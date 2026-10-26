@@ -316,7 +316,12 @@ def test_no_child_the_hub_starts_inherits_the_blocked_signals():
 def test_a_sender_command_line_keeps_a_byte_that_is_not_utf8_as_the_log_escapes_it(port):
     p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)", b"\xff", b" a "])
     try:
-        line = sender.cmdline(p.pid)
+        # Popen returns when the exec has begun, a moment before the kernel has set the arguments
+        # that /proc/<pid>/cmdline shows: until then it is empty and cmdline() is None.
+        deadline = time.monotonic() + 30
+        while (line := sender.cmdline(p.pid)) is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert line is not None
         assert line.endswith("\udcff  a ")            # the whitespace of an argument stays
         assert "\udcff" in line                       # not U+FFFD: two different bytes stay two different rows
         assert diagnostics.record("hub", "hub-exit", None, reason="signal", sender_cmdline=line)

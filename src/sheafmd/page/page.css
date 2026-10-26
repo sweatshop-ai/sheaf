@@ -53,8 +53,8 @@ body.rd-show-resolved .rd-anchor.rd-resolved{display:inline}
 #rd-popover .rd-who-ask,#rd-panel .rd-who-ask{color:#1d4ed8}
 #rd-popover .rd-who-tell,#rd-panel .rd-who-tell{color:#c2410c}
 #rd-popover .rd-when{font:12px ui-monospace,monospace;opacity:.6;margin-left:6px}
-/* The thread keeps its height (to half the frame, then it scrolls); a frame too short for it and the form scrolls the popover. */
-#rd-popover .rd-scroll{overflow-y:auto;min-height:0;max-height:50vh;flex:0 0 auto;margin-right:-8px;padding-right:8px}
+/* The thread shrinks for the form, but not below a comment's worth; a frame too short for both scrolls the popover. */
+#rd-popover .rd-scroll{overflow-y:auto;min-height:6em;flex:0 1 auto;margin-right:-8px;padding-right:8px}
 #rd-popover .rd-actions,#rd-popover .rd-form{flex:0 0 auto}
 #rd-popover .rd-text{margin-top:2px;overflow-wrap:anywhere}
 #rd-popover .rd-text p{margin:0 0 .5em}

@@ -144,8 +144,8 @@ def test_a_screen_too_short_for_the_form_scrolls_it_and_keeps_the_keyboard_clear
 def test_the_thread_stays_readable_above_the_reply_field_in_a_short_frame(touch_tab):
     """A reply to a comment in a frame 320 px high (the page in an embedding app, its keyboard up): the popover is
     in the text, not docked, and its height is capped. The field and the buttons took all of it and squeezed the
-    comment to a sliver (its author line cut through by the field, its text out of sight). The comment keeps room
-    to be read, and the popover scrolls instead."""
+    comment to a sliver (its author line cut through by the field, its text out of sight). The thread keeps a
+    comment's worth of room, and the popover scrolls instead."""
     from sheafmd import comments as rdc
     from sheafmd.source import update_file
     site = touch_tab.site
@@ -163,3 +163,22 @@ def test_the_thread_stays_readable_above_the_reply_field_in_a_short_frame(touch_
                  shown: s.clientHeight, content: s.scrollHeight, pop: r(p).height, scrolls: p.scrollHeight > p.clientHeight }; }""")
     assert got["shown"] >= got["content"], got       # the whole thread (one comment) is in view
     assert got["scroll"][1] <= got["field"][0] + 0.5, got   # and the field starts below it
+
+
+def test_a_long_thread_leaves_the_field_in_reach_above_the_keyboard(phone):
+    """The thread gives way to the form, down to its floor: with a long comment and the keyboard up, the field and
+    its buttons are still inside the docked popover and above the keyboard."""
+    from sheafmd import comments as rdc
+    from sheafmd.source import update_file
+    update_file(phone.site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "Second paragraph"), "Second paragraph",
+                                                           "Nearly good, only a pity about my name. " * 20, "Ada", "2026-10-25T21:01")[0])
+    page = phone.open().page
+    page.click(".rd-badge")
+    page.click(POP + " button[data-a=reply]")
+    page.wait_for_selector(POP + " textarea")
+    page.focus(POP + " textarea")
+    keyboard(page, 450)
+    got = rects(page)
+    assert got["pop"][3] <= 450 - ACCESSORY, got
+    assert got["field"][1] >= got["pop"][1] and got["field"][3] <= got["pop"][3], got
+    assert all(b[3] <= got["pop"][3] for b in got["buttons"]), got

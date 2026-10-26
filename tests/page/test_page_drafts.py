@@ -247,11 +247,17 @@ def test_a_restore_the_hub_does_not_answer_within_120_seconds_names_itself_when_
     page.route("**/_/save", hold_first)
     page.click("#rd-notice button[data-d=restore]")
     until(lambda: held or page.wait_for_timeout(20), what="the restore to go out")
+    mark(page)
     page.clock.fast_forward(120_500)
     # the draft in the store names the send, for the page that offers it again: a late write the hub made
     # reloads this one, and a person may come back to it in another tab too
     until(lambda: (stored(page, lost_edit.site) or {}).get("edits", [{}])[0].get("saved"), what="the draft to name the send")
-    page.reload()
+    if written:
+        # the page reloads itself as the give-up frees the reload the late write asked for, at a moment the test
+        # does not pick: a reload of its own then lands on that navigation and is aborted. It waits for it instead.
+        reloaded(page)
+    else:
+        page.reload()
     page.wait_for_selector("#rd-notice button[data-d=restore]")
     page.click("#rd-notice button[data-d=restore]")
     until(lambda: len(bodies) >= 2, what="the second restore to go out")

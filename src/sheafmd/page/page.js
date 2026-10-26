@@ -1576,6 +1576,7 @@
   function offButton(what, label) {
     return '<button class="rd-alt rd-na rd-' + what + '" disabled title="' + esc(lineOf(what)) + '">' + esc(label) + '</button>';
   }
+  var THREAD_FLOOR = 84;                // px of a thread kept in view when the form takes the rest: the author line and two lines
   var DOTS = '<span class="rd-dots" aria-hidden="true"><i></i><i></i><i></i></span>';
   function fillPopover(id) {
     var c = byId[id], sc = pop.querySelector('.rd-scroll');
@@ -1629,6 +1630,8 @@
     }
     sendingIn(pop);
     sc = pop.querySelector('.rd-scroll');
+    // The thread gives way to the form, but not below a comment's worth of itself (a shorter thread is not stretched).
+    sc.style.minHeight = Math.min(sc.scrollHeight, THREAD_FLOOR) + 'px';
     if (atEnd) sc.scrollTop = sc.scrollHeight;
     replace();
   }

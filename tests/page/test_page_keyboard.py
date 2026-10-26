@@ -182,3 +182,18 @@ def test_a_long_thread_leaves_the_field_in_reach_above_the_keyboard(phone):
     assert got["pop"][3] <= 450 - ACCESSORY, got
     assert got["field"][1] >= got["pop"][1] and got["field"][3] <= got["pop"][3], got
     assert all(b[3] <= got["pop"][3] for b in got["buttons"]), got
+
+
+def test_a_short_thread_is_not_stretched_to_the_floor(touch_tab):
+    """The floor only stops the thread giving way further; a thread shorter than it keeps the height it has."""
+    from sheafmd import comments as rdc
+    from sheafmd.source import update_file
+    site = touch_tab.site
+    site.file.write_text(MD, encoding="utf-8")
+    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "Second paragraph"), "Second paragraph",
+                                                     "Short.", "Ada", "2026-10-25T21:01")[0])
+    page = touch_tab.open().page
+    page.click(".rd-badge")
+    page.wait_for_selector(POP + " .rd-scroll")
+    got = page.evaluate("(() => { const s = document.querySelector('#rd-popover .rd-scroll'); return [s.clientHeight, s.scrollHeight]; })()")
+    assert got[0] == got[1] and got[0] < 84, got

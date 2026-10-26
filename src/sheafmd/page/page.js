@@ -1304,14 +1304,25 @@
     p.style.top = (window.scrollY + top) + 'px';
   }
   // A target taken out of the page (forget, for a thread deleted) has no place to measure: the popover stays where it was.
+  // The thread gives way to the form, but not below a comment's worth of itself (a shorter thread is not stretched).
+  // Measured again on every move of the viewport: a thread that wraps differently at another width has another height.
+  function keepThread() {
+    var sc = pop.querySelector('.rd-scroll');
+    if (!sc) return;
+    sc.style.minHeight = '';
+    sc.style.minHeight = Math.min(sc.scrollHeight, THREAD_FLOOR) + 'px';
+  }
   function replace() {
-    if (!pop || dock()) return;
+    if (!pop) return;
+    keepThread();
+    if (dock()) return;
     undock();
     if (pop._target && pop._target.isConnected && pop.style.position !== 'fixed') place(pop, pop._target);
   }
   // A touch screen's keyboard shrinks the visual viewport and leaves the layout viewport as it was (iOS), so a form
   // placed in the text can lie behind it. A popover with a form is docked, fixed, to the foot of what can be seen,
   // and above the suggestion bar and the AutoFill pill that iOS draws over the page there.
+  var THREAD_FLOOR = 84;                // px of a thread kept in view when the form takes the rest: the author line and two lines
   var KEY_ROOM = 56;                    // px kept clear above the keyboard, for its suggestion bar and the AutoFill pill
   var DOCK_GAP = 8, DOCK_SIDE = 16;     // px kept clear of the head of the visible area, and of its sides
   var KEY_MIN = 100, ZOOMED = 1.01;     // a visual viewport this much shorter is a keyboard; a larger scale is a pinch zoom
@@ -1576,7 +1587,6 @@
   function offButton(what, label) {
     return '<button class="rd-alt rd-na rd-' + what + '" disabled title="' + esc(lineOf(what)) + '">' + esc(label) + '</button>';
   }
-  var THREAD_FLOOR = 84;                // px of a thread kept in view when the form takes the rest: the author line and two lines
   var DOTS = '<span class="rd-dots" aria-hidden="true"><i></i><i></i><i></i></span>';
   function fillPopover(id) {
     var c = byId[id], sc = pop.querySelector('.rd-scroll');
@@ -1630,8 +1640,6 @@
     }
     sendingIn(pop);
     sc = pop.querySelector('.rd-scroll');
-    // The thread gives way to the form, but not below a comment's worth of itself (a shorter thread is not stretched).
-    sc.style.minHeight = Math.min(sc.scrollHeight, THREAD_FLOOR) + 'px';
     if (atEnd) sc.scrollTop = sc.scrollHeight;
     replace();
   }

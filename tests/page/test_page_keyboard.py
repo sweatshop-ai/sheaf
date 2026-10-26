@@ -197,3 +197,22 @@ def test_a_short_thread_is_not_stretched_to_the_floor(touch_tab):
     page.wait_for_selector(POP + " .rd-scroll")
     got = page.evaluate("(() => { const s = document.querySelector('#rd-popover .rd-scroll'); return [s.clientHeight, s.scrollHeight]; })()")
     assert got[0] == got[1] and got[0] < 84, got
+
+
+def test_the_thread_floor_follows_the_width_the_thread_wraps_at(touch_tab):
+    """A thread that is one line wide and three lines narrow: the floor is measured again when the frame is resized
+    (a phone turned, an embedding frame resized), not kept from the first width."""
+    from sheafmd import comments as rdc
+    from sheafmd.source import update_file
+    site = touch_tab.site
+    site.file.write_text(MD, encoding="utf-8")
+    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "Second paragraph"), "Second paragraph",
+                                                     "Nearly good, only a pity about my name.", "Ada", "2026-10-25T21:01")[0])
+    page = touch_tab.open().page
+    page.click(".rd-badge")
+    page.wait_for_selector(POP + " .rd-scroll")
+    page.set_viewport_size({"width": 230, "height": 844})
+    page.wait_for_timeout(300)
+    got = page.evaluate("""(() => { const s = document.querySelector('#rd-popover .rd-scroll');
+        return [parseFloat(s.style.minHeight), Math.min(s.scrollHeight, 84)]; })()""")
+    assert abs(got[0] - got[1]) < 1 and got[1] > 80, got

@@ -139,3 +139,27 @@ def test_a_screen_too_short_for_the_form_scrolls_it_and_keeps_the_keyboard_clear
     got = rects(page)
     assert got["pop"][3] <= 150 - ACCESSORY, got
     assert page.evaluate("(() => { const p = document.querySelector('#rd-popover'); return p.scrollHeight > p.clientHeight; })()")
+
+
+def test_the_thread_stays_readable_above_the_reply_field_in_a_short_frame(touch_tab):
+    """A reply to a comment in a frame 320 px high (the page in an embedding app, its keyboard up): the popover is
+    in the text, not docked, and its height is capped. The field and the buttons took all of it and squeezed the
+    comment to a sliver (its author line cut through by the field, its text out of sight). The comment keeps room
+    to be read, and the popover scrolls instead."""
+    from sheafmd import comments as rdc
+    from sheafmd.source import update_file
+    site = touch_tab.site
+    site.file.write_text(MD, encoding="utf-8")
+    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "Second paragraph"), "Second paragraph",
+                                                     "Nearly good, only a pity about my name.", "Ada", "2026-10-25T21:01")[0])
+    page = touch_tab.open().page
+    page.set_viewport_size({"width": 390, "height": 320})
+    page.click(".rd-badge")
+    page.click(POP + " button[data-a=reply]")
+    page.wait_for_selector(POP + " textarea")
+    got = page.evaluate("""() => { const p = document.querySelector('#rd-popover'), r = (e) => e.getBoundingClientRect();
+        const s = p.querySelector('.rd-scroll'), m = s.querySelector('.rd-msg'), t = p.querySelector('textarea');
+        return { scroll: [r(s).top, r(s).bottom], field: [r(t).top, r(t).bottom], msg: r(m).height,
+                 shown: s.clientHeight, content: s.scrollHeight, pop: r(p).height, scrolls: p.scrollHeight > p.clientHeight }; }""")
+    assert got["shown"] >= got["content"], got       # the whole thread (one comment) is in view
+    assert got["scroll"][1] <= got["field"][0] + 0.5, got   # and the field starts below it

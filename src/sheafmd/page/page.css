@@ -45,7 +45,7 @@ body.rd-show-resolved .rd-anchor.rd-resolved{display:inline}
 ::highlight(rd-widened){background:rgba(59,130,246,.18)}
 
 #rd-popover{position:absolute;z-index:402;width:380px;max-width:calc(100vw - 32px);
- max-height:calc(100vh - 32px);box-sizing:border-box;display:flex;flex-direction:column;
+ max-height:calc(100vh - 32px);overflow-y:auto;box-sizing:border-box;display:flex;flex-direction:column;
  background:var(--bg,#fff);color:var(--fg,#000);border:2px solid var(--fg,#000);border-radius:3px;
  box-shadow:4px 4px 0 rgba(0,0,0,.18);padding:12px 14px;font:14px/1.45 system-ui,sans-serif}
 #rd-popover .rd-msg{margin:0 0 10px}
@@ -53,7 +53,8 @@ body.rd-show-resolved .rd-anchor.rd-resolved{display:inline}
 #rd-popover .rd-who-ask,#rd-panel .rd-who-ask{color:#1d4ed8}
 #rd-popover .rd-who-tell,#rd-panel .rd-who-tell{color:#c2410c}
 #rd-popover .rd-when{font:12px ui-monospace,monospace;opacity:.6;margin-left:6px}
-#rd-popover .rd-scroll{overflow-y:auto;min-height:0;flex:0 1 auto;margin-right:-8px;padding-right:8px}
+/* The thread keeps its height (to half the frame, then it scrolls); a frame too short for it and the form scrolls the popover. */
+#rd-popover .rd-scroll{overflow-y:auto;min-height:0;max-height:50vh;flex:0 0 auto;margin-right:-8px;padding-right:8px}
 #rd-popover .rd-actions,#rd-popover .rd-form{flex:0 0 auto}
 #rd-popover .rd-text{margin-top:2px;overflow-wrap:anywhere}
 #rd-popover .rd-text p{margin:0 0 .5em}

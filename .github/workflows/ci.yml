@@ -1,0 +1,125 @@
+# SPEC 18. A pull request, a push to main and the nightly run run on ubuntu only, and macOS runs only when someone
+# starts the workflow by hand with `macos` ticked: a macOS minute counts ten times.
+# tests/test_ci_workflow.py holds these triggers.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  # paths-ignore filters push and pull_request only; a scheduled run always starts.
+  schedule:
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+    inputs:
+      macos:
+        description: Add the macOS jobs (a macOS minute counts ten times)
+        type: boolean
+        default: false
+      python:
+        description: Python version to test (all is every version of the matrix)
+        type: choice
+        options: [all, "3.11", "3.13", "3.14"]
+        default: all
+
+# A new push to a pull request cancels its earlier run. A run on main is never cancelled once it has
+# started, so every merge to main gets a full verdict. Each run on main has a
+# group of its own, because a group holds one running and one waiting run, and a newer waiting run
+# would replace an older one even with cancel-in-progress false. Merges in a burst therefore run side
+# by side, one job each, and a 3.11 or 3.14 regression shows in the nightly run, not in a merge.
+concurrency:
+  group: ci-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }} py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    # A run takes about 25 minutes; 45 still stops a hang.
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.macos && '["ubuntu-latest","macos-latest"]' || '["ubuntu-latest"]') }}
+        python: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.python != 'all' && format('["{0}"]', inputs.python) || (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && '["3.11","3.13","3.14"]' || '["3.13"]') }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # A pull request's checkout is its merge commit; two commits give the base as its first parent.
+          fetch-depth: 2
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install from the lock
+        run: uv sync --locked
+
+      # -v names every test in the log, and tools/ci/stall_watch.py dumps
+      # the process table and the pytest process's thread stacks when the output stops for six
+      # minutes, then ends the run after ten, so a hung job names itself instead of being cancelled.
+      - name: Tests
+        run: uv run --no-sync python tools/ci/stall_watch.py -- uv run --no-sync pytest -v --durations=25 -m "not page"
+
+      # The page tests drive Chromium through Playwright (tests/page) and take about half of a pull
+      # request's run. A pull request that changes no path they load skips them, and says so here
+      # (tools/ci/page_paths.py holds the list). A push to main, the nightly run and a manual run
+      # always run them. Until tests/page exists on main there is nothing to run.
+      - name: Decide whether the page tests run
+        id: page
+        run: uv run --no-sync python tools/ci/page_paths.py
+
+      - name: Cache the Playwright browsers
+        if: hashFiles('tests/page/**') != '' && steps.page.outputs.run == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.os == 'macOS' && '~/Library/Caches/ms-playwright' || '~/.cache/ms-playwright' }}
+          key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+
+      - name: Page tests (Playwright, Chromium)
+        if: hashFiles('tests/page/**') != '' && steps.page.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -o pipefail
+          # --with-deps installs Chromium's system packages through sudo, which GitHub's runners have.
+          deps=""
+          if [ "$RUNNER_OS" = "Linux" ] && command -v sudo >/dev/null; then deps="--with-deps"; fi
+          uv run --no-sync playwright install $deps chromium
+          uv run --no-sync python tools/ci/stall_watch.py -- uv run --no-sync pytest -v --durations=25 -m page -rs 2>&1 | tee page-tests.txt
+          # A page test that cannot start its browser skips with a reason. Here that is a failure.
+          if grep -Eq '[0-9]+ skipped' page-tests.txt; then
+            echo "::error::page tests were skipped, so Chromium did not run them"
+            exit 1
+          fi
+
+      # A Chromium has closed with no word on a runner. The runner is a container
+      # with no dmesg (kernel.dmesg_restrict) and a memory cap of its own, so this reads what it can: the cgroup's
+      # own count of OOM kills, the memory and load, and /dev/shm. Nothing here changes the result of the job.
+      - name: Host state after a failure
+        if: failure() && runner.os == 'Linux'
+        shell: bash
+        run: |
+          free -m || true
+          uptime || true
+          cat /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory.current /sys/fs/cgroup/memory.events 2>/dev/null || true
+          df -h /dev/shm || true
+          dmesg 2>/dev/null | tail -50 || true
+          journalctl -k --no-pager -n 50 2>/dev/null || true
+
+      - name: Wheel smoke (build, uv tool install, sheaf version, --share, init cursor, a hub)
+        run: uv run --no-sync python tools/wheel_smoke.py
+
+      # These two install a real user service on the runner. They refuse to run anywhere else.
+      - name: User service, systemd
+        if: runner.os == 'Linux'
+        run: PATH="$PWD/.venv/bin:$PATH" .venv/bin/python tools/ci/service_linux.py
+
+      - name: User service, launchd
+        if: runner.os == 'macOS'
+        run: PATH="$PWD/.venv/bin:$PATH" .venv/bin/python tools/ci/service_macos.py

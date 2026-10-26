@@ -1,0 +1,472 @@
+"""Local images in proxy mode (SPEC 9.9 "Local images", 6.2): a local image is embedded only when the
+root 8.2 finds for its file is the document's own root. Any other is left out of the page and of
+the share copy, element and all, and the render log says so, whether or not the file is there. In
+loopback mode nothing changes."""
+import os
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+
+import pytest
+from helpers import GIT_FAILS, git_fails
+from PIL import Image
+
+DOC = "work/plan.md"
+
+
+def png(path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (4, 4), (200, 30, 30)).save(path)
+    return path
+
+
+@pytest.fixture
+def outside():
+    """A PNG outside every root."""
+    d = Path(tempfile.mkdtemp(dir="/tmp", prefix="si-"))
+    yield png(d / "secret.png")
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def page(front, plan, src):
+    plan.write_text(f"# Plan\n\nSee ![the figure]({src}).\n", encoding="utf-8")
+    r = front.get("/work/plan.md")
+    assert r.status == 200
+    share = front.post("/_/export", {"doc": DOC, "kind": "html"})
+    assert share.status == 200
+    return r.text, share.text, front.hub.entries[DOC].log
+
+
+def test_an_image_outside_every_root_is_left_out_of_the_page_and_the_share_copy(front, plan, outside):
+    html, share, log = page(front, plan, outside)
+    for out in (html, share):
+        assert "data:image/png" not in out and "the figure" not in out and "missing image" not in out
+    assert any("left out" in line and str(outside) in line for line in log)
+
+
+def test_one_that_is_not_there_is_left_out_the_same_so_nothing_says_whether_it_exists(front, plan, outside):
+    html, _, log = page(front, plan, outside.parent / "nothing.png")
+    assert "missing image" not in html and any("left out" in line for line in log)
+
+
+def test_an_image_of_another_root_is_left_out(front, plan, other):
+    (other / "notes.md").write_text("# Notes\n", encoding="utf-8")
+    front.hub.roots.for_document(other / "notes.md")
+    html, share, _ = page(front, plan, png(other / "fig.png"))
+    assert "data:image/png" not in html and "data:image/png" not in share
+
+
+def test_an_image_of_a_root_nested_inside_the_documents_is_left_out(front, plan, work):
+    sub = work / "sub"
+    png(sub / "fig.png")
+    subprocess.run(["git", "init", "-q", str(sub)], check=True)
+    html, _, _ = page(front, plan, "sub/fig.png")
+    assert "data:image/png" not in html
+
+
+@pytest.fixture
+def nested(work):
+    """A git repo inside the member's root, `work/sub`, which holds one folder, `real`."""
+    sub = work / "sub"
+    (sub / "real").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(sub)], check=True)
+    return sub
+
+
+@pytest.fixture
+def locked(nested):
+    """A folder of the nested repo that the hub's account cannot enter, `sub/locked`."""
+    if os.geteuid() == 0:
+        pytest.skip("root enters any folder")
+    f = nested / "locked"
+    f.mkdir(mode=0)
+    yield f
+    f.chmod(0o700)
+
+
+def says_missing(src, *outs):
+    """Each output says `[missing image: <src>]`."""
+    return all(f"[missing image: {src}]" in out for out in outs)
+
+
+def left_out(html, share, log):
+    """The image is left out of the page and the share copy, element and all, and the log says so."""
+    gone = all("missing image" not in out and "the figure" not in out for out in (html, share))
+    return gone and any("left out" in line for line in log)
+
+
+NOT_THERE = ["sub/guess/fig.png", "sub/real/guess/fig.png"]
+
+
+@pytest.mark.parametrize("src", NOT_THERE)
+def test_a_folder_that_is_not_there_in_a_nested_repo_is_left_out_like_one_that_is(front, plan, nested, src):
+    assert left_out(*page(front, plan, "sub/real/fig.png"))
+    assert left_out(*page(front, plan, src))
+
+
+def test_a_folder_of_a_nested_repo_that_git_cannot_enter_is_left_out_like_one_it_can(front, plan, locked):
+    assert left_out(*page(front, plan, "sub/locked/fig.png"))
+
+
+@pytest.fixture
+def git_dirs(nested):
+    """The nested repo's git directories: a PNG in `sub/.git`, and a bare repo `sub/keep.git` holding one."""
+    png(nested / ".git" / "fig.png")
+    subprocess.run(["git", "init", "-q", "--bare", str(nested / "keep.git")], check=True)
+    png(nested / "keep.git" / "fig.png")
+    return nested
+
+
+# Images in the nested repo's git directories, there or not, and under a bare repo that is not there
+# (`gone.git`), which is a folder of its work tree.
+GIT_DIR_PATHS = ["sub/.git/fig.png", "sub/.git/nope/fig.png", "sub/keep.git/fig.png", "sub/keep.git/nope.png",
+                 "sub/gone.git/fig.png"]
+
+
+@pytest.mark.parametrize("src", GIT_DIR_PATHS)
+def test_an_image_in_a_git_directory_of_a_nested_repo_is_left_out_like_its_work_tree(front, plan, git_dirs, src):
+    assert left_out(*page(front, plan, "sub/real/fig.png"))
+    assert left_out(*page(front, plan, src))
+
+
+def test_beside_a_nested_repos_git_directories_the_members_images_and_its_work_tree_answer_as_before(
+        front, plan, work, git_dirs):
+    png(work / "img" / "fig.png")
+    png(git_dirs / "real" / "fig.png")
+    html, share, _ = page(front, plan, "img/fig.png")
+    assert "data:image/png" in html and "data:image/png" in share
+    for src in ("img/nothing.png", "nope/nothing.png"):
+        assert says_missing(src, *page(front, plan, src)[:2])
+    for src in ("sub/real/fig.png", "sub/real/nothing.png", "sub/nope/fig.png"):
+        assert left_out(*page(front, plan, src))
+
+
+def test_in_a_git_root_its_own_git_directory_is_left_out_as_before(front, git_plan, work):
+    png(work / ".git" / "fig.png")
+    for src in (".git/fig.png", ".git/nope/fig.png"):
+        assert left_out(*page(front, git_plan, src))
+
+
+# Where git names neither a work tree nor a git directory (8.2) the path tells a git directory: images in
+# the nested repo's, there or not.
+IN_A_GIT_DIR = [p for p in GIT_DIR_PATHS if not p.startswith("sub/gone.git")]
+
+
+@pytest.mark.parametrize("how", GIT_FAILS)
+@pytest.mark.parametrize("src", IN_A_GIT_DIR)
+def test_where_git_fails_an_image_in_a_nested_repos_git_directory_is_left_out(front, plan, git_dirs, monkeypatch,
+                                                                           tmp_path, how, src):
+    git_fails(how, monkeypatch, tmp_path)
+    assert left_out(*page(front, plan, src))
+
+
+@pytest.mark.parametrize("how", GIT_FAILS)
+def test_where_git_fails_the_members_images_and_a_nested_repos_work_tree_answer_as_before(front, plan, work,
+                                                                                       git_dirs, monkeypatch,
+                                                                                       tmp_path, how):
+    png(git_dirs / "real" / "fig.png")
+    png(work / "img" / "fig.png")
+    git_fails(how, monkeypatch, tmp_path)
+    for src in ("sub/real/fig.png", "img/fig.png"):
+        html, share, _ = page(front, plan, src)
+        assert "data:image/png" in html and "data:image/png" in share, src
+    for src in ("sub/real/nothing.png", "img/nothing.png"):
+        assert says_missing(src, *page(front, plan, src)[:2])
+
+
+@pytest.fixture
+def own_repo(plan, work):
+    """The member's root `work`, registered as no git repo, made one with a PNG in its `.git` and one in
+    `img`: what git refuses on a server where the member's folder is not the hub's account's."""
+    subprocess.run(["git", "init", "-q", str(work)], check=True)
+    png(work / ".git" / "fig.png")
+    png(work / "img" / "fig.png")
+    return plan
+
+
+@pytest.mark.parametrize("how", GIT_FAILS)
+def test_where_git_fails_the_members_own_repo_its_images_answer_as_before(front, own_repo, monkeypatch, tmp_path,
+                                                                       how):
+    git_fails(how, monkeypatch, tmp_path)
+    html, share, _ = page(front, own_repo, "img/fig.png")
+    assert "data:image/png" in html and "data:image/png" in share
+    assert says_missing("img/nothing.png", *page(front, own_repo, "img/nothing.png")[:2])
+
+
+@pytest.mark.parametrize("how", GIT_FAILS)
+def test_where_git_fails_the_members_own_repo_its_git_directory_is_left_out(front, own_repo, monkeypatch, tmp_path,
+                                                                         how):
+    git_fails(how, monkeypatch, tmp_path)
+    for src in (".git/fig.png", ".git/nope/fig.png"):
+        assert left_out(*page(front, own_repo, src))
+
+
+@pytest.fixture(params=["bare-and-gitfile", "core-bare"])
+def bare_layout(request, work, tmp_path):
+    """The member's root holds a repo's git directory but is no work tree of it: a bare clone `.bare` that a
+    `.git` file names (the bare repo plus worktrees layout), or a `.git` folder with `core.bare = true`."""
+    if request.param == "bare-and-gitfile":
+        src = tmp_path / "srcrepo"
+        subprocess.run(["git", "init", "-q", str(src)], check=True)
+        subprocess.run(["git", "-C", str(src), "-c", "user.email=a@b", "-c", "user.name=a", "commit", "-q",
+                        "--allow-empty", "-m", "i"], check=True)
+        subprocess.run(["git", "clone", "-q", "--bare", str(src), str(work / ".bare")], check=True)
+        (work / ".git").write_text("gitdir: ./.bare\n", encoding="utf-8")
+    else:
+        subprocess.run(["git", "init", "-q", str(work)], check=True)
+        subprocess.run(["git", "-C", str(work), "config", "core.bare", "true"], check=True)
+
+
+def test_a_root_beside_its_repos_git_directory_keeps_its_images_as_before(front, bare_layout, work):
+    plan = work / "plan.md"
+    plan.write_text("# Plan\n", encoding="utf-8")
+    front.hub.roots.for_document(plan)
+    png(work / "img" / "fig.png")
+    html, share, _ = page(front, plan, "img/fig.png")
+    assert "data:image/png" in html and "data:image/png" in share
+    assert says_missing("img/nothing.png", *page(front, plan, "img/nothing.png")[:2])
+
+
+def test_a_bare_repo_in_the_members_own_root_is_left_out_like_their_git_roots_git_directory(front, plan, work):
+    subprocess.run(["git", "init", "-q", "--bare", str(work / "keep.git")], check=True)
+    png(work / "keep.git" / "fig.png")
+    assert left_out(*page(front, plan, "keep.git/fig.png"))
+
+
+def test_an_image_of_the_documents_own_root_is_embedded(front, plan, work):
+    png(work / "img" / "fig.png")
+    html, share, _ = page(front, plan, "img/fig.png")
+    assert "data:image/png" in html and "data:image/png" in share
+
+
+@pytest.mark.parametrize("src", ["img/nothing.png", "nope/nothing.png"])
+def test_a_missing_image_of_the_documents_own_root_says_so(front, plan, work, nested, src):
+    (work / "img").mkdir()
+    html, share, _ = page(front, plan, src)
+    assert f"[missing image: {src}]" in html and f"[missing image: {src}]" in share
+
+
+@pytest.fixture
+def git_plan(front, work):
+    """The member's root is a git repo: `work` itself, registered as one. Address `work/plan.md`."""
+    subprocess.run(["git", "init", "-q", str(work)], check=True)
+    f = work / "plan.md"
+    f.write_text("# Plan\n", encoding="utf-8")
+    front.hub.roots.for_document(f)
+    return f
+
+
+def test_in_a_git_root_an_image_is_embedded_and_a_missing_one_says_so(front, git_plan, work):
+    png(work / "img" / "fig.png")
+    html, share, _ = page(front, git_plan, "img/fig.png")
+    assert "data:image/png" in html and "data:image/png" in share
+    html, share, _ = page(front, git_plan, "img/nothing.png")
+    assert "[missing image: img/nothing.png]" in html and "[missing image: img/nothing.png]" in share
+
+
+def test_in_a_git_root_an_image_under_a_folder_that_is_not_there_says_so_too(front, git_plan):
+    html, share, _ = page(front, git_plan, "nope/fig.png")
+    assert "[missing image: nope/fig.png]" in html and "[missing image: nope/fig.png]" in share
+
+
+@pytest.fixture
+def closed(work):
+    """`work/closed`, a folder of the member's root that the hub's account cannot enter, holding `fig.png`."""
+    if os.geteuid() == 0:
+        pytest.skip("root enters any folder")
+    f = work / "closed"
+    png(f / "fig.png")
+    f.chmod(0)
+    yield f
+    f.chmod(0o700)
+
+
+@pytest.mark.parametrize("own", ["plan", "git_plan"])
+def test_an_image_the_hub_cannot_reach_in_the_documents_own_root_says_missing(front, closed, own, request):
+    html, share, _ = page(front, request.getfixturevalue(own), "closed/fig.png")
+    assert "[missing image: closed/fig.png]" in html and "[missing image: closed/fig.png]" in share
+
+
+def test_an_image_file_the_hub_cannot_read_says_missing(front, plan, work):
+    if os.geteuid() == 0:
+        pytest.skip("root reads any file")
+    fig = png(work / "img" / "fig.png")
+    fig.chmod(0)
+    try:
+        html, share, _ = page(front, plan, "img/fig.png")
+    finally:
+        fig.chmod(0o600)
+    assert "[missing image: img/fig.png]" in html and "[missing image: img/fig.png]" in share
+
+
+def test_in_loopback_mode_an_image_the_hub_cannot_reach_says_missing_too(browser, plan, closed):
+    plan.write_text("# Plan\n\nSee ![the figure](closed/fig.png).\n", encoding="utf-8")
+    r = browser.get("/work/plan.md")
+    assert r.status == 200 and "[missing image: closed/fig.png]" in r.text
+
+
+@pytest.fixture
+def loops(nested):
+    """Symlink loops: `work/loop.png` and `work/d` point at themselves, and so does `sub/loop.png` in
+    the nested repo."""
+    for link in (nested.parent / "loop.png", nested.parent / "d", nested / "loop.png"):
+        link.symlink_to(link.name)
+
+
+NOT_A_FILE = ["loop.png", "d/fig.png", "a%00b.png"]
+
+
+@pytest.mark.parametrize("src", NOT_A_FILE)
+def test_a_symlink_loop_or_a_nul_in_the_documents_own_root_is_a_missing_image(front, plan, loops, src):
+    html, share, _ = page(front, plan, src)
+    assert says_missing(src, html, share)
+
+
+@pytest.mark.parametrize("src", ["sub/loop.png", "sub/a%00b.png"])
+def test_a_symlink_loop_or_a_nul_at_a_path_of_another_root_is_left_out_like_a_file(front, plan, loops, src):
+    assert left_out(*page(front, plan, "sub/real/fig.png"))
+    assert left_out(*page(front, plan, src))
+
+
+@pytest.mark.parametrize("src", ["a\0b.png", "sub/a\0b.png"])
+def test_a_nul_written_in_the_source_names_no_file_and_says_missing_wherever_it_points(front, plan, nested, src):
+    html, share, _ = page(front, plan, src)
+    assert says_missing(src, html, share)
+
+
+def test_a_file_named_with_a_percent_00_is_still_embedded_as_written(front, plan, work):
+    png(work / "a%00b.png")
+    html, share, _ = page(front, plan, "a%00b.png")
+    assert "data:image/png" in html and "data:image/png" in share
+
+
+@pytest.mark.parametrize("src", NOT_A_FILE)
+def test_in_loopback_mode_a_symlink_loop_or_a_nul_is_a_missing_image(browser, plan, loops, src):
+    plan.write_text(f"# Plan\n\nSee ![the figure]({src}).\n", encoding="utf-8")
+    r, share = browser.get("/work/plan.md"), browser.post("/_/export", {"doc": DOC, "kind": "html"})
+    assert r.status == share.status == 200 and says_missing(src, r.text, share.text)
+
+
+def test_in_loopback_mode_an_image_outside_every_root_is_embedded_as_before(browser, plan, outside):
+    plan.write_text(f"# Plan\n\nSee ![the figure]({outside}).\n", encoding="utf-8")
+    assert "data:image/png" in browser.get("/work/plan.md").text
+    assert "data:image/png" in browser.post("/_/export", {"doc": DOC, "kind": "html"}).text
+
+
+# ── sheaf share, which renders without the hub (9.9 "Local images") ──────────
+
+@pytest.fixture
+def proxied():
+    """config.toml with a `[proxy]` table: the share copy then holds the image rule too."""
+    from helpers import BEA, proxy_table, write
+
+    from sheafmd import paths
+    write(paths.config_file(), proxy_table("/run/sheaf-proxy/hub.sock", {BEA: ("Bea", ["/srv/pages"])}))
+
+
+def share(sheaf, work, src):
+    doc = work / "doc.md"
+    doc.write_text(f"# Doc\n\nSee ![the figure]({src}).\n", encoding="utf-8")
+    r = sheaf(doc, "--share")
+    assert r.code == 0, r.err
+    return (work / "doc-share.html").read_text(encoding="utf-8"), r.err
+
+
+def test_share_leaves_out_an_image_outside_every_root(proxied, sheaf, work, outside):
+    copy, err = share(sheaf, work, outside)
+    assert "data:image/png" not in copy and "the figure" not in copy and "missing image" not in copy
+    assert "left out" in err and str(outside) in err
+
+
+def test_share_leaves_out_one_that_is_not_there_the_same_so_nothing_says_whether_it_exists(proxied, sheaf, work,
+                                                                                          outside):
+    copy, err = share(sheaf, work, outside.parent / "nothing.png")
+    assert "missing image" not in copy and "left out" in err
+
+
+def test_share_leaves_out_an_image_of_another_root(proxied, sheaf, work, other):
+    from sheafmd.hub.roots import Roots
+    (other / "notes.md").write_text("# Notes\n", encoding="utf-8")
+    Roots().for_document(other / "notes.md")
+    copy, _ = share(sheaf, work, png(other / "fig.png"))
+    assert "data:image/png" not in copy
+
+
+def test_share_leaves_out_an_image_of_a_root_nested_inside_the_documents(proxied, sheaf, work):
+    png(work / "sub" / "fig.png")
+    subprocess.run(["git", "init", "-q", str(work / "sub")], check=True)
+    copy, _ = share(sheaf, work, "sub/fig.png")
+    assert "data:image/png" not in copy
+
+
+def shared_left_out(copy, err):
+    return "missing image" not in copy and "the figure" not in copy and "left out" in err
+
+
+@pytest.mark.parametrize("src", NOT_THERE)
+def test_share_leaves_out_a_folder_that_is_not_there_in_a_nested_repo_like_one_that_is(proxied, sheaf, work,
+                                                                                      nested, src):
+    assert shared_left_out(*share(sheaf, work, "sub/real/fig.png"))
+    assert shared_left_out(*share(sheaf, work, src))
+
+
+def test_share_leaves_out_a_folder_of_a_nested_repo_that_git_cannot_enter(proxied, sheaf, work, locked):
+    assert shared_left_out(*share(sheaf, work, "sub/locked/fig.png"))
+
+
+@pytest.mark.parametrize("src", GIT_DIR_PATHS)
+def test_share_leaves_out_an_image_in_a_git_directory_of_a_nested_repo_like_its_work_tree(proxied, sheaf, work,
+                                                                                         git_dirs, src):
+    assert shared_left_out(*share(sheaf, work, "sub/real/fig.png"))
+    assert shared_left_out(*share(sheaf, work, src))
+
+
+@pytest.mark.parametrize("how", GIT_FAILS)
+@pytest.mark.parametrize("src", IN_A_GIT_DIR)
+def test_share_leaves_out_an_image_in_a_nested_repos_git_directory_where_git_fails(proxied, sheaf, work, git_dirs,
+                                                                                  monkeypatch, tmp_path, how, src):
+    git_fails(how, monkeypatch, tmp_path)
+    assert shared_left_out(*share(sheaf, work, src))
+
+
+@pytest.mark.parametrize("src", NOT_A_FILE)
+def test_share_says_missing_for_a_symlink_loop_or_a_nul(proxied, sheaf, work, loops, src):
+    assert says_missing(src, share(sheaf, work, src)[0])
+
+
+def test_share_embeds_an_image_of_the_documents_own_root_and_registers_nothing(proxied, sheaf, work):
+    from sheafmd import paths
+    png(work / "img" / "fig.png")
+    copy, _ = share(sheaf, work, "img/fig.png")
+    assert "data:image/png" in copy
+    assert not (paths.state_dir() / "roots.json").exists()
+
+
+def test_share_says_missing_for_an_image_the_hub_cannot_reach(sheaf, work, closed):
+    copy, _ = share(sheaf, work, "closed/fig.png")
+    assert "[missing image: closed/fig.png]" in copy
+
+
+def test_share_in_loopback_mode_embeds_an_image_outside_every_root_as_before(sheaf, work, outside):
+    copy, _ = share(sheaf, work, outside)
+    assert "data:image/png" in copy
+
+
+def test_share_holds_the_rule_under_a_proxy_table_the_hub_would_refuse(sheaf, work, outside):
+    from helpers import write
+
+    from sheafmd import paths
+    write(paths.config_file(), '[proxy]\norigin = "http://chat.example.com"\n')
+    copy, _ = share(sheaf, work, outside)
+    assert "data:image/png" not in copy
+
+
+def test_share_leaves_a_registry_it_cannot_read_where_it_is(proxied, sheaf, work, outside):
+    from sheafmd import paths
+    reg = paths.state_dir() / "roots.json"
+    reg.parent.mkdir(parents=True, exist_ok=True)
+    reg.write_text("{not json", encoding="utf-8")
+    copy, _ = share(sheaf, work, outside)
+    assert "data:image/png" not in copy
+    assert reg.read_text(encoding="utf-8") == "{not json" and not list(reg.parent.glob("*.corrupt"))

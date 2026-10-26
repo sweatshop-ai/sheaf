@@ -1,0 +1,890 @@
+"""
+sheafmd.hub.handler — request routing, with no socket (SPEC 8.5, 9, 3.1).
+
+`Handler(hub).handle(method, target, headers, body, conn, via)` takes what the server read from the wire
+(`conn`: the connection it came in on; `via`: the listener, the loopback port or the proxy socket) and
+returns a `Response`; server.py only moves bytes in and out. So every route and every 4xx
+runs in a test, in memory, without a subprocess.
+
+The order of every request: the Host check, then who the caller is (the key header, the cookie
+or, at the door, an MCP token), then the route, then (for a POST the cookie authenticated) the Origin
+check, then the body. A caller that is refused earlier never has its body read at all.
+
+On the proxy socket (9.9) the order is the same with other checks: the uid at the other end of the
+connection, the Host of the front, the member header, the route (a member's routes only), the
+Origin of every POST, then the body. No cookie and no key is read there.
+"""
+import json
+import re
+import tempfile
+from dataclasses import dataclass, field
+from pathlib import Path
+from urllib.parse import parse_qs, quote, unquote
+
+from .. import comments as rdc
+from .. import diagnostics, pdf
+from ..agents.base import Target
+from ..config import ConfigError
+from ..edit import EditError
+from ..mcp import Caller, Door
+from ..render import RenderError
+from ..source import StaleError
+from . import auth, peer, proxy
+from .asktell import NO_AGENT, JobRefused
+from .index import Status
+from .live import UNKNOWN, NotAuthor
+from .roots import Address, NotFound, address_of_url, root_of_url
+from .state import TokenRow
+
+MAX_BODY = 8 * 1024 * 1024
+OPS = ("add", "reply", "status", "edit", "delete")
+SIGN_IN = ("This browser is not signed in to your sheaf hub. On the machine that runs the hub, "
+           "run <code>sheaf open &lt;this url&gt;</code>. If the hub runs on another machine, "
+           "run <code>sheaf signin-url</code> there and open what it prints in this browser.")
+LINK_USED = (f"A sign-in link from <code>sheaf open</code> works once, for {auth.SIGNIN_TTL} seconds: "
+             "this one was used already, has run out or is not from this hub. On the machine that runs the hub, run "
+             "<code>sheaf open &lt;the document&gt;</code> again. If you did not use the link twice "
+             "yourself, someone else on that machine may have used it first: run "
+             "<code>sheaf rotate</code> to sign every browser out, then <code>sheaf open</code> again.")
+LINK_LIMIT = ("This hub cannot check which user of this machine follows a link (this system gives it no way "
+              "to see who owns a connection), so on a machine that other people use, someone who read the "
+              "link while it lasted could have used it first.")
+LINK_OTHER_USER = ("The hub did not sign this browser in, and the link is spent: the connection comes from "
+                   "another user of this machine than the one that runs the hub. A sign-in link works only "
+                   "in a browser of the hub's own user. On the machine that runs the hub, run "
+                   "<code>sheaf open &lt;the document&gt;</code> again, as that user.")
+LINK_UNKNOWN = ("The hub could not tell which user of this machine followed this link, so it signed no one in, "
+                "and the link is spent. On the machine that runs the hub, run "
+                "<code>sheaf open &lt;the document&gt;</code> again. If it keeps happening, run "
+                "<code>sheaf diag</code> and look at the <code>open-401</code> rows, or run "
+                "<code>sheaf signin-url</code> and open what it prints in this browser.")
+PROXY_SIGN_IN = ("This browser is not signed in to this site, or its sign-in has ended. Sign in to this "
+                 "site again, then reload this page.")
+WRONG_KEY = ("This link does not hold this hub's key. On the machine that runs the hub, run "
+             "<code>sheaf signin-url</code> again and open what it prints in this browser.")
+SETTING_TYPES = {"title": str, "toc": str, "max_image_width": int, "by": str, "for": str,
+                 "theme": str, "credit": bool}
+_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,40}")
+_RID_RE = re.compile(r"[A-Za-z0-9_-]{16,64}")     # a page's request id (/_/comment, /_/save)
+_RESERVED = {"kind", "source", "doc", "at", "pid", "session", "member"}
+
+
+@dataclass
+class Response:
+    status: int
+    headers: dict = field(default_factory=dict)
+    body: bytes = b""
+    stream: object = None            # an events.Subscription: the server turns it into a stream
+    nonce: str | None = None
+    error: str | None = None         # why a page refused, for the row: a JSON answer carries its own
+    row: str | None = None           # the kind of the row a refusal writes, when not `<route>-<status>`
+    fields: dict = field(default_factory=dict)   # more for that row
+
+    @property
+    def text(self) -> str:
+        return self.body.decode("utf-8", "replace")
+
+    def json(self):
+        return json.loads(self.body)
+
+
+class Refuse(Exception):
+    def __init__(self, status: int, message: str, headers: dict | None = None, page: str | None = None,
+                 detail: str | None = None, row: str | None = None, fields: dict | None = None,
+                 answer: dict | None = None):
+        super().__init__(message)
+        self.status, self.message, self.headers = status, message, headers or {}
+        self.page = page                 # what a browser is told when the refusal is of its sign-in link
+        self.detail = detail             # more than any caller is told, for the row of the log
+        self.row, self.fields = row, fields or {}
+        self.answer = answer or {}       # more fields of the JSON answer, beside `error`
+
+
+@dataclass
+class Req:
+    method: str
+    path: str
+    query: dict
+    headers: dict
+    host: str
+    kind: str | None = None          # "key", "cookie" or "token": how the caller proved itself
+    body: dict = field(default_factory=dict)
+    raw: bytes = b""                 # the body as it came, for the door (it reads its own JSON-RPC)
+    token: TokenRow | None = None    # the MCP token that opened the door
+    display: str = ""                # the name a key signs the door's replies with (`X-Sheaf-As`)
+    auth: object = None              # the Auth that judged this request: a rotation may swap the hub's own mid-way
+    route: str = "unknown"
+    conn: object = None              # the peer.Conn (proxy.Peer on the proxy socket) it came in on; None where nothing is behind it (a test)
+    via: str = "port"                # "port" or "proxy": the listener it came in on (9.9)
+    member: object = None            # the proxy.Member the proxy socket let in
+    member_id: str = ""              # the member header, once the connection is the proxy's: every row names it
+
+
+@dataclass(frozen=True)
+class Who:
+    """Who may call a route (8.5, 9.3, 9.7): the credentials it takes, and what the caller is told
+    when it holds none of them. A route that `token`s also takes an MCP token, nowhere else is one
+    looked at; one that reads its own `raw_body` is sent the bytes as they came, and its key
+    caller must name itself (the door reads its own JSON-RPC and signs its replies)."""
+    kinds: frozenset[str]
+    refusal: str
+    raw_body: bool = False
+
+    def __contains__(self, kind) -> bool:
+        return kind in self.kinds
+
+    @property
+    def token(self) -> bool:
+        return "token" in self.kinds
+
+
+_BROWSER = "this needs a browser that is signed in to the hub"
+OPEN = None
+COOKIE = Who(frozenset({"cookie"}), _BROWSER)
+EITHER = Who(frozenset({"cookie", "key"}), _BROWSER)
+KEY = Who(frozenset({"key"}), "this needs the hub key")
+DOOR = Who(frozenset({"key", "token"}), "this needs the hub key or an MCP token", raw_body=True)
+
+
+def _json(status: int, obj: dict, headers: dict | None = None) -> Response:
+    return Response(status, {"Content-Type": "application/json", **(headers or {})},
+                    json.dumps(obj).encode("utf-8"))
+
+
+def _ok(**fields) -> Response:
+    return _json(200, {"ok": True, **fields})
+
+
+def _stream(sub) -> Response:
+    return Response(200, {"Content-Type": "text/event-stream", "Connection": "close"}, stream=sub)
+
+
+def _html(status: int, html: str, nonce: str | None = None, headers: dict | None = None) -> Response:
+    nonce = nonce or auth.new_nonce()
+    return Response(status, {"Content-Type": "text/html; charset=utf-8", **(headers or {})},
+                    html.encode("utf-8"), nonce=nonce)
+
+
+def _disposition(name: str) -> str:
+    plain = re.sub(r"[^A-Za-z0-9._ -]", "_", name)
+    out = f'attachment; filename="{plain}"'
+    if plain != name:
+        out += f"; filename*=UTF-8''{quote(name, safe='')}"
+    return out
+
+
+def _sign_in_page(title: str, html: str) -> str:
+    return ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>"
+            f"{title}</title><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+            "<style>body{font:16px/1.5 system-ui,sans-serif;max-width:34rem;margin:4rem auto;"
+            "padding:0 1rem;color:#222}code{background:#eee;padding:.1em .3em;border-radius:3px}"
+            f"</style></head><body><h1>{title}</h1><p>{html}</p></body></html>")
+
+
+def _signed_out_page() -> str:
+    return _sign_in_page("Not signed in", SIGN_IN)
+
+
+def _shape(cond, message: str):
+    if not cond:
+        raise Refuse(400, message)
+
+
+def _document_events(name: str, data):
+    """What a member's document stream is sent (9.9): the events of `proxy.DOCUMENT_EVENTS` only,
+    and in them nothing of the hub account's agent session. So no Ask or Tell of it, no thread told
+    to it, no question it put to its person, and no `signed-out`, since `sheaf rotate` does not
+    touch a member."""
+    if name not in proxy.DOCUMENT_EVENTS:
+        return None
+    return proxy.for_member(data) if isinstance(data, dict) else data
+
+
+class Handler:
+    def __init__(self, hub, peer_check=peer.check):
+        self.hub = hub
+        self.peer_check = peer_check
+        self.door = Door(hub)
+        # path -> method -> (route name, who may call it, function)
+        self.routes: dict = {}
+        for method, path, name, who, fn in (
+            ("GET", "/_/health", "health", OPEN, self._health),
+            ("GET", "/_/open", "open", OPEN, self._open),
+            ("GET", "/_/live", "live", COOKIE, self._live),
+            ("GET", "/_/doc", "doc", EITHER, self._doc),
+            ("GET", "/_/index.json", "index", EITHER, self._index_json),
+            ("GET", "/_/jobs", "jobs", KEY, self._jobs),
+            ("POST", "/_/save", "save", COOKIE, self._save),
+            ("POST", "/_/pin", "pin", COOKIE, self._pin),
+            ("POST", "/_/comment", "comment", COOKIE, self._comment),
+            ("POST", "/_/ask", "ask", COOKIE, self._ask),
+            ("POST", "/_/tell", "tell", COOKIE, self._tell),
+            ("POST", "/_/cancel", "cancel", COOKIE, self._cancel),
+            ("POST", "/_/jump", "jump", COOKIE, self._jump),
+            ("POST", "/_/seen", "seen", COOKIE, self._seen),
+            ("POST", "/_/export", "export", COOKIE, self._export),
+            ("POST", "/_/diag", "diag", COOKIE, self._diag),
+            ("POST", "/_/render", "render", KEY, self._render),
+            ("POST", "/_/forget", "forget", KEY, self._forget),
+            ("POST", "/_/stop", "stop", KEY, self._stop),
+            ("POST", "/_/rotate", "rotate", KEY, self._rotate),
+            ("POST", "/_/signin", "signin", KEY, self._signin),
+            ("POST", "/_/restarting", "restarting", KEY, self._restarting),
+            ("DELETE", "/_/restarting", "restarting", KEY, self._forget_restart),
+            ("POST", "/_/mcp", "mcp", DOOR, self._mcp),
+        ):
+            self.routes.setdefault(path, {})[method] = (name, who, fn)
+
+    # ── the front door ───────────────────────────────────────────────────────
+    def handle(self, method: str, target: str, headers: dict, body=b"", conn=None, via="port") -> Response:
+        """`body` is the bytes, or a function that reads them off the wire: it is called only for
+        a POST that has passed the Host, credential and Origin checks. `conn` is the connection
+        the request came in on (a `peer.Conn`): the sign-in link looks up who owns it (9.3). `via`
+        is the listener: "proxy" for the proxy socket (9.9), where `conn` is a `proxy.Peer`."""
+        req = None
+        try:
+            headers = {str(k).lower(): str(v) for k, v in headers.items()}
+            path, _, qs = target.partition("?")
+            req = Req(method, path, {k: v[0] for k, v in parse_qs(qs, keep_blank_values=True).items()},
+                      headers, headers.get("host", ""), conn=conn, via=via)
+            res = self._route_proxy(req, body) if via == "proxy" else self._route(req, body)
+        except Refuse as r:
+            res = self._refusal(req, r)
+        except Exception as e:
+            if req is not None:
+                self.hub.record_exception("request-failed", self._doc_hint(req),
+                                          endpoint=req.path, method=method, **self._who(req))
+            res = _json(500, {"ok": False, "error": f"the hub failed on this request "
+                              f"({type(e).__name__}); the details are in `sheaf diag`"})
+        return self._finish(req, res)
+
+    def _refusal(self, req, r: Refuse) -> Response:
+        res = self._refusal_answer(req, r)
+        res.row, res.fields = r.row, r.fields
+        return res
+
+    def _refusal_answer(self, req, r: Refuse) -> Response:
+        if req is not None and req.via == "proxy":
+            # A person's browser that asks for a page gets a page: to sign in to the front again,
+            # or that this account has nothing here. Everything else gets the JSON.
+            if r.page and req.method == "GET" and not req.path.startswith("/_/"):
+                title = "Not signed in" if r.status == 401 else "No documents"
+                res = _html(r.status, _sign_in_page(title, r.page), headers=r.headers)
+                res.error = r.detail or r.message
+                return res
+        elif req is not None and r.status == 401 and req.method == "GET":
+            if not req.path.startswith("/_/"):
+                return _html(401, _signed_out_page(), headers=r.headers)
+            # The link of `sheaf open` is the one `/_/` route a person's browser follows: it asks
+            # for a page, so it gets one, not the JSON that a command reads.
+            if req.path == "/_/open" and r.page and "text/html" in req.headers.get("accept", ""):
+                res = _html(401, _sign_in_page("This sign-in link did not work", r.page), headers=r.headers)
+                res.error = r.detail or r.message
+                return res
+        res = _json(r.status, {"ok": False, "error": r.message, **r.answer}, r.headers)
+        res.error = r.detail
+        return res
+
+    def _finish(self, req, res: Response) -> Response:
+        """The headers every answer carries, the CSP on every HTML one, and a row for each
+        refusal and failure."""
+        h = res.headers
+        h.setdefault("Cache-Control", "no-store")
+        h.setdefault("Referrer-Policy", "no-referrer")
+        h.setdefault("X-Content-Type-Options", "nosniff")
+        if h.get("Content-Type", "").startswith("text/html"):
+            res.nonce = res.nonce or auth.new_nonce()
+            framed = req is not None and req.via == "proxy"     # the front's own pages may frame it (9.5)
+            h["Content-Security-Policy"] = auth.csp(res.nonce, "'self'" if framed else "'none'")
+        if res.status >= 400 and req is not None:
+            error = res.error or ""
+            if not error and h.get("Content-Type") == "application/json":
+                try:
+                    error = json.loads(res.body).get("error", "")
+                except ValueError:
+                    pass
+            self.hub.record(res.row or f"{req.route}-{res.status}", self._doc_hint(req), endpoint=req.path,
+                            error=error or None, **self._who(req), **res.fields)
+        return res
+
+    @staticmethod
+    def _who(req) -> dict:
+        """What every row a request of the proxy socket writes carries: the member (15)."""
+        return {"member": req.member_id} if req is not None and req.member_id else {}
+
+    @staticmethod
+    def _doc_hint(req) -> str | None:
+        d = req.query.get("doc") or req.body.get("doc")
+        return d if isinstance(d, str) else None
+
+    def _route(self, req: Req, raw: bytes) -> Response:
+        hub = self.hub
+        req.auth = hub.auth
+        if not auth.host_ok(req.host):
+            raise Refuse(403, "this hub answers only to 127.0.0.1 and localhost")
+        if not req.path.startswith("/"):
+            raise Refuse(400, "bad request target")
+        methods = self.routes.get(req.path) if req.path.startswith("/_/") else None
+        found = methods.get(req.method) if methods else None
+        if found:
+            req.route = found[0]
+        elif not req.path.startswith("/_/"):
+            req.route = "page"
+        if found and found[1] is OPEN:
+            return found[2](req)
+        # Everything else needs the key header or the cookie, whatever the path is; a route that
+        # says so also takes an MCP token (9.3, 9.7), whatever the method. Nowhere else is a token
+        # looked at.
+        takes_token = any(w is not OPEN and w.token for _, w, _ in (methods or {}).values())
+        if req.auth.key_ok(req.headers.get("x-sheaf-key")):
+            req.kind = "key"
+        elif req.auth.cookie_ok(req.headers.get("cookie")):
+            req.kind = "cookie"
+        elif takes_token and self._token(req):
+            req.kind = "token"
+        else:
+            # Only a route that takes a token has a 401 that names the scheme to try.
+            raise Refuse(401, "not signed in", {"WWW-Authenticate": "Bearer"} if takes_token else None)
+        if req.path.startswith("/_/"):
+            if methods is None:
+                raise Refuse(404, "no such route")
+            if found is None:
+                raise Refuse(405, "method not allowed", {"Allow": ", ".join(sorted(methods))})
+            name, who, fn = found
+        else:
+            if req.method != "GET":
+                raise Refuse(405, "method not allowed", {"Allow": "GET"})
+            name, who, fn = "page", COOKIE, self._page
+        if req.kind not in who:
+            raise Refuse(403, who.refusal)
+        if req.method == "POST" and req.kind == "cookie" \
+                and not auth.origin_ok(req.headers.get("origin"), req.host):
+            raise Refuse(403, "this request did not come from the hub's own page")
+        if req.method == "POST" and who.raw_body:
+            if req.kind == "key":
+                req.display = self._door_name(req)
+            req.raw = self._body(req, raw)
+        elif req.method == "POST":
+            self._read_body(req, self._body(req, raw))
+        return fn(req)
+
+    # ── the proxy socket (9.9) ───────────────────────────────────────────────
+    def _index_events(self, member):
+        """What a member's index stream is sent (9.9): a `status` only for a document of theirs
+        whose file moved, naming nothing but the document (the page asks for its own index
+        again, with their own dots), and no `signed-out`. Judged on the stream's own thread
+        (`events.Subscription`): a failure to judge one is written down, and they are told nothing
+        of it."""
+        def accept(name: str, data):
+            if name == "signed-out":
+                return None
+            if name == "status":
+                doc = data.get("doc") if isinstance(data, Status) and data.files else None
+                if not isinstance(doc, str):
+                    return None
+                try:
+                    theirs = self.hub.member_owns(member, doc)
+                except Exception:
+                    self.hub.record_exception("status-failed", doc)
+                    return None
+                return {"doc": doc, "root": data.get("root")} if theirs else None
+            return data
+        return accept
+
+    @staticmethod
+    def _for_members(found) -> bool:
+        """A route a member may use: one 8.5 marks `cookie` or `cookie or key`, but not Ask and
+        Tell, which run the hub account's own agent session."""
+        name, who, _ = found
+        return who in (COOKIE, EITHER) and name not in ("ask", "tell", "cancel", "jump")
+
+    def _route_proxy(self, req: Req, raw: bytes) -> Response:
+        cfg = self.hub.proxy
+        req.auth = self.hub.auth
+        uid = req.conn.uid if isinstance(req.conn, proxy.Peer) else None
+        if cfg is None or uid is None or uid != cfg.uid:
+            raise Refuse(403, "this socket serves only the proxy's account", row="proxy-peer",
+                         fields={"uid": uid}, detail=f"a connection of uid {uid}; the proxy's account is "
+                         f"{cfg.proxy_user if cfg else None} (uid {cfg.uid if cfg else None})")
+        # The proxy set the member header (9.9), so from here on every row names it (15).
+        req.member_id = req.headers.get("x-sheaf-member", "")
+        if req.host.lower() != cfg.host:
+            raise Refuse(403, "this hub answers on its proxy socket only to its front's host")
+        if not req.path.startswith("/"):
+            raise Refuse(400, "bad request target")
+        # The member header alone says who asks, before the route and the method (9.3, 9.9).
+        if not req.member_id:
+            raise Refuse(401, "not signed in", page=PROXY_SIGN_IN)
+        req.member = cfg.members.get(req.member_id)
+        if req.member is None:
+            raise Refuse(403, proxy.NO_DOCUMENTS, page=proxy.NO_DOCUMENTS)
+        if req.path.startswith("/_/"):
+            allowed = {m: f for m, f in (self.routes.get(req.path) or {}).items() if self._for_members(f)}
+            if not allowed:
+                raise Refuse(404, "no such route")
+            found = allowed.get(req.method)
+            if found is None:
+                raise Refuse(405, "method not allowed", {"Allow": ", ".join(sorted(allowed))})
+            req.route, _, fn = found
+        else:
+            req.route, fn = "page", self._page
+            if req.method != "GET":
+                raise Refuse(405, "method not allowed", {"Allow": "GET"})
+        # Every POST, since the member header is the only credential here: a page of another name
+        # of the same site can make the browser send the front's cookie (9.9, Host and Origin).
+        if req.method == "POST" and req.headers.get("origin", "").lower() != cfg.origin:
+            raise Refuse(403, "this request did not come from the front's own page")
+        if req.method == "POST":
+            self._read_body(req, self._body(req, raw))
+        return fn(req)
+
+    def _token(self, req: Req) -> bool:
+        """Whether the request carries an MCP token that is good now; its owner is on `req.token`."""
+        req.token = self.hub.tokens.verify(auth.bearer(req.headers.get("authorization")))
+        return req.token is not None
+
+    @staticmethod
+    def _door_name(req: Req) -> str:
+        """The name the door's replies are signed with, for a caller that holds the key: the
+        `X-Sheaf-As` header, percent-encoded UTF-8 (SPEC 12), then made one safe line. A token has
+        its own name; the key has only this one, so a request without it is refused."""
+        header = req.headers.get("x-sheaf-as", "")
+        try:
+            if not header.isascii():       # a raw byte above U+007F arrives as Latin-1: refused, never guessed
+                raise UnicodeDecodeError("ascii", b"", 0, 1, "raw byte above U+007F")
+            name = auth.clean_display(unquote(header, errors="strict"))
+        except UnicodeDecodeError:
+            raise Refuse(400, "X-Sheaf-As is not percent-encoded UTF-8") from None
+        if not name:
+            raise Refuse(400, "a request with the hub key needs X-Sheaf-As, the name its reply is signed with")
+        return name
+
+    def _body(self, req: Req, raw) -> bytes:
+        """The body, now that the caller is known to be let in: refused by its header when it is
+        over the limit, before a byte of it is read."""
+        try:
+            n = int(req.headers.get("content-length") or (0 if callable(raw) else len(raw)))
+        except ValueError:
+            raise Refuse(400, "bad Content-Length") from None
+        if n > MAX_BODY:
+            raise Refuse(413, "the request is too large")
+        raw = raw() if callable(raw) else raw
+        if len(raw) > MAX_BODY:
+            raise Refuse(413, "the request is too large")
+        return raw
+
+    def _read_body(self, req: Req, raw: bytes):
+        try:
+            body = json.loads(raw.decode("utf-8") if raw.strip() else "{}")
+        except (ValueError, UnicodeDecodeError):
+            raise Refuse(400, "the body is not JSON") from None
+        _shape(isinstance(body, dict), "the body is not a JSON object")
+        req.body = body
+
+    # ── helpers for the routes ───────────────────────────────────────────────
+    def _owned(self, req: Req, doc):
+        """The address `doc` names, once the request may name it: text, and for a member one of their
+        own roots. Looks at no file, so it holds for a document that is gone."""
+        _shape(isinstance(doc, str), "doc is missing")
+        if req.member is not None and not self.hub.member_owns(req.member, doc):
+            raise Refuse(404, "no such document")
+        return doc
+
+    def _entry(self, req: Req, doc):
+        """The document `doc` names. A member of proxy mode is told of no document of another
+        root, nor of a root nested inside one of theirs: the same 404 as for one that does not
+        exist, before anything is made or rendered for it (9.9)."""
+        self._owned(req, doc)
+        try:
+            return self.hub.entry(doc)
+        except NotFound:
+            raise Refuse(404, "no such document") from None
+
+    # ── open routes ──────────────────────────────────────────────────────────
+    def _health(self, req: Req) -> Response:
+        hub = self.hub
+        out = {"app": "sheaf", "version": hub.version, "boot": hub.boot, "service": hub.service}
+        if "nonce" in req.query:
+            nonce = req.query["nonce"]
+            _shape(auth.nonce_ok(nonce), "nonce must be 16 to 128 lowercase hex characters")
+            out["proof"] = hub.auth.proof(nonce)
+        return _ok(**out)
+
+    def _open(self, req: Req) -> Response:
+        if "nonce" in req.query:
+            # Asking spends the link, whatever the answer. Only then is the caller looked at: a link
+            # that was read from a command line is good for the user who runs the hub, not for another (9.1).
+            if not req.auth.redeem_signin(req.query["nonce"]):
+                raise Refuse(401, "that sign-in link was used already, has expired or is not this hub's",
+                             page=LINK_USED if peer.supported() else f"{LINK_USED} {LINK_LIMIT}")
+            no = self.peer_check(req.conn)
+            if no is not None:
+                raise Refuse(401, no.message, page=LINK_OTHER_USER if no.kind == peer.OTHER_USER else LINK_UNKNOWN,
+                             detail=no.detail)
+        elif not req.auth.key_ok(req.query.get("key")):
+            raise Refuse(401, "that is not this hub's key", page=WRONG_KEY)
+        nxt = req.query.get("next", "/")
+        _shape(auth.safe_next(nxt), "next must be a path on this hub")
+        return Response(303, {"Location": auth.location(nxt), "Set-Cookie": req.auth.set_cookie()})
+
+    def _signin(self, req: Req) -> Response:
+        """A one-time sign-in nonce for the caller that holds the key (`sheaf open`, 9.3)."""
+        return _ok(nonce=req.auth.mint_signin(), expires=auth.SIGNIN_TTL)
+
+    # ── the page and its streams ─────────────────────────────────────────────
+    def _page(self, req: Req) -> Response:
+        nonce = auth.new_nonce()
+        if req.path == "/":
+            return _html(200, self.hub.index.page(nonce, member=req.member), nonce)
+        address = address_of_url(req.path)
+        if address is None:
+            # `/<root>` with no slash after it names the root's page, where the browser is sent.
+            bare = req.path.count("/") == 1
+            name = root_of_url(req.path + "/" if bare else req.path)
+            if name is None:
+                raise Refuse(404, "no such page")
+            root = self.hub.roots.get(name)
+            if root is None or (req.member is not None and not self.hub.owns(req.member, root)):
+                raise Refuse(404, "no such root")
+            if bare:
+                return Response(301, {"Location": req.path + "/"})
+            return _html(200, self.hub.index.page(nonce, only=name, member=req.member), nonce)
+        if not address.endswith(".md"):
+            raise Refuse(404, "no such page")
+        e = self._entry(req, address)
+        self.hub.catch_up(e)
+        return _html(200, self.hub.page(e, nonce, member=req.member), nonce)
+
+    def _live(self, req: Req) -> Response:
+        hub, member = self.hub, req.member
+        if "doc" not in req.query:
+            sub = hub.open_index_stream(lambda _: {"boot": hub.boot, "version": hub.version,
+                                                   "service": hub.service},
+                                        self._index_events(member) if member else None)
+            if member is None and hub.auth is not req.auth:   # a rotation overtook this request, after it told the open streams
+                sub.put("signed-out", {})
+            return _stream(sub)
+        e = self._entry(req, req.query.get("doc"))
+        sub = e.bus.subscribe(lambda tabs: {"boot": hub.boot, "version": hub.version,
+                                            "service": hub.service, "tabs": tabs},
+                              _document_events if member else None)
+        if member is None and hub.auth is not req.auth:       # a rotation overtook this request, after it told the open streams
+            sub.put("signed-out", {})
+        if hub.entries.get(e.address) is not e:               # a forget overtook this request, after it told the open streams
+            sub.put("gone", {"doc": e.address})
+        e.opened = True
+        return _stream(sub)
+
+    def _root_id(self, req: Req, address: str) -> str | None:
+        """The id of the root that holds the name `address` starts with now (8.2), which a page whose
+        stream comes back compares with the one it was served from (10.7); None when no root holds it. A
+        member is told it only of a root of theirs: of another's None, as of a name no root holds, so they
+        are never told that another root exists (9.9)."""
+        root = self.hub.roots.get(Address.parse(address).root)
+        if root is None or (req.member is not None and not self.hub.owns(req.member, root)):
+            return None
+        return root.id
+
+    def _doc(self, req: Req) -> Response:
+        doc = req.query.get("doc")
+        try:
+            e = self._entry(req, doc)
+        except Refuse as r:
+            if r.status == 404:         # a file gone from its root, or a root gone from its name (10.7)
+                r.answer = {"root": self._root_id(req, doc)}
+            raise
+        snap = e.live.snapshot()
+        snap["root"] = self._root_id(req, e.address)
+        snap["rids"] = e.live.taken_rids()
+        if req.member is not None:
+            # Their own seen state, and nothing of the hub account's agent session (9.9).
+            return _ok(**proxy.for_member(snap), seen=self.hub.member_seen.get(req.member.id, e.address),
+                       asking=[], question="", target=None, capabilities=[], lines=proxy.member_lines())
+        v = self.hub.asktell.view(e.address)
+        return _ok(**snap, seen=self.hub.seen.get(e.address),
+                   asking=self.hub.runner.active("ask", e.address),
+                   question=e.live.session_question(), target=v.agent(),
+                   capabilities=sorted(v.caps), lines=v.lines)
+
+    def _index_json(self, req: Req) -> Response:
+        rendered = req.query.get("rendered", "0")
+        _shape(rendered in ("0", "1"), "rendered must be 0 or 1")
+        return _ok(**self.hub.index.data(rendered=rendered == "1", member=req.member))
+
+    def _jobs(self, req: Req) -> Response:
+        return _ok(**self.hub.jobs())
+
+    # ── save and comment ─────────────────────────────────────────────────────
+    def _save(self, req: Req) -> Response:
+        b = req.body
+        e = self._entry(req, b.get("doc"))
+        h, edits = b.get("hash"), b.get("edits")
+        _shape(isinstance(h, str) and h != "", "hash must be the hash of the version the edits were made against")
+        _shape(isinstance(edits, list), "edits must be a list")
+        for x in edits:
+            _shape(isinstance(x, dict) and type(x.get("i")) is int and isinstance(x.get("html"), str)
+                   and isinstance(x.get("saved", ""), str), "each edit is {i, html} or {i, html, saved}")
+        rid = b.get("rid")
+        _shape(rid is None or (isinstance(rid, str) and _RID_RE.fullmatch(rid)), "rid is not a request id")
+        try:
+            got = e.live.save(h, edits, rid=rid)
+        except (EditError, StaleError) as ex:
+            raise Refuse(409, str(ex)) from None
+        except UnicodeEncodeError:
+            raise Refuse(400, "the text holds a character that cannot be written to the .md "
+                              "(half of a pair, such as half an emoji)") from None
+        self.hub.index.touch(e.address)
+        if got["merged"] and not got.get("again"):
+            # Not a failure, but the thing this log exists to measure: how often the page and
+            # an agent write at the same time.
+            self.hub.record("save-merged", e.address,
+                            conflicts=json.dumps(got["conflicts"]) if got["conflicts"] else None,
+                            **self._who(req))
+        return _ok(**got)
+
+    def _pin(self, req: Req) -> Response:
+        """The page keeps the version it holds past a change of the file, while a form holds the reload
+        that change needs: the hub keeps it too, beside the newest (7.4)."""
+        b = req.body
+        e = self._entry(req, b.get("doc"))
+        h = b.get("hash")
+        _shape(isinstance(h, str) and h != "", "hash must be the hash of the version the page holds")
+        if not e.live.pin(h):
+            raise Refuse(409, UNKNOWN)
+        return _ok()
+
+    def _comment(self, req: Req) -> Response:
+        b = req.body
+        e = self._entry(req, b.get("doc"))
+        op = b.get("op")
+        _shape(op in OPS, f"op must be one of {', '.join(OPS)}")
+        h = self._page_hash(req)
+        for k in ("id", "body", "quote", "status"):
+            _shape(k not in b or isinstance(b[k], str), f"{k} must be text")
+        rid = b.get("rid")
+        _shape(rid is None or (isinstance(rid, str) and _RID_RE.fullmatch(rid)), "rid is not a request id")
+        if op in ("add", "reply", "edit"):
+            _shape(isinstance(b.get("body"), str) and b["body"].strip(), "the comment is empty")
+        if op == "add":
+            for k in ("block", "start", "end"):
+                _shape(type(b.get(k)) is int, f"{k} must be a whole number")
+        member = req.member
+        # Ask and Tell run the hub account's own session, which a member is not (9.9).
+        _shape(member is None or not (b.get("ask") or b.get("tell")), proxy.PROXY_LINE)
+        starts = op in ("add", "reply")
+        ask, tell = starts and bool(b.get("ask")), starts and bool(b.get("tell"))
+        # A Tell that cannot go out still writes the comment, and then starts no wait. A reply
+        # sent with Tell to a thread that is being told is such a Tell: the wait the first one
+        # began stays as it is (SPEC 11.3).
+        tell_line = self.hub.asktell.refusal(e.address, "tell") if tell else None
+        if tell and tell_line is None and op == "reply":
+            tell_line = self.hub.asktell.telling_line(e.address, b.get("id", ""))
+        can_tell = tell and tell_line is None
+        signed = {"by": member.name, "author": member.name} if member else {}
+        try:
+            snap = e.live.comment(op, b, h, await_action=can_tell, rid=rid, **signed)
+        except NotAuthor as ex:
+            raise Refuse(403, str(ex)) from None
+        except StaleError as ex:
+            raise Refuse(409, str(ex), answer={"code": ex.code} if ex.code else None) from None
+        except KeyError as ex:
+            raise Refuse(400, f"missing field {ex}") from None
+        except rdc.NoComment as ex:
+            # Deleted while the page's request was out, often before the page has heard of it.
+            raise Refuse(410, str(ex)) from None
+        except (rdc.AnchorError, ValueError, TypeError) as ex:
+            raise Refuse(400, str(ex)) from None
+        self.hub.index.touch(e.address)
+        if snap.get("again"):
+            # Taken before under this request id: what the first request started (an Ask, a Tell's wait)
+            # is running or done, and the page hears of it by its events.
+            ask = tell = False
+        # The job looks the document up again when it starts: it names its thread in the text the
+        # comment was just written in, so a forget in between, and another folder that takes the name,
+        # cannot hand it that folder's thread of the same id (SPEC 7.3). A forget that leaves no folder
+        # under the name, or a file gone meanwhile, is refused as well: the comment is still answered.
+        if ask:
+            try:
+                self.hub.asktell.start_ask(e.address, snap["id"], held=snap["hash"])
+            except JobRefused as r:
+                snap["askError"] = r.message
+        if tell:
+            try:
+                if not can_tell:
+                    raise JobRefused(409, tell_line or NO_AGENT)
+                self.hub.asktell.start_tell(e.address, snap["id"], waiting=True, held=snap["hash"])
+            except JobRefused as r:
+                if can_tell and not r.leaves_wait:   # a wait this request began, and no other
+                    e.live.stop_waiting(snap["id"])
+                snap["tellError"] = r.message
+            snap["telling"] = e.live.waiting()
+        return _ok(**(proxy.for_member(snap) if member else snap))
+
+    @staticmethod
+    def _page_hash(req: Req):
+        """The version of the document the page holds (`hash`), or None when the request sends none."""
+        h = req.body.get("hash")
+        _shape(h is None or isinstance(h, str), "hash must be text")
+        return h
+
+    def _thread_job(self, req: Req):
+        """The document and thread a job names. Nothing else in the body is read: a request
+        never names a session, a socket or a command."""
+        e = self._entry(req, req.body.get("doc"))
+        return e, self._comment_id(req)
+
+    @staticmethod
+    def _comment_id(req: Req):
+        cid = req.body.get("id")
+        _shape(isinstance(cid, str) and _ID_RE.fullmatch(cid), "id is not a comment id")
+        return cid
+
+    def _ask(self, req: Req) -> Response:
+        e, cid = self._thread_job(req)
+        try:
+            self.hub.asktell.start_ask(e.address, cid, held=self._page_hash(req))
+        except JobRefused as r:
+            raise Refuse(r.status, r.message) from None
+        return _ok()
+
+    def _tell(self, req: Req) -> Response:
+        e, cid = self._thread_job(req)
+        try:
+            self.hub.asktell.start_tell(e.address, cid, held=self._page_hash(req))
+        except JobRefused as r:
+            raise Refuse(r.status, r.message) from None
+        return _ok()
+
+    def _jump(self, req: Req) -> Response:
+        """Bring the session's terminal forward by the command of config.toml (SPEC 4.3, 8.5). The body
+        names a document; which command runs, and for which session, is not the request's to say."""
+        e = self._entry(req, req.body.get("doc"))
+        try:
+            self.hub.asktell.jump(e.address)
+        except JobRefused as r:
+            raise Refuse(r.status, r.message) from None
+        return _ok()
+
+    def _cancel(self, req: Req) -> Response:
+        """A cancel stops what runs and clears the page, and asks nothing of the file: a document
+        that is gone, or whose root was forgotten, has nothing left to stop, and the answer is ok."""
+        doc = self._owned(req, req.body.get("doc"))
+        cid = self._comment_id(req)
+        what = req.body.get("what")
+        _shape(what in ("ask", "tell"), "what must be ask or tell")
+        self.hub.asktell.cancel(doc, cid, what)
+        return _ok()
+
+    def _seen(self, req: Req) -> Response:
+        b = req.body
+        e = self._entry(req, b.get("doc"))
+        cid, n = b.get("id"), b.get("count")
+        _shape(isinstance(cid, str) and _ID_RE.fullmatch(cid), "id is not a comment id")
+        _shape(type(n) is int and 0 <= n <= 100000, "count must be a number of messages")
+        if req.member is not None:
+            self.hub.member_seen.mark(req.member.id, e.address, cid, n)
+        else:
+            self.hub.seen.mark(e.address, cid, n)
+        self.hub.index.touch(e.address)
+        return _ok()
+
+    # ── export, diagnostics ──────────────────────────────────────────────────
+    def _export(self, req: Req) -> Response:
+        e = self._entry(req, req.body.get("doc"))
+        kind = req.body.get("kind")
+        _shape(kind in ("html", "pdf"), "kind must be html or pdf")
+        try:
+            html = self.hub.share_copy(e)
+        except RenderError as ex:
+            raise Refuse(409, str(ex)) from None
+        stem = Path(e.address).stem
+        if kind == "html":
+            return Response(200, {"Content-Type": "text/html; charset=utf-8",
+                                  "Content-Disposition": _disposition(stem + ".html")},
+                            html.encode("utf-8"))
+        # Serialised: two clicks would otherwise have two Chromes at once.
+        with self.hub.pdf_lock, tempfile.TemporaryDirectory(prefix="sheaf-pdf-") as d:
+            out = Path(d) / "share.pdf"
+            try:
+                pdf.write_pdf(html, out)
+                data = out.read_bytes()
+            except pdf.PdfError as ex:
+                # One line, because it lands in a toast and the useful half of "Chrome is not
+                # installed / apt install ..." is the half after the newline.
+                raise Refuse(503, " ".join(str(ex).split())) from None
+        return Response(200, {"Content-Type": "application/pdf",
+                              "Content-Disposition": _disposition(stem + ".pdf")}, data)
+
+    def _diag(self, req: Req) -> Response:
+        b = req.body
+        kind = b.get("kind")
+        _shape(isinstance(kind, str) and kind.strip(), "kind is missing")
+        doc = b.get("doc") if isinstance(b.get("doc"), str) else None
+        detail = {str(k)[:40]: str(v) for k, v in list(b.items())[:40] if k not in _RESERVED}
+        diagnostics.record("page", kind.strip()[:40], doc, **detail, **self._who(req))
+        return Response(204)
+
+    # ── the MCP door (the key and a name, or a token) ────────────────────────
+    def _mcp(self, req: Req) -> Response:
+        if req.token:
+            caller = Caller(req.token.display, req.token)
+        else:
+            caller = Caller(req.display)
+        status, answer = self.door.handle(req.raw, caller)
+        return _json(status, answer) if answer is not None else Response(status)
+
+    # ── the CLI's routes (the key) ───────────────────────────────────────────
+    def _render(self, req: Req) -> Response:
+        b = req.body
+        path, settings, target = b.get("path"), b.get("settings", {}), b.get("target")
+        _shape(isinstance(path, str) and Path(path).is_absolute(), "path must be absolute")
+        md = Path(path)
+        _shape(path.endswith(".md") and md.is_file(), "path must be an existing .md file")
+        _shape(isinstance(settings, dict), "settings must be an object")
+        for k, want in SETTING_TYPES.items():
+            v = settings.get(k)
+            _shape(v is None or (type(v) is want), f"{k} must be {want.__name__}")
+        _shape(settings.get("toc") in (None, "always", "auto", "never"),
+               "toc must be always, auto or never")
+        _shape(settings.get("max_image_width") is None or settings["max_image_width"] > 0,
+               "max_image_width must be positive")
+        _shape(target is None or isinstance(target, dict), "target must be an object or null")
+        if target is not None and target.get("agent") != "none":
+            try:
+                target = Target.from_dict(target).as_dict()
+            except ValueError as ex:
+                raise Refuse(400, str(ex)) from None
+        elif target is not None:
+            target = {"agent": "none"}
+        try:
+            return _ok(**self.hub.render(md, settings, target))
+        except (RenderError, ConfigError) as ex:
+            raise Refuse(422, str(ex)) from None
+
+    def _forget(self, req: Req) -> Response:
+        name = req.body.get("name")
+        _shape(isinstance(name, str) and name != "", "name must be the name of a root")
+        root = self.hub.forget_root(name)
+        if root is None:
+            raise Refuse(404, "no such root")
+        return _ok(name=root.name, path=str(root.path))
+
+    def _rotate(self, req: Req) -> Response:
+        self.hub.rotate()
+        return _ok()                       # never the key: the caller reads the file it owns
+
+    def _restarting(self, req: Req) -> Response:
+        self.hub.expect_restart()
+        return _ok()
+
+    def _forget_restart(self, req: Req) -> Response:
+        self.hub.forget_restart()
+        return _ok()
+
+    def _stop(self, req: Req) -> Response:
+        reason, force = req.body.get("reason"), req.body.get("force", False)
+        _shape(reason in ("stop", "upgrade"), "reason must be stop or upgrade")
+        _shape(isinstance(force, bool), "force must be true or false")
+        if not self.hub.request_stop(reason, force):
+            raise Refuse(409, "an Ask or Tell is running, so the hub was not stopped for the upgrade")
+        return _ok()

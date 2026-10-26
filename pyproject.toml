@@ -1,0 +1,56 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sheafmd"
+dynamic = ["version"]
+description = "A working page for a markdown document, shared between a person and their agent."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+    # pandoc as a wheel, the same binary for every user. Pinned exactly: the edit
+    # round-trip depends on pandoc's exact output, so an upgrade is a deliberate
+    # change that runs the whole suite (tests/test_pandoc.py asserts the version).
+    "pypandoc-binary==1.17",
+    "beautifulsoup4>=4.12",
+    "pillow>=10",
+    "fonttools[woff]>=4.50",
+]
+
+[project.scripts]
+sheaf = "sheafmd.cli:main"
+
+[dependency-groups]
+dev = [
+    "playwright==1.58.0",
+    "pytest>=9",                      # faulthandler_exit_on_timeout, below
+    "pytest-timeout>=2.3",
+]
+
+[tool.hatch.version]
+path = "src/sheafmd/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sheafmd"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "page: runs the page in Chromium through Playwright (skipped when it is not installed); -m \"not page\" leaves it out",
+]
+# The tests make git repos in tmp_path (about 100,000 files a full run). Keep only a failed test's
+# directory: /tmp is a tmpfs with a fixed number of inodes, and a dozen kept runs fill it.
+tmp_path_retention_policy = "failed"
+# A test that stands still names itself. Past `timeout` seconds for its setup, call and
+# teardown together, pytest-timeout prints the stack of every other thread and fails the test, whose
+# name is in the summary, and the run goes on. A test that still does not end (its teardown hangs as
+# well, or its main thread runs no Python code) gets faulthandler's dump of every thread at
+# `faulthandler_timeout`, and the run ends there with exit 1. The longest test of a full run took 43.6 s
+# at CPUQuota=200% on a box at load 37 to 52, and none took 60 s. The method is pytest-timeout's
+# default: its signal method where there is SIGALRM; on Windows, which has none, its thread method,
+# which ends the run (naming "signal" there would fail every test).
+timeout = 300
+faulthandler_timeout = 600
+faulthandler_exit_on_timeout = true

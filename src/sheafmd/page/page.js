@@ -1365,6 +1365,8 @@
       if (pop) replace();
     });
   });
+  // A frame resized, a phone turned, with a mouse as with a thumb: the thread wraps at another width.
+  window.addEventListener('resize', function () { if (pop) keepThread(); });
   // A popover with no place in the text (a kept comment, a thread whose badge is hidden or gone) is pinned
   // beside the panel.
   function pin(p) { p.style.position = 'fixed'; p.style.top = '80px'; p.style.left = ''; p.style.right = '390px'; }

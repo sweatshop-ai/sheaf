@@ -220,6 +220,30 @@ def test_a_draft_the_hub_refuses_opens_a_panel_with_its_text_to_copy(lost_edit, 
     assert stored(page, lost_edit.site) is not None
 
 
+# The panel that holds the text of a refused draft is the one place a person can copy it from. The page's first
+# read of the hub (the jobs running, the read state) answers at a moment of its own, and its answer redraws the
+# comments list when the panel is open: it must not draw over that text. (This showed as the test above failing
+# now and then, when the answer came after the Restore was refused.)
+def test_the_text_of_a_refused_draft_stays_in_its_panel_when_the_first_read_of_the_hub_answers_late(lost_edit, context):
+    page = context.new_page()
+    page.goto(lost_edit.site.url)
+    page.wait_for_selector("#rd-notice button[data-d=restore]")
+    d = stored(page, lost_edit.site)
+    d["hash"] = "0000000000000000"
+    page.evaluate(f"localStorage.setItem({draft_key(lost_edit.site)!r}, {json.dumps(json.dumps(d))})")
+    held = []
+    page.route("**/_/doc?*", lambda route: held.append(route))
+    page.reload()
+    page.click("#rd-notice button[data-d=restore]")
+    page.wait_for_selector("#rd-panel.open pre.rd-draft")
+    until(lambda: held, what="the page's first read of the hub")
+    for route in held:
+        route.continue_()
+    page.wait_for_timeout(500)
+    page.unroute("**/_/doc?*")
+    assert "plums" in page.inner_text("#rd-panel pre.rd-draft", timeout=3000)
+
+
 # A Restore goes through the same save as any other and gives up after 120 s (SPEC 10.3). The hub may have
 # written it all the same, and the offer stays (or comes back with the reload that write brings), so a second
 # Restore must say what the first sent (`saved`, SPEC 7.3): the hub finds it in the file instead of taking it

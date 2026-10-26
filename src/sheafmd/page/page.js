@@ -137,7 +137,7 @@
       var a = anchors[id], c = byId[id];
       if (a && c) a.className = anchorClass(c) + (a.classList.contains('rd-new') ? ' rd-new' : '');
     });
-    if (panel.classList.contains('open')) drawPanel();
+    redrawPanel();
   }
   function badgeClass(c) {
     var st = badgeState(c);
@@ -1468,7 +1468,7 @@
     var wasOpen = menu.classList.contains('open');
     buildMenu();
     if (wasOpen) openMenu();
-    if (panel.classList.contains('open')) drawPanel();
+    redrawPanel();
     if (pop && popId) { if (byId[popId]) touched(popId); else if (holdsPopover()) goneNote(); else closePopover(); }
     paint(popId);
     var n = news(before, COMMENTS, quiet);
@@ -1971,7 +1971,10 @@
   // ---- side panel -----------------------------------------------------------
   var filter = 'open', who = '';
   function openPanel() { panel.classList.add('open'); drawPanel(); }
-  function closePanel() { panel.classList.remove('open'); }
+  function closePanel() { panel.classList.remove('open'); delete panel.dataset.keeps; }
+  // A change in the comments redraws the list when the panel is open, but not over the text of a refused draft
+  // (`keeps`): that panel is where the text is copied from, and only opening the panel again replaces it.
+  function redrawPanel() { if (panel.classList.contains('open') && !panel.dataset.keeps) drawPanel(); }
   // The right edge of the window opens the panel; a click anywhere else closes it.
   // It re-arms only after the pointer has left the edge, so Escape or a click-away
   // with the mouse still parked there does not bounce it open again.
@@ -2018,6 +2021,7 @@
         return '<div class="rd-item" style="cursor:default">line ' + m.line + ': ' + esc(m.reason) + '</div>';
       }).join('');
     }
+    delete panel.dataset.keeps;
     panel.innerHTML = h;
     document.body.classList.toggle('rd-show-resolved', filter !== 'open');
     paint(popId);
@@ -3061,6 +3065,7 @@
         var why = x.timedOut ? 'The hub did not answer within 2 minutes; what follows may have been saved all the same. The text is kept here.' : x.message;
         panel.innerHTML = '<h3>Your unsaved edits</h3><p>' + esc(why) + '</p><pre class="rd-draft"></pre>';
         panel.querySelector('pre').textContent = text;
+        panel.dataset.keeps = 'draft';
         panel.classList.add('open');
       }
     };

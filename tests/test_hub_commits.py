@@ -298,3 +298,11 @@ def test_a_projects_toml_that_cannot_be_read_warns_once_however_it_changes(box, 
     (sheaves / "projects.toml").write_text('[projects."acme/blog"\n', encoding="utf-8")
     box.get("/_/index.json")
     assert len(rows("projects-invalid")) == 1
+
+
+def test_a_versions_store_the_repo_ignores_is_committed_all_the_same(box, sheaves, remote):
+    (sheaves / ".git" / "info" / "exclude").write_text(".sheaf/\n", encoding="utf-8")
+    edit(box, sheaves)
+    (who, files), _ = pushed(box, remote)
+    assert who.startswith("Bea <bea@example.com>|")
+    assert any(f.startswith(".sheaf/versions/") for f in files)

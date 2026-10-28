@@ -98,7 +98,7 @@ class Commits:
         paths = [p for p in paths if (folder / p).exists() or _git(folder, "ls-files", "--", p).stdout]
         if not paths:                                 # never `add -A` with no path: that is the whole tree
             return False
-        r = _git(folder, "add", "-A", "--", *paths)
+        r = _git(folder, "add", "-A", "-f", "--", *paths)   # the paths are named: an ignore rule holds none back
         if r.returncode != 0:
             self._record("commit-failed", address, error=_last_line(r))
             return False

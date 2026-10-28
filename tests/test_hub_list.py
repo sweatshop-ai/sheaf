@@ -511,3 +511,22 @@ def test_a_line_separator_markdown_does_not_break_on_leaves_the_tick_on_its_own_
     before = path.read_text(encoding="utf-8")
     assert box.post("/_/tick", {"doc": JOEY, "action": 0, "word": "Approve"}, member=NELL).status == 200
     assert path.read_text(encoding="utf-8") == before.replace("- [ ] Approve", "- [x] Approve")
+
+
+def test_a_list_root_inside_a_git_work_tree_is_refused_at_each_poll_and_lists_nothing(box, sheaves, tmp_path):
+    import shutil
+    import subprocess
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    shutil.copytree(sheaves, repo / "list")
+    cfg = box.hub.proxy
+    box.hub.proxy = proxy.parse({"origin": FRONT, "socket": str(cfg.socket), "proxy_user": cfg.proxy_user,
+                                 "members": {NELL: {"name": "Nell", "short": "nell", "github": "nell-l",
+                                                    "roots": [str(repo)]}}}, "the test")
+    box.hub.the_list.cfg = the_list.ListConfig(**{**box.hub.the_list.cfg.__dict__, "root": repo / "list"})
+    box.hub.the_list.poll()
+    rows = hub_rows("list-poll-failed")
+    assert rows and f"{repo / 'list'} is not the top folder of its root" in rows[-1]["error"], rows
+    res = box.get("/repo", member=NELL)
+    assert res.status == 200 and BeautifulSoup(res.text, "html.parser").select(".list-row") == []

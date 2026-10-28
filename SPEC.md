@@ -910,7 +910,7 @@ waiting = "Waiting on member"               # optional: the Project's Status opt
 in_progress = "In progress"                 # optional: and the one that is `open`
 ```
 
-`root` and `token_file` are absolute paths; `repo` is `owner/name`; `project` a number from 1; `poll` at least 1; `api` an `https://` address, or `http://` on 127.0.0.1 or localhost (a test's fake).
+`root` and `token_file` are absolute paths; `repo` is `owner/name`; `project` a number from 1; `poll` at least 1; `api` an `https://` address, or `http://` on 127.0.0.1 or localhost (a test's fake). `root` is the top folder of its root (8.2): a folder inside a git work tree, whose root is the tree's top, writes a `list-poll-failed` row at every poll and lists nothing.
 
 **What a sheaf says.** Its front matter, its top-level `key: value` lines: `issue` (`owner/repo#n`; empty or missing for a documentation sheaf, which is never on the list), `assistant`, `kind` and `visibility` (`project`, the default, or `owner`). Its title is its first `# ` heading, else its file name. Its **actions** are its unticked task lines that carry one of seven words, `- [ ] Approve`, `- [ ] Run it`, `- [ ] Don't run`, `- [ ] Undo skip`, `- [ ] Done`, `- [ ] Share` or `- [ ] Stop James` (an apostrophe may be `’`), optionally followed by `@<short>` of the member it is addressed to; a line in a fenced code block is not one.
 

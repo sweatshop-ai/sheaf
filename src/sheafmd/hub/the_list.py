@@ -302,6 +302,12 @@ class TheList:
         """Read every sheaf of the root and the record of their issues, and keep the rows."""
         with self._poll_lock:
             root = self.root()
+            if root.path != Path(os.path.realpath(self.cfg.root)):
+                # Inside a git work tree the root is the tree's top: its sheaves are not the list's.
+                self.hub.record("list-poll-failed", None, root=root.name,
+                                error=f"{self.cfg.root} is not the top folder of its root ({root.path})")
+                self._records, self._answered, self._snap = {}, {}, Snapshot()
+                return
             sheaves = []
             for found in roots_mod.list_documents(root).docs:
                 if found.rel.count("/") < 2:

@@ -32,7 +32,7 @@ from .hub.roots import Address, NotFound, address_of_url, in_git_dir
 from .hub import visibility
 from .hub.state import TokenRow
 from .render import COMMENT_RE as HTML_COMMENT_RE, strip_comments
-from .source import create_file, md_hash, now, update_file
+from .source import check_create, create_file, md_hash, now, update_file
 
 PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")
 INSTRUCTIONS = (
@@ -625,20 +625,21 @@ class Door:
             raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path")     # a root of another member's
         self._check_size(text)
         _check_comments("", text)
-        text = self._visible(text, None)
+        top = Path(os.path.realpath(root.path))
         try:
-            create_file(Path(os.path.realpath(root.path)), rel, text)
-        except FileExistsError:
-            raise ToolError(f"{address} exists already; `create` makes a new page, and `update` "
-                            "changes one.", "exists") from None
-        except FileNotFoundError:
-            raise ToolError(f"The folder of {address} does not exist; `create` makes no folder.",
-                            "no folder") from None
+            # The owner is judged by the list's row for the address, which a sheaf already there may have: what
+            # the path alone answers, walked as the write walks it, comes before every answer that judgement
+            # shapes (the refusal, the size with the owner line), so none tells what is there, nor what a link
+            # on the way points to.
+            check_create(top, rel)
         except OSError as e:
-            if e.errno in (errno.ELOOP, errno.ENOTDIR):
-                raise ToolError(f"{address} could not be made: every folder on its way must be a "
-                                "folder of its root, not a link or a file.", "link on the way") from None
-            raise ToolError(f"{address} could not be made ({e.strerror}).", "not written") from None
+            raise _not_made(address, e) from None
+        text = self._owned(self._visible(text, None), address, caller)
+        self._check_size(text)      # again: the owner `_owned` gave it is part of the page
+        try:
+            create_file(top, rel, text)
+        except OSError as e:
+            raise _not_made(address, e) from None
         self.hub.wrote(address)
         self.hub.committed(address, by=caller.display, what="create")
         return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text)}
@@ -661,7 +662,8 @@ class Door:
                 raise Stale(f"{address} has changed since that hash was read; read it again, make the "
                             "change on that text and send it with its hash.")
             _check_comments(now_text, text)
-            written[0] = self._visible(text, now_text)
+            written[0] = self._owned(self._visible(text, now_text), address, caller)
+            self._check_size(written[0])
             return written[0]
         try:
             before, _ = update_file(self.hub.roots.document(address), change)
@@ -690,6 +692,44 @@ class Door:
             raise ToolError("The text changes `sessions`, which only the hub writes; send it as `read` gave it"
                             + (" (a new page lists none)." if old is None else "."), "sessions")
         return out
+
+    def _owned(self, text: str, address: str, caller: Caller) -> str:
+        """`text`, a door write's text after `_visible`, when the sheaf it makes at `address` has an owner. A
+        sheaf that is its owner's alone and that no member owns is open to nobody, the token that wrote it
+        included, and no door write can mend it (9.11). So when no member owns it and it names no `owner`, a
+        token bound to a member gives it that member's `short`; else the write is refused. The key, which reads every file,
+        writes it as `_visible` gave it (#30)."""
+        if not self._judged(caller):
+            return text
+        fm = visibility.front_matter(text)
+        if visibility.effective(fm) == "project":
+            return text
+        # an owner whose roots do not hold the sheaf cannot open it either (9.9)
+        everyone = self.hub.members_owning(self.hub.proxy.members.values(), address)
+        if visibility.owner_of(fm, everyone, self.hub.assignees(address, fm)):
+            return text     # owned already, by an assignee of its issue or its `owner`, which stays as it is
+        member = self._member(caller)
+        if member is not None and member.short and not visibility.text(fm, "owner"):
+            text = visibility.set_keys(text, {"owner": member.short})
+            fm = visibility.front_matter(text)
+        if not visibility.owner_of(fm, everyone, self.hub.assignees(address, fm)):
+            raise ToolError(f"{address} would be its owner's alone, with no member as its owner, and nobody could "
+                            "open it: name a member's `short` as `owner`, or bind the token to a member.",
+                            "no owner")
+        return text
+
+
+def _not_made(address: str, e: OSError) -> ToolError:
+    """The answer to a `create` of `address` whose file `create_file` (or `check_create`) refused with `e`."""
+    if isinstance(e, FileExistsError):
+        return ToolError(f"{address} exists already; `create` makes a new page, and `update` changes one.",
+                         "exists")
+    if isinstance(e, FileNotFoundError):
+        return ToolError(f"The folder of {address} does not exist; `create` makes no folder.", "no folder")
+    if e.errno in (errno.ELOOP, errno.ENOTDIR):
+        return ToolError(f"{address} could not be made: every folder on its way must be a folder of its root, "
+                         "not a link or a file.", "link on the way")
+    return ToolError(f"{address} could not be made ({e.strerror}).", "not written")
 
 
 def _absent(doc: str) -> ToolError:

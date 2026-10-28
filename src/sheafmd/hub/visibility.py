@@ -246,7 +246,8 @@ def for_door(text_: str, old: str | None) -> str:
     want = "owner" if closed or (mine and not kept) else "project"
     values = {"visibility": want, "shared": kept if want == "project" else None}
     if old is not None:
-        # an update neither gives nor changes the owner, nor the issue whose assignee is the owner
+        # an update neither gives nor changes the owner, nor the issue whose assignee is the owner; the door
+        # gives a sheaf that no member owns its token's member (mcp `_owned`, #30)
         values["owner"] = owner or None
         values["issue"] = text(was, "issue") or None
     if want == "project" and not ({"visibility", "sources", "shared"} & fm.keys()) \

@@ -12,6 +12,7 @@ from sheafmd.hub import proxy, the_list
 from sheafmd.hub.index import SWEEP_SECONDS
 from sheafmd.hub.state import Tokens
 from sheafmd.hub.visibility import front_matter
+from sheafmd.mcp import MAX_TEXT
 from sheafmd.source import md_hash
 
 THIERRY = "503b2f77-83de-452c-817a-a357faf85929"
@@ -148,6 +149,80 @@ def test_a_door_create_from_mistral_with_a_library_source_lands_owner_only(team,
     assert got["hash"] == md_hash(on_disk)
     assert team.get(f"/work/{DOC}", member=HANS).status == 404
     assert team.get(f"/work/{DOC}", member=THIERRY).status == 200
+
+
+MAIL = "list/a/inbox/x.md"
+MAIL_TEXT = "---\nsources: [mail]\n---\n# A mail\n\nWhat it says.\n"
+
+
+def test_a_door_create_by_a_bound_token_gives_its_member_an_owner_only_sheaf_with_no_owner(team, browser, work):
+    """#30: the mail module's token, bound to Thierry, writes a sheaf from a private source with no `owner`."""
+    team.hub.proxy = members(work, thierry=["mail"])
+    (work / "list/a/inbox").mkdir(parents=True)
+    token = Tokens().add("mail", write=True)
+    is_error, got = call(browser, "create", token=token, doc=f"work/{MAIL}", text=MAIL_TEXT)
+    assert not is_error, got
+    on_disk = (work / MAIL).read_text(encoding="utf-8")
+    assert front_matter(on_disk)["owner"] == "thierry" and got["hash"] == md_hash(on_disk)
+    is_error, got = call(browser, "read", token=token, doc=f"work/{MAIL}")
+    assert not is_error and got["text"] == on_disk
+    assert team.get(f"/work/{MAIL}", member=THIERRY).status == 200
+    assert team.get(f"/work/{MAIL}", member=HANS).status == 404
+
+
+def test_a_door_create_by_an_unbound_token_of_an_owner_only_sheaf_with_no_owner_is_refused(team, browser, work):
+    """#30: a token bound to nobody could not open what it made, nor could anyone else: no orphan is made."""
+    (work / "list/a/inbox").mkdir(parents=True)
+    is_error, got = call(browser, "create", token=Tokens().add("mail", write=True), doc=f"work/{MAIL}",
+                         text=MAIL_TEXT)
+    assert is_error and "owner" in got and "bind" in got, got
+    assert not (work / MAIL).exists()
+    assert hub_rows("door-create")[-1]["reason"] == "no owner"
+
+
+def test_a_door_create_that_names_its_owner_keeps_that_owner(team, browser, work):
+    team.hub.proxy = members(work, thierry=["mail"])
+    (work / "list/a/inbox").mkdir(parents=True)
+    text = MAIL_TEXT.replace("sources:", "owner: hans\nsources:")
+    for token, doc in ((Tokens().add("mail", write=True), MAIL), (Tokens().add("mistral", write=True), "list/a/y.md")):
+        is_error, got = call(browser, "create", token=token, doc=f"work/{doc}", text=text)
+        assert not is_error, got
+        assert front_matter((work / doc).read_text(encoding="utf-8"))["owner"] == "hans"
+        assert team.get(f"/work/{doc}", member=HANS).status == 200
+
+
+def test_a_door_update_that_closes_a_sheaf_with_no_owner_gives_it_the_tokens_member(team, browser, work):
+    put(team, work, MAIL, "---\nsources: [issue:x/y#1]\n---\n# A mail\n")
+    is_error, got = door_update(team, browser, work, MAIL, lambda t: t.replace("issue:x/y#1", "mail:t-1"))
+    assert not is_error, got
+    assert front_matter((work / MAIL).read_text(encoding="utf-8"))["owner"] == "thierry"
+    assert team.get(f"/work/{MAIL}", member=THIERRY).status == 200
+    assert team.get(f"/work/{MAIL}", member=HANS).status == 404
+
+
+def test_a_door_update_by_an_unbound_token_that_would_close_a_sheaf_with_no_owner_is_refused(team, browser, work):
+    put(team, work, MAIL, "---\nsources: [issue:x/y#1]\n---\n# A mail\n")
+    token = Tokens().add("mistral", write=True)
+    before = (work / MAIL).read_text(encoding="utf-8")
+    is_error, got = call(browser, "update", token=token, doc=f"work/{MAIL}", expected_hash=md_hash(before),
+                         text=before.replace("issue:x/y#1", "mail:t-1"))
+    assert is_error and "owner" in got, got
+    assert (work / MAIL).read_text(encoding="utf-8") == before
+    assert hub_rows("door-update")[-1]["reason"] == "no owner"
+
+
+def test_a_door_create_by_a_bound_token_of_a_sheaf_its_issues_assignee_owns_names_no_owner(team, browser, work,
+                                                                                        monkeypatch):
+    """The assignee stays the owner: an `owner` line would hand the sheaf to the token's member once the list
+    stops knowing the issue."""
+    team.hub.proxy = members(work, thierry=["mail"])
+    monkeypatch.setattr(team.hub, "assignees", lambda address, fm: ["hanshermans"])
+    (work / "list/a/inbox").mkdir(parents=True)
+    is_error, got = call(browser, "create", token=Tokens().add("mail", write=True), doc=f"work/{MAIL}",
+                         text=MAIL_TEXT.replace("sources:", "issue: x/y#1\nsources:"))
+    assert not is_error, got
+    assert "owner" not in front_matter((work / MAIL).read_text(encoding="utf-8"))
+    assert team.get(f"/work/{MAIL}", member=HANS).status == 200
 
 
 def test_a_door_write_cannot_share_a_sheaf_itself(team, browser, work):
@@ -835,6 +910,76 @@ def hans_root(team, work):
     f.write_text("# Hans's notes\n\n" + THREAD + "\n", encoding="utf-8")
     name = team.hub.roots.for_document(f).name
     return root, f"{name}/notes.md"
+
+
+def test_a_door_create_whose_owner_cannot_reach_its_root_is_refused(team, browser, work, hans_root):
+    """An owner who is a member but not of the sheaf's root could not open it either (9.9): an orphan all the
+    same (#30)."""
+    root, notes = hans_root
+    team.hub.proxy = members(work, hans_also=root, hans=["mail-hans"])
+    name = notes.split("/", 1)[0]
+    is_error, got = call(browser, "create", token=Tokens().add("mail-hans", write=True), doc=f"{name}/x.md",
+                         text=MAIL_TEXT.replace("sources:", "owner: thierry\nsources:"))
+    assert is_error and "owner" in got, got
+    assert not (root / "x.md").exists()
+
+
+def test_a_refused_create_over_a_hidden_sheaf_answers_only_that_its_name_is_taken(team, browser, work,
+                                                                                monkeypatch):
+    """Whether a create has an owner reads the list's row for its address: over a sheaf the token may not see,
+    the answer is the taken name's alone, whatever issue the text guesses (#30)."""
+    put(team, work, DOC, PRIVATE)
+    monkeypatch.setattr(team.hub, "assignees", lambda address, fm: ["tiroir"] if "issue" in fm else None)
+    token = Tokens().add("mistral", write=True)
+    answers = {call(browser, "create", token=token, doc=f"work/{DOC}", text=text)[1]
+               for text in (MAIL_TEXT, MAIL_TEXT.replace("sources:", "issue: thinkingtoo/tt-tiroir#9\nsources:"))}
+    assert answers == {f"work/{DOC} exists already; `create` makes a new page, and `update` changes one."}
+
+
+def test_a_create_over_a_hidden_sheaf_near_the_limit_answers_only_that_its_name_is_taken(team, browser, work,
+                                                                                        monkeypatch):
+    """The owner line `_owned` adds depends on the list's row for the address; over a sheaf the token may not
+    see, a text near the limit must not tell by its size answer which issue that sheaf names (#30)."""
+    put(team, work, DOC, PRIVATE)
+    team.hub.proxy = members(work, hans=["mail-hans"])
+    monkeypatch.setattr(team.hub, "assignees",
+                        lambda address, fm: ["tiroir"] if fm.get("issue") == "thinkingtoo/tt-tiroir#9" else None)
+    token = Tokens().add("mail-hans", write=True)
+    answers = set()
+    for guess in ("thinkingtoo/tt-tiroir#9", "thinkingtoo/tt-tiroir#8"):
+        head = f"---\nvisibility: owner\nsources: [mail]\nissue: {guess}\n---\n"
+        answers.add(call(browser, "create", token=token, doc=f"work/{DOC}",
+                         text=head + "x" * (MAX_TEXT - len(head) - 6) + "\n")[1])
+    assert answers == {f"work/{DOC} exists already; `create` makes a new page, and `update` changes one."}
+
+
+def test_a_create_refused_for_no_owner_through_a_link_tells_nothing_of_what_is_behind_it(team, browser, work,
+                                                                                       tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.md").write_text("# Secret\n", encoding="utf-8")
+    (work / "alias").symlink_to(outside)
+    token = Tokens().add("mistral", write=True)
+    answers = {call(browser, "create", token=token, doc=f"work/alias/{name}", text=MAIL_TEXT)[1].replace(name, "N")
+               for name in ("secret.md", "none.md")}
+    assert len(answers) == 1 and "link" in answers.pop()
+
+
+def test_a_bound_tokens_create_that_its_owner_line_takes_past_the_limit_is_refused(team, browser, work):
+    team.hub.proxy = members(work, thierry=["mail"])
+    (work / "list/a/inbox").mkdir(parents=True)
+    text = MAIL_TEXT + "x" * (MAX_TEXT - len(MAIL_TEXT.encode("utf-8")) - 1) + "\n"
+    is_error, got = call(browser, "create", token=Tokens().add("mail", write=True), doc=f"work/{MAIL}", text=text)
+    assert is_error and "1 MiB" in got, got
+    assert not (work / MAIL).exists()
+
+
+def test_whose_a_document_is_is_judged_with_one_lookup_of_its_root_for_every_member(team, work, monkeypatch):
+    lookups = []
+    lookup = team.hub.roots.lookup
+    monkeypatch.setattr(team.hub.roots, "lookup", lambda p: lookups.append(p) or lookup(p))
+    everyone = list(team.hub.proxy.members.values())
+    assert team.hub.members_owning(everyone, f"work/{DOC}") == everyone and len(lookups) == 1
 
 
 def test_a_token_bound_to_a_member_reaches_only_that_members_roots(team, browser, work, hans_root):

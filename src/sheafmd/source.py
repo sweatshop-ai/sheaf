@@ -5,6 +5,7 @@ of them protects nothing against the others, so every write takes an exclusive
 flock across read, hash check and replace. The lock file lives in the runtime
 folder, keyed by the document's path, so no dotfile appears next to the .md.
 """
+import errno
 import hashlib
 import os
 import secrets
@@ -216,14 +217,8 @@ def create_file(top, rel: str, text: str):
     place: a reader never sees half a page, and the link fails (FileExistsError) when the name is
     taken by anything, a dangling link included, even one that appeared a moment ago. The file gets
     the mode the umask gives a new file. A missing folder is FileNotFoundError."""
-    parts = rel.split("/")
-    fd = os.open(top, os.O_RDONLY | os.O_DIRECTORY)
+    fd, name = _folder_of(top, rel)
     try:
-        for seg in parts[:-1]:
-            inner = os.open(seg, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
-            os.close(fd)
-            fd = inner
-        name = parts[-1]
         tmp = f".{name}.sheaf-new-{secrets.token_hex(6)}"
         out = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o666, dir_fd=fd)
         try:
@@ -239,6 +234,37 @@ def create_file(top, rel: str, text: str):
                 pass
     finally:
         os.close(fd)
+
+
+def check_create(top, rel: str):
+    """Raise what `create_file(top, rel, …)` would raise for its path, writing nothing: FileExistsError when the
+    name is taken by anything, a dangling link included, and the OSError of its walk for a missing folder or a
+    link on the way. So a create refused for another reason can answer as the path alone would."""
+    fd, name = _folder_of(top, rel)
+    try:
+        try:
+            os.stat(name, dir_fd=fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        raise FileExistsError(errno.EEXIST, "File exists", rel)
+    finally:
+        os.close(fd)
+
+
+def _folder_of(top, rel: str):
+    """(fd of the folder of `rel` under `top`, the file's name): each folder opened from the one above it
+    without following a link, so a link on the way is an OSError wherever it points."""
+    parts = rel.split("/")
+    fd = os.open(top, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for seg in parts[:-1]:
+            inner = os.open(seg, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = inner
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd, parts[-1]
 
 
 class Source:

@@ -392,11 +392,17 @@ class Hub:
         """Whether the document at `address` (it need not exist) is the member's: the root 8.2
         finds for its file is the root its address names, and that root is one of theirs. So a
         root nested inside one of theirs stays another root."""
+        return bool(self.members_owning([member], address))
+
+    def members_owning(self, members, address: str) -> list:
+        """Those of `members` whose the document at `address` is, as `member_owns` judges, with one lookup of
+        its root for them all."""
         at = roots_mod.Address.parse(address)
         root = self.roots.get(at.root)
         if root is None or not at.plain:
-            return False
-        return self.owns(member, root) and self.roots.lookup(root.path / at.rel) == root
+            return []
+        mine = [m for m in members if self.owns(m, root)]
+        return mine if mine and self.roots.lookup(root.path / at.rel) == root else []
 
     def _judged(self, address: str):
         """(front matter, assignees) of the sheaf at `address`, what its visibility is judged on: the front

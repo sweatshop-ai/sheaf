@@ -3,6 +3,7 @@ Share. Through the handler in proxy mode, with two members of one root: Thierry,
 below, and Hans, who is a member of the project but owns none of them."""
 import os
 import pwd
+import time
 
 import pytest
 from helpers import FRONT, Front, call, hub_rows
@@ -404,3 +405,14 @@ def test_a_sheaf_closed_with_the_same_size_and_time_is_closed_at_once(team, work
         f.write_text(closed, encoding="utf-8")
         os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns))
     assert team.get(f"/work/{DOC}", member=HANS).status == 404
+
+
+def test_two_stop_james_in_one_second_leave_one_drop_and_two_rows(team, work, stop_dir, monkeypatch):
+    put(team, work, DOC, STOPPABLE.replace("- [ ] Stop James", "- [ ] Stop James\n- [ ] Stop James"))
+    second = time.gmtime()
+    monkeypatch.setattr(time, "gmtime", lambda *_: second)
+    assert tick(team, work, DOC, "Stop James", HANS).status == 200
+    assert tick(team, work, DOC, "Stop James", THIERRY).status == 200
+    f, = stop_dir.iterdir()
+    assert f.read_text(encoding="utf-8") == "thinkingtoo/tiroir\n"
+    assert [r["drop"] for r in hub_rows("stop-james")] == ["written", "written"]

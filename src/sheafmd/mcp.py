@@ -685,7 +685,8 @@ class Door:
         `sessions` is judged again on what it gives (#36)."""
         seen = self._visible(text, old)
         out = self._owned(seen, address, caller)
-        if out != seen and visibility.front_matter(out).get("sessions", "") != visibility.front_matter(seen).get("sessions", ""):
+        sessions = visibility.front_matter(seen).get("sessions", "")    # the old value: `_visible` saw to that
+        if out != seen and visibility.front_matter(out).get("sessions", "") != sessions:
             raise _sessions_changed(old)
         return out
 

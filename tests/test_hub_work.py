@@ -1000,9 +1000,8 @@ def test_a_door_update_whose_owner_rewrite_would_join_an_item_to_sessions_is_ref
                          doc=new)
     assert not is_error, got
     before = (work / "thinkingtoo/tiroir/new.md").read_text(encoding="utf-8")
-    is_error, said = door(browser, james_token, "update", lambda t: head + "sources: [mail:t-1]\n" + OWNER_THEN_SESSIONS
-                          + "---\n# New\n",
-                          doc=new)
+    closed = head + "sources: [mail:t-1]\n" + OWNER_THEN_SESSIONS + "---\n# New\n"
+    is_error, said = door(browser, james_token, "update", lambda t: closed, doc=new)
     assert is_error and "sessions" in said
     assert (work / "thinkingtoo/tiroir/new.md").read_text(encoding="utf-8") == before
     assert download(team, id=FORK).status == 404

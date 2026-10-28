@@ -897,6 +897,7 @@ def test_a_bound_token_cannot_tell_another_members_root_from_none_through_a_link
     (links / "lnk").symlink_to(root.parent)
     (links / "lnk2").symlink_to(nowhere)
     theirs, none = links / "lnk" / root.name / "x.md", links / "lnk2" / "x.md"
-    assert call(browser, "create", token=token, doc=str(theirs), text="# X\n") == \
-        (True, call(browser, "create", token=token, doc=str(none), text="# X\n")[1].replace(str(none), str(theirs)))
+    is_error, got = call(browser, "create", token=token, doc=str(theirs), text="# X\n")
+    _, expected = call(browser, "create", token=token, doc=str(none), text="# X\n")
+    assert is_error and got == expected.replace(str(none), str(theirs))
     assert not (root / "x.md").exists()

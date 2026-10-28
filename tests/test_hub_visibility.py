@@ -211,17 +211,17 @@ def test_a_door_update_by_an_unbound_token_that_would_close_a_sheaf_with_no_owne
     assert hub_rows("door-update")[-1]["reason"] == "no owner"
 
 
-def test_a_door_create_by_a_bound_token_of_a_sheaf_its_issues_assignee_owns_names_no_owner(team, browser, work,
-                                                                                        monkeypatch):
-    """The assignee stays the owner: an `owner` line would hand the sheaf to the token's member once the list
-    stops knowing the issue."""
+def test_a_door_create_by_a_bound_token_of_a_sheaf_its_issues_assignee_owns_names_the_assignee(team, browser, work,
+                                                                                            monkeypatch):
+    """The assignee stays the owner: the token's member as `owner` would have the sheaf once the list stops
+    knowing the issue, and no `owner` would leave it to nobody (#33)."""
     team.hub.proxy = members(work, thierry=["mail"])
     monkeypatch.setattr(team.hub, "assignees", lambda address, fm: ["hanshermans"])
     (work / "list/a/inbox").mkdir(parents=True)
     is_error, got = call(browser, "create", token=Tokens().add("mail", write=True), doc=f"work/{MAIL}",
                          text=MAIL_TEXT.replace("sources:", "issue: x/y#1\nsources:"))
     assert not is_error, got
-    assert "owner" not in front_matter((work / MAIL).read_text(encoding="utf-8"))
+    assert front_matter((work / MAIL).read_text(encoding="utf-8"))["owner"] == "hans"
     assert team.get(f"/work/{MAIL}", member=HANS).status == 200
 
 

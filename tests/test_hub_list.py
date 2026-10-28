@@ -12,9 +12,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 from bs4 import BeautifulSoup
-from helpers import FRONT, Front, hub_rows
+from helpers import FRONT, Front, call, hub_rows
 
 from sheafmd.hub import proxy, the_list
+from sheafmd.hub.state import Tokens
+from sheafmd.hub.visibility import front_matter
+from sheafmd.source import md_hash
 
 NELL = "503b2f77-83de-452c-817a-a357faf85929"       # the front's ids of two members
 DORA = "2b9d7e1c-4a51-4c0e-9d1f-6f0c3a7e8b42"
@@ -774,3 +777,150 @@ def test_an_issue_written_in_another_case_is_still_the_issue_the_list_polled(box
     address = f"/{root}/globex/black-friday/2026-10-28-reply-to-joey.md"
     assert box.get(address, member=NELL).status == 200
     assert box.get(address, member=DORA).status == 404
+
+
+def bind_tokens(box, sheaves):
+    """Nell's and Dora's door tokens, `nell-door` and `dora-door`, bound to them (9.11)."""
+    box.hub.proxy = proxy.parse({"origin": FRONT, "socket": "/run/sheaf-proxy/hub.sock",
+                                 "proxy_user": pwd.getpwuid(os.getuid()).pw_name,
+                                 "members": {NELL: {"name": "Nell", "short": "nell", "github": "nell-l",
+                                                    "roots": [str(sheaves)], "tokens": ["nell-door"]},
+                                             DORA: {"name": "Dora", "short": "dora", "github": "dora-k",
+                                                    "roots": [str(sheaves)], "tokens": ["dora-door"]}}}, "the test")
+    return {name: Tokens().add(name, write=True) for name in ("nell-door", "dora-door")}
+
+
+def hidden_joey(sheaves):
+    """Joey's sheaf, its owner's alone and with no `owner`: its issue's assignee, Nell, owns it."""
+    joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
+    joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n", "sources: [library:4711]\n"),
+                    encoding="utf-8")
+    return joey
+
+
+def test_a_door_update_of_a_sheaf_its_assignee_alone_owns_keeps_it_theirs_once_the_issue_is_not_polled(
+        box, browser, sheaves, github):
+    """#33: the record names the owner only while the list polls the issue; the `owner` the write gives
+    it is the one after."""
+    tokens = bind_tokens(box, sheaves)
+    joey = hidden_joey(sheaves)
+    box.hub.the_list.poll()
+    root = box.hub.roots.lookup(joey).name
+    doc = f"{root}/globex/black-friday/2026-10-28-reply-to-joey.md"
+    before = joey.read_text(encoding="utf-8")
+    is_error, got = call(browser, "update", token=tokens["nell-door"], doc=doc, expected_hash=md_hash(before),
+                         text=before.replace("The draft.", "The draft, again."))
+    assert not is_error, got
+    assert front_matter(joey.read_text(encoding="utf-8"))["owner"] == "nell"
+    del github.issues[5]                                # moved to another repo: the list no longer knows it
+    box.hub.the_list.poll()
+    assert box.get(f"/{doc}", member=NELL).status == 200
+    assert box.get(f"/{doc}", member=DORA).status == 404
+
+
+@pytest.mark.parametrize("issue", ["acme/record#5", "acme/record#7"], ids=["its-issue", "another"])
+def test_a_door_create_where_a_hidden_sheaf_was_deleted_answers_the_same_whatever_issue_it_names(
+        box, browser, sheaves, issue):
+    """#34: until the next poll the list still has the deleted sheaf's row; neither the create's answer nor
+    a read after it tells which issue that sheaf named."""
+    tokens = bind_tokens(box, sheaves)
+    joey = hidden_joey(sheaves)
+    box.hub.the_list.poll()
+    root = box.hub.roots.lookup(joey).name
+    doc = f"{root}/globex/black-friday/2026-10-28-reply-to-joey.md"
+    joey.unlink()
+    text = f"---\nissue: {issue}\nsources: [library:1]\n---\n# A guess\n"
+    is_error, got = call(browser, "create", token=tokens["dora-door"], doc=doc, text=text)
+    assert not is_error, got
+    assert front_matter(joey.read_text(encoding="utf-8"))["owner"] == "dora"
+    is_error, got = call(browser, "read", token=tokens["dora-door"], doc=doc)
+    assert not is_error, got
+
+
+@pytest.mark.parametrize("issue", ["acme/record#5", "acme/record#7"], ids=["its-issue", "another"])
+def test_an_unbound_create_where_a_hidden_sheaf_was_deleted_is_refused_whatever_issue_it_names(
+        box, browser, sheaves, issue):
+    """#34: a token bound to nobody gives no owner, so the stale row of the deleted sheaf is no owner either."""
+    joey = hidden_joey(sheaves)
+    box.hub.the_list.poll()
+    root = box.hub.roots.lookup(joey).name
+    joey.unlink()
+    is_error, got = call(browser, "create", token=Tokens().add("mistral", write=True),
+                         doc=f"{root}/globex/black-friday/2026-10-28-reply-to-joey.md",
+                         text=f"---\nissue: {issue}\nsources: [library:1]\n---\n# A guess\n")
+    assert is_error and "no member as its owner" in got, got
+    assert not joey.exists()
+
+
+def test_a_poll_that_read_a_hidden_sheaf_before_it_went_does_not_bring_its_row_back(
+        box, browser, sheaves, monkeypatch):
+    """#34, Codex: the sheaf goes and a door create takes its address while a poll that read it asks GitHub;
+    the snapshot that poll publishes judges the new sheaf without the row."""
+    tokens = bind_tokens(box, sheaves)
+    joey = hidden_joey(sheaves)
+    box.hub.the_list.poll()
+    root = box.hub.roots.lookup(joey).name
+    doc = f"{root}/globex/black-friday/2026-10-28-reply-to-joey.md"
+    fetch = the_list.fetch
+
+    def meanwhile(cfg, wanted):
+        joey.unlink()
+        is_error, got = call(browser, "create", token=tokens["dora-door"], doc=doc,
+                             text="---\nissue: acme/record#5\nsources: [library:1]\n---\n# A guess\n")
+        assert not is_error, got
+        return fetch(cfg, wanted)
+    monkeypatch.setattr(the_list, "fetch", meanwhile)
+    box.hub.the_list.poll()
+    monkeypatch.setattr(the_list, "fetch", fetch)
+    is_error, got = call(browser, "read", token=tokens["dora-door"], doc=doc)
+    assert not is_error, got
+    box.hub.the_list.poll()                             # a poll that read the new sheaf: its issue's assignee owns it
+    is_error, got = call(browser, "read", token=tokens["dora-door"], doc=doc)
+    assert is_error, got
+
+
+@pytest.mark.parametrize("through", ["its-address", "a-link"])
+def test_a_sheaf_made_where_a_hidden_one_went_is_listed_by_what_it_says_not_what_that_one_said(
+        box, browser, sheaves, through):
+    """Codex, Opus: a row the poll read from a hidden sheaf goes with its file, a link's row to it too; the
+    sheaf made at its address, open to the project, is listed by its own text from the next poll."""
+    tokens = bind_tokens(box, sheaves)
+    joey = hidden_joey(sheaves)
+    joey.write_text(joey.read_text(encoding="utf-8").replace("# Reply to Joey about column L", "# Secret title"),
+                    encoding="utf-8")
+    if through == "a-link":
+        (sheaves / "globex/black-friday/joey.md").symlink_to(joey.name)
+    box.hub.the_list.poll()
+    root = box.hub.roots.lookup(joey).name
+    joey.unlink()
+    is_error, got = call(browser, "create", token=tokens["dora-door"],
+                         doc=f"{root}/globex/black-friday/2026-10-28-reply-to-joey.md",
+                         text="---\nissue: acme/record#5\nvisibility: project\n---\n# Open title\n\n- [ ] Approve\n")
+    assert not is_error, got
+    shown = str(read(box.get("/list?show=all", member=DORA)))
+    assert "Secret title" not in shown and "Open title" not in shown, shown   # the row waits for the next poll
+    box.hub.the_list.poll()
+    shown = str(read(box.get("/list?show=all", member=DORA)))
+    assert "Secret title" not in shown and "Open title" in shown, shown
+
+
+@pytest.mark.parametrize("issue", ["acme/record#5", "acme/record#7"], ids=["its-issue", "another"])
+def test_an_open_create_where_a_hidden_sheaf_went_then_closed_answers_the_same_whatever_issue_it_names(
+        box, browser, sheaves, issue):
+    """Opus: a create open to the project drops the row of the sheaf that went too, so an update that closes it
+    is owned by the token's member, whatever issue it names, and the list shows it to nobody before a poll."""
+    tokens = bind_tokens(box, sheaves)
+    joey = hidden_joey(sheaves)
+    box.hub.the_list.poll()
+    root = box.hub.roots.lookup(joey).name
+    doc = f"{root}/globex/black-friday/2026-10-28-reply-to-joey.md"
+    joey.unlink()
+    is_error, got = call(browser, "create", token=tokens["dora-door"], doc=doc,
+                         text=f"---\nissue: {issue}\nvisibility: project\n---\n# A guess\n\n- [ ] Approve\n")
+    assert not is_error, got
+    assert "A guess" not in str(read(box.get("/list?show=all", member=DORA)))
+    now = joey.read_text(encoding="utf-8")
+    is_error, got = call(browser, "update", token=tokens["dora-door"], doc=doc, expected_hash=md_hash(now),
+                         text=now.replace("visibility: project\n", "sources: [library:1]\n"))
+    assert not is_error, got
+    assert front_matter(joey.read_text(encoding="utf-8"))["owner"] == "dora"

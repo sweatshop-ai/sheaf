@@ -870,3 +870,40 @@ def test_the_recorded_session_is_committed_with_the_member_who_sent_the_tell(com
     log = git(repo, "log", "--format=%an|%s").splitlines()
     assert f"Hans|session: {DOC}" in log, log
     assert f"{{id: {NEW}, host: tiroir-tt, member: james, " in git(repo, "show", f"HEAD:{DOC}")
+
+
+# ── review round 3 (Codex) ───────────────────────────────────────────────────
+ON_A_LAPTOP = SHEAF.replace("host: tiroir-tt, member: james, date: 2026-10-28T05:12:03Z",
+                            "host: thierry-laptop, member: thierry, date: 2026-10-28T05:12:03Z")
+
+
+def test_a_fork_that_lands_after_the_gate_keeps_the_tell_from_james(team, box, work, monkeypatch):
+    # The gate read the box as live; a fork moved the session to a laptop before the comment took the lock.
+    from sheafmd.hub import handler as handler_mod
+    put(team, work, DOC, ON_A_LAPTOP)
+    before = (work / DOC).read_text(encoding="utf-8")
+    monkeypatch.setattr(handler_mod.Handler, "_box_live", lambda self, e: True)
+    got = comment(team, work, "tell")
+    assert got.status == 400 and got.json()["error"] == proxy.PROXY_LINE
+    assert (work / DOC).read_text(encoding="utf-8") == before and drops(box) == []
+
+
+def test_a_fork_that_lands_while_the_hub_looks_for_james_session_stays_live(team, at_work, work, monkeypatch):
+    from sheafmd.hub import work as work_mod
+    james_wrote(at_work, NEW)
+    found = work_mod.james_newest
+
+    def a_fork_lands_meanwhile(cfg, project):
+        (work / DOC).write_text(ON_A_LAPTOP, encoding="utf-8")
+        return found(cfg, project)
+    monkeypatch.setattr(work_mod, "james_newest", a_fork_lands_meanwhile)
+    assert comment(team, work, "tell").status == 200
+    assert "thierry-laptop" in sessions_of(work)[0] and not [s for s in sessions_of(work) if NEW in s]
+    assert hub_rows("session-recorded") == []
+
+
+def test_an_empty_list_keeps_the_comment_on_its_key_line():
+    from sheafmd.hub import work as work_mod
+    text = "---\nclient: a\nsessions: [] # newest first\n---\n# T\n"
+    assert work_mod.with_session(text, "{NEW}", FORK) == \
+        "---\nclient: a\nsessions: # newest first\n  - {NEW}\n---\n# T\n"

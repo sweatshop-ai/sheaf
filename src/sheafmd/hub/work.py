@@ -137,7 +137,10 @@ def with_session(text: str, line: str, id: str) -> str:
         if not (item and (m := _ITEM_RE.fullmatch(item.group(2))) and m.group(1) == id):
             kept.append(raw[n])
         n += 1
-    key = raw[at] if value == "" else "sessions:" + cr
+    key = raw[at]
+    if value == "[]":                                   # a comment after `[]` stays on the key's line
+        rest = raw[at].removesuffix("\r").split("[]", 1)[1].strip()
+        key = "sessions:" + (" " + rest if rest else "") + cr
     return "\n".join(raw[:at] + [key, (lead or "  - ") + line + cr] + kept + raw[n:])
 
 

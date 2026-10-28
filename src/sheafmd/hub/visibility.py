@@ -33,6 +33,22 @@ def _lines(text: str) -> list:
     return [line.removesuffix("\r") for line in text.split("\n")]
 
 
+_COMMENT_RE = re.compile(r"(?:^|\s)#")
+
+
+def _uncomment(value: str) -> str:
+    """`value` without the YAML comment after it, as pandoc reads it: a quoted value ends at its closing
+    quote, an unquoted one at the first `#` that opens the value or follows a space (`a/b#7` keeps its `#`)."""
+    value = value.strip()
+    if value[:1] in ("\"", "'") and (close := value.find(value[0], 1)) > 0:
+        rest = value[close + 1:].strip()
+        if not rest or rest.startswith("#"):
+            return value[:close + 1]
+    if m := _COMMENT_RE.search(value):
+        value = value[:m.start()]
+    return value.strip()
+
+
 def _unquote(value: str) -> str:
     if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
         return value[1:-1]
@@ -56,13 +72,13 @@ def front_matter(text: str) -> dict:
     out, listing = {}, None
     for line in lines[1:end]:
         if listing is not None and (m := _ITEM_RE.fullmatch(line)):
-            out[listing] += (_unquote(m.group(1)),)
+            out[listing] += (_unquote(_uncomment(m.group(1))),)
             continue
         listing = None
         m = _KEY_RE.fullmatch(line)
         if not m:
             continue
-        key, value = m.group(1), (m.group(2) or "").strip()
+        key, value = m.group(1), _uncomment(m.group(2) or "")
         if value.startswith("[") and value.endswith("]"):
             out[key] = tuple(_unquote(v.strip()) for v in value[1:-1].split(",") if v.strip())
         elif not value:

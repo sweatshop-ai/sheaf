@@ -328,7 +328,7 @@ class TheList:
         self._answered: dict = {}           # {rel: the record's `updated` when a member ticked it}
         self._poll_lock = threading.Lock()
         self._ask = itertools.count(1)      # numbers each poll's start and each time a file is seen gone, in order
-        self._gone: dict = {}               # {rel: the number of the last time the hub saw its file gone}
+        self._gone: dict = {}               # {real path: the number of the last time the hub saw its file gone}
         self._gone_lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = None
@@ -389,8 +389,8 @@ class TheList:
             with self._gone_lock:
                 # A file seen gone after this poll began may have been read before it went: its row waits for the
                 # next poll, which reads what is there now (#34).
-                rows = [r for r in rows if self._gone.get(r.sheaf.rel, 0) < started]
-                self._gone = {rel: n for rel, n in self._gone.items() if n > started}
+                rows = [r for r in rows if self._gone.get(os.path.realpath(root.path / r.sheaf.rel), 0) < started]
+                self._gone = {f: n for f, n in self._gone.items() if n > started}
                 self._snap = Snapshot(rows, entries, self.hub.clock())
 
     def start(self):
@@ -416,18 +416,19 @@ class TheList:
         root = self.root()
         if a.root != root.name:
             return
-        snap = self._snap
-        for row in snap.rows:
-            if row.sheaf.rel == a.rel:
-                try:
-                    sheaf = read_sheaf(a.rel, (root.path / a.rel).read_text(encoding="utf-8"))
-                except (OSError, UnicodeDecodeError):
-                    sheaf = row.sheaf
-                if not _same_issue(sheaf.issue, row.sheaf.issue):
-                    _drop(snap, row)
-                    return
-                row.sheaf = sheaf
-                self._answered[a.rel] = row.record.updated
+        with self._gone_lock:           # as `assignees` drops a row, so neither write undoes the other
+            snap = self._snap
+            for row in snap.rows:
+                if row.sheaf.rel == a.rel:
+                    try:
+                        sheaf = read_sheaf(a.rel, (root.path / a.rel).read_text(encoding="utf-8"))
+                    except (OSError, UnicodeDecodeError):
+                        sheaf = row.sheaf
+                    if not _same_issue(sheaf.issue, row.sheaf.issue):
+                        _drop(snap, row)
+                        return
+                    row.sheaf = sheaf
+                    self._answered[a.rel] = row.record.updated
 
     # ── the page ────────────────────────────────────────────────────────────
     def assignees(self, address: str, issue: str):
@@ -445,10 +446,12 @@ class TheList:
             if not os.path.lexists(root.path / a.rel):
                 # Kept, the row would judge a sheaf a door create makes at its address before the next poll, and
                 # tell which issue the one that went named (#34).
-                self._gone[a.rel] = next(self._ask)
+                # By its real path, so the row of a link to it goes too.
+                gone = os.path.realpath(root.path / a.rel)
+                self._gone[gone] = next(self._ask)
                 snap = self._snap
                 for row in snap.rows:
-                    if row.sheaf.rel == a.rel:
+                    if os.path.realpath(root.path / row.sheaf.rel) == gone:
                         _drop(snap, row)
                 return None
         for row in self._snap.rows:
@@ -475,7 +478,7 @@ class TheList:
             address = f"{root.name}/{row.sheaf.rel}"
             if not self.hub.visible(member, address):               # the file now, not the poll
                 continue
-            row = self._now(root, row)                              # and what it says now
+            row = self._now(root, row, member, address)             # and what it says now
             if row is None:
                 continue
             owners = self.hub.owners(address, members)              # and its owners, as visible has them
@@ -502,19 +505,24 @@ class TheList:
                 f'<nav class="list-filters">{filters}</nav><p class="list-error" hidden></p><main>{body}</main>'
                 f'<script nonce="{nonce}">{SCRIPT}</script></body></html>')
 
-    def _now(self, root, row: Row):
+    def _now(self, root, row: Row, member, address: str):
         """`row` with the sheaf its file holds now when that file is not the one the poll read (another file
         made at its address, or one a link now points to, or a change), so the page never shows what a sheaf
-        that went said; None when it now names another issue, or cannot be read."""
+        that went said; None when it now names another issue, cannot be read, or is no longer `member`'s to
+        see: it may have changed since `visible` judged it."""
         f = root.path / row.sheaf.rel
         try:
             key = _stat_key(f.stat())
             if key == row.read:
                 return row
-            sheaf = read_sheaf(row.sheaf.rel, f.read_text(encoding="utf-8"))
+            text = f.read_text(encoding="utf-8")
+            sheaf = read_sheaf(row.sheaf.rel, text)
         except Exception:                   # unreadable, or one the reader trips on, as the poll leaves it out
             return None
         if not _same_issue(sheaf.issue, row.sheaf.issue):
+            return None
+        fm = visibility.front_matter(text)
+        if not visibility.visible_to(fm, member, self.hub.assignees(address, fm)):
             return None
         return Row(sheaf, row.record, row.group, key)
 

@@ -374,14 +374,15 @@ def test_a_list_table_the_hub_cannot_use_stops_its_start(proxy_folder, extra, wo
     assert words in rows[0]["reason"] and words in err
 
 
-def test_a_stop_dir_inside_a_members_root_stops_the_start(proxy_folder):
+@pytest.mark.parametrize("key", ["stop_dir", "tell_dir", "sessions_dir"])
+def test_a_box_folder_inside_a_members_root_stops_the_start(proxy_folder, key):
     from test_proxy_start import refused_start
     configure_list(f"{proxy_folder}/hub.sock", "/srv/nell",
-                   'root = "/srv/list"\nrepo = "a/b"\nproject = 1\ntoken_file = "/run/t"\nstop_dir = "/srv/nell/stop"\n')
+                   f'root = "/srv/list"\nrepo = "a/b"\nproject = 1\ntoken_file = "/run/t"\n{key} = "/srv/nell/box"\n')
     code, err, rows = refused_start()
     assert code == 1
     assert [r["kind"] for r in rows] == ["list-config"], rows
-    assert "inside a root of Nell" in rows[0]["reason"]
+    assert f"'{key}' of [list]" in rows[0]["reason"] and "inside a root of Nell" in rows[0]["reason"]
 
 
 def test_the_hub_polls_the_record_from_its_start_and_serves_the_list_on_its_proxy_socket(

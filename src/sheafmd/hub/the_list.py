@@ -308,6 +308,11 @@ class Snapshot:
     polled: float | None = None
 
 
+def _drop(snap: Snapshot, row: Row):
+    """Take `row` off `snap` as a new list: a page reading the old one keeps it."""
+    snap.rows = [r for r in snap.rows if r is not row]
+
+
 class TheList:
     def __init__(self, hub, cfg: ListConfig):
         self.hub, self.cfg = hub, cfg
@@ -400,7 +405,7 @@ class TheList:
                 except (OSError, UnicodeDecodeError):
                     sheaf = row.sheaf
                 if not _same_issue(sheaf.issue, row.sheaf.issue):
-                    snap.rows = [r for r in snap.rows if r is not row]     # a new list: a page reading the old one keeps it
+                    _drop(snap, row)
                     return
                 row.sheaf = sheaf
                 self._answered[a.rel] = row.record.updated
@@ -409,7 +414,8 @@ class TheList:
     def assignees(self, address: str, issue: str):
         """The record's assignees of the issue of the sheaf at `address`, from the last poll, when `issue`, what
         its file names now, is still the issue of its row; None when the list does not know the sheaf (no row:
-        another root, no issue, not polled yet, an issue changed since the poll, or a file gone since)."""
+        another root, no issue, not polled yet, an issue changed since the poll, or a file gone since). The row
+        of a file gone since is dropped then, until the next poll."""
         a = roots_mod.Address.parse(address)
         root = self.root()
         if root is None or a.root != root.name:
@@ -418,9 +424,9 @@ class TheList:
         for row in snap.rows:
             if row.sheaf.rel == a.rel:
                 if not os.path.lexists(root.path / a.rel):
-                    # The row of a sheaf that went would judge one made at its address before the next poll,
-                    # and tell which issue the one that went named (#34).
-                    snap.rows = [r for r in snap.rows if r is not row]     # a new list: a page reading the old one keeps it
+                    # Kept, it would judge a sheaf a door create makes at its address before the next poll, and
+                    # tell which issue the one that went named (#34).
+                    _drop(snap, row)
                     return None
                 return tuple(row.record.assignees) if _same_issue(row.sheaf.issue, issue_of(issue)) else None
         return None

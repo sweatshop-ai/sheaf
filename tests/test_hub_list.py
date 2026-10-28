@@ -779,7 +779,7 @@ def test_an_issue_written_in_another_case_is_still_the_issue_the_list_polled(box
     assert box.get(address, member=DORA).status == 404
 
 
-def bind(box, sheaves):
+def bind_tokens(box, sheaves):
     """Nell's and Dora's door tokens, `nell-door` and `dora-door`, bound to them (9.11)."""
     box.hub.proxy = proxy.parse({"origin": FRONT, "socket": "/run/sheaf-proxy/hub.sock",
                                  "proxy_user": pwd.getpwuid(os.getuid()).pw_name,
@@ -802,7 +802,7 @@ def test_a_door_update_of_a_sheaf_its_assignee_alone_owns_keeps_it_theirs_once_t
         box, browser, sheaves, github):
     """#33: the record names the owner only while the list polls the issue; the `owner` the write gives
     it is the one after."""
-    tokens = bind(box, sheaves)
+    tokens = bind_tokens(box, sheaves)
     joey = hidden_joey(sheaves)
     box.hub.the_list.poll()
     root = box.hub.roots.lookup(joey).name
@@ -823,7 +823,7 @@ def test_a_door_create_where_a_hidden_sheaf_was_deleted_answers_the_same_whateve
         box, browser, sheaves, issue):
     """#34: until the next poll the list still has the deleted sheaf's row; neither the create's answer nor
     a read after it tells which issue that sheaf named."""
-    tokens = bind(box, sheaves)
+    tokens = bind_tokens(box, sheaves)
     joey = hidden_joey(sheaves)
     box.hub.the_list.poll()
     root = box.hub.roots.lookup(joey).name

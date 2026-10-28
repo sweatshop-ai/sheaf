@@ -357,3 +357,10 @@ def test_the_owners_share_nested_in_a_list_opens_the_sheaf_too(team, work):
     put(team, work, DOC, PRIVATE.replace("- [ ] Share", "- Before you share\n  - [ ] Share"))
     assert tick(team, work, DOC, "Share", THIERRY).status == 200
     assert team.get(f"/work/{DOC}", member=HANS).status == 200
+
+
+def test_a_door_update_cannot_give_an_owner_to_an_owner_only_sheaf_that_had_none(team, browser, work):
+    put(team, work, DOC, PRIVATE.replace("owner: thierry\n", ""))
+    is_error, got = door_update(browser, work, DOC, lambda t: t.replace("assistant: James", "assistant: James\nowner: hans"))
+    assert not is_error, got
+    assert team.get(f"/work/{DOC}", member=HANS).status == 404

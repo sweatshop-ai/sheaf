@@ -637,7 +637,7 @@ class Door:
         # Every create, open or not, tells the list its address has no file now: the row of a sheaf that went
         # there would judge the new one (its owner on a later update, its row on the page) until the next poll (#34).
         self.hub.assignees(address, {})
-        text = self._owned(self._visible(text, None), address, caller)
+        text = self._door_text(text, None, address, caller)
         self._check_size(text)      # again: the owner `_owned` gave it is part of the page
         try:
             create_file(top, rel, text)
@@ -665,7 +665,7 @@ class Door:
                 raise Stale(f"{address} has changed since that hash was read; read it again, make the "
                             "change on that text and send it with its hash.")
             _check_comments(now_text, text)
-            written[0] = self._owned(self._visible(text, now_text), address, caller)
+            written[0] = self._door_text(text, now_text, address, caller)
             self._check_size(written[0])
             return written[0]
         try:
@@ -678,6 +678,16 @@ class Door:
             self.hub.committed(address, by=caller.display, what="update")
         return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text),
                 "changed": before != text}
+
+    def _door_text(self, text: str, old: str | None, address: str, caller: Caller) -> str:
+        """The text a door write puts on disk: `_visible`'s, with the `owner` `_owned` gives it. `_owned` rewrites
+        the front matter with `set_keys`, which can join a line the reader gave another key to `sessions`, so
+        `sessions` is judged again on what it gives (#36)."""
+        seen = self._visible(text, old)
+        out = self._owned(seen, address, caller)
+        if out != seen and visibility.front_matter(out).get("sessions", "") != visibility.front_matter(seen).get("sessions", ""):
+            raise _sessions_changed(old)
+        return out
 
     def _visible(self, text: str, old: str | None) -> str:
         """In proxy mode, the text a door write puts on disk by the rule of visibility (9.11): the caller is
@@ -692,8 +702,7 @@ class Door:
         out = visibility.for_door(text, old)
         was = visibility.front_matter(old).get("sessions", "") if old is not None else ""
         if visibility.front_matter(text).get("sessions", "") != was or visibility.front_matter(out).get("sessions", "") != was:
-            raise ToolError("The text changes `sessions`, which only the hub writes; send it as `read` gave it"
-                            + (" (a new page lists none)." if old is None else "."), "sessions")
+            raise _sessions_changed(old)
         return out
 
     def _owned(self, text: str, address: str, caller: Caller) -> str:
@@ -730,6 +739,12 @@ class Door:
                             "open it: name a member's `short` as `owner`, or bind the token to a member.",
                             "no owner")
         return text
+
+
+def _sessions_changed(old: str | None) -> ToolError:
+    """The answer to a door write whose text, as written, changes `sessions` (9.12); `old` is None for a create."""
+    return ToolError("The text changes `sessions`, which only the hub writes; send it as `read` gave it"
+                     + (" (a new page lists none)." if old is None else "."), "sessions")
 
 
 def _not_made(address: str, e: OSError) -> ToolError:

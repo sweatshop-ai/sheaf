@@ -219,8 +219,8 @@ def for_door(text_: str, old: str | None) -> str:
     kept = text(was, "shared") if text(was, "shared") and mine <= set(sources(was)) else None
     want = "owner" if closed or (mine and not kept) else "project"
     values = {"visibility": want, "shared": kept if want == "project" else None}
-    if owner:
-        values["owner"] = owner
+    if old is not None:
+        values["owner"] = owner or None     # an update neither gives nor changes the owner
     if want == "project" and not ({"visibility", "sources", "shared"} & fm.keys()) \
             and text(fm, "owner") == owner:
         return text_

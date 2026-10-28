@@ -274,9 +274,10 @@ class Hub:
         out = {"sessions": st.sessions, "live": st.live}
         if st.box:                  # the fork fetches a transcript of the box: none there, nothing to fork
             out["fork"] = f"tiroir work {self.proxy.origin}{roots_mod.url_path(e.address)}"
-        if member.shell and st.cfg.attach:
-            client, project = roots_mod.Address.parse(e.address).rel.split("/")[:2]
-            out["attach"] = st.cfg.attach.replace("{window}", f"{client}-{project}")
+        window = "-".join(roots_mod.Address.parse(e.address).rel.split("/")[:2])
+        # Two shells and tmux read the command: a name with another character (`.`, `:`, a space) is left out.
+        if member.shell and st.cfg.attach and re.fullmatch(r"[A-Za-z0-9_-]+", window):
+            out["attach"] = st.cfg.attach.replace("{window}", window)
         return out
 
     # ── the agent of a document ──────────────────────────────────────────────

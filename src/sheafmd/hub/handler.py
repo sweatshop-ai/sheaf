@@ -713,6 +713,10 @@ class Handler:
                 fm = visibility.front_matter(text)
                 if not visibility.visible_to(fm, m, assignees):
                     raise Refuse(404, "no such document")
+                # The page cannot edit a front matter (5): paragraphs of `---` would write one, and its
+                # `sessions` would serve any transcript (9.12), its `visibility` open the sheaf.
+                if visibility.front_matter(new) != fm:
+                    raise EditError("A save cannot change the front matter: change it in the file.")
             words = visibility.newly_ticked(toggled)
             if "Share" in words:
                 if m is not None and not visibility.owner_of(fm, [m], assignees):

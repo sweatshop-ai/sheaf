@@ -107,7 +107,8 @@ def with_session(text: str, line: str, id: str) -> str:
     end = _end(lines)
     if end < 0:
         cr = "\r" if raw[0].endswith("\r") else ""
-        return "\n".join(["---" + cr, "sessions:" + cr, f"  - {line}" + cr, "---" + cr]) + "\n" + text
+        bom = "\ufeff" if text.startswith("\ufeff") else ""      # stays first, or the heading reads as a paragraph
+        return bom + "\n".join(["---" + cr, "sessions:" + cr, f"  - {line}" + cr, "---" + cr]) + "\n" + text[len(bom):]
     keys = [n for n in range(1, end) if _KEY_LINE_RE.fullmatch(lines[n])]
     if len(keys) > 1:
         raise NotRewritten("sessions is written twice in the front matter: keep one list")

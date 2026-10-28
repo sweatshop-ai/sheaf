@@ -330,8 +330,10 @@ class TheList:
                 self.hub.record("list-poll-failed", None, root=root.name, error=str(e))
             rows = [Row(s, self._records[s.issue], "/".join(s.rel.split("/")[:2]))
                     for s in sheaves if s.issue in self._records]
-            # A ticked sheaf waits on nobody until the record routine has moved its issue.
-            moved = {r.sheaf.rel for r in rows if self._answered.get(r.sheaf.rel, r.record.updated) != r.record.updated}
+            # A ticked sheaf waits on nobody until the record routine has moved its issue: a new change of the
+            # issue, or a Status other than waiting (moving a Project's Status leaves the issue's change as it was).
+            moved = {r.sheaf.rel for r in rows
+                     if r.record.status != "waiting" or self._answered.get(r.sheaf.rel, r.record.updated) != r.record.updated}
             for rel in moved | (set(self._answered) - {r.sheaf.rel for r in rows}):
                 self._answered.pop(rel, None)
             self._snap = Snapshot(rows, entries, self.hub.clock())

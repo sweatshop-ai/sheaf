@@ -385,17 +385,24 @@ class TheList:
 
     def ticked(self, address: str):
         """A member ticked an action of the sheaf at `address`: its row leaves "Waiting on you" now, and
-        shows its other actions, rather than at the next poll that sees the record move."""
+        shows its other actions, rather than at the next poll that sees the record move. A sheaf whose file
+        now names another issue, or none, leaves the list until the next poll: its row's record is not that
+        issue's, so its assignees are nobody's (9.11)."""
         a = roots_mod.Address.parse(address)
         root = self.root()
         if a.root != root.name:
             return
-        for row in self._snap.rows:
+        snap = self._snap
+        for row in snap.rows:
             if row.sheaf.rel == a.rel:
                 try:
-                    row.sheaf = read_sheaf(a.rel, (root.path / a.rel).read_text(encoding="utf-8"))
+                    sheaf = read_sheaf(a.rel, (root.path / a.rel).read_text(encoding="utf-8"))
                 except (OSError, UnicodeDecodeError):
-                    pass
+                    sheaf = row.sheaf
+                if not _same_issue(sheaf.issue, row.sheaf.issue):
+                    snap.rows = [r for r in snap.rows if r is not row]     # a new list: a page reading the old one keeps it
+                    return
+                row.sheaf = sheaf
                 self._answered[a.rel] = row.record.updated
 
     # ── the page ────────────────────────────────────────────────────────────

@@ -520,7 +520,7 @@ def test_the_meta_block_of_a_box_sheaf_carries_the_fork_command_the_sessions_and
 
 def test_a_member_with_a_shell_gets_the_attach_command_for_the_projects_window(team, box):
     assert meta(team, THIERRY)["work"]["attach"] == \
-        "ssh tiroir-tt -t tmux attach -t james \; select-window -t thinkingtoo-tiroir"
+        r"ssh tiroir-tt -t tmux attach -t james \; select-window -t thinkingtoo-tiroir"
 
 
 def test_a_sheaf_live_on_a_laptop_says_so_and_can_nothing(team, box, work):
@@ -547,3 +547,29 @@ def test_a_page_that_is_not_a_sheaf_of_the_list_has_no_work(team, box, work):
     put(team, work, "thinkingtoo/notes.md", SHEAF)
     assert "work" not in meta(team, doc="thinkingtoo/notes.md")
     assert "work" not in meta(team, doc="plan.md")
+
+
+# ── the /_/doc answer (10.5): the same work and can as the meta block ────────
+
+def doc_answer(team, member=HANS, doc=ADDRESS):
+    got = team.get(f"/_/doc?doc={doc}", member=member)
+    assert got.status == 200, got.text
+    return got.json()
+
+
+def test_the_doc_answer_of_a_box_sheaf_keeps_box_ask_tell_and_the_work(team, box):
+    j = doc_answer(team)
+    assert j["capabilities"] == ["box-ask", "box-tell"]
+    assert j["work"] == meta(team)["work"]
+
+
+def test_the_doc_answer_follows_a_fork_to_a_laptop(team, box, work):
+    put(team, work, DOC, SHEAF.replace("host: tiroir-tt, member: james, date: 2026-10-28T05:12:03Z",
+                                       "host: thierry-laptop, member: thierry, date: 2026-10-28T05:12:03Z"))
+    j = doc_answer(team)
+    assert j["capabilities"] == [] and j["work"]["live"] == "laptop"
+
+
+def test_the_doc_answer_of_a_page_that_is_not_a_sheaf_has_no_work(team, box):
+    j = doc_answer(team, doc="work/plan.md")
+    assert j["capabilities"] == [] and "work" not in j

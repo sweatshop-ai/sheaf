@@ -252,13 +252,19 @@ class Hub:
                 meta.update(me=member.name, seen=self.member_seen.get(member.id, e.address),
                             agent=None, can=[], lines=proxy_mod.member_lines(), proxy=True,
                             member=member.id)
-                work = self.work_meta(e, member)
+                work, meta["can"] = self.member_work(e, member)
                 if work is not None:
                     meta["work"] = work
-                    if work["live"] == "box" and self.the_list.cfg.tell_dir is not None:
-                        meta["can"] = ["box-ask", "box-tell"]
             html = (html[:m.start(2)] + json.dumps(meta).replace("<", "\\u003c") + html[m.end(2):])
         return html
+
+    def member_work(self, e: Entry, member):
+        """The `work` of a member's page (None when it is not a sheaf of the list's root) and its `can`:
+        box-ask and box-tell while the live session runs on the box and `[list]` names a `tell_dir` (10.1).
+        The meta block and every /_/doc answer carry both, so a fork seen by the page changes what it offers."""
+        work = self.work_meta(e, member)
+        box = work is not None and work["live"] == "box" and self.the_list.cfg.tell_dir is not None
+        return work, ["box-ask", "box-tell"] if box else []
 
     def work_meta(self, e: Entry, member) -> dict | None:
         """What the page's Work on this shows a member (9.12, 10.1): the command that forks the sheaf's session

@@ -822,7 +822,37 @@ class Handler:
                           "kind": kind},
                          "no tell_dir in [list]")
         self.hub.record("tell-dropped", e.address, what=kind, project=project, by=by, drop=drop)
+        if drop == "written":
+            self._record_james(req, e, project)
         return drop
+
+    def _record_james(self, req: Req, e, project: str):
+        """James's newest session of the project, as the hub finds it in the copy of his transcripts, becomes
+        the sheaf's live session, the first of `sessions`. The hub is its only writer (9.12): never a door
+        write or a save, never a name a request carries. Nothing when it is the live one already."""
+        cfg = self.hub.the_list.cfg
+        sid = work.james_newest(cfg, project)
+        live = work.sessions(visibility.front_matter(e.live.current()[1]))
+        if sid is None or (live and live[0]["id"] == sid):
+            return
+        line = work.item(sid, cfg.box, "james", time.strftime(work.ISO, time.gmtime()))
+        moved = []
+
+        def change(text):
+            items = work.sessions(visibility.front_matter(text))
+            if items and items[0]["id"] == sid:
+                return text
+            moved.append(sid)
+            return work.with_session(text, line, sid)
+        try:
+            e.live.rewrite(change)
+        except work.NotRewritten as ex:
+            self.hub.record("session-not-recorded", e.address, transcript=sid, reason=str(ex))
+            return
+        if moved:
+            self.hub.index.touch(e.address)
+            self.hub.committed(e.address, req.member, "session")
+            self.hub.record("session-recorded", e.address, transcript=sid, by=work.member_word(req.member))
 
     def _sessions(self, req: Req) -> Response:
         """A member forked one of the sheaf's sessions on their machine (9.12): the fork becomes the sheaf's live

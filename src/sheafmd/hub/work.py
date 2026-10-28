@@ -6,11 +6,13 @@ file Ask and Tell drop for James's window.
     sessions(fm)                    the items of the front matter's `sessions` that parse, as written (newest first)
     with_session(text, line, id)    the text with `line` as the first of `sessions`, the rest as written
     open_transcript(folder, id)     the bytes of `<folder>/<one folder>/<id>.jsonl`, or None
+    james_newest(cfg, project)      the id of James's newest session of `project`, from the copy, or None
     drop(folder, project, data, missing)  a file in `folder` for the box's supervisor: "written" or why not
 
 A session item is one YAML flow mapping on one line, `{id: <uuid>, host: <host>, member: <who>, date: <UTC>}`.
-An item that does not match that exactly is skipped, never guessed at: the front matter is written by hand
-and by James, and the hub serves a file by what it names.
+An item that does not match that exactly is skipped, never guessed at: the hub serves a file by what it names.
+Only the hub writes `sessions`: a fork reported by the signed-in member, and James's session, which the hub
+finds itself when it drops an Ask or a Tell for him. A door write or a save that would change it is refused.
 """
 import json
 import os
@@ -54,6 +56,7 @@ class State:
     sessions: list              # the items of `sessions` as written, which is newest first
     live: str                   # "box" when the first runs on `[list]`'s box, "laptop" on another host, "" none
     cfg: object                 # the list's the_list.ListConfig
+    james: bool = False         # the sheaf's `assistant` is James
 
     @property
     def box(self) -> list:
@@ -62,9 +65,11 @@ class State:
 
     @property
     def can(self) -> list:
-        """The page's `can` (10.1): Ask and Tell go to James's window while the live session is on the box
-        and `[list]` names the folder to drop them in."""
-        return ["box-ask", "box-tell"] if self.live == "box" and self.cfg.tell_dir is not None else []
+        """The page's `can` (10.1): Ask and Tell go to James's window while the live session is on the box,
+        or on a sheaf of James with no session yet (the hub records his when it finds it), and `[list]`
+        names the box and the folder to drop them in."""
+        to_james = self.live == "box" or (self.live == "" and self.james)
+        return ["box-ask", "box-tell"] if to_james and self.cfg.box and self.cfg.tell_dir is not None else []
 
 
 def is_sheaf(hub, address: str) -> bool:
@@ -79,11 +84,13 @@ def state(hub, address: str, text: str) -> State | None:
     if not is_sheaf(hub, address):
         return None
     cfg = hub.the_list.cfg
-    items = sessions(front_matter(text))
+    fm = front_matter(text)
+    items = sessions(fm)
     live = ""
     if items:
         live = "box" if cfg.box and items[0]["host"] == cfg.box else "laptop"
-    return State(items, live, cfg)
+    assistant = fm.get("assistant", "")
+    return State(items, live, cfg, isinstance(assistant, str) and assistant.casefold() == "james")
 
 
 def member_word(member) -> str:
@@ -161,6 +168,51 @@ def open_transcript(folder: Path, id: str) -> bytes | None:
             return b"".join(chunks)
         finally:
             os.close(fd)
+    return None
+
+
+def james_newest(cfg, project: str) -> str | None:
+    """The id of James's newest session of `project` (`<client>/<project>`) in the copy of his transcripts:
+    in the folder Claude names after `<work_dir>/<project>`, the newest `<id>.jsonl`, a regular file and no
+    link, whose first `cwd` is that very path and whose `sessionId` is its name. Claude's folder name is
+    lossy (`a-b/c` and `a/b-c` share one), so the name alone never decides. None when there is none."""
+    if cfg.sessions_dir is None or cfg.work_dir is None:
+        return None
+    cwd = f"{cfg.work_dir}/{project}"
+    folder = os.path.join(os.path.realpath(cfg.sessions_dir), re.sub(r"[^A-Za-z0-9]", "-", cwd))
+    try:
+        found = [(e.stat(follow_symlinks=False).st_mtime_ns, e.name[:-6]) for e in os.scandir(folder)
+                 if e.name.endswith(".jsonl") and UUID_RE.fullmatch(e.name[:-6]) and e.is_file(follow_symlinks=False)]
+    except OSError:
+        return None
+    for _, id in sorted(found, reverse=True):
+        if _first_cwd(os.path.join(folder, f"{id}.jsonl")) == (cwd, id):
+            return id
+    return None
+
+
+def _first_cwd(path: str, most: int = 1 << 20):
+    """(cwd, sessionId) of the first line of the transcript at `path` that names a cwd, within its first
+    `most` bytes; None when it is not a regular file or names none."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        head = os.read(fd, most)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+    for line in head.split(b"\n"):
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and "cwd" in row:
+            return row.get("cwd"), row.get("sessionId")
     return None
 
 

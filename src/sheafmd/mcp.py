@@ -608,6 +608,12 @@ class Door:
         its owner's alone. With no member to hide a page from, the text as sent."""
         if getattr(self.hub, "proxy", None) is None:
             return text
+        # `sessions` is the hub's (9.12): an item of the box serves that transcript to every member of the
+        # sheaf, and a door token is held by services that read untrusted text.
+        was = visibility.front_matter(old).get("sessions", "") if old is not None else ""
+        if visibility.front_matter(text).get("sessions", "") != was:
+            raise ToolError("The text changes `sessions`, which only the hub writes; send it as `read` gave it"
+                            + (" (a new page lists none)." if old is None else "."), "sessions")
         return visibility.for_door(text, old)
 
 

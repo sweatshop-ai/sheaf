@@ -254,7 +254,7 @@ FORK = "7e8f9a0b-1c2d-4e3f-8a4b-5c6d7e8f9a0b"
 
 def sessions_of(work):
     from sheafmd.hub.visibility import front_matter
-    return list(front_matter((work / DOC).read_text(encoding="utf-8"))["sessions"])
+    return list(front_matter((work / DOC).read_text(encoding="utf-8")).get("sessions", ()))
 
 
 def test_a_fork_is_the_first_session_named_by_the_signed_in_member(team, box, work):
@@ -504,11 +504,6 @@ def test_without_a_tell_dir_or_outside_the_list_ask_stays_refused(team, box, wor
     assert hub_rows("tell-dropped") == []
 
 
-def test_a_sheaf_with_no_session_keeps_the_400(team, box, work):
-    put(team, work, DOC, SHEAF.split("sessions:\n")[0] + "---\n# T\n\nA quote from the contract.\n")
-    assert comment(team, work, "tell").json()["error"] == proxy.PROXY_LINE
-
-
 def test_ask_and_tell_both_are_refused_on_the_box(team, box, work):
     got = comment(team, work, "ask", tell=True)
     assert got.status == 400 and "not both" in got.json()["error"] and drops(box) == []
@@ -712,3 +707,166 @@ def test_a_fork_on_a_file_with_a_bom_keeps_the_bom_first():
 def test_a_window_name_tmux_or_a_shell_would_read_otherwise_gets_no_attach(team, box, work):
     put(team, work, "thinkingtoo/site.v2/2026-10-28-a.md", SHEAF)      # tmux reads `.` as a pane
     assert "attach" not in meta(team, THIERRY, doc="thinkingtoo/site.v2/2026-10-28-a.md")["work"]
+
+
+# ── `sessions` is the hub's (9.12): no door write and no save sets it ─────────
+@pytest.fixture
+def james_token():
+    from sheafmd.hub.state import Tokens
+    return Tokens().add("james", write=True)
+
+
+def door(browser, token, tool, text, doc=ADDRESS):
+    """An assistant's door write through the hub: `update` of the text it read, or `create`."""
+    from helpers import call
+    if tool == "create":
+        return call(browser, "create", token=token, doc=doc, text=text)
+    is_error, got = call(browser, "read", token=token, doc=doc)
+    assert not is_error, got
+    return call(browser, "update", token=token, doc=doc, text=text(got["text"]), expected_hash=got["hash"])
+
+
+A_BOX_ITEM = f"  - {{id: {FORK}, host: tiroir-tt, member: james, date: 2026-10-28T06:00:00Z}}\n"
+
+
+@pytest.mark.parametrize("change", [
+    lambda t: t.replace("sessions:\n", "sessions:\n" + A_BOX_ITEM),                      # adds a box item
+    lambda t: t.replace(f"{OLDER}, host: tiroir-tt", f"{FORK}, host: tiroir-tt"),         # changes an id
+    lambda t: "".join(line for line in t.splitlines(True) if LAPTOP not in line),         # drops an item
+    lambda t: t.replace("sessions:\n", "").replace("  - {", "# - {"),                     # drops the key
+], ids=["adds", "changes", "drops-an-item", "drops-the-key"])
+def test_a_door_update_that_changes_sessions_is_refused_and_writes_nothing(team, box, browser, work, change, james_token):
+    (box["sessions"] / FOLDER / f"{FORK}.jsonl").write_bytes(b'{"another":"project"}\n')
+    before = (work / DOC).read_text(encoding="utf-8")
+    is_error, said = door(browser, james_token, "update", lambda t: change(t) + "\nMore.\n")
+    assert is_error and "sessions" in said
+    assert (work / DOC).read_text(encoding="utf-8") == before
+    assert download(team, id=FORK).status == 404
+
+
+def test_a_door_update_that_keeps_sessions_as_read_is_written(team, box, browser, work, james_token):
+    is_error, got = door(browser, james_token, "update", lambda t: t + "\nMore.\n")
+    assert not is_error, got
+    assert (work / DOC).read_text(encoding="utf-8").endswith("More.\n")
+    assert LIVE in sessions_of(work)[0]
+
+
+def test_a_door_create_cannot_list_a_session_but_may_write_an_empty_list(team, box, browser, work, james_token):
+    head = "---\nclient: thinkingtoo\nproject: tiroir\nassistant: James\n"
+    new = "work/thinkingtoo/tiroir/new.md"
+    is_error, said = door(browser, james_token, "create", head + "sessions:\n" + A_BOX_ITEM + "---\n# New\n", doc=new)
+    assert is_error and "sessions" in said and not (work / "thinkingtoo/tiroir/new.md").exists()
+    is_error, got = door(browser, james_token, "create", head + "sessions: []\n---\n# New\n", doc=new)
+    assert not is_error, got
+
+
+# ── the hub records James's session from its own Ask and Tell (9.12) ─────────
+NEW = "abcdef01-2345-4678-89ab-cdef01234567"
+CWD = "/home/james/work/thinkingtoo/tiroir"
+
+
+def james_wrote(box, id, cwd=CWD, folder=FOLDER, at=None):
+    """A transcript of James's in the box's copy, newer than the others unless `at` says when."""
+    f = box["sessions"] / folder / f"{id}.jsonl"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps({"type": "summary", "summary": "x"}) + "\n"
+                 + json.dumps({"type": "user", "cwd": cwd, "sessionId": id, "message": "hi"}) + "\n", encoding="utf-8")
+    at = at or 2_000_000_000
+    os.utime(f, (at, at))
+    return f
+
+
+@pytest.fixture
+def at_work(team, box):
+    """The box's list knows the folder James works in: `<work_dir>/<client>/<project>`."""
+    cfg = team.hub.the_list.cfg
+    team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{**cfg.__dict__,
+                                                                         "work_dir": "/home/james/work"}))
+    return box
+
+
+@pytest.mark.parametrize("kind", ["ask", "tell"])
+def test_a_tell_records_james_newest_session_of_the_project_as_the_live_one(team, at_work, work, kind):
+    james_wrote(at_work, NEW)
+    got = comment(team, work, kind)
+    assert got.status == 200, got.text
+    first = sessions_of(work)[0]
+    assert first.startswith(f"{{id: {NEW}, host: tiroir-tt, member: james, date: 20") and first.endswith("Z}")
+    assert [s for s in sessions_of(work) if LIVE in s]          # the others stay, as written
+    row, = hub_rows("session-recorded")
+    assert (row["transcript"], row["by"]) == (NEW, "hans")
+    assert download(team).headers["X-Sheaf-Session"] == NEW
+
+
+def test_a_session_of_the_same_folder_name_from_another_path_is_not_recorded(team, at_work, work):
+    # Claude's folder name is lossy: /home/james/work/thinkingtoo-tiroir lands in the same folder.
+    james_wrote(at_work, NEW, cwd="/home/james/work/thinkingtoo-tiroir")
+    assert comment(team, work, "tell").status == 200
+    assert LIVE in sessions_of(work)[0] and not [s for s in sessions_of(work) if NEW in s]
+    assert hub_rows("session-recorded") == []
+
+
+def test_a_transcript_whose_session_id_is_not_its_name_is_not_recorded(team, at_work, work):
+    f = james_wrote(at_work, NEW)
+    f.write_text(f.read_text(encoding="utf-8").replace(f'"sessionId": "{NEW}"', f'"sessionId": "{OLDER}"'),
+                 encoding="utf-8")
+    os.utime(f, (2_000_000_000, 2_000_000_000))
+    assert comment(team, work, "tell").status == 200
+    assert LIVE in sessions_of(work)[0] and not [s for s in sessions_of(work) if NEW in s]
+
+
+def test_when_the_live_session_is_still_the_newest_the_file_keeps_its_front_matter(team, at_work, work):
+    james_wrote(at_work, LIVE)
+    head = (work / DOC).read_text(encoding="utf-8").split("---\n# ")[0]
+    assert comment(team, work, "tell").status == 200
+    assert (work / DOC).read_text(encoding="utf-8").split("---\n# ")[0] == head
+    assert hub_rows("session-recorded") == []
+
+
+def test_a_sheaf_of_james_with_no_session_yet_takes_ask_and_tell_and_records_his(team, at_work, work):
+    put(team, work, DOC, SHEAF.split("sessions:\n")[0] + "---\n# T\n\nA quote from the contract.\n")
+    assert meta(team)["can"] == ["box-ask", "box-tell"]
+    assert comment(team, work, "tell").status == 200 and len(drops(at_work)) == 1
+    assert sessions_of(work) == []                              # James has not opened the project yet
+    james_wrote(at_work, NEW)
+    assert comment(team, work, "tell").status == 200
+    assert NEW in sessions_of(work)[0]
+
+
+def test_a_sheaf_of_another_assistant_with_no_session_keeps_the_400(team, at_work, work):
+    put(team, work, DOC, SHEAF.split("sessions:\n")[0].replace("assistant: James", "assistant: Mistral")
+        + "---\n# T\n\nA quote from the contract.\n")
+    assert comment(team, work, "tell").json()["error"] == proxy.PROXY_LINE
+
+
+def test_without_work_dir_a_tell_drops_and_records_nothing(team, box, work):
+    james_wrote(box, NEW)
+    assert comment(team, work, "tell").status == 200 and len(drops(box)) == 1
+    assert LIVE in sessions_of(work)[0]
+
+
+def test_a_work_dir_that_is_not_absolute_stops_the_start(tmp_path):
+    with pytest.raises(the_list.ListError, match="'work_dir' must be an absolute path"):
+        listing(tmp_path, work_dir="home/james/work")
+    assert str(listing(tmp_path, work_dir="/home/james/work/").work_dir) == "/home/james/work"
+
+
+def test_the_recorded_session_is_committed_with_the_member_who_sent_the_tell(committing, tmp_path):
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.source import md_hash
+    repo, team = committing
+    sessions, tell = tmp_path / "copy", tmp_path / "tell"
+    tell.mkdir()
+    cfg = team.hub.the_list.cfg
+    team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{
+        **cfg.__dict__, "sessions_dir": sessions, "tell_dir": tell, "work_dir": the_list.Path("/home/james/work")}))
+    james_wrote({"sessions": sessions}, NEW)
+    text = (repo / DOC).read_text(encoding="utf-8")
+    i = next(i for i, b in enumerate(split_md_blocks(text)) if b.content.startswith("A quote"))
+    got = team.post("/_/comment", {"doc": f"sheaves/{DOC}", "op": "add", "hash": md_hash(text), "block": i,
+                                   "start": 0, "end": 6, "quote": "A quote", "body": "Go on", "tell": True}, member=HANS)
+    assert got.status == 200, got.text
+    team.hub.commits.settle()
+    log = git(repo, "log", "--format=%an|%s").splitlines()
+    assert f"Hans|session: {DOC}" in log, log
+    assert f"{{id: {NEW}, host: tiroir-tt, member: james, " in git(repo, "show", f"HEAD:{DOC}")

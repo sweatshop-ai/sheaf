@@ -610,11 +610,14 @@ class Door:
             return text
         # `sessions` is the hub's (9.12): an item of the box serves that transcript to every member of the
         # sheaf, and a door token is held by services that read untrusted text.
+        # Judged on the text written, after for_door's rewrite: a line it takes out can join a line the reader
+        # skipped to the list.
+        out = visibility.for_door(text, old)
         was = visibility.front_matter(old).get("sessions", "") if old is not None else ""
-        if visibility.front_matter(text).get("sessions", "") != was:
+        if visibility.front_matter(text).get("sessions", "") != was or visibility.front_matter(out).get("sessions", "") != was:
             raise ToolError("The text changes `sessions`, which only the hub writes; send it as `read` gave it"
                             + (" (a new page lists none)." if old is None else "."), "sessions")
-        return visibility.for_door(text, old)
+        return out
 
 
 def _named(doc: str) -> str:

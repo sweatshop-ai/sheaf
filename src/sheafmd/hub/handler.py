@@ -724,6 +724,9 @@ class Handler:
                 if visibility.effective(visibility.front_matter(new)) == "owner":
                     by = (m.short or m.name) if m is not None else self.hub.person
                     new = visibility.share(new, by, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+                    # Share rewrites the front matter: a line it takes out must not join a skipped one to `sessions`.
+                    if visibility.front_matter(new).get("sessions", "") != fm.get("sessions", ""):
+                        raise EditError("A save cannot change the front matter: change it in the file.")
             ticked.clear()
             ticked.update(words)
             return new

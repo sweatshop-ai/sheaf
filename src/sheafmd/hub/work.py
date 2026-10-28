@@ -106,6 +106,16 @@ def item(id: str, host: str, member: str, date: str) -> str:
 
 
 def with_session(text: str, line: str, id: str) -> str:
+    """`with_session`, refused (NotRewritten) unless the list read back is `line` and the items read before
+    but `id`: a rewrite never makes a session of a line the reader skipped (one under `sessions: []`)."""
+    new = _with_session(text, line, id)
+    want = sessions({"sessions": (line,)}) + [s for s in sessions(front_matter(text)) if s["id"] != id]
+    if sessions(front_matter(new)) != want:
+        raise NotRewritten("sessions has lines the hub does not read as its items: write it as one item per line")
+    return new
+
+
+def _with_session(text: str, line: str, id: str) -> str:
     """`text` with `line` (an `item`) as the first item of `sessions`. An item of the same `id` is taken out,
     so a session is listed once; every other line of the file stays as written, its line ending too. A text
     with no front matter gets one. NotRewritten for a list on the key's line or a key written twice."""
@@ -182,23 +192,34 @@ def james_newest(cfg, project: str) -> str | None:
     if cfg.sessions_dir is None or cfg.work_dir is None:
         return None
     cwd = f"{cfg.work_dir}/{project}"
-    folder = os.path.join(os.path.realpath(cfg.sessions_dir), re.sub(r"[^A-Za-z0-9]", "-", cwd))
     try:
-        found = [(e.stat(follow_symlinks=False).st_mtime_ns, e.name[:-6]) for e in os.scandir(folder)
-                 if e.name.endswith(".jsonl") and UUID_RE.fullmatch(e.name[:-6]) and e.is_file(follow_symlinks=False)]
+        # The project's folder opened without following a link, and every file opened from it: the folder
+        # is the copy's own, never one a link leads to.
+        top = os.open(cfg.sessions_dir, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            dfd = os.open(re.sub(r"[^A-Za-z0-9]", "-", cwd), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=top)
+        finally:
+            os.close(top)
     except OSError:
         return None
-    for _, id in sorted(found, reverse=True):
-        if _first_cwd(os.path.join(folder, f"{id}.jsonl")) == (cwd, id):
-            return id
+    try:
+        found = [(e.stat(follow_symlinks=False).st_mtime_ns, e.name[:-6]) for e in os.scandir(dfd)
+                 if e.name.endswith(".jsonl") and UUID_RE.fullmatch(e.name[:-6]) and e.is_file(follow_symlinks=False)]
+        for _, id in sorted(found, reverse=True):
+            if _first_cwd(dfd, f"{id}.jsonl") == (cwd, id):
+                return id
+    except OSError:
+        return None
+    finally:
+        os.close(dfd)
     return None
 
 
-def _first_cwd(path: str, most: int = 1 << 20):
-    """(cwd, sessionId) of the first line of the transcript at `path` that names a cwd, within its first
-    `most` bytes; None when it is not a regular file or names none."""
+def _first_cwd(dfd: int, name: str, most: int = 1 << 20):
+    """(cwd, sessionId) of the first line of the transcript `name` in the folder `dfd` that names a cwd,
+    within its first `most` bytes; None when it is not a regular file or names none."""
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
     except OSError:
         return None
     try:

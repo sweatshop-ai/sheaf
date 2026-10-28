@@ -907,3 +907,46 @@ def test_an_empty_list_keeps_the_comment_on_its_key_line():
     text = "---\nclient: a\nsessions: [] # newest first\n---\n# T\n"
     assert work_mod.with_session(text, "{NEW}", FORK) == \
         "---\nclient: a\nsessions: # newest first\n  - {NEW}\n---\n# T\n"
+
+
+# ── narrow check of round 3 (Codex, be22023): a rewrite cannot wake a line the reader skipped ────
+HIDDEN = f"  - {{id: {FORK}, host: tiroir-tt, member: james, date: 2026-10-28T06:00:00Z}}\n"
+
+
+def test_a_door_create_whose_rewrite_would_join_a_hidden_item_to_sessions_is_refused(team, box, browser, work,
+                                                                                    james_token):
+    (box["sessions"] / FOLDER / f"{FORK}.jsonl").write_bytes(b'{"another":"project"}\n')
+    new = "work/thinkingtoo/tiroir/new.md"
+    text = ("---\nclient: thinkingtoo\nproject: tiroir\nsources: [mail:t-1]\nsessions:\nshared: bogus\n"
+            + HIDDEN + "---\n# New\n")
+    is_error, said = door(browser, james_token, "create", text, doc=new)
+    assert is_error and "sessions" in said and not (work / "thinkingtoo/tiroir/new.md").exists()
+
+
+def test_a_fork_onto_an_empty_list_does_not_wake_a_line_under_it():
+    from sheafmd.hub import work as work_mod
+    with pytest.raises(work_mod.NotRewritten):
+        work_mod.with_session("---\nclient: a\nsessions: []\n" + HIDDEN + "---\n# T\n",
+                              f"{{id: {NEW}, host: hans-mac, member: hans, date: 2026-10-28T06:00:00Z}}", NEW)
+
+
+def test_a_project_folder_that_is_a_link_out_of_sessions_dir_is_not_looked_in(team, at_work, work, tmp_path):
+    away = tmp_path / "away"
+    james_wrote({"sessions": away}, NEW, folder="x")
+    (at_work["sessions"] / FOLDER).rename(tmp_path / "moved")
+    (at_work["sessions"] / FOLDER).symlink_to(away / "x")
+    assert comment(team, work, "tell").status == 200
+    assert not [s for s in sessions_of(work) if NEW in s]
+
+
+def test_a_share_whose_rewrite_would_join_a_hidden_item_to_sessions_writes_nothing(team, box, work):
+    from sheafmd.source import md_hash
+    (box["sessions"] / FOLDER / f"{FORK}.jsonl").write_bytes(b'{"another":"project"}\n')
+    text = ("---\nclient: thinkingtoo\nproject: tiroir\nowner: thierry\nsources: [library:doc-1]\nshared: old\n"
+            "sessions:\nshared: other\n" + HIDDEN + "---\n# T\n\n- [ ] Share\n")
+    put(team, work, DOC, text)
+    n = [a[0] for a in the_list.read_sheaf(DOC, text).actions].index("Share")
+    got = team.post("/_/save", {"doc": ADDRESS, "hash": md_hash(text), "edits": [the_list.tick_edit(text, n, "Share")]},
+                    member=THIERRY)
+    assert got.status != 200 and (work / DOC).read_text(encoding="utf-8") == text
+    assert download(team, id=FORK, member=THIERRY).status == 404

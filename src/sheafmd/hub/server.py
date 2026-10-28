@@ -23,7 +23,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .. import __version__, config, diagnostics, paths
 from ..source import STAMP_FORMAT
-from . import peer, proxy, sender, state
+from . import peer, proxy, sender, state, the_list
 from .client import STOPPING
 from .core import Hub
 from .events import KEEPALIVE, KEEPALIVE_SECONDS, PREAMBLE, frame
@@ -338,6 +338,8 @@ class HubServer:
         self.hub.stop_jobs()
         time.sleep(0.15)                  # let the streams write it before the server goes
         self.tell_socket.stop()
+        if self.hub.the_list is not None:
+            self.hub.the_list.stop()
         self.stopping.set()
         self.httpd.shutdown()
         self.httpd.server_close()         # shutdown leaves the port listening; close gives it back
@@ -348,6 +350,8 @@ class HubServer:
         self.closing.set()
         self.hub.stop_jobs()
         self.tell_socket.stop()
+        if self.hub.the_list is not None:
+            self.hub.the_list.stop()
         if not self.stopping.is_set():
             self.stopping.set()
             self.httpd.shutdown()
@@ -405,6 +409,12 @@ def _proxy_refused(e: "proxy.ProxyError") -> int:
     return 1
 
 
+def _list_refused(e: "the_list.ListError") -> int:
+    diagnostics.record("hub", "list-config", None, reason=str(e))
+    print(f"sheaf hub: {e}", file=sys.stderr)
+    return 1
+
+
 def run(started_by: str = "cli") -> int:
     """Run the hub in the foreground. Exit 0 after a clean stop, 1 when the port is taken or
     the hub crashed, 75 after an upgrade stop of a hub the service started (SPEC 8.4, 14.4).
@@ -449,6 +459,13 @@ def _run(started_by: str, signals: "sender.Signals") -> int:
             proxy.check_folder(cfg)
     except proxy.ProxyError as e:
         return _proxy_refused(e)
+    # The list (9.10) is checked with it, and needs it: the list is a member's page.
+    try:
+        list_cfg = the_list.load()
+        if list_cfg is not None and cfg is None:
+            raise the_list.ListError(f"[list] of {paths.config_file()} needs a [proxy] table: the list is a member's page")
+    except the_list.ListError as e:
+        return _list_refused(e)
     # From reading the key to holding the port, `sheaf rotate` on a machine with no hub waits: it
     # must not replace the key of a hub that is a moment from listening on the old one.
     with paths.key_lock():
@@ -469,6 +486,9 @@ def _run(started_by: str, signals: "sender.Signals") -> int:
             return _proxy_refused(e)
     hub = Hub(port=port, key=key, started_by=started_by, service=started_by == "service", proxy=cfg)
     srv = HubServer(hub, sock, proxy_sock)
+    if list_cfg is not None:
+        hub.the_list = the_list.TheList(hub, list_cfg)
+        hub.the_list.start()
     hub_cell["hub"] = hub
     if signals_before_the_hub:
         hub.request_stop("signal")

@@ -380,7 +380,7 @@ class Hub:
         f = root.path / at.rel
         try:
             st = f.stat()
-            key = (st.st_mtime_ns, st.st_size)
+            key = (st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
             hit = self._front.get(f)
             if hit is None or hit[0] != key:
                 hit = (key, visibility.front_matter(f.read_text(encoding="utf-8")))

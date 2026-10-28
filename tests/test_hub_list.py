@@ -233,6 +233,16 @@ def test_all_of_the_team_shows_the_projects_a_member_is_not_in(box):
         ("Reply to Joey about column L Approve James", "mail · @nell · #5 · 2 h")]
 
 
+def test_all_of_the_team_leaves_out_a_sheaf_with_a_private_source_for_all_but_its_owner(box, sheaves):
+    joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
+    joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n", "sources: [library:4711]\n"),
+                    encoding="utf-8")
+    box.hub.the_list.poll()
+    assert "globex/black-friday" not in read(box.get("/list?show=all", member=DORA))["Waiting on you 1"]
+    assert read(box.get("/list?show=all", member=NELL))["Waiting on you 2"]["globex/black-friday"] == [
+        ("Reply to Joey about column L Approve James", "mail · you · #5 · 2 h")]
+
+
 def test_the_filters_are_links_to_real_addresses_and_the_one_shown_is_marked(box):
     soup = BeautifulSoup(box.get("/list?show=mine", member=NELL).text, "html.parser")
     links = [(a.get_text(strip=True), a["href"], a.get("aria-current")) for a in soup.select("a.list-filter")]

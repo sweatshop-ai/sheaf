@@ -369,32 +369,49 @@ class Hub:
             return False
         return self.owns(member, root) and self.roots.lookup(root.path / at.rel) == root
 
-    def visible(self, member, address: str, missing: bool = True) -> bool:
-        """Whether the member may open the document at `address` by its visibility (9.11): a sheaf that is
-        its owner's alone is no other member's. A file that is not there is judged by the front matter it
-        had when the hub last read it, so its going away is told to whom it was visible; one the hub never
-        read is `missing` (a page answers it as a missing document all the same, a stream tells nobody). A
-        file that is there but cannot be read, or not as UTF-8, is no member's: the hub may still hold its
-        last good page."""
+    def front(self, address: str) -> dict | None:
+        """The front matter of the document at `address`, read again only when its file moved; for a file
+        that is not there, the one it had when the hub last read it, None when it never did; {} in a root the
+        hub does not know. Raises OSError or UnicodeDecodeError for a file that is there but cannot be read."""
         at = roots_mod.Address.parse(address)
         root = self.roots.get(at.root)
         if root is None:
-            return True
+            return {}
         f = root.path / at.rel
         try:
             st = f.stat()
-            key = (st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
-            hit = self._front.get(f)
-            if hit is None or hit[0] != key:
-                hit = (key, visibility.front_matter(f.read_text(encoding="utf-8")))
-                self._front[f] = hit
         except FileNotFoundError:
             hit = self._front.get(f)
-            if hit is None:
-                return missing
+            return None if hit is None else hit[1]
+        key = (st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
+        hit = self._front.get(f)
+        if hit is None or hit[0] != key:
+            hit = (key, visibility.front_matter(f.read_text(encoding="utf-8")))
+            self._front[f] = hit
+        return hit[1]
+
+    def visible(self, member, address: str, never_read: bool = True) -> bool:
+        """Whether the member may open the document at `address` by its visibility (9.11): a sheaf that is
+        its owner's alone is no other member's. A file that is not there is judged by the front matter it
+        had when the hub last read it, so its going away is told to whom it was visible; one the hub never
+        read is `never_read` (a page answers it as a missing document all the same, a stream tells nobody).
+        A file that is there but cannot be read, or not as UTF-8, is no member's: the hub may still hold its
+        last good page."""
+        try:
+            fm = self.front(address)
         except (OSError, UnicodeDecodeError):
             return False
-        return visibility.visible_to(hit[1], member, self.assignees(address, hit[1]))
+        if fm is None:
+            return never_read
+        return visibility.visible_to(fm, member, self.assignees(address, fm))
+
+    def owners(self, address: str, members) -> list:
+        """Those of `members` who own the sheaf at `address`, by its front matter now, as `visible` judges."""
+        try:
+            fm = self.front(address) or {}
+        except (OSError, UnicodeDecodeError):
+            return []
+        return visibility.owner_of(fm, members, self.assignees(address, fm))
 
     def assignees(self, address: str, fm: dict):
         """The record's assignees of the issue of the sheaf at `address` whose front matter is `fm`, asked by

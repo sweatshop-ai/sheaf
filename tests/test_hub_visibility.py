@@ -663,7 +663,8 @@ def test_a_front_matter_key_the_hub_does_not_enforce_leaves_an_open_sheaf_open(t
 
 
 @pytest.mark.parametrize("line", ['"visibility": owner', "'owner': hans", '"\\x6fwner": hans', "? visibility\n: owner",
-                                  "visibility : owner"])
+                                  "visibility : owner", "lang: en\n{kind: x,\n  visibility: owner}", "&a key: x",
+                                  "lang: en\n[a, b]: x\n  visibility: owner"])
 def test_a_line_that_may_spell_a_key_the_hub_enforces_still_closes_the_sheaf(team, work, line):
     put(team, work, DOC, OPEN.replace("owner: thierry\n", f"owner: thierry\n{line}\n"))
     assert team.get(f"/work/{DOC}", member=HANS).status == 404

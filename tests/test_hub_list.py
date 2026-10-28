@@ -882,9 +882,8 @@ def test_a_poll_that_read_a_hidden_sheaf_before_it_went_does_not_bring_its_row_b
 @pytest.mark.parametrize("through", ["its-address", "a-link"])
 def test_a_sheaf_made_where_a_hidden_one_went_is_listed_by_what_it_says_not_what_that_one_said(
         box, browser, sheaves, through):
-    """Codex: a row the poll read from a hidden sheaf shows its title and actions only while its file is the
-    one read; a sheaf made at its address, open to the project, is listed by its own text, also through a
-    link to it."""
+    """Codex, Opus: a row the poll read from a hidden sheaf goes with its file, a link's row to it too; the
+    sheaf made at its address, open to the project, is listed by its own text from the next poll."""
     tokens = bind_tokens(box, sheaves)
     joey = hidden_joey(sheaves)
     joey.write_text(joey.read_text(encoding="utf-8").replace("# Reply to Joey about column L", "# Secret title"),
@@ -899,4 +898,29 @@ def test_a_sheaf_made_where_a_hidden_one_went_is_listed_by_what_it_says_not_what
                          text="---\nissue: acme/record#5\nvisibility: project\n---\n# Open title\n\n- [ ] Approve\n")
     assert not is_error, got
     shown = str(read(box.get("/list?show=all", member=DORA)))
+    assert "Secret title" not in shown and "Open title" not in shown, shown   # the row waits for the next poll
+    box.hub.the_list.poll()
+    shown = str(read(box.get("/list?show=all", member=DORA)))
     assert "Secret title" not in shown and "Open title" in shown, shown
+
+
+@pytest.mark.parametrize("issue", ["acme/record#5", "acme/record#7"], ids=["its-issue", "another"])
+def test_an_open_create_where_a_hidden_sheaf_went_then_closed_answers_the_same_whatever_issue_it_names(
+        box, browser, sheaves, issue):
+    """Opus: a create open to the project drops the row of the sheaf that went too, so an update that closes it
+    is owned by the token's member, whatever issue it names, and the list shows it to nobody before a poll."""
+    tokens = bind_tokens(box, sheaves)
+    joey = hidden_joey(sheaves)
+    box.hub.the_list.poll()
+    root = box.hub.roots.lookup(joey).name
+    doc = f"{root}/globex/black-friday/2026-10-28-reply-to-joey.md"
+    joey.unlink()
+    is_error, got = call(browser, "create", token=tokens["dora-door"], doc=doc,
+                         text=f"---\nissue: {issue}\nvisibility: project\n---\n# A guess\n\n- [ ] Approve\n")
+    assert not is_error, got
+    assert "A guess" not in str(read(box.get("/list?show=all", member=DORA)))
+    now = joey.read_text(encoding="utf-8")
+    is_error, got = call(browser, "update", token=tokens["dora-door"], doc=doc, expected_hash=md_hash(now),
+                         text=now.replace("visibility: project\n", "sources: [library:1]\n"))
+    assert not is_error, got
+    assert front_matter(joey.read_text(encoding="utf-8"))["owner"] == "dora"

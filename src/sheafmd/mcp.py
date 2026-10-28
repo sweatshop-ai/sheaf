@@ -634,6 +634,9 @@ class Door:
             check_create(top, rel)
         except OSError as e:
             raise _not_made(address, e) from None
+        # Every create, open or not, tells the list its address has no file now: the row of a sheaf that went
+        # there would judge the new one (its owner on a later update, its row on the page) until the next poll (#34).
+        self.hub.assignees(address, {})
         text = self._owned(self._visible(text, None), address, caller)
         self._check_size(text)      # again: the owner `_owned` gave it is part of the page
         try:

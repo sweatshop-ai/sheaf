@@ -537,6 +537,8 @@ class Index:
             if member is not None and not hub.owns(member, root):
                 continue
             listing = roots_mod.Listing([], 0) if rendered else roots_mod.list_documents(root)
+            if not rendered:
+                hub.check_projects(root, (f.rel for f in listing.docs))
             rows, have = [], set()
             for f in listing.docs:
                 address, path = str(roots_mod.Address(root.name, f.rel)), root.path / f.rel

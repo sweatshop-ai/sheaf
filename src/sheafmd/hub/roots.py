@@ -383,9 +383,12 @@ class Roots:
         root = self.get(at.root)
         if root is None or not at.plain or not at.rel.endswith(".md"):
             raise NotFound(address)
+        if _sheafs_own(at.rel):
+            raise NotFound(address)
         try:
+            top = Path(os.path.realpath(root.path))
             real = Path(os.path.realpath(root.path / at.rel))
-            if not _inside(real, Path(os.path.realpath(root.path))) or not real.is_file():
+            if not _inside(real, top) or not real.is_file() or _sheafs_own(real.relative_to(top).as_posix()):
                 raise NotFound(address)
         except (OSError, ValueError):
             raise NotFound(address) from None
@@ -482,7 +485,7 @@ def _git_names(folder: Path):
     installed, too slow, refusing), when nothing may be listed that git did not vouch for."""
     try:
         r = subprocess.run(["git", "-C", str(folder), "ls-files", "-z", "-co", "--exclude-standard",
-                            "--", "*.md", ":!:**/node_modules/**"],
+                            "--", "*.md", ":!:**/node_modules/**", ":!:.sheaf/**"],
                            capture_output=True, timeout=_GIT_LIST_SECONDS,
                            env={**os.environ, "LC_ALL": "C"})
     except (OSError, subprocess.SubprocessError):
@@ -492,10 +495,19 @@ def _git_names(folder: Path):
     return [n for n in r.stdout.decode("utf-8", "surrogateescape").split("\0") if n]
 
 
+SHEAFS_OWN = ".sheaf"            # a root's folder of sheaf's own files: its versions store, a theme (4.4, 7.4)
+
+
+def _sheafs_own(rel: str) -> bool:
+    """Whether `rel`, a path in a root, lies in the root's `.sheaf/`, which is never a page (8.3)."""
+    return rel.split("/", 1)[0] == SHEAFS_OWN
+
+
 def _servable(rel: str) -> bool:
-    """A name the hub can serve: markdown, never inside `.git` or `node_modules`, and
-    spelled in UTF-8 (a URL cannot carry any other)."""
-    if not rel.endswith(".md") or any(p in (".git", "node_modules") for p in rel.split("/")):
+    """A name the hub can serve: markdown, never inside `.git` or `node_modules` or the root's
+    `.sheaf/`, and spelled in UTF-8 (a URL cannot carry any other)."""
+    if (not rel.endswith(".md") or any(p in (".git", "node_modules") for p in rel.split("/"))
+            or _sheafs_own(rel)):
         return False
     try:
         rel.encode("utf-8")
@@ -546,6 +558,8 @@ def _capped(top: Path, names: Iterable[str], kept: Callable[[str, bool], bool]) 
     for rel in names:
         if not (_servable(rel) and (found := _stat_inside(top, rel, folders)) and kept(rel, found[1])):
             continue
+        if found[1] and _sheafs_own(os.path.relpath(os.path.realpath(top / rel), top)):
+            continue                                  # a link into `.sheaf/`, which `document` refuses
         if len(docs) < LIST_CAP:
             docs.append(Found(rel, found[0]))
         else:

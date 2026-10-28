@@ -34,15 +34,22 @@ PINS_MAX_AGE = 7 * 86400        # seconds since a page last pinned it
 _HASH_RE = re.compile(r"[0-9a-f]{16}")
 _ADDRESS_FILE = "address"       # in each versions folder: the address it is the key of
 _PINS = "pins"                  # in each versions folder: the versions pages keep
+INSIDE = Path(".sheaf") / "versions"    # a root's own versions store, inside it (7.4)
 
 
 def write_text_private(path: Path, text: str):
-    """Write `text` to `path`: complete or not at all, 0600."""
+    """Write `text` to `path`: complete or not at all, 0600. The hidden sibling is made new: whatever
+    stands at its name (a link planted in a root's versions store, 7.4) goes first, never written
+    through."""
     path = Path(path)
     paths.private_dir(path.parent)
     tmp = path.with_name("." + path.name + ".tmp")
     try:
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.unlink(tmp)
+    except FileNotFoundError:
+        pass
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             os.fchmod(f.fileno(), 0o600)
             f.write(text)
@@ -118,18 +125,34 @@ class Versions:
     pinned last more than 7 days before `prune()`. Each folder also holds `address`, the
     `<root>/<path>` it is the key of, so a whole root's folders can be found."""
 
+    def __init__(self, root: Path | None = None, name: str = ""):
+        """Without `root`, the store of the state folder. With it, the store of that root's own
+        documents, inside it at `.sheaf/versions/` (7.4, `versions = "root"`), keyed by the path in the
+        root, not the address: another hub, a clone's, names the root otherwise. `name` is the root's."""
+        self._root, self._prefix = root, f"{name}/"
+
     @property
     def dir(self) -> Path:
+        if self._root is not None:
+            return self._root / INSIDE
         return paths.state_dir() / "versions"
 
+    def _key(self, address: str) -> str:
+        """What the folder of `address` is named by, and what its `address` file holds."""
+        if self._root is not None and address.startswith(self._prefix):
+            return address[len(self._prefix):]
+        return address
+
     def _folder(self, address: str) -> Path:
-        return self.dir / doc_key(address)
+        return self.dir / doc_key(self._key(address))
 
     def _make_folder(self, address: str) -> Path:
         """`_folder`, made when it is not there yet, with its `address` file."""
-        folder = paths.private_dir(paths.private_dir(self.dir) / doc_key(address))
+        if self._root is not None:
+            paths.private_dir(self._root / INSIDE.parent)   # `.sheaf` itself: never a link out of the root
+        folder = paths.private_dir(paths.private_dir(self.dir) / doc_key(self._key(address)))
         if not (folder / _ADDRESS_FILE).exists():
-            write_text_private(folder / _ADDRESS_FILE, address)
+            write_text_private(folder / _ADDRESS_FILE, self._key(address))
         return folder
 
     @staticmethod
@@ -140,7 +163,7 @@ class Versions:
         h = md_hash(text)
         f = folder / f"{h}.md"
         if f.is_file():
-            os.utime(f)
+            os.utime(f, follow_symlinks=False)
         else:
             write_text_private(f, text)
         files = []
@@ -184,8 +207,10 @@ class Versions:
     def forget(self, address: str):
         """Drop every version of one document. A root that is forgotten takes its documents'
         versions with it: the name may go to another folder, and a page still open on the old
-        document must not be merged into the new one."""
-        shutil.rmtree(self._folder(address), ignore_errors=True)
+        document must not be merged into the new one. A store inside a root keeps them: they are
+        files of the root, as its documents are (7.4)."""
+        if self._root is None:
+            shutil.rmtree(self._folder(address), ignore_errors=True)
 
     def forget_prefix(self, prefix: str):
         """Drop the versions of every document whose address starts with `prefix` (`<root>/`),

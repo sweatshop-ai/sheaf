@@ -374,14 +374,14 @@ class Door:
         try:
             if entry is not None:
                 entry.live.comment(op, fields, None, by=caller.display, role=role, announce=True)
-                return
-
-            update_file(self.hub.roots.document(address),
-                        lambda t: rdc.apply_op(t, op, fields, caller.display, now(), role))
+            else:
+                update_file(self.hub.roots.document(address),
+                            lambda t: rdc.apply_op(t, op, fields, caller.display, now(), role))
         except rdc.AnchorError as e:
             raise ToolError(f"{e}.") from None
         except (OSError, UnicodeDecodeError, NotFound):
             raise ToolError(f"{address} could not be written.") from None
+        self.hub.committed(address, by=caller.display, what="comment")
 
     # ── the tools ────────────────────────────────────────────────────────────
     def _open_in(self, path: Path) -> list:
@@ -569,6 +569,7 @@ class Door:
                                 "folder of its root, not a link or a file.", "link on the way") from None
             raise ToolError(f"{address} could not be made ({e.strerror}).", "not written") from None
         self.hub.wrote(address)
+        self.hub.committed(address, by=caller.display, what="create")
         return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text)}
 
     def _update(self, args: dict, caller: Caller):
@@ -591,6 +592,7 @@ class Door:
             raise ToolError(f"{address} could not be written.", "not written") from None
         if before != text:
             self.hub.wrote(address)
+            self.hub.committed(address, by=caller.display, what="update")
         return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text),
                 "changed": before != text}
 

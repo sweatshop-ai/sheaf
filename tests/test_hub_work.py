@@ -2,6 +2,7 @@
 fork they made of it on their machine, and on a sheaf whose live session runs on the box sends Ask and Tell
 to James's window by a file the hub drops. Through the handler in proxy mode, with the list's root as the
 members' root: Thierry owns the sheaves, Hans is a member of the project, Bea is a member of another root."""
+import json
 import os
 import pwd
 
@@ -378,3 +379,122 @@ def test_a_write_that_landed_before_the_fork_is_kept(team, box, work):
     assert fork(team).status == 200
     text = f.read_text(encoding="utf-8")
     assert text.endswith("\nA paragraph from another hand.\n") and f"{{id: {FORK}, " in text
+
+
+# ── Ask and Tell to James's window ───────────────────────────────────────────
+
+def comment(team, work, kind, as_=HANS, body="Can you send the draft to Joey?", **extra):
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.source import md_hash
+    text = (work / DOC).read_text(encoding="utf-8")
+    i = next(i for i, b in enumerate(split_md_blocks(text)) if b.content.startswith("A quote"))
+    return team.post("/_/comment", {"doc": ADDRESS, "op": "add", "hash": md_hash(text), "block": i, "start": 0,
+                                    "end": 6, "quote": "A quote", "body": body, kind: True, **extra}, member=as_)
+
+
+def drops(box):
+    return sorted(box["tell"].iterdir())
+
+
+@pytest.mark.parametrize("kind", ["ask", "tell"])
+def test_ask_and_tell_on_a_box_sheaf_write_the_comment_and_drop_it_for_james(team, box, work, kind):
+    got = comment(team, work, kind)
+    assert got.status == 200, got.text
+    assert got.json()["telling"] == [] and "tellError" not in got.json() and "askError" not in got.json()
+    assert "Can you send the draft to Joey?" in (work / DOC).read_text(encoding="utf-8")
+    f, = drops(box)
+    assert f.name.startswith("thinkingtoo--tiroir-20") and f.name.endswith("Z")
+    assert json.loads(f.read_bytes()) == {"project": "thinkingtoo/tiroir", "member": "hans", "sheaf": ADDRESS,
+                                          "text": "Can you send the draft to Joey?", "kind": kind}
+    assert list(f.read_bytes().decode()) == list(json.dumps(json.loads(f.read_bytes())))
+    row, = hub_rows("tell-dropped")
+    assert (row["what"], row["project"], row["by"], row["drop"]) == (kind, "thinkingtoo/tiroir", "hans", "written")
+    assert team.hub.runner.active("ask", ADDRESS) == team.hub.runner.active("tell", ADDRESS) == []
+
+
+@pytest.mark.parametrize("mask", [0o077, 0o000])
+def test_the_drop_is_0640_whatever_the_hubs_umask(team, box, work, mask):
+    old = os.umask(mask)
+    try:
+        assert comment(team, work, "tell").status == 200
+    finally:
+        os.umask(old)
+    f, = drops(box)
+    assert f.stat().st_mode & 0o777 == 0o640
+
+
+def test_the_drop_is_written_as_a_dot_file_then_renamed(team, box, work, monkeypatch):
+    seen = []
+    real = os.replace
+    monkeypatch.setattr(os, "replace", lambda a, b: (seen.append((os.path.basename(a), os.path.basename(b),
+                                                                  os.path.exists(a))), real(a, b))[1])
+    assert comment(team, work, "tell").status == 200
+    (src, dst, existed), = [x for x in seen if x[1].startswith("thinkingtoo--")]
+    assert src == "." + dst and existed
+
+
+def test_a_second_drop_in_the_same_second_takes_the_next_name(team, box, work, monkeypatch):
+    import time as time_mod
+    monkeypatch.setattr(time_mod, "gmtime", lambda *a: time_mod.struct_time((2026, 10, 28, 5, 12, 3, 2, 301, 0)))
+    for _ in range(3):
+        assert comment(team, work, "ask").status == 200
+    assert [f.name for f in drops(box)] == ["thinkingtoo--tiroir-20261028T051203Z",
+                                            "thinkingtoo--tiroir-20261028T051203Z-1",
+                                            "thinkingtoo--tiroir-20261028T051203Z-2"]
+
+
+@pytest.mark.parametrize("kind", ["ask", "tell"])
+def test_on_a_sheaf_whose_live_session_is_on_a_laptop_ask_and_tell_stay_refused(team, box, work, kind):
+    put(team, work, DOC, SHEAF.replace("host: tiroir-tt, member: james, date: 2026-10-28T05:12:03Z",
+                                       "host: thierry-laptop, member: thierry, date: 2026-10-28T05:12:03Z"))
+    before = (work / DOC).read_text(encoding="utf-8")
+    got = comment(team, work, kind)
+    assert got.status == 400 and got.json()["error"] == proxy.PROXY_LINE
+    assert (work / DOC).read_text(encoding="utf-8") == before and drops(box) == []
+
+
+def test_without_a_tell_dir_or_outside_the_list_ask_stays_refused(team, box, work, tmp_path):
+    cfg = team.hub.the_list.cfg
+    team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{**cfg.__dict__, "tell_dir": None}))
+    assert comment(team, work, "ask").json()["error"] == proxy.PROXY_LINE
+    team.hub.the_list = None
+    assert comment(team, work, "tell").json()["error"] == proxy.PROXY_LINE
+    assert hub_rows("tell-dropped") == []
+
+
+def test_a_sheaf_with_no_session_keeps_the_400(team, box, work):
+    put(team, work, DOC, SHEAF.split("sessions:\n")[0] + "---\n# T\n\nA quote from the contract.\n")
+    assert comment(team, work, "tell").json()["error"] == proxy.PROXY_LINE
+
+
+def test_ask_and_tell_both_are_refused_on_the_box(team, box, work):
+    got = comment(team, work, "ask", tell=True)
+    assert got.status == 400 and "not both" in got.json()["error"] and drops(box) == []
+
+
+def test_a_request_sent_again_drops_once(team, box, work):
+    rid = "r" * 20
+    assert comment(team, work, "tell", rid=rid).status == 200
+    assert comment(team, work, "tell", rid=rid).status == 200
+    assert len(drops(box)) == 1
+
+
+def test_a_reply_with_tell_drops_the_reply(team, box, work):
+    cid = comment(team, work, "ask").json()["id"]
+    got = team.post("/_/comment", {"doc": ADDRESS, "op": "reply", "id": cid, "body": "And the invoice.",
+                                   "tell": True}, member=THIERRY)
+    assert got.status == 200, got.text
+    texts = [(json.loads(f.read_bytes())["text"], json.loads(f.read_bytes())["member"]) for f in drops(box)]
+    assert ("And the invoice.", "thierry") in texts
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root writes into a folder of mode 0500")
+def test_a_drop_that_fails_keeps_the_comment_says_so_and_leaves_no_dot_file(team, box, work):
+    box["tell"].chmod(0o500)
+    try:
+        got = comment(team, work, "tell")
+    finally:
+        box["tell"].chmod(0o700)
+    assert got.status == 200 and "James" in got.json()["tellError"]
+    assert "Can you send the draft" in (work / DOC).read_text(encoding="utf-8")
+    assert hub_rows("tell-dropped")[0]["drop"].startswith("failed: ") and drops(box) == []

@@ -767,38 +767,53 @@ class Handler:
 
     # ── Work on this (9.12) ──────────────────────────────────────────────────
     def _sheaf(self, req: Req, doc):
-        """The address `doc` names, its file's front matter and the list, once it is a sheaf the member may open
-        (9.11) of the list's root, at `<client>/<project>/<file>.md`. Else the 404 of a document that is not
+        """The address `doc` names, its file's front matter and its work.State, once it is a sheaf the member may
+        open (9.11) of the list's root, at `<client>/<project>/<file>.md`. Else the 404 of a document that is not
         there."""
         address = self._owned(req, doc)
-        the = self.hub.the_list
-        at = Address.parse(address)
-        if the is None or not the.serves(at.root) or at.rel.count("/") != 2:
+        if work.state(self.hub, address, "") is None:
             raise Refuse(404, "no such document")
         try:
-            fm = visibility.front_matter(self.hub.roots.document(address).read_text(encoding="utf-8"))
+            text = self.hub.roots.document(address).read_text(encoding="utf-8")
         except (NotFound, OSError, UnicodeDecodeError):
             raise Refuse(404, "no such document") from None
-        return address, fm, the
+        return address, visibility.front_matter(text), work.state(self.hub, address, text)
 
     def _session(self, req: Req) -> Response:
         """The transcript of one of the sheaf's box-hosted sessions, the newest without `id`, from the copy of
         James's transcripts (9.12). It names only a file the front matter lists, of the box, in `sessions_dir`."""
-        address, fm, the = self._sheaf(req, req.query.get("doc"))
+        address, fm, st = self._sheaf(req, req.query.get("doc"))
         sid = req.query.get("id")
         _shape(sid is None or work.UUID_RE.fullmatch(sid), "id must be a session id (a lowercase UUID)")
-        box = [s["id"] for s in work.sessions(fm) if the.cfg.box and s["host"] == the.cfg.box]
+        box = [s["id"] for s in st.sessions if st.cfg.box and s["host"] == st.cfg.box]
         if sid is None:
             sid = box[0] if box else None
-        if sid not in box or the.cfg.sessions_dir is None:
+        if sid not in box or st.cfg.sessions_dir is None:
             raise Refuse(404, "this sheaf has no such session on the box")
-        body = work.open_transcript(the.cfg.sessions_dir, sid)
+        body = work.open_transcript(st.cfg.sessions_dir, sid)
         if body is None:
             raise Refuse(404, "this sheaf has no such session on the box")
         self.hub.record("transcript-downloaded", address, transcript=sid, by=work.member_word(req.member),
                         issue=visibility.text(fm, "issue"))
         return Response(200, {"Content-Type": "application/x-ndjson", "Content-Disposition": _disposition(f"{sid}.jsonl"),
                               "Cache-Control": "no-store", "X-Sheaf-Session": sid}, body)
+
+    def _box_live(self, e) -> bool:
+        """Whether the sheaf's live session (the first of `sessions`) runs on the box, and Ask and Tell can be
+        dropped for it: a sheaf of the list's root at project depth, `box` and `tell_dir` set (9.12)."""
+        state = work.state(self.hub, e.address, e.live.current()[1])
+        return state is not None and state.live == "box" and state.cfg.tell_dir is not None
+
+    def _drop_for_james(self, req: Req, e, kind: str, body: str) -> str:
+        """The file Ask or Tell drops in `[list]`'s `tell_dir` for the box's supervisor to type into James's
+        window for the project, and its `tell-dropped` row. The hub runs no agent of its own for it."""
+        project = "/".join(Address.parse(e.address).rel.split("/")[:2])
+        by = work.member_word(req.member)
+        drop = work.drop(self.hub.the_list.cfg.tell_dir, project,
+                         {"project": project, "member": by, "sheaf": e.address, "text": body, "kind": kind},
+                         "no tell_dir in [list]")
+        self.hub.record("tell-dropped", e.address, what=kind, project=project, by=by, drop=drop)
+        return drop
 
     def _sessions(self, req: Req) -> Response:
         """A member forked one of the sheaf's sessions on their machine (9.12): the fork becomes the sheaf's live
@@ -846,10 +861,15 @@ class Handler:
             for k in ("block", "start", "end"):
                 _shape(type(b.get(k)) is int, f"{k} must be a whole number")
         member = req.member
-        # Ask and Tell run the hub account's own session, which a member is not (9.9).
-        _shape(member is None or not (b.get("ask") or b.get("tell")), proxy.PROXY_LINE)
         starts = op in ("add", "reply")
-        ask, tell = starts and bool(b.get("ask")), starts and bool(b.get("tell"))
+        # Ask and Tell run the hub account's own session, which a member is not (9.9); on a sheaf whose live
+        # session is James's on the box they go to his window instead, by a file the hub drops (9.12).
+        to_box = None
+        if member is not None and (b.get("ask") or b.get("tell")):
+            _shape(starts and self._box_live(e), proxy.PROXY_LINE)
+            _shape(not (b.get("ask") and b.get("tell")), "a comment is sent with Ask or with Tell, not both")
+            to_box = "ask" if b.get("ask") else "tell"
+        ask, tell = starts and bool(b.get("ask")) and not to_box, starts and bool(b.get("tell")) and not to_box
         # A Tell that cannot go out still writes the comment, and then starts no wait. A reply
         # sent with Tell to a thread that is being told is such a Tell: the wait the first one
         # began stays as it is (SPEC 11.3).
@@ -884,6 +904,11 @@ class Handler:
             # Taken before under this request id: what the first request started (an Ask, a Tell's wait)
             # is running or done, and the page hears of it by its events.
             ask = tell = False
+            to_box = None
+        if to_box:
+            drop = self._drop_for_james(req, e, to_box, b["body"])
+            if drop != "written":
+                snap[f"{to_box}Error"] = "The hub could not send this to James's window; the comment is written."
         # The job looks the document up again when it starts: it names its thread in the text the
         # comment was just written in, so a forget in between, and another folder that takes the name,
         # cannot hand it that folder's thread of the same id (SPEC 7.3). A forget that leaves no folder

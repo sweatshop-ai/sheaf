@@ -385,9 +385,10 @@ class TheList:
             sections[row.record.status].append((row, owners, is_owner))
         body = "".join(self._section(title, sections[key], member, root.name)
                        for key, title in (("waiting", "Waiting on you"), ("open", "In progress")))
+        current = ' aria-current="page"'
         filters = "".join(
             f'<a class="list-filter{" on" if key == show else ""}" href="{_href(root.name, key)}"'
-            f'{" aria-current=\"page\"" if key == show else ""}>{html.escape(label)}</a>'
+            f'{current if key == show else ""}>{html.escape(label)}</a>'
             for key, label in SHOWS.items())
         return ('<!doctype html>\n<html lang="en"><head><meta charset="utf-8">'
                 '<meta name="viewport" content="width=device-width,initial-scale=1">'

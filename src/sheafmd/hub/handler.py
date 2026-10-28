@@ -695,15 +695,19 @@ class Handler:
         ticked = set()
 
         def guard(text, new):
+            m = req.member
+            if m is not None:
+                # The gate (_owned) read the file before the lock: a write that closed the sheaf since is
+                # seen here, on the text the save would write over.
+                the = self.hub.the_list
+                assignees = the.assignees(e.address) if the is not None else None
+                fm = visibility.front_matter(text)
+                if not visibility.visible_to(fm, m, assignees):
+                    raise Refuse(404, "no such document")
             words = visibility.newly_ticked(text, new)
             if "Share" in words:
-                m = req.member
-                if m is not None:
-                    the = self.hub.the_list
-                    owners = visibility.owner_of(visibility.front_matter(text), [m],
-                                                 the.assignees(e.address) if the is not None else None)
-                    if not owners:
-                        raise EditError("Only the owner of this sheaf can share it.")
+                if m is not None and not visibility.owner_of(fm, [m], assignees):
+                    raise EditError("Only the owner of this sheaf can share it.")
                 if visibility.effective(visibility.front_matter(new)) == "owner":
                     by = (m.short or m.name) if m is not None else self.hub.person
                     new = visibility.share(new, by, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))

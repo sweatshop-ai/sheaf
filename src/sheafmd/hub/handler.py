@@ -694,7 +694,7 @@ class Handler:
         signed-in member, never a name the request carries."""
         ticked = set()
 
-        def guard(text, new):
+        def guard(text, new, toggled):
             m = req.member
             if m is not None:
                 # The gate (_owned) read the file before the lock: a write that closed the sheaf since is
@@ -703,7 +703,7 @@ class Handler:
                 fm = visibility.front_matter(text)
                 if not visibility.visible_to(fm, m, assignees):
                     raise Refuse(404, "no such document")
-            words = visibility.newly_ticked(text, new)
+            words = visibility.newly_ticked(toggled)
             if "Share" in words:
                 if m is not None and not visibility.owner_of(fm, [m], assignees):
                     raise EditError("Only the owner of this sheaf can share it.")

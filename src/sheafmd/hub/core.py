@@ -30,6 +30,7 @@ from . import proxy as proxy_mod
 from . import roots as roots_mod
 from . import state
 from . import visibility
+from . import work as work_mod
 from .asktell import AskTell
 from .auth import Auth
 from .commits import Author, Commits
@@ -251,8 +252,27 @@ class Hub:
                 meta.update(me=member.name, seen=self.member_seen.get(member.id, e.address),
                             agent=None, can=[], lines=proxy_mod.member_lines(), proxy=True,
                             member=member.id)
+                work = self.work_meta(e, member)
+                if work is not None:
+                    meta["work"] = work
+                    if work["live"] == "box" and self.the_list.cfg.tell_dir is not None:
+                        meta["can"] = ["box-ask", "box-tell"]
             html = (html[:m.start(2)] + json.dumps(meta).replace("<", "\\u003c") + html[m.end(2):])
         return html
+
+    def work_meta(self, e: Entry, member) -> dict | None:
+        """What the page's Work on this shows a member (9.12, 10.1): the command that forks the sheaf's session
+        on their machine, the one that attaches to James's window when they have a shell on the box, the
+        sessions and where the live one runs. None for a page that is not a sheaf of the list's root."""
+        st = work_mod.state(self, e.address, e.live.current()[1])
+        if st is None:
+            return None
+        out = {"fork": f"tiroir work {self.proxy.origin}{roots_mod.url_path(e.address)}",
+               "sessions": st.sessions, "live": st.live}
+        if member.shell and st.cfg.attach:
+            client, project = roots_mod.Address.parse(e.address).rel.split("/")[:2]
+            out["attach"] = st.cfg.attach.replace("{window}", f"{client}-{project}")
+        return out
 
     # ── the agent of a document ──────────────────────────────────────────────
     def target(self, address: str) -> Target | None:

@@ -498,3 +498,52 @@ def test_a_drop_that_fails_keeps_the_comment_says_so_and_leaves_no_dot_file(team
     assert got.status == 200 and "James" in got.json()["tellError"]
     assert "Can you send the draft" in (work / DOC).read_text(encoding="utf-8")
     assert hub_rows("tell-dropped")[0]["drop"].startswith("failed: ") and drops(box) == []
+
+
+# ── the meta block (10.1) ────────────────────────────────────────────────────
+
+def meta(team, member=HANS, doc=DOC):
+    from helpers import page_meta
+    got = team.get(f"/work/{doc}", member=member)
+    assert got.status == 200, got.text
+    return page_meta(got.text)
+
+
+def test_the_meta_block_of_a_box_sheaf_carries_the_fork_command_the_sessions_and_box_ask_tell(team, box):
+    m = meta(team)
+    assert m["work"] == {"fork": f"tiroir work {FRONT}/{ADDRESS}", "live": "box", "sessions": [
+        {"id": LIVE, "host": "tiroir-tt", "member": "james", "date": "2026-10-28T05:12:03Z"},
+        {"id": LAPTOP, "host": "thierry-laptop", "member": "thierry", "date": "2026-10-27T09:00:00Z"},
+        {"id": OLDER, "host": "tiroir-tt", "member": "james", "date": "2026-10-26T08:00:00Z"}]}
+    assert m["can"] == ["box-ask", "box-tell"]
+
+
+def test_a_member_with_a_shell_gets_the_attach_command_for_the_projects_window(team, box):
+    assert meta(team, THIERRY)["work"]["attach"] == \
+        "ssh tiroir-tt -t tmux attach -t james \; select-window -t thinkingtoo-tiroir"
+
+
+def test_a_sheaf_live_on_a_laptop_says_so_and_can_nothing(team, box, work):
+    put(team, work, DOC, SHEAF.replace("host: tiroir-tt, member: james, date: 2026-10-28T05:12:03Z",
+                                       "host: thierry-laptop, member: thierry, date: 2026-10-28T05:12:03Z"))
+    m = meta(team)
+    assert m["work"]["live"] == "laptop" and m["can"] == []
+
+
+def test_without_a_tell_dir_a_box_sheaf_can_nothing_and_without_attach_none_is_offered(team, box):
+    cfg = team.hub.the_list.cfg
+    team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{**cfg.__dict__, "tell_dir": None,
+                                                                        "attach": ""}))
+    m = meta(team, THIERRY)
+    assert m["work"]["live"] == "box" and m["can"] == [] and "attach" not in m["work"]
+
+
+def test_a_sheaf_with_no_session_has_work_with_no_live_one(team, box, work):
+    put(team, work, DOC, SHEAF.split("sessions:\n")[0] + "---\n# T\n")
+    assert meta(team)["work"] == {"fork": f"tiroir work {FRONT}/{ADDRESS}", "live": "", "sessions": []}
+
+
+def test_a_page_that_is_not_a_sheaf_of_the_list_has_no_work(team, box, work):
+    put(team, work, "thinkingtoo/notes.md", SHEAF)
+    assert "work" not in meta(team, doc="thinkingtoo/notes.md")
+    assert "work" not in meta(team, doc="plan.md")

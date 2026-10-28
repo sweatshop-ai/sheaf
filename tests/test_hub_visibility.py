@@ -33,10 +33,12 @@ A quote from the contract.
 """
 
 
-def members(work, **tokens):
-    """The `[proxy]` table of the two members, each with the door tokens `tokens` binds to their `short`."""
+def members(work, hans_also=None, **tokens):
+    """The `[proxy]` table of the two members, each with the door tokens `tokens` binds to their `short`.
+    Both have the root `work`; Hans has `hans_also` too, when given."""
     team = {THIERRY: {"name": "Thierry", "short": "thierry", "github": "tiroir", "roots": [str(work)]},
-            HANS: {"name": "Hans", "short": "hans", "github": "hanshermans", "roots": [str(work)]}}
+            HANS: {"name": "Hans", "short": "hans", "github": "hanshermans",
+                   "roots": [str(work)] + ([str(hans_also)] if hans_also else [])}}
     for m in team.values():
         if m["short"] in tokens:
             m["tokens"] = tokens[m["short"]]
@@ -819,3 +821,38 @@ def test_an_update_that_lands_after_the_sheaf_closed_writes_nothing(team, browse
                           expected_hash=got["hash"])
     assert is_error and said.startswith(f"There is no document work/{DOC} ")
     assert (work / DOC).read_text(encoding="utf-8") == closed
+
+
+@pytest.fixture
+def hans_root(team, work):
+    """A root of Hans's alone, with an open page in it (no front matter, so open to the project)."""
+    root = work.parent / "hansroot"
+    root.mkdir()
+    f = root / "notes.md"
+    f.write_text("# Hans's notes\n\n" + THREAD + "\n", encoding="utf-8")
+    name = team.hub.roots.for_document(f).name
+    return root, f"{name}/notes.md"
+
+
+def test_a_token_bound_to_a_member_reaches_only_that_members_roots(team, browser, work, hans_root):
+    root, doc = hans_root
+    team.hub.proxy = members(work, hans_also=root, thierry=["james-thierry"])
+    put(team, work, "thinkingtoo/tiroir/open.md", "# Open\n\n" + THREAD + "\n")
+    token = Tokens().add("james-thierry", write=True)
+    assert not call(browser, "read", token=token, doc="work/thinkingtoo/tiroir/open.md")[0]   # inside its roots
+    is_error, got = call(browser, "read", token=token, doc=doc)
+    assert is_error and got.startswith(f"There is no document {doc} ")
+    is_error, got = call(browser, "threads", token=token, doc=str(root / "notes.md"))
+    assert is_error and got.startswith(f"There is no document {root / 'notes.md'} ")
+    assert doc not in [d.get("doc") for d in call(browser, "documents", token=token)[1]]
+    is_error, got = call(browser, "documents", token=token, root=doc.split("/")[0])
+    assert is_error and got == f"There is no root named {doc.split('/')[0]}."
+    is_error, got = call(browser, "create", token=token, doc=doc.replace("notes", "copy"), text="# Copy\n")
+    assert is_error and "is not inside a root of this hub" in got and not (root / "copy.md").exists()
+
+
+def test_an_unbound_token_still_reaches_every_root(team, browser, work, hans_root):
+    root, doc = hans_root
+    team.hub.proxy = members(work, hans_also=root, thierry=["james-thierry"])
+    is_error, got = call(browser, "read", token=Tokens().add("codex", write=True), doc=doc)
+    assert not is_error and "Hans's notes" in got["text"]

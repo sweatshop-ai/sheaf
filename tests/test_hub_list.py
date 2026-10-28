@@ -12,9 +12,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 from bs4 import BeautifulSoup
-from helpers import FRONT, Front, hub_rows
+from helpers import FRONT, Front, call, hub_rows
 
 from sheafmd.hub import proxy, the_list
+from sheafmd.hub.state import Tokens
+from sheafmd.hub.visibility import front_matter
+from sheafmd.source import md_hash
 
 NELL = "503b2f77-83de-452c-817a-a357faf85929"       # the front's ids of two members
 DORA = "2b9d7e1c-4a51-4c0e-9d1f-6f0c3a7e8b42"
@@ -774,3 +777,76 @@ def test_an_issue_written_in_another_case_is_still_the_issue_the_list_polled(box
     address = f"/{root}/globex/black-friday/2026-10-28-reply-to-joey.md"
     assert box.get(address, member=NELL).status == 200
     assert box.get(address, member=DORA).status == 404
+
+
+def bind(box, sheaves):
+    """Nell's and Dora's door tokens, `nell-door` and `dora-door`, bound to them (9.11)."""
+    box.hub.proxy = proxy.parse({"origin": FRONT, "socket": "/run/sheaf-proxy/hub.sock",
+                                 "proxy_user": pwd.getpwuid(os.getuid()).pw_name,
+                                 "members": {NELL: {"name": "Nell", "short": "nell", "github": "nell-l",
+                                                    "roots": [str(sheaves)], "tokens": ["nell-door"]},
+                                             DORA: {"name": "Dora", "short": "dora", "github": "dora-k",
+                                                    "roots": [str(sheaves)], "tokens": ["dora-door"]}}}, "the test")
+    return {name: Tokens().add(name, write=True) for name in ("nell-door", "dora-door")}
+
+
+def hidden_joey(sheaves):
+    """Joey's sheaf, its owner's alone and with no `owner`: its issue's assignee, Nell, owns it."""
+    joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
+    joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n", "sources: [library:4711]\n"),
+                    encoding="utf-8")
+    return joey
+
+
+def test_a_door_update_of_a_sheaf_its_assignee_alone_owns_keeps_it_theirs_once_the_issue_is_not_polled(
+        box, browser, sheaves, github):
+    """#33: the record names the owner only while the list polls the issue; the `owner` the write gives
+    it is the one after."""
+    tokens = bind(box, sheaves)
+    joey = hidden_joey(sheaves)
+    box.hub.the_list.poll()
+    root = box.hub.roots.lookup(joey).name
+    doc = f"{root}/globex/black-friday/2026-10-28-reply-to-joey.md"
+    before = joey.read_text(encoding="utf-8")
+    is_error, got = call(browser, "update", token=tokens["nell-door"], doc=doc, expected_hash=md_hash(before),
+                         text=before.replace("The draft.", "The draft, again."))
+    assert not is_error, got
+    assert front_matter(joey.read_text(encoding="utf-8"))["owner"] == "nell"
+    del github.issues[5]                                # moved to another repo: the list no longer knows it
+    box.hub.the_list.poll()
+    assert box.get(f"/{doc}", member=NELL).status == 200
+    assert box.get(f"/{doc}", member=DORA).status == 404
+
+
+@pytest.mark.parametrize("issue", ["acme/record#5", "acme/record#7"], ids=["its-issue", "another"])
+def test_a_door_create_where_a_hidden_sheaf_was_deleted_answers_the_same_whatever_issue_it_names(
+        box, browser, sheaves, issue):
+    """#34: until the next poll the list still has the deleted sheaf's row; neither the create's answer nor
+    a read after it tells which issue that sheaf named."""
+    tokens = bind(box, sheaves)
+    joey = hidden_joey(sheaves)
+    box.hub.the_list.poll()
+    root = box.hub.roots.lookup(joey).name
+    doc = f"{root}/globex/black-friday/2026-10-28-reply-to-joey.md"
+    joey.unlink()
+    text = f"---\nissue: {issue}\nsources: [library:1]\n---\n# A guess\n"
+    is_error, got = call(browser, "create", token=tokens["dora-door"], doc=doc, text=text)
+    assert not is_error, got
+    assert front_matter(joey.read_text(encoding="utf-8"))["owner"] == "dora"
+    is_error, got = call(browser, "read", token=tokens["dora-door"], doc=doc)
+    assert not is_error, got
+
+
+@pytest.mark.parametrize("issue", ["acme/record#5", "acme/record#7"], ids=["its-issue", "another"])
+def test_an_unbound_create_where_a_hidden_sheaf_was_deleted_is_refused_whatever_issue_it_names(
+        box, browser, sheaves, issue):
+    """#34: a token bound to nobody gives no owner, so the stale row of the deleted sheaf is no owner either."""
+    joey = hidden_joey(sheaves)
+    box.hub.the_list.poll()
+    root = box.hub.roots.lookup(joey).name
+    joey.unlink()
+    is_error, got = call(browser, "create", token=Tokens().add("mistral", write=True),
+                         doc=f"{root}/globex/black-friday/2026-10-28-reply-to-joey.md",
+                         text=f"---\nissue: {issue}\nsources: [library:1]\n---\n# A guess\n")
+    assert is_error and "no member as its owner" in got, got
+    assert not joey.exists()

@@ -409,13 +409,19 @@ class TheList:
     def assignees(self, address: str, issue: str):
         """The record's assignees of the issue of the sheaf at `address`, from the last poll, when `issue`, what
         its file names now, is still the issue of its row; None when the list does not know the sheaf (no row:
-        another root, no issue, not polled yet, or an issue changed since the poll)."""
+        another root, no issue, not polled yet, an issue changed since the poll, or a file gone since)."""
         a = roots_mod.Address.parse(address)
         root = self.root()
         if root is None or a.root != root.name:
             return None
-        for row in self._snap.rows:
+        snap = self._snap
+        for row in snap.rows:
             if row.sheaf.rel == a.rel:
+                if not os.path.lexists(root.path / a.rel):
+                    # The row of a sheaf that went would judge one made at its address before the next poll,
+                    # and tell which issue the one that went named (#34).
+                    snap.rows = [r for r in snap.rows if r is not row]     # a new list: a page reading the old one keeps it
+                    return None
                 return tuple(row.record.assignees) if _same_issue(row.sheaf.issue, issue_of(issue)) else None
         return None
 

@@ -13,7 +13,7 @@ import pytest
 
 from agent_fakes import PID, FakeClaude, Peer, write_record
 from helpers import PLAN
-from pagehelp import DOC, launch_chromium, new_context, unavailable, use_pump
+from pagehelp import DOC, close_context, launch_chromium, new_context, unavailable, use_pump
 from sheafmd import paths
 from sheafmd.agents.base import Target
 from sheafmd.agents.claude_code import proc_start
@@ -155,7 +155,7 @@ def context(chromium, site):
     c = new_context(chromium, viewport={"width": 1100, "height": 800})
     c.add_cookies([site.cookie()])
     yield c
-    c.close()
+    close_context(c)
 
 
 @pytest.fixture
@@ -167,7 +167,7 @@ def touch_tab(chromium, site):
     t = Tab(c.new_page(), site)
     yield t
     assert t.errors == [], "the page raised script errors"
-    c.close()
+    close_context(c)
 
 
 @pytest.fixture

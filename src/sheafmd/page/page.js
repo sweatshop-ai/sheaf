@@ -31,33 +31,48 @@
   // the proxy socket (SPEC 9.9) every member shares the front's origin, so the key holds the member's
   // id, which a rename in the hub's config does not change (10.4, 10.8).
   var DRAFTS_OF = CFG.proxy ? 'm:' + CFG.member : location.port;
-  var AGENT, AGENT_UC, CAN, canAsk, canTell;
+  // On a member's page of a sheaf whose live session runs on the box, CFG.can holds "box-ask" and "box-tell":
+  // Ask and Tell go with the comment to /_/comment, the hub drops it for James's window, and James answers in
+  // the thread through the door. The page starts no wait of its own for it (SPEC 9.12).
+  var AGENT, AGENT_UC, CAN, canAsk, canTell, toBox;
   function takeAgent() {
-    // The session's own name when it has one ("Linnea"), else the agent's display name (SPEC 10.5).
-    AGENT = (CFG.agent && (CFG.agent.name || CFG.agent.display)) || 'the agent';
-    AGENT_UC = AGENT.charAt(0).toUpperCase() + AGENT.slice(1);
     CAN = CFG.can || [];
-    canAsk = CAN.indexOf('ask') >= 0;
-    canTell = CAN.indexOf('deliver') >= 0;
+    toBox = CAN.indexOf('box-ask') >= 0 || CAN.indexOf('box-tell') >= 0;
+    // The session's own name when it has one ("Linnea"), else the agent's display name (SPEC 10.5); on a
+    // box sheaf the member the live session runs as (James), and James on his sheaf with no session yet.
+    AGENT = toBox ? upper(liveSession().member) || 'James'
+          : (CFG.agent && (CFG.agent.name || CFG.agent.display)) || 'the agent';
+    AGENT_UC = AGENT.charAt(0).toUpperCase() + AGENT.slice(1);
+    canAsk = CAN.indexOf(toBox ? 'box-ask' : 'ask') >= 0;
+    canTell = CAN.indexOf(toBox ? 'box-tell' : 'deliver') >= 0;
   }
+  function liveSession() { return (CFG.work && CFG.work.sessions && CFG.work.sessions[0]) || {}; }
+  function upper(s) { s = String(s || ''); return s.charAt(0).toUpperCase() + s.slice(1); }
   takeAgent();
   // What the hub's answer to /_/doc says of the agent: a rename, or a session that ended, reaches
   // an open page by any of the three places that ask (SPEC 10.5).
   function takeTarget(j) {
     if (!j || !('capabilities' in j)) return;
-    var before = JSON.stringify([CFG.agent, CFG.can, CFG.lines]);
+    var before = JSON.stringify([CFG.agent, CFG.can, CFG.lines, CFG.work]);
     CFG.agent = j.target || null;
     CFG.can = j.capabilities || [];
     CFG.lines = j.lines || {};
+    if ('work' in j) CFG.work = j.work;       // a fork moves the live session off the box (9.12)
     takeAgent();
+    if (workOpen()) drawWork();               // an open Work on this shows the sessions the hub knows now
     var wasOpen = menu.classList.contains('open');
     buildMenu();
     if (wasOpen) openMenu();
     // An open thread draws the agent's name and the Answer button; it is drawn again when they changed.
-    if (before !== JSON.stringify([CFG.agent, CFG.can, CFG.lines]) && pop && popId && byId[popId]) fillPopover(popId);
+    if (before !== JSON.stringify([CFG.agent, CFG.can, CFG.lines, CFG.work]) && pop && popId && byId[popId]) fillPopover(popId);
   }
-  function lineOf(what) { return (CFG.lines && CFG.lines[what]) || NO_AGENT; }
+  // A sheaf whose live session runs on a member's machine is worked on there (SPEC 10.6).
+  function lineOf(what) {
+    if (CFG.work && CFG.work.live === 'laptop') return 'This session runs on ' + upper(liveSession().member) + '’s machine: open it there.';
+    return (CFG.lines && CFG.lines[what]) || NO_AGENT;
+  }
   function agentLine() {
+    if (toBox && (canAsk || canTell)) return (canAsk && canTell ? 'Ask and Tell' : canAsk ? 'Ask' : 'Tell') + ' → ' + AGENT + '’s window on the box';
     var a = CFG.agent;
     if (!a || (!canAsk && !canTell)) return lineOf('ask');
     return (canAsk && canTell ? 'Ask and Tell' : canAsk ? 'Ask' : 'Tell') +
@@ -351,11 +366,13 @@
 
   function buildMenu() {
     var h = '<div class="rd-state" id="rd-state"></div>';
+    // Work on this (CFG.work): on a member's page of a sheaf, the ways to work on its session (SPEC 10.2).
+    if (canEdit || CFG.work) h += '<div class="rd-group">Document</div>';
     if (canEdit) {
-      h += '<div class="rd-group">Document</div>' +
-           '<button id="rd-edit"><span>Edit</span><span class="rd-key">E</span></button>' +
+      h += '<button id="rd-edit"><span>Edit</span><span class="rd-key">E</span></button>' +
            '<button id="rd-save"><span>Save</span><span class="rd-key">Ctrl+S</span></button>';
     }
+    if (CFG.work) h += '<button id="rd-work-btn"><span>Work on this</span></button>';
     h += '<div class="rd-group">Comments</div>' +
          '<button id="rd-show"><span>Show comments (' + openCount() + ')</span></button>';
     if (canSave) h += '<div class="rd-as">Commenting as ' + esc(CFG.me || 'unknown') +
@@ -370,6 +387,7 @@
     q('#rd-edit') && q('#rd-edit').addEventListener('click', function () { closeMenu(); setEditing(!editing); });
     q('#rd-save') && q('#rd-save').addEventListener('click', function () { closeMenu(); save(); });
     q('#rd-show').addEventListener('click', function () { closeMenu(); openPanel(); });
+    q('#rd-work-btn') && q('#rd-work-btn').addEventListener('click', function (e) { e.stopPropagation(); closeMenu(); openWork(); });
     q('#rd-html') && q('#rd-html').addEventListener('click', function () { closeMenu(); grab('html'); });
     q('#rd-pdf') && q('#rd-pdf').addEventListener('click', function () { closeMenu(); grab('pdf'); });
     refresh();
@@ -448,7 +466,7 @@
     if (bs) bs.disabled = !(d > 0 && canSave && !stale && !dead);
   }
 
-  function openMenu() { menu.classList.add('open'); refresh(); }
+  function openMenu() { closeWork(); menu.classList.add('open'); refresh(); }     // the popover stands where the menu is
   function closeMenu() { menu.classList.remove('open'); }
   btn.addEventListener('click', function (e) {
     e.stopPropagation();
@@ -456,6 +474,65 @@
   });
   document.addEventListener('click', function (e) {
     if (menu.classList.contains('open') && !menu.contains(e.target) && e.target !== btn) closeMenu();
+  });
+
+  // ---- Work on this (SPEC 10.2) ----------------------------------------------------------------
+  // On a member's page of a sheaf, CFG.work holds the commands that work on its session (attach on the
+  // box, fork to the member's machine) and the sessions of its front matter, newest first. The popover
+  // stands where the menu was; Escape and a click outside close it, as they close the menu.
+  var workPop = null;
+  // "2026-10-28T05:12:03Z" reads "2026-10-28 05:12 UTC"; anything else is shown as written.
+  function utcDate(d) {
+    var m = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}):\d{2}Z$/.exec(String(d || ''));
+    return m ? m[1] + ' ' + m[2] + ' UTC' : String(d || '');
+  }
+  function cmdRow(text) {
+    return '<div class="rd-cmd"><code>' + esc(text) + '</code><button type="button">Copy</button></div>';
+  }
+  function drawWork() {
+    var w = CFG.work || {}, ss = (w.sessions || []).slice(0, 5);
+    var h = '';
+    if (w.attach) h += '<h4>Attach on the box</h4><p>James’s session is live in tmux. You join it in your terminal; ' +
+                       'same transcript, same tools, James’s account.</p>' + cmdRow(w.attach);
+    // The fork fetches a transcript of the box; the hub leaves `fork` out when none of the sessions ran there.
+    if (w.fork) h += '<h4>Fork to your machine</h4>' + cmdRow(w.fork) +
+                     '<p>Runs on your laptop: fetches the session through this hub, forks it under your name.</p>';
+    h += '<h4>Sessions</h4>' + (ss.length ? ss.map(function (x) {
+      return '<div class="rd-sess">' + esc(upper(x.member)) + ' on ' + esc(x.host) + ' · ' + esc(utcDate(x.date)) + '</div>';
+    }).join('') : '<p class="rd-none">No session yet.</p>') +
+    (ss.length && !w.fork ? '<p class="rd-none">No session of this sheaf ran on the box: there is none to fork.</p>' : '');
+    workPop.innerHTML = h;
+    Array.prototype.forEach.call(workPop.querySelectorAll('.rd-cmd button'), function (b) {
+      b.addEventListener('click', function () { copyCommand(b.previousElementSibling); });
+    });
+  }
+  function openWork() {
+    if (!workPop) {
+      workPop = el('div', { id: 'rd-work', role: 'dialog', 'aria-label': 'Work on this' });
+      document.body.appendChild(workPop);
+    }
+    drawWork();
+    workPop.hidden = false;
+  }
+  function workOpen() { return !!workPop && !workPop.hidden; }
+  function closeWork() { if (workPop) workPop.hidden = true; }
+  // The clipboard where the browser lends it (a secure context); else the command is selected, for Ctrl+C.
+  function copyCommand(code) {
+    var text = code.textContent;
+    var pick = function () {
+      var r = document.createRange();
+      r.selectNodeContents(code);
+      var s = window.getSelection();
+      s.removeAllRanges();
+      s.addRange(r);
+      say('Selected: press Ctrl+C to copy.');
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { say('Copied'); }, pick);
+    } else pick();
+  }
+  document.addEventListener('click', function (e) {
+    if (workOpen() && !workPop.contains(e.target) && e.target !== btn && !menu.contains(e.target)) closeWork();
   });
 
   function setEditing(on) {
@@ -485,7 +562,7 @@
                                                          panel: panel.classList.contains('open'),
                                                          known: counts(), editing: editing,
                                                          caret: caretNow(), held: heldReload,
-                                                         interrupted: Object.keys(interrupted) }));
+                                                         interrupted: Object.keys(interrupted), sent: sentBox }));
     } catch (e) {}
     location.reload();
   }
@@ -1569,11 +1646,35 @@
   // is offered only when the agent can do it (CFG.can); a job already running
   // always shows, so it can be cancelled.
   var ASK_TIP = 'Answers here in the thread, from a copy of the session. Reads, changes nothing.';
-  function tellTip() { return 'Sends this to ' + yourSession() + ', which acts on it and replies here.'; }
+  function askTip() { return toBox ? 'Sends this to ' + AGENT + '’s window on the box; ' + AGENT + ' answers here in the thread.' : ASK_TIP; }
+  function tellTip() {
+    return toBox ? 'Sends this to ' + AGENT + '’s window on the box, to act on; ' + AGENT + ' replies here.'
+                 : 'Sends this to ' + yourSession() + ', which acts on it and replies here.';
+  }
+  // A comment sent to James's window: its thread says so until a reply comes after it, with no spinner, as
+  // nothing on the page waits for it (9.12). Kept by thread id with the number of replies it had then and the
+  // name it went to, which a fork reported since does not change.
+  var sentBox = {};
+  function sentLine(id) {
+    var c = byId[id];
+    var s = sentBox[id];
+    if (!s || !c || (c.replies || []).length > s.n) { delete sentBox[id]; return ''; }
+    return '<div class="rd-msg rd-sent">Sent to ' + esc(s.to) + '’s window; his answer appears in this thread.</div>';
+  }
+  // What a send with Ask or Tell started: on a box sheaf the line, counted from the thread as the hub's answer
+  // holds it (the send's own reply in it), else the page's own wait.
+  function started(id, k, j) {
+    if (!took(j, k + 'Error')) return;
+    if (toBox) {
+      var c = (j.comments || []).filter(function (x) { return x.id === id; })[0] || byId[id];
+      sentBox[id] = { n: ((c && c.replies) || []).length, to: AGENT };
+    } else if (k === 'ask') asking[id] = true;
+    else telling[id] = true;
+  }
   // The Ask and Tell entries of a form: a working button for what the agent can do, a
   // disabled one carrying its line for what it cannot (textForm shows the lines).
   function agentButtons(askLabel, tellLabel) {
-    return [canAsk ? { k: 'ask', label: askLabel, cls: 'rd-ask', tip: ASK_TIP }
+    return [canAsk ? { k: 'ask', label: askLabel, cls: 'rd-ask', tip: askTip() }
                    : { off: lineOf('ask'), label: askLabel, cls: 'rd-ask' },
             canTell ? { k: 'tell', label: tellLabel, cls: 'rd-tell', tip: tellTip() }
                     : { off: lineOf('tell'), label: tellLabel, cls: 'rd-tell' }];
@@ -1604,6 +1705,7 @@
                      (tellQ ? '<div class="rd-text">is waiting for your answer in your session: ' + esc(tellQ) + '</div>' +
                               answerButton() + '</div>'
                             : '<div class="rd-text">is working on it in your session' + DOTS + '</div></div>') : '') +
+      sentLine(id) +
       (interrupted[id] ? '<div class="rd-msg rd-reply rd-interrupted"><span class="rd-who">' + esc(AGENT_UC) + '</span>' +
                          '<div class="rd-text">interrupted by a hub restart, send it again</div></div>' : '') + '</div>';
     var ans = pop.querySelector('.rd-answer');
@@ -1613,7 +1715,7 @@
       acts.hidden = sentOf(id);      // a reply or an edit of this thread is out: its buttons wait for the answer
       acts.innerHTML = '<button data-a="reply">Reply</button>' +
         (asking[id] ? busy('ask', AGENT_UC + ' is answering')
-         : canAsk ? '<button class="rd-alt rd-ask" data-a="ask" title="' + esc(ASK_TIP) + '">Ask ' + esc(AGENT) + '</button>'
+         : canAsk ? '<button class="rd-alt rd-ask" data-a="ask" title="' + esc(askTip()) + '">Ask ' + esc(AGENT) + '</button>'
          : offButton('ask', 'Ask ' + AGENT)) +
         (telling[id] ? busy('tell', AGENT_UC + ' is working')
          : canTell ? '<button class="rd-alt rd-tell" data-a="tell" title="' + esc(tellTip()) + '">Tell ' + esc(AGENT) + '</button>'
@@ -1627,6 +1729,8 @@
         var a = t && t.getAttribute('data-a');
         if (!a) return;
         if (a === 'cancel-ask' || a === 'cancel-tell') { cancel(id, a.slice(7)); return; }
+        // On a box sheaf Ask and Tell carry a text for James: they open the reply form, which sends it (9.12).
+        if ((a === 'ask' || a === 'tell') && toBox) { replyForm(id); return; }
         if (a === 'ask') { ask(id); return; }
         if (a === 'tell') { tell(id); return; }
         if (a === 'status') op({ op: 'status', id: id, status: c.status === 'open' ? 'resolved' : 'open' });
@@ -1676,8 +1780,7 @@
       threadKeep(c, 'reply', t, rid, line, Date.now());
       return op({ op: 'reply', id: id, body: t, resolve: k === 'res', ask: k === 'ask', tell: k === 'tell', rid: rid }).then(function (j) {
         if (j) threadKeep(c, 'reply', null, rid);
-        if (k === 'ask' && took(j, 'askError')) { asking[id] = true; touched(id); }
-        if (k === 'tell' && took(j, 'tellError')) { telling[id] = true; touched(id); }
+        if (k === 'ask' || k === 'tell') { started(id, k, j); touched(id); }
         if (j && j.askError) say(j.askError, true);
         if (j && j.tellError) say(j.tellError, true);
         return j;
@@ -2003,7 +2106,7 @@
   document.addEventListener('mousedown', function (e) {
     if (!panel.classList.contains('open')) return;
     var t = e.target;
-    if (t.closest && t.closest('#rd-panel, #rd-popover, #rd-menu, #rd-menu-btn, #rd-comment-btn, .rd-badge')) return;
+    if (t.closest && t.closest('#rd-panel, #rd-popover, #rd-menu, #rd-work, #rd-menu-btn, #rd-comment-btn, .rd-badge')) return;
     closePanel();
   });
   function drawPanel() {
@@ -2064,7 +2167,7 @@
   var BAR_CLEAR = 24;                   // px between the touch bar and a selection before the bar moves out of its way
   var TAP_SLOP = 8, TAP_MOVE = 10;      // px a finger may be off the button, and may travel, and still tap it
   var SETTLE = 350;                     // ms a touch selection stands still before the button is offered
-  var IN_UI = '#rd-popover, #rd-panel, #rd-menu, #rd-comment-btn';   // selections that are not the document's
+  var IN_UI = '#rd-popover, #rd-panel, #rd-menu, #rd-work, #rd-comment-btn';   // selections that are not the document's
   function unpaintWidened() { if (HL) CSS.highlights.delete('rd-widened'); }
   function dropCommentBtn() { if (cbtn) { cbtn.remove(); cbtn = null; } clearTimeout(thumbTimer); thumbOn = false; }
   function hideCommentBtn() { dropCommentBtn(); unpaintWidened(); }
@@ -2315,8 +2418,7 @@
           r.insertNode(a);
           b.pristine = pristineWithAnchor(b, a, before);
         }
-        if (k === 'ask' && took(j, 'askError')) asking[j.id] = true;
-        if (k === 'tell' && took(j, 'tellError')) telling[j.id] = true;
+        if (k === 'ask' || k === 'tell') started(j.id, k, j);
         window.getSelection().removeAllRanges();
         draftsReplace(own);
         if (j.textSame === false || reloadPending || !applyComments(j, [j.id])) {
@@ -2368,6 +2470,7 @@
                  /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName || '');
     if (e.key === 'Escape') {
       // One thing per press, the first that applies.
+      if (workOpen()) { e.preventDefault(); closeWork(); return; }
       if (pop && !standing()) { e.preventDefault(); leavePopover(); return; }
       if (panel.classList.contains('open')) { e.preventDefault(); closePanel(); return; }
       if (menu.classList.contains('open')) { e.preventDefault(); closeMenu(); return; }
@@ -3106,6 +3209,11 @@
       if (says) msg = msg ? msg + ' · ' + says.charAt(0).toLowerCase() + says.slice(1, -1) : says;
       // The jobs a new boot lost are still lost: the reload an upgrade or moved text brings keeps them.
       (keep.interrupted || []).forEach(function (id) { if (byId[id]) interrupted[id] = true; });
+      // A comment sent to James's window keeps its line past the reload the session the hub records brings.
+      Object.keys(keep.sent || {}).forEach(function (id) {
+        var s = keep.sent[id];
+        if (byId[id] && s && typeof s.n === 'number' && typeof s.to === 'string') sentBox[id] = { n: s.n, to: s.to };
+      });
       if (keep.panel) openPanel();
       if (keep.editing) { setEditing(true); placeCaret(keep.caret); }
       if (keep.open && byId[keep.open]) setTimeout(function () { openComment(keep.open); }, 50);

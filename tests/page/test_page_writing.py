@@ -1658,7 +1658,7 @@ def test_a_block_typed_in_again_after_a_save_given_up_that_the_hub_wrote_meets_n
     p.keyboard.type(" Three.")
     p.keyboard.press("Control+s")
     until(lambda: len(bodies) >= 3 and " Three." in f.read_text(), what="the third save in the file")
-    p.unroute("**/_/save")
+    p.unroute_all(behavior="ignoreErrors")      # the held save may still be in route.fetch
     second, again, third = bodies[:3]
     assert second["edits"][0]["saved"] and second["rid"]            # it names the first save, which was merged
     assert again["rid"] == second["rid"] and again["hash"] == second["hash"], "the save that got no answer did not go again first"

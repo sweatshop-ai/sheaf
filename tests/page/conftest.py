@@ -166,8 +166,10 @@ def touch_tab(chromium, site):
     c.add_cookies([site.cookie()])
     t = Tab(c.new_page(), site)
     yield t
-    assert t.errors == [], "the page raised script errors"
-    close_context(c)
+    try:
+        assert t.errors == [], "the page raised script errors"
+    finally:
+        close_context(c)
 
 
 @pytest.fixture

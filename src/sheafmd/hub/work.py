@@ -1,13 +1,13 @@
 """
 sheafmd.hub.work — Work on this (SPEC 9.12): a sheaf's sessions, the transcript of a box-hosted one, and the
-file Ask and Tell drop for James's window.
+file Ask, Tell and Stop James drop for James's window.
 
     state(hub, address, text)       a sheaf's sessions and where its live session runs; None for another page
     sessions(fm)                    the items of the front matter's `sessions` that parse, as written (newest first)
     with_session(text, line, id)    the text with `line` as the first of `sessions`, the rest as written
     open_transcript(folder, id)     the bytes of `<folder>/<one folder>/<id>.jsonl`, or None
     james_newest(cfg, project)      the id of James's newest session of `project`, from the copy, or None
-    drop(folder, project, data, missing)  a file in `folder` for the box's supervisor: "written" or why not
+    drop(folder, project, body, missing)  a file in `folder` for the box's supervisor: "written" or why not
 
 A session item is one YAML flow mapping on one line, `{id: <uuid>, host: <host>, member: <who>, date: <UTC>}`.
 An item that does not match that exactly is skipped, never guessed at: the hub serves a file by what it names.
@@ -240,8 +240,8 @@ def _first_cwd(dfd: int, name: str, most: int = 1 << 20):
     return None
 
 
-def drop(folder: Path | None, project: str, data: dict, missing: str) -> str:
-    """Write `data` as JSON to a new file of `folder`, named `<client>--<project>-<UTC stamp>` (and `-<n>`
+def drop(folder: Path | None, project: str, body: bytes, missing: str) -> str:
+    """Write `body` to a new file of `folder`, named `<client>--<project>-<UTC stamp>` (and `-<n>`
     when that is taken): written as `.<name>`, mode 0640 whatever the hub's umask, then renamed, so the
     box's supervisor never reads half a file. "written", or why nothing was."""
     if folder is None:
@@ -249,7 +249,6 @@ def drop(folder: Path | None, project: str, data: dict, missing: str) -> str:
     if not folder.is_dir():
         return f"{folder} is not a folder"
     base = f"{project.replace('/', '--')}-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}"
-    body = json.dumps(data).encode("utf-8")
     for n in range(100):
         name = base if n == 0 else f"{base}-{n}"
         tmp, final = folder / f".{name}", folder / name

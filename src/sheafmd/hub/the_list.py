@@ -103,7 +103,7 @@ def parse(t: dict, where) -> ListConfig:
         raise ListError(f"'repo' must be owner/name, in {here}: {t['repo']!r}")
     if t["project"] < 1:
         raise ListError(f"'project' must be a Project's number, in {here}: {t['project']!r}")
-    if t.get("poll", 60) < 1:
+    if t.get("poll", DEFAULTS["poll"]) < 1:
         raise ListError(f"'poll' must be a number of seconds, in {here}: {t['poll']!r}")
     api = t.get("api", DEFAULTS["api"]).rstrip("/")
     if not api.startswith(("https://", "http://127.0.0.1:", "http://localhost:")):
@@ -204,7 +204,7 @@ def _query(issues: list) -> str:
     for i, (owner, repo, number) in enumerate(issues):
         parts.append(
             f'i{i}: repository(owner: "{owner}", name: "{repo}") {{ issue(number: {number}) {{ '
-            "state stateReason updatedAt assignees(first: 10) { nodes { login } } "
+            "state updatedAt assignees(first: 10) { nodes { login } } "
             "projectItems(first: 20) { nodes { project { number owner { ... on Organization { login } "
             "... on User { login } } } status: fieldValueByName(name: \"Status\") { "
             "... on ProjectV2ItemFieldSingleSelectValue { name } } } } } }")
@@ -233,7 +233,11 @@ def fetch(cfg: ListConfig, issues: list) -> dict:
             raise RecordError(f"GitHub answered {e.code} to the record's query") from None
         except (OSError, ValueError) as e:
             raise RecordError(f"GitHub could not be read ({type(e).__name__})") from None
-        data = answer.get("data") or {}
+        data = answer.get("data") if isinstance(answer, dict) else None
+        if not isinstance(data, dict):
+            kinds = sorted({str(e.get("type") or "?") for e in answer.get("errors") or [] if isinstance(e, dict)}) \
+                if isinstance(answer, dict) else []
+            raise RecordError(f"GitHub answered the record's query with errors and no data ({', '.join(kinds) or 'none named'})")
         for i, key in enumerate(batch):
             issue = (data.get(f"i{i}") or {}).get("issue")
             if issue is not None:
@@ -310,7 +314,7 @@ class TheList:
                 entries = {}
             wanted = sorted({s.issue for s in sheaves})
             try:
-                self._records.update(fetch(self.cfg, wanted) if wanted else {})
+                self._records = fetch(self.cfg, wanted) if wanted else {}   # an issue it does not hold is off
             except RecordError as e:
                 self.hub.record("list-poll-failed", None, root=root.name, error=str(e))
             rows = [Row(s, self._records[s.issue], "/".join(s.rel.split("/")[:2]))
@@ -376,7 +380,7 @@ class TheList:
                 continue
             if show == "projects":
                 entry = snap.projects.get(row.group) or {}
-                if not member.short or member.short not in entry.get("members", []):
+                if not member.short or member.short.lower() not in {str(m).lower() for m in entry.get("members", [])}:
                     continue
             sections[row.record.status].append((row, owners, is_owner))
         body = "".join(self._section(title, sections[key], member, root.name)
@@ -417,7 +421,7 @@ class TheList:
         elif owners and owners[0] is not None and owners[0].short:
             owner = "@" + owners[0].short
         elif rec.assignees:
-            owner = "@" + rec.assignees[0]
+            owner = rec.assignees[0]
         else:
             owner = "nobody"
         meta = " · ".join(x for x in (s.kind, owner, f"#{s.issue[2]}", _age(self.hub.clock() - rec.updated)) if x)

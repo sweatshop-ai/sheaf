@@ -617,8 +617,11 @@ class Handler:
         snap["rids"] = e.live.taken_rids()
         if req.member is not None:
             # Their own seen state, and nothing of the hub account's agent session (9.9).
+            # A sheaf's Work on this and its Ask and Tell for James's window are refreshed as the meta's (9.12).
+            work, can = self.hub.member_work(e, req.member)
+            extra = {} if work is None else {"work": work}
             return _ok(**proxy.for_member(snap), seen=self.hub.member_seen.get(req.member.id, e.address),
-                       asking=[], question="", target=None, capabilities=[], lines=proxy.member_lines())
+                       asking=[], question="", target=None, capabilities=can, lines=proxy.member_lines(), **extra)
         v = self.hub.asktell.view(e.address)
         return _ok(**snap, seen=self.hub.seen.get(e.address),
                    asking=self.hub.runner.active("ask", e.address),

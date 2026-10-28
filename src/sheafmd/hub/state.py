@@ -38,12 +38,18 @@ INSIDE = Path(".sheaf") / "versions"    # a root's own versions store, inside it
 
 
 def write_text_private(path: Path, text: str):
-    """Write `text` to `path`: complete or not at all, 0600."""
+    """Write `text` to `path`: complete or not at all, 0600. The hidden sibling is made new: whatever
+    stands at its name (a link planted in a root's versions store, 7.4) goes first, never written
+    through."""
     path = Path(path)
     paths.private_dir(path.parent)
     tmp = path.with_name("." + path.name + ".tmp")
     try:
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.unlink(tmp)
+    except FileNotFoundError:
+        pass
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             os.fchmod(f.fileno(), 0o600)
             f.write(text)
@@ -142,6 +148,8 @@ class Versions:
 
     def _make_folder(self, address: str) -> Path:
         """`_folder`, made when it is not there yet, with its `address` file."""
+        if self._root is not None:
+            paths.private_dir(self._root / INSIDE.parent)   # `.sheaf` itself: never a link out of the root
         folder = paths.private_dir(paths.private_dir(self.dir) / doc_key(self._key(address)))
         if not (folder / _ADDRESS_FILE).exists():
             write_text_private(folder / _ADDRESS_FILE, self._key(address))
@@ -155,7 +163,7 @@ class Versions:
         h = md_hash(text)
         f = folder / f"{h}.md"
         if f.is_file():
-            os.utime(f)
+            os.utime(f, follow_symlinks=False)
         else:
             write_text_private(f, text)
         files = []

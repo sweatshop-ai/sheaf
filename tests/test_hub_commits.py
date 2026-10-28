@@ -238,3 +238,63 @@ def test_a_stopping_hub_waits_for_the_push_of_the_last_write(box, sheaves, remot
     edit(box, sheaves)
     box.hub.stop_jobs()
     assert "Second, edited on the page." in git(remote, "show", "main:acme/blog/2026-10-28-plan.md")
+
+
+def test_a_link_planted_in_the_versions_store_is_never_written_through(box, sheaves, tmp_path):
+    from sheafmd.hub import state
+    victim = tmp_path / "victim.txt"
+    victim.write_text("untouched\n", encoding="utf-8")
+    folder = sheaves / ".sheaf" / "versions" / state.doc_key("acme/blog/2026-10-28-plan.md")
+    folder.mkdir(parents=True)
+    (folder / ".address.tmp").symlink_to(victim)
+    box.get(f"/{DOC}")
+    edit(box, sheaves)
+    assert victim.read_text(encoding="utf-8") == "untouched\n"
+
+
+def test_a_sheaf_folder_that_is_a_link_out_of_the_root_gets_no_versions(box, sheaves, tmp_path):
+    away = tmp_path / "away"
+    away.mkdir()
+    (sheaves / ".sheaf").symlink_to(away)
+    box.get(f"/{DOC}")
+    try:
+        edit(box, sheaves)
+    except AssertionError:
+        pass
+    assert list(away.iterdir()) == []
+
+
+def test_a_slow_push_does_not_hold_up_the_next_save(box, sheaves, remote):
+    import time
+    git(sheaves, "config", "remote.origin.receivepack", "sleep 3; git-receive-pack")
+    edit(box, sheaves)
+    time.sleep(0.5)                                      # the push is under way
+    t = time.monotonic()
+    edit(box, sheaves, words="Second, edited while it pushed.")
+    assert time.monotonic() - t < 2
+    assert box.hub.commits.settle()
+
+
+def test_a_commit_that_fails_leaves_nothing_staged(box, sheaves):
+    head = git(sheaves, "rev-parse", "HEAD").strip()
+    (sheaves / ".git" / "MERGE_HEAD").write_text(head + "\n", encoding="utf-8")   # a merge under way
+    edit(box, sheaves)
+    (row,) = rows("commit-failed")
+    assert row["doc"] == DOC
+    assert git(sheaves, "diff", "--cached", "--name-only") == ""
+
+
+def test_a_link_into_the_versions_store_is_not_listed(box, sheaves):
+    edit(box, sheaves)
+    target = next((sheaves / ".sheaf" / "versions").rglob("*.md"))
+    (sheaves / "acme" / "blog" / "alias.md").symlink_to(target)
+    docs = [d["doc"] for r in box.get("/_/index.json").json()["roots"] for d in r["docs"]]
+    assert docs == [DOC]
+
+
+def test_a_projects_toml_that_cannot_be_read_warns_once_however_it_changes(box, sheaves):
+    (sheaves / "projects.toml").write_text('[projects."acme/blog"]\nstatus = "maybe"\n', encoding="utf-8")
+    box.get("/_/index.json")
+    (sheaves / "projects.toml").write_text('[projects."acme/blog"\n', encoding="utf-8")
+    box.get("/_/index.json")
+    assert len(rows("projects-invalid")) == 1

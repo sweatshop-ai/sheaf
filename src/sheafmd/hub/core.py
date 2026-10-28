@@ -127,8 +127,8 @@ class Hub:
         try:
             entries = projects.read(root.path)
         except projects.Invalid as e:
-            if (root.id, None, str(e)) not in self._told_projects:
-                self._told_projects.add((root.id, None, str(e)))
+            if (root.id, None) not in self._told_projects:
+                self._told_projects.add((root.id, None))
                 self.record("projects-invalid", None, root=root.name, error=str(e))
                 print(f"sheaf: {root.path / projects.FILE}: {e}", file=sys.stderr, flush=True)
             return

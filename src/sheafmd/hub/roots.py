@@ -558,6 +558,8 @@ def _capped(top: Path, names: Iterable[str], kept: Callable[[str, bool], bool]) 
     for rel in names:
         if not (_servable(rel) and (found := _stat_inside(top, rel, folders)) and kept(rel, found[1])):
             continue
+        if found[1] and _sheafs_own(os.path.relpath(os.path.realpath(top / rel), top)):
+            continue                                  # a link into `.sheaf/`, which `document` refuses
         if len(docs) < LIST_CAP:
             docs.append(Found(rel, found[0]))
         else:

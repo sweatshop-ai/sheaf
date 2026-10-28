@@ -112,6 +112,7 @@ class Commits:
             author = Author(author.name, mail.stdout.strip() if mail.returncode == 0 else COMMITTER[1])
         r = _git(folder, *who, "commit", "-q", "--no-verify", "-m", subject, "--", *paths, author=author)
         if r.returncode != 0:
+            _git(folder, "reset", "-q", "--", *paths)     # what this write staged goes back out
             self._record("commit-failed", address, error=_last_line(r))
             return False
         return True
@@ -135,8 +136,8 @@ class Commits:
                 folder, address = self._due.popitem()
                 self._pushing = True
             try:
-                with self._root_lock(folder):
-                    r = _git(folder, "push", "-q", "origin", "HEAD", seconds=PUSH_SECONDS)
+                # Not under the root's lock: a save meanwhile commits, and the next push carries it.
+                r = _git(folder, "push", "-q", "origin", "HEAD", seconds=PUSH_SECONDS)
                 if r.returncode != 0:
                     # The commit stays; the next write's push carries it.
                     self._record("push-failed", address, error=_last_line(r))

@@ -730,6 +730,31 @@ def _toggle_boxes(block, fragment: str):
     return out
 
 
+def ticked_html(block, k: int):
+    """The block as the page would send it with its `k`th task box ticked, for a tick made away from the
+    page (the list's row, SPEC 9.10): saved like the page's own, it takes the `_toggle_boxes` path and
+    flips that one mark. None when the box is ticked already, or when that path would not be the one
+    taken (the marks are not the boxes drawn, a comment is in the way): a save would then go through pandoc."""
+    from bs4 import BeautifulSoup
+
+    if not block.editable:
+        return None
+    r = _pandoc.run(["-f", "gfm", "-t", "html5", "--no-highlight"], block.content)
+    if r.returncode != 0:
+        return None
+    # The page shows each comment as its anchor; the anchor is what keeps the comment through a save.
+    soup = BeautifulSoup(COMMENT_HTML_RE.sub(
+        lambda m: f'<span class="rd-anchor" data-rd-id="{m.group(1)}"></span>', r.stdout), "html.parser")
+    found = soup.select('input[type="checkbox"]')
+    if not 0 <= k < len(found) or found[k].has_attr("checked"):
+        return None
+    found[k]["checked"] = ""
+    fragment = str(soup)
+    marks = list(TASK_MARK_RE.finditer(block.content))
+    want = block.content[:marks[k].start(2)] + "x" + block.content[marks[k].end(2):] if k < len(marks) else None
+    return fragment if _toggle_boxes(block, fragment) == want else None
+
+
 # ─────────────────────────────────────────────── comments through a save ──
 # pandoc html -> gfm drops HTML comments in silence (measured on paragraphs,
 # headings, lists, tables and blockquotes), so a comment would vanish the first

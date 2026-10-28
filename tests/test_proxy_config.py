@@ -187,3 +187,28 @@ def test_a_name_that_could_pass_for_someone_else_stops_the_start(names, person, 
     with pytest.raises(ProxyError) as e:
         proxy.check_names(members(*names), person=person, tokens=tokens)
     assert words in str(e.value)
+
+
+def test_a_member_names_the_door_tokens_that_act_for_them():
+    write_config(table() + 'tokens = ["james-ada", "mistral-ada"]\n')
+    cfg = proxy.load()
+    assert cfg.member_of_token("james-ada").id == ADA and cfg.member_of_token("james") is None
+
+
+def test_a_member_without_tokens_still_starts_and_binds_no_token():
+    write_config(table())
+    assert proxy.load().members[ADA].tokens == ()
+
+
+@pytest.mark.parametrize("value", ['"james"', '["a b"]', "[1]", f'["{"x" * 41}"]'])
+def test_tokens_that_are_not_a_list_of_token_names_stop_the_start(value):
+    write_config(table() + f"tokens = {value}\n")
+    with pytest.raises(ProxyError, match="'tokens' must be a list of token names"):
+        proxy.load()
+
+
+def test_a_token_that_acts_for_two_members_stops_the_start():
+    write_config(table() + 'tokens = ["james"]\n'
+                 f'\n[proxy.members."{BOB}"]\nname = "Bob"\nroots = ["/srv/pages/bob"]\ntokens = ["james"]\n')
+    with pytest.raises(ProxyError, match="acts for another member already"):
+        proxy.load()

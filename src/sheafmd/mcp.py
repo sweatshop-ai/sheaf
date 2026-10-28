@@ -32,7 +32,7 @@ from .hub.roots import Address, NotFound, address_of_url, in_git_dir
 from .hub import visibility
 from .hub.state import TokenRow
 from .render import COMMENT_RE as HTML_COMMENT_RE, strip_comments
-from .source import StaleError, create_file, md_hash, now, update_file
+from .source import create_file, md_hash, now, update_file
 
 PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")
 INSTRUCTIONS = (
@@ -233,8 +233,9 @@ def markdown_files(root) -> list[str]:
 class Door:
     def __init__(self, hub):
         self.hub = hub
-        # real path -> ((mtime_ns, size), [(id, messages, last author)] of its open threads):
-        # a file is read again only when it changed (SPEC 8.6)
+        # real path -> ((inode, mtime_ns, ctime_ns, size), [(id, messages, last author)] of its open threads,
+        # its front matter): a file is read again only when it changed, a write that kept its size and put
+        # its time back included (SPEC 8.6, 9.11)
         self._open_threads: dict = {}
         self._tools = {"documents": self._documents, "threads": self._threads,
                        "reply": self._reply, "resolve": self._resolve, "read": self._read,
@@ -319,11 +320,47 @@ class Door:
         else:
             address = doc
         try:
-            self.hub.roots.document(address)
+            path = self.hub.roots.document(address)
         except NotFound:
-            raise ToolError(f"There is no document {doc} in a root of this hub; name it "
-                            "`<root>/<path>`, by its page URL or by the absolute path of the .md.") from None
+            raise _absent(doc) from None
+        if self._judged(caller):
+            # Before any other check of the call, so no answer tells a sheaf the caller may not see from none;
+            # each tool judges again on the text it reads.
+            try:
+                self._seen(path.read_text(encoding="utf-8"), address, caller, doc)
+            except (OSError, UnicodeDecodeError):
+                raise _absent(doc) from None        # as a member is answered for a file it cannot read
         return address
+
+    def _judged(self, caller: Caller) -> bool:
+        """Whether visibility (9.11) holds `caller`: a token, in proxy mode."""
+        return caller.token is not None and getattr(self.hub, "proxy", None) is not None
+
+    def _member(self, caller: Caller):
+        """The member `caller` acts for (9.11): in proxy mode, the one whose `tokens` name its token; None for
+        the key, a token bound to nobody, and every caller in loopback mode."""
+        return self.hub.proxy.member_of_token(caller.token.name) if self._judged(caller) else None
+
+    def _sees(self, fm: dict, address: str, caller: Caller) -> bool:
+        """Whether `caller` may see the sheaf at `address` whose front matter is `fm` (9.11). In proxy mode a
+        token acts for the member whose `tokens` name it and sees what that member sees, in that member's
+        roots only; a token bound to nobody sees every root (9.7) and no sheaf that is its owner's alone. The
+        key is the hub's own account, which reads every file."""
+        if not self._judged(caller):
+            return True
+        member = self._member(caller)
+        if member is not None and not self.hub.member_owns(member, address):
+            return False
+        if visibility.effective(fm) == "project":
+            return True
+        return member is not None and visibility.visible_to(fm, member, self.hub.assignees(address, fm))
+
+    def _seen(self, text: str, address: str, caller: Caller, doc: str) -> str:
+        """`text`, the text of the document at `address`, when `caller` may see it; else the answer to a
+        `doc` that names no document."""
+        if not self._sees(visibility.front_matter(text), address, caller):
+            raise _absent(doc)
+        return text
 
     @staticmethod
     def _address_of_url(url: str) -> str:
@@ -345,7 +382,8 @@ class Door:
                     raise ToolError(f"{path} is not an existing .md file.")
                 return roots.address(md)
             root = roots.lookup(md)
-            if root is None:
+            if root is None or ((member := self._member(caller)) is not None and not self.hub.owns(member, root)):
+                # a root of another member's is no root to a token bound to one (9.11)
                 raise ToolError("A token cannot add a root, and the hub has no root that holds that file.")
             return str(Address(root.name, Path(os.path.realpath(md)).relative_to(root.path).as_posix()))
         except (OSError, ValueError) as e:
@@ -354,30 +392,36 @@ class Door:
             why = f" ({e.strerror})" if caller.may_add_roots and getattr(e, "strerror", None) else ""
             raise ToolError(f"{path} cannot be used as a document{why}.") from None
 
-    def _comments(self, address: str):
-        """The comments of the document as the file is now, not as a page was rendered."""
+    def _comments(self, address: str, caller: Caller, doc: str):
+        """The comments of the document as the file is now, not as a page was rendered. `doc` is how the
+        caller named it, for the answer to one it may not see."""
         try:
-            return rdc.parse(self.hub.roots.document(address).read_text(encoding="utf-8"))
+            text = self.hub.roots.document(address).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError, NotFound):
             raise ToolError(f"{address} cannot be read.") from None
+        return rdc.parse(self._seen(text, address, caller, doc))
 
-    def _comment(self, address: str, cid: str):
-        c = self._comments(address).by_id(cid)
+    def _comment(self, address: str, cid: str, caller: Caller, doc: str):
+        c = self._comments(address, caller, doc).by_id(cid)
         if c is None:
             raise ToolError(f"There is no comment {cid} in {address}.")
         return c
 
-    def _write(self, address: str, caller: Caller, op: str, fields: dict, role=None):
+    def _write(self, address: str, caller: Caller, doc: str, op: str, fields: dict, role=None):
         """A change to one comment. Through the document's Live Document when the hub has one,
         so open tabs hear of it at once and a Tell wait sees an action reply; straight into the
-        file when the hub holds no page for it."""
+        file when the hub holds no page for it. Either way the caller's sight of it (9.11) is judged
+        again on the file under its lock, so a sheaf that closed since the check takes nothing."""
         entry = self.hub.entries.get(address)
+
+        def guard(t):
+            self._seen(t, address, caller, doc)
         try:
             if entry is not None:
-                entry.live.comment(op, fields, None, by=caller.display, role=role, announce=True)
+                entry.live.comment(op, fields, None, by=caller.display, role=role, announce=True, guard=guard)
             else:
                 update_file(self.hub.roots.document(address),
-                            lambda t: rdc.apply_op(t, op, fields, caller.display, now(), role))
+                            lambda t: rdc.apply_op(guard(t) or t, op, fields, caller.display, now(), role))
         except rdc.AnchorError as e:
             raise ToolError(f"{e}.") from None
         except (OSError, UnicodeDecodeError, NotFound):
@@ -385,12 +429,13 @@ class Door:
         self.hub.committed(address, by=caller.display, what="comment")
 
     # ── the tools ────────────────────────────────────────────────────────────
-    def _open_in(self, path: Path) -> list:
+    def _open_in(self, path: Path) -> tuple:
+        """(open threads, front matter) of the file at `path`, both from one read."""
         st = path.stat()
-        key = (st.st_mtime_ns, st.st_size)
+        key = (st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
         cached = self._open_threads.get(path)
         if cached and cached[0] == key:
-            return cached[1]
+            return cached[1:]
         text = path.read_text(encoding="utf-8")
         threads = []
         if "comment id=" in text:
@@ -398,8 +443,8 @@ class Door:
                 if c.status == "open":
                     last = c.display(c.replies[-1]) if c.replies else c.by
                     threads.append((c.id, 1 + len(c.replies), last))
-        self._open_threads[path] = (key, threads)
-        return threads
+        self._open_threads[path] = (key, threads, visibility.front_matter(text))
+        return self._open_threads[path][1:]
 
     def _dot(self, address: str, unread: int, open_: int, asking: set) -> str:
         """The dot of 8.6, as the index page gives it: `asking` holds the documents an Ask runs on."""
@@ -412,12 +457,14 @@ class Door:
 
     def _documents(self, args: dict, caller: Caller):
         hub = self.hub
+        member = self._member(caller)
         if "root" in args:
-            if hub.roots.get(args["root"]) is None:
+            root = hub.roots.get(args["root"])
+            if root is None or (member is not None and not hub.owns(member, root)):
                 raise ToolError(f"There is no root named {args['root']}.")
-            wanted = [hub.roots.get(args["root"])]
+            wanted = [root]
         else:
-            wanted = hub.roots.all()
+            wanted = [r for r in hub.roots.all() if member is None or hub.owns(member, r)]
         asking = {doc for doc, _ in hub.jobs_asking()}
         rows, shut = [], []
         in_git = {}                             # (root, real folder) -> whether 8.2 keeps its files from the root
@@ -436,10 +483,12 @@ class Door:
                         in_git[root.name, path.parent] = in_git_dir(path, root)
                     if in_git[root.name, path.parent]:
                         continue                               # nor one in a git directory
-                    threads = self._open_in(path)
+                    threads, fm = self._open_in(path)
                     mtime = path.stat().st_mtime_ns
                 except (NotFound, OSError, UnicodeDecodeError):
                     continue
+                if not self._sees(fm, address, caller):
+                    continue                                   # nor a sheaf the caller may not see (9.11)
                 if args.get("open_only", True) and not threads:
                     continue
                 seen = hub.seen.get(address)
@@ -453,7 +502,7 @@ class Door:
     def _threads(self, args: dict, caller: Caller):
         address = self._address(args["doc"], caller)
         status = args.get("status", "open")
-        got = self._comments(address)
+        got = self._comments(address, caller, args["doc"])
         return {"doc": address, "url": self.hub.url(address),
                 "comments": [{k: v for k, v in c.as_dict().items() if k != "block"}
                              for c in got.comments if status == "all" or c.status == status],
@@ -464,18 +513,18 @@ class Door:
         cid, text = args["id"], args["text"]
         if not text.strip():
             raise ToolError("text is empty.")
-        self._comment(address, cid)
-        self._write(address, caller, "reply",
+        self._comment(address, cid, caller, args["doc"])
+        self._write(address, caller, args["doc"], "reply",
                     {"id": cid, "body": text, "resolve": args.get("resolve", False)},
                     role=args.get("role", "answer"))
-        c = self._comment(address, cid)
+        c = self._comment(address, cid, caller, args["doc"])
         return {"id": cid, "status": c.status, "replies": c.as_dict()["replies"]}
 
     def _resolve(self, args: dict, caller: Caller):
         address = self._address(args["doc"], caller)
         cid = args["id"]
-        if self._comment(address, cid).status != "resolved":
-            self._write(address, caller, "status", {"id": cid, "status": "resolved"})
+        if self._comment(address, cid, caller, args["doc"]).status != "resolved":
+            self._write(address, caller, args["doc"], "status", {"id": cid, "status": "resolved"})
         return {"id": cid, "status": "resolved"}
 
     def _read(self, args: dict, caller: Caller):
@@ -484,7 +533,7 @@ class Door:
             text = self.hub.roots.document(address).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError, NotFound):
             raise ToolError(f"{address} cannot be read.") from None
-        out = text
+        out = self._seen(text, address, caller, args["doc"])
         if not args.get("comments", True):
             out = strip_comments(text)
             if "<!--" in out:
@@ -520,11 +569,12 @@ class Door:
             raise ToolError("text is longer than 1 MiB; a page made or changed through the door is at "
                             "most that.", "size")
 
-    def _new_address(self, doc: str):
+    def _new_address(self, doc: str, caller: Caller):
         """(root, path in it) of the file `create` is to make. Its root must be one the hub has, for
-        every caller; the rules of 8.3, and no hidden name, hold for the path. An absolute path is
-        taken as it is written, inside the root's real path: it is not resolved, so a link on the way
-        is left for the walk of `create_file` to refuse, as it is in `<root>/<path>`."""
+        every caller, and for a token bound to a member one of that member's (9.11); the rules of 8.3,
+        and no hidden name, hold for the path. An absolute path is taken as it is written, inside the
+        root's real path: it is not resolved, so a link on the way is left for the walk of
+        `create_file` to refuse, as it is in `<root>/<path>`."""
         doc = _named(doc)
         roots = self.hub.roots
         if "://" in doc:
@@ -540,8 +590,8 @@ class Door:
         else:
             at = Address.parse(doc)
             root, rel = roots.get(at.root), at.rel
-        if root is None:
-            raise ToolError(f"{doc} {NOT_IN_A_ROOT}", "path")
+        if root is None or ((member := self._member(caller)) is not None and not self.hub.owns(member, root)):
+            raise ToolError(f"{doc} {NOT_IN_A_ROOT}", "path")     # a root of another member's is none (9.11)
         parts = rel.split("/")
         if (not rel.endswith(".md") or any(p in ("", ".", "..") or p.startswith(".") or "\0" in p
                                             for p in parts)):
@@ -552,8 +602,10 @@ class Door:
         return root, rel
 
     def _create(self, args: dict, caller: Caller):
-        root, rel = self._new_address(args["doc"])
+        root, rel = self._new_address(args["doc"], caller)
         address, text = str(Address(root.name, rel)), _as_read(args["text"])
+        if (member := self._member(caller)) is not None and not self.hub.member_owns(member, address):
+            raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path")     # a root of another member's
         self._check_size(text)
         _check_comments("", text)
         text = self._visible(text, None)
@@ -585,14 +637,17 @@ class Door:
         written = [text]
 
         def change(now_text):
-            _check_comments(now_text, text)     # against the file as it is, under its lock
+            # Each check on the file as it is, under its lock; a sheaf the caller may not see first, so a
+            # wrong hash does not tell it from no document (9.11).
+            self._seen(now_text, address, caller, args["doc"])
+            if md_hash(now_text) != expected:
+                raise Stale(f"{address} has changed since that hash was read; read it again, make the "
+                            "change on that text and send it with its hash.")
+            _check_comments(now_text, text)
             written[0] = self._visible(text, now_text)
             return written[0]
         try:
-            before, _ = update_file(self.hub.roots.document(address), change, expected)
-        except StaleError:
-            raise Stale(f"{address} has changed since that hash was read; read it again, make the "
-                        "change on that text and send it with its hash.") from None
+            before, _ = update_file(self.hub.roots.document(address), change)
         except (OSError, UnicodeDecodeError, NotFound):
             raise ToolError(f"{address} could not be written.", "not written") from None
         text = written[0]
@@ -618,6 +673,12 @@ class Door:
             raise ToolError("The text changes `sessions`, which only the hub writes; send it as `read` gave it"
                             + (" (a new page lists none)." if old is None else "."), "sessions")
         return out
+
+
+def _absent(doc: str) -> ToolError:
+    """The answer to a `doc` that names no document, said the same for one the caller may not see (9.11)."""
+    return ToolError(f"There is no document {_named(doc)} in a root of this hub; name it "
+                     "`<root>/<path>`, by its page URL or by the absolute path of the .md.")
 
 
 def _named(doc: str) -> str:

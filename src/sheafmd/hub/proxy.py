@@ -71,6 +71,7 @@ class Member:
     short: str = ""             # their short name in `projects.toml` and in an action's `@name` (9.10)
     github: str = ""            # their GitHub login: the record's assignee who is them (9.10)
     shell: bool = False         # they have a shell on the box: the page offers them the attach command (9.12)
+    tokens: tuple = ()          # the names of the door tokens that act for them (9.7, 9.11)
 
 
 @dataclass(frozen=True)
@@ -82,6 +83,10 @@ class ProxyConfig:
     uid: int                    # proxy_user's: the one uid the proxy socket serves
     gid: int                    # proxy_user's group: the group of the socket's folder
     members: dict               # id -> Member
+
+    def member_of_token(self, name: str):
+        """The member the door token `name` acts for, by their `tokens`; None for a token bound to nobody."""
+        return next((m for m in self.members.values() if name in m.tokens), None)
 
 
 def _read() -> dict:
@@ -124,7 +129,7 @@ _HOST_RE = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9
 _EMAIL_RE = re.compile(r"[^\s<>@,;\"']+@[^\s<>@,;\"']+")
 _SHORT_RE = re.compile(r"[A-Za-z0-9._-]{1,40}")
 _LOGIN_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
-OPTIONAL_MEMBER_KEYS = ("email", "short", "github", "shell")
+OPTIONAL_MEMBER_KEYS = ("email", "short", "github", "shell", "tokens")
 _OPTIONAL_WORDS = {"short": "1 to 40 letters, digits, dots, dashes or underscores (nell)",
                    "github": "a GitHub login (tiroir)"}
 SOCKET_MAX = 107                # bytes of a Unix socket's path (sun_path less its NUL)
@@ -183,6 +188,10 @@ def parse(t: dict, where) -> ProxyConfig:
                 raise ProxyError(f"'{key}' must be {_OPTIONAL_WORDS[key]}, not {v!r}, in {mhere}")
         if not isinstance(m.get("shell", False), bool):
             raise ProxyError(f"'shell' must be true or false, not {m['shell']!r}, in {mhere}")
+        tokens = m.get("tokens", [])
+        if not isinstance(tokens, list) or not all(isinstance(t, str) and _SHORT_RE.fullmatch(t) for t in tokens):
+            raise ProxyError(f"'tokens' must be a list of token names, each 1 to 40 letters, digits, dots, "
+                             f"dashes or underscores, not {tokens!r}, in {mhere}")
         _keys({k: v for k, v in m.items() if k not in OPTIONAL_MEMBER_KEYS}, MEMBER_KEYS, mhere)
         name = clean_display(m["name"])
         if not name:
@@ -195,7 +204,10 @@ def parse(t: dict, where) -> ProxyConfig:
                 raise ProxyError(f"every folder of 'roots' must be an absolute path, not {r!r}, in {mhere}")
             roots.append(r.rstrip("/") or "/")
         members[mid] = Member(mid, name, tuple(roots), email or "", m.get("short", ""), m.get("github", ""),
-                              m.get("shell", False))
+                              m.get("shell", False), tuple(tokens))
+        for name_ in tokens:
+            if any(name_ in o.tokens for o in members.values() if o.id != mid):
+                raise ProxyError(f"token {name_!r} of {mhere} acts for another member already")
         for key in ("short", "github"):
             mine = getattr(members[mid], key).casefold()
             if mine and any(getattr(o, key).casefold() == mine for o in members.values() if o.id != mid):

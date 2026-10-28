@@ -33,14 +33,22 @@ A quote from the contract.
 """
 
 
+def members(work, hans_also=None, **tokens):
+    """The `[proxy]` table of the two members, each with the door tokens `tokens` binds to their `short`.
+    Both have the root `work`; Hans has `hans_also` too, when given."""
+    team = {THIERRY: {"name": "Thierry", "short": "thierry", "github": "tiroir", "roots": [str(work)]},
+            HANS: {"name": "Hans", "short": "hans", "github": "hanshermans",
+                   "roots": [str(work)] + ([str(hans_also)] if hans_also else [])}}
+    for m in team.values():
+        if m["short"] in tokens:
+            m["tokens"] = tokens[m["short"]]
+    return proxy.parse({"origin": FRONT, "socket": "/run/sheaf-proxy/hub.sock",
+                        "proxy_user": pwd.getpwuid(os.getuid()).pw_name, "members": team}, "the test")
+
+
 @pytest.fixture
 def team(hub, browser, work, plan):
-    hub.proxy = proxy.parse({"origin": FRONT, "socket": "/run/sheaf-proxy/hub.sock",
-                             "proxy_user": pwd.getpwuid(os.getuid()).pw_name,
-                             "members": {THIERRY: {"name": "Thierry", "short": "thierry", "github": "tiroir",
-                                                   "roots": [str(work)]},
-                                         HANS: {"name": "Hans", "short": "hans", "github": "hanshermans",
-                                                "roots": [str(work)]}}}, "the test")
+    hub.proxy = members(work)
     return Front(hub, browser.handler)
 
 
@@ -144,10 +152,8 @@ def test_a_door_create_from_mistral_with_a_library_source_lands_owner_only(team,
 
 def test_a_door_write_cannot_share_a_sheaf_itself(team, browser, work):
     put(team, work, DOC, PRIVATE)
-    token = Tokens().add("james", write=True)
-    is_error, got = call(browser, "read", token=token, doc=f"work/{DOC}")
-    forged = got["text"].replace("owner: thierry", "owner: thierry\nvisibility: project\nshared: thierry 2026-10-28")
-    is_error, got = call(browser, "update", token=token, doc=f"work/{DOC}", text=forged, expected_hash=got["hash"])
+    is_error, got = door_update(team, browser, work, DOC, lambda t: t.replace(
+        "owner: thierry", "owner: thierry\nvisibility: project\nshared: thierry 2026-10-28"))
     assert not is_error, got
     fm = front_matter((work / DOC).read_text(encoding="utf-8"))
     assert fm["visibility"] == "owner" and "shared" not in fm
@@ -248,8 +254,10 @@ def test_the_stop_file_is_readable_by_the_folders_group_whatever_the_hubs_umask(
     assert f.stat().st_mode & 0o777 == 0o640
 
 
-def door_update(browser, work, rel, change):
-    """An assistant's door update of `rel`: the text it reads, changed by `change`."""
+def door_update(team, browser, work, rel, change):
+    """James's door update of `rel` for Thierry: the text it reads, changed by `change`. Its token is bound to
+    Thierry, who owns the sheaves here, so it is shown them (9.11)."""
+    team.hub.proxy = members(work, thierry=["james"])
     token = Tokens().add("james", write=True)
     is_error, got = call(browser, "read", token=token, doc=f"work/{rel}")
     assert not is_error, got
@@ -258,7 +266,7 @@ def door_update(browser, work, rel, change):
 
 def test_a_door_update_that_drops_the_front_matter_leaves_an_owner_only_sheaf_its_owners(team, browser, work):
     put(team, work, DOC, PRIVATE)
-    is_error, got = door_update(browser, work, DOC, lambda t: t.split("---\n", 2)[2])
+    is_error, got = door_update(team, browser, work, DOC, lambda t: t.split("---\n", 2)[2])
     assert not is_error, got
     assert team.get(f"/work/{DOC}", member=HANS).status == 404
     assert team.get(f"/work/{DOC}", member=THIERRY).status == 200
@@ -266,7 +274,7 @@ def test_a_door_update_that_drops_the_front_matter_leaves_an_owner_only_sheaf_it
 
 def test_a_door_update_cannot_hand_an_owner_only_sheaf_to_another_member(team, browser, work):
     put(team, work, DOC, PRIVATE)
-    is_error, got = door_update(browser, work, DOC, lambda t: t.replace("owner: thierry", "owner: hans"))
+    is_error, got = door_update(team, browser, work, DOC, lambda t: t.replace("owner: thierry", "owner: hans"))
     assert not is_error, got
     assert team.get(f"/work/{DOC}", member=HANS).status == 404
     assert team.get(f"/work/{DOC}", member=THIERRY).status == 200
@@ -288,7 +296,7 @@ def test_an_open_stream_of_hans_hears_nothing_once_a_door_write_closes_the_sheaf
     put(team, work, DOC, open_)
     sub = team.get(f"/_/live?doc=work/{DOC}", member=HANS).stream
     sub.drain()
-    is_error, got = door_update(browser, work, DOC, lambda t: t.replace("sources: [issue:x/y#1]", "sources: [mail:t-1]")
+    is_error, got = door_update(team, browser, work, DOC, lambda t: t.replace("sources: [issue:x/y#1]", "sources: [mail:t-1]")
                                 + "\nA line from the mail.\n")
     assert not is_error, got
     team.hub.entry(f"work/{DOC}").live.refresh(force=True)
@@ -365,7 +373,10 @@ def test_the_owners_share_nested_in_a_list_opens_the_sheaf_too(team, work):
 
 def test_a_door_update_cannot_give_an_owner_to_an_owner_only_sheaf_that_had_none(team, browser, work):
     put(team, work, DOC, PRIVATE.replace("owner: thierry\n", ""))
-    is_error, got = door_update(browser, work, DOC, lambda t: t.replace("assistant: James", "assistant: James\nowner: hans"))
+    # A sheaf with no owner is no token's to see (9.11), so only the key reaches it.
+    is_error, got = call(browser, "read", as_name="James", doc=f"work/{DOC}")
+    is_error, got = call(browser, "update", as_name="James", doc=f"work/{DOC}", expected_hash=got["hash"],
+                         text=got["text"].replace("assistant: James", "assistant: James\nowner: hans"))
     assert not is_error, got
     assert team.get(f"/work/{DOC}", member=HANS).status == 404
 
@@ -444,7 +455,7 @@ def test_an_owner_only_sheaf_its_page_cached_answers_404_to_hans_once_its_file_c
     lambda t: t.replace("issue: thinkingtoo/tt-tiroir#9\n", "")], ids=["another issue", "no issue"])
 def test_a_door_update_keeps_the_issue_on_disk_which_names_the_owner(team, browser, work, change):
     put(team, work, DOC, PRIVATE)
-    is_error, got = door_update(browser, work, DOC, change)
+    is_error, got = door_update(team, browser, work, DOC, change)
     assert not is_error, got
     assert front_matter((work / DOC).read_text(encoding="utf-8"))["issue"] == "thinkingtoo/tt-tiroir#9"
 
@@ -608,6 +619,7 @@ def test_a_merged_save_does_not_tick_a_box_an_assistant_reopened_since_the_page_
     i, html = _block_html(base, "Done")
     html = html.replace('<input type="checkbox" />Done', '<input type="checkbox" checked="" />Done')
     cur = PRIVATE.replace("- [ ] Share", "- [ ] Share\n* [ ] Done")
+    team.hub.proxy = members(work, thierry=["james"])       # James works for Thierry, the owner
     is_error, got = call(browser, "update", token=Tokens().add("james", write=True), doc=f"work/{DOC}",
                          text=cur, expected_hash=md_hash(base))
     assert not is_error, got
@@ -669,3 +681,206 @@ def test_a_front_matter_key_the_hub_does_not_enforce_leaves_an_open_sheaf_open(t
 def test_a_line_that_may_spell_a_key_the_hub_enforces_still_closes_the_sheaf(team, work, line):
     put(team, work, DOC, OPEN.replace("owner: thierry\n", f"owner: thierry\n{line}\n"))
     assert team.get(f"/work/{DOC}", member=HANS).status == 404
+
+
+def test_a_write_token_cannot_read_an_owner_only_sheaf(team, browser, work):
+    put(team, work, DOC, PRIVATE)
+    token = Tokens().add("mistral", write=True)
+    is_error, got = call(browser, "read", token=token, doc=f"work/{DOC}")
+    _, missing = call(browser, "read", token=token, doc="work/thinkingtoo/tiroir/nothing.md")
+    assert is_error and got == missing.replace("nothing.md", DOC.rsplit("/", 1)[1])
+
+
+THREAD = ('A quote from the contract.<!-- sheaf-comment id=c1 by="Thierry" at=2026-10-28T09:00 status=open '
+          'quote="contract"\nThe fee?\n-->')
+
+
+def test_a_token_cannot_read_the_threads_of_an_owner_only_sheaf(team, browser, work):
+    put(team, work, DOC, PRIVATE.replace("A quote from the contract.", THREAD))
+    token = Tokens().add("codex")
+    is_error, got = call(browser, "threads", token=token, doc=f"work/{DOC}", status="all")
+    assert is_error and got.startswith(f"There is no document work/{DOC} ") and "fee" not in got
+
+
+@pytest.mark.parametrize("tool, args", [("reply", {"id": "c1", "text": "Noted."}), ("resolve", {"id": "c1"})])
+def test_a_token_cannot_answer_or_resolve_a_thread_of_an_owner_only_sheaf(team, browser, work, tool, args):
+    put(team, work, DOC, PRIVATE.replace("A quote from the contract.", THREAD))
+    before = (work / DOC).read_text(encoding="utf-8")
+    is_error, got = call(browser, tool, token=Tokens().add("codex"), doc=f"work/{DOC}", **args)
+    assert is_error and got.startswith(f"There is no document work/{DOC} ")
+    assert (work / DOC).read_text(encoding="utf-8") == before
+
+
+def test_documents_does_not_list_an_owner_only_sheaf_to_a_token(team, browser, work):
+    put(team, work, DOC, PRIVATE.replace("A quote from the contract.", THREAD))
+    put(team, work, "thinkingtoo/tiroir/open.md", "# Open\n\n" + THREAD + "\n")
+    token = Tokens().add("mistral", write=True)
+    for open_only in (True, False):
+        is_error, got = call(browser, "documents", token=token, open_only=open_only)
+        listed = [d["doc"] for d in got if "doc" in d]
+        assert not is_error and "work/thinkingtoo/tiroir/open.md" in listed and f"work/{DOC}" not in listed
+
+
+def test_a_token_cannot_update_an_owner_only_sheaf_even_with_its_hash(team, browser, work):
+    put(team, work, DOC, PRIVATE)
+    before = (work / DOC).read_text(encoding="utf-8")
+    is_error, got = call(browser, "update", token=Tokens().add("james", write=True), doc=f"work/{DOC}",
+                         text=before.replace("A quote", "No quote"), expected_hash=md_hash(before))
+    assert is_error and got.startswith(f"There is no document work/{DOC} ")
+    assert (work / DOC).read_text(encoding="utf-8") == before
+
+
+def test_a_tokens_update_with_a_wrong_hash_does_not_tell_an_owner_only_sheaf_from_none(team, browser, work):
+    put(team, work, DOC, PRIVATE)
+    token = Tokens().add("james", write=True)
+    before = (work / DOC).read_text(encoding="utf-8")
+    is_error, got = call(browser, "update", token=token, doc=f"work/{DOC}", text="x\n", expected_hash="0" * 16)
+    assert is_error and got.startswith(f"There is no document work/{DOC} ")
+    assert (work / DOC).read_text(encoding="utf-8") == before
+
+
+def test_a_token_bound_to_the_owner_reads_the_owners_sheaf(team, browser, work):
+    team.hub.proxy = members(work, thierry=["james-thierry"])
+    put(team, work, DOC, PRIVATE)
+    is_error, got = call(browser, "read", token=Tokens().add("james-thierry", write=True), doc=f"work/{DOC}")
+    assert not is_error and "A quote from the contract." in got["text"]
+
+
+def test_a_token_bound_to_another_member_does_not_see_the_owners_sheaf(team, browser, work):
+    team.hub.proxy = members(work, thierry=["james-thierry"], hans=["james-hans"])
+    put(team, work, DOC, PRIVATE.replace("A quote from the contract.", THREAD))
+    put(team, work, "thinkingtoo/tiroir/open.md", "# Open\n\n" + THREAD + "\n")
+    token = Tokens().add("james-hans", write=True)
+    is_error, got = call(browser, "read", token=token, doc=f"work/{DOC}")
+    assert is_error and got.startswith(f"There is no document work/{DOC} ")
+    listed = [d["doc"] for d in call(browser, "documents", token=token)[1] if "doc" in d]
+    assert listed == ["work/thinkingtoo/tiroir/open.md"]
+
+
+def test_a_token_bound_to_the_owner_lists_and_answers_the_owners_sheaf(team, browser, work):
+    team.hub.proxy = members(work, thierry=["james-thierry"])
+    put(team, work, DOC, PRIVATE.replace("A quote from the contract.", THREAD))
+    token = Tokens().add("james-thierry")
+    assert f"work/{DOC}" in [d["doc"] for d in call(browser, "documents", token=token)[1] if "doc" in d]
+    is_error, got = call(browser, "reply", token=token, doc=f"work/{DOC}", id="c1", text="The fee is fixed.")
+    assert not is_error and got["replies"][-1]["text"] == "The fee is fixed."
+
+
+@pytest.mark.parametrize("tool, args", [
+    ("reply", {"id": "c1", "text": " "}),
+    ("update", {"text": "x\n", "expected_hash": "not a hash"}),
+    ("update", {"text": "x" * (1024 * 1024 + 1), "expected_hash": "0" * 16})],
+    ids=["empty reply", "malformed hash", "text too long"])
+def test_a_wrong_argument_does_not_tell_a_hidden_sheaf_from_none(team, browser, work, tool, args):
+    put(team, work, DOC, PRIVATE.replace("A quote from the contract.", THREAD))
+    token = Tokens().add("james", write=True)
+    _, hidden = call(browser, tool, token=token, doc=f"work/{DOC}", **args)
+    _, missing = call(browser, tool, token=token, doc="work/thinkingtoo/tiroir/nothing.md", **args)
+    assert hidden == missing.replace("nothing.md", DOC.rsplit("/", 1)[1])
+
+
+@pytest.mark.parametrize("tool, args", [("reply", {"id": "c1", "text": "Noted."}), ("resolve", {"id": "c1"})])
+@pytest.mark.parametrize("open_tab", [False, True], ids=["no tab", "open tab"])
+def test_a_reply_that_lands_after_the_sheaf_closed_writes_nothing(team, browser, work, monkeypatch, tool, args,
+                                                                  open_tab):
+    shared = PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:x/y#1]")
+    put(team, work, DOC, shared.replace("A quote from the contract.", THREAD))
+    if open_tab:
+        assert team.get(f"/work/{DOC}", member=THIERRY).status == 200
+    door = browser.handler.door
+    checked = door._comment
+
+    def a_door_write_closes_it_after_the_check(*a, **kw):
+        got = checked(*a, **kw)
+        f = work / DOC
+        f.write_text(f.read_text(encoding="utf-8").replace("sources: [issue:x/y#1]", "sources: [mail:t-1]"),
+                     encoding="utf-8")
+        return got
+    monkeypatch.setattr(door, "_comment", a_door_write_closes_it_after_the_check)
+    before_close = (work / DOC).read_text(encoding="utf-8")
+    is_error, got = call(browser, tool, token=Tokens().add("james"), doc=f"work/{DOC}", **args)
+    assert is_error and got.startswith(f"There is no document work/{DOC} ")
+    after = (work / DOC).read_text(encoding="utf-8")
+    assert after == before_close.replace("sources: [issue:x/y#1]", "sources: [mail:t-1]")
+
+
+def test_an_update_that_lands_after_the_sheaf_closed_writes_nothing(team, browser, work, monkeypatch):
+    shared = PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:x/y#1]")
+    put(team, work, DOC, shared)
+    token = Tokens().add("james", write=True)
+    _, got = call(browser, "read", token=token, doc=f"work/{DOC}")
+    door, named = browser.handler.door, browser.handler.door._address
+    closed = shared.replace("sources: [issue:x/y#1]", "sources: [mail:t-1]")
+
+    def a_door_write_closes_it_after_the_check(*a, **kw):
+        address = named(*a, **kw)
+        (work / DOC).write_text(closed, encoding="utf-8")
+        return address
+    monkeypatch.setattr(door, "_address", a_door_write_closes_it_after_the_check)
+    is_error, said = call(browser, "update", token=token, doc=f"work/{DOC}", text=got["text"] + "\nMore.\n",
+                          expected_hash=got["hash"])
+    assert is_error and said.startswith(f"There is no document work/{DOC} ")
+    assert (work / DOC).read_text(encoding="utf-8") == closed
+
+
+@pytest.fixture
+def hans_root(team, work):
+    """A root of Hans's alone, with an open page in it (no front matter, so open to the project)."""
+    root = work.parent / "hansroot"
+    root.mkdir()
+    f = root / "notes.md"
+    f.write_text("# Hans's notes\n\n" + THREAD + "\n", encoding="utf-8")
+    name = team.hub.roots.for_document(f).name
+    return root, f"{name}/notes.md"
+
+
+def test_a_token_bound_to_a_member_reaches_only_that_members_roots(team, browser, work, hans_root):
+    root, doc = hans_root
+    team.hub.proxy = members(work, hans_also=root, thierry=["james-thierry"])
+    put(team, work, "thinkingtoo/tiroir/open.md", "# Open\n\n" + THREAD + "\n")
+    token = Tokens().add("james-thierry", write=True)
+    assert not call(browser, "read", token=token, doc="work/thinkingtoo/tiroir/open.md")[0]   # inside its roots
+    is_error, got = call(browser, "read", token=token, doc=doc)
+    assert is_error and got.startswith(f"There is no document {doc} ")
+    is_error, got = call(browser, "threads", token=token, doc=str(root / "notes.md"))
+    assert is_error and got == "A token cannot add a root, and the hub has no root that holds that file."
+    assert doc not in [d.get("doc") for d in call(browser, "documents", token=token)[1]]
+    is_error, got = call(browser, "documents", token=token, root=doc.split("/")[0])
+    assert is_error and got == f"There is no root named {doc.split('/')[0]}."
+    is_error, got = call(browser, "create", token=token, doc=doc.replace("notes", "copy"), text="# Copy\n")
+    assert is_error and "is not inside a root of this hub" in got and not (root / "copy.md").exists()
+
+
+def test_an_unbound_token_still_reaches_every_root(team, browser, work, hans_root):
+    root, doc = hans_root
+    team.hub.proxy = members(work, hans_also=root, thierry=["james-thierry"])
+    is_error, got = call(browser, "read", token=Tokens().add("codex", write=True), doc=doc)
+    assert not is_error and "Hans's notes" in got["text"]
+
+
+def test_documents_stops_listing_a_sheaf_that_closed_with_the_same_size_and_time(team, browser, work):
+    shared = PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:x/y#1]")
+    put(team, work, DOC, shared.replace("A quote from the contract.", THREAD))
+    token = Tokens().add("codex")
+    assert f"work/{DOC}" in [d.get("doc") for d in call(browser, "documents", token=token)[1]]
+    f = work / DOC
+    st = f.stat()
+    f.write_text(f.read_text(encoding="utf-8").replace("sources: [issue:x/y#1]", "sources: [mail:t-1234]"),
+                 encoding="utf-8")
+    os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns))            # as `cp -p` or a sync tool leaves it
+    assert f.stat().st_size == st.st_size
+    assert f"work/{DOC}" not in [d.get("doc") for d in call(browser, "documents", token=token)[1]]
+
+
+@pytest.mark.parametrize("tool, doc, args", [
+    ("create", "{root}/x.txt", {"text": "# X\n"}),
+    ("read", "{path}/nope.md", {})], ids=["create", "read by path"])
+def test_a_bound_token_cannot_tell_another_members_root_from_none(team, browser, work, hans_root, tool, doc, args):
+    root, address = hans_root
+    team.hub.proxy = members(work, hans_also=root, thierry=["james-thierry"])
+    token = Tokens().add("james-thierry", write=True)
+    name = address.split("/")[0]
+    nowhere = work.parent / "nowhere"
+    _, theirs = call(browser, tool, token=token, doc=doc.format(root=name, path=root), **args)
+    _, none = call(browser, tool, token=token, doc=doc.format(root="nosuchroot", path=nowhere), **args)
+    assert theirs == none.replace("nosuchroot", name).replace(str(nowhere), str(root))

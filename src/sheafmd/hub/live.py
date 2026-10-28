@@ -166,7 +166,7 @@ class LiveDocument:
             self._publish("changed", snap)
             return snap
 
-    def save(self, base_hash, edits, rid=None):
+    def save(self, base_hash, edits, rid=None, guard=None):
         """Apply a page's block edits, made against the text named by base_hash.
 
         A save that changed the file tells the open tabs with one `changed` event (SPEC 7.3:
@@ -182,6 +182,9 @@ class LiveDocument:
         paragraph the page split, or one the file changed since, is never written a second time. A save
         the hub refused is not remembered. `taken_rids` names the ids kept, and
         the `changed` event of the write names its id. The last RIDS ids of saves are kept, in memory, apart from those of comments.
+
+        `guard(text, new)` sees the text a save would write over the file's text, under the file lock, and
+        returns the text to write; an EditError it raises refuses the save and nothing is written (9.11).
 
         Returns the report: hash (of the text written), changed, skipped, remap, merged,
         conflicts. Raises StaleError when the file moved on from a version this document no
@@ -202,7 +205,9 @@ class LiveDocument:
                     new, got["report"] = rde.merge_edits(base, text, edits, rds.now())
                 else:
                     new, got["report"] = rde.apply_edits(text, edits)
-                return new if got["report"]["changed"] else text
+                if not got["report"]["changed"]:
+                    return text
+                return guard(text, new) if guard is not None else new
             # The version check happens inside change(), under the file lock: the CLI and an
             # Ask job write this file from other processes.
             token = rde.DOC.set(self._md)

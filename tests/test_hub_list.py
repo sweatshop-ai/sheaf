@@ -567,3 +567,23 @@ def test_a_sheaf_of_a_root_nested_in_the_list_root_is_on_no_list(box, sheaves):
         encoding="utf-8")
     box.hub.the_list.poll()
     assert "Nested" not in box.get("/list?show=all", member=NELL).text
+
+
+def test_a_front_matter_closed_only_by_a_line_break_markdown_does_not_count_is_none():
+    for text in ("---\rissue: acme/record#7\r---\r# Odd\r- [ ] Approve\r",       # read_text() turns \r into \n
+                 "---\nissue: acme/record#7\nk: v\u2028---\n# Odd\n- [ ] Approve\n"):
+        assert the_list.read_sheaf("a/b/c.md", text).issue is None
+
+
+def test_a_sheaf_whose_front_matter_closes_only_on_another_line_break_leaves_the_rest_of_the_list(box, sheaves):
+    text = "---\nissue: acme/record#7\nk: v\u2028---\n# Odd\n- [ ] Approve\n"
+    (sheaves / "initech/website/2026-10-28-odd.md").write_text(text, encoding="utf-8")
+    box.hub.the_list.poll()
+    page = read(box.get("/list", member=NELL))
+    assert "Waiting on you 2" in page and "Odd" not in json.dumps(page)
+    path = sheaves / "initech/website/2026-10-28-odd.md"
+    before = path.read_text(encoding="utf-8")
+    r = box.post("/_/tick", {"doc": "list/initech/website/2026-10-28-odd.md", "action": 0, "word": "Approve"},
+                 member=NELL)
+    assert r.status in (200, 409), r.text       # no sheaf, still a document: its one box, or nothing
+    assert path.read_text(encoding="utf-8") in (before, before.replace("- [ ] Approve", "- [x] Approve"))

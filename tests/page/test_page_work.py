@@ -9,8 +9,10 @@ import re
 import pytest
 
 from helpers import BEA
-from pagehelp import toast, until
+from pagehelp import P1, at, select, toast, until
+from sheafmd import comments as rdc
 from sheafmd.hub import proxy
+from sheafmd.source import update_file
 
 pytestmark = pytest.mark.page
 
@@ -22,12 +24,14 @@ BOX = {"id": "6f1c0e9a-2b3d-4c5e-8f70-1a2b3c4d5e6f", "host": "tiroir-tt", "membe
        "date": "2026-10-28T05:12:03Z"}
 LAPTOP = {"id": "0b9d1e7c-4a2f-4e8b-9c3d-5f6a7b8c9d0e", "host": "thierry-laptop", "member": "thierry",
           "date": "2026-10-28T09:40:00Z"}
-SENT = "Sent to James's window; his answer appears in this thread."
+SENT = "Sent to James’s window; his answer appears in this thread."
 
 
-def as_member(tab, work=None, can=()):
+def as_member(tab, work=None, can=(), doc_work=None, doc_can=None):
     """The tab's page as Bea, a member of the proxy socket, gets it: her meta block, with `work` and `can`
-    as given, in the first render and in the /_/doc answers (which, on the proxy socket, name no agent)."""
+    as given, in the first render and in the /_/doc answers (which, on the proxy socket, name no agent and
+    carry the same `work` and `can` as the meta, 9.12). `doc_work` and `doc_can` make the /_/doc answers
+    say otherwise: a fork the hub has seen since the page was served."""
     site = tab.site
     bea = proxy.Member(BEA, "Bea", (str(site.file.parent),))
     real = site.hub.page
@@ -45,8 +49,16 @@ def as_member(tab, work=None, can=()):
 
     def doc(route):
         r = route.fetch()
-        route.fulfill(response=r, json={**r.json(), "target": None, "capabilities": [],
-                                        "lines": proxy.member_lines()})
+        j = {**r.json(), "target": None, "capabilities": list(can if doc_can is None else doc_can),
+             "lines": proxy.member_lines()}
+        w = work if doc_work is None else doc_work
+        if w is not None:
+            j["work"] = w
+        docs.append(j)
+        route.fulfill(response=r, json=j)
+
+    docs = []
+    tab.docs = docs
 
     tab.page.route(site.url, page)
     tab.page.route(re.compile(r"/_/doc\?"), doc)
@@ -170,3 +182,100 @@ def test_a_click_outside_closes_the_popover(tab):
     open_work(tab.page)
     tab.page.click("main h1")
     assert not tab.page.locator("#rd-work").is_visible()
+
+
+# ---- Ask and Tell on a box-hosted sheaf (10.6, 9.12) ---------------------------------------------------------
+
+BOX_CAN = ("box-ask", "box-tell")
+START, END = at(P1, "apples"), at(P1, "apples", None)
+
+
+def agent_buttons(page, scope):
+    """The Ask and Tell buttons of the form or the actions in `scope`: (label, enabled) each."""
+    out = []
+    for k in ("ask", "tell"):
+        b = page.locator(f"{scope} button.rd-{k}").first
+        out.append((b.inner_text(), b.is_enabled()))
+    return out
+
+
+def comment_form(tab):
+    select(tab.page, START, END)
+    tab.page.click("#rd-comment-btn")
+    tab.page.wait_for_selector("#rd-popover .rd-form")
+
+
+def sent_to_box(tab):
+    """The bodies of the page's /_/comment requests, which go on to the hub without ask and tell (the loopback
+    hub has no James); and the paths of any /_/ask or /_/tell request, which a box sheaf never sends."""
+    bodies, others = [], []
+
+    def comment(route):
+        b = json.loads(route.request.post_data)
+        bodies.append(b)
+        route.continue_(post_data=json.dumps({**b, "ask": False, "tell": False}))
+
+    tab.page.route(re.compile(r"/_/comment$"), comment)
+    tab.page.route(re.compile(r"/_/(ask|tell)$"), lambda route: (others.append(route.request.url), route.abort()))
+    return bodies, others
+
+
+def test_on_a_box_sheaf_ask_and_tell_name_james_and_outlast_the_doc_answer(tab):
+    as_member(tab, work(), can=BOX_CAN)
+    tab.open()
+    until(lambda: tab.docs, what="the page's /_/doc answer")
+    comment_form(tab)
+    assert agent_buttons(tab.page, "#rd-popover .rd-form") == [("Ask James", True), ("Tell James", True)]
+    assert tab.page.locator("#rd-popover .rd-agent-line").count() == 0
+    tab.page.click("#rd-menu-btn")
+    assert tab.page.inner_text("#rd-agent") == "Ask and Tell → James’s window on the box"
+
+
+@pytest.mark.parametrize("k", ["ask", "tell"])
+def test_a_comment_sent_to_james_goes_with_the_comment_and_says_so_without_a_spinner(tab, k):
+    as_member(tab, work(), can=BOX_CAN)
+    tab.open()
+    bodies, others = sent_to_box(tab)
+    comment_form(tab)
+    tab.page.fill("#rd-popover textarea", "What does James think?")
+    tab.page.click(f"#rd-popover .rd-form button.rd-{k}")
+    until(lambda: SENT in tab.page.inner_text("#rd-popover"), what="the sent line in the thread")
+    assert [(b["op"], b["ask"], b["tell"]) for b in bodies] == [("add", k == "ask", k == "tell")]
+    assert others == []
+    assert tab.page.locator("#rd-popover .rd-pending, #rd-popover .rd-dots").count() == 0
+    assert tab.page.locator("#rd-popover .rd-busy").count() == 0
+
+
+def test_the_threads_own_ask_opens_the_reply_form_and_sends_through_the_comment(tab):
+    update_file(tab.site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
+                                                         "Ada", "2026-10-14T10:00")[0])
+    as_member(tab, work(), can=BOX_CAN)
+    tab.open()
+    bodies, others = sent_to_box(tab)
+    tab.page.click(".rd-badge")
+    tab.page.click("#rd-popover .rd-actions button.rd-ask")
+    tab.page.wait_for_selector("#rd-popover .rd-form textarea")
+    tab.page.fill("#rd-popover .rd-form textarea", "And you, James?")
+    tab.page.click("#rd-popover .rd-form button.rd-ask")
+    until(lambda: SENT in tab.page.inner_text("#rd-popover"), what="the sent line in the thread")
+    assert [(b["op"], b["ask"], b["tell"]) for b in bodies] == [("reply", True, False)]
+    assert others == []
+
+
+def test_a_sheaf_live_on_a_laptop_turns_ask_and_tell_off_with_its_line(tab):
+    as_member(tab, work(sessions=[LAPTOP, BOX], live="laptop"))
+    tab.open()
+    comment_form(tab)
+    line = "This session runs on Thierry’s machine: open it there."
+    assert [e for _, e in agent_buttons(tab.page, "#rd-popover .rd-form")] == [False, False]
+    assert tab.page.locator("#rd-popover .rd-agent-line").all_inner_texts() == [line]
+    assert proxy.PROXY_LINE not in tab.page.inner_text("#rd-popover")
+
+
+def test_a_fork_the_doc_answer_reports_turns_box_ask_and_tell_off(tab):
+    as_member(tab, work(), can=BOX_CAN, doc_work=work(sessions=[LAPTOP, BOX], live="laptop"), doc_can=())
+    tab.open()
+    until(lambda: tab.docs, what="the page's /_/doc answer")
+    comment_form(tab)
+    assert [e for _, e in agent_buttons(tab.page, "#rd-popover .rd-form")] == [False, False]
+    assert "Thierry’s machine" in tab.page.inner_text("#rd-popover .rd-agent-line")

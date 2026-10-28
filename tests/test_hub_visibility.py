@@ -150,6 +150,65 @@ def test_a_door_create_from_mistral_with_a_library_source_lands_owner_only(team,
     assert team.get(f"/work/{DOC}", member=THIERRY).status == 200
 
 
+MAIL = "list/a/inbox/x.md"
+MAIL_TEXT = "---\nsources: [mail]\n---\n# A mail\n\nWhat it says.\n"
+
+
+def test_a_door_create_by_a_bound_token_gives_its_member_an_owner_only_sheaf_with_no_owner(team, browser, work):
+    """#30: the mail module's token, bound to Thierry, writes a sheaf from a private source with no `owner`."""
+    team.hub.proxy = members(work, thierry=["mail"])
+    (work / "list/a/inbox").mkdir(parents=True)
+    token = Tokens().add("mail", write=True)
+    is_error, got = call(browser, "create", token=token, doc=f"work/{MAIL}", text=MAIL_TEXT)
+    assert not is_error, got
+    on_disk = (work / MAIL).read_text(encoding="utf-8")
+    assert front_matter(on_disk)["owner"] == "thierry" and got["hash"] == md_hash(on_disk)
+    is_error, got = call(browser, "read", token=token, doc=f"work/{MAIL}")
+    assert not is_error and got["text"] == on_disk
+    assert team.get(f"/work/{MAIL}", member=THIERRY).status == 200
+    assert team.get(f"/work/{MAIL}", member=HANS).status == 404
+
+
+def test_a_door_create_by_an_unbound_token_of_an_owner_only_sheaf_with_no_owner_is_refused(team, browser, work):
+    """#30: a token bound to nobody could not open what it made, nor could anyone else: no orphan is made."""
+    (work / "list/a/inbox").mkdir(parents=True)
+    is_error, got = call(browser, "create", token=Tokens().add("mail", write=True), doc=f"work/{MAIL}",
+                         text=MAIL_TEXT)
+    assert is_error and "owner" in got and "bind" in got, got
+    assert not (work / MAIL).exists()
+    assert hub_rows("door-create")[-1]["reason"] == "no owner"
+
+
+def test_a_door_create_that_names_its_owner_keeps_that_owner(team, browser, work):
+    team.hub.proxy = members(work, thierry=["mail"])
+    (work / "list/a/inbox").mkdir(parents=True)
+    text = MAIL_TEXT.replace("sources:", "owner: hans\nsources:")
+    for token, doc in ((Tokens().add("mail", write=True), MAIL), (Tokens().add("mistral", write=True), "list/a/y.md")):
+        is_error, got = call(browser, "create", token=token, doc=f"work/{doc}", text=text)
+        assert not is_error, got
+        assert front_matter((work / doc).read_text(encoding="utf-8"))["owner"] == "hans"
+        assert team.get(f"/work/{doc}", member=HANS).status == 200
+
+
+def test_a_door_update_that_closes_a_sheaf_with_no_owner_gives_it_the_tokens_member(team, browser, work):
+    put(team, work, MAIL, "---\nsources: [issue:x/y#1]\n---\n# A mail\n")
+    is_error, got = door_update(team, browser, work, MAIL, lambda t: t.replace("issue:x/y#1", "mail:t-1"))
+    assert not is_error, got
+    assert front_matter((work / MAIL).read_text(encoding="utf-8"))["owner"] == "thierry"
+    assert team.get(f"/work/{MAIL}", member=THIERRY).status == 200
+    assert team.get(f"/work/{MAIL}", member=HANS).status == 404
+
+
+def test_a_door_update_by_an_unbound_token_that_would_close_a_sheaf_with_no_owner_is_refused(team, browser, work):
+    put(team, work, MAIL, "---\nsources: [issue:x/y#1]\n---\n# A mail\n")
+    token = Tokens().add("mistral", write=True)
+    before = (work / MAIL).read_text(encoding="utf-8")
+    is_error, got = call(browser, "update", token=token, doc=f"work/{MAIL}", expected_hash=md_hash(before),
+                         text=before.replace("issue:x/y#1", "mail:t-1"))
+    assert is_error and "owner" in got, got
+    assert (work / MAIL).read_text(encoding="utf-8") == before
+
+
 def test_a_door_write_cannot_share_a_sheaf_itself(team, browser, work):
     put(team, work, DOC, PRIVATE)
     is_error, got = door_update(team, browser, work, DOC, lambda t: t.replace(

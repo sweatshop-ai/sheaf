@@ -625,7 +625,7 @@ class Door:
             raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path")     # a root of another member's
         self._check_size(text)
         _check_comments("", text)
-        text = self._visible(text, None)
+        text = self._owned(self._visible(text, None), address, caller)
         try:
             create_file(Path(os.path.realpath(root.path)), rel, text)
         except FileExistsError:
@@ -661,7 +661,7 @@ class Door:
                 raise Stale(f"{address} has changed since that hash was read; read it again, make the "
                             "change on that text and send it with its hash.")
             _check_comments(now_text, text)
-            written[0] = self._visible(text, now_text)
+            written[0] = self._owned(self._visible(text, now_text), address, caller)
             return written[0]
         try:
             before, _ = update_file(self.hub.roots.document(address), change)
@@ -690,6 +690,28 @@ class Door:
             raise ToolError("The text changes `sessions`, which only the hub writes; send it as `read` gave it"
                             + (" (a new page lists none)." if old is None else "."), "sessions")
         return out
+
+    def _owned(self, text: str, address: str, caller: Caller) -> str:
+        """`text`, a door write's text after `_visible`, when the sheaf it makes at `address` has an owner. A
+        sheaf that is its owner's alone and that no member owns is open to nobody, the token that wrote it
+        included, and no door write can mend it (9.11). So when it names no `owner`, a token bound to a
+        member gives it that member's `short`; else the write is refused. The key, which reads every file,
+        writes it as `_visible` gave it (#30)."""
+        if not self._judged(caller):
+            return text
+        fm = visibility.front_matter(text)
+        if visibility.effective(fm) == "project":
+            return text
+        everyone = list(self.hub.proxy.members.values())
+        member = self._member(caller)
+        if member is not None and member.short and not visibility.text(fm, "owner"):
+            text = visibility.set_keys(text, {"owner": member.short})
+            fm = visibility.front_matter(text)
+        if not visibility.owner_of(fm, everyone, self.hub.assignees(address, fm)):
+            raise ToolError(f"{address} would be its owner's alone, with no member as its owner, and nobody could "
+                            "open it: name a member's `short` as `owner`, or bind the token to a member.",
+                            "no owner")
+        return text
 
 
 def _absent(doc: str) -> ToolError:

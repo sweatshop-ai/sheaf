@@ -29,7 +29,9 @@ def problems_for_311(text: str) -> list:
         inside = bool(stack) and stack[-1][1] > 0
         if inside and t.type in (tokenize.STRING, tokenize.FSTRING_START) and _quote(t.string).startswith(stack[-1][0]):
             out.append((t.start[0], "the enclosing f-string's quote inside its replacement field"))
-        if inside and t.type != tokenize.FSTRING_MIDDLE and "\\" in t.string:
+        # A nested f-string's own text sits inside its enclosing f-string's field: any depth > 0 counts.
+        enclosing = stack[:-1] if t.type == tokenize.FSTRING_MIDDLE else stack
+        if any(depth > 0 for _, depth in enclosing) and "\\" in t.string:
             out.append((t.start[0], "a backslash inside an f-string's replacement field"))
         if t.type == tokenize.FSTRING_START:
             stack.append([_quote(t.string), 0])
@@ -45,6 +47,7 @@ def problems_for_311(text: str) -> list:
 @pytest.mark.parametrize("text, line", [
     ('x = f\'{" a=\\"b\\"" if k else ""}\'\n', 1),
     ("d = {}\nx = f\"{d[\"a\"]}\"\n", 2),
+    ("x = f\"{f'a\\nb'}\"\n", 1),
 ])
 def test_what_311_refuses_inside_an_f_string_is_found(text, line):
     assert [n for n, _ in problems_for_311(text)] == [line]

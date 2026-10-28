@@ -936,6 +936,23 @@ def test_a_refused_create_over_a_hidden_sheaf_answers_only_that_its_name_is_take
     assert answers == {f"work/{DOC} exists already; `create` makes a new page, and `update` changes one."}
 
 
+def test_a_create_over_a_hidden_sheaf_near_the_limit_answers_only_that_its_name_is_taken(team, browser, work,
+                                                                                        monkeypatch):
+    """The owner line `_owned` adds depends on the list's row for the address; over a sheaf the token may not
+    see, a text near the limit must not tell by its size answer which issue that sheaf names (#30)."""
+    put(team, work, DOC, PRIVATE)
+    team.hub.proxy = members(work, hans=["mail-hans"])
+    monkeypatch.setattr(team.hub, "assignees",
+                        lambda address, fm: ["tiroir"] if fm.get("issue") == "thinkingtoo/tt-tiroir#9" else None)
+    token = Tokens().add("mail-hans", write=True)
+    answers = set()
+    for guess in ("thinkingtoo/tt-tiroir#9", "thinkingtoo/tt-tiroir#8"):
+        head = f"---\nvisibility: owner\nsources: [mail]\nissue: {guess}\n---\n"
+        answers.add(call(browser, "create", token=token, doc=f"work/{DOC}",
+                         text=head + "x" * (MAX_TEXT - len(head) - 6) + "\n")[1])
+    assert answers == {f"work/{DOC} exists already; `create` makes a new page, and `update` changes one."}
+
+
 def test_a_create_refused_for_no_owner_through_a_link_tells_nothing_of_what_is_behind_it(team, browser, work,
                                                                                        tmp_path):
     outside = tmp_path / "outside"

@@ -627,17 +627,14 @@ class Door:
         _check_comments("", text)
         top = Path(os.path.realpath(root.path))
         try:
-            text = self._owned(self._visible(text, None), address, caller)
-        except ToolError as e:
-            # The owner is judged by the list's row for the address, which a sheaf already there may have: the
-            # refusal answers first what the path alone answers, walked as the write walks it, so it tells
-            # nothing of what is there, nor of what a link on the way points to.
-            if e.why == "no owner":
-                try:
-                    check_create(top, rel)
-                except OSError as o:
-                    raise _not_made(address, o) from None
-            raise
+            # The owner is judged by the list's row for the address, which a sheaf already there may have: what
+            # the path alone answers, walked as the write walks it, comes before every answer that judgement
+            # shapes (the refusal, the size with the owner line), so none tells what is there, nor what a link
+            # on the way points to.
+            check_create(top, rel)
+        except OSError as e:
+            raise _not_made(address, e) from None
+        text = self._owned(self._visible(text, None), address, caller)
         self._check_size(text)      # again: the owner `_owned` gave it is part of the page
         try:
             create_file(top, rel, text)

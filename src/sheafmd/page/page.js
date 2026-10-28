@@ -1652,12 +1652,14 @@
                  : 'Sends this to ' + yourSession() + ', which acts on it and replies here.';
   }
   // A comment sent to James's window: its thread says so until a reply comes after it, with no spinner, as
-  // nothing on the page waits for it (9.12). Kept by thread id with the number of replies it had then.
+  // nothing on the page waits for it (9.12). Kept by thread id with the number of replies it had then and the
+  // name it went to, which a fork reported since does not change.
   var sentBox = {};
   function sentLine(id) {
     var c = byId[id];
-    if (!(id in sentBox) || !c || (c.replies || []).length > sentBox[id]) { delete sentBox[id]; return ''; }
-    return '<div class="rd-msg rd-sent">Sent to ' + esc(AGENT) + '’s window; his answer appears in this thread.</div>';
+    var s = sentBox[id];
+    if (!s || !c || (c.replies || []).length > s.n) { delete sentBox[id]; return ''; }
+    return '<div class="rd-msg rd-sent">Sent to ' + esc(s.to) + '’s window; his answer appears in this thread.</div>';
   }
   // What a send with Ask or Tell started: on a box sheaf the line, counted from the thread as the hub's answer
   // holds it (the send's own reply in it), else the page's own wait.
@@ -1665,7 +1667,7 @@
     if (!took(j, k + 'Error')) return;
     if (toBox) {
       var c = (j.comments || []).filter(function (x) { return x.id === id; })[0] || byId[id];
-      sentBox[id] = ((c && c.replies) || []).length;
+      sentBox[id] = { n: ((c && c.replies) || []).length, to: AGENT };
     } else if (k === 'ask') asking[id] = true;
     else telling[id] = true;
   }
@@ -3208,7 +3210,10 @@
       // The jobs a new boot lost are still lost: the reload an upgrade or moved text brings keeps them.
       (keep.interrupted || []).forEach(function (id) { if (byId[id]) interrupted[id] = true; });
       // A comment sent to James's window keeps its line past the reload the session the hub records brings.
-      Object.keys(keep.sent || {}).forEach(function (id) { if (byId[id]) sentBox[id] = keep.sent[id]; });
+      Object.keys(keep.sent || {}).forEach(function (id) {
+        var s = keep.sent[id];
+        if (byId[id] && s && typeof s.n === 'number' && typeof s.to === 'string') sentBox[id] = { n: s.n, to: s.to };
+      });
       if (keep.panel) openPanel();
       if (keep.editing) { setEditing(true); placeCaret(keep.caret); }
       if (keep.open && byId[keep.open]) setTimeout(function () { openComment(keep.open); }, 50);

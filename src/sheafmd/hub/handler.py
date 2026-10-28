@@ -31,7 +31,7 @@ from ..edit import EditError
 from ..mcp import Caller, Door
 from ..render import RenderError
 from ..source import StaleError
-from . import auth, peer, proxy, the_list, visibility
+from . import auth, peer, proxy, the_list, visibility, work
 from .asktell import NO_AGENT, JobRefused
 from .index import Status
 from .live import UNKNOWN, NotAuthor
@@ -146,6 +146,8 @@ COOKIE = Who(frozenset({"cookie"}), _BROWSER)
 EITHER = Who(frozenset({"cookie", "key"}), _BROWSER)
 KEY = Who(frozenset({"key"}), "this needs the hub key")
 DOOR = Who(frozenset({"key", "token"}), "this needs the hub key or an MCP token", raw_body=True)
+# A member's alone, on the proxy socket (9.12): the loopback port answers 404, as for a route it has not.
+MEMBER = Who(frozenset({"member"}), "no such route")
 
 
 def _json(status: int, obj: dict, headers: dict | None = None) -> Response:
@@ -219,6 +221,8 @@ class Handler:
             ("POST", "/_/save", "save", COOKIE, self._save),
             ("POST", "/_/pin", "pin", COOKIE, self._pin),
             ("POST", "/_/tick", "tick", COOKIE, self._tick),
+            ("GET", "/_/session", "session", MEMBER, self._session),
+            ("POST", "/_/sessions", "sessions", MEMBER, self._sessions),
             ("POST", "/_/comment", "comment", COOKIE, self._comment),
             ("POST", "/_/ask", "ask", COOKIE, self._ask),
             ("POST", "/_/tell", "tell", COOKIE, self._tell),
@@ -353,11 +357,13 @@ class Handler:
                 raise Refuse(404, "no such route")
             if found is None:
                 raise Refuse(405, "method not allowed", {"Allow": ", ".join(sorted(methods))})
-            name, who, fn = found
+            _, who, fn = found
+            if who is MEMBER:
+                raise Refuse(404, "no such route")
         else:
             if req.method != "GET":
                 raise Refuse(405, "method not allowed", {"Allow": "GET"})
-            name, who, fn = "page", COOKIE, self._page
+            who, fn = COOKIE, self._page
         if req.kind not in who:
             raise Refuse(403, who.refusal)
         if req.method == "POST" and req.kind == "cookie" \
@@ -399,7 +405,7 @@ class Handler:
         """A route a member may use: one 8.5 marks `cookie` or `cookie or key`, but not Ask and
         Tell, which run the hub account's own agent session."""
         name, who, _ = found
-        return who in (COOKIE, EITHER) and name not in ("ask", "tell", "cancel", "jump")
+        return who in (COOKIE, EITHER, MEMBER) and name not in ("ask", "tell", "cancel", "jump")
 
     def _route_proxy(self, req: Req, raw: bytes) -> Response:
         cfg = self.hub.proxy
@@ -758,6 +764,44 @@ class Handler:
                 tmp.unlink(missing_ok=True)
         self.hub.record("stop-james", e.address, project=project, assistant=assistant,
                         by=(m.short or m.name) if m is not None else self.hub.person, drop=drop)
+
+    # ── Work on this (9.12) ──────────────────────────────────────────────────
+    def _sheaf(self, req: Req, doc):
+        """The address `doc` names, its file's front matter and the list, once it is a sheaf the member may open
+        (9.11) of the list's root, at `<client>/<project>/<file>.md`. Else the 404 of a document that is not
+        there."""
+        address = self._owned(req, doc)
+        the = self.hub.the_list
+        at = Address.parse(address)
+        if the is None or not the.serves(at.root) or at.rel.count("/") != 2:
+            raise Refuse(404, "no such document")
+        try:
+            fm = visibility.front_matter(self.hub.roots.document(address).read_text(encoding="utf-8"))
+        except (NotFound, OSError, UnicodeDecodeError):
+            raise Refuse(404, "no such document") from None
+        return address, fm, the
+
+    def _session(self, req: Req) -> Response:
+        """The transcript of one of the sheaf's box-hosted sessions, the newest without `id`, from the copy of
+        James's transcripts (9.12). It names only a file the front matter lists, of the box, in `sessions_dir`."""
+        address, fm, the = self._sheaf(req, req.query.get("doc"))
+        sid = req.query.get("id")
+        _shape(sid is None or work.UUID_RE.fullmatch(sid), "id must be a session id (a lowercase UUID)")
+        box = [s["id"] for s in work.sessions(fm) if the.cfg.box and s["host"] == the.cfg.box]
+        if sid is None:
+            sid = box[0] if box else None
+        if sid not in box or the.cfg.sessions_dir is None:
+            raise Refuse(404, "this sheaf has no such session on the box")
+        body = work.open_transcript(the.cfg.sessions_dir, sid)
+        if body is None:
+            raise Refuse(404, "this sheaf has no such session on the box")
+        self.hub.record("transcript-downloaded", address, transcript=sid, by=work.member_word(req.member),
+                        issue=visibility.text(fm, "issue"))
+        return Response(200, {"Content-Type": "application/x-ndjson", "Content-Disposition": _disposition(f"{sid}.jsonl"),
+                              "Cache-Control": "no-store", "X-Sheaf-Session": sid}, body)
+
+    def _sessions(self, req: Req) -> Response:
+        raise Refuse(404, "no such route")
 
     def _pin(self, req: Req) -> Response:
         """The page keeps the version it holds past a change of the file, while a form holds the reload

@@ -21,6 +21,7 @@ The record is read as the GitHub App the deployment installs: the hub reads an i
 """
 import calendar
 import html
+import itertools
 import json
 import os
 import re
@@ -320,6 +321,9 @@ class TheList:
         self._records: dict = {}            # the last record read of each issue, kept through a failed poll
         self._answered: dict = {}           # {rel: the record's `updated` when a member ticked it}
         self._poll_lock = threading.Lock()
+        self._ask = itertools.count(1)      # numbers each poll's start and each time a file is seen gone, in order
+        self._gone: dict = {}               # {rel: the number of the last time the hub saw its file gone}
+        self._gone_lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = None
 
@@ -331,6 +335,7 @@ class TheList:
     def poll(self):
         """Read every sheaf of the root and the record of their issues, and keep the rows."""
         with self._poll_lock:
+            started = next(self._ask)
             root = self.root()
             if root.path != Path(os.path.realpath(self.cfg.root)):
                 # Inside a git work tree the root is the tree's top: its sheaves are not the list's.
@@ -372,7 +377,12 @@ class TheList:
                      if r.record.status != "waiting" or self._answered.get(r.sheaf.rel, r.record.updated) != r.record.updated}
             for rel in moved | (set(self._answered) - {r.sheaf.rel for r in rows}):
                 self._answered.pop(rel, None)
-            self._snap = Snapshot(rows, entries, self.hub.clock())
+            with self._gone_lock:
+                # A file seen gone after this poll began may have been read before it went: its row waits for the
+                # next poll, which reads what is there now (#34).
+                rows = [r for r in rows if self._gone.get(r.sheaf.rel, 0) < started]
+                self._gone = {rel: n for rel, n in self._gone.items() if n > started}
+                self._snap = Snapshot(rows, entries, self.hub.clock())
 
     def start(self):
         def run():
@@ -415,19 +425,24 @@ class TheList:
         """The record's assignees of the issue of the sheaf at `address`, from the last poll, when `issue`, what
         its file names now, is still the issue of its row; None when the list does not know the sheaf (no row:
         another root, no issue, not polled yet, an issue changed since the poll, or a file gone since). The row
-        of a file gone since is dropped then, until the next poll."""
+        of a file gone since is dropped then, and kept out of the snapshot of a poll that began before, until
+        the next poll."""
         a = roots_mod.Address.parse(address)
         root = self.root()
         if root is None or a.root != root.name:
             return None
-        snap = self._snap
-        for row in snap.rows:
+        if not os.path.lexists(root.path / a.rel):
+            # Kept, the row would judge a sheaf a door create makes at its address before the next poll, and tell
+            # which issue the one that went named (#34).
+            with self._gone_lock:
+                self._gone[a.rel] = next(self._ask)
+                snap = self._snap
+                for row in snap.rows:
+                    if row.sheaf.rel == a.rel:
+                        _drop(snap, row)
+            return None
+        for row in self._snap.rows:
             if row.sheaf.rel == a.rel:
-                if not os.path.lexists(root.path / a.rel):
-                    # Kept, it would judge a sheaf a door create makes at its address before the next poll, and
-                    # tell which issue the one that went named (#34).
-                    _drop(snap, row)
-                    return None
                 return tuple(row.record.assignees) if _same_issue(row.sheaf.issue, issue_of(issue)) else None
         return None
 

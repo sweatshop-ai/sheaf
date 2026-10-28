@@ -850,3 +850,30 @@ def test_an_unbound_create_where_a_hidden_sheaf_was_deleted_is_refused_whatever_
                          text=f"---\nissue: {issue}\nsources: [library:1]\n---\n# A guess\n")
     assert is_error and "no member as its owner" in got, got
     assert not joey.exists()
+
+
+def test_a_poll_that_read_a_hidden_sheaf_before_it_went_does_not_bring_its_row_back(
+        box, browser, sheaves, monkeypatch):
+    """#34, Codex: the sheaf goes and a door create takes its address while a poll that read it asks GitHub;
+    the snapshot that poll publishes judges the new sheaf without the row."""
+    tokens = bind_tokens(box, sheaves)
+    joey = hidden_joey(sheaves)
+    box.hub.the_list.poll()
+    root = box.hub.roots.lookup(joey).name
+    doc = f"{root}/globex/black-friday/2026-10-28-reply-to-joey.md"
+    fetch = the_list.fetch
+
+    def meanwhile(cfg, wanted):
+        joey.unlink()
+        is_error, got = call(browser, "create", token=tokens["dora-door"], doc=doc,
+                             text="---\nissue: acme/record#5\nsources: [library:1]\n---\n# A guess\n")
+        assert not is_error, got
+        return fetch(cfg, wanted)
+    monkeypatch.setattr(the_list, "fetch", meanwhile)
+    box.hub.the_list.poll()
+    monkeypatch.setattr(the_list, "fetch", fetch)
+    is_error, got = call(browser, "read", token=tokens["dora-door"], doc=doc)
+    assert not is_error, got
+    box.hub.the_list.poll()                             # a poll that read the new sheaf: its issue's assignee owns it
+    is_error, got = call(browser, "read", token=tokens["dora-door"], doc=doc)
+    assert is_error, got

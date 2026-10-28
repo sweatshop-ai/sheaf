@@ -85,20 +85,23 @@ def front_matter(text: str) -> dict:
     end = _end(lines)
     if end < 0:
         return {}                   # none, or no closing line: no front matter
-    out, listing, current = {}, None, None
+    out, listing, current, skipped = {}, None, None, False
     for line in lines[1:end]:
         if not line.strip() or line.lstrip().startswith("#"):
             continue                # a blank or comment line closes no list
         if listing is not None and (m := _ITEM_RE.fullmatch(line)):
             out[listing] += (_unquote(_uncomment(m.group(1))),)
             continue
-        listing = None
+        if skipped and _ITEM_RE.fullmatch(line):
+            continue                # an item of the list under a plain key the reader skipped
+        listing, skipped = None, False
         m = _KEY_RE.fullmatch(line)
         if not m:
             if line[:1] not in " \t":
                 if _may_spell_a_key(line):
                     out[UNREAD] = True
-                current = None      # a plain key the reader does not read: the indented lines below are its
+                current = None      # a plain key the reader does not read: the indented lines below are its,
+                skipped = line.rstrip().endswith(":")       # and so are the items of a list under it
             elif current in KEYS:
                 out[UNREAD] = True
             continue                # an indented line under another key: a value this reader does not read

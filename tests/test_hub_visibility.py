@@ -9,6 +9,7 @@ import pytest
 from helpers import FRONT, Front, call, hub_rows
 
 from sheafmd.hub import proxy, the_list
+from sheafmd.hub.index import SWEEP_SECONDS
 from sheafmd.hub.state import Tokens
 from sheafmd.hub.visibility import front_matter
 from sheafmd.source import md_hash
@@ -627,3 +628,25 @@ def test_a_tick_that_a_later_edit_of_the_same_block_rewrites_shares_nothing(team
                     member=THIERRY)
     assert got.status == 200, got.body
     assert team.get(f"/work/{DOC}", member=HANS).status == 404
+
+
+@pytest.mark.parametrize("judged", [True, False], ids=["judged before", "never judged"])
+def test_an_owner_only_sheaf_deleted_while_streams_are_open_is_told_to_its_owner_alone(team, work, monkeypatch, judged):
+    now = [time.time()]
+    team.hub.clock = lambda: now[0]
+    monkeypatch.setattr(team.hub.index, "_start_sweep", lambda run: run())     # a sweep inside the tick
+    f = work / DOC
+    put(team, work, DOC, PRIVATE)
+    hans, thierry = (team.get("/_/live", member=m).stream for m in (HANS, THIERRY))
+    if judged:
+        for m in (HANS, THIERRY):
+            team.get("/_/index.json", member=m)
+    now[0] += SWEEP_SECONDS
+    team.hub.tick()
+    hans.drain(), thierry.drain()
+    f.unlink()
+    now[0] += SWEEP_SECONDS
+    team.hub.tick()
+    assert [d for name, d in hans.drain() if name == "status"] == []
+    if judged:
+        assert [d["doc"] for name, d in thierry.drain() if name == "status"] == [f"work/{DOC}"]

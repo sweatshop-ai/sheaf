@@ -77,6 +77,7 @@ class Hub:
         self.versions = state.Versions()
         self.commits = Commits(self.record)      # the roots that commit (8.11)
         self._told_projects: set = set()         # what check_projects warned of this run (8.12)
+        self.the_list = None                     # the list (9.10): a the_list.TheList, set by the server
         self.docs = state.Docs()
         self.seen = state.Seen()
         self.member_seen = state.MemberSeen()

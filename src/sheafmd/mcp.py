@@ -483,9 +483,10 @@ class Door:
                 address = str(Address(root.name, rel))
                 try:
                     path = hub.roots.resolve(address)          # never a file outside its root
-                    if (root.name, path.parent) not in in_git:
-                        in_git[root.name, path.parent] = in_git_dir(path, root)
-                    if in_git[root.name, path.parent]:
+                    folder = (root.name, path.parent)
+                    if folder not in in_git:
+                        in_git[folder] = in_git_dir(path, root)
+                    if in_git[folder]:
                         continue                               # nor one in a git directory
                     threads, fm = self._open_in(path)
                     mtime = path.stat().st_mtime_ns
@@ -493,9 +494,9 @@ class Door:
                     continue
                 # Whether the member owns a file asks git of its folder (8.2), and every file of a folder has the
                 # same answer: asked once a folder, not once a file.
-                if member is not None and (root.name, path.parent) not in owned:
-                    owned[root.name, path.parent] = hub.member_owns(member, address)
-                if not self._sees(fm, address, caller, owned.get((root.name, path.parent))):
+                if member is not None and folder not in owned:
+                    owned[folder] = hub.member_owns(member, address)
+                if not self._sees(fm, address, caller, owned.get(folder)):
                     continue                                   # nor a sheaf the caller may not see (9.11)
                 if args.get("open_only", True) and not threads:
                     continue

@@ -144,7 +144,16 @@ def test_a_sheaf_with_no_session_on_the_box_offers_no_fork(tab):
     open_work(tab.page)
     assert tab.page.locator("#rd-work h4").all_text_contents() == ["Sessions"]
     assert tab.page.locator("#rd-work .rd-cmd").count() == 0
-    assert "No session of this sheaf ran on the box: there is none to fork." in tab.page.inner_text("#rd-work")
+    assert "Nothing to fork from this hub: no session of this sheaf ran on the box" in tab.page.inner_text("#rd-work")
+
+
+def test_a_box_sheaf_the_hub_cannot_fork_never_says_there_is_none_to_fork(tab):
+    # Without [list] sessions_dir the hub leaves `fork` out of a sheaf whose sessions ran on the box (9.12).
+    as_member(tab, work(attach=None, fork=None))
+    tab.open()
+    open_work(tab.page)
+    text = tab.page.inner_text("#rd-work")
+    assert "there is none to fork" not in text and "Nothing to fork from this hub" in text
 
 
 def test_a_sheaf_with_no_session_says_so(tab):

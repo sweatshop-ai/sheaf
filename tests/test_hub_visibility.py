@@ -907,7 +907,7 @@ def test_a_bound_token_cannot_tell_another_members_root_from_none_through_a_link
 
 
 def test_documents_for_a_bound_token_asks_git_once_per_folder_not_once_per_file(team, browser, work, monkeypatch):
-    # Codex P2 #22: the walk judged each file's root by asking git, so a large root started a git per file.
+    # Whether a file is the member's asks git of its folder: a large root must not start a git per file.
     import subprocess
     team.hub.proxy = members(work, hans=["james-hans"])
     for i in range(6):
@@ -915,7 +915,7 @@ def test_documents_for_a_bound_token_asks_git_once_per_folder_not_once_per_file(
     run, asked = subprocess.run, []
 
     def counting(cmd, *a, **k):
-        if cmd[:1] == ["git"]:
+        if cmd[:2] == ["git", "-C"]:
             asked.append(cmd)
         return run(cmd, *a, **k)
     monkeypatch.setattr(subprocess, "run", counting)

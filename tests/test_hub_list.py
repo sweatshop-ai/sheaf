@@ -530,3 +530,14 @@ def test_a_list_root_inside_a_git_work_tree_is_refused_at_each_poll_and_lists_no
     assert rows and f"{repo / 'list'} is not the top folder of its root" in rows[-1]["error"], rows
     res = box.get("/repo", member=NELL)
     assert res.status == 200 and BeautifulSoup(res.text, "html.parser").select(".list-row") == []
+
+
+def test_a_ticked_sheaf_moved_out_of_waiting_and_back_without_a_new_change_is_waiting_again(box, github):
+    # A Project's Status is not the issue's: moving it leaves the issue's last change where it was.
+    assert box.post("/_/tick", {"doc": JOEY, "action": 0, "word": "Approve"}, member=NELL).status == 200
+    github.issues[5]["status"] = "In progress at TT"
+    box.hub.the_list.poll()
+    assert "globex/black-friday" in read(box.get("/list", member=NELL))["In progress 2"]
+    github.issues[5]["status"] = "Waiting on member"
+    box.hub.the_list.poll()
+    assert "globex/black-friday" in read(box.get("/list", member=NELL))["Waiting on you 2"]

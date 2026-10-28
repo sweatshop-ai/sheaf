@@ -950,3 +950,14 @@ def test_a_share_whose_rewrite_would_join_a_hidden_item_to_sessions_writes_nothi
                     member=THIERRY)
     assert got.status != 200 and (work / DOC).read_text(encoding="utf-8") == text
     assert download(team, id=FORK, member=THIERRY).status == 404
+
+
+def test_the_hub_persons_share_on_the_loopback_port_is_written(team, box, browser, work):
+    # Narrow check of 62a9324 (Codex): the Share check of `sessions` read a front matter only a member's save had.
+    from sheafmd.source import md_hash
+    text = SHEAF.replace("sources: [issue:thinkingtoo/tt-tiroir#8]", "sources: [library:doc-1]") + "\n- [ ] Share\n"
+    put(team, work, DOC, text)
+    n = [a[0] for a in the_list.read_sheaf(DOC, text).actions].index("Share")
+    got = browser.post("/_/save", {"doc": ADDRESS, "hash": md_hash(text), "edits": [the_list.tick_edit(text, n, "Share")]})
+    assert got.status == 200, got.text
+    assert "visibility: project" in (work / DOC).read_text(encoding="utf-8")

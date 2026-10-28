@@ -5,6 +5,9 @@ members' root: Thierry owns the sheaves, Hans is a member of the project, Bea is
 import json
 import os
 import pwd
+import shutil
+import subprocess
+import uuid
 
 import pytest
 from helpers import FRONT, Front, hub_rows
@@ -66,7 +69,7 @@ def box(team, tmp_path, work):
     cfg = the_list.parse({"root": str(work), "repo": "thinkingtoo/tt-tiroir", "project": 1,
                           "token_file": str(tmp_path / "token"), "sessions_dir": str(sessions),
                           "tell_dir": str(tell), "box": "tiroir-tt",
-                          "attach": "ssh tiroir-tt -t tmux attach -t james \\; select-window -t {window}"},
+                          "attach": "ssh tiroir-tt -t tmux attach -t james \\; select-window -t ={window}"},
                          "the test")
     team.hub.the_list = the_list.TheList(team.hub, cfg)
     put(team, work, DOC, SHEAF)
@@ -557,7 +560,35 @@ def test_the_meta_block_of_a_box_sheaf_carries_the_fork_command_the_sessions_and
 
 def test_a_member_with_a_shell_gets_the_attach_command_for_the_projects_window(team, box):
     assert meta(team, THIERRY)["work"]["attach"] == \
-        r"ssh tiroir-tt -t tmux attach -t james \; select-window -t thinkingtoo-tiroir"
+        r"ssh tiroir-tt -t tmux attach -t james \; select-window -t =thinkingtoo_tiroir"
+
+
+@pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux not installed")
+def test_the_attach_command_takes_the_projects_window_and_never_one_its_name_is_a_prefix_of(team, box):
+    # James names a project's window <client>_<project> (tt-tiroir f606f9a), and tmux takes a bare name as a
+    # prefix: `-t thinkingtoo_tiroir` would select thinkingtoo_tiroir2, another project's window.
+    server = f"sheaf-test-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    cfg = team.hub.the_list.cfg
+    team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{
+        **cfg.__dict__, "attach": f"tmux -L {server} select-window -t ={{window}}"}))
+    attach = meta(team, THIERRY)["work"]["attach"]
+
+    def tmux(*args):
+        return subprocess.run(["tmux", "-L", server, *args], capture_output=True, text=True, timeout=10)
+
+    def active():
+        return tmux("display-message", "-p", "-t", "james", "#{window_name}").stdout.strip()
+    try:
+        assert tmux("new-session", "-d", "-s", "james", "-n", "inbox").returncode == 0
+        assert tmux("new-window", "-d", "-t", "james:", "-n", "thinkingtoo_tiroir2").returncode == 0
+        assert subprocess.run(attach, shell=True, capture_output=True, timeout=10).returncode != 0
+        assert active() == "inbox"
+        assert tmux("new-window", "-d", "-t", "james:", "-n", "thinkingtoo_tiroir").returncode == 0
+        got = subprocess.run(attach, shell=True, capture_output=True, text=True, timeout=10)
+        assert got.returncode == 0, got.stderr
+        assert active() == "thinkingtoo_tiroir"
+    finally:
+        tmux("kill-server")
 
 
 def test_a_sheaf_live_on_a_laptop_says_so_and_can_nothing(team, box, work):
@@ -635,7 +666,7 @@ def test_a_fork_cannot_name_the_box_as_its_machine(team, box, work):
 def test_a_fork_on_a_sheaf_closed_after_the_gate_is_404_and_writes_nothing(team, box, work, monkeypatch):
     put(team, work, DOC, SHEAF.replace("sources: [issue:thinkingtoo/tt-tiroir#8]", "sources: [library:doc-1]"))
     before = (work / DOC).read_text(encoding="utf-8")
-    monkeypatch.setattr(team.hub, "visible", lambda member, address: True)     # the gate saw it open
+    monkeypatch.setattr(team.hub, "visible", lambda member, address, **kw: True)     # the gate saw it open
     got = fork(team)
     assert got.status == 404 and (work / DOC).read_text(encoding="utf-8") == before
     assert hub_rows("session-forked") == []
@@ -899,6 +930,22 @@ def test_a_fork_that_lands_while_the_hub_looks_for_james_session_stays_live(team
     monkeypatch.setattr(work_mod, "james_newest", a_fork_lands_meanwhile)
     assert comment(team, work, "tell").status == 200
     assert "thierry-laptop" in sessions_of(work)[0] and not [s for s in sessions_of(work) if NEW in s]
+    assert hub_rows("session-recorded") == []
+
+
+def test_a_sheaf_closed_while_the_hub_looks_for_james_session_records_none(team, at_work, work, monkeypatch):
+    # The comment's guard read the sheaf open to Hans; a door write closed it before the session's write.
+    from sheafmd.hub import work as work_mod
+    james_wrote(at_work, NEW)
+    found = work_mod.james_newest
+    closed = SHEAF.replace("sources: [issue:thinkingtoo/tt-tiroir#8]", "sources: [library:doc-1]")
+
+    def a_door_write_closes_it_meanwhile(cfg, project):
+        (work / DOC).write_text(closed, encoding="utf-8")
+        return found(cfg, project)
+    monkeypatch.setattr(work_mod, "james_newest", a_door_write_closes_it_meanwhile)
+    assert comment(team, work, "tell").status == 200
+    assert (work / DOC).read_text(encoding="utf-8") == closed
     assert hub_rows("session-recorded") == []
 
 

@@ -419,14 +419,17 @@ def test_a_sheaf_closed_with_the_same_size_and_time_is_closed_at_once(team, work
     assert team.get(f"/work/{DOC}", member=HANS).status == 404
 
 
-def test_two_stop_james_in_one_second_leave_one_drop_and_two_rows(team, work, stop_dir, monkeypatch):
+def test_two_stop_james_in_one_second_leave_two_drops_and_two_rows(team, work, stop_dir, monkeypatch):
+    # Through work.drop, as Ask and Tell: the second takes `-1`, and never writes over a drop James has not read.
     put(team, work, DOC, STOPPABLE.replace("- [ ] Stop James", "- [ ] Stop James\n- [ ] Stop James"))
     second = time.gmtime()
     monkeypatch.setattr(time, "gmtime", lambda *_: second)
     assert tick(team, work, DOC, "Stop James", HANS).status == 200
     assert tick(team, work, DOC, "Stop James", THIERRY).status == 200
-    f, = stop_dir.iterdir()
-    assert f.read_text(encoding="utf-8") == "thinkingtoo/tiroir\n"
+    first, again = sorted(stop_dir.iterdir())
+    assert again.name == first.name + "-1"
+    assert first.read_text(encoding="utf-8") == again.read_text(encoding="utf-8") == "thinkingtoo/tiroir\n"
+    assert {f.stat().st_mode & 0o777 for f in (first, again)} == {0o640}
     assert [r["drop"] for r in hub_rows("stop-james")] == ["written", "written"]
 
 

@@ -107,7 +107,7 @@ def test_a_second_restore_of_a_draft_whose_first_got_no_answer_goes_under_the_sa
     until(lambda: "and plums" in lost_edit.site.file.read_text(), what="the first restore to be written")
     assert re.fullmatch(r"[A-Za-z0-9_-]{16,64}", bodies[0]["rid"])
     assert kept[0]["rid"] == bodies[0]["rid"]          # the draft keeps it
-    page.unroute("**/_/save")
+    page.unroute_all(behavior="ignoreErrors")   # a closed page leaves context.pages: close_context cannot stop it
     page.close()
     page = context.new_page()
     page.on("request", lambda r: bodies.append(r.post_data_json) if r.url.endswith("/_/save") else None)

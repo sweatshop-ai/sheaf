@@ -904,3 +904,22 @@ def test_a_bound_token_cannot_tell_another_members_root_from_none_through_a_link
     _, expected = call(browser, "create", token=token, doc=str(none), text="# X\n")
     assert is_error and got == expected.replace(str(none), str(theirs))
     assert not (root / "x.md").exists()
+
+
+def test_documents_for_a_bound_token_asks_git_once_per_folder_not_once_per_file(team, browser, work, monkeypatch):
+    # Codex P2 #22: the walk judged each file's root by asking git, so a large root started a git per file.
+    import subprocess
+    team.hub.proxy = members(work, hans=["james-hans"])
+    for i in range(6):
+        put(team, work, f"thinkingtoo/tiroir/{i}.md", "# Open\n\n" + THREAD + "\n")
+    run, asked = subprocess.run, []
+
+    def counting(cmd, *a, **k):
+        if cmd[:1] == ["git"]:
+            asked.append(cmd)
+        return run(cmd, *a, **k)
+    monkeypatch.setattr(subprocess, "run", counting)
+    listed = [d["doc"] for d in call(browser, "documents", token=Tokens().add("james-hans"))[1] if "doc" in d]
+    assert len(listed) == 6
+    folders = [cmd[2] for cmd in asked]
+    assert len(folders) == len(set(folders)), folders      # no folder asked twice, whatever its files

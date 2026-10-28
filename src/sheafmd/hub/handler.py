@@ -574,9 +574,13 @@ class Handler:
                 sub.put("signed-out", {})
             return _stream(sub)
         e = self._entry(req, req.query.get("doc"))
+        def for_member(name, data):
+            # Asked at each event: a write that makes the sheaf its owner's alone silences a stream
+            # opened before it (9.11).
+            return _document_events(name, data) if hub.visible(member, e.address) else None
         sub = e.bus.subscribe(lambda tabs: {"boot": hub.boot, "version": hub.version,
                                             "service": hub.service, "tabs": tabs},
-                              _document_events if member else None)
+                              for_member if member else None)
         if member is None and hub.auth is not req.auth:       # a rotation overtook this request, after it told the open streams
             sub.put("signed-out", {})
         if hub.entries.get(e.address) is not e:               # a forget overtook this request, after it told the open streams
@@ -696,7 +700,7 @@ class Handler:
                 m = req.member
                 if m is not None:
                     the = self.hub.the_list
-                    owners = visibility.owner_of(visibility.front_matter(new), [m],
+                    owners = visibility.owner_of(visibility.front_matter(text), [m],
                                                  the.assignees(e.address) if the is not None else None)
                     if not owners:
                         raise EditError("Only the owner of this sheaf can share it.")

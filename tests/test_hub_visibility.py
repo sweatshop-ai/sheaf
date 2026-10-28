@@ -313,3 +313,27 @@ def test_stop_james_whose_drop_fails_says_failed_and_leaves_no_dot_file(team, wo
         stop_dir.chmod(0o700)
     assert hub_rows("stop-james")[0]["drop"].startswith("failed: ")
     assert list(stop_dir.iterdir()) == []
+
+
+def test_a_source_list_written_without_indent_is_read_too(team, work):
+    put(team, work, DOC, PRIVATE.replace("sources: [library:doc-123]", "sources:\n- library:x"))
+    assert team.get(f"/work/{DOC}", member=HANS).status == 404
+    assert team.get(f"/work/{DOC}", member=THIERRY).status == 200
+
+
+def test_a_sheaf_whose_front_matter_follows_a_byte_order_mark_is_read_too(team, work):
+    put(team, work, DOC, "﻿" + PRIVATE)
+    assert team.get(f"/work/{DOC}", member=HANS).status == 404
+    assert team.get(f"/work/{DOC}", member=THIERRY).status == 200
+
+
+@pytest.mark.parametrize("change", [
+    lambda t: t.replace("sources: [library:doc-123]", '"sources": [library:doc-123]'),
+    lambda t: t.replace("sources: [library:doc-123]", "sources: [library:doc-123]\nsources: []"),
+    lambda t: t.replace("sources: [library:doc-123]", "sources :\n  - library:doc-123"),
+    lambda t: t.replace("sources: [library:doc-123]", "visibility: >-\n  owner"),
+], ids=["quoted key", "key twice", "space before colon", "folded value"])
+def test_a_front_matter_line_the_hub_cannot_read_keeps_the_sheaf_its_owners(team, work, change):
+    put(team, work, DOC, change(PRIVATE))
+    assert team.get(f"/work/{DOC}", member=HANS).status == 404
+    assert team.get(f"/work/{DOC}", member=THIERRY).status == 200

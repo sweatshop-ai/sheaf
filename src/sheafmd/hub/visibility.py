@@ -22,9 +22,10 @@ import re
 
 PROJECT_WIDE = ("issue", "pr", "repo", "web")
 KEYS = ("visibility", "sources", "owner", "shared")
+UNREAD = "?"                        # set by front_matter when a line it cannot read may hold one of KEYS
 
 _KEY_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*):(?:\s+(.*?))?\s*")
-_ITEM_RE = re.compile(r"\s+-\s+(.*?)\s*")
+_ITEM_RE = re.compile(r"\s*-\s+(.*?)\s*")
 
 
 def _lines(text: str) -> list:
@@ -58,28 +59,38 @@ def _unquote(value: str) -> str:
 
 def _end(lines: list) -> int:
     """The number of the front matter's closing line; -1 when `lines` opens with none."""
-    if not lines or lines[0].strip() != "---":
+    if not lines or lines[0].lstrip("\ufeff").strip() != "---":
         return -1
     return next((n for n in range(1, len(lines)) if lines[n].strip() in ("---", "...")), -1)
 
 
 def front_matter(text: str) -> dict:
     """The top-level `key: value` lines of the front matter at the top of `text`. A list, written
-    `[a, b]` or as `- a` lines under an empty key, is a tuple of its items; a nested table is not read."""
+    `[a, b]` or as `- a` lines under an empty key, indented or not, is a tuple of its items; a nested table
+    is not read. The reader fails closed: a line it cannot read that may hold one of KEYS (a quoted key, a
+    line that is no `key: value`, an indented line under one of KEYS, one of KEYS written twice) sets
+    `UNREAD`, and `effective` reads such a sheaf as `owner`."""
     lines = _lines(text)
     end = _end(lines)
     if end < 0:
         return {}                   # none, or no closing line: no front matter
-    out, listing = {}, None
+    out, listing, current = {}, None, None
     for line in lines[1:end]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue                # a blank or comment line closes no list
         if listing is not None and (m := _ITEM_RE.fullmatch(line)):
             out[listing] += (_unquote(_uncomment(m.group(1))),)
             continue
         listing = None
         m = _KEY_RE.fullmatch(line)
         if not m:
-            continue
+            if line[:1] not in " \t" or current in KEYS:
+                out[UNREAD] = True
+            continue                # an indented line under another key: a value this reader does not read
         key, value = m.group(1), _uncomment(m.group(2) or "")
+        if key in KEYS and key in out:
+            out[UNREAD] = True
+        current = key
         if value.startswith("[") and value.endswith("]"):
             out[key] = tuple(_unquote(v.strip()) for v in value[1:-1].split(",") if v.strip())
         elif not value:
@@ -113,7 +124,7 @@ def private(source: str) -> bool:
 
 def effective(fm: dict) -> str:
     """`owner` or `project`, as the hub enforces it (9.11)."""
-    if text(fm, "visibility").casefold() == "owner":
+    if fm.get(UNREAD) or text(fm, "visibility").casefold() == "owner":
         return "owner"
     if any(private(s) for s in sources(fm)) and not text(fm, "shared"):
         return "owner"

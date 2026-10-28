@@ -67,14 +67,20 @@ class Commits:
         """`rel`, a document of `root` (a roots.Root), was written by `author`: commit it when the root
         commits. `what` names the write in the subject (`edit`, `comment`). Never raises: a commit that
         fails is a diagnostics row, and the write stands."""
-        rc = config.load_root_config(root.path, warn=lambda line: None)
+        address = f"{root.name}/{rel}"
+        try:
+            rc = config.load_root_config(root.path, warn=lambda line: None)
+        except config.ConfigError as e:
+            self._record("commit-failed", address, error=str(e)[:300])
+            return
         if not rc.commit:
             return
-        address = f"{root.name}/{rel}"
         if not root.git:
             self._record("commit-not-git", address)
             return
-        paths = [rel]
+        # The file the write went to: a link inside the root is staged as the link, not what it names.
+        top = os.path.realpath(root.path)
+        paths = [os.path.relpath(os.path.realpath(root.path / rel), top)]
         if rc.versions_inside:
             paths.append(str(state.INSIDE / state.doc_key(rel)))
         try:

@@ -3,8 +3,8 @@ members and its status. The hub reads it for one thing: a sheaf folder it does n
 in the hub's log and in the diagnostics log (15), once per folder per hub run. Access stays the
 member's roots (9.9); the file grants nothing.
 
-    [projects."klium/blog"]
-    members = ["thierry", "sven"]     # the front's short names of who works on it
+    [projects."acme/blog"]
+    members = ["ada", "bob"]          # the front's short names of who works on it
     status = "live"                   # or "closed"
 
     read(folder)              the entries, or None without the file; raises Invalid

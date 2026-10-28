@@ -33,8 +33,8 @@ PINS_KEPT = 16                  # per document: the versions pages keep (`pin`)
 PINS_MAX_AGE = 7 * 86400        # seconds since a page last pinned it
 _HASH_RE = re.compile(r"[0-9a-f]{16}")
 _ADDRESS_FILE = "address"       # in each versions folder: the address it is the key of
-_PINS = "pins"
-INSIDE = Path(".sheaf") / "versions"  # a root's own versions store, inside it (7.4)                  # in each versions folder: the versions pages keep
+_PINS = "pins"                  # in each versions folder: the versions pages keep
+INSIDE = Path(".sheaf") / "versions"    # a root's own versions store, inside it (7.4)
 
 
 def write_text_private(path: Path, text: str):
@@ -199,8 +199,10 @@ class Versions:
     def forget(self, address: str):
         """Drop every version of one document. A root that is forgotten takes its documents'
         versions with it: the name may go to another folder, and a page still open on the old
-        document must not be merged into the new one."""
-        shutil.rmtree(self._folder(address), ignore_errors=True)
+        document must not be merged into the new one. A store inside a root keeps them: they are
+        files of the root, as its documents are (7.4)."""
+        if self._root is None:
+            shutil.rmtree(self._folder(address), ignore_errors=True)
 
     def forget_prefix(self, prefix: str):
         """Drop the versions of every document whose address starts with `prefix` (`<root>/`),

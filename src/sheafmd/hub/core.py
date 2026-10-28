@@ -24,13 +24,14 @@ from ..agents import registry
 from ..agents.base import Adapter, Target
 from ..render import render_file
 from ..source import STAMP_FORMAT
+from . import commits as commits_mod
+from . import projects
 from . import proxy as proxy_mod
 from . import roots as roots_mod
 from . import state
 from .asktell import AskTell
-from . import projects
-from .commits import Author, Commits
 from .auth import Auth
+from .commits import Author, Commits
 from .events import Bus
 from .index import Index
 from .jobs import Jobs
@@ -75,7 +76,7 @@ class Hub:
         self.roots = roots_mod.Roots()
         self.versions = state.Versions()
         self.commits = Commits(self.record)      # the roots that commit (8.11)
-        self._told_projects: dict = {}           # what check_projects warned of this run (8.12)
+        self._told_projects: set = set()         # what check_projects warned of this run (8.12)
         self.docs = state.Docs()
         self.seen = state.Seen()
         self.member_seen = state.MemberSeen()
@@ -111,8 +112,12 @@ class Hub:
     # ── documents ────────────────────────────────────────────────────────────
     def _versions_of(self, root) -> state.Versions:
         """The versions store of `root`'s documents: inside it with `versions = "root"` (7.4), else the
-        state folder's."""
-        if config.load_root_config(root.path, warn=lambda line: None).versions_inside:
+        state folder's, also when its `.sheaf.toml` cannot be read."""
+        try:
+            inside = config.load_root_config(root.path, warn=lambda line: None).versions_inside
+        except config.ConfigError:
+            inside = False
+        if inside:
             return state.Versions(root.path, root.name)
         return self.versions
 
@@ -122,8 +127,8 @@ class Hub:
         try:
             entries = projects.read(root.path)
         except projects.Invalid as e:
-            if self._told_projects.setdefault((root.id, None, str(e)), True) is True:
-                self._told_projects[(root.id, None, str(e))] = False
+            if (root.id, None, str(e)) not in self._told_projects:
+                self._told_projects.add((root.id, None, str(e)))
                 self.record("projects-invalid", None, root=root.name, error=str(e))
                 print(f"sheaf: {root.path / projects.FILE}: {e}", file=sys.stderr, flush=True)
             return
@@ -132,7 +137,7 @@ class Hub:
         for folder in projects.unlisted(entries, rels):
             if (root.id, folder) in self._told_projects:
                 continue
-            self._told_projects[(root.id, folder)] = False
+            self._told_projects.add((root.id, folder))
             self.record("project-unlisted", None, root=root.name, folder=folder)
             print(f"sheaf: {root.name}/{folder} holds sheaves and {projects.FILE} has no entry for it",
                   file=sys.stderr, flush=True)
@@ -262,8 +267,10 @@ class Hub:
         return registry.adapter_for(agent, self.sender)
 
     def stop_jobs(self):
-        """Kill every Ask and Tell child's process group (a clean stop, SPEC 8.4)."""
+        """Kill every Ask and Tell child's process group, and let the pushes due go out (a clean stop,
+        SPEC 8.4, 8.11)."""
         self.runner.kill_all()
+        self.commits.settle(commits_mod.PUSH_SECONDS)
 
     def waiting(self, address: str) -> bool:
         """Whether a Tell waits on a thread of this document for an action reply."""

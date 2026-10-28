@@ -13,7 +13,7 @@ from sheafmd.blocks import split_md_blocks
 from sheafmd.hub import proxy
 from sheafmd.source import md_hash
 
-DOC = "sheaves/klium/blog/2026-10-28-plan.md"
+DOC = "sheaves/acme/blog/2026-10-28-plan.md"
 
 
 def git(at, *args):
@@ -30,16 +30,16 @@ def remote(tmp_path):
 
 @pytest.fixture
 def sheaves(tmp_path, remote):
-    """A clone of `remote` that commits and pushes, with one sheaf, `klium/blog/2026-10-28-plan.md`,
+    """A clone of `remote` that commits and pushes, with one sheaf, `acme/blog/2026-10-28-plan.md`,
     and its project in `projects.toml`. Committed and pushed as the box's first commit would be."""
     repo = tmp_path / "sheaves"
     subprocess.run(["git", "clone", "-q", str(remote), str(repo)], check=True, capture_output=True)
     git(repo, "config", "user.name", "the box")
     git(repo, "config", "user.email", "box@example.com")
     (repo / ".sheaf.toml").write_text('versions = "root"\ncommit = true\npush = true\n', encoding="utf-8")
-    (repo / "projects.toml").write_text('[projects."klium/blog"]\nmembers = ["bea"]\nstatus = "live"\n',
+    (repo / "projects.toml").write_text('[projects."acme/blog"]\nmembers = ["bea"]\nstatus = "live"\n',
                                         encoding="utf-8")
-    doc = repo / "klium" / "blog" / "2026-10-28-plan.md"
+    doc = repo / "acme" / "blog" / "2026-10-28-plan.md"
     doc.parent.mkdir(parents=True)
     doc.write_text(PLAN, encoding="utf-8")
     git(repo, "add", "-A")
@@ -58,12 +58,12 @@ def box(hub, browser, sheaves, other):
                              "members": {BEA: {"name": "Bea", "email": "bea@example.com",
                                                "roots": [str(sheaves)]},
                                          CAL: {"name": "Cal", "roots": [str(sheaves)]}}}, "the test")
-    hub.roots.for_document(sheaves / "klium" / "blog" / "2026-10-28-plan.md")
+    hub.roots.for_document(sheaves / "acme" / "blog" / "2026-10-28-plan.md")
     return Front(hub, browser.handler)
 
 
 def edit(box, sheaves, member=BEA, words="Second, edited on the page."):
-    f = sheaves / "klium" / "blog" / "2026-10-28-plan.md"
+    f = sheaves / "acme" / "blog" / "2026-10-28-plan.md"
     text = f.read_text(encoding="utf-8")
     i = next(i for i, b in enumerate(split_md_blocks(text)) if b.content.startswith("Second"))
     r = box.post("/_/save", {"doc": DOC, "hash": md_hash(text), "edits": [{"i": i, "html": f"<p>{words}</p>"}]},
@@ -90,13 +90,13 @@ def test_a_members_save_is_one_commit_on_the_remote_under_their_name(box, sheave
     assert len(commits) == 2
     (who, files) = commits[0]
     assert who.startswith("Bea <bea@example.com>|")
-    assert "klium/blog/2026-10-28-plan.md" in files
+    assert "acme/blog/2026-10-28-plan.md" in files
     assert any(f.startswith(".sheaf/versions/") for f in files)
-    assert "Second, edited on the page." in git(remote, "show", "main:klium/blog/2026-10-28-plan.md")
+    assert "Second, edited on the page." in git(remote, "show", "main:acme/blog/2026-10-28-plan.md")
 
 
 def test_a_comment_is_a_commit_too_and_a_member_without_an_email_gets_one_at_the_fronts_host(box, sheaves, remote):
-    f = sheaves / "klium" / "blog" / "2026-10-28-plan.md"
+    f = sheaves / "acme" / "blog" / "2026-10-28-plan.md"
     text = f.read_text(encoding="utf-8")
     i = next(i for i, b in enumerate(split_md_blocks(text)) if b.content.startswith("First"))
     r = box.post("/_/comment", {"doc": DOC, "op": "add", "hash": md_hash(text), "block": i, "start": 0,
@@ -104,7 +104,7 @@ def test_a_comment_is_a_commit_too_and_a_member_without_an_email_gets_one_at_the
     assert r.status == 200, r.text
     (who, files), _ = pushed(box, remote)
     assert who.startswith(f"Cal <{CAL}@chat.example.com>|")
-    assert "klium/blog/2026-10-28-plan.md" in files
+    assert "acme/blog/2026-10-28-plan.md" in files
 
 
 def versions_files(sheaves):
@@ -134,20 +134,20 @@ def rows(kind):
 
 
 def test_a_sheaf_folder_projects_toml_does_not_name_is_a_warning_once(box, sheaves, capsys):
-    stray = sheaves / "tribeloo" / "launch" / "2026-10-28-brief.md"
+    stray = sheaves / "globex" / "launch" / "2026-10-28-brief.md"
     stray.parent.mkdir(parents=True)
     stray.write_text(PLAN, encoding="utf-8")
     (sheaves / "README.md").write_text("# The sheaves\n", encoding="utf-8")      # the top: no project
     assert box.get("/_/index.json").status == 200
     assert box.get("/_/index.json").status == 200
     got = rows("project-unlisted")
-    assert [(r["root"], r["folder"]) for r in got] == [("sheaves", "tribeloo/launch")]
+    assert [(r["root"], r["folder"]) for r in got] == [("sheaves", "globex/launch")]
     err = capsys.readouterr().err
-    assert err.count("tribeloo/launch") == 1 and "projects.toml" in err
+    assert err.count("globex/launch") == 1 and "projects.toml" in err
 
 
 def test_a_projects_toml_that_cannot_be_read_is_a_warning_and_lists_as_before(box, sheaves):
-    (sheaves / "projects.toml").write_text('[projects."klium/blog"]\nmembers = ["bea"]\nstatus = "maybe"\n', encoding="utf-8")
+    (sheaves / "projects.toml").write_text('[projects."acme/blog"]\nmembers = ["bea"]\nstatus = "maybe"\n', encoding="utf-8")
     docs = [d["doc"] for r in box.get("/_/index.json").json()["roots"] for d in r["docs"]]
     assert docs == [DOC]
     (row,) = rows("projects-invalid")
@@ -167,7 +167,7 @@ def test_a_push_that_fails_is_a_row_the_save_stands_and_the_next_push_carries_it
 
 
 def test_the_hubs_person_saving_through_the_loopback_port_commits_as_the_repo_names_them(box, browser, sheaves, remote):
-    f = sheaves / "klium" / "blog" / "2026-10-28-plan.md"
+    f = sheaves / "acme" / "blog" / "2026-10-28-plan.md"
     text = f.read_text(encoding="utf-8")
     i = next(i for i, b in enumerate(split_md_blocks(text)) if b.content.startswith("Second"))
     assert browser.post("/_/save", {"doc": DOC, "hash": md_hash(text),
@@ -184,7 +184,7 @@ def test_a_door_update_commits_under_the_callers_name(box, browser, sheaves, rem
                          expected_hash=got["hash"])
     assert not is_error, got
     (who, files), _ = pushed(box, remote)
-    assert who.startswith("Claude <box@example.com>|") and "klium/blog/2026-10-28-plan.md" in files
+    assert who.startswith("Claude <box@example.com>|") and "acme/blog/2026-10-28-plan.md" in files
 
 
 def test_a_root_that_does_not_commit_makes_no_commit(box, sheaves, remote):
@@ -192,3 +192,49 @@ def test_a_root_that_does_not_commit_makes_no_commit(box, sheaves, remote):
     edit(box, sheaves)
     assert len(pushed(box, remote)) == 1
     assert "2026-10-28-plan.md" in git(sheaves, "status", "--porcelain")
+
+
+def test_forgetting_the_root_leaves_its_versions_in_it(box, sheaves):
+    edit(box, sheaves)
+    kept = versions_files(sheaves)
+    assert kept
+    box.hub.forget_root("sheaves")
+    assert versions_files(sheaves) == kept
+
+
+def test_a_save_that_changes_nothing_commits_nothing_not_even_what_another_hand_left(box, sheaves, remote):
+    f = sheaves / "acme" / "blog" / "2026-10-28-plan.md"
+    f.write_text(f.read_text(encoding="utf-8") + "\nTyped in an editor, not saved by Bea.\n", encoding="utf-8")
+    text = f.read_text(encoding="utf-8")
+    r = box.post("/_/save", {"doc": DOC, "hash": md_hash(text), "edits": []}, member=BEA)
+    assert r.status == 200, r.text
+    assert len(pushed(box, remote)) == 1
+
+
+def test_a_save_through_a_link_commits_the_document_it_wrote(box, sheaves, remote):
+    (sheaves / "acme" / "blog" / "plan.md").symlink_to("2026-10-28-plan.md")
+    git(sheaves, "add", "-A")
+    git(sheaves, "commit", "-q", "-m", "a link")
+    text = (sheaves / "acme" / "blog" / "2026-10-28-plan.md").read_text(encoding="utf-8")
+    i = next(i for i, b in enumerate(split_md_blocks(text)) if b.content.startswith("Second"))
+    r = box.post("/_/save", {"doc": "sheaves/acme/blog/plan.md", "hash": md_hash(text),
+                             "edits": [{"i": i, "html": "<p>Second, through the link.</p>"}]}, member=BEA)
+    assert r.status == 200, r.text
+    (who, files), *_ = pushed(box, remote)
+    assert who.startswith("Bea <bea@example.com>|") and "acme/blog/2026-10-28-plan.md" in files
+    assert "through the link" in git(remote, "show", "main:acme/blog/2026-10-28-plan.md")
+
+
+def test_a_sheaf_toml_that_cannot_be_read_when_the_commit_comes_is_a_row_not_an_error(box, sheaves):
+    # The render reads it first and fails the request on its own (8.3); a write whose render went
+    # through and whose `.sheaf.toml` broke in between still answers.
+    (sheaves / ".sheaf.toml").write_text("commit = [\n", encoding="utf-8")
+    box.hub.committed(DOC, by="Claude", what="update")
+    (row,) = rows("commit-failed")
+    assert row["doc"] == DOC and row["error"]
+
+
+def test_a_stopping_hub_waits_for_the_push_of_the_last_write(box, sheaves, remote):
+    edit(box, sheaves)
+    box.hub.stop_jobs()
+    assert "Second, edited on the page." in git(remote, "show", "main:acme/blog/2026-10-28-plan.md")

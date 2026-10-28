@@ -485,7 +485,7 @@ def _git_names(folder: Path):
     installed, too slow, refusing), when nothing may be listed that git did not vouch for."""
     try:
         r = subprocess.run(["git", "-C", str(folder), "ls-files", "-z", "-co", "--exclude-standard",
-                            "--", "*.md", ":!:**/node_modules/**"],
+                            "--", "*.md", ":!:**/node_modules/**", ":!:.sheaf/**"],
                            capture_output=True, timeout=_GIT_LIST_SECONDS,
                            env={**os.environ, "LC_ALL": "C"})
     except (OSError, subprocess.SubprocessError):

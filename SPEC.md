@@ -717,19 +717,19 @@ A root whose `.sheaf.toml` says `commit = true` and that is a git work tree (rul
 
 Its author is whoever made the write: a member by their `name` and `email` (9.9), and by `<member id>@<the host of origin>` when the member block names no e-mail; the hub's person by their name (4.3) and the repo's `user.email`; a door caller by its display name (12) and the repo's `user.email`. Its committer is the repo's `user.name` and `user.email`, or `sheaf <sheaf@localhost>` when the repo names none. Two writes to one document in the same instant can land in one commit under the first one's author.
 
-With `push = true` a thread of the hub then runs `git push origin HEAD`, one push for however many commits came while one ran. A commit that fails writes `commit-failed`, a push that fails `push-failed`, each with the document and git's last line (15); the write stands, the page is told nothing, and the next push carries a commit whose push failed. `commit = true` in a root that is not a git work tree writes `commit-not-git` and commits nothing.
+With `push = true` a thread of the hub then runs `git push origin HEAD`, one push for however many commits came while one ran; a clean stop (8.4) waits up to 60 seconds for the push due. A commit that fails writes `commit-failed`, a push that fails `push-failed`, each with the document and git's last line (15); the write stands, the page is told nothing, and the next push carries a commit whose push failed. `commit = true` in a root that is not a git work tree writes `commit-not-git` and commits nothing.
 
 ### 8.12 `projects.toml`
 
 A root may hold `projects.toml` at its top, one entry per `<client>/<project>` folder:
 
 ```toml
-[projects."klium/blog"]
-members = ["thierry", "sven"]   # who works on it, by the short names the deployment uses
+[projects."acme/blog"]
+members = ["ada", "bob"]        # who works on it, by the short names the deployment uses
 status = "live"                 # or "closed"
 ```
 
-The hub reads it when it lists the root (8.6) for one thing: a folder `<client>/<project>` that holds a document and has no entry is a `project-unlisted` row (15) with `root` and `folder`, and a line on the hub's stderr (the service's journal), once per folder per hub run. A document above that depth (a README at the top) belongs to no project. A file the hub cannot read (TOML, an unknown key, a name that is not `<client>/<project>`, `members` not a list of names, `status` not `live` or `closed`) is a `projects-invalid` row with `root` and `error` and a line on stderr, once per hub run, and the root lists as before. The file grants nothing: what a member sees is still their `roots` (9.9). No index file is made.
+The hub reads it when it lists the root (8.6) for one thing: a folder `<client>/<project>` that holds a document the listing names and has no entry is a `project-unlisted` row (15) with `root` and `folder`, and a line on the hub's stderr (the service's journal), once per folder per hub run. A document above that depth (a README at the top) belongs to no project. A file the hub cannot read (TOML, an unknown key, a name that is not `<client>/<project>`, `members` not a list of names, `status` not `live` or `closed`) is a `projects-invalid` row with `root` and `error` and a line on stderr, once per hub run, and the root lists as before. The file grants nothing: what a member sees is still their `roots` (9.9). No index file is made.
 
 ---
 

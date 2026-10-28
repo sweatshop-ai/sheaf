@@ -734,9 +734,16 @@ class Handler:
         else:
             stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
             name = f"{project.replace('/', '--')}-{stamp}"
-            tmp = folder / f".{name}.tmp"
+            tmp = folder / f".{name}"
             try:
-                tmp.write_text(project + "\n", encoding="utf-8")
+                # The supervisor reads it as the folder's group: 0640 whatever the hub's umask; the reader
+                # takes a dot-file for one still being written.
+                fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o640)
+                try:
+                    os.fchmod(fd, 0o640)
+                    os.write(fd, (project + "\n").encode("utf-8"))
+                finally:
+                    os.close(fd)
                 os.replace(tmp, folder / name)
                 drop = "written"
             except OSError as ex:

@@ -483,6 +483,7 @@ def test_a_member_of_a_git_root_is_told_when_a_document_goes_with_its_folder(fro
     doc.write_text(PLAN, encoding="utf-8")
     front.hub.roots.for_document(doc)
     mine = front.get("/_/live").stream
+    front.get("/_/index.json")                  # the page lists it: the hub has read the file (9.9, 9.11)
     doc.unlink()
     doc.parent.rmdir()
     front.hub.index.touch("work/a/x.md")

@@ -416,3 +416,106 @@ def test_two_stop_james_in_one_second_leave_one_drop_and_two_rows(team, work, st
     f, = stop_dir.iterdir()
     assert f.read_text(encoding="utf-8") == "thinkingtoo/tiroir\n"
     assert [r["drop"] for r in hub_rows("stop-james")] == ["written", "written"]
+
+
+# ── Review round 2 (PR 10), and Tariq's digest round on tt-tiroir PR 32 ─────────────────────────────
+
+@pytest.mark.parametrize("how", ["not UTF-8", "unreadable"])
+def test_an_owner_only_sheaf_its_page_cached_answers_404_to_hans_once_its_file_cannot_be_read(team, work, how):
+    if how == "unreadable" and os.geteuid() == 0:
+        pytest.skip("root reads a file of mode 000")
+    put(team, work, DOC, PRIVATE)
+    assert team.get(f"/work/{DOC}", member=THIERRY).status == 200       # the hub now holds its page
+    f = work / DOC
+    if how == "not UTF-8":
+        f.write_bytes(f.read_bytes() + b"\nlatin1 caf\xe9\n")
+    else:
+        os.chmod(f, 0)
+    try:
+        assert team.get(f"/work/{DOC}", member=HANS).status == 404
+        assert team.get(f"/_/doc?doc=work/{DOC}", member=HANS).status == 404
+    finally:
+        os.chmod(f, 0o644)
+
+
+@pytest.mark.parametrize("change", [
+    lambda t: t.replace("issue: thinkingtoo/tt-tiroir#9", "issue: thinkingtoo/tt-tiroir#99"),
+    lambda t: t.replace("issue: thinkingtoo/tt-tiroir#9\n", "")], ids=["another issue", "no issue"])
+def test_a_door_update_keeps_the_issue_on_disk_which_names_the_owner(team, browser, work, change):
+    put(team, work, DOC, PRIVATE)
+    is_error, got = door_update(browser, work, DOC, change)
+    assert not is_error, got
+    assert front_matter((work / DOC).read_text(encoding="utf-8"))["issue"] == "thinkingtoo/tt-tiroir#9"
+
+
+def test_a_front_matter_after_a_byte_order_mark_is_no_block_a_member_can_edit(team, work):
+    shared = "﻿" + PRIVATE.replace("owner: thierry", "owner: thierry\nshared: thierry 2026-10-28T09:00:00Z")
+    put(team, work, DOC, shared)
+    assert team.get(f"/work/{DOC}", member=HANS).status == 200
+    text = (work / DOC).read_text(encoding="utf-8")
+    team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text), "edits": [{"i": 0, "html": "<p>gone</p>"}]},
+              member=HANS)
+    fm = front_matter((work / DOC).read_text(encoding="utf-8"))
+    assert fm["owner"] == "thierry" and fm["shared"] and fm["sources"] == ("library:doc-123",)
+
+
+def test_a_comment_of_hans_that_lands_after_the_sheaf_closed_writes_nothing(team, work, monkeypatch):
+    from sheafmd.blocks import split_md_blocks
+    open_ = PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:x/y#1]")
+    put(team, work, DOC, open_)
+    closed = open_.replace("sources: [issue:x/y#1]", "sources: [mail:t-77]")
+    assert team.get(f"/work/{DOC}", member=HANS).status == 200
+    gate = team.hub.visible
+
+    def a_door_write_closes_it_after_the_gate(member, address):
+        ok = gate(member, address)
+        if member.id == HANS:
+            (work / DOC).write_text(closed, encoding="utf-8")
+        return ok
+    monkeypatch.setattr(team.hub, "visible", a_door_write_closes_it_after_the_gate)
+    i = next(i for i, b in enumerate(split_md_blocks(open_)) if b.content.startswith("A quote"))
+    got = team.post("/_/comment", {"doc": f"work/{DOC}", "op": "add", "hash": md_hash(open_), "block": i, "start": 0,
+                                   "end": 7, "quote": "A quote", "body": "Is this right?"}, member=HANS)
+    assert got.status == 404, got.body
+    assert (work / DOC).read_text(encoding="utf-8") == closed
+
+
+@pytest.mark.parametrize("front,body", [("\n", "\r\n"), ("\r\n", "\n")], ids=["LF over CRLF", "CRLF over LF"])
+def test_share_rewrites_the_front_matter_lines_only_never_the_bodys_line_endings(front, body):
+    from sheafmd.hub import visibility
+    text = front.join(["---", "owner: thierry", "sources: [library:1]", "---", ""]) + \
+        body.join(["line one", "```", "code", "```", ""])
+    out = visibility.share(text, "thierry", "T")
+    assert out.endswith(body.join(["line one", "```", "code", "```", ""]))
+    assert visibility.effective(visibility.front_matter(out)) == "project"
+
+
+@pytest.mark.parametrize("old,new,words", [
+    ("- &#9746; Share @a\n- &#9744; Mark this read\n", "- [x] Share @a\n- [x] Mark this read\n", set()),  # a decoy
+    ("- <input type=\"checkbox\" checked> Share @a\n- teh other\n", "- [x] Share @a\n- the other\n", set()),  # a typo
+    ("\\- [x] Share @a\\\nteh rest\n", "- [x] Share @a\n  the rest\n", set()),            # a paragraph edited
+    ("- [ ] Share\n", "- [x] Share @a\n", set()),                                      # the line changed too
+    ("- [ ] Share\n- &#9746; Share\n", "- [x] Share\n- [x] Share\n", {"Share"}),       # the owner's own box
+    ("- [ ] Share\n", "- [x] Share\n", {"Share"}),
+    ("+ [ ] Stop James @x\n", "+ [X] Stop James @x\n", {"Stop James"})])
+def test_a_tick_counts_only_when_its_own_line_goes_from_open_to_ticked(old, new, words):
+    from sheafmd.hub import visibility
+    head = "---\nowner: thierry\n---\n# A\n\n"
+    assert visibility.newly_ticked(head + old, head + new) == words
+
+
+def test_the_owners_tick_of_a_decoy_box_beside_a_ballot_share_does_not_share_the_sheaf(team, work):
+    from sheafmd import _pandoc
+    from sheafmd.blocks import split_md_blocks
+    put(team, work, DOC, PRIVATE.replace("A quote from the contract.",
+                                         "- &#9746; Share @a\n- &#9744; Mark this digest as read"))
+    text = (work / DOC).read_text(encoding="utf-8")
+    i = next(k for k, b in enumerate(split_md_blocks(text)) if "Mark this" in b.content)
+    html = _pandoc.run(["-f", "gfm", "-t", "html5", "--no-highlight"], split_md_blocks(text)[i].content).stdout
+    k = html.rfind('<input type="checkbox"', 0, html.index("Mark this"))
+    html = html[:k] + '<input type="checkbox" checked=""' + html[k + len('<input type="checkbox"'):]
+    got = team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text), "edits": [{"i": i, "html": html}]},
+                    member=THIERRY)
+    assert got.status == 200, got.body
+    assert "[x] Mark this digest as read" in (work / DOC).read_text(encoding="utf-8")   # the save went through
+    assert team.get(f"/work/{DOC}", member=HANS).status == 404

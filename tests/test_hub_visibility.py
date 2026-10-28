@@ -595,3 +595,35 @@ def test_the_owners_tick_saved_against_an_older_version_still_shares(team, work)
     after = (work / DOC).read_text(encoding="utf-8")
     assert "revised" in after and "- [x] Share" in after
     assert team.get(f"/work/{DOC}", member=HANS).status == 200
+
+
+@pytest.mark.parametrize("was", ["- &#9746; Share", "- [x] Share"])
+def test_a_merged_save_does_not_tick_a_box_an_assistant_reopened_since_the_page_loaded(team, browser, work, was):
+    """Review 3, narrow check P1: the merge compared the page's boxes with the file's block, not with the
+    block the page held; a box James reopened counted as ticked by the owner's tick of Done."""
+    base = PRIVATE.replace("- [ ] Share", f"{was}\n- [ ] Done")
+    put(team, work, DOC, base)
+    assert team.get(f"/work/{DOC}", member=THIERRY).status == 200           # the page holds this version
+    i, html = _block_html(base, "Done")
+    html = html.replace('<input type="checkbox" />Done', '<input type="checkbox" checked="" />Done')
+    cur = PRIVATE.replace("- [ ] Share", "- [ ] Share\n* [ ] Done")
+    is_error, got = call(browser, "update", token=Tokens().add("james", write=True), doc=f"work/{DOC}",
+                         text=cur, expected_hash=md_hash(base))
+    assert not is_error, got
+    got = team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(base), "edits": [{"i": i, "html": html}]},
+                    member=THIERRY)
+    assert got.status == 200, got.body
+    assert "shared" not in front_matter((work / DOC).read_text(encoding="utf-8"))
+    assert team.get(f"/work/{DOC}", member=HANS).status == 404
+
+
+def test_a_tick_that_a_later_edit_of_the_same_block_rewrites_shares_nothing(team, work):
+    put(team, work, DOC, PRIVATE)
+    text = (work / DOC).read_text(encoding="utf-8")
+    i, html = _block_html(text, "Share")
+    on = html.replace('<input type="checkbox"', '<input type="checkbox" checked=""', 1)
+    got = team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text),
+                                "edits": [{"i": i, "html": on}, {"i": i, "html": html.replace("Share", "Share later")}]},
+                    member=THIERRY)
+    assert got.status == 200, got.body
+    assert team.get(f"/work/{DOC}", member=HANS).status == 404

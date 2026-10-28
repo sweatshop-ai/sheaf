@@ -156,3 +156,29 @@ def test_a_route_still_fetching_when_its_context_closes_does_not_fail_the_next_c
         until(lambda: fetching, what="the route to be fetching")
         close_context(c)
     close_context(new_context(chromium))
+
+
+@pytest.mark.parametrize("closed", ["by close_context", "by hand"])
+def test_a_route_unrouted_while_fetching_does_not_fail_the_next_context(chromium, closed):
+    # close_context stops the routes of the pages still open: a route a test takes off itself, or one on a page
+    # it closes by hand, is stopped where it is taken off: unroute_all with ignoreErrors (PR 13 narrow check).
+    with socket.socket() as mute:
+        mute.bind(("127.0.0.1", 0))
+        mute.listen()
+        url = f"http://127.0.0.1:{mute.getsockname()[1]}/"
+        c = new_context(chromium)
+        p = c.new_page()
+        fetching = []
+
+        def held(route):
+            fetching.append(route.request.url)
+            route.fetch()
+
+        p.route(url + "slow", held)
+        p.evaluate("u => { fetch(u).catch(() => {}); }", url + "slow")
+        until(lambda: fetching, what="the route to be fetching")
+        p.unroute_all(behavior="ignoreErrors")
+        if closed == "by hand":
+            p.close()
+        close_context(c)
+    close_context(new_context(chromium))

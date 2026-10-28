@@ -384,3 +384,23 @@ def test_a_save_of_hans_that_lands_after_the_sheaf_closed_writes_nothing(team, w
     got = tick(team, work, DOC, "Done", HANS)
     assert got.status == 404, got.body
     assert (work / DOC).read_text(encoding="utf-8") == closed
+
+
+@pytest.mark.parametrize("how", ["replaced", "in place"])
+def test_a_sheaf_closed_with_the_same_size_and_time_is_closed_at_once(team, work, how):
+    open_ = PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:x/y#1]")
+    closed = PRIVATE.replace("sources: [library:doc-123]", "sources: [library:ab1]")
+    assert len(open_) == len(closed)
+    put(team, work, DOC, open_)
+    f = work / DOC
+    assert team.get(f"/work/{DOC}", member=HANS).status == 200
+    st = f.stat()
+    if how == "replaced":
+        tmp = f.with_name("next.tmp")
+        tmp.write_text(closed, encoding="utf-8")
+        os.utime(tmp, ns=(st.st_atime_ns, st.st_mtime_ns))
+        os.replace(tmp, f)
+    else:
+        f.write_text(closed, encoding="utf-8")
+        os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns))
+    assert team.get(f"/work/{DOC}", member=HANS).status == 404

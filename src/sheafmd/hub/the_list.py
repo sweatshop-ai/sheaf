@@ -300,6 +300,7 @@ class Row:
     sheaf: Sheaf
     record: Record
     group: str                  # `<client>/<project>`
+    read: tuple | None = None   # `_stat_key` of the file the sheaf was read from
 
 
 @dataclass
@@ -307,6 +308,11 @@ class Snapshot:
     rows: list = field(default_factory=list)
     projects: dict = field(default_factory=dict)    # `projects.toml`'s entries, {} without the file
     polled: float | None = None
+
+
+def _stat_key(st: os.stat_result) -> tuple:
+    """What tells a file from the one read before at its address: another file, or a change of it."""
+    return (st.st_dev, st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
 
 
 def _drop(snap: Snapshot, row: Row):
@@ -335,7 +341,8 @@ class TheList:
     def poll(self):
         """Read every sheaf of the root and the record of their issues, and keep the rows."""
         with self._poll_lock:
-            started = next(self._ask)
+            with self._gone_lock:
+                started = next(self._ask)
             root = self.root()
             if root.path != Path(os.path.realpath(self.cfg.root)):
                 # Inside a git work tree the root is the tree's top: its sheaves are not the list's.
@@ -343,16 +350,18 @@ class TheList:
                                 error=f"{self.cfg.root} is not the top folder of its root ({root.path})")
                 self._records, self._answered, self._snap = {}, {}, Snapshot()
                 return
-            sheaves = []
+            sheaves, read = [], {}
             for found in roots_mod.list_documents(root).docs:
                 if found.rel.count("/") < 2:
                     continue                # above `<client>/<project>`: no sheaf
                 if self.hub.roots.lookup(root.path / found.rel) != root:
                     continue                # a nested root's (8.2): 9.9 keeps it from the list's members
                 try:
+                    key = _stat_key((root.path / found.rel).stat())     # before the read: a change after it shows
                     text = (root.path / found.rel).read_text(encoding="utf-8")
                 except (OSError, UnicodeDecodeError):
                     continue
+                read[found.rel] = key
                 try:
                     s = read_sheaf(found.rel, text)
                 except Exception:           # one sheaf the reader trips on leaves the rest of the list
@@ -369,7 +378,7 @@ class TheList:
                 self._records = fetch(self.cfg, wanted) if wanted else {}   # an issue it does not hold is off
             except RecordError as e:
                 self.hub.record("list-poll-failed", None, root=root.name, error=str(e))
-            rows = [Row(s, self._records[s.issue], "/".join(s.rel.split("/")[:2]))
+            rows = [Row(s, self._records[s.issue], "/".join(s.rel.split("/")[:2]), read.get(s.rel))
                     for s in sheaves if s.issue in self._records]
             # A ticked sheaf waits on nobody until the record routine has moved its issue: a new change of the
             # issue, or a Status other than waiting (moving a Project's Status leaves the issue's change as it was).
@@ -431,16 +440,17 @@ class TheList:
         root = self.root()
         if root is None or a.root != root.name:
             return None
-        if not os.path.lexists(root.path / a.rel):
-            # Kept, the row would judge a sheaf a door create makes at its address before the next poll, and tell
-            # which issue the one that went named (#34).
-            with self._gone_lock:
+        with self._gone_lock:
+            # Seen gone and numbered in one step, so a poll that begins after this has the larger number.
+            if not os.path.lexists(root.path / a.rel):
+                # Kept, the row would judge a sheaf a door create makes at its address before the next poll, and
+                # tell which issue the one that went named (#34).
                 self._gone[a.rel] = next(self._ask)
                 snap = self._snap
                 for row in snap.rows:
                     if row.sheaf.rel == a.rel:
                         _drop(snap, row)
-            return None
+                return None
         for row in self._snap.rows:
             if row.sheaf.rel == a.rel:
                 return tuple(row.record.assignees) if _same_issue(row.sheaf.issue, issue_of(issue)) else None
@@ -465,6 +475,9 @@ class TheList:
             address = f"{root.name}/{row.sheaf.rel}"
             if not self.hub.visible(member, address):               # the file now, not the poll
                 continue
+            row = self._now(root, row)                              # and what it says now
+            if row is None:
+                continue
             owners = self.hub.owners(address, members)              # and its owners, as visible has them
             is_owner = any(o.id == member.id for o in owners)
             addressed = any(short and short.lower() == member.short.lower() for _, short, _ in row.sheaf.actions)
@@ -488,6 +501,22 @@ class TheList:
                 f'<header><h1>Waiting on you</h1><span class="list-sub">and what is in progress</span></header>'
                 f'<nav class="list-filters">{filters}</nav><p class="list-error" hidden></p><main>{body}</main>'
                 f'<script nonce="{nonce}">{SCRIPT}</script></body></html>')
+
+    def _now(self, root, row: Row):
+        """`row` with the sheaf its file holds now when that file is not the one the poll read (another file
+        made at its address, or one a link now points to, or a change), so the page never shows what a sheaf
+        that went said; None when it now names another issue, or cannot be read."""
+        f = root.path / row.sheaf.rel
+        try:
+            key = _stat_key(f.stat())
+            if key == row.read:
+                return row
+            sheaf = read_sheaf(row.sheaf.rel, f.read_text(encoding="utf-8"))
+        except Exception:                   # unreadable, or one the reader trips on, as the poll leaves it out
+            return None
+        if not _same_issue(sheaf.issue, row.sheaf.issue):
+            return None
+        return Row(sheaf, row.record, row.group, key)
 
     def _section(self, title: str, rows: list, member, root: str) -> str:
         groups: dict = {}

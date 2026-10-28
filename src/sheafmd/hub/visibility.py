@@ -50,6 +50,7 @@ def _uncomment(value: str) -> str:
 
 
 def _unquote(value: str) -> str:
+    """`value` without the pair of quotes around it, when it has one."""
     if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
         return value[1:-1]
     return value
@@ -98,16 +99,20 @@ def text(fm: dict, key: str) -> str:
 
 
 def sources(fm: dict) -> tuple:
+    """The sheaf's sources, one item or a list, as a tuple."""
     v = fm.get("sources", ())
     return (v,) if isinstance(v, str) and v else v if isinstance(v, tuple) else ()
 
 
 def private(source: str) -> bool:
+    """Whether `source` may hold what not every member of the project may read (9.11): every kind but
+    those of PROJECT_WIDE with a ref, an unknown kind included."""
     kind, colon, ref = source.partition(":")
     return not (colon and ref.strip() and kind.strip().casefold() in PROJECT_WIDE)
 
 
 def effective(fm: dict) -> str:
+    """`owner` or `project`, as the hub enforces it (9.11)."""
     if text(fm, "visibility").casefold() == "owner":
         return "owner"
     if any(private(s) for s in sources(fm)) and not text(fm, "shared"):
@@ -189,21 +194,23 @@ def newly_ticked(old: str, new: str) -> set:
 
 def for_door(text_: str, old: str | None) -> str:
     """What a door write of `text_` puts on disk over `old` (None for a create). The caller is an assistant,
-    never the owner: its `visibility` and `shared` are not read. The sheaf is `owner` when it has a private
-    source, and stays `owner` when it was; a Share already made stays while the write adds no private
-    source the owner did not share."""
+    never the owner: its `visibility` and `shared` are not read, and on an update the `owner` stays the one
+    on disk. The sheaf is `owner` when it has a private source, and stays `owner` when it was, front matter
+    dropped or not; a Share already made stays while the write adds no private source the owner did not
+    share."""
     fm = front_matter(text_)
-    if not fm:
-        return text_
     was = front_matter(old) if old is not None else {}
+    closed = old is not None and effective(was) == "owner"
+    owner = text(was, "owner")
+    if not fm and not closed:
+        return text_
     mine = {s for s in sources(fm) if private(s)}
     kept = text(was, "shared") if text(was, "shared") and mine <= set(sources(was)) else None
-    if old is not None and effective(was) == "owner":
-        want = "owner"
-    elif mine and not kept:
-        want = "owner"
-    else:
-        want = "project"
-    if not ({"visibility", "sources", "shared"} & fm.keys()) and want == "project":
+    want = "owner" if closed or (mine and not kept) else "project"
+    values = {"visibility": want, "shared": kept if want == "project" else None}
+    if owner:
+        values["owner"] = owner
+    if want == "project" and not ({"visibility", "sources", "shared"} & fm.keys()) \
+            and text(fm, "owner") == owner:
         return text_
-    return set_keys(text_, {"visibility": want, "shared": kept if want == "project" else None})
+    return set_keys(text_, values)

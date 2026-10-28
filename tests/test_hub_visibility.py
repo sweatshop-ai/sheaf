@@ -168,6 +168,7 @@ def test_a_door_update_that_adds_a_private_source_closes_a_shared_sheaf(team, br
     is_error, got = call(browser, "read", token=token, doc=f"work/{DOC}")
     more = got["text"].replace("sources: [library:doc-123]", "sources: [library:doc-123, mail:t-77]")
     is_error, got = call(browser, "update", token=token, doc=f"work/{DOC}", text=more, expected_hash=got["hash"])
+    assert not is_error, got
     assert team.get(f"/work/{DOC}", member=HANS).status == 404
 
 
@@ -241,3 +242,74 @@ def test_the_stop_file_is_readable_by_the_folders_group_whatever_the_hubs_umask(
         os.umask(old)
     f, = stop_dir.iterdir()
     assert f.stat().st_mode & 0o777 == 0o640
+
+
+def door_update(browser, work, rel, change):
+    """An assistant's door update of `rel`: the text it reads, changed by `change`."""
+    token = Tokens().add("james", write=True)
+    is_error, got = call(browser, "read", token=token, doc=f"work/{rel}")
+    assert not is_error, got
+    return call(browser, "update", token=token, doc=f"work/{rel}", text=change(got["text"]), expected_hash=got["hash"])
+
+
+def test_a_door_update_that_drops_the_front_matter_leaves_an_owner_only_sheaf_its_owners(team, browser, work):
+    put(team, work, DOC, PRIVATE)
+    is_error, got = door_update(browser, work, DOC, lambda t: t.split("---\n", 2)[2])
+    assert not is_error, got
+    assert team.get(f"/work/{DOC}", member=HANS).status == 404
+    assert team.get(f"/work/{DOC}", member=THIERRY).status == 200
+
+
+def test_a_door_update_cannot_hand_an_owner_only_sheaf_to_another_member(team, browser, work):
+    put(team, work, DOC, PRIVATE)
+    is_error, got = door_update(browser, work, DOC, lambda t: t.replace("owner: thierry", "owner: hans"))
+    assert not is_error, got
+    assert team.get(f"/work/{DOC}", member=HANS).status == 404
+    assert team.get(f"/work/{DOC}", member=THIERRY).status == 200
+
+
+def test_a_page_save_cannot_change_the_front_matter_whoever_sends_it(team, work):
+    open_ = PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:x/y#1]")
+    put(team, work, DOC, open_)
+    text = (work / DOC).read_text(encoding="utf-8")
+    got = team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text),
+                                "edits": [{"i": 0, "html": "<p>visibility: owner<br>owner: hans</p>"}]}, member=HANS)
+    assert got.status == 200 and got.json()["skipped"]
+    assert (work / DOC).read_text(encoding="utf-8") == text
+    assert team.get(f"/work/{DOC}", member=THIERRY).status == 200
+
+
+def test_an_open_stream_of_hans_hears_nothing_once_a_door_write_closes_the_sheaf(team, browser, work):
+    open_ = PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:x/y#1]")
+    put(team, work, DOC, open_)
+    sub = team.get(f"/_/live?doc=work/{DOC}", member=HANS).stream
+    sub.drain()
+    is_error, got = door_update(browser, work, DOC, lambda t: t.replace("sources: [issue:x/y#1]", "sources: [mail:t-1]")
+                                + "\nA line from the mail.\n")
+    assert not is_error, got
+    team.hub.entry(f"work/{DOC}").live.refresh(force=True)
+    assert sub.drain() == []
+
+
+@pytest.mark.parametrize("where, why", [("missing", "is not a folder"), ("top", "no <client>/<project> folder")])
+def test_stop_james_that_cannot_drop_says_why_in_its_row(team, work, stop_dir, where, why):
+    rel = DOC
+    if where == "missing":
+        stop_dir.rmdir()
+    else:
+        rel = "contract.md"
+    put(team, work, rel, STOPPABLE)
+    assert tick(team, work, rel, "Stop James", HANS).status == 200
+    assert why in hub_rows("stop-james")[0]["drop"]
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root writes into a folder of mode 0500")
+def test_stop_james_whose_drop_fails_says_failed_and_leaves_no_dot_file(team, work, stop_dir):
+    put(team, work, DOC, STOPPABLE)
+    stop_dir.chmod(0o500)
+    try:
+        assert tick(team, work, DOC, "Stop James", HANS).status == 200
+    finally:
+        stop_dir.chmod(0o700)
+    assert hub_rows("stop-james")[0]["drop"].startswith("failed: ")
+    assert list(stop_dir.iterdir()) == []

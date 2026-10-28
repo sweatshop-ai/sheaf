@@ -627,3 +627,62 @@ def test_the_doc_answer_follows_a_fork_to_a_laptop(team, box, work):
 def test_the_doc_answer_of_a_page_that_is_not_a_sheaf_has_no_work(team, box):
     j = doc_answer(team, doc="work/plan.md")
     assert j["capabilities"] == [] and "work" not in j
+
+
+# ── review round 1 (Opus): the fork's write, the box, the loopback ───────────
+
+def test_a_fork_cannot_name_the_box_as_its_machine(team, box, work):
+    got = fork(team, machine="tiroir-tt")
+    assert got.status == 400 and "box" in got.json()["error"]
+    assert sessions_of(work)[0].startswith(f"{{id: {LIVE}, ")
+
+
+def test_a_fork_on_a_sheaf_closed_after_the_gate_is_404_and_writes_nothing(team, box, work, monkeypatch):
+    put(team, work, DOC, SHEAF.replace("sources: [issue:thinkingtoo/tt-tiroir#8]", "sources: [library:doc-1]"))
+    before = (work / DOC).read_text(encoding="utf-8")
+    monkeypatch.setattr(team.hub, "visible", lambda member, address: True)     # the gate saw it open
+    got = fork(team)
+    assert got.status == 404 and (work / DOC).read_text(encoding="utf-8") == before
+    assert hub_rows("session-forked") == []
+
+
+def test_the_fork_line_keeps_every_other_line_ending():
+    # with_session itself; the file's own read (source.update_file) reads universal newlines, as every save does.
+    from sheafmd.hub import work
+    mixed = SHEAF.replace("\n", "\r\n").replace("# What the contract says\r\n", "# What the contract says\n")
+    after = work.with_session(mixed, "{NEW}", FORK)
+    assert after == mixed.replace("sessions:\r\n", "sessions:\r\n  - {NEW}\r\n", 1)
+
+
+def test_a_sessions_key_written_twice_is_409(team, box, work):
+    put(team, work, DOC, SHEAF.replace("sources:", f"sessions:\n  - {{id: {OLDER}, host: x, member: y, "
+                                                  f"date: 2026-10-01T00:00:00Z}}\nsources:"))
+    before = (work / DOC).read_text(encoding="utf-8")
+    got = fork(team)
+    assert got.status == 409 and (work / DOC).read_text(encoding="utf-8") == before
+
+
+def test_a_comment_after_the_key_is_kept_and_is_no_list(team, box, work):
+    put(team, work, DOC, SHEAF.replace("sessions:\n", "sessions:  # newest first\n"))
+    assert fork(team).status == 200
+    text = (work / DOC).read_text(encoding="utf-8")
+    assert "sessions:  # newest first\n" in text and sessions_of(work)[0].startswith(f"{{id: {FORK}, ")
+
+
+def test_a_comment_line_naming_the_same_id_is_kept(team, box, work):
+    note = f"  # - {{id: {OLDER}, host: tiroir-tt, member: james, date: 2026-10-26T08:00:00Z}} kept note\n"
+    put(team, work, DOC, SHEAF.replace(f"  - {{id: {LAPTOP}", note + f"  - {{id: {LAPTOP}"))
+    assert fork(team, id=OLDER).status == 200
+    assert note in (work / DOC).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("name", ["&Co", "*star", "!tag", "|bar", ">gt", "%pc", "@at", "`tick", "- dash", "? q"])
+def test_a_member_word_never_opens_with_a_yaml_indicator(name):
+    from sheafmd.hub import work
+    word = work.member_word(proxy.Member(BEA, name, ("/x",)))
+    assert word[0] not in "&*!|>%@`-?" and word.strip() == word
+
+
+def test_the_loopback_port_answers_404_not_405_for_a_member_route(team, box, browser):
+    assert browser.get("/_/sessions").status == 404
+    assert browser.post("/_/session", {"doc": ADDRESS}).status == 404

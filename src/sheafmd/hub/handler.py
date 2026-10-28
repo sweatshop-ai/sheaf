@@ -355,11 +355,12 @@ class Handler:
         if req.path.startswith("/_/"):
             if methods is None:
                 raise Refuse(404, "no such route")
+            # A member route is no route of this port, for any method: not a 405 that names it (9.12).
+            if any(w is MEMBER for _, w, _ in methods.values()):
+                raise Refuse(404, "no such route")
             if found is None:
                 raise Refuse(405, "method not allowed", {"Allow": ", ".join(sorted(methods))})
             _, who, fn = found
-            if who is MEMBER:
-                raise Refuse(404, "no such route")
         else:
             if req.method != "GET":
                 raise Refuse(405, "method not allowed", {"Allow": "GET"})
@@ -828,12 +829,19 @@ class Handler:
         _shape(isinstance(sid, str) and work.UUID_RE.fullmatch(sid), "id must be a session id (a lowercase UUID)")
         _shape(isinstance(machine, str) and work.MACHINE_RE.fullmatch(machine),
                "machine must be a host name: 1 to 63 letters, digits, dots, dashes or underscores")
+        # A fork runs on the member's machine; one named after the box would make its id a box transcript.
+        _shape(machine.lower() != (self.hub.the_list.cfg.box or "").lower(), "machine cannot be the box")
         e = self._entry(req, address)
         by = work.member_word(req.member)
         line = work.item(sid, machine, by, time.strftime(work.ISO, time.gmtime()))
+        def change(text):
+            # The gate (_sheaf) read the file before the lock: a write that closed the sheaf since is seen here.
+            if not visibility.visible_to(visibility.front_matter(text), req.member, self.hub.assignees(e.address)):
+                raise Refuse(404, "no such document")
+            return work.with_session(text, line, sid)
         try:
-            h = e.live.rewrite(lambda text: work.with_session(text, line, sid))
-        except work.NotOneItemPerLine as ex:
+            h = e.live.rewrite(change)
+        except work.NotRewritten as ex:
             raise Refuse(409, str(ex)) from None
         self.hub.index.touch(e.address)
         self.hub.committed(e.address, req.member, "fork")

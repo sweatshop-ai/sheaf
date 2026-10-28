@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .roots import Address
-from .visibility import _end, _lines, front_matter
+from .visibility import _end, _lines, _uncomment, front_matter
 
 UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 MACHINE_RE = re.compile(r"[A-Za-z0-9._-]{1,63}")
@@ -29,12 +29,12 @@ _MEMBER = r"[^\s,{}\[\]:#\"'][^,{}\[\]:#\"'\n]{0,62}?"
 _ITEM_RE = re.compile(r"\{id: (" + UUID_RE.pattern + r"), host: ([A-Za-z0-9._-]{1,63}), member: (" + _MEMBER
                       + r"), date: ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)\}")
 _KEY_LINE_RE = re.compile(r"sessions:(.*)")
-_LIST_ITEM_RE = re.compile(r"(\s*-\s+).*")
+_LIST_ITEM_RE = re.compile(r"(\s*-\s+)(.*?)\s*")
 TEXT_MAX = 3000                 # characters of a comment's text dropped for James's window (Zara's contract)
 
 
-class NotOneItemPerLine(ValueError):
-    """The front matter's `sessions` is written on its key's line: the hub does not rewrite such a list."""
+class NotRewritten(ValueError):
+    """The front matter's `sessions` is in a shape the hub does not rewrite: on its key's line, or twice."""
 ISO = "%Y-%m-%dT%H:%M:%SZ"
 
 
@@ -89,8 +89,9 @@ def state(hub, address: str, text: str) -> State | None:
 def member_word(member) -> str:
     """How a session item and a row name a member: their short name, else their name, in the characters a
     flow mapping holds unquoted."""
-    word = member.short or member.name
-    return re.sub(r"[,{}\[\]:#\"'\n]", "-", word).strip() or "member"
+    word = re.sub(r"[,{}\[\]:#\"'\n]", "-", member.short or member.name).strip()
+    # A plain YAML scalar does not open with an indicator (an anchor, a tag, a block, a list item...).
+    return re.sub(r"^[-?&*!|>%@`\s]+", "", word) or "member"
 
 
 def item(id: str, host: str, member: str, date: str) -> str:
@@ -99,32 +100,37 @@ def item(id: str, host: str, member: str, date: str) -> str:
 
 def with_session(text: str, line: str, id: str) -> str:
     """`text` with `line` (an `item`) as the first item of `sessions`. An item of the same `id` is taken out,
-    so a session is listed once; every other line of the file stays as written. A text with no front matter
-    gets one."""
+    so a session is listed once; every other line of the file stays as written, its line ending too. A text
+    with no front matter gets one. NotRewritten for a list on the key's line or a key written twice."""
+    raw = text.split("\n")                      # each line keeps its own "\r"
     lines = _lines(text)
-    nl = "\r\n" if text.split("\n", 1)[0].endswith("\r") else "\n"
     end = _end(lines)
     if end < 0:
-        return nl.join(["---", "sessions:", f"  - {line}", "---"]) + nl + text
-    head = lines[:end]
-    at = next((n for n in range(1, end) if _KEY_LINE_RE.fullmatch(head[n])), None)
-    if at is None:
-        head = head + ["sessions:", f"  - {line}"]
-    else:
-        if _KEY_LINE_RE.fullmatch(head[at]).group(1).strip() not in ("", "[]"):
-            raise NotOneItemPerLine("sessions is written on one line: write it as one item per line")
-        # The list runs, as the reader reads it, over its `- ` lines, indented or not, and the blank and
-        # comment lines between them; the fork takes the indent of its first item.
-        rest, n, lead = [], at + 1, "  - "
-        while n < end and (_LIST_ITEM_RE.fullmatch(head[n]) or not head[n].strip()
-                           or head[n].lstrip().startswith("#")):
-            if (m := _LIST_ITEM_RE.fullmatch(head[n])) and not any(_LIST_ITEM_RE.fullmatch(x) for x in rest):
-                lead = m.group(1)
-            rest.append(head[n])
-            n += 1
-        kept = [x for x in rest if not ((m := _ITEM_RE.search(x)) and m.group(1) == id)]
-        head = head[:at] + ["sessions:", lead + line] + kept + head[n:]
-    return nl.join(head + lines[end:])
+        cr = "\r" if raw[0].endswith("\r") else ""
+        return "\n".join(["---" + cr, "sessions:" + cr, f"  - {line}" + cr, "---" + cr]) + "\n" + text
+    keys = [n for n in range(1, end) if _KEY_LINE_RE.fullmatch(lines[n])]
+    if len(keys) > 1:
+        raise NotRewritten("sessions is written twice in the front matter: keep one list")
+    if not keys:
+        cr = "\r" if raw[end].endswith("\r") else ""
+        return "\n".join(raw[:end] + ["sessions:" + cr, f"  - {line}" + cr] + raw[end:])
+    at = keys[0]
+    cr = "\r" if raw[at].endswith("\r") else ""
+    value = _uncomment(_KEY_LINE_RE.fullmatch(lines[at]).group(1))
+    if value not in ("", "[]"):
+        raise NotRewritten("sessions is written on one line: write it as one item per line")
+    # The list runs, as the reader reads it, over its `- ` lines, indented or not, and the blank and comment
+    # lines between them; the fork takes the indent of its first item. Only an item of `id` is taken out.
+    n, lead, kept = at + 1, None, []
+    while n < end and (_LIST_ITEM_RE.fullmatch(lines[n]) or not lines[n].strip() or lines[n].lstrip().startswith("#")):
+        item = _LIST_ITEM_RE.fullmatch(lines[n]) if not lines[n].lstrip().startswith("#") else None
+        if item and lead is None:
+            lead = item.group(1)
+        if not (item and (m := _ITEM_RE.fullmatch(item.group(2))) and m.group(1) == id):
+            kept.append(raw[n])
+        n += 1
+    key = raw[at] if value == "" else "sessions:" + cr
+    return "\n".join(raw[:at] + [key, (lead or "  - ") + line + cr] + kept + raw[n:])
 
 
 def open_transcript(folder: Path, id: str) -> bytes | None:

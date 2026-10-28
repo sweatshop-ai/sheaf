@@ -290,3 +290,11 @@ def test_a_fork_the_doc_answer_reports_turns_box_ask_and_tell_off(tab):
     comment_form(tab)
     assert [e for _, e in agent_buttons(tab.page, "#rd-popover .rd-form")] == [False, False]
     assert "Thierry’s machine" in tab.page.inner_text("#rd-popover .rd-agent-line")
+
+
+def test_the_menu_button_closes_the_popover(tab):
+    as_member(tab, work())
+    tab.open()
+    open_work(tab.page)
+    tab.page.click("#rd-menu-btn")
+    assert not tab.page.locator("#rd-work").is_visible() and tab.page.locator("#rd-menu").is_visible()

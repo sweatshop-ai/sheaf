@@ -801,7 +801,23 @@ class Handler:
                               "Cache-Control": "no-store", "X-Sheaf-Session": sid}, body)
 
     def _sessions(self, req: Req) -> Response:
-        raise Refuse(404, "no such route")
+        """A member forked one of the sheaf's sessions on their machine (9.12): the fork becomes the sheaf's live
+        session, the first item of `sessions`, under the signed-in member's name whatever the body says."""
+        b = req.body
+        address, fm, _ = self._sheaf(req, b.get("doc"))
+        sid, machine = b.get("id"), b.get("machine")
+        _shape(isinstance(sid, str) and work.UUID_RE.fullmatch(sid), "id must be a session id (a lowercase UUID)")
+        _shape(isinstance(machine, str) and work.MACHINE_RE.fullmatch(machine),
+               "machine must be a host name: 1 to 63 letters, digits, dots, dashes or underscores")
+        e = self._entry(req, address)
+        by = work.member_word(req.member)
+        line = work.item(sid, machine, by, time.strftime(work.ISO, time.gmtime()))
+        h = e.live.rewrite(lambda text: work.with_session(text, line, sid))
+        self.hub.index.touch(e.address)
+        self.hub.committed(e.address, req.member, "fork")
+        self.hub.record("session-forked", address, transcript=sid, by=by, machine=machine,
+                        issue=visibility.text(fm, "issue"))
+        return _ok(hash=h)
 
     def _pin(self, req: Req) -> Response:
         """The page keeps the version it holds past a change of the file, while a form holds the reload

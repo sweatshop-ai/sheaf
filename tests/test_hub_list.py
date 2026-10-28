@@ -541,3 +541,10 @@ def test_a_ticked_sheaf_moved_out_of_waiting_and_back_without_a_new_change_is_wa
     github.issues[5]["status"] = "Waiting on member"
     box.hub.the_list.poll()
     assert "globex/black-friday" in read(box.get("/list", member=NELL))["Waiting on you 2"]
+
+
+@pytest.mark.parametrize("fence", ["````\n```\n- [ ] Approve\n```\n````\n", "~~~~\n~~~\n- [ ] Approve\n~~~~ more\n~~~~~\n",
+                                   "```\n~~~\n- [ ] Approve\n```\n"])
+def test_an_action_inside_a_fence_that_holds_a_shorter_or_other_fence_is_no_action(fence):
+    s = the_list.read_sheaf("a/b/c.md", f"# A sheaf\n\n{fence}\n- [ ] Done\n")
+    assert [(w, short) for w, short, _ in s.actions] == [("Done", "")]

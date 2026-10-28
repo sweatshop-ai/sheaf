@@ -52,6 +52,7 @@ _ISSUE_RE = re.compile(r"([A-Za-z0-9-]+)/([A-Za-z0-9._-]+)#([0-9]+)")
 _ACTION_RE = re.compile(r"\s*[-*+] \[ \] (" + "|".join(re.escape(w).replace("'", "['’]") for w in WORDS)
                         + r")(?:\s+@([A-Za-z0-9._-]+))?\s*")
 _KEY_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*):(?:\s+(.*?))?\s*")
+_FENCE_RE = re.compile(r"[ \t]*(`{3,}|~{3,})(.*)")
 
 
 class ListError(Exception):
@@ -156,10 +157,12 @@ def read_sheaf(rel: str, text: str) -> Sheaf:
     first = next(n for n in range(1, len(lines)) if lines[n].strip() in ("---", "...")) + 1 if fm else 0
     for number in range(first, len(lines)):
         line = lines[number]
-        stripped = line.lstrip()
-        if stripped.startswith(("```", "~~~")):
-            mark = stripped[:3]
-            fence = None if fence == mark else (fence or mark)
+        if m := _FENCE_RE.match(line):
+            # Only a run of the opening fence's character, at least as long, with no info string, closes it.
+            if fence is None:
+                fence = m.group(1)
+            elif m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not m.group(2).strip():
+                fence = None
             continue
         if fence:
             continue

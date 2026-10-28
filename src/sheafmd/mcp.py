@@ -625,12 +625,20 @@ class Door:
             raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path")     # a root of another member's
         self._check_size(text)
         _check_comments("", text)
-        text = self._owned(self._visible(text, None), address, caller)
+        exists = ToolError(f"{address} exists already; `create` makes a new page, and `update` changes one.",
+                           "exists")
+        try:
+            text = self._owned(self._visible(text, None), address, caller)
+        except ToolError as e:
+            # The owner is judged by the list's row for the address, which a sheaf already there may have: a
+            # name that is taken gets the one answer whatever the text, so the refusal tells nothing of it.
+            if e.why == "no owner" and os.path.lexists(Path(os.path.realpath(root.path)) / rel):
+                raise exists from None
+            raise
         try:
             create_file(Path(os.path.realpath(root.path)), rel, text)
         except FileExistsError:
-            raise ToolError(f"{address} exists already; `create` makes a new page, and `update` "
-                            "changes one.", "exists") from None
+            raise exists from None
         except FileNotFoundError:
             raise ToolError(f"The folder of {address} does not exist; `create` makes no folder.",
                             "no folder") from None
@@ -703,7 +711,7 @@ class Door:
         if visibility.effective(fm) == "project":
             return text
         # an owner whose roots do not hold the sheaf cannot open it either (9.9)
-        everyone = [m for m in self.hub.proxy.members.values() if self.hub.member_owns(m, address)]
+        everyone = self.hub.members_owning(self.hub.proxy.members.values(), address)
         if visibility.owner_of(fm, everyone, self.hub.assignees(address, fm)):
             return text     # owned already, by an assignee of its issue or its `owner`, which stays as it is
         member = self._member(caller)

@@ -923,6 +923,26 @@ def test_a_door_create_whose_owner_cannot_reach_its_root_is_refused(team, browse
     assert not (root / "x.md").exists()
 
 
+def test_a_refused_create_over_a_hidden_sheaf_answers_only_that_its_name_is_taken(team, browser, work,
+                                                                                monkeypatch):
+    """Whether a create has an owner reads the list's row for its address: over a sheaf the token may not see,
+    the answer is the taken name's alone, whatever issue the text guesses (#30)."""
+    put(team, work, DOC, PRIVATE)
+    monkeypatch.setattr(team.hub, "assignees", lambda address, fm: ["tiroir"] if "issue" in fm else None)
+    token = Tokens().add("mistral", write=True)
+    answers = {call(browser, "create", token=token, doc=f"work/{DOC}", text=text)[1]
+               for text in (MAIL_TEXT, MAIL_TEXT.replace("sources:", "issue: thinkingtoo/tt-tiroir#9\nsources:"))}
+    assert answers == {f"work/{DOC} exists already; `create` makes a new page, and `update` changes one."}
+
+
+def test_whose_a_document_is_is_judged_with_one_lookup_of_its_root_for_every_member(team, work, monkeypatch):
+    lookups = []
+    lookup = team.hub.roots.lookup
+    monkeypatch.setattr(team.hub.roots, "lookup", lambda p: lookups.append(p) or lookup(p))
+    everyone = list(team.hub.proxy.members.values())
+    assert team.hub.members_owning(everyone, f"work/{DOC}") == everyone and len(lookups) == 1
+
+
 def test_a_token_bound_to_a_member_reaches_only_that_members_roots(team, browser, work, hans_root):
     root, doc = hans_root
     team.hub.proxy = members(work, hans_also=root, thierry=["james-thierry"])

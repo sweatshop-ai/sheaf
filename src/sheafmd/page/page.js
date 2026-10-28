@@ -40,7 +40,7 @@
     toBox = CAN.indexOf('box-ask') >= 0 || CAN.indexOf('box-tell') >= 0;
     // The session's own name when it has one ("Linnea"), else the agent's display name (SPEC 10.5); on a
     // box sheaf the member the live session runs as (James).
-    AGENT = toBox ? upper(liveSession().member) || 'James'
+    AGENT = toBox ? upper(liveSession().member) || 'the agent'
           : (CFG.agent && (CFG.agent.name || CFG.agent.display)) || 'the agent';
     AGENT_UC = AGENT.charAt(0).toUpperCase() + AGENT.slice(1);
     canAsk = CAN.indexOf(toBox ? 'box-ask' : 'ask') >= 0;
@@ -493,11 +493,13 @@
     var h = '';
     if (w.attach) h += '<h4>Attach on the box</h4><p>James’s session is live in tmux. You join it in your terminal; ' +
                        'same transcript, same tools, James’s account.</p>' + cmdRow(w.attach);
-    h += '<h4>Fork to your machine</h4>' + cmdRow(w.fork || '') +
-         '<p>Runs on your laptop: fetches the session through this hub, forks it under your name.</p>';
+    // The fork fetches a transcript of the box; the hub leaves `fork` out when none of the sessions ran there.
+    if (w.fork) h += '<h4>Fork to your machine</h4>' + cmdRow(w.fork) +
+                     '<p>Runs on your laptop: fetches the session through this hub, forks it under your name.</p>';
     h += '<h4>Sessions</h4>' + (ss.length ? ss.map(function (x) {
       return '<div class="rd-sess">' + esc(upper(x.member)) + ' on ' + esc(x.host) + ' · ' + esc(utcDate(x.date)) + '</div>';
-    }).join('') : '<p class="rd-none">No session yet.</p>');
+    }).join('') : '<p class="rd-none">No session yet.</p>') +
+    (ss.length && !w.fork ? '<p class="rd-none">No session of this sheaf ran on the box: there is none to fork.</p>' : '');
     workPop.innerHTML = h;
     Array.prototype.forEach.call(workPop.querySelectorAll('.rd-cmd button'), function (b) {
       b.addEventListener('click', function () { copyCommand(b.previousElementSibling); });

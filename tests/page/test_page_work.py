@@ -64,8 +64,10 @@ def as_member(tab, work=None, can=(), doc_work=None, doc_can=None):
     tab.page.route(re.compile(r"/_/doc\?"), doc)
 
 
-def work(sessions=(BOX,), attach=ATTACH, live="box"):
-    w = {"fork": FORK, "sessions": list(sessions), "live": live}
+def work(sessions=(BOX,), attach=ATTACH, live="box", fork=FORK):
+    w = {"sessions": list(sessions), "live": live}
+    if fork is not None:
+        w["fork"] = fork
     if attach is not None:
         w["attach"] = attach
     return w
@@ -136,8 +138,17 @@ def test_without_a_shell_there_is_no_attach_command(tab):
     assert tab.page.locator("#rd-work .rd-cmd code").all_inner_texts() == [FORK]
 
 
+def test_a_sheaf_with_no_session_on_the_box_offers_no_fork(tab):
+    as_member(tab, work(sessions=[LAPTOP], attach=None, live="laptop", fork=None))
+    tab.open()
+    open_work(tab.page)
+    assert tab.page.locator("#rd-work h4").all_text_contents() == ["Sessions"]
+    assert tab.page.locator("#rd-work .rd-cmd").count() == 0
+    assert "No session of this sheaf ran on the box: there is none to fork." in tab.page.inner_text("#rd-work")
+
+
 def test_a_sheaf_with_no_session_says_so(tab):
-    as_member(tab, work(sessions=(), attach=None, live=""))
+    as_member(tab, work(sessions=(), attach=None, live="", fork=None))
     tab.open()
     open_work(tab.page)
     assert tab.page.locator("#rd-work .rd-sess").count() == 0

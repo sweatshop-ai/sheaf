@@ -262,19 +262,18 @@ class Hub:
         """The `work` of a member's page (None when it is not a sheaf of the list's root) and its `can`:
         box-ask and box-tell while the live session runs on the box and `[list]` names a `tell_dir` (10.1).
         The meta block and every /_/doc answer carry both, so a fork seen by the page changes what it offers."""
-        work = self.work_meta(e, member)
-        box = work is not None and work["live"] == "box" and self.the_list.cfg.tell_dir is not None
-        return work, ["box-ask", "box-tell"] if box else []
+        st = work_mod.state(self, e.address, e.live.current()[1])
+        if st is None:
+            return None, []
+        return self.work_meta(e, member, st), st.can
 
-    def work_meta(self, e: Entry, member) -> dict | None:
+    def work_meta(self, e: Entry, member, st) -> dict:
         """What the page's Work on this shows a member (9.12, 10.1): the command that forks the sheaf's session
         on their machine, the one that attaches to James's window when they have a shell on the box, the
         sessions and where the live one runs. None for a page that is not a sheaf of the list's root."""
-        st = work_mod.state(self, e.address, e.live.current()[1])
-        if st is None:
-            return None
-        out = {"fork": f"tiroir work {self.proxy.origin}{roots_mod.url_path(e.address)}",
-               "sessions": st.sessions, "live": st.live}
+        out = {"sessions": st.sessions, "live": st.live}
+        if st.box:                  # the fork fetches a transcript of the box: none there, nothing to fork
+            out["fork"] = f"tiroir work {self.proxy.origin}{roots_mod.url_path(e.address)}"
         if member.shell and st.cfg.attach:
             client, project = roots_mod.Address.parse(e.address).rel.split("/")[:2]
             out["attach"] = st.cfg.attach.replace("{window}", f"{client}-{project}")

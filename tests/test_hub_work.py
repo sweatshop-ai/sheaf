@@ -287,6 +287,40 @@ def test_a_sheaf_with_no_sessions_yet_gets_the_key(team, box, work):
     assert (work / DOC).read_text(encoding="utf-8").endswith("---\n# Bare\n")
 
 
+def unindented(text):
+    return text.replace("\n  - {id: ", "\n- {id: ")
+
+
+def test_an_unindented_list_takes_the_fork_at_its_own_indent_and_lists_an_id_once(team, box, work):
+    put(team, work, DOC, unindented(SHEAF))
+    assert fork(team, id=OLDER).status == 200
+    text = (work / DOC).read_text(encoding="utf-8")
+    assert [s.split(",")[0] for s in sessions_of(work)] == [f"{{id: {OLDER}", f"{{id: {LIVE}", f"{{id: {LAPTOP}"]
+    assert "\n  - {id: " not in text and text.count(f"{{id: {OLDER}") == 1
+
+
+def test_a_blank_or_comment_line_inside_the_list_does_not_end_it(team, box, work):
+    put(team, work, DOC, SHEAF.replace(f"  - {{id: {LAPTOP}", f"\n  # older ones\n  - {{id: {LAPTOP}"))
+    assert fork(team, id=OLDER).status == 200
+    text = (work / DOC).read_text(encoding="utf-8")
+    assert text.count(f"{{id: {OLDER}") == 1 and "  # older ones\n" in text
+
+
+def test_an_empty_flow_list_becomes_the_list_of_the_fork(team, box, work):
+    put(team, work, DOC, SHEAF.split("sessions:\n")[0] + "sessions: []\n---\n# T\n")
+    assert fork(team).status == 200
+    text = (work / DOC).read_text(encoding="utf-8")
+    assert text.count("sessions:") == 1 and sessions_of(work)[0].startswith(f"{{id: {FORK}, host: hans-mac, ")
+
+
+def test_sessions_written_on_one_line_are_not_rewritten(team, box, work):
+    put(team, work, DOC, SHEAF.split("sessions:\n")[0] + f"sessions: [{{id: {LIVE}}}]\n---\n# T\n")
+    before = (work / DOC).read_text(encoding="utf-8")
+    got = fork(team)
+    assert got.status == 409 and "one item per line" in got.json()["error"]
+    assert (work / DOC).read_text(encoding="utf-8") == before and hub_rows("session-forked") == []
+
+
 def test_the_fork_is_the_signed_in_members_whatever_the_body_names(team, box, work):
     assert fork(team, member="thierry", by="thierry", name="Thierry", email="t@example.com").status == 200
     assert ", member: hans, " in sessions_of(work)[0]
@@ -410,6 +444,14 @@ def test_ask_and_tell_on_a_box_sheaf_write_the_comment_and_drop_it_for_james(tea
     row, = hub_rows("tell-dropped")
     assert (row["what"], row["project"], row["by"], row["drop"]) == (kind, "thinkingtoo/tiroir", "hans", "written")
     assert team.hub.runner.active("ask", ADDRESS) == team.hub.runner.active("tell", ADDRESS) == []
+
+
+def test_the_text_dropped_for_james_is_cut_at_3000_characters(team, box, work):
+    body = "x" * 2990 + "é" * 20
+    assert comment(team, work, "tell", body=body).status == 200
+    f, = drops(box)
+    assert json.loads(f.read_bytes())["text"] == body[:3000]
+    assert body in (work / DOC).read_text(encoding="utf-8")       # the comment itself is written whole
 
 
 @pytest.mark.parametrize("mask", [0o077, 0o000])
@@ -538,9 +580,21 @@ def test_without_a_tell_dir_a_box_sheaf_can_nothing_and_without_attach_none_is_o
     assert m["work"]["live"] == "box" and m["can"] == [] and "attach" not in m["work"]
 
 
-def test_a_sheaf_with_no_session_has_work_with_no_live_one(team, box, work):
+def test_a_sheaf_with_no_session_has_work_with_no_live_one_and_nothing_to_fork(team, box, work):
     put(team, work, DOC, SHEAF.split("sessions:\n")[0] + "---\n# T\n")
-    assert meta(team)["work"] == {"fork": f"tiroir work {FRONT}/{ADDRESS}", "live": "", "sessions": []}
+    assert meta(team)["work"] == {"live": "", "sessions": []}
+
+
+def test_a_sheaf_with_only_laptop_sessions_has_nothing_to_fork(team, box, work):
+    put(team, work, DOC, SHEAF.replace("host: tiroir-tt", "host: thierry-laptop"))
+    w = meta(team)["work"]
+    assert "fork" not in w and w["live"] == "laptop"
+
+
+def test_a_sheaf_live_on_a_laptop_with_an_older_box_session_can_fork_that_one(team, box, work):
+    put(team, work, DOC, SHEAF.replace("host: tiroir-tt, member: james, date: 2026-10-28T05:12:03Z",
+                                       "host: thierry-laptop, member: thierry, date: 2026-10-28T05:12:03Z"))
+    assert meta(team)["work"]["fork"] == f"tiroir work {FRONT}/{ADDRESS}"
 
 
 def test_a_page_that_is_not_a_sheaf_of_the_list_has_no_work(team, box, work):

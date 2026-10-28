@@ -127,10 +127,16 @@ class Sheaf:
     actions: tuple              # ((word, short name or "", 0-based line in the file), ...)
 
 
+def _lines(text: str) -> list:
+    """The lines of `text` as split_md_blocks numbers them: on "\n" only, never on U+2028 or "\x0c" as
+    splitlines() does, so the front matter, the actions and the blocks agree on every line."""
+    return [line.removesuffix("\r") for line in text.split("\n")]
+
+
 def front_matter(text: str) -> dict:
     """The top-level `key: value` lines of the front matter at the top of `text`; a list or a nested
     table under a key is not read."""
-    lines = text.splitlines()
+    lines = _lines(text)
     if not lines or lines[0].strip() != "---":
         return {}
     out = {}
@@ -152,9 +158,8 @@ def read_sheaf(rel: str, text: str) -> Sheaf:
     if m := _ISSUE_RE.fullmatch(fm.get("issue", "")):
         issue = (m.group(1), m.group(2), int(m.group(3)))
     title, actions, fence = "", [], None
-    # Numbered as split_md_blocks numbers them: on "\n" only, never on U+2028 or "\x0c" as splitlines() does.
-    lines = [line.removesuffix("\r") for line in text.split("\n")]
-    first = next(n for n in range(1, len(lines)) if lines[n].strip() in ("---", "...")) + 1 if fm else 0
+    lines = _lines(text)
+    first = next((n for n in range(1, len(lines)) if lines[n].strip() in ("---", "...")), -1) + 1 if fm else 0
     for number in range(first, len(lines)):
         line = lines[number]
         if m := _FENCE_RE.match(line):
@@ -321,7 +326,11 @@ class TheList:
                     text = (root.path / found.rel).read_text(encoding="utf-8")
                 except (OSError, UnicodeDecodeError):
                     continue
-                s = read_sheaf(found.rel, text)
+                try:
+                    s = read_sheaf(found.rel, text)
+                except Exception:           # one sheaf the reader trips on leaves the rest of the list
+                    self.hub.record_exception("list-poll-failed", None)
+                    continue
                 if s.issue is not None:
                     sheaves.append(s)
             try:

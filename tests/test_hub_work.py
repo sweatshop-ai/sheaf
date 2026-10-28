@@ -43,15 +43,20 @@ A quote from the contract.
 TRANSCRIPT = b'{"type":"user","message":"hello"}\n{"type":"assistant","message":"hi"}\n'
 
 
+def the_team(work, tmp_path, thierrys_tokens=()):
+    """The `[proxy]` table of the three members; `thierrys_tokens` are the door tokens bound to Thierry."""
+    return proxy.parse({"origin": FRONT, "socket": "/run/sheaf-proxy/hub.sock",
+                        "proxy_user": pwd.getpwuid(os.getuid()).pw_name,
+                        "members": {THIERRY: {"name": "Thierry", "short": "thierry", "roots": [str(work)],
+                                              "shell": True, "tokens": list(thierrys_tokens)},
+                                    HANS: {"name": "Hans", "short": "hans", "roots": [str(work)]},
+                                    BEA: {"name": "Bea", "roots": [str(tmp_path / "other")]}}},
+                       "the test")
+
+
 @pytest.fixture
 def team(hub, browser, work, plan, tmp_path):
-    hub.proxy = proxy.parse({"origin": FRONT, "socket": "/run/sheaf-proxy/hub.sock",
-                             "proxy_user": pwd.getpwuid(os.getuid()).pw_name,
-                             "members": {THIERRY: {"name": "Thierry", "short": "thierry", "roots": [str(work)],
-                                                   "shell": True},
-                                         HANS: {"name": "Hans", "short": "hans", "roots": [str(work)]},
-                                         BEA: {"name": "Bea", "roots": [str(tmp_path / "other")]}}},
-                            "the test")
+    hub.proxy = the_team(work, tmp_path)
     (tmp_path / "other").mkdir()
     (work / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["thierry", "hans"]\n',
                                         encoding="utf-8")
@@ -968,6 +973,38 @@ def test_a_door_create_whose_rewrite_would_join_a_hidden_item_to_sessions_is_ref
             + HIDDEN + "---\n# New\n")
     is_error, said = door(browser, james_token, "create", text, doc=new)
     assert is_error and "sessions" in said and not (work / "thinkingtoo/tiroir/new.md").exists()
+
+
+# ── #36: the owner `_owned` gives cannot join an item to `sessions` either ─────────
+OWNER_THEN_SESSIONS = "owner:\nsessions:\nowner: []\n" + HIDDEN     # the issue's own front matter
+
+
+def test_a_door_create_whose_owner_rewrite_would_join_an_item_to_sessions_is_refused(team, box, browser, work,
+                                                                                    james_token, tmp_path):
+    team.hub.proxy = the_team(work, tmp_path, thierrys_tokens=["james"])     # so `_owned` gives it `owner: thierry`
+    (box["sessions"] / FOLDER / f"{FORK}.jsonl").write_bytes(b'{"another":"project"}\n')
+    new = "work/thinkingtoo/tiroir/new.md"
+    text = "---\nclient: thinkingtoo\nproject: tiroir\nsources: [mail:t-1]\n" + OWNER_THEN_SESSIONS + "---\n# New\n"
+    is_error, said = door(browser, james_token, "create", text, doc=new)
+    assert is_error and "sessions" in said and not (work / "thinkingtoo/tiroir/new.md").exists()
+    assert download(team, id=FORK).status == 404
+
+
+def test_a_door_update_whose_owner_rewrite_would_join_an_item_to_sessions_is_refused(team, box, browser, work,
+                                                                                    james_token, tmp_path):
+    team.hub.proxy = the_team(work, tmp_path, thierrys_tokens=["james"])
+    (box["sessions"] / FOLDER / f"{FORK}.jsonl").write_bytes(b'{"another":"project"}\n')
+    new = "work/thinkingtoo/tiroir/new.md"
+    head = "---\nclient: thinkingtoo\nproject: tiroir\n"
+    is_error, got = door(browser, james_token, "create", head + "sources: [issue:x/y#1]\nsessions: []\n---\n# New\n",
+                         doc=new)
+    assert not is_error, got
+    before = (work / "thinkingtoo/tiroir/new.md").read_text(encoding="utf-8")
+    closed = head + "sources: [mail:t-1]\n" + OWNER_THEN_SESSIONS + "---\n# New\n"
+    is_error, said = door(browser, james_token, "update", lambda t: closed, doc=new)
+    assert is_error and "sessions" in said
+    assert (work / "thinkingtoo/tiroir/new.md").read_text(encoding="utf-8") == before
+    assert download(team, id=FORK).status == 404
 
 
 def test_a_fork_onto_an_empty_list_does_not_wake_a_line_under_it():

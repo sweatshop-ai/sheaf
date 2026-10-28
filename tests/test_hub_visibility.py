@@ -207,6 +207,21 @@ def test_a_door_update_by_an_unbound_token_that_would_close_a_sheaf_with_no_owne
                          text=before.replace("issue:x/y#1", "mail:t-1"))
     assert is_error and "owner" in got, got
     assert (work / MAIL).read_text(encoding="utf-8") == before
+    assert hub_rows("door-update")[-1]["reason"] == "no owner"
+
+
+def test_a_door_create_by_a_bound_token_of_a_sheaf_its_issues_assignee_owns_names_no_owner(team, browser, work,
+                                                                                        monkeypatch):
+    """The assignee stays the owner: an `owner` line would hand the sheaf to the token's member once the list
+    stops knowing the issue."""
+    team.hub.proxy = members(work, thierry=["mail"])
+    monkeypatch.setattr(team.hub, "assignees", lambda address, fm: ["hanshermans"])
+    (work / "list/a/inbox").mkdir(parents=True)
+    is_error, got = call(browser, "create", token=Tokens().add("mail", write=True), doc=f"work/{MAIL}",
+                         text=MAIL_TEXT.replace("sources:", "issue: x/y#1\nsources:"))
+    assert not is_error, got
+    assert "owner" not in front_matter((work / MAIL).read_text(encoding="utf-8"))
+    assert team.get(f"/work/{MAIL}", member=HANS).status == 200
 
 
 def test_a_door_write_cannot_share_a_sheaf_itself(team, browser, work):

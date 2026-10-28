@@ -694,8 +694,8 @@ class Door:
     def _owned(self, text: str, address: str, caller: Caller) -> str:
         """`text`, a door write's text after `_visible`, when the sheaf it makes at `address` has an owner. A
         sheaf that is its owner's alone and that no member owns is open to nobody, the token that wrote it
-        included, and no door write can mend it (9.11). So when it names no `owner`, a token bound to a
-        member gives it that member's `short`; else the write is refused. The key, which reads every file,
+        included, and no door write can mend it (9.11). So when no member owns it and it names no `owner`, a
+        token bound to a member gives it that member's `short`; else the write is refused. The key, which reads every file,
         writes it as `_visible` gave it (#30)."""
         if not self._judged(caller):
             return text
@@ -703,6 +703,8 @@ class Door:
         if visibility.effective(fm) == "project":
             return text
         everyone = list(self.hub.proxy.members.values())
+        if visibility.owner_of(fm, everyone, self.hub.assignees(address, fm)):
+            return text     # owned already, by an assignee of its issue or its `owner`, which stays as it is
         member = self._member(caller)
         if member is not None and member.short and not visibility.text(fm, "owner"):
             text = visibility.set_keys(text, {"owner": member.short})

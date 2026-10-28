@@ -395,6 +395,20 @@ class LiveDocument:
             self._rerender()
             return self._announce(self._snapshot(self._text), before, event, id=cid)
 
+    def rewrite(self, change):
+        """Write `change(text)` over the file's text as it is under the file lock, so a write that landed
+        meanwhile is kept, then render and tell the tabs, as a save does. Returns the hash of the text
+        written (9.12: the hub's own line in the front matter)."""
+        with self._held():
+            before = self._text
+            _, new_text = rds.update_file(self._md, change)
+            self._after_write()
+            self._remember(new_text)
+            if new_text != before:
+                self._rerender()
+                self._announce(self._snapshot(self._text), before)
+            return rds.md_hash(new_text)
+
     def _await(self, cid):
         c = rdc.parse(self._md.read_text(encoding="utf-8")).by_id(cid)
         if c is None:

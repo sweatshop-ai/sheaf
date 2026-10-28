@@ -29,7 +29,7 @@ from ..edit import EditError
 from ..mcp import Caller, Door
 from ..render import RenderError
 from ..source import StaleError
-from . import auth, peer, proxy
+from . import auth, peer, proxy, the_list
 from .asktell import NO_AGENT, JobRefused
 from .index import Status
 from .live import UNKNOWN, NotAuthor
@@ -216,6 +216,7 @@ class Handler:
             ("GET", "/_/jobs", "jobs", KEY, self._jobs),
             ("POST", "/_/save", "save", COOKIE, self._save),
             ("POST", "/_/pin", "pin", COOKIE, self._pin),
+            ("POST", "/_/tick", "tick", COOKIE, self._tick),
             ("POST", "/_/comment", "comment", COOKIE, self._comment),
             ("POST", "/_/ask", "ask", COOKIE, self._ask),
             ("POST", "/_/tell", "tell", COOKIE, self._tell),
@@ -546,6 +547,10 @@ class Handler:
             root = self.hub.roots.get(name)
             if root is None or (req.member is not None and not self.hub.owns(req.member, root)):
                 raise Refuse(404, "no such root")
+            # The list's root: its page is the list, at `/<root>` itself, for a member (9.10).
+            the_list = self.hub.the_list
+            if req.member is not None and the_list is not None and the_list.serves(name):
+                return _html(200, the_list.page(req.member, req.query.get("show", ""), nonce), nonce)
             if bare:
                 return Response(301, {"Location": req.path + "/"})
             return _html(200, self.hub.index.page(nonce, only=name, member=req.member), nonce)
@@ -643,6 +648,30 @@ class Handler:
                             conflicts=json.dumps(got["conflicts"]) if got["conflicts"] else None,
                             **self._who(req))
         return _ok(**got)
+
+    def _tick(self, req: Req) -> Response:
+        """The list's row ticks the sheaf's action (9.10): saved as the page saves a tick, so the file, the
+        commit and the open tabs see what a tick in the page makes them see."""
+        b = req.body
+        e = self._entry(req, b.get("doc"))
+        n, word = b.get("action"), b.get("word")
+        _shape(type(n) is int and n >= 0, "action must be the number of the sheaf's action, from 0")
+        _shape(isinstance(word, str) and word != "", "word must be the action's word")
+        h, text = e.live.current()
+        edit = the_list.tick_edit(text, n, word)
+        if edit is None:
+            raise Refuse(409, f"the sheaf no longer holds that action ({word}): reload the list")
+        try:
+            got = e.live.save(h, [edit])
+        except (EditError, StaleError) as ex:
+            raise Refuse(409, str(ex)) from None
+        if not got["changed"]:
+            raise Refuse(409, f"the sheaf no longer holds that action ({word}): reload the list")
+        self.hub.index.touch(e.address)
+        self.hub.committed(e.address, req.member, "tick")
+        if self.hub.the_list is not None:
+            self.hub.the_list.ticked(e.address)
+        return _ok(hash=got["hash"])
 
     def _pin(self, req: Req) -> Response:
         """The page keeps the version it holds past a change of the file, while a form holds the reload

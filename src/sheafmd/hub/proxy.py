@@ -68,6 +68,8 @@ class Member:
     name: str                   # signs their comments and replies, cleaned by the rule of 12
     roots: tuple                # the folders of their roots, absolute, as written
     email: str = ""             # the e-mail of their commits (8.11); "" for `default_email`
+    short: str = ""             # their short name in `projects.toml` and in an action's `@name` (9.10)
+    github: str = ""            # their GitHub login: the record's assignee who is them (9.10)
 
 
 @dataclass(frozen=True)
@@ -119,6 +121,11 @@ def _keys(t: dict, want: dict, where: str):
 _WORDS = {str: "text", list: "a list", dict: "a table"}
 _HOST_RE = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]*[a-z0-9])?|\[[0-9a-f:.]+\]")
 _EMAIL_RE = re.compile(r"[^\s<>@,;\"']+@[^\s<>@,;\"']+")
+_SHORT_RE = re.compile(r"[A-Za-z0-9._-]{1,40}")
+_LOGIN_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
+OPTIONAL_MEMBER_KEYS = ("email", "short", "github")
+_OPTIONAL_WORDS = {"short": "1 to 40 letters, digits, dots, dashes or underscores (nell)",
+                   "github": "a GitHub login (tiroir)"}
 SOCKET_MAX = 107                # bytes of a Unix socket's path (sun_path less its NUL)
 
 
@@ -169,7 +176,11 @@ def parse(t: dict, where) -> ProxyConfig:
         email = m.get("email", None)
         if email is not None and (not isinstance(email, str) or not _EMAIL_RE.fullmatch(email)):
             raise ProxyError(f"'email' must be an address like name@example.com, not {email!r}, in {mhere}")
-        _keys({k: v for k, v in m.items() if k != "email"}, MEMBER_KEYS, mhere)
+        for key, rule in (("short", _SHORT_RE), ("github", _LOGIN_RE)):
+            v = m.get(key)
+            if v is not None and (not isinstance(v, str) or not rule.fullmatch(v)):
+                raise ProxyError(f"'{key}' must be {_OPTIONAL_WORDS[key]}, not {v!r}, in {mhere}")
+        _keys({k: v for k, v in m.items() if k not in OPTIONAL_MEMBER_KEYS}, MEMBER_KEYS, mhere)
         name = clean_display(m["name"])
         if not name:
             raise ProxyError(f"'name' has no printable character, in {mhere}")
@@ -180,7 +191,11 @@ def parse(t: dict, where) -> ProxyConfig:
             if not isinstance(r, str) or not r.startswith("/"):
                 raise ProxyError(f"every folder of 'roots' must be an absolute path, not {r!r}, in {mhere}")
             roots.append(r.rstrip("/") or "/")
-        members[mid] = Member(mid, name, tuple(roots), email or "")
+        members[mid] = Member(mid, name, tuple(roots), email or "", m.get("short", ""), m.get("github", ""))
+        for key in ("short", "github"):
+            mine = getattr(members[mid], key).casefold()
+            if mine and any(getattr(o, key).casefold() == mine for o in members.values() if o.id != mid):
+                raise ProxyError(f"'{key}' {getattr(members[mid], key)!r} of {mhere} is another member's")
     return ProxyConfig(origin, host, Path(sock), t["proxy_user"], acct.pw_uid, acct.pw_gid, members)
 
 

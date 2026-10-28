@@ -722,3 +722,17 @@ def test_an_owner_only_sheaf_deleted_after_a_poll_is_told_to_its_assignee_alone(
     doc = f"{box.hub.roots.lookup(sheaves / 'projects.toml').name}/globex/black-friday/2026-10-28-reply-to-joey.md"
     assert [d["doc"] for name, d in nell.drain() if name == "status"] == [doc]
     assert [d for name, d in dora.drain() if name == "status"] == []
+
+
+def test_an_issue_written_in_another_case_is_still_the_issue_the_list_polled(box, sheaves):
+    joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
+    joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n",
+                                                             "sources: [library:4711]\nowner: dora\n"),
+                    encoding="utf-8")
+    box.hub.the_list.poll()
+    joey.write_text(joey.read_text(encoding="utf-8").replace("issue: acme/record#5", "issue: Acme/Record#5"),
+                    encoding="utf-8")
+    root = box.hub.roots.lookup(joey).name
+    address = f"/{root}/globex/black-friday/2026-10-28-reply-to-joey.md"
+    assert box.get(address, member=NELL).status == 200
+    assert box.get(address, member=DORA).status == 404

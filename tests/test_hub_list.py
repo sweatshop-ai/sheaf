@@ -618,3 +618,23 @@ def test_a_sheaf_whose_front_matter_closes_only_on_another_line_break_leaves_the
                  member=NELL)
     assert r.status in (200, 409), r.text       # no sheaf, still a document: its one box, or nothing
     assert path.read_text(encoding="utf-8") in (before, before.replace("- [ ] Approve", "- [x] Approve"))
+
+
+def test_all_of_the_team_leaves_out_a_sheaf_closed_since_the_last_poll(box, sheaves):
+    joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
+    joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n", "sources: [library:4711]\n"),
+                    encoding="utf-8")
+    assert all("globex/black-friday" not in groups for groups in read(box.get("/list?show=all", member=DORA)).values())
+
+
+def test_a_link_to_a_sheaf_has_the_owner_of_the_sheaf_it_names(box, sheaves):
+    joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
+    joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n",
+                                                             "sources: [library:4711]\nowner: dora\n"),
+                    encoding="utf-8")
+    (sheaves / "globex/black-friday/joey.md").symlink_to(joey.name)
+    box.hub.the_list.poll()
+    root = box.hub.roots.lookup(joey).name
+    assert box.get(f"/{root}/globex/black-friday/2026-10-28-reply-to-joey.md", member=DORA).status == 404
+    assert box.get(f"/{root}/globex/black-friday/joey.md", member=DORA).status == 404
+    assert box.get(f"/{root}/globex/black-friday/joey.md", member=NELL).status == 200

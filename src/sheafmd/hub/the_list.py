@@ -143,11 +143,6 @@ class Sheaf:
     owner: str = ""
     shared: str = ""
 
-    @property
-    def front(self) -> dict:
-        """What visibility.visible_to reads of the sheaf: its visibility as the hub enforces it, and its owner."""
-        return {"visibility": self.visibility, "owner": self.owner}
-
 
 def read_sheaf(rel: str, text: str) -> Sheaf:
     fm = front_matter(text)
@@ -403,7 +398,7 @@ class TheList:
                 continue
             owners = [mine.get(a.lower()) for a in row.record.assignees]
             is_owner = any(o is not None and o.id == member.id for o in owners)
-            if not visibility.visible_to(row.sheaf.front, member, row.record.assignees):
+            if not self.hub.visible(member, f"{root.name}/{row.sheaf.rel}"):   # the file now, not the poll
                 continue
             addressed = any(short and short.lower() == member.short.lower() for _, short, _ in row.sheaf.actions)
             if show == "mine" and not (is_owner or addressed):

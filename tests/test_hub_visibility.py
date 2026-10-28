@@ -87,7 +87,9 @@ def test_a_source_list_written_as_lines_is_read_too(team, work):
 
 def test_hans_does_not_see_an_owner_only_sheaf_in_the_index(team, work):
     put(team, work, DOC, PRIVATE)
-    docs = lambda m: [d["doc"] for r in team.get("/_/index.json", member=m).json()["roots"] for d in r["docs"]]
+
+    def docs(m):
+        return [d["doc"] for r in team.get("/_/index.json", member=m).json()["roots"] for d in r["docs"]]
     assert f"work/{DOC}" in docs(THIERRY)
     assert f"work/{DOC}" not in docs(HANS)
 

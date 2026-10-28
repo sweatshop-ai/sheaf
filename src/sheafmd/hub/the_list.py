@@ -164,11 +164,22 @@ class Sheaf:
     shared: str = ""
 
 
+def issue_of(written: str) -> tuple | None:
+    """The issue a front matter's `issue` names, (owner, repo, number); None when it names none."""
+    m = _ISSUE_RE.fullmatch(written)
+    return (m.group(1), m.group(2), int(m.group(3))) if m else None
+
+
+def _same_issue(a: tuple | None, b: tuple | None) -> bool:
+    """Whether `a` and `b` are one issue: GitHub reads an owner and a repo name in any case."""
+    def norm(i):
+        return None if i is None else (i[0].casefold(), i[1].casefold(), i[2])
+    return norm(a) == norm(b)
+
+
 def read_sheaf(rel: str, text: str) -> Sheaf:
     fm = front_matter(text)
-    issue = None
-    if m := _ISSUE_RE.fullmatch(fm_text(fm, "issue")):
-        issue = (m.group(1), m.group(2), int(m.group(3)))
+    issue = issue_of(fm_text(fm, "issue"))
     # The title and the actions are read from the blocks the page draws, so an action in a fence, an
     # indented code block or an HTML comment is no action, and every action is one the tick can reach.
     title, actions = "", []
@@ -388,16 +399,17 @@ class TheList:
                 self._answered[a.rel] = row.record.updated
 
     # ── the page ────────────────────────────────────────────────────────────
-    def assignees(self, address: str):
-        """The record's assignees of the issue of the sheaf at `address`, from the last poll; None when the
-        list does not know the sheaf (no row: another root, no issue, or not polled yet)."""
+    def assignees(self, address: str, issue: str):
+        """The record's assignees of the issue of the sheaf at `address`, from the last poll, when `issue`, what
+        its file names now, is still the issue of its row; None when the list does not know the sheaf (no row:
+        another root, no issue, not polled yet, or an issue changed since the poll)."""
         a = roots_mod.Address.parse(address)
         root = self.root()
         if root is None or a.root != root.name:
             return None
         for row in self._snap.rows:
             if row.sheaf.rel == a.rel:
-                return tuple(row.record.assignees)
+                return tuple(row.record.assignees) if _same_issue(row.sheaf.issue, issue_of(issue)) else None
         return None
 
     def serves(self, name: str) -> bool:
@@ -408,7 +420,7 @@ class TheList:
     def page(self, member, show: str, nonce: str) -> str:
         snap = self._snap
         show = show if show in SHOWS else "projects"
-        mine = {m.github.lower(): m for m in self.hub.proxy.members.values() if m.github}
+        members = list(self.hub.proxy.members.values())
         root = self.root()
         sections = {"waiting": [], "open": []}
         for row in snap.rows:
@@ -416,10 +428,11 @@ class TheList:
                 continue
             if row.record.status == "waiting" and self._answered.get(row.sheaf.rel) == row.record.updated:
                 continue
-            owners = [mine.get(a.lower()) for a in row.record.assignees]
-            is_owner = any(o is not None and o.id == member.id for o in owners)
-            if not self.hub.visible(member, f"{root.name}/{row.sheaf.rel}"):   # the file now, not the poll
+            address = f"{root.name}/{row.sheaf.rel}"
+            if not self.hub.visible(member, address):               # the file now, not the poll
                 continue
+            owners = self.hub.owners(address, members)              # and its owners, as visible has them
+            is_owner = any(o.id == member.id for o in owners)
             addressed = any(short and short.lower() == member.short.lower() for _, short, _ in row.sheaf.actions)
             if show == "mine" and not (is_owner or addressed):
                 continue
@@ -462,12 +475,14 @@ class TheList:
             for word, short, _ in s.actions)
         if s.assistant:
             chips += f'<span class="list-assistant">{html.escape(s.assistant)}</span>'
+        by_login = {m.github.lower(): m for m in self.hub.proxy.members.values() if m.github}
+        first = by_login.get(rec.assignees[0].lower()) if rec.assignees else None
         if is_owner:
             owner = "you"
-        elif owners and owners[0] is not None and owners[0].short:
+        elif rec.assignees:             # the issue's first assignee, as the record orders them
+            owner = "@" + first.short if first is not None and first.short else rec.assignees[0]
+        elif owners and owners[0].short:
             owner = "@" + owners[0].short
-        elif rec.assignees:
-            owner = rec.assignees[0]
         else:
             owner = "nobody"
         meta = " · ".join(x for x in (s.kind, owner, f"#{s.issue[2]}", _age(self.hub.clock() - rec.updated)) if x)

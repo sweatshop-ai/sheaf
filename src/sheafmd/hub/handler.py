@@ -393,7 +393,7 @@ class Handler:
                 if not isinstance(doc, str):
                     return None
                 try:
-                    theirs = self.hub.member_owns(member, doc) and self.hub.visible(member, doc)
+                    theirs = self.hub.member_owns(member, doc) and self.hub.visible(member, doc, never_read=False)
                 except Exception:
                     self.hub.record_exception("status-failed", doc)
                     return None
@@ -709,8 +709,8 @@ class Handler:
             if m is not None:
                 # The gate (_owned) read the file before the lock: a write that closed the sheaf since is
                 # seen here, on the text the save would write over.
-                assignees = self.hub.assignees(e.address)
                 fm = visibility.front_matter(text)
+                assignees = self.hub.assignees(e.address, fm)
                 if not visibility.visible_to(fm, m, assignees):
                     raise Refuse(404, "no such document")
                 # The page cannot edit a front matter (5): paragraphs of `---` would write one, and its
@@ -878,7 +878,8 @@ class Handler:
         line = work.item(sid, machine, by, time.strftime(work.ISO, time.gmtime()))
         def change(text):
             # The gate (_sheaf) read the file before the lock: a write that closed the sheaf since is seen here.
-            if not visibility.visible_to(visibility.front_matter(text), req.member, self.hub.assignees(e.address)):
+            fm = visibility.front_matter(text)
+            if not visibility.visible_to(fm, req.member, self.hub.assignees(e.address, fm)):
                 raise Refuse(404, "no such document")
             return work.with_session(text, line, sid)
         try:
@@ -939,7 +940,8 @@ class Handler:
             def still_visible(text):
                 # The gate (_entry) read the file before the lock: a write that closed the sheaf since is seen here,
                 # and a fork that moved its live session off the box since keeps Ask and Tell from James's window.
-                if not visibility.visible_to(visibility.front_matter(text), member, self.hub.assignees(e.address)):
+                fm = visibility.front_matter(text)
+                if not visibility.visible_to(fm, member, self.hub.assignees(e.address, fm)):
                     raise Refuse(404, "no such document")
                 if to_box and not (work.state(self.hub, e.address, text) or work.State([], "", None)).can:
                     raise Refuse(400, proxy.PROXY_LINE)

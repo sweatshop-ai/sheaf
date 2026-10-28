@@ -11,6 +11,7 @@ import json
 import os
 import re
 import secrets
+import sys
 import threading
 import time
 import traceback
@@ -27,6 +28,8 @@ from . import proxy as proxy_mod
 from . import roots as roots_mod
 from . import state
 from .asktell import AskTell
+from . import projects
+from .commits import Author, Commits
 from .auth import Auth
 from .events import Bus
 from .index import Index
@@ -71,6 +74,8 @@ class Hub:
         self.person = config.user_name()
         self.roots = roots_mod.Roots()
         self.versions = state.Versions()
+        self.commits = Commits(self.record)      # the roots that commit (8.11)
+        self._told_projects: dict = {}           # what check_projects warned of this run (8.12)
         self.docs = state.Docs()
         self.seen = state.Seen()
         self.member_seen = state.MemberSeen()
@@ -104,6 +109,47 @@ class Hub:
         self.asktell = AskTell(self)
 
     # ── documents ────────────────────────────────────────────────────────────
+    def _versions_of(self, root) -> state.Versions:
+        """The versions store of `root`'s documents: inside it with `versions = "root"` (7.4), else the
+        state folder's."""
+        if config.load_root_config(root.path, warn=lambda line: None).versions_inside:
+            return state.Versions(root.path, root.name)
+        return self.versions
+
+    def check_projects(self, root, rels):
+        """Warn of each sheaf folder of `root` (its documents `rels`) that the root's `projects.toml`
+        does not name, and of a file that cannot be read, once per hub run (8.12)."""
+        try:
+            entries = projects.read(root.path)
+        except projects.Invalid as e:
+            if self._told_projects.setdefault((root.id, None, str(e)), True) is True:
+                self._told_projects[(root.id, None, str(e))] = False
+                self.record("projects-invalid", None, root=root.name, error=str(e))
+                print(f"sheaf: {root.path / projects.FILE}: {e}", file=sys.stderr, flush=True)
+            return
+        if entries is None:
+            return
+        for folder in projects.unlisted(entries, rels):
+            if (root.id, folder) in self._told_projects:
+                continue
+            self._told_projects[(root.id, folder)] = False
+            self.record("project-unlisted", None, root=root.name, folder=folder)
+            print(f"sheaf: {root.name}/{folder} holds sheaves and {projects.FILE} has no entry for it",
+                  file=sys.stderr, flush=True)
+
+    def committed(self, address: str, member=None, what: str = "edit", by: str | None = None):
+        """A write went to `address`, by `member` (a proxy.Member), by `by` (the display name of a door
+        caller) or else by the hub's person: a commit, in a root that commits (8.11)."""
+        a = roots_mod.Address.parse(address)
+        root = self.roots.get(a.root)
+        if root is None:
+            return
+        if member is not None:
+            who = Author(member.name, member.email or proxy_mod.default_email(member.id, self.proxy.origin))
+        else:
+            who = Author(by or self.person, "")
+        self.commits.saved(root, a.rel, who, what)
+
     def url(self, address: str) -> str:
         return f"http://127.0.0.1:{self.port}{roots_mod.url_path(address)}"
 
@@ -126,7 +172,7 @@ class Hub:
             e = Entry(address, path, root.id)
             e.live = LiveDocument(path, render=lambda text: self._rendered(e, text),
                                   publish=e.bus.publish, by=self.person, clock=self.clock,
-                                  versions=self.versions, address=address)
+                                  versions=self._versions_of(root), address=address)
             e.live.refresh(force=True)           # the first render: e.html
             self.entries[address] = e
             return e

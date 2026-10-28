@@ -33,7 +33,8 @@ PINS_KEPT = 16                  # per document: the versions pages keep (`pin`)
 PINS_MAX_AGE = 7 * 86400        # seconds since a page last pinned it
 _HASH_RE = re.compile(r"[0-9a-f]{16}")
 _ADDRESS_FILE = "address"       # in each versions folder: the address it is the key of
-_PINS = "pins"                  # in each versions folder: the versions pages keep
+_PINS = "pins"
+INSIDE = Path(".sheaf") / "versions"  # a root's own versions store, inside it (7.4)                  # in each versions folder: the versions pages keep
 
 
 def write_text_private(path: Path, text: str):
@@ -118,18 +119,32 @@ class Versions:
     pinned last more than 7 days before `prune()`. Each folder also holds `address`, the
     `<root>/<path>` it is the key of, so a whole root's folders can be found."""
 
+    def __init__(self, root: Path | None = None, name: str = ""):
+        """Without `root`, the store of the state folder. With it, the store of that root's own
+        documents, inside it at `.sheaf/versions/` (7.4, `versions = "root"`), keyed by the path in the
+        root, not the address: another hub, a clone's, names the root otherwise. `name` is the root's."""
+        self._root, self._prefix = root, f"{name}/"
+
     @property
     def dir(self) -> Path:
+        if self._root is not None:
+            return self._root / INSIDE
         return paths.state_dir() / "versions"
 
+    def _key(self, address: str) -> str:
+        """What the folder of `address` is named by, and what its `address` file holds."""
+        if self._root is not None and address.startswith(self._prefix):
+            return address[len(self._prefix):]
+        return address
+
     def _folder(self, address: str) -> Path:
-        return self.dir / doc_key(address)
+        return self.dir / doc_key(self._key(address))
 
     def _make_folder(self, address: str) -> Path:
         """`_folder`, made when it is not there yet, with its `address` file."""
-        folder = paths.private_dir(paths.private_dir(self.dir) / doc_key(address))
+        folder = paths.private_dir(paths.private_dir(self.dir) / doc_key(self._key(address)))
         if not (folder / _ADDRESS_FILE).exists():
-            write_text_private(folder / _ADDRESS_FILE, address)
+            write_text_private(folder / _ADDRESS_FILE, self._key(address))
         return folder
 
     @staticmethod

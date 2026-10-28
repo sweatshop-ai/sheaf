@@ -246,7 +246,7 @@ command = ["wezterm", "cli", "activate-pane", "--pane-id", "{pid}"]
 
 `command` is a list of text, the program first and its arguments after, and nothing reads it as a shell line. A string, an empty list, an empty or non-text element, a table with no `command`, or a `jump` that is not a table stops the command and names the file and the key; an unknown key in the table warns. Each element may hold `{session}`, `{pid}`, `{name}` and `{agent}`, which the hub replaces, element by element and as plain text, with the session's id, the process id of its record, its name (10.1) and its agent (`claude-code`); a value never splits an element (put `--` before `{name}` for a program that reads a leading `-` as an option: a name is the session's own and may start with one), and a `{` that is none of the four stays as written, so a JSON argument keeps its braces. The same four values are in the environment of the command as `SHEAF_JUMP_SESSION`, `SHEAF_JUMP_PID`, `SHEAF_JUMP_NAME` and `SHEAF_JUMP_AGENT`, for a script. The command runs with the hub's own environment, no input, its output thrown away except its stderr (the first line of it is the reason of a failure), in a group of its own that is killed when the command has not ended after 5 seconds; a helper it leaves running after it exits is left alone; exit 0 is a jump. It is read from the file at each use, so a change needs no restart. Nothing of the page or of a request reaches it but those four values, which come from the hub's own record of the session (11.2).
 
-A `[proxy]` table switches the hub to proxy mode (9.9). Without it the hub is in loopback mode, the default. Inside that table every key 9.9 names is required, and a missing or unknown one stops the hub's start instead of printing a warning.
+A `[proxy]` table switches the hub to proxy mode (9.9). Without it the hub is in loopback mode, the default. Inside that table every key 9.9 names is required but a member's `email`, and a missing or unknown one, or an `email` that is not one address, stops the hub's start instead of printing a warning.
 
 ### 4.4 Root config: `.sheaf.toml`
 
@@ -258,11 +258,14 @@ for = "Acme"                  # byline: "Document prepared by <by> for <for>"
 links = true                  # the link rule (section 6.6); false turns off the warning and the prompt text
 link_tlds = ["lu", "studio"]  # endings added to the default list
 credit = false                # the page credit line (D17)
+versions = "root"             # the versions store inside the root, at .sheaf/versions/ (7.4)
+commit = true                 # every write on the page and through the door is a commit (8.11)
+push = true                   # and the hub pushes it (8.11)
 ```
 
 `--for NAME` on a render replaces `for` for that render (section 6.3).
 
-Without the file: theme `plain`, a byline without "for", the link rule on with the default endings, no credit. A theme path that does not exist, or a folder without `theme.toml`, stops the render with an error naming both paths. sheaf reads `.sheaf.toml` only at the top of a root, never in subfolders.
+Without the file: theme `plain`, a byline without "for", the link rule on with the default endings, no credit, the versions in the state folder, no commit. A `versions` other than `"state"` or `"root"` warns and keeps the state folder. A theme path that does not exist, or a folder without `theme.toml`, stops the render with an error naming both paths. sheaf reads `.sheaf.toml` only at the top of a root, never in subfolders.
 
 ### 4.5 Theme folder
 
@@ -478,7 +481,7 @@ A comment is not merged: a reply, a status, an edit or a delete finds its commen
 
 ### 7.4 Versions (D5)
 
-Each `LiveDocument` remembers every text it has handed a page, keyed by hash, so a save against an older one is merged. The request ids of its comment writes and saves (8.5) are not among them: they live in memory only, 256 per document, and the on-disk format has no place for them. v1 also writes each such text to `<state>/versions/<doc-key>/<hash>.md`, keeps the newest 60 per document and deletes files older than 7 days at hub start. A save whose base hash is in neither memory nor disk is refused with 409: "the .md changed on disk and this page's version is no longer known to the hub. Copy your edit, then reload".
+Each `LiveDocument` remembers every text it has handed a page, keyed by hash, so a save against an older one is merged. The request ids of its comment writes and saves (8.5) are not among them: they live in memory only, 256 per document, and the on-disk format has no place for them. v1 also writes each such text to `<state>/versions/<doc-key>/<hash>.md`, keeps the newest 60 per document and deletes files older than 7 days at hub start. A root whose `.sheaf.toml` says `versions = "root"` keeps its documents' versions inside itself instead, at `<root>/.sheaf/versions/<doc-key>/`, where `<doc-key>` is the first 16 hex of the sha256 of the path in the root, not of the address, and `address` holds that path: a clone's hub names the root otherwise and still finds them. The same 60 and 16 are kept there; the 7 days are not applied (the root's git history keeps what is deleted), and forgetting the root deletes nothing in it. A second hub that serves a clone reads that store as its own. A save whose base hash is in neither memory nor disk is refused with 409: "the .md changed on disk and this page's version is no longer known to the hub. Copy your edit, then reload".
 
 A page keeps the version it shows while a form holds the reload that a change of the file needs (10.4), a merged or remapped save's reload among them (7.3), and what it sends once the form is done (the save of what was typed meanwhile, the reply, an Ask, a Tell) goes with that version. Writes from outside push it out of the newest 60 however short the hold, so the page pins it when the hold starts, once per version: `POST /_/pin {doc, hash}`, and again once a day for as long as the hold lasts, so the pin is never a week old while a form is open (the page looks every hour at the clock, not at a timer, which stops while a laptop sleeps; a renewal that failed is made again at the next look, and it stops when the hold ends, when the document is gone (10.7), or when the hub answers 409). The document keeps the 16 versions pinned last beside the newest, in memory and in `versions/<doc-key>/pins/` (only a file named by a version's hash counts toward the 16, and toward the newest 60 in the folder above: anything else there is not a version, takes no slot and is never deleted for one); pinned again, a version counts from then, and a pin on disk last pinned more than 7 days before is deleted at hub start, with the versions. The pins on disk outlive a restart, so a page that held its reload through one (10.7) still saves, replies, asks and tells against its version. A version no page pinned goes with the oldest as before; a pin of a version the document does not know is refused with 409, "the .md changed on disk and this page's version is no longer known to the hub", and keeps nothing, and the page then sends as it would have without it. A page that hears of the change only after 60 more writes (its stream was down while the hub took them) pins too late.
 
@@ -524,7 +527,7 @@ The root's name is the folder's name, with every character outside `[A-Za-z0-9._
 
 A document's address is `<root>/<path-in-root>`, path with `/` separators, and its URL is `http://127.0.0.1:<port>/<root>/<path-in-root>` with each segment percent-encoded. Only files ending in `.md` are served.
 
-Path resolution refuses `..` segments, and refuses a path whose `realpath` is outside the root's `realpath` (a symlink out of the root): 404.
+Path resolution refuses `..` segments, and refuses a path whose `realpath` is outside the root's `realpath` (a symlink out of the root): 404. The root's own `.sheaf/` folder (a theme, the versions store of 7.4) holds no document: a path in it, by its address or by its `realpath`, answers 404, and no listing names one.
 
 An address whose file 8.2 keeps from the root it names for lying in a git directory (`work/sub/.git/x.md`, and `work/sub/keep.git/x.md` for a bare repository) names no document either: its page, every route of 8.5 that takes a `doc`, Ask and Tell answer `404` as for a file that is not there, to the hub's person as to a member (9.9) and the door (12). The file is its own folder's root (rule 3), where `sheaf open` puts it (`keep.git/x.md`). One file has one address, so a Tell never names one the door refuses.
 
@@ -708,6 +711,26 @@ The hub counts open tabs per document (event-stream connections) and whether a d
 
 One job runner in the hub runs every Ask and Tell: it owns the processes (each in its own process group, `start_new_session=True`), cancellation (`killpg` SIGTERM, then SIGKILL after 5 s if the child is still running), timeouts (SIGKILL) and the event names. At most one Ask and one Tell per thread. A hub stop cancels every job the same way, waits out the 5 s, then sends SIGKILL to the groups still running, so no child outlives the hub. Jobs die with the hub; nothing reattaches.
 
+### 8.11 A root that commits
+
+A root whose `.sheaf.toml` says `commit = true` and that is a git work tree (rule 1 of 8.2) gets one commit for every write to one of its documents: a save on the page (task-box ticks are saves), a comment write on the page (add, reply, edit, status, delete), and the door's `create`, `update` and comment writes (12). The commit carries the document and, with `versions = "root"`, its versions folder, and nothing else of the work tree, whatever else is changed there. It is made in the request, after the write, under a lock of the root, with no hook of the repo run (`core.hooksPath=/dev/null`, `--no-verify`); a write that changes nothing makes none. Its subject is `<what>: <path>`, `<what>` one of `edit`, `comment`, `create`, `update`.
+
+Its author is whoever made the write: a member by their `name` and `email` (9.9), and by `<member id>@<the host of origin>` when the member block names no e-mail; the hub's person by their name (4.3) and the repo's `user.email`; a door caller by its display name (12) and the repo's `user.email`. Its committer is the repo's `user.name` and `user.email`, or `sheaf <sheaf@localhost>` when the repo names none. Two writes to one document in the same instant can land in one commit under the first one's author.
+
+With `push = true` a thread of the hub then runs `git push origin HEAD`, one push for however many commits came while one ran. A commit that fails writes `commit-failed`, a push that fails `push-failed`, each with the document and git's last line (15); the write stands, the page is told nothing, and the next push carries a commit whose push failed. `commit = true` in a root that is not a git work tree writes `commit-not-git` and commits nothing.
+
+### 8.12 `projects.toml`
+
+A root may hold `projects.toml` at its top, one entry per `<client>/<project>` folder:
+
+```toml
+[projects."klium/blog"]
+members = ["thierry", "sven"]   # who works on it, by the short names the deployment uses
+status = "live"                 # or "closed"
+```
+
+The hub reads it when it lists the root (8.6) for one thing: a folder `<client>/<project>` that holds a document and has no entry is a `project-unlisted` row (15) with `root` and `folder`, and a line on the hub's stderr (the service's journal), once per folder per hub run. A document above that depth (a README at the top) belongs to no project. A file the hub cannot read (TOML, an unknown key, a name that is not `<client>/<project>`, `members` not a list of names, `status` not `live` or `closed`) is a `projects-invalid` row with `root` and `error` and a line on stderr, once per hub run, and the root lists as before. The file grants nothing: what a member sees is still their `roots` (9.9). No index file is made.
+
 ---
 
 ## 9. Security
@@ -834,6 +857,7 @@ proxy_user = "caddy"                   # the account the proxy runs as
 [proxy.members."0f8fad5b-d9cb-469f-a165-70867728950e"]   # the front's id of the member
 name = "Ada"                           # signs that member's comments and replies
 roots = ["/srv/pages/mails"]           # the folders of the roots (8.2) that member sees
+email = "ada@example.com"              # optional: the e-mail of their commits (8.11)
 ```
 
 **Two listeners.** The loopback port of 8.1 stays as it is in loopback mode: the CLI with the key, the MCP door with a token or the key (9.7, 12), a browser on the machine with the cookie (9.3). It never reads the member header. The **proxy socket** is a Unix socket at `socket`. Its folder is the deployment's, made by root: owned by the hub's account and by `proxy_user`'s group, mode `2750`, so that the proxy socket the hub makes in it at start (mode `0660`) belongs to that group and no other account can open it. On every connection the hub reads the uid of the connecting process from the connection itself (`SO_PEERCRED`) and serves only `proxy_user`'s; any other gets `403` and a `proxy-peer` row. The hub removes the proxy socket on a clean exit, and at start replaces a socket file that nothing listens on (an unclean exit left it).
@@ -1363,6 +1387,7 @@ When the agent's command is not on PATH, `init` prints the command to run instea
 - File: `<state>/diagnostics.jsonl`. When it passes 10 MB at a write, it becomes `diagnostics.1.jsonl` (replacing the old one).
 - Row: `{"at", "source": "hub"|"page"|"cli"|"agent", "kind", "doc", "pid", "session", …detail}`, every field clipped to 2,000 characters, a character that is not UTF-8 written as its escape (`\udcff`) so the row is kept, one `write()` per line, and logging never raises. A row that a request on the proxy socket writes also carries `member`, the front's id of the member (9.9), once the connection is the proxy's; a `proxy-peer` row names the connection's `uid` instead.
 - Written by: the hub (every 4xx/5xx with the endpoint, start and exit rows, a `key-rotated` row, `file-set-aside` and `file-set-aside-failed` rows (a state file moved to `<name>.corrupt`, or not, 4.2), failed jobs, failed rebuilds, merged saves, `markup-unwrapped` rows (a save that took browser markup out of a block, 7.2), courier fallbacks, socket messages, request tracebacks, the `proxy-config` and `proxy-peer` rows of 9.9, and a `door-create` or `door-update` row for each `create` and `update` of the door: the document, the token's name (none for the key), the display name, the outcome, for a write the new hash and its size in bytes, and for a refusal a few fixed words of why, never the tool's sentence, which may quote the document; never the text, 9.7), the page (10.10), the CLI (failed comment writes), and agents (`sheaf diag note`).
+- A root that commits (8.11, 8.12) writes `commit-failed`, `push-failed` and `commit-not-git` rows with the document, and `project-unlisted` and `projects-invalid` rows with the root.
 - A `hub-exit` row with reason `signal` also holds the signal and, on Linux, the pid and command line of the process that sent it (8.4, "Who sent a signal"); elsewhere the signal only.
 - `sheaf diag` prints counts by source and kind and the latest 40 rows; `--since DAYS`; `--json` for the rows.
 - It never leaves the machine. A user attaches it to a bug report.

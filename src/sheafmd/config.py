@@ -25,7 +25,8 @@ ROOT_FILE = ".sheaf.toml"
 
 USER_KEYS = {"port": int, "name": str, "browser": bool, "proxy": dict, "jump": dict}   # proxy: hub.proxy reads it (9.9)
 JUMP_KEYS = {"command": list}
-ROOT_KEYS = {"theme": str, "for": str, "links": bool, "link_tlds": list, "credit": bool}
+ROOT_KEYS = {"theme": str, "for": str, "links": bool, "link_tlds": list, "credit": bool,
+             "versions": str, "commit": bool, "push": bool}
 
 _ENDING = re.compile(r"[a-z0-9]+")
 
@@ -166,6 +167,9 @@ class RootConfig:
     links: bool = True             # the link rule (6.6)
     link_tlds: tuple[str, ...] = ()
     credit: bool = False           # the page credit line (6.7)
+    versions_inside: bool = False  # `versions = "root"`: the versions store at `.sheaf/versions/` (7.4)
+    commit: bool = False           # every write on the page is a git commit of who made it (8.11)
+    push: bool = False             # and the hub pushes it (8.11)
 
 
 def load_root_config(root: Path, warn=None) -> RootConfig:
@@ -181,9 +185,13 @@ def load_root_config(root: Path, warn=None) -> RootConfig:
             tlds.append(e)
         else:
             warn(f"  ! link_tlds in {path}: {raw!r} is not a domain ending; ignored")
+    versions = data.get("versions", "state")
+    if versions not in ("state", "root"):
+        warn(f"  ! versions in {path}: {versions!r} is neither \"state\" nor \"root\"; the state folder is used")
     return RootConfig(theme=data.get("theme") or None, for_=data.get("for") or None,
                       links=data.get("links", True), link_tlds=tuple(tlds),
-                      credit=data.get("credit", False))
+                      credit=data.get("credit", False), versions_inside=versions == "root",
+                      commit=data.get("commit", False), push=data.get("push", False))
 
 
 class GitPlace(NamedTuple):

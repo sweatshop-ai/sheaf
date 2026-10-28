@@ -78,7 +78,7 @@ class Hub:
         self.versions = state.Versions()
         self.commits = Commits(self.record)      # the roots that commit (8.11)
         self._told_projects: set = set()         # what check_projects warned of this run (8.12)
-        self._front: dict = {}                   # {file: ((mtime_ns, size), its front matter)}, for 9.11
+        self._front: dict = {}                   # {file: (its stat, its front matter, its assignees)}, for 9.11
         self.the_list = None                     # the list (9.10): a the_list.TheList, set by the server
         self.docs = state.Docs()
         self.seen = state.Seen()
@@ -369,32 +369,56 @@ class Hub:
             return False
         return self.owns(member, root) and self.roots.lookup(root.path / at.rel) == root
 
-    def visible(self, member, address: str) -> bool:
-        """Whether the member may open the document at `address` by its visibility (9.11): a sheaf that is
-        its owner's alone is no other member's. A file that is not there is visible: it answers as a missing
-        document all the same. A file that is there but cannot be read, or not as UTF-8, is no member's: the
-        hub may still hold its last good page."""
+    def _judged(self, address: str):
+        """(front matter, assignees) of the sheaf at `address`, what its visibility is judged on: the front
+        matter read again only when its file moved, the assignees the list has for it now. For a file that is
+        not there, both as the hub last judged it, so a poll that no longer sees the sheaf changes nothing;
+        None when it never did. ({}, None) in a root the hub does not know. Raises OSError or
+        UnicodeDecodeError for a file that is there but cannot be read."""
         at = roots_mod.Address.parse(address)
         root = self.roots.get(at.root)
         if root is None:
-            return True
+            return {}, None
         f = root.path / at.rel
         try:
             st = f.stat()
-            key = (st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
-            hit = self._front.get(f)
-            if hit is None or hit[0] != key:
-                hit = (key, visibility.front_matter(f.read_text(encoding="utf-8")))
-                self._front[f] = hit
         except FileNotFoundError:
-            return True
+            hit = self._front.get(f)
+            return None if hit is None else hit[1:]
+        key = (st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
+        hit = self._front.get(f)
+        fm = hit[1] if hit is not None and hit[0] == key else visibility.front_matter(f.read_text(encoding="utf-8"))
+        assignees = self.assignees(address, fm)
+        self._front[f] = (key, fm, assignees)
+        return fm, assignees
+
+    def visible(self, member, address: str, never_read: bool = True) -> bool:
+        """Whether the member may open the document at `address` by its visibility (9.11): a sheaf that is
+        its owner's alone is no other member's. A file that is not there is judged by the front matter it
+        had when the hub last read it, so its going away is told to whom it was visible; one the hub never
+        read is `never_read` (a page answers it as a missing document all the same, a stream tells nobody).
+        A file that is there but cannot be read, or not as UTF-8, is no member's: the hub may still hold its
+        last good page."""
+        try:
+            judged = self._judged(address)
         except (OSError, UnicodeDecodeError):
             return False
-        return visibility.visible_to(hit[1], member, self.assignees(address))
+        if judged is None:
+            return never_read
+        return visibility.visible_to(judged[0], member, judged[1])
 
-    def assignees(self, address: str):
-        """The record's assignees of the issue of the sheaf at `address`, asked by the address of the file
-        it names, so a link has the owner of the sheaf it points to; None when the list does not know it."""
+    def owners(self, address: str, members) -> list:
+        """Those of `members` who own the sheaf at `address`, by its front matter now, as `visible` judges."""
+        try:
+            fm, assignees = self._judged(address) or ({}, None)
+        except (OSError, UnicodeDecodeError):
+            return []
+        return visibility.owner_of(fm, members, assignees)
+
+    def assignees(self, address: str, fm: dict):
+        """The record's assignees of the issue of the sheaf at `address` whose front matter is `fm`, asked by
+        the address of the file it names, so a link has the owner of the sheaf it points to; None when the
+        list does not know it, or when `fm` names another issue than the one it polled."""
         if self.the_list is None:
             return None
         at = roots_mod.Address.parse(address)
@@ -405,7 +429,7 @@ class Hub:
                 address = f"{root.name}/{rel.as_posix()}"
             except ValueError:
                 pass
-        return self.the_list.assignees(address)
+        return self.the_list.assignees(address, visibility.text(fm, "issue"))
 
     def jobs(self) -> dict:
         telling = []

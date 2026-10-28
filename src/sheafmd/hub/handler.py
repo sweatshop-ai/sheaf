@@ -386,7 +386,7 @@ class Handler:
                 if not isinstance(doc, str):
                     return None
                 try:
-                    theirs = self.hub.member_owns(member, doc) and self.hub.visible(member, doc)
+                    theirs = self.hub.member_owns(member, doc) and self.hub.visible(member, doc, never_read=False)
                 except Exception:
                     self.hub.record_exception("status-failed", doc)
                     return None
@@ -699,8 +699,8 @@ class Handler:
             if m is not None:
                 # The gate (_owned) read the file before the lock: a write that closed the sheaf since is
                 # seen here, on the text the save would write over.
-                assignees = self.hub.assignees(e.address)
                 fm = visibility.front_matter(text)
+                assignees = self.hub.assignees(e.address, fm)
                 if not visibility.visible_to(fm, m, assignees):
                     raise Refuse(404, "no such document")
             words = visibility.newly_ticked(toggled)
@@ -801,7 +801,8 @@ class Handler:
         if member is not None:
             def still_visible(text):
                 # The gate (_entry) read the file before the lock: a write that closed the sheaf since is seen here.
-                if not visibility.visible_to(visibility.front_matter(text), member, self.hub.assignees(e.address)):
+                fm = visibility.front_matter(text)
+                if not visibility.visible_to(fm, member, self.hub.assignees(e.address, fm)):
                     raise Refuse(404, "no such document")
             signed["guard"] = still_visible
         try:

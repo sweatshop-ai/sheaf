@@ -669,6 +669,43 @@ def test_a_sheaf_whose_issue_changed_since_the_poll_is_not_its_old_assignees(box
     assert box.get(address, member=DORA).status == 200
 
 
+@pytest.mark.parametrize("issue", ["issue:\n", "issue: acme/record#7\n"], ids=["removed", "changed"])
+def test_a_tick_after_the_issue_changed_does_not_give_the_old_assignees_back(box, sheaves, issue):
+    joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
+    joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n", "sources: [library:4711]\n"),
+                    encoding="utf-8")
+    box.hub.the_list.poll()
+    root = box.hub.roots.lookup(joey).name
+    address = f"/{root}/globex/black-friday/2026-10-28-reply-to-joey.md"
+    assert box.get(address, member=NELL).status == 200          # the assignee of #5 owns it
+    joey.write_text(joey.read_text(encoding="utf-8").replace("issue: acme/record#5\n", issue + "owner: dora\n"),
+                    encoding="utf-8")
+    r = box.post("/_/tick", {"doc": address[1:], "action": 0, "word": "Approve"}, member=DORA)
+    assert r.status == 200, r.text
+    assert box.get(address, member=NELL).status == 404          # the tick, before the next poll
+    assert box.get(address, member=DORA).status == 200
+    assert "globex/black-friday" not in str(read(box.get("/list", member=NELL)))
+
+
+def titles(page):
+    return [t for groups in page.values() for rows in groups.values() for t, _ in rows]
+
+
+@pytest.mark.parametrize("issue", ["issue:\n", "issue: acme/record#7\n"], ids=["removed", "changed"])
+def test_a_tick_after_the_issue_changed_takes_the_row_off_the_list_until_the_next_poll(box, sheaves, github, issue):
+    github.issues[5].update(status="In progress at TT")         # drawn, not left out as answered
+    box.hub.the_list.poll()
+    joey = sheaves / JOEY[5:]
+    joey.write_text(joey.read_text(encoding="utf-8").replace("issue: acme/record#5\n", issue), encoding="utf-8")
+    r = box.post("/_/tick", {"doc": JOEY, "action": 0, "word": "Approve"}, member=NELL)
+    assert r.status == 200, r.text
+    for m in (NELL, DORA):
+        assert "Reply to Joey about column L James" not in titles(read(box.get("/list?show=all", member=m)))
+    box.hub.the_list.poll()
+    listed = "Reply to Joey about column L James" in titles(read(box.get("/list?show=all", member=DORA)))
+    assert listed == (issue != "issue:\n")                      # back under #7; with no issue, on no list (9.10)
+
+
 def test_an_issue_without_assignees_has_the_owner_its_sheaf_names(box, sheaves, github):
     github.issues[6]["assignees"] = []
     prep = sheaves / "initech/website/2026-10-26-prep-thursday.md"

@@ -287,3 +287,12 @@ def new_context(browser, error=None, **options):
         return context
     except error as e:
         pytest.fail(f"Chromium went away under a new context (connected={browser.is_connected()}):\n{e}")
+
+
+def close_context(context):
+    """Close a context of new_context. A route of its pages still in `route.fetch` would otherwise fail
+    there, and Playwright raises that failure in the next call into the browser: another test's new_context."""
+    for page in context.pages:
+        page.unroute_all(behavior="ignoreErrors")
+    context.unroute_all(behavior="ignoreErrors")
+    context.close()

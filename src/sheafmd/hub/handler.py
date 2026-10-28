@@ -699,8 +699,7 @@ class Handler:
             if m is not None:
                 # The gate (_owned) read the file before the lock: a write that closed the sheaf since is
                 # seen here, on the text the save would write over.
-                the = self.hub.the_list
-                assignees = the.assignees(e.address) if the is not None else None
+                assignees = self.hub.assignees(e.address)
                 fm = visibility.front_matter(text)
                 if not visibility.visible_to(fm, m, assignees):
                     raise Refuse(404, "no such document")

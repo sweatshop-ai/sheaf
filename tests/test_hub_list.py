@@ -638,3 +638,16 @@ def test_a_link_to_a_sheaf_has_the_owner_of_the_sheaf_it_names(box, sheaves):
     assert box.get(f"/{root}/globex/black-friday/2026-10-28-reply-to-joey.md", member=DORA).status == 404
     assert box.get(f"/{root}/globex/black-friday/joey.md", member=DORA).status == 404
     assert box.get(f"/{root}/globex/black-friday/joey.md", member=NELL).status == 200
+
+
+def test_a_link_the_poll_does_not_read_has_the_owner_of_the_sheaf_it_names(box, sheaves):
+    joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
+    joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n",
+                                                             "sources: [library:4711]\nowner: dora\n"),
+                    encoding="utf-8")
+    (sheaves / ".kept").mkdir()
+    (sheaves / ".kept/joey.md").symlink_to(joey)
+    box.hub.the_list.poll()
+    root = box.hub.roots.lookup(joey).name
+    assert box.get(f"/{root}/.kept/joey.md", member=DORA).status == 404
+    assert box.get(f"/{root}/.kept/joey.md", member=NELL).status == 200

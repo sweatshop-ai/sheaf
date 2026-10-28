@@ -1,11 +1,13 @@
 """A browser that will not start fails a CI run with what is known about its death; on a person's machine it skips."""
 import signal
+import socket
 import stat
 
 import pytest
 
 import pagehelp
-from pagehelp import died_report, how_it_ended, launched_binary, launch_chromium, new_context, unavailable
+from pagehelp import (close_context, died_report, how_it_ended, launched_binary, launch_chromium, new_context,
+                      unavailable, until)
 
 pytestmark = pytest.mark.page
 
@@ -132,3 +134,25 @@ def test_the_headless_shell_of_linux_arm_has_another_name(tmp_path):
         f.parent.mkdir(parents=True)
         f.touch()
     assert launched_binary(str(chrome)) == str(shell)
+
+
+def test_a_route_still_fetching_when_its_context_closes_does_not_fail_the_next_context(chromium):
+    # CI, PR 13: a /_/doc route of one test was still in route.fetch at its teardown, and the next test's
+    # new_context failed with "Route.fetch: Target page, context or browser has been closed".
+    with socket.socket() as mute:
+        mute.bind(("127.0.0.1", 0))
+        mute.listen()
+        url = f"http://127.0.0.1:{mute.getsockname()[1]}/"
+        c = new_context(chromium)
+        p = c.new_page()
+        fetching = []
+
+        def held(route):
+            fetching.append(route.request.url)
+            route.fetch()
+
+        p.route(url + "slow", held)
+        p.evaluate("u => { fetch(u).catch(() => {}); }", url + "slow")
+        until(lambda: fetching, what="the route to be fetching")
+        close_context(c)
+    close_context(new_context(chromium))

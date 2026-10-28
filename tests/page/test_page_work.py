@@ -332,11 +332,15 @@ def test_the_sent_line_keeps_the_name_it_was_sent_to_after_a_fork(tab):
     tab.page.fill("#rd-popover textarea", "What does James think?")
     tab.page.click("#rd-popover .rd-form button.rd-tell")
     until(lambda: SENT in tab.page.inner_text("#rd-popover"), what="the sent line in the thread")
-    tab.page.unroute(re.compile(r"/_/doc\\?"))
-    tab.page.route(re.compile(r"/_/doc\\?"), lambda route: route.fulfill(
-        response=route.fetch(), json={**route.fetch().json(), "target": None, "capabilities": [],
-                                      "lines": proxy.member_lines(), "work": work(sessions=[LAPTOP, BOX], live="laptop")}))
-    update_file(tab.site.file, lambda t: t + "\\nOne more paragraph.\\n")
+    tab.page.unroute(re.compile(r"/_/doc\?"))
+
+    def forked(route):
+        r = route.fetch()
+        route.fulfill(response=r, json={**r.json(), "target": None, "capabilities": [], "lines": proxy.member_lines(),
+                                         "work": work(sessions=[LAPTOP, BOX], live="laptop")})
+
+    tab.page.route(re.compile(r"/_/doc\?"), forked)
+    update_file(tab.site.file, lambda t: t + "\nOne more paragraph.\n")
     until(lambda: "One more paragraph." in tab.page.inner_text("body"), what="the reload")
     until(lambda: tab.page.locator("#rd-popover").is_visible() and SENT in tab.page.inner_text("#rd-popover"),
           what="the sent line, still naming James")

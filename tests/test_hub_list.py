@@ -652,3 +652,88 @@ def test_a_link_the_poll_does_not_read_has_the_owner_of_the_sheaf_it_names(box, 
     root = box.hub.roots.lookup(joey).name
     assert box.get(f"/{root}/.kept/joey.md", member=DORA).status == 404
     assert box.get(f"/{root}/.kept/joey.md", member=NELL).status == 200
+
+
+@pytest.mark.parametrize("issue", ["issue:\n", "issue: acme/record#7\n"], ids=["removed", "changed"])
+def test_a_sheaf_whose_issue_changed_since_the_poll_is_not_its_old_assignees(box, sheaves, issue):
+    joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
+    joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n", "sources: [library:4711]\n"),
+                    encoding="utf-8")
+    box.hub.the_list.poll()
+    root = box.hub.roots.lookup(joey).name
+    address = f"/{root}/globex/black-friday/2026-10-28-reply-to-joey.md"
+    assert box.get(address, member=NELL).status == 200          # the assignee of #5 owns it
+    joey.write_text(joey.read_text(encoding="utf-8").replace("issue: acme/record#5\n", issue + "owner: dora\n"),
+                    encoding="utf-8")
+    assert box.get(address, member=NELL).status == 404          # before the next poll
+    assert box.get(address, member=DORA).status == 200
+
+
+def test_an_issue_without_assignees_has_the_owner_its_sheaf_names(box, sheaves, github):
+    github.issues[6]["assignees"] = []
+    prep = sheaves / "initech/website/2026-10-26-prep-thursday.md"
+    prep.write_text(prep.read_text(encoding="utf-8").replace("kind: prep\n", "kind: prep\nowner: nell\n"),
+                    encoding="utf-8")
+    box.hub.the_list.poll()
+    assert read(box.get("/list?show=mine", member=NELL))["In progress 1"] == {
+        "initech/website": [("Prep for the call of Thursday James", "prep · you · #6 · 40 min")]}
+    assert read(box.get("/list", member=DORA))["In progress 1"] == {
+        "initech/website": [("Prep for the call of Thursday James", "prep · @nell · #6 · 40 min")]}
+
+
+def test_the_lists_owner_is_the_one_the_file_names_now_not_at_the_poll(box, sheaves, github):
+    github.issues[6]["assignees"] = []
+    prep = sheaves / "initech/website/2026-10-26-prep-thursday.md"
+    prep.write_text(prep.read_text(encoding="utf-8").replace("kind: prep\n", "kind: prep\nowner: nell\n"),
+                    encoding="utf-8")
+    box.hub.the_list.poll()
+    prep.write_text(prep.read_text(encoding="utf-8").replace("owner: nell\n", "owner: dora\n"), encoding="utf-8")
+    assert read(box.get("/list?show=mine", member=NELL))["In progress 0"] == {}
+    assert read(box.get("/list?show=mine", member=DORA))["In progress 1"] == {
+        "initech/website": [("Prep for the call of Thursday James", "prep · you · #6 · 40 min")]}
+
+
+def test_the_owner_shown_is_the_issues_first_assignee_even_when_no_member(box, github):
+    github.issues[6]["assignees"] = ["zed-x", "dora-k"]
+    box.hub.the_list.poll()
+    assert read(box.get("/list", member=NELL))["In progress 1"] == {
+        "initech/website": [("Prep for the call of Thursday James", "prep · zed-x · #6 · 40 min")]}
+
+
+def test_an_owner_only_sheaf_deleted_after_a_poll_is_told_to_its_assignee_alone(box, sheaves, monkeypatch):
+    from sheafmd.hub.index import SWEEP_SECONDS
+    joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
+    joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n",
+                                                             "sources: [library:4711]\nowner: dora\n"),
+                    encoding="utf-8")
+    box.hub.the_list.poll()
+    now = [NOW]
+    box.hub.clock = lambda: now[0]
+    monkeypatch.setattr(box.hub.index, "_start_sweep", lambda run: run())
+    nell, dora = (box.get("/_/live", member=m).stream for m in (NELL, DORA))
+    for m in (NELL, DORA):
+        box.get("/_/index.json", member=m)
+    now[0] += SWEEP_SECONDS
+    box.hub.tick()
+    nell.drain(), dora.drain()
+    joey.unlink()
+    box.hub.the_list.poll()                             # the poll sees no sheaf there before the sweep does
+    now[0] += SWEEP_SECONDS
+    box.hub.tick()
+    doc = f"{box.hub.roots.lookup(sheaves / 'projects.toml').name}/globex/black-friday/2026-10-28-reply-to-joey.md"
+    assert [d["doc"] for name, d in nell.drain() if name == "status"] == [doc]
+    assert [d for name, d in dora.drain() if name == "status"] == []
+
+
+def test_an_issue_written_in_another_case_is_still_the_issue_the_list_polled(box, sheaves):
+    joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
+    joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n",
+                                                             "sources: [library:4711]\nowner: dora\n"),
+                    encoding="utf-8")
+    box.hub.the_list.poll()
+    joey.write_text(joey.read_text(encoding="utf-8").replace("issue: acme/record#5", "issue: Acme/Record#5"),
+                    encoding="utf-8")
+    root = box.hub.roots.lookup(joey).name
+    address = f"/{root}/globex/black-friday/2026-10-28-reply-to-joey.md"
+    assert box.get(address, member=NELL).status == 200
+    assert box.get(address, member=DORA).status == 404

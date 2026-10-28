@@ -31,7 +31,7 @@ from ..edit import EditError
 from ..mcp import Caller, Door
 from ..render import RenderError
 from ..source import StaleError
-from . import auth, peer, proxy, the_list, visibility
+from . import auth, peer, proxy, the_list, visibility, work
 from .asktell import NO_AGENT, JobRefused
 from .index import Status
 from .live import UNKNOWN, NotAuthor
@@ -146,6 +146,8 @@ COOKIE = Who(frozenset({"cookie"}), _BROWSER)
 EITHER = Who(frozenset({"cookie", "key"}), _BROWSER)
 KEY = Who(frozenset({"key"}), "this needs the hub key")
 DOOR = Who(frozenset({"key", "token"}), "this needs the hub key or an MCP token", raw_body=True)
+# A member's alone, on the proxy socket (9.12): the loopback port answers 404, as for a route it has not.
+MEMBER = Who(frozenset({"member"}), "no such route")
 
 
 def _json(status: int, obj: dict, headers: dict | None = None) -> Response:
@@ -219,6 +221,8 @@ class Handler:
             ("POST", "/_/save", "save", COOKIE, self._save),
             ("POST", "/_/pin", "pin", COOKIE, self._pin),
             ("POST", "/_/tick", "tick", COOKIE, self._tick),
+            ("GET", "/_/session", "session", MEMBER, self._session),
+            ("POST", "/_/sessions", "sessions", MEMBER, self._sessions),
             ("POST", "/_/comment", "comment", COOKIE, self._comment),
             ("POST", "/_/ask", "ask", COOKIE, self._ask),
             ("POST", "/_/tell", "tell", COOKIE, self._tell),
@@ -351,13 +355,16 @@ class Handler:
         if req.path.startswith("/_/"):
             if methods is None:
                 raise Refuse(404, "no such route")
+            # A member route is no route of this port, for any method: not a 405 that names it (9.12).
+            if any(w is MEMBER for _, w, _ in methods.values()):
+                raise Refuse(404, "no such route")
             if found is None:
                 raise Refuse(405, "method not allowed", {"Allow": ", ".join(sorted(methods))})
-            name, who, fn = found
+            _, who, fn = found
         else:
             if req.method != "GET":
                 raise Refuse(405, "method not allowed", {"Allow": "GET"})
-            name, who, fn = "page", COOKIE, self._page
+            who, fn = COOKIE, self._page
         if req.kind not in who:
             raise Refuse(403, who.refusal)
         if req.method == "POST" and req.kind == "cookie" \
@@ -399,7 +406,7 @@ class Handler:
         """A route a member may use: one 8.5 marks `cookie` or `cookie or key`, but not Ask and
         Tell, which run the hub account's own agent session."""
         name, who, _ = found
-        return who in (COOKIE, EITHER) and name not in ("ask", "tell", "cancel", "jump")
+        return who in (COOKIE, EITHER, MEMBER) and name not in ("ask", "tell", "cancel", "jump")
 
     def _route_proxy(self, req: Req, raw: bytes) -> Response:
         cfg = self.hub.proxy
@@ -611,8 +618,11 @@ class Handler:
         snap["rids"] = e.live.taken_rids()
         if req.member is not None:
             # Their own seen state, and nothing of the hub account's agent session (9.9).
+            # A sheaf's Work on this and its Ask and Tell for James's window are refreshed as the meta's (9.12).
+            work, can = self.hub.member_work(e, req.member)
+            extra = {} if work is None else {"work": work}
             return _ok(**proxy.for_member(snap), seen=self.hub.member_seen.get(req.member.id, e.address),
-                       asking=[], question="", target=None, capabilities=[], lines=proxy.member_lines())
+                       asking=[], question="", target=None, capabilities=can, lines=proxy.member_lines(), **extra)
         v = self.hub.asktell.view(e.address)
         return _ok(**snap, seen=self.hub.seen.get(e.address),
                    asking=self.hub.runner.active("ask", e.address),
@@ -703,6 +713,10 @@ class Handler:
                 assignees = self.hub.assignees(e.address, fm)
                 if not visibility.visible_to(fm, m, assignees):
                     raise Refuse(404, "no such document")
+                # The page cannot edit a front matter (5): paragraphs of `---` would write one, and its
+                # `sessions` would serve any transcript (9.12), its `visibility` open the sheaf.
+                if visibility.front_matter(new) != fm:
+                    raise EditError("A save cannot change the front matter: change it in the file.")
             words = visibility.newly_ticked(toggled)
             if "Share" in words:
                 if m is not None and not visibility.owner_of(fm, [m], assignees):
@@ -710,6 +724,9 @@ class Handler:
                 if visibility.effective(visibility.front_matter(new)) == "owner":
                     by = (m.short or m.name) if m is not None else self.hub.person
                     new = visibility.share(new, by, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+                    # Share rewrites the front matter: a line it takes out must not join a skipped one to `sessions`.
+                    if visibility.front_matter(new).get("sessions", "") != visibility.front_matter(text).get("sessions", ""):
+                        raise EditError("A save cannot change the front matter: change it in the file.")
             ticked.clear()
             ticked.update(words)
             return new
@@ -759,6 +776,122 @@ class Handler:
         self.hub.record("stop-james", e.address, project=project, assistant=assistant,
                         by=(m.short or m.name) if m is not None else self.hub.person, drop=drop)
 
+    # ── Work on this (9.12) ──────────────────────────────────────────────────
+    def _sheaf(self, req: Req, doc):
+        """The address `doc` names, its file's front matter and its work.State, once it is a sheaf the member may
+        open (9.11) of the list's root, at `<client>/<project>/<file>.md`. Else the 404 of a document that is not
+        there."""
+        address = self._owned(req, doc)
+        if not work.is_sheaf(self.hub, address):
+            raise Refuse(404, "no such document")
+        try:
+            text = self.hub.roots.document(address).read_text(encoding="utf-8")
+        except (NotFound, OSError, UnicodeDecodeError):
+            raise Refuse(404, "no such document") from None
+        return address, visibility.front_matter(text), work.state(self.hub, address, text)
+
+    def _session(self, req: Req) -> Response:
+        """The transcript of one of the sheaf's box-hosted sessions, the newest without `id`, from the copy of
+        James's transcripts (9.12). It names only a file the front matter lists, of the box, in `sessions_dir`."""
+        address, fm, st = self._sheaf(req, req.query.get("doc"))
+        sid = req.query.get("id")
+        _shape(sid is None or work.UUID_RE.fullmatch(sid), "id must be a session id (a lowercase UUID)")
+        box = st.box
+        if sid is None:
+            sid = box[0] if box else None
+        if sid not in box or st.cfg.sessions_dir is None:
+            raise Refuse(404, "this sheaf has no such session on the box")
+        body = work.open_transcript(st.cfg.sessions_dir, sid)
+        if body is None:
+            raise Refuse(404, "this sheaf has no such session on the box")
+        self.hub.record("transcript-downloaded", address, transcript=sid, by=work.member_word(req.member),
+                        issue=visibility.text(fm, "issue"))
+        return Response(200, {"Content-Type": "application/x-ndjson", "Content-Disposition": _disposition(f"{sid}.jsonl"),
+                              "Cache-Control": "no-store", "X-Sheaf-Session": sid}, body)
+
+    def _box_live(self, e) -> bool:
+        """Whether the sheaf's live session (the first of `sessions`) runs on the box, and Ask and Tell can be
+        dropped for it: a sheaf of the list's root at project depth, `box` and `tell_dir` set (9.12)."""
+        state = work.state(self.hub, e.address, e.live.current()[1])
+        return state is not None and bool(state.can)
+
+    def _drop_for_james(self, req: Req, e, kind: str, body: str) -> str:
+        """The file Ask or Tell drops in `[list]`'s `tell_dir` for the box's supervisor to type into James's
+        window for the project, and its `tell-dropped` row. The hub runs no agent of its own for it."""
+        project = "/".join(Address.parse(e.address).rel.split("/")[:2])
+        by = work.member_word(req.member)
+        drop = work.drop(self.hub.the_list.cfg.tell_dir, project,
+                         {"project": project, "member": by, "sheaf": e.address, "text": body[:work.TEXT_MAX],
+                          "kind": kind},
+                         "no tell_dir in [list]")
+        self.hub.record("tell-dropped", e.address, what=kind, project=project, by=by, drop=drop)
+        if drop == "written":
+            self._record_james(req, e, project)
+        return drop
+
+    def _record_james(self, req: Req, e, project: str):
+        """James's newest session of the project, as the hub finds it in the copy of his transcripts, becomes
+        the sheaf's live session, the first of `sessions`. The hub is its only writer (9.12): never a door
+        write or a save, never a name a request carries. Nothing when it is the live one already."""
+        cfg = self.hub.the_list.cfg
+        sid = work.james_newest(cfg, project)
+        if sid is None or not self._james_may_take(e.live.current()[1], sid):
+            return
+        line = work.item(sid, cfg.box, "james", time.strftime(work.ISO, time.gmtime()))
+        moved = []
+
+        def change(text):
+            # Under the lock again: a fork reported while the hub looked keeps the session it made live.
+            if not self._james_may_take(text, sid):
+                return text
+            moved.append(sid)
+            return work.with_session(text, line, sid)
+        try:
+            e.live.rewrite(change)
+        except work.NotRewritten as ex:
+            self.hub.record("session-not-recorded", e.address, transcript=sid, reason=str(ex))
+            return
+        if moved:
+            self.hub.index.touch(e.address)
+            self.hub.committed(e.address, req.member, "session")
+            self.hub.record("session-recorded", e.address, transcript=sid, by=work.member_word(req.member))
+
+    def _james_may_take(self, text: str, sid: str) -> bool:
+        """Whether James's session `sid` becomes the live one of the sheaf whose text is `text`: the live one is
+        James's on the box, another than `sid`, or there is none yet. Never over a member's fork on a laptop."""
+        items = work.sessions(visibility.front_matter(text))
+        return not items or (items[0]["host"] == self.hub.the_list.cfg.box and items[0]["id"] != sid)
+
+    def _sessions(self, req: Req) -> Response:
+        """A member forked one of the sheaf's sessions on their machine (9.12): the fork becomes the sheaf's live
+        session, the first item of `sessions`, under the signed-in member's name whatever the body says."""
+        b = req.body
+        address, fm, _ = self._sheaf(req, b.get("doc"))
+        sid, machine = b.get("id"), b.get("machine")
+        _shape(isinstance(sid, str) and work.UUID_RE.fullmatch(sid), "id must be a session id (a lowercase UUID)")
+        _shape(isinstance(machine, str) and work.MACHINE_RE.fullmatch(machine),
+               "machine must be a host name: 1 to 63 letters, digits, dots, dashes or underscores")
+        # A fork runs on the member's machine; one named after the box would make its id a box transcript.
+        _shape(machine.lower() != (self.hub.the_list.cfg.box or "").lower(), "machine cannot be the box")
+        e = self._entry(req, address)
+        by = work.member_word(req.member)
+        line = work.item(sid, machine, by, time.strftime(work.ISO, time.gmtime()))
+        def change(text):
+            # The gate (_sheaf) read the file before the lock: a write that closed the sheaf since is seen here.
+            fm = visibility.front_matter(text)
+            if not visibility.visible_to(fm, req.member, self.hub.assignees(e.address, fm)):
+                raise Refuse(404, "no such document")
+            return work.with_session(text, line, sid)
+        try:
+            h = e.live.rewrite(change)
+        except work.NotRewritten as ex:
+            raise Refuse(409, str(ex)) from None
+        self.hub.index.touch(e.address)
+        self.hub.committed(e.address, req.member, "fork")
+        self.hub.record("session-forked", address, transcript=sid, by=by, machine=machine,
+                        issue=visibility.text(fm, "issue"))
+        return _ok(hash=h)
+
     def _pin(self, req: Req) -> Response:
         """The page keeps the version it holds past a change of the file, while a form holds the reload
         that change needs: the hub keeps it too, beside the newest (7.4)."""
@@ -786,10 +919,15 @@ class Handler:
             for k in ("block", "start", "end"):
                 _shape(type(b.get(k)) is int, f"{k} must be a whole number")
         member = req.member
-        # Ask and Tell run the hub account's own session, which a member is not (9.9).
-        _shape(member is None or not (b.get("ask") or b.get("tell")), proxy.PROXY_LINE)
         starts = op in ("add", "reply")
-        ask, tell = starts and bool(b.get("ask")), starts and bool(b.get("tell"))
+        # Ask and Tell run the hub account's own session, which a member is not (9.9); on a sheaf whose live
+        # session is James's on the box they go to his window instead, by a file the hub drops (9.12).
+        to_box = None
+        if member is not None and (b.get("ask") or b.get("tell")):
+            _shape(starts and self._box_live(e), proxy.PROXY_LINE)
+            _shape(not (b.get("ask") and b.get("tell")), "a comment is sent with Ask or with Tell, not both")
+            to_box = "ask" if b.get("ask") else "tell"
+        ask, tell = starts and bool(b.get("ask")) and not to_box, starts and bool(b.get("tell")) and not to_box
         # A Tell that cannot go out still writes the comment, and then starts no wait. A reply
         # sent with Tell to a thread that is being told is such a Tell: the wait the first one
         # began stays as it is (SPEC 11.3).
@@ -800,10 +938,13 @@ class Handler:
         signed = {"by": member.name, "author": member.name} if member else {}
         if member is not None:
             def still_visible(text):
-                # The gate (_entry) read the file before the lock: a write that closed the sheaf since is seen here.
+                # The gate (_entry) read the file before the lock: a write that closed the sheaf since is seen here,
+                # and a fork that moved its live session off the box since keeps Ask and Tell from James's window.
                 fm = visibility.front_matter(text)
                 if not visibility.visible_to(fm, member, self.hub.assignees(e.address, fm)):
                     raise Refuse(404, "no such document")
+                if to_box and not (work.state(self.hub, e.address, text) or work.State([], "", None)).can:
+                    raise Refuse(400, proxy.PROXY_LINE)
             signed["guard"] = still_visible
         try:
             snap = e.live.comment(op, b, h, await_action=can_tell, rid=rid, **signed)
@@ -825,6 +966,11 @@ class Handler:
             # Taken before under this request id: what the first request started (an Ask, a Tell's wait)
             # is running or done, and the page hears of it by its events.
             ask = tell = False
+            to_box = None
+        if to_box:
+            drop = self._drop_for_james(req, e, to_box, b["body"])
+            if drop != "written":
+                snap[f"{to_box}Error"] = "The hub could not send this to James's window; the comment is written."
         # The job looks the document up again when it starts: it names its thread in the text the
         # comment was just written in, so a forget in between, and another folder that takes the name,
         # cannot hand it that folder's thread of the same id (SPEC 7.3). A forget that leaves no folder

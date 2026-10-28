@@ -6,7 +6,7 @@ sheafmd.hub.visibility — who may open a sheaf (SPEC 9.11): its owner alone, or
     owner_of(fm, members, assignees) the members who own the sheaf
     visible_to(fm, member, assignees=None)
     share(text, by, date)           the text the owner's Share writes
-    newly_ticked(old, new)          the Share and Stop James boxes a save ticks
+    newly_ticked(toggled)           the Share and Stop James boxes a save ticks
     for_door(text, old)             the text a door write puts on disk
 
 A sheaf is `owner` when its `visibility` says so, or when one of its `sources` is private and the owner has
@@ -18,7 +18,6 @@ that the hub writes when the owner ticks Share does, and a door write cannot wri
 The owner is the assignee of the sheaf's issue in the record, when the list knows it and it has one, told by
 the member whose `github` it is; else the member whose `short` is the front matter's `owner`.
 """
-import difflib
 import re
 
 PROJECT_WIDE = ("issue", "pr", "repo", "web")
@@ -192,17 +191,19 @@ def share(text_: str, by: str, date: str) -> str:
 _BOX_RE = re.compile(r"(\s*[-*+] \[)([ xX])(\] (Share|Stop James)(?:\s+@\S+)?\s*)")
 
 
-def newly_ticked(old: str, new: str) -> set:
-    """The words of the two actions the hub acts on, Share and Stop James, whose box a save ticked: a line
-    of `old` that reads `- [ ] <word>` and is the same line in `new` with only its box ticked. A ticked line
-    that was anything else before (a ballot box, an `<input>`, an escaped `\\- [x]` that pandoc rewrites on
-    a save) ticks nothing, so text an assistant writes cannot Share a sheaf through the owner's save."""
-    a, b = _lines(old), _lines(new)
+def newly_ticked(toggled) -> set:
+    """The words of the two actions the hub acts on, Share and Stop James, whose box a save ticked.
+    `toggled` holds the (old, new) content of each block whose edit only flipped task marks (edit.py
+    `apply_edits`): a line that reads `- [ ] <word>` in the old and is that line with only its box ticked
+    in the new. Nothing else counts, not a block pandoc rewrote, so a line that takes the place of another
+    (a ballot box, an `<input>`, an escaped `\\- [x]`, a box beside one the owner deleted) ticks nothing,
+    and text an assistant writes cannot Share a sheaf through the owner's save."""
     words = set()
-    for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
-        if op != "replace":
+    for old, new in toggled:
+        a, b = _lines(old), _lines(new)
+        if len(a) != len(b):
             continue
-        for was, now in zip(a[i1:i2], b[j1:j2]):
+        for was, now in zip(a, b):
             m, n = _BOX_RE.fullmatch(was), _BOX_RE.fullmatch(now)
             if m and n and m.group(2) == " " and n.group(2) in "xX" \
                     and (m.group(1), m.group(3)) == (n.group(1), n.group(3)):

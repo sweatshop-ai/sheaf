@@ -491,17 +491,17 @@ def test_share_rewrites_the_front_matter_lines_only_never_the_bodys_line_endings
 
 
 @pytest.mark.parametrize("old,new,words", [
-    ("- &#9746; Share @a\n- &#9744; Mark this read\n", "- [x] Share @a\n- [x] Mark this read\n", set()),  # a decoy
-    ("- <input type=\"checkbox\" checked> Share @a\n- teh other\n", "- [x] Share @a\n- the other\n", set()),  # a typo
-    ("\\- [x] Share @a\\\nteh rest\n", "- [x] Share @a\n  the rest\n", set()),            # a paragraph edited
+    ("- &#9746; Share @a\n", "- [x] Share @a\n", set()),                             # a ballot, rewritten
     ("- [ ] Share\n", "- [x] Share @a\n", set()),                                      # the line changed too
-    ("- [ ] Share\n- &#9746; Share\n", "- [x] Share\n- [x] Share\n", {"Share"}),       # the owner's own box
+    ("- [ ] Share\n- &#9746; Share\n", "- [x] Share\n", set()),                       # a line took its place
+    ("- [ ] Share\n- [ ] Done\n", "- [ ] Share\n- [x] Done\n", set()),               # another box
     ("- [ ] Share\n", "- [x] Share\n", {"Share"}),
+    ("* [ ] Share   \n", "* [x] Share   \n", {"Share"}),
     ("+ [ ] Stop James @x\n", "+ [X] Stop James @x\n", {"Stop James"})])
-def test_a_tick_counts_only_when_its_own_line_goes_from_open_to_ticked(old, new, words):
+def test_a_tick_counts_only_when_a_toggled_block_ticks_that_line_alone(old, new, words):
     from sheafmd.hub import visibility
-    head = "---\nowner: thierry\n---\n# A\n\n"
-    assert visibility.newly_ticked(head + old, head + new) == words
+    assert visibility.newly_ticked([(old, new)]) == words
+    assert visibility.newly_ticked([]) == set()
 
 
 def test_the_owners_tick_of_a_decoy_box_beside_a_ballot_share_does_not_share_the_sheaf(team, work):
@@ -519,3 +519,79 @@ def test_the_owners_tick_of_a_decoy_box_beside_a_ballot_share_does_not_share_the
     assert got.status == 200, got.body
     assert "[x] Mark this digest as read" in (work / DOC).read_text(encoding="utf-8")   # the save went through
     assert team.get(f"/work/{DOC}", member=HANS).status == 404
+
+
+def _block_html(text, word):
+    """The block of `text` that holds `word`, as the page draws it (pandoc HTML), and its index."""
+    from sheafmd import _pandoc
+    from sheafmd.blocks import split_md_blocks
+    blocks = split_md_blocks(text)
+    i = next(k for k, b in enumerate(blocks) if word in b.content and b.kind != "frontmatter")
+    return i, _pandoc.run(["-f", "gfm", "-t", "html5", "--no-highlight"], blocks[i].content).stdout
+
+
+@pytest.mark.parametrize("ballot", ["&#9746;", "☒"])
+def test_the_owner_deleting_the_open_share_box_above_a_ticked_ballot_does_not_share_the_sheaf(team, work, ballot):
+    """Review 3, P1-1: the save writes the ballot as `- [x] Share` where `- [ ] Share` was; only a box the
+    save toggled counts, never a line that took the place of another."""
+    import re
+    put(team, work, DOC, PRIVATE.replace("- [ ] Share", f"- [ ] Share\n- {ballot} Share"))
+    text = (work / DOC).read_text(encoding="utf-8")
+    i, html = _block_html(text, "Share")
+    html = re.sub(r"<ul[^>]*>.*?</ul>\s*", "", html, count=1, flags=re.S)       # the open box's list, gone
+    got = team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text), "edits": [{"i": i, "html": html}]},
+                    member=THIERRY)
+    assert got.status == 200, got.body
+    after = (work / DOC).read_text(encoding="utf-8")
+    assert "- [x] Share" in after and "shared" not in front_matter(after)
+    assert team.get(f"/work/{DOC}", member=HANS).status == 404
+
+
+@pytest.mark.parametrize("body", ["- one\n* [ ] Share\n- three", "+ [ ] Share", "- [ ] Share   ", "- [ ] Share\t",
+                                  "- [ ] Share @thierry", "- top\n  - [ ] Share\n  - other",
+                                  "- one\n\n- [ ] Share\n\n- three", "- [ ] Share\n- item <!-- x -->"])
+def test_the_owners_tick_in_the_page_shares_whatever_the_lists_shape(team, work, body):
+    put(team, work, DOC, PRIVATE.replace("- [ ] Share", body))
+    text = (work / DOC).read_text(encoding="utf-8")
+    i, html = _block_html(text, "Share")
+    html = html.replace('<input type="checkbox"', '<input type="checkbox" checked=""', 1)
+    got = team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text), "edits": [{"i": i, "html": html}]},
+                    member=THIERRY)
+    assert got.status == 200, got.body
+    assert team.get(f"/work/{DOC}", member=HANS).status == 200
+
+
+def test_the_lists_tick_of_a_star_bullet_share_shares(team, work):
+    put(team, work, DOC, PRIVATE.replace("- [ ] Share", "* [ ] Share"))
+    assert team.post("/_/tick", {"doc": f"work/{DOC}", "action": 0, "word": "Share"}, member=THIERRY).status == 200
+    assert team.get(f"/work/{DOC}", member=HANS).status == 200
+
+
+def test_a_share_ticked_in_the_same_save_as_another_edit_of_its_list_shares_nothing(team, work):
+    """Review 3, P2-1, as SPEC 9.11 now says: pandoc rewrote the list, so no box was toggled alone."""
+    put(team, work, DOC, PRIVATE.replace("- [ ] Share", "- teh item\n- [ ] Share"))
+    text = (work / DOC).read_text(encoding="utf-8")
+    i, html = _block_html(text, "Share")
+    html = html.replace('<input type="checkbox"', '<input type="checkbox" checked=""', 1).replace("teh", "the")
+    got = team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text), "edits": [{"i": i, "html": html}]},
+                    member=THIERRY)
+    assert got.status == 200, got.body
+    assert team.get(f"/work/{DOC}", member=HANS).status == 404
+
+
+def test_the_owners_tick_saved_against_an_older_version_still_shares(team, work):
+    """A save the hub merges onto a newer text (an assistant wrote another block meanwhile) keeps its toggle."""
+    put(team, work, DOC, PRIVATE)
+    text = (work / DOC).read_text(encoding="utf-8")
+    i, html = _block_html(text, "Share")
+    assert team.get(f"/work/{DOC}", member=THIERRY).status == 200           # the page holds this version
+    (work / DOC).write_text(text.replace("A quote from the contract.", "A quote from the contract, revised."),
+                            encoding="utf-8")
+    html = html.replace('<input type="checkbox"', '<input type="checkbox" checked=""', 1)
+    got = team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text), "edits": [{"i": i, "html": html}]},
+                    member=THIERRY)
+    assert got.status == 200, got.body
+    assert got.json().get("merged") is True
+    after = (work / DOC).read_text(encoding="utf-8")
+    assert "revised" in after and "- [x] Share" in after
+    assert team.get(f"/work/{DOC}", member=HANS).status == 200

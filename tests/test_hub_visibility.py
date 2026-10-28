@@ -211,3 +211,22 @@ def test_a_stop_dir_inside_the_lists_root_stops_the_start(tmp_path):
     with pytest.raises(the_list.ListError, match="stop_dir"):
         the_list.parse({"root": str(tmp_path), "repo": "a/b", "project": 1, "token_file": "/t",
                         "stop_dir": str(tmp_path / "stop")}, "the test")
+
+
+@pytest.mark.parametrize("line, key, value", [
+    ("visibility: owner   # only Nell", "visibility", "owner"),
+    ("issue: a/b#7  # x", "issue", "a/b#7"),
+    ("issue: a/b#7", "issue", "a/b#7"),
+    ('owner: "thierry"  # quoted', "owner", "thierry"),
+    ('title: "a # b"', "title", "a # b"),
+    ("sources: [library:1, issue:a/b#2]  # two", "sources", ("library:1", "issue:a/b#2")),
+    ("visibility:   # none yet", "visibility", ""),
+])
+def test_a_comment_after_a_value_is_not_part_of_it(line, key, value):
+    assert front_matter(f"---\n{line}\n---\n# T\n")[key] == value
+
+
+def test_an_owner_only_sheaf_with_a_comment_on_its_visibility_line_answers_404_to_hans(team, work):
+    put(team, work, DOC, PRIVATE.replace("sources: [library:doc-123]", "visibility: owner   # Thierry's alone"))
+    assert team.get(f"/work/{DOC}", member=HANS).status == 404
+    assert team.get(f"/work/{DOC}", member=THIERRY).status == 200

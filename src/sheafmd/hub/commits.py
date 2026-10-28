@@ -37,10 +37,33 @@ def _env(author: Author | None = None) -> dict:
     return env
 
 
-def _git(root: Path, *args, author=None, seconds=GIT_SECONDS):
+def _git(root: Path, *args, author=None, seconds=GIT_SECONDS, given=None):
     # No hook of the repo runs for the hub: hooks are code of whoever wrote `.git/hooks`.
     return subprocess.run(["git", "-C", str(root), "-c", "core.hooksPath=/dev/null", "--literal-pathspecs",
-                           *args], capture_output=True, text=True, timeout=seconds, env=_env(author))
+                           *args], capture_output=True, text=True, timeout=seconds, env=_env(author),
+                          input=given)
+
+
+def _ignored(folder: Path, rel: str) -> bool:
+    """Whether the repo's ignore rules name `rel` and the index does not hold it. `check-ignore` takes
+    paths, not pathspecs: `--literal-pathspecs` makes it fail."""
+    return subprocess.run(["git", "-C", str(folder), "check-ignore", "-q", "--", rel], capture_output=True,
+                          timeout=GIT_SECONDS, env=_env()).returncode == 0
+
+
+def _staged(folder: Path, paths: list) -> dict:
+    """The index entries of `paths` (folders taken whole): path -> `mode sha stage`."""
+    out = _git(folder, "ls-files", "-s", "-z", "--", *paths).stdout
+    return dict(reversed(e.split("\t", 1)) for e in out.split("\0") if e)
+
+
+def _restage(folder: Path, before: dict, paths: list):
+    """Put the index entries of `paths` back as `before` held them: what a commit that failed staged
+    goes, what the person had staged there comes back."""
+    zero = "0" * (64 if _git(folder, "rev-parse", "--show-object-format").stdout.strip() == "sha256" else 40)
+    gone = [f"0 {zero}\t{p}" for p in _staged(folder, paths) if p not in before]
+    back = [f"{meta}\t{p}" for p, meta in before.items()]
+    _git(folder, "update-index", "-z", "--index-info", given="".join(e + "\0" for e in gone + back))
 
 
 def _last_line(r) -> str:
@@ -95,17 +118,18 @@ class Commits:
 
     def _commit(self, folder: Path, paths: list, author: Author, subject: str, address: str) -> bool:
         """`paths`: the document, then its versions folder when the root keeps it."""
-        if _git(folder, "check-ignore", "-q", "--", paths[0]).returncode == 0:
+        if _ignored(folder, paths[0]):
             return False                              # a document the repo ignores stays out, its versions too
+        # A versions folder the repo ignores stays out; the document is committed without it.
+        paths = paths[:1] + [p for p in paths[1:] if not _ignored(folder, p)]
         # A path git cannot match stops `add`: a versions folder that no page has made yet (a door write).
         paths = [p for p in paths if (folder / p).exists() or _git(folder, "ls-files", "--", p).stdout]
         if not paths:                                 # never `add -A` with no path: that is the whole tree
             return False
-        r = _git(folder, "add", "-A", "--", paths[0])
-        if r.returncode == 0 and paths[1:]:
-            # The versions folder is named by the hub: an ignore rule of `.sheaf/` holds it none back.
-            r = _git(folder, "add", "-A", "-f", "--", *paths[1:])
+        before = _staged(folder, paths)
+        r = _git(folder, "add", "-A", "--", *paths)   # a file an ignore rule names, in the folder, stays out
         if r.returncode != 0:
+            _restage(folder, before, paths)
             self._record("commit-failed", address, error=_last_line(r))
             return False
         if _git(folder, "diff", "--cached", "--quiet", "--", *paths).returncode == 0:
@@ -118,7 +142,7 @@ class Commits:
             author = Author(author.name, mail.stdout.strip() if mail.returncode == 0 else COMMITTER[1])
         r = _git(folder, *who, "commit", "-q", "--no-verify", "-m", subject, "--", *paths, author=author)
         if r.returncode != 0:
-            _git(folder, "reset", "-q", "--", *paths)     # what this write staged goes back out
+            _restage(folder, before, paths)
             self._record("commit-failed", address, error=_last_line(r))
             return False
         return True

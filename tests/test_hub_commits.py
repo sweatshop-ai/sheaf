@@ -300,12 +300,37 @@ def test_a_projects_toml_that_cannot_be_read_warns_once_however_it_changes(box, 
     assert len(rows("projects-invalid")) == 1
 
 
-def test_a_versions_store_the_repo_ignores_is_committed_all_the_same(box, sheaves, remote):
+def test_a_versions_store_the_repo_ignores_stays_out_and_the_document_is_committed(box, sheaves, remote):
     (sheaves / ".git" / "info" / "exclude").write_text(".sheaf/\n", encoding="utf-8")
     edit(box, sheaves)
     (who, files), _ = pushed(box, remote)
     assert who.startswith("Bea <bea@example.com>|")
-    assert any(f.startswith(".sheaf/versions/") for f in files)
+    assert files == ["acme/blog/2026-10-28-plan.md"]
+
+
+def test_a_file_the_repo_ignores_inside_the_versions_folder_is_never_committed(box, sheaves, remote):
+    from sheafmd.hub import state
+    folder = sheaves / ".sheaf" / "versions" / state.doc_key("acme/blog/2026-10-28-plan.md")
+    folder.mkdir(parents=True)
+    (folder / "notes.key").write_text("not a version\n", encoding="utf-8")
+    (sheaves / ".git" / "info" / "exclude").write_text("*.key\n", encoding="utf-8")
+    edit(box, sheaves)
+    (who, files), _ = pushed(box, remote)
+    assert who.startswith("Bea <bea@example.com>|") and not any(f.endswith(".key") for f in files)
+
+
+def test_a_commit_that_fails_puts_back_what_was_staged_before(box, sheaves):
+    f = sheaves / "acme" / "blog" / "2026-10-28-plan.md"
+    original = f.read_text(encoding="utf-8")
+    f.write_text(original + "\nStaged by hand, never in the work tree again.\n", encoding="utf-8")
+    git(sheaves, "add", "acme/blog/2026-10-28-plan.md")
+    f.write_text(original, encoding="utf-8")
+    head = git(sheaves, "rev-parse", "HEAD").strip()
+    (sheaves / ".git" / "MERGE_HEAD").write_text(head + "\n", encoding="utf-8")
+    edit(box, sheaves)
+    assert rows("commit-failed")
+    assert "Staged by hand" in git(sheaves, "show", ":acme/blog/2026-10-28-plan.md")
+    assert git(sheaves, "diff", "--cached", "--name-only") == "acme/blog/2026-10-28-plan.md\n"
 
 
 def test_a_document_the_repo_ignores_is_never_committed_nor_its_versions(box, sheaves, remote):
@@ -315,6 +340,7 @@ def test_a_document_the_repo_ignores_is_never_committed_nor_its_versions(box, sh
     git(sheaves, "push", "-q", "origin", "HEAD:main")
     edit(box, sheaves)
     assert len(pushed(box, remote)) == 2
+    assert rows("commit-failed") == []
     assert git(sheaves, "status", "--porcelain", "--", ".sheaf").strip().startswith("??")
 
 

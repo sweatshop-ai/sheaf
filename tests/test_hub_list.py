@@ -548,3 +548,10 @@ def test_a_ticked_sheaf_moved_out_of_waiting_and_back_without_a_new_change_is_wa
 def test_an_action_inside_a_fence_that_holds_a_shorter_or_other_fence_is_no_action(fence):
     s = the_list.read_sheaf("a/b/c.md", f"# A sheaf\n\n{fence}\n- [ ] Done\n")
     assert [(w, short) for w, short, _ in s.actions] == [("Done", "")]
+
+
+def test_a_box_the_render_draws_past_the_blocks_marks_cannot_be_ticked():
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import ticked_html
+    block = split_md_blocks('- [ ] Approve <input type="checkbox">\n')[0]
+    assert ticked_html(block, 1) is None        # the raw box in the line: no mark of the source is it

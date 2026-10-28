@@ -746,12 +746,12 @@ def ticked_html(block, k: int):
     soup = BeautifulSoup(COMMENT_HTML_RE.sub(
         lambda m: f'<span class="rd-anchor" data-rd-id="{m.group(1)}"></span>', r.stdout), "html.parser")
     found = soup.select('input[type="checkbox"]')
-    if not 0 <= k < len(found) or found[k].has_attr("checked"):
+    marks = list(TASK_MARK_RE.finditer(block.content))
+    if not 0 <= k < min(len(found), len(marks)) or found[k].has_attr("checked"):
         return None
     found[k]["checked"] = ""
     fragment = str(soup)
-    marks = list(TASK_MARK_RE.finditer(block.content))
-    want = block.content[:marks[k].start(2)] + "x" + block.content[marks[k].end(2):] if k < len(marks) else None
+    want = block.content[:marks[k].start(2)] + "x" + block.content[marks[k].end(2):]
     return fragment if _toggle_boxes(block, fragment) == want else None
 
 

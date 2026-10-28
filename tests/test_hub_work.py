@@ -244,3 +244,137 @@ def test_an_attach_of_two_lines_stops_the_start(tmp_path):
     with pytest.raises(the_list.ListError, match="'attach' must be one line"):
         listing(tmp_path, attach="ssh box\nrm -rf /")
     assert listing(tmp_path, box="tiroir-tt", attach="ssh {window}").attach == "ssh {window}"
+
+
+# ── the fork report ──────────────────────────────────────────────────────────
+
+FORK = "7e8f9a0b-1c2d-4e3f-8a4b-5c6d7e8f9a0b"
+
+
+def sessions_of(work):
+    from sheafmd.hub.visibility import front_matter
+    return list(front_matter((work / DOC).read_text(encoding="utf-8"))["sessions"])
+
+
+def test_a_fork_is_the_first_session_named_by_the_signed_in_member(team, box, work):
+    before = (work / DOC).read_text(encoding="utf-8")
+    got = team.post("/_/sessions", {"doc": ADDRESS, "id": FORK, "machine": "hans-mac.local"}, member=HANS)
+    assert got.status == 200, got.text
+    after = (work / DOC).read_text(encoding="utf-8")
+    first = sessions_of(work)[0]
+    assert first.startswith(f"{{id: {FORK}, host: hans-mac.local, member: hans, date: 20")
+    assert after.replace(f"  - {first}\n", "", 1) == before
+    from sheafmd.source import md_hash
+    assert got.json() == {"ok": True, "hash": md_hash(after)}
+
+
+def fork(team, id=FORK, as_=HANS, **extra):
+    return team.post("/_/sessions", {"doc": ADDRESS, "id": id, "machine": "hans-mac", **extra}, member=as_)
+
+
+def test_an_id_already_listed_moves_to_the_top_and_is_listed_once(team, box, work):
+    assert fork(team, id=OLDER).status == 200
+    got = sessions_of(work)
+    assert [s.split(",")[0] for s in got] == [f"{{id: {OLDER}", f"{{id: {LIVE}", f"{{id: {LAPTOP}"]
+    assert got[0].startswith(f"{{id: {OLDER}, host: hans-mac, member: hans, ")
+
+
+def test_a_sheaf_with_no_sessions_yet_gets_the_key(team, box, work):
+    put(team, work, DOC, SHEAF.split("sessions:\n")[0] + "---\n# Bare\n")
+    assert fork(team).status == 200
+    assert sessions_of(work)[0].startswith(f"{{id: {FORK}, host: hans-mac, member: hans, ")
+    assert (work / DOC).read_text(encoding="utf-8").endswith("---\n# Bare\n")
+
+
+def test_the_fork_is_the_signed_in_members_whatever_the_body_names(team, box, work):
+    assert fork(team, member="thierry", by="thierry", name="Thierry", email="t@example.com").status == 200
+    assert ", member: hans, " in sessions_of(work)[0]
+    row, = hub_rows("session-forked")
+    assert (row["doc"], row["transcript"], row["by"], row["machine"], row["issue"]) == \
+        (ADDRESS, FORK, "hans", "hans-mac", "thinkingtoo/tt-tiroir#8")
+
+
+@pytest.mark.parametrize("body, words", [
+    ({"id": LIVE.upper()}, "id must be"), ({"id": "../x"}, "id must be"), ({"id": 7}, "id must be"),
+    ({"machine": ""}, "machine must be"), ({"machine": "a b"}, "machine must be"), ({"machine": "x" * 64}, "machine must be"),
+    ({"machine": "../etc"}, "machine must be"), ({"machine": "box\n"}, "machine must be"),
+])
+def test_a_fork_report_of_another_shape_is_refused_and_writes_nothing(team, box, work, body, words):
+    before = (work / DOC).read_text(encoding="utf-8")
+    got = team.post("/_/sessions", {"doc": ADDRESS, "id": FORK, "machine": "hans-mac", **body}, member=HANS)
+    assert got.status == 400 and words in got.json()["error"]
+    assert (work / DOC).read_text(encoding="utf-8") == before
+
+
+def test_a_fork_report_from_another_origin_is_refused(team, box, work):
+    before = (work / DOC).read_text(encoding="utf-8")
+    got = team.post("/_/sessions", {"doc": ADDRESS, "id": FORK, "machine": "m"}, member=HANS,
+                    origin="https://evil.example")
+    assert got.status == 403
+    assert (work / DOC).read_text(encoding="utf-8") == before
+
+
+def test_a_fork_report_on_a_sheaf_hans_may_not_open_is_404(team, box, work):
+    put(team, work, DOC, SHEAF.replace("sources: [issue:thinkingtoo/tt-tiroir#8]", "sources: [library:doc-1]"))
+    before = (work / DOC).read_text(encoding="utf-8")
+    assert fork(team).status == 404
+    assert fork(team, as_=BEA).status == 404
+    assert (work / DOC).read_text(encoding="utf-8") == before
+
+
+def test_an_open_tab_hears_the_fork(team, box, work):
+    sub = team.get(f"/_/live?doc={ADDRESS}", member=THIERRY).stream
+    sub.drain()
+    h = fork(team).json()["hash"]
+    events = [(name, data) for name, data in sub.drain() if name == "changed"]
+    assert len(events) == 1 and events[0][1]["hash"] == h
+
+
+def git(at, *args):
+    import subprocess
+    return subprocess.run(["git", "-C", str(at), *args], check=True, capture_output=True, text=True).stdout
+
+
+@pytest.fixture
+def committing(hub, browser, tmp_path):
+    """The list's root a git repo that commits, as on the box; Hans's member block names no e-mail."""
+    repo = tmp_path / "sheaves"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    git(repo, "config", "user.name", "the box")
+    git(repo, "config", "user.email", "box@example.com")
+    (repo / ".sheaf.toml").write_text('commit = true\n', encoding="utf-8")
+    (repo / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["hans"]\n', encoding="utf-8")
+    (repo / DOC).parent.mkdir(parents=True)
+    (repo / DOC).write_text(SHEAF, encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "first")
+    hub.proxy = proxy.parse({"origin": FRONT, "socket": "/run/sheaf-proxy/hub.sock",
+                             "proxy_user": pwd.getpwuid(os.getuid()).pw_name,
+                             "members": {HANS: {"name": "Hans", "short": "hans", "roots": [str(repo)]}}}, "the test")
+    hub.roots.for_document(repo / DOC)
+    hub.the_list = the_list.TheList(hub, the_list.parse(
+        {"root": str(repo), "repo": "thinkingtoo/tt-tiroir", "project": 1, "token_file": str(tmp_path / "t"),
+         "box": "tiroir-tt"}, "the test"))
+    return repo, Front(hub, browser.handler)
+
+
+def test_the_fork_is_committed_as_the_signed_in_member(committing):
+    repo, team = committing
+    got = team.post("/_/sessions", {"doc": f"sheaves/{DOC}", "id": FORK, "machine": "hans-mac",
+                                    "member": "thierry", "by": "Thierry", "name": "Thierry",
+                                    "email": "thierry@example.com"}, member=HANS)
+    assert got.status == 200, got.text
+    team.hub.commits.settle()
+    assert git(repo, "log", "-1", "--format=%an <%ae>|%s").strip() == \
+        f"Hans <{proxy.default_email(HANS, FRONT)}>|fork: {DOC}"
+    assert ", member: hans, " in git(repo, "show", f"HEAD:{DOC}")
+
+
+def test_a_write_that_landed_before_the_fork_is_kept(team, box, work):
+    team.hub.entry(ADDRESS)                          # a tab has the page
+    f = work / DOC
+    f.write_text(f.read_text(encoding="utf-8") + "\nA paragraph from another hand.\n", encoding="utf-8")
+    assert fork(team).status == 200
+    text = f.read_text(encoding="utf-8")
+    assert text.endswith("\nA paragraph from another hand.\n") and f"{{id: {FORK}, " in text

@@ -70,6 +70,7 @@ class Member:
     email: str = ""             # the e-mail of their commits (8.11); "" for `default_email`
     short: str = ""             # their short name in `projects.toml` and in an action's `@name` (9.10)
     github: str = ""            # their GitHub login: the record's assignee who is them (9.10)
+    shell: bool = False         # they have a shell on the box: the page offers them the attach command (9.12)
 
 
 @dataclass(frozen=True)
@@ -123,7 +124,7 @@ _HOST_RE = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9
 _EMAIL_RE = re.compile(r"[^\s<>@,;\"']+@[^\s<>@,;\"']+")
 _SHORT_RE = re.compile(r"[A-Za-z0-9._-]{1,40}")
 _LOGIN_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
-OPTIONAL_MEMBER_KEYS = ("email", "short", "github")
+OPTIONAL_MEMBER_KEYS = ("email", "short", "github", "shell")
 _OPTIONAL_WORDS = {"short": "1 to 40 letters, digits, dots, dashes or underscores (nell)",
                    "github": "a GitHub login (tiroir)"}
 SOCKET_MAX = 107                # bytes of a Unix socket's path (sun_path less its NUL)
@@ -180,6 +181,8 @@ def parse(t: dict, where) -> ProxyConfig:
             v = m.get(key)
             if v is not None and (not isinstance(v, str) or not rule.fullmatch(v)):
                 raise ProxyError(f"'{key}' must be {_OPTIONAL_WORDS[key]}, not {v!r}, in {mhere}")
+        if not isinstance(m.get("shell", False), bool):
+            raise ProxyError(f"'shell' must be true or false, not {m['shell']!r}, in {mhere}")
         _keys({k: v for k, v in m.items() if k not in OPTIONAL_MEMBER_KEYS}, MEMBER_KEYS, mhere)
         name = clean_display(m["name"])
         if not name:
@@ -191,7 +194,8 @@ def parse(t: dict, where) -> ProxyConfig:
             if not isinstance(r, str) or not r.startswith("/"):
                 raise ProxyError(f"every folder of 'roots' must be an absolute path, not {r!r}, in {mhere}")
             roots.append(r.rstrip("/") or "/")
-        members[mid] = Member(mid, name, tuple(roots), email or "", m.get("short", ""), m.get("github", ""))
+        members[mid] = Member(mid, name, tuple(roots), email or "", m.get("short", ""), m.get("github", ""),
+                              m.get("shell", False))
         for key in ("short", "github"):
             mine = getattr(members[mid], key).casefold()
             if mine and any(getattr(o, key).casefold() == mine for o in members.values() if o.id != mid):

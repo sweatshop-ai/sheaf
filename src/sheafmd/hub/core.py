@@ -30,6 +30,7 @@ from . import proxy as proxy_mod
 from . import roots as roots_mod
 from . import state
 from . import visibility
+from . import work as work_mod
 from .asktell import AskTell
 from .auth import Auth
 from .commits import Author, Commits
@@ -251,8 +252,33 @@ class Hub:
                 meta.update(me=member.name, seen=self.member_seen.get(member.id, e.address),
                             agent=None, can=[], lines=proxy_mod.member_lines(), proxy=True,
                             member=member.id)
+                work, meta["can"] = self.member_work(e, member)
+                if work is not None:
+                    meta["work"] = work
             html = (html[:m.start(2)] + json.dumps(meta).replace("<", "\\u003c") + html[m.end(2):])
         return html
+
+    def member_work(self, e: Entry, member):
+        """The `work` of a member's page (None when it is not a sheaf of the list's root) and its `can`:
+        box-ask and box-tell while the live session runs on the box and `[list]` names a `tell_dir` (10.1).
+        The meta block and every /_/doc answer carry both, so a fork seen by the page changes what it offers."""
+        st = work_mod.state(self, e.address, e.live.current()[1])
+        if st is None:
+            return None, []
+        return self.work_meta(e, member, st), st.can
+
+    def work_meta(self, e: Entry, member, st) -> dict:
+        """What the page's Work on this shows a member (9.12, 10.1): the command that forks the sheaf's session
+        on their machine, the one that attaches to James's window when they have a shell on the box, the
+        sessions and where the live one runs. None for a page that is not a sheaf of the list's root."""
+        out = {"sessions": st.sessions, "live": st.live}
+        if st.box:                  # the fork fetches a transcript of the box: none there, nothing to fork
+            out["fork"] = f"tiroir work {self.proxy.origin}{roots_mod.url_path(e.address)}"
+        window = "-".join(roots_mod.Address.parse(e.address).rel.split("/")[:2])
+        # Two shells and tmux read the command: a name with another character (`.`, `:`, a space) is left out.
+        if member.shell and st.cfg.attach and re.fullmatch(r"[A-Za-z0-9_-]+", window):
+            out["attach"] = st.cfg.attach.replace("{window}", window)
+        return out
 
     # ── the agent of a document ──────────────────────────────────────────────
     def target(self, address: str) -> Target | None:

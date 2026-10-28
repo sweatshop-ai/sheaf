@@ -1008,3 +1008,25 @@ def test_the_hub_persons_share_on_the_loopback_port_is_written(team, box, browse
     got = browser.post("/_/save", {"doc": ADDRESS, "hash": md_hash(text), "edits": [the_list.tick_edit(text, n, "Share")]})
     assert got.status == 200, got.text
     assert "visibility: project" in (work / DOC).read_text(encoding="utf-8")
+
+
+# ── the fork without sessions_dir, work_dir "/" (9.12) ─────────────────────
+
+def test_with_work_dir_the_filesystem_root_a_tell_records_james_session(team, box, work, tmp_path):
+    # `work_dir = "/"` is accepted; James then works in /<client>/<project>, never //<client>/<project>.
+    cfg = listing(tmp_path, work_dir="/")
+    team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{
+        **team.hub.the_list.cfg.__dict__, "work_dir": cfg.work_dir}))
+    james_wrote(box, NEW, cwd="/thinkingtoo/tiroir", folder="-thinkingtoo-tiroir")
+    assert comment(team, work, "tell").status == 200
+    assert NEW in sessions_of(work)[0]
+    row, = hub_rows("session-recorded")
+    assert row["transcript"] == NEW
+
+
+def test_without_sessions_dir_a_box_sheaf_offers_no_fork(team, box):
+    # The fork fetches the transcript from /_/session, which is a 404 without sessions_dir.
+    cfg = team.hub.the_list.cfg
+    team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{**cfg.__dict__, "sessions_dir": None}))
+    w = meta(team)["work"]
+    assert "fork" not in w and w["live"] == "box"

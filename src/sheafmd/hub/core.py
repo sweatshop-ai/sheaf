@@ -387,8 +387,22 @@ class Hub:
                 self._front[f] = hit
         except (OSError, UnicodeDecodeError):
             return True
-        assignees = self.the_list.assignees(address) if self.the_list is not None else None
-        return visibility.visible_to(hit[1], member, assignees)
+        return visibility.visible_to(hit[1], member, self.assignees(address))
+
+    def assignees(self, address: str):
+        """The record's assignees of the issue of the sheaf at `address`, asked by the address of the file
+        it names, so a link has the owner of the sheaf it points to; None when the list does not know it."""
+        if self.the_list is None:
+            return None
+        at = roots_mod.Address.parse(address)
+        root = self.roots.get(at.root)
+        if root is not None and at.plain:
+            try:
+                rel = Path(os.path.realpath(root.path / at.rel)).relative_to(os.path.realpath(root.path))
+                address = f"{root.name}/{rel.as_posix()}"
+            except ValueError:
+                pass
+        return self.the_list.assignees(address)
 
     def jobs(self) -> dict:
         telling = []

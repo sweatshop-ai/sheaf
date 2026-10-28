@@ -686,3 +686,29 @@ def test_a_member_word_never_opens_with_a_yaml_indicator(name):
 def test_the_loopback_port_answers_404_not_405_for_a_member_route(team, box, browser):
     assert browser.get("/_/sessions").status == 404
     assert browser.post("/_/session", {"doc": ADDRESS}).status == 404
+
+
+def test_a_members_save_cannot_write_a_front_matter_onto_a_sheaf(team, box, work):
+    # The page cannot edit a front matter (5): a save of `---` paragraphs would list any transcript id as the
+    # sheaf's box session, of another project or of a sheaf the member cannot open.
+    from sheafmd.source import md_hash
+    bare = put(team, work, "thinkingtoo/tiroir/bare.md", "Hello world\n\nSecond para\n")
+    before = (work / "thinkingtoo/tiroir/bare.md").read_text(encoding="utf-8")
+    html = (f"<p>---</p><p>sessions:</p><ul><li>{{id: {OLDER}, host: tiroir-tt, member: james, "
+            f"date: 2026-10-28T05:12:03Z}}</li></ul><p>---</p>")
+    got = team.post("/_/save", {"doc": bare, "hash": md_hash(before), "edits": [{"i": 0, "html": html}]},
+                    member=HANS)
+    assert got.status == 409
+    assert (work / "thinkingtoo/tiroir/bare.md").read_text(encoding="utf-8") == before
+    assert download(team, doc=bare, id=OLDER).status == 404
+
+
+def test_a_fork_on_a_file_with_a_bom_keeps_the_bom_first():
+    from sheafmd.hub import work
+    after = work.with_session("﻿# Title\n", "{NEW}", FORK)
+    assert after == "﻿---\nsessions:\n  - {NEW}\n---\n# Title\n"
+
+
+def test_a_window_name_tmux_or_a_shell_would_read_otherwise_gets_no_attach(team, box, work):
+    put(team, work, "thinkingtoo/site.v2/2026-10-28-a.md", SHEAF)      # tmux reads `.` as a pane
+    assert "attach" not in meta(team, THIERRY, doc="thinkingtoo/site.v2/2026-10-28-a.md")["work"]

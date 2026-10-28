@@ -583,6 +583,8 @@ class Door:
         elif os.path.isabs(doc):
             try:
                 root = roots.lookup(Path(doc))
+                if root is not None and (member := self._member(caller)) is not None and not self.hub.owns(member, root):
+                    root = None     # a root of another member's is none (9.11), before the link's message
                 rel = Path(doc).relative_to(root.path).as_posix() if root is not None else ""
             except (OSError, ValueError):
                 raise ToolError(f"{doc} {NOT_IN_A_ROOT} Name it `<root>/<path>`, or by the real "

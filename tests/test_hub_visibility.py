@@ -843,7 +843,7 @@ def test_a_token_bound_to_a_member_reaches_only_that_members_roots(team, browser
     is_error, got = call(browser, "read", token=token, doc=doc)
     assert is_error and got.startswith(f"There is no document {doc} ")
     is_error, got = call(browser, "threads", token=token, doc=str(root / "notes.md"))
-    assert is_error and got.startswith(f"There is no document {root / 'notes.md'} ")
+    assert is_error and got == "A token cannot add a root, and the hub has no root that holds that file."
     assert doc not in [d.get("doc") for d in call(browser, "documents", token=token)[1]]
     is_error, got = call(browser, "documents", token=token, root=doc.split("/")[0])
     assert is_error and got == f"There is no root named {doc.split('/')[0]}."
@@ -856,3 +856,31 @@ def test_an_unbound_token_still_reaches_every_root(team, browser, work, hans_roo
     team.hub.proxy = members(work, hans_also=root, thierry=["james-thierry"])
     is_error, got = call(browser, "read", token=Tokens().add("codex", write=True), doc=doc)
     assert not is_error and "Hans's notes" in got["text"]
+
+
+def test_documents_stops_listing_a_sheaf_that_closed_with_the_same_size_and_time(team, browser, work):
+    shared = PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:x/y#1]")
+    put(team, work, DOC, shared.replace("A quote from the contract.", THREAD))
+    token = Tokens().add("codex")
+    assert f"work/{DOC}" in [d.get("doc") for d in call(browser, "documents", token=token)[1]]
+    f = work / DOC
+    st = f.stat()
+    f.write_text(f.read_text(encoding="utf-8").replace("sources: [issue:x/y#1]", "sources: [mail:t-1234]"),
+                 encoding="utf-8")
+    os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns))            # as `cp -p` or a sync tool leaves it
+    assert f.stat().st_size == st.st_size
+    assert f"work/{DOC}" not in [d.get("doc") for d in call(browser, "documents", token=token)[1]]
+
+
+@pytest.mark.parametrize("tool, doc, args", [
+    ("create", "{root}/x.txt", {"text": "# X\n"}),
+    ("read", "{path}/nope.md", {})], ids=["create", "read by path"])
+def test_a_bound_token_cannot_tell_another_members_root_from_none(team, browser, work, hans_root, tool, doc, args):
+    root, address = hans_root
+    team.hub.proxy = members(work, hans_also=root, thierry=["james-thierry"])
+    token = Tokens().add("james-thierry", write=True)
+    name = address.split("/")[0]
+    nowhere = work.parent / "nowhere"
+    _, theirs = call(browser, tool, token=token, doc=doc.format(root=name, path=root), **args)
+    _, none = call(browser, tool, token=token, doc=doc.format(root="nosuchroot", path=nowhere), **args)
+    assert theirs == none.replace("nosuchroot", name).replace(str(nowhere), str(root))

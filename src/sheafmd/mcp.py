@@ -233,8 +233,9 @@ def markdown_files(root) -> list[str]:
 class Door:
     def __init__(self, hub):
         self.hub = hub
-        # real path -> ((mtime_ns, size), [(id, messages, last author)] of its open threads, its front
-        # matter): a file is read again only when it changed (SPEC 8.6, 9.11)
+        # real path -> ((inode, mtime_ns, ctime_ns, size), [(id, messages, last author)] of its open threads,
+        # its front matter): a file is read again only when it changed, a write that kept its size and put
+        # its time back included (SPEC 8.6, 9.11)
         self._open_threads: dict = {}
         self._tools = {"documents": self._documents, "threads": self._threads,
                        "reply": self._reply, "resolve": self._resolve, "read": self._read,
@@ -381,7 +382,8 @@ class Door:
                     raise ToolError(f"{path} is not an existing .md file.")
                 return roots.address(md)
             root = roots.lookup(md)
-            if root is None:
+            if root is None or ((member := self._member(caller)) is not None and not self.hub.owns(member, root)):
+                # a root of another member's is no root to a token bound to one (9.11)
                 raise ToolError("A token cannot add a root, and the hub has no root that holds that file.")
             return str(Address(root.name, Path(os.path.realpath(md)).relative_to(root.path).as_posix()))
         except (OSError, ValueError) as e:
@@ -430,7 +432,7 @@ class Door:
     def _open_in(self, path: Path) -> tuple:
         """(open threads, front matter) of the file at `path`, both from one read."""
         st = path.stat()
-        key = (st.st_mtime_ns, st.st_size)
+        key = (st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
         cached = self._open_threads.get(path)
         if cached and cached[0] == key:
             return cached[1:]
@@ -567,11 +569,12 @@ class Door:
             raise ToolError("text is longer than 1 MiB; a page made or changed through the door is at "
                             "most that.", "size")
 
-    def _new_address(self, doc: str):
+    def _new_address(self, doc: str, caller: Caller):
         """(root, path in it) of the file `create` is to make. Its root must be one the hub has, for
-        every caller; the rules of 8.3, and no hidden name, hold for the path. An absolute path is
-        taken as it is written, inside the root's real path: it is not resolved, so a link on the way
-        is left for the walk of `create_file` to refuse, as it is in `<root>/<path>`."""
+        every caller, and for a token bound to a member one of that member's (9.11); the rules of 8.3,
+        and no hidden name, hold for the path. An absolute path is taken as it is written, inside the
+        root's real path: it is not resolved, so a link on the way is left for the walk of
+        `create_file` to refuse, as it is in `<root>/<path>`."""
         doc = _named(doc)
         roots = self.hub.roots
         if "://" in doc:
@@ -587,8 +590,8 @@ class Door:
         else:
             at = Address.parse(doc)
             root, rel = roots.get(at.root), at.rel
-        if root is None:
-            raise ToolError(f"{doc} {NOT_IN_A_ROOT}", "path")
+        if root is None or ((member := self._member(caller)) is not None and not self.hub.owns(member, root)):
+            raise ToolError(f"{doc} {NOT_IN_A_ROOT}", "path")     # a root of another member's is none (9.11)
         parts = rel.split("/")
         if (not rel.endswith(".md") or any(p in ("", ".", "..") or p.startswith(".") or "\0" in p
                                             for p in parts)):
@@ -599,7 +602,7 @@ class Door:
         return root, rel
 
     def _create(self, args: dict, caller: Caller):
-        root, rel = self._new_address(args["doc"])
+        root, rel = self._new_address(args["doc"], caller)
         address, text = str(Address(root.name, rel)), _as_read(args["text"])
         if (member := self._member(caller)) is not None and not self.hub.member_owns(member, address):
             raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path")     # a root of another member's

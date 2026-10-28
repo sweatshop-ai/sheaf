@@ -150,6 +150,13 @@ def issue_of(written: str) -> tuple | None:
     return (m.group(1), m.group(2), int(m.group(3))) if m else None
 
 
+def _same_issue(a: tuple | None, b: tuple | None) -> bool:
+    """Whether `a` and `b` are one issue: GitHub reads an owner and a repo name in any case."""
+    def norm(i):
+        return None if i is None else (i[0].casefold(), i[1].casefold(), i[2])
+    return norm(a) == norm(b)
+
+
 def read_sheaf(rel: str, text: str) -> Sheaf:
     fm = front_matter(text)
     issue = issue_of(fm_text(fm, "issue"))
@@ -382,7 +389,7 @@ class TheList:
             return None
         for row in self._snap.rows:
             if row.sheaf.rel == a.rel:
-                return tuple(row.record.assignees) if row.sheaf.issue == issue_of(issue) else None
+                return tuple(row.record.assignees) if _same_issue(row.sheaf.issue, issue_of(issue)) else None
         return None
 
     def serves(self, name: str) -> bool:

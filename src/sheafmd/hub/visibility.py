@@ -95,8 +95,11 @@ def front_matter(text: str) -> dict:
         listing = None
         m = _KEY_RE.fullmatch(line)
         if not m:
-            indented = line[:1] in " \t"
-            if (indented and current in KEYS) or (not indented and _may_spell_a_key(line)):
+            if line[:1] not in " \t":
+                if _may_spell_a_key(line):
+                    out[UNREAD] = True
+                current = None      # a plain key the reader does not read: the indented lines below are its
+            elif current in KEYS:
                 out[UNREAD] = True
             continue                # an indented line under another key: a value this reader does not read
         key, value = m.group(1), _uncomment(m.group(2) or "")

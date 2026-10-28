@@ -678,3 +678,15 @@ def test_an_issue_without_assignees_has_the_owner_its_sheaf_names(box, sheaves, 
         "initech/website": [("Prep for the call of Thursday James", "prep · you · #6 · 40 min")]}
     assert read(box.get("/list", member=DORA))["In progress 1"] == {
         "initech/website": [("Prep for the call of Thursday James", "prep · @nell · #6 · 40 min")]}
+
+
+def test_the_lists_owner_is_the_one_the_file_names_now_not_at_the_poll(box, sheaves, github):
+    github.issues[6]["assignees"] = []
+    prep = sheaves / "initech/website/2026-10-26-prep-thursday.md"
+    prep.write_text(prep.read_text(encoding="utf-8").replace("kind: prep\n", "kind: prep\nowner: nell\n"),
+                    encoding="utf-8")
+    box.hub.the_list.poll()
+    prep.write_text(prep.read_text(encoding="utf-8").replace("owner: nell\n", "owner: dora\n"), encoding="utf-8")
+    assert read(box.get("/list?show=mine", member=NELL))["In progress 0"] == {}
+    assert read(box.get("/list?show=mine", member=DORA))["In progress 1"] == {
+        "initech/website": [("Prep for the call of Thursday James", "prep · you · #6 · 40 min")]}

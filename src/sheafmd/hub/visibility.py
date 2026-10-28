@@ -24,7 +24,8 @@ PROJECT_WIDE = ("issue", "pr", "repo", "web")
 KEYS = ("visibility", "sources", "owner", "shared")
 UNREAD = "?"                        # set by front_matter when a line it cannot read may hold one of KEYS
 
-_KEY_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_.-]*):(?:\s+(.*?))?\s*")
+_KEY_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_-]*):(?:\s+(.*?))?\s*")
+_PLAIN_KEY_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_ .-]*:(?:\s.*)?")      # `my key: …`, `a.b: …`
 _ITEM_RE = re.compile(r"\s*-\s+(.*?)\s*")
 
 
@@ -65,8 +66,11 @@ def _end(lines: list) -> int:
 
 
 def _may_spell_a_key(line: str) -> bool:
-    """Whether `line`, which the reader cannot read, may hold one of KEYS: it names one, in any case, or
-    holds an escape a quoted key may spell one with."""
+    """Whether `line`, an unindented line the reader cannot read, may hold one of KEYS: anything but a plain
+    `key: value` (a quoted or complex key, a flow mapping, an anchor), or one that names one of KEYS in any
+    case, or holds an escape."""
+    if not _PLAIN_KEY_RE.fullmatch(line):
+        return True
     return "\\" in line or any(k in line.casefold() for k in KEYS)
 
 
@@ -74,9 +78,9 @@ def front_matter(text: str) -> dict:
     """The top-level `key: value` lines of the front matter at the top of `text`. A list, written
     `[a, b]` or as `- a` lines under an empty key, indented or not, is a tuple of its items; a nested table
     is not read. The reader fails closed: a line it cannot read that may hold one of KEYS (a line that is no
-    `key: value` and names one or holds an escape, as a quoted key may; an indented line under one of KEYS;
-    one of KEYS written twice) sets `UNREAD`, and `effective` reads such a sheaf as `owner`. A line it cannot
-    read that names none of them (`my key: a value`) is another key's, as `date-created: …` is."""
+    plain `key: value`, or one that names one of them or holds an escape; an indented line under one of
+    KEYS; one of KEYS written twice) sets `UNREAD`, and `effective` reads such a sheaf as `owner`. A plain
+    `key: value` the reader does not read that names none of them (`my key: a value`) is another key's."""
     lines = _lines(text)
     end = _end(lines)
     if end < 0:
@@ -91,7 +95,8 @@ def front_matter(text: str) -> dict:
         listing = None
         m = _KEY_RE.fullmatch(line)
         if not m:
-            if (current in KEYS) if line[:1] in " \t" else _may_spell_a_key(line):
+            indented = line[:1] in " \t"
+            if (indented and current in KEYS) or (not indented and _may_spell_a_key(line)):
                 out[UNREAD] = True
             continue                # an indented line under another key: a value this reader does not read
         key, value = m.group(1), _uncomment(m.group(2) or "")

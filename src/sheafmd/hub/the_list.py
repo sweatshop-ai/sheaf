@@ -144,11 +144,15 @@ class Sheaf:
     shared: str = ""
 
 
+def issue_of(written: str) -> tuple | None:
+    """The issue a front matter's `issue` names, (owner, repo, number); None when it names none."""
+    m = _ISSUE_RE.fullmatch(written)
+    return (m.group(1), m.group(2), int(m.group(3))) if m else None
+
+
 def read_sheaf(rel: str, text: str) -> Sheaf:
     fm = front_matter(text)
-    issue = None
-    if m := _ISSUE_RE.fullmatch(fm_text(fm, "issue")):
-        issue = (m.group(1), m.group(2), int(m.group(3)))
+    issue = issue_of(fm_text(fm, "issue"))
     # The title and the actions are read from the blocks the page draws, so an action in a fence, an
     # indented code block or an HTML comment is no action, and every action is one the tick can reach.
     title, actions = "", []
@@ -376,11 +380,9 @@ class TheList:
         root = self.root()
         if root is None or a.root != root.name:
             return None
-        m = _ISSUE_RE.fullmatch(issue)
-        now = (m.group(1), m.group(2), int(m.group(3))) if m else None
         for row in self._snap.rows:
             if row.sheaf.rel == a.rel:
-                return tuple(row.record.assignees) if row.sheaf.issue == now else None
+                return tuple(row.record.assignees) if row.sheaf.issue == issue_of(issue) else None
         return None
 
     def serves(self, name: str) -> bool:
@@ -399,11 +401,11 @@ class TheList:
                 continue
             if row.record.status == "waiting" and self._answered.get(row.sheaf.rel) == row.record.updated:
                 continue
-            # the owners as visibility.owner_of has them: the assignees, else the member the front matter names
-            owners = visibility.owner_of({"owner": row.sheaf.owner}, members, row.record.assignees)
-            is_owner = any(o.id == member.id for o in owners)
-            if not self.hub.visible(member, f"{root.name}/{row.sheaf.rel}"):   # the file now, not the poll
+            address = f"{root.name}/{row.sheaf.rel}"
+            if not self.hub.visible(member, address):               # the file now, not the poll
                 continue
+            owners = self.hub.owners(address, members)              # and its owners, as visible has them
+            is_owner = any(o.id == member.id for o in owners)
             addressed = any(short and short.lower() == member.short.lower() for _, short, _ in row.sheaf.actions)
             if show == "mine" and not (is_owner or addressed):
                 continue

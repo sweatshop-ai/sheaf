@@ -2,6 +2,7 @@
 sheafmd.hub.work — Work on this (SPEC 9.12): a sheaf's sessions, the transcript of a box-hosted one, and the
 file Ask and Tell drop for James's window.
 
+    state(hub, address, text)       a sheaf's sessions and where its live session runs; None for another page
     sessions(fm)                    the items of the front matter's `sessions`, newest first, that parse
     with_session(text, item)        the text with `item` as the first of `sessions`, the rest as written
     open_transcript(folder, id)     the bytes of `<folder>/<one folder>/<id>.jsonl`, or None
@@ -16,9 +17,11 @@ import os
 import re
 import stat
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
-from .visibility import _end, _lines
+from .roots import Address
+from .visibility import _end, _lines, front_matter
 
 UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 MACHINE_RE = re.compile(r"[A-Za-z0-9._-]{1,63}")
@@ -39,6 +42,27 @@ def sessions(fm: dict) -> list:
         if m := _ITEM_RE.fullmatch(item):
             out.append(dict(zip(("id", "host", "member", "date"), m.groups())))
     return out
+
+
+@dataclass(frozen=True)
+class State:
+    sessions: list              # the items of `sessions`, newest first
+    live: str                   # "box" when the first runs on `[list]`'s box, "laptop" on another host, "" none
+    cfg: object                 # the list's the_list.ListConfig
+
+
+def state(hub, address: str, text: str) -> State | None:
+    """The sessions of the sheaf at `address` whose text is `text`, when it is a sheaf of the list's root at
+    `<client>/<project>/<file>.md`; None for any other document, which has no Work on this."""
+    the = hub.the_list
+    at = Address.parse(address)
+    if the is None or not the.serves(at.root) or at.rel.count("/") != 2:
+        return None
+    items = sessions(front_matter(text))
+    live = ""
+    if items:
+        live = "box" if the.cfg.box and items[0]["host"] == the.cfg.box else "laptop"
+    return State(items, live, the.cfg)
 
 
 def member_word(member) -> str:
@@ -129,7 +153,9 @@ def drop(folder: Path | None, project: str, data: dict, missing: str) -> str:
         try:
             try:
                 os.fchmod(fd, 0o640)
-                os.write(fd, body)
+                view = memoryview(body)
+                while view:
+                    view = view[os.write(fd, view):]
             finally:
                 os.close(fd)
             if final.exists():

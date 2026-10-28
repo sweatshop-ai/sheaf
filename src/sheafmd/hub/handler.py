@@ -15,7 +15,6 @@ connection, the Host of the front, the member header, the route (a member's rout
 Origin of every POST, then the body. No cookie and no key is read there.
 """
 import json
-import os
 import re
 import tempfile
 import time
@@ -745,34 +744,14 @@ class Handler:
         assistant = visibility.text(fm, "assistant")
         m = req.member
         the = self.hub.the_list
-        folder = the.cfg.stop_dir if the is not None else None
-        drop = None
         if assistant.casefold() != "james":
             drop = "not a sheaf of James"
         elif not project:
             drop = "the sheaf is in no <client>/<project> folder"
-        elif folder is None:
-            drop = "no stop_dir in [list]"
-        elif not folder.is_dir():
-            drop = f"{folder} is not a folder"
         else:
-            stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-            name = f"{project.replace('/', '--')}-{stamp}"
-            tmp = folder / f".{name}"
-            try:
-                # The supervisor reads it as the folder's group: 0640 whatever the hub's umask; the reader
-                # takes a dot-file for one still being written.
-                fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o640)
-                try:
-                    os.fchmod(fd, 0o640)
-                    os.write(fd, (project + "\n").encode("utf-8"))
-                finally:
-                    os.close(fd)
-                os.replace(tmp, folder / name)
-                drop = "written"
-            except OSError as ex:
-                drop = f"failed: {ex.strerror or ex}"
-                tmp.unlink(missing_ok=True)
+            # The box's supervisor reads the line as `<client>/<project>` (tt-tiroir routines/james, stops).
+            drop = work.drop(the.cfg.stop_dir if the is not None else None, project,
+                             (project + "\n").encode("utf-8"), "no stop_dir in [list]")
         self.hub.record("stop-james", e.address, project=project, assistant=assistant,
                         by=(m.short or m.name) if m is not None else self.hub.person, drop=drop)
 
@@ -821,8 +800,8 @@ class Handler:
         project = "/".join(Address.parse(e.address).rel.split("/")[:2])
         by = work.member_word(req.member)
         drop = work.drop(self.hub.the_list.cfg.tell_dir, project,
-                         {"project": project, "member": by, "sheaf": e.address, "text": body[:work.TEXT_MAX],
-                          "kind": kind},
+                         json.dumps({"project": project, "member": by, "sheaf": e.address,
+                                     "text": body[:work.TEXT_MAX], "kind": kind}).encode("utf-8"),
                          "no tell_dir in [list]")
         self.hub.record("tell-dropped", e.address, what=kind, project=project, by=by, drop=drop)
         if drop == "written":
@@ -841,8 +820,11 @@ class Handler:
         moved = []
 
         def change(text):
-            # Under the lock again: a fork reported while the hub looked keeps the session it made live.
-            if not self._james_may_take(text, sid):
+            # Under the lock again: a fork reported while the hub looked keeps the session it made live, and a
+            # write that closed the sheaf to the member since the comment's guard gets nothing of theirs.
+            fm = visibility.front_matter(text)
+            if not visibility.visible_to(fm, req.member, self.hub.assignees(e.address, fm)) \
+                    or not self._james_may_take(text, sid):
                 return text
             moved.append(sid)
             return work.with_session(text, line, sid)

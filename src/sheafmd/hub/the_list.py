@@ -78,7 +78,7 @@ class ListConfig:
     tell_dir: Path | None = None                # where Ask and Tell on a box-hosted sheaf drop theirs (9.12)
     sessions_dir: Path | None = None            # the copy of James's transcripts, <folder>/<id>.jsonl (9.12)
     box: str = ""                               # the host name of a box-hosted session (9.12)
-    attach: str = ""                            # the attach command, `{window}` for <client>-<project> (9.12)
+    attach: str = ""                            # the attach command, `{window}` for <client>_<project> (9.12)
     work_dir: Path | None = None                # the folder James works in, <work_dir>/<client>/<project> (9.12)
 
     @property

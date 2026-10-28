@@ -551,6 +551,16 @@ def test_an_action_inside_a_fence_that_holds_a_shorter_or_other_fence_is_no_acti
     assert [(w, short) for w, short, _ in s.actions] == [("Done", "")]
 
 
+def test_an_action_inside_an_html_comment_is_no_action():
+    s = the_list.read_sheaf("a/b/c.md", "# A sheaf\n\n<!--\n- [ ] Approve\n-->\n\n- [ ] Done\n")
+    assert [(w, line) for w, _, line in s.actions] == [("Done", 6)]
+
+
+def test_an_indented_code_line_holding_a_fence_opens_no_fence():
+    s = the_list.read_sheaf("a/b/c.md", "# A sheaf\n\n    ```\n\n- [ ] Approve\n")
+    assert [(w, line) for w, _, line in s.actions] == [("Approve", 4)]
+
+
 def test_a_box_the_render_draws_past_the_blocks_marks_cannot_be_ticked():
     from sheafmd.blocks import split_md_blocks
     from sheafmd.edit import ticked_html

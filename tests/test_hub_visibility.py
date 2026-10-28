@@ -364,3 +364,21 @@ def test_a_door_update_cannot_give_an_owner_to_an_owner_only_sheaf_that_had_none
     is_error, got = door_update(browser, work, DOC, lambda t: t.replace("assistant: James", "assistant: James\nowner: hans"))
     assert not is_error, got
     assert team.get(f"/work/{DOC}", member=HANS).status == 404
+
+
+def test_a_save_of_hans_that_lands_after_the_sheaf_closed_writes_nothing(team, work, monkeypatch):
+    open_ = PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:x/y#1]").replace("- [ ] Share", "- [ ] Done")
+    put(team, work, DOC, open_)
+    closed = open_.replace("sources: [issue:x/y#1]", "sources: [mail:t-77]")
+    assert team.get(f"/work/{DOC}", member=HANS).status == 200      # the page Hans saves from
+    gate = team.hub.visible
+
+    def a_door_write_closes_it_after_the_gate(member, address):
+        ok = gate(member, address)
+        if member.id == HANS:
+            (work / DOC).write_text(closed, encoding="utf-8")
+        return ok
+    monkeypatch.setattr(team.hub, "visible", a_door_write_closes_it_after_the_gate)
+    got = tick(team, work, DOC, "Done", HANS)
+    assert got.status == 404, got.body
+    assert (work / DOC).read_text(encoding="utf-8") == closed

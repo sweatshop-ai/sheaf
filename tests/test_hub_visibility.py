@@ -144,10 +144,8 @@ def test_a_door_create_from_mistral_with_a_library_source_lands_owner_only(team,
 
 def test_a_door_write_cannot_share_a_sheaf_itself(team, browser, work):
     put(team, work, DOC, PRIVATE)
-    token = Tokens().add("james", write=True)
-    is_error, got = call(browser, "read", token=token, doc=f"work/{DOC}")
-    forged = got["text"].replace("owner: thierry", "owner: thierry\nvisibility: project\nshared: thierry 2026-10-28")
-    is_error, got = call(browser, "update", token=token, doc=f"work/{DOC}", text=forged, expected_hash=got["hash"])
+    is_error, got = door_update(browser, work, DOC, lambda t: t.replace(
+        "owner: thierry", "owner: thierry\nvisibility: project\nshared: thierry 2026-10-28"))
     assert not is_error, got
     fm = front_matter((work / DOC).read_text(encoding="utf-8"))
     assert fm["visibility"] == "owner" and "shared" not in fm
@@ -249,11 +247,12 @@ def test_the_stop_file_is_readable_by_the_folders_group_whatever_the_hubs_umask(
 
 
 def door_update(browser, work, rel, change):
-    """An assistant's door update of `rel`: the text it reads, changed by `change`."""
-    token = Tokens().add("james", write=True)
-    is_error, got = call(browser, "read", token=token, doc=f"work/{rel}")
+    """A door update of `rel` signed James: the text it reads, changed by `change`. Through the key, which
+    reads every sheaf: a token is not shown one that is its owner's alone (9.11)."""
+    is_error, got = call(browser, "read", as_name="James", doc=f"work/{rel}")
     assert not is_error, got
-    return call(browser, "update", token=token, doc=f"work/{rel}", text=change(got["text"]), expected_hash=got["hash"])
+    return call(browser, "update", as_name="James", doc=f"work/{rel}", text=change(got["text"]),
+                expected_hash=got["hash"])
 
 
 def test_a_door_update_that_drops_the_front_matter_leaves_an_owner_only_sheaf_its_owners(team, browser, work):
@@ -608,8 +607,8 @@ def test_a_merged_save_does_not_tick_a_box_an_assistant_reopened_since_the_page_
     i, html = _block_html(base, "Done")
     html = html.replace('<input type="checkbox" />Done', '<input type="checkbox" checked="" />Done')
     cur = PRIVATE.replace("- [ ] Share", "- [ ] Share\n* [ ] Done")
-    is_error, got = call(browser, "update", token=Tokens().add("james", write=True), doc=f"work/{DOC}",
-                         text=cur, expected_hash=md_hash(base))
+    is_error, got = call(browser, "update", as_name="James", doc=f"work/{DOC}",    # the key: a token is not
+                         text=cur, expected_hash=md_hash(base))                    # shown an owner-only sheaf
     assert not is_error, got
     got = team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(base), "edits": [{"i": i, "html": html}]},
                     member=THIERRY)
@@ -669,3 +668,57 @@ def test_a_front_matter_key_the_hub_does_not_enforce_leaves_an_open_sheaf_open(t
 def test_a_line_that_may_spell_a_key_the_hub_enforces_still_closes_the_sheaf(team, work, line):
     put(team, work, DOC, OPEN.replace("owner: thierry\n", f"owner: thierry\n{line}\n"))
     assert team.get(f"/work/{DOC}", member=HANS).status == 404
+
+
+def test_a_write_token_cannot_read_an_owner_only_sheaf(team, browser, work):
+    put(team, work, DOC, PRIVATE)
+    token = Tokens().add("mistral", write=True)
+    is_error, got = call(browser, "read", token=token, doc=f"work/{DOC}")
+    _, missing = call(browser, "read", token=token, doc="work/thinkingtoo/tiroir/nothing.md")
+    assert is_error and got == missing.replace("nothing.md", DOC.rsplit("/", 1)[1])
+
+
+THREAD = ('A quote from the contract.<!-- sheaf-comment id=c1 by="Thierry" at=2026-10-28T09:00 status=open '
+          'quote="contract"\nThe fee?\n-->')
+
+
+def test_a_token_cannot_read_the_threads_of_an_owner_only_sheaf(team, browser, work):
+    put(team, work, DOC, PRIVATE.replace("A quote from the contract.", THREAD))
+    token = Tokens().add("codex")
+    is_error, got = call(browser, "threads", token=token, doc=f"work/{DOC}", status="all")
+    assert is_error and got.startswith(f"There is no document work/{DOC} ") and "fee" not in got
+
+
+@pytest.mark.parametrize("tool, args", [("reply", {"id": "c1", "text": "Noted."}), ("resolve", {"id": "c1"})])
+def test_a_token_cannot_answer_or_resolve_a_thread_of_an_owner_only_sheaf(team, browser, work, tool, args):
+    put(team, work, DOC, PRIVATE.replace("A quote from the contract.", THREAD))
+    before = (work / DOC).read_text(encoding="utf-8")
+    is_error, got = call(browser, tool, token=Tokens().add("codex"), doc=f"work/{DOC}", **args)
+    assert is_error and got.startswith(f"There is no document work/{DOC} ")
+    assert (work / DOC).read_text(encoding="utf-8") == before
+
+
+def test_documents_does_not_list_an_owner_only_sheaf_to_a_token(team, browser, work):
+    put(team, work, DOC, PRIVATE.replace("A quote from the contract.", THREAD))
+    put(team, work, "thinkingtoo/tiroir/open.md", "# Open\n\n" + THREAD + "\n")
+    token = Tokens().add("mistral", write=True)
+    for open_only in (True, False):
+        is_error, got = call(browser, "documents", token=token, open_only=open_only)
+        listed = [d["doc"] for d in got if "doc" in d]
+        assert not is_error and "work/thinkingtoo/tiroir/open.md" in listed and f"work/{DOC}" not in listed
+
+
+def test_a_token_cannot_update_an_owner_only_sheaf_even_with_its_hash(team, browser, work):
+    put(team, work, DOC, PRIVATE)
+    before = (work / DOC).read_text(encoding="utf-8")
+    is_error, got = call(browser, "update", token=Tokens().add("james", write=True), doc=f"work/{DOC}",
+                         text=before.replace("A quote", "No quote"), expected_hash=md_hash(before))
+    assert is_error and got.startswith(f"There is no document work/{DOC} ")
+    assert (work / DOC).read_text(encoding="utf-8") == before
+
+
+def test_a_tokens_update_with_a_wrong_hash_does_not_tell_an_owner_only_sheaf_from_none(team, browser, work):
+    put(team, work, DOC, PRIVATE)
+    token = Tokens().add("james", write=True)
+    _, got = call(browser, "update", token=token, doc=f"work/{DOC}", text="x\n", expected_hash="0" * 16)
+    assert got.startswith(f"There is no document work/{DOC} ")

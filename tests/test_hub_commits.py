@@ -360,3 +360,21 @@ def test_a_first_commit_that_fails_leaves_nothing_staged(browser, tmp_path):
     assert r.status == 200, r.text
     assert rows("commit-failed")
     assert git(fresh, "diff", "--cached", "--name-only") == ""
+
+
+def test_a_conflict_in_the_index_is_left_as_it_is(box, sheaves):
+    f = sheaves / "acme" / "blog" / "2026-10-28-plan.md"
+    original = f.read_text(encoding="utf-8")
+    git(sheaves, "checkout", "-q", "-b", "other")
+    f.write_text(original.replace("Last paragraph.", "Last paragraph, theirs."), encoding="utf-8")
+    git(sheaves, "commit", "-q", "-am", "theirs")
+    git(sheaves, "checkout", "-q", "-")
+    f.write_text(original.replace("Last paragraph.", "Last paragraph, ours."), encoding="utf-8")
+    git(sheaves, "commit", "-q", "-am", "ours")
+    assert subprocess.run(["git", "-C", str(sheaves), "merge", "-q", "other"], capture_output=True).returncode
+    unmerged = git(sheaves, "ls-files", "-u")
+    assert unmerged.count("\n") == 3
+    edit(box, sheaves)
+    (row,) = rows("commit-failed")
+    assert row["doc"] == DOC and "conflict" in row["error"]
+    assert git(sheaves, "ls-files", "-u") == unmerged

@@ -52,18 +52,20 @@ def _ignored(folder: Path, rel: str) -> bool:
 
 
 def _staged(folder: Path, paths: list) -> dict:
-    """The index entries of `paths` (folders taken whole): path -> `mode sha stage`."""
+    """The index entries of `paths` (folders taken whole): path -> `mode sha stage`. Stage 0 only: a
+    path in conflict is never committed (`_commit`)."""
     out = _git(folder, "ls-files", "-s", "-z", "--", *paths).stdout
     return dict(reversed(e.split("\t", 1)) for e in out.split("\0") if e)
 
 
-def _restage(folder: Path, before: dict, paths: list):
+def _restage(folder: Path, before: dict, paths: list) -> bool:
     """Put the index entries of `paths` back as `before` held them: what a commit that failed staged
     goes, what the person had staged there comes back."""
     zero = "0" * (64 if _git(folder, "rev-parse", "--show-object-format").stdout.strip() == "sha256" else 40)
     gone = [f"0 {zero}\t{p}" for p in _staged(folder, paths) if p not in before]
     back = [f"{meta}\t{p}" for p, meta in before.items()]
-    _git(folder, "update-index", "-z", "--index-info", given="".join(e + "\0" for e in gone + back))
+    return _git(folder, "update-index", "-z", "--index-info",
+                given="".join(e + "\0" for e in gone + back)).returncode == 0
 
 
 def _last_line(r) -> str:
@@ -126,11 +128,16 @@ class Commits:
         paths = [p for p in paths if (folder / p).exists() or _git(folder, "ls-files", "--", p).stdout]
         if not paths:                                 # never `add -A` with no path: that is the whole tree
             return False
+        if _git(folder, "ls-files", "-u", "--", *paths).stdout:
+            # A merge stopped on this document: its index is the person's to settle, never the hub's.
+            self._record("commit-failed", address, error="the index holds a merge conflict on this document")
+            return False
         before = _staged(folder, paths)
         r = _git(folder, "add", "-A", "--", *paths)   # a file an ignore rule names, in the folder, stays out
         if r.returncode != 0:
-            _restage(folder, before, paths)
-            self._record("commit-failed", address, error=_last_line(r))
+            kept = _restage(folder, before, paths)
+            self._record("commit-failed", address,
+                         error=_last_line(r) + ("" if kept else "; the index could not be put back"))
             return False
         if _git(folder, "diff", "--cached", "--quiet", "--", *paths).returncode == 0:
             return False                              # nothing of this write is left to commit
@@ -142,8 +149,9 @@ class Commits:
             author = Author(author.name, mail.stdout.strip() if mail.returncode == 0 else COMMITTER[1])
         r = _git(folder, *who, "commit", "-q", "--no-verify", "-m", subject, "--", *paths, author=author)
         if r.returncode != 0:
-            _restage(folder, before, paths)
-            self._record("commit-failed", address, error=_last_line(r))
+            kept = _restage(folder, before, paths)
+            self._record("commit-failed", address,
+                         error=_last_line(r) + ("" if kept else "; the index could not be put back"))
             return False
         return True
 

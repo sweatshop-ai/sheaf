@@ -103,3 +103,7 @@ _Avoid_: reply type, magic author name
 **Pin**:
 A version of a document that the hub keeps beside the newest because a page holds its reload on it (`POST /_/pin`), so what the page sends later against that version is still taken. It is not the popover a page fixes on screen.
 _Avoid_: lock, snapshot
+
+**Versions store**:
+Where the hub keeps the texts it handed pages, per document, so a save against an older one is merged: the state folder's `versions/`, or with `versions = "root"` the root's own `.sheaf/versions/`, committed with the document in a root that commits.
+_Avoid_: history, backup, snapshots

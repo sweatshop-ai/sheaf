@@ -67,6 +67,7 @@ class Member:
     id: str                     # the front's id of the member: what `X-Sheaf-Member` carries
     name: str                   # signs their comments and replies, cleaned by the rule of 12
     roots: tuple                # the folders of their roots, absolute, as written
+    email: str = ""             # the e-mail of their commits (8.11); "" for `default_email`
 
 
 @dataclass(frozen=True)
@@ -117,6 +118,7 @@ def _keys(t: dict, want: dict, where: str):
 
 _WORDS = {str: "text", list: "a list", dict: "a table"}
 _HOST_RE = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]*[a-z0-9])?|\[[0-9a-f:.]+\]")
+_EMAIL_RE = re.compile(r"[^\s<>@,;\"']+@[^\s<>@,;\"']+")
 SOCKET_MAX = 107                # bytes of a Unix socket's path (sun_path less its NUL)
 
 
@@ -164,7 +166,10 @@ def parse(t: dict, where) -> ProxyConfig:
         mhere = f'[proxy.members."{mid}"] of {where}'
         if not isinstance(m, dict):
             raise ProxyError(f"{mhere} must be a table with name and roots")
-        _keys(m, MEMBER_KEYS, mhere)
+        email = m.get("email", None)
+        if email is not None and (not isinstance(email, str) or not _EMAIL_RE.fullmatch(email)):
+            raise ProxyError(f"'email' must be an address like name@example.com, not {email!r}, in {mhere}")
+        _keys({k: v for k, v in m.items() if k != "email"}, MEMBER_KEYS, mhere)
         name = clean_display(m["name"])
         if not name:
             raise ProxyError(f"'name' has no printable character, in {mhere}")
@@ -175,8 +180,14 @@ def parse(t: dict, where) -> ProxyConfig:
             if not isinstance(r, str) or not r.startswith("/"):
                 raise ProxyError(f"every folder of 'roots' must be an absolute path, not {r!r}, in {mhere}")
             roots.append(r.rstrip("/") or "/")
-        members[mid] = Member(mid, name, tuple(roots))
+        members[mid] = Member(mid, name, tuple(roots), email or "")
     return ProxyConfig(origin, host, Path(sock), t["proxy_user"], acct.pw_uid, acct.pw_gid, members)
+
+
+def default_email(mid: str, origin: str) -> str:
+    """The e-mail of a member's commits whose block names none (8.11): their id at the front's host."""
+    local = mid if re.fullmatch(r"[A-Za-z0-9._+-]+", mid) else "member"
+    return f"{local}@{urlsplit(origin).hostname}"
 
 
 def same_name(a: str, b: str) -> bool:

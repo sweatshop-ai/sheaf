@@ -634,6 +634,8 @@ class Handler:
             raise Refuse(400, "the text holds a character that cannot be written to the .md "
                               "(half of a pair, such as half an emoji)") from None
         self.hub.index.touch(e.address)
+        if got["changed"] and not got.get("again"):
+            self.hub.committed(e.address, req.member, "edit")
         if got["merged"] and not got.get("again"):
             # Not a failure, but the thing this log exists to measure: how often the page and
             # an agent write at the same time.
@@ -695,6 +697,8 @@ class Handler:
         except (rdc.AnchorError, ValueError, TypeError) as ex:
             raise Refuse(400, str(ex)) from None
         self.hub.index.touch(e.address)
+        if not snap.get("again"):
+            self.hub.committed(e.address, member, "comment")
         if snap.get("again"):
             # Taken before under this request id: what the first request started (an Ask, a Tell's wait)
             # is running or done, and the page hears of it by its events.

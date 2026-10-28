@@ -335,14 +335,23 @@ class Door:
         """Whether visibility (9.11) holds `caller`: a token, in proxy mode."""
         return caller.token is not None and getattr(self.hub, "proxy", None) is not None
 
+    def _member(self, caller: Caller):
+        """The member `caller` acts for (9.11): in proxy mode, the one whose `tokens` name its token; None for
+        the key, a token bound to nobody, and every caller in loopback mode."""
+        return self.hub.proxy.member_of_token(caller.token.name) if self._judged(caller) else None
+
     def _sees(self, fm: dict, address: str, caller: Caller) -> bool:
         """Whether `caller` may see the sheaf at `address` whose front matter is `fm` (9.11). In proxy mode a
-        token acts for the member whose `tokens` name it and sees what that member sees; a token bound to
-        nobody sees no sheaf that is its owner's alone. The key is the hub's own account, which reads every
-        file."""
-        if not self._judged(caller) or visibility.effective(fm) == "project":
+        token acts for the member whose `tokens` name it and sees what that member sees, in that member's
+        roots only; a token bound to nobody sees every root (9.7) and no sheaf that is its owner's alone. The
+        key is the hub's own account, which reads every file."""
+        if not self._judged(caller):
             return True
-        member = self.hub.proxy.member_of_token(caller.token.name)
+        member = self._member(caller)
+        if member is not None and not self.hub.member_owns(member, address):
+            return False
+        if visibility.effective(fm) == "project":
+            return True
         return member is not None and visibility.visible_to(fm, member, self.hub.assignees(address, fm))
 
     def _seen(self, text: str, address: str, caller: Caller, doc: str) -> str:
@@ -446,12 +455,14 @@ class Door:
 
     def _documents(self, args: dict, caller: Caller):
         hub = self.hub
+        member = self._member(caller)
         if "root" in args:
-            if hub.roots.get(args["root"]) is None:
+            root = hub.roots.get(args["root"])
+            if root is None or (member is not None and not hub.owns(member, root)):
                 raise ToolError(f"There is no root named {args['root']}.")
-            wanted = [hub.roots.get(args["root"])]
+            wanted = [root]
         else:
-            wanted = hub.roots.all()
+            wanted = [r for r in hub.roots.all() if member is None or hub.owns(member, r)]
         asking = {doc for doc, _ in hub.jobs_asking()}
         rows, shut = [], []
         in_git = {}                             # (root, real folder) -> whether 8.2 keeps its files from the root
@@ -590,6 +601,8 @@ class Door:
     def _create(self, args: dict, caller: Caller):
         root, rel = self._new_address(args["doc"])
         address, text = str(Address(root.name, rel)), _as_read(args["text"])
+        if (member := self._member(caller)) is not None and not self.hub.member_owns(member, address):
+            raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path")     # a root of another member's
         self._check_size(text)
         _check_comments("", text)
         text = self._visible(text, None)

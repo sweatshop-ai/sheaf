@@ -298,3 +298,26 @@ def test_the_menu_button_closes_the_popover(tab):
     open_work(tab.page)
     tab.page.click("#rd-menu-btn")
     assert not tab.page.locator("#rd-work").is_visible() and tab.page.locator("#rd-menu").is_visible()
+
+
+# ── review round 3 (Codex) ───────────────────────────────────────────────────
+def test_a_sheaf_of_james_with_no_session_yet_names_james(tab):
+    as_member(tab, work(sessions=[], live="", fork=None, attach=None), can=BOX_CAN)
+    tab.open()
+    comment_form(tab)
+    assert agent_buttons(tab.page, "#rd-popover .rd-form") == [("Ask James", True), ("Tell James", True)]
+
+
+def test_the_sent_line_outlasts_the_reload_a_recorded_session_brings(tab):
+    # The hub records James's session after the drop: a front matter change, which reloads the page.
+    as_member(tab, work(), can=BOX_CAN)
+    tab.open()
+    sent_to_box(tab)
+    comment_form(tab)
+    tab.page.fill("#rd-popover textarea", "What does James think?")
+    tab.page.click("#rd-popover .rd-form button.rd-tell")
+    until(lambda: SENT in tab.page.inner_text("#rd-popover"), what="the sent line in the thread")
+    update_file(tab.site.file, lambda t: t + "\nOne more paragraph.\n")
+    until(lambda: "One more paragraph." in tab.page.inner_text("body"), what="the reload")
+    until(lambda: tab.page.locator("#rd-popover").is_visible() and SENT in tab.page.inner_text("#rd-popover"),
+          what="the sent line after the reload")

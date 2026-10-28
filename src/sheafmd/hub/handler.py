@@ -832,15 +832,14 @@ class Handler:
         write or a save, never a name a request carries. Nothing when it is the live one already."""
         cfg = self.hub.the_list.cfg
         sid = work.james_newest(cfg, project)
-        live = work.sessions(visibility.front_matter(e.live.current()[1]))
-        if sid is None or (live and live[0]["id"] == sid):
+        if sid is None or not self._james_may_take(e.live.current()[1], sid):
             return
         line = work.item(sid, cfg.box, "james", time.strftime(work.ISO, time.gmtime()))
         moved = []
 
         def change(text):
-            items = work.sessions(visibility.front_matter(text))
-            if items and items[0]["id"] == sid:
+            # Under the lock again: a fork reported while the hub looked keeps the session it made live.
+            if not self._james_may_take(text, sid):
                 return text
             moved.append(sid)
             return work.with_session(text, line, sid)
@@ -853,6 +852,12 @@ class Handler:
             self.hub.index.touch(e.address)
             self.hub.committed(e.address, req.member, "session")
             self.hub.record("session-recorded", e.address, transcript=sid, by=work.member_word(req.member))
+
+    def _james_may_take(self, text: str, sid: str) -> bool:
+        """Whether James's session `sid` becomes the live one of the sheaf whose text is `text`: the live one is
+        James's on the box, another than `sid`, or there is none yet. Never over a member's fork on a laptop."""
+        items = work.sessions(visibility.front_matter(text))
+        return not items or (items[0]["host"] == self.hub.the_list.cfg.box and items[0]["id"] != sid)
 
     def _sessions(self, req: Req) -> Response:
         """A member forked one of the sheaf's sessions on their machine (9.12): the fork becomes the sheaf's live
@@ -929,9 +934,12 @@ class Handler:
         signed = {"by": member.name, "author": member.name} if member else {}
         if member is not None:
             def still_visible(text):
-                # The gate (_entry) read the file before the lock: a write that closed the sheaf since is seen here.
+                # The gate (_entry) read the file before the lock: a write that closed the sheaf since is seen here,
+                # and a fork that moved its live session off the box since keeps Ask and Tell from James's window.
                 if not visibility.visible_to(visibility.front_matter(text), member, self.hub.assignees(e.address)):
                     raise Refuse(404, "no such document")
+                if to_box and not (work.state(self.hub, e.address, text) or work.State([], "", None)).can:
+                    raise Refuse(400, proxy.PROXY_LINE)
             signed["guard"] = still_visible
         try:
             snap = e.live.comment(op, b, h, await_action=can_tell, rid=rid, **signed)

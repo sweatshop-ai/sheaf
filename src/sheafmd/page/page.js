@@ -39,8 +39,8 @@
     CAN = CFG.can || [];
     toBox = CAN.indexOf('box-ask') >= 0 || CAN.indexOf('box-tell') >= 0;
     // The session's own name when it has one ("Linnea"), else the agent's display name (SPEC 10.5); on a
-    // box sheaf the member the live session runs as (James).
-    AGENT = toBox ? upper(liveSession().member) || 'the agent'
+    // box sheaf the member the live session runs as (James), and James on his sheaf with no session yet.
+    AGENT = toBox ? upper(liveSession().member) || 'James'
           : (CFG.agent && (CFG.agent.name || CFG.agent.display)) || 'the agent';
     AGENT_UC = AGENT.charAt(0).toUpperCase() + AGENT.slice(1);
     canAsk = CAN.indexOf(toBox ? 'box-ask' : 'ask') >= 0;
@@ -562,7 +562,7 @@
                                                          panel: panel.classList.contains('open'),
                                                          known: counts(), editing: editing,
                                                          caret: caretNow(), held: heldReload,
-                                                         interrupted: Object.keys(interrupted) }));
+                                                         interrupted: Object.keys(interrupted), sent: sentBox }));
     } catch (e) {}
     location.reload();
   }
@@ -3207,6 +3207,8 @@
       if (says) msg = msg ? msg + ' · ' + says.charAt(0).toLowerCase() + says.slice(1, -1) : says;
       // The jobs a new boot lost are still lost: the reload an upgrade or moved text brings keeps them.
       (keep.interrupted || []).forEach(function (id) { if (byId[id]) interrupted[id] = true; });
+      // A comment sent to James's window keeps its line past the reload the session the hub records brings.
+      Object.keys(keep.sent || {}).forEach(function (id) { if (byId[id]) sentBox[id] = keep.sent[id]; });
       if (keep.panel) openPanel();
       if (keep.editing) { setEditing(true); placeCaret(keep.caret); }
       if (keep.open && byId[keep.open]) setTimeout(function () { openComment(keep.open); }, 50);

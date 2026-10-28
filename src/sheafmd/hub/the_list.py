@@ -315,6 +315,8 @@ class TheList:
             for found in roots_mod.list_documents(root).docs:
                 if found.rel.count("/") < 2:
                     continue                # above `<client>/<project>`: no sheaf
+                if self.hub.roots.lookup(root.path / found.rel) != root:
+                    continue                # a nested root's (8.2): 9.9 keeps it from the list's members
                 try:
                     text = (root.path / found.rel).read_text(encoding="utf-8")
                 except (OSError, UnicodeDecodeError):

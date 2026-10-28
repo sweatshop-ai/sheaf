@@ -555,3 +555,15 @@ def test_a_box_the_render_draws_past_the_blocks_marks_cannot_be_ticked():
     from sheafmd.edit import ticked_html
     block = split_md_blocks('- [ ] Approve <input type="checkbox">\n')[0]
     assert ticked_html(block, 1) is None        # the raw box in the line: no mark of the source is it
+
+
+def test_a_sheaf_of_a_root_nested_in_the_list_root_is_on_no_list(box, sheaves):
+    import subprocess
+    nested = sheaves / "acme" / "site"
+    nested.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(nested)], check=True)
+    (nested / "2026-10-28-nested.md").write_text(
+        SHEAVES["initech/website/2026-10-27-ga4-property.md"].replace("# James needs the GA4 property id", "# Nested"),
+        encoding="utf-8")
+    box.hub.the_list.poll()
+    assert "Nested" not in box.get("/list?show=all", member=NELL).text

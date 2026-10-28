@@ -299,6 +299,7 @@ class Row:
     sheaf: Sheaf
     record: Record
     group: str                  # `<client>/<project>`
+    issue: tuple                # the issue the record was read for; a tick re-reads `sheaf`, never this
 
 
 @dataclass
@@ -359,7 +360,7 @@ class TheList:
                 self._records = fetch(self.cfg, wanted) if wanted else {}   # an issue it does not hold is off
             except RecordError as e:
                 self.hub.record("list-poll-failed", None, root=root.name, error=str(e))
-            rows = [Row(s, self._records[s.issue], "/".join(s.rel.split("/")[:2]))
+            rows = [Row(s, self._records[s.issue], "/".join(s.rel.split("/")[:2]), s.issue)
                     for s in sheaves if s.issue in self._records]
             # A ticked sheaf waits on nobody until the record routine has moved its issue: a new change of the
             # issue, or a Status other than waiting (moving a Project's Status leaves the issue's change as it was).
@@ -409,7 +410,7 @@ class TheList:
             return None
         for row in self._snap.rows:
             if row.sheaf.rel == a.rel:
-                return tuple(row.record.assignees) if _same_issue(row.sheaf.issue, issue_of(issue)) else None
+                return tuple(row.record.assignees) if _same_issue(row.issue, issue_of(issue)) else None
         return None
 
     def serves(self, name: str) -> bool:
@@ -485,7 +486,7 @@ class TheList:
             owner = "@" + owners[0].short
         else:
             owner = "nobody"
-        meta = " · ".join(x for x in (s.kind, owner, f"#{s.issue[2]}", _age(self.hub.clock() - rec.updated)) if x)
+        meta = " · ".join(x for x in (s.kind, owner, f"#{row.issue[2]}", _age(self.hub.clock() - rec.updated)) if x)
         box = ""
         if s.actions:
             word = s.actions[0][0]

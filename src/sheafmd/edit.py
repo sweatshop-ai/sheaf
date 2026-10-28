@@ -937,7 +937,9 @@ def apply_edits(md_text: str, edits, _tomb: str = "", _span: int = 1):
     """Splice edited blocks into the source. Returns (new_text, report).
 
     `edits` is an iterable of {"i": block index, "html": edited fragment}.
-    Blocks not named here are written back byte-for-byte.
+    Blocks not named here are written back byte-for-byte. The report's `toggled` holds, for each
+    block whose edit only flipped task marks, its (old, new) content: the hub's Share and Stop James
+    count only those (SPEC 9.11).
 
     `_tomb` and `_span`, for `merge_edits`, which passes one edit: an emptied block becomes this
     one line instead of going, so the block count and every index stay as they were; the edit
@@ -945,10 +947,11 @@ def apply_edits(md_text: str, edits, _tomb: str = "", _span: int = 1):
     of the one block the page still shows (`_own_span`). The page never sends a span.
     """
     blocks = split_md_blocks(md_text)
-    changed, skipped, deleted, dropped = [], [], [], {}
+    changed, skipped, deleted, dropped, toggled = [], [], [], {}, {}
 
     for e in edits:
         i = int(e["i"])
+        toggled.pop(i, None)            # a later edit of the block decides what it holds
         if not (0 <= i and i + _span <= len(blocks)):
             skipped.append((i, "no such block"))
             continue
@@ -963,6 +966,7 @@ def apply_edits(md_text: str, edits, _tomb: str = "", _span: int = 1):
             continue
         ticked = _toggle_boxes(b, e["html"])
         if ticked is not None:
+            toggled[i] = (b.content, ticked)
             b.content = ticked
             changed.append(i)
             continue
@@ -1011,7 +1015,8 @@ def apply_edits(md_text: str, edits, _tomb: str = "", _span: int = 1):
     # paragraphs). That invalidates every index the open page is holding, so the
     # caller has to make the page reload rather than let it save against stale ids.
     remap = len(split_md_blocks(new_text)) != len(blocks)
-    return new_text, {"changed": changed, "skipped": skipped, "remap": remap, "deleted": deleted}
+    return new_text, {"changed": changed, "skipped": skipped, "remap": remap, "deleted": deleted,
+                      "toggled": list(toggled.values())}
 
 
 # ──────────────────────────────────────────── edits against an older version ──
@@ -1761,7 +1766,7 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
     tomb = ""
     while not tomb or tomb in base_text + cur_text:
         tomb = f"<!--sheaf-merge-{os.urandom(6).hex()}-->"
-    text, changed, skipped, conflicts = cur_text, [], [], []
+    text, changed, skipped, conflicts, toggled = cur_text, [], [], [], []
     for t in todo:
         j, mode, i, html, span = t.at, t.mode, t.i, t.html, t.span
         blocks = split_md_blocks(text)
@@ -1809,6 +1814,9 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
         # must not be bound to it.
         held = {_identity(c) for c in rdc.parse(bb[i].content).comments}
         mine = _span_text(blocks, j, span)
+        # A box counts as ticked by this save (SPEC 9.11) only when the file's block is still the one the
+        # page held: else the page's boxes are compared with boxes someone else changed since.
+        as_held = span == 1 and mine == bb[i].content
         content, lifted = _lift(mine, held)
         if lifted:
             pos = sum(len(x.text) for x in blocks[:j])
@@ -1816,6 +1824,8 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
         n_before = len(split_md_blocks(text))
         text, rep = apply_edits(text, [{"i": j, "html": html}], _tomb=tomb, _span=span)
         skipped += [(i, why) for _, why in rep["skipped"]]
+        if as_held:
+            toggled += rep["toggled"]
         # The edit of `span` blocks is now blocks j .. j + grown.
         grown = len(split_md_blocks(text)) - n_before + span - 1
         if rep["changed"] and (j in rep["deleted"] or not _bare(split_md_blocks(text)[j].content)):
@@ -1843,7 +1853,7 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
     if tomb in text:
         text = _drop_tombstones(text, tomb)
     return text, {"changed": changed, "skipped": skipped, "remap": True,
-                  "merged": True, "conflicts": conflicts}
+                  "merged": True, "conflicts": conflicts, "toggled": toggled}
 
 
 def map_block(base_text: str, cur_text: str, i: int):

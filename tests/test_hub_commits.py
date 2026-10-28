@@ -10,7 +10,7 @@ import pytest
 from helpers import BEA, CAL, FRONT, Front, PLAN
 
 from sheafmd.blocks import split_md_blocks
-from sheafmd.hub import proxy
+from sheafmd.hub import proxy, the_list
 from sheafmd.source import md_hash
 
 DOC = "sheaves/acme/blog/2026-10-28-plan.md"
@@ -378,3 +378,42 @@ def test_a_conflict_in_the_index_is_left_as_it_is(box, sheaves):
     (row,) = rows("commit-failed")
     assert row["doc"] == DOC and "conflict" in row["error"]
     assert git(sheaves, "ls-files", "-u") == unmerged
+
+
+PRIVATE = """---
+client: acme
+project: blog
+owner: bea
+sources: [library:doc-123]
+---
+# What the contract says
+
+- [ ] Share
+
+A quote from the contract.
+"""
+
+
+def test_a_share_is_one_commit_by_the_signed_in_owner_whatever_name_the_request_carries(box, sheaves, remote):
+    import dataclasses
+    box.hub.proxy.members[BEA] = dataclasses.replace(box.hub.proxy.members[BEA], short="bea")
+    rel = "acme/blog/2026-10-28-contract.md"
+    (sheaves / rel).write_text(PRIVATE, encoding="utf-8")
+    git(sheaves, "add", rel)
+    git(sheaves, "commit", "-q", "-m", "the contract")
+    git(sheaves, "push", "-q", "origin", "HEAD:main")
+
+    def share(member):
+        text = (sheaves / rel).read_text(encoding="utf-8")
+        edit = the_list.tick_edit(text, 0, "Share")
+        return box.post("/_/save", {"doc": f"sheaves/{rel}", "hash": md_hash(text), "edits": [edit],
+                                    "by": "Bea", "author": "Bea <bea@example.com>", "short": "bea"}, member=member)
+
+    assert share(CAL).status == 404                         # not his to open, let alone to share
+    assert share(BEA).status == 200
+    (who, files), *_ = pushed(box, remote)
+    assert who == f"Bea <bea@example.com>|edit: {rel}"
+    assert rel in files and all(f == rel or f.startswith(".sheaf/versions/") for f in files)
+    on_remote = git(remote, "show", f"main:{rel}")
+    assert "- [x] Share" in on_remote and "visibility: project" in on_remote and "shared: bea " in on_remote
+    assert len(pushed(box, remote)) == 3                    # the first, the contract, the share: Cal wrote nothing

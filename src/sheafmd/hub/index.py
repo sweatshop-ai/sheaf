@@ -514,7 +514,7 @@ class Index:
         when the listing leaves it out (a gitignored file the person named). `rendered` lists
         only those, with no listing of any folder: what `sheaf list` asks for. For a `member` of
         proxy mode, only their roots, and in them only their documents: a root nested inside one
-        of theirs is another root (9.9)."""
+        of theirs is another root (9.9), and a sheaf that is another member's alone is none (9.11)."""
         hub = self.hub
         waiting, running = self._live_state()
         named = {a for a, e in list(hub.entries.items()) if e.rendered}
@@ -544,14 +544,14 @@ class Index:
                 address, path = str(roots_mod.Address(root.name, f.rel)), root.path / f.rel
                 keys.add(str(path))
                 have.add(address)
-                if shown(root, path):
+                if shown(root, path) and (member is None or hub.visible(member, address)):
                     rows.append(self._row(address, path, f.stat, waiting, running, member))
             for address in sorted(a for a in named - have if a.startswith(roots_mod.Address.prefix(root.name))):
                 if not (found := self._stat_of(root, address)):
                     continue
                 path, st = found
                 keys.add(str(path))
-                if shown(root, path):
+                if shown(root, path) and (member is None or hub.visible(member, address)):
                     rows.append(self._row(address, path, st, waiting, running, member))
             if rendered and not rows:
                 continue

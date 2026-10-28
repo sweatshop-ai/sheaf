@@ -31,6 +31,10 @@ _Avoid_: settings, project config
 A read-only render of a document with every comment removed, for someone outside the conversation.
 _Avoid_: client render, client version, public copy
 
+**Share**:
+The action a sheaf's owner ticks to open it to every member whose roots hold it (SPEC 9.11). It renders nothing and makes no Share copy.
+_Avoid_: publish, unlock
+
 **Link rule**:
 The standard that every page, article, tool or document a text names is a link to its URL. It is checked when a page is rendered and told to the agent.
 
@@ -74,6 +78,17 @@ The small service the reverse proxy asks, in proxy mode, whether a request carri
 **Member**:
 A user of the front whom the hub's config lets in through proxy mode, with the roots they see and the name they sign with. A member has no account on the machine.
 _Avoid_: account, login
+
+**Owner** (of a sheaf):
+The member a sheaf belongs to: the assignee of its issue in the list's record, else the member its front matter's `owner` names (SPEC 9.11). Only the owner reads a sheaf that is its owner's alone, and only the owner ticks Share. A member's roots are not "owned": a root is one a member may open (9.9), whatever the code's `owns` says.
+_Avoid_: author, creator, root owner
+
+**Visibility**:
+Whether a sheaf is open to every member whose roots hold it, or its owner's alone, as the hub reads it from the front matter (SPEC 9.11).
+_Avoid_: permission, privacy, ACL
+
+**Stop James**:
+The action any member ticks on a sheaf of the assistant James to end his work on its project (SPEC 9.11). It is the one place the core names a deployment's assistant: the hub writes a diagnostics row and, with `[list] stop_dir`, a file the deployment's supervisor reads; stopping is the deployment's, a Layer concern the core only signals.
 
 **Agent adapter**:
 How the hub reaches an agent session: ask it a question, deliver a Tell, read its state, stop it. Each agent offers only what it can really do.

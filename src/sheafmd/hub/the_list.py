@@ -37,9 +37,11 @@ from ..blocks import _split_lines, split_md_blocks
 from ..edit import TASK_MARK_RE, ticked_html
 from . import projects
 from . import roots as roots_mod
+from . import visibility
+from .visibility import front_matter, text as fm_text
 
 TABLE_KEYS = {"root": str, "repo": str, "project": int, "token_file": str}
-OPTIONAL_KEYS = {"api": str, "poll": int, "waiting": str, "in_progress": str}
+OPTIONAL_KEYS = {"api": str, "poll": int, "waiting": str, "in_progress": str, "stop_dir": str}
 DEFAULTS = {"api": "https://api.github.com", "poll": 60, "waiting": "Waiting on member",
             "in_progress": "In progress"}
 WORDS = ("Approve", "Run it", "Don't run", "Undo skip", "Done", "Share", "Stop James")
@@ -51,7 +53,6 @@ _REPO_RE = re.compile(r"[A-Za-z0-9-]+/[A-Za-z0-9._-]+")
 _ISSUE_RE = re.compile(r"([A-Za-z0-9-]+)/([A-Za-z0-9._-]+)#([0-9]+)")
 _ACTION_RE = re.compile(r"\s*[-*+] \[ \] (" + "|".join(re.escape(w).replace("'", "['’]") for w in WORDS)
                         + r")(?:\s+@([A-Za-z0-9._-]+))?\s*")
-_KEY_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*):(?:\s+(.*?))?\s*")
 
 
 class ListError(Exception):
@@ -68,6 +69,7 @@ class ListConfig:
     poll: int = DEFAULTS["poll"]
     waiting: str = DEFAULTS["waiting"]          # the Project's Status option of `waiting`
     in_progress: str = DEFAULTS["in_progress"]  # and of `open`
+    stop_dir: Path | None = None                # where a Stop James tick drops its file (9.11)
 
     @property
     def owner(self) -> str:
@@ -82,6 +84,12 @@ def load() -> ListConfig | None:
     if "list" not in data:
         return None
     return parse(data["list"], paths.config_file())
+
+
+def _within(path: str, folder: str) -> bool:
+    """Whether `path` is `folder` or under it, by their real paths."""
+    p, f = os.path.realpath(path), os.path.realpath(folder)
+    return p == f or p.startswith(f.rstrip("/") + "/")
 
 
 def parse(t: dict, where) -> ListConfig:
@@ -99,6 +107,12 @@ def parse(t: dict, where) -> ListConfig:
     for key in ("root", "token_file"):
         if not t[key].startswith("/"):
             raise ListError(f"'{key}' must be an absolute path, in {here}: {t[key]!r}")
+    if "stop_dir" in t:
+        stop = t["stop_dir"].rstrip("/") or "/"
+        if not stop.startswith("/"):
+            raise ListError(f"'stop_dir' must be an absolute path, in {here}: {t['stop_dir']!r}")
+        if _within(stop, t["root"]):
+            raise ListError(f"'stop_dir' must not be inside the list's root, in {here}: {t['stop_dir']!r}")
     if not _REPO_RE.fullmatch(t["repo"]):
         raise ListError(f"'repo' must be owner/name, in {here}: {t['repo']!r}")
     if t["project"] < 1:
@@ -110,7 +124,8 @@ def parse(t: dict, where) -> ListConfig:
         raise ListError(f"'api' must be an https:// address, in {here}: {api!r}")
     return ListConfig(Path(t["root"].rstrip("/") or "/"), t["repo"], t["project"], Path(t["token_file"]),
                       api, t.get("poll", DEFAULTS["poll"]), t.get("waiting", DEFAULTS["waiting"]),
-                      t.get("in_progress", DEFAULTS["in_progress"]))
+                      t.get("in_progress", DEFAULTS["in_progress"]),
+                      Path(t["stop_dir"].rstrip("/") or "/") if "stop_dir" in t else None)
 
 
 # ── a sheaf, as its file says ───────────────────────────────────────────────
@@ -122,39 +137,17 @@ class Sheaf:
     issue: tuple | None         # (owner, repo, number)
     assistant: str
     kind: str
-    visibility: str
+    visibility: str             # what the hub enforces (9.11): `owner` or `project`, never as written alone
     actions: tuple              # ((word, short name or "", 0-based line in the file), ...)
-
-
-def _lines(text: str) -> list:
-    """The lines of `text` as split_md_blocks numbers them: on "\n" only, never on U+2028 or "\x0c" as
-    splitlines() does, so the front matter, the actions and the blocks agree on every line."""
-    return [line.removesuffix("\r") for line in text.split("\n")]
-
-
-def front_matter(text: str) -> dict:
-    """The top-level `key: value` lines of the front matter at the top of `text`; a list or a nested
-    table under a key is not read."""
-    lines = _lines(text)
-    if not lines or lines[0].strip() != "---":
-        return {}
-    out = {}
-    for line in lines[1:]:
-        if line.strip() in ("---", "..."):
-            return out
-        m = _KEY_RE.fullmatch(line)
-        if m:
-            value = (m.group(2) or "").strip()
-            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-                value = value[1:-1]
-            out[m.group(1)] = value
-    return {}                   # no closing line: no front matter
+    sources: tuple = ()
+    owner: str = ""
+    shared: str = ""
 
 
 def read_sheaf(rel: str, text: str) -> Sheaf:
     fm = front_matter(text)
     issue = None
-    if m := _ISSUE_RE.fullmatch(fm.get("issue", "")):
+    if m := _ISSUE_RE.fullmatch(fm_text(fm, "issue")):
         issue = (m.group(1), m.group(2), int(m.group(3)))
     # The title and the actions are read from the blocks the page draws, so an action in a fence, an
     # indented code block or an HTML comment is no action, and every action is one the tick can reach.
@@ -167,8 +160,9 @@ def read_sheaf(rel: str, text: str) -> Sheaf:
             for k, line in enumerate(own):
                 if m := _ACTION_RE.fullmatch(line.removesuffix("\r")):
                     actions.append((m.group(1).replace("’", "'"), m.group(2) or "", b.start + k))
-    return Sheaf(rel, title or rel.rsplit("/", 1)[-1][:-3], issue, fm.get("assistant", ""),
-                 fm.get("kind", ""), fm.get("visibility", "project"), tuple(actions))
+    return Sheaf(rel, title or rel.rsplit("/", 1)[-1][:-3], issue, fm_text(fm, "assistant"),
+                 fm_text(fm, "kind"), visibility.effective(fm), tuple(actions), visibility.sources(fm),
+                 fm_text(fm, "owner"), fm_text(fm, "shared"))
 
 
 def tick_edit(text: str, n: int, word: str):
@@ -374,6 +368,18 @@ class TheList:
                 self._answered[a.rel] = row.record.updated
 
     # ── the page ────────────────────────────────────────────────────────────
+    def assignees(self, address: str):
+        """The record's assignees of the issue of the sheaf at `address`, from the last poll; None when the
+        list does not know the sheaf (no row: another root, no issue, or not polled yet)."""
+        a = roots_mod.Address.parse(address)
+        root = self.root()
+        if root is None or a.root != root.name:
+            return None
+        for row in self._snap.rows:
+            if row.sheaf.rel == a.rel:
+                return tuple(row.record.assignees)
+        return None
+
     def serves(self, name: str) -> bool:
         """Whether `name` is the root whose page is the list; never the git top of a refused list root."""
         r = self.hub.roots.lookup(self.cfg.root / projects.FILE)
@@ -392,7 +398,7 @@ class TheList:
                 continue
             owners = [mine.get(a.lower()) for a in row.record.assignees]
             is_owner = any(o is not None and o.id == member.id for o in owners)
-            if row.sheaf.visibility == "owner" and not is_owner:
+            if not self.hub.visible(member, f"{root.name}/{row.sheaf.rel}"):   # the file now, not the poll
                 continue
             addressed = any(short and short.lower() == member.short.lower() for _, short, _ in row.sheaf.actions)
             if show == "mine" and not (is_owner or addressed):

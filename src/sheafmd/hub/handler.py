@@ -15,8 +15,10 @@ connection, the Host of the front, the member header, the route (a member's rout
 Origin of every POST, then the body. No cookie and no key is read there.
 """
 import json
+import os
 import re
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote
@@ -29,7 +31,7 @@ from ..edit import EditError
 from ..mcp import Caller, Door
 from ..render import RenderError
 from ..source import StaleError
-from . import auth, peer, proxy, the_list
+from . import auth, peer, proxy, the_list, visibility
 from .asktell import NO_AGENT, JobRefused
 from .index import Status
 from .live import UNKNOWN, NotAuthor
@@ -384,7 +386,7 @@ class Handler:
                 if not isinstance(doc, str):
                     return None
                 try:
-                    theirs = self.hub.member_owns(member, doc)
+                    theirs = self.hub.member_owns(member, doc) and self.hub.visible(member, doc)
                 except Exception:
                     self.hub.record_exception("status-failed", doc)
                     return None
@@ -485,9 +487,11 @@ class Handler:
     # ── helpers for the routes ───────────────────────────────────────────────
     def _owned(self, req: Req, doc):
         """The address `doc` names, once the request may name it: text, and for a member one of their
-        own roots. Looks at no file, so it holds for a document that is gone."""
+        own roots and none whose visibility is its owner's alone when they are not the owner (9.11). Reads
+        no more than the front matter, so it holds for a document that is gone."""
         _shape(isinstance(doc, str), "doc is missing")
-        if req.member is not None and not self.hub.member_owns(req.member, doc):
+        if req.member is not None and not (self.hub.member_owns(req.member, doc)
+                                           and self.hub.visible(req.member, doc)):
             raise Refuse(404, "no such document")
         return doc
 
@@ -632,7 +636,8 @@ class Handler:
         rid = b.get("rid")
         _shape(rid is None or (isinstance(rid, str) and _RID_RE.fullmatch(rid)), "rid is not a request id")
         try:
-            got = e.live.save(h, edits, rid=rid)
+            guard, ticked = self._ticks(req, e)
+            got = e.live.save(h, edits, rid=rid, guard=guard)
         except (EditError, StaleError) as ex:
             raise Refuse(409, str(ex)) from None
         except UnicodeEncodeError:
@@ -641,6 +646,8 @@ class Handler:
         self.hub.index.touch(e.address)
         if got["changed"] and not got.get("again"):
             self.hub.committed(e.address, req.member, "edit")
+        if "Stop James" in ticked:
+            self._stop_james(req, e)
         if got["merged"] and not got.get("again"):
             # Not a failure, but the thing this log exists to measure: how often the page and
             # an agent write at the same time.
@@ -662,16 +669,81 @@ class Handler:
         if edit is None:
             raise Refuse(409, f"the sheaf no longer holds that action ({word}): reload the list")
         try:
-            got = e.live.save(h, [edit])
+            guard, ticked = self._ticks(req, e)
+            got = e.live.save(h, [edit], guard=guard)
         except (EditError, StaleError) as ex:
             raise Refuse(409, str(ex)) from None
         if not got["changed"]:
             raise Refuse(409, f"the sheaf no longer holds that action ({word}): reload the list")
         self.hub.index.touch(e.address)
         self.hub.committed(e.address, req.member, "tick")
+        if "Stop James" in ticked:
+            self._stop_james(req, e)
         if self.hub.the_list is not None:
             self.hub.the_list.ticked(e.address)
         return _ok(hash=got["hash"])
+
+    def _ticks(self, req: Req, e):
+        """The guard of a save (live.save) for the two actions the hub acts on (9.11), and the set it fills
+        with the words the save ticked. Share is its owner's alone: ticked by anyone else, nothing is
+        written; ticked by the owner, the same write opens the sheaf to the project. Who ticked is the
+        signed-in member, never a name the request carries."""
+        ticked = set()
+
+        def guard(text, new):
+            words = visibility.newly_ticked(text, new)
+            if "Share" in words:
+                m = req.member
+                if m is not None:
+                    the = self.hub.the_list
+                    owners = visibility.owner_of(visibility.front_matter(new), [m],
+                                                 the.assignees(e.address) if the is not None else None)
+                    if not owners:
+                        raise EditError("Only the owner of this sheaf can share it.")
+                if visibility.effective(visibility.front_matter(new)) == "owner":
+                    by = (m.short or m.name) if m is not None else self.hub.person
+                    new = visibility.share(new, by, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+            ticked.clear()
+            ticked.update(words)
+            return new
+        return guard, ticked
+
+    def _stop_james(self, req: Req, e):
+        """A member ticked Stop James (9.11): a `stop-james` row, and for a sheaf of James a file in the
+        `[list]`'s `stop_dir` that the box's supervisor of James reads to end his window for the project.
+        The hub kills nothing itself."""
+        rel = Address.parse(e.address).rel
+        project = "/".join(rel.split("/")[:2]) if rel.count("/") >= 2 else ""
+        try:
+            fm = visibility.front_matter((e.path).read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError):
+            fm = {}
+        assistant = visibility.text(fm, "assistant")
+        m = req.member
+        the = self.hub.the_list
+        folder = the.cfg.stop_dir if the is not None else None
+        drop = None
+        if assistant.casefold() != "james":
+            drop = "not a sheaf of James"
+        elif not project:
+            drop = "the sheaf is in no <client>/<project> folder"
+        elif folder is None:
+            drop = "no stop_dir in [list]"
+        elif not folder.is_dir():
+            drop = f"{folder} is not a folder"
+        else:
+            stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+            name = f"{project.replace('/', '--')}-{stamp}"
+            tmp = folder / f".{name}.tmp"
+            try:
+                tmp.write_text(project + "\n", encoding="utf-8")
+                os.replace(tmp, folder / name)
+                drop = "written"
+            except OSError as ex:
+                drop = f"failed: {ex.strerror or ex}"
+                tmp.unlink(missing_ok=True)
+        self.hub.record("stop-james", e.address, project=project, assistant=assistant,
+                        by=(m.short or m.name) if m is not None else self.hub.person, drop=drop)
 
     def _pin(self, req: Req) -> Response:
         """The page keeps the version it holds past a change of the file, while a form holds the reload

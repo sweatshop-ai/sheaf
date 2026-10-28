@@ -299,7 +299,6 @@ class Row:
     sheaf: Sheaf
     record: Record
     group: str                  # `<client>/<project>`
-    issue: tuple                # the issue the record was read for; a tick re-reads `sheaf`, never this
 
 
 @dataclass
@@ -360,7 +359,7 @@ class TheList:
                 self._records = fetch(self.cfg, wanted) if wanted else {}   # an issue it does not hold is off
             except RecordError as e:
                 self.hub.record("list-poll-failed", None, root=root.name, error=str(e))
-            rows = [Row(s, self._records[s.issue], "/".join(s.rel.split("/")[:2]), s.issue)
+            rows = [Row(s, self._records[s.issue], "/".join(s.rel.split("/")[:2]))
                     for s in sheaves if s.issue in self._records]
             # A ticked sheaf waits on nobody until the record routine has moved its issue: a new change of the
             # issue, or a Status other than waiting (moving a Project's Status leaves the issue's change as it was).
@@ -386,17 +385,24 @@ class TheList:
 
     def ticked(self, address: str):
         """A member ticked an action of the sheaf at `address`: its row leaves "Waiting on you" now, and
-        shows its other actions, rather than at the next poll that sees the record move."""
+        shows its other actions, rather than at the next poll that sees the record move. A sheaf whose file
+        now names another issue, or none, leaves the list until the next poll: its row's record is not that
+        issue's, so its assignees are nobody's (9.11)."""
         a = roots_mod.Address.parse(address)
         root = self.root()
         if a.root != root.name:
             return
-        for row in self._snap.rows:
+        snap = self._snap
+        for row in snap.rows:
             if row.sheaf.rel == a.rel:
                 try:
-                    row.sheaf = read_sheaf(a.rel, (root.path / a.rel).read_text(encoding="utf-8"))
+                    sheaf = read_sheaf(a.rel, (root.path / a.rel).read_text(encoding="utf-8"))
                 except (OSError, UnicodeDecodeError):
-                    pass
+                    sheaf = row.sheaf
+                if not _same_issue(sheaf.issue, row.sheaf.issue):
+                    snap.rows = [r for r in snap.rows if r is not row]     # a new list: a page reading the old one keeps it
+                    return
+                row.sheaf = sheaf
                 self._answered[a.rel] = row.record.updated
 
     # ── the page ────────────────────────────────────────────────────────────
@@ -410,7 +416,7 @@ class TheList:
             return None
         for row in self._snap.rows:
             if row.sheaf.rel == a.rel:
-                return tuple(row.record.assignees) if _same_issue(row.issue, issue_of(issue)) else None
+                return tuple(row.record.assignees) if _same_issue(row.sheaf.issue, issue_of(issue)) else None
         return None
 
     def serves(self, name: str) -> bool:
@@ -486,7 +492,7 @@ class TheList:
             owner = "@" + owners[0].short
         else:
             owner = "nobody"
-        meta = " · ".join(x for x in (s.kind, owner, f"#{row.issue[2]}", _age(self.hub.clock() - rec.updated)) if x)
+        meta = " · ".join(x for x in (s.kind, owner, f"#{s.issue[2]}", _age(self.hub.clock() - rec.updated)) if x)
         box = ""
         if s.actions:
             word = s.actions[0][0]

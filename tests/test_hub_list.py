@@ -684,18 +684,26 @@ def test_a_tick_after_the_issue_changed_does_not_give_the_old_assignees_back(box
     assert r.status == 200, r.text
     assert box.get(address, member=NELL).status == 404          # the tick, before the next poll
     assert box.get(address, member=DORA).status == 200
+    assert "globex/black-friday" not in str(read(box.get("/list", member=NELL)))
 
 
-def test_a_tick_after_the_issue_was_taken_out_still_draws_the_list_with_the_polled_issue(box, sheaves, github):
-    github.issues[5].update(status="In progress at TT")
+def titles(page):
+    return [t for groups in page.values() for rows in groups.values() for t, _ in rows]
+
+
+@pytest.mark.parametrize("issue", ["issue:\n", "issue: acme/record#7\n"], ids=["removed", "changed"])
+def test_a_tick_after_the_issue_changed_takes_the_row_off_the_list_until_the_next_poll(box, sheaves, github, issue):
+    github.issues[5].update(status="In progress at TT")         # drawn, not left out as answered
     box.hub.the_list.poll()
     joey = sheaves / JOEY[5:]
-    joey.write_text(joey.read_text(encoding="utf-8").replace("issue: acme/record#5\n", "issue:\n"), encoding="utf-8")
+    joey.write_text(joey.read_text(encoding="utf-8").replace("issue: acme/record#5\n", issue), encoding="utf-8")
     r = box.post("/_/tick", {"doc": JOEY, "action": 0, "word": "Approve"}, member=NELL)
     assert r.status == 200, r.text
-    page = read(box.get("/list", member=NELL))      # its row is the poll's until the next poll, "you" the file's
-    assert page["In progress 2"]["globex/black-friday"] == [
-        ("Reply to Joey about column L James", "mail · @nell · #5 · 2 h")]
+    for m in (NELL, DORA):
+        assert "Reply to Joey about column L James" not in titles(read(box.get("/list?show=all", member=m)))
+    box.hub.the_list.poll()
+    listed = "Reply to Joey about column L James" in titles(read(box.get("/list?show=all", member=DORA)))
+    assert listed == (issue != "issue:\n")                      # back under #7; with no issue, on no list (9.10)
 
 
 def test_an_issue_without_assignees_has_the_owner_its_sheaf_names(box, sheaves, github):

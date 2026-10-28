@@ -230,3 +230,14 @@ def test_an_owner_only_sheaf_with_a_comment_on_its_visibility_line_answers_404_t
     put(team, work, DOC, PRIVATE.replace("sources: [library:doc-123]", "visibility: owner   # Thierry's alone"))
     assert team.get(f"/work/{DOC}", member=HANS).status == 404
     assert team.get(f"/work/{DOC}", member=THIERRY).status == 200
+
+
+def test_the_stop_file_is_readable_by_the_folders_group_whatever_the_hubs_umask(team, work, stop_dir):
+    put(team, work, DOC, STOPPABLE)
+    old = os.umask(0o077)
+    try:
+        assert tick(team, work, DOC, "Stop James", HANS).status == 200
+    finally:
+        os.umask(old)
+    f, = stop_dir.iterdir()
+    assert f.stat().st_mode & 0o777 == 0o640

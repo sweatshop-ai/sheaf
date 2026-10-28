@@ -59,6 +59,7 @@
     CFG.lines = j.lines || {};
     if ('work' in j) CFG.work = j.work;       // a fork moves the live session off the box (9.12)
     takeAgent();
+    if (workOpen()) drawWork();               // an open Work on this shows the sessions the hub knows now
     var wasOpen = menu.classList.contains('open');
     buildMenu();
     if (wasOpen) openMenu();
@@ -465,7 +466,7 @@
     if (bs) bs.disabled = !(d > 0 && canSave && !stale && !dead);
   }
 
-  function openMenu() { menu.classList.add('open'); refresh(); }
+  function openMenu() { closeWork(); menu.classList.add('open'); refresh(); }     // the popover stands where the menu is
   function closeMenu() { menu.classList.remove('open'); }
   btn.addEventListener('click', function (e) {
     e.stopPropagation();

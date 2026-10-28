@@ -528,8 +528,9 @@ def test_a_list_root_inside_a_git_work_tree_is_refused_at_each_poll_and_lists_no
     box.hub.the_list.poll()
     rows = hub_rows("list-poll-failed")
     assert rows and f"{repo / 'list'} is not the top folder of its root" in rows[-1]["error"], rows
+    # The git top's own page stays its index: a refused list root does not take it over.
     res = box.get("/repo", member=NELL)
-    assert res.status == 200 and BeautifulSoup(res.text, "html.parser").select(".list-row") == []
+    assert res.status == 301 and res.headers["Location"] == "/repo/", res.status
 
 
 def test_a_ticked_sheaf_moved_out_of_waiting_and_back_without_a_new_change_is_waiting_again(box, github):

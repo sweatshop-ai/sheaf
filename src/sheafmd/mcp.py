@@ -697,8 +697,9 @@ class Door:
         """`text`, a door write's text after `_visible`, when the sheaf it makes at `address` has an owner. A
         sheaf that is its owner's alone and that no member owns is open to nobody, the token that wrote it
         included, and no door write can mend it (9.11). So when no member owns it and it names no `owner`, a
-        token bound to a member gives it that member's `short`; else the write is refused. The key, which reads every file,
-        writes it as `_visible` gave it (#30)."""
+        token bound to a member gives it that member's `short`; else the write is refused. One its issue's
+        assignees alone own gets the `short` of one of them, so it stays theirs once the list does not poll the
+        issue (#33). The key, which reads every file, writes it as `_visible` gave it (#30)."""
         if not self._judged(caller):
             return text
         fm = visibility.front_matter(text)
@@ -706,9 +707,16 @@ class Door:
             return text
         # an owner whose roots do not hold the sheaf cannot open it either (9.9)
         everyone = self.hub.members_owning(self.hub.proxy.members.values(), address)
-        if visibility.owner_of(fm, everyone, self.hub.assignees(address, fm)):
-            return text     # owned already, by an assignee of its issue or its `owner`, which stays as it is
         member = self._member(caller)
+        owners = visibility.owner_of(fm, everyone, self.hub.assignees(address, fm))
+        if owners and visibility.owner_of(fm, everyone):
+            return text     # its `owner` owns it without the record, and stays as it is
+        if owners:
+            # Owned by its issue's assignees alone, who own it only while the list polls the issue: once it
+            # does not, the `owner` is the owner, so it names one of them, the token's member first (#33).
+            short = next((m.short for m in owners if m.short and member is not None and m.id == member.id),
+                         next((m.short for m in owners if m.short), None))
+            return visibility.set_keys(text, {"owner": short}) if short else text
         if member is not None and member.short and not visibility.text(fm, "owner"):
             text = visibility.set_keys(text, {"owner": member.short})
             fm = visibility.front_matter(text)

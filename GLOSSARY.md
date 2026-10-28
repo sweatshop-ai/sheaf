@@ -90,6 +90,18 @@ _Avoid_: permission, privacy, ACL
 **Stop James**:
 The action any member ticks on a sheaf of the assistant James to end his work on its project (SPEC 9.11). It is the one place the core names a deployment's assistant: the hub writes a diagnostics row and, with `[list] stop_dir`, a file the deployment's supervisor reads; stopping is the deployment's, a Layer concern the core only signals.
 
+**Work on this**:
+What a member does with a sheaf's agent session from its page (SPEC 9.12): attach to James's window on the box, if they have a shell there, or fork the live session to their own machine with `tiroir work`. The page offers it from the meta block's `work`.
+_Avoid_: resume, take over, hand over
+
+**Fork** (of a session):
+A new session on a member's machine, started from the transcript of a sheaf's box-hosted session, which the hub serves and never changes (SPEC 9.12). Reported to the hub, it becomes the first of the sheaf's `sessions`, under the signed-in member's name; the session it came from goes on as it was.
+_Avoid_: copy, clone, move
+
+**Box-hosted session**:
+A sheaf's session whose `host` in its `sessions` front matter is `[list] box`: James's, on the deployment's box (SPEC 9.12). The hub serves the transcript of no other session, and only when one is the live session, the first item, do Ask and Tell go to James's window by a file in `[list] tell_dir`.
+_Avoid_: remote session, server session
+
 **Agent adapter**:
 How the hub reaches an agent session: ask it a question, deliver a Tell, read its state, stop it. Each agent offers only what it can really do.
 

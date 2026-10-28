@@ -464,12 +464,13 @@ def _run(started_by: str, signals: "sender.Signals") -> int:
         list_cfg = the_list.load()
         if list_cfg is not None and cfg is None:
             raise the_list.ListError(f"[list] of {paths.config_file()} needs a [proxy] table: the list is a member's page")
-        if list_cfg is not None and list_cfg.stop_dir is not None:
-            # A file dropped in a member's root would be a document they open.
-            for m in cfg.members.values():
-                if any(the_list._within(str(list_cfg.stop_dir), r) for r in m.roots):
-                    raise the_list.ListError(f"'stop_dir' of [list] of {paths.config_file()} is inside a root of "
-                                             f"{m.name}: {list_cfg.stop_dir}")
+        for key in the_list.FOLDER_KEYS if list_cfg is not None else ():
+            # A file dropped in a member's root would be a document they open; a transcript there, one they read.
+            folder = getattr(list_cfg, key)
+            for m in cfg.members.values() if folder is not None else ():
+                if any(the_list._within(str(folder), r) for r in m.roots):
+                    raise the_list.ListError(f"'{key}' of [list] of {paths.config_file()} is inside a root of "
+                                             f"{m.name}: {folder}")
     except the_list.ListError as e:
         return _list_refused(e)
     # From reading the key to holding the port, `sheaf rotate` on a machine with no hub waits: it

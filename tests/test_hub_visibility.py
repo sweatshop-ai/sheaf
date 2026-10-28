@@ -884,3 +884,20 @@ def test_a_bound_token_cannot_tell_another_members_root_from_none(team, browser,
     _, theirs = call(browser, tool, token=token, doc=doc.format(root=name, path=root), **args)
     _, none = call(browser, tool, token=token, doc=doc.format(root="nosuchroot", path=nowhere), **args)
     assert theirs == none.replace("nosuchroot", name).replace(str(nowhere), str(root))
+
+
+def test_a_bound_token_cannot_tell_another_members_root_from_none_through_a_link(team, browser, work, hans_root):
+    """`create` by an absolute path through a link: one into Hans's root answers as one into no root (#68)."""
+    root, _ = hans_root
+    team.hub.proxy = members(work, hans_also=root, thierry=["james-thierry"])
+    token = Tokens().add("james-thierry", write=True)
+    links, nowhere = work.parent / "links", work.parent / "nowhere"
+    links.mkdir()
+    nowhere.mkdir()
+    (links / "lnk").symlink_to(root.parent)
+    (links / "lnk2").symlink_to(nowhere)
+    theirs, none = links / "lnk" / root.name / "x.md", links / "lnk2" / "x.md"
+    is_error, got = call(browser, "create", token=token, doc=str(theirs), text="# X\n")
+    _, expected = call(browser, "create", token=token, doc=str(none), text="# X\n")
+    assert is_error and got == expected.replace(str(none), str(theirs))
+    assert not (root / "x.md").exists()

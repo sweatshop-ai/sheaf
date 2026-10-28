@@ -569,12 +569,18 @@ class Door:
             raise ToolError("text is longer than 1 MiB; a page made or changed through the door is at "
                             "most that.", "size")
 
+    def _hidden_root(self, root, caller: Caller) -> bool:
+        """Whether `root` is not there for `caller`: a token bound to a member, and a root that is not one
+        of that member's (9.11)."""
+        return (member := self._member(caller)) is not None and not self.hub.owns(member, root)
+
     def _new_address(self, doc: str, caller: Caller):
         """(root, path in it) of the file `create` is to make. Its root must be one the hub has, for
         every caller, and for a token bound to a member one of that member's (9.11); the rules of 8.3,
         and no hidden name, hold for the path. An absolute path is taken as it is written, inside the
         root's real path: it is not resolved, so a link on the way is left for the walk of
-        `create_file` to refuse, as it is in `<root>/<path>`."""
+        `create_file` to refuse, as it is in `<root>/<path>`; a link into a root of another member's
+        is answered first, as a path in no root."""
         doc = _named(doc)
         roots = self.hub.roots
         if "://" in doc:
@@ -583,6 +589,8 @@ class Door:
         elif os.path.isabs(doc):
             try:
                 root = roots.lookup(Path(doc))
+                if root is not None and self._hidden_root(root, caller):
+                    root = None     # a root of another member's is none (9.11), before the link's message
                 rel = Path(doc).relative_to(root.path).as_posix() if root is not None else ""
             except (OSError, ValueError):
                 raise ToolError(f"{doc} {NOT_IN_A_ROOT} Name it `<root>/<path>`, or by the real "
@@ -590,7 +598,7 @@ class Door:
         else:
             at = Address.parse(doc)
             root, rel = roots.get(at.root), at.rel
-        if root is None or ((member := self._member(caller)) is not None and not self.hub.owns(member, root)):
+        if root is None or self._hidden_root(root, caller):
             raise ToolError(f"{doc} {NOT_IN_A_ROOT}", "path")     # a root of another member's is none (9.11)
         parts = rel.split("/")
         if (not rel.endswith(".md") or any(p in ("", ".", "..") or p.startswith(".") or "\0" in p

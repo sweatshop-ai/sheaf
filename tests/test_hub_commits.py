@@ -306,3 +306,31 @@ def test_a_versions_store_the_repo_ignores_is_committed_all_the_same(box, sheave
     (who, files), _ = pushed(box, remote)
     assert who.startswith("Bea <bea@example.com>|")
     assert any(f.startswith(".sheaf/versions/") for f in files)
+
+
+def test_a_document_the_repo_ignores_is_never_committed_nor_its_versions(box, sheaves, remote):
+    (sheaves / ".git" / "info" / "exclude").write_text("acme/blog/2026-10-28-plan.md\n", encoding="utf-8")
+    git(sheaves, "rm", "-q", "--cached", "acme/blog/2026-10-28-plan.md")
+    git(sheaves, "commit", "-q", "-m", "a private draft from now on")
+    git(sheaves, "push", "-q", "origin", "HEAD:main")
+    edit(box, sheaves)
+    assert len(pushed(box, remote)) == 2
+    assert git(sheaves, "status", "--porcelain", "--", ".sheaf").strip().startswith("??")
+
+
+def test_a_first_commit_that_fails_leaves_nothing_staged(browser, tmp_path):
+    fresh = tmp_path / "fresh"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(fresh)], check=True)
+    git(fresh, "config", "commit.gpgsign", "true")
+    git(fresh, "config", "gpg.program", "false")                # every commit fails
+    (fresh / ".sheaf.toml").write_text('commit = true\n', encoding="utf-8")
+    doc = fresh / "plan.md"
+    doc.write_text(PLAN, encoding="utf-8")
+    root = browser.hub.roots.for_document(doc)
+    text = doc.read_text(encoding="utf-8")
+    i = next(i for i, b in enumerate(split_md_blocks(text)) if b.content.startswith("Second"))
+    r = browser.post("/_/save", {"doc": f"{root.name}/plan.md", "hash": md_hash(text),
+                                 "edits": [{"i": i, "html": "<p>Second, never committed.</p>"}]})
+    assert r.status == 200, r.text
+    assert rows("commit-failed")
+    assert git(fresh, "diff", "--cached", "--name-only") == ""

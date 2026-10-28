@@ -94,11 +94,17 @@ class Commits:
             self._push_later(root.path, address)
 
     def _commit(self, folder: Path, paths: list, author: Author, subject: str, address: str) -> bool:
+        """`paths`: the document, then its versions folder when the root keeps it."""
+        if _git(folder, "check-ignore", "-q", "--", paths[0]).returncode == 0:
+            return False                              # a document the repo ignores stays out, its versions too
         # A path git cannot match stops `add`: a versions folder that no page has made yet (a door write).
         paths = [p for p in paths if (folder / p).exists() or _git(folder, "ls-files", "--", p).stdout]
         if not paths:                                 # never `add -A` with no path: that is the whole tree
             return False
-        r = _git(folder, "add", "-A", "-f", "--", *paths)   # the paths are named: an ignore rule holds none back
+        r = _git(folder, "add", "-A", "--", paths[0])
+        if r.returncode == 0 and paths[1:]:
+            # The versions folder is named by the hub: an ignore rule of `.sheaf/` holds it none back.
+            r = _git(folder, "add", "-A", "-f", "--", *paths[1:])
         if r.returncode != 0:
             self._record("commit-failed", address, error=_last_line(r))
             return False

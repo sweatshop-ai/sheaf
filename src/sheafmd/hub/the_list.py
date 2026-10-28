@@ -391,7 +391,7 @@ class TheList:
     def page(self, member, show: str, nonce: str) -> str:
         snap = self._snap
         show = show if show in SHOWS else "projects"
-        mine = {m.github.lower(): m for m in self.hub.proxy.members.values() if m.github}
+        members = list(self.hub.proxy.members.values())
         root = self.root()
         sections = {"waiting": [], "open": []}
         for row in snap.rows:
@@ -399,8 +399,9 @@ class TheList:
                 continue
             if row.record.status == "waiting" and self._answered.get(row.sheaf.rel) == row.record.updated:
                 continue
-            owners = [mine.get(a.lower()) for a in row.record.assignees]
-            is_owner = any(o is not None and o.id == member.id for o in owners)
+            # the owners as visibility.owner_of has them: the assignees, else the member the front matter names
+            owners = visibility.owner_of({"owner": row.sheaf.owner}, members, row.record.assignees)
+            is_owner = any(o.id == member.id for o in owners)
             if not self.hub.visible(member, f"{root.name}/{row.sheaf.rel}"):   # the file now, not the poll
                 continue
             addressed = any(short and short.lower() == member.short.lower() for _, short, _ in row.sheaf.actions)
@@ -447,7 +448,7 @@ class TheList:
             chips += f'<span class="list-assistant">{html.escape(s.assistant)}</span>'
         if is_owner:
             owner = "you"
-        elif owners and owners[0] is not None and owners[0].short:
+        elif owners and owners[0].short:
             owner = "@" + owners[0].short
         elif rec.assignees:
             owner = rec.assignees[0]

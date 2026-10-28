@@ -666,3 +666,15 @@ def test_a_sheaf_whose_issue_changed_since_the_poll_is_not_its_old_assignees(box
                     encoding="utf-8")
     assert box.get(address, member=NELL).status == 404          # before the next poll
     assert box.get(address, member=DORA).status == 200
+
+
+def test_an_issue_without_assignees_has_the_owner_its_sheaf_names(box, sheaves, github):
+    github.issues[6]["assignees"] = []
+    prep = sheaves / "initech/website/2026-10-26-prep-thursday.md"
+    prep.write_text(prep.read_text(encoding="utf-8").replace("kind: prep\n", "kind: prep\nowner: nell\n"),
+                    encoding="utf-8")
+    box.hub.the_list.poll()
+    assert read(box.get("/list?show=mine", member=NELL))["In progress 1"] == {
+        "initech/website": [("Prep for the call of Thursday James", "prep · you · #6 · 40 min")]}
+    assert read(box.get("/list", member=DORA))["In progress 1"] == {
+        "initech/website": [("Prep for the call of Thursday James", "prep · @nell · #6 · 40 min")]}

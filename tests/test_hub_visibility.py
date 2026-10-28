@@ -911,6 +911,18 @@ def hans_root(team, work):
     return root, f"{name}/notes.md"
 
 
+def test_a_door_create_whose_owner_cannot_reach_its_root_is_refused(team, browser, work, hans_root):
+    """An owner who is a member but not of the sheaf's root could not open it either (9.9): an orphan all the
+    same (#30)."""
+    root, notes = hans_root
+    team.hub.proxy = members(work, hans_also=root, hans=["mail-hans"])
+    name = notes.split("/", 1)[0]
+    is_error, got = call(browser, "create", token=Tokens().add("mail-hans", write=True), doc=f"{name}/x.md",
+                         text=MAIL_TEXT.replace("sources:", "owner: thierry\nsources:"))
+    assert is_error and "owner" in got, got
+    assert not (root / "x.md").exists()
+
+
 def test_a_token_bound_to_a_member_reaches_only_that_members_roots(team, browser, work, hans_root):
     root, doc = hans_root
     team.hub.proxy = members(work, hans_also=root, thierry=["james-thierry"])

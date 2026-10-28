@@ -702,7 +702,8 @@ class Door:
         fm = visibility.front_matter(text)
         if visibility.effective(fm) == "project":
             return text
-        everyone = list(self.hub.proxy.members.values())
+        # an owner whose roots do not hold the sheaf cannot open it either (9.9)
+        everyone = [m for m in self.hub.proxy.members.values() if self.hub.member_owns(m, address)]
         if visibility.owner_of(fm, everyone, self.hub.assignees(address, fm)):
             return text     # owned already, by an assignee of its issue or its `owner`, which stays as it is
         member = self._member(caller)

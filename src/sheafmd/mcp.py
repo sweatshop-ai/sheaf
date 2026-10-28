@@ -341,15 +341,18 @@ class Door:
         the key, a token bound to nobody, and every caller in loopback mode."""
         return self.hub.proxy.member_of_token(caller.token.name) if self._judged(caller) else None
 
-    def _sees(self, fm: dict, address: str, caller: Caller) -> bool:
+    def _sees(self, fm: dict, address: str, caller: Caller, owns: bool | None = None) -> bool:
         """Whether `caller` may see the sheaf at `address` whose front matter is `fm` (9.11). In proxy mode a
         token acts for the member whose `tokens` name it and sees what that member sees, in that member's
         roots only; a token bound to nobody sees every root (9.7) and no sheaf that is its owner's alone. The
-        key is the hub's own account, which reads every file."""
+        key is the hub's own account, which reads every file. `owns`, when given, is `member_owns` for the
+        token's member, already asked."""
         if not self._judged(caller):
             return True
         member = self._member(caller)
-        if member is not None and not self.hub.member_owns(member, address):
+        if owns is None and member is not None:
+            owns = self.hub.member_owns(member, address)
+        if member is not None and not owns:
             return False
         if visibility.effective(fm) == "project":
             return True
@@ -468,6 +471,7 @@ class Door:
         asking = {doc for doc, _ in hub.jobs_asking()}
         rows, shut = [], []
         in_git = {}                             # (root, real folder) -> whether 8.2 keeps its files from the root
+        owned = {}                              # (root, real folder) -> whether its files are the member's (9.11)
         for root in wanted:
             # A root the hub cannot look into may hold what waits: said by name and why, never its folder (8.6).
             if (why := root.closed()) is not None:
@@ -479,15 +483,20 @@ class Door:
                 address = str(Address(root.name, rel))
                 try:
                     path = hub.roots.resolve(address)          # never a file outside its root
-                    if (root.name, path.parent) not in in_git:
-                        in_git[root.name, path.parent] = in_git_dir(path, root)
-                    if in_git[root.name, path.parent]:
+                    folder = (root.name, path.parent)
+                    if folder not in in_git:
+                        in_git[folder] = in_git_dir(path, root)
+                    if in_git[folder]:
                         continue                               # nor one in a git directory
                     threads, fm = self._open_in(path)
                     mtime = path.stat().st_mtime_ns
                 except (NotFound, OSError, UnicodeDecodeError):
                     continue
-                if not self._sees(fm, address, caller):
+                # Whether the member owns a file asks git of its folder (8.2), and every file of a folder has the
+                # same answer: asked once a folder, not once a file.
+                if member is not None and folder not in owned:
+                    owned[folder] = hub.member_owns(member, address)
+                if not self._sees(fm, address, caller, owned.get(folder)):
                     continue                                   # nor a sheaf the caller may not see (9.11)
                 if args.get("open_only", True) and not threads:
                     continue

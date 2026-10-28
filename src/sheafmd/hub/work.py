@@ -191,7 +191,7 @@ def james_newest(cfg, project: str) -> str | None:
     lossy (`a-b/c` and `a/b-c` share one), so the name alone never decides. None when there is none."""
     if cfg.sessions_dir is None or cfg.work_dir is None:
         return None
-    cwd = f"{cfg.work_dir}/{project}"
+    cwd = os.path.join(cfg.work_dir, project)        # a work_dir of "/" gives /<client>/<project>, not //
     try:
         # The project's folder opened without following a link, and every file opened from it: the folder
         # is the copy's own, never one a link leads to.

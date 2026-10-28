@@ -272,7 +272,9 @@ class Hub:
         on their machine, the one that attaches to James's window when they have a shell on the box, the
         sessions and where the live one runs. None for a page that is not a sheaf of the list's root."""
         out = {"sessions": st.sessions, "live": st.live}
-        if st.box:                  # the fork fetches a transcript of the box: none there, nothing to fork
+        # The fork fetches a transcript of the box from /_/session: none there, or no sessions_dir to serve
+        # it from, nothing to fork.
+        if st.box and st.cfg.sessions_dir is not None:
             out["fork"] = f"tiroir work {self.proxy.origin}{roots_mod.url_path(e.address)}"
         # James names a project's window <client>_<project>: with a dash, a-b/c and a/b-c would share one.
         window = "_".join(roots_mod.Address.parse(e.address).rel.split("/")[:2])

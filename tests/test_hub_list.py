@@ -233,6 +233,16 @@ def test_all_of_the_team_shows_the_projects_a_member_is_not_in(box):
         ("Reply to Joey about column L Approve James", "mail · @nell · #5 · 2 h")]
 
 
+def test_all_of_the_team_leaves_out_a_sheaf_with_a_private_source_for_all_but_its_owner(box, sheaves):
+    joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
+    joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n", "sources: [library:4711]\n"),
+                    encoding="utf-8")
+    box.hub.the_list.poll()
+    assert "globex/black-friday" not in read(box.get("/list?show=all", member=DORA))["Waiting on you 1"]
+    assert read(box.get("/list?show=all", member=NELL))["Waiting on you 2"]["globex/black-friday"] == [
+        ("Reply to Joey about column L Approve James", "mail · you · #5 · 2 h")]
+
+
 def test_the_filters_are_links_to_real_addresses_and_the_one_shown_is_marked(box):
     soup = BeautifulSoup(box.get("/list?show=mine", member=NELL).text, "html.parser")
     links = [(a.get_text(strip=True), a["href"], a.get("aria-current")) for a in soup.select("a.list-filter")]
@@ -362,6 +372,16 @@ def test_a_list_table_the_hub_cannot_use_stops_its_start(proxy_folder, extra, wo
     assert code == 1
     assert [r["kind"] for r in rows] == ["list-config"], rows
     assert words in rows[0]["reason"] and words in err
+
+
+def test_a_stop_dir_inside_a_members_root_stops_the_start(proxy_folder):
+    from test_proxy_start import refused_start
+    configure_list(f"{proxy_folder}/hub.sock", "/srv/nell",
+                   'root = "/srv/list"\nrepo = "a/b"\nproject = 1\ntoken_file = "/run/t"\nstop_dir = "/srv/nell/stop"\n')
+    code, err, rows = refused_start()
+    assert code == 1
+    assert [r["kind"] for r in rows] == ["list-config"], rows
+    assert "inside a root of Nell" in rows[0]["reason"]
 
 
 def test_the_hub_polls_the_record_from_its_start_and_serves_the_list_on_its_proxy_socket(
@@ -598,3 +618,36 @@ def test_a_sheaf_whose_front_matter_closes_only_on_another_line_break_leaves_the
                  member=NELL)
     assert r.status in (200, 409), r.text       # no sheaf, still a document: its one box, or nothing
     assert path.read_text(encoding="utf-8") in (before, before.replace("- [ ] Approve", "- [x] Approve"))
+
+
+def test_all_of_the_team_leaves_out_a_sheaf_closed_since_the_last_poll(box, sheaves):
+    joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
+    joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n", "sources: [library:4711]\n"),
+                    encoding="utf-8")
+    assert all("globex/black-friday" not in groups for groups in read(box.get("/list?show=all", member=DORA)).values())
+
+
+def test_a_link_to_a_sheaf_has_the_owner_of_the_sheaf_it_names(box, sheaves):
+    joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
+    joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n",
+                                                             "sources: [library:4711]\nowner: dora\n"),
+                    encoding="utf-8")
+    (sheaves / "globex/black-friday/joey.md").symlink_to(joey.name)
+    box.hub.the_list.poll()
+    root = box.hub.roots.lookup(joey).name
+    assert box.get(f"/{root}/globex/black-friday/2026-10-28-reply-to-joey.md", member=DORA).status == 404
+    assert box.get(f"/{root}/globex/black-friday/joey.md", member=DORA).status == 404
+    assert box.get(f"/{root}/globex/black-friday/joey.md", member=NELL).status == 200
+
+
+def test_a_link_the_poll_does_not_read_has_the_owner_of_the_sheaf_it_names(box, sheaves):
+    joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
+    joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n",
+                                                             "sources: [library:4711]\nowner: dora\n"),
+                    encoding="utf-8")
+    (sheaves / ".kept").mkdir()
+    (sheaves / ".kept/joey.md").symlink_to(joey)
+    box.hub.the_list.poll()
+    root = box.hub.roots.lookup(joey).name
+    assert box.get(f"/{root}/.kept/joey.md", member=DORA).status == 404
+    assert box.get(f"/{root}/.kept/joey.md", member=NELL).status == 200

@@ -29,6 +29,7 @@ from .agents import detect
 from .hub.auth import clean_display
 from .hub.client import HubUnavailable
 from .hub.roots import Address, NotFound, address_of_url, in_git_dir
+from .hub import visibility
 from .hub.state import TokenRow
 from .render import COMMENT_RE as HTML_COMMENT_RE, strip_comments
 from .source import StaleError, create_file, md_hash, now, update_file
@@ -555,6 +556,7 @@ class Door:
         address, text = str(Address(root.name, rel)), _as_read(args["text"])
         self._check_size(text)
         _check_comments("", text)
+        text = self._visible(text, None)
         try:
             create_file(Path(os.path.realpath(root.path)), rel, text)
         except FileExistsError:
@@ -580,9 +582,12 @@ class Door:
                             "hash")
         self._check_size(text)
 
+        written = [text]
+
         def change(now_text):
             _check_comments(now_text, text)     # against the file as it is, under its lock
-            return text
+            written[0] = self._visible(text, now_text)
+            return written[0]
         try:
             before, _ = update_file(self.hub.roots.document(address), change, expected)
         except StaleError:
@@ -590,11 +595,20 @@ class Door:
                         "change on that text and send it with its hash.") from None
         except (OSError, UnicodeDecodeError, NotFound):
             raise ToolError(f"{address} could not be written.", "not written") from None
+        text = written[0]
         if before != text:
             self.hub.wrote(address)
             self.hub.committed(address, by=caller.display, what="update")
         return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text),
                 "changed": before != text}
+
+    def _visible(self, text: str, old: str | None) -> str:
+        """In proxy mode, the text a door write puts on disk by the rule of visibility (9.11): the caller is
+        an assistant, so its `visibility` and `shared` are not read, and a private source makes the sheaf
+        its owner's alone. With no member to hide a page from, the text as sent."""
+        if getattr(self.hub, "proxy", None) is None:
+            return text
+        return visibility.for_door(text, old)
 
 
 def _named(doc: str) -> str:

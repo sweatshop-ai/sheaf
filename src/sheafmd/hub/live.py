@@ -166,7 +166,7 @@ class LiveDocument:
             self._publish("changed", snap)
             return snap
 
-    def save(self, base_hash, edits, rid=None):
+    def save(self, base_hash, edits, rid=None, guard=None):
         """Apply a page's block edits, made against the text named by base_hash.
 
         A save that changed the file tells the open tabs with one `changed` event (SPEC 7.3:
@@ -182,6 +182,10 @@ class LiveDocument:
         paragraph the page split, or one the file changed since, is never written a second time. A save
         the hub refused is not remembered. `taken_rids` names the ids kept, and
         the `changed` event of the write names its id. The last RIDS ids of saves are kept, in memory, apart from those of comments.
+
+        `guard(text, new, toggled)` sees the text a save would write over the file's text, under the file
+        lock, with the (old, new) content of each block whose edit only flipped task marks, and returns the
+        text to write; an EditError it raises refuses the save and nothing is written (9.11).
 
         Returns the report: hash (of the text written), changed, skipped, remap, merged,
         conflicts. Raises StaleError when the file moved on from a version this document no
@@ -202,7 +206,9 @@ class LiveDocument:
                     new, got["report"] = rde.merge_edits(base, text, edits, rds.now())
                 else:
                     new, got["report"] = rde.apply_edits(text, edits)
-                return new if got["report"]["changed"] else text
+                if not got["report"]["changed"]:
+                    return text
+                return guard(text, new, got["report"]["toggled"]) if guard is not None else new
             # The version check happens inside change(), under the file lock: the CLI and an
             # Ask job write this file from other processes.
             token = rde.DOC.set(self._md)
@@ -231,7 +237,7 @@ class LiveDocument:
             return answer
 
     def comment(self, op, fields, base_hash, await_action=False, *, by=None, role=None,
-                announce=True, author=None, rid=None):
+                announce=True, author=None, rid=None, guard=None):
         """add / reply / status / edit / delete, written as this document's reader.
 
         `by` signs an add or a reply as someone else, and `role` gives a reply a role of its own
@@ -261,7 +267,8 @@ class LiveDocument:
         now, with the comment's id and `again`. It is not looked for in the file: a thread deleted or
         an edit overwritten since still answers `again`. `taken_rids` names the ids kept. The
         `changed` event of a write names its id, so the tab that gave up hears that it was taken.
-        The last RIDS ids are kept, in memory."""
+        The last RIDS ids are kept, in memory. `guard(text)` sees the file's text under the file lock
+        before anything is written, and raises to write nothing."""
         sent = (op, fields.get("id", ""), fields.get("body", ""), fields.get("quote", ""), by or self._by,
                 bool(fields.get("resolve")), bool(fields.get("ask")), bool(fields.get("tell")),
                 fields.get("block"), fields.get("start"), fields.get("end"))
@@ -274,6 +281,8 @@ class LiveDocument:
             before = self._text
 
             def change(t):
+                if guard is not None:
+                    guard(t)
                 new = write(t)
                 if wait:
                     # The Tell's baseline comes from the very text written, inside the file

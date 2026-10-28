@@ -12,6 +12,7 @@ from sheafmd.hub import proxy, the_list
 from sheafmd.hub.index import SWEEP_SECONDS
 from sheafmd.hub.state import Tokens
 from sheafmd.hub.visibility import front_matter
+from sheafmd.mcp import MAX_TEXT
 from sheafmd.source import md_hash
 
 THIERRY = "503b2f77-83de-452c-817a-a357faf85929"
@@ -933,6 +934,27 @@ def test_a_refused_create_over_a_hidden_sheaf_answers_only_that_its_name_is_take
     answers = {call(browser, "create", token=token, doc=f"work/{DOC}", text=text)[1]
                for text in (MAIL_TEXT, MAIL_TEXT.replace("sources:", "issue: thinkingtoo/tt-tiroir#9\nsources:"))}
     assert answers == {f"work/{DOC} exists already; `create` makes a new page, and `update` changes one."}
+
+
+def test_a_create_refused_for_no_owner_through_a_link_tells_nothing_of_what_is_behind_it(team, browser, work,
+                                                                                       tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.md").write_text("# Secret\n", encoding="utf-8")
+    (work / "alias").symlink_to(outside)
+    token = Tokens().add("mistral", write=True)
+    answers = {call(browser, "create", token=token, doc=f"work/alias/{name}", text=MAIL_TEXT)[1].replace(name, "N")
+               for name in ("secret.md", "none.md")}
+    assert len(answers) == 1 and "link" in answers.pop()
+
+
+def test_a_bound_tokens_create_that_its_owner_line_takes_past_the_limit_is_refused(team, browser, work):
+    team.hub.proxy = members(work, thierry=["mail"])
+    (work / "list/a/inbox").mkdir(parents=True)
+    text = MAIL_TEXT + "x" * (MAX_TEXT - len(MAIL_TEXT.encode("utf-8")) - 1) + "\n"
+    is_error, got = call(browser, "create", token=Tokens().add("mail", write=True), doc=f"work/{MAIL}", text=text)
+    assert is_error and "1 MiB" in got, got
+    assert not (work / MAIL).exists()
 
 
 def test_whose_a_document_is_is_judged_with_one_lookup_of_its_root_for_every_member(team, work, monkeypatch):

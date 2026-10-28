@@ -32,7 +32,7 @@ from .hub.roots import Address, NotFound, address_of_url, in_git_dir
 from .hub import visibility
 from .hub.state import TokenRow
 from .render import COMMENT_RE as HTML_COMMENT_RE, strip_comments
-from .source import create_file, md_hash, now, update_file
+from .source import check_create, create_file, md_hash, now, update_file
 
 PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")
 INSTRUCTIONS = (
@@ -625,28 +625,24 @@ class Door:
             raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path")     # a root of another member's
         self._check_size(text)
         _check_comments("", text)
-        exists = ToolError(f"{address} exists already; `create` makes a new page, and `update` changes one.",
-                           "exists")
+        top = Path(os.path.realpath(root.path))
         try:
             text = self._owned(self._visible(text, None), address, caller)
         except ToolError as e:
-            # The owner is judged by the list's row for the address, which a sheaf already there may have: a
-            # name that is taken gets the one answer whatever the text, so the refusal tells nothing of it.
-            if e.why == "no owner" and os.path.lexists(Path(os.path.realpath(root.path)) / rel):
-                raise exists from None
+            # The owner is judged by the list's row for the address, which a sheaf already there may have: the
+            # refusal answers first what the path alone answers, walked as the write walks it, so it tells
+            # nothing of what is there, nor of what a link on the way points to.
+            if e.why == "no owner":
+                try:
+                    check_create(top, rel)
+                except OSError as o:
+                    raise _not_made(address, o) from None
             raise
+        self._check_size(text)      # again: the owner `_owned` gave it is part of the page
         try:
-            create_file(Path(os.path.realpath(root.path)), rel, text)
-        except FileExistsError:
-            raise exists from None
-        except FileNotFoundError:
-            raise ToolError(f"The folder of {address} does not exist; `create` makes no folder.",
-                            "no folder") from None
+            create_file(top, rel, text)
         except OSError as e:
-            if e.errno in (errno.ELOOP, errno.ENOTDIR):
-                raise ToolError(f"{address} could not be made: every folder on its way must be a "
-                                "folder of its root, not a link or a file.", "link on the way") from None
-            raise ToolError(f"{address} could not be made ({e.strerror}).", "not written") from None
+            raise _not_made(address, e) from None
         self.hub.wrote(address)
         self.hub.committed(address, by=caller.display, what="create")
         return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text)}
@@ -670,6 +666,7 @@ class Door:
                             "change on that text and send it with its hash.")
             _check_comments(now_text, text)
             written[0] = self._owned(self._visible(text, now_text), address, caller)
+            self._check_size(written[0])
             return written[0]
         try:
             before, _ = update_file(self.hub.roots.document(address), change)
@@ -723,6 +720,19 @@ class Door:
                             "open it: name a member's `short` as `owner`, or bind the token to a member.",
                             "no owner")
         return text
+
+
+def _not_made(address: str, e: OSError) -> ToolError:
+    """The answer to a `create` of `address` whose file `create_file` (or `check_create`) refused with `e`."""
+    if isinstance(e, FileExistsError):
+        return ToolError(f"{address} exists already; `create` makes a new page, and `update` changes one.",
+                         "exists")
+    if isinstance(e, FileNotFoundError):
+        return ToolError(f"The folder of {address} does not exist; `create` makes no folder.", "no folder")
+    if e.errno in (errno.ELOOP, errno.ENOTDIR):
+        return ToolError(f"{address} could not be made: every folder on its way must be a folder of its root, "
+                         "not a link or a file.", "link on the way")
+    return ToolError(f"{address} could not be made ({e.strerror}).", "not written")
 
 
 def _absent(doc: str) -> ToolError:

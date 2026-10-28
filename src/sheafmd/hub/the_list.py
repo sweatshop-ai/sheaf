@@ -33,7 +33,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from .. import config, paths
-from ..blocks import split_md_blocks
+from ..blocks import _split_lines, split_md_blocks
 from ..edit import TASK_MARK_RE, ticked_html
 from . import projects
 from . import roots as roots_mod
@@ -151,7 +151,8 @@ def read_sheaf(rel: str, text: str) -> Sheaf:
     if m := _ISSUE_RE.fullmatch(fm.get("issue", "")):
         issue = (m.group(1), m.group(2), int(m.group(3)))
     title, actions, fence = "", [], None
-    lines = text.splitlines()
+    # Numbered as split_md_blocks numbers them: on "\n" only, never on U+2028 or "\x0c" as splitlines() does.
+    lines = [line.removesuffix("\r") for line in text.split("\n")]
     first = next(n for n in range(1, len(lines)) if lines[n].strip() in ("---", "...")) + 1 if fm else 0
     for number in range(first, len(lines)):
         line = lines[number]
@@ -180,8 +181,12 @@ def tick_edit(text: str, n: int, word: str):
     blocks = split_md_blocks(text)
     i = max(x for x, b in enumerate(blocks) if b.start <= line)
     b = blocks[i]
-    offset = sum(len(x) for x in b.content.splitlines(keepends=True)[:line - b.start])
-    k = sum(1 for m in TASK_MARK_RE.finditer(b.content) if m.start() < offset)
+    own = _split_lines(b.content)
+    offset = sum(len(x) for x in own[:line - b.start])
+    marks = list(TASK_MARK_RE.finditer(b.content))
+    k = sum(1 for m in marks if m.start() < offset)
+    if k >= len(marks) or marks[k].start() != offset:
+        return None                 # the mark found is not on the action's own line
     fragment = ticked_html(b, k)
     return None if fragment is None else {"i": i, "html": fragment}
 

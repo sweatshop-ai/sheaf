@@ -501,3 +501,13 @@ def test_a_list_table_without_a_proxy_table_stops_the_start(proxy_folder):
     assert code == 1
     assert [r["kind"] for r in rows] == ["list-config"], rows
     assert "needs a [proxy] table" in rows[0]["reason"] and "needs a [proxy] table" in err
+
+
+@pytest.mark.parametrize("sep", [" ", "\x0c", "\x85", "\x0b"])
+def test_a_line_separator_markdown_does_not_break_on_leaves_the_tick_on_its_own_box(box, sheaves, sep):
+    path = sheaves / JOEY[5:]
+    path.write_text(path.read_text(encoding="utf-8").replace(
+        "- [ ] Approve\n", f"Two lines{sep}in one paragraph.\n\n- [ ] Approve\n- [ ] Done\n"), encoding="utf-8")
+    before = path.read_text(encoding="utf-8")
+    assert box.post("/_/tick", {"doc": JOEY, "action": 0, "word": "Approve"}, member=NELL).status == 200
+    assert path.read_text(encoding="utf-8") == before.replace("- [ ] Approve", "- [x] Approve")

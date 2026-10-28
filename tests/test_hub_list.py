@@ -690,3 +690,35 @@ def test_the_lists_owner_is_the_one_the_file_names_now_not_at_the_poll(box, shea
     assert read(box.get("/list?show=mine", member=NELL))["In progress 0"] == {}
     assert read(box.get("/list?show=mine", member=DORA))["In progress 1"] == {
         "initech/website": [("Prep for the call of Thursday James", "prep · you · #6 · 40 min")]}
+
+
+def test_the_owner_shown_is_the_issues_first_assignee_even_when_no_member(box, github):
+    github.issues[6]["assignees"] = ["zed-x", "dora-k"]
+    box.hub.the_list.poll()
+    assert read(box.get("/list", member=NELL))["In progress 1"] == {
+        "initech/website": [("Prep for the call of Thursday James", "prep · zed-x · #6 · 40 min")]}
+
+
+def test_an_owner_only_sheaf_deleted_after_a_poll_is_told_to_its_assignee_alone(box, sheaves, monkeypatch):
+    from sheafmd.hub.index import SWEEP_SECONDS
+    joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
+    joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n",
+                                                             "sources: [library:4711]\nowner: dora\n"),
+                    encoding="utf-8")
+    box.hub.the_list.poll()
+    now = [NOW]
+    box.hub.clock = lambda: now[0]
+    monkeypatch.setattr(box.hub.index, "_start_sweep", lambda run: run())
+    nell, dora = (box.get("/_/live", member=m).stream for m in (NELL, DORA))
+    for m in (NELL, DORA):
+        box.get("/_/index.json", member=m)
+    now[0] += SWEEP_SECONDS
+    box.hub.tick()
+    nell.drain(), dora.drain()
+    joey.unlink()
+    box.hub.the_list.poll()                             # the poll sees no sheaf there before the sweep does
+    now[0] += SWEEP_SECONDS
+    box.hub.tick()
+    doc = f"{box.hub.roots.lookup(sheaves / 'projects.toml').name}/globex/black-friday/2026-10-28-reply-to-joey.md"
+    assert [d["doc"] for name, d in nell.drain() if name == "status"] == [doc]
+    assert [d for name, d in dora.drain() if name == "status"] == []

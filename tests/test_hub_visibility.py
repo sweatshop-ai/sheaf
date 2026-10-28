@@ -656,7 +656,7 @@ OPEN = PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:thinkingto
 
 
 @pytest.mark.parametrize("line", ["date-created: 2026-10-28", "link-citations: true", "header-includes:\n  - x",
-                                  "my key: a value"])
+                                  "my key: a value", "document title: Ownership report", "a.b: shared visibility"])
 def test_a_front_matter_key_the_hub_does_not_enforce_leaves_an_open_sheaf_open(team, work, line):
     put(team, work, DOC, OPEN.replace("owner: thierry\n", f"owner: thierry\n{line}\n"))
     assert team.get(f"/work/{DOC}", member=HANS).status == 200

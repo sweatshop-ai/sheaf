@@ -67,18 +67,18 @@ def _end(lines: list) -> int:
 
 def _may_spell_a_key(line: str) -> bool:
     """Whether `line`, an unindented line the reader cannot read, may hold one of KEYS: anything but a plain
-    `key: value` (a quoted or complex key, a flow mapping, an anchor), or one that names one of KEYS in any
-    case, or holds an escape."""
+    `key: value` (a quoted or complex key, a flow mapping, an anchor), or a plain one whose key is one of KEYS
+    in any case (`Owner : x`). Its value is not looked at."""
     if not _PLAIN_KEY_RE.fullmatch(line):
         return True
-    return "\\" in line or any(k in line.casefold() for k in KEYS)
+    return " ".join(line.partition(":")[0].split()).casefold() in KEYS
 
 
 def front_matter(text: str) -> dict:
     """The top-level `key: value` lines of the front matter at the top of `text`. A list, written
     `[a, b]` or as `- a` lines under an empty key, indented or not, is a tuple of its items; a nested table
     is not read. The reader fails closed: a line it cannot read that may hold one of KEYS (a line that is no
-    plain `key: value`, or one that names one of them or holds an escape; an indented line under one of
+    plain `key: value`, or one whose key is one of them; an indented line under one of
     KEYS; one of KEYS written twice) sets `UNREAD`, and `effective` reads such a sheaf as `owner`. A plain
     `key: value` the reader does not read that names none of them (`my key: a value`) is another key's."""
     lines = _lines(text)

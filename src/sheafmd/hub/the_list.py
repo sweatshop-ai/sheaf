@@ -448,12 +448,14 @@ class TheList:
             for word, short, _ in s.actions)
         if s.assistant:
             chips += f'<span class="list-assistant">{html.escape(s.assistant)}</span>'
+        by_login = {m.github.lower(): m for m in self.hub.proxy.members.values() if m.github}
+        first = by_login.get(rec.assignees[0].lower()) if rec.assignees else None
         if is_owner:
             owner = "you"
+        elif rec.assignees:             # the issue's first assignee, as the record orders them
+            owner = "@" + first.short if first is not None and first.short else rec.assignees[0]
         elif owners and owners[0].short:
             owner = "@" + owners[0].short
-        elif rec.assignees:
-            owner = rec.assignees[0]
         else:
             owner = "nobody"
         meta = " · ".join(x for x in (s.kind, owner, f"#{s.issue[2]}", _age(self.hub.clock() - rec.updated)) if x)

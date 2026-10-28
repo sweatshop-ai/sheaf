@@ -31,33 +31,47 @@
   // the proxy socket (SPEC 9.9) every member shares the front's origin, so the key holds the member's
   // id, which a rename in the hub's config does not change (10.4, 10.8).
   var DRAFTS_OF = CFG.proxy ? 'm:' + CFG.member : location.port;
-  var AGENT, AGENT_UC, CAN, canAsk, canTell;
+  // On a member's page of a sheaf whose live session runs on the box, CFG.can holds "box-ask" and "box-tell":
+  // Ask and Tell go with the comment to /_/comment, the hub drops it for James's window, and James answers in
+  // the thread through the door. The page starts no wait of its own for it (SPEC 9.12).
+  var AGENT, AGENT_UC, CAN, canAsk, canTell, toBox;
   function takeAgent() {
-    // The session's own name when it has one ("Linnea"), else the agent's display name (SPEC 10.5).
-    AGENT = (CFG.agent && (CFG.agent.name || CFG.agent.display)) || 'the agent';
-    AGENT_UC = AGENT.charAt(0).toUpperCase() + AGENT.slice(1);
     CAN = CFG.can || [];
-    canAsk = CAN.indexOf('ask') >= 0;
-    canTell = CAN.indexOf('deliver') >= 0;
+    toBox = CAN.indexOf('box-ask') >= 0 || CAN.indexOf('box-tell') >= 0;
+    // The session's own name when it has one ("Linnea"), else the agent's display name (SPEC 10.5); on a
+    // box sheaf the member the live session runs as (James).
+    AGENT = toBox ? upper(liveSession().member) || 'James'
+          : (CFG.agent && (CFG.agent.name || CFG.agent.display)) || 'the agent';
+    AGENT_UC = AGENT.charAt(0).toUpperCase() + AGENT.slice(1);
+    canAsk = CAN.indexOf(toBox ? 'box-ask' : 'ask') >= 0;
+    canTell = CAN.indexOf(toBox ? 'box-tell' : 'deliver') >= 0;
   }
+  function liveSession() { return (CFG.work && CFG.work.sessions && CFG.work.sessions[0]) || {}; }
+  function upper(s) { s = String(s || ''); return s.charAt(0).toUpperCase() + s.slice(1); }
   takeAgent();
   // What the hub's answer to /_/doc says of the agent: a rename, or a session that ended, reaches
   // an open page by any of the three places that ask (SPEC 10.5).
   function takeTarget(j) {
     if (!j || !('capabilities' in j)) return;
-    var before = JSON.stringify([CFG.agent, CFG.can, CFG.lines]);
+    var before = JSON.stringify([CFG.agent, CFG.can, CFG.lines, CFG.work]);
     CFG.agent = j.target || null;
     CFG.can = j.capabilities || [];
     CFG.lines = j.lines || {};
+    if ('work' in j) CFG.work = j.work;       // a fork moves the live session off the box (9.12)
     takeAgent();
     var wasOpen = menu.classList.contains('open');
     buildMenu();
     if (wasOpen) openMenu();
     // An open thread draws the agent's name and the Answer button; it is drawn again when they changed.
-    if (before !== JSON.stringify([CFG.agent, CFG.can, CFG.lines]) && pop && popId && byId[popId]) fillPopover(popId);
+    if (before !== JSON.stringify([CFG.agent, CFG.can, CFG.lines, CFG.work]) && pop && popId && byId[popId]) fillPopover(popId);
   }
-  function lineOf(what) { return (CFG.lines && CFG.lines[what]) || NO_AGENT; }
+  // A sheaf whose live session runs on a member's machine is worked on there (SPEC 10.6).
+  function lineOf(what) {
+    if (CFG.work && CFG.work.live === 'laptop') return 'This session runs on ' + upper(liveSession().member) + '’s machine: open it there.';
+    return (CFG.lines && CFG.lines[what]) || NO_AGENT;
+  }
   function agentLine() {
+    if (toBox && (canAsk || canTell)) return (canAsk && canTell ? 'Ask and Tell' : canAsk ? 'Ask' : 'Tell') + ' → ' + AGENT + '’s window on the box';
     var a = CFG.agent;
     if (!a || (!canAsk && !canTell)) return lineOf('ask');
     return (canAsk && canTell ? 'Ask and Tell' : canAsk ? 'Ask' : 'Tell') +
@@ -466,7 +480,6 @@
   // box, fork to the member's machine) and the sessions of its front matter, newest first. The popover
   // stands where the menu was; Escape and a click outside close it, as they close the menu.
   var workPop = null;
-  function upper(s) { s = String(s || ''); return s.charAt(0).toUpperCase() + s.slice(1); }
   // "2026-10-28T05:12:03Z" reads "2026-10-28 05:12 UTC"; anything else is shown as written.
   function utcDate(d) {
     var m = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}):\d{2}Z$/.exec(String(d || ''));
@@ -1630,11 +1643,33 @@
   // is offered only when the agent can do it (CFG.can); a job already running
   // always shows, so it can be cancelled.
   var ASK_TIP = 'Answers here in the thread, from a copy of the session. Reads, changes nothing.';
-  function tellTip() { return 'Sends this to ' + yourSession() + ', which acts on it and replies here.'; }
+  function askTip() { return toBox ? 'Sends this to ' + AGENT + '’s window on the box; ' + AGENT + ' answers here in the thread.' : ASK_TIP; }
+  function tellTip() {
+    return toBox ? 'Sends this to ' + AGENT + '’s window on the box, to act on; ' + AGENT + ' replies here.'
+                 : 'Sends this to ' + yourSession() + ', which acts on it and replies here.';
+  }
+  // A comment sent to James's window: its thread says so until a reply comes after it, with no spinner, as
+  // nothing on the page waits for it (9.12). Kept by thread id with the number of replies it had then.
+  var sentBox = {};
+  function sentLine(id) {
+    var c = byId[id];
+    if (!(id in sentBox) || !c || (c.replies || []).length > sentBox[id]) { delete sentBox[id]; return ''; }
+    return '<div class="rd-msg rd-sent">Sent to ' + esc(AGENT) + '’s window; his answer appears in this thread.</div>';
+  }
+  // What a send with Ask or Tell started: on a box sheaf the line, counted from the thread as the hub's answer
+  // holds it (the send's own reply in it), else the page's own wait.
+  function started(id, k, j) {
+    if (!took(j, k + 'Error')) return;
+    if (toBox) {
+      var c = (j.comments || []).filter(function (x) { return x.id === id; })[0] || byId[id];
+      sentBox[id] = ((c && c.replies) || []).length;
+    } else if (k === 'ask') asking[id] = true;
+    else telling[id] = true;
+  }
   // The Ask and Tell entries of a form: a working button for what the agent can do, a
   // disabled one carrying its line for what it cannot (textForm shows the lines).
   function agentButtons(askLabel, tellLabel) {
-    return [canAsk ? { k: 'ask', label: askLabel, cls: 'rd-ask', tip: ASK_TIP }
+    return [canAsk ? { k: 'ask', label: askLabel, cls: 'rd-ask', tip: askTip() }
                    : { off: lineOf('ask'), label: askLabel, cls: 'rd-ask' },
             canTell ? { k: 'tell', label: tellLabel, cls: 'rd-tell', tip: tellTip() }
                     : { off: lineOf('tell'), label: tellLabel, cls: 'rd-tell' }];
@@ -1665,6 +1700,7 @@
                      (tellQ ? '<div class="rd-text">is waiting for your answer in your session: ' + esc(tellQ) + '</div>' +
                               answerButton() + '</div>'
                             : '<div class="rd-text">is working on it in your session' + DOTS + '</div></div>') : '') +
+      sentLine(id) +
       (interrupted[id] ? '<div class="rd-msg rd-reply rd-interrupted"><span class="rd-who">' + esc(AGENT_UC) + '</span>' +
                          '<div class="rd-text">interrupted by a hub restart, send it again</div></div>' : '') + '</div>';
     var ans = pop.querySelector('.rd-answer');
@@ -1674,7 +1710,7 @@
       acts.hidden = sentOf(id);      // a reply or an edit of this thread is out: its buttons wait for the answer
       acts.innerHTML = '<button data-a="reply">Reply</button>' +
         (asking[id] ? busy('ask', AGENT_UC + ' is answering')
-         : canAsk ? '<button class="rd-alt rd-ask" data-a="ask" title="' + esc(ASK_TIP) + '">Ask ' + esc(AGENT) + '</button>'
+         : canAsk ? '<button class="rd-alt rd-ask" data-a="ask" title="' + esc(askTip()) + '">Ask ' + esc(AGENT) + '</button>'
          : offButton('ask', 'Ask ' + AGENT)) +
         (telling[id] ? busy('tell', AGENT_UC + ' is working')
          : canTell ? '<button class="rd-alt rd-tell" data-a="tell" title="' + esc(tellTip()) + '">Tell ' + esc(AGENT) + '</button>'
@@ -1688,6 +1724,8 @@
         var a = t && t.getAttribute('data-a');
         if (!a) return;
         if (a === 'cancel-ask' || a === 'cancel-tell') { cancel(id, a.slice(7)); return; }
+        // On a box sheaf Ask and Tell carry a text for James: they open the reply form, which sends it (9.12).
+        if ((a === 'ask' || a === 'tell') && toBox) { replyForm(id); return; }
         if (a === 'ask') { ask(id); return; }
         if (a === 'tell') { tell(id); return; }
         if (a === 'status') op({ op: 'status', id: id, status: c.status === 'open' ? 'resolved' : 'open' });
@@ -1737,8 +1775,7 @@
       threadKeep(c, 'reply', t, rid, line, Date.now());
       return op({ op: 'reply', id: id, body: t, resolve: k === 'res', ask: k === 'ask', tell: k === 'tell', rid: rid }).then(function (j) {
         if (j) threadKeep(c, 'reply', null, rid);
-        if (k === 'ask' && took(j, 'askError')) { asking[id] = true; touched(id); }
-        if (k === 'tell' && took(j, 'tellError')) { telling[id] = true; touched(id); }
+        if (k === 'ask' || k === 'tell') { started(id, k, j); touched(id); }
         if (j && j.askError) say(j.askError, true);
         if (j && j.tellError) say(j.tellError, true);
         return j;
@@ -2376,8 +2413,7 @@
           r.insertNode(a);
           b.pristine = pristineWithAnchor(b, a, before);
         }
-        if (k === 'ask' && took(j, 'askError')) asking[j.id] = true;
-        if (k === 'tell' && took(j, 'tellError')) telling[j.id] = true;
+        if (k === 'ask' || k === 'tell') started(j.id, k, j);
         window.getSelection().removeAllRanges();
         draftsReplace(own);
         if (j.textSame === false || reloadPending || !applyComments(j, [j.id])) {

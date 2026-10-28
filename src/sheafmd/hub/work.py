@@ -3,10 +3,10 @@ sheafmd.hub.work — Work on this (SPEC 9.12): a sheaf's sessions, the transcrip
 file Ask and Tell drop for James's window.
 
     state(hub, address, text)       a sheaf's sessions and where its live session runs; None for another page
-    sessions(fm)                    the items of the front matter's `sessions`, newest first, that parse
-    with_session(text, item)        the text with `item` as the first of `sessions`, the rest as written
+    sessions(fm)                    the items of the front matter's `sessions` that parse, as written (newest first)
+    with_session(text, line, id)    the text with `line` as the first of `sessions`, the rest as written
     open_transcript(folder, id)     the bytes of `<folder>/<one folder>/<id>.jsonl`, or None
-    drop(folder, project, data)     a file in `folder` for the box's supervisor: "written" or why not
+    drop(folder, project, data, missing)  a file in `folder` for the box's supervisor: "written" or why not
 
 A session item is one YAML flow mapping on one line, `{id: <uuid>, host: <host>, member: <who>, date: <UTC>}`.
 An item that does not match that exactly is skipped, never guessed at: the front matter is written by hand
@@ -28,8 +28,13 @@ MACHINE_RE = re.compile(r"[A-Za-z0-9._-]{1,63}")
 _MEMBER = r"[^\s,{}\[\]:#\"'][^,{}\[\]:#\"'\n]{0,62}?"
 _ITEM_RE = re.compile(r"\{id: (" + UUID_RE.pattern + r"), host: ([A-Za-z0-9._-]{1,63}), member: (" + _MEMBER
                       + r"), date: ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)\}")
-_KEY_LINE_RE = re.compile(r"sessions:\s*")
-_LIST_ITEM_RE = re.compile(r"\s+-\s+.*")
+_KEY_LINE_RE = re.compile(r"sessions:(.*)")
+_LIST_ITEM_RE = re.compile(r"(\s*-\s+).*")
+TEXT_MAX = 3000                 # characters of a comment's text dropped for James's window (Zara's contract)
+
+
+class NotOneItemPerLine(ValueError):
+    """The front matter's `sessions` is written on its key's line: the hub does not rewrite such a list."""
 ISO = "%Y-%m-%dT%H:%M:%SZ"
 
 
@@ -46,23 +51,39 @@ def sessions(fm: dict) -> list:
 
 @dataclass(frozen=True)
 class State:
-    sessions: list              # the items of `sessions`, newest first
+    sessions: list              # the items of `sessions` as written, which is newest first
     live: str                   # "box" when the first runs on `[list]`'s box, "laptop" on another host, "" none
     cfg: object                 # the list's the_list.ListConfig
+
+    @property
+    def box(self) -> list:
+        """The ids of the sessions that ran on the box, whose transcripts the hub serves, newest first."""
+        return [s["id"] for s in self.sessions if self.cfg.box and s["host"] == self.cfg.box]
+
+    @property
+    def can(self) -> list:
+        """The page's `can` (10.1): Ask and Tell go to James's window while the live session is on the box
+        and `[list]` names the folder to drop them in."""
+        return ["box-ask", "box-tell"] if self.live == "box" and self.cfg.tell_dir is not None else []
+
+
+def is_sheaf(hub, address: str) -> bool:
+    """Whether `address` names a sheaf of the list's root, at `<client>/<project>/<file>.md`."""
+    at = Address.parse(address)
+    return hub.the_list is not None and hub.the_list.serves(at.root) and at.rel.count("/") == 2
 
 
 def state(hub, address: str, text: str) -> State | None:
     """The sessions of the sheaf at `address` whose text is `text`, when it is a sheaf of the list's root at
     `<client>/<project>/<file>.md`; None for any other document, which has no Work on this."""
-    the = hub.the_list
-    at = Address.parse(address)
-    if the is None or not the.serves(at.root) or at.rel.count("/") != 2:
+    if not is_sheaf(hub, address):
         return None
+    cfg = hub.the_list.cfg
     items = sessions(front_matter(text))
     live = ""
     if items:
-        live = "box" if the.cfg.box and items[0]["host"] == the.cfg.box else "laptop"
-    return State(items, live, the.cfg)
+        live = "box" if cfg.box and items[0]["host"] == cfg.box else "laptop"
+    return State(items, live, cfg)
 
 
 def member_word(member) -> str:
@@ -90,12 +111,19 @@ def with_session(text: str, line: str, id: str) -> str:
     if at is None:
         head = head + ["sessions:", f"  - {line}"]
     else:
-        items, n = [], at + 1
-        while n < end and _LIST_ITEM_RE.fullmatch(head[n]):
-            items.append(head[n])
+        if _KEY_LINE_RE.fullmatch(head[at]).group(1).strip() not in ("", "[]"):
+            raise NotOneItemPerLine("sessions is written on one line: write it as one item per line")
+        # The list runs, as the reader reads it, over its `- ` lines, indented or not, and the blank and
+        # comment lines between them; the fork takes the indent of its first item.
+        rest, n, lead = [], at + 1, "  - "
+        while n < end and (_LIST_ITEM_RE.fullmatch(head[n]) or not head[n].strip()
+                           or head[n].lstrip().startswith("#")):
+            if (m := _LIST_ITEM_RE.fullmatch(head[n])) and not any(_LIST_ITEM_RE.fullmatch(x) for x in rest):
+                lead = m.group(1)
+            rest.append(head[n])
             n += 1
-        kept = [x for x in items if not ((m := _ITEM_RE.search(x)) and m.group(1) == id)]
-        head = head[:at + 1] + [f"  - {line}"] + kept + head[n:]
+        kept = [x for x in rest if not ((m := _ITEM_RE.search(x)) and m.group(1) == id)]
+        head = head[:at] + ["sessions:", lead + line] + kept + head[n:]
     return nl.join(head + lines[end:])
 
 

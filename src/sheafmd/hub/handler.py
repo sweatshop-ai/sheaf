@@ -774,7 +774,7 @@ class Handler:
         open (9.11) of the list's root, at `<client>/<project>/<file>.md`. Else the 404 of a document that is not
         there."""
         address = self._owned(req, doc)
-        if work.state(self.hub, address, "") is None:
+        if not work.is_sheaf(self.hub, address):
             raise Refuse(404, "no such document")
         try:
             text = self.hub.roots.document(address).read_text(encoding="utf-8")
@@ -788,7 +788,7 @@ class Handler:
         address, fm, st = self._sheaf(req, req.query.get("doc"))
         sid = req.query.get("id")
         _shape(sid is None or work.UUID_RE.fullmatch(sid), "id must be a session id (a lowercase UUID)")
-        box = [s["id"] for s in st.sessions if st.cfg.box and s["host"] == st.cfg.box]
+        box = st.box
         if sid is None:
             sid = box[0] if box else None
         if sid not in box or st.cfg.sessions_dir is None:
@@ -805,7 +805,7 @@ class Handler:
         """Whether the sheaf's live session (the first of `sessions`) runs on the box, and Ask and Tell can be
         dropped for it: a sheaf of the list's root at project depth, `box` and `tell_dir` set (9.12)."""
         state = work.state(self.hub, e.address, e.live.current()[1])
-        return state is not None and state.live == "box" and state.cfg.tell_dir is not None
+        return state is not None and bool(state.can)
 
     def _drop_for_james(self, req: Req, e, kind: str, body: str) -> str:
         """The file Ask or Tell drops in `[list]`'s `tell_dir` for the box's supervisor to type into James's
@@ -813,7 +813,8 @@ class Handler:
         project = "/".join(Address.parse(e.address).rel.split("/")[:2])
         by = work.member_word(req.member)
         drop = work.drop(self.hub.the_list.cfg.tell_dir, project,
-                         {"project": project, "member": by, "sheaf": e.address, "text": body, "kind": kind},
+                         {"project": project, "member": by, "sheaf": e.address, "text": body[:work.TEXT_MAX],
+                          "kind": kind},
                          "no tell_dir in [list]")
         self.hub.record("tell-dropped", e.address, what=kind, project=project, by=by, drop=drop)
         return drop
@@ -830,7 +831,10 @@ class Handler:
         e = self._entry(req, address)
         by = work.member_word(req.member)
         line = work.item(sid, machine, by, time.strftime(work.ISO, time.gmtime()))
-        h = e.live.rewrite(lambda text: work.with_session(text, line, sid))
+        try:
+            h = e.live.rewrite(lambda text: work.with_session(text, line, sid))
+        except work.NotOneItemPerLine as ex:
+            raise Refuse(409, str(ex)) from None
         self.hub.index.touch(e.address)
         self.hub.committed(e.address, req.member, "fork")
         self.hub.record("session-forked", address, transcript=sid, by=by, machine=machine,

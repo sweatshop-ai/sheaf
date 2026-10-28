@@ -651,3 +651,18 @@ def test_a_link_the_poll_does_not_read_has_the_owner_of_the_sheaf_it_names(box, 
     root = box.hub.roots.lookup(joey).name
     assert box.get(f"/{root}/.kept/joey.md", member=DORA).status == 404
     assert box.get(f"/{root}/.kept/joey.md", member=NELL).status == 200
+
+
+@pytest.mark.parametrize("issue", ["issue:\n", "issue: acme/record#7\n"], ids=["removed", "changed"])
+def test_a_sheaf_whose_issue_changed_since_the_poll_is_not_its_old_assignees(box, sheaves, issue):
+    joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
+    joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n", "sources: [library:4711]\n"),
+                    encoding="utf-8")
+    box.hub.the_list.poll()
+    root = box.hub.roots.lookup(joey).name
+    address = f"/{root}/globex/black-friday/2026-10-28-reply-to-joey.md"
+    assert box.get(address, member=NELL).status == 200          # the assignee of #5 owns it
+    joey.write_text(joey.read_text(encoding="utf-8").replace("issue: acme/record#5\n", issue + "owner: dora\n"),
+                    encoding="utf-8")
+    assert box.get(address, member=NELL).status == 404          # before the next poll
+    assert box.get(address, member=DORA).status == 200

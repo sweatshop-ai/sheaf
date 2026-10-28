@@ -390,11 +390,12 @@ class Hub:
             return True
         except (OSError, UnicodeDecodeError):
             return False
-        return visibility.visible_to(hit[1], member, self.assignees(address))
+        return visibility.visible_to(hit[1], member, self.assignees(address, hit[1]))
 
-    def assignees(self, address: str):
-        """The record's assignees of the issue of the sheaf at `address`, asked by the address of the file
-        it names, so a link has the owner of the sheaf it points to; None when the list does not know it."""
+    def assignees(self, address: str, fm: dict):
+        """The record's assignees of the issue of the sheaf at `address` whose front matter is `fm`, asked by
+        the address of the file it names, so a link has the owner of the sheaf it points to; None when the
+        list does not know it, or when `fm` names another issue than the one it polled."""
         if self.the_list is None:
             return None
         at = roots_mod.Address.parse(address)
@@ -405,7 +406,7 @@ class Hub:
                 address = f"{root.name}/{rel.as_posix()}"
             except ValueError:
                 pass
-        return self.the_list.assignees(address)
+        return self.the_list.assignees(address, visibility.text(fm, "issue"))
 
     def jobs(self) -> dict:
         telling = []

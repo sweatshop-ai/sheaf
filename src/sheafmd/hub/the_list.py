@@ -368,16 +368,19 @@ class TheList:
                 self._answered[a.rel] = row.record.updated
 
     # ── the page ────────────────────────────────────────────────────────────
-    def assignees(self, address: str):
-        """The record's assignees of the issue of the sheaf at `address`, from the last poll; None when the
-        list does not know the sheaf (no row: another root, no issue, or not polled yet)."""
+    def assignees(self, address: str, issue: str):
+        """The record's assignees of the issue of the sheaf at `address`, from the last poll, when `issue`, what
+        its file names now, is still the issue of its row; None when the list does not know the sheaf (no row:
+        another root, no issue, not polled yet, or an issue changed since the poll)."""
         a = roots_mod.Address.parse(address)
         root = self.root()
         if root is None or a.root != root.name:
             return None
+        m = _ISSUE_RE.fullmatch(issue)
+        now = (m.group(1), m.group(2), int(m.group(3))) if m else None
         for row in self._snap.rows:
             if row.sheaf.rel == a.rel:
-                return tuple(row.record.assignees)
+                return tuple(row.record.assignees) if row.sheaf.issue == now else None
         return None
 
     def serves(self, name: str) -> bool:

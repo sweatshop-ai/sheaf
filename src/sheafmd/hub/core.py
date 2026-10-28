@@ -369,11 +369,13 @@ class Hub:
             return False
         return self.owns(member, root) and self.roots.lookup(root.path / at.rel) == root
 
-    def visible(self, member, address: str) -> bool:
+    def visible(self, member, address: str, missing: bool = True) -> bool:
         """Whether the member may open the document at `address` by its visibility (9.11): a sheaf that is
-        its owner's alone is no other member's. A file that is not there is visible: it answers as a missing
-        document all the same. A file that is there but cannot be read, or not as UTF-8, is no member's: the
-        hub may still hold its last good page."""
+        its owner's alone is no other member's. A file that is not there is judged by the front matter it
+        had when the hub last read it, so its going away is told to whom it was visible; one the hub never
+        read is `missing` (a page answers it as a missing document all the same, a stream tells nobody). A
+        file that is there but cannot be read, or not as UTF-8, is no member's: the hub may still hold its
+        last good page."""
         at = roots_mod.Address.parse(address)
         root = self.roots.get(at.root)
         if root is None:
@@ -387,7 +389,9 @@ class Hub:
                 hit = (key, visibility.front_matter(f.read_text(encoding="utf-8")))
                 self._front[f] = hit
         except FileNotFoundError:
-            return True
+            hit = self._front.get(f)
+            if hit is None:
+                return missing
         except (OSError, UnicodeDecodeError):
             return False
         return visibility.visible_to(hit[1], member, self.assignees(address, hit[1]))

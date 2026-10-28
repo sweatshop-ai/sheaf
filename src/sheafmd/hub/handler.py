@@ -386,7 +386,7 @@ class Handler:
                 if not isinstance(doc, str):
                     return None
                 try:
-                    theirs = self.hub.member_owns(member, doc) and self.hub.visible(member, doc)
+                    theirs = self.hub.member_owns(member, doc) and self.hub.visible(member, doc, missing=False)
                 except Exception:
                     self.hub.record_exception("status-failed", doc)
                     return None

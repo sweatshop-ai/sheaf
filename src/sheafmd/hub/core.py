@@ -371,8 +371,9 @@ class Hub:
 
     def visible(self, member, address: str) -> bool:
         """Whether the member may open the document at `address` by its visibility (9.11): a sheaf that is
-        its owner's alone is no other member's. A file that is not there or cannot be read is visible: it
-        answers as a missing document all the same."""
+        its owner's alone is no other member's. A file that is not there is visible: it answers as a missing
+        document all the same. A file that is there but cannot be read, or not as UTF-8, is no member's: the
+        hub may still hold its last good page."""
         at = roots_mod.Address.parse(address)
         root = self.roots.get(at.root)
         if root is None:
@@ -385,8 +386,10 @@ class Hub:
             if hit is None or hit[0] != key:
                 hit = (key, visibility.front_matter(f.read_text(encoding="utf-8")))
                 self._front[f] = hit
-        except (OSError, UnicodeDecodeError):
+        except FileNotFoundError:
             return True
+        except (OSError, UnicodeDecodeError):
+            return False
         return visibility.visible_to(hit[1], member, self.assignees(address))
 
     def assignees(self, address: str):

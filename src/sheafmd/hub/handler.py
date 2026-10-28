@@ -798,6 +798,12 @@ class Handler:
             tell_line = self.hub.asktell.telling_line(e.address, b.get("id", ""))
         can_tell = tell and tell_line is None
         signed = {"by": member.name, "author": member.name} if member else {}
+        if member is not None:
+            def still_visible(text):
+                # The gate (_entry) read the file before the lock: a write that closed the sheaf since is seen here.
+                if not visibility.visible_to(visibility.front_matter(text), member, self.hub.assignees(e.address)):
+                    raise Refuse(404, "no such document")
+            signed["guard"] = still_visible
         try:
             snap = e.live.comment(op, b, h, await_action=can_tell, rid=rid, **signed)
         except NotAuthor as ex:

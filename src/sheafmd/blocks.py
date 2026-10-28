@@ -225,7 +225,7 @@ def split_md_blocks(text):
         i = j
 
     # YAML front matter, only at the very top
-    if i == 0 and n and lines[0].strip() == "---":
+    if i == 0 and n and lines[0].lstrip("\ufeff").strip() == "---":
         for j in range(1, n):
             if lines[j].strip() in ("---", "..."):
                 i = emit("frontmatter", 0, j + 1)

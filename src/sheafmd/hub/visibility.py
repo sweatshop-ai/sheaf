@@ -18,6 +18,7 @@ that the hub writes when the owner ticks Share does, and a door write cannot wri
 The owner is the assignee of the sheaf's issue in the record, when the list knows it and it has one, told by
 the member whose `github` it is; else the member whose `short` is the front matter's `owner`.
 """
+import difflib
 import re
 
 PROJECT_WIDE = ("issue", "pr", "repo", "web")
@@ -178,7 +179,8 @@ def set_keys(text_: str, values: dict) -> str:
             continue
         head.append(line)
     head += [f"{k}: {v}" for k, v in values.items() if k not in done and v is not None]
-    return nl.join(head + lines[end:])
+    below = sum(len(raw) + 1 for raw in text_.split("\n")[:end])     # the closing line and the body, as written
+    return nl.join(head) + nl + text_[below:]
 
 
 def share(text_: str, by: str, date: str) -> str:
@@ -187,26 +189,31 @@ def share(text_: str, by: str, date: str) -> str:
     return set_keys(text_, {"visibility": "project", "shared": f"{by} {date}"})
 
 
-_TICKED_RE = re.compile(r"\s*[-*+] \[[xX]\] (Share|Stop James)(?:\s+@\S+)?\s*")
+_BOX_RE = re.compile(r"(\s*[-*+] \[)([ xX])(\] (Share|Stop James)(?:\s+@\S+)?\s*)")
 
 
 def newly_ticked(old: str, new: str) -> set:
-    """The words of the two actions the hub acts on, Share and Stop James, that `new` holds ticked more
-    often than `old`: a box a save ticked."""
-    def count(t):
-        out = {}
-        for line in _lines(t):
-            if m := _TICKED_RE.fullmatch(line):
-                out[m.group(1)] = out.get(m.group(1), 0) + 1
-        return out
-    a, b = count(old), count(new)
-    return {w for w in b if b[w] > a.get(w, 0)}
+    """The words of the two actions the hub acts on, Share and Stop James, whose box a save ticked: a line
+    of `old` that reads `- [ ] <word>` and is the same line in `new` with only its box ticked. A ticked line
+    that was anything else before (a ballot box, an `<input>`, an escaped `\\- [x]` that pandoc rewrites on
+    a save) ticks nothing, so text an assistant writes cannot Share a sheaf through the owner's save."""
+    a, b = _lines(old), _lines(new)
+    words = set()
+    for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+        if op != "replace":
+            continue
+        for was, now in zip(a[i1:i2], b[j1:j2]):
+            m, n = _BOX_RE.fullmatch(was), _BOX_RE.fullmatch(now)
+            if m and n and m.group(2) == " " and n.group(2) in "xX" \
+                    and (m.group(1), m.group(3)) == (n.group(1), n.group(3)):
+                words.add(m.group(4))
+    return words
 
 
 def for_door(text_: str, old: str | None) -> str:
     """What a door write of `text_` puts on disk over `old` (None for a create). The caller is an assistant,
-    never the owner: its `visibility` and `shared` are not read, and on an update the `owner` stays the one
-    on disk. The sheaf is `owner` when it has a private source, and stays `owner` when it was, front matter
+    never the owner: its `visibility` and `shared` are not read, and on an update the `owner` and the `issue`
+    (whose assignee is the owner) stay the ones on disk. The sheaf is `owner` when it has a private source, and stays `owner` when it was, front matter
     dropped or not; a Share already made stays while the write adds no private source the owner did not
     share."""
     fm = front_matter(text_)
@@ -220,8 +227,10 @@ def for_door(text_: str, old: str | None) -> str:
     want = "owner" if closed or (mine and not kept) else "project"
     values = {"visibility": want, "shared": kept if want == "project" else None}
     if old is not None:
-        values["owner"] = owner or None     # an update neither gives nor changes the owner
+        # an update neither gives nor changes the owner, nor the issue whose assignee is the owner
+        values["owner"] = owner or None
+        values["issue"] = text(was, "issue") or None
     if want == "project" and not ({"visibility", "sources", "shared"} & fm.keys()) \
-            and text(fm, "owner") == owner:
+            and text(fm, "owner") == owner and (old is None or text(fm, "issue") == text(was, "issue")):
         return text_
     return set_keys(text_, values)

@@ -236,7 +236,7 @@ class LiveDocument:
             return answer
 
     def comment(self, op, fields, base_hash, await_action=False, *, by=None, role=None,
-                announce=True, author=None, rid=None):
+                announce=True, author=None, rid=None, guard=None):
         """add / reply / status / edit / delete, written as this document's reader.
 
         `by` signs an add or a reply as someone else, and `role` gives a reply a role of its own
@@ -266,7 +266,8 @@ class LiveDocument:
         now, with the comment's id and `again`. It is not looked for in the file: a thread deleted or
         an edit overwritten since still answers `again`. `taken_rids` names the ids kept. The
         `changed` event of a write names its id, so the tab that gave up hears that it was taken.
-        The last RIDS ids are kept, in memory."""
+        The last RIDS ids are kept, in memory. `guard(text)` sees the file's text under the file lock
+        before anything is written, and raises to write nothing."""
         sent = (op, fields.get("id", ""), fields.get("body", ""), fields.get("quote", ""), by or self._by,
                 bool(fields.get("resolve")), bool(fields.get("ask")), bool(fields.get("tell")),
                 fields.get("block"), fields.get("start"), fields.get("end"))
@@ -279,6 +280,8 @@ class LiveDocument:
             before = self._text
 
             def change(t):
+                if guard is not None:
+                    guard(t)
                 new = write(t)
                 if wait:
                     # The Tell's baseline comes from the very text written, inside the file

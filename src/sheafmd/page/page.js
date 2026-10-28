@@ -351,11 +351,13 @@
 
   function buildMenu() {
     var h = '<div class="rd-state" id="rd-state"></div>';
+    // Work on this (CFG.work): on a member's page of a sheaf, the ways to work on its session (SPEC 10.2).
+    if (canEdit || CFG.work) h += '<div class="rd-group">Document</div>';
     if (canEdit) {
-      h += '<div class="rd-group">Document</div>' +
-           '<button id="rd-edit"><span>Edit</span><span class="rd-key">E</span></button>' +
+      h += '<button id="rd-edit"><span>Edit</span><span class="rd-key">E</span></button>' +
            '<button id="rd-save"><span>Save</span><span class="rd-key">Ctrl+S</span></button>';
     }
+    if (CFG.work) h += '<button id="rd-work-btn"><span>Work on this</span></button>';
     h += '<div class="rd-group">Comments</div>' +
          '<button id="rd-show"><span>Show comments (' + openCount() + ')</span></button>';
     if (canSave) h += '<div class="rd-as">Commenting as ' + esc(CFG.me || 'unknown') +
@@ -370,6 +372,7 @@
     q('#rd-edit') && q('#rd-edit').addEventListener('click', function () { closeMenu(); setEditing(!editing); });
     q('#rd-save') && q('#rd-save').addEventListener('click', function () { closeMenu(); save(); });
     q('#rd-show').addEventListener('click', function () { closeMenu(); openPanel(); });
+    q('#rd-work-btn') && q('#rd-work-btn').addEventListener('click', function (e) { e.stopPropagation(); closeMenu(); openWork(); });
     q('#rd-html') && q('#rd-html').addEventListener('click', function () { closeMenu(); grab('html'); });
     q('#rd-pdf') && q('#rd-pdf').addEventListener('click', function () { closeMenu(); grab('pdf'); });
     refresh();
@@ -456,6 +459,64 @@
   });
   document.addEventListener('click', function (e) {
     if (menu.classList.contains('open') && !menu.contains(e.target) && e.target !== btn) closeMenu();
+  });
+
+  // ---- Work on this (SPEC 10.2) ----------------------------------------------------------------
+  // On a member's page of a sheaf, CFG.work holds the commands that work on its session (attach on the
+  // box, fork to the member's machine) and the sessions of its front matter, newest first. The popover
+  // stands where the menu was; Escape and a click outside close it, as they close the menu.
+  var workPop = null;
+  function upper(s) { s = String(s || ''); return s.charAt(0).toUpperCase() + s.slice(1); }
+  // "2026-10-28T05:12:03Z" reads "2026-10-28 05:12 UTC"; anything else is shown as written.
+  function utcDate(d) {
+    var m = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}):\d{2}Z$/.exec(String(d || ''));
+    return m ? m[1] + ' ' + m[2] + ' UTC' : String(d || '');
+  }
+  function cmdRow(text) {
+    return '<div class="rd-cmd"><code>' + esc(text) + '</code><button type="button">Copy</button></div>';
+  }
+  function drawWork() {
+    var w = CFG.work || {}, ss = (w.sessions || []).slice(0, 5);
+    var h = '';
+    if (w.attach) h += '<h4>Attach on the box</h4><p>James’s session is live in tmux. You join it in your terminal; ' +
+                       'same transcript, same tools, James’s account.</p>' + cmdRow(w.attach);
+    h += '<h4>Fork to your machine</h4>' + cmdRow(w.fork || '') +
+         '<p>Runs on your laptop: fetches the session through this hub, forks it under your name.</p>';
+    h += '<h4>Sessions</h4>' + (ss.length ? ss.map(function (x) {
+      return '<div class="rd-sess">' + esc(upper(x.member)) + ' on ' + esc(x.host) + ' · ' + esc(utcDate(x.date)) + '</div>';
+    }).join('') : '<p class="rd-none">No session yet.</p>');
+    workPop.innerHTML = h;
+    Array.prototype.forEach.call(workPop.querySelectorAll('.rd-cmd button'), function (b) {
+      b.addEventListener('click', function () { copyCommand(b.previousElementSibling); });
+    });
+  }
+  function openWork() {
+    if (!workPop) {
+      workPop = el('div', { id: 'rd-work', role: 'dialog', 'aria-label': 'Work on this' });
+      document.body.appendChild(workPop);
+    }
+    drawWork();
+    workPop.hidden = false;
+  }
+  function workOpen() { return !!workPop && !workPop.hidden; }
+  function closeWork() { if (workPop) workPop.hidden = true; }
+  // The clipboard where the browser lends it (a secure context); else the command is selected, for Ctrl+C.
+  function copyCommand(code) {
+    var text = code.textContent;
+    var pick = function () {
+      var r = document.createRange();
+      r.selectNodeContents(code);
+      var s = window.getSelection();
+      s.removeAllRanges();
+      s.addRange(r);
+      say('Selected: press Ctrl+C to copy.');
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { say('Copied'); }, pick);
+    } else pick();
+  }
+  document.addEventListener('click', function (e) {
+    if (workOpen() && !workPop.contains(e.target) && e.target !== btn && !menu.contains(e.target)) closeWork();
   });
 
   function setEditing(on) {
@@ -2003,7 +2064,7 @@
   document.addEventListener('mousedown', function (e) {
     if (!panel.classList.contains('open')) return;
     var t = e.target;
-    if (t.closest && t.closest('#rd-panel, #rd-popover, #rd-menu, #rd-menu-btn, #rd-comment-btn, .rd-badge')) return;
+    if (t.closest && t.closest('#rd-panel, #rd-popover, #rd-menu, #rd-work, #rd-menu-btn, #rd-comment-btn, .rd-badge')) return;
     closePanel();
   });
   function drawPanel() {
@@ -2064,7 +2125,7 @@
   var BAR_CLEAR = 24;                   // px between the touch bar and a selection before the bar moves out of its way
   var TAP_SLOP = 8, TAP_MOVE = 10;      // px a finger may be off the button, and may travel, and still tap it
   var SETTLE = 350;                     // ms a touch selection stands still before the button is offered
-  var IN_UI = '#rd-popover, #rd-panel, #rd-menu, #rd-comment-btn';   // selections that are not the document's
+  var IN_UI = '#rd-popover, #rd-panel, #rd-menu, #rd-work, #rd-comment-btn';   // selections that are not the document's
   function unpaintWidened() { if (HL) CSS.highlights.delete('rd-widened'); }
   function dropCommentBtn() { if (cbtn) { cbtn.remove(); cbtn = null; } clearTimeout(thumbTimer); thumbOn = false; }
   function hideCommentBtn() { dropCommentBtn(); unpaintWidened(); }
@@ -2368,6 +2429,7 @@
                  /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName || '');
     if (e.key === 'Escape') {
       // One thing per press, the first that applies.
+      if (workOpen()) { e.preventDefault(); closeWork(); return; }
       if (pop && !standing()) { e.preventDefault(); leavePopover(); return; }
       if (panel.classList.contains('open')) { e.preventDefault(); closePanel(); return; }
       if (menu.classList.contains('open')) { e.preventDefault(); closeMenu(); return; }

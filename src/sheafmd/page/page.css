@@ -21,6 +21,20 @@
 #rd-menu button[disabled]{opacity:.4;cursor:default}
 #rd-menu .rd-key{opacity:.55}
 #rd-menu .rd-as{padding:2px 14px 6px;font-size:11px;opacity:.6}
+/* Work on this (SPEC 10.2): where the menu stands, the commands that work on the sheaf's session. */
+#rd-work{position:fixed;right:18px;bottom:74px;z-index:401;width:420px;max-width:calc(100vw - 32px);
+ max-height:calc(100vh - 90px);overflow-y:auto;box-sizing:border-box;
+ background:var(--bg,#fff);color:var(--fg,#000);border:2px solid var(--fg,#000);border-radius:3px;
+ box-shadow:4px 4px 0 rgba(0,0,0,.18);padding:10px 14px 12px;font:13px/1.45 system-ui,sans-serif}
+#rd-work[hidden]{display:none}
+#rd-work h4{font:700 10px ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;opacity:.6;margin:10px 0 4px}
+#rd-work h4:first-child{margin-top:2px}
+#rd-work p{margin:4px 0;font-size:12px;opacity:.8}
+#rd-work .rd-cmd{display:flex;gap:8px;align-items:center;border:1.5px solid rgba(127,127,127,.45);border-radius:2px;padding:4px 4px 4px 8px}
+#rd-work .rd-cmd code{flex:1;min-width:0;overflow-x:auto;white-space:nowrap;font:12px ui-monospace,monospace}
+#rd-work .rd-cmd button{font:600 11px ui-monospace,monospace;cursor:pointer;background:var(--fg,#000);
+ color:var(--bg,#fff);border:0;border-radius:2px;padding:4px 9px}
+#rd-work .rd-sess{font:12px ui-monospace,monospace;padding:3px 0;border-top:1px solid rgba(127,127,127,.2)}
 
 .rd-anchor{display:inline;white-space:nowrap}
 .rd-badge{display:inline-block;min-width:1.35em;padding:0 .3em;margin-left:.15em;border-radius:.7em;
@@ -139,7 +153,7 @@ body.rd-editing .rd-locked::after{content:"source-only";position:absolute;top:4p
 #rd-notice code{font:inherit;font-weight:700}
 /* What was typed on a page whose document left the hub, to copy. */
 #rd-notice textarea{display:block;box-sizing:border-box;width:100%;margin-top:6px;font:inherit;resize:vertical}
-@media print{#rd-menu-btn,#rd-menu,#rd-toast,#rd-notice,#rd-unsent,#rd-popover,#rd-panel,#rd-comment-btn,.rd-badge{display:none!important}}
+@media print{#rd-menu-btn,#rd-menu,#rd-work,#rd-toast,#rd-notice,#rd-unsent,#rd-popover,#rd-panel,#rd-comment-btn,.rd-badge{display:none!important}}
 
 /* "Claude is answering": three dots that rise in turn, so a wait looks alive. */
 .rd-dots{display:inline-flex;gap:3px;margin-left:5px;vertical-align:middle}

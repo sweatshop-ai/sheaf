@@ -337,3 +337,23 @@ def test_a_front_matter_line_the_hub_cannot_read_keeps_the_sheaf_its_owners(team
     put(team, work, DOC, change(PRIVATE))
     assert team.get(f"/work/{DOC}", member=HANS).status == 404
     assert team.get(f"/work/{DOC}", member=THIERRY).status == 200
+
+
+def test_the_owners_share_written_with_a_plus_bullet_opens_the_sheaf_too(team, work):
+    put(team, work, DOC, PRIVATE.replace("- [ ] Share", "+ [ ] Share"))
+    assert tick(team, work, DOC, "Share", THIERRY).status == 200
+    assert team.get(f"/work/{DOC}", member=HANS).status == 200
+
+
+def test_share_with_a_plus_bullet_ticked_by_a_member_who_is_not_the_owner_is_refused(team, work):
+    shared = PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:x/y#1]")
+    put(team, work, DOC, shared.replace("- [ ] Share", "+ [ ] Share"))
+    before = (work / DOC).read_text(encoding="utf-8")
+    assert tick(team, work, DOC, "Share", HANS).status == 409
+    assert (work / DOC).read_text(encoding="utf-8") == before
+
+
+def test_the_owners_share_nested_in_a_list_opens_the_sheaf_too(team, work):
+    put(team, work, DOC, PRIVATE.replace("- [ ] Share", "- Before you share\n  - [ ] Share"))
+    assert tick(team, work, DOC, "Share", THIERRY).status == 200
+    assert team.get(f"/work/{DOC}", member=HANS).status == 200

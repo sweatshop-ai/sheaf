@@ -187,7 +187,7 @@ def share(text_: str, by: str, date: str) -> str:
     return set_keys(text_, {"visibility": "project", "shared": f"{by} {date}"})
 
 
-_TICKED_RE = re.compile(r"[-*] \[[xX]\] (Share|Stop James)(?:\s+@\S+)?\s*")
+_TICKED_RE = re.compile(r"\s*[-*+] \[[xX]\] (Share|Stop James)(?:\s+@\S+)?\s*")
 
 
 def newly_ticked(old: str, new: str) -> set:

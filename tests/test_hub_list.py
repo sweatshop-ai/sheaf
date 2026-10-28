@@ -84,6 +84,7 @@ class FakeGitHub:
     def __init__(self):
         self.issues = {}
         self.requests = 0
+        self.errors = None              # GraphQL errors to answer with, and no data, still with a 200
         fake = self
 
         class H(BaseHTTPRequestHandler):
@@ -100,7 +101,8 @@ class FakeGitHub:
                 data = {}
                 for alias, owner, name, number in fake.ALIAS.findall(body["query"]):
                     data[alias] = {"issue": fake.issue(owner, name, int(number))}
-                out = json.dumps({"data": data}).encode()
+                answer = {"data": data} if fake.errors is None else {"data": None, "errors": fake.errors}
+                out = json.dumps(answer).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(out)))
@@ -254,6 +256,40 @@ def test_a_done_issue_leaves_the_list_and_its_sheaf_still_opens_at_its_address(b
     assert box.get("/list/globex/black-friday/2026-10-28-reply-to-joey.md", member=NELL).status == 200
 
 
+def test_an_issue_the_record_no_longer_answers_leaves_the_list(box, github):
+    del github.issues[5]                        # deleted, transferred, or the App lost its repo
+    box.hub.the_list.poll()
+    assert list(read(box.get("/list", member=NELL))) == ["Waiting on you 1", "In progress 1"]
+    assert not hub_rows("list-poll-failed")
+
+
+def test_an_answer_with_errors_and_no_data_is_a_poll_that_could_not_read_the_record(box, github):
+    github.errors = [{"type": "RATE_LIMITED", "message": "API rate limit exceeded"}]
+    github.issues[5]["status"] = "Done"
+    box.hub.the_list.poll()
+    assert "Waiting on you 2" in read(box.get("/list", member=NELL))
+    rows = hub_rows("list-poll-failed")
+    assert rows and "errors" in rows[-1]["error"]
+    assert TOKEN not in json.dumps(rows)
+
+
+def test_the_owner_is_the_login_of_an_assignee_who_is_no_member_and_nobody_without_one(box, github):
+    github.issues[6]["assignees"] = ["zed-x"]
+    github.issues[7]["assignees"] = []
+    box.hub.the_list.poll()
+    page = read(box.get("/list", member=NELL))
+    assert page["In progress 1"]["initech/website"] == [("Prep for the call of Thursday James", "prep · zed-x · #6 · 40 min")]
+    assert page["Waiting on you 2"]["initech/website"] == [
+        ("James needs the GA4 property id Done @dora James", "question · nobody · #7 · 3 h")]
+
+
+def test_my_projects_reads_the_members_of_projects_toml_without_case(box, sheaves):
+    (sheaves / "projects.toml").write_text(
+        '[projects."globex/black-friday"]\nmembers = ["Nell"]\nstatus = "live"\n', encoding="utf-8")
+    box.hub.the_list.poll()
+    assert list(read(box.get("/list", member=NELL))["Waiting on you 1"]) == ["globex/black-friday"]
+
+
 def test_a_row_links_to_its_sheafs_own_address_which_opens_and_reloads(box):
     for path in ("/list", "/list/"):
         soup = BeautifulSoup(box.get(path, member=NELL).text, "html.parser")
@@ -404,7 +440,8 @@ def test_a_tick_of_an_action_the_sheaf_no_longer_holds_is_refused_and_writes_not
 
 
 @pytest.mark.parametrize("body", [{"doc": JOEY, "word": "Approve"}, {"doc": JOEY, "action": "0", "word": "Approve"},
-                                  {"doc": JOEY, "action": True, "word": "Approve"}, {"doc": JOEY, "action": 0}])
+                                  {"doc": JOEY, "action": True, "word": "Approve"}, {"doc": JOEY, "action": 0},
+                                  {"doc": JOEY, "action": 0, "word": ""}])
 def test_a_tick_that_does_not_name_an_action_is_refused(box, body):
     assert box.post("/_/tick", body, member=NELL).status == 400
 

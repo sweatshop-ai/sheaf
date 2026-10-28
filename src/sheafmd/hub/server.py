@@ -338,6 +338,8 @@ class HubServer:
         self.hub.stop_jobs()
         time.sleep(0.15)                  # let the streams write it before the server goes
         self.tell_socket.stop()
+        if self.hub.the_list is not None:
+            self.hub.the_list.stop()
         self.stopping.set()
         self.httpd.shutdown()
         self.httpd.server_close()         # shutdown leaves the port listening; close gives it back
@@ -348,6 +350,8 @@ class HubServer:
         self.closing.set()
         self.hub.stop_jobs()
         self.tell_socket.stop()
+        if self.hub.the_list is not None:
+            self.hub.the_list.stop()
         if not self.stopping.is_set():
             self.stopping.set()
             self.httpd.shutdown()

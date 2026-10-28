@@ -24,7 +24,7 @@ PROJECT_WIDE = ("issue", "pr", "repo", "web")
 KEYS = ("visibility", "sources", "owner", "shared")
 UNREAD = "?"                        # set by front_matter when a line it cannot read may hold one of KEYS
 
-_KEY_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*):(?:\s+(.*?))?\s*")
+_KEY_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_.-]*):(?:\s+(.*?))?\s*")
 _ITEM_RE = re.compile(r"\s*-\s+(.*?)\s*")
 
 
@@ -64,12 +64,19 @@ def _end(lines: list) -> int:
     return next((n for n in range(1, len(lines)) if lines[n].strip() in ("---", "...")), -1)
 
 
+def _may_spell_a_key(line: str) -> bool:
+    """Whether `line`, which the reader cannot read, may hold one of KEYS: it names one, in any case, or
+    holds an escape a quoted key may spell one with."""
+    return "\\" in line or any(k in line.casefold() for k in KEYS)
+
+
 def front_matter(text: str) -> dict:
     """The top-level `key: value` lines of the front matter at the top of `text`. A list, written
     `[a, b]` or as `- a` lines under an empty key, indented or not, is a tuple of its items; a nested table
-    is not read. The reader fails closed: a line it cannot read that may hold one of KEYS (a quoted key, a
-    line that is no `key: value`, an indented line under one of KEYS, one of KEYS written twice) sets
-    `UNREAD`, and `effective` reads such a sheaf as `owner`."""
+    is not read. The reader fails closed: a line it cannot read that may hold one of KEYS (a line that is no
+    `key: value` and names one or holds an escape, as a quoted key may; an indented line under one of KEYS;
+    one of KEYS written twice) sets `UNREAD`, and `effective` reads such a sheaf as `owner`. A line it cannot
+    read that names none of them (`my key: a value`) is another key's, as `date-created: …` is."""
     lines = _lines(text)
     end = _end(lines)
     if end < 0:
@@ -84,7 +91,7 @@ def front_matter(text: str) -> dict:
         listing = None
         m = _KEY_RE.fullmatch(line)
         if not m:
-            if line[:1] not in " \t" or current in KEYS:
+            if (current in KEYS) if line[:1] in " \t" else _may_spell_a_key(line):
                 out[UNREAD] = True
             continue                # an indented line under another key: a value this reader does not read
         key, value = m.group(1), _uncomment(m.group(2) or "")

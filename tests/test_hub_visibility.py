@@ -650,3 +650,20 @@ def test_an_owner_only_sheaf_deleted_while_streams_are_open_is_told_to_its_owner
     assert [d for name, d in hans.drain() if name == "status"] == []
     if judged:
         assert [d["doc"] for name, d in thierry.drain() if name == "status"] == [f"work/{DOC}"]
+
+
+OPEN = PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:thinkingtoo/tt-tiroir#9]")
+
+
+@pytest.mark.parametrize("line", ["date-created: 2026-10-28", "link-citations: true", "header-includes:\n  - x",
+                                  "my key: a value"])
+def test_a_front_matter_key_the_hub_does_not_enforce_leaves_an_open_sheaf_open(team, work, line):
+    put(team, work, DOC, OPEN.replace("owner: thierry\n", f"owner: thierry\n{line}\n"))
+    assert team.get(f"/work/{DOC}", member=HANS).status == 200
+
+
+@pytest.mark.parametrize("line", ['"visibility": owner', "'owner': hans", '"\\x6fwner": hans', "? visibility\n: owner",
+                                  "visibility : owner"])
+def test_a_line_that_may_spell_a_key_the_hub_enforces_still_closes_the_sheaf(team, work, line):
+    put(team, work, DOC, OPEN.replace("owner: thierry\n", f"owner: thierry\n{line}\n"))
+    assert team.get(f"/work/{DOC}", member=HANS).status == 404

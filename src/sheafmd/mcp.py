@@ -32,7 +32,7 @@ from .hub.roots import Address, NotFound, address_of_url, in_git_dir
 from .hub import visibility
 from .hub.state import TokenRow
 from .render import COMMENT_RE as HTML_COMMENT_RE, strip_comments
-from .source import StaleError, create_file, md_hash, now, update_file
+from .source import create_file, md_hash, now, update_file
 
 PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")
 INSTRUCTIONS = (
@@ -233,8 +233,8 @@ def markdown_files(root) -> list[str]:
 class Door:
     def __init__(self, hub):
         self.hub = hub
-        # real path -> ((mtime_ns, size), [(id, messages, last author)] of its open threads):
-        # a file is read again only when it changed (SPEC 8.6)
+        # real path -> ((mtime_ns, size), [(id, messages, last author)] of its open threads, whether it is
+        # its owner's alone): a file is read again only when it changed (SPEC 8.6, 9.11)
         self._open_threads: dict = {}
         self._tools = {"documents": self._documents, "threads": self._threads,
                        "reply": self._reply, "resolve": self._resolve, "read": self._read,
@@ -321,9 +321,18 @@ class Door:
         try:
             self.hub.roots.document(address)
         except NotFound:
-            raise ToolError(f"There is no document {doc} in a root of this hub; name it "
-                            "`<root>/<path>`, by its page URL or by the absolute path of the .md.") from None
+            raise _absent(doc) from None
         return address
+
+    def _hides_from(self, caller: Caller) -> bool:
+        """Whether a sheaf that is its owner's alone is not there for `caller` (9.11): in proxy mode a token
+        acts for an assistant, which is no member, so such a sheaf is as absent to it as to a member who does
+        not own it. The key is the hub's own account, which reads every file."""
+        return caller.token is not None and getattr(self.hub, "proxy", None) is not None
+
+    def _hidden(self, text: str, caller: Caller) -> bool:
+        """Whether the document whose text is `text` is not there for `caller`."""
+        return self._hides_from(caller) and _owner_only(text)
 
     @staticmethod
     def _address_of_url(url: str) -> str:
@@ -354,15 +363,19 @@ class Door:
             why = f" ({e.strerror})" if caller.may_add_roots and getattr(e, "strerror", None) else ""
             raise ToolError(f"{path} cannot be used as a document{why}.") from None
 
-    def _comments(self, address: str):
-        """The comments of the document as the file is now, not as a page was rendered."""
+    def _comments(self, address: str, caller: Caller, doc: str):
+        """The comments of the document as the file is now, not as a page was rendered. `doc` is how the
+        caller named it, for the answer to one it may not see."""
         try:
-            return rdc.parse(self.hub.roots.document(address).read_text(encoding="utf-8"))
+            text = self.hub.roots.document(address).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError, NotFound):
             raise ToolError(f"{address} cannot be read.") from None
+        if self._hidden(text, caller):
+            raise _absent(doc)
+        return rdc.parse(text)
 
-    def _comment(self, address: str, cid: str):
-        c = self._comments(address).by_id(cid)
+    def _comment(self, address: str, cid: str, caller: Caller, doc: str):
+        c = self._comments(address, caller, doc).by_id(cid)
         if c is None:
             raise ToolError(f"There is no comment {cid} in {address}.")
         return c
@@ -385,12 +398,13 @@ class Door:
         self.hub.committed(address, by=caller.display, what="comment")
 
     # ── the tools ────────────────────────────────────────────────────────────
-    def _open_in(self, path: Path) -> list:
+    def _open_in(self, path: Path) -> tuple:
+        """(open threads, whether the sheaf is its owner's alone) of the file at `path`, both from one read."""
         st = path.stat()
         key = (st.st_mtime_ns, st.st_size)
         cached = self._open_threads.get(path)
         if cached and cached[0] == key:
-            return cached[1]
+            return cached[1:]
         text = path.read_text(encoding="utf-8")
         threads = []
         if "comment id=" in text:
@@ -398,8 +412,8 @@ class Door:
                 if c.status == "open":
                     last = c.display(c.replies[-1]) if c.replies else c.by
                     threads.append((c.id, 1 + len(c.replies), last))
-        self._open_threads[path] = (key, threads)
-        return threads
+        self._open_threads[path] = (key, threads, _owner_only(text))
+        return self._open_threads[path][1:]
 
     def _dot(self, address: str, unread: int, open_: int, asking: set) -> str:
         """The dot of 8.6, as the index page gives it: `asking` holds the documents an Ask runs on."""
@@ -420,6 +434,7 @@ class Door:
             wanted = hub.roots.all()
         asking = {doc for doc, _ in hub.jobs_asking()}
         rows, shut = [], []
+        hides = self._hides_from(caller)
         in_git = {}                             # (root, real folder) -> whether 8.2 keeps its files from the root
         for root in wanted:
             # A root the hub cannot look into may hold what waits: said by name and why, never its folder (8.6).
@@ -436,10 +451,12 @@ class Door:
                         in_git[root.name, path.parent] = in_git_dir(path, root)
                     if in_git[root.name, path.parent]:
                         continue                               # nor one in a git directory
-                    threads = self._open_in(path)
+                    threads, owner_only = self._open_in(path)
                     mtime = path.stat().st_mtime_ns
                 except (NotFound, OSError, UnicodeDecodeError):
                     continue
+                if hides and owner_only:
+                    continue                                   # nor a sheaf the caller may not see (9.11)
                 if args.get("open_only", True) and not threads:
                     continue
                 seen = hub.seen.get(address)
@@ -453,7 +470,7 @@ class Door:
     def _threads(self, args: dict, caller: Caller):
         address = self._address(args["doc"], caller)
         status = args.get("status", "open")
-        got = self._comments(address)
+        got = self._comments(address, caller, args["doc"])
         return {"doc": address, "url": self.hub.url(address),
                 "comments": [{k: v for k, v in c.as_dict().items() if k != "block"}
                              for c in got.comments if status == "all" or c.status == status],
@@ -464,17 +481,17 @@ class Door:
         cid, text = args["id"], args["text"]
         if not text.strip():
             raise ToolError("text is empty.")
-        self._comment(address, cid)
+        self._comment(address, cid, caller, args["doc"])
         self._write(address, caller, "reply",
                     {"id": cid, "body": text, "resolve": args.get("resolve", False)},
                     role=args.get("role", "answer"))
-        c = self._comment(address, cid)
+        c = self._comment(address, cid, caller, args["doc"])
         return {"id": cid, "status": c.status, "replies": c.as_dict()["replies"]}
 
     def _resolve(self, args: dict, caller: Caller):
         address = self._address(args["doc"], caller)
         cid = args["id"]
-        if self._comment(address, cid).status != "resolved":
+        if self._comment(address, cid, caller, args["doc"]).status != "resolved":
             self._write(address, caller, "status", {"id": cid, "status": "resolved"})
         return {"id": cid, "status": "resolved"}
 
@@ -484,6 +501,8 @@ class Door:
             text = self.hub.roots.document(address).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError, NotFound):
             raise ToolError(f"{address} cannot be read.") from None
+        if self._hidden(text, caller):
+            raise _absent(args["doc"])
         out = text
         if not args.get("comments", True):
             out = strip_comments(text)
@@ -585,14 +604,18 @@ class Door:
         written = [text]
 
         def change(now_text):
-            _check_comments(now_text, text)     # against the file as it is, under its lock
+            # Each check on the file as it is, under its lock; a sheaf the caller may not see first, so a
+            # wrong hash does not tell it from no document (9.11).
+            if self._hidden(now_text, caller):
+                raise _absent(args["doc"])
+            if md_hash(now_text) != expected:
+                raise Stale(f"{address} has changed since that hash was read; read it again, make the "
+                            "change on that text and send it with its hash.")
+            _check_comments(now_text, text)
             written[0] = self._visible(text, now_text)
             return written[0]
         try:
-            before, _ = update_file(self.hub.roots.document(address), change, expected)
-        except StaleError:
-            raise Stale(f"{address} has changed since that hash was read; read it again, make the "
-                        "change on that text and send it with its hash.") from None
+            before, _ = update_file(self.hub.roots.document(address), change)
         except (OSError, UnicodeDecodeError, NotFound):
             raise ToolError(f"{address} could not be written.", "not written") from None
         text = written[0]
@@ -609,6 +632,17 @@ class Door:
         if getattr(self.hub, "proxy", None) is None:
             return text
         return visibility.for_door(text, old)
+
+
+def _owner_only(text: str) -> bool:
+    """Whether the sheaf whose text is `text` is its owner's alone (9.11)."""
+    return visibility.effective(visibility.front_matter(text)) == "owner"
+
+
+def _absent(doc: str) -> ToolError:
+    """The answer to a `doc` that names no document, said the same for one the caller may not see (9.11)."""
+    return ToolError(f"There is no document {_named(doc)} in a root of this hub; name it "
+                     "`<root>/<path>`, by its page URL or by the absolute path of the .md.")
 
 
 def _named(doc: str) -> str:

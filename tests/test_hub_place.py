@@ -140,6 +140,8 @@ def test_a_door_create_of_an_open_sheaf_lands_at_the_project(team, work, browser
 def test_a_door_create_of_an_owner_only_sheaf_whose_owner_has_no_short_is_refused(team, work, browser, tokens):
     """A short that cannot name a folder (`..`, which the config's rule lets through) is no short for it."""
     team.hub.proxy.members[THIERRY] = dataclasses.replace(team.hub.proxy.members[THIERRY], short="..")
+    (work / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["..", "hans"]\n'
+                                        'status = "live"\n', encoding="utf-8")       # the project names that short
     is_error, got = call(browser, "create", token=tokens["thierry"], doc=f"work/{SHARED}",
                          text=PRIVATE.replace("owner: thierry", "owner: .."))
     assert is_error and "no owner of it has a short" in got, got

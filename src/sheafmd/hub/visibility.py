@@ -4,7 +4,7 @@ sheafmd.hub.visibility — who may open a sheaf (SPEC 9.11): its owner alone, or
     front_matter(text)              the top-level keys of the front matter: text, or a tuple for a list
     effective(fm)                   "owner" or "project", what the hub enforces
     owner_of(fm, members, assignees) the members who own the sheaf
-    visible_to(fm, member, assignees=None)
+    visible_to(fm, member, assignees=None, granted=True)
     share(text, by, date)           the text the owner's Share writes
     unshare(text)                   the text the owner's untick of Share writes
     newly_ticked(toggled)           the Share and Stop James boxes a save ticks
@@ -164,12 +164,13 @@ def owner_of(fm: dict, members, assignees=None) -> list:
     return [m for m in members if short and m.short and m.short.casefold() == short]
 
 
-def visible_to(fm: dict, member, assignees=None) -> bool:
+def visible_to(fm: dict, member, assignees=None, granted: bool = True) -> bool:
     """Whether `member` may open the sheaf `fm`. `assignees` is the record's for its issue, None when the
-    list does not know it."""
-    if effective(fm) == "project":
+    list does not know it. `granted`: whether `projects.toml` lets the member into the sheaf's project (8.12);
+    an owner opens their own sheaf whatever it says."""
+    if any(m.id == member.id for m in owner_of(fm, [member], assignees)):
         return True
-    return any(m.id == member.id for m in owner_of(fm, [member], assignees))
+    return granted and effective(fm) == "project"
 
 
 def set_keys(text_: str, values: dict) -> str:

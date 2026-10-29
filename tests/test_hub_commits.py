@@ -37,7 +37,7 @@ def sheaves(tmp_path, remote):
     git(repo, "config", "user.name", "the box")
     git(repo, "config", "user.email", "box@example.com")
     (repo / ".sheaf.toml").write_text('versions = "root"\ncommit = true\npush = true\n', encoding="utf-8")
-    (repo / "projects.toml").write_text('[projects."acme/blog"]\nmembers = ["bea"]\nstatus = "live"\n',
+    (repo / "projects.toml").write_text('[projects."acme/blog"]\nmembers = ["bea", "cal"]\nstatus = "live"\n',
                                         encoding="utf-8")
     doc = repo / "acme" / "blog" / "2026-10-28-plan.md"
     doc.parent.mkdir(parents=True)
@@ -55,9 +55,9 @@ def box(hub, browser, sheaves, other):
     import pwd
     hub.proxy = proxy.parse({"origin": FRONT, "socket": "/run/sheaf-proxy/hub.sock",
                              "proxy_user": pwd.getpwuid(os.getuid()).pw_name,
-                             "members": {BEA: {"name": "Bea", "email": "bea@example.com",
+                             "members": {BEA: {"name": "Bea", "email": "bea@example.com", "short": "bea",
                                                "roots": [str(sheaves)]},
-                                         CAL: {"name": "Cal", "roots": [str(sheaves)]}}}, "the test")
+                                         CAL: {"name": "Cal", "short": "cal", "roots": [str(sheaves)]}}}, "the test")
     hub.roots.for_document(sheaves / "acme" / "blog" / "2026-10-28-plan.md")
     return Front(hub, browser.handler)
 
@@ -146,10 +146,11 @@ def test_a_sheaf_folder_projects_toml_does_not_name_is_a_warning_once(box, sheav
     assert err.count("globex/launch") == 1 and "projects.toml" in err
 
 
-def test_a_projects_toml_that_cannot_be_read_is_a_warning_and_lists_as_before(box, sheaves):
+def test_a_projects_toml_that_cannot_be_read_is_a_warning_and_closes_every_project(box, sheaves):
+    """It grants (8.12, #44): one the hub cannot read opens no project to a member, and says why once."""
     (sheaves / "projects.toml").write_text('[projects."acme/blog"]\nmembers = ["bea"]\nstatus = "maybe"\n', encoding="utf-8")
     docs = [d["doc"] for r in box.get("/_/index.json").json()["roots"] for d in r["docs"]]
-    assert docs == [DOC]
+    assert docs == []
     (row,) = rows("projects-invalid")
     assert row["root"] == "sheaves" and "status" in row["error"]
 

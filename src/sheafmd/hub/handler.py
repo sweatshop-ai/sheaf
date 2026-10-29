@@ -31,7 +31,7 @@ from ..edit import EditError
 from ..mcp import Caller, Door
 from ..render import RenderError
 from ..source import StaleError, md_hash
-from . import auth, peer, place, proxy, the_list, visibility, work
+from . import auth, events, peer, place, proxy, the_list, visibility, work
 from .asktell import NO_AGENT, JobRefused
 from .index import Status
 from .live import UNKNOWN, NotAuthor
@@ -594,8 +594,13 @@ class Handler:
         e = self._entry(req, req.query.get("doc"))
         def for_member(name, data):
             # Asked at each event: a write that makes the sheaf its owner's alone silences a stream
-            # opened before it (9.11).
-            return _document_events(name, data) if hub.visible(member, e.address) else None
+            # opened before it (9.11). A change of `projects.toml` that shuts the member out is told `gone`, with
+            # why (8.12): that alone, never a file of the sheaf that cannot be read for a moment.
+            if hub.visible(member, e.address):
+                return _document_events(name, data)
+            if name == "grants" and not hub.granted(member, e.address):
+                return events.Renamed("gone", {"doc": e.address, "why": "access"})
+            return None
         sub = e.bus.subscribe(lambda tabs: {"boot": hub.boot, "version": hub.version,
                                             "service": hub.service, "tabs": tabs},
                               for_member if member else None)
@@ -796,8 +801,7 @@ class Handler:
                 # The gate (_owned) read the file before the lock: a write that closed the sheaf since is
                 # seen here, on the text the save would write over.
                 fm = visibility.front_matter(text)
-                assignees = self.hub.assignees(e.address, fm)
-                if not visibility.visible_to(fm, m, assignees):
+                if not self.hub.may_open(m, e.address, fm):
                     raise Refuse(404, "no such document")
                 # The page cannot edit a front matter (5): paragraphs of `---` would write one, and its
                 # `sessions` would serve any transcript (9.12), its `visibility` open the sheaf.
@@ -816,7 +820,7 @@ class Handler:
                     raise EditError("A save cannot change the front matter: change it in the file.")
                 words.add("Unshare")
             if "Share" in words:
-                if m is not None and not visibility.owner_of(fm, [m], assignees):
+                if m is not None and not visibility.owner_of(fm, [m], self.hub.assignees(e.address, fm)):
                     raise EditError("Only the owner of this sheaf can share it.")
                 if visibility.effective(visibility.front_matter(new)) == "owner":
                     by = (m.short or m.name) if m is not None else self.hub.person
@@ -922,7 +926,7 @@ class Handler:
             # Under the lock again: a fork reported while the hub looked keeps the session it made live, and a
             # write that closed the sheaf to the member since the comment's guard gets nothing of theirs.
             fm = visibility.front_matter(text)
-            if not visibility.visible_to(fm, req.member, self.hub.assignees(e.address, fm)) \
+            if not self.hub.may_open(req.member, e.address, fm) \
                     or not self._james_may_take(text, sid):
                 return text
             moved.append(sid)
@@ -962,7 +966,7 @@ class Handler:
         def change(text):
             # The gate (_sheaf) read the file before the lock: a write that closed the sheaf since is seen here.
             fm = visibility.front_matter(text)
-            if not visibility.visible_to(fm, req.member, self.hub.assignees(e.address, fm)):
+            if not self.hub.may_open(req.member, e.address, fm):
                 raise Refuse(404, "no such document")
             return work.with_session(text, line, sid)
         with place.held(self.hub, e.address):           # the write and its commit, one step (9.11)
@@ -1025,7 +1029,7 @@ class Handler:
                 # The gate (_entry) read the file before the lock: a write that closed the sheaf since is seen here,
                 # and a fork that moved its live session off the box since keeps Ask and Tell from James's window.
                 fm = visibility.front_matter(text)
-                if not visibility.visible_to(fm, member, self.hub.assignees(e.address, fm)):
+                if not self.hub.may_open(member, e.address, fm):
                     raise Refuse(404, "no such document")
                 if to_box and not (work.state(self.hub, e.address, text) or work.State([], "", None)).can:
                     raise Refuse(400, proxy.PROXY_LINE)

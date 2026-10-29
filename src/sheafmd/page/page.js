@@ -2833,7 +2833,8 @@
   // The stream is closed for good and the page is never reloaded, which would take it into that other
   // document or a 404. What was typed stays on screen and in its drafts, nothing more is sent (post), and
   // the notice holds a copy of it, over the outage banner (outageBanner) and any other line.
-  function meetDocGone(more) {
+  // `access`: the gone of 8.12, a change of projects.toml that no longer lets this member into the project.
+  function meetDocGone(more, access) {
     if (docGone) return;
     docGone = true;
     if (live) live.close();
@@ -2848,12 +2849,14 @@
     }).concat(Array.prototype.map.call(document.querySelectorAll('.rd-form textarea'), function (t) {
       return t.value.trim();
     }), storedTexts()).filter(function (t, i, all) { return t && all.indexOf(t) === i; });
-    showNoticeOverOffer('This document is no longer on the sheaf hub: its folder was forgotten with ' +
-                        '<code>sheaf roots forget</code>' + more + '. Nothing more can be saved from this page.' +
+    showNoticeOverOffer((access ? 'You no longer have access to this document: its project no longer lists you'
+                                : 'This document is no longer on the sheaf hub: its folder was forgotten with ' +
+                                  '<code>sheaf roots forget</code>' + more) +
+                        '. Nothing more can be saved from this page.' +
                         (typed.length ? ' What you typed and did not save is below, to copy.' +
-                                        (saving ? ' A save was still out when the folder went, so some of it may be in the file.' : '') +
+                                        (saving ? ' A save was still out when ' + (access ? 'access ended' : 'the folder went') + ', so some of it may be in the file.' : '') +
                                         '<textarea readonly rows="6">' + esc(typed.join('\n\n')) + '</textarea>' : ''));
-    incident('document-gone', { more: more });
+    incident('document-gone', { more: more, access: !!access });
   }
   // A hello: this hub may be another boot, and the text may have moved while the page could
   // not hear `changed`. (Another version is meetVersion's, which the hello handler calls next.)
@@ -3002,7 +3005,11 @@
       });
       live.addEventListener('signed-out', function () { meetSignOut(); });
       // Its root was forgotten (8.2): the last event of this stream.
-      live.addEventListener('gone', function () { meetDocGone(''); });
+      live.addEventListener('gone', function (ev) {
+        var d = {};
+        try { d = JSON.parse(ev.data || '{}'); } catch (e) {}
+        meetDocGone('', d.why === 'access');
+      });
       live.addEventListener('changed', function (ev) {
         var d = JSON.parse(ev.data || '{}');
         var late = !!d.rid && taken(d.rid);

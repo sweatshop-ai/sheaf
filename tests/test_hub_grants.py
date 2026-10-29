@@ -101,6 +101,7 @@ def test_an_open_stream_of_a_member_taken_off_the_project_is_told_gone(team, wor
     sven.drain(), thierry.drain()
     (work / "projects.toml").write_text(GRANTS.replace(', "sven"', ""), encoding="utf-8")
     team.hub.tick()
+    team.hub.tick()                 # told once the new file has held for two passes
     assert sven.drain() == [("gone", {"doc": f"work/{SHARED}", "why": "access"})]
     assert thierry.drain() == []
 
@@ -208,3 +209,20 @@ def test_two_projects_that_would_share_a_library_group_are_refused(work, capsys)
                                         '[projects."a/b-c"]\nmembers = ["sven"]\nstatus = "live"\n', encoding="utf-8")
     code, out, err = groups(capsys, "--root", str(work))
     assert code == 1 and out == "" and "group:proj-a-b-c" in err
+
+
+
+@pytest.mark.parametrize("cut", [GRANTS[:40], "", GRANTS.replace(', "sven"', "")])
+def test_a_projects_toml_caught_mid_write_ends_no_page(team, work, cut):
+    """Opus P2 (PR 51, round 2): a file written in place is met empty or cut off for a moment, and `gone` ends a
+    page for good. A change is told once the watcher has seen it hold for two passes."""
+    put(team, work, SHARED, OPEN)
+    sven = team.get(f"/_/live?doc=work/{SHARED}", member=SVEN).stream
+    sven.drain()
+    (work / "projects.toml").write_text(cut, encoding="utf-8")
+    team.hub.tick()
+    got = sven.drain()                                                      # a stream reads at once
+    (work / "projects.toml").write_text(GRANTS + "\n", encoding="utf-8")       # the write ends
+    team.hub.tick()
+    team.hub.tick()
+    assert [name for name, _ in got + sven.drain() if name == "gone"] == []

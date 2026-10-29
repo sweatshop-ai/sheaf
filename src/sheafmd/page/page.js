@@ -2854,7 +2854,7 @@
                                   '<code>sheaf roots forget</code>' + more) +
                         '. Nothing more can be saved from this page.' +
                         (typed.length ? ' What you typed and did not save is below, to copy.' +
-                                        (saving ? ' A save was still out when the folder went, so some of it may be in the file.' : '') +
+                                        (saving ? ' A save was still out when ' + (access ? 'access ended' : 'the folder went') + ', so some of it may be in the file.' : '') +
                                         '<textarea readonly rows="6">' + esc(typed.join('\n\n')) + '</textarea>' : ''));
     incident('document-gone', { more: more, access: !!access });
   }

@@ -88,7 +88,8 @@ class Hub:
         self.commits = Commits(self.record)      # the roots that commit (8.11)
         self._told_projects: set = set()         # what check_projects warned of this run (8.12)
         self._projects: dict = {}                # root id -> (stat key, entries | Invalid | None) of its projects.toml
-        self._grants_seen: dict = {}             # root id -> what projects_of gave the last tick (8.12)
+        self._grants_seen: dict = {}             # root id -> the projects_of answer the open tabs were last told (8.12)
+        self._grants_last: dict = {}             # root id -> what projects_of gave the last tick
         self.told_place: set = set()             # the addresses a place-refused row named this run (9.11)
         self.told_link: set = set()              # the (root id, path) a link-ignored row named this run (9.11)
         self.told_ignored: set = set()           # the roots a private-ignored row named this run (9.11)
@@ -616,9 +617,9 @@ class Hub:
             self.record_exception("status-failed")
 
     def _tell_grants(self):
-        """Tell the open tabs of a root whose `projects.toml` changed, `grants`: each member's stream asks again
-        whether the member may open its document, and one `projects.toml` no longer lets in is told `gone`
-        (8.12). A page ignores the event itself."""
+        """Tell the open tabs of a root whose `projects.toml` changed, once the change held for two passes,
+        `grants`: each member's stream asks again whether the member may open its document, and one
+        `projects.toml` no longer lets in is told `gone` (8.12). A page ignores the event itself."""
         if self.proxy is None:
             return
         by_root: dict = {}
@@ -627,9 +628,10 @@ class Hub:
                 by_root.setdefault(root.id, (root, []))[1].append(e)
         for root_id, (root, open_) in by_root.items():
             got = self.projects_of(root)
-            was = self._grants_seen.get(root_id, got)
-            self._grants_seen[root_id] = got
-            if got is not was:
+            # Told once the new answer held for two passes: a file met empty or cut off mid-write ends no page.
+            held, self._grants_last[root_id] = self._grants_last.get(root_id) is got, got
+            if got is not self._grants_seen.get(root_id, got) and held:
+                self._grants_seen[root_id] = got
                 for e in open_:
                     e.bus.publish("grants", {})
 

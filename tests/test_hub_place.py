@@ -605,3 +605,33 @@ def test_a_door_update_that_changes_nothing_still_commits_the_move_it_makes(hub,
     assert not is_error and got["doc"] == f"sheaves/{HOME}" and not got["changed"], got
     assert subjects(repo) == [f"move: {SHARED} -> {HOME}", "first"]
     assert git(repo, "status", "--porcelain") == ""
+
+
+def poll_before_the_lock(team, monkeypatch):
+    """The list's poll comes between the request finding its document and taking the name's lock."""
+    from sheafmd.hub import place
+    real = place.held
+
+    def held(hub, address):
+        team.hub.the_list.poll()
+        return real(hub, address)
+    monkeypatch.setattr(place, "held", held)
+
+
+def test_a_save_the_poll_overtook_lands_where_the_sheaf_went(team, work, monkeypatch):
+    put(team, work, SHARED, PRIVATE)                           # written before the rule: the poll moves it
+    assert team.get(f"/work/{SHARED}", member=THIERRY).status == 200
+    i = next(i for i, b in enumerate(split_md_blocks(PRIVATE)) if "A quote" in b.content)
+    poll_before_the_lock(team, monkeypatch)
+    got = team.post("/_/save", {"doc": f"work/{SHARED}", "hash": md_hash(PRIVATE),
+                                "edits": [{"i": i, "html": "<p>A quote, edited.</p>"}]}, member=THIERRY)
+    assert got.status == 200 and got.json()["moved"] == f"work/{HOME}", got.text
+    assert "A quote, edited." in (work / HOME).read_text(encoding="utf-8") and not (work / SHARED).exists()
+
+
+def test_a_tick_the_poll_overtook_lands_where_the_sheaf_went(team, work, monkeypatch):
+    put(team, work, SHARED, PRIVATE)
+    poll_before_the_lock(team, monkeypatch)
+    got = team.post("/_/tick", {"doc": f"work/{SHARED}", "action": 0, "word": "Share"}, member=THIERRY)
+    assert got.status == 200, got.text
+    assert "- [x] Share" in (work / SHARED).read_text(encoding="utf-8") and not (work / HOME).exists()

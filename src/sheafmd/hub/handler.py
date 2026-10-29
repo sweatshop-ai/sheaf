@@ -15,6 +15,7 @@ connection, the Host of the front, the member header, the route (a member's rout
 Origin of every POST, then the body. No cookie and no key is read there.
 """
 import json
+import os
 import re
 import tempfile
 import time
@@ -665,6 +666,7 @@ class Handler:
         # The name's lock (9.11) from the guard's judging of the sheaf's home to its move: the write and the move
         # are one operation, and one commit.
         with place.held(self.hub, e.address):
+            e, came = self._here(req, e)
             try:
                 guard, ticked = self._ticks(req, e)
                 got = e.live.save(h, edits, rid=rid, guard=guard)
@@ -679,8 +681,8 @@ class Handler:
             self._committed(req, e, "edit", moved)
         if "Stop James" in ticked:
             self._stop_james(req, e)
-        if moved:
-            got["moved"] = moved
+        if moved or came:
+            got["moved"] = moved or came
         if got["merged"] and not got.get("again"):
             # Not a failure, but the thing this log exists to measure: how often the page and
             # an agent write at the same time.
@@ -702,6 +704,7 @@ class Handler:
         if edit is None:
             raise Refuse(409, f"the sheaf no longer holds that action ({word}): reload the list")
         with place.held(self.hub, e.address):
+            e, came = self._here(req, e)
             try:
                 guard, ticked = self._ticks(req, e)
                 got = e.live.save(h, [edit], guard=guard)
@@ -716,9 +719,21 @@ class Handler:
         self._committed(req, e, "tick", moved)
         if "Stop James" in ticked:
             self._stop_james(req, e)
-        if moved:
-            return _ok(hash=got["hash"], moved=moved)
+        if moved or came:
+            return _ok(hash=got["hash"], moved=moved or came)
         return _ok(hash=got["hash"])
+
+    def _here(self, req: Req, e):
+        """Under the lock of the sheaf's name: (the entry of the document `e` was, where its file is now, the address
+        it moved to or None). A move that came after the request found `e` and before the lock (the list's poll,
+        9.11) sends the write to the sheaf's home, and its answer names it as `moved`; a file gone, or one the
+        caller may not open where it went, is the 404 of a document that is not there."""
+        if self.hub.entries.get(e.address) is e and os.path.lexists(e.path):
+            return e, None
+        to = place.found(self.hub, e.address, lambda a: self._may_open(req, a))
+        if to is None:
+            raise Refuse(404, "no such document")
+        return self._entry(req, to), to
 
     def _placed(self, req: Req, e, ticked) -> str | None:
         """After a write that shared the sheaf or withdrew its Share, under the lock of its name, the sheaf goes to

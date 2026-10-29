@@ -730,18 +730,21 @@ def test_a_door_reply_with_no_page_open_and_a_poll_at_once_lands_in_the_moved_fi
     assert not is_error, got
     assert "The second page." in (work / HOME).read_text(encoding="utf-8") and not (work / SHARED).exists()
 
-def test_a_move_into_an_ignored_private_folder_still_commits_the_old_path_gone(hub, browser, tmp_path):
-    """Codex P1: a deployment that keeps private folders out of git must not keep the shared copy in it."""
+def test_a_root_that_ignores_its_private_folders_is_told_and_nothing_moves_into_them(hub, browser, tmp_path, capsys):
+    """A root the hub places must not ignore `private/` (8.11, 9.11): the poll would lose the sheaf it moved."""
     box, repo = committing(hub, browser, tmp_path, ignore="*/*/private/\n")
-    assert box.get(f"/sheaves/{SHARED}", member=THIERRY).status == 200          # a version, inside the root
-    git(repo, "add", "-A")
-    git(repo, "commit", "-q", "-m", "the version")
     hub.the_list.poll()
-    assert (repo / HOME).exists()
-    assert git(repo, "log", "-1", "--format=%s").strip() == f"move: {SHARED} -> {HOME}"
-    files = set(git(repo, "show", "--no-renames", "--name-status", "--format=", "HEAD").splitlines())
-    assert files == {f"D\t{SHARED}"}, files
-    assert git(repo, "ls-files", SHARED) == ""
+    hub.the_list.poll()
+    assert (repo / SHARED).exists() and not (repo / HOME).exists()
+    rows = hub_rows("private-ignored")
+    assert len(rows) == 1 and rows[0]["root"] == "sheaves", rows
+    assert "private" in capsys.readouterr().err
+    assert [r["why"] for r in hub_rows("place-refused")] == ["the repo ignores the private folder"]
+    token = Tokens().add("james-thierry", write=True)
+    is_error, got = call(browser, "update", token=token, doc=f"sheaves/{SHARED}", text=PRIVATE + "More.\n",
+                         expected_hash=md_hash(PRIVATE))
+    assert not is_error, got                                    # it could not go home before: written as before
+    assert (repo / SHARED).exists() and not (repo / HOME).exists()
 
 
 def test_a_door_update_that_changes_nothing_still_commits_the_move_it_makes(hub, browser, tmp_path):

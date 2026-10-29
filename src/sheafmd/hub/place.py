@@ -15,6 +15,7 @@ sheafmd.hub.place — where the file of a sheaf of the list's root is (SPEC 9.11
     held(hub, address)               the lock of the sheaf's name, for a writer that writes or moves its file
     folders_lock(top, name)          the lock of the project's private folders
     refusal(hub, address, text)      why the sheaf could not go home once its file holds `text`
+    tell_ignored(hub, root, folders) a `private-ignored` row when the root's repo ignores a private home
 
 In proxy mode, in the list's root (9.10) only, a sheaf at project depth has one name, its address
 `<client>/<project>/<name>.md`, and one home for its file: open to the project, that path; its owner's alone,
@@ -23,10 +24,14 @@ member owns it, else the first owner, in the config's order, that has one). The 
 path glob one owner: the shared stanza reads `<client>/*/*.md`, an owner's `*/*/private/<short>/**/*.md`, so a file's
 place says whose it is. The hub keys everything of a sheaf (its entry, versions, read state, render settings) by the
 name, and finds the file only when it reads or writes it; a move is a rename of the file and one commit of both
-paths (8.11), and nothing else moves. A path under `private/` is no address: it names no document.
+paths (8.11), and nothing else moves. A path under `private/` is no address: it names no document. The repo of
+such a root must not ignore `private/`: the listing (8.6) would no longer show a sheaf the hub moved there, so a move
+into a folder the repo ignores is refused, and the root is told of once.
 """
 import os
 import stat
+import subprocess
+import sys
 import threading
 from contextlib import contextmanager
 from pathlib import Path
@@ -38,6 +43,47 @@ from .roots import Address, NotFound
 
 PRIVATE = "private"
 NO_SHORT = "it is its owner's alone and no owner of it has a short to name its private folder"
+IGNORED = "the repo ignores the private folder"
+
+
+def _ignored(top: Path, paths: list) -> list:
+    """Those of `paths` (in the root at `top`) that the repo's ignore rules name, in one `git check-ignore`; none
+    outside a git work tree, or when git does not answer."""
+    if not paths:
+        return []
+    try:
+        got = subprocess.run(["git", "-C", str(top), "check-ignore", "--", *paths], capture_output=True, text=True,
+                             timeout=commits_mod.GIT_SECONDS, env=commits_mod._env())
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return got.stdout.splitlines() if got.returncode == 0 else []
+
+
+def _private_home(rel: str) -> bool:
+    parts = rel.split("/")
+    return len(parts) == 5 and parts[2] == PRIVATE
+
+
+def tell_ignored(hub, root, folders):
+    """A `private-ignored` row (15) and a line on stderr, once per root per hub run, when the repo of `root`, which
+    the hub places, ignores the private home of a member whose roots hold it in one of the project `folders`
+    (`<client>/<project>`): the listing leaves out what git ignores (8.6), so a sheaf moved there would leave the
+    list, the index and the door. Nothing moves there (`_move`)."""
+    if root.id in hub.told_ignored:
+        return
+    shorts = [m.short for m in hub.proxy.members.values() if _segment(m.short) and hub.owns(m, root)]
+    probes = [f"{f}/{PRIVATE}/{s}/{PROBE}" for f in sorted(folders) for s in shorts]
+    got = _ignored(Path(os.path.realpath(root.path)), probes)
+    if not got:
+        return
+    hub.told_ignored.add(root.id)
+    folder = got[0].rsplit("/", 1)[0]
+    hub.record("private-ignored", None, root=root.name, folder=folder)
+    print(f"sheaf: {root.name}/{folder} is ignored by the repo: sheaves are not moved into private folders there",
+          file=sys.stderr, flush=True)
+
+
+PROBE = "sheaf.md"
 
 
 def logical(rel: str) -> str | None:
@@ -235,6 +281,8 @@ def refusal(hub, address: str, text: str) -> str | None:
         return NO_SHORT
     if target != file_rel(top, name) and os.path.lexists(top / target):
         return f"{target} is taken"
+    if target != file_rel(top, name) and _private_home(target) and _ignored(top, [target]):
+        return IGNORED
     return None
 
 
@@ -289,6 +337,9 @@ def _move(hub, root, top: Path, rel: str, name: str, address: str) -> str | None
                 _refused(hub, address, NO_SHORT)
                 return None
             if target == rel:
+                return None
+            if _private_home(target) and _ignored(top, [target]):
+                _refused(hub, address, IGNORED)
                 return None
             try:
                 dfd, dname = make_folders(top, target)

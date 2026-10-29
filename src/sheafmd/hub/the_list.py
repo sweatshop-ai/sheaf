@@ -436,25 +436,27 @@ class TheList:
             wanted = sorted({s.issue for s in sheaves})
             try:
                 self._records = fetch(self.cfg, wanted) if wanted else {}   # an issue it does not hold is off
+                got = True
             except RecordError as e:
                 self.hub.record("list-poll-failed", None, root=root.name, error=str(e))
-                return              # no record read: the list stays as the last poll that read one left it,
-                                    # and no sheaf is placed on records this poll did not read
-            rows = [Row(s, self._records[s.issue], "/".join(s.rel.split("/")[:2]), read.get(s.rel), files[s.rel])
-                    for s in sheaves if s.issue in self._records]
-            # A ticked sheaf waits on nobody until the record routine has moved its issue: a new change of the
-            # issue, or a Status other than waiting (moving a Project's Status leaves the issue's change as it was).
-            moved = {r.sheaf.rel for r in rows
-                     if r.record.status != "waiting" or self._answered.get(r.sheaf.rel, r.record.updated) != r.record.updated}
-            for rel in moved | (set(self._answered) - {r.sheaf.rel for r in rows}):
-                self._answered.pop(rel, None)
-            with self._gone_lock:
-                # A file seen gone after this poll began may have been read before it went: its row waits for the
-                # next poll, which reads what is there now (#34).
-                rows = [r for r in rows if self._gone.get(r.file, 0) < started]
-                self._gone = {f: n for f, n in self._gone.items() if n > started}
-                self._snap = Snapshot(rows, entries, self.hub.clock())
-            # Every sheaf whose file is not at its home goes there (9.11), judged with the records just read: the
+                got = False         # no record read: the list stays as the last poll that read one left it
+            if got:
+                rows = [Row(s, self._records[s.issue], "/".join(s.rel.split("/")[:2]), read.get(s.rel), files[s.rel])
+                        for s in sheaves if s.issue in self._records]
+                # A ticked sheaf waits on nobody until the record routine has moved its issue: a new change of the
+                # issue, or a Status other than waiting (moving a Project's Status leaves the issue's change as it was).
+                moved = {r.sheaf.rel for r in rows
+                         if r.record.status != "waiting" or self._answered.get(r.sheaf.rel, r.record.updated) != r.record.updated}
+                for rel in moved | (set(self._answered) - {r.sheaf.rel for r in rows}):
+                    self._answered.pop(rel, None)
+                with self._gone_lock:
+                    # A file seen gone after this poll began may have been read before it went: its row waits for the
+                    # next poll, which reads what is there now (#34).
+                    rows = [r for r in rows if self._gone.get(r.file, 0) < started]
+                    self._gone = {f: n for f, n in self._gone.items() if n > started}
+                    self._snap = Snapshot(rows, entries, self.hub.clock())
+            # Every sheaf whose file is not at its home goes there (9.11), judged with the last records read (a failed
+            # read places on the ones before it, as every other judgement of the hub reads them): the
             # first poll moves what was written before the rule, a later one what an owner change made another's.
             for rel in read if placed else ():
                 if place.logical(rel) == rel:

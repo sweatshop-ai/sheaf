@@ -363,6 +363,18 @@ def test_a_sheaf_added_since_joins_the_list_only_at_a_poll_that_reads_the_record
     assert "A new one" in json.dumps(read(box.get("/list", member=NELL)))
 
 
+def test_a_poll_that_cannot_read_the_record_still_places_its_sheaves_on_the_last_records_read(box, sheaves, tmp_path):
+    """A failed read keeps the list as it was, but a sheaf made owner-only since goes to its owner's private folder, the
+    owner judged on the records the last good poll read (#45, agreed with #43's placement): here #5's assignee, Nell."""
+    joey = sheaves / JOEY[5:]
+    (tmp_path / "installation-token").write_text("", encoding="utf-8")
+    joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n", "sources: [library:4711]\n"),
+                    encoding="utf-8")
+    box.hub.the_list.poll()
+    assert "holds no token" in hub_rows("list-poll-failed")[-1]["error"]
+    assert (sheaves / "globex/black-friday/private/nell/2026-10-28-reply-to-joey.md").exists() and not joey.exists()
+
+
 def test_an_issue_in_more_projects_than_one_page_still_has_the_status_of_its_item_in_the_lists_project(box, github):
     github.issues[5]["others"] = [(100 + k, "Waiting on member") for k in range(120)]
     github.issues[7]["others"] = [(300 + k, "In progress at TT") for k in range(30)]

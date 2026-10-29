@@ -506,7 +506,16 @@ class Hub:
         root = self.roots.get(at.root)
         if self.proxy is None or root is None:
             return True
-        return projects.grants(self.projects_of(root), at.rel, member.short)
+        entries = self.projects_of(root)
+        if entries is None:
+            return True
+        # Judged where the file is as well as by the address: a link in one project to a sheaf of another (a root
+        # the hub does not place follows it) opens it only to a member both name.
+        top = os.path.realpath(root.path)
+        real = os.path.realpath(self.file(address))
+        if not real.startswith(top.rstrip("/") + "/"):
+            return False
+        return all(projects.grants(entries, rel, member.short) for rel in {at.rel, os.path.relpath(real, top)})
 
     def projects_of(self, root):
         """The entries of `root`'s `projects.toml`, None without the file, an `Invalid` for one the hub cannot
@@ -515,14 +524,20 @@ class Hub:
         f = root.path / projects.FILE
         try:
             st = f.stat()
+            key = (st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
         except FileNotFoundError:
+            self._grants_seen.setdefault(root.id, None)
             return None
         except OSError as e:
-            return projects.Invalid(f"cannot be read ({e.strerror})")
-        key = (st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
+            key = ("unreadable", e.errno)            # kept as one answer, so the tick tells the tabs once
         hit = self._projects.get(root.id)
         if hit is not None and hit[0] == key:
             return hit[1]
+        if key[0] == "unreadable":
+            got = projects.Invalid(f"cannot be read ({os.strerror(key[1])})")
+            self._projects[root.id] = (key, got)
+            self._grants_seen.setdefault(root.id, got)
+            return got
         try:
             got = projects.read(root.path)
         except projects.Invalid as e:

@@ -13,12 +13,15 @@ in the hub's log and in the diagnostics log (15), once per folder per hub run.
     grants(entries, rel, short)   whether the member `short` may open the shared sheaves at `rel`
     groups(entries)           what `sheaf projects groups` prints for the Library: the same judgement
 """
+import re
 import tomllib
 from pathlib import Path
 
 from . import place
 
 FILE = "projects.toml"
+# A folder name the Library's glob reads as itself: no `*`, `?`, `[`, space or other character it could take apart.
+PART = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]*")
 STATUSES = ("live", "closed")
 
 
@@ -46,8 +49,9 @@ def read(folder: Path) -> dict | None:
     for name, p in projects.items():
         here = f'[projects."{name}"]'
         parts = name.split("/")
-        if len(parts) != 2 or not all(parts) or any(x.startswith(".") for x in parts):
-            raise Invalid(f"{here}: a project is named <client>/<project>")
+        if len(parts) != 2 or not all(PART.fullmatch(x) for x in parts):
+            raise Invalid(f"{here}: a project is named <client>/<project>, each of letters, digits, '.', '_' or '-' "
+                          "and not starting with '.'")
         if parts[1] == place.PRIVATE:
             # `<client>/<project>/private/` holds the sheaves the hub places as their owner's alone (9.11)
             raise Invalid(f"{here}: a project cannot be named private, the name of the folder of owner-only sheaves")
@@ -60,7 +64,17 @@ def read(folder: Path) -> dict | None:
             raise Invalid(f"'members' in {here} must be a list of names")
         if p.get("status") not in STATUSES:
             raise Invalid(f"'status' in {here} must be one of {', '.join(STATUSES)}, not {p.get('status')!r}")
+    seen = {}
+    for name in sorted(projects):
+        # The Library knows a project by its group alone: two that share one would give each the other's sheaves.
+        if (other := seen.setdefault(group_of(name).casefold(), name)) != name:
+            raise Invalid(f'[projects."{other}"] and [projects."{name}"] would share the group {group_of(name)}')
     return projects
+
+
+def group_of(name: str) -> str:
+    """The Library's group of the project `name` (`<client>/<project>`): `group:proj-<client>-<project>`."""
+    return "group:proj-" + name.replace("/", "-")
 
 
 def unlisted(entries: dict, rels) -> list[str]:
@@ -100,7 +114,7 @@ def groups(entries: dict) -> dict:
     as `grants` compares them), and for each member short the groups of the projects that name them."""
     out, members = [], {}
     for name in sorted(entries):
-        group = "group:proj-" + name.replace("/", "-")
+        group = group_of(name)
         names = sorted({m.casefold() for m in entries[name]["members"]})
         out.append({"project": name, "group": group, "glob": f"{name}/*.md", "status": entries[name]["status"],
                     "members": names})

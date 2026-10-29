@@ -594,10 +594,13 @@ class Handler:
         e = self._entry(req, req.query.get("doc"))
         def for_member(name, data):
             # Asked at each event: a write that makes the sheaf its owner's alone silences a stream
-            # opened before it (9.11), and a member `projects.toml` no longer names is told `gone` (8.12).
+            # opened before it (9.11). A change of `projects.toml` that shuts the member out is told `gone`, with
+            # why (8.12): that alone, never a file of the sheaf that cannot be read for a moment.
             if hub.visible(member, e.address):
                 return _document_events(name, data)
-            return None if hub.granted(member, e.address) else events.Renamed("gone", {"doc": e.address})
+            if name == "grants" and not hub.granted(member, e.address):
+                return events.Renamed("gone", {"doc": e.address, "why": "access"})
+            return None
         sub = e.bus.subscribe(lambda tabs: {"boot": hub.boot, "version": hub.version,
                                             "service": hub.service, "tabs": tabs},
                               for_member if member else None)

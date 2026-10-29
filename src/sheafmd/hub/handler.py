@@ -731,10 +731,12 @@ class Handler:
                 if visibility.front_matter(new) != fm:
                     raise EditError("A save cannot change the front matter: change it in the file.")
             words = visibility.newly_ticked(toggled)
-            if m is not None and visibility.withdraws_share(text, new):
+            if visibility.withdraws_share(text, new):
                 # Withdrawing a Share is its owner's alone, as giving it is (#40), by whatever edit unticks the box:
-                # anyone else's writes nothing; the owner's closes the sheaf again in the same write.
-                if not visibility.owner_of(fm, [m], assignees):
+                # anyone else's writes nothing; the owner's closes the sheaf again in the same write. The hub's own
+                # person (no member: the loopback port or the key) reads every file, and withdraws it as an owner.
+                fm = visibility.front_matter(text)
+                if m is not None and not visibility.owner_of(fm, [m], self.hub.assignees(e.address, fm)):
                     raise EditError("Only the owner of this sheaf can withdraw its Share.")
                 new = visibility.unshare(new)
                 if visibility.front_matter(new).get("sessions", "") != fm.get("sessions", ""):

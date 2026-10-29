@@ -936,6 +936,51 @@ def cmd_token(argv: list[str]) -> int:
     return EXIT_OK
 
 
+def cmd_code(argv: list[str]) -> int:
+    p = _parser("code", "code issue --member ID --doc ADDRESS --out FILE",
+                "Sign-in codes for the laptop client of the fork (SPEC 9.13). `issue` asks the hub for one, for a member on one "
+                "sheaf, and writes it to a new file of mode 0600 as the header line `curl -H @FILE` sends. It "
+                "prints only the code's id and expiry: the code is never in a terminal or on a command line.")
+    sub = p.add_subparsers(dest="action", required=True, metavar="issue")
+    issue = sub.add_parser("issue", usage="sheaf code issue --member ID --doc ADDRESS --out FILE",
+                           help="make a code for a member on one sheaf, into a new 0600 file")
+    issue.add_argument("--member", required=True, metavar="ID", help="the front's id of the member")
+    issue.add_argument("--doc", required=True, metavar="ADDRESS", help="the sheaf's address on the hub")
+    issue.add_argument("--out", required=True, metavar="FILE", help="a new file: one that is there is refused")
+    args = p.parse_args(argv)
+    out = Path(args.out)
+    # The file first, so one that is there, or a link, is refused before a code is made.
+    try:
+        fd = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    except FileExistsError:
+        _err(f"sheaf: {out} is there already: name a new file")
+        return EXIT_FAILED
+    except OSError as e:
+        _err(f"sheaf: cannot make {out}: {e.strerror or e}")
+        return EXIT_FAILED
+    written = False
+    try:
+        os.fchmod(fd, 0o600)
+        try:
+            status, res = hubclient.client().call("POST", "/_/code", {"doc": args.doc, "member": args.member})
+        except (hubclient.Impostor, paths.PathError, OSError) as e:
+            return _hub_failure(e)
+        if status != 200 or not isinstance(res.get("code"), str):
+            _err(f"sheaf: the hub answered {status}: {res.get('error') or 'no code'}")
+            return EXIT_FAILED
+        view = memoryview(f"Authorization: Bearer {res['code']}\n".encode("ascii"))
+        while view:
+            view = view[os.write(fd, view):]
+        written = True
+    finally:
+        os.close(fd)
+        if not written:
+            out.unlink(missing_ok=True)
+    _out(f"  code {res.get('id')} for {args.member} on {args.doc}, good until {res.get('expires')}")
+    _out(f"  Written to {out} (0600). Send it with `curl -H @{out}`, never on a command line.")
+    return EXIT_OK
+
+
 def hub_version() -> str | None:
     """The version of the hub that is running, or None when none is. The hub is asked, with
     the challenge of SPEC 9.4; an impostor, or a key that cannot be read, is no hub."""
@@ -960,7 +1005,7 @@ COMMANDS.update({"open": cmd_open, "start": cmd_start, "stop": cmd_stop, "status
                  "hub": cmd_hub, "comments": cmd_comments, "comment": cmd_comment,
                  "reply": cmd_reply, "resolve": cmd_resolve, "reopen": cmd_reopen,
                  "diag": cmd_diag, "version": cmd_version, "list": cmd_list, "roots": cmd_roots,
-                 "token": cmd_token, "mcp": cmd_mcp, "projects": cmd_projects})
+                 "token": cmd_token, "code": cmd_code, "mcp": cmd_mcp, "projects": cmd_projects})
 COMMAND_HELP.update({
     "open": ("open FILE.md|URL [--no-browser] [render options]",
              "open the page of a document; starts the hub if none runs"),
@@ -985,6 +1030,8 @@ COMMAND_HELP.update({
                   "make an MCP token for an agent that reaches the hub over HTTP; shown once"),
     "token list": ("token list", "MCP tokens: name, display name, created, last used"),
     "token revoke": ("token revoke NAME", "end an MCP token"),
+    "code issue": ("code issue --member ID --doc ADDRESS --out FILE",
+                   "a sign-in code for the fork's laptop client, written to a new 0600 file; never printed"),
     "projects groups": ("projects groups [--root PATH]",
                         "print the Library's project groups from projects.toml as JSON (exit 1 without a good file)"),
     "version": ("version", "print the version"),

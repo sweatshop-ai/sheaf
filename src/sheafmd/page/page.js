@@ -496,8 +496,10 @@
                        'same transcript, same tools, James’s account.</p>' + cmdRow(w.attach);
     // The fork fetches the live session's transcript; the hub leaves `fork` out unless the live session runs on
     // the box and it keeps a copy of the box's transcripts (`sessions_dir`).
+    // It asks for a sign-in code (9.13), which this button gets: shown once, in the popover only, never kept.
     if (w.fork) h += '<h4>Fork to your machine</h4>' + cmdRow(w.fork) +
-                     '<p>Runs on your laptop: fetches the session through this hub, forks it under your name. Needs uv there.</p>';
+                     '<p>Runs on your laptop: fetches the session through this hub, forks it under your name. Needs uv there.</p>' +
+                     '<div class="rd-code"><button type="button">Get a sign-in code</button></div>';
     // A live session on a laptop is continued there: the hub holds no copy of it, and offers no fork of an older one.
     var live = liveSession(), none = w.live === 'laptop'
       ? 'The live session runs on ' + upper(live.member) + '’s machine, ' + live.host + ': open it there. This hub keeps no copy of it to fork.'
@@ -510,6 +512,32 @@
     Array.prototype.forEach.call(workPop.querySelectorAll('.rd-cmd button'), function (b) {
       b.addEventListener('click', function () { copyCommand(b.previousElementSibling); });
     });
+    var get = workPop.querySelector('.rd-code button');
+    if (get) get.addEventListener('click', function () { getCode(get.parentNode); });
+  }
+  // A sign-in code for the fork (9.13): POST /_/code, and the code shown once in `box`. It is not put on the
+  // clipboard by itself, and drawing the popover again forgets it; a lost code is replaced by a new one.
+  async function getCode(box) {
+    var b = box.querySelector('button'), line = box.querySelector('p');
+    var tell = function (text) {
+      b.disabled = false;
+      if (!line) line = box.appendChild(el('p', { 'class': 'rd-none' }));
+      line.textContent = text;
+    };
+    b.disabled = true;
+    try {
+      var res = await fetch('/_/code', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                         body: JSON.stringify({ doc: CFG.doc }), cache: 'no-store' });
+      var j = {};
+      try { j = await res.json(); } catch (e) { /* not JSON: said by its status below */ }
+      if (!res.ok || typeof j.code !== 'string') return tell(j.error || 'The hub answered ' + res.status + '.');
+      box.innerHTML = cmdRow(j.code) + '<p>Good for 10 minutes, for this sheaf only. Paste it when ' +
+                      '<code>tiroir work</code> asks for it. It is shown once.</p>';
+      var c = box.querySelector('.rd-cmd button');
+      c.addEventListener('click', function () { copyCommand(c.previousElementSibling); });
+    } catch (e) {
+      tell('The hub is unreachable: try again in a moment.');
+    }
   }
   function openWork() {
     if (!workPop) {

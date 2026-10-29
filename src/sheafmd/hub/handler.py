@@ -1009,7 +1009,11 @@ class Handler:
                 since = old[1] if old and old[0] == sid else _clock()     # the same session keeps its clock
                 self._pending_sessions[address] = (sid, since, seq)
         for at, (wanted, since_, seq_) in waiting:
-            self._record_james(at, wanted, caller, since_, seq_)
+            try:
+                self._record_james(at, wanted, caller, since_, seq_)
+            except Exception:                           # one sheaf's failure never stops the others nor this write
+                self._drop_waiting(at, seq_)
+                self.hub.record_exception("session-hook-failed", at)
         if address is not None:
             self._record_james(address, sid, caller, since, seq)
 
@@ -1067,7 +1071,8 @@ class Handler:
             try:
                 e.live.rewrite(change)
             except work.NotRewritten as ex:
-                self.hub.record("session-not-recorded", address, transcript=sid, reason=str(ex))
+                if self._drop_waiting(address, seq):        # said once: the list stays as it is written
+                    self.hub.record("session-not-recorded", address, transcript=sid, reason=str(ex))
                 return
             if moved:
                 self.hub.index.touch(address)

@@ -240,7 +240,7 @@ def _first_cwd(dfd: int, name: str, most: int = 1 << 20):
     for line in head.split(b"\n"):
         try:
             row = json.loads(line)
-        except ValueError:
+        except (ValueError, RecursionError):           # a line nested past the parser's depth is no row either
             continue
         if isinstance(row, dict) and "cwd" in row:
             return row.get("cwd"), row.get("sessionId")

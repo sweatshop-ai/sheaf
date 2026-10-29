@@ -16,8 +16,11 @@ Origin of every POST, then the body. No cookie and no key is read there.
 """
 import contextlib
 import json
+import os
 import re
+import stat
 import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -69,6 +72,10 @@ SETTING_TYPES = {"title": str, "toc": str, "max_image_width": int, "by": str, "f
 _ID_RE = re.compile(r"[A-Za-z0-9_-]{1,40}")
 _RID_RE = re.compile(r"[A-Za-z0-9_-]{16,64}")     # a page's request id (/_/comment, /_/save)
 _RESERVED = {"kind", "source", "doc", "at", "pid", "session", "member"}
+
+
+PENDING_S = 300  # how long a session James named waits for the copy before it is said (9.12)
+_clock = time.monotonic
 
 
 @dataclass
@@ -209,6 +216,10 @@ class Handler:
         self.hub = hub
         self.peer_check = peer_check
         self.door = Door(hub)
+        self.door.called = self._james_called
+        self._pending_sessions: dict = {}   # address -> (James's session it waits for, since, its write's seq) (9.12)
+        self._session_seqs: dict = {}       # address -> the seq of James's latest write to it: the newest one wins
+        self._pending_lock = threading.Lock()
         # path -> method -> (route name, who may call it, function)
         self.routes: dict = {}
         for method, path, name, who, fn in (
@@ -851,11 +862,84 @@ class Handler:
         elif not project:
             drop = "the sheaf is in no <client>/<project> folder"
         else:
+            if the is not None and the.serves(Address.parse(e.address).root):
+                self._stop_tells(project, m)
             # The box's supervisor reads the line as `<client>/<project>` (tt-tiroir routines/james, stops).
             drop = work.drop(the.cfg.stop_dir if the is not None else None, project,
                              (project + "\n").encode("utf-8"), "no stop_dir in [list]")
         self.hub.record("stop-james", e.address, project=project, assistant=assistant,
                         by=(m.short or m.name) if m is not None else self.hub.person, drop=drop)
+
+    STOPPED = "Stopped before delivery: Stop James closed this project's window before James took this."
+
+    def _stop_tells(self, project: str, member):
+        """Every Ask and Tell for `project` still waiting in `tell_dir` for James's window, removed before the Stop
+        is dropped, and a reply in each one's thread, signed by the member who stopped him, saying it never reached
+        him (9.12): a Stop ends the work, and none of it goes on unseen. A `tell-stopped` row for each, without
+        its text. The box's supervisor clears what is left of the project's the same way (tt-tiroir #136)."""
+        folder = self.hub.the_list.cfg.tell_dir
+        by = work.member_word(member) if member is not None else self.hub.person
+        if folder is None:
+            return
+        try:
+            names = sorted(f.name for f in folder.iterdir()
+                           if not f.name.startswith(".") and f.name.startswith(project.replace("/", "--") + "-"))
+        except OSError:
+            return
+        for name in names:
+            f = folder / name
+            try:
+                fd = os.open(f, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                with os.fdopen(fd, "rb") as fh:
+                    if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+                        continue
+                    tell = json.loads(fh.read(64 * 1024).decode("utf-8"))
+            except (OSError, ValueError, RecursionError):
+                continue
+            if not isinstance(tell, dict) or tell.get("project") != project:
+                continue
+            try:
+                f.unlink()
+            except FileNotFoundError:
+                continue                                # the supervisor took it meanwhile: it reached James
+            except OSError:
+                continue
+            sheaf, thread = tell.get("sheaf"), tell.get("thread")
+            if not (isinstance(sheaf, str) and isinstance(thread, str)):
+                said = "no thread in the drop"
+            elif not self._of_project(sheaf, project):
+                said = "the drop names a sheaf of another root or project"
+            else:
+                said = self._say_stopped(sheaf, thread, member)
+            self.hub.record("tell-stopped", sheaf if isinstance(sheaf, str) else None, project=project,
+                            thread=thread if isinstance(thread, str) else None, what=tell.get("kind"), by=by,
+                            said=said)
+
+    def _of_project(self, sheaf: str, project: str) -> bool:
+        """Whether `sheaf` is a sheaf of `project` on the list's root, where a drop's sheaf always is (9.12)."""
+        at = Address.parse(sheaf)
+        return self.hub.the_list.serves(at.root) and at.rel.startswith(project + "/") and at.rel.count("/") == 2
+
+    def _say_stopped(self, sheaf: str, thread: str, member) -> str:
+        """The STOPPED reply in `thread` of `sheaf`: "written", or why not."""
+        name = (member.name if member is not None else self.hub.person) or "sheaf"
+        try:
+            e = self.hub.entry(sheaf)
+            if member is not None and not self.hub.may_open(member, e.address,
+                                                             visibility.front_matter(e.live.current()[1])):
+                return "the member who stopped cannot open the sheaf"
+            with place.held(self.hub, e.address):       # the write and its commit, one step (9.11)
+                e.live.comment("reply", {"id": thread, "body": self.STOPPED}, None, by=name, announce=True)
+                self.hub.index.touch(e.address)
+                self.hub.committed(e.address, member, "comment")
+        except NotFound:
+            return "the sheaf is gone"
+        except (rdc.AnchorError, rdc.NoComment, KeyError, ValueError) as ex:
+            return f"not written: {ex}"
+        except Exception:                               # the Stop is dropped whatever becomes of the reply
+            self.hub.record_exception("tell-stopped-reply-failed", sheaf)
+            return "not written: the hub failed on it (sheaf diag)"
+        return "written"
 
     # ── Work on this (9.12) ──────────────────────────────────────────────────
     def _sheaf(self, req: Req, doc):
@@ -896,51 +980,106 @@ class Handler:
         state = work.state(self.hub, e.address, e.live.current()[1])
         return state is not None and bool(state.can)
 
-    def _drop_for_james(self, req: Req, e, kind: str, body: str) -> str:
+    def _drop_for_james(self, req: Req, e, kind: str, body: str, thread: str) -> str:
         """The file Ask or Tell drops in `[list]`'s `tell_dir` for the box's supervisor to type into James's
         window for the project, and its `tell-dropped` row. The hub runs no agent of its own for it."""
         project = "/".join(Address.parse(e.address).rel.split("/")[:2])
         by = work.member_word(req.member)
         drop = work.drop(self.hub.the_list.cfg.tell_dir, project,
                          json.dumps({"project": project, "member": by, "sheaf": e.address,
-                                     "text": body[:work.TEXT_MAX], "kind": kind}).encode("utf-8"),
+                                     "text": body[:work.TEXT_MAX], "kind": kind, "thread": thread}).encode("utf-8"),
                          "no tell_dir in [list]")
         self.hub.record("tell-dropped", e.address, what=kind, project=project, by=by, drop=drop)
-        if drop == "written":
-            self._record_james(req, e, project)
         return drop
 
-    def _record_james(self, req: Req, e, project: str):
-        """James's newest session of the project, as the hub finds it in the copy of his transcripts, becomes
-        the sheaf's live session, the first of `sessions`. The hub is its only writer (9.12): never a door
-        write or a save, never a name a request carries. Nothing when it is the live one already."""
-        cfg = self.hub.the_list.cfg
-        sid = work.james_newest(cfg, project)
-        if sid is None or not self._james_may_take(e.live.current()[1], sid):
+    def _james_called(self, caller, address):
+        """A door call of James's session (9.12): a write to a sheaf of James makes the session it names the sheaf's
+        live one, once the copy holds it; one the copy does not hold yet waits, the newest per sheaf, and is looked
+        for again at his next call. The session is never the request's to choose: only an id whose transcript is
+        James's in that project's folder is taken."""
+        sid = caller.session
+        if not work.UUID_RE.fullmatch(sid or ""):
             return
-        line = work.item(sid, cfg.box, "james", time.strftime(work.ISO, time.gmtime()))
+        with self._pending_lock:
+            waiting = [(at, w) for at, w in self._pending_sessions.items() if at != address]
+            if address is not None:
+                seq = self._session_seqs.get(address, 0) + 1
+                self._session_seqs[address] = seq
+                old = self._pending_sessions.get(address)
+                since = old[1] if old and old[0] == sid else _clock()     # the same session keeps its clock
+                self._pending_sessions[address] = (sid, since, seq)
+        for at, (wanted, since_, seq_) in waiting:
+            try:
+                self._record_james(at, wanted, caller, since_, seq_)
+            except Exception:                           # one sheaf's failure never stops the others nor this write
+                self._drop_waiting(at, seq_)
+                self.hub.record_exception("session-hook-failed", at)
+        if address is not None:
+            self._record_james(address, sid, caller, since, seq)
+
+    def _latest(self, address: str, seq: int) -> bool:
+        """Whether `seq` is still James's latest write to `address`: an older session never replaces a newer one."""
+        with self._pending_lock:
+            return self._session_seqs.get(address) == seq
+
+    def _drop_waiting(self, address: str, seq: int) -> bool:
+        """The waiting session of `address` forgotten, when it is the one of write `seq`; whether it was."""
+        with self._pending_lock:
+            if self._pending_sessions.get(address, (None, None, None))[2] != seq:
+                return False
+            del self._pending_sessions[address]
+            return True
+
+    def _record_james(self, address: str, sid: str, caller, since: float, seq: int):
+        """James's session `sid`, named by his write `seq` to `address`, becomes the sheaf's live session, the first of
+        `sessions`, when it is a sheaf of James on the list's root, `[list]` names a box, and the copy holds `sid` as a
+        session of its project. The hub is the only writer of `sessions` (9.12). Nothing when it is the live one
+        already, a member's fork is, or James wrote to the sheaf again since."""
+        the = self.hub.the_list
+        try:
+            e = self.hub.entry(address)
+        except NotFound:
+            self._drop_waiting(address, seq)
+            return
+        text = e.live.current()[1]
+        state = work.state(self.hub, address, text)
+        if the is None or not the.cfg.box or state is None or not state.james \
+                or not self._james_may_take(text, sid):
+            self._drop_waiting(address, seq)                  # an item names the box: without one there is nothing to write
+            return
+        project = "/".join(Address.parse(address).rel.split("/")[:2])
+        found = work.james_has(the.cfg, project, sid)
+        if found is None and _clock() - since < PENDING_S:
+            return                                      # it waits for the copy
+        if not found:
+            if self._drop_waiting(address, seq):
+                self.hub.record("session-not-recorded", address, transcript=sid,
+                                reason=f"not in the copy {PENDING_S} s after James's write" if found is None
+                                else "not a transcript of James's in the project's folder of the copy")
+            return
+        line = work.item(sid, the.cfg.box, "james", time.strftime(work.ISO, time.gmtime()))
         moved = []
 
         def change(text):
-            # Under the lock again: a fork reported while the hub looked keeps the session it made live, and a
-            # write that closed the sheaf to the member since the comment's guard gets nothing of theirs.
-            fm = visibility.front_matter(text)
-            if not self.hub.may_open(req.member, e.address, fm) \
-                    or not self._james_may_take(text, sid):
+            # Under the lock again: a fork reported meanwhile keeps the session it made live, and a newer write of
+            # James's to the sheaf keeps the session it names.
+            if not self._latest(address, seq) or not self._james_may_take(text, sid):
                 return text
             moved.append(sid)
             return work.with_session(text, line, sid)
-        with place.held(self.hub, e.address):           # the write and its commit, one step (9.11)
+        with place.held(self.hub, address):             # the write and its commit, one step (9.11)
             try:
                 e.live.rewrite(change)
             except work.NotRewritten as ex:
-                self.hub.record("session-not-recorded", e.address, transcript=sid, reason=str(ex))
+                if self._drop_waiting(address, seq):        # said once: the list stays as it is written
+                    self.hub.record("session-not-recorded", address, transcript=sid, reason=str(ex))
                 return
             if moved:
-                self.hub.index.touch(e.address)
-                self.hub.committed(e.address, req.member, "session")
+                self.hub.index.touch(address)
+                self.hub.committed(address, by=caller.display, what="session")
+        self._drop_waiting(address, seq)
         if moved:
-            self.hub.record("session-recorded", e.address, transcript=sid, by=work.member_word(req.member))
+            self.hub.record("session-recorded", address, transcript=sid, by="james")
 
     def _james_may_take(self, text: str, sid: str) -> bool:
         """Whether James's session `sid` becomes the live one of the sheaf whose text is `text`: the live one is
@@ -1056,7 +1195,7 @@ class Handler:
             ask = tell = False
             to_box = None
         if to_box:
-            drop = self._drop_for_james(req, e, to_box, b["body"])
+            drop = self._drop_for_james(req, e, to_box, b["body"], snap["id"])
             if drop != "written":
                 snap[f"{to_box}Error"] = "The hub could not send this to James's window; the comment is written."
         # The job looks the document up again when it starts: it names its thread in the text the
@@ -1188,7 +1327,10 @@ class Handler:
     # ── the MCP door (the key and a name, or a token) ────────────────────────
     def _mcp(self, req: Req) -> Response:
         if req.token:
-            caller = Caller(req.token.display, req.token)
+            the = self.hub.the_list
+            james = the is not None and the.cfg.james_token and req.token.name == the.cfg.james_token
+            caller = Caller(req.token.display, req.token,
+                            session=req.headers.get("x-james-session", "") if james else None)
         else:
             caller = Caller(req.display)
         status, answer = self.door.handle(req.raw, caller)

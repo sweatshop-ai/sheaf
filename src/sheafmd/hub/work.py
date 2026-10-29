@@ -6,13 +6,14 @@ file Ask, Tell and Stop James drop for James's window.
     sessions(fm)                    the items of the front matter's `sessions` that parse, as written (newest first)
     with_session(text, line, id)    the text with `line` as the first of `sessions`, the rest as written
     open_transcript(folder, id)     the bytes of `<folder>/<one folder>/<id>.jsonl`, or None
-    james_newest(cfg, project)      the id of James's newest session of `project`, from the copy, or None
+    james_has(cfg, project, id)     whether the copy holds `id` as James's session of `project` (None: not yet)
     drop(folder, project, body, missing)  a file in `folder` for the box's supervisor: "written" or why not
 
 A session item is one YAML flow mapping on one line, `{id: <uuid>, host: <host>, member: <who>, date: <UTC>}`.
 An item that does not match that exactly is skipped, never guessed at: the hub serves a file by what it names.
 Only the hub writes `sessions`: a fork reported by the signed-in member, and James's session, which the hub
-finds itself when it drops an Ask or a Tell for him. A door write or a save that would change it is refused.
+takes from his own door write once its copy shows that session is his in the project. A door write or a save
+that would change it is refused.
 """
 import json
 import os
@@ -191,35 +192,34 @@ def open_transcript(folder: Path, id: str) -> bytes | None:
     return None
 
 
-def james_newest(cfg, project: str) -> str | None:
-    """The id of James's newest session of `project` (`<client>/<project>`) in the copy of his transcripts:
-    in the folder Claude names after `<work_dir>/<project>`, the newest `<id>.jsonl`, a regular file and no
-    link, whose first `cwd` is that very path and whose `sessionId` is its name. Claude's folder name is
-    lossy (`a-b/c` and `a/b-c` share one), so the name alone never decides. None when there is none."""
-    if cfg.sessions_dir is None or cfg.work_dir is None:
-        return None
-    cwd = os.path.join(cfg.work_dir, project)        # a work_dir of "/" gives /<client>/<project>, not //
+def james_has(cfg, project: str, id: str) -> bool | None:
+    """Whether the copy of James's transcripts holds `id` as a session of `project`: `<id>.jsonl` in the folder Claude
+    names after `<work_dir>/<project>`, a regular file and no link, whose first `cwd` is that very path and whose
+    `sessionId` is `id` (Claude's folder name is lossy: `a-b/c` and `a/b-c` share one). None when the file is not there (yet: the copy is a minute
+    behind), False when it is there and is not that, or when the copy or `work_dir` is not set."""
+    if cfg.sessions_dir is None or cfg.work_dir is None or not UUID_RE.fullmatch(id):
+        return False
+    cwd = os.path.join(cfg.work_dir, project)
     try:
-        # The project's folder opened without following a link, and every file opened from it: the folder
-        # is the copy's own, never one a link leads to.
         top = os.open(cfg.sessions_dir, os.O_RDONLY | os.O_DIRECTORY)
         try:
             dfd = os.open(re.sub(r"[^A-Za-z0-9]", "-", cwd), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=top)
         finally:
             os.close(top)
-    except OSError:
+    except FileNotFoundError:
         return None
+    except OSError:
+        return False
     try:
-        found = [(e.stat(follow_symlinks=False).st_mtime_ns, e.name[:-6]) for e in os.scandir(dfd)
-                 if e.name.endswith(".jsonl") and UUID_RE.fullmatch(e.name[:-6]) and e.is_file(follow_symlinks=False)]
-        for _, id in sorted(found, reverse=True):
-            if _first_cwd(dfd, f"{id}.jsonl") == (cwd, id):
-                return id
+        try:
+            os.stat(f"{id}.jsonl", dir_fd=dfd, follow_symlinks=False)
+        except FileNotFoundError:
+            return None
+        return _first_cwd(dfd, f"{id}.jsonl") == (cwd, id)
     except OSError:
-        return None
+        return False
     finally:
         os.close(dfd)
-    return None
 
 
 def _first_cwd(dfd: int, name: str, most: int = 1 << 20):
@@ -240,7 +240,7 @@ def _first_cwd(dfd: int, name: str, most: int = 1 << 20):
     for line in head.split(b"\n"):
         try:
             row = json.loads(line)
-        except ValueError:
+        except (ValueError, RecursionError):           # a line nested past the parser's depth is no row either
             continue
         if isinstance(row, dict) and "cwd" in row:
             return row.get("cwd"), row.get("sessionId")

@@ -45,7 +45,8 @@ from .visibility import front_matter, text as fm_text
 
 TABLE_KEYS = {"root": str, "repo": str, "project": int, "token_file": str}
 OPTIONAL_KEYS = {"api": str, "poll": int, "waiting": str, "in_progress": str, "stop_dir": str,
-                 "tell_dir": str, "sessions_dir": str, "box": str, "attach": str, "work_dir": str}
+                 "tell_dir": str, "sessions_dir": str, "box": str, "attach": str, "work_dir": str,
+                 "james_token": str}
 # The folders of `[list]` the hub writes in or serves from: absolute, and never inside the list's root or a
 # member's root, where a file would be a document (9.11, 9.12).
 FOLDER_KEYS = ("stop_dir", "tell_dir", "sessions_dir")
@@ -85,6 +86,7 @@ class ListConfig:
     box: str = ""                               # the host name of a box-hosted session (9.12)
     attach: str = ""                            # the attach command, `{window}` for <client>_<project> (9.12)
     work_dir: Path | None = None                # the folder James works in, <work_dir>/<client>/<project> (9.12)
+    james_token: str = ""                       # the door token James writes with: its X-James-Session is read (9.12)
 
     @property
     def owner(self) -> str:
@@ -150,7 +152,7 @@ def parse(t: dict, where) -> ListConfig:
                       t.get("in_progress", DEFAULTS["in_progress"]),
                       *(Path(t[k].rstrip("/") or "/") if k in t else None for k in FOLDER_KEYS),
                       t.get("box", ""), t.get("attach", ""),
-                      Path(t["work_dir"].rstrip("/") or "/") if "work_dir" in t else None)
+                      Path(t["work_dir"].rstrip("/") or "/") if "work_dir" in t else None, t.get("james_token", ""))
 
 
 # ── a sheaf, as its file says ───────────────────────────────────────────────

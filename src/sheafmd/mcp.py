@@ -706,7 +706,7 @@ class Door:
             if placed:
                 address = self._address(args["doc"], caller)
             before, text, moved = self._updated(address, args, text, expected, caller)
-        if before != text:
+        if before != text or moved != address:          # a text that changed nothing may still have moved the file
             self.hub.committed(moved, by=caller.display, what="update",
                                gone=None if moved == address else Address.parse(address).rel)
         return {"doc": moved, "url": self.hub.url(moved), "hash": md_hash(text), "changed": before != text}

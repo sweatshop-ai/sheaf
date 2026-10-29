@@ -32,8 +32,12 @@ A read-only render of a document with every comment removed, for someone outside
 _Avoid_: client render, client version, public copy
 
 **Share**:
-The action a sheaf's owner ticks to open it to every member whose roots hold it (SPEC 9.11). It renders nothing and makes no Share copy.
+The action a sheaf's owner ticks to open it to every member whose roots hold it (SPEC 9.11). It renders nothing and makes no Share copy. Only the owner unticks it, which makes the sheaf their own alone again. In the list's root a Share moves the sheaf out of its owner's private folder, and unticking it moves the sheaf back.
 _Avoid_: publish, unlock
+
+**Home** (of a sheaf):
+The one path a sheaf of the list's root lives at, by its visibility: `<client>/<project>/<name>.md` when it is open to the project, `<client>/<project>/private/<short>/<name>.md` when it is its owner's alone (SPEC 9.11). Its name stays `<client>/<project>/<name>.md` wherever it lives, and the hub moves the file home.
+_Avoid_: location, private copy
 
 **Link rule**:
 The standard that every page, article, tool or document a text names is a link to its URL. It is checked when a page is rendered and told to the agent.

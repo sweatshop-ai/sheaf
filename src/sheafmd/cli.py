@@ -823,8 +823,8 @@ def cmd_projects(argv: list[str]) -> int:
     from .hub import projects, the_list
     p = _parser("projects groups", "projects groups [--root PATH]",
                 "Print as JSON the groups the Library gives from projects.toml (8.12): for each member short its "
-                "project groups, and each project with its group, glob, status and members. The hub's own "
-                "reading, so the two never judge membership differently. Needs no hub.")
+                "project groups, the same for each assistant, and each project with its group, glob, status, members "
+                "and assistants. The hub's own reading, so the two never judge membership differently. Needs no hub.")
     p.add_argument("what", choices=["groups"])
     p.add_argument("--root", metavar="PATH", help="the folder that holds projects.toml (default: the [list] root)")
     args = p.parse_args(argv)

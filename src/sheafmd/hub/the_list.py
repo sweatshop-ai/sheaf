@@ -35,6 +35,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from .. import config, paths
+from ..source import md_hash
 from ..blocks import _split_lines, split_md_blocks
 from ..edit import TASK_MARK_RE, ticked_html
 from . import place, projects
@@ -164,6 +165,7 @@ class Sheaf:
     sources: tuple = ()
     owner: str = ""
     shared: str = ""
+    hash: str = ""              # md_hash of the text read: a tick from its row is refused once the text is another
 
 
 def issue_of(written: str) -> tuple | None:
@@ -195,7 +197,7 @@ def read_sheaf(rel: str, text: str) -> Sheaf:
                     actions.append((m.group(1).replace("’", "'"), m.group(2) or "", b.start + k))
     return Sheaf(rel, title or rel.rsplit("/", 1)[-1][:-3], issue, fm_text(fm, "assistant"),
                  fm_text(fm, "kind"), visibility.effective(fm), tuple(actions), visibility.sources(fm),
-                 fm_text(fm, "owner"), fm_text(fm, "shared"))
+                 fm_text(fm, "owner"), fm_text(fm, "shared"), md_hash(text))
 
 
 def tick_edit(text: str, n: int, word: str):
@@ -594,7 +596,7 @@ class TheList:
         if s.actions:
             word = s.actions[0][0]
             box = (f'<input type="checkbox" aria-label="{html.escape(word)}" data-doc="{html.escape(f"{root}/{s.rel}")}"'
-                   f' data-action="0" data-word="{html.escape(word)}">')
+                   f' data-action="0" data-word="{html.escape(word)}" data-hash="{html.escape(s.hash)}">')
         href = roots_mod.url_path(f"{root}/{s.rel}")
         return (f'<li class="list-row">{box}<div><a class="list-title" href="{html.escape(href)}">'
                 f'{html.escape(s.title)} {chips}</a><div class="list-meta">{html.escape(meta)}</div></div></li>')
@@ -621,7 +623,8 @@ document.querySelectorAll('.list-row input[type=checkbox]').forEach(function (b)
     b.disabled = true;
     var said = document.querySelector('.list-error');
     fetch('/_/tick', {method: 'POST', headers: {'Content-Type': 'application/json'}, credentials: 'same-origin',
-      body: JSON.stringify({doc: b.dataset.doc, action: Number(b.dataset.action), word: b.dataset.word})})
+      body: JSON.stringify({doc: b.dataset.doc, action: Number(b.dataset.action), word: b.dataset.word,
+        hash: b.dataset.hash})})
       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) {
         if (r.ok) { location.reload(); return; }
         throw new Error(j.error || ('the hub answered ' + r.status));

@@ -439,7 +439,7 @@ def test_a_row_with_an_action_carries_a_box_that_names_its_sheaf_and_its_action(
 
 def test_a_tick_on_the_row_is_answered_in_the_sheaf_and_the_row_leaves_waiting_on_you(box, sheaves, github):
     before = (sheaves / JOEY[5:]).read_text(encoding="utf-8")
-    r = box.post("/_/tick", {"doc": JOEY, "action": 0, "word": "Approve"}, member=NELL)
+    r = box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Approve"}), member=NELL)
     assert r.status == 200, r.text
     assert (sheaves / JOEY[5:]).read_text(encoding="utf-8") == before.replace("- [ ] Approve", "- [x] Approve")
     page = read(box.get("/list", member=NELL))
@@ -455,17 +455,44 @@ def test_a_tick_on_the_row_is_answered_in_the_sheaf_and_the_row_leaves_waiting_o
 def test_a_tick_of_an_action_the_sheaf_no_longer_holds_is_refused_and_writes_nothing(box, sheaves):
     before = (sheaves / JOEY[5:]).read_text(encoding="utf-8")
     for body in ({"doc": JOEY, "action": 0, "word": "Done"}, {"doc": JOEY, "action": 1, "word": "Approve"}):
-        r = box.post("/_/tick", body, member=NELL)
+        r = box.post("/_/tick", now(box, body), member=NELL)
         assert r.status == 409, r.text
         assert "reload the list" in r.json()["error"]
-    assert box.post("/_/tick", {"doc": JOEY, "action": 0, "word": "Approve"}, member=NELL).status == 200
-    assert box.post("/_/tick", {"doc": JOEY, "action": 0, "word": "Approve"}, member=NELL).status == 409
+    assert box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Approve"}), member=NELL).status == 200
+    assert box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Approve"}), member=NELL).status == 409
     assert (sheaves / JOEY[5:]).read_text(encoding="utf-8") == before.replace("- [ ] Approve", "- [x] Approve")
+
+
+def now(box, body):
+    """`body` with the hash of its sheaf's text as it is now: the tick of a list read just now."""
+    rel = body["doc"].split("/", 1)[1]
+    return {**body, "hash": md_hash((box.hub.the_list.root().path / rel).read_text(encoding="utf-8"))}
+
+
+def row_box(res, doc):
+    """The tick the row of `doc` would post: its box's doc, action, word and hash."""
+    b = BeautifulSoup(res.text, "html.parser").select_one(f'input[type=checkbox][data-doc="{doc}"]')
+    return {"doc": b["data-doc"], "action": int(b["data-action"]), "word": b["data-word"], "hash": b["data-hash"]}
+
+
+def test_a_tick_from_a_stale_row_does_not_tick_the_next_action_with_the_same_word(box, sheaves):
+    tick = row_box(box.get("/list", member=NELL), JOEY)
+    joey = sheaves / JOEY[5:]
+    # Since the list was read, the first Approve was ticked in the page and a second one added below it.
+    joey.write_text(joey.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [x] Approve\n- [ ] Approve\n"),
+                    encoding="utf-8")
+    before = joey.read_text(encoding="utf-8")
+    r = box.post("/_/tick", tick, member=NELL)
+    assert r.status == 409, r.text
+    assert "reload the list" in r.json()["error"]
+    assert joey.read_text(encoding="utf-8") == before
 
 
 @pytest.mark.parametrize("body", [{"doc": JOEY, "word": "Approve"}, {"doc": JOEY, "action": "0", "word": "Approve"},
                                   {"doc": JOEY, "action": True, "word": "Approve"}, {"doc": JOEY, "action": 0},
-                                  {"doc": JOEY, "action": 0, "word": ""}])
+                                  {"doc": JOEY, "action": 0, "word": ""},
+                                  {"doc": JOEY, "action": 0, "word": "Approve"},
+                                  {"doc": JOEY, "action": 0, "word": "Approve", "hash": 7}])
 def test_a_tick_that_does_not_name_an_action_is_refused(box, body):
     assert box.post("/_/tick", body, member=NELL).status == 400
 
@@ -477,7 +504,7 @@ def test_a_member_cannot_tick_a_sheaf_outside_their_roots(box, tmp_path):
     box.hub.proxy = proxy.parse({"origin": FRONT, "socket": str(cfg.socket), "proxy_user": cfg.proxy_user,
                                  "members": {DORA: {"name": "Dora", "short": "dora", "roots": [str(other)]}}},
                                 "the test")
-    assert box.post("/_/tick", {"doc": JOEY, "action": 0, "word": "Approve"}, member=DORA).status == 404
+    assert box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Approve"}), member=DORA).status == 404
 
 
 def test_the_tick_inside_a_list_of_other_boxes_flips_that_one_line(box, sheaves):
@@ -486,7 +513,7 @@ def test_the_tick_inside_a_list_of_other_boxes_flips_that_one_line(box, sheaves)
         "- [ ] Done @dora\n", "- [x] Read the brief\n- [ ] Done @dora\n- [ ] Share\n"), encoding="utf-8")
     before = path.read_text(encoding="utf-8")
     doc = "list/initech/website/2026-10-27-ga4-property.md"
-    assert box.post("/_/tick", {"doc": doc, "action": 1, "word": "Share"}, member=DORA).status == 200
+    assert box.post("/_/tick", now(box, {"doc": doc, "action": 1, "word": "Share"}), member=DORA).status == 200
     assert path.read_text(encoding="utf-8") == before.replace("- [ ] Share", "- [x] Share")
 
 
@@ -504,7 +531,7 @@ def test_a_tick_beside_a_comment_in_the_same_list_keeps_the_comment(box, sheaves
     path.write_text(path.read_text(encoding="utf-8").replace(
         "- [ ] Approve\n", f"- [x] Read the thread{thread('c1', 'Dora')}\n- [ ] Approve\n"), encoding="utf-8")
     before = path.read_text(encoding="utf-8")
-    assert box.post("/_/tick", {"doc": JOEY, "action": 0, "word": "Approve"}, member=NELL).status == 200
+    assert box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Approve"}), member=NELL).status == 200
     assert path.read_text(encoding="utf-8") == before.replace("- [ ] Approve", "- [x] Approve")
 
 
@@ -533,7 +560,7 @@ def test_a_line_separator_markdown_does_not_break_on_leaves_the_tick_on_its_own_
     path.write_text(path.read_text(encoding="utf-8").replace(
         "- [ ] Approve\n", f"Two lines{sep}in one paragraph.\n\n- [ ] Approve\n- [ ] Done\n"), encoding="utf-8")
     before = path.read_text(encoding="utf-8")
-    assert box.post("/_/tick", {"doc": JOEY, "action": 0, "word": "Approve"}, member=NELL).status == 200
+    assert box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Approve"}), member=NELL).status == 200
     assert path.read_text(encoding="utf-8") == before.replace("- [ ] Approve", "- [x] Approve")
 
 
@@ -559,7 +586,7 @@ def test_a_list_root_inside_a_git_work_tree_is_refused_at_each_poll_and_lists_no
 
 def test_a_ticked_sheaf_moved_out_of_waiting_and_back_without_a_new_change_is_waiting_again(box, github):
     # A Project's Status is not the issue's: moving it leaves the issue's last change where it was.
-    assert box.post("/_/tick", {"doc": JOEY, "action": 0, "word": "Approve"}, member=NELL).status == 200
+    assert box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Approve"}), member=NELL).status == 200
     github.issues[5]["status"] = "In progress at TT"
     box.hub.the_list.poll()
     assert "globex/black-friday" in read(box.get("/list", member=NELL))["In progress 2"]
@@ -618,7 +645,7 @@ def test_a_sheaf_whose_front_matter_closes_only_on_another_line_break_leaves_the
     assert "Waiting on you 2" in page and "Odd" not in json.dumps(page)
     path = sheaves / "initech/website/2026-10-28-odd.md"
     before = path.read_text(encoding="utf-8")
-    r = box.post("/_/tick", {"doc": "list/initech/website/2026-10-28-odd.md", "action": 0, "word": "Approve"},
+    r = box.post("/_/tick", now(box, {"doc": "list/initech/website/2026-10-28-odd.md", "action": 0, "word": "Approve"}),
                  member=NELL)
     assert r.status in (200, 409), r.text       # no sheaf, still a document: its one box, or nothing
     assert path.read_text(encoding="utf-8") in (before, before.replace("- [ ] Approve", "- [x] Approve"))
@@ -693,7 +720,7 @@ def test_a_tick_after_the_issue_changed_does_not_give_the_old_assignees_back(box
     assert box.get(address, member=NELL).status == 200          # the assignee of #5 owns it
     joey.write_text(joey.read_text(encoding="utf-8").replace("issue: acme/record#5\n", issue + "owner: dora\n"),
                     encoding="utf-8")
-    r = box.post("/_/tick", {"doc": address[1:], "action": 0, "word": "Approve"}, member=DORA)
+    r = box.post("/_/tick", now(box, {"doc": address[1:], "action": 0, "word": "Approve"}), member=DORA)
     assert r.status == 200, r.text
     assert box.get(address, member=NELL).status == 404          # the tick, before the next poll
     assert box.get(address, member=DORA).status == 200
@@ -710,7 +737,7 @@ def test_a_tick_after_the_issue_changed_takes_the_row_off_the_list_until_the_nex
     box.hub.the_list.poll()
     joey = sheaves / JOEY[5:]
     joey.write_text(joey.read_text(encoding="utf-8").replace("issue: acme/record#5\n", issue), encoding="utf-8")
-    r = box.post("/_/tick", {"doc": JOEY, "action": 0, "word": "Approve"}, member=NELL)
+    r = box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Approve"}), member=NELL)
     assert r.status == 200, r.text
     for m in (NELL, DORA):
         assert "Reply to Joey about column L James" not in titles(read(box.get("/list?show=all", member=m)))

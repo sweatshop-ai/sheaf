@@ -331,20 +331,25 @@ def place(hub, address: str, member=None, by: str | None = None, commit: bool = 
     if got is None:
         return None
     root, top, name = got
-    with _name_lock(top, name), folders_lock(top, name):
-        rel, n = _one(top, name)
-        if n > 1:
-            _twice(hub, address, n)
+    with _name_lock(top, name):
+        with folders_lock(top, name):
+            rel, n = _one(top, name)
+            if n > 1:
+                _twice(hub, address, n)
+                return None
+            gone = _move(hub, root, top, rel, name, address) if n else None
+            if gone is not None:
+                _tidy(top, gone)
+        if gone is None:
             return None
-        gone = _move(hub, root, top, rel, name, address) if n else None
-        if gone is not None:
-            _tidy(top, gone)
-            hub.wrote(address, moved=True)
-    if gone is not None and commit:
-        if member is None and by is None:
-            hub.committed(address, what="move", gone=gone, author=commits_mod.Author(*commits_mod.COMMITTER))
-        else:
-            hub.committed(address, member, "move", by, gone=gone)
+        # Rendered and committed under the name's lock (9.11), after the folders' is let go: no other writer of
+        # the name comes between the move and its commit.
+        hub.wrote(address, moved=True)
+        if commit:
+            if member is None and by is None:
+                hub.committed(address, what="move", gone=gone, author=commits_mod.Author(*commits_mod.COMMITTER))
+            else:
+                hub.committed(address, member, "move", by, gone=gone)
     return gone
 
 

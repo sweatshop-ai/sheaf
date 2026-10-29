@@ -678,8 +678,8 @@ class Handler:
                                   "(half of a pair, such as half an emoji)") from None
             self.hub.index.touch(e.address)
             gone = moved[0] if moved else self._placed(e, ticked)
-        if got["changed"] and not got.get("again"):
-            self.hub.committed(e.address, req.member, "edit", gone=gone)
+            if got["changed"] and not got.get("again"):
+                self.hub.committed(e.address, req.member, "edit", gone=gone)
         if "Stop James" in ticked:
             self._stop_james(req, e)
         if got["merged"] and not got.get("again"):
@@ -713,7 +713,7 @@ class Handler:
                 raise Refuse(409, f"the sheaf no longer holds that action ({word}): reload the list")
             self.hub.index.touch(e.address)
             gone = moved[0] if moved else self._placed(e, ticked)
-        self.hub.committed(e.address, req.member, "tick", gone=gone)
+            self.hub.committed(e.address, req.member, "tick", gone=gone)
         if "Stop James" in ticked:
             self._stop_james(req, e)
         if self.hub.the_list is not None:

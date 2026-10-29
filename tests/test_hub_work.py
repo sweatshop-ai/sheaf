@@ -1378,3 +1378,17 @@ def test_the_wait_of_a_session_that_keeps_writing_still_ends_after_its_time(team
     assert not james_door(browser, james_writes, "reply", session=S1, doc=ADDRESS, id=cid, text="At 400.")[0]
     row, = hub_rows("session-not-recorded")
     assert row["transcript"] == S1
+
+
+def test_a_sessions_list_the_hub_cannot_rewrite_says_so_once_not_at_every_later_call(team, browser, work,
+                                                                                     james_writes):
+    # gate round 3 on PR 59: the waiting entry goes with the row
+    put(team, work, DOC, SHEAF.split("sessions:\n")[0] + f"sessions: [{{id: {LIVE}}}]\n---\n# T\n")
+    james_wrote({"sessions": team.hub.the_list.cfg.sessions_dir}, NEW)
+    read = json.loads(james_door(browser, james_writes, "read", doc=ADDRESS)[1])
+    assert not james_door(browser, james_writes, "update", session=NEW, doc=ADDRESS, text=read["text"] + "\nMore.\n",
+                          expected_hash=read["hash"])[0]
+    for _ in range(2):
+        assert not james_door(browser, james_writes, "documents", session=NEW)[0]
+    row, = hub_rows("session-not-recorded")
+    assert row["transcript"] == NEW and "one item per line" in row["reason"]

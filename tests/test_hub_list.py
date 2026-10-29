@@ -660,14 +660,15 @@ def test_a_link_at_a_sheafs_path_is_no_document_even_to_the_owner_of_the_sheaf_i
     assert box.get(f"/{root}/globex/black-friday/joey.md", member=NELL).status == 404
 
 
-def test_a_link_the_poll_does_not_read_has_the_owner_of_the_sheaf_it_names(box, sheaves):
+def test_a_link_the_poll_does_not_read_is_no_document_even_to_the_owner_of_the_sheaf_it_names(box, sheaves):
+    """No address of the list's root reaches a file through a link, at any depth (9.11, Opus round 8)."""
     joey = closed_joey(sheaves, "sources: [library:4711]\nowner: dora\n")
     (sheaves / ".kept").mkdir()
     (sheaves / ".kept/joey.md").symlink_to(joey)
     box.hub.the_list.poll()
     root = box.hub.roots.lookup(joey).name
     assert box.get(f"/{root}/.kept/joey.md", member=DORA).status == 404
-    assert box.get(f"/{root}/.kept/joey.md", member=NELL).status == 200
+    assert box.get(f"/{root}/.kept/joey.md", member=NELL).status == 404
 
 
 @pytest.mark.parametrize("issue", ["issue:\n", "issue: acme/record#7\n"], ids=["removed", "changed"])

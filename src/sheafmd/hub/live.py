@@ -436,7 +436,9 @@ class LiveDocument:
 
     def await_reply(self, cid):
         """Start waiting for an action reply in an existing thread. False if there is no such
-        thread. Under the name's lock (9.11), as every read of the file."""
+        thread. Under the name's lock (9.11), as every read of the file: a Tell start that calls it under the hub's
+        admission lock waits there for a write of the name under way, its render and its commit (8.11), as it waited
+        for the render alone under the document's lock before; nothing takes the admission lock under a name's."""
         with self._hold(), self._held():
             return self._await(cid)
 

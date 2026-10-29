@@ -922,6 +922,38 @@ def test_a_withdrawal_through_a_link_name_writes_nothing_at_the_shared_path(team
     assert team.get(f"/work/{LINK}", member=THIERRY).status == 404
 
 
+@pytest.mark.parametrize("alias, to", [
+    ("thinkingtoo/alias.md", f"tiroir/{NAME}"),
+    ("thinkingtoo/tiroir/notes/alias.md", f"../{NAME}"),
+    (f"thinkingtoo/tiroir/notes/{NAME}", ".."),
+])
+def test_no_path_reaches_a_sheaf_through_a_link_at_any_depth(team, work, alias, to):
+    """Opus P1 (round 8): a link above or below project depth, or a linked folder on the way, was no name, so the
+    hub served it as a plain document: the owner's untick there wrote `visibility: owner` through it at the shared
+    path, unlocked, and the commit staged that path. In a root the hub places no address reaches a file through a
+    link, at any depth (9.11): the page answers 404 and nothing is written."""
+    put(team, work, SHARED, SHARED_TEXT)
+    link = alias if to != ".." else alias.rsplit("/", 1)[0]
+    (work / link).parent.mkdir(parents=True, exist_ok=True)
+    os.symlink(to, work / link)
+    assert team.get(f"/work/{alias}", member=THIERRY).status == 404
+    blocks = split_md_blocks(SHARED_TEXT)
+    i = next(i for i, b in enumerate(blocks) if "- [x] Share" in b.content)
+    soup = BeautifulSoup(_pandoc.run(["-f", "gfm", "-t", "html5", "--no-highlight"], blocks[i].content).stdout,
+                         "html.parser")
+    del next(b for b in soup.select('input[type="checkbox"]') if "Share" in b.parent.get_text())["checked"]
+    got = team.post("/_/save", {"doc": f"work/{alias}", "hash": md_hash(SHARED_TEXT),
+                                "edits": [{"i": i, "html": str(soup)}]}, member=THIERRY)
+    assert got.status == 404, got.text
+    assert (work / SHARED).read_text(encoding="utf-8") == SHARED_TEXT
+
+
+def test_a_document_below_project_depth_in_real_folders_is_still_served(team, work):
+    """The rule above refuses links, not depth: a file in real folders under a project is a document as before."""
+    put(team, work, "thinkingtoo/tiroir/notes/plain.md", "# Plain\n\nWords.\n")
+    assert team.get("/work/thinkingtoo/tiroir/notes/plain.md", member=THIERRY).status == 200
+
+
 @pytest.mark.parametrize("linked", ["private", "private/thierry"])
 def test_a_file_under_a_linked_private_folder_holds_no_name(team, work, tmp_path, linked):
     """A name is held only by a regular file reached through real folders (9.11): one under a linked `private`

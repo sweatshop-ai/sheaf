@@ -107,14 +107,14 @@ class Commits:
             return
         # The file the write went to: a link inside the root is staged as the link, not what it names.
         top = os.path.realpath(root.path)
-        docs = [rel] + ([gone] if gone else [])
-        paths = [os.path.relpath(os.path.realpath(root.path / d), top) for d in docs]
-        if rc.versions_inside:
-            paths += [str(state.INSIDE / state.doc_key(d)) for d in docs]
+        def of(d):
+            """The document `d`, then its versions folder when the root keeps it."""
+            return [os.path.relpath(os.path.realpath(root.path / d), top)] + \
+                ([str(state.INSIDE / state.doc_key(d))] if rc.versions_inside else [])
         subject = f"move: {gone} -> {rel}" if gone else f"{what}: {rel}"
         try:
             with self._root_lock(root.path):
-                if not self._commit(root.path, paths, author, subject, address):
+                if not self._commit(root.path, of(rel), author, subject, address, gone=of(gone) if gone else []):
                     return
         except (OSError, subprocess.SubprocessError) as e:
             self._record("commit-failed", address, error=str(e)[:300])
@@ -122,11 +122,18 @@ class Commits:
         if rc.push:
             self._push_later(root.path, address)
 
-    def _commit(self, folder: Path, paths: list, author: Author, subject: str, address: str) -> bool:
-        """`paths`: the document, then the path it moved from (a move), then their versions folders when the
-        root keeps them. A path that is gone is staged as gone: git still lists it."""
+    def _commit(self, folder: Path, paths: list, author: Author, subject: str, address: str,
+                gone: list = ()) -> bool:
+        """`paths`: the document, then its versions folder when the root keeps it; `gone`: the same of the path it
+        moved from (a move). A path that is gone is staged as gone: git still lists it."""
         if _ignored(folder, paths[0]):
-            return False                              # a document the repo ignores stays out, its versions too
+            # A document the repo ignores stays out, its versions too; but a move into an ignored folder still
+            # takes the file, and its versions, out of the place git holds them (9.11), or git keeps them there.
+            if not gone:
+                return False
+            paths = list(gone)
+        else:
+            paths = list(paths) + list(gone)
         # A versions folder the repo ignores stays out; the document is committed without it.
         paths = paths[:1] + [p for p in paths[1:] if not _ignored(folder, p)]
         # A path git cannot match stops `add`: a versions folder that no page has made yet (a door write).

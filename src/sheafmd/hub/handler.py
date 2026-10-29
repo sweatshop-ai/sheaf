@@ -30,7 +30,7 @@ from ..config import ConfigError
 from ..edit import EditError
 from ..mcp import Caller, Door
 from ..render import RenderError
-from ..source import StaleError
+from ..source import StaleError, md_hash
 from . import auth, peer, place, proxy, the_list, visibility, work
 from .asktell import NO_AGENT, JobRefused
 from .index import Status
@@ -697,19 +697,27 @@ class Handler:
         commit and the open tabs see what a tick in the page makes them see."""
         b = req.body
         e = self._entry(req, b.get("doc"))
-        n, word = b.get("action"), b.get("word")
+        n, word, read = b.get("action"), b.get("word"), b.get("hash")
         _shape(type(n) is int and n >= 0, "action must be the number of the sheaf's action, from 0")
         _shape(isinstance(word, str) and word != "", "word must be the action's word")
+        _shape(isinstance(read, str) and read != "", "hash must be the hash of the sheaf the list read")
         h, text = e.live.current()
         edit = the_list.tick_edit(text, n, word)
         if edit is None:
             raise Refuse(409, f"the sheaf no longer holds that action ({word}): reload the list")
         with place.held(self.hub, e.address):
             guard, ticked = self._ticks(req, e)
+
+            def as_read(text, new, toggled):
+                # The row names its action by place and word: on another text than the list read, another
+                # action may sit there with the same word. Judged on the file under its lock.
+                if md_hash(text) != read:
+                    raise EditError(f"the sheaf changed since the list read it ({word}): reload the list")
+                return guard(text, new, toggled)
             move, moved = self._mover(e, ticked)
             with self._moved_committed(e, req.member, "tick", moved):
                 try:
-                    got = e.live.save(h, [edit], guard=guard, move=move)
+                    got = e.live.save(h, [edit], guard=as_read, move=move)
                 except (EditError, StaleError) as ex:
                     raise Refuse(409, str(ex)) from None
                 if not got["changed"]:

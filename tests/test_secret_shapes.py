@@ -24,7 +24,9 @@ def test_the_pattern_is_the_runners():
 
 
 def test_no_test_file_holds_a_secret_shaped_line():
-    files = subprocess.run(["git", "ls-files", "tests"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.split()
+    files = subprocess.run(["git", "ls-files", "-z", "tests"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.split("\0")
+    files = [f for f in files if f]
+    assert files
     hits = [f"{f}:{n}" for f in files
             for n, line in enumerate((ROOT / f).read_text(encoding="utf-8", errors="replace").splitlines(), 1)
             if SECRET_TEXT.search(line)]

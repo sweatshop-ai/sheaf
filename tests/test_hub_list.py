@@ -387,6 +387,15 @@ def test_an_issue_in_more_projects_than_one_page_still_has_the_status_of_its_ite
             "initech/website": [("Prep for the call of Thursday James", "prep · @dora · #6 · 40 min")]}}
 
 
+def test_the_pages_of_an_issues_project_items_end_at_ten_however_many_github_names(box, github):
+    """Opus gate on #45, P3: the poll holds `_poll_lock` while it pages, so an answer that never ends must not hold it."""
+    github.issues[5]["others"] = [(1000 + k, "Waiting on member") for k in range(2000)]
+    before = github.requests
+    box.hub.the_list.poll()
+    assert github.requests - before == the_list.PAGES          # the first page with the rest, then nine of #5's
+    assert "Reply to Joey" not in json.dumps(read(box.get("/list", member=NELL)))    # its item was never read
+
+
 def test_a_member_whose_roots_do_not_hold_the_list_gets_404(box, tmp_path):
     other = tmp_path / "other"
     other.mkdir()
@@ -538,6 +547,37 @@ def test_a_tick_from_a_stale_row_does_not_tick_the_next_action_with_the_same_wor
     assert r.status == 409, r.text
     assert "reload the list" in r.json()["error"]
     assert joey.read_text(encoding="utf-8") == before
+
+
+def test_the_rows_tick_of_a_sheaf_the_poll_placed_in_a_private_folder_lands_in_that_file(box, sheaves):
+    """Opus gate on #45, P3: the row's hash is of the text the poll read, wherever the file sits (9.11)."""
+    joey = sheaves / JOEY[5:]
+    joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n", "sources: [library:4711]\n"),
+                    encoding="utf-8")
+    box.hub.the_list.poll()
+    home = sheaves / "globex/black-friday/private/nell/2026-10-28-reply-to-joey.md"
+    assert home.exists() and not joey.exists()
+    before = home.read_text(encoding="utf-8")
+    r = box.post("/_/tick", row_box(box.get("/list", member=NELL), JOEY), member=NELL)
+    assert r.status == 200, r.text
+    assert home.read_text(encoding="utf-8") == before.replace("- [ ] Approve", "- [x] Approve")
+
+
+def test_a_tick_ticks_the_action_the_row_showed_though_the_hubs_copy_of_a_page_no_tab_holds_is_older(box, sheaves):
+    """Opus gate on #45, P1: a sheaf opened once and closed keeps its entry, which the watcher no longer refreshes. A
+    question written above its Approve since is the row's action 0: the tick lands there, not on the old Approve."""
+    joey = sheaves / JOEY[5:]
+    joey.write_text(joey.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [ ] Approve @nell\n"),
+                    encoding="utf-8")
+    assert box.get("/" + JOEY, member=NELL).status == 200          # opened once; no tab listens now
+    joey.write_text(joey.read_text(encoding="utf-8").replace(
+        "# Reply to Joey about column L\n\n", "# Reply to Joey about column L\n\n- [ ] Approve\n\nA second question.\n\n"),
+        encoding="utf-8")
+    box.hub.the_list.poll()
+    before = joey.read_text(encoding="utf-8")
+    r = box.post("/_/tick", row_box(box.get("/list", member=NELL), JOEY), member=NELL)
+    assert r.status == 200, r.text
+    assert joey.read_text(encoding="utf-8") == before.replace("- [ ] Approve\n", "- [x] Approve\n", 1)
 
 
 @pytest.mark.parametrize("body", [{"doc": JOEY, "word": "Approve"}, {"doc": JOEY, "action": "0", "word": "Approve"},

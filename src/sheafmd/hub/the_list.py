@@ -605,7 +605,7 @@ class TheList:
         if not _same_issue(sheaf.issue, row.sheaf.issue):
             return None
         fm = visibility.front_matter(text)
-        if not visibility.visible_to(fm, member, self.hub.assignees(address, fm)):
+        if not self.hub.may_open(member, address, fm):
             return None
         return Row(sheaf, row.record, row.group, key, row.file)
 

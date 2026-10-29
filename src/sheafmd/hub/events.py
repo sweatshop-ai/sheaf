@@ -25,6 +25,13 @@ PREAMBLE = f"retry: {RETRY_MS}\n\n".encode("ascii")
 KEEPALIVE = b": keepalive\n\n"
 
 
+class Renamed:
+    """What `accept` returns to send another event in place of the one read: `gone` to a member who can no longer
+    open the document (8.12)."""
+    def __init__(self, name: str, data):
+        self.name, self.data = name, data
+
+
 class Subscription:
     def __init__(self, bus: "Bus", accept=None):
         """`accept(name, data)` returns what this stream is sent of an event, or None to send it
@@ -57,6 +64,8 @@ class Subscription:
                 data = self._accept(name, data)
                 if data is None:
                     continue
+                if isinstance(data, Renamed):
+                    return data.name, data.data
             return name, data
 
     def drain(self) -> list:

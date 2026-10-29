@@ -241,11 +241,14 @@ def test_only_mine_keeps_what_the_member_owns_or_what_names_them(box):
     assert list(read(box.get("/list?show=mine", member=DORA))["Waiting on you 1"]) == ["initech/website"]
 
 
-def test_all_of_the_team_shows_the_projects_a_member_is_not_in(box):
+def test_all_of_the_team_leaves_out_the_projects_a_member_is_not_in(box):
+    """`projects.toml` grants (8.12, #44): All of the team is what the reader may open, so a project that does
+    not name them is not on it."""
     page = read(box.get("/list?show=all", member=DORA))
-    assert list(page) == ["Waiting on you 2", "In progress 1"]
-    assert page["Waiting on you 2"]["globex/black-friday"] == [
-        ("Reply to Joey about column L Approve James", "mail · @nell · #5 · 2 h")]
+    assert list(page) == ["Waiting on you 1", "In progress 1"]
+    assert "globex/black-friday" not in page["Waiting on you 1"]
+    assert read(box.get("/list?show=all", member=NELL))["Waiting on you 2"]["globex/black-friday"] == [
+        ("Reply to Joey about column L Approve James", "mail · you · #5 · 2 h")]
 
 
 def test_all_of_the_team_leaves_out_a_sheaf_with_a_private_source_for_all_but_its_owner(box, sheaves):
@@ -918,7 +921,11 @@ def test_an_issue_written_in_another_case_is_still_the_issue_the_list_polled(box
 
 
 def bind_tokens(box, sheaves):
-    """Nell's and Dora's door tokens, `nell-door` and `dora-door`, bound to them (9.11)."""
+    """Nell's and Dora's door tokens, `nell-door` and `dora-door`, bound to them (9.11), both members of both
+    projects (8.12): what these tests judge is a sheaf's own visibility, not the grant."""
+    text = (sheaves / "projects.toml").read_text(encoding="utf-8")
+    (sheaves / "projects.toml").write_text(text.replace('members = ["nell"]', 'members = ["nell", "dora"]'),
+                                           encoding="utf-8")
     box.hub.proxy = proxy.parse({"origin": FRONT, "socket": "/run/sheaf-proxy/hub.sock",
                                  "proxy_user": pwd.getpwuid(os.getuid()).pw_name,
                                  "members": {NELL: {"name": "Nell", "short": "nell", "github": "nell-l",

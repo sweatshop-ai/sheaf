@@ -87,6 +87,8 @@ class Hub:
         self.versions = state.Versions()
         self.commits = Commits(self.record)      # the roots that commit (8.11)
         self._told_projects: set = set()         # what check_projects warned of this run (8.12)
+        self._projects: dict = {}                # root id -> (stat key, entries | Invalid | None) of its projects.toml
+        self._grants_seen: dict = {}             # root id -> what projects_of gave the last tick (8.12)
         self.told_place: set = set()             # the addresses a place-refused row named this run (9.11)
         self.told_link: set = set()              # the (root id, path) a link-ignored row named this run (9.11)
         self.told_ignored: set = set()           # the roots a private-ignored row named this run (9.11)
@@ -489,8 +491,45 @@ class Hub:
         except (OSError, UnicodeDecodeError):
             return False
         if judged is None:
-            return never_read
-        return visibility.visible_to(judged[0], member, judged[1])
+            return never_read and self.granted(member, address)
+        return visibility.visible_to(judged[0], member, judged[1], self.granted(member, address))
+
+    def may_open(self, member, address: str, fm: dict) -> bool:
+        """Whether `member` may open the sheaf at `address` whose front matter is `fm`, a text read under its lock
+        (9.11): as `visible` judges the file on disk, with `projects.toml`'s grant (8.12)."""
+        return visibility.visible_to(fm, member, self.assignees(address, fm), self.granted(member, address))
+
+    def granted(self, member, address: str) -> bool:
+        """Whether the `projects.toml` of the root of `address` lets `member` into its project (8.12): always in
+        loopback mode, and in a root with no such file."""
+        at = roots_mod.Address.parse(address)
+        root = self.roots.get(at.root)
+        if self.proxy is None or root is None:
+            return True
+        return projects.grants(self.projects_of(root), at.rel, member.short)
+
+    def projects_of(self, root):
+        """The entries of `root`'s `projects.toml`, None without the file, an `Invalid` for one the hub cannot
+        read: read again only when the file changed (its inode, times or size), so an edit takes effect at the
+        next request, with no restart."""
+        f = root.path / projects.FILE
+        try:
+            st = f.stat()
+        except FileNotFoundError:
+            return None
+        except OSError as e:
+            return projects.Invalid(f"cannot be read ({e.strerror})")
+        key = (st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
+        hit = self._projects.get(root.id)
+        if hit is not None and hit[0] == key:
+            return hit[1]
+        try:
+            got = projects.read(root.path)
+        except projects.Invalid as e:
+            got = e
+        self._projects[root.id] = (key, got)          # a swap of one item: no lock, any reader sees one or the other
+        self._grants_seen.setdefault(root.id, got)    # what the tick compares with, from the first read on
+        return got
 
     def owners(self, address: str, members) -> list:
         """Those of `members` who own the sheaf at `address`, by its front matter now, as `visible` judges."""
@@ -553,9 +592,31 @@ class Hub:
             except Exception as ex:
                 self._rebuild_failed(e, ex)
         try:
+            self._tell_grants()
+        except Exception:
+            self.record_exception("grants-failed")
+        try:
             self.index.tick(self.clock())
         except Exception:               # a traceback, not `error=`: see `record_exception`
             self.record_exception("status-failed")
+
+    def _tell_grants(self):
+        """Tell the open tabs of a root whose `projects.toml` changed, `grants`: each member's stream asks again
+        whether the member may open its document, and one `projects.toml` no longer lets in is told `gone`
+        (8.12). A page ignores the event itself."""
+        if self.proxy is None:
+            return
+        by_root: dict = {}
+        for address, e in list(self.entries.items()):
+            if e.bus.count() and (root := self.roots.get(roots_mod.Address.parse(address).root)) is not None:
+                by_root.setdefault(root.id, (root, []))[1].append(e)
+        for root_id, (root, open_) in by_root.items():
+            got = self.projects_of(root)
+            was = self._grants_seen.get(root_id, got)
+            self._grants_seen[root_id] = got
+            if got is not was:
+                for e in open_:
+                    e.bus.publish("grants", {})
 
     def _observe(self, e: Entry):
         """What the session told by this document is doing. A failure here is written down and

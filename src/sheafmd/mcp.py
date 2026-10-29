@@ -705,13 +705,13 @@ class Door:
         with place.held(self.hub, address) as placed:
             if placed:
                 address = self._address(args["doc"], caller)
-            before, text, moved = self._write(address, args, text, expected, caller)
+            before, text, moved = self._updated(address, args, text, expected, caller)
         if before != text:
             self.hub.committed(moved, by=caller.display, what="update",
                                gone=None if moved == address else Address.parse(address).rel)
         return {"doc": moved, "url": self.hub.url(moved), "hash": md_hash(text), "changed": before != text}
 
-    def _write(self, address: str, args: dict, text: str, expected: str, caller: Caller):
+    def _updated(self, address: str, args: dict, text: str, expected: str, caller: Caller):
         """The write of an update, and the sheaf moved to its home (9.11): (the text before, the text written, the
         address it lives at now)."""
         written = [text]

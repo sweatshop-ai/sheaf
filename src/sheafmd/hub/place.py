@@ -454,13 +454,15 @@ def _move(hub, root, top: Path, rel: str, name: str, address: str, text: str | N
           strict: bool = False) -> str | None:
     """Link the file at `rel` into the home of its text, or of `text` when given (`ahead`), then unlink it at `rel`:
     the path it left, or None. The caller holds the name's lock, the file's and then the folders'. A move that
-    cannot be made is a `place-refused` row, or with `strict` (`ahead`) raises `Refused`."""
-    def refused(why: str):
+    cannot be made is a `place-refused` row, or with `strict` (`ahead`) raises `Refused`. An owner-only one goes to
+    quarantine instead when it is at the project's path (#61) or in an owner's private folder that is not its home
+    (#66): either way a Library glob would file it for someone it is not for."""
+    def refused(why: str, target: str | None = None):
         if strict:
             raise Refused(why)
         gone = None
-        if rel == name:     # an owner-only file at the project's path: a project one never gets here
-            gone = _to_quarantine(top, sfd, sname, name)      # never left at the project's path (#61)
+        if target != name and not quarantined(rel):     # an owner-only file away from home and not in quarantine
+            gone = _to_quarantine(top, sfd, sname, rel, name)
             _refused(hub, address, why, gone is not None, tried=True)
         else:
             _refused(hub, address, why, quarantined(rel))
@@ -486,17 +488,17 @@ def _move(hub, root, top: Path, rel: str, name: str, address: str, text: str | N
         if target == rel:
             return None
         if ignores(top, target):
-            return refused(IGNORED)
+            return refused(IGNORED, target)
         try:
             dfd, dname = make_folders(top, target)
         except OSError as e:
-            return refused(f"its folder could not be made ({e.strerror})")
+            return refused(f"its folder could not be made ({e.strerror})", target)
         try:
             os.link(sname, dname, src_dir_fd=sfd, dst_dir_fd=dfd, follow_symlinks=False)
         except FileExistsError:
-            return refused(f"{target} is taken")
+            return refused(f"{target} is taken", target)
         except OSError as e:
-            return refused(f"it could not be moved ({e.strerror})")
+            return refused(f"it could not be moved ({e.strerror})", target)
         finally:
             os.close(dfd)
         os.unlink(sname, dir_fd=sfd)
@@ -505,11 +507,11 @@ def _move(hub, root, top: Path, rel: str, name: str, address: str, text: str | N
     return rel
 
 
-def _to_quarantine(top: Path, sfd: int, sname: str, name: str) -> str | None:
-    """Link the file `sname` in the folder `sfd`, the sheaf named `name` at the project's path, into its quarantine,
-    never over anything, then unlink it: `name`, the path it left, or None when it stays (a quarantine the repo
-    ignores, taken, or a folder that cannot be made). The caller holds the name's lock, the file's and the
-    folders'."""
+def _to_quarantine(top: Path, sfd: int, sname: str, rel: str, name: str) -> str | None:
+    """Link the file `sname` in the folder `sfd`, the sheaf named `name` at `rel` (the project's path, or an owner's
+    private folder that is not its home), into its quarantine, never over anything, then unlink it: `rel`, the path
+    it left, or None when it stays (a quarantine the repo ignores, taken, or a folder that cannot be made). The
+    caller holds the name's lock, the file's and the folders'."""
     target = quarantine(name)
     if ignores(top, target):
         return None
@@ -524,7 +526,7 @@ def _to_quarantine(top: Path, sfd: int, sname: str, name: str) -> str | None:
     finally:
         os.close(dfd)
     os.unlink(sname, dir_fd=sfd)
-    return name
+    return rel
 
 
 def _tidy(top: Path, rel: str):

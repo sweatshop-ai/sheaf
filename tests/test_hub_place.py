@@ -681,6 +681,30 @@ def test_a_door_update_and_a_poll_at_once_leave_one_file_with_the_update(team, w
     assert (work / HOME).read_text(encoding="utf-8").endswith("More.\n") and not (work / SHARED).exists()
 
 
+def test_a_door_reply_with_no_page_open_and_a_poll_at_once_lands_in_the_moved_file(team, work, browser, tokens,
+                                                                                    monkeypatch):
+    """A door comment write on a sheaf the hub holds no page for goes straight into the file: under the name's
+    lock, its file found again under it, so a poll that comes between finding the file and writing it waits."""
+    from sheafmd import mcp
+    commented = PRIVATE.replace("A quote from the contract.\n", 'A quote from the contract.<!-- sheaf-comment id=c1 '
+                                'by="Hans" at=2026-10-14T09:00 status=open quote="A quote"\nSource?\n-->\n')
+    put(team, work, SHARED, commented)                         # written before the rule: the poll would move it
+    assert f"work/{SHARED}" not in team.hub.entries
+    real, threads = mcp.update_file, []
+
+    def poll_then_write(path, change):
+        t = threading.Thread(target=team.hub.the_list.poll)
+        t.start()
+        t.join(1)
+        threads.append(t)
+        return real(path, change)
+    monkeypatch.setattr(mcp, "update_file", poll_then_write)
+    is_error, got = call(browser, "reply", token=tokens["thierry"], doc=f"work/{SHARED}", id="c1",
+                         text="The second page.")
+    threads[0].join(10)
+    assert not is_error, got
+    assert "The second page." in (work / HOME).read_text(encoding="utf-8") and not (work / SHARED).exists()
+
 def test_a_move_into_an_ignored_private_folder_still_commits_the_old_path_gone(hub, browser, tmp_path):
     """Codex P1: a deployment that keeps private folders out of git must not keep the shared copy in it."""
     box, repo = committing(hub, browser, tmp_path, ignore="*/*/private/\n")

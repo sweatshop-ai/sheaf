@@ -479,7 +479,14 @@ class Door:
                 continue
             if root.missing():
                 continue
-            for rel in markdown_files(root):
+            placed = place.applies(hub, root.name)
+            top = Path(os.path.realpath(root.path)) if placed else None
+            for found in markdown_files(root):
+                # A sheaf of the list's root is listed by its name (9.11), wherever its file is; a private path is
+                # none.
+                rel = place.named(hub, root, top, found) if placed else found
+                if rel is None:
+                    continue
                 address = str(Address(root.name, rel))
                 try:
                     path = hub.roots.resolve(address)          # never a file outside its root

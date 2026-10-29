@@ -101,7 +101,7 @@ def test_an_open_stream_of_a_member_taken_off_the_project_is_told_gone(team, wor
     sven.drain(), thierry.drain()
     (work / "projects.toml").write_text(GRANTS.replace(', "sven"', ""), encoding="utf-8")
     team.hub.tick()
-    assert sven.drain() == [("gone", {"doc": f"work/{SHARED}"})]
+    assert sven.drain() == [("gone", {"doc": f"work/{SHARED}", "why": "access"})]
     assert thierry.drain() == []
 
 
@@ -167,3 +167,44 @@ def test_the_index_stream_tells_a_change_in_a_project_to_its_members_alone(team,
     team.hub.tick()
     assert [d for name, d in hans.drain() if name == "status"] == []
     assert [d["doc"] for name, d in sven.drain() if name == "status"] == [f"work/{SHARED}"]
+
+
+
+def test_a_link_in_a_granted_project_reaches_no_sheaf_of_a_project_that_is_not(team, work):
+    """Opus P1 (PR 51): in a root the hub does not place, a link is followed, so the project is judged on where
+    the file is as well as on the address: both must name the member."""
+    team.hub.the_list = None
+    (work / "projects.toml").write_text(GRANTS + '\n[projects."acme/blog"]\nmembers = ["hans"]\nstatus = "live"\n',
+                                        encoding="utf-8")
+    put(team, work, SHARED, OPEN.replace("A quote from the contract.", "SECRET"))
+    (work / "acme/blog").mkdir(parents=True)
+    os.symlink(f"../../{SHARED}", work / "acme/blog/link.md")
+    got = team.get("/work/acme/blog/link.md", member=HANS)
+    assert got.status == 404 and "SECRET" not in got.text
+
+
+def test_a_sheaf_its_owner_keeps_outside_their_projects_is_never_told_gone_for_a_bad_moment(team, work):
+    """Opus P2 (PR 51): `gone` ends the page for good; it is the answer to a change of `projects.toml` alone, never
+    to a file of the sheaf that cannot be read for a moment."""
+    rel = f"thinkingtoo/tiroir/private/hans/{NAME}"
+    put(team, work, rel, HANS_OWN)
+    stream = team.get(f"/_/live?doc=work/{SHARED}", member=HANS).stream
+    stream.drain()
+    (work / rel).write_text("", encoding="utf-8")
+    team.hub.tick()
+    assert [name for name, _ in stream.drain() if name == "gone"] == []
+
+
+@pytest.mark.parametrize("name", ["acme/*", "acme/blog?", "acme/[x]", "acme/blog post"])
+def test_a_project_name_the_librarys_glob_would_read_otherwise_is_refused(work, capsys, name):
+    (work / "projects.toml").write_text(f'[projects."{name}"]\nmembers = ["hans"]\nstatus = "live"\n',
+                                        encoding="utf-8")
+    code, out, err = groups(capsys, "--root", str(work))
+    assert code == 1 and out == "" and name in err
+
+
+def test_two_projects_that_would_share_a_library_group_are_refused(work, capsys):
+    (work / "projects.toml").write_text('[projects."a-b/c"]\nmembers = ["hans"]\nstatus = "live"\n\n'
+                                        '[projects."a/b-c"]\nmembers = ["sven"]\nstatus = "live"\n', encoding="utf-8")
+    code, out, err = groups(capsys, "--root", str(work))
+    assert code == 1 and out == "" and "group:proj-a-b-c" in err

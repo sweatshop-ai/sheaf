@@ -14,6 +14,7 @@ import pytest
 from helpers import FRONT, Front, hub_rows
 
 from sheafmd.hub import proxy, the_list
+from sheafmd.hub import work as work_mod
 
 THIERRY = "503b2f77-83de-452c-817a-a357faf85929"
 HANS = "2b9d7e1c-4a51-4c0e-9d1f-6f0c3a7e8b42"
@@ -592,19 +593,17 @@ def meta(team, member=HANS, doc=DOC):
 
 def test_the_meta_block_of_a_box_sheaf_carries_the_fork_command_the_sessions_and_box_ask_tell(team, box):
     m = meta(team)
-    assert m["work"] == {"fork": f"uvx --from tiroir==0.1.0 tiroir work {FRONT}/{ADDRESS}", "live": "box", "sessions": [
+    assert m["work"] == {"fork": f"uvx --from {work_mod.FORK_CLIENT} tiroir work {FRONT}/{ADDRESS}", "live": "box", "sessions": [
         {"id": LIVE, "host": "tiroir-tt", "member": "james", "date": "2026-10-28T05:12:03Z"},
         {"id": LAPTOP, "host": "thierry-laptop", "member": "thierry", "date": "2026-10-27T09:00:00Z"},
         {"id": OLDER, "host": "tiroir-tt", "member": "james", "date": "2026-10-26T08:00:00Z"}]}
     assert m["can"] == ["box-ask", "box-tell"]
 
 
-def test_the_fork_command_runs_the_client_from_pypi_at_one_exact_version(team, box):
-    # tt-tiroir#170: a member's laptop has uv and Claude Code, not the client. The version is pinned exactly:
-    # the copied command runs code that handles the member's sign-in, so no newer upload runs unasked.
-    fork = meta(team)["work"]["fork"]
-    assert fork.startswith("uvx --from tiroir==") and fork.endswith(f" tiroir work {FRONT}/{ADDRESS}")
-    assert re.fullmatch(r"uvx --from tiroir==[0-9]+\.[0-9]+\.[0-9]+ tiroir work \S+", fork)
+def test_the_fork_client_is_pinned_to_one_exact_version():
+    # tt-tiroir#170: the copied command runs code that holds the member's sign-in; a range (>=, ~=) or a bare
+    # name would run whatever is uploaded next.
+    assert re.fullmatch(r"tiroir==[0-9]+\.[0-9]+\.[0-9]+", work_mod.FORK_CLIENT)
 
 
 def test_a_member_with_a_shell_gets_the_attach_command_for_the_projects_window(team, box):

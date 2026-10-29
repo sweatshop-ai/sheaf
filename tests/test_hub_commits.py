@@ -333,9 +333,13 @@ def test_a_commit_that_fails_puts_back_what_was_staged_before(box, sheaves):
     assert git(sheaves, "diff", "--cached", "--name-only") == "acme/blog/2026-10-28-plan.md\n"
 
 
-def test_a_write_that_brings_the_document_back_to_head_keeps_what_was_staged(box, sheaves, remote):
-    # Versions the repo ignores make no diff of their own: the write alone decides there is nothing to commit.
-    (sheaves / ".git" / "info" / "exclude").write_text(".sheaf/\n", encoding="utf-8")
+@pytest.mark.parametrize("versions", ["ignored", "in state"])
+def test_a_write_that_brings_the_document_back_to_head_keeps_what_was_staged(box, sheaves, remote, versions):
+    # Versions out of the commit make no diff of their own: the write alone decides there is nothing to commit.
+    if versions == "ignored":
+        (sheaves / ".git" / "info" / "exclude").write_text(".sheaf/\n", encoding="utf-8")
+    else:
+        (sheaves / ".sheaf.toml").write_text('commit = true\npush = true\n', encoding="utf-8")
     f = sheaves / "acme" / "blog" / "2026-10-28-plan.md"
     original = f.read_text(encoding="utf-8")
     f.write_text(original + "\nStaged by hand, never in the work tree again.\n", encoding="utf-8")
@@ -346,6 +350,14 @@ def test_a_write_that_brings_the_document_back_to_head_keeps_what_was_staged(box
     assert len(pushed(box, remote)) == 1
     assert rows("commit-failed") == []
     assert "Staged by hand" in git(sheaves, "show", ":acme/blog/2026-10-28-plan.md")
+
+
+def test_a_write_with_nothing_to_commit_keeps_the_flags_of_the_index(box, sheaves, remote):
+    (sheaves / ".git" / "info" / "exclude").write_text(".sheaf/\n", encoding="utf-8")
+    git(sheaves, "update-index", "--assume-unchanged", "acme/blog/2026-10-28-plan.md")
+    edit(box, sheaves)
+    assert len(pushed(box, remote)) == 1                 # the first commit alone: git add passed the file by
+    assert git(sheaves, "ls-files", "-v", "--", "acme/blog/2026-10-28-plan.md").startswith("h ")
 
 
 def test_a_document_the_repo_ignores_is_never_committed_nor_its_versions(box, sheaves, remote):

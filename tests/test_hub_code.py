@@ -200,7 +200,7 @@ def test_a_code_saves_comments_and_ticks_nothing(team, box):
         assert with_code(team, "POST", path, code_of(team), {"doc": ADDRESS}).status == 404
 
 
-@pytest.mark.parametrize("value", ["", "zz", "a" * 64, hashlib.sha256(b"made up").hexdigest()])
+@pytest.mark.parametrize("value", ["zz", "a" * 64, hashlib.sha256(b"made up").hexdigest()])
 def test_a_hash_the_hub_does_not_hold_gets_the_one_sentence(team, box, value):
     got = with_code(team, "GET", f"/_/session?doc={ADDRESS}", value)
     assert got.status == 401 and got.json()["error"] == NO_GOOD
@@ -395,3 +395,8 @@ def test_the_hub_never_writes_a_code_to_disk(team, box, tmp_path):
                 with open(p, "rb") as fh:
                     data = fh.read()
                 assert code.encode() not in data and hashed(code).encode() not in data, p
+
+
+def test_an_empty_code_header_is_no_code(team, box):
+    got = team.get(f"/_/session?doc={ADDRESS}", member=HANS, headers={"X-Sheaf-Code": ""})
+    assert got.status == 200

@@ -1030,7 +1030,7 @@ A sign-in code lets the laptop client of the fork (`tiroir work`, 10.1 `fork`) c
 
 **What the front cannot say during a code's 10 minutes.** The hub does not ask the front about a code. A member deactivated on the front keeps their live codes until they expire; taking them out of `[proxy.members]` with `sheaf restart` ends them at once.
 
-**Rows** (15) carry the code id, never the code and never its hash: `code-issued` (`by`, `doc`, `code`, `expires`, `via`: `popover` or `cli`), `code-used` (`code`, `route`: `session` or `sessions`) and `code-refused` (`reason`: `unknown`, `expired`, `used`, `order`, `route`, `doc`, `moved`, `listed`, `member`, `two-credentials`; `code` when the hub knows which; `route`). The refusals of unknown codes are one row a minute with a `count`, so a flood of made-up codes cannot grow the log: the first of a minute is written at once, with the count since the last row. `transcript-downloaded` and `session-forked` gain `via: code` and the code id.
+**Rows** (15) carry the code id, never the code and never its hash: `code-issued` (`by`, `doc`, `code`, `expires`, `via`: `popover` or `cli`), `code-used` (`code`, `route`: `session` or `sessions`) and `code-refused` (`reason`: `unknown`, `expired`, `used`, `order`, `route`, `doc`, `moved`, `listed`, `member`, `two-credentials`; `code` when the hub knows which; `route`). The refusals of unknown codes are one row a minute with a `count`, so a flood of made-up codes cannot grow the log: the first of a minute is written at once, with the count since the last row; the count of the last minute before a quiet spell or a restart is not written. `transcript-downloaded` and `session-forked` gain `via: code` and the code id.
 
 ---
 

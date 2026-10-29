@@ -442,7 +442,7 @@ class Handler:
         if not req.path.startswith("/"):
             raise Refuse(400, "bad request target")
         # A sign-in code the verifier let in, judged before the route, the method and the body (9.13).
-        if "x-sheaf-code" in req.headers:
+        if req.headers.get("x-sheaf-code"):            # an empty one is none, as an empty member header
             return self._route_code(req, raw)
         # The member header alone says who asks, before the route and the method (9.3, 9.9).
         if not req.member_id:

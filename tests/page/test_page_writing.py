@@ -4118,7 +4118,14 @@ def test_a_reply_the_hub_took_and_told_of_before_the_page_gave_up_goes_from_the_
     p.clock.fast_forward(30_500)
     toasted(p, TAKEN)
     until(lambda: p.locator("#rd-popover textarea").count() == 0, what="the form to go")
-    until(lambda: p.inner_text("#rd-popover").count(SLOW) == 1, what="the reply in its thread")
+    try:
+        until(lambda: p.inner_text("#rd-popover").count(SLOW) == 1, what="the reply in its thread")
+    except AssertionError as e:
+        # It timed out on CI and passed everywhere else (#46): say what the page held, so the next red names it.
+        shown = p.inner_text("#rd-popover")
+        raise AssertionError(f"{e}: the reply is {shown.count(SLOW)} times in the popover {shown!r}; the file "
+                             f"{'holds' if SLOW in thread.site.file.read_text() else 'lacks'} it; the page keeps "
+                             f"{comment_store(thread)!r}") from None
     assert SLOW not in comment_store(thread)
     assert p.is_visible("#rd-popover button[data-a=reply]"), "the thread's buttons did not come back"
     answer_after_event.release()

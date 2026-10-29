@@ -20,6 +20,7 @@ The record is read as the GitHub App the deployment installs: the hub reads an i
 `token_file` at every poll and never mints one, so the App's key stays where the hub cannot read it.
 """
 import calendar
+import contextlib
 import html
 import itertools
 import json
@@ -358,15 +359,20 @@ class TheList:
                     continue                # above `<client>/<project>`: no sheaf
                 if self.hub.roots.lookup(root.path / found.rel) != root:
                     continue                # a nested root's (8.2): 9.9 keeps it from the list's members
-                # A sheaf is known by its name (9.11), wherever its file is; a name two files hold is none.
-                rel = place.named(self.hub, root, top, found.rel) if placed else found.rel
-                if rel is None:
-                    continue
-                try:
-                    key = _stat_key((root.path / found.rel).stat())     # before the read: a change after it shows
-                    text = (root.path / found.rel).read_text(encoding="utf-8")
-                except (OSError, UnicodeDecodeError):
-                    continue
+                # A sheaf is known by its name (9.11), wherever its file is; a name two files hold is none, and so is
+                # a link. Found and read under its name's lock, as every read: no move comes between.
+                logical = place.logical(found.rel) if placed else None
+                with place.held(self.hub, f"{root.name}/{logical}") if logical else contextlib.nullcontext():
+                    rel = place.named(self.hub, root, top, found.rel) if placed else found.rel
+                    if rel is None:
+                        if placed:
+                            place.tell_link(self.hub, root, top, found.rel)
+                        continue
+                    try:
+                        key = _stat_key((root.path / found.rel).stat())     # before the read: a change after it shows
+                        text = (root.path / found.rel).read_text(encoding="utf-8")
+                    except (OSError, UnicodeDecodeError):
+                        continue
                 read[rel] = key
                 files[rel] = os.path.realpath(root.path / found.rel)
                 try:
@@ -462,7 +468,8 @@ class TheList:
         root = self.root()
         if root is None or a.root != root.name:
             return None
-        with self._gone_lock:
+        # Under the name's lock (9.11), taken before `_gone_lock`: a move's unlink never makes a sheaf look gone.
+        with place.held(self.hub, address), self._gone_lock:
             # Seen gone and numbered in one step, so a poll that begins after this has the larger number.
             if not os.path.lexists(self._file(root, a.rel)):
                 # Kept, the row would judge a sheaf a door create makes at its address before the next poll, and
@@ -532,13 +539,14 @@ class TheList:
         """`row` with the sheaf its file holds now when that file is not the one the poll read (another file
         made at its address, or one a link now points to, or a change), so the page never shows what a sheaf
         that went said; None when it now names another issue, cannot be read, or is no longer `member`'s to
-        see: it may have changed since `visible` judged it."""
-        f = self._file(root, row.sheaf.rel)
+        see: it may have changed since `visible` judged it. Found and read under the name's lock (9.11)."""
         try:
-            key = _stat_key(f.stat())
-            if key == row.read:
-                return row
-            text = f.read_text(encoding="utf-8")
+            with place.held(self.hub, address):
+                f = self._file(root, row.sheaf.rel)
+                key = _stat_key(f.stat())
+                if key == row.read:
+                    return row
+                text = f.read_text(encoding="utf-8")
             sheaf = read_sheaf(row.sheaf.rel, text)
         except Exception:                   # unreadable, or one the reader trips on, as the poll leaves it out
             return None

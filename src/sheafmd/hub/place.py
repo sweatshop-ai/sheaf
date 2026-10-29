@@ -13,9 +13,11 @@ sheafmd.hub.place — where the file of a sheaf of the list's root is (SPEC 9.11
     make_folders(top, rel)           the folder of `rel`, made on the way, walked without following a link
     taken(top, name), holders(top, name)  whether a logical name is held, and by which paths
     held(hub, address)               the lock of the sheaf's name, for every read and write of its file
-    ahead(hub, address, text)        a writer's move of the file to the home of the text it is about to write
+    owns(hub, address)               whether this thread holds that lock (a commit asserts it)
+    ahead(hub, address, old, new)    a writer's move of the file to the home of the text it is about to write;
+                                     `Refused` when it cannot go there, and nothing is written
     folders_lock(top, name)          the lock of the project's private folders
-    refusal(hub, address, text)      why the sheaf could not go home once its file holds `text`
+    tell_link(hub, root, top, rel)   a `link-ignored` row for a listed entry that holds no name
     ignores(top, target)             whether a private home is one the root's repo ignores
     tell_ignored(hub, root, folders) a `private-ignored` row when the root's repo ignores a private home
 
@@ -27,7 +29,9 @@ path glob one owner: the shared stanza reads `<client>/*/*.md`, an owner's `*/*/
 place says whose it is. The hub keys everything of a sheaf (its entry, versions, read state, render settings) by the
 name, and finds the file only when it reads or writes it; a move is a rename of the file and one commit of both
 paths (8.11), and nothing else moves. Every read and every write of a name holds its lock (`held`); a move is move,
-write, render, commit, under it. A path under `private/` is no address: it names no document. The repo of
+write, render, commit, under it, and a write and its commit are one step under it. A name is held only by a regular
+file reached from the root through real folders: a link, or a file under a linked folder, holds none, so one file
+never has two names and two name locks. A path under `private/` is no address: it names no document. The repo of
 such a root must not ignore `private/`: the listing (8.6) would no longer show a sheaf the hub moved there, so a move
 into a folder the repo ignores is refused, and the root is told of once.
 """
@@ -48,6 +52,15 @@ from .roots import Address, NotFound
 PRIVATE = "private"
 NO_SHORT = "it is its owner's alone and no owner of it has a short to name its private folder"
 IGNORED = "the repo ignores the private folder"
+
+
+class Refused(Exception):
+    """A write whose file could not go to the home of the text it was about to write (9.11): nothing is written.
+    `why` says what kept it, as a `place-refused` row would."""
+
+    def __init__(self, why: str):
+        super().__init__(why)
+        self.why = why
 
 
 def _ignored(top: Path, paths: list) -> list:
@@ -126,16 +139,31 @@ def _segment(short: str) -> bool:
     return bool(short) and not short.startswith(".") and "/" not in short
 
 
+def _holds(top: Path, rel: str) -> bool:
+    """Whether the entry at `rel` in the root at the real path `top` can hold a name (9.11): a regular file, reached
+    from the root through real folders. A link, or a file under a linked folder, holds none: a link and its target
+    would be two names, two name locks, of one file and its one file lock."""
+    try:
+        if not stat.S_ISREG(os.lstat(top / rel).st_mode):
+            return False
+    except OSError:
+        return False
+    return os.path.realpath(top / rel) == str(top / rel)
+
+
 def _one(top: Path, name: str):
     """(the path of the one file that holds the name `name`, or `name` when none does; the count of files that
-    hold it). Two entries that are one file (a move between its link and its unlink) count once."""
+    hold it). Two entries that are one file (a move between its link and its unlink) count once; an entry that
+    holds no name (`_holds`) is not counted."""
     rels, seen = [], set()
     for rel in holders(top, name):
         try:
             st = os.lstat(top / rel)
             key = (st.st_dev, st.st_ino)
         except OSError:
-            key = rel
+            continue
+        if not _holds(top, rel):
+            continue
         if key not in seen:
             seen.add(key)
             rels.append(rel)
@@ -150,8 +178,8 @@ def physical(hub, root, rel: str) -> str:
     """The path in `root` of the file the document `rel` names (`Roots` asks it at each lookup): `rel` itself where
     the hub does not place sheaves; for a sheaf's name, the one file that holds it, at its home or at any private
     home. Raises NotFound for any path under a project's `private` folder (or in a project called `private`), at
-    any depth, which is no address, and for a name that two files hold (made by hand: nothing repairs it), which a
-    `place-refused` row names."""
+    any depth, which is no address, for a name that two files hold (made by hand: nothing repairs it), which a
+    `place-refused` row names, and for a name whose entries hold none (a link: `_holds`)."""
     if not applies(hub, root.name):
         return rel
     if names_private(rel):
@@ -159,9 +187,12 @@ def physical(hub, root, rel: str) -> str:
     name = logical(rel)
     if name is None:
         return rel
-    got, n = _one(Path(os.path.realpath(root.path)), name)
+    top = Path(os.path.realpath(root.path))
+    got, n = _one(top, name)
     if n > 1:
         _twice(hub, f"{root.name}/{name}", n)
+        raise NotFound(f"{root.name}/{rel}")
+    if n == 0 and taken(top, name):
         raise NotFound(f"{root.name}/{rel}")
     return got
 
@@ -179,8 +210,8 @@ def file_rel(top: Path, rel: str) -> str:
 def named(hub, root, top: Path, rel: str) -> str | None:
     """The path in the root that the listed file `rel` is shown by, in a root the hub places: its sheaf's name for
     the one file that holds it; None for a file of a name that two files hold, which a `place-refused` row names,
-    for the second entry of a file a move has at both paths, and for any other file under a `private` folder,
-    which no name shows."""
+    for the second entry of a file a move has at both paths, for an entry that holds no name (a link: `_holds`),
+    and for any other file under a `private` folder, which no name shows."""
     name = logical(rel)
     if name is None:
         return None if names_private(rel) else rel
@@ -188,7 +219,19 @@ def named(hub, root, top: Path, rel: str) -> str | None:
     if n > 1:
         _twice(hub, f"{root.name}/{name}", n)
         return None
-    return name if got == rel else None
+    return name if n == 1 and got == rel else None
+
+
+def tell_link(hub, root, top: Path, rel: str):
+    """A `link-ignored` row (15) with the root and the path, and a line on stderr, once per path per hub run, for an
+    entry the listing gave at a sheaf's path that holds no name (a link, or a file under a linked folder: 9.11):
+    the poll says it, never a lookup, so a link someone makes is seen and the hub serves nothing through it."""
+    if logical(rel) is None or _holds(top, rel) or (root.id, rel) in hub.told_link:
+        return
+    hub.told_link.add((root.id, rel))
+    hub.record("link-ignored", None, root=root.name, path=rel)
+    print(f"sheaf: {root.name}/{rel} is a link, or under a linked folder: it holds no sheaf's name and is not served",
+          file=sys.stderr, flush=True)
 
 
 def owner_short(hub, root, address: str, fm: dict) -> str | None:
@@ -230,26 +273,62 @@ def _refused(hub, address: str, why: str):
         hub.record("place-refused", address, why=why)
 
 
-def _name_lock(top: Path, name: str) -> threading.RLock:
-    """The lock of the logical name `name` in the root at the real path `top`. Every writer of a name's file in the
-    hub's process holds it: a door create, a write (the file is found again under it), a move, the tidying after
-    it; and every reader, from finding the file to the text read or rendered."""
+@contextmanager
+def _locked(key: tuple):
+    """Hold the lock of `key` (re-entrant), counted in this thread's `_OWNED`. The lock lives in `_LOCKS` only while
+    a thread holds it or waits on it: a name nobody holds costs nothing, however many names are asked for."""
     with _LOCKS_GUARD:
-        return _LOCKS.setdefault((str(top), name), threading.RLock())
+        got = _LOCKS.setdefault(key, [threading.RLock(), 0])
+        got[1] += 1
+    try:
+        with got[0]:
+            owned = _owned()
+            owned[key] = owned.get(key, 0) + 1
+            try:
+                yield
+            finally:
+                owned[key] -= 1
+                if not owned[key]:
+                    del owned[key]
+    finally:
+        with _LOCKS_GUARD:
+            got[1] -= 1
+            if not got[1]:
+                del _LOCKS[key]
 
 
-def folders_lock(top: Path, name: str) -> threading.RLock:
+def _owned() -> dict:
+    if not hasattr(_THREAD, "owned"):
+        _THREAD.owned = {}
+    return _THREAD.owned
+
+
+def _name_lock(top: Path, name: str):
+    """The lock of the logical name `name` in the root at the real path `top`. Every writer of a name's file in the
+    hub's process holds it: a door create, a write (the file is found again under it) and its commit, a move, the
+    tidying after it; and every reader, from finding the file to the text read or rendered."""
+    return _locked((str(top), name))
+
+
+def folders_lock(top: Path, name: str):
     """The lock of the private folders of the project of the logical name `name` in the root at `top`: held from
     making a `private/<short>` to the file linked into it, and while a move out takes away what it left empty, so
     the one never takes a folder from under the other, whatever names they write. Taken after the name's lock,
     before a file lock."""
     client, project, _ = name.split("/")
-    with _LOCKS_GUARD:
-        return _LOCKS.setdefault((str(top), f"{client}/{project}/{PRIVATE}/"), threading.RLock())
+    return _locked((str(top), f"{client}/{project}/{PRIVATE}/"))
 
 
 _LOCKS_GUARD = threading.Lock()
-_LOCKS: dict = {}
+_LOCKS: dict = {}                       # key -> [its RLock, the threads that hold it or wait on it]
+_THREAD = threading.local()
+
+
+def owns(hub, address: str) -> bool:
+    """Whether this thread holds the lock of the sheaf's name `address`; True where the hub does not place it. A
+    commit asserts it (`Hub.committed`): nothing commits a sheaf's file without holding its name (9.11)."""
+    got = _where(hub, address)
+    return got is None or (str(got[1]), got[2]) in _owned()
 
 
 @contextmanager
@@ -280,30 +359,15 @@ def _where(hub, address: str):
     return root, Path(os.path.realpath(root.path)), at.rel
 
 
-def refusal(hub, address: str, text: str) -> str | None:
-    """Why the file of the sheaf named `address` could not go to its home once it holds `text`, None when it could
-    or the hub does not place it: a writer asks before it writes, under `held`, so a write that would leave the
-    file where it may not stay is refused instead (9.11)."""
-    got = _where(hub, address)
-    if got is None:
-        return None
-    root, top, name = got
-    target = home(hub, root, name, text)
-    if target is None:
-        return NO_SHORT
-    if target != file_rel(top, name) and os.path.lexists(top / target):
-        return f"{target} is taken"
-    if target != file_rel(top, name) and ignores(top, target):
-        return IGNORED
-    return None
-
-
-def ahead(hub, address: str, text: str) -> str | None:
-    """A writer that is about to write `text` over the file of the sheaf named `address`, holding the name's lock
-    and the file's lock, moves the file to the home of `text` first (9.11), so the new text is written, and
-    rendered, in the folder it says: a reader never meets a visibility with the folder of the other. Returns the
-    path in the root the file left, None when it stays (home already, a refused move, a name the hub does not
-    place); the writer then finds the file again and writes it there, and commits the write and the move as one."""
+def ahead(hub, address: str, old: str, new: str) -> str | None:
+    """A writer that is about to write `new` over `old`, the text of the file of the sheaf named `address`, holding
+    the name's lock and the file's lock, moves the file to the home of `new` first (9.11), so the new text is
+    written, and rendered, in the folder it says: a reader never meets a visibility with the folder of the other.
+    Returns the path in the root the file left, None when it stays (home already, a name the hub does not place);
+    the writer then finds the file again and writes it there, and commits the write and the move as one. The one
+    judge of whether the write may go: a file at the home of `old` that cannot go to the home of `new`, for any
+    reason (no owner with a short, the home taken or ignored, a folder or a link that cannot be made), raises
+    `Refused`, and the writer writes nothing; a file that was not at the home of `old` is written as before."""
     got = _where(hub, address)
     if got is None:
         return None
@@ -312,7 +376,8 @@ def ahead(hub, address: str, text: str) -> str | None:
         rel, n = _one(top, name)
         if n != 1:
             return None
-        gone = _move(hub, root, top, rel, name, address, text=text)
+        strict = home(hub, root, name, old) == rel
+        gone = _move(hub, root, top, rel, name, address, text=new, strict=strict)
         if gone is not None:
             _tidy(top, gone)
     return gone
@@ -353,14 +418,21 @@ def place(hub, address: str, member=None, by: str | None = None, commit: bool = 
     return gone
 
 
-def _move(hub, root, top: Path, rel: str, name: str, address: str, text: str | None = None) -> str | None:
+def _move(hub, root, top: Path, rel: str, name: str, address: str, text: str | None = None,
+          strict: bool = False) -> str | None:
     """Link the file at `rel` into the home of its text, or of `text` when given (`ahead`, whose caller holds the
-    file's lock already), then unlink it at `rel`: the path it left, or None."""
+    file's lock already), then unlink it at `rel`: the path it left, or None. A move that cannot be made is a
+    `place-refused` row, or with `strict` (`ahead`) raises `Refused`."""
+    def refused(why: str):
+        if strict:
+            raise Refused(why)
+        _refused(hub, address, why)
+        return None
     with (contextlib.nullcontext() if text is not None else file_lock(top / rel)):
         try:
             sfd, sname = _folder_of(top, rel)
-        except OSError:
-            return None
+        except OSError as e:
+            return refused(f"its folder could not be opened ({e.strerror})") if strict else None
         try:
             try:
                 st = os.stat(sname, dir_fd=sfd, follow_symlinks=False)
@@ -374,26 +446,21 @@ def _move(hub, root, top: Path, rel: str, name: str, address: str, text: str | N
                 return None             # gone, or not a text the hub reads: nothing to judge it on
             target = home(hub, root, name, text)
             if target is None:
-                _refused(hub, address, NO_SHORT)
-                return None
+                return refused(NO_SHORT)
             if target == rel:
                 return None
             if ignores(top, target):
-                _refused(hub, address, IGNORED)
-                return None
+                return refused(IGNORED)
             try:
                 dfd, dname = make_folders(top, target)
             except OSError as e:
-                _refused(hub, address, f"its folder could not be made ({e.strerror})")
-                return None
+                return refused(f"its folder could not be made ({e.strerror})")
             try:
                 os.link(sname, dname, src_dir_fd=sfd, dst_dir_fd=dfd, follow_symlinks=False)
             except FileExistsError:
-                _refused(hub, address, f"{target} is taken")
-                return None
+                return refused(f"{target} is taken")
             except OSError as e:
-                _refused(hub, address, f"it could not be moved ({e.strerror})")
-                return None
+                return refused(f"it could not be moved ({e.strerror})")
             finally:
                 os.close(dfd)
             os.unlink(sname, dir_fd=sfd)

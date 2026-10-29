@@ -23,7 +23,7 @@ member owns it, else the first owner, in the config's order, that has one). The 
 path glob one owner: the shared stanza reads `<client>/*/*.md`, an owner's `*/*/private/<short>/**/*.md`, so a file's
 place says whose it is. The hub keys everything of a sheaf (its entry, versions, read state, render settings) by the
 name, and finds the file only when it reads or writes it; a move is a rename of the file and one commit of both
-paths (8.11), and nothing else moves. The private path is no address: it names no document.
+paths (8.11), and nothing else moves. A path under `private/` is no address: it names no document.
 """
 import os
 import stat
@@ -93,13 +93,16 @@ def _twice(hub, address: str, n: int):
 def physical(hub, root, rel: str) -> str:
     """The path in `root` of the file the document `rel` names (`Roots` asks it at each lookup): `rel` itself where
     the hub does not place sheaves; for a sheaf's name, the one file that holds it, at its home or at any private
-    home. Raises NotFound for a private path, which is no address, and for a name that two files hold (made by
-    hand: nothing repairs it), which a `place-refused` row names."""
-    name = logical(rel)
-    if name is None or not applies(hub, root.name):
+    home. Raises NotFound for any path under a project's `private` folder (or in a project called `private`), at
+    any depth, which is no address, and for a name that two files hold (made by hand: nothing repairs it), which a
+    `place-refused` row names."""
+    if not applies(hub, root.name):
         return rel
-    if name != rel:
+    if names_private(rel):
         raise NotFound(f"{root.name}/{rel}")
+    name = logical(rel)
+    if name is None:
+        return rel
     got, n = _one(Path(os.path.realpath(root.path)), name)
     if n > 1:
         _twice(hub, f"{root.name}/{name}", n)
@@ -120,10 +123,11 @@ def file_rel(top: Path, rel: str) -> str:
 def named(hub, root, top: Path, rel: str) -> str | None:
     """The path in the root that the listed file `rel` is shown by, in a root the hub places: its sheaf's name for
     the one file that holds it; None for a file of a name that two files hold, which a `place-refused` row names,
-    and for the second entry of a file a move has at both paths."""
+    for the second entry of a file a move has at both paths, and for any other file under a `private` folder,
+    which no name shows."""
     name = logical(rel)
     if name is None:
-        return rel
+        return None if names_private(rel) else rel
     got, n = _one(top, name)
     if n > 1:
         _twice(hub, f"{root.name}/{name}", n)

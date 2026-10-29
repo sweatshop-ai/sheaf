@@ -34,6 +34,10 @@ _ITEM_RE = re.compile(r"\{id: (" + UUID_RE.pattern + r"), host: ([A-Za-z0-9._-]{
 _KEY_LINE_RE = re.compile(r"sessions:(.*)")
 _LIST_ITEM_RE = re.compile(r"(\s*-\s+)(.*?)\s*")
 TEXT_MAX = 3000                 # characters of a comment's text dropped for James's window (Zara's contract)
+# The laptop client of the fork (github.com/tiroir/tiroir-client), run from PyPI by uv: a member needs uv and
+# Claude Code, nothing installed. One exact version: the copied command runs code that holds the member's sign-in,
+# so a newer upload runs only when this line changes (tt-tiroir#170).
+FORK_CLIENT = "tiroir==0.1.0"
 
 
 class NotRewritten(ValueError):

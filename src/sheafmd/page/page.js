@@ -497,7 +497,7 @@
     // The fork fetches the live session's transcript; the hub leaves `fork` out unless the live session runs on
     // the box and it keeps a copy of the box's transcripts (`sessions_dir`).
     if (w.fork) h += '<h4>Fork to your machine</h4>' + cmdRow(w.fork) +
-                     '<p>Runs on your laptop: fetches the session through this hub, forks it under your name.</p>';
+                     '<p>Runs on your laptop: fetches the session through this hub, forks it under your name. Needs uv there.</p>';
     // A live session on a laptop is continued there: the hub holds no copy of it, and offers no fork of an older one.
     var live = liveSession(), none = w.live === 'laptop'
       ? 'The live session runs on ' + upper(live.member) + '’s machine, ' + live.host + ': open it there. This hub keeps no copy of it to fork.'

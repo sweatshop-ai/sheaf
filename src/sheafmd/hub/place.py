@@ -455,13 +455,14 @@ def _move(hub, root, top: Path, rel: str, name: str, address: str, text: str | N
     """Link the file at `rel` into the home of its text, or of `text` when given (`ahead`), then unlink it at `rel`:
     the path it left, or None. The caller holds the name's lock, the file's and then the folders'. A move that
     cannot be made is a `place-refused` row, or with `strict` (`ahead`) raises `Refused`. An owner-only one goes to
-    quarantine instead when it is at the project's path (#61) or in an owner's private folder that is not its home
-    (#66): either way a Library glob would file it for someone it is not for."""
+    quarantine instead when it is at the project's path (#61) or in the private folder of a member who no longer owns
+    it (#66): either way a Library glob would file it for someone it is not for. One in a folder of an owner it
+    still has waits there."""
     def refused(why: str, target: str | None = None):
         if strict:
             raise Refused(why)
         gone = None
-        if target != name and not quarantined(rel):     # an owner-only file away from home and not in quarantine
+        if target != name and not quarantined(rel) and (rel == name or not _an_owners(hub, root, address, rel, text)):
             gone = _to_quarantine(top, sfd, sname, rel, name)
             _refused(hub, address, why, gone is not None, tried=True)
         else:
@@ -505,6 +506,14 @@ def _move(hub, root, top: Path, rel: str, name: str, address: str, text: str | N
     finally:
         os.close(sfd)
     return rel
+
+
+def _an_owners(hub, root, address: str, rel: str, text: str) -> bool:
+    """Whether `rel`, a file in a `private/<short>/`, is in the folder of one of the owners of the sheaf at `address`
+    whose text is `text`: that owner's Library glob files it for someone it is for."""
+    fm = visibility.front_matter(text)
+    members = [m for m in hub.proxy.members.values() if hub.owns(m, root)]
+    return rel.split("/")[3] in {m.short for m in visibility.owner_of(fm, members, hub.assignees(address, fm))}
 
 
 def _to_quarantine(top: Path, sfd: int, sname: str, rel: str, name: str) -> str | None:

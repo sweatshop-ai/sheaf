@@ -517,6 +517,24 @@ def test_an_owner_only_sheaf_that_loses_every_owner_with_a_short_leaves_its_old_
     assert [r["doc"] for r in rows] == [f"work/{SHARED}"] and rows[0]["quarantined"] is True, rows
 
 
+def test_a_sheaf_in_the_folder_of_an_owner_it_still_has_stays_when_its_new_home_cannot_be_made(team, work,
+                                                                                               monkeypatch):
+    """Its folder's owner's Library glob files it for one of its owners, so it is not quarantined (#66): it waits
+    there for its home, as before."""
+    hans = PRIVATE.replace("owner: thierry", "owner: hans")
+    put(team, work, SHARED, hans)
+    team.hub.the_list.poll()
+    at_hans = f"thinkingtoo/tiroir/private/hans/{NAME}"
+    assert (work / at_hans).exists()
+    # Owned by both now, and its front matter names neither: its home is the first in the config's order, thierry's.
+    monkeypatch.setattr(team.hub, "assignees", lambda address, fm: ["hanshermans", "tiroir"])
+    (work / at_hans).write_text(NOBODY, encoding="utf-8")
+    (work / "thinkingtoo/tiroir/private/thierry").write_text("", encoding="utf-8")       # no folder can be made
+    team.hub.the_list.poll()
+    assert (work / at_hans).read_text(encoding="utf-8") == NOBODY and not (work / QUARANTINE).exists()
+    assert [r.get("quarantined") for r in hub_rows("place-refused")] == [None]
+
+
 def test_a_sheaf_already_in_quarantine_that_still_has_no_home_stays_there(team, work):
     put(team, work, SHARED, NOBODY)
     team.hub.the_list.poll()

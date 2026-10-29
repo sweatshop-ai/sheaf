@@ -430,11 +430,11 @@ class Door:
                 else:
                     update_file(self.hub.roots.document(address),
                                 lambda t: rdc.apply_op(guard(t) or t, op, fields, caller.display, now(), role))
+                self.hub.committed(address, by=caller.display, what="comment")     # under the lock, as every write's
         except rdc.AnchorError as e:
             raise ToolError(f"{e}.") from None
         except (OSError, UnicodeDecodeError, NotFound):
             raise ToolError(f"{address} could not be written.") from None
-        self.hub.committed(address, by=caller.display, what="comment")
 
     # ── the tools ────────────────────────────────────────────────────────────
     def _open_in(self, path: Path) -> tuple:
@@ -650,8 +650,8 @@ class Door:
         # move, that comes meanwhile waits, and then finds the name taken.
         with place.held(self.hub, address):
             text = self._make(root, top, rel, name, address, text, caller)
-        self.hub.wrote(address)
-        self.hub.committed(address, by=caller.display, what="create")
+            self.hub.wrote(address)
+            self.hub.committed(address, by=caller.display, what="create")
         return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text)}
 
     def _make(self, root, top: Path, rel: str, name: str | None, address: str, text: str, caller: Caller):
@@ -700,12 +700,12 @@ class Door:
             raise ToolError("expected_hash is not a hash that `read` or `create` gave (16 hex digits).",
                             "hash")
         self._check_size(text)
-        # The name's lock (9.11) from finding the file to its move: the write and the move are one operation and one
-        # commit, and no poll moves the file in between.
+        # The name's lock (9.11) from finding the file to the commit: move, write, render, commit, one operation, so
+        # no poll moves the file in between and no other writer's commit takes this write.
         with place.held(self.hub, address):
             before, text, gone = self._updated(address, args, text, expected, caller)
-        if before != text or gone:          # a text that changed nothing may still have moved the file
-            self.hub.committed(address, by=caller.display, what="update", gone=gone)
+            if before != text or gone:          # a text that changed nothing may still have moved the file
+                self.hub.committed(address, by=caller.display, what="update", gone=gone)
         return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text), "changed": before != text}
 
     def _updated(self, address: str, args: dict, text: str, expected: str, caller: Caller):

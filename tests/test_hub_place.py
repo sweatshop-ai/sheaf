@@ -835,6 +835,36 @@ def test_a_door_read_during_a_move_finds_the_file(team, work, browser, tokens, m
     assert got["text"].startswith("---") and (work / HOME).exists() and not (work / SHARED).exists()
 
 
+def test_two_writers_of_one_name_each_commit_their_own_write(hub, browser, tmp_path, monkeypatch):
+    """Codex P1: the commit ran after the name's lock was let go, so a second writer could write and commit first,
+    its commit taking the first one's text under its own author. The commit is made under the lock."""
+    box, repo = committing(hub, browser, tmp_path, at=HOME)
+    blocks = split_md_blocks(PRIVATE)
+    i = next(i for i, b in enumerate(blocks) if "A quote" in b.content)
+    h = next(i for i, b in enumerate(blocks) if "What the contract says" in b.content)
+    real, threads, answers = hub.commits.saved, [], []
+
+    def second(*a, **kw):
+        monkeypatch.setattr(hub.commits, "saved", real)
+        t = threading.Thread(target=lambda: answers.append(browser.post(
+            "/_/save", {"doc": f"sheaves/{SHARED}", "hash": md_hash(PRIVATE),
+                        "edits": [{"i": h, "html": "<h1>What the contract says, edited</h1>"}]})))
+        t.start()
+        t.join(1)
+        threads.append(t)
+        return real(*a, **kw)
+    monkeypatch.setattr(hub.commits, "saved", second)
+    got = box.post("/_/save", {"doc": f"sheaves/{SHARED}", "hash": md_hash(PRIVATE),
+                               "edits": [{"i": i, "html": "<p>A quote, edited.</p>"}]}, member=THIERRY)
+    threads[0].join(10)
+    assert got.status == 200 and answers[0].status == 200, (got.text, answers[0].text)
+    log = git(repo, "log", "--format=%an|%s").splitlines()
+    assert log == [f"{hub.person}|edit: {HOME}", f"Thierry|edit: {HOME}", "the box|first"], log
+    first = git(repo, "show", f"HEAD~1:{HOME}")
+    assert "A quote, edited." in first and "says, edited" not in first
+    assert "says, edited" in git(repo, "show", f"HEAD:{HOME}")
+
+
 def test_a_door_create_of_an_owner_only_sheaf_in_a_root_that_ignores_private_is_refused(hub, browser, tmp_path):
     """An owner-only create picks the private home; in a root whose repo ignores it the file would be made
     untracked. Refused as the move is, and nothing is written."""

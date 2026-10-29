@@ -481,7 +481,8 @@ def test_ask_and_tell_on_a_box_sheaf_write_the_comment_and_drop_it_for_james(tea
     f, = drops(box)
     assert f.name.startswith("thinkingtoo--tiroir-20") and f.name.endswith("Z")
     assert json.loads(f.read_bytes()) == {"project": "thinkingtoo/tiroir", "member": "hans", "sheaf": ADDRESS,
-                                          "text": "Can you send the draft to Joey?", "kind": kind}
+                                          "text": "Can you send the draft to Joey?", "kind": kind,
+                                          "thread": got.json()["id"]}
     assert list(f.read_bytes().decode()) == list(json.dumps(json.loads(f.read_bytes())))
     row, = hub_rows("tell-dropped")
     assert (row["what"], row["project"], row["by"], row["drop"]) == (kind, "thinkingtoo/tiroir", "hans", "written")
@@ -858,16 +859,23 @@ def at_work(team, box):
     return box
 
 
-@pytest.mark.parametrize("kind", ["ask", "tell"])
-def test_a_tell_records_james_newest_session_of_the_project_as_the_live_one(team, at_work, work, kind):
-    james_wrote(at_work, NEW)
-    got = comment(team, work, kind)
-    assert got.status == 200, got.text
+@pytest.mark.parametrize("tool", ["reply", "update"])
+def test_james_s_door_write_records_his_session_as_the_live_one_and_keeps_the_others(team, browser, work, james_writes,
+                                                                                    tool):
+    cid = a_thread(team, work)
+    james_wrote({"sessions": team.hub.the_list.cfg.sessions_dir}, NEW)
+    if tool == "reply":
+        got = james_door(browser, james_writes, "reply", session=NEW, doc=ADDRESS, id=cid, text="Sent.")
+    else:
+        read = json.loads(james_door(browser, james_writes, "read", doc=ADDRESS)[1])
+        got = james_door(browser, james_writes, "update", session=NEW, doc=ADDRESS, text=read["text"] + "\nMore.\n",
+                         expected_hash=read["hash"])
+    assert not got[0], got[1]
     first = sessions_of(work)[0]
     assert first.startswith(f"{{id: {NEW}, host: tiroir-tt, member: james, date: 20") and first.endswith("Z}")
     assert [s for s in sessions_of(work) if LIVE in s]          # the others stay, as written
     row, = hub_rows("session-recorded")
-    assert (row["transcript"], row["by"]) == (NEW, "hans")
+    assert (row["transcript"], row["by"]) == (NEW, "james")
     assert download(team).headers["X-Sheaf-Session"] == NEW
 
 
@@ -896,13 +904,15 @@ def test_when_the_live_session_is_still_the_newest_the_file_keeps_its_front_matt
     assert hub_rows("session-recorded") == []
 
 
-def test_a_sheaf_of_james_with_no_session_yet_takes_ask_and_tell_and_records_his(team, at_work, work):
+def test_a_sheaf_of_james_with_no_session_yet_takes_ask_and_tell_and_records_his_when_he_writes(team, browser, work,
+                                                                                              james_writes):
     put(team, work, DOC, SHEAF.split("sessions:\n")[0] + "---\n# T\n\nA quote from the contract.\n")
     assert meta(team)["can"] == ["box-ask", "box-tell"]
-    assert comment(team, work, "tell").status == 200 and len(drops(at_work)) == 1
-    assert sessions_of(work) == []                              # James has not opened the project yet
-    james_wrote(at_work, NEW)
-    assert comment(team, work, "tell").status == 200
+    cid = a_thread(team, work)
+    assert len(drops({"tell": team.hub.the_list.cfg.tell_dir})) == 1
+    assert sessions_of(work) == []                              # James has not answered yet
+    james_wrote({"sessions": team.hub.the_list.cfg.sessions_dir}, NEW)
+    assert not james_door(browser, james_writes, "reply", session=NEW, doc=ADDRESS, id=cid, text="Sent.")[0]
     assert NEW in sessions_of(work)[0]
 
 
@@ -924,24 +934,22 @@ def test_a_work_dir_that_is_not_absolute_stops_the_start(tmp_path):
     assert str(listing(tmp_path, work_dir="/home/james/work/").work_dir) == "/home/james/work"
 
 
-def test_the_recorded_session_is_committed_with_the_member_who_sent_the_tell(committing, tmp_path):
-    from sheafmd.blocks import split_md_blocks
-    from sheafmd.source import md_hash
+def test_the_recorded_session_is_committed_as_james_s_door_token(committing, browser, tmp_path, james_token):
     repo, team = committing
     sessions, tell = tmp_path / "copy", tmp_path / "tell"
     tell.mkdir()
     cfg = team.hub.the_list.cfg
     team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{
-        **cfg.__dict__, "sessions_dir": sessions, "tell_dir": tell, "work_dir": the_list.Path("/home/james/work")}))
+        **cfg.__dict__, "sessions_dir": sessions, "tell_dir": tell, "work_dir": the_list.Path("/home/james/work"),
+        "james_token": "james"}))
     james_wrote({"sessions": sessions}, NEW)
-    text = (repo / DOC).read_text(encoding="utf-8")
-    i = next(i for i, b in enumerate(split_md_blocks(text)) if b.content.startswith("A quote"))
-    got = team.post("/_/comment", {"doc": f"sheaves/{DOC}", "op": "add", "hash": md_hash(text), "block": i,
-                                   "start": 0, "end": 6, "quote": "A quote", "body": "Go on", "tell": True}, member=HANS)
-    assert got.status == 200, got.text
+    read = json.loads(james_door(browser, james_token, "read", doc=f"sheaves/{DOC}")[1])
+    got = james_door(browser, james_token, "update", session=NEW, doc=f"sheaves/{DOC}",
+                     text=read["text"] + "\nMore.\n", expected_hash=read["hash"])
+    assert not got[0], got[1]
     team.hub.commits.settle()
     log = git(repo, "log", "--format=%an|%s").splitlines()
-    assert f"Hans|session: {DOC}" in log, log
+    assert any(line.endswith(f"|session: {DOC}") and not line.startswith("Hans|") for line in log), log
     assert f"{{id: {NEW}, host: tiroir-tt, member: james, " in git(repo, "show", f"HEAD:{DOC}")
 
 
@@ -961,34 +969,29 @@ def test_a_fork_that_lands_after_the_gate_keeps_the_tell_from_james(team, box, w
     assert (work / DOC).read_text(encoding="utf-8") == before and drops(box) == []
 
 
-def test_a_fork_that_lands_while_the_hub_looks_for_james_session_stays_live(team, at_work, work, monkeypatch):
+def test_a_fork_that_lands_while_the_hub_looks_for_james_session_stays_live(team, browser, work, james_writes,
+                                                                          monkeypatch):
     from sheafmd.hub import work as work_mod
-    james_wrote(at_work, NEW)
-    found = work_mod.james_newest
+    cid = a_thread(team, work)
+    james_wrote({"sessions": team.hub.the_list.cfg.sessions_dir}, NEW)
+    found = work_mod.james_has
 
-    def a_fork_lands_meanwhile(cfg, project):
+    def a_fork_lands_meanwhile(cfg, project, id):
         (work / DOC).write_text(ON_A_LAPTOP, encoding="utf-8")
-        return found(cfg, project)
-    monkeypatch.setattr(work_mod, "james_newest", a_fork_lands_meanwhile)
-    assert comment(team, work, "tell").status == 200
+        return found(cfg, project, id)
+    monkeypatch.setattr(work_mod, "james_has", a_fork_lands_meanwhile)
+    assert not james_door(browser, james_writes, "reply", session=NEW, doc=ADDRESS, id=cid, text="Sent.")[0]
     assert "thierry-laptop" in sessions_of(work)[0] and not [s for s in sessions_of(work) if NEW in s]
     assert hub_rows("session-recorded") == []
 
 
-def test_a_sheaf_closed_while_the_hub_looks_for_james_session_records_none(team, at_work, work, monkeypatch):
-    # The comment's guard read the sheaf open to Hans; a door write closed it before the session's write.
-    from sheafmd.hub import work as work_mod
-    james_wrote(at_work, NEW)
-    found = work_mod.james_newest
-    closed = SHEAF.replace("sources: [issue:thinkingtoo/tt-tiroir#8]", "sources: [library:doc-1]")
-
-    def a_door_write_closes_it_meanwhile(cfg, project):
-        (work / DOC).write_text(closed, encoding="utf-8")
-        return found(cfg, project)
-    monkeypatch.setattr(work_mod, "james_newest", a_door_write_closes_it_meanwhile)
-    assert comment(team, work, "tell").status == 200
-    assert (work / DOC).read_text(encoding="utf-8") == closed
-    assert hub_rows("session-recorded") == []
+def test_james_s_write_on_a_sheaf_of_another_assistant_records_none(team, browser, work, james_writes):
+    put(team, work, DOC, SHEAF.replace("assistant: James", "assistant: Mistral"))
+    james_wrote({"sessions": team.hub.the_list.cfg.sessions_dir}, NEW)
+    read = json.loads(james_door(browser, james_writes, "read", doc=ADDRESS)[1])
+    assert not james_door(browser, james_writes, "update", session=NEW, doc=ADDRESS, text=read["text"] + "\nMore.\n",
+                          expected_hash=read["hash"])[0]
+    assert LIVE in sessions_of(work)[0] and hub_rows("session-recorded") == []
 
 
 def test_an_empty_list_keeps_the_comment_on_its_key_line():
@@ -1086,13 +1089,15 @@ def test_the_hub_persons_share_on_the_loopback_port_is_written(team, box, browse
 
 # ── the fork without sessions_dir, work_dir "/" (9.12) ─────────────────────
 
-def test_with_work_dir_the_filesystem_root_a_tell_records_james_session(team, box, work, tmp_path):
+def test_with_work_dir_the_filesystem_root_james_s_write_records_his_session(team, box, browser, work, tmp_path,
+                                                                            james_token):
     # `work_dir = "/"` is accepted; James then works in /<client>/<project>, never //<client>/<project>.
     cfg = listing(tmp_path, work_dir="/")
     team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{
-        **team.hub.the_list.cfg.__dict__, "work_dir": cfg.work_dir}))
+        **team.hub.the_list.cfg.__dict__, "work_dir": cfg.work_dir, "james_token": "james"}))
     james_wrote(box, NEW, cwd="/thinkingtoo/tiroir", folder="-thinkingtoo-tiroir")
-    assert comment(team, work, "tell").status == 200
+    cid = a_thread(team, work)
+    assert not james_door(browser, james_token, "reply", session=NEW, doc=ADDRESS, id=cid, text="Sent.")[0]
     assert NEW in sessions_of(work)[0]
     row, = hub_rows("session-recorded")
     assert row["transcript"] == NEW
@@ -1104,3 +1109,170 @@ def test_without_sessions_dir_a_box_sheaf_offers_no_fork(team, box):
     team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{**cfg.__dict__, "sessions_dir": None}))
     w = meta(team)["work"]
     assert "fork" not in w and w["live"] == "box"
+
+
+# ── the hub records James's session from his own door write (sweatshop-ai/sheaf#57) ─────────
+# The door's `X-James-Session` names the session of the claude that writes, from its headersHelper; the hub takes it
+# from `[list]`'s `james_token` alone, and only an id whose transcript is James's in that project's folder of the copy.
+
+
+@pytest.fixture
+def james_writes(team, at_work, james_token):
+    """`[list]` names the token James's door writes with."""
+    cfg = team.hub.the_list.cfg
+    team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{**cfg.__dict__, "james_token": "james"}))
+    return james_token
+
+
+def james_door(browser, token, tool, session=None, **args):
+    """(is_error, text) of one door call, with the session header when `session` is given."""
+    from helpers import door as post, rpc
+    headers = {"X-James-Session": session} if session is not None else {}
+    res = post(browser, rpc("tools/call", {"name": tool, "arguments": args}), token=token, as_name=None,
+               headers=headers)
+    assert res.status == 200, res.text
+    out = res.json()["result"]
+    return out["isError"], out["content"][0]["text"]
+
+
+def a_thread(team, work):
+    got = comment(team, work, "tell")
+    assert got.status == 200, got.text
+    return got.json()["id"]
+
+
+def test_james_s_door_reply_records_the_session_it_names_as_the_live_one(team, browser, work, james_writes):
+    cid = a_thread(team, work)
+    james_wrote({"sessions": team.hub.the_list.cfg.sessions_dir}, NEW)
+    is_error, said = james_door(browser, james_writes, "reply", session=NEW, doc=ADDRESS, id=cid, text="Sent.")
+    assert not is_error, said
+    first = sessions_of(work)[0]
+    assert first.startswith(f"{{id: {NEW}, host: tiroir-tt, member: james, date: 20")
+    row, = hub_rows("session-recorded")
+    assert row["transcript"] == NEW
+
+
+def test_a_tell_drop_no_longer_records_a_session(team, at_work, work):
+    # the hub guessed at the drop, before James acted (tt-tiroir #136): only his own write names it now
+    james_wrote(at_work, NEW)
+    assert comment(team, work, "tell").status == 200
+    assert LIVE in sessions_of(work)[0] and not [s for s in sessions_of(work) if NEW in s]
+    assert hub_rows("session-recorded") == []
+
+
+def test_a_door_write_without_the_header_records_nothing(team, browser, work, james_writes):
+    cid = a_thread(team, work)
+    james_wrote({"sessions": team.hub.the_list.cfg.sessions_dir}, NEW)
+    assert not james_door(browser, james_writes, "reply", doc=ADDRESS, id=cid, text="Sent.")[0]
+    assert LIVE in sessions_of(work)[0]
+
+
+def test_the_header_of_another_token_is_not_read(team, browser, work, james_writes):
+    from sheafmd.hub.state import Tokens
+    other = Tokens().add("mistral", write=True)
+    cid = a_thread(team, work)
+    james_wrote({"sessions": team.hub.the_list.cfg.sessions_dir}, NEW)
+    assert not james_door(browser, other, "reply", session=NEW, doc=ADDRESS, id=cid, text="Sent.")[0]
+    assert LIVE in sessions_of(work)[0]
+
+
+@pytest.mark.parametrize("session", ["not-a-uuid", "ABCDEF01-2345-4678-89AB-CDEF01234567", ""])
+def test_a_header_that_is_no_session_id_records_nothing_and_the_write_stands(team, browser, work, james_writes,
+                                                                             session):
+    cid = a_thread(team, work)
+    is_error, said = james_door(browser, james_writes, "reply", session=session, doc=ADDRESS, id=cid, text="Sent.")
+    assert not is_error, said
+    assert LIVE in sessions_of(work)[0] and hub_rows("session-recorded") == []
+
+
+def test_an_id_that_is_no_transcript_of_the_project_is_not_recorded_and_says_why(team, browser, work, james_writes):
+    cid = a_thread(team, work)
+    james_wrote({"sessions": team.hub.the_list.cfg.sessions_dir}, NEW, cwd="/home/james/work/thinkingtoo-tiroir")
+    assert not james_door(browser, james_writes, "reply", session=NEW, doc=ADDRESS, id=cid, text="Sent.")[0]
+    assert LIVE in sessions_of(work)[0]
+    row, = hub_rows("session-not-recorded")
+    assert row["transcript"] == NEW
+
+
+def test_a_member_s_fork_stays_live_after_james_writes(team, browser, work, james_writes):
+    cid = a_thread(team, work)
+    assert fork(team).status == 200
+    james_wrote({"sessions": team.hub.the_list.cfg.sessions_dir}, NEW)
+    assert not james_door(browser, james_writes, "reply", session=NEW, doc=ADDRESS, id=cid, text="Sent.")[0]
+    assert FORK in sessions_of(work)[0]
+
+
+def test_an_id_the_copy_does_not_hold_yet_is_recorded_at_james_s_next_door_call(team, browser, work, james_writes):
+    # his transcript reaches the copy about a minute after he writes
+    cid = a_thread(team, work)
+    assert not james_door(browser, james_writes, "reply", session=NEW, doc=ADDRESS, id=cid, text="Sent.")[0]
+    assert LIVE in sessions_of(work)[0]
+    james_wrote({"sessions": team.hub.the_list.cfg.sessions_dir}, NEW)
+    assert not james_door(browser, james_writes, "read", session=NEW, doc=ADDRESS)[0]
+    assert NEW in sessions_of(work)[0]
+
+
+# ── Stop James clears the project's Tells that wait for his window (sweatshop-ai/sheaf#57) ────────
+
+
+def test_a_drop_names_the_thread_it_came_from(team, box, work):
+    got = comment(team, work, "tell")
+    assert got.status == 200, got.text
+    drop, = drops(box)
+    assert json.loads(drop.read_text(encoding="utf-8"))["thread"] == got.json()["id"]
+
+
+@pytest.fixture
+def stoppable(team, box, work, tmp_path):
+    """The box's list with a `stop_dir`, and the sheaf holding a Stop James action."""
+    stop = tmp_path / "stop"
+    stop.mkdir()
+    cfg = team.hub.the_list.cfg
+    team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{**cfg.__dict__, "stop_dir": stop}))
+    put(team, work, DOC, SHEAF + "\n- [ ] Stop James\n")
+    return {**box, "stop": stop}
+
+
+def stop_james(team, work, member=HANS):
+    from sheafmd.source import md_hash
+    text = (work / DOC).read_text(encoding="utf-8")
+    n = [a[0] for a in the_list.read_sheaf(DOC, text).actions].index("Stop James")
+    return team.post("/_/save", {"doc": ADDRESS, "hash": md_hash(text),
+                                 "edits": [the_list.tick_edit(text, n, "Stop James")]}, member=member)
+
+
+def replies(team, cid):
+    doc = team.get(f"/_/doc?doc={ADDRESS}", member=HANS).json()
+    thread, = [c for c in doc["comments"] if c["id"] == cid]
+    return thread["replies"]
+
+
+def test_stop_james_removes_the_project_s_waiting_tells_and_says_so_in_each_thread(team, work, stoppable):
+    first = comment(team, work, "tell", body="Send the draft.").json()["id"]
+    second = comment(team, work, "ask", body="Which draft?").json()["id"]
+    other = stoppable["tell"] / "acme--site-20261029T200000Z"
+    other.write_text(json.dumps({"project": "acme/site", "member": "hans", "sheaf": "work/acme/site/x.md",
+                                 "text": "not this one", "kind": "tell", "thread": "c9"}), encoding="utf-8")
+    assert len(drops(stoppable)) == 3
+    assert stop_james(team, work).status == 200
+    assert drops(stoppable) == [other]
+    for cid in (first, second):
+        said, = [r for r in replies(team, cid) if "Stopped before delivery" in r["text"]]
+        assert said["by"] == "Hans"
+    rows = hub_rows("tell-stopped")
+    assert sorted(r["thread"] for r in rows) == sorted([first, second])
+    assert all(r["project"] == "thinkingtoo/tiroir" and r["by"] == "hans" for r in rows)
+    assert "Send the draft" not in json.dumps(rows)
+    assert [f.read_text(encoding="utf-8") for f in stoppable["stop"].iterdir()] == ["thinkingtoo/tiroir\n"]
+
+
+def test_a_waiting_tell_whose_thread_is_gone_is_still_removed_and_says_why(team, work, stoppable):
+    cid = comment(team, work, "tell").json()["id"]
+    drop, = drops(stoppable)
+    body = json.loads(drop.read_text(encoding="utf-8"))
+    drop.write_text(json.dumps({**body, "thread": "c999"}), encoding="utf-8")
+    assert stop_james(team, work).status == 200
+    assert drops(stoppable) == []
+    row, = hub_rows("tell-stopped")
+    assert row["thread"] == "c999" and row["said"] != "written"
+    assert not [r for r in replies(team, cid) if "Stopped before delivery" in r["text"]]

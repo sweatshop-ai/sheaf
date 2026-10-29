@@ -55,6 +55,7 @@ WORDS = ("Approve", "Run it", "Don't run", "Undo skip", "Done", "Share", "Stop J
 SHOWS = {"projects": "My projects", "mine": "Only mine", "all": "All of the team"}
 BATCH = 50                      # issues per GraphQL request
 ITEMS = 100                     # Project items of an issue per page: the most GitHub gives
+PAGES = 10                      # requests a batch's Project items may take: the poll holds _poll_lock while it pages
 HTTP_SECONDS = 20
 
 _BOX_RE = re.compile(r"[A-Za-z0-9.-]{1,63}")
@@ -267,7 +268,9 @@ def fetch(cfg: ListConfig, issues: list) -> dict:
                 found[key] = {**issue, "projectItems": {**items, "nodes": list(items.get("nodes") or [])}}
         # An issue in more Projects than one page holds: the next pages, until the list's Project is read.
         more = {key: cursor for key, issue in found.items() if (cursor := _next_page(cfg, issue["projectItems"]))}
-        while more:
+        for _ in range(PAGES - 1):
+            if not more:
+                break               # an issue still unread after them has no status: its sheaf is off the list
             keys = list(more)
             data = _ask(cfg, token, _query(keys, [more[k] for k in keys]))
             more, asked = {}, more

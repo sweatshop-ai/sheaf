@@ -701,7 +701,12 @@ class Handler:
         _shape(type(n) is int and n >= 0, "action must be the number of the sheaf's action, from 0")
         _shape(isinstance(word, str) and word != "", "word must be the action's word")
         _shape(isinstance(read, str) and read != "", "hash must be the hash of the sheaf the list read")
+        # The edit is built from the text the list read, never from an older copy the hub holds: the watcher does not
+        # refresh a page no tab has open, and a merge of an edit of that copy can tick another box of the word.
+        self.hub.catch_up(e)
         h, text = e.live.current()
+        if h != read:
+            raise Refuse(409, f"the sheaf changed since the list read it ({word}): reload the list")
         edit = the_list.tick_edit(text, n, word)
         if edit is None:
             raise Refuse(409, f"the sheaf no longer holds that action ({word}): reload the list")

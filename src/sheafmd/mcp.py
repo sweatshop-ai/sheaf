@@ -648,6 +648,17 @@ class Door:
         self._check_size(text)
         _check_comments("", text)
         top = Path(os.path.realpath(root.path))
+        name = place.logical(rel) if placed else None
+        # The name's lock (9.11) from the first look at its homes to the file made: a create of the same name, or a
+        # move, that comes meanwhile waits, and then finds the name taken.
+        with place.held(self.hub, address):
+            address, text = self._make(root, top, rel, name, address, text, caller)
+        self.hub.wrote(address)
+        self.hub.committed(address, by=caller.display, what="create")
+        return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text)}
+
+    def _make(self, root, top: Path, rel: str, name: str | None, address: str, text: str, caller: Caller):
+        """The file of a create, at its home when the hub places it (9.11): (its address, the text written)."""
         try:
             # The owner is judged by the list's row for the address, which a sheaf already there may have: what
             # the path alone answers, walked as the write walks it, comes before every answer that judgement
@@ -655,7 +666,6 @@ class Door:
             # on the way points to.
             check_create(top, rel)
             # A sheaf's name is taken by its file at home and at every private home (9.11), whoever's it is.
-            name = place.logical(rel) if placed else None
             if name is not None and place.taken(top, name):
                 raise FileExistsError(errno.EEXIST, "File exists", rel)
         except OSError as e:
@@ -674,13 +684,14 @@ class Door:
             self.hub.assignees(address, {})
         try:
             if name is not None and rel != name:        # the private folders, walked as create_file walks
-                os.close(place.make_folders(top, rel)[0])
-            create_file(top, rel, text)
+                with place.folders_lock(top, name):     # so no move's tidying takes them before the file is in
+                    os.close(place.make_folders(top, rel)[0])
+                    create_file(top, rel, text)
+            else:
+                create_file(top, rel, text)
         except OSError as e:
             raise _not_made(address, e) from None
-        self.hub.wrote(address)
-        self.hub.committed(address, by=caller.display, what="create")
-        return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text)}
+        return address, text
 
     def _update(self, args: dict, caller: Caller):
         address = self._address(args["doc"], caller)

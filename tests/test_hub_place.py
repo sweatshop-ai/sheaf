@@ -8,6 +8,7 @@ import dataclasses
 import os
 import pwd
 import subprocess
+import threading
 
 import pytest
 from bs4 import BeautifulSoup
@@ -87,7 +88,7 @@ def tick(team, work, rel, word, member):
     return team.post("/_/save", {"doc": f"work/{rel}", "hash": md_hash(text), "edits": [edit]}, member=member)
 
 
-def untick(team, work, rel, word, member):
+def untick(team, work, rel, word, member, root="work"):
     """The page's save that unticks the box `- [x] <word>`, as the page sends it: the block's HTML with that box
     no longer checked."""
     text = (work / rel).read_text(encoding="utf-8")
@@ -97,7 +98,7 @@ def untick(team, work, rel, word, member):
                          "html.parser")
     box = next(b for b in soup.select('input[type="checkbox"]') if word in b.parent.get_text())
     del box["checked"]
-    return team.post("/_/save", {"doc": f"work/{rel}", "hash": md_hash(text),
+    return team.post("/_/save", {"doc": f"{root}/{rel}", "hash": md_hash(text),
                                  "edits": [{"i": i, "html": str(soup)}]}, member=member)
 
 
@@ -141,6 +142,55 @@ def test_a_create_that_names_a_private_folder_is_refused(team, work, browser, to
     is_error, got = call(browser, "create", token=tokens["thierry"], doc=f"work/{rel}", text=OPEN)
     assert is_error and "the hub places owner-only sheaves itself" in got
     assert not (work / rel).exists()
+
+
+def test_two_creates_of_one_name_with_different_homes_make_one_file(team, work, browser, tokens, monkeypatch):
+    """The second create comes while the first makes its file: it waits on the name's lock, then finds the name
+    taken. Without the lock it would see no file at either home and make the other."""
+    from sheafmd import mcp
+    real, answers = mcp.create_file, []
+
+    def second():
+        answers.append(call(browser, "create", token=tokens["thierry"], doc=f"work/{SHARED}", text=OPEN))
+
+    def first_writes(top, rel, text):
+        monkeypatch.setattr(mcp, "create_file", real)
+        t = threading.Thread(target=second)
+        t.start()
+        t.join(1)
+        real(top, rel, text)
+        threads.append(t)
+    threads = []
+    monkeypatch.setattr(mcp, "create_file", first_writes)
+    answers.append(call(browser, "create", token=tokens["thierry"], doc=f"work/{SHARED}", text=PRIVATE))
+    threads[0].join(10)
+    assert sorted(is_error for is_error, _ in answers) == [False, True], answers
+    assert (work / HOME).exists() and not (work / SHARED).exists()
+
+
+def test_a_move_out_of_private_leaves_the_folder_a_create_just_made(team, work, browser, tokens, monkeypatch):
+    """The move of another sheaf out of `private/thierry` comes while a create of a new one there has made the
+    folder and not yet its file: the move's tidying must not take the folder from under it."""
+    from sheafmd import mcp
+    from sheafmd.hub import place
+    other = "thinkingtoo/tiroir/private/thierry/other.md"
+    put(team, work, other, OPEN)
+    (work / other).rename(work / "other.md")                    # out of the way while the create makes the folder
+    real, threads = mcp.create_file, []
+
+    def create_while_moving(top, rel, text):
+        monkeypatch.setattr(mcp, "create_file", real)
+        os.rename(work / "other.md", work / other)              # an open sheaf in the folder, the poll's to move
+        t = threading.Thread(target=place.place, args=(team.hub, f"work/{other}"))
+        t.start()
+        t.join(1)
+        threads.append(t)
+        real(top, rel, text)
+    monkeypatch.setattr(mcp, "create_file", create_while_moving)
+    is_error, got = call(browser, "create", token=tokens["thierry"], doc=f"work/{SHARED}", text=PRIVATE)
+    threads[0].join(10)
+    assert not is_error, got
+    assert (work / HOME).exists() and (work / "thinkingtoo/tiroir/other.md").exists()
 
 
 # ── the logical name finds the sheaf ─────────────────────────────────────────
@@ -409,7 +459,8 @@ def git(at, *args):
     return subprocess.run(["git", "-C", str(at), *args], check=True, capture_output=True, text=True).stdout
 
 
-def test_a_move_is_one_commit_with_both_paths_and_the_versions_folder(hub, browser, tmp_path):
+def committing(hub, browser, tmp_path, first=PRIVATE, at=SHARED):
+    """A root that commits, with `versions = "root"`, the list on it and `first` committed at `at`."""
     repo = tmp_path / "sheaves"
     repo.mkdir()
     git(repo, "init", "-q", "-b", "main")
@@ -418,14 +469,18 @@ def test_a_move_is_one_commit_with_both_paths_and_the_versions_folder(hub, brows
     (repo / ".sheaf.toml").write_text('versions = "root"\ncommit = true\n', encoding="utf-8")
     (repo / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["thierry"]\nstatus = "live"\n',
                                         encoding="utf-8")
-    (repo / SHARED).parent.mkdir(parents=True)
-    (repo / SHARED).write_text(PRIVATE, encoding="utf-8")
+    (repo / at).parent.mkdir(parents=True)
+    (repo / at).write_text(first, encoding="utf-8")
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "first")
     hub.proxy = members(repo)
-    hub.roots.for_document(repo / SHARED)
+    hub.roots.for_document(repo / at)
     the_list_on(hub, repo, tmp_path)
-    box = Front(hub, browser.handler)
+    return Front(hub, browser.handler), repo
+
+
+def test_a_move_is_one_commit_with_both_paths_and_the_versions_folder(hub, browser, tmp_path):
+    box, repo = committing(hub, browser, tmp_path)
     assert box.get(f"/sheaves/{SHARED}", member=THIERRY).status == 200          # a version, inside the root
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "the version")
@@ -437,3 +492,4 @@ def test_a_move_is_one_commit_with_both_paths_and_the_versions_folder(hub, brows
     assert any(line.startswith("D\t" + str(INSIDE / doc_key(SHARED))) for line in files)
     assert git(repo, "status", "--porcelain") == ""
     assert (repo / INSIDE / doc_key(HOME) / "address").read_text(encoding="utf-8") == HOME
+

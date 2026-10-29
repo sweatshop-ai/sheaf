@@ -17,6 +17,8 @@ document's versions, read state and render settings with it, and is one commit o
 """
 import os
 import stat
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 from ..source import _folder_of, file_lock
@@ -111,25 +113,105 @@ def _refused(hub, address: str, why: str):
     hub.record("place-refused", address, why=why)
 
 
-def place(hub, address: str, member=None, by: str | None = None) -> str:
-    """Move the sheaf at `address` to its home, under its file lock, and return the address it lives at now:
-    `address` itself when it is home already, when the hub does not place it (another root, loopback mode, a
-    path that is no sheaf's, a link, which stays where it is written), or when the move is refused (a
-    `place-refused` row says why: no owner with a short, the home taken). The file is linked into place, never
-    over anything, and only then unlinked where it was. Its versions, read state and render settings follow it,
-    an open page is told `moved`, the index and the list hear of both addresses, and the root commits
-    `move: <old> -> <new>` as `member`, `by` (a door caller's display name) or else the hub (the poll)."""
+def _name_lock(top: Path, name: str) -> threading.RLock:
+    """The lock of the logical name `name` in the root at the real path `top`. Every writer that judges or changes
+    where a name's file is (a door create, a move, the tidying after it) is in the hub's process and holds it."""
+    with _LOCKS_GUARD:
+        return _LOCKS.setdefault((str(top), name), threading.RLock())
+
+
+def folders_lock(top: Path, name: str) -> threading.RLock:
+    """The lock of the private folders of the project of the logical name `name` in the root at `top`: held from
+    making a `private/<short>` to the file linked into it, and while a move out takes away what it left empty, so
+    the one never takes a folder from under the other, whatever names they write. Taken after the name's lock,
+    before a file lock."""
+    client, project, _ = name.split("/")
+    with _LOCKS_GUARD:
+        return _LOCKS.setdefault((str(top), f"{client}/{project}/{PRIVATE}/"), threading.RLock())
+
+
+_LOCKS_GUARD = threading.Lock()
+_LOCKS: dict = {}
+
+
+@contextmanager
+def held(hub, address: str):
+    """Hold the lock of the logical name of the sheaf at `address` (9.11): no create of the name, and no move of
+    its file, comes in while it is held, so a writer that judges the name's homes and then writes finds them as it
+    judged. Nothing to hold where the hub does not place the sheaf. Re-entrant: `place` takes it again."""
+    got = _where(hub, address)
+    if got is None:
+        yield
+        return
+    with _name_lock(got[1], got[2]):
+        yield
+
+
+def _where(hub, address: str):
+    """(its root, the real path of the root, its logical name) of a sheaf the hub places, else None."""
     at = Address.parse(address)
     if not at.plain or not applies(hub, at.root):
-        return address
+        return None
     name = logical(at.rel)
     root = hub.roots.get(at.root)
     if name is None or root is None:
+        return None
+    return root, Path(os.path.realpath(root.path)), name
+
+
+def refusal(hub, address: str, text: str) -> str | None:
+    """Why the sheaf at `address` could not go to its home once its file holds `text`, None when it could or the
+    hub does not place it: a writer asks before it writes, under `held`, so a write that would leave the sheaf
+    where it may not stay is refused instead (9.11)."""
+    got = _where(hub, address)
+    if got is None:
+        return None
+    root, top, name = got
+    return _judge(hub, root, top, Address.parse(address).rel, name, address, text)[1]
+
+
+def _judge(hub, root, top: Path, rel: str, name: str, address: str, text: str):
+    """(the home of `text`, None) when it may go there or is there, (None, why) when it may not."""
+    target = home(hub, root, name, address, text)
+    if target is None:
+        return None, NO_SHORT
+    if target != rel and [r for r in holders(top, name) if r != rel]:
+        # The name has one file (9.11): another under any home of it, its target or not, keeps this one here.
+        return None, f"its name {name} is held by another file"
+    return target, None
+
+
+def place(hub, address: str, member=None, by: str | None = None, commit: bool = True) -> str:
+    """Move the sheaf at `address` to its home, under the lock of its name and its file lock, and return the
+    address it lives at now: `address` itself when it is home already, when the hub does not place it (another
+    root, loopback mode, a path that is no sheaf's, a link, which stays where it is written), or when the move is
+    refused (a `place-refused` row says why: no owner with a short, the name held by another file). The file is
+    linked into place, never over anything, and only then unlinked where it was. Its versions, read state and
+    render settings follow it, an open page is told `moved`, the index and the list hear of both addresses, and,
+    with `commit`, the root commits `move: <old> -> <new>` as `member`, `by` (a door caller's display name) or
+    else the hub (the poll). A writer that moves the file it just wrote passes `commit=False` and commits the
+    write and the move as one (`Hub.committed` with `gone`)."""
+    got = _where(hub, address)
+    if got is None:
         return address
-    top = Path(os.path.realpath(root.path))
-    with file_lock(top / at.rel):
+    root, top, name = got
+    rel = Address.parse(address).rel
+    with _name_lock(top, name), folders_lock(top, name):
+        new = _move(hub, root, top, rel, name, address)
+        if new != address:
+            _tidy(top, rel)
+    if new != address and commit:
+        if member is None and by is None:
+            hub.committed(new, what="move", gone=rel, author=commits_mod.Author(*commits_mod.COMMITTER))
+        else:
+            hub.committed(new, member, "move", by, gone=rel)
+    return new
+
+
+def _move(hub, root, top: Path, rel: str, name: str, address: str) -> str:
+    with file_lock(top / rel):
         try:
-            sfd, sname = _folder_of(top, at.rel)
+            sfd, sname = _folder_of(top, rel)
         except OSError:
             return address
         try:
@@ -142,15 +224,11 @@ def place(hub, address: str, member=None, by: str | None = None) -> str:
                     text = f.read().decode("utf-8")
             except (OSError, UnicodeDecodeError):
                 return address          # gone, or not a text the hub reads: nothing to judge it on
-            target = home(hub, root, name, address, text)
+            target, why = _judge(hub, root, top, rel, name, address, text)
             if target is None:
-                _refused(hub, address, NO_SHORT)
+                _refused(hub, address, why)
                 return address
-            if target == at.rel:
-                return address
-            if [r for r in holders(top, name) if r != at.rel]:
-                # The name has one file (9.11): another under any home of it, its target or not, keeps this one here.
-                _refused(hub, address, f"its name {name} is held by another file")
+            if target == rel:
                 return address
             try:
                 dfd, dname = make_folders(top, target)
@@ -172,12 +250,6 @@ def place(hub, address: str, member=None, by: str | None = None) -> str:
             os.close(sfd)
         new = f"{root.name}/{target}"
         _follow(hub, root, address, new)
-    _tidy(top, at.rel)
-    if member is None and by is None:
-        author = commits_mod.Author(*commits_mod.COMMITTER)
-        hub.committed(new, what="move", gone=at.rel, author=author)
-    else:
-        hub.committed(new, member, "move", by, gone=at.rel)
     return new
 
 

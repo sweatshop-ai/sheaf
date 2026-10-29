@@ -187,13 +187,17 @@ def _write_atomic(p: Path, text: str):
         raise
 
 
-def update_file(md_path, change, expected_hash=None):
+def update_file(md_path, change, expected_hash=None, move=None):
     """Apply change(text) -> new text under the lock. Returns (old, new).
 
     With expected_hash, the check happens inside the lock: a write that lands
     between a caller's read and this one is refused, never overwritten.
     The new text goes through a sibling temp file, so an interrupted write
-    cannot truncate the document."""
+    cannot truncate the document.
+
+    `move(text, new)`, called under the lock before a write that changes the text, may move the
+    file (a sheaf going to the home of its new text, SPEC 9.11) and give the path it is at now:
+    the new text is written there, under that path's lock too."""
     p = Path(md_path)
     with file_lock(p):
         text = p.read_text(encoding="utf-8")
@@ -203,7 +207,12 @@ def update_file(md_path, change, expected_hash=None):
                              "overwrite that change")
         new = change(text)
         if new != text:
-            _write_atomic(p, new)
+            q = move(text, new) if move is not None else None
+            if q is None:
+                _write_atomic(p, new)
+            else:
+                with file_lock(q):
+                    _write_atomic(Path(q), new)
         return text, new
 
 

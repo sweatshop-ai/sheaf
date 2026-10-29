@@ -197,7 +197,12 @@ class Hub:
         file that 8.2 keeps from the root for lying in a git directory, as the door says (12).
         The file is found before the hub's lock is taken, and its root looked at again under it: a
         `forget_root` that took the lock in between makes the address name nothing, as it does for
-        a request that comes after it."""
+        a request that comes after it. All of it under the lock of a sheaf's name (9.11), taken before
+        the hub's: the file is found and first read and rendered where no move takes it."""
+        with place.held(self, address):
+            return self._entry(address)
+
+    def _entry(self, address: str) -> Entry:
         name = roots_mod.Address.parse(address).root
         root = self.roots.get(name)
         path = self.roots.document(address)
@@ -359,7 +364,7 @@ class Hub:
         restarts anything."""
         md = Path(md).resolve()
         address = self.roots.address(md)
-        with self._lock:
+        with place.held(self, address), self._lock:        # the name's lock first (9.11), as `entry` takes it
             old = self.docs.get(address)
             new = dict(old)
             new["path"] = str(md)

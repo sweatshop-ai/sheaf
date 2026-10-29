@@ -7,6 +7,7 @@ person has seen of it (`seen.json`), and what the hub knows is running on it (a 
 its reply, a session waiting on the person). A document that nobody has opened is never rendered
 for this: the index reads files, it does not start pages.
 """
+import contextlib
 import html
 import os
 import threading
@@ -483,10 +484,11 @@ class Index:
             return
         at = roots_mod.Address.parse(address)
         root, got = hub.roots.get(at.root), None
-        if root is not None and (found := self._stat_of(root, address)):
-            path, st = found
-            waiting, running = self._live_state(address)
-            got = (at.root, self._row(address, path, st, waiting, running))
+        with place.held(hub, address):              # every read of a sheaf's file holds its name's lock (9.11)
+            if root is not None and (found := self._stat_of(root, address)):
+                path, st = found
+                waiting, running = self._live_state(address)
+                got = (at.root, self._row(address, path, st, waiting, running))
         self._queue_look({address: got}, since)
         self._publish()
 
@@ -545,15 +547,18 @@ class Index:
             placed = not rendered and place.applies(hub, root.name)
             top = Path(os.path.realpath(root.path))
             for f in listing.docs:
-                # A sheaf of the list's root is listed by its name (9.11); a private path is none.
-                rel = place.named(hub, root, top, f.rel) if placed else f.rel
-                if rel is None:
-                    continue
-                address, path = str(roots_mod.Address(root.name, rel)), root.path / f.rel
-                keys.add(str(path))
-                have.add(address)
-                if shown(root, path) and (member is None or hub.visible(member, address)):
-                    rows.append(self._row(address, path, f.stat, waiting, running, member))
+                # A sheaf of the list's root is listed by its name (9.11); a private path is none. Each file is
+                # read under its name's lock, as every read.
+                logical = place.logical(f.rel) if placed else None
+                with place.held(hub, f"{root.name}/{logical}") if logical else contextlib.nullcontext():
+                    rel = place.named(hub, root, top, f.rel) if placed else f.rel
+                    if rel is None:
+                        continue
+                    address, path = str(roots_mod.Address(root.name, rel)), root.path / f.rel
+                    keys.add(str(path))
+                    have.add(address)
+                    if shown(root, path) and (member is None or hub.visible(member, address)):
+                        rows.append(self._row(address, path, f.stat, waiting, running, member))
             for address in sorted(a for a in named - have if a.startswith(roots_mod.Address.prefix(root.name))):
                 if not (found := self._stat_of(root, address)):
                     continue

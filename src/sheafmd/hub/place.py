@@ -12,7 +12,8 @@ sheafmd.hub.place — where the file of a sheaf of the list's root is (SPEC 9.11
     owner_short(hub, root, address, fm)   the `short` that names the sheaf's private folder
     make_folders(top, rel)           the folder of `rel`, made on the way, walked without following a link
     taken(top, name), holders(top, name)  whether a logical name is held, and by which paths
-    held(hub, address)               the lock of the sheaf's name, for a writer that writes or moves its file
+    held(hub, address)               the lock of the sheaf's name, for every read and write of its file
+    ahead(hub, address, text)        a writer's move of the file to the home of the text it is about to write
     folders_lock(top, name)          the lock of the project's private folders
     refusal(hub, address, text)      why the sheaf could not go home once its file holds `text`
     ignores(top, target)             whether a private home is one the root's repo ignores
@@ -25,10 +26,12 @@ member owns it, else the first owner, in the config's order, that has one). The 
 path glob one owner: the shared stanza reads `<client>/*/*.md`, an owner's `*/*/private/<short>/**/*.md`, so a file's
 place says whose it is. The hub keys everything of a sheaf (its entry, versions, read state, render settings) by the
 name, and finds the file only when it reads or writes it; a move is a rename of the file and one commit of both
-paths (8.11), and nothing else moves. A path under `private/` is no address: it names no document. The repo of
+paths (8.11), and nothing else moves. Every read and every write of a name holds its lock (`held`); a move is move,
+write, render, commit, under it. A path under `private/` is no address: it names no document. The repo of
 such a root must not ignore `private/`: the listing (8.6) would no longer show a sheaf the hub moved there, so a move
 into a folder the repo ignores is refused, and the root is told of once.
 """
+import contextlib
 import os
 import stat
 import subprocess
@@ -230,7 +233,7 @@ def _refused(hub, address: str, why: str):
 def _name_lock(top: Path, name: str) -> threading.RLock:
     """The lock of the logical name `name` in the root at the real path `top`. Every writer of a name's file in the
     hub's process holds it: a door create, a write (the file is found again under it), a move, the tidying after
-    it."""
+    it; and every reader, from finding the file to the text read or rendered."""
     with _LOCKS_GUARD:
         return _LOCKS.setdefault((str(top), name), threading.RLock())
 
@@ -252,10 +255,12 @@ _LOCKS: dict = {}
 @contextmanager
 def held(hub, address: str):
     """Hold the lock of the sheaf's name `address` (9.11): no create of the name, no write of its file and no move
-    of it comes in while it is held, so a writer that finds the file under it writes where the file is, and one
-    that judges the name's homes finds them as it judged. Nothing to hold where the hub does not place the sheaf.
-    Gives whether it holds a lock. Re-entrant: `place` and a document's write take it again. Taken before the
-    document's own lock (live.py) and before a file lock."""
+    of it comes in while it is held, so a writer that finds the file under it writes where the file is, one that
+    judges the name's homes finds them as it judged, and a reader reads the file it found, in the folder its text
+    says. Nothing to hold where the hub does not place the sheaf. Gives whether it holds a lock. Re-entrant:
+    `place` and a document's write take it again. Taken first: before the hub's lock (`Hub.entry`), the document's
+    own lock (live.py), a file lock and the root's commit lock (commits.py). Held for disk work only: nothing under
+    it waits on the network."""
     got = _where(hub, address)
     if got is None:
         yield False
@@ -293,6 +298,26 @@ def refusal(hub, address: str, text: str) -> str | None:
     return None
 
 
+def ahead(hub, address: str, text: str) -> str | None:
+    """A writer that is about to write `text` over the file of the sheaf named `address`, holding the name's lock
+    and the file's lock, moves the file to the home of `text` first (9.11), so the new text is written, and
+    rendered, in the folder it says: a reader never meets a visibility with the folder of the other. Returns the
+    path in the root the file left, None when it stays (home already, a refused move, a name the hub does not
+    place); the writer then finds the file again and writes it there, and commits the write and the move as one."""
+    got = _where(hub, address)
+    if got is None:
+        return None
+    root, top, name = got
+    with _name_lock(top, name), folders_lock(top, name):
+        rel, n = _one(top, name)
+        if n != 1:
+            return None
+        gone = _move(hub, root, top, rel, name, address, text=text)
+        if gone is not None:
+            _tidy(top, gone)
+    return gone
+
+
 def place(hub, address: str, member=None, by: str | None = None, commit: bool = True) -> str | None:
     """Move the file of the sheaf named `address` to its home, under the lock of its name and its file lock, and
     return the path in the root it left; None when it did not move: home already, a name the hub does not place,
@@ -323,8 +348,10 @@ def place(hub, address: str, member=None, by: str | None = None, commit: bool = 
     return gone
 
 
-def _move(hub, root, top: Path, rel: str, name: str, address: str) -> str | None:
-    with file_lock(top / rel):
+def _move(hub, root, top: Path, rel: str, name: str, address: str, text: str | None = None) -> str | None:
+    """Link the file at `rel` into the home of its text, or of `text` when given (`ahead`, whose caller holds the
+    file's lock already), then unlink it at `rel`: the path it left, or None."""
+    with (contextlib.nullcontext() if text is not None else file_lock(top / rel)):
         try:
             sfd, sname = _folder_of(top, rel)
         except OSError:
@@ -334,9 +361,10 @@ def _move(hub, root, top: Path, rel: str, name: str, address: str) -> str | None
                 st = os.stat(sname, dir_fd=sfd, follow_symlinks=False)
                 if not stat.S_ISREG(st.st_mode):
                     return None         # a link stays where it is written: the sheaf it names is placed itself
-                fd = os.open(sname, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=sfd)
-                with os.fdopen(fd, "rb") as f:
-                    text = f.read().decode("utf-8")
+                if text is None:
+                    fd = os.open(sname, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=sfd)
+                    with os.fdopen(fd, "rb") as f:
+                        text = f.read().decode("utf-8")
             except (OSError, UnicodeDecodeError):
                 return None             # gone, or not a text the hub reads: nothing to judge it on
             target = home(hub, root, name, text)

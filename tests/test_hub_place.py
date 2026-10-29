@@ -555,13 +555,13 @@ def test_a_comment_written_as_the_poll_moves_the_file_lands_in_the_one_file(team
     assert team.get(f"/work/{SHARED}", member=THIERRY).status == 200
     real, threads = live.rds.update_file, []
 
-    def poll_then_write(path, change):
+    def poll_then_write(path, change, **kw):
         monkeypatch.setattr(live.rds, "update_file", real)
         t = threading.Thread(target=team.hub.the_list.poll)
         t.start()
         t.join(1)
         threads.append(t)
-        return real(path, change)
+        return real(path, change, **kw)
     monkeypatch.setattr(live.rds, "update_file", poll_then_write)
     blk, start, end = rdc.find_quote(PRIVATE, "A quote")
     got = team.post("/_/comment", {"doc": f"work/{SHARED}", "op": "add", "hash": md_hash(PRIVATE), "block": blk,
@@ -691,8 +691,8 @@ def test_a_door_update_and_a_poll_at_once_leave_one_file_with_the_update(team, w
     put(team, work, SHARED, PRIVATE)                           # written before the rule: the poll would move it
     real, threads = mcp.update_file, []
 
-    def write_then_poll(path, change):
-        got = real(path, change)
+    def write_then_poll(path, change, **kw):
+        got = real(path, change, **kw)
         t = threading.Thread(target=team.hub.the_list.poll)
         t.start()
         t.join(1)
@@ -717,12 +717,12 @@ def test_a_door_reply_with_no_page_open_and_a_poll_at_once_lands_in_the_moved_fi
     assert f"work/{SHARED}" not in team.hub.entries
     real, threads = mcp.update_file, []
 
-    def poll_then_write(path, change):
+    def poll_then_write(path, change, **kw):
         t = threading.Thread(target=team.hub.the_list.poll)
         t.start()
         t.join(1)
         threads.append(t)
-        return real(path, change)
+        return real(path, change, **kw)
     monkeypatch.setattr(mcp, "update_file", poll_then_write)
     is_error, got = call(browser, "reply", token=tokens["thierry"], doc=f"work/{SHARED}", id="c1",
                          text="The second page.")
@@ -764,6 +764,7 @@ def poll_before_the_lock(team, monkeypatch):
     real = place.held
 
     def held(hub, address):
+        monkeypatch.setattr(place, "held", real)        # once: every read and write takes the lock (9.11)
         team.hub.the_list.poll()
         return real(hub, address)
     monkeypatch.setattr(place, "held", held)
@@ -786,6 +787,52 @@ def test_a_tick_the_poll_overtook_lands_in_the_moved_file(team, work, monkeypatc
     got = team.post("/_/tick", {"doc": f"work/{SHARED}", "action": 0, "word": "Share"}, member=THIERRY)
     assert got.status == 200, got.text
     assert "- [x] Share" in (work / SHARED).read_text(encoding="utf-8") and not (work / HOME).exists()
+
+
+# ── reads hold the name's lock; a move is move, write, render, commit under it ──
+
+def test_a_reader_during_a_share_save_never_gets_the_page_rendered_from_the_private_folder(team, work, monkeypatch):
+    """Codex P1: the Share save writes `visibility: project` while the file is still in private/<owner>/; a reader
+    that came between that write and the move passed the new visibility check and got the page rendered against
+    the private folder. The reader waits on the name's lock, and the move comes before the write."""
+    from PIL import Image
+    put(team, work, HOME, PRIVATE.replace("A quote from the contract.", "![seal](seal.png)"))
+    Image.new("RGB", (8, 8), (200, 10, 10)).save(work / "thinkingtoo/tiroir/private/thierry/seal.png", "PNG")
+    assert "data:image/png;base64," in team.get(f"/work/{SHARED}", member=THIERRY).text
+    e = team.hub.entries[f"work/{SHARED}"]
+    pages, threads = [], []
+
+    def read_between():
+        monkeypatch.undo()
+        t = threading.Thread(target=lambda: pages.append(team.get(f"/work/{SHARED}", member=HANS)))
+        t.start()
+        t.join(1)
+        threads.append(t)
+    monkeypatch.setattr(e.live, "_after_write", read_between)
+    assert tick(team, work, "Share", THIERRY).status == 200
+    threads[0].join(10)
+    assert pages[0].status == 200
+    assert "data:image/png;base64," not in pages[0].text and "missing image: seal.png" in pages[0].text
+
+
+def test_a_door_read_during_a_move_finds_the_file(team, work, browser, tokens, monkeypatch):
+    """Codex P1: a read resolved the path a move then unlinked, and read nothing. The move waits for the read."""
+    put(team, work, SHARED, PRIVATE)                           # written before the rule: the poll moves it
+    real, threads = team.hub.roots.document, []
+
+    def resolve_then_poll(address):
+        got = real(address)
+        monkeypatch.setattr(team.hub.roots, "document", real)
+        t = threading.Thread(target=team.hub.the_list.poll)
+        t.start()
+        t.join(1)
+        threads.append(t)
+        return got
+    monkeypatch.setattr(team.hub.roots, "document", resolve_then_poll)
+    is_error, got = call(browser, "read", token=tokens["thierry"], doc=f"work/{SHARED}")
+    threads[0].join(10)
+    assert not is_error, got
+    assert got["text"].startswith("---") and (work / HOME).exists() and not (work / SHARED).exists()
 
 
 def test_a_door_create_of_an_owner_only_sheaf_in_a_root_that_ignores_private_is_refused(hub, browser, tmp_path):

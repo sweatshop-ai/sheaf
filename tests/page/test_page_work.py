@@ -366,3 +366,79 @@ def test_the_sent_line_keeps_the_name_it_was_sent_to_after_a_fork(tab):
     until(lambda: "One more paragraph." in tab.page.inner_text("body"), what="the reload")
     until(lambda: tab.page.locator("#rd-popover").is_visible() and SENT in tab.page.inner_text("#rd-popover"),
           what="the sent line, still naming James")
+
+
+# ---- the sign-in code (9.13) ---------------------------------------------------------------------------------
+
+CODE = "sheaf_code_" + "A" * 43
+
+
+def code_route(tab, status=200, answer=None):
+    """`/_/code` answered as the proxy socket would: the requests the page sent are in the list returned."""
+    sent = []
+
+    def answer_(route):
+        sent.append(route.request)
+        route.fulfill(status=status, content_type="application/json", json=answer if answer is not None else
+                      {"ok": True, "code": CODE, "expires": "2026-10-30T10:10:00Z", "id": "a1b2c3d4"})
+    tab.page.route("**/_/code", answer_)
+    return sent
+
+
+def test_the_fork_row_has_a_get_a_sign_in_code_button_and_no_code(tab):
+    as_member(tab, work())
+    tab.open()
+    open_work(tab.page)
+    assert tab.page.locator("#rd-work .rd-code button").inner_text() == "Get a sign-in code"
+    assert "sheaf_code_" not in tab.page.content()
+
+
+def test_no_fork_no_code_button(tab):
+    as_member(tab, work(fork=None))
+    tab.open()
+    open_work(tab.page)
+    assert tab.page.locator("#rd-work .rd-code").count() == 0
+
+
+def test_the_button_posts_the_doc_and_shows_the_code_once_with_its_terms(tab):
+    sent = code_route(tab)
+    as_member(tab, work())
+    tab.open()
+    open_work(tab.page)
+    tab.page.click("#rd-work .rd-code button")
+    until(lambda: tab.page.locator("#rd-work .rd-code .rd-cmd code").count() == 1, what="the code shown")
+    assert tab.page.locator("#rd-work .rd-code .rd-cmd code").inner_text() == CODE
+    assert "Good for 10 minutes, for this sheaf only." in tab.page.inner_text("#rd-work")
+    assert len(sent) == 1 and sent[0].method == "POST"
+    doc = tab.page.evaluate("JSON.parse(document.getElementById('rd-edit-meta').textContent).doc")
+    assert json.loads(sent[0].post_data) == {"doc": doc}
+    # Closed and opened again, the code is gone: it is shown once.
+    tab.page.keyboard.press("Escape")
+    open_work(tab.page)
+    assert tab.page.locator("#rd-work .rd-code .rd-cmd code").count() == 0
+    assert CODE not in tab.page.content()
+
+
+def test_the_code_is_not_put_on_the_clipboard_by_itself(tab, context, site):
+    context.grant_permissions(["clipboard-read", "clipboard-write"], origin=site.base)
+    code_route(tab)
+    as_member(tab, work())
+    tab.open()
+    tab.page.evaluate("navigator.clipboard.writeText('before')")
+    open_work(tab.page)
+    tab.page.click("#rd-work .rd-code button")
+    until(lambda: tab.page.locator("#rd-work .rd-code .rd-cmd code").count() == 1, what="the code shown")
+    assert tab.page.evaluate("navigator.clipboard.readText()") == "before"
+    tab.page.click("#rd-work .rd-code .rd-cmd button")
+    until(lambda: tab.page.evaluate("navigator.clipboard.readText()") == CODE, what="the code copied")
+
+
+def test_too_many_codes_says_so_in_the_popover(tab):
+    code_route(tab, 429, {"ok": False, "error": "Too many sign-in codes: wait a few minutes."})
+    as_member(tab, work())
+    tab.open()
+    open_work(tab.page)
+    tab.page.click("#rd-work .rd-code button")
+    until(lambda: "Too many sign-in codes: wait a few minutes." in tab.page.inner_text("#rd-work"),
+          what="the 429 line")
+    assert tab.page.locator("#rd-work .rd-code button").is_enabled()

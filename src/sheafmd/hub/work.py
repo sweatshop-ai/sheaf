@@ -4,6 +4,7 @@ file Ask, Tell and Stop James drop for James's window.
 
     state(hub, address, text)       a sheaf's sessions and where its live session runs; None for another page
     sessions(fm)                    the items of the front matter's `sessions` that parse, as written (newest first)
+    code_session(st, recorded)      the session a sign-in code serves (9.13): made, downloaded and forked by one rule
     with_session(text, line, id)    the text with `line` as the first of `sessions`, the rest as written
     open_transcript(folder, id)     the bytes of `<folder>/<one folder>/<id>.jsonl`, or None
     james_has(cfg, project, id)     whether the copy holds `id` as James's session of `project` (None: not yet)
@@ -82,6 +83,15 @@ class State:
         names the box and the folder to drop them in."""
         to_james = self.live == "box" or (self.live == "" and self.james)
         return ["box-ask", "box-tell"] if to_james and self.cfg.box and self.cfg.tell_dir is not None else []
+
+
+def code_session(st: State | None, recorded: str | None = None) -> str | None:
+    """The session a sign-in code serves on the sheaf whose state is `st` (9.13), the one rule of its making, its
+    GET and its POST: the sheaf's forkable session, while the hub keeps the copy that serves it. Asked with no
+    `recorded`, the id a new code records; asked with a code's `recorded` id, that id while it is still the
+    forkable one, else None: a newer live session, James's or a member's fork, needs a new code."""
+    sid = st.forkable if st is not None and st.cfg.sessions_dir is not None else None
+    return sid if sid is not None and recorded in (None, sid) else None
 
 
 def is_sheaf(hub, address: str) -> bool:

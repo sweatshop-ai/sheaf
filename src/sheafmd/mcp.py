@@ -356,9 +356,9 @@ class Door:
             owns = self.hub.member_owns(member, address)
         if member is not None and not owns:
             return False
-        if visibility.effective(fm) == "project":
-            return True
-        return member is not None and visibility.visible_to(fm, member, self.hub.assignees(address, fm))
+        if member is None:
+            return visibility.effective(fm) == "project"
+        return self.hub.may_open(member, address, fm)        # projects.toml grants a bound token's member (8.12)
 
     def _seen(self, text: str, address: str, caller: Caller, doc: str) -> str:
         """`text`, the text of the document at `address`, when `caller` may see it; else the answer to a
@@ -642,6 +642,8 @@ class Door:
         if placed and place.names_private(rel):
             raise ToolError(f"{_named(args['doc'])} cannot be made: the hub places owner-only sheaves itself: name "
                             "`<client>/<project>/<name>.md`.", "path")
+        if member is not None and not self.hub.granted(member, address):
+            raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path")     # a project not theirs (8.12)
         self._check_size(text)
         _check_comments("", text)
         top = Path(os.path.realpath(root.path))

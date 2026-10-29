@@ -1,7 +1,8 @@
 """`projects.toml` at the top of a root (SPEC 8.12): one entry per `<client>/<project>` folder, with its
-members and its status. The hub reads it for one thing: a sheaf folder it does not name is a warning,
-in the hub's log and in the diagnostics log (15), once per folder per hub run. Access stays the
-member's roots (9.9); the file grants nothing.
+members and its status. In proxy mode the file grants (#44): a member opens the shared sheaves of a project
+folder only when its `members` hold their `short`, and a folder it does not name, or every folder of a file
+the hub cannot read, is open to its sheaves' owners alone. A sheaf folder it does not name is also a warning,
+in the hub's log and in the diagnostics log (15), once per folder per hub run.
 
     [projects."acme/blog"]
     members = ["ada", "bob"]          # the front's short names of who works on it
@@ -9,13 +10,18 @@ member's roots (9.9); the file grants nothing.
 
     read(folder)              the entries, or None without the file; raises Invalid
     unlisted(entries, rels)   the `<client>/<project>` folders of `rels` that the entries do not name
+    grants(entries, rel, short)   whether the member `short` may open the shared sheaves at `rel`
+    groups(entries)           what `sheaf projects groups` prints for the Library: the same judgement
 """
+import re
 import tomllib
 from pathlib import Path
 
 from . import place
 
 FILE = "projects.toml"
+# A folder name the Library's glob reads as itself: no `*`, `?`, `[`, space or other character it could take apart.
+PART = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]*")
 STATUSES = ("live", "closed")
 
 
@@ -43,8 +49,9 @@ def read(folder: Path) -> dict | None:
     for name, p in projects.items():
         here = f'[projects."{name}"]'
         parts = name.split("/")
-        if len(parts) != 2 or not all(parts) or any(x.startswith(".") for x in parts):
-            raise Invalid(f"{here}: a project is named <client>/<project>")
+        if len(parts) != 2 or not all(PART.fullmatch(x) for x in parts):
+            raise Invalid(f"{here}: a project is named <client>/<project>, each of letters, digits, '.', '_' or '-' "
+                          "and not starting with '.'")
         if parts[1] == place.PRIVATE:
             # `<client>/<project>/private/` holds the sheaves the hub places as their owner's alone (9.11)
             raise Invalid(f"{here}: a project cannot be named private, the name of the folder of owner-only sheaves")
@@ -57,7 +64,17 @@ def read(folder: Path) -> dict | None:
             raise Invalid(f"'members' in {here} must be a list of names")
         if p.get("status") not in STATUSES:
             raise Invalid(f"'status' in {here} must be one of {', '.join(STATUSES)}, not {p.get('status')!r}")
+    seen = {}
+    for name in sorted(projects):
+        # The Library knows a project by its group alone: two that share one would give each the other's sheaves.
+        if (other := seen.setdefault(group_of(name).casefold(), name)) != name:
+            raise Invalid(f'[projects."{other}"] and [projects."{name}"] would share the group {group_of(name)}')
     return projects
+
+
+def group_of(name: str) -> str:
+    """The Library's group of the project `name` (`<client>/<project>`): `group:proj-<client>-<project>`."""
+    return "group:proj-" + name.replace("/", "-")
 
 
 def unlisted(entries: dict, rels) -> list[str]:
@@ -70,3 +87,37 @@ def unlisted(entries: dict, rels) -> list[str]:
         if len(parts) >= 3 and (folder := f"{parts[0]}/{parts[1]}") not in entries:
             out.add(folder)
     return sorted(out)
+
+
+def project_of(rel: str) -> str | None:
+    """The `<client>/<project>` folder of the path `rel` in a root, None above that depth."""
+    parts = rel.split("/")
+    return f"{parts[0]}/{parts[1]}" if len(parts) >= 3 else None
+
+
+def grants(entries, rel: str, short: str) -> bool:
+    """Whether the file's `entries` (None for no file, an `Invalid` for one the hub cannot read) let the member of
+    `short` open the shared sheaves at `rel` (8.12): its project's `members` hold `short`, compared without case.
+    A root with no file, and a document above project depth, grant as before: to every member of the root. A
+    project the file does not name, and every project of a file the hub cannot read, grant no one."""
+    folder = project_of(rel)
+    if entries is None or folder is None:
+        return True
+    if isinstance(entries, Invalid) or (entry := entries.get(folder)) is None:
+        return False
+    return bool(short) and short.casefold() in {m.casefold() for m in entry["members"]}
+
+
+def groups(entries: dict) -> dict:
+    """The Library's groups from the same entries the hub grants by (8.12, 13): each project's group
+    `group:proj-<client>-<project>`, its glob `<client>/<project>/*.md`, its status and its members (lower case,
+    as `grants` compares them), and for each member short the groups of the projects that name them."""
+    out, members = [], {}
+    for name in sorted(entries):
+        group = group_of(name)
+        names = sorted({m.casefold() for m in entries[name]["members"]})
+        out.append({"project": name, "group": group, "glob": f"{name}/*.md", "status": entries[name]["status"],
+                    "members": names})
+        for m in names:
+            members.setdefault(m, []).append(group)
+    return {"members": {m: sorted(g) for m, g in sorted(members.items())}, "projects": out}

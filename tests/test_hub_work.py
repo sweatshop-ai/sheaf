@@ -58,8 +58,8 @@ def the_team(work, tmp_path, thierrys_tokens=()):
 def team(hub, browser, work, plan, tmp_path):
     hub.proxy = the_team(work, tmp_path)
     (tmp_path / "other").mkdir()
-    (work / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["thierry", "hans"]\n',
-                                        encoding="utf-8")
+    (work / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["thierry", "hans"]\n'
+                                        'status = "live"\n', encoding="utf-8")
     return Front(hub, browser.handler)
 
 
@@ -387,7 +387,7 @@ def committing(hub, browser, tmp_path):
     git(repo, "config", "user.name", "the box")
     git(repo, "config", "user.email", "box@example.com")
     (repo / ".sheaf.toml").write_text('commit = true\n', encoding="utf-8")
-    (repo / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["hans"]\n', encoding="utf-8")
+    (repo / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["hans"]\nstatus = "live"\n', encoding="utf-8")
     (repo / DOC).parent.mkdir(parents=True)
     (repo / DOC).write_text(SHEAF, encoding="utf-8")
     git(repo, "add", "-A")

@@ -580,6 +580,21 @@ def test_a_tick_ticks_the_action_the_row_showed_though_the_hubs_copy_of_a_page_n
     assert joey.read_text(encoding="utf-8") == before.replace("- [ ] Approve\n", "- [x] Approve\n", 1)
 
 
+def test_a_tick_after_a_write_the_hubs_stat_check_cannot_see_still_lands(box, sheaves):
+    """Opus delta check on #45, P3: a write of the same size in the same clock tick leaves (mtime, size) as it was, so
+    catch_up keeps the old copy; the tick reads the file once more rather than refusing every retry."""
+    joey = sheaves / JOEY[5:]
+    assert box.get("/" + JOEY, member=NELL).status == 200          # the hub's copy, then no tab
+    st = joey.stat()
+    joey.write_text(joey.read_text(encoding="utf-8").replace("The draft.", "Our draft."), encoding="utf-8")
+    os.utime(joey, ns=(st.st_atime_ns, st.st_mtime_ns))
+    box.hub.the_list.poll()
+    before = joey.read_text(encoding="utf-8")
+    r = box.post("/_/tick", row_box(box.get("/list", member=NELL), JOEY), member=NELL)
+    assert r.status == 200, r.text
+    assert joey.read_text(encoding="utf-8") == before.replace("- [ ] Approve", "- [x] Approve")
+
+
 @pytest.mark.parametrize("body", [{"doc": JOEY, "word": "Approve"}, {"doc": JOEY, "action": "0", "word": "Approve"},
                                   {"doc": JOEY, "action": True, "word": "Approve"}, {"doc": JOEY, "action": 0},
                                   {"doc": JOEY, "action": 0, "word": ""},

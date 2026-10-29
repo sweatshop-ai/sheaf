@@ -706,6 +706,11 @@ class Handler:
         self.hub.catch_up(e)
         h, text = e.live.current()
         if h != read:
+            # A write of the same size in the same clock tick leaves the (mtime, size) catch_up compares: the file once.
+            with contextlib.suppress(Exception):
+                e.live.refresh()
+            h, text = e.live.current()
+        if h != read:
             raise Refuse(409, f"the sheaf changed since the list read it ({word}): reload the list")
         edit = the_list.tick_edit(text, n, word)
         if edit is None:

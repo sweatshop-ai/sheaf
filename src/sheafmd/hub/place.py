@@ -15,6 +15,7 @@ sheafmd.hub.place — where the file of a sheaf of the list's root is (SPEC 9.11
     held(hub, address)               the lock of the sheaf's name, for a writer that writes or moves its file
     folders_lock(top, name)          the lock of the project's private folders
     refusal(hub, address, text)      why the sheaf could not go home once its file holds `text`
+    ignores(top, target)             whether a private home is one the root's repo ignores
     tell_ignored(hub, root, folders) a `private-ignored` row when the root's repo ignores a private home
 
 In proxy mode, in the list's root (9.10) only, a sheaf at project depth has one name, its address
@@ -62,6 +63,12 @@ def _ignored(top: Path, paths: list) -> list:
 def _private_home(rel: str) -> bool:
     parts = rel.split("/")
     return len(parts) == 5 and parts[2] == PRIVATE
+
+
+def ignores(top: Path, target: str) -> bool:
+    """Whether `target`, a home in the root at `top`, is a private home its repo ignores: no file goes there, by a
+    move or a create (9.11), or the listing (8.6) would no longer show it."""
+    return _private_home(target) and bool(_ignored(top, [target]))
 
 
 def tell_ignored(hub, root, folders):
@@ -281,7 +288,7 @@ def refusal(hub, address: str, text: str) -> str | None:
         return NO_SHORT
     if target != file_rel(top, name) and os.path.lexists(top / target):
         return f"{target} is taken"
-    if target != file_rel(top, name) and _private_home(target) and _ignored(top, [target]):
+    if target != file_rel(top, name) and ignores(top, target):
         return IGNORED
     return None
 
@@ -338,7 +345,7 @@ def _move(hub, root, top: Path, rel: str, name: str, address: str) -> str | None
                 return None
             if target == rel:
                 return None
-            if _private_home(target) and _ignored(top, [target]):
+            if ignores(top, target):
                 _refused(hub, address, IGNORED)
                 return None
             try:

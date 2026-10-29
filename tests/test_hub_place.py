@@ -786,3 +786,15 @@ def test_a_tick_the_poll_overtook_lands_in_the_moved_file(team, work, monkeypatc
     got = team.post("/_/tick", {"doc": f"work/{SHARED}", "action": 0, "word": "Share"}, member=THIERRY)
     assert got.status == 200, got.text
     assert "- [x] Share" in (work / SHARED).read_text(encoding="utf-8") and not (work / HOME).exists()
+
+
+def test_a_door_create_of_an_owner_only_sheaf_in_a_root_that_ignores_private_is_refused(hub, browser, tmp_path):
+    """An owner-only create picks the private home; in a root whose repo ignores it the file would be made
+    untracked. Refused as the move is, and nothing is written."""
+    box, repo = committing(hub, browser, tmp_path, at="thinkingtoo/tiroir/other.md", first=OPEN,
+                           ignore="*/*/private/\n")
+    token = Tokens().add("james-thierry", write=True)
+    is_error, got = call(browser, "create", token=token, doc=f"sheaves/{SHARED}", text=PRIVATE)
+    assert is_error and "the repo ignores the private folder" in got, got
+    assert not (repo / SHARED).exists() and not (repo / HOME).exists()
+    assert not (repo / "thinkingtoo/tiroir/private").exists()

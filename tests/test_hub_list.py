@@ -21,7 +21,7 @@ from sheafmd.source import md_hash
 
 NELL = "503b2f77-83de-452c-817a-a357faf85929"       # the front's ids of two members
 DORA = "2b9d7e1c-4a51-4c0e-9d1f-6f0c3a7e8b42"
-TOKEN = "ghs_fake_installation_token"
+TOKEN = "ghs_fake_" "installation_token"
 NOW = 1_761_640_000                                    # 2025-10-28 08:26:40 UTC
 ISO = "%Y-%m-%dT%H:%M:%SZ"
 

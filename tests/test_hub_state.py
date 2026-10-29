@@ -354,24 +354,3 @@ def test_each_store_takes_the_lock_the_spec_names():
     state.Seen().mark("a/one.md", "c1", 1)
     state.MemberSeen().mark("m1", "a/one.md", "c1", 1)
     assert {p.name for p in paths.locks_dir().glob("*.lock")} >= {"docs.lock", "seen.lock", "seen-members.lock"}
-
-
-@pytest.mark.parametrize("linked", [".sheaf", ".sheaf/versions"])
-def test_a_move_in_a_roots_store_leaves_a_linked_parent_alone_and_says_so(tmp_path, linked):
-    """7.4: `.sheaf` and every folder below it are folders of the hub's account, never a link; a move (9.11) that
-    would rename or delete through one leaves everything where it is."""
-    from helpers import hub_rows
-    root, outside = tmp_path / "root", tmp_path / "outside"
-    root.mkdir()
-    v = state.Versions(root, "work")
-    v.put("work/a/b/old.md", "old\n")
-    v.put("work/a/b/new.md", "new\n")
-    real = root / linked
-    (outside / linked).parent.mkdir(parents=True, exist_ok=True)
-    real.rename(outside / linked)
-    real.symlink_to(outside / linked)
-    before = sorted(str(p.relative_to(outside)) for p in outside.rglob("*"))
-    v.move("work/a/b/old.md", "work/a/b/new.md")
-    assert sorted(str(p.relative_to(outside)) for p in outside.rglob("*")) == before
-    assert (outside / ".sheaf/versions" / state.doc_key("a/b/new.md") / "address").read_text() == "a/b/new.md"
-    assert [r["kind"] for r in hub_rows("versions-move-refused")] == ["versions-move-refused"]

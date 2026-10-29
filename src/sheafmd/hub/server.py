@@ -32,7 +32,7 @@ from .sock import TellSocket
 
 TICK_SECONDS = 1.0
 WAIT_SLICE = 0.25
-ENDS_STREAM = ("hub-stopping", "signed-out", "gone", "moved")   # the last event a tab gets on this stream
+ENDS_STREAM = ("hub-stopping", "signed-out", "gone")   # the last event a tab gets on this stream
 EXIT_UPGRADE = 75                     # sysexits EX_TEMPFAIL: the service manager starts the new code
 IDLE_SECONDS = 60.0              # a connection that is silent for this long, between requests or inside a head, is closed
 BODY_SECONDS = 30.0              # all of a body, from the moment the caller has been checked

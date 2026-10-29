@@ -20,7 +20,6 @@ The record is read as the GitHub App the deployment installs: the hub reads an i
 `token_file` at every poll and never mints one, so the App's key stays where the hub cannot read it.
 """
 import calendar
-import dataclasses
 import html
 import itertools
 import json
@@ -302,6 +301,7 @@ class Row:
     record: Record
     group: str                  # `<client>/<project>`
     read: tuple | None = None   # `_stat_key` of the file the sheaf was read from
+    file: str = ""              # the real path of that file: a sheaf's name finds it wherever it is (9.11)
 
 
 @dataclass
@@ -351,20 +351,26 @@ class TheList:
                                 error=f"{self.cfg.root} is not the top folder of its root ({root.path})")
                 self._records, self._answered, self._snap = {}, {}, Snapshot()
                 return
-            sheaves, read = [], {}
+            sheaves, read, files = [], {}, {}
+            placed, top = place.applies(self.hub, root.name), Path(os.path.realpath(root.path))
             for found in roots_mod.list_documents(root).docs:
                 if found.rel.count("/") < 2:
                     continue                # above `<client>/<project>`: no sheaf
                 if self.hub.roots.lookup(root.path / found.rel) != root:
                     continue                # a nested root's (8.2): 9.9 keeps it from the list's members
+                # A sheaf is known by its name (9.11), wherever its file is; a name two files hold is none.
+                rel = place.named(self.hub, root, top, found.rel) if placed else found.rel
+                if rel is None:
+                    continue
                 try:
                     key = _stat_key((root.path / found.rel).stat())     # before the read: a change after it shows
                     text = (root.path / found.rel).read_text(encoding="utf-8")
                 except (OSError, UnicodeDecodeError):
                     continue
-                read[found.rel] = key
+                read[rel] = key
+                files[rel] = os.path.realpath(root.path / found.rel)
                 try:
-                    s = read_sheaf(found.rel, text)
+                    s = read_sheaf(rel, text)
                 except Exception:           # one sheaf the reader trips on leaves the rest of the list
                     self.hub.record_exception("list-poll-failed", None)
                     continue
@@ -379,7 +385,7 @@ class TheList:
                 self._records = fetch(self.cfg, wanted) if wanted else {}   # an issue it does not hold is off
             except RecordError as e:
                 self.hub.record("list-poll-failed", None, root=root.name, error=str(e))
-            rows = [Row(s, self._records[s.issue], "/".join(s.rel.split("/")[:2]), read.get(s.rel))
+            rows = [Row(s, self._records[s.issue], "/".join(s.rel.split("/")[:2]), read.get(s.rel), files[s.rel])
                     for s in sheaves if s.issue in self._records]
             # A ticked sheaf waits on nobody until the record routine has moved its issue: a new change of the
             # issue, or a Status other than waiting (moving a Project's Status leaves the issue's change as it was).
@@ -390,13 +396,13 @@ class TheList:
             with self._gone_lock:
                 # A file seen gone after this poll began may have been read before it went: its row waits for the
                 # next poll, which reads what is there now (#34).
-                rows = [r for r in rows if self._gone.get(os.path.realpath(root.path / r.sheaf.rel), 0) < started]
+                rows = [r for r in rows if self._gone.get(r.file, 0) < started]
                 self._gone = {f: n for f, n in self._gone.items() if n > started}
                 self._snap = Snapshot(rows, entries, self.hub.clock())
-            # Every sheaf not at its home goes there (9.11), judged with the records just read: the first poll
-            # moves what was written before the rule, a later one what an owner change made another's.
-            for rel in read:
-                if place.logical(rel) is not None:
+            # Every sheaf whose file is not at its home goes there (9.11), judged with the records just read: the
+            # first poll moves what was written before the rule, a later one what an owner change made another's.
+            for rel in read if placed else ():
+                if place.logical(rel) == rel:
                     try:
                         place.place(self.hub, f"{root.name}/{rel}")
                     except Exception:       # one sheaf that cannot move leaves the others
@@ -430,7 +436,7 @@ class TheList:
             for row in snap.rows:
                 if row.sheaf.rel == a.rel:
                     try:
-                        sheaf = read_sheaf(a.rel, (root.path / a.rel).read_text(encoding="utf-8"))
+                        sheaf = read_sheaf(a.rel, self._file(root, a.rel).read_text(encoding="utf-8"))
                     except (OSError, UnicodeDecodeError):
                         sheaf = row.sheaf
                     if not _same_issue(sheaf.issue, row.sheaf.issue):
@@ -439,15 +445,9 @@ class TheList:
                     row.sheaf = sheaf
                     self._answered[a.rel] = row.record.updated
 
-    def moved(self, old: str, new: str):
-        """The sheaf at `old` (a path in the root) now lives at `new` (9.11): its row takes the new path at once,
-        so the page links where the file is, and a tick waits on it as before."""
-        with self._gone_lock:
-            for row in self._snap.rows:
-                if row.sheaf.rel == old:
-                    row.sheaf, row.read = dataclasses.replace(row.sheaf, rel=new), None
-            if old in self._answered:
-                self._answered[new] = self._answered.pop(old)
+    def _file(self, root, rel: str) -> Path:
+        """The file of the sheaf at `rel` in `root`, the list's, wherever it is (9.11): placed in proxy mode."""
+        return self.hub.file(f"{root.name}/{rel}", placed=self.hub.proxy is not None)
 
     # ── the page ────────────────────────────────────────────────────────────
     def assignees(self, address: str, issue: str):
@@ -462,15 +462,17 @@ class TheList:
             return None
         with self._gone_lock:
             # Seen gone and numbered in one step, so a poll that begins after this has the larger number.
-            if not os.path.lexists(root.path / a.rel):
+            if not os.path.lexists(self._file(root, a.rel)):
                 # Kept, the row would judge a sheaf a door create makes at its address before the next poll, and
                 # tell which issue the one that went named (#34).
-                # By its real path, so the row of a link to it goes too.
-                gone = os.path.realpath(root.path / a.rel)
-                self._gone[gone] = next(self._ask)
-                snap = self._snap
+                # By the real path of the file each row was read from, so the row of a link to it goes too, wherever
+                # the sheaf's file was (9.11).
+                snap, n = self._snap, next(self._ask)
+                gone = {os.path.realpath(self._file(root, a.rel))} | {r.file for r in snap.rows if r.sheaf.rel == a.rel}
+                for f in gone:
+                    self._gone[f] = n
                 for row in snap.rows:
-                    if os.path.realpath(root.path / row.sheaf.rel) == gone:
+                    if row.file in gone:
                         _drop(snap, row)
                 return None
         for row in self._snap.rows:
@@ -529,7 +531,7 @@ class TheList:
         made at its address, or one a link now points to, or a change), so the page never shows what a sheaf
         that went said; None when it now names another issue, cannot be read, or is no longer `member`'s to
         see: it may have changed since `visible` judged it."""
-        f = root.path / row.sheaf.rel
+        f = self._file(root, row.sheaf.rel)
         try:
             key = _stat_key(f.stat())
             if key == row.read:
@@ -543,7 +545,7 @@ class TheList:
         fm = visibility.front_matter(text)
         if not visibility.visible_to(fm, member, self.hub.assignees(address, fm)):
             return None
-        return Row(sheaf, row.record, row.group, key)
+        return Row(sheaf, row.record, row.group, key, row.file)
 
     def _section(self, title: str, rows: list, member, root: str) -> str:
         groups: dict = {}

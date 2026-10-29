@@ -15,7 +15,6 @@ connection, the Host of the front, the member header, the route (a member's rout
 Origin of every POST, then the body. No cookie and no key is read there.
 """
 import json
-import os
 import re
 import tempfile
 import time
@@ -33,10 +32,9 @@ from ..render import RenderError
 from ..source import StaleError
 from . import auth, peer, place, proxy, the_list, visibility, work
 from .asktell import NO_AGENT, JobRefused
-from .events import Instead
 from .index import Status
 from .live import UNKNOWN, NotAuthor
-from .roots import Address, NotFound, address_of_url, root_of_url, url_path
+from .roots import Address, NotFound, address_of_url, root_of_url
 from .state import TokenRow
 
 MAX_BODY = 8 * 1024 * 1024
@@ -503,12 +501,6 @@ class Handler:
             raise Refuse(404, "no such document")
         return doc
 
-    def _may_open(self, req: Req, address: str) -> bool:
-        """Whether the caller may open the document at `address`, which is there: the hub's person always, a member
-        when it is in one of their roots and its visibility lets them (9.9, 9.11)."""
-        m = req.member
-        return m is None or (self.hub.member_owns(m, address) and self.hub.visible(m, address, never_read=False))
-
     def _entry(self, req: Req, doc):
         """The document `doc` names. A member of proxy mode is told of no document of another
         root, nor of a root nested inside one of theirs: the same 404 as for one that does not
@@ -574,10 +566,6 @@ class Handler:
             return _html(200, self.hub.index.page(nonce, only=name, member=req.member), nonce)
         if not address.endswith(".md"):
             raise Refuse(404, "no such page")
-        # A sheaf the hub moved (9.11): its other address sends whoever may open it to where it lives, and is the
-        # 404 of a missing document to anyone else.
-        if (moved := place.found(self.hub, address, lambda a: self._may_open(req, a))) is not None:
-            return Response(302, {"Location": url_path(moved)})
         e = self._entry(req, address)
         self.hub.catch_up(e)
         return _html(200, self.hub.page(e, nonce, member=req.member), nonce)
@@ -594,21 +582,15 @@ class Handler:
         e = self._entry(req, req.query.get("doc"))
         def for_member(name, data):
             # Asked at each event: a write that makes the sheaf its owner's alone silences a stream
-            # opened before it (9.11). Where a moved sheaf went is told only to whom may open it there; anyone
-            # else is told it is gone, the last event of the stream as `moved` is.
-            if name == "moved":
-                return data if self._may_open(req, data.get("to", "")) else Instead("gone", {"doc": data.get("doc")})
+            # opened before it (9.11).
             return _document_events(name, data) if hub.visible(member, e.address) else None
         sub = e.bus.subscribe(lambda tabs: {"boot": hub.boot, "version": hub.version,
                                             "service": hub.service, "tabs": tabs},
                               for_member if member else None)
         if member is None and hub.auth is not req.auth:       # a rotation overtook this request, after it told the open streams
             sub.put("signed-out", {})
-        if hub.entries.get(e.address) is not e:
-            # A forget or a move (9.11) overtook this request, after it told the open streams: a move is told as
-            # `moved` to whoever may open the sheaf where it went (the filter sends anyone else `gone`).
-            to = place.found(hub, e.address, lambda a: self._may_open(req, a))
-            sub.put(*(("moved", {"doc": e.address, "to": to}) if to else ("gone", {"doc": e.address})))
+        if hub.entries.get(e.address) is not e:               # a forget overtook this request, after it told the open streams
+            sub.put("gone", {"doc": e.address})
         e.opened = True
         return _stream(sub)
 
@@ -666,10 +648,9 @@ class Handler:
                    and isinstance(x.get("saved", ""), str), "each edit is {i, html} or {i, html, saved}")
         rid = b.get("rid")
         _shape(rid is None or (isinstance(rid, str) and _RID_RE.fullmatch(rid)), "rid is not a request id")
-        # The name's lock (9.11) from the guard's judging of the sheaf's home to its move: the write and the move
-        # are one operation, and one commit.
+        # The name's lock (9.11) from the guard's judging of the sheaf's home to its file's move: the write and the
+        # move are one operation, and one commit.
         with place.held(self.hub, e.address):
-            e, came = self._here(req, e)
             try:
                 guard, ticked = self._ticks(req, e)
                 got = e.live.save(h, edits, rid=rid, guard=guard)
@@ -679,13 +660,11 @@ class Handler:
                 raise Refuse(400, "the text holds a character that cannot be written to the .md "
                                   "(half of a pair, such as half an emoji)") from None
             self.hub.index.touch(e.address)
-            moved = self._placed(req, e, ticked)
+            gone = self._placed(e, ticked)
         if got["changed"] and not got.get("again"):
-            self._committed(req, e, "edit", moved)
+            self.hub.committed(e.address, req.member, "edit", gone=gone)
         if "Stop James" in ticked:
             self._stop_james(req, e)
-        if moved or came:
-            got["moved"] = moved or came
         if got["merged"] and not got.get("again"):
             # Not a failure, but the thing this log exists to measure: how often the page and
             # an agent write at the same time.
@@ -707,7 +686,6 @@ class Handler:
         if edit is None:
             raise Refuse(409, f"the sheaf no longer holds that action ({word}): reload the list")
         with place.held(self.hub, e.address):
-            e, came = self._here(req, e)
             try:
                 guard, ticked = self._ticks(req, e)
                 got = e.live.save(h, [edit], guard=guard)
@@ -716,43 +694,21 @@ class Handler:
             if not got["changed"]:
                 raise Refuse(409, f"the sheaf no longer holds that action ({word}): reload the list")
             self.hub.index.touch(e.address)
-            if self.hub.the_list is not None:
-                self.hub.the_list.ticked(e.address)
-            moved = self._placed(req, e, ticked)
-        self._committed(req, e, "tick", moved)
+            gone = self._placed(e, ticked)
+        self.hub.committed(e.address, req.member, "tick", gone=gone)
         if "Stop James" in ticked:
             self._stop_james(req, e)
-        if moved or came:
-            return _ok(hash=got["hash"], moved=moved or came)
+        if self.hub.the_list is not None:
+            self.hub.the_list.ticked(e.address)
         return _ok(hash=got["hash"])
 
-    def _here(self, req: Req, e):
-        """Under the lock of the sheaf's name: (the entry of the document `e` was, where its file is now, the address
-        it moved to or None). A move that came after the request found `e` and before the lock (the list's poll,
-        9.11) sends the write to the sheaf's home, and its answer names it as `moved`; a file gone, or one the
-        caller may not open where it went, is the 404 of a document that is not there."""
-        if self.hub.entries.get(e.address) is e and os.path.lexists(e.path):
-            return e, None
-        to = place.found(self.hub, e.address, lambda a: self._may_open(req, a))
-        if to is None:
-            raise Refuse(404, "no such document")
-        return self._entry(req, to), to
-
-    def _placed(self, req: Req, e, ticked) -> str | None:
-        """After a write that shared the sheaf or withdrew its Share, under the lock of its name, the sheaf goes to
-        its home (9.11): the address it moved to, None when it stayed. The caller commits the write and the move."""
+    def _placed(self, e, ticked) -> str | None:
+        """After a write that shared the sheaf or withdrew its Share, under the lock of its name, its file goes to
+        its home (9.11): the path in the root it left, None when it stayed. The caller commits the write and the
+        move as one; the sheaf's address stays."""
         if not ({"Share", "Unshare"} & ticked):
             return None
-        new = place.place(self.hub, e.address, commit=False)
-        return new if new != e.address else None
-
-    def _committed(self, req: Req, e, what: str, moved: str | None):
-        """The commit of a save or a tick (8.11): one `move: <old> -> <new>` with the new text when it moved the
-        sheaf (9.11)."""
-        if moved:
-            self.hub.committed(moved, req.member, what, gone=Address.parse(e.address).rel)
-        else:
-            self.hub.committed(e.address, req.member, what)
+        return place.place(self.hub, e.address, commit=False)
 
     def _ticks(self, req: Req, e):
         """The guard of a save (live.save) for the two actions the hub acts on (9.11), and the set it fills

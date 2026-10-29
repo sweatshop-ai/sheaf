@@ -146,16 +146,11 @@ class Versions:
     def _folder(self, address: str) -> Path:
         return self.dir / doc_key(self._key(address))
 
-    def _store_dir(self) -> Path:
-        """`dir`, made when it is not there yet, each folder of it checked as one of the hub's account and never a
-        link: a root's `.sheaf` and `.sheaf/versions` (7.4). Raises paths.PathError otherwise."""
-        if self._root is not None:
-            paths.private_dir(self._root / INSIDE.parent)   # `.sheaf` itself: never a link out of the root
-        return paths.private_dir(self.dir)
-
     def _make_folder(self, address: str) -> Path:
         """`_folder`, made when it is not there yet, with its `address` file."""
-        folder = paths.private_dir(self._store_dir() / doc_key(self._key(address)))
+        if self._root is not None:
+            paths.private_dir(self._root / INSIDE.parent)   # `.sheaf` itself: never a link out of the root
+        folder = paths.private_dir(paths.private_dir(self.dir) / doc_key(self._key(address)))
         if not (folder / _ADDRESS_FILE).exists():
             write_text_private(folder / _ADDRESS_FILE, self._key(address))
         return folder
@@ -216,28 +211,6 @@ class Versions:
         files of the root, as its documents are (7.4)."""
         if self._root is None:
             shutil.rmtree(self._folder(address), ignore_errors=True)
-
-    def move(self, old: str, new: str):
-        """The versions of the document at `old` become those of `new`: its folder renamed, its `address` file
-        rewritten (9.11, a sheaf the hub moved). A folder already at `new`'s name holds the versions of a document
-        that is no longer there, and goes first. A folder that is a link is left as it is, and so is everything when
-        a folder of the store above it is a link or not the hub's account's (7.4): a `versions-move-refused` row."""
-        if self._root is not None and not os.path.lexists(self._root / INSIDE.parent):
-            return                                          # no store in the root: nothing to move
-        try:
-            self._store_dir()
-        except (paths.PathError, OSError) as e:
-            diagnostics.record("hub", "versions-move-refused", old, to=new, error=str(e)[:300])
-            return
-        src, dst = self._folder(old), self._folder(new)
-        if src == dst or src.is_symlink() or not src.is_dir():
-            return
-        if dst.is_symlink():
-            dst.unlink()
-        elif dst.exists():
-            shutil.rmtree(dst, ignore_errors=True)
-        os.rename(src, dst)
-        write_text_private(dst / _ADDRESS_FILE, self._key(new))
 
     def forget_prefix(self, prefix: str):
         """Drop the versions of every document whose address starts with `prefix` (`<root>/`),
@@ -304,16 +277,6 @@ class _Store:
                 del data[k]
             return gone, True
         return self._change(change)
-
-
-    def move(self, old: str, new: str):
-        """The entry of the document at `old` becomes `new`'s (9.11, a sheaf the hub moved)."""
-        def change(data):
-            if old not in data:
-                return None, False
-            data[new] = data.pop(old)
-            return None, True
-        self._change(change)
 
 
 class TokenError(Exception):
@@ -554,17 +517,6 @@ class MemberSeen(_Store):
                 doc[cid] = count
                 return None, True
             return None, False
-        self._change(change)
-
-    def move(self, old: str, new: str):
-        """Each member's entry of the document at `old` becomes their entry of `new` (9.11)."""
-        def change(data):
-            moved = False
-            for docs in data.values():
-                if isinstance(docs, dict) and old in docs:
-                    docs[new] = docs.pop(old)
-                    moved = True
-            return None, moved
         self._change(change)
 
     def forget_prefix(self, prefix: str) -> list[str]:

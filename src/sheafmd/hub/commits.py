@@ -88,13 +88,15 @@ class Commits:
         with self._lock:
             return self._roots.setdefault(folder, threading.Lock())
 
-    def saved(self, root, rel: str, author: Author, what: str, gone: str | None = None):
-        """`rel`, a document of `root` (a roots.Root), was written by `author`: commit it when the root
-        commits. `what` names the write in the subject (`edit`, `comment`). `gone` is the path the document
-        was moved from (9.11): the commit is `move: <gone> -> <rel>`, and stages the file's going from there
-        with its coming here, and its versions folder's, when the root keeps it. Never raises: a commit that
-        fails is a diagnostics row, and the write stands."""
-        address = f"{root.name}/{rel}"
+    def saved(self, root, rel: str, author: Author, what: str, gone: str | None = None, key: str | None = None):
+        """`rel`, the file of a document of `root` (a roots.Root), was written by `author`: commit it when the
+        root commits. `what` names the write in the subject (`edit`, `comment`). `key` is the document's own path,
+        its address in the root, when that is not `rel` (a sheaf's name, 9.11), which names its versions folder.
+        `gone` is the path the file was moved from (9.11): the commit is `move: <gone> -> <rel>`, and stages the
+        file's going from there with its coming here. Never raises: a commit that fails is a diagnostics row, and
+        the write stands."""
+        key = key or rel
+        address = f"{root.name}/{key}"
         try:
             rc = config.load_root_config(root.path, warn=lambda line: None)
         except config.ConfigError as e:
@@ -107,14 +109,13 @@ class Commits:
             return
         # The file the write went to: a link inside the root is staged as the link, not what it names.
         top = os.path.realpath(root.path)
-        def of(d):
-            """The document `d`, then its versions folder when the root keeps it."""
-            return [os.path.relpath(os.path.realpath(root.path / d), top)] + \
-                ([str(state.INSIDE / state.doc_key(d))] if rc.versions_inside else [])
+        def file(d):
+            return os.path.relpath(os.path.realpath(root.path / d), top)
+        paths = [file(rel)] + ([str(state.INSIDE / state.doc_key(key))] if rc.versions_inside else [])
         subject = f"move: {gone} -> {rel}" if gone else f"{what}: {rel}"
         try:
             with self._root_lock(root.path):
-                if not self._commit(root.path, of(rel), author, subject, address, gone=of(gone) if gone else []):
+                if not self._commit(root.path, paths, author, subject, address, gone=[file(gone)] if gone else []):
                     return
         except (OSError, subprocess.SubprocessError) as e:
             self._record("commit-failed", address, error=str(e)[:300])
@@ -124,11 +125,11 @@ class Commits:
 
     def _commit(self, folder: Path, paths: list, author: Author, subject: str, address: str,
                 gone: list = ()) -> bool:
-        """`paths`: the document, then its versions folder when the root keeps it; `gone`: the same of the path it
+        """`paths`: the document's file, then its versions folder when the root keeps it; `gone`: the path its file
         moved from (a move). A path that is gone is staged as gone: git still lists it."""
         if _ignored(folder, paths[0]):
             # A document the repo ignores stays out, its versions too; but a move into an ignored folder still
-            # takes the file, and its versions, out of the place git holds them (9.11), or git keeps them there.
+            # takes the file out of the place git holds it (9.11), or git keeps it there.
             if not gone:
                 return False
             paths = list(gone)

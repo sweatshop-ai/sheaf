@@ -8,7 +8,7 @@ sheafmd.hub.visibility — who may open a sheaf (SPEC 9.11): its owner alone, or
     share(text, by, date)           the text the owner's Share writes
     unshare(text)                   the text the owner's untick of Share writes
     newly_ticked(toggled)           the Share and Stop James boxes a save ticks
-    newly_unticked(toggled)         the boxes a save unticks
+    withdraws_share(old, new)       whether a write unticks Share, by whatever edit
     for_door(text, old)             the text a door write puts on disk
 
 A sheaf is `owner` when its `visibility` says so, or when one of its `sources` is private and the owner has
@@ -21,6 +21,8 @@ The owner is the assignee of the sheaf's issue in the record, when the list know
 the member whose `github` it is; else the member whose `short` is the front matter's `owner`.
 """
 import re
+
+from ..blocks import split_md_blocks
 
 PROJECT_WIDE = ("issue", "pr", "repo", "web")
 KEYS = ("visibility", "sources", "owner", "shared")
@@ -226,10 +228,22 @@ def newly_ticked(toggled) -> set:
     return _flipped(toggled, " ", "xX")
 
 
-def newly_unticked(toggled) -> set:
-    """The mirror of `newly_ticked`: the words whose box a save unticked, a line that reads `- [x] <word>` in the
-    old and is that line with only its box unticked in the new, by the same strict rule (9.11, #40)."""
-    return _flipped(toggled, "xX", " ")
+def withdraws_share(old: str, new: str) -> bool:
+    """Whether writing `new` over `old` unticks Share, by whatever edit (9.11, #40): `old` holds a ticked Share box
+    and `new` holds Share boxes, none of them ticked. Boxes are read in the list blocks the page draws, so a box in
+    a fence or a comment is none."""
+    return _share_box(old) == "x" and _share_box(new) == " "
+
+
+def _share_box(text_: str) -> str | None:
+    """"x" when `text_` holds a ticked Share box, " " when it holds only unticked ones, None when it holds none."""
+    marks = set()
+    for b in split_md_blocks(text_):
+        if b.kind == "list":
+            for line in _lines(b.content):
+                if (m := _BOX_RE.fullmatch(line)) and m.group(4) == "Share":
+                    marks.add(m.group(2).lower())
+    return "x" if "x" in marks else (" " if marks else None)
 
 
 def _flipped(toggled, was_marks: str, now_marks: str) -> set:

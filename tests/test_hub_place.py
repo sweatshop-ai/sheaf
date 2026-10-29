@@ -214,6 +214,40 @@ def test_a_merged_save_that_unticks_share_follows_the_same_rule(team, work):
     assert (work / SHARED).read_text(encoding="utf-8") == now
 
 
+def rewrite_untick(team, work, rel, member):
+    """A save that unticks Share by rewriting its block through pandoc: the box unchecked and an item added, so the
+    edit is no tick of 7.2."""
+    text = (work / rel).read_text(encoding="utf-8")
+    blocks = split_md_blocks(text)
+    i = next(i for i, b in enumerate(blocks) if "- [x] Share" in b.content)
+    soup = BeautifulSoup(_pandoc.run(["-f", "gfm", "-t", "html5"], blocks[i].content).stdout, "html.parser")
+    del soup.select_one('input[type="checkbox"]')["checked"]
+    item = soup.new_tag("li")
+    item.string = "Also this."
+    soup.select_one("ul").append(item)
+    return team.post("/_/save", {"doc": f"work/{rel}", "hash": md_hash(text), "edits": [{"i": i, "html": str(soup)}]},
+                     member=member)
+
+
+def test_a_rewrite_that_unticks_share_is_refused_to_a_member_who_is_not_the_owner(team, work):
+    put(team, work, HOME, PRIVATE)
+    tick(team, work, HOME, "Share", THIERRY)
+    before = (work / SHARED).read_text(encoding="utf-8")
+    got = rewrite_untick(team, work, SHARED, HANS)
+    assert got.status == 409 and got.json()["error"] == "Only the owner of this sheaf can withdraw its Share."
+    assert (work / SHARED).read_text(encoding="utf-8") == before
+
+
+def test_the_owners_rewrite_that_unticks_share_withdraws_it(team, work):
+    put(team, work, HOME, PRIVATE)
+    tick(team, work, HOME, "Share", THIERRY)
+    got = rewrite_untick(team, work, SHARED, THIERRY)
+    assert got.status == 200, got.text
+    assert got.json()["moved"] == f"work/{HOME}"
+    text = (work / HOME).read_text(encoding="utf-8")
+    assert front_matter(text)["visibility"] == "owner" and "Also this." in text and not (work / SHARED).exists()
+
+
 def test_the_lists_tick_of_share_moves_the_sheaf_and_says_where(team, work):
     put(team, work, HOME, PRIVATE)
     got = team.post("/_/tick", {"doc": f"work/{HOME}", "action": 0, "word": "Share"}, member=THIERRY)

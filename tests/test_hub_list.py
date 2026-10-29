@@ -14,7 +14,7 @@ import pytest
 from bs4 import BeautifulSoup
 from helpers import FRONT, Front, call, hub_rows
 
-from sheafmd.hub import proxy, the_list
+from sheafmd.hub import place, proxy, the_list
 from sheafmd.hub.state import Tokens
 from sheafmd.hub.visibility import front_matter
 from sheafmd.source import md_hash
@@ -502,9 +502,11 @@ def test_a_tick_of_an_action_the_sheaf_no_longer_holds_is_refused_and_writes_not
 
 
 def now(box, body):
-    """`body` with the hash of its sheaf's text as it is now: the tick of a list read just now."""
-    rel = body["doc"].split("/", 1)[1]
-    return {**body, "hash": md_hash((box.hub.the_list.root().path / rel).read_text(encoding="utf-8"))}
+    """`body` with the hash of its sheaf's text as it is now: the tick of a list read just now. The file is the one
+    that holds the sheaf's name, wherever it is placed (9.11)."""
+    top = box.hub.the_list.root().path
+    rel = place.file_rel(top, body["doc"].split("/", 1)[1])
+    return {**body, "hash": md_hash((top / rel).read_text(encoding="utf-8"))}
 
 
 def row_box(res, doc):

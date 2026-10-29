@@ -380,6 +380,8 @@ class TheList:
                 entries = projects.read(root.path) or {}
             except projects.Invalid:
                 entries = {}
+            if placed:
+                place.tell_ignored(self.hub, root, set(entries) | {"/".join(r.split("/")[:2]) for r in read})
             wanted = sorted({s.issue for s in sheaves})
             try:
                 self._records = fetch(self.cfg, wanted) if wanted else {}   # an issue it does not hold is off

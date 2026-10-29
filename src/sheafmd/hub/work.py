@@ -64,6 +64,13 @@ class State:
         return [s["id"] for s in self.sessions if self.cfg.box and s["host"] == self.cfg.box]
 
     @property
+    def forkable(self) -> str | None:
+        """The id of the session a fork starts from: the live one, while it runs on the box. None while it runs
+        on a laptop, whose transcript the hub never holds: a box session's older copy would start a second line
+        of work beside the live one."""
+        return self.sessions[0]["id"] if self.live == "box" else None
+
+    @property
     def can(self) -> list:
         """The page's `can` (10.1): Ask and Tell go to James's window while the live session is on the box,
         or on a sheaf of James with no session yet (the hub records his when it finds it), and `[list]`

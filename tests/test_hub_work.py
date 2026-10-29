@@ -216,7 +216,10 @@ def test_a_session_item_that_does_not_parse_is_skipped(team, box, work):
     bad = SHEAF.replace(f"{{id: {LIVE}, host: tiroir-tt, member: james, date: 2026-10-28T05:12:03Z}}",
                         f"{{id: {LIVE}, host: tiroir-tt, member: james, date: yesterday}}")
     put(team, work, DOC, bad)
-    got = download(team)
+    # Its file is in the copy, and it is no session: the live one is the laptop's that follows it.
+    assert download(team, id=LIVE).status == 404
+    assert download(team).status == 404
+    got = download(team, id=OLDER)
     assert got.status == 200 and got.headers["X-Sheaf-Session"] == OLDER
 
 

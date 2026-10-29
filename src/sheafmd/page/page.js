@@ -498,10 +498,14 @@
     // or when it keeps no copy of the box's transcripts (no `sessions_dir`).
     if (w.fork) h += '<h4>Fork to your machine</h4>' + cmdRow(w.fork) +
                      '<p>Runs on your laptop: fetches the session through this hub, forks it under your name.</p>';
+    // A live session on a laptop is continued there: the hub holds no copy of it, and offers no fork of an older one.
+    var live = liveSession(), none = w.live === 'laptop'
+      ? 'The live session runs on ' + upper(live.member) + '’s machine, ' + live.host + ': open it there. This hub keeps no copy of it to fork.'
+      : 'Nothing to fork from this hub: no session of this sheaf ran on the box, or the hub keeps no copy of its transcripts.';
     h += '<h4>Sessions</h4>' + (ss.length ? ss.map(function (x) {
       return '<div class="rd-sess">' + esc(upper(x.member)) + ' on ' + esc(x.host) + ' · ' + esc(utcDate(x.date)) + '</div>';
     }).join('') : '<p class="rd-none">No session yet.</p>') +
-    (ss.length && !w.fork ? '<p class="rd-none">Nothing to fork from this hub: no session of this sheaf ran on the box, or the hub keeps no copy of its transcripts.</p>' : '');
+    (ss.length && !w.fork ? '<p class="rd-none">' + esc(none) + '</p>' : '');
     workPop.innerHTML = h;
     Array.prototype.forEach.call(workPop.querySelectorAll('.rd-cmd button'), function (b) {
       b.addEventListener('click', function () { copyCommand(b.previousElementSibling); });

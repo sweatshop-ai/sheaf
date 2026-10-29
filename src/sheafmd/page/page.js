@@ -532,7 +532,7 @@
       try { j = await res.json(); } catch (e) { /* not JSON: said by its status below */ }
       if (!res.ok || typeof j.code !== 'string') return tell(j.error || 'The hub answered ' + res.status + '.');
       box.innerHTML = cmdRow(j.code) + '<p>Good for 10 minutes, for this sheaf only. Paste it when ' +
-                      '<code>tiroir work</code> asks for it. It is shown once.</p>';
+                      'the command above asks for it. It is shown once.</p>';
       var c = box.querySelector('.rd-cmd button');
       c.addEventListener('click', function () { copyCommand(c.previousElementSibling); });
     } catch (e) {

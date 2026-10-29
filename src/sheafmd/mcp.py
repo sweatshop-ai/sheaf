@@ -414,17 +414,19 @@ class Door:
         """A change to one comment. Through the document's Live Document when the hub has one,
         so open tabs hear of it at once and a Tell wait sees an action reply; straight into the
         file when the hub holds no page for it. Either way the caller's sight of it (9.11) is judged
-        again on the file under its lock, so a sheaf that closed since the check takes nothing."""
-        entry = self.hub.entries.get(address)
-
+        again on the file under its lock, so a sheaf that closed since the check takes nothing. Both
+        under the lock of the sheaf's name (9.11), the file found again under it, so no move comes
+        between finding the file and writing it."""
         def guard(t):
             self._seen(t, address, caller, doc)
         try:
-            if entry is not None:
-                entry.live.comment(op, fields, None, by=caller.display, role=role, announce=True, guard=guard)
-            else:
-                update_file(self.hub.roots.document(address),
-                            lambda t: rdc.apply_op(guard(t) or t, op, fields, caller.display, now(), role))
+            with place.held(self.hub, address):
+                entry = self.hub.entries.get(address)
+                if entry is not None:
+                    entry.live.comment(op, fields, None, by=caller.display, role=role, announce=True, guard=guard)
+                else:
+                    update_file(self.hub.roots.document(address),
+                                lambda t: rdc.apply_op(guard(t) or t, op, fields, caller.display, now(), role))
         except rdc.AnchorError as e:
             raise ToolError(f"{e}.") from None
         except (OSError, UnicodeDecodeError, NotFound):

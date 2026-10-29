@@ -568,3 +568,45 @@ def test_the_pull_holds_the_file_lock_of_what_it_changes(box, sheaves, remote, t
     edit(box, sheaves)
     assert box.hub.commits.settle()
     assert seen == ["held"]
+
+
+def test_a_link_and_its_file_both_changed_on_the_remote_take_one_lock_and_the_push_goes(box, sheaves, remote, tmp_path):
+    """Two paths of one file are one file lock: the pull never waits on itself."""
+    (sheaves / "notes").mkdir()
+    (sheaves / "notes" / "b.md").write_text("# B\n", encoding="utf-8")
+    (sheaves / "notes" / "a.md").symlink_to("b.md")
+    git(sheaves, "add", "-A")
+    git(sheaves, "commit", "-q", "-m", "a link")
+    git(sheaves, "push", "-q", "origin", "HEAD:main")
+    away = tmp_path / "github"
+    merged_on_github(tmp_path, remote, {"notes/b.md": "# B, on GitHub\n"}, "b")
+    git(away, "rm", "-q", "notes/a.md")
+    git(away, "commit", "-q", "-m", "no link")
+    git(away, "push", "-q", "origin", "HEAD:main")
+    edit(box, sheaves)
+    assert box.hub.commits.settle(timeout=10)
+    assert git(sheaves, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
+    assert (sheaves / "notes" / "b.md").read_text(encoding="utf-8") == "# B, on GitHub\n"
+
+
+def test_a_file_name_that_is_not_utf8_on_the_remote_is_taken_in(box, sheaves, remote, tmp_path):
+    merged_on_github(tmp_path, remote, {"README.md": "# The sheaves\n"}, "a README")
+    away = tmp_path / "github"
+    (away / os.fsdecode(b"caf\xe9.txt")).write_text("x\n", encoding="utf-8")
+    git(away, "add", "-A")
+    git(away, "commit", "-q", "-m", "a latin-1 name")
+    git(away, "push", "-q", "origin", "HEAD:main")
+    edit(box, sheaves)
+    assert box.hub.commits.settle(timeout=10)
+    assert git(sheaves, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
+    assert (sheaves / os.fsdecode(b"caf\xe9.txt")).exists()
+
+
+def test_a_hub_commit_the_remote_already_holds_is_not_pushed_again_empty(box, sheaves, remote, tmp_path):
+    (sheaves / "README.md").write_text("# The sheaves\n", encoding="utf-8")
+    git(sheaves, "add", "README.md")
+    git(sheaves, "commit", "-q", "-m", "a README, on the box")         # not pushed
+    merged_on_github(tmp_path, remote, {"README.md": "# The sheaves\n"}, "a README, on GitHub")
+    edit(box, sheaves)
+    subjects = [who.split("|")[1] for who, _ in pushed(box, remote)]
+    assert subjects == ["edit: acme/blog/2026-10-28-plan.md", "a README, on GitHub", "first"]

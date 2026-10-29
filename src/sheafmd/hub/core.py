@@ -25,7 +25,7 @@ from .. import __version__, config, diagnostics, paths
 from ..agents import registry
 from ..agents.base import Adapter, Target
 from ..render import render_file
-from ..source import STAMP_FORMAT, file_lock
+from ..source import STAMP_FORMAT, file_lock, lock_key
 from . import commits as commits_mod
 from . import place
 from . import projects
@@ -176,7 +176,8 @@ class Hub:
         with ExitStack() as held:
             for name in sorted(names):
                 held.enter_context(place.held(self, f"{root.name}/{name}"))
-            for f in sorted(set(map(str, files))):
+            # One lock per file, not per path: a link and its file are one lock, and flock taken twice waits on itself.
+            for _, f in sorted({lock_key(f): f for f in files}.items()):
                 held.enter_context(file_lock(f))
             yield
 

@@ -45,8 +45,8 @@ def _env(author: Author | None = None) -> dict:
 def _git(root: Path, *args, author=None, seconds=GIT_SECONDS, given=None):
     # No hook of the repo runs for the hub: hooks are code of whoever wrote `.git/hooks`.
     return subprocess.run(["git", "-C", str(root), "-c", "core.hooksPath=/dev/null", "--literal-pathspecs",
-                           *args], capture_output=True, text=True, timeout=seconds, env=_env(author),
-                          input=given)
+                           *args], capture_output=True, text=True, encoding="utf-8",
+                          errors="surrogateescape", timeout=seconds, env=_env(author), input=given)
 
 
 def _ignored(folder: Path, rel: str) -> bool:
@@ -87,16 +87,20 @@ def _again(folder: Path, commit: str, onto: str):
     tree, *conflicts = head.split("\0")
     if r.returncode != 0:
         return None, sorted(set(conflicts)) if r.returncode == 1 else [_last_line(r)]
+    if tree == _git(folder, "rev-parse", f"{onto}^{{tree}}").stdout.strip():
+        return onto, []                                # the remote holds this change already: no empty commit
     meta = _git(folder, "log", "-1", "--format=%an%x00%ae%x00%ad%x00%cn%x00%ce%x00%cd", "--date=raw",
                 commit).stdout.rstrip("\n").split("\0")
-    message = _git(folder, "cat-file", "commit", commit).stdout.partition("\n\n")[2]
+    # The message as bytes: text mode would turn a CR into a LF.
+    message = subprocess.run(["git", "-C", str(folder), "cat-file", "commit", commit], capture_output=True,
+                             timeout=GIT_SECONDS, env=_env()).stdout.partition(b"\n\n")[2]
     env = dict(zip(["GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_AUTHOR_DATE",
                     "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "GIT_COMMITTER_DATE"], meta))
     made = subprocess.run(["git", "-C", str(folder), "commit-tree", tree, "-p", onto, "-F", "-"], capture_output=True,
-                          text=True, timeout=GIT_SECONDS, env={**_env(), **env}, input=message)
+                          timeout=GIT_SECONDS, env={**_env(), **env}, input=message)
     if made.returncode != 0:
-        return None, [_last_line(made)]
-    return made.stdout.strip(), []
+        return None, [made.stderr.decode("utf-8", "replace").strip()[-300:] or f"git exited {made.returncode}"]
+    return made.stdout.decode().strip(), []
 
 
 class Commits:
@@ -227,8 +231,8 @@ class Commits:
                 if r.returncode != 0:
                     # The commit stays; the next write's push carries it.
                     self._record("push-failed", address, error=_last_line(r))
-            except (OSError, subprocess.SubprocessError) as e:
-                self._record("push-failed", address, error=str(e)[:300])
+            except Exception as e:                     # never a dead thread: a push that never comes is a row
+                self._record("push-failed", address, error=str(e)[:300] or type(e).__name__)
             finally:
                 with self._lock:
                     self._pushing = False

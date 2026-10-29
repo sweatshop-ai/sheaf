@@ -35,6 +35,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from .. import config, paths
+from ..source import md_hash
 from ..blocks import _split_lines, split_md_blocks
 from ..edit import TASK_MARK_RE, ticked_html
 from . import place, projects
@@ -53,6 +54,8 @@ DEFAULTS = {"api": "https://api.github.com", "poll": 60, "waiting": "Waiting on 
 WORDS = ("Approve", "Run it", "Don't run", "Undo skip", "Done", "Share", "Stop James")
 SHOWS = {"projects": "My projects", "mine": "Only mine", "all": "All of the team"}
 BATCH = 50                      # issues per GraphQL request
+ITEMS = 100                     # Project items of an issue per page: the most GitHub gives
+PAGES = 10                      # requests a batch's Project items may take: the poll holds _poll_lock while it pages
 HTTP_SECONDS = 20
 
 _BOX_RE = re.compile(r"[A-Za-z0-9.-]{1,63}")
@@ -164,6 +167,7 @@ class Sheaf:
     sources: tuple = ()
     owner: str = ""
     shared: str = ""
+    hash: str = ""              # md_hash of the text read: a tick from its row is refused once the text is another
 
 
 def issue_of(written: str) -> tuple | None:
@@ -195,7 +199,7 @@ def read_sheaf(rel: str, text: str) -> Sheaf:
                     actions.append((m.group(1).replace("’", "'"), m.group(2) or "", b.start + k))
     return Sheaf(rel, title or rel.rsplit("/", 1)[-1][:-3], issue, fm_text(fm, "assistant"),
                  fm_text(fm, "kind"), visibility.effective(fm), tuple(actions), visibility.sources(fm),
-                 fm_text(fm, "owner"), fm_text(fm, "shared"))
+                 fm_text(fm, "owner"), fm_text(fm, "shared"), md_hash(text))
 
 
 def tick_edit(text: str, n: int, word: str):
@@ -231,15 +235,17 @@ class RecordError(Exception):
     """The record could not be read this poll. The message says why, never the token."""
 
 
-def _query(issues: list) -> str:
+def _query(issues: list, after: list | None = None) -> str:
+    """The query of `issues`; with `after` (a cursor per issue), only the next page of their Project items."""
     parts = []
     for i, (owner, repo, number) in enumerate(issues):
+        page = f"first: {ITEMS}" + (f", after: {json.dumps(after[i])}" if after else "")
         parts.append(
             f'i{i}: repository(owner: "{owner}", name: "{repo}") {{ issue(number: {number}) {{ '
-            "state updatedAt assignees(first: 10) { nodes { login } } "
-            "projectItems(first: 20) { nodes { project { number owner { ... on Organization { login } "
+            + ("" if after else "state updatedAt assignees(first: 10) { nodes { login } } ")
+            + f"projectItems({page}) {{ nodes {{ project {{ number owner {{ ... on Organization {{ login }} "
             "... on User { login } } } status: fieldValueByName(name: \"Status\") { "
-            "... on ProjectV2ItemFieldSingleSelectValue { name } } } } } }")
+            "... on ProjectV2ItemFieldSingleSelectValue { name } } } pageInfo { hasNextPage endCursor } } } }")
     return "query { " + " ".join(parts) + " }"
 
 
@@ -254,27 +260,71 @@ def fetch(cfg: ListConfig, issues: list) -> dict:
     out = {}
     for start in range(0, len(issues), BATCH):
         batch = issues[start:start + BATCH]
-        req = urllib.request.Request(
-            cfg.api + "/graphql", data=json.dumps({"query": _query(batch)}).encode(), method="POST",
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json",
-                     "Accept": "application/json", "User-Agent": "sheaf-list"})
-        try:
-            with urllib.request.urlopen(req, timeout=HTTP_SECONDS) as r:
-                answer = json.loads(r.read())
-        except urllib.error.HTTPError as e:
-            raise RecordError(f"GitHub answered {e.code} to the record's query") from None
-        except (OSError, ValueError) as e:
-            raise RecordError(f"GitHub could not be read ({type(e).__name__})") from None
-        data = answer.get("data") if isinstance(answer, dict) else None
-        if not isinstance(data, dict):
-            kinds = sorted({str(e.get("type") or "?") for e in answer.get("errors") or [] if isinstance(e, dict)}) \
-                if isinstance(answer, dict) else []
-            raise RecordError(f"GitHub answered the record's query with errors and no data ({', '.join(kinds) or 'none named'})")
+        data = _ask(cfg, token, _query(batch))
+        found = {}
         for i, key in enumerate(batch):
-            issue = (data.get(f"i{i}") or {}).get("issue")
-            if issue is not None:
-                out[key] = _record(cfg, issue)
+            if (issue := (data.get(f"i{i}") or {}).get("issue")) is not None:
+                items = issue.get("projectItems") or {}
+                found[key] = {**issue, "projectItems": {**items, "nodes": list(items.get("nodes") or [])}}
+        # An issue in more Projects than one page holds: the next pages, until the list's Project is read.
+        more = {key: cursor for key, issue in found.items() if (cursor := _next_page(cfg, issue["projectItems"]))}
+        for _ in range(PAGES - 1):
+            if not more:
+                break               # an issue still unread after them has no status: its sheaf is off the list
+            keys = list(more)
+            data = _ask(cfg, token, _query(keys, [more[k] for k in keys]))
+            more, asked = {}, more
+            for i, key in enumerate(keys):
+                page = ((data.get(f"i{i}") or {}).get("issue") or {}).get("projectItems") or {}
+                nodes = found[key]["projectItems"]["nodes"]
+                nodes += page.get("nodes") or []
+                cursor = _next_page(cfg, {**page, "nodes": nodes})
+                if cursor is not None and cursor != asked[key]:     # a cursor that does not move ends the pages
+                    more[key] = cursor
+        for key, issue in found.items():
+            out[key] = _record(cfg, issue)
     return out
+
+
+def _ask(cfg: ListConfig, token: str, query: str) -> dict:
+    """The `data` of GitHub's answer to `query`. Raises RecordError."""
+    req = urllib.request.Request(
+        cfg.api + "/graphql", data=json.dumps({"query": query}).encode(), method="POST",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json",
+                 "Accept": "application/json", "User-Agent": "sheaf-list"})
+    try:
+        with urllib.request.urlopen(req, timeout=HTTP_SECONDS) as r:
+            answer = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        raise RecordError(f"GitHub answered {e.code} to the record's query") from None
+    except (OSError, ValueError) as e:
+        raise RecordError(f"GitHub could not be read ({type(e).__name__})") from None
+    data = answer.get("data") if isinstance(answer, dict) else None
+    if not isinstance(data, dict):
+        kinds = sorted({str(e.get("type") or "?") for e in answer.get("errors") or [] if isinstance(e, dict)}) \
+            if isinstance(answer, dict) else []
+        raise RecordError(f"GitHub answered the record's query with errors and no data ({', '.join(kinds) or 'none named'})")
+    return data
+
+
+def _next_page(cfg: ListConfig, items: dict) -> str | None:
+    """The cursor of the next page of `items` (an issue's `projectItems`), when it has one and the pages
+    read hold no item of the list's Project."""
+    info = items.get("pageInfo") or {}
+    cursor = info.get("endCursor")
+    if not info.get("hasNextPage") or not isinstance(cursor, str) or not cursor:
+        return None
+    return None if _item(cfg, items.get("nodes") or []) is not None else cursor
+
+
+def _item(cfg: ListConfig, nodes: list) -> dict | None:
+    """The issue's item in the list's Project, of the items `nodes`."""
+    for item in nodes:
+        project = (item or {}).get("project") or {}
+        if project.get("number") == cfg.project and \
+                ((project.get("owner") or {}).get("login") or "").lower() == cfg.owner.lower():
+            return item
+    return None
 
 
 def _record(cfg: ListConfig, issue: dict) -> Record:
@@ -284,13 +334,9 @@ def _record(cfg: ListConfig, issue: dict) -> Record:
     except ValueError:
         updated = 0.0
     status = None
-    if issue.get("state") == "OPEN":
-        for item in (issue.get("projectItems") or {}).get("nodes", []):
-            project = (item or {}).get("project") or {}
-            if project.get("number") == cfg.project and \
-                    ((project.get("owner") or {}).get("login") or "").lower() == cfg.owner.lower():
-                name = ((item.get("status") or {}).get("name"))
-                status = {cfg.waiting: "waiting", cfg.in_progress: "open"}.get(name)
+    if issue.get("state") == "OPEN" and (item := _item(cfg, (issue.get("projectItems") or {}).get("nodes") or [])):
+        name = ((item.get("status") or {}).get("name"))
+        status = {cfg.waiting: "waiting", cfg.in_progress: "open"}.get(name)
     return Record(status, assignees, updated)
 
 
@@ -393,23 +439,27 @@ class TheList:
             wanted = sorted({s.issue for s in sheaves})
             try:
                 self._records = fetch(self.cfg, wanted) if wanted else {}   # an issue it does not hold is off
+                got = True
             except RecordError as e:
                 self.hub.record("list-poll-failed", None, root=root.name, error=str(e))
-            rows = [Row(s, self._records[s.issue], "/".join(s.rel.split("/")[:2]), read.get(s.rel), files[s.rel])
-                    for s in sheaves if s.issue in self._records]
-            # A ticked sheaf waits on nobody until the record routine has moved its issue: a new change of the
-            # issue, or a Status other than waiting (moving a Project's Status leaves the issue's change as it was).
-            moved = {r.sheaf.rel for r in rows
-                     if r.record.status != "waiting" or self._answered.get(r.sheaf.rel, r.record.updated) != r.record.updated}
-            for rel in moved | (set(self._answered) - {r.sheaf.rel for r in rows}):
-                self._answered.pop(rel, None)
-            with self._gone_lock:
-                # A file seen gone after this poll began may have been read before it went: its row waits for the
-                # next poll, which reads what is there now (#34).
-                rows = [r for r in rows if self._gone.get(r.file, 0) < started]
-                self._gone = {f: n for f, n in self._gone.items() if n > started}
-                self._snap = Snapshot(rows, entries, self.hub.clock())
-            # Every sheaf whose file is not at its home goes there (9.11), judged with the records just read: the
+                got = False         # no record read: the list stays as the last poll that read one left it
+            if got:
+                rows = [Row(s, self._records[s.issue], "/".join(s.rel.split("/")[:2]), read.get(s.rel), files[s.rel])
+                        for s in sheaves if s.issue in self._records]
+                # A ticked sheaf waits on nobody until the record routine has moved its issue: a new change of the
+                # issue, or a Status other than waiting (moving a Project's Status leaves the issue's change as it was).
+                moved = {r.sheaf.rel for r in rows
+                         if r.record.status != "waiting" or self._answered.get(r.sheaf.rel, r.record.updated) != r.record.updated}
+                for rel in moved | (set(self._answered) - {r.sheaf.rel for r in rows}):
+                    self._answered.pop(rel, None)
+                with self._gone_lock:
+                    # A file seen gone after this poll began may have been read before it went: its row waits for the
+                    # next poll, which reads what is there now (#34).
+                    rows = [r for r in rows if self._gone.get(r.file, 0) < started]
+                    self._gone = {f: n for f, n in self._gone.items() if n > started}
+                    self._snap = Snapshot(rows, entries, self.hub.clock())
+            # Every sheaf whose file is not at its home goes there (9.11), judged with the last records read (a failed
+            # read places on the ones before it, as every other judgement of the hub reads them): the
             # first poll moves what was written before the rule, a later one what an owner change made another's.
             for rel in read if placed else ():
                 if place.logical(rel) == rel:
@@ -594,7 +644,7 @@ class TheList:
         if s.actions:
             word = s.actions[0][0]
             box = (f'<input type="checkbox" aria-label="{html.escape(word)}" data-doc="{html.escape(f"{root}/{s.rel}")}"'
-                   f' data-action="0" data-word="{html.escape(word)}">')
+                   f' data-action="0" data-word="{html.escape(word)}" data-hash="{html.escape(s.hash)}">')
         href = roots_mod.url_path(f"{root}/{s.rel}")
         return (f'<li class="list-row">{box}<div><a class="list-title" href="{html.escape(href)}">'
                 f'{html.escape(s.title)} {chips}</a><div class="list-meta">{html.escape(meta)}</div></div></li>')
@@ -621,7 +671,8 @@ document.querySelectorAll('.list-row input[type=checkbox]').forEach(function (b)
     b.disabled = true;
     var said = document.querySelector('.list-error');
     fetch('/_/tick', {method: 'POST', headers: {'Content-Type': 'application/json'}, credentials: 'same-origin',
-      body: JSON.stringify({doc: b.dataset.doc, action: Number(b.dataset.action), word: b.dataset.word})})
+      body: JSON.stringify({doc: b.dataset.doc, action: Number(b.dataset.action), word: b.dataset.word,
+        hash: b.dataset.hash})})
       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) {
         if (r.ok) { location.reload(); return; }
         throw new Error(j.error || ('the hub answered ' + r.status));

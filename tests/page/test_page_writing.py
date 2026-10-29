@@ -2626,7 +2626,8 @@ def keep_on_disk(tab, *entries):
 
 def test_a_reply_kept_after_the_hub_took_it_is_cleared_when_the_page_loads(thread):
     # The write is made with the tab closed, as the miss it stands for. A page open over it races the
-    # test: its start-up reads answering after the write reload it, under the test's own reload (#68).
+    # test: the `/_/doc` check of its stream's hello, answering after the write, reloads it under the
+    # test's own reload (#68).
     live = thread.site.hub.entry(DOC).live
     (c,) = rdc.parse(thread.site.file.read_text()).comments
     keep_on_disk(thread, {"thread": c.id, "born": c.at, "about": c.quote, "kind": "reply", "body": MISSED,

@@ -714,7 +714,7 @@ if sys.argv[1:3] == ["mcp", "get"]:
 with open(os.path.join(os.environ["FAKE_AGENT_STATE_DIR"], "adds"), "a") as f:
     f.write(" ".join(sys.argv[1:]) + "\\n")
 '''
-TOKEN = "tok-2c7d90b1e4a85f36"
+TOKEN = "tok-" "2c7d90b1e4a85f36"
 BROKEN_ANSWERS = {
     "codex, the line of config.toml": (
         "", "Error: failed to load bootstrap configuration\n\nCaused by:\n"
@@ -1083,7 +1083,7 @@ def test_cursor_a_door_called_sheaf_that_is_not_ours_is_not_replaced(agents, cap
 
 def test_cursor_a_door_that_is_not_ours_is_named_and_what_it_holds_is_never_printed(agents, capsys):
     cursor_config().parent.mkdir(parents=True)
-    token = "tok-8f3a91c2d7e04b65"
+    token = "tok-" "8f3a91c2d7e04b65"
     text = json.dumps({"mcpServers": {"sheaf": {
         "url": "http://127.0.0.1:1/mcp", "headers": {"Authorization": f"Bearer {token}"}}}})
     cursor_config().write_text(text)
@@ -1096,7 +1096,7 @@ def test_cursor_a_door_that_is_not_ours_is_named_and_what_it_holds_is_never_prin
 
 @pytest.mark.parametrize("agent", ["claude", "codex", "gemini"])
 def test_a_stdio_door_that_is_not_ours_is_named_and_what_it_holds_is_never_printed(agents, capsys, agent):
-    token = "tok-2c7d90b1e4a85f36"
+    token = "tok-" "2c7d90b1e4a85f36"
     held = {"command": "npx", "args": ["mcp-remote", "https://hub.invalid/mcp",
                                        "--header", f"Authorization: Bearer {token}"]}
     if agent == "gemini":

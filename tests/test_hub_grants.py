@@ -271,3 +271,44 @@ def test_assistants_that_are_not_a_list_of_names_are_refused(work, capsys, value
     (work / "projects.toml").write_text(GRANTS + f"assistants = {value}\n", encoding="utf-8")
     code, out, err = groups(capsys, "--root", str(work))
     assert code == 1 and out == "" and "'assistants' in" in err and "list of names" in err
+
+
+def test_projects_groups_prints_a_name_in_lower_case_not_casefolded(work, capsys):
+    """The Library compares principal ids as given (#58): `Straße` is printed `straße`, as `str.lower()` gives it,
+    not `strasse`, which would name no principal."""
+    import json
+    (work / "projects.toml").write_text('[projects."acme/blog"]\nmembers = ["Straße"]\nstatus = "live"\n'
+                                        'assistants = ["Weiß"]\n', encoding="utf-8")
+    code, out, _ = groups(capsys, "--root", str(work))
+    got = json.loads(out)
+    assert code == 0
+    assert got["members"] == {"straße": ["group:proj-acme-blog"]}
+    assert got["assistants"] == {"weiß": ["group:proj-acme-blog"]}
+    assert got["projects"][0]["members"] == ["straße"] and got["projects"][0]["assistants"] == ["weiß"]
+
+
+@pytest.mark.parametrize("short, granted", [("straße", True), ("STRASSE", False), ("strasse", False)])
+def test_the_hub_grants_by_the_same_lower_case_it_prints(work, short, granted):
+    """`grants` and `sheaf projects groups` give the same judgement (8.12): a short is held by `members` when the
+    two are equal in lower case, so a member the Library is told of is the member the hub opens the project to."""
+    from sheafmd.hub import projects
+    entries = {"acme/blog": {"members": ["Straße"], "status": "live"}}
+    assert projects.grants(entries, "acme/blog/a.md", short) is granted
+    assert (short.lower() in projects.groups(entries)["members"]) is granted
+
+
+def test_a_name_in_both_members_and_assistants_is_in_both_maps_and_the_library_unions_them(work, capsys):
+    """A name may be a member of one project and an assistant of another (#58). It is printed under `members` with
+    the groups that name it a member and under `assistants` with the groups that name it an assistant; its
+    principal's groups in the Library are the union of the two (13)."""
+    import json
+    (work / "projects.toml").write_text('[projects."acme/blog"]\nmembers = ["james"]\nstatus = "live"\n'
+                                        '\n[projects."acme/shop"]\nmembers = ["ada"]\nstatus = "live"\n'
+                                        'assistants = ["James"]\n', encoding="utf-8")
+    code, out, _ = groups(capsys, "--root", str(work))
+    got = json.loads(out)
+    assert code == 0
+    assert got["members"]["james"] == ["group:proj-acme-blog"]
+    assert got["assistants"]["james"] == ["group:proj-acme-shop"]
+    assert sorted(set(got["members"]["james"]) | set(got["assistants"]["james"])) == [
+        "group:proj-acme-blog", "group:proj-acme-shop"]

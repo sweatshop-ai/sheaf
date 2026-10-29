@@ -569,15 +569,20 @@ class Hub:
         except Exception as ex:
             self._rebuild_failed(e, ex)
 
-    def wrote(self, address: str):
+    def wrote(self, address: str, moved: bool = False):
         """The door made or changed this document's file (SPEC 12): tell its open tabs now, as the
         watcher would within a second, and the open indexes. Compared by its text, not by
-        `(mtime, size)`, which a write of the same length within one clock tick leaves as it was."""
+        `(mtime, size)`, which a write of the same length within one clock tick leaves as it was.
+        `moved`: the file of a sheaf moved (9.11), its text the same; the page is rendered again all
+        the same, since its relative images are now found in the new folder."""
         e = self.entries.get(address)
         if e is not None:
             try:
                 st = e.path.stat()
-                e.live.refresh()
+                if moved:
+                    e.live.rebuild()
+                else:
+                    e.live.refresh()
                 e.last_stat = (st.st_mtime_ns, st.st_size)
             except Exception as ex:
                 self._rebuild_failed(e, ex)

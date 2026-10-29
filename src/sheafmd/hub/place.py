@@ -259,7 +259,7 @@ def place(hub, address: str, member=None, by: str | None = None, commit: bool = 
         gone = _move(hub, root, top, rel, name, address) if n else None
         if gone is not None:
             _tidy(top, gone)
-            hub.wrote(address)
+            hub.wrote(address, moved=True)
     if gone is not None and commit:
         if member is None and by is None:
             hub.committed(address, what="move", gone=gone, author=commits_mod.Author(*commits_mod.COMMITTER))

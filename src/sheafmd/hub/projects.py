@@ -11,6 +11,7 @@ in the hub's log and in the diagnostics log (15), once per folder per hub run.
     read(folder)              the entries, or None without the file; raises Invalid
     unlisted(entries, rels)   the `<client>/<project>` folders of `rels` that the entries do not name
     grants(entries, rel, short)   whether the member `short` may open the shared sheaves at `rel`
+    groups(entries)           what `sheaf projects groups` prints for the Library: the same judgement
 """
 import tomllib
 from pathlib import Path
@@ -91,3 +92,18 @@ def grants(entries, rel: str, short: str) -> bool:
     if isinstance(entries, Invalid) or (entry := entries.get(folder)) is None:
         return False
     return bool(short) and short.casefold() in {m.casefold() for m in entry["members"]}
+
+
+def groups(entries: dict) -> dict:
+    """The Library's groups from the same entries the hub grants by (8.12, 13): each project's group
+    `group:proj-<client>-<project>`, its glob `<client>/<project>/*.md`, its status and its members (lower case,
+    as `grants` compares them), and for each member short the groups of the projects that name them."""
+    out, members = [], {}
+    for name in sorted(entries):
+        group = "group:proj-" + name.replace("/", "-")
+        names = sorted({m.casefold() for m in entries[name]["members"]})
+        out.append({"project": name, "group": group, "glob": f"{name}/*.md", "status": entries[name]["status"],
+                    "members": names})
+        for m in names:
+            members.setdefault(m, []).append(group)
+    return {"members": {m: sorted(g) for m, g in sorted(members.items())}, "projects": out}

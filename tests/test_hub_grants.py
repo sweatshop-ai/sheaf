@@ -113,3 +113,57 @@ def test_a_door_token_bound_to_a_member_the_project_does_not_name_makes_nothing_
     is_error, got = call(browser, "create", token=tokens["thierry"], doc="work/thinkingtoo/tiroir/2026-10-29-new.md",
                          text="---\nvisibility: project\n---\n# New\n")
     assert not is_error, got
+
+
+def groups(capsys, *argv):
+    from sheafmd import cli
+    code = cli.main(["projects", "groups", *argv])
+    out = capsys.readouterr()
+    return code, out.out, out.err
+
+
+def test_projects_groups_gives_the_library_the_hubs_own_judgement(team, work, capsys):
+    import json
+    (work / "projects.toml").write_text(GRANTS + '\n[projects."acme/blog"]\nmembers = ["Sven"]\nstatus = "closed"\n',
+                                        encoding="utf-8")
+    code, out, _ = groups(capsys, "--root", str(work))
+    assert code == 0
+    got = json.loads(out)
+    assert got["projects"] == [
+        {"project": "acme/blog", "group": "group:proj-acme-blog", "glob": "acme/blog/*.md", "status": "closed",
+         "members": ["sven"]},
+        {"project": "thinkingtoo/tiroir", "group": "group:proj-thinkingtoo-tiroir", "glob": "thinkingtoo/tiroir/*.md",
+         "status": "live", "members": ["sven", "thierry"]}]
+    assert got["members"] == {"sven": ["group:proj-acme-blog", "group:proj-thinkingtoo-tiroir"],
+                              "thierry": ["group:proj-thinkingtoo-tiroir"]}
+    for member in team.hub.proxy.members.values():
+        assert ("group:proj-thinkingtoo-tiroir" in got["members"].get(member.short, [])) \
+            == team.hub.granted(member, f"work/{SHARED}")
+
+
+@pytest.mark.parametrize("text", [None, "not toml ["])
+def test_projects_groups_fails_on_a_file_that_is_not_there_or_cannot_be_read(work, capsys, text):
+    if text is not None:
+        (work / "projects.toml").write_text(text, encoding="utf-8")
+    code, out, err = groups(capsys, "--root", str(work))
+    assert code == 1 and out == "" and "projects.toml" in err
+
+
+def test_the_index_stream_tells_a_change_in_a_project_to_its_members_alone(team, work, monkeypatch):
+    import time
+    from sheafmd.hub.index import SWEEP_SECONDS
+    now = [time.time()]
+    team.hub.clock = lambda: now[0]
+    monkeypatch.setattr(team.hub.index, "_start_sweep", lambda run: run())     # a sweep inside the tick
+    put(team, work, SHARED, OPEN)
+    hans, sven = (team.get("/_/live", member=m).stream for m in (HANS, SVEN))
+    for m in (HANS, SVEN):
+        team.get("/_/index.json", member=m)
+    now[0] += SWEEP_SECONDS
+    team.hub.tick()
+    hans.drain(), sven.drain()
+    (work / SHARED).write_text(OPEN + "\nMore.\n", encoding="utf-8")
+    now[0] += SWEEP_SECONDS
+    team.hub.tick()
+    assert [d for name, d in hans.drain() if name == "status"] == []
+    assert [d["doc"] for name, d in sven.drain() if name == "status"] == [f"work/{SHARED}"]

@@ -819,6 +819,40 @@ def cmd_diag(argv: list[str]) -> int:
     return EXIT_OK
 
 
+def cmd_projects(argv: list[str]) -> int:
+    from .hub import projects, the_list
+    p = _parser("projects groups", "projects groups [--root PATH]",
+                "Print as JSON the groups the Library gives from projects.toml (8.12): for each member short its "
+                "project groups, and each project with its group, glob, status and members. The hub's own "
+                "reading, so the two never judge membership differently. Needs no hub.")
+    p.add_argument("what", choices=["groups"])
+    p.add_argument("--root", metavar="PATH", help="the folder that holds projects.toml (default: the [list] root)")
+    args = p.parse_args(argv)
+    root = args.root
+    if root is None:
+        try:
+            cfg = the_list.load()
+        except the_list.ListError as e:
+            _err(f"sheaf: {e}")
+            return EXIT_FAILED
+        if cfg is None:
+            _err(f"sheaf: {paths.config_file()} has no [list]: name the folder with --root")
+            return EXIT_USAGE
+        root = cfg.root
+    f = Path(root) / projects.FILE
+    try:
+        entries = projects.read(Path(root))
+    except projects.Invalid as e:
+        _err(f"sheaf: {f}: {e}")
+        return EXIT_FAILED
+    if entries is None:
+        # Nothing printed: an empty answer would read as "no project has a member" and take every group away.
+        _err(f"sheaf: {f} is not there")
+        return EXIT_FAILED
+    _out(json.dumps({"root": str(Path(root).resolve()), **projects.groups(entries)}, indent=2))
+    return EXIT_OK
+
+
 def cmd_mcp(argv: list[str]) -> int:
     p = _parser("mcp", "mcp [--agent NAME]",
                 "The stdio MCP door: an agent runs this to reach the hub. It reads one JSON-RPC "
@@ -926,7 +960,7 @@ COMMANDS.update({"open": cmd_open, "start": cmd_start, "stop": cmd_stop, "status
                  "hub": cmd_hub, "comments": cmd_comments, "comment": cmd_comment,
                  "reply": cmd_reply, "resolve": cmd_resolve, "reopen": cmd_reopen,
                  "diag": cmd_diag, "version": cmd_version, "list": cmd_list, "roots": cmd_roots,
-                 "token": cmd_token, "mcp": cmd_mcp})
+                 "token": cmd_token, "mcp": cmd_mcp, "projects": cmd_projects})
 COMMAND_HELP.update({
     "open": ("open FILE.md|URL [--no-browser] [render options]",
              "open the page of a document; starts the hub if none runs"),
@@ -951,6 +985,8 @@ COMMAND_HELP.update({
                   "make an MCP token for an agent that reaches the hub over HTTP; shown once"),
     "token list": ("token list", "MCP tokens: name, display name, created, last used"),
     "token revoke": ("token revoke NAME", "end an MCP token"),
+    "projects groups": ("projects groups [--root PATH]",
+                        "print the Library's project groups from projects.toml as JSON (exit 1 without a good file)"),
     "version": ("version", "print the version"),
 })
 

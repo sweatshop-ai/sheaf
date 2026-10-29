@@ -594,3 +594,14 @@ def test_a_move_into_an_ignored_private_folder_still_commits_the_old_path_gone(h
     assert f"D\t{SHARED}" in files and not any(HOME in f for f in files)
     assert any(line.startswith("D\t" + str(INSIDE / doc_key(SHARED))) for line in files)
     assert git(repo, "ls-files", SHARED) == ""
+
+
+def test_a_door_update_that_changes_nothing_still_commits_the_move_it_makes(hub, browser, tmp_path):
+    closed = PRIVATE.replace("sources: [library:doc-123]\n", "sources: [library:doc-123]\nvisibility: owner\n")
+    committing(hub, browser, tmp_path, first=closed)                # written before the rule, at the project's path
+    repo = tmp_path / "sheaves"
+    is_error, got = call(browser, "update", token=Tokens().add("james-thierry", write=True), doc=f"sheaves/{SHARED}",
+                         text=closed, expected_hash=md_hash(closed))
+    assert not is_error and got["doc"] == f"sheaves/{HOME}" and not got["changed"], got
+    assert subjects(repo) == [f"move: {SHARED} -> {HOME}", "first"]
+    assert git(repo, "status", "--porcelain") == ""

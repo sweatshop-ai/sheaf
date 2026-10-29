@@ -636,14 +636,14 @@ class Door:
     def _create(self, args: dict, caller: Caller):
         root, rel = self._new_address(args["doc"], caller)
         address, text = str(Address(root.name, rel)), _as_read(args["text"])
-        if (member := self._member(caller)) is not None and not (self.hub.member_owns(member, address)
-                                                                 and self.hub.granted(member, address)):
-            # A root of another member's, or a project `projects.toml` does not name them in (8.12), is none.
-            raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path")
+        if (member := self._member(caller)) is not None and not self.hub.member_owns(member, address):
+            raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path")     # a root of another member's
         placed = place.applies(self.hub, root.name)
         if placed and place.names_private(rel):
             raise ToolError(f"{_named(args['doc'])} cannot be made: the hub places owner-only sheaves itself: name "
                             "`<client>/<project>/<name>.md`.", "path")
+        if member is not None and not self.hub.granted(member, address):
+            raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path")     # a project not theirs (8.12)
         self._check_size(text)
         _check_comments("", text)
         top = Path(os.path.realpath(root.path))

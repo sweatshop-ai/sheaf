@@ -131,7 +131,8 @@ def test_the_share_mark_names_the_signed_in_owner_whatever_the_request_says(team
 
 def test_the_lists_tick_of_share_by_a_member_who_is_not_the_owner_is_refused(team, work):
     put(team, work, DOC, PRIVATE.replace("sources: [library:doc-123]", "sources: []"))
-    got = team.post("/_/tick", {"doc": f"work/{DOC}", "action": 0, "word": "Share"}, member=HANS)
+    got = team.post("/_/tick", {"doc": f"work/{DOC}", "action": 0, "word": "Share",
+                                 "hash": md_hash((work / DOC).read_text(encoding="utf-8"))}, member=HANS)
     assert got.status == 409
     assert "- [ ] Share" in (work / DOC).read_text(encoding="utf-8")
 
@@ -653,7 +654,8 @@ def test_the_owners_tick_in_the_page_shares_whatever_the_lists_shape(team, work,
 
 def test_the_lists_tick_of_a_star_bullet_share_shares(team, work):
     put(team, work, DOC, PRIVATE.replace("- [ ] Share", "* [ ] Share"))
-    assert team.post("/_/tick", {"doc": f"work/{DOC}", "action": 0, "word": "Share"}, member=THIERRY).status == 200
+    assert team.post("/_/tick", {"doc": f"work/{DOC}", "action": 0, "word": "Share",
+                                 "hash": md_hash((work / DOC).read_text(encoding="utf-8"))}, member=THIERRY).status == 200
     assert team.get(f"/work/{DOC}", member=HANS).status == 200
 
 

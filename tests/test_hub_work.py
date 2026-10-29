@@ -255,6 +255,26 @@ def test_an_attach_of_two_lines_stops_the_start(tmp_path):
     assert listing(tmp_path, box="tiroir-tt", attach="ssh {window}").attach == "ssh {window}"
 
 
+def test_a_root_holder_the_project_does_not_name_gets_the_404_of_a_missing_document(team, box, work):
+    """tt-tiroir #116: the download and the fork report are judged as the page is, by `projects.toml` too (8.12):
+    Hans holds the root but the project names Thierry alone, so the shared sheaf is not there for him."""
+    missing = download(team, doc="work/thinkingtoo/tiroir/nothing.md", member=HANS)
+    assert download(team, member=HANS).status == 200                # named, he downloads; the hub has read the file
+    (work / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["thierry"]\nstatus = "live"\n',
+                                        encoding="utf-8")
+    downloaded = len(hub_rows("transcript-downloaded"))
+    before = (work / DOC).read_text(encoding="utf-8")
+    got = download(team, member=HANS)
+    assert got.status == missing.status == 404 and got.body == missing.body
+    forked = team.post("/_/sessions", {"doc": ADDRESS, "id": "7e8f9a0b-1c2d-4e3f-8a4b-5c6d7e8f9a0b",
+                                        "machine": "hans-mac"}, member=HANS)
+    assert forked.status == 404 and forked.json()["error"] == "no such document"
+    assert (work / DOC).read_text(encoding="utf-8") == before
+    assert len(hub_rows("transcript-downloaded")) == downloaded and hub_rows("session-forked") == []
+    assert team.get(f"/{ADDRESS}", member=HANS).status == 404
+    assert download(team, member=THIERRY).body == TRANSCRIPT
+
+
 # ── the fork report ──────────────────────────────────────────────────────────
 
 FORK = "7e8f9a0b-1c2d-4e3f-8a4b-5c6d7e8f9a0b"

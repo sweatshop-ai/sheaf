@@ -503,6 +503,28 @@ def test_a_sheaf_open_to_the_project_is_never_quarantined(team, work):
     assert (work / SHARED).exists() and not (work / QUARANTINE).exists() and not hub_rows("place-refused")
 
 
+def test_an_owner_only_sheaf_that_loses_every_owner_with_a_short_leaves_its_old_owners_folder(team, work):
+    """At `private/thierry/` the owner's Library glob `*/*/private/thierry/**` files it for `user:thierry`, who no
+    longer owns it (#66): it goes to quarantine at the next poll, as one at the project's path does (#61)."""
+    put(team, work, SHARED, PRIVATE)
+    team.hub.the_list.poll()
+    assert (work / HOME).exists()
+    (work / HOME).write_text(NOBODY, encoding="utf-8")
+    team.hub.the_list.poll()
+    assert (work / QUARANTINE).read_text(encoding="utf-8") == NOBODY
+    assert not (work / HOME).exists() and not (work / "thinkingtoo/tiroir/private/thierry").exists()
+    rows = hub_rows("place-refused")
+    assert [r["doc"] for r in rows] == [f"work/{SHARED}"] and rows[0]["quarantined"] is True, rows
+
+
+def test_a_sheaf_already_in_quarantine_that_still_has_no_home_stays_there(team, work):
+    put(team, work, SHARED, NOBODY)
+    team.hub.the_list.poll()
+    team.hub.the_list.poll()
+    assert (work / QUARANTINE).read_text(encoding="utf-8") == NOBODY
+    assert [r["quarantined"] for r in hub_rows("place-refused")] == [True]
+
+
 def test_the_quarantine_folder_is_no_members_short():
     """No `short` can name it, so no owner's Library glob `*/*/private/<short>/**` reads it, and it is no hidden
     folder, which the listing would leave out (8.6)."""

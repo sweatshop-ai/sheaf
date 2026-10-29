@@ -949,7 +949,7 @@ def test_the_recorded_session_is_committed_as_james_s_door_token(committing, bro
     assert not got[0], got[1]
     team.hub.commits.settle()
     log = git(repo, "log", "--format=%an|%s").splitlines()
-    assert any(line.endswith(f"|session: {DOC}") and not line.startswith("Hans|") for line in log), log
+    assert f"james|session: {DOC}" in log, log
     assert f"{{id: {NEW}, host: tiroir-tt, member: james, " in git(repo, "show", f"HEAD:{DOC}")
 
 
@@ -1250,9 +1250,11 @@ def replies(team, cid):
 def test_stop_james_removes_the_project_s_waiting_tells_and_says_so_in_each_thread(team, work, stoppable):
     first = comment(team, work, "tell", body="Send the draft.").json()["id"]
     second = comment(team, work, "ask", body="Which draft?").json()["id"]
-    other = stoppable["tell"] / "acme--site-20261029T200000Z"
-    other.write_text(json.dumps({"project": "acme/site", "member": "hans", "sheaf": "work/acme/site/x.md",
-                                 "text": "not this one", "kind": "tell", "thread": "c9"}), encoding="utf-8")
+    # named with the project's prefix, but another project's: only `project` tells them apart
+    other = stoppable["tell"] / "thinkingtoo--tiroir-x-20261029T200000Z"
+    other.write_text(json.dumps({"project": "thinkingtoo/tiroir-x", "member": "hans",
+                                 "sheaf": "work/thinkingtoo/tiroir-x/x.md", "text": "not this one", "kind": "tell",
+                                 "thread": "c9"}), encoding="utf-8")
     assert len(drops(stoppable)) == 3
     assert stop_james(team, work).status == 200
     assert drops(stoppable) == [other]
@@ -1276,3 +1278,59 @@ def test_a_waiting_tell_whose_thread_is_gone_is_still_removed_and_says_why(team,
     row, = hub_rows("tell-stopped")
     assert row["thread"] == "c999" and row["said"] != "written"
     assert not [r for r in replies(team, cid) if "Stopped before delivery" in r["text"]]
+
+
+# ── the gate's round 1 on PR 59 ─────────────────────────────────────────────
+
+
+def test_without_a_box_in_the_list_james_s_write_records_nothing(team, browser, work, james_writes):
+    cfg = team.hub.the_list.cfg
+    team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{**cfg.__dict__, "box": ""}))
+    put(team, work, DOC, SHEAF.split("sessions:\n")[0] + "---\n# T\n\nA quote from the contract.\n")
+    james_wrote({"sessions": cfg.sessions_dir}, NEW)
+    read = json.loads(james_door(browser, james_writes, "read", doc=ADDRESS)[1])
+    assert not james_door(browser, james_writes, "update", session=NEW, doc=ADDRESS, text=read["text"] + "\nMore.\n",
+                          expected_hash=read["hash"])[0]
+    assert sessions_of(work) == [] and "host: ," not in (work / DOC).read_text(encoding="utf-8")
+    assert hub_rows("session-recorded") == []
+
+
+def test_an_id_the_copy_never_gets_says_so_once_it_has_waited_long_enough(team, browser, work, james_writes,
+                                                                           monkeypatch):
+    from sheafmd.hub import handler as handler_mod
+    cid = a_thread(team, work)
+    assert not james_door(browser, james_writes, "reply", session=NEW, doc=ADDRESS, id=cid, text="Sent.")[0]
+    assert hub_rows("session-not-recorded") == []
+    monkeypatch.setattr(handler_mod, "PENDING_S", 0)
+    assert not james_door(browser, james_writes, "read", session=NEW, doc=ADDRESS)[0]
+    row, = hub_rows("session-not-recorded")
+    assert row["transcript"] == NEW and "copy" in row["reason"]
+    assert not james_door(browser, james_writes, "read", session=NEW, doc=ADDRESS)[0]
+    assert len(hub_rows("session-not-recorded")) == 1                  # said once, then forgotten
+
+
+def test_a_stop_whose_reply_fails_still_drops_the_stop_and_says_why(team, work, stoppable, monkeypatch):
+    from sheafmd.hub import live
+    comment(team, work, "tell")
+
+    def a_failing_reply(self, op, *a, **kw):
+        raise OSError("disk full")
+    monkeypatch.setattr(live.LiveDocument, "comment", a_failing_reply)
+    assert stop_james(team, work).status == 200
+    assert drops(stoppable) == []
+    assert [f.read_text(encoding="utf-8") for f in stoppable["stop"].iterdir()] == ["thinkingtoo/tiroir\n"]
+    row, = hub_rows("tell-stopped")
+    assert row["said"] != "written"
+
+
+def test_a_waiting_tell_naming_a_sheaf_of_another_project_is_removed_with_no_reply_there(team, work, stoppable):
+    elsewhere = put(team, work, "acme/site/x.md", SHEAF.replace("project: tiroir", "project: site"))
+    stoppable["tell"].joinpath("thinkingtoo--tiroir-20261029T200000Z").write_text(json.dumps(
+        {"project": "thinkingtoo/tiroir", "member": "hans", "sheaf": elsewhere, "text": "x", "kind": "tell",
+         "thread": "c1"}), encoding="utf-8")
+    before = (work / "acme/site/x.md").read_text(encoding="utf-8")
+    assert stop_james(team, work).status == 200
+    assert drops(stoppable) == []
+    assert (work / "acme/site/x.md").read_text(encoding="utf-8") == before
+    row, = hub_rows("tell-stopped")
+    assert row["said"] != "written"

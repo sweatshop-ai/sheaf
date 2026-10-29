@@ -18,7 +18,9 @@ import contextlib
 import json
 import os
 import re
+import stat
 import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -70,6 +72,9 @@ SETTING_TYPES = {"title": str, "toc": str, "max_image_width": int, "by": str, "f
 _ID_RE = re.compile(r"[A-Za-z0-9_-]{1,40}")
 _RID_RE = re.compile(r"[A-Za-z0-9_-]{16,64}")     # a page's request id (/_/comment, /_/save)
 _RESERVED = {"kind", "source", "doc", "at", "pid", "session", "member"}
+
+
+PENDING_S = 300  # how long a session James named waits for the copy before it is said (9.12)
 
 
 @dataclass
@@ -211,7 +216,8 @@ class Handler:
         self.peer_check = peer_check
         self.door = Door(hub)
         self.door.called = self._james_called
-        self._pending_sessions: dict = {}   # address -> James's session it waits for in the copy (9.12)
+        self._pending_sessions: dict = {}   # address -> (James's session it waits for in the copy, since) (9.12)
+        self._pending_lock = threading.Lock()
         # path -> method -> (route name, who may call it, function)
         self.routes: dict = {}
         for method, path, name, who, fn in (
@@ -855,7 +861,7 @@ class Handler:
             drop = "the sheaf is in no <client>/<project> folder"
         else:
             if the is not None:
-                self._stop_tells(project, m)
+                self._stop_tells(e.address, project, m)
             # The box's supervisor reads the line as `<client>/<project>` (tt-tiroir routines/james, stops).
             drop = work.drop(the.cfg.stop_dir if the is not None else None, project,
                              (project + "\n").encode("utf-8"), "no stop_dir in [list]")
@@ -864,7 +870,7 @@ class Handler:
 
     STOPPED = "Stopped before delivery: Stop James closed this project's window before James took this."
 
-    def _stop_tells(self, project: str, member):
+    def _stop_tells(self, stopped: str, project: str, member):
         """Every Ask and Tell for `project` still waiting in `tell_dir` for James's window, removed before the Stop
         is dropped, and a reply in each one's thread, signed by the member who stopped him, saying it never reached
         him (9.12): a Stop ends the work, and none of it goes on unseen. A `tell-stopped` row for each, without
@@ -881,8 +887,10 @@ class Handler:
         for name in names:
             f = folder / name
             try:
-                fd = os.open(f, os.O_RDONLY | os.O_NOFOLLOW)
+                fd = os.open(f, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
                 with os.fdopen(fd, "rb") as fh:
+                    if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+                        continue
                     tell = json.loads(fh.read(64 * 1024).decode("utf-8"))
             except (OSError, ValueError):
                 continue
@@ -895,11 +903,24 @@ class Handler:
             except OSError:
                 continue
             sheaf, thread = tell.get("sheaf"), tell.get("thread")
-            said = self._say_stopped(sheaf, thread, member) if isinstance(sheaf, str) and isinstance(thread, str) \
-                else "no thread in the drop"
+            if not (isinstance(sheaf, str) and isinstance(thread, str)):
+                said = "no thread in the drop"
+            elif not self._of_project(sheaf, stopped, project):
+                said = "the drop names a sheaf of another root or project"
+            else:
+                said = self._say_stopped(sheaf, thread, member)
             self.hub.record("tell-stopped", sheaf if isinstance(sheaf, str) else None, project=project,
                             thread=thread if isinstance(thread, str) else None, what=tell.get("kind"), by=by,
                             said=said)
+
+    @staticmethod
+    def _of_project(sheaf: str, stopped: str, project: str) -> bool:
+        """Whether `sheaf` is a sheaf of `project` in the root of `stopped`, the sheaf Stop James was ticked on."""
+        try:
+            at, here = Address.parse(sheaf), Address.parse(stopped)
+        except (ValueError, TypeError):
+            return False
+        return at.root == here.root and at.rel.startswith(project + "/") and at.rel.count("/") == 2
 
     def _say_stopped(self, sheaf: str, thread: str, member) -> str:
         """The STOPPED reply in `thread` of `sheaf`: "written", or why not."""
@@ -914,6 +935,9 @@ class Handler:
             return "the sheaf is gone"
         except (rdc.AnchorError, rdc.NoComment, KeyError, ValueError) as ex:
             return f"not written: {ex}"
+        except Exception:                               # the Stop is dropped whatever becomes of the reply
+            self.hub.record_exception("tell-stopped-reply-failed", sheaf)
+            return "not written: the hub failed on it (sheaf diag)"
         return "written"
 
     # ── Work on this (9.12) ──────────────────────────────────────────────────
@@ -974,18 +998,24 @@ class Handler:
         sid = caller.session
         if not work.UUID_RE.fullmatch(sid or ""):
             return
-        for at, waiting in list(self._pending_sessions.items()):
+        with self._pending_lock:
+            waiting = list(self._pending_sessions.items())
+        for at, (wanted, since) in waiting:
             if at != address:
-                self._record_james(at, waiting, caller)
+                self._record_james(at, wanted, caller, since)
         if address is not None:
             self._record_james(address, sid, caller)
 
-    def _record_james(self, address: str, sid: str, caller):
+    def _record_james(self, address: str, sid: str, caller, since: float | None = None):
         """James's session `sid` becomes the live session of the sheaf at `address`, the first of `sessions`, when
         it is a sheaf of James on the list's root and the copy holds `sid` as a session of its project. The hub is
         the only writer of `sessions` (9.12). Nothing when it is the live one already or a member's fork is."""
-        self._pending_sessions.pop(address, None)
+        with self._pending_lock:
+            if self._pending_sessions.get(address, (None,))[0] in (None, sid):
+                self._pending_sessions.pop(address, None)
         the = self.hub.the_list
+        if the is None or not the.cfg.box:
+            return                                      # an item names the box: without one there is nothing to write
         try:
             e = self.hub.entry(address)
         except NotFound:
@@ -996,7 +1026,13 @@ class Handler:
         project = "/".join(Address.parse(address).rel.split("/")[:2])
         found = work.james_has(the.cfg, project, sid)
         if found is None:
-            self._pending_sessions[address] = sid
+            since = time.monotonic() if since is None else since
+            if time.monotonic() - since < PENDING_S:
+                with self._pending_lock:
+                    self._pending_sessions.setdefault(address, (sid, since))
+                return
+            self.hub.record("session-not-recorded", address, transcript=sid,
+                            reason=f"not in the copy {PENDING_S} s after James's write")
             return
         if not found:
             self.hub.record("session-not-recorded", address, transcript=sid,

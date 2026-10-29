@@ -98,9 +98,9 @@ def tick(team, work, word, member, name=SHARED):
     return team.post("/_/save", {"doc": f"work/{name}", "hash": md_hash(text), "edits": [edit]}, member=member)
 
 
-def untick(team, work, word, member, name=SHARED, root="work"):
+def untick(team, work, word, member, name=SHARED, root="work", via=None):
     """The page's save that unticks the box `- [x] <word>`, as the page sends it: the block's HTML with that box
-    no longer checked."""
+    no longer checked. `via`: a browser on the loopback port, the hub's own person, instead of `member`."""
     text = text_of(work, name)
     blocks = split_md_blocks(text)
     i = next(i for i, b in enumerate(blocks) if f"- [x] {word}" in b.content)
@@ -108,8 +108,8 @@ def untick(team, work, word, member, name=SHARED, root="work"):
                          "html.parser")
     box = next(b for b in soup.select('input[type="checkbox"]') if word in b.parent.get_text())
     del box["checked"]
-    return team.post("/_/save", {"doc": f"{root}/{name}", "hash": md_hash(text),
-                                 "edits": [{"i": i, "html": str(soup)}]}, member=member)
+    body = {"doc": f"{root}/{name}", "hash": md_hash(text), "edits": [{"i": i, "html": str(soup)}]}
+    return via.post("/_/save", body) if via is not None else team.post("/_/save", body, member=member)
 
 
 def absent(browser, token, rel):
@@ -338,6 +338,18 @@ def test_the_owner_unticking_share_closes_the_sheaf_and_moves_its_file_back(team
     assert fm["visibility"] == "owner" and "shared" not in fm and "- [ ] Share" in text
     assert not (work / SHARED).exists()
     assert team.get(f"/work/{SHARED}", member=HANS).status == 404
+
+
+def test_the_hubs_own_person_unticking_share_on_the_loopback_port_closes_the_sheaf_again(team, work, browser):
+    """Codex P2: the loopback person is no member, and reads every file; the untick still withdraws the Share."""
+    put(team, work, HOME, PRIVATE)
+    tick(team, work, "Share", THIERRY)
+    got = untick(team, work, "Share", None, via=browser)
+    assert got.status == 200, got.text
+    text = (work / HOME).read_text(encoding="utf-8")
+    fm = front_matter(text)
+    assert fm["visibility"] == "owner" and "shared" not in fm and "- [ ] Share" in text
+    assert not (work / SHARED).exists()
 
 
 def test_a_member_who_is_not_the_owner_cannot_untick_share(team, work):

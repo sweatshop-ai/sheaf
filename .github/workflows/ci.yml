@@ -44,7 +44,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.macos && '["ubuntu-latest","macos-latest"]' || '["ubuntu-latest"]') }}
+        # ubuntu-24.04, never ubuntu-latest: that label moved to 26.04 on 2026-10-29 and Playwright 1.58 refused
+        # it, so the page tests broke with no change of ours. The image moves only in a pull request.
+        os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.macos && '["ubuntu-24.04","macos-latest"]' || '["ubuntu-24.04"]') }}
         python: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.python != 'all' && format('["{0}"]', inputs.python) || (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && '["3.11","3.13","3.14"]' || '["3.13"]') }}
     steps:
       - uses: actions/checkout@v4

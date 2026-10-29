@@ -146,7 +146,7 @@ def test_the_ubuntu_image_is_named_never_latest(text):
     # `ubuntu-latest` moved to 26.04 on 2026-10-29 and Playwright 1.58 refused it: Playwright supports a fixed
     # list of systems per version, so a moving label breaks the page tests the day it moves. The image changes
     # only in a pull request that moves it (and Playwright with it when needed).
-    assert "ubuntu-latest" not in text
+    assert not [ln for ln in text.splitlines() if "ubuntu-latest" in ln and not ln.lstrip().startswith("#")]
 
 
 def test_a_job_that_hangs_is_stopped(text):

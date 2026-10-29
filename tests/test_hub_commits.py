@@ -674,3 +674,97 @@ def test_two_roots_of_one_repo_share_its_commit_lock_and_a_commit_of_one_never_l
     assert git(remote, "log", "--format=%an|%s", "main").splitlines() == [
         "Cal|edit: plan.md", "Bea|edit: plan.md", "Ada|a README", "the box|first"]
     assert git(remote, "show", "--name-only", "--format=", "main").split() == ["globex/plan.md"]
+
+
+# ── the poll's fetch (#75) ─────────────────────────────────────────────────────
+def poll(box):
+    """One pass of the watcher, then the pusher's work it handed on."""
+    box.hub.tick()
+    assert box.hub.commits.settle()
+
+
+def fetches(monkeypatch):
+    from sheafmd.hub import commits
+    seen, real = [], commits._git
+
+    def spy(folder, *args, **kw):
+        if args[:1] == ("fetch",):
+            seen.append(folder)
+        return real(folder, *args, **kw)
+
+    monkeypatch.setattr(commits, "_git", spy)
+    return seen
+
+
+def test_a_projects_toml_merged_on_the_remote_lands_at_the_next_poll_with_no_save_and_the_grant_follows(
+        box, sheaves, remote, tmp_path):
+    assert box.get(f"/{DOC}", member=CAL).status == 200
+    head = merged_on_github(tmp_path, remote, {"projects.toml": ONLY_BEA}, "Cal leaves acme/blog")
+    poll(box)
+    assert (sheaves / "projects.toml").read_text(encoding="utf-8") == ONLY_BEA
+    assert git(sheaves, "rev-parse", "HEAD").strip() == head == git(remote, "rev-parse", "main").strip()
+    assert git(sheaves, "status", "--porcelain", "--untracked-files=no") == ""
+    assert box.get(f"/{DOC}", member=CAL).status == 404
+    assert rows("push-diverged") == [] and rows("push-failed") == []
+
+
+def test_two_polls_within_a_minute_fetch_once(box, sheaves, remote, monkeypatch):
+    seen = fetches(monkeypatch)
+    poll(box)
+    poll(box)
+    assert len(seen) == 1
+
+
+def test_a_poll_fetches_again_once_the_interval_passed(box, sheaves, remote, tmp_path, monkeypatch):
+    from sheafmd.hub import commits
+    seen = fetches(monkeypatch)
+    poll(box)
+    monkeypatch.setattr(commits, "FETCH_SECONDS", 0)
+    merged_on_github(tmp_path, remote, {"README.md": "# The sheaves\n"}, "a README")
+    poll(box)
+    assert len(seen) == 2
+    assert (sheaves / "README.md").read_text(encoding="utf-8") == "# The sheaves\n"
+
+
+def test_a_root_that_does_not_push_is_never_fetched_by_the_poll(box, sheaves, remote, tmp_path, monkeypatch):
+    (sheaves / ".sheaf.toml").write_text('versions = "root"\ncommit = true\n', encoding="utf-8")
+    seen = fetches(monkeypatch)
+    poll(box)
+    assert seen == []
+
+
+def test_a_fetch_the_poll_cannot_make_is_one_row_however_many_polls_meet_it(box, sheaves, remote, tmp_path, monkeypatch):
+    from sheafmd.hub import commits
+    monkeypatch.setattr(commits, "FETCH_SECONDS", 0)
+    remote.rename(tmp_path / "away.git")
+    poll(box)
+    poll(box)
+    poll(box)
+    (row,) = rows("push-failed")
+    assert row["doc"] == "sheaves" and row["error"]
+
+
+def test_a_hub_commit_whose_push_failed_goes_out_at_the_next_poll(box, sheaves, remote, tmp_path, monkeypatch):
+    from sheafmd.hub import commits
+    away = tmp_path / "away.git"
+    remote.rename(away)
+    edit(box, sheaves)
+    assert box.hub.commits.settle()
+    away.rename(remote)
+    monkeypatch.setattr(commits, "FETCH_SECONDS", 0)
+    poll(box)
+    assert git(sheaves, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
+
+
+def test_an_idle_poll_pushes_nothing(box, sheaves, remote, monkeypatch):
+    from sheafmd.hub import commits
+    pushes, real = [], commits._git
+
+    def spy(folder, *args, **kw):
+        if args[:1] == ("push",):
+            pushes.append(folder)
+        return real(folder, *args, **kw)
+
+    monkeypatch.setattr(commits, "_git", spy)
+    poll(box)
+    assert pushes == []

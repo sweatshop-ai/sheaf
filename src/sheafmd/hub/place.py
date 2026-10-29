@@ -49,6 +49,10 @@ from . import visibility
 from .roots import Address, NotFound
 
 PRIVATE = "private"
+# The folder of a project's private folders where an owner-only sheaf the hub cannot place goes (#61): no `short` can
+# name it (`~` is none of a short's characters), so no owner's Library glob reads it, nor the project's
+# `<client>/<project>/*.md`; it is no hidden folder, which the listing would leave out (8.6).
+QUARANTINE = "~unplaced"
 NO_SHORT = "it is its owner's alone and no owner of it has a short to name its private folder"
 IGNORED = "the repo ignores the private folder"
 
@@ -78,6 +82,18 @@ def _ignored(top: Path, paths: list) -> list:
 def _private_home(rel: str) -> bool:
     parts = rel.split("/")
     return len(parts) == 5 and parts[2] == PRIVATE
+
+
+def quarantine(name: str) -> str:
+    """The path in the root of the quarantine of the sheaf named `name`: `<client>/<project>/private/~unplaced/<file>`."""
+    client, project, file = name.split("/")
+    return f"{client}/{project}/{PRIVATE}/{QUARANTINE}/{file}"
+
+
+def quarantined(rel: str) -> bool:
+    """Whether `rel` is a file in a project's quarantine."""
+    parts = rel.split("/")
+    return len(parts) == 5 and parts[2] == PRIVATE and parts[3] == QUARANTINE
 
 
 def ignores(top: Path, target: str) -> bool:
@@ -274,11 +290,13 @@ def make_folders(top, rel: str):
     return _folder_of(top, rel, make=True)
 
 
-def _refused(hub, address: str, why: str):
-    """A `place-refused` row, once per address per hub run: a sheaf that cannot move is met at every poll."""
-    if address not in hub.told_place:
-        hub.told_place.add(address)
-        hub.record("place-refused", address, why=why)
+def _refused(hub, address: str, why: str, quarantined_: bool = False, tried: bool = False):
+    """A `place-refused` row, once per address per hub run: a sheaf that cannot move is met at every poll. A sheaf
+    in quarantine (#61) has its own row, `quarantined: true`, once too; one left at the project's path because its
+    quarantine could not be made (`tried`) says `quarantined: false`: the project's Library glob still files it."""
+    if (address, quarantined_) not in hub.told_place:
+        hub.told_place.add((address, quarantined_))
+        hub.record("place-refused", address, why=why, **({"quarantined": quarantined_} if quarantined_ or tried else {}))
 
 
 @contextmanager
@@ -440,8 +458,13 @@ def _move(hub, root, top: Path, rel: str, name: str, address: str, text: str | N
     def refused(why: str):
         if strict:
             raise Refused(why)
-        _refused(hub, address, why)
-        return None
+        gone = None
+        if rel == name:     # an owner-only file at the project's path: a project one never gets here
+            gone = _to_quarantine(top, sfd, sname, name)      # never left at the project's path (#61)
+            _refused(hub, address, why, gone is not None, tried=True)
+        else:
+            _refused(hub, address, why, quarantined(rel))
+        return gone
     try:
         sfd, sname = _folder_of(top, rel)
     except OSError as e:
@@ -480,6 +503,28 @@ def _move(hub, root, top: Path, rel: str, name: str, address: str, text: str | N
     finally:
         os.close(sfd)
     return rel
+
+
+def _to_quarantine(top: Path, sfd: int, sname: str, name: str) -> str | None:
+    """Link the file `sname` in the folder `sfd`, the sheaf named `name` at the project's path, into its quarantine,
+    never over anything, then unlink it: `name`, the path it left, or None when it stays (a quarantine the repo
+    ignores, taken, or a folder that cannot be made). The caller holds the name's lock, the file's and the
+    folders'."""
+    target = quarantine(name)
+    if ignores(top, target):
+        return None
+    try:
+        dfd, dname = make_folders(top, target)
+    except OSError:
+        return None
+    try:
+        os.link(sname, dname, src_dir_fd=sfd, dst_dir_fd=dfd, follow_symlinks=False)
+    except OSError:
+        return None
+    finally:
+        os.close(dfd)
+    os.unlink(sname, dir_fd=sfd)
+    return name
 
 
 def _tidy(top: Path, rel: str):

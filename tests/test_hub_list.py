@@ -83,6 +83,7 @@ class FakeGitHub:
     127.0.0.1. It answers only a request with the installation token, and counts the requests."""
 
     ALIAS = re.compile(r'(\w+): repository\(owner: "([^"]+)", name: "([^"]+)"\) \{ issue\(number: (\d+)\)')
+    PAGE = re.compile(r'projectItems\(first: (\d+)(?:, after: "(\d+)")?\)')
 
     def __init__(self):
         self.issues = {}
@@ -102,8 +103,14 @@ class FakeGitHub:
                     self.end_headers()
                     return
                 data = {}
-                for alias, owner, name, number in fake.ALIAS.findall(body["query"]):
-                    data[alias] = {"issue": fake.issue(owner, name, int(number))}
+                query = body["query"]
+                found = list(fake.ALIAS.finditer(query))
+                for k, m in enumerate(found):
+                    alias, owner, name, number = m.groups()
+                    part = query[m.end():found[k + 1].start() if k + 1 < len(found) else len(query)]
+                    page = fake.PAGE.search(part)
+                    first, after = (int(page.group(1)), int(page.group(2) or 0)) if page else (20, 0)
+                    data[alias] = {"issue": fake.issue(owner, name, int(number), first, after)}
                 answer = {"data": data} if fake.errors is None else {"data": None, "errors": fake.errors}
                 out = json.dumps(answer).encode()
                 self.send_response(200)
@@ -116,17 +123,22 @@ class FakeGitHub:
         self.url = f"http://127.0.0.1:{self.server.server_port}"
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
-    def issue(self, owner, name, number):
+    def issue(self, owner, name, number, first=20, after=0):
+        """The issue's fields, with the page of its Project items from item `after`, `first` of them; the
+        items are those of `others` ((project number, Status), ...) then the item in Project 1 when it has a status."""
         i = self.issues.get(number) if (owner, name) == ("acme", "record") else None
         if i is None:
             return None
         status = i.get("status")
-        items = [] if status is None else [{
-            "project": {"number": 1, "owner": {"login": "acme"}},
-            "status": {"name": status}}]
+        items = [{"project": {"number": n, "owner": {"login": "acme"}}, "status": {"name": st}}
+                 for n, st in i.get("others", ())]
+        if status is not None:
+            items.append({"project": {"number": 1, "owner": {"login": "acme"}}, "status": {"name": status}})
+        page = items[after:after + first]
         return {"number": number, "state": i.get("state", "OPEN"), "stateReason": i.get("reason"),
                 "updatedAt": i["updated"], "assignees": {"nodes": [{"login": a} for a in i["assignees"]]},
-                "projectItems": {"nodes": items}}
+                "projectItems": {"nodes": page, "pageInfo": {"hasNextPage": after + first < len(items),
+                                                             "endCursor": str(after + len(page))}}}
 
     def close(self):
         self.server.shutdown()
@@ -349,6 +361,18 @@ def test_a_sheaf_added_since_joins_the_list_only_at_a_poll_that_reads_the_record
     (tmp_path / "installation-token").write_text(TOKEN + "\n", encoding="utf-8")
     box.hub.the_list.poll()
     assert "A new one" in json.dumps(read(box.get("/list", member=NELL)))
+
+
+def test_an_issue_in_more_projects_than_one_page_still_has_the_status_of_its_item_in_the_lists_project(box, github):
+    github.issues[5]["others"] = [(100 + k, "Waiting on member") for k in range(120)]
+    github.issues[7]["others"] = [(300 + k, "In progress at TT") for k in range(30)]
+    box.hub.the_list.poll()
+    assert read(box.get("/list", member=NELL)) == {
+        "Waiting on you 2": {
+            "globex/black-friday": [("Reply to Joey about column L Approve James", "mail · you · #5 · 2 h")],
+            "initech/website": [("James needs the GA4 property id Done @dora James", "question · @dora · #7 · 3 h")]},
+        "In progress 1": {
+            "initech/website": [("Prep for the call of Thursday James", "prep · @dora · #6 · 40 min")]}}
 
 
 def test_a_member_whose_roots_do_not_hold_the_list_gets_404(box, tmp_path):

@@ -54,6 +54,7 @@ DEFAULTS = {"api": "https://api.github.com", "poll": 60, "waiting": "Waiting on 
 WORDS = ("Approve", "Run it", "Don't run", "Undo skip", "Done", "Share", "Stop James")
 SHOWS = {"projects": "My projects", "mine": "Only mine", "all": "All of the team"}
 BATCH = 50                      # issues per GraphQL request
+ITEMS = 100                     # Project items of an issue per page: the most GitHub gives
 HTTP_SECONDS = 20
 
 _BOX_RE = re.compile(r"[A-Za-z0-9.-]{1,63}")
@@ -233,15 +234,17 @@ class RecordError(Exception):
     """The record could not be read this poll. The message says why, never the token."""
 
 
-def _query(issues: list) -> str:
+def _query(issues: list, after: list | None = None) -> str:
+    """The query of `issues`; with `after` (a cursor per issue), only the next page of their Project items."""
     parts = []
     for i, (owner, repo, number) in enumerate(issues):
+        page = f"first: {ITEMS}" + (f", after: {json.dumps(after[i])}" if after else "")
         parts.append(
             f'i{i}: repository(owner: "{owner}", name: "{repo}") {{ issue(number: {number}) {{ '
-            "state updatedAt assignees(first: 10) { nodes { login } } "
-            "projectItems(first: 20) { nodes { project { number owner { ... on Organization { login } "
+            + ("" if after else "state updatedAt assignees(first: 10) { nodes { login } } ")
+            + f"projectItems({page}) {{ nodes {{ project {{ number owner {{ ... on Organization {{ login }} "
             "... on User { login } } } status: fieldValueByName(name: \"Status\") { "
-            "... on ProjectV2ItemFieldSingleSelectValue { name } } } } } }")
+            "... on ProjectV2ItemFieldSingleSelectValue { name } } } pageInfo { hasNextPage endCursor } } } }")
     return "query { " + " ".join(parts) + " }"
 
 
@@ -256,27 +259,69 @@ def fetch(cfg: ListConfig, issues: list) -> dict:
     out = {}
     for start in range(0, len(issues), BATCH):
         batch = issues[start:start + BATCH]
-        req = urllib.request.Request(
-            cfg.api + "/graphql", data=json.dumps({"query": _query(batch)}).encode(), method="POST",
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json",
-                     "Accept": "application/json", "User-Agent": "sheaf-list"})
-        try:
-            with urllib.request.urlopen(req, timeout=HTTP_SECONDS) as r:
-                answer = json.loads(r.read())
-        except urllib.error.HTTPError as e:
-            raise RecordError(f"GitHub answered {e.code} to the record's query") from None
-        except (OSError, ValueError) as e:
-            raise RecordError(f"GitHub could not be read ({type(e).__name__})") from None
-        data = answer.get("data") if isinstance(answer, dict) else None
-        if not isinstance(data, dict):
-            kinds = sorted({str(e.get("type") or "?") for e in answer.get("errors") or [] if isinstance(e, dict)}) \
-                if isinstance(answer, dict) else []
-            raise RecordError(f"GitHub answered the record's query with errors and no data ({', '.join(kinds) or 'none named'})")
+        data = _ask(cfg, token, _query(batch))
+        found = {}
         for i, key in enumerate(batch):
-            issue = (data.get(f"i{i}") or {}).get("issue")
-            if issue is not None:
-                out[key] = _record(cfg, issue)
+            if (issue := (data.get(f"i{i}") or {}).get("issue")) is not None:
+                items = issue.get("projectItems") or {}
+                found[key] = {**issue, "projectItems": {**items, "nodes": list(items.get("nodes") or [])}}
+        # An issue in more Projects than one page holds: the next pages, until the list's Project is read.
+        more = {key: cursor for key, issue in found.items() if (cursor := _next_page(cfg, issue["projectItems"]))}
+        while more:
+            keys = list(more)
+            data = _ask(cfg, token, _query(keys, [more[k] for k in keys]))
+            more, asked = {}, more
+            for i, key in enumerate(keys):
+                page = ((data.get(f"i{i}") or {}).get("issue") or {}).get("projectItems") or {}
+                nodes = found[key]["projectItems"]["nodes"]
+                nodes += page.get("nodes") or []
+                cursor = _next_page(cfg, {**page, "nodes": nodes})
+                if cursor is not None and cursor != asked[key]:     # a cursor that does not move ends the pages
+                    more[key] = cursor
+        for key, issue in found.items():
+            out[key] = _record(cfg, issue)
     return out
+
+
+def _ask(cfg: ListConfig, token: str, query: str) -> dict:
+    """The `data` of GitHub's answer to `query`. Raises RecordError."""
+    req = urllib.request.Request(
+        cfg.api + "/graphql", data=json.dumps({"query": query}).encode(), method="POST",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json",
+                 "Accept": "application/json", "User-Agent": "sheaf-list"})
+    try:
+        with urllib.request.urlopen(req, timeout=HTTP_SECONDS) as r:
+            answer = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        raise RecordError(f"GitHub answered {e.code} to the record's query") from None
+    except (OSError, ValueError) as e:
+        raise RecordError(f"GitHub could not be read ({type(e).__name__})") from None
+    data = answer.get("data") if isinstance(answer, dict) else None
+    if not isinstance(data, dict):
+        kinds = sorted({str(e.get("type") or "?") for e in answer.get("errors") or [] if isinstance(e, dict)}) \
+            if isinstance(answer, dict) else []
+        raise RecordError(f"GitHub answered the record's query with errors and no data ({', '.join(kinds) or 'none named'})")
+    return data
+
+
+def _next_page(cfg: ListConfig, items: dict) -> str | None:
+    """The cursor of the next page of `items` (an issue's `projectItems`), when it has one and the pages
+    read hold no item of the list's Project."""
+    info = items.get("pageInfo") or {}
+    cursor = info.get("endCursor")
+    if not info.get("hasNextPage") or not isinstance(cursor, str) or not cursor:
+        return None
+    return None if _item(cfg, items.get("nodes") or []) is not None else cursor
+
+
+def _item(cfg: ListConfig, nodes: list) -> dict | None:
+    """The issue's item in the list's Project, of the items `nodes`."""
+    for item in nodes:
+        project = (item or {}).get("project") or {}
+        if project.get("number") == cfg.project and \
+                ((project.get("owner") or {}).get("login") or "").lower() == cfg.owner.lower():
+            return item
+    return None
 
 
 def _record(cfg: ListConfig, issue: dict) -> Record:
@@ -286,13 +331,9 @@ def _record(cfg: ListConfig, issue: dict) -> Record:
     except ValueError:
         updated = 0.0
     status = None
-    if issue.get("state") == "OPEN":
-        for item in (issue.get("projectItems") or {}).get("nodes", []):
-            project = (item or {}).get("project") or {}
-            if project.get("number") == cfg.project and \
-                    ((project.get("owner") or {}).get("login") or "").lower() == cfg.owner.lower():
-                name = ((item.get("status") or {}).get("name"))
-                status = {cfg.waiting: "waiting", cfg.in_progress: "open"}.get(name)
+    if issue.get("state") == "OPEN" and (item := _item(cfg, (issue.get("projectItems") or {}).get("nodes") or [])):
+        name = ((item.get("status") or {}).get("name"))
+        status = {cfg.waiting: "waiting", cfg.in_progress: "open"}.get(name)
     return Record(status, assignees, updated)
 
 

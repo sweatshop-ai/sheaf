@@ -290,12 +290,13 @@ def make_folders(top, rel: str):
     return _folder_of(top, rel, make=True)
 
 
-def _refused(hub, address: str, why: str, quarantined_: bool = False):
+def _refused(hub, address: str, why: str, quarantined_: bool = False, tried: bool = False):
     """A `place-refused` row, once per address per hub run: a sheaf that cannot move is met at every poll. A sheaf
-    in quarantine (#61) has its own row, `quarantined: true`, once too."""
+    in quarantine (#61) has its own row, `quarantined: true`, once too; one left at the project's path because its
+    quarantine could not be made (`tried`) says `quarantined: false`: the project's Library glob still files it."""
     if (address, quarantined_) not in hub.told_place:
         hub.told_place.add((address, quarantined_))
-        hub.record("place-refused", address, why=why, **({"quarantined": True} if quarantined_ else {}))
+        hub.record("place-refused", address, why=why, **({"quarantined": quarantined_} if quarantined_ or tried else {}))
 
 
 @contextmanager
@@ -458,9 +459,11 @@ def _move(hub, root, top: Path, rel: str, name: str, address: str, text: str | N
         if strict:
             raise Refused(why)
         gone = None
-        if rel == name and text is not None and visibility.effective(visibility.front_matter(text)) != "project":
-            gone = _to_quarantine(top, sfd, sname, name)      # never at the project's path (#61)
-        _refused(hub, address, why, gone is not None or quarantined(rel))
+        if rel == name:     # an owner-only file at the project's path: a project one never gets here
+            gone = _to_quarantine(top, sfd, sname, name)      # never left at the project's path (#61)
+            _refused(hub, address, why, gone is not None, tried=True)
+        else:
+            _refused(hub, address, why, quarantined(rel))
         return gone
     try:
         sfd, sname = _folder_of(top, rel)

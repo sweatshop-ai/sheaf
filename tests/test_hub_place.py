@@ -686,7 +686,20 @@ def test_a_root_that_ignores_its_private_folders_keeps_an_unplaceable_sheaf_wher
     _, repo = committing(hub, browser, tmp_path, first=NOBODY, ignore="*/*/private/\n")
     hub.the_list.poll()
     assert (repo / SHARED).exists() and not (repo / QUARANTINE).exists()
-    assert [r.get("quarantined") for r in hub_rows("place-refused")] == [None]
+    assert [r.get("quarantined") for r in hub_rows("place-refused")] == [False]
+
+
+def test_a_write_to_a_sheaf_that_could_not_go_home_takes_it_to_quarantine_in_one_commit(hub, browser, tmp_path):
+    """Not at the home of the text on disk (its owner's private folder is ignored), the door's update is written as
+    before (9.11), and its move goes to quarantine, with the new text, in the write's one `move:` commit."""
+    _, repo = committing(hub, browser, tmp_path, ignore="*/*/private/thierry/\n")
+    token = Tokens().add("james-thierry", write=True)
+    is_error, got = call(browser, "update", token=token, doc=f"sheaves/{SHARED}", text=PRIVATE + "More.\n",
+                         expected_hash=md_hash(PRIVATE))
+    assert not is_error, got
+    assert not (repo / SHARED).exists() and (repo / QUARANTINE).read_text(encoding="utf-8").endswith("More.\n")
+    assert git(repo, "log", "-1", "--format=%s").strip() == f"move: {SHARED} -> {QUARANTINE}"
+    assert git(repo, "status", "--porcelain") == ""
 
 
 def subjects(repo):

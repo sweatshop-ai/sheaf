@@ -610,3 +610,51 @@ def test_a_hub_commit_the_remote_already_holds_is_not_pushed_again_empty(box, sh
     edit(box, sheaves)
     subjects = [who.split("|")[1] for who, _ in pushed(box, remote)]
     assert subjects == ["edit: acme/blog/2026-10-28-plan.md", "a README, on GitHub", "first"]
+
+
+def test_two_roots_of_one_repo_share_its_commit_lock_and_a_commit_of_one_never_lands_inside_the_others_pull(
+        tmp_path, remote, monkeypatch):
+    """Two roots in one git repo share one index and one HEAD, so one commit lock (#73): a commit of root B waits
+    while root A's pull moves HEAD, and comes after it, on top."""
+    import threading
+
+    from sheafmd.hub import commits
+    from sheafmd.hub.roots import Root
+    repo = tmp_path / "sheaves"
+    subprocess.run(["git", "clone", "-q", str(remote), str(repo)], check=True, capture_output=True)
+    git(repo, "config", "user.name", "the box")
+    git(repo, "config", "user.email", "box@example.com")
+    for name in ("acme", "globex"):
+        (repo / name).mkdir()
+        (repo / name / ".sheaf.toml").write_text("commit = true\npush = true\n", encoding="utf-8")
+        (repo / name / "plan.md").write_text(f"# {name}\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "first")
+    git(repo, "push", "-q", "origin", "HEAD:main")
+    a, b = (Root(name, repo / name, True) for name in ("acme", "globex"))
+    made = []
+    hub_commits = commits.Commits(lambda kind, doc, **detail: made.append((kind, doc, detail)))
+    real, racer = commits._git, []
+
+    def spy(folder, *args, **kw):
+        if args[:1] == ("update-ref",) and not racer:
+            (repo / "globex" / "plan.md").write_text("# globex, on the page\n", encoding="utf-8")
+            racer.append(threading.Thread(target=hub_commits.saved,
+                                          args=(b, "plan.md", commits.Author("Cal", "cal@example.com"), "edit")))
+            racer[0].start()
+            racer[0].join(1)                  # B's commit, given every chance to land between A's read-tree and HEAD
+        return real(folder, *args, **kw)
+
+    monkeypatch.setattr(commits, "_git", spy)
+    merged_on_github(tmp_path, remote, {"README.md": "# The sheaves\n"}, "a README")
+    (repo / "acme" / "plan.md").write_text("# acme, on the page\n", encoding="utf-8")
+    hub_commits.saved(a, "plan.md", commits.Author("Bea", "bea@example.com"), "edit")
+    assert hub_commits.settle()
+    racer[0].join(10)
+    assert hub_commits.settle()
+    assert made == []
+    assert git(repo, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
+    assert git(repo, "status", "--porcelain", "--untracked-files=no") == ""
+    assert git(remote, "log", "--format=%an|%s", "main").splitlines() == [
+        "Cal|edit: plan.md", "Bea|edit: plan.md", "Ada|a README", "the box|first"]
+    assert git(remote, "show", "--name-only", "--format=", "main").split() == ["globex/plan.md"]

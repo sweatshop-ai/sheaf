@@ -317,6 +317,16 @@ def test_a_home_already_taken_keeps_the_sheaf_where_it_is(team, work):
     assert {r["doc"] for r in hub_rows("place-refused")} == {f"work/{SHARED}", f"work/{HOME}"}
 
 
+def test_a_name_held_by_another_private_sheaf_keeps_the_sheaf_where_it_is(team, work):
+    """Its own home is free, but the name is not: a move there would give the name two files."""
+    hans = f"thinkingtoo/tiroir/private/hans/{NAME}"
+    put(team, work, SHARED, PRIVATE)
+    put(team, work, hans, PRIVATE.replace("owner: thierry", "owner: hans"))
+    team.hub.the_list.poll()
+    assert (work / SHARED).read_text(encoding="utf-8") == PRIVATE and not (work / HOME).exists()
+    assert [r["doc"] for r in hub_rows("place-refused")] == [f"work/{SHARED}"]
+
+
 def test_the_owner_is_the_front_matters_owner_when_it_is_one_of_the_owners(team, work):
     put(team, work, SHARED, PRIVATE.replace("owner: thierry", "owner: hans"))
     team.hub.the_list.poll()

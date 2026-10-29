@@ -327,7 +327,8 @@ class Hub:
         # The fork fetches the live session's transcript from /_/session: one on a laptop, none, or no
         # sessions_dir to serve it from, nothing to fork.
         if st.forkable and st.cfg.sessions_dir is not None:
-            out["fork"] = f"tiroir work {self.proxy.origin}{roots_mod.url_path(e.address)}"
+            out["fork"] = (f"uvx --from {work_mod.FORK_CLIENT} tiroir work "
+                           f"{self.proxy.origin}{roots_mod.url_path(e.address)}")
         # James names a project's window <client>_<project>: with a dash, a-b/c and a/b-c would share one.
         window = "_".join(roots_mod.Address.parse(e.address).rel.split("/")[:2])
         # Two shells and tmux read the command: a name with another character (`.`, `:`, a space) is left out.

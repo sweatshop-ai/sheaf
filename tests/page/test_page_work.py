@@ -120,7 +120,7 @@ def test_work_on_this_opens_the_two_ways_and_the_sessions(tab):
     assert w.locator(".rd-cmd code").all_inner_texts() == [ATTACH, FORK]
     assert w.locator(".rd-cmd button").all_inner_texts() == ["Copy", "Copy"]
     assert "Runs on your laptop: fetches the session through this hub, forks it under your name. " \
-           "Needs uv and Claude Code there." in w.inner_text()
+           "Needs uv there." in w.inner_text()
     # Newest first, as the front matter lists them, and five at most.
     assert w.locator(".rd-sess").all_inner_texts() == [
         "James on tiroir-tt · 2026-10-28 05:12 UTC",

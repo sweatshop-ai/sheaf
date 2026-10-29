@@ -873,15 +873,14 @@ class Handler:
         return address, visibility.front_matter(text), work.state(self.hub, address, text)
 
     def _session(self, req: Req) -> Response:
-        """The transcript of one of the sheaf's box-hosted sessions, the newest without `id`, from the copy of
+        """The transcript of one of the sheaf's box-hosted sessions, the live one without `id`, from the copy of
         James's transcripts (9.12). It names only a file the front matter lists, of the box, in `sessions_dir`."""
         address, fm, st = self._sheaf(req, req.query.get("doc"))
         sid = req.query.get("id")
         _shape(sid is None or work.UUID_RE.fullmatch(sid), "id must be a session id (a lowercase UUID)")
-        box = st.box
         if sid is None:
-            sid = box[0] if box else None
-        if sid not in box or st.cfg.sessions_dir is None:
+            sid = st.forkable           # a live session on a laptop: none, never an older box copy to fork
+        if sid not in st.box or st.cfg.sessions_dir is None:
             raise Refuse(404, "this sheaf has no such session on the box")
         body = work.open_transcript(st.cfg.sessions_dir, sid)
         if body is None:

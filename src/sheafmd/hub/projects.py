@@ -103,7 +103,8 @@ def project_of(rel: str) -> str | None:
 
 def grants(entries, rel: str, short: str) -> bool:
     """Whether the file's `entries` (None for no file, an `Invalid` for one the hub cannot read) let the member of
-    `short` open the shared sheaves at `rel` (8.12): its project's `members` hold `short`, compared without case.
+    `short` open the shared sheaves at `rel` (8.12): its project's `members` hold `short`, compared in lower case
+    (`str.lower()`, not casefolded: `groups` prints the names so, and the Library compares principal ids as given).
     A root with no file, and a document above project depth, grant as before: to every member of the root. A
     project the file does not name, and every project of a file the hub cannot read, grant no one."""
     folder = project_of(rel)
@@ -111,19 +112,20 @@ def grants(entries, rel: str, short: str) -> bool:
         return True
     if isinstance(entries, Invalid) or (entry := entries.get(folder)) is None:
         return False
-    return bool(short) and short.casefold() in {m.casefold() for m in entry["members"]}
+    return bool(short) and short.lower() in {m.lower() for m in entry["members"]}
 
 
 def groups(entries: dict) -> dict:
     """The Library's groups from the same entries the hub grants by (8.12, 13): each project's group
     `group:proj-<client>-<project>`, its glob `<client>/<project>/*.md`, its status and its members (lower case,
     as `grants` compares them) and its assistants (lower case too), and for each member short, and each assistant,
-    the groups of the projects that name them."""
+    the groups of the projects that name them. A name in both maps keeps its two lists apart: its principal's
+    groups are their union (13)."""
     out, members, assistants = [], {}, {}
     for name in sorted(entries):
         group = group_of(name)
-        names = sorted({m.casefold() for m in entries[name]["members"]})
-        agents = sorted({a.casefold() for a in entries[name].get("assistants", [])})
+        names = sorted({m.lower() for m in entries[name]["members"]})
+        agents = sorted({a.lower() for a in entries[name].get("assistants", [])})
         out.append({"project": name, "group": group, "glob": f"{name}/*.md", "status": entries[name]["status"],
                     "members": names, "assistants": agents})
         for m in names:

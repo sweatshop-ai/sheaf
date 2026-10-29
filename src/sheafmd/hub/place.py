@@ -148,6 +148,10 @@ def place(hub, address: str, member=None, by: str | None = None) -> str:
                 return address
             if target == at.rel:
                 return address
+            if [r for r in holders(top, name) if r != at.rel]:
+                # The name has one file (9.11): another under any home of it, its target or not, keeps this one here.
+                _refused(hub, address, f"its name {name} is held by another file")
+                return address
             try:
                 dfd, dname = make_folders(top, target)
             except OSError as e:
@@ -246,13 +250,20 @@ def taken(top: Path, name: str) -> bool:
     """Whether the logical name `name` is held: by a file at `<client>/<project>/<name>.md` or at any
     `<client>/<project>/private/*/<name>.md`, whatever the caller may see (9.11: a create tells that a name is
     taken, never what holds it)."""
+    return bool(holders(top, name))
+
+
+def holders(top: Path, name: str) -> list:
+    """The paths in the root, under `top`, of every entry that holds the logical name `name`: at
+    `<client>/<project>/<name>.md` and at each `<client>/<project>/private/*/<name>.md`, a link or a dangling one
+    included."""
     client, project, file = name.split("/")
-    if os.path.lexists(top / name):
-        return True
+    held = [name] if os.path.lexists(top / name) else []
     try:
         with os.scandir(top / client / project / PRIVATE) as it:
-            return any(os.path.lexists(top / client / project / PRIVATE / d.name / file) for d in it
-                       if d.is_dir(follow_symlinks=False))
+            held += [f"{client}/{project}/{PRIVATE}/{d.name}/{file}" for d in it if d.is_dir(follow_symlinks=False)
+                     and os.path.lexists(top / client / project / PRIVATE / d.name / file)]
     except OSError:
-        return False
+        pass
+    return held
 

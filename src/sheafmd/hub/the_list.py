@@ -397,6 +397,8 @@ class TheList:
                 self._records = fetch(self.cfg, wanted) if wanted else {}   # an issue it does not hold is off
             except RecordError as e:
                 self.hub.record("list-poll-failed", None, root=root.name, error=str(e))
+                return              # no record read: the list stays as the last poll that read one left it,
+                                    # and no sheaf is placed on records this poll did not read
             rows = [Row(s, self._records[s.issue], "/".join(s.rel.split("/")[:2]), read.get(s.rel), files[s.rel])
                     for s in sheaves if s.issue in self._records]
             # A ticked sheaf waits on nobody until the record routine has moved its issue: a new change of the

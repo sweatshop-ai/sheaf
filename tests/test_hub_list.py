@@ -337,6 +337,20 @@ def test_the_record_is_read_as_the_app_and_a_poll_that_cannot_read_it_keeps_the_
     assert "answered 401" in hub_rows("list-poll-failed")[-1]["error"]
 
 
+def test_a_sheaf_added_since_joins_the_list_only_at_a_poll_that_reads_the_record(box, sheaves, github, tmp_path):
+    before = read(box.get("/list", member=NELL))
+    # A new sheaf whose issue the last poll read: the record it would be listed by is not read this poll.
+    (sheaves / "initech/website/2026-10-29-new.md").write_text(
+        "---\nissue: acme/record#7\n---\n# A new one\n\n- [ ] Done\n", encoding="utf-8")
+    (tmp_path / "installation-token").write_text("", encoding="utf-8")
+    box.hub.the_list.poll()
+    assert "holds no token" in hub_rows("list-poll-failed")[-1]["error"]
+    assert read(box.get("/list", member=NELL)) == before
+    (tmp_path / "installation-token").write_text(TOKEN + "\n", encoding="utf-8")
+    box.hub.the_list.poll()
+    assert "A new one" in json.dumps(read(box.get("/list", member=NELL)))
+
+
 def test_a_member_whose_roots_do_not_hold_the_list_gets_404(box, tmp_path):
     other = tmp_path / "other"
     other.mkdir()

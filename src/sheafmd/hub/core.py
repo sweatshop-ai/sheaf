@@ -18,6 +18,7 @@ import traceback
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 from .. import __version__, config, diagnostics, paths
 from ..agents import registry
@@ -25,6 +26,7 @@ from ..agents.base import Adapter, Target
 from ..render import render_file
 from ..source import STAMP_FORMAT
 from . import commits as commits_mod
+from . import place
 from . import projects
 from . import proxy as proxy_mod
 from . import roots as roots_mod
@@ -48,7 +50,7 @@ _META_RE = re.compile(r'(<script id="rd-edit-meta" type="application/json">)(.*?
 @dataclass
 class Entry:
     address: str
-    path: Path
+    file: Callable[[], Path]     # where its file is now: a sheaf of the list's root is found by its name (9.11)
     root_id: str = ""            # the id of the root it was made for (SPEC 8.2), which its page carries (10.1)
     live: LiveDocument | None = None
     bus: Bus = field(default_factory=Bus)
@@ -60,6 +62,11 @@ class Entry:
     log: list = field(default_factory=list)        # the render log of the last build
     warnings: list = field(default_factory=list)   # link-rule warnings not yet handed to a command
     first: bool = True                             # no build has run yet
+
+    @property
+    def path(self) -> Path:
+        """The document's file as it is found now (9.11: a move renames the file of a sheaf, never its entry)."""
+        return self.file()
 
 
 RESTART_TOLD_TTL = 30            # seconds a restart that was announced is still expected
@@ -76,9 +83,13 @@ class Hub:
         self.started = time.time()
         self.person = config.user_name()
         self.roots = roots_mod.Roots()
+        self.roots.placer = lambda root, rel: place.physical(self, root, rel)
         self.versions = state.Versions()
         self.commits = Commits(self.record)      # the roots that commit (8.11)
         self._told_projects: set = set()         # what check_projects warned of this run (8.12)
+        self.told_place: set = set()             # the addresses a place-refused row named this run (9.11)
+        self.told_link: set = set()              # the (root id, path) a link-ignored row named this run (9.11)
+        self.told_ignored: set = set()           # the roots a private-ignored row named this run (9.11)
         self._front: dict = {}                   # {file: (its stat, its front matter, its assignees)}, for 9.11
         self.the_list = None                     # the list (9.10): a the_list.TheList, set by the server
         self.docs = state.Docs()
@@ -146,18 +157,41 @@ class Hub:
             print(f"sheaf: {root.name}/{folder} holds sheaves and {projects.FILE} has no entry for it",
                   file=sys.stderr, flush=True)
 
-    def committed(self, address: str, member=None, what: str = "edit", by: str | None = None):
+    def committed(self, address: str, member=None, what: str = "edit", by: str | None = None,
+                  gone: str | None = None, author: Author | None = None):
         """A write went to `address`, by `member` (a proxy.Member), by `by` (the display name of a door
-        caller) or else by the hub's person: a commit, in a root that commits (8.11)."""
+        caller), by `author` when given (the hub itself, for a move of the poll) or else by the hub's person:
+        a commit, in a root that commits (8.11). `gone`: the path in the root the document moved from (9.11). The
+        caller holds the sheaf's name (`place.held`): a write and its commit are one step under it, so no other
+        write of the name comes between, and a commit never carries another's write."""
+        if not place.owns(self, address):
+            raise RuntimeError(f"{address} committed outside its name's lock (9.11)")
         a = roots_mod.Address.parse(address)
         root = self.roots.get(a.root)
         if root is None:
             return
-        if member is not None:
+        rel = place.file_rel(Path(os.path.realpath(root.path)), a.rel) if place.applies(self, a.root) else a.rel
+        if author is not None:
+            who = author
+        elif member is not None:
             who = Author(member.name, member.email or proxy_mod.default_email(member.id, self.proxy.origin))
         else:
             who = Author(by or self.person, "")
-        self.commits.saved(root, a.rel, who, what)
+        self.commits.saved(root, rel, who, what, gone=gone, key=a.rel)
+
+    def file(self, address: str, placed: bool | None = None) -> Path:
+        """The path of the file the document at `address` names, there or not, unchecked: in the list's root the one
+        file that holds a sheaf's name, wherever it lives (9.11), else the address's own path. `placed` is whether
+        the hub places the root's sheaves (`place.applies`), when the caller knows it."""
+        at = roots_mod.Address.parse(address)
+        root = self.roots.get(at.root)
+        if root is None:
+            raise roots_mod.NotFound(address)
+        if placed is None:
+            placed = place.applies(self, at.root)
+        if not placed:
+            return root.path / at.rel
+        return root.path / place.file_rel(Path(os.path.realpath(root.path)), at.rel)
 
     def url(self, address: str) -> str:
         return f"http://127.0.0.1:{self.port}{roots_mod.url_path(address)}"
@@ -168,7 +202,12 @@ class Hub:
         file that 8.2 keeps from the root for lying in a git directory, as the door says (12).
         The file is found before the hub's lock is taken, and its root looked at again under it: a
         `forget_root` that took the lock in between makes the address name nothing, as it does for
-        a request that comes after it."""
+        a request that comes after it. All of it under the lock of a sheaf's name (9.11), taken before
+        the hub's: the file is found and first read and rendered where no move takes it."""
+        with place.held(self, address):
+            return self._entry(address)
+
+    def _entry(self, address: str) -> Entry:
         name = roots_mod.Address.parse(address).root
         root = self.roots.get(name)
         path = self.roots.document(address)
@@ -178,10 +217,20 @@ class Hub:
                 return e
             if self.roots.get(name) != root:
                 raise roots_mod.NotFound(address)
-            e = Entry(address, path, root.id)
-            e.live = LiveDocument(path, render=lambda text: self._rendered(e, text),
+            if place.applies(self, name):
+                # Keyed by the sheaf's name: its file is found again at each read, and under the name's lock at
+                # each write, so a move of the file changes nothing the hub keeps (9.11).
+                def file():
+                    return Path(os.path.realpath(self.file(address, placed=True)))
+
+                def hold():
+                    return place.held(self, address)
+            else:
+                file, hold = (lambda: path), None
+            e = Entry(address, file, root.id)
+            e.live = LiveDocument(file, render=lambda text: self._rendered(e, text),
                                   publish=e.bus.publish, by=self.person, clock=self.clock,
-                                  versions=self._versions_of(root), address=address)
+                                  versions=self._versions_of(root), address=address, hold=hold)
             e.live.refresh(force=True)           # the first render: e.html
             self.entries[address] = e
             return e
@@ -320,7 +369,7 @@ class Hub:
         restarts anything."""
         md = Path(md).resolve()
         address = self.roots.address(md)
-        with self._lock:
+        with place.held(self, address), self._lock:        # the name's lock first (9.11), as `entry` takes it
             old = self.docs.get(address)
             new = dict(old)
             new["path"] = str(md)
@@ -414,17 +463,18 @@ class Hub:
         root = self.roots.get(at.root)
         if root is None:
             return {}, None
-        f = root.path / at.rel
+        # Kept by the address's own path, a sheaf's name (9.11), and read where its file is now.
+        kept, f = root.path / at.rel, self.file(address)
         try:
             st = f.stat()
         except FileNotFoundError:
-            hit = self._front.get(f)
+            hit = self._front.get(kept)
             return None if hit is None else hit[1:]
         key = (st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
-        hit = self._front.get(f)
+        hit = self._front.get(kept)
         fm = hit[1] if hit is not None and hit[0] == key else visibility.front_matter(f.read_text(encoding="utf-8"))
         assignees = self.assignees(address, fm)
-        self._front[f] = (key, fm, assignees)
+        self._front[kept] = (key, fm, assignees)
         return fm, assignees
 
     def visible(self, member, address: str, never_read: bool = True) -> bool:
@@ -459,9 +509,12 @@ class Hub:
         at = roots_mod.Address.parse(address)
         root = self.roots.get(at.root)
         if root is not None and at.plain:
+            placed = place.applies(self, at.root)
             try:
-                rel = Path(os.path.realpath(root.path / at.rel)).relative_to(os.path.realpath(root.path))
-                address = f"{root.name}/{rel.as_posix()}"
+                rel = Path(os.path.realpath(self.file(address, placed))).relative_to(os.path.realpath(root.path))
+                rel = rel.as_posix()
+                # The list knows a sheaf by its name (9.11), wherever its file is.
+                address = f"{root.name}/{(place.logical(rel) if placed else None) or rel}"
             except ValueError:
                 pass
         return self.the_list.assignees(address, visibility.text(fm, "issue"))
@@ -527,15 +580,20 @@ class Hub:
         except Exception as ex:
             self._rebuild_failed(e, ex)
 
-    def wrote(self, address: str):
+    def wrote(self, address: str, moved: bool = False):
         """The door made or changed this document's file (SPEC 12): tell its open tabs now, as the
         watcher would within a second, and the open indexes. Compared by its text, not by
-        `(mtime, size)`, which a write of the same length within one clock tick leaves as it was."""
+        `(mtime, size)`, which a write of the same length within one clock tick leaves as it was.
+        `moved`: the file of a sheaf moved (9.11), its text the same; the page is rendered again all
+        the same, since its relative images are now found in the new folder."""
         e = self.entries.get(address)
         if e is not None:
             try:
                 st = e.path.stat()
-                e.live.refresh()
+                if moved:
+                    e.live.rebuild()
+                else:
+                    e.live.refresh()
                 e.last_stat = (st.st_mtime_ns, st.st_size)
             except Exception as ex:
                 self._rebuild_failed(e, ex)

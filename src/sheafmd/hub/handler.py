@@ -32,6 +32,7 @@ from ..render import RenderError
 from ..source import StaleError
 from . import auth, peer, place, proxy, the_list, visibility, work
 from .asktell import NO_AGENT, JobRefused
+from .events import Instead
 from .index import Status
 from .live import UNKNOWN, NotAuthor
 from .roots import Address, NotFound, address_of_url, root_of_url, url_path
@@ -592,10 +593,10 @@ class Handler:
         e = self._entry(req, req.query.get("doc"))
         def for_member(name, data):
             # Asked at each event: a write that makes the sheaf its owner's alone silences a stream
-            # opened before it (9.11). Where a moved sheaf went is told only to whom may open it there.
+            # opened before it (9.11). Where a moved sheaf went is told only to whom may open it there; anyone
+            # else is told it is gone, the last event of the stream as `moved` is.
             if name == "moved":
-                to = data.get("to", "")
-                return data if hub.member_owns(member, to) and hub.visible(member, to, never_read=False) else None
+                return data if self._may_open(req, data.get("to", "")) else Instead("gone", {"doc": data.get("doc")})
             return _document_events(name, data) if hub.visible(member, e.address) else None
         sub = e.bus.subscribe(lambda tabs: {"boot": hub.boot, "version": hub.version,
                                             "service": hub.service, "tabs": tabs},

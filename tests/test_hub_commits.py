@@ -445,3 +445,126 @@ def test_a_share_is_one_commit_by_the_signed_in_owner_whatever_name_the_request_
     on_remote = git(remote, "show", f"main:{rel}")
     assert "- [x] Share" in on_remote and "visibility: project" in on_remote and "shared: bea " in on_remote
     assert len(pushed(box, remote)) == 3                    # the first, the contract, the share: Cal wrote nothing
+
+
+# ── what the remote got meanwhile (#62) ──────────────────────────────────────
+def merged_on_github(tmp_path, remote, files: dict, subject: str):
+    """A commit made away from the box and pushed to `remote`, as a PR merged on GitHub would be: `files` maps
+    a path to its new text. Gives the new commit."""
+    away = tmp_path / "github"
+    if not away.exists():
+        subprocess.run(["git", "clone", "-q", str(remote), str(away)], check=True, capture_output=True)
+        git(away, "config", "user.name", "Ada")
+        git(away, "config", "user.email", "ada@example.com")
+    git(away, "pull", "-q", "--ff-only", "origin", "main")
+    for rel, text in files.items():
+        (away / rel).write_text(text, encoding="utf-8")
+    git(away, "add", "-A")
+    git(away, "commit", "-q", "-m", subject)
+    git(away, "push", "-q", "origin", "HEAD:main")
+    return git(away, "rev-parse", "HEAD").strip()
+
+
+ONLY_BEA = '[projects."acme/blog"]\nmembers = ["bea"]\nstatus = "live"\n'
+
+
+def test_a_projects_toml_change_merged_on_the_remote_reaches_the_hub_at_its_next_push_and_the_grant_follows(
+        box, sheaves, remote, tmp_path):
+    assert box.get(f"/{DOC}", member=CAL).status == 200
+    merged_on_github(tmp_path, remote, {"projects.toml": ONLY_BEA}, "Cal leaves acme/blog")
+    edit(box, sheaves)
+    subjects = [who.split("|")[1] for who, _ in pushed(box, remote)]
+    assert subjects == ["edit: acme/blog/2026-10-28-plan.md", "Cal leaves acme/blog", "first"]
+    assert (sheaves / "projects.toml").read_text(encoding="utf-8") == ONLY_BEA
+    assert git(sheaves, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
+    assert git(sheaves, "status", "--porcelain", "--untracked-files=no") == ""
+    assert box.get(f"/{DOC}", member=CAL).status == 404
+    assert rows("push-diverged") == [] and rows("push-failed") == []
+
+
+def test_the_hubs_commits_keep_their_author_and_subject_on_top_of_the_remotes(box, sheaves, remote, tmp_path):
+    edit(box, sheaves)
+    pushed(box, remote)
+    merged_on_github(tmp_path, remote, {"README.md": "# The sheaves\n"}, "a README")
+    edit(box, sheaves, member=CAL, words="Second, by Cal.")
+    commits = pushed(box, remote)
+    cal = git(sheaves, "log", "-1", "--format=%an <%ae>", "HEAD").strip()
+    assert cal.startswith("Cal <")
+    assert [who for who, _ in commits] == [f"{cal}|edit: acme/blog/2026-10-28-plan.md", "Ada <ada@example.com>|a README",
+                                           "Bea <bea@example.com>|edit: acme/blog/2026-10-28-plan.md",
+                                           "the box <box@example.com>|first"]
+    assert (sheaves / "README.md").read_text(encoding="utf-8") == "# The sheaves\n"
+    assert "Second, by Cal." in git(remote, "show", "main:acme/blog/2026-10-28-plan.md")
+
+
+def test_a_conflict_with_the_remote_leaves_the_checkout_as_it_was_pushes_nothing_and_is_a_row(
+        box, sheaves, remote, tmp_path):
+    f = sheaves / "acme" / "blog" / "2026-10-28-plan.md"
+    theirs = f.read_text(encoding="utf-8").replace("Second", "Second, rewritten on GitHub")
+    remote_head = merged_on_github(tmp_path, remote, {"acme/blog/2026-10-28-plan.md": theirs}, "a rewrite")
+    edit(box, sheaves)
+    assert box.hub.commits.settle()
+    head = git(sheaves, "rev-parse", "HEAD").strip()
+    assert git(sheaves, "log", "-1", "--format=%s", head).strip() == "edit: acme/blog/2026-10-28-plan.md"
+    assert "Second, edited on the page." in f.read_text(encoding="utf-8")
+    assert git(sheaves, "status", "--porcelain", "--untracked-files=no") == ""
+    assert not (sheaves / ".git" / "rebase-merge").exists() and not (sheaves / ".git" / "MERGE_HEAD").exists()
+    assert git(remote, "rev-parse", "main").strip() == remote_head
+    (row,) = rows("push-diverged")
+    assert row["doc"] == DOC and row["paths"] == ["acme/blog/2026-10-28-plan.md"]
+    # A person settles it once, on GitHub here; the next push goes through.
+    merged_on_github(tmp_path, remote, {"acme/blog/2026-10-28-plan.md": PLAN}, "back as it was")
+    edit(box, sheaves, words="Second, edited again.")
+    assert box.hub.commits.settle()
+    assert git(sheaves, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
+    assert "Second, edited again." in git(remote, "show", "main:acme/blog/2026-10-28-plan.md")
+    assert len(rows("push-diverged")) == 1
+
+
+def test_a_change_of_the_person_on_a_file_the_remote_changed_stops_the_pull_and_stays(box, sheaves, remote, tmp_path):
+    merged_on_github(tmp_path, remote, {"projects.toml": ONLY_BEA}, "Cal leaves acme/blog")
+    mine = '[projects."acme/blog"]\nmembers = ["bea", "cal", "dan"]\nstatus = "live"\n'
+    (sheaves / "projects.toml").write_text(mine, encoding="utf-8")       # by hand on the box, not committed
+    edit(box, sheaves)
+    assert box.hub.commits.settle()
+    assert (sheaves / "projects.toml").read_text(encoding="utf-8") == mine
+    (row,) = rows("push-diverged")
+    assert row["doc"] == DOC and row["error"]
+    assert git(remote, "log", "-1", "--format=%s", "main").strip() == "Cal leaves acme/blog"
+
+
+def test_a_root_that_does_not_push_does_not_fetch(box, sheaves, remote, tmp_path):
+    (sheaves / ".sheaf.toml").write_text('versions = "root"\ncommit = true\n', encoding="utf-8")
+    merged_on_github(tmp_path, remote, {"projects.toml": ONLY_BEA}, "Cal leaves acme/blog")
+    edit(box, sheaves)
+    assert box.hub.commits.settle()
+    assert git(sheaves, "log", "-1", "--format=%s", "HEAD~1").strip() == "first"
+    assert "cal" in (sheaves / "projects.toml").read_text(encoding="utf-8")
+
+
+def test_the_pull_holds_the_file_lock_of_what_it_changes(box, sheaves, remote, tmp_path, monkeypatch):
+    """A page's write never lands between the pull's look at a file and its writing of it (9.11's locks)."""
+    from sheafmd.hub import commits
+    seen = []
+    real = commits._git
+
+    def spy(folder, *args, **kw):
+        if args[:1] == ("read-tree",):
+            from sheafmd import source
+            lock = source.file_lock(sheaves / "projects.toml")
+            import fcntl
+            f = open(lock.paths[0], "a+")
+            try:
+                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                seen.append("free")
+            except BlockingIOError:
+                seen.append("held")
+            finally:
+                f.close()
+        return real(folder, *args, **kw)
+
+    monkeypatch.setattr(commits, "_git", spy)
+    merged_on_github(tmp_path, remote, {"projects.toml": ONLY_BEA}, "Cal leaves acme/blog")
+    edit(box, sheaves)
+    assert box.hub.commits.settle()
+    assert seen == ["held"]

@@ -16,6 +16,7 @@ import threading
 import time
 import traceback
 import uuid
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -24,7 +25,7 @@ from .. import __version__, config, diagnostics, paths
 from ..agents import registry
 from ..agents.base import Adapter, Target
 from ..render import render_file
-from ..source import STAMP_FORMAT
+from ..source import STAMP_FORMAT, file_lock
 from . import commits as commits_mod
 from . import place
 from . import projects
@@ -85,7 +86,7 @@ class Hub:
         self.roots = roots_mod.Roots()
         self.roots.placer = lambda root, rel: place.physical(self, root, rel)
         self.versions = state.Versions()
-        self.commits = Commits(self.record)      # the roots that commit (8.11)
+        self.commits = Commits(self.record, self._writers_out)   # the roots that commit (8.11)
         self._told_projects: set = set()         # what check_projects warned of this run (8.12)
         self._projects: dict = {}                # root id -> (stat key, entries | Invalid | None) of its projects.toml
         self._grants_seen: dict = {}             # root id -> the projects_of answer the open tabs were last told (8.12)
@@ -159,6 +160,25 @@ class Hub:
             self.record("project-unlisted", None, root=root.name, folder=folder)
             print(f"sheaf: {root.name}/{folder} holds sheaves and {projects.FILE} has no entry for it",
                   file=sys.stderr, flush=True)
+
+    @contextmanager
+    def _writers_out(self, root, files):
+        """Hold what a writer of each of `files` (absolute paths in `root`) holds before the root's commit lock:
+        the lock of its sheaf's name, where the hub places the root's sheaves, then its file lock (9.11). A pull
+        (8.11, #62) holds it while it changes them, so no write lands between its look at a file and its new text."""
+        top = Path(os.path.realpath(root.path))
+        names = set()
+        if place.applies(self, root.name):
+            for f in files:
+                rel = os.path.relpath(f, top)
+                if not rel.startswith("..") and (name := place.logical(rel.replace(os.sep, "/"))):
+                    names.add(name)
+        with ExitStack() as held:
+            for name in sorted(names):
+                held.enter_context(place.held(self, f"{root.name}/{name}"))
+            for f in sorted(set(map(str, files))):
+                held.enter_context(file_lock(f))
+            yield
 
     def committed(self, address: str, member=None, what: str = "edit", by: str | None = None,
                   gone: str | None = None, author: Author | None = None):

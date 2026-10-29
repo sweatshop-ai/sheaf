@@ -604,8 +604,11 @@ class Handler:
                               for_member if member else None)
         if member is None and hub.auth is not req.auth:       # a rotation overtook this request, after it told the open streams
             sub.put("signed-out", {})
-        if hub.entries.get(e.address) is not e:               # a forget overtook this request, after it told the open streams
-            sub.put("gone", {"doc": e.address})
+        if hub.entries.get(e.address) is not e:
+            # A forget or a move (9.11) overtook this request, after it told the open streams: a move is told as
+            # `moved` to whoever may open the sheaf where it went (the filter sends anyone else `gone`).
+            to = place.found(hub, e.address, lambda a: self._may_open(req, a))
+            sub.put(*(("moved", {"doc": e.address, "to": to}) if to else ("gone", {"doc": e.address})))
         e.opened = True
         return _stream(sub)
 

@@ -7,6 +7,12 @@ sheafmd.hub.place — where a sheaf of the list's root lives (SPEC 9.11 "Where a
     home(hub, root, logical, address, text)   the path in the root where that text lives, None when it has none
     place(hub, address, ...)         the file moved to its home: the address it lives at now
     found(hub, address, may_see)     the one address a missing logical or private name lives at now
+    owner_short(hub, root, address, fm)   the `short` that names the sheaf's private folder
+    make_folders(top, rel)           the folder of `rel`, made on the way, walked without following a link
+    taken(top, name), holders(top, name)  whether a logical name is held, and by which paths
+    held(hub, address)               the lock of the sheaf's name, for a writer that judges where its file is
+    folders_lock(top, name)          the lock of the project's private folders
+    refusal(hub, address, text)      why the sheaf could not go home once its file holds `text`
 
 In proxy mode, in the list's root (9.10) only, a sheaf at project depth has one home: open to the project,
 `<client>/<project>/<name>.md`; its owner's alone, `<client>/<project>/private/<short>/<name>.md`, where `short`
@@ -89,24 +95,7 @@ def make_folders(top, rel: str):
     """(fd of the folder of `rel` under `top`, the file's name), making each missing folder on the way as the
     umask gives a new folder. Each folder is opened from the one above it without following a link, as
     `create_file` walks, so a link on the way is an OSError wherever it points."""
-    parts = rel.split("/")
-    fd = os.open(top, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        for seg in parts[:-1]:
-            try:
-                inner = os.open(seg, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
-            except FileNotFoundError:
-                try:
-                    os.mkdir(seg, 0o777, dir_fd=fd)
-                except FileExistsError:
-                    pass                # made meanwhile: opened as any other, a link refused
-                inner = os.open(seg, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
-            os.close(fd)
-            fd = inner
-    except BaseException:
-        os.close(fd)
-        raise
-    return fd, parts[-1]
+    return _folder_of(top, rel, make=True)
 
 
 def _refused(hub, address: str, why: str):
@@ -253,21 +242,15 @@ def _move(hub, root, top: Path, rel: str, name: str, address: str) -> str:
         finally:
             os.close(sfd)
         new = f"{root.name}/{target}"
-        _follow(hub, root, address, new)
+        _follow(hub, address, new)
     return new
 
 
-def _follow(hub, root, old: str, new: str):
-    """What the hub keeps of the document at `old` goes to `new`: its versions (7.4), the read state of the hub's
-    person and of each member, its render settings; its entry goes, and each page open on it is told `moved`, the
-    last event of its stream; the index looks at both addresses and the list's row takes the new path."""
-    hub._versions_of(root).move(old, new)
-    for store in (hub.seen, hub.member_seen, hub.docs):
-        store.move(old, new)
-    with hub._lock:
-        e = hub.entries.pop(old, None)
-    if e is not None:
-        e.bus.publish("moved", {"doc": old, "to": new})
+def _follow(hub, old: str, new: str):
+    """What the hub keeps of the document at `old` goes to `new` (`Hub.move_entry`: its versions, read state and
+    render settings, its entry, `moved` to each page open on it); the index looks at both addresses and the list's
+    row takes the new path."""
+    hub.move_entry(old, new)
     hub.wrote(new)
     try:
         hub.index.touch(old)

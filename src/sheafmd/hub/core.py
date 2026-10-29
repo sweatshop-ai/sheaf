@@ -164,6 +164,20 @@ class Hub:
             who = Author(by or self.person, "")
         self.commits.saved(root, a.rel, who, what, gone=gone)
 
+    def move_entry(self, old: str, new: str):
+        """What the hub keeps of the document at `old` goes to `new`, which the hub moved it to (9.11): its versions
+        (7.4), the read state of the hub's person and of each member, its render settings. Its entry goes, and each
+        page open on it is told `moved`, the last event of its stream."""
+        root = self.roots.get(roots_mod.Address.parse(old).root)
+        if root is not None:
+            self._versions_of(root).move(old, new)
+        for store in (self.seen, self.member_seen, self.docs):
+            store.move(old, new)
+        with self._lock:
+            e = self.entries.pop(old, None)
+        if e is not None:
+            e.bus.publish("moved", {"doc": old, "to": new})
+
     def url(self, address: str) -> str:
         return f"http://127.0.0.1:{self.port}{roots_mod.url_path(address)}"
 

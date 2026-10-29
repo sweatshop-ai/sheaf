@@ -18,7 +18,7 @@ from helpers import FRONT, Front, call, hub_rows
 
 from sheafmd import _pandoc
 from sheafmd.blocks import split_md_blocks
-from sheafmd.hub import projects, proxy, the_list, work as work_mod
+from sheafmd.hub import place, projects, proxy, the_list, work as work_mod
 from sheafmd.hub.state import INSIDE, Tokens, doc_key
 from sheafmd.hub.visibility import front_matter
 from sheafmd.source import md_hash
@@ -457,12 +457,57 @@ def test_the_poll_moves_an_owner_only_sheaf_into_private_and_an_open_one_out(tea
     assert not (work / "thinkingtoo/tiroir/private/thierry/open.md").exists()
 
 
-def test_an_owner_only_sheaf_with_no_owner_that_has_a_short_stays_and_says_why(team, work):
-    put(team, work, SHARED, PRIVATE.replace("owner: thierry", "owner: nobody"))
+QUARANTINE = f"thinkingtoo/tiroir/private/~unplaced/{NAME}"
+NOBODY = PRIVATE.replace("owner: thierry", "owner: nobody")
+
+
+def test_an_owner_only_sheaf_with_no_owner_that_has_a_short_goes_to_quarantine_and_says_why(team, work):
+    """Not at the project's path, where the Library's project glob would file it for the whole project (#61)."""
+    put(team, work, SHARED, NOBODY)
     team.hub.the_list.poll()
-    assert (work / SHARED).exists()
+    assert not (work / SHARED).exists() and (work / QUARANTINE).read_text(encoding="utf-8") == NOBODY
     rows = hub_rows("place-refused")
     assert [r["doc"] for r in rows] == [f"work/{SHARED}"] and "owner" in rows[0]["why"]
+    assert rows[0]["quarantined"] is True, rows
+
+
+def test_a_quarantined_sheaf_keeps_its_name_and_its_path_is_no_address(team, work, browser, tokens):
+    put(team, work, SHARED, NOBODY)
+    team.hub.the_list.poll()
+    root = team.hub.roots.get("work")
+    assert place.physical(team.hub, root, SHARED) == QUARANTINE
+    assert absent(browser, tokens["hans"], QUARANTINE) == absent(browser, tokens["hans"], MISSING)
+    assert team.get(f"/work/{QUARANTINE}", member=HANS).status == 404
+
+
+def test_a_quarantined_sheaf_goes_home_once_it_has_one_and_the_quarantine_folder_goes(team, work):
+    put(team, work, SHARED, NOBODY)
+    team.hub.the_list.poll()
+    (work / QUARANTINE).write_text(PRIVATE, encoding="utf-8")         # an owner with a short now
+    team.hub.the_list.poll()
+    assert (work / HOME).read_text(encoding="utf-8") == PRIVATE and not (work / QUARANTINE).exists()
+    assert not (work / "thinkingtoo/tiroir/private/~unplaced").exists()
+
+
+def test_a_quarantined_sheaf_opened_to_the_project_goes_to_the_projects_path(team, work):
+    put(team, work, SHARED, NOBODY)
+    team.hub.the_list.poll()
+    (work / QUARANTINE).write_text(OPEN, encoding="utf-8")
+    team.hub.the_list.poll()
+    assert (work / SHARED).read_text(encoding="utf-8") == OPEN and not (work / QUARANTINE).exists()
+
+
+def test_a_sheaf_open_to_the_project_is_never_quarantined(team, work):
+    put(team, work, SHARED, OPEN.replace("owner: thierry", "owner: nobody"))
+    team.hub.the_list.poll()
+    assert (work / SHARED).exists() and not (work / QUARANTINE).exists() and not hub_rows("place-refused")
+
+
+def test_the_quarantine_folder_is_no_members_short():
+    """No `short` can name it, so no owner's Library glob `*/*/private/<short>/**` reads it, and it is no hidden
+    folder, which the listing would leave out (8.6)."""
+    folder = QUARANTINE.split("/")[3]
+    assert not proxy._SHORT_RE.fullmatch(folder) and not folder.startswith(".")
 
 
 def test_a_stuck_sheaf_is_one_place_refused_row_per_hub_run(team, work):
@@ -626,6 +671,35 @@ def test_a_move_is_one_commit_of_both_paths_and_the_versions_stay_under_the_name
     assert git(repo, "status", "--porcelain") == ""
     assert (repo / INSIDE / doc_key(SHARED) / "address").read_text(encoding="utf-8") == SHARED
     assert not (repo / INSIDE / doc_key(HOME)).exists()
+
+
+def test_a_move_to_quarantine_is_one_commit_of_both_paths(hub, browser, tmp_path):
+    _, repo = committing(hub, browser, tmp_path, first=NOBODY)
+    hub.the_list.poll()
+    assert git(repo, "log", "-1", "--format=%s|%an").strip() == f"move: {SHARED} -> {QUARANTINE}|sheaf"
+    files = set(git(repo, "show", "--no-renames", "--name-status", "--format=", "HEAD").splitlines())
+    assert files == {f"D\t{SHARED}", f"A\t{QUARANTINE}"}, files
+
+
+def test_a_root_that_ignores_its_private_folders_keeps_an_unplaceable_sheaf_where_it_is(hub, browser, tmp_path):
+    """Its quarantine is under `private/` too: a sheaf moved there would leave the list (8.6)."""
+    _, repo = committing(hub, browser, tmp_path, first=NOBODY, ignore="*/*/private/\n")
+    hub.the_list.poll()
+    assert (repo / SHARED).exists() and not (repo / QUARANTINE).exists()
+    assert [r.get("quarantined") for r in hub_rows("place-refused")] == [False]
+
+
+def test_a_write_to_a_sheaf_that_could_not_go_home_takes_it_to_quarantine_in_one_commit(hub, browser, tmp_path):
+    """Not at the home of the text on disk (its owner's private folder is ignored), the door's update is written as
+    before (9.11), and its move goes to quarantine, with the new text, in the write's one `move:` commit."""
+    _, repo = committing(hub, browser, tmp_path, ignore="*/*/private/thierry/\n")
+    token = Tokens().add("james-thierry", write=True)
+    is_error, got = call(browser, "update", token=token, doc=f"sheaves/{SHARED}", text=PRIVATE + "More.\n",
+                         expected_hash=md_hash(PRIVATE))
+    assert not is_error, got
+    assert not (repo / SHARED).exists() and (repo / QUARANTINE).read_text(encoding="utf-8").endswith("More.\n")
+    assert git(repo, "log", "-1", "--format=%s").strip() == f"move: {SHARED} -> {QUARANTINE}"
+    assert git(repo, "status", "--porcelain") == ""
 
 
 def subjects(repo):

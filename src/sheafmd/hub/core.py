@@ -90,7 +90,7 @@ class Hub:
         self._projects: dict = {}                # root id -> (stat key, entries | Invalid | None) of its projects.toml
         self._grants_seen: dict = {}             # root id -> the projects_of answer the open tabs were last told (8.12)
         self._grants_last: dict = {}             # root id -> what projects_of gave the last tick
-        self.told_place: set = set()             # the addresses a place-refused row named this run (9.11)
+        self.told_place: set = set()             # (address, quarantined) a place-refused row named this run (9.11)
         self.told_link: set = set()              # the (root id, path) a link-ignored row named this run (9.11)
         self.told_ignored: set = set()           # the roots a private-ignored row named this run (9.11)
         self._front: dict = {}                   # {file: (its stat, its front matter, its assignees)}, for 9.11

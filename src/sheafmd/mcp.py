@@ -700,7 +700,20 @@ class Door:
             raise ToolError("expected_hash is not a hash that `read` or `create` gave (16 hex digits).",
                             "hash")
         self._check_size(text)
+        # The name's lock (9.11) from finding the file to its move: the write and the move are one operation and one
+        # commit, and no poll moves the file in between. The name is found again under it.
+        with place.held(self.hub, address) as placed:
+            if placed:
+                address = self._address(args["doc"], caller)
+            before, text, moved = self._write(address, args, text, expected, caller)
+        if before != text:
+            self.hub.committed(moved, by=caller.display, what="update",
+                               gone=None if moved == address else Address.parse(address).rel)
+        return {"doc": moved, "url": self.hub.url(moved), "hash": md_hash(text), "changed": before != text}
 
+    def _write(self, address: str, args: dict, text: str, expected: str, caller: Caller):
+        """The write of an update, and the sheaf moved to its home (9.11): (the text before, the text written, the
+        address it lives at now)."""
         written = [text]
 
         def change(now_text):
@@ -713,6 +726,10 @@ class Door:
             _check_comments(now_text, text)
             written[0] = self._door_text(text, now_text, address, caller)
             self._check_size(written[0])
+            if (why := place.refusal(self.hub, address, written[0])) is not None \
+                    and place.refusal(self.hub, address, now_text) is None:
+                # It would stay where it may not (9.11): nothing is written.
+                raise ToolError(f"{address} was not written: {why}, so it could not go to its home.", "not written")
             return written[0]
         try:
             before, _ = update_file(self.hub.roots.document(address), change)
@@ -721,11 +738,8 @@ class Door:
         text = written[0]
         if before != text:
             self.hub.wrote(address)
-            self.hub.committed(address, by=caller.display, what="update")
         # A text that opens or closes the sheaf moves it to its home (9.11); the answer names where it lives.
-        address = place.place(self.hub, address, by=caller.display)
-        return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text),
-                "changed": before != text}
+        return before, text, place.place(self.hub, address, commit=False)
 
     def _door_text(self, text: str, old: str | None, address: str, caller: Caller) -> str:
         """The text a door write puts on disk: `_visible`'s, with the `owner` `_owned` gives it. `_owned` rewrites

@@ -138,13 +138,14 @@ _LOCKS: dict = {}
 def held(hub, address: str):
     """Hold the lock of the logical name of the sheaf at `address` (9.11): no create of the name, and no move of
     its file, comes in while it is held, so a writer that judges the name's homes and then writes finds them as it
-    judged. Nothing to hold where the hub does not place the sheaf. Re-entrant: `place` takes it again."""
+    judged. Nothing to hold where the hub does not place the sheaf. Gives whether it holds a lock. Re-entrant:
+    `place` takes it again."""
     got = _where(hub, address)
     if got is None:
-        yield
+        yield False
         return
     with _name_lock(got[1], got[2]):
-        yield
+        yield True
 
 
 def _where(hub, address: str):

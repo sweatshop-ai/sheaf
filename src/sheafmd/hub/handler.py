@@ -661,20 +661,24 @@ class Handler:
                    and isinstance(x.get("saved", ""), str), "each edit is {i, html} or {i, html, saved}")
         rid = b.get("rid")
         _shape(rid is None or (isinstance(rid, str) and _RID_RE.fullmatch(rid)), "rid is not a request id")
-        try:
-            guard, ticked = self._ticks(req, e)
-            got = e.live.save(h, edits, rid=rid, guard=guard)
-        except (EditError, StaleError) as ex:
-            raise Refuse(409, str(ex)) from None
-        except UnicodeEncodeError:
-            raise Refuse(400, "the text holds a character that cannot be written to the .md "
-                              "(half of a pair, such as half an emoji)") from None
-        self.hub.index.touch(e.address)
+        # The name's lock (9.11) from the guard's judging of the sheaf's home to its move: the write and the move
+        # are one operation, and one commit.
+        with place.held(self.hub, e.address):
+            try:
+                guard, ticked = self._ticks(req, e)
+                got = e.live.save(h, edits, rid=rid, guard=guard)
+            except (EditError, StaleError) as ex:
+                raise Refuse(409, str(ex)) from None
+            except UnicodeEncodeError:
+                raise Refuse(400, "the text holds a character that cannot be written to the .md "
+                                  "(half of a pair, such as half an emoji)") from None
+            self.hub.index.touch(e.address)
+            moved = self._placed(req, e, ticked)
         if got["changed"] and not got.get("again"):
-            self.hub.committed(e.address, req.member, "edit")
+            self._committed(req, e, "edit", moved)
         if "Stop James" in ticked:
             self._stop_james(req, e)
-        if moved := self._placed(req, e, ticked):
+        if moved:
             got["moved"] = moved
         if got["merged"] and not got.get("again"):
             # Not a failure, but the thing this log exists to measure: how often the page and
@@ -696,30 +700,40 @@ class Handler:
         edit = the_list.tick_edit(text, n, word)
         if edit is None:
             raise Refuse(409, f"the sheaf no longer holds that action ({word}): reload the list")
-        try:
-            guard, ticked = self._ticks(req, e)
-            got = e.live.save(h, [edit], guard=guard)
-        except (EditError, StaleError) as ex:
-            raise Refuse(409, str(ex)) from None
-        if not got["changed"]:
-            raise Refuse(409, f"the sheaf no longer holds that action ({word}): reload the list")
-        self.hub.index.touch(e.address)
-        self.hub.committed(e.address, req.member, "tick")
+        with place.held(self.hub, e.address):
+            try:
+                guard, ticked = self._ticks(req, e)
+                got = e.live.save(h, [edit], guard=guard)
+            except (EditError, StaleError) as ex:
+                raise Refuse(409, str(ex)) from None
+            if not got["changed"]:
+                raise Refuse(409, f"the sheaf no longer holds that action ({word}): reload the list")
+            self.hub.index.touch(e.address)
+            if self.hub.the_list is not None:
+                self.hub.the_list.ticked(e.address)
+            moved = self._placed(req, e, ticked)
+        self._committed(req, e, "tick", moved)
         if "Stop James" in ticked:
             self._stop_james(req, e)
-        if self.hub.the_list is not None:
-            self.hub.the_list.ticked(e.address)
-        if moved := self._placed(req, e, ticked):
+        if moved:
             return _ok(hash=got["hash"], moved=moved)
         return _ok(hash=got["hash"])
 
     def _placed(self, req: Req, e, ticked) -> str | None:
-        """After a write that shared the sheaf or withdrew its Share, the sheaf goes to its home (9.11): the address
-        it moved to, None when it stayed."""
+        """After a write that shared the sheaf or withdrew its Share, under the lock of its name, the sheaf goes to
+        its home (9.11): the address it moved to, None when it stayed. The caller commits the write and the move."""
         if not ({"Share", "Unshare"} & ticked):
             return None
-        new = place.place(self.hub, e.address, member=req.member, by=None if req.member else self.hub.person)
+        new = place.place(self.hub, e.address, commit=False)
         return new if new != e.address else None
+
+    def _committed(self, req: Req, e, what: str, moved: str | None):
+        """The commit of a save or a tick (8.11): one `move: <old> -> <new>` with the new text when it moved the
+        sheaf (9.11)."""
+        if moved:
+            self.hub.committed(moved, req.member, what, gone=Address.parse(e.address).rel)
+        else:
+            self.hub.committed(e.address, req.member, what)
 
     def _ticks(self, req: Req, e):
         """The guard of a save (live.save) for the two actions the hub acts on (9.11), and the set it fills
@@ -760,6 +774,10 @@ class Handler:
                     # Share rewrites the front matter: a line it takes out must not join a skipped one to `sessions`.
                     if visibility.front_matter(new).get("sessions", "") != visibility.front_matter(text).get("sessions", ""):
                         raise EditError("A save cannot change the front matter: change it in the file.")
+            if {"Share", "Unshare"} & words and (why := place.refusal(self.hub, e.address, new)) is not None \
+                    and place.refusal(self.hub, e.address, text) is None:
+                # The write would leave the sheaf where it may not stay (9.11): nothing is written.
+                raise EditError(f"This sheaf cannot go to its home: {why}. Nothing was written.")
             ticked.clear()
             ticked.update(words)
             return new

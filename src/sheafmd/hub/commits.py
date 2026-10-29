@@ -6,11 +6,13 @@ for every root of one git dir: they share its index and HEAD, #73), so the page'
 however many commits came meanwhile. Before it pushes, the hub fetches its branch and takes in what the remote
 got meanwhile (a pull request merged on GitHub): its own unpushed commits are made again on top, in git's object
 store, and the work tree moves only for the files the remote changed, under their locks; a conflict changes
-nothing and pushes nothing (#62).
+nothing and pushes nothing (#62). The watcher's poll hands each root that pushes to the same thread at most once a
+minute, with no save (#75): a change merged on the remote lands within a minute, and a push that failed goes out.
 
     Author(name, email)          who a commit is by
     Commits(record, guard)       `guard(root, files)`: the locks a writer of `files` holds before the repo's
     Commits.saved(root, rel, author, what)
+    Commits.poll(roots, now)     the watcher's tick: hand each root that pushes to the pusher, once a minute
     Commits.settle(timeout)      wait until no push is due (a test, a stopping hub)
 """
 import os
@@ -25,8 +27,10 @@ from . import state
 
 GIT_SECONDS = 20                # a commit's git commands
 PUSH_SECONDS = 60               # a push
+FETCH_SECONDS = 60              # the least time between two of the poll's pulls of one root (#75)
 # Who a commit is committed by when the repo names nobody: the hub, not the author.
 COMMITTER = ("sheaf", "sheaf@localhost")
+EVEN = "even"                   # `_pull`: the hub's branch is the remote's, nothing to push
 
 
 @dataclass(frozen=True)
@@ -112,7 +116,9 @@ class Commits:
         self._guard = guard or (lambda root, files: nullcontext())
         self._repos: dict[str, threading.Lock] = {}  # a repo's git dir, links resolved -> its commit lock
         self._lock = threading.Lock()
-        self._due: dict[Path, tuple] = {}          # root folder -> (the root, the address of the last commit)
+        self._due: dict[Path, tuple] = {}          # root folder -> (the root, the address, whether a write asked)
+        self._polled: dict[Path, float] = {}       # root folder -> when the poll last looked at it
+        self._told: dict[Path, tuple] = {}         # root folder -> the last row a poll's pull wrote (the pusher's)
         self._wake = threading.Condition(self._lock)
         self._pushing = False
         self._thread: threading.Thread | None = None
@@ -210,9 +216,27 @@ class Commits:
         return True
 
     # ── the push ─────────────────────────────────────────────────────────────
-    def _push_later(self, root, address: str):
+    def poll(self, roots, now: float):
+        """The watcher's tick (#75): each root that commits and pushes, once every `FETCH_SECONDS`, goes to the
+        pusher with no write behind it, so what the remote got lands with no save. Never raises for one root."""
+        for root in roots:
+            if now - self._polled.get(root.path, float("-inf")) < FETCH_SECONDS:
+                continue
+            self._polled[root.path] = now             # before the config: a root that does not push is read once a minute too
+            if not root.git:
+                continue
+            try:
+                rc = config.load_root_config(root.path, warn=lambda line: None)
+            except (config.ConfigError, OSError):
+                continue                              # a save on it says so (`commit-failed`)
+            if rc.commit and rc.push:
+                self._push_later(root, root.name, wrote=False)
+
+    def _push_later(self, root, address: str, wrote: bool = True):
         with self._lock:
-            self._due[root.path] = (root, address)
+            was = self._due.get(root.path)
+            if wrote or was is None or not was[2]:   # a write's address is kept over a poll's
+                self._due[root.path] = (root, address, wrote or (was is not None and was[2]))
             if self._thread is None or not self._thread.is_alive():
                 self._thread = threading.Thread(target=self._pusher, name="sheaf-push", daemon=True)
                 self._thread.start()
@@ -225,28 +249,46 @@ class Commits:
                     self._thread = None
                     self._wake.notify_all()
                     return
-                folder, (root, address) = self._due.popitem()
+                folder, (root, address, wrote) = self._due.popitem()
                 self._pushing = True
+            # A write's rows are each written; the poll meets the same cause every minute, and says it once.
+            record = self._record if wrote else self._once(folder)
             try:
-                if not self._pull(root, address):
+                go = self._pull(root, address, record)
+                if not go:
                     continue
-                # Not under the repo's lock: a save meanwhile commits, and the next push carries it.
-                r = _git(folder, "push", "-q", "origin", "HEAD", seconds=PUSH_SECONDS)
-                if r.returncode != 0:
-                    # The commit stays; the next write's push carries it.
-                    self._record("push-failed", address, error=_last_line(r))
+                if go is not EVEN:
+                    # Not under the repo's lock: a save meanwhile commits, and the next push carries it.
+                    r = _git(folder, "push", "-q", "origin", "HEAD", seconds=PUSH_SECONDS)
+                    if r.returncode != 0:
+                        # The commit stays; the next write's push, or the next poll, carries it.
+                        record("push-failed", address, error=_last_line(r))
+                        continue
+                self._told.pop(folder, None)
             except Exception as e:                     # never a dead thread: a push that never comes is a row
-                self._record("push-failed", address, error=str(e)[:300] or type(e).__name__)
+                record("push-failed", address, error=str(e)[:300] or type(e).__name__)
             finally:
                 with self._lock:
                     self._pushing = False
                     self._wake.notify_all()
 
+    def _once(self, folder: Path):
+        """A `record` that writes a row only when it differs from the last the poll wrote for `folder`: a remote
+        that cannot be reached is one row, not one a minute. A pull and push that go through forget it."""
+        def record(kind, doc, **detail):
+            said = (kind, detail.get("error"), tuple(detail.get("paths") or ()))
+            if self._told.get(folder) != said:
+                self._told[folder] = said
+                self._record(kind, doc, **detail)
+        return record
+
     # ── the pull before it ───────────────────────────────────────────────────
-    def _pull(self, root, address: str) -> bool:
-        """Take in what the remote's branch got that the hub's lacks (#62); whether to push. A failed fetch is a
-        `push-failed` row, a remote the hub cannot take in a `push-diverged` row: nothing is pushed, and the next
-        write's push tries again. A branch the remote does not have yet is pushed as it is."""
+    def _pull(self, root, address: str, record=None):
+        """Take in what the remote's branch got that the hub's lacks (#62); whether to push: False, True, or
+        `EVEN` when the hub's branch is the remote's (nothing to push). A failed fetch is a `push-failed` row, a
+        remote the hub cannot take in a `push-diverged` row: nothing is pushed, and the next write's push, or the
+        next poll, tries again. A branch the remote does not have yet is pushed as it is."""
+        record = record or self._record
         folder = root.path
         branch = _git(folder, "symbolic-ref", "-q", "--short", "HEAD")
         if branch.returncode != 0:
@@ -256,47 +298,47 @@ class Commits:
         if r.returncode != 0:
             if "couldn't find remote ref" in r.stderr:
                 return True
-            self._record("push-failed", address, error=_last_line(r))
+            record("push-failed", address, error=_last_line(r))
             return False
         theirs = _git(folder, "rev-parse", "--verify", "-q", "FETCH_HEAD^{commit}").stdout.strip()
         base = _git(folder, "merge-base", "HEAD", theirs)
         if base.returncode != 0:
-            self._record("push-diverged", address, paths=[], error="the remote's branch shares no history with the hub's")
+            record("push-diverged", address, paths=[], error="the remote's branch shares no history with the hub's")
             return False
         base = base.stdout.strip()
-        if base == theirs:
-            return True                                # nothing new on the remote
+        if base == theirs:                             # nothing new on the remote
+            return EVEN if _git(folder, "rev-parse", "HEAD").stdout.strip() == theirs else True
         top = Path(_git(folder, "rev-parse", "--show-toplevel").stdout.strip())
         changed = [p for p in _git(folder, "diff", "--name-only", "--no-renames", "-z", base, theirs).stdout.split("\0")
                    if p]
         # The writers' locks first, the repo's last (9.11): no write of a file the remote changed comes between
         # the look at it and its new text, and no commit of any root of the repo between the hub's HEAD read and moved.
         with self._guard(root, [top / p for p in changed]), self._repo_lock(folder):
-            return self._catch_up(folder, theirs, address)
+            return self._catch_up(folder, theirs, address, record)
 
-    def _catch_up(self, folder: Path, theirs: str, address: str) -> bool:
+    def _catch_up(self, folder: Path, theirs: str, address: str, record):
         head = _git(folder, "rev-parse", "HEAD").stdout.strip()
         if _git(folder, "rev-list", "--merges", f"{theirs}..{head}").stdout.strip():
-            self._record("push-diverged", address, paths=[], error="the hub's unpushed commits hold a merge")
+            record("push-diverged", address, paths=[], error="the hub's unpushed commits hold a merge")
             return False
         new = theirs
         for c in _git(folder, "rev-list", "--reverse", f"{theirs}..{head}").stdout.split():
             new, conflicts = _again(folder, c, new)
             if new is None:
-                self._record("push-diverged", address, paths=conflicts, error="the remote changed what the hub did")
+                record("push-diverged", address, paths=conflicts, error="the remote changed what the hub did")
                 return False
         # The work tree moves for what differs between the two alone, and refuses over a change of the person's.
         r = _git(folder, "read-tree", "-m", "-u", head, new)
         if r.returncode != 0:
-            self._record("push-diverged", address, paths=[], error=_last_line(r))
+            record("push-diverged", address, paths=[], error=_last_line(r))
             return False
         r = _git(folder, "update-ref", "-m", "sheaf: on top of the remote's", "HEAD", new, head)
         if r.returncode != 0:
             # The files are the remote's; HEAD is not: put the index and the work tree back to it.
             _git(folder, "read-tree", "-m", "-u", new, head)
-            self._record("push-diverged", address, paths=[], error=_last_line(r))
+            record("push-diverged", address, paths=[], error=_last_line(r))
             return False
-        return True
+        return EVEN if new == theirs else True
 
     def settle(self, timeout: float = 30) -> bool:
         """Wait until no push is due or running; whether that came within `timeout` seconds."""

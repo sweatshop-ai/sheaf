@@ -459,8 +459,9 @@ def git(at, *args):
     return subprocess.run(["git", "-C", str(at), *args], check=True, capture_output=True, text=True).stdout
 
 
-def committing(hub, browser, tmp_path, first=PRIVATE, at=SHARED):
-    """A root that commits, with `versions = "root"`, the list on it and `first` committed at `at`."""
+def committing(hub, browser, tmp_path, first=PRIVATE, at=SHARED, ignore=""):
+    """A root that commits, with `versions = "root"`, the list on it and `first` committed at `at`; `ignore` is its
+    `.gitignore`."""
     repo = tmp_path / "sheaves"
     repo.mkdir()
     git(repo, "init", "-q", "-b", "main")
@@ -471,6 +472,8 @@ def committing(hub, browser, tmp_path, first=PRIVATE, at=SHARED):
                                         encoding="utf-8")
     (repo / at).parent.mkdir(parents=True)
     (repo / at).write_text(first, encoding="utf-8")
+    if ignore:
+        (repo / ".gitignore").write_text(ignore, encoding="utf-8")
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "first")
     hub.proxy = members(repo)
@@ -560,3 +563,18 @@ def test_a_door_update_answers_where_the_sheaf_is_when_the_poll_moves_it_meanwhi
     threads[0].join(10)
     assert not is_error and got["doc"] == f"work/{HOME}", got
     assert (work / HOME).read_text(encoding="utf-8").endswith("More.\n")
+
+
+def test_a_move_into_an_ignored_private_folder_still_commits_the_old_path_gone(hub, browser, tmp_path):
+    """Codex P1: a deployment that keeps private folders out of git must not keep the shared copy in it."""
+    box, repo = committing(hub, browser, tmp_path, ignore="*/*/private/\n")
+    assert box.get(f"/sheaves/{SHARED}", member=THIERRY).status == 200          # a version, inside the root
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "the version")
+    hub.the_list.poll()
+    assert (repo / HOME).exists()
+    assert git(repo, "log", "-1", "--format=%s").strip() == f"move: {SHARED} -> {HOME}"
+    files = set(git(repo, "show", "--no-renames", "--name-status", "--format=", "HEAD").splitlines())
+    assert f"D\t{SHARED}" in files and not any(HOME in f for f in files)
+    assert any(line.startswith("D\t" + str(INSIDE / doc_key(SHARED))) for line in files)
+    assert git(repo, "ls-files", SHARED) == ""

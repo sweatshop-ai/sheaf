@@ -616,7 +616,10 @@ def test_two_roots_of_one_repo_share_its_commit_lock_and_a_commit_of_one_never_l
         tmp_path, remote, monkeypatch):
     """Two roots in one git repo share one index and one HEAD, so one commit lock (#73): a commit of root B waits
     while root A's pull moves HEAD, and comes after it, on top."""
+    import inspect
+    import sys
     import threading
+    import time
 
     from sheafmd.hub import commits
     from sheafmd.hub.roots import Root
@@ -636,13 +639,25 @@ def test_two_roots_of_one_repo_share_its_commit_lock_and_a_commit_of_one_never_l
     hub_commits = commits.Commits(lambda kind, doc, **detail: made.append((kind, doc, detail)))
     real, racer = commits._git, []
 
+    # The line of `saved` that takes the commit lock: a thread whose innermost frame stays there waits on it.
+    lines, first = inspect.getsourcelines(commits.Commits.saved)
+    at_lock = first + next(i for i, line in enumerate(lines) if "_lock(root.path)" in line)
+
+    def waiting(t):
+        frame = sys._current_frames().get(t.ident)
+        return frame is not None and frame.f_code is commits.Commits.saved.__code__ and frame.f_lineno == at_lock
+
     def spy(folder, *args, **kw):
         if args[:1] == ("update-ref",) and not racer:
             (repo / "globex" / "plan.md").write_text("# globex, on the page\n", encoding="utf-8")
             racer.append(threading.Thread(target=hub_commits.saved,
                                           args=(b, "plan.md", commits.Author("Cal", "cal@example.com"), "edit")))
             racer[0].start()
-            racer[0].join(1)                  # B's commit, given every chance to land between A's read-tree and HEAD
+            # B's commit lands between A's read-tree and HEAD, or waits on A's lock: whichever, not a timing.
+            seen, end = 0, time.monotonic() + 30
+            while racer[0].is_alive() and seen < 5 and time.monotonic() < end:
+                seen = seen + 1 if waiting(racer[0]) else 0
+                time.sleep(0.02)
         return real(folder, *args, **kw)
 
     monkeypatch.setattr(commits, "_git", spy)
@@ -650,7 +665,8 @@ def test_two_roots_of_one_repo_share_its_commit_lock_and_a_commit_of_one_never_l
     (repo / "acme" / "plan.md").write_text("# acme, on the page\n", encoding="utf-8")
     hub_commits.saved(a, "plan.md", commits.Author("Bea", "bea@example.com"), "edit")
     assert hub_commits.settle()
-    racer[0].join(10)
+    racer[0].join(30)
+    assert not racer[0].is_alive()
     assert hub_commits.settle()
     assert made == []
     assert git(repo, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")

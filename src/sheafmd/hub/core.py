@@ -88,6 +88,7 @@ class Hub:
         self.commits = Commits(self.record)      # the roots that commit (8.11)
         self._told_projects: set = set()         # what check_projects warned of this run (8.12)
         self.told_place: set = set()             # the addresses a place-refused row named this run (9.11)
+        self.told_link: set = set()              # the (root id, path) a link-ignored row named this run (9.11)
         self.told_ignored: set = set()           # the roots a private-ignored row named this run (9.11)
         self._front: dict = {}                   # {file: (its stat, its front matter, its assignees)}, for 9.11
         self.the_list = None                     # the list (9.10): a the_list.TheList, set by the server
@@ -160,7 +161,11 @@ class Hub:
                   gone: str | None = None, author: Author | None = None):
         """A write went to `address`, by `member` (a proxy.Member), by `by` (the display name of a door
         caller), by `author` when given (the hub itself, for a move of the poll) or else by the hub's person:
-        a commit, in a root that commits (8.11). `gone`: the path in the root the document moved from (9.11)."""
+        a commit, in a root that commits (8.11). `gone`: the path in the root the document moved from (9.11). The
+        caller holds the sheaf's name (`place.held`): a write and its commit are one step under it, so no other
+        write of the name comes between, and a commit never carries another's write."""
+        if not place.owns(self, address):
+            raise RuntimeError(f"{address} committed outside its name's lock (9.11)")
         a = roots_mod.Address.parse(address)
         root = self.roots.get(a.root)
         if root is None:

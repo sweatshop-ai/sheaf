@@ -875,3 +875,174 @@ def test_a_door_create_of_an_owner_only_sheaf_in_a_root_that_ignores_private_is_
     assert is_error and "the repo ignores the private folder" in got, got
     assert not (repo / SHARED).exists() and not (repo / HOME).exists()
     assert not (repo / "thinkingtoo/tiroir/private").exists()
+
+
+# ── round 7: a link holds no name; ahead is the one judge; a write and its commit are one step ──
+
+LINK = "thinkingtoo/tiroir/link.md"
+SHARED_TEXT = OPEN.replace("- [ ] Share", "- [x] Share").replace("sources: [issue:thinkingtoo/tt-tiroir#9]\n",
+                                                                   "visibility: project\n")
+
+
+def test_a_poll_placing_a_link_while_its_target_is_withdrawn_does_not_deadlock(team, work, monkeypatch):
+    """Opus P1 (round 7): a link and its target took two name locks and one file lock (the file lock resolves
+    links), so the owner's withdrawal (file lock, then the folders lock in `ahead`) and the poll's `place` of the
+    link (folders lock, then the file lock) waited on each other for good. A link holds no name (9.11): the poll
+    takes no lock of its file."""
+    from sheafmd.hub import place
+    put(team, work, SHARED, SHARED_TEXT)
+    os.symlink(NAME, work / LINK)
+    real, threads = place.ahead, []
+
+    def poll_first(hub, address, *a, **kw):
+        t = threading.Thread(target=place.place, args=(team.hub, f"work/{LINK}"), daemon=True)
+        t.start()
+        t.join(1)
+        threads.append(t)
+        return real(hub, address, *a, **kw)
+    monkeypatch.setattr(place, "ahead", poll_first)
+    answers = []
+    t = threading.Thread(target=lambda: answers.append(untick(team, work, "Share", THIERRY)), daemon=True)
+    t.start()
+    t.join(20)
+    assert not t.is_alive() and not threads[0].is_alive(), "the withdrawal and the poll wait on each other"
+    assert answers[0].status == 200, answers[0].text
+    assert front_matter((work / HOME).read_text(encoding="utf-8"))["visibility"] == "owner"
+
+
+def test_a_withdrawal_through_a_link_name_writes_nothing_at_the_shared_path(team, work):
+    """Opus P1 (round 7): the owner's untick on the page of a link to a shared sheaf wrote `visibility: owner`
+    through the link into the shared path, where the shared glob reads it. A link holds no name: its page is
+    the 404 of a document that does not exist, and nothing is written."""
+    put(team, work, SHARED, SHARED_TEXT)
+    os.symlink(NAME, work / LINK)
+    got = untick(team, work, "Share", THIERRY, name=LINK)
+    assert got.status == 404, got.text
+    assert (work / SHARED).read_text(encoding="utf-8") == SHARED_TEXT
+    assert team.get(f"/work/{LINK}", member=THIERRY).status == 404
+
+
+@pytest.mark.parametrize("linked", ["private", "private/thierry"])
+def test_a_file_under_a_linked_private_folder_holds_no_name(team, work, tmp_path, linked):
+    """A name is held only by a regular file reached through real folders (9.11): one under a linked `private`
+    or `private/<short>` is no sheaf, to the page and to the list, and the poll moves nothing out of it."""
+    elsewhere = tmp_path / "elsewhere"
+    target = elsewhere / "thierry" if linked == "private" else elsewhere
+    target.mkdir(parents=True)
+    (target / NAME).write_text(PRIVATE, encoding="utf-8")
+    (work / "thinkingtoo/tiroir" / linked).parent.mkdir(parents=True, exist_ok=True)
+    os.symlink(elsewhere, work / "thinkingtoo/tiroir" / linked)
+    team.hub.the_list.poll()
+    assert team.get(f"/work/{SHARED}", member=THIERRY).status == 404
+    assert not (work / SHARED).exists() and (target / NAME).read_text(encoding="utf-8") == PRIVATE
+    assert SHARED not in [r.sheaf.rel for r in team.hub.the_list._snap.rows]
+
+
+def test_a_link_the_poll_meets_is_one_link_ignored_row_per_hub_run(team, work, capsys):
+    """A link holds no name, and the hub says so once, from the poll: a `link-ignored` row (15) with the root and
+    the path, and a line on stderr, never again for that path in that hub run, and never on a lookup."""
+    put(team, work, SHARED, SHARED_TEXT)
+    os.symlink(NAME, work / LINK)
+    team.hub.the_list.poll()
+    team.hub.the_list.poll()
+    team.get(f"/work/{LINK}", member=THIERRY)
+    rows = hub_rows("link-ignored")
+    assert [(r["root"], r["path"]) for r in rows] == [("work", LINK)], rows
+    assert capsys.readouterr().err.count(LINK) == 1
+
+
+def test_an_untick_whose_move_fails_in_the_folder_is_refused_and_writes_nothing(team, work, tmp_path):
+    """Opus P1 (round 7): `refusal` judged the move allowed (nothing at the home through a linked `private/<short>`,
+    and `git check-ignore` does not answer beyond a link), the move then failed making the folder, and the
+    withdrawal wrote `visibility: owner` at the shared path. `ahead` is the one judge: a move it cannot make
+    refuses the write."""
+    put(team, work, SHARED, SHARED_TEXT)
+    (tmp_path / "elsewhere").mkdir()
+    (work / "thinkingtoo/tiroir/private").mkdir()
+    os.symlink(tmp_path / "elsewhere", work / "thinkingtoo/tiroir/private/thierry")
+    got = untick(team, work, "Share", THIERRY)
+    assert got.status == 409 and "This sheaf cannot go to its home" in got.text, got.text
+    assert (work / SHARED).read_text(encoding="utf-8") == SHARED_TEXT
+
+
+def test_a_door_update_whose_link_into_place_fails_is_refused_and_writes_nothing(team, work, browser, tokens,
+                                                                                  monkeypatch):
+    """Any error of the link into place (EXDEV, EPERM, ENOSPC) refuses the write, at the door as on the page."""
+    import errno
+    from sheafmd.hub import place
+    put(team, work, SHARED, OPEN)
+
+    def no_link(*a, **kw):
+        raise OSError(errno.EXDEV, os.strerror(errno.EXDEV))
+    monkeypatch.setattr(place.os, "link", no_link)
+    is_error, got = call(browser, "update", token=tokens["thierry"], doc=f"work/{SHARED}", text=PRIVATE,
+                         expected_hash=md_hash(OPEN))
+    assert is_error and "was not written" in got and "so it could not go to its home" in got, got
+    assert (work / SHARED).read_text(encoding="utf-8") == OPEN and not (work / HOME).exists()
+
+
+def test_a_comment_committed_while_the_owner_withdraws_the_share_is_its_own_commit(hub, browser, tmp_path,
+                                                                                    monkeypatch):
+    """Opus P1 (round 7): the page's comment was written under the name's lock and committed after it, so the
+    owner's withdrawal came between: its `move:` commit took the comment, and the comment's commit found nothing.
+    A write and its commit are one step under the name's lock."""
+    box, repo = committing(hub, browser, tmp_path, first=SHARED_TEXT)
+    page = browser.get(f"/sheaves/{SHARED}")
+    assert page.status == 200
+    real, threads, answers = hub.committed, [], []
+
+    def withdraw_first(address, *a, **kw):
+        if kw.get("what", a[1] if len(a) > 1 else None) == "comment" and not threads:
+            t = threading.Thread(target=lambda: answers.append(untick(box, repo, "Share", THIERRY, root="sheaves")),
+                                 daemon=True)
+            t.start()
+            t.join(2)
+            threads.append(t)
+        return real(address, *a, **kw)
+    monkeypatch.setattr(hub, "committed", withdraw_first)
+    from sheafmd import comments as rdc
+    blk, start, end = rdc.find_quote(SHARED_TEXT, "A quote")
+    got = browser.post("/_/comment", {"doc": f"sheaves/{SHARED}", "op": "add", "hash": md_hash(SHARED_TEXT),
+                                      "block": blk, "start": start, "end": end, "quote": "A quote", "body": "Mine."})
+    assert threads, got.text
+    threads[0].join(20)
+    assert got.status == 200 and answers[0].status == 200, (got.text, answers[0].text)
+    log = git(repo, "log", "--format=%an|%s").splitlines()
+    assert log == [f"Thierry|move: {SHARED} -> {HOME}", f"{hub.person}|comment: {SHARED}", "the box|first"], log
+    assert "Mine." in git(repo, "show", f"HEAD~1:{SHARED}")
+    assert git(repo, "status", "--porcelain") == ""
+
+
+def test_a_move_made_before_a_render_that_fails_is_still_committed(hub, browser, tmp_path, monkeypatch):
+    """Opus P2 (round 7): the withdrawal moved and wrote the file, its render raised, and the commit was skipped:
+    HEAD kept the shared path for good. The move is committed whatever the render does."""
+    from sheafmd.render import RenderError
+    box, repo = committing(hub, browser, tmp_path, first=SHARED_TEXT)
+    assert box.get(f"/sheaves/{SHARED}", member=THIERRY).status == 200
+    e = hub.entries[f"sheaves/{SHARED}"]
+
+    def fails():
+        raise RenderError("pandoc took too long")
+    monkeypatch.setattr(e.live, "_rerender", fails)
+    untick(box, repo, "Share", THIERRY, root="sheaves")
+    assert subjects(repo)[0] == f"move: {SHARED} -> {HOME}", subjects(repo)
+    assert git(repo, "status", "--porcelain") == ""
+
+
+def test_a_commit_outside_the_names_lock_is_a_programming_error(team, work):
+    """Nothing commits a sheaf's file without holding its name (9.11): the hub refuses such a commit loudly."""
+    put(team, work, SHARED, OPEN)
+    with pytest.raises(RuntimeError, match="lock"):
+        team.hub.committed(f"work/{SHARED}", what="edit")
+
+
+def test_the_lock_of_a_name_nobody_holds_is_let_go(team, work):
+    """Opus P2 (round 7): a lock was kept for every well-formed name ever asked for, so a member asking for
+    unlimited URLs grew the hub's memory without end. A name's lock lives while a thread holds it or waits on it."""
+    from sheafmd.hub import place
+    before = len(place._LOCKS)
+    for n in range(200):
+        assert team.get(f"/work/thinkingtoo/tiroir/none-{n}.md", member=THIERRY).status == 404
+    with place.held(team.hub, f"work/{SHARED}"):
+        assert place.owns(team.hub, f"work/{SHARED}") and len(place._LOCKS) == before + 1
+    assert len(place._LOCKS) == before and not place.owns(team.hub, f"work/{SHARED}")

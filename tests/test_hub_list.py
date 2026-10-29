@@ -647,14 +647,17 @@ def closed_joey(sheaves, sources="sources: [library:4711]\n"):
     return home
 
 
-def test_a_link_to_a_sheaf_has_the_owner_of_the_sheaf_it_names(box, sheaves):
+def test_a_link_at_a_sheafs_path_is_no_document_even_to_the_owner_of_the_sheaf_it_names(box, sheaves):
+    """A link holds no name (9.11): a second name of one file would be a second name lock over its one file lock.
+    The sheaf is its owner's by its own name; the link answers as a document that does not exist, to everyone."""
     joey = closed_joey(sheaves, "sources: [library:4711]\nowner: dora\n")
     (sheaves / "globex/black-friday/joey.md").symlink_to(f"private/nell/{joey.name}")
     box.hub.the_list.poll()
     root = box.hub.roots.lookup(joey).name
     assert box.get(f"/{root}/{JOEY_NAME}", member=DORA).status == 404
+    assert box.get(f"/{root}/{JOEY_NAME}", member=NELL).status == 200
     assert box.get(f"/{root}/globex/black-friday/joey.md", member=DORA).status == 404
-    assert box.get(f"/{root}/globex/black-friday/joey.md", member=NELL).status == 200
+    assert box.get(f"/{root}/globex/black-friday/joey.md", member=NELL).status == 404
 
 
 def test_a_link_the_poll_does_not_read_has_the_owner_of_the_sheaf_it_names(box, sheaves):

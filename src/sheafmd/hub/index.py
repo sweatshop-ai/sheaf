@@ -560,12 +560,13 @@ class Index:
                     if shown(root, path) and (member is None or hub.visible(member, address)):
                         rows.append(self._row(address, path, f.stat, waiting, running, member))
             for address in sorted(a for a in named - have if a.startswith(roots_mod.Address.prefix(root.name))):
-                if not (found := self._stat_of(root, address)):
-                    continue
-                path, st = found
-                keys.add(str(path))
-                if shown(root, path) and (member is None or hub.visible(member, address)):
-                    rows.append(self._row(address, path, st, waiting, running, member))
+                with place.held(hub, address):          # every read of a sheaf's file holds its name's lock (9.11)
+                    if not (found := self._stat_of(root, address)):
+                        continue
+                    path, st = found
+                    keys.add(str(path))
+                    if shown(root, path) and (member is None or hub.visible(member, address)):
+                        rows.append(self._row(address, path, st, waiting, running, member))
             if rendered and not rows:
                 continue
             rows.sort(key=lambda r: (RANK[r["dot"]], -r["mtime"], r["doc"]))

@@ -703,14 +703,21 @@ class Door:
         # The name's lock (9.11) from finding the file to the commit: move, write, render, commit, one operation, so
         # no poll moves the file in between and no other writer's commit takes this write.
         with place.held(self.hub, address):
-            before, text, gone = self._updated(address, args, text, expected, caller)
-            if before != text or gone:          # a text that changed nothing may still have moved the file
-                self.hub.committed(address, by=caller.display, what="update", gone=gone)
+            moved = []
+            try:
+                before, text, gone = self._updated(address, args, text, expected, caller, moved)
+                if before != text or gone:          # a text that changed nothing may still have moved the file
+                    moved.clear()
+                    self.hub.committed(address, by=caller.display, what="update", gone=gone)
+            finally:
+                if moved:                           # moved, then failed before its commit: the move is committed
+                    self.hub.committed(address, by=caller.display, what="update", gone=moved.pop())
         return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text), "changed": before != text}
 
-    def _updated(self, address: str, args: dict, text: str, expected: str, caller: Caller):
+    def _updated(self, address: str, args: dict, text: str, expected: str, caller: Caller, moved: list):
         """The write of an update, and the sheaf's file moved to its home (9.11): (the text before, the text
-        written, the path in the root the file left or None)."""
+        written, the path in the root the file left or None). A move `ahead` makes is put in `moved` as it is made,
+        so the caller commits it whatever comes after."""
         written = [text]
 
         def change(now_text):
@@ -723,16 +730,16 @@ class Door:
             _check_comments(now_text, text)
             written[0] = self._door_text(text, now_text, address, caller)
             self._check_size(written[0])
-            if (why := place.refusal(self.hub, address, written[0])) is not None \
-                    and place.refusal(self.hub, address, now_text) is None:
-                # It would stay where it may not (9.11): nothing is written.
-                raise ToolError(f"{address} was not written: {why}, so it could not go to its home.", "not written")
             return written[0]
-        moved = []
 
         def move(now_text, new):
-            # A text that opens or closes the sheaf moves its file to its home before it is written there (9.11).
-            gone = place.ahead(self.hub, address, new)
+            # A text that opens or closes the sheaf moves its file to its home before it is written there (9.11); one
+            # that cannot go there is not written.
+            try:
+                gone = place.ahead(self.hub, address, now_text, new)
+            except place.Refused as ex:
+                raise ToolError(f"{address} was not written: {ex.why}, so it could not go to its home.",
+                                "not written") from None
             if gone is None:
                 return None
             moved.append(gone)

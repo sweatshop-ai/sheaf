@@ -667,19 +667,21 @@ class Handler:
         # The name's lock (9.11) from the guard's judging of the sheaf's home to the commit: move, write, render,
         # commit, one operation.
         with place.held(self.hub, e.address):
-            try:
-                guard, ticked = self._ticks(req, e)
-                move, moved = self._mover(e, ticked)
-                got = e.live.save(h, edits, rid=rid, guard=guard, move=move)
-            except (EditError, StaleError) as ex:
-                raise Refuse(409, str(ex)) from None
-            except UnicodeEncodeError:
-                raise Refuse(400, "the text holds a character that cannot be written to the .md "
-                                  "(half of a pair, such as half an emoji)") from None
-            self.hub.index.touch(e.address)
-            gone = moved[0] if moved else self._placed(e, ticked)
-            if got["changed"] and not got.get("again"):
-                self.hub.committed(e.address, req.member, "edit", gone=gone)
+            guard, ticked = self._ticks(req, e)
+            move, moved = self._mover(e, ticked)
+            with self._moved_committed(e, req.member, "edit", moved):
+                try:
+                    got = e.live.save(h, edits, rid=rid, guard=guard, move=move)
+                except (EditError, StaleError) as ex:
+                    raise Refuse(409, str(ex)) from None
+                except UnicodeEncodeError:
+                    raise Refuse(400, "the text holds a character that cannot be written to the .md "
+                                      "(half of a pair, such as half an emoji)") from None
+                self.hub.index.touch(e.address)
+                gone = moved[0] if moved else self._placed(e, ticked)
+                if got["changed"] and not got.get("again"):
+                    moved.clear()
+                    self.hub.committed(e.address, req.member, "edit", gone=gone)
         if "Stop James" in ticked:
             self._stop_james(req, e)
         if got["merged"] and not got.get("again"):
@@ -703,17 +705,19 @@ class Handler:
         if edit is None:
             raise Refuse(409, f"the sheaf no longer holds that action ({word}): reload the list")
         with place.held(self.hub, e.address):
-            try:
-                guard, ticked = self._ticks(req, e)
-                move, moved = self._mover(e, ticked)
-                got = e.live.save(h, [edit], guard=guard, move=move)
-            except (EditError, StaleError) as ex:
-                raise Refuse(409, str(ex)) from None
-            if not got["changed"]:
-                raise Refuse(409, f"the sheaf no longer holds that action ({word}): reload the list")
-            self.hub.index.touch(e.address)
-            gone = moved[0] if moved else self._placed(e, ticked)
-            self.hub.committed(e.address, req.member, "tick", gone=gone)
+            guard, ticked = self._ticks(req, e)
+            move, moved = self._mover(e, ticked)
+            with self._moved_committed(e, req.member, "tick", moved):
+                try:
+                    got = e.live.save(h, [edit], guard=guard, move=move)
+                except (EditError, StaleError) as ex:
+                    raise Refuse(409, str(ex)) from None
+                if not got["changed"]:
+                    raise Refuse(409, f"the sheaf no longer holds that action ({word}): reload the list")
+                self.hub.index.touch(e.address)
+                gone = moved[0] if moved else self._placed(e, ticked)
+                moved.clear()
+                self.hub.committed(e.address, req.member, "tick", gone=gone)
         if "Stop James" in ticked:
             self._stop_james(req, e)
         if self.hub.the_list is not None:
@@ -729,12 +733,28 @@ class Handler:
         def move(text, new):
             if not ({"Share", "Unshare"} & ticked):
                 return None
-            gone = place.ahead(self.hub, e.address, new)
+            try:
+                gone = place.ahead(self.hub, e.address, text, new)
+            except place.Refused as ex:
+                # The write would leave the sheaf where it may not stay (9.11): nothing is written.
+                raise EditError(f"This sheaf cannot go to its home: {ex.why}. Nothing was written.") from None
             if gone is None:
                 return None
             moved.append(gone)
             return self.hub.file(e.address, placed=True)
         return move, moved
+
+    @contextlib.contextmanager
+    def _moved_committed(self, e, member, what: str, moved: list):
+        """Under the name's lock, around a write whose `move` may move the file (9.11): a move that was made and that
+        the write did not commit (a render that failed after it, a write that raised) is committed all the same as
+        the request leaves, so git never keeps the file at the path it left. The writer empties `moved` when it
+        commits."""
+        try:
+            yield
+        finally:
+            if moved:
+                self.hub.committed(e.address, member, what, gone=moved.pop())
 
     def _placed(self, e, ticked) -> str | None:
         """After a write that shared the sheaf or withdrew its Share, under the lock of its name, its file goes to
@@ -786,10 +806,6 @@ class Handler:
                     # Share rewrites the front matter: a line it takes out must not join a skipped one to `sessions`.
                     if visibility.front_matter(new).get("sessions", "") != visibility.front_matter(text).get("sessions", ""):
                         raise EditError("A save cannot change the front matter: change it in the file.")
-            if {"Share", "Unshare"} & words and (why := place.refusal(self.hub, e.address, new)) is not None \
-                    and place.refusal(self.hub, e.address, text) is None:
-                # The write would leave the sheaf where it may not stay (9.11): nothing is written.
-                raise EditError(f"This sheaf cannot go to its home: {why}. Nothing was written.")
             ticked.clear()
             ticked.update(words)
             return new
@@ -893,14 +909,16 @@ class Handler:
                 return text
             moved.append(sid)
             return work.with_session(text, line, sid)
-        try:
-            e.live.rewrite(change)
-        except work.NotRewritten as ex:
-            self.hub.record("session-not-recorded", e.address, transcript=sid, reason=str(ex))
-            return
+        with place.held(self.hub, e.address):           # the write and its commit, one step (9.11)
+            try:
+                e.live.rewrite(change)
+            except work.NotRewritten as ex:
+                self.hub.record("session-not-recorded", e.address, transcript=sid, reason=str(ex))
+                return
+            if moved:
+                self.hub.index.touch(e.address)
+                self.hub.committed(e.address, req.member, "session")
         if moved:
-            self.hub.index.touch(e.address)
-            self.hub.committed(e.address, req.member, "session")
             self.hub.record("session-recorded", e.address, transcript=sid, by=work.member_word(req.member))
 
     def _james_may_take(self, text: str, sid: str) -> bool:
@@ -929,12 +947,13 @@ class Handler:
             if not visibility.visible_to(fm, req.member, self.hub.assignees(e.address, fm)):
                 raise Refuse(404, "no such document")
             return work.with_session(text, line, sid)
-        try:
-            h = e.live.rewrite(change)
-        except work.NotRewritten as ex:
-            raise Refuse(409, str(ex)) from None
-        self.hub.index.touch(e.address)
-        self.hub.committed(e.address, req.member, "fork")
+        with place.held(self.hub, e.address):           # the write and its commit, one step (9.11)
+            try:
+                h = e.live.rewrite(change)
+            except work.NotRewritten as ex:
+                raise Refuse(409, str(ex)) from None
+            self.hub.index.touch(e.address)
+            self.hub.committed(e.address, req.member, "fork")
         self.hub.record("session-forked", address, transcript=sid, by=by, machine=machine,
                         issue=visibility.text(fm, "issue"))
         return _ok(hash=h)
@@ -993,22 +1012,23 @@ class Handler:
                 if to_box and not (work.state(self.hub, e.address, text) or work.State([], "", None)).can:
                     raise Refuse(400, proxy.PROXY_LINE)
             signed["guard"] = still_visible
-        try:
-            snap = e.live.comment(op, b, h, await_action=can_tell, rid=rid, **signed)
-        except NotAuthor as ex:
-            raise Refuse(403, str(ex)) from None
-        except StaleError as ex:
-            raise Refuse(409, str(ex), answer={"code": ex.code} if ex.code else None) from None
-        except KeyError as ex:
-            raise Refuse(400, f"missing field {ex}") from None
-        except rdc.NoComment as ex:
-            # Deleted while the page's request was out, often before the page has heard of it.
-            raise Refuse(410, str(ex)) from None
-        except (rdc.AnchorError, ValueError, TypeError) as ex:
-            raise Refuse(400, str(ex)) from None
-        self.hub.index.touch(e.address)
-        if not snap.get("again"):
-            self.hub.committed(e.address, member, "comment")
+        with place.held(self.hub, e.address):           # the write and its commit, one step (9.11)
+            try:
+                snap = e.live.comment(op, b, h, await_action=can_tell, rid=rid, **signed)
+            except NotAuthor as ex:
+                raise Refuse(403, str(ex)) from None
+            except StaleError as ex:
+                raise Refuse(409, str(ex), answer={"code": ex.code} if ex.code else None) from None
+            except KeyError as ex:
+                raise Refuse(400, f"missing field {ex}") from None
+            except rdc.NoComment as ex:
+                # Deleted while the page's request was out, often before the page has heard of it.
+                raise Refuse(410, str(ex)) from None
+            except (rdc.AnchorError, ValueError, TypeError) as ex:
+                raise Refuse(400, str(ex)) from None
+            self.hub.index.touch(e.address)
+            if not snap.get("again"):
+                self.hub.committed(e.address, member, "comment")
         if snap.get("again"):
             # Taken before under this request id: what the first request started (an Ask, a Tell's wait)
             # is running or done, and the page hears of it by its events.

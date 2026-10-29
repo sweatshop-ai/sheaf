@@ -436,8 +436,8 @@ class LiveDocument:
 
     def await_reply(self, cid):
         """Start waiting for an action reply in an existing thread. False if there is no such
-        thread."""
-        with self._held():
+        thread. Under the name's lock (9.11), as every read of the file."""
+        with self._hold(), self._held():
             return self._await(cid)
 
     def forget(self):
@@ -474,7 +474,7 @@ class LiveDocument:
         """`_names` for the file as it is now: what an Ask or a Tell of a thread by its id must hold."""
         if not h:
             return True
-        with self._held():
+        with self._hold(), self._held():        # the name's lock (9.11), as every read of the file
             try:
                 return self._names(h, self._read())
             except OSError:

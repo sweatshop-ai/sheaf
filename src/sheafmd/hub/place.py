@@ -110,7 +110,10 @@ def make_folders(top, rel: str):
 
 
 def _refused(hub, address: str, why: str):
-    hub.record("place-refused", address, why=why)
+    """A `place-refused` row, once per address per hub run: a sheaf that cannot move is met at every poll."""
+    if address not in hub.told_place:
+        hub.told_place.add(address)
+        hub.record("place-refused", address, why=why)
 
 
 def _name_lock(top: Path, name: str) -> threading.RLock:

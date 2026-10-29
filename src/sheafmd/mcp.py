@@ -672,6 +672,9 @@ class Door:
         if name is not None and (home := place.home(self.hub, root, name, text)) != rel:
             if home is None:
                 raise ToolError(f"{address} cannot be made: {place.NO_SHORT}, so it would have no home.", "path")
+            if place.ignores(top, home):
+                # Made there, it would be untracked and leave the listing (8.6): refused as a move there is.
+                raise ToolError(f"{address} cannot be made: {place.IGNORED}, so it would have no home.", "path")
             rel = home
         try:
             if name is not None and rel != name:        # the private folders, walked as create_file walks

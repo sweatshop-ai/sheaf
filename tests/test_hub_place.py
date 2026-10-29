@@ -270,6 +270,22 @@ def test_the_doors_documents_lists_an_owner_only_sheaf_by_its_name_to_its_owner_
     docs = door_documents(browser, tokens["hans"])
     assert f"work/{SHARED}" not in docs and f"work/{HOME}" not in docs, docs
 
+@pytest.mark.parametrize("rel", ["thinkingtoo/tiroir/private/readme.md",
+                                 "thinkingtoo/tiroir/private/thierry/sub/note.md",
+                                 "thinkingtoo/tiroir/private/thierry/sub/deeper/note.md"])
+def test_every_path_under_a_projects_private_folder_is_no_address(team, work, browser, tokens, rel):
+    """Not only a private home: a file anywhere under `private/` is no document, to the page, the index and the
+    door, for the key and its owner too."""
+    put(team, work, rel, OPEN)
+    page, missing = team.get(f"/work/{rel}", member=THIERRY), team.get(f"/work/{MISSING}", member=THIERRY)
+    assert page.status == missing.status == 404 and page.body == missing.body
+    docs = [d["doc"] for r in team.get("/_/index.json", member=THIERRY).json()["roots"] for d in r["docs"]]
+    assert f"work/{rel}" not in docs, docs
+    for token in (tokens["thierry"], None):
+        assert f"work/{rel}" not in door_documents(browser, token)
+    assert absent(browser, tokens["thierry"], rel) == absent(browser, tokens["thierry"], MISSING)
+    assert absent(browser, None, rel) == absent(browser, None, MISSING)
+
 def test_a_private_sheaf_is_a_sheaf_of_the_list_for_work_on_this_by_its_name_only(team, work):
     assert work_mod.is_sheaf(team.hub, f"work/{SHARED}")
     assert not work_mod.is_sheaf(team.hub, f"work/{HOME}")

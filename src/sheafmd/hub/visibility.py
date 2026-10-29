@@ -6,7 +6,9 @@ sheafmd.hub.visibility — who may open a sheaf (SPEC 9.11): its owner alone, or
     owner_of(fm, members, assignees) the members who own the sheaf
     visible_to(fm, member, assignees=None)
     share(text, by, date)           the text the owner's Share writes
+    unshare(text)                   the text the owner's untick of Share writes
     newly_ticked(toggled)           the Share and Stop James boxes a save ticks
+    newly_unticked(toggled)         the boxes a save unticks
     for_door(text, old)             the text a door write puts on disk
 
 A sheaf is `owner` when its `visibility` says so, or when one of its `sources` is private and the owner has
@@ -209,6 +211,11 @@ def share(text_: str, by: str, date: str) -> str:
 _BOX_RE = re.compile(r"(\s*[-*+] \[)([ xX])(\] (Share|Stop James)(?:\s+@\S+)?\s*)")
 
 
+def unshare(text_: str) -> str:
+    """The sheaf `text_` once its owner has unticked Share: their own alone again, and no mark of the Share."""
+    return set_keys(text_, {"visibility": "owner", "shared": None})
+
+
 def newly_ticked(toggled) -> set:
     """The words of the two actions the hub acts on, Share and Stop James, whose box a save ticked.
     `toggled` holds the (old, new) content of each block whose edit only flipped task marks (edit.py
@@ -216,6 +223,16 @@ def newly_ticked(toggled) -> set:
     in the new. Nothing else counts, not a block pandoc rewrote, so a line that takes the place of another
     (a ballot box, an `<input>`, an escaped `\\- [x]`, a box beside one the owner deleted) ticks nothing,
     and text an assistant writes cannot Share a sheaf through the owner's save."""
+    return _flipped(toggled, " ", "xX")
+
+
+def newly_unticked(toggled) -> set:
+    """The mirror of `newly_ticked`: the words whose box a save unticked, a line that reads `- [x] <word>` in the
+    old and is that line with only its box unticked in the new, by the same strict rule (9.11, #40)."""
+    return _flipped(toggled, "xX", " ")
+
+
+def _flipped(toggled, was_marks: str, now_marks: str) -> set:
     words = set()
     for old, new in toggled:
         a, b = _lines(old), _lines(new)
@@ -223,7 +240,7 @@ def newly_ticked(toggled) -> set:
             continue
         for was, now in zip(a, b):
             m, n = _BOX_RE.fullmatch(was), _BOX_RE.fullmatch(now)
-            if m and n and m.group(2) == " " and n.group(2) in "xX" \
+            if m and n and m.group(2) in was_marks and n.group(2) in now_marks \
                     and (m.group(1), m.group(3)) == (n.group(1), n.group(3)):
                 words.add(m.group(4))
     return words

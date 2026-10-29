@@ -30,11 +30,11 @@ from ..edit import EditError
 from ..mcp import Caller, Door
 from ..render import RenderError
 from ..source import StaleError
-from . import auth, peer, proxy, the_list, visibility, work
+from . import auth, peer, place, proxy, the_list, visibility, work
 from .asktell import NO_AGENT, JobRefused
 from .index import Status
 from .live import UNKNOWN, NotAuthor
-from .roots import Address, NotFound, address_of_url, root_of_url
+from .roots import Address, NotFound, address_of_url, root_of_url, url_path
 from .state import TokenRow
 
 MAX_BODY = 8 * 1024 * 1024
@@ -501,6 +501,12 @@ class Handler:
             raise Refuse(404, "no such document")
         return doc
 
+    def _may_open(self, req: Req, address: str) -> bool:
+        """Whether the caller may open the document at `address`, which is there: the hub's person always, a member
+        when it is in one of their roots and its visibility lets them (9.9, 9.11)."""
+        m = req.member
+        return m is None or (self.hub.member_owns(m, address) and self.hub.visible(m, address, never_read=False))
+
     def _entry(self, req: Req, doc):
         """The document `doc` names. A member of proxy mode is told of no document of another
         root, nor of a root nested inside one of theirs: the same 404 as for one that does not
@@ -566,6 +572,10 @@ class Handler:
             return _html(200, self.hub.index.page(nonce, only=name, member=req.member), nonce)
         if not address.endswith(".md"):
             raise Refuse(404, "no such page")
+        # A sheaf the hub moved (9.11): its other address sends whoever may open it to where it lives, and is the
+        # 404 of a missing document to anyone else.
+        if (moved := place.found(self.hub, address, lambda a: self._may_open(req, a))) is not None:
+            return Response(302, {"Location": url_path(moved)})
         e = self._entry(req, address)
         self.hub.catch_up(e)
         return _html(200, self.hub.page(e, nonce, member=req.member), nonce)
@@ -582,7 +592,10 @@ class Handler:
         e = self._entry(req, req.query.get("doc"))
         def for_member(name, data):
             # Asked at each event: a write that makes the sheaf its owner's alone silences a stream
-            # opened before it (9.11).
+            # opened before it (9.11). Where a moved sheaf went is told only to whom may open it there.
+            if name == "moved":
+                to = data.get("to", "")
+                return data if hub.member_owns(member, to) and hub.visible(member, to, never_read=False) else None
             return _document_events(name, data) if hub.visible(member, e.address) else None
         sub = e.bus.subscribe(lambda tabs: {"boot": hub.boot, "version": hub.version,
                                             "service": hub.service, "tabs": tabs},
@@ -661,6 +674,8 @@ class Handler:
             self.hub.committed(e.address, req.member, "edit")
         if "Stop James" in ticked:
             self._stop_james(req, e)
+        if moved := self._placed(req, e, ticked):
+            got["moved"] = moved
         if got["merged"] and not got.get("again"):
             # Not a failure, but the thing this log exists to measure: how often the page and
             # an agent write at the same time.
@@ -694,7 +709,17 @@ class Handler:
             self._stop_james(req, e)
         if self.hub.the_list is not None:
             self.hub.the_list.ticked(e.address)
+        if moved := self._placed(req, e, ticked):
+            return _ok(hash=got["hash"], moved=moved)
         return _ok(hash=got["hash"])
+
+    def _placed(self, req: Req, e, ticked) -> str | None:
+        """After a write that shared the sheaf or withdrew its Share, the sheaf goes to its home (9.11): the address
+        it moved to, None when it stayed."""
+        if not ({"Share", "Unshare"} & ticked):
+            return None
+        new = place.place(self.hub, e.address, member=req.member, by=None if req.member else self.hub.person)
+        return new if new != e.address else None
 
     def _ticks(self, req: Req, e):
         """The guard of a save (live.save) for the two actions the hub acts on (9.11), and the set it fills
@@ -717,6 +742,15 @@ class Handler:
                 if visibility.front_matter(new) != fm:
                     raise EditError("A save cannot change the front matter: change it in the file.")
             words = visibility.newly_ticked(toggled)
+            if m is not None and "Share" in visibility.newly_unticked(toggled):
+                # Withdrawing a Share is its owner's alone, as giving it is (#40): anyone else's untick writes
+                # nothing; the owner's closes the sheaf again in the same write.
+                if not visibility.owner_of(fm, [m], assignees):
+                    raise EditError("Only the owner of this sheaf can withdraw its Share.")
+                new = visibility.unshare(new)
+                if visibility.front_matter(new).get("sessions", "") != fm.get("sessions", ""):
+                    raise EditError("A save cannot change the front matter: change it in the file.")
+                words.add("Unshare")
             if "Share" in words:
                 if m is not None and not visibility.owner_of(fm, [m], assignees):
                     raise EditError("Only the owner of this sheaf can share it.")

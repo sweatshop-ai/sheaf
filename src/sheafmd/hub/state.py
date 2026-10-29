@@ -212,6 +212,20 @@ class Versions:
         if self._root is None:
             shutil.rmtree(self._folder(address), ignore_errors=True)
 
+    def move(self, old: str, new: str):
+        """The versions of the document at `old` become those of `new`: its folder renamed, its `address` file
+        rewritten (9.11, a sheaf the hub moved). A folder already at `new`'s name holds the versions of a document
+        that is no longer there, and goes first. A folder that is a link is left as it is."""
+        src, dst = self._folder(old), self._folder(new)
+        if src == dst or src.is_symlink() or not src.is_dir():
+            return
+        if dst.is_symlink():
+            dst.unlink()
+        elif dst.exists():
+            shutil.rmtree(dst, ignore_errors=True)
+        os.rename(src, dst)
+        write_text_private(dst / _ADDRESS_FILE, self._key(new))
+
     def forget_prefix(self, prefix: str):
         """Drop the versions of every document whose address starts with `prefix` (`<root>/`),
         found by the `address` file of each folder. A document that was opened and never
@@ -277,6 +291,16 @@ class _Store:
                 del data[k]
             return gone, True
         return self._change(change)
+
+
+    def move(self, old: str, new: str):
+        """The entry of the document at `old` becomes `new`'s (9.11, a sheaf the hub moved)."""
+        def change(data):
+            if old not in data:
+                return None, False
+            data[new] = data.pop(old)
+            return None, True
+        self._change(change)
 
 
 class TokenError(Exception):
@@ -517,6 +541,17 @@ class MemberSeen(_Store):
                 doc[cid] = count
                 return None, True
             return None, False
+        self._change(change)
+
+    def move(self, old: str, new: str):
+        """Each member's entry of the document at `old` becomes their entry of `new` (9.11)."""
+        def change(data):
+            moved = False
+            for docs in data.values():
+                if isinstance(docs, dict) and old in docs:
+                    docs[new] = docs.pop(old)
+                    moved = True
+            return None, moved
         self._change(change)
 
     def forget_prefix(self, prefix: str) -> list[str]:

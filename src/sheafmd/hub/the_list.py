@@ -20,6 +20,7 @@ The record is read as the GitHub App the deployment installs: the hub reads an i
 `token_file` at every poll and never mints one, so the App's key stays where the hub cannot read it.
 """
 import calendar
+import dataclasses
 import html
 import itertools
 import json
@@ -36,7 +37,7 @@ from urllib.parse import quote
 from .. import config, paths
 from ..blocks import _split_lines, split_md_blocks
 from ..edit import TASK_MARK_RE, ticked_html
-from . import projects
+from . import place, projects
 from . import roots as roots_mod
 from . import visibility
 from .visibility import front_matter, text as fm_text
@@ -392,6 +393,14 @@ class TheList:
                 rows = [r for r in rows if self._gone.get(os.path.realpath(root.path / r.sheaf.rel), 0) < started]
                 self._gone = {f: n for f, n in self._gone.items() if n > started}
                 self._snap = Snapshot(rows, entries, self.hub.clock())
+            # Every sheaf not at its home goes there (9.11), judged with the records just read: the first poll
+            # moves what was written before the rule, a later one what an owner change made another's.
+            for rel in read:
+                if place.logical(rel) is not None:
+                    try:
+                        place.place(self.hub, f"{root.name}/{rel}")
+                    except Exception:       # one sheaf that cannot move leaves the others
+                        self.hub.record_exception("place-failed", f"{root.name}/{rel}")
 
     def start(self):
         def run():
@@ -429,6 +438,16 @@ class TheList:
                         return
                     row.sheaf = sheaf
                     self._answered[a.rel] = row.record.updated
+
+    def moved(self, old: str, new: str):
+        """The sheaf at `old` (a path in the root) now lives at `new` (9.11): its row takes the new path at once,
+        so the page links where the file is, and a tick waits on it as before."""
+        with self._gone_lock:
+            for row in self._snap.rows:
+                if row.sheaf.rel == old:
+                    row.sheaf, row.read = dataclasses.replace(row.sheaf, rel=new), None
+            if old in self._answered:
+                self._answered[new] = self._answered.pop(old)
 
     # ── the page ────────────────────────────────────────────────────────────
     def assignees(self, address: str, issue: str):

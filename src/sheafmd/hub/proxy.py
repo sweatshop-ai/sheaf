@@ -37,9 +37,10 @@ TABLE_KEYS = {"origin": str, "socket": str, "proxy_user": str, "members": dict}
 MEMBER_KEYS = {"name": str, "roots": list}
 STREAM_SECONDS = 300            # a stream of the proxy socket is closed after this (9.9 "The credential")
 # The only events a member's document stream is sent: the document's changes (an Ask's answer is
-# one), the hub's stop, and `gone` when its root is forgotten, which names only the address the stream
-# was opened on. Never a job of the hub account's agent session, nor `signed-out` (9.9).
-DOCUMENT_EVENTS = ("hello", "changed", "ask-done", "hub-stopping", "gone")
+# one), the hub's stop, `gone` when its root is forgotten, which names only the address the stream
+# was opened on, and `moved` when the hub moved its sheaf (9.11), sent only to a member who may open it where it
+# went (the handler's stream filter). Never a job of the hub account's agent session, nor `signed-out` (9.9).
+DOCUMENT_EVENTS = ("hello", "changed", "ask-done", "hub-stopping", "gone", "moved")
 PROXY_LINE = "Ask and Tell work only on the machine that runs the hub."     # 10.6
 NO_DOCUMENTS = "This account has no documents on this hub."
 FOLDER_MODE = 0o2750            # the socket's folder: the hub's account, the proxy's group, setgid

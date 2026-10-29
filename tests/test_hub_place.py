@@ -254,6 +254,22 @@ def test_the_index_names_a_private_sheaf_by_its_logical_name(team, work):
     assert f"work/{SHARED}" in docs and f"work/{HOME}" not in docs
 
 
+def door_documents(browser, token=None):
+    """The addresses the door's `documents` lists to `token` (the key without one), open threads or not."""
+    is_error, got = call(browser, "documents", token=token, open_only=False)
+    assert not is_error, got
+    return [d["doc"] for d in got if "doc" in d]
+
+
+def test_the_doors_documents_lists_an_owner_only_sheaf_by_its_name_to_its_owner_and_the_key(team, work, browser,
+                                                                                               tokens):
+    put(team, work, HOME, PRIVATE)
+    for token in (tokens["thierry"], None):
+        docs = door_documents(browser, token)
+        assert f"work/{SHARED}" in docs and f"work/{HOME}" not in docs, docs
+    docs = door_documents(browser, tokens["hans"])
+    assert f"work/{SHARED}" not in docs and f"work/{HOME}" not in docs, docs
+
 def test_a_private_sheaf_is_a_sheaf_of_the_list_for_work_on_this_by_its_name_only(team, work):
     assert work_mod.is_sheaf(team.hub, f"work/{SHARED}")
     assert not work_mod.is_sheaf(team.hub, f"work/{HOME}")

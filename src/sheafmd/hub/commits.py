@@ -88,9 +88,11 @@ class Commits:
         with self._lock:
             return self._roots.setdefault(folder, threading.Lock())
 
-    def saved(self, root, rel: str, author: Author, what: str):
+    def saved(self, root, rel: str, author: Author, what: str, gone: str | None = None):
         """`rel`, a document of `root` (a roots.Root), was written by `author`: commit it when the root
-        commits. `what` names the write in the subject (`edit`, `comment`). Never raises: a commit that
+        commits. `what` names the write in the subject (`edit`, `comment`). `gone` is the path the document
+        was moved from (9.11): the commit is `move: <gone> -> <rel>`, and stages the file's going from there
+        with its coming here, and its versions folder's, when the root keeps it. Never raises: a commit that
         fails is a diagnostics row, and the write stands."""
         address = f"{root.name}/{rel}"
         try:
@@ -105,12 +107,14 @@ class Commits:
             return
         # The file the write went to: a link inside the root is staged as the link, not what it names.
         top = os.path.realpath(root.path)
-        paths = [os.path.relpath(os.path.realpath(root.path / rel), top)]
+        docs = [rel] + ([gone] if gone else [])
+        paths = [os.path.relpath(os.path.realpath(root.path / d), top) for d in docs]
         if rc.versions_inside:
-            paths.append(str(state.INSIDE / state.doc_key(rel)))
+            paths += [str(state.INSIDE / state.doc_key(d)) for d in docs]
+        subject = f"move: {gone} -> {rel}" if gone else f"{what}: {rel}"
         try:
             with self._root_lock(root.path):
-                if not self._commit(root.path, paths, author, f"{what}: {rel}", address):
+                if not self._commit(root.path, paths, author, subject, address):
                     return
         except (OSError, subprocess.SubprocessError) as e:
             self._record("commit-failed", address, error=str(e)[:300])
@@ -119,7 +123,8 @@ class Commits:
             self._push_later(root.path, address)
 
     def _commit(self, folder: Path, paths: list, author: Author, subject: str, address: str) -> bool:
-        """`paths`: the document, then its versions folder when the root keeps it."""
+        """`paths`: the document, then the path it moved from (a move), then their versions folders when the
+        root keeps them. A path that is gone is staged as gone: git still lists it."""
         if _ignored(folder, paths[0]):
             return False                              # a document the repo ignores stays out, its versions too
         # A versions folder the repo ignores stays out; the document is committed without it.

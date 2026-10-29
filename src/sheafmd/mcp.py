@@ -29,7 +29,7 @@ from .agents import detect
 from .hub.auth import clean_display
 from .hub.client import HubUnavailable
 from .hub.roots import Address, NotFound, address_of_url, in_git_dir
-from .hub import visibility
+from .hub import place, visibility
 from .hub.state import TokenRow
 from .render import COMMENT_RE as HTML_COMMENT_RE, strip_comments
 from .source import check_create, create_file, md_hash, now, update_file
@@ -322,7 +322,16 @@ class Door:
         try:
             path = self.hub.roots.document(address)
         except NotFound:
-            raise _absent(doc) from None
+            # A sheaf the hub moved (9.11) is still found by its name `<client>/<project>/<name>.md`, by whoever may see
+            # it where it lives; to anyone else it is absent, as a document that does not exist.
+            moved = place.found(self.hub, address, lambda a: self._may_see_at(a, caller))
+            if moved is None:
+                raise _absent(doc) from None
+            address = moved
+            try:
+                path = self.hub.roots.document(address)
+            except NotFound:
+                raise _absent(doc) from None
         if self._judged(caller):
             # Before any other check of the call, so no answer tells a sheaf the caller may not see from none;
             # each tool judges again on the text it reads.
@@ -331,6 +340,15 @@ class Door:
             except (OSError, UnicodeDecodeError):
                 raise _absent(doc) from None        # as a member is answered for a file it cannot read
         return address
+
+    def _may_see_at(self, address: str, caller: Caller) -> bool:
+        """Whether `caller` may see the document at `address`, judged on its file now (9.11); False for one that
+        cannot be read."""
+        try:
+            text = self.hub.roots.document(address).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError, NotFound):
+            return False
+        return self._sees(visibility.front_matter(text), address, caller)
 
     def _judged(self, caller: Caller) -> bool:
         """Whether visibility (9.11) holds `caller`: a token, in proxy mode."""
@@ -623,6 +641,10 @@ class Door:
         address, text = str(Address(root.name, rel)), _as_read(args["text"])
         if (member := self._member(caller)) is not None and not self.hub.member_owns(member, address):
             raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path")     # a root of another member's
+        placed = place.applies(self.hub, root.name)
+        if placed and place.names_private(rel):
+            raise ToolError(f"{_named(args['doc'])} cannot be made: the hub places owner-only sheaves itself: name "
+                            "`<client>/<project>/<name>.md`.", "path")
         self._check_size(text)
         _check_comments("", text)
         top = Path(os.path.realpath(root.path))
@@ -632,6 +654,10 @@ class Door:
             # shapes (the refusal, the size with the owner line), so none tells what is there, nor what a link
             # on the way points to.
             check_create(top, rel)
+            # A sheaf's name is taken by its file at home and at every private home (9.11), whoever's it is.
+            name = place.logical(rel) if placed else None
+            if name is not None and place.taken(top, name):
+                raise FileExistsError(errno.EEXIST, "File exists", rel)
         except OSError as e:
             raise _not_made(address, e) from None
         # Every create, open or not, tells the list its address has no file now: the row of a sheaf that went
@@ -639,7 +665,18 @@ class Door:
         self.hub.assignees(address, {})
         text = self._door_text(text, None, address, caller)
         self._check_size(text)      # again: the owner `_owned` gave it is part of the page
+        # Made at its home (9.11), so no file, and no commit, ever holds a sheaf that is its owner's alone at the
+        # project's path.
+        if name is not None and (home := place.home(self.hub, root, name, address, text)) != rel:
+            if home is None:
+                self.hub.record("place-refused", address,
+                                why="it is its owner's alone and no owner of it has a short to name the folder")
+            else:
+                address, rel = str(Address(root.name, home)), home
+                self.hub.assignees(address, {})
         try:
+            if name is not None and rel != name:        # the private folders, walked as create_file walks
+                os.close(place.make_folders(top, rel)[0])
             create_file(top, rel, text)
         except OSError as e:
             raise _not_made(address, e) from None
@@ -676,6 +713,8 @@ class Door:
         if before != text:
             self.hub.wrote(address)
             self.hub.committed(address, by=caller.display, what="update")
+        # A text that opens or closes the sheaf moves it to its home (9.11); the answer names where it lives.
+        address = place.place(self.hub, address, by=caller.display)
         return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text),
                 "changed": before != text}
 

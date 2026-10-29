@@ -43,6 +43,9 @@ def read(folder: Path) -> dict | None:
         parts = name.split("/")
         if len(parts) != 2 or not all(parts) or any(x.startswith(".") for x in parts):
             raise Invalid(f"{here}: a project is named <client>/<project>")
+        if parts[1] == "private":
+            # `<client>/<project>/private/` holds the sheaves the hub places as their owner's alone (9.11)
+            raise Invalid(f"{here}: a project cannot be named private, the name of the folder of owner-only sheaves")
         if not isinstance(p, dict):
             raise Invalid(f"{here} must be a table with members and status")
         extra = sorted(set(p) - {"members", "status"})

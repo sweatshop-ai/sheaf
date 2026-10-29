@@ -146,18 +146,22 @@ class Hub:
             print(f"sheaf: {root.name}/{folder} holds sheaves and {projects.FILE} has no entry for it",
                   file=sys.stderr, flush=True)
 
-    def committed(self, address: str, member=None, what: str = "edit", by: str | None = None):
+    def committed(self, address: str, member=None, what: str = "edit", by: str | None = None,
+                  gone: str | None = None, author: Author | None = None):
         """A write went to `address`, by `member` (a proxy.Member), by `by` (the display name of a door
-        caller) or else by the hub's person: a commit, in a root that commits (8.11)."""
+        caller), by `author` when given (the hub itself, for a move of the poll) or else by the hub's person:
+        a commit, in a root that commits (8.11). `gone`: the path in the root the document moved from (9.11)."""
         a = roots_mod.Address.parse(address)
         root = self.roots.get(a.root)
         if root is None:
             return
-        if member is not None:
+        if author is not None:
+            who = author
+        elif member is not None:
             who = Author(member.name, member.email or proxy_mod.default_email(member.id, self.proxy.origin))
         else:
             who = Author(by or self.person, "")
-        self.commits.saved(root, a.rel, who, what)
+        self.commits.saved(root, a.rel, who, what, gone=gone)
 
     def url(self, address: str) -> str:
         return f"http://127.0.0.1:{self.port}{roots_mod.url_path(address)}"

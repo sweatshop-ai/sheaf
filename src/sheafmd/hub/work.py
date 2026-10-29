@@ -22,6 +22,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import place
 from .roots import Address
 from .visibility import _end, _lines, _uncomment, front_matter
 
@@ -73,9 +74,10 @@ class State:
 
 
 def is_sheaf(hub, address: str) -> bool:
-    """Whether `address` names a sheaf of the list's root, at `<client>/<project>/<file>.md`."""
+    """Whether `address` names a sheaf of the list's root, at `<client>/<project>/<file>.md` or, its owner's
+    alone, at `<client>/<project>/private/<short>/<file>.md` (9.11)."""
     at = Address.parse(address)
-    return hub.the_list is not None and hub.the_list.serves(at.root) and at.rel.count("/") == 2
+    return hub.the_list is not None and hub.the_list.serves(at.root) and place.logical(at.rel) is not None
 
 
 def state(hub, address: str, text: str) -> State | None:

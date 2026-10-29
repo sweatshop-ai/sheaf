@@ -32,12 +32,16 @@ A read-only render of a document with every comment removed, for someone outside
 _Avoid_: client render, client version, public copy
 
 **Share**:
-The action a sheaf's owner ticks to open it to every member whose roots hold it (SPEC 9.11). It renders nothing and makes no Share copy. Only the owner unticks it, which makes the sheaf their own alone again. In the list's root a Share moves the sheaf out of its owner's private folder, and unticking it moves the sheaf back.
+The action a sheaf's owner ticks to open it to every member whose roots hold it (SPEC 9.11). It renders nothing and makes no Share copy. Only the owner unticks it, which makes the sheaf their own alone again. In the list's root a Share moves the sheaf's file out of its owner's private folder, and unticking it moves the file back; the sheaf's name, its address, stays.
 _Avoid_: publish, unlock
 
 **Home** (of a sheaf):
-The one path a sheaf of the list's root lives at, by its visibility: `<client>/<project>/<name>.md` when it is open to the project, `<client>/<project>/private/<short>/<name>.md` when it is its owner's alone (SPEC 9.11). Its name stays `<client>/<project>/<name>.md` wherever it lives, and the hub moves the file home.
+The one path the file of a sheaf of the list's root lives at, by its visibility: `<client>/<project>/<name>.md` when it is open to the project, `<client>/<project>/private/<short>/<name>.md` when it is its owner's alone (SPEC 9.11). The hub moves the file home; the sheaf itself is its logical name.
 _Avoid_: location, private copy
+
+**Logical name** (of a sheaf):
+`<client>/<project>/<name>.md`, the address of a sheaf of the list's root wherever its file lives (SPEC 9.11). The hub keys the sheaf's entry, versions, read state and render settings by it, and finds the file under it only to read or write it. The file's private path is no address.
+_Avoid_: private address, physical address
 
 **Link rule**:
 The standard that every page, article, tool or document a text names is a link to its URL. It is checked when a page is rendered and told to the agent.

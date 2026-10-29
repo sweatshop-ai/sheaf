@@ -631,40 +631,52 @@ def test_all_of_the_team_leaves_out_a_sheaf_closed_since_the_last_poll(box, shea
     assert all("globex/black-friday" not in groups for groups in read(box.get("/list?show=all", member=DORA)).values())
 
 
-def test_a_link_to_a_sheaf_has_the_owner_of_the_sheaf_it_names(box, sheaves):
+JOEY_NAME = "globex/black-friday/2026-10-28-reply-to-joey.md"
+JOEY_HOME = "globex/black-friday/private/nell/2026-10-28-reply-to-joey.md"
+
+
+def closed_joey(sheaves, sources="sources: [library:4711]\n"):
+    """Joey's sheaf made its owner's alone (`sources` in the place of `visibility: project`), its file at its home
+    (9.11): the private folder of its issue's assignee, Nell, where the poll would move it. Its address stays
+    `JOEY_NAME`."""
     joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
-    joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n",
-                                                             "sources: [library:4711]\nowner: dora\n"),
-                    encoding="utf-8")
-    (sheaves / "globex/black-friday/joey.md").symlink_to(joey.name)
+    home = sheaves / JOEY_HOME
+    home.parent.mkdir(parents=True)
+    home.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n", sources), encoding="utf-8")
+    joey.unlink()
+    return home
+
+
+def test_a_link_at_a_sheafs_path_is_no_document_even_to_the_owner_of_the_sheaf_it_names(box, sheaves):
+    """A link holds no name (9.11): a second name of one file would be a second name lock over its one file lock.
+    The sheaf is its owner's by its own name; the link answers as a document that does not exist, to everyone."""
+    joey = closed_joey(sheaves, "sources: [library:4711]\nowner: dora\n")
+    (sheaves / "globex/black-friday/joey.md").symlink_to(f"private/nell/{joey.name}")
     box.hub.the_list.poll()
     root = box.hub.roots.lookup(joey).name
-    assert box.get(f"/{root}/globex/black-friday/2026-10-28-reply-to-joey.md", member=DORA).status == 404
+    assert box.get(f"/{root}/{JOEY_NAME}", member=DORA).status == 404
+    assert box.get(f"/{root}/{JOEY_NAME}", member=NELL).status == 200
     assert box.get(f"/{root}/globex/black-friday/joey.md", member=DORA).status == 404
-    assert box.get(f"/{root}/globex/black-friday/joey.md", member=NELL).status == 200
+    assert box.get(f"/{root}/globex/black-friday/joey.md", member=NELL).status == 404
 
 
-def test_a_link_the_poll_does_not_read_has_the_owner_of_the_sheaf_it_names(box, sheaves):
-    joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
-    joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n",
-                                                             "sources: [library:4711]\nowner: dora\n"),
-                    encoding="utf-8")
+def test_a_link_the_poll_does_not_read_is_no_document_even_to_the_owner_of_the_sheaf_it_names(box, sheaves):
+    """No address of the list's root reaches a file through a link, at any depth (9.11, Opus round 8)."""
+    joey = closed_joey(sheaves, "sources: [library:4711]\nowner: dora\n")
     (sheaves / ".kept").mkdir()
     (sheaves / ".kept/joey.md").symlink_to(joey)
     box.hub.the_list.poll()
     root = box.hub.roots.lookup(joey).name
     assert box.get(f"/{root}/.kept/joey.md", member=DORA).status == 404
-    assert box.get(f"/{root}/.kept/joey.md", member=NELL).status == 200
+    assert box.get(f"/{root}/.kept/joey.md", member=NELL).status == 404
 
 
 @pytest.mark.parametrize("issue", ["issue:\n", "issue: acme/record#7\n"], ids=["removed", "changed"])
 def test_a_sheaf_whose_issue_changed_since_the_poll_is_not_its_old_assignees(box, sheaves, issue):
-    joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
-    joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n", "sources: [library:4711]\n"),
-                    encoding="utf-8")
+    joey = closed_joey(sheaves)
     box.hub.the_list.poll()
     root = box.hub.roots.lookup(joey).name
-    address = f"/{root}/globex/black-friday/2026-10-28-reply-to-joey.md"
+    address = f"/{root}/{JOEY_NAME}"
     assert box.get(address, member=NELL).status == 200          # the assignee of #5 owns it
     joey.write_text(joey.read_text(encoding="utf-8").replace("issue: acme/record#5\n", issue + "owner: dora\n"),
                     encoding="utf-8")
@@ -674,12 +686,10 @@ def test_a_sheaf_whose_issue_changed_since_the_poll_is_not_its_old_assignees(box
 
 @pytest.mark.parametrize("issue", ["issue:\n", "issue: acme/record#7\n"], ids=["removed", "changed"])
 def test_a_tick_after_the_issue_changed_does_not_give_the_old_assignees_back(box, sheaves, issue):
-    joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
-    joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n", "sources: [library:4711]\n"),
-                    encoding="utf-8")
+    joey = closed_joey(sheaves)
     box.hub.the_list.poll()
     root = box.hub.roots.lookup(joey).name
-    address = f"/{root}/globex/black-friday/2026-10-28-reply-to-joey.md"
+    address = f"/{root}/{JOEY_NAME}"
     assert box.get(address, member=NELL).status == 200          # the assignee of #5 owns it
     joey.write_text(joey.read_text(encoding="utf-8").replace("issue: acme/record#5\n", issue + "owner: dora\n"),
                     encoding="utf-8")
@@ -742,10 +752,7 @@ def test_the_owner_shown_is_the_issues_first_assignee_even_when_no_member(box, g
 
 def test_an_owner_only_sheaf_deleted_after_a_poll_is_told_to_its_assignee_alone(box, sheaves, monkeypatch):
     from sheafmd.hub.index import SWEEP_SECONDS
-    joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
-    joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n",
-                                                             "sources: [library:4711]\nowner: dora\n"),
-                    encoding="utf-8")
+    joey = closed_joey(sheaves, "sources: [library:4711]\nowner: dora\n")
     box.hub.the_list.poll()
     now = [NOW]
     box.hub.clock = lambda: now[0]
@@ -760,21 +767,18 @@ def test_an_owner_only_sheaf_deleted_after_a_poll_is_told_to_its_assignee_alone(
     box.hub.the_list.poll()                             # the poll sees no sheaf there before the sweep does
     now[0] += SWEEP_SECONDS
     box.hub.tick()
-    doc = f"{box.hub.roots.lookup(sheaves / 'projects.toml').name}/globex/black-friday/2026-10-28-reply-to-joey.md"
+    doc = f"{box.hub.roots.lookup(sheaves / 'projects.toml').name}/{JOEY_NAME}"
     assert [d["doc"] for name, d in nell.drain() if name == "status"] == [doc]
     assert [d for name, d in dora.drain() if name == "status"] == []
 
 
 def test_an_issue_written_in_another_case_is_still_the_issue_the_list_polled(box, sheaves):
-    joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
-    joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n",
-                                                             "sources: [library:4711]\nowner: dora\n"),
-                    encoding="utf-8")
+    joey = closed_joey(sheaves, "sources: [library:4711]\nowner: dora\n")
     box.hub.the_list.poll()
     joey.write_text(joey.read_text(encoding="utf-8").replace("issue: acme/record#5", "issue: Acme/Record#5"),
                     encoding="utf-8")
     root = box.hub.roots.lookup(joey).name
-    address = f"/{root}/globex/black-friday/2026-10-28-reply-to-joey.md"
+    address = f"/{root}/{JOEY_NAME}"
     assert box.get(address, member=NELL).status == 200
     assert box.get(address, member=DORA).status == 404
 
@@ -792,10 +796,7 @@ def bind_tokens(box, sheaves):
 
 def hidden_joey(sheaves):
     """Joey's sheaf, its owner's alone and with no `owner`: its issue's assignee, Nell, owns it."""
-    joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
-    joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n", "sources: [library:4711]\n"),
-                    encoding="utf-8")
-    return joey
+    return closed_joey(sheaves)
 
 
 def test_a_door_update_of_a_sheaf_its_assignee_alone_owns_keeps_it_theirs_once_the_issue_is_not_polled(
@@ -806,7 +807,7 @@ def test_a_door_update_of_a_sheaf_its_assignee_alone_owns_keeps_it_theirs_once_t
     joey = hidden_joey(sheaves)
     box.hub.the_list.poll()
     root = box.hub.roots.lookup(joey).name
-    doc = f"{root}/globex/black-friday/2026-10-28-reply-to-joey.md"
+    doc = f"{root}/{JOEY_NAME}"
     before = joey.read_text(encoding="utf-8")
     is_error, got = call(browser, "update", token=tokens["nell-door"], doc=doc, expected_hash=md_hash(before),
                          text=before.replace("The draft.", "The draft, again."))
@@ -832,7 +833,9 @@ def test_a_door_create_where_a_hidden_sheaf_was_deleted_answers_the_same_whateve
     text = f"---\nissue: {issue}\nsources: [library:1]\n---\n# A guess\n"
     is_error, got = call(browser, "create", token=tokens["dora-door"], doc=doc, text=text)
     assert not is_error, got
-    assert front_matter(joey.read_text(encoding="utf-8"))["owner"] == "dora"
+    assert got["doc"] == doc                                    # its name; its file is in Dora's folder (9.11)
+    dora = sheaves / f"globex/black-friday/private/dora/{joey.name}"
+    assert front_matter(dora.read_text(encoding="utf-8"))["owner"] == "dora"
     is_error, got = call(browser, "read", token=tokens["dora-door"], doc=doc)
     assert not is_error, got
 
@@ -889,7 +892,7 @@ def test_a_sheaf_made_where_a_hidden_one_went_is_listed_by_what_it_says_not_what
     joey.write_text(joey.read_text(encoding="utf-8").replace("# Reply to Joey about column L", "# Secret title"),
                     encoding="utf-8")
     if through == "a-link":
-        (sheaves / "globex/black-friday/joey.md").symlink_to(joey.name)
+        (sheaves / "globex/black-friday/joey.md").symlink_to(f"private/nell/{joey.name}")
     box.hub.the_list.poll()
     root = box.hub.roots.lookup(joey).name
     joey.unlink()
@@ -919,8 +922,10 @@ def test_an_open_create_where_a_hidden_sheaf_went_then_closed_answers_the_same_w
                          text=f"---\nissue: {issue}\nvisibility: project\n---\n# A guess\n\n- [ ] Approve\n")
     assert not is_error, got
     assert "A guess" not in str(read(box.get("/list?show=all", member=DORA)))
-    now = joey.read_text(encoding="utf-8")
+    now = (sheaves / "globex/black-friday" / joey.name).read_text(encoding="utf-8")
     is_error, got = call(browser, "update", token=tokens["dora-door"], doc=doc, expected_hash=md_hash(now),
                          text=now.replace("visibility: project\n", "sources: [library:1]\n"))
     assert not is_error, got
-    assert front_matter(joey.read_text(encoding="utf-8"))["owner"] == "dora"
+    assert got["doc"] == doc                                    # its name; its file moved to Dora's folder (9.11)
+    dora = sheaves / f"globex/black-friday/private/dora/{joey.name}"
+    assert front_matter(dora.read_text(encoding="utf-8"))["owner"] == "dora"

@@ -187,13 +187,17 @@ def _write_atomic(p: Path, text: str):
         raise
 
 
-def update_file(md_path, change, expected_hash=None):
+def update_file(md_path, change, expected_hash=None, move=None):
     """Apply change(text) -> new text under the lock. Returns (old, new).
 
     With expected_hash, the check happens inside the lock: a write that lands
     between a caller's read and this one is refused, never overwritten.
     The new text goes through a sibling temp file, so an interrupted write
-    cannot truncate the document."""
+    cannot truncate the document.
+
+    `move(text, new)`, called under the lock before a write that changes the text, may move the
+    file (a sheaf going to the home of its new text, SPEC 9.11) and give the path it is at now:
+    the new text is written there, under that path's lock too."""
     p = Path(md_path)
     with file_lock(p):
         text = p.read_text(encoding="utf-8")
@@ -203,7 +207,12 @@ def update_file(md_path, change, expected_hash=None):
                              "overwrite that change")
         new = change(text)
         if new != text:
-            _write_atomic(p, new)
+            q = move(text, new) if move is not None else None
+            if q is None:
+                _write_atomic(p, new)
+            else:
+                with file_lock(q):
+                    _write_atomic(Path(q), new)
         return text, new
 
 
@@ -251,13 +260,19 @@ def check_create(top, rel: str):
         os.close(fd)
 
 
-def _folder_of(top, rel: str):
+def _folder_of(top, rel: str, make: bool = False):
     """(fd of the folder of `rel` under `top`, the file's name): each folder opened from the one above it
-    without following a link, so a link on the way is an OSError wherever it points."""
+    without following a link, so a link on the way is an OSError wherever it points. With `make`, a missing
+    folder is made on the way, as the umask gives a new folder, and then opened as any other."""
     parts = rel.split("/")
     fd = os.open(top, os.O_RDONLY | os.O_DIRECTORY)
     try:
         for seg in parts[:-1]:
+            if make:
+                try:
+                    os.mkdir(seg, 0o777, dir_fd=fd)
+                except FileExistsError:
+                    pass                # there already, or made meanwhile: opened as any other, a link refused
             inner = os.open(seg, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
             os.close(fd)
             fd = inner

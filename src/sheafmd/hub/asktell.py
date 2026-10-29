@@ -479,8 +479,8 @@ class AskTell:
             return
         # Under the admission lock only what an upgrade stop must not come between: the end of the
         # delivery's job and the hold that says the stop message is on its way (8.4). The wait ends
-        # after, outside the lock, because it needs the document's lock, which a render holds for
-        # as long as pandoc or mmdc take, and an upgrade stop (the announced SIGTERM of `sheaf restart`
+        # after, outside the lock, because it needs the document's lock and the name's (9.11), which a
+        # write holds for as long as pandoc or mmdc take and its commit, and an upgrade stop (the announced SIGTERM of `sheaf restart`
         # too) and every Ask and Tell start wait on the admission lock. The hold stays until the cancel
         # is over: no Tell of the thread starts meanwhile (`_not_cancelling`).
         with self.hub.admit:

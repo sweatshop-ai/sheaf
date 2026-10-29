@@ -14,6 +14,7 @@ On the proxy socket (9.9) the order is the same with other checks: the uid at th
 connection, the Host of the front, the member header, the route (a member's routes only), the
 Origin of every POST, then the body. No cookie and no key is read there.
 """
+import contextlib
 import json
 import re
 import tempfile
@@ -30,7 +31,7 @@ from ..edit import EditError
 from ..mcp import Caller, Door
 from ..render import RenderError
 from ..source import StaleError
-from . import auth, peer, proxy, the_list, visibility, work
+from . import auth, peer, place, proxy, the_list, visibility, work
 from .asktell import NO_AGENT, JobRefused
 from .index import Status
 from .live import UNKNOWN, NotAuthor
@@ -501,6 +502,11 @@ class Handler:
             raise Refuse(404, "no such document")
         return doc
 
+    def _reading(self, doc):
+        """The lock of the sheaf's name `doc` (9.11), held by a read from the check of its visibility to the page
+        or text sent: no write or move of its file comes between."""
+        return place.held(self.hub, doc) if isinstance(doc, str) else contextlib.nullcontext()
+
     def _entry(self, req: Req, doc):
         """The document `doc` names. A member of proxy mode is told of no document of another
         root, nor of a root nested inside one of theirs: the same 404 as for one that does not
@@ -566,9 +572,10 @@ class Handler:
             return _html(200, self.hub.index.page(nonce, only=name, member=req.member), nonce)
         if not address.endswith(".md"):
             raise Refuse(404, "no such page")
-        e = self._entry(req, address)
-        self.hub.catch_up(e)
-        return _html(200, self.hub.page(e, nonce, member=req.member), nonce)
+        with self._reading(address):
+            e = self._entry(req, address)
+            self.hub.catch_up(e)
+            return _html(200, self.hub.page(e, nonce, member=req.member), nonce)
 
     def _live(self, req: Req) -> Response:
         hub, member = self.hub, req.member
@@ -579,6 +586,11 @@ class Handler:
             if member is None and hub.auth is not req.auth:   # a rotation overtook this request, after it told the open streams
                 sub.put("signed-out", {})
             return _stream(sub)
+        with self._reading(req.query.get("doc")):
+            return self._document_stream(req)
+
+    def _document_stream(self, req: Req) -> Response:
+        hub, member = self.hub, req.member
         e = self._entry(req, req.query.get("doc"))
         def for_member(name, data):
             # Asked at each event: a write that makes the sheaf its owner's alone silences a stream
@@ -605,6 +617,10 @@ class Handler:
         return root.id
 
     def _doc(self, req: Req) -> Response:
+        with self._reading(req.query.get("doc")):
+            return self._doc_state(req)
+
+    def _doc_state(self, req: Req) -> Response:
         doc = req.query.get("doc")
         try:
             e = self._entry(req, doc)
@@ -648,17 +664,24 @@ class Handler:
                    and isinstance(x.get("saved", ""), str), "each edit is {i, html} or {i, html, saved}")
         rid = b.get("rid")
         _shape(rid is None or (isinstance(rid, str) and _RID_RE.fullmatch(rid)), "rid is not a request id")
-        try:
+        # The name's lock (9.11) from the guard's judging of the sheaf's home to the commit: move, write, render,
+        # commit, one operation.
+        with place.held(self.hub, e.address):
             guard, ticked = self._ticks(req, e)
-            got = e.live.save(h, edits, rid=rid, guard=guard)
-        except (EditError, StaleError) as ex:
-            raise Refuse(409, str(ex)) from None
-        except UnicodeEncodeError:
-            raise Refuse(400, "the text holds a character that cannot be written to the .md "
-                              "(half of a pair, such as half an emoji)") from None
-        self.hub.index.touch(e.address)
-        if got["changed"] and not got.get("again"):
-            self.hub.committed(e.address, req.member, "edit")
+            move, moved = self._mover(e, ticked)
+            with self._moved_committed(e, req.member, "edit", moved):
+                try:
+                    got = e.live.save(h, edits, rid=rid, guard=guard, move=move)
+                except (EditError, StaleError) as ex:
+                    raise Refuse(409, str(ex)) from None
+                except UnicodeEncodeError:
+                    raise Refuse(400, "the text holds a character that cannot be written to the .md "
+                                      "(half of a pair, such as half an emoji)") from None
+                self.hub.index.touch(e.address)
+                gone = moved[0] if moved else self._placed(e, ticked)
+                if got["changed"] and not got.get("again"):
+                    moved.clear()
+                    self.hub.committed(e.address, req.member, "edit", gone=gone)
         if "Stop James" in ticked:
             self._stop_james(req, e)
         if got["merged"] and not got.get("again"):
@@ -681,20 +704,66 @@ class Handler:
         edit = the_list.tick_edit(text, n, word)
         if edit is None:
             raise Refuse(409, f"the sheaf no longer holds that action ({word}): reload the list")
-        try:
+        with place.held(self.hub, e.address):
             guard, ticked = self._ticks(req, e)
-            got = e.live.save(h, [edit], guard=guard)
-        except (EditError, StaleError) as ex:
-            raise Refuse(409, str(ex)) from None
-        if not got["changed"]:
-            raise Refuse(409, f"the sheaf no longer holds that action ({word}): reload the list")
-        self.hub.index.touch(e.address)
-        self.hub.committed(e.address, req.member, "tick")
+            move, moved = self._mover(e, ticked)
+            with self._moved_committed(e, req.member, "tick", moved):
+                try:
+                    got = e.live.save(h, [edit], guard=guard, move=move)
+                except (EditError, StaleError) as ex:
+                    raise Refuse(409, str(ex)) from None
+                if not got["changed"]:
+                    raise Refuse(409, f"the sheaf no longer holds that action ({word}): reload the list")
+                self.hub.index.touch(e.address)
+                gone = moved[0] if moved else self._placed(e, ticked)
+                moved.clear()
+                self.hub.committed(e.address, req.member, "tick", gone=gone)
         if "Stop James" in ticked:
             self._stop_james(req, e)
         if self.hub.the_list is not None:
             self.hub.the_list.ticked(e.address)
         return _ok(hash=got["hash"])
+
+    def _mover(self, e, ticked):
+        """(the `move` of a save, the list it puts the path the file left in): a write that shares the sheaf or
+        withdraws its Share moves the file to the home of its new text before it writes it (9.11), so the text is
+        written and rendered in its new folder. `ticked` is filled by the save's guard before the move is asked."""
+        moved = []
+
+        def move(text, new):
+            if not ({"Share", "Unshare"} & ticked):
+                return None
+            try:
+                gone = place.ahead(self.hub, e.address, text, new)
+            except place.Refused as ex:
+                # The write would leave the sheaf where it may not stay (9.11): nothing is written.
+                raise EditError(f"This sheaf cannot go to its home: {ex.why}. Nothing was written.") from None
+            if gone is None:
+                return None
+            moved.append(gone)
+            return self.hub.file(e.address, placed=True)
+        return move, moved
+
+    @contextlib.contextmanager
+    def _moved_committed(self, e, member, what: str, moved: list):
+        """Under the name's lock, around a write whose `move` may move the file (9.11): a move that was made and that
+        the write did not commit (a render that failed after it, a write that raised) is committed all the same as
+        the request leaves, so git never keeps the file at the path it left. The writer empties `moved` when it
+        commits."""
+        try:
+            yield
+        finally:
+            if moved:
+                self.hub.committed(e.address, member, what, gone=moved.pop())
+
+    def _placed(self, e, ticked) -> str | None:
+        """After a write that shared the sheaf or withdrew its Share, under the lock of its name, its file goes to
+        its home (9.11) if the write did not take it there (a text that changed meanwhile): the path in the root
+        it left, None when it stayed. The caller commits the write and the move as one; the sheaf's address
+        stays."""
+        if not ({"Share", "Unshare"} & ticked):
+            return None
+        return place.place(self.hub, e.address, commit=False)
 
     def _ticks(self, req: Req, e):
         """The guard of a save (live.save) for the two actions the hub acts on (9.11), and the set it fills
@@ -717,6 +786,17 @@ class Handler:
                 if visibility.front_matter(new) != fm:
                     raise EditError("A save cannot change the front matter: change it in the file.")
             words = visibility.newly_ticked(toggled)
+            if visibility.withdraws_share(text, new):
+                # Withdrawing a Share is its owner's alone, as giving it is (#40), by whatever edit unticks the box:
+                # anyone else's writes nothing; the owner's closes the sheaf again in the same write. The hub's own
+                # person (no member: the loopback port or the key) reads every file, and withdraws it as an owner.
+                fm = visibility.front_matter(text)
+                if m is not None and not visibility.owner_of(fm, [m], self.hub.assignees(e.address, fm)):
+                    raise EditError("Only the owner of this sheaf can withdraw its Share.")
+                new = visibility.unshare(new)
+                if visibility.front_matter(new).get("sessions", "") != fm.get("sessions", ""):
+                    raise EditError("A save cannot change the front matter: change it in the file.")
+                words.add("Unshare")
             if "Share" in words:
                 if m is not None and not visibility.owner_of(fm, [m], assignees):
                     raise EditError("Only the owner of this sheaf can share it.")
@@ -760,13 +840,14 @@ class Handler:
         """The address `doc` names, its file's front matter and its work.State, once it is a sheaf the member may
         open (9.11) of the list's root, at `<client>/<project>/<file>.md`. Else the 404 of a document that is not
         there."""
-        address = self._owned(req, doc)
-        if not work.is_sheaf(self.hub, address):
-            raise Refuse(404, "no such document")
-        try:
-            text = self.hub.roots.document(address).read_text(encoding="utf-8")
-        except (NotFound, OSError, UnicodeDecodeError):
-            raise Refuse(404, "no such document") from None
+        with self._reading(doc):
+            address = self._owned(req, doc)
+            if not work.is_sheaf(self.hub, address):
+                raise Refuse(404, "no such document")
+            try:
+                text = self.hub.roots.document(address).read_text(encoding="utf-8")
+            except (NotFound, OSError, UnicodeDecodeError):
+                raise Refuse(404, "no such document") from None
         return address, visibility.front_matter(text), work.state(self.hub, address, text)
 
     def _session(self, req: Req) -> Response:
@@ -828,14 +909,16 @@ class Handler:
                 return text
             moved.append(sid)
             return work.with_session(text, line, sid)
-        try:
-            e.live.rewrite(change)
-        except work.NotRewritten as ex:
-            self.hub.record("session-not-recorded", e.address, transcript=sid, reason=str(ex))
-            return
+        with place.held(self.hub, e.address):           # the write and its commit, one step (9.11)
+            try:
+                e.live.rewrite(change)
+            except work.NotRewritten as ex:
+                self.hub.record("session-not-recorded", e.address, transcript=sid, reason=str(ex))
+                return
+            if moved:
+                self.hub.index.touch(e.address)
+                self.hub.committed(e.address, req.member, "session")
         if moved:
-            self.hub.index.touch(e.address)
-            self.hub.committed(e.address, req.member, "session")
             self.hub.record("session-recorded", e.address, transcript=sid, by=work.member_word(req.member))
 
     def _james_may_take(self, text: str, sid: str) -> bool:
@@ -864,12 +947,13 @@ class Handler:
             if not visibility.visible_to(fm, req.member, self.hub.assignees(e.address, fm)):
                 raise Refuse(404, "no such document")
             return work.with_session(text, line, sid)
-        try:
-            h = e.live.rewrite(change)
-        except work.NotRewritten as ex:
-            raise Refuse(409, str(ex)) from None
-        self.hub.index.touch(e.address)
-        self.hub.committed(e.address, req.member, "fork")
+        with place.held(self.hub, e.address):           # the write and its commit, one step (9.11)
+            try:
+                h = e.live.rewrite(change)
+            except work.NotRewritten as ex:
+                raise Refuse(409, str(ex)) from None
+            self.hub.index.touch(e.address)
+            self.hub.committed(e.address, req.member, "fork")
         self.hub.record("session-forked", address, transcript=sid, by=by, machine=machine,
                         issue=visibility.text(fm, "issue"))
         return _ok(hash=h)
@@ -928,22 +1012,23 @@ class Handler:
                 if to_box and not (work.state(self.hub, e.address, text) or work.State([], "", None)).can:
                     raise Refuse(400, proxy.PROXY_LINE)
             signed["guard"] = still_visible
-        try:
-            snap = e.live.comment(op, b, h, await_action=can_tell, rid=rid, **signed)
-        except NotAuthor as ex:
-            raise Refuse(403, str(ex)) from None
-        except StaleError as ex:
-            raise Refuse(409, str(ex), answer={"code": ex.code} if ex.code else None) from None
-        except KeyError as ex:
-            raise Refuse(400, f"missing field {ex}") from None
-        except rdc.NoComment as ex:
-            # Deleted while the page's request was out, often before the page has heard of it.
-            raise Refuse(410, str(ex)) from None
-        except (rdc.AnchorError, ValueError, TypeError) as ex:
-            raise Refuse(400, str(ex)) from None
-        self.hub.index.touch(e.address)
-        if not snap.get("again"):
-            self.hub.committed(e.address, member, "comment")
+        with place.held(self.hub, e.address):           # the write and its commit, one step (9.11)
+            try:
+                snap = e.live.comment(op, b, h, await_action=can_tell, rid=rid, **signed)
+            except NotAuthor as ex:
+                raise Refuse(403, str(ex)) from None
+            except StaleError as ex:
+                raise Refuse(409, str(ex), answer={"code": ex.code} if ex.code else None) from None
+            except KeyError as ex:
+                raise Refuse(400, f"missing field {ex}") from None
+            except rdc.NoComment as ex:
+                # Deleted while the page's request was out, often before the page has heard of it.
+                raise Refuse(410, str(ex)) from None
+            except (rdc.AnchorError, ValueError, TypeError) as ex:
+                raise Refuse(400, str(ex)) from None
+            self.hub.index.touch(e.address)
+            if not snap.get("again"):
+                self.hub.committed(e.address, member, "comment")
         if snap.get("again"):
             # Taken before under this request id: what the first request started (an Ask, a Tell's wait)
             # is running or done, and the page hears of it by its events.
@@ -1044,13 +1129,14 @@ class Handler:
 
     # ── export, diagnostics ──────────────────────────────────────────────────
     def _export(self, req: Req) -> Response:
-        e = self._entry(req, req.body.get("doc"))
         kind = req.body.get("kind")
         _shape(kind in ("html", "pdf"), "kind must be html or pdf")
-        try:
-            html = self.hub.share_copy(e)
-        except RenderError as ex:
-            raise Refuse(409, str(ex)) from None
+        with self._reading(req.body.get("doc")):
+            e = self._entry(req, req.body.get("doc"))
+            try:
+                html = self.hub.share_copy(e)
+            except RenderError as ex:
+                raise Refuse(409, str(ex)) from None
         stem = Path(e.address).stem
         if kind == "html":
             return Response(200, {"Content-Type": "text/html; charset=utf-8",

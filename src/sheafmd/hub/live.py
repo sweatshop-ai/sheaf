@@ -52,8 +52,9 @@ class LiveDocument:
 
         `md` is the file, or a callable that finds it at each read and write: a sheaf of the list's
         root is the document of its name wherever its file is (9.11). `hold()` is a context held
-        around each write, taken before this document's lock: the lock of the sheaf's name, under
-        which no move comes, so the file found under it is the one written."""
+        around each write and each render, taken before this document's lock: the lock of the
+        sheaf's name, under which no move comes, so the file found under it is the one written or
+        read. The first read, here, is its maker's to hold (`Hub.entry`)."""
         self._file = md if callable(md) else (lambda: md)
         self._hold = hold or contextlib.nullcontext
         self._render, self._publish = render, publish
@@ -85,12 +86,9 @@ class LiveDocument:
         self._save_rids = {}
 
     def _read(self):
-        """The file's text, found again when a move took it from where it was found (9.11): a read holds no lock of
-        the name, and a move links the file at its new path before it unlinks the old one."""
-        try:
-            return self._file().read_text(encoding="utf-8")
-        except FileNotFoundError:
-            return self._file().read_text(encoding="utf-8")
+        """The file's text, found where it is now: under the name's lock (`hold`), so no move takes it between
+        finding it and reading it (9.11)."""
+        return self._file().read_text(encoding="utf-8")
 
     # ── the lock, and the guard against a callback calling back in ─────────────
     def _held(self):
@@ -175,14 +173,14 @@ class LiveDocument:
     def rebuild(self):
         """Render the page again from the file as it is and tell the tabs: the render settings
         changed, so what they show is not the same page (`textSame` false)."""
-        with self._held():
+        with self._hold(), self._held():
             self._rerender()
             snap = self._snapshot(self._text)
             snap["textSame"] = False
             self._publish("changed", snap)
             return snap
 
-    def save(self, base_hash, edits, rid=None, guard=None):
+    def save(self, base_hash, edits, rid=None, guard=None, move=None):
         """Apply a page's block edits, made against the text named by base_hash.
 
         A save that changed the file tells the open tabs with one `changed` event (SPEC 7.3:
@@ -201,7 +199,9 @@ class LiveDocument:
 
         `guard(text, new, toggled)` sees the text a save would write over the file's text, under the file
         lock, with the (old, new) content of each block whose edit only flipped task marks, and returns the
-        text to write; an EditError it raises refuses the save and nothing is written (9.11).
+        text to write; an EditError it raises refuses the save and nothing is written (9.11). `move(text, new)`
+        may move the file to the home of the new text before it is written (`rds.update_file`), so the render
+        that follows reads it from its new folder.
 
         Returns the report: hash (of the text written), changed, skipped, remap, merged,
         conflicts. Raises StaleError when the file moved on from a version this document no
@@ -230,7 +230,7 @@ class LiveDocument:
             md = self._file()
             token = rde.DOC.set(md)
             try:
-                _, new_text = rds.update_file(md, change)
+                _, new_text = rds.update_file(md, change, move=move)
             finally:
                 rde.DOC.reset(token)
             self._after_write()
@@ -555,7 +555,7 @@ class LiveDocument:
 
         force: render whatever the file holds and return the snapshot, publishing nothing: an
         Ask that just wrote announces its own event."""
-        with self._held():
+        with self._hold(), self._held():
             if force:
                 self._rerender()
                 return self._snapshot(self._text)

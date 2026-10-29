@@ -14,6 +14,7 @@ protocol goes to stdout; whatever it has to say goes to stderr.
 Not the MCP SDK: the door is small enough to read in one sitting, and runs inside the hub's own
 server (SPEC 3.2).
 """
+import contextlib
 import errno
 import json
 import os
@@ -319,17 +320,18 @@ class Door:
             address = self._address_of_path(doc, caller)
         else:
             address = doc
-        try:
-            path = self.hub.roots.document(address)
-        except NotFound:
-            raise _absent(doc) from None
-        if self._judged(caller):
-            # Before any other check of the call, so no answer tells a sheaf the caller may not see from none;
-            # each tool judges again on the text it reads.
+        with place.held(self.hub, address):         # a read, under the name's lock (9.11)
             try:
-                self._seen(path.read_text(encoding="utf-8"), address, caller, doc)
-            except (OSError, UnicodeDecodeError):
-                raise _absent(doc) from None        # as a member is answered for a file it cannot read
+                path = self.hub.roots.document(address)
+            except NotFound:
+                raise _absent(doc) from None
+            if self._judged(caller):
+                # Before any other check of the call, so no answer tells a sheaf the caller may not see from none;
+                # each tool judges again on the text it reads.
+                try:
+                    self._seen(path.read_text(encoding="utf-8"), address, caller, doc)
+                except (OSError, UnicodeDecodeError):
+                    raise _absent(doc) from None        # as a member is answered for a file it cannot read
         return address
 
     def _judged(self, caller: Caller) -> bool:
@@ -397,9 +399,10 @@ class Door:
 
     def _comments(self, address: str, caller: Caller, doc: str):
         """The comments of the document as the file is now, not as a page was rendered. `doc` is how the
-        caller named it, for the answer to one it may not see."""
+        caller named it, for the answer to one it may not see. Under the name's lock (9.11), as every read."""
         try:
-            text = self.hub.roots.document(address).read_text(encoding="utf-8")
+            with place.held(self.hub, address):
+                text = self.hub.roots.document(address).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError, NotFound):
             raise ToolError(f"{address} cannot be read.") from None
         return rdc.parse(self._seen(text, address, caller, doc))
@@ -485,22 +488,24 @@ class Door:
             top = Path(os.path.realpath(root.path)) if placed else None
             for found in markdown_files(root):
                 # A sheaf of the list's root is listed by its name (9.11), wherever its file is; a private path is
-                # none.
-                rel = place.named(hub, root, top, found) if placed else found
-                if rel is None:
-                    continue
-                address = str(Address(root.name, rel))
-                try:
-                    path = hub.roots.resolve(address)          # never a file outside its root
-                    folder = (root.name, path.parent)
-                    if folder not in in_git:
-                        in_git[folder] = in_git_dir(path, root)
-                    if in_git[folder]:
-                        continue                               # nor one in a git directory
-                    threads, fm = self._open_in(path)
-                    mtime = path.stat().st_mtime_ns
-                except (NotFound, OSError, UnicodeDecodeError):
-                    continue
+                # none. Each file is read under its name's lock, as every read.
+                logical = place.logical(found) if placed else None
+                with place.held(hub, f"{root.name}/{logical}") if logical else contextlib.nullcontext():
+                    rel = place.named(hub, root, top, found) if placed else found
+                    if rel is None:
+                        continue
+                    address = str(Address(root.name, rel))
+                    try:
+                        path = hub.roots.resolve(address)          # never a file outside its root
+                        folder = (root.name, path.parent)
+                        if folder not in in_git:
+                            in_git[folder] = in_git_dir(path, root)
+                        if in_git[folder]:
+                            continue                               # nor one in a git directory
+                        threads, fm = self._open_in(path)
+                        mtime = path.stat().st_mtime_ns
+                    except (NotFound, OSError, UnicodeDecodeError):
+                        continue
                 # Whether the member owns a file asks git of its folder (8.2), and every file of a folder has the
                 # same answer: asked once a folder, not once a file.
                 if member is not None and folder not in owned:
@@ -548,7 +553,8 @@ class Door:
     def _read(self, args: dict, caller: Caller):
         address = self._address(args["doc"], caller)
         try:
-            text = self.hub.roots.document(address).read_text(encoding="utf-8")
+            with place.held(self.hub, address):         # no move between finding the file and reading it (9.11)
+                text = self.hub.roots.document(address).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError, NotFound):
             raise ToolError(f"{address} cannot be read.") from None
         out = self._seen(text, address, caller, args["doc"])
@@ -722,15 +728,24 @@ class Door:
                 # It would stay where it may not (9.11): nothing is written.
                 raise ToolError(f"{address} was not written: {why}, so it could not go to its home.", "not written")
             return written[0]
+        moved = []
+
+        def move(now_text, new):
+            # A text that opens or closes the sheaf moves its file to its home before it is written there (9.11).
+            gone = place.ahead(self.hub, address, new)
+            if gone is None:
+                return None
+            moved.append(gone)
+            return self.hub.file(address, placed=True)
         try:
-            before, _ = update_file(self.hub.roots.document(address), change)
+            before, _ = update_file(self.hub.roots.document(address), change, move=move)
         except (OSError, UnicodeDecodeError, NotFound):
             raise ToolError(f"{address} could not be written.", "not written") from None
         text = written[0]
         if before != text:
             self.hub.wrote(address)
-        # A text that opens or closes the sheaf moves its file to its home (9.11); its address stays.
-        return before, text, place.place(self.hub, address, commit=False)
+        # A text that changed nothing may still move the file to its home; its address stays.
+        return before, text, moved[0] if moved else place.place(self.hub, address, commit=False)
 
     def _door_text(self, text: str, old: str | None, address: str, caller: Caller) -> str:
         """The text a door write puts on disk: `_visible`'s, with the `owner` `_owned` gives it. `_owned` rewrites

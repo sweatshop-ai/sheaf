@@ -493,3 +493,70 @@ def test_a_move_is_one_commit_with_both_paths_and_the_versions_folder(hub, brows
     assert git(repo, "status", "--porcelain") == ""
     assert (repo / INSIDE / doc_key(HOME) / "address").read_text(encoding="utf-8") == HOME
 
+
+def subjects(repo):
+    return git(repo, "log", "--format=%s").splitlines()
+
+
+def test_the_owners_untick_is_one_commit_that_moves_the_new_text(hub, browser, tmp_path):
+    shared = OPEN.replace("- [ ] Share", "- [x] Share").replace("sources: [issue:thinkingtoo/tt-tiroir#9]\n",
+                                                                  "visibility: project\n")
+    box, repo = committing(hub, browser, tmp_path, first=shared)
+    got = untick(box, repo, SHARED, "Share", THIERRY, root="sheaves")
+    assert got.status == 200 and got.json()["moved"] == f"sheaves/{HOME}", got.text
+    assert subjects(repo) == [f"move: {SHARED} -> {HOME}", "first"]
+    assert front_matter(git(repo, "show", f"HEAD:{HOME}"))["visibility"] == "owner"
+    assert git(repo, "status", "--porcelain") == ""
+
+
+def test_a_door_update_that_closes_a_sheaf_is_one_commit_that_moves_the_new_text(hub, browser, tmp_path):
+    committing(hub, browser, tmp_path, first=OPEN)
+    repo = tmp_path / "sheaves"
+    token = Tokens().add("james-thierry", write=True)
+    is_error, got = call(browser, "update", token=token, doc=f"sheaves/{SHARED}", text=PRIVATE,
+                         expected_hash=md_hash(OPEN))
+    assert not is_error and got["doc"] == f"sheaves/{HOME}", got
+    assert subjects(repo) == [f"move: {SHARED} -> {HOME}", "first"]
+    assert git(repo, "show", f"HEAD:{HOME}") == (repo / HOME).read_text(encoding="utf-8")
+    assert git(repo, "status", "--porcelain") == ""
+
+
+def test_an_untick_whose_private_home_is_taken_writes_nothing(team, work):
+    shared = OPEN.replace("- [ ] Share", "- [x] Share")
+    put(team, work, SHARED, shared)
+    put(team, work, HOME, "# Something else\n")
+    got = untick(team, work, SHARED, "Share", THIERRY)
+    assert got.status == 409 and "held by another file" in got.json()["error"], got.text
+    assert (work / SHARED).read_text(encoding="utf-8") == shared
+
+
+def test_a_door_update_whose_private_home_is_taken_writes_nothing(team, work, browser, tokens):
+    put(team, work, SHARED, OPEN)
+    put(team, work, HOME, "# Something else\n")
+    is_error, got = call(browser, "update", token=tokens["thierry"], doc=f"work/{SHARED}", text=PRIVATE,
+                         expected_hash=md_hash(OPEN))
+    assert is_error and "held by another file" in got, got
+    assert (work / SHARED).read_text(encoding="utf-8") == OPEN
+
+
+def test_a_door_update_answers_where_the_sheaf_is_when_the_poll_moves_it_meanwhile(team, work, browser, tokens,
+                                                                                    monkeypatch):
+    """Codex P2: the poll's move comes between the update's write and its own placing; the answer must still name
+    the file's home, never the address it left."""
+    from sheafmd import mcp
+    put(team, work, SHARED, PRIVATE)                           # written before the rule: the poll would move it
+    real, threads = mcp.update_file, []
+
+    def write_then_poll(path, change):
+        got = real(path, change)
+        t = threading.Thread(target=team.hub.the_list.poll)
+        t.start()
+        t.join(1)
+        threads.append(t)
+        return got
+    monkeypatch.setattr(mcp, "update_file", write_then_poll)
+    is_error, got = call(browser, "update", token=tokens["thierry"], doc=f"work/{SHARED}",
+                         text=PRIVATE + "\nMore.\n", expected_hash=md_hash(PRIVATE))
+    threads[0].join(10)
+    assert not is_error and got["doc"] == f"work/{HOME}", got
+    assert (work / HOME).read_text(encoding="utf-8").endswith("More.\n")

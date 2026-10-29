@@ -12,6 +12,7 @@ Two callbacks connect it to the page, and both run with its lock held:
 Neither may call back into the Live Document (that raises instead of deadlocking), nor block
 on anything another of its calls holds.
 """
+import contextlib
 import threading
 import time
 
@@ -44,16 +45,23 @@ def prose(text):
 
 class LiveDocument:
     def __init__(self, md, render, publish, by="unknown", clock=time.time,
-                 versions=None, address=None):
+                 versions=None, address=None, hold=None):
         """`versions` (a `state.Versions`) and `address` (`<root>/<path>`) together keep every
         text this document hands a page on disk too (SPEC 7.4), so a save made against a page
-        rendered before a restart still merges."""
-        self._md, self._render, self._publish = md, render, publish
+        rendered before a restart still merges.
+
+        `md` is the file, or a callable that finds it at each read and write: a sheaf of the list's
+        root is the document of its name wherever its file is (9.11). `hold()` is a context held
+        around each write, taken before this document's lock: the lock of the sheaf's name, under
+        which no move comes, so the file found under it is the one written."""
+        self._file = md if callable(md) else (lambda: md)
+        self._hold = hold or contextlib.nullcontext
+        self._render, self._publish = render, publish
         self._by, self._clock = by, clock
         self._store, self._address = versions, address
         self._lock = threading.Lock()
         self._owner = None
-        text = md.read_text(encoding="utf-8")
+        text = self._read()
         self._text, self._hash = text, rds.md_hash(text)
         # Every text this hub run has handed a page a hash of, so a save made against an older
         # one can be merged onto the file as it is now instead of refused. The disk copy
@@ -75,6 +83,14 @@ class LiveDocument:
         # report of a save). Apart, so that the many saves of an editing page never push a comment's out.
         self._rids = {}
         self._save_rids = {}
+
+    def _read(self):
+        """The file's text, found again when a move took it from where it was found (9.11): a read holds no lock of
+        the name, and a move links the file at its new path before it unlinks the old one."""
+        try:
+            return self._file().read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return self._file().read_text(encoding="utf-8")
 
     # ── the lock, and the guard against a callback calling back in ─────────────
     def _held(self):
@@ -129,7 +145,7 @@ class LiveDocument:
         # write land in between (a session's reply right after its own edit, while pandoc
         # runs). The page would then carry a hash the hub does not know, the watcher would see
         # its own hash and never rebuild, and every new comment would fail with "select the text again".
-        text = self._md.read_text(encoding="utf-8")
+        text = self._read()
         self._render(text)
         self._text, self._hash = text, rds.md_hash(text)
         self._remember(text)
@@ -191,7 +207,7 @@ class LiveDocument:
         conflicts. Raises StaleError when the file moved on from a version this document no
         longer knows, EditError when an edit cannot apply."""
         sent = (base_hash, tuple((x["i"], x["html"]) for x in edits))
-        with self._held():
+        with self._hold(), self._held():
             if rid is not None and rid in self._save_rids and self._save_rids[rid][0] == sent:
                 return {**self._save_rids[rid][1], "again": True}
             before = self._text
@@ -211,9 +227,10 @@ class LiveDocument:
                 return guard(text, new, got["report"]["toggled"]) if guard is not None else new
             # The version check happens inside change(), under the file lock: the CLI and an
             # Ask job write this file from other processes.
-            token = rde.DOC.set(self._md)
+            md = self._file()
+            token = rde.DOC.set(md)
             try:
-                _, new_text = rds.update_file(self._md, change)
+                _, new_text = rds.update_file(md, change)
             finally:
                 rde.DOC.reset(token)
             self._after_write()
@@ -272,7 +289,7 @@ class LiveDocument:
         sent = (op, fields.get("id", ""), fields.get("body", ""), fields.get("quote", ""), by or self._by,
                 bool(fields.get("resolve")), bool(fields.get("ask")), bool(fields.get("tell")),
                 fields.get("block"), fields.get("start"), fields.get("end"))
-        with self._held():
+        with self._hold(), self._held():
             if rid is not None and rid in self._rids and self._rids[rid][0] == sent:
                 return {**self._answer(self._rids[rid][1], base_hash), "again": True}
             made = {}
@@ -328,7 +345,7 @@ class LiveDocument:
                                         "only your own comments can be edited")
                 return rdc.apply_op(t, op, fields, by or self._by, now, role)
 
-            rds.update_file(self._md, change)
+            rds.update_file(self._file(), change)
             self._after_write()
             self._rerender()
             if wait:
@@ -388,9 +405,9 @@ class LiveDocument:
             if expect is not None and c is not None and rdc.thread_identity(c) != expect:
                 raise rdc.ThreadChanged(cid)
             return rdc.reply(t, cid, text, by, rds.now(), False, role)
-        with self._held():
+        with self._hold(), self._held():
             before = self._text
-            rds.update_file(self._md, write)
+            rds.update_file(self._file(), write)
             self._after_write()
             self._rerender()
             return self._announce(self._snapshot(self._text), before, event, id=cid)
@@ -399,9 +416,9 @@ class LiveDocument:
         """Write `change(text)` over the file's text as it is under the file lock, so a write that landed
         meanwhile is kept, then render and tell the tabs, as a save does. Returns the hash of the text
         written (9.12: the hub's own line in the front matter)."""
-        with self._held():
+        with self._hold(), self._held():
             before = self._text
-            _, new_text = rds.update_file(self._md, change)
+            _, new_text = rds.update_file(self._file(), change)
             self._after_write()
             self._remember(new_text)
             if new_text != before:
@@ -410,7 +427,7 @@ class LiveDocument:
             return rds.md_hash(new_text)
 
     def _await(self, cid):
-        c = rdc.parse(self._md.read_text(encoding="utf-8")).by_id(cid)
+        c = rdc.parse(self._read()).by_id(cid)
         if c is None:
             return False
         self._telling[cid] = rdc.action_replies(c)
@@ -459,7 +476,7 @@ class LiveDocument:
             return True
         with self._held():
             try:
-                return self._names(h, self._md.read_text(encoding="utf-8"))
+                return self._names(h, self._read())
             except OSError:
                 return self._known(h) is not None
 
@@ -542,7 +559,7 @@ class LiveDocument:
             if force:
                 self._rerender()
                 return self._snapshot(self._text)
-            if rds.md_hash(self._md.read_text(encoding="utf-8")) == self._hash:
+            if rds.md_hash(self._read()) == self._hash:
                 return None
             before = self._text
             self._rerender()

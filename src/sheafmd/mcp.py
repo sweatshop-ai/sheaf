@@ -322,16 +322,7 @@ class Door:
         try:
             path = self.hub.roots.document(address)
         except NotFound:
-            # A sheaf the hub moved (9.11) is still found by its name `<client>/<project>/<name>.md`, by whoever may see
-            # it where it lives; to anyone else it is absent, as a document that does not exist.
-            moved = place.found(self.hub, address, lambda a: self._may_see_at(a, caller))
-            if moved is None:
-                raise _absent(doc) from None
-            address = moved
-            try:
-                path = self.hub.roots.document(address)
-            except NotFound:
-                raise _absent(doc) from None
+            raise _absent(doc) from None
         if self._judged(caller):
             # Before any other check of the call, so no answer tells a sheaf the caller may not see from none;
             # each tool judges again on the text it reads.
@@ -340,15 +331,6 @@ class Door:
             except (OSError, UnicodeDecodeError):
                 raise _absent(doc) from None        # as a member is answered for a file it cannot read
         return address
-
-    def _may_see_at(self, address: str, caller: Caller) -> bool:
-        """Whether `caller` may see the document at `address`, judged on its file now (9.11); False for one that
-        cannot be read."""
-        try:
-            text = self.hub.roots.document(address).read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError, NotFound):
-            return False
-        return self._sees(visibility.front_matter(text), address, caller)
 
     def _judged(self, caller: Caller) -> bool:
         """Whether visibility (9.11) holds `caller`: a token, in proxy mode."""
@@ -652,13 +634,14 @@ class Door:
         # The name's lock (9.11) from the first look at its homes to the file made: a create of the same name, or a
         # move, that comes meanwhile waits, and then finds the name taken.
         with place.held(self.hub, address):
-            address, text = self._make(root, top, rel, name, address, text, caller)
+            text = self._make(root, top, rel, name, address, text, caller)
         self.hub.wrote(address)
         self.hub.committed(address, by=caller.display, what="create")
         return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text)}
 
     def _make(self, root, top: Path, rel: str, name: str | None, address: str, text: str, caller: Caller):
-        """The file of a create, at its home when the hub places it (9.11): (its address, the text written)."""
+        """The file of a create, at its home when the hub places it (9.11): the text written. The sheaf's address is
+        its name wherever its file is."""
         try:
             # The owner is judged by the list's row for the address, which a sheaf already there may have: what
             # the path alone answers, walked as the write walks it, comes before every answer that judgement
@@ -677,11 +660,10 @@ class Door:
         self._check_size(text)      # again: the owner `_owned` gave it is part of the page
         # Made at its home (9.11), so no file, and no commit, ever holds a sheaf that is its owner's alone at the
         # project's path: one with no home is not made.
-        if name is not None and (home := place.home(self.hub, root, name, address, text)) != rel:
+        if name is not None and (home := place.home(self.hub, root, name, text)) != rel:
             if home is None:
                 raise ToolError(f"{address} cannot be made: {place.NO_SHORT}, so it would have no home.", "path")
-            address, rel = str(Address(root.name, home)), home
-            self.hub.assignees(address, {})
+            rel = home
         try:
             if name is not None and rel != name:        # the private folders, walked as create_file walks
                 with place.folders_lock(top, name):     # so no move's tidying takes them before the file is in
@@ -691,7 +673,7 @@ class Door:
                 create_file(top, rel, text)
         except OSError as e:
             raise _not_made(address, e) from None
-        return address, text
+        return text
 
     def _update(self, args: dict, caller: Caller):
         address = self._address(args["doc"], caller)
@@ -701,19 +683,16 @@ class Door:
                             "hash")
         self._check_size(text)
         # The name's lock (9.11) from finding the file to its move: the write and the move are one operation and one
-        # commit, and no poll moves the file in between. The name is found again under it.
-        with place.held(self.hub, address) as placed:
-            if placed:
-                address = self._address(args["doc"], caller)
-            before, text, moved = self._updated(address, args, text, expected, caller)
-        if before != text or moved != address:          # a text that changed nothing may still have moved the file
-            self.hub.committed(moved, by=caller.display, what="update",
-                               gone=None if moved == address else Address.parse(address).rel)
-        return {"doc": moved, "url": self.hub.url(moved), "hash": md_hash(text), "changed": before != text}
+        # commit, and no poll moves the file in between.
+        with place.held(self.hub, address):
+            before, text, gone = self._updated(address, args, text, expected, caller)
+        if before != text or gone:          # a text that changed nothing may still have moved the file
+            self.hub.committed(address, by=caller.display, what="update", gone=gone)
+        return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text), "changed": before != text}
 
     def _updated(self, address: str, args: dict, text: str, expected: str, caller: Caller):
-        """The write of an update, and the sheaf moved to its home (9.11): (the text before, the text written, the
-        address it lives at now)."""
+        """The write of an update, and the sheaf's file moved to its home (9.11): (the text before, the text
+        written, the path in the root the file left or None)."""
         written = [text]
 
         def change(now_text):
@@ -738,7 +717,7 @@ class Door:
         text = written[0]
         if before != text:
             self.hub.wrote(address)
-        # A text that opens or closes the sheaf moves it to its home (9.11); the answer names where it lives.
+        # A text that opens or closes the sheaf moves its file to its home (9.11); its address stays.
         return before, text, place.place(self.hub, address, commit=False)
 
     def _door_text(self, text: str, old: str | None, address: str, caller: Caller) -> str:

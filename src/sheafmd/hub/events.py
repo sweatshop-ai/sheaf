@@ -11,7 +11,6 @@ import json
 import queue
 import threading
 import time
-from typing import NamedTuple
 
 RETRY_MS = 2000
 KEEPALIVE_SECONDS = 25
@@ -26,17 +25,10 @@ PREAMBLE = f"retry: {RETRY_MS}\n\n".encode("ascii")
 KEEPALIVE = b": keepalive\n\n"
 
 
-class Instead(NamedTuple):
-    """What `accept` returns to send a stream another event in place of the one published."""
-    name: str
-    data: object
-
-
 class Subscription:
     def __init__(self, bus: "Bus", accept=None):
-        """`accept(name, data)` returns what this stream is sent of an event: its data, an `Instead` for
-        another event in its place, or None to send it nothing: a member of proxy mode is told less than the
-        hub's person (9.9). It runs when the
+        """`accept(name, data)` returns what this stream is sent of an event, or None to send it
+        nothing: a member of proxy mode is told less than the hub's person (9.9). It runs when the
         stream reads the event, on the stream's own thread, never on the one that publishes: a
         member's stream asks whether the document is theirs, which can ask git, and the thread that
         publishes hands the event to every stream."""
@@ -65,8 +57,6 @@ class Subscription:
                 data = self._accept(name, data)
                 if data is None:
                     continue
-                if isinstance(data, Instead):
-                    name, data = data
             return name, data
 
     def drain(self) -> list:

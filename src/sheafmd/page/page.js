@@ -804,10 +804,8 @@
         editDraftMirror();
         reload = reload || !!(j.remap || j.merged);
         conflicts = conflicts.concat(j.conflicts || []);
-        if (j.moved) break;           // the save moved the sheaf (9.11): nothing more goes to this address
         if (!again || !dirty().length) break;
       }
-      if (j.moved) { done(); saving = null; meetMoved(j.moved); return true; }
       note = j.changed.length + ' block' + (j.changed.length === 1 ? '' : 's') + ' → ' + CFG.name;
       if (j.skipped && j.skipped.length) {
         note += ' · skipped: ' + j.skipped.map(function (s) { return '#' + s[0] + ' ' + s[1]; }).join('; ');
@@ -2857,23 +2855,6 @@
                                         '<textarea readonly rows="6">' + esc(typed.join('\n\n')) + '</textarea>' : ''));
     incident('document-gone', { more: more });
   }
-  // The sheaf now lives at the address `to` (9.11: a Share moved it out of its owner's private folder, its
-  // withdrawal or the list's poll moved it in). This page's address names nothing any more.
-  function pageOf(to) {
-    return '/' + String(to).split('/').map(encodeURIComponent).join('/');
-  }
-  function meetMoved(to) {
-    if (!to || docGone) return;
-    var typing = Array.prototype.some.call(document.querySelectorAll('.rd-form textarea'),
-                                           function (t) { return t.value.trim(); });
-    if (!dirty().length && !typing) { location.replace(pageOf(to)); return; }
-    if (live) live.close();
-    docGone = true;
-    editDraftMirror();
-    refresh();
-    showHubLine('This sheaf moved to <a href="' + esc(pageOf(to)) + '">' + esc(to) + '</a>. Copy what you typed, ' +
-                'then open it there: nothing more can be saved from this page.');
-  }
   // A hello: this hub may be another boot, and the text may have moved while the page could
   // not hear `changed`. (Another version is meetVersion's, which the hello handler calls next.)
   function meetHello(h) {
@@ -3022,9 +3003,6 @@
       live.addEventListener('signed-out', function () { meetSignOut(); });
       // Its root was forgotten (8.2): the last event of this stream.
       live.addEventListener('gone', function () { meetDocGone(''); });
-      // The hub moved the sheaf to its home (9.11): the last event of this stream. The page follows it, unless it
-      // holds what was typed and not saved, which a new page would lose: then it says where the sheaf went.
-      live.addEventListener('moved', function (ev) { meetMoved(data(ev).to); });
       live.addEventListener('changed', function (ev) {
         var d = JSON.parse(ev.data || '{}');
         var late = !!d.rid && taken(d.rid);

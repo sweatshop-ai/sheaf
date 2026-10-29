@@ -1,9 +1,10 @@
-"""Placement (SPEC 9.11 "Where a sheaf lives"): in proxy mode a sheaf of the list's root that is its owner's alone
-lives at `<client>/<project>/private/<owner short>/<name>.md`, one open to the project at
-`<client>/<project>/<name>.md`. The door's create lands at home, an update, a Share, its owner's withdrawal of it and
-the list's poll move the file, and the logical name `<client>/<project>/<name>.md` still finds it for whoever may
-see it. Through the handler in proxy mode, with the list on `work`: Thierry owns the sheaves, Hans is a member of
-the project."""
+"""Placement (SPEC 9.11 "Where a sheaf lives"): in proxy mode the hub keys a sheaf of the list's root by its logical
+name `<client>/<project>/<name>.md`, and finds its file only when it reads or writes it: at that path when the sheaf
+is open to the project, at `<client>/<project>/private/<owner short>/<name>.md` when it is its owner's alone. The
+door's create lands at home; an update, a Share, its owner's withdrawal of it and the list's poll move the file, and
+nothing else moves: the address, the versions, the read state and the render settings stay with the name. The
+private path is no address. Through the handler in proxy mode, with the list on `work`: Thierry owns the sheaves,
+Hans is a member of the project."""
 import dataclasses
 import os
 import pwd
@@ -26,6 +27,7 @@ HANS = "2b9d7e1c-4a51-4c0e-9d1f-6f0c3a7e8b42"
 NAME = "2026-10-28-contract.md"
 SHARED = f"thinkingtoo/tiroir/{NAME}"
 HOME = f"thinkingtoo/tiroir/private/thierry/{NAME}"
+MISSING = "thinkingtoo/tiroir/nothing.md"
 
 PRIVATE = """---
 issue: thinkingtoo/tt-tiroir#9
@@ -80,26 +82,41 @@ def put(team, work, rel, text):
     return f"work/{rel}"
 
 
-def tick(team, work, rel, word, member):
-    """The page's save that ticks the first action `word` of the sheaf, as `member`."""
-    text = (work / rel).read_text(encoding="utf-8")
-    n = [a[0] for a in the_list.read_sheaf(rel, text).actions].index(word)
+def text_of(work, name=SHARED):
+    """The text of the one file that holds the sheaf's name, at the project's path or in a private folder."""
+    client, project, file = name.split("/")
+    held = [p for p in [work / name, *(work / client / project / "private").glob(f"*/{file}")] if p.exists()]
+    assert len(held) == 1, held
+    return held[0].read_text(encoding="utf-8")
+
+
+def tick(team, work, word, member, name=SHARED):
+    """The page's save that ticks the first action `word` of the sheaf named `name`, as `member`."""
+    text = text_of(work, name)
+    n = [a[0] for a in the_list.read_sheaf(name, text).actions].index(word)
     edit = the_list.tick_edit(text, n, word)
-    return team.post("/_/save", {"doc": f"work/{rel}", "hash": md_hash(text), "edits": [edit]}, member=member)
+    return team.post("/_/save", {"doc": f"work/{name}", "hash": md_hash(text), "edits": [edit]}, member=member)
 
 
-def untick(team, work, rel, word, member, root="work"):
+def untick(team, work, word, member, name=SHARED, root="work"):
     """The page's save that unticks the box `- [x] <word>`, as the page sends it: the block's HTML with that box
     no longer checked."""
-    text = (work / rel).read_text(encoding="utf-8")
+    text = text_of(work, name)
     blocks = split_md_blocks(text)
     i = next(i for i, b in enumerate(blocks) if f"- [x] {word}" in b.content)
     soup = BeautifulSoup(_pandoc.run(["-f", "gfm", "-t", "html5", "--no-highlight"], blocks[i].content).stdout,
                          "html.parser")
     box = next(b for b in soup.select('input[type="checkbox"]') if word in b.parent.get_text())
     del box["checked"]
-    return team.post("/_/save", {"doc": f"{root}/{rel}", "hash": md_hash(text),
+    return team.post("/_/save", {"doc": f"{root}/{name}", "hash": md_hash(text),
                                  "edits": [{"i": i, "html": str(soup)}]}, member=member)
+
+
+def absent(browser, token, rel):
+    """What the door answers `token` for a `read` of `rel`, with the name of a document that does not exist in its
+    place, so two answers compare."""
+    _, got = call(browser, "read", token=token, doc=f"work/{rel}")
+    return got.replace(rel, "<doc>") if isinstance(got, str) else got
 
 
 # ── the door's create lands at home ──────────────────────────────────────────
@@ -107,7 +124,7 @@ def untick(team, work, rel, word, member, root="work"):
 def test_a_door_create_of_an_owner_only_sheaf_lands_in_its_owners_private_folder(team, work, browser, tokens):
     is_error, got = call(browser, "create", token=tokens["thierry"], doc=f"work/{SHARED}", text=PRIVATE)
     assert not is_error, got
-    assert got["doc"] == f"work/{HOME}" and got["url"].endswith(f"/work/{HOME}")
+    assert got["doc"] == f"work/{SHARED}" and got["url"].endswith(f"/work/{SHARED}")       # its name, not its file
     assert front_matter((work / HOME).read_text(encoding="utf-8"))["visibility"] == "owner"
     assert not (work / SHARED).exists()
 
@@ -181,7 +198,7 @@ def test_a_move_out_of_private_leaves_the_folder_a_create_just_made(team, work, 
     def create_while_moving(top, rel, text):
         monkeypatch.setattr(mcp, "create_file", real)
         os.rename(work / "other.md", work / other)              # an open sheaf in the folder, the poll's to move
-        t = threading.Thread(target=place.place, args=(team.hub, f"work/{other}"))
+        t = threading.Thread(target=place.place, args=(team.hub, "work/thinkingtoo/tiroir/other.md"))
         t.start()
         t.join(1)
         threads.append(t)
@@ -193,66 +210,96 @@ def test_a_move_out_of_private_leaves_the_folder_a_create_just_made(team, work, 
     assert (work / HOME).exists() and (work / "thinkingtoo/tiroir/other.md").exists()
 
 
-# ── the logical name finds the sheaf ─────────────────────────────────────────
+# ── the logical name is the address; the private path is none ────────────────
 
 def test_the_logical_name_reads_and_updates_the_private_sheaf_for_its_owner(team, work, browser, tokens):
     put(team, work, HOME, PRIVATE)
     is_error, got = call(browser, "read", token=tokens["thierry"], doc=f"work/{SHARED}")
-    assert not is_error and got["doc"] == f"work/{HOME}"
+    assert not is_error and got["doc"] == f"work/{SHARED}" and got["text"] == PRIVATE, got
     is_error, got = call(browser, "update", token=tokens["thierry"], doc=f"work/{SHARED}",
                          text=PRIVATE + "\nMore.\n", expected_hash=md_hash(PRIVATE))
-    assert not is_error and got["doc"] == f"work/{HOME}"
-    assert (work / HOME).read_text(encoding="utf-8").endswith("More.\n")
+    assert not is_error and got["doc"] == f"work/{SHARED}", got
+    assert (work / HOME).read_text(encoding="utf-8").endswith("More.\n") and not (work / SHARED).exists()
 
 
 def test_the_logical_name_is_absent_to_a_token_that_may_not_see_the_sheaf(team, work, browser, tokens):
     put(team, work, HOME, PRIVATE)
-    _, got = call(browser, "read", token=tokens["hans"], doc=f"work/{SHARED}")
-    _, missing = call(browser, "read", token=tokens["hans"], doc="work/thinkingtoo/tiroir/nothing.md")
-    assert got == missing.replace("nothing.md", NAME)
+    assert absent(browser, tokens["hans"], SHARED) == absent(browser, tokens["hans"], MISSING)
+
+
+def test_the_logical_name_is_the_page_of_the_private_sheaf_for_its_owner_and_a_404_to_hans(team, work):
+    put(team, work, HOME, PRIVATE)
+    assert team.get(f"/work/{SHARED}", member=THIERRY).status == 200
+    hidden = team.get(f"/work/{SHARED}", member=HANS)
+    missing = team.get(f"/work/{MISSING}", member=HANS)
+    assert hidden.status == missing.status == 404 and hidden.body == missing.body
+
+
+def test_a_private_path_is_no_address(team, work, browser, tokens):
+    """No second entry for one file: the page, the door and its stream answer the private path as a document that
+    does not exist, to its owner too."""
+    put(team, work, HOME, PRIVATE)
+    page, missing = team.get(f"/work/{HOME}", member=THIERRY), team.get(f"/work/{MISSING}", member=THIERRY)
+    assert page.status == missing.status == 404 and page.body == missing.body
+    assert team.get(f"/_/live?doc=work/{HOME}", member=THIERRY).status == 404
+    assert absent(browser, tokens["thierry"], HOME) == absent(browser, tokens["thierry"], MISSING)
+    is_error, got = call(browser, "update", token=tokens["thierry"], doc=f"work/{HOME}", text=PRIVATE + "x\n",
+                         expected_hash=md_hash(PRIVATE))
+    assert is_error and (work / HOME).read_text(encoding="utf-8") == PRIVATE
+
+
+def test_the_index_names_a_private_sheaf_by_its_logical_name(team, work):
+    put(team, work, HOME, PRIVATE)
+    docs = [d["doc"] for r in team.get("/_/index.json", member=THIERRY).json()["roots"] for d in r["docs"]]
+    assert f"work/{SHARED}" in docs and f"work/{HOME}" not in docs
+
+
+def test_a_private_sheaf_is_a_sheaf_of_the_list_for_work_on_this_by_its_name_only(team, work):
+    assert work_mod.is_sheaf(team.hub, f"work/{SHARED}")
+    assert not work_mod.is_sheaf(team.hub, f"work/{HOME}")
 
 
 # ── a door update moves the file ─────────────────────────────────────────────
 
-def test_a_door_update_that_closes_a_sheaf_moves_it_into_private(team, work, browser, tokens):
+def test_a_door_update_that_closes_a_sheaf_moves_its_file_into_private(team, work, browser, tokens):
     put(team, work, SHARED, OPEN)
     is_error, got = call(browser, "update", token=tokens["thierry"], doc=f"work/{SHARED}",
                          text=PRIVATE, expected_hash=md_hash(OPEN))
     assert not is_error, got
-    assert got["doc"] == f"work/{HOME}" and got["url"].endswith(f"/work/{HOME}")
+    assert got["doc"] == f"work/{SHARED}" and got["url"].endswith(f"/work/{SHARED}")
     assert not (work / SHARED).exists()
     assert front_matter((work / HOME).read_text(encoding="utf-8"))["visibility"] == "owner"
 
 
-# ── Share moves out, its owner's withdrawal moves back ───────────────────────
+# ── Share moves the file out, its owner's withdrawal moves it back ───────────
 
-def test_the_owners_share_moves_the_sheaf_out_of_private(team, work):
+def test_the_owners_share_moves_the_file_out_of_private(team, work):
     put(team, work, HOME, PRIVATE)
-    got = tick(team, work, HOME, "Share", THIERRY)
+    got = tick(team, work, "Share", THIERRY)
     assert got.status == 200, got.text
-    assert got.json()["moved"] == f"work/{SHARED}"
+    assert "moved" not in got.json()                                   # the address stays
     assert not (work / HOME).exists() and "- [x] Share" in (work / SHARED).read_text(encoding="utf-8")
     assert team.get(f"/work/{SHARED}", member=HANS).status == 200
 
 
-def test_the_owner_unticking_share_closes_the_sheaf_and_moves_it_back(team, work):
+def test_the_owner_unticking_share_closes_the_sheaf_and_moves_its_file_back(team, work):
     put(team, work, HOME, PRIVATE)
-    tick(team, work, HOME, "Share", THIERRY)
-    got = untick(team, work, SHARED, "Share", THIERRY)
+    tick(team, work, "Share", THIERRY)
+    got = untick(team, work, "Share", THIERRY)
     assert got.status == 200, got.text
-    assert got.json()["moved"] == f"work/{HOME}"
+    assert "moved" not in got.json()
     text = (work / HOME).read_text(encoding="utf-8")
     fm = front_matter(text)
     assert fm["visibility"] == "owner" and "shared" not in fm and "- [ ] Share" in text
     assert not (work / SHARED).exists()
-    assert team.get(f"/work/{HOME}", member=HANS).status == 404
+    assert team.get(f"/work/{SHARED}", member=HANS).status == 404
 
 
 def test_a_member_who_is_not_the_owner_cannot_untick_share(team, work):
     put(team, work, HOME, PRIVATE)
-    tick(team, work, HOME, "Share", THIERRY)
+    tick(team, work, "Share", THIERRY)
     before = (work / SHARED).read_text(encoding="utf-8")
-    got = untick(team, work, SHARED, "Share", HANS)
+    got = untick(team, work, "Share", HANS)
     assert got.status == 409 and got.json()["error"] == "Only the owner of this sheaf can withdraw its Share."
     assert (work / SHARED).read_text(encoding="utf-8") == before
 
@@ -274,10 +321,10 @@ def test_a_merged_save_that_unticks_share_follows_the_same_rule(team, work):
     assert (work / SHARED).read_text(encoding="utf-8") == now
 
 
-def rewrite_untick(team, work, rel, member):
+def rewrite_untick(team, work, member):
     """A save that unticks Share by rewriting its block through pandoc: the box unchecked and an item added, so the
     edit is no tick of 7.2."""
-    text = (work / rel).read_text(encoding="utf-8")
+    text = text_of(work)
     blocks = split_md_blocks(text)
     i = next(i for i, b in enumerate(blocks) if "- [x] Share" in b.content)
     soup = BeautifulSoup(_pandoc.run(["-f", "gfm", "-t", "html5"], blocks[i].content).stdout, "html.parser")
@@ -285,34 +332,33 @@ def rewrite_untick(team, work, rel, member):
     item = soup.new_tag("li")
     item.string = "Also this."
     soup.select_one("ul").append(item)
-    return team.post("/_/save", {"doc": f"work/{rel}", "hash": md_hash(text), "edits": [{"i": i, "html": str(soup)}]},
-                     member=member)
+    return team.post("/_/save", {"doc": f"work/{SHARED}", "hash": md_hash(text),
+                                 "edits": [{"i": i, "html": str(soup)}]}, member=member)
 
 
 def test_a_rewrite_that_unticks_share_is_refused_to_a_member_who_is_not_the_owner(team, work):
     put(team, work, HOME, PRIVATE)
-    tick(team, work, HOME, "Share", THIERRY)
+    tick(team, work, "Share", THIERRY)
     before = (work / SHARED).read_text(encoding="utf-8")
-    got = rewrite_untick(team, work, SHARED, HANS)
+    got = rewrite_untick(team, work, HANS)
     assert got.status == 409 and got.json()["error"] == "Only the owner of this sheaf can withdraw its Share."
     assert (work / SHARED).read_text(encoding="utf-8") == before
 
 
 def test_the_owners_rewrite_that_unticks_share_withdraws_it(team, work):
     put(team, work, HOME, PRIVATE)
-    tick(team, work, HOME, "Share", THIERRY)
-    got = rewrite_untick(team, work, SHARED, THIERRY)
+    tick(team, work, "Share", THIERRY)
+    got = rewrite_untick(team, work, THIERRY)
     assert got.status == 200, got.text
-    assert got.json()["moved"] == f"work/{HOME}"
     text = (work / HOME).read_text(encoding="utf-8")
     assert front_matter(text)["visibility"] == "owner" and "Also this." in text and not (work / SHARED).exists()
 
 
-def test_the_lists_tick_of_share_moves_the_sheaf_and_says_where(team, work):
+def test_the_lists_tick_of_share_moves_the_file(team, work):
     put(team, work, HOME, PRIVATE)
-    got = team.post("/_/tick", {"doc": f"work/{HOME}", "action": 0, "word": "Share"}, member=THIERRY)
+    got = team.post("/_/tick", {"doc": f"work/{SHARED}", "action": 0, "word": "Share"}, member=THIERRY)
     assert got.status == 200, got.text
-    assert got.json()["moved"] == f"work/{SHARED}" and (work / SHARED).exists()
+    assert "moved" not in got.json() and (work / SHARED).exists() and not (work / HOME).exists()
 
 
 def test_the_untick_is_refused_outside_the_list_too(team, work, tmp_path):
@@ -365,23 +411,23 @@ def test_a_stuck_sheaf_is_one_place_refused_row_per_hub_run(team, work):
     assert [r["doc"] for r in hub_rows("place-refused")] == [f"work/{SHARED}"]
 
 
-def test_a_home_already_taken_keeps_the_sheaf_where_it_is(team, work):
-    put(team, work, SHARED, PRIVATE)
-    put(team, work, HOME, OPEN)                 # an open one, itself to be moved out onto the first
-    team.hub.the_list.poll()
-    assert (work / SHARED).read_text(encoding="utf-8") == PRIVATE
-    assert (work / HOME).read_text(encoding="utf-8") == OPEN
-    assert {r["doc"] for r in hub_rows("place-refused")} == {f"work/{SHARED}", f"work/{HOME}"}
-
-
-def test_a_name_held_by_another_private_sheaf_keeps_the_sheaf_where_it_is(team, work):
-    """Its own home is free, but the name is not: a move there would give the name two files."""
+def test_two_files_that_hold_one_name_are_refused_and_left_as_they_are(team, work, browser, tokens):
+    """Made by hand: one at the project's path, one in a private folder. The name answers as a document that does
+    not exist, to the page and to the door, a create of it is refused, a diagnostics row says why, and the hub
+    repairs nothing: no move, no write."""
     hans = f"thinkingtoo/tiroir/private/hans/{NAME}"
     put(team, work, SHARED, PRIVATE)
     put(team, work, hans, PRIVATE.replace("owner: thierry", "owner: hans"))
+    page, missing = team.get(f"/work/{SHARED}", member=THIERRY), team.get(f"/work/{MISSING}", member=THIERRY)
+    assert page.status == missing.status == 404 and page.body == missing.body
+    assert absent(browser, tokens["thierry"], SHARED) == absent(browser, tokens["thierry"], MISSING)
+    is_error, got = call(browser, "create", token=tokens["thierry"], doc=f"work/{SHARED}", text=OPEN)
+    assert is_error and "exists already" in got, got
     team.hub.the_list.poll()
     assert (work / SHARED).read_text(encoding="utf-8") == PRIVATE and not (work / HOME).exists()
-    assert [r["doc"] for r in hub_rows("place-refused")] == [f"work/{SHARED}"]
+    assert (work / hans).read_text(encoding="utf-8") == PRIVATE.replace("owner: thierry", "owner: hans")
+    rows = hub_rows("place-refused")
+    assert [r["doc"] for r in rows] == [f"work/{SHARED}"] and "held by 2 files" in rows[0]["why"], rows
 
 
 def test_the_owner_is_the_front_matters_owner_when_it_is_one_of_the_owners(team, work):
@@ -403,61 +449,70 @@ def test_nothing_moves_in_loopback_mode(team, work, browser):
     assert (work / SHARED).exists()
 
 
-# ── what follows the file ────────────────────────────────────────────────────
+# ── what the hub keeps of a sheaf stays with its name ────────────────────────
 
-def test_a_members_seen_state_follows_the_move(team, work):
+def test_the_read_state_and_render_settings_stay_with_the_name_when_the_file_moves(team, work):
     put(team, work, SHARED, PRIVATE)
     team.hub.member_seen.mark(THIERRY, f"work/{SHARED}", "c1", 2)
+    team.hub.seen.mark(f"work/{SHARED}", "c1", 3)
+    team.hub.docs.put(f"work/{SHARED}", {"title": "The contract"})
     team.hub.the_list.poll()
-    assert team.hub.member_seen.get(THIERRY, f"work/{HOME}") == {"c1": 2}
-    assert team.hub.member_seen.get(THIERRY, f"work/{SHARED}") == {}
+    assert (work / HOME).exists()
+    assert team.hub.member_seen.get(THIERRY, f"work/{SHARED}") == {"c1": 2}
+    assert team.hub.seen.get(f"work/{SHARED}") == {"c1": 3}
+    assert team.hub.docs.get(f"work/{SHARED}")["title"] == "The contract"
 
 
-def test_the_versions_follow_the_move(team, work):
+def test_a_save_against_the_page_before_the_move_still_merges_into_the_moved_file(team, work):
     put(team, work, SHARED, PRIVATE)
     assert team.get(f"/work/{SHARED}", member=THIERRY).status == 200      # the page: its text is a version
     team.hub.the_list.poll()
-    assert team.hub.versions.get(f"work/{HOME}", md_hash(PRIVATE)) == PRIVATE
-    assert team.hub.versions.get(f"work/{SHARED}", md_hash(PRIVATE)) is None
+    assert (work / HOME).exists() and not (work / SHARED).exists()
+    assert team.hub.versions.get(f"work/{SHARED}", md_hash(PRIVATE)) == PRIVATE
+    i = next(i for i, b in enumerate(split_md_blocks(PRIVATE)) if "A quote" in b.content)
+    got = team.post("/_/save", {"doc": f"work/{SHARED}", "hash": md_hash(PRIVATE),
+                                "edits": [{"i": i, "html": "<p>A quote, edited.</p>"}]}, member=THIERRY)
+    assert got.status == 200 and "moved" not in got.json(), got.text
+    assert "A quote, edited." in (work / HOME).read_text(encoding="utf-8") and not (work / SHARED).exists()
 
 
-def test_an_open_page_is_told_where_its_sheaf_went(team, work):
-    put(team, work, HOME, PRIVATE)
-    stream = team.get(f"/_/live?doc=work/{HOME}", member=THIERRY).stream
+def test_an_open_stream_stays_open_across_a_move_and_hears_the_next_change(team, work, browser, tokens):
+    put(team, work, SHARED, PRIVATE)
+    stream = team.get(f"/_/live?doc=work/{SHARED}", member=THIERRY).stream
     stream.drain()
-    tick(team, work, HOME, "Share", THIERRY)
-    assert ("moved", {"doc": f"work/{HOME}", "to": f"work/{SHARED}"}) in stream.drain()
+    team.hub.the_list.poll()
+    assert (work / HOME).exists()
+    assert [name for name, _ in stream.drain() if name in ("moved", "gone")] == []
+    is_error, got = call(browser, "update", token=tokens["thierry"], doc=f"work/{SHARED}",
+                         text=PRIVATE + "\nMore.\n", expected_hash=md_hash(PRIVATE))
+    assert not is_error, got
+    assert "changed" in [name for name, _ in stream.drain()]
 
 
-def test_a_member_who_may_not_open_the_sheaf_where_it_went_is_told_gone(team, work):
-    put(team, work, SHARED, OPEN.replace("- [ ] Share", "- [x] Share"))
-    stream = team.get(f"/_/live?doc=work/{SHARED}", member=HANS).stream
-    stream.drain()
-    assert untick(team, work, SHARED, "Share", THIERRY).status == 200
-    got = stream.drain()
-    assert ("gone", {"doc": f"work/{SHARED}"}) in got and not [e for e in got if e[0] == "moved"]
+def test_a_comment_written_as_the_poll_moves_the_file_lands_in_the_one_file(team, work, monkeypatch):
+    """A document's write holds the name's lock from finding its file to the file written: the poll's move that
+    comes between waits, so the write never makes a second file where the first one was."""
+    from sheafmd import comments as rdc
+    from sheafmd.hub import live
+    put(team, work, SHARED, PRIVATE)                           # written before the rule: the poll would move it
+    assert team.get(f"/work/{SHARED}", member=THIERRY).status == 200
+    real, threads = live.rds.update_file, []
 
-
-def test_a_private_sheaf_is_a_sheaf_of_the_list_for_work_on_this(team, work):
-    assert work_mod.is_sheaf(team.hub, f"work/{HOME}")
-    assert not work_mod.is_sheaf(team.hub, "work/thinkingtoo/tiroir/private/x.md")
-
-
-# ── the page's address of a sheaf that moved ─────────────────────────────────
-
-def test_the_logical_address_sends_the_owner_to_the_private_page_and_hans_to_a_404(team, work):
-    put(team, work, HOME, PRIVATE)
-    got = team.get(f"/work/{SHARED}", member=THIERRY)
-    assert got.status == 302 and got.headers["Location"] == f"/work/{HOME}"
-    hidden = team.get(f"/work/{SHARED}", member=HANS)
-    missing = team.get("/work/thinkingtoo/tiroir/nothing.md", member=HANS)
-    assert hidden.status == missing.status == 404 and hidden.body == missing.body
-
-
-def test_a_private_address_whose_sheaf_was_shared_sends_to_the_shared_page(team, work):
-    put(team, work, SHARED, OPEN)
-    got = team.get(f"/work/{HOME}", member=HANS)
-    assert got.status == 302 and got.headers["Location"] == f"/work/{SHARED}"
+    def poll_then_write(path, change):
+        monkeypatch.setattr(live.rds, "update_file", real)
+        t = threading.Thread(target=team.hub.the_list.poll)
+        t.start()
+        t.join(1)
+        threads.append(t)
+        return real(path, change)
+    monkeypatch.setattr(live.rds, "update_file", poll_then_write)
+    blk, start, end = rdc.find_quote(PRIVATE, "A quote")
+    got = team.post("/_/comment", {"doc": f"work/{SHARED}", "op": "add", "hash": md_hash(PRIVATE), "block": blk,
+                                   "start": start, "end": end, "quote": "A quote", "body": "Which clause?"},
+                    member=THIERRY)
+    threads[0].join(10)
+    assert got.status == 200, got.text
+    assert not (work / SHARED).exists() and "Which clause?" in (work / HOME).read_text(encoding="utf-8")
 
 
 # ── a project named private ──────────────────────────────────────────────────
@@ -498,7 +553,7 @@ def committing(hub, browser, tmp_path, first=PRIVATE, at=SHARED, ignore=""):
     return Front(hub, browser.handler), repo
 
 
-def test_a_move_is_one_commit_with_both_paths_and_the_versions_folder(hub, browser, tmp_path):
+def test_a_move_is_one_commit_of_both_paths_and_the_versions_stay_under_the_name(hub, browser, tmp_path):
     box, repo = committing(hub, browser, tmp_path)
     assert box.get(f"/sheaves/{SHARED}", member=THIERRY).status == 200          # a version, inside the root
     git(repo, "add", "-A")
@@ -506,11 +561,10 @@ def test_a_move_is_one_commit_with_both_paths_and_the_versions_folder(hub, brows
     hub.the_list.poll()
     assert git(repo, "log", "-1", "--format=%s|%an").strip() == f"move: {SHARED} -> {HOME}|sheaf"
     files = set(git(repo, "show", "--no-renames", "--name-status", "--format=", "HEAD").splitlines())
-    assert f"D\t{SHARED}" in files and f"A\t{HOME}" in files
-    assert any(line.startswith("A\t" + str(INSIDE / doc_key(HOME))) for line in files)
-    assert any(line.startswith("D\t" + str(INSIDE / doc_key(SHARED))) for line in files)
+    assert files == {f"D\t{SHARED}", f"A\t{HOME}"}, files
     assert git(repo, "status", "--porcelain") == ""
-    assert (repo / INSIDE / doc_key(HOME) / "address").read_text(encoding="utf-8") == HOME
+    assert (repo / INSIDE / doc_key(SHARED) / "address").read_text(encoding="utf-8") == SHARED
+    assert not (repo / INSIDE / doc_key(HOME)).exists()
 
 
 def subjects(repo):
@@ -521,8 +575,8 @@ def test_the_owners_untick_is_one_commit_that_moves_the_new_text(hub, browser, t
     shared = OPEN.replace("- [ ] Share", "- [x] Share").replace("sources: [issue:thinkingtoo/tt-tiroir#9]\n",
                                                                   "visibility: project\n")
     box, repo = committing(hub, browser, tmp_path, first=shared)
-    got = untick(box, repo, SHARED, "Share", THIERRY, root="sheaves")
-    assert got.status == 200 and got.json()["moved"] == f"sheaves/{HOME}", got.text
+    got = untick(box, repo, "Share", THIERRY, root="sheaves")
+    assert got.status == 200 and "moved" not in got.json(), got.text
     assert subjects(repo) == [f"move: {SHARED} -> {HOME}", "first"]
     assert front_matter(git(repo, "show", f"HEAD:{HOME}"))["visibility"] == "owner"
     assert git(repo, "status", "--porcelain") == ""
@@ -534,34 +588,48 @@ def test_a_door_update_that_closes_a_sheaf_is_one_commit_that_moves_the_new_text
     token = Tokens().add("james-thierry", write=True)
     is_error, got = call(browser, "update", token=token, doc=f"sheaves/{SHARED}", text=PRIVATE,
                          expected_hash=md_hash(OPEN))
-    assert not is_error and got["doc"] == f"sheaves/{HOME}", got
+    assert not is_error and got["doc"] == f"sheaves/{SHARED}", got
     assert subjects(repo) == [f"move: {SHARED} -> {HOME}", "first"]
     assert git(repo, "show", f"HEAD:{HOME}") == (repo / HOME).read_text(encoding="utf-8")
     assert git(repo, "status", "--porcelain") == ""
 
 
-def test_an_untick_whose_private_home_is_taken_writes_nothing(team, work):
+def test_an_edit_of_a_private_sheaf_commits_its_file(hub, browser, tmp_path):
+    box, repo = committing(hub, browser, tmp_path, at=HOME)
+    i = next(i for i, b in enumerate(split_md_blocks(PRIVATE)) if "A quote" in b.content)
+    got = box.post("/_/save", {"doc": f"sheaves/{SHARED}", "hash": md_hash(PRIVATE),
+                               "edits": [{"i": i, "html": "<p>A quote, edited.</p>"}]}, member=THIERRY)
+    assert got.status == 200, got.text
+    assert subjects(repo)[0] == f"edit: {HOME}"
+    assert git(repo, "status", "--porcelain") == ""
+
+
+def test_an_untick_while_another_file_holds_the_name_writes_nothing(team, work):
+    """The private home is taken by another file: two files hold the name, which then names no document."""
     shared = OPEN.replace("- [ ] Share", "- [x] Share")
     put(team, work, SHARED, shared)
     put(team, work, HOME, "# Something else\n")
-    got = untick(team, work, SHARED, "Share", THIERRY)
-    assert got.status == 409 and "held by another file" in got.json()["error"], got.text
-    assert (work / SHARED).read_text(encoding="utf-8") == shared
+    text = (work / SHARED).read_text(encoding="utf-8")
+    i = next(i for i, b in enumerate(split_md_blocks(text)) if "- [x] Share" in b.content)
+    got = team.post("/_/save", {"doc": f"work/{SHARED}", "hash": md_hash(text),
+                                "edits": [{"i": i, "html": "<ul><li><input type=\"checkbox\"> Share</li></ul>"}]},
+                    member=THIERRY)
+    assert got.status == 404, got.text
+    assert (work / SHARED).read_text(encoding="utf-8") == shared and (work / HOME).read_text() == "# Something else\n"
 
 
-def test_a_door_update_whose_private_home_is_taken_writes_nothing(team, work, browser, tokens):
+def test_a_door_update_while_another_file_holds_the_name_writes_nothing(team, work, browser, tokens):
     put(team, work, SHARED, OPEN)
     put(team, work, HOME, "# Something else\n")
     is_error, got = call(browser, "update", token=tokens["thierry"], doc=f"work/{SHARED}", text=PRIVATE,
                          expected_hash=md_hash(OPEN))
-    assert is_error and "held by another file" in got, got
+    assert is_error, got
     assert (work / SHARED).read_text(encoding="utf-8") == OPEN
 
 
-def test_a_door_update_answers_where_the_sheaf_is_when_the_poll_moves_it_meanwhile(team, work, browser, tokens,
-                                                                                    monkeypatch):
-    """Codex P2: the poll's move comes between the update's write and its own placing; the answer must still name
-    the file's home, never the address it left."""
+def test_a_door_update_and_a_poll_at_once_leave_one_file_with_the_update(team, work, browser, tokens, monkeypatch):
+    """Codex P2: the poll comes while the update writes; it waits on the name's lock, and the answer names the
+    sheaf by its name."""
     from sheafmd import mcp
     put(team, work, SHARED, PRIVATE)                           # written before the rule: the poll would move it
     real, threads = mcp.update_file, []
@@ -577,8 +645,8 @@ def test_a_door_update_answers_where_the_sheaf_is_when_the_poll_moves_it_meanwhi
     is_error, got = call(browser, "update", token=tokens["thierry"], doc=f"work/{SHARED}",
                          text=PRIVATE + "\nMore.\n", expected_hash=md_hash(PRIVATE))
     threads[0].join(10)
-    assert not is_error and got["doc"] == f"work/{HOME}", got
-    assert (work / HOME).read_text(encoding="utf-8").endswith("More.\n")
+    assert not is_error and got["doc"] == f"work/{SHARED}", got
+    assert (work / HOME).read_text(encoding="utf-8").endswith("More.\n") and not (work / SHARED).exists()
 
 
 def test_a_move_into_an_ignored_private_folder_still_commits_the_old_path_gone(hub, browser, tmp_path):
@@ -591,8 +659,7 @@ def test_a_move_into_an_ignored_private_folder_still_commits_the_old_path_gone(h
     assert (repo / HOME).exists()
     assert git(repo, "log", "-1", "--format=%s").strip() == f"move: {SHARED} -> {HOME}"
     files = set(git(repo, "show", "--no-renames", "--name-status", "--format=", "HEAD").splitlines())
-    assert f"D\t{SHARED}" in files and not any(HOME in f for f in files)
-    assert any(line.startswith("D\t" + str(INSIDE / doc_key(SHARED))) for line in files)
+    assert files == {f"D\t{SHARED}"}, files
     assert git(repo, "ls-files", SHARED) == ""
 
 
@@ -602,7 +669,7 @@ def test_a_door_update_that_changes_nothing_still_commits_the_move_it_makes(hub,
     repo = tmp_path / "sheaves"
     is_error, got = call(browser, "update", token=Tokens().add("james-thierry", write=True), doc=f"sheaves/{SHARED}",
                          text=closed, expected_hash=md_hash(closed))
-    assert not is_error and got["doc"] == f"sheaves/{HOME}" and not got["changed"], got
+    assert not is_error and got["doc"] == f"sheaves/{SHARED}" and not got["changed"], got
     assert subjects(repo) == [f"move: {SHARED} -> {HOME}", "first"]
     assert git(repo, "status", "--porcelain") == ""
 
@@ -618,36 +685,20 @@ def poll_before_the_lock(team, monkeypatch):
     monkeypatch.setattr(place, "held", held)
 
 
-def test_a_save_the_poll_overtook_lands_where_the_sheaf_went(team, work, monkeypatch):
+def test_a_save_the_poll_overtook_lands_in_the_moved_file(team, work, monkeypatch):
     put(team, work, SHARED, PRIVATE)                           # written before the rule: the poll moves it
     assert team.get(f"/work/{SHARED}", member=THIERRY).status == 200
     i = next(i for i, b in enumerate(split_md_blocks(PRIVATE)) if "A quote" in b.content)
     poll_before_the_lock(team, monkeypatch)
     got = team.post("/_/save", {"doc": f"work/{SHARED}", "hash": md_hash(PRIVATE),
                                 "edits": [{"i": i, "html": "<p>A quote, edited.</p>"}]}, member=THIERRY)
-    assert got.status == 200 and got.json()["moved"] == f"work/{HOME}", got.text
+    assert got.status == 200 and "moved" not in got.json(), got.text
     assert "A quote, edited." in (work / HOME).read_text(encoding="utf-8") and not (work / SHARED).exists()
 
 
-def test_a_tick_the_poll_overtook_lands_where_the_sheaf_went(team, work, monkeypatch):
+def test_a_tick_the_poll_overtook_lands_in_the_moved_file(team, work, monkeypatch):
     put(team, work, SHARED, PRIVATE)
     poll_before_the_lock(team, monkeypatch)
     got = team.post("/_/tick", {"doc": f"work/{SHARED}", "action": 0, "word": "Share"}, member=THIERRY)
     assert got.status == 200, got.text
     assert "- [x] Share" in (work / SHARED).read_text(encoding="utf-8") and not (work / HOME).exists()
-
-
-def test_a_stream_opened_as_its_sheaf_moves_is_told_where_it_went(team, work):
-    """The move comes between the request finding the document and its stream being in place: the stream missed
-    `moved`, and is sent it after the fact, not `gone`."""
-    put(team, work, SHARED, PRIVATE)
-    e = team.hub.entry(f"work/{SHARED}")
-    real = e.bus.subscribe
-
-    def subscribe(*a, **k):
-        team.hub.the_list.poll()
-        return real(*a, **k)
-    e.bus.subscribe = subscribe
-    stream = team.get(f"/_/live?doc=work/{SHARED}", member=THIERRY).stream
-    got = [x for x in stream.drain() if x[0] != "hello"]
-    assert got == [("moved", {"doc": f"work/{SHARED}", "to": f"work/{HOME}"})]

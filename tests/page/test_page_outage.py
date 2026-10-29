@@ -1,8 +1,7 @@
 """Riding through an outage (SPEC 10.7): a banner after 15 s of failed reconnects on a visible tab,
 none after a suspend, jobs marked interrupted after a new boot, a new version or moved text settled
 and reloaded, a rotated key told as a sign-in message with the edits kept, and a document that is no
-longer on the hub told as such, with what was typed kept and offered; a sheaf the hub moved (9.11)
-followed to its new address, unless what was typed holds the page.
+longer on the hub told as such, with what was typed kept and offered.
 
 The tests that count seconds drive the page's clock (Playwright's `page.clock`): only the page's
 timers and `Date` are faked, so the browser's own reconnect of the stream (every 2 s) still runs."""
@@ -1182,38 +1181,3 @@ def test_a_change_held_behind_the_pages_own_write_waits_for_the_check_that_write
     until(lambda: gone(p) or GONE in notice(p) or p.wait_for_timeout(50), timeout=15, what="the page to answer")
     assert not gone(p), "the page reloaded into the other folder's document"
     assert GONE in notice(p)
-
-
-# ---- a sheaf the hub moved (9.11) ----
-
-def moved_to(site):
-    """A second file of the root, where the hub says the page's sheaf now lives."""
-    f = site.file.parent / "moved.md"
-    f.write_text(PLAN, encoding="utf-8")
-    site.hub.roots.for_document(f)
-    return "work/moved.md"
-
-
-def test_a_page_whose_sheaf_the_hub_moved_goes_to_its_new_address(tab, site):
-    p = tab.page
-    p.add_init_script(WATCH)
-    tab.open()
-    until(lambda: stream(p)["opens"] >= 1, what="the stream to open")
-    to = moved_to(site)
-    site.hub.entry(DOC).bus.publish("moved", {"doc": DOC, "to": to})
-    until(lambda: p.url == f"{site.base}/{to}" or p.wait_for_timeout(20), what="the page at the new address")
-    p.wait_for_selector("#rd-menu-btn", state="attached")
-
-
-def test_a_page_with_unsaved_text_stays_when_its_sheaf_moved_and_links_to_where_it_went(tab, site):
-    p = tab.page
-    p.add_init_script(WATCH)
-    tab.open()
-    until(lambda: stream(p)["opens"] >= 1, what="the stream to open")
-    p.keyboard.press("e")
-    p.evaluate(f"document.querySelector({P2!r}).append(' and plums')")      # on screen, not saved
-    to = moved_to(site)
-    site.hub.entry(DOC).bus.publish("moved", {"doc": DOC, "to": to})
-    until(lambda: "This sheaf moved to" in notice(p), what="the notice that the sheaf moved")
-    assert p.url == site.url and "and plums" in p.inner_text(P2)
-    assert p.get_attribute("#rd-notice a", "href") == f"/{to}"

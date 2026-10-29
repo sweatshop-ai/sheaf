@@ -18,6 +18,7 @@ from typing import NamedTuple
 from urllib.parse import quote
 
 from .. import comments as rdc
+from . import place
 from . import roots as roots_mod
 
 DOTS = ("red", "orange", "blue", "green")          # most urgent first
@@ -457,10 +458,11 @@ class Index:
 
     def _stat_of(self, root, address: str):
         """`(path, stat)` of the document the hub would serve at `address`, or None when `resolve`
-        refuses it or the file cannot be statted."""
-        path = root.path / roots_mod.Address.parse(address).rel
+        refuses it or the file cannot be statted. A sheaf's name in the list's root is its file's, wherever
+        that is (9.11)."""
         try:
             self.hub.roots.resolve(address)
+            path = self.hub.file(address)
             return path, os.stat(path)
         except (roots_mod.NotFound, OSError):
             return None
@@ -540,8 +542,14 @@ class Index:
             if not rendered:
                 hub.check_projects(root, (f.rel for f in listing.docs))
             rows, have = [], set()
+            placed = not rendered and place.applies(hub, root.name)
+            top = Path(os.path.realpath(root.path))
             for f in listing.docs:
-                address, path = str(roots_mod.Address(root.name, f.rel)), root.path / f.rel
+                # A sheaf of the list's root is listed by its name (9.11); a private path is none.
+                rel = place.named(hub, root, top, f.rel) if placed else f.rel
+                if rel is None:
+                    continue
+                address, path = str(roots_mod.Address(root.name, rel)), root.path / f.rel
                 keys.add(str(path))
                 have.add(address)
                 if shown(root, path) and (member is None or hub.visible(member, address)):

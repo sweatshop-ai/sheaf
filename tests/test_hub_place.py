@@ -414,7 +414,8 @@ def test_the_owners_rewrite_that_unticks_share_withdraws_it(team, work):
 
 def test_the_lists_tick_of_share_moves_the_file(team, work):
     put(team, work, HOME, PRIVATE)
-    got = team.post("/_/tick", {"doc": f"work/{SHARED}", "action": 0, "word": "Share"}, member=THIERRY)
+    read = md_hash((work / HOME).read_text(encoding="utf-8"))          # the text the list read
+    got = team.post("/_/tick", {"doc": f"work/{SHARED}", "action": 0, "word": "Share", "hash": read}, member=THIERRY)
     assert got.status == 200, got.text
     assert "moved" not in got.json() and (work / SHARED).exists() and not (work / HOME).exists()
 
@@ -784,8 +785,9 @@ def test_a_save_the_poll_overtook_lands_in_the_moved_file(team, work, monkeypatc
 
 def test_a_tick_the_poll_overtook_lands_in_the_moved_file(team, work, monkeypatch):
     put(team, work, SHARED, PRIVATE)
+    read = md_hash((work / SHARED).read_text(encoding="utf-8"))        # the text the list read
     poll_before_the_lock(team, monkeypatch)
-    got = team.post("/_/tick", {"doc": f"work/{SHARED}", "action": 0, "word": "Share"}, member=THIERRY)
+    got = team.post("/_/tick", {"doc": f"work/{SHARED}", "action": 0, "word": "Share", "hash": read}, member=THIERRY)
     assert got.status == 200, got.text
     assert "- [x] Share" in (work / SHARED).read_text(encoding="utf-8") and not (work / HOME).exists()
 

@@ -25,6 +25,7 @@ from . import visibility
 from .roots import Address
 
 PRIVATE = "private"
+NO_SHORT = "it is its owner's alone and no owner of it has a short to name its private folder"
 
 
 def logical(rel: str) -> str | None:
@@ -143,7 +144,7 @@ def place(hub, address: str, member=None, by: str | None = None) -> str:
                 return address          # gone, or not a text the hub reads: nothing to judge it on
             target = home(hub, root, name, address, text)
             if target is None:
-                _refused(hub, address, "it is its owner's alone and no owner of it has a short to name the folder")
+                _refused(hub, address, NO_SHORT)
                 return address
             if target == at.rel:
                 return address

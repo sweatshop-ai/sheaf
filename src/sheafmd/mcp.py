@@ -666,14 +666,12 @@ class Door:
         text = self._door_text(text, None, address, caller)
         self._check_size(text)      # again: the owner `_owned` gave it is part of the page
         # Made at its home (9.11), so no file, and no commit, ever holds a sheaf that is its owner's alone at the
-        # project's path.
+        # project's path: one with no home is not made.
         if name is not None and (home := place.home(self.hub, root, name, address, text)) != rel:
             if home is None:
-                self.hub.record("place-refused", address,
-                                why="it is its owner's alone and no owner of it has a short to name the folder")
-            else:
-                address, rel = str(Address(root.name, home)), home
-                self.hub.assignees(address, {})
+                raise ToolError(f"{address} cannot be made: {place.NO_SHORT}, so it would have no home.", "path")
+            address, rel = str(Address(root.name, home)), home
+            self.hub.assignees(address, {})
         try:
             if name is not None and rel != name:        # the private folders, walked as create_file walks
                 os.close(place.make_folders(top, rel)[0])

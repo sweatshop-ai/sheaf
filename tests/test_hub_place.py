@@ -4,6 +4,7 @@ lives at `<client>/<project>/private/<owner short>/<name>.md`, one open to the p
 the list's poll move the file, and the logical name `<client>/<project>/<name>.md` still finds it for whoever may
 see it. Through the handler in proxy mode, with the list on `work`: Thierry owns the sheaves, Hans is a member of
 the project."""
+import dataclasses
 import os
 import pwd
 import subprocess
@@ -115,6 +116,15 @@ def test_a_door_create_of_an_open_sheaf_lands_at_the_project(team, work, browser
     assert not is_error, got
     assert got["doc"] == f"work/{SHARED}" and (work / SHARED).exists()
     assert not (work / "thinkingtoo/tiroir/private").exists()
+
+
+def test_a_door_create_of_an_owner_only_sheaf_whose_owner_has_no_short_is_refused(team, work, browser, tokens):
+    """A short that cannot name a folder (`..`, which the config's rule lets through) is no short for it."""
+    team.hub.proxy.members[THIERRY] = dataclasses.replace(team.hub.proxy.members[THIERRY], short="..")
+    is_error, got = call(browser, "create", token=tokens["thierry"], doc=f"work/{SHARED}",
+                         text=PRIVATE.replace("owner: thierry", "owner: .."))
+    assert is_error and "no owner of it has a short" in got, got
+    assert not (work / SHARED).exists() and not (work / "thinkingtoo/tiroir/private").exists()
 
 
 def test_a_name_held_by_a_private_sheaf_is_taken_for_every_token(team, work, browser, tokens):

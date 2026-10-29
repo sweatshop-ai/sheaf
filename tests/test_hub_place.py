@@ -358,6 +358,13 @@ def test_an_owner_only_sheaf_with_no_owner_that_has_a_short_stays_and_says_why(t
     assert [r["doc"] for r in rows] == [f"work/{SHARED}"] and "owner" in rows[0]["why"]
 
 
+def test_a_stuck_sheaf_is_one_place_refused_row_per_hub_run(team, work):
+    put(team, work, SHARED, PRIVATE.replace("owner: thierry", "owner: nobody"))
+    team.hub.the_list.poll()
+    team.hub.the_list.poll()
+    assert [r["doc"] for r in hub_rows("place-refused")] == [f"work/{SHARED}"]
+
+
 def test_a_home_already_taken_keeps_the_sheaf_where_it_is(team, work):
     put(team, work, SHARED, PRIVATE)
     put(team, work, HOME, OPEN)                 # an open one, itself to be moved out onto the first

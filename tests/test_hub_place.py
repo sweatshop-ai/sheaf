@@ -314,6 +314,19 @@ def test_the_owners_share_moves_the_file_out_of_private(team, work):
     assert team.get(f"/work/{SHARED}", member=HANS).status == 200
 
 
+def test_a_move_renders_the_page_again_from_the_new_folder(team, work):
+    """Codex P1: the page rendered from private/<owner>/ embeds a relative image of that folder; after Share moves
+    the file, the same text resolves the image against the shared folder, so the private image is no longer sent."""
+    from PIL import Image
+    put(team, work, HOME, PRIVATE.replace("A quote from the contract.", "![seal](seal.png)"))
+    Image.new("RGB", (8, 8), (200, 10, 10)).save(work / "thinkingtoo/tiroir/private/thierry/seal.png", "PNG")
+    assert "data:image/png;base64," in team.get(f"/work/{SHARED}", member=THIERRY).text
+    assert tick(team, work, "Share", THIERRY).status == 200
+    page = team.get(f"/work/{SHARED}", member=HANS)
+    assert page.status == 200
+    assert "data:image/png;base64," not in page.text and "missing image: seal.png" in page.text
+
+
 def test_the_owner_unticking_share_closes_the_sheaf_and_moves_its_file_back(team, work):
     put(team, work, HOME, PRIVATE)
     tick(team, work, "Share", THIERRY)

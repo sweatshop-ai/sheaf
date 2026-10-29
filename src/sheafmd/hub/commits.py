@@ -140,7 +140,11 @@ class Commits:
                          error=_last_line(r) + ("" if kept else "; the index could not be put back"))
             return False
         if _git(folder, "diff", "--cached", "--quiet", "--", *paths).returncode == 0:
-            return False                              # nothing of this write is left to commit
+            # Nothing of this write is left to commit; what the person had staged there comes back. An
+            # index `add` left as it was is not rewritten: `--index-info` would drop its assume-unchanged flags.
+            if _staged(folder, paths) != before and not _restage(folder, before, paths):
+                self._record("commit-failed", address, error="the index could not be put back")
+            return False
         who = []
         if _git(folder, "config", "user.email").returncode != 0:
             who = ["-c", f"user.name={COMMITTER[0]}", "-c", f"user.email={COMMITTER[1]}"]

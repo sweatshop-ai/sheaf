@@ -10,6 +10,7 @@ import os
 import pwd
 import subprocess
 import threading
+from pathlib import Path
 
 import pytest
 from bs4 import BeautifulSoup
@@ -952,6 +953,59 @@ def test_a_document_below_project_depth_in_real_folders_is_still_served(team, wo
     """The rule above refuses links, not depth: a file in real folders under a project is a document as before."""
     put(team, work, "thinkingtoo/tiroir/notes/plain.md", "# Plain\n\nWords.\n")
     assert team.get("/work/thinkingtoo/tiroir/notes/plain.md", member=THIERRY).status == 200
+
+
+@pytest.mark.parametrize("alias, to", [("thinkingtoo/alias.md", f"tiroir/{NAME}"),
+                                       ("thinkingtoo/tiroir/notes/alias.md", f"../{NAME}")])
+def test_a_link_off_a_sheafs_path_is_in_no_index_and_no_list_and_the_poll_says_so(team, work, alias, to):
+    """Opus P2 (round 9): the page answered such a link 404, but the index listed it and the list read it as a
+    sheaf, through the link and under no name's lock. Nothing is listed or read through a link (9.11), and the
+    poll says so of it once, as of a link at a sheaf's path."""
+    put(team, work, SHARED, SHARED_TEXT)
+    (work / alias).parent.mkdir(parents=True, exist_ok=True)
+    os.symlink(to, work / alias)
+    team.hub.the_list.poll()
+    docs = [d["doc"] for r in team.get("/_/index.json", member=THIERRY).json()["roots"] for d in r["docs"]]
+    assert f"work/{alias}" not in docs, docs
+    assert alias not in [r.sheaf.rel for r in team.hub.the_list._snap.rows]
+    assert [(r["root"], r["path"]) for r in hub_rows("link-ignored")] == [("work", alias)]
+
+
+def test_a_holder_that_turns_into_a_link_while_the_poll_moves_it_deadlocks_nothing(team, work, monkeypatch):
+    """Opus P2 (round 9): `place` took the project's folders lock and then the file's, and a writer that moves
+    (`ahead`) holds the file's lock and then takes the folders': one file whose path became a link to another's
+    between the poll's look and its file lock crossed the two, and the project hung. One order everywhere
+    (9.11): a name's, then the file's, then the folders'."""
+    from sheafmd.hub import place
+    from sheafmd.source import file_lock
+    other = "thinkingtoo/tiroir/other.md"
+    put(team, work, SHARED, OPEN)
+    put(team, work, other, PRIVATE)
+    hub, top = team.hub, Path(os.path.realpath(work))
+    real_one, swapped, holding = place._one, threading.Event(), threading.Event()
+
+    def one(t, name):
+        got = real_one(t, name)
+        if name == other and threading.current_thread().name == "poll" and not swapped.is_set():
+            os.unlink(work / other)
+            os.symlink(NAME, work / other)          # by hand, or a pull, between the poll's look and its file lock
+            swapped.set()
+        return got
+    monkeypatch.setattr(place, "_one", one)
+
+    def writer():
+        with place.held(hub, f"work/{SHARED}"), file_lock(top / SHARED):
+            holding.set()
+            swapped.wait(5)
+            place.ahead(hub, f"work/{SHARED}", OPEN, PRIVATE)
+    w = threading.Thread(target=writer, name="writer", daemon=True)
+    w.start()
+    assert holding.wait(5)
+    poll = threading.Thread(target=lambda: place.place(hub, f"work/{other}"), name="poll", daemon=True)
+    poll.start()
+    w.join(10)
+    poll.join(10)
+    assert not w.is_alive() and not poll.is_alive(), "the writer waits on the folders, the poll on the file"
 
 
 @pytest.mark.parametrize("linked", ["private", "private/thierry"])

@@ -356,6 +356,8 @@ class TheList:
             placed, top = place.applies(self.hub, root.name), Path(os.path.realpath(root.path))
             for found in roots_mod.list_documents(root).docs:
                 if found.rel.count("/") < 2:
+                    if placed:
+                        place.tell_link(self.hub, root, top, found.rel)     # a link there is none either (9.11)
                     continue                # above `<client>/<project>`: no sheaf
                 if self.hub.roots.lookup(root.path / found.rel) != root:
                     continue                # a nested root's (8.2): 9.9 keeps it from the list's members

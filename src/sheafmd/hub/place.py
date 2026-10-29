@@ -35,7 +35,6 @@ never has two names and two name locks. A path under `private/` is no address: i
 such a root must not ignore `private/`: the listing (8.6) would no longer show a sheaf the hub moved there, so a move
 into a folder the repo ignores is refused, and the root is told of once.
 """
-import contextlib
 import os
 import stat
 import subprocess
@@ -148,6 +147,11 @@ def _holds(top: Path, rel: str) -> bool:
             return False
     except OSError:
         return False
+    return _real(top, rel)
+
+
+def _real(top: Path, rel: str) -> bool:
+    """Whether `rel` is reached from the root at the real path `top` through no link, itself none (9.11)."""
     return os.path.realpath(top / rel) == str(top / rel)
 
 
@@ -188,7 +192,7 @@ def physical(hub, root, rel: str) -> str:
     top = Path(os.path.realpath(root.path))
     name = logical(rel)
     if name is None:
-        if os.path.realpath(top / rel) != str(top / rel):
+        if not _real(top, rel):
             raise NotFound(f"{root.name}/{rel}")        # no address reaches a file through a link (9.11)
         return rel
     got, n = _one(top, name)
@@ -214,10 +218,11 @@ def named(hub, root, top: Path, rel: str) -> str | None:
     """The path in the root that the listed file `rel` is shown by, in a root the hub places: its sheaf's name for
     the one file that holds it; None for a file of a name that two files hold, which a `place-refused` row names,
     for the second entry of a file a move has at both paths, for an entry that holds no name (a link: `_holds`),
-    and for any other file under a `private` folder, which no name shows."""
+    for any other path that is a link or passes through one, which no address reaches (`physical`), and for any
+    other file under a `private` folder, which no name shows."""
     name = logical(rel)
     if name is None:
-        return None if names_private(rel) else rel
+        return None if names_private(rel) or not _real(top, rel) else rel
     got, n = _one(top, name)
     if n > 1:
         _twice(hub, f"{root.name}/{name}", n)
@@ -227,9 +232,9 @@ def named(hub, root, top: Path, rel: str) -> str | None:
 
 def tell_link(hub, root, top: Path, rel: str):
     """A `link-ignored` row (15) with the root and the path, and a line on stderr, once per path per hub run, for an
-    entry the listing gave at a sheaf's path that holds no name (a link, or a file under a linked folder: 9.11):
+    entry the listing gave that is a link or under a linked folder (9.11), at a sheaf's path or any other:
     the poll says it, never a lookup, so a link someone makes is seen and the hub serves nothing through it."""
-    if logical(rel) is None or _holds(top, rel) or (root.id, rel) in hub.told_link:
+    if (_holds(top, rel) if logical(rel) else _real(top, rel)) or (root.id, rel) in hub.told_link:
         return
     hub.told_link.add((root.id, rel))
     hub.record("link-ignored", None, root=root.name, path=rel)
@@ -400,14 +405,20 @@ def place(hub, address: str, member=None, by: str | None = None, commit: bool = 
         return None
     root, top, name = got
     with _name_lock(top, name):
-        with folders_lock(top, name):
-            rel, n = _one(top, name)
-            if n > 1:
-                _twice(hub, address, n)
-                return None
-            gone = _move(hub, root, top, rel, name, address) if n else None
-            if gone is not None:
-                _tidy(top, gone)
+        rel, n = _one(top, name)
+        if n > 1:
+            _twice(hub, address, n)
+            return None
+        gone = None
+        if n:
+            # The file's lock before the folders', as a writer that moves holds them (`ahead`): one order (9.11),
+            # so a path that turns into a link to another sheaf's file meanwhile waits for that writer, and is
+            # then looked at again.
+            with file_lock(top / rel), folders_lock(top, name):
+                if _one(top, name) == (rel, 1):
+                    gone = _move(hub, root, top, rel, name, address)
+                    if gone is not None:
+                        _tidy(top, gone)
         if gone is None:
             return None
         # Rendered and committed under the name's lock (9.11), after the folders' is let go: no other writer of
@@ -423,52 +434,51 @@ def place(hub, address: str, member=None, by: str | None = None, commit: bool = 
 
 def _move(hub, root, top: Path, rel: str, name: str, address: str, text: str | None = None,
           strict: bool = False) -> str | None:
-    """Link the file at `rel` into the home of its text, or of `text` when given (`ahead`, whose caller holds the
-    file's lock already), then unlink it at `rel`: the path it left, or None. A move that cannot be made is a
-    `place-refused` row, or with `strict` (`ahead`) raises `Refused`."""
+    """Link the file at `rel` into the home of its text, or of `text` when given (`ahead`), then unlink it at `rel`:
+    the path it left, or None. The caller holds the name's lock, the file's and then the folders'. A move that
+    cannot be made is a `place-refused` row, or with `strict` (`ahead`) raises `Refused`."""
     def refused(why: str):
         if strict:
             raise Refused(why)
         _refused(hub, address, why)
         return None
-    with (contextlib.nullcontext() if text is not None else file_lock(top / rel)):
+    try:
+        sfd, sname = _folder_of(top, rel)
+    except OSError as e:
+        return refused(f"its folder could not be opened ({e.strerror})") if strict else None
+    try:
         try:
-            sfd, sname = _folder_of(top, rel)
+            st = os.stat(sname, dir_fd=sfd, follow_symlinks=False)
+            if not stat.S_ISREG(st.st_mode):
+                return None         # a link stays where it is written: the sheaf it names is placed itself
+            if text is None:
+                fd = os.open(sname, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=sfd)
+                with os.fdopen(fd, "rb") as f:
+                    text = f.read().decode("utf-8")
+        except (OSError, UnicodeDecodeError):
+            return None             # gone, or not a text the hub reads: nothing to judge it on
+        target = home(hub, root, name, text)
+        if target is None:
+            return refused(NO_SHORT)
+        if target == rel:
+            return None
+        if ignores(top, target):
+            return refused(IGNORED)
+        try:
+            dfd, dname = make_folders(top, target)
         except OSError as e:
-            return refused(f"its folder could not be opened ({e.strerror})") if strict else None
+            return refused(f"its folder could not be made ({e.strerror})")
         try:
-            try:
-                st = os.stat(sname, dir_fd=sfd, follow_symlinks=False)
-                if not stat.S_ISREG(st.st_mode):
-                    return None         # a link stays where it is written: the sheaf it names is placed itself
-                if text is None:
-                    fd = os.open(sname, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=sfd)
-                    with os.fdopen(fd, "rb") as f:
-                        text = f.read().decode("utf-8")
-            except (OSError, UnicodeDecodeError):
-                return None             # gone, or not a text the hub reads: nothing to judge it on
-            target = home(hub, root, name, text)
-            if target is None:
-                return refused(NO_SHORT)
-            if target == rel:
-                return None
-            if ignores(top, target):
-                return refused(IGNORED)
-            try:
-                dfd, dname = make_folders(top, target)
-            except OSError as e:
-                return refused(f"its folder could not be made ({e.strerror})")
-            try:
-                os.link(sname, dname, src_dir_fd=sfd, dst_dir_fd=dfd, follow_symlinks=False)
-            except FileExistsError:
-                return refused(f"{target} is taken")
-            except OSError as e:
-                return refused(f"it could not be moved ({e.strerror})")
-            finally:
-                os.close(dfd)
-            os.unlink(sname, dir_fd=sfd)
+            os.link(sname, dname, src_dir_fd=sfd, dst_dir_fd=dfd, follow_symlinks=False)
+        except FileExistsError:
+            return refused(f"{target} is taken")
+        except OSError as e:
+            return refused(f"it could not be moved ({e.strerror})")
         finally:
-            os.close(sfd)
+            os.close(dfd)
+        os.unlink(sname, dir_fd=sfd)
+    finally:
+        os.close(sfd)
     return rel
 
 

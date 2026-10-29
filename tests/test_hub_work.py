@@ -1320,7 +1320,7 @@ def test_a_stop_whose_reply_fails_still_drops_the_stop_and_says_why(team, work, 
     assert drops(stoppable) == []
     assert [f.read_text(encoding="utf-8") for f in stoppable["stop"].iterdir()] == ["thinkingtoo/tiroir\n"]
     row, = hub_rows("tell-stopped")
-    assert row["said"] != "written"
+    assert row["said"] == "not written: the hub failed on it (sheaf diag)"
 
 
 def test_a_waiting_tell_naming_a_sheaf_of_another_project_is_removed_with_no_reply_there(team, work, stoppable):
@@ -1333,4 +1333,48 @@ def test_a_waiting_tell_naming_a_sheaf_of_another_project_is_removed_with_no_rep
     assert drops(stoppable) == []
     assert (work / "acme/site/x.md").read_text(encoding="utf-8") == before
     row, = hub_rows("tell-stopped")
-    assert row["said"] != "written"
+    assert row["said"] == "the drop names a sheaf of another root or project"
+
+
+# ── the gate's round 2 on PR 59: the newest session James names wins ─────────────────────────
+S1 = "11111111-aaaa-4aaa-8aaa-111111111111"
+S2 = "22222222-bbbb-4bbb-8bbb-222222222222"
+
+
+def test_an_older_waiting_session_never_replaces_a_newer_one_recorded_since(team, browser, work, james_writes):
+    cid = a_thread(team, work)
+    copy = {"sessions": team.hub.the_list.cfg.sessions_dir}
+    assert not james_door(browser, james_writes, "reply", session=S1, doc=ADDRESS, id=cid, text="One.")[0]
+    james_wrote(copy, S2)
+    assert not james_door(browser, james_writes, "reply", session=S2, doc=ADDRESS, id=cid, text="Two.")[0]
+    assert S2 in sessions_of(work)[0]
+    james_wrote(copy, S1, at=1_900_000_000)
+    assert not james_door(browser, james_writes, "read", session=S2, doc=ADDRESS)[0]
+    assert S2 in sessions_of(work)[0]
+
+
+def test_of_two_sessions_waiting_for_the_copy_the_newest_is_recorded(team, browser, work, james_writes):
+    cid = a_thread(team, work)
+    copy = {"sessions": team.hub.the_list.cfg.sessions_dir}
+    assert not james_door(browser, james_writes, "reply", session=S1, doc=ADDRESS, id=cid, text="One.")[0]
+    assert not james_door(browser, james_writes, "reply", session=S2, doc=ADDRESS, id=cid, text="Two.")[0]
+    james_wrote(copy, S1, at=1_900_000_000)
+    james_wrote(copy, S2)
+    assert not james_door(browser, james_writes, "documents", session=S2)[0]
+    assert S2 in sessions_of(work)[0] and not [s for s in sessions_of(work) if S1 in s]
+
+
+def test_the_wait_of_a_session_that_keeps_writing_still_ends_after_its_time(team, browser, work, james_writes,
+                                                                             monkeypatch):
+    from sheafmd.hub import handler as handler_mod
+    clock = [1000.0]
+    monkeypatch.setattr(handler_mod, "_clock", lambda: clock[0])
+    cid = a_thread(team, work)
+    for t in (0, 200):
+        clock[0] = 1000.0 + t
+        assert not james_door(browser, james_writes, "reply", session=S1, doc=ADDRESS, id=cid, text=f"At {t}.")[0]
+    assert hub_rows("session-not-recorded") == []
+    clock[0] = 1000.0 + 400                             # 400 s since its first write, not 200 since its last
+    assert not james_door(browser, james_writes, "reply", session=S1, doc=ADDRESS, id=cid, text="At 400.")[0]
+    row, = hub_rows("session-not-recorded")
+    assert row["transcript"] == S1

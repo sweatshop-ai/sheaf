@@ -20,7 +20,7 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 CI = WORKFLOWS / "ci.yml"
 
 MATRIX_OS = ("os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.macos && "
-             "'[\"ubuntu-latest\",\"macos-latest\"]' || '[\"ubuntu-latest\"]') }}")
+             "'[\"ubuntu-24.04\",\"macos-latest\"]' || '[\"ubuntu-24.04\"]') }}")
 RUNS_ON = "runs-on: ${{ matrix.os }}"
 MATRIX_PYTHON = ("python: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.python != 'all' && "
                  "format('[\"{0}\"]', inputs.python) || (github.event_name == 'workflow_dispatch' || "
@@ -137,9 +137,16 @@ def test_one_job_asks_for_a_runner_and_nothing_else_does(text):
 
 
 def test_every_job_runs_on_the_runner_its_matrix_value_names(text):
-    # GitHub's own runners: the matrix value is `ubuntu-latest` or `macos-latest`.
+    # GitHub's own runners: the matrix value is `ubuntu-24.04` or `macos-latest`.
     line = re.search(r"^\s*runs-on: (.*)$", text, flags=re.M).group(1)
     assert line == "${{ matrix.os }}"
+
+
+def test_the_ubuntu_image_is_named_never_latest(text):
+    # `ubuntu-latest` moved to 26.04 on 2026-10-29 and Playwright 1.58 refused it: Playwright supports a fixed
+    # list of systems per version, so a moving label breaks the page tests the day it moves. The image changes
+    # only in a pull request that moves it (and Playwright with it when needed).
+    assert "ubuntu-latest" not in text
 
 
 def test_a_job_that_hangs_is_stopped(text):

@@ -144,7 +144,19 @@ def test_a_sheaf_with_no_session_on_the_box_offers_no_fork(tab):
     open_work(tab.page)
     assert tab.page.locator("#rd-work h4").all_text_contents() == ["Sessions"]
     assert tab.page.locator("#rd-work .rd-cmd").count() == 0
-    assert "Nothing to fork from this hub: no session of this sheaf ran on the box" in tab.page.inner_text("#rd-work")
+    assert "The live session runs on Thierry’s machine, thierry-laptop: open it there." in tab.page.inner_text("#rd-work")
+
+
+def test_a_sheaf_live_on_a_laptop_names_its_machine_in_place_of_the_fork(tab):
+    # tt-tiroir#165: the hub offers no fork of a box session while the live one runs on a laptop.
+    as_member(tab, work(sessions=[LAPTOP, BOX], attach=None, live="laptop", fork=None))
+    tab.open()
+    open_work(tab.page)
+    text = tab.page.inner_text("#rd-work")
+    assert tab.page.locator("#rd-work .rd-cmd").count() == 0
+    assert "The live session runs on Thierry’s machine, thierry-laptop: open it there. " \
+           "This hub keeps no copy of it to fork." in text
+    assert "Nothing to fork from this hub" not in text
 
 
 def test_a_box_sheaf_the_hub_cannot_fork_never_says_there_is_none_to_fork(tab):

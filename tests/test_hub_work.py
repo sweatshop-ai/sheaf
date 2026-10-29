@@ -176,6 +176,17 @@ def test_a_laptop_hosted_session_is_never_served(team, box):
     assert download(team, id=LAPTOP).status == 404
 
 
+def test_on_a_sheaf_live_on_a_laptop_no_box_session_is_served_without_its_id(team, box, work):
+    # tt-tiroir#165: without an id the transcript is the live session's, and a laptop's is never served; the box's
+    # older copy is not handed out in its place (`tiroir work` would fork it).
+    put(team, work, DOC, SHEAF.replace("host: tiroir-tt, member: james, date: 2026-10-28T05:12:03Z",
+                                       "host: thierry-laptop, member: thierry, date: 2026-10-28T05:12:03Z"))
+    assert download(team).status == 404
+    assert hub_rows("transcript-downloaded") == []
+    got = download(team, id=OLDER)
+    assert got.status == 200 and got.body == b'{"older":true}\n'
+
+
 def test_an_older_box_session_is_served_by_its_id(team, box):
     got = download(team, id=OLDER)
     assert got.status == 200 and got.body == b'{"older":true}\n' and got.headers["X-Sheaf-Session"] == OLDER
@@ -622,10 +633,13 @@ def test_a_sheaf_with_only_laptop_sessions_has_nothing_to_fork(team, box, work):
     assert "fork" not in w and w["live"] == "laptop"
 
 
-def test_a_sheaf_live_on_a_laptop_with_an_older_box_session_can_fork_that_one(team, box, work):
+def test_a_sheaf_live_on_a_laptop_with_an_older_box_session_offers_no_fork_of_that_copy(team, box, work):
+    # tt-tiroir#165: the live session is the laptop's, which the hub never serves; a fork of the box's older copy
+    # would start a second line of work beside it, and lose what was done on the laptop since.
     put(team, work, DOC, SHEAF.replace("host: tiroir-tt, member: james, date: 2026-10-28T05:12:03Z",
                                        "host: thierry-laptop, member: thierry, date: 2026-10-28T05:12:03Z"))
-    assert meta(team)["work"]["fork"] == f"tiroir work {FRONT}/{ADDRESS}"
+    w = meta(team)["work"]
+    assert "fork" not in w and w["live"] == "laptop"
 
 
 def test_a_page_that_is_not_a_sheaf_of_the_list_has_no_work(team, box, work):

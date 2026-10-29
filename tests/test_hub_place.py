@@ -429,6 +429,15 @@ def test_an_open_page_is_told_where_its_sheaf_went(team, work):
     assert ("moved", {"doc": f"work/{HOME}", "to": f"work/{SHARED}"}) in stream.drain()
 
 
+def test_a_member_who_may_not_open_the_sheaf_where_it_went_is_told_gone(team, work):
+    put(team, work, SHARED, OPEN.replace("- [ ] Share", "- [x] Share"))
+    stream = team.get(f"/_/live?doc=work/{SHARED}", member=HANS).stream
+    stream.drain()
+    assert untick(team, work, SHARED, "Share", THIERRY).status == 200
+    got = stream.drain()
+    assert ("gone", {"doc": f"work/{SHARED}"}) in got and not [e for e in got if e[0] == "moved"]
+
+
 def test_a_private_sheaf_is_a_sheaf_of_the_list_for_work_on_this(team, work):
     assert work_mod.is_sheaf(team.hub, f"work/{HOME}")
     assert not work_mod.is_sheaf(team.hub, "work/thinkingtoo/tiroir/private/x.md")

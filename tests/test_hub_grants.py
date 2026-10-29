@@ -132,9 +132,9 @@ def test_projects_groups_gives_the_library_the_hubs_own_judgement(team, work, ca
     got = json.loads(out)
     assert got["projects"] == [
         {"project": "acme/blog", "group": "group:proj-acme-blog", "glob": "acme/blog/*.md", "status": "closed",
-         "members": ["sven"]},
+         "members": ["sven"], "assistants": []},
         {"project": "thinkingtoo/tiroir", "group": "group:proj-thinkingtoo-tiroir", "glob": "thinkingtoo/tiroir/*.md",
-         "status": "live", "members": ["sven", "thierry"]}]
+         "status": "live", "members": ["sven", "thierry"], "assistants": []}]
     assert got["members"] == {"sven": ["group:proj-acme-blog", "group:proj-thinkingtoo-tiroir"],
                               "thierry": ["group:proj-thinkingtoo-tiroir"]}
     for member in team.hub.proxy.members.values():
@@ -226,3 +226,48 @@ def test_a_projects_toml_caught_mid_write_ends_no_page(team, work, cut):
     team.hub.tick()
     team.hub.tick()
     assert [name for name, _ in got + sven.drain() if name == "gone"] == []
+
+
+def test_projects_groups_prints_each_projects_assistants_and_their_groups(work, capsys):
+    """An entry's `assistants` names the agents that work on the project for its members (8.12): the Library
+    gives each its groups, as `members` does for a member. An entry without it has none."""
+    import json
+    (work / "projects.toml").write_text(GRANTS.replace("members =", 'assistants = ["James"]\nmembers =')
+                                        + '\n[projects."thinkingtoo/inbox"]\nmembers = ["thierry"]\nstatus = "live"\n'
+                                        + 'assistants = ["james", "mistral"]\n'
+                                        + '\n[projects."acme/blog"]\nmembers = ["sven"]\nstatus = "live"\n',
+                                        encoding="utf-8")
+    code, out, _ = groups(capsys, "--root", str(work))
+    assert code == 0
+    got = json.loads(out)
+    assert {p["project"]: p["assistants"] for p in got["projects"]} == {
+        "acme/blog": [], "thinkingtoo/inbox": ["james", "mistral"], "thinkingtoo/tiroir": ["james"]}
+    assert got["assistants"] == {"james": ["group:proj-thinkingtoo-inbox", "group:proj-thinkingtoo-tiroir"],
+                                 "mistral": ["group:proj-thinkingtoo-inbox"]}
+    assert got["members"] == {"sven": ["group:proj-acme-blog", "group:proj-thinkingtoo-tiroir"],
+                              "thierry": ["group:proj-thinkingtoo-inbox", "group:proj-thinkingtoo-tiroir"]}
+
+
+def test_a_file_without_assistants_prints_none(work, capsys):
+    import json
+    (work / "projects.toml").write_text(GRANTS, encoding="utf-8")
+    code, out, _ = groups(capsys, "--root", str(work))
+    got = json.loads(out)
+    assert code == 0 and got["assistants"] == {} and got["projects"][0]["assistants"] == []
+
+
+def test_an_assistant_is_granted_nothing_in_the_hub(team, work):
+    """`assistants` is for the Library alone: an agent reaches the hub through its member's token (9.7), so a
+    member's short in `assistants` opens nothing that `members` does not."""
+    (work / "projects.toml").write_text(GRANTS.replace("members =", 'assistants = ["hans"]\nmembers ='),
+                                        encoding="utf-8")
+    put(team, work, SHARED, OPEN)
+    assert team.get(f"/work/{SHARED}", member=HANS).status == 404
+    assert team.get(f"/work/{SHARED}", member=SVEN).status == 200
+
+
+@pytest.mark.parametrize("value", ['"james"', "[1]", '[""]', "true"])
+def test_assistants_that_are_not_a_list_of_names_are_refused(work, capsys, value):
+    (work / "projects.toml").write_text(GRANTS + f"assistants = {value}\n", encoding="utf-8")
+    code, out, err = groups(capsys, "--root", str(work))
+    assert code == 1 and out == "" and "'assistants' in" in err and "list of names" in err

@@ -7,6 +7,7 @@ in the hub's log and in the diagnostics log (15), once per folder per hub run.
     [projects."acme/blog"]
     members = ["ada", "bob"]          # the front's short names of who works on it
     status = "live"                   # or "closed"
+    assistants = ["james"]            # optional: the agents that work on it for its members, for the Library
 
     read(folder)              the entries, or None without the file; raises Invalid
     unlisted(entries, rels)   the `<client>/<project>` folders of `rels` that the entries do not name
@@ -57,11 +58,16 @@ def read(folder: Path) -> dict | None:
             raise Invalid(f"{here}: a project cannot be named private, the name of the folder of owner-only sheaves")
         if not isinstance(p, dict):
             raise Invalid(f"{here} must be a table with members and status")
-        extra = sorted(set(p) - {"members", "status"})
+        extra = sorted(set(p) - {"members", "status", "assistants"})
         if extra:
             raise Invalid(f"unknown key '{extra[0]}' in {here}")
         if not isinstance(p.get("members"), list) or not all(isinstance(m, str) and m for m in p["members"]):
             raise Invalid(f"'members' in {here} must be a list of names")
+        # An agent reaches the hub through its member's token (9.7), so `assistants` grants nothing here: it is
+        # read for the Library alone, which knows an agent by its own principal.
+        if "assistants" in p and not (isinstance(p["assistants"], list)
+                                      and all(isinstance(a, str) and a for a in p["assistants"])):
+            raise Invalid(f"'assistants' in {here} must be a list of names")
         if p.get("status") not in STATUSES:
             raise Invalid(f"'status' in {here} must be one of {', '.join(STATUSES)}, not {p.get('status')!r}")
     seen = {}
@@ -111,13 +117,18 @@ def grants(entries, rel: str, short: str) -> bool:
 def groups(entries: dict) -> dict:
     """The Library's groups from the same entries the hub grants by (8.12, 13): each project's group
     `group:proj-<client>-<project>`, its glob `<client>/<project>/*.md`, its status and its members (lower case,
-    as `grants` compares them), and for each member short the groups of the projects that name them."""
-    out, members = [], {}
+    as `grants` compares them) and its assistants (lower case too), and for each member short, and each assistant,
+    the groups of the projects that name them."""
+    out, members, assistants = [], {}, {}
     for name in sorted(entries):
         group = group_of(name)
         names = sorted({m.casefold() for m in entries[name]["members"]})
+        agents = sorted({a.casefold() for a in entries[name].get("assistants", [])})
         out.append({"project": name, "group": group, "glob": f"{name}/*.md", "status": entries[name]["status"],
-                    "members": names})
+                    "members": names, "assistants": agents})
         for m in names:
             members.setdefault(m, []).append(group)
-    return {"members": {m: sorted(g) for m, g in sorted(members.items())}, "projects": out}
+        for a in agents:
+            assistants.setdefault(a, []).append(group)
+    return {"members": {m: sorted(g) for m, g in sorted(members.items())},
+            "assistants": {a: sorted(g) for a, g in sorted(assistants.items())}, "projects": out}

@@ -364,7 +364,7 @@ def held(hub, address: str):
     judges the name's homes finds them as it judged, and a reader reads the file it found, in the folder its text
     says. Nothing to hold where the hub does not place the sheaf. Gives whether it holds a lock. Re-entrant:
     `place` and a document's write take it again. Taken first: before the hub's lock (`Hub.entry`), the document's
-    own lock (live.py), a file lock and the root's commit lock (commits.py). Held for disk work only: nothing under
+    own lock (live.py), a file lock and the repo's commit lock (commits.py). Held for disk work only: nothing under
     it waits on the network."""
     got = _where(hub, address)
     if got is None:

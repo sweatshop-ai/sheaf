@@ -635,3 +635,19 @@ def test_a_tick_the_poll_overtook_lands_where_the_sheaf_went(team, work, monkeyp
     got = team.post("/_/tick", {"doc": f"work/{SHARED}", "action": 0, "word": "Share"}, member=THIERRY)
     assert got.status == 200, got.text
     assert "- [x] Share" in (work / SHARED).read_text(encoding="utf-8") and not (work / HOME).exists()
+
+
+def test_a_stream_opened_as_its_sheaf_moves_is_told_where_it_went(team, work):
+    """The move comes between the request finding the document and its stream being in place: the stream missed
+    `moved`, and is sent it after the fact, not `gone`."""
+    put(team, work, SHARED, PRIVATE)
+    e = team.hub.entry(f"work/{SHARED}")
+    real = e.bus.subscribe
+
+    def subscribe(*a, **k):
+        team.hub.the_list.poll()
+        return real(*a, **k)
+    e.bus.subscribe = subscribe
+    stream = team.get(f"/_/live?doc=work/{SHARED}", member=THIERRY).stream
+    got = [x for x in stream.drain() if x[0] != "hello"]
+    assert got == [("moved", {"doc": f"work/{SHARED}", "to": f"work/{HOME}"})]

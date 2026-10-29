@@ -123,6 +123,7 @@ TOOLS = {
 }
 PAGE_TOOLS = ("read", "create", "update")    # the key, or a token made with --write (SPEC 9.7)
 WRITE_TOOLS = ("create", "update")           # each call leaves a row in the diagnostics log (SPEC 15)
+SESSION_WRITES = ("create", "update", "reply", "resolve")    # a write that names James's session to the hub (9.12)
 MAX_TEXT = 1024 * 1024           # bytes of UTF-8 a create or an update may write (SPEC 12)
 NO_RIGHT = ("This token reads and answers comments; it does not read, make or change pages. A "
             "token that does is made with `sheaf token add NAME --write`.")
@@ -137,6 +138,7 @@ class Caller:
     made to work on pages; None is the key (the stdio door, which runs as the user)."""
     display: str
     token: TokenRow | None = None
+    session: str | None = None      # James's session, from X-James-Session: set only for `[list]`'s james_token (9.12)
 
     @property
     def token_name(self) -> str | None:
@@ -234,6 +236,7 @@ def markdown_files(root) -> list[str]:
 class Door:
     def __init__(self, hub):
         self.hub = hub
+        self.called = None      # called(caller, address or None) after each call of James's session (9.12)
         # real path -> ((inode, mtime_ns, ctime_ns, size), [(id, messages, last author)] of its open threads,
         # its front matter): a file is read again only when it changed, a write that kept its size and put
         # its time back included (SPEC 8.6, 9.11)
@@ -297,6 +300,8 @@ class Door:
             return _error(id_, INVALID_PARAMS, "The arguments are not an object.")
         try:
             out = self._logged(name, args, caller) if name in WRITE_TOOLS else self._run(name, args, caller)
+            if caller.session is not None and self.called is not None:
+                self._tell_called(name, args, caller)
             return self._ok(id_, {"content": [{"type": "text", "text": json.dumps(out, ensure_ascii=False)}],
                                   "isError": False})
         except ToolError as e:
@@ -307,6 +312,20 @@ class Door:
             return self._ok(id_, {"content": [{"type": "text", "text":
                                                "The hub failed on this call; the details are in `sheaf diag`."}],
                                   "isError": True})
+
+    def _tell_called(self, name: str, args: dict, caller: Caller):
+        """The hub hears of a call James's session made (9.12): which document a write went to, if one did. The
+        call stands whatever the hub does with it."""
+        address = None
+        if name in SESSION_WRITES:
+            try:
+                address = self._address(args["doc"], caller)
+            except (ToolError, KeyError, TypeError):
+                address = None
+        try:
+            self.called(caller, address)
+        except Exception:
+            self.hub.record_exception("session-hook-failed", address, tool=name)
 
     # ── naming a document ────────────────────────────────────────────────────
     def _address(self, doc: str, caller: Caller) -> str:

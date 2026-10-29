@@ -178,16 +178,19 @@ def physical(hub, root, rel: str) -> str:
     """The path in `root` of the file the document `rel` names (`Roots` asks it at each lookup): `rel` itself where
     the hub does not place sheaves; for a sheaf's name, the one file that holds it, at its home or at any private
     home. Raises NotFound for any path under a project's `private` folder (or in a project called `private`), at
-    any depth, which is no address, for a name that two files hold (made by hand: nothing repairs it), which a
-    `place-refused` row names, and for a name whose entries hold none (a link: `_holds`)."""
+    any depth, which is no address; for a path that is a link or passes through one, at any depth, made or not;
+    for a name that two files hold (made by hand: nothing repairs it), which a `place-refused` row names; and for
+    a name whose entries hold none (a link: `_holds`)."""
     if not applies(hub, root.name):
         return rel
     if names_private(rel):
         raise NotFound(f"{root.name}/{rel}")
+    top = Path(os.path.realpath(root.path))
     name = logical(rel)
     if name is None:
+        if os.path.realpath(top / rel) != str(top / rel):
+            raise NotFound(f"{root.name}/{rel}")        # no address reaches a file through a link (9.11)
         return rel
-    top = Path(os.path.realpath(root.path))
     got, n = _one(top, name)
     if n > 1:
         _twice(hub, f"{root.name}/{name}", n)

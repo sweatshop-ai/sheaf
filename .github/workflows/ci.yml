@@ -1,6 +1,21 @@
 # SPEC 18. A pull request, a push to main and the nightly run run on ubuntu only, and macOS runs only when someone
 # starts the workflow by hand with `macos` ticked: a macOS minute counts ten times.
 # tests/test_ci_workflow.py holds these triggers.
+#
+# To move the ubuntu image (24.04 to 26.04, or later ones), in one pull request of its own (#65):
+#   1. Read the release notes of the newest Playwright for the systems it supports; take the first version
+#      that names the new image. Playwright supports a fixed list of systems per version, and 1.58 refuses 26.04.
+#   2. Set `playwright==` to that version in pyproject.toml's dev group and run `uv lock`.
+#   3. Name the new image in the matrix below (and its comment), in MATRIX_OS in tests/test_ci_workflow.py and in SPEC 18.
+#   4. Open the pull request. It runs on the new image, and since ci.yml and uv.lock are page paths, the page
+#      tests run too: the bump changes the Chromium they drive. The Playwright cache key names the image and
+#      uv.lock, so no browser of the old image is restored.
+#   5. Start a manual run on the branch with python=all and macos ticked:
+#      `gh workflow run ci.yml --ref <branch> -f python=all -f macos=true`.
+#      The macOS job must fail on nothing that main's last manual macOS run passed (macOS is not green yet,
+#      see the matrix); once it is green, it must stay green.
+#   6. Merge only when both runs are green, page tests included. 24.04 stays supported by GitHub for years and
+#      its retirement is announced with brownouts, so there is no hurry to move before Playwright is ready.
 name: CI
 
 on:
@@ -46,7 +61,10 @@ jobs:
       matrix:
         # ubuntu-24.04, never ubuntu-latest: that label moved to 26.04 on 2026-10-29 and Playwright 1.58 refused
         # it, so the page tests broke with no change of ours. The image moves only in a pull request.
-        os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.macos && '["ubuntu-24.04","macos-latest"]' || '["ubuntu-24.04"]') }}
+        # macos-26, never macos-latest, for the same reason: it is the image macos-latest ran on 2026-10-30
+        # (macos-26-arm64, run 40980723217). That run was red on sheaf's side (test_hub_recover and others), so
+        # no macOS run has been green yet; the pin keeps the image from moving under that work.
+        os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.macos && '["ubuntu-24.04","macos-26"]' || '["ubuntu-24.04"]') }}
         python: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.python != 'all' && format('["{0}"]', inputs.python) || (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && '["3.11","3.13","3.14"]' || '["3.13"]') }}
     steps:
       - uses: actions/checkout@v4
@@ -77,12 +95,20 @@ jobs:
         id: page
         run: uv run --no-sync python tools/ci/page_paths.py
 
+      # The cache key names the runner image, so a move of the image does not restore browsers built on the
+      # old one. ImageOS is set on GitHub's runners but is not in the env context of an expression.
+      - name: Name the runner image
+        id: image
+        if: hashFiles('tests/page/**') != '' && steps.page.outputs.run == 'true'
+        shell: bash
+        run: echo "os=${ImageOS:?ImageOS is not set on this runner}" >> "$GITHUB_OUTPUT"
+
       - name: Cache the Playwright browsers
         if: hashFiles('tests/page/**') != '' && steps.page.outputs.run == 'true'
         uses: actions/cache@v4
         with:
           path: ${{ runner.os == 'macOS' && '~/Library/Caches/ms-playwright' || '~/.cache/ms-playwright' }}
-          key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          key: playwright-${{ runner.os }}-${{ steps.image.outputs.os }}-${{ hashFiles('uv.lock') }}
 
       - name: Page tests (Playwright, Chromium)
         if: hashFiles('tests/page/**') != '' && steps.page.outputs.run == 'true'

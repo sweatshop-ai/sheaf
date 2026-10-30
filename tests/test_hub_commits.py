@@ -792,3 +792,68 @@ def test_the_polls_row_for_one_cause_is_one_however_its_numbers_move():
     once("push-failed", "r", error="Failed to connect to 127.0.0.1 port 9 after 3012 ms: No route to host")
     once("push-failed", "r", error="Failed to connect to 127.0.0.1 port 9 after 2987 ms: No route to host")
     assert len(made) == 1
+
+
+def test_a_pull_of_one_root_waits_on_the_name_of_a_sheaf_another_root_of_the_repo_moves(hub, tmp_path, monkeypatch):
+    """A pull of root A that changes both files of a move in root B, where the hub places B's sheaves, waits on the
+    sheaf's name before any file lock, as B's writer does (#76): the writer that holds the name and the move's first
+    file takes its second, and neither waits on the other for ever."""
+    import fcntl
+    import threading
+    import time
+
+    from sheafmd import source
+    from sheafmd.hub import place
+    repo = tmp_path / "sheaves"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+    (repo / "globex").mkdir()
+    b = hub.roots._add(repo, git=True)
+    a = hub.roots._add(repo / "globex", git=False)
+    monkeypatch.setattr(place, "applies", lambda hub, name: name == b.name)
+    # The move of the sheaf `acme/blog/plan.md` out to Bea's private folder: the writer holds the file it leaves
+    # and takes the one it goes to. Whichever sorts first is the one the pull would take first.
+    p, q = repo / "acme" / "blog" / "plan.md", repo / "acme" / "blog" / "private" / "bea" / "plan.md"
+    first, second = sorted((p, q), key=source.lock_key)
+    name = (str(os.path.realpath(b.path)), "acme/blog/plan.md")
+
+    def free(f):
+        with open(source._lock_path(f), "a+") as fd:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return False
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            return True
+
+    holding, go, got, entered = threading.Event(), threading.Event(), [], []
+
+    def writer():
+        with place.held(hub, f"{b.name}/acme/blog/plan.md"), source.file_lock(second):
+            holding.set()
+            go.wait(30)
+            end = time.monotonic() + 3          # bounded: the deadlock is a failure here, not a hang
+            while time.monotonic() < end and not free(first):
+                time.sleep(0.02)
+            if free(first):
+                with source.file_lock(first):
+                    got.append(first)
+
+    def pull():
+        with hub._writers_out(a, [p, q]):
+            entered.append(True)
+
+    w = threading.Thread(target=writer)
+    w.start()
+    assert holding.wait(30)
+    g = threading.Thread(target=pull)
+    g.start()
+    # The pull has settled: waiting on the name (a second thread counted on its lock), or on a file lock it reached.
+    end = time.monotonic() + 30
+    while time.monotonic() < end and place._LOCKS.get(name, [None, 0])[1] < 2 and free(first):
+        time.sleep(0.02)
+    go.set()
+    w.join(30)
+    g.join(30)
+    assert not w.is_alive() and not g.is_alive()
+    assert got == [first]
+    assert entered == [True]

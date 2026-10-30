@@ -3,15 +3,20 @@ work tree gets one commit for every write made on the page (a save, a task box, 
 by whoever made it, carrying the document and, with `versions = "root"`, its versions folder
 (`.sheaf/versions/<doc-key>/`). The commit is made in the request, under a lock of the root, so the
 page's answer comes after it; with `push = true` a thread of its own pushes after it, one push for
-however many commits came meanwhile.
+however many commits came meanwhile. Before it pushes, the hub fetches its branch and takes in what the remote
+got meanwhile (a pull request merged on GitHub): its own unpushed commits are made again on top, in git's object
+store, and the work tree moves only for the files the remote changed, under their locks; a conflict changes
+nothing and pushes nothing (#62).
 
     Author(name, email)          who a commit is by
+    Commits(record, guard)       `guard(root, files)`: the locks a writer of `files` holds before the root's
     Commits.saved(root, rel, author, what)
     Commits.settle(timeout)      wait until no push is due (a test, a stopping hub)
 """
 import os
 import subprocess
 import threading
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -40,8 +45,8 @@ def _env(author: Author | None = None) -> dict:
 def _git(root: Path, *args, author=None, seconds=GIT_SECONDS, given=None):
     # No hook of the repo runs for the hub: hooks are code of whoever wrote `.git/hooks`.
     return subprocess.run(["git", "-C", str(root), "-c", "core.hooksPath=/dev/null", "--literal-pathspecs",
-                           *args], capture_output=True, text=True, timeout=seconds, env=_env(author),
-                          input=given)
+                           *args], capture_output=True, text=True, encoding="utf-8",
+                          errors="surrogateescape", timeout=seconds, env=_env(author), input=given)
 
 
 def _ignored(folder: Path, rel: str) -> bool:
@@ -73,13 +78,41 @@ def _last_line(r) -> str:
     return lines[-1][:300] if lines else f"git exited {r.returncode}"
 
 
+def _again(folder: Path, commit: str, onto: str):
+    """`commit` made again on top of `onto`, in the object store alone (a cherry-pick that touches neither the
+    index nor the work tree): (the new commit, []), or (None, the paths in conflict). Author, committer and
+    message are kept."""
+    r = _git(folder, "merge-tree", "--write-tree", "--name-only", "-z", f"--merge-base={commit}^", onto, commit)
+    head, _, _ = r.stdout.partition("\0\0")
+    tree, *conflicts = head.split("\0")
+    if r.returncode != 0:
+        return None, sorted(set(conflicts)) if r.returncode == 1 else [_last_line(r)]
+    if tree == _git(folder, "rev-parse", f"{onto}^{{tree}}").stdout.strip():
+        return onto, []                                # the remote holds this change already: no empty commit
+    meta = _git(folder, "log", "-1", "--format=%an%x00%ae%x00%ad%x00%cn%x00%ce%x00%cd", "--date=raw",
+                commit).stdout.rstrip("\n").split("\0")
+    # The message as bytes: text mode would turn a CR into a LF.
+    message = subprocess.run(["git", "-C", str(folder), "cat-file", "commit", commit], capture_output=True,
+                             timeout=GIT_SECONDS, env=_env()).stdout.partition(b"\n\n")[2]
+    env = dict(zip(["GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_AUTHOR_DATE",
+                    "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "GIT_COMMITTER_DATE"], meta))
+    made = subprocess.run(["git", "-C", str(folder), "commit-tree", tree, "-p", onto, "-F", "-"], capture_output=True,
+                          timeout=GIT_SECONDS, env={**_env(), **env}, input=message)
+    if made.returncode != 0:
+        return None, [made.stderr.decode("utf-8", "replace").strip()[-300:] or f"git exited {made.returncode}"]
+    return made.stdout.decode().strip(), []
+
+
 class Commits:
-    def __init__(self, record):
-        """`record(kind, doc, **detail)` writes a diagnostics row (15)."""
+    def __init__(self, record, guard=None):
+        """`record(kind, doc, **detail)` writes a diagnostics row (15). `guard(root, files)` gives a context that
+        holds what a writer of each of `files` (absolute paths) holds before the root's lock (9.11): a pull takes
+        it before it changes them."""
         self._record = record
+        self._guard = guard or (lambda root, files: nullcontext())
         self._roots: dict[Path, threading.Lock] = {}
         self._lock = threading.Lock()
-        self._due: dict[Path, str] = {}            # root folder -> the address of the last commit, for the row
+        self._due: dict[Path, tuple] = {}          # root folder -> (the root, the address of the last commit)
         self._wake = threading.Condition(self._lock)
         self._pushing = False
         self._thread: threading.Thread | None = None
@@ -121,7 +154,7 @@ class Commits:
             self._record("commit-failed", address, error=str(e)[:300])
             return
         if rc.push:
-            self._push_later(root.path, address)
+            self._push_later(root, address)
 
     def _commit(self, folder: Path, paths: list, author: Author, subject: str, address: str,
                 gone: list = ()) -> bool:
@@ -173,9 +206,9 @@ class Commits:
         return True
 
     # ── the push ─────────────────────────────────────────────────────────────
-    def _push_later(self, folder: Path, address: str):
+    def _push_later(self, root, address: str):
         with self._lock:
-            self._due[folder] = address
+            self._due[root.path] = (root, address)
             if self._thread is None or not self._thread.is_alive():
                 self._thread = threading.Thread(target=self._pusher, name="sheaf-push", daemon=True)
                 self._thread.start()
@@ -188,20 +221,78 @@ class Commits:
                     self._thread = None
                     self._wake.notify_all()
                     return
-                folder, address = self._due.popitem()
+                folder, (root, address) = self._due.popitem()
                 self._pushing = True
             try:
+                if not self._pull(root, address):
+                    continue
                 # Not under the root's lock: a save meanwhile commits, and the next push carries it.
                 r = _git(folder, "push", "-q", "origin", "HEAD", seconds=PUSH_SECONDS)
                 if r.returncode != 0:
                     # The commit stays; the next write's push carries it.
                     self._record("push-failed", address, error=_last_line(r))
-            except (OSError, subprocess.SubprocessError) as e:
-                self._record("push-failed", address, error=str(e)[:300])
+            except Exception as e:                     # never a dead thread: a push that never comes is a row
+                self._record("push-failed", address, error=str(e)[:300] or type(e).__name__)
             finally:
                 with self._lock:
                     self._pushing = False
                     self._wake.notify_all()
+
+    # ── the pull before it ───────────────────────────────────────────────────
+    def _pull(self, root, address: str) -> bool:
+        """Take in what the remote's branch got that the hub's lacks (#62); whether to push. A failed fetch is a
+        `push-failed` row, a remote the hub cannot take in a `push-diverged` row: nothing is pushed, and the next
+        write's push tries again. A branch the remote does not have yet is pushed as it is."""
+        folder = root.path
+        branch = _git(folder, "symbolic-ref", "-q", "--short", "HEAD")
+        if branch.returncode != 0:
+            return True                                # a detached HEAD: the push says what it says
+        r = _git(folder, "fetch", "-q", "--no-tags", "origin", f"refs/heads/{branch.stdout.strip()}",
+                 seconds=PUSH_SECONDS)
+        if r.returncode != 0:
+            if "couldn't find remote ref" in r.stderr:
+                return True
+            self._record("push-failed", address, error=_last_line(r))
+            return False
+        theirs = _git(folder, "rev-parse", "--verify", "-q", "FETCH_HEAD^{commit}").stdout.strip()
+        base = _git(folder, "merge-base", "HEAD", theirs)
+        if base.returncode != 0:
+            self._record("push-diverged", address, paths=[], error="the remote's branch shares no history with the hub's")
+            return False
+        base = base.stdout.strip()
+        if base == theirs:
+            return True                                # nothing new on the remote
+        top = Path(_git(folder, "rev-parse", "--show-toplevel").stdout.strip())
+        changed = [p for p in _git(folder, "diff", "--name-only", "--no-renames", "-z", base, theirs).stdout.split("\0")
+                   if p]
+        # The writers' locks first, the root's last (9.11): no write of a file the remote changed comes between
+        # the look at it and its new text, and no commit comes between the hub's HEAD read and moved.
+        with self._guard(root, [top / p for p in changed]), self._root_lock(folder):
+            return self._catch_up(folder, theirs, address)
+
+    def _catch_up(self, folder: Path, theirs: str, address: str) -> bool:
+        head = _git(folder, "rev-parse", "HEAD").stdout.strip()
+        if _git(folder, "rev-list", "--merges", f"{theirs}..{head}").stdout.strip():
+            self._record("push-diverged", address, paths=[], error="the hub's unpushed commits hold a merge")
+            return False
+        new = theirs
+        for c in _git(folder, "rev-list", "--reverse", f"{theirs}..{head}").stdout.split():
+            new, conflicts = _again(folder, c, new)
+            if new is None:
+                self._record("push-diverged", address, paths=conflicts, error="the remote changed what the hub did")
+                return False
+        # The work tree moves for what differs between the two alone, and refuses over a change of the person's.
+        r = _git(folder, "read-tree", "-m", "-u", head, new)
+        if r.returncode != 0:
+            self._record("push-diverged", address, paths=[], error=_last_line(r))
+            return False
+        r = _git(folder, "update-ref", "-m", "sheaf: on top of the remote's", "HEAD", new, head)
+        if r.returncode != 0:
+            # The files are the remote's; HEAD is not: put the index and the work tree back to it.
+            _git(folder, "read-tree", "-m", "-u", new, head)
+            self._record("push-diverged", address, paths=[], error=_last_line(r))
+            return False
+        return True
 
     def settle(self, timeout: float = 30) -> bool:
         """Wait until no push is due or running; whether that came within `timeout` seconds."""

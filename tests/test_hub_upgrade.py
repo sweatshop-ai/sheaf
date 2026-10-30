@@ -508,7 +508,7 @@ def test_an_upgrade_stop_names_the_process_that_is_still_there(
 
 
 def test_an_upgrade_stop_under_the_service_whose_new_hub_answers_before_any_silence_is_an_upgrade(
-        port, thread_hub, procs, quick_stop, monkeypatch):
+        port, thread_hub, quick_stop, monkeypatch):
     """The service starts the new code the moment the old hub exits 75; a new hub that answers before the
     command next asks leaves it no silence to see. The old hub ended (its process is gone and its boot no
     longer answers), so the stop went through (run 41011379501 on macos-26 waited out STOP_WAIT on it)."""

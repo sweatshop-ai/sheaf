@@ -63,7 +63,11 @@ def _env(author: Author | None = None) -> dict:
 
 
 class Stopped(Exception):
-    """The hub is stopping: it ended the git, or never started it (#95)."""
+    """The hub is stopping: it ended the git (`ended`), or never started it (#95)."""
+
+    def __init__(self, text: str, ended: bool = False):
+        super().__init__(text)
+        self.ended = ended
 
 
 class Children:
@@ -72,6 +76,7 @@ class Children:
     def __init__(self):
         self._lock = threading.Lock()
         self._running: set[subprocess.Popen] = set()
+        self._signalled: set[subprocess.Popen] = set()   # the ones `end` sent a signal to
         self._ended = False
 
     def run(self, argv, seconds, env):
@@ -85,15 +90,21 @@ class Children:
         try:
             out, err = proc.communicate(timeout=seconds)
         except subprocess.TimeoutExpired:
-            self._signal(proc, signal.SIGKILL)         # the group: git's ssh or helper holds its pipes
-            proc.communicate()
+            # The group: git's ssh or helper holds its pipes. A process that left the group may hold them still,
+            # so the pipes are closed, not read to their end: the one pusher never waits on it.
+            self._signal(proc, signal.SIGKILL)
+            proc.wait()
+            for pipe in (proc.stdout, proc.stderr):
+                pipe.close()
             raise
         finally:
             with self._lock:
                 self._running.discard(proc)
-        with self._lock:
-            if self._ended and proc.returncode != 0:
-                raise Stopped(f"git ended by the stop ({proc.returncode})")
+                signalled = proc in self._signalled
+                self._signalled.discard(proc)
+        if signalled and proc.returncode != 0:
+            # Only a git the stop signalled: one that failed on its own just before is the failure it is.
+            raise Stopped(f"git ended by the stop ({proc.returncode})", ended=True)
         return subprocess.CompletedProcess(argv, proc.returncode, out, err)
 
     @staticmethod
@@ -113,7 +124,8 @@ class Children:
         """`sig` to the group of every git running, and none starts from here; whether any ran."""
         with self._lock:
             self._ended = True
-            running = list(self._running)
+            running = [proc for proc in self._running if proc.returncode is None]   # one already reaped ended on its own
+            self._signalled.update(running)
         for proc in running:
             self._signal(proc, sig)
         return bool(running)
@@ -410,9 +422,11 @@ class Commits:
                 with self._lock:
                     self._owed.discard(repo)
                 self._told.pop(repo, None)
-            except Stopped:
-                # Ended by the stop, or never begun: the commit stays for the next hub (#95).
-                record("push-stopped", address)
+            except Stopped as e:
+                # Ended by the stop, or never begun: the commit stays for the next hub (#95). A poll's pull with
+                # nothing owed that never began is no news.
+                if e.ended or wrote or repo in self._owed:
+                    record("push-stopped", address)
             except Exception as e:                     # never a dead thread: a push that never comes is a row
                 record("push-failed", address, error=str(e)[:300] or type(e).__name__)
             finally:

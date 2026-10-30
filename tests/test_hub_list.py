@@ -1325,6 +1325,17 @@ def test_a_row_whose_move_to_is_ticked_draws_no_move_to_button(box, sheaves):
     assert [b for b in buttons(box.get("/list?show=all", member=NELL)) if b.word == "Move to"] == []
 
 
+def test_a_tick_of_another_candidate_once_one_is_ticked_is_refused_and_one_tick_stays(box, sheaves):
+    """Even on the text as it is now: the other candidates are no actions, so no tick can reach them."""
+    path = unsure(sheaves)
+    box.hub.the_list.poll()
+    assert box.post("/_/tick", now(box, {"doc": JOEY, "action": 1, "word": "Move to"}), member=NELL).status == 200
+    after = path.read_text(encoding="utf-8")
+    r = box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Move to"}), member=NELL)
+    assert r.status == 409, r.text
+    assert path.read_text(encoding="utf-8") == after and after.count("- [x] Move to") == 1
+
+
 @pytest.mark.parametrize("old, new, slug", [
     ("- [x] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n",
      "- [x] Move to klium (ref t1)\n- [x] Move to acme (ref t1)\n", "klium"),           # a second tick
@@ -1343,8 +1354,8 @@ def test_a_write_that_ticks_another_move_to_names_the_one_ticked(old, new, slug)
      "- [x] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n"),                    # the first tick
     ("- [x] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n",
      "- [x] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n\nText.\n"),          # another edit
-    ("- [x] Move to klium (ref t1)\n", "- [x] Move to klium (ref t1)\n- [ ] Approve\n"),
-    ("- [ ] Move to newtrition-coach (ref t1)\n", "- [x] Move to newtrition\\-coach (ref t1)\n"),
+    ("- [x] Move to klium (ref t1)\n", "- [x] Move to klium (ref t1)\n- [ ] Approve\n"),    # another word added
+    ("- [ ] Move to newtrition-coach (ref t1)\n", "- [x] Move to newtrition\\-coach (ref t1)\n"),  # ticked escaped
     ("- [x] Move to newtrition-coach (ref t1)\n", "- [x] Move to newtrition\\-coach (ref t1)\n"),  # escaped back
     ("```\n- [x] Move to klium (ref t1)\n```\n- [ ] Move to acme (ref t1)\n",
      "```\n- [x] Move to klium (ref t1)\n```\n- [x] Move to acme (ref t1)\n"),         # in a fence: no box

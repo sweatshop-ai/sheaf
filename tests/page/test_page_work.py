@@ -117,8 +117,8 @@ def test_work_on_this_opens_the_two_ways_and_the_sessions(tab):
     w = tab.page.locator("#rd-work")
     heads = w.locator("h4").all_text_contents()
     assert heads == ["Attach on the box", "Fork to your machine", "Sessions"]
-    assert w.locator(".rd-cmd code").all_inner_texts() == [ATTACH, FORK]
-    assert w.locator(".rd-cmd button").all_inner_texts() == ["Copy", "Copy"]
+    assert w.locator(".rd-cmd:not(.rd-install) code").all_inner_texts() == [ATTACH, FORK]
+    assert w.locator(".rd-cmd:not(.rd-install) button").all_inner_texts() == ["Copy", "Copy"]
     assert "Runs on your laptop: fetches the session through this hub, forks it under your name. " \
            "Needs uv there." in w.inner_text()
     # Newest first, as the front matter lists them, and five at most.
@@ -131,12 +131,42 @@ def test_work_on_this_opens_the_two_ways_and_the_sessions(tab):
     assert not tab.page.locator("#rd-menu").is_visible()
 
 
+UV_MACOS = "curl -LsSf https://astral.sh/uv/install.sh | sh"
+UV_LINUX = "wget -qO- https://astral.sh/uv/install.sh | sh"
+UV_WINDOWS = 'powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"'
+
+
+def test_the_fork_folds_how_to_install_uv_on_a_bare_laptop(tab, context, site):
+    # tt-tiroir#170: a member's laptop may have nothing on it; uv's installer is one line per system, folded.
+    context.grant_permissions(["clipboard-read", "clipboard-write"], origin=site.base)
+    as_member(tab, work())
+    tab.open()
+    open_work(tab.page)
+    need = tab.page.locator("#rd-work details.rd-need")
+    assert need.locator("summary").inner_text() == "No uv on this laptop yet?"
+    assert not need.locator(".rd-install").first.is_visible()
+    need.locator("summary").click()
+    assert need.locator(".rd-install code").all_inner_texts() == [UV_MACOS, UV_LINUX, UV_WINDOWS]
+    assert "Then open a new terminal and paste the command above." in need.inner_text()
+    assert need.locator("a").count() == 0           # the page links nowhere outside the hub
+    need.locator(".rd-install button").nth(2).click()
+    until(lambda: toast(tab.page) == "Copied", what="the Copied toast")
+    assert tab.page.evaluate("navigator.clipboard.readText()") == UV_WINDOWS
+
+
+def test_no_fork_no_uv_fold(tab):
+    as_member(tab, work(fork=None))
+    tab.open()
+    open_work(tab.page)
+    assert tab.page.locator("#rd-work .rd-need").count() == 0
+
+
 def test_without_a_shell_there_is_no_attach_command(tab):
     as_member(tab, work(attach=None))
     tab.open()
     open_work(tab.page)
     assert tab.page.locator("#rd-work h4").all_text_contents() == ["Fork to your machine", "Sessions"]
-    assert tab.page.locator("#rd-work .rd-cmd code").all_inner_texts() == [FORK]
+    assert tab.page.locator("#rd-work .rd-cmd:not(.rd-install) code").all_inner_texts() == [FORK]
 
 
 def test_a_sheaf_with_no_session_on_the_box_offers_no_fork(tab):
@@ -182,7 +212,7 @@ def test_copy_puts_the_command_on_the_clipboard_and_says_copied(tab, context, si
     as_member(tab, work())
     tab.open()
     open_work(tab.page)
-    tab.page.locator("#rd-work .rd-cmd button").nth(1).click()
+    tab.page.locator("#rd-work .rd-cmd:not(.rd-install) button").nth(1).click()
     until(lambda: toast(tab.page) == "Copied", what="the Copied toast")
     assert tab.page.evaluate("navigator.clipboard.readText()") == FORK
 
@@ -192,7 +222,7 @@ def test_without_the_clipboard_api_copy_selects_the_command(tab):
     as_member(tab, work())
     tab.open()
     open_work(tab.page)
-    tab.page.locator("#rd-work .rd-cmd button").nth(0).click()
+    tab.page.locator("#rd-work .rd-cmd:not(.rd-install) button").nth(0).click()
     until(lambda: tab.page.evaluate("getSelection().toString()") == ATTACH, what="the command selected")
     assert tab.page.locator("#rd-work").is_visible()
     tab.page.wait_for_timeout(500)        # past the 350 ms after which a selection would get its Comment button

@@ -275,15 +275,17 @@ class Hub:
                 "service": self.service, "me": self.person,
                 "agent": None, "can": [], "lines": {}, "seen": {}}
         log = []
+        by_project = self._images_by_project(root)
         # The link rule is a warning for whoever renders the document, said once: the hub's
         # re-renders after a save say nothing, so a bare host name is not reported on every save.
         html = render_file(e.path, share=False, src=text, title=s["title"],
                            toc=s["toc"] or "auto", max_image_width=s["max_image_width"] or 1400,
                            by=s["by"], for_=s["for"], theme=s["theme"], credit=s["credit"], log=log,
                            root=root.path if root else None, extra_meta=meta,
-                           script_nonce=self.placeholder, image_ok=self._image_rule(root, e.path, e),
+                           script_nonce=self.placeholder, image_ok=self._image_rule(root, e.path, by_project),
                            warn=e.warnings.append if e.first else None)
         e.log, e.first = log, False
+        e.images_by_project = by_project if self.proxy is not None and root is not None else None  # once it built
         return html
 
     def share_copy(self, e: Entry) -> str:
@@ -295,19 +297,19 @@ class Hub:
                            for_=s["for"], theme=s["theme"], credit=s["credit"], log=[],
                            root=root.path if root else None, image_ok=self._image_rule(root, e.path))
 
-    def _image_rule(self, root, doc, e: Entry | None = None):
+    def _image_rule(self, root, doc, by_project: bool | None = None):
         """In proxy mode, a local image is embedded only when the root 8.2 finds for its file is the
         document's own root (9.9 "Local images"), and, in a root with a `projects.toml`, when its
         `<client>/<project>` is in reach of the document's file `doc` (8.12): in every render of the hub, the page
-        and the share copy alike. None in loopback mode: every local image, as 6.2 says. The entry `e` of a page
-        keeps which of the two it was built by, so `catch_up` builds it again once the file comes or goes."""
+        and the share copy alike. None in loopback mode: every local image, as 6.2 says. `by_project`, when given,
+        is the rule a page's build read (`_build` keeps it on the entry once the build worked, so `catch_up` builds
+        the page again once the file comes or goes)."""
         if self.proxy is None:
             return None
         if root is None:
             return lambda path: False
-        by_project = self._images_by_project(root)
-        if e is not None:
-            e.images_by_project = by_project
+        if by_project is None:
+            by_project = self._images_by_project(root)
         top = os.path.realpath(root.path)
         at = os.path.relpath(os.path.realpath(doc), top)
 

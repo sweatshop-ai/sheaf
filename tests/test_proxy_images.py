@@ -556,3 +556,25 @@ def test_a_page_built_before_projects_toml_came_is_built_again_at_its_next_load(
     assert "data:image/png" not in front.get("/work/acme/blog/pic.md").text
     (work / "projects.toml").unlink()
     assert "data:image/png" in front.get("/work/acme/blog/pic.md").text
+
+
+def test_a_build_that_failed_after_projects_toml_came_is_tried_again_at_the_next_load(front, plan, granted, work,
+                                                                                      monkeypatch):
+    """The rule a page was built by is kept only once the build worked: one that raised leaves the page of the old
+    rule marked as such, so the next request builds it again."""
+    from sheafmd.hub import core
+    (work / "projects.toml").unlink()
+    png(work / "thinkingtoo" / "tiroir" / "secret.png")
+    html, _, _ = project_page(front, work, "acme/blog/pic.md", "../../thinkingtoo/tiroir/secret.png")
+    assert "data:image/png" in html
+    (work / "projects.toml").write_text(PROJECTS, encoding="utf-8")
+    real, calls = core.render_file, []
+
+    def once(*a, **k):
+        calls.append(1)
+        if len(calls) == 1:
+            raise OSError("the disk hiccuped")
+        return real(*a, **k)
+    monkeypatch.setattr(core, "render_file", once)
+    front.get("/work/acme/blog/pic.md")
+    assert "data:image/png" not in front.get("/work/acme/blog/pic.md").text

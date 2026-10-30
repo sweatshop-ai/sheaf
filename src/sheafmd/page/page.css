@@ -34,6 +34,9 @@
 #rd-work .rd-cmd code{flex:1;min-width:0;overflow-x:auto;white-space:nowrap;font:12px ui-monospace,monospace}
 #rd-work .rd-cmd button{font:600 11px ui-monospace,monospace;cursor:pointer;background:var(--fg,#000);
  color:var(--bg,#fff);border:0;border-radius:2px;padding:4px 9px}
+#rd-work .rd-need{margin:4px 0 6px;font-size:12px}
+#rd-work .rd-need summary{cursor:pointer;opacity:.8}
+#rd-work .rd-need .rd-cmd{margin:2px 0}
 #rd-work .rd-sess{font:12px ui-monospace,monospace;padding:3px 0;border-top:1px solid rgba(127,127,127,.2)}
 
 .rd-anchor{display:inline;white-space:nowrap}

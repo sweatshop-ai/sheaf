@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 import pytest
-from helpers import BEA, CAL, FRONT, Front, PLAN
+from helpers import BEA, CAL, FRONT, Front, PLAN, undecodable_names_or_skip
 
 from sheafmd import signals
 from sheafmd.blocks import split_md_blocks
@@ -722,6 +722,7 @@ def test_a_link_and_its_file_both_changed_on_the_remote_take_one_lock_and_the_pu
 def test_a_file_name_that_is_not_utf8_on_the_remote_is_taken_in(box, sheaves, remote, tmp_path):
     merged_on_github(tmp_path, remote, {"README.md": "# The sheaves\n"}, "a README")
     away = tmp_path / "github"
+    undecodable_names_or_skip(away)
     (away / os.fsdecode(b"caf\xe9.txt")).write_text("x\n", encoding="utf-8")
     git(away, "add", "-A")
     git(away, "commit", "-q", "-m", "a latin-1 name")

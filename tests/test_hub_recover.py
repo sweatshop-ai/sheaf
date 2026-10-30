@@ -20,6 +20,7 @@ import pytest
 
 from helpers import (Silent, claim_port, gone, hub_rows, is_stopped, proc_state, silent_message, start_late_hub,
                      stranger, wait_until_refused)
+from sheafmd import darwin
 from sheafmd import signals as sheaf_signals
 from sheafmd.hub import client as hubclient
 from sheafmd.hub import jobs, recover, server, state
@@ -418,37 +419,81 @@ def test_a_stranger_that_answers_is_not_a_silent_hub_and_nothing_is_signalled(
 
 
 @pytest.mark.parametrize("command", ["restart", "stop"])
-def test_without_a_proc_nothing_is_stopped_and_the_message_is_the_one_it_was(
+def test_on_a_system_sheaf_cannot_read_a_process_on_nothing_is_stopped(
         sheaf, port, stand_in, sent, monkeypatch, command):
-    """macOS has no /proc: v1 is Linux, and there a silent hub keeps the message."""
+    """Neither Linux nor macOS: nothing tells the rule what a pid is, and a silent hub keeps the message."""
     p = stand_in(port)
     write_pid_file(p.pid, port)
-    monkeypatch.setattr(recover, "PLATFORM", "darwin")
-    refused(sheaf, command, port, sent, p, why="this system has no /proc to check a process by")
+    monkeypatch.setattr(recover, "PLATFORM", "freebsd14")
+    refused(sheaf, command, port, sent, p, why="sheaf cannot check a process on this system")
 
 
 @pytest.mark.parametrize("command", ["restart", "stop"])
 def test_a_proc_that_cannot_be_read_stops_nothing(sheaf, port, stand_in, sent, monkeypatch, tmp_path, command):
+    """A Linux whose /proc cannot be read."""
     p = stand_in(port)
     write_pid_file(p.pid, port)
+    monkeypatch.setattr(recover, "PLATFORM", "linux")
     monkeypatch.setattr(recover, "PROC", tmp_path / "no-proc-here")
     refused(sheaf, command, port, sent, p, why="this system has no /proc to check a process by")
 
 
 @pytest.mark.parametrize("command", ["restart", "stop"])
 def test_a_process_whose_command_line_cannot_be_read_is_left_alone(
-        sheaf, port, stand_in, sent, monkeypatch, tmp_path, command):
-    """The process is there and holds the port, but /proc/<pid>/cmdline is not: the rule cannot say it is
-    a hub. A /proc of the test's own, with every file of it but that one."""
+        sheaf, port, stand_in, sent, monkeypatch, command):
+    """The process is there and holds the port, but its command line cannot be read: the rule cannot say it
+    is a hub."""
     p = stand_in(port)
     write_pid_file(p.pid, port)
-    fake = tmp_path / "proc"
-    (fake / "self").mkdir(parents=True)
-    (fake / "self" / "stat").write_text((recover.PROC / "self" / "stat").read_text())
-    (fake / str(p.pid)).mkdir()
-    (fake / str(p.pid) / "stat").write_text((recover.PROC / str(p.pid) / "stat").read_text())
-    monkeypatch.setattr(recover, "PROC", fake)
+    monkeypatch.setattr(recover, "read_cmdline", lambda pid: None)
     refused(sheaf, command, port, sent, p, why=f"the command line of pid {p.pid} cannot be read")
+
+
+@pytest.fixture
+def macos(monkeypatch):
+    """What macOS's kernel would say (`sheafmd.darwin`), answered on any system from what this one says:
+    the rule reads it on `recover.PLATFORM` "darwin" through the four functions of that module only."""
+    if not sys.platform.startswith("linux"):
+        yield None                                                       # the real kernel answers
+        return
+    readings = []
+    for name, read in {"stat": recover.proc_stat, "uids": recover.proc_uids, "cmdline": recover.proc_cmdline,
+                       "listens": recover.proc_holds}.items():
+        monkeypatch.setattr(darwin, name, lambda *a, _read=read, _name=name: (readings.append(_name), _read(*a))[1])
+    monkeypatch.setattr(darwin, "available", lambda: True)
+    monkeypatch.setattr(recover, "PLATFORM", "darwin")
+    yield readings
+    assert {"stat", "uids", "cmdline", "listens"} <= set(readings)
+
+
+def test_on_macos_the_rule_names_the_hub_and_stops_it(port, stand_in, macos):
+    p = stand_in(port)
+    write_pid_file(p.pid, port)
+    hub = recover.find(port)
+    assert hub.pid == p.pid and not hub.supervised
+    done = hub.stop()
+    assert done.ended and not done.killed and p.wait(timeout=30) == -signal.SIGTERM
+
+
+def test_on_macos_a_stand_in_of_another_port_is_left_alone(port, stand_in, stranger_that_says_nothing, macos):
+    other = stand_in(claim_port()[0])
+    write_pid_file(other.pid, port)
+    with pytest.raises(recover.Refusal, match=f"pid {other.pid} does not hold 127.0.0.1:{port}"):
+        recover.find(port)
+    assert other.poll() is None
+
+
+def test_on_macos_the_command_line_is_the_one_the_process_was_started_with(stand_in, port):
+    """The real kernel, where there is one: what /proc/<pid>/cmdline says on Linux."""
+    if not darwin.available():
+        assert darwin.cmdline(os.getpid()) is None and darwin.stat(os.getpid()) is None
+        return
+    p = stand_in(port)
+    assert darwin.cmdline(p.pid) == b"\0".join(a.encode() for a in [sys.executable, "-c", STAND_IN, *HUB_TAIL]) + b"\0"
+    assert darwin.uids(p.pid) == (os.getuid(),) * 4
+    state, started = darwin.stat(p.pid)
+    assert state in ("R", "S") and abs(started / 1e6 - time.time()) < 600
+    assert darwin.listens(p.pid, port) and not darwin.listens(os.getpid(), port)
 
 
 @pytest.mark.parametrize("command", ["restart", "stop"])

@@ -63,6 +63,7 @@ class Entry:
     log: list = field(default_factory=list)        # the render log of the last build
     warnings: list = field(default_factory=list)   # link-rule warnings not yet handed to a command
     first: bool = True                             # no build has run yet
+    images_by_project: bool | None = None          # whether its last build judged images by project (9.9, 8.12)
 
     @property
     def path(self) -> Path:
@@ -280,7 +281,7 @@ class Hub:
                            toc=s["toc"] or "auto", max_image_width=s["max_image_width"] or 1400,
                            by=s["by"], for_=s["for"], theme=s["theme"], credit=s["credit"], log=log,
                            root=root.path if root else None, extra_meta=meta,
-                           script_nonce=self.placeholder, image_ok=self._image_rule(root),
+                           script_nonce=self.placeholder, image_ok=self._image_rule(root, e.path, e),
                            warn=e.warnings.append if e.first else None)
         e.log, e.first = log, False
         return html
@@ -292,15 +293,39 @@ class Hub:
         return render_file(e.path, share=True, title=s["title"], toc=s["toc"] or "auto",
                            max_image_width=s["max_image_width"] or 1400, by=s["by"],
                            for_=s["for"], theme=s["theme"], credit=s["credit"], log=[],
-                           root=root.path if root else None, image_ok=self._image_rule(root))
+                           root=root.path if root else None, image_ok=self._image_rule(root, e.path))
 
-    def _image_rule(self, root):
+    def _image_rule(self, root, doc, e: Entry | None = None):
         """In proxy mode, a local image is embedded only when the root 8.2 finds for its file is the
-        document's own root (9.9 "Local images"), in every render of the hub, the page and the share
-        copy alike. None in loopback mode: every local image, as 6.2 says."""
+        document's own root (9.9 "Local images"), and, in a root with a `projects.toml`, when its
+        `<client>/<project>` is in reach of the document's file `doc` (8.12): in every render of the hub, the page
+        and the share copy alike. None in loopback mode: every local image, as 6.2 says. The entry `e` of a page
+        keeps which of the two it was built by, so `catch_up` builds it again once the file comes or goes."""
         if self.proxy is None:
             return None
-        return lambda path: root is not None and self.roots.lookup(path) == root
+        if root is None:
+            return lambda path: False
+        by_project = self._images_by_project(root)
+        if e is not None:
+            e.images_by_project = by_project
+        top = os.path.realpath(root.path)
+        at = os.path.relpath(os.path.realpath(doc), top)
+
+        def ok(path) -> bool:
+            if self.roots.lookup(path) != root:
+                return False
+            return not by_project or projects.image_in_reach(at, os.path.relpath(os.path.realpath(path), top))
+        return ok
+
+    def _images_by_project(self, root) -> bool:
+        """Whether a page of `root` judges its images by project: when the root has a `projects.toml`, read or not
+        (8.12: a root without one grants as before)."""
+        return self.proxy is not None and root is not None and self.projects_of(root) is not None
+
+    def _images_moved(self, e: Entry) -> bool:
+        """Whether the page of `e` was built by another image rule than its root's `projects.toml` gives now."""
+        root = self.roots.get(roots_mod.Address.parse(e.address).root)
+        return e.images_by_project is not None and e.images_by_project != self._images_by_project(root)
 
     def page(self, e: Entry, nonce: str, member=None) -> str:
         """The page to send: the nonce of this response on its script, and the read state as it
@@ -656,6 +681,11 @@ class Hub:
                 self._grants_seen[root_id] = got
                 for e in open_:
                     e.bus.publish("grants", {})
+                    if self._images_moved(e):
+                        try:
+                            e.live.rebuild()
+                        except Exception as ex:
+                            self._rebuild_failed(e, ex)
 
     def _observe(self, e: Entry):
         """What the session told by this document is doing. A failure here is written down and
@@ -677,6 +707,8 @@ class Hub:
             if key != e.last_stat:
                 e.live.refresh()
                 e.last_stat = key
+            if self._images_moved(e):           # a projects.toml came or went: its images are judged otherwise
+                e.live.rebuild()
         except Exception as ex:
             self._rebuild_failed(e, ex)
 

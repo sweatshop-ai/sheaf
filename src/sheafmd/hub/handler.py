@@ -850,10 +850,10 @@ class Handler:
         return place.place(self.hub, e.address, commit=False)
 
     def _ticks(self, req: Req, e):
-        """The guard of a save (live.save) for the two actions the hub acts on (9.11), and the set it fills
-        with the words the save ticked. Share is its owner's alone: ticked by anyone else, nothing is
-        written; ticked by the owner, the same write opens the sheaf to the project. A one-off action
-        (9.10) is never unticked. Who ticked is the signed-in member, never a name the request carries."""
+        """The guard of a save (live.save) for the actions the hub judges: a one-off is never unticked (9.10), and
+        the two it acts on (9.11); and the set it fills with the words the save ticked. Share is its owner's alone: ticked by anyone else, nothing is
+        written; ticked by the owner, the same write opens the sheaf to the project. Who ticked is the
+        signed-in member, never a name the request carries."""
         ticked = set()
 
         def guard(text, new, toggled):

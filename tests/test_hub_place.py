@@ -420,6 +420,13 @@ PRESSED = OPEN.replace("- [ ] Share", "- [x] Approve\n- [ ] Share")
 REFUSED = "Approve is pressed once: its tick cannot be taken back."
 
 
+def the_block(text, word):
+    """(the number of the block of `text` that holds `- [x] <word>`, its HTML as the page draws it)."""
+    blocks = split_md_blocks(text)
+    i = next(i for i, b in enumerate(blocks) if f"- [x] {word}" in b.content)
+    return i, BeautifulSoup(_pandoc.run(["-f", "gfm", "-t", "html5"], blocks[i].content).stdout, "html.parser")
+
+
 @pytest.mark.parametrize("member", [THIERRY, HANS], ids=["owner", "member"])
 def test_a_save_that_unticks_a_one_off_is_refused_and_writes_nothing(team, work, member):
     put(team, work, SHARED, PRESSED)
@@ -445,10 +452,8 @@ def test_a_rewrite_that_unticks_a_one_off_is_refused(team, work):
 def test_a_merged_save_that_unticks_a_one_off_is_refused(team, work):
     put(team, work, SHARED, PRESSED)
     assert team.get(f"/work/{SHARED}", member=HANS).status == 200            # the page: its text is a version
-    blocks = split_md_blocks(PRESSED)
-    i = next(i for i, b in enumerate(blocks) if "- [x] Approve" in b.content)
-    soup = BeautifulSoup(_pandoc.run(["-f", "gfm", "-t", "html5"], blocks[i].content).stdout, "html.parser")
-    del soup.select_one('input[type="checkbox"]')["checked"]
+    i, soup = the_block(PRESSED, "Approve")
+    del next(b for b in soup.select('input[type="checkbox"]') if "Approve" in b.parent.get_text())["checked"]
     now = PRESSED.replace("A quote from the contract.", "A quote, changed elsewhere.")
     (work / SHARED).write_text(now, encoding="utf-8")
     got = team.post("/_/save", {"doc": f"work/{SHARED}", "hash": md_hash(PRESSED),
@@ -458,11 +463,10 @@ def test_a_merged_save_that_unticks_a_one_off_is_refused(team, work):
 
 
 def test_a_save_that_takes_a_ticked_one_off_out_writes(team, work):
-    """Only an untick is refused: a box taken out leaves no action to press again, as for Share (9.11)."""
+    """Only an untick is refused: a box taken out, with no other box of its word left, leaves no action to press
+    again, as for Share (9.11)."""
     put(team, work, SHARED, PRESSED)
-    blocks = split_md_blocks(PRESSED)
-    i = next(i for i, b in enumerate(blocks) if "- [x] Approve" in b.content)
-    soup = BeautifulSoup(_pandoc.run(["-f", "gfm", "-t", "html5"], blocks[i].content).stdout, "html.parser")
+    i, soup = the_block(PRESSED, "Approve")
     next(li for li in soup.select("li") if "Approve" in li.get_text()).decompose()
     got = team.post("/_/save", {"doc": f"work/{SHARED}", "hash": md_hash(PRESSED),
                                 "edits": [{"i": i, "html": str(soup)}]}, member=THIERRY)

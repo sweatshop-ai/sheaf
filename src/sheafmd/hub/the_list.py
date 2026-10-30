@@ -206,34 +206,37 @@ def read_sheaf(rel: str, text: str) -> Sheaf:
                 if (m := _ACTION_RE.fullmatch(line.removesuffix("\r"))) and m["mark"] == " ":
                     # A slug the hub gave back escaped (`newtrition\-coach`) is read as written.
                     slug = re.sub(r"\\(.)", r"\1", m["slug"] or "")
-                    actions.append(((m["word"] or m["move"]).replace("’", "'"), m["short"] or "", b.start + k, slug))
+                    actions.append((_word(m), m["short"] or "", b.start + k, slug))
     return Sheaf(rel, title or rel.rsplit("/", 1)[-1][:-3], issue, fm_text(fm, "assistant"),
                  fm_text(fm, "kind"), visibility.effective(fm), tuple(actions), visibility.sources(fm),
                  fm_text(fm, "owner"), fm_text(fm, "shared"), md_hash(text), "moved_to" in fm)
 
 
+def _word(m: re.Match) -> str:
+    """The word of the action `_ACTION_RE` matched, its apostrophe straight."""
+    return (m["word"] or m["move"]).replace("’", "'")
+
+
 def unticks_one_off(old: str, new: str) -> str | None:
-    """The word of a one-off action (every word but the toggles) whose ticked box writing `new` over `old` turns
-    back to `[ ]`, by whatever edit (9.10, #108): one action, its word, short name and Move to's slug alike, has
-    fewer ticked boxes in `new` than in `old` and more unticked ones. None when there is none: a ticked box taken
-    out, or another action written in its place, unticks nothing. Boxes are read in the list blocks the page
-    draws, as the actions are."""
-    was, now = _boxes(old), _boxes(new)
-    for (action, mark), n in was.items():
-        if mark == "x" and action[0] not in TOGGLES and now[action, "x"] < n and now[action, " "] > was[action, " "]:
-            return action[0]
+    """The word of a one-off action (every word but the toggles) whose tick writing `new` over `old` takes back,
+    by whatever edit (9.10, #108), judged by its word as the Share rule is (9.11): `new` holds fewer ticked boxes
+    of that word than `old`, and an unticked one. None when there is none: a ticked box taken out with no other
+    box of its word left unticks nothing. Boxes are read in the list blocks the page draws, as the actions are."""
+    was, now = _box_marks(old), _box_marks(new)
+    for (word, mark), n in was.items():
+        if mark == "x" and word not in TOGGLES and now[word, "x"] < n and now[word, " "]:
+            return word
     return None
 
 
-def _boxes(text: str) -> collections.Counter:
-    """How many boxes of each action `text` holds, ticked ("x") or not (" "): {((word, short, slug), mark): n}."""
+def _box_marks(text: str) -> collections.Counter:
+    """How many boxes of each action's word `text` holds, ticked ("x") or not (" "): {(word, mark): n}."""
     counts = collections.Counter()
     for b in split_md_blocks(text):
         if b.kind == "list":
             for line in b.content.removesuffix("\n").split("\n"):
                 if m := _ACTION_RE.fullmatch(line.removesuffix("\r")):
-                    action = ((m["word"] or m["move"]).replace("’", "'"), m["short"] or "", re.sub(r"\\(.)", r"\1", m["slug"] or ""))
-                    counts[action, m["mark"].lower()] += 1
+                    counts[_word(m), m["mark"].lower()] += 1
     return counts
 
 

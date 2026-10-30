@@ -203,7 +203,7 @@ def read(res):
         for group in section.select(".list-group"):
             rows = []
             for row in group.select(".list-row"):
-                # The title, then its actions (buttons and Move to's chips) and its assistant, as a reader scans the row.
+                # The title, then its action buttons and its assistant, as a reader scans the row.
                 said = [row.select_one(".list-title")] + row.select(".list-actions > *") + row.select(".list-assistant")
                 rows.append((" ".join(x.get_text(" ", strip=True) for x in said),
                              " ".join(row.select_one(".list-meta").get_text(" ", strip=True).split())))
@@ -1298,13 +1298,59 @@ def test_a_tick_of_the_second_move_to_ticks_that_box_and_no_other(box, sheaves):
     assert path.read_text(encoding="utf-8") == before.replace("- [ ] Move to klium", "- [x] Move to klium")
 
 
-def test_a_row_of_move_to_boxes_names_each_slug_in_its_chip_and_draws_no_button_for_them(box, sheaves):
+def test_a_row_of_move_to_boxes_draws_one_one_off_button_per_candidate_named_by_its_slug(box, sheaves):
     unsure(sheaves)
     box.hub.the_list.poll()
     res = box.get("/list", member=NELL)
     assert read(res)["Waiting on you 2"]["globex/black-friday"] == [
         ("Reply to Joey about column L Move to dexis Move to klium Move to thinkingtoo James", "mail · you · #5 · 2 h")]
-    assert JOEY not in [b.doc for b in buttons(res)]
+    href = "/list/globex/black-friday/2026-10-28-reply-to-joey.md"
+    assert [b for b in buttons(res) if b.doc == JOEY] == [
+        (href, JOEY, str(n), "Move to", "one-off", f"Move to {slug}") for n, slug in enumerate(("dexis", "klium",
+                                                                                                 "thinkingtoo"))]
+
+
+@pytest.mark.parametrize("mark", ["x", "X"])
+def test_once_a_move_to_is_ticked_the_other_candidates_are_no_actions_and_other_words_stay(mark):
+    s = the_list.read_sheaf("a/b/c.md", "# A sheaf\n" + CLIENT.replace("- [ ] Move to klium", f"- [{mark}] Move to klium")
+                            + "\n- [ ] Done\n")
+    assert [(w, arg) for w, _, _, arg in s.actions] == [("Done", "")]
+
+
+def test_a_row_whose_move_to_is_ticked_draws_no_move_to_button(box, sheaves):
+    path = unsure(sheaves)
+    path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Move to klium", "- [x] Move to klium"),
+                    encoding="utf-8")
+    box.hub.the_list.poll()
+    assert [b for b in buttons(box.get("/list?show=all", member=NELL)) if b.word == "Move to"] == []
+
+
+@pytest.mark.parametrize("old, new, slug", [
+    ("- [x] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n",
+     "- [x] Move to klium (ref t1)\n- [x] Move to acme (ref t1)\n", "klium"),           # a second tick
+    ("- [x] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n",
+     "- [ ] Move to klium (ref t1)\n- [x] Move to acme (ref t1)\n", "klium"),           # the two swapped
+    ("- [x] Move to klium (ref t1)\n", "- [x] Move to acme (ref t1)\n", "klium"),       # its slug rewritten
+    ("- [ ] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n",
+     "- [x] Move to klium (ref t1)\n- [x] Move to acme (ref t1)\n", "klium"),           # two in one save
+])
+def test_a_write_that_ticks_another_move_to_names_the_one_ticked(old, new, slug):
+    assert the_list.ticks_another_move(f"# A sheaf\n\n{old}", f"# A sheaf\n\n{new}") == slug
+
+
+@pytest.mark.parametrize("old, new", [
+    ("- [ ] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n",
+     "- [x] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n"),                    # the first tick
+    ("- [x] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n",
+     "- [x] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n\nText.\n"),          # another edit
+    ("- [x] Move to klium (ref t1)\n", "- [x] Move to klium (ref t1)\n- [ ] Approve\n"),
+    ("- [ ] Move to newtrition-coach (ref t1)\n", "- [x] Move to newtrition\\-coach (ref t1)\n"),
+    ("- [x] Move to newtrition-coach (ref t1)\n", "- [x] Move to newtrition\\-coach (ref t1)\n"),  # escaped back
+    ("```\n- [x] Move to klium (ref t1)\n```\n- [ ] Move to acme (ref t1)\n",
+     "```\n- [x] Move to klium (ref t1)\n```\n- [x] Move to acme (ref t1)\n"),         # in a fence: no box
+])
+def test_a_write_that_ticks_no_other_move_to_names_none(old, new):
+    assert the_list.ticks_another_move(f"# A sheaf\n\n{old}", f"# A sheaf\n\n{new}") is None
 
 
 def pointer(sheaves):
@@ -1331,13 +1377,14 @@ def test_a_sheaf_that_became_a_pointer_since_the_poll_leaves_the_page_at_once(bo
     assert not any("joey" in t.lower() for t in titles(page)), page
 
 
-def test_a_row_whose_move_to_boxes_come_before_another_action_carries_the_button_of_that_action(box, sheaves):
+def test_a_row_whose_move_to_boxes_come_before_another_action_carries_the_button_of_each(box, sheaves):
     path = unsure(sheaves)
     path.write_text(path.read_text(encoding="utf-8").replace("The draft.\n", "The draft.\n\n- [ ] Approve\n"),
                     encoding="utf-8")
     box.hub.the_list.poll()
-    assert [b for b in buttons(box.get("/list", member=NELL)) if b.doc == JOEY] == [
-        ("/list/globex/black-friday/2026-10-28-reply-to-joey.md", JOEY, "3", "Approve", "one-off", "Approve")]
+    assert [(b.action, b.word, b.label) for b in buttons(box.get("/list", member=NELL)) if b.doc == JOEY] == [
+        ("0", "Move to", "Move to dexis"), ("1", "Move to", "Move to klium"),
+        ("2", "Move to", "Move to thinkingtoo"), ("3", "Approve", "Approve")]
 
 
 # ── a one-off stays pressed (#108) ────────────────────────────────────────────

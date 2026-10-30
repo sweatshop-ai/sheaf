@@ -506,6 +506,51 @@ def test_the_untick_is_refused_outside_the_list_too(team, work, tmp_path):
     assert got.status == 409 and f.read_text(encoding="utf-8") == text
 
 
+
+# ── a sheaf moves to one client (#109) ───────────────────────────────────────
+
+MOVES = OPEN.replace("- [ ] Share", "- [ ] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n- [ ] Share")
+MOVED = MOVES.replace("- [ ] Move to klium", "- [x] Move to klium")
+MOVED_ONCE = "This thread moves to one client: Move to klium is ticked."
+
+
+def set_moves(team, work, text, ticked, member=HANS):
+    """The page's save of the Move to block of `text` with exactly the boxes of the slugs `ticked` checked."""
+    blocks = split_md_blocks(text)
+    i = next(i for i, b in enumerate(blocks) if "Move to klium" in b.content)
+    soup = BeautifulSoup(_pandoc.run(["-f", "gfm", "-t", "html5"], blocks[i].content).stdout, "html.parser")
+    for b in soup.select('input[type="checkbox"]'):
+        words = b.parent.get_text()
+        if "Move to" in words:
+            if any(f"Move to {s} " in words for s in ticked):
+                b["checked"] = ""
+            elif b.has_attr("checked"):
+                del b["checked"]
+    return team.post("/_/save", {"doc": f"work/{SHARED}", "hash": md_hash(text),
+                                 "edits": [{"i": i, "html": str(soup)}]}, member=member)
+
+
+def test_the_first_move_to_tick_in_the_page_writes(team, work):
+    put(team, work, SHARED, MOVES)
+    got = set_moves(team, work, MOVES, ["klium"])
+    assert got.status == 200, got.text
+    assert "- [x] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)" in (work / SHARED).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("ticked", [["klium", "acme"], ["acme"]], ids=["second", "swap"])
+def test_a_save_that_ticks_another_move_to_is_refused_and_writes_nothing(team, work, ticked):
+    put(team, work, SHARED, MOVED)
+    got = set_moves(team, work, MOVED, ticked)
+    assert got.status == 409 and got.json()["error"] == MOVED_ONCE
+    assert (work / SHARED).read_text(encoding="utf-8") == MOVED
+
+
+def test_a_save_that_ticks_two_move_tos_at_once_is_refused(team, work):
+    put(team, work, SHARED, MOVES)
+    got = set_moves(team, work, MOVES, ["klium", "acme"], member=THIERRY)
+    assert got.status == 409 and got.json()["error"] == MOVED_ONCE
+    assert (work / SHARED).read_text(encoding="utf-8") == MOVES
+
 # ── the poll places what is not at home ──────────────────────────────────────
 
 def test_the_poll_moves_an_owner_only_sheaf_into_private_and_an_open_one_out(team, work):

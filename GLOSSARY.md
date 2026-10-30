@@ -99,11 +99,11 @@ _Avoid_: permission, privacy, ACL
 The action any member ticks on a sheaf of the assistant James to end his work on its project (SPEC 9.11). It is the one place the core names a deployment's assistant: the hub writes a diagnostics row and, with `[list] stop_dir`, a file the deployment's supervisor reads; stopping is the deployment's, a Layer concern the core only signals.
 
 **Move to**:
-The action that answers which client an unsure thread is for: one box per candidate, `- [ ] Move to <slug> (ref <thread>)`, the only word that takes an argument (SPEC 9.10). The boxes are the options of one answer, ticked in the sheaf; on the list each is a chip, not a button; the deployment's mail module moves the thread.
+The action that answers which client an unsure thread is for: one box per candidate, `- [ ] Move to <slug> (ref <thread>)`, the only word that takes an argument (SPEC 9.10). The boxes are the options of one answer: on the list each is a one-off button named by its slug, and once one is ticked the others are no actions and the hub refuses a second tick (#109); the deployment's mail module moves the thread.
 _Avoid_: reassign, transfer
 
 **One-off action**:
-An action a member presses once and that stays pressed: every word but Share (SPEC 9.10). On the list it is a red button that reads Undo for 5 seconds before the hub writes the tick; the hub refuses a save that unticks it (#108); a Move to is a one-off too, shown on the list as a chip.
+An action a member presses once and that stays pressed: every word but Share (SPEC 9.10). On the list it is a red button that reads Undo for 5 seconds before the hub writes the tick; the hub refuses a save that unticks it (#108); a Move to is a one-off too, one button per candidate.
 _Avoid_: single-use, final
 
 **Toggle action**:

@@ -7,6 +7,8 @@ import pytest
 from pagehelp import close_context, new_context, until
 from test_hub_list import JOEY, NELL, box, github, sheaves  # noqa: F401  (the hub with its list, as there)
 
+pytestmark = pytest.mark.page
+
 ORIGIN = "http://list.test"
 
 
@@ -121,7 +123,6 @@ def test_while_a_press_of_a_row_waits_its_other_buttons_cannot_be_pressed(listed
     page.clock.run_for(5100)
     until(lambda: ticks, what="the tick")
     assert [(b["action"], b["word"], s) for b, s in ticks] == [(1, "Done", 200)]
-
 
 
 def test_a_refusal_beside_a_press_that_went_through_is_still_said_after_the_reload(listed, sheaves):  # noqa: F811

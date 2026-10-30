@@ -248,6 +248,28 @@ def test_a_deliberate_stop_of_a_service_hub_under_the_unit_exits_with_its_own_co
     assert server.exit_code(hub) == server.EXIT_STOPPED
 
 
+def test_a_signal_that_comes_after_a_deliberate_stop_keeps_the_stop(port, work, monkeypatch):
+    """Under Restart=always a signal exits 0 and is restarted: one that lands while the hub ends a
+    `sheaf stop` must not bring back the hub the person stopped (gate P3)."""
+    monkeypatch.setenv(service.STOP_EXIT_ENV, str(server.EXIT_STOPPED))
+    hub = service_hub(port)
+    seen = []
+    hub.on_stop = seen.append
+    hub.request_stop("stop")
+    assert hub.request_stop("signal") is True
+    assert hub.stop_requested == "stop" and seen == ["stop"]
+    assert server.exit_code(hub) == server.EXIT_STOPPED
+
+
+def test_a_stop_that_comes_after_a_signal_keeps_the_signal(port, work, monkeypatch):
+    """The other way round the hub is ending on the signal already; the stop changes nothing."""
+    monkeypatch.setenv(service.STOP_EXIT_ENV, str(server.EXIT_STOPPED))
+    hub = service_hub(port)
+    hub.request_stop("signal")
+    hub.request_stop("stop")
+    assert hub.stop_requested == "signal" and server.exit_code(hub) == 0
+
+
 def test_a_signal_to_a_service_hub_exits_0_so_restart_always_starts_it_again(port, work, monkeypatch):
     monkeypatch.setenv(service.STOP_EXIT_ENV, str(server.EXIT_STOPPED))
     hub = service_hub(port)

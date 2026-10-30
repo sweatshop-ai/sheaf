@@ -38,7 +38,7 @@ TEXT_MAX = 3000                 # characters of a comment's text dropped for Jam
 # The laptop client of the fork (github.com/tiroir/tiroir-client), run from PyPI by uv: a member needs uv and
 # Claude Code, nothing installed. One exact version: the copied command runs code that holds the member's sign-in,
 # so a newer upload runs only when this line changes (tt-tiroir#170).
-FORK_CLIENT = "tiroir==0.1.0"
+FORK_CLIENT = "tiroir==0.2.0"
 
 
 class NotRewritten(ValueError):

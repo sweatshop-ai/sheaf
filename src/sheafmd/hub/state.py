@@ -11,6 +11,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import threading
 import time
 from contextlib import contextmanager
@@ -76,6 +77,20 @@ def file_locked(name: str):
         yield
     finally:
         f.close()
+
+
+def read_small(path: Path, most: int = 4096) -> str | None:
+    """The text of `path`, a regular file of at most `most` bytes reached without a link, or None: never a link's
+    target, never a wait on a FIFO. For a file of a root's versions store, which may hold traps (7.4)."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0))
+        with os.fdopen(fd, "rb") as f:
+            if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+                return None
+            data = f.read(most + 1)
+        return data.decode("utf-8") if len(data) <= most else None
+    except (OSError, ValueError):
+        return None
 
 
 def write_json(path: Path, obj):
@@ -152,7 +167,7 @@ class Versions:
             paths.private_dir(self._root / INSIDE.parent)   # `.sheaf` itself: never a link out of the root
         folder = paths.private_dir(paths.private_dir(self.dir) / doc_key(self._key(address)))
         named = folder / _ADDRESS_FILE
-        if named.is_symlink() or not named.exists():    # a link planted there is written over, never kept
+        if read_small(named) != self._key(address):     # a link, or a text planted there, is written over
             write_text_private(named, self._key(address))
         return folder
 

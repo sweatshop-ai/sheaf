@@ -1300,6 +1300,8 @@ def test_a_sweep_that_fails_is_a_row_and_the_pull_still_comes(box, sheaves, remo
     head = merged_on_github(tmp_path, remote, {"README.md": "# The sheaves\n"}, "a README")
     monkeypatch.setattr(commits, "_git", spy)
     poll(box)
+    monkeypatch.setattr(commits, "FETCH_SECONDS", 0)
+    poll(box)                                           # a pull that went through forgets nothing of the sweep's row
     assert (sheaves / "README.md").read_text(encoding="utf-8") == "# The sheaves\n"
     assert git(sheaves, "rev-parse", "HEAD").strip() == head
     assert rows("push-failed") == [] and [r["doc"] for r in rows("commit-failed")] == ["sheaves"]
@@ -1312,11 +1314,13 @@ def test_an_address_that_is_a_link_never_reaches_a_commit(box, sheaves, remote, 
     folder = sheaves / ".sheaf" / "versions" / state.doc_key("acme/blog/2026-10-28-plan.md")
     folder.mkdir(parents=True)
     (folder / "address").symlink_to(secret)
-    opened(box, sheaves)
+    opened(box, sheaves)                                # the version written: the link is written over
+    assert not (folder / "address").is_symlink() and secret.read_text(encoding="utf-8") == "TOKEN=s3cr3t\n"
+    (folder / "address").unlink()
+    (folder / "address").symlink_to(secret)             # and planted again after it, before the sweep
     poll(box)
     assert "s3cr3t" not in git(remote, "log", "--format=%B", "main")
-    assert git(remote, "log", "-1", "--format=%s", "main") == "versions: acme/blog/2026-10-28-plan.md\n"
-    assert not (folder / "address").is_symlink() and secret.read_text(encoding="utf-8") == "TOKEN=s3cr3t\n"
+    assert git(remote, "log", "-1", "--format=%s", "main") == f"versions: {folder.name}\n"
 
 
 def test_a_forged_address_names_no_commit(box, sheaves, remote):
@@ -1326,4 +1330,26 @@ def test_a_forged_address_names_no_commit(box, sheaves, remote):
     folder = sheaves / ".sheaf" / "versions" / state.doc_key("acme/blog/2026-10-28-plan.md")
     (folder / "address").write_text("TOKEN=s3cr3t", encoding="utf-8")
     poll(box)
+    assert git(remote, "log", "-1", "--format=%s", "main") == f"versions: {folder.name}\n"
+
+
+def test_a_forged_address_is_written_over_at_the_next_version(box, sheaves, remote):
+    from sheafmd.hub import state
+    opened(box, sheaves)
+    folder = sheaves / ".sheaf" / "versions" / state.doc_key("acme/blog/2026-10-28-plan.md")
+    (folder / "address").write_text("TOKEN=s3cr3t", encoding="utf-8")
+    changed_from_outside(box, sheaves)
+    poll(box)
+    assert (folder / "address").read_text(encoding="utf-8") == "acme/blog/2026-10-28-plan.md"
+    assert git(remote, "log", "-1", "--format=%s", "main") == "versions: acme/blog/2026-10-28-plan.md\n"
+
+
+def test_an_address_that_is_a_fifo_never_holds_the_pusher(box, sheaves, remote):
+    from sheafmd.hub import state
+    opened(box, sheaves)
+    folder = sheaves / ".sheaf" / "versions" / state.doc_key("acme/blog/2026-10-28-plan.md")
+    (folder / "address").unlink()
+    os.mkfifo(folder / "address")
+    box.hub.tick()
+    assert box.hub.commits.settle(10)
     assert git(remote, "log", "-1", "--format=%s", "main") == f"versions: {folder.name}\n"

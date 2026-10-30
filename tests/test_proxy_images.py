@@ -688,3 +688,13 @@ def test_an_owner_lookup_that_fails_leaves_the_projects_images_out(front, plan, 
     monkeypatch.setattr(front.hub, "owners", lambda address, members: (_ for _ in ()).throw(RuntimeError("boom")))
     html, share = owned_page(front, outsider, "acme/blog/pic.md", "bea", "fig.png")
     assert "data:image/png" not in html and "data:image/png" not in share
+
+
+def test_a_page_built_with_its_images_drops_them_when_its_owners_can_no_longer_be_judged(front, plan, outsider,
+                                                                                        monkeypatch):
+    """`catch_up` serves no page built under an older answer: one whose owners the hub then cannot judge is built
+    again without the project's images before it is served."""
+    html, _ = owned_page(front, outsider, "acme/blog/pic.md", "bea", "fig.png")
+    assert "data:image/png" in html
+    monkeypatch.setattr(front.hub, "owners", lambda address, members: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert "data:image/png" not in front.get("/work/acme/blog/pic.md").text

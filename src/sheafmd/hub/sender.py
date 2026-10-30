@@ -4,15 +4,24 @@ A Python signal handler is not told who sent the signal. Where the OS gives sigi
 hub blocks SIGTERM and SIGINT in every thread and one thread takes them with `sigtimedwait`, which
 returns the sender's pid; the command line is read from /proc at that moment, since the sender may
 be gone a second later. Without `sigtimedwait` (macOS) nothing is blocked, the ordinary handler
-runs, and the row names the signal only (SPEC 8.4, 15)."""
+runs, and the row names the signal only (SPEC 8.4, 15).
+
+CPython's `sigtimedwait`, interrupted (EINTR: a stop and SIGCONT, a debugger attaching) once its
+deadline has passed, returns the siginfo the kernel never filled in instead of None: stack garbage
+(sheaf#78, every CPython up to 3.14 at least). Only a siginfo that names SIGTERM or SIGINT is a
+signal; any other is logged as its raw numbers and the hub goes on."""
 import contextlib
 import signal
 import subprocess
 import threading
+import time
 from pathlib import Path
+
+from .. import diagnostics
 
 STOPPING = (signal.SIGTERM, signal.SIGINT)
 POLL = 0.25                              # how long the watcher waits before it looks at `done` again
+UNREAD_EVERY = 60.0                      # at most one signal-unread row a minute: a tracer that keeps pausing the hub
 BLOCKS = hasattr(signal, "sigtimedwait") and hasattr(signal, "pthread_sigmask")
 
 
@@ -34,12 +43,20 @@ def cmdline(pid: int) -> str | None:
     return text or None
 
 
+def raw(info) -> dict:
+    return {"si_signo": info.si_signo, "si_code": info.si_code, "si_pid": info.si_pid, "si_uid": info.si_uid}
+
+
 def who(info) -> dict:
     """The row fields for one siginfo: the signal, and the sender when the kernel names a process
-    (si_pid is 0 for a signal the kernel itself raised)."""
+    (si_pid is 0 for a signal the kernel itself raised). A siginfo that names no stopping signal
+    names no sender either: its numbers go under `raw`, as they came."""
+    if info.si_signo not in STOPPING:
+        return {"signal": "unknown", "raw": raw(info)}
     row = {"signal": name(info.si_signo)}
     if info.si_pid > 0:
         row["sender_pid"] = info.si_pid
+        row["sender_uid"] = info.si_uid
         line = cmdline(info.si_pid)
         if line:
             row["sender_cmdline"] = line
@@ -100,10 +117,18 @@ class Signals:
         self._thread.start()
 
     def _wait(self, deliver):
+        unread, last = 0, None
         while not self._done.is_set():
             info = signal.sigtimedwait(STOPPING, POLL)
-            if info is not None:
+            if info is None:
+                continue
+            if info.si_signo in STOPPING:
                 deliver(info.si_signo, who(info))
+                continue
+            unread += 1
+            if last is None or time.monotonic() - last >= UNREAD_EVERY:
+                diagnostics.record("hub", "signal-unread", None, raw=raw(info), count=unread)
+                unread, last = 0, time.monotonic()
 
     def close(self):
         self._done.set()

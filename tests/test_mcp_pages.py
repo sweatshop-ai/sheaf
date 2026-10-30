@@ -7,7 +7,8 @@ import subprocess
 import pytest
 
 import sheafmd.comments as rdc
-from helpers import GIT_FAILS, NOW, PLAN, comment, door, git_dirs_in, git_fails, ok, refused, refused_as_not_there, rpc
+from helpers import (GIT_FAILS, NOW, PLAN, comment, door, git_dirs_in, git_fails, ok, refused, refused_as_not_there, rpc,
+                     undecodable_names_or_skip)
 from sheafmd import diagnostics
 from sheafmd.hub.state import Tokens
 from sheafmd.mcp import NOT_IN_A_ROOT
@@ -168,6 +169,7 @@ def test_create_refuses_a_name_that_is_not_utf8_before_it_touches_the_disk(brows
     ("read", {}), ("threads", {}), ("reply", {"id": "c1", "text": "Done."}), ("resolve", {"id": "c1"}),
     ("update", {"text": "# x\n", "expected_hash": "0" * 16})])
 def test_every_tool_that_names_a_page_refuses_a_name_that_is_not_utf8(browser, plan, work, tool, args):
+    undecodable_names_or_skip(work)
     (work / "\udcff.md").write_bytes(b"# x\n")          # such a file, made outside sheaf
     assert "UTF-8" in refused(browser, tool, doc=NOT_UTF8, **args)
     assert (work / "\udcff.md").read_bytes() == b"# x\n"

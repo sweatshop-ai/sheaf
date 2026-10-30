@@ -630,6 +630,10 @@ class Hub:
             except Exception as ex:
                 self._rebuild_failed(e, ex)
         try:
+            self.commits.poll(self.roots.all())   # what the remote got, with no save (8.11, #75)
+        except Exception:
+            self.record_exception("push-failed")
+        try:
             self._tell_grants()
         except Exception:
             self.record_exception("grants-failed")

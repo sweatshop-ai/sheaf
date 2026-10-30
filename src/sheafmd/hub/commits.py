@@ -10,6 +10,9 @@ nothing and pushes nothing (#62). The watcher's poll hands each repo that pushes
 minute, with no save (#75): a change merged on the remote lands within a minute, and a push that failed goes out.
 The pull and the push are the repo's, not a root's: one of either per repo, however many of its roots asked, and
 none while the roots of the repo that commit disagree on `push` (#89).
+The versions a root keeps inside that no write made (a page opened, a change from outside rendered, a pin) are
+committed by the same thread, `versions: <path>`, before its pull and at the poll, push or not (#92): an untracked
+version is never pushed, and git refuses to write the remote's over it, even the same text.
 
     Author(name, email)          who a commit is by
     Commits(record, guard, roots)  `guard(root, files)`: the locks a writer of `files` holds before the repo's;
@@ -368,7 +371,7 @@ class Commits:
                 continue
             try:
                 rc = config.load_root_config(root.path, warn=lambda line: None)
-                if not (rc.commit and rc.push):
+                if not (rc.commit and (rc.push or rc.versions_inside)):
                     continue
                 repo = _repo(root.path)
                 if now - self._fetched.get(repo, float("-inf")) < FETCH_SECONDS:
@@ -406,6 +409,10 @@ class Commits:
             try:
                 if self._children.ended:
                     raise Stopped("the hub is stopping")
+                with self._repo_lock(folder):
+                    if self._sweep(root, repo):
+                        with self._lock:
+                            self._owed.add(repo)       # the hub's own commits: pushed as a write's are
                 if not self._pushes(root, repo, address):
                     continue                           # a write's push stays owed: the poll after the roots agree takes it
                 go = self._pull(root, address, record, seconds=PUSH_SECONDS if wrote else GIT_SECONDS)
@@ -478,7 +485,43 @@ class Commits:
         # The writers' locks first, the repo's last (9.11): no write of a file the remote changed comes between
         # the look at it and its new text, and no commit of any root of the repo between the hub's HEAD read and moved.
         with self._guard(root, [top / p for p in changed]), self._repo_lock(folder):
+            self._sweep(root, _repo(folder))           # what a page made since the pusher's sweep, before the work tree moves
             return self._catch_up(folder, theirs, address, record)
+
+    def _sweep(self, root, repo: str) -> bool:
+        """Commit what git does not hold yet of the versions stores of `repo`'s roots that commit and keep their
+        versions inside (#92): one commit per document, `versions: <path>`, by the hub. A write's commit carries its
+        versions folder; this takes the versions made with no write behind it (a page opened, a change from outside
+        or from the remote rendered, a pin, the newest 60 pushing an old one out), so the work tree never holds an
+        untracked version where the remote's may land: git refuses to write over one, even one that is the same.
+        A folder whose document the repo ignores stays out, as a write's does. The caller holds the repo's lock.
+        Whether it committed; a commit that fails is a `commit-failed` row, and the next sweep tries again."""
+        made = False
+        for r in [root] + [r for r in self._roots() if r.path != root.path]:
+            if not r.git or (r is not root and _repo(r.path) != repo):
+                continue
+            try:
+                rc = config.load_root_config(r.path, warn=lambda line: None)
+            except (config.ConfigError, OSError):
+                continue
+            if not (rc.commit and rc.versions_inside):
+                continue
+            listed = _git(r.path, "ls-files", "-z", "--others", "--modified", "--deleted", "--exclude-standard",
+                          "--", str(state.INSIDE))
+            folders: dict[Path, list] = {}
+            for p in map(Path, filter(None, listed.stdout.split("\0"))):
+                # By name, not the folder: a version half written (`state.write_text_private`) is never staged.
+                if len(p.parts) > 3 and not (p.name.startswith(".") and p.name.endswith(".tmp")):
+                    folders.setdefault(Path(*p.parts[:3]), []).append(str(p))
+            for f, files in sorted(folders.items()):
+                try:
+                    key = (r.path / f / "address").read_text(encoding="utf-8").strip()
+                except (OSError, ValueError):
+                    key = f.name
+                if key != f.name and _ignored(r.path, key):
+                    continue                           # a private draft's versions stay out with it
+                made |= self._commit(r.path, sorted(files), Author(*COMMITTER), f"versions: {key}", f"{r.name}/{key}")
+        return made
 
     def _catch_up(self, folder: Path, theirs: str, address: str, record):
         head = _git(folder, "rev-parse", "HEAD").stdout.strip()

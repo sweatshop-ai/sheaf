@@ -832,7 +832,10 @@ def test_a_projects_toml_merged_on_the_remote_lands_at_the_next_poll_with_no_sav
     head = merged_on_github(tmp_path, remote, {"projects.toml": ONLY_BEA}, "Cal leaves acme/blog")
     poll(box)
     assert (sheaves / "projects.toml").read_text(encoding="utf-8") == ONLY_BEA
-    assert git(sheaves, "rev-parse", "HEAD").strip() == head == git(remote, "rev-parse", "main").strip()
+    # The page Cal opened made a version: the poll commits it on top of the remote's (#92), and pushes it.
+    assert git(sheaves, "log", "-2", "--format=%H %s") == f"{git(sheaves, 'rev-parse', 'HEAD').strip()} " \
+        f"versions: acme/blog/2026-10-28-plan.md\n{head} Cal leaves acme/blog\n"
+    assert git(sheaves, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
     assert git(sheaves, "status", "--porcelain", "--untracked-files=no") == ""
     assert box.get(f"/{DOC}", member=CAL).status == 404
     assert rows("push-diverged") == [] and rows("push-failed") == []
@@ -1180,3 +1183,83 @@ def test_a_push_queued_while_the_roots_agreed_is_judged_again_when_its_turn_come
     assert len(seen) == 1 and made == ["push-settings-differ"]
     assert git(remote, "log", "--format=%s", "main").splitlines() == ["edit: plan.md", "first"]
     assert git(repo, "log", "--format=%s", "-3").splitlines() == ["edit: plan.md", "edit: plan.md", "first"]
+
+
+# ── versions written without a write (#92) ─────────────────────────────────────
+def untracked_versions(sheaves):
+    return git(sheaves, "status", "--porcelain", "--untracked-files=all", "--", ".sheaf/versions")
+
+
+def test_a_version_the_remote_gained_while_the_hub_held_it_untracked_is_taken_in(box, sheaves, remote, tmp_path):
+    """A page opened makes a version with no write behind it. Another clone's hub keeps the same text under the
+    same name and commits it: git refuses to write over an untracked file even when it is the same, so the pull
+    must find none."""
+    assert box.get(f"/{DOC}", member=BEA).status == 200
+    kept = {p.relative_to(sheaves).as_posix(): p.read_text(encoding="utf-8")
+            for p in (sheaves / ".sheaf" / "versions").rglob("*") if p.is_file()}
+    assert kept, "opening the page kept a version inside the root"
+    away = tmp_path / "github"
+    subprocess.run(["git", "clone", "-q", str(remote), str(away)], check=True, capture_output=True)
+    git(away, "config", "user.name", "Ada")
+    git(away, "config", "user.email", "ada@example.com")
+    for rel in kept:
+        (away / rel).parent.mkdir(parents=True, exist_ok=True)
+    head = merged_on_github(tmp_path, remote, kept, "the other clone's versions")
+    poll(box)
+    assert rows("push-diverged") == [] and rows("push-failed") == []
+    assert git(remote, "merge-base", "--is-ancestor", head, "main") == ""
+    assert git(sheaves, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
+    assert untracked_versions(sheaves) == ""
+
+
+def opened(box, sheaves):
+    assert box.get(f"/{DOC}", member=BEA).status == 200
+
+
+def changed_from_outside(box, sheaves):
+    opened(box, sheaves)
+    f = sheaves / "acme" / "blog" / "2026-10-28-plan.md"
+    f.write_text(f.read_text(encoding="utf-8") + "\nAn agent's line.\n", encoding="utf-8")
+    opened(box, sheaves)
+
+
+def pinned(box, sheaves):
+    opened(box, sheaves)
+    text = (sheaves / "acme" / "blog" / "2026-10-28-plan.md").read_text(encoding="utf-8")
+    r = box.post("/_/pin", {"doc": DOC, "hash": md_hash(text)}, member=BEA)
+    assert r.status == 200, r.text
+
+
+@pytest.mark.parametrize("push", [True, False], ids=["pushes", "does not push"])
+@pytest.mark.parametrize("made", [opened, changed_from_outside, pinned], ids=lambda f: f.__name__)
+def test_a_version_made_with_no_write_is_committed_by_the_next_poll(box, sheaves, remote, made, push):
+    if not push:
+        (sheaves / ".sheaf.toml").write_text('versions = "root"\ncommit = true\n', encoding="utf-8")
+    made(box, sheaves)
+    assert untracked_versions(sheaves) != ""
+    poll(box)
+    assert untracked_versions(sheaves) == ""
+    assert git(sheaves, "log", "-1", "--format=%an|%s") == "sheaf|versions: acme/blog/2026-10-28-plan.md\n"
+    assert git(remote, "rev-parse", "main") == git(sheaves, "rev-parse", "HEAD") if push else \
+        git(remote, "rev-list", "--count", "main") == "1\n"
+    assert rows("commit-failed") == []
+
+
+def test_the_versions_of_a_document_the_repo_ignores_stay_out_when_the_poll_commits(box, sheaves, remote):
+    (sheaves / ".git" / "info" / "exclude").write_text("acme/blog/2026-10-28-plan.md\n", encoding="utf-8")
+    git(sheaves, "rm", "-q", "--cached", "acme/blog/2026-10-28-plan.md")
+    git(sheaves, "commit", "-q", "-m", "a private draft from now on")
+    opened(box, sheaves)
+    poll(box)
+    assert git(sheaves, "log", "-1", "--format=%s") == "a private draft from now on\n"
+    assert untracked_versions(sheaves).startswith("??")
+
+
+def test_a_version_half_written_is_never_committed_by_the_poll(box, sheaves, remote):
+    from sheafmd.hub import state
+    opened(box, sheaves)
+    folder = sheaves / ".sheaf" / "versions" / state.doc_key("acme/blog/2026-10-28-plan.md")
+    (folder / f".{'0' * 16}.md.tmp").write_text("half a ver", encoding="utf-8")
+    poll(box)
+    assert not any(f.endswith(".tmp") for f in git(sheaves, "show", "--name-only", "--format=", "HEAD").split())
+    assert untracked_versions(sheaves).splitlines() == [f"?? .sheaf/versions/{folder.name}/.{'0' * 16}.md.tmp"]

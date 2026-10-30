@@ -323,16 +323,22 @@ class Hub:
         """(whether a page of `root` judges its images by project, whether the sheaf at `address` has a reader the
         project does not name). By project when the root has a `projects.toml`, read or not (8.12: a root without
         one grants as before). A reader the project does not name is an owner its `members` do not hold, since an
-        owner opens their sheaf whatever the file says; every owner, when the file cannot be read (#81). None in
-        loopback mode or outside every root."""
+        owner opens their sheaf whatever the file says; judged at the address and where its file is, and every owner
+        when the file cannot be read (#81). One the hub cannot judge counts as such a reader. None in loopback mode
+        or outside every root."""
         if self.proxy is None or root is None:
             return None
         entries = self.projects_of(root)
         if entries is None:
             return False, False
-        rel = roots_mod.Address.parse(address).rel
-        owners = self.owners(address, list(self.proxy.members.values()))
-        return True, any(not projects.grants(entries, rel, o.short) for o in owners)
+        try:
+            # Judged where the file is as well as by the address, as `granted` judges (a link to another project).
+            top = os.path.realpath(root.path)
+            rels = {roots_mod.Address.parse(address).rel, os.path.relpath(os.path.realpath(self.file(address)), top)}
+            owners = self.owners(address, list(self.proxy.members.values()))
+        except Exception:
+            return True, True               # an owner the hub cannot judge is no member: no project image goes in
+        return True, any(not projects.grants(entries, rel, o.short) for o in owners for rel in rels)
 
     def _images_moved(self, e: Entry) -> bool:
         """Whether the page of `e` was built by another image rule than its root's `projects.toml` and its owners

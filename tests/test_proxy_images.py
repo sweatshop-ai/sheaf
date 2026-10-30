@@ -663,3 +663,28 @@ def test_an_entry_whose_root_was_forgotten_is_built_again_once_not_at_every_catc
     for _ in range(3):
         front.hub.catch_up(e)
     assert len(builds) <= 1 and e.images_scope is None
+
+
+def test_a_link_sheaf_judges_its_owners_by_the_project_of_its_file_too(front, plan, outsider):
+    """A link in a project Cal is in, to a sheaf of one he is not, that he owns: he opens it (8.12), and its images
+    are judged by where its file is, so its owners are judged there as well, as `granted` judges both (#81)."""
+    from helpers import CAL
+    (outsider / "projects.toml").write_text(
+        '[projects."acme/blog"]\nmembers = ["bea", "cal"]\nstatus = "live"\n'
+        '[projects."acme/secret"]\nmembers = ["bea"]\nstatus = "live"\n', encoding="utf-8")
+    png(outsider / "acme" / "secret" / "img.png")
+    doc = outsider / "acme" / "secret" / "doc.md"
+    doc.parent.mkdir(parents=True, exist_ok=True)
+    doc.write_text("---\nowner: cal\nvisibility: project\n---\n# Doc\n\nSee ![x](img.png).\n", encoding="utf-8")
+    (outsider / "acme" / "blog" / "link.md").symlink_to(doc)
+    front.hub.roots.for_document(outsider / "acme" / "blog" / "link.md")
+    r = front.get("/work/acme/blog/link.md", member=CAL)
+    assert r.status == 200, r.text
+    assert "data:image/png" not in r.text
+
+
+def test_an_owner_lookup_that_fails_leaves_the_projects_images_out(front, plan, outsider, monkeypatch):
+    """Judged as a reader the project may not name, never as one it does: the page holds none of its images."""
+    monkeypatch.setattr(front.hub, "owners", lambda address, members: (_ for _ in ()).throw(RuntimeError("boom")))
+    html, share = owned_page(front, outsider, "acme/blog/pic.md", "bea", "fig.png")
+    assert "data:image/png" not in html and "data:image/png" not in share

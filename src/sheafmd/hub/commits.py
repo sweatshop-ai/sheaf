@@ -164,13 +164,8 @@ def _address(folder: Path) -> str:
     `address` file: read without following a link, one line, and believed only when it is the folder's key, so a
     file planted there (a link to a token, a forged path) never reaches a commit's subject or the ignore check.
     Else the folder's name."""
-    try:
-        fd = os.open(folder / "address", os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0))
-        with os.fdopen(fd, "rb") as f:
-            key = f.read(4097).decode("utf-8")
-    except (OSError, ValueError):
-        return folder.name
-    return key if "\n" not in key and state.doc_key(key) == folder.name else folder.name
+    key = state.read_small(folder / "address")
+    return key if key is not None and "\n" not in key and state.doc_key(key) == folder.name else folder.name
 
 
 def _staged(folder: Path, paths: list) -> dict:
@@ -236,6 +231,7 @@ class Commits:
         self._polled: dict[Path, float] = {}       # root folder -> when the poll last looked at it
         self._fetched: dict[str, float] = {}       # repo -> when the poll last handed it to the pusher
         self._told: dict[str, tuple] = {}          # repo -> the last row a poll's pull wrote (the pusher's)
+        self._swept: dict[tuple, tuple] = {}       # (repo, document) -> the last row the sweep wrote for it (#92)
         self._owed: set[str] = set()               # repos with a write's push not yet gone
         self._split: set[tuple] = set()            # the push mixes a row named this run
         self._wake = threading.Condition(self._lock)
@@ -425,7 +421,7 @@ class Commits:
                 if self._children.ended:
                     raise Stopped("the hub is stopping")
                 with self._repo_lock(folder):
-                    self._sweep(root, repo, record)
+                    self._sweep(root, repo)
                 if not self._pushes(root, repo, address):
                     continue                           # a write's push stays owed: the poll after the roots agree takes it
                 go = self._pull(root, address, record, seconds=PUSH_SECONDS if wrote else GIT_SECONDS)
@@ -498,10 +494,10 @@ class Commits:
         # The writers' locks first, the repo's last (9.11): no write of a file the remote changed comes between
         # the look at it and its new text, and no commit of any root of the repo between the hub's HEAD read and moved.
         with self._guard(root, [top / p for p in changed]), self._repo_lock(folder):
-            self._sweep(root, _repo(folder), record)   # what a page made since the pusher's sweep, before the work tree moves
+            self._sweep(root, _repo(folder))           # what a page made since the pusher's sweep, before the work tree moves
             return self._catch_up(folder, theirs, address, record)
 
-    def _sweep(self, root, repo: str, record):
+    def _sweep(self, root, repo: str):
         """Commit what git does not hold yet of the versions stores of `repo`'s roots that commit and keep their
         versions inside (#92): one commit per document, `versions: <path>`, by the hub. A write's commit carries its
         versions folder; this takes the versions made with no write behind it (a page opened, a change from outside
@@ -509,7 +505,22 @@ class Commits:
         untracked version where the remote's may land: git refuses to write over one, even one that is the same.
         A folder whose document the repo ignores stays out, as a write's does. The caller holds the repo's lock.
         Its commits are owed a push, as a write's are. Never raises: a folder that cannot be committed is a
-        `commit-failed` row, the next sweep tries again, and the pull and push go on."""
+        `commit-failed` row, written once while its cause stays the same (its own memory, not the pull's: a pull
+        that goes through says nothing of a folder), the next sweep tries again, and the pull and push go on."""
+        def told(doc):
+            said = []
+
+            def record(kind, _doc, **detail):
+                said.append(kind)
+                cause = (kind, re.sub(r"\d+", "#", detail.get("error") or ""))
+                if self._swept.get((repo, doc)) != cause:
+                    self._swept[(repo, doc)] = cause
+                    self._record(kind, doc, **detail)
+
+            def done():
+                if not said:
+                    self._swept.pop((repo, doc), None)
+            return record, done
         for r in [root] + [r for r in self._roots() if r.path != root.path]:
             if not r.git or (r is not root and _repo(r.path) != repo):
                 continue
@@ -519,12 +530,14 @@ class Commits:
                 continue
             if not (rc.commit and rc.versions_inside):
                 continue
+            record, done = told(r.name)
             try:
                 listed = _git(r.path, "ls-files", "-z", "--others", "--modified", "--deleted", "--exclude-standard",
                               "--", str(state.INSIDE))
             except (OSError, ValueError, subprocess.SubprocessError) as e:
                 record("commit-failed", r.name, error=str(e)[:300] or type(e).__name__)
                 continue
+            done()
             folders: dict[Path, list] = {}
             for p in map(Path, filter(None, listed.stdout.split("\0"))):
                 # By name, not the folder: a version half written (`state.write_text_private`) is never staged.
@@ -532,6 +545,7 @@ class Commits:
                     folders.setdefault(Path(*p.parts[:3]), []).append(str(p))
             for f, files in sorted(folders.items()):
                 key = _address(r.path / f)
+                record, done = told(f"{r.name}/{key}")
                 try:
                     if key != f.name and _ignored(r.path, key):
                         continue                       # a private draft's versions stay out with it
@@ -540,6 +554,7 @@ class Commits:
                 except (OSError, ValueError, subprocess.SubprocessError) as e:
                     record("commit-failed", f"{r.name}/{key}", error=str(e)[:300] or type(e).__name__)
                     continue
+                done()
                 if made and rc.push:                    # a repo that never pushes owes no push
                     with self._lock:
                         self._owed.add(repo)

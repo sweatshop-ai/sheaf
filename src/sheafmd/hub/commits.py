@@ -1,15 +1,15 @@
 """A root that commits (SPEC 8.11). A root whose `.sheaf.toml` says `commit = true` and that is a git
 work tree gets one commit for every write made on the page (a save, a task box, a comment), authored
 by whoever made it, carrying the document and, with `versions = "root"`, its versions folder
-(`.sheaf/versions/<doc-key>/`). The commit is made in the request, under a lock of the root, so the
-page's answer comes after it; with `push = true` a thread of its own pushes after it, one push for
+(`.sheaf/versions/<doc-key>/`). The commit is made in the request, under the lock of the root's repo (one
+for every root of one git dir: they share its index and HEAD, #73), so the page's answer comes after it; with `push = true` a thread of its own pushes after it, one push for
 however many commits came meanwhile. Before it pushes, the hub fetches its branch and takes in what the remote
 got meanwhile (a pull request merged on GitHub): its own unpushed commits are made again on top, in git's object
 store, and the work tree moves only for the files the remote changed, under their locks; a conflict changes
 nothing and pushes nothing (#62).
 
     Author(name, email)          who a commit is by
-    Commits(record, guard)       `guard(root, files)`: the locks a writer of `files` holds before the root's
+    Commits(record, guard)       `guard(root, files)`: the locks a writer of `files` holds before the repo's
     Commits.saved(root, rel, author, what)
     Commits.settle(timeout)      wait until no push is due (a test, a stopping hub)
 """
@@ -106,20 +106,24 @@ def _again(folder: Path, commit: str, onto: str):
 class Commits:
     def __init__(self, record, guard=None):
         """`record(kind, doc, **detail)` writes a diagnostics row (15). `guard(root, files)` gives a context that
-        holds what a writer of each of `files` (absolute paths) holds before the root's lock (9.11): a pull takes
+        holds what a writer of each of `files` (absolute paths) holds before the repo's lock (9.11): a pull takes
         it before it changes them."""
         self._record = record
         self._guard = guard or (lambda root, files: nullcontext())
-        self._roots: dict[Path, threading.Lock] = {}
+        self._repos: dict[str, threading.Lock] = {}  # a repo's git dir, links resolved -> its commit lock
         self._lock = threading.Lock()
         self._due: dict[Path, tuple] = {}          # root folder -> (the root, the address of the last commit)
         self._wake = threading.Condition(self._lock)
         self._pushing = False
         self._thread: threading.Thread | None = None
 
-    def _root_lock(self, folder: Path) -> threading.Lock:
+    def _repo_lock(self, folder: Path) -> threading.Lock:
+        """The commit lock of the repo `folder` is in, keyed by its git dir: two roots in one repo share an index
+        and a HEAD, so one lock (#73). A linked worktree has a git dir, an index and a HEAD of its own."""
+        r = _git(folder, "rev-parse", "--absolute-git-dir")
+        key = os.path.realpath(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip() else os.path.realpath(folder)
         with self._lock:
-            return self._roots.setdefault(folder, threading.Lock())
+            return self._repos.setdefault(key, threading.Lock())
 
     def saved(self, root, rel: str, author: Author, what: str, gone: str | None = None, key: str | None = None):
         """`rel`, the file of a document of `root` (a roots.Root), was written by `author`: commit it when the
@@ -147,7 +151,7 @@ class Commits:
         paths = [file(rel)] + ([str(state.INSIDE / state.doc_key(key))] if rc.versions_inside else [])
         subject = f"move: {gone} -> {rel}" if gone else f"{what}: {rel}"
         try:
-            with self._root_lock(root.path):
+            with self._repo_lock(root.path):
                 if not self._commit(root.path, paths, author, subject, address, gone=[file(gone)] if gone else []):
                     return
         except (OSError, subprocess.SubprocessError) as e:
@@ -226,7 +230,7 @@ class Commits:
             try:
                 if not self._pull(root, address):
                     continue
-                # Not under the root's lock: a save meanwhile commits, and the next push carries it.
+                # Not under the repo's lock: a save meanwhile commits, and the next push carries it.
                 r = _git(folder, "push", "-q", "origin", "HEAD", seconds=PUSH_SECONDS)
                 if r.returncode != 0:
                     # The commit stays; the next write's push carries it.
@@ -265,9 +269,9 @@ class Commits:
         top = Path(_git(folder, "rev-parse", "--show-toplevel").stdout.strip())
         changed = [p for p in _git(folder, "diff", "--name-only", "--no-renames", "-z", base, theirs).stdout.split("\0")
                    if p]
-        # The writers' locks first, the root's last (9.11): no write of a file the remote changed comes between
-        # the look at it and its new text, and no commit comes between the hub's HEAD read and moved.
-        with self._guard(root, [top / p for p in changed]), self._root_lock(folder):
+        # The writers' locks first, the repo's last (9.11): no write of a file the remote changed comes between
+        # the look at it and its new text, and no commit of any root of the repo between the hub's HEAD read and moved.
+        with self._guard(root, [top / p for p in changed]), self._repo_lock(folder):
             return self._catch_up(folder, theirs, address)
 
     def _catch_up(self, folder: Path, theirs: str, address: str) -> bool:

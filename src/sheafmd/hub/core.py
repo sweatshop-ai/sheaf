@@ -163,7 +163,7 @@ class Hub:
 
     @contextmanager
     def _writers_out(self, root, files):
-        """Hold what a writer of each of `files` (absolute paths in `root`) holds before the root's commit lock:
+        """Hold what a writer of each of `files` (absolute paths in `root`) holds before the repo's commit lock:
         the lock of its sheaf's name, where the hub places the root's sheaves, then its file lock (9.11). A pull
         (8.11, #62) holds it while it changes them, so no write lands between its look at a file and its new text."""
         top = Path(os.path.realpath(root.path))

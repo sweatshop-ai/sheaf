@@ -91,7 +91,9 @@ def unsupported() -> str:
 
 
 def _is_python(program: bytes) -> bool:
-    return os.path.basename(program).startswith((b"python", b"pypy"))
+    """`python3.12`, `pypy3`, and `Python`: python.org's framework build on macOS re-executes itself as
+    `.../Python.app/Contents/MacOS/Python`, and that is the name the kernel holds."""
+    return os.path.basename(program).lower().startswith((b"python", b"pypy"))
 
 
 def is_hub_command(raw: bytes) -> bool:

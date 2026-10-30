@@ -1125,6 +1125,9 @@ def test_renders_that_ask_the_list_for_owners_and_a_poll_that_drops_a_row_all_fi
     kept = gone.read_text(encoding="utf-8")
     errors, stop = [], threading.Event()
 
+    def rows():
+        return {r.sheaf.rel for r in box.hub.the_list._snap.rows}
+
     def render():
         try:
             while not stop.is_set():
@@ -1136,8 +1139,10 @@ def test_renders_that_ask_the_list_for_owners_and_a_poll_that_drops_a_row_all_fi
     def drop():
         try:
             for _ in range(10):
+                assert gone_rel in rows()
                 gone.unlink()
-                assert box.hub.the_list.assignees(f"list/{gone_rel}", "acme/record#7") is None   # drops its row
+                assert box.hub.the_list.assignees(f"list/{gone_rel}", "acme/record#7") is None
+                assert gone_rel not in rows()                                                    # its row dropped
                 box.hub.the_list.poll()
                 gone.write_text(kept, encoding="utf-8")
                 box.hub.the_list.poll()

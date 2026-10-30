@@ -20,7 +20,7 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 CI = WORKFLOWS / "ci.yml"
 
 MATRIX_OS = ("os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.macos && "
-             "'[\"ubuntu-24.04\",\"macos-latest\"]' || '[\"ubuntu-24.04\"]') }}")
+             "'[\"ubuntu-24.04\",\"macos-26\"]' || '[\"ubuntu-24.04\"]') }}")
 RUNS_ON = "runs-on: ${{ matrix.os }}"
 MATRIX_PYTHON = ("python: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.python != 'all' && "
                  "format('[\"{0}\"]', inputs.python) || (github.event_name == 'workflow_dispatch' || "
@@ -137,7 +137,7 @@ def test_one_job_asks_for_a_runner_and_nothing_else_does(text):
 
 
 def test_every_job_runs_on_the_runner_its_matrix_value_names(text):
-    # GitHub's own runners: the matrix value is `ubuntu-24.04` or `macos-latest`.
+    # GitHub's own runners: the matrix value is `ubuntu-24.04` or `macos-26`.
     line = re.search(r"^\s*runs-on: (.*)$", text, flags=re.M).group(1)
     assert line == "${{ matrix.os }}"
 
@@ -147,6 +147,11 @@ def test_the_ubuntu_image_is_named_never_latest(text):
     # list of systems per version, so a moving label breaks the page tests the day it moves. The image changes
     # only in a pull request that moves it (and Playwright with it when needed).
     assert not [ln for ln in text.splitlines() if "ubuntu-latest" in ln and not ln.lstrip().startswith("#")]
+
+
+def test_the_macos_image_is_named_never_latest(text):
+    # Same failure mode as ubuntu-latest (#65): Playwright supports a fixed list of macOS versions too.
+    assert not [ln for ln in text.splitlines() if "macos-latest" in ln and not ln.lstrip().startswith("#")]
 
 
 def test_a_job_that_hangs_is_stopped(text):
@@ -173,6 +178,23 @@ def test_uv_and_the_playwright_browsers_are_cached(text):
     cache = [ln for ln in text.splitlines() if "ms-playwright" in ln]
     assert any("Library/Caches/ms-playwright" in ln and ".cache/ms-playwright" in ln for ln in cache)
     assert "uses: actions/cache@" in text
+
+
+def test_the_playwright_cache_key_names_the_runner_image(text):
+    # A move of the image with the same uv.lock restored browsers built on the old one (#65). `env.ImageOS`
+    # is empty in an expression (the env context leaves out what the runner inherits), so a step reads it.
+    step = text[text.index("- name: Name the runner image"):text.index("- name: Cache the Playwright browsers")]
+    assert "id: image" in step and '"os=${ImageOS:?' in step and '>> "$GITHUB_OUTPUT"' in step
+    key = re.search(r"^\s*key: (playwright-.*)$", text, flags=re.M).group(1)
+    assert key == "playwright-${{ runner.os }}-${{ steps.image.outputs.os }}-${{ hashFiles('uv.lock') }}"
+
+
+def test_the_move_to_a_new_ubuntu_image_with_playwright_is_written_down(text):
+    # #65: the move to 26.04 and the Playwright bump go in one pull request, by these steps.
+    head = text[:text.index("name: CI")]
+    assert "To move the ubuntu image" in head
+    for word in ("playwright==", "uv lock", "MATRIX_OS", "SPEC 18", "page tests", "macos", "python=all"):
+        assert word in head, word
 
 
 def test_it_installs_from_the_lock_and_runs_pytest_without_the_page_marks_first(text):

@@ -34,7 +34,7 @@ from ..edit import EditError
 from ..mcp import Caller, Door
 from ..render import RenderError
 from ..source import StaleError, md_hash
-from . import auth, events, peer, place, proxy, the_list, visibility, work
+from . import auth, codes, events, peer, place, proxy, the_list, visibility, work
 from .asktell import NO_AGENT, JobRefused
 from .index import Status
 from .live import UNKNOWN, NotAuthor
@@ -127,6 +127,7 @@ class Req:
     via: str = "port"                # "port" or "proxy": the listener it came in on (9.9)
     member: object = None            # the proxy.Member the proxy socket let in
     member_id: str = ""              # the member header, once the connection is the proxy's: every row names it
+    code: object = None              # the codes.Code that let the request in, instead of the member header (9.13)
 
 
 @dataclass(frozen=True)
@@ -155,6 +156,11 @@ KEY = Who(frozenset({"key"}), "this needs the hub key")
 DOOR = Who(frozenset({"key", "token"}), "this needs the hub key or an MCP token", raw_body=True)
 # A member's alone, on the proxy socket (9.12): the loopback port answers 404, as for a route it has not.
 MEMBER = Who(frozenset({"member"}), "no such route")
+# A sign-in code is asked for by a member on the proxy socket, or with the key on the loopback port (9.13).
+MINT = Who(frozenset({"member", "key"}), "this needs the hub key")
+# What a sign-in code opens (9.13): the transcript and the fork, nothing else.
+CODE_ROUTES = {("GET", "/_/session"): "session", ("POST", "/_/sessions"): "sessions"}
+LISTED = "That session is already listed on this sheaf"
 
 
 def _json(status: int, obj: dict, headers: dict | None = None) -> Response:
@@ -220,6 +226,7 @@ class Handler:
         self._pending_sessions: dict = {}   # address -> (James's session it waits for, since, its write's seq) (9.12)
         self._session_seqs: dict = {}       # address -> the seq of James's latest write to it: the newest one wins
         self._pending_lock = threading.Lock()
+        self.codes = codes.Codes()          # the sign-in codes, in memory only: a restart drops them (9.13)
         # path -> method -> (route name, who may call it, function)
         self.routes: dict = {}
         for method, path, name, who, fn in (
@@ -234,6 +241,7 @@ class Handler:
             ("POST", "/_/tick", "tick", COOKIE, self._tick),
             ("GET", "/_/session", "session", MEMBER, self._session),
             ("POST", "/_/sessions", "sessions", MEMBER, self._sessions),
+            ("POST", "/_/code", "code", MINT, self._code),
             ("POST", "/_/comment", "comment", COOKIE, self._comment),
             ("POST", "/_/ask", "ask", COOKIE, self._ask),
             ("POST", "/_/tell", "tell", COOKIE, self._tell),
@@ -314,7 +322,7 @@ class Handler:
             res.nonce = res.nonce or auth.new_nonce()
             framed = req is not None and req.via == "proxy"     # the front's own pages may frame it (9.5)
             h["Content-Security-Policy"] = auth.csp(res.nonce, "'self'" if framed else "'none'")
-        if res.status >= 400 and req is not None:
+        if res.status >= 400 and req is not None and res.row is not False:     # False: counted, not written
             error = res.error or ""
             if not error and h.get("Content-Type") == "application/json":
                 try:
@@ -417,7 +425,7 @@ class Handler:
         """A route a member may use: one 8.5 marks `cookie` or `cookie or key`, but not Ask and
         Tell, which run the hub account's own agent session."""
         name, who, _ = found
-        return who in (COOKIE, EITHER, MEMBER) and name not in ("ask", "tell", "cancel", "jump")
+        return who in (COOKIE, EITHER, MEMBER, MINT) and name not in ("ask", "tell", "cancel", "jump")
 
     def _route_proxy(self, req: Req, raw: bytes) -> Response:
         cfg = self.hub.proxy
@@ -433,6 +441,9 @@ class Handler:
             raise Refuse(403, "this hub answers on its proxy socket only to its front's host")
         if not req.path.startswith("/"):
             raise Refuse(400, "bad request target")
+        # A sign-in code the verifier let in, judged before the route, the method and the body (9.13).
+        if req.headers.get("x-sheaf-code"):            # an empty one is none, as an empty member header
+            return self._route_code(req, raw)
         # The member header alone says who asks, before the route and the method (9.3, 9.9).
         if not req.member_id:
             raise Refuse(401, "not signed in", page=PROXY_SIGN_IN)
@@ -458,6 +469,45 @@ class Handler:
         if req.method == "POST":
             self._read_body(req, self._body(req, raw))
         return fn(req)
+
+    def _route_code(self, req: Req, raw: bytes) -> Response:
+        """A request the verifier let in with a sign-in code (9.13): `X-Sheaf-Code` is the code's sha256, and Caddy
+        sends no member header with it. The code says who asks, and opens the transcript and the fork of its one
+        sheaf, the POST's Origin checked as every proxy POST's. Any answer to a POST spends the code."""
+        cfg = self.hub.proxy
+        req.route = CODE_ROUTES.get((req.method, req.path), req.path)
+        if req.member_id:
+            raise self._code_refused(req, None, "two-credentials")
+        code, why = self.codes.find(req.headers["x-sheaf-code"])
+        if why is None and code.member not in cfg.members:
+            why = "member"
+        if why is not None:
+            raise self._code_refused(req, code, why)
+        req.code, req.member, req.member_id = code, cfg.members[code.member], code.member
+        try:
+            if (req.method, req.path) not in CODE_ROUTES:
+                raise self._code_refused(req, code, "route", 404, "no such route")
+            if req.method == "POST":
+                if req.headers.get("origin", "").lower() != cfg.origin:
+                    raise Refuse(403, "this request did not come from the front's own page")
+                self._read_body(req, self._body(req, raw))
+            return self._session(req) if req.method == "GET" else self._sessions(req)
+        finally:
+            if req.method == "POST":
+                self.codes.spend(code)
+
+    def _code_refused(self, req: Req, code, reason: str, status: int = 401, message: str = codes.NO_GOOD) -> Refuse:
+        """The refusal of a sign-in code and its `code-refused` row (15), which names the code by its id. One
+        sentence answers every 401, so a guesser learns nothing; made-up codes are counted, one row a minute."""
+        fields = {"reason": reason, "route": req.route}
+        if code is not None:
+            fields["code"] = code.id
+        if reason == "unknown":
+            n = self.codes.unknown()
+            if not n:
+                return Refuse(status, message, row=False)
+            fields["count"] = n
+        return Refuse(status, message, row="code-refused", fields=fields)
 
     def _token(self, req: Req) -> bool:
         """Whether the request carries an MCP token that is good now; its owner is on `req.token`."""
@@ -956,9 +1006,67 @@ class Handler:
                 raise Refuse(404, "no such document") from None
         return address, visibility.front_matter(text), work.state(self.hub, address, text)
 
+    def _code_sheaf(self, req: Req, doc):
+        """`_sheaf` for a request of a sign-in code (9.13): the code's own sheaf, open to its member, else the 404
+        that names neither, since the laptop cannot tell the two apart and neither can a guesser."""
+        try:
+            if doc != req.code.doc:
+                raise Refuse(404, "another sheaf")
+            return self._sheaf(req, doc)
+        except Refuse as r:
+            if r.status != 404:
+                raise
+            raise self._code_refused(req, req.code, "doc", 404, codes.NOT_OPEN) from None
+
+    def _code_moved(self, req: Req):
+        """The code's session is no longer the sheaf's forkable one: the code is spent (9.13)."""
+        self.codes.spend(req.code)
+        return self._code_refused(req, req.code, "moved", 404, codes.NOT_OPEN)
+
+    def _code(self, req: Req) -> Response:
+        """A sign-in code for `tiroir work` on one sheaf (9.13): for the member who asks in its Work on this, or,
+        with the key, for the member the body names (`sheaf code issue`). Made only while the sheaf has a session to
+        fork; shown once, and never again."""
+        b = req.body
+        if req.kind == "key":
+            mid = b.get("member")
+            _shape(isinstance(mid, str), "member must be the front's id of a member")
+            req.member = self.hub.proxy.members.get(mid) if self.hub.proxy is not None else None
+            if req.member is None:
+                raise Refuse(404, "no member of [proxy] has that id")
+            req.member_id = mid
+        address, _, st = self._sheaf(req, b.get("doc"))
+        sid = work.code_session(st)
+        if sid is None:
+            raise Refuse(404, "this sheaf has no live session on the box to fork")
+        try:
+            code, c = self.codes.issue(req.member.id, address, sid)
+        except codes.TooMany as ex:
+            raise Refuse(429, str(ex)) from None
+        self.hub.record("code-issued", address, by=work.member_word(req.member), code=c.id, expires=c.expires_text,
+                        via="cli" if req.kind == "key" else "popover", **self._who(req))
+        return _ok(code=code, expires=c.expires_text, id=c.id)
+
     def _session(self, req: Req) -> Response:
         """The transcript of one of the sheaf's box-hosted sessions, the live one without `id`, from the copy of
-        James's transcripts (9.12). It names only a file the front matter lists, of the box, in `sessions_dir`."""
+        James's transcripts (9.12). It names only a file the front matter lists, of the box, in `sessions_dir`.
+        A sign-in code (9.13) takes no `id`: it serves the session it was made for, once, while that is the
+        sheaf's forkable one."""
+        code = req.code
+        if code is not None:
+            _shape("id" not in req.query, "a sign-in code serves the session it was made for: send no id")
+            if code.served:
+                raise self._code_refused(req, code, "used")
+            address, fm, st = self._code_sheaf(req, req.query.get("doc"))
+            if work.code_session(st, code.session) is None:
+                raise self._code_moved(req)
+            body = work.open_transcript(st.cfg.sessions_dir, code.session)
+            if body is None:
+                raise Refuse(404, "this sheaf has no such session on the box")
+            if not self.codes.serve(code):                  # one of two racing GETs: the flag is set before a byte
+                raise self._code_refused(req, code, "used")
+            self.hub.record("code-used", address, code=code.id, route="session", **self._who(req))
+            return self._transcript(req, address, fm, code.session, body, via="code", code=code.id)
         address, fm, st = self._sheaf(req, req.query.get("doc"))
         sid = req.query.get("id")
         _shape(sid is None or work.UUID_RE.fullmatch(sid), "id must be a session id (a lowercase UUID)")
@@ -969,8 +1077,11 @@ class Handler:
         body = work.open_transcript(st.cfg.sessions_dir, sid)
         if body is None:
             raise Refuse(404, "this sheaf has no such session on the box")
+        return self._transcript(req, address, fm, sid, body)
+
+    def _transcript(self, req: Req, address: str, fm, sid: str, body: bytes, **via) -> Response:
         self.hub.record("transcript-downloaded", address, transcript=sid, by=work.member_word(req.member),
-                        issue=visibility.text(fm, "issue"))
+                        issue=visibility.text(fm, "issue"), **via, **self._who(req))
         return Response(200, {"Content-Type": "application/x-ndjson", "Content-Disposition": _disposition(f"{sid}.jsonl"),
                               "Cache-Control": "no-store", "X-Sheaf-Session": sid}, body)
 
@@ -1091,7 +1202,14 @@ class Handler:
         """A member forked one of the sheaf's sessions on their machine (9.12): the fork becomes the sheaf's live
         session, the first item of `sessions`, under the signed-in member's name whatever the body says."""
         b = req.body
-        address, fm, _ = self._sheaf(req, b.get("doc"))
+        code = req.code
+        if code is not None:
+            # A code reports the fork of the transcript it downloaded: never before, and once (9.13).
+            if code.served is False:
+                raise self._code_refused(req, code, "order")
+            address, fm, _ = self._code_sheaf(req, b.get("doc"))
+        else:
+            address, fm, _ = self._sheaf(req, b.get("doc"))
         sid, machine = b.get("id"), b.get("machine")
         _shape(isinstance(sid, str) and work.UUID_RE.fullmatch(sid), "id must be a session id (a lowercase UUID)")
         _shape(isinstance(machine, str) and work.MACHINE_RE.fullmatch(machine),
@@ -1106,6 +1224,16 @@ class Handler:
             fm = visibility.front_matter(text)
             if not self.hub.may_open(req.member, e.address, fm):
                 raise Refuse(404, "no such document")
+            if code is not None:
+                # Under the lock, where the fork is written: the code's session still the forkable one, an id
+                # that is no box session's to push out, and one fork of two racing POSTs.
+                if work.code_session(work.state(self.hub, e.address, text), code.session) is None:
+                    raise self._code_moved(req)
+                if any(s["id"] == sid for s in work.sessions(fm)):
+                    raise self._code_refused(req, code, "listed", 409, LISTED)
+                if code.spent:
+                    raise self._code_refused(req, code, "used")
+                self.codes.spend(code)
             return work.with_session(text, line, sid)
         with place.held(self.hub, e.address):           # the write and its commit, one step (9.11)
             try:
@@ -1114,8 +1242,11 @@ class Handler:
                 raise Refuse(409, str(ex)) from None
             self.hub.index.touch(e.address)
             self.hub.committed(e.address, req.member, "fork")
+        via = {"via": "code", "code": code.id} if code is not None else {}
+        if code is not None:
+            self.hub.record("code-used", address, code=code.id, route="sessions", **self._who(req))
         self.hub.record("session-forked", address, transcript=sid, by=by, machine=machine,
-                        issue=visibility.text(fm, "issue"))
+                        issue=visibility.text(fm, "issue"), **via, **self._who(req))
         return _ok(hash=h)
 
     def _pin(self, req: Req) -> Response:

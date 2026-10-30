@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 import pytest
-from helpers import GIT_FAILS, git_fails, make_repo, md
+from helpers import GIT_FAILS, git_fails, make_repo, md, undecodable_names_or_skip
 
 from sheafmd import paths
 from sheafmd.hub import roots
@@ -398,6 +398,7 @@ def test_a_repo_whose_path_has_a_newline_or_a_trailing_space_is_still_its_own_ro
 
 def test_a_nested_repo_whose_name_is_not_utf8_is_not_the_outer_roots(git_dirs):
     reg, outer, _ = git_dirs
+    undecodable_names_or_skip(outer.path)
     odd = make_repo(outer.path / os.fsdecode(b"not-utf8-\xff"))
     assert reg.lookup(odd / "x.png") is None and reg.lookup(odd / ".git" / "x.png") is None
 

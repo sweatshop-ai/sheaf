@@ -1,5 +1,6 @@
 """Shared by the tests: pandoc is always the bundled one, never whatever is on PATH; the
 brand words no output may hold; small file helpers; `python -m sheafmd` as a real process."""
+import errno
 import fcntl
 import http.client
 import json
@@ -17,6 +18,7 @@ import time
 from pathlib import Path
 
 import pypandoc
+import pytest
 
 import sheafmd.comments as rdc
 from sheafmd import config, diagnostics, paths, signals
@@ -62,11 +64,29 @@ def proc_state(pid: int) -> str:
 
 
 def is_stopped(pid: int) -> bool:
-    """The process is stopped (SIGSTOP, state `T`): alive, and running nothing. Linux only."""
+    """The process is stopped (SIGSTOP, state `T`): alive, and running nothing. /proc says where there is
+    one (Linux); macOS has none, and there `ps` prints the state."""
+    if _has_proc():
+        try:
+            return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0] == "T"
+        except OSError:
+            return False
+    ps = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True)
+    return ps.stdout.strip().startswith("T")
+
+
+def undecodable_names_or_skip(folder: Path):
+    """End the test as skipped where the file system refuses a name that is not UTF-8 (APFS and HFS+ on
+    macOS: EILSEQ), so a file of that name cannot exist there and there is nothing to test. Anywhere it
+    is taken (ext4, tmpfs, btrfs), the test goes on. Any other error is the test's."""
+    probe = os.path.join(os.fsencode(folder), b"probe-\xff")
     try:
-        return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0] == "T"
-    except OSError:
-        return False
+        os.close(os.open(probe, os.O_CREAT | os.O_WRONLY))
+    except OSError as e:
+        if e.errno == errno.EILSEQ:
+            pytest.skip(f"this file system refuses a name that is not UTF-8 ({os.strerror(e.errno)})")
+        raise
+    os.unlink(probe)
 
 
 def gone(pid: int) -> bool:

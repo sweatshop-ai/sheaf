@@ -335,9 +335,20 @@ class Peer:
     uid: int
 
 
+SOL_LOCAL = 0                                                # <sys/un.h>: the level of LOCAL_PEERCRED
+XUCRED, XUCRED_VERSION = "@IIh16I", 0                                           # struct xucred: version, uid, ngroups, groups
+
+
 def peer(conn: socket.socket) -> Peer:
-    """The uid of the process that connected, read from the connection (`SO_PEERCRED`)."""
-    fmt = "3i"                                               # struct ucred: pid, uid, gid
-    _, uid, _ = struct.unpack(fmt, conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED,
-                                                   struct.calcsize(fmt)))
+    """The uid of the process that connected, read from the connection: `SO_PEERCRED` on Linux,
+    `LOCAL_PEERCRED` on macOS, which has no `SO_PEERCRED`."""
+    if hasattr(socket, "SO_PEERCRED"):
+        fmt = "3i"                                           # struct ucred: pid, uid, gid
+        _, uid, _ = struct.unpack(fmt, conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED,
+                                                       struct.calcsize(fmt)))
+        return Peer(uid)
+    raw = conn.getsockopt(SOL_LOCAL, socket.LOCAL_PEERCRED, struct.calcsize(XUCRED))
+    version, uid = struct.unpack_from("=II", raw)
+    if version != XUCRED_VERSION:
+        raise OSError(f"struct xucred of version {version}, not {XUCRED_VERSION}")
     return Peer(uid)

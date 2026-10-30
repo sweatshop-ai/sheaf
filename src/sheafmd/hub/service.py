@@ -21,6 +21,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from .. import paths
@@ -41,6 +42,9 @@ STOP_EXIT_ENV = "SHEAF_STOP_EXIT"
 # How long the manager waits for a stopping hub before SIGKILL (#95): past the hub's own bound (the jobs' grace,
 # then the pushes due and the end of its git, hub/commits.py). `KillMode=mixed` signals the hub alone, not its git.
 STOP_WAIT = 60
+# How long an install or uninstall waits for launchd to let go of the job it booted out: the manager's wait for
+# the stopping hub, then its SIGKILL.
+BOOTOUT_WAIT = STOP_WAIT + 10
 
 
 class ServiceError(Exception):
@@ -266,9 +270,23 @@ def install(say, make_room=lambda: None, *, install_line):
         f = plist_path()
         _write(f, launchd_plist(command, path_env, extra))
         make_room()
-        _run([tool, "bootout", f"{_domain()}/{LABEL}"], check=False)    # a loaded agent is replaced
+        _bootout(tool)                                                    # a loaded agent is replaced
         _run([tool, "bootstrap", _domain(), str(f)])
         say(f"  service installed: {f}")
+
+
+def _bootout(tool: str):
+    """Boot the job out and wait until launchd no longer has it. `launchctl bootout` returns while the hub
+    runs its clean stop, and launchd keeps the job until the hub has ended (run 41016931742): a bootstrap
+    meanwhile, or an uninstall that returned then, would meet the job that was booted out."""
+    target = f"{_domain()}/{LABEL}"
+    _run([tool, "bootout", target], check=False)
+    deadline = time.monotonic() + BOOTOUT_WAIT
+    while _run([tool, "print", target], check=False).returncode == 0:
+        if time.monotonic() >= deadline:
+            raise ServiceError(f"launchd still has the job {BOOTOUT_WAIT} s after `launchctl bootout`; "
+                               f"see `launchctl print {target}`")
+        time.sleep(0.2)
 
 
 def uninstall(say):
@@ -285,7 +303,7 @@ def uninstall(say):
         f.unlink()
         _run([tool, "--user", "daemon-reload"])
     else:
-        _run([tool, "bootout", f"{_domain()}/{LABEL}"], check=False)
+        _bootout(tool)
         f.unlink()
     say("  service removed")
 

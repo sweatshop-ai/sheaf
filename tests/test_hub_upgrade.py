@@ -507,6 +507,23 @@ def test_an_upgrade_stop_names_the_process_that_is_still_there(
                             "see `sheaf diag`)")
 
 
+def test_an_upgrade_stop_under_the_service_whose_new_hub_answers_before_any_silence_is_an_upgrade(
+        port, thread_hub, quick_stop, monkeypatch):
+    """The service starts the new code the moment the old hub exits 75; a new hub that answers before the
+    command next asks leaves it no silence to see. The old hub ended (its process is gone and its boot no
+    longer answers), so the stop went through (run 41011379501 on macos-26 waited out STOP_WAIT on it)."""
+    hub = thread_hub(OLD)
+    hub.service = True
+    old = subprocess.Popen([sys.executable, "-c", "pass"])
+    old.wait()
+    state.write_json(server.pid_file(), {"pid": old.pid, "boot": hub.boot})
+    spawned = []
+    monkeypatch.setattr(hubclient, "spawn_hub", lambda *a, **k: spawned.append(a))
+    stub_the_stop(monkeypatch, lambda got: {**got, "boot": "the-new-boot", "version": __version__})
+    c, started = hubclient.ensure_hub("cli", lambda s: None, lambda s: None)
+    assert started and c.challenge()["boot"] == "the-new-boot" and spawned == []
+
+
 def test_an_upgrade_stop_the_hub_refuses_says_so(port, thread_hub, quick_stop, monkeypatch):
     thread_hub(OLD)
     stub_the_stop(monkeypatch, lambda got: got, status=500)

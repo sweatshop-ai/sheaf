@@ -5,12 +5,14 @@ the root (`.sheaf/versions/`) and committed with it; the hub never serves `.shea
 and a bare repo as its remote."""
 import os
 import random
+import shlex
 import subprocess
+import sys
 import time
 from pathlib import Path
 
 import pytest
-from helpers import BEA, CAL, FRONT, Front, PLAN
+from helpers import BEA, CAL, FRONT, Front, PLAN, undecodable_names_or_skip
 
 from sheafmd import signals
 from sheafmd.blocks import split_md_blocks
@@ -250,12 +252,20 @@ def test_a_stopping_hub_waits_for_the_push_of_the_last_write(box, sheaves, remot
 HANG = f"61.{random.randrange(10 ** 6):06d}"
 
 
+# `setsid PROGRAM`, which macOS has no command for: a session of its own, then the program
+SETSID = shlex.join([sys.executable, "-c", "import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])"])
+
+
 def hanging(sheaves):
     """The remote's upload-pack waits first: the pull's fetch hangs as on a remote that drops packets."""
     git(sheaves, "config", "remote.origin.uploadpack", f"sleep {HANG}; git-upload-pack")
 
 
 def sleepers() -> list:
+    """The pids of the `sleep HANG` processes: from /proc where there is one, from `ps` on macOS."""
+    if not Path("/proc/self").is_dir():
+        ps = subprocess.run(["ps", "-axo", "pid=,args="], capture_output=True, text=True).stdout
+        return [int(f[0]) for f in (ln.split() for ln in ps.splitlines()) if f[1:3] == ["sleep", HANG]]
     out = []
     for d in Path("/proc").iterdir():
         try:
@@ -275,7 +285,6 @@ def until(look, seconds=20):
     return look()
 
 
-@pytest.mark.skipif(not Path("/proc/self").is_dir(), reason="finds the hanging git by /proc")
 def test_a_stop_ends_a_fetch_that_hangs_within_its_bound_and_calls_it_stopped_not_failed(box, sheaves, remote, monkeypatch):
     """#95: an upgrade stop left `push-failed "git exited -15"`, a git the stop itself ended. The hub ends its
     git within a bound it sets, the git's own children with it, and says so as `push-stopped`; the commit stays
@@ -295,7 +304,6 @@ def test_a_stop_ends_a_fetch_that_hangs_within_its_bound_and_calls_it_stopped_no
     assert git(sheaves, "rev-parse", "HEAD") != git(remote, "rev-parse", "main")
 
 
-@pytest.mark.skipif(not Path("/proc/self").is_dir(), reason="finds the hanging git by /proc")
 def test_the_hubs_git_runs_in_a_session_of_its_own(box, sheaves, monkeypatch):
     """A Ctrl-C at the terminal of a hub run in the foreground goes to its whole group: git is not in it, the hub
     ends it (#95)."""
@@ -333,7 +341,7 @@ def test_a_git_that_failed_before_the_stop_signalled_it_is_a_failure_and_one_its
     kids._ended = False
     t = time.monotonic()
     with pytest.raises(subprocess.TimeoutExpired):
-        kids.run(["sh", "-c", f"setsid sleep {HANG} & sleep 30"], 1, os.environ)
+        kids.run(["sh", "-c", f"{SETSID} sleep {HANG} & sleep 30"], 1, os.environ)
     assert time.monotonic() - t < 4
     for pid in sleepers():
         signals.send(pid, 15)
@@ -722,6 +730,7 @@ def test_a_link_and_its_file_both_changed_on_the_remote_take_one_lock_and_the_pu
 def test_a_file_name_that_is_not_utf8_on_the_remote_is_taken_in(box, sheaves, remote, tmp_path):
     merged_on_github(tmp_path, remote, {"README.md": "# The sheaves\n"}, "a README")
     away = tmp_path / "github"
+    undecodable_names_or_skip(away)
     (away / os.fsdecode(b"caf\xe9.txt")).write_text("x\n", encoding="utf-8")
     git(away, "add", "-A")
     git(away, "commit", "-q", "-m", "a latin-1 name")

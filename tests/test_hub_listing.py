@@ -1,5 +1,6 @@
 """Which documents a root holds, and forgetting a root (SPEC 8.2, 8.6): the listing the index
 page and `sheaf list` are made from."""
+import errno
 import os
 import subprocess
 import threading
@@ -159,7 +160,11 @@ def test_a_plain_root_counts_past_the_cap_only_what_it_would_list(plain, tmp_pat
     git_dirs_in(plain.path, "# T\n")                   # sub/keep.git/x.md is the bare repo's; sub/b.md is kept
     md(tmp_path / "outside.md")
     (plain.path / "out.md").symlink_to(tmp_path / "outside.md")
-    os.close(os.open(os.path.join(os.fsencode(plain.path), b"\xff.md"), os.O_CREAT | os.O_WRONLY))
+    try:                                               # APFS refuses the name (EILSEQ): there it cannot be counted
+        os.close(os.open(os.path.join(os.fsencode(plain.path), b"\xff.md"), os.O_CREAT | os.O_WRONLY))
+    except OSError as e:
+        if e.errno != errno.EILSEQ:
+            raise
     got = roots.list_documents(plain)
     assert [d.rel for d in got.docs] == ["d0.md", "d1.md", "d2.md"] and got.more == 5
 

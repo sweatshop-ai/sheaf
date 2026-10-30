@@ -219,6 +219,23 @@ case "$*" in
       done
     fi ;;
 esac
+# launchd's jobs: bootstrap loads one, bootout unloads it, and print finds it (exit 0) or not (113). A real
+# bootout returns while the job's hub still runs its clean stop: FAKE_LINGER is how many prints still find
+# it after the bootout ("never": it stays).
+JOB="$FAKE_LOG.job"
+case "$1" in
+  bootstrap) echo up > "$JOB" ;;
+  bootout) if [ -f "$JOB" ] && [ -n "$FAKE_LINGER" ]; then
+             [ "$FAKE_LINGER" = never ] || echo "$FAKE_LINGER" > "$JOB"
+           else rm -f "$JOB"; fi ;;
+  print) n=$(cat "$JOB" 2>/dev/null)
+         case "$n" in
+           "") echo "Could not find service" >&2; exit 113 ;;
+           up) ;;
+           0) rm -f "$JOB"; echo "Could not find service" >&2; exit 113 ;;
+           *) echo $((n - 1)) > "$JOB" ;;
+         esac ;;
+esac
 case "$*" in
   "--user start sheaf.service"|"--user restart sheaf.service"|kickstart*)
     if [ -n "$FAKE_START_HUB" ]; then
@@ -420,7 +437,7 @@ def test_install_on_macos_writes_the_plist_and_bootstraps_it(sheaf, fake, macos,
     assert data["ProgramArguments"][-3:] == ["hub", "--started-by", "service"]
     assert data["EnvironmentVariables"]["SHEAF_PORT"] == str(port)
     uid = os.getuid()
-    assert fake.calls() == [f"launchctl bootout gui/{uid}/{LABEL}",
+    assert fake.calls() == [f"launchctl bootout gui/{uid}/{LABEL}", f"launchctl print gui/{uid}/{LABEL}",
                             f"launchctl bootstrap gui/{uid} {plist_file}"]
     assert "enable-linger" not in r.out                       # a Linux remark
 
@@ -429,7 +446,39 @@ def test_uninstall_on_macos_boots_it_out_and_removes_the_plist(sheaf, fake, maco
     sheaf("service", "install")
     r = sheaf("service", "uninstall")
     assert r.code == 0 and not plist_file.exists()
-    assert fake.calls()[-1] == f"launchctl bootout gui/{os.getuid()}/{LABEL}"
+    target = f"gui/{os.getuid()}/{LABEL}"
+    assert fake.calls()[-2:] == [f"launchctl bootout {target}", f"launchctl print {target}"]
+
+
+# A real bootout returns while the hub runs its clean stop, and launchd still has the job (run 41016931742 on
+# macos-26: `launchctl print` found it right after `sheaf service uninstall`). Uninstall, and the bootstrap that
+# follows a bootout in install, wait until launchd no longer has it.
+def test_uninstall_on_macos_returns_once_launchd_no_longer_has_the_job(sheaf, fake, macos, plist_file, monkeypatch):
+    sheaf("service", "install")
+    monkeypatch.setenv("FAKE_LINGER", "3")
+    r = sheaf("service", "uninstall")
+    assert r.code == 0 and not plist_file.exists()
+    target = f"gui/{os.getuid()}/{LABEL}"
+    assert fake.calls()[-5:] == [f"launchctl bootout {target}"] + [f"launchctl print {target}"] * 4
+
+
+def test_a_second_install_on_macos_bootstraps_once_the_job_it_booted_out_is_gone(
+        sheaf, fake, macos, plist_file, monkeypatch):
+    sheaf("service", "install")
+    monkeypatch.setenv("FAKE_LINGER", "2")
+    assert sheaf("service", "install").code == 0
+    uid = os.getuid()
+    assert fake.calls()[3:] == [f"launchctl bootout gui/{uid}/{LABEL}"] + [f"launchctl print gui/{uid}/{LABEL}"] * 3 + [
+        f"launchctl bootstrap gui/{uid} {plist_file}"]
+
+
+def test_a_job_launchd_keeps_after_the_bootout_is_said_and_the_plist_stays(sheaf, fake, macos, plist_file, monkeypatch):
+    sheaf("service", "install")
+    monkeypatch.setenv("FAKE_LINGER", "never")
+    monkeypatch.setattr(service, "BOOTOUT_WAIT", 0.5)
+    r = sheaf("service", "uninstall")
+    assert r.code == 1 and plist_file.exists()
+    assert f"launchctl print gui/{os.getuid()}/{LABEL}" in r.err
 
 
 def test_a_second_install_on_macos_boots_out_and_bootstraps_again(sheaf, fake, macos, plist_file):
@@ -438,7 +487,7 @@ def test_a_second_install_on_macos_boots_out_and_bootstraps_again(sheaf, fake, m
     r = sheaf("service", "install")
     assert r.code == 0 and plist_file.read_bytes() == first
     uid = os.getuid()
-    assert fake.calls() == [f"launchctl bootout gui/{uid}/{LABEL}",
+    assert fake.calls() == [f"launchctl bootout gui/{uid}/{LABEL}", f"launchctl print gui/{uid}/{LABEL}",
                             f"launchctl bootstrap gui/{uid} {plist_file}"] * 2
 
 

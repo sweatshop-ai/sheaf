@@ -10,8 +10,8 @@ import pytest
 
 from agent_fakes import FakeClaude
 from helpers import comment, writes_from_outside
-from pagehelp import (DOC, P1, P2, T0, at, comment_draft_key, comment_on, gone, mark, reload_on_clock, reloaded, select,
-                      toast, toasted, type_at_end, until)
+from pagehelp import (DOC, P1, P2, T0, at, comment_draft_key, comment_on, gone, key, mark, reload_on_clock, reloaded,
+                      select, select_by_touch, toast, toasted, type_at_end, until)
 from sheafmd import comments as rdc
 from sheafmd.hub import live as hub_live
 from sheafmd.hub import state as hub_state
@@ -1155,7 +1155,7 @@ def test_while_a_merge_waits_for_a_reply_a_later_save_does_not_overwrite_what_th
     until(lambda: p.text_content("#rd-state") == "Editing", what="the page to take in the first save")
     # The open thread covers that paragraph, so it takes the caret without a click.
     p.focus("main p:nth-of-type(4)")
-    p.keyboard.press("Control+End")
+    p.keyboard.press(key("Control+End"))
     p.keyboard.type(" and kiwis")
     p.keyboard.press("Control+s")
     until(lambda: "and kiwis" in f.read_text(), what="the second save in the file")
@@ -1399,7 +1399,7 @@ def test_the_text_takes_keys_again_once_the_settle_waits_for_a_reply(frozen):
     p.wait_for_selector("#rd-popover .rd-hold")
     until(lambda: p.text_content("#rd-state") == "Editing", what="the page to take in the settle's save")
     p.focus("main p:nth-of-type(4)")
-    p.keyboard.press("Control+End")
+    p.keyboard.press(key("Control+End"))
     p.keyboard.type(" and kiwis")
     assert "and kiwis" in p.inner_text("main"), "the text still refuses keys after the settle"
     p.keyboard.press("Control+s")
@@ -1461,7 +1461,7 @@ def test_what_is_saved_while_the_reload_waits_for_a_reply_is_merged_onto_the_cha
     p.wait_for_selector("#rd-popover .rd-hold")
     until(lambda: p.text_content("#rd-state") == "Editing", what="the page to take in the last save")
     p.focus("main p:nth-of-type(4)")
-    p.keyboard.press("Control+End")
+    p.keyboard.press(key("Control+End"))
     p.keyboard.type(" and kiwis")
     p.keyboard.press("Control+s")
     until(lambda: "and kiwis" in f.read_text(), what="the edit made while the reload waits")
@@ -1492,7 +1492,7 @@ def split_the_last_paragraph(p):
     """In edit mode, Enter at the end of "Last paragraph." and a line typed after it."""
     p.keyboard.press("e")
     p.click("main p:last-of-type")
-    p.keyboard.press("End")
+    p.keyboard.press(key("End"))
     p.keyboard.press("Enter")
     p.keyboard.type("Split off.")
 
@@ -1561,7 +1561,7 @@ def test_a_paragraph_saved_twice_while_the_reload_waits_for_a_reply_writes_no_co
     until(lambda: "and plums" in f.read_text(), what="the first save in the file")
     until(lambda: p.text_content("#rd-state") == "Editing", what="the page to take in the first save")
     p.focus(P2)
-    p.keyboard.press("Control+End")
+    p.keyboard.press(key("Control+End"))
     p.keyboard.type(" and kiwis")
     p.keyboard.press("Control+s")
     until(lambda: "and kiwis" in f.read_text(), what="the second save of the paragraph")
@@ -1585,11 +1585,11 @@ def test_a_paragraph_the_first_save_split_takes_the_next_save_while_the_reload_w
     outside_change(frozen)
     p.wait_for_selector("#rd-popover .rd-hold")
     p.focus(last)
-    p.keyboard.press("Control+End")
+    p.keyboard.press(key("Control+End"))
     if then == "the first line changed too":
         p.keyboard.press("ArrowLeft")
         p.keyboard.type(", edited")
-        p.keyboard.press("End")
+        p.keyboard.press(key("End"))
     p.keyboard.press("Enter")
     p.keyboard.type("Split off.")
     p.keyboard.press("Control+s")           # merged onto the change from outside, and split: the reload waits
@@ -1597,7 +1597,7 @@ def test_a_paragraph_the_first_save_split_takes_the_next_save_while_the_reload_w
     until(lambda: p.text_content("#rd-state") == "Editing", what="the page to take in the first save")
     before = f.read_text()
     p.focus(last)
-    p.keyboard.press("Control+End")
+    p.keyboard.press(key("Control+End"))
     if then == "the split line deleted":
         for _ in "Split off.!":
             p.keyboard.press("Backspace")
@@ -1628,7 +1628,7 @@ def test_a_block_typed_in_again_after_a_save_given_up_that_the_hub_wrote_meets_n
     outside_change(frozen)
     p.wait_for_selector("#rd-popover .rd-hold")
     p.focus(last)
-    p.keyboard.press("Control+End")
+    p.keyboard.press(key("Control+End"))
     p.keyboard.type(" One.")
     p.keyboard.press("Control+s")           # merged onto the change from outside: the reload waits for the reply
     until(lambda: " One." in f.read_text(), what="the first save in the file")
@@ -1645,7 +1645,7 @@ def test_a_block_typed_in_again_after_a_save_given_up_that_the_hub_wrote_meets_n
 
     p.route("**/_/save", written_never_answered)
     p.focus(last)
-    p.keyboard.press("Control+End")
+    p.keyboard.press(key("Control+End"))
     p.keyboard.type(" Two.")
     p.keyboard.press("Control+s")
     until(lambda: " Two." in f.read_text(), what="the second save in the file")
@@ -1654,7 +1654,7 @@ def test_a_block_typed_in_again_after_a_save_given_up_that_the_hub_wrote_meets_n
     # the autosave that waited behind the held save goes now, and the page takes no typing while it is out
     until(lambda: len(bodies) >= 2 and p.text_content("#rd-state") == "Editing", what="the save to go again")
     p.focus(last)
-    p.keyboard.press("Control+End")
+    p.keyboard.press(key("Control+End"))
     p.keyboard.type(" Three.")
     p.keyboard.press("Control+s")
     until(lambda: len(bodies) >= 3 and " Three." in f.read_text(), what="the third save in the file")
@@ -1683,11 +1683,11 @@ def test_a_paragraph_the_file_puts_between_the_halves_of_the_first_save_stays_an
     outside_change(frozen)
     p.wait_for_selector("#rd-popover .rd-hold")
     p.focus(last)
-    p.keyboard.press("Control+End")
+    p.keyboard.press(key("Control+End"))
     if first == "changed too":
         p.keyboard.press("ArrowLeft")
         p.keyboard.type(", edited")
-        p.keyboard.press("End")
+        p.keyboard.press(key("End"))
     p.keyboard.press("Enter")
     p.keyboard.type("Split off.")
     p.keyboard.press("Control+s")           # merged onto the change from outside, and split: the reload waits
@@ -1696,7 +1696,7 @@ def test_a_paragraph_the_file_puts_between_the_halves_of_the_first_save_stays_an
     f.write_text(f.read_text().replace("\n\nSplit off.", "\n\nA line from outside.\n\nSplit off."), encoding="utf-8")
     before = f.read_text()
     p.focus(last)
-    p.keyboard.press("Control+End")
+    p.keyboard.press(key("Control+End"))
     p.keyboard.type(" More.")
     p.keyboard.press("Control+s")
     until(lambda: f.read_text() != before, what="the second save in the file")
@@ -1717,8 +1717,8 @@ def paragraphs_saying(p, text):
 
 def type_into(p, k, keys, text):
     p.locator("main p").nth(k).focus()
-    for key in keys:
-        p.keyboard.press(key)
+    for k in keys:
+        p.keyboard.press(key(k))
     p.keyboard.type(text)
 
 
@@ -1790,7 +1790,7 @@ def test_a_save_says_what_it_saved_before_only_for_a_block_saved_while_the_page_
     for words in (" and kiwis", " and figs"):       # merged, and the page keeps its hash until the reload
         until(lambda: p.text_content("#rd-state") == "Editing", what="the page to take in the last save")
         p.focus(P2)
-        p.keyboard.press("Control+End")
+        p.keyboard.press(key("Control+End"))
         p.keyboard.type(words)
         p.keyboard.press("Control+s")
         until(lambda: words in f.read_text(), what="the save of" + words)
@@ -1837,7 +1837,7 @@ def test_a_line_typed_after_enter_in_a_paragraph_is_a_paragraph_of_its_own_in_th
     p.keyboard.press("e")
     p.click("main p:last-of-type")
     for k in keys:
-        p.keyboard.press(k)
+        p.keyboard.press(key(k))
     p.keyboard.type(typed)
     p.keyboard.press("Control+s")
     until(lambda: f.read_text() != before, what="the save in the file")
@@ -1887,7 +1887,7 @@ def test_the_keys_that_wrapped_a_paragraph_in_raw_html_save_plain_paragraphs(fro
     p.keyboard.press("e")
     p.click("main p:last-of-type")
     for k in keys:
-        p.keyboard.press(k)
+        p.keyboard.press(key(k))
     p.keyboard.type(typed)
     if not typed and keys[-1] == "Enter":
         p.keyboard.press("Control+s")
@@ -1932,10 +1932,10 @@ def test_rich_text_pasted_into_a_paragraph_is_saved_as_plain_markdown(frozen, so
     p.context.grant_permissions(["clipboard-read", "clipboard-write"])
     p.keyboard.press("e")
     p.click("main p:last-of-type")
-    p.keyboard.press("End")
+    p.keyboard.press(key("End"))
     p.evaluate("""async (h) => navigator.clipboard.write([new ClipboardItem({
         'text/html': new Blob([h], {type: 'text/html'}), 'text/plain': new Blob(['plain'], {type: 'text/plain'})})])""", html)
-    p.keyboard.press("Control+v")
+    p.keyboard.press(key("Control+v"))
     reloads = save_with_ctrl_s(p, f)
     got = f.read_text()
     assert "<div" not in got and "<span" not in got and "<a " not in got and "style=" not in got, got
@@ -1969,7 +1969,7 @@ def test_enter_at_the_start_of_a_heading_or_in_a_table_cell_keeps_the_block_what
     p.keyboard.press("e")
     p.click(where)
     for k in keys:
-        p.keyboard.press(k)
+        p.keyboard.press(key(k))
     p.keyboard.type(typed)
     p.keyboard.press("Control+s")
     if md is None:
@@ -1985,7 +1985,7 @@ def test_enter_at_the_start_of_a_heading_or_in_a_table_cell_keeps_the_block_what
         p.wait_for_selector("main td")
         p.keyboard.press("e")
         p.click("main td:nth-of-type(1)")
-        p.keyboard.press("End")
+        p.keyboard.press(key("End"))
         p.keyboard.type(" too")
         p.keyboard.press("Control+s")
         until(lambda: "apples too" in f.read_text(), what="the second edit of the table in the file")
@@ -2013,7 +2013,7 @@ def test_an_answer_that_reloads_saves_the_edits_typed_while_it_was_out_and_asks_
         until(lambda: held or p.wait_for_timeout(20), what="the send to go out")
     if typed:
         p.focus(P2)
-        p.keyboard.press("Control+End")
+        p.keyboard.press(key("Control+End"))
         p.keyboard.type(" and plums")
     md = f.read_text()
     blk, s, e = rdc.find_quote(md, "Last paragraph")
@@ -2085,7 +2085,7 @@ def test_words_typed_where_a_comments_anchor_goes_or_comes_are_still_unsaved_and
         until(lambda: held or p.wait_for_timeout(20), what="the send to go out")
     if typed != "nothing":
         p.focus(para)
-        p.keyboard.press("Control+Home" if typed == "words at the start" else "Control+End")
+        p.keyboard.press(key("Control+Home" if typed == "words at the start" else "Control+End"))
         p.keyboard.type("Now: " if typed == "words at the start" else " and plums")
     mark(p)
     if how == "deleted in the file":
@@ -2097,7 +2097,7 @@ def test_words_typed_where_a_comments_anchor_goes_or_comes_are_still_unsaved_and
     until(lambda: p.locator("main .rd-badge").count() == badges, what="the anchor to go or come")
     if typed == "words taken out again":
         p.focus(para)
-        p.keyboard.press("Control+End")
+        p.keyboard.press(key("Control+End"))
         for _ in " and plums":
             p.keyboard.press("Backspace")
     p.wait_for_timeout(300)
@@ -2128,7 +2128,7 @@ def test_words_typed_where_a_comments_anchor_went_or_came_are_saved_by_the_next_
     if how == "a new comment":
         held = new_comment_held(frozen)
     p.focus(P2 if how == "a new comment" else P1)
-    p.keyboard.press("Control+End")
+    p.keyboard.press(key("Control+End"))
     p.keyboard.type(" and plums")
     if how == "a new comment":
         held.pop(0).continue_()
@@ -3544,7 +3544,7 @@ def test_a_typed_task_line_is_a_task_box_after_the_save_and_it_ticks(tab, typed,
     tab.open()
     p.keyboard.press("e")
     p.click(P1)
-    p.keyboard.press("End")
+    p.keyboard.press(key("End"))
     p.keyboard.press("Enter")
     p.keyboard.type(typed)
     before = f.read_text()
@@ -3568,7 +3568,7 @@ def test_a_bracket_pair_in_the_middle_of_a_typed_line_stays_text(tab):
     tab.open()
     p.keyboard.press("e")
     p.click(P1)
-    p.keyboard.press("End")
+    p.keyboard.press(key("End"))
     p.keyboard.press("Enter")
     p.keyboard.type("buy [ ] later")
     before = f.read_text()
@@ -3585,7 +3585,7 @@ def test_a_typed_task_box_whose_words_were_deleted_keeps_its_characters_and_no_b
     tab.open()
     p.keyboard.press("e")
     p.click(P1)
-    p.keyboard.press("End")
+    p.keyboard.press(key("End"))
     p.keyboard.press("Enter")
     p.keyboard.type("- [ ] x")
     p.keyboard.press("Backspace")
@@ -3607,7 +3607,7 @@ def _enter_in_task_list(tab, tasks, item, keys):
     tab.open()
     p.keyboard.press("e")
     p.click(f"main li:has-text('{item}')")
-    p.keyboard.press("End")
+    p.keyboard.press(key("End"))
     for k in keys:
         if k == "Enter":
             p.keyboard.press("Enter")
@@ -3643,7 +3643,7 @@ def test_enter_in_the_middle_of_a_task_item_splits_it_into_two_task_items(tab):
     tab.open()
     p.keyboard.press("e")
     p.click("main li:has-text('first task')")
-    p.keyboard.press("End")
+    p.keyboard.press(key("End"))
     for _ in range(len(" task")):
         p.keyboard.press("ArrowLeft")
     p.keyboard.press("Enter")
@@ -3673,7 +3673,7 @@ def test_enter_at_the_start_of_a_task_item_moves_the_words_and_leaves_one_box_in
     tab.open()
     p.keyboard.press("e")
     p.click("main li:has-text('first task')")
-    p.keyboard.press("Home")
+    p.keyboard.press(key("Home"))
     p.keyboard.press("Enter")
     assert p.locator("main li input[type=checkbox]").count() == 3
     assert p.locator("main li:has-text('first task') input[type=checkbox]").count() == 1
@@ -3685,7 +3685,7 @@ def test_enter_on_the_only_item_of_a_task_list_when_it_is_empty_keeps_the_list(t
     tab.open()
     p.keyboard.press("e")
     p.click("main li:has-text('only')")
-    p.keyboard.press("End")
+    p.keyboard.press(key("End"))
     for _ in range(len("only")):
         p.keyboard.press("Backspace")
     p.keyboard.press("Enter")
@@ -3698,7 +3698,7 @@ def test_enter_at_the_end_of_a_task_item_then_a_pause_saves_no_box_character(tab
     tab.open()
     p.keyboard.press("e")
     p.click("main li:has-text('first task')")
-    p.keyboard.press("End")
+    p.keyboard.press(key("End"))
     p.keyboard.press("Enter")
     p.wait_for_timeout(3500)  # the autosave runs on its own after a pause in typing
     assert "☐" not in f.read_text() and "<!--" not in f.read_text().replace("<!-- sheaf", "")
@@ -3716,7 +3716,7 @@ def test_enter_on_an_empty_item_then_a_pause_saves_no_comment_marker_between_the
     tab.open()
     p.keyboard.press("e")
     p.click("main li:has-text('first task')")
-    p.keyboard.press("End")
+    p.keyboard.press(key("End"))
     p.keyboard.press("Enter")
     p.keyboard.press("Enter")
     p.wait_for_timeout(3500)
@@ -3735,7 +3735,7 @@ def test_enter_at_the_start_of_a_task_item_then_a_save_keeps_the_words_in_a_task
     tab.open()
     p.keyboard.press("e")
     p.click("main li:has-text('first task')")
-    p.keyboard.press("Home")
+    p.keyboard.press(key("Home"))
     p.keyboard.press("Enter")
     p.keyboard.type("X")
     before = f.read_text()
@@ -3751,8 +3751,8 @@ def test_enter_over_all_the_words_of_a_task_item_keeps_its_box(tab):
     tab.open()
     p.keyboard.press("e")
     p.click("main li:has-text('first task')")
-    p.keyboard.press("Home")
-    p.keyboard.press("Shift+End")
+    p.keyboard.press(key("Home"))
+    p.keyboard.press(key("Shift+End"))
     p.keyboard.press("Enter")
     p.keyboard.type("new")
     # the emptied item keeps its ticked box (saved as an emptied ticked item is, whatever emptied it)
@@ -3792,7 +3792,7 @@ def test_enter_three_times_after_an_item_then_a_pause_saves_no_comment_marker_be
     tab.open()
     p.keyboard.press("e")
     p.click("main li:has-text('first task')")
-    p.keyboard.press("End")
+    p.keyboard.press(key("End"))
     for _ in range(3):
         p.keyboard.press("Enter")
     p.wait_for_timeout(3500)
@@ -3827,7 +3827,7 @@ def _enter_before_the_words_of_the_first_item(tab, box, place):
 @pytest.mark.parametrize("box", [" ", "x"])
 def test_enter_with_the_caret_walked_back_to_the_first_letter_keeps_the_words_in_their_item(tab, box):
     def place(p):
-        p.keyboard.press("End")
+        p.keyboard.press(key("End"))
         for _ in range(len("first task")):
             p.keyboard.press("ArrowLeft")
     saved = _enter_before_the_words_of_the_first_item(tab, box, place)
@@ -3849,7 +3849,7 @@ def test_enter_with_a_click_just_before_the_first_letter_keeps_the_words_in_thei
 
 def test_enter_over_the_box_alone_keeps_the_words_in_their_item(tab):
     def place(p):
-        p.keyboard.press("Home")
+        p.keyboard.press(key("Home"))
         p.keyboard.press("Shift+ArrowRight")
     saved = _enter_before_the_words_of_the_first_item(tab, "x", place)
     assert "- [x] Xfirst task\n- [ ] second task" in saved and "☐" not in saved and "☒" not in saved
@@ -3861,7 +3861,7 @@ def test_a_task_typed_in_the_paragraph_that_ending_a_list_left_joins_the_lists(t
     tab.open()
     p.keyboard.press("e")
     p.click("main li:has-text('first task')")
-    p.keyboard.press("End")
+    p.keyboard.press(key("End"))
     p.keyboard.press("Enter")
     p.keyboard.press("Enter")
     p.keyboard.type("- [ ] typed")
@@ -3879,7 +3879,7 @@ def test_enter_in_the_middle_of_a_task_item_then_typing_saves_no_no_break_space(
     tab.open()
     p.keyboard.press("e")
     p.click("main li:has-text('first task')")
-    p.keyboard.press("End")
+    p.keyboard.press(key("End"))
     for _ in range(len(" task")):
         p.keyboard.press("ArrowLeft")
     p.keyboard.press("Enter")
@@ -3898,10 +3898,11 @@ def test_enter_over_a_selection_across_two_task_items_changes_nothing(tab):
     tab.open()
     p.keyboard.press("e")
     p.click("main li:has-text('first task')")
-    p.keyboard.press("End")
-    for _ in range(len("first task")):
-        p.keyboard.press("Shift+ArrowLeft")
-    p.keyboard.press("Shift+ArrowDown")
+    # Set, not made with Shift and the arrows: on macOS those left a caret at the end of the first item (run
+    # 41011124680), and Enter there makes an item of its own, as it should. A keyboard's selection tells the page
+    # only by selectionchange, as this does.
+    select_by_touch(p, at("main", "first task"), at("main", "second task", len("second")))
+    assert p.evaluate("getSelection().toString()").replace("\n", " ").split() == ["first", "task", "second"]
     items = (p.locator("main li").count(), p.locator("main li input[type=checkbox]").count())
     p.keyboard.press("Enter")
     assert (p.locator("main li").count(), p.locator("main li input[type=checkbox]").count()) == items
@@ -4067,7 +4068,7 @@ def test_text_typed_into_the_form_a_failed_send_brought_back_comes_back_after_th
     p = thread.page
     fail_a_reply(thread, "sent words")
     p.click("#rd-popover textarea")
-    p.keyboard.press("End")
+    p.keyboard.press(key("End"))
     p.keyboard.type(" and more")
     p.reload()
     p.wait_for_selector("#rd-menu-btn", state="attached")
@@ -4463,7 +4464,7 @@ def test_two_kept_comments_with_one_quote_in_two_paragraphs_do_not_replace_each_
     areas = p.locator(PINNED + " textarea")
     assert areas.count() == 2
     areas.nth(0).click()
-    p.keyboard.press("End")
+    p.keyboard.press(key("End"))
     p.keyboard.type(" and more")
     until(lambda: "and more" in comment_store(tab), what="the edit to reach the store")
     stored = json.loads(comment_store(tab))

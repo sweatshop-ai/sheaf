@@ -98,6 +98,14 @@ _Avoid_: permission, privacy, ACL
 **Stop James**:
 The action any member ticks on a sheaf of the assistant James to end his work on its project (SPEC 9.11). It is the one place the core names a deployment's assistant: the hub writes a diagnostics row and, with `[list] stop_dir`, a file the deployment's supervisor reads; stopping is the deployment's, a Layer concern the core only signals.
 
+**Move to**:
+The action that answers which client an unsure thread is for: one box per candidate, `- [ ] Move to <slug> (ref <thread>)`, the only word that takes an argument (SPEC 9.10). The boxes are the options of one answer, ticked in the sheaf, never by the row's box on the list; the deployment's mail module moves the thread.
+_Avoid_: reassign, transfer
+
+**Pointer** (of a sheaf):
+What a sheaf becomes once its thread moved to another client: its front matter, with `moved_to:` naming the new path, and one line. It keeps its `issue` and its versions, and is never a row on the list (SPEC 9.10).
+_Avoid_: redirect, stub, tombstone
+
 **Work on this**:
 What a member does with a sheaf's agent session from its page (SPEC 9.12): attach to James's window on the box, if they have a shell there, or fork the live session to their own machine with `tiroir work`. The page offers it from the meta block's `work`.
 _Avoid_: resume, take over, hand over

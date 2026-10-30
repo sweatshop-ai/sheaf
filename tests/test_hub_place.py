@@ -381,14 +381,14 @@ def test_a_merged_save_that_unticks_share_follows_the_same_rule(team, work):
     assert (work / SHARED).read_text(encoding="utf-8") == now
 
 
-def rewrite_untick(team, work, member):
-    """A save that unticks Share by rewriting its block through pandoc: the box unchecked and an item added, so the
+def rewrite_untick(team, work, member, word="Share"):
+    """A save that unticks `word` by rewriting its block through pandoc: the box unchecked and an item added, so the
     edit is no tick of 7.2."""
     text = text_of(work)
     blocks = split_md_blocks(text)
-    i = next(i for i, b in enumerate(blocks) if "- [x] Share" in b.content)
+    i = next(i for i, b in enumerate(blocks) if f"- [x] {word}" in b.content)
     soup = BeautifulSoup(_pandoc.run(["-f", "gfm", "-t", "html5"], blocks[i].content).stdout, "html.parser")
-    del soup.select_one('input[type="checkbox"]')["checked"]
+    del next(b for b in soup.select('input[type="checkbox"]') if word in b.parent.get_text())["checked"]
     item = soup.new_tag("li")
     item.string = "Also this."
     soup.select_one("ul").append(item)
@@ -412,6 +412,62 @@ def test_the_owners_rewrite_that_unticks_share_withdraws_it(team, work):
     assert got.status == 200, got.text
     text = (work / HOME).read_text(encoding="utf-8")
     assert front_matter(text)["visibility"] == "owner" and "Also this." in text and not (work / SHARED).exists()
+
+
+# ── a one-off stays pressed (#108) ────────────────────────────────────────────
+
+PRESSED = OPEN.replace("- [ ] Share", "- [x] Approve\n- [ ] Share")
+REFUSED = "Approve is pressed once: its tick cannot be taken back."
+
+
+@pytest.mark.parametrize("member", [THIERRY, HANS], ids=["owner", "member"])
+def test_a_save_that_unticks_a_one_off_is_refused_and_writes_nothing(team, work, member):
+    put(team, work, SHARED, PRESSED)
+    got = untick(team, work, "Approve", member)
+    assert got.status == 409 and got.json()["error"] == REFUSED
+    assert (work / SHARED).read_text(encoding="utf-8") == PRESSED
+
+
+def test_the_hubs_own_person_cannot_untick_a_one_off_either(team, work, browser):
+    put(team, work, SHARED, PRESSED)
+    got = untick(team, work, "Approve", None, via=browser)
+    assert got.status == 409 and got.json()["error"] == REFUSED
+    assert (work / SHARED).read_text(encoding="utf-8") == PRESSED
+
+
+def test_a_rewrite_that_unticks_a_one_off_is_refused(team, work):
+    put(team, work, SHARED, PRESSED)
+    got = rewrite_untick(team, work, THIERRY, "Approve")
+    assert got.status == 409 and got.json()["error"] == REFUSED
+    assert (work / SHARED).read_text(encoding="utf-8") == PRESSED
+
+
+def test_a_merged_save_that_unticks_a_one_off_is_refused(team, work):
+    put(team, work, SHARED, PRESSED)
+    assert team.get(f"/work/{SHARED}", member=HANS).status == 200            # the page: its text is a version
+    blocks = split_md_blocks(PRESSED)
+    i = next(i for i, b in enumerate(blocks) if "- [x] Approve" in b.content)
+    soup = BeautifulSoup(_pandoc.run(["-f", "gfm", "-t", "html5"], blocks[i].content).stdout, "html.parser")
+    del soup.select_one('input[type="checkbox"]')["checked"]
+    now = PRESSED.replace("A quote from the contract.", "A quote, changed elsewhere.")
+    (work / SHARED).write_text(now, encoding="utf-8")
+    got = team.post("/_/save", {"doc": f"work/{SHARED}", "hash": md_hash(PRESSED),
+                                "edits": [{"i": i, "html": str(soup)}]}, member=HANS)
+    assert got.status == 409 and got.json()["error"] == REFUSED
+    assert (work / SHARED).read_text(encoding="utf-8") == now
+
+
+def test_a_save_that_takes_a_ticked_one_off_out_writes(team, work):
+    """Only an untick is refused: a box taken out leaves no action to press again, as for Share (9.11)."""
+    put(team, work, SHARED, PRESSED)
+    blocks = split_md_blocks(PRESSED)
+    i = next(i for i, b in enumerate(blocks) if "- [x] Approve" in b.content)
+    soup = BeautifulSoup(_pandoc.run(["-f", "gfm", "-t", "html5"], blocks[i].content).stdout, "html.parser")
+    next(li for li in soup.select("li") if "Approve" in li.get_text()).decompose()
+    got = team.post("/_/save", {"doc": f"work/{SHARED}", "hash": md_hash(PRESSED),
+                                "edits": [{"i": i, "html": str(soup)}]}, member=THIERRY)
+    assert got.status == 200, got.text
+    assert "Approve" not in (work / SHARED).read_text(encoding="utf-8")
 
 
 def test_the_lists_tick_of_share_moves_the_file(team, work):

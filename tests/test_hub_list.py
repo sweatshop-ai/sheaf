@@ -1338,3 +1338,31 @@ def test_a_row_whose_move_to_boxes_come_before_another_action_carries_the_button
     box.hub.the_list.poll()
     assert [b for b in buttons(box.get("/list", member=NELL)) if b.doc == JOEY] == [
         ("/list/globex/black-friday/2026-10-28-reply-to-joey.md", JOEY, "3", "Approve", "one-off", "Approve")]
+
+
+# ── a one-off stays pressed (#108) ────────────────────────────────────────────
+
+@pytest.mark.parametrize("old, new, word", [
+    ("- [x] Approve\n", "- [ ] Approve\n", "Approve"),
+    ("- [X] Done @nell\n", "- [ ] Done @nell\n", "Done"),
+    ("- [x] Don’t run\n", "- [ ] Don't run\n", "Don't run"),
+    ("- [x] Stop James\n", "* [ ] Stop James\n", "Stop James"),
+    ("- [x] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n",
+     "- [ ] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n", "Move to"),
+    ("- [x] Approve\n- [x] Approve\n", "- [x] Approve\n- [ ] Approve\n", "Approve"),
+])
+def test_a_write_that_unticks_a_one_off_names_its_word(old, new, word):
+    assert the_list.unticks_one_off(f"# A sheaf\n\n{old}", f"# A sheaf\n\n{new}") == word
+
+
+@pytest.mark.parametrize("old, new", [
+    ("- [x] Share\n", "- [ ] Share\n"),                                 # the toggle
+    ("- [ ] Approve\n", "- [x] Approve\n"),                             # a tick
+    ("- [x] Approve\n", "Approved.\n"),                                 # the box taken out, not unticked
+    ("- [x] Approve\n", "- [x] Approve\n- [ ] Approve\n"),              # a box added beside it
+    ("- [x] Done @nell\n", "- [ ] Done @dora\n"),                       # another action takes its place
+    ("```\n- [x] Approve\n```\n", "```\n- [ ] Approve\n```\n"),         # in a fence: no box
+    ("- [x] Approve the plan\n", "- [ ] Approve the plan\n"),           # no action's word alone
+])
+def test_a_write_that_unticks_no_one_off_names_none(old, new):
+    assert the_list.unticks_one_off(f"# A sheaf\n\n{old}", f"# A sheaf\n\n{new}") is None

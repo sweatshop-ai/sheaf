@@ -125,7 +125,7 @@ class Commits:
         """`record(kind, doc, **detail)` writes a diagnostics row (15). `guard(root, files)` gives a context that
         holds what a writer of each of `files` (absolute paths) holds before the repo's lock (9.11): a pull takes
         it before it changes them. `roots()` gives the registered roots: the repo of one pushes only when its other
-        roots that commit push too (#89)."""
+        roots that commit push too (#89), judged by the pusher when it takes the repo."""
         self._record = record
         self._guard = guard or (lambda root, files: nullcontext())
         self._roots = roots or (lambda: ())
@@ -149,26 +149,27 @@ class Commits:
         with self._lock:
             return self._repos.setdefault(key, threading.Lock())
 
-    def _pushes(self, root, repo: str, rc, address: str) -> bool:
-        """Whether a push of `root` (its settings `rc`) may go: it commits and pushes, and so does every other
-        registered root of its repo that commits (#89). A push carries every commit of the repo's HEAD and a pull moves
+    def _pushes(self, root, repo: str, address: str) -> bool:
+        """Whether `repo` may be pulled and pushed now, `root` the one that asked (#89): the registered roots of the
+        repo that commit, `root` among them, all push. A push carries every commit of the repo's HEAD and a pull moves
         any of its files, so one root's `push = false` holds only when no root of its repo pushes. A mix pushes
         nothing and is a `push-settings-differ` row and a line on stderr, once per mix per hub run. A root that does
-        not commit is left out: the hub commits none of its paths. One whose settings cannot be read counts as one
-        that does not push."""
-        if not (rc.commit and rc.push):
-            return False
-        split = {True: [root.name], False: []}
-        for r in self._roots():
-            if r.path == root.path or not r.git or _repo(r.path) != repo:
+        not commit, or is no git work tree, is left out: the hub commits none of its paths. One whose settings cannot
+        be read counts as one that does not push. The pusher judges when it takes the repo, so a root that stopped
+        pushing while the push waited is never carried by it."""
+        split = {True: [], False: []}
+        for r in [root] + [r for r in self._roots() if r.path != root.path]:
+            if not r.git or (r is not root and _repo(r.path) != repo):
                 continue
             try:
-                other = config.load_root_config(r.path, warn=lambda line: None)
+                rc = config.load_root_config(r.path, warn=lambda line: None)
             except (config.ConfigError, OSError):
                 split[False].append(r.name)
                 continue
-            if other.commit:
-                split[bool(other.push)].append(r.name)
+            if rc.commit:
+                split[bool(rc.push)].append(r.name)
+        if not split[True]:
+            return False
         if not split[False]:
             return True
         said = (repo, tuple(sorted(split[True])), tuple(sorted(split[False])))
@@ -215,16 +216,9 @@ class Commits:
             return
         if rc.push:
             try:
-                repo = _repo(root.path)
-                go = self._pushes(root, repo, rc, address)
+                self._push_later(_repo(root.path), root, address)
             except (OSError, subprocess.SubprocessError) as e:
                 self._record("push-failed", address, error=str(e)[:300])
-                return
-            if go:
-                self._push_later(repo, root, address)
-            else:
-                with self._lock:
-                    self._owed.add(repo)               # the poll pushes it once the repo's roots agree
 
     def _commit(self, folder: Path, paths: list, author: Author, subject: str, address: str,
                 gone: list = ()) -> bool:
@@ -295,8 +289,6 @@ class Commits:
                 repo = _repo(root.path)
                 if now - self._fetched.get(repo, float("-inf")) < FETCH_SECONDS:
                     continue                          # another root of the repo handed it on this minute
-                if not self._pushes(root, repo, rc, root.name):
-                    continue
             except (config.ConfigError, OSError, subprocess.SubprocessError):
                 continue                              # a save on it says so (`commit-failed`)
             self._fetched[repo] = now
@@ -328,6 +320,8 @@ class Commits:
             # A write's rows are each written; the poll meets the same cause every minute, and says it once.
             record = self._record if wrote else self._once(repo)
             try:
+                if not self._pushes(root, repo, address):
+                    continue                           # a write's push stays owed: the poll after the roots agree takes it
                 go = self._pull(root, address, record, seconds=PUSH_SECONDS if wrote else GIT_SECONDS)
                 if not go:
                     continue

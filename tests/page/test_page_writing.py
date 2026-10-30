@@ -11,7 +11,7 @@ import pytest
 from agent_fakes import FakeClaude
 from helpers import comment, writes_from_outside
 from pagehelp import (DOC, P1, P2, T0, at, comment_draft_key, comment_on, gone, key, mark, reload_on_clock, reloaded,
-                      select, toast, toasted, type_at_end, until)
+                      select, select_by_touch, toast, toasted, type_at_end, until)
 from sheafmd import comments as rdc
 from sheafmd.hub import live as hub_live
 from sheafmd.hub import state as hub_state
@@ -3898,10 +3898,11 @@ def test_enter_over_a_selection_across_two_task_items_changes_nothing(tab):
     tab.open()
     p.keyboard.press("e")
     p.click("main li:has-text('first task')")
-    p.keyboard.press(key("End"))
-    for _ in range(len("first task")):
-        p.keyboard.press("Shift+ArrowLeft")
-    p.keyboard.press("Shift+ArrowDown")
+    # Set, not made with Shift and the arrows: on macOS those left a caret at the end of the first item (run
+    # 41011124680), and Enter there makes an item of its own, as it should. A keyboard's selection tells the page
+    # only by selectionchange, as this does.
+    select_by_touch(p, at("main", "first task"), at("main", "second task", len("second")))
+    assert p.evaluate("getSelection().toString()").replace("\n", " ").split() == ["first", "task", "second"]
     items = (p.locator("main li").count(), p.locator("main li input[type=checkbox]").count())
     p.keyboard.press("Enter")
     assert (p.locator("main li").count(), p.locator("main li input[type=checkbox]").count()) == items

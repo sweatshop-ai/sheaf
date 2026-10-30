@@ -113,6 +113,9 @@ def answers():
     ["python", "-m", "sheafmd", "hub"],                                              # run by hand in a terminal
     ["python", "/opt/sheaf/bin/sheaf", "hub"],
     ["pypy3", "-m", "sheafmd", "hub"],
+    # python.org's framework Python on macOS starts its own `Python.app` binary: that is what the kernel names
+    ["/Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python",
+     "-m", "sheafmd", "hub", "--started-by", "cli"],
     ["python", "-c", "import time", "-m", "sheafmd", "hub", "--started-by", "cli"]])  # the shape of the stand-in
 def test_these_command_lines_are_a_hub(argv):
     assert recover.is_hub_command(b"\0".join(a.encode() for a in argv) + b"\0")
@@ -489,7 +492,9 @@ def test_on_macos_the_command_line_is_the_one_the_process_was_started_with(stand
         assert darwin.cmdline(os.getpid()) is None and darwin.stat(os.getpid()) is None
         return
     p = stand_in(port)
-    assert darwin.cmdline(p.pid) == b"\0".join(a.encode() for a in [sys.executable, "-c", STAND_IN, *HUB_TAIL]) + b"\0"
+    args = darwin.cmdline(p.pid).split(b"\0")
+    assert args[-1] == b"" and args[1:-1] == [a.encode() for a in ["-c", STAND_IN, *HUB_TAIL]]
+    assert os.path.basename(args[0]).lower().startswith(b"python")        # the framework's re-exec may name its own
     assert darwin.uids(p.pid) == (os.getuid(),) * 4
     state, started = darwin.stat(p.pid)
     assert state in ("R", "S") and abs(started / 1e6 - time.time()) < 600

@@ -336,7 +336,7 @@ class Peer:
 
 
 SOL_LOCAL = 0                                                # <sys/un.h>: the level of LOCAL_PEERCRED
-XUCRED = "@IIh16I"                                           # struct xucred: version, uid, ngroups, groups
+XUCRED, XUCRED_VERSION = "@IIh16I", 0                                           # struct xucred: version, uid, ngroups, groups
 
 
 def peer(conn: socket.socket) -> Peer:
@@ -348,5 +348,7 @@ def peer(conn: socket.socket) -> Peer:
                                                        struct.calcsize(fmt)))
         return Peer(uid)
     raw = conn.getsockopt(SOL_LOCAL, socket.LOCAL_PEERCRED, struct.calcsize(XUCRED))
-    _, uid = struct.unpack_from("=II", raw)
+    version, uid = struct.unpack_from("=II", raw)
+    if version != XUCRED_VERSION:
+        raise OSError(f"struct xucred of version {version}, not {XUCRED_VERSION}")
     return Peer(uid)

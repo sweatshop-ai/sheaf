@@ -104,7 +104,7 @@ def cmdline(pid: int) -> bytes | None:
     if not available():
         return None
     argmax = _sysctl([CTL_KERN, KERN_ARGMAX], ctypes.sizeof(ctypes.c_int))
-    if argmax is None:
+    if argmax is None or len(argmax) != ctypes.sizeof(ctypes.c_int):
         return None
     raw = _sysctl([CTL_KERN, KERN_PROCARGS2, pid], struct.unpack("i", argmax)[0])
     if raw is None or len(raw) < 4:
@@ -114,7 +114,9 @@ def cmdline(pid: int) -> bytes | None:
     end = rest.find(b"\0")                       # the executable's path, then NULs up to the arguments
     if argc < 1 or end < 0:
         return None
-    rest = rest[end:].lstrip(b"\0")
+    rest = rest[end:].lstrip(b"\0")             # an empty argv[0] goes with the padding: the arguments then
+                                                 # end in the first environment string, never `hub`, so no
+                                                 # such process is taken for a hub
     args = rest.split(b"\0")[:argc]
     if len(args) < argc:
         return None

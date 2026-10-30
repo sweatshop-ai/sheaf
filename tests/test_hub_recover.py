@@ -127,6 +127,7 @@ def test_these_command_lines_are_a_hub(argv):
     ["python", "-m", "sheafmd", "stop"],
     ["tail", "-f", "sheafmd.log"],                                                   # the name is in it
     ["vim", "sheafmd", "hub"],
+    ["/opt/PYTHONISH", "-m", "sheafmd", "hub"],                                      # `Python` exactly, no other case
     ["vim", "sheaf", "hub"],                                                         # `sheaf hub`, but not Python
     ["grep", "-m", "sheafmd", "hub"],                                                # `-m sheafmd hub`, not Python
     ["/opt/sheaf/bin/sheaf", "hub", "--started-by", "cli"],                          # no interpreter: not how it runs
@@ -450,6 +451,11 @@ def test_a_process_whose_command_line_cannot_be_read_is_left_alone(
     write_pid_file(p.pid, port)
     monkeypatch.setattr(recover, "read_cmdline", lambda pid: None)
     refused(sheaf, command, port, sent, p, why=f"the command line of pid {p.pid} cannot be read")
+
+
+def test_the_command_line_of_a_process_that_is_not_there_is_none(tmp_path, monkeypatch):
+    monkeypatch.setattr(recover, "PROC", tmp_path)
+    assert recover.proc_cmdline(4242) is None
 
 
 @pytest.fixture

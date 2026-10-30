@@ -13,7 +13,7 @@ in the hub's log and in the diagnostics log (15), once per folder per hub run.
     unlisted(entries, rels)   the `<client>/<project>` folders of `rels` that the entries do not name
     grants(entries, rel, short)   whether the member `short` may open the shared sheaves at `rel`
     groups(entries)           what `sheaf projects groups` prints for the Library: the same judgement
-    image_in_reach(doc, image)   whether a page of `doc` may embed the local image `image` (9.9)
+    image_in_reach(doc, image, outsider)   whether a page of `doc` may embed the local image `image` (9.9)
 """
 import re
 import tomllib
@@ -102,18 +102,21 @@ def project_of(rel: str) -> str | None:
     return f"{parts[0]}/{parts[1]}" if len(parts) >= 3 else None
 
 
-def image_in_reach(doc: str, image: str) -> bool:
+def image_in_reach(doc: str, image: str, outsider: bool = False) -> bool:
     """Whether a page of the document at `doc` may embed the image at `image` (paths in one root, 9.9 "Local
     images"), judged as a document is (8.12, 9.11) and the same for every reader of the page: an image above project
-    depth is open to every member of the root; one of a project only to a page of that project; one in a
-    `private/<short>/` only to a sheaf in that same folder."""
+    depth is open to every member of the root; one in a `private/<short>/` only to a sheaf in that same folder; any
+    other of a project only to a page of that project that no `outsider` reads, an owner the project's `members` do
+    not name (#81): a non-member never receives a project's content."""
     folder = project_of(image)
     if folder is None:
         return True
     if project_of(doc) != folder:
         return False
     d, i = doc.split("/"), image.split("/")
-    return i[2] != place.PRIVATE or (len(d) >= 5 and d[:4] == i[:4])
+    if i[2] == place.PRIVATE:
+        return len(d) >= 5 and d[:4] == i[:4]
+    return not outsider
 
 
 def grants(entries, rel: str, short: str) -> bool:

@@ -185,6 +185,42 @@ def test_the_uid_of_each_connection_is_read_off_the_connection(port, folder, wor
         stop(p)
 
 
+def test_on_macos_the_uid_is_read_with_local_peercred():
+    """macOS has no SO_PEERCRED: the uid comes from LOCAL_PEERCRED, a struct xucred (version, uid, ...)."""
+    import struct
+    from sheafmd.hub import proxy
+
+    class Conn:
+        def getsockopt(self, level, name, size):
+            assert (level, name, size) == (0, 1, 76)            # SOL_LOCAL, LOCAL_PEERCRED, sizeof(struct xucred)
+            return struct.pack("@IIh16I", 0, 4242, 1, 20, *[0] * 15)
+    with pytest.MonkeyPatch.context() as mp:
+        mp.delattr(socket, "SO_PEERCRED", raising=False)
+        mp.setattr(socket, "LOCAL_PEERCRED", 1, raising=False)
+        assert proxy.peer(Conn()).uid == 4242
+
+
+def test_on_macos_an_xucred_of_another_version_gives_no_uid():
+    import struct
+    from sheafmd.hub import proxy
+
+    class Conn:
+        def getsockopt(self, level, name, size):
+            return struct.pack("@IIh16I", 1, 4242, 1, 20, *[0] * 15)
+    with pytest.MonkeyPatch.context() as mp:
+        mp.delattr(socket, "SO_PEERCRED", raising=False)
+        mp.setattr(socket, "LOCAL_PEERCRED", 1, raising=False)
+        with pytest.raises(OSError, match="version 1"):
+            proxy.peer(Conn())
+
+
+def test_the_uid_of_a_real_connection_is_this_users():
+    from sheafmd.hub import proxy
+    a, b = socket.socketpair(socket.AF_UNIX)
+    with a, b:
+        assert proxy.peer(a).uid == os.getuid()
+
+
 def test_without_the_table_the_hub_makes_no_proxy_socket(port, folder):
     p = run_hub()
     try:

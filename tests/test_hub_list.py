@@ -1123,7 +1123,7 @@ def test_renders_that_ask_the_list_for_owners_and_a_poll_that_drops_a_row_all_fi
     gone_rel = "initech/website/2026-10-27-ga4-property.md"
     gone = sheaves / gone_rel
     kept = gone.read_text(encoding="utf-8")
-    errors, stop = [], threading.Event()
+    errors, stop, steps = [], threading.Event(), [0]
 
     def rows():
         return {r.sheaf.rel for r in box.hub.the_list._snap.rows}
@@ -1146,6 +1146,7 @@ def test_renders_that_ask_the_list_for_owners_and_a_poll_that_drops_a_row_all_fi
                 box.hub.the_list.poll()
                 gone.write_text(kept, encoding="utf-8")
                 box.hub.the_list.poll()
+                steps[0] += 1
         except Exception as ex:                 # noqa: BLE001
             errors.append(ex)
         finally:
@@ -1155,9 +1156,16 @@ def test_renders_that_ask_the_list_for_owners_and_a_poll_that_drops_a_row_all_fi
               [threading.Thread(target=drop, daemon=True)]
     for t in threads:
         t.start()
-    deadline = time.monotonic() + 30
+    # Stuck is a drop that takes no step for 30 s, not a run that takes 30 s: a 3-core macOS runner took
+    # 30.7 s for what takes 4 s on Linux.
+    seen, still = steps[0], time.monotonic()
+    while any(t.is_alive() for t in threads) and time.monotonic() - still < 30:
+        threads[-1].join(timeout=0.5)
+        if steps[0] != seen:
+            seen, still = steps[0], time.monotonic()
+    stop.set()
     for t in threads:
-        t.join(timeout=max(0, deadline - time.monotonic()))
+        t.join(timeout=30)
     assert not any(t.is_alive() for t in threads), "a render or the poll is stuck: a deadlock"
     assert errors == []
     assert "data:image/png" in e.html

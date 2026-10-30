@@ -2,6 +2,7 @@
 import contextlib
 import signal
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -195,11 +196,23 @@ def comment_draft_key(site):
     return f"sheaf-comment-draft:{site.port}:{DOC}"
 
 
+# What Playwright's Chromium does on macOS with these keys is what macOS does (its macEditingCommands): End and
+# Home scroll the document, Control+End moves nothing, Control+v is page down. These are the keys a person there
+# presses for the move the test means.
+MAC_KEYS = {"End": "Meta+ArrowRight", "Home": "Meta+ArrowLeft", "Shift+End": "Shift+Meta+ArrowRight",
+            "Control+End": "Meta+ArrowDown", "Control+Home": "Meta+ArrowUp", "Control+v": "Meta+v"}
+
+
+def key(combo, platform=sys.platform):
+    """The keys to press for `combo`, written as on Linux, on the system the browser runs on."""
+    return MAC_KEYS.get(combo, combo) if platform == "darwin" else combo
+
+
 def type_at_end(page, css, text):
     """Press e, click the paragraph `css`, go to its end and type `text`."""
     page.keyboard.press("e")
     page.click(css)
-    page.keyboard.press("End")
+    page.keyboard.press(key("End"))
     page.keyboard.type(text)
 
 

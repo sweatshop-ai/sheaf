@@ -122,3 +122,19 @@ def test_while_a_press_of_a_row_waits_its_other_buttons_cannot_be_pressed(listed
     until(lambda: ticks, what="the tick")
     assert [(b["action"], b["word"], s) for b, s in ticks] == [(1, "Done", 200)]
 
+
+
+def test_a_refusal_beside_a_press_that_went_through_is_still_said_after_the_reload(listed, sheaves):  # noqa: F811
+    page, ticks = listed
+    path = sheaves / GA4[5:]
+    joey(page).click()
+    ga4(page).click()
+    path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Done", "- [x] Done"), encoding="utf-8")
+    page.clock.run_for(5100)
+    until(lambda: len(ticks) == 2, what="both ticks")
+    assert sorted(s for _, s in ticks) == [200, 409]
+    until(lambda: joey(page).count() == 0, what="the reload without Joey's button")
+    until(lambda: page.locator(".list-error").is_visible(), what="the refusal, said after the reload")
+    assert "Done" in page.locator(".list-error").inner_text()
+    page.reload()
+    assert page.locator(".list-error").is_hidden()          # said once, not at every load after

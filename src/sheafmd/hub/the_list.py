@@ -680,14 +680,16 @@ def _age(seconds: float) -> str:
 # reload never drops a press still in its window; a refusal is said above the rows, after that reload too, and gives
 # the button back.
 SCRIPT = """
-var UNDO_MS = 5000, open = 0, ticked = false, SAID = 'sheaf-list-said';
-var said = document.querySelector('.list-error');
+var UNDO_MS = 5000, open = 0, ticked = false, reloading = false, SAID = 'sheaf-list-said';
+var said = document.querySelector('.list-error'), refused = new Map();   // button: its refusal on this page
 function say(text) { said.textContent = text; said.hidden = false; }
-// A refusal beside a press that went through is said again after the reload, once (sessionStorage may refuse).
+// A refusal beside a press that went through is said again after that press's reload, once: only the refusals
+// made on this page are kept, never one said again here (sessionStorage may refuse).
 try { var kept = sessionStorage.getItem(SAID); sessionStorage.removeItem(SAID); if (kept) say(kept); } catch (e) {}
 function settled() {
   if (--open !== 0 || !ticked) return;
-  try { if (!said.hidden) sessionStorage.setItem(SAID, said.textContent); } catch (e) {}
+  reloading = true;               // a press from now on would die with the page
+  try { if (refused.size) sessionStorage.setItem(SAID, Array.from(refused.values()).join(' ')); } catch (e) {}
   location.reload();
 }
 document.querySelectorAll('.list-row button.list-act').forEach(function (b) {
@@ -705,17 +707,18 @@ document.querySelectorAll('.list-row button.list-act').forEach(function (b) {
       body: JSON.stringify({doc: b.dataset.doc, action: Number(b.dataset.action), word: b.dataset.word,
         hash: b.dataset.hash})})
       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) {
-        if (r.ok) { ticked = true; return; }
+        if (r.ok) { ticked = true; refused.delete(b); return; }
         throw new Error(j.error || ('the hub answered ' + r.status));
       }); })
       .catch(function (e) {
         if (b.hasAttribute('aria-pressed')) b.setAttribute('aria-pressed', 'false');
         b.disabled = false; lock(false);
-        say(e.message);
+        refused.set(b, e.message); say(e.message);
       })
       .then(settled);
   }
   b.addEventListener('click', function () {
+    if (reloading) return;
     if (waiting !== null) { clearTimeout(waiting); waiting = null; back(); lock(false); settled(); return; }
     open++;
     lock(true);

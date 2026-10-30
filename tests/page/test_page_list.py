@@ -136,5 +136,17 @@ def test_a_refusal_beside_a_press_that_went_through_is_still_said_after_the_relo
     until(lambda: joey(page).count() == 0, what="the reload without Joey's button")
     until(lambda: page.locator(".list-error").is_visible(), what="the refusal, said after the reload")
     assert "Done" in page.locator(".list-error").inner_text()
-    page.reload()
-    assert page.locator(".list-error").is_hidden()          # said once, not at every load after
+    # The GA4 sheaf, whose tick was refused, gets an action again, for a press that goes through.
+    path.write_text(path.read_text(encoding="utf-8").replace("- [x] Done", "- [x] Done\n- [ ] Approve"), encoding="utf-8")
+    page.reload()                                           # a reload by hand
+    assert page.locator(".list-error").is_hidden()
+    page.evaluate("sessionStorage.setItem('sheaf-list-said', 'an old refusal')")
+    page.reload()                                           # said once, after the reload that kept it
+    assert page.locator(".list-error").inner_text() == "an old refusal"
+    ga4(page).click()
+    page.clock.run_for(5100)
+    until(lambda: len(ticks) == 3, what="the third tick")
+    assert ticks[2][1] == 200
+    until(lambda: ga4(page).count() == 0, what="the reload after GA4's Approve")
+    page.wait_for_timeout(200)
+    assert page.locator(".list-error").is_hidden()          # not said again after a later press's reload

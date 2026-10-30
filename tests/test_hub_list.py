@@ -8,6 +8,7 @@ import os
 import pwd
 import re
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -1082,3 +1083,81 @@ def test_an_open_create_where_a_hidden_sheaf_went_then_closed_answers_the_same_w
     assert got["doc"] == doc                                    # its name; its file moved to Dora's folder (9.11)
     dora = sheaves / f"globex/black-friday/private/dora/{joey.name}"
     assert front_matter(dora.read_text(encoding="utf-8"))["owner"] == "dora"
+
+
+def joey_with_a_figure(sheaves):
+    """Joey's sheaf, which names an image of its project, `globex/black-friday/fig.png`."""
+    from PIL import Image
+    Image.new("RGB", (4, 4), (200, 30, 30)).save(sheaves / "globex/black-friday/fig.png")
+    joey = sheaves / JOEY[5:]
+    joey.write_text(joey.read_text(encoding="utf-8").replace("The draft.", "The draft. ![the figure](fig.png)"),
+                    encoding="utf-8")
+    return joey
+
+
+def test_a_sheaf_whose_issue_is_assigned_outside_its_project_embeds_none_of_its_images(box, sheaves, github):
+    """On the list's root a sheaf's owner is its issue's assignee (9.11), and an owner the project's `members` do
+    not hold leaves out the project's images (#81, #91): the record moves them, the file does not."""
+    joey = joey_with_a_figure(sheaves)
+    before = joey.read_text(encoding="utf-8")
+    assert "data:image/png" in box.get(f"/{JOEY}", member=NELL).text      # #5 is Nell's, in the project
+    github.issues[5]["assignees"] = ["dora-k"]                          # Dora is in initech/website only
+    box.hub.the_list.poll()
+    assert "data:image/png" not in box.get(f"/{JOEY}", member=NELL).text
+    github.issues[5]["assignees"] = ["nell-l"]
+    box.hub.the_list.poll()
+    assert "data:image/png" in box.get(f"/{JOEY}", member=NELL).text
+    github.issues[5]["assignees"] = ["dora-k"]
+    box.hub.the_list.poll()
+    assert "data:image/png" not in box.get(f"/{JOEY}", member=NELL).text
+    assert joey.read_text(encoding="utf-8") == before
+
+
+def test_renders_that_ask_the_list_for_owners_and_a_poll_that_drops_a_row_all_finish(box, sheaves, github):
+    """`_build` judges the images by the owners, so a render asks `the_list.assignees` under the document's lock,
+    which takes the name's lock and `_gone_lock` (#81, #91). Renders of a list sheaf beside a poll and asks that
+    drop the row of a file gone since all finish, with no deadlock and no exception."""
+    joey_with_a_figure(sheaves)
+    assert box.get(f"/{JOEY}", member=NELL).status == 200
+    e = box.hub.entries[JOEY]
+    gone_rel = "initech/website/2026-10-27-ga4-property.md"
+    gone = sheaves / gone_rel
+    kept = gone.read_text(encoding="utf-8")
+    errors, stop = [], threading.Event()
+
+    def rows():
+        return {r.sheaf.rel for r in box.hub.the_list._snap.rows}
+
+    def render():
+        try:
+            while not stop.is_set():
+                e.live.rebuild()
+                assert box.get(f"/{JOEY}", member=NELL).status == 200
+        except Exception as ex:                 # noqa: BLE001 - every failure is the test's
+            errors.append(ex)
+
+    def drop():
+        try:
+            for _ in range(10):
+                assert gone_rel in rows()
+                gone.unlink()
+                assert box.hub.the_list.assignees(f"list/{gone_rel}", "acme/record#7") is None
+                assert gone_rel not in rows()                                                    # its row dropped
+                box.hub.the_list.poll()
+                gone.write_text(kept, encoding="utf-8")
+                box.hub.the_list.poll()
+        except Exception as ex:                 # noqa: BLE001
+            errors.append(ex)
+        finally:
+            stop.set()
+
+    threads = [threading.Thread(target=render, daemon=True) for _ in range(3)] + \
+              [threading.Thread(target=drop, daemon=True)]
+    for t in threads:
+        t.start()
+    deadline = time.monotonic() + 30
+    for t in threads:
+        t.join(timeout=max(0, deadline - time.monotonic()))
+    assert not any(t.is_alive() for t in threads), "a render or the poll is stuck: a deadlock"
+    assert errors == []
+    assert "data:image/png" in e.html

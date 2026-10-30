@@ -490,14 +490,17 @@
     return '<div class="rd-cmd"><code>' + esc(text) + '</code><button type="button">Copy</button></div>';
   }
   // A laptop with nothing installed (tt-tiroir#170): uv's own installer, one line per system, folded under the fork.
-  // uv brings its own Python, so the fork command needs nothing else; Claude Code the member installs as its page says.
-  var UV_POSIX = 'curl -LsSf https://astral.sh/uv/install.sh | sh',
+  // uv brings its own Python, so the fork command needs no Python of its own; Claude Code comes from its install page.
+  // A fresh Ubuntu Desktop has wget and no curl; macOS has curl and no wget.
+  var UV_MACOS = 'curl -LsSf https://astral.sh/uv/install.sh | sh',
+      UV_LINUX = 'wget -qO- https://astral.sh/uv/install.sh | sh',
       UV_WINDOWS = 'powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"';
   function installUv() {
     var row = function (text) { return cmdRow(text).replace('class="rd-cmd"', 'class="rd-cmd rd-install"'); };
     return '<details class="rd-need"><summary>No uv on this laptop yet?</summary>' +
-      '<p>macOS or Linux, in Terminal:</p>' + row(UV_POSIX) +
-      '<p>Windows, in PowerShell:</p>' + row(UV_WINDOWS) +
+      '<p>macOS, in Terminal:</p>' + row(UV_MACOS) +
+      '<p>Linux, in a terminal:</p>' + row(UV_LINUX) +
+      '<p>Windows, in PowerShell or Command Prompt:</p>' + row(UV_WINDOWS) +
       '<p>Then open a new terminal and paste the command above. Claude Code: ' +
       '<a href="https://code.claude.com/docs/en/setup" target="_blank" rel="noopener">its install page</a>.</p>' +
       '</details>';

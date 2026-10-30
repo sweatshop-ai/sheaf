@@ -857,3 +857,196 @@ def test_a_pull_of_one_root_waits_on_the_name_of_a_sheaf_another_root_of_the_rep
     assert not w.is_alive() and not g.is_alive()
     assert got == [first]
     assert entered == [True]
+
+
+# ── two roots of one repo: the repo pulls and pushes as a whole (#89) ─────────
+def one_repo(tmp_path, remote, acme="commit = true\npush = true\n", globex="commit = true\npush = true\n"):
+    """A clone of `remote` holding two roots, `acme/` and `globex/`, each with its own `.sheaf.toml` (`None`: none)
+    and a `plan.md`, committed and pushed. Gives (the repo, root acme, root globex)."""
+    from sheafmd.hub.roots import Root
+    repo = tmp_path / "sheaves"
+    subprocess.run(["git", "clone", "-q", str(remote), str(repo)], check=True, capture_output=True)
+    git(repo, "config", "user.name", "the box")
+    git(repo, "config", "user.email", "box@example.com")
+    for name, settings in (("acme", acme), ("globex", globex)):
+        (repo / name).mkdir()
+        if settings is not None:
+            (repo / name / ".sheaf.toml").write_text(settings, encoding="utf-8")
+        (repo / name / "plan.md").write_text(f"# {name}\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "first")
+    git(repo, "push", "-q", "origin", "HEAD:main")
+    return repo, Root("acme", repo / "acme", True), Root("globex", repo / "globex", True)
+
+
+def git_spy(monkeypatch, on_fetch=None):
+    """The folders the hub fetched in and pushed from, in order; `on_fetch()` runs before each fetch."""
+    from sheafmd.hub import commits
+    seen, real = {"fetch": [], "push": []}, commits._git
+
+    def spy(folder, *args, **kw):
+        if args[:1] in (("fetch",), ("push",)):
+            if args[0] == "fetch" and on_fetch:
+                on_fetch()
+            seen[args[0]].append(folder)
+        return real(folder, *args, **kw)
+
+    monkeypatch.setattr(commits, "_git", spy)
+    return seen
+
+
+def on_the_page(repo, root, words):
+    from sheafmd.hub import commits
+    (repo / root.name / "plan.md").write_text(f"# {root.name}, {words}\n", encoding="utf-8")
+    return commits.Author("Bea", "bea@example.com")
+
+
+def test_a_poll_fetches_a_repo_once_however_many_of_its_roots_push(tmp_path, remote, monkeypatch):
+    from sheafmd.hub import commits
+    repo, a, b = one_repo(tmp_path, remote)
+    made = []
+    hub_commits = commits.Commits(lambda kind, doc, **detail: made.append(kind))
+    seen = git_spy(monkeypatch)
+    hub_commits.poll([a, b])
+    assert hub_commits.settle()
+    assert len(seen["fetch"]) == 1
+    assert made == []
+
+
+def test_one_cause_in_a_repo_of_two_roots_is_one_push_diverged_row(tmp_path, remote, monkeypatch):
+    """A remote that changed what the box committed meets the poll of each root of the repo: one cause, one row."""
+    from sheafmd.hub import commits
+    repo, a, b = one_repo(tmp_path, remote)
+    (repo / "acme" / "plan.md").write_text("# acme, on the box\n", encoding="utf-8")
+    git(repo, "commit", "-q", "-am", "on the box")                      # not pushed
+    merged_on_github(tmp_path, remote, {"acme/plan.md": "# acme, on GitHub\n"}, "on GitHub")
+    made = []
+    hub_commits = commits.Commits(lambda kind, doc, **detail: made.append((kind, doc)))
+    hub_commits.poll([a, b])
+    assert hub_commits.settle()
+    assert [kind for kind, _ in made] == ["push-diverged"]
+
+
+def test_writes_in_both_roots_of_a_repo_while_a_push_runs_make_one_pull_and_push_after_it(tmp_path, remote, monkeypatch):
+    """The repo is due once, whichever of its roots asked: a push carries every commit of its HEAD."""
+    import threading
+
+    from sheafmd.hub import commits
+    repo, a, b = one_repo(tmp_path, remote)
+    fetching, go = threading.Event(), threading.Event()
+
+    def hold():
+        if not fetching.is_set():
+            fetching.set()
+            assert go.wait(30)
+
+    seen = git_spy(monkeypatch, on_fetch=hold)
+    made = []
+    hub_commits = commits.Commits(lambda kind, doc, **detail: made.append(kind))
+    hub_commits.saved(a, "plan.md", on_the_page(repo, a, "first"), "edit")
+    assert fetching.wait(30)                                            # the pusher took acme's push
+    hub_commits.saved(a, "plan.md", on_the_page(repo, a, "second"), "edit")
+    hub_commits.saved(b, "plan.md", on_the_page(repo, b, "first"), "edit")
+    go.set()
+    assert hub_commits.settle()
+    # The first push carries the three commits, made while its fetch ran; the one pull after it finds nothing to push.
+    assert len(seen["fetch"]) == 2 and len(seen["push"]) == 1
+    assert made == []
+    assert git(repo, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
+
+
+@pytest.mark.parametrize("globex", ["commit = true\n", "commit = true\npush = false\n"])
+def test_roots_of_one_repo_that_disagree_on_push_push_nothing_until_they_agree(tmp_path, remote, monkeypatch,
+                                                                              capsys, globex):
+    """acme pushes and globex, which commits, does not: acme's push would carry globex's commits, so the repo
+    pushes and pulls nothing, says so once, and a write's push goes out once the two agree."""
+    from sheafmd.hub import commits
+    repo, a, b = one_repo(tmp_path, remote, globex=globex)
+    first = git(remote, "rev-parse", "main")
+    made = []
+    hub_commits = commits.Commits(lambda kind, doc, **detail: made.append((kind, doc, detail)), roots=lambda: [a, b])
+    seen = git_spy(monkeypatch)
+    hub_commits.saved(b, "plan.md", on_the_page(repo, b, "first"), "edit")
+    hub_commits.saved(a, "plan.md", on_the_page(repo, a, "first"), "edit")
+    hub_commits.poll([a, b])
+    assert hub_commits.settle()
+    assert seen == {"fetch": [], "push": []}
+    assert git(remote, "rev-parse", "main") == first
+    assert git(repo, "log", "--format=%s", "-2").splitlines() == ["edit: plan.md", "edit: plan.md"]
+    assert made == [("push-settings-differ", "acme/plan.md", {"push": ["acme"], "no_push": ["globex"]})]
+    assert capsys.readouterr().err.count("pushes nothing until they agree") == 1
+    (repo / "globex" / ".sheaf.toml").write_text("commit = true\npush = true\n", encoding="utf-8")
+    monkeypatch.setattr(commits, "FETCH_SECONDS", 0)
+    hub_commits.poll([a, b])
+    assert hub_commits.settle()
+    assert git(repo, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
+    assert len(made) == 1
+
+
+def test_a_root_that_does_not_commit_leaves_the_push_of_its_repo_to_the_roots_that_do(tmp_path, remote):
+    """The hub never commits a path of a root that does not commit, so the push of the others carries none of its
+    writes: no disagreement."""
+    from sheafmd.hub import commits
+    repo, a, b = one_repo(tmp_path, remote, globex=None)
+    made = []
+    hub_commits = commits.Commits(lambda kind, doc, **detail: made.append(kind), roots=lambda: [a, b])
+    hub_commits.saved(b, "plan.md", on_the_page(repo, b, "first"), "edit")
+    hub_commits.saved(a, "plan.md", on_the_page(repo, a, "first"), "edit")
+    assert hub_commits.settle()
+    assert made == []
+    assert git(remote, "log", "--format=%s", "main").splitlines() == ["edit: plan.md", "first"]
+    assert git(repo, "status", "--porcelain", "--untracked-files=no") == " M globex/plan.md\n"
+
+
+def test_a_write_made_while_a_push_runs_and_the_roots_part_goes_out_once_they_agree(tmp_path, remote, monkeypatch):
+    """A save after the push read HEAD, meeting a mix that came meanwhile, is a write's push not gone: the poll after
+    the roots agree again pushes it (the gate on PR 90)."""
+    from sheafmd.hub import commits
+    repo, a, b = one_repo(tmp_path, remote)
+    made = []
+    hub_commits = commits.Commits(lambda kind, doc, **detail: made.append(kind), roots=lambda: [a, b])
+    real, done = commits._git, []
+
+    def spy(folder, *args, **kw):
+        r = real(folder, *args, **kw)
+        if args[:1] == ("push",) and not done:
+            done.append(True)
+            (repo / "globex" / ".sheaf.toml").write_text("commit = true\npush = false\n", encoding="utf-8")
+            hub_commits.saved(a, "plan.md", on_the_page(repo, a, "second"), "edit")
+        return r
+
+    monkeypatch.setattr(commits, "_git", spy)
+    hub_commits.saved(a, "plan.md", on_the_page(repo, a, "first"), "edit")
+    assert hub_commits.settle()
+    assert made == ["push-settings-differ"]
+    (repo / "globex" / ".sheaf.toml").write_text("commit = true\npush = true\n", encoding="utf-8")
+    monkeypatch.setattr(commits, "FETCH_SECONDS", 0)
+    hub_commits.poll([a, b])
+    assert hub_commits.settle()
+    assert git(repo, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
+
+
+def test_a_push_queued_while_the_roots_agreed_is_judged_again_when_its_turn_comes(tmp_path, remote, monkeypatch):
+    """The mix is judged when the pusher takes the repo, not when a write queued it: a root that stops pushing while
+    its push waits is not pushed (the gate on PR 90). What a push already carried was committed while they agreed."""
+    from sheafmd.hub import commits
+    repo, a, b = one_repo(tmp_path, remote)
+    made = []
+    hub_commits = commits.Commits(lambda kind, doc, **detail: made.append(kind), roots=lambda: [a, b])
+    real, seen = commits._git, []
+
+    def spy(folder, *args, **kw):
+        if args[:1] == ("fetch",):
+            seen.append(folder)
+        r = real(folder, *args, **kw)
+        if args[:1] == ("push",) and len(seen) == 1:
+            hub_commits.saved(b, "plan.md", on_the_page(repo, b, "first"), "edit")   # queued while the two agree
+            (repo / "globex" / ".sheaf.toml").write_text("commit = true\npush = false\n", encoding="utf-8")
+        return r
+
+    monkeypatch.setattr(commits, "_git", spy)
+    hub_commits.saved(a, "plan.md", on_the_page(repo, a, "first"), "edit")
+    assert hub_commits.settle()
+    assert len(seen) == 1 and made == ["push-settings-differ"]
+    assert git(remote, "log", "--format=%s", "main").splitlines() == ["edit: plan.md", "first"]
+    assert git(repo, "log", "--format=%s", "-3").splitlines() == ["edit: plan.md", "edit: plan.md", "first"]

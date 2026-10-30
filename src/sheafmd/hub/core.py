@@ -784,6 +784,9 @@ class Hub:
         A stop or a signal that is under way is not turned into an upgrade by a later upgrade stop:
         under the service that would exit 75 and start the hub again, which the person stopped.
         Only an upgrade stop gives way: a stop or a signal that comes after one ends the hub for good.
+        A stop wins over a signal, in either order: they exit differently under the service (#79: a
+        signal is restarted, `sheaf stop` is not), and a person who asked for a stop is told the hub
+        stopped, so a stray signal before or after it must not bring the hub back.
         The look at `stop_requested` and the write of it are one step, because the signal handler and
         the request threads both come here."""
         with self._stop_lock:
@@ -799,6 +802,8 @@ class Hub:
                         return False
                     self.upgrading = True
                 self.told_restart = self.told_restart or told
+            elif self.stop_requested == "stop" or (self.stop_requested == "signal" and reason == "signal"):
+                return True                                  # a stop under way stays; a second signal adds nothing
             self.stop_requested = reason
         if self.on_stop:
             self.on_stop(reason)

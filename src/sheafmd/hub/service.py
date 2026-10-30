@@ -6,9 +6,13 @@ it; `uninstall` undoes that. It is offered, never run by install. The unit and t
 built here as text by pure functions, so a test reads them without a service manager; the
 commands that run `systemctl` and `launchctl` find them only through PATH.
 
-Restart on a crash, with a backoff, is the service manager's work: the unit says
-`Restart=on-failure` and the plist `KeepAlive.SuccessfulExit=false`, and sheaf only has to exit
-with a failure code when it crashes (1) or is stopped for an upgrade (75, 14.4).
+Restart, with a backoff, is the service manager's work. The unit says `Restart=always`, so a hub that
+ends on a signal nobody announced is started again (#79), and `RestartPreventExitStatus` names the
+one exit it leaves down: `sheaf stop`, which the hub ends with EXIT_STOPPED only when the unit says
+so (STOP_EXIT_ENV), because a unit of an older sheaf restarts that code. `systemctl stop` is never
+restarted. launchd has no per-code rule, so the plist keeps `KeepAlive.SuccessfulExit=false`, says
+nothing, and a stop there exits 0: sheaf has to exit with a failure code when it crashes (1) or is
+stopped for an upgrade (75, 14.4).
 """
 import getpass
 import os
@@ -29,6 +33,11 @@ DEFAULT_PATH = "/usr/local/bin:/usr/bin:/bin"
 # The paths on macOS ignore XDG, so the plist does not carry them.
 CARRIED = ("SHEAF_PORT", "SHEAF_HOME")
 CARRIED_XDG = ("XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME")
+# What a hub under the unit exits with after `sheaf stop` (POST /_/stop {reason: "stop"}): the unit's
+# one exit it does not restart, and a success, so a hub stopped on purpose is `inactive`, not `failed`.
+# The unit says it in STOP_EXIT_ENV; a hub whose manager does not say it exits 0 on a stop.
+EXIT_STOPPED = 3
+STOP_EXIT_ENV = "SHEAF_STOP_EXIT"
 
 
 class ServiceError(Exception):
@@ -116,10 +125,12 @@ def systemd_unit(command: list[str], path_env: str, extra_env: dict | None = Non
         if "\n" in text or "\r" in text:
             raise ServiceError("a value with a line break cannot go into a service file")
     exec_start = " ".join([*(_word(c, command=True) for c in command), "hub", "--started-by", "service"])
-    env = [_env_line("PATH", path_env)] + [_env_line(k, v) for k, v in (extra_env or {}).items()]
+    env = [_env_line("PATH", path_env), _env_line(STOP_EXIT_ENV, str(EXIT_STOPPED))] \
+        + [_env_line(k, v) for k, v in (extra_env or {}).items()]
     return "\n".join([
         "[Unit]", "Description=sheaf hub", "StartLimitIntervalSec=300", "StartLimitBurst=5", "",
-        "[Service]", f"ExecStart={exec_start}", "Restart=on-failure", "RestartSec=2",
+        "[Service]", f"ExecStart={exec_start}", "Restart=always",
+        f"RestartPreventExitStatus={EXIT_STOPPED}", f"SuccessExitStatus={EXIT_STOPPED}", "RestartSec=2",
         "RestartSteps=5", "RestartMaxDelaySec=60", *env, "",
         "[Install]", "WantedBy=default.target", ""])
 
@@ -233,11 +244,18 @@ def install(say, make_room=lambda: None, *, install_line):
                            f"service again:\n  {install_line()}\n  sheaf service install")
     if k == "systemd":
         f = unit_path()
-        _write(f, systemd_unit(command, path_env, extra).encode("utf-8"))
+        unit = systemd_unit(command, path_env, extra).encode("utf-8")
+        before = f.read_bytes() if f.is_file() else None
+        _write(f, unit)
         _run([tool, "--user", "daemon-reload"])
         make_room()
         _run([tool, "--user", "enable", "--now", UNIT])
         say(f"  service installed: {f}")
+        if before is not None and before != unit:
+            # `enable --now` leaves a running hub as it is: it keeps the environment it started with
+            # (STOP_EXIT_ENV), so until it starts again its `sheaf stop` exits 0, which the new unit restarts.
+            say("  the unit changed; a hub the service is running takes it when it starts again: "
+                "run `sheaf restart`")
         say(f"  On a remote box, ask the admin for `loginctl enable-linger {getpass.getuser()}` "
             "so the hub keeps running after you log out.")
     else:

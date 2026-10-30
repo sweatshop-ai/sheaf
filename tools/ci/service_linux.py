@@ -4,9 +4,10 @@
 It refuses anywhere else (`_ci.guard`): it installs a user unit and starts a hub under systemd.
 Run it with the project's Python and `sheaf` on PATH, as ci.yml does. It checks, in order, what
 the unit tests can only imitate: `sheaf service install` leaves the hub running as the service,
-a `kill -9` is followed by a restart and an `unclean-exit` row, an upgrade stop (a newer command
-meets the idle hub) ends in exit 75 and a restart, and `sheaf service uninstall` takes it all
-away. A runner with no systemd (a container) or no systemd user session skips the checks with a
+a `kill -9` is followed by a restart and an `unclean-exit` row, a stray SIGTERM ends in exit 0 and
+a restart (#79), an upgrade stop (a newer command meets the idle hub) ends in exit 75 and a restart,
+`sheaf stop` ends in exit 3 that systemd leaves down as a success, and `sheaf service uninstall`
+takes it all away. A runner with no systemd (a container) or no systemd user session skips the checks with a
 notice."""
 import getpass
 import os
@@ -15,6 +16,7 @@ import signal
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 import _ci
@@ -92,8 +94,11 @@ def checks(port: int):
     done = _ci.sh(["sheaf", "service", "install"])
     _ci.check(done.returncode == 0, "sheaf service install exits 0")
     text = unit.read_text(encoding="utf-8") if unit.is_file() else ""
-    _ci.check("Restart=on-failure" in text and f"Environment=SHEAF_PORT={port}" in text
-              and "hub --started-by service" in text, "the unit is the one of SPEC 14.3", text)
+    _ci.check(all(f"\n{line}\n" in text for line in (
+        "Restart=always", f"RestartPreventExitStatus={service.EXIT_STOPPED}",
+        f"SuccessExitStatus={service.EXIT_STOPPED}", f"Environment={service.STOP_EXIT_ENV}={service.EXIT_STOPPED}",
+        f"Environment=SHEAF_PORT={port}")) and "hub --started-by service" in text,
+        "the unit is the one of SPEC 14.3", text)
     _ci.check(_ci.wait_until(lambda: show().get("ActiveState") == "active", seconds=30, every=1),
               "the service is active")
     _ci.check(_ci.wait_until(_ci.hub_answers, seconds=30, every=1), "the hub answers")
@@ -112,7 +117,20 @@ def checks(port: int):
               str(sorted(sampler.exits_seen())))
     _ci.check(_ci.has_row(_ci.diag(), "unclean-exit"), "the next hub wrote an unclean-exit row")
 
-    _ci.say("3. an upgrade stop")
+    _ci.say("3. a stray SIGTERM (#79)")
+    before = show()
+    sampler = Sampler()
+    sampler.start()
+    # Not the manager's stop job: a signal from anyone else, which exits 0 and Restart=always starts again.
+    os.kill(int(before["MainPID"]), signal.SIGTERM)
+    now = hub_back(int(before["NRestarts"]), before["MainPID"])
+    sampler.finish()
+    _ci.check(now, "the service restarted the hub after a SIGTERM it did not send")
+    _ci.check("0" in sampler.exits_seen(), "systemd saw exit 0 before the restart",
+              str(sorted(sampler.exits_seen())))
+    _ci.check(_ci.has_row(_ci.diag(), "hub-exit", reason="signal"), "the hub wrote hub-exit reason=signal")
+
+    _ci.say("4. an upgrade stop")
     before = show()
     sampler = Sampler()
     sampler.start()
@@ -126,7 +144,23 @@ def checks(port: int):
               str(sorted(sampler.exits_seen())))
     _ci.check(_ci.has_row(_ci.diag(), "hub-exit", reason="upgrade"), "the hub wrote hub-exit reason=upgrade")
 
-    _ci.say("4. uninstall")
+    _ci.say("5. sheaf stop")
+    before = show()
+    done = _ci.sh(["sheaf", "stop"])
+    _ci.check(done.returncode == 0, "sheaf stop exits 0", done.stdout + done.stderr)
+    stopped = _ci.wait_until(lambda: (lambda now: now if now.get("ActiveState") == "inactive" else None)(show()),
+                             seconds=30, every=0.5)
+    _ci.check(stopped, "the service is inactive after sheaf stop", str(show()))
+    _ci.check(stopped and stopped.get("ExecMainStatus") == str(service.EXIT_STOPPED)
+              and stopped.get("Result") == "success",
+              f"the hub exited {service.EXIT_STOPPED}, which systemd counts as a success", str(stopped))
+    time.sleep(20)          # past the backoff: with RestartSteps the next restart here would come after about 15 s
+    after = show()
+    _ci.check(after.get("ActiveState") == "inactive" and after.get("NRestarts") == before.get("NRestarts")
+              and not _ci.hub_answers(), "systemd left the hub stopped", str(after))
+    _ci.check(_ci.has_row(_ci.diag(), "hub-exit", reason="stop"), "the hub wrote hub-exit reason=stop")
+
+    _ci.say("6. uninstall")
     done = _ci.sh(["sheaf", "service", "uninstall"])
     _ci.check(done.returncode == 0, "sheaf service uninstall exits 0")
     _ci.check(not unit.exists(), "the unit file is gone")

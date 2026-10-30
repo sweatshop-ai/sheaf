@@ -6,7 +6,8 @@ Run it with the project's Python and `sheaf` on PATH, as ci.yml does. It checks,
 the unit tests can only imitate: `sheaf service install` leaves the hub running as the service,
 a `kill -9` is followed by a restart and an `unclean-exit` row, a stray SIGTERM ends in exit 0 and
 a restart (#79), an upgrade stop (a newer command meets the idle hub) ends in exit 75 and a restart,
-`sheaf stop` ends in exit 3 that systemd leaves down as a success, and `sheaf service uninstall`
+`sheaf stop` ends in exit 3 that systemd leaves down as a success, a `systemctl stop` while the hub's git
+fetch hangs lets the hub end that git itself (`push-stopped`, never `push-failed`, #95), and `sheaf service uninstall`
 takes it all away. A runner with no systemd (a container) or no systemd user session skips the checks with a
 notice."""
 import getpass
@@ -88,6 +89,36 @@ def hub_back(after_restarts: int, old_pid: str, seconds: int = 90):
     return _ci.wait_until(look, seconds=seconds, every=1)
 
 
+HANG = "61.9519"                 # a sleep nothing else runs: the remote that does not answer
+
+
+def hanging_root() -> Path:
+    """A root that commits and pushes, whose remote's upload-pack sleeps first: the poll's fetch hangs."""
+    w = Path(tempfile.mkdtemp(prefix="sheaf-ci-git-"))
+    remote, root = w / "remote.git", w / "root"
+    _ci.sh(["git", "init", "-q", "--bare", "-b", "main", str(remote)])
+    _ci.sh(["git", "clone", "-q", str(remote), str(root)])
+    for args in (["config", "user.name", "ci"], ["config", "user.email", "ci@example.com"]):
+        _ci.sh(["git", "-C", str(root), *args])
+    (root / ".sheaf.toml").write_text("commit = true\npush = true\n", encoding="utf-8")
+    (root / "doc.md").write_text("# Doc\n\nText.\n", encoding="utf-8")
+    for args in (["add", "-A"], ["commit", "-qm", "first"], ["push", "-q", "origin", "HEAD:main"],
+                 ["config", "remote.origin.uploadpack", f"sleep {HANG}; git-upload-pack"]):
+        _ci.sh(["git", "-C", str(root), *args])
+    return root
+
+
+def sleepers() -> list:
+    out = []
+    for d in Path("/proc").iterdir():
+        try:
+            if d.name.isdigit() and (d / "cmdline").read_bytes().split(b"\0")[:2] == [b"sleep", HANG.encode()]:
+                out.append(int(d.name))
+        except OSError:
+            pass
+    return out
+
+
 def checks(port: int):
     unit = service.unit_path()
     _ci.say("1. install")
@@ -98,7 +129,8 @@ def checks(port: int):
     _ci.check(all(f"\n{line}\n" in text for line in (
         "Restart=always", f"RestartPreventExitStatus={service.EXIT_STOPPED}",
         f"SuccessExitStatus={service.EXIT_STOPPED}", f"Environment={service.STOP_EXIT_ENV}={service.EXIT_STOPPED}",
-        f"Environment=SHEAF_PORT={port}")) and "hub --started-by service" in text,
+        f"Environment=SHEAF_PORT={port}", "KillMode=mixed", f"TimeoutStopSec={service.STOP_WAIT}"))
+        and "hub --started-by service" in text,
         "the unit is the one of SPEC 14.3", text)
     _ci.check(_ci.wait_until(lambda: show().get("ActiveState") == "active", seconds=30, every=1),
               "the service is active")
@@ -161,7 +193,23 @@ def checks(port: int):
               and not _ci.hub_answers(), "systemd left the hub stopped", str(after))
     _ci.check(_ci.has_row(_ci.diag(), "hub-exit", reason="stop"), "the hub wrote hub-exit reason=stop")
 
-    _ci.say("6. uninstall")
+    _ci.say("6. systemctl stop while git fetches (#95)")
+    systemctl("start", service.UNIT)
+    _ci.check(_ci.wait_until(_ci.hub_answers, seconds=30, every=1), "the hub answers again")
+    root = hanging_root()
+    done = _ci.sh(["sheaf", "open", str(root / "doc.md"), "--no-browser"])
+    _ci.check(done.returncode == 0, "sheaf open registers a root that commits and pushes", done.stdout + done.stderr)
+    _ci.check(_ci.wait_until(sleepers, seconds=30, every=0.25), "the poll's fetch is under way and hangs")
+    started = time.monotonic()
+    systemctl("stop", service.UNIT)
+    took = time.monotonic() - started
+    _ci.check(took < service.STOP_WAIT, f"the hub stopped within TimeoutStopSec ({took:.1f} s)")
+    _ci.check(not sleepers(), "nothing of the fetch is left")
+    rows = _ci.diag()
+    _ci.check(_ci.has_row(rows, "push-stopped", doc=root.name), "the hub wrote push-stopped for the git it ended", rows)
+    _ci.check(not _ci.has_row(rows, "push-failed"), "and no push-failed", rows)
+
+    _ci.say("7. uninstall")
     done = _ci.sh(["sheaf", "service", "uninstall"])
     _ci.check(done.returncode == 0, "sheaf service uninstall exits 0")
     _ci.check(not unit.exists(), "the unit file is gone")

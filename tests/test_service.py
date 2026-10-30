@@ -39,6 +39,8 @@ SuccessExitStatus=3
 RestartSec=2
 RestartSteps=5
 RestartMaxDelaySec=60
+KillMode=mixed
+TimeoutStopSec=60
 Environment=PATH=/opt/a:/usr/bin
 Environment=SHEAF_STOP_EXIT=3
 
@@ -64,6 +66,20 @@ def test_the_unit_restarts_every_exit_but_a_deliberate_stop():
     # and tells the hub so: a unit of an older sheaf restarts a 3, so the hub exits 3 only under this one
     assert f"\nEnvironment={service.STOP_EXIT_ENV}={code}\n" in text
     assert service.STOP_EXIT_ENV not in str(plistlib.loads(service.launchd_plist(["/opt/sheaf/bin/sheaf"], "/opt/a:/usr/bin")))
+
+
+def test_a_stop_signals_the_hub_alone_and_waits_longer_than_the_hubs_own_stop():
+    """#95: under the default `KillMode=control-group` systemd sent SIGTERM to every process of the unit, the
+    hub's git in the middle of a push included (`git exited -15`). `mixed` sends it to the hub alone, which
+    ends its git itself; the rest gets SIGKILL only after the hub. The manager waits past the hub's own bound."""
+    from sheafmd.hub import commits, jobs
+    text = service.systemd_unit(["/opt/sheaf/bin/sheaf"], "/opt/a:/usr/bin")
+    assert "\nKillMode=mixed\n" in text
+    (wait,) = [int(line.split("=")[1]) for line in text.splitlines() if line.startswith("TimeoutStopSec=")]
+    hub_stop = jobs.TERM_GRACE + 1 + commits.STOP_SECONDS + commits.END_GRACE + commits.END_GRACE
+    assert wait > hub_stop
+    data = plistlib.loads(service.launchd_plist(["/opt/sheaf/bin/sheaf"], "/opt/a:/usr/bin"))
+    assert data["ExitTimeOut"] == wait
 
 
 def test_the_port_and_the_home_set_at_install_go_into_environment_lines():
@@ -126,7 +142,7 @@ def test_the_plist_is_the_plist_of_the_spec():
                     "ProgramArguments": ["/opt/sheaf/bin/sheaf", "hub", "--started-by", "service"],
                     "EnvironmentVariables": {"PATH": "/opt/a:/usr/bin", "SHEAF_PORT": "27500"},
                     "RunAtLoad": True, "KeepAlive": {"SuccessfulExit": False},
-                    "ThrottleInterval": 10}
+                    "ThrottleInterval": 10, "ExitTimeOut": 60}
 
 
 def script(path):

@@ -1,6 +1,7 @@
 """The hub as a process, from its start to its exit (SPEC 8.4): what the diagnostics log holds
 after a clean stop, a lost start race and a kill -9. Every hub here is a real `python -m sheafmd
 hub` under this test's own SHEAF_HOME and port, and every one is reaped."""
+import contextlib
 import os
 import signal
 import socket
@@ -265,6 +266,7 @@ def siginfo(signo, code=0, pid=0, uid=0):
     return signal.struct_siginfo((signo, code, 0, pid, uid, 0, 0))
 
 
+@pytest.mark.skipif(not LINUX_SIGINFO, reason="struct_siginfo and sigtimedwait exist where the OS gives siginfo")
 def test_a_siginfo_that_names_no_stopping_signal_is_written_as_its_raw_numbers():
     """The row of sheaf#78 said `"signal": "-1532110032", "sender_pid": 443239200`: no signal, and
     a pid above pid_max. A siginfo that names neither SIGTERM nor SIGINT is no sender to name."""
@@ -273,10 +275,11 @@ def test_a_siginfo_that_names_no_stopping_signal_is_written_as_its_raw_numbers()
                    "raw": {"si_signo": -1532110032, "si_code": -1532110000, "si_pid": 443239200, "si_uid": 7}}
 
 
+@pytest.mark.skipif(not LINUX_SIGINFO, reason="struct_siginfo and sigtimedwait exist where the OS gives siginfo")
 def test_the_watcher_takes_only_a_stopping_signal_and_logs_the_rest(monkeypatch):
     """CPython's sigtimedwait, interrupted (EINTR) once its deadline has passed, returns the
     siginfo it never filled in instead of None (sheaf#78). The hub stopped on it."""
-    waits = iter([siginfo(-1532110032, pid=443239200), None, siginfo(signal.SIGTERM, pid=4242, uid=995)])
+    waits = iter([siginfo(-1532110032, pid=443239200), None, siginfo(-7), siginfo(signal.SIGTERM, pid=4242, uid=995)])
     held = sender.Signals.__new__(sender.Signals)
     held._done = threading.Event()
     delivered = []
@@ -289,8 +292,9 @@ def test_the_watcher_takes_only_a_stopping_signal_and_logs_the_rest(monkeypatch)
     monkeypatch.setattr(sender.signal, "sigtimedwait", fake_wait)
     held._wait(lambda signum, fields: delivered.append((signum, fields)))
     assert delivered == [(signal.SIGTERM, {"signal": "SIGTERM", "sender_pid": 4242, "sender_uid": 995})]
-    row, = hub_rows("signal-unread")
+    row, = hub_rows("signal-unread")                  # the second is counted, not written, within the minute
     assert row["raw"] == {"si_signo": -1532110032, "si_code": 0, "si_pid": 443239200, "si_uid": 0}
+    assert row["count"] == 1
 
 
 @pytest.mark.skipif(not LINUX_SIGINFO, reason="the signals are taken with sigtimedwait where the OS gives siginfo")
@@ -309,6 +313,8 @@ def test_a_hub_that_is_stopped_and_continued_keeps_running(port):
         assert not hub_rows("hub-exit")
         assert hub_rows("signal-unread")
     finally:
+        with contextlib.suppress(signals.Refused, ProcessLookupError):
+            signals.send(hub.pid, signal.SIGCONT)        # a hub left stopped would never take the SIGTERM
         hub.terminate()
         hub.wait(timeout=30)
     row, = hub_rows("hub-exit")

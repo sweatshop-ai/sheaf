@@ -578,3 +578,73 @@ def test_a_build_that_failed_after_projects_toml_came_is_tried_again_at_the_next
     monkeypatch.setattr(core, "render_file", once)
     front.get("/work/acme/blog/pic.md")
     assert "data:image/png" not in front.get("/work/acme/blog/pic.md").text
+
+
+@pytest.fixture
+def outsider(front, granted, work):
+    """Cal, `cal`, holds `work` too and is in none of its projects (8.12): an owner of a sheaf there is no member."""
+    import pwd
+    from helpers import BEA, CAL, FRONT
+    from sheafmd.hub import proxy
+    front.hub.proxy = proxy.parse({"origin": FRONT, "socket": "/run/sheaf-proxy/hub.sock",
+                                   "proxy_user": pwd.getpwuid(os.getuid()).pw_name,
+                                   "members": {BEA: {"name": "Bea", "short": "bea", "roots": [str(work)]},
+                                               CAL: {"name": "Cal", "short": "cal", "roots": [str(work)]}}},
+                                  "the test")
+    png(work / "acme" / "blog" / "fig.png")
+    return work
+
+
+def owned_page(front, work, rel, owner, src, member=None, visibility="project"):
+    from helpers import BEA
+    doc = work / rel
+    doc.parent.mkdir(parents=True, exist_ok=True)
+    doc.write_text(f"---\nowner: {owner}\nvisibility: {visibility}\n---\n# Plan\n\nSee ![the figure]({src}).\n",
+                   encoding="utf-8")
+    front.hub.roots.for_document(doc)
+    r = front.get(f"/work/{rel}", member=member or BEA)
+    assert r.status == 200, r.text
+    share = front.post("/_/export", {"doc": f"work/{rel}", "kind": "html"}, member=member or BEA)
+    assert share.status == 200
+    return r.text, share.text
+
+
+def test_a_sheaf_with_an_owner_outside_its_project_embeds_none_of_the_projects_images(front, plan, outsider):
+    """`projects.toml` is the one source of who is in a project (8.12, #81): a non-member never receives a project's
+    content, even as the owner of a sheaf in it. Its page is one render for every reader, so no reader gets them."""
+    from helpers import CAL
+    for member in (None, CAL):
+        html, share = owned_page(front, outsider, "acme/blog/pic.md", "cal", "fig.png", member=member)
+        assert "data:image/png" not in html and "data:image/png" not in share
+
+
+def test_a_sheaf_whose_owners_are_all_members_keeps_the_projects_images(front, plan, outsider):
+    html, share = owned_page(front, outsider, "acme/blog/pic.md", "bea", "fig.png")
+    assert "data:image/png" in html and "data:image/png" in share
+
+
+def test_an_outside_owner_keeps_the_images_of_their_own_private_folder_and_above_every_project(front, plan,
+                                                                                               outsider):
+    """The owner's own `private/<short>/` is theirs in the Library too (`*/*/private/<short>/**`), and an image
+    above project depth is every root member's."""
+    from helpers import CAL
+    png(outsider / "acme" / "blog" / "private" / "cal" / "seal.png")
+    png(outsider / "logo.png")
+    for src in ("seal.png", "../../../../logo.png"):
+        html, _ = owned_page(front, outsider, "acme/blog/private/cal/own.md", "cal", src, member=CAL,
+                             visibility="owner")
+        assert "data:image/png" in html, src
+    html, _ = owned_page(front, outsider, "acme/blog/private/cal/own.md", "cal", "../../fig.png", member=CAL,
+                         visibility="owner")
+    assert "data:image/png" not in html
+
+
+def test_an_outside_owner_added_to_the_project_gets_its_images_at_the_next_load(front, plan, outsider):
+    html, _ = owned_page(front, outsider, "acme/blog/pic.md", "cal", "fig.png")
+    assert "data:image/png" not in html
+    toml = outsider / "projects.toml"
+    toml.write_text(toml.read_text(encoding="utf-8").replace('members = ["bea"]', 'members = ["bea", "cal"]', 1),
+                    encoding="utf-8")
+    assert "data:image/png" in front.get("/work/acme/blog/pic.md").text
+    toml.write_text(PROJECTS, encoding="utf-8")
+    assert "data:image/png" not in front.get("/work/acme/blog/pic.md").text

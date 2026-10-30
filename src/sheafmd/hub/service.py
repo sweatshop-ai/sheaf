@@ -38,6 +38,9 @@ CARRIED_XDG = ("XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME")
 # The unit says it in STOP_EXIT_ENV; a hub whose manager does not say it exits 0 on a stop.
 EXIT_STOPPED = 3
 STOP_EXIT_ENV = "SHEAF_STOP_EXIT"
+# How long the manager waits for a stopping hub before SIGKILL (#95): past the hub's own bound (the jobs' grace,
+# then the pushes due and the end of its git, hub/commits.py). `KillMode=mixed` signals the hub alone, not its git.
+STOP_WAIT = 60
 
 
 class ServiceError(Exception):
@@ -131,7 +134,7 @@ def systemd_unit(command: list[str], path_env: str, extra_env: dict | None = Non
         "[Unit]", "Description=sheaf hub", "StartLimitIntervalSec=300", "StartLimitBurst=5", "",
         "[Service]", f"ExecStart={exec_start}", "Restart=always",
         f"RestartPreventExitStatus={EXIT_STOPPED}", f"SuccessExitStatus={EXIT_STOPPED}", "RestartSec=2",
-        "RestartSteps=5", "RestartMaxDelaySec=60", *env, "",
+        "RestartSteps=5", "RestartMaxDelaySec=60", "KillMode=mixed", f"TimeoutStopSec={STOP_WAIT}", *env, "",
         "[Install]", "WantedBy=default.target", ""])
 
 
@@ -144,6 +147,7 @@ def launchd_plist(command: list[str], path_env: str, extra_env: dict | None = No
         "RunAtLoad": True,
         "KeepAlive": {"SuccessfulExit": False},
         "ThrottleInterval": 10,
+        "ExitTimeOut": STOP_WAIT,
     })
 
 

@@ -16,10 +16,18 @@ none while the roots of the repo that commit disagree on `push` (#89).
                                  `roots()`: the registered roots, whose settings the repo's push agrees with
     Commits.saved(root, rel, author, what)
     Commits.poll(roots)          the watcher's tick: hand each repo that pushes to the pusher, once a minute
-    Commits.settle(timeout)      wait until no push is due (a test, a stopping hub)
+    Commits.settle(timeout)      wait until no push is due (a test)
+    Commits.stop()               a stopping hub: the pushes due go out within STOP_SECONDS, then the hub ends its git
+
+The hub owns its git (#95). Every git it runs is in a session of its own, so a signal to the hub's group (a
+Ctrl-C at its terminal) never reaches it, and the unit's `KillMode=mixed` (14.3) leaves it to the hub. A stopping
+hub lets the pull and push due finish for STOP_SECONDS, then sends SIGTERM to the group of the fetch or push still
+running and, after END_GRACE, SIGKILL; it starts no fetch or push after that. A git the hub ended is a
+`push-stopped` row, never a `push-failed`; the commit stays, and the next hub's write or poll pushes it.
 """
 import os
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -28,12 +36,14 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import config
+from .. import config, signals
 from . import state
 
 GIT_SECONDS = 20                # a commit's git commands
 PUSH_SECONDS = 60               # a push
 FETCH_SECONDS = 60              # the least time between two of the poll's pulls of one repo (#75)
+STOP_SECONDS = 15               # how long a stopping hub lets the pull and push due run: under the poll's fetch (#95)
+END_GRACE = 5                   # from the SIGTERM of a git the stop ends to its SIGKILL
 # Who a commit is committed by when the repo names nobody: the hub, not the author.
 COMMITTER = ("sheaf", "sheaf@localhost")
 EVEN = "even"                   # `_pull`: the hub's branch is the remote's, nothing to push
@@ -52,11 +62,84 @@ def _env(author: Author | None = None) -> dict:
     return env
 
 
-def _git(root: Path, *args, author=None, seconds=GIT_SECONDS, given=None):
+class Stopped(Exception):
+    """The hub is stopping: it ended the git (`ended`), or never started it (#95)."""
+
+    def __init__(self, text: str, ended: bool = False):
+        super().__init__(text)
+        self.ended = ended
+
+
+class Children:
+    """The fetches and pushes running, which a stopping hub ends (#95). Once `end` has run, none starts."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._running: set[subprocess.Popen] = set()
+        self._signalled: set[subprocess.Popen] = set()   # the ones `end` sent a signal to
+        self._ended = False
+
+    def run(self, argv, seconds, env):
+        with self._lock:
+            if self._ended:
+                raise Stopped("the hub is stopping")
+            proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    text=True, encoding="utf-8", errors="surrogateescape", env=env,
+                                    start_new_session=True)
+            self._running.add(proc)
+        try:
+            out, err = proc.communicate(timeout=seconds)
+        except subprocess.TimeoutExpired:
+            # The group: git's ssh or helper holds its pipes. A process that left the group may hold them still,
+            # so the pipes are closed, not read to their end: the one pusher never waits on it.
+            self._signal(proc, signal.SIGKILL)
+            proc.wait()
+            for pipe in (proc.stdout, proc.stderr):
+                pipe.close()
+            raise
+        finally:
+            with self._lock:
+                self._running.discard(proc)
+                signalled = proc in self._signalled
+                self._signalled.discard(proc)
+        if signalled and proc.returncode != 0:
+            # Only a git the stop signalled: one that failed on its own just before is the failure it is.
+            raise Stopped(f"git ended by the stop ({proc.returncode})", ended=True)
+        return subprocess.CompletedProcess(argv, proc.returncode, out, err)
+
+    @staticmethod
+    def _signal(proc, sig):
+        if proc.returncode is not None:
+            return
+        try:
+            signals.send_group(proc, sig)
+        except (ProcessLookupError, PermissionError, signals.Refused):
+            pass
+
+    @property
+    def ended(self) -> bool:
+        return self._ended
+
+    def end(self, sig) -> bool:
+        """`sig` to the group of every git running, and none starts from here; whether any ran."""
+        with self._lock:
+            self._ended = True
+            running = [proc for proc in self._running if proc.returncode is None]   # one already reaped ended on its own
+            self._signalled.update(running)
+        for proc in running:
+            self._signal(proc, sig)
+        return bool(running)
+
+
+def _git(root: Path, *args, author=None, seconds=GIT_SECONDS, given=None, children=None):
+    """`children`: given for a fetch or a push, which a stopping hub ends (#95). Every git runs in a session of
+    its own: a signal to the hub's group never reaches it."""
     # No hook of the repo runs for the hub: hooks are code of whoever wrote `.git/hooks`.
-    return subprocess.run(["git", "-C", str(root), "-c", "core.hooksPath=/dev/null", "--literal-pathspecs",
-                           *args], capture_output=True, text=True, encoding="utf-8",
-                          errors="surrogateescape", timeout=seconds, env=_env(author), input=given)
+    argv = ["git", "-C", str(root), "-c", "core.hooksPath=/dev/null", "--literal-pathspecs", *args]
+    if children is not None:
+        return children.run(argv, seconds, _env(author))
+    return subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="surrogateescape",
+                          timeout=seconds, env=_env(author), input=given, start_new_session=True)
 
 
 def _repo(folder: Path) -> str:
@@ -70,7 +153,7 @@ def _ignored(folder: Path, rel: str) -> bool:
     """Whether the repo's ignore rules name `rel` and the index does not hold it. `check-ignore` takes
     paths, not pathspecs: `--literal-pathspecs` makes it fail."""
     return subprocess.run(["git", "-C", str(folder), "check-ignore", "-q", "--", rel], capture_output=True,
-                          timeout=GIT_SECONDS, env=_env()).returncode == 0
+                          timeout=GIT_SECONDS, env=_env(), start_new_session=True).returncode == 0
 
 
 def _staged(folder: Path, paths: list) -> dict:
@@ -110,11 +193,11 @@ def _again(folder: Path, commit: str, onto: str):
                 commit).stdout.rstrip("\n").split("\0")
     # The message as bytes: text mode would turn a CR into a LF.
     message = subprocess.run(["git", "-C", str(folder), "cat-file", "commit", commit], capture_output=True,
-                             timeout=GIT_SECONDS, env=_env()).stdout.partition(b"\n\n")[2]
+                             timeout=GIT_SECONDS, env=_env(), start_new_session=True).stdout.partition(b"\n\n")[2]
     env = dict(zip(["GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_AUTHOR_DATE",
                     "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "GIT_COMMITTER_DATE"], meta))
     made = subprocess.run(["git", "-C", str(folder), "commit-tree", tree, "-p", onto, "-F", "-"], capture_output=True,
-                          timeout=GIT_SECONDS, env={**_env(), **env}, input=message)
+                          timeout=GIT_SECONDS, env={**_env(), **env}, input=message, start_new_session=True)
     if made.returncode != 0:
         return None, [made.stderr.decode("utf-8", "replace").strip()[-300:] or f"git exited {made.returncode}"]
     return made.stdout.decode().strip(), []
@@ -141,6 +224,7 @@ class Commits:
         self._wake = threading.Condition(self._lock)
         self._pushing = False
         self._thread: threading.Thread | None = None
+        self._children = Children()               # the fetch or push running, which a stop ends (#95)
 
     def _repo_lock(self, folder: Path) -> threading.Lock:
         """The commit lock of the repo `folder` is in, keyed by its git dir: two roots in one repo share an index
@@ -320,6 +404,8 @@ class Commits:
             # A write's rows are each written; the poll meets the same cause every minute, and says it once.
             record = self._record if wrote else self._once(repo)
             try:
+                if self._children.ended:
+                    raise Stopped("the hub is stopping")
                 if not self._pushes(root, repo, address):
                     continue                           # a write's push stays owed: the poll after the roots agree takes it
                 go = self._pull(root, address, record, seconds=PUSH_SECONDS if wrote else GIT_SECONDS)
@@ -328,7 +414,7 @@ class Commits:
                 # The poll pushes a write's push that failed, never what a person committed or branched by hand.
                 if go is not EVEN and repo in self._owed:
                     # Not under the repo's lock: a save meanwhile commits, and the next push carries it.
-                    r = _git(folder, "push", "-q", "origin", "HEAD", seconds=PUSH_SECONDS)
+                    r = _git(folder, "push", "-q", "origin", "HEAD", seconds=PUSH_SECONDS, children=self._children)
                     if r.returncode != 0:
                         # The commit stays; the next write's push, or the next poll, carries it.
                         record("push-failed", address, error=_last_line(r))
@@ -336,6 +422,11 @@ class Commits:
                 with self._lock:
                     self._owed.discard(repo)
                 self._told.pop(repo, None)
+            except Stopped as e:
+                # Ended by the stop, or never begun: the commit stays for the next hub (#95). A poll's pull with
+                # nothing owed that never began is no news.
+                if e.ended or wrote or repo in self._owed:
+                    record("push-stopped", address)
             except Exception as e:                     # never a dead thread: a push that never comes is a row
                 record("push-failed", address, error=str(e)[:300] or type(e).__name__)
             finally:
@@ -367,7 +458,7 @@ class Commits:
         if branch.returncode != 0:
             return True                                # a detached HEAD: the push says what it says
         r = _git(folder, "fetch", "-q", "--no-tags", "origin", f"refs/heads/{branch.stdout.strip()}",
-                 seconds=seconds)
+                 seconds=seconds, children=self._children)
         if r.returncode != 0:
             if "couldn't find remote ref" in r.stderr:
                 return True
@@ -412,6 +503,17 @@ class Commits:
             record("push-diverged", address, paths=[], error=_last_line(r))
             return False
         return EVEN if new == theirs else True
+
+    def stop(self) -> bool:
+        """A stopping hub (8.4, #95): the pull and push due run for STOP_SECONDS; then the fetch or push still
+        running gets SIGTERM, and SIGKILL END_GRACE seconds later, and no fetch or push starts again. Returns
+        within STOP_SECONDS and twice END_GRACE: whether the pusher was done by then."""
+        if self.settle(STOP_SECONDS):
+            self._children.end(signal.SIGTERM)
+            return True
+        if self._children.end(signal.SIGTERM) and not self.settle(END_GRACE):
+            self._children.end(signal.SIGKILL)
+        return self.settle(END_GRACE)
 
     def settle(self, timeout: float = 30) -> bool:
         """Wait until no push is due or running; whether that came within `timeout` seconds."""

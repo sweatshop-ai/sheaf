@@ -30,7 +30,7 @@ import time
 from pathlib import Path
 from urllib.parse import quote
 
-from .. import __version__, config, paths
+from .. import __version__, config, paths, signals
 from .auth import Auth
 
 # A hub's start is its imports, 0.75 s of a free core: sixteen starts at once on two cores answer after
@@ -318,17 +318,8 @@ def ended(pid: int) -> bool:
     """Whether the process `pid` has ended. A hub that this very process started is its child
     and stays a zombie until reaped, so reap it first; a hub started from a shell is nobody's
     child, and `waitpid` says so."""
-    try:
-        os.waitpid(pid, os.WNOHANG)
-    except ChildProcessError:
-        pass
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return True
-    except PermissionError:
-        return False
-    return False
+    signals.reap(pid)
+    return not signals.exists(pid)
 
 
 def stop_and_explain(c: HubClient, got: dict, reason: str, force: bool = False) -> str:

@@ -17,6 +17,7 @@ import pytest
 
 import leakguard
 from helpers import _has_proc, gone, is_stopped, proc_state
+from sheafmd import signals
 
 pytestmark = pytest.mark.skipif(not _has_proc(), reason="the guard reads /proc")
 
@@ -47,7 +48,7 @@ def inner_run(tmp_path, source, plugin="leakguard"):
 
 def kill_if_left(pid):
     if pid and not gone(pid):
-        os.kill(pid, signal.SIGKILL)
+        signals.send(pid, signal.SIGKILL)
 
 
 def really_gone(pid, seconds=10):
@@ -226,7 +227,7 @@ def test_a_process_that_is_stopped_is_continued_so_that_it_can_end():
     env = {**os.environ, leakguard.RUN_VAR: rid("run-that-is-stopped")}
     p = subprocess.Popen(["sleep", "300"], env=env)
     try:
-        os.kill(p.pid, signal.SIGSTOP)
+        signals.send(p.pid, signal.SIGSTOP)
         for _ in range(100):
             if is_stopped(p.pid):
                 break

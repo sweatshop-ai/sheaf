@@ -195,10 +195,11 @@ class _Adopted:
         return None if not gone(self.pid) else 0
 
     def terminate(self):
-        import os
         import signal
+
+        from sheafmd import signals
         try:
-            os.kill(self.pid, signal.SIGTERM)
+            signals.send(self.pid, signal.SIGTERM)
         except OSError:
             pass
 

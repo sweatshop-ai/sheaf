@@ -20,6 +20,7 @@ import pytest
 
 from helpers import (Silent, claim_port, gone, hub_rows, is_stopped, proc_state, silent_message, start_late_hub,
                      stranger, wait_until_refused)
+from sheafmd import signals as sheaf_signals
 from sheafmd.hub import client as hubclient
 from sheafmd.hub import jobs, recover, server, state
 
@@ -87,14 +88,14 @@ def stopped_hub(port, monkeypatch):
         usual.setattr(hubclient, "TIMEOUT", USUAL)                      # a start waits as long as a person's does
         hubclient.ensure_hub("cli", lambda *a: None, lambda *a: None)
     pid = server.read_pid_file()["pid"]
-    os.kill(pid, signal.SIGSTOP)
+    sheaf_signals.send(pid, signal.SIGSTOP)
     for _ in range(200):
         if is_stopped(pid):
             break
         time.sleep(0.05)
     yield pid
     if proc_state(pid) == "alive":
-        os.kill(pid, signal.SIGCONT)                                    # the reaper stops it from there
+        sheaf_signals.send(pid, signal.SIGCONT)                                    # the reaper stops it from there
 
 
 def answers():

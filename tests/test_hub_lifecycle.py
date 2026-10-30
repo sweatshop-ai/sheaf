@@ -229,7 +229,8 @@ def test_a_sigterm_that_arrives_while_the_port_is_being_bound_is_still_a_clean_s
 
 LINUX_SIGINFO = hasattr(signal, "sigtimedwait")
 SENDER = ("import os, signal, sys, time\n"
-          "os.kill(int(sys.argv[1]), getattr(signal, sys.argv[2]))\n"
+          "from sheafmd import signals\n"
+          "signals.send(int(sys.argv[1]), getattr(signal, sys.argv[2]))\n"
           "time.sleep(60)\n")
 
 

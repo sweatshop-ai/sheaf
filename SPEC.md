@@ -1065,7 +1065,7 @@ On a page served through the proxy socket (9.9), `me` is the member's name, `age
 A page of the proxy socket that is a sheaf of the list's root (9.10) adds `work` (9.12), and no other page has it:
 
 ```json
-"work": {"fork": "uvx --from tiroir==0.1.0 tiroir work https://chat.example.com/sheaves/acme/site/2026-10-28-plan.md",
+"work": {"fork": "uvx --from tiroir==0.2.0 tiroir work https://chat.example.com/sheaves/acme/site/2026-10-28-plan.md",
          "attach": "ssh box -t tmux attach -t james \\; select-window -t =acme_site",
          "sessions": [{"id": "6f1c0e9a-…", "host": "tiroir-tt", "member": "james", "date": "2026-10-28T05:12:03Z"}],
          "live": "box"}

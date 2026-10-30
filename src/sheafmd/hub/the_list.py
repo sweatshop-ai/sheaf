@@ -364,11 +364,6 @@ def _stat_key(st: os.stat_result) -> tuple:
     return (st.st_dev, st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
 
 
-def _drop(snap: Snapshot, row: Row):
-    """Take `row` off `snap` as a new list: a page reading the old one keeps it."""
-    snap.rows = [r for r in snap.rows if r is not row]
-
-
 class TheList:
     def __init__(self, hub, cfg: ListConfig):
         self.hub, self.cfg = hub, cfg
@@ -376,9 +371,9 @@ class TheList:
         self._records: dict = {}            # the last record read of each issue, kept through a failed poll
         self._answered: dict = {}           # {rel: the record's `updated` when a member ticked it}
         self._poll_lock = threading.Lock()
-        self._ask = itertools.count(1)      # numbers each poll's start and each time a file is seen gone, in order
-        self._gone: dict = {}               # {real path: the number of the last time the hub saw its file gone}
-        self._gone_lock = threading.Lock()
+        self._ask = itertools.count(1)      # numbers each poll's start and each time rows are taken off, in order
+        self._off: dict = {}                # {real path: the number of the last time the rows of its file were taken off}
+        self._off_lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = None
 
@@ -390,7 +385,7 @@ class TheList:
     def poll(self):
         """Read every sheaf of the root and the record of their issues, and keep the rows."""
         with self._poll_lock:
-            with self._gone_lock:
+            with self._off_lock:
                 started = next(self._ask)
             root = self.root()
             if root.path != Path(os.path.realpath(self.cfg.root)):
@@ -453,11 +448,12 @@ class TheList:
                          if r.record.status != "waiting" or self._answered.get(r.sheaf.rel, r.record.updated) != r.record.updated}
                 for rel in moved | (set(self._answered) - {r.sheaf.rel for r in rows}):
                     self._answered.pop(rel, None)
-                with self._gone_lock:
-                    # A file seen gone after this poll began may have been read before it went: its row waits for the
-                    # next poll, which reads what is there now (#34).
-                    rows = [r for r in rows if self._gone.get(r.file, 0) < started]
-                    self._gone = {f: n for f, n in self._gone.items() if n > started}
+                with self._off_lock:
+                    # A row taken off after this poll began may have been read before what took it off: its file went
+                    # (#34), or a tick found it names another issue (#27). It waits for the next poll, which reads what
+                    # is there now.
+                    rows = [r for r in rows if self._off.get(r.file, 0) < started]
+                    self._off = {f: n for f, n in self._off.items() if n > started}
                     self._snap = Snapshot(rows, self.hub.clock())
             # Every sheaf whose file is not at its home goes there (9.11), judged with the last records read (a failed
             # read places on the ones before it, as every other judgement of the hub reads them): the
@@ -486,25 +482,32 @@ class TheList:
     def ticked(self, address: str):
         """A member ticked an action of the sheaf at `address`: its row leaves "Waiting on you" now, and
         shows its other actions, rather than at the next poll that sees the record move. A sheaf whose file
-        now names another issue, or none, leaves the list until the next poll: its row's record is not that
-        issue's, so its assignees are nobody's (9.11)."""
+        now names another issue, or none, leaves the list until the next poll, even one that began before the tick
+        (#27): its row's record is not that issue's, so its assignees are nobody's (9.11)."""
         a = roots_mod.Address.parse(address)
         root = self.root()
         if a.root != root.name:
             return
-        with self._gone_lock:           # as `assignees` drops a row, so neither write undoes the other
-            snap = self._snap
-            for row in snap.rows:
+        with self._off_lock:            # as `assignees` takes a row off, so neither write undoes the other
+            for row in self._snap.rows:
                 if row.sheaf.rel == a.rel:
                     try:
                         sheaf = read_sheaf(a.rel, self._file(root, a.rel).read_text(encoding="utf-8"))
                     except (OSError, UnicodeDecodeError):
                         sheaf = row.sheaf
                     if not _same_issue(sheaf.issue, row.sheaf.issue):
-                        _drop(snap, row)
+                        self._take_off({row.file, os.path.realpath(self._file(root, a.rel))})
                         return
                     row.sheaf = sheaf
                     self._answered[a.rel] = row.record.updated
+
+    def _take_off(self, files: set):
+        """Take the rows read from `files` (real paths) off the list as a new list, so a page reading the old one
+        keeps them, and number it: a poll that began before leaves them off until the next poll. Under `_off_lock`."""
+        n = next(self._ask)
+        for f in files:
+            self._off[f] = n
+        self._snap.rows = [r for r in self._snap.rows if r.file not in files]
 
     def _file(self, root, rel: str) -> Path:
         """The file of the sheaf at `rel` in `root`, the list's, wherever it is (9.11): placed in proxy mode."""
@@ -521,21 +524,16 @@ class TheList:
         root = self.root()
         if root is None or a.root != root.name:
             return None
-        # Under the name's lock (9.11), taken before `_gone_lock`: a move's unlink never makes a sheaf look gone.
-        with place.held(self.hub, address), self._gone_lock:
+        # Under the name's lock (9.11), taken before `_off_lock`: a move's unlink never makes a sheaf look gone.
+        with place.held(self.hub, address), self._off_lock:
             # Seen gone and numbered in one step, so a poll that begins after this has the larger number.
             if not os.path.lexists(self._file(root, a.rel)):
                 # Kept, the row would judge a sheaf a door create makes at its address before the next poll, and
                 # tell which issue the one that went named (#34).
                 # By the real path of the file each row was read from, so the row of a link to it goes too, wherever
                 # the sheaf's file was (9.11).
-                snap, n = self._snap, next(self._ask)
-                gone = {os.path.realpath(self._file(root, a.rel))} | {r.file for r in snap.rows if r.sheaf.rel == a.rel}
-                for f in gone:
-                    self._gone[f] = n
-                for row in snap.rows:
-                    if row.file in gone:
-                        _drop(snap, row)
+                self._take_off({os.path.realpath(self._file(root, a.rel))}
+                               | {r.file for r in self._snap.rows if r.sheaf.rel == a.rel})
                 return None
         for row in self._snap.rows:
             if row.sheaf.rel == a.rel:

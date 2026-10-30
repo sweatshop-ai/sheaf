@@ -103,11 +103,11 @@ The action that answers which client an unsure thread is for: one box per candid
 _Avoid_: reassign, transfer
 
 **One-off action**:
-An action a member presses once and that stays pressed: every word but Share (SPEC 9.10). On the list it is a red button that reads Undo for 5 seconds before the hub writes the tick.
+An action a member presses once and that stays pressed: every word but Share (SPEC 9.10). On the list it is a red button that reads Undo for 5 seconds before the hub writes the tick; a Move to is a one-off too, shown on the list as a chip.
 _Avoid_: single-use, final
 
 **Toggle action**:
-An action a member presses and may release again; today only Share (SPEC 9.10, 9.11). On the list it is a blue button with `aria-pressed`.
+An action a member presses and may release again; today only Share (SPEC 9.10, 9.11). On the list it is a blue button with `aria-pressed`, pressed there and released in the sheaf.
 _Avoid_: switch
 
 **Pointer** (of a sheaf):

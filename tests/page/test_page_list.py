@@ -35,8 +35,17 @@ def listed(chromium, box):  # noqa: F811
     close_context(context)
 
 
+GA4 = "list/initech/website/2026-10-27-ga4-property.md"
+
+
 def joey(page):
+    """The button of Joey's sheaf, Approve: its one action unless a test gave it more."""
     return page.locator(f'button.list-act[data-doc="{JOEY}"]')
+
+
+def ga4(page):
+    """The button of the GA4 sheaf, Done @dora."""
+    return page.locator(f'button.list-act[data-doc="{GA4}"]')
 
 
 def test_a_press_shows_undo_for_five_seconds_then_ticks_and_the_list_reloads_without_the_row(listed, sheaves):  # noqa: F811
@@ -65,7 +74,7 @@ def test_undo_in_the_five_seconds_sends_nothing_and_gives_the_button_back(listed
     assert (sheaves / JOEY[5:]).read_text(encoding="utf-8") == before
 
 
-def test_a_refused_press_is_said_above_the_rows_and_the_button_can_be_pressed_again(listed, sheaves):  # noqa: F811
+def test_a_refused_press_is_said_above_the_rows_and_the_button_comes_back(listed, sheaves):  # noqa: F811
     page, ticks = listed
     path = sheaves / JOEY[5:]
     path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Approve", "- [x] Approve"), encoding="utf-8")
@@ -76,5 +85,40 @@ def test_a_refused_press_is_said_above_the_rows_and_the_button_can_be_pressed_ag
     until(lambda: page.locator(".list-error").is_visible(), what="the refusal")
     assert "reload the list" in page.locator(".list-error").inner_text()
     assert joey(page).inner_text() == "Approve" and joey(page).is_enabled()
-    assert joey(page).get_attribute("aria-pressed") == "false"
+    assert joey(page).get_attribute("aria-pressed") is None
+    assert page.locator(".list-error").get_attribute("role") == "alert"
+
+
+def test_a_press_on_another_row_in_the_five_seconds_is_sent_too_and_the_list_reloads_after_both(listed, sheaves):  # noqa: F811
+    page, ticks = listed
+    joey(page).click()
+    page.clock.run_for(2000)
+    ga4(page).click()
+    page.clock.run_for(3100)
+    until(lambda: ticks, what="Joey's tick")
+    page.wait_for_timeout(300)
+    assert ga4(page).inner_text() == "Undo"             # Joey's reload waits for the press still in its window
+    page.clock.run_for(2100)
+    until(lambda: len(ticks) == 2, what="the GA4 tick")
+    assert [(b["doc"], b["word"], s) for b, s in ticks] == [(JOEY, "Approve", 200), (GA4, "Done", 200)]
+    until(lambda: joey(page).count() == 0 and ga4(page).count() == 0, what="the reload without both rows' buttons")
+
+
+def test_while_a_press_of_a_row_waits_its_other_buttons_cannot_be_pressed(listed, box, sheaves):  # noqa: F811
+    page, ticks = listed
+    path = sheaves / JOEY[5:]
+    path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [ ] Approve\n- [ ] Done\n"),
+                    encoding="utf-8")
+    box.hub.the_list.poll()
+    page.reload()
+    approve, done = joey(page).nth(0), joey(page).nth(1)
+    approve.click()
+    assert done.is_disabled()
+    approve.click()                                     # Undo
+    assert done.is_enabled()
+    done.click()
+    assert approve.is_disabled()
+    page.clock.run_for(5100)
+    until(lambda: ticks, what="the tick")
+    assert [(b["action"], b["word"], s) for b, s in ticks] == [(1, "Done", 200)]
 

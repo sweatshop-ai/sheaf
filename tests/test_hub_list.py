@@ -9,6 +9,7 @@ import pwd
 import re
 import threading
 import time
+from collections import namedtuple
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -495,24 +496,30 @@ def test_the_hub_polls_the_record_from_its_start_and_serves_the_list_on_its_prox
 JOEY = "list/globex/black-friday/2026-10-28-reply-to-joey.md"
 
 
+Button = namedtuple("Button", "href doc action word kind label")
+
+
 def buttons(res):
-    """Each row's action buttons as (title link, data-doc, data-action, data-word, kind, label), in row order."""
+    """Each row's action buttons, in row order: its title link, data-doc, data-action, data-word, its kind
+    (`one-off` or `toggle`, by its class) and its label."""
     soup = BeautifulSoup(res.text, "html.parser")
     out = []
     for row in soup.select(".list-row"):
         assert row.select_one("input[type=checkbox]") is None      # the row's one box is gone (#107)
         for b in row.select("button.list-act"):
             assert not b.has_attr("disabled")
-            out.append((row.select_one("a.list-title")["href"], b["data-doc"], b["data-action"], b["data-word"],
-                        b["data-kind"], b.get_text(" ", strip=True)))
+            kind = next(k for k in ("one-off", "toggle") if k in b["class"])
+            assert b.has_attr("aria-pressed") == (kind == "toggle")      # a one-off is no toggle to a screen reader
+            out.append(Button(row.select_one("a.list-title")["href"], b["data-doc"], b["data-action"], b["data-word"],
+                              kind, b.get_text(" ", strip=True)))
     return out
 
 
 def test_a_row_carries_a_button_for_its_action_that_names_its_sheaf_and_the_member_it_names(box):
     assert buttons(box.get("/list", member=NELL)) == [
-        ("/list/globex/black-friday/2026-10-28-reply-to-joey.md", JOEY, "0", "Approve", "once", "Approve"),
+        ("/list/globex/black-friday/2026-10-28-reply-to-joey.md", JOEY, "0", "Approve", "one-off", "Approve"),
         ("/list/initech/website/2026-10-27-ga4-property.md", "list/initech/website/2026-10-27-ga4-property.md",
-         "0", "Done", "once", "Done @dora")]
+         "0", "Done", "one-off", "Done @dora")]
 
 
 def test_every_action_of_a_row_is_a_button_one_off_but_share_which_is_a_toggle(box, sheaves):
@@ -521,10 +528,10 @@ def test_every_action_of_a_row_is_a_button_one_off_but_share_which_is_a_toggle(b
         "- [ ] Approve\n", "- [ ] Approve\n- [x] Read the brief\n- [ ] Done\n- [ ] Share\n"), encoding="utf-8")
     box.hub.the_list.poll()
     res = box.get("/list", member=NELL)
-    assert [b[2:] for b in buttons(res) if b[1] == JOEY] == [
-        ("0", "Approve", "once", "Approve"), ("1", "Done", "once", "Done"), ("2", "Share", "toggle", "Share")]
-    soup = BeautifulSoup(res.text, "html.parser")
-    assert [b["aria-pressed"] for b in soup.select(f'button[data-doc="{JOEY}"]')] == ["false"] * 3
+    assert [(b.action, b.word, b.kind) for b in buttons(res) if b.doc == JOEY] == [
+        ("0", "Approve", "one-off"), ("1", "Done", "one-off"), ("2", "Share", "toggle")]
+    share = BeautifulSoup(res.text, "html.parser").select_one(f'button[data-doc="{JOEY}"][data-word="Share"]')
+    assert share["aria-pressed"] == "false"
 
 
 def test_the_rows_second_button_ticks_the_second_action_and_no_other(box, sheaves):
@@ -533,7 +540,7 @@ def test_the_rows_second_button_ticks_the_second_action_and_no_other(box, sheave
                     encoding="utf-8")
     box.hub.the_list.poll()
     before = path.read_text(encoding="utf-8")
-    r = box.post("/_/tick", row_box(box.get("/list", member=NELL), JOEY, "Done"), member=NELL)
+    r = box.post("/_/tick", row_press(box.get("/list", member=NELL), JOEY, "Done"), member=NELL)
     assert r.status == 200, r.text
     assert path.read_text(encoding="utf-8") == before.replace("- [ ] Done", "- [x] Done")
 
@@ -572,7 +579,7 @@ def now(box, body):
     return {**body, "hash": md_hash((top / rel).read_text(encoding="utf-8"))}
 
 
-def row_box(res, doc, word=None):
+def row_press(res, doc, word=None):
     """The tick the row of `doc` would post on a press of its button for `word` (its first button without one):
     the button's doc, action, word and hash."""
     found = BeautifulSoup(res.text, "html.parser").select(f'button.list-act[data-doc="{doc}"]')
@@ -581,7 +588,7 @@ def row_box(res, doc, word=None):
 
 
 def test_a_tick_from_a_stale_row_does_not_tick_the_next_action_with_the_same_word(box, sheaves):
-    tick = row_box(box.get("/list", member=NELL), JOEY)
+    tick = row_press(box.get("/list", member=NELL), JOEY)
     joey = sheaves / JOEY[5:]
     # Since the list was read, the first Approve was ticked in the page and a second one added below it.
     joey.write_text(joey.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [x] Approve\n- [ ] Approve\n"),
@@ -602,7 +609,7 @@ def test_the_rows_tick_of_a_sheaf_the_poll_placed_in_a_private_folder_lands_in_t
     home = sheaves / "globex/black-friday/private/nell/2026-10-28-reply-to-joey.md"
     assert home.exists() and not joey.exists()
     before = home.read_text(encoding="utf-8")
-    r = box.post("/_/tick", row_box(box.get("/list", member=NELL), JOEY), member=NELL)
+    r = box.post("/_/tick", row_press(box.get("/list", member=NELL), JOEY), member=NELL)
     assert r.status == 200, r.text
     assert home.read_text(encoding="utf-8") == before.replace("- [ ] Approve", "- [x] Approve")
 
@@ -619,7 +626,7 @@ def test_a_tick_ticks_the_action_the_row_showed_though_the_hubs_copy_of_a_page_n
         encoding="utf-8")
     box.hub.the_list.poll()
     before = joey.read_text(encoding="utf-8")
-    r = box.post("/_/tick", row_box(box.get("/list", member=NELL), JOEY), member=NELL)
+    r = box.post("/_/tick", row_press(box.get("/list", member=NELL), JOEY), member=NELL)
     assert r.status == 200, r.text
     assert joey.read_text(encoding="utf-8") == before.replace("- [ ] Approve\n", "- [x] Approve\n", 1)
 
@@ -634,7 +641,7 @@ def test_a_tick_after_a_write_the_hubs_stat_check_cannot_see_still_lands(box, sh
     os.utime(joey, ns=(st.st_atime_ns, st.st_mtime_ns))
     box.hub.the_list.poll()
     before = joey.read_text(encoding="utf-8")
-    r = box.post("/_/tick", row_box(box.get("/list", member=NELL), JOEY), member=NELL)
+    r = box.post("/_/tick", row_press(box.get("/list", member=NELL), JOEY), member=NELL)
     assert r.status == 200, r.text
     assert joey.read_text(encoding="utf-8") == before.replace("- [ ] Approve", "- [x] Approve")
 
@@ -1297,7 +1304,7 @@ def test_a_row_of_move_to_boxes_names_each_slug_in_its_chip_and_draws_no_button_
     res = box.get("/list", member=NELL)
     assert read(res)["Waiting on you 2"]["globex/black-friday"] == [
         ("Reply to Joey about column L Move to dexis Move to klium Move to thinkingtoo James", "mail · you · #5 · 2 h")]
-    assert JOEY not in [b[1] for b in buttons(res)]
+    assert JOEY not in [b.doc for b in buttons(res)]
 
 
 def pointer(sheaves):
@@ -1329,5 +1336,5 @@ def test_a_row_whose_move_to_boxes_come_before_another_action_carries_the_button
     path.write_text(path.read_text(encoding="utf-8").replace("The draft.\n", "The draft.\n\n- [ ] Approve\n"),
                     encoding="utf-8")
     box.hub.the_list.poll()
-    assert [b for b in buttons(box.get("/list", member=NELL)) if b[1] == JOEY] == [
-        ("/list/globex/black-friday/2026-10-28-reply-to-joey.md", JOEY, "3", "Approve", "once", "Approve")]
+    assert [b for b in buttons(box.get("/list", member=NELL)) if b.doc == JOEY] == [
+        ("/list/globex/black-friday/2026-10-28-reply-to-joey.md", JOEY, "3", "Approve", "one-off", "Approve")]

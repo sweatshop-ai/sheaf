@@ -503,6 +503,46 @@ def test_a_sheaf_open_to_the_project_is_never_quarantined(team, work):
     assert (work / SHARED).exists() and not (work / QUARANTINE).exists() and not hub_rows("place-refused")
 
 
+def test_an_owner_only_sheaf_that_loses_every_owner_with_a_short_leaves_its_old_owners_folder(team, work):
+    """At `private/thierry/` the owner's Library glob `*/*/private/thierry/**` files it for `user:thierry`, who no
+    longer owns it (#66): it goes to quarantine at the next poll, as one at the project's path does (#61)."""
+    put(team, work, SHARED, PRIVATE)
+    team.hub.the_list.poll()
+    assert (work / HOME).exists()
+    (work / HOME).write_text(NOBODY, encoding="utf-8")
+    team.hub.the_list.poll()
+    assert (work / QUARANTINE).read_text(encoding="utf-8") == NOBODY
+    assert not (work / HOME).exists() and not (work / "thinkingtoo/tiroir/private/thierry").exists()
+    rows = hub_rows("place-refused")
+    assert [r["doc"] for r in rows] == [f"work/{SHARED}"] and rows[0]["quarantined"] is True, rows
+
+
+def test_a_sheaf_in_the_folder_of_an_owner_it_still_has_stays_when_its_new_home_cannot_be_made(team, work,
+                                                                                               monkeypatch):
+    """Its folder's owner's Library glob files it for one of its owners, so it is not quarantined (#66): it waits
+    there for its home, as before."""
+    hans = PRIVATE.replace("owner: thierry", "owner: hans")
+    put(team, work, SHARED, hans)
+    team.hub.the_list.poll()
+    at_hans = f"thinkingtoo/tiroir/private/hans/{NAME}"
+    assert (work / at_hans).exists()
+    # Owned by both now, and its front matter names neither: its home is the first in the config's order, thierry's.
+    monkeypatch.setattr(team.hub, "assignees", lambda address, fm: ["hanshermans", "tiroir"])
+    (work / at_hans).write_text(NOBODY, encoding="utf-8")
+    (work / "thinkingtoo/tiroir/private/thierry").write_text("", encoding="utf-8")       # no folder can be made
+    team.hub.the_list.poll()
+    assert (work / at_hans).read_text(encoding="utf-8") == NOBODY and not (work / QUARANTINE).exists()
+    assert [r.get("quarantined") for r in hub_rows("place-refused")] == [None]
+
+
+def test_a_sheaf_already_in_quarantine_that_still_has_no_home_stays_there(team, work):
+    put(team, work, SHARED, NOBODY)
+    team.hub.the_list.poll()
+    team.hub.the_list.poll()
+    assert (work / QUARANTINE).read_text(encoding="utf-8") == NOBODY
+    assert [r["quarantined"] for r in hub_rows("place-refused")] == [True]
+
+
 def test_the_quarantine_folder_is_no_members_short():
     """No `short` can name it, so no owner's Library glob `*/*/private/<short>/**` reads it, and it is no hidden
     folder, which the listing would leave out (8.6)."""

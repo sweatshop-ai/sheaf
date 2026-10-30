@@ -1,6 +1,6 @@
 # Knoppen in plaats van vinkjes: alle acties van een sheaf in één tabel op de lijst
 
-**Status:** ontwerp, nog niets gebouwd
+**Status:** gekozen: ontwerp A (2026-10-30). Move to komt terug op de lijst als één knop per klant (draait d85f2ec terug); Done en Don't run blijven eenmalig. Dit is de spec voor de bouw.
 **Datum:** 2026-10-30
 **Gaat over:** de lijst van de hub (`/list`) en de vakjes bovenaan elke sheaf
 
@@ -137,4 +137,4 @@ Twee vragen die bij A nog beantwoord moeten worden:
 1. Mag Move to nu wel vanaf de lijst? Dat draait de keuze van d85f2ec terug; met een knop per klant is de reden van toen (één vakje kan niet kiezen) weg.
 2. Moeten Done en Don't run omkeerbaar worden (loslaten heropent het issue)? Dan moet ook de routine van de installatie het weghalen van een vinkje gaan lezen. Zonder die wens blijven ze rood.
 
-Kies **A**, **B** of **C**, of zet een opmerking op de passage die je anders wil.
+**Besluit (2026-10-30):** ontwerp A. Vraag 1: ja, Move to komt op de lijst, één knop per klant. Vraag 2: nee, Done en Don't run blijven eenmalig.

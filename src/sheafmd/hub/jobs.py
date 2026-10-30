@@ -9,14 +9,13 @@ one Tell. Jobs die with the hub; nothing reattaches.
 `Job.run` is the `Runner` an adapter delivers through: a child that was killed comes back with a
 negative return code, a timeout raises `subprocess.TimeoutExpired`.
 """
-import os
 import signal
 import subprocess
 import threading
 import time
 import traceback
 
-from .. import diagnostics
+from .. import diagnostics, signals
 
 TERM_GRACE = 5.0       # seconds between SIGTERM and SIGKILL on Cancel
 
@@ -29,8 +28,8 @@ def _signal_group(proc: subprocess.Popen, sig: int):
     if proc.returncode is not None:
         return
     try:
-        os.killpg(proc.pid, sig)
-    except (ProcessLookupError, PermissionError):
+        signals.send_group(proc, sig)
+    except (ProcessLookupError, PermissionError, signals.Refused):
         pass
 
 

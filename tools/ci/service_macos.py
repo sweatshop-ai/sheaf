@@ -20,6 +20,7 @@ import _ci
 
 _ci.guard("macOS")
 
+from sheafmd import signals  # noqa: E402
 from sheafmd.hub import service  # noqa: E402  (after the guard: nothing of sheaf is touched on a laptop)
 
 
@@ -78,7 +79,7 @@ def checks(port: int):
 
     _ci.say("2. kill -9")
     first = launchd_job()
-    os.kill(int(first["pid"]), signal.SIGKILL)
+    signals.send(int(first["pid"]), signal.SIGKILL)
     _ci.check(hub_back(first["pid"]), "launchd restarted the hub with another process")
     _ci.check(_ci.has_row(_ci.diag(), "unclean-exit"), "the next hub wrote an unclean-exit row")
 

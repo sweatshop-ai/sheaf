@@ -24,6 +24,7 @@ from typing import NamedTuple
 import pytest
 
 from helpers import _has_proc, proc_state
+from sheafmd import signals
 
 RUN_VAR = "SHEAF_TEST_RUN"
 NODE_VAR = "SHEAF_TEST_NODE"
@@ -123,8 +124,8 @@ def left_running(run: str, test: str | None = None) -> list[Left]:
 
 def _send(pid: int, sig: int):
     try:
-        os.kill(pid, sig)
-    except OSError:
+        signals.send(pid, sig)
+    except (OSError, signals.Refused):
         pass
 
 

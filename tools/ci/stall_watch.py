@@ -31,6 +31,8 @@ import threading
 import time
 from pathlib import Path
 
+from sheafmd import signals
+
 QUIET = float(os.environ.get("SHEAF_STALL_QUIET", "360"))
 # The job has 30 minutes in all and a green Tests step takes about 19, so a hang can start late: the run
 # ends 10 quiet minutes after its last output, inside the job limit for any hang before minute ~18.
@@ -92,13 +94,15 @@ def catches(pid: int, sig: int) -> bool:
 
 def signal_main_thread(pid: int, sig: int):
     """`sig` to the main thread of `pid` (its thread id is the pid), so faulthandler's handler runs
-    there; where there is no tgkill, to the process, which runs it on any thread."""
+    there; where there is no tgkill, to the process, which runs it on any thread. The pid is read from a
+    file, so `signals.check` refuses a -1, 0 or 1 in it before tgkill sees it."""
+    signals.check(pid)
     try:
         if ctypes.CDLL(None, use_errno=True).tgkill(pid, pid, sig) == 0:
             return
     except (OSError, AttributeError):
         pass
-    os.kill(pid, sig)
+    signals.send(pid, sig)
 
 
 def wait_for_dump(dump: Path, after: int = 0):
@@ -124,10 +128,12 @@ def python_stacks(pidfile: Path, dump: Path) -> str:
             signal_main_thread(pid, signal.SIGUSR2)
             wait_for_dump(dump)
         main = dump.read_text()
-        os.kill(pid, signal.SIGUSR1)
+        signals.send(pid, signal.SIGUSR1)
         wait_for_dump(dump, len(main))
     except OSError as e:
         return f"pytest pid {pid}: {e.strerror or e}"
+    except signals.Refused as e:
+        return f"pytest pid file: {e}"
     text = dump.read_text()
     rest = text[len(main):] if text.startswith(main) else text
     return (f"pytest pid {pid}\n{kernel_view(pid)}\n\nmain thread:\n{main or '(no main thread dump)'}"
@@ -169,8 +175,8 @@ def main(argv: list[str]) -> int:
         """The job was cancelled: the child has its own session, so the runner's kill does not reach it."""
         for sig in (signal.SIGTERM, signal.SIGKILL):
             try:
-                os.killpg(proc.pid, sig)
-            except OSError:
+                signals.send_group(proc, sig)
+            except (OSError, signals.Refused):
                 break
             time.sleep(2)
         sys.exit(128 + signum)
@@ -192,8 +198,8 @@ def main(argv: list[str]) -> int:
             # exits on SIGTERM while the pytest below it ignores it, and would be left holding the pipe.
             for sig in (signal.SIGTERM, signal.SIGKILL):
                 try:
-                    os.killpg(proc.pid, sig)
-                except OSError:
+                    signals.send_group(proc, sig)
+                except (OSError, signals.Refused):
                     break
                 if sig == signal.SIGTERM:
                     time.sleep(3)

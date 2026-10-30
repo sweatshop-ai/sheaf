@@ -33,11 +33,14 @@ StartLimitBurst=5
 
 [Service]
 ExecStart=/opt/sheaf/bin/sheaf hub --started-by service
-Restart=on-failure
+Restart=always
+RestartPreventExitStatus=3
+SuccessExitStatus=3
 RestartSec=2
 RestartSteps=5
 RestartMaxDelaySec=60
 Environment=PATH=/opt/a:/usr/bin
+Environment=SHEAF_STOP_EXIT=3
 
 [Install]
 WantedBy=default.target
@@ -48,6 +51,19 @@ WantedBy=default.target
 
 def test_the_unit_is_the_unit_of_the_spec():
     assert service.systemd_unit(["/opt/sheaf/bin/sheaf"], "/opt/a:/usr/bin") == SPEC_UNIT
+
+
+def test_the_unit_restarts_every_exit_but_a_deliberate_stop():
+    """#79: a hub that exited 0 on a stray signal stayed down under Restart=on-failure. The unit now
+    restarts every exit, and the hub's code for `sheaf stop` is the one exit it does not restart, and
+    counts as a success, so a stopped hub is `inactive`, not `failed`."""
+    text = service.systemd_unit(["/opt/sheaf/bin/sheaf"], "/opt/a:/usr/bin")
+    code = server.EXIT_STOPPED
+    assert code not in (0, 1, 2, server.EXIT_UPGRADE)
+    assert f"\nRestartPreventExitStatus={code}\n" in text and f"\nSuccessExitStatus={code}\n" in text
+    # and tells the hub so: a unit of an older sheaf restarts a 3, so the hub exits 3 only under this one
+    assert f"\nEnvironment={service.STOP_EXIT_ENV}={code}\n" in text
+    assert service.STOP_EXIT_ENV not in str(plistlib.loads(service.launchd_plist(["/opt/sheaf/bin/sheaf"], "/opt/a:/usr/bin")))
 
 
 def test_the_port_and_the_home_set_at_install_go_into_environment_lines():
@@ -251,7 +267,7 @@ def test_install_writes_the_unit_reloads_and_enables_it_now(sheaf, linux, fake, 
     assert r.code == 0, r.err
     assert unit_file.is_file() and stat.S_IMODE(unit_file.stat().st_mode) == 0o644
     text = unit_file.read_text()
-    assert text.startswith("[Unit]\nDescription=sheaf hub\n") and "Restart=on-failure" in text
+    assert text.startswith("[Unit]\nDescription=sheaf hub\n") and "Restart=always" in text
     assert f"Environment=SHEAF_PORT={port}" in text            # the port set at install goes in
     assert f"Environment=PATH={os.environ['PATH']}" in text    # the PATH of the shell that ran it
     assert fake.calls() == ["systemctl --user daemon-reload",

@@ -63,7 +63,7 @@ class Entry:
     log: list = field(default_factory=list)        # the render log of the last build
     warnings: list = field(default_factory=list)   # link-rule warnings not yet handed to a command
     first: bool = True                             # no build has run yet
-    images_by_project: bool | None = None          # whether its last build judged images by project (9.9, 8.12)
+    images_scope: tuple | None = None              # the image rule its last build read: `Hub._image_scope` (9.9)
 
     @property
     def path(self) -> Path:
@@ -281,17 +281,17 @@ class Hub:
                 "service": self.service, "me": self.person,
                 "agent": None, "can": [], "lines": {}, "seen": {}}
         log = []
-        by_project = self._images_by_project(root)
+        scope = self._image_scope(root, e.address)
         # The link rule is a warning for whoever renders the document, said once: the hub's
         # re-renders after a save say nothing, so a bare host name is not reported on every save.
         html = render_file(e.path, share=False, src=text, title=s["title"],
                            toc=s["toc"] or "auto", max_image_width=s["max_image_width"] or 1400,
                            by=s["by"], for_=s["for"], theme=s["theme"], credit=s["credit"], log=log,
                            root=root.path if root else None, extra_meta=meta,
-                           script_nonce=self.placeholder, image_ok=self._image_rule(root, e.path, by_project),
+                           script_nonce=self.placeholder, image_ok=self._image_rule(root, e.path, e.address, scope),
                            warn=e.warnings.append if e.first else None)
         e.log, e.first = log, False
-        e.images_by_project = by_project if self.proxy is not None and root is not None else None  # once it built
+        e.images_scope = scope          # once the build worked
         return html
 
     def share_copy(self, e: Entry) -> str:
@@ -301,39 +301,58 @@ class Hub:
         return render_file(e.path, share=True, title=s["title"], toc=s["toc"] or "auto",
                            max_image_width=s["max_image_width"] or 1400, by=s["by"],
                            for_=s["for"], theme=s["theme"], credit=s["credit"], log=[],
-                           root=root.path if root else None, image_ok=self._image_rule(root, e.path))
+                           root=root.path if root else None, image_ok=self._image_rule(root, e.path, e.address))
 
-    def _image_rule(self, root, doc, by_project: bool | None = None):
+    def _image_rule(self, root, doc, address: str, scope: tuple | None = None):
         """In proxy mode, a local image is embedded only when the root 8.2 finds for its file is the
         document's own root (9.9 "Local images"), and, in a root with a `projects.toml`, when its
-        `<client>/<project>` is in reach of the document's file `doc` (8.12): in every render of the hub, the page
-        and the share copy alike. None in loopback mode: every local image, as 6.2 says. `by_project`, when given,
-        is the rule a page's build read (`_build` keeps it on the entry once the build worked, so `catch_up` builds
-        the page again once the file comes or goes)."""
+        `<client>/<project>` is in reach of the document's file `doc` for every reader of the sheaf at `address`
+        (8.12, #81): in every render of the hub, the page and the share copy alike. None in loopback mode: every
+        local image, as 6.2 says. `scope`, when given, is the `_image_scope` a page's build read (`_build` keeps it
+        on the entry once the build worked, so `catch_up` builds the page again once it changes)."""
         if self.proxy is None:
             return None
         if root is None:
             return lambda path: False
-        if by_project is None:
-            by_project = self._images_by_project(root)
+        by_project, outsider = scope if scope is not None else self._image_scope(root, address)
         top = os.path.realpath(root.path)
         at = os.path.relpath(os.path.realpath(doc), top)
 
         def ok(path) -> bool:
             if self.roots.lookup(path) != root:
                 return False
-            return not by_project or projects.image_in_reach(at, os.path.relpath(os.path.realpath(path), top))
+            return not by_project or projects.image_in_reach(at, os.path.relpath(os.path.realpath(path), top),
+                                                             outsider)
         return ok
 
-    def _images_by_project(self, root) -> bool:
-        """Whether a page of `root` judges its images by project: when the root has a `projects.toml`, read or not
-        (8.12: a root without one grants as before)."""
-        return self.proxy is not None and root is not None and self.projects_of(root) is not None
+    def _image_scope(self, root, address: str) -> tuple | None:
+        """(whether a page of `root` judges its images by project, whether the sheaf at `address` has a reader the
+        project does not name). By project when the root has a `projects.toml`, read or not (8.12: a root without
+        one grants as before). A reader the project does not name is an owner its `members` do not hold, since an
+        owner opens their sheaf whatever the file says; judged at the address and where its file is, and every owner
+        when the file cannot be read (#81). One the hub cannot judge counts as such a reader. None in loopback mode
+        or outside every root."""
+        if self.proxy is None or root is None:
+            return None
+        entries = self.projects_of(root)
+        if entries is None:
+            return False, False
+        try:
+            # Judged where the file is as well as by the address, as `granted` judges (a link to another project).
+            top = os.path.realpath(root.path)
+            rels = {roots_mod.Address.parse(address).rel, os.path.relpath(os.path.realpath(self.file(address)), top)}
+            owners = self.owners(address, list(self.proxy.members.values()))
+        except Exception:
+            return True, True               # an owner the hub cannot judge is no member: no project image goes in
+        return True, any(not projects.grants(entries, rel, o.short) for o in owners for rel in rels)
 
     def _images_moved(self, e: Entry) -> bool:
-        """Whether the page of `e` was built by another image rule than its root's `projects.toml` gives now."""
+        """Whether the page of `e` was built by another image rule than its root's `projects.toml` and its owners
+        give now."""
+        if e.images_scope is None:
+            return False
         root = self.roots.get(roots_mod.Address.parse(e.address).root)
-        return e.images_by_project is not None and e.images_by_project != self._images_by_project(root)
+        return e.images_scope != self._image_scope(root, e.address)
 
     def page(self, e: Entry, nonce: str, member=None) -> str:
         """The page to send: the nonce of this response on its script, and the read state as it
@@ -719,7 +738,7 @@ class Hub:
             if key != e.last_stat:
                 e.live.refresh()
                 e.last_stat = key
-            if self._images_moved(e):           # a projects.toml came or went: its images are judged otherwise
+            if self._images_moved(e):           # projects.toml or the owners moved: its images are judged otherwise
                 e.live.rebuild()
         except Exception as ex:
             self._rebuild_failed(e, ex)

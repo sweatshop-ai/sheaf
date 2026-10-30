@@ -1294,3 +1294,12 @@ def test_a_sheaf_that_became_a_pointer_since_the_poll_leaves_the_page_at_once(bo
     pointer(sheaves)
     page = read(box.get("/list", member=NELL))
     assert not any("joey" in t.lower() for t in titles(page)), page
+
+
+def test_a_row_whose_move_to_boxes_come_before_another_action_carries_the_box_of_that_action(box, sheaves):
+    path = unsure(sheaves)
+    path.write_text(path.read_text(encoding="utf-8").replace("The draft.\n", "The draft.\n\n- [ ] Approve\n"),
+                    encoding="utf-8")
+    box.hub.the_list.poll()
+    assert (("/list/globex/black-friday/2026-10-28-reply-to-joey.md", JOEY, "3", "Approve")
+            in boxes(box.get("/list", member=NELL)))

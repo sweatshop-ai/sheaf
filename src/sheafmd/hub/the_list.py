@@ -677,10 +677,19 @@ def _age(seconds: float) -> str:
 # A press of a row's button shows Undo for UNDO_MS, then posts the action's tick to the hub; Undo in that window
 # sends nothing. While a press of a row waits or is sent, the row's other buttons cannot be pressed: they name their
 # action by the text the list read, which the tick changes. The list reloads once every press has been answered, so a
-# reload never drops a press still in its window, and a refusal is said above the rows and gives the button back.
+# reload never drops a press still in its window; a refusal is said above the rows, after that reload too, and gives
+# the button back.
 SCRIPT = """
-var UNDO_MS = 5000, open = 0, ticked = false;
-function settled() { if (--open === 0 && ticked) location.reload(); }
+var UNDO_MS = 5000, open = 0, ticked = false, SAID = 'sheaf-list-said';
+var said = document.querySelector('.list-error');
+function say(text) { said.textContent = text; said.hidden = false; }
+// A refusal beside a press that went through is said again after the reload, once (sessionStorage may refuse).
+try { var kept = sessionStorage.getItem(SAID); sessionStorage.removeItem(SAID); if (kept) say(kept); } catch (e) {}
+function settled() {
+  if (--open !== 0 || !ticked) return;
+  try { if (!said.hidden) sessionStorage.setItem(SAID, said.textContent); } catch (e) {}
+  location.reload();
+}
 document.querySelectorAll('.list-row button.list-act').forEach(function (b) {
   var word = b.textContent, waiting = null;
   var others = Array.prototype.filter.call(b.closest('.list-row').querySelectorAll('button.list-act'),
@@ -692,7 +701,6 @@ document.querySelectorAll('.list-row button.list-act').forEach(function (b) {
     back();
     b.disabled = true;
     if (b.hasAttribute('aria-pressed')) b.setAttribute('aria-pressed', 'true');
-    var said = document.querySelector('.list-error');
     fetch('/_/tick', {method: 'POST', headers: {'Content-Type': 'application/json'}, credentials: 'same-origin',
       body: JSON.stringify({doc: b.dataset.doc, action: Number(b.dataset.action), word: b.dataset.word,
         hash: b.dataset.hash})})
@@ -703,7 +711,7 @@ document.querySelectorAll('.list-row button.list-act').forEach(function (b) {
       .catch(function (e) {
         if (b.hasAttribute('aria-pressed')) b.setAttribute('aria-pressed', 'false');
         b.disabled = false; lock(false);
-        said.textContent = e.message; said.hidden = false;
+        say(e.message);
       })
       .then(settled);
   }

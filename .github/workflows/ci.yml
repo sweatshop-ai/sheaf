@@ -6,7 +6,7 @@
 #   1. Read the release notes of the newest Playwright for the systems it supports; take the first version
 #      that names the new image. Playwright supports a fixed list of systems per version, and 1.58 refuses 26.04.
 #   2. Set `playwright==` to that version in pyproject.toml's dev group and run `uv lock`.
-#   3. Name the new image in the matrix below, in MATRIX_OS in tests/test_ci_workflow.py and in SPEC 18.
+#   3. Name the new image in the matrix below (and its comment), in MATRIX_OS in tests/test_ci_workflow.py and in SPEC 18.
 #   4. Open the pull request. It runs on the new image, and since ci.yml and uv.lock are page paths, the page
 #      tests run too: the bump changes the Chromium they drive. The Playwright cache key names the image and
 #      uv.lock, so no browser of the old image is restored.
@@ -101,7 +101,7 @@ jobs:
         id: image
         if: hashFiles('tests/page/**') != '' && steps.page.outputs.run == 'true'
         shell: bash
-        run: echo "os=${ImageOS:?GitHub's runners set ImageOS}" >> "$GITHUB_OUTPUT"
+        run: echo "os=${ImageOS:?ImageOS is not set on this runner}" >> "$GITHUB_OUTPUT"
 
       - name: Cache the Playwright browsers
         if: hashFiles('tests/page/**') != '' && steps.page.outputs.run == 'true'

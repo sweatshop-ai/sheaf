@@ -185,6 +185,9 @@ def test_the_playwright_cache_key_names_the_runner_image(text):
     # is empty in an expression (the env context leaves out what the runner inherits), so a step reads it.
     step = text[text.index("- name: Name the runner image"):text.index("- name: Cache the Playwright browsers")]
     assert "id: image" in step and '"os=${ImageOS:?' in step and '>> "$GITHUB_OUTPUT"' in step
+    # bash reads an apostrophe inside "${ImageOS:?...}" as an opening quote: the step did not parse (PR #82 gate).
+    run = re.search(r"^\s*run: (.*)$", step, flags=re.M).group(1)
+    assert subprocess.run(["bash", "-n", "-c", run], capture_output=True).returncode == 0, run
     key = re.search(r"^\s*key: (playwright-.*)$", text, flags=re.M).group(1)
     assert key == "playwright-${{ runner.os }}-${{ steps.image.outputs.os }}-${{ hashFiles('uv.lock') }}"
 

@@ -1350,6 +1350,9 @@ def test_a_row_whose_move_to_boxes_come_before_another_action_carries_the_button
     ("- [x] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n",
      "- [ ] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n", "Move to"),
     ("- [x] Approve\n- [x] Approve\n", "- [x] Approve\n- [ ] Approve\n", "Approve"),
+    ("- [x] Approve @nell\n", "- [ ] Approve\n", "Approve"),                # the member it names dropped
+    ("- [x] Done @nell\n", "- [ ] Done @dora\n", "Done"),                   # or changed
+    ("- [x] Approve\n\nText.\n\n- [ ] Approve\n", "- [ ] Approve\n\nText.\n", "Approve"),   # another box taken out
 ])
 def test_a_write_that_unticks_a_one_off_names_its_word(old, new, word):
     assert the_list.unticks_one_off(f"# A sheaf\n\n{old}", f"# A sheaf\n\n{new}") == word
@@ -1360,7 +1363,7 @@ def test_a_write_that_unticks_a_one_off_names_its_word(old, new, word):
     ("- [ ] Approve\n", "- [x] Approve\n"),                             # a tick
     ("- [x] Approve\n", "Approved.\n"),                                 # the box taken out, not unticked
     ("- [x] Approve\n", "- [x] Approve\n- [ ] Approve\n"),              # a box added beside it
-    ("- [x] Done @nell\n", "- [ ] Done @dora\n"),                       # another action takes its place
+    ("- [x] Approve\n- [ ] Done\n", "- [ ] Done\n"),                    # and another word's box stays
     ("```\n- [x] Approve\n```\n", "```\n- [ ] Approve\n```\n"),         # in a fence: no box
     ("- [x] Approve the plan\n", "- [ ] Approve the plan\n"),           # no action's word alone
 ])

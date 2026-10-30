@@ -4,11 +4,15 @@ the root (`.sheaf/versions/`) and committed with it; the hub never serves `.shea
 `projects.toml` does not name is a warning. Through the handler in proxy mode, with a git repo as the root
 and a bare repo as its remote."""
 import os
+import random
 import subprocess
+import time
+from pathlib import Path
 
 import pytest
 from helpers import BEA, CAL, FRONT, Front, PLAN
 
+from sheafmd import signals
 from sheafmd.blocks import split_md_blocks
 from sheafmd.hub import proxy, the_list
 from sheafmd.source import md_hash
@@ -239,6 +243,132 @@ def test_a_stopping_hub_waits_for_the_push_of_the_last_write(box, sheaves, remot
     edit(box, sheaves)
     box.hub.stop_jobs()
     assert "Second, edited on the page." in git(remote, "show", "main:acme/blog/2026-10-28-plan.md")
+
+
+# ── a stop while git runs (#95) ───────────────────────────────────────────────
+# A sleep of its own per test run: another session on the machine running these tests has another.
+HANG = f"61.{random.randrange(10 ** 6):06d}"
+
+
+def hanging(sheaves):
+    """The remote's upload-pack waits first: the pull's fetch hangs as on a remote that drops packets."""
+    git(sheaves, "config", "remote.origin.uploadpack", f"sleep {HANG}; git-upload-pack")
+
+
+def sleepers() -> list:
+    out = []
+    for d in Path("/proc").iterdir():
+        try:
+            if d.name.isdigit() and (d / "cmdline").read_bytes().split(b"\0")[:2] == [b"sleep", HANG.encode()]:
+                out.append(int(d.name))
+        except OSError:
+            pass
+    return out
+
+
+def until(look, seconds=20):
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if got := look():
+            return got
+        time.sleep(0.05)
+    return look()
+
+
+@pytest.mark.skipif(not Path("/proc/self").is_dir(), reason="finds the hanging git by /proc")
+def test_a_stop_ends_a_fetch_that_hangs_within_its_bound_and_calls_it_stopped_not_failed(box, sheaves, remote, monkeypatch):
+    """#95: an upgrade stop left `push-failed "git exited -15"`, a git the stop itself ended. The hub ends its
+    git within a bound it sets, the git's own children with it, and says so as `push-stopped`; the commit stays
+    for the next hub's push."""
+    from sheafmd.hub import commits
+    monkeypatch.setattr(commits, "STOP_SECONDS", 1)
+    hanging(sheaves)
+    edit(box, sheaves)
+    assert until(sleepers), "the fetch never started"
+    t = time.monotonic()
+    box.hub.stop_jobs()
+    assert time.monotonic() - t < 1 + 2 * commits.END_GRACE + 1
+    assert until(lambda: not sleepers(), 5)
+    assert rows("push-failed") == []
+    (row,) = rows("push-stopped")
+    assert row["doc"] == DOC
+    assert git(sheaves, "rev-parse", "HEAD") != git(remote, "rev-parse", "main")
+
+
+@pytest.mark.skipif(not Path("/proc/self").is_dir(), reason="finds the hanging git by /proc")
+def test_the_hubs_git_runs_in_a_session_of_its_own(box, sheaves, monkeypatch):
+    """A Ctrl-C at the terminal of a hub run in the foreground goes to its whole group: git is not in it, the hub
+    ends it (#95)."""
+    from sheafmd.hub import commits
+    monkeypatch.setattr(commits, "STOP_SECONDS", 0)
+    hanging(sheaves)
+    edit(box, sheaves)
+    (pid,) = until(sleepers)
+    assert os.getsid(pid) != os.getsid(0)
+    box.hub.stop_jobs()
+
+
+def test_a_stop_ends_a_fetch_of_the_poll_before_the_fetch_gives_up_on_its_own():
+    """A poll's fetch that the stop meets would otherwise time out first and be a `push-failed` (#95)."""
+    from sheafmd.hub import commits
+    assert commits.STOP_SECONDS < commits.GIT_SECONDS
+
+
+def test_a_git_that_failed_before_the_stop_signalled_it_is_a_failure_and_one_its_descendant_holds_never_holds_the_pusher(
+        monkeypatch):
+    """Gate P3-1 and P2-1 of #95: the stop's word goes only to a git it signalled; and a timed-out git whose pipes a
+    process outside its group keeps open is given up at its time, as `subprocess.run` gives it up."""
+    import signal
+    from sheafmd.hub import commits
+    kids = commits.Children()
+    real = subprocess.Popen.communicate
+
+    def then_the_stop(self, *args, **kw):
+        out = real(self, *args, **kw)
+        if self.args[:2] == ["sh", "-c"] and self.args[2] == "exit 1":
+            kids.end(signal.SIGTERM)                      # the stop comes just after the git failed on its own
+        return out
+    monkeypatch.setattr(subprocess.Popen, "communicate", then_the_stop)
+    assert kids.run(["sh", "-c", "exit 1"], 5, os.environ).returncode == 1
+    kids._ended = False
+    t = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        kids.run(["sh", "-c", f"setsid sleep {HANG} & sleep 30"], 1, os.environ)
+    assert time.monotonic() - t < 4
+    for pid in sleepers():
+        signals.send(pid, 15)
+
+
+def test_a_poll_that_meets_a_stopped_hub_with_nothing_owed_writes_no_row(box, sheaves, monkeypatch):
+    from sheafmd.hub import commits
+    monkeypatch.setattr(commits, "STOP_SECONDS", 0)
+    box.hub.stop_jobs()
+    monkeypatch.setattr(commits, "FETCH_SECONDS", 0)
+    poll(box)
+    assert rows("push-stopped") == [] and rows("push-failed") == []
+
+
+def test_a_push_that_ends_within_the_stops_bound_goes_out(box, sheaves, remote, monkeypatch):
+    from sheafmd.hub import commits
+    monkeypatch.setattr(commits, "STOP_SECONDS", 15)
+    git(sheaves, "config", "remote.origin.receivepack", "sleep 1; git-receive-pack")
+    edit(box, sheaves)
+    box.hub.stop_jobs()
+    assert git(sheaves, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
+    assert rows("push-stopped") == [] and rows("push-failed") == []
+
+
+def test_a_push_due_once_the_hub_ended_its_git_starts_no_git(box, sheaves, remote, monkeypatch):
+    """After the stop ended the running git, a push still due is never started: it would run past the bound."""
+    from sheafmd.hub import commits
+    monkeypatch.setattr(commits, "STOP_SECONDS", 0)
+    seen = fetches(monkeypatch)
+    box.hub.stop_jobs()
+    edit(box, sheaves)
+    assert box.hub.commits.settle(5)
+    assert seen == [] and rows("push-failed") == []
+    (row,) = rows("push-stopped")
+    assert row["doc"] == DOC
 
 
 def test_a_link_planted_in_the_versions_store_is_never_written_through(box, sheaves, tmp_path):

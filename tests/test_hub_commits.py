@@ -996,3 +996,57 @@ def test_a_root_that_does_not_commit_leaves_the_push_of_its_repo_to_the_roots_th
     assert made == []
     assert git(remote, "log", "--format=%s", "main").splitlines() == ["edit: plan.md", "first"]
     assert git(repo, "status", "--porcelain", "--untracked-files=no") == " M globex/plan.md\n"
+
+
+def test_a_write_made_while_a_push_runs_and_the_roots_part_goes_out_once_they_agree(tmp_path, remote, monkeypatch):
+    """A save after the push read HEAD, meeting a mix that came meanwhile, is a write's push not gone: the poll after
+    the roots agree again pushes it (the gate on PR 90)."""
+    from sheafmd.hub import commits
+    repo, a, b = one_repo(tmp_path, remote)
+    made = []
+    hub_commits = commits.Commits(lambda kind, doc, **detail: made.append(kind), roots=lambda: [a, b])
+    real, done = commits._git, []
+
+    def spy(folder, *args, **kw):
+        r = real(folder, *args, **kw)
+        if args[:1] == ("push",) and not done:
+            done.append(True)
+            (repo / "globex" / ".sheaf.toml").write_text("commit = true\npush = false\n", encoding="utf-8")
+            hub_commits.saved(a, "plan.md", on_the_page(repo, a, "second"), "edit")
+        return r
+
+    monkeypatch.setattr(commits, "_git", spy)
+    hub_commits.saved(a, "plan.md", on_the_page(repo, a, "first"), "edit")
+    assert hub_commits.settle()
+    assert made == ["push-settings-differ"]
+    (repo / "globex" / ".sheaf.toml").write_text("commit = true\npush = true\n", encoding="utf-8")
+    monkeypatch.setattr(commits, "FETCH_SECONDS", 0)
+    hub_commits.poll([a, b])
+    assert hub_commits.settle()
+    assert git(repo, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
+
+
+def test_a_push_queued_while_the_roots_agreed_is_judged_again_when_its_turn_comes(tmp_path, remote, monkeypatch):
+    """The mix is judged when the pusher takes the repo, not when a write queued it: a root that stops pushing while
+    its push waits is not pushed (the gate on PR 90). What a push already carried was committed while they agreed."""
+    from sheafmd.hub import commits
+    repo, a, b = one_repo(tmp_path, remote)
+    made = []
+    hub_commits = commits.Commits(lambda kind, doc, **detail: made.append(kind), roots=lambda: [a, b])
+    real, seen = commits._git, []
+
+    def spy(folder, *args, **kw):
+        if args[:1] == ("fetch",):
+            seen.append(folder)
+        r = real(folder, *args, **kw)
+        if args[:1] == ("push",) and len(seen) == 1:
+            hub_commits.saved(b, "plan.md", on_the_page(repo, b, "first"), "edit")   # queued while the two agree
+            (repo / "globex" / ".sheaf.toml").write_text("commit = true\npush = false\n", encoding="utf-8")
+        return r
+
+    monkeypatch.setattr(commits, "_git", spy)
+    hub_commits.saved(a, "plan.md", on_the_page(repo, a, "first"), "edit")
+    assert hub_commits.settle()
+    assert len(seen) == 1 and made == ["push-settings-differ"]
+    assert git(remote, "log", "--format=%s", "main").splitlines() == ["edit: plan.md", "first"]
+    assert git(repo, "log", "--format=%s", "-3").splitlines() == ["edit: plan.md", "edit: plan.md", "first"]

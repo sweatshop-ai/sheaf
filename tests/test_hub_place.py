@@ -506,15 +506,14 @@ def test_the_untick_is_refused_outside_the_list_too(team, work, tmp_path):
     assert got.status == 409 and f.read_text(encoding="utf-8") == text
 
 
-
-# ── a sheaf moves to one client (#109) ───────────────────────────────────────
+# ── a thread moves to one client (#109) ──────────────────────────────────────
 
 MOVES = OPEN.replace("- [ ] Share", "- [ ] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n- [ ] Share")
 MOVED = MOVES.replace("- [ ] Move to klium", "- [x] Move to klium")
 MOVED_ONCE = "This thread moves to one client: Move to klium is ticked."
 
 
-def set_moves(team, work, text, ticked, member=HANS):
+def set_moves(team, text, ticked, member=HANS):
     """The page's save of the Move to block of `text` with exactly the boxes of the slugs `ticked` checked."""
     blocks = split_md_blocks(text)
     i = next(i for i, b in enumerate(blocks) if "Move to klium" in b.content)
@@ -532,7 +531,7 @@ def set_moves(team, work, text, ticked, member=HANS):
 
 def test_the_first_move_to_tick_in_the_page_writes(team, work):
     put(team, work, SHARED, MOVES)
-    got = set_moves(team, work, MOVES, ["klium"])
+    got = set_moves(team, MOVES, ["klium"])
     assert got.status == 200, got.text
     assert "- [x] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)" in (work / SHARED).read_text(encoding="utf-8")
 
@@ -540,16 +539,17 @@ def test_the_first_move_to_tick_in_the_page_writes(team, work):
 @pytest.mark.parametrize("ticked", [["klium", "acme"], ["acme"]], ids=["second", "swap"])
 def test_a_save_that_ticks_another_move_to_is_refused_and_writes_nothing(team, work, ticked):
     put(team, work, SHARED, MOVED)
-    got = set_moves(team, work, MOVED, ticked)
+    got = set_moves(team, MOVED, ticked)
     assert got.status == 409 and got.json()["error"] == MOVED_ONCE
     assert (work / SHARED).read_text(encoding="utf-8") == MOVED
 
 
 def test_a_save_that_ticks_two_move_tos_at_once_is_refused(team, work):
     put(team, work, SHARED, MOVES)
-    got = set_moves(team, work, MOVES, ["klium", "acme"], member=THIERRY)
+    got = set_moves(team, MOVES, ["klium", "acme"], member=THIERRY)
     assert got.status == 409 and got.json()["error"] == MOVED_ONCE
     assert (work / SHARED).read_text(encoding="utf-8") == MOVES
+
 
 # ── the poll places what is not at home ──────────────────────────────────────
 

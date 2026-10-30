@@ -210,7 +210,7 @@ def read_sheaf(rel: str, text: str) -> Sheaf:
                 elif m["move"]:
                     moved = True
     if moved:
-        # A sheaf moves to one client (#109): once a Move to is ticked, its other candidates are no actions.
+        # A thread moves to one client (#109): once a Move to is ticked, its other candidates are no actions.
         actions = [a for a in actions if a[0] != MOVE]
     return Sheaf(rel, title or rel.rsplit("/", 1)[-1][:-3], issue, fm_text(fm, "assistant"),
                  fm_text(fm, "kind"), visibility.effective(fm), tuple(actions), visibility.sources(fm),

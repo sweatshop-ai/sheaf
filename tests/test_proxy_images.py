@@ -470,3 +470,89 @@ def test_share_leaves_a_registry_it_cannot_read_where_it_is(proxied, sheaf, work
     copy, _ = share(sheaf, work, outside)
     assert "data:image/png" not in copy
     assert reg.read_text(encoding="utf-8") == "{not json" and not list(reg.parent.glob("*.corrupt"))
+
+
+PROJECTS = '[projects."acme/blog"]\nmembers = ["bea"]\nstatus = "live"\n' \
+           '[projects."thinkingtoo/tiroir"]\nmembers = ["bea"]\nstatus = "live"\n'
+
+
+@pytest.fixture
+def granted(front, work):
+    """`work` with a `projects.toml` (8.12) that names Bea, now `bea`, in both its projects: its projects' images
+    are judged by project, and none of what Bea opens is shut by the grant itself."""
+    import pwd
+    from helpers import BEA, FRONT
+    from sheafmd.hub import proxy
+    front.hub.proxy = proxy.parse({"origin": FRONT, "socket": "/run/sheaf-proxy/hub.sock",
+                                   "proxy_user": pwd.getpwuid(os.getuid()).pw_name,
+                                   "members": {BEA: {"name": "Bea", "short": "bea", "roots": [str(work)]}}}, "the test")
+    (work / "projects.toml").write_text(PROJECTS, encoding="utf-8")
+    return work
+
+
+def project_page(front, work, rel, src):
+    """The page and the share copy of the document `rel` in `work`, which names the image `src`, and its log."""
+    doc = work / rel
+    doc.parent.mkdir(parents=True, exist_ok=True)
+    doc.write_text(f"# Plan\n\nSee ![the figure]({src}).\n", encoding="utf-8")
+    front.hub.roots.for_document(doc)
+    r = front.get(f"/work/{rel}")
+    assert r.status == 200
+    share = front.post("/_/export", {"doc": f"work/{rel}", "kind": "html"})
+    assert share.status == 200
+    return r.text, share.text, front.hub.entries[f"work/{rel}"].log
+
+
+def test_an_image_of_another_project_is_left_out_like_one_of_another_root(front, plan, granted, work):
+    """A member opens a page of a project they are in; an image of a project they may not be in is no part of it
+    (#53): judged by its `<client>/<project>` as a document is (8.12), the same for every reader of the page."""
+    png(work / "thinkingtoo" / "tiroir" / "secret.png")
+    html, share, log = project_page(front, work, "acme/blog/pic.md", "../../thinkingtoo/tiroir/secret.png")
+    for out in (html, share):
+        assert "data:image/png" not in out and "the figure" not in out and "missing image" not in out
+    assert any("left out" in line and "secret.png" in line for line in log)
+
+
+def test_an_image_of_the_documents_own_project_or_above_any_project_is_embedded(front, plan, granted, work):
+    png(work / "acme" / "blog" / "fig.png")
+    png(work / "logo.png")
+    for src in ("fig.png", "../../logo.png"):
+        html, share, _ = project_page(front, work, "acme/blog/pic.md", src)
+        assert "data:image/png" in html and "data:image/png" in share, src
+
+
+def test_a_document_above_every_project_leaves_out_a_projects_image(front, plan, granted, work):
+    """A document above project depth opens to every member of the root (8.12), so it embeds no project's image."""
+    png(work / "acme" / "blog" / "fig.png")
+    html, share, _ = page(front, plan, "acme/blog/fig.png")
+    assert "data:image/png" not in html and "data:image/png" not in share
+
+
+@pytest.mark.parametrize("rel", ["acme/blog/pic.md", "acme/blog/private/hans/pic.md"])
+def test_an_image_in_a_private_folder_is_embedded_only_in_a_sheaf_of_that_folder(front, plan, granted, work, rel):
+    """`private/<short>/` holds what is its owner's alone (9.11): its image is no part of a page of the project, nor
+    of another owner's sheaf."""
+    png(work / "acme" / "blog" / "private" / "thierry" / "seal.png")
+    up = "../../" if "private" in rel else ""
+    html, _, _ = project_page(front, work, rel, f"{up}private/thierry/seal.png")
+    assert "data:image/png" not in html
+    html, _, _ = project_page(front, work, "acme/blog/private/thierry/own.md", "seal.png")
+    assert "data:image/png" in html
+
+
+def test_a_root_without_projects_toml_embeds_another_projects_image_as_before(front, plan, work):
+    """A root without the file grants as before (8.12): a folder at project depth is no project there."""
+    png(work / "thinkingtoo" / "tiroir" / "fig.png")
+    html, share, _ = project_page(front, work, "acme/blog/pic.md", "../../thinkingtoo/tiroir/fig.png")
+    assert "data:image/png" in html and "data:image/png" in share
+
+
+def test_a_page_built_before_projects_toml_came_is_built_again_at_its_next_load(front, plan, granted, work):
+    (work / "projects.toml").unlink()
+    png(work / "thinkingtoo" / "tiroir" / "secret.png")
+    html, _, _ = project_page(front, work, "acme/blog/pic.md", "../../thinkingtoo/tiroir/secret.png")
+    assert "data:image/png" in html
+    (work / "projects.toml").write_text(PROJECTS, encoding="utf-8")
+    assert "data:image/png" not in front.get("/work/acme/blog/pic.md").text
+    (work / "projects.toml").unlink()
+    assert "data:image/png" in front.get("/work/acme/blog/pic.md").text

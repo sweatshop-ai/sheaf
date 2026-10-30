@@ -356,7 +356,6 @@ class Row:
 @dataclass
 class Snapshot:
     rows: list = field(default_factory=list)
-    projects: dict = field(default_factory=dict)    # `projects.toml`'s entries, {} without the file
     polled: float | None = None
 
 
@@ -459,7 +458,7 @@ class TheList:
                     # next poll, which reads what is there now (#34).
                     rows = [r for r in rows if self._gone.get(r.file, 0) < started]
                     self._gone = {f: n for f, n in self._gone.items() if n > started}
-                    self._snap = Snapshot(rows, entries, self.hub.clock())
+                    self._snap = Snapshot(rows, self.hub.clock())
             # Every sheaf whose file is not at its home goes there (9.11), judged with the last records read (a failed
             # read places on the ones before it, as every other judgement of the hub reads them): the
             # first poll moves what was written before the rule, a later one what an owner change made another's.
@@ -553,6 +552,7 @@ class TheList:
         show = show if show in SHOWS else "projects"
         members = list(self.hub.proxy.members.values())
         root = self.root()
+        entries = self.hub.projects_of(root) if root is not None else None    # read once for the page
         sections = {"waiting": [], "open": []}
         for row in snap.rows:
             if row.record.status not in sections:
@@ -570,10 +570,10 @@ class TheList:
             addressed = any(short and short.lower() == member.short.lower() for _, short, _ in row.sheaf.actions)
             if show == "mine" and not (is_owner or addressed):
                 continue
-            if show == "projects":
-                entry = snap.projects.get(row.group) or {}
-                if not member.short or member.short.lower() not in {str(m).lower() for m in entry.get("members", [])}:
-                    continue
+            # My projects: the file as the hub grants by it now (8.12), not as the last poll read it (#53).
+            if show == "projects" and not (isinstance(entries, dict)
+                                           and projects.grants(entries, row.sheaf.rel, member.short)):
+                continue
             sections[row.record.status].append((row, owners, is_owner))
         body = "".join(self._section(title, sections[key], member, root.name)
                        for key, title in (("waiting", "Waiting on you"), ("open", "In progress")))

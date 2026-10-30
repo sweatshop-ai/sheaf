@@ -949,7 +949,8 @@ def test_writes_in_both_roots_of_a_repo_while_a_push_runs_make_one_pull_and_push
     hub_commits.saved(b, "plan.md", on_the_page(repo, b, "first"), "edit")
     go.set()
     assert hub_commits.settle()
-    assert len(seen["fetch"]) == 2 and len(seen["push"]) == 2
+    # The first push carries the three commits, made while its fetch ran; the one pull after it finds nothing to push.
+    assert len(seen["fetch"]) == 2 and len(seen["push"]) == 1
     assert made == []
     assert git(repo, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
 
@@ -973,7 +974,7 @@ def test_roots_of_one_repo_that_disagree_on_push_push_nothing_until_they_agree(t
     assert git(remote, "rev-parse", "main") == first
     assert git(repo, "log", "--format=%s", "-2").splitlines() == ["edit: plan.md", "edit: plan.md"]
     assert made == [("push-settings-differ", "acme/plan.md", {"push": ["acme"], "no_push": ["globex"]})]
-    assert capsys.readouterr().err.count("push") == 1
+    assert capsys.readouterr().err.count("pushes nothing until they agree") == 1
     (repo / "globex" / ".sheaf.toml").write_text("commit = true\npush = true\n", encoding="utf-8")
     monkeypatch.setattr(commits, "FETCH_SECONDS", 0)
     hub_commits.poll([a, b])

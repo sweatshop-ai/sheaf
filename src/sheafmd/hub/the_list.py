@@ -14,7 +14,8 @@ GitHub Project. `waiting` is the Project's option named by `waiting`, `open` the
 The owner is the issue's assignee, told by the member whose `github` it is. The rest is the sheaf's front
 matter: `issue` (`owner/repo#n`; empty for a documentation sheaf, which is never listed), `assistant`,
 `kind`, `visibility`; its title is its first `# ` heading and its actions are its unticked boxes that
-carry one of the seven words (`- [ ] Approve`, `- [ ] Done @nell`).
+carry one of the eight words (`- [ ] Approve`, `- [ ] Done @nell`, `- [ ] Move to klium (ref <thread>)`). A sheaf
+whose front matter has `moved_to:` is the pointer a move left, never a row.
 
 The record is read as the GitHub App the deployment installs: the hub reads an installation token from
 `token_file` at every poll and never mints one, so the App's key stays where the hub cannot read it.
@@ -52,7 +53,8 @@ OPTIONAL_KEYS = {"api": str, "poll": int, "waiting": str, "in_progress": str, "s
 FOLDER_KEYS = ("stop_dir", "tell_dir", "sessions_dir")
 DEFAULTS = {"api": "https://api.github.com", "poll": 60, "waiting": "Waiting on member",
             "in_progress": "In progress"}
-WORDS = ("Approve", "Run it", "Don't run", "Undo skip", "Done", "Share", "Stop James")
+WORDS = ("Approve", "Run it", "Don't run", "Undo skip", "Done", "Share", "Stop James", "Move to")
+MOVE = "Move to"                # the one word that takes an argument: `<slug> (ref <thread>)`, maybe escaped
 SHOWS = {"projects": "My projects", "mine": "Only mine", "all": "All of the team"}
 BATCH = 50                      # issues per GraphQL request
 ITEMS = 100                     # Project items of an issue per page: the most GitHub gives
@@ -62,8 +64,9 @@ HTTP_SECONDS = 20
 _BOX_RE = re.compile(r"[A-Za-z0-9.-]{1,63}")
 _REPO_RE = re.compile(r"[A-Za-z0-9-]+/[A-Za-z0-9._-]+")
 _ISSUE_RE = re.compile(r"([A-Za-z0-9-]+)/([A-Za-z0-9._-]+)#([0-9]+)")
-_ACTION_RE = re.compile(r"\s*[-*+] \[ \] (" + "|".join(re.escape(w).replace("'", "['’]") for w in WORDS)
-                        + r")(?:\s+@([A-Za-z0-9._-]+))?\s*")
+_ACTION_RE = re.compile(r"\s*[-*+] \[ \] (?:(" + "|".join(re.escape(w).replace("'", "['’]") for w in WORDS if w != MOVE)
+                        + r")|(" + re.escape(MOVE) + r")\s+([A-Za-z0-9._\\-]+)\s+\(ref\s+[^()\s]+\))"
+                        + r"(?:\s+@([A-Za-z0-9._-]+))?\s*")
 
 
 class ListError(Exception):
@@ -165,11 +168,12 @@ class Sheaf:
     assistant: str
     kind: str
     visibility: str             # what the hub enforces (9.11): `owner` or `project`, never as written alone
-    actions: tuple              # ((word, short name or "", 0-based line in the file), ...)
+    actions: tuple              # ((word, short name or "", 0-based line in the file, Move to's slug or ""), ...)
     sources: tuple = ()
     owner: str = ""
     shared: str = ""
     hash: str = ""              # md_hash of the text read: a tick from its row is refused once the text is another
+    moved: bool = False         # its front matter has `moved_to:`: the pointer a move left, never a row
 
 
 def issue_of(written: str) -> tuple | None:
@@ -198,10 +202,11 @@ def read_sheaf(rel: str, text: str) -> Sheaf:
         elif b.kind == "list":
             for k, line in enumerate(own):
                 if m := _ACTION_RE.fullmatch(line.removesuffix("\r")):
-                    actions.append((m.group(1).replace("’", "'"), m.group(2) or "", b.start + k))
+                    word = (m.group(1) or m.group(2)).replace("’", "'")
+                    actions.append((word, m.group(4) or "", b.start + k, re.sub(r"\\(.)", r"\1", m.group(3) or "")))
     return Sheaf(rel, title or rel.rsplit("/", 1)[-1][:-3], issue, fm_text(fm, "assistant"),
                  fm_text(fm, "kind"), visibility.effective(fm), tuple(actions), visibility.sources(fm),
-                 fm_text(fm, "owner"), fm_text(fm, "shared"), md_hash(text))
+                 fm_text(fm, "owner"), fm_text(fm, "shared"), md_hash(text), "moved_to" in fm)
 
 
 def tick_edit(text: str, n: int, word: str):
@@ -424,7 +429,7 @@ class TheList:
                 except Exception:           # one sheaf the reader trips on leaves the rest of the list
                     self.hub.record_exception("list-poll-failed", None)
                     continue
-                if s.issue is not None:
+                if s.issue is not None and not s.moved:
                     sheaves.append(s)
             try:
                 entries = projects.read(root.path) or {}
@@ -565,7 +570,7 @@ class TheList:
                 continue
             owners = self.hub.owners(address, members)              # and its owners, as visible has them
             is_owner = any(o.id == member.id for o in owners)
-            addressed = any(short and short.lower() == member.short.lower() for _, short, _ in row.sheaf.actions)
+            addressed = any(short and short.lower() == member.short.lower() for _, short, _, _ in row.sheaf.actions)
             if show == "mine" and not (is_owner or addressed):
                 continue
             # My projects: the file as the hub grants by it now (8.12), not as the last poll read it (#53).
@@ -602,7 +607,7 @@ class TheList:
             sheaf = read_sheaf(row.sheaf.rel, text)
         except Exception:                   # unreadable, or one the reader trips on, as the poll leaves it out
             return None
-        if not _same_issue(sheaf.issue, row.sheaf.issue):
+        if not _same_issue(sheaf.issue, row.sheaf.issue) or sheaf.moved:
             return None
         fm = visibility.front_matter(text)
         if not self.hub.may_open(member, address, fm):
@@ -624,9 +629,9 @@ class TheList:
     def _row(self, row: Row, owners: list, is_owner: bool, member, root: str) -> str:
         s, rec = row.sheaf, row.record
         chips = "".join(
-            f'<span class="list-chip">{html.escape(word)}'
+            f'<span class="list-chip">{html.escape(word)}{" " + html.escape(arg) if arg else ""}'
             f'{" @" + html.escape(short) if short and short.lower() != member.short.lower() else ""}</span>'
-            for word, short, _ in s.actions)
+            for word, short, _, arg in s.actions)
         if s.assistant:
             chips += f'<span class="list-assistant">{html.escape(s.assistant)}</span>'
         by_login = {m.github.lower(): m for m in self.hub.proxy.members.values() if m.github}
@@ -641,7 +646,8 @@ class TheList:
             owner = "nobody"
         meta = " · ".join(x for x in (s.kind, owner, f"#{s.issue[2]}", _age(self.hub.clock() - rec.updated)) if x)
         box = ""
-        if s.actions:
+        # Move to's boxes are the options of one answer: the row's box would tick the first unseen, so it has none.
+        if s.actions and s.actions[0][0] != MOVE:
             word = s.actions[0][0]
             box = (f'<input type="checkbox" aria-label="{html.escape(word)}" data-doc="{html.escape(f"{root}/{s.rel}")}"'
                    f' data-action="0" data-word="{html.escape(word)}" data-hash="{html.escape(s.hash)}">')

@@ -660,7 +660,7 @@ def test_a_tick_beside_a_comment_in_the_same_list_keeps_the_comment(box, sheaves
 
 def test_an_action_above_a_rule_after_the_front_matter_is_still_read():
     s = the_list.read_sheaf("a/b/c.md", SHEAVES["globex/black-friday/2026-10-28-reply-to-joey.md"] + "\n---\n\nMore.\n")
-    assert [(w, short) for w, short, _ in s.actions] == [("Approve", "")]
+    assert [(w, short) for w, short, _, _ in s.actions] == [("Approve", "")]
     assert s.title == "Reply to Joey about column L"
 
 
@@ -722,17 +722,17 @@ def test_a_ticked_sheaf_moved_out_of_waiting_and_back_without_a_new_change_is_wa
                                    "```\n~~~\n- [ ] Approve\n```\n"])
 def test_an_action_inside_a_fence_that_holds_a_shorter_or_other_fence_is_no_action(fence):
     s = the_list.read_sheaf("a/b/c.md", f"# A sheaf\n\n{fence}\n- [ ] Done\n")
-    assert [(w, short) for w, short, _ in s.actions] == [("Done", "")]
+    assert [(w, short) for w, short, _, _ in s.actions] == [("Done", "")]
 
 
 def test_an_action_inside_an_html_comment_is_no_action():
     s = the_list.read_sheaf("a/b/c.md", "# A sheaf\n\n<!--\n- [ ] Approve\n-->\n\n- [ ] Done\n")
-    assert [(w, line) for w, _, line in s.actions] == [("Done", 6)]
+    assert [(w, line) for w, _, line, _ in s.actions] == [("Done", 6)]
 
 
 def test_an_indented_code_line_holding_a_fence_opens_no_fence():
     s = the_list.read_sheaf("a/b/c.md", "# A sheaf\n\n    ```\n\n- [ ] Approve\n")
-    assert [(w, line) for w, _, line in s.actions] == [("Approve", 4)]
+    assert [(w, line) for w, _, line, _ in s.actions] == [("Approve", 4)]
 
 
 def test_a_box_the_render_draws_past_the_blocks_marks_cannot_be_ticked():
@@ -1196,3 +1196,101 @@ def test_a_poll_that_read_a_sheaf_before_a_tick_took_its_row_off_does_not_put_it
     box.hub.the_list.poll()
     listed = "Reply to Joey about column L James" in titles(read(box.get("/list?show=all", member=DORA)))
     assert listed == (issue != "issue:\n")                      # back under #7; with no issue, on no list (9.10)
+
+
+# ── Move to: the eighth word, and the pointer a move leaves (tt-tiroir#211) ──
+
+CLIENT = """
+## Client
+
+The sender writes from dexis.be, which Dexis and Klium share. Which client is this thread for?
+
+- [ ] Move to dexis (ref 18f3a9c2)
+- [ ] Move to klium (ref 18f3a9c2)
+- [ ] Move to thinkingtoo (ref 18f3a9c2)
+"""
+
+
+def test_a_move_to_box_with_its_slug_and_ref_is_an_action_with_the_word_move_to():
+    s = the_list.read_sheaf("a/b/c.md", "# A sheaf\n\n- [ ] Move to klium (ref 18f3a9c2)\n")
+    assert s.actions == (("Move to", "", 2, "klium"),)
+
+
+def test_a_client_section_of_three_boxes_gives_three_actions_in_its_order():
+    s = the_list.read_sheaf("a/b/c.md", "# A sheaf\n" + CLIENT)
+    assert [(w, line, arg) for w, _, line, arg in s.actions] == [
+        ("Move to", 6, "dexis"), ("Move to", 7, "klium"), ("Move to", 8, "thinkingtoo")]
+
+
+def test_a_move_to_the_hub_gave_back_escaped_reads_its_slug_unescaped():
+    s = the_list.read_sheaf("a/b/c.md", "# A sheaf\n\n- [ ] Move to newtrition\\-coach (ref 18f\\_3a)\n")
+    assert [(w, arg) for w, _, _, arg in s.actions] == [("Move to", "newtrition-coach")]
+
+
+@pytest.mark.parametrize("line", ["- [ ] Move to", "- [ ] Move to klium", "- [ ] Move to (ref 18f3a9c2)",
+                                  "- [ ] Move to klium (ref 18f3a9c2) now", "- [ ] Move klium (ref 18f3a9c2)",
+                                  "- [ ] Archive", "- [ ] Undo skip (ref 18f3a9c2)", "- [ ] Approve klium"])
+def test_a_line_with_an_unknown_word_or_a_move_to_without_its_argument_is_still_no_action(line):
+    assert the_list.read_sheaf("a/b/c.md", f"# A sheaf\n\n{line}\n").actions == ()
+
+
+def test_tick_edit_ticks_the_move_to_box_of_its_index():
+    from sheafmd.blocks import split_md_blocks
+    text = "# A sheaf\n" + CLIENT
+    edit = the_list.tick_edit(text, 1, "Move to")
+    block = split_md_blocks(text)[edit["i"]]
+    assert block.kind == "list"
+    assert edit["html"].count("checked") == 1
+    soup = BeautifulSoup(edit["html"], "html.parser")
+    ticked = [" ".join(li.get_text(" ").split()) for li in soup.select("li") if li.find("input", checked=True)]
+    assert ticked == ["Move to klium (ref 18f3a9c2)"]
+    assert the_list.tick_edit(text, 1, "Approve") is None
+
+
+def unsure(sheaves):
+    """Joey's sheaf with the Client section of an unsure thread in place of its Approve."""
+    path = sheaves / JOEY[5:]
+    path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Approve\n", CLIENT.lstrip("\n")), encoding="utf-8")
+    return path
+
+
+def test_a_tick_of_the_second_move_to_ticks_that_box_and_no_other(box, sheaves):
+    path = unsure(sheaves)
+    box.hub.the_list.poll()
+    before = path.read_text(encoding="utf-8")
+    r = box.post("/_/tick", now(box, {"doc": JOEY, "action": 1, "word": "Move to"}), member=NELL)
+    assert r.status == 200, r.text
+    assert path.read_text(encoding="utf-8") == before.replace("- [ ] Move to klium", "- [x] Move to klium")
+
+
+def test_a_row_of_move_to_boxes_names_each_slug_in_its_chip_and_draws_no_box_of_its_own(box, sheaves):
+    unsure(sheaves)
+    box.hub.the_list.poll()
+    res = box.get("/list", member=NELL)
+    assert read(res)["Waiting on you 2"]["globex/black-friday"] == [
+        ("Reply to Joey about column L Move to dexis Move to klium Move to thinkingtoo James", "mail · you · #5 · 2 h")]
+    assert JOEY not in [doc for _, doc, _, _ in boxes(res)]
+
+
+def pointer(sheaves):
+    """Joey's sheaf as the pointer a move leaves: its front matter with `moved_to:`, and one line."""
+    path = sheaves / JOEY[5:]
+    text = path.read_text(encoding="utf-8")
+    head = text[:text.index("---\n", 4)]
+    path.write_text(head + "moved_to: klium/inbox/2026-10-28-reply-to-joey.md\n---\n"
+                    "Moved to `klium/inbox/2026-10-28-reply-to-joey.md` on 2026-10-30.\n", encoding="utf-8")
+
+
+def test_a_sheaf_whose_front_matter_has_moved_to_is_not_a_row(box, sheaves):
+    pointer(sheaves)
+    box.hub.the_list.poll()
+    page = read(box.get("/list", member=NELL))
+    assert "globex/black-friday" not in page["Waiting on you 1"]
+    assert JOEY[5:] not in {r.sheaf.rel for r in box.hub.the_list._snap.rows}
+
+
+def test_a_sheaf_that_became_a_pointer_since_the_poll_leaves_the_page_at_once(box, sheaves):
+    assert "globex/black-friday" in read(box.get("/list", member=NELL))["Waiting on you 2"]
+    pointer(sheaves)
+    page = read(box.get("/list", member=NELL))
+    assert not any("joey" in t.lower() for t in titles(page)), page

@@ -43,7 +43,7 @@ def now() -> str:
 def lock_key(md_path) -> str:
     """First 12 hex of sha1 of the absolute path, links resolved: a link to a .md
     and the .md itself are one document and take one lock."""
-    return hashlib.sha1(str(Path(md_path).resolve()).encode()).hexdigest()[:12]
+    return hashlib.sha1(os.fsencode(Path(md_path).resolve())).hexdigest()[:12]
 
 
 def _lock_path(md_path):

@@ -12,12 +12,14 @@ minute, with no save (#75): a change merged on the remote lands within a minute,
     Author(name, email)          who a commit is by
     Commits(record, guard)       `guard(root, files)`: the locks a writer of `files` holds before the repo's
     Commits.saved(root, rel, author, what)
-    Commits.poll(roots, now)     the watcher's tick: hand each root that pushes to the pusher, once a minute
+    Commits.poll(roots)          the watcher's tick: hand each root that pushes to the pusher, once a minute
     Commits.settle(timeout)      wait until no push is due (a test, a stopping hub)
 """
 import os
+import re
 import subprocess
 import threading
+import time
 from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
@@ -119,6 +121,7 @@ class Commits:
         self._due: dict[Path, tuple] = {}          # root folder -> (the root, the address, whether a write asked)
         self._polled: dict[Path, float] = {}       # root folder -> when the poll last looked at it
         self._told: dict[Path, tuple] = {}         # root folder -> the last row a poll's pull wrote (the pusher's)
+        self._owed: set[Path] = set()              # root folders with a write's push not yet gone (the pusher's)
         self._wake = threading.Condition(self._lock)
         self._pushing = False
         self._thread: threading.Thread | None = None
@@ -216,9 +219,11 @@ class Commits:
         return True
 
     # ── the push ─────────────────────────────────────────────────────────────
-    def poll(self, roots, now: float):
+    def poll(self, roots):
         """The watcher's tick (#75): each root that commits and pushes, once every `FETCH_SECONDS`, goes to the
-        pusher with no write behind it, so what the remote got lands with no save. Never raises for one root."""
+        pusher with no write behind it, so what the remote got lands with no save, and a write's push that failed
+        goes out; nothing else is pushed (a commit or a branch made by hand). Never raises for one root."""
+        now = time.monotonic()                        # not the wall clock: a clock set back would stop the poll
         for root in roots:
             if now - self._polled.get(root.path, float("-inf")) < FETCH_SECONDS:
                 continue
@@ -253,17 +258,21 @@ class Commits:
                 self._pushing = True
             # A write's rows are each written; the poll meets the same cause every minute, and says it once.
             record = self._record if wrote else self._once(folder)
+            if wrote:
+                self._owed.add(folder)                 # until a push of it goes through
             try:
-                go = self._pull(root, address, record)
+                go = self._pull(root, address, record, seconds=PUSH_SECONDS if wrote else GIT_SECONDS)
                 if not go:
                     continue
-                if go is not EVEN:
+                # The poll pushes a write's push that failed, never what a person committed or branched by hand.
+                if go is not EVEN and folder in self._owed:
                     # Not under the repo's lock: a save meanwhile commits, and the next push carries it.
                     r = _git(folder, "push", "-q", "origin", "HEAD", seconds=PUSH_SECONDS)
                     if r.returncode != 0:
                         # The commit stays; the next write's push, or the next poll, carries it.
                         record("push-failed", address, error=_last_line(r))
                         continue
+                self._owed.discard(folder)
                 self._told.pop(folder, None)
             except Exception as e:                     # never a dead thread: a push that never comes is a row
                 record("push-failed", address, error=str(e)[:300] or type(e).__name__)
@@ -276,25 +285,27 @@ class Commits:
         """A `record` that writes a row only when it differs from the last the poll wrote for `folder`: a remote
         that cannot be reached is one row, not one a minute. A pull and push that go through forget it."""
         def record(kind, doc, **detail):
-            said = (kind, detail.get("error"), tuple(detail.get("paths") or ()))
+            # Digits out: git's "after 3012 ms" is the same cause as "after 2987 ms".
+            said = (kind, re.sub(r"\d+", "#", detail.get("error") or ""), tuple(detail.get("paths") or ()))
             if self._told.get(folder) != said:
                 self._told[folder] = said
                 self._record(kind, doc, **detail)
         return record
 
     # ── the pull before it ───────────────────────────────────────────────────
-    def _pull(self, root, address: str, record=None):
+    def _pull(self, root, address: str, record=None, seconds=PUSH_SECONDS):
         """Take in what the remote's branch got that the hub's lacks (#62); whether to push: False, True, or
         `EVEN` when the hub's branch is the remote's (nothing to push). A failed fetch is a `push-failed` row, a
         remote the hub cannot take in a `push-diverged` row: nothing is pushed, and the next write's push, or the
-        next poll, tries again. A branch the remote does not have yet is pushed as it is."""
+        next poll, tries again. A branch the remote does not have yet is pushed as it is. `seconds`: the fetch's
+        time; a poll's is short, so a remote that drops packets holds the one pusher, and a clean stop, no longer."""
         record = record or self._record
         folder = root.path
         branch = _git(folder, "symbolic-ref", "-q", "--short", "HEAD")
         if branch.returncode != 0:
             return True                                # a detached HEAD: the push says what it says
         r = _git(folder, "fetch", "-q", "--no-tags", "origin", f"refs/heads/{branch.stdout.strip()}",
-                 seconds=PUSH_SECONDS)
+                 seconds=seconds)
         if r.returncode != 0:
             if "couldn't find remote ref" in r.stderr:
                 return True

@@ -765,6 +765,30 @@ def test_an_idle_poll_pushes_nothing(box, sheaves, remote, monkeypatch):
             pushes.append(folder)
         return real(folder, *args, **kw)
 
-    monkeypatch.setattr(commits, "_git", spy)
+    seen = fetches(monkeypatch)
     poll(box)
-    assert pushes == []
+    assert len(seen) == 1 and pushes == []
+
+
+def test_a_poll_never_pushes_a_commit_or_a_branch_made_by_hand(box, sheaves, remote, monkeypatch):
+    """The poll takes in the remote; what it pushes is a write's push that failed, never a person's own commit."""
+    from sheafmd.hub import commits
+    (sheaves / "README.md").write_text("# by hand\n", encoding="utf-8")
+    git(sheaves, "add", "README.md")
+    git(sheaves, "commit", "-q", "-m", "by hand")
+    first = git(remote, "rev-parse", "main")
+    poll(box)
+    git(sheaves, "checkout", "-q", "-b", "experiment")
+    monkeypatch.setattr(commits, "FETCH_SECONDS", 0)
+    poll(box)
+    assert git(remote, "rev-parse", "main") == first
+    assert git(remote, "branch", "--list", "experiment") == ""
+
+
+def test_the_polls_row_for_one_cause_is_one_however_its_numbers_move():
+    from sheafmd.hub import commits
+    made = []
+    once = commits.Commits(lambda kind, doc, **detail: made.append(detail))._once("/r")
+    once("push-failed", "r", error="Failed to connect to 127.0.0.1 port 9 after 3012 ms: No route to host")
+    once("push-failed", "r", error="Failed to connect to 127.0.0.1 port 9 after 2987 ms: No route to host")
+    assert len(made) == 1

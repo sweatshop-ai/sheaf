@@ -23,6 +23,7 @@ import _ci
 
 _ci.guard("Linux")
 
+from sheafmd import signals  # noqa: E402
 from sheafmd.hub import service  # noqa: E402  (after the guard: nothing of sheaf is touched on a laptop)
 
 FIELDS = ["ActiveState", "SubState", "MainPID", "NRestarts", "ExecMainStatus", "Result"]
@@ -109,7 +110,7 @@ def checks(port: int):
     first = show()
     sampler = Sampler()
     sampler.start()
-    os.kill(int(first["MainPID"]), signal.SIGKILL)
+    signals.send(int(first["MainPID"]), signal.SIGKILL)          # MainPID=0: no process, refused
     now = hub_back(int(first["NRestarts"]), first["MainPID"])
     sampler.finish()
     _ci.check(now, "the service restarted the hub with another process")
@@ -122,7 +123,7 @@ def checks(port: int):
     sampler = Sampler()
     sampler.start()
     # Not the manager's stop job: a signal from anyone else, which exits 0 and Restart=always starts again.
-    os.kill(int(before["MainPID"]), signal.SIGTERM)
+    signals.send(int(before["MainPID"]), signal.SIGTERM)
     now = hub_back(int(before["NRestarts"]), before["MainPID"])
     sampler.finish()
     _ci.check(now, "the service restarted the hub after a SIGTERM it did not send")

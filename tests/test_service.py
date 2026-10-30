@@ -18,7 +18,7 @@ import time
 import pytest
 
 from helpers import LATE_HUB, gone, is_stopped
-from sheafmd import agent_setup
+from sheafmd import agent_setup, signals
 from sheafmd.hub import service
 from sheafmd.hub import client as hubclient
 from sheafmd.hub import server
@@ -810,11 +810,11 @@ def stop_it(request):
     and answers nothing. At the end of the test it is continued, so that the fixture that started it can
     stop it (a stopped process runs no SIGTERM handler)."""
     def stop(pid):
-        os.kill(pid, signal.SIGSTOP)
+        signals.send(pid, signal.SIGSTOP)
 
         def go_on():
             try:
-                os.kill(pid, signal.SIGCONT)
+                signals.send(pid, signal.SIGCONT)
             except ProcessLookupError:
                 pass
         request.node.addfinalizer(go_on)          # the test's own, not this fixture's: it runs before any fixture ends

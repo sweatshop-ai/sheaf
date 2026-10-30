@@ -126,6 +126,7 @@ src/sheafmd/
   themes/plain/theme.toml, theme.css
   pdf.py                       find_chrome, print_pdf
   diagnostics.py               the diagnostics log
+  signals.py                   the one place a process is signalled, probed or reaped: never a pid that is not one process of this user's (8.4)
   hub/
     server.py                  socket, threads, lifecycle, signals, exit reasons
     sender.py                  who sent the signal that stops the hub (8.4)

@@ -44,6 +44,7 @@ import time
 from pathlib import Path
 from typing import NamedTuple
 
+from .. import signals
 from . import client as hubclient
 from . import server
 
@@ -172,8 +173,8 @@ class HubProcess:
         if not self.running():
             return
         try:
-            os.kill(self.pid, sig)
-        except ProcessLookupError:
+            signals.send(self.pid, sig)
+        except (ProcessLookupError, signals.Refused):
             pass
 
     def _wait(self, seconds: float) -> bool:

@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from helpers import proc_state
+from sheafmd import signals
 
 TOOLS = Path(__file__).resolve().parent.parent / "tools"
 CI = TOOLS / "ci"
@@ -341,7 +342,7 @@ def test_the_conftest_answers_sigusr1_with_the_stacks_of_a_real_pytest_run(tmp_p
         end = time.time() + 30
         while time.time() < end and not (tmp_path / "in").exists():     # the test has started
             time.sleep(0.1)
-        os.kill(p.pid, signal.SIGUSR1)
+        signals.send(p.pid, signal.SIGUSR1)
         end = time.time() + 10
         while time.time() < end and "test_sits_here" not in dump.read_text():
             time.sleep(0.1)

@@ -164,19 +164,25 @@ class Hub:
 
     @contextmanager
     def _writers_out(self, root, files):
-        """Hold what a writer of each of `files` (absolute paths in `root`) holds before the repo's commit lock:
-        the lock of its sheaf's name, where the hub places the root's sheaves, then its file lock (9.11). A pull
-        (8.11, #62) holds it while it changes them, so no write lands between its look at a file and its new text."""
-        top = Path(os.path.realpath(root.path))
+        """Hold what a writer of each of `files` (absolute paths in `root`'s repo) holds before the repo's commit
+        lock: the lock of its sheaf's name, in every root that holds the file and whose sheaves the hub places, then
+        its file lock (9.11). A pull (8.11, #62) holds it while it changes them, so no write lands between its look
+        at a file and its new text. A pull of one root changes the files of every root of its repo, so the names are
+        those of all of them, not of `root` alone, taken in one order, that of their locks' keys: a writer that
+        moves a sheaf of another root holds its name before its files, as the pull does, and the two never wait on
+        each other (#76)."""
         names = set()
-        if place.applies(self, root.name):
+        for r in self.roots.all():
+            if not place.applies(self, r.name):
+                continue
+            top = os.path.realpath(r.path)
             for f in files:
                 rel = os.path.relpath(f, top)
                 if not rel.startswith("..") and (name := place.logical(rel.replace(os.sep, "/"))):
-                    names.add(name)
+                    names.add((top, name, r.name))
         with ExitStack() as held:
-            for name in sorted(names):
-                held.enter_context(place.held(self, f"{root.name}/{name}"))
+            for _, name, at in sorted(names):
+                held.enter_context(place.held(self, f"{at}/{name}"))
             # One lock per file, not per path: a link and its file are one lock, and flock taken twice waits on itself.
             for _, f in sorted({lock_key(f): f for f in files}.items()):
                 held.enter_context(file_lock(f))

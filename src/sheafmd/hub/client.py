@@ -323,7 +323,8 @@ def ended(pid: int) -> bool:
 
 
 def stop_and_explain(c: HubClient, got: dict, reason: str, force: bool = False) -> str:
-    """Ask the hub `got` to stop and wait for it to end, its exit row written. "" when it ended;
+    """Ask the hub `got` to stop and wait for it to end, its exit row written. "" when it ended (its
+    process is gone and nothing answers, or another hub answers, which the service may start at once);
     otherwise a few plain words on what was there when STOP_WAIT ran out: that it refused, that a
     hub still answers (this one or another), that the process it waited for still runs. Never the
     hub's own text. An upgrade stop that is not `force`d (`sheaf restart` forces its own) is
@@ -343,7 +344,9 @@ def stop_and_explain(c: HubClient, got: dict, reason: str, force: bool = False) 
         except Impostor:
             now = None
         alive = pid is not None and not ended(pid)
-        if now is None and not alive:
+        # another hub answering once this one's process is gone is the one the service started in its
+        # place (exit 75, 14.4), which can answer before any silence comes between them
+        if not alive and (now is None or pid is not None and now.get("boot") != got.get("boot")):
             return ""
         seen = [] if now is None else ["still answering" if now.get("boot") == got.get("boot")
                                        else "another hub answers"]

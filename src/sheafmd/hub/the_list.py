@@ -591,7 +591,7 @@ class TheList:
                 '<meta name="viewport" content="width=device-width,initial-scale=1">'
                 f'<title>Actions</title><style>{CSS}</style></head><body>'
                 f'<header><h1>Waiting on you</h1><span class="list-sub">and what is in progress</span></header>'
-                f'<nav class="list-filters">{filters}</nav><p class="list-error" hidden></p><main>{body}</main>'
+                f'<nav class="list-filters">{filters}</nav><p class="list-error" role="alert" hidden></p><main>{body}</main>'
                 f'<script nonce="{nonce}">{SCRIPT}</script></body></html>')
 
     def _now(self, root, row: Row, member, address: str):
@@ -638,10 +638,10 @@ class TheList:
                 # Move to's boxes are the options of one answer, given in the sheaf: no button of their own yet.
                 acts.append(f'<span class="list-chip">{label}</span>')
                 continue
-            kind = "toggle" if word in TOGGLES else "once"
-            acts.append(f'<button type="button" class="list-act {kind}" data-kind="{kind}" aria-pressed="false"'
-                        f' data-doc="{doc}" data-action="{n}" data-word="{html.escape(word)}"'
-                        f' data-hash="{html.escape(s.hash)}">{label}</button>')
+            # A toggle says whether it is pressed; a one-off is a plain button to a screen reader.
+            kind = ('toggle', ' aria-pressed="false"') if word in TOGGLES else ("one-off", "")
+            acts.append(f'<button type="button" class="list-act {kind[0]}"{kind[1]} data-doc="{doc}" data-action="{n}"'
+                        f' data-word="{html.escape(word)}" data-hash="{html.escape(s.hash)}">{label}</button>')
         assistant = f' <span class="list-assistant">{html.escape(s.assistant)}</span>' if s.assistant else ""
         by_login = {m.github.lower(): m for m in self.hub.proxy.members.values() if m.github}
         first = by_login.get(rec.assignees[0].lower()) if rec.assignees else None
@@ -674,33 +674,43 @@ def _age(seconds: float) -> str:
     return f"{seconds // 86400} d"
 
 
-# A press of a row's button shows Undo for UNDO_MS, then posts the action's tick to the hub and reloads the list;
-# Undo in that window sends nothing, and a refusal is said above the rows and gives the button back.
+# A press of a row's button shows Undo for UNDO_MS, then posts the action's tick to the hub; Undo in that window
+# sends nothing. While a press of a row waits or is sent, the row's other buttons cannot be pressed: they name their
+# action by the text the list read, which the tick changes. The list reloads once every press has been answered, so a
+# reload never drops a press still in its window, and a refusal is said above the rows and gives the button back.
 SCRIPT = """
-var UNDO_MS = 5000;
+var UNDO_MS = 5000, open = 0, ticked = false;
+function settled() { if (--open === 0 && ticked) location.reload(); }
 document.querySelectorAll('.list-row button.list-act').forEach(function (b) {
   var word = b.textContent, waiting = null;
+  var others = Array.prototype.filter.call(b.closest('.list-row').querySelectorAll('button.list-act'),
+    function (o) { return o !== b; });
+  function lock(on) { others.forEach(function (o) { o.disabled = on; }); }
   function back() { b.textContent = word; b.classList.remove('pending'); b.removeAttribute('aria-label'); }
   function send() {
     waiting = null;
     back();
     b.disabled = true;
-    b.setAttribute('aria-pressed', 'true');
+    if (b.hasAttribute('aria-pressed')) b.setAttribute('aria-pressed', 'true');
     var said = document.querySelector('.list-error');
     fetch('/_/tick', {method: 'POST', headers: {'Content-Type': 'application/json'}, credentials: 'same-origin',
       body: JSON.stringify({doc: b.dataset.doc, action: Number(b.dataset.action), word: b.dataset.word,
         hash: b.dataset.hash})})
       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) {
-        if (r.ok) { location.reload(); return; }
+        if (r.ok) { ticked = true; return; }
         throw new Error(j.error || ('the hub answered ' + r.status));
       }); })
       .catch(function (e) {
-        b.setAttribute('aria-pressed', 'false'); b.disabled = false;
+        if (b.hasAttribute('aria-pressed')) b.setAttribute('aria-pressed', 'false');
+        b.disabled = false; lock(false);
         said.textContent = e.message; said.hidden = false;
-      });
+      })
+      .then(settled);
   }
   b.addEventListener('click', function () {
-    if (waiting !== null) { clearTimeout(waiting); waiting = null; back(); return; }
+    if (waiting !== null) { clearTimeout(waiting); waiting = null; back(); lock(false); settled(); return; }
+    open++;
+    lock(true);
     b.textContent = 'Undo'; b.classList.add('pending'); b.setAttribute('aria-label', 'Undo ' + word);
     waiting = setTimeout(send, UNDO_MS);
   });
@@ -723,10 +733,10 @@ ul{list-style:none;margin:0;padding:0}
 .list-main{flex:1;min-width:0}
 .list-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start;justify-content:flex-end;max-width:50%}
 .list-act{font:inherit;font-size:13px;border-radius:999px;padding:2px 10px;cursor:pointer;background:none}
-.list-act.once{border:1px solid var(--once);color:var(--once)}
+.list-act.one-off{border:1px solid var(--once);color:var(--once)}
 .list-act.toggle{border:1px solid var(--chip);color:var(--chip)}
-.list-act.toggle[aria-pressed=true]{background:var(--chip);color:var(--bg)}
-.list-act.once[aria-pressed=true],.list-act.pending{background:var(--once);color:var(--bg)}
+.list-act.one-off.pending{background:var(--once);color:var(--bg)}
+.list-act.toggle.pending,.list-act.toggle[aria-pressed=true]{background:var(--chip);color:var(--bg)}
 .list-act:disabled{cursor:default;opacity:.7}
 .list-title{color:var(--fg);text-decoration:none}.list-title:hover{text-decoration:underline}
 .list-chip,.list-assistant{display:inline-block;font-size:12px;border:1px solid var(--chip);color:var(--chip);

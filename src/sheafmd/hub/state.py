@@ -151,8 +151,9 @@ class Versions:
         if self._root is not None:
             paths.private_dir(self._root / INSIDE.parent)   # `.sheaf` itself: never a link out of the root
         folder = paths.private_dir(paths.private_dir(self.dir) / doc_key(self._key(address)))
-        if not (folder / _ADDRESS_FILE).exists():
-            write_text_private(folder / _ADDRESS_FILE, self._key(address))
+        named = folder / _ADDRESS_FILE
+        if named.is_symlink() or not named.exists():    # a link planted there is written over, never kept
+            write_text_private(named, self._key(address))
         return folder
 
     @staticmethod

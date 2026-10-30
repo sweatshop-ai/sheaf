@@ -54,7 +54,7 @@ FOLDER_KEYS = ("stop_dir", "tell_dir", "sessions_dir")
 DEFAULTS = {"api": "https://api.github.com", "poll": 60, "waiting": "Waiting on member",
             "in_progress": "In progress"}
 WORDS = ("Approve", "Run it", "Don't run", "Undo skip", "Done", "Share", "Stop James", "Move to")
-MOVE = "Move to"                # the one word that takes an argument: `<slug> (ref <thread>)`, maybe escaped
+MOVE = "Move to"                # the one word that takes an argument: `<slug> (ref <thread>)`
 SHOWS = {"projects": "My projects", "mine": "Only mine", "all": "All of the team"}
 BATCH = 50                      # issues per GraphQL request
 ITEMS = 100                     # Project items of an issue per page: the most GitHub gives
@@ -64,9 +64,9 @@ HTTP_SECONDS = 20
 _BOX_RE = re.compile(r"[A-Za-z0-9.-]{1,63}")
 _REPO_RE = re.compile(r"[A-Za-z0-9-]+/[A-Za-z0-9._-]+")
 _ISSUE_RE = re.compile(r"([A-Za-z0-9-]+)/([A-Za-z0-9._-]+)#([0-9]+)")
-_ACTION_RE = re.compile(r"\s*[-*+] \[ \] (?:(" + "|".join(re.escape(w).replace("'", "['’]") for w in WORDS if w != MOVE)
-                        + r")|(" + re.escape(MOVE) + r")\s+([A-Za-z0-9._\\-]+)\s+\(ref\s+[^()\s]+\))"
-                        + r"(?:\s+@([A-Za-z0-9._-]+))?\s*")
+_ACTION_RE = re.compile(r"\s*[-*+] \[ \] (?:(?P<word>" + "|".join(re.escape(w).replace("'", "['’]") for w in WORDS if w != MOVE)
+                        + r")|(?P<move>" + re.escape(MOVE) + r")\s+(?P<slug>[A-Za-z0-9._\\-]+)\s+\(ref\s+[^()\s]+\))"
+                        + r"(?:\s+@(?P<short>[A-Za-z0-9._-]+))?\s*")
 
 
 class ListError(Exception):
@@ -202,8 +202,9 @@ def read_sheaf(rel: str, text: str) -> Sheaf:
         elif b.kind == "list":
             for k, line in enumerate(own):
                 if m := _ACTION_RE.fullmatch(line.removesuffix("\r")):
-                    word = (m.group(1) or m.group(2)).replace("’", "'")
-                    actions.append((word, m.group(4) or "", b.start + k, re.sub(r"\\(.)", r"\1", m.group(3) or "")))
+                    # A slug the hub gave back escaped (`newtrition\-coach`) is read as written.
+                    slug = re.sub(r"\\(.)", r"\1", m["slug"] or "")
+                    actions.append(((m["word"] or m["move"]).replace("’", "'"), m["short"] or "", b.start + k, slug))
     return Sheaf(rel, title or rel.rsplit("/", 1)[-1][:-3], issue, fm_text(fm, "assistant"),
                  fm_text(fm, "kind"), visibility.effective(fm), tuple(actions), visibility.sources(fm),
                  fm_text(fm, "owner"), fm_text(fm, "shared"), md_hash(text), "moved_to" in fm)
@@ -646,11 +647,12 @@ class TheList:
             owner = "nobody"
         meta = " · ".join(x for x in (s.kind, owner, f"#{s.issue[2]}", _age(self.hub.clock() - rec.updated)) if x)
         box = ""
-        # Move to's boxes are the options of one answer: the row's box would tick the first unseen, so it has none.
-        if s.actions and s.actions[0][0] != MOVE:
-            word = s.actions[0][0]
+        # Move to's boxes are the options of one answer, given in the sheaf: the row's box ticks its first other action.
+        n = next((n for n, a in enumerate(s.actions) if a[0] != MOVE), None)
+        if n is not None:
+            word = s.actions[n][0]
             box = (f'<input type="checkbox" aria-label="{html.escape(word)}" data-doc="{html.escape(f"{root}/{s.rel}")}"'
-                   f' data-action="0" data-word="{html.escape(word)}" data-hash="{html.escape(s.hash)}">')
+                   f' data-action="{n}" data-word="{html.escape(word)}" data-hash="{html.escape(s.hash)}">')
         href = roots_mod.url_path(f"{root}/{s.rel}")
         return (f'<li class="list-row">{box}<div><a class="list-title" href="{html.escape(href)}">'
                 f'{html.escape(s.title)} {chips}</a><div class="list-meta">{html.escape(meta)}</div></div></li>')

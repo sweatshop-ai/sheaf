@@ -244,11 +244,18 @@ def install(say, make_room=lambda: None, *, install_line):
                            f"service again:\n  {install_line()}\n  sheaf service install")
     if k == "systemd":
         f = unit_path()
-        _write(f, systemd_unit(command, path_env, extra).encode("utf-8"))
+        unit = systemd_unit(command, path_env, extra).encode("utf-8")
+        before = f.read_bytes() if f.is_file() else None
+        _write(f, unit)
         _run([tool, "--user", "daemon-reload"])
         make_room()
         _run([tool, "--user", "enable", "--now", UNIT])
         say(f"  service installed: {f}")
+        if before is not None and before != unit:
+            # `enable --now` leaves a running hub as it is: it keeps the environment it started with
+            # (STOP_EXIT_ENV), so until it starts again its `sheaf stop` exits 0, which the new unit restarts.
+            say("  the unit changed; a hub the service is running takes it when it starts again: "
+                "run `sheaf restart`")
         say(f"  On a remote box, ask the admin for `loginctl enable-linger {getpass.getuser()}` "
             "so the hub keeps running after you log out.")
     else:

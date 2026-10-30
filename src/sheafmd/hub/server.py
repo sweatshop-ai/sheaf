@@ -426,7 +426,8 @@ def _list_refused(e: "the_list.ListError") -> int:
 
 def run(started_by: str = "cli") -> int:
     """Run the hub in the foreground. Exit 0 after a clean stop, 1 when the port is taken or
-    the hub crashed, 75 after an upgrade stop of a hub the service started (SPEC 8.4, 14.4).
+    the hub crashed, 75 after an upgrade stop of a hub the service started, 3 after `sheaf stop`
+    of a hub whose unit says SHEAF_STOP_EXIT=3 (SPEC 8.4, 14.3, 14.4).
     Where the OS gives siginfo, SIGTERM and SIGINT are blocked from here on in every thread and
     one thread takes them, so that the exit row can say who sent the signal (`sender`)."""
     signals = sender.Signals()           # before any thread of the hub, which would inherit the mask

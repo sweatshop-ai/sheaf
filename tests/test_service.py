@@ -276,6 +276,26 @@ def test_install_writes_the_unit_reloads_and_enables_it_now(sheaf, linux, fake, 
     assert "loginctl enable-linger" in r.out and "keeps running after you log out" in r.out
 
 
+def test_install_over_a_unit_that_differs_says_the_running_hub_takes_it_at_its_next_start(
+        sheaf, linux, fake, unit_file):
+    """#79: a hub the service runs keeps the environment it started with, so under the new unit its
+    `sheaf stop` would exit 0 and be restarted until it starts again. Install says how to apply it."""
+    unit_file.parent.mkdir(parents=True)
+    unit_file.write_text(SPEC_UNIT.replace("Restart=always\nRestartPreventExitStatus=3\nSuccessExitStatus=3\n",
+                                           "Restart=on-failure\n"))
+    r = sheaf("service", "install")
+    assert r.code == 0, r.err
+    assert "RestartPreventExitStatus=3" in unit_file.read_text()
+    assert "run `sheaf restart`" in r.out
+    again = sheaf("service", "install")                        # the same unit: nothing to apply
+    assert again.code == 0 and "sheaf restart" not in again.out
+
+
+def test_a_first_install_says_nothing_about_a_restart(sheaf, linux, fake, unit_file):
+    r = sheaf("service", "install")
+    assert r.code == 0 and "sheaf restart" not in r.out
+
+
 def test_install_honours_xdg_config_home(sheaf, linux, fake, tmp_path, monkeypatch):
     cfg = tmp_path / "xdg-config"
     monkeypatch.setenv("XDG_CONFIG_HOME", str(cfg))

@@ -13,7 +13,7 @@ import urllib.request
 import pytest
 
 from helpers import gone, hub_rows, key, stranger
-from sheafmd import diagnostics
+from sheafmd import diagnostics, signals
 from sheafmd.hub import sender, server
 from sheafmd.hub.jobs import Job, Jobs
 
@@ -255,10 +255,64 @@ def signalled_by_a_known_process(port, name):
 def test_the_exit_row_of_a_signal_names_the_signal_and_who_sent_it(port, name):
     row, killer = signalled_by_a_known_process(port, name)
     assert row["signal"] == name
-    assert row["sender_pid"] == killer.pid
+    assert row["sender_pid"] == killer.pid and row["sender_uid"] == os.getuid()
     # /proc/<pid>/cmdline is NUL-separated; the row holds it with spaces, whole
     assert row["sender_cmdline"] == " ".join([sys.executable, "-c", SENDER, str(row["pid"]), name])
     assert row["sender_cmdline"].startswith(f"{sys.executable} -c import os, signal")
+
+
+def siginfo(signo, code=0, pid=0, uid=0):
+    return signal.struct_siginfo((signo, code, 0, pid, uid, 0, 0))
+
+
+def test_a_siginfo_that_names_no_stopping_signal_is_written_as_its_raw_numbers():
+    """The row of sheaf#78 said `"signal": "-1532110032", "sender_pid": 443239200`: no signal, and
+    a pid above pid_max. A siginfo that names neither SIGTERM nor SIGINT is no sender to name."""
+    row = sender.who(siginfo(-1532110032, code=-1532110000, pid=443239200, uid=7))
+    assert row == {"signal": "unknown",
+                   "raw": {"si_signo": -1532110032, "si_code": -1532110000, "si_pid": 443239200, "si_uid": 7}}
+
+
+def test_the_watcher_takes_only_a_stopping_signal_and_logs_the_rest(monkeypatch):
+    """CPython's sigtimedwait, interrupted (EINTR) once its deadline has passed, returns the
+    siginfo it never filled in instead of None (sheaf#78). The hub stopped on it."""
+    waits = iter([siginfo(-1532110032, pid=443239200), None, siginfo(signal.SIGTERM, pid=4242, uid=995)])
+    held = sender.Signals.__new__(sender.Signals)
+    held._done = threading.Event()
+    delivered = []
+
+    def fake_wait(sigset, timeout):
+        info = next(waits)
+        if info is not None and info.si_signo == signal.SIGTERM:
+            held._done.set()
+        return info
+    monkeypatch.setattr(sender.signal, "sigtimedwait", fake_wait)
+    held._wait(lambda signum, fields: delivered.append((signum, fields)))
+    assert delivered == [(signal.SIGTERM, {"signal": "SIGTERM", "sender_pid": 4242, "sender_uid": 995})]
+    row, = hub_rows("signal-unread")
+    assert row["raw"] == {"si_signo": -1532110032, "si_code": 0, "si_pid": 443239200, "si_uid": 0}
+
+
+@pytest.mark.skipif(not LINUX_SIGINFO, reason="the signals are taken with sigtimedwait where the OS gives siginfo")
+def test_a_hub_that_is_stopped_and_continued_keeps_running(port):
+    """A stop and SIGCONT (a debugger, a freezer, kill -STOP) interrupt sigtimedwait; past its
+    deadline that gave the siginfo nobody filled in, and the hub exited as if signalled (sheaf#78)."""
+    hub = run_hub("--started-by", "cli")
+    try:
+        wait_alive(port)
+        for _ in range(3):
+            signals.send(hub.pid, signal.SIGSTOP)
+            time.sleep(4 * sender.POLL)
+            signals.send(hub.pid, signal.SIGCONT)
+            time.sleep(2 * sender.POLL)
+        assert hub.poll() is None and alive(port)
+        assert not hub_rows("hub-exit")
+        assert hub_rows("signal-unread")
+    finally:
+        hub.terminate()
+        hub.wait(timeout=30)
+    row, = hub_rows("hub-exit")
+    assert row["signal"] == "SIGTERM"
 
 
 @pytest.mark.skipif(LINUX_SIGINFO, reason="this platform gives the sender")

@@ -87,7 +87,7 @@ class Hub:
         self.roots = roots_mod.Roots()
         self.roots.placer = lambda root, rel: place.physical(self, root, rel)
         self.versions = state.Versions()
-        self.commits = Commits(self.record, self._writers_out)   # the roots that commit (8.11)
+        self.commits = Commits(self.record, self._writers_out, self.roots.all)   # the roots that commit (8.11)
         self._told_projects: set = set()         # what check_projects warned of this run (8.12)
         self._projects: dict = {}                # root id -> (stat key, entries | Invalid | None) of its projects.toml
         self._grants_seen: dict = {}             # root id -> the projects_of answer the open tabs were last told (8.12)

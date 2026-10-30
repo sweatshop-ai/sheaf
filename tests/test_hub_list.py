@@ -1115,7 +1115,7 @@ def test_a_sheaf_whose_issue_is_assigned_outside_its_project_embeds_none_of_its_
 
 def test_renders_that_ask_the_list_for_owners_and_a_poll_that_drops_a_row_all_finish(box, sheaves, github):
     """`_build` judges the images by the owners, so a render asks `the_list.assignees` under the document's lock,
-    which takes the name's lock and `_gone_lock` (#81, #91). Renders of a list sheaf beside a poll and asks that
+    which takes the name's lock and `_off_lock` (#81, #91). Renders of a list sheaf beside a poll and asks that
     drop the row of a file gone since all finish, with no deadlock and no exception."""
     joey_with_a_figure(sheaves)
     assert box.get(f"/{JOEY}", member=NELL).status == 200
@@ -1169,3 +1169,30 @@ def test_renders_that_ask_the_list_for_owners_and_a_poll_that_drops_a_row_all_fi
     assert not any(t.is_alive() for t in threads), "a render or the poll is stuck: a deadlock"
     assert errors == []
     assert "data:image/png" in e.html
+
+
+@pytest.mark.parametrize("issue", ["issue:\n", "issue: acme/record#7\n"], ids=["removed", "changed"])
+def test_a_poll_that_read_a_sheaf_before_a_tick_took_its_row_off_does_not_put_it_back(
+        box, sheaves, github, monkeypatch, issue):
+    """#27 (2): the file loses its issue and a member ticks while a poll that read it asks GitHub; the snapshot
+    that poll publishes holds no row of the issue the sheaf no longer names, until the next poll."""
+    github.issues[5].update(status="In progress at TT")         # drawn, not left out as answered
+    box.hub.the_list.poll()
+    joey = sheaves / JOEY[5:]
+    fetch = the_list.fetch
+
+    def meanwhile(cfg, wanted):
+        joey.write_text(joey.read_text(encoding="utf-8").replace("issue: acme/record#5\n", issue), encoding="utf-8")
+        r = box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Approve"}), member=NELL)
+        assert r.status == 200, r.text
+        assert JOEY[5:] not in {r.sheaf.rel for r in box.hub.the_list._snap.rows}    # the tick took it off
+        return fetch(cfg, wanted)
+    monkeypatch.setattr(the_list, "fetch", meanwhile)
+    box.hub.the_list.poll()
+    monkeypatch.setattr(the_list, "fetch", fetch)
+    for m in (NELL, DORA):
+        assert "Reply to Joey about column L James" not in titles(read(box.get("/list?show=all", member=m)))
+    assert JOEY[5:] not in {r.sheaf.rel for r in box.hub.the_list._snap.rows}
+    box.hub.the_list.poll()
+    listed = "Reply to Joey about column L James" in titles(read(box.get("/list?show=all", member=DORA)))
+    assert listed == (issue != "issue:\n")                      # back under #7; with no issue, on no list (9.10)

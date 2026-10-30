@@ -2625,13 +2625,16 @@ def keep_on_disk(tab, *entries):
 
 
 def test_a_reply_kept_after_the_hub_took_it_is_cleared_when_the_page_loads(thread):
+    # The write is made with the tab closed, as the miss it stands for. A page open over it races the
+    # test: the `/_/doc` check of its stream's hello, answering after the write, reloads it under the
+    # test's own reload (#68).
     live = thread.site.hub.entry(DOC).live
     (c,) = rdc.parse(thread.site.file.read_text()).comments
-    live.comment("reply", {"id": c.id, "body": MISSED}, "", rid=MISSED_RID)
     keep_on_disk(thread, {"thread": c.id, "born": c.at, "about": c.quote, "kind": "reply", "body": MISSED,
                           "rid": MISSED_RID, "at": "2026-10-22T10:00:00.000Z"})
-    thread.page.reload()
-    thread.page.wait_for_selector("#rd-menu-btn", state="attached")
+    thread.page.goto("about:blank")
+    live.comment("reply", {"id": c.id, "body": MISSED}, "", rid=MISSED_RID)
+    thread.open()
     until(lambda: MISSED not in comment_store(thread), what="the kept reply to leave localStorage")
     thread.page.click(".rd-badge")
     thread.page.wait_for_selector("#rd-popover button[data-a=reply]")

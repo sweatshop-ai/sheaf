@@ -648,3 +648,18 @@ def test_an_outside_owner_added_to_the_project_gets_its_images_at_the_next_load(
     assert "data:image/png" in front.get("/work/acme/blog/pic.md").text
     toml.write_text(PROJECTS, encoding="utf-8")
     assert "data:image/png" not in front.get("/work/acme/blog/pic.md").text
+
+
+def test_an_entry_whose_root_was_forgotten_is_built_again_once_not_at_every_catch_up(front, plan, granted, work,
+                                                                                     monkeypatch):
+    """Its image scope goes from the root's to none: one build takes that in, and the next catch-ups find nothing
+    moved (a gate P3 on 4272c2f)."""
+    from sheafmd.hub import live
+    project_page(front, work, "acme/blog/pic.md", "fig.png")
+    e = front.hub.entries["work/acme/blog/pic.md"]
+    builds, real = [], live.LiveDocument.rebuild
+    monkeypatch.setattr(live.LiveDocument, "rebuild", lambda self: builds.append(1) or real(self))
+    front.hub.roots.forget("work")
+    for _ in range(3):
+        front.hub.catch_up(e)
+    assert len(builds) <= 1 and e.images_scope is None

@@ -200,6 +200,20 @@ def test_on_macos_the_uid_is_read_with_local_peercred():
         assert proxy.peer(Conn()).uid == 4242
 
 
+def test_on_macos_an_xucred_of_another_version_gives_no_uid():
+    import struct
+    from sheafmd.hub import proxy
+
+    class Conn:
+        def getsockopt(self, level, name, size):
+            return struct.pack("@IIh16I", 1, 4242, 1, 20, *[0] * 15)
+    with pytest.MonkeyPatch.context() as mp:
+        mp.delattr(socket, "SO_PEERCRED", raising=False)
+        mp.setattr(socket, "LOCAL_PEERCRED", 1, raising=False)
+        with pytest.raises(OSError, match="version 1"):
+            proxy.peer(Conn())
+
+
 def test_the_uid_of_a_real_connection_is_this_users():
     from sheafmd.hub import proxy
     a, b = socket.socketpair(socket.AF_UNIX)

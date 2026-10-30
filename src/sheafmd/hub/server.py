@@ -23,7 +23,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .. import __version__, config, diagnostics, paths
 from ..source import STAMP_FORMAT
-from . import peer, proxy, sender, state, the_list
+from . import peer, proxy, sender, service, state, the_list
 from .client import STOPPING
 from .core import Hub
 from .events import KEEPALIVE, KEEPALIVE_SECONDS, PREAMBLE, frame
@@ -34,6 +34,7 @@ TICK_SECONDS = 1.0
 WAIT_SLICE = 0.25
 ENDS_STREAM = ("hub-stopping", "signed-out", "gone")   # the last event a tab gets on this stream
 EXIT_UPGRADE = 75                     # sysexits EX_TEMPFAIL: the service manager starts the new code
+EXIT_STOPPED = service.EXIT_STOPPED   # `sheaf stop` of a hub whose unit says it leaves that down (#79)
 IDLE_SECONDS = 60.0              # a connection that is silent for this long, between requests or inside a head, is closed
 BODY_SECONDS = 30.0              # all of a body, from the moment the caller has been checked
 LINGER_SECONDS = 0.5             # what a refused caller's unread body gets to arrive and be dropped
@@ -396,11 +397,19 @@ def note_unclean_exit(port: int):
 
 def exit_code(hub: Hub) -> int:
     """What a hub that was asked to stop exits with. An upgrade stop under the service ends with a
-    code that is a failure to the service manager, so Restart=on-failure and
+    code that is a failure to the service manager, so Restart=always and
     KeepAlive.SuccessfulExit=false start the new code (14.4). A restart the service manager itself
-    asked for (`told_restart`) is not a failure to it, and a stop that is not an upgrade ends the hub."""
+    asked for (`told_restart`) exits 0, and the manager starts it, as it asked to. A signal exits 0:
+    `systemctl stop` is never restarted, and any other signal is (#79). `sheaf stop` of a hub whose
+    unit names EXIT_STOPPED in STOP_EXIT_ENV exits with it, the one exit that unit leaves down. Any
+    other manager is not told: a unit of an older sheaf (`Restart=on-failure`) would restart it, and
+    launchd has no per-code rule. There the stop exits 0, which both leave down."""
     reason = hub.stop_requested or "stop"
-    return EXIT_UPGRADE if reason == "upgrade" and hub.service and not hub.told_restart else 0
+    if reason == "upgrade" and hub.service and not hub.told_restart:
+        return EXIT_UPGRADE
+    if reason == "stop" and hub.service and os.environ.get(service.STOP_EXIT_ENV) == str(EXIT_STOPPED):
+        return EXIT_STOPPED
+    return 0
 
 
 def _proxy_refused(e: "proxy.ProxyError") -> int:
@@ -417,7 +426,8 @@ def _list_refused(e: "the_list.ListError") -> int:
 
 def run(started_by: str = "cli") -> int:
     """Run the hub in the foreground. Exit 0 after a clean stop, 1 when the port is taken or
-    the hub crashed, 75 after an upgrade stop of a hub the service started (SPEC 8.4, 14.4).
+    the hub crashed, 75 after an upgrade stop of a hub the service started, 3 after `sheaf stop`
+    of a hub whose unit says SHEAF_STOP_EXIT=3 (SPEC 8.4, 14.3, 14.4).
     Where the OS gives siginfo, SIGTERM and SIGINT are blocked from here on in every thread and
     one thread takes them, so that the exit row can say who sent the signal (`sender`)."""
     signals = sender.Signals()           # before any thread of the hub, which would inherit the mask

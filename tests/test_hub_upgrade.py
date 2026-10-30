@@ -3,8 +3,9 @@ busy one is left alone, an older command only says so. Under the service the hub
 supervisor starts the new code; without it the hub exits 0 and the command starts the new one.
 
 The hubs are real `python -m sheafmd hub` processes whose version is patched before the package
-is used, so "the hub is older" needs no second install. systemd is not here: `supervise` does
-what `Restart=on-failure` does, so the exit code is what is under test."""
+is used, so "the hub is older" needs no second install. systemd is not here: `Supervisor` does
+what `Restart=always` with `RestartPreventExitStatus` does, so the exit code is what is under test."""
+import os
 import signal
 import subprocess
 import sys
@@ -16,7 +17,7 @@ import pytest
 from helpers import gone, hub_rows, start_late_hub
 from sheafmd import __version__, cli, paths
 from sheafmd.hub import client as hubclient
-from sheafmd.hub import jobs, server, state
+from sheafmd.hub import jobs, server, service, state
 from sheafmd.hub.core import Hub
 
 OLD = "0.0.1"
@@ -32,16 +33,22 @@ def start_old_hub(started_by, version=OLD):
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
 
-def start_hub(started_by):
+def start_hub(started_by, env=None):
     return subprocess.Popen([sys.executable, "-m", "sheafmd", "hub", "--started-by", started_by],
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+
+
+def unit_env():
+    """The environment the unit of 14.3 gives the hub: it names the exit it leaves down."""
+    return {**os.environ, service.STOP_EXIT_ENV: str(server.EXIT_STOPPED)}
 
 
 class Supervisor:
-    """`Restart=on-failure`: when the hub it runs exits with a code other than 0, run the hub
-    again, now on this code. A hub that exits 0 is left stopped."""
+    """`Restart=always` and `RestartPreventExitStatus=<EXIT_STOPPED>`: when the hub it runs exits with
+    any other code, run the hub again, now on this code. A hub stopped on purpose is left stopped."""
 
-    def __init__(self, first):
+    def __init__(self, first, env=None):
+        self.env = env
         self.procs = [first]
         self.codes: list[int] = []
         self.over = threading.Event()        # the test has ended: the hub it runs is stopped, not crashed
@@ -51,8 +58,8 @@ class Supervisor:
     def _watch(self):
         code = self.procs[-1].wait()
         self.codes.append(code)
-        if code != 0 and not self.over.is_set():
-            self.procs.append(start_hub("service"))
+        if code != server.EXIT_STOPPED and not self.over.is_set():
+            self.procs.append(start_hub("service", self.env))
 
     def stop(self):
         self.over.set()                      # from here a hub that ends is stopped, not crashed
@@ -221,19 +228,119 @@ def test_an_upgrade_stop_alone_of_a_service_hub_exits_75(port, work):
     assert server.exit_code(hub) == server.EXIT_UPGRADE
 
 
-@pytest.mark.parametrize("first", ["stop", "signal"])
-def test_a_stop_that_was_under_way_when_an_upgrade_stop_came_exits_0_so_the_service_leaves_it_stopped(
-        port, work, first):
+@pytest.mark.parametrize("first, code", [("stop", server.EXIT_STOPPED), ("signal", 0)])
+def test_a_stop_that_was_under_way_when_an_upgrade_stop_came_keeps_its_own_exit(port, work, monkeypatch, first, code):
+    """The stop stays a stop: the service leaves it stopped. The signal stays a signal: `systemctl stop`
+    is never restarted, and any other signal is (#79)."""
+    monkeypatch.setenv(service.STOP_EXIT_ENV, str(server.EXIT_STOPPED))
     hub = service_hub(port)
     hub.request_stop(first)
     assert hub.request_stop("upgrade") is True
-    assert hub.stop_requested == first and server.exit_code(hub) == 0
+    assert hub.stop_requested == first and server.exit_code(hub) == code
 
 
-def test_a_stop_that_comes_while_an_upgrade_stop_is_being_taken_is_not_overwritten_by_it(port, work):
+# ── a deliberate stop under the unit of 14.3 has its own exit, which the unit does not restart (#79) ──
+
+def test_a_deliberate_stop_of_a_service_hub_under_the_unit_exits_with_its_own_code(port, work, monkeypatch):
+    monkeypatch.setenv(service.STOP_EXIT_ENV, str(server.EXIT_STOPPED))
+    hub = service_hub(port)
+    hub.request_stop("stop")
+    assert server.exit_code(hub) == server.EXIT_STOPPED
+
+
+def test_a_signal_that_comes_after_a_deliberate_stop_keeps_the_stop(port, work, monkeypatch):
+    """Under Restart=always a signal exits 0 and is restarted: one that lands while the hub ends a
+    `sheaf stop` must not bring back the hub the person stopped (gate P3)."""
+    monkeypatch.setenv(service.STOP_EXIT_ENV, str(server.EXIT_STOPPED))
+    hub = service_hub(port)
+    seen = []
+    hub.on_stop = seen.append
+    hub.request_stop("stop")
+    assert hub.request_stop("signal") is True
+    assert hub.stop_requested == "stop" and seen == ["stop"]
+    assert server.exit_code(hub) == server.EXIT_STOPPED
+
+
+def test_a_stop_that_comes_after_a_signal_wins_so_the_person_s_stop_stays_down(port, work, monkeypatch):
+    """A stray signal began the end and `sheaf stop` came in its window: the person asked for a stop,
+    and `cmd_stop` says "hub stopped", so the exit is the one the unit leaves down (gate round 2, P3)."""
+    monkeypatch.setenv(service.STOP_EXIT_ENV, str(server.EXIT_STOPPED))
+    hub = service_hub(port)
+    hub.request_stop("signal")
+    assert hub.request_stop("stop") is True
+    assert hub.stop_requested == "stop" and server.exit_code(hub) == server.EXIT_STOPPED
+
+
+def test_a_second_signal_keeps_the_first(port, work):
+    hub = service_hub(port)
+    seen = []
+    hub.on_stop = seen.append
+    hub.request_stop("signal")
+    hub.request_stop("signal")
+    assert hub.stop_requested == "signal" and seen == ["signal"]
+
+
+def test_a_signal_to_a_service_hub_exits_0_so_restart_always_starts_it_again(port, work, monkeypatch):
+    monkeypatch.setenv(service.STOP_EXIT_ENV, str(server.EXIT_STOPPED))
+    hub = service_hub(port)
+    hub.request_stop("signal")
+    assert server.exit_code(hub) == 0
+
+
+@pytest.mark.parametrize("said", [None, "", "1", "75", "0"])
+def test_a_deliberate_stop_under_a_unit_that_does_not_say_the_code_exits_0(port, work, monkeypatch, said):
+    """A unit of an older sheaf (`Restart=on-failure`) would restart a 3, and launchd's
+    `KeepAlive {SuccessfulExit: false}` restarts every exit but 0: neither carries the line, so the
+    stop exits 0 there, which both leave down. Only the code the unit names is taken."""
+    if said is None:
+        monkeypatch.delenv(service.STOP_EXIT_ENV, raising=False)
+    else:
+        monkeypatch.setenv(service.STOP_EXIT_ENV, said)
+    hub = service_hub(port)
+    hub.request_stop("stop")
+    assert server.exit_code(hub) == 0
+
+
+def test_a_deliberate_stop_of_a_hub_the_service_did_not_start_exits_0(port, work, monkeypatch):
+    monkeypatch.setenv(service.STOP_EXIT_ENV, str(server.EXIT_STOPPED))
+    hub = Hub(port=port, key=paths.ensure_key(), started_by="cli", service=False)
+    hub.request_stop("stop")
+    assert server.exit_code(hub) == 0
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="systemd's rule: Linux")
+def test_sheaf_stop_of_a_service_hub_exits_stopped_and_the_supervisor_leaves_it_down(port, procs):
+    hub = start_hub("service", unit_env())
+    sup = Supervisor(hub, unit_env())
+    procs.extend([hub, sup])
+    wait_health(port)
+    assert cli.main(["stop"]) == 0
+    assert hub.wait(timeout=30) == server.EXIT_STOPPED
+    time.sleep(0.5)
+    assert sup.codes == [server.EXIT_STOPPED] and sup.procs == [hub]
+    assert [r["reason"] for r in hub_rows("hub-exit")] == ["stop"]
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="systemd's rule: Linux")
+def test_a_stray_sigterm_to_a_service_hub_is_restarted(port, procs):
+    """2026-10-30 on tiroir-tt: a signal from a sender nobody knows stopped the hub, it exited 0 and
+    Restart=on-failure left it down."""
+    hub = start_hub("service", unit_env())
+    sup = Supervisor(hub, unit_env())
+    procs.extend([hub, sup])
+    first = wait_health(port)
+    hub.send_signal(signal.SIGTERM)
+    assert hub.wait(timeout=30) == 0
+    again = wait_health(port, boot_not=first["boot"], seconds=20)
+    procs.extend(sup.procs[1:])
+    assert again["service"] is True and sup.codes == [0]
+
+
+def test_a_stop_that_comes_while_an_upgrade_stop_is_being_taken_is_not_overwritten_by_it(port, work, monkeypatch):
     """The upgrade stop has looked at `stop_requested` and is in the busy check when a stop comes
     from another thread (a request, or the signal handler): the stop waits for it, and ends the
     hub for good after it. Without one lock for both the later write would be the upgrade's."""
+    monkeypatch.setenv(service.STOP_EXIT_ENV, str(server.EXIT_STOPPED))
     hub = service_hub(port)
     seen = []
     hub.on_stop = seen.append
@@ -248,7 +355,7 @@ def test_a_stop_that_comes_while_an_upgrade_stop_is_being_taken_is_not_overwritt
     assert hub.request_stop("upgrade", force=False) is True
     other.join(5)
     assert hub.stop_requested == "stop" and seen == ["upgrade", "stop"]
-    assert server.exit_code(hub) == 0
+    assert server.exit_code(hub) == server.EXIT_STOPPED
 
 
 def test_a_second_signal_that_interrupts_the_first_inside_the_admit_lock_does_not_hang_the_hub(port, work):

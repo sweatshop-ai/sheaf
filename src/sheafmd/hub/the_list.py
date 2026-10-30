@@ -21,6 +21,7 @@ The record is read as the GitHub App the deployment installs: the hub reads an i
 `token_file` at every poll and never mints one, so the App's key stays where the hub cannot read it.
 """
 import calendar
+import collections
 import contextlib
 import html
 import itertools
@@ -65,7 +66,7 @@ HTTP_SECONDS = 20
 _BOX_RE = re.compile(r"[A-Za-z0-9.-]{1,63}")
 _REPO_RE = re.compile(r"[A-Za-z0-9-]+/[A-Za-z0-9._-]+")
 _ISSUE_RE = re.compile(r"([A-Za-z0-9-]+)/([A-Za-z0-9._-]+)#([0-9]+)")
-_ACTION_RE = re.compile(r"\s*[-*+] \[ \] (?:(?P<word>" + "|".join(re.escape(w).replace("'", "['’]") for w in WORDS if w != MOVE)
+_ACTION_RE = re.compile(r"\s*[-*+] \[(?P<mark>[ xX])\] (?:(?P<word>" + "|".join(re.escape(w).replace("'", "['’]") for w in WORDS if w != MOVE)
                         + r")|(?P<move>" + re.escape(MOVE) + r")\s+(?P<slug>[A-Za-z0-9._\\-]+)\s+\(ref\s+[^()\s]+\))"
                         + r"(?:\s+@(?P<short>[A-Za-z0-9._-]+))?\s*")
 
@@ -202,13 +203,38 @@ def read_sheaf(rel: str, text: str) -> Sheaf:
             title = own[0][2:].strip()
         elif b.kind == "list":
             for k, line in enumerate(own):
-                if m := _ACTION_RE.fullmatch(line.removesuffix("\r")):
+                if (m := _ACTION_RE.fullmatch(line.removesuffix("\r"))) and m["mark"] == " ":
                     # A slug the hub gave back escaped (`newtrition\-coach`) is read as written.
                     slug = re.sub(r"\\(.)", r"\1", m["slug"] or "")
                     actions.append(((m["word"] or m["move"]).replace("’", "'"), m["short"] or "", b.start + k, slug))
     return Sheaf(rel, title or rel.rsplit("/", 1)[-1][:-3], issue, fm_text(fm, "assistant"),
                  fm_text(fm, "kind"), visibility.effective(fm), tuple(actions), visibility.sources(fm),
                  fm_text(fm, "owner"), fm_text(fm, "shared"), md_hash(text), "moved_to" in fm)
+
+
+def unticks_one_off(old: str, new: str) -> str | None:
+    """The word of a one-off action (every word but the toggles) whose ticked box writing `new` over `old` turns
+    back to `[ ]`, by whatever edit (9.10, #108): one action, its word, short name and Move to's slug alike, has
+    fewer ticked boxes in `new` than in `old` and more unticked ones. None when there is none: a ticked box taken
+    out, or another action written in its place, unticks nothing. Boxes are read in the list blocks the page
+    draws, as the actions are."""
+    was, now = _boxes(old), _boxes(new)
+    for (action, mark), n in was.items():
+        if mark == "x" and action[0] not in TOGGLES and now[action, "x"] < n and now[action, " "] > was[action, " "]:
+            return action[0]
+    return None
+
+
+def _boxes(text: str) -> collections.Counter:
+    """How many boxes of each action `text` holds, ticked ("x") or not (" "): {((word, short, slug), mark): n}."""
+    counts = collections.Counter()
+    for b in split_md_blocks(text):
+        if b.kind == "list":
+            for line in b.content.removesuffix("\n").split("\n"):
+                if m := _ACTION_RE.fullmatch(line.removesuffix("\r")):
+                    action = ((m["word"] or m["move"]).replace("’", "'"), m["short"] or "", re.sub(r"\\(.)", r"\1", m["slug"] or ""))
+                    counts[action, m["mark"].lower()] += 1
+    return counts
 
 
 def tick_edit(text: str, n: int, word: str):

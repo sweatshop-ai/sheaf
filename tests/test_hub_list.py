@@ -251,6 +251,18 @@ def test_all_of_the_team_leaves_out_the_projects_a_member_is_not_in(box):
         ("Reply to Joey about column L Approve James", "mail · you · #5 · 2 h")]
 
 
+def test_my_projects_reads_projects_toml_as_it_is_now_not_as_the_last_poll_read_it(box, sheaves):
+    """My projects judges by the file the hub grants by (8.12, #53): a member just added to a project has its rows
+    there at their next request, as All of the team has, and one just taken off has them no more."""
+    toml = sheaves / "projects.toml"
+    toml.write_text(toml.read_text(encoding="utf-8").replace('members = ["nell"]', 'members = ["nell", "dora"]'),
+                    encoding="utf-8")
+    assert "globex/black-friday" in read(box.get("/list", member=DORA))["Waiting on you 2"]
+    toml.write_text(toml.read_text(encoding="utf-8").replace('members = ["nell", "dora"]', 'members = ["dora"]', 1),
+                    encoding="utf-8")
+    assert "globex/black-friday" not in read(box.get("/list", member=NELL))["Waiting on you 1"]
+
+
 def test_all_of_the_team_leaves_out_a_sheaf_with_a_private_source_for_all_but_its_owner(box, sheaves):
     joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
     joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n", "sources: [library:4711]\n"),

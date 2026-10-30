@@ -695,7 +695,10 @@ def test_an_owner_only_sheaf_in_its_owners_private_folder_has_work_at_its_name(t
     assert ("attach" in w) is attach
     assert download(team, member=member).body == TRANSCRIPT
     other = HANS if member == THIERRY else THIERRY
-    assert team.get(f"/{ADDRESS}", member=other).status == 404
+    assert team.get(f"/{ADDRESS}", member=other).status == download(team, member=other).status == 404
+    # The fork report writes the private file and makes no shared copy, which the project would read.
+    assert fork(team, as_=member).status == 200
+    assert not (work / DOC).exists() and FORK in (work / client / project / "private" / owner / name).read_text()
 
 
 # ── the /_/doc answer (10.5): the same work and can as the meta block ────────

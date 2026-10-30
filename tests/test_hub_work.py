@@ -680,6 +680,24 @@ def test_a_page_that_is_not_a_sheaf_of_the_list_has_no_work(team, box, work):
     assert "work" not in meta(team, doc="plan.md")
 
 
+@pytest.mark.parametrize("owner, member, attach", [("thierry", THIERRY, True), ("hans", HANS, False)])
+def test_an_owner_only_sheaf_in_its_owners_private_folder_has_work_at_its_name(team, box, work, owner, member,
+                                                                              attach):
+    # 9.11: the file lives at <client>/<project>/private/<short>/, but the sheaf's address stays its name, so its
+    # owner gets Work on this as on a project sheaf: the fork, and the attach only with a shell.
+    (work / DOC).unlink()
+    client, project, name = DOC.split("/")
+    put(team, work, f"{client}/{project}/private/{owner}/{name}",
+        SHEAF.replace("owner: thierry", f"owner: {owner}").replace("sources: [issue:thinkingtoo/tt-tiroir#8]",
+                                                                   "sources: [library:doc-1]"))
+    w = meta(team, member)["work"]
+    assert w["fork"] == f"uvx --from {work_mod.FORK_CLIENT} tiroir work {FRONT}/{ADDRESS}" and w["live"] == "box"
+    assert ("attach" in w) is attach
+    assert download(team, member=member).body == TRANSCRIPT
+    other = HANS if member == THIERRY else THIERRY
+    assert team.get(f"/{ADDRESS}", member=other).status == 404
+
+
 # ── the /_/doc answer (10.5): the same work and can as the meta block ────────
 
 def doc_answer(team, member=HANS, doc=ADDRESS):

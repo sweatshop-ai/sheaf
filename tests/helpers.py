@@ -19,7 +19,7 @@ from pathlib import Path
 import pypandoc
 
 import sheafmd.comments as rdc
-from sheafmd import config, diagnostics, paths
+from sheafmd import config, diagnostics, paths, signals
 from sheafmd.source import update_file
 
 NOW = time.time()
@@ -52,12 +52,8 @@ def proc_state(pid: int) -> str:
         except OSError:
             return "gone"
         return "zombie" if state == "Z" else "alive"
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
+    if not signals.exists(pid):                  # another user's process exists too
         return "gone"
-    except PermissionError:
-        pass                                     # another user's process: it exists
     ps = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True)
     state = ps.stdout.strip()
     if not state:
@@ -76,32 +72,30 @@ def is_stopped(pid: int) -> bool:
 def gone(pid: int) -> bool:
     """The process has ended. A hub that a command of a test started is a child of the test
     process, and stays a zombie until reaped (a shell's `sheaf` leaves it to init)."""
-    try:
-        os.waitpid(pid, os.WNOHANG)
-    except ChildProcessError:
-        pass
+    signals.reap(pid)
     return proc_state(pid) != "alive"
 
 
 def stop_hub(pid: int):
-    """SIGTERM, then SIGKILL after five seconds. Where there is a /proc (Linux), only a process
-    that still is a sheaf hub: a pid that ended and was given to something else is left alone.
-    macOS has none, so there the pid cannot be checked and is stopped as it always was."""
+    """SIGTERM, then SIGKILL after five seconds, to one process of this user's (`sheafmd.signals`: a
+    -1, 0 or 1 from `hub.pid` is refused on macOS as on Linux, sheaf#85). Where there is a /proc
+    (Linux), only a process that still is a sheaf hub: a pid that ended and was given to something
+    else is left alone. macOS has none, so there the command line cannot be checked."""
     try:
         if _has_proc():
             with open(f"/proc/{pid}/cmdline", "rb") as f:
                 if b"sheafmd" not in f.read():
                     return
-        os.kill(pid, signal.SIGTERM)
-    except OSError:
+        signals.send(pid, signal.SIGTERM)
+    except (OSError, signals.Refused):
         return
     for _ in range(100):
         if gone(pid):
             return
         time.sleep(0.05)
     try:
-        os.kill(pid, signal.SIGKILL)
-    except OSError:
+        signals.send(pid, signal.SIGKILL)
+    except (OSError, signals.Refused):
         pass
 
 

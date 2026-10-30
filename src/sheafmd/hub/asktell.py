@@ -21,7 +21,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 from .. import comments as rdc
-from .. import config, diagnostics
+from .. import config, diagnostics, signals
 from ..agents import prompts
 from ..agents.base import Adapter, DeliveryCancelled, DeliveryError, Target
 from . import roots as roots_mod
@@ -196,8 +196,8 @@ class AskTell:
                 p.wait(timeout=JUMP_TIMEOUT)
             except subprocess.TimeoutExpired:
                 try:
-                    os.killpg(p.pid, signal.SIGKILL)
-                except OSError:
+                    signals.send_group(p, signal.SIGKILL)
+                except (OSError, signals.Refused):
                     pass
                 p.wait()
                 raise JobRefused(409, f"The jump command did not finish within {JUMP_TIMEOUT:g} seconds.") from None

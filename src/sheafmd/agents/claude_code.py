@@ -24,7 +24,7 @@ import uuid
 from pathlib import Path
 from typing import Mapping
 
-from .. import diagnostics
+from .. import diagnostics, signals
 from .base import DeliveryCancelled, DeliveryError, Runner, State, Target
 
 TOOLS = "Read,Grep,Glob"
@@ -72,14 +72,8 @@ def _read_record(path: Path) -> dict | None:
 def _same_process(pid: int | None, start: str) -> bool:
     """Process `pid` exists and, when both starts are known, began when `start` says. A target
     stored without a pid is not believed: nothing says whose socket it is."""
-    if type(pid) is not int or not 0 < pid < 2 ** 31:
+    if not signals.exists(pid):
         return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        pass
     now = proc_start(pid)
     return not (start and now) or start == now
 

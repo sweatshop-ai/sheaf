@@ -18,7 +18,7 @@ import pytest
 
 from agent_fakes import PID, FakeClaude, write_record
 from helpers import PLAN, Impostor, Silent, gone, http_get, hub_alive, hub_rows, key, silent_message
-from sheafmd import diagnostics, paths
+from sheafmd import diagnostics, paths, signals
 from sheafmd.hub import client as hubclient
 from sheafmd.hub import server
 
@@ -61,7 +61,7 @@ def test_the_hub_keeps_running_after_the_command_ends(sheaf, opened_browser, doc
     sheaf("open", doc)
     info = server.read_pid_file()
     assert info["port"] == port and info["service"] is False
-    os.kill(info["pid"], 0)
+    assert signals.exists(info["pid"])
     assert hub_alive(port)
 
 
@@ -320,14 +320,14 @@ def test_a_hub_that_does_not_answer_in_time_is_not_called_a_stranger(port, monke
     usual = hubclient.TIMEOUT
     monkeypatch.setattr(hubclient, "TIMEOUT", 0.5)
     pid = server.read_pid_file()["pid"]
-    os.kill(pid, signal.SIGSTOP)
+    signals.send(pid, signal.SIGSTOP)
     try:
         with pytest.raises(hubclient.HubSilent) as e:
             c.challenge()
         assert str(e.value) == silent_message(port, 0.5)
         assert "something else" not in str(e.value)
     finally:
-        os.kill(pid, signal.SIGCONT)
+        signals.send(pid, signal.SIGCONT)
         monkeypatch.setattr(hubclient, "TIMEOUT", usual)     # a hub that has just woken may be slow to answer
     assert c.challenge()["app"] == "sheaf"
 

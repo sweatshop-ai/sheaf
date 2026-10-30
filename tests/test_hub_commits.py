@@ -1261,5 +1261,69 @@ def test_a_version_half_written_is_never_committed_by_the_poll(box, sheaves, rem
     folder = sheaves / ".sheaf" / "versions" / state.doc_key("acme/blog/2026-10-28-plan.md")
     (folder / f".{'0' * 16}.md.tmp").write_text("half a ver", encoding="utf-8")
     poll(box)
+    assert git(sheaves, "log", "-1", "--format=%s") == "versions: acme/blog/2026-10-28-plan.md\n"
     assert not any(f.endswith(".tmp") for f in git(sheaves, "show", "--name-only", "--format=", "HEAD").split())
     assert untracked_versions(sheaves).splitlines() == [f"?? .sheaf/versions/{folder.name}/.{'0' * 16}.md.tmp"]
+
+
+def test_a_version_the_pull_commits_is_pushed(box, sheaves, remote, tmp_path, monkeypatch):
+    """A page opened while the poll fetches: the pull commits its version just before the work tree moves, and
+    that commit goes out with the pull, not with the next write."""
+    from sheafmd.hub import commits
+    real, once = commits._git, []
+
+    def spy(folder, *args, **kw):
+        r = real(folder, *args, **kw)
+        if args[:1] == ("fetch",) and not once:
+            once.append(1)
+            opened(box, sheaves)
+        return r
+
+    merged_on_github(tmp_path, remote, {"README.md": "# The sheaves\n"}, "a README")
+    monkeypatch.setattr(commits, "_git", spy)
+    poll(box)
+    assert once and untracked_versions(sheaves) == ""
+    assert git(remote, "log", "-1", "--format=%s", "main") == "versions: acme/blog/2026-10-28-plan.md\n"
+    assert git(sheaves, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
+
+
+def test_a_sweep_that_fails_is_a_row_and_the_pull_still_comes(box, sheaves, remote, tmp_path, monkeypatch):
+    from sheafmd.hub import commits
+    real = commits._git
+
+    def spy(folder, *args, **kw):
+        if args[:2] == ("ls-files", "-z"):
+            raise subprocess.TimeoutExpired(args, 20)
+        return real(folder, *args, **kw)
+
+    opened(box, sheaves)
+    head = merged_on_github(tmp_path, remote, {"README.md": "# The sheaves\n"}, "a README")
+    monkeypatch.setattr(commits, "_git", spy)
+    poll(box)
+    assert (sheaves / "README.md").read_text(encoding="utf-8") == "# The sheaves\n"
+    assert git(sheaves, "rev-parse", "HEAD").strip() == head
+    assert rows("push-failed") == [] and [r["doc"] for r in rows("commit-failed")] == ["sheaves"]
+
+
+def test_an_address_that_is_a_link_never_reaches_a_commit(box, sheaves, remote, tmp_path):
+    from sheafmd.hub import state
+    secret = tmp_path / "token.env"
+    secret.write_text("TOKEN=s3cr3t\n", encoding="utf-8")
+    folder = sheaves / ".sheaf" / "versions" / state.doc_key("acme/blog/2026-10-28-plan.md")
+    folder.mkdir(parents=True)
+    (folder / "address").symlink_to(secret)
+    opened(box, sheaves)
+    poll(box)
+    assert "s3cr3t" not in git(remote, "log", "--format=%B", "main")
+    assert git(remote, "log", "-1", "--format=%s", "main") == "versions: acme/blog/2026-10-28-plan.md\n"
+    assert not (folder / "address").is_symlink() and secret.read_text(encoding="utf-8") == "TOKEN=s3cr3t\n"
+
+
+def test_a_forged_address_names_no_commit(box, sheaves, remote):
+    """An `address` that is not the folder's key (written by hand, or merged on the remote) is not believed."""
+    from sheafmd.hub import state
+    opened(box, sheaves)
+    folder = sheaves / ".sheaf" / "versions" / state.doc_key("acme/blog/2026-10-28-plan.md")
+    (folder / "address").write_text("TOKEN=s3cr3t", encoding="utf-8")
+    poll(box)
+    assert git(remote, "log", "-1", "--format=%s", "main") == f"versions: {folder.name}\n"

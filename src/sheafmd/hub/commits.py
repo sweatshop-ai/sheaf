@@ -159,6 +159,20 @@ def _ignored(folder: Path, rel: str) -> bool:
                           timeout=GIT_SECONDS, env=_env(), start_new_session=True).returncode == 0
 
 
+def _address(folder: Path) -> str:
+    """The path in the root a versions folder of the root's store is the key of (`state.Versions`), from its
+    `address` file: read without following a link, one line, and believed only when it is the folder's key, so a
+    file planted there (a link to a token, a forged path) never reaches a commit's subject or the ignore check.
+    Else the folder's name."""
+    try:
+        fd = os.open(folder / "address", os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0))
+        with os.fdopen(fd, "rb") as f:
+            key = f.read(4097).decode("utf-8")
+    except (OSError, ValueError):
+        return folder.name
+    return key if "\n" not in key and state.doc_key(key) == folder.name else folder.name
+
+
 def _staged(folder: Path, paths: list) -> dict:
     """The index entries of `paths` (folders taken whole): path -> `mode sha stage`. Stage 0 only: a
     path in conflict is never committed (`_commit`)."""
@@ -308,9 +322,10 @@ class Commits:
                 self._record("push-failed", address, error=str(e)[:300])
 
     def _commit(self, folder: Path, paths: list, author: Author, subject: str, address: str,
-                gone: list = ()) -> bool:
+                gone: list = (), record=None) -> bool:
         """`paths`: the document's file, then its versions folder when the root keeps it; `gone`: the path its file
-        moved from (a move). A path that is gone is staged as gone: git still lists it."""
+        moved from (a move). A path that is gone is staged as gone: git still lists it. `record`: where its rows go."""
+        record = record or self._record
         if _ignored(folder, paths[0]):
             # A document the repo ignores stays out, its versions too; but a move into an ignored folder still
             # takes the file out of the place git holds it (9.11), or git keeps it there.
@@ -327,20 +342,20 @@ class Commits:
             return False
         if _git(folder, "ls-files", "-u", "--", *paths).stdout:
             # A merge stopped on this document: its index is the person's to settle, never the hub's.
-            self._record("commit-failed", address, error="the index holds a merge conflict on this document")
+            record("commit-failed", address, error="the index holds a merge conflict on this document")
             return False
         before = _staged(folder, paths)
         r = _git(folder, "add", "-A", "--", *paths)   # a file an ignore rule names, in the folder, stays out
         if r.returncode != 0:
             kept = _restage(folder, before, paths)
-            self._record("commit-failed", address,
+            record("commit-failed", address,
                          error=_last_line(r) + ("" if kept else "; the index could not be put back"))
             return False
         if _git(folder, "diff", "--cached", "--quiet", "--", *paths).returncode == 0:
             # Nothing of this write is left to commit; what the person had staged there comes back. An
             # index `add` left as it was is not rewritten: `--index-info` would drop its assume-unchanged flags.
             if _staged(folder, paths) != before and not _restage(folder, before, paths):
-                self._record("commit-failed", address, error="the index could not be put back")
+                record("commit-failed", address, error="the index could not be put back")
             return False
         who = []
         if _git(folder, "config", "user.email").returncode != 0:
@@ -351,7 +366,7 @@ class Commits:
         r = _git(folder, *who, "commit", "-q", "--no-verify", "-m", subject, "--", *paths, author=author)
         if r.returncode != 0:
             kept = _restage(folder, before, paths)
-            self._record("commit-failed", address,
+            record("commit-failed", address,
                          error=_last_line(r) + ("" if kept else "; the index could not be put back"))
             return False
         return True
@@ -410,9 +425,7 @@ class Commits:
                 if self._children.ended:
                     raise Stopped("the hub is stopping")
                 with self._repo_lock(folder):
-                    if self._sweep(root, repo):
-                        with self._lock:
-                            self._owed.add(repo)       # the hub's own commits: pushed as a write's are
+                    self._sweep(root, repo, record)
                 if not self._pushes(root, repo, address):
                     continue                           # a write's push stays owed: the poll after the roots agree takes it
                 go = self._pull(root, address, record, seconds=PUSH_SECONDS if wrote else GIT_SECONDS)
@@ -485,18 +498,18 @@ class Commits:
         # The writers' locks first, the repo's last (9.11): no write of a file the remote changed comes between
         # the look at it and its new text, and no commit of any root of the repo between the hub's HEAD read and moved.
         with self._guard(root, [top / p for p in changed]), self._repo_lock(folder):
-            self._sweep(root, _repo(folder))           # what a page made since the pusher's sweep, before the work tree moves
+            self._sweep(root, _repo(folder), record)   # what a page made since the pusher's sweep, before the work tree moves
             return self._catch_up(folder, theirs, address, record)
 
-    def _sweep(self, root, repo: str) -> bool:
+    def _sweep(self, root, repo: str, record):
         """Commit what git does not hold yet of the versions stores of `repo`'s roots that commit and keep their
         versions inside (#92): one commit per document, `versions: <path>`, by the hub. A write's commit carries its
         versions folder; this takes the versions made with no write behind it (a page opened, a change from outside
         or from the remote rendered, a pin, the newest 60 pushing an old one out), so the work tree never holds an
         untracked version where the remote's may land: git refuses to write over one, even one that is the same.
         A folder whose document the repo ignores stays out, as a write's does. The caller holds the repo's lock.
-        Whether it committed; a commit that fails is a `commit-failed` row, and the next sweep tries again."""
-        made = False
+        Its commits are owed a push, as a write's are. Never raises: a folder that cannot be committed is a
+        `commit-failed` row, the next sweep tries again, and the pull and push go on."""
         for r in [root] + [r for r in self._roots() if r.path != root.path]:
             if not r.git or (r is not root and _repo(r.path) != repo):
                 continue
@@ -506,22 +519,30 @@ class Commits:
                 continue
             if not (rc.commit and rc.versions_inside):
                 continue
-            listed = _git(r.path, "ls-files", "-z", "--others", "--modified", "--deleted", "--exclude-standard",
-                          "--", str(state.INSIDE))
+            try:
+                listed = _git(r.path, "ls-files", "-z", "--others", "--modified", "--deleted", "--exclude-standard",
+                              "--", str(state.INSIDE))
+            except (OSError, ValueError, subprocess.SubprocessError) as e:
+                record("commit-failed", r.name, error=str(e)[:300] or type(e).__name__)
+                continue
             folders: dict[Path, list] = {}
             for p in map(Path, filter(None, listed.stdout.split("\0"))):
                 # By name, not the folder: a version half written (`state.write_text_private`) is never staged.
                 if len(p.parts) > 3 and not (p.name.startswith(".") and p.name.endswith(".tmp")):
                     folders.setdefault(Path(*p.parts[:3]), []).append(str(p))
             for f, files in sorted(folders.items()):
+                key = _address(r.path / f)
                 try:
-                    key = (r.path / f / "address").read_text(encoding="utf-8").strip()
-                except (OSError, ValueError):
-                    key = f.name
-                if key != f.name and _ignored(r.path, key):
-                    continue                           # a private draft's versions stay out with it
-                made |= self._commit(r.path, sorted(files), Author(*COMMITTER), f"versions: {key}", f"{r.name}/{key}")
-        return made
+                    if key != f.name and _ignored(r.path, key):
+                        continue                       # a private draft's versions stay out with it
+                    made = self._commit(r.path, sorted(files), Author(*COMMITTER), f"versions: {key}",
+                                        f"{r.name}/{key}", record=record)
+                except (OSError, ValueError, subprocess.SubprocessError) as e:
+                    record("commit-failed", f"{r.name}/{key}", error=str(e)[:300] or type(e).__name__)
+                    continue
+                if made and rc.push:                    # a repo that never pushes owes no push
+                    with self._lock:
+                        self._owed.add(repo)
 
     def _catch_up(self, folder: Path, theirs: str, address: str, record):
         head = _git(folder, "rev-parse", "HEAD").stdout.strip()

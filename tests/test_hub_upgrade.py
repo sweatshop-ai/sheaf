@@ -261,13 +261,23 @@ def test_a_signal_that_comes_after_a_deliberate_stop_keeps_the_stop(port, work, 
     assert server.exit_code(hub) == server.EXIT_STOPPED
 
 
-def test_a_stop_that_comes_after_a_signal_keeps_the_signal(port, work, monkeypatch):
-    """The other way round the hub is ending on the signal already; the stop changes nothing."""
+def test_a_stop_that_comes_after_a_signal_wins_so_the_person_s_stop_stays_down(port, work, monkeypatch):
+    """A stray signal began the end and `sheaf stop` came in its window: the person asked for a stop,
+    and `cmd_stop` says "hub stopped", so the exit is the one the unit leaves down (gate round 2, P3)."""
     monkeypatch.setenv(service.STOP_EXIT_ENV, str(server.EXIT_STOPPED))
     hub = service_hub(port)
     hub.request_stop("signal")
-    hub.request_stop("stop")
-    assert hub.stop_requested == "signal" and server.exit_code(hub) == 0
+    assert hub.request_stop("stop") is True
+    assert hub.stop_requested == "stop" and server.exit_code(hub) == server.EXIT_STOPPED
+
+
+def test_a_second_signal_keeps_the_first(port, work):
+    hub = service_hub(port)
+    seen = []
+    hub.on_stop = seen.append
+    hub.request_stop("signal")
+    hub.request_stop("signal")
+    assert hub.stop_requested == "signal" and seen == ["signal"]
 
 
 def test_a_signal_to_a_service_hub_exits_0_so_restart_always_starts_it_again(port, work, monkeypatch):

@@ -154,7 +154,7 @@ def checks(port: int):
     _ci.check(stopped and stopped.get("ExecMainStatus") == str(service.EXIT_STOPPED)
               and stopped.get("Result") == "success",
               f"the hub exited {service.EXIT_STOPPED}, which systemd counts as a success", str(stopped))
-    time.sleep(6)                                         # past RestartSec: a restart would have come by now
+    time.sleep(20)          # past the backoff: with RestartSteps the next restart here would come after about 15 s
     after = show()
     _ci.check(after.get("ActiveState") == "inactive" and after.get("NRestarts") == before.get("NRestarts")
               and not _ci.hub_answers(), "systemd left the hub stopped", str(after))

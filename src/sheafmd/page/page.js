@@ -489,6 +489,19 @@
   function cmdRow(text) {
     return '<div class="rd-cmd"><code>' + esc(text) + '</code><button type="button">Copy</button></div>';
   }
+  // A laptop with nothing installed (tt-tiroir#170): uv's own installer, one line per system, folded under the fork.
+  // uv brings its own Python, so the fork command needs nothing else; Claude Code the member installs as its page says.
+  var UV_POSIX = 'curl -LsSf https://astral.sh/uv/install.sh | sh',
+      UV_WINDOWS = 'powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"';
+  function installUv() {
+    var row = function (text) { return cmdRow(text).replace('class="rd-cmd"', 'class="rd-cmd rd-install"'); };
+    return '<details class="rd-need"><summary>No uv on this laptop yet?</summary>' +
+      '<p>macOS or Linux, in Terminal:</p>' + row(UV_POSIX) +
+      '<p>Windows, in PowerShell:</p>' + row(UV_WINDOWS) +
+      '<p>Then open a new terminal and paste the command above. Claude Code: ' +
+      '<a href="https://code.claude.com/docs/en/setup" target="_blank" rel="noopener">its install page</a>.</p>' +
+      '</details>';
+  }
   function drawWork() {
     var w = CFG.work || {}, ss = (w.sessions || []).slice(0, 5);
     var h = '';
@@ -498,7 +511,8 @@
     // the box and it keeps a copy of the box's transcripts (`sessions_dir`).
     // It asks for a sign-in code (9.13), which this button gets: shown once, in the popover only, never kept.
     if (w.fork) h += '<h4>Fork to your machine</h4>' + cmdRow(w.fork) +
-                     '<p>Runs on your laptop: fetches the session through this hub, forks it under your name. Needs uv there.</p>' +
+                     '<p>Runs on your laptop: fetches the session through this hub, forks it under your name. ' +
+                     'Needs uv and Claude Code there.</p>' + installUv() +
                      '<div class="rd-code"><button type="button">Get a sign-in code</button></div>';
     // A live session on a laptop is continued there: the hub holds no copy of it, and offers no fork of an older one.
     var live = liveSession(), none = w.live === 'laptop'

@@ -131,7 +131,8 @@ def test_work_on_this_opens_the_two_ways_and_the_sessions(tab):
     assert not tab.page.locator("#rd-menu").is_visible()
 
 
-UV_POSIX = "curl -LsSf https://astral.sh/uv/install.sh | sh"
+UV_MACOS = "curl -LsSf https://astral.sh/uv/install.sh | sh"
+UV_LINUX = "wget -qO- https://astral.sh/uv/install.sh | sh"
 UV_WINDOWS = 'powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"'
 
 
@@ -145,10 +146,10 @@ def test_the_fork_folds_how_to_install_uv_on_a_bare_laptop(tab, context, site):
     assert need.locator("summary").inner_text() == "No uv on this laptop yet?"
     assert not need.locator(".rd-install").first.is_visible()
     need.locator("summary").click()
-    assert need.locator(".rd-install code").all_inner_texts() == [UV_POSIX, UV_WINDOWS]
+    assert need.locator(".rd-install code").all_inner_texts() == [UV_MACOS, UV_LINUX, UV_WINDOWS]
     assert "Then open a new terminal and paste the command above." in need.inner_text()
     assert need.locator("a").get_attribute("href") == "https://code.claude.com/docs/en/setup"
-    need.locator(".rd-install button").nth(1).click()
+    need.locator(".rd-install button").nth(2).click()
     until(lambda: toast(tab.page) == "Copied", what="the Copied toast")
     assert tab.page.evaluate("navigator.clipboard.readText()") == UV_WINDOWS
 
@@ -211,7 +212,7 @@ def test_copy_puts_the_command_on_the_clipboard_and_says_copied(tab, context, si
     as_member(tab, work())
     tab.open()
     open_work(tab.page)
-    tab.page.locator("#rd-work .rd-cmd button").nth(1).click()
+    tab.page.locator("#rd-work .rd-cmd:not(.rd-install) button").nth(1).click()
     until(lambda: toast(tab.page) == "Copied", what="the Copied toast")
     assert tab.page.evaluate("navigator.clipboard.readText()") == FORK
 
@@ -221,7 +222,7 @@ def test_without_the_clipboard_api_copy_selects_the_command(tab):
     as_member(tab, work())
     tab.open()
     open_work(tab.page)
-    tab.page.locator("#rd-work .rd-cmd button").nth(0).click()
+    tab.page.locator("#rd-work .rd-cmd:not(.rd-install) button").nth(0).click()
     until(lambda: tab.page.evaluate("getSelection().toString()") == ATTACH, what="the command selected")
     assert tab.page.locator("#rd-work").is_visible()
     tab.page.wait_for_timeout(500)        # past the 350 ms after which a selection would get its Comment button

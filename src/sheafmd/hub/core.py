@@ -26,7 +26,6 @@ from ..agents import registry
 from ..agents.base import Adapter, Target
 from ..render import render_file
 from ..source import STAMP_FORMAT, file_lock, lock_key
-from . import commits as commits_mod
 from . import place
 from . import projects
 from . import proxy as proxy_mod
@@ -425,10 +424,10 @@ class Hub:
         return registry.adapter_for(agent, self.sender)
 
     def stop_jobs(self):
-        """Kill every Ask and Tell child's process group, and let the pushes due go out (a clean stop,
-        SPEC 8.4, 8.11)."""
+        """Kill every Ask and Tell child's process group, and let the pushes due go out within a bound, then end
+        the hub's git (a clean stop, SPEC 8.4, 8.11, #95)."""
         self.runner.kill_all()
-        self.commits.settle(commits_mod.PUSH_SECONDS)
+        self.commits.stop()
 
     def waiting(self, address: str) -> bool:
         """Whether a Tell waits on a thread of this document for an action reply."""

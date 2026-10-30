@@ -18,7 +18,7 @@ pytestmark = pytest.mark.page
 
 META = re.compile(r'(<script id="rd-edit-meta" type="application/json">)(.*?)(</script>)', re.S)
 ORIGIN = "https://tt.tiroir.me"
-FORK = f"uvx --from tiroir==0.1.0 tiroir work {ORIGIN}/list/acme/site/plan.md"
+FORK = f"uvx --from tiroir==0.2.0 tiroir work {ORIGIN}/list/acme/site/plan.md"
 ATTACH = "ssh tiroir-tt -t tmux -S /run/james/tmux.sock attach -t james \\; select-window -t =acme_site"
 BOX = {"id": "6f1c0e9a-2b3d-4c5e-8f70-1a2b3c4d5e6f", "host": "tiroir-tt", "member": "james",
        "date": "2026-10-28T05:12:03Z"}

@@ -698,3 +698,49 @@ def test_a_page_built_with_its_images_drops_them_when_its_owners_can_no_longer_b
     assert "data:image/png" in html
     monkeypatch.setattr(front.hub, "owners", lambda address, members: (_ for _ in ()).throw(RuntimeError("boom")))
     assert "data:image/png" not in front.get("/work/acme/blog/pic.md").text
+
+
+@pytest.mark.parametrize("bad", ["not toml at all [", '[projects."acme/blog"]\nmembers = "bea"\n'],
+                         ids=["not-toml", "invalid"])
+def test_an_invalid_projects_toml_leaves_out_the_projects_images_of_a_sheaf_with_an_owner(front, plan, outsider,
+                                                                                          bad):
+    """A file the hub cannot read names nobody, so every owner counts as one it does not name (#81, #91): a sheaf
+    with an owner embeds none of the project's images. Above-project images and the sheaf's own `private/<short>/`
+    ones stay."""
+    png(outsider / "acme" / "blog" / "private" / "bea" / "seal.png")
+    png(outsider / "logo.png")
+    html, _ = owned_page(front, outsider, "acme/blog/pic.md", "bea", "fig.png")
+    assert "data:image/png" in html
+    (outsider / "projects.toml").write_text(bad, encoding="utf-8")
+    from sheafmd.hub import projects
+    assert isinstance(front.hub.projects_of(front.hub.roots.get("work")), projects.Invalid)
+    html, share = owned_page(front, outsider, "acme/blog/pic.md", "bea", "fig.png")
+    assert "data:image/png" not in html and "data:image/png" not in share
+    for src in ("seal.png", "../../../../logo.png"):
+        html, _ = owned_page(front, outsider, "acme/blog/private/bea/own.md", "bea", src, visibility="owner")
+        assert "data:image/png" in html, src
+    html, _ = owned_page(front, outsider, "acme/blog/private/bea/own.md", "bea", "../../fig.png", visibility="owner")
+    assert "data:image/png" not in html
+
+
+def test_an_open_tab_has_its_page_built_again_when_projects_toml_moves_its_images(front, plan, outsider):
+    """The tick tells an open tab of a `projects.toml` change (`_tell_grants`) and builds its page again once the
+    image rule moved (#53, #81, #91), before any request comes: the page the hub holds has the images the file now
+    gives."""
+    from helpers import BEA
+    owned_page(front, outsider, "acme/blog/pic.md", "cal", "fig.png")
+    e = front.hub.entries["work/acme/blog/pic.md"]
+    assert "data:image/png" not in e.html
+    stream = front.get("/_/live?doc=work/acme/blog/pic.md", member=BEA).stream
+    stream.drain()
+    assert e.bus.count()
+    toml = outsider / "projects.toml"
+    toml.write_text(PROJECTS.replace('members = ["bea"]', 'members = ["bea", "cal"]', 1), encoding="utf-8")
+    front.hub.tick()
+    front.hub.tick()                    # told once the new file has held for two passes
+    assert "data:image/png" in e.html
+    assert "changed" in [name for name, _ in stream.drain()]
+    toml.write_text(PROJECTS, encoding="utf-8")
+    front.hub.tick()
+    front.hub.tick()
+    assert "data:image/png" not in e.html

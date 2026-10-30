@@ -55,6 +55,7 @@ DEFAULTS = {"api": "https://api.github.com", "poll": 60, "waiting": "Waiting on 
             "in_progress": "In progress"}
 WORDS = ("Approve", "Run it", "Don't run", "Undo skip", "Done", "Share", "Stop James", "Move to")
 MOVE = "Move to"                # the one word that takes an argument: `<slug> (ref <thread>)`
+TOGGLES = frozenset({"Share"})  # the words a member may press and release; every other word is pressed once
 SHOWS = {"projects": "My projects", "mine": "Only mine", "all": "All of the team"}
 BATCH = 50                      # issues per GraphQL request
 ITEMS = 100                     # Project items of an issue per page: the most GitHub gives
@@ -590,7 +591,7 @@ class TheList:
                 '<meta name="viewport" content="width=device-width,initial-scale=1">'
                 f'<title>Actions</title><style>{CSS}</style></head><body>'
                 f'<header><h1>Waiting on you</h1><span class="list-sub">and what is in progress</span></header>'
-                f'<nav class="list-filters">{filters}</nav><p class="list-error" hidden></p><main>{body}</main>'
+                f'<nav class="list-filters">{filters}</nav><p class="list-error" role="alert" hidden></p><main>{body}</main>'
                 f'<script nonce="{nonce}">{SCRIPT}</script></body></html>')
 
     def _now(self, root, row: Row, member, address: str):
@@ -629,12 +630,19 @@ class TheList:
 
     def _row(self, row: Row, owners: list, is_owner: bool, member, root: str) -> str:
         s, rec = row.sheaf, row.record
-        chips = "".join(
-            f'<span class="list-chip">{html.escape(word)}{" " + html.escape(arg) if arg else ""}'
-            f'{" @" + html.escape(short) if short and short.lower() != member.short.lower() else ""}</span>'
-            for word, short, _, arg in s.actions)
-        if s.assistant:
-            chips += f'<span class="list-assistant">{html.escape(s.assistant)}</span>'
+        doc, acts = html.escape(f"{root}/{s.rel}"), []
+        for n, (word, short, _, arg) in enumerate(s.actions):
+            label = html.escape(word + (" " + arg if arg else "")
+                                + (" @" + short if short and short.lower() != member.short.lower() else ""))
+            if word == MOVE:
+                # Move to's boxes are the options of one answer, given in the sheaf: no button of their own yet.
+                acts.append(f'<span class="list-chip">{label}</span>')
+                continue
+            # A toggle says whether it is pressed; a one-off is a plain button to a screen reader.
+            kind = ('toggle', ' aria-pressed="false"') if word in TOGGLES else ("one-off", "")
+            acts.append(f'<button type="button" class="list-act {kind[0]}"{kind[1]} data-doc="{doc}" data-action="{n}"'
+                        f' data-word="{html.escape(word)}" data-hash="{html.escape(s.hash)}">{label}</button>')
+        assistant = f' <span class="list-assistant">{html.escape(s.assistant)}</span>' if s.assistant else ""
         by_login = {m.github.lower(): m for m in self.hub.proxy.members.values() if m.github}
         first = by_login.get(rec.assignees[0].lower()) if rec.assignees else None
         if is_owner:
@@ -646,16 +654,10 @@ class TheList:
         else:
             owner = "nobody"
         meta = " · ".join(x for x in (s.kind, owner, f"#{s.issue[2]}", _age(self.hub.clock() - rec.updated)) if x)
-        box = ""
-        # Move to's boxes are the options of one answer, given in the sheaf: the row's box ticks its first other action.
-        n = next((n for n, a in enumerate(s.actions) if a[0] != MOVE), None)
-        if n is not None:
-            word = s.actions[n][0]
-            box = (f'<input type="checkbox" aria-label="{html.escape(word)}" data-doc="{html.escape(f"{root}/{s.rel}")}"'
-                   f' data-action="{n}" data-word="{html.escape(word)}" data-hash="{html.escape(s.hash)}">')
         href = roots_mod.url_path(f"{root}/{s.rel}")
-        return (f'<li class="list-row">{box}<div><a class="list-title" href="{html.escape(href)}">'
-                f'{html.escape(s.title)} {chips}</a><div class="list-meta">{html.escape(meta)}</div></div></li>')
+        return (f'<li class="list-row"><div class="list-main"><a class="list-title" href="{html.escape(href)}">'
+                f'{html.escape(s.title)}</a>{assistant}<div class="list-meta">{html.escape(meta)}</div></div>'
+                f'<div class="list-actions">{"".join(acts)}</div></li>')
 
 
 def _href(root: str, show: str) -> str:
@@ -672,27 +674,63 @@ def _age(seconds: float) -> str:
     return f"{seconds // 86400} d"
 
 
-# A tick posts the row's action to the hub and reloads the list; a refusal is said above the rows.
+# A press of a row's button shows Undo for UNDO_MS, then posts the action's tick to the hub; Undo in that window
+# sends nothing. While a press of a row waits or is sent, the row's other buttons cannot be pressed: they name their
+# action by the text the list read, which the tick changes. The list reloads once every press has been answered, so a
+# reload never drops a press still in its window; a refusal is said above the rows, after that reload too, and gives
+# the button back.
 SCRIPT = """
-document.querySelectorAll('.list-row input[type=checkbox]').forEach(function (b) {
-  b.addEventListener('change', function () {
+var UNDO_MS = 5000, open = 0, ticked = false, reloading = false, SAID = 'sheaf-list-said';
+var said = document.querySelector('.list-error'), refused = new Map();   // button: its refusal on this page
+function say(text) { said.textContent = text; said.hidden = false; }
+// A refusal beside a press that went through is said again after that press's reload, once: only the refusals
+// made on this page are kept, never one said again here (sessionStorage may refuse).
+try { var kept = sessionStorage.getItem(SAID); sessionStorage.removeItem(SAID); if (kept) say(kept); } catch (e) {}
+function settled() {
+  if (--open !== 0 || !ticked) return;
+  reloading = true;               // a press from now on would die with the page
+  try { if (refused.size) sessionStorage.setItem(SAID, Array.from(refused.values()).join(' ')); } catch (e) {}
+  location.reload();
+}
+document.querySelectorAll('.list-row button.list-act').forEach(function (b) {
+  var word = b.textContent, waiting = null;
+  var others = Array.prototype.filter.call(b.closest('.list-row').querySelectorAll('button.list-act'),
+    function (o) { return o !== b; });
+  function lock(on) { others.forEach(function (o) { o.disabled = on; }); }
+  function back() { b.textContent = word; b.classList.remove('pending'); b.removeAttribute('aria-label'); }
+  function send() {
+    waiting = null;
+    back();
     b.disabled = true;
-    var said = document.querySelector('.list-error');
+    if (b.hasAttribute('aria-pressed')) b.setAttribute('aria-pressed', 'true');
     fetch('/_/tick', {method: 'POST', headers: {'Content-Type': 'application/json'}, credentials: 'same-origin',
       body: JSON.stringify({doc: b.dataset.doc, action: Number(b.dataset.action), word: b.dataset.word,
         hash: b.dataset.hash})})
       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) {
-        if (r.ok) { location.reload(); return; }
+        if (r.ok) { ticked = true; refused.delete(b); return; }
         throw new Error(j.error || ('the hub answered ' + r.status));
       }); })
-      .catch(function (e) { b.checked = false; b.disabled = false; said.textContent = e.message; said.hidden = false; });
+      .catch(function (e) {
+        if (b.hasAttribute('aria-pressed')) b.setAttribute('aria-pressed', 'false');
+        b.disabled = false; lock(false);
+        refused.set(b, e.message); say(e.message);
+      })
+      .then(settled);
+  }
+  b.addEventListener('click', function () {
+    if (reloading) return;
+    if (waiting !== null) { clearTimeout(waiting); waiting = null; back(); lock(false); settled(); return; }
+    open++;
+    lock(true);
+    b.textContent = 'Undo'; b.classList.add('pending'); b.setAttribute('aria-label', 'Undo ' + word);
+    waiting = setTimeout(send, UNDO_MS);
   });
 });
 """
 
 CSS = """
-:root{--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--chip:#1f5fd6;--bg:#fff}
-@media (prefers-color-scheme:dark){:root{--fg:#f2f2f7;--muted:#a1a1a6;--line:#38383a;--chip:#6ea2ff;--bg:#1c1c1e}}
+:root{--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--chip:#1f5fd6;--once:#c62828;--bg:#fff}
+@media (prefers-color-scheme:dark){:root{--fg:#f2f2f7;--muted:#a1a1a6;--line:#38383a;--chip:#6ea2ff;--once:#ff6b6b;--bg:#1c1c1e}}
 body{margin:0;padding:24px 16px;font:15px/1.45 system-ui,sans-serif;color:var(--fg);background:var(--bg)}
 header{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
 h1{font-size:20px;margin:0}.list-sub{color:var(--muted);font-size:13px}
@@ -703,10 +741,18 @@ h2{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute
 h3{font-size:15px;margin:16px 0 4px}
 ul{list-style:none;margin:0;padding:0}
 .list-row{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
-.list-row input{margin-top:4px}
+.list-main{flex:1;min-width:0}
+.list-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start;justify-content:flex-end;max-width:50%}
+.list-act{font:inherit;font-size:13px;border-radius:999px;padding:2px 10px;cursor:pointer;background:none}
+.list-act.one-off{border:1px solid var(--once);color:var(--once)}
+.list-act.toggle{border:1px solid var(--chip);color:var(--chip)}
+.list-act.one-off.pending{background:var(--once);color:var(--bg)}
+.list-act.toggle.pending,.list-act.toggle[aria-pressed=true]{background:var(--chip);color:var(--bg)}
+.list-act:disabled{cursor:default;opacity:.7}
 .list-title{color:var(--fg);text-decoration:none}.list-title:hover{text-decoration:underline}
 .list-chip,.list-assistant{display:inline-block;font-size:12px;border:1px solid var(--chip);color:var(--chip);
 border-radius:999px;padding:0 8px;margin-left:6px}
+.list-actions .list-chip{margin-left:0}
 .list-assistant{border-color:var(--line);color:var(--muted)}
 .list-meta{color:var(--muted);font-size:13px}
 .list-error{color:#c62828}

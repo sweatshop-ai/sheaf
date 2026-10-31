@@ -594,7 +594,7 @@ var create = function (ROOT, CFG, opts) {
     if (w.attach) h += '<h4>Attach on the box</h4><p>James’s session is live in tmux. You join it in your terminal; ' +
                        'same transcript, same tools, James’s account.</p>' + cmdRow(w.attach);
     // The fork fetches the live session's transcript; the hub leaves `fork` out unless the live session runs on
-    // the box and it keeps a copy of the box's transcripts (`sessions_dir`).
+    // the box and it keeps a copy of the box's transcripts (`sessions_dir` and `work_dir`, #146).
     // It asks for a sign-in code (9.13), which this button gets: shown once, in the popover only, never kept.
     if (w.fork) h += '<h4>Fork to your machine</h4>' + cmdRow(w.fork) +
                      '<p>Runs on your laptop: fetches the session through this hub, forks it under your name. ' +
@@ -787,6 +787,7 @@ var create = function (ROOT, CFG, opts) {
   // hold events for as long as a job runs. `out` (below): the forms between their click and their answer,
   // each with the popover it holds, read by `writingNow`, `sendingIn` and the `sent*` questions.
   var writes = 0, afterWrites = [], docGone = false;     // docGone: no request goes out any more (meetDocGone)
+  var parked = 0;              // writes not yet sent, waiting for a tick that is out (post): meetVersion counts them
   var ownWrites = 0, ownSeq = 0, held = [];       // ownSeq: how many of them have started
   var lateSends = {};          // the request ids of the sends the page gave up on, until the hub's event names them
   var lastLate = {};           // of those, the ones whose latest attempt was given up on (a send again may have failed otherwise)
@@ -806,6 +807,9 @@ var create = function (ROOT, CFG, opts) {
     if (docGone) { var no = new Error(DOC_GONE); no.unreachable = true; notLate(body); throw no; }     // a whole sentence too
     var isSave = path === '/_/save';
     var own = isSave || path === '/_/comment';
+    // A write to the file (a comment, a draft's Restore) waits for a tick that is out, as a save does: it would move
+    // the text the tick names (SPEC 10.11).
+    if (own && ticking) { parked++; try { await ticking; } finally { parked--; } }
     var ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
     var stop = ctl ? setTimeout(function () { ctl.abort(); }, isSave ? SAVE_WAIT : WAIT) : null;
     var gaveUp = function () { return !!ctl && ctl.signal.aborted; };
@@ -890,7 +894,7 @@ var create = function (ROOT, CFG, opts) {
   // answers `again` if it took it and writes it once if it did not, so a block the page split is not split
   // twice and the save after it names it (`saved`) whatever was typed meanwhile. The draft holds the id of
   // the save whose text it is (editDraftMirror), for a page that is gone by then.
-  var saving = null, asTmr = null, autosaveOwed = false, unanswered = null, reloadsAsked = 0;
+  var saving = null, asTmr = null, autosaveOwed = false, unanswered = null;
   function sentEdits(sent) {
     return sent.map(function (x) {
       var e = { i: x.b.i, html: x.html };
@@ -907,14 +911,22 @@ var create = function (ROOT, CFG, opts) {
     autosaveOwed = false;
     if (!stale && !docGone && dirty().length) save(true);
   }
-  async function save(quiet) {
+  // `res`, when given, is told whether a failure left the save owed (res.owed): the caller's own save, not an earlier one.
+  async function save(quiet, res) {
     if (!canEdit) { say('This page has nothing to save to. Open the document with sheaf to edit it.', true); return false; }
     if (stale) { say('The document changed. Reload the page before saving again.', true); return false; }
-    if (saving) { await saving; return save(quiet); }
+    if (saving) { await saving; return save(quiet, res); }
     // A tick out names the text on disk: a save now would change it under the tick, which the hub would refuse.
-    if (ticking) { await ticking; return save(quiet); }
+    // The wait can last as long as the tick's answer, so the menu says the save is on its way.
+    if (ticking) {
+      var sw = q('#rd-state');
+      if (sw && dirty().length) sw.textContent = 'Saving…';
+      await ticking;
+      refresh();
+      return save(quiet, res);
+    }
     var d = dirty();
-    if (!d.length) { unanswered = null; if (!quiet) say('Nothing changed'); return true; }
+    if (!d.length) { unanswered = null; if (!quiet) say('Nothing changed'); refresh(); return true; }
     var st = q('#rd-state');
     if (st) st.textContent = 'Saving…';
     var done, sent, reload = false, conflicts = [], j, note;
@@ -939,12 +951,12 @@ var create = function (ROOT, CFG, opts) {
         var kept = j.remap || j.merged || j.again;
         hash = kept ? was : j.hash;
         if (!kept && j.actions) drawActions(j.actions, j.hash);     // the buttons of the text the hash names (SPEC 10.11)
+        if (kept) actsUnsure = true;      // none came: the file's buttons are not known until the page reloads
         // What was sent is now saved; anything typed while the request was out
         // stays dirty for the next save.
         sent.forEach(function (x) { x.b.pristine = x.html; x.b.ownSave = kept ? x.html : null; });
         editDraftMirror();
         reload = reload || !!(j.remap || j.merged);
-        if (j.remap || j.merged) reloadsAsked++;      // tickBox: this save's answer brought no actions
         conflicts = conflicts.concat(j.conflicts || []);
         if (!again || !dirty().length) break;
       }
@@ -969,7 +981,7 @@ var create = function (ROOT, CFG, opts) {
       // after SAVE_WAIT has no banner behind it and still says so.
       // What it did not save is owed: payOwed saves it at the hello, when the stream is back or after the next request the hub answers, since no key may be pressed by then.
       var silent = quiet && e.unreachable && !e.timedOut;
-      if (silent) autosaveOwed = true;
+      if (silent) { autosaveOwed = true; if (res) res.owed = true; }
       else say(e.unreachable ? e.message : 'save failed: ' + e.message, true);     // UNREACHABLE is a whole sentence
       // A save the hub refused is not kept, nothing was written. One that got no answer may have been written:
       // it stays in `unanswered` and goes again with its id (so does one whose 200 was cut off before its body).
@@ -1700,7 +1712,12 @@ var create = function (ROOT, CFG, opts) {
     byId = {};
     COMMENTS.forEach(function (c) { byId[c.id] = c; });
     CFG.malformed = d.malformed || [];
-    if (d.hash) hash = d.hash;
+    if (d.hash) {
+      // Only comments moved: the text, so its actions, are the same, and a press names the new hash (SPEC 10.11).
+      if (actsHash === hash) actsHash = d.hash;
+      if (actsOwed && actsOwed.hash === hash) actsOwed.hash = d.hash;
+      hash = d.hash;
+    }
     if (d.telling) { telling = {}; d.telling.forEach(function (id) { telling[id] = true; }); }
     Object.keys(anchors).forEach(function (id) {
       var c = byId[id], a = anchors[id];
@@ -2836,15 +2853,36 @@ var create = function (ROOT, CFG, opts) {
   var unticked = function (html) { return html.replace(/(<input\b[^>]*?) checked=""/g, '$1'); };
   // A save the hub could not be reached for is owed (payOwed), and the box ticks as before: as far as the page
   // knows it is a plain box, and the owed save carries its tick, which the hub judges.
+  // A box whose line reads as an action is not ticked either, clean block or not, while the page does not know the
+  // file's buttons: a save answered without them (merged, remapped, `again`), a tick taken, a reload held or under
+  // way. A reload brings them, and is asked for when none is coming. Any other box ticks as a plain one.
+  var boxWaits = new WeakSet();       // a box whose block's save is out: a second click would toggle it back
+  // The eight words as the hub reads them (the_list.WORDS and _ACTION_RE), so a box no button names yet can be told.
+  var ACTION_WORDS = ['Approve', 'Run it', 'Don\'t run', 'Undo skip', 'Done', 'Share', 'Stop James', 'Move to'];
+  var ACTION_LINE = new RegExp('^(?:(?:' + ACTION_WORDS.slice(0, -1).map(function (w) {
+    return w.replace(/'/g, '[\'’]');
+  }).join('|') + ')|Move to\\s+[A-Za-z0-9._\\\\-]+\\s+\\(ref\\s+[^()\\s]+\\))(?:\\s+@[A-Za-z0-9._-]+)?$');
+  function mayBeAction(t) {
+    var li = t.closest && t.closest('li');
+    if (!li) return false;
+    var own = li.cloneNode(true);
+    Array.prototype.forEach.call(own.querySelectorAll('ul, ol'), function (n) { n.remove(); });
+    return ACTION_LINE.test(own.textContent.replace(/\s+/g, ' ').trim());
+  }
   async function tickBox(t, b) {
+    if (boxWaits.has(t)) return;
     if (unticked(ser(b)) !== unticked(b.pristine)) {
-      var asked = reloadsAsked, ok = await save(true);
-      if ((!ok && !autosaveOwed) || stale || docGone || !main.contains(t)) return;
+      var res = {}, ok;
+      boxWaits.add(t);
+      try { ok = await save(true, res); } finally { boxWaits.delete(t); }
+      if ((!ok && !res.owed) || stale || docGone || !main.contains(t)) return;
       if (ok && isActBox(t)) { say(PRESS_IT); return; }
-      if (ok && (reloadsAsked !== asked || (hash !== actsHash && !(actsOwed && actsOwed.hash === hash)))) {
-        say('The page is reloading onto a change to the file: tick it once it has.');
-        return;
-      }
+    }
+    if (mayBeAction(t) && (actsUnsure || reloadPending || reloadAfterPress || settling ||
+                           (hash !== actsHash && !(actsOwed && actsOwed.hash === hash)))) {
+      if (!reloadPending && !reloadAfterPress && !settling) reloadWhenFree(popId);
+      say('The page is reloading onto a change to the file: tick it once it has.');
+      return;
     }
     var on = !t.hasAttribute('checked');
     if (on) t.setAttribute('checked', ''); else t.removeAttribute('checked');
@@ -2866,6 +2904,9 @@ var create = function (ROOT, CFG, opts) {
   // waits for its answer: it would move the text the tick names.
   var UNDO_MS = 5000, actBoxes = new WeakSet(), actBar = null, pressOpen = false, reloadAfterPress = null;
   var actsHash = CFG.hash, actsShown = [], actsOwed = null, pressSaid = null, ticking = null;
+  // actsUnsure: the buttons drawn may not be the file's (tickBox). signOutLater: a sign-out met in a press's Undo,
+  // gone on to once the press is undone (meetSignOut).
+  var actsUnsure = false, signOutLater = null;
   // Every reload asked during a press waits as one: the reload of a change to the file goes through its settle,
   // which saves the edits on screen first, even when a plain reload (an upgrade) is asked after it; the newest
   // thread to open is kept, and a restore's reason over any other (as holdReload).
@@ -2903,7 +2944,7 @@ var create = function (ROOT, CFG, opts) {
   }
   function drawActions(acts, h) {
     if (pressOpen) { actsOwed = { acts: acts, hash: h }; return; }
-    actsHash = h; actsShown = acts || [];
+    actsHash = h; actsShown = acts || []; actsUnsure = false;
     actBoxes = boxesOfActs(acts);
     if (actBar) actBar.remove();
     actBar = null;
@@ -2923,7 +2964,7 @@ var create = function (ROOT, CFG, opts) {
     main.parentNode.insertBefore(actBar, main);
   }
   function pressable(btn, a, all) {
-    var word = btn.textContent, waiting = null;
+    var word = btn.textContent, waiting = null, pressedBox = null;
     function lock(on) { all.forEach(function (o) { if (o.btn !== btn && o.a.may) o.btn.disabled = on; }); }
     function back() { btn.textContent = word; btn.classList.remove('pending'); btn.removeAttribute('aria-label'); }
     function done() {
@@ -2932,7 +2973,9 @@ var create = function (ROOT, CFG, opts) {
       if (reloadAfterPress) {
         var r = reloadAfterPress;
         reloadAfterPress = null;
-        if (r.keep) reloadKeep(r.open); else reloadWhenFree(r.open, r.why);
+        // Only upgrades asked: a plain reload, unless edits were typed or a form opened during the press. Then it
+        // goes as a change's does, which saves them first or waits for the form.
+        if (r.keep && !dirty().length && !writingNow({ page: true })) reloadKeep(r.open); else reloadWhenFree(r.open, r.why);
       }
     }
     async function send() {
@@ -2940,8 +2983,9 @@ var create = function (ROOT, CFG, opts) {
       back();
       btn.disabled = true;
       if (a.toggle) btn.setAttribute('aria-pressed', a.pressed ? 'false' : 'true');
-      // A save out now changes the hash: the tick names the text that save leaves.
-      while (saving || settling) await (saving || new Promise(function (r) { setTimeout(r, 100); }));
+      // A save out now changes the hash: the tick names the text that save leaves. So does a comment or a Restore
+      // (`ownWrites`), which the hub would otherwise write between the tick's read and its lock.
+      while (saving || settling || ownWrites) await (saving || new Promise(function (r) { setTimeout(r, 100); }));
       // The number names a box of the text the buttons were drawn from. A save answered since moved the hash: its
       // buttons say whether the numbers still hold; without them (a text the page did not write) the hub judges.
       var at = actsHash;
@@ -2965,6 +3009,8 @@ var create = function (ROOT, CFG, opts) {
         // Ticked: the hub's `changed` reloads the page; until then nothing more is pressed on the old text.
         all.forEach(function (o) { o.btn.disabled = true; });
         actsOwed = null;
+        actsUnsure = true;
+        showTick(a, pressedBox);
         done();
       } catch (e) {
         if (ticking) free();
@@ -2979,15 +3025,41 @@ var create = function (ROOT, CFG, opts) {
       }
     }
     btn.addEventListener('click', function () {
-      if (waiting !== null) { clearTimeout(waiting); waiting = null; back(); lock(false); done(); return; }
+      if (waiting !== null) {
+        clearTimeout(waiting); waiting = null; back(); lock(false); done();
+        var later = signOutLater;
+        signOutLater = null;
+        if (later) later();
+        return;
+      }
       if (stale || dead || pressOpen) return;
       // A settle ends in a reload onto the change: a press now would die with the page, so it is not taken.
       if (settling) { say('The page is reloading onto a change to the file: press ' + a.label + ' once it has.'); return; }
       pressOpen = true;
+      // Its box, as an element: an item typed above it during the press moves its number, not the box (showTick).
+      // The number names the box only in the text the buttons were drawn from: in a block edited and not saved, or
+      // with buttons the page is not sure of, it may name another, and no box is taken.
+      var pb = boxOfAct(a), pbb = pb && blockOf(pb);
+      pressedBox = pbb && ser(pbb) === pbb.pristine && !actsUnsure && hash === actsHash ? pb : null;
       lock(true);
       btn.textContent = 'Undo'; btn.classList.add('pending'); btn.setAttribute('aria-label', 'Undo ' + word);
       waiting = setTimeout(send, UNDO_MS);
     });
+  }
+  // The box of a tick the hub took shows it until the reload: an edit saved in its block before then is merged
+  // against the ticked file, and would otherwise put the box back as the page's version of that block. A clean
+  // block stays clean.
+  function boxOfAct(a) {
+    var b = a.box && blocks.filter(function (x) { return x.i === a.box[0]; })[0];
+    return (b && boxesOf(b)[a.box[1]]) || null;
+  }
+  function showTick(a, box) {
+    var b = box && main.contains(box) && blockOf(box);
+    if (!b) return;
+    var clean = ser(b) === b.pristine, on = a.toggle ? !a.pressed : true;
+    if (on) box.setAttribute('checked', ''); else box.removeAttribute('checked');
+    box.checked = on;
+    if (clean) b.pristine = ser(b);
   }
   if (canSave) drawActions(CFG.actions, CFG.hash);
 
@@ -3182,7 +3254,7 @@ var create = function (ROOT, CFG, opts) {
   // not hear `changed`. (Another version is meetVersion's, which the hello handler calls next.)
   function meetHello(h) {
     clearHubLine();
-    stopped = false; signedOut = false;
+    stopped = false; signedOut = false; signOutLater = null;
     if (fileMissing) { fileMissing = false; refresh(); }
     if (h.service !== undefined) hubService = h.service !== false;
     if (h.boot && CFG.boot && h.boot !== CFG.boot) interruptJobs();
@@ -3279,8 +3351,18 @@ var create = function (ROOT, CFG, opts) {
       // A press waits or is out (SPEC 10.11): its answer, a refusal now, is said on this page, not lost to a reload.
       // Its tick counts in `writes`, whose wait would end after the press is done: so it is asked first.
       if (writes && !pressOpen) { afterWrites.push(meetSignOut); return; }
-      if (dirty().length || writingNow({ page: true }) || pressOpen) {
+      var typed = dirty().length || writingNow({ page: true });
+      if (typed || pressOpen) {
         hubLine = true;         // the hub's voice: a hello clears it (clearHubLine)
+        // Only a press: its answer is said here, and an Undo goes on to the sign-in page (signOutLater).
+        if (!typed) {
+          signOutLater = meetSignOut;
+          showNoticeOverOffer(CFG.proxy ? 'You were signed out of this site. Sign in to it again in another tab, ' +
+                                          'then reload this page.' :
+                              'You were signed out of the sheaf hub: its key was changed. Run <code>sheaf open</code> ' +
+                              'in a terminal to sign in again.');
+          return;
+        }
         showNoticeOverOffer(CFG.proxy ? 'You were signed out of this site. Your edits are safe on screen. Sign ' +
                                         'in to this site again in another tab, then save.' :
                             'You were signed out of the sheaf hub: its key was changed. Your edits are safe ' +
@@ -3291,7 +3373,9 @@ var create = function (ROOT, CFG, opts) {
     };
     var meetVersion = function (v) {
       if (!v || !CFG.version || v === CFG.version || docGone) return;
-      if (writes) { afterWrites.push(function () { meetVersion(v); }); return; }
+      // A press's tick counts in `writes`: its reload waits for the press instead (reloadKeep), so that a refusal
+      // is said again on the page it brings. Any other write out is waited for, as ever.
+      if (writes + parked > (ticking ? 1 : 0)) { afterWrites.push(function () { meetVersion(v); }); return; }
       if (dirty().length || writingNow({ page: true })) {
         showNoticeOverOffer('The sheaf hub was upgraded. ' +
                             (dirty().length ? 'Save your edits' : 'Send or cancel your comment') +

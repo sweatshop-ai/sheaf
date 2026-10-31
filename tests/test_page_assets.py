@@ -234,3 +234,12 @@ def test_an_answer_from_an_ask_is_taken_in_place_only_from_the_version_the_page_
     js = text("page.js")
     m = re.search(r"addEventListener\('ask-done'.*?\n      \}\);", js, re.S)
     assert m and re.search(r"d\.textSame && d\.base === hash && applyComments\(d\)", m.group(0))
+
+
+def test_the_page_knows_the_eight_words_as_the_hub_reads_them():
+    # #148: a box no button names yet is told an action's by its line, with the hub's words, in the hub's order.
+    from sheafmd.hub import the_list
+    m = re.search(r"var ACTION_WORDS = \[(.*?)\];", (PAGE / "page.js").read_text(encoding="utf-8"))
+    assert m, "page.js names no ACTION_WORDS"
+    words = [w.replace("\\'", "'") for w in re.findall(r"'((?:[^'\\]|\\.)*)'", m.group(1))]
+    assert words == list(the_list.WORDS)

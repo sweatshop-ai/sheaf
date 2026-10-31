@@ -21,6 +21,7 @@ version is never pushed, and git refuses to write the remote's over it, even the
     Commits.poll(roots)          the watcher's tick: hand each repo that pushes to the pusher, once a minute
     Commits.settle(timeout)      wait until no push is due (a test)
     Commits.stop()               a stopping hub: the pushes due go out within STOP_SECONDS, then the hub ends its git
+    blame(file, text, lines)     who last changed each of `lines` of `text`, and when: who pressed a box (9.10, #110)
 
 The hub owns its git (#95). Every git it runs is in a session of its own, so a signal to the hub's group (a
 Ctrl-C at its terminal) never reaches it, and the unit's `KillMode=mixed` (14.3) leaves it to the hub. A stopping
@@ -43,6 +44,7 @@ from .. import config, signals
 from . import state
 
 GIT_SECONDS = 20                # a commit's git commands
+BLAME_SECONDS = 2               # a blame the list's page waits for (9.10)
 PUSH_SECONDS = 60               # a push
 FETCH_SECONDS = 60              # the least time between two of the poll's pulls of one repo (#75)
 STOP_SECONDS = 15               # how long a stopping hub lets the pull and push due run: under the poll's fetch (#95)
@@ -143,6 +145,39 @@ def _git(root: Path, *args, author=None, seconds=GIT_SECONDS, given=None, childr
         return children.run(argv, seconds, _env(author))
     return subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="surrogateescape",
                           timeout=seconds, env=_env(author), input=given, start_new_session=True)
+
+
+def blame(file: Path, text: str, lines, seconds: float = BLAME_SECONDS) -> dict:
+    """{0-based line: (author's name, author's e-mail, epoch seconds)} of each of `lines` of `text`, the sheaf whose
+    file is `file`, by the commit that last changed that line (8.11): its tick, on the list (`tick: <path>`) or in the
+    page (`edit: <path>`) (9.10, #110). Blamed on `text` itself, so the lines are the ones read. A line no commit holds
+    (a root that is no git work tree, a write not committed yet) is left out."""
+    if not lines:
+        return {}
+    ranges = [arg for n in sorted(set(lines)) for arg in ("-L", f"{n + 1},{n + 1}")]
+    try:
+        r = _git(file.parent, "blame", "--line-porcelain", *ranges, "--contents", "-", "--", file.name,
+                         given=text, seconds=seconds)
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    if r.returncode != 0:
+        return {}
+    out, head = {}, {}
+    for line in r.stdout.split("\n"):
+        if line.startswith("\t"):              # the line's own text ends its block
+            if head.get("sha", "").strip("0") and "time" in head:
+                out[head["line"]] = (head.get("name", ""), head.get("mail", ""), head["time"])
+            head = {}
+        elif not head and line:                 # `<sha> <line in the commit> <line in text>`
+            sha, _, final = line.split(" ")[:3]
+            head = {"sha": sha, "line": int(final) - 1}
+        elif line.startswith("author "):
+            head["name"] = line[len("author "):]
+        elif line.startswith("author-mail "):
+            head["mail"] = line[len("author-mail "):].strip("<>")
+        elif line.startswith("author-time "):
+            head["time"] = int(line[len("author-time "):])
+    return out
 
 
 def _repo(folder: Path) -> str:

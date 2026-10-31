@@ -17,6 +17,7 @@ import pytest
 from bs4 import BeautifulSoup
 from helpers import FRONT, Front, call, hub_rows
 
+from sheafmd.blocks import split_md_blocks
 from sheafmd.hub import place, proxy, the_list
 from sheafmd.hub.state import Tokens
 from sheafmd.hub.visibility import front_matter
@@ -1557,3 +1558,21 @@ def test_a_release_by_another_member_or_of_a_one_off_is_refused_and_writes_nothi
     assert box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Share", "release": "yes"}),
                     member=NELL).status == 400
     assert path.read_text(encoding="utf-8") == before
+
+
+def test_a_one_off_ticked_in_the_page_shows_who_ticked_it_there_through_a_later_edit_of_another_block(
+        committing, box, sheaves, github):
+    path = sheaves / JOEY[5:]
+    text = path.read_text(encoding="utf-8")
+    edit = the_list.tick_edit(text, 0, "Approve")
+    r = box.post("/_/save", {"doc": JOEY, "hash": md_hash(text), "edits": [edit]}, member=NELL)   # an `edit:` commit
+    assert r.status == 200, r.text
+    text = path.read_text(encoding="utf-8")
+    i = next(i for i, b in enumerate(split_md_blocks(text)) if b.content.startswith("The draft."))
+    r = box.post("/_/save", {"doc": JOEY, "hash": md_hash(text), "edits": [{"i": i, "html": "<p>The draft, again.</p>"}]},
+                 member=DORA)
+    assert r.status == 200, r.text
+    assert git(sheaves, "log", "-2", "--format=%an|%s").splitlines() == [
+        f"Dora|edit: {JOEY[5:]}", f"Nell|edit: {JOEY[5:]}"]
+    in_progress(box, github, 5)
+    assert row_buttons(box.get("/list", member=DORA), JOEY) == [("Approve ✓ @nell, 27 Oct", None, True, None)]

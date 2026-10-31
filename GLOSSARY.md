@@ -106,6 +106,10 @@ _Avoid_: reassign, transfer
 An action a member presses once and that stays pressed: every word but Share (SPEC 9.10). On the list it is a red button that reads Undo for 5 seconds before the hub writes the tick; once pressed it stays on the row, filled and locked, with who pressed it and when (#110); the hub refuses a save that unticks it (#108); a Move to is a one-off too, one button per candidate.
 _Avoid_: single-use, final
 
+**Pressed box**:
+A ticked box of an action's word, `- [x] Approve` (SPEC 9.10). On the list a pressed one-off is a locked button that says who pressed it and when, from the commit that last changed its line (#110); a pressed toggle is one its owner may release.
+_Avoid_: done box, checked action
+
 **Toggle action**:
 An action a member presses and may release again; today only Share (SPEC 9.10, 9.11). On the list it is a blue button with `aria-pressed`, pressed and released there, or in the sheaf, by the sheaf's owner (#110).
 _Avoid_: switch

@@ -41,7 +41,6 @@ from ..source import md_hash
 from ..blocks import _split_lines, split_md_blocks
 from ..edit import TASK_MARK_RE, ticked_html
 from .. import comments as rdc
-from ..render import COMMENT_RE
 from . import commits, place, projects
 from . import proxy as proxy_mod
 from . import roots as roots_mod
@@ -198,6 +197,8 @@ def _same_issue(a: tuple | None, b: tuple | None) -> bool:
     return norm(a) == norm(b)
 
 
+_HEADING_COMMENT_RE = re.compile(r"<!--(?:-?>|[\s\S]*?-->)")      # an HTML comment as CommonMark reads it
+
 def read_sheaf(rel: str, text: str) -> Sheaf:
     fm = front_matter(text)
     issue = issue_of(fm_text(fm, "issue"))
@@ -228,11 +229,16 @@ def read_sheaf(rel: str, text: str) -> Sheaf:
 
 def _title(heading: str) -> str:
     """The text of a `# ` heading's line without its HTML comments, its spaces collapsed (9.10): a review comment
-    anchored in the heading is written on that line. A `<!--` in a code span is text, as the page shows it."""
-    masked, kept, last = rdc._mask_code(heading), [], 0
-    for m in COMMENT_RE.finditer(masked):
+    anchored in the heading is written on that line. A comment is what CommonMark reads as one, as the page does:
+    a `<!--` in a code span or after a backslash is text, and `<!-->` and `<!--->` are whole comments."""
+    masked, kept, last, pos = rdc._mask_code(heading), [], 0, 0
+    while m := _HEADING_COMMENT_RE.search(masked, pos):
+        slashes = len(masked[:m.start()]) - len(masked[:m.start()].rstrip("\\"))
+        if slashes % 2:
+            pos = m.start() + 1          # an escaped `<`: the comment may still start inside what it matched
+            continue
         kept.append(heading[last:m.start()])
-        last = m.end()
+        last = pos = m.end()
     kept.append(heading[last:])
     return " ".join("".join(kept).split())
 

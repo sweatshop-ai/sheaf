@@ -46,10 +46,11 @@ PHONE = {"viewport": {"width": 360, "height": 780}, "has_touch": True, "is_mobil
 
 @pytest.fixture
 def phone(chromium, box, sheaves):  # noqa: F811
-    """The list on a 360 px phone, Joey's row holding four buttons, one a Move to with a long slug."""
+    """The list on a 360 px phone, Joey's row holding four buttons, one a Move to whose long slug has no hyphen."""
     path = sheaves / JOEY[5:]
     path.write_text(path.read_text(encoding="utf-8").replace(
-        "- [ ] Approve\n", "- [ ] Approve\n- [ ] Done\n- [ ] Share\n- [ ] Move to klium-website-relaunch (ref 18f3a9c2)\n"),
+        "- [ ] Approve\n", "- [ ] Approve\n- [ ] Done\n- [ ] Share\n"
+        "- [ ] Move to klium_website_relaunch_international_2026_phase_two (ref 18f3a9c2)\n"),
         encoding="utf-8")
     box.hub.the_list.poll()
     yield from on_the_list(chromium, box, **PHONE)
@@ -215,6 +216,7 @@ def test_on_a_phone_a_rows_buttons_wrap_under_its_title_44_px_high_and_the_list_
     boxes = [joey(page).nth(k).bounding_box() for k in range(joey(page).count())]
     assert len(boxes) == 4
     assert all(b["y"] >= title["y"] + title["height"] for b in boxes), "a button beside the title"
+    assert len({b["y"] for b in boxes}) > 1, "four buttons on one line of 360 px"
     assert all(b["height"] >= 44 and b["width"] >= 44 for b in boxes), boxes
     assert all(b["x"] >= 0 and b["x"] + b["width"] <= 360 for b in boxes), boxes
     assert page.evaluate("document.documentElement.scrollWidth") <= 360

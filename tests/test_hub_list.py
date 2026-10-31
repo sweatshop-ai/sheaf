@@ -1614,7 +1614,8 @@ def test_a_one_off_ticked_in_the_page_shows_who_ticked_it_there_through_a_later_
 
 # ── A review comment anchored in the H1 is no part of the row's title ─────────────────────────────────────
 
-H1_COMMENT = '<!-- sheaf-comment id=c1 by="Ada" at=2026-10-29T15:43 status={} quote="sheaf"\nWhy this name?\n-->'
+# As `sheaf comment` writes one in a heading: on one line, its lines joined by `<br>`.
+H1_COMMENT = '<!-- sheaf-comment id=c1 by="Ada" at=2026-10-29T15:43 status={} quote="sheaf"<br>Why this name? -->'
 
 
 @pytest.mark.parametrize("status", ["open", "resolved"])

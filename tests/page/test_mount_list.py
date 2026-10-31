@@ -180,3 +180,15 @@ def test_the_list_mounts_with_the_filter_it_is_asked_for(chromium, box):  # noqa
     for m in mount_the_list(chromium, box, {"list": "list", "show": "mine"}):
         assert [r[1] for r in m.js(ROWS)] == ["Reply to Joey about column L"]
         assert m.js("return root.querySelector('a.list-filter[aria-current=page]').textContent;") == "Only mine"
+
+
+@pytest.mark.parametrize("href", ["javascript:alert(1)", "//evil.test/x", "/\\evil.test/x", "/\t/evil.test/x",
+                                  "/\n/evil.test/x", "/ /evil.test", "https://evil.test/x", "list", "/%2F/evil.test"])
+def test_render_keeps_no_address_that_is_not_a_path_on_the_origin(mounted, href):
+    """A link the list draws is a path of the hub's: anything the URL parser could read as another origin is dropped."""
+    got = mounted.page.evaluate("""(h) => { const f = sheafList.render({filters: [{label: 'x', href: h, on: false}],
+        sections: [{title: 's', count: 1, groups: [{name: 'g', rows: [{title: 't', href: h, meta: '', actions: []}]}]}]},
+        document.body); return Array.from(f.querySelectorAll('a')).map((a) => a.getAttribute('href')); }""", href)
+    assert got == ([None, None] if href != "/%2F/evil.test" else [href, href])
+    if href == "/%2F/evil.test":
+        assert mounted.page.evaluate("(h) => new URL(h, location.href).origin === location.origin", href)

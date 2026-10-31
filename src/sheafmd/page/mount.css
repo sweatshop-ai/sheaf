@@ -1,4 +1,6 @@
 :host { display: block; contain: content; }
-.rd-root { display: block; }
-/* The rest of the page's styles move here from page.css when the page's behaviour is mounted (#116, next step):
-   body selectors become .rd-root, position:fixed parts become the pane's own. */
+/* The wrapper is the page's body and its scroller: the host holds it at the pane's height, and `contain` on the host makes
+   the page's position:fixed parts (the menu button, the panel, the toast) the pane's, not the front's window's.
+   page.css follows this file in /_/mount.css. */
+.rd-root { display: block; position: relative; height: 100%; overflow: auto; box-sizing: border-box; }
+.rd-root:focus { outline: none; }

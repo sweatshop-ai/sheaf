@@ -851,7 +851,9 @@ class Handler:
     def _mount_asset(self, req: Req, name: str, kind: str) -> Response:
         """The loader's script and the page's style, the hub's own files. A request that names this hub's version
         (`?v=`) may be kept for a year: a new version is a new address. Any other is asked again each time."""
-        body = (resources.files("sheafmd") / "page" / name).read_bytes()
+        page = resources.files("sheafmd") / "page"
+        # The page's own script and style follow the loader's: page.js and page.css, the same files a page of its own inlines.
+        body = (page / name).read_bytes() + b"\n" + (page / {"mount.js": "page.js", "mount.css": "page.css"}[name]).read_bytes()
         named = req.query.get("v") == self.hub.version
         return Response(200, {"Content-Type": kind, "X-Content-Type-Options": "nosniff",
                               "Cache-Control": "public, max-age=31536000, immutable" if named else "no-store"}, body)

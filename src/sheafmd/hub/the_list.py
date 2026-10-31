@@ -28,6 +28,7 @@ import itertools
 import json
 import os
 import re
+import subprocess
 import threading
 import time
 import urllib.error
@@ -40,7 +41,8 @@ from .. import config, paths
 from ..source import md_hash
 from ..blocks import _split_lines, split_md_blocks
 from ..edit import TASK_MARK_RE, ticked_html
-from . import place, projects
+from . import commits, place, projects
+from . import proxy as proxy_mod
 from . import roots as roots_mod
 from . import visibility
 from .visibility import front_matter, text as fm_text
@@ -62,6 +64,9 @@ BATCH = 50                      # issues per GraphQL request
 ITEMS = 100                     # Project items of an issue per page: the most GitHub gives
 PAGES = 10                      # requests a batch's Project items may take: the poll holds _poll_lock while it pages
 HTTP_SECONDS = 20
+BLAME_SECONDS = 5               # how long the page waits for git to say who pressed a row's boxes
+BLAMED = 512                    # sheaves whose pressers the page keeps
+MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
 _BOX_RE = re.compile(r"[A-Za-z0-9.-]{1,63}")
 _REPO_RE = re.compile(r"[A-Za-z0-9-]+/[A-Za-z0-9._-]+")
@@ -176,6 +181,7 @@ class Sheaf:
     shared: str = ""
     hash: str = ""              # md_hash of the text read: a tick from its row is refused once the text is another
     moved: bool = False         # its front matter has `moved_to:`: the pointer a move left, never a row
+    pressed: tuple = ()         # its ticked boxes of the eight words, as `actions` holds its unticked ones (#110)
 
 
 def issue_of(written: str) -> tuple | None:
@@ -196,7 +202,7 @@ def read_sheaf(rel: str, text: str) -> Sheaf:
     issue = issue_of(fm_text(fm, "issue"))
     # The title and the actions are read from the blocks the page draws, so an action in a fence, an
     # indented code block or an HTML comment is no action, and every action is one the tick can reach.
-    title, actions, moved = "", [], False
+    title, actions, pressed, moved = "", [], [], False
     for b in split_md_blocks(text):
         own = b.content.removesuffix("\n").split("\n")
         if b.kind == "heading" and not title and own[0].startswith("# "):
@@ -205,16 +211,18 @@ def read_sheaf(rel: str, text: str) -> Sheaf:
             for k, line in enumerate(own):
                 if not (m := _ACTION_RE.fullmatch(line.removesuffix("\r"))):
                     continue
+                box = (_word(m), m["short"] or "", b.start + k, _slug(m))
                 if m["mark"] == " ":
-                    actions.append((_word(m), m["short"] or "", b.start + k, _slug(m)))
-                elif m["move"]:
-                    moved = True
+                    actions.append(box)
+                else:
+                    pressed.append(box)
+                    moved = moved or bool(m["move"])
     if moved:
         # A thread moves to one client (#109): once a Move to is ticked, its other candidates are no actions.
         actions = [a for a in actions if a[0] != MOVE]
     return Sheaf(rel, title or rel.rsplit("/", 1)[-1][:-3], issue, fm_text(fm, "assistant"),
                  fm_text(fm, "kind"), visibility.effective(fm), tuple(actions), visibility.sources(fm),
-                 fm_text(fm, "owner"), fm_text(fm, "shared"), md_hash(text), "moved_to" in fm)
+                 fm_text(fm, "owner"), fm_text(fm, "shared"), md_hash(text), "moved_to" in fm, tuple(pressed))
 
 
 def _word(m: re.Match) -> str:
@@ -266,13 +274,15 @@ def _boxes(text: str):
                     yield m
 
 
-def tick_edit(text: str, n: int, word: str):
+def tick_edit(text: str, n: int, word: str, release: bool = False):
     """The page's edit `{i, html}` that ticks the `n`th action of the sheaf `text`, if that action's word is
-    `word`; None when the sheaf holds no such action now, or when its box cannot be ticked this way."""
-    actions = read_sheaf("x.md", text).actions
-    if not 0 <= n < len(actions) or actions[n][0] != word:
+    `word`; None when the sheaf holds no such action now, or when its box cannot be ticked this way. With `release`,
+    the edit that unticks its `n`th pressed box instead, a toggle's (#110)."""
+    boxes = read_sheaf("x.md", text)
+    boxes = boxes.pressed if release else boxes.actions
+    if not 0 <= n < len(boxes) or boxes[n][0] != word or (release and word not in TOGGLES):
         return None
-    line = actions[n][2]
+    line = boxes[n][2]
     blocks = split_md_blocks(text)
     i = max(x for x, b in enumerate(blocks) if b.start <= line)
     b = blocks[i]
@@ -282,8 +292,41 @@ def tick_edit(text: str, n: int, word: str):
     k = sum(1 for m in marks if m.start() < offset)
     if k >= len(marks) or marks[k].start() != offset:
         return None                 # the mark found is not on the action's own line
-    fragment = ticked_html(b, k)
+    fragment = ticked_html(b, k, tick=not release)
     return None if fragment is None else {"i": i, "html": fragment}
+
+
+def pressers(file: Path, text: str, lines) -> dict:
+    """{0-based line: (author's name, author's e-mail, epoch seconds)} of each of `lines` of `text`, the sheaf whose
+    file is `file`, by the commit that last changed that line (8.11): its tick, on the list (`tick: <path>`) or in the
+    page (`edit: <path>`). Blamed on `text` itself, so the lines are the ones read. A line no commit holds (a root that
+    is no git work tree, a write not committed yet) is left out."""
+    if not lines:
+        return {}
+    ranges = [arg for n in sorted(set(lines)) for arg in ("-L", f"{n + 1},{n + 1}")]
+    try:
+        r = commits._git(file.parent, "blame", "--line-porcelain", *ranges, "--contents", "-", "--", file.name,
+                         given=text, seconds=BLAME_SECONDS)
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    if r.returncode != 0:
+        return {}
+    out, head = {}, {}
+    for line in r.stdout.split("\n"):
+        if line.startswith("\t"):              # the line's own text ends its block
+            if head.get("sha", "").strip("0") and "time" in head:
+                out[head["line"]] = (head.get("name", ""), head.get("mail", ""), head["time"])
+            head = {}
+        elif not head and line:                 # `<sha> <line in the commit> <line in text>`
+            sha, _, final = line.split(" ")[:3]
+            head = {"sha": sha, "line": int(final) - 1}
+        elif line.startswith("author "):
+            head["name"] = line[len("author "):]
+        elif line.startswith("author-mail "):
+            head["mail"] = line[len("author-mail "):].strip("<>")
+        elif line.startswith("author-time "):
+            head["time"] = int(line[len("author-time "):])
+    return out
 
 
 # ── the record ──────────────────────────────────────────────────────────────
@@ -438,6 +481,7 @@ class TheList:
         self._off_lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = None
+        self._blamed: dict = {}             # {(real path, md_hash): pressers}: blamed once per text
 
     # ── the poll ────────────────────────────────────────────────────────────
     def root(self):
@@ -683,16 +727,67 @@ class TheList:
         return (f'<section class="list-section"><h2>{html.escape(title)} <span class="list-count">{len(rows)}'
                 f'</span></h2>{"".join(out)}</section>')
 
+    def _pressers(self, root, s: Sheaf) -> dict:
+        """`pressers` of the pressed boxes of `s`, from the file that holds its name now when that file is still the
+        text the row was drawn from (else none); kept per text once every box has its commit."""
+        lines = [line for _, _, line, _ in s.pressed]
+        if not lines or not root.git:
+            return {}
+        try:
+            f = Path(os.path.realpath(self._file(root, s.rel)))
+            if (f, s.hash) in self._blamed:
+                return self._blamed[f, s.hash]
+            text = f.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return {}
+        if md_hash(text) != s.hash:
+            return {}
+        got = pressers(f, text, lines)
+        if len(got) == len(set(lines)):         # a box not committed yet is blamed again at the next page
+            if len(self._blamed) >= BLAMED:
+                self._blamed.clear()
+            self._blamed[f, s.hash] = got
+        return got
+
+    def _presser(self, name: str, mail: str, member) -> str:
+        """Who pressed a box, as the reader reads it: `you`, `@<short>` of the member whose commits carry `mail`
+        (8.11), their name without a short, else the commit's author's name."""
+        for m in self.hub.proxy.members.values():
+            if (m.email or proxy_mod.default_email(m.id, self.hub.proxy.origin)).lower() == mail.lower():
+                return "you" if m.id == member.id else "@" + m.short if m.short else m.name
+        return name
+
+    def _when(self, epoch: int) -> str:
+        """The day a box was pressed, as `30 Oct`, its year after it when that is not this year's, in the hub's time."""
+        t = time.localtime(epoch)
+        year = "" if t.tm_year == time.localtime(self.hub.clock()).tm_year else f" {t.tm_year}"
+        return f"{t.tm_mday} {MONTHS[t.tm_mon - 1]}{year}"
+
     def _row(self, row: Row, owners: list, is_owner: bool, member, root: str) -> str:
         s, rec = row.sheaf, row.record
         doc, acts = html.escape(f"{root}/{s.rel}"), []
-        for n, (word, short, _, arg) in enumerate(s.actions):
+        by = self._pressers(self.root(), s)
+        # Every box of the eight words in the order of the file: an action is a button to press, a pressed one-off a
+        # locked one that says who pressed it and when, a pressed toggle one its owner may release (#110). A toggle's
+        # number is its place among the actions, or among the pressed boxes when it is pressed.
+        boxes = sorted([(a[2], n, False, *a[:2], a[3]) for n, a in enumerate(s.actions)]
+                       + [(a[2], n, True, *a[:2], a[3]) for n, a in enumerate(s.pressed)])
+        for line, n, pressed, word, short, arg in boxes:
             label = html.escape(word + (" " + arg if arg else "")
                                 + (" @" + short if short and short.lower() != member.short.lower() else ""))
-            # A toggle says whether it is pressed; a one-off is a plain button to a screen reader.
-            kind = ('toggle', ' aria-pressed="false"') if word in TOGGLES else ("one-off", "")
-            acts.append(f'<button type="button" class="list-act {kind[0]}"{kind[1]} data-doc="{doc}" data-action="{n}"'
-                        f' data-word="{html.escape(word)}" data-hash="{html.escape(s.hash)}">{label}</button>')
+            data = f'data-doc="{doc}" data-word="{html.escape(word)}"'
+            if word in TOGGLES:
+                # Share is its owner's alone (9.11): another member reads whether it is pressed, and cannot press it.
+                acts.append(f'<button type="button" class="list-act toggle" aria-pressed="{str(pressed).lower()}"'
+                            f'{"" if is_owner else " disabled"} {data} data-action="{n}"{" data-release" if pressed else ""}'
+                            f' data-hash="{html.escape(s.hash)}">{label}</button>')
+            elif pressed:
+                said = f"{label} ✓" + (f" {html.escape(self._presser(*by[line][:2], member))}, "
+                                       f"{self._when(by[line][2])}" if line in by else "")
+                acts.append(f'<button type="button" class="list-act one-off pressed" disabled {data}>{said}</button>')
+            else:                       # a one-off is a plain button to a screen reader
+                acts.append(f'<button type="button" class="list-act one-off" {data} data-action="{n}"'
+                            f' data-hash="{html.escape(s.hash)}">{label}</button>')
         assistant = f' <span class="list-assistant">{html.escape(s.assistant)}</span>' if s.assistant else ""
         by_login = {m.github.lower(): m for m in self.hub.proxy.members.values() if m.github}
         first = by_login.get(rec.assignees[0].lower()) if rec.assignees else None
@@ -729,7 +824,8 @@ def _age(seconds: float) -> str:
 # sends nothing. While a press of a row waits or is sent, the row's other buttons cannot be pressed: they name their
 # action by the text the list read, which the tick changes. The list reloads once every press has been answered, so a
 # reload never drops a press still in its window; a refusal is said above the rows, after that reload too, and gives
-# the button back.
+# the button back. A button drawn locked (a pressed one-off, another's Share) stays locked; a pressed toggle's press
+# releases it (#110).
 SCRIPT = """
 var UNDO_MS = 5000, open = 0, ticked = false, reloading = false, SAID = 'sheaf-list-said';
 var said = document.querySelector('.list-error'), refused = new Map();   // button: its refusal on this page
@@ -743,9 +839,9 @@ function settled() {
   try { if (refused.size) sessionStorage.setItem(SAID, Array.from(refused.values()).join(' ')); } catch (e) {}
   location.reload();
 }
-document.querySelectorAll('.list-row button.list-act').forEach(function (b) {
-  var word = b.textContent, waiting = null;
-  var others = Array.prototype.filter.call(b.closest('.list-row').querySelectorAll('button.list-act'),
+document.querySelectorAll('.list-row button.list-act:not(:disabled)').forEach(function (b) {
+  var word = b.textContent, waiting = null, pressed = b.getAttribute('aria-pressed');
+  var others = Array.prototype.filter.call(b.closest('.list-row').querySelectorAll('button.list-act:not(:disabled)'),
     function (o) { return o !== b; });
   function lock(on) { others.forEach(function (o) { o.disabled = on; }); }
   function back() { b.textContent = word; b.classList.remove('pending'); b.removeAttribute('aria-label'); }
@@ -753,16 +849,17 @@ document.querySelectorAll('.list-row button.list-act').forEach(function (b) {
     waiting = null;
     back();
     b.disabled = true;
-    if (b.hasAttribute('aria-pressed')) b.setAttribute('aria-pressed', 'true');
+    if (pressed !== null) b.setAttribute('aria-pressed', pressed === 'true' ? 'false' : 'true');
+    var tick = {doc: b.dataset.doc, action: Number(b.dataset.action), word: b.dataset.word, hash: b.dataset.hash};
+    if (b.hasAttribute('data-release')) tick.release = true;
     fetch('/_/tick', {method: 'POST', headers: {'Content-Type': 'application/json'}, credentials: 'same-origin',
-      body: JSON.stringify({doc: b.dataset.doc, action: Number(b.dataset.action), word: b.dataset.word,
-        hash: b.dataset.hash})})
+      body: JSON.stringify(tick)})
       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) {
         if (r.ok) { ticked = true; refused.delete(b); return; }
         throw new Error(j.error || ('the hub answered ' + r.status));
       }); })
       .catch(function (e) {
-        if (b.hasAttribute('aria-pressed')) b.setAttribute('aria-pressed', 'false');
+        if (pressed !== null) b.setAttribute('aria-pressed', pressed);
         b.disabled = false; lock(false);
         refused.set(b, e.message); say(e.message);
       })
@@ -797,7 +894,7 @@ ul{list-style:none;margin:0;padding:0}
 .list-act{font:inherit;font-size:13px;border-radius:999px;padding:2px 10px;cursor:pointer;background:none}
 .list-act.one-off{border:1px solid var(--once);color:var(--once)}
 .list-act.toggle{border:1px solid var(--chip);color:var(--chip)}
-.list-act.one-off.pending{background:var(--once);color:var(--bg)}
+.list-act.one-off.pending,.list-act.one-off.pressed{background:var(--once);color:var(--bg)}
 .list-act.toggle.pending,.list-act.toggle[aria-pressed=true]{background:var(--chip);color:var(--bg)}
 .list-act:disabled{cursor:default;opacity:.7}
 .list-title{color:var(--fg);text-decoration:none}.list-title:hover{text-decoration:underline}

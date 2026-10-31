@@ -7,6 +7,7 @@ import json
 import os
 import pwd
 import re
+import subprocess
 import threading
 import time
 from collections import namedtuple
@@ -557,7 +558,7 @@ def test_a_tick_on_the_row_is_answered_in_the_sheaf_and_the_row_leaves_waiting_o
     github.issues[5].update(status="In progress at TT", updated=ago(60))   # the record routine moved it
     box.hub.the_list.poll()
     page = read(box.get("/list", member=NELL))
-    assert page["In progress 2"]["globex/black-friday"] == [("Reply to Joey about column L James", "mail · you · #5 · 1 min")]
+    assert page["In progress 2"]["globex/black-friday"] == [("Reply to Joey about column L Approve ✓ James", "mail · you · #5 · 1 min")]
 
 
 def test_a_tick_of_an_action_the_sheaf_no_longer_holds_is_refused_and_writes_nothing(box, sheaves):
@@ -581,10 +582,11 @@ def now(box, body):
 
 def row_press(res, doc, word=None):
     """The tick the row of `doc` would post on a press of its button for `word` (its first button without one):
-    the button's doc, action, word and hash."""
+    the button's doc, action, word and hash, and `release` for a pressed toggle (#110)."""
     found = BeautifulSoup(res.text, "html.parser").select(f'button.list-act[data-doc="{doc}"]')
-    b = next(b for b in found if word is None or b["data-word"] == word)
-    return {"doc": b["data-doc"], "action": int(b["data-action"]), "word": b["data-word"], "hash": b["data-hash"]}
+    b = next(b for b in found if (word is None or b["data-word"] == word) and b.has_attr("data-action"))
+    press = {"doc": b["data-doc"], "action": int(b["data-action"]), "word": b["data-word"], "hash": b["data-hash"]}
+    return {**press, "release": True} if b.has_attr("data-release") else press
 
 
 def test_a_tick_from_a_stale_row_does_not_tick_the_next_action_with_the_same_word(box, sheaves):
@@ -898,9 +900,9 @@ def test_a_tick_after_the_issue_changed_takes_the_row_off_the_list_until_the_nex
     r = box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Approve"}), member=NELL)
     assert r.status == 200, r.text
     for m in (NELL, DORA):
-        assert "Reply to Joey about column L James" not in titles(read(box.get("/list?show=all", member=m)))
+        assert "Reply to Joey about column L Approve ✓ James" not in titles(read(box.get("/list?show=all", member=m)))
     box.hub.the_list.poll()
-    listed = "Reply to Joey about column L James" in titles(read(box.get("/list?show=all", member=DORA)))
+    listed = "Reply to Joey about column L Approve ✓ James" in titles(read(box.get("/list?show=all", member=DORA)))
     assert listed == (issue != "issue:\n")                      # back under #7; with no issue, on no list (9.10)
 
 
@@ -1226,10 +1228,10 @@ def test_a_poll_that_read_a_sheaf_before_a_tick_took_its_row_off_does_not_put_it
     box.hub.the_list.poll()
     monkeypatch.setattr(the_list, "fetch", fetch)
     for m in (NELL, DORA):
-        assert "Reply to Joey about column L James" not in titles(read(box.get("/list?show=all", member=m)))
+        assert "Reply to Joey about column L Approve ✓ James" not in titles(read(box.get("/list?show=all", member=m)))
     assert JOEY[5:] not in {r.sheaf.rel for r in box.hub.the_list._snap.rows}
     box.hub.the_list.poll()
-    listed = "Reply to Joey about column L James" in titles(read(box.get("/list?show=all", member=DORA)))
+    listed = "Reply to Joey about column L Approve ✓ James" in titles(read(box.get("/list?show=all", member=DORA)))
     assert listed == (issue != "issue:\n")                      # back under #7; with no issue, on no list (9.10)
 
 
@@ -1317,12 +1319,15 @@ def test_once_a_move_to_is_ticked_the_other_candidates_are_no_actions_and_other_
     assert [(w, arg) for w, _, _, arg in s.actions] == [("Done", "")]
 
 
-def test_a_row_whose_move_to_is_ticked_draws_no_move_to_button(box, sheaves):
+def test_a_row_whose_move_to_is_ticked_draws_no_move_to_button_to_press(box, sheaves):
     path = unsure(sheaves)
     path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Move to klium", "- [x] Move to klium"),
                     encoding="utf-8")
     box.hub.the_list.poll()
-    assert [b for b in buttons(box.get("/list?show=all", member=NELL)) if b.word == "Move to"] == []
+    soup = BeautifulSoup(box.get("/list?show=all", member=NELL).text, "html.parser")
+    # The ticked candidate stays, locked (#110); the others are gone.
+    assert [(b.get_text(" ", strip=True), b.has_attr("disabled"))
+            for b in soup.select('button.list-act[data-word="Move to"]')] == [("Move to klium ✓", True)]
 
 
 def test_a_tick_of_another_candidate_once_one_is_ticked_is_refused_and_one_tick_stays(box, sheaves):
@@ -1427,3 +1432,128 @@ def test_a_write_that_unticks_a_one_off_names_its_word(old, new, word):
 ])
 def test_a_write_that_unticks_no_one_off_names_none(old, new):
     assert the_list.unticks_one_off(f"# A sheaf\n\n{old}", f"# A sheaf\n\n{new}") is None
+
+
+# ── a pressed one-off shows locked, with who and when (#110) ─────────────────
+
+def git(at, *args):
+    return subprocess.run(["git", "-C", str(at), *args], check=True, capture_output=True, text=True).stdout
+
+
+@pytest.fixture
+def committing(sheaves, monkeypatch):
+    """The sheaves as a git repo whose root commits (8.11), every sheaf in its first commit, by "the box"; every
+    commit from here on is dated 27 Oct 2025 at noon UTC, the same day in every time zone of the hub. Dora is a member
+    of Joey's project too. Asked before `box`, so the hub registers the root as a git work tree."""
+    (sheaves / "projects.toml").write_text(
+        '[projects."globex/black-friday"]\nmembers = ["nell", "dora"]\nstatus = "live"\n\n'
+        '[projects."initech/website"]\nmembers = ["nell", "dora"]\nstatus = "live"\n', encoding="utf-8")
+    subprocess.run(["git", "init", "-q", str(sheaves)], check=True)
+    git(sheaves, "config", "user.name", "the box")
+    git(sheaves, "config", "user.email", "box@example.com")
+    (sheaves / ".sheaf.toml").write_text("commit = true\n", encoding="utf-8")
+    git(sheaves, "add", "-A")
+    git(sheaves, "commit", "-q", "-m", "first")
+    monkeypatch.setenv("GIT_AUTHOR_DATE", "2025-10-27T12:00:00Z")
+    return sheaves
+
+
+def row_buttons(res, doc):
+    """The buttons of the row of `doc`, in row order: (label, data-action or None, disabled, aria-pressed or None)."""
+    soup = BeautifulSoup(res.text, "html.parser")
+    return [(b.get_text(" ", strip=True), b.get("data-action"), b.has_attr("disabled"), b.get("aria-pressed"))
+            for b in soup.select(f'button.list-act[data-doc="{doc}"]')]
+
+
+def in_progress(box, github, number):
+    """The record routine moved the issue on: its sheaf shows again, under In progress."""
+    github.issues[number].update(status="In progress at TT", updated=ago(60))
+    box.hub.the_list.poll()
+
+
+def test_a_one_off_pressed_on_the_row_shows_locked_with_who_pressed_it_and_when(committing, box, sheaves, github):
+    path = sheaves / JOEY[5:]
+    path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [ ] Approve\n- [ ] Done\n"),
+                    encoding="utf-8")
+    git(sheaves, "commit", "-q", "-am", "Done too")
+    box.hub.the_list.poll()
+    r = box.post("/_/tick", row_press(box.get("/list", member=NELL), JOEY, "Approve"), member=NELL)
+    assert r.status == 200, r.text
+    in_progress(box, github, 5)
+    assert row_buttons(box.get("/list", member=NELL), JOEY) == [
+        ("Approve ✓ you, 27 Oct", None, True, None), ("Done", "0", False, None)]
+    assert row_buttons(box.get("/list", member=DORA), JOEY) == [
+        ("Approve ✓ @nell, 27 Oct", None, True, None), ("Done", "0", False, None)]
+
+
+def test_a_box_no_commit_holds_shows_pressed_without_who_or_when_and_a_ticked_move_to_is_one(box, sheaves):
+    path = sheaves / JOEY[5:]
+    path.write_text(path.read_text(encoding="utf-8").replace(
+        "- [ ] Approve\n", "- [x] Approve\n- [ ] Done\n- [x] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n"),
+        encoding="utf-8")
+    box.hub.the_list.poll()
+    assert row_buttons(box.get("/list", member=NELL), JOEY) == [
+        ("Approve ✓", None, True, None), ("Done", "0", False, None), ("Move to klium ✓", None, True, None)]
+
+
+def test_a_box_ticked_by_someone_who_is_no_member_shows_their_name(committing, box, sheaves):
+    path = sheaves / JOEY[5:]
+    path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [x] Approve @dora\n"),
+                    encoding="utf-8")
+    git(sheaves, "-c", "user.name=Ada Byron", "-c", "user.email=ada@example.com", "commit", "-q", "-am", "by hand")
+    box.hub.the_list.poll()
+    assert row_buttons(box.get("/list", member=NELL), JOEY) == [("Approve @dora ✓ Ada Byron, 27 Oct", None, True, None)]
+    # The page reads the file again when it changed since the poll: a tick not committed yet says no one.
+    path.write_text(path.read_text(encoding="utf-8") + "\n- [x] Done\n", encoding="utf-8")
+    assert row_buttons(box.get("/list", member=NELL), JOEY) == [
+        ("Approve @dora ✓ Ada Byron, 27 Oct", None, True, None), ("Done ✓", None, True, None)]
+
+
+def shared_joey(sheaves):
+    """Joey's sheaf with Approve and a pressed Share, committed."""
+    path = sheaves / JOEY[5:]
+    path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [ ] Approve\n- [x] Share\n"),
+                    encoding="utf-8")
+    git(sheaves, "commit", "-q", "-am", "shared")
+    return path
+
+
+def test_a_pressed_share_shows_pressed_and_only_its_owner_may_press_it(committing, box, sheaves):
+    shared_joey(sheaves)
+    box.hub.the_list.poll()
+    assert row_buttons(box.get("/list", member=NELL), JOEY) == [("Approve", "0", False, None), ("Share", "0", False, "true")]
+    assert row_buttons(box.get("/list", member=DORA), JOEY) == [("Approve", "0", False, None), ("Share", "0", True, "true")]
+    path = sheaves / JOEY[5:]
+    path.write_text(path.read_text(encoding="utf-8").replace("- [x] Share", "- [ ] Share"), encoding="utf-8")
+    assert row_buttons(box.get("/list", member=NELL), JOEY)[1] == ("Share", "1", False, "false")
+    assert row_buttons(box.get("/list", member=DORA), JOEY)[1] == ("Share", "1", True, "false")
+
+
+def test_the_owner_releases_a_pressed_share_from_the_row(committing, box, sheaves):
+    shared_joey(sheaves)
+    box.hub.the_list.poll()
+    press = row_press(box.get("/list", member=NELL), JOEY, "Share")
+    assert press["release"] is True
+    r = box.post("/_/tick", press, member=NELL)
+    assert r.status == 200, r.text
+    top = box.hub.the_list.root().path
+    text = (top / place.file_rel(top, JOEY[5:])).read_text(encoding="utf-8")
+    assert "- [ ] Share\n" in text and front_matter(text)["visibility"] == "owner"
+    assert git(sheaves, "log", "-1", "--format=%an|%s").startswith("Nell|")
+    assert row_buttons(box.get("/list", member=NELL), JOEY)[1] == ("Share", "1", False, "false")
+
+
+def test_a_release_by_another_member_or_of_a_one_off_is_refused_and_writes_nothing(committing, box, sheaves):
+    path = shared_joey(sheaves)
+    path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Approve", "- [x] Approve"), encoding="utf-8")
+    box.hub.the_list.poll()
+    before = path.read_text(encoding="utf-8")
+    r = box.post("/_/tick", now(box, {"doc": JOEY, "action": 1, "word": "Share", "release": True}), member=DORA)
+    assert r.status == 409, r.text
+    assert "Only the owner" in r.json()["error"]
+    r = box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Approve", "release": True}), member=NELL)
+    assert r.status == 409, r.text
+    assert r.json()["error"] == "Approve is pressed once: its tick cannot be taken back."
+    assert box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Share", "release": "yes"}),
+                    member=NELL).status == 400
+    assert path.read_text(encoding="utf-8") == before

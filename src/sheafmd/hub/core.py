@@ -763,6 +763,29 @@ class Hub:
         if e is not None:
             e.bus.publish(name, data)
 
+    def relay_failed(self, address: str, t, kind: str, error: str, **fields):
+        """A relayed Tell that will not be delivered (9.14): its row, and the page's `tellError` by its event."""
+        self.record(kind, address, tell=t.id, thread=t.thread, error=error, **fields)
+        e = self.entries.get(address)
+        if e is not None:
+            e.bus.publish("tell-relay-failed", {"id": t.thread, "error": error})
+
+    def expire_relayed(self):
+        """Drop every relayed Tell queued an hour ago or more (9.14): each tick, and each relay request, relayed
+        Tell and page's /_/doc, so one is dropped within a second of its hour whether or not anything calls in."""
+        for address, t in self.relays.expire():
+            self.relay_failed(address, t, "tell-expired", relay_mod.EXPIRED)
+
+    def relay_changed(self, address: str, session: str):
+        """A relay of the sheaf's live session `session` connected, or its grace ran out: the open pages read
+        `/_/doc` again (9.14). A fork that is no longer the live one changes nothing on the page."""
+        e = self.entries.get(address)
+        if e is None:
+            return
+        items = work_mod.sessions(visibility.front_matter(e.live.current()[1]))
+        if items and items[0]["id"] == session:
+            e.bus.publish("relay", {})
+
     def tick(self):
         """One pass of the watcher, run every second. For each document with an open tab or a
         Tell wait: give up on waits nobody answers, and when the file's (mtime, size) moved,
@@ -789,6 +812,12 @@ class Hub:
             self._watch_drops()                   # after the tabs' refresh: a reply that just landed is in
         except Exception:
             self.record_exception("drops-failed")
+        try:
+            self.expire_relayed()                 # by the clock, with no relay or page calling in (9.14)
+            for address, session in self.relays.lapsed():
+                self.relay_changed(address, session)
+        except Exception:
+            self.record_exception("relays-failed")
         try:
             self.commits.poll(self.roots.all())   # what the remote got, with no save (8.11, #75)
         except Exception:

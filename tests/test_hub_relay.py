@@ -202,7 +202,9 @@ def test_without_a_connected_relay_tell_on_a_fork_is_refused(team, box, work):
     assert team.hub.relays.open(ADDRESS, FORK) == []
 
 
-def test_can_offers_relay_tell_while_the_relay_of_that_session_is_connected(team, box, work):
+def test_can_offers_relay_tell_while_the_relay_of_that_session_is_connected(team, box, work, monkeypatch):
+    now = [1_000_000.0]
+    monkeypatch.setattr(relay_mod, "_clock", lambda: now[0])
     token = forked(team)
     assert team.get(f"/_/doc?doc={ADDRESS}", member=HANS).json()["capabilities"] == []
     sub = listen(team, token).stream
@@ -210,6 +212,7 @@ def test_can_offers_relay_tell_while_the_relay_of_that_session_is_connected(team
     assert j["capabilities"] == ["relay-tell"]
     assert j["work"]["relay"] is True
     sub.close()
+    now[0] += relay_mod.GRACE           # a relay that has not reconnected within the grace (#135)
     j = team.get(f"/_/doc?doc={ADDRESS}", member=HANS).json()
     assert j["capabilities"] == [] and j["work"]["relay"] is False
 
@@ -291,10 +294,10 @@ def test_a_queued_tell_expires_after_an_hour(team, box, work, monkeypatch):
     got = comment(team, work, "tell")
     tab.drain()
     now[0] += relay_mod.TTL - 1
-    team.handler._expire_relayed()
+    team.hub.expire_relayed()
     assert hub_rows("tell-expired") == []
     now[0] += 1
-    team.handler._expire_relayed()
+    team.hub.expire_relayed()
     row, = hub_rows("tell-expired")
     assert row["thread"] == got.json()["id"]
     assert team.hub.relays.open(ADDRESS, FORK) == []
@@ -376,6 +379,78 @@ def test_a_live_session_changed_by_hand_drops_the_queued_tells_with_a_row(team, 
     assert row["thread"] == first and row["error"] == RELAY_MOVED
     assert {"id": first, "error": RELAY_MOVED} in [d for n, d in tab.drain() if n == "tell-relay-failed"]
     assert [t.thread for t in team.hub.relays.open(ADDRESS, FORK2)] == [got.json()["id"]]
+
+
+# ── #135: the reconnect gap, the page told, expiry by the clock, visibility ──
+
+def test_a_tell_pressed_in_the_reconnect_gap_is_queued_and_sent_on_reconnect(team, box, work, monkeypatch):
+    now = [1_000_000.0]
+    monkeypatch.setattr(relay_mod, "_clock", lambda: now[0])
+    token = forked(team)
+    listen(team, token).stream.close()          # the front ended the stream; the relay is reconnecting
+    now[0] += relay_mod.GRACE - 1
+    got = comment(team, work, "tell")
+    assert got.status == 200 and "tellError" not in got.json(), got.text
+    row, = hub_rows("tell-relayed")
+    assert row["thread"] == got.json()["id"]
+    assert [t["id"] for t in tells(listen(team, token).stream)] == [row["tell"]]
+
+
+def test_past_the_grace_a_closed_relay_is_no_longer_connected(team, box, work, monkeypatch):
+    now = [1_000_000.0]
+    monkeypatch.setattr(relay_mod, "_clock", lambda: now[0])
+    listen(team, forked(team)).stream.close()
+    now[0] += relay_mod.GRACE
+    assert comment(team, work, "tell").status == 400
+    assert team.get(f"/_/doc?doc={ADDRESS}", member=HANS).json()["capabilities"] == []
+
+
+def test_the_page_is_told_when_a_relay_connects_and_when_it_is_gone(team, box, work, monkeypatch):
+    now = [1_000_000.0]
+    monkeypatch.setattr(relay_mod, "_clock", lambda: now[0])
+    token = forked(team)
+    tab = team.get(f"/_/live?doc={ADDRESS}", member=HANS).stream
+    tab.drain()
+    sub = listen(team, token).stream
+    assert [n for n, _ in tab.drain()].count("relay") == 1
+    sub.close()
+    listen(team, token).stream.close()          # a reconnect within the grace: the page hears nothing
+    team.hub.tick()
+    assert "relay" not in [n for n, _ in tab.drain()]
+    now[0] += relay_mod.GRACE
+    team.hub.tick()
+    assert [n for n, _ in tab.drain()].count("relay") == 1
+
+
+def test_a_queued_tell_expires_by_the_clock_with_nothing_calling_in(team, box, work, monkeypatch):
+    now = [1_000_000.0]
+    monkeypatch.setattr(relay_mod, "_clock", lambda: now[0])
+    listen(team, forked(team))
+    got = comment(team, work, "tell")
+    now[0] += relay_mod.TTL
+    team.hub.tick()
+    row, = hub_rows("tell-expired")
+    assert row["thread"] == got.json()["id"]
+
+
+def test_a_member_whose_access_is_taken_away_gets_gone_instead_of_the_tell(team, box, work):
+    sub = listen(team, forked(team)).stream
+    sub.drain()
+    (work / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["thierry"]\n'
+                                        'status = "live"\n', encoding="utf-8")
+    relayed = team.hub.relays.put(ADDRESS, FORK, relay_mod.Tell(
+        "11111111-2222-4333-8444-555555555555", "c9", "the thread's words", "thierry"))
+    assert relayed == []
+    assert [n for n, _ in sub.drain()] == ["gone"]
+
+
+def test_a_relay_in_its_grace_whose_member_lost_access_takes_no_tell(team, box, work):
+    """#135: the grace keeps a reconnecting relay, not one whose member can no longer open the sheaf."""
+    listen(team, forked(team)).stream.close()
+    (work / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["thierry"]\n'
+                                        'status = "live"\n', encoding="utf-8")
+    assert comment(team, work, "tell", as_=THIERRY).status == 400
+    assert team.hub.relays.open(ADDRESS, FORK) == []
 
 
 # ── the box's drop carries the Tell's id and its message (9.12) ──────────────

@@ -616,7 +616,7 @@
   // every comment write and every outside change.
   function reloadKeep(openId) {
     if (docGone) return;        // it would load another folder's document, or none (meetDocGone)
-    if (pressOpen) { reloadAfterPress = { open: openId, keep: true }; return; }     // as in settle (SPEC 10.11)
+    if (pressOpen) { waitForPress({ open: openId, keep: true }); return; }     // as in settle (SPEC 10.11)
     try {
       if (pressSaid && Date.now() < pressSaid.until) sessionStorage.setItem('rd-press-said', pressSaid.text);
       sessionStorage.setItem('rd-keep', JSON.stringify({ doc: CFG.doc, y: window.scrollY, open: openId || null,
@@ -833,6 +833,8 @@
     if (!canEdit) { say('This page has nothing to save to. Open the document with sheaf to edit it.', true); return false; }
     if (stale) { say('The document changed. Reload the page before saving again.', true); return false; }
     if (saving) { await saving; return save(quiet); }
+    // A tick out names the text on disk: a save now would change it under the tick, which the hub would refuse.
+    if (ticking) { await ticking; return save(quiet); }
     var d = dirty();
     if (!d.length) { unanswered = null; if (!quiet) say('Nothing changed'); return true; }
     var st = q('#rd-state');
@@ -913,7 +915,7 @@
   async function settle(openId) {
     if (settling || docGone) return;
     // Every reload of an outside change, a held one too, comes here: one waits for an open press (SPEC 10.11).
-    if (pressOpen) { reloadAfterPress = { open: openId }; return; }
+    if (pressOpen) { waitForPress({ open: openId }); return; }
     settling = true;
     for (var n = 0; n < 3 && dirty().length; n++) {
       if (!(await save(true))) {
@@ -1168,7 +1170,7 @@
   function reloadWhenFree(openId, why) {
     if (docGone) return;
     // A press of an action button waits or is out (SPEC 10.11): the reload waits for its answer, as the list's does.
-    if (pressOpen) { reloadAfterPress = { open: openId, why: why }; return; }    // its form is not waited for either
+    if (pressOpen) { waitForPress({ open: openId, why: why }); return; }    // its form is not waited for either
     if (!writingNow({ sent: 'any' })) { settle(openId); return; }
     holdReload(why);
   }
@@ -2741,16 +2743,32 @@
       // contenteditable it is not reliable, and the attribute must move with it.
       e.preventDefault();
       // A box of the eight words is pressed with its button at the top of the page (SPEC 10.11).
-      if (actBoxes.has(t)) { say('Press it with its button at the top of the page.'); return; }
+      if (isActBox(t)) { say(PRESS_IT); return; }
       var b = blockOf(t);
       if (stale || dead || !b || !editable.has(b.i)) return;
-      var on = !t.hasAttribute('checked');
-      if (on) t.setAttribute('checked', ''); else t.removeAttribute('checked');
-      // A cancelled click puts the old state back once the handlers are done.
-      setTimeout(function () { t.checked = t.hasAttribute('checked'); }, 0);
-      refresh();
-      save(true);
+      tickBox(t, b);
     });
+  }
+  var PRESS_IT = 'Press it with its button at the top of the page.';
+  // A box in a block whose words were edited and not saved may be an action typed there, which has no button yet:
+  // the block is saved first, and the answer's actions say whether the box is one (SPEC 10.11). A save that brings a
+  // reload (merged or remapped) brings none: the box is left for the page that follows. Ticks alone make no action.
+  var unticked = function (html) { return html.replace(/(<input\b[^>]*?) checked=""/g, '$1'); };
+  async function tickBox(t, b) {
+    if (unticked(ser(b)) !== unticked(b.pristine)) {
+      if (!(await save(true)) || stale || dead || !main.contains(t)) return;
+      if (isActBox(t)) { say(PRESS_IT); return; }
+      if (hash !== actsHash && !(actsOwed && actsOwed.hash === hash)) {
+        say('The page is reloading onto a change to the file: tick it once it has.');
+        return;
+      }
+    }
+    var on = !t.hasAttribute('checked');
+    if (on) t.setAttribute('checked', ''); else t.removeAttribute('checked');
+    // A cancelled click puts the old state back once the handlers are done.
+    setTimeout(function () { t.checked = t.hasAttribute('checked'); }, 0);
+    refresh();
+    save(true);
   }
 
   // ---- the action buttons (SPEC 10.11) ------------------------------------------
@@ -2761,9 +2779,32 @@
   // buttons cannot be pressed: they name their actions by the text the page holds, which the tick changes. The boxes
   // themselves stay in the document, and a click on one says where its button is. A save's answer brings the buttons
   // of the text it wrote (`actsOwed`, with its hash), drawn once no press is open; a press whose buttons that save
-  // changed is not sent, since its number may now name another box.
+  // changed is not sent, since its number may now name another box. While the tick is out (`ticking`), a save
+  // waits for its answer: it would move the text the tick names.
   var UNDO_MS = 5000, actBoxes = new WeakSet(), actBar = null, pressOpen = false, reloadAfterPress = null;
-  var actsHash = CFG.hash, actsShown = [], actsOwed = null, pressSaid = null;
+  var actsHash = CFG.hash, actsShown = [], actsOwed = null, pressSaid = null, ticking = null;
+  // Every reload asked during a press waits as one: the reload of a change to the file goes through its settle,
+  // which saves the edits on screen first, even when a plain reload (an upgrade) is asked after it; the newest
+  // thread to open is kept, and a restore's reason over any other (as holdReload).
+  function waitForPress(r) {
+    var o = reloadAfterPress;
+    reloadAfterPress = !o ? r : {
+      open: r.open || o.open, keep: !!(o.keep && r.keep),
+      why: o.why === 'restore' || r.why === 'restore' ? 'restore' : r.why || o.why
+    };
+  }
+  // The boxes of these actions in the document, by the blocks on screen.
+  function boxesOfActs(acts) {
+    var set = new WeakSet();
+    (acts || []).forEach(function (a) {
+      var b = a.box && blocks.filter(function (x) { return x.i === a.box[0]; })[0];
+      var box = b && boxesOf(b)[a.box[1]];
+      if (box) set.add(box);
+    });
+    return set;
+  }
+  // A box of an action: of the buttons drawn, or of those a save brought while a press was open.
+  function isActBox(t) { return actBoxes.has(t) || (!!actsOwed && boxesOfActs(actsOwed.acts).has(t)); }
   function sameActions(a, b) {
     var sig = function (xs) { return JSON.stringify(xs.map(function (x) { return [x.label, x.pressed, x.n]; })); };
     return sig(a) === sig(b);
@@ -2780,15 +2821,10 @@
   function drawActions(acts, h) {
     if (pressOpen) { actsOwed = { acts: acts, hash: h }; return; }
     actsHash = h; actsShown = acts || [];
-    actBoxes = new WeakSet();
+    actBoxes = boxesOfActs(acts);
     if (actBar) actBar.remove();
     actBar = null;
     if (!acts || !acts.length) return;
-    acts.forEach(function (a) {
-      var b = a.box && blocks.filter(function (x) { return x.i === a.box[0]; })[0];
-      var box = b && boxesOf(b)[a.box[1]];
-      if (box) actBoxes.add(box);
-    });
     actBar = el('div', { id: 'rd-actions', role: 'group', 'aria-label': 'Actions' });
     var all = acts.map(function (a) {
       var btn = document.createElement('button');
@@ -2837,13 +2873,18 @@
       }
       var tick = { action: a.n, word: a.word, hash: at, where: 'page' };
       if (a.release) tick.release = true;
+      var ticked;
+      ticking = new Promise(function (r) { ticked = r; });
+      var free = function () { ticking = null; ticked(); };       // before done(): the reload it runs may save
       try {
         await post('/_/tick', tick);
+        free();
         // Ticked: the hub's `changed` reloads the page; until then nothing more is pressed on the old text.
         all.forEach(function (o) { o.btn.disabled = true; });
         actsOwed = null;
         done();
       } catch (e) {
+        if (ticking) free();
         if (a.toggle) btn.setAttribute('aria-pressed', a.pressed ? 'true' : 'false');
         btn.disabled = false;
         lock(false);
@@ -3151,7 +3192,8 @@
       if (docGone) return;
       stopped = true;
       if (writes) { afterWrites.push(meetSignOut); return; }
-      if (dirty().length || writingNow({ page: true })) {
+      // A press waits or is out (SPEC 10.11): its answer, a refusal now, is said on this page, not lost to a reload.
+      if (dirty().length || writingNow({ page: true }) || pressOpen) {
         hubLine = true;         // the hub's voice: a hello clears it (clearHubLine)
         showNoticeOverOffer(CFG.proxy ? 'You were signed out of this site. Your edits are safe on screen. Sign ' +
                                         'in to this site again in another tab, then save.' :

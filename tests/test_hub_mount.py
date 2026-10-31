@@ -2,6 +2,7 @@
 {title, html, config, css, toc, version} with the body already through the MOUNT sanitiser, `/_/mount.js` and
 `/_/mount.css` are the hub's own files, named by the version in the address so a browser keeps them.
 The page route and the share copy are unchanged."""
+import re
 import json
 
 import pytest
@@ -112,3 +113,15 @@ def test_the_mount_json_cannot_be_framed_or_sniffed_into_a_page(browser, hostile
     r = browser.get(f"/_/mount?doc={DOC}")
     assert r.headers["X-Content-Type-Options"] == "nosniff" and "html" not in r.headers["Content-Type"]
     assert json.loads(r.text)["title"] == "Plan"
+
+
+def test_the_mounted_css_selects_the_host_and_the_wrapper_where_a_page_of_its_own_selects_its_root_and_body(browser, hostile):
+    """In a shadow root there is no `html`, `:root` or `body`: the theme's variables go on `:host` and the body's rules on
+    the wrapper `.rd-root`, so a mounted page has the fonts, colours and wrapping (#128) a page of its own has."""
+    attach(browser, hostile)
+    css = browser.get(f"/_/mount?doc={DOC}").json()["css"]
+    bare = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    selectors = re.findall(r"(?:^|[{}])\s*([^{}@][^{}]*?)\s*\{", bare)
+    words = {w for s in selectors for part in s.split(",") for w in [part.strip().split()[0] if part.strip() else ""]}
+    assert not {w for w in words if re.match(r"(?:html|body|:root)(?![\w-])", w)}, sorted(words)
+    assert re.search(r":host\s*\{[^}]*--bg", css) and re.search(r"\.rd-root\s*\{[^}]*overflow-wrap:break-word", css)

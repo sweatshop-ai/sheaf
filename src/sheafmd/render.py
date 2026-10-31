@@ -940,6 +940,18 @@ def doc_header(frag: str, by: str, for_: str | None) -> str:
     return frag[:at] + head + frag[at:]
 
 
+# A mounted page's styles sit in a shadow root, which holds no `html`, `:root` or `body` (#116): a selector that starts
+# with one of them is moved to the host (the theme's variables, the root font size) or to the wrapper `.rd-root`, which
+# stands where the body stands on a page of its own. Comments go first, so a word in one is never read as a selector.
+_MOUNT_TOP_RE = re.compile(r"(^|[{},]\s*)(?::root|html)(?=[\s{,>+~:\[.#]|$)")
+_MOUNT_BODY_RE = re.compile(r"(^|[{},]\s*)body(?=[\s{,>+~:\[.#]|$)")
+
+
+def mount_css(css: str) -> str:
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    return _MOUNT_BODY_RE.sub(r"\1.rd-root", _MOUNT_TOP_RE.sub(r"\1:host", css))
+
+
 def _page_asset(name: str) -> str:
     return (resources.files("sheafmd") / "page" / name).read_text(encoding="utf-8")
 
@@ -1146,7 +1158,7 @@ def build(md: Path, *, theme: Theme, share: bool = True, title: str | None = Non
 
     if mount:
         return json.dumps({"title": title, "toc": bool(want_toc), "html": f"{nav}<main>{mark}{frag}{tail}</main>",
-                           "config": meta, "css": fonts + doc_css})
+                           "config": meta, "css": mount_css(fonts + doc_css)})
 
     out = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">

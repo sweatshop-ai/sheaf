@@ -729,9 +729,13 @@ class Hub:
             self.catch_up(e)
             return e.live.current()[1]
         minutes = max(1, -(-self.tell_wait // 60))
+        working = {address for address, _, d in self.box_waits.drops() if d.state == "delivered"}
         for address, thread, d in self.box_waits.expire(self.tell_wait, text_of):
             self.record("box-expired", address, what=d.kind, project=_project(address), thread=thread)
             self._tell_drop(address, "box-failed", {"id": thread, "kind": d.kind, "minutes": minutes})
+        for address in working:
+            if not self.box_waits.working(address):       # answered or given up on: a member's orange goes
+                self.index.moved_for_members(address)
         folder = self.the_list.cfg.tell_dir if self.the_list is not None else None
         if folder is None:
             return
@@ -751,10 +755,14 @@ class Hub:
                 if self.box_waits.end(address, thread):
                     self.record("drop-status", address, **row, error=error)
                     self._tell_drop(address, "box-failed", {"id": thread, "kind": d.kind, "error": error})
+                    if d.state == "delivered":
+                        self.index.moved_for_members(address)
                 continue
-            d.state = state
+            was, d.state = d.state, state
             self.record("drop-status", address, **row)
             self._tell_drop(address, "box-status", {"id": thread, "kind": d.kind, "state": state})
+            if "delivered" in (was, state):
+                self.index.moved_for_members(address)
 
     def _tell_drop(self, address: str, name: str, data: dict):
         e = self.entries.get(address)

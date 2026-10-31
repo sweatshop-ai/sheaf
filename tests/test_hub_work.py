@@ -740,6 +740,30 @@ def test_a_reply_ends_a_delivered_drop_whatever_the_status_says_next(team, box, 
     assert sent(team) == [] and [r["state"] for r in hub_rows("drop-status")] == ["delivered"]
 
 
+
+def dot(team, member=HANS):
+    got = team.get("/_/index.json", member=member)
+    assert got.status == 200, got.text
+    return next(d["dot"] for r in got.json()["roots"] for d in r["docs"] if d["doc"] == ADDRESS)
+
+
+def test_a_delivered_drop_turns_the_members_dot_orange_and_tells_their_index_alone(team, box, work):
+    # The member's dot is the supervisor's word, never the hub account's session (9.9, #139).
+    mine = team.get("/_/live", member=HANS).stream
+    hubs = team.hub.index_bus.subscribe(None, team.hub.index.accepting(None))
+    cid = comment(team, work, "tell").json()["id"]
+    assert dot(team) != "orange"
+    mine.drain(), hubs.drain()
+    status(box, "delivered")
+    team.hub.tick()
+    assert dot(team) == "orange"
+    assert ("status", {"doc": ADDRESS, "root": "work"}) in mine.drain()
+    assert [d for n, d in hubs.drain() if n == "status" and d.get("doc") == ADDRESS and "dot" not in d] == []
+    assert team.post("/_/comment", {"doc": ADDRESS, "op": "reply", "id": cid, "body": "Done."},
+                     member=THIERRY).status == 200
+    assert dot(team) != "orange"
+
+
 # ── the meta block (10.1) ────────────────────────────────────────────────────
 
 def meta(team, member=HANS, doc=DOC):

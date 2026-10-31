@@ -98,14 +98,17 @@ def _to_session(args, text: str, sender: str, msg_id: str | None):
     # supervisor that tries again would tell the session twice.
     job = Job(None, "deliver", "", "")
 
+    # The handler only kills and never waits or raises: it may land while the runner holds its lock, and a
+    # push that is already on its way is reported as delivered, as it is.
     def stop(signum, frame):
-        job.kill()
-        raise Refused("stopped before the message was delivered; the courier was stopped too")
+        job.kill(blocking=False)
     before = {sig: signal.signal(sig, stop) for sig in (signal.SIGTERM, signal.SIGINT)}
     try:
         ad.deliver(t, text, job.run, msg_id=msg_id)
-    except (DeliveryError, DeliveryCancelled) as e:
-        raise Refused(str(e) or "the delivery was cancelled") from None
+    except DeliveryCancelled:
+        raise Refused("stopped before the message was delivered; the courier was stopped too") from None
+    except DeliveryError as e:
+        raise Refused(str(e)) from None
     finally:
         for sig, handler in before.items():
             signal.signal(sig, handler)
@@ -128,6 +131,9 @@ def cmd_deliver(argv: list[str]) -> int:
     p.add_argument("--from", dest="sender", metavar="uds:PATH",
                    help="the address the message names as its origin (default: this user's hub socket)")
     args = p.parse_args(argv)
+    if args.socket and (args.wait or args.config_dir):
+        _err("sheaf: --wait and --config-dir go with --session")
+        return EXIT_USAGE
     if args.sender is not None and not _SENDER_RE.fullmatch(args.sender):
         _err("sheaf: --from must be uds: and a socket path, without quotes, angle brackets, & or control characters")
         return EXIT_USAGE

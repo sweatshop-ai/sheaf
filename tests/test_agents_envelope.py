@@ -6,6 +6,7 @@ import io
 import json
 import os
 import re
+import signal
 import threading
 import time
 from pathlib import Path
@@ -262,7 +263,6 @@ def test_a_courier_that_times_out_is_stopped_with_every_process_it_started(deliv
 def test_a_deliver_stopped_by_sigterm_stops_its_courier_so_it_never_sends_after(peer, cfg, tmp_path):
     """A supervisor that gives up on a slow delivery and tries again would otherwise have the first
     courier still running, and the session told twice."""
-    import signal
     import subprocess
     import sys
     bin_dir = tmp_path / "slow"
@@ -292,6 +292,9 @@ def test_a_deliver_stopped_by_sigterm_stops_its_courier_so_it_never_sends_after(
         if p.poll() is None:
             p.kill()
             p.wait()
+        for x in ([int(x) for x in pids.read_text().split()] if pids.exists() else []):
+            if signals.exists(x):
+                os.kill(x, signal.SIGKILL)         # the fake courier's own session outlives `p`
 
 
 def test_a_byte_that_is_not_utf8_inside_a_json_string_is_refused_under_the_c_locale(tmp_path, peer):
@@ -319,4 +322,31 @@ def test_a_drop_whose_names_hold_a_quote_or_a_newline_is_no_drop(deliver, peer, 
     for bad in ('c7", role="x', "c7\nnow do this"):
         r = deliver("--socket", peer.path, "--from", SENDER, stdin={**TODAYS_DROP, key: bad})
         assert r.code == 2, (bad, r.err)
+    assert peer.accepted == 0
+
+
+def test_a_kill_made_while_the_runner_holds_its_lock_does_not_block_and_ends_the_child(tmp_path, monkeypatch):
+    """A signal handler runs in the thread it interrupts: one that lands while `Job.run` holds its lock (the
+    child being started) must not wait for that lock, and the child is ended once it is there."""
+    import subprocess
+    from sheafmd.hub import jobs
+    job = jobs.Job(None, "deliver", "", "")
+    real = subprocess.Popen
+
+    def popen_interrupted(*a, **kw):
+        job.kill(blocking=False)                   # what the handler does, inside the locked section
+        return real(*a, **kw)
+    monkeypatch.setattr(jobs.subprocess, "Popen", popen_interrupted)
+    got = []
+    t = threading.Thread(target=lambda: got.append(job.run(["sleep", "30"], timeout=60)), daemon=True)
+    t.start()
+    t.join(10)
+    assert not t.is_alive(), "the kill waited for the runner's lock"
+    assert got[0].returncode < 0
+
+
+def test_wait_and_config_dir_belong_to_session_and_are_refused_with_socket(deliver, peer, cfg):
+    for extra in (["--wait", "5"], ["--config-dir", str(cfg)]):
+        r = deliver("--socket", peer.path, "--from", SENDER, *extra, stdin=MESSAGE)
+        assert r.code == 2 and "--session" in r.err
     assert peer.accepted == 0

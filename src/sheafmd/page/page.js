@@ -3601,9 +3601,15 @@ var create = function (ROOT, CFG, opts) {
     if (live) live.close();
     if (HL) ['rd-open', 'rd-resolved', 'rd-active', 'rd-widened'].forEach(function (k) { CSS.highlights.delete(k); });
   }
-  // failed(): mount.js could not fetch the page again for a remount. The page stays as it was and says so, and the
-  // next change settles again: `settling` was left set by a reload that, on a page of its own, never comes back.
-  function failed(msg) { if (unmounted) return; settling = false; say(msg, true); }
+  // failed(): mount.js could not fetch the page again for a remount (or the hub was upgraded and the loader takes over).
+  // The page stays as it was and says so, and the next change settles again: `settling` was left set by a reload that,
+  // on a page of its own, never comes back.
+  function failed(msg) {
+    if (unmounted) return;
+    settling = false;
+    try { sessionStorage.removeItem(KEYS + 'rd-keep'); } catch (e) {}     // the keep of a reload that did not happen
+    say(msg, true);
+  }
   return { unmount: unmount, dirty: unsavedNow, failed: failed };
 };
 

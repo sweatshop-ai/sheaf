@@ -320,6 +320,11 @@ def test_a_hub_of_another_version_hands_the_remount_to_the_loader(front):
     assert until(lambda: front.page.evaluate("window.__upgrades || null"), what="the loader told") == ["9.9.9-next"]
     front.page.wait_for_timeout(300)
     assert front.js("return root.querySelector('main').__old;") == 1, "the old script built the new page"
+    # Told once: a later trigger of a remount does not call the loader again, and the old page says what is happening.
+    front.site.file.write_text(front.site.file.read_text().replace("about plums", "about figs"), encoding="utf-8")
+    front.page.wait_for_timeout(2500)
+    assert front.page.evaluate("window.__upgrades") == ["9.9.9-next"]
+    assert "updated" in front.js("return root.getElementById('rd-toast').textContent;")
 
 
 def test_a_first_mount_of_another_version_builds_nothing_and_without_a_loader_says_reload(front):
@@ -327,6 +332,8 @@ def test_a_first_mount_of_another_version_builds_nothing_and_without_a_loader_sa
     front.page.goto(front.site.base + FRONT)
     assert until(lambda: front.page.evaluate("window.__upgrades || null"), what="the loader told") == ["9.9.9-next"]
     assert not front.has("#rd-menu-btn")
+    # It took nothing of the pane: no root was attached, so the loader's new script can still attach its own there.
+    assert front.page.evaluate("window.__root === undefined")
     # No loader to hand it to: the pane says so instead of running the old script on the new hub.
     front.page.evaluate("const d = document.createElement('div'); d.id = 'pane2'; document.body.append(d);"
                         "window.__page = null; sheafMount.mount(d, {doc: %s}).then((m) => { window.__page = m; });"
@@ -345,6 +352,31 @@ def test_a_remount_that_fails_says_so_in_the_page_and_the_next_one_still_works(f
     front.site.file.write_text(front.site.file.read_text().replace("about pears", "about plums"), encoding="utf-8")
     until(lambda: "401" in (front.js("const t = root.getElementById('rd-toast'); return t.className.includes('err') "
                                      "? t.textContent : '';") or ""), what="the failure said in the page")
+    # The keep the reload wrote is not left for a later mount of this sheaf in the tab to restore.
+    assert front.page.evaluate("Object.keys(sessionStorage).filter((k) => k.endsWith('rd-keep'))") == []
     refuse.clear()
     front.site.file.write_text(front.site.file.read_text().replace("about plums", "about figs"), encoding="utf-8")
     until(lambda: "about figs" in front.js("return root.querySelector('main').textContent;"), what="the next remount")
+
+
+def test_of_two_mounts_on_one_pane_the_one_called_last_stands_whichever_answers_first(front):
+    """The loader moves on before the first answer is in: the older mount must not take the pane over the newer one
+    (gate P2 of 2e9856f: the answer that came last won, and dropping the older handle left the pane empty)."""
+    front.open()
+    front.page.evaluate("""(() => {
+      const f = window.fetch; let n = 0;
+      window.fetch = function (u, o) { const p = f(u, o);
+        if (String(u).startsWith('/_/mount?doc=') && n++ === 0) return new Promise((r) => setTimeout(() => r(p), 1500));
+        return p; };
+      const pane = document.getElementById('pane');
+      window.__order = [];
+      sheafMount.mount(pane, {doc: %s}).then((m) => { window.__h1 = m; __order.push(1); });
+      sheafMount.mount(pane, {doc: %s}).then((m) => { window.__h2 = m; __order.push(2);
+        window.__root.querySelector('main').__mark = 2; });
+    })()""" % (json.dumps(DOC), json.dumps(DOC)))
+    until(lambda: front.page.evaluate("window.__order.length === 2"), what="both mounts to settle")
+    front.page.wait_for_timeout(300)
+    assert front.js("return root.querySelector('main').__mark;") == 2, "the older mount replaced the newer page"
+    front.page.evaluate("window.__h1.unmount()")
+    assert front.js("return root.querySelectorAll('#rd-menu-btn').length;") == 1, "dropping the older handle took the page"
+    assert front.page.evaluate("window.__streams.filter((e) => e.readyState !== 2).length") == 1

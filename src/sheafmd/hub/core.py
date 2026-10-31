@@ -97,7 +97,8 @@ class Hub:
         self.told_ignored: set = set()           # the roots a private-ignored row named this run (9.11)
         self._front: dict = {}                   # {file: (its stat, its front matter, its assignees)}, for 9.11
         self.the_list = None                     # the list (9.10): a the_list.TheList, set by the server
-        self.blamed: dict = {}                   # the pressers of the pages' pressed boxes, once per text (10.11)
+        self.blamed: dict = {}                   # {(real path, md_hash): (pressers, monotonic time or None)}: once per text,
+                                                 # for the list's rows and the pages' buttons alike (9.10, 10.11)
         self.docs = state.Docs()
         self.seen = state.Seen()
         self.member_seen = state.MemberSeen()
@@ -391,7 +392,7 @@ class Hub:
         number among the task boxes of that block] where the document draws it, or None."""
         if text is None:
             text = e.live.current()[1]
-        s = the_list.read_sheaf("x.md", text)
+        s = the_list.read_sheaf("x.md", text)       # read for its boxes alone: the name is no matter
         if not (s.actions or s.pressed):
             return []
         fm = visibility.front_matter(text)

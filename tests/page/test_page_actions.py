@@ -3,7 +3,7 @@ as the list's buttons, a one-off red with the 5 second Undo and locked once pres
 the list's tick (`POST /_/tick`, 9.10): the markdown on disk is what a tick writes, `- [x] <word>`."""
 import pytest
 
-from pagehelp import toast, type_at_end, until
+from pagehelp import mark, reloaded, toast, type_at_end, until
 
 pytestmark = pytest.mark.page
 
@@ -102,3 +102,44 @@ def test_a_refused_press_is_said_and_gives_the_button_back(sheaf):
     until(lambda: "refused here" in toast(p), what="the refusal")
     assert bar(p).nth(0).inner_text() == "Approve" and bar(p).nth(0).is_enabled()
     assert "- [ ] Approve" in f.read_text(encoding="utf-8")
+
+
+def test_a_change_from_outside_during_a_press_waits_for_its_answer_before_the_page_reloads(sheaf):
+    p, f = sheaf.page, sheaf.site.file
+    mark(p)
+    bar(p).nth(0).click()
+    f.write_text(SHEAF.replace("Body paragraph.", "Body paragraph, changed."), encoding="utf-8")
+    p.wait_for_timeout(1500)
+    assert p.evaluate("window.__same_load") is True, "the page reloaded under the press"
+    assert bar(p).nth(0).inner_text() == "Undo"
+    p.clock.run_for(5100)
+    # The press names the text the page held: the hub refuses it, and the page says so before it reloads.
+    until(lambda: "reload the page" in toast(p), what="the refusal")
+    reloaded(p)
+    assert "- [ ] Approve" in f.read_text(encoding="utf-8")
+
+
+def test_a_press_whose_actions_a_save_changed_meanwhile_is_not_sent(sheaf):
+    p, f = sheaf.page, sheaf.site.file
+    bar(p).nth(1).click()                               # Done
+    type_at_end(p, "main li:has-text('Approve')", "")
+    p.keyboard.press("Enter")
+    p.keyboard.type("Done")
+    p.clock.run_for(3000)
+    until(lambda: "- [ ] Approve\n- [ ] Done\n- [ ] Done" in f.read_text(encoding="utf-8"), what="the saved action")
+    p.clock.run_for(2100)
+    until(lambda: "Press it again." in toast(p), what="the line that the press was not sent")
+    assert "[x]" not in f.read_text(encoding="utf-8")
+    until(lambda: bar(p).all_inner_texts() == ["Approve", "Done", "Done", "Share"], what="the new buttons")
+
+
+def test_share_is_pressed_and_released_on_the_page(sheaf):
+    p, f = sheaf.page, sheaf.site.file
+    bar(p).nth(2).click()
+    p.clock.run_for(5100)
+    until(lambda: "- [x] Share" in f.read_text(encoding="utf-8"), what="the Share tick")
+    until(lambda: p.locator("#rd-actions button.toggle[aria-pressed=true]").count() == 1, what="Share pressed")
+    p.locator("#rd-actions button.toggle").click()
+    p.clock.run_for(5100)
+    until(lambda: "- [ ] Share" in f.read_text(encoding="utf-8"), what="the release")
+    until(lambda: p.locator("#rd-actions button.toggle[aria-pressed=false]").count() == 1, what="Share released")

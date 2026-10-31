@@ -510,7 +510,6 @@ class TheList:
         self._off_lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = None
-        self._blamed: dict = {}             # {(real path, md_hash): (pressers, monotonic time or None)}: once per text
 
     # ── the poll ────────────────────────────────────────────────────────────
     def root(self):
@@ -769,7 +768,7 @@ class TheList:
             return {}
         if md_hash(text) != s.hash:
             return {}
-        return pressers(self._blamed, f, text, lines)
+        return pressers(self.hub.blamed, f, text, lines)
 
     def _row(self, row: Row, owners: list, is_owner: bool, member, root: str) -> str:
         s, rec = row.sheaf, row.record

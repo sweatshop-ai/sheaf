@@ -21,12 +21,32 @@ FRONT_HTML = f"""<!doctype html><html><head><meta charset="utf-8"></head>
 <div id="pane" style="height:640px"></div>
 <script src="/_/mount.js"></script>
 <script>window.__front = true;
+window.__before = window.__live.size;          // the listeners the front holds before the mount
 sheafMount.mount(document.getElementById('pane'), {{doc: {json.dumps(DOC)}}})
   .then((m) => {{ window.__page = m; }}, (e) => {{ window.__failed = String(e); }});</script>
 </body></html>"""
 # Keeps the closed root where the test can find it; nothing else about the root changes.
+# Also counts the listeners held on the document and the window, and keeps every EventSource opened, so a test can see
+# what an unmounted page left behind.
 KEEP_ROOT = """(() => { const attach = Element.prototype.attachShadow;
-  Element.prototype.attachShadow = function (o) { const r = attach.call(this, o); window.__root = r; return r; }; })();"""
+  Element.prototype.attachShadow = function (o) { const r = attach.call(this, o); window.__root = r; return r; };
+  const live = window.__live = new Set(), add = EventTarget.prototype.addEventListener,
+        remove = EventTarget.prototype.removeEventListener;
+  const id = (t, type, fn, o) => [t === document ? 'd' : 'w', type, fn, !!(o === true || (o && o.capture))];
+  const key = new Map();
+  const k = (t, type, fn, o) => { const a = id(t, type, fn, o); let m = key.get(fn);
+    if (!m) key.set(fn, m = new Map()); const s = a[0] + a[1] + a[3]; return [m, s]; };
+  EventTarget.prototype.addEventListener = function (type, fn, o) {
+    if ((this === document || this === window) && fn) { const [m, s] = k(this, type, fn, o);
+      if (!m.has(s)) { const e = {}; m.set(s, e); live.add(e); } }
+    return add.call(this, type, fn, o); };
+  EventTarget.prototype.removeEventListener = function (type, fn, o) {
+    if ((this === document || this === window) && fn) { const [m, s] = k(this, type, fn, o);
+      if (m.has(s)) { live.delete(m.get(s)); m.delete(s); } }
+    return remove.call(this, type, fn, o); };
+  const ES = window.EventSource, streams = window.__streams = [];
+  window.EventSource = function (url, o) { const e = new ES(url, o); streams.push(e); return e; };
+  window.EventSource.prototype = ES.prototype; })();"""
 
 
 class Front:
@@ -180,10 +200,12 @@ def test_an_outside_change_remounts_in_place_and_keeps_the_scroll(front):
     front.site.file.write_text(front.site.file.read_text() + "".join(f"\nFiller {i}.\n" for i in range(80)),
                                encoding="utf-8")
     front.open()
-    front.js("root.querySelector('.rd-root').scrollTop = 600;")
+    front.page.evaluate("window.__same_front = 1")
+    front.js("root.querySelector('main').__old = 1; root.querySelector('.rd-root').scrollTop = 600;")
     front.site.file.write_text(front.site.file.read_text().replace("about pears", "about plums"), encoding="utf-8")
     until(lambda: "about plums" in front.js("return root.querySelector('main').textContent;"), what="the change")
-    assert front.page.evaluate("window.__front === true"), "the front reloaded"
+    assert front.page.evaluate("window.__same_front === 1"), "the front reloaded"
+    assert front.js("return root.querySelector('main').__old === undefined;"), "the page was not built again"
     until(lambda: abs(front.js("return root.querySelector('.rd-root').scrollTop;") - 600) < 2, what="the scroll kept")
 
 
@@ -199,3 +221,32 @@ def test_unmount_takes_the_page_off_the_document_and_the_window(front):
     front.page.wait_for_timeout(3000)
     assert asked == [], asked
     assert front.page.evaluate("typeof CSS.highlights === 'undefined' || !CSS.highlights.has('rd-open')")
+    assert_nothing_left(front)
+
+
+def assert_nothing_left(front):
+    """No listener of the page on the document or the window, no stream open, no part of the page in the root."""
+    assert front.page.evaluate("window.__live.size") == front.page.evaluate("window.__before")
+    assert front.page.evaluate("window.__streams.length") > 0
+    assert front.page.evaluate("window.__streams.every((e) => e.readyState === 2)")
+    assert not front.has("#rd-menu-btn")
+
+
+def test_unmount_while_a_remount_is_out_leaves_no_page_behind(front):
+    front.open()
+    until(lambda: front.page.evaluate("window.__streams.length") > 0, what="the stream")
+    front.page.evaluate("window.__page.remount().then(() => { window.__settled = 'done'; }, (e) => { window.__settled = String(e); });"
+                        "window.__page.unmount();")
+    assert until(lambda: front.page.evaluate("window.__settled || null"), what="the remount to settle") == "done"
+    front.page.wait_for_timeout(1500)
+    assert_nothing_left(front)
+
+
+def test_two_remounts_at_once_both_settle_and_one_page_stands(front):
+    front.open()
+    front.page.evaluate("Promise.all([window.__page.remount(), window.__page.remount()])"
+                        ".then(() => { window.__settled = 'done'; }, (e) => { window.__settled = String(e); });")
+    assert until(lambda: front.page.evaluate("window.__settled || null"), what="both remounts to settle") == "done"
+    front.page.wait_for_timeout(500)
+    assert front.js("return root.querySelectorAll('#rd-menu-btn').length;") == 1
+    assert front.page.evaluate("window.__streams.filter((e) => e.readyState !== 2).length") == 1

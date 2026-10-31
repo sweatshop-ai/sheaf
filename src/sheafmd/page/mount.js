@@ -307,12 +307,24 @@
     const url = '/_/mount?doc=' + encodeURIComponent(opts.doc);
     const root = host.attachShadow({ mode: 'closed' });
     const doc = host.ownerDocument;
+    const create = window.sheafPage && window.sheafPage.create;   // taken now: a later front script cannot swap it in
     let page = null;
     let got = null;
+    // Each draw has a number; one that a newer draw or unmount() overtook while its fetch or its stylesheet was out
+    // builds nothing, so two pages never stand at once and an older answer never replaces a newer one. `cut` ends
+    // the wait of the draw in flight: a <link> taken out of the root before it loads fires neither load nor error.
+    let drawn = 0;
+    let gone = false;
+    let cut = () => {};
     async function draw() {
+      const mine = ++drawn;
+      cut();
+      const stale = () => gone || mine !== drawn;
       const res = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
       if (!res.ok) throw new Error('the hub answered ' + res.status + ' for ' + opts.doc);
-      got = await res.json();
+      const fresh = await res.json();
+      if (stale()) return got;
+      got = fresh;
       const style = doc.createElement('style');
       style.textContent = got.css;                  // the hub's own text: fonts, base and theme
       const link = doc.createElement('link');
@@ -325,14 +337,15 @@
       if (page) page.unmount();
       page = null;
       root.replaceChildren(style, link, wrap);
-      await new Promise((done) => { link.onload = link.onerror = done; });   // the page measures its parts: their styles first
-      if (window.sheafPage) page = window.sheafPage.create(root, got.config, { body: wrap, remount: () => { draw().catch(() => {}); } });
+      await new Promise((done) => { link.onload = link.onerror = done; cut = done; });   // the page measures its parts: their styles first
+      if (stale()) return got;
+      if (create) page = create(root, got.config, { body: wrap, remount: () => { draw().catch(() => {}); } });
       return got;
     }
     await draw();
     return {
       get config() { return got.config; }, get title() { return got.title; }, get toc() { return got.toc; },
-      unmount() { if (page) page.unmount(); page = null; root.replaceChildren(); },
+      unmount() { gone = true; cut(); if (page) page.unmount(); page = null; root.replaceChildren(); },
       dirty() { return !!page && page.dirty(); },
       remount: draw,
     };

@@ -412,7 +412,7 @@ def told_james(tab, sent):
     tab.page.click("#rd-popover .rd-form button.rd-tell")
     until(lambda: SENT in tab.page.inner_text("#rd-popover"), what="the sent line in the thread")
     cid, = [c.id for c in rdc.parse(tab.site.file.read_text(encoding="utf-8")).comments]
-    sent.append({"id": cid, "kind": "tell"})
+    sent.append({"id": cid, "kind": "tell", "state": "sent"})
     return cid
 
 
@@ -437,6 +437,34 @@ def test_a_drop_the_hub_gives_up_on_takes_the_line_off_and_says_so(tab):
     tab.site.hub.entry(DOC).bus.publish("box-failed", {"id": cid, "kind": "tell", "minutes": 10})
     until(lambda: "after 10 min" in toast(tab.page), what="the toast")
     assert "James" in toast(tab.page)
+    until(lambda: SENT not in tab.page.inner_text("#rd-popover"), what="the line taken off")
+
+
+
+@pytest.mark.parametrize("state, line", [("picked-up", "James’s window is opening"),
+                                         ("delivered", "James is working on it in his window")])
+def test_the_supervisors_word_on_a_drop_replaces_the_sent_line(tab, state, line):
+    # The hub reads <drop>.status and tells the page box-status (#139).
+    cid = told_james(tab, [])
+    tab.site.hub.entry(DOC).bus.publish("box-status", {"id": cid, "kind": "tell", "state": state})
+    until(lambda: line in tab.page.inner_text("#rd-popover"), what=f"the {state} line")
+    assert SENT not in tab.page.inner_text("#rd-popover")
+
+
+def test_the_supervisors_word_outlasts_a_reload_of_the_browser(tab):
+    sent = []
+    cid = told_james(tab, sent)
+    sent[0]["state"] = "delivered"
+    reopen(tab, cid)
+    until(lambda: "James is working on it in his window" in tab.page.inner_text("#rd-popover"),
+          what="the delivered line after the reload")
+
+
+def test_a_drop_the_supervisor_could_not_deliver_says_its_error(tab):
+    cid = told_james(tab, [])
+    tab.site.hub.entry(DOC).bus.publish("box-failed", {"id": cid, "kind": "tell", "error": "the window would not open"})
+    until(lambda: "the window would not open" in toast(tab.page), what="the toast")
+    assert "Tell James failed" in toast(tab.page)
     until(lambda: SENT not in tab.page.inner_text("#rd-popover"), what="the line taken off")
 
 

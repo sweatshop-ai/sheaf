@@ -1297,8 +1297,9 @@
     (j.telling || []).forEach(function (id) { telling[id] = true; });
     // The drops for James's window the hub still holds open (#115): the line comes back on a new load.
     if (toBox) (j.sent || []).forEach(function (d) {
-      if (sentBox[d.id] || !byId[d.id]) return;
-      sentBox[d.id] = { n: (byId[d.id].replies || []).length, to: AGENT };
+      if (!byId[d.id]) return;
+      if (!sentBox[d.id]) sentBox[d.id] = { n: (byId[d.id].replies || []).length, to: AGENT };
+      sentBox[d.id].state = d.state;
       touched(d.id);
     });
     tellQ = j.question || '';
@@ -1732,6 +1733,10 @@
     var s = sentBox[id];
     if (!s || !c || (c.replies || []).length > s.n) { delete sentBox[id]; return ''; }
     if (s.at) return '<div class="rd-msg rd-sent">Sent to ' + esc(s.at) + '; the answer appears in this thread.</div>';
+    // What the box's supervisor said of the drop, read by the hub (9.12, #139).
+    if (s.state === 'picked-up') return '<div class="rd-msg rd-sent">' + esc(s.to) + '’s window is opening' + DOTS + '</div>';
+    if (s.state === 'delivered') return '<div class="rd-msg rd-sent rd-working">' + esc(s.to) +
+      ' is working on it in his window' + DOTS + '</div>';
     return '<div class="rd-msg rd-sent">Sent to ' + esc(s.to) + '’s window; his answer appears in this thread.</div>';
   }
   // What a send with Ask or Tell started: on a box sheaf the line, counted from the thread as the hub's answer
@@ -3255,8 +3260,17 @@
         var d = JSON.parse(ev.data || '{}');
         delete sentBox[d.id];
         touched(d.id);
-        say((d.kind === 'ask' ? 'Ask ' : 'Tell ') + AGENT + ': no answer from ' + AGENT + '’s window after ' +
-            d.minutes + ' min. The comment is written: reply here, or send it again.', true);
+        var what = (d.kind === 'ask' ? 'Ask ' : 'Tell ') + AGENT;
+        say((d.error !== undefined ? what + ' failed: ' + (d.error || 'the box could not deliver it') + '.'
+             : what + ': no answer from ' + AGENT + '’s window after ' + d.minutes + ' min.') +
+            ' The comment is written: reply here, or send it again.', true);
+      });
+      // What the box's supervisor said of a drop: its window opening, then the session working on it (#139).
+      live.addEventListener('box-status', function (ev) {
+        var d = JSON.parse(ev.data || '{}');
+        if (!sentBox[d.id]) return;
+        sentBox[d.id].state = d.state;
+        touched(d.id);
       });
       ['ask-cancelled', 'tell-cancelled'].forEach(function (name) {
         live.addEventListener(name, function (ev) {

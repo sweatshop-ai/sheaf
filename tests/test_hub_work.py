@@ -595,7 +595,7 @@ def sent(team, member=HANS):
 @pytest.mark.parametrize("kind", ["ask", "tell"])
 def test_a_drop_for_james_is_sent_on_every_members_page_until_a_reply_lands_in_its_thread(team, box, work, kind):
     cid = comment(team, work, kind).json()["id"]
-    assert sent(team) == sent(team, THIERRY) == [{"id": cid, "kind": kind}]
+    assert sent(team) == sent(team, THIERRY) == [{"id": cid, "kind": kind, "state": "sent"}]
     got = team.post("/_/comment", {"doc": ADDRESS, "op": "reply", "id": cid, "body": "Sent it."}, member=THIERRY)
     assert got.status == 200, got.text
     assert sent(team) == []
@@ -618,7 +618,7 @@ def test_a_drop_with_no_reply_after_the_tell_wait_fails_on_the_members_page(team
     cid = comment(team, work, "tell").json()["id"]
     now[0] += team.hub.tell_wait - 1
     team.hub.tick()
-    assert sent(team) == [{"id": cid, "kind": "tell"}]
+    assert sent(team) == [{"id": cid, "kind": "tell", "state": "sent"}]
     now[0] += 2
     team.hub.tick()
     assert sent(team) == []
@@ -656,6 +656,88 @@ def test_a_drop_answered_in_the_file_from_outside_is_never_given_up_on(team, box
     now[0] += team.hub.tell_wait + 1
     team.hub.tick()
     assert hub_rows("box-expired") == []
+
+
+
+# ── the drop's status, from the box's supervisor (#139) ──────────────────────
+
+def status(box, state, **extra):
+    """The supervisor's word on the one drop: `<drop>.status` beside it, written whole and renamed."""
+    f, = [f for f in drops(box) if not f.name.endswith(".status")]
+    tmp = box["tell"] / f".{f.name}.status.tmp"
+    tmp.write_text(json.dumps({"state": state, **extra}), encoding="utf-8")
+    tmp.replace(box["tell"] / f"{f.name}.status")
+
+
+@pytest.mark.parametrize("kind", ["ask", "tell"])
+def test_the_supervisors_picked_up_then_delivered_is_told_to_the_page_once_each(team, box, work, kind):
+    tab = team.get(f"/_/live?doc={ADDRESS}", member=HANS).stream
+    cid = comment(team, work, kind).json()["id"]
+    assert sent(team) == [{"id": cid, "kind": kind, "state": "sent"}]
+    status(box, "picked-up")
+    team.hub.tick()
+    team.hub.tick()
+    assert sent(team) == [{"id": cid, "kind": kind, "state": "picked-up"}]
+    status(box, "delivered")
+    team.hub.tick()
+    assert sent(team) == [{"id": cid, "kind": kind, "state": "delivered"}]
+    told = [d for n, d in tab.drain() if n == "box-status"]
+    assert told == [{"id": cid, "kind": kind, "state": "picked-up"}, {"id": cid, "kind": kind, "state": "delivered"}]
+    assert [r["state"] for r in hub_rows("drop-status")] == ["picked-up", "delivered"]
+
+
+def test_a_failed_drop_ends_with_the_supervisors_error_cut_to_one_line_of_200(team, box, work):
+    tab = team.get(f"/_/live?doc={ADDRESS}", member=HANS).stream
+    cid = comment(team, work, "tell").json()["id"]
+    status(box, "failed", error="the window would not open\n" + "x" * 300)
+    team.hub.tick()
+    assert sent(team) == []
+    data = next(d for n, d in tab.drain() if n == "box-failed")
+    assert data["id"] == cid and data["kind"] == "tell"
+    assert data["error"] == ("the window would not open " + "x" * 300)[:200]
+    row, = hub_rows("drop-status")
+    assert row["state"] == "failed"
+
+
+@pytest.mark.parametrize("bad", ["not json", "[1]", '{"state": "done"}', '{"state": 1}'])
+def test_a_status_of_another_shape_is_ignored_once_and_the_drop_stays_open(team, box, work, bad):
+    cid = comment(team, work, "tell").json()["id"]
+    f, = drops(box)
+    (box["tell"] / f"{f.name}.status").write_text(bad, encoding="utf-8")
+    team.hub.tick()
+    team.hub.tick()
+    assert sent(team) == [{"id": cid, "kind": "tell", "state": "sent"}]
+    assert len(hub_rows("drop-status-ignored")) == 1 and hub_rows("drop-status") == []
+
+
+def test_a_status_that_is_a_link_is_never_followed(team, box, work, tmp_path):
+    cid = comment(team, work, "tell").json()["id"]
+    f, = drops(box)
+    elsewhere = tmp_path / "elsewhere.json"
+    elsewhere.write_text('{"state": "delivered"}', encoding="utf-8")
+    (box["tell"] / f"{f.name}.status").symlink_to(elsewhere)
+    team.hub.tick()
+    assert sent(team) == [{"id": cid, "kind": "tell", "state": "sent"}]
+    assert len(hub_rows("drop-status-ignored")) == 1
+
+
+def test_a_status_for_a_name_the_hub_did_not_drop_is_not_read(team, box, work):
+    (box["tell"] / "thinkingtoo--tiroir-20260101T000000Z.status").write_text('{"state": "failed", "error": "x"}')
+    cid = comment(team, work, "tell").json()["id"]
+    team.hub.tick()
+    assert sent(team) == [{"id": cid, "kind": "tell", "state": "sent"}]
+    assert hub_rows("drop-status") == hub_rows("drop-status-ignored") == []
+
+
+def test_a_reply_ends_a_delivered_drop_whatever_the_status_says_next(team, box, work):
+    cid = comment(team, work, "tell").json()["id"]
+    status(box, "delivered")
+    team.hub.tick()
+    assert team.post("/_/comment", {"doc": ADDRESS, "op": "reply", "id": cid, "body": "Done."},
+                     member=THIERRY).status == 200
+    status(box, "failed", error="late")
+    team.hub.tick()
+    assert sent(team) == [] and [r["state"] for r in hub_rows("drop-status")] == ["delivered"]
 
 
 # ── the meta block (10.1) ────────────────────────────────────────────────────

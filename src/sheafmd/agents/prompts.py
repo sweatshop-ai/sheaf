@@ -49,6 +49,10 @@ def dropped(drop: dict) -> str | None:
     if drop.get("kind") not in ("ask", "tell") or not all(isinstance(drop.get(k), str) and drop[k].strip()
                                                          for k in keys):
         return None
+    # The names are written into the `reply(...)` the session is told to call, and on lines of their own: a
+    # quote would end an argument there, a line break start an instruction of the drop's.
+    if any(c in drop[k] for k in ("member", "sheaf", "thread") for c in '"\r\n'):
+        return None
     me, doc, text, cid = (drop[k] for k in keys)
     if drop["kind"] == "ask":
         return (f"Ask from sheaf, on the page of {doc}.\n"

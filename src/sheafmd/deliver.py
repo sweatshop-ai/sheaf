@@ -17,13 +17,14 @@ import math
 import os
 import re
 import shutil
+import signal
 import sys
 import time
 
 from . import config, paths
 from .agents import envelope, prompts
 from .agents.base import DeliveryCancelled, DeliveryError, Target
-from .agents.claude_code import ClaudeCodeAdapter, config_dir_of
+from .agents.claude_code import ClaudeCodeAdapter, _own_socket, config_dir_of
 from .hub.jobs import Job
 
 EXIT_OK, EXIT_FAILED, EXIT_USAGE = 0, 1, 2
@@ -59,7 +60,8 @@ def _seconds(text: str) -> float:
 def _parse_drop() -> dict | None:
     """The drop on stdin; None for what is not UTF-8, not JSON, nested past the parser, or not an object."""
     try:
-        drop = json.loads(sys.stdin.read())
+        # Bytes, decoded strictly: under no locale Python's own stdin would let a stray byte through.
+        drop = json.loads(sys.stdin.buffer.read().decode("utf-8"))
     except (ValueError, RecursionError):           # UnicodeDecodeError is a ValueError
         return None
     return drop if isinstance(drop, dict) else None
@@ -74,6 +76,8 @@ def _tell_text(drop: dict) -> str | None:
 
 
 def _to_socket(args, text: str, sender: str, msg_id: str | None):
+    if not _own_socket(args.socket):
+        raise Refused(f"{args.socket} is no socket of this user")
     try:
         envelope.push(args.socket, envelope.line(text, sender, msg_id))
     except OSError as e:
@@ -89,11 +93,22 @@ def _to_session(args, text: str, sender: str, msg_id: str | None):
         if time.monotonic() >= deadline:
             raise Refused(f"no open session {args.session} in {t.config_dir}")
         time.sleep(POLL_S)
+    # The hub's runner: the courier in a process group of its own, which a timeout ends whole. A SIGTERM or
+    # Ctrl-C ends it too, before this process goes: a courier left running would still send, and a
+    # supervisor that tries again would tell the session twice.
+    job = Job(None, "deliver", "", "")
+
+    def stop(signum, frame):
+        job.kill()
+        raise Refused("stopped before the message was delivered; the courier was stopped too")
+    before = {sig: signal.signal(sig, stop) for sig in (signal.SIGTERM, signal.SIGINT)}
     try:
-        # The hub's runner: the courier in a process group of its own, which a timeout ends whole.
-        ad.deliver(t, text, Job(None, "deliver", "", "").run, msg_id=msg_id)
+        ad.deliver(t, text, job.run, msg_id=msg_id)
     except (DeliveryError, DeliveryCancelled) as e:
         raise Refused(str(e) or "the delivery was cancelled") from None
+    finally:
+        for sig, handler in before.items():
+            signal.signal(sig, handler)
 
 
 def cmd_deliver(argv: list[str]) -> int:

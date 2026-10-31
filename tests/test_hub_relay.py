@@ -294,10 +294,10 @@ def test_a_queued_tell_expires_after_an_hour(team, box, work, monkeypatch):
     got = comment(team, work, "tell")
     tab.drain()
     now[0] += relay_mod.TTL - 1
-    team.handler._expire_relayed()
+    team.hub.expire_relayed()
     assert hub_rows("tell-expired") == []
     now[0] += 1
-    team.handler._expire_relayed()
+    team.hub.expire_relayed()
     row, = hub_rows("tell-expired")
     assert row["thread"] == got.json()["id"]
     assert team.hub.relays.open(ADDRESS, FORK) == []
@@ -442,6 +442,15 @@ def test_a_member_whose_access_is_taken_away_gets_gone_instead_of_the_tell(team,
         "11111111-2222-4333-8444-555555555555", "c9", "the thread's words", "thierry"))
     assert relayed == []
     assert [n for n, _ in sub.drain()] == ["gone"]
+
+
+def test_a_relay_in_its_grace_whose_member_lost_access_takes_no_tell(team, box, work):
+    """#135: the grace keeps a reconnecting relay, not one whose member can no longer open the sheaf."""
+    listen(team, forked(team)).stream.close()
+    (work / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["thierry"]\n'
+                                        'status = "live"\n', encoding="utf-8")
+    assert comment(team, work, "tell", as_=THIERRY).status == 400
+    assert team.hub.relays.open(ADDRESS, FORK) == []
 
 
 # ── the box's drop carries the Tell's id and its message (9.12) ──────────────

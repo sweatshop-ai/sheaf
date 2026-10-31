@@ -776,10 +776,14 @@ class Hub:
         for address, t in self.relays.expire():
             self.relay_failed(address, t, "tell-expired", relay_mod.EXPIRED)
 
-    def relay_seen(self, address: str):
-        """A relay of the sheaf connected, or its grace ran out: the open pages read `/_/doc` again (9.14)."""
+    def relay_changed(self, address: str, session: str):
+        """A relay of the sheaf's live session `session` connected, or its grace ran out: the open pages read
+        `/_/doc` again (9.14). A fork that is no longer the live one changes nothing on the page."""
         e = self.entries.get(address)
-        if e is not None:
+        if e is None:
+            return
+        items = work_mod.sessions(visibility.front_matter(e.live.current()[1]))
+        if items and items[0]["id"] == session:
             e.bus.publish("relay", {})
 
     def tick(self):
@@ -809,9 +813,9 @@ class Hub:
         except Exception:
             self.record_exception("drops-failed")
         try:
-            self.expire_relayed()                 # by the clock, with no relay or page calling in (#135)
-            for address, _ in self.relays.lapsed():
-                self.relay_seen(address)
+            self.expire_relayed()                 # by the clock, with no relay or page calling in (9.14)
+            for address, session in self.relays.lapsed():
+                self.relay_changed(address, session)
         except Exception:
             self.record_exception("relays-failed")
         try:

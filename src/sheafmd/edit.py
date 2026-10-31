@@ -730,11 +730,12 @@ def _toggle_boxes(block, fragment: str):
     return out
 
 
-def ticked_html(block, k: int):
-    """The block as the page would send it with its `k`th task box ticked, for a tick made away from the
-    page (the list's row, SPEC 9.10): saved like the page's own, it takes the `_toggle_boxes` path and
-    flips that one mark. None when the box is ticked already, or when that path would not be the one
-    taken (the marks are not the boxes drawn, a comment is in the way): a save would then go through pandoc."""
+def ticked_html(block, k: int, tick: bool = True):
+    """The block as the page would send it with its `k`th task box ticked (unticked, with `tick` false), for a
+    tick made away from the page (the list's row, SPEC 9.10): saved like the page's own, it takes the
+    `_toggle_boxes` path and flips that one mark. None when the box is ticked already (unticked already), or when
+    that path would not be the one taken (the marks are not the boxes drawn, a comment is in the way): a save would
+    then go through pandoc."""
     from bs4 import BeautifulSoup
 
     if not block.editable:
@@ -747,11 +748,14 @@ def ticked_html(block, k: int):
         lambda m: f'<span class="rd-anchor" data-rd-id="{m.group(1)}"></span>', r.stdout), "html.parser")
     found = soup.select('input[type="checkbox"]')
     marks = list(TASK_MARK_RE.finditer(block.content))
-    if not 0 <= k < min(len(found), len(marks)) or found[k].has_attr("checked"):
+    if not 0 <= k < min(len(found), len(marks)) or found[k].has_attr("checked") == tick:
         return None
-    found[k]["checked"] = ""
+    if tick:
+        found[k]["checked"] = ""
+    else:
+        del found[k]["checked"]
     fragment = str(soup)
-    want = block.content[:marks[k].start(2)] + "x" + block.content[marks[k].end(2):]
+    want = block.content[:marks[k].start(2)] + ("x" if tick else " ") + block.content[marks[k].end(2):]
     return fragment if _toggle_boxes(block, fragment) == want else None
 
 

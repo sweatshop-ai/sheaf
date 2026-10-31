@@ -1,6 +1,8 @@
 """The action buttons at the top of a sheaf's page (SPEC 10.11, #111): the page draws the boxes of the eight words
 as the list's buttons, a one-off red with the 5 second Undo and locked once pressed, Share a toggle. A press posts
 the list's tick (`POST /_/tick`, 9.10): the markdown on disk is what a tick writes, `- [x] <word>`."""
+import re
+
 import pytest
 
 from pagehelp import DOC, at, comment_on, draft_key, key, mark, reloaded, select, toast, toasted, type_at_end, until
@@ -734,7 +736,8 @@ def test_a_press_whose_block_was_edited_and_not_saved_keeps_the_tick(tab, site):
     until(lambda: "more" in p.inner_text("main li:has-text('notes')"), what="the second edit on screen")
     p.clock.run_for(2100)
     until(lambda: "notes now more" in f.read_text(encoding="utf-8"), what="the edit, saved by the reload's settle")
-    assert "- [x] Approve" in f.read_text(encoding="utf-8"), f.read_text(encoding="utf-8")
+    text = f.read_text(encoding="utf-8")
+    assert re.search(r"^- \[x\] Approve$", text, re.M), text
 
 
 def test_an_upgrade_while_a_save_waits_for_the_tick_does_not_ask_to_save(sheaf, site):

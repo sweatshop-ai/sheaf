@@ -449,7 +449,7 @@ def test_a_link_to_a_page_of_the_hub_goes_to_the_loader_and_a_modified_click_doe
     """The root is closed, so the front cannot see which link in it was clicked: a plain click on a link of the origin
     is handed to opts.navigate, which moves the front; a ctrl-click, a target or a download is the browser's."""
     front.site.file.write_text(PLAN.replace("Last paragraph.", "See [the list](/list?show=mine), [out](https://example.org/x),"
-                                            " [new](/list), [file](/list/a.md)."), encoding="utf-8")
+                                            " [new](/list), [file](/list/a.md), [hub](/_/export?doc=x)."), encoding="utf-8")
     front.open()
     front.click("main a[href='/list?show=mine']")
     assert until(lambda: front.page.evaluate("window.__moves || null"), what="the move") == ["/list?show=mine"]
@@ -463,4 +463,7 @@ def test_a_link_to_a_page_of_the_hub_goes_to_the_loader_and_a_modified_click_doe
     assert front.js(clicked, ["main a[href='/list']", None, True]) is False
     assert front.js(clicked, ["main a[href='/list/a.md']", "target", False]) is False
     assert front.js(clicked, ["main a[href^='https:']", None, False]) is False
+    assert front.js(clicked, ["main a[href='/list']", "download", False]) is False
+    # A route of the hub itself is no page for the loader to mount: the browser's (gate P3 of e01c79d).
+    assert front.js(clicked, ["main a[href^='/_/']", None, False]) is False
     assert front.page.evaluate("window.__moves") == ["/list?show=mine"]

@@ -1,9 +1,11 @@
 """The action buttons at the top of a sheaf's page (SPEC 10.11, #111): the page draws the boxes of the eight words
 as the list's buttons, a one-off red with the 5 second Undo and locked once pressed, Share a toggle. A press posts
 the list's tick (`POST /_/tick`, 9.10): the markdown on disk is what a tick writes, `- [x] <word>`."""
+import re
+
 import pytest
 
-from pagehelp import DOC, at, comment_on, key, mark, reloaded, select, toast, type_at_end, until
+from pagehelp import DOC, at, comment_on, draft_key, key, mark, reloaded, select, toast, toasted, type_at_end, until
 
 pytestmark = pytest.mark.page
 
@@ -709,3 +711,213 @@ def test_an_upgrade_while_a_comment_waits_for_the_tick_does_not_ask_to_send_it(s
     p.unroute("**/_/tick")
     until(lambda: "- [x] Approve" in f.read_text(encoding="utf-8"), what="the tick")
     until(lambda: "Why?" in f.read_text(encoding="utf-8"), what="the comment after it")
+
+
+NOTES = SHEAF.replace("- [ ] Share\n", "- [ ] Share\n- [ ] notes\n")
+
+
+def test_a_press_whose_block_was_edited_and_not_saved_keeps_the_tick(tab, site):
+    # #153, 1: the box was taken only from a clean block, so the settle's merge of a later edit put Approve back.
+    p, f = tab.page, site.file
+    f.write_text(NOTES, encoding="utf-8")
+    p.clock.install()
+    tab.open()
+    p.wait_for_selector("#rd-actions button")
+    stand_still(p)
+    type_at_end(p, "main li:has-text('notes')", " now")
+    until(lambda: "now" in p.inner_text("main li:has-text('notes')"), what="the edit on screen")
+    bar(p).nth(0).click()                               # Approve, its block edited and not saved
+    p.clock.run_for(3000)                               # the autosave goes
+    until(lambda: "notes now" in f.read_text(encoding="utf-8"), what="the autosave")
+    until(lambda: p.evaluate("document.querySelector('#rd-state').textContent") != "Saving…", what="its answer")
+    p.click("main li:has-text('notes')")
+    p.keyboard.press(key("End"))
+    p.keyboard.type(" more")
+    until(lambda: "more" in p.inner_text("main li:has-text('notes')"), what="the second edit on screen")
+    p.clock.run_for(2100)
+    until(lambda: "notes now more" in f.read_text(encoding="utf-8"), what="the edit, saved by the reload's settle")
+    text = f.read_text(encoding="utf-8")
+    assert re.search(r"^- \[x\] Approve$", text, re.M), text
+
+
+def test_an_upgrade_while_a_save_waits_for_the_tick_does_not_ask_to_save(sheaf, site):
+    # #153, 2: the save waiting for the tick was counted nowhere, and the upgrade's notice asked to save the edits.
+    p, f = sheaf.page, sheaf.site.file
+    p.add_init_script(HEARD)
+    p.reload()
+    p.wait_for_selector("#rd-actions button")
+    held = []
+    p.route("**/_/tick", lambda r: held.append(r))
+    stand_still(p)
+    bar(p).nth(0).click()
+    p.clock.run_for(5100)
+    until(lambda: held or p.wait_for_timeout(20), what="the tick, held")
+    type_at_end(p, "main p:has-text('Body')", " typed")
+    p.clock.run_for(2600)                               # the autosave is due and waits for the tick
+    until(lambda: p.evaluate("document.querySelector('#rd-state').textContent") == "Saving…", what="Saving…")
+    p.route("**/_/doc?*", lambda r: r.abort())
+    site.hub.entry(DOC).bus.publish("hello", {"version": "99.0.0"})
+    until(lambda: heard(p, "hello"), what="the upgrade")
+    p.wait_for_timeout(300)
+    assert "Save your edits" not in p.inner_text("#rd-notice")
+    held[0].continue_()
+    p.unroute("**/_/tick")
+    until(lambda: "- [x] Approve" in f.read_text(encoding="utf-8"), what="the tick")
+    until(lambda: " typed" in f.read_text(encoding="utf-8"), what="the save after it")
+
+
+def test_an_upgrade_held_by_a_comment_form_during_a_press_does_not_say_the_text_changed(sheaf, site):
+    # #153, 3: the reload held for the form had no reason of its own, and the page it brought said the text changed.
+    p = sheaf.page
+    p.add_init_script(HEARD)
+    p.reload()
+    p.wait_for_selector("#rd-actions button")
+    p.route("**/_/doc?*", lambda r: r.abort())
+    stand_still(p)
+    bar(p).nth(0).click()
+    site.hub.entry(DOC).bus.publish("hello", {"version": "99.0.0"})
+    until(lambda: heard(p, "hello"), what="the upgrade, whose reload waits for the press")
+    select(p, at("main", "Body"), at("main", "Body", None))
+    p.clock.run_for(500)                                # the Comment button shows after the selection settles
+    p.click("#rd-comment-btn")
+    p.fill("#rd-popover textarea", "Why?")
+    mark(p)
+    bar(p).nth(0).click()                               # Undo: the reload now waits for the form
+    p.wait_for_timeout(300)
+    assert p.evaluate("window.__same_load") is True, "the page reloaded under the comment form"
+    p.click("#rd-popover button[data-f=no]")
+    reloaded(p)
+    p.wait_for_selector("#rd-actions button")
+    toasted(p, "upgraded")
+    assert "text changed" not in toast(p)
+
+
+def test_a_restore_waiting_for_the_tick_is_answered_before_the_page_reloads(tab, context, site):
+    # #153, 4: the Restore waiting for the tick was counted nowhere, and the reload of the tick's change went under it.
+    f = site.file
+    f.write_text(SHEAF, encoding="utf-8")
+    tab.open()
+    tab.page.wait_for_selector("#rd-actions button")
+    site.kill()
+    type_at_end(tab.page, "main p:has-text('Body')", " typed")
+    until(lambda: tab.page.evaluate(f"localStorage.getItem({draft_key(site)!r})"), what="the draft")
+    tab.page.close()
+    site.start()
+    p = context.new_page()
+    p.add_init_script(HEARD)
+    p.clock.install()
+    p.goto(site.url)
+    p.wait_for_selector("#rd-notice button[data-d=restore]")
+    p.wait_for_selector("#rd-actions button")
+    held = []
+    p.route("**/_/tick", lambda r: held.append(r))
+    stand_still(p)
+    bar(p).nth(0).click()
+    p.clock.run_for(5100)
+    until(lambda: held or p.wait_for_timeout(20), what="the tick, held")
+    saves = []
+    p.route("**/_/save", lambda r: saves.append(r))
+    p.click("#rd-notice button[data-d=restore]")       # it waits for the tick's answer
+    answer = held[0].fetch()                            # the hub ticks, and its `changed` comes before the answer
+    until(lambda: heard(p, "changed") or p.wait_for_timeout(20), what="the tick's change")
+    mark(p)
+    held[0].fulfill(response=answer)
+    p.unroute("**/_/tick")
+    until(lambda: saves or p.wait_for_timeout(20), what="the Restore, sent once the tick is answered")
+    p.wait_for_timeout(500)
+    assert p.evaluate("window.__same_load") is True, "the page reloaded under the Restore"
+    saves[0].continue_()
+    p.unroute("**/_/save")
+    until(lambda: " typed" in f.read_text(encoding="utf-8"), what="the restored edit")
+    reloaded(p)
+    p.wait_for_selector("#rd-actions button")
+    p.wait_for_timeout(500)
+    assert p.query_selector("#rd-notice button[data-d=restore]") is None, "the draft is offered again"
+    assert p.evaluate(f"localStorage.getItem({draft_key(site)!r})") is None
+
+
+def test_a_comment_opened_while_a_reload_waits_for_the_restore_holds_that_reload(tab, context, site):
+    # #153, gate on 49f0491: the reload put off for the Restore went on once it was answered, under the comment
+    # form opened meanwhile.
+    f = site.file
+    f.write_text(SHEAF, encoding="utf-8")
+    tab.open()
+    tab.page.wait_for_selector("#rd-actions button")
+    site.kill()
+    type_at_end(tab.page, "main p:has-text('Body')", " typed")
+    until(lambda: tab.page.evaluate(f"localStorage.getItem({draft_key(site)!r})"), what="the draft")
+    tab.page.close()
+    site.start()
+    p = context.new_page()
+    p.add_init_script(HEARD)
+    p.clock.install()
+    p.goto(site.url)
+    p.wait_for_selector("#rd-notice button[data-d=restore]")
+    p.wait_for_selector("#rd-actions button")
+    held = []
+    p.route("**/_/tick", lambda r: held.append(r))
+    stand_still(p)
+    bar(p).nth(0).click()
+    p.clock.run_for(5100)
+    until(lambda: held or p.wait_for_timeout(20), what="the tick, held")
+    saves = []
+    p.route("**/_/save", lambda r: saves.append(r))
+    p.click("#rd-notice button[data-d=restore]")
+    answer = held[0].fetch()
+    until(lambda: heard(p, "changed") or p.wait_for_timeout(20), what="the tick's change")
+    mark(p)
+    held[0].fulfill(response=answer)
+    p.unroute("**/_/tick")
+    until(lambda: saves or p.wait_for_timeout(20), what="the Restore, sent once the tick is answered")
+    select(p, at("main", "Body"), at("main", "Body", None))
+    p.clock.run_for(500)                                # the Comment button shows after the selection settles
+    p.click("#rd-comment-btn")
+    p.fill("#rd-popover textarea", "Why?")
+    saves[0].continue_()
+    p.unroute("**/_/save")
+    until(lambda: " typed" in f.read_text(encoding="utf-8"), what="the restored edit")
+    p.wait_for_timeout(1000)
+    assert p.evaluate("window.__same_load") is True, "the page reloaded under the comment form"
+    assert p.input_value("#rd-popover textarea") == "Why?"
+
+
+def test_an_upgrade_during_the_press_does_not_reload_before_a_restore_waiting_for_the_tick(tab, context, site):
+    # #153, gate on 8aeb048: a reload asked only by an upgrade went to location.reload when the press was done,
+    # before the Restore parked on its tick was sent.
+    f = site.file
+    f.write_text(SHEAF, encoding="utf-8")
+    tab.open()
+    tab.page.wait_for_selector("#rd-actions button")
+    site.kill()
+    type_at_end(tab.page, "main p:has-text('Body')", " typed")
+    until(lambda: tab.page.evaluate(f"localStorage.getItem({draft_key(site)!r})"), what="the draft")
+    tab.page.close()
+    site.start()
+    p = context.new_page()
+    p.add_init_script(HEARD)
+    p.clock.install()
+    p.goto(site.url)
+    p.wait_for_selector("#rd-notice button[data-d=restore]")
+    p.wait_for_selector("#rd-actions button")
+    p.route("**/_/doc?*", lambda r: r.abort())
+    held = []
+    p.route("**/_/tick", lambda r: held.append(r))
+    stand_still(p)
+    bar(p).nth(0).click()
+    site.hub.entry(DOC).bus.publish("hello", {"version": "99.0.0"})
+    until(lambda: heard(p, "hello"), what="the upgrade, whose reload waits for the press")
+    p.clock.run_for(5100)
+    until(lambda: held or p.wait_for_timeout(20), what="the tick, held")
+    saves = []
+    p.route("**/_/save", lambda r: saves.append(r))
+    p.click("#rd-notice button[data-d=restore]")       # it waits for the tick's answer
+    mark(p)
+    held[0].fulfill(status=409, content_type="application/json", body=REFUSED)
+    p.unroute("**/_/tick")
+    until(lambda: saves or p.wait_for_timeout(20), what="the Restore, sent once the tick is answered")
+    p.wait_for_timeout(500)
+    assert p.evaluate("window.__same_load") is True, "the page reloaded under the Restore"
+    saves[0].continue_()
+    p.unroute("**/_/save")
+    until(lambda: " typed" in f.read_text(encoding="utf-8"), what="the restored edit")
+    reloaded(p)

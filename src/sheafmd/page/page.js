@@ -614,9 +614,18 @@
 
   // Keeps scroll position (and the open comment) across the reloads that follow
   // every comment write and every outside change.
-  function reloadKeep(openId) {
+  // `why`, the reason of the reload, is for one that waits for a draft's Restore (restoring, settle): a form opened
+  // meanwhile holds it with that reason, and the thread it opens is kept for when it runs (holdOpen).
+  function reloadKeep(openId, why) {
     if (docGone) return;        // it would load another folder's document, or none (meetDocGone)
     if (pressOpen) { waitForPress({ open: openId, keep: true }); return; }     // as in settle (SPEC 10.11)
+    if (restoring) {
+      restoring.then(function () {
+        if (openId && !holdOpen && writingNow({ sent: 'any' })) holdOpen = openId;
+        reloadWhenFree(openId, why);
+      });
+      return;
+    }
     try {
       if (pressSaid && Date.now() < pressSaid.until) sessionStorage.setItem('rd-press-said', pressSaid.text);
       sessionStorage.setItem('rd-keep', JSON.stringify({ doc: CFG.doc, y: window.scrollY, open: openId || null,
@@ -709,7 +718,7 @@
   // hold events for as long as a job runs. `out` (below): the forms between their click and their answer,
   // each with the popover it holds, read by `writingNow`, `sendingIn` and the `sent*` questions.
   var writes = 0, afterWrites = [], docGone = false;     // docGone: no request goes out any more (meetDocGone)
-  var parked = 0;              // writes not yet sent, waiting for a tick that is out (post): meetVersion counts them
+  var parked = 0;              // writes not yet sent, waiting for a tick that is out (post, save): meetVersion counts them
   var ownWrites = 0, ownSeq = 0, held = [];       // ownSeq: how many of them have started
   var lateSends = {};          // the request ids of the sends the page gave up on, until the hub's event names them
   var lastLate = {};           // of those, the ones whose latest attempt was given up on (a send again may have failed otherwise)
@@ -839,11 +848,13 @@
     if (stale) { say('The document changed. Reload the page before saving again.', true); return false; }
     if (saving) { await saving; return save(quiet, res); }
     // A tick out names the text on disk: a save now would change it under the tick, which the hub would refuse.
-    // The wait can last as long as the tick's answer, so the menu says the save is on its way.
+    // The wait can last as long as the tick's answer, so the menu says the save is on its way, and an upgrade
+    // waits for it as for a write out (parked, meetVersion).
     if (ticking) {
       var sw = q('#rd-state');
       if (sw && dirty().length) sw.textContent = 'Saving…';
-      await ticking;
+      parked++;
+      try { await ticking; } finally { parked--; }
       refresh();
       return save(quiet, res);
     }
@@ -925,7 +936,13 @@
   // structure: save what is still on screen, which the server merges, then
   // reload onto the merged file with scroll, edit mode and caret kept.
   var settling = false;
-  async function settle(openId) {
+  // A draft's Restore between its click and its answer (offerDraft). It may wait for a tick that is out, and so is
+  // not yet among the writes whose `changed` the page holds (ownWrites): a reload asked meanwhile, the tick's own
+  // among them, waits for its answer, or it would go before the Restore is sent. Every reload ends in reloadKeep,
+  // which waits for it, and then goes back through reloadWhenFree with its reason: a form opened or edits typed
+  // during that wait hold or save first, as for any other reload.
+  var restoring = null;
+  async function settle(openId, why) {
     if (settling || docGone) return;
     // Every reload of an outside change, a held one too, comes here: one waits for an open press (SPEC 10.11).
     if (pressOpen) { waitForPress({ open: openId }); return; }
@@ -942,7 +959,8 @@
     // A form opened while those saves were out holds the reload like any other (reloadWhenFree). With no
     // save there was no time to open one, and a send whose answer called this still counts in `out`.
     if (n > 0 && writingNow({ sent: 'any' })) { settling = false; reloadWhenFree(openId, heldReload); return; }
-    reloadKeep(openId);
+    if (restoring) settling = false;      // the reload waits for the Restore, then comes through here again
+    reloadKeep(openId, why);
   }
 
   // ---- export ---------------------------------------------------------------
@@ -1011,11 +1029,12 @@
   // and not yet answered. A reload the page needs is held until then: it waits as a
   // pending flag with a quiet line above the form, and runs when the form is sent or
   // cancelled, with the thread just written kept open.
-  // `heldReload` is why the reload that has just run was held ('text', 'arrived', 'restore'), false for one
+  // `heldReload` is why the reload that has just run was held ('text', 'arrived', 'restore', 'upgrade'), false for one
   // that was not; `holdWhy` is the reason of the pending one; `holdOpen` the thread a new comment sent
   // behind another send has, which that reload opens.
   var reloadPending = false, heldReload = false, holdWhy = null, holdOpen = null;
-  var HELD_SAYS = { text: 'The text changed while you wrote.', restore: 'Your restored edits are in.' };
+  var HELD_SAYS = { text: 'The text changed while you wrote.', restore: 'Your restored edits are in.',
+                    upgrade: 'The sheaf hub was upgraded while you wrote.' };
   // The forms whose send is out, one {host, own, says, rid} each: the popover it was sent from, the thread
   // of that popover (null for a new comment), the line that popover shows meanwhile and the send's request
   // id. A send is per form: it holds back what would close the popover it comes back to, not every popover
@@ -1184,7 +1203,7 @@
     if (docGone) return;
     // A press of an action button waits or is out (SPEC 10.11): the reload waits for its answer, as the list's does.
     if (pressOpen) { waitForPress({ open: openId, why: why }); return; }    // its form is not waited for either
-    if (!writingNow({ sent: 'any' })) { settle(openId); return; }
+    if (!writingNow({ sent: 'any' })) { settle(openId, why); return; }
     holdReload(why);
   }
   // The reload that a send's answer, a held reload or a refused comment asks for, keeping `openId`
@@ -1194,7 +1213,7 @@
     var open = holdOpen || openId;
     reloadPending = false; holdWhy = null; holdOpen = null;
     stopRenewing();
-    settle(open);
+    settle(open, heldReload || undefined);
   }
   function flushHold() {
     if (pop && popId && !byId[popId] && !writingNow({ sent: 'any' })) { closePopover(); return; }
@@ -2783,12 +2802,17 @@
   var ACTION_LINE = new RegExp('^(?:(?:' + ACTION_WORDS.slice(0, -1).map(function (w) {
     return w.replace(/'/g, '[\'’]');
   }).join('|') + ')|Move to\\s+[A-Za-z0-9._\\\\-]+\\s+\\(ref\\s+[^()\\s]+\\))(?:\\s+@[A-Za-z0-9._-]+)?$');
-  function mayBeAction(t) {
+  // The text of a box's own item, its nested lists left out; null for a box in no item.
+  function itemLine(t) {
     var li = t.closest && t.closest('li');
-    if (!li) return false;
+    if (!li) return null;
     var own = li.cloneNode(true);
     Array.prototype.forEach.call(own.querySelectorAll('ul, ol'), function (n) { n.remove(); });
-    return ACTION_LINE.test(own.textContent.replace(/\s+/g, ' ').trim());
+    return own.textContent.replace(/\s+/g, ' ').trim();
+  }
+  function mayBeAction(t) {
+    var line = itemLine(t);
+    return line !== null && ACTION_LINE.test(line);
   }
   async function tickBox(t, b) {
     if (boxWaits.has(t)) return;
@@ -2895,8 +2919,9 @@
         var r = reloadAfterPress;
         reloadAfterPress = null;
         // Only upgrades asked: a plain reload, unless edits were typed or a form opened during the press. Then it
-        // goes as a change's does, which saves them first or waits for the form.
-        if (r.keep && !dirty().length && !writingNow({ page: true })) reloadKeep(r.open); else reloadWhenFree(r.open, r.why);
+        // goes as a change's does, which saves them first or waits for the form, held as an upgrade's.
+        if (r.keep && !dirty().length && !writingNow({ page: true })) reloadKeep(r.open, 'upgrade');
+        else reloadWhenFree(r.open, r.why || (r.keep ? 'upgrade' : undefined));
       }
     }
     async function send() {
@@ -2958,10 +2983,11 @@
       if (settling) { say('The page is reloading onto a change to the file: press ' + a.label + ' once it has.'); return; }
       pressOpen = true;
       // Its box, as an element: an item typed above it during the press moves its number, not the box (showTick).
-      // The number names the box only in the text the buttons were drawn from: in a block edited and not saved, or
-      // with buttons the page is not sure of, it may name another, and no box is taken.
-      var pb = boxOfAct(a), pbb = pb && blockOf(pb);
-      pressedBox = pbb && ser(pbb) === pbb.pristine && !actsUnsure && hash === actsHash ? pb : null;
+      // The number names the box only in the text the buttons were drawn from: with buttons the page is not sure
+      // of, or in a block whose edits not saved moved its boxes or changed its line, it may name another, and no
+      // box is taken.
+      var pb = boxOfAct(a);
+      pressedBox = pb && !actsUnsure && hash === actsHash && savedBox(pb, a.box[1]) ? pb : null;
       lock(true);
       btn.textContent = 'Undo'; btn.classList.add('pending'); btn.setAttribute('aria-label', 'Undo ' + word);
       waiting = setTimeout(send, UNDO_MS);
@@ -2973,6 +2999,19 @@
   function boxOfAct(a) {
     var b = a.box && blocks.filter(function (x) { return x.i === a.box[0]; })[0];
     return (b && boxesOf(b)[a.box[1]]) || null;
+  }
+  // The box is the `k`th of its block in the text saved too: the block is clean, or its edits left the same boxes,
+  // the `k`th on the same line (an edit in another item of the list), a line no other box of the block reads (an
+  // item typed with the same words after one deleted above would be another box at that number).
+  function savedBox(box, k) {
+    var b = blockOf(box);
+    if (!b) return false;
+    if (ser(b) === b.pristine) return true;
+    var was = document.createElement('template');
+    was.innerHTML = b.pristine;
+    var then = was.content.querySelectorAll('input[type="checkbox"]'), now = boxesOf(b), line = itemLine(box);
+    return then.length === now.length && itemLine(then[k]) === line &&
+           now.filter(function (x) { return itemLine(x) === line; }).length === 1;
   }
   function showTick(a, box) {
     var b = box && main.contains(box) && blockOf(box);
@@ -3301,7 +3340,7 @@
                             ', then reload this page to use the new version.');
         return;
       }
-      reloadKeep(popId);
+      reloadKeep(popId, 'upgrade');
     };
     var connect = function () {
       if (docGone) return;
@@ -3515,6 +3554,8 @@
       var k = e.target.getAttribute && e.target.getAttribute('data-d');
       if (k === 'discard') { decided(); dropOffer(); }
       if (k !== 'restore') return;
+      var end, mine = new Promise(function (r) { end = r; });
+      restoring = mine;          // a second click's Restore keeps the wait until its own answer
       try {
         // A Restore the hub did not answer can be pressed again, or a page opened later can offer the draft
         // again: the same edits go under the same id, which the draft keeps (an older entry's has none).
@@ -3545,6 +3586,9 @@
         panel.querySelector('pre').textContent = text;
         panel.dataset.keeps = 'draft';
         panel.classList.add('open');
+      } finally {
+        if (restoring === mine) restoring = null;
+        end();
       }
     };
   }

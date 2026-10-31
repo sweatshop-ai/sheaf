@@ -1512,6 +1512,15 @@ def test_the_page_of_a_sheaf_names_the_rows_buttons_with_who_pressed_a_one_off_a
         ("Share", "", 1, False, [i, 2])]
 
 
+def test_a_press_from_the_page_that_went_stale_says_to_reload_the_page(box, sheaves):
+    tick = {**row_press(box.get("/list", member=NELL), JOEY), "where": "page"}
+    path = sheaves / JOEY[5:]
+    path.write_text(path.read_text(encoding="utf-8").replace("The draft.", "The draft, changed."), encoding="utf-8")
+    r = box.post("/_/tick", tick, member=NELL)
+    assert r.status == 409 and r.json()["error"].endswith("(Approve): reload the page"), r.text
+    assert box.post("/_/tick", {**tick, "where": "box"}, member=NELL).status == 400
+
+
 def test_a_box_no_commit_holds_shows_pressed_without_who_or_when_and_a_ticked_move_to_is_one(box, sheaves):
     path = sheaves / JOEY[5:]
     path.write_text(path.read_text(encoding="utf-8").replace(

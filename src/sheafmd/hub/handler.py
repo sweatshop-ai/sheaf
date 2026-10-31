@@ -764,11 +764,13 @@ class Handler:
         return _ok(**got)
 
     def _tick(self, req: Req) -> Response:
-        """The list's row ticks the sheaf's action (9.10): saved as the page saves a tick, so the file, the
-        commit and the open tabs see what a tick in the page makes them see."""
+        """The list's row, or the sheaf's own page (10.11, `where`), ticks the sheaf's action (9.10): saved as the
+        page saves a tick, so the file, the commit and the open tabs see what a tick in the page makes them see."""
         b = req.body
         e = self._entry(req, b.get("doc"))
         n, word, read, release = b.get("action"), b.get("word"), b.get("hash"), b.get("release", False)
+        where = b.get("where", "list")
+        _shape(where in ("list", "page"), "where must be list or page")
         _shape(type(n) is int and n >= 0, "action must be the number of the sheaf's action, from 0")
         _shape(isinstance(word, str) and word != "", "word must be the action's word")
         _shape(isinstance(read, str) and read != "", "hash must be the hash of the sheaf the list read")
@@ -786,10 +788,10 @@ class Handler:
                 e.live.refresh()
             h, text = e.live.current()
         if h != read:
-            raise Refuse(409, f"the sheaf changed since the list read it ({word}): reload the list")
+            raise Refuse(409, f"the sheaf changed since the {where} read it ({word}): reload the {where}")
         edit = the_list.tick_edit(text, n, word, release)
         if edit is None:
-            raise Refuse(409, f"the sheaf no longer holds that action ({word}): reload the list")
+            raise Refuse(409, f"the sheaf no longer holds that action ({word}): reload the {where}")
         with place.held(self.hub, e.address):
             guard, ticked = self._ticks(req, e)
 
@@ -797,7 +799,7 @@ class Handler:
                 # The row names its action by place and word: on another text than the list read, another
                 # action may sit there with the same word. Judged on the file under its lock.
                 if md_hash(text) != read:
-                    raise EditError(f"the sheaf changed since the list read it ({word}): reload the list")
+                    raise EditError(f"the sheaf changed since the {where} read it ({word}): reload the {where}")
                 return guard(text, new, toggled)
             move, moved = self._mover(e, ticked)
             with self._moved_committed(e, req.member, "tick", moved):
@@ -806,7 +808,7 @@ class Handler:
                 except (EditError, StaleError) as ex:
                     raise Refuse(409, str(ex)) from None
                 if not got["changed"]:
-                    raise Refuse(409, f"the sheaf no longer holds that action ({word}): reload the list")
+                    raise Refuse(409, f"the sheaf no longer holds that action ({word}): reload the {where}")
                 self.hub.index.touch(e.address)
                 gone = moved[0] if moved else self._placed(e, ticked)
                 moved.clear()

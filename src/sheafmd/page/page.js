@@ -846,7 +846,7 @@
         // So does an answer of `again`: its hash is the text the first send wrote, not always the file's now.
         var kept = j.remap || j.merged || j.again;
         hash = kept ? was : j.hash;
-        if (!kept && j.actions) drawActions(j.actions);     // the buttons of the text the hash names (SPEC 10.11)
+        if (!kept && j.actions) drawActions(j.actions, j.hash);     // the buttons of the text the hash names (SPEC 10.11)
         // What was sent is now saved; anything typed while the request was out
         // stays dirty for the next save.
         sent.forEach(function (x) { x.b.pristine = x.html; x.b.ownSave = kept ? x.html : null; });
@@ -1153,6 +1153,8 @@
   }
   function reloadWhenFree(openId, why) {
     if (docGone) return;
+    // A press of an action button waits or is out (SPEC 10.11): the reload waits for its answer, as the list's does.
+    if (pressOpen) { reloadAfterPress = { open: openId, why: why }; return; }
     if (!writingNow({ sent: 'any' })) { settle(openId); return; }
     holdReload(why);
   }
@@ -2728,10 +2730,17 @@
   // The boxes of the eight words are the list's buttons at the top of the page (9.10): a one-off red, locked once
   // pressed, with who and when; Share a toggle, its owner's alone. A press reads Undo for 5 seconds, then posts the
   // list's tick (`/_/tick`) with the hash of the text on screen; the hub's `changed` reloads the page onto the
-  // ticked file. While a press waits or is sent, the other buttons cannot be pressed: they name their actions by
-  // the text the page holds, which the tick changes. The boxes themselves stay in the document, and a click on one
-  // says where its button is. A save's answer brings the buttons of the text it wrote, drawn once no press is open.
-  var UNDO_MS = 5000, actBoxes = new WeakSet(), actBar = null, pressOpen = false, actsOwed = null;
+  // ticked file, and a reload asked meanwhile waits for the press's answer. While a press waits or is sent, the other
+  // buttons cannot be pressed: they name their actions by the text the page holds, which the tick changes. The boxes
+  // themselves stay in the document, and a click on one says where its button is. A save's answer brings the buttons
+  // of the text it wrote (`actsOwed`, with its hash), drawn once no press is open; a press whose buttons that save
+  // changed is not sent, since its number may now name another box.
+  var UNDO_MS = 5000, actBoxes = new WeakSet(), actBar = null, pressOpen = false, reloadAfterPress = null;
+  var actsHash = CFG.hash, actsShown = [], actsOwed = null;
+  function sameActions(a, b) {
+    var sig = function (xs) { return JSON.stringify(xs.map(function (x) { return [x.label, x.pressed, x.n]; })); };
+    return sig(a) === sig(b);
+  }
   function boxesOf(b) {
     var out = [];
     b.nodes.forEach(function (n) {
@@ -2741,8 +2750,9 @@
     });
     return out;
   }
-  function drawActions(acts) {
-    if (pressOpen) { actsOwed = acts; return; }
+  function drawActions(acts, h) {
+    if (pressOpen) { actsOwed = { acts: acts, hash: h }; return; }
+    actsHash = h; actsShown = acts || [];
     actBoxes = new WeakSet();
     if (actBar) actBar.remove();
     actBar = null;
@@ -2759,7 +2769,7 @@
       btn.className = 'rd-act ' + (a.toggle ? 'toggle' : 'one-off') + (a.pressed && !a.toggle ? ' pressed' : '');
       btn.textContent = a.label + (a.pressed && !a.toggle ? ' ✓' + (a.by ? ' ' + a.by : '') : '');
       if (a.toggle) btn.setAttribute('aria-pressed', a.pressed ? 'true' : 'false');
-      btn.disabled = !a.may || !canEdit;
+      btn.disabled = !a.may;
       actBar.appendChild(btn);
       return { btn: btn, a: a };
     });
@@ -2770,7 +2780,11 @@
     var word = btn.textContent, waiting = null;
     function lock(on) { all.forEach(function (o) { if (o.btn !== btn && o.a.may) o.btn.disabled = on; }); }
     function back() { btn.textContent = word; btn.classList.remove('pending'); btn.removeAttribute('aria-label'); }
-    function done() { pressOpen = false; if (actsOwed) { var owed = actsOwed; actsOwed = null; drawActions(owed); } }
+    function done() {
+      pressOpen = false;
+      if (actsOwed) { var owed = actsOwed; actsOwed = null; drawActions(owed.acts, owed.hash); }
+      if (reloadAfterPress) { var r = reloadAfterPress; reloadAfterPress = null; reloadWhenFree(r.open, r.why); }
+    }
     async function send() {
       waiting = null;
       back();
@@ -2778,18 +2792,33 @@
       if (a.toggle) btn.setAttribute('aria-pressed', a.pressed ? 'false' : 'true');
       // A save out now changes the hash: the tick names the text that save leaves.
       while (saving || settling) await (saving || new Promise(function (r) { setTimeout(r, 100); }));
-      var tick = { action: a.n, word: a.word, hash: hash };
+      // The number names a box of the text the buttons were drawn from. A save answered since moved the hash: its
+      // buttons say whether the numbers still hold; without them (a text the page did not write) the hub judges.
+      var at = actsHash;
+      if (hash !== actsHash && actsOwed && actsOwed.hash === hash) {
+        if (!sameActions(actsOwed.acts, actsShown)) {
+          if (a.toggle) btn.setAttribute('aria-pressed', a.pressed ? 'true' : 'false');
+          say('The actions changed while ' + a.label + ' waited: it was not sent. Press it again.', true);
+          done();
+          return;
+        }
+        at = hash;
+      }
+      var tick = { action: a.n, word: a.word, hash: at, where: 'page' };
       if (a.release) tick.release = true;
       try {
         await post('/_/tick', tick);
         // Ticked: the hub's `changed` reloads the page; until then nothing more is pressed on the old text.
         all.forEach(function (o) { o.btn.disabled = true; });
         actsOwed = null;
+        done();
       } catch (e) {
         if (a.toggle) btn.setAttribute('aria-pressed', a.pressed ? 'true' : 'false');
         btn.disabled = false;
         lock(false);
         say(e.message, true);
+        // A reload waits for this answer: the refusal is said again on the page it brings.
+        if (reloadAfterPress) try { sessionStorage.setItem('rd-toast', e.message); } catch (x) {}
         done();
       }
     }
@@ -2802,7 +2831,7 @@
       waiting = setTimeout(send, UNDO_MS);
     });
   }
-  if (canSave) drawActions(CFG.actions);
+  if (canSave) drawActions(CFG.actions, CFG.hash);
 
   // Asked when edits are on screen, stale or not: a stale page refuses Save and says to copy the
   // text and reload, so it is the one whose edits are most likely to be left behind. A comment, reply

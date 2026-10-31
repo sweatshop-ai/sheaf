@@ -56,6 +56,8 @@ class Job:
                                     text=True, encoding="utf-8",
                                     errors="replace", start_new_session=True, env=env, cwd=cwd)
             self._proc = proc
+            if self.cancelled:                 # a kill that could not wait for this lock (`kill`)
+                _signal_group(proc, signal.SIGKILL)
         try:
             out, err = proc.communicate(input, timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -86,11 +88,19 @@ class Job:
             if self._proc is proc:             # still the child this cancel signalled
                 _signal_group(proc, signal.SIGKILL)
 
-    def kill(self):
-        """SIGKILL the group of the child running now, if there is one."""
-        with self._lock:
+    def kill(self, *, blocking: bool = True):
+        """SIGKILL the group of the child running now, if there is one. A signal handler passes
+        `blocking=False`: it runs in the thread it interrupted, which may hold the lock while the child
+        starts; the job is then marked cancelled, and `run` ends the child once it is there."""
+        if not self._lock.acquire(blocking):
+            self.cancelled = True
+            return
+        try:
+            self.cancelled = self.cancelled or not blocking
             if self._proc is not None:
                 _signal_group(self._proc, signal.SIGKILL)
+        finally:
+            self._lock.release()
 
 
 class Jobs:

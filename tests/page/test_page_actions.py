@@ -657,3 +657,55 @@ def test_an_item_added_above_the_pressed_box_during_the_undo_leaves_the_tick_on_
     until(lambda: "extra" in f.read_text(encoding="utf-8"), what="the edit, saved by the reload's settle")
     text = f.read_text(encoding="utf-8")
     assert "- [x] Share" in text and "- [ ] Done" in text, text
+
+
+def test_an_item_typed_above_the_box_just_before_the_press_never_ticks_another_box(sheaf):
+    # #148, 7, gate on 3b10c3c: the box was found by its number in the text the buttons were drawn from, which an
+    # item on screen and not yet saved had moved onto Done, a one-off the hub then kept ticked.
+    p, f = sheaf.page, sheaf.site.file
+    stand_still(p)
+    type_at_end(p, "main li:has-text('Approve')", "")
+    p.keyboard.press("Enter")
+    p.keyboard.type("extra")
+    until(lambda: "extra" in p.inner_text("main ul"), what="the new item on screen")
+    bar(p).nth(2).click()                               # Share, within the autosave's 2.5 s
+    p.clock.run_for(3000)                               # the autosave goes
+    until(lambda: "extra" in f.read_text(encoding="utf-8"), what="the autosave")
+    until(lambda: p.evaluate("document.querySelector('#rd-state').textContent") != "Saving…", what="its answer")
+    p.click("main li:has-text('extra')")
+    p.keyboard.press(key("End"))
+    p.keyboard.type(" more")
+    p.clock.run_for(2200)
+    until(lambda: "more" in f.read_text(encoding="utf-8"), what="the edit, saved by the reload's settle")
+    p.wait_for_timeout(500)
+    text = f.read_text(encoding="utf-8")
+    assert "- [ ] Done" in text and "[x] Done" not in text, text
+
+
+def test_an_upgrade_while_a_comment_waits_for_the_tick_does_not_ask_to_send_it(sheaf, site):
+    # #148, gate on 3b10c3c: the comment, sent and waiting for the tick's answer, did not count as a write out, and
+    # the upgrade's notice asked to send or cancel it.
+    p, f = sheaf.page, sheaf.site.file
+    p.add_init_script(HEARD)
+    p.reload()
+    p.wait_for_selector("#rd-actions button")
+    held = []
+    p.route("**/_/tick", lambda r: held.append(r))
+    select(p, at("main", "Body"), at("main", "Body", None))
+    p.click("#rd-comment-btn")
+    p.fill("#rd-popover textarea", "Why?")
+    stand_still(p)
+    bar(p).nth(0).click()
+    p.clock.run_for(5100)
+    until(lambda: held or p.wait_for_timeout(20), what="the tick, held")
+    p.click("#rd-popover button[data-f=ok]")
+    p.wait_for_timeout(300)
+    p.route("**/_/doc?*", lambda r: r.abort())
+    site.hub.entry(DOC).bus.publish("hello", {"version": "99.0.0"})
+    until(lambda: heard(p, "hello"), what="the upgrade")
+    p.wait_for_timeout(300)
+    assert "Send or cancel" not in p.inner_text("#rd-notice")
+    held[0].continue_()
+    p.unroute("**/_/tick")
+    until(lambda: "- [x] Approve" in f.read_text(encoding="utf-8"), what="the tick")
+    until(lambda: "Why?" in f.read_text(encoding="utf-8"), what="the comment after it")

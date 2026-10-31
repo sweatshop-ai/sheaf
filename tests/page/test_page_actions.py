@@ -52,8 +52,17 @@ def heard(page, event):
 
 
 def stand_still(page):
-    """The installed clock runs at the real pace: from now on it moves only when the test runs it."""
-    page.clock.pause_at((page.evaluate("Date.now()") + 50) / 1000)        # seconds, in Playwright's Python
+    """The installed clock runs at the real pace: from now on it moves only when the test runs it. Called before a
+    press, so the half second it jumps is not the Undo's. A page that read the clock past that time meanwhile makes
+    `pause_at` refuse ("fast-forward to the past"): the time is read again."""
+    for _ in range(5):
+        try:
+            page.clock.pause_at((page.evaluate("Date.now()") + 500) / 1000)       # seconds, in Playwright's Python
+            return
+        except Exception as e:
+            if "past" not in str(e):
+                raise
+    raise AssertionError("the page clock would not pause")
 
 
 def test_the_page_draws_its_actions_as_the_lists_buttons_at_the_top(sheaf):
@@ -277,8 +286,8 @@ def test_an_autosave_due_while_a_press_is_out_waits_for_its_answer_and_the_press
     p, f = sheaf.page, sheaf.site.file
     held = []
     p.route("**/_/tick", lambda r: held.append(r))
-    bar(p).nth(0).click()
     stand_still(p)
+    bar(p).nth(0).click()
     p.clock.run_for(3000)
     type_at_end(p, "main p:has-text('Body')", " typed")
     p.clock.run_for(2100)                               # the tick goes out at 5 s, held
@@ -299,8 +308,8 @@ def test_every_reload_asked_during_a_press_counts_and_the_settle_still_saves_the
     p.reload()
     p.wait_for_selector("#rd-actions button")
     mark(p)
-    bar(p).nth(0).click()
     stand_still(p)
+    bar(p).nth(0).click()
     f.write_text(SHEAF.replace("# Plan", "# Plan, outside"), encoding="utf-8")
     until(lambda: heard(p, "changed"), what="the change, whose reload waits for the press")
     p.route("**/_/doc?*", lambda r: r.abort())          # the hello's look at the text finds nothing to add
@@ -334,8 +343,8 @@ def test_a_sign_out_during_a_press_does_not_reload_under_it(sheaf, site):
     # #127, 4: the page reloaded at once and the press was dropped without a line.
     p, f = sheaf.page, sheaf.site.file
     mark(p)
-    bar(p).nth(0).click()
     stand_still(p)
+    bar(p).nth(0).click()
     site.hub.entry(DOC).bus.publish("signed-out", {})
     until(lambda: "signed out" in p.inner_text("#rd-notice"), what="the signed-out notice")
     assert p.evaluate("window.__same_load") is True, "the page reloaded under the press"
@@ -389,8 +398,8 @@ def test_a_sign_out_while_a_press_is_out_does_not_reload_under_its_answer(sheaf,
     held = []
     p.route("**/_/tick", lambda r: held.append(r))
     mark(p)
-    bar(p).nth(0).click()
     stand_still(p)
+    bar(p).nth(0).click()
     p.clock.run_for(5100)
     until(lambda: held or p.wait_for_timeout(20), what="the tick, held")
     site.hub.entry(DOC).bus.publish("signed-out", {})

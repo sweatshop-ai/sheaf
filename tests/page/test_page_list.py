@@ -12,8 +12,7 @@ pytestmark = pytest.mark.page
 ORIGIN = "http://list.test"
 
 
-@pytest.fixture
-def listed(chromium, box):  # noqa: F811
+def on_the_list(chromium, box, **options):  # noqa: F811
     """A tab on the list as Nell, its requests answered by the hub; `ticks` holds each tick's body and status."""
     ticks = []
 
@@ -28,13 +27,32 @@ def listed(chromium, box):  # noqa: F811
             res = box.get(path, member=NELL)
         route.fulfill(status=res.status, headers=dict(res.headers), body=res.body)
 
-    context = new_context(chromium)
+    context = new_context(chromium, **options)
     context.route(f"{ORIGIN}/**", answer)
     page = context.new_page()
     page.clock.install()
     page.goto(f"{ORIGIN}/list")
     yield page, ticks
     close_context(context)
+
+
+@pytest.fixture
+def listed(chromium, box):  # noqa: F811
+    yield from on_the_list(chromium, box)
+
+
+PHONE = {"viewport": {"width": 360, "height": 780}, "has_touch": True, "is_mobile": True}
+
+
+@pytest.fixture
+def phone(chromium, box, sheaves):  # noqa: F811
+    """The list on a 360 px phone, Joey's row holding four buttons, one a Move to with a long slug."""
+    path = sheaves / JOEY[5:]
+    path.write_text(path.read_text(encoding="utf-8").replace(
+        "- [ ] Approve\n", "- [ ] Approve\n- [ ] Done\n- [ ] Share\n- [ ] Move to klium-website-relaunch (ref 18f3a9c2)\n"),
+        encoding="utf-8")
+    box.hub.the_list.poll()
+    yield from on_the_list(chromium, box, **PHONE)
 
 
 GA4 = "list/initech/website/2026-10-27-ga4-property.md"
@@ -189,3 +207,14 @@ def test_the_owner_releases_a_pressed_share_after_its_five_seconds(listed, box, 
     until(lambda: ticks, what="the release")
     assert [(b["action"], b["word"], b.get("release"), s) for b, s in ticks] == [(0, "Share", True, 200)]
     until(lambda: share.count() == 0 or share.get_attribute("aria-pressed") == "false", what="the reload")
+
+
+def test_on_a_phone_a_rows_buttons_wrap_under_its_title_44_px_high_and_the_list_never_scrolls_sideways(phone):
+    page, _ = phone
+    title = page.locator(".list-row", has=joey(page).first).locator(".list-title").bounding_box()
+    boxes = [joey(page).nth(k).bounding_box() for k in range(joey(page).count())]
+    assert len(boxes) == 4
+    assert all(b["y"] >= title["y"] + title["height"] for b in boxes), "a button beside the title"
+    assert all(b["height"] >= 44 and b["width"] >= 44 for b in boxes), boxes
+    assert all(b["x"] >= 0 and b["x"] + b["width"] <= 360 for b in boxes), boxes
+    assert page.evaluate("document.documentElement.scrollWidth") <= 360

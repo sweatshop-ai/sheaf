@@ -192,3 +192,19 @@ def test_a_press_while_the_page_settles_onto_a_change_is_refused_and_the_page_re
     p.clock.run_for(5100)
     until(lambda: "- [x] Approve" in f.read_text(encoding="utf-8"), what="the press on the reloaded page")
     assert "# Plan, outside" in f.read_text(encoding="utf-8") and " typed" in f.read_text(encoding="utf-8")
+
+
+def test_on_a_phone_the_buttons_wrap_44_px_high_and_the_page_never_scrolls_sideways(touch_tab):
+    p = touch_tab.page
+    touch_tab.site.file.write_text(SHEAF.replace("- [ ] Share\n", "- [ ] Share\n- [ ] Stop James\n"
+                                                 "- [ ] Move to klium-website-relaunch (ref 18f3a9c2)\n"),
+                                   encoding="utf-8")
+    p.set_viewport_size({"width": 360, "height": 780})
+    touch_tab.open()
+    p.wait_for_selector("#rd-actions button")
+    boxes = [bar(p).nth(k).bounding_box() for k in range(bar(p).count())]
+    assert len(boxes) == 5
+    assert all(b["height"] >= 44 and b["width"] >= 44 for b in boxes), boxes
+    assert all(b["x"] >= 0 and b["x"] + b["width"] <= 360 for b in boxes), boxes
+    assert len({b["y"] for b in boxes}) > 1, "five buttons on one line of 360 px"
+    assert p.evaluate("document.documentElement.scrollWidth") <= 360

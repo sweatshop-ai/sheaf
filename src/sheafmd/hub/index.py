@@ -53,9 +53,11 @@ class Status(dict):
     sent (`json.dumps` reads only the items). A member's index stream is sent only these: a dot
     that moved alone says what the hub's person read, or that the hub account's Ask or Tell
     started or ended (9.9)."""
-    def __init__(self, data: dict, files: bool, at: int | None = None, sig: tuple | None = None):
+    def __init__(self, data: dict, files: bool, at: int | None = None, sig: tuple | None = None,
+                 members_only: bool = False):
         super().__init__(data)
         self.files = files
+        self.members_only = members_only    # a dot only a member's index shows moved (9.15): not the hub's person's
         self.at = at                # the number of the last look when the board took it (None: not the board's)
         self.sig = sig              # what the board took for the document
 
@@ -254,8 +256,10 @@ class Index:
         # nor that an Ask or a Tell of it runs.
         unread = sum(1 for cid, n, by in s.threads if by != me and n > seen.get(cid, 0))
         sees_session = member is None
+        # A member's orange is James's session working on a drop of theirs, by its supervisor's word (9.15).
+        works = (sees_session and address in running) or (member is not None and hub.box_waits.working(address))
         dot = ("red" if (sees_session and address in waiting) or unread else
-               "orange" if sees_session and address in running else "blue" if s.open else "green")
+               "orange" if works else "blue" if s.open else "green")
         e = hub.entries.get(address)
         url = roots_mod.url_path(address) if member else hub.url(address)     # the front's origin (9.9)
         return {"doc": address, "url": url, "dot": dot, "open": s.open,
@@ -429,7 +433,8 @@ class Index:
             return name == "status" and isinstance(data, Status) and not self._stream_may_take(data)
 
         def accepting(name: str, data):
-            if forgotten(name, data):
+            # A stream with no `accept` is the hub's person's: a dot only members see moved is not theirs (9.15).
+            if forgotten(name, data) or (accept is None and isinstance(data, Status) and data.members_only):
                 return None
             told = accept(name, data) if accept else data
             return None if told is not None and forgotten(name, data) else told
@@ -491,6 +496,15 @@ class Index:
                 got = (at.root, self._row(address, path, st, waiting, running))
         self._queue_look({address: got}, since)
         self._publish()
+
+    def moved_for_members(self, address: str):
+        """A dot only a member's index shows moved: a drop for James's window began or ended its work (9.15).
+        Their index streams are told the document, and ask for their index again; the hub's person's board and
+        stream are left as they are."""
+        if self.hub.index_bus.count():
+            root = roots_mod.Address.parse(address).root
+            self.hub.index_bus.publish("status", Status({"doc": address, "root": root}, files=True,
+                                                        members_only=True))
 
     def tick(self, now: float):
         """The watcher's step for the index (every second). While an index stream is open:

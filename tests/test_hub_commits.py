@@ -499,6 +499,21 @@ def test_a_write_with_nothing_to_commit_keeps_the_flags_of_the_index(box, sheave
     assert git(sheaves, "ls-files", "-v", "--", "acme/blog/2026-10-28-plan.md").startswith("h ")
 
 
+@pytest.mark.parametrize("flag, letter", [("--assume-unchanged", "h "), ("--skip-worktree", "S ")])
+def test_a_commit_that_fails_keeps_the_flags_of_the_version_entries_it_did_not_touch(box, sheaves, flag, letter):
+    # #49: putting the index back rewrote every entry of the versions folder, which drops their flags.
+    edit(box, sheaves)
+    assert box.hub.commits.settle()
+    (kept, *_) = git(sheaves, "ls-files", "--", ".sheaf/versions").split()
+    git(sheaves, "update-index", flag, kept)
+    head = git(sheaves, "rev-parse", "HEAD").strip()
+    (sheaves / ".git" / "MERGE_HEAD").write_text(head + "\n", encoding="utf-8")   # a merge under way
+    edit(box, sheaves, words="Second, edited again.")
+    assert rows("commit-failed")
+    assert git(sheaves, "ls-files", "-v", "--", kept).startswith(letter)
+    assert git(sheaves, "diff", "--cached", "--name-only") == ""
+
+
 def test_a_document_the_repo_ignores_is_never_committed_nor_its_versions(box, sheaves, remote):
     (sheaves / ".git" / "info" / "exclude").write_text("acme/blog/2026-10-28-plan.md\n", encoding="utf-8")
     git(sheaves, "rm", "-q", "--cached", "acme/blog/2026-10-28-plan.md")

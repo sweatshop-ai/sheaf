@@ -26,6 +26,7 @@ from ..agents import registry
 from ..agents.base import Adapter, Target
 from ..render import render_file
 from ..source import STAMP_FORMAT, file_lock, lock_key
+from . import boxwait
 from . import place
 from . import projects
 from . import proxy as proxy_mod
@@ -75,6 +76,11 @@ class Entry:
 RESTART_TOLD_TTL = 30            # seconds a restart that was announced is still expected
 
 
+def _project(address: str) -> str:
+    """`<client>/<project>` of a sheaf of the list's root at that address (9.10)."""
+    return "/".join(roots_mod.Address.parse(address).rel.split("/")[:2])
+
+
 class Hub:
     def __init__(self, port: int, key: str, *, started_by: str = "cli", service: bool = False,
                  version: str = __version__, clock=time.time, proxy=None):
@@ -106,6 +112,7 @@ class Hub:
         self.index = Index(self)
         self.tokens = state.Tokens()
         self.relays = relay_mod.Relays()     # the forks' relay tokens, queued Tells and streams (9.14)
+        self.box_waits = boxwait.BoxWaits(lambda: self.clock())    # the drops for James's window (9.12, #115)
         self.entries: dict[str, Entry] = {}
         self.index_bus = Bus()                   # the index streams (SPEC 8.8)
         self._index_opening = threading.Lock()   # one index stream opens at a time
@@ -724,6 +731,76 @@ class Hub:
         return self.runner.active("ask")
 
     # ── the watcher's step (SPEC 8.9) ────────────────────────────────────────
+    def _watch_drops(self):
+        """The drops for James's window (9.12): give up on those with no reply after the Tell wait (#115), read in
+        the file as it is now, whether a page asked since or not; then read the supervisor's word on the others."""
+        def text_of(address):
+            # The file, not the hub's copy: `sheaf reply` answers a drop without the hub, and a sheaf with no tab
+            # is not refreshed by the pass.
+            e = self.entries.get(address)
+            if e is None:
+                return None
+            self.catch_up(e)
+            return e.live.current()[1]
+        minutes = max(1, -(-self.tell_wait // 60))
+        for address, thread, d in self.box_waits.expire(self.tell_wait, text_of):
+            self.record("box-expired", address, what=d.kind, project=_project(address), thread=thread)
+            self._tell_drop(address, "box-failed", {"id": thread, "kind": d.kind, "minutes": minutes})
+        self._read_drop_statuses()
+        for address in self.box_waits.cleared():          # however it ended, here or on a page's ask: the orange goes
+            if not self.box_waits.working(address):
+                self.index.moved_for_members(address)
+
+    def _read_drop_statuses(self):
+        """What the box's supervisor says of each drop still open, in its `<drop>.status` (9.15, #139): a change
+        is a `drop-status` row and the page's `box-status`, or `box-failed` with its error, which ends the drop;
+        a `delivered` begun moves a member's dot (one that ends is `cleared`)."""
+        folder = self.the_list.cfg.tell_dir if self.the_list is not None else None
+        if folder is None:
+            return
+        for address, thread, d in self.box_waits.drops():
+            got = boxwait.read_status(folder, d.name) if d.name else None
+            what, was = self.box_waits.observe(address, thread, got, d)
+            row = {"what": d.kind, "project": _project(address), "thread": thread}
+            if what == "ignored":
+                self.record("drop-status-ignored", address, **row, drop=d.name)
+            elif what == "failed":
+                self.record("drop-status", address, **row, state="failed", error=got[1])
+                self._tell_drop(address, "box-failed", {"id": thread, "kind": d.kind, "error": got[1]})
+            elif what == "state":
+                self.record("drop-status", address, **row, state=got[0])
+                self._tell_drop(address, "box-status", {"id": thread, "kind": d.kind, "state": got[0]})
+            if what == "state" and got[0] == "delivered":
+                self.index.moved_for_members(address)
+
+    def _tell_drop(self, address: str, name: str, data: dict):
+        e = self.entries.get(address)
+        if e is not None:
+            e.bus.publish(name, data)
+
+    def relay_failed(self, address: str, t, kind: str, error: str, **fields):
+        """A relayed Tell that will not be delivered (9.14): its row, and the page's `tellError` by its event."""
+        self.record(kind, address, tell=t.id, thread=t.thread, error=error, **fields)
+        e = self.entries.get(address)
+        if e is not None:
+            e.bus.publish("tell-relay-failed", {"id": t.thread, "error": error})
+
+    def expire_relayed(self):
+        """Drop every relayed Tell queued an hour ago or more (9.14): each tick, and each relay request, relayed
+        Tell and page's /_/doc, so one is dropped within a second of its hour whether or not anything calls in."""
+        for address, t in self.relays.expire():
+            self.relay_failed(address, t, "tell-expired", relay_mod.EXPIRED)
+
+    def relay_changed(self, address: str, session: str):
+        """A relay of the sheaf's live session `session` connected, or its grace ran out: the open pages read
+        `/_/doc` again (9.14). A fork that is no longer the live one changes nothing on the page."""
+        e = self.entries.get(address)
+        if e is None:
+            return
+        items = work_mod.sessions(visibility.front_matter(e.live.current()[1]))
+        if items and items[0]["id"] == session:
+            e.bus.publish("relay", {})
+
     def tick(self):
         """One pass of the watcher, run every second. For each document with an open tab or a
         Tell wait: give up on waits nobody answers, and when the file's (mtime, size) moved,
@@ -746,6 +823,16 @@ class Hub:
                 e.last_stat = key        # after: a rebuild that failed is tried again next tick
             except Exception as ex:
                 self._rebuild_failed(e, ex)
+        try:
+            self._watch_drops()                   # after the tabs' refresh: a reply that just landed is in
+        except Exception:
+            self.record_exception("drops-failed")
+        try:
+            self.expire_relayed()                 # by the clock, with no relay or page calling in (9.14)
+            for address, session in self.relays.lapsed():
+                self.relay_changed(address, session)
+        except Exception:
+            self.record_exception("relays-failed")
         try:
             self.commits.poll(self.roots.all())   # what the remote got, with no save (8.11, #75)
         except Exception:

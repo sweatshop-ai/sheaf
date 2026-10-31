@@ -294,7 +294,7 @@ def test_a_deliver_stopped_by_sigterm_stops_its_courier_so_it_never_sends_after(
             p.wait()
         for x in ([int(x) for x in pids.read_text().split()] if pids.exists() else []):
             if signals.exists(x):
-                os.kill(x, signal.SIGKILL)         # the fake courier's own session outlives `p`
+                signals.send(x, signal.SIGKILL)    # the fake courier's own session outlives `p`
 
 
 def test_a_byte_that_is_not_utf8_inside_a_json_string_is_refused_under_the_c_locale(tmp_path, peer):

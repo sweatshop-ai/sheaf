@@ -3,7 +3,7 @@ as the list's buttons, a one-off red with the 5 second Undo and locked once pres
 the list's tick (`POST /_/tick`, 9.10): the markdown on disk is what a tick writes, `- [x] <word>`."""
 import pytest
 
-from pagehelp import at, comment_on, mark, reloaded, toast, type_at_end, until
+from pagehelp import DOC, at, comment_on, mark, reloaded, toast, type_at_end, until
 
 pytestmark = pytest.mark.page
 
@@ -32,6 +32,37 @@ def sheaf(tab):
 
 def bar(page):
     return page.locator("#rd-actions button")
+
+
+HEARD = """(() => {
+  const ES = window.EventSource;
+  window.__heard = {};
+  window.EventSource = class extends ES {
+    constructor(...a) {
+      super(...a);
+      for (const k of ['changed', 'hello']) this.addEventListener(k, () => { window.__heard[k] = (window.__heard[k] || 0) + 1; });
+    }
+  };
+})()"""
+
+
+def heard(page, event):
+    """How many `event`s the page's stream has brought; the page's own listener has run on each."""
+    return page.evaluate(f"window.__heard[{event!r}] || 0")
+
+
+def stand_still(page):
+    """The installed clock runs at the real pace: from now on it moves only when the test runs it. Called before a
+    press, so the half second it jumps is not the Undo's. A page that read the clock past that time meanwhile makes
+    `pause_at` refuse ("fast-forward to the past"): the time is read again."""
+    for _ in range(5):
+        try:
+            page.clock.pause_at((page.evaluate("Date.now()") + 500) / 1000)       # seconds, in Playwright's Python
+            return
+        except Exception as e:
+            if "past" not in str(e):
+                raise
+    raise AssertionError("the page clock would not pause")
 
 
 def test_the_page_draws_its_actions_as_the_lists_buttons_at_the_top(sheaf):
@@ -246,3 +277,135 @@ def test_on_a_phone_a_long_word_in_the_text_breaks_and_a_code_block_scrolls_insi
     assert frame.evaluate("e => e.scrollWidth > e.clientWidth"), "the table broke its word instead of scrolling"
     p.emulate_media(media="print")
     assert p.locator("main p").first.evaluate("e => getComputedStyle(e).overflowWrap") == "break-word"
+
+
+# The four P3s #111's gate left (#127).
+
+def test_an_autosave_due_while_a_press_is_out_waits_for_its_answer_and_the_press_ticks(sheaf):
+    # #127, 1: the autosave reached the hub just before the tick, which then named a text gone by and was refused.
+    p, f = sheaf.page, sheaf.site.file
+    held = []
+    p.route("**/_/tick", lambda r: held.append(r))
+    stand_still(p)
+    bar(p).nth(0).click()
+    p.clock.run_for(3000)
+    type_at_end(p, "main p:has-text('Body')", " typed")
+    p.clock.run_for(2100)                               # the tick goes out at 5 s, held
+    until(lambda: held or p.wait_for_timeout(20), what="the tick, held")
+    p.clock.run_for(1000)                               # the autosave is due at 5.5 s
+    p.wait_for_timeout(500)
+    assert f.read_text(encoding="utf-8") == SHEAF, "the autosave went while the tick was out"
+    held[0].continue_()
+    p.unroute("**/_/tick")
+    until(lambda: "- [x] Approve" in f.read_text(encoding="utf-8"), what="the tick")
+    until(lambda: " typed" in f.read_text(encoding="utf-8"), what="the autosave after it")
+
+
+def test_every_reload_asked_during_a_press_counts_and_the_settle_still_saves_the_edits(sheaf, site):
+    # #127, 2: an upgrade's reload replaced the waiting reload of an outside change, and the settle's save was lost.
+    p, f = sheaf.page, sheaf.site.file
+    p.add_init_script(HEARD)
+    p.reload()
+    p.wait_for_selector("#rd-actions button")
+    mark(p)
+    stand_still(p)
+    bar(p).nth(0).click()
+    f.write_text(SHEAF.replace("# Plan", "# Plan, outside"), encoding="utf-8")
+    until(lambda: heard(p, "changed"), what="the change, whose reload waits for the press")
+    p.route("**/_/doc?*", lambda r: r.abort())          # the hello's look at the text finds nothing to add
+    site.hub.entry(DOC).bus.publish("hello", {"version": "99.0.0"})
+    until(lambda: heard(p, "hello"), what="the upgrade, whose reload waits too")
+    p.clock.run_for(4000)
+    type_at_end(p, "main p:has-text('Body')", " typed")
+    until(lambda: "typed" in p.inner_text("main p:has-text('Body')"), what="the edit on screen")
+    p.clock.run_for(1100)                               # the press names the text before the change: refused;
+    # the edit's autosave is not due yet
+    until(lambda: " typed" in f.read_text(encoding="utf-8"), what="the settle's save of the edit")
+    assert "# Plan, outside" in f.read_text(encoding="utf-8")
+    reloaded(p)
+
+
+def test_a_box_of_an_action_typed_and_not_yet_saved_is_not_ticked_by_a_click(sheaf):
+    # #127, 3: the box was no button's yet, so a click ticked it through a save.
+    p, f = sheaf.page, sheaf.site.file
+    type_at_end(p, "main li:has-text('Share')", "")
+    p.keyboard.press("Enter")
+    p.keyboard.type("Run it")
+    p.locator("main li:has-text('Run it') input[type=checkbox]").click()
+    until(lambda: "at the top of the page" in toast(p), what="the line that points to the button")
+    until(lambda: "- [ ] Run it" in f.read_text(encoding="utf-8"), what="the saved action")
+    until(lambda: bar(p).all_inner_texts() == ["Approve", "Done", "Share", "Run it"], what="its button")
+    assert "[x]" not in f.read_text(encoding="utf-8")
+    assert p.locator("main li:has-text('Run it') input[type=checkbox]").is_checked() is False
+
+
+def test_a_sign_out_during_a_press_does_not_reload_under_it(sheaf, site):
+    # #127, 4: the page reloaded at once and the press was dropped without a line.
+    p, f = sheaf.page, sheaf.site.file
+    mark(p)
+    stand_still(p)
+    bar(p).nth(0).click()
+    site.hub.entry(DOC).bus.publish("signed-out", {})
+    until(lambda: "signed out" in p.inner_text("#rd-notice"), what="the signed-out notice")
+    assert p.evaluate("window.__same_load") is True, "the page reloaded under the press"
+    assert bar(p).nth(0).inner_text() == "Undo"
+    p.clock.run_for(5100)
+    until(lambda: "- [x] Approve" in f.read_text(encoding="utf-8"), what="the press, sent")
+
+
+def test_a_box_typed_in_a_block_whose_save_is_merged_is_not_ticked_before_the_reload(sheaf):
+    # #127, 3, gate on 793824c: a merged save brings no actions, so the box may be an action's; it waits for the page
+    # the merge's reload brings.
+    p, f = sheaf.page, sheaf.site.file
+    def merged(route):
+        r = route.fetch()
+        j = r.json()
+        j["merged"] = True
+        route.fulfill(response=r, json=j)
+    p.route("**/_/save", merged, times=1)
+    type_at_end(p, "main li:has-text('Share')", "")
+    p.keyboard.press("Enter")
+    p.keyboard.type("Run it")
+    mark(p)
+    p.locator("main li:has-text('Run it') input[type=checkbox]").click()
+    reloaded(p)
+    until(lambda: bar(p).all_inner_texts() == ["Approve", "Done", "Share", "Run it"], what="its button")
+    p.wait_for_timeout(500)
+    assert "- [ ] Run it" in f.read_text(encoding="utf-8") and "[x]" not in f.read_text(encoding="utf-8")
+
+
+PLAIN = SHEAF + "\n- [ ] plain task\n"
+
+
+def test_a_plain_box_clicked_in_an_edited_block_while_the_hub_is_away_still_ticks(tab, site):
+    # #127, 3, gate on 793824c: its save first could not reach the hub, and the click was dropped without a line.
+    p, f = tab.page, site.file
+    f.write_text(PLAIN, encoding="utf-8")
+    tab.open()
+    p.wait_for_selector("#rd-actions button")
+    type_at_end(p, "main li:has-text('plain task')", " now")
+    site.kill()
+    p.locator("main li:has-text('plain task') input[type=checkbox]").click()
+    until(lambda: p.locator("main li:has-text('plain task') input[type=checkbox]").get_attribute("checked") is not None,
+          what="the tick on screen")
+    site.reopen()
+    until(lambda: "- [x] plain task now" in f.read_text(encoding="utf-8"), timeout=20, what="the owed save")
+
+
+def test_a_sign_out_while_a_press_is_out_does_not_reload_under_its_answer(sheaf, site):
+    # #127, 4, gate on 793824c: the sign-out waited for the tick's answer, then reloaded over its refusal.
+    p, f = sheaf.page, sheaf.site.file
+    held = []
+    p.route("**/_/tick", lambda r: held.append(r))
+    mark(p)
+    stand_still(p)
+    bar(p).nth(0).click()
+    p.clock.run_for(5100)
+    until(lambda: held or p.wait_for_timeout(20), what="the tick, held")
+    site.hub.entry(DOC).bus.publish("signed-out", {})
+    until(lambda: "signed out" in p.inner_text("#rd-notice"), what="the signed-out notice")
+    held[0].fulfill(status=401, content_type="application/json", body='{"ok": false, "error": "Not signed in."}')
+    until(lambda: "Not signed in." in toast(p), what="the refusal")
+    p.wait_for_timeout(500)
+    assert p.evaluate("window.__same_load") is True, "the page reloaded over the refusal"
+    assert "- [ ] Approve" in f.read_text(encoding="utf-8")

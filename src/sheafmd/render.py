@@ -100,6 +100,10 @@ BASE_CSS = r"""*{box-sizing:border-box}
    on a laptop (floor) and on a 4K panel (ceiling). */
 html{font-size:clamp(16px,1.28vw,31px)}
 body{background:var(--bg);color:var(--fg);margin:0;padding:0 1.25rem 7rem}
+/* A word wider than the screen breaks rather than widen the page on a phone (#128): a slug with no hyphen, a
+   long path. break-word, not anywhere, so a table's columns keep their words and the table scrolls in its
+   .tblwrap; a pre keeps its lines and scrolls inside itself. */
+body{overflow-wrap:break-word}
 #wrap{max-width:calc(var(--toc) + 2.2rem + var(--col));margin:0 auto;display:grid;
   grid-template-columns:var(--toc) minmax(0,var(--col));gap:2.2rem;align-items:start}
 .notoc #wrap{display:block;max-width:var(--col)}

@@ -1229,21 +1229,22 @@ class Handler:
         return Response(200, {"Content-Type": "application/x-ndjson", "Content-Disposition": _disposition(f"{sid}.jsonl"),
                               "Cache-Control": "no-store", "X-Sheaf-Session": sid}, body)
 
-    def _drop_for_james(self, req: Req, e, kind: str, body: str, thread: str) -> str:
+    def _drop_for_james(self, req: Req, e, kind: str, body: str, thread: str) -> tuple[str, str | None]:
         """The file Ask or Tell drops in `[list]`'s `tell_dir` for the box's supervisor to hand to James's session
         for the project with `sheaf deliver`, and its `tell-dropped` row. The hub runs no agent of its own for it.
-        A Tell carries its id and the words of a local Tell (`message`), so every path says the same (9.12)."""
+        A Tell carries its id and the words of a local Tell (`message`), so every path says the same (9.12).
+        (`written` or why not, the file's name when written)."""
         project = "/".join(Address.parse(e.address).rel.split("/")[:2])
         by = work.member_word(req.member)
         out = {"project": project, "member": by, "sheaf": e.address, "text": body[:work.TEXT_MAX], "kind": kind,
                "thread": thread, "address": e.address, "abs_path": str(e.path)}
         if kind == "tell":
             out.update(id=str(uuid.uuid4()), message=self._tell_message(req, e, thread))
-        drop = work.drop(self.hub.the_list.cfg.tell_dir, project, json.dumps(out).encode("utf-8"),
-                         "no tell_dir in [list]")
+        drop, name = work.drop_named(self.hub.the_list.cfg.tell_dir, project, json.dumps(out).encode("utf-8"),
+                                     "no tell_dir in [list]")
         self.hub.record("tell-dropped", e.address, what=kind, project=project, by=by, drop=drop,
                         **({"tell": out["id"]} if "id" in out else {}))
-        return drop
+        return drop, name
 
     def _tell_message(self, req: Req, e, thread: str) -> str:
         """What a member's Tell on the thread `thread` says to the session, in the words of a local Tell (11.3)."""
@@ -1506,12 +1507,12 @@ class Handler:
             if (line := self._relay_tell(req, e, snap["id"])) is not None:
                 snap["tellError"] = line
         elif to_box:
-            drop = self._drop_for_james(req, e, to_box, b["body"], snap["id"])
+            drop, name = self._drop_for_james(req, e, to_box, b["body"], snap["id"])
             if drop != "written":
                 snap[f"{to_box}Error"] = "The hub could not send this to James's window; the comment is written."
             else:
                 # Open on the sheaf's pages until a reply lands in the thread, or past the Tell wait (#115).
-                self.hub.box_waits.add(e.address, snap["id"], to_box, e.live.current()[1])
+                self.hub.box_waits.add(e.address, snap["id"], to_box, e.live.current()[1], name)
         # The job looks the document up again when it starts: it names its thread in the text the
         # comment was just written in, so a forget in between, and another folder that takes the name,
         # cannot hand it that folder's thread of the same id (SPEC 7.3). A forget that leaves no folder

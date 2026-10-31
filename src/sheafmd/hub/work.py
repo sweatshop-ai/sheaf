@@ -9,6 +9,7 @@ file Ask, Tell and Stop James drop for James's window.
     open_transcript(folder, id)     the bytes of `<folder>/<one folder>/<id>.jsonl`, or None
     james_has(cfg, project, id)     whether the copy holds `id` as James's session of `project` (None: not yet)
     drop(folder, project, body, missing)  a file in `folder` for the box's supervisor: "written" or why not
+    drop_named(…)                         the same, and the file's name when it is written (#139)
 
 A session item is one YAML flow mapping on one line, `{id: <uuid>, host: <host>, member: <who>, date: <UTC>}`.
 An item that does not match that exactly is skipped, never guessed at: the hub serves a file by what it names.
@@ -272,10 +273,16 @@ def drop(folder: Path | None, project: str, body: bytes, missing: str) -> str:
     """Write `body` to a new file of `folder`, named `<client>--<project>-<UTC stamp>` (and `-<n>`
     when that is taken): written as `.<name>`, mode 0640 whatever the hub's umask, then renamed, so the
     box's supervisor never reads half a file. "written", or why nothing was."""
+    return drop_named(folder, project, body, missing)[0]
+
+
+def drop_named(folder: Path | None, project: str, body: bytes, missing: str) -> tuple[str, str | None]:
+    """`drop`'s answer, and the name of the file it wrote (None when it wrote none): the supervisor's
+    `<name>.status` beside it says what became of it (9.12, #139)."""
     if folder is None:
-        return missing
+        return missing, None
     if not folder.is_dir():
-        return f"{folder} is not a folder"
+        return f"{folder} is not a folder", None
     base = f"{project.replace('/', '--')}-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}"
     for n in range(100):
         name = base if n == 0 else f"{base}-{n}"
@@ -287,7 +294,7 @@ def drop(folder: Path | None, project: str, body: bytes, missing: str) -> str:
         except FileExistsError:
             continue
         except OSError as ex:
-            return f"failed: {ex.strerror or ex}"
+            return f"failed: {ex.strerror or ex}", None
         try:
             try:
                 os.fchmod(fd, 0o640)
@@ -300,8 +307,8 @@ def drop(folder: Path | None, project: str, body: bytes, missing: str) -> str:
                 tmp.unlink(missing_ok=True)
                 continue
             os.replace(tmp, final)
-            return "written"
+            return "written", name
         except OSError as ex:
             tmp.unlink(missing_ok=True)
-            return f"failed: {ex.strerror or ex}"
-    return "failed: every name of this second is taken"
+            return f"failed: {ex.strerror or ex}", None
+    return "failed: every name of this second is taken", None

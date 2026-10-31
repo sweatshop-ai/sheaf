@@ -198,6 +198,10 @@ body.rd-editing .rd-locked::after{content:"source-only";position:absolute;top:4p
  cursor:pointer;background:none;border:1px solid var(--rd-c);color:var(--rd-c)}
 #rd-actions .rd-act.toggle{--rd-c:#1f5fd6}
 @media (prefers-color-scheme:dark){#rd-actions .rd-act{--rd-c:#ff6b6b}#rd-actions .rd-act.toggle{--rd-c:#6ea2ff}}
+/* On a phone, a touch target of 44 px, as the list's .list-act in hub/the_list.py (#112); the row wraps as it does
+   on a desktop, and a Move to's slug without a hyphen breaks anywhere rather than scroll the page sideways. */
+@media (max-width:600px),(pointer:coarse){#rd-actions .rd-act{min-height:44px;min-width:44px;padding:2px 14px}}
+#rd-actions .rd-act{overflow-wrap:anywhere}
 #rd-actions .rd-act.pending,#rd-actions .rd-act.pressed,#rd-actions .rd-act[aria-pressed=true]{background:var(--rd-c);
  color:var(--bg,#fff)}
 #rd-actions .rd-act:disabled{cursor:default;opacity:.7}

@@ -192,3 +192,33 @@ def test_a_press_while_the_page_settles_onto_a_change_is_refused_and_the_page_re
     p.clock.run_for(5100)
     until(lambda: "- [x] Approve" in f.read_text(encoding="utf-8"), what="the press on the reloaded page")
     assert "# Plan, outside" in f.read_text(encoding="utf-8") and " typed" in f.read_text(encoding="utf-8")
+
+
+def test_on_a_phone_the_buttons_wrap_44_px_high_and_the_page_never_scrolls_sideways(touch_tab):
+    p = touch_tab.page
+    touch_tab.site.file.write_text(SHEAF.replace("- [ ] Share\n", "- [ ] Share\n- [ ] Stop James\n"
+                                                 "- [ ] Move to klium-website-relaunch (ref 18f3a9c2)\n"),
+                                   encoding="utf-8")
+    p.set_viewport_size({"width": 360, "height": 780})
+    touch_tab.open()
+    p.wait_for_selector("#rd-actions button")
+    boxes = [bar(p).nth(k).bounding_box() for k in range(bar(p).count())]
+    assert len(boxes) == 5
+    assert all(b["height"] >= 44 and b["width"] >= 44 for b in boxes), boxes
+    assert all(b["x"] >= 0 and b["x"] + b["width"] <= 360 for b in boxes), boxes
+    assert len({b["y"] for b in boxes}) > 1, "five buttons on one line of 360 px"
+    assert p.evaluate("document.documentElement.scrollWidth") <= 360
+
+
+def test_on_a_phone_a_move_to_whose_slug_has_no_hyphen_breaks_inside_its_button(touch_tab):
+    # The document's own box of that line is as wide as its word: the theme's, not the buttons' (#128).
+    p = touch_tab.page
+    touch_tab.site.file.write_text(SHEAF.replace(
+        "- [ ] Share\n", "- [ ] Share\n- [ ] Move to klium_website_relaunch_international_2026_phase_two (ref 18f3a9c2)\n"),
+        encoding="utf-8")
+    p.set_viewport_size({"width": 360, "height": 780})
+    touch_tab.open()
+    p.wait_for_selector("#rd-actions button")
+    move = bar(p).nth(3).bounding_box()
+    assert move["x"] >= 0 and move["x"] + move["width"] <= 360, move
+    assert p.evaluate("(e => e.scrollWidth <= e.clientWidth)(document.getElementById('rd-actions'))")

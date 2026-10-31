@@ -1674,15 +1674,17 @@ def _transcript(folder, cwd, id):
     (folder / f"{id}.jsonl").write_text(json.dumps({"cwd": cwd, "sessionId": id}) + "\n", encoding="utf-8")
 
 
-def test_james_has_with_a_project_that_climbs_never_reads_outside_sessions_dir(tmp_path):
+@pytest.mark.parametrize("project", ["../../outside", "../../outside/../outside", "/OUTSIDE"])
+def test_james_has_with_a_project_that_climbs_never_reads_outside_sessions_dir(tmp_path, project):
     from types import SimpleNamespace
-    sid, sessions = str(uuid.uuid4()), tmp_path / "sessions"
+    sid, sessions, work_dir = str(uuid.uuid4()), tmp_path / "sessions", tmp_path / "work" / "james"
     sessions.mkdir()
-    cfg = SimpleNamespace(sessions_dir=sessions, work_dir="/home/james/work")
-    project = "../../.." + str(tmp_path / "outside")
-    # A transcript that would match if `<work_dir>/<project>` were opened as a path: it climbs to tmp_path/outside.
+    work_dir.mkdir(parents=True)
+    project = project.replace("/OUTSIDE", str(tmp_path / "outside"))
+    cfg = SimpleNamespace(sessions_dir=sessions, work_dir=str(work_dir))
+    # A transcript that matches if `<work_dir>/<project>` were opened as a path: the kernel would land in tmp_path/outside.
     _transcript(tmp_path / "outside", os.path.join(cfg.work_dir, project), sid)
-    assert os.path.realpath(os.path.join(cfg.work_dir, project)) == str(tmp_path / "outside")
+    assert os.path.isdir(os.path.join(cfg.work_dir, project, ""))
     assert work_mod.james_has(cfg, project, sid) is None
 
 

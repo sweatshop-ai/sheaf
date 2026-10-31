@@ -3,6 +3,7 @@
 issues repo and its GitHub Project), the rest from each sheaf's front matter. Through the handler in proxy
 mode, with three hand-made sheaves, a documentation sheaf and a fake GitHub that answers GraphQL from the
 issues a test gives it."""
+import contextlib
 import json
 import os
 import pwd
@@ -1235,6 +1236,146 @@ def test_a_poll_that_read_a_sheaf_before_a_tick_took_its_row_off_does_not_put_it
     box.hub.the_list.poll()
     listed = "Reply to Joey about column L Approve ✓ James" in titles(read(box.get("/list?show=all", member=DORA)))
     assert listed == (issue != "issue:\n")                      # back under #7; with no issue, on no list (9.10)
+
+
+def _move_twice_during_a_poll(box, sheaves, github, monkeypatch, issue):
+    """#102: the last poll read JOEY at its project path (P1); a 9.11 move takes it to its owner's folder (P2) and the
+    poll that is in flight reads it there; during that poll's fetch a second move takes it back (P3) and a member ticks
+    after the file's issue changed to `issue`."""
+    github.issues[5].update(status="In progress at TT")         # drawn, not left out as answered
+    joey = sheaves / JOEY[5:]
+    the_list_ = box.hub.the_list
+    old_row = next(r for r in the_list_._snap.rows if r.sheaf.rel == JOEY[5:])
+    assert old_row.file == os.path.realpath(sheaves / JOEY[5:])                # P1
+    joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n", "sources: [library:4711]\n"),
+                    encoding="utf-8")
+    place.place(box.hub, JOEY)                                  # P2: private/nell/
+    p2 = sheaves / "globex/black-friday/private/nell/2026-10-28-reply-to-joey.md"
+    assert p2.exists() and not joey.exists()
+    fetch = the_list.fetch
+    seen = {}
+
+    def meanwhile(cfg, wanted):
+        text = p2.read_text(encoding="utf-8").replace("sources: [library:4711]\n", "visibility: project\n")
+        p2.write_text(text.replace("issue: acme/record#5\n", issue), encoding="utf-8")
+        place.place(box.hub, JOEY)                              # P3: back at the project path
+        assert joey.exists() and not p2.exists()
+        r = box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Approve"}), member=NELL)
+        assert r.status == 200, r.text
+        seen["rows"] = {r.sheaf.rel for r in the_list_._snap.rows}
+        return fetch(cfg, wanted)
+    monkeypatch.setattr(the_list, "fetch", meanwhile)
+    the_list_.poll()
+    monkeypatch.setattr(the_list, "fetch", fetch)
+    assert JOEY[5:] not in seen["rows"]                         # the tick took it off; P1 and P3 are one path, P2 is not it
+    return the_list_
+
+
+@pytest.mark.parametrize("issue", ["issue:\n", "issue: acme/record#7\n"], ids=["removed", "changed"])
+def test_a_poll_that_read_a_sheaf_moved_twice_during_its_fetch_does_not_put_its_row_back(
+        box, sheaves, github, monkeypatch, issue):
+    """#102 (1): the take-off names the sheaf by its name too, so the row read at P2, a path neither the last poll
+    nor the tick's file now names, stays off until the next poll."""
+    the_list_ = _move_twice_during_a_poll(box, sheaves, github, monkeypatch, issue)
+    assert JOEY[5:] not in {r.sheaf.rel for r in the_list_._snap.rows}
+    the_list_.poll()
+    listed = JOEY[5:] in {r.sheaf.rel for r in the_list_._snap.rows}
+    assert listed == (issue != "issue:\n")                      # back under #7; with no issue, on no list (9.10)
+
+
+def test_a_row_the_poll_read_after_the_issue_changed_is_kept_though_the_tick_took_the_old_one_off(
+        box, sheaves, github, monkeypatch):
+    """#102 (2): only a row that still names the issue the tick saw replaced is left out; one read under the new issue
+    is already right."""
+    github.issues[5].update(status="In progress at TT")
+    joey = sheaves / JOEY[5:]
+    joey.write_text(joey.read_text(encoding="utf-8").replace("issue: acme/record#5\n", "issue: acme/record#7\n"),
+                    encoding="utf-8")                           # changed before the in-flight poll reads it
+    fetch = the_list.fetch
+
+    def meanwhile(cfg, wanted):
+        r = box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Approve"}), member=NELL)
+        assert r.status == 200, r.text
+        assert JOEY[5:] not in {r.sheaf.rel for r in box.hub.the_list._snap.rows}     # the old row went at once
+        return fetch(cfg, wanted)
+    monkeypatch.setattr(the_list, "fetch", meanwhile)
+    box.hub.the_list.poll()
+    monkeypatch.setattr(the_list, "fetch", fetch)
+    rows = {r.sheaf.rel: r.sheaf.issue for r in box.hub.the_list._snap.rows}
+    assert rows.get(JOEY[5:]) == ("acme", "record", 7), rows
+
+
+def test_a_row_that_still_names_the_replaced_issue_stays_off_though_it_was_read_after_the_tick_began(
+        box, sheaves, github, monkeypatch):
+    """#102 (2), the other side: the in-flight poll read the file before the issue changed, so it lists #5."""
+    github.issues[5].update(status="In progress at TT")
+    joey = sheaves / JOEY[5:]
+    fetch = the_list.fetch
+
+    def meanwhile(cfg, wanted):
+        joey.write_text(joey.read_text(encoding="utf-8").replace("issue: acme/record#5\n", "issue: acme/record#7\n"),
+                        encoding="utf-8")
+        r = box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Approve"}), member=NELL)
+        assert r.status == 200, r.text
+        return fetch(cfg, wanted)
+    monkeypatch.setattr(the_list, "fetch", meanwhile)
+    box.hub.the_list.poll()
+    monkeypatch.setattr(the_list, "fetch", fetch)
+    assert JOEY[5:] not in {r.sheaf.rel for r in box.hub.the_list._snap.rows}
+    box.hub.the_list.poll()
+    assert JOEY[5:] in {r.sheaf.rel for r in box.hub.the_list._snap.rows}
+
+
+def test_a_row_naming_a_third_issue_stays_off_when_the_file_changed_again_after_the_poll_read_it(
+        box, sheaves, github, monkeypatch):
+    """#102 review: the poll read #6 (5 became 6 before it), then the file became #7 and a tick found 5 against 7:
+    the poll's row names neither the old issue nor the one the file names now, so it is stale."""
+    github.issues[5].update(status="In progress at TT")
+    joey = sheaves / JOEY[5:]
+    joey.write_text(joey.read_text(encoding="utf-8").replace("issue: acme/record#5\n", "issue: acme/record#6\n"),
+                    encoding="utf-8")
+    fetch = the_list.fetch
+
+    def meanwhile(cfg, wanted):
+        joey.write_text(joey.read_text(encoding="utf-8").replace("issue: acme/record#6\n", "issue: acme/record#7\n"),
+                        encoding="utf-8")
+        r = box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Approve"}), member=NELL)
+        assert r.status == 200, r.text
+        return fetch(cfg, wanted)
+    monkeypatch.setattr(the_list, "fetch", meanwhile)
+    box.hub.the_list.poll()
+    monkeypatch.setattr(the_list, "fetch", fetch)
+    assert JOEY[5:] not in {r.sheaf.rel for r in box.hub.the_list._snap.rows}
+    box.hub.the_list.poll()
+    assert {r.sheaf.rel: r.sheaf.issue for r in box.hub.the_list._snap.rows}[JOEY[5:]] == ("acme", "record", 7)
+
+
+def test_a_tick_reads_the_file_under_the_names_lock_taken_before_the_lists_own(box, sheaves, monkeypatch):
+    """#102 note: a move may be mid-way when `ticked` reads; the name's lock (9.11) keeps it from resolving a missing
+    path, and is taken first, as `assignees` takes it."""
+    held = []
+    real = place.held
+
+    @contextlib.contextmanager
+    def spy(hub, address):
+        held.append((address, box.hub.the_list._off_lock.locked()))
+        with real(hub, address) as got:
+            yield got
+    monkeypatch.setattr(place, "held", spy)
+    box.hub.the_list.ticked(JOEY)
+    assert held == [(JOEY, False)]
+
+
+def test_a_take_off_of_a_file_that_went_is_not_narrowed_by_a_later_tick_of_the_same_file(box):
+    """#102: `_take_off` for a gone file leaves every row of it off; a tick's take-off of the same file, naming the
+    issue it saw replaced, does not turn that into a take-off of the rows that name that issue only."""
+    the_list_ = box.hub.the_list
+    key = ("file", "/x/y.md")
+    with the_list_._off_lock:
+        the_list_._take_off({"/x/y.md"})
+        the_list_._take_off({"/x/y.md"}, {"a/b/c.md"}, ("acme", "record", 5))
+        assert the_list_._off[key][1] is None
+        assert the_list_._off[("name", "a/b/c.md")][1] == ("acme", "record", 5)
 
 
 # ── Move to: the eighth word, and the pointer a move leaves (tt-tiroir#211) ──

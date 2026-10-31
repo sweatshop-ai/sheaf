@@ -525,7 +525,9 @@ class TheList:
         self._answered: dict = {}           # {rel: the record's `updated` when a member ticked it}
         self._poll_lock = threading.Lock()
         self._ask = itertools.count(1)      # numbers each poll's start and each time rows are taken off, in order
-        self._off: dict = {}                # {real path: the number of the last time the rows of its file were taken off}
+        # {("file", real path) or ("name", `<client>/<project>/<file>`): (the number of the last time the rows of that
+        # file or name were taken off, the issue the file named when it was: a row naming it is kept; None: no row is)}
+        self._off: dict = {}
         self._off_lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = None
@@ -604,9 +606,11 @@ class TheList:
                 with self._off_lock:
                     # A row taken off after this poll began may have been read before what took it off: its file went
                     # (#34), or a tick found it names another issue (#27). It waits for the next poll, which reads what
-                    # is there now.
-                    rows = [r for r in rows if self._off.get(r.file, 0) < started]
-                    self._off = {f: n for f, n in self._off.items() if n > started}
+                    # is there now. A tick's take-off names the sheaf by its name as well as by its files, since a move
+                    # may have put the file where neither the last poll nor the tick found it (#102), and keeps a row that
+                    # names the issue the file names now: it was read after the change, so it is right.
+                    rows = [r for r in rows if not self._left_off(r, started)]
+                    self._off = {k: v for k, v in self._off.items() if v[0] > started}
                     self._snap = Snapshot(rows, self.hub.clock())
             # Every sheaf whose file is not at its home goes there (9.11), judged with the last records read (a failed
             # read places on the ones before it, as every other judgement of the hub reads them): the
@@ -641,7 +645,9 @@ class TheList:
         root = self.root()
         if a.root != root.name:
             return
-        with self._off_lock:            # as `assignees` takes a row off, so neither write undoes the other
+        # Under the name's lock (9.11), taken before `_off_lock` as `assignees` takes it: no move is half done while the
+        # file is read, so its path resolves.
+        with place.held(self.hub, address), self._off_lock:     # as `assignees` takes a row off, so neither write undoes the other
             for row in self._snap.rows:
                 if row.sheaf.rel == a.rel:
                     try:
@@ -649,18 +655,31 @@ class TheList:
                     except (OSError, UnicodeDecodeError):
                         sheaf = row.sheaf
                     if not _same_issue(sheaf.issue, row.sheaf.issue):
-                        self._take_off({row.file, os.path.realpath(self._file(root, a.rel))})
+                        self._take_off({row.file, os.path.realpath(self._file(root, a.rel))}, {a.rel}, sheaf.issue)
                         return
                     row.sheaf = sheaf
                     self._answered[a.rel] = row.record.updated
 
-    def _take_off(self, files: set):
-        """Take the rows read from `files` (real paths) off the list as a new list, so a page reading the old one
-        keeps them, and number it: a poll that began before leaves them off until the next poll. Under `_off_lock`."""
+    def _take_off(self, files: set, names: set = frozenset(), keep: tuple | None = None):
+        """Take the rows read from `files` (real paths) or named `names` off the list as a new list, so a page reading
+        the old one keeps them, and number it: a poll that began before leaves them off until the next poll, those of
+        `names` and `files` unless a row names the issue `keep`, the one the file names now (None keeps none: every
+        row stays off). Under `_off_lock`."""
         n = next(self._ask)
-        for f in files:
-            self._off[f] = n
-        self._snap.rows = [r for r in self._snap.rows if r.file not in files]
+        for key in [("file", f) for f in files] + [("name", name) for name in names]:
+            held = self._off.get(key)
+            # A file that went (#34) stays off for every row, whatever a later tick says of the issue.
+            self._off[key] = (n, None if held is not None and held[1] is None else keep)
+        self._snap.rows = [r for r in self._snap.rows if r.file not in files and r.sheaf.rel not in names]
+
+    def _left_off(self, row: Row, started: int) -> bool:
+        """Whether a row read by the poll numbered `started` was taken off after it began, and is not the row of the
+        issue the tick found the file naming. Under `_off_lock`."""
+        for key in (("file", row.file), ("name", row.sheaf.rel)):
+            n, keep = self._off.get(key, (0, None))
+            if n > started and not (keep is not None and _same_issue(row.sheaf.issue, keep)):
+                return True
+        return False
 
     def _file(self, root, rel: str) -> Path:
         """The file of the sheaf at `rel` in `root`, the list's, wherever it is (9.11): placed in proxy mode."""

@@ -149,6 +149,16 @@ def test_the_mounted_page_builds_its_parts_in_the_root_and_none_in_the_front(fro
     assert front.page.evaluate("window.__front === true")
 
 
+def test_the_mounted_page_wears_its_theme_in_the_root_and_leaves_the_front_alone(front):
+    """The theme's variables, the font and the body's rules (#128's wrap among them) reach the wrapper in the root."""
+    f = front.open()
+    got = f.js("""const cs = getComputedStyle(root.querySelector('.rd-root'));
+      return [cs.fontFamily, cs.backgroundColor, cs.getPropertyValue('--accent').trim(), cs.overflowWrap];""")
+    assert "Times" not in got[0] and got[1] != "rgba(0, 0, 0, 0)" and got[2] and got[3] == "break-word", got
+    assert f.page.evaluate("getComputedStyle(document.body).fontFamily") != got[0]
+    assert f.page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--accent')") == ""
+
+
 def test_the_menu_opens_from_a_click_in_the_root_and_a_click_elsewhere_in_it_closes_it(front):
     front.open()
     front.click("#rd-menu-btn")

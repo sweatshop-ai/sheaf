@@ -5,7 +5,7 @@ import json
 
 import pytest
 from pagehelp import close_context, new_context, until
-from test_hub_list import JOEY, NELL, box, github, sheaves  # noqa: F401  (the hub with its list, as there)
+from test_hub_list import JOEY, NELL, ago, box, github, sheaves  # noqa: F401  (the hub with its list, as there)
 
 pytestmark = pytest.mark.page
 
@@ -220,3 +220,65 @@ def test_on_a_phone_a_rows_buttons_wrap_under_its_title_44_px_high_and_the_list_
     assert all(b["height"] >= 44 and b["width"] >= 44 for b in boxes), boxes
     assert all(b["x"] >= 0 and b["x"] + b["width"] <= 360 for b in boxes), boxes
     assert page.evaluate("document.documentElement.scrollWidth") <= 360
+
+
+
+def test_on_a_phone_a_refusal_naming_a_slug_with_no_hyphen_breaks_and_the_list_never_scrolls_sideways(phone):
+    # The refusal is the list's own line (#130). The hub says this one only when a Move to is ticked between the
+    # tick's hash check and its lock, so the test answers the tick with it.
+    page, _ = phone
+    refusal = "This thread moves to one client: Move to klium_website_relaunch_international_2026_phase_two is ticked."
+    page.route(f"{ORIGIN}/_/tick", lambda route: route.fulfill(status=409, content_type="application/json",
+                                                               body=json.dumps({"error": refusal})))
+    joey(page).first.click()
+    page.clock.run_for(5100)
+    until(lambda: page.locator(".list-error").is_visible(), what="the refusal")
+    assert page.locator(".list-error").inner_text() == refusal
+    assert page.evaluate("document.documentElement.scrollWidth") <= 360
+
+
+LONG_CLIENT, LONG_PROJECT = "globex_international_relaunch", "black_friday_2026_phase_two_and_three"
+
+
+@pytest.fixture
+def long_words(chromium, box, sheaves, github):  # noqa: F811
+    """The list on a 360 px phone, Joey's title one long word and a group whose client/project has no hyphen."""
+    path = sheaves / JOEY[5:]
+    path.write_text(path.read_text(encoding="utf-8").replace(
+        "# Reply to Joey about column L", "# Reply_to_Joey_about_column_L_of_the_black_friday_sheet"), encoding="utf-8")
+    rel = sheaves / LONG_CLIENT / LONG_PROJECT / "2026-10-29-tagging.md"
+    rel.parent.mkdir(parents=True)
+    rel.write_text(f"---\nclient: {LONG_CLIENT}\nproject: {LONG_PROJECT}\nissue: acme/record#8\nkind: question\n---\n"
+                   "# Tagging\n", encoding="utf-8")
+    with (sheaves / "projects.toml").open("a", encoding="utf-8") as f:
+        f.write(f'\n[projects."{LONG_CLIENT}/{LONG_PROJECT}"]\nmembers = ["nell"]\nstatus = "live"\n')
+    github.issues[8] = {"status": "Waiting on member", "assignees": ["nell-l"], "updated": ago(3600)}
+    box.hub.the_list.poll()
+    yield from on_the_list(chromium, box, **PHONE)
+
+
+def test_on_a_phone_a_title_or_a_heading_of_one_long_word_breaks_and_the_list_never_scrolls_sideways(long_words):
+    # The row's title is the sheaf's H1 and the group's heading its client/project, both the list's own text (#130).
+    page, _ = long_words
+    assert page.locator("h3", has_text=LONG_PROJECT).count() == 1
+    assert page.locator(".list-title", has_text="Reply_to_Joey").count() == 1
+    for each in (page.locator("h3", has_text=LONG_PROJECT), page.locator(".list-main", has_text="Reply_to_Joey")):
+        assert each.evaluate("e => e.scrollWidth <= e.clientWidth"), each
+    assert page.evaluate("document.documentElement.scrollWidth") <= 360
+
+
+
+@pytest.fixture
+def tablet(chromium, box):  # noqa: F811
+    """The list on a 1024 px touch screen: wider than a phone, its pointer coarse."""
+    yield from on_the_list(chromium, box, viewport={"width": 1024, "height": 768}, has_touch=True, is_mobile=True)
+
+
+def test_on_a_wide_touch_screen_the_buttons_stay_beside_the_title_44_px_high(tablet):
+    # The (pointer: coarse) half of #112's query (#130): a finger needs 44 px, the width keeps the row's layout.
+    page, _ = tablet
+    assert page.evaluate("matchMedia('(pointer: coarse)').matches")
+    title = page.locator(".list-row", has=joey(page)).locator(".list-title").bounding_box()
+    b = joey(page).bounding_box()
+    assert b["height"] >= 44 and b["width"] >= 44, b
+    assert b["x"] > title["x"] + title["width"] and b["y"] < title["y"] + title["height"], "the button under the title"

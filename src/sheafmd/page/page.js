@@ -1295,6 +1295,12 @@
     if (heardBefore !== jobsHeard) return;      // an event came while the answer was out: it is the newer word
     (j.asking || []).forEach(function (id) { asking[id] = true; });
     (j.telling || []).forEach(function (id) { telling[id] = true; });
+    // The drops for James's window the hub still holds open (#115): the line comes back on a new load.
+    if (toBox) (j.sent || []).forEach(function (d) {
+      if (sentBox[d.id] || !byId[d.id]) return;
+      sentBox[d.id] = { n: (byId[d.id].replies || []).length, to: AGENT };
+      touched(d.id);
+    });
     tellQ = j.question || '';
     Object.keys(j.seen || {}).forEach(function (id) { SEEN[id] = Math.max(SEEN[id] || 0, j.seen[id]); });
     reBadge();
@@ -3243,6 +3249,14 @@
         var d = JSON.parse(ev.data || '{}');
         touched(d.id);
         say('Tell ' + AGENT + ' failed: ' + (d.error || 'unknown error'), true);
+      });
+      // A drop for James's window that the hub gave up on: no reply within the Tell wait (#115).
+      live.addEventListener('box-failed', function (ev) {
+        var d = JSON.parse(ev.data || '{}');
+        delete sentBox[d.id];
+        touched(d.id);
+        say((d.kind === 'ask' ? 'Ask ' : 'Tell ') + AGENT + ': no answer from ' + AGENT + '’s window after ' +
+            d.minutes + ' min. The comment is written: reply here, or send it again.', true);
       });
       ['ask-cancelled', 'tell-cancelled'].forEach(function (name) {
         live.addEventListener(name, function (ev) {

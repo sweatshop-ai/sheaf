@@ -26,6 +26,7 @@ from ..agents import registry
 from ..agents.base import Adapter, Target
 from ..render import render_file
 from ..source import STAMP_FORMAT, file_lock, lock_key
+from . import boxwait
 from . import place
 from . import projects
 from . import proxy as proxy_mod
@@ -106,6 +107,7 @@ class Hub:
         self.index = Index(self)
         self.tokens = state.Tokens()
         self.relays = relay_mod.Relays()     # the forks' relay tokens, queued Tells and streams (9.14)
+        self.box_waits = boxwait.BoxWaits(lambda: self.clock())    # the drops for James's window (9.12, #115)
         self.entries: dict[str, Entry] = {}
         self.index_bus = Bus()                   # the index streams (SPEC 8.8)
         self._index_opening = threading.Lock()   # one index stream opens at a time
@@ -709,11 +711,22 @@ class Hub:
         return self.runner.active("ask")
 
     # ── the watcher's step (SPEC 8.9) ────────────────────────────────────────
+    def _expire_drops(self):
+        """Give up on drops for James's window with no reply after the Tell wait (9.12, #115): the page is told
+        `box-failed`, and a `box-expired` row says so."""
+        for address, w in self.box_waits.expire(self.tell_wait):
+            project = "/".join(roots_mod.Address.parse(address).rel.split("/")[:2])
+            self.record("box-expired", address, what=w.kind, project=project, thread=w.thread)
+            e = self.entries.get(address)
+            if e is not None:
+                e.bus.publish("box-failed", {"id": w.thread, "kind": w.kind, "minutes": self.tell_wait // 60})
+
     def tick(self):
         """One pass of the watcher, run every second. For each document with an open tab or a
         Tell wait: give up on waits nobody answers, and when the file's (mtime, size) moved,
         catch up with it and tell the tabs. A failure in one document is written down and never
         stops the pass."""
+        self._expire_drops()
         for e in list(self.entries.values()):
             try:
                 e.live.expire(self.tell_wait, self.asktell.product(e.address))

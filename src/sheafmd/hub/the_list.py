@@ -196,17 +196,22 @@ def read_sheaf(rel: str, text: str) -> Sheaf:
     issue = issue_of(fm_text(fm, "issue"))
     # The title and the actions are read from the blocks the page draws, so an action in a fence, an
     # indented code block or an HTML comment is no action, and every action is one the tick can reach.
-    title, actions = "", []
+    title, actions, moved = "", [], False
     for b in split_md_blocks(text):
         own = b.content.removesuffix("\n").split("\n")
         if b.kind == "heading" and not title and own[0].startswith("# "):
             title = own[0][2:].strip()
         elif b.kind == "list":
             for k, line in enumerate(own):
-                if (m := _ACTION_RE.fullmatch(line.removesuffix("\r"))) and m["mark"] == " ":
-                    # A slug the hub gave back escaped (`newtrition\-coach`) is read as written.
-                    slug = re.sub(r"\\(.)", r"\1", m["slug"] or "")
-                    actions.append((_word(m), m["short"] or "", b.start + k, slug))
+                if not (m := _ACTION_RE.fullmatch(line.removesuffix("\r"))):
+                    continue
+                if m["mark"] == " ":
+                    actions.append((_word(m), m["short"] or "", b.start + k, _slug(m)))
+                elif m["move"]:
+                    moved = True
+    if moved:
+        # A thread moves to one client (#109): once a Move to is ticked, its other candidates are no actions.
+        actions = [a for a in actions if a[0] != MOVE]
     return Sheaf(rel, title or rel.rsplit("/", 1)[-1][:-3], issue, fm_text(fm, "assistant"),
                  fm_text(fm, "kind"), visibility.effective(fm), tuple(actions), visibility.sources(fm),
                  fm_text(fm, "owner"), fm_text(fm, "shared"), md_hash(text), "moved_to" in fm)
@@ -215,6 +220,12 @@ def read_sheaf(rel: str, text: str) -> Sheaf:
 def _word(m: re.Match) -> str:
     """The word of the action `_ACTION_RE` matched, its apostrophe straight."""
     return (m["word"] or m["move"]).replace("’", "'")
+
+
+def _slug(m: re.Match) -> str:
+    """The slug of the Move to `_ACTION_RE` matched, "" for another word. A slug the hub gave back escaped
+    (`newtrition\\-coach`) is read as written."""
+    return re.sub(r"\\(.)", r"\1", m["slug"] or "")
 
 
 def unticks_one_off(old: str, new: str) -> str | None:
@@ -229,15 +240,30 @@ def unticks_one_off(old: str, new: str) -> str | None:
     return None
 
 
+def ticks_another_move(old: str, new: str) -> str | None:
+    """The slug of the Move to ticked in `old` (else the first one ticked in `new`) when writing `new` over `old`
+    ticks a Move to box beside it, by whatever edit (9.10, #109): a thread moves to one client, so a sheaf answers
+    Move to once. A second tick, a swap and two ticks in one save are each one; None when there is none."""
+    was = collections.Counter(_slug(m) for m in _boxes(old) if m["move"] and m["mark"] != " ")
+    now = [_slug(m) for m in _boxes(new) if m["move"] and m["mark"] != " "]
+    if collections.Counter(now) - was and (was or len(now) > 1):
+        return next(iter(was), now[0])
+    return None
+
+
 def _box_marks(text: str) -> collections.Counter:
     """How many boxes of each action's word `text` holds, ticked ("x") or not (" "): {(word, mark): n}."""
-    counts = collections.Counter()
+    return collections.Counter((_word(m), m["mark"].lower()) for m in _boxes(text))
+
+
+def _boxes(text: str):
+    """Each action's box of `text`, ticked or not, as `_ACTION_RE` matches it: in the list blocks the page draws, as
+    the actions are read."""
     for b in split_md_blocks(text):
         if b.kind == "list":
             for line in b.content.removesuffix("\n").split("\n"):
                 if m := _ACTION_RE.fullmatch(line.removesuffix("\r")):
-                    counts[_word(m), m["mark"].lower()] += 1
-    return counts
+                    yield m
 
 
 def tick_edit(text: str, n: int, word: str):
@@ -663,10 +689,6 @@ class TheList:
         for n, (word, short, _, arg) in enumerate(s.actions):
             label = html.escape(word + (" " + arg if arg else "")
                                 + (" @" + short if short and short.lower() != member.short.lower() else ""))
-            if word == MOVE:
-                # Move to's boxes are the options of one answer, given in the sheaf: no button of their own yet.
-                acts.append(f'<span class="list-chip">{label}</span>')
-                continue
             # A toggle says whether it is pressed; a one-off is a plain button to a screen reader.
             kind = ('toggle', ' aria-pressed="false"') if word in TOGGLES else ("one-off", "")
             acts.append(f'<button type="button" class="list-act {kind[0]}"{kind[1]} data-doc="{doc}" data-action="{n}"'
@@ -779,9 +801,8 @@ ul{list-style:none;margin:0;padding:0}
 .list-act.toggle.pending,.list-act.toggle[aria-pressed=true]{background:var(--chip);color:var(--bg)}
 .list-act:disabled{cursor:default;opacity:.7}
 .list-title{color:var(--fg);text-decoration:none}.list-title:hover{text-decoration:underline}
-.list-chip,.list-assistant{display:inline-block;font-size:12px;border:1px solid var(--chip);color:var(--chip);
+.list-assistant{display:inline-block;font-size:12px;border:1px solid var(--chip);color:var(--chip);
 border-radius:999px;padding:0 8px;margin-left:6px}
-.list-actions .list-chip{margin-left:0}
 .list-assistant{border-color:var(--line);color:var(--muted)}
 .list-meta{color:var(--muted);font-size:13px}
 .list-error{color:#c62828}

@@ -455,8 +455,8 @@ class Hub:
         if st.live == "laptop":
             out["relay"] = st.relay         # whether Tell reaches the fork now (9.14, 10.1)
         # The fork fetches the live session's transcript from /_/session: one on a laptop, none, or no
-        # sessions_dir to serve it from, nothing to fork.
-        if st.forkable and st.cfg.sessions_dir is not None:
+        # copy to serve it from (sessions_dir and work_dir, #146), nothing to fork.
+        if st.forkable and work_mod.serves(st.cfg):
             out["fork"] = (f"uvx --from {work_mod.FORK_CLIENT} tiroir work "
                            f"{self.proxy.origin}{roots_mod.url_path(e.address)}")
         # James names a project's window <client>_<project>: with a dash, a-b/c and a/b-c would share one.

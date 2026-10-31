@@ -1232,7 +1232,8 @@ class Handler:
 
     def _session(self, req: Req) -> Response:
         """The transcript of one of the sheaf's box-hosted sessions, the live one without `id`, from the copy of
-        James's transcripts (9.12). It names only a file the front matter lists, of the box, in `sessions_dir`.
+        James's transcripts (9.12). It names only a file the front matter lists, of the box, in the project's folder
+        of `sessions_dir` (#146).
         A sign-in code (9.13) takes no `id`: it serves the session it was made for, once, while that is the
         sheaf's forkable one."""
         code = req.code
@@ -1243,7 +1244,7 @@ class Handler:
             address, fm, st = self._code_sheaf(req, req.query.get("doc"))
             if work.code_session(st, code.session) is None:
                 raise self._code_moved(req)
-            body = work.open_transcript(st.cfg.sessions_dir, code.session)
+            body = work.open_transcript(st.cfg, "/".join(Address.parse(address).rel.split("/")[:2]), code.session)
             if body is None:
                 raise Refuse(404, "this sheaf has no such session on the box")
             if not self.codes.serve(code):                  # one of two racing GETs: the flag is set before a byte
@@ -1255,9 +1256,9 @@ class Handler:
         _shape(sid is None or work.UUID_RE.fullmatch(sid), "id must be a session id (a lowercase UUID)")
         if sid is None:
             sid = st.forkable           # a live session on a laptop: none, never an older box copy to fork
-        if sid not in st.box or st.cfg.sessions_dir is None:
+        if sid not in st.box or not work.serves(st.cfg):
             raise Refuse(404, "this sheaf has no such session on the box")
-        body = work.open_transcript(st.cfg.sessions_dir, sid)
+        body = work.open_transcript(st.cfg, "/".join(Address.parse(address).rel.split("/")[:2]), sid)
         if body is None:
             raise Refuse(404, "this sheaf has no such session on the box")
         return self._transcript(req, address, fm, sid, body)

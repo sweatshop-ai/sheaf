@@ -298,3 +298,44 @@ def test_known_mutation_payloads_leave_no_handler_and_no_script(payload):
     out = mount(payload)
     assert_inert(out)
     assert mount(out) == out
+
+
+# ── depth ─────────────────────────────────────────────────────────────────────────
+
+def depth_of(out: str) -> int:
+    """The deepest nesting of start tags, by the standard library's parser."""
+    from html.parser import HTMLParser
+    VOID = {"br", "hr", "img", "input", "col", "wbr"}
+    d = best = 0
+
+    class P(HTMLParser):
+        def handle_starttag(self, tag, attrs):
+            nonlocal d, best
+            if tag not in VOID:
+                d += 1
+                best = max(best, d)
+
+        def handle_endtag(self, tag):
+            nonlocal d
+            d = max(0, d - 1)
+    P().feed(out)
+    return best
+
+
+def test_a_page_nested_very_deep_is_flattened_so_the_browser_never_parses_it_deep():
+    """Chromium's DOMParser takes 20 s for 100,000 nested divs (its cost grows with the square of the depth): one hostile
+    sheaf would freeze the front's tab. The mount sanitiser cuts the nesting where no real page goes, and keeps the text."""
+    import time
+    deep = "<div>" * 50000 + "deep text" + "</div>" * 50000
+    t0 = time.monotonic()
+    out = mount("<p>start</p>" + deep + "<p>end</p>")
+    assert time.monotonic() - t0 < 15
+    assert depth_of(out) <= 100, depth_of(out)
+    text = text_of(out)
+    assert "start" in text and "deep text" in text and "end" in text
+    assert mount(out) == out
+
+
+def test_ordinary_nesting_is_untouched():
+    nested = "<blockquote>" * 20 + "<ul><li><ul><li><ol><li>x</li></ol></li></ul></li></ul>" + "</blockquote>" * 20
+    assert mount(nested) == nested

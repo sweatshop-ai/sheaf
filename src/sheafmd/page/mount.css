@@ -1,0 +1,4 @@
+:host { display: block; contain: content; }
+.rd-root { display: block; }
+/* The rest of the page's styles move here from page.css when the page's behaviour is mounted (#116, next step):
+   body selectors become .rd-root, position:fixed parts become the pane's own. */

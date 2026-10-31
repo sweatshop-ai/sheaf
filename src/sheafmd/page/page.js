@@ -3239,7 +3239,7 @@ var create = function (ROOT, CFG, opts) {
       reloadKeep(popId);
     };
     var connect = function () {
-      if (docGone) return;
+      if (docGone || unmounted) return;         // an answer that comes after unmount() opens no stream for a page that is gone
       try { live = new EventSource('/_/live?doc=' + encodeURIComponent(CFG.doc)); } catch (e) { return; }
       live.onopen = function () {
         streamBack();

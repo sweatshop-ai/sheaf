@@ -32,6 +32,8 @@ def saved(block_md, old="here", new="there", html=None):
     "H<sub>2</sub>O and x<sup>2</sup> and <u>under</u> here.",
     "Upper <KBD>Esc</KBD> and <x1  class='a'> here.",
     "*Emphasis with <x1> inside* here.",
+    r"Use <kbd>\_init\_</kbd> and <kbd>\_</kbd>x<kbd>\_</kbd> here.",
+    r"Stars <kbd>\*a\*</kbd>, <x1>\[b\]</x1> and <kbd>\`c\`</kbd> here.",
 ])
 def test_an_edit_keeps_each_raw_inline_tag_byte_for_byte(src):
     assert saved(src) == src.replace("here", "there") + "\n"
@@ -96,3 +98,10 @@ def test_a_sup_the_math_render_wrote_is_not_taken_for_the_sources_raw_sup():
     html = '<p>Area <span class="math inline"><em>x</em><sup>2</sup></span> and x<sup>3 there.</sup></p>'
     out = saved("Area $x^2$ and x<sup>3 here.", html=html)
     assert out.endswith(" and x<sup>3 there.\n") and "<sup>2</sup>" in out
+
+
+@pytest.mark.parametrize("src", ["- the <li> tag here", "| A |\n|---|\n| the <td> tag here |"])
+def test_a_raw_tag_named_like_a_block_element_does_not_take_the_blocks_own_element(src):
+    # The page's own <li> or <td> is not the source's tag: the save does what it did before #155.
+    out = saved(src)
+    assert out.count("\n- ") == 0 and "there" in out

@@ -830,8 +830,9 @@ def _orphans(comments) -> str:
 # when the source never closed it. What markdown itself writes (an emphasis, a link, a
 # line break), the page's own spans and what the sanitiser removes are left to pandoc.
 MARKDOWN_TAGS = frozenset({
-    "a", "b", "br", "code", "del", "div", "em", "i", "img", "input", "p", "s", "span", "strike",
-    "strong",
+    "a", "b", "blockquote", "br", "code", "del", "div", "em", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "i",
+    "img", "input", "li", "ol", "p", "pre", "s", "span", "strike", "strong", "table", "tbody", "td", "tfoot",
+    "th", "thead", "tr", "ul",
 })
 TAG_RE = re.compile(r"^<(/?)([A-Za-z][A-Za-z0-9-]*)\b[^>]*?(/?)>$")
 
@@ -909,7 +910,9 @@ def _tags_as_text(content: str, fragment: str, token):
         if hit is None:
             continue
         unused.remove(hit)
-        a, b = token(), token()
+        # In brackets that are punctuation, as the tag's own < and > are: between letters pandoc would
+        # take the words' `_` for intraword and drop its escape, and `\_x\_` would come back as emphasis.
+        a, b = f"\u27e6{token()}\u27e7", f"\u27e6{token()}\u27e7"
         placed[a], placed[b] = hit[1], hit[2]
         el.insert_before(a)
         el.insert_after(b)

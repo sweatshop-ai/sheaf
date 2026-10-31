@@ -641,3 +641,19 @@ def test_a_box_whose_save_is_refused_does_not_tick_because_an_older_save_is_owed
     until(lambda: len(calls) >= 2, what="its save, refused")
     p.wait_for_timeout(500)
     assert p.locator("main li:has-text('plain task') input[type=checkbox]").get_attribute("checked") is None
+
+
+def test_an_item_added_above_the_pressed_box_during_the_undo_leaves_the_tick_on_that_box(sheaf):
+    # #148, 7, gate on 91b73f3: the box was found again by its number, which the new item had moved onto Done.
+    p, f = sheaf.page, sheaf.site.file
+    stand_still(p)
+    bar(p).nth(2).click()                               # Share
+    p.clock.run_for(4000)
+    type_at_end(p, "main li:has-text('Approve')", "")
+    p.keyboard.press("Enter")
+    p.keyboard.type("extra")
+    until(lambda: "extra" in p.inner_text("main ul"), what="the new item on screen")
+    p.clock.run_for(1100)
+    until(lambda: "extra" in f.read_text(encoding="utf-8"), what="the edit, saved by the reload's settle")
+    text = f.read_text(encoding="utf-8")
+    assert "- [x] Share" in text and "- [ ] Done" in text, text

@@ -843,6 +843,7 @@
       var sw = q('#rd-state');
       if (sw && dirty().length) sw.textContent = 'Saving…';
       await ticking;
+      refresh();
       return save(quiet, res);
     }
     var d = dirty();
@@ -2883,7 +2884,7 @@
     main.parentNode.insertBefore(actBar, main);
   }
   function pressable(btn, a, all) {
-    var word = btn.textContent, waiting = null;
+    var word = btn.textContent, waiting = null, pressedBox = null;
     function lock(on) { all.forEach(function (o) { if (o.btn !== btn && o.a.may) o.btn.disabled = on; }); }
     function back() { btn.textContent = word; btn.classList.remove('pending'); btn.removeAttribute('aria-label'); }
     function done() {
@@ -2929,7 +2930,7 @@
         all.forEach(function (o) { o.btn.disabled = true; });
         actsOwed = null;
         actsUnsure = true;
-        showTick(a);
+        showTick(a, pressedBox);
         done();
       } catch (e) {
         if (ticking) free();
@@ -2955,6 +2956,8 @@
       // A settle ends in a reload onto the change: a press now would die with the page, so it is not taken.
       if (settling) { say('The page is reloading onto a change to the file: press ' + a.label + ' once it has.'); return; }
       pressOpen = true;
+      // Its box, as an element: an item typed above it during the press moves its number, not the box (showTick).
+      pressedBox = boxOfAct(a);
       lock(true);
       btn.textContent = 'Undo'; btn.classList.add('pending'); btn.setAttribute('aria-label', 'Undo ' + word);
       waiting = setTimeout(send, UNDO_MS);
@@ -2963,10 +2966,13 @@
   // The box of a tick the hub took shows it until the reload: an edit saved in its block before then is merged
   // against the ticked file, and would otherwise put the box back as the page's version of that block. A clean
   // block stays clean.
-  function showTick(a) {
+  function boxOfAct(a) {
     var b = a.box && blocks.filter(function (x) { return x.i === a.box[0]; })[0];
-    var box = b && boxesOf(b)[a.box[1]];
-    if (!box) return;
+    return (b && boxesOf(b)[a.box[1]]) || null;
+  }
+  function showTick(a, box) {
+    var b = box && main.contains(box) && blockOf(box);
+    if (!b) return;
     var clean = ser(b) === b.pristine, on = a.toggle ? !a.pressed : true;
     if (on) box.setAttribute('checked', ''); else box.removeAttribute('checked');
     box.checked = on;
@@ -3283,8 +3289,8 @@
     var meetVersion = function (v) {
       if (!v || !CFG.version || v === CFG.version || docGone) return;
       // A press's tick counts in `writes`: its reload waits for the press instead (reloadKeep), so that a refusal
-      // is said again on the page it brings, as meetSignOut asks first.
-      if (writes && !pressOpen) { afterWrites.push(function () { meetVersion(v); }); return; }
+      // is said again on the page it brings. Any other write out is waited for, as ever.
+      if (writes > (ticking ? 1 : 0)) { afterWrites.push(function () { meetVersion(v); }); return; }
       if (dirty().length || writingNow({ page: true })) {
         showNoticeOverOffer('The sheaf hub was upgraded. ' +
                             (dirty().length ? 'Save your edits' : 'Send or cancel your comment') +

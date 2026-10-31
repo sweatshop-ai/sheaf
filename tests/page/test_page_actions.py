@@ -3,7 +3,7 @@ as the list's buttons, a one-off red with the 5 second Undo and locked once pres
 the list's tick (`POST /_/tick`, 9.10): the markdown on disk is what a tick writes, `- [x] <word>`."""
 import pytest
 
-from pagehelp import DOC, at, comment_on, key, mark, reloaded, select, toast, toasted, type_at_end, until
+from pagehelp import DOC, at, comment_on, draft_key, key, mark, reloaded, select, toast, toasted, type_at_end, until
 
 pytestmark = pytest.mark.page
 
@@ -787,3 +787,47 @@ def test_an_upgrade_held_by_a_comment_form_during_a_press_does_not_say_the_text_
     p.wait_for_selector("#rd-actions button")
     toasted(p, "upgraded")
     assert "text changed" not in toast(p)
+
+
+def test_a_restore_waiting_for_the_tick_is_answered_before_the_page_reloads(tab, context, site):
+    # #153, 4: the Restore waiting for the tick was counted nowhere, and the reload of the tick's change went under it.
+    f = site.file
+    f.write_text(SHEAF, encoding="utf-8")
+    tab.open()
+    tab.page.wait_for_selector("#rd-actions button")
+    site.kill()
+    type_at_end(tab.page, "main p:has-text('Body')", " typed")
+    until(lambda: tab.page.evaluate(f"localStorage.getItem({draft_key(site)!r})"), what="the draft")
+    tab.page.close()
+    site.start()
+    p = context.new_page()
+    p.add_init_script(HEARD)
+    p.clock.install()
+    p.goto(site.url)
+    p.wait_for_selector("#rd-notice button[data-d=restore]")
+    p.wait_for_selector("#rd-actions button")
+    held = []
+    p.route("**/_/tick", lambda r: held.append(r))
+    stand_still(p)
+    bar(p).nth(0).click()
+    p.clock.run_for(5100)
+    until(lambda: held or p.wait_for_timeout(20), what="the tick, held")
+    saves = []
+    p.route("**/_/save", lambda r: saves.append(r))
+    p.click("#rd-notice button[data-d=restore]")       # it waits for the tick's answer
+    answer = held[0].fetch()                            # the hub ticks, and its `changed` comes before the answer
+    until(lambda: heard(p, "changed") or p.wait_for_timeout(20), what="the tick's change")
+    mark(p)
+    held[0].fulfill(response=answer)
+    p.unroute("**/_/tick")
+    until(lambda: saves or p.wait_for_timeout(20), what="the Restore, sent once the tick is answered")
+    p.wait_for_timeout(500)
+    assert p.evaluate("window.__same_load") is True, "the page reloaded under the Restore"
+    saves[0].continue_()
+    p.unroute("**/_/save")
+    until(lambda: " typed" in f.read_text(encoding="utf-8"), what="the restored edit")
+    reloaded(p)
+    p.wait_for_selector("#rd-actions button")
+    p.wait_for_timeout(500)
+    assert p.query_selector("#rd-notice button[data-d=restore]") is None, "the draft is offered again"
+    assert p.evaluate(f"localStorage.getItem({draft_key(site)!r})") is None

@@ -1183,8 +1183,13 @@
       b.title = GONE;
     });
   }
+  // A draft's Restore between its click and its answer (offerDraft). It may wait for a tick that is out, and so is
+  // not yet among the writes whose `changed` the page holds (ownWrites): a reload asked meanwhile, the tick's own
+  // among them, waits for its answer, or it would go before the Restore is sent.
+  var restoring = null;
   function reloadWhenFree(openId, why) {
     if (docGone) return;
+    if (restoring) { restoring.then(function () { reloadWhenFree(openId, why); }); return; }
     // A press of an action button waits or is out (SPEC 10.11): the reload waits for its answer, as the list's does.
     if (pressOpen) { waitForPress({ open: openId, why: why }); return; }    // its form is not waited for either
     if (!writingNow({ sent: 'any' })) { settle(openId); return; }
@@ -3536,6 +3541,8 @@
       var k = e.target.getAttribute && e.target.getAttribute('data-d');
       if (k === 'discard') { decided(); dropOffer(); }
       if (k !== 'restore') return;
+      var end;
+      restoring = new Promise(function (r) { end = r; });
       try {
         // A Restore the hub did not answer can be pressed again, or a page opened later can offer the draft
         // again: the same edits go under the same id, which the draft keeps (an older entry's has none).
@@ -3566,6 +3573,9 @@
         panel.querySelector('pre').textContent = text;
         panel.dataset.keeps = 'draft';
         panel.classList.add('open');
+      } finally {
+        restoring = null;
+        end();
       }
     };
   }

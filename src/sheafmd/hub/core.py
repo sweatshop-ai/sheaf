@@ -555,11 +555,18 @@ class Hub:
 
     def last_judged(self, address: str):
         """(front matter, assignees) of the sheaf at `address` as the hub last judged it, whatever its file holds
-        now: what the door judges a file that cannot be read on (9.11). None when the hub never read it."""
+        now: what the door judges a file that cannot be read on (9.11). None when the hub never read it, or read
+        another file there (another inode): what that one said is nothing about this one."""
         at = roots_mod.Address.parse(address)
         root = self.roots.get(at.root)
         hit = None if root is None else self._front.get(root.path / at.rel)
-        return None if hit is None else hit[1:]
+        if hit is None:
+            return None
+        try:
+            same = self.file(address).stat().st_ino == hit[0][0]
+        except OSError:
+            return None
+        return hit[1:] if same else None
 
     def visible(self, member, address: str, never_read: bool = True) -> bool:
         """Whether the member may open the document at `address` by its visibility (9.11): a sheaf that is

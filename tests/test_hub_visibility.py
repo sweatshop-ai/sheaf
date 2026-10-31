@@ -1133,3 +1133,39 @@ def test_an_unreadable_file_the_hub_never_read_is_told_as_none_even_to_its_owner
     _, missing = call(browser, "read", token=token, doc="work/thinkingtoo/tiroir/nothing.md")
     assert is_error and got == missing.replace("nothing.md", DOC.rsplit("/", 1)[1])
     assert missing.startswith("There is no document work/thinkingtoo/tiroir/nothing.md ")
+
+
+@pytest.mark.parametrize("tool, args", [("resolve", {"id": "c1"}), ("update", {"text": "x\n", "expected_hash": "0" * 16})])
+def test_the_other_tools_tell_a_token_that_saw_a_sheaf_its_file_cannot_be_read(team, browser, work, tool, args):
+    team.hub.proxy = members(work, thierry=["james-thierry"])
+    put(team, work, DOC, PRIVATE.replace("A quote from the contract.", THREAD))
+    token = Tokens().add("james-thierry", write=True)
+    assert not call(browser, "read", token=token, doc=f"work/{DOC}")[0]
+    spoil(work / DOC, "not UTF-8")
+    assert call(browser, tool, token=token, doc=f"work/{DOC}", **args) == (True, UNREADABLE.format(f"work/{DOC}"))
+
+
+def test_a_token_whose_project_no_longer_names_its_member_is_told_nothing_of_the_unreadable_file(team, browser,
+                                                                                                    work):
+    team.hub.proxy = members(work, hans=["james-hans"])
+    put(team, work, DOC, OPEN)
+    token = Tokens().add("james-hans", write=True)
+    assert not call(browser, "read", token=token, doc=f"work/{DOC}")[0]
+    (work / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["Thierry"]\n', encoding="utf-8")
+    spoil(work / DOC, "not UTF-8")
+    is_error, got = call(browser, "read", token=token, doc=f"work/{DOC}")
+    _, missing = call(browser, "read", token=token, doc="work/thinkingtoo/tiroir/nothing.md")
+    assert is_error and got == missing.replace("nothing.md", DOC.rsplit("/", 1)[1])
+
+
+def test_an_unreadable_file_that_replaced_the_one_a_token_saw_is_told_as_none(team, browser, work):
+    # The last good read was of another file: what it said is nothing about this one.
+    put(team, work, DOC, OPEN)
+    token = Tokens().add("codex", write=True)
+    assert not call(browser, "read", token=token, doc=f"work/{DOC}")[0]
+    f = work / DOC
+    os.rename(f, work / "kept.md")              # kept, so the new file cannot take its inode
+    f.write_bytes(PRIVATE.encode("utf-8") + b"\nlatin1 caf\xe9\n")
+    is_error, got = call(browser, "read", token=token, doc=f"work/{DOC}")
+    _, missing = call(browser, "read", token=token, doc="work/thinkingtoo/tiroir/nothing.md")
+    assert is_error and got == missing.replace("nothing.md", DOC.rsplit("/", 1)[1])

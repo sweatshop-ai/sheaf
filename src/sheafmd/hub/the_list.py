@@ -916,7 +916,8 @@ document.querySelectorAll('.list-row button.list-act:not(:disabled)').forEach(fu
 CSS = """
 :root{--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--chip:#1f5fd6;--once:#c62828;--bg:#fff}
 @media (prefers-color-scheme:dark){:root{--fg:#f2f2f7;--muted:#a1a1a6;--line:#38383a;--chip:#6ea2ff;--once:#ff6b6b;--bg:#1c1c1e}}
-body{margin:0;padding:24px 16px;font:15px/1.45 system-ui,sans-serif;color:var(--fg);background:var(--bg)}
+body{margin:0;padding:24px 16px;font:15px/1.45 system-ui,sans-serif;color:var(--fg);background:var(--bg);
+overflow-wrap:anywhere}
 header{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
 h1{font-size:20px;margin:0}.list-sub{color:var(--muted);font-size:13px}
 .list-filters{display:flex;gap:8px;margin:12px 0 20px;flex-wrap:wrap}
@@ -934,11 +935,11 @@ ul{list-style:none;margin:0;padding:0}
 .list-act.one-off.pending,.list-act.one-off.pressed{background:var(--once);color:var(--bg)}
 .list-act.toggle.pending,.list-act.toggle[aria-pressed=true]{background:var(--chip);color:var(--bg)}
 .list-act:disabled{cursor:default;opacity:.7}
-/* On a phone the buttons go under the title, 44 px, as the page's #rd-actions in page/page.css (#112). */
+/* The list never scrolls sideways: every word breaks, the buttons' (#112), a title, a heading, a refusal (#130).
+   On a phone the buttons go under the title, 44 px, as the page's #rd-actions in page/page.css (#112). */
 @media (max-width:600px){.list-row{flex-wrap:wrap}.list-main{flex-basis:100%}
 .list-actions{max-width:none;justify-content:flex-start}}
 @media (max-width:600px),(pointer:coarse){.list-act{min-height:44px;min-width:44px;padding:2px 14px}}
-.list-act{overflow-wrap:anywhere}
 .list-title{color:var(--fg);text-decoration:none}.list-title:hover{text-decoration:underline}
 .list-assistant{display:inline-block;font-size:12px;border:1px solid var(--chip);color:var(--chip);
 border-radius:999px;padding:0 8px;margin-left:6px}

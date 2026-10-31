@@ -63,6 +63,7 @@ class State:
     live: str                   # "box" when the first runs on `[list]`'s box, "laptop" on another host, "" none
     cfg: object                 # the list's the_list.ListConfig
     james: bool = False         # the sheaf's `assistant` is James
+    relay: bool = False         # a relay of the live session, a member's fork, has its stream open (9.14)
 
     @property
     def box(self) -> list:
@@ -80,9 +81,12 @@ class State:
     def can(self) -> list:
         """The page's `can` (10.1): Ask and Tell go to James's window while the live session is on the box,
         or on a sheaf of James with no session yet (the hub records his when it finds it), and `[list]`
-        names the box and the folder to drop them in."""
+        names the box and the folder to drop them in; Tell goes to a fork's connected relay."""
         to_james = self.live == "box" or (self.live == "" and self.james)
-        return ["box-ask", "box-tell"] if to_james and self.cfg.box and self.cfg.tell_dir is not None else []
+        if to_james and self.cfg.box and self.cfg.tell_dir is not None:
+            return ["box-ask", "box-tell"]
+        # Tell, never Ask, goes to a member's fork through its relay while that relay is connected (9.14).
+        return ["relay-tell"] if self.live == "laptop" and self.relay else []
 
 
 def code_session(st: State | None, recorded: str | None = None) -> str | None:
@@ -112,7 +116,9 @@ def state(hub, address: str, text: str) -> State | None:
     if items:
         live = "box" if cfg.box and items[0]["host"] == cfg.box else "laptop"
     assistant = fm.get("assistant", "")
-    return State(items, live, cfg, isinstance(assistant, str) and assistant.casefold() == "james")
+    relays = getattr(hub, "relays", None)
+    relay = live == "laptop" and relays is not None and relays.connected(address, items[0]["id"])
+    return State(items, live, cfg, isinstance(assistant, str) and assistant.casefold() == "james", relay)
 
 
 def member_word(member) -> str:

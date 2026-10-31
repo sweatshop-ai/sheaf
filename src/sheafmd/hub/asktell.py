@@ -319,7 +319,7 @@ class AskTell:
             raise JobRefused(404, f"no comment {cid} in this document")
         return c
 
-    def _links(self, address: str) -> bool:
+    def links(self, address: str) -> bool:
         root = self.hub.roots.get(roots_mod.Address.parse(address).root)
         if root is None:
             return True
@@ -370,7 +370,7 @@ class AskTell:
             return fail("the document is gone")
         if c is None:
             return fail(f"no comment {cid} in this document")
-        prompt = prompts.ask(str(e.path), c, self._links(e.address))
+        prompt = prompts.ask(str(e.path), c, self.links(e.address))
         try:
             r = job.run(ad.ask_command(t), timeout=self.ask_timeout, env=ad.child_env(t),
                         cwd=self._cwd(e), input=prompt)
@@ -419,7 +419,7 @@ class AskTell:
             e.live.stop_waiting(cid)
             raise
         t, ad = v.target, v.adapter
-        text = prompts.tell(address, str(e.path), self.hub.person, c, self._links(address))
+        text = prompts.tell(address, str(e.path), self.hub.person, c, self.links(address))
 
         def work(job):
             if job.cancelled:                      # the Cancel came before the first byte

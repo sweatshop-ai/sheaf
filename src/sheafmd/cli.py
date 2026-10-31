@@ -26,7 +26,7 @@ import webbrowser
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from . import __version__, agent_setup, comments, config, deliver, diagnostics, lifecycle, mcp, paths, pdf, seat, theme
+from . import __version__, agent_setup, comments, config, deliver, diagnostics, lifecycle, mcp, paths, pdf, relay_client, seat, theme
 from .agents.detect import detect
 from .agents.registry import detect_target
 from .atomic import write_text_atomic
@@ -1044,6 +1044,8 @@ COMMANDS.update(agent_setup.COMMANDS)
 COMMAND_HELP.update(agent_setup.COMMAND_HELP)
 COMMANDS.update(deliver.COMMANDS)
 COMMAND_HELP.update(deliver.COMMAND_HELP)
+COMMANDS.update(relay_client.COMMANDS)
+COMMAND_HELP.update(relay_client.COMMAND_HELP)
 
 
 # SPEC 14.2: on native Windows only what needs no hub and no service manager runs.

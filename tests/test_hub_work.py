@@ -310,7 +310,7 @@ def test_a_fork_is_the_first_session_named_by_the_signed_in_member(team, box, wo
     assert first.startswith(f"{{id: {FORK}, host: hans-mac.local, member: hans, date: 20")
     assert after.replace(f"  - {first}\n", "", 1) == before
     from sheafmd.source import md_hash
-    assert got.json() == {"ok": True, "hash": md_hash(after)}
+    assert got.json() == {"ok": True, "hash": md_hash(after), "relay": got.json()["relay"]}
 
 
 def fork(team, id=FORK, as_=HANS, **extra):
@@ -482,9 +482,11 @@ def test_ask_and_tell_on_a_box_sheaf_write_the_comment_and_drop_it_for_james(tea
     assert "Can you send the draft to Joey?" in (work / DOC).read_text(encoding="utf-8")
     f, = drops(box)
     assert f.name.startswith("thinkingtoo--tiroir-20") and f.name.endswith("Z")
-    assert json.loads(f.read_bytes()) == {"project": "thinkingtoo/tiroir", "member": "hans", "sheaf": ADDRESS,
-                                          "text": "Can you send the draft to Joey?", "kind": kind,
-                                          "thread": got.json()["id"]}
+    d = json.loads(f.read_bytes())
+    tell_keys = {"id": d.get("id"), "message": d.get("message")} if kind == "tell" else {}
+    assert d == {"project": "thinkingtoo/tiroir", "member": "hans", "sheaf": ADDRESS,
+                 "text": "Can you send the draft to Joey?", "kind": kind, "thread": got.json()["id"],
+                 "address": ADDRESS, "abs_path": str(work / DOC), **tell_keys}
     assert list(f.read_bytes().decode()) == list(json.dumps(json.loads(f.read_bytes())))
     row, = hub_rows("tell-dropped")
     assert (row["what"], row["project"], row["by"], row["drop"]) == (kind, "thinkingtoo/tiroir", "hans", "written")
@@ -992,7 +994,13 @@ def test_a_fork_that_lands_after_the_gate_keeps_the_tell_from_james(team, box, w
     from sheafmd.hub import handler as handler_mod
     put(team, work, DOC, ON_A_LAPTOP)
     before = (work / DOC).read_text(encoding="utf-8")
-    monkeypatch.setattr(handler_mod.Handler, "_box_live", lambda self, e: True)
+    real = handler_mod.Handler._work_route
+    seen = []
+
+    def box_at_the_gate(self, address, text, kind):
+        seen.append(1)
+        return "box" if len(seen) == 1 else real(self, address, text, kind)
+    monkeypatch.setattr(handler_mod.Handler, "_work_route", box_at_the_gate)
     got = comment(team, work, "tell")
     assert got.status == 400 and got.json()["error"] == proxy.PROXY_LINE
     assert (work / DOC).read_text(encoding="utf-8") == before and drops(box) == []

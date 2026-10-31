@@ -472,3 +472,33 @@ def test_too_many_codes_says_so_in_the_popover(tab):
     until(lambda: "Too many sign-in codes: wait a few minutes." in tab.page.inner_text("#rd-work"),
           what="the 429 line")
     assert tab.page.locator("#rd-work .rd-code button").is_enabled()
+
+
+# ── a fork's relay (9.14) ─────────────────────────────────────────────────────
+
+def relayed(connected):
+    return {**work(sessions=[LAPTOP, BOX], attach=None, live="laptop", fork=None), "relay": connected}
+
+
+def test_a_fork_with_its_relay_connected_offers_tell_to_its_session_and_no_ask(tab):
+    as_member(tab, relayed(True), can=["relay-tell"])
+    tab.open()
+    bodies, others = sent_to_box(tab)
+    comment_form(tab)
+    assert [e for _, e in agent_buttons(tab.page, "#rd-popover .rd-form")] == [False, True]
+    tab.page.fill("#rd-popover textarea", "Send the draft to Joey")
+    tab.page.click("#rd-popover .rd-form button.rd-tell")
+    sent = "Sent to Thierry’s session on thierry-laptop; the answer appears in this thread."
+    until(lambda: sent in tab.page.inner_text("#rd-popover"), what="the sent line in the thread")
+    assert [(b["op"], b["ask"], b["tell"]) for b in bodies] == [("add", False, True)]
+    assert others == []
+    open_work(tab.page)
+    assert tab.page.inner_text("#rd-work .rd-relay") == "Tell goes to Thierry’s session on thierry-laptop."
+
+
+def test_a_fork_whose_relay_is_not_connected_says_so_in_work_on_this(tab):
+    as_member(tab, relayed(False))
+    tab.open()
+    open_work(tab.page)
+    assert tab.page.inner_text("#rd-work .rd-relay") == \
+        "Thierry’s session on thierry-laptop is not connected: Tell works again when it is."

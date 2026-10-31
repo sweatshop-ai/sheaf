@@ -941,8 +941,8 @@ def doc_header(frag: str, by: str, for_: str | None) -> str:
 
 
 # A mounted page's styles sit in a shadow root, which holds no `html`, `:root` or `body` (#116): a selector that starts
-# with one of them is moved to the host (the theme's variables, the root font size) or to the wrapper `.rd-root`, which
-# stands where the body stands on a page of its own. Comments go first, so a word in one is never read as a selector.
+# with one of them is moved to the host (the theme's variables) or to the wrapper `.rd-root`, which stands where the body
+# stands on a page of its own. `rem` still resolves against the front's `html`, so the root font size is the front's. Comments go first, so a word in one is never read as a selector.
 _MOUNT_TOP_RE = re.compile(r"(^|[{},]\s*)(?::root|html)(?=[\s{,>+~:\[.#]|$)")
 _MOUNT_BODY_RE = re.compile(r"(^|[{},]\s*)body(?=[\s{,>+~:\[.#]|$)")
 

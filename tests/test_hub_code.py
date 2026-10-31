@@ -91,9 +91,11 @@ def test_no_code_while_the_live_session_runs_on_a_laptop(team, box, work):
     assert issue(team).status == 404
 
 
-def test_no_code_without_a_copy_of_the_boxs_transcripts(team, box):
+@pytest.mark.parametrize("key", ["sessions_dir", "work_dir"])
+def test_no_code_without_a_copy_of_the_boxs_transcripts(team, box, key):
+    # Without work_dir the copy serves nothing either (#146).
     cfg = team.hub.the_list.cfg
-    team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{**cfg.__dict__, "sessions_dir": None}))
+    team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{**cfg.__dict__, key: None}))
     assert issue(team).status == 404
 
 

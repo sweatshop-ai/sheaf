@@ -4,9 +4,10 @@ file Ask, Tell and Stop James drop for James's window.
 
     state(hub, address, text)       a sheaf's sessions and where its live session runs; None for another page
     sessions(fm)                    the items of the front matter's `sessions` that parse, as written (newest first)
+    serves(cfg)                     whether the hub keeps a copy it serves transcripts from (sessions_dir and work_dir)
     code_session(st, recorded)      the session a sign-in code serves (9.13): made, downloaded and forked by one rule
     with_session(text, line, id)    the text with `line` as the first of `sessions`, the rest as written
-    open_transcript(folder, id)     the bytes of `<folder>/<one folder>/<id>.jsonl`, or None
+    open_transcript(cfg, project, id)  the bytes of `id`'s transcript in `project`'s folder of the copy, or None
     james_has(cfg, project, id)     whether the copy holds `id` as James's session of `project` (None: not yet)
     drop(folder, project, body, missing)  a file in `folder` for the box's supervisor: "written" or why not
     drop_named(…)                         the same, and the file's name when it is written (#139)
@@ -90,12 +91,18 @@ class State:
         return ["relay-tell"] if self.live == "laptop" and self.relay else []
 
 
+def serves(cfg) -> bool:
+    """Whether the hub keeps a copy it serves transcripts from: `sessions_dir`, and `work_dir`, which names the
+    project's one folder in it (#146). Without both there is no transcript, so no fork and no sign-in code."""
+    return cfg.sessions_dir is not None and cfg.work_dir is not None
+
+
 def code_session(st: State | None, recorded: str | None = None) -> str | None:
     """The session a sign-in code serves on the sheaf whose state is `st` (9.13), the one rule of its making, its
     GET and its POST: the sheaf's forkable session, while the hub keeps the copy that serves it. Asked with no
     `recorded`, the id a new code records; asked with a code's `recorded` id, that id while it is still the
     forkable one, else None: a newer live session, James's or a member's fork, needs a new code."""
-    sid = st.forkable if st is not None and st.cfg.sessions_dir is not None else None
+    sid = st.forkable if st is not None and serves(st.cfg) else None
     return sid if sid is not None and recorded in (None, sid) else None
 
 
@@ -186,34 +193,37 @@ def _with_session(text: str, line: str, id: str) -> str:
     return "\n".join(raw[:at] + [key, (lead or "  - ") + line + cr] + kept + raw[n:])
 
 
-def open_transcript(folder: Path, id: str) -> bytes | None:
-    """The transcript `<folder>/<one folder>/<id>.jsonl`: a regular file, no link, whose real path is inside
-    `folder`. None when there is none. `id` is a UUID already (UUID_RE), so it names no other path."""
-    if not UUID_RE.fullmatch(id):
+def open_transcript(cfg, project: str, id: str) -> bytes | None:
+    """The transcript of `id` as a session of `project`, from the copy: `<id>.jsonl` in the folder Claude names after
+    `<work_dir>/<project>` and in no other folder of the copy (#146), a regular file and no link, whose first `cwd` is
+    that very path and whose `sessionId` is `id`, as `james_has` asks. None when there is none, or when the copy or
+    `work_dir` is not set. `id` is a UUID already (UUID_RE), so it names no other path."""
+    if cfg.sessions_dir is None or cfg.work_dir is None or not UUID_RE.fullmatch(id):
         return None
-    top = os.path.realpath(folder)
+    cwd = os.path.join(cfg.work_dir, project)
     try:
-        subs = sorted(e.name for e in os.scandir(top) if e.is_dir(follow_symlinks=False))
+        dfd = _project_folder(cfg.sessions_dir, cwd)
     except OSError:
         return None
-    for sub in subs:
-        path = os.path.join(top, sub, f"{id}.jsonl")
-        try:
-            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-        except OSError:
-            continue
-        try:
-            st = os.fstat(fd)
-            real = os.path.realpath(path)
-            if not stat.S_ISREG(st.st_mode) or not real.startswith(top.rstrip("/") + "/"):
-                continue
-            chunks = []
-            while chunk := os.read(fd, 1 << 20):
-                chunks.append(chunk)
-            return b"".join(chunks)
-        finally:
-            os.close(fd)
-    return None
+    try:
+        fd = os.open(f"{id}.jsonl", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
+    except OSError:
+        return None
+    finally:
+        os.close(dfd)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        chunks = []
+        while chunk := os.read(fd, 1 << 20):
+            chunks.append(chunk)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+    body = b"".join(chunks)
+    # The bytes checked are the bytes served: the file is read once.
+    return body if _cwd_of(body[:1 << 20]) == (cwd, id) else None
 
 
 def james_has(cfg, project: str, id: str) -> bool | None:
@@ -225,11 +235,7 @@ def james_has(cfg, project: str, id: str) -> bool | None:
         return False
     cwd = os.path.join(cfg.work_dir, project)
     try:
-        top = os.open(cfg.sessions_dir, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            dfd = os.open(re.sub(r"[^A-Za-z0-9]", "-", cwd), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=top)
-        finally:
-            os.close(top)
+        dfd = _project_folder(cfg.sessions_dir, cwd)
     except FileNotFoundError:
         return None
     except OSError:
@@ -244,6 +250,16 @@ def james_has(cfg, project: str, id: str) -> bool | None:
         return False
     finally:
         os.close(dfd)
+
+
+def _project_folder(sessions_dir, cwd: str) -> int:
+    """The folder of the copy Claude names after `cwd` (every character but a letter or digit a `-`), opened without
+    following a link: its descriptor, which the caller closes. OSError when it cannot be opened."""
+    top = os.open(sessions_dir, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        return os.open(re.sub(r"[^A-Za-z0-9]", "-", cwd), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=top)
+    finally:
+        os.close(top)
 
 
 def _first_cwd(dfd: int, name: str, most: int = 1 << 20):
@@ -261,6 +277,11 @@ def _first_cwd(dfd: int, name: str, most: int = 1 << 20):
         return None
     finally:
         os.close(fd)
+    return _cwd_of(head)
+
+
+def _cwd_of(head: bytes):
+    """(cwd, sessionId) of the first line of `head` that names a cwd; None when none does."""
     for line in head.split(b"\n"):
         try:
             row = json.loads(line)

@@ -13,6 +13,9 @@ In memory: a restart forgets it.
                                           every drop older than `wait` seconds: [(doc, thread, Drop)]
     .drops()                              [(doc, thread, Drop)] of every open drop
     .working(doc)                         whether James's session works on a drop of the sheaf: one `delivered`
+    .cleared()                            the sheaves where a `delivered` drop ended since the last ask
+    .observe(doc, thread, got)            take in `read_status`'s `got` for that drop: (what changed, its state
+                                          before), what being None, "ignored", "state" or "failed" (which ends it)
     .end(doc, thread)                     take one off: whether it was open
     read_status(folder, name)             what `<name>.status` in `folder` says: None when there is none, BAD when
                                           it is not one regular file of the contract, else (state, error)
@@ -48,6 +51,7 @@ class BoxWaits:
         self._clock = clock
         self._lock = threading.Lock()
         self._drops: dict[str, dict[str, Drop]] = {}       # {doc: {thread: Drop}}
+        self._cleared: set[str] = set()                    # sheaves where a `delivered` drop ended since asked
 
     def add(self, doc: str, thread: str, kind: str, text: str, name: str | None = None):
         c = rdc.parse(text).by_id(thread)
@@ -74,10 +78,8 @@ class BoxWaits:
                 drops = self._drops.get(doc, {})
                 for thread, d in list(drops.items()):
                     if now - d.at > wait:
-                        del drops[thread]
+                        self._end(doc, thread)
                         out.append((doc, thread, d))
-                if not drops:
-                    self._drops.pop(doc, None)
         return out
 
     def drops(self) -> list:
@@ -88,13 +90,44 @@ class BoxWaits:
         with self._lock:
             return any(d.state == "delivered" for d in self._drops.get(doc, {}).values())
 
+    def observe(self, doc: str, thread: str, got) -> tuple[str | None, str]:
+        with self._lock:
+            d = self._drops.get(doc, {}).get(thread)
+            if d is None or got is None:
+                return None, ""
+            if got == BAD:
+                if d.ignored:
+                    return None, d.state
+                d.ignored = True
+                return "ignored", d.state
+            state, was = got[0], d.state
+            if state == was:
+                return None, was
+            if state == "failed":
+                self._end(doc, thread)
+                return "failed", was
+            d.state = state
+            return "state", was
+
     def end(self, doc: str, thread: str) -> bool:
         with self._lock:
-            drops = self._drops.get(doc, {})
-            gone = drops.pop(thread, None) is not None
-            if not drops:
-                self._drops.pop(doc, None)
-            return gone
+            return self._end(doc, thread)
+
+    def cleared(self) -> set:
+        """The sheaves where a `delivered` drop ended since the last ask, however it ended: a member's orange goes."""
+        with self._lock:
+            out, self._cleared = self._cleared, set()
+            return out
+
+    def _end(self, doc: str, thread: str) -> bool:
+        """Take one drop off. Under the lock."""
+        drops = self._drops.get(doc, {})
+        d = drops.pop(thread, None)
+        if not drops:
+            self._drops.pop(doc, None)
+        if d is not None and d.state == "delivered":
+            self._cleared.add(doc)
+        return d is not None
 
     def _settle(self, doc: str, text: str):
         """End the drops of `doc` whose thread has a reply in `text`, or is gone from it. Under the lock."""
@@ -105,9 +138,7 @@ class BoxWaits:
         for thread, d in list(drops.items()):
             c = parsed.by_id(thread)
             if c is None or len(c.replies) > d.replies:
-                del drops[thread]
-        if not drops:
-            del self._drops[doc]
+                self._end(doc, thread)
 
 
 def read_status(folder: Path, name: str):

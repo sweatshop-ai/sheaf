@@ -440,7 +440,6 @@ def test_a_drop_the_hub_gives_up_on_takes_the_line_off_and_says_so(tab):
     until(lambda: SENT not in tab.page.inner_text("#rd-popover"), what="the line taken off")
 
 
-
 @pytest.mark.parametrize("state, line", [("picked-up", "James’s window is opening"),
                                          ("delivered", "James is working on it in his window")])
 def test_the_supervisors_word_on_a_drop_replaces_the_sent_line(tab, state, line):

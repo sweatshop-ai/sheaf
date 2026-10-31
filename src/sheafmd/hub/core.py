@@ -712,14 +712,18 @@ class Hub:
 
     # ── the watcher's step (SPEC 8.9) ────────────────────────────────────────
     def _expire_drops(self):
-        """Give up on drops for James's window with no reply after the Tell wait (9.12, #115): the page is told
-        `box-failed`, and a `box-expired` row says so."""
-        for address, w in self.box_waits.expire(self.tell_wait):
+        """Give up on drops for James's window with no reply after the Tell wait (9.12, #115), read in the file as
+        it is now, whether a page asked since or not: the page is told `box-failed`, and a `box-expired` row says so."""
+        def text_of(address):
+            e = self.entries.get(address)
+            return e.live.current()[1] if e is not None else None
+        minutes = max(1, -(-self.tell_wait // 60))
+        for address, thread, d in self.box_waits.expire(self.tell_wait, text_of):
             project = "/".join(roots_mod.Address.parse(address).rel.split("/")[:2])
-            self.record("box-expired", address, what=w.kind, project=project, thread=w.thread)
+            self.record("box-expired", address, what=d.kind, project=project, thread=thread)
             e = self.entries.get(address)
             if e is not None:
-                e.bus.publish("box-failed", {"id": w.thread, "kind": w.kind, "minutes": self.tell_wait // 60})
+                e.bus.publish("box-failed", {"id": thread, "kind": d.kind, "minutes": minutes})
 
     def tick(self):
         """One pass of the watcher, run every second. For each document with an open tab or a

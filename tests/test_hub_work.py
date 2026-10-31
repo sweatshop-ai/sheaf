@@ -584,7 +584,6 @@ def test_a_drop_that_fails_keeps_the_comment_says_so_and_leaves_no_dot_file(team
     assert hub_rows("tell-dropped")[0]["drop"].startswith("failed: ") and drops(box) == []
 
 
-
 # ── the drop's wait (#115) ───────────────────────────────────────────────────
 
 def sent(team, member=HANS):
@@ -627,6 +626,21 @@ def test_a_drop_with_no_reply_after_the_tell_wait_fails_on_the_members_page(team
     assert data == {"id": cid, "kind": "tell", "minutes": team.hub.tell_wait // 60}
     row, = hub_rows("box-expired")
     assert (row["what"], row["project"], row["thread"]) == ("tell", "thinkingtoo/tiroir", cid)
+
+
+
+def test_a_drop_answered_before_the_tell_wait_is_never_given_up_on_though_no_page_asked(team, box, work):
+    # The reply ends the wait when it lands, not when a page next asks /_/doc (#115).
+    now = [1_000_000.0]
+    team.hub.clock = lambda: now[0]
+    tab = team.get(f"/_/live?doc={ADDRESS}", member=HANS).stream
+    cid = comment(team, work, "tell").json()["id"]
+    got = team.post("/_/comment", {"doc": ADDRESS, "op": "reply", "id": cid, "body": "Sent it."}, member=THIERRY)
+    assert got.status == 200, got.text
+    now[0] += team.hub.tell_wait + 1
+    team.hub.tick()
+    assert [n for n, _ in tab.drain() if n == "box-failed"] == []
+    assert hub_rows("box-expired") == []
 
 
 # ── the meta block (10.1) ────────────────────────────────────────────────────

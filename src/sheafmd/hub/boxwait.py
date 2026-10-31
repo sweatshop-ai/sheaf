@@ -12,6 +12,7 @@ In memory: a restart forgets it.
     .expire(wait, text_of)                end every drop answered in `text_of(doc)` (None: not read), then take off
                                           every drop older than `wait` seconds: [(doc, thread, Drop)]
     .drops()                              [(doc, thread, Drop)] of every open drop
+    .working(doc)                         whether James's session works on a drop of the sheaf: one `delivered`
     .end(doc, thread)                     take one off: whether it was open
     read_status(folder, name)             what `<name>.status` in `folder` says: None when there is none, BAD when
                                           it is not one regular file of the contract, else (state, error)
@@ -82,6 +83,10 @@ class BoxWaits:
     def drops(self) -> list:
         with self._lock:
             return [(doc, thread, d) for doc, drops in self._drops.items() for thread, d in drops.items()]
+
+    def working(self, doc: str) -> bool:
+        with self._lock:
+            return any(d.state == "delivered" for d in self._drops.get(doc, {}).values())
 
     def end(self, doc: str, thread: str) -> bool:
         with self._lock:

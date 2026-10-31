@@ -3255,6 +3255,12 @@
         touched(d.id);
         say('Tell ' + AGENT + ' failed: ' + (d.error || 'unknown error'), true);
       });
+      // A fork's relay connected, or is gone: Tell on the page follows it at once, not at the next /_/doc (#135).
+      live.addEventListener('relay', function () {
+        readDoc().then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+          if (j && j.ok !== false) takeTarget(j);
+        }).catch(function () {});
+      });
       // A drop for James's window that the hub gave up on: no reply within the Tell wait (#115).
       live.addEventListener('box-failed', function (ev) {
         var d = JSON.parse(ev.data || '{}');

@@ -235,3 +235,26 @@ def test_a_stream_cut_in_the_middle_of_a_chunk_is_tried_again():
         return Cut() if len(calls) == 1 else first(req, timeout)
     relay(opener, lambda m, i: got.append(i)).run()
     assert got == [TID]
+
+
+def test_a_relayed_tell_reaches_the_session_through_the_real_adapter_in_the_envelope(tmp_path, short_tmp):
+    """#135: no stand-in for `deliver`: the Tell goes to the socket the session's record names, in the envelope
+    of 11.4, from the relay's own socket, with the Tell's id as msg_id."""
+    from pathlib import Path
+
+    from agent_fakes import PID, Peer, write_record
+    peer = Peer(Path(short_tmp) / "s.sock")
+    cfg = tmp_path / "claude-config"
+    write_record(cfg, PID, sessionId=SID, messagingSocketPath=peer.path, peerProtocol=1)
+    net = Net([("tell", {"id": TID, "message": "Tell from sheaf: do it"}), ("gone", {})])
+    r = rc.Relay("https://front.example", DOC, SID, TOKEN, str(cfg), opener=net, sleep=lambda s: None)
+    r.sender = rc.Sender()
+    try:
+        r.run()
+        got = json.loads(peer.received())
+    finally:
+        r.sender.close()
+        peer.close()
+    assert got["msg_id"] == TID and got["from"] == f"uds:{r.sender.path}"
+    assert got["message"]["content"].endswith("\nTell from sheaf: do it\n</cross-session-message>")
+    assert net.posts[0][2] == {"doc": DOC, "id": TID, "outcome": "delivered"}

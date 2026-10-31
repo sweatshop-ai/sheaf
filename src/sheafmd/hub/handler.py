@@ -582,11 +582,16 @@ class Handler:
             if good:
                 try:
                     e = hub.entry(row["doc"])
-                    good = self._relay_live(row, work.state(hub, row["doc"], e.live.current()[1]))
+                    text = e.live.current()[1]
+                    # A member whose access to the sheaf was taken away gets no more of its threads (#135).
+                    good = self._relay_live(row, work.state(hub, row["doc"], text)) and hub.may_open(
+                        hub.proxy.members[row["member"]], row["doc"], visibility.front_matter(text))
                 except NotFound:
                     good = False
             return data if good else events.Renamed("gone", {"doc": row["doc"]})
         sub = self.relays.connect(row["doc"], row["session"], still_good)
+        if sub.fresh:                   # the page offers Tell from now (9.14); a reconnect changes nothing
+            hub.relay_seen(row["doc"])
         who = {"relay": row["id"], "transcript": row["session"], **self._who(req)}
         sub.on_close = lambda: hub.record("relay-closed", row["doc"], **who)
         hub.record("relay-connected", row["doc"], **who)
@@ -610,17 +615,10 @@ class Handler:
         return _ok()
 
     def _relay_failed(self, address: str, t, kind: str, error: str, **fields):
-        """A relayed Tell that will not be delivered: its row, and the page's `tellError` by its event."""
-        self.hub.record(kind, address, tell=t.id, thread=t.thread, error=error, **fields)
-        e = self.hub.entries.get(address)
-        if e is not None:
-            e.bus.publish("tell-relay-failed", {"id": t.thread, "error": error})
+        self.hub.relay_failed(address, t, kind, error, **fields)
 
     def _expire_relayed(self):
-        """Drop every relayed Tell queued an hour ago or more: asked by each relay request, each relayed Tell and
-        each page's /_/doc, so one waits at most the 5 minutes of a relay's stream past its hour (9.14)."""
-        for address, t in self.relays.expire():
-            self._relay_failed(address, t, "tell-expired", relay.EXPIRED)
+        self.hub.expire_relayed()
 
     def _relay_moved(self, address: str):
         """The sheaf's live session changed: its relay streams end and the Tells queued for the old one are dropped."""

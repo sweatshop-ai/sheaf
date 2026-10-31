@@ -13,7 +13,9 @@ session runs on a member's machine reaches that session through `sheaf relay`, w
     .expire()                       take off every Tell queued TTL seconds ago or more: [(doc, Tell)]
     .drop(doc)                      take every Tell of the sheaf off the queue, its fork no longer live: [(doc, Tell)]
     .connect(doc, session, accept)  a stream for the relay, in the connected set until it closes
-    .connected(doc, session)        the token's member while a relay of that fork has a stream open, else None
+    .connected(doc, session)        the token's member while a relay of that fork has a stream open, or closed one
+                                    less than GRACE seconds ago (it is reconnecting), else None
+    .lapsed()                       the forks whose last stream closed GRACE seconds ago or more: [(doc, session)]
     .end(doc, but)                  tell every stream of the sheaf (but the session `but`) it is `gone`
     .unknown()                      the count of made-up tokens to write in a row now, or 0 within the minute
 
@@ -39,6 +41,7 @@ PREFIX = "sheaf_relay_"
 HASH_RE = re.compile(r"[0-9a-f]{64}")
 QUEUE_MAX = 20                  # Tells open on one sheaf at a time: bounds the hub's memory
 TTL = 3600                      # seconds a Tell waits for its ack before it is dropped
+GRACE = 30                      # seconds a relay whose stream closed still counts as connected: its reconnect
 NO_GOOD = "This relay token is no good: fork the session again."
 FULL = "Twenty Tells on this sheaf are waiting for the session on the member's machine: wait for them first."
 EXPIRED = "The session on the member's machine did not take this Tell within an hour; the comment is written."
@@ -83,6 +86,7 @@ class Relays:
         self._lock = threading.Lock()
         self._queues: dict = {}             # doc -> {session, tells: {id: Tell}}
         self._streams: dict = {}            # (doc, session) -> set of _Stream
+        self._gaps: dict = {}               # (doc, session) -> when its last stream closed, for GRACE seconds
         self._bus = events.Bus()            # the streams' own bus: never a document's, which tabs share
         self._unknown = [None, 0]
 
@@ -181,6 +185,8 @@ class Relays:
         """A stream that holds `hello` and every Tell still queued for the fork, then what is put after."""
         s = _Stream(self, (doc, session), accept)
         with self._lock:
+            # New to the page: no stream of the fork open, and none closed within the grace (a reconnect).
+            s.fresh = not self._streams.get((doc, session)) and self._gaps.pop((doc, session), None) is None
             self._streams.setdefault((doc, session), set()).add(s)
             q = self._queues.get(doc)
             queued = list(q["tells"].values()) if q and q["session"] == session else []
@@ -196,15 +202,26 @@ class Relays:
                 subs.discard(s)
                 if not subs:
                     del self._streams[s.key]
+                    self._gaps[s.key] = _clock()
 
     def connected(self, doc: str, session: str) -> str | None:
         """The member of the fork's token while a relay of it has a stream open and the token is on disk, else None.
         A stream stays open after `sheaf relay revoke` in another process until its next event, so the disk says."""
         with self._lock:
-            if not self._streams.get((doc, session)):
+            gap = self._gaps.get((doc, session))
+            if not self._streams.get((doc, session)) and (gap is None or _clock() - gap >= GRACE):
                 return None
         row = next((r for r in self._rows() if r.get("doc") == doc and r.get("session") == session), None)
         return row["member"] if row is not None and isinstance(row.get("member"), str) else None
+
+    def lapsed(self) -> list:
+        """The forks whose relay has had no stream for GRACE seconds: [(doc, session)], each given once."""
+        now = _clock()
+        with self._lock:
+            out = [k for k, t in self._gaps.items() if now - t >= GRACE]
+            for k in out:
+                del self._gaps[k]
+        return out
 
     def end(self, doc: str, but: str | None = None):
         with self._lock:

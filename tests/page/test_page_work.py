@@ -571,3 +571,33 @@ def test_a_fork_whose_relay_is_not_connected_says_so_in_work_on_this(tab):
     open_work(tab.page)
     assert tab.page.inner_text("#rd-work .rd-relay") == \
         "Thierry’s session on thierry-laptop is not connected: Tell works again when it is."
+
+
+def test_a_relay_that_connects_turns_tell_on_without_a_reload(tab):
+    # The hub's `relay` event (#135): the page reads /_/doc again at once, not at its next check.
+    w, can = relayed(False), []
+    as_member(tab, w, doc_work=w, doc_can=can)
+    tab.open()
+    until(lambda: tab.docs, what="the page's first /_/doc answer")
+    comment_form(tab)
+    assert [e for _, e in agent_buttons(tab.page, "#rd-popover .rd-form")] == [False, False]
+    w["relay"], can[:] = True, ["relay-tell"]
+    seen = len(tab.docs)
+    tab.site.hub.entry(DOC).bus.publish("relay", {})
+    until(lambda: len(tab.docs) > seen, what="the /_/doc the relay event asks for")
+    tab.page.keyboard.press("Escape")
+    comment_form(tab)
+    assert [e for _, e in agent_buttons(tab.page, "#rd-popover .rd-form")] == [False, True]
+
+
+def test_a_relay_gone_past_its_grace_turns_tell_off_without_a_reload(tab):
+    w, can = relayed(True), ["relay-tell"]
+    as_member(tab, w, can=["relay-tell"], doc_work=w, doc_can=can)
+    tab.open()
+    until(lambda: tab.docs, what="the page's first /_/doc answer")
+    w["relay"], can[:] = False, []
+    seen = len(tab.docs)
+    tab.site.hub.entry(DOC).bus.publish("relay", {})
+    until(lambda: len(tab.docs) > seen, what="the /_/doc the relay event asks for")
+    comment_form(tab)
+    assert [e for _, e in agent_buttons(tab.page, "#rd-popover .rd-form")] == [False, False]

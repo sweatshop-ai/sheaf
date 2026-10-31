@@ -40,6 +40,7 @@ from .. import config, paths
 from ..source import md_hash
 from ..blocks import _split_lines, split_md_blocks
 from ..edit import TASK_MARK_RE, ticked_html
+from .. import comments as rdc
 from . import commits, place, projects
 from . import proxy as proxy_mod
 from . import roots as roots_mod
@@ -196,16 +197,18 @@ def _same_issue(a: tuple | None, b: tuple | None) -> bool:
     return norm(a) == norm(b)
 
 
+_HEADING_COMMENT_RE = re.compile(r"<!--(?:-?>|[\s\S]*?-->)")      # an HTML comment as CommonMark reads it
+
 def read_sheaf(rel: str, text: str) -> Sheaf:
     fm = front_matter(text)
     issue = issue_of(fm_text(fm, "issue"))
     # The title and the actions are read from the blocks the page draws, so an action in a fence, an
     # indented code block or an HTML comment is no action, and every action is one the tick can reach.
-    title, actions, pressed, moved = "", [], [], False
+    title, actions, pressed, moved = None, [], [], False
     for b in split_md_blocks(text):
         own = b.content.removesuffix("\n").split("\n")
-        if b.kind == "heading" and not title and own[0].startswith("# "):
-            title = own[0][2:].strip()
+        if b.kind == "heading" and title is None and own[0].startswith("# "):
+            title = _title(own[0][2:])          # the first only, as the page's title: one left empty gives none
         elif b.kind == "list":
             for k, line in enumerate(own):
                 if not (m := _ACTION_RE.fullmatch(line.removesuffix("\r"))):
@@ -222,6 +225,22 @@ def read_sheaf(rel: str, text: str) -> Sheaf:
     return Sheaf(rel, title or rel.rsplit("/", 1)[-1][:-3], issue, fm_text(fm, "assistant"),
                  fm_text(fm, "kind"), visibility.effective(fm), tuple(actions), visibility.sources(fm),
                  fm_text(fm, "owner"), fm_text(fm, "shared"), md_hash(text), "moved_to" in fm, tuple(pressed))
+
+
+def _title(heading: str) -> str:
+    """The text of a `# ` heading's line without its HTML comments, its spaces collapsed (9.10): a review comment
+    anchored in the heading is written on that line. A comment is what CommonMark reads as one, as the page does:
+    a `<!--` in a code span or after a backslash is text, and `<!-->` and `<!--->` are whole comments."""
+    masked, kept, last, pos = rdc._mask_code(heading), [], 0, 0
+    while m := _HEADING_COMMENT_RE.search(masked, pos):
+        slashes = len(masked[:m.start()]) - len(masked[:m.start()].rstrip("\\"))
+        if slashes % 2:
+            pos = m.start() + 1          # an escaped `<`: the comment may still start inside what it matched
+            continue
+        kept.append(heading[last:m.start()])
+        last = pos = m.end()
+    kept.append(heading[last:])
+    return " ".join("".join(kept).split())
 
 
 def _word(m: re.Match) -> str:

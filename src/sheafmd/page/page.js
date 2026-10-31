@@ -2803,7 +2803,7 @@
     return w.replace(/'/g, '[\'’]');
   }).join('|') + ')|Move to\\s+[A-Za-z0-9._\\\\-]+\\s+\\(ref\\s+[^()\\s]+\\))(?:\\s+@[A-Za-z0-9._-]+)?$');
   // The text of a box's own item, its nested lists left out; null for a box in no item.
-  function lineOf(t) {
+  function itemLine(t) {
     var li = t.closest && t.closest('li');
     if (!li) return null;
     var own = li.cloneNode(true);
@@ -2811,7 +2811,7 @@
     return own.textContent.replace(/\s+/g, ' ').trim();
   }
   function mayBeAction(t) {
-    var line = lineOf(t);
+    var line = itemLine(t);
     return line !== null && ACTION_LINE.test(line);
   }
   async function tickBox(t, b) {
@@ -3009,9 +3009,9 @@
     if (ser(b) === b.pristine) return true;
     var was = document.createElement('template');
     was.innerHTML = b.pristine;
-    var then = was.content.querySelectorAll('input[type="checkbox"]'), now = boxesOf(b), line = lineOf(box);
-    return then.length === now.length && lineOf(then[k]) === line &&
-           now.filter(function (x) { return lineOf(x) === line; }).length === 1;
+    var then = was.content.querySelectorAll('input[type="checkbox"]'), now = boxesOf(b), line = itemLine(box);
+    return then.length === now.length && itemLine(then[k]) === line &&
+           now.filter(function (x) { return itemLine(x) === line; }).length === 1;
   }
   function showTick(a, box) {
     var b = box && main.contains(box) && blockOf(box);

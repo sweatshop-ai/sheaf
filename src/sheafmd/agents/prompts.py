@@ -39,6 +39,27 @@ def tell(address: str, abs_path: str, me: str, c, links: bool = True) -> str:
             f'- or in a shell: sheaf reply {abs_path} {c.id} "<what you did>" --role action')
 
 
+def dropped(drop: dict) -> str | None:
+    """The text of a drop of `tell_dir` (9.12) that carries no `message` of its own: the comment's body, its
+    sheaf and thread, and how to answer through the door. None when the drop lacks one of them."""
+    keys = ("member", "sheaf", "text", "thread")
+    if drop.get("kind") not in ("ask", "tell") or not all(isinstance(drop.get(k), str) and drop[k].strip()
+                                                         for k in keys):
+        return None
+    me, doc, text, cid = (drop[k] for k in keys)
+    if drop["kind"] == "ask":
+        return (f"Ask from sheaf, on the page of {doc}.\n"
+                f"{me} pressed Ask on comment {cid}: answer it in the thread, short, in the language it "
+                "was written in. Do not edit any file.\n\n"
+                f"The comment:\n{text}\n\n"
+                f'Answer with the sheaf MCP tool: reply(doc="{doc}", id="{cid}", text="<your answer>")')
+    return (f"Tell from sheaf, on the page of {doc}.\n"
+            f"{me} pressed Tell on comment {cid}: act on it here, in this conversation.\n\n"
+            f"The comment:\n{text}\n\n"
+            "When you are done, answer in the thread so the page shows it, with the role action:\n"
+            f'- with the sheaf MCP tool: reply(doc="{doc}", id="{cid}", text="<what you did>", role="action")')
+
+
 def cancel(address: str, me: str, cid: str) -> str:
     return (f"Tell from sheaf, on the page of {address}: {me} pressed Cancel on comment {cid}. "
             "Stop working on it, undo nothing on your own, and do not reply in the thread. If "

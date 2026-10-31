@@ -327,6 +327,27 @@ def test_a_hub_of_another_version_hands_the_remount_to_the_loader(front):
     assert "updated" in front.js("return root.getElementById('rd-toast').textContent;")
 
 
+_TYPED = ("const e = new InputEvent('beforeinput', {cancelable: true, bubbles: true});"
+          "root.querySelector('main').dispatchEvent(e); return e.defaultPrevented;")
+
+
+def test_every_remount_after_an_upgrade_leaves_the_old_page_writable(front):
+    """The loader's upgrade is slow or failed and the file changes again: the second settle had set `settling` and
+    written the keep, and the remount told nobody, so the page went read-only in silence (gate P2 of 5453534)."""
+    front.open()
+    front.page.route("**/_/mount?doc=*", _another_version)
+    front.site.file.write_text(front.site.file.read_text().replace("about pears", "about plums"), encoding="utf-8")
+    until(lambda: front.page.evaluate("window.__upgrades || null"), what="the loader told")
+    until(lambda: front.js(_TYPED) is False, what="the page writable after the first change")
+    front.js("root.getElementById('rd-toast').textContent = '';")
+    front.site.file.write_text(front.site.file.read_text().replace("about plums", "about figs"), encoding="utf-8")
+    until(lambda: "updated" in front.js("return root.getElementById('rd-toast').textContent;"),
+          what="the second change said in the page")
+    assert front.js(_TYPED) is False, "typing is refused after the second change"
+    assert front.page.evaluate("Object.keys(sessionStorage).filter((k) => k.endsWith('rd-keep'))") == []
+    assert front.page.evaluate("window.__upgrades") == ["9.9.9-next"]
+
+
 def test_a_first_mount_of_another_version_builds_nothing_and_without_a_loader_says_reload(front):
     front.page.route("**/_/mount?doc=*", _another_version)
     front.page.goto(front.site.base + FRONT)
@@ -380,3 +401,23 @@ def test_of_two_mounts_on_one_pane_the_one_called_last_stands_whichever_answers_
     front.page.evaluate("window.__h1.unmount()")
     assert front.js("return root.querySelectorAll('#rd-menu-btn').length;") == 1, "dropping the older handle took the page"
     assert front.page.evaluate("window.__streams.filter((e) => e.readyState !== 2).length") == 1
+
+
+def test_a_mount_overtaken_before_its_answer_resolves_to_a_handle_that_says_so(front):
+    """The loader awaits mount A and reads its title after the user already clicked B: A's handle threw a TypeError from
+    its getters, and a failed fetch of A was swallowed (gate P2 of 5453534)."""
+    front.open()
+    got = front.page.evaluate("""(async () => {
+      const f = window.fetch; let n = 0;
+      window.fetch = function (u, o) {
+        if (String(u).startsWith('/_/mount?doc=') && n++ === 0)
+          return new Promise((r, no) => setTimeout(() => no(new TypeError('offline')), 800));
+        return f(u, o); };
+      const pane = document.getElementById('pane');
+      const a = sheafMount.mount(pane, {doc: %s});
+      const b = sheafMount.mount(pane, {doc: %s});
+      const h = await a, k = await b;
+      return [h.overtaken, h.title, h.config, h.toc, h.dirty(), k.overtaken, typeof k.title];
+    })()""" % (json.dumps(DOC), json.dumps(DOC)))
+    assert got == [True, None, None, None, False, False, "string"], got
+    assert front.js("return root.querySelectorAll('#rd-menu-btn').length;") == 1

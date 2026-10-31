@@ -42,7 +42,11 @@ sessions:
 
 A quote from the contract.
 """
-TRANSCRIPT = b'{"type":"user","message":"hello"}\n{"type":"assistant","message":"hi"}\n'
+CWD = "/home/james/work/thinkingtoo/tiroir"
+# As Claude Code writes them: the first line naming a cwd names the project's folder and the session (#146).
+TRANSCRIPT = (b'{"type":"user","cwd":"%s","sessionId":"%s","message":"hello"}\n'
+              b'{"type":"assistant","message":"hi"}\n') % (CWD.encode(), LIVE.encode())
+OLDER_TRANSCRIPT = b'{"older":true,"cwd":"%s","sessionId":"%s"}\n' % (CWD.encode(), OLDER.encode())
 
 
 def the_team(work, tmp_path, thierrys_tokens=()):
@@ -72,10 +76,10 @@ def box(team, tmp_path, work):
     (sessions / FOLDER).mkdir(parents=True)
     tell.mkdir()
     (sessions / FOLDER / f"{LIVE}.jsonl").write_bytes(TRANSCRIPT)
-    (sessions / FOLDER / f"{OLDER}.jsonl").write_bytes(b'{"older":true}\n')
+    (sessions / FOLDER / f"{OLDER}.jsonl").write_bytes(OLDER_TRANSCRIPT)
     cfg = the_list.parse({"root": str(work), "repo": "thinkingtoo/tt-tiroir", "project": 1,
                           "token_file": str(tmp_path / "token"), "sessions_dir": str(sessions),
-                          "tell_dir": str(tell), "box": "tiroir-tt",
+                          "tell_dir": str(tell), "box": "tiroir-tt", "work_dir": "/home/james/work",
                           "attach": "ssh tiroir-tt -t tmux attach -t james \\; select-window -t ={window}"},
                          "the test")
     team.hub.the_list = the_list.TheList(team.hub, cfg)
@@ -186,12 +190,61 @@ def test_on_a_sheaf_live_on_a_laptop_no_box_session_is_served_without_its_id(tea
     assert download(team).status == 404
     assert hub_rows("transcript-downloaded") == []
     got = download(team, id=OLDER)
-    assert got.status == 200 and got.body == b'{"older":true}\n'
+    assert got.status == 200 and got.body == OLDER_TRANSCRIPT
 
 
 def test_an_older_box_session_is_served_by_its_id(team, box):
     got = download(team, id=OLDER)
-    assert got.status == 200 and got.body == b'{"older":true}\n' and got.headers["X-Sheaf-Session"] == OLDER
+    assert got.status == 200 and got.body == OLDER_TRANSCRIPT and got.headers["X-Sheaf-Session"] == OLDER
+
+
+# ── only the project's own folder of the copy is looked in (sheaf#146) ───────
+STRAY = "33333333-4444-4555-8666-777777777777"
+
+
+def listed(team, work, sid):
+    """The sheaf with `sid` as an older box session of its own, as a push to the root's remote could list it."""
+    put(team, work, DOC, SHEAF.replace(f"  - {{id: {OLDER}", f"  - {{id: {sid}, host: tiroir-tt, member: james, "
+                                       f"date: 2026-10-27T08:00:00Z}}\n  - {{id: {OLDER}", 1))
+
+
+def planted(box, folder, cwd, sid, session=None):
+    f = box["sessions"] / folder / f"{sid}.jsonl"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps({"type": "user", "cwd": cwd, "sessionId": session or sid}) + "\n", encoding="utf-8")
+
+
+def test_a_listed_id_whose_transcript_is_the_projects_is_served(team, box, work):
+    listed(team, work, STRAY)
+    planted(box, FOLDER, CWD, STRAY)
+    assert download(team, id=STRAY).status == 200
+
+
+def test_a_listed_id_whose_transcript_is_another_projects_is_not_served(team, box, work):
+    listed(team, work, STRAY)
+    planted(box, "-home-james-work-acme-site", "/home/james/work/acme/site", STRAY)
+    assert download(team, id=STRAY).status == 404
+    assert hub_rows("transcript-downloaded") == []
+
+
+def test_a_transcript_in_the_projects_folder_whose_cwd_is_another_path_is_not_served(team, box, work):
+    # Claude's folder name is lossy: thinkingtoo-tiroir and thinkingtoo/tiroir share one.
+    listed(team, work, STRAY)
+    planted(box, FOLDER, "/home/james/work/thinkingtoo-tiroir", STRAY)
+    assert download(team, id=STRAY).status == 404
+
+
+def test_a_transcript_whose_session_id_is_not_its_name_is_not_served(team, box, work):
+    listed(team, work, STRAY)
+    planted(box, FOLDER, CWD, STRAY, session=OLDER)
+    assert download(team, id=STRAY).status == 404
+
+
+def test_without_work_dir_no_transcript_is_served(team, box):
+    cfg = team.hub.the_list.cfg
+    team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{**cfg.__dict__, "work_dir": None}))
+    assert download(team).status == 404
+    assert download(team, id=OLDER).status == 404
 
 
 def test_a_transcript_that_is_a_link_out_of_sessions_dir_is_refused(team, box, outside):
@@ -1103,7 +1156,6 @@ def test_a_door_create_cannot_list_a_session_but_may_write_an_empty_list(team, b
 
 # ── the hub records James's session from its own Ask and Tell (9.12) ─────────
 NEW = "abcdef01-2345-4678-89ab-cdef01234567"
-CWD = "/home/james/work/thinkingtoo/tiroir"
 
 
 def james_wrote(box, id, cwd=CWD, folder=FOLDER, at=None):

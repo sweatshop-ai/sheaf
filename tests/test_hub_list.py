@@ -1610,3 +1610,37 @@ def test_a_one_off_ticked_in_the_page_shows_who_ticked_it_there_through_a_later_
         f"Dora|edit: {JOEY[5:]}", f"Nell|edit: {JOEY[5:]}"]
     in_progress(box, github, 5)
     assert row_buttons(box.get("/list", member=DORA), JOEY) == [("Approve ✓ @nell, 27 Oct", None, True, None)]
+
+
+# ── A review comment anchored in the H1 is no part of the row's title ─────────────────────────────────────
+
+H1_COMMENT = '<!-- sheaf-comment id=c1 by="Ada" at=2026-10-29T15:43 status={} quote="sheaf"\nWhy this name?\n-->'
+
+
+@pytest.mark.parametrize("status", ["open", "resolved"])
+def test_a_comment_anchored_in_the_h1_is_left_out_of_the_title(status):
+    text = f"---\nissue: o/r#1\n---\n\n# Test sheaf{H1_COMMENT.format(status)} tail\n\n- [ ] Done\n"
+    assert the_list.read_sheaf("x/y/z.md", text).title == "Test sheaf tail"
+
+
+def test_a_comment_on_one_line_in_the_h1_is_left_out_of_the_title():
+    text = ('---\nissue: o/r#1\n---\n\n'
+            '# Test sheaf<!-- sheaf-comment id=c1 by="A" at=2026-10-29T15:43 status=open quote="sheaf"<br>hello --> tail\n')
+    assert the_list.read_sheaf("x/y/z.md", text).title == "Test sheaf tail"
+
+
+def test_an_h1_that_is_only_a_comment_gives_the_file_name_as_for_none():
+    text = f"---\nissue: o/r#1\n---\n\n# {H1_COMMENT.format('open')}\n\n- [ ] Done\n"
+    assert the_list.read_sheaf("x/y/2026-10-29-z.md", text).title == "2026-10-29-z"
+
+
+def test_the_rows_title_holds_no_comment_of_the_h1(box, sheaves):
+    joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
+    joey.write_text(joey.read_text(encoding="utf-8").replace(
+        "# Reply to Joey about column L", f"# Reply to Joey{H1_COMMENT.format('open')} about column L"),
+        encoding="utf-8")
+    box.hub.the_list.poll()
+    soup = BeautifulSoup(box.get("/list", member=NELL).text, "html.parser")
+    titles = [a.get_text() for a in soup.select("a.list-title")]
+    assert "Reply to Joey about column L" in titles
+    assert not any("<!--" in t or "sheaf-comment" in t or "Why this name" in t for t in titles)

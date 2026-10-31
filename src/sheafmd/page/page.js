@@ -709,6 +709,7 @@
   // hold events for as long as a job runs. `out` (below): the forms between their click and their answer,
   // each with the popover it holds, read by `writingNow`, `sendingIn` and the `sent*` questions.
   var writes = 0, afterWrites = [], docGone = false;     // docGone: no request goes out any more (meetDocGone)
+  var parked = 0;              // writes not yet sent, waiting for a tick that is out (post): meetVersion counts them
   var ownWrites = 0, ownSeq = 0, held = [];       // ownSeq: how many of them have started
   var lateSends = {};          // the request ids of the sends the page gave up on, until the hub's event names them
   var lastLate = {};           // of those, the ones whose latest attempt was given up on (a send again may have failed otherwise)
@@ -730,7 +731,7 @@
     var own = isSave || path === '/_/comment';
     // A write to the file (a comment, a draft's Restore) waits for a tick that is out, as a save does: it would move
     // the text the tick names (SPEC 10.11).
-    if (own && ticking) await ticking;
+    if (own && ticking) { parked++; try { await ticking; } finally { parked--; } }
     var ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
     var stop = ctl ? setTimeout(function () { ctl.abort(); }, isSave ? SAVE_WAIT : WAIT) : null;
     var gaveUp = function () { return !!ctl && ctl.signal.aborted; };
@@ -2957,7 +2958,10 @@
       if (settling) { say('The page is reloading onto a change to the file: press ' + a.label + ' once it has.'); return; }
       pressOpen = true;
       // Its box, as an element: an item typed above it during the press moves its number, not the box (showTick).
-      pressedBox = boxOfAct(a);
+      // The number names the box only in the text the buttons were drawn from: in a block edited and not saved, or
+      // with buttons the page is not sure of, it may name another, and no box is taken.
+      var pb = boxOfAct(a), pbb = pb && blockOf(pb);
+      pressedBox = pbb && ser(pbb) === pbb.pristine && !actsUnsure && hash === actsHash ? pb : null;
       lock(true);
       btn.textContent = 'Undo'; btn.classList.add('pending'); btn.setAttribute('aria-label', 'Undo ' + word);
       waiting = setTimeout(send, UNDO_MS);
@@ -3290,7 +3294,7 @@
       if (!v || !CFG.version || v === CFG.version || docGone) return;
       // A press's tick counts in `writes`: its reload waits for the press instead (reloadKeep), so that a refusal
       // is said again on the page it brings. Any other write out is waited for, as ever.
-      if (writes > (ticking ? 1 : 0)) { afterWrites.push(function () { meetVersion(v); }); return; }
+      if (writes + parked > (ticking ? 1 : 0)) { afterWrites.push(function () { meetVersion(v); }); return; }
       if (dirty().length || writingNow({ page: true })) {
         showNoticeOverOffer('The sheaf hub was upgraded. ' +
                             (dirty().length ? 'Save your edits' : 'Send or cancel your comment') +

@@ -379,6 +379,7 @@ function applyComments(d) {
 }
 function settle(id) { settled.push(id); }
 var autosaveOwed = false;                           // post() pays an owed autosave after an answer
+var ticking = null;                                 // post() holds a write to the file while a press's tick is out
 function payOwed() {}
 function reloadWhenFree(id) { settle(id); }
 globalThis.fetch = function () {

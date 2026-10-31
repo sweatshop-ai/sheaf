@@ -60,18 +60,18 @@ def test_events_are_read_from_the_stream_lines():
 
 class Net:
     """The front: one stream of `frames`, and every POST kept."""
-    def __init__(self, *streams, refuse=None):
-        self.streams, self.refuse, self.posts, self.gets = list(streams), refuse, [], []
+    def __init__(self, *streams, refuse=None, ack=200):
+        self.streams, self.refuse, self.ack, self.posts, self.gets = list(streams), refuse, ack, [], []
 
     def __call__(self, req, timeout=None):
         if req.get_method() == "POST":
             self.posts.append((req.full_url, dict(req.header_items()), json.loads(req.data)))
+            if self.ack != 200:
+                raise urllib.error.HTTPError(req.full_url, self.ack, "no", {}, io.BytesIO(b"{}"))
             return io.BytesIO(b'{"ok": true}')
         self.gets.append((req.full_url, dict(req.header_items())))
-        if self.refuse:
-            raise urllib.error.HTTPError(req.full_url, self.refuse, "no", {}, io.BytesIO(b"{}"))
-        if not self.streams:
-            raise OSError("no more streams")
+        if self.refuse or not self.streams:       # out of streams: a refused token, so a relay never spins here
+            raise urllib.error.HTTPError(req.full_url, self.refuse or 401, "no", {}, io.BytesIO(b"{}"))
         return io.BytesIO(b"".join(rc_frame(n, d) for n, d in self.streams.pop(0)))
 
 
@@ -157,3 +157,26 @@ def test_a_hub_that_is_not_https_or_this_machine_is_refused(tmp_path, hub, capsy
     f = token_file(tmp_path)
     assert rc.cmd_relay(["--hub", hub, "--doc", DOC, "--session", SID, "--token-file", str(f)]) == 2
     assert "--hub must be an origin" in capsys.readouterr().err
+
+
+def test_an_ack_the_hub_no_longer_waits_for_keeps_the_stream_and_says_so(capsys):
+    got = []
+    other = "22222222-3333-4444-8555-666666666666"
+    net = Net([("tell", {"id": TID, "message": "m"}), ("tell", {"id": other, "message": "n"}), ("gone", {})], ack=404)
+    relay(net, lambda m, i: got.append(i)).run()
+    assert got == [TID, other] and len(net.gets) == 1
+    err = capsys.readouterr().err
+    assert f"Tell {TID} delivered; the hub was no longer waiting for it (it expired, or was acked)" in err
+    assert "unreachable" not in err
+
+
+def test_the_token_is_in_no_line_the_relay_prints(capsys):
+    def cleared(message, id):
+        raise DeliveryError("no")
+    for net, deliver in ((Net([("tell", {"id": TID, "message": "m"}), ("gone", {})]), lambda m, i: None),
+                         (Net([("tell", {"id": TID, "message": "m"}), ("gone", {})]), cleared),
+                         (Net([("tell", {"id": TID, "message": "m"})], [("gone", {})]), lambda m, i: None),
+                         (Net(refuse=401), lambda m, i: None)):
+        relay(net, deliver).run()
+    out = capsys.readouterr()
+    assert out.err and TOKEN not in out.out + out.err

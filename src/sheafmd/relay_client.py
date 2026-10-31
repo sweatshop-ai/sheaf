@@ -157,14 +157,21 @@ class Relay:
             raise DeliveryError(CLEARED.format(id=self.session))
         ad.deliver(t, message, Job(None, "relay", "", "").run, msg_id=msg_id)
 
-    def ack(self, id: str, error: str | None):
+    def ack(self, id: str, error: str | None) -> bool:
+        """Whether the hub still waited for the Tell: a 404 says it expired or was acked, which is no reason to
+        drop the stream."""
         body = {"doc": self.doc, "id": id, "outcome": "failed" if error else "delivered"}
         if error:
             body["error"] = error[:500]
         req = self._request(f"{self.hub}/_/relay", json.dumps(body).encode("utf-8"),
                             **{"Content-Type": "application/json"})
-        with self._open(req, timeout=30):
-            pass
+        try:
+            with self._open(req, timeout=30):
+                return True
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return False
+            raise
 
     def once(self):
         """One stream, to its end. Gone when the hub refuses the token or ends the fork."""
@@ -193,8 +200,9 @@ class Relay:
                     error = None
                 except DeliveryError as e:
                     error = str(e) or "not delivered"
-                self.ack(id, error)
-                _err(f"sheaf relay: Tell {id} {'not delivered: ' + error if error else 'delivered'}")
+                waited = self.ack(id, error)
+                _err(f"sheaf relay: Tell {id} {'not delivered: ' + error if error else 'delivered'}"
+                     + ("" if waited else "; the hub was no longer waiting for it (it expired, or was acked)"))
 
     def run(self) -> int:
         tries = 0

@@ -10,9 +10,10 @@ session runs on a member's machine reaches that session through `sheaf relay`, w
     .open(doc, session)             the Tells queued for that fork and not yet acked, oldest first
     .ack(doc, id)                   take one off the queue: the Tell, or None when it is not queued
     .expire()                       take off every Tell queued TTL seconds ago or more: [(doc, Tell)]
+    .drop(doc)                      take every Tell of the sheaf off the queue, its fork no longer live: [(doc, Tell)]
     .connect(doc, session, accept)  a stream for the relay, in the connected set until it closes
-    .connected(doc, session)        whether a relay of that fork has a stream open now
-    .end(doc)                       tell every stream of the sheaf it is `gone`: its fork is no longer live
+    .connected(doc, session)        the token's member while a relay of that fork has a stream open, else None
+    .end(doc, but)                  tell every stream of the sheaf (but the session `but`) it is `gone`
     .unknown()                      the count of made-up tokens to write in a row now, or 0 within the minute
 
 A relay token is `sheaf_relay_` and 43 base64url characters. The verifier hands the hub its hex sha256
@@ -190,9 +191,14 @@ class Relays:
                 if not subs:
                     del self._streams[s.key]
 
-    def connected(self, doc: str, session: str) -> bool:
+    def connected(self, doc: str, session: str) -> str | None:
+        """The member of the fork's token while a relay of it has a stream open and the token is on disk, else None.
+        A stream stays open after `sheaf relay revoke` in another process until its next event, so the disk says."""
         with self._lock:
-            return bool(self._streams.get((doc, session)))
+            if not self._streams.get((doc, session)):
+                return None
+        row = next((r for r in self._rows() if r.get("doc") == doc and r.get("session") == session), None)
+        return row["member"] if row is not None and isinstance(row.get("member"), str) else None
 
     def end(self, doc: str, but: str | None = None):
         with self._lock:

@@ -63,7 +63,7 @@ class State:
     live: str                   # "box" when the first runs on `[list]`'s box, "laptop" on another host, "" none
     cfg: object                 # the list's the_list.ListConfig
     james: bool = False         # the sheaf's `assistant` is James
-    relay: bool = False         # a relay of the live session, a member's fork, has its stream open (9.14)
+    relay: bool = False         # a relay of the live session, a member's fork, is connected with a good token (9.14)
 
     @property
     def box(self) -> list:
@@ -117,7 +117,8 @@ def state(hub, address: str, text: str) -> State | None:
         live = "box" if cfg.box and items[0]["host"] == cfg.box else "laptop"
     assistant = fm.get("assistant", "")
     relays = getattr(hub, "relays", None)
-    relay = live == "laptop" and relays is not None and relays.connected(address, items[0]["id"])
+    member = relays.connected(address, items[0]["id"]) if live == "laptop" and relays is not None else None
+    relay = bool(member) and member in getattr(hub.proxy, "members", {})
     return State(items, live, cfg, isinstance(assistant, str) and assistant.casefold() == "james", relay)
 
 

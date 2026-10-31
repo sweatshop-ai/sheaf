@@ -76,12 +76,25 @@ def test_a_fork_report_answers_a_relay_token_kept_only_as_its_hash(team, box, wo
     assert (row["member"], row["doc"], row["session"]) == (HANS, ADDRESS, FORK)
 
 
-def test_the_token_is_in_no_row(team, box, work):
+def test_the_token_is_in_no_row_and_not_on_the_page(team, box, work):
     token = forked(team)
     sub = listen(team, token).stream
+    page = team.get(f"/_/doc?doc={ADDRESS}", member=HANS).text + team.get("/" + DOC, member=HANS).text
     sub.close()
-    text = json.dumps(hub_rows())
+    text = json.dumps(hub_rows()) + page
     assert token not in text and hashed(token) not in text
+
+
+def test_a_fork_reported_with_a_sign_in_code_gets_a_relay_token_too(team, box, work):
+    from test_hub_code import code_of, fetch, report
+    code = code_of(team)
+    assert fetch(team, code).status == 200
+    got = report(team, code)
+    assert got.status == 200, got.text
+    token = got.json()["relay"]
+    row, = json.loads(relay_mod.Relays.path().read_text(encoding="utf-8"))
+    assert row["sha256"] == hashed(token) and (row["member"], row["session"]) == (HANS, FORK)
+    assert listen(team, token).status == 200
 
 
 def test_a_token_opens_its_stream_with_hello_and_writes_relay_connected(team, box, work):
@@ -142,6 +155,16 @@ def test_a_token_is_refused_after_sheaf_relay_revoke(team, box, work):
     assert team.hub.relays.revoke(ADDRESS) == 1
     assert sub.drain()[-1][0] == "gone"
     assert listen(team, token).status == 401
+
+
+def test_a_revoke_from_another_process_takes_relay_tell_off_at_once(team, box, work):
+    token = forked(team)
+    sub = listen(team, token).stream
+    assert relay_mod.Relays().revoke(ADDRESS) == 1      # `sheaf relay revoke`: its own Relays, not the hub's
+    assert team.get(f"/_/doc?doc={ADDRESS}", member=HANS).json()["capabilities"] == []
+    assert comment(team, work, "tell").status == 400
+    assert team.hub.relays.open(ADDRESS, FORK) == []
+    sub.close()
 
 
 def test_a_newer_fork_ends_the_older_token(team, box, work):

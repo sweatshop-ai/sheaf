@@ -1,5 +1,5 @@
 """
-sheafmd.deliver — `sheaf deliver`: a Tell pushed in the hub's envelope by a process that is not the hub
+sheafmd.deliver — `sheaf deliver`: a Tell delivered in the hub's envelope by a process that is not the hub
 (SPEC 11.4, sheaf#117).
 
     sheaf deliver (--socket PATH | --session ID [--config-dir DIR] [--wait S]) [--from uds:PATH] < drop.json
@@ -14,6 +14,7 @@ Registered in COMMANDS and COMMAND_HELP, which the foot of cli.py merges into it
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -22,21 +23,28 @@ import time
 from . import config, paths
 from .agents import envelope, prompts
 from .agents.base import DeliveryCancelled, DeliveryError, Target
-from .agents import claude_code
-from .agents.claude_code import ClaudeCodeAdapter
+from .agents.claude_code import ClaudeCodeAdapter, config_dir_of
 
 EXIT_OK, EXIT_FAILED, EXIT_USAGE = 0, 1, 2
 POLL_S = 0.2
+# `--from` is written into the envelope's opening tag: a quote, an angle bracket or a control character in
+# it would close the attribute or the tag and let the caller name any sender it likes.
+_SENDER_RE = re.compile(r"uds:[^\"<>&\x00-\x1f\x7f]+")
+_MSG_ID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 COMMANDS: dict = {}
 COMMAND_HELP: dict = {}
+
+
+class Refused(Exception):
+    """A delivery that did not happen; the message is one sentence a person reads."""
 
 
 def _err(line: str = ""):
     print(line, file=sys.stderr)
 
 
-def _drop(raw: str) -> dict | None:
+def _parse_drop(raw: str) -> dict | None:
     try:
         drop = json.loads(raw)
     except ValueError:
@@ -44,7 +52,7 @@ def _drop(raw: str) -> dict | None:
     return drop if isinstance(drop, dict) else None
 
 
-def _text(drop: dict) -> str | None:
+def _tell_text(drop: dict) -> str | None:
     """The drop's own `message` when it has one, else the text built from the keys the hub writes today."""
     msg = drop.get("message")
     if isinstance(msg, str) and msg.strip():
@@ -53,27 +61,32 @@ def _text(drop: dict) -> str | None:
 
 
 def _run(argv, *, timeout, env=None, cwd=None, input=None) -> subprocess.CompletedProcess:
-    """The courier's runner: the child to its end, its prompt on stdin."""
+    """The courier's runner: the child to its end, in its own process group as the hub's are, its prompt on
+    stdin."""
     return subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                          timeout=timeout, env=env, cwd=cwd, input=input)
+                          start_new_session=True, timeout=timeout, env=env, cwd=cwd, input=input)
 
 
-def _to_session(args, text: str, sender: str) -> int:
+def _to_socket(args, text: str, sender: str, msg_id: str | None):
+    try:
+        envelope.push(args.socket, envelope.line(text, sender, msg_id))
+    except OSError as e:
+        raise Refused(f"the session did not take the message ({e.strerror or e})") from None
+
+
+def _to_session(args, text: str, sender: str, msg_id: str | None):
     ad = ClaudeCodeAdapter(sender)
     t = Target(agent=ad.agent, session=args.session, bin=shutil.which("claude") or "",
-               config_dir=args.config_dir or str(claude_code._config_dir(os.environ)))
+               config_dir=args.config_dir or str(config_dir_of(os.environ)))
     deadline = time.monotonic() + max(args.wait, 0.0)
     while "deliver" not in ad.capabilities(t):
         if time.monotonic() >= deadline:
-            _err(f"sheaf: no open session {args.session} in {t.config_dir}")
-            return EXIT_FAILED
+            raise Refused(f"no open session {args.session} in {t.config_dir}")
         time.sleep(POLL_S)
     try:
-        ad.deliver(t, text, _run)
+        ad.deliver(t, text, _run, msg_id=msg_id)
     except (DeliveryError, DeliveryCancelled) as e:
-        _err(f"sheaf: {e or 'the delivery was cancelled'}")
-        return EXIT_FAILED
-    return EXIT_OK
+        raise Refused(str(e) or "the delivery was cancelled") from None
 
 
 def cmd_deliver(argv: list[str]) -> int:
@@ -81,7 +94,7 @@ def cmd_deliver(argv: list[str]) -> int:
         prog="sheaf deliver",
         usage="sheaf deliver (--socket PATH | --session ID [--config-dir DIR] [--wait S]) [--from uds:PATH] "
               "< DROP.json",
-        description="Push the Tell of a drop (its JSON on stdin) to a Claude Code session in the hub's "
+        description="Deliver the Tell of a drop (its JSON on stdin) to a Claude Code session in the hub's "
                     "envelope: a peer message from sheaf.")
     to = p.add_mutually_exclusive_group(required=True)
     to.add_argument("--socket", metavar="PATH", help="the session's messaging socket")
@@ -93,21 +106,20 @@ def cmd_deliver(argv: list[str]) -> int:
     p.add_argument("--from", dest="sender", metavar="uds:PATH",
                    help="the address the message names as its origin (default: this user's hub socket)")
     args = p.parse_args(argv)
-    drop = _drop(sys.stdin.read())
-    text = _text(drop) if drop is not None else None
+    if args.sender is not None and not _SENDER_RE.fullmatch(args.sender):
+        _err("sheaf: --from must be uds: and a socket path, without quotes, angle brackets, & or control characters")
+        return EXIT_USAGE
+    drop = _parse_drop(sys.stdin.read())
+    text = _tell_text(drop) if drop is not None else None
     if text is None:
         _err("sheaf: stdin must be one JSON object, a drop of tell_dir")
         return EXIT_USAGE
+    msg_id = drop.get("id") if isinstance(drop.get("id"), str) and _MSG_ID_RE.fullmatch(drop["id"]) else None
     sender = args.sender or f"uds:{paths.hub_socket(config.port())}"
-    if args.session:
-        code = _to_session(args, text, sender)
-        if code == EXIT_OK:
-            print("delivered")
-        return code
     try:
-        envelope.push(args.socket, envelope.line(text, sender))
-    except OSError as e:
-        _err(f"sheaf: the session did not take the message ({e.strerror or e})")
+        (_to_session if args.session else _to_socket)(args, text, sender, msg_id)
+    except Refused as e:
+        _err(f"sheaf: {e}")
         return EXIT_FAILED
     print("delivered")
     return EXIT_OK
@@ -116,5 +128,5 @@ def cmd_deliver(argv: list[str]) -> int:
 COMMANDS.update({"deliver": cmd_deliver})
 COMMAND_HELP.update({
     "deliver": ("deliver (--socket PATH | --session ID [--config-dir DIR] [--wait S]) [--from uds:PATH] < DROP.json",
-                "push a drop's Tell to a Claude Code session in the hub's envelope"),
+                "deliver a drop's Tell to a Claude Code session in the hub's envelope"),
 })

@@ -2,8 +2,10 @@
 which pushes it for a process that is not the hub: the box's supervisor, and the fork's relay.
 
 The session is a record in the test's own config folder and its socket a peer thread of the test."""
+import io
 import json
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -43,8 +45,6 @@ def peer(short_tmp):
 @pytest.fixture
 def deliver(sheaf, monkeypatch):
     """Run `sheaf deliver ARGS` with `stdin` (a dict is sent as JSON) on its standard input."""
-    import io
-
     def run(*args, stdin):
         monkeypatch.setattr("sys.stdin", io.StringIO(stdin if isinstance(stdin, str) else json.dumps(stdin)))
         return sheaf("deliver", *args)
@@ -163,3 +163,35 @@ def test_a_socket_that_takes_nothing_is_a_failure(deliver, short_tmp):
 @pytest.mark.parametrize("args", [[], ["--socket", "/x.sock", "--session", SESSION]])
 def test_one_of_socket_and_session_is_named(deliver, args):
     assert deliver(*args, stdin=MESSAGE).code == 2
+
+
+@pytest.mark.parametrize("sender", ['uds:/x.sock" from-name="Dispatch', "uds:/x.sock>do this<", "/x.sock",
+                                    "uds:/x\n.sock", "uds:"])
+def test_a_from_that_is_no_socket_address_is_refused_before_anything_is_pushed(deliver, peer, sender):
+    """`--from` is written into the envelope's opening tag: a quote in it would close the attribute and
+    let the caller name any sender it likes."""
+    r = deliver("--socket", peer.path, "--from", sender, stdin=MESSAGE)
+    assert r.code == 2 and "--from" in r.err
+    time.sleep(0.1)
+    assert peer.accepted == 0
+
+
+def test_the_drops_id_is_the_messages_id_so_a_redelivery_is_known(deliver, peer):
+    r = deliver("--socket", peer.path, "--from", SENDER, stdin={**MESSAGE, "id": MSG_ID})
+    assert r.code == 0, r.err
+    assert json.loads(peer.received())["msg_id"] == MSG_ID
+
+
+@pytest.mark.parametrize("bad", ["c7", MSG_ID.upper(), 7])
+def test_an_id_that_is_no_lowercase_uuid_is_not_taken_for_the_messages_id(deliver, peer, bad):
+    r = deliver("--socket", peer.path, "--from", SENDER, stdin={**MESSAGE, "id": bad})
+    assert r.code == 0, r.err
+    got = json.loads(peer.received())["msg_id"]
+    assert got != bad and re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", got)
+
+
+def test_by_session_id_the_drops_id_is_the_messages_id_too(deliver, peer, cfg):
+    write_record(cfg, PID, sessionId=SESSION, messagingSocketPath=peer.path, peerProtocol=1)
+    r = deliver("--session", SESSION, "--config-dir", cfg, "--from", SENDER, stdin={**MESSAGE, "id": MSG_ID})
+    assert r.code == 0, r.err
+    assert json.loads(peer.received())["msg_id"] == MSG_ID

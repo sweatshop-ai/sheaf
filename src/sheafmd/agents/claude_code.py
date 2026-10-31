@@ -29,7 +29,6 @@ from .base import DeliveryCancelled, DeliveryError, Runner, State, Target
 TOOLS = "Read,Grep,Glob"
 WRITERS = "Bash,Edit,Write,NotebookEdit"
 COURIER_TIMEOUT = 3 * 60
-PUSH_TIMEOUT = envelope.PUSH_TIMEOUT
 PS_TIMEOUT = 2                     # seconds `ps` may take to say when a process started
 SOCKS_ROOT = Path("/run/user")        # <root>/<uid>/cc-socks/<pid>.sock (SPEC 11.4)
 # The courier's fence. The `<` that begins a `<<<MESSAGE` and the `>` that ends a `MESSAGE>>>` are
@@ -123,7 +122,8 @@ def _default_config_dir() -> Path:
     return Path.home() / ".claude"
 
 
-def _config_dir(env: Mapping[str, str]) -> Path:
+def config_dir_of(env: Mapping[str, str]) -> Path:
+    """The folder Claude Code keeps its session records in, for a process with environment `env`."""
     d = env.get("CLAUDE_CONFIG_DIR", "").strip()
     return Path(d) if d else _default_config_dir()
 
@@ -192,7 +192,7 @@ class ClaudeCodeAdapter:
         if not own_session and not force:
             return None
         pid = int(env["CLAUDE_PID"]) if env.get("CLAUDE_PID", "").strip().isdigit() else None
-        config_dir = str(_config_dir(env))
+        config_dir = str(config_dir_of(env))
         wanted = session or own_session
         bin_ = env.get("CLAUDE_CODE_EXECPATH", "").strip() or shutil.which(
             "claude", path=env.get("PATH", "")) or ""
@@ -255,7 +255,7 @@ class ClaudeCodeAdapter:
         session in the config folder it runs under, which may not be the hub's own. None when
         the hub's own is the session's. The default folder is not named: with
         CLAUDE_CONFIG_DIR set, Claude Code keeps its settings file in that folder."""
-        if not t.config_dir or t.config_dir == str(_config_dir(os.environ)):
+        if not t.config_dir or t.config_dir == str(config_dir_of(os.environ)):
             return None
         env = dict(os.environ)
         if t.config_dir == str(_default_config_dir()):
@@ -301,14 +301,16 @@ class ClaudeCodeAdapter:
             return State("waiting", (asked if isinstance(asked, str) else "")[:1000] or "a question")
         return State("idle")
 
-    def deliver(self, t: Target, text: str, run: Runner) -> None:
+    def deliver(self, t: Target, text: str, run: Runner, *, msg_id: str | None = None) -> None:
+        """`msg_id` names the pushed message (a Tell's own id, so a redelivery is known); the courier,
+        which sends through a session of its own, carries none."""
         rec = self._record(t)
         sock = self._socket(t, rec)
         if not sock:
             raise DeliveryError(GONE)
         proto = rec.get("peerProtocol") if rec else None
         if type(proto) is int and proto == 1:
-            self._push(sock, text)
+            self._push(sock, text, msg_id)
         else:
             self._courier(t, sock, text, run, "no record" if rec is None else repr(proto))
 
@@ -316,9 +318,9 @@ class ClaudeCodeAdapter:
         self.deliver(t, text, run)
 
     # ── the direct push (SPEC 11.4) ──────────────────────────────────────────
-    def _push(self, sock_path: str, text: str):
+    def _push(self, sock_path: str, text: str, msg_id: str | None = None):
         try:
-            envelope.push(sock_path, envelope.line(text, self.sender), PUSH_TIMEOUT)
+            envelope.push(sock_path, envelope.line(text, self.sender, msg_id))
         except OSError as e:
             raise DeliveryError(f"the Claude Code session did not take the message "
                                 f"({e.strerror or e}); render the page again from a session") from None

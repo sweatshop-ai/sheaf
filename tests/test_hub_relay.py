@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import stat
+import threading
 
 from helpers import hub_rows
 from test_hub_work import (  # noqa: F401
@@ -22,14 +23,17 @@ from test_hub_work import (  # noqa: F401
     drops,
     fork,
     put,
+    sessions_of,
     team,
 )
 
 from sheafmd.hub import relay as relay_mod
 from sheafmd.hub import work as work_mod
+from sheafmd.hub.handler import RELAY_MOVED
 
 OTHER_DOC = "thinkingtoo/tiroir/2026-10-29-other.md"
 OTHER = f"work/{OTHER_DOC}"
+FORK2 = "8f9a0b1c-2d3e-4f5a-9b6c-7d8e9f0a1b2c"
 NO_GOOD = "This relay token is no good: fork the session again."
 
 
@@ -315,6 +319,63 @@ def test_a_tell_whose_fork_moved_under_the_lock_is_refused_and_queues_nothing(te
     monkeypatch.setattr(team.hub.relays, "connected", moved_meanwhile)
     assert comment(team, work, "tell").status == 400
     assert team.hub.relays.open(ADDRESS, FORK) == []
+
+
+def test_two_forks_reported_at_once_leave_the_later_one_with_a_good_token(team, box, work, monkeypatch):
+    """#134: fork A is written first, so B is live; A's token must not be issued after B's and push it out."""
+    real, other = team.hub.relays.issue, {}
+
+    def issue(member, doc, session):
+        if session == FORK and not other:
+            def report_b():
+                other["got"] = team.post("/_/sessions", {"doc": ADDRESS, "id": FORK2, "machine": "hans-mac"},
+                                         member=HANS)
+            other["thread"] = threading.Thread(target=report_b)
+            other["thread"].start()
+            other["thread"].join(1.0)       # B's report runs to its end here unless A's lock holds it back
+        return real(member, doc, session)
+    monkeypatch.setattr(team.hub.relays, "issue", issue)
+    forked(team)
+    other["thread"].join(10)
+    got = other["got"]
+    assert got.status == 200, got.text
+    assert sessions_of(work)[0].startswith(f"{{id: {FORK2}, ")
+    sub = listen(team, got.json()["relay"])
+    assert sub.status == 200, sub.text
+    assert [n for n, _ in sub.stream.drain()] == ["hello"]
+
+
+def test_a_tell_judged_on_one_fork_is_not_queued_for_a_newer_one(team, box, work, monkeypatch):
+    """#134: a fork that lands between the comment's write and the queue does not receive the Tell."""
+    listen(team, forked(team))
+    real = team.handler._relay_tell
+
+    def fork_lands_first(*a, **kw):
+        forked(team, id=FORK2)
+        return real(*a, **kw)
+    monkeypatch.setattr(team.handler, "_relay_tell", fork_lands_first)
+    got = comment(team, work, "tell")
+    assert got.status == 200 and got.json()["tellError"] == RELAY_MOVED
+    assert team.hub.relays.open(ADDRESS, FORK2) == []
+
+
+def test_a_live_session_changed_by_hand_drops_the_queued_tells_with_a_row(team, box, work):
+    """#134: the live session changed in the file, not by a fork report: the Tells queued for the old one are
+    dropped as for a fork, with their row and the page's event, when the next Tell is queued for the new one."""
+    listen(team, forked(team))
+    tab = team.get(f"/_/live?doc={ADDRESS}", member=HANS).stream
+    first = comment(team, work, "tell").json()["id"]
+    put(team, work, DOC, (work / DOC).read_text(encoding="utf-8").replace(f"{{id: {FORK},", f"{{id: {FORK2},"))
+    team.hub.entry(ADDRESS).live.refresh()
+    token2, _ = team.hub.relays.issue(HANS, ADDRESS, FORK2)
+    listen(team, token2)
+    tab.drain()
+    got = comment(team, work, "tell")
+    assert got.status == 200 and "tellError" not in got.json(), got.text
+    row, = hub_rows("tell-relay-failed")
+    assert row["thread"] == first and row["error"] == RELAY_MOVED
+    assert {"id": first, "error": RELAY_MOVED} in [d for n, d in tab.drain() if n == "tell-relay-failed"]
+    assert [t.thread for t in team.hub.relays.open(ADDRESS, FORK2)] == [got.json()["id"]]
 
 
 # ── the box's drop carries the Tell's id and its message (9.12) ──────────────

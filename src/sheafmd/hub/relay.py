@@ -6,7 +6,8 @@ session runs on a member's machine reaches that session through `sheaf relay`, w
     .issue(member, doc, session)    a new relay token for that one fork, which ends the sheaf's older ones
     .find(sha256)                   the row of a token the hub holds, else None
     .revoke(doc)                    end every token of the sheaf: how many there were
-    .put(doc, session, tell)        queue a Tell for the fork, or Full past QUEUE_MAX open on the sheaf
+    .put(doc, session, tell)        queue a Tell for the fork, or Full past QUEUE_MAX open on the sheaf: the Tells
+                                    of another session it took off the queue, [(doc, Tell)]
     .open(doc, session)             the Tells queued for that fork and not yet acked, oldest first
     .ack(doc, id)                   take one off the queue: the Tell, or None when it is not queued
     .expire()                       take off every Tell queued TTL seconds ago or more: [(doc, Tell)]
@@ -132,10 +133,14 @@ class Relays:
         return len(rows) - len(kept)
 
     # ── the queue ───────────────────────────────────────────────────────────
-    def put(self, doc: str, session: str, tell: Tell):
+    def put(self, doc: str, session: str, tell: Tell) -> list:
+        """Queue `tell` for the fork `session`. The Tells queued for another session of the sheaf (its live session
+        changed without a fork report, by hand) leave the queue and are given back, [(doc, Tell)], to be dropped."""
         with self._lock:
             q = self._queues.get(doc)
+            old = []
             if q is None or q["session"] != session:
+                old = [(doc, t) for t in q["tells"].values()] if q else []
                 q = self._queues[doc] = {"session": session, "tells": {}}
             if len(q["tells"]) >= QUEUE_MAX:
                 raise Full(FULL)
@@ -144,6 +149,7 @@ class Relays:
             subs = list(self._streams.get((doc, session), ()))
         for s in subs:
             s.put("tell", {"id": tell.id, "message": tell.message})
+        return old
 
     def open(self, doc: str, session: str) -> list:
         with self._lock:

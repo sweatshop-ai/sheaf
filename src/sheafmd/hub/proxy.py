@@ -40,7 +40,7 @@ STREAM_SECONDS = 300            # a stream of the proxy socket is closed after t
 # one), the hub's stop, and `gone` when its root is forgotten, which names only the address the stream
 # was opened on, and a member's Tell that its fork's relay will not deliver (9.14). Never a job of the hub
 # account's agent session, nor `signed-out` (9.9).
-DOCUMENT_EVENTS = ("hello", "changed", "ask-done", "hub-stopping", "gone", "tell-relay-failed")
+DOCUMENT_EVENTS = ("hello", "changed", "ask-done", "hub-stopping", "gone", "tell-relay-failed", "box-failed")
 PROXY_LINE = "Ask and Tell work only on the machine that runs the hub."     # 10.6
 NO_DOCUMENTS = "This account has no documents on this hub."
 FOLDER_MODE = 0o2750            # the socket's folder: the hub's account, the proxy's group, setgid

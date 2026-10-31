@@ -1396,9 +1396,9 @@ Cancel message (`prompts.cancel`):
   Answer with the sheaf MCP tool: reply(doc="<sheaf>", id="<thread>", text="<your answer>")
   ```
 
-  A stdin that is no such drop exits 2 and delivers nothing.
+  A stdin that is no such drop (not UTF-8, not JSON, nested past the parser, not an object, or missing those keys) exits 2 and delivers nothing.
 - **`msg_id`** is the drop's `id` when that is a lowercase UUID, so a Tell delivered again is known; else a new uuid4.
-- **Where.** `--socket` pushes on that socket. `--session` resolves the socket from the session's live record under `--config-dir` (default as `config_dir` above) and delivers as steps 2 and 3 do, the courier included. `--wait` polls up to S seconds for that record, for a session just started.
+- **Where.** `--socket` pushes on that socket. `--session` resolves the socket from the session's live record under `--config-dir` (default as `config_dir` above) and delivers as steps 2 and 3 do, the courier included. `--wait` polls up to S seconds for that record, for a session just started; S is a finite number, 0 or more, else exit 2. A courier runs in a process group of its own, as the hub's do (8.10), and its timeout ends the group.
 - **`--from`** is written into the envelope's tag, so it must be `uds:` and a path with no `"`, `<`, `>`, `&` or control character, else exit 2 and nothing is delivered. It defaults to this user's hub socket, which nothing needs to listen on: a session answers a Tell through the door (12), never on that socket.
 - Exit 0 and `delivered`; 1 with the reason when no open session is found or it does not take the message.
 

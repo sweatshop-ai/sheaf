@@ -13,10 +13,10 @@ Registered in COMMANDS and COMMAND_HELP, which the foot of cli.py merges into it
 """
 import argparse
 import json
+import math
 import os
 import re
 import shutil
-import subprocess
 import sys
 import time
 
@@ -24,6 +24,7 @@ from . import config, paths
 from .agents import envelope, prompts
 from .agents.base import DeliveryCancelled, DeliveryError, Target
 from .agents.claude_code import ClaudeCodeAdapter, config_dir_of
+from .hub.jobs import Job
 
 EXIT_OK, EXIT_FAILED, EXIT_USAGE = 0, 1, 2
 POLL_S = 0.2
@@ -44,10 +45,22 @@ def _err(line: str = ""):
     print(line, file=sys.stderr)
 
 
-def _parse_drop(raw: str) -> dict | None:
+def _seconds(text: str) -> float:
+    """A wait: a finite number of seconds, 0 or more. nan or inf would never reach the deadline."""
     try:
-        drop = json.loads(raw)
+        s = float(text)
     except ValueError:
+        s = math.nan
+    if not math.isfinite(s) or s < 0:
+        raise argparse.ArgumentTypeError("must be a number of seconds, 0 or more")
+    return s
+
+
+def _parse_drop() -> dict | None:
+    """The drop on stdin; None for what is not UTF-8, not JSON, nested past the parser, or not an object."""
+    try:
+        drop = json.loads(sys.stdin.read())
+    except (ValueError, RecursionError):           # UnicodeDecodeError is a ValueError
         return None
     return drop if isinstance(drop, dict) else None
 
@@ -58,13 +71,6 @@ def _tell_text(drop: dict) -> str | None:
     if isinstance(msg, str) and msg.strip():
         return msg
     return prompts.dropped(drop)
-
-
-def _run(argv, *, timeout, env=None, cwd=None, input=None) -> subprocess.CompletedProcess:
-    """The courier's runner: the child to its end, in its own process group as the hub's are, its prompt on
-    stdin."""
-    return subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                          start_new_session=True, timeout=timeout, env=env, cwd=cwd, input=input)
 
 
 def _to_socket(args, text: str, sender: str, msg_id: str | None):
@@ -78,13 +84,14 @@ def _to_session(args, text: str, sender: str, msg_id: str | None):
     ad = ClaudeCodeAdapter(sender)
     t = Target(agent=ad.agent, session=args.session, bin=shutil.which("claude") or "",
                config_dir=args.config_dir or str(config_dir_of(os.environ)))
-    deadline = time.monotonic() + max(args.wait, 0.0)
+    deadline = time.monotonic() + args.wait
     while "deliver" not in ad.capabilities(t):
         if time.monotonic() >= deadline:
             raise Refused(f"no open session {args.session} in {t.config_dir}")
         time.sleep(POLL_S)
     try:
-        ad.deliver(t, text, _run, msg_id=msg_id)
+        # The hub's runner: the courier in a process group of its own, which a timeout ends whole.
+        ad.deliver(t, text, Job(None, "deliver", "", "").run, msg_id=msg_id)
     except (DeliveryError, DeliveryCancelled) as e:
         raise Refused(str(e) or "the delivery was cancelled") from None
 
@@ -101,7 +108,7 @@ def cmd_deliver(argv: list[str]) -> int:
     to.add_argument("--session", metavar="ID", help="the session's id: its socket is the one its live record names")
     p.add_argument("--config-dir", metavar="DIR",
                    help="where the session keeps its record (default: CLAUDE_CONFIG_DIR, else ~/.claude)")
-    p.add_argument("--wait", type=float, default=0.0, metavar="S",
+    p.add_argument("--wait", type=_seconds, default=0.0, metavar="S",
                    help="seconds to wait for the session's record to appear (default: 0)")
     p.add_argument("--from", dest="sender", metavar="uds:PATH",
                    help="the address the message names as its origin (default: this user's hub socket)")
@@ -109,7 +116,7 @@ def cmd_deliver(argv: list[str]) -> int:
     if args.sender is not None and not _SENDER_RE.fullmatch(args.sender):
         _err("sheaf: --from must be uds: and a socket path, without quotes, angle brackets, & or control characters")
         return EXIT_USAGE
-    drop = _parse_drop(sys.stdin.read())
+    drop = _parse_drop()
     text = _tell_text(drop) if drop is not None else None
     if text is None:
         _err("sheaf: stdin must be one JSON object, a drop of tell_dir")

@@ -281,8 +281,18 @@ def tick_edit(text: str, n: int, word: str, release: bool = False):
     boxes = sheaf.pressed if release else sheaf.actions
     if not 0 <= n < len(boxes) or boxes[n][0] != word or (release and word not in TOGGLES):
         return None
-    line = boxes[n][2]
     blocks = split_md_blocks(text)
+    at = box_place(text, boxes[n][2], blocks)
+    if at is None:
+        return None
+    fragment = ticked_html(blocks[at[0]], at[1], tick=not release)
+    return None if fragment is None else {"i": at[0], "html": fragment}
+
+
+def box_place(text: str, line: int, blocks=None) -> tuple | None:
+    """(the block, the box's number among the task boxes of that block) of the box on the 0-based `line` of
+    `text`: where the page draws it. None when the mark found is not on that line."""
+    blocks = split_md_blocks(text) if blocks is None else blocks
     i = max(x for x, b in enumerate(blocks) if b.start <= line)
     b = blocks[i]
     own = _split_lines(b.content)
@@ -291,8 +301,61 @@ def tick_edit(text: str, n: int, word: str, release: bool = False):
     k = sum(1 for m in marks if m.start() < offset)
     if k >= len(marks) or marks[k].start() != offset:
         return None                 # the mark found is not on the action's own line
-    fragment = ticked_html(b, k, tick=not release)
-    return None if fragment is None else {"i": i, "html": fragment}
+    return i, k
+
+
+def buttons(s: Sheaf, who: dict, hub, member, is_owner: bool) -> list:
+    """The buttons of the sheaf `s` as `member` (None: the hub's own person) reads them, on the list's row and at
+    the top of its page alike (#110, #111): every box of the eight words in the order of the file, each
+    {word, label, line, toggle, pressed, may, n, release, by}. An action is a button to press (`n` its number among
+    the actions); a pressed one-off a locked one that says who pressed it and when (`by`, from `who`, the
+    `pressers` of `s`), with no `n`; a pressed toggle one its owner may release (`n` its number among the pressed
+    boxes). Share is its owner's alone (9.11): another member reads whether it is pressed, and cannot press it."""
+    me = (member.short if member is not None else "").lower()
+    boxes = sorted([(a[2], n, False, *a[:2], a[3]) for n, a in enumerate(s.actions)]
+                   + [(a[2], n, True, *a[:2], a[3]) for n, a in enumerate(s.pressed)])
+    out = []
+    for line, n, pressed, word, short, arg in boxes:
+        toggle = word in TOGGLES
+        label = word + (" " + arg if arg else "") + (" @" + short if short and short.lower() != me else "")
+        by = f"{presser(hub, *who[line][:2], member)}, {when(hub, who[line][2])}" \
+            if pressed and not toggle and line in who else ""
+        out.append({"word": word, "label": label, "line": line, "toggle": toggle, "pressed": pressed,
+                    "may": is_owner if toggle else not pressed, "n": n if toggle or not pressed else None,
+                    "release": pressed and toggle, "by": by})
+    return out
+
+
+def pressers(cache: dict, f: Path, text: str, lines) -> dict:
+    """`commits.blame` of `lines` of `text`, the sheaf whose real file is `f`; kept in `cache` per text once every box
+    has its commit, and blamed again a little later while a box has none yet."""
+    if not lines:
+        return {}
+    h = md_hash(text)
+    got, until = cache.get((f, h), (None, None))
+    if got is not None and (until is None or time.monotonic() < until):
+        return got
+    got = commits.blame(f, text, lines)
+    if len(cache) >= BLAME_CACHE:
+        cache.clear()
+    cache[f, h] = (got, None if len(got) == len(set(lines)) else time.monotonic() + UNCOMMITTED_SECONDS)
+    return got
+
+
+def presser(hub, name: str, mail: str, member) -> str:
+    """Who pressed a box, as the reader reads it: `you`, `@<short>` of the member whose commits carry `mail`
+    (8.11), their name without a short, else the commit's author's name (the loopback port knows no member)."""
+    for m in (hub.proxy.members.values() if hub.proxy is not None else ()):
+        if proxy_mod.commit_email(m, hub.proxy.origin).lower() == mail.lower():
+            return "you" if member is not None and m.id == member.id else "@" + m.short if m.short else m.name
+    return name
+
+
+def when(hub, epoch: int) -> str:
+    """The day a box was pressed, as `30 Oct`, its year after it when that is not this year's, in the hub's time."""
+    t = time.localtime(epoch)
+    year = "" if t.tm_year == time.localtime(hub.clock()).tm_year else f" {t.tm_year}"
+    return f"{t.tm_mday} {MONTHS[t.tm_mon - 1]}{year}"
 
 
 # ── the record ──────────────────────────────────────────────────────────────
@@ -447,7 +510,6 @@ class TheList:
         self._off_lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = None
-        self._blamed: dict = {}             # {(real path, md_hash): (pressers, monotonic time or None)}: once per text
 
     # ── the poll ────────────────────────────────────────────────────────────
     def root(self):
@@ -694,66 +756,36 @@ class TheList:
                 f'</span></h2>{"".join(out)}</section>')
 
     def _pressers(self, root, s: Sheaf) -> dict:
-        """`commits.blame` of the pressed boxes of `s`, from the file that holds its name now when that file is still the
-        text the row was drawn from (else none); kept per text once every box has its commit."""
+        """`pressers` of the pressed boxes of `s`, from the file that holds its name now when that file is still the
+        text the row was drawn from (else none)."""
         lines = [line for _, _, line, _ in s.pressed]
         if not lines or not root.git:
             return {}
         try:
             f = Path(os.path.realpath(self._file(root, s.rel)))
-            got, until = self._blamed.get((f, s.hash), (None, None))
-            if got is not None and (until is None or time.monotonic() < until):
-                return got
             text = f.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             return {}
         if md_hash(text) != s.hash:
             return {}
-        got = commits.blame(f, text, lines)
-        if len(self._blamed) >= BLAME_CACHE:
-            self._blamed.clear()
-        # Kept for good once every box has its commit; a box not committed yet is blamed again a little later.
-        self._blamed[f, s.hash] = (got, None if len(got) == len(set(lines)) else time.monotonic() + UNCOMMITTED_SECONDS)
-        return got
-
-    def _presser(self, name: str, mail: str, member) -> str:
-        """Who pressed a box, as the reader reads it: `you`, `@<short>` of the member whose commits carry `mail`
-        (8.11), their name without a short, else the commit's author's name."""
-        for m in self.hub.proxy.members.values():
-            if proxy_mod.commit_email(m, self.hub.proxy.origin).lower() == mail.lower():
-                return "you" if m.id == member.id else "@" + m.short if m.short else m.name
-        return name
-
-    def _when(self, epoch: int) -> str:
-        """The day a box was pressed, as `30 Oct`, its year after it when that is not this year's, in the hub's time."""
-        t = time.localtime(epoch)
-        year = "" if t.tm_year == time.localtime(self.hub.clock()).tm_year else f" {t.tm_year}"
-        return f"{t.tm_mday} {MONTHS[t.tm_mon - 1]}{year}"
+        return pressers(self.hub.blamed, f, text, lines)
 
     def _row(self, row: Row, owners: list, is_owner: bool, member, root: str) -> str:
         s, rec = row.sheaf, row.record
         doc, acts = html.escape(f"{root}/{s.rel}"), []
-        who = self._pressers(self.root(), s)
-        # Every box of the eight words in the order of the file: an action is a button to press, a pressed one-off a
-        # locked one that says who pressed it and when, a pressed toggle one its owner may release (#110). A toggle's
-        # number is its place among the actions, or among the pressed boxes when it is pressed.
-        boxes = sorted([(a[2], n, False, *a[:2], a[3]) for n, a in enumerate(s.actions)]
-                       + [(a[2], n, True, *a[:2], a[3]) for n, a in enumerate(s.pressed)])
-        for line, n, pressed, word, short, arg in boxes:
-            label = html.escape(word + (" " + arg if arg else "")
-                                + (" @" + short if short and short.lower() != member.short.lower() else ""))
-            data = f'data-doc="{doc}" data-word="{html.escape(word)}"'
-            if word in TOGGLES:
-                # Share is its owner's alone (9.11): another member reads whether it is pressed, and cannot press it.
-                acts.append(f'<button type="button" class="list-act toggle" aria-pressed="{str(pressed).lower()}"'
-                            f'{"" if is_owner else " disabled"} {data} data-action="{n}"{" data-release" if pressed else ""}'
-                            f' data-hash="{html.escape(s.hash)}">{label}</button>')
-            elif pressed:
-                locked = f"{label} ✓" + (f" {html.escape(self._presser(*who[line][:2], member))}, "
-                                         f"{self._when(who[line][2])}" if line in who else "")
+        # A toggle's number is its place among the actions, or among the pressed boxes when it is pressed (#110).
+        for x in buttons(s, self._pressers(self.root(), s), self.hub, member, is_owner):
+            label = html.escape(x["label"])
+            data = f'data-doc="{doc}" data-word="{html.escape(x["word"])}"'
+            if x["toggle"]:
+                acts.append(f'<button type="button" class="list-act toggle" aria-pressed="{str(x["pressed"]).lower()}"'
+                            f'{"" if x["may"] else " disabled"} {data} data-action="{x["n"]}"'
+                            f'{" data-release" if x["release"] else ""} data-hash="{html.escape(s.hash)}">{label}</button>')
+            elif x["pressed"]:
+                locked = f"{label} ✓" + (f" {html.escape(x['by'])}" if x["by"] else "")
                 acts.append(f'<button type="button" class="list-act one-off pressed" disabled {data}>{locked}</button>')
             else:                       # a one-off is a plain button to a screen reader
-                acts.append(f'<button type="button" class="list-act one-off" {data} data-action="{n}"'
+                acts.append(f'<button type="button" class="list-act one-off" {data} data-action="{x["n"]}"'
                             f' data-hash="{html.escape(s.hash)}">{label}</button>')
         assistant = f' <span class="list-assistant">{html.escape(s.assistant)}</span>' if s.assistant else ""
         by_login = {m.github.lower(): m for m in self.hub.proxy.members.values() if m.github}

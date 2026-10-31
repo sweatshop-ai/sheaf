@@ -718,8 +718,7 @@ class Hub:
     # ── the watcher's step (SPEC 8.9) ────────────────────────────────────────
     def _watch_drops(self):
         """The drops for James's window (9.12): give up on those with no reply after the Tell wait (#115), read in
-        the file as it is now, whether a page asked since or not; then read what the box's supervisor says of each
-        that is still open in its `<drop>.status` (#139). The page is told `box-status`, or `box-failed`."""
+        the file as it is now, whether a page asked since or not; then read the supervisor's word on the others."""
         def text_of(address):
             # The file, not the hub's copy: `sheaf reply` answers a drop without the hub, and a sheaf with no tab
             # is not refreshed by the pass.
@@ -729,39 +728,34 @@ class Hub:
             self.catch_up(e)
             return e.live.current()[1]
         minutes = max(1, -(-self.tell_wait // 60))
-        working = {address for address, _, d in self.box_waits.drops() if d.state == "delivered"}
         for address, thread, d in self.box_waits.expire(self.tell_wait, text_of):
             self.record("box-expired", address, what=d.kind, project=_project(address), thread=thread)
             self._tell_drop(address, "box-failed", {"id": thread, "kind": d.kind, "minutes": minutes})
-        for address in working:
-            if not self.box_waits.working(address):       # answered or given up on: a member's orange goes
+        self._read_drop_statuses()
+        for address in self.box_waits.cleared():          # however it ended, here or on a page's ask: the orange goes
+            if not self.box_waits.working(address):
                 self.index.moved_for_members(address)
+
+    def _read_drop_statuses(self):
+        """What the box's supervisor says of each drop still open, in its `<drop>.status` (9.15, #139): a change
+        is a `drop-status` row and the page's `box-status`, or `box-failed` with its error, which ends the drop;
+        a `delivered` begun moves a member's dot (one that ends is `cleared`)."""
         folder = self.the_list.cfg.tell_dir if self.the_list is not None else None
         if folder is None:
             return
         for address, thread, d in self.box_waits.drops():
             got = boxwait.read_status(folder, d.name) if d.name else None
-            if got is None or (got != boxwait.BAD and got[0] == d.state):
-                continue
-            if got == boxwait.BAD:
-                if not d.ignored:
-                    d.ignored = True
-                    self.record("drop-status-ignored", address, what=d.kind, project=_project(address),
-                                thread=thread, drop=d.name)
-                continue
-            state, error = got
-            row = {"what": d.kind, "project": _project(address), "thread": thread, "state": state}
-            if state == "failed":
-                if self.box_waits.end(address, thread):
-                    self.record("drop-status", address, **row, error=error)
-                    self._tell_drop(address, "box-failed", {"id": thread, "kind": d.kind, "error": error})
-                    if d.state == "delivered":
-                        self.index.moved_for_members(address)
-                continue
-            was, d.state = d.state, state
-            self.record("drop-status", address, **row)
-            self._tell_drop(address, "box-status", {"id": thread, "kind": d.kind, "state": state})
-            if "delivered" in (was, state):
+            what, was = self.box_waits.observe(address, thread, got)
+            row = {"what": d.kind, "project": _project(address), "thread": thread}
+            if what == "ignored":
+                self.record("drop-status-ignored", address, **row, drop=d.name)
+            elif what == "failed":
+                self.record("drop-status", address, **row, state="failed", error=got[1])
+                self._tell_drop(address, "box-failed", {"id": thread, "kind": d.kind, "error": got[1]})
+            elif what == "state":
+                self.record("drop-status", address, **row, state=got[0])
+                self._tell_drop(address, "box-status", {"id": thread, "kind": d.kind, "state": got[0]})
+            if what == "state" and got[0] == "delivered":
                 self.index.moved_for_members(address)
 
     def _tell_drop(self, address: str, name: str, data: dict):

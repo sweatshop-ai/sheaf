@@ -433,6 +433,7 @@ class Index:
             return name == "status" and isinstance(data, Status) and not self._stream_may_take(data)
 
         def accepting(name: str, data):
+            # A stream with no `accept` is the hub's person's: a dot only members see moved is not theirs (9.15).
             if forgotten(name, data) or (accept is None and isinstance(data, Status) and data.members_only):
                 return None
             told = accept(name, data) if accept else data

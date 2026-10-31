@@ -39,7 +39,7 @@ STREAM_SECONDS = 300            # a stream of the proxy socket is closed after t
 # The only events a member's document stream is sent: the document's changes (an Ask's answer is
 # one), the hub's stop, and `gone` when its root is forgotten, which names only the address the stream
 # was opened on, a member's Tell that its fork's relay will not deliver (9.14), and what became of a drop for
-# James's window: its supervisor's word on it, and its failure or no answer within the Tell wait (9.12). Never
+# James's window: its supervisor's word on it (9.15), and its failure or no answer within the Tell wait (9.12). Never
 # a job of the hub account's agent session, nor `signed-out` (9.9).
 DOCUMENT_EVENTS = ("hello", "changed", "ask-done", "hub-stopping", "gone", "tell-relay-failed", "box-failed",
                    "box-status")

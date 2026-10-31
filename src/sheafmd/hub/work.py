@@ -278,7 +278,7 @@ def drop(folder: Path | None, project: str, body: bytes, missing: str) -> str:
 
 def drop_named(folder: Path | None, project: str, body: bytes, missing: str) -> tuple[str, str | None]:
     """`drop`'s answer, and the name of the file it wrote (None when it wrote none): the supervisor's
-    `<name>.status` beside it says what became of it (9.12, #139)."""
+    `<name>.status` beside it says what became of it (9.15, #139)."""
     if folder is None:
         return missing, None
     if not folder.is_dir():

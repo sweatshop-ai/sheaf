@@ -658,7 +658,6 @@ def test_a_drop_answered_in_the_file_from_outside_is_never_given_up_on(team, box
     assert hub_rows("box-expired") == []
 
 
-
 # ── the drop's status, from the box's supervisor (#139) ──────────────────────
 
 def status(box, state, **extra):
@@ -740,8 +739,35 @@ def test_a_reply_ends_a_delivered_drop_whatever_the_status_says_next(team, box, 
     assert sent(team) == [] and [r["state"] for r in hub_rows("drop-status")] == ["delivered"]
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a file of mode 0000")
+def test_a_status_the_hub_cannot_read_is_ignored_once(team, box, work):
+    cid = comment(team, work, "tell").json()["id"]
+    status(box, "delivered")
+    f, = [f for f in drops(box) if f.name.endswith(".status")]
+    f.chmod(0)
+    try:
+        team.hub.tick()
+        team.hub.tick()
+    finally:
+        f.chmod(0o644)
+    assert sent(team) == [{"id": cid, "kind": "tell", "state": "sent"}]
+    assert len(hub_rows("drop-status-ignored")) == 1
+
+
+def test_a_reply_before_the_supervisor_says_delivered_ends_the_drop_first(team, box, work):
+    cid = comment(team, work, "tell").json()["id"]
+    assert team.post("/_/comment", {"doc": ADDRESS, "op": "reply", "id": cid, "body": "Done already."},
+                     member=THIERRY).status == 200
+    status(box, "delivered")
+    team.hub.tick()
+    assert sent(team) == [] and hub_rows("drop-status") == []
+
+
+
+# ── a member's index dot (#139) ──────────────────────────────────────────────
 
 def dot(team, member=HANS):
+    """The dot of the sheaf on `member`'s index."""
     got = team.get("/_/index.json", member=member)
     assert got.status == 200, got.text
     return next(d["dot"] for r in got.json()["roots"] for d in r["docs"] if d["doc"] == ADDRESS)
@@ -759,9 +785,22 @@ def test_a_delivered_drop_turns_the_members_dot_orange_and_tells_their_index_alo
     assert dot(team) == "orange"
     assert ("status", {"doc": ADDRESS, "root": "work"}) in mine.drain()
     assert [d for n, d in hubs.drain() if n == "status" and d.get("doc") == ADDRESS and "dot" not in d] == []
+
+
+
+def test_a_delivered_drop_answered_while_a_page_asks_still_clears_the_members_orange(team, box, work):
+    # A page's /_/doc settles the drop before the pass does: the pass still tells the members' indexes (#139).
+    from sheafmd.hub.index import Status
+    cid = comment(team, work, "tell").json()["id"]
+    status(box, "delivered")
+    team.hub.tick()
+    raw = team.hub.index_bus.subscribe()
     assert team.post("/_/comment", {"doc": ADDRESS, "op": "reply", "id": cid, "body": "Done."},
-                     member=THIERRY).status == 200
-    assert dot(team) != "orange"
+                     member=HANS).status == 200
+    assert sent(team) == []
+    team.hub.tick()
+    assert dot(team) == "blue"
+    assert any(isinstance(d, Status) and d.members_only and d["doc"] == ADDRESS for n, d in raw.drain())
 
 
 # ── the meta block (10.1) ────────────────────────────────────────────────────

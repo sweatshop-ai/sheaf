@@ -1733,7 +1733,7 @@
     var s = sentBox[id];
     if (!s || !c || (c.replies || []).length > s.n) { delete sentBox[id]; return ''; }
     if (s.at) return '<div class="rd-msg rd-sent">Sent to ' + esc(s.at) + '; the answer appears in this thread.</div>';
-    // What the box's supervisor said of the drop, read by the hub (9.12, #139).
+    // What the box's supervisor said of the drop, read by the hub (9.15, #139).
     if (s.state === 'picked-up') return '<div class="rd-msg rd-sent">' + esc(s.to) + '’s window is opening' + DOTS + '</div>';
     if (s.state === 'delivered') return '<div class="rd-msg rd-sent rd-working">' + esc(s.to) +
       ' is working on it in his window' + DOTS + '</div>';

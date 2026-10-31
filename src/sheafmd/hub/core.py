@@ -76,6 +76,11 @@ class Entry:
 RESTART_TOLD_TTL = 30            # seconds a restart that was announced is still expected
 
 
+def _project(address: str) -> str:
+    """`<client>/<project>` of a sheaf of the list's root at that address (9.10)."""
+    return "/".join(roots_mod.Address.parse(address).rel.split("/")[:2])
+
+
 class Hub:
     def __init__(self, port: int, key: str, *, started_by: str = "cli", service: bool = False,
                  version: str = __version__, clock=time.time, proxy=None):
@@ -711,9 +716,9 @@ class Hub:
         return self.runner.active("ask")
 
     # ── the watcher's step (SPEC 8.9) ────────────────────────────────────────
-    def _expire_drops(self):
-        """Give up on drops for James's window with no reply after the Tell wait (9.12, #115), read in the file as
-        it is now, whether a page asked since or not: the page is told `box-failed`, and a `box-expired` row says so."""
+    def _watch_drops(self):
+        """The drops for James's window (9.12): give up on those with no reply after the Tell wait (#115), read in
+        the file as it is now, whether a page asked since or not; then read the supervisor's word on the others."""
         def text_of(address):
             # The file, not the hub's copy: `sheaf reply` answers a drop without the hub, and a sheaf with no tab
             # is not refreshed by the pass.
@@ -724,11 +729,39 @@ class Hub:
             return e.live.current()[1]
         minutes = max(1, -(-self.tell_wait // 60))
         for address, thread, d in self.box_waits.expire(self.tell_wait, text_of):
-            project = "/".join(roots_mod.Address.parse(address).rel.split("/")[:2])
-            self.record("box-expired", address, what=d.kind, project=project, thread=thread)
-            e = self.entries.get(address)
-            if e is not None:
-                e.bus.publish("box-failed", {"id": thread, "kind": d.kind, "minutes": minutes})
+            self.record("box-expired", address, what=d.kind, project=_project(address), thread=thread)
+            self._tell_drop(address, "box-failed", {"id": thread, "kind": d.kind, "minutes": minutes})
+        self._read_drop_statuses()
+        for address in self.box_waits.cleared():          # however it ended, here or on a page's ask: the orange goes
+            if not self.box_waits.working(address):
+                self.index.moved_for_members(address)
+
+    def _read_drop_statuses(self):
+        """What the box's supervisor says of each drop still open, in its `<drop>.status` (9.15, #139): a change
+        is a `drop-status` row and the page's `box-status`, or `box-failed` with its error, which ends the drop;
+        a `delivered` begun moves a member's dot (one that ends is `cleared`)."""
+        folder = self.the_list.cfg.tell_dir if self.the_list is not None else None
+        if folder is None:
+            return
+        for address, thread, d in self.box_waits.drops():
+            got = boxwait.read_status(folder, d.name) if d.name else None
+            what, was = self.box_waits.observe(address, thread, got, d)
+            row = {"what": d.kind, "project": _project(address), "thread": thread}
+            if what == "ignored":
+                self.record("drop-status-ignored", address, **row, drop=d.name)
+            elif what == "failed":
+                self.record("drop-status", address, **row, state="failed", error=got[1])
+                self._tell_drop(address, "box-failed", {"id": thread, "kind": d.kind, "error": got[1]})
+            elif what == "state":
+                self.record("drop-status", address, **row, state=got[0])
+                self._tell_drop(address, "box-status", {"id": thread, "kind": d.kind, "state": got[0]})
+            if what == "state" and got[0] == "delivered":
+                self.index.moved_for_members(address)
+
+    def _tell_drop(self, address: str, name: str, data: dict):
+        e = self.entries.get(address)
+        if e is not None:
+            e.bus.publish(name, data)
 
     def tick(self):
         """One pass of the watcher, run every second. For each document with an open tab or a
@@ -753,7 +786,7 @@ class Hub:
             except Exception as ex:
                 self._rebuild_failed(e, ex)
         try:
-            self._expire_drops()                  # after the tabs' refresh: a reply that just landed is in
+            self._watch_drops()                   # after the tabs' refresh: a reply that just landed is in
         except Exception:
             self.record_exception("drops-failed")
         try:

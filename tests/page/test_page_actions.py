@@ -879,3 +879,45 @@ def test_a_comment_opened_while_a_reload_waits_for_the_restore_holds_that_reload
     p.wait_for_timeout(1000)
     assert p.evaluate("window.__same_load") is True, "the page reloaded under the comment form"
     assert p.input_value("#rd-popover textarea") == "Why?"
+
+
+def test_an_upgrade_during_the_press_does_not_reload_before_a_restore_waiting_for_the_tick(tab, context, site):
+    # #153, gate on 8aeb048: a reload asked only by an upgrade went to location.reload when the press was done,
+    # before the Restore parked on its tick was sent.
+    f = site.file
+    f.write_text(SHEAF, encoding="utf-8")
+    tab.open()
+    tab.page.wait_for_selector("#rd-actions button")
+    site.kill()
+    type_at_end(tab.page, "main p:has-text('Body')", " typed")
+    until(lambda: tab.page.evaluate(f"localStorage.getItem({draft_key(site)!r})"), what="the draft")
+    tab.page.close()
+    site.start()
+    p = context.new_page()
+    p.add_init_script(HEARD)
+    p.clock.install()
+    p.goto(site.url)
+    p.wait_for_selector("#rd-notice button[data-d=restore]")
+    p.wait_for_selector("#rd-actions button")
+    p.route("**/_/doc?*", lambda r: r.abort())
+    held = []
+    p.route("**/_/tick", lambda r: held.append(r))
+    stand_still(p)
+    bar(p).nth(0).click()
+    site.hub.entry(DOC).bus.publish("hello", {"version": "99.0.0"})
+    until(lambda: heard(p, "hello"), what="the upgrade, whose reload waits for the press")
+    p.clock.run_for(5100)
+    until(lambda: held or p.wait_for_timeout(20), what="the tick, held")
+    saves = []
+    p.route("**/_/save", lambda r: saves.append(r))
+    p.click("#rd-notice button[data-d=restore]")       # it waits for the tick's answer
+    mark(p)
+    held[0].fulfill(status=409, content_type="application/json", body=REFUSED)
+    p.unroute("**/_/tick")
+    until(lambda: saves or p.wait_for_timeout(20), what="the Restore, sent once the tick is answered")
+    p.wait_for_timeout(500)
+    assert p.evaluate("window.__same_load") is True, "the page reloaded under the Restore"
+    saves[0].continue_()
+    p.unroute("**/_/save")
+    until(lambda: " typed" in f.read_text(encoding="utf-8"), what="the restored edit")
+    reloaded(p)

@@ -40,6 +40,7 @@ from .. import config, paths
 from ..source import md_hash
 from ..blocks import _split_lines, split_md_blocks
 from ..edit import TASK_MARK_RE, ticked_html
+from ..render import strip_comments
 from . import commits, place, projects
 from . import proxy as proxy_mod
 from . import roots as roots_mod
@@ -205,7 +206,9 @@ def read_sheaf(rel: str, text: str) -> Sheaf:
     for b in split_md_blocks(text):
         own = b.content.removesuffix("\n").split("\n")
         if b.kind == "heading" and not title and own[0].startswith("# "):
-            title = own[0][2:].strip()
+            # Without its comments, as the page draws it: a review comment anchored in the heading sits in it.
+            head = strip_comments(b.content).split("\n", 1)[0]
+            title = " ".join(head[2:].split()) if head.startswith("# ") else ""
         elif b.kind == "list":
             for k, line in enumerate(own):
                 if not (m := _ACTION_RE.fullmatch(line.removesuffix("\r"))):

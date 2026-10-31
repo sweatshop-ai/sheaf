@@ -552,7 +552,7 @@ class Handler:
         _, _, st = self._sheaf(req, doc)
         if not self._relay_live(row, st):
             raise self._relay_refused(req, row, "moved")
-        self._expire_relayed()
+        self.hub.expire_relayed()
         return self._relay_stream(req) if req.method == "GET" else self._relay_ack(req)
 
     @staticmethod
@@ -588,11 +588,16 @@ class Handler:
             if good:
                 try:
                     e = hub.entry(row["doc"])
-                    good = self._relay_live(row, work.state(hub, row["doc"], e.live.current()[1]))
+                    text = e.live.current()[1]
+                    # A member whose access to the sheaf was taken away gets no more of its threads (#135).
+                    good = self._relay_live(row, work.state(hub, row["doc"], text)) and hub.may_open(
+                        hub.proxy.members[row["member"]], row["doc"], visibility.front_matter(text))
                 except NotFound:
                     good = False
             return data if good else events.Renamed("gone", {"doc": row["doc"]})
         sub = self.relays.connect(row["doc"], row["session"], still_good)
+        if sub.fresh:                   # the page offers Tell from now (9.14); a reconnect changes nothing
+            hub.relay_changed(row["doc"], row["session"])
         who = {"relay": row["id"], "transcript": row["session"], **self._who(req)}
         sub.on_close = lambda: hub.record("relay-closed", row["doc"], **who)
         hub.record("relay-connected", row["doc"], **who)
@@ -612,27 +617,14 @@ class Handler:
             self.hub.record("tell-delivered", row["doc"], tell=t.id, thread=t.thread, relay=row["id"], **self._who(req))
         else:
             line = " ".join((error or "the relay could not deliver it").split())
-            self._relay_failed(row["doc"], t, "tell-relay-failed", line, relay=row["id"], **self._who(req))
+            self.hub.relay_failed(row["doc"], t, "tell-relay-failed", line, relay=row["id"], **self._who(req))
         return _ok()
-
-    def _relay_failed(self, address: str, t, kind: str, error: str, **fields):
-        """A relayed Tell that will not be delivered: its row, and the page's `tellError` by its event."""
-        self.hub.record(kind, address, tell=t.id, thread=t.thread, error=error, **fields)
-        e = self.hub.entries.get(address)
-        if e is not None:
-            e.bus.publish("tell-relay-failed", {"id": t.thread, "error": error})
-
-    def _expire_relayed(self):
-        """Drop every relayed Tell queued an hour ago or more: asked by each relay request, each relayed Tell and
-        each page's /_/doc, so one waits at most the 5 minutes of a relay's stream past its hour (9.14)."""
-        for address, t in self.relays.expire():
-            self._relay_failed(address, t, "tell-expired", relay.EXPIRED)
 
     def _relay_moved(self, address: str):
         """The sheaf's live session changed: its relay streams end and the Tells queued for the old one are dropped."""
         self.relays.end(address)
         for _, t in self.relays.drop(address):
-            self._relay_failed(address, t, "tell-relay-failed", RELAY_MOVED)
+            self.hub.relay_failed(address, t, "tell-relay-failed", RELAY_MOVED)
 
     def _token(self, req: Req) -> bool:
         """Whether the request carries an MCP token that is good now; its owner is on `req.token`."""
@@ -825,11 +817,12 @@ class Handler:
         if req.member is not None:
             # Their own seen state, and nothing of the hub account's agent session (9.9).
             # A sheaf's Work on this and its Ask and Tell for James's window are refreshed as the meta's (9.12).
-            self._expire_relayed()
+            self.hub.expire_relayed()
             work, can = self.hub.member_work(e, req.member)
             extra = {} if work is None else {"work": work}
             return _ok(**proxy.for_member(snap), seen=self.hub.member_seen.get(req.member.id, e.address),
-                       asking=[], question="", target=None, capabilities=can, lines=proxy.member_lines(), **extra)
+                       asking=[], question="", target=None, capabilities=can, lines=proxy.member_lines(),
+                       sent=self.hub.box_waits.pending(e.address, e.live.current()[1]), **extra)
         v = self.hub.asktell.view(e.address)
         return _ok(**snap, seen=self.hub.seen.get(e.address),
                    asking=self.hub.runner.active("ask", e.address),
@@ -1273,21 +1266,22 @@ class Handler:
         return Response(200, {"Content-Type": "application/x-ndjson", "Content-Disposition": _disposition(f"{sid}.jsonl"),
                               "Cache-Control": "no-store", "X-Sheaf-Session": sid}, body)
 
-    def _drop_for_james(self, req: Req, e, kind: str, body: str, thread: str) -> str:
+    def _drop_for_james(self, req: Req, e, kind: str, body: str, thread: str) -> tuple[str, str | None]:
         """The file Ask or Tell drops in `[list]`'s `tell_dir` for the box's supervisor to hand to James's session
         for the project with `sheaf deliver`, and its `tell-dropped` row. The hub runs no agent of its own for it.
-        A Tell carries its id and the words of a local Tell (`message`), so every path says the same (9.12)."""
+        A Tell carries its id and the words of a local Tell (`message`), so every path says the same (9.12).
+        (`written` or why not, the file's name when written)."""
         project = "/".join(Address.parse(e.address).rel.split("/")[:2])
         by = work.member_word(req.member)
         out = {"project": project, "member": by, "sheaf": e.address, "text": body[:work.TEXT_MAX], "kind": kind,
                "thread": thread, "address": e.address, "abs_path": str(e.path)}
         if kind == "tell":
             out.update(id=str(uuid.uuid4()), message=self._tell_message(req, e, thread))
-        drop = work.drop(self.hub.the_list.cfg.tell_dir, project, json.dumps(out).encode("utf-8"),
-                         "no tell_dir in [list]")
+        drop, name = work.drop_named(self.hub.the_list.cfg.tell_dir, project, json.dumps(out).encode("utf-8"),
+                                     "no tell_dir in [list]")
         self.hub.record("tell-dropped", e.address, what=kind, project=project, by=by, drop=drop,
                         **({"tell": out["id"]} if "id" in out else {}))
-        return drop
+        return drop, name
 
     def _tell_message(self, req: Req, e, thread: str) -> str:
         """What a member's Tell on the thread `thread` says to the session, in the words of a local Tell (11.3)."""
@@ -1303,19 +1297,25 @@ class Handler:
             return "box"
         return "relay" if kind == "tell" and "relay-tell" in can else None
 
-    def _relay_tell(self, req: Req, e, thread: str) -> str | None:
-        """Queue a member's Tell for the fork's relay and write `tell-relayed`; the page's `tellError`, or None."""
-        st = work.state(self.hub, e.address, e.live.current()[1])
-        if st is None or st.live != "laptop":
-            return RELAY_MOVED
+    def _relay_tell(self, req: Req, e, thread: str, session: str) -> str | None:
+        """Queue a member's Tell for the relay of the fork `session`, the live session the comment was judged on,
+        and write `tell-relayed`; the page's `tellError`, or None. Under the name's lock, where a fork is written
+        and its token issued (#134): a fork that landed since the comment was written does not receive it."""
         t = relay.Tell(str(uuid.uuid4()), thread, self._tell_message(req, e, thread), work.member_word(req.member))
-        self._expire_relayed()
-        try:
-            self.relays.put(e.address, st.sessions[0]["id"], t)
-        except relay.Full as ex:
-            return str(ex)
+        self.hub.expire_relayed()
+        with place.held(self.hub, e.address):
+            st = work.state(self.hub, e.address, e.live.current()[1])
+            if st is None or st.live != "laptop" or st.sessions[0]["id"] != session:
+                return RELAY_MOVED
+            try:
+                old = self.relays.put(e.address, session, t)
+            except relay.Full as ex:
+                return str(ex)
+        # A live session changed by hand, with no fork report to drop them: its Tells are dropped here (#134).
+        for _, gone in old:
+            self.hub.relay_failed(e.address, gone, "tell-relay-failed", RELAY_MOVED)
         self.hub.record("tell-relayed", e.address, tell=t.id, thread=thread, by=t.by,
-                        transcript=st.sessions[0]["id"], **self._who(req))
+                        transcript=session, **self._who(req))
         return None
 
     def _james_called(self, caller, address):
@@ -1403,9 +1403,9 @@ class Handler:
             if moved:
                 self.hub.index.touch(address)
                 self.hub.committed(address, by=caller.display, what="session")
+                self._relay_moved(address)          # under the name's lock, as a fork's (#134)
         self._drop_waiting(address, seq)
         if moved:
-            self._relay_moved(address)
             self.hub.record("session-recorded", address, transcript=sid, by="james")
 
     def _james_may_take(self, text: str, sid: str) -> bool:
@@ -1458,9 +1458,10 @@ class Handler:
                 raise Refuse(409, str(ex)) from None
             self.hub.index.touch(e.address)
             self.hub.committed(e.address, req.member, "fork")
-        # The fork is the live session now: the relay of the one before ends, and this one gets its own (9.14).
-        self._relay_moved(address)
-        token, rid = self.relays.issue(req.member_id, address, sid)
+            # The fork is the live session now: the relay of the one before ends, and this one gets its own (9.14).
+            # Under the name's lock, so two forks reported at once issue in the order they were written (#134).
+            self._relay_moved(address)
+            token, rid = self.relays.issue(req.member_id, address, sid)
         via = {"via": "code", "code": code.id} if code is not None else {}
         if code is not None:
             self.hub.record("code-used", address, code=code.id, route="sessions", **self._who(req))
@@ -1514,6 +1515,7 @@ class Handler:
             tell_line = self.hub.asktell.telling_line(e.address, b.get("id", ""))
         can_tell = tell and tell_line is None
         signed = {"by": member.name, "author": member.name} if member else {}
+        judged = []
         if member is not None:
             def still_visible(text):
                 # The gate (_entry) read the file before the lock: a write that closed the sheaf since is seen here,
@@ -1523,6 +1525,8 @@ class Handler:
                     raise Refuse(404, "no such document")
                 if to_box and self._work_route(e.address, text, to_box) != route:
                     raise Refuse(400, proxy.PROXY_LINE)
+                if route == "relay":        # the fork the Tell goes to: no newer one (#134)
+                    judged[:] = [work.sessions(fm)[0]["id"]]
             signed["guard"] = still_visible
         with place.held(self.hub, e.address):           # the write and its commit, one step (9.11)
             try:
@@ -1547,12 +1551,15 @@ class Handler:
             ask = tell = False
             to_box = None
         if to_box and route == "relay":
-            if (line := self._relay_tell(req, e, snap["id"])) is not None:
+            if (line := self._relay_tell(req, e, snap["id"], judged[0] if judged else "")) is not None:
                 snap["tellError"] = line
         elif to_box:
-            drop = self._drop_for_james(req, e, to_box, b["body"], snap["id"])
+            drop, name = self._drop_for_james(req, e, to_box, b["body"], snap["id"])
             if drop != "written":
                 snap[f"{to_box}Error"] = "The hub could not send this to James's window; the comment is written."
+            else:
+                # Open on the sheaf's pages until a reply lands in the thread, or past the Tell wait (#115).
+                self.hub.box_waits.add(e.address, snap["id"], to_box, e.live.current()[1], name)
         # The job looks the document up again when it starts: it names its thread in the text the
         # comment was just written in, so a forget in between, and another folder that takes the name,
         # cannot hand it that folder's thread of the same id (SPEC 7.3). A forget that leaves no folder

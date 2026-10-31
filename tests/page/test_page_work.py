@@ -9,7 +9,7 @@ import re
 import pytest
 
 from helpers import BEA
-from pagehelp import P1, at, select, toast, until
+from pagehelp import DOC, P1, at, select, toast, until
 from sheafmd import comments as rdc
 from sheafmd.hub import proxy
 from sheafmd.source import update_file
@@ -27,11 +27,12 @@ LAPTOP = {"id": "0b9d1e7c-4a2f-4e8b-9c3d-5f6a7b8c9d0e", "host": "thierry-laptop"
 SENT = "Sent to James’s window; his answer appears in this thread."
 
 
-def as_member(tab, work=None, can=(), doc_work=None, doc_can=None):
+def as_member(tab, work=None, can=(), doc_work=None, doc_can=None, sent=None):
     """The tab's page as Bea, a member of the proxy socket, gets it: her meta block, with `work` and `can`
     as given, in the first render and in the /_/doc answers (which, on the proxy socket, name no agent and
     carry the same `work` and `can` as the meta, 9.12). `doc_work` and `doc_can` make the /_/doc answers
-    say otherwise: a fork the hub has seen since the page was served."""
+    say otherwise: a fork the hub has seen since the page was served. `sent`, a list, is the drops for James's
+    window the /_/doc answers name as still open (#115), the hub's own on the proxy socket."""
     site = tab.site
     bea = proxy.Member(BEA, "Bea", (str(site.file.parent),))
     real = site.hub.page
@@ -54,6 +55,8 @@ def as_member(tab, work=None, can=(), doc_work=None, doc_can=None):
         w = work if doc_work is None else doc_work
         if w is not None:
             j["work"] = w
+        if sent is not None:
+            j["sent"] = [dict(x) for x in sent]
         docs.append(j)
         route.fulfill(response=r, json=j)
 
@@ -398,6 +401,72 @@ def test_the_sent_line_keeps_the_name_it_was_sent_to_after_a_fork(tab):
           what="the sent line, still naming James")
 
 
+def told_james(tab, sent):
+    """Bea tells James on a thread, through the page, and the /_/doc answers from then on name it in `sent`: the
+    list as_member was given, which its route reads at each answer, so the thread appended here is in the next."""
+    as_member(tab, work(), can=BOX_CAN, sent=sent)
+    tab.open()
+    sent_to_box(tab)
+    comment_form(tab)
+    tab.page.fill("#rd-popover textarea", "What does James think?")
+    tab.page.click("#rd-popover .rd-form button.rd-tell")
+    until(lambda: SENT in tab.page.inner_text("#rd-popover"), what="the sent line in the thread")
+    cid, = [c.id for c in rdc.parse(tab.site.file.read_text(encoding="utf-8")).comments]
+    sent.append({"id": cid, "kind": "tell", "state": "sent"})
+    return cid
+
+
+def reopen(tab, cid):
+    """A new load of the browser, once its /_/doc answer names a drop, and the thread `cid` opened."""
+    tab.page.reload()
+    until(lambda: tab.docs and "sent" in tab.docs[-1] and tab.docs[-1]["sent"], what="the /_/doc answer")
+    tab.page.click(f'.rd-anchor[data-rd-id="{cid}"]')
+    tab.page.wait_for_selector("#rd-popover .rd-thread, #rd-popover .rd-msg")
+
+
+def test_the_sent_line_outlasts_a_reload_of_the_browser_while_the_hub_holds_the_drop_open(tab):
+    # The hub keeps the drop open until a reply lands or the Tell wait passes (#115): a new load asks it.
+    cid = told_james(tab, [])
+    reopen(tab, cid)
+    until(lambda: SENT in tab.page.inner_text("#rd-popover"), what="the sent line after the browser's reload")
+
+
+def test_a_drop_the_hub_gives_up_on_takes_the_line_off_and_says_so(tab):
+    # No reply within the Tell wait: the hub's box-failed (#115).
+    cid = told_james(tab, [])
+    tab.site.hub.entry(DOC).bus.publish("box-failed", {"id": cid, "kind": "tell", "minutes": 10})
+    until(lambda: "after 10 min" in toast(tab.page), what="the toast")
+    assert "James" in toast(tab.page)
+    until(lambda: SENT not in tab.page.inner_text("#rd-popover"), what="the line taken off")
+
+
+@pytest.mark.parametrize("state, line", [("picked-up", "James’s window is opening"),
+                                         ("delivered", "James is working on it in his window")])
+def test_the_supervisors_word_on_a_drop_replaces_the_sent_line(tab, state, line):
+    # The hub reads <drop>.status and tells the page box-status (#139).
+    cid = told_james(tab, [])
+    tab.site.hub.entry(DOC).bus.publish("box-status", {"id": cid, "kind": "tell", "state": state})
+    until(lambda: line in tab.page.inner_text("#rd-popover"), what=f"the {state} line")
+    assert SENT not in tab.page.inner_text("#rd-popover")
+
+
+def test_the_supervisors_word_outlasts_a_reload_of_the_browser(tab):
+    sent = []
+    cid = told_james(tab, sent)
+    sent[0]["state"] = "delivered"
+    reopen(tab, cid)
+    until(lambda: "James is working on it in his window" in tab.page.inner_text("#rd-popover"),
+          what="the delivered line after the reload")
+
+
+def test_a_drop_the_supervisor_could_not_deliver_says_its_error(tab):
+    cid = told_james(tab, [])
+    tab.site.hub.entry(DOC).bus.publish("box-failed", {"id": cid, "kind": "tell", "error": "the window would not open"})
+    until(lambda: "the window would not open" in toast(tab.page), what="the toast")
+    assert "Tell James failed" in toast(tab.page)
+    until(lambda: SENT not in tab.page.inner_text("#rd-popover"), what="the line taken off")
+
+
 # ---- the sign-in code (9.13) ---------------------------------------------------------------------------------
 
 CODE = "sheaf_code_" + "A" * 43
@@ -502,3 +571,33 @@ def test_a_fork_whose_relay_is_not_connected_says_so_in_work_on_this(tab):
     open_work(tab.page)
     assert tab.page.inner_text("#rd-work .rd-relay") == \
         "Thierry’s session on thierry-laptop is not connected: Tell works again when it is."
+
+
+def test_a_relay_that_connects_turns_tell_on_without_a_reload(tab):
+    # The hub's `relay` event (#135): the page reads /_/doc again at once, not at its next check.
+    w, can = relayed(False), []
+    as_member(tab, w, doc_work=w, doc_can=can)
+    tab.open()
+    until(lambda: tab.docs, what="the page's first /_/doc answer")
+    comment_form(tab)
+    assert [e for _, e in agent_buttons(tab.page, "#rd-popover .rd-form")] == [False, False]
+    w["relay"], can[:] = True, ["relay-tell"]
+    seen = len(tab.docs)
+    tab.site.hub.entry(DOC).bus.publish("relay", {})
+    until(lambda: len(tab.docs) > seen, what="the /_/doc the relay event asks for")
+    tab.page.keyboard.press("Escape")
+    comment_form(tab)
+    assert [e for _, e in agent_buttons(tab.page, "#rd-popover .rd-form")] == [False, True]
+
+
+def test_a_relay_gone_past_its_grace_turns_tell_off_without_a_reload(tab):
+    w, can = relayed(True), ["relay-tell"]
+    as_member(tab, w, can=["relay-tell"], doc_work=w, doc_can=can)
+    tab.open()
+    until(lambda: tab.docs, what="the page's first /_/doc answer")
+    w["relay"], can[:] = False, []
+    seen = len(tab.docs)
+    tab.site.hub.entry(DOC).bus.publish("relay", {})
+    until(lambda: len(tab.docs) > seen, what="the /_/doc the relay event asks for")
+    comment_form(tab)
+    assert [e for _, e in agent_buttons(tab.page, "#rd-popover .rd-form")] == [False, False]

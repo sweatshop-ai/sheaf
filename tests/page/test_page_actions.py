@@ -3,7 +3,7 @@ as the list's buttons, a one-off red with the 5 second Undo and locked once pres
 the list's tick (`POST /_/tick`, 9.10): the markdown on disk is what a tick writes, `- [x] <word>`."""
 import pytest
 
-from pagehelp import DOC, at, comment_on, mark, reloaded, toast, type_at_end, until
+from pagehelp import DOC, at, comment_on, key, mark, reloaded, select, toast, type_at_end, until
 
 pytestmark = pytest.mark.page
 
@@ -409,3 +409,235 @@ def test_a_sign_out_while_a_press_is_out_does_not_reload_under_its_answer(sheaf,
     p.wait_for_timeout(500)
     assert p.evaluate("window.__same_load") is True, "the page reloaded over the refusal"
     assert "- [ ] Approve" in f.read_text(encoding="utf-8")
+
+
+# The P3s #144's gates left (#148).
+
+REFUSED = '{"ok": false, "error": "the sheaf changed since the page read it (Approve): reload the page"}'
+
+
+def test_an_upgrade_while_a_press_is_out_says_its_refusal_again_on_the_page_it_brings(sheaf, site):
+    # #148, 1: the upgrade waited for the tick through the page's writes, not for the press, and reloaded without it.
+    p = sheaf.page
+    p.add_init_script(HEARD)
+    p.reload()
+    p.wait_for_selector("#rd-actions button")
+    held = []
+    p.route("**/_/tick", lambda r: held.append(r))
+    stand_still(p)
+    bar(p).nth(0).click()
+    p.clock.run_for(5100)
+    until(lambda: held or p.wait_for_timeout(20), what="the tick, held")
+    p.route("**/_/doc?*", lambda r: r.abort())          # the hello's look at the text finds nothing to add
+    mark(p)
+    site.hub.entry(DOC).bus.publish("hello", {"version": "99.0.0"})
+    until(lambda: heard(p, "hello"), what="the upgrade")
+    held[0].fulfill(status=409, content_type="application/json", body=REFUSED)
+    p.wait_for_timeout(200)
+    p.clock.run_for(100)                                # the wait for the page's writes ends after 50 ms
+    reloaded(p)
+    p.wait_for_selector("#rd-actions button")
+    until(lambda: "the sheaf changed" in toast(p), what="the refusal, said again on the new page")
+
+
+def test_a_reload_asked_only_by_an_upgrade_saves_what_was_typed_during_the_press(sheaf, site):
+    # #148, 2: the upgrade's reload went straight to location.reload once the press was done.
+    p, f = sheaf.page, sheaf.site.file
+    p.add_init_script(HEARD)
+    p.reload()
+    p.wait_for_selector("#rd-actions button")
+    p.route("**/_/tick", lambda r: r.fulfill(status=409, content_type="application/json", body=REFUSED))
+    p.route("**/_/doc?*", lambda r: r.abort())
+    stand_still(p)
+    bar(p).nth(0).click()
+    site.hub.entry(DOC).bus.publish("hello", {"version": "99.0.0"})
+    until(lambda: heard(p, "hello"), what="the upgrade, whose reload waits for the press")
+    p.clock.run_for(4000)
+    type_at_end(p, "main p:has-text('Body')", " typed")
+    until(lambda: "typed" in p.inner_text("main p:has-text('Body')"), what="the edit on screen")
+    p.clock.run_for(1100)                               # the press is refused; the edit's autosave is not due yet
+    until(lambda: " typed" in f.read_text(encoding="utf-8"), what="the edit, saved before the reload")
+
+
+def merged_once(p, key):
+    """The first save that sends "Run it" is answered as `key` says, besides what the hub answers."""
+    done = []
+    def answer(route):
+        if done or "Run it" not in (route.request.post_data or ""):
+            route.continue_()
+            return
+        done.append(1)
+        r = route.fetch()
+        j = r.json()
+        j[key] = True
+        route.fulfill(response=r, json=j)
+    p.route("**/_/save", answer)
+
+
+def test_a_saved_action_box_is_not_ticked_while_a_press_holds_the_reload_of_its_merged_save(sheaf):
+    # #148, 3: the box's block was clean, so no save looked at it, and the box ticked through the next save.
+    p, f = sheaf.page, sheaf.site.file
+    merged_once(p, "merged")
+    stand_still(p)
+    type_at_end(p, "main li:has-text('Share')", "")
+    p.keyboard.press("Enter")
+    p.keyboard.type("Run it")
+    bar(p).nth(0).click()
+    p.clock.run_for(3000)                               # the autosave goes, merged: its reload waits for the press
+    until(lambda: "- [ ] Run it" in f.read_text(encoding="utf-8"), what="the saved action")
+    until(lambda: p.evaluate("document.querySelector('#rd-state').textContent") != "Saving…", what="its answer")
+    p.locator("main li:has-text('Run it') input[type=checkbox]").click()
+    until(lambda: "tick it once it has" in toast(p), what="the line that says the page reloads first")
+    p.wait_for_timeout(500)
+    assert "[x] Run it" not in f.read_text(encoding="utf-8")
+    bar(p).nth(0).click()                               # Undo
+
+
+DEAF = """(() => {
+  const ES = window.EventSource;
+  window.__deaf = false;
+  window.EventSource = class extends ES {
+    addEventListener(k, f, o) {
+      super.addEventListener(k, k === 'changed' ? (ev => { if (!window.__deaf) f(ev); }) : f, o);
+    }
+  };
+})()"""
+
+
+def test_a_saved_action_box_is_not_ticked_after_a_save_answered_again(sheaf):
+    # #148, 3: an `again` answer keeps the hash of the text on screen and brings no buttons. It comes after a send
+    # the page gave up on, whose `changed` it did not hear: the stream misses it here too.
+    p, f = sheaf.page, sheaf.site.file
+    p.add_init_script(DEAF)
+    p.reload()
+    p.wait_for_selector("#rd-actions button")
+    p.evaluate("window.__deaf = true")
+    merged_once(p, "again")
+    type_at_end(p, "main li:has-text('Share')", "")
+    p.keyboard.press("Enter")
+    p.keyboard.type("Run it")
+    until(lambda: "- [ ] Run it" in f.read_text(encoding="utf-8"), what="the saved action")
+    until(lambda: p.evaluate("document.querySelector('#rd-state').textContent") != "Saving…", what="its answer")
+    mark(p)
+    p.locator("main li:has-text('Run it') input[type=checkbox]").click()
+    reloaded(p)
+    until(lambda: bar(p).all_inner_texts() == ["Approve", "Done", "Share", "Run it"], what="its button")
+    p.wait_for_timeout(500)
+    assert "[x] Run it" not in f.read_text(encoding="utf-8")
+
+
+def test_a_comment_sent_while_the_tick_is_out_waits_for_its_answer(sheaf):
+    # #148, 4: the comment reached the hub first and the tick, naming the text before it, was refused.
+    p, f = sheaf.page, sheaf.site.file
+    held = []
+    p.route("**/_/tick", lambda r: held.append(r))
+    select(p, at("main", "Body"), at("main", "Body", None))
+    p.click("#rd-comment-btn")
+    p.fill("#rd-popover textarea", "Why?")
+    stand_still(p)
+    bar(p).nth(0).click()
+    p.clock.run_for(5100)
+    until(lambda: held or p.wait_for_timeout(20), what="the tick, held")
+    p.click("#rd-popover button[data-f=ok]")
+    p.wait_for_timeout(500)
+    held[0].continue_()
+    p.unroute("**/_/tick")
+    until(lambda: "- [x] Approve" in f.read_text(encoding="utf-8"), what="the tick")
+    until(lambda: "Why?" in f.read_text(encoding="utf-8"), what="the comment after it")
+
+
+def test_a_comment_answered_during_the_undo_does_not_move_the_text_the_press_names(sheaf):
+    # #148, 4: the comment's answer moved the page's hash and the press still named the text before it.
+    p, f = sheaf.page, sheaf.site.file
+    select(p, at("main", "Body"), at("main", "Body", None))
+    p.click("#rd-comment-btn")
+    p.fill("#rd-popover textarea", "Why?")
+    stand_still(p)
+    bar(p).nth(0).click()
+    p.click("#rd-popover button[data-f=ok]")
+    until(lambda: "Why?" in f.read_text(encoding="utf-8"), what="the comment, in the file during the Undo")
+    p.wait_for_timeout(300)
+    p.clock.run_for(5100)
+    until(lambda: "- [x] Approve" in f.read_text(encoding="utf-8"), what="the tick")
+    assert "Why?" in f.read_text(encoding="utf-8")
+
+
+def test_a_box_clicked_twice_while_the_tick_is_out_says_saving_and_ticks_once(tab, site):
+    # #148, 5: the wait said nothing, and the second click queued a toggle that undid the first.
+    p, f = tab.page, site.file
+    f.write_text(PLAIN, encoding="utf-8")
+    p.clock.install()
+    tab.open()
+    p.wait_for_selector("#rd-actions button")
+    held = []
+    p.route("**/_/tick", lambda r: held.append(r))
+    stand_still(p)
+    bar(p).nth(0).click()
+    p.clock.run_for(3000)
+    type_at_end(p, "main li:has-text('plain task')", " now")
+    p.clock.run_for(2100)
+    until(lambda: held or p.wait_for_timeout(20), what="the tick, held")
+    box = p.locator("main li:has-text('plain task') input[type=checkbox]")
+    box.click()
+    box.click()
+    until(lambda: p.evaluate("document.querySelector('#rd-state').textContent") == "Saving…", what="Saving…")
+    mark(p)
+    held[0].continue_()
+    p.unroute("**/_/tick")
+    until(lambda: "- [x] Approve" in f.read_text(encoding="utf-8"), what="the tick")
+    until(lambda: "- [x] plain task now" in f.read_text(encoding="utf-8"), what="the box, ticked once")
+    reloaded(p)
+    p.wait_for_selector("main li:has-text('plain task')")
+    p.wait_for_timeout(500)
+    assert "- [x] plain task now" in f.read_text(encoding="utf-8")
+
+
+def test_a_sign_out_during_a_press_with_nothing_typed_says_so_and_undo_goes_to_the_sign_in(sheaf, site):
+    # #148, 6: the notice spoke of edits on screen, and after Undo the page stayed on it.
+    p = sheaf.page
+    mark(p)
+    stand_still(p)
+    bar(p).nth(0).click()
+    site.hub.entry(DOC).bus.publish("signed-out", {})
+    until(lambda: "signed out" in p.inner_text("#rd-notice"), what="the signed-out notice")
+    assert "edits" not in p.inner_text("#rd-notice")
+    bar(p).nth(0).click()                               # Undo
+    reloaded(p)
+
+
+def test_an_edit_in_the_pressed_actions_own_block_keeps_the_tick(sheaf):
+    # #148, 7: the settle's save of the edit was merged against the ticked file and put the box back.
+    p, f = sheaf.page, sheaf.site.file
+    stand_still(p)
+    bar(p).nth(0).click()
+    p.clock.run_for(4000)
+    type_at_end(p, "main li:has-text('Done')", " now")
+    until(lambda: "now" in p.inner_text("main li:has-text('Done')"), what="the edit on screen")
+    p.clock.run_for(1100)
+    until(lambda: "Done now" in f.read_text(encoding="utf-8"), what="the edit, saved by the reload's settle")
+    assert "- [x] Approve" in f.read_text(encoding="utf-8")
+
+
+def test_a_box_whose_save_is_refused_does_not_tick_because_an_older_save_is_owed(tab, site):
+    # #148, 9: tickBox read autosaveOwed, which an earlier save had left.
+    p, f = tab.page, site.file
+    f.write_text(PLAIN, encoding="utf-8")
+    tab.open()
+    p.wait_for_selector("#rd-actions button")
+    calls = []
+    def save(route):
+        calls.append(1)
+        if len(calls) == 1:
+            route.abort()
+        else:
+            route.fulfill(status=409, content_type="application/json", body='{"ok": false, "error": "refused"}')
+    p.route("**/_/save", save)
+    type_at_end(p, "main p:has-text('Body')", " typed")
+    until(lambda: calls, timeout=10, what="the autosave, cut off: owed")
+    p.click("main li:has-text('plain task')")
+    p.keyboard.press(key("End"))
+    p.keyboard.type(" now")
+    p.locator("main li:has-text('plain task') input[type=checkbox]").click()
+    until(lambda: len(calls) >= 2, what="its save, refused")
+    p.wait_for_timeout(500)
+    assert p.locator("main li:has-text('plain task') input[type=checkbox]").get_attribute("checked") is None

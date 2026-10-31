@@ -55,11 +55,13 @@ SET_KEYS = """(() => { const set = Storage.prototype.setItem, keys = window.__se
 
 
 def mount_the_list(chromium, box, opts=None, **options):  # noqa: F811
-    ticks, errors = [], []
+    ticks, errors, refuse = [], [], []
 
     def answer(route):
         req = route.request
         path = req.url[len(ORIGIN):]
+        if refuse and path.startswith("/_/mount?"):
+            return route.fulfill(status=refuse[0], content_type="application/json", body='{"error": "sign in"}')
         if path == FRONT:
             return route.fulfill(status=200, content_type="text/html", body=front_html(opts or {"list": "list"}))
         if req.method == "POST" and path == "/_/tick":
@@ -81,6 +83,7 @@ def mount_the_list(chromium, box, opts=None, **options):  # noqa: F811
     until(lambda: page.evaluate("!!(window.__page || window.__failed)"), what="the mount")
     assert page.evaluate("window.__failed || null") is None
     m = Mounted(page, ticks, errors)
+    m.refuse = refuse
     until(lambda: m.text(".list-row") is not None, what="the list's rows in the root")
     yield m
     try:
@@ -193,3 +196,18 @@ def test_render_keeps_no_address_that_is_not_a_path_on_the_origin(mounted, href)
     assert got == ([None, None] if href != "/%2F/evil.test" else [href, href])
     if href == "/%2F/evil.test":
         assert mounted.page.evaluate("(h) => new URL(h, location.href).origin === location.origin", href)
+
+
+def test_a_remount_that_fails_after_a_press_says_so_and_gives_the_buttons_back(mounted, sheaves):  # noqa: F811
+    """The list's remount failure was swallowed and `reloading` stayed set: every button dead, nothing said (gate P3 of
+    b9db2ab, with Ines's P2)."""
+    m = mounted
+    m.press(m.button(JOEY))
+    m.refuse.append(401)
+    m.page.clock.run_for(5100)
+    until(lambda: m.ticks, what="the tick")
+    until(lambda: m.js("const e = root.querySelector('.list-error'); return !e.hidden && e.textContent.includes('401');"),
+          what="the failure said above the rows")
+    m.refuse.clear()
+    m.press(m.button(GA4))
+    assert m.text(m.button(GA4)) == "Undo", "the other rows' buttons are dead"

@@ -17,6 +17,13 @@
   const HTML_NS = 'http://www.w3.org/1999/xhtml';
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const ID_PREFIX = 'u-';
+  // The version of the hub that served this file, written in by the hub (handler._mount_asset). A hub answering with
+  // another version was upgraded under the page, and the page.js in memory is the old one.
+  const VERSION = '@@SHEAF_VERSION@@';
+  const KNOWN = !VERSION.startsWith('@@');
+  // Each pane's closed root, kept here: attachShadow works once per element, so a pane mounted again (a failed first
+  // try, the list after a sheaf) reuses its root, and `live` is the mount standing in it.
+  const PANES = new WeakMap();
   const MAX_DEPTH = 60;
   const MAX_NODES = 200000;
   const MAX_TEXT = 4 * 1024 * 1024;
@@ -303,13 +310,17 @@
    *  toc, unmount, dirty, remount}. remount() fetches the page again and builds it in place of the old one, which is what a
    *  reload of a page of its own did; the page calls it where it called location.reload(). The wrapper is the scroller and
    *  takes focus on a click, so the page's keys reach its root. With `opts.list` (a root's name) and `opts.show` instead
-   *  of `opts.doc`, the list: its rows are data, drawn by list.js `render` from text, and its script is sheafList.create. */
+   *  of `opts.doc`, the list: its rows are data, drawn by list.js `render` from text, and its script is sheafList.create.
+   *  The root is attached at the first good answer, and a pane keeps it: mount() on a pane that holds a page takes that
+   *  page down first. An answer of another hub version builds nothing: `opts.upgrade(version)` is called, so the loader
+   *  loads that version's script and mounts with it (on a new host: a pane's root belongs to the script that made it);
+   *  without it the pane says to reload. A remount that fails is said in the page, which stays as it was. */
   async function mount(host, opts) {
     const list = opts.list != null;
     const url = list
       ? '/_/mount?list=' + encodeURIComponent(opts.list) + (opts.show ? '&show=' + encodeURIComponent(opts.show) : '')
       : '/_/mount?doc=' + encodeURIComponent(opts.doc);
-    const root = host.attachShadow({ mode: 'closed' });
+    let root = null;
     const doc = host.ownerDocument;
     const kit = list ? window.sheafList : window.sheafPage;          // taken now: a later front script cannot swap it in
     const create = kit && kit.create;
@@ -322,15 +333,39 @@
     let drawn = 0;
     let gone = false;
     let cut = () => {};
+    let handle = null;
     async function draw() {
       const mine = ++drawn;
       cut();
       const stale = () => gone || mine !== drawn;
-      const res = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
-      if (!res.ok) throw new Error('the hub answered ' + res.status + ' for ' + (list ? 'the list' : opts.doc));
-      const fresh = await res.json();
+      let fresh;
+      try {
+        const res = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+        if (!res.ok) throw new Error('the hub answered ' + res.status + ' for ' + (list ? 'the list' : opts.doc));
+        fresh = await res.json();
+      } catch (e) {
+        if (stale()) return got;                    // overtaken: its failure is no one's
+        throw e;
+      }
       if (stale()) return got;
       if (list && (fresh.kind !== 'list' || !render)) throw new Error('the hub sent no list');
+      if (!root) {
+        const pane = PANES.get(host) || { root: host.attachShadow({ mode: 'closed' }), live: null };
+        PANES.set(host, pane);
+        if (pane.live && pane.live !== handle) pane.live.unmount();
+        pane.live = handle;
+        root = pane.root;
+      }
+      if (KNOWN && fresh.version !== VERSION) {
+        if (typeof opts.upgrade === 'function') { got = got || fresh; opts.upgrade(fresh.version); return got; }
+        got = got || fresh;
+        if (page) page.unmount();
+        page = null;
+        const p = doc.createElement('p');
+        p.textContent = 'sheaf was updated on the hub. Reload this page to see the new version.';
+        root.replaceChildren(p);
+        return got;
+      }
       got = fresh;
       const parts = [];
       if (!list) {
@@ -350,17 +385,26 @@
       root.replaceChildren(...parts, link, wrap);
       await new Promise((done) => { link.onload = link.onerror = done; cut = done; });   // the page measures its parts: their styles first
       if (stale()) return got;
-      const again = { body: wrap, remount: () => { draw().catch(() => {}); } };
+      const again = { body: wrap, remount: () => {
+        draw().catch((e) => {
+          if (!gone && page && page.failed) page.failed('The page could not be loaded again: ' + e.message + '. Reload to try again.');
+        });
+      } };
       if (create) page = list ? create(root, again) : create(root, got.config, again);
       return got;
     }
-    await draw();
-    return {
+    handle = {
       get config() { return got.config; }, get title() { return got.title; }, get toc() { return got.toc; },
-      unmount() { gone = true; cut(); if (page) page.unmount(); page = null; root.replaceChildren(); },
+      unmount() {
+        gone = true; cut(); if (page) page.unmount(); page = null;
+        const pane = PANES.get(host);
+        if (pane && pane.live === handle) { pane.live = null; pane.root.replaceChildren(); }
+      },
       dirty() { return !!page && page.dirty(); },
       remount: draw,
     };
+    await draw();
+    return handle;
   }
 
   window.sheafMount = Object.freeze({ rebuild, mount, ID_PREFIX, cleanStyle });

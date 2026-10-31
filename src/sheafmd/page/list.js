@@ -74,6 +74,9 @@ function create(ROOT, opts) {
   return {
     unmount: function () { gone = true; timers.forEach(function (t) { clearTimeout(t); }); timers.clear(); },
     dirty: function () { return !gone && open > 0; },
+    // The remount after a press could not fetch the list: the rows stay as they were, and so do the buttons the presses
+    // locked (their text is the old one); the others can be pressed again, and the next settled press remounts.
+    failed: function (msg) { if (gone) return; reloading = false; say(msg); },
   };
 }
 

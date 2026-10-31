@@ -930,11 +930,17 @@
   // A draft's Restore between its click and its answer (offerDraft). It may wait for a tick that is out, and so is
   // not yet among the writes whose `changed` the page holds (ownWrites): a reload asked meanwhile, the tick's own
   // among them, waits for its answer, or it would go before the Restore is sent. Every reload of a change, held or
-  // not, comes through settle.
+  // not, comes through settle. A form opened during that wait holds the reload as any other (reloadWhenFree).
   var restoring = null;
   async function settle(openId) {
     if (settling || docGone) return;
-    if (restoring) { restoring.then(function () { settle(openId); }); return; }
+    if (restoring) {
+      var why = heldReload || undefined;
+      restoring.then(function () {
+        if (writingNow({ sent: 'any' })) holdReload(why); else settle(openId);
+      });
+      return;
+    }
     // Every reload of an outside change, a held one too, comes here: one waits for an open press (SPEC 10.11).
     if (pressOpen) { waitForPress({ open: openId }); return; }
     settling = true;

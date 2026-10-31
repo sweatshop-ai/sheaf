@@ -834,3 +834,48 @@ def test_a_restore_waiting_for_the_tick_is_answered_before_the_page_reloads(tab,
     p.wait_for_timeout(500)
     assert p.query_selector("#rd-notice button[data-d=restore]") is None, "the draft is offered again"
     assert p.evaluate(f"localStorage.getItem({draft_key(site)!r})") is None
+
+
+def test_a_comment_opened_while_a_reload_waits_for_the_restore_holds_that_reload(tab, context, site):
+    # #153, gate on 49f0491: the reload put off for the Restore went on once it was answered, under the comment
+    # form opened meanwhile.
+    f = site.file
+    f.write_text(SHEAF, encoding="utf-8")
+    tab.open()
+    tab.page.wait_for_selector("#rd-actions button")
+    site.kill()
+    type_at_end(tab.page, "main p:has-text('Body')", " typed")
+    until(lambda: tab.page.evaluate(f"localStorage.getItem({draft_key(site)!r})"), what="the draft")
+    tab.page.close()
+    site.start()
+    p = context.new_page()
+    p.add_init_script(HEARD)
+    p.clock.install()
+    p.goto(site.url)
+    p.wait_for_selector("#rd-notice button[data-d=restore]")
+    p.wait_for_selector("#rd-actions button")
+    held = []
+    p.route("**/_/tick", lambda r: held.append(r))
+    stand_still(p)
+    bar(p).nth(0).click()
+    p.clock.run_for(5100)
+    until(lambda: held or p.wait_for_timeout(20), what="the tick, held")
+    saves = []
+    p.route("**/_/save", lambda r: saves.append(r))
+    p.click("#rd-notice button[data-d=restore]")
+    answer = held[0].fetch()
+    until(lambda: heard(p, "changed") or p.wait_for_timeout(20), what="the tick's change")
+    mark(p)
+    held[0].fulfill(response=answer)
+    p.unroute("**/_/tick")
+    until(lambda: saves or p.wait_for_timeout(20), what="the Restore, sent once the tick is answered")
+    select(p, at("main", "Body"), at("main", "Body", None))
+    p.clock.run_for(500)                                # the Comment button shows after the selection settles
+    p.click("#rd-comment-btn")
+    p.fill("#rd-popover textarea", "Why?")
+    saves[0].continue_()
+    p.unroute("**/_/save")
+    until(lambda: " typed" in f.read_text(encoding="utf-8"), what="the restored edit")
+    p.wait_for_timeout(1000)
+    assert p.evaluate("window.__same_load") is True, "the page reloaded under the comment form"
+    assert p.input_value("#rd-popover textarea") == "Why?"

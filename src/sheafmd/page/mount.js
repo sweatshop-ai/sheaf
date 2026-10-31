@@ -344,6 +344,27 @@
     let cut = () => {};
     let handle = null;
     let overtaken = false;
+    // The root is closed, so the front cannot see which link in it was clicked (composedPath stops at the host). A plain
+    // click on a link of this origin goes to `opts.navigate(path)` and the loader moves; a modified click, a target, a
+    // download, an edit and a link elsewhere are the browser's. A fragment is looked up in the front's document, where the
+    // page's ids are not: its element in the root is scrolled to instead, and the front's address stays as it is.
+    function follow(e) {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+      if (!a || a.isContentEditable || a.hasAttribute('target') || a.hasAttribute('download')) return;
+      const href = a.getAttribute('href');
+      if (href.startsWith('#')) {
+        e.preventDefault();
+        const to = root && href.length > 1 ? root.getElementById(href.slice(1)) : null;
+        if (to) to.scrollIntoView({ block: 'start' });
+        return;
+      }
+      if (typeof opts.navigate !== 'function') return;
+      const to = new URL(a.href, location.href);
+      if (to.origin !== location.origin) return;
+      e.preventDefault();
+      opts.navigate(to.pathname + to.search + to.hash);
+    }
     async function draw() {
       const mine = ++drawn;
       cut();
@@ -397,6 +418,7 @@
       const wrap = doc.createElement('div');
       wrap.className = list ? 'rd-root sheaf-list' : 'rd-root' + (got.toc ? '' : ' notoc');
       wrap.tabIndex = -1;
+      wrap.addEventListener('click', follow);
       wrap.appendChild(list ? render(got.list, wrap) : rebuild(got.html, wrap));
       if (page) page.unmount();
       page = null;

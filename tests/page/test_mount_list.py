@@ -24,7 +24,8 @@ def front_html(opts):
 <div id="pane" style="height:640px"></div>
 <script src="/_/mount.js"></script>
 <script>window.__front = true;
-sheafMount.mount(document.getElementById('pane'), {json.dumps(opts)})
+sheafMount.mount(document.getElementById('pane'), Object.assign({json.dumps(opts)},
+  {{navigate: (path) => {{ (window.__moves = window.__moves || []).push(path); }}}}))
   .then((m) => {{ window.__page = m; }}, (e) => {{ window.__failed = String(e); }});</script>
 </body></html>"""
 
@@ -211,3 +212,15 @@ def test_a_remount_that_fails_after_a_press_says_so_and_gives_the_buttons_back(m
     m.refuse.clear()
     m.press(m.button(GA4))
     assert m.text(m.button(GA4)) == "Undo", "the other rows' buttons are dead"
+
+
+def test_a_filter_and_a_title_clicked_in_the_mounted_list_go_to_the_loader_not_the_front(mounted):
+    """The list's links moved the whole front window (gate P3 of b9db2ab): mount.js hands them to opts.navigate."""
+    m = mounted
+    m.press("a.list-filter[href='/list?show=all']")
+    assert until(lambda: m.page.evaluate("window.__moves || null"), what="the move") == ["/list?show=all"]
+    title = m.js("return root.querySelector('a.list-title').getAttribute('href');")
+    m.press("a.list-title")
+    until(lambda: len(m.page.evaluate("window.__moves")) == 2, what="the second move")
+    assert m.page.evaluate("window.__moves")[1] == title
+    assert m.page.evaluate("[location.pathname, window.__front]") == [FRONT, True]

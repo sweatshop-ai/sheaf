@@ -763,10 +763,14 @@ class Handler:
         commit and the open tabs see what a tick in the page makes them see."""
         b = req.body
         e = self._entry(req, b.get("doc"))
-        n, word, read = b.get("action"), b.get("word"), b.get("hash")
+        n, word, read, release = b.get("action"), b.get("word"), b.get("hash"), b.get("release", False)
         _shape(type(n) is int and n >= 0, "action must be the number of the sheaf's action, from 0")
         _shape(isinstance(word, str) and word != "", "word must be the action's word")
         _shape(isinstance(read, str) and read != "", "hash must be the hash of the sheaf the list read")
+        _shape(type(release) is bool, "release must be true or false")
+        if release and word not in the_list.TOGGLES:
+            # Only a toggle is released (#110): a one-off stays pressed (#108).
+            raise Refuse(409, f"{word} is pressed once: its tick cannot be taken back.")
         # The edit is built from the text the list read, never from an older copy the hub holds: the watcher does not
         # refresh a page no tab has open, and a merge of an edit of that copy can tick another box of the word.
         self.hub.catch_up(e)
@@ -778,7 +782,7 @@ class Handler:
             h, text = e.live.current()
         if h != read:
             raise Refuse(409, f"the sheaf changed since the list read it ({word}): reload the list")
-        edit = the_list.tick_edit(text, n, word)
+        edit = the_list.tick_edit(text, n, word, release)
         if edit is None:
             raise Refuse(409, f"the sheaf no longer holds that action ({word}): reload the list")
         with place.held(self.hub, e.address):
@@ -801,10 +805,10 @@ class Handler:
                 self.hub.index.touch(e.address)
                 gone = moved[0] if moved else self._placed(e, ticked)
                 moved.clear()
-                self.hub.committed(e.address, req.member, "tick", gone=gone)
+                self.hub.committed(e.address, req.member, "untick" if release else "tick", gone=gone)
         if "Stop James" in ticked:
             self._stop_james(req, e)
-        if self.hub.the_list is not None:
+        if self.hub.the_list is not None and not release:     # a release answers nothing: the row stays where it is
             self.hub.the_list.ticked(e.address)
         return _ok(hash=got["hash"])
 

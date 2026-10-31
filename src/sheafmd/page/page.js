@@ -1013,11 +1013,12 @@
   // and not yet answered. A reload the page needs is held until then: it waits as a
   // pending flag with a quiet line above the form, and runs when the form is sent or
   // cancelled, with the thread just written kept open.
-  // `heldReload` is why the reload that has just run was held ('text', 'arrived', 'restore'), false for one
+  // `heldReload` is why the reload that has just run was held ('text', 'arrived', 'restore', 'upgrade'), false for one
   // that was not; `holdWhy` is the reason of the pending one; `holdOpen` the thread a new comment sent
   // behind another send has, which that reload opens.
   var reloadPending = false, heldReload = false, holdWhy = null, holdOpen = null;
-  var HELD_SAYS = { text: 'The text changed while you wrote.', restore: 'Your restored edits are in.' };
+  var HELD_SAYS = { text: 'The text changed while you wrote.', restore: 'Your restored edits are in.',
+                    upgrade: 'The sheaf hub was upgraded while you wrote.' };
   // The forms whose send is out, one {host, own, says, rid} each: the popover it was sent from, the thread
   // of that popover (null for a new comment), the line that popover shows meanwhile and the send's request
   // id. A send is per form: it holds back what would close the popover it comes back to, not every popover
@@ -2902,8 +2903,9 @@
         var r = reloadAfterPress;
         reloadAfterPress = null;
         // Only upgrades asked: a plain reload, unless edits were typed or a form opened during the press. Then it
-        // goes as a change's does, which saves them first or waits for the form.
-        if (r.keep && !dirty().length && !writingNow({ page: true })) reloadKeep(r.open); else reloadWhenFree(r.open, r.why);
+        // goes as a change's does, which saves them first or waits for the form, held as an upgrade's.
+        if (r.keep && !dirty().length && !writingNow({ page: true })) reloadKeep(r.open);
+        else reloadWhenFree(r.open, r.why || (r.keep ? 'upgrade' : undefined));
       }
     }
     async function send() {

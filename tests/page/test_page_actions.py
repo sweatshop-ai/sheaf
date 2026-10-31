@@ -3,7 +3,7 @@ as the list's buttons, a one-off red with the 5 second Undo and locked once pres
 the list's tick (`POST /_/tick`, 9.10): the markdown on disk is what a tick writes, `- [x] <word>`."""
 import pytest
 
-from pagehelp import DOC, at, comment_on, key, mark, reloaded, select, toast, type_at_end, until
+from pagehelp import DOC, at, comment_on, key, mark, reloaded, select, toast, toasted, type_at_end, until
 
 pytestmark = pytest.mark.page
 
@@ -761,3 +761,29 @@ def test_an_upgrade_while_a_save_waits_for_the_tick_does_not_ask_to_save(sheaf, 
     p.unroute("**/_/tick")
     until(lambda: "- [x] Approve" in f.read_text(encoding="utf-8"), what="the tick")
     until(lambda: " typed" in f.read_text(encoding="utf-8"), what="the save after it")
+
+
+def test_an_upgrade_held_by_a_comment_form_during_a_press_does_not_say_the_text_changed(sheaf, site):
+    # #153, 3: the reload held for the form had no reason of its own, and the page it brought said the text changed.
+    p = sheaf.page
+    p.add_init_script(HEARD)
+    p.reload()
+    p.wait_for_selector("#rd-actions button")
+    p.route("**/_/doc?*", lambda r: r.abort())
+    stand_still(p)
+    bar(p).nth(0).click()
+    site.hub.entry(DOC).bus.publish("hello", {"version": "99.0.0"})
+    until(lambda: heard(p, "hello"), what="the upgrade, whose reload waits for the press")
+    select(p, at("main", "Body"), at("main", "Body", None))
+    p.clock.run_for(500)                                # the Comment button shows after the selection settles
+    p.click("#rd-comment-btn")
+    p.fill("#rd-popover textarea", "Why?")
+    mark(p)
+    bar(p).nth(0).click()                               # Undo: the reload now waits for the form
+    p.wait_for_timeout(300)
+    assert p.evaluate("window.__same_load") is True, "the page reloaded under the comment form"
+    p.click("#rd-popover button[data-f=no]")
+    reloaded(p)
+    p.wait_for_selector("#rd-actions button")
+    toasted(p, "upgraded")
+    assert "text changed" not in toast(p)

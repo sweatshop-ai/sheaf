@@ -183,9 +183,10 @@ def test_the_list_mounts_with_the_filter_it_is_asked_for(chromium, box):  # noqa
 
 
 @pytest.mark.parametrize("href", ["javascript:alert(1)", "//evil.test/x", "/\\evil.test/x", "/\t/evil.test/x",
-                                  "/\n/evil.test/x", "/ /evil.test", "https://evil.test/x", "list", "/%2F/evil.test"])
+                                  "/\n/evil.test/x", "/\r/evil.test", "/ /evil.test", "https://evil.test/x", "list", "/%2F/evil.test"])
 def test_render_keeps_no_address_that_is_not_a_path_on_the_origin(mounted, href):
-    """A link the list draws is a path of the hub's: anything the URL parser could read as another origin is dropped."""
+    """A link the list draws is a path of the hub's: another scheme, `//`, a backslash, and any control or space (the
+    URL parser drops a tab, CR or LF, so `/<tab>/host` reads as `//host`) are dropped; the hub sends none of them."""
     got = mounted.page.evaluate("""(h) => { const f = sheafList.render({filters: [{label: 'x', href: h, on: false}],
         sections: [{title: 's', count: 1, groups: [{name: 'g', rows: [{title: 't', href: h, meta: '', actions: []}]}]}]},
         document.body); return Array.from(f.querySelectorAll('a')).map((a) => a.getAttribute('href')); }""", href)

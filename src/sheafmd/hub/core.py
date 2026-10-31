@@ -31,6 +31,7 @@ from . import projects
 from . import proxy as proxy_mod
 from . import roots as roots_mod
 from . import state
+from . import the_list
 from . import visibility
 from . import work as work_mod
 from .asktell import AskTell
@@ -96,6 +97,7 @@ class Hub:
         self.told_ignored: set = set()           # the roots a private-ignored row named this run (9.11)
         self._front: dict = {}                   # {file: (its stat, its front matter, its assignees)}, for 9.11
         self.the_list = None                     # the list (9.10): a the_list.TheList, set by the server
+        self.blamed: dict = {}                   # the pressers of the pages' pressed boxes, once per text (10.11)
         self.docs = state.Docs()
         self.seen = state.Seen()
         self.member_seen = state.MemberSeen()
@@ -368,6 +370,7 @@ class Hub:
         if found:
             m = found[-1]
             meta = json.loads(m.group(2))
+            meta["actions"] = self.actions(e, member)
             if member is None:
                 meta["seen"] = self.seen.get(e.address)
                 v = self.asktell.view(e.address)
@@ -381,6 +384,31 @@ class Hub:
                     meta["work"] = work
             html = (html[:m.start(2)] + json.dumps(meta).replace("<", "\\u003c") + html[m.end(2):])
         return html
+
+    def actions(self, e: Entry, member, text: str | None = None) -> list:
+        """The buttons at the top of the page of `e` as `member` (None: the hub's own person) reads them (10.11,
+        #111): the list's `buttons` of its text (`text`, else the one it holds now), each with `box`, [block, box's
+        number among the task boxes of that block] where the document draws it, or None."""
+        if text is None:
+            text = e.live.current()[1]
+        s = the_list.read_sheaf("x.md", text)
+        if not (s.actions or s.pressed):
+            return []
+        fm = visibility.front_matter(text)
+        owner = member is None or bool(visibility.owner_of(fm, [member], self.assignees(e.address, fm)))
+        lines = [line for _, _, line, _ in s.pressed]
+        root = self.roots.get(roots_mod.Address.parse(e.address).root)
+        who = {}
+        if lines and root is not None and root.git:
+            try:
+                who = the_list.pressers(self.blamed, Path(os.path.realpath(e.path)), text, lines)
+            except OSError:
+                who = {}
+        out = []
+        for x in the_list.buttons(s, who, self, member, owner):
+            at = the_list.box_place(text, x.pop("line"))
+            out.append({**x, "box": list(at) if at else None})
+        return out
 
     def member_work(self, e: Entry, member):
         """The `work` of a member's page (None when it is not a sheaf of the list's root) and its `can`:

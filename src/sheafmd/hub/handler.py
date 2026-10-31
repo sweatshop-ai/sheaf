@@ -1277,7 +1277,7 @@ class Handler:
         for _, gone in old:
             self._relay_failed(e.address, gone, "tell-relay-failed", RELAY_MOVED)
         self.hub.record("tell-relayed", e.address, tell=t.id, thread=thread, by=t.by,
-                        transcript=st.sessions[0]["id"], **self._who(req))
+                        transcript=session, **self._who(req))
         return None
 
     def _james_called(self, caller, address):

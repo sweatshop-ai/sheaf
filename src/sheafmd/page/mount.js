@@ -298,26 +298,44 @@
   }
 
   /** Mount the sheaf `opts.doc` in `host`: a CLOSED shadow root (the front's CSS and the page's cannot touch each other, and a
-   *  script of the front cannot walk into it by `host.shadowRoot`), the document's own styles, then its rebuilt body.
-   *  Resolves to {config, title, toc, unmount}. The page's behaviour (selection, comments, editing) attaches to `root` in a
-   *  later step; this one is the part that turns a stranger's text into DOM. */
+   *  script of the front cannot walk into it by `host.shadowRoot`), the document's own styles, then its rebuilt body, and the
+   *  page's behaviour on it (page.js, served after this file in /_/mount.js: sheafPage.create). Resolves to {config, title,
+   *  toc, unmount, dirty, remount}. remount() fetches the page again and builds it in place of the old one, which is what a
+   *  reload of a page of its own did; the page calls it where it called location.reload(). The wrapper is the scroller and
+   *  takes focus on a click, so the page's keys reach its root. */
   async function mount(host, opts) {
     const url = '/_/mount?doc=' + encodeURIComponent(opts.doc);
-    const res = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
-    if (!res.ok) throw new Error('the hub answered ' + res.status + ' for ' + opts.doc);
-    const got = await res.json();
     const root = host.attachShadow({ mode: 'closed' });
     const doc = host.ownerDocument;
-    const style = doc.createElement('style');
-    style.textContent = got.css;                    // the hub's own text: fonts, base and theme
-    const link = doc.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = '/_/mount.css?v=' + encodeURIComponent(got.version);
-    const wrap = doc.createElement('div');
-    wrap.className = 'rd-root' + (got.toc ? '' : ' notoc');
-    wrap.appendChild(rebuild(got.html, wrap));
-    root.append(style, link, wrap);
-    return { config: got.config, title: got.title, toc: got.toc, unmount() { root.replaceChildren(); } };
+    let page = null;
+    let got = null;
+    async function draw() {
+      const res = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+      if (!res.ok) throw new Error('the hub answered ' + res.status + ' for ' + opts.doc);
+      got = await res.json();
+      const style = doc.createElement('style');
+      style.textContent = got.css;                  // the hub's own text: fonts, base and theme
+      const link = doc.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = '/_/mount.css?v=' + encodeURIComponent(got.version);
+      const wrap = doc.createElement('div');
+      wrap.className = 'rd-root' + (got.toc ? '' : ' notoc');
+      wrap.tabIndex = -1;
+      wrap.appendChild(rebuild(got.html, wrap));
+      if (page) page.unmount();
+      page = null;
+      root.replaceChildren(style, link, wrap);
+      await new Promise((done) => { link.onload = link.onerror = done; });   // the page measures its parts: their styles first
+      if (window.sheafPage) page = window.sheafPage.create(root, got.config, { body: wrap, remount: () => { draw().catch(() => {}); } });
+      return got;
+    }
+    await draw();
+    return {
+      get config() { return got.config; }, get title() { return got.title; }, get toc() { return got.toc; },
+      unmount() { if (page) page.unmount(); page = null; root.replaceChildren(); },
+      dirty() { return !!page && page.dirty(); },
+      remount: draw,
+    };
   }
 
   window.sheafMount = Object.freeze({ rebuild, mount, ID_PREFIX, cleanStyle });

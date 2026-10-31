@@ -97,6 +97,8 @@ def test_the_mount_assets_are_the_hubs_own_files_and_cache_by_version(browser):
         assert "immutable" in r.headers["Cache-Control"] and "max-age=31536000" in r.headers["Cache-Control"]
         assert r.headers["X-Content-Type-Options"] == "nosniff"
     assert "rebuild" in js.text and ":host" in css.text
+    # The page's own script and style follow the loader's (slice iii): one request each brings the whole page.
+    assert "sheafPage" in js.text and "#rd-menu-btn" in css.text
 
 
 def test_an_asset_asked_without_the_current_version_is_not_cached_for_a_year(browser):

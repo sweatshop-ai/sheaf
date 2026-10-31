@@ -8,12 +8,84 @@
 //
 // The page's Content-Security-Policy allows no inline handler, no javascript: URL and
 // no eval: handlers are attached with addEventListener, never written into HTML.
+//
+// The page runs in a document of its own (the meta block below, the hub's page route) or mounted in the front's
+// document (#116): page/mount.js builds the sheaf in a closed shadow root and calls sheafPage.create(root, cfg,
+// {body, remount}). Both run this one function. ROOT is where the page's elements are found (the document, or the
+// shadow root), BODY what it adds its own parts to (document.body, or the root's wrapper, which is also the scroller).
 (function () {
-  var meta = document.getElementById('rd-edit-meta');
-  if (!meta) return;
-  var CFG = JSON.parse(meta.textContent);
-  var main = document.querySelector('main');
-  if (!main) return;
+var create = function (ROOT, CFG, opts) {
+  opts = opts || {};
+  var main = ROOT.querySelector('main');
+  if (!main) return null;
+  var MOUNTED = ROOT !== document;
+  var BODY = MOUNTED ? opts.body : document.body;
+  // Clicks and keys of the page's own parts: a listener on the front's document sees them retargeted to the host,
+  // so a mounted page hears them on its root. Selection, visibility and the mouse's state stay on the document.
+  var PAGE_EV = MOUNTED ? ROOT : document;
+  // Stored keys share the front's origin when mounted: a prefix of their own.
+  var KEYS = MOUNTED ? 'sheaf-mount:' : '';
+  // Everything the page hangs on the document or the window goes through listen(), and unmount() takes it off.
+  var unmounted = false, unlistens = [], intervals = [];
+  function listen(target, type, fn, capture) {
+    target.addEventListener(type, fn, capture);
+    unlistens.push(function () { target.removeEventListener(type, fn, capture); });
+  }
+  // A timer of an unmounted page does nothing: the page it would act on is gone.
+  function setTimeout(f, ms) { return window.setTimeout(function () { if (!unmounted) f(); }, ms); }
+  function setInterval(f, ms) {
+    var t = window.setInterval(function () { if (!unmounted) f(); }, ms);
+    intervals.push(t);
+    return t;
+  }
+  // location.reload() of a page of its own; a mounted page is fetched and built again in place (opts.remount),
+  // and the same sessionStorage keep carries the scroll, the caret and the open comment across.
+  function reloadPage() {
+    if (unmounted) return;
+    if (MOUNTED) opts.remount(); else location.reload();
+  }
+  // The selection: in a shadow root, the composed range with both ends in the root (Firefox does not retarget
+  // getSelection() out of a root, Chromium and WebKit do, so the plain one cannot be read there). The object has
+  // the part of Selection the page uses.
+  function getSel() {
+    var s = window.getSelection();
+    if (!MOUNTED || !s) return s;
+    var r = null;
+    if (s.rangeCount && typeof s.getComposedRanges === 'function') {
+      var c = s.getComposedRanges({ shadowRoots: [ROOT] })[0];
+      if (c && ROOT.contains(c.startContainer) && ROOT.contains(c.endContainer)) {
+        r = document.createRange();
+        r.setStart(c.startContainer, c.startOffset);
+        r.setEnd(c.endContainer, c.endOffset);
+      }
+    }
+    return {
+      rangeCount: r ? 1 : 0, isCollapsed: !r || r.collapsed,
+      anchorNode: r && r.startContainer, anchorOffset: r ? r.startOffset : 0,
+      focusNode: r && r.endContainer, focusOffset: r ? r.endOffset : 0,
+      getRangeAt: function () { return r; },
+      toString: function () { return r ? r.toString() : ''; },
+      removeAllRanges: function () { s.removeAllRanges(); },
+      addRange: function (x) { s.setBaseAndExtent(x.startContainer, x.startOffset, x.endContainer, x.endOffset); }
+    };
+  }
+  // What can be seen, in the client coordinates a rectangle is measured in: the window, or the part of it the
+  // mounted page's scroller shows.
+  function viewRect() {
+    var w = document.documentElement.clientWidth, h = window.innerHeight;
+    if (!MOUNTED) return { left: 0, top: 0, right: w, bottom: h };
+    var b = BODY.getBoundingClientRect();
+    return { left: Math.max(0, b.left), top: Math.max(0, b.top),
+             right: Math.min(w, b.left + BODY.clientWidth), bottom: Math.min(h, b.top + BODY.clientHeight) };
+  }
+  // What turns a client coordinate into the place of an absolutely positioned part of the page.
+  function pageOrigin() {
+    if (!MOUNTED) return { x: window.scrollX, y: window.scrollY };
+    var b = BODY.getBoundingClientRect();
+    return { x: BODY.scrollLeft - b.left - BODY.clientLeft, y: BODY.scrollTop - b.top - BODY.clientTop };
+  }
+  function scrollNow() { return MOUNTED ? BODY.scrollTop : window.scrollY; }
+  function scrollBack(y) { if (MOUNTED) BODY.scrollTop = y; else window.scrollTo(0, y); }
 
   var COMMENTS = CFG.comments || [];
   var byId = {};
@@ -325,7 +397,7 @@
   function paint(activeId) {
     if (!HL) return;
     var open = new Highlight(), res = new Highlight(), act = new Highlight();
-    var showRes = document.body.classList.contains('rd-show-resolved');
+    var showRes = BODY.classList.contains('rd-show-resolved');
     COMMENTS.forEach(function (c) {
       var r = ranges[c.id] || (ranges[c.id] = rangeFor(c));
       if (!r) return;
@@ -360,11 +432,11 @@
   // A quiet line that stays until the hub says hello again (hub-stopping).
   var notice = el('div', { id: 'rd-notice', role: 'status' });
   notice.hidden = true;
-  document.body.appendChild(btn);
-  document.body.appendChild(menu);
-  document.body.appendChild(toast);
-  document.body.appendChild(panel);
-  document.body.appendChild(notice);
+  BODY.appendChild(btn);
+  BODY.appendChild(menu);
+  BODY.appendChild(toast);
+  BODY.appendChild(panel);
+  BODY.appendChild(notice);
 
   var openCount = function () {
     return COMMENTS.filter(function (c) { return c.status === 'open'; }).length;
@@ -405,7 +477,7 @@
   // (POST /_/diag, read with sheaf diag), so a race seen once on screen is not lost.
   // When the hub is the thing that went away, rows wait in localStorage (newest 50)
   // and go out on the next reconnect. Reporting never shows a toast of its own.
-  var IQ = 'rd-incidents';
+  var IQ = KEYS + 'rd-incidents';
   function iqLoad() { try { return JSON.parse(localStorage.getItem(IQ) || '[]'); } catch (e) { return []; } }
   function iqSave(rows) { try { localStorage.setItem(IQ, JSON.stringify(rows.slice(-50))); } catch (e) {} }
   function sendIncident(row) {
@@ -429,10 +501,12 @@
         .catch(function () { var r = iqLoad(); r.push(row); iqSave(r); });
     });
   }
-  window.addEventListener('error', function (e) {
+  // Mounted, the window's errors are mostly the front's: only those of the page's own script are the page's.
+  listen(window, 'error', function (e) {
+    if (MOUNTED && !/\/_\/mount\.js/.test(e.filename || '')) return;
     incident('js-error', { message: e.message, where: (e.filename || '') + ':' + e.lineno });
   });
-  window.addEventListener('unhandledrejection', function (e) {
+  if (!MOUNTED) listen(window, 'unhandledrejection', function (e) {
     incident('js-rejection', { message: String(e.reason && e.reason.message || e.reason) });
   });
 
@@ -478,7 +552,7 @@
     e.stopPropagation();
     if (menu.classList.contains('open')) closeMenu(); else openMenu();
   });
-  document.addEventListener('click', function (e) {
+  listen(PAGE_EV, 'click', function (e) {
     if (menu.classList.contains('open') && !menu.contains(e.target) && e.target !== btn) closeMenu();
   });
 
@@ -568,7 +642,7 @@
   function openWork() {
     if (!workPop) {
       workPop = el('div', { id: 'rd-work', role: 'dialog', 'aria-label': 'Work on this' });
-      document.body.appendChild(workPop);
+      BODY.appendChild(workPop);
     }
     drawWork();
     workPop.hidden = false;
@@ -581,7 +655,7 @@
     var pick = function () {
       var r = document.createRange();
       r.selectNodeContents(code);
-      var s = window.getSelection();
+      var s = getSel();
       s.removeAllRanges();
       s.addRange(r);
       say('Selected: press Ctrl+C to copy.');
@@ -590,14 +664,14 @@
       navigator.clipboard.writeText(text).then(function () { say('Copied'); }, pick);
     } else pick();
   }
-  document.addEventListener('click', function (e) {
+  listen(PAGE_EV, 'click', function (e) {
     if (workOpen() && !workPop.contains(e.target) && e.target !== btn && !menu.contains(e.target)) closeWork();
   });
 
   function setEditing(on) {
     if (!canEdit) return;
     editing = on;
-    document.body.classList.toggle('rd-editing', on);
+    BODY.classList.toggle('rd-editing', on);
     blocks.forEach(function (b) {
       var ok = editable.has(b.i);
       b.nodes.forEach(function (n) {
@@ -618,14 +692,14 @@
     if (docGone) return;        // it would load another folder's document, or none (meetDocGone)
     if (pressOpen) { reloadAfterPress = { open: openId, keep: true }; return; }     // as in settle (SPEC 10.11)
     try {
-      if (pressSaid && Date.now() < pressSaid.until) sessionStorage.setItem('rd-press-said', pressSaid.text);
-      sessionStorage.setItem('rd-keep', JSON.stringify({ doc: CFG.doc, y: window.scrollY, open: openId || null,
+      if (pressSaid && Date.now() < pressSaid.until) sessionStorage.setItem(KEYS + 'rd-press-said', pressSaid.text);
+      sessionStorage.setItem(KEYS + 'rd-keep', JSON.stringify({ doc: CFG.doc, y: scrollNow(), open: openId || null,
                                                          panel: panel.classList.contains('open'),
                                                          known: counts(), editing: editing,
                                                          caret: caretNow(), held: heldReload,
                                                          interrupted: Object.keys(interrupted), sent: sentBox }));
     } catch (e) {}
-    location.reload();
+    reloadPage();
   }
 
   // ---- the caret across a reload ---------------------------------------------
@@ -639,7 +713,7 @@
     return nodes.map(function (t) { return t.nodeValue; }).join('').replace(/\s+/g, '');
   }
   function caretNow() {
-    var sel = window.getSelection();
+    var sel = getSel();
     if (!sel || !sel.rangeCount || !main.contains(sel.anchorNode)) return null;
     var b = blockOf(sel.anchorNode);
     if (!b) return null;
@@ -668,7 +742,7 @@
             var r = document.createRange();
             r.setStart(nodes[x], c);
             r.collapse(true);
-            var sel = window.getSelection();
+            var sel = getSel();
             sel.removeAllRanges();
             sel.addRange(r);
             return;
@@ -873,7 +947,7 @@
       }
       if (conflicts.length) note = conflictNote(conflicts);
       if (reload) {
-        try { sessionStorage.setItem('rd-toast', quiet && !conflicts.length ? '' : note); } catch (e) {}
+        try { sessionStorage.setItem(KEYS + 'rd-toast', quiet && !conflicts.length ? '' : note); } catch (e) {}
         done(); saving = null;
         reloadWhenFree(popId);
         refresh();
@@ -963,7 +1037,7 @@
       var a = document.createElement('a');
       a.href = href;
       a.download = name || CFG.name.replace(/\.md$/, '') + '.' + kind;
-      document.body.appendChild(a);
+      BODY.appendChild(a);
       a.click();
       a.remove();
       // Revoked late: Chrome has been seen to cancel a download whose blob URL
@@ -1031,7 +1105,7 @@
   var OPEN_FORM = '.rd-form:not([data-done]):not([data-kept])';
   // A kept comment with the cursor in it, or a selection that has its Comment button: what a thread opened by
   // itself would take away. (A form with text typed in it is `writingNow`.)
-  function writingElsewhere() { return !!cbtn || (!!pop && pop.hasAttribute('data-kept') && pop.contains(document.activeElement)); }
+  function writingElsewhere() { return !!cbtn || (!!pop && pop.hasAttribute('data-kept') && pop.contains(ROOT.activeElement)); }
   function openForm() { return pop ? pop.querySelector(OPEN_FORM) : null; }
   // The open form of the popover's own thread: the form of another thread's failed send put here (data-for)
   // carries a line of its own about its thread.
@@ -1042,7 +1116,7 @@
   // not the first only: the form of another thread's failed send that the store could not keep can sit
   // after an empty one.
   function formsWithText(page) {
-    var forms = page ? document.querySelectorAll('.rd-form:not([data-kept])') : pop ? pop.querySelectorAll(OPEN_FORM) : [];
+    var forms = page ? ROOT.querySelectorAll('.rd-form:not([data-kept])') : pop ? pop.querySelectorAll(OPEN_FORM) : [];
     return Array.prototype.filter.call(forms, function (f) {
       var t = f.querySelector('textarea');
       return !!(t && t.value.trim());
@@ -1196,7 +1270,7 @@
   // (unsentLine). The thread is told by its id, its `at` and its quote together: next_id reuses the id
   // of a deleted last comment. An entry also holds the
   // request id it was sent with (`rid`), which its form sends again with the same text (textForm).
-  var COMMENT_DRAFT_KEY = 'sheaf-comment-draft:' + DRAFTS_OF + ':' + CFG.doc;
+  var COMMENT_DRAFT_KEY = KEYS + 'sheaf-comment-draft:' + DRAFTS_OF + ':' + CFG.doc;
   // Each entry holds the id of the root it was written under (`root`): two folders can hold one name on one
   // port, one after the other, and the key cannot tell them apart. An entry of another root is not this page's:
   // not listed, not sent, and kept when this page writes the store. One with no `root` (an older entry) is
@@ -1270,8 +1344,8 @@
     if (left.length < ds.length) commentDraftsSave(left);
     // The notice of kept comments is drawn again from what is left (closePopover does it), unless it is being typed in.
     var shown = ds.some(function (d) { return d.rid === rid && typeof d.quote === 'string'; });
-    if (shown && pop && pop.hasAttribute('data-kept') && !pop.contains(document.activeElement)) closePopover();
-    Array.prototype.forEach.call(document.querySelectorAll('.rd-form'), function (f) { if (f.whenTaken) f.whenTaken(rid); });
+    if (shown && pop && pop.hasAttribute('data-kept') && !pop.contains(ROOT.activeElement)) closePopover();
+    Array.prototype.forEach.call(ROOT.querySelectorAll('.rd-form'), function (f) { if (f.whenTaken) f.whenTaken(rid); });
     var late = !!lateSends[rid];
     delete lateSends[rid];
     delete lastLate[rid];
@@ -1314,7 +1388,7 @@
     var a = { id: 'rd-popover', role: 'dialog' };
     a[attr] = '';
     pop = el('div', a, ds.map(html).join(''));
-    document.body.appendChild(pop);
+    BODY.appendChild(pop);
     Array.prototype.forEach.call(pop.querySelectorAll('.rd-form'), function (f, i) {
       f.querySelector('textarea').value = ds[i].body;
       wire(f, ds[i]);
@@ -1389,7 +1463,7 @@
     if (!unsentBtn) {
       unsentBtn = el('button', { id: 'rd-unsent', type: 'button' });
       unsentBtn.addEventListener('click', function () { if (pop && pop.hasAttribute('data-unsent')) closePopover(); else showUnsent(); });
-      document.body.appendChild(unsentBtn);
+      BODY.appendChild(unsentBtn);
     }
     unsentBtn.textContent = Object.keys(KINDS).map(function (name) {
       var k = KINDS[name], n = ds.filter(function (d) { return kindOf(d) === k; }).length;
@@ -1401,7 +1475,7 @@
   // got through, a Discard there, each comes here as a storage event (a page hears none of its own writes). The
   // kept comments' notice is left as it is: its text is being typed into, and it is drawn from the store again
   // after any close.
-  window.addEventListener('storage', function (e) {
+  listen(window, 'storage', function (e) {
     if (e.key === null || e.key === COMMENT_DRAFT_KEY) unsentLine();      // null: the whole store was cleared
   });
   // The list the line opens: a popover above it, out of the text's way until asked for, that Escape, a click
@@ -1438,13 +1512,13 @@
   // The popover's own max-height keeps it on screen; its thread scrolls inside it.
   function place(p, target) {
     p._target = target;
-    if (!p.parentNode) document.body.appendChild(p);
-    var r = target.getBoundingClientRect(), vh = window.innerHeight, h = p.offsetHeight;
-    var w = p.offsetWidth, x = Math.min(window.scrollX + r.left, window.scrollX + document.documentElement.clientWidth - w - 16);
+    if (!p.parentNode) BODY.appendChild(p);
+    var r = target.getBoundingClientRect(), v = viewRect(), o = pageOrigin(), h = p.offsetHeight;
+    var w = p.offsetWidth, x = Math.min(r.left, v.right - w - 16);
     var top = r.bottom + 8;
-    if (top + h > vh - 16) top = r.top - 8 - h >= 16 ? r.top - 8 - h : Math.max(16, vh - 16 - h);
-    p.style.left = Math.max(window.scrollX + 16, x) + 'px';
-    p.style.top = (window.scrollY + top) + 'px';
+    if (top + h > v.bottom - 16) top = r.top - 8 - h >= v.top + 16 ? r.top - 8 - h : Math.max(v.top + 16, v.bottom - 16 - h);
+    p.style.left = (o.x + Math.max(v.left + 16, x)) + 'px';
+    p.style.top = (o.y + top) + 'px';
   }
   // A target taken out of the page (forget, for a thread deleted) has no place to measure: the popover stays where it was.
   // The thread gives way to the form, but not below a comment's worth of itself (a shorter thread is not stretched).
@@ -1501,7 +1575,7 @@
     pop._was = null;
   }
   if (window.visualViewport) ['resize', 'scroll'].forEach(function (ev) {
-    window.visualViewport.addEventListener(ev, function () {
+    listen(window.visualViewport, ev, function () {
       if (!COARSE.matches) return;
       // iOS pans the page sideways when a field takes focus: put it back (the page has nothing to the side).
       if (pop && window.visualViewport.scale <= ZOOMED && window.visualViewport.offsetLeft > 0) window.scrollTo(0, window.scrollY);
@@ -1509,7 +1583,7 @@
     });
   });
   // A frame resized, a phone turned, with a mouse as with a thumb: the thread wraps at another width.
-  window.addEventListener('resize', function () { if (pop) keepThread(); });
+  listen(window, 'resize', function () { if (pop) keepThread(); });
   // A popover with no place in the text (a kept comment, a thread whose badge is hidden or gone) is pinned
   // beside the panel.
   function pin(p) { p.style.position = 'fixed'; p.style.top = '80px'; p.style.left = ''; p.style.right = '390px'; }
@@ -1893,7 +1967,7 @@
     pop = el('div', { id: 'rd-popover', role: 'dialog' });
     var target = anchors[id];
     if (target && target.offsetParent === null) target = null;
-    document.body.appendChild(pop);
+    BODY.appendChild(pop);
     touched(id);
     place(pop, target || btn);
     if (!target) pin(pop);
@@ -2055,7 +2129,7 @@
         } else if (gone) {
           closePopover();
           pop = host; popId = own;
-          document.body.appendChild(host);
+          BODY.appendChild(host);
           pin(host);
           at = host;
         } else {
@@ -2148,7 +2222,7 @@
     if (writingFirst()) return;
     if (popId === id) closePopover(); else openComment(id);
   });
-  document.addEventListener('mousedown', function (e) {
+  listen(PAGE_EV, 'mousedown', function (e) {
     if (pop && !standing() && !pop.contains(e.target) && !(e.target.closest && e.target.closest('.rd-badge, #rd-panel, #rd-unsent'))) leavePopover();
   });
 
@@ -2163,15 +2237,15 @@
   // It re-arms only after the pointer has left the edge, so Escape or a click-away
   // with the mouse still parked there does not bounce it open again.
   var EDGE = 6, edgeArmed = true;
-  document.addEventListener('mousemove', function (e) {
-    var w = document.documentElement.clientWidth;      // excludes the page scrollbar
+  listen(PAGE_EV, 'mousemove', function (e) {
+    var w = viewRect().right;      // excludes the page scrollbar
     var atEdge = e.clientX >= w - EDGE && e.clientX < w;
     if (!atEdge) { edgeArmed = true; return; }
     if (!edgeArmed || e.buttons || panel.classList.contains('open')) return;
     edgeArmed = false;
     openPanel();
   });
-  document.addEventListener('mousedown', function (e) {
+  listen(PAGE_EV, 'mousedown', function (e) {
     if (!panel.classList.contains('open')) return;
     var t = e.target;
     if (t.closest && t.closest('#rd-panel, #rd-popover, #rd-menu, #rd-work, #rd-menu-btn, #rd-comment-btn, .rd-badge')) return;
@@ -2207,7 +2281,7 @@
     }
     delete panel.dataset.keeps;
     panel.innerHTML = h;
-    document.body.classList.toggle('rd-show-resolved', filter !== 'open');
+    BODY.classList.toggle('rd-show-resolved', filter !== 'open');
     paint(popId);
   }
   panel.addEventListener('click', function (e) {
@@ -2282,7 +2356,7 @@
     }
   }
   function selectionTarget() {
-    var sel = window.getSelection();
+    var sel = getSel();
     if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
     var r = sel.getRangeAt(0).cloneRange(), was = sel.getRangeAt(0);
     if (!main.contains(r.commonAncestorContainer) || !r.toString().trim()) return null;
@@ -2339,24 +2413,25 @@
     // A refused selection gets the button's place, disabled, with the reason as its label.
     cbtn = el('button', t.error ? { id: 'rd-comment-btn', disabled: '', title: t.error } : { id: 'rd-comment-btn' },
               t.error || 'Comment');
-    document.body.appendChild(cbtn);
+    BODY.appendChild(cbtn);
     if (COARSE.matches) {
       // A touch screen has a callout of its own (Copy, Search, ...) beside the selection, above or below it,
       // drawn over anything there: the button is a bar at the foot of the screen, fixed, clear
       // of the ☰ button. A selection that reaches the foot takes the bar to the head of the screen instead.
       cbtn.className = 'rd-bar';
       var band = cbtn.offsetHeight + BAR_CLEAR,
-          barAtHead = t.rect.bottom > window.innerHeight - band && t.rect.top > band;   // a selection that fills the screen keeps the foot
+          vb = viewRect(), barAtHead = t.rect.bottom > vb.bottom - band && t.rect.top > vb.top + band;   // a selection that fills the screen keeps the foot
       cbtn.style.top = barAtHead ? 'calc(8px + env(safe-area-inset-top, 0px))' : 'auto';
       cbtn.style.bottom = barAtHead ? 'auto' : 'calc(8px + env(safe-area-inset-bottom, 0px))';
     } else {
       // Under the selection and inside the screen.
-      var left = window.scrollX + t.rect.right - cbtn.offsetWidth,
-          least = window.scrollX + 8, most = window.scrollX + document.documentElement.clientWidth - cbtn.offsetWidth - 8,
-          top = window.scrollY + t.rect.bottom + 6,
-          foot = window.scrollY + window.innerHeight - cbtn.offsetHeight - 8;
+      var v = viewRect(), o = pageOrigin(),
+          left = o.x + t.rect.right - cbtn.offsetWidth,
+          least = o.x + v.left + 8, most = o.x + v.right - cbtn.offsetWidth - 8,
+          top = o.y + t.rect.bottom + 6,
+          foot = o.y + v.bottom - cbtn.offsetHeight - 8;
       cbtn.style.left = Math.max(least, Math.min(left, most)) + 'px';
-      cbtn.style.top = Math.max(window.scrollY + 8, Math.min(top, foot)) + 'px';
+      cbtn.style.top = Math.max(o.y + v.top + 8, Math.min(top, foot)) + 'px';
     }
     cbtn.addEventListener('mousedown', function (ev) { ev.preventDefault(); });
     // A thumb on the button may collapse the selection before the click arrives: the button stays meanwhile.
@@ -2366,9 +2441,9 @@
       thumbTimer = setTimeout(function () {   // a click that never came (the finger slid off) leaves no stale button
         thumbOn = false;
         if (!cbtn) return;
-        var sel = window.getSelection();
+        var sel = getSel();
         if (!sel || sel.isCollapsed) hideCommentBtn();
-        else if (!mouseDown && !document.getElementById('rd-popover')) offerComment();   // a selection made meanwhile was held back by the thumb: the button is for it now
+        else if (!mouseDown && !ROOT.getElementById('rd-popover')) offerComment();   // a selection made meanwhile was held back by the thumb: the button is for it now
       }, 2000);
     });
     if (!t.error) {
@@ -2393,26 +2468,26 @@
   }
   // The mouse is down from mousedown to the next mouseup anywhere, or until the window loses focus
   // (a mouseup outside the page, or in another frame, never reaches it).
-  document.addEventListener('mousedown', function () { mouseDown = true; }, true);
-  document.addEventListener('mouseup', function () { mouseDown = false; }, true);
-  window.addEventListener('blur', function () { mouseDown = false; keptAfterMouse(); });
-  document.addEventListener('dragend', function () { mouseDown = false; keptAfterMouse(); }, true);
-  document.addEventListener('mouseup', function (e) {
+  listen(document, 'mousedown', function () { mouseDown = true; }, true);
+  listen(document, 'mouseup', function () { mouseDown = false; }, true);
+  listen(window, 'blur', function () { mouseDown = false; keptAfterMouse(); });
+  listen(document, 'dragend', function () { mouseDown = false; keptAfterMouse(); }, true);
+  listen(PAGE_EV, 'mouseup', function (e) {
     if (!canSave || (e.target.closest && e.target.closest(IN_UI))) return;
     setTimeout(offerComment, 0);
   });
   // After the offer above: the Comment button of the drag is on the page before the kept comment is drawn again.
-  document.addEventListener('mouseup', keptAfterMouse);
+  listen(document, 'mouseup', keptAfterMouse);
   // A selection made by touch (a long press, then the handles) changes the selection and sends no mouse
   // event (SPEC 10.4, D24), so the page also listens to `selectionchange`. Each step of a handle's drag
   // fires one, so the button waits until the selection has stood still for SETTLE ms. A selection
   // made with the mouse is left to `mouseup`: nothing is offered while a mouse button is held.
-  document.addEventListener('selectionchange', function () {
+  listen(document, 'selectionchange', function () {
     clearTimeout(offerTimer);
     if (!canSave || mouseDown) return;
     offerTimer = setTimeout(function () {
-      var sel = window.getSelection(), anchor = sel && sel.anchorNode && elementOf(sel.anchorNode);
-      if (mouseDown || document.getElementById('rd-popover')) return;   // not while a comment is written
+      var sel = getSel(), anchor = sel && sel.anchorNode && elementOf(sel.anchorNode);
+      if (mouseDown || ROOT.getElementById('rd-popover')) return;   // not while a comment is written
       // The form's own text box, the panel and the menu hold selections of their own.
       if (anchor && anchor.closest && anchor.closest(IN_UI + ', input, textarea')) return;
       if (!sel || sel.isCollapsed) { if (!thumbOn) hideCommentBtn(); return; }   // a thumb on the button keeps it through a collapse
@@ -2487,7 +2562,7 @@
           b.pristine = pristineWithAnchor(b, a, before);
         }
         if (k === 'ask' || k === 'tell') started(j.id, k, j);
-        window.getSelection().removeAllRanges();
+        getSel().removeAllRanges();
         draftsReplace(own);
         if (j.textSame === false || reloadPending || !applyComments(j, [j.id])) {
           // With another send out the reload waits for it (holdForOpenForm). This comment was taken, so its
@@ -2533,7 +2608,7 @@
   }
 
   // ---- keyboard -------------------------------------------------------------
-  document.addEventListener('keydown', function (e) {
+  listen(PAGE_EV, 'keydown', function (e) {
     var typing = e.target.isContentEditable ||
                  /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName || '');
     if (e.key === 'Escape') {
@@ -2576,7 +2651,7 @@
                  ' :scope > p > label > input[type="checkbox"]';
   main.addEventListener('beforeinput', function (e) {
     if (e.inputType !== 'insertParagraph' || e.defaultPrevented || !editing) return;
-    var sel = window.getSelection();
+    var sel = getSel();
     if (!sel.rangeCount) return;
     var range = sel.getRangeAt(0);
     var at = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentNode;
@@ -2860,8 +2935,10 @@
   // text and reload, so it is the one whose edits are most likely to be left behind. A comment, reply
   // or edit being typed is asked about too: until it is sent, nothing but the form holds it. A form
   // that holds what the store keeps for it is not: the next page draws that text again (unkept).
-  window.addEventListener('beforeunload', function (e) {
-    if (dirty().length || unkept() || (docGone && storedTexts().length)) { e.preventDefault(); e.returnValue = ''; }
+  // Mounted, the front's loader asks the page's dirty() before it moves, and holds the tab's own beforeunload with it.
+  function unsavedNow() { return !!(dirty().length || unkept() || (docGone && storedTexts().length)); }
+  if (!MOUNTED) listen(window, 'beforeunload', function (e) {
+    if (unsavedNow()) { e.preventDefault(); e.returnValue = ''; }
   });
 
   // The document's event stream (GET /_/live?doc=…). Held open, it is also how the
@@ -3025,11 +3102,11 @@
     failing = false; hubLine = false; dead = true; reloadPending = false; heldReload = false; holdWhy = null; holdOpen = null;
     stopRenewing();
     if (dirty().length) editDraftMirror();
-    Array.prototype.forEach.call(document.querySelectorAll('.rd-hold'), function (n) { if (n.textContent === HOLD) n.remove(); });
+    Array.prototype.forEach.call(ROOT.querySelectorAll('.rd-hold'), function (n) { if (n.textContent === HOLD) n.remove(); });
     refresh();
     var typed = dirty().map(function (b) {
       return new DOMParser().parseFromString(ser(b), 'text/html').body.textContent.trim();
-    }).concat(Array.prototype.map.call(document.querySelectorAll('.rd-form textarea'), function (t) {
+    }).concat(Array.prototype.map.call(ROOT.querySelectorAll('.rd-form textarea'), function (t) {
       return t.value.trim();
     }), storedTexts()).filter(function (t, i, all) { return t && all.indexOf(t) === i; });
     showNoticeOverOffer((access ? 'You no longer have access to this document: its project no longer lists you'
@@ -3120,7 +3197,7 @@
   }
   if (canSave) {
     setInterval(outageTick, 1000);
-    document.addEventListener('visibilitychange', function () {
+    listen(document, 'visibilitychange', function () {
       if (document.visibilityState === 'visible') graceAgain();
     });
 
@@ -3148,7 +3225,7 @@
                             'on screen. Run <code>sheaf open</code> in a terminal to sign in again, then save.');
         return;
       }
-      location.reload();
+      reloadPage();
     };
     var meetVersion = function (v) {
       if (!v || !CFG.version || v === CFG.version || docGone) return;
@@ -3265,7 +3342,7 @@
     connect();
     // Belt and braces, and an event rather than a timer: coming back to the tab
     // reopens a stream the browser gave up on.
-    document.addEventListener('visibilitychange', function () {
+    listen(document, 'visibilitychange', function () {
       if (document.visibilityState !== 'visible') return;
       if (!live || live.readyState === 2) connect();
     });
@@ -3285,7 +3362,7 @@
   // key goes when a save leaves nothing dirty. Only the edited blocks and the version they
   // were made on are stored, never a key or token. A page that finds a draft on load offers
   // to restore it: the edits go to the hub as a save against that version, which merges.
-  var EDIT_DRAFT_KEY = 'sheaf-draft:' + DRAFTS_OF + ':' + CFG.doc, dTmr = null, offered = null, offeredText = null, myDraft = null;
+  var EDIT_DRAFT_KEY = KEYS + 'sheaf-draft:' + DRAFTS_OF + ':' + CFG.doc, dTmr = null, offered = null, offeredText = null, myDraft = null;
   // Every tab of this document shares the key, and so does another folder under the same name: a tab removes
   // only the draft it wrote itself (myDraft) or the one it offered (offeredText), and offers only a draft
   // whose `root` is its own. A draft with no `root` (an older entry) is offered.
@@ -3388,17 +3465,17 @@
   buildMenu();
   paint(null);
   try {
-    var keep = JSON.parse(sessionStorage.getItem('rd-keep') || 'null');
-    var msg = sessionStorage.getItem('rd-toast');
-    var refusedPress = sessionStorage.getItem('rd-press-said');   // a press's refusal a reload waited for (10.11)
-    sessionStorage.removeItem('rd-keep');
-    sessionStorage.removeItem('rd-toast');
-    sessionStorage.removeItem('rd-press-said');
+    var keep = JSON.parse(sessionStorage.getItem(KEYS + 'rd-keep') || 'null');
+    var msg = sessionStorage.getItem(KEYS + 'rd-toast');
+    var refusedPress = sessionStorage.getItem(KEYS + 'rd-press-said');   // a press's refusal a reload waited for (10.11)
+    sessionStorage.removeItem(KEYS + 'rd-keep');
+    sessionStorage.removeItem(KEYS + 'rd-toast');
+    sessionStorage.removeItem(KEYS + 'rd-press-said');
     // One hub serves every document from one origin, so what a reload kept
     // belongs to this page only if it names this document.
     if (keep && keep.doc !== CFG.doc) { keep = null; msg = null; }
     if (keep) {
-      window.scrollTo(0, keep.y || 0);
+      scrollBack(keep.y || 0);
       if (keep.known) {
         var n = news(keep.known, COMMENTS, keep.open ? [keep.open] : []);
         n.forEach(function (x) { flash(x.id); });
@@ -3427,4 +3504,22 @@
     if (unsaved) offerDraft(unsaved);
   } catch (e) {}
   refresh();
+
+  // Takes the page off its root: every listener on the document and the window, the timers, the stream and the
+  // highlights (the registry is the document's). The root's own elements go with the caller's replaceChildren.
+  function unmount() {
+    if (unmounted) return;
+    unmounted = true;
+    unlistens.forEach(function (f) { f(); });
+    unlistens = [];
+    intervals.forEach(function (t) { window.clearInterval(t); });
+    if (live) live.close();
+    if (HL) ['rd-open', 'rd-resolved', 'rd-active', 'rd-widened'].forEach(function (k) { CSS.highlights.delete(k); });
+  }
+  return { unmount: unmount, dirty: unsavedNow };
+};
+
+window.sheafPage = Object.freeze({ create: create });
+var meta = document.getElementById('rd-edit-meta');
+if (meta) create(document, JSON.parse(meta.textContent));
 })();

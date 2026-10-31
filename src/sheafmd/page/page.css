@@ -54,7 +54,7 @@
 .rd-working .rd-badge{animation:rd-breathe 1.6s ease-in-out infinite}
 @keyframes rd-breathe{50%{opacity:.45}}
 .rd-anchor.rd-resolved,.rd-anchor.rd-orphan{display:none}
-body.rd-show-resolved .rd-anchor.rd-resolved{display:inline}
+.rd-show-resolved .rd-anchor.rd-resolved{display:inline}
 ::highlight(rd-open){background:rgba(250,204,21,.32)}
 ::highlight(rd-resolved){background:rgba(156,163,175,.25)}
 ::highlight(rd-active){background:rgba(250,204,21,.75)}
@@ -124,12 +124,12 @@ body.rd-show-resolved .rd-anchor.rd-resolved{display:inline}
 #rd-panel .rd-item .rd-q{display:block;font-size:12px;opacity:.65;font-style:italic;margin-top:2px}
 #rd-panel .rd-empty{opacity:.6;font-size:13px}
 
-body.rd-editing [contenteditable="true"]{outline:1px dashed rgba(120,120,120,.55);
+.rd-editing [contenteditable="true"]{outline:1px dashed rgba(120,120,120,.55);
  outline-offset:4px;border-radius:2px}
-body.rd-editing [contenteditable="true"]:focus{outline:2px solid #2563eb;outline-offset:4px}
-body.rd-editing .rd-locked{position:relative;opacity:.62}
+.rd-editing [contenteditable="true"]:focus{outline:2px solid #2563eb;outline-offset:4px}
+.rd-editing .rd-locked{position:relative;opacity:.62}
 /* Inside the box, not above it: a <pre> scrolls, so it clips anything outside its edge. */
-body.rd-editing .rd-locked::after{content:"source-only";position:absolute;top:4px;right:4px;
+.rd-editing .rd-locked::after{content:"source-only";position:absolute;top:4px;right:4px;
  font:600 9px ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase;
  background:#999;color:#fff;padding:1px 5px;border-radius:2px}
 #rd-toast{position:fixed;left:50%;bottom:74px;transform:translateX(-50%);z-index:403;

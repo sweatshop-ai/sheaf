@@ -12,6 +12,7 @@ Then it acks it. The token is read from a 0600 file of this user's, never from a
 Registered in COMMANDS and COMMAND_HELP, which the foot of cli.py merges into its own.
 """
 import argparse
+import http.client
 import json
 import os
 import re
@@ -23,7 +24,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from . import paths
 from .agents import registry
@@ -37,6 +38,8 @@ UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 BACKOFF = (1, 2, 5, 10, 30, 60)         # seconds between tries after a stream that failed, the last repeated
 CLEARED = "no open session {id}: if it was cleared (/clear), fork again"
 AGENT = "claude-code"
+NOT_ORIGIN = "--hub must be an origin: https:// and a host, no path (http:// only for this machine)"
+UNACKED_MAX = 100                       # Tells handed to the session whose ack has not reached the hub yet
 
 COMMANDS: dict = {}
 COMMAND_HELP: dict = {}
@@ -74,6 +77,18 @@ def read_token(path: str) -> str:
     if not TOKEN_RE.fullmatch(text):
         raise Refused(f"the token file {path} holds no relay token")
     return text
+
+
+def origin(hub: str) -> str:
+    """`hub` spelled as the front's origin, which the hub compares Origin with: lower case, no default port, no `/`
+    at the end. `https://Front.example:443/` would otherwise make every ack a 403 (#134)."""
+    u = urlsplit(hub.rstrip("/"))
+    scheme, host = u.scheme.lower(), (u.hostname or "").lower()
+    if ":" in host:
+        host = f"[{host}]"
+    port = u.port
+    default = {"https": 443, "http": 80}.get(scheme)
+    return f"{scheme}://{host}" + (f":{port}" if port is not None and port != default else "")
 
 
 def events(lines):
@@ -135,8 +150,11 @@ class Relay:
 
     def __init__(self, hub: str, doc: str, session: str, token: str, config_dir: str, opener=None, deliver=None,
                  sleep=time.sleep):
-        self.hub, self.doc, self.session, self._token = hub.rstrip("/"), doc, session, token
+        self.hub, self.doc, self.session, self._token = origin(hub), doc, session, token
         self.config_dir = config_dir
+        # Tells handed to the session whose ack failed (a 403, a 5xx, a dropped connection): id -> the error, or
+        # None. The stream sends such a Tell again after the reconnect; it is acked again, never delivered again.
+        self._unacked: dict = {}
         self._open = opener or urllib.request.urlopen
         self._deliver = deliver or self._to_session
         self._sleep = sleep
@@ -195,12 +213,19 @@ class Relay:
                     continue
                 if not (isinstance(id, str) and UUID_RE.fullmatch(id) and isinstance(message, str)):
                     continue
-                try:
-                    self._deliver(message, id)
-                    error = None
-                except DeliveryError as e:
-                    error = str(e) or "not delivered"
+                if id in self._unacked:
+                    error = self._unacked[id]
+                else:
+                    try:
+                        self._deliver(message, id)
+                        error = None
+                    except DeliveryError as e:
+                        error = str(e) or "not delivered"
+                    self._unacked[id] = error
+                    while len(self._unacked) > UNACKED_MAX:
+                        del self._unacked[next(iter(self._unacked))]
                 waited = self.ack(id, error)
+                self._unacked.pop(id, None)
                 _err(f"sheaf relay: Tell {id} {'not delivered: ' + error if error else 'delivered'}"
                      + ("" if waited else "; the hub was no longer waiting for it (it expired, or was acked)"))
 
@@ -213,7 +238,7 @@ class Relay:
             except Gone as e:
                 _err(f"sheaf relay: {e}")
                 return EXIT_FAILED
-            except (OSError, urllib.error.URLError) as e:
+            except (OSError, http.client.HTTPException) as e:     # URLError is an OSError; a cut chunk is not
                 _err(f"sheaf relay: the hub is unreachable ({getattr(e, 'reason', None) or e}): trying again")
             # A stream that ran a while (the front ends each after 5 minutes) is followed by a try at once.
             tries = 0 if time.monotonic() - started > 60 else tries + 1
@@ -242,8 +267,13 @@ def cmd_relay(argv: list[str]) -> int:
                    help="where the session keeps its record (default: CLAUDE_CONFIG_DIR, else ~/.claude)")
     args = p.parse_args(argv)
     # The token goes in every request: over https, or plain http to this machine only.
-    if not re.fullmatch(r"https://[^/?#\s]+|http://(127\.0\.0\.1|localhost|\[::1\])(:[0-9]+)?", args.hub):
-        _err("sheaf: --hub must be an origin: https:// and a host, no path (http:// only for this machine)")
+    if not re.fullmatch(r"https://[^/?#@\s]+|http://(127\.0\.0\.1|localhost|\[::1\])(:[0-9]+)?", args.hub):
+        _err(f"sheaf: {NOT_ORIGIN}")
+        return EXIT_USAGE
+    try:
+        hub = origin(args.hub)
+    except ValueError:                  # a port that is no number, or out of range
+        _err(f"sheaf: {NOT_ORIGIN}")
         return EXIT_USAGE
     if not UUID_RE.fullmatch(args.session):
         _err("sheaf: --session must be a session id (a lowercase UUID)")
@@ -254,7 +284,7 @@ def cmd_relay(argv: list[str]) -> int:
         _err(f"sheaf: {e}")
         return EXIT_USAGE
     config_dir = args.config_dir if args.config_dir is not None else str(config_dir_of(os.environ))
-    r = Relay(args.hub, args.doc, args.session, token, config_dir)
+    r = Relay(hub, args.doc, args.session, token, config_dir)
     r.sender = Sender()
     try:
         return r.run()

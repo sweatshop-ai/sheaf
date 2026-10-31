@@ -1428,10 +1428,11 @@ def test_with_work_dir_the_filesystem_root_james_s_write_records_his_session(tea
     assert row["transcript"] == NEW
 
 
-def test_without_sessions_dir_a_box_sheaf_offers_no_fork(team, box):
-    # The fork fetches the transcript from /_/session, which is a 404 without sessions_dir.
+@pytest.mark.parametrize("key", ["sessions_dir", "work_dir"])
+def test_without_sessions_dir_or_work_dir_a_box_sheaf_offers_no_fork(team, box, key):
+    # The fork fetches the transcript from /_/session, which is a 404 without either (#146).
     cfg = team.hub.the_list.cfg
-    team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{**cfg.__dict__, "sessions_dir": None}))
+    team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{**cfg.__dict__, key: None}))
     w = meta(team)["work"]
     assert "fork" not in w and w["live"] == "box"
 
@@ -1762,11 +1763,15 @@ def test_james_has_refuses_a_projects_folder_that_is_a_link(tmp_path):
 
 
 def test_open_transcript_refuses_an_id_that_is_not_a_uuid(tmp_path):
-    (tmp_path / "s" / "p").mkdir(parents=True)
-    for planted in (tmp_path / "x.jsonl", tmp_path / "s" / "x.jsonl", tmp_path / "s" / "p" / "x.jsonl"):
-        planted.write_text("would be served\n", encoding="utf-8")     # each id below names one of these without the guard
+    from types import SimpleNamespace
+    (tmp_path / "s" / FOLDER).mkdir(parents=True)
+    cfg = SimpleNamespace(sessions_dir=tmp_path / "s", work_dir="/home/james/work")
+    # Each id below names one of these, a transcript of the project's as far as its first line goes, without the guard.
+    for sid, planted in (("../../x", tmp_path / "x.jsonl"), ("../x", tmp_path / "s" / "x.jsonl"),
+                         ("x", tmp_path / "s" / FOLDER / "x.jsonl")):
+        planted.write_text(json.dumps({"cwd": CWD, "sessionId": sid}) + "\n", encoding="utf-8")
     for sid in ("../x", "../../x", "x", "%2e%2e%2fx", "x\0"):
-        assert work_mod.open_transcript(tmp_path / "s", sid) is None
+        assert work_mod.open_transcript(cfg, "thinkingtoo/tiroir", sid) is None
 
 
 def test_a_drop_for_a_project_that_climbs_stays_in_its_folder(tmp_path):

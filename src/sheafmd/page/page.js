@@ -606,6 +606,7 @@
   // every comment write and every outside change.
   function reloadKeep(openId) {
     if (docGone) return;        // it would load another folder's document, or none (meetDocGone)
+    if (pressOpen) { reloadAfterPress = { open: openId, keep: true }; return; }     // as in settle (SPEC 10.11)
     try {
       sessionStorage.setItem('rd-keep', JSON.stringify({ doc: CFG.doc, y: window.scrollY, open: openId || null,
                                                          panel: panel.classList.contains('open'),
@@ -900,6 +901,8 @@
   var settling = false;
   async function settle(openId) {
     if (settling || docGone) return;
+    // Every reload of an outside change, a held one too, comes here: one waits for an open press (SPEC 10.11).
+    if (pressOpen) { reloadAfterPress = { open: openId }; return; }
     settling = true;
     for (var n = 0; n < 3 && dirty().length; n++) {
       if (!(await save(true))) {
@@ -1154,7 +1157,7 @@
   function reloadWhenFree(openId, why) {
     if (docGone) return;
     // A press of an action button waits or is out (SPEC 10.11): the reload waits for its answer, as the list's does.
-    if (pressOpen) { reloadAfterPress = { open: openId, why: why }; return; }
+    if (pressOpen) { reloadAfterPress = { open: openId, why: why }; return; }    // its form is not waited for either
     if (!writingNow({ sent: 'any' })) { settle(openId); return; }
     holdReload(why);
   }
@@ -2783,7 +2786,11 @@
     function done() {
       pressOpen = false;
       if (actsOwed) { var owed = actsOwed; actsOwed = null; drawActions(owed.acts, owed.hash); }
-      if (reloadAfterPress) { var r = reloadAfterPress; reloadAfterPress = null; reloadWhenFree(r.open, r.why); }
+      if (reloadAfterPress) {
+        var r = reloadAfterPress;
+        reloadAfterPress = null;
+        if (r.keep) reloadKeep(r.open); else reloadWhenFree(r.open, r.why);
+      }
     }
     async function send() {
       waiting = null;
@@ -2818,7 +2825,7 @@
         lock(false);
         say(e.message, true);
         // A reload waits for this answer: the refusal is said again on the page it brings.
-        if (reloadAfterPress) try { sessionStorage.setItem('rd-toast', e.message); } catch (x) {}
+        if (reloadAfterPress) try { sessionStorage.setItem('rd-press-said', e.message); } catch (x) {}
         done();
       }
     }
@@ -3361,8 +3368,10 @@
   try {
     var keep = JSON.parse(sessionStorage.getItem('rd-keep') || 'null');
     var msg = sessionStorage.getItem('rd-toast');
+    var pressSaid = sessionStorage.getItem('rd-press-said');      // a press's refusal a reload waited for (10.11)
     sessionStorage.removeItem('rd-keep');
     sessionStorage.removeItem('rd-toast');
+    sessionStorage.removeItem('rd-press-said');
     // One hub serves every document from one origin, so what a reload kept
     // belongs to this page only if it names this document.
     if (keep && keep.doc !== CFG.doc) { keep = null; msg = null; }
@@ -3386,7 +3395,8 @@
       if (keep.editing) { setEditing(true); placeCaret(keep.caret); }
       if (keep.open && byId[keep.open]) setTimeout(function () { openComment(keep.open); }, 50);
     }
-    if (msg) say(msg);
+    if (pressSaid && keep) say(pressSaid, true);
+    else if (msg) say(msg);
     if (canSave) { showKept(); unsentLine(); }
     var unsaved = canEdit ? editDraftFound() : null;
     if (unsaved) offerDraft(unsaved);

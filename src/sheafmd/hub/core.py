@@ -371,7 +371,10 @@ class Hub:
         if found:
             m = found[-1]
             meta = json.loads(m.group(2))
-            meta["actions"] = self.actions(e, member)
+            # The buttons of the text the page draws: a write since its render brings a `changed` and a reload,
+            # so none are drawn on the old text meanwhile (10.11).
+            h, text = e.live.current()
+            meta["actions"] = self.actions(e, member, text) if h == meta.get("hash") else []
             if member is None:
                 meta["seen"] = self.seen.get(e.address)
                 v = self.asktell.view(e.address)

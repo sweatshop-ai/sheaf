@@ -156,7 +156,7 @@ def test_the_token_is_never_carried_onto_a_redirect():
 
 
 @pytest.mark.parametrize("hub", ["http://front.example", "https://front.example/path", "ftp://front.example",
-                                 "https://front.example:x"])
+                                 "https://front.example:x", "https://u@front.example"])
 def test_a_hub_that_is_not_https_or_this_machine_is_refused(tmp_path, hub, capsys):
     f = token_file(tmp_path)
     assert rc.cmd_relay(["--hub", hub, "--doc", DOC, "--session", SID, "--token-file", str(f)]) == 2

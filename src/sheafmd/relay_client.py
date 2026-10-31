@@ -37,6 +37,7 @@ UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 BACKOFF = (1, 2, 5, 10, 30, 60)         # seconds between tries after a stream that failed, the last repeated
 CLEARED = "no open session {id}: if it was cleared (/clear), fork again"
 AGENT = "claude-code"
+NOT_ORIGIN = "--hub must be an origin: https:// and a host, no path (http:// only for this machine)"
 UNACKED_MAX = 100                       # Tells handed to the session whose ack has not reached the hub yet
 
 COMMANDS: dict = {}
@@ -265,13 +266,13 @@ def cmd_relay(argv: list[str]) -> int:
                    help="where the session keeps its record (default: CLAUDE_CONFIG_DIR, else ~/.claude)")
     args = p.parse_args(argv)
     # The token goes in every request: over https, or plain http to this machine only.
-    if not re.fullmatch(r"https://[^/?#\s]+|http://(127\.0\.0\.1|localhost|\[::1\])(:[0-9]+)?", args.hub):
-        _err("sheaf: --hub must be an origin: https:// and a host, no path (http:// only for this machine)")
+    if not re.fullmatch(r"https://[^/?#@\s]+|http://(127\.0\.0\.1|localhost|\[::1\])(:[0-9]+)?", args.hub):
+        _err(f"sheaf: {NOT_ORIGIN}")
         return EXIT_USAGE
     try:
         hub = origin(args.hub)
     except ValueError:                  # a port that is no number, or out of range
-        _err("sheaf: --hub must be an origin: https:// and a host, no path (http:// only for this machine)")
+        _err(f"sheaf: {NOT_ORIGIN}")
         return EXIT_USAGE
     if not UUID_RE.fullmatch(args.session):
         _err("sheaf: --session must be a session id (a lowercase UUID)")

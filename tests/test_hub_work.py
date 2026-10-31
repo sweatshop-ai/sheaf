@@ -1665,3 +1665,75 @@ def test_a_sessions_list_the_hub_cannot_rewrite_says_so_once_not_at_every_later_
         assert not james_door(browser, james_writes, "documents", session=NEW)[0]
     row, = hub_rows("session-not-recorded")
     assert row["transcript"] == NEW and "one item per line" in row["reason"]
+
+
+# --- path traversal in the project and session ids (tt-tiroir #8, #9) -------------------------------------
+
+def _transcript(folder, cwd, id):
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{id}.jsonl").write_text(json.dumps({"cwd": cwd, "sessionId": id}) + "\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize("project", ["../../outside", "../../outside/../outside", "/OUTSIDE"])
+def test_james_has_with_a_project_that_climbs_never_reads_outside_sessions_dir(tmp_path, project):
+    from types import SimpleNamespace
+    sid, sessions, work_dir = str(uuid.uuid4()), tmp_path / "sessions", tmp_path / "work" / "james"
+    sessions.mkdir()
+    work_dir.mkdir(parents=True)
+    project = project.replace("/OUTSIDE", str(tmp_path / "outside"))
+    cfg = SimpleNamespace(sessions_dir=sessions, work_dir=str(work_dir))
+    # A transcript that matches if `<work_dir>/<project>` were opened as a path: the kernel would land in tmp_path/outside.
+    _transcript(tmp_path / "outside", os.path.join(cfg.work_dir, project), sid)
+    assert os.path.isdir(os.path.join(cfg.work_dir, project, ""))
+    assert work_mod.james_has(cfg, project, sid) is None
+
+
+def test_james_has_refuses_a_session_id_that_is_not_a_uuid(tmp_path):
+    from types import SimpleNamespace
+    sessions = tmp_path / "sessions"
+    cfg = SimpleNamespace(sessions_dir=sessions, work_dir="/home/james/work")
+    cwd = "/home/james/work/thinkingtoo/tiroir"
+    _transcript(sessions / re.sub(r"[^A-Za-z0-9]", "-", cwd), cwd, "x")
+    for sid in ("../x", "x", "%2e%2e%2fx", "x\0", str(uuid.uuid4()) + "/../x"):
+        assert work_mod.james_has(cfg, "thinkingtoo/tiroir", sid) is False
+
+
+def test_james_has_refuses_a_projects_folder_that_is_a_link(tmp_path):
+    from types import SimpleNamespace
+    sid, sessions = str(uuid.uuid4()), tmp_path / "sessions"
+    sessions.mkdir()
+    cwd = "/home/james/work/thinkingtoo/tiroir"
+    _transcript(tmp_path / "elsewhere", cwd, sid)
+    (sessions / re.sub(r"[^A-Za-z0-9]", "-", cwd)).symlink_to(tmp_path / "elsewhere")
+    cfg = SimpleNamespace(sessions_dir=sessions, work_dir="/home/james/work")
+    assert work_mod.james_has(cfg, "thinkingtoo/tiroir", sid) is False
+
+
+def test_open_transcript_refuses_an_id_that_is_not_a_uuid(tmp_path):
+    (tmp_path / "s" / "p").mkdir(parents=True)
+    for planted in (tmp_path / "x.jsonl", tmp_path / "s" / "x.jsonl", tmp_path / "s" / "p" / "x.jsonl"):
+        planted.write_text("would be served\n", encoding="utf-8")     # each id below names one of these without the guard
+    for sid in ("../x", "../../x", "x", "%2e%2e%2fx", "x\0"):
+        assert work_mod.open_transcript(tmp_path / "s", sid) is None
+
+
+def test_a_drop_for_a_project_that_climbs_stays_in_its_folder(tmp_path):
+    folder = tmp_path / "case" / "tell"
+    folder.mkdir(parents=True)
+    for project in ("../../outside", "thinkingtoo/../../x", "/etc/passwd"):
+        said, name = work_mod.drop_named(folder, project, b"{}", "missing")
+        assert said == "written" and "/" not in name and (folder / name).is_file()
+    assert [p.name for p in (tmp_path / "case").iterdir()] == ["tell"]
+
+
+def test_a_drop_never_writes_through_a_link_planted_at_its_name(tmp_path, monkeypatch):
+    import time as time_mod
+    monkeypatch.setattr(time_mod, "gmtime", lambda *a: time_mod.struct_time((2026, 10, 31, 17, 0, 0, 5, 304, 0)))
+    folder, target = tmp_path / "tell", tmp_path / "target"
+    folder.mkdir()
+    name = "thinkingtoo--tiroir-20261031T170000Z"
+    (folder / ("." + name)).symlink_to(target)            # dangling: exists() is False, O_EXCL refuses it
+    (folder / name).symlink_to(target)
+    said, wrote = work_mod.drop_named(folder, "thinkingtoo/tiroir", b"{}", "missing")
+    assert said == "written" and not target.exists()
+    assert not (folder / wrote).is_symlink() and (folder / wrote).read_bytes() == b"{}"

@@ -12,6 +12,7 @@ Then it acks it. The token is read from a 0600 file of this user's, never from a
 Registered in COMMANDS and COMMAND_HELP, which the foot of cli.py merges into its own.
 """
 import argparse
+import http.client
 import json
 import os
 import re
@@ -237,7 +238,7 @@ class Relay:
             except Gone as e:
                 _err(f"sheaf relay: {e}")
                 return EXIT_FAILED
-            except (OSError, urllib.error.URLError) as e:
+            except (OSError, http.client.HTTPException) as e:     # URLError is an OSError; a cut chunk is not
                 _err(f"sheaf relay: the hub is unreachable ({getattr(e, 'reason', None) or e}): trying again")
             # A stream that ran a while (the front ends each after 5 minutes) is followed by a try at once.
             tries = 0 if time.monotonic() - started > 60 else tries + 1

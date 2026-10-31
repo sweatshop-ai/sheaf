@@ -308,14 +308,16 @@
   /** Mount the sheaf `opts.doc` in `host`: a CLOSED shadow root (the front's CSS and the page's cannot touch each other, and a
    *  script of the front cannot walk into it by `host.shadowRoot`), the document's own styles, then its rebuilt body, and the
    *  page's behaviour on it (page.js, served after this file in /_/mount.js: sheafPage.create). Resolves to {config, title,
-   *  toc, unmount, dirty, remount}. remount() fetches the page again and builds it in place of the old one, which is what a
+   *  toc, overtaken, unmount, dirty, remount}. remount() fetches the page again and builds it in place of the old one, which is what a
    *  reload of a page of its own did; the page calls it where it called location.reload(). The wrapper is the scroller and
    *  takes focus on a click, so the page's keys reach its root. With `opts.list` (a root's name) and `opts.show` instead
    *  of `opts.doc`, the list: its rows are data, drawn by list.js `render` from text, and its script is sheafList.create.
    *  The root is attached at the first good answer, and a pane keeps it: mount() on a pane that holds a page takes that
    *  page down first, and a mount overtaken by a newer call on its pane before it took the pane builds nothing (its
-   *  handle is dead). An answer of another hub version builds nothing and attaches nothing: `opts.upgrade(version)` is
-   *  called once, so the loader loads that version's script and mounts with it (a pane already holding a root of this
+   *  handle is dead: `overtaken` is true, its getters are null, and a failure of its fetch is no one's). The takeover
+   *  asks the standing page nothing: the loader asks its dirty() before it calls mount(). An answer of another hub
+   *  version builds nothing and attaches nothing: `opts.upgrade(version)` is called once (each remount of the old page
+   *  says the new one is loading), so the loader loads that version's script and mounts with it (a pane already holding a root of this
    *  script needs a new host: a root belongs to the script that made it); without it the pane says to reload. A remount
    *  that fails is said in the page, which stays as it was. */
   async function mount(host, opts) {
@@ -341,6 +343,7 @@
     let gone = false;
     let cut = () => {};
     let handle = null;
+    let overtaken = false;
     async function draw() {
       const mine = ++drawn;
       cut();
@@ -360,11 +363,10 @@
       const upgraded = KNOWN && fresh.version !== VERSION;
       if (upgraded && typeof opts.upgrade === 'function') {
         got = got || fresh;
-        if (!told) {
-          told = true;
-          if (page && page.failed) page.failed('sheaf was updated on the hub: the new version is loading.');
-          opts.upgrade(fresh.version);
-        }
+        // Every remount of the old page is said, not the first only: its settle had set `settling` and written the keep,
+        // and a page left so refuses typing in silence while the loader's new script is slow or failed.
+        if (page && page.failed) page.failed('sheaf was updated on the hub: the new version is loading.');
+        if (!told) { told = true; opts.upgrade(fresh.version); }
         return got;
       }
       if (!root) {
@@ -410,7 +412,9 @@
       return got;
     }
     handle = {
-      get config() { return got.config; }, get title() { return got.title; }, get toc() { return got.toc; },
+      // An overtaken handle has no answer (or one it did not build): its getters say null, and `overtaken` says why.
+      get config() { return got ? got.config : null; }, get title() { return got ? got.title : null; },
+      get toc() { return got ? got.toc : null; }, get overtaken() { return overtaken; },
       unmount() {
         gone = true; cut(); if (page) page.unmount(); page = null;
         const pane = PANES.get(host);
@@ -420,7 +424,8 @@
       remount: draw,
     };
     await draw();
-    if (pane.live !== handle) gone = true;          // overtaken before it took the pane: nothing of it stands
+    if (pane.live !== handle) gone = true;          // overtaken, or an upgrade: nothing of it stands
+    overtaken = pane.live !== handle && pane.seq !== call;
     return handle;
   }
 

@@ -42,7 +42,11 @@ sessions:
 
 A quote from the contract.
 """
-TRANSCRIPT = b'{"type":"user","message":"hello"}\n{"type":"assistant","message":"hi"}\n'
+CWD = "/home/james/work/thinkingtoo/tiroir"
+# As Claude Code writes them: the first line naming a cwd names the project's folder and the session (#146).
+TRANSCRIPT = (b'{"type":"user","cwd":"%s","sessionId":"%s","message":"hello"}\n'
+              b'{"type":"assistant","message":"hi"}\n') % (CWD.encode(), LIVE.encode())
+OLDER_TRANSCRIPT = b'{"older":true,"cwd":"%s","sessionId":"%s"}\n' % (CWD.encode(), OLDER.encode())
 
 
 def the_team(work, tmp_path, thierrys_tokens=()):
@@ -72,10 +76,10 @@ def box(team, tmp_path, work):
     (sessions / FOLDER).mkdir(parents=True)
     tell.mkdir()
     (sessions / FOLDER / f"{LIVE}.jsonl").write_bytes(TRANSCRIPT)
-    (sessions / FOLDER / f"{OLDER}.jsonl").write_bytes(b'{"older":true}\n')
+    (sessions / FOLDER / f"{OLDER}.jsonl").write_bytes(OLDER_TRANSCRIPT)
     cfg = the_list.parse({"root": str(work), "repo": "thinkingtoo/tt-tiroir", "project": 1,
                           "token_file": str(tmp_path / "token"), "sessions_dir": str(sessions),
-                          "tell_dir": str(tell), "box": "tiroir-tt",
+                          "tell_dir": str(tell), "box": "tiroir-tt", "work_dir": "/home/james/work",
                           "attach": "ssh tiroir-tt -t tmux attach -t james \\; select-window -t ={window}"},
                          "the test")
     team.hub.the_list = the_list.TheList(team.hub, cfg)
@@ -138,10 +142,11 @@ def test_a_document_outside_the_lists_root_or_not_at_project_depth_has_no_sessio
 
 @pytest.fixture
 def outside(tmp_path):
-    """A transcript of the same id outside sessions_dir, which no request may reach."""
+    """A transcript of the same id outside sessions_dir, which no request may reach: the project's as far as its first
+    line goes, so only the refusal to follow a link keeps it out (#146)."""
     f = tmp_path / "secret" / f"{LIVE}.jsonl"
     f.parent.mkdir()
-    f.write_bytes(b'{"secret":true}\n')
+    f.write_text(json.dumps({"secret": True, "cwd": CWD, "sessionId": LIVE}) + "\n", encoding="utf-8")
     return f
 
 
@@ -186,12 +191,61 @@ def test_on_a_sheaf_live_on_a_laptop_no_box_session_is_served_without_its_id(tea
     assert download(team).status == 404
     assert hub_rows("transcript-downloaded") == []
     got = download(team, id=OLDER)
-    assert got.status == 200 and got.body == b'{"older":true}\n'
+    assert got.status == 200 and got.body == OLDER_TRANSCRIPT
 
 
 def test_an_older_box_session_is_served_by_its_id(team, box):
     got = download(team, id=OLDER)
-    assert got.status == 200 and got.body == b'{"older":true}\n' and got.headers["X-Sheaf-Session"] == OLDER
+    assert got.status == 200 and got.body == OLDER_TRANSCRIPT and got.headers["X-Sheaf-Session"] == OLDER
+
+
+# ── only the project's own folder of the copy is looked in (sheaf#146) ───────
+STRAY = "33333333-4444-4555-8666-777777777777"
+
+
+def listed(team, work, sid):
+    """The sheaf with `sid` as an older box session of its own, as a push to the root's remote could list it."""
+    put(team, work, DOC, SHEAF.replace(f"  - {{id: {OLDER}", f"  - {{id: {sid}, host: tiroir-tt, member: james, "
+                                       f"date: 2026-10-27T08:00:00Z}}\n  - {{id: {OLDER}", 1))
+
+
+def planted(box, folder, cwd, sid, session=None):
+    f = box["sessions"] / folder / f"{sid}.jsonl"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps({"type": "user", "cwd": cwd, "sessionId": session or sid}) + "\n", encoding="utf-8")
+
+
+def test_a_listed_id_whose_transcript_is_the_projects_is_served(team, box, work):
+    listed(team, work, STRAY)
+    planted(box, FOLDER, CWD, STRAY)
+    assert download(team, id=STRAY).status == 200
+
+
+def test_a_listed_id_whose_transcript_is_another_projects_is_not_served(team, box, work):
+    listed(team, work, STRAY)
+    planted(box, "-home-james-work-acme-site", "/home/james/work/acme/site", STRAY)
+    assert download(team, id=STRAY).status == 404
+    assert hub_rows("transcript-downloaded") == []
+
+
+def test_a_transcript_in_the_projects_folder_whose_cwd_is_another_path_is_not_served(team, box, work):
+    # Claude's folder name is lossy: thinkingtoo-tiroir and thinkingtoo/tiroir share one.
+    listed(team, work, STRAY)
+    planted(box, FOLDER, "/home/james/work/thinkingtoo-tiroir", STRAY)
+    assert download(team, id=STRAY).status == 404
+
+
+def test_a_transcript_whose_session_id_is_not_its_name_is_not_served(team, box, work):
+    listed(team, work, STRAY)
+    planted(box, FOLDER, CWD, STRAY, session=OLDER)
+    assert download(team, id=STRAY).status == 404
+
+
+def test_without_work_dir_no_transcript_is_served(team, box):
+    cfg = team.hub.the_list.cfg
+    team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{**cfg.__dict__, "work_dir": None}))
+    assert download(team).status == 404
+    assert download(team, id=OLDER).status == 404
 
 
 def test_a_transcript_that_is_a_link_out_of_sessions_dir_is_refused(team, box, outside):
@@ -202,8 +256,9 @@ def test_a_transcript_that_is_a_link_out_of_sessions_dir_is_refused(team, box, o
 
 
 def test_a_folder_that_is_a_link_out_of_sessions_dir_is_refused(team, box, outside):
-    (box["sessions"] / FOLDER / f"{LIVE}.jsonl").unlink()
-    (box["sessions"] / "-elsewhere").symlink_to(outside.parent)
+    # The project's own folder is the link (#146): no other folder of the copy is looked in at all.
+    shutil.rmtree(box["sessions"] / FOLDER)
+    (box["sessions"] / FOLDER).symlink_to(outside.parent)
     assert download(team).status == 404
 
 
@@ -1103,7 +1158,6 @@ def test_a_door_create_cannot_list_a_session_but_may_write_an_empty_list(team, b
 
 # ── the hub records James's session from its own Ask and Tell (9.12) ─────────
 NEW = "abcdef01-2345-4678-89ab-cdef01234567"
-CWD = "/home/james/work/thinkingtoo/tiroir"
 
 
 def james_wrote(box, id, cwd=CWD, folder=FOLDER, at=None):
@@ -1376,10 +1430,11 @@ def test_with_work_dir_the_filesystem_root_james_s_write_records_his_session(tea
     assert row["transcript"] == NEW
 
 
-def test_without_sessions_dir_a_box_sheaf_offers_no_fork(team, box):
-    # The fork fetches the transcript from /_/session, which is a 404 without sessions_dir.
+@pytest.mark.parametrize("key", ["sessions_dir", "work_dir"])
+def test_without_sessions_dir_or_work_dir_a_box_sheaf_offers_no_fork(team, box, key):
+    # The fork fetches the transcript from /_/session, which is a 404 without either (#146).
     cfg = team.hub.the_list.cfg
-    team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{**cfg.__dict__, "sessions_dir": None}))
+    team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{**cfg.__dict__, key: None}))
     w = meta(team)["work"]
     assert "fork" not in w and w["live"] == "box"
 
@@ -1710,11 +1765,15 @@ def test_james_has_refuses_a_projects_folder_that_is_a_link(tmp_path):
 
 
 def test_open_transcript_refuses_an_id_that_is_not_a_uuid(tmp_path):
-    (tmp_path / "s" / "p").mkdir(parents=True)
-    for planted in (tmp_path / "x.jsonl", tmp_path / "s" / "x.jsonl", tmp_path / "s" / "p" / "x.jsonl"):
-        planted.write_text("would be served\n", encoding="utf-8")     # each id below names one of these without the guard
+    from types import SimpleNamespace
+    (tmp_path / "s" / FOLDER).mkdir(parents=True)
+    cfg = SimpleNamespace(sessions_dir=tmp_path / "s", work_dir="/home/james/work")
+    # Each id below names one of these, a transcript of the project's as far as its first line goes, without the guard.
+    for sid, planted in (("../../x", tmp_path / "x.jsonl"), ("../x", tmp_path / "s" / "x.jsonl"),
+                         ("x", tmp_path / "s" / FOLDER / "x.jsonl")):
+        planted.write_text(json.dumps({"cwd": CWD, "sessionId": sid}) + "\n", encoding="utf-8")
     for sid in ("../x", "../../x", "x", "%2e%2e%2fx", "x\0"):
-        assert work_mod.open_transcript(tmp_path / "s", sid) is None
+        assert work_mod.open_transcript(cfg, "thinkingtoo/tiroir", sid) is None
 
 
 def test_a_drop_for_a_project_that_climbs_stays_in_its_folder(tmp_path):

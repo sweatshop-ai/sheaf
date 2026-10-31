@@ -1,6 +1,7 @@
 """`sheaf relay` (SPEC 9.14, sheaf#117): the member's side of the relay. The token is read from a 0600 file of the
 user's own and never from argv; each Tell of the stream is handed to the session with its id as msg_id and acked;
 `gone` or a refused token ends the relay. The network and the session are stand-ins here."""
+import http.client
 import io
 import json
 import os
@@ -66,8 +67,11 @@ class Net:
     def __call__(self, req, timeout=None):
         if req.get_method() == "POST":
             self.posts.append((req.full_url, dict(req.header_items()), json.loads(req.data)))
-            if self.ack != 200:
-                raise urllib.error.HTTPError(req.full_url, self.ack, "no", {}, io.BytesIO(b"{}"))
+            ack = self.ack.pop(0) if isinstance(self.ack, list) else self.ack
+            if isinstance(ack, Exception):
+                raise ack
+            if ack != 200:
+                raise urllib.error.HTTPError(req.full_url, ack, "no", {}, io.BytesIO(b"{}"))
             return io.BytesIO(b'{"ok": true}')
         self.gets.append((req.full_url, dict(req.header_items())))
         if self.refuse or not self.streams:       # out of streams: a refused token, so a relay never spins here
@@ -152,7 +156,8 @@ def test_the_token_is_never_carried_onto_a_redirect():
     assert "Authorization" not in req.headers and req.unredirected_hdrs["Authorization"] == f"Bearer {TOKEN}"
 
 
-@pytest.mark.parametrize("hub", ["http://front.example", "https://front.example/path", "ftp://front.example"])
+@pytest.mark.parametrize("hub", ["http://front.example", "https://front.example/path", "ftp://front.example",
+                                 "https://front.example:x", "https://u@front.example"])
 def test_a_hub_that_is_not_https_or_this_machine_is_refused(tmp_path, hub, capsys):
     f = token_file(tmp_path)
     assert rc.cmd_relay(["--hub", hub, "--doc", DOC, "--session", SID, "--token-file", str(f)]) == 2
@@ -180,3 +185,53 @@ def test_the_token_is_in_no_line_the_relay_prints(capsys):
         relay(net, deliver).run()
     out = capsys.readouterr()
     assert out.err and TOKEN not in out.out + out.err
+
+
+@pytest.mark.parametrize("failure", [403, 502, urllib.error.URLError("connection reset"),
+                                     http.client.BadStatusLine("")])
+def test_a_tell_whose_ack_failed_is_acked_again_and_never_delivered_twice(failure, capsys):
+    """#134: the stream sends the Tell again after the reconnect; the relay only acks it again."""
+    got = []
+    first = failure if isinstance(failure, Exception) else \
+        urllib.error.HTTPError("https://front.example/_/relay", failure, "no", {}, io.BytesIO(b"{}"))
+    net = Net([("tell", {"id": TID, "message": "m"})], [("tell", {"id": TID, "message": "m"}), ("gone", {})],
+              ack=[first, 200])
+    relay(net, lambda m, i: got.append(i)).run()
+    assert got == [TID] and len(net.gets) == 2
+    assert [b for _, _, b in net.posts] == [{"doc": DOC, "id": TID, "outcome": "delivered"}] * 2
+
+
+def test_a_failed_tell_whose_ack_failed_is_acked_failed_again_with_its_error():
+    def cleared(message, id):
+        raise DeliveryError("cleared")
+    net = Net([("tell", {"id": TID, "message": "m"})], [("tell", {"id": TID, "message": "m"}), ("gone", {})],
+              ack=[503, 200])
+    calls = []
+    relay(net, lambda m, i: (calls.append(i), cleared(m, i))).run()
+    assert calls == [TID]
+    assert [b for _, _, b in net.posts] == [{"doc": DOC, "id": TID, "outcome": "failed", "error": "cleared"}] * 2
+
+
+@pytest.mark.parametrize("hub", ["https://Front.Example:443", "https://front.example:443", "HTTPS://FRONT.EXAMPLE"])
+def test_the_hub_is_spelled_as_the_fronts_origin(hub):
+    """#134: Origin is compared with the front's own; `:443` or capitals would make every ack a 403."""
+    net = Net([("tell", {"id": TID, "message": "m"}), ("gone", {})])
+    rc.Relay(hub, DOC, SID, TOKEN, "/tmp/none", opener=net, deliver=lambda m, i: None, sleep=lambda s: None).run()
+    (url, headers, _), = net.posts
+    assert url == "https://front.example/_/relay" and headers["Origin"] == "https://front.example"
+
+
+def test_a_stream_cut_in_the_middle_of_a_chunk_is_tried_again():
+    class Cut(io.BytesIO):
+        def __iter__(self):
+            yield b"event: hello\n"
+            raise http.client.IncompleteRead(b"")
+    got, calls = [], []
+    net = Net([("tell", {"id": TID, "message": "m"}), ("gone", {})])
+    first = net.__call__
+
+    def opener(req, timeout=None):
+        calls.append(req.get_method())
+        return Cut() if len(calls) == 1 else first(req, timeout)
+    relay(opener, lambda m, i: got.append(i)).run()
+    assert got == [TID]

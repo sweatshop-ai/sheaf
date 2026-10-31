@@ -1259,19 +1259,25 @@ class Handler:
             return "box"
         return "relay" if kind == "tell" and "relay-tell" in can else None
 
-    def _relay_tell(self, req: Req, e, thread: str) -> str | None:
-        """Queue a member's Tell for the fork's relay and write `tell-relayed`; the page's `tellError`, or None."""
-        st = work.state(self.hub, e.address, e.live.current()[1])
-        if st is None or st.live != "laptop":
-            return RELAY_MOVED
+    def _relay_tell(self, req: Req, e, thread: str, session: str) -> str | None:
+        """Queue a member's Tell for the relay of the fork `session`, the live session the comment was judged on,
+        and write `tell-relayed`; the page's `tellError`, or None. Under the name's lock, where a fork is written
+        and its token issued (#134): a fork that landed since the comment was written does not receive it."""
         t = relay.Tell(str(uuid.uuid4()), thread, self._tell_message(req, e, thread), work.member_word(req.member))
         self._expire_relayed()
-        try:
-            self.relays.put(e.address, st.sessions[0]["id"], t)
-        except relay.Full as ex:
-            return str(ex)
+        with place.held(self.hub, e.address):
+            st = work.state(self.hub, e.address, e.live.current()[1])
+            if st is None or st.live != "laptop" or st.sessions[0]["id"] != session:
+                return RELAY_MOVED
+            try:
+                old = self.relays.put(e.address, session, t)
+            except relay.Full as ex:
+                return str(ex)
+        # A live session changed by hand, with no fork report to drop them: its Tells are dropped here (#134).
+        for _, gone in old:
+            self._relay_failed(e.address, gone, "tell-relay-failed", RELAY_MOVED)
         self.hub.record("tell-relayed", e.address, tell=t.id, thread=thread, by=t.by,
-                        transcript=st.sessions[0]["id"], **self._who(req))
+                        transcript=session, **self._who(req))
         return None
 
     def _james_called(self, caller, address):
@@ -1359,9 +1365,9 @@ class Handler:
             if moved:
                 self.hub.index.touch(address)
                 self.hub.committed(address, by=caller.display, what="session")
+                self._relay_moved(address)          # under the name's lock, as a fork's (#134)
         self._drop_waiting(address, seq)
         if moved:
-            self._relay_moved(address)
             self.hub.record("session-recorded", address, transcript=sid, by="james")
 
     def _james_may_take(self, text: str, sid: str) -> bool:
@@ -1414,9 +1420,10 @@ class Handler:
                 raise Refuse(409, str(ex)) from None
             self.hub.index.touch(e.address)
             self.hub.committed(e.address, req.member, "fork")
-        # The fork is the live session now: the relay of the one before ends, and this one gets its own (9.14).
-        self._relay_moved(address)
-        token, rid = self.relays.issue(req.member_id, address, sid)
+            # The fork is the live session now: the relay of the one before ends, and this one gets its own (9.14).
+            # Under the name's lock, so two forks reported at once issue in the order they were written (#134).
+            self._relay_moved(address)
+            token, rid = self.relays.issue(req.member_id, address, sid)
         via = {"via": "code", "code": code.id} if code is not None else {}
         if code is not None:
             self.hub.record("code-used", address, code=code.id, route="sessions", **self._who(req))
@@ -1470,6 +1477,7 @@ class Handler:
             tell_line = self.hub.asktell.telling_line(e.address, b.get("id", ""))
         can_tell = tell and tell_line is None
         signed = {"by": member.name, "author": member.name} if member else {}
+        judged = []
         if member is not None:
             def still_visible(text):
                 # The gate (_entry) read the file before the lock: a write that closed the sheaf since is seen here,
@@ -1479,6 +1487,8 @@ class Handler:
                     raise Refuse(404, "no such document")
                 if to_box and self._work_route(e.address, text, to_box) != route:
                     raise Refuse(400, proxy.PROXY_LINE)
+                if route == "relay":        # the fork the Tell goes to: no newer one (#134)
+                    judged[:] = [work.sessions(fm)[0]["id"]]
             signed["guard"] = still_visible
         with place.held(self.hub, e.address):           # the write and its commit, one step (9.11)
             try:
@@ -1503,7 +1513,7 @@ class Handler:
             ask = tell = False
             to_box = None
         if to_box and route == "relay":
-            if (line := self._relay_tell(req, e, snap["id"])) is not None:
+            if (line := self._relay_tell(req, e, snap["id"], judged[0] if judged else "")) is not None:
                 snap["tellError"] = line
         elif to_box:
             drop = self._drop_for_james(req, e, to_box, b["body"], snap["id"])

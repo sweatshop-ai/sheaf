@@ -194,7 +194,7 @@ def test_a_sheaf_live_on_a_laptop_names_its_machine_in_place_of_the_fork(tab):
 
 
 def test_a_box_sheaf_the_hub_cannot_fork_never_says_there_is_none_to_fork(tab):
-    # Without [list] sessions_dir the hub leaves `fork` out of a sheaf whose sessions ran on the box (9.12).
+    # Without [list] sessions_dir and work_dir the hub leaves `fork` out of a sheaf whose sessions ran on the box (9.12).
     as_member(tab, work(attach=None, fork=None))
     tab.open()
     open_work(tab.page)

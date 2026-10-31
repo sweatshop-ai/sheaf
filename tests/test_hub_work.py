@@ -142,10 +142,11 @@ def test_a_document_outside_the_lists_root_or_not_at_project_depth_has_no_sessio
 
 @pytest.fixture
 def outside(tmp_path):
-    """A transcript of the same id outside sessions_dir, which no request may reach."""
+    """A transcript of the same id outside sessions_dir, which no request may reach: the project's as far as its first
+    line goes, so only the refusal to follow a link keeps it out (#146)."""
     f = tmp_path / "secret" / f"{LIVE}.jsonl"
     f.parent.mkdir()
-    f.write_bytes(b'{"secret":true}\n')
+    f.write_text(json.dumps({"secret": True, "cwd": CWD, "sessionId": LIVE}) + "\n", encoding="utf-8")
     return f
 
 
@@ -255,8 +256,9 @@ def test_a_transcript_that_is_a_link_out_of_sessions_dir_is_refused(team, box, o
 
 
 def test_a_folder_that_is_a_link_out_of_sessions_dir_is_refused(team, box, outside):
-    (box["sessions"] / FOLDER / f"{LIVE}.jsonl").unlink()
-    (box["sessions"] / "-elsewhere").symlink_to(outside.parent)
+    # The project's own folder is the link (#146): no other folder of the copy is looked in at all.
+    shutil.rmtree(box["sessions"] / FOLDER)
+    (box["sessions"] / FOLDER).symlink_to(outside.parent)
     assert download(team).status == 404
 
 

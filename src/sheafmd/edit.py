@@ -880,6 +880,12 @@ def _raw_tags(content: str) -> list:
     return [tuple(t) for t in tags]
 
 
+def _html_blocks(md: str) -> int:
+    """How many HTML blocks pandoc reads in `md`, at any depth."""
+    r = _pandoc.run(["-f", "gfm", "-t", "json"], md)
+    return r.stdout.count('"t":"RawBlock"') if r.returncode == 0 else -1
+
+
 def _tags_as_text(content: str, fragment: str, token):
     """(the fragment with each element that stands for a raw tag of `content` written as two
     placeholders around its words, {placeholder: the source's bytes})."""
@@ -903,7 +909,9 @@ def _tags_as_text(content: str, fragment: str, token):
     placed = {}
     for el in soup.find_all(True):
         # A math span's <sup> is the render's, not a tag of the source.
-        if _page_own(el) or any(_page_own(up) for up in el.parents if up.name != "[document]"):
+        # In code, a tag is the code's words, and stays the element pandoc writes as text.
+        if _page_own(el) or any(_page_own(up) or up.name in ("code", "pre")
+                                for up in el.parents if up.name != "[document]"):
             continue
         k = key(el)
         hit = next((u for u in unused if u[0] == k), None)
@@ -960,12 +968,21 @@ def _convert_with_comments(block, fragment: str, strays=None):
     frag = RAW_COMMENT_RE.sub(keep, ANCHOR_RE.sub(swap, fragment))
     frag, tags = _tags_as_text(block.content, frag, token)
     new_md = html_block_to_md(frag, block.content, strays)
-    for t, raw in tags.items():
-        if new_md.count(t) != 1:
-            # Pandoc lost or doubled the words around a raw tag: refused, as the file
-            # would lose the tag.
-            raise EditError("block holds raw HTML the edit cannot keep; edit it in the .md")
-        new_md = new_md.replace(t, raw, 1)
+    if tags:
+        before = _html_blocks(new_md)
+        for t, raw in tags.items():
+            # Pandoc's writer takes the character after a backslash it escapes, here the
+            # placeholder's opening bracket: the placeholder is found by its own letters.
+            found = re.findall(rf"\u27e6?{t[1:-1]}\u27e7", new_md)
+            if len(found) != 1:
+                # Pandoc lost or doubled the words around a raw tag: refused, as the file
+                # would lose the tag.
+                raise EditError("block holds raw HTML the edit cannot keep; edit it in the .md")
+            new_md = new_md.replace(found[0], raw, 1)
+        if _html_blocks(new_md) != before:
+            # A tag the edit left alone at the start of a line opens an HTML block, which
+            # would take the lines after it as raw text.
+            raise EditError("the edit leaves raw HTML at the start of a line; edit it in the .md")
     lost = []
     for cid, c in by_id.items():
         t = tokens.get(cid)

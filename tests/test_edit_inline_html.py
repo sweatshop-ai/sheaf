@@ -105,3 +105,29 @@ def test_a_raw_tag_named_like_a_block_element_does_not_take_the_blocks_own_eleme
     # The page's own <li> or <td> is not the source's tag: the save does what it did before #155.
     out = saved(src)
     assert out.count("\n- ") == 0 and "there" in out
+
+
+def refused(block_md, html):
+    doc = "# Title\n\n" + block_md + "\n"
+    out, rep = rde.apply_edits(doc, [{"i": 1, "html": html}])
+    return out == doc and rep["skipped"] and rep["skipped"][0][0] == 1
+
+
+@pytest.mark.parametrize("src,html", [
+    ("- a <x1> here\n  - b *c*", "<ul><li><x1></x1><ul><li>b <em>c</em></li></ul></li></ul>"),
+    ("A <x1> here.", "<p><x1></x1></p>"),
+])
+def test_an_edit_that_leaves_a_raw_tag_alone_on_its_line_is_refused(src, html):
+    # Alone at the start of a line the tag opens an HTML block, which takes the lines after it as text.
+    assert refused(src, html)
+
+
+@pytest.mark.parametrize("src", [r"A \\<kbd>a</kbd> here.", r"A <kbd>\\</kbd> here.", r"A <kbd>a\\</kbd>b here."])
+def test_a_backslash_beside_a_raw_tag_keeps_the_tag(src):
+    assert saved(src) == src.replace("here", "there") + "\n"
+
+
+def test_a_raw_element_inside_code_on_the_page_stays_text():
+    # Pandoc writes it as it did before #155; the tag is never put back inside the backticks as text.
+    out = saved("A <kbd>x</kbd> here.", html="<p>A <code><kbd>x</kbd></code> there.</p>")
+    assert "`<kbd>" not in out and "`x`" in out

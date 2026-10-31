@@ -846,6 +846,7 @@
         // So does an answer of `again`: its hash is the text the first send wrote, not always the file's now.
         var kept = j.remap || j.merged || j.again;
         hash = kept ? was : j.hash;
+        if (!kept && j.actions) drawActions(j.actions);     // the buttons of the text the hash names (SPEC 10.11)
         // What was sent is now saved; anything typed while the request was out
         // stays dirty for the next save.
         sent.forEach(function (x) { x.b.pristine = x.html; x.b.ownSave = kept ? x.html : null; });
@@ -2710,6 +2711,8 @@
       // The browser's own toggle is cancelled and replaced by ours: inside a
       // contenteditable it is not reliable, and the attribute must move with it.
       e.preventDefault();
+      // A box of the eight words is pressed with its button at the top of the page (SPEC 10.11).
+      if (actBoxes.has(t)) { say('Press it with its button at the top of the page.'); return; }
       var b = blockOf(t);
       if (stale || dead || !b || !editable.has(b.i)) return;
       var on = !t.hasAttribute('checked');
@@ -2720,6 +2723,86 @@
       save(true);
     });
   }
+
+  // ---- the action buttons (SPEC 10.11) ------------------------------------------
+  // The boxes of the eight words are the list's buttons at the top of the page (9.10): a one-off red, locked once
+  // pressed, with who and when; Share a toggle, its owner's alone. A press reads Undo for 5 seconds, then posts the
+  // list's tick (`/_/tick`) with the hash of the text on screen; the hub's `changed` reloads the page onto the
+  // ticked file. While a press waits or is sent, the other buttons cannot be pressed: they name their actions by
+  // the text the page holds, which the tick changes. The boxes themselves stay in the document, and a click on one
+  // says where its button is. A save's answer brings the buttons of the text it wrote, drawn once no press is open.
+  var UNDO_MS = 5000, actBoxes = new WeakSet(), actBar = null, pressOpen = false, actsOwed = null;
+  function boxesOf(b) {
+    var out = [];
+    b.nodes.forEach(function (n) {
+      if (n.nodeType !== 1) return;
+      if (n.matches('input[type="checkbox"]')) out.push(n);
+      Array.prototype.push.apply(out, n.querySelectorAll('input[type="checkbox"]'));
+    });
+    return out;
+  }
+  function drawActions(acts) {
+    if (pressOpen) { actsOwed = acts; return; }
+    actBoxes = new WeakSet();
+    if (actBar) actBar.remove();
+    actBar = null;
+    if (!acts || !acts.length) return;
+    acts.forEach(function (a) {
+      var b = a.box && blocks.filter(function (x) { return x.i === a.box[0]; })[0];
+      var box = b && boxesOf(b)[a.box[1]];
+      if (box) actBoxes.add(box);
+    });
+    actBar = el('div', { id: 'rd-actions', role: 'group', 'aria-label': 'Actions' });
+    var all = acts.map(function (a) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'rd-act ' + (a.toggle ? 'toggle' : 'one-off') + (a.pressed && !a.toggle ? ' pressed' : '');
+      btn.textContent = a.label + (a.pressed && !a.toggle ? ' ✓' + (a.by ? ' ' + a.by : '') : '');
+      if (a.toggle) btn.setAttribute('aria-pressed', a.pressed ? 'true' : 'false');
+      btn.disabled = !a.may || !canEdit;
+      actBar.appendChild(btn);
+      return { btn: btn, a: a };
+    });
+    all.forEach(function (x) { if (!x.btn.disabled) pressable(x.btn, x.a, all); });
+    main.parentNode.insertBefore(actBar, main);
+  }
+  function pressable(btn, a, all) {
+    var word = btn.textContent, waiting = null;
+    function lock(on) { all.forEach(function (o) { if (o.btn !== btn && o.a.may) o.btn.disabled = on; }); }
+    function back() { btn.textContent = word; btn.classList.remove('pending'); btn.removeAttribute('aria-label'); }
+    function done() { pressOpen = false; if (actsOwed) { var owed = actsOwed; actsOwed = null; drawActions(owed); } }
+    async function send() {
+      waiting = null;
+      back();
+      btn.disabled = true;
+      if (a.toggle) btn.setAttribute('aria-pressed', a.pressed ? 'false' : 'true');
+      // A save out now changes the hash: the tick names the text that save leaves.
+      while (saving || settling) await (saving || new Promise(function (r) { setTimeout(r, 100); }));
+      var tick = { action: a.n, word: a.word, hash: hash };
+      if (a.release) tick.release = true;
+      try {
+        await post('/_/tick', tick);
+        // Ticked: the hub's `changed` reloads the page; until then nothing more is pressed on the old text.
+        all.forEach(function (o) { o.btn.disabled = true; });
+        actsOwed = null;
+      } catch (e) {
+        if (a.toggle) btn.setAttribute('aria-pressed', a.pressed ? 'true' : 'false');
+        btn.disabled = false;
+        lock(false);
+        say(e.message, true);
+        done();
+      }
+    }
+    btn.addEventListener('click', function () {
+      if (waiting !== null) { clearTimeout(waiting); waiting = null; back(); lock(false); done(); return; }
+      if (stale || dead || pressOpen) return;
+      pressOpen = true;
+      lock(true);
+      btn.textContent = 'Undo'; btn.classList.add('pending'); btn.setAttribute('aria-label', 'Undo ' + word);
+      waiting = setTimeout(send, UNDO_MS);
+    });
+  }
+  if (canSave) drawActions(CFG.actions);
 
   // Asked when edits are on screen, stale or not: a stale page refuses Save and says to copy the
   // text and reload, so it is the one whose edits are most likely to be left behind. A comment, reply

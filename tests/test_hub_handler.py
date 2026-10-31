@@ -217,6 +217,17 @@ def test_a_save_lands_in_the_md(browser, plan):
     assert page_meta(browser.get(URL).text)["hash"] == got["hash"]
 
 
+def test_a_saves_answer_names_the_buttons_of_the_text_it_wrote(browser, plan):
+    # The page draws its action buttons from the text it holds (10.11): a save that adds an action, here a list
+    # item rewritten as a box, hands the page the buttons it numbers by from now on.
+    r = browser.post("/_/save", {"doc": DOC, "hash": md_hash(PLAN),
+                                 "edits": edit(PLAN, "- one", '<ul><li><input type="checkbox">Run it</li></ul>')})
+    got = r.json()
+    assert r.status == 200 and "- [ ] Run it" in plan.read_text(encoding="utf-8")
+    assert [(a["label"], a["n"], a["toggle"], a["box"]) for a in got["actions"]] == [
+        ("Run it", 0, False, [block_of(PLAN, "- one"), 0])]
+
+
 @pytest.mark.parametrize("swap", [True, False], ids=["swapped", "control"])
 def test_a_save_whose_sibling_is_swapped_for_a_link_is_not_acknowledged(browser, plan, work, tmp_path, monkeypatch,
                                                                        swap):

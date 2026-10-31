@@ -748,8 +748,13 @@ class Handler:
                 if got["changed"] and not got.get("again"):
                     moved.clear()
                     self.hub.committed(e.address, req.member, "edit", gone=gone)
+                # The buttons of the text written, under its lock (10.11): the page numbers its presses by them.
+                h, text = e.live.current()
+                actions = self.hub.actions(e, req.member, text) if h == got["hash"] else None
         if "Stop James" in ticked:
             self._stop_james(req, e)
+        if actions is not None:
+            got = {**got, "actions": actions}
         if got["merged"] and not got.get("again"):
             # Not a failure, but the thing this log exists to measure: how often the page and
             # an agent write at the same time.

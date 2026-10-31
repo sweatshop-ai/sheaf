@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 from bs4 import BeautifulSoup
-from helpers import FRONT, Front, call, hub_rows
+from helpers import FRONT, Front, call, hub_rows, page_meta
 
 from sheafmd.blocks import split_md_blocks
 from sheafmd.hub import place, proxy, the_list
@@ -1485,6 +1485,31 @@ def test_a_one_off_pressed_on_the_row_shows_locked_with_who_pressed_it_and_when(
         ("Approve ✓ you, 27 Oct", None, True, None), ("Done", "0", False, None)]
     assert row_buttons(box.get("/list", member=DORA), JOEY) == [
         ("Approve ✓ @nell, 27 Oct", None, True, None), ("Done", "0", False, None)]
+
+
+def page_buttons(res):
+    """The buttons at the top of a sheaf's page (10.11, #111), from its meta block: (label, `by`, n, may, box)."""
+    return [(a["label"], a["by"], a["n"], a["may"], a["box"]) for a in page_meta(res.text)["actions"]]
+
+
+def test_the_page_of_a_sheaf_names_the_rows_buttons_with_who_pressed_a_one_off_and_where_each_box_is(
+        committing, box, sheaves, github):
+    path = sheaves / JOEY[5:]
+    path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [ ] Approve\n- [ ] Done\n- [ ] Share\n"),
+                    encoding="utf-8")
+    git(sheaves, "commit", "-q", "-am", "Done and Share too")
+    box.hub.the_list.poll()
+    r = box.post("/_/tick", row_press(box.get("/list", member=NELL), JOEY, "Approve"), member=NELL)
+    assert r.status == 200, r.text
+    text = path.read_text(encoding="utf-8")
+    i = next(k for k, b in enumerate(split_md_blocks(text)) if "- [x] Approve" in b.content)
+    # Nell owns the sheaf (her issue): she may press its Share; Dora reads it and cannot.
+    assert page_buttons(box.get(f"/{JOEY}", member=NELL)) == [
+        ("Approve", "you, 27 Oct", None, False, [i, 0]), ("Done", "", 0, True, [i, 1]),
+        ("Share", "", 1, True, [i, 2])]
+    assert page_buttons(box.get(f"/{JOEY}", member=DORA)) == [
+        ("Approve", "@nell, 27 Oct", None, False, [i, 0]), ("Done", "", 0, True, [i, 1]),
+        ("Share", "", 1, False, [i, 2])]
 
 
 def test_a_box_no_commit_holds_shows_pressed_without_who_or_when_and_a_ticked_move_to_is_one(box, sheaves):

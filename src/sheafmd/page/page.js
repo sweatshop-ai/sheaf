@@ -709,7 +709,7 @@
   // hold events for as long as a job runs. `out` (below): the forms between their click and their answer,
   // each with the popover it holds, read by `writingNow`, `sendingIn` and the `sent*` questions.
   var writes = 0, afterWrites = [], docGone = false;     // docGone: no request goes out any more (meetDocGone)
-  var parked = 0;              // writes not yet sent, waiting for a tick that is out (post): meetVersion counts them
+  var parked = 0;              // writes not yet sent, waiting for a tick that is out (post, save): meetVersion counts them
   var ownWrites = 0, ownSeq = 0, held = [];       // ownSeq: how many of them have started
   var lateSends = {};          // the request ids of the sends the page gave up on, until the hub's event names them
   var lastLate = {};           // of those, the ones whose latest attempt was given up on (a send again may have failed otherwise)
@@ -839,11 +839,13 @@
     if (stale) { say('The document changed. Reload the page before saving again.', true); return false; }
     if (saving) { await saving; return save(quiet, res); }
     // A tick out names the text on disk: a save now would change it under the tick, which the hub would refuse.
-    // The wait can last as long as the tick's answer, so the menu says the save is on its way.
+    // The wait can last as long as the tick's answer, so the menu says the save is on its way, and an upgrade
+    // waits for it as for a write out (parked, meetVersion).
     if (ticking) {
       var sw = q('#rd-state');
       if (sw && dirty().length) sw.textContent = 'Saving…';
-      await ticking;
+      parked++;
+      try { await ticking; } finally { parked--; }
       refresh();
       return save(quiet, res);
     }

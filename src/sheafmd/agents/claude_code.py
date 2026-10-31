@@ -16,24 +16,22 @@ import json
 import os
 import re
 import shutil
-import socket
 import stat
 import subprocess
 import sys
-import uuid
 from pathlib import Path
 from typing import Mapping
 
 from .. import diagnostics, signals
+from . import envelope
 from .base import DeliveryCancelled, DeliveryError, Runner, State, Target
 
 TOOLS = "Read,Grep,Glob"
 WRITERS = "Bash,Edit,Write,NotebookEdit"
 COURIER_TIMEOUT = 3 * 60
-PUSH_TIMEOUT = 5
+PUSH_TIMEOUT = envelope.PUSH_TIMEOUT
 PS_TIMEOUT = 2                     # seconds `ps` may take to say when a process started
 SOCKS_ROOT = Path("/run/user")        # <root>/<uid>/cc-socks/<pid>.sock (SPEC 11.4)
-_ENVELOPE_TAG_RE = re.compile(r"<(?=\s*/?\s*cross-session-message)", re.I)
 # The courier's fence. The `<` that begins a `<<<MESSAGE` and the `>` that ends a `MESSAGE>>>` are
 # written as entities. Removing a character instead leaves a fence standing in `<<<<MESSAGE`; an
 # entity holds neither `<` nor `>`, so nothing re-forms however many characters pile up.
@@ -319,25 +317,11 @@ class ClaudeCodeAdapter:
 
     # ── the direct push (SPEC 11.4) ──────────────────────────────────────────
     def _push(self, sock_path: str, text: str):
-        # The text is a person's comment. An envelope tag of its own would close this message
-        # and open one from any sender it likes, so its `<` is written as `&lt;`.
-        text = _ENVELOPE_TAG_RE.sub("&lt;", text)
-        content = (f'<cross-session-message from="{self.sender}" from-name="sheaf" '
-                   f'from-mode="prompting">\n{text}\n</cross-session-message>')
-        line = json.dumps({"msgV": 1, "msg_id": str(uuid.uuid4()), "type": "user",
-                           "message": {"role": "user", "content": content},
-                           "priority": "next", "from": self.sender},
-                          separators=(",", ":")) + "\n"
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
-            s.settimeout(PUSH_TIMEOUT)
-            s.connect(sock_path)
-            s.sendall(line.encode("utf-8"))
+            envelope.push(sock_path, envelope.line(text, self.sender), PUSH_TIMEOUT)
         except OSError as e:
             raise DeliveryError(f"the Claude Code session did not take the message "
                                 f"({e.strerror or e}); render the page again from a session") from None
-        finally:
-            s.close()
 
     # ── the courier ──────────────────────────────────────────────────────────
     def _courier(self, t: Target, sock_path: str, text: str, run: Runner, seen: str):

@@ -147,10 +147,45 @@ def test_a_refusal_beside_a_press_that_went_through_is_still_said_after_the_relo
     page.evaluate("sessionStorage.setItem('sheaf-list-said', 'an old refusal')")
     page.reload()                                           # said once, after the reload that kept it
     assert page.locator(".list-error").inner_text() == "an old refusal"
-    ga4(page).click()
+    ga4(page).filter(has_text="Approve").click()            # beside its Done, pressed and locked (#110)
     page.clock.run_for(5100)
     until(lambda: len(ticks) == 3, what="the third tick")
     assert ticks[2][1] == 200
     until(lambda: ga4(page).count() == 0, what="the reload after GA4's Approve")
     page.wait_for_timeout(200)
     assert page.locator(".list-error").is_hidden()          # not said again after a later press's reload
+
+
+def test_a_pressed_one_off_stays_locked_when_a_press_beside_it_is_undone(listed, box, sheaves):  # noqa: F811
+    page, ticks = listed
+    path = sheaves / JOEY[5:]
+    path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [x] Approve\n- [ ] Done\n"),
+                    encoding="utf-8")
+    box.hub.the_list.poll()
+    page.reload()
+    approve, done = joey(page).nth(0), joey(page).nth(1)
+    assert approve.inner_text() == "Approve ✓" and approve.is_disabled()
+    done.click()
+    done.click()                                        # Undo
+    assert done.is_enabled() and approve.is_disabled()
+    approve.click(force=True)                           # a locked button sends nothing
+    page.clock.run_for(5100)
+    page.wait_for_timeout(200)
+    assert ticks == []
+
+
+def test_the_owner_releases_a_pressed_share_after_its_five_seconds(listed, box, sheaves):  # noqa: F811
+    page, ticks = listed
+    path = sheaves / JOEY[5:]
+    path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [ ] Approve\n- [x] Share\n"),
+                    encoding="utf-8")
+    box.hub.the_list.poll()
+    page.reload()
+    share = page.locator(f'button.list-act[data-doc="{JOEY}"][data-word="Share"]')
+    assert share.get_attribute("aria-pressed") == "true"
+    share.click()
+    assert share.inner_text() == "Undo"
+    page.clock.run_for(5100)
+    until(lambda: ticks, what="the release")
+    assert [(b["action"], b["word"], b.get("release"), s) for b, s in ticks] == [(0, "Share", True, 200)]
+    until(lambda: share.count() == 0 or share.get_attribute("aria-pressed") == "false", what="the reload")

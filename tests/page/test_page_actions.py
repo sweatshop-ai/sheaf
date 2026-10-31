@@ -709,3 +709,29 @@ def test_an_upgrade_while_a_comment_waits_for_the_tick_does_not_ask_to_send_it(s
     p.unroute("**/_/tick")
     until(lambda: "- [x] Approve" in f.read_text(encoding="utf-8"), what="the tick")
     until(lambda: "Why?" in f.read_text(encoding="utf-8"), what="the comment after it")
+
+
+NOTES = SHEAF.replace("- [ ] Share\n", "- [ ] Share\n- [ ] notes\n")
+
+
+def test_a_press_whose_block_was_edited_and_not_saved_keeps_the_tick(tab, site):
+    # #153, 1: the box was taken only from a clean block, so the settle's merge of a later edit put Approve back.
+    p, f = tab.page, site.file
+    f.write_text(NOTES, encoding="utf-8")
+    p.clock.install()
+    tab.open()
+    p.wait_for_selector("#rd-actions button")
+    stand_still(p)
+    type_at_end(p, "main li:has-text('notes')", " now")
+    until(lambda: "now" in p.inner_text("main li:has-text('notes')"), what="the edit on screen")
+    bar(p).nth(0).click()                               # Approve, its block edited and not saved
+    p.clock.run_for(3000)                               # the autosave goes
+    until(lambda: "notes now" in f.read_text(encoding="utf-8"), what="the autosave")
+    until(lambda: p.evaluate("document.querySelector('#rd-state').textContent") != "Saving…", what="its answer")
+    p.click("main li:has-text('notes')")
+    p.keyboard.press(key("End"))
+    p.keyboard.type(" more")
+    until(lambda: "more" in p.inner_text("main li:has-text('notes')"), what="the second edit on screen")
+    p.clock.run_for(2100)
+    until(lambda: "notes now more" in f.read_text(encoding="utf-8"), what="the edit, saved by the reload's settle")
+    assert "- [x] Approve" in f.read_text(encoding="utf-8"), f.read_text(encoding="utf-8")

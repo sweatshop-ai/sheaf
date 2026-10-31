@@ -2783,12 +2783,17 @@
   var ACTION_LINE = new RegExp('^(?:(?:' + ACTION_WORDS.slice(0, -1).map(function (w) {
     return w.replace(/'/g, '[\'’]');
   }).join('|') + ')|Move to\\s+[A-Za-z0-9._\\\\-]+\\s+\\(ref\\s+[^()\\s]+\\))(?:\\s+@[A-Za-z0-9._-]+)?$');
-  function mayBeAction(t) {
+  // The text of a box's own item, its nested lists left out; null for a box in no item.
+  function lineOf(t) {
     var li = t.closest && t.closest('li');
-    if (!li) return false;
+    if (!li) return null;
     var own = li.cloneNode(true);
     Array.prototype.forEach.call(own.querySelectorAll('ul, ol'), function (n) { n.remove(); });
-    return ACTION_LINE.test(own.textContent.replace(/\s+/g, ' ').trim());
+    return own.textContent.replace(/\s+/g, ' ').trim();
+  }
+  function mayBeAction(t) {
+    var line = lineOf(t);
+    return line !== null && ACTION_LINE.test(line);
   }
   async function tickBox(t, b) {
     if (boxWaits.has(t)) return;
@@ -2958,10 +2963,11 @@
       if (settling) { say('The page is reloading onto a change to the file: press ' + a.label + ' once it has.'); return; }
       pressOpen = true;
       // Its box, as an element: an item typed above it during the press moves its number, not the box (showTick).
-      // The number names the box only in the text the buttons were drawn from: in a block edited and not saved, or
-      // with buttons the page is not sure of, it may name another, and no box is taken.
-      var pb = boxOfAct(a), pbb = pb && blockOf(pb);
-      pressedBox = pbb && ser(pbb) === pbb.pristine && !actsUnsure && hash === actsHash ? pb : null;
+      // The number names the box only in the text the buttons were drawn from: with buttons the page is not sure
+      // of, or in a block whose edits not saved moved its boxes or changed its line, it may name another, and no
+      // box is taken.
+      var pb = boxOfAct(a);
+      pressedBox = pb && !actsUnsure && hash === actsHash && savedBox(pb, a.box[1]) ? pb : null;
       lock(true);
       btn.textContent = 'Undo'; btn.classList.add('pending'); btn.setAttribute('aria-label', 'Undo ' + word);
       waiting = setTimeout(send, UNDO_MS);
@@ -2973,6 +2979,17 @@
   function boxOfAct(a) {
     var b = a.box && blocks.filter(function (x) { return x.i === a.box[0]; })[0];
     return (b && boxesOf(b)[a.box[1]]) || null;
+  }
+  // The box is the `k`th of its block in the text saved too: the block is clean, or its edits left the same boxes,
+  // the `k`th on the same line (an edit in another item of the list).
+  function savedBox(box, k) {
+    var b = blockOf(box);
+    if (!b) return false;
+    if (ser(b) === b.pristine) return true;
+    var was = document.createElement('template');
+    was.innerHTML = b.pristine;
+    var then = was.content.querySelectorAll('input[type="checkbox"]'), now = boxesOf(b);
+    return then.length === now.length && now[k] === box && lineOf(then[k]) === lineOf(box);
   }
   function showTick(a, box) {
     var b = box && main.contains(box) && blockOf(box);

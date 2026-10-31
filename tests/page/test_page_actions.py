@@ -3,7 +3,7 @@ as the list's buttons, a one-off red with the 5 second Undo and locked once pres
 the list's tick (`POST /_/tick`, 9.10): the markdown on disk is what a tick writes, `- [x] <word>`."""
 import pytest
 
-from pagehelp import mark, reloaded, toast, type_at_end, until
+from pagehelp import at, comment_on, mark, reloaded, toast, type_at_end, until
 
 pytestmark = pytest.mark.page
 
@@ -143,3 +143,30 @@ def test_share_is_pressed_and_released_on_the_page(sheaf):
     p.clock.run_for(5100)
     until(lambda: "- [ ] Share" in f.read_text(encoding="utf-8"), what="the release")
     until(lambda: p.locator("#rd-actions button.toggle[aria-pressed=false]").count() == 1, what="Share released")
+
+
+def test_a_replys_answer_that_reloads_the_page_waits_for_a_press_in_its_undo(tab):
+    p, f = tab.page, tab.site.file
+    f.write_text(SHEAF, encoding="utf-8")
+    tab.open()
+    body = "main"
+    comment_on(tab, at(body, "Body"), at(body, "Body", None), "Why?")
+    p.clock.install()
+    p.reload()
+    p.wait_for_selector("#rd-actions button")
+    p.click(".rd-badge")
+    p.wait_for_selector("#rd-popover button[data-a=reply]")
+    p.click("#rd-popover button[data-a=reply]")
+    p.fill("#rd-popover textarea", "my reply")
+    f.write_text(f.read_text(encoding="utf-8") + "\nFrom outside.\n", encoding="utf-8")
+    p.wait_for_selector("#rd-popover .rd-hold")         # the form holds the reload
+    mark(p)
+    bar(p).nth(0).click()
+    p.click("#rd-popover button[data-f=ok]")            # its answer would run the held reload
+    until(lambda: "my reply" in f.read_text(encoding="utf-8"), what="the reply in the file")
+    p.wait_for_timeout(1500)
+    assert p.evaluate("window.__same_load") is True, "the page reloaded under the press"
+    p.clock.run_for(5100)
+    # The press names the text before the outside change: refused, and said on the page the reload brings.
+    reloaded(p)
+    until(lambda: "reload the page" in toast(p), what="the refusal after the reload")

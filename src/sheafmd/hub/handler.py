@@ -824,7 +824,7 @@ class Handler:
             extra = {} if work is None else {"work": work}
             return _ok(**proxy.for_member(snap), seen=self.hub.member_seen.get(req.member.id, e.address),
                        asking=[], question="", target=None, capabilities=can, lines=proxy.member_lines(),
-                       sent=self.hub.box_waits.open(e.address, e.live.current()[1]), **extra)
+                       sent=self.hub.box_waits.pending(e.address, e.live.current()[1]), **extra)
         v = self.hub.asktell.view(e.address)
         return _ok(**snap, seen=self.hub.seen.get(e.address),
                    asking=self.hub.runner.active("ask", e.address),
@@ -1509,9 +1509,9 @@ class Handler:
             drop = self._drop_for_james(req, e, to_box, b["body"], snap["id"])
             if drop != "written":
                 snap[f"{to_box}Error"] = "The hub could not send this to James's window; the comment is written."
-            elif (c := rdc.parse(e.live.current()[1]).by_id(snap["id"])) is not None:
+            else:
                 # Open on the sheaf's pages until a reply lands in the thread, or past the Tell wait (#115).
-                self.hub.box_waits.add(e.address, snap["id"], to_box, len(c.replies))
+                self.hub.box_waits.add(e.address, snap["id"], to_box, e.live.current()[1])
         # The job looks the document up again when it starts: it names its thread in the text the
         # comment was just written in, so a forget in between, and another folder that takes the name,
         # cannot hand it that folder's thread of the same id (SPEC 7.3). A forget that leaves no folder

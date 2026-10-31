@@ -401,9 +401,9 @@ def test_the_sent_line_keeps_the_name_it_was_sent_to_after_a_fork(tab):
           what="the sent line, still naming James")
 
 
-
 def told_james(tab, sent):
-    """Bea tells James on a thread, through the page, and the /_/doc answers from then on name it in `sent`."""
+    """Bea tells James on a thread, through the page, and the /_/doc answers from then on name it in `sent`: the
+    list as_member was given, which its route reads at each answer, so the thread appended here is in the next."""
     as_member(tab, work(), can=BOX_CAN, sent=sent)
     tab.open()
     sent_to_box(tab)
@@ -417,6 +417,7 @@ def told_james(tab, sent):
 
 
 def reopen(tab, cid):
+    """A new load of the browser, once its /_/doc answer names a drop, and the thread `cid` opened."""
     tab.page.reload()
     until(lambda: tab.docs and "sent" in tab.docs[-1] and tab.docs[-1]["sent"], what="the /_/doc answer")
     tab.page.click(f'.rd-anchor[data-rd-id="{cid}"]')
@@ -431,6 +432,7 @@ def test_the_sent_line_outlasts_a_reload_of_the_browser_while_the_hub_holds_the_
 
 
 def test_a_drop_the_hub_gives_up_on_takes_the_line_off_and_says_so(tab):
+    # No reply within the Tell wait: the hub's box-failed (#115).
     cid = told_james(tab, [])
     tab.site.hub.entry(DOC).bus.publish("box-failed", {"id": cid, "kind": "tell", "minutes": 10})
     until(lambda: "after 10 min" in toast(tab.page), what="the toast")

@@ -31,9 +31,13 @@ var create = function (ROOT, CFG, opts) {
     target.addEventListener(type, fn, capture);
     unlistens.push(function () { target.removeEventListener(type, fn, capture); });
   }
-  // A timer of an unmounted page does nothing: the page it would act on is gone.
-  function setTimeout(f, ms) { return window.setTimeout(function () { if (!unmounted) f(); }, ms); }
+  // A timer of an unmounted page does nothing: the page it would act on is gone. A page of its own hands the
+  // window its own function, as before: unload ends its timers, and a test that reads a timer's name still can.
+  function setTimeout(f, ms) {
+    return window.setTimeout(MOUNTED ? function () { if (!unmounted) f(); } : f, ms);
+  }
   function setInterval(f, ms) {
+    if (!MOUNTED) return window.setInterval(f, ms);
     var t = window.setInterval(function () { if (!unmounted) f(); }, ms);
     intervals.push(t);
     return t;

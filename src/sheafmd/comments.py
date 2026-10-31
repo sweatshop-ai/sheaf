@@ -27,6 +27,9 @@ may sit inside an inline HTML comment. Measured with pandoc 3.1.3:
     of every continuation line that could do this is written as an entity.
   * in a table cell or a heading the whole comment has to stay on one line, and a
     raw "|" splits the cell.
+  * a backtick before the comment that has no partner pairs with the first one
+    inside it, and the code span between them takes the comment in. So every
+    backtick is written "&#96;".
 
 Text is entity-encoded on the way in and decoded on the way out, so what a reader
 typed is what they get back, including "&", "<" and "-->".
@@ -152,6 +155,9 @@ class Parsed:
 def _enc(s: str) -> str:
     s = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     s = s.replace('"', "&quot;").replace("|", "&#124;")
+    # A raw backtick could pair with an unpaired one before the comment, and the code
+    # span between them would show the comment's head on the page and hide it from parse.
+    s = s.replace("`", "&#96;")
     while "--" in s:
         s = s.replace("--", "-&#45;")
     return s

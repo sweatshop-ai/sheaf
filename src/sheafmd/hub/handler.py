@@ -1365,9 +1365,9 @@ class Handler:
             if moved:
                 self.hub.index.touch(address)
                 self.hub.committed(address, by=caller.display, what="session")
+                self._relay_moved(address)          # under the name's lock, as a fork's (#134)
         self._drop_waiting(address, seq)
         if moved:
-            self._relay_moved(address)
             self.hub.record("session-recorded", address, transcript=sid, by="james")
 
     def _james_may_take(self, text: str, sid: str) -> bool:

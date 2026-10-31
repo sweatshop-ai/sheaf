@@ -1,6 +1,7 @@
 """`sheaf relay` (SPEC 9.14, sheaf#117): the member's side of the relay. The token is read from a 0600 file of the
 user's own and never from argv; each Tell of the stream is handed to the session with its id as msg_id and acked;
 `gone` or a refused token ends the relay. The network and the session are stand-ins here."""
+import http.client
 import io
 import json
 import os
@@ -186,7 +187,8 @@ def test_the_token_is_in_no_line_the_relay_prints(capsys):
     assert out.err and TOKEN not in out.out + out.err
 
 
-@pytest.mark.parametrize("failure", [403, 502, urllib.error.URLError("connection reset")])
+@pytest.mark.parametrize("failure", [403, 502, urllib.error.URLError("connection reset"),
+                                     http.client.BadStatusLine("")])
 def test_a_tell_whose_ack_failed_is_acked_again_and_never_delivered_twice(failure, capsys):
     """#134: the stream sends the Tell again after the reconnect; the relay only acks it again."""
     got = []
@@ -217,3 +219,19 @@ def test_the_hub_is_spelled_as_the_fronts_origin(hub):
     rc.Relay(hub, DOC, SID, TOKEN, "/tmp/none", opener=net, deliver=lambda m, i: None, sleep=lambda s: None).run()
     (url, headers, _), = net.posts
     assert url == "https://front.example/_/relay" and headers["Origin"] == "https://front.example"
+
+
+def test_a_stream_cut_in_the_middle_of_a_chunk_is_tried_again():
+    class Cut(io.BytesIO):
+        def __iter__(self):
+            yield b"event: hello\n"
+            raise http.client.IncompleteRead(b"")
+    got, calls = [], []
+    net = Net([("tell", {"id": TID, "message": "m"}), ("gone", {})])
+    first = net.__call__
+
+    def opener(req, timeout=None):
+        calls.append(req.get_method())
+        return Cut() if len(calls) == 1 else first(req, timeout)
+    relay(opener, lambda m, i: got.append(i)).run()
+    assert got == [TID]

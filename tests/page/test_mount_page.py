@@ -9,6 +9,7 @@ measures there. The comment test runs in Chromium, Firefox and WebKit: selection
 import json
 
 import pytest
+from helpers import PLAN
 from pagehelp import DOC, PAGE_TIMEOUT_MS, close_context, new_context, until
 
 from sheafmd import comments as rdc
@@ -23,7 +24,8 @@ FRONT_HTML = f"""<!doctype html><html><head><meta charset="utf-8"></head>
 <script>window.__front = true;
 window.__before = window.__live.size;          // the listeners the front holds before the mount
 sheafMount.mount(document.getElementById('pane'), {{doc: {json.dumps(DOC)},
-  upgrade: (v) => {{ (window.__upgrades = window.__upgrades || []).push(v); }}}})
+  upgrade: (v) => {{ (window.__upgrades = window.__upgrades || []).push(v); }},
+  navigate: (path) => {{ (window.__moves = window.__moves || []).push(path); }}}})
   .then((m) => {{ window.__page = m; }}, (e) => {{ window.__failed = String(e); }});</script>
 </body></html>"""
 # Keeps the closed root where the test can find it; nothing else about the root changes.
@@ -421,3 +423,44 @@ def test_a_mount_overtaken_before_its_answer_resolves_to_a_handle_that_says_so(f
     })()""" % (json.dumps(DOC), json.dumps(DOC)))
     assert got == [True, None, None, None, False, False, "string"], got
     assert front.js("return root.querySelectorAll('#rd-menu-btn').length;") == 1
+
+
+HEADS = "# Plan\n\n" + "".join(f"## Part {i}\n\n" + "".join(f"Line {i}.{j}.\n\n" for j in range(12)) for i in range(1, 8))
+
+
+def test_a_contents_link_scrolls_the_pane_to_its_heading_and_leaves_the_front_where_it_is(front):
+    """A fragment in a shadow root is looked up in the front's document: the click scrolled nothing and changed the
+    front's hash. mount.js scrolls the root's own element into view instead."""
+    front.site.file.write_text(HEADS, encoding="utf-8")
+    front.open()
+    link = "nav a[href$='part-6']"
+    until(lambda: front.has(link), what="the contents")
+    href = front.js("return root.querySelector(arg).getAttribute('href');", link)
+    assert href.startswith("#u-"), href
+    front.click(link)
+    until(lambda: front.js("const h = root.getElementById(arg.slice(1)), w = root.querySelector('.rd-root');"
+                           "return Math.abs(h.getBoundingClientRect().top - w.getBoundingClientRect().top) < 40;", href),
+          what="the heading at the top of the pane")
+    assert front.page.evaluate("location.hash") == ""
+    assert front.page.evaluate("window.__moves || null") is None
+
+
+def test_a_link_to_a_page_of_the_hub_goes_to_the_loader_and_a_modified_click_does_not(front):
+    """The root is closed, so the front cannot see which link in it was clicked: a plain click on a link of the origin
+    is handed to opts.navigate, which moves the front; a ctrl-click, a target or a download is the browser's."""
+    front.site.file.write_text(PLAN.replace("Last paragraph.", "See [the list](/list?show=mine), [out](https://example.org/x),"
+                                            " [new](/list), [file](/list/a.md)."), encoding="utf-8")
+    front.open()
+    front.click("main a[href='/list?show=mine']")
+    assert until(lambda: front.page.evaluate("window.__moves || null"), what="the move") == ["/list?show=mine"]
+    assert front.page.evaluate("location.pathname") == FRONT
+    # What mount.js decided, read on the front's side of the root; the front then stops the browser following it.
+    front.page.evaluate("document.getElementById('pane').addEventListener('click', (e) => {"
+                        " window.__prevented = e.defaultPrevented; e.preventDefault(); })")
+    clicked = """const a = root.querySelector(arg[0]); if (arg[1]) a.setAttribute(arg[1], '_blank');
+      a.dispatchEvent(new MouseEvent('click', {bubbles: true, composed: true, cancelable: true, button: 0, ctrlKey: !!arg[2]}));
+      return window.__prevented;"""
+    assert front.js(clicked, ["main a[href='/list']", None, True]) is False
+    assert front.js(clicked, ["main a[href='/list/a.md']", "target", False]) is False
+    assert front.js(clicked, ["main a[href^='https:']", None, False]) is False
+    assert front.page.evaluate("window.__moves") == ["/list?show=mine"]

@@ -26,6 +26,7 @@ from ..agents import registry
 from ..agents.base import Adapter, Target
 from ..render import render_file
 from ..source import STAMP_FORMAT, file_lock, lock_key
+from . import boxwait
 from . import place
 from . import projects
 from . import proxy as proxy_mod
@@ -106,6 +107,7 @@ class Hub:
         self.index = Index(self)
         self.tokens = state.Tokens()
         self.relays = relay_mod.Relays()     # the forks' relay tokens, queued Tells and streams (9.14)
+        self.box_waits = boxwait.BoxWaits(lambda: self.clock())    # the drops for James's window (9.12, #115)
         self.entries: dict[str, Entry] = {}
         self.index_bus = Bus()                   # the index streams (SPEC 8.8)
         self._index_opening = threading.Lock()   # one index stream opens at a time
@@ -709,6 +711,25 @@ class Hub:
         return self.runner.active("ask")
 
     # ── the watcher's step (SPEC 8.9) ────────────────────────────────────────
+    def _expire_drops(self):
+        """Give up on drops for James's window with no reply after the Tell wait (9.12, #115), read in the file as
+        it is now, whether a page asked since or not: the page is told `box-failed`, and a `box-expired` row says so."""
+        def text_of(address):
+            # The file, not the hub's copy: `sheaf reply` answers a drop without the hub, and a sheaf with no tab
+            # is not refreshed by the pass.
+            e = self.entries.get(address)
+            if e is None:
+                return None
+            self.catch_up(e)
+            return e.live.current()[1]
+        minutes = max(1, -(-self.tell_wait // 60))
+        for address, thread, d in self.box_waits.expire(self.tell_wait, text_of):
+            project = "/".join(roots_mod.Address.parse(address).rel.split("/")[:2])
+            self.record("box-expired", address, what=d.kind, project=project, thread=thread)
+            e = self.entries.get(address)
+            if e is not None:
+                e.bus.publish("box-failed", {"id": thread, "kind": d.kind, "minutes": minutes})
+
     def tick(self):
         """One pass of the watcher, run every second. For each document with an open tab or a
         Tell wait: give up on waits nobody answers, and when the file's (mtime, size) moved,
@@ -731,6 +752,10 @@ class Hub:
                 e.last_stat = key        # after: a rebuild that failed is tried again next tick
             except Exception as ex:
                 self._rebuild_failed(e, ex)
+        try:
+            self._expire_drops()                  # after the tabs' refresh: a reply that just landed is in
+        except Exception:
+            self.record_exception("drops-failed")
         try:
             self.commits.poll(self.roots.all())   # what the remote got, with no save (8.11, #75)
         except Exception:

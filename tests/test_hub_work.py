@@ -584,6 +584,80 @@ def test_a_drop_that_fails_keeps_the_comment_says_so_and_leaves_no_dot_file(team
     assert hub_rows("tell-dropped")[0]["drop"].startswith("failed: ") and drops(box) == []
 
 
+# ── the drop's wait (#115) ───────────────────────────────────────────────────
+
+def sent(team, member=HANS):
+    got = team.get(f"/_/doc?doc={ADDRESS}", member=member)
+    assert got.status == 200, got.text
+    return got.json()["sent"]
+
+
+@pytest.mark.parametrize("kind", ["ask", "tell"])
+def test_a_drop_for_james_is_sent_on_every_members_page_until_a_reply_lands_in_its_thread(team, box, work, kind):
+    cid = comment(team, work, kind).json()["id"]
+    assert sent(team) == sent(team, THIERRY) == [{"id": cid, "kind": kind}]
+    got = team.post("/_/comment", {"doc": ADDRESS, "op": "reply", "id": cid, "body": "Sent it."}, member=THIERRY)
+    assert got.status == 200, got.text
+    assert sent(team) == []
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root writes into a folder of mode 0500")
+def test_a_drop_that_fails_is_not_sent(team, box, work):
+    box["tell"].chmod(0o500)
+    try:
+        assert "tellError" in comment(team, work, "tell").json()
+    finally:
+        box["tell"].chmod(0o700)
+    assert sent(team) == []
+
+
+def test_a_drop_with_no_reply_after_the_tell_wait_fails_on_the_members_page(team, box, work):
+    now = [1_000_000.0]
+    team.hub.clock = lambda: now[0]
+    tab = team.get(f"/_/live?doc={ADDRESS}", member=HANS).stream
+    cid = comment(team, work, "tell").json()["id"]
+    now[0] += team.hub.tell_wait - 1
+    team.hub.tick()
+    assert sent(team) == [{"id": cid, "kind": "tell"}]
+    now[0] += 2
+    team.hub.tick()
+    assert sent(team) == []
+    data = next(d for n, d in tab.drain() if n == "box-failed")
+    assert data == {"id": cid, "kind": "tell", "minutes": team.hub.tell_wait // 60}
+    row, = hub_rows("box-expired")
+    assert (row["what"], row["project"], row["thread"]) == ("tell", "thinkingtoo/tiroir", cid)
+
+
+
+def test_a_drop_answered_before_the_tell_wait_is_never_given_up_on_though_no_page_asked(team, box, work):
+    # The reply ends the wait when it lands, not when a page next asks /_/doc (#115).
+    now = [1_000_000.0]
+    team.hub.clock = lambda: now[0]
+    tab = team.get(f"/_/live?doc={ADDRESS}", member=HANS).stream
+    cid = comment(team, work, "tell").json()["id"]
+    got = team.post("/_/comment", {"doc": ADDRESS, "op": "reply", "id": cid, "body": "Sent it."}, member=THIERRY)
+    assert got.status == 200, got.text
+    now[0] += team.hub.tell_wait + 1
+    team.hub.tick()
+    assert [n for n, _ in tab.drain() if n == "box-failed"] == []
+    assert hub_rows("box-expired") == []
+
+
+
+def test_a_drop_answered_in_the_file_from_outside_is_never_given_up_on(team, box, work):
+    # `sheaf reply` writes the file without the hub: the tick reads the file, not the hub's copy (#115).
+    from sheafmd import comments as rdc
+    now = [1_000_000.0]
+    team.hub.clock = lambda: now[0]
+    cid = comment(team, work, "tell").json()["id"]
+    f = work / DOC
+    f.write_text(rdc.reply(f.read_text(encoding="utf-8"), cid, "Sent it.", "James", "2026-10-31T15:00"),
+                 encoding="utf-8")
+    now[0] += team.hub.tell_wait + 1
+    team.hub.tick()
+    assert hub_rows("box-expired") == []
+
+
 # ── the meta block (10.1) ────────────────────────────────────────────────────
 
 def meta(team, member=HANS, doc=DOC):

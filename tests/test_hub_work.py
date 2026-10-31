@@ -764,6 +764,23 @@ def test_a_reply_before_the_supervisor_says_delivered_ends_the_drop_first(team, 
 
 
 
+def test_a_status_nested_too_deep_for_the_parser_is_ignored(team, box, work, monkeypatch):
+    # Python 3.11's json recurses on 2048 nested brackets: RecursionError, not ValueError (#139).
+    from sheafmd.hub import boxwait
+
+    def deep(_):
+        raise RecursionError("maximum recursion depth exceeded")
+    cid = comment(team, work, "tell").json()["id"]
+    status(box, "delivered")
+    from types import SimpleNamespace
+    with monkeypatch.context() as m:
+        m.setattr(boxwait, "json", SimpleNamespace(loads=deep))
+        team.hub.tick()
+    assert sent(team) == [{"id": cid, "kind": "tell", "state": "sent"}]
+    assert len(hub_rows("drop-status-ignored")) == 1 and hub_rows("drops-failed") == []
+
+
+
 # ── a member's index dot (#139) ──────────────────────────────────────────────
 
 def dot(team, member=HANS):

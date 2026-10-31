@@ -745,7 +745,7 @@ class Hub:
             return
         for address, thread, d in self.box_waits.drops():
             got = boxwait.read_status(folder, d.name) if d.name else None
-            what, was = self.box_waits.observe(address, thread, got)
+            what, was = self.box_waits.observe(address, thread, got, d)
             row = {"what": d.kind, "project": _project(address), "thread": thread}
             if what == "ignored":
                 self.record("drop-status-ignored", address, **row, drop=d.name)

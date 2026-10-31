@@ -837,32 +837,42 @@ MARKDOWN_TAGS = frozenset({
 TAG_RE = re.compile(r"^<(/?)([A-Za-z][A-Za-z0-9-]*)\b[^>]*?(/?)>$")
 
 
-def _raw_tags(content: str) -> list:
-    """The raw inline tags of a block's source, in order: (name, opening tag, closing tag or "")."""
+def _raw_tags(content: str):
+    """The raw inline tags of a block's source, in order, as (tags, lone, doc), each tag in the source's
+    bytes: `tags` holds (name, opening tag, closing tag or "", the opening tag as the page has it);
+    `lone`, (closing tag, its node in `doc`) for each closing tag with no opener of its name; `doc`,
+    pandoc's JSON of the block."""
     import json
 
     from .sanitize import ALSO_REMOVED, REMOVE
 
     if "<" not in content:
-        return []
+        return [], [], None
     r = _pandoc.run(["-f", "gfm", "-t", "json"], content)
     if r.returncode != 0:
-        return []
-    raws = []
+        return [], [], None
+    doc = json.loads(r.stdout)
+    nodes = []
 
     def walk(node):
         if isinstance(node, dict):
             if node.get("t") == "RawInline" and node["c"][0] == "html":
-                raws.append(node["c"][1])
+                nodes.append(node)
             else:
                 walk(node.get("c"))
         elif isinstance(node, list):
             for x in node:
                 walk(x)
 
-    walk(json.loads(r.stdout)["blocks"])
-    tags, open_ = [], {}
-    for raw in raws:
+    walk(doc["blocks"])
+    tags, lone, open_, at = [], [], {}, 0
+    for node in nodes:
+        raw = seen = node["c"][1]
+        # In a table cell pandoc's RawInline has `|` where the source has `\|`, which keeps the cell
+        # whole: the tag is the source's bytes.
+        found = re.compile(re.escape(raw).replace("\\|", r"\\?\|")).search(content, at)
+        if found:
+            raw, at = found.group(0), found.end()
         m = TAG_RE.match(raw)
         if not m:
             continue
@@ -872,12 +882,75 @@ def _raw_tags(content: str) -> list:
         if closing:
             if open_.get(name):
                 open_[name].pop()[2] = raw
+            else:
+                lone.append((raw, node))
             continue
-        tag = [name, raw, ""]
+        tag = [name, raw, "", seen]
         tags.append(tag)
         if not empty:
             open_.setdefault(name, []).append(tag)
-    return [tuple(t) for t in tags]
+    return [tuple(t) for t in tags], lone, doc
+
+
+def _texts(soup) -> list:
+    from bs4 import NavigableString
+
+    return [t for t in soup.descendants if type(t) is NavigableString]
+
+
+def _lone_as_text(soup, lone, doc, token) -> dict:
+    """Each closing tag of `lone` put in `soup` as a placeholder, after the words it followed in the
+    source: {placeholder: the tag's bytes}. The browser drops a closing tag with no opener, so the
+    page holds no element for it; its place is found in the page's words, against a render of the
+    source with the tag written as its placeholder."""
+    import difflib
+    import json
+
+    from bs4 import BeautifulSoup, NavigableString
+
+    placed = {}
+    for raw, node in lone:
+        p = f"\u27e6{token()}\u27e7"
+        placed[p] = raw
+        node["t"], node["c"] = "Str", p
+    r = _pandoc.run(["-f", "json", "-t", "html5", "--no-highlight"], json.dumps(doc))
+    if r.returncode != 0:
+        return {}
+    old, at = "", []
+    for t in _texts(BeautifulSoup(r.stdout, "html.parser")):
+        for part in re.split("(\u27e6[A-Z0-9]+\u27e7)", str(t)):
+            if part in placed:
+                at.append((len(old), part))
+            else:
+                old += part
+    new = "".join(_texts(soup))
+    same = [b for b in difflib.SequenceMatcher(None, old, new, autojunk=False).get_matching_blocks() if b.size]
+
+    def where(o):
+        # After the same words when they are still there, else after the last words before it that are.
+        k = 0
+        for a, b, n in same:
+            if a < o <= a + n:
+                return b + o - a
+            if a + n <= o:
+                k = b + n
+        return k
+
+    # From the end, so that the offsets still to place stay where they were; of two at one place, the
+    # second goes first and the first lands before it.
+    for o, p in reversed(sorted(((where(o), p) for o, p in at), key=lambda x: x[0])):
+        cum = 0
+        for t in _texts(soup):
+            if cum <= o <= cum + len(t) and (o > cum or cum == 0):
+                up = [u for u in t.parents if u.name in ("code", "pre")]
+                if up:
+                    # Never inside code, where it would be the code's words.
+                    up[-1].insert_after(p)
+                else:
+                    t.replace_with(NavigableString(t[:o - cum]), NavigableString(p), NavigableString(t[o - cum:]))
+                break
+            cum += len(t)
+    return placed
 
 
 def _html_blocks(md: str) -> int:
@@ -891,8 +964,8 @@ def _tags_as_text(content: str, fragment: str, token):
     placeholders around its words, {placeholder: the source's bytes})."""
     from bs4 import BeautifulSoup
 
-    tags = _raw_tags(content)
-    if not tags:
+    tags, lone, doc = _raw_tags(content)
+    if not tags and not lone:
         return fragment, {}
 
     def key(el):
@@ -901,16 +974,17 @@ def _tags_as_text(content: str, fragment: str, token):
     # An element is the source tag that says the same: same name, same attributes, the
     # first one not yet taken. Of two that differ, the one left on the page keeps its own.
     unused = []
-    for name, opening, closing in tags:
-        el = BeautifulSoup(opening, "html.parser").find(True)
+    for name, opening, closing, seen in tags:
+        el = BeautifulSoup(seen, "html.parser").find(True)
         if el is not None:
             unused.append((key(el), opening, closing))
     soup = BeautifulSoup(fragment, "html.parser")
-    placed = {}
+    placed = _lone_as_text(soup, lone, doc, token) if lone else {}
     for el in soup.find_all(True):
-        # A math span's <sup> is the render's, not a tag of the source.
+        # A math span's <sup> is the render's, not a tag of the source; a wrapper the page puts around the
+        # source's words, as `div.tblwrap` around a table, is not (#157).
         # In code, a tag is the code's words, and stays the element pandoc writes as text.
-        if _page_own(el) or any(_page_own(up) or up.name in ("code", "pre")
+        if _page_own(el) or any("math" in (up.get("class") or []) or up.name in ("code", "pre")
                                 for up in el.parents if up.name != "[document]"):
             continue
         k = key(el)

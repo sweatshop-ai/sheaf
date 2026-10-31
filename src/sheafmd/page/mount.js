@@ -346,8 +346,9 @@
     let overtaken = false;
     // The root is closed, so the front cannot see which link in it was clicked (composedPath stops at the host). A plain
     // click on a link of this origin goes to `opts.navigate(path)` and the loader moves; a modified click, a target, a
-    // download, an edit and a link elsewhere are the browser's. A fragment is looked up in the front's document, where the
-    // page's ids are not: its element in the root is scrolled to instead, and the front's address stays as it is.
+    // download, an edit, a route of the hub (/_/) and a link elsewhere are the browser's; a middle click fires no click.
+    // A fragment is looked up in the front's document, where the page's ids are not: its element in the root is scrolled
+    // to instead, and the front's address stays as it is.
     function follow(e) {
       if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
       const a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
@@ -361,7 +362,7 @@
       }
       if (typeof opts.navigate !== 'function') return;
       const to = new URL(a.href, location.href);
-      if (to.origin !== location.origin) return;
+      if (to.origin !== location.origin || to.pathname.startsWith('/_/')) return;      // a route of the hub is no page to mount
       e.preventDefault();
       opts.navigate(to.pathname + to.search + to.hash);
     }

@@ -28,7 +28,6 @@ import itertools
 import json
 import os
 import re
-import subprocess
 import threading
 import time
 import urllib.error
@@ -64,8 +63,8 @@ BATCH = 50                      # issues per GraphQL request
 ITEMS = 100                     # Project items of an issue per page: the most GitHub gives
 PAGES = 10                      # requests a batch's Project items may take: the poll holds _poll_lock while it pages
 HTTP_SECONDS = 20
-BLAME_SECONDS = 5               # how long the page waits for git to say who pressed a row's boxes
-BLAMED = 512                    # sheaves whose pressers the page keeps
+BLAME_CACHE = 512               # texts of sheaves whose pressers the page keeps
+UNCOMMITTED_SECONDS = 10        # how long the page keeps the pressers of a text with a box no commit holds yet
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
 _BOX_RE = re.compile(r"[A-Za-z0-9.-]{1,63}")
@@ -278,8 +277,8 @@ def tick_edit(text: str, n: int, word: str, release: bool = False):
     """The page's edit `{i, html}` that ticks the `n`th action of the sheaf `text`, if that action's word is
     `word`; None when the sheaf holds no such action now, or when its box cannot be ticked this way. With `release`,
     the edit that unticks its `n`th pressed box instead, a toggle's (#110)."""
-    boxes = read_sheaf("x.md", text)
-    boxes = boxes.pressed if release else boxes.actions
+    sheaf = read_sheaf("x.md", text)
+    boxes = sheaf.pressed if release else sheaf.actions
     if not 0 <= n < len(boxes) or boxes[n][0] != word or (release and word not in TOGGLES):
         return None
     line = boxes[n][2]
@@ -294,39 +293,6 @@ def tick_edit(text: str, n: int, word: str, release: bool = False):
         return None                 # the mark found is not on the action's own line
     fragment = ticked_html(b, k, tick=not release)
     return None if fragment is None else {"i": i, "html": fragment}
-
-
-def pressers(file: Path, text: str, lines) -> dict:
-    """{0-based line: (author's name, author's e-mail, epoch seconds)} of each of `lines` of `text`, the sheaf whose
-    file is `file`, by the commit that last changed that line (8.11): its tick, on the list (`tick: <path>`) or in the
-    page (`edit: <path>`). Blamed on `text` itself, so the lines are the ones read. A line no commit holds (a root that
-    is no git work tree, a write not committed yet) is left out."""
-    if not lines:
-        return {}
-    ranges = [arg for n in sorted(set(lines)) for arg in ("-L", f"{n + 1},{n + 1}")]
-    try:
-        r = commits._git(file.parent, "blame", "--line-porcelain", *ranges, "--contents", "-", "--", file.name,
-                         given=text, seconds=BLAME_SECONDS)
-    except (OSError, subprocess.SubprocessError):
-        return {}
-    if r.returncode != 0:
-        return {}
-    out, head = {}, {}
-    for line in r.stdout.split("\n"):
-        if line.startswith("\t"):              # the line's own text ends its block
-            if head.get("sha", "").strip("0") and "time" in head:
-                out[head["line"]] = (head.get("name", ""), head.get("mail", ""), head["time"])
-            head = {}
-        elif not head and line:                 # `<sha> <line in the commit> <line in text>`
-            sha, _, final = line.split(" ")[:3]
-            head = {"sha": sha, "line": int(final) - 1}
-        elif line.startswith("author "):
-            head["name"] = line[len("author "):]
-        elif line.startswith("author-mail "):
-            head["mail"] = line[len("author-mail "):].strip("<>")
-        elif line.startswith("author-time "):
-            head["time"] = int(line[len("author-time "):])
-    return out
 
 
 # ── the record ──────────────────────────────────────────────────────────────
@@ -481,7 +447,7 @@ class TheList:
         self._off_lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = None
-        self._blamed: dict = {}             # {(real path, md_hash): pressers}: blamed once per text
+        self._blamed: dict = {}             # {(real path, md_hash): (pressers, monotonic time or None)}: once per text
 
     # ── the poll ────────────────────────────────────────────────────────────
     def root(self):
@@ -728,32 +694,33 @@ class TheList:
                 f'</span></h2>{"".join(out)}</section>')
 
     def _pressers(self, root, s: Sheaf) -> dict:
-        """`pressers` of the pressed boxes of `s`, from the file that holds its name now when that file is still the
+        """`commits.blame` of the pressed boxes of `s`, from the file that holds its name now when that file is still the
         text the row was drawn from (else none); kept per text once every box has its commit."""
         lines = [line for _, _, line, _ in s.pressed]
         if not lines or not root.git:
             return {}
         try:
             f = Path(os.path.realpath(self._file(root, s.rel)))
-            if (f, s.hash) in self._blamed:
-                return self._blamed[f, s.hash]
+            got, until = self._blamed.get((f, s.hash), (None, None))
+            if got is not None and (until is None or time.monotonic() < until):
+                return got
             text = f.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             return {}
         if md_hash(text) != s.hash:
             return {}
-        got = pressers(f, text, lines)
-        if len(got) == len(set(lines)):         # a box not committed yet is blamed again at the next page
-            if len(self._blamed) >= BLAMED:
-                self._blamed.clear()
-            self._blamed[f, s.hash] = got
+        got = commits.blame(f, text, lines)
+        if len(self._blamed) >= BLAME_CACHE:
+            self._blamed.clear()
+        # Kept for good once every box has its commit; a box not committed yet is blamed again a little later.
+        self._blamed[f, s.hash] = (got, None if len(got) == len(set(lines)) else time.monotonic() + UNCOMMITTED_SECONDS)
         return got
 
     def _presser(self, name: str, mail: str, member) -> str:
         """Who pressed a box, as the reader reads it: `you`, `@<short>` of the member whose commits carry `mail`
         (8.11), their name without a short, else the commit's author's name."""
         for m in self.hub.proxy.members.values():
-            if (m.email or proxy_mod.default_email(m.id, self.hub.proxy.origin)).lower() == mail.lower():
+            if proxy_mod.commit_email(m, self.hub.proxy.origin).lower() == mail.lower():
                 return "you" if m.id == member.id else "@" + m.short if m.short else m.name
         return name
 
@@ -766,7 +733,7 @@ class TheList:
     def _row(self, row: Row, owners: list, is_owner: bool, member, root: str) -> str:
         s, rec = row.sheaf, row.record
         doc, acts = html.escape(f"{root}/{s.rel}"), []
-        by = self._pressers(self.root(), s)
+        who = self._pressers(self.root(), s)
         # Every box of the eight words in the order of the file: an action is a button to press, a pressed one-off a
         # locked one that says who pressed it and when, a pressed toggle one its owner may release (#110). A toggle's
         # number is its place among the actions, or among the pressed boxes when it is pressed.
@@ -782,9 +749,9 @@ class TheList:
                             f'{"" if is_owner else " disabled"} {data} data-action="{n}"{" data-release" if pressed else ""}'
                             f' data-hash="{html.escape(s.hash)}">{label}</button>')
             elif pressed:
-                said = f"{label} ✓" + (f" {html.escape(self._presser(*by[line][:2], member))}, "
-                                       f"{self._when(by[line][2])}" if line in by else "")
-                acts.append(f'<button type="button" class="list-act one-off pressed" disabled {data}>{said}</button>')
+                locked = f"{label} ✓" + (f" {html.escape(self._presser(*who[line][:2], member))}, "
+                                         f"{self._when(who[line][2])}" if line in who else "")
+                acts.append(f'<button type="button" class="list-act one-off pressed" disabled {data}>{locked}</button>')
             else:                       # a one-off is a plain button to a screen reader
                 acts.append(f'<button type="button" class="list-act one-off" {data} data-action="{n}"'
                             f' data-hash="{html.escape(s.hash)}">{label}</button>')

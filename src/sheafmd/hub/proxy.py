@@ -221,6 +221,11 @@ def default_email(mid: str, origin: str) -> str:
     return f"{local}@{urlsplit(origin).hostname}"
 
 
+def commit_email(member: Member, origin: str) -> str:
+    """The e-mail of `member`'s commits (8.11): their block's, else `default_email`."""
+    return member.email or default_email(member.id, origin)
+
+
 def same_name(a: str, b: str) -> bool:
     """Two names a reader would take for one: the same once cleaned, whatever their case."""
     return clean_display(a).casefold() == clean_display(b).casefold()

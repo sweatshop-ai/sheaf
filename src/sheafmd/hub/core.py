@@ -204,7 +204,7 @@ class Hub:
         if author is not None:
             who = author
         elif member is not None:
-            who = Author(member.name, member.email or proxy_mod.default_email(member.id, self.proxy.origin))
+            who = Author(member.name, proxy_mod.commit_email(member, self.proxy.origin))
         else:
             who = Author(by or self.person, "")
         self.commits.saved(root, rel, who, what, gone=gone, key=a.rel)

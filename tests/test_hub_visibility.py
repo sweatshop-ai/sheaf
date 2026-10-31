@@ -1070,3 +1070,102 @@ def test_documents_for_a_bound_token_asks_git_once_per_folder_not_once_per_file(
     assert len(listed) == 6
     folders = [cmd[2] for cmd in asked]
     assert len(folders) == len(set(folders)), folders      # no folder asked twice, whatever its files
+
+
+# ── A file the hub cannot read, to a door token: told from none only to a token that saw it ───────────────
+
+UNREADABLE = "{} cannot be read."
+
+
+def spoil(f, how):
+    """The file `f` made one the hub cannot read: bytes that are not UTF-8, or mode 000."""
+    if how == "not UTF-8":
+        f.write_bytes(f.read_bytes() + b"\nlatin1 caf\xe9\n")
+    else:
+        os.chmod(f, 0)
+
+
+@pytest.mark.parametrize("how", ["not UTF-8", "unreadable"])
+@pytest.mark.parametrize("tool, args", [("read", {}), ("threads", {"status": "all"}),
+                                        ("reply", {"id": "c1", "text": "Noted."})])
+def test_a_token_that_saw_a_sheaf_is_told_when_its_file_cannot_be_read(team, browser, work, how, tool, args):
+    if how == "unreadable" and os.geteuid() == 0:
+        pytest.skip("root reads a file of mode 000")
+    team.hub.proxy = members(work, thierry=["james-thierry"])
+    put(team, work, DOC, PRIVATE.replace("A quote from the contract.", THREAD))
+    token = Tokens().add("james-thierry", write=True)
+    assert not call(browser, "read", token=token, doc=f"work/{DOC}")[0]
+    f = work / DOC
+    spoil(f, how)
+    try:
+        assert call(browser, tool, token=token, doc=f"work/{DOC}", **args) == (True, UNREADABLE.format(f"work/{DOC}"))
+    finally:
+        os.chmod(f, 0o644)
+
+
+def test_an_unbound_token_is_told_when_the_file_of_an_open_sheaf_it_saw_cannot_be_read(team, browser, work):
+    put(team, work, DOC, OPEN)
+    assert team.get(f"/work/{DOC}", member=HANS).status == 200      # what the hub last read of it: open
+    spoil(work / DOC, "not UTF-8")
+    got = call(browser, "read", token=Tokens().add("codex", write=True), doc=f"work/{DOC}")
+    assert got == (True, UNREADABLE.format(f"work/{DOC}"))
+
+
+@pytest.mark.parametrize("token_of", ["hans", "nobody"])
+def test_a_token_that_may_not_see_a_sheaf_is_told_nothing_of_its_unreadable_file(team, browser, work, token_of):
+    team.hub.proxy = members(work, thierry=["james-thierry"], hans=["james-hans"])
+    put(team, work, DOC, PRIVATE)
+    assert not call(browser, "read", token=Tokens().add("james-thierry", write=True), doc=f"work/{DOC}")[0]   # the hub read it
+    spoil(work / DOC, "not UTF-8")
+    token = Tokens().add("james-hans" if token_of == "hans" else "codex", write=True)
+    is_error, got = call(browser, "read", token=token, doc=f"work/{DOC}")
+    _, missing = call(browser, "read", token=token, doc="work/thinkingtoo/tiroir/nothing.md")
+    assert is_error and got == missing.replace("nothing.md", DOC.rsplit("/", 1)[1])
+
+
+def test_an_unreadable_file_the_hub_never_read_is_told_as_none_even_to_its_owners_token(team, browser, work):
+    # Without a good read since the hub started, nothing says the token may see it.
+    team.hub.proxy = members(work, thierry=["james-thierry"])
+    put(team, work, DOC, PRIVATE)
+    spoil(work / DOC, "not UTF-8")
+    token = Tokens().add("james-thierry", write=True)
+    is_error, got = call(browser, "read", token=token, doc=f"work/{DOC}")
+    _, missing = call(browser, "read", token=token, doc="work/thinkingtoo/tiroir/nothing.md")
+    assert is_error and got == missing.replace("nothing.md", DOC.rsplit("/", 1)[1])
+    assert missing.startswith("There is no document work/thinkingtoo/tiroir/nothing.md ")
+
+
+@pytest.mark.parametrize("tool, args", [("resolve", {"id": "c1"}), ("update", {"text": "x\n", "expected_hash": "0" * 16})])
+def test_the_other_tools_tell_a_token_that_saw_a_sheaf_its_file_cannot_be_read(team, browser, work, tool, args):
+    team.hub.proxy = members(work, thierry=["james-thierry"])
+    put(team, work, DOC, PRIVATE.replace("A quote from the contract.", THREAD))
+    token = Tokens().add("james-thierry", write=True)
+    assert not call(browser, "read", token=token, doc=f"work/{DOC}")[0]
+    spoil(work / DOC, "not UTF-8")
+    assert call(browser, tool, token=token, doc=f"work/{DOC}", **args) == (True, UNREADABLE.format(f"work/{DOC}"))
+
+
+def test_a_token_whose_project_no_longer_names_its_member_is_told_nothing_of_the_unreadable_file(team, browser,
+                                                                                                    work):
+    team.hub.proxy = members(work, hans=["james-hans"])
+    put(team, work, DOC, OPEN)
+    token = Tokens().add("james-hans", write=True)
+    assert not call(browser, "read", token=token, doc=f"work/{DOC}")[0]
+    (work / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["Thierry"]\n', encoding="utf-8")
+    spoil(work / DOC, "not UTF-8")
+    is_error, got = call(browser, "read", token=token, doc=f"work/{DOC}")
+    _, missing = call(browser, "read", token=token, doc="work/thinkingtoo/tiroir/nothing.md")
+    assert is_error and got == missing.replace("nothing.md", DOC.rsplit("/", 1)[1])
+
+
+def test_an_unreadable_file_that_replaced_the_one_a_token_saw_is_told_as_none(team, browser, work):
+    # The last good read was of another file: what it said is nothing about this one.
+    put(team, work, DOC, OPEN)
+    token = Tokens().add("codex", write=True)
+    assert not call(browser, "read", token=token, doc=f"work/{DOC}")[0]
+    f = work / DOC
+    os.rename(f, work / "kept.md")              # kept, so the new file cannot take its inode
+    f.write_bytes(PRIVATE.encode("utf-8") + b"\nlatin1 caf\xe9\n")
+    is_error, got = call(browser, "read", token=token, doc=f"work/{DOC}")
+    _, missing = call(browser, "read", token=token, doc="work/thinkingtoo/tiroir/nothing.md")
+    assert is_error and got == missing.replace("nothing.md", DOC.rsplit("/", 1)[1])

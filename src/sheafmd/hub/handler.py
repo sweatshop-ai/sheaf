@@ -864,6 +864,8 @@ class Handler:
         # The page's and the list's own script and style follow the loader's: the same files their pages of their own inline.
         after = {"mount.js": ("page.js", "list.js"), "mount.css": ("page.css", "list.css")}[name]
         body = b"\n".join((page / f).read_bytes() for f in (name, *after))
+        if name == "mount.js":       # the script knows the hub it came from, to tell an upgrade from a remount
+            body = body.replace(b"'@@SHEAF_VERSION@@'", json.dumps(self.hub.version).encode(), 1)
         named = req.query.get("v") == self.hub.version
         return Response(200, {"Content-Type": kind, "X-Content-Type-Options": "nosniff",
                               "Cache-Control": "public, max-age=31536000, immutable" if named else "no-store"}, body)

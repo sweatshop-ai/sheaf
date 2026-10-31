@@ -125,3 +125,11 @@ def test_the_mounted_css_selects_the_host_and_the_wrapper_where_a_page_of_its_ow
     words = {w for s in selectors for part in s.split(",") for w in [part.strip().split()[0] if part.strip() else ""]}
     assert not {w for w in words if re.match(r"(?:html|body|:root)(?![\w-])", w)}, sorted(words)
     assert re.search(r":host\s*\{[^}]*--bg", css) and re.search(r"\.rd-root\s*\{[^}]*overflow-wrap:break-word", css)
+
+
+def test_the_mount_script_knows_the_version_of_the_hub_that_served_it(browser):
+    """A hub upgraded under a mounted page answers with a new version; the script in memory is the old one, and it can only
+    tell by knowing its own (#116 slice v, Ines's P2)."""
+    js = browser.get("/_/mount.js", cookie=False).text
+    assert f"const VERSION = {json.dumps(__version__)};" in js
+    assert "@@SHEAF_VERSION@@" not in js

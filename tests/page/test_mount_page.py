@@ -22,7 +22,8 @@ FRONT_HTML = f"""<!doctype html><html><head><meta charset="utf-8"></head>
 <script src="/_/mount.js"></script>
 <script>window.__front = true;
 window.__before = window.__live.size;          // the listeners the front holds before the mount
-sheafMount.mount(document.getElementById('pane'), {{doc: {json.dumps(DOC)}}})
+sheafMount.mount(document.getElementById('pane'), {{doc: {json.dumps(DOC)},
+  upgrade: (v) => {{ (window.__upgrades = window.__upgrades || []).push(v); }}}})
   .then((m) => {{ window.__page = m; }}, (e) => {{ window.__failed = String(e); }});</script>
 </body></html>"""
 # Keeps the closed root where the test can find it; nothing else about the root changes.
@@ -260,3 +261,90 @@ def test_two_remounts_at_once_both_settle_and_one_page_stands(front):
     front.page.wait_for_timeout(500)
     assert front.js("return root.querySelectorAll('#rd-menu-btn').length;") == 1
     assert front.page.evaluate("window.__streams.filter((e) => e.readyState !== 2).length") == 1
+
+
+def _mount_again(front, opts_js):
+    """mount() again on the front's pane, with `opts_js` (a JS object literal); the handle lands in window.__page."""
+    front.page.evaluate("window.__page = null; window.__again = null; sheafMount.mount(document.getElementById('pane'), "
+                        + opts_js + ").then((m) => { window.__page = m; }, (e) => { window.__again = String(e); });")
+    until(lambda: front.page.evaluate("!!(window.__page || window.__again)"), what="the second mount")
+    assert front.page.evaluate("window.__again") is None
+
+
+def test_a_mount_that_failed_can_be_tried_again_on_the_same_pane(front):
+    """A failed first mount must not cost the pane its shadow root: attachShadow throws the second time (Ines's P2)."""
+    hits = []
+
+    def once(route):
+        hits.append(route.request.url)
+        if len(hits) == 1:
+            route.fulfill(status=503, content_type="application/json", body='{"error": "the hub is starting"}')
+        else:
+            route.continue_()
+
+    front.page.route("**/_/mount?doc=*", once)
+    front.page.goto(front.site.base + FRONT)
+    assert "503" in until(lambda: front.page.evaluate("window.__failed || null"), what="the failed mount")
+    _mount_again(front, "{doc: %s}" % json.dumps(DOC))
+    until(lambda: front.has("#rd-menu-btn"), what="the page after the second try")
+
+
+def test_a_pane_mounts_again_after_an_unmount_and_over_a_page_still_standing(front):
+    """The loader moves from a sheaf to the list and back in the same pane."""
+    front.open()
+    front.page.evaluate("window.__page.unmount()")
+    _mount_again(front, "{doc: %s}" % json.dumps(DOC))
+    until(lambda: front.has("#rd-menu-btn"), what="the page mounted again")
+    # A mount over a page that still stands takes that page down first: one page, one stream.
+    _mount_again(front, "{doc: %s}" % json.dumps(DOC))
+    until(lambda: front.has("#rd-menu-btn"), what="the page mounted over the first")
+    front.page.wait_for_timeout(500)
+    assert front.js("return root.querySelectorAll('#rd-menu-btn').length;") == 1
+    assert front.page.evaluate("window.__streams.filter((e) => e.readyState !== 2).length") == 1
+
+
+def _another_version(route):
+    res = route.fetch()
+    got = res.json()
+    got["version"] = "9.9.9-next"
+    route.fulfill(response=res, body=json.dumps(got))
+
+
+def test_a_hub_of_another_version_hands_the_remount_to_the_loader(front):
+    """A hub upgrade under a mounted page: the page.js in memory is the old one, so the remount builds nothing with it and
+    tells the loader the new version, which loads the new script (Ines's P2)."""
+    front.open()
+    front.js("root.querySelector('main').__old = 1;")
+    front.page.route("**/_/mount?doc=*", _another_version)
+    front.site.file.write_text(front.site.file.read_text().replace("about pears", "about plums"), encoding="utf-8")
+    assert until(lambda: front.page.evaluate("window.__upgrades || null"), what="the loader told") == ["9.9.9-next"]
+    front.page.wait_for_timeout(300)
+    assert front.js("return root.querySelector('main').__old;") == 1, "the old script built the new page"
+
+
+def test_a_first_mount_of_another_version_builds_nothing_and_without_a_loader_says_reload(front):
+    front.page.route("**/_/mount?doc=*", _another_version)
+    front.page.goto(front.site.base + FRONT)
+    assert until(lambda: front.page.evaluate("window.__upgrades || null"), what="the loader told") == ["9.9.9-next"]
+    assert not front.has("#rd-menu-btn")
+    # No loader to hand it to: the pane says so instead of running the old script on the new hub.
+    front.page.evaluate("const d = document.createElement('div'); d.id = 'pane2'; document.body.append(d);"
+                        "window.__page = null; sheafMount.mount(d, {doc: %s}).then((m) => { window.__page = m; });"
+                        % json.dumps(DOC))
+    until(lambda: front.page.evaluate("!!window.__page"), what="the second pane")
+    assert "reload" in front.js("return root.textContent;").lower()
+    assert not front.has("#rd-menu-btn")
+
+
+def test_a_remount_that_fails_says_so_in_the_page_and_the_next_one_still_works(front):
+    """A signed-out mounted page went silent: the remount's failure was swallowed (Ines's P2)."""
+    front.open()
+    refuse = [True]
+    front.page.route("**/_/mount?doc=*", lambda route: route.fulfill(
+        status=401, content_type="application/json", body='{"error": "sign in"}') if refuse else route.continue_())
+    front.site.file.write_text(front.site.file.read_text().replace("about pears", "about plums"), encoding="utf-8")
+    until(lambda: "401" in (front.js("const t = root.getElementById('rd-toast'); return t.className.includes('err') "
+                                     "? t.textContent : '';") or ""), what="the failure said in the page")
+    refuse.clear()
+    front.site.file.write_text(front.site.file.read_text().replace("about plums", "about figs"), encoding="utf-8")
+    until(lambda: "about figs" in front.js("return root.querySelector('main').textContent;"), what="the next remount")

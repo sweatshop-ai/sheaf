@@ -1325,6 +1325,30 @@ def test_a_row_that_still_names_the_replaced_issue_stays_off_though_it_was_read_
     assert JOEY[5:] in {r.sheaf.rel for r in box.hub.the_list._snap.rows}
 
 
+def test_a_row_naming_a_third_issue_stays_off_when_the_file_changed_again_after_the_poll_read_it(
+        box, sheaves, github, monkeypatch):
+    """#102 review: the poll read #6 (5 became 6 before it), then the file became #7 and a tick found 5 against 7:
+    the poll's row names neither the old issue nor the one the file names now, so it is stale."""
+    github.issues[5].update(status="In progress at TT")
+    joey = sheaves / JOEY[5:]
+    joey.write_text(joey.read_text(encoding="utf-8").replace("issue: acme/record#5\n", "issue: acme/record#6\n"),
+                    encoding="utf-8")
+    fetch = the_list.fetch
+
+    def meanwhile(cfg, wanted):
+        joey.write_text(joey.read_text(encoding="utf-8").replace("issue: acme/record#6\n", "issue: acme/record#7\n"),
+                        encoding="utf-8")
+        r = box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Approve"}), member=NELL)
+        assert r.status == 200, r.text
+        return fetch(cfg, wanted)
+    monkeypatch.setattr(the_list, "fetch", meanwhile)
+    box.hub.the_list.poll()
+    monkeypatch.setattr(the_list, "fetch", fetch)
+    assert JOEY[5:] not in {r.sheaf.rel for r in box.hub.the_list._snap.rows}
+    box.hub.the_list.poll()
+    assert {r.sheaf.rel: r.sheaf.issue for r in box.hub.the_list._snap.rows}[JOEY[5:]] == ("acme", "record", 7)
+
+
 def test_a_tick_reads_the_file_under_the_names_lock_taken_before_the_lists_own(box, sheaves, monkeypatch):
     """#102 note: a move may be mid-way when `ticked` reads; the name's lock (9.11) keeps it from resolving a missing
     path, and is taken first, as `assignees` takes it."""

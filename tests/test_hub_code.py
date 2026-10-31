@@ -167,6 +167,17 @@ def test_a_code_downloads_the_live_box_session_once(team, box):
     assert again.status == 401 and again.json()["error"] == NO_GOOD
 
 
+def test_a_code_does_not_serve_a_live_session_whose_transcript_is_another_projects(team, box, work):
+    # sheaf#146: the live session's file sits only in another project's folder of the copy.
+    (box["sessions"] / "-home-james-work-thinkingtoo-tiroir" / f"{LIVE}.jsonl").unlink()
+    other = box["sessions"] / "-home-james-work-acme-site"
+    other.mkdir()
+    (other / f"{LIVE}.jsonl").write_text('{"cwd": "/home/james/work/acme/site", "sessionId": "%s"}\n' % LIVE,
+                                         encoding="utf-8")
+    code = code_of(team)
+    assert fetch(team, code).status == 404
+
+
 def test_a_download_with_a_code_says_so_in_its_row(team, box):
     code = code_of(team)
     cid = hub_rows("code-issued")[-1]["code"]

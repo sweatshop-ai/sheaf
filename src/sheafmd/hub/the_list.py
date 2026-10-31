@@ -40,7 +40,8 @@ from .. import config, paths
 from ..source import md_hash
 from ..blocks import _split_lines, split_md_blocks
 from ..edit import TASK_MARK_RE, ticked_html
-from ..render import strip_comments
+from .. import comments as rdc
+from ..render import COMMENT_RE
 from . import commits, place, projects
 from . import proxy as proxy_mod
 from . import roots as roots_mod
@@ -202,13 +203,11 @@ def read_sheaf(rel: str, text: str) -> Sheaf:
     issue = issue_of(fm_text(fm, "issue"))
     # The title and the actions are read from the blocks the page draws, so an action in a fence, an
     # indented code block or an HTML comment is no action, and every action is one the tick can reach.
-    title, actions, pressed, moved = "", [], [], False
+    title, actions, pressed, moved = None, [], [], False
     for b in split_md_blocks(text):
         own = b.content.removesuffix("\n").split("\n")
-        if b.kind == "heading" and not title and own[0].startswith("# "):
-            # Without its comments, as the page draws it: a review comment anchored in the heading sits in it.
-            head = strip_comments(b.content).split("\n", 1)[0]
-            title = " ".join(head[2:].split()) if head.startswith("# ") else ""
+        if b.kind == "heading" and title is None and own[0].startswith("# "):
+            title = _title(own[0][2:])          # the first only, as the page's title: one left empty gives none
         elif b.kind == "list":
             for k, line in enumerate(own):
                 if not (m := _ACTION_RE.fullmatch(line.removesuffix("\r"))):
@@ -225,6 +224,17 @@ def read_sheaf(rel: str, text: str) -> Sheaf:
     return Sheaf(rel, title or rel.rsplit("/", 1)[-1][:-3], issue, fm_text(fm, "assistant"),
                  fm_text(fm, "kind"), visibility.effective(fm), tuple(actions), visibility.sources(fm),
                  fm_text(fm, "owner"), fm_text(fm, "shared"), md_hash(text), "moved_to" in fm, tuple(pressed))
+
+
+def _title(heading: str) -> str:
+    """The text of a `# ` heading's line without its HTML comments, its spaces collapsed (9.10): a review comment
+    anchored in the heading is written on that line. A `<!--` in a code span is text, as the page shows it."""
+    masked, kept, last = rdc._mask_code(heading), [], 0
+    for m in COMMENT_RE.finditer(masked):
+        kept.append(heading[last:m.start()])
+        last = m.end()
+    kept.append(heading[last:])
+    return " ".join("".join(kept).split())
 
 
 def _word(m: re.Match) -> str:

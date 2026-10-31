@@ -17,6 +17,7 @@ import pytest
 from bs4 import BeautifulSoup
 from helpers import FRONT, Front, call, hub_rows, page_meta
 
+from sheafmd import comments as rdc
 from sheafmd.blocks import split_md_blocks
 from sheafmd.hub import place, proxy, the_list
 from sheafmd.hub.state import Tokens
@@ -1614,34 +1615,49 @@ def test_a_one_off_ticked_in_the_page_shows_who_ticked_it_there_through_a_later_
 
 # ── A review comment anchored in the H1 is no part of the row's title ─────────────────────────────────────
 
-# As `sheaf comment` writes one in a heading: on one line, its lines joined by `<br>`.
-H1_COMMENT = '<!-- sheaf-comment id=c1 by="Ada" at=2026-10-29T15:43 status={} quote="sheaf"<br>Why this name? -->'
+def h1_comment(status="open"):
+    """A comment anchored in a heading, as `sheaf comment` writes one there: on one line, its lines joined by `<br>`."""
+    return f'<!-- sheaf-comment id=c1 by="Ada" at=2026-10-29T15:43 status={status} quote="sheaf"<br>Why this name? -->'
 
 
 @pytest.mark.parametrize("status", ["open", "resolved"])
 def test_a_comment_anchored_in_the_h1_is_left_out_of_the_title(status):
-    text = f"---\nissue: o/r#1\n---\n\n# Test sheaf{H1_COMMENT.format(status)} tail\n\n- [ ] Done\n"
+    text = f"---\nissue: o/r#1\n---\n\n# Test sheaf{h1_comment(status)} tail\n\n- [ ] Done\n"
     assert the_list.read_sheaf("x/y/z.md", text).title == "Test sheaf tail"
 
 
-def test_a_comment_on_one_line_in_the_h1_is_left_out_of_the_title():
-    text = ('---\nissue: o/r#1\n---\n\n'
-            '# Test sheaf<!-- sheaf-comment id=c1 by="A" at=2026-10-29T15:43 status=open quote="sheaf"<br>hello --> tail\n')
+def test_a_comment_that_sheaf_comment_anchors_in_the_h1_is_left_out_of_the_title():
+    text = "---\nissue: o/r#1\n---\n\n# Test sheaf tail\n\n- [ ] Done\n"
+    heading = next(i for i, b in enumerate(split_md_blocks(text)) if b.kind == "heading")
+    start = rdc.projection(split_md_blocks(text)[heading].content).text.index("sheaf")    # as the page counts
+    text, _ = rdc.add_comment(text, heading, start, start + 5, "sheaf",
+                              'Why "this" name?\n\nA <b>second</b> line & -- more', 'A "B"', "2026-10-29T15:43")
+    assert "sheaf-comment" in text.split("\n")[4]
     assert the_list.read_sheaf("x/y/z.md", text).title == "Test sheaf tail"
+
+
+def test_a_comment_mark_in_a_code_span_of_the_h1_stays_in_the_title():
+    text = "# Use `<!--` and `-->` here\n"
+    assert the_list.read_sheaf("x/y/z.md", text).title == "Use `<!--` and `-->` here"
 
 
 def test_an_h1_that_is_only_a_comment_gives_the_file_name_as_for_none():
-    text = f"---\nissue: o/r#1\n---\n\n# {H1_COMMENT.format('open')}\n\n- [ ] Done\n"
+    text = f"---\nissue: o/r#1\n---\n\n# {h1_comment()}\n\n- [ ] Done\n"
+    assert the_list.read_sheaf("x/y/2026-10-29-z.md", text).title == "2026-10-29-z"
+
+
+def test_an_h1_that_is_only_a_comment_gives_the_file_name_not_a_later_h1s_text():
+    # As the page's title: the first `# ` heading is the title, and one left empty gives the file name.
+    text = f"# {h1_comment()}\n\n# Second\n"
     assert the_list.read_sheaf("x/y/2026-10-29-z.md", text).title == "2026-10-29-z"
 
 
 def test_the_rows_title_holds_no_comment_of_the_h1(box, sheaves):
     joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
     joey.write_text(joey.read_text(encoding="utf-8").replace(
-        "# Reply to Joey about column L", f"# Reply to Joey{H1_COMMENT.format('open')} about column L"),
-        encoding="utf-8")
+        "# Reply to Joey about column L", f"# Reply to Joey{h1_comment()} about column L"), encoding="utf-8")
     box.hub.the_list.poll()
     soup = BeautifulSoup(box.get("/list", member=NELL).text, "html.parser")
     titles = [a.get_text() for a in soup.select("a.list-title")]
     assert "Reply to Joey about column L" in titles
-    assert not any("<!--" in t or "sheaf-comment" in t or "Why this name" in t for t in titles)
+    assert not any("sheaf-comment" in t for t in titles)

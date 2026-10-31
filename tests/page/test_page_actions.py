@@ -17,6 +17,7 @@ SHEAF = """# Plan
 
 Body paragraph.
 """
+LONG = "klium_website_relaunch_international_2026_phase_two"     # one word wider than a 360 px phone
 
 
 @pytest.fixture
@@ -210,11 +211,11 @@ def test_on_a_phone_the_buttons_wrap_44_px_high_and_the_page_never_scrolls_sidew
     assert p.evaluate("document.documentElement.scrollWidth") <= 360
 
 
-def test_on_a_phone_a_move_to_whose_slug_has_no_hyphen_breaks_inside_its_button(touch_tab):
-    # The document's own box of that line is as wide as its word: the theme's, not the buttons' (#128).
+def test_on_a_phone_a_move_to_whose_slug_has_no_hyphen_breaks_inside_its_button_and_in_the_text(touch_tab):
+    # The button breaks it (#112), and so does the document's own line of that box, the theme's (#128).
     p = touch_tab.page
     touch_tab.site.file.write_text(SHEAF.replace(
-        "- [ ] Share\n", "- [ ] Share\n- [ ] Move to klium_website_relaunch_international_2026_phase_two (ref 18f3a9c2)\n"),
+        "- [ ] Share\n", f"- [ ] Share\n- [ ] Move to {LONG} (ref 18f3a9c2)\n"),
         encoding="utf-8")
     p.set_viewport_size({"width": 360, "height": 780})
     touch_tab.open()
@@ -222,3 +223,26 @@ def test_on_a_phone_a_move_to_whose_slug_has_no_hyphen_breaks_inside_its_button(
     move = bar(p).nth(3).bounding_box()
     assert move["x"] >= 0 and move["x"] + move["width"] <= 360, move
     assert p.evaluate("(e => e.scrollWidth <= e.clientWidth)(document.getElementById('rd-actions'))")
+    assert p.evaluate("document.documentElement.scrollWidth") <= 360
+    menu = p.locator("#rd-menu-btn").bounding_box()
+    assert menu["x"] >= 0 and menu["x"] + menu["width"] <= 360, menu
+
+
+def test_on_a_phone_a_long_word_in_the_text_breaks_and_a_code_block_scrolls_inside_itself(touch_tab):
+    # #128: the document's text breaks a word wider than the screen, inline code too, on screen and in print; a
+    # table keeps its words and scrolls in its frame, a code block keeps its lines.
+    p = touch_tab.page
+    touch_tab.site.file.write_text(f"# {LONG}\n\nThe slug {LONG} is long, and `{LONG}` is code.\n\n"
+                                   f"| Slug |\n|---|\n| {LONG} |\n\n```\nmove {LONG} {LONG}\n```\n",
+                                   encoding="utf-8")
+    p.set_viewport_size({"width": 360, "height": 780})
+    touch_tab.open()
+    assert p.evaluate("document.documentElement.scrollWidth") <= 360
+    menu = p.locator("#rd-menu-btn").bounding_box()
+    assert menu["x"] >= 0 and menu["x"] + menu["width"] <= 360, menu
+    pre = p.locator("main pre")
+    assert pre.evaluate("e => e.scrollWidth > e.clientWidth"), "the code block wrapped its line"
+    frame = p.locator("main .tblwrap")
+    assert frame.evaluate("e => e.scrollWidth > e.clientWidth"), "the table broke its word instead of scrolling"
+    p.emulate_media(media="print")
+    assert p.locator("main p").first.evaluate("e => getComputedStyle(e).overflowWrap") == "break-word"

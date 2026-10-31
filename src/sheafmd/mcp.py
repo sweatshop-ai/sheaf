@@ -341,16 +341,22 @@ class Door:
             address = doc
         with place.held(self.hub, address):         # a read, under the name's lock (9.11)
             try:
-                path = self.hub.roots.document(address)
+                self.hub.roots.document(address)
             except NotFound:
                 raise _absent(doc) from None
             if self._judged(caller):
                 # Before any other check of the call, so no answer tells a sheaf the caller may not see from none;
                 # each tool judges again on the text it reads.
                 try:
-                    self._seen(path.read_text(encoding="utf-8"), address, caller, doc)
+                    judged = self.hub.judged(address)
                 except (OSError, UnicodeDecodeError):
-                    raise _absent(doc) from None        # as a member is answered for a file it cannot read
+                    # Told only to a caller the last good read let see it, which knew of it already (9.11).
+                    judged = self.hub.last_judged(address)
+                    if judged is not None and self._sees(judged[0], address, caller):
+                        raise _unreadable(address) from None
+                    raise _absent(doc) from None
+                if judged is None or not self._sees(judged[0], address, caller):
+                    raise _absent(doc)
         return address
 
     def _judged(self, caller: Caller) -> bool:
@@ -423,7 +429,7 @@ class Door:
             with place.held(self.hub, address):
                 text = self.hub.roots.document(address).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError, NotFound):
-            raise ToolError(f"{address} cannot be read.") from None
+            raise _unreadable(address) from None
         return rdc.parse(self._seen(text, address, caller, doc))
 
     def _comment(self, address: str, cid: str, caller: Caller, doc: str):
@@ -575,7 +581,7 @@ class Door:
             with place.held(self.hub, address):         # no move between finding the file and reading it (9.11)
                 text = self.hub.roots.document(address).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError, NotFound):
-            raise ToolError(f"{address} cannot be read.") from None
+            raise _unreadable(address) from None
         out = self._seen(text, address, caller, args["doc"])
         if not args.get("comments", True):
             out = strip_comments(text)
@@ -861,6 +867,12 @@ def _absent(doc: str) -> ToolError:
     """The answer to a `doc` that names no document, said the same for one the caller may not see (9.11)."""
     return ToolError(f"There is no document {_named(doc)} in a root of this hub; name it "
                      "`<root>/<path>`, by its page URL or by the absolute path of the .md.")
+
+
+def _unreadable(address: str) -> ToolError:
+    """The answer to a document whose file is there but cannot be read, or not as UTF-8: in proxy mode only to a
+    token that may see it (9.11), so a client can tell it from `_absent`."""
+    return ToolError(f"{address} cannot be read.", "unreadable")
 
 
 def _named(doc: str) -> str:

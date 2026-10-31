@@ -529,7 +529,7 @@ class Hub:
         mine = [m for m in members if self.owns(m, root)]
         return mine if mine and self.roots.lookup(root.path / at.rel) == root else []
 
-    def _judged(self, address: str):
+    def judged(self, address: str):
         """(front matter, assignees) of the sheaf at `address`, what its visibility is judged on: the front
         matter read again only when its file moved, the assignees the list has for it now. For a file that is
         not there, both as the hub last judged it, so a poll that no longer sees the sheaf changes nothing;
@@ -553,6 +553,21 @@ class Hub:
         self._front[kept] = (key, fm, assignees)
         return fm, assignees
 
+    def last_judged(self, address: str):
+        """(front matter, assignees) of the sheaf at `address` as the hub last judged it, whatever its file holds
+        now: what the door judges a file that cannot be read on (9.11). None when the hub never read it, or read
+        another file there (another inode): what that one said is nothing about this one."""
+        at = roots_mod.Address.parse(address)
+        root = self.roots.get(at.root)
+        hit = None if root is None else self._front.get(root.path / at.rel)
+        if hit is None:
+            return None
+        try:
+            same = self.file(address).stat().st_ino == hit[0][0]
+        except OSError:
+            return None
+        return hit[1:] if same else None
+
     def visible(self, member, address: str, never_read: bool = True) -> bool:
         """Whether the member may open the document at `address` by its visibility (9.11): a sheaf that is
         its owner's alone is no other member's. A file that is not there is judged by the front matter it
@@ -561,7 +576,7 @@ class Hub:
         A file that is there but cannot be read, or not as UTF-8, is no member's: the hub may still hold its
         last good page."""
         try:
-            judged = self._judged(address)
+            judged = self.judged(address)
         except (OSError, UnicodeDecodeError):
             return False
         if judged is None:
@@ -623,7 +638,7 @@ class Hub:
     def owners(self, address: str, members) -> list:
         """Those of `members` who own the sheaf at `address`, by its front matter now, as `visible` judges."""
         try:
-            fm, assignees = self._judged(address) or ({}, None)
+            fm, assignees = self.judged(address) or ({}, None)
         except (OSError, UnicodeDecodeError):
             return []
         return visibility.owner_of(fm, members, assignees)

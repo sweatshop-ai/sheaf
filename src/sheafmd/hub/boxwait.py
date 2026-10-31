@@ -14,7 +14,7 @@ In memory: a restart forgets it.
     .drops()                              [(doc, thread, Drop)] of every open drop
     .working(doc)                         whether James's session works on a drop of the sheaf: one `delivered`
     .cleared()                            the sheaves where a `delivered` drop ended since the last ask
-    .observe(doc, thread, got)            take in `read_status`'s `got` for that drop: (what changed, its state
+    .observe(doc, thread, got, drop)      take in `read_status`'s `got` for `drop`: (what changed, its state
                                           before), what being None, "ignored", "state" or "failed" (which ends it)
     .end(doc, thread)                     take one off: whether it was open
     read_status(folder, name)             what `<name>.status` in `folder` says: None when there is none, BAD when
@@ -58,6 +58,7 @@ class BoxWaits:
         if c is None:
             return
         with self._lock:
+            self._end(doc, thread)              # a drop sent again on the thread: the older one ends here
             self._drops.setdefault(doc, {})[thread] = Drop(kind, len(c.replies), self._clock(), name)
 
     def pending(self, doc: str, text: str) -> list:
@@ -90,10 +91,10 @@ class BoxWaits:
         with self._lock:
             return any(d.state == "delivered" for d in self._drops.get(doc, {}).values())
 
-    def observe(self, doc: str, thread: str, got) -> tuple[str | None, str]:
+    def observe(self, doc: str, thread: str, got, drop: Drop) -> tuple[str | None, str]:
         with self._lock:
             d = self._drops.get(doc, {}).get(thread)
-            if d is None or got is None:
+            if d is not drop or got is None:        # ended, or another drop on the thread since `got` was read
                 return None, ""
             if got == BAD:
                 if d.ignored:
@@ -162,7 +163,7 @@ def read_status(folder: Path, name: str):
         os.close(fd)
     try:
         got = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError):
+    except (UnicodeDecodeError, ValueError, RecursionError):      # nested deep: Python 3.11 recurses
         return BAD
     if not isinstance(got, dict) or got.get("state") not in STATES:
         return BAD

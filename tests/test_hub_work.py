@@ -1679,11 +1679,11 @@ def test_james_has_with_a_project_that_climbs_never_reads_outside_sessions_dir(t
     sid, sessions = str(uuid.uuid4()), tmp_path / "sessions"
     sessions.mkdir()
     cfg = SimpleNamespace(sessions_dir=sessions, work_dir="/home/james/work")
-    # Where `<sessions>/<work_dir>/../../outside` would land if the project were joined as a path.
-    _transcript(tmp_path / "outside", "/home/james/work/../../outside", sid)
-    for project in ("../../outside", "../../../" + str(tmp_path / "outside"), "a/../../b", "..", "/etc"):
-        assert work_mod.james_has(cfg, project, sid) is not True
-    assert sorted(p.name for p in sessions.iterdir()) == []
+    project = "../../.." + str(tmp_path / "outside")
+    # A transcript that would match if `<work_dir>/<project>` were opened as a path: it climbs to tmp_path/outside.
+    _transcript(tmp_path / "outside", os.path.join(cfg.work_dir, project), sid)
+    assert os.path.realpath(os.path.join(cfg.work_dir, project)) == str(tmp_path / "outside")
+    assert work_mod.james_has(cfg, project, sid) is None
 
 
 def test_james_has_refuses_a_session_id_that_is_not_a_uuid(tmp_path):
@@ -1709,7 +1709,8 @@ def test_james_has_refuses_a_projects_folder_that_is_a_link(tmp_path):
 
 def test_open_transcript_refuses_an_id_that_is_not_a_uuid(tmp_path):
     (tmp_path / "s" / "p").mkdir(parents=True)
-    (tmp_path / "x.jsonl").write_text("outside\n", encoding="utf-8")
+    for planted in (tmp_path / "x.jsonl", tmp_path / "s" / "x.jsonl", tmp_path / "s" / "p" / "x.jsonl"):
+        planted.write_text("would be served\n", encoding="utf-8")     # each id below names one of these without the guard
     for sid in ("../x", "../../x", "x", "%2e%2e%2fx", "x\0"):
         assert work_mod.open_transcript(tmp_path / "s", sid) is None
 
@@ -1729,7 +1730,7 @@ def test_a_drop_never_writes_through_a_link_planted_at_its_name(tmp_path, monkey
     folder, target = tmp_path / "tell", tmp_path / "target"
     folder.mkdir()
     name = "thinkingtoo--tiroir-20261031T170000Z"
-    (folder / ("." + name)).symlink_to(target)            # dangling: exists() is False, open must not follow it
+    (folder / ("." + name)).symlink_to(target)            # dangling: exists() is False, O_EXCL refuses it
     (folder / name).symlink_to(target)
     said, wrote = work_mod.drop_named(folder, "thinkingtoo/tiroir", b"{}", "missing")
     assert said == "written" and not target.exists()

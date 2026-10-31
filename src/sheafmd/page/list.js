@@ -78,7 +78,8 @@ function create(ROOT, opts) {
 }
 
 // The list of TheList.data drawn as the page of its own draws it (the_list.py _row_html), in `target`'s document.
-// An address is kept only when it is a path on this origin.
+// An address is kept only when it is a path on this origin: one slash, then no second slash or backslash, and no
+// control or space anywhere (the URL parser drops a tab or a newline, so "/\t/host" would be "//host").
 function render(data, target) {
   var doc = target && target.ownerDocument ? target.ownerDocument : document;
   function el(tag, cls, text) {
@@ -88,7 +89,7 @@ function render(data, target) {
     return e;
   }
   function href(a, value) {
-    if (typeof value === 'string' && /^\/(?![\/\\])/.test(value) && value.indexOf('\\') < 0) a.setAttribute('href', value);
+    if (typeof value === 'string' && /^\/(?![\/\\])/.test(value) && !/[\u0000-\u0020\u007f\\]/.test(value)) a.setAttribute('href', value);
   }
   var out = doc.createDocumentFragment();
   var header = el('header');

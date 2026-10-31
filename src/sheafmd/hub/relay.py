@@ -71,6 +71,7 @@ class _Stream(events.Subscription):
         super().__init__(relays._bus, accept)
         self._relays, self.key = relays, key
         self.on_close = None
+        self.fresh = False              # set by Relays.connect: the first stream of its fork, no reconnect
 
     def close(self):
         was = self.closed

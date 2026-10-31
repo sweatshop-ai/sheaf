@@ -119,7 +119,9 @@ def state(hub, address: str, text: str) -> State | None:
     assistant = fm.get("assistant", "")
     relays = getattr(hub, "relays", None)
     member = relays.connected(address, items[0]["id"]) if live == "laptop" and relays is not None else None
-    relay = bool(member) and member in getattr(hub.proxy, "members", {})
+    members = getattr(hub.proxy, "members", {})
+    # A relay whose member may no longer open the sheaf is not connected, in its grace too (9.14, #135).
+    relay = bool(member) and member in members and hub.may_open(members[member], address, fm)
     return State(items, live, cfg, isinstance(assistant, str) and assistant.casefold() == "james", relay)
 
 

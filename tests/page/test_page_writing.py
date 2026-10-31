@@ -4499,3 +4499,19 @@ def test_a_new_comment_refused_while_a_failed_reply_form_is_open_in_its_popover_
     reloaded(p)
     p.wait_for_selector(KEPT)
     assert p.input_value("#rd-popover textarea") == "about the pears"
+
+
+RAW = "# Plan\n\nSee (ref <x1>), <x2/> and <kbd>Ctrl</kbd> in this line.\n\nBody paragraph.\n"
+
+
+def test_an_edit_of_a_line_with_raw_inline_html_keeps_each_tag_in_the_file(tab):
+    """sheaf #155: the save of `(ref <x1>)` wrote `(ref )`. The browser nests an unknown element over the rest
+    of the line, which is what reaches the hub here."""
+    f = tab.site.file
+    f.write_text(RAW, encoding="utf-8")
+    tab.page.clock.install()
+    tab.open()
+    type_at_end(tab.page, "main p:has-text('this line')", " typed")
+    tab.page.clock.run_for(3000)
+    until(lambda: "typed" in f.read_text(encoding="utf-8"), what="the save")
+    assert f.read_text(encoding="utf-8") == RAW.replace("this line.", "this line. typed")

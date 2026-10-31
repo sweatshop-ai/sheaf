@@ -820,6 +820,114 @@ def _orphans(comments) -> str:
     return "\n\n".join(parts) + "\n"
 
 
+# ───────────────────────────────────────────────────── raw inline tags ──
+# A paragraph can hold raw HTML between its words: `(ref <x1>)`, `<kbd>Ctrl</kbd>`,
+# `<abbr title="...">`. Pandoc's HTML reader drops an element it does not know and writes
+# <kbd>, <mark> and <abbr> as <span class=...>, so an edit of the paragraph took the tag
+# out of the file (sheaf #155). Each element of the page that stands for a raw tag of the
+# source goes through pandoc as two placeholders around its words, and the placeholders
+# come back as the source's own bytes: the opening tag, and its closing tag or nothing
+# when the source never closed it. What markdown itself writes (an emphasis, a link, a
+# line break), the page's own spans and what the sanitiser removes are left to pandoc.
+MARKDOWN_TAGS = frozenset({
+    "a", "b", "blockquote", "br", "code", "del", "div", "em", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "i",
+    "img", "input", "li", "ol", "p", "pre", "s", "span", "strike", "strong", "table", "tbody", "td", "tfoot",
+    "th", "thead", "tr", "ul",
+})
+TAG_RE = re.compile(r"^<(/?)([A-Za-z][A-Za-z0-9-]*)\b[^>]*?(/?)>$")
+
+
+def _raw_tags(content: str) -> list:
+    """The raw inline tags of a block's source, in order: (name, opening tag, closing tag or "")."""
+    import json
+
+    from .sanitize import ALSO_REMOVED, REMOVE
+
+    if "<" not in content:
+        return []
+    r = _pandoc.run(["-f", "gfm", "-t", "json"], content)
+    if r.returncode != 0:
+        return []
+    raws = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("t") == "RawInline" and node["c"][0] == "html":
+                raws.append(node["c"][1])
+            else:
+                walk(node.get("c"))
+        elif isinstance(node, list):
+            for x in node:
+                walk(x)
+
+    walk(json.loads(r.stdout)["blocks"])
+    tags, open_ = [], {}
+    for raw in raws:
+        m = TAG_RE.match(raw)
+        if not m:
+            continue
+        closing, name, empty = m.group(1), m.group(2).lower(), m.group(3)
+        if name in MARKDOWN_TAGS or name in REMOVE or name in ALSO_REMOVED:
+            continue
+        if closing:
+            if open_.get(name):
+                open_[name].pop()[2] = raw
+            continue
+        tag = [name, raw, ""]
+        tags.append(tag)
+        if not empty:
+            open_.setdefault(name, []).append(tag)
+    return [tuple(t) for t in tags]
+
+
+def _html_blocks(md: str) -> int:
+    """How many HTML blocks pandoc reads in `md`, at any depth."""
+    r = _pandoc.run(["-f", "gfm", "-t", "json"], md)
+    return r.stdout.count('"t":"RawBlock"') if r.returncode == 0 else -1
+
+
+def _tags_as_text(content: str, fragment: str, token):
+    """(the fragment with each element that stands for a raw tag of `content` written as two
+    placeholders around its words, {placeholder: the source's bytes})."""
+    from bs4 import BeautifulSoup
+
+    tags = _raw_tags(content)
+    if not tags:
+        return fragment, {}
+
+    def key(el):
+        return (el.name, tuple(sorted((k, " ".join(v) if isinstance(v, list) else v) for k, v in el.attrs.items())))
+
+    # An element is the source tag that says the same: same name, same attributes, the
+    # first one not yet taken. Of two that differ, the one left on the page keeps its own.
+    unused = []
+    for name, opening, closing in tags:
+        el = BeautifulSoup(opening, "html.parser").find(True)
+        if el is not None:
+            unused.append((key(el), opening, closing))
+    soup = BeautifulSoup(fragment, "html.parser")
+    placed = {}
+    for el in soup.find_all(True):
+        # A math span's <sup> is the render's, not a tag of the source.
+        # In code, a tag is the code's words, and stays the element pandoc writes as text.
+        if _page_own(el) or any(_page_own(up) or up.name in ("code", "pre")
+                                for up in el.parents if up.name != "[document]"):
+            continue
+        k = key(el)
+        hit = next((u for u in unused if u[0] == k), None)
+        if hit is None:
+            continue
+        unused.remove(hit)
+        # In brackets that are punctuation, as the tag's own < and > are: between letters pandoc would
+        # take the words' `_` for intraword and drop its escape, and `\_x\_` would come back as emphasis.
+        a, b = f"\u27e6{token()}\u27e7", f"\u27e6{token()}\u27e7"
+        placed[a], placed[b] = hit[1], hit[2]
+        el.insert_before(a)
+        el.insert_after(b)
+        el.unwrap()
+    return (str(soup), placed) if placed else (fragment, {})
+
+
 def _convert_with_comments(block, fragment: str, strays=None):
     """(new markdown for the block, comments left without text)."""
     parsed = rdc.parse(block.content).comments
@@ -858,7 +966,23 @@ def _convert_with_comments(block, fragment: str, strays=None):
         return t
 
     frag = RAW_COMMENT_RE.sub(keep, ANCHOR_RE.sub(swap, fragment))
+    frag, tags = _tags_as_text(block.content, frag, token)
     new_md = html_block_to_md(frag, block.content, strays)
+    if tags:
+        before = _html_blocks(new_md)
+        for t, raw in tags.items():
+            # Pandoc's writer takes the character after a backslash it escapes, here the
+            # placeholder's opening bracket: the placeholder is found by its own letters.
+            found = re.findall(rf"\u27e6?{t[1:-1]}\u27e7", new_md)
+            if len(found) != 1:
+                # Pandoc lost or doubled the words around a raw tag: refused, as the file
+                # would lose the tag.
+                raise EditError("block holds raw HTML the edit cannot keep; edit it in the .md")
+            new_md = new_md.replace(found[0], raw, 1)
+        if _html_blocks(new_md) != before:
+            # A tag the edit left alone at the start of a line opens an HTML block, which
+            # would take the lines after it as raw text.
+            raise EditError("the edit leaves raw HTML at the start of a line; edit it in the .md")
     lost = []
     for cid, c in by_id.items():
         t = tokens.get(cid)

@@ -22,7 +22,8 @@
   const VERSION = '@@SHEAF_VERSION@@';
   const KNOWN = !VERSION.startsWith('@@');
   // Each pane's closed root, kept here: attachShadow works once per element, so a pane mounted again (a failed first
-  // try, the list after a sheaf) reuses its root, and `live` is the mount standing in it.
+  // try, the list after a sheaf) reuses its root, and `live` is the mount standing in it. `seq` counts the mount()
+  // calls on the pane: the one called last takes it, whichever answer comes in first.
   const PANES = new WeakMap();
   const MAX_DEPTH = 60;
   const MAX_NODES = 200000;
@@ -312,9 +313,11 @@
    *  takes focus on a click, so the page's keys reach its root. With `opts.list` (a root's name) and `opts.show` instead
    *  of `opts.doc`, the list: its rows are data, drawn by list.js `render` from text, and its script is sheafList.create.
    *  The root is attached at the first good answer, and a pane keeps it: mount() on a pane that holds a page takes that
-   *  page down first. An answer of another hub version builds nothing: `opts.upgrade(version)` is called, so the loader
-   *  loads that version's script and mounts with it (on a new host: a pane's root belongs to the script that made it);
-   *  without it the pane says to reload. A remount that fails is said in the page, which stays as it was. */
+   *  page down first, and a mount overtaken by a newer call on its pane before it took the pane builds nothing (its
+   *  handle is dead). An answer of another hub version builds nothing and attaches nothing: `opts.upgrade(version)` is
+   *  called once, so the loader loads that version's script and mounts with it (a pane already holding a root of this
+   *  script needs a new host: a root belongs to the script that made it); without it the pane says to reload. A remount
+   *  that fails is said in the page, which stays as it was. */
   async function mount(host, opts) {
     const list = opts.list != null;
     const url = list
@@ -322,6 +325,10 @@
       : '/_/mount?doc=' + encodeURIComponent(opts.doc);
     let root = null;
     const doc = host.ownerDocument;
+    const pane = PANES.get(host) || { root: null, live: null, seq: 0 };
+    PANES.set(host, pane);
+    const call = ++pane.seq;
+    let told = false;
     const kit = list ? window.sheafList : window.sheafPage;          // taken now: a later front script cannot swap it in
     const create = kit && kit.create;
     const render = list && kit && kit.render;
@@ -337,7 +344,8 @@
     async function draw() {
       const mine = ++drawn;
       cut();
-      const stale = () => gone || mine !== drawn;
+      // A newer mount() on the pane overtakes this one until this one holds the pane; then only one that took it does.
+      const stale = () => gone || mine !== drawn || (pane.live !== handle && pane.seq !== call);
       let fresh;
       try {
         const res = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
@@ -349,15 +357,23 @@
       }
       if (stale()) return got;
       if (list && (fresh.kind !== 'list' || !render)) throw new Error('the hub sent no list');
+      const upgraded = KNOWN && fresh.version !== VERSION;
+      if (upgraded && typeof opts.upgrade === 'function') {
+        got = got || fresh;
+        if (!told) {
+          told = true;
+          if (page && page.failed) page.failed('sheaf was updated on the hub: the new version is loading.');
+          opts.upgrade(fresh.version);
+        }
+        return got;
+      }
       if (!root) {
-        const pane = PANES.get(host) || { root: host.attachShadow({ mode: 'closed' }), live: null };
-        PANES.set(host, pane);
+        if (!pane.root) pane.root = host.attachShadow({ mode: 'closed' });
         if (pane.live && pane.live !== handle) pane.live.unmount();
         pane.live = handle;
         root = pane.root;
       }
-      if (KNOWN && fresh.version !== VERSION) {
-        if (typeof opts.upgrade === 'function') { got = got || fresh; opts.upgrade(fresh.version); return got; }
+      if (upgraded) {
         got = got || fresh;
         if (page) page.unmount();
         page = null;
@@ -404,6 +420,7 @@
       remount: draw,
     };
     await draw();
+    if (pane.live !== handle) gone = true;          // overtaken before it took the pane: nothing of it stands
     return handle;
   }
 

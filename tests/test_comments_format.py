@@ -96,6 +96,25 @@ def test_a_backtick_in_a_comment_does_not_pair_with_one_after_it():
     assert c.status == "resolved" and c.replies[0].text == "this one: `\u2318` (two)"
 
 
+@pytest.mark.parametrize("one_line", [False, True])
+def test_a_backtick_in_a_comment_cannot_pair_with_an_unpaired_one_before_it(one_line):
+    """An unpaired backtick before a comment opened a code span that closed on the
+    backtick format wrote raw into the comment: the page showed the comment's head as
+    code, and parse masked it and read no comment (#136). A backtick is written as an
+    entity, so the comment holds none, and it reads back as a backtick."""
+    c = rdc.Comment(id="c1", by="A`da", at="2026-10-31T10:00", status="open",
+                    quote="the ` key", body="which ` key?\n`first` on a line")
+    c.replies.append(rdc.Reply("Claude", "2026-10-31T11:00", "this ` one"))
+    raw = rdc.format(c, one_line=one_line)
+    md = f"Use the ` key here{raw} tail.\n"
+    out = pandoc(["-f", "gfm", "-t", "html"], md)
+    assert "<code>" not in out and "&lt;!--" not in out and "sheaf-comment" in out, out
+    [back] = rdc.parse(md).comments
+    assert (back.by, back.quote, back.body) == (c.by, c.quote, c.body)
+    assert [r.text for r in back.replies] == ["this ` one"]
+    assert "`" not in raw
+
+
 def test_a_head_after_an_earlier_code_span_and_one_inside_a_longer_span_are_read_as_before():
     head = '<!-- sheaf-comment id=c%d by="Ada" at=2026-10-14T10:00 status=open quote="x"\nbody\n-->'
     md = f"Run `make` first.{head % 1} Then ``a ` b {head % 9} c`` end.\n"

@@ -113,7 +113,7 @@ jobs:
           path: ${{ runner.os == 'macOS' && '~/Library/Caches/ms-playwright' || '~/.cache/ms-playwright' }}
           key: playwright-${{ runner.os }}-${{ steps.image.outputs.os }}-${{ hashFiles('uv.lock') }}
 
-      - name: Page tests (Playwright: Chromium, Firefox, WebKit)
+      - name: Page tests (Playwright, Chromium, Firefox, WebKit)
         if: hashFiles('tests/page/**') != '' && steps.page.outputs.run == 'true'
         shell: bash
         run: |

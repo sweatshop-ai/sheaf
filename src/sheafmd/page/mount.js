@@ -308,18 +308,18 @@
   /** Mount the sheaf `opts.doc` in `host`: a CLOSED shadow root (the front's CSS and the page's cannot touch each other, and a
    *  script of the front cannot walk into it by `host.shadowRoot`), the document's own styles, then its rebuilt body, and the
    *  page's behaviour on it (page.js, served after this file in /_/mount.js: sheafPage.create). Resolves to {config, title,
-   *  toc, overtaken, unmount, dirty, remount}. remount() fetches the page again and builds it in place of the old one, which is what a
-   *  reload of a page of its own did; the page calls it where it called location.reload(). The wrapper is the scroller and
-   *  takes focus on a click, so the page's keys reach its root. With `opts.list` (a root's name) and `opts.show` instead
-   *  of `opts.doc`, the list: its rows are data, drawn by list.js `render` from text, and its script is sheafList.create.
-   *  The root is attached at the first good answer, and a pane keeps it: mount() on a pane that holds a page takes that
-   *  page down first, and a mount overtaken by a newer call on its pane before it took the pane builds nothing (its
-   *  handle is dead: `overtaken` is true, its getters are null, and a failure of its fetch is no one's). The takeover
-   *  asks the standing page nothing: the loader asks its dirty() before it calls mount(). An answer of another hub
-   *  version builds nothing and attaches nothing: `opts.upgrade(version)` is called once (each remount of the old page
-   *  says the new one is loading), so the loader loads that version's script and mounts with it (a pane already holding a root of this
-   *  script needs a new host: a root belongs to the script that made it); without it the pane says to reload. A remount
-   *  that fails is said in the page, which stays as it was. */
+   *  toc, overtaken, unmount, dirty, remount}. remount() fetches the page again and builds it in place of the old one,
+   *  which is what a reload of a page of its own did; the page calls it where it called location.reload(). The wrapper is
+   *  the scroller and takes focus on a click, so the page's keys reach its root. With `opts.list` (a root's name) and
+   *  `opts.show` instead of `opts.doc`, the list: its rows are data, drawn by list.js `render` from text, and its script is
+   *  sheafList.create. The root is attached at the first good answer, and a pane keeps it: mount() on a pane that holds a
+   *  page takes that page down first, and a mount overtaken by a newer call on its pane before it took the pane builds
+   *  nothing (its handle is dead: `overtaken` is true, its getters are null if it never built, and a failure of its fetch
+   *  is no one's). The takeover asks the standing page nothing: the loader asks its dirty() before it calls mount(). An
+   *  answer of another hub version builds nothing and attaches nothing: `opts.upgrade(version)` is called once (each
+   *  remount of the old page says the new one is loading), so the loader loads that version's script and mounts with it
+   *  (a pane already holding a root of this script needs a new host: a root belongs to the script that made it); without
+   *  it the pane says to reload. A remount that fails is said in the page, which stays as it was. */
   async function mount(host, opts) {
     const list = opts.list != null;
     const url = list
@@ -434,7 +434,8 @@
       return got;
     }
     handle = {
-      // An overtaken handle has no answer (or one it did not build): its getters say null, and `overtaken` says why.
+      // A handle overtaken before its first answer has none: its getters say null, and `overtaken` says why. One
+      // overtaken later keeps the answer it built.
       get config() { return got ? got.config : null; }, get title() { return got ? got.title : null; },
       get toc() { return got ? got.toc : null; }, get overtaken() { return overtaken; },
       unmount() {

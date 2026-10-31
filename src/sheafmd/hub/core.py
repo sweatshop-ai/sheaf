@@ -29,6 +29,7 @@ from ..source import STAMP_FORMAT, file_lock, lock_key
 from . import place
 from . import projects
 from . import proxy as proxy_mod
+from . import relay as relay_mod
 from . import roots as roots_mod
 from . import state
 from . import the_list
@@ -104,6 +105,7 @@ class Hub:
         self.member_seen = state.MemberSeen()
         self.index = Index(self)
         self.tokens = state.Tokens()
+        self.relays = relay_mod.Relays()     # the forks' relay tokens, queued Tells and streams (9.14)
         self.entries: dict[str, Entry] = {}
         self.index_bus = Bus()                   # the index streams (SPEC 8.8)
         self._index_opening = threading.Lock()   # one index stream opens at a time
@@ -428,6 +430,8 @@ class Hub:
         on their machine, the one that attaches to James's window when they have a shell on the box, the
         sessions and where the live one runs. None for a page that is not a sheaf of the list's root."""
         out = {"sessions": st.sessions, "live": st.live}
+        if st.live == "laptop":
+            out["relay"] = st.relay         # whether Tell reaches the fork now (9.14, 10.1)
         # The fork fetches the live session's transcript from /_/session: one on a laptop, none, or no
         # sessions_dir to serve it from, nothing to fork.
         if st.forkable and st.cfg.sessions_dir is not None:

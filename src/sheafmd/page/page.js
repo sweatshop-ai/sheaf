@@ -33,20 +33,26 @@
   var DRAFTS_OF = CFG.proxy ? 'm:' + CFG.member : location.port;
   // On a member's page of a sheaf whose live session runs on the box, CFG.can holds "box-ask" and "box-tell":
   // Ask and Tell go with the comment to /_/comment, the hub drops it for James's window, and James answers in
-  // the thread through the door. The page starts no wait of its own for it (SPEC 9.12).
+  // the thread through the door. The page starts no wait of its own for it (SPEC 9.12). On a sheaf whose live
+  // session is a member's fork, CFG.can holds "relay-tell" while that fork's relay is connected: Tell goes the
+  // same way, to the relay, and Ask is not offered (9.14).
   var AGENT, AGENT_UC, CAN, canAsk, canTell, toBox;
   function takeAgent() {
     CAN = CFG.can || [];
-    toBox = CAN.indexOf('box-ask') >= 0 || CAN.indexOf('box-tell') >= 0;
+    toBox = CAN.indexOf('box-ask') >= 0 || CAN.indexOf('box-tell') >= 0 || CAN.indexOf('relay-tell') >= 0;
     // The session's own name when it has one ("Linnea"), else the agent's display name (SPEC 10.5); on a
     // box sheaf the member the live session runs as (James), and James on his sheaf with no session yet.
     AGENT = toBox ? upper(liveSession().member) || 'James'
           : (CFG.agent && (CFG.agent.name || CFG.agent.display)) || 'the agent';
     AGENT_UC = AGENT.charAt(0).toUpperCase() + AGENT.slice(1);
     canAsk = CAN.indexOf(toBox ? 'box-ask' : 'ask') >= 0;
-    canTell = CAN.indexOf(toBox ? 'box-tell' : 'deliver') >= 0;
+    canTell = CAN.indexOf('relay-tell') >= 0 || CAN.indexOf(toBox ? 'box-tell' : 'deliver') >= 0;
   }
   function liveSession() { return (CFG.work && CFG.work.sessions && CFG.work.sessions[0]) || {}; }
+  // Where a member's Ask or Tell goes: James's window on the box, or the fork's session through its relay (9.14).
+  function whereTo() {
+    return CAN.indexOf('relay-tell') >= 0 ? AGENT + '’s session on ' + liveSession().host : AGENT + '’s window on the box';
+  }
   function upper(s) { s = String(s || ''); return s.charAt(0).toUpperCase() + s.slice(1); }
   takeAgent();
   // What the hub's answer to /_/doc says of the agent: a rename, or a session that ended, reaches
@@ -72,7 +78,7 @@
     return (CFG.lines && CFG.lines[what]) || NO_AGENT;
   }
   function agentLine() {
-    if (toBox && (canAsk || canTell)) return (canAsk && canTell ? 'Ask and Tell' : canAsk ? 'Ask' : 'Tell') + ' → ' + AGENT + '’s window on the box';
+    if (toBox && (canAsk || canTell)) return (canAsk && canTell ? 'Ask and Tell' : canAsk ? 'Ask' : 'Tell') + ' → ' + whereTo();
     var a = CFG.agent;
     if (!a || (!canAsk && !canTell)) return lineOf('ask');
     return (canAsk && canTell ? 'Ask and Tell' : canAsk ? 'Ask' : 'Tell') +
@@ -520,6 +526,10 @@
     var live = liveSession(), none = w.live === 'laptop'
       ? 'The live session runs on ' + upper(live.member) + '’s machine, ' + live.host + ': open it there. This hub keeps no copy of it to fork.'
       : 'Nothing to fork from this hub: it keeps no copy of the box’s transcripts.';
+    // Whether a Tell reaches that fork now: its relay connected or not (9.14).
+    if (w.live === 'laptop' && 'relay' in w) h += '<p class="rd-relay">' + esc(w.relay
+      ? 'Tell goes to ' + upper(live.member) + '’s session on ' + live.host + '.'
+      : upper(live.member) + '’s session on ' + live.host + ' is not connected: Tell works again when it is.') + '</p>';
     h += '<h4>Sessions</h4>' + (ss.length ? ss.map(function (x) {
       return '<div class="rd-sess">' + esc(upper(x.member)) + ' on ' + esc(x.host) + ' · ' + esc(utcDate(x.date)) + '</div>';
     }).join('') : '<p class="rd-none">No session yet.</p>') +
@@ -1702,9 +1712,9 @@
   // is offered only when the agent can do it (CFG.can); a job already running
   // always shows, so it can be cancelled.
   var ASK_TIP = 'Answers here in the thread, from a copy of the session. Reads, changes nothing.';
-  function askTip() { return toBox ? 'Sends this to ' + AGENT + '’s window on the box; ' + AGENT + ' answers here in the thread.' : ASK_TIP; }
+  function askTip() { return toBox ? 'Sends this to ' + whereTo() + '; ' + AGENT + ' answers here in the thread.' : ASK_TIP; }
   function tellTip() {
-    return toBox ? 'Sends this to ' + AGENT + '’s window on the box, to act on; ' + AGENT + ' replies here.'
+    return toBox ? 'Sends this to ' + whereTo() + ', to act on; ' + AGENT + ' replies here.'
                  : 'Sends this to ' + yourSession() + ', which acts on it and replies here.';
   }
   // A comment sent to James's window: its thread says so until a reply comes after it, with no spinner, as
@@ -1715,6 +1725,7 @@
     var c = byId[id];
     var s = sentBox[id];
     if (!s || !c || (c.replies || []).length > s.n) { delete sentBox[id]; return ''; }
+    if (s.at) return '<div class="rd-msg rd-sent">Sent to ' + esc(s.at) + '; the answer appears in this thread.</div>';
     return '<div class="rd-msg rd-sent">Sent to ' + esc(s.to) + '’s window; his answer appears in this thread.</div>';
   }
   // What a send with Ask or Tell started: on a box sheaf the line, counted from the thread as the hub's answer
@@ -1724,6 +1735,7 @@
     if (toBox) {
       var c = (j.comments || []).filter(function (x) { return x.id === id; })[0] || byId[id];
       sentBox[id] = { n: ((c && c.replies) || []).length, to: AGENT };
+      if (CAN.indexOf('relay-tell') >= 0) sentBox[id].at = whereTo();
     } else if (k === 'ask') asking[id] = true;
     else telling[id] = true;
   }
@@ -3226,6 +3238,12 @@
         touched(d.id);
         say('Tell ' + AGENT + ' failed: ' + (d.error || 'unknown error'), true);
       });
+      // A member's Tell that the fork's relay will not deliver: it expired, or the session did not take it (9.14).
+      live.addEventListener('tell-relay-failed', function (ev) {
+        var d = JSON.parse(ev.data || '{}');
+        touched(d.id);
+        say('Tell ' + AGENT + ' failed: ' + (d.error || 'unknown error'), true);
+      });
       ['ask-cancelled', 'tell-cancelled'].forEach(function (name) {
         live.addEventListener(name, function (ev) {
           var d = JSON.parse(ev.data || '{}');
@@ -3393,7 +3411,10 @@
       // A comment sent to James's window keeps its line past the reload the session the hub records brings.
       Object.keys(keep.sent || {}).forEach(function (id) {
         var s = keep.sent[id];
-        if (byId[id] && s && typeof s.n === 'number' && typeof s.to === 'string') sentBox[id] = { n: s.n, to: s.to };
+        if (byId[id] && s && typeof s.n === 'number' && typeof s.to === 'string') {
+          sentBox[id] = { n: s.n, to: s.to };
+          if (typeof s.at === 'string') sentBox[id].at = s.at;
+        }
       });
       if (keep.panel) openPanel();
       if (keep.editing) { setEditing(true); placeCaret(keep.caret); }

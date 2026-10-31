@@ -302,12 +302,18 @@
    *  page's behaviour on it (page.js, served after this file in /_/mount.js: sheafPage.create). Resolves to {config, title,
    *  toc, unmount, dirty, remount}. remount() fetches the page again and builds it in place of the old one, which is what a
    *  reload of a page of its own did; the page calls it where it called location.reload(). The wrapper is the scroller and
-   *  takes focus on a click, so the page's keys reach its root. */
+   *  takes focus on a click, so the page's keys reach its root. With `opts.list` (a root's name) and `opts.show` instead
+   *  of `opts.doc`, the list: its rows are data, drawn by list.js `render` from text, and its script is sheafList.create. */
   async function mount(host, opts) {
-    const url = '/_/mount?doc=' + encodeURIComponent(opts.doc);
+    const list = opts.list != null;
+    const url = list
+      ? '/_/mount?list=' + encodeURIComponent(opts.list) + (opts.show ? '&show=' + encodeURIComponent(opts.show) : '')
+      : '/_/mount?doc=' + encodeURIComponent(opts.doc);
     const root = host.attachShadow({ mode: 'closed' });
     const doc = host.ownerDocument;
-    const create = window.sheafPage && window.sheafPage.create;   // taken now: a later front script cannot swap it in
+    const kit = list ? window.sheafList : window.sheafPage;          // taken now: a later front script cannot swap it in
+    const create = kit && kit.create;
+    const render = list && kit && kit.render;
     let page = null;
     let got = null;
     // Each draw has a number; one that a newer draw or unmount() overtook while its fetch or its stylesheet was out
@@ -321,25 +327,31 @@
       cut();
       const stale = () => gone || mine !== drawn;
       const res = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
-      if (!res.ok) throw new Error('the hub answered ' + res.status + ' for ' + opts.doc);
+      if (!res.ok) throw new Error('the hub answered ' + res.status + ' for ' + (list ? 'the list' : opts.doc));
       const fresh = await res.json();
       if (stale()) return got;
+      if (list && (fresh.kind !== 'list' || !render)) throw new Error('the hub sent no list');
       got = fresh;
-      const style = doc.createElement('style');
-      style.textContent = got.css;                  // the hub's own text: fonts, base and theme
+      const parts = [];
+      if (!list) {
+        const style = doc.createElement('style');
+        style.textContent = got.css;                // the hub's own text: fonts, base and theme
+        parts.push(style);
+      }
       const link = doc.createElement('link');
       link.rel = 'stylesheet';
       link.href = '/_/mount.css?v=' + encodeURIComponent(got.version);
       const wrap = doc.createElement('div');
-      wrap.className = 'rd-root' + (got.toc ? '' : ' notoc');
+      wrap.className = list ? 'rd-root sheaf-list' : 'rd-root' + (got.toc ? '' : ' notoc');
       wrap.tabIndex = -1;
-      wrap.appendChild(rebuild(got.html, wrap));
+      wrap.appendChild(list ? render(got.list, wrap) : rebuild(got.html, wrap));
       if (page) page.unmount();
       page = null;
-      root.replaceChildren(style, link, wrap);
+      root.replaceChildren(...parts, link, wrap);
       await new Promise((done) => { link.onload = link.onerror = done; cut = done; });   // the page measures its parts: their styles first
       if (stale()) return got;
-      if (create) page = create(root, got.config, { body: wrap, remount: () => { draw().catch(() => {}); } });
+      const again = { body: wrap, remount: () => { draw().catch(() => {}); } };
+      if (create) page = list ? create(root, again) : create(root, got.config, again);
       return got;
     }
     await draw();

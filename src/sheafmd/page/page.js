@@ -516,7 +516,7 @@
     if (w.attach) h += '<h4>Attach on the box</h4><p>James’s session is live in tmux. You join it in your terminal; ' +
                        'same transcript, same tools, James’s account.</p>' + cmdRow(w.attach);
     // The fork fetches the live session's transcript; the hub leaves `fork` out unless the live session runs on
-    // the box and it keeps a copy of the box's transcripts (`sessions_dir`).
+    // the box and it keeps a copy of the box's transcripts (`sessions_dir` and `work_dir`, #146).
     // It asks for a sign-in code (9.13), which this button gets: shown once, in the popover only, never kept.
     if (w.fork) h += '<h4>Fork to your machine</h4>' + cmdRow(w.fork) +
                      '<p>Runs on your laptop: fetches the session through this hub, forks it under your name. ' +

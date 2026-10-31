@@ -935,7 +935,8 @@ ul{list-style:none;margin:0;padding:0}
 .list-act.one-off.pending,.list-act.one-off.pressed{background:var(--once);color:var(--bg)}
 .list-act.toggle.pending,.list-act.toggle[aria-pressed=true]{background:var(--chip);color:var(--bg)}
 .list-act:disabled{cursor:default;opacity:.7}
-/* The list never scrolls sideways: every word breaks, the buttons' (#112), a title, a heading, a refusal (#130).
+/* The list never scrolls sideways: a word wider than the screen breaks (body above), in a button (#112) as in a
+   title, a heading or a refusal (#130).
    On a phone the buttons go under the title, 44 px, as the page's #rd-actions in page/page.css (#112). */
 @media (max-width:600px){.list-row{flex-wrap:wrap}.list-main{flex-basis:100%}
 .list-actions{max-width:none;justify-content:flex-start}}

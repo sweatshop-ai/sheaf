@@ -715,8 +715,13 @@ class Hub:
         """Give up on drops for James's window with no reply after the Tell wait (9.12, #115), read in the file as
         it is now, whether a page asked since or not: the page is told `box-failed`, and a `box-expired` row says so."""
         def text_of(address):
+            # The file, not the hub's copy: `sheaf reply` answers a drop without the hub, and a sheaf with no tab
+            # is not refreshed by the pass.
             e = self.entries.get(address)
-            return e.live.current()[1] if e is not None else None
+            if e is None:
+                return None
+            self.catch_up(e)
+            return e.live.current()[1]
         minutes = max(1, -(-self.tell_wait // 60))
         for address, thread, d in self.box_waits.expire(self.tell_wait, text_of):
             project = "/".join(roots_mod.Address.parse(address).rel.split("/")[:2])
@@ -730,7 +735,6 @@ class Hub:
         Tell wait: give up on waits nobody answers, and when the file's (mtime, size) moved,
         catch up with it and tell the tabs. A failure in one document is written down and never
         stops the pass."""
-        self._expire_drops()
         for e in list(self.entries.values()):
             try:
                 e.live.expire(self.tell_wait, self.asktell.product(e.address))
@@ -748,6 +752,10 @@ class Hub:
                 e.last_stat = key        # after: a rebuild that failed is tried again next tick
             except Exception as ex:
                 self._rebuild_failed(e, ex)
+        try:
+            self._expire_drops()                  # after the tabs' refresh: a reply that just landed is in
+        except Exception:
+            self.record_exception("drops-failed")
         try:
             self.commits.poll(self.roots.all())   # what the remote got, with no save (8.11, #75)
         except Exception:

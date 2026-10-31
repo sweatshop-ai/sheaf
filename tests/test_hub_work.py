@@ -643,6 +643,21 @@ def test_a_drop_answered_before_the_tell_wait_is_never_given_up_on_though_no_pag
     assert hub_rows("box-expired") == []
 
 
+
+def test_a_drop_answered_in_the_file_from_outside_is_never_given_up_on(team, box, work):
+    # `sheaf reply` writes the file without the hub: the tick reads the file, not the hub's copy (#115).
+    from sheafmd import comments as rdc
+    now = [1_000_000.0]
+    team.hub.clock = lambda: now[0]
+    cid = comment(team, work, "tell").json()["id"]
+    f = work / DOC
+    f.write_text(rdc.reply(f.read_text(encoding="utf-8"), cid, "Sent it.", "James", "2026-10-31T15:00"),
+                 encoding="utf-8")
+    now[0] += team.hub.tell_wait + 1
+    team.hub.tick()
+    assert hub_rows("box-expired") == []
+
+
 # ── the meta block (10.1) ────────────────────────────────────────────────────
 
 def meta(team, member=HANS, doc=DOC):

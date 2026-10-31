@@ -24,6 +24,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+from importlib import resources
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote
 
@@ -242,6 +243,9 @@ class Handler:
             ("GET", "/_/open", "open", OPEN, self._open),
             ("GET", "/_/live", "live", COOKIE, self._live),
             ("GET", "/_/doc", "doc", EITHER, self._doc),
+            ("GET", "/_/mount", "mount", EITHER, self._mount),
+            ("GET", "/_/mount.js", "mount-js", OPEN, lambda req: self._mount_asset(req, "mount.js", "text/javascript; charset=utf-8")),
+            ("GET", "/_/mount.css", "mount-css", OPEN, lambda req: self._mount_asset(req, "mount.css", "text/css; charset=utf-8")),
             ("GET", "/_/index.json", "index", EITHER, self._index_json),
             ("GET", "/_/jobs", "jobs", KEY, self._jobs),
             ("POST", "/_/save", "save", COOKIE, self._save),
@@ -829,6 +833,28 @@ class Handler:
                    asking=self.hub.runner.active("ask", e.address),
                    question=e.live.session_question(), target=v.agent(),
                    capabilities=sorted(v.caps), lines=v.lines)
+
+    def _mount(self, req: Req) -> Response:
+        """The sheaf as JSON for the front's loader to mount (#116): the body through the sanitiser's mount mode and the
+        meta block the page route sends. The same gate as the page: a member sees what they could open."""
+        doc = req.query.get("doc")
+        _shape(isinstance(doc, str) and doc.endswith(".md"), "doc must be the address of a sheaf")
+        with self._reading(doc):
+            e = self._entry(req, doc)
+            self.hub.catch_up(e)
+            try:
+                got = self.hub.mount_doc(e, req.member)
+            except RenderError as ex:
+                raise Refuse(500, f"the page could not be rendered: {ex}") from None
+            return _json(200, got, {"X-Content-Type-Options": "nosniff"})
+
+    def _mount_asset(self, req: Req, name: str, kind: str) -> Response:
+        """The loader's script and the page's style, the hub's own files. A request that names this hub's version
+        (`?v=`) may be kept for a year: a new version is a new address. Any other is asked again each time."""
+        body = (resources.files("sheafmd") / "page" / name).read_bytes()
+        named = req.query.get("v") == self.hub.version
+        return Response(200, {"Content-Type": kind, "X-Content-Type-Options": "nosniff",
+                              "Cache-Control": "public, max-age=31536000, immutable" if named else "no-store"}, body)
 
     def _index_json(self, req: Req) -> Response:
         rendered = req.query.get("rendered", "0")

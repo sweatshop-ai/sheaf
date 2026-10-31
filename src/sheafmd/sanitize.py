@@ -73,6 +73,7 @@ MOUNT_REMOVED = frozenset({
     "video", "audio", "source", "track", "canvas", "portal", "use", "image", "foreignobject", "animate", "set",
     "animatetransform", "animatemotion", "math", "maction", "annotation-xml", "mglyph", "semantics",
 })
+MOUNT_MAX_DEPTH = 100          # no real page nests deeper; Chromium's DOMParser costs the square of the depth (20 s at 100,000)
 _MOUNT_LINK_SCHEMES = frozenset({"http", "https", "mailto"})
 _MOUNT_DROPPED_ATTRS = frozenset({"target", "name", "background", "action", "poster", "longdesc", "manifest", "formtarget"})
 _EXTERNAL_URL = re.compile(r"url\(\s*['\"]?\s*(?!#)", re.I)
@@ -158,6 +159,20 @@ def _url_ok(tag, attr: str, value: str) -> bool:
             and bool(_SAFE_DATA.match(v)))
 
 
+def _flatten_deep(soup, log: list[str]) -> None:
+    """Replace every element nested deeper than MOUNT_MAX_DEPTH by its text. Walks with a stack, not recursion."""
+    stack = [(child, 1) for child in soup.contents]
+    while stack:
+        node, depth = stack.pop()
+        if not isinstance(node, Tag):
+            continue
+        if depth > MOUNT_MAX_DEPTH:
+            log.append(f"  - <{node.name}> nested deeper than {MOUNT_MAX_DEPTH} replaced by its text")
+            node.replace_with(node.get_text())
+            continue
+        stack.extend((child, depth + 1) for child in node.contents)
+
+
 def _mount_style(value: str) -> str:
     """The declarations of a style attribute that the allow-list names, written out normalised; "" when none is left.
     Each declaration stands or falls alone, and the value grammar has no quote, backslash, slash, bang or function
@@ -236,6 +251,8 @@ def _comment_ok(text: str) -> bool:
 
 def _pass(fragment: str, comments: bool, log: list[str], mount: bool = False) -> str:
     soup = BeautifulSoup(_end_empty_comments(fragment), "html.parser", element_classes={Tag: _Tag})
+    if mount:
+        _flatten_deep(soup, log)
 
     for node in list(soup.find_all(string=True)):
         if not isinstance(node, PreformattedString):

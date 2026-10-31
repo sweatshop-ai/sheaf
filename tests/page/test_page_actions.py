@@ -735,3 +735,29 @@ def test_a_press_whose_block_was_edited_and_not_saved_keeps_the_tick(tab, site):
     p.clock.run_for(2100)
     until(lambda: "notes now more" in f.read_text(encoding="utf-8"), what="the edit, saved by the reload's settle")
     assert "- [x] Approve" in f.read_text(encoding="utf-8"), f.read_text(encoding="utf-8")
+
+
+def test_an_upgrade_while_a_save_waits_for_the_tick_does_not_ask_to_save(sheaf, site):
+    # #153, 2: the save waiting for the tick was counted nowhere, and the upgrade's notice asked to save the edits.
+    p, f = sheaf.page, sheaf.site.file
+    p.add_init_script(HEARD)
+    p.reload()
+    p.wait_for_selector("#rd-actions button")
+    held = []
+    p.route("**/_/tick", lambda r: held.append(r))
+    stand_still(p)
+    bar(p).nth(0).click()
+    p.clock.run_for(5100)
+    until(lambda: held or p.wait_for_timeout(20), what="the tick, held")
+    type_at_end(p, "main p:has-text('Body')", " typed")
+    p.clock.run_for(2600)                               # the autosave is due and waits for the tick
+    until(lambda: p.evaluate("document.querySelector('#rd-state').textContent") == "Saving…", what="Saving…")
+    p.route("**/_/doc?*", lambda r: r.abort())
+    site.hub.entry(DOC).bus.publish("hello", {"version": "99.0.0"})
+    until(lambda: heard(p, "hello"), what="the upgrade")
+    p.wait_for_timeout(300)
+    assert "Save your edits" not in p.inner_text("#rd-notice")
+    held[0].continue_()
+    p.unroute("**/_/tick")
+    until(lambda: "- [x] Approve" in f.read_text(encoding="utf-8"), what="the tick")
+    until(lambda: " typed" in f.read_text(encoding="utf-8"), what="the save after it")

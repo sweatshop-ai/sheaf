@@ -212,10 +212,14 @@ def _staged(folder: Path, paths: list) -> dict:
 
 def _restage(folder: Path, before: dict, paths: list) -> bool:
     """Put the index entries of `paths` back as `before` held them: what a commit that failed staged
-    goes, what the person had staged there comes back."""
+    goes, what the person had staged there comes back. Only the entries whose blob or mode changed are
+    written: `--index-info` drops the assume-unchanged and skip-worktree flags of an entry it writes (#49)."""
+    now = _staged(folder, paths)
     zero = "0" * (64 if _git(folder, "rev-parse", "--show-object-format").stdout.strip() == "sha256" else 40)
-    gone = [f"0 {zero}\t{p}" for p in _staged(folder, paths) if p not in before]
-    back = [f"{meta}\t{p}" for p, meta in before.items()]
+    gone = [f"0 {zero}\t{p}" for p in now if p not in before]
+    back = [f"{meta}\t{p}" for p, meta in before.items() if now.get(p) != meta]
+    if not gone and not back:
+        return True
     return _git(folder, "update-index", "-z", "--index-info",
                 given="".join(e + "\0" for e in gone + back)).returncode == 0
 
@@ -383,9 +387,8 @@ class Commits:
                          error=_last_line(r) + ("" if kept else "; the index could not be put back"))
             return False
         if _git(folder, "diff", "--cached", "--quiet", "--", *paths).returncode == 0:
-            # Nothing of this write is left to commit; what the person had staged there comes back. An
-            # index `add` left as it was is not rewritten: `--index-info` would drop its assume-unchanged flags.
-            if _staged(folder, paths) != before and not _restage(folder, before, paths):
+            # Nothing of this write is left to commit; what the person had staged there comes back.
+            if not _restage(folder, before, paths):
                 record("commit-failed", address, error="the index could not be put back")
             return False
         who = []

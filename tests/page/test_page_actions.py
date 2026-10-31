@@ -170,3 +170,25 @@ def test_a_replys_answer_that_reloads_the_page_waits_for_a_press_in_its_undo(tab
     # The press names the text before the outside change: refused, and said on the page the reload brings.
     reloaded(p)
     until(lambda: "reload the page" in toast(p), what="the refusal after the reload")
+
+
+def test_a_press_while_the_page_settles_onto_a_change_is_refused_and_the_page_reloads(sheaf):
+    p, f = sheaf.page, sheaf.site.file
+    held = []
+    p.route("**/_/save", lambda r: held.append(r))
+    type_at_end(p, "main p:has-text('Body')", " typed")
+    f.write_text(SHEAF.replace("# Plan", "# Plan, outside"), encoding="utf-8")
+    until(lambda: held or p.wait_for_timeout(20), what="the settle's save, held")
+    mark(p)
+    bar(p).nth(0).click()
+    # The page is about to reload onto the change: the press is refused, never left to wait for a page that goes.
+    assert bar(p).nth(0).inner_text() == "Approve"
+    assert "reloading" in toast(p)
+    held[0].continue_()
+    p.unroute("**/_/save")
+    reloaded(p)
+    p.wait_for_selector("#rd-actions button")
+    bar(p).nth(0).click()
+    p.clock.run_for(5100)
+    until(lambda: "- [x] Approve" in f.read_text(encoding="utf-8"), what="the press on the reloaded page")
+    assert "# Plan, outside" in f.read_text(encoding="utf-8") and " typed" in f.read_text(encoding="utf-8")

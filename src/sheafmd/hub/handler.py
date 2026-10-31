@@ -750,7 +750,12 @@ class Handler:
                     self.hub.committed(e.address, req.member, "edit", gone=gone)
                 # The buttons of the text written, under its lock (10.11): the page numbers its presses by them.
                 h, text = e.live.current()
-                actions = self.hub.actions(e, req.member, text) if h == got["hash"] else None
+                try:
+                    actions = self.hub.actions(e, req.member, text) if h == got["hash"] else None
+                except Exception:
+                    # The save is written: a reading of its buttons that fails leaves the page's, which the hub
+                    # still judges at the press (a hash it no longer holds is refused), never a 500 for it.
+                    actions = None
         if "Stop James" in ticked:
             self._stop_james(req, e)
         if actions is not None:

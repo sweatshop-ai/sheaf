@@ -608,6 +608,7 @@
     if (docGone) return;        // it would load another folder's document, or none (meetDocGone)
     if (pressOpen) { reloadAfterPress = { open: openId, keep: true }; return; }     // as in settle (SPEC 10.11)
     try {
+      if (pressSaid && Date.now() < pressSaid.until) sessionStorage.setItem('rd-press-said', pressSaid.text);
       sessionStorage.setItem('rd-keep', JSON.stringify({ doc: CFG.doc, y: window.scrollY, open: openId || null,
                                                          panel: panel.classList.contains('open'),
                                                          known: counts(), editing: editing,
@@ -2739,7 +2740,7 @@
   // of the text it wrote (`actsOwed`, with its hash), drawn once no press is open; a press whose buttons that save
   // changed is not sent, since its number may now name another box.
   var UNDO_MS = 5000, actBoxes = new WeakSet(), actBar = null, pressOpen = false, reloadAfterPress = null;
-  var actsHash = CFG.hash, actsShown = [], actsOwed = null;
+  var actsHash = CFG.hash, actsShown = [], actsOwed = null, pressSaid = null;
   function sameActions(a, b) {
     var sig = function (xs) { return JSON.stringify(xs.map(function (x) { return [x.label, x.pressed, x.n]; })); };
     return sig(a) === sig(b);
@@ -2824,14 +2825,17 @@
         btn.disabled = false;
         lock(false);
         say(e.message, true);
-        // A reload waits for this answer: the refusal is said again on the page it brings.
-        if (reloadAfterPress) try { sessionStorage.setItem('rd-press-said', e.message); } catch (x) {}
+        // A reload waits for this answer: the refusal is said again on the page it brings, if it comes while the
+        // toast would still be up (a form may hold it longer).
+        if (reloadAfterPress) pressSaid = { text: e.message, until: Date.now() + 7000 };
         done();
       }
     }
     btn.addEventListener('click', function () {
       if (waiting !== null) { clearTimeout(waiting); waiting = null; back(); lock(false); done(); return; }
       if (stale || dead || pressOpen) return;
+      // A settle ends in a reload onto the change: a press now would die with the page, so it is not taken.
+      if (settling) { say('The page is reloading onto a change to the file: press ' + a.label + ' once it has.'); return; }
       pressOpen = true;
       lock(true);
       btn.textContent = 'Undo'; btn.classList.add('pending'); btn.setAttribute('aria-label', 'Undo ' + word);
@@ -3368,7 +3372,7 @@
   try {
     var keep = JSON.parse(sessionStorage.getItem('rd-keep') || 'null');
     var msg = sessionStorage.getItem('rd-toast');
-    var pressSaid = sessionStorage.getItem('rd-press-said');      // a press's refusal a reload waited for (10.11)
+    var refusedPress = sessionStorage.getItem('rd-press-said');   // a press's refusal a reload waited for (10.11)
     sessionStorage.removeItem('rd-keep');
     sessionStorage.removeItem('rd-toast');
     sessionStorage.removeItem('rd-press-said');
@@ -3395,7 +3399,7 @@
       if (keep.editing) { setEditing(true); placeCaret(keep.caret); }
       if (keep.open && byId[keep.open]) setTimeout(function () { openComment(keep.open); }, 50);
     }
-    if (pressSaid && keep) say(pressSaid, true);
+    if (refusedPress && keep) say(refusedPress, true);
     else if (msg) say(msg);
     if (canSave) { showKept(); unsentLine(); }
     var unsaved = canEdit ? editDraftFound() : null;

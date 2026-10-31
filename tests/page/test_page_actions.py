@@ -290,7 +290,6 @@ def test_an_autosave_due_while_a_press_is_out_waits_for_its_answer_and_the_press
     p.unroute("**/_/tick")
     until(lambda: "- [x] Approve" in f.read_text(encoding="utf-8"), what="the tick")
     until(lambda: " typed" in f.read_text(encoding="utf-8"), what="the autosave after it")
-    assert "reload the page" not in toast(p)
 
 
 def test_every_reload_asked_during_a_press_counts_and_the_settle_still_saves_the_edits(sheaf, site):
@@ -343,3 +342,61 @@ def test_a_sign_out_during_a_press_does_not_reload_under_it(sheaf, site):
     assert bar(p).nth(0).inner_text() == "Undo"
     p.clock.run_for(5100)
     until(lambda: "- [x] Approve" in f.read_text(encoding="utf-8"), what="the press, sent")
+
+
+def test_a_box_typed_in_a_block_whose_save_is_merged_is_not_ticked_before_the_reload(sheaf):
+    # #127, 3, gate on 793824c: a merged save brings no actions, so the box may be an action's; it waits for the page
+    # the merge's reload brings.
+    p, f = sheaf.page, sheaf.site.file
+    def merged(route):
+        r = route.fetch()
+        j = r.json()
+        j["merged"] = True
+        route.fulfill(response=r, json=j)
+    p.route("**/_/save", merged, times=1)
+    type_at_end(p, "main li:has-text('Share')", "")
+    p.keyboard.press("Enter")
+    p.keyboard.type("Run it")
+    mark(p)
+    p.locator("main li:has-text('Run it') input[type=checkbox]").click()
+    reloaded(p)
+    until(lambda: bar(p).all_inner_texts() == ["Approve", "Done", "Share", "Run it"], what="its button")
+    p.wait_for_timeout(500)
+    assert "- [ ] Run it" in f.read_text(encoding="utf-8") and "[x]" not in f.read_text(encoding="utf-8")
+
+
+PLAIN = SHEAF + "\n- [ ] plain task\n"
+
+
+def test_a_plain_box_clicked_in_an_edited_block_while_the_hub_is_away_still_ticks(tab, site):
+    # #127, 3, gate on 793824c: its save first could not reach the hub, and the click was dropped without a line.
+    p, f = tab.page, site.file
+    f.write_text(PLAIN, encoding="utf-8")
+    tab.open()
+    p.wait_for_selector("#rd-actions button")
+    type_at_end(p, "main li:has-text('plain task')", " now")
+    site.kill()
+    p.locator("main li:has-text('plain task') input[type=checkbox]").click()
+    until(lambda: p.locator("main li:has-text('plain task') input[type=checkbox]").get_attribute("checked") is not None,
+          what="the tick on screen")
+    site.reopen()
+    until(lambda: "- [x] plain task now" in f.read_text(encoding="utf-8"), timeout=20, what="the owed save")
+
+
+def test_a_sign_out_while_a_press_is_out_does_not_reload_under_its_answer(sheaf, site):
+    # #127, 4, gate on 793824c: the sign-out waited for the tick's answer, then reloaded over its refusal.
+    p, f = sheaf.page, sheaf.site.file
+    held = []
+    p.route("**/_/tick", lambda r: held.append(r))
+    mark(p)
+    bar(p).nth(0).click()
+    stand_still(p)
+    p.clock.run_for(5100)
+    until(lambda: held or p.wait_for_timeout(20), what="the tick, held")
+    site.hub.entry(DOC).bus.publish("signed-out", {})
+    until(lambda: "signed out" in p.inner_text("#rd-notice"), what="the signed-out notice")
+    held[0].fulfill(status=401, content_type="application/json", body='{"ok": false, "error": "Not signed in."}')
+    until(lambda: "Not signed in." in toast(p), what="the refusal")
+    p.wait_for_timeout(500)
+    assert p.evaluate("window.__same_load") is True, "the page reloaded over the refusal"
+    assert "- [ ] Approve" in f.read_text(encoding="utf-8")

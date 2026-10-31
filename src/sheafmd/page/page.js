@@ -812,7 +812,7 @@
   // answers `again` if it took it and writes it once if it did not, so a block the page split is not split
   // twice and the save after it names it (`saved`) whatever was typed meanwhile. The draft holds the id of
   // the save whose text it is (editDraftMirror), for a page that is gone by then.
-  var saving = null, asTmr = null, autosaveOwed = false, unanswered = null;
+  var saving = null, asTmr = null, autosaveOwed = false, unanswered = null, reloadsAsked = 0;
   function sentEdits(sent) {
     return sent.map(function (x) {
       var e = { i: x.b.i, html: x.html };
@@ -866,6 +866,7 @@
         sent.forEach(function (x) { x.b.pristine = x.html; x.b.ownSave = kept ? x.html : null; });
         editDraftMirror();
         reload = reload || !!(j.remap || j.merged);
+        if (j.remap || j.merged) reloadsAsked++;      // tickBox: this save's answer brought no actions
         conflicts = conflicts.concat(j.conflicts || []);
         if (!again || !dirty().length) break;
       }
@@ -2754,11 +2755,14 @@
   // the block is saved first, and the answer's actions say whether the box is one (SPEC 10.11). A save that brings a
   // reload (merged or remapped) brings none: the box is left for the page that follows. Ticks alone make no action.
   var unticked = function (html) { return html.replace(/(<input\b[^>]*?) checked=""/g, '$1'); };
+  // A save the hub could not be reached for is owed (payOwed), and the box ticks as before: as far as the page
+  // knows it is a plain box, and the owed save carries its tick, which the hub judges.
   async function tickBox(t, b) {
     if (unticked(ser(b)) !== unticked(b.pristine)) {
-      if (!(await save(true)) || stale || dead || !main.contains(t)) return;
-      if (isActBox(t)) { say(PRESS_IT); return; }
-      if (hash !== actsHash && !(actsOwed && actsOwed.hash === hash)) {
+      var asked = reloadsAsked, ok = await save(true);
+      if ((!ok && !autosaveOwed) || stale || docGone || !main.contains(t)) return;
+      if (ok && isActBox(t)) { say(PRESS_IT); return; }
+      if (ok && (reloadsAsked !== asked || (hash !== actsHash && !(actsOwed && actsOwed.hash === hash)))) {
         say('The page is reloading onto a change to the file: tick it once it has.');
         return;
       }
@@ -3191,8 +3195,9 @@
     var meetSignOut = function () {
       if (docGone) return;
       stopped = true;
-      if (writes) { afterWrites.push(meetSignOut); return; }
       // A press waits or is out (SPEC 10.11): its answer, a refusal now, is said on this page, not lost to a reload.
+      // Its tick counts in `writes`, whose wait would end after the press is done: so it is asked first.
+      if (writes && !pressOpen) { afterWrites.push(meetSignOut); return; }
       if (dirty().length || writingNow({ page: true }) || pressOpen) {
         hubLine = true;         // the hub's voice: a hello clears it (clearHubLine)
         showNoticeOverOffer(CFG.proxy ? 'You were signed out of this site. Your edits are safe on screen. Sign ' +

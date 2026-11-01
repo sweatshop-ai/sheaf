@@ -410,7 +410,9 @@ class Commits:
                 record("commit-failed", address, error="the index could not be put back")
             return False
         who = []
-        if _git(folder, "config", "user.email").returncode != 0:
+        # Either one missing and git refuses the commit (`user.useConfigOnly`, no name from the account): the
+        # hub commits as itself then, never half as the repo's committer (#38).
+        if any(_git(folder, "config", f"user.{k}").returncode != 0 for k in ("name", "email")):
             who = ["-c", f"user.name={COMMITTER[0]}", "-c", f"user.email={COMMITTER[1]}"]
         if not author.email:
             mail = _git(folder, "config", "user.email")

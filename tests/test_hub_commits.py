@@ -1393,7 +1393,7 @@ def test_a_git_that_times_out_puts_back_what_was_staged_and_leaves_no_lock(box, 
     def killed(folder, *args, **kw):
         if step in args and "--" in args:
             if step == "add":
-                real(folder, *args, **kw)                  # killed once it staged the write: the index is its
+                real(folder, *args, **kw)                  # killed after it staged the write
             (sheaves / ".git" / "index.lock").write_text("", encoding="utf-8")   # what a SIGKILL leaves
             raise subprocess.TimeoutExpired(args, 20)
         return real(folder, *args, **kw)
@@ -1405,7 +1405,6 @@ def test_a_git_that_times_out_puts_back_what_was_staged_and_leaves_no_lock(box, 
     assert not (sheaves / ".git" / "index.lock").exists()
     assert "Staged by hand" in git(sheaves, "show", ":acme/blog/2026-10-28-plan.md")
     assert git(sheaves, "diff", "--cached", "--name-only") == "acme/blog/2026-10-28-plan.md\n"
-
 
 
 def test_a_repo_with_an_email_but_no_name_commits_as_sheaf(box, sheaves, remote):

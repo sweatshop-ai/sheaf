@@ -381,13 +381,13 @@ class Commits:
             return False
         before = _staged(folder, paths)
         lock = _git(folder, "rev-parse", "--path-format=absolute", "--git-path", "index.lock").stdout.strip()
-        locked = bool(lock) and os.path.lexists(lock)
+        held_before = bool(lock) and os.path.lexists(lock)
         try:
             return self._add_and_commit(folder, paths, before, author, subject, address, record)
         except subprocess.TimeoutExpired as e:
             # The git killed on its bound left its lock, and the index as far as it got (#38). A lock there before
             # the add is another git's (the add then fails on it, no timeout), so it is never taken away.
-            if lock and not locked:
+            if lock and not held_before:
                 try:
                     os.unlink(lock)
                 except FileNotFoundError:

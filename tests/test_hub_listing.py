@@ -350,6 +350,7 @@ def test_a_tracked_file_under_a_folder_that_became_a_link_into_the_roots_sheaf_f
     (r.path / "docs").symlink_to(r.path / ".sheaf" / "versions" / "0123456789abcdef")
     assert listed(r) == ["a.md"]
 
+
 @pytest.mark.parametrize("kind", ["git", "plain"])
 def test_a_symlink_that_stays_inside_the_root_is_listed(tmp_path, kind):
     r = (roots.Root("proj", make_repo(tmp_path / "proj"), True) if kind == "git"

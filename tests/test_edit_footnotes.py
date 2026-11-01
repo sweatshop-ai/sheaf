@@ -117,3 +117,43 @@ def test_a_label_with_a_space_keeps_its_label():
     out, rep = edit(doc, 1)
     assert rep["skipped"] == []
     assert out == doc.replace("A here", "A there")
+
+
+def test_a_save_that_changes_a_blocks_citations_makes_the_page_reload_onto_the_new_numbers():
+    # Opus review 1, P1: the page kept #fn2 for P2 after its own save took P1's citation away; the next
+    # save then read #fn2 in a text where it is [^c]. The remap makes the page reload (and merge until then).
+    doc = "# T\n\nP1 has a[^a].\n\nP2 has b[^b].\n\nP3 has c[^c].\n\n[^a]: note A\n\n[^b]: note B\n\n[^c]: note C\n"
+    p1, p2 = page_paragraph(doc, 0), page_paragraph(doc, 1)
+    text1, rep1 = rde.apply_edits(doc, [{"i": 1, "html": re.sub(r'<a href="#fn1"[\s\S]*?</a>', "", p1)}])
+    assert text1 == doc.replace("a[^a].", "a.") and rep1["remap"]
+    # until the reload, the page keeps the hash of the text it shows, so its next save is merged against it
+    text2, _ = rde.merge_edits(doc, text1, [{"i": 2, "html": p2.replace("has b", "has bb")}])
+    assert text2 == text1.replace("has b[^b]", "has bb[^b]")
+
+
+def test_a_save_that_keeps_a_blocks_citations_does_not_reload_the_page():
+    doc = "# T\n\nA here[^1].\n\n[^1]: the note\n"
+    _, rep = edit(doc, 1)
+    assert rep["remap"] is False
+
+
+def test_a_mounted_pages_ref_keeps_its_label():
+    # Opus review 1, P2: mount.js gives every fragment link its own prefix (`u-`)
+    doc = "# T\n\nB first[^z].\n\nA here[^note].\n\n[^note]: named\n\n[^z]: zed\n"
+    frag = page_paragraph(doc, 1).replace("here", "there").replace('href="#fn', 'href="#u-fn')
+    out, rep = rde.apply_edits(doc, [{"i": 2, "html": frag}])
+    assert rep["skipped"] == [] and out == doc.replace("A here", "A there")
+
+
+def test_a_tab_before_a_citation_does_not_shift_it_onto_another_label():
+    # Opus review 1, P3: pandoc's columns count a tab to the next stop of 4; [^u] has no definition, so is words
+    doc = "# T\n\na\ta\t[^p][^q][^u] here.\n\n[^p]: note P\n\n[^q]: note Q\n"
+    out, rep = edit(doc, 1)
+    # pandoc writes the tabs as spaces and the undefined [^u] as words, as it does without a footnote
+    assert rep["skipped"] == [] and out == doc.replace("a\ta\t[^p][^q][^u] here", "a a [^p][^q]\\[^u\\] there")
+
+
+def test_a_label_with_a_double_quote_beside_raw_inline_html_keeps_its_label():
+    doc = '# T\n\nA <kbd>K</kbd> here[^a"b].\n\n[^a"b]: note\n'
+    out, rep = edit(doc, 1)
+    assert rep["skipped"] == [] and out == doc.replace("A <kbd>K</kbd> here", "A <kbd>K</kbd> there")

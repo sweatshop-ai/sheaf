@@ -16,6 +16,7 @@ import contextvars
 import os
 import re
 from collections import Counter
+from functools import lru_cache
 from html import escape as html_escape, unescape as html_unescape
 from typing import NamedTuple
 
@@ -1165,7 +1166,10 @@ def _tags_as_text(content: str, fragment: str, token):
 # writes `[^label]` where the ref was. A ref with no label is refused, never written as an empty note.
 
 NOTE_REF_RE = re.compile(r'<a\b(?=[^>]*\bclass="[^"]*\bfootnote-ref\b)[^>]*>[\s\S]*?</a>')
-NOTE_NAME_RE = re.compile(r'^<a\b[^>]*\bdata-rd-note="([^"]*)"')
+# A name keeps its quotes as `_name_notes` wrote them, or a parser's: BeautifulSoup writes one that holds `"` in `'`.
+NOTE_NAME_RE = re.compile(r'^<a\b[^>]*\bdata-rd-note=(?:"([^"]*)"|\'([^\']*)\')')
+# A ref's number on the page: `#fn3`, or `#u-fn3` on a mounted page (mount.js gives every fragment its prefix).
+NOTE_NUMBER_RE = re.compile(r'\bhref="#(?:u-)?fn(\d+)"')
 NOTE_DEF_RE = re.compile(r"^ {0,3}\[\^[^\]\n]+\]:", re.M)
 CITED_RE = re.compile(r"\[\^([^\]\n]+)\]")
 # A citation in pandoc's sourcepos render: where it is in the source, and its number on the page. In a tight
@@ -1173,16 +1177,22 @@ CITED_RE = re.compile(r"\[\^([^\]\n]+)\]")
 CITED_AT_RE = re.compile(r'data-pos="(\d+):(\d+)-(\d+):(\d+)"(?: data-pos="[^"]*")*><a href="#fn(\d+)" class="footnote-ref"')
 
 
+@lru_cache(maxsize=8)
 def _note_labels(text: str) -> dict:
-    """{page number: source label} for each citation of `text`, numbered as the page numbers them."""
+    """{page number: source label} for each citation of `text`, numbered as the page numbers them. Kept for the
+    last few texts: a page that types on saves against one text again and again. The caller never changes it."""
     r = _pandoc.run(["-f", "gfm+sourcepos", "-t", "html5", "--wrap=none"], text)
     if r.returncode != 0:
         return {}
     lines, labels = text.split("\n"), {}
     for m in CITED_AT_RE.finditer(r.stdout):
         l1, c1, l2, c2, n = map(int, m.groups())
-        cited = CITED_RE.fullmatch(lines[l1 - 1][c1 - 1:c2 - 1]) if l1 == l2 <= len(lines) else None
-        if cited:
+        if l1 != l2 or l1 > len(lines):
+            continue
+        # Pandoc's columns count a tab to the next stop of 4: the citation is the one that starts at that column.
+        line = lines[l1 - 1]
+        cited = next((x for x in CITED_RE.finditer(line) if len(line[:x.start()].expandtabs(4)) + 1 == c1), None)
+        if cited and len(line[:cited.end()].expandtabs(4)) + 1 == c2:
             labels[n] = cited.group(1)
     return labels
 
@@ -1197,8 +1207,8 @@ def _name_notes(text: str, edits) -> list:
     labels = _note_labels(text)
 
     def name(m):
-        ref = re.sub(r'\s+data-rd-note="[^"]*"', "", m.group(0))
-        n = re.search(r'\bhref="#fn(\d+)"', ref)
+        ref = re.sub(r'\s+data-rd-note=(?:"[^"]*"|\'[^\']*\')', "", m.group(0))
+        n = NOTE_NUMBER_RE.search(ref)
         label = labels.get(int(n.group(1))) if n else None
         if label is None:
             return ref
@@ -1213,7 +1223,7 @@ def _notes_as_tokens(fragment: str, token):
 
     def swap(m):
         name = NOTE_NAME_RE.match(m.group(0))
-        cited = f"[^{html_unescape(name.group(1))}]" if name else ""
+        cited = f"[^{html_unescape(name.group(1) if name.group(1) is not None else name.group(2))}]" if name else ""
         if not CITED_RE.fullmatch(cited):
             raise EditError("block cites a footnote the edit cannot name; edit it in the .md")
         t = token()
@@ -1379,6 +1389,7 @@ def apply_edits(md_text: str, edits, _tomb: str = "", _span: int = 1, _named: bo
     `merge_edits` too: its footnote refs are named already, against the base (`_name_notes`).
     """
     blocks = split_md_blocks(md_text)
+    cited = [CITED_RE.findall(b.content) for b in blocks]
     changed, skipped, deleted, dropped, toggled = [], [], [], {}, {}
 
     for e in (edits if _named else _name_notes(md_text, edits)):
@@ -1447,6 +1458,9 @@ def apply_edits(md_text: str, edits, _tomb: str = "", _span: int = 1, _named: bo
     # paragraphs). That invalidates every index the open page is holding, so the
     # caller has to make the page reload rather than let it save against stale ids.
     remap = len(split_md_blocks(new_text)) != len(blocks)
+    # So does a save that took a footnote citation from a block, or put one in: the page numbers each citation
+    # by its place in the document (`_name_notes`), and the refs after it now have other numbers.
+    remap = remap or any(CITED_RE.findall(blocks[i].content) != cited[i] for i in changed)
     return new_text, {"changed": changed, "skipped": skipped, "remap": remap, "deleted": deleted,
                       "toggled": list(toggled.values())}
 

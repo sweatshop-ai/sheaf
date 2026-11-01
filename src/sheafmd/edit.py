@@ -902,7 +902,16 @@ def _texts(soup) -> list:
 # Where an edit changed more words than this, a closing tag with no opener in the changed words goes
 # where the change begins: a diff of a longer stretch costs seconds.
 LONE_DIFF_MAX = 2000
+LONE_CONTEXT = 40
 _ENCLOSED = ("code", "pre")
+# A comment's placeholder (`_convert_with_comments`) is text on the page side only.
+_COMMENT_TOKEN = re.compile("(?<!\u27e6)RDCMT[0-9A-F]{10}(?!\u27e7)")
+
+
+def _kept(s: str) -> list:
+    """The indices of the characters of `s` that are words, not a comment's placeholder."""
+    drop = {i for m in _COMMENT_TOKEN.finditer(s) for i in range(m.start(), m.end())}
+    return [i for i in range(len(s)) if i not in drop]
 
 
 def _enclosing(t):
@@ -950,7 +959,7 @@ def _lone_as_text(soup, lone, doc, token) -> dict:
         at.append((len(old), str(t), before is not None, climb))
     # A line break of the render and of the page is a space to the diff.
     old = re.sub(r"\s", " ", old)
-    new = re.sub(r"\s", " ", "".join(_texts(soup)))
+    new = re.sub(r"\s", " ", "".join(_COMMENT_TOKEN.sub("", t) for t in _texts(soup)))
     pre = 0
     while pre < min(len(old), len(new)) and old[pre] == new[pre]:
         pre += 1
@@ -967,6 +976,11 @@ def _lone_as_text(soup, lone, doc, token) -> dict:
             return o + len(new) - len(old)
         a0, b0, a1, b1 = pre, pre, len(old) - suf, len(new) - suf
         if max(a1 - a0, b1 - b0) > LONE_DIFF_MAX:
+            # Two edits far apart: the words around it, if they are there once.
+            left, right = old[max(a0, o - LONE_CONTEXT):o], old[o:o + LONE_CONTEXT]
+            for ctx, off in ((left + right, len(left)), (left, len(left)), (right, 0)):
+                if ctx and new.count(ctx, b0, b1) == 1:
+                    return new.index(ctx, b0, b1) + off
             return pre
         if same is None:
             same = [m for m in difflib.SequenceMatcher(None, old[a0:a1], new[b0:b1], autojunk=False)
@@ -986,9 +1000,12 @@ def _lone_as_text(soup, lone, doc, token) -> dict:
                                              key=lambda x: x[0])):
         cum, spot = 0, None
         for t in _texts(soup):
-            n = len(t)
+            kept = _kept(str(t))
+            n = len(kept)
             if back and o > 0 and cum < o <= cum + n or not (back and o > 0) and cum <= o < cum + n:
-                spot = t, o - cum
+                j = o - cum
+                # Right after the words before it, or right before the words after it.
+                spot = t, (kept[j - 1] + 1 if j > 0 and back else kept[j] if j < n else len(t))
                 break
             cum += n
         if spot is None:

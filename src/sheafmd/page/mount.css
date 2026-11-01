@@ -1,4 +1,7 @@
 :host { display: block; contain: content; }
+/* The scheme where the loader sets none on the host: the OS's, as the list's own colours (#169). In a layer, so a
+   theme's own :host (its :root, in /_/mount?doc=) still wins, and so does the host's style from the front. */
+@layer sheaf-fallback { :host { color-scheme: light dark; } }
 /* The wrapper is the page's body and its scroller: the host holds it at the pane's height, and `contain` on the host makes
    the page's position:fixed parts (the menu button, the panel, the toast) the pane's, not the front's window's.
    page.css follows this file in /_/mount.css. */

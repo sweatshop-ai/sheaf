@@ -940,6 +940,19 @@ def doc_header(frag: str, by: str, for_: str | None) -> str:
     return frag[:at] + head + frag[at:]
 
 
+# A mounted page's styles sit in a shadow root, which holds no `html`, `:root` or `body` (#116): a selector that starts
+# with one of them is moved to the host (the theme's variables) or to the wrapper `.rd-root`, which stands where the body
+# stands on a page of its own. `rem` still resolves against the front's `html`, so the root font size is
+# the front's. Comments go first, so a word in one is never read as a selector.
+_MOUNT_TOP_RE = re.compile(r"(^|[{},]\s*)(?::root|html)(?=[\s{,>+~:\[.#]|$)")
+_MOUNT_BODY_RE = re.compile(r"(^|[{},]\s*)body(?=[\s{,>+~:\[.#]|$)")
+
+
+def mount_css(css: str) -> str:
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    return _MOUNT_BODY_RE.sub(r"\1.rd-root", _MOUNT_TOP_RE.sub(r"\1:host", css))
+
+
 def _page_asset(name: str) -> str:
     return (resources.files("sheafmd") / "page" / name).read_text(encoding="utf-8")
 
@@ -962,8 +975,13 @@ def build(md: Path, *, theme: Theme, share: bool = True, title: str | None = Non
           toc: str = "auto", max_image_width: int = 1400, by: str = "",
           for_: str | None = None, credit: bool = False, link_rule: bool = True,
           link_tlds=(), log: list[str], src: str | None = None, warn=None,
-          extra_meta: dict | None = None, script_nonce: str | None = None, image_ok=None) -> str:
+          extra_meta: dict | None = None, script_nonce: str | None = None, image_ok=None,
+          mount: bool = False) -> str:
     """The HTML of `md`, as a share copy (`share=True`) or as the page.
+
+    `mount=True` (never with `share`) is the page for the front's document (#116): the body through the
+    sanitiser's mount mode, answered as JSON {title, toc, html, config, css} for page/mount.js to rebuild,
+    with no `<html>`, no script and no page.css (the hub serves those as files).
 
     `log` collects the render log: "  +" added, "  !" warning, "  -" removed.
     `warn(text)` receives the link-rule warning; the hub's re-renders after a save
@@ -977,6 +995,8 @@ def build(md: Path, *, theme: Theme, share: bool = True, title: str | None = Non
     if src is None:
         src = md.read_text(encoding="utf-8")
     original = src
+    if mount and share:
+        raise ValueError("a mounted page is never a share copy")
     if share:
         # A reviewer's comment that lost its closing arrow is never stripped-and-
         # warned: here a later arrow would close it for the strip and take the text
@@ -1034,7 +1054,7 @@ def build(md: Path, *, theme: Theme, share: bool = True, title: str | None = Non
     if open_element:
         log.append(f"  ! line {open_element[1]}: <{open_element[0]}> is never closed, so the text "
                    "after it is removed from the document too")
-    frag = sanitizer.sanitize(frag, comments=not share, log=log)
+    frag = sanitizer.sanitize(frag, comments=not share, log=log, mount=mount)
 
     # 5. Headings h1 to h4: ids, flags, the table of contents.
     slug, toc_rows, first_h1, first_head = slugger(), [], [], []
@@ -1124,6 +1144,7 @@ def build(md: Path, *, theme: Theme, share: bool = True, title: str | None = Non
             "malformed": [{"line": m.line, "reason": m.reason} for m in parsed.malformed],
             **(extra_meta or {}),
         }
+        doc_css = css
         css += "\n" + _page_asset("page.css")
         # "<" escaped: comment text is in here, and a comment holding "</script>"
         # would otherwise end this element and put the rest of it into the page.
@@ -1135,6 +1156,10 @@ def build(md: Path, *, theme: Theme, share: bool = True, title: str | None = Non
             log.append("  + export only: no in-page editing")
         else:
             log.append(f"  + edit mode, {len(meta['editable'])}/{len(blocks)} blocks editable")
+
+    if mount:
+        return json.dumps({"title": title, "toc": bool(want_toc), "html": f"{nav}<main>{mark}{frag}{tail}</main>",
+                           "config": meta, "css": mount_css(fonts + doc_css)})
 
     out = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -1164,7 +1189,8 @@ def render_file(path, *, share: bool = True, theme=None, title: str | None = Non
                 for_: str | None = None, credit: bool | None = None, log: list[str] | None = None,
                 warn=None,
                 src: str | None = None, extra_meta: dict | None = None,
-                root: Path | None = None, script_nonce: str | None = None, image_ok=None) -> str:
+                root: Path | None = None, script_nonce: str | None = None, image_ok=None,
+                mount: bool = False) -> str:
     """Everything `sheafmd.render` does, plus the arguments only the CLI and the hub
     use (`warn`, `src`, `extra_meta`, `root`, `script_nonce`, `image_ok`). Reads the root's `.sheaf.toml` itself:
     `for`, `links`, `link_tlds`, `credit` and the theme.
@@ -1184,7 +1210,7 @@ def render_file(path, *, share: bool = True, theme=None, title: str | None = Non
                      for_=for_ if for_ is not None else rc.for_,
                      credit=rc.credit if credit is None else credit,
                      link_rule=rc.links, link_tlds=rc.link_tlds, log=log, src=src,
-                     warn=warn, extra_meta=extra_meta, script_nonce=script_nonce, image_ok=image_ok)
+                     warn=warn, extra_meta=extra_meta, script_nonce=script_nonce, image_ok=image_ok, mount=mount)
     if own:
         import sys
         for line in log:

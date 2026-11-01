@@ -1810,3 +1810,85 @@ def test_the_rows_title_holds_no_comment_of_the_h1(box, sheaves):
                                             ("a <!---> b --> c", "a b --> c")])
 def test_only_what_commonmark_reads_as_a_comment_leaves_the_title(heading, title):
     assert the_list.read_sheaf("x/y/z.md", f"# {heading}\n").title == title
+
+
+# ── the list mounted in the front's document (#116 step 2, slice iv) ──────────────
+
+def mounted(res):
+    """The mounted list's data read the way `read` reads the page: each section's heading, then each group's rows."""
+    assert res.status == 200, res.text
+    got = res.json()
+    out = {}
+    for section in got["list"]["sections"]:
+        groups = {}
+        for group in section["groups"]:
+            groups[group["name"]] = [
+                (" ".join([r["title"]] + [a["label"] for a in r["actions"]] + ([r["assistant"]] if r["assistant"] else [])),
+                 r["meta"]) for r in group["rows"]]
+        out[f'{section["title"]} {section["count"]}'] = groups
+    return out
+
+
+@pytest.mark.parametrize("show", ["", "mine", "all"])
+def test_the_mounted_list_is_the_rows_the_page_shows_as_data(box, show):
+    page = box.get("/list" + (f"?show={show}" if show else ""), member=NELL)
+    got = box.get("/_/mount?list=list" + (f"&show={show}" if show else ""), member=NELL)
+    assert mounted(got) == read(page)
+    j = got.json()
+    assert j["kind"] == "list" and j["title"] == "Actions" and j["version"] == box.hub.version
+    assert "html" not in j                       # no markup: the front builds every node from text (layer b)
+    assert got.headers["X-Content-Type-Options"] == "nosniff"
+
+
+def test_the_mounted_lists_buttons_and_links_are_the_pages(box):
+    j = box.get("/_/mount?list=list", member=NELL).json()["list"]
+    rows = [r for s in j["sections"] for g in s["groups"] for r in g["rows"]]
+    assert [r["href"] for r in rows] == ["/list/globex/black-friday/2026-10-28-reply-to-joey.md",
+                                         "/list/initech/website/2026-10-27-ga4-property.md",
+                                         "/list/initech/website/2026-10-26-prep-thursday.md"]
+    page = buttons(box.get("/list", member=NELL))
+    data = [(r["href"], a["doc"], str(a["n"]), a["word"], "toggle" if a["toggle"] else "one-off", a["label"])
+            for r in rows for a in r["actions"]]
+    assert data == [tuple(b) for b in page]
+    assert all(a["hash"] for r in rows for a in r["actions"])
+    assert [(f["label"], f["href"], f["on"]) for f in j["filters"]] == [
+        ("My projects", "/list", True), ("Only mine", "/list?show=mine", False), ("All of the team", "/list?show=all", False)]
+
+
+def test_the_mounted_list_is_a_members_alone_and_only_of_the_lists_root(box, browser, tmp_path):
+    assert box.get("/_/mount?list=nolist", member=NELL).status == 404
+    assert browser.get("/_/mount?list=list", cookie=False, key=True).status == 404      # the hub's key is no member
+    other = tmp_path / "other"
+    other.mkdir()
+    cfg = box.hub.proxy
+    box.hub.proxy = proxy.parse({"origin": FRONT, "socket": str(cfg.socket), "proxy_user": cfg.proxy_user,
+                                 "members": {DORA: {"name": "Dora", "short": "dora", "roots": [str(other)]}}},
+                                "the test")
+    assert box.get("/_/mount?list=list", member=DORA).status == 404
+
+
+def test_a_title_with_markup_reaches_the_mount_as_its_text(box, sheaves):
+    joey = sheaves / JOEY[5:]
+    joey.write_text(joey.read_text(encoding="utf-8").replace(
+        "# Reply to Joey about column L", "# Reply <img src=/x onerror=alert(1)> & co"), encoding="utf-8")
+    box.hub.the_list.poll()
+    j = box.get("/_/mount?list=list", member=NELL).json()["list"]
+    titles = [r["title"] for s in j["sections"] for g in s["groups"] for r in g["rows"]]
+    assert "Reply <img src=/x onerror=alert(1)> & co" in titles
+
+
+def test_the_list_script_and_style_are_files_the_mount_assets_carry(box, browser):
+    page = box.get("/list", member=NELL).text
+    js = browser.get("/_/mount.js", cookie=False).text
+    css = browser.get("/_/mount.css", cookie=False).text
+    assert "sheafList" in js and "sheafList" in page
+    assert ".sheaf-list" in css and ".sheaf-list" in page
+
+
+def test_a_member_on_the_proxy_gets_the_mount_assets(box):
+    """The front loads `/_/mount.js` and `/_/mount.css` through the proxy, as a member: the open routes the proxy
+    otherwise refuses to members."""
+    for path, kind in (("/_/mount.js", "text/javascript"), ("/_/mount.css", "text/css")):
+        r = box.get(f"{path}?v={box.hub.version}", member=NELL)
+        assert r.status == 200 and r.headers["Content-Type"].startswith(kind), (path, r.status)
+    assert box.get("/_/health", member=NELL).status == 404          # the other open routes stay off the proxy

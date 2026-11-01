@@ -37,7 +37,7 @@ def test_unsaved_edits_and_a_comment_being_written_are_never_reloaded_over():
     guard = f.index("dirty().length")
     assert guard < f.index("reloadKeep(")              # the guard is checked first
     assert "showNoticeOverOffer(" in f[guard:f.index("reloadKeep(")]
-    assert "location.reload" not in f                  # only reloadKeep, which keeps scroll and caret
+    assert "location.reload" not in f and "reloadPage" not in f      # only reloadKeep, which keeps scroll and caret
 
 
 def test_a_comment_being_written_is_a_form_with_text_in_it_and_not_a_kept_comment():
@@ -54,14 +54,14 @@ def test_signed_out_is_handled_by_the_sign_out_check():
 def test_a_tab_with_nothing_only_on_screen_reloads_into_the_sign_in_page():
     f = body_of("var meetSignOut = function")
     guard = f.index("dirty().length")
-    assert "writingNow({ page: true })" in f[:f.index("location.reload()")]
-    assert guard < f.index("location.reload()")        # the guard comes first
+    assert "writingNow({ page: true })" in f[:f.index("reloadPage()")]
+    assert guard < f.index("reloadPage()")        # the guard comes first
     assert "stopped = true" in f                       # the "hub unreachable" toast stays quiet
 
 
 def test_a_tab_with_unsaved_work_keeps_it_and_says_how_to_sign_in_again():
     f = body_of("var meetSignOut = function")
-    notice = f[f.index("showNoticeOverOffer("):f.index("location.reload()")]
+    notice = f[f.index("showNoticeOverOffer("):f.index("reloadPage()")]
     assert "sheaf open" in notice and "on screen" in notice
 
 

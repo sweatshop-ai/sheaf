@@ -1,0 +1,15 @@
+# What each version of sheaf serves as /_/mount.js and /_/mount.css (#172): `<version> <asset> <sha256>`, the
+# sha256 of the joined files (handler.MOUNT_ASSETS) before the version is written into mount.js.
+#
+# A browser keeps an asset asked with `?v=<version>` for a year, so a version serves one body forever. Never
+# change a line: when a test says an asset changed, raise __version__ in src/sheafmd/__init__.py and add
+# that version's lines below.
+#
+# 1.0.1 as the deployed hub serves it, at 8a15c7b; 1.0.1 served other bodies before that, from f3c500d4
+# on, unrecorded. #152 changed mount.css after it under the same version.
+1.0.1 mount.js c011a5a5481a7065fd3f4f68e08b13d16acdfbb1b99520b07cec1c4174f95c01
+1.0.1 mount.css 2967b2ee073bf5835bcff3126f3ee2bf2ab478ad79e942b3bd9e4685aa1940b5
+#
+# 1.0.2: #152's --front-font rule in mount.css, and #169's scheme reds in mount.css, page.css and list.css.
+1.0.2 mount.js c011a5a5481a7065fd3f4f68e08b13d16acdfbb1b99520b07cec1c4174f95c01
+1.0.2 mount.css 98443fd64b8539d09bf1fdcb1afb28edf4875966038c6b71a084e4c549c843da

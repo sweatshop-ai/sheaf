@@ -123,6 +123,19 @@ def test_the_list_mounts_in_the_closed_root_with_the_rows_buttons_and_filters_of
     assert m.js("return getComputedStyle(root.querySelector('.list-act.one-off')).borderTopLeftRadius;") == "999px"
 
 
+def test_the_mounted_list_wears_the_fronts_font_once_the_loader_sets_it_on_the_host(mounted):
+    """#152's gap: the loader sets `--front-font` on the host of a list as of a page, and the list's wrapper takes it as
+    its family, its buttons with it (`font:inherit`). Taken off again, the list's own comes back."""
+    m = mounted
+    of = "return [root.querySelector('.rd-root'), root.querySelector('.list-act')].map((e) => getComputedStyle(e).fontFamily);"
+    own = m.js(of)
+    assert "system-ui" in own[0], own
+    m.page.evaluate("document.getElementById('pane').style.setProperty('--front-font', '\"Front Sans\", serif')")
+    assert m.js(of) == ['"Front Sans", serif'] * 2
+    m.page.evaluate("document.getElementById('pane').style.removeProperty('--front-font')")
+    assert m.js(of) == own
+
+
 def test_a_press_waits_five_seconds_with_undo_then_ticks_and_remounts_without_the_row_not_reloading_the_front(
         mounted, sheaves):  # noqa: F811
     m = mounted

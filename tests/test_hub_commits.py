@@ -1406,3 +1406,14 @@ def test_a_git_that_times_out_puts_back_what_was_staged_and_leaves_no_lock(box, 
     assert "Staged by hand" in git(sheaves, "show", ":acme/blog/2026-10-28-plan.md")
     assert git(sheaves, "diff", "--cached", "--name-only") == "acme/blog/2026-10-28-plan.md\n"
 
+
+
+def test_a_repo_with_an_email_but_no_name_commits_as_sheaf(box, sheaves, remote):
+    """#38: the hub's committer stood in only for a missing `user.email`; with no `user.name` either git refused."""
+    git(sheaves, "config", "--unset", "user.name")
+    git(sheaves, "config", "user.useConfigOnly", "true")
+    edit(box, sheaves)
+    assert rows("commit-failed") == []
+    (who, _), _ = pushed(box, remote)
+    assert who.startswith("Bea <bea@example.com>|")
+    assert git(remote, "log", "-1", "--format=%cn <%ce>", "main") == "sheaf <sheaf@localhost>\n"

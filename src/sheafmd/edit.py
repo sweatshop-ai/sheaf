@@ -837,32 +837,43 @@ MARKDOWN_TAGS = frozenset({
 TAG_RE = re.compile(r"^<(/?)([A-Za-z][A-Za-z0-9-]*)\b[^>]*?(/?)>$")
 
 
-def _raw_tags(content: str) -> list:
-    """The raw inline tags of a block's source, in order: (name, opening tag, closing tag or "")."""
+def _raw_tags(content: str):
+    """The raw inline tags of a block's source, in order, as (tags, lone, doc), each tag in the source's
+    bytes: `tags` holds (name, opening tag, closing tag or "", the opening tag as the page has it);
+    `lone`, (closing tag, its node in `doc`) for each closing tag with no opener of its name; `doc`,
+    pandoc's JSON of the block."""
     import json
 
     from .sanitize import ALSO_REMOVED, REMOVE
 
     if "<" not in content:
-        return []
+        return [], [], None
     r = _pandoc.run(["-f", "gfm", "-t", "json"], content)
     if r.returncode != 0:
-        return []
-    raws = []
+        return [], [], None
+    doc = json.loads(r.stdout)
+    nodes = []
 
-    def walk(node):
+    def walk(node, in_table=False):
         if isinstance(node, dict):
             if node.get("t") == "RawInline" and node["c"][0] == "html":
-                raws.append(node["c"][1])
+                nodes.append((node, in_table))
             else:
-                walk(node.get("c"))
+                walk(node.get("c"), in_table or node.get("t") == "Table")
         elif isinstance(node, list):
             for x in node:
-                walk(x)
+                walk(x, in_table)
 
-    walk(json.loads(r.stdout)["blocks"])
-    tags, open_ = [], {}
-    for raw in raws:
+    walk(doc["blocks"])
+    tags, lone, open_, at = [], [], {}, 0
+    for node, in_table in nodes:
+        raw = seen = node["c"][1]
+        # In a table cell pandoc's RawInline has `|` where the source has `\|`, which keeps the cell
+        # whole: the tag is the source's bytes. Nowhere else does pandoc take a backslash out of a tag.
+        if in_table and "|" in raw:
+            found = re.compile(re.escape(raw).replace("\\|", r"\\?\|")).search(content, at)
+            if found:
+                raw, at = found.group(0), found.end()
         m = TAG_RE.match(raw)
         if not m:
             continue
@@ -872,12 +883,187 @@ def _raw_tags(content: str) -> list:
         if closing:
             if open_.get(name):
                 open_[name].pop()[2] = raw
+            else:
+                lone.append((raw, node))
             continue
-        tag = [name, raw, ""]
+        tag = [name, raw, "", seen]
         tags.append(tag)
         if not empty:
             open_.setdefault(name, []).append(tag)
-    return [tuple(t) for t in tags]
+    return [tuple(t) for t in tags], lone, doc
+
+
+def _texts(soup) -> list:
+    from bs4 import NavigableString
+
+    return [t for t in soup.descendants if type(t) is NavigableString]
+
+
+# Where an edit changed more words than this, a closing tag with no opener in the changed words goes
+# where the change begins: a diff of a longer stretch costs seconds.
+LONE_DIFF_MAX = 2000
+LONE_CONTEXT = 40
+_ENCLOSED = ("code", "pre")
+# A comment's placeholder (`_convert_with_comments`) is text on the page side only.
+_COMMENT_TOKEN = re.compile("(?<!\u27e6)RDCMT[0-9A-F]{10}(?!\u27e7)")
+
+
+def _kept(s: str) -> list:
+    """The indices of the characters of `s` that are words, not a comment's placeholder."""
+    drop = {i for m in _COMMENT_TOKEN.finditer(s) for i in range(m.start(), m.end())}
+    return [i for i in range(len(s)) if i not in drop]
+
+
+def _enclosing(t):
+    """The outermost code, pre or math span around `t`, or None: a tag inside one would be its words."""
+    up = [u for u in t.parents if u.name in _ENCLOSED or "math" in (u.get("class") or [])]
+    return up[-1] if up else None
+
+
+def _lone_as_text(soup, lone, doc, token) -> dict:
+    """Each closing tag of `lone` put in `soup` as a placeholder, after the words it followed in the
+    source: {placeholder: the tag's bytes}. The browser drops a closing tag with no opener, so the
+    page holds no element for it; its place is found in the page's words, against a render of the
+    source with the tag written as its placeholder, and on the same side of the elements around it."""
+    import difflib
+    import json
+
+    from bs4 import BeautifulSoup, NavigableString
+
+    placed = {}
+    for raw, node in lone:
+        p = f"\u27e6{token()}\u27e7"
+        placed[p] = raw
+        node["t"], node["c"] = "Str", p
+    r = _pandoc.run(["-f", "json", "-t", "html5", "--no-highlight", "--wrap=none"], json.dumps(doc))
+    if r.returncode != 0:
+        return {}
+    src = BeautifulSoup(r.stdout, "html.parser")
+    for t in _texts(src):
+        parts = [x for x in re.split("(\u27e6[A-Z0-9]+\u27e7)", str(t)) if x]
+        if len(parts) > 1:
+            t.replace_with(*(NavigableString(x) for x in parts))
+    texts = _texts(src)
+    old, at = "", []
+    for i, t in enumerate(texts):
+        if str(t) not in placed:
+            old += t
+            continue
+        # How many elements close between the words before it and the tag, or, with no words before
+        # it, open between the tag and the words after it.
+        ups = {id(u) for u in t.parents}
+        before = next((x for x in reversed(texts[:i]) if str(x) not in placed), None)
+        after = next((x for x in texts[i + 1:] if str(x) not in placed), None)
+        side = before if before is not None else after
+        climb = sum(id(u) not in ups for u in side.parents) if side is not None else 0
+        # The spaces between the words before it and the tag, in the same text.
+        gap = len(before) - len(before.rstrip()) if before is not None and before.strip() else 0
+        at.append((len(old), str(t), before is not None, climb, gap))
+    # A line break of the render and of the page is a space to the diff.
+    old = re.sub(r"\s", " ", old)
+    words = [_COMMENT_TOKEN.sub("", t) for t in _texts(soup)]
+    raw = "".join(words)
+    new = re.sub(r"\s", " ", raw)
+    # Where one text of the page ends and the next begins: Enter puts a new item or line right after
+    # the old one, with no space between their words.
+    edges, cum = set(), 0
+    for w in words:
+        cum += len(w)
+        edges.add(cum)
+    pre = 0
+    while pre < min(len(old), len(new)) and old[pre] == new[pre]:
+        pre += 1
+    suf = 0
+    while suf < min(len(old), len(new)) - pre and old[-1 - suf] == new[-1 - suf]:
+        suf += 1
+    same = None
+
+    def where(o):
+        nonlocal same
+        if o <= pre:
+            return o
+        if o >= len(old) - suf:
+            return o + len(new) - len(old)
+        a0, b0, a1, b1 = pre, pre, len(old) - suf, len(new) - suf
+        if max(a1 - a0, b1 - b0) > LONE_DIFF_MAX:
+            # Two edits far apart: the words around it, if they are there once.
+            left, right = old[max(a0, o - LONE_CONTEXT):o], old[o:o + LONE_CONTEXT]
+            for ctx, off in ((left + right, len(left)), (left, len(left)), (right, 0)):
+                if ctx and new.count(ctx, b0, b1) == 1:
+                    return new.index(ctx, b0, b1) + off
+            return pre
+        if same is None:
+            same = [m for m in difflib.SequenceMatcher(None, old[a0:a1], new[b0:b1], autojunk=False)
+                    .get_matching_blocks() if m.size]
+        # After the same words when they are still there, else before the words after it when those
+        # are, else after the last words before it that are.
+        o, k = o - a0, b0
+        for a, b, n in same:
+            if a < o <= a + n:
+                return b0 + b + o - a
+            if a + n <= o:
+                k = b0 + b + n
+        return next((b0 + b for a, b, n in same if a == o), k)
+
+    def between_words(o, back, gap):
+        # The diff matches letters: where the word before it was replaced, it can point into the new
+        # word. A tag that stood between words in the source goes to the end of that word, or, with no
+        # words before it, to the start of the word after it.
+        # Enter after a word moves the space after it to the new line, as a no-break space: a tag
+        # goes with the word before it, then over as many plain spaces as it had, on the same text.
+        o -= gap
+        k = where(o)
+        if not (0 < o < len(old) and old[o - 1].isalnum() and old[o].isalnum()):
+            while 0 < k < len(new) and new[k - 1].isalnum() and new[k].isalnum() and k not in edges:
+                k += 1 if back else -1
+        for _ in range(gap):
+            if k >= len(raw) or raw[k] not in " \t\n" or k in edges:
+                break
+            k += 1
+        return k
+
+    # From the end, so that the offsets still to place stay where they were; of two at one place, the
+    # second goes first and the first lands before it.
+    for o, p, back, climb in reversed(sorted(((between_words(o, back, gap), p, back, climb)
+                                              for o, p, back, climb, gap in at), key=lambda x: x[0])):
+        cum, spot = 0, None
+        for t in _texts(soup):
+            kept = _kept(str(t))
+            n = len(kept)
+            if back and o > 0 and cum < o <= cum + n or not (back and o > 0) and cum <= o < cum + n:
+                j = o - cum
+                # Right after the words before it, or right before the words after it.
+                spot = t, (kept[j - 1] + 1 if j > 0 and back else kept[j] if j < n else len(t))
+                break
+            cum += n
+        if spot is None:
+            # The words are all gone, and the tag goes with them.
+            del placed[p]
+            continue
+        t, j = spot
+        if 0 < j < len(t):
+            t.replace_with(NavigableString(t[:j]), NavigableString(p), NavigableString(t[j:]))
+            anchor, after_it = None, True
+        else:
+            anchor, after_it = t, j > 0
+            for _ in range(climb):
+                sib = anchor.next_sibling if after_it else anchor.previous_sibling
+                if sib is not None or anchor.parent is None or anchor.parent.name == "[document]":
+                    break
+                anchor = anchor.parent
+        if anchor is None:
+            anchor = next(x for x in _texts(soup) if str(x) == p)
+            out = _enclosing(anchor)
+            if out is None:
+                continue
+            anchor.extract()
+            anchor, after_it = out, True
+        else:
+            out = _enclosing(anchor) if anchor.name is None or anchor.name not in _ENCLOSED else None
+            if out is not None:
+                anchor = out
+        (anchor.insert_after if after_it else anchor.insert_before)(p)
+    return placed
 
 
 def _html_blocks(md: str) -> int:
@@ -891,8 +1077,8 @@ def _tags_as_text(content: str, fragment: str, token):
     placeholders around its words, {placeholder: the source's bytes})."""
     from bs4 import BeautifulSoup
 
-    tags = _raw_tags(content)
-    if not tags:
+    tags, lone, doc = _raw_tags(content)
+    if not tags and not lone:
         return fragment, {}
 
     def key(el):
@@ -901,16 +1087,17 @@ def _tags_as_text(content: str, fragment: str, token):
     # An element is the source tag that says the same: same name, same attributes, the
     # first one not yet taken. Of two that differ, the one left on the page keeps its own.
     unused = []
-    for name, opening, closing in tags:
-        el = BeautifulSoup(opening, "html.parser").find(True)
+    for name, opening, closing, seen in tags:
+        el = BeautifulSoup(seen, "html.parser").find(True)
         if el is not None:
             unused.append((key(el), opening, closing))
     soup = BeautifulSoup(fragment, "html.parser")
-    placed = {}
+    placed = _lone_as_text(soup, lone, doc, token) if lone else {}
     for el in soup.find_all(True):
-        # A math span's <sup> is the render's, not a tag of the source.
+        # A math span's <sup> is the render's, not a tag of the source; a wrapper the page puts around the
+        # source's words, as `div.tblwrap` around a table, is not (#157).
         # In code, a tag is the code's words, and stays the element pandoc writes as text.
-        if _page_own(el) or any(_page_own(up) or up.name in ("code", "pre")
+        if _page_own(el) or any("math" in (up.get("class") or []) or up.name in ("code", "pre")
                                 for up in el.parents if up.name != "[document]"):
             continue
         k = key(el)

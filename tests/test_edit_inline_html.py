@@ -178,3 +178,52 @@ def test_a_raw_tag_in_a_table_the_page_wraps_in_its_tblwrap_is_kept():
 
 def test_a_pipe_in_a_raw_tags_attribute_outside_a_table_is_not_given_a_backslash():
     assert saved('A <abbr title="a|b">X</abbr> here.') == 'A <abbr title="a|b">X</abbr> there.\n'
+
+
+# Gate 1 on #157.
+
+@pytest.mark.parametrize("src", [
+    r'`<abbr title="a\|b">` and <abbr title="a|b">X</abbr> here.',
+    r'\<abbr title="a\|b"> and <abbr title="a|b">X</abbr> here.',
+])
+def test_a_pipe_outside_a_table_is_not_given_the_backslash_of_the_same_tag_written_as_text(src):
+    # Pandoc's writer escapes the text's `>` as `\>`, as on main; the tag keeps its bytes.
+    assert saved(src).endswith(' and <abbr title="a|b">X</abbr> there.\n')
+
+
+@pytest.mark.parametrize("src,html", [
+    ("Press <kbd>K</kbd></x1> now here.", "<p>Press <kbd>K</kbd> now there.</p>"),
+    ("A [a](http://u)</x1> link here.", '<p>A <a href="http://u">a</a> link there.</p>'),
+    ("An *a*</x1> here.", "<p>An <em>a</em> there.</p>"),
+    # At the start of a paragraph the tag would open an HTML block; a heading has none.
+    ("## </x1><kbd>K</kbd> first here", "<h2><kbd>K</kbd> first there</h2>"),
+])
+def test_a_closing_tag_with_no_opener_stays_outside_the_element_beside_it(src, html):
+    assert saved(src, html=html) == src.replace("here", "there") + "\n"
+
+
+def test_a_closing_tag_with_no_opener_after_math_stays_outside_the_math_span():
+    html = '<p>Area <span class="math inline"><em>x</em><sup>2</sup></span> there.</p>'
+    out = saved("Area $x^2$</x1> here.", html=html)
+    assert out.endswith("</span></x1> there.\n") and "</x1></sup>" not in out
+
+
+def test_a_closing_tag_with_no_opener_keeps_its_place_in_a_line_the_render_wraps():
+    src = "a " * 27 + "x</x1> here."
+    assert saved(src) == src.replace("here", "there") + "\n"
+
+
+def test_placing_a_closing_tag_with_no_opener_compares_only_the_words_the_edit_changed(monkeypatch):
+    # A diff of the whole block is quadratic: a paragraph of 47 KB took 54 s.
+    import difflib
+
+    sizes, real = [], difflib.SequenceMatcher
+
+    def counted(isjunk=None, a="", b="", autojunk=True):
+        sizes.append(max(len(a), len(b)))
+        return real(isjunk, a, b, autojunk)
+
+    monkeypatch.setattr(difflib, "SequenceMatcher", counted)
+    src = "word " * 8000 + "x</x1> here."
+    assert saved(src) == src.replace("here", "there") + "\n"
+    assert max(sizes, default=0) < 2100

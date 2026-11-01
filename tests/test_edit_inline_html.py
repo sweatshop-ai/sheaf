@@ -501,3 +501,32 @@ def test_a_tag_closed_past_its_container_keeps_the_source_while_the_page_element
 ])
 def test_a_tag_closed_past_its_container_and_deleted_on_the_page_takes_its_closing_tag_with_it(src, html, want):
     assert saved(src, html=html) == want
+
+
+@pytest.mark.parametrize("src,html,want", [
+    ("> Note <mark>this\n>\n> and</mark> that here.", "<blockquote>\n<p>Note <mark>this</mark></p>\n\n</blockquote>",
+     "> Note <mark>this</mark>\n"),
+    ("> Note <mark>this\n>\n> and</mark> that here.",
+     "<blockquote>\n<p>Note <mark>this</mark></p>\n<p>that here.</p>\n</blockquote>",
+     "> Note <mark>this</mark>\n>\n> that here.\n"),
+    ("- one <mark>two\n\n- three</mark> four here", "<ul>\n<li><p>one <mark>two</mark></p></li>\n\n</ul>",
+     "- one <mark>two</mark>\n"),
+    ("- a <x1>b\n- c</x1> d here", "<ul>\n<li>a <x1>b</x1></li>\n<li>d here</li>\n</ul>", "- a <x1>b</x1>\n- d here\n"),
+    ("| a | b |\n|---|---|\n| <x1>k | c</x1> d here |",
+     "<table>\n<thead>\n<tr>\n<th>a</th>\n<th>b</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><x1>k</x1></td>\n"
+     "<td>d here</td>\n</tr>\n</tbody>\n</table>", "<x1>k</x1>"),
+])
+def test_a_tag_closed_past_its_container_whose_words_after_it_went_closes_at_the_elements_end(src, html, want):
+    out = saved(src, html=html)
+    assert out == want if want.endswith("\n") else want in out and "</x1> d here |" not in out
+
+
+@pytest.mark.parametrize("src,html,want", [
+    ("*a <mark>b* c</mark> here.", "<p><em>a <mark>b</mark></em><i>z</i> c there.</p>", "<mark>b</mark>"),
+    ("**a <x1>b** c</x1> here.", "<p><strong>a <x1>b</x1></strong><b>z</b> c there.</p>", "<x1>b</x1>"),
+    ("- a <x1>b\n- c</x1> d here", "<ul><li>a <x1>b</x1>&nbsp;</li><li>c d there</li></ul>", "<x1>b</x1>\xa0"),
+])
+def test_a_tag_closed_past_its_container_closes_at_its_end_before_a_merged_emphasis_or_a_no_break_space(
+        src, html, want):
+    out = saved(src, html=html)
+    assert want in out and out.count(want.split(">")[0].replace("<", "</") + ">") == 1

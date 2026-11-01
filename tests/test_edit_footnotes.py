@@ -85,3 +85,19 @@ def test_a_merged_save_maps_the_ref_against_the_page_version_not_the_file():
     html = page_paragraph(base).replace("here", "there")
     out, _ = rde.merge_edits(base, cur, [{"i": 1, "html": html}])
     assert out == cur.replace("A here", "A there")
+
+
+def test_a_merged_save_refuses_a_ref_the_page_version_does_not_number_though_the_file_does():
+    # #fn2 is nothing in the base; the file's second citation must not lend it a label
+    base = "# T\n\nA here[^b].\n\n[^a]: one\n\n[^b]: two\n"
+    cur = "# T\n\nNew[^a] above.\n\nA here[^b].\n\n[^a]: one\n\n[^b]: two\n"
+    html = page_paragraph(base).replace("here", "there").replace("#fn1", "#fn2")
+    out, rep = rde.merge_edits(base, cur, [{"i": 1, "html": html}])
+    assert out == cur and rep["skipped"]
+
+
+def test_a_label_the_page_sends_is_not_trusted():
+    doc = "# T\n\nA here[^1].\n\n[^1]: the note\n"
+    frag = page_paragraph(doc).replace("here", "there").replace("<a ", '<a data-rd-note="forged" ', 1)
+    out, rep = rde.apply_edits(doc, [{"i": 1, "html": frag}])
+    assert out == "# T\n\nA there[^1].\n\n[^1]: the note\n" and rep["skipped"] == []

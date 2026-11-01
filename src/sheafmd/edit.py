@@ -1168,6 +1168,8 @@ NOTE_REF_RE = re.compile(r'<a\b(?=[^>]*\bclass="[^"]*\bfootnote-ref\b)[^>]*>[\s\
 NOTE_NAME_RE = re.compile(r'^<a data-rd-note="([^"]*)"')
 NOTE_DEF_RE = re.compile(r"^ {0,3}\[\^[^\]\n]+\]:", re.M)
 CITED_RE = re.compile(r"\[\^([^\]\s]+)\]")
+# A citation in pandoc's sourcepos render: where it is in the source, and its number on the page.
+CITED_AT_RE = re.compile(r'data-pos="(\d+):(\d+)-(\d+):(\d+)"><a href="#fn(\d+)" class="footnote-ref"')
 
 
 def _note_labels(text: str) -> dict:
@@ -1176,7 +1178,7 @@ def _note_labels(text: str) -> dict:
     if r.returncode != 0:
         return {}
     lines, labels = text.split("\n"), {}
-    for m in re.finditer(r'data-pos="(\d+):(\d+)-(\d+):(\d+)"><a href="#fn(\d+)" class="footnote-ref"', r.stdout):
+    for m in CITED_AT_RE.finditer(r.stdout):
         l1, c1, l2, c2, n = map(int, m.groups())
         cited = CITED_RE.fullmatch(lines[l1 - 1][c1 - 1:c2 - 1]) if l1 == l2 <= len(lines) else None
         if cited:
@@ -1186,17 +1188,18 @@ def _note_labels(text: str) -> dict:
 
 def _name_notes(text: str, edits) -> list:
     """The edits, each footnote ref in their HTML named by its label in `text`, the version the page rendered.
-    A ref already named is left as it is; one that `text` does not number stays unnamed, and is refused."""
+    A name the page sent is not the hub's and goes (SPEC 7.2); a ref that `text` does not number stays unnamed,
+    and is refused."""
     edits = list(edits)
-    if not any(not NOTE_NAME_RE.match(m.group(0)) for e in edits for m in NOTE_REF_RE.finditer(e["html"])):
+    if not any(NOTE_REF_RE.search(e["html"]) for e in edits):
         return edits
     labels = _note_labels(text)
 
     def name(m):
-        ref = m.group(0)
+        ref = re.sub(r'\s+data-rd-note="[^"]*"', "", m.group(0))
         n = re.search(r'\bhref="#fn(\d+)"', ref)
         label = labels.get(int(n.group(1))) if n else None
-        if NOTE_NAME_RE.match(ref) or label is None:
+        if label is None:
             return ref
         return f'<a data-rd-note="{html_escape(label, quote=True)}"' + ref[2:]
 
@@ -1360,7 +1363,7 @@ def _join(blocks, i: int, n: int) -> None:
         x.content = x.gap = ""
 
 
-def apply_edits(md_text: str, edits, _tomb: str = "", _span: int = 1):
+def apply_edits(md_text: str, edits, _tomb: str = "", _span: int = 1, _named: bool = False):
     """Splice edited blocks into the source. Returns (new_text, report).
 
     `edits` is an iterable of {"i": block index, "html": edited fragment}.
@@ -1371,12 +1374,13 @@ def apply_edits(md_text: str, edits, _tomb: str = "", _span: int = 1):
     `_tomb` and `_span`, for `merge_edits`, which passes one edit: an emptied block becomes this
     one line instead of going, so the block count and every index stay as they were; the edit
     takes the place of the `_span` blocks from its index, which the page's own earlier save made
-    of the one block the page still shows (`_own_span`). The page never sends a span.
+    of the one block the page still shows (`_own_span`). The page never sends a span. `_named`, for
+    `merge_edits` too: its footnote refs are named already, against the base (`_name_notes`).
     """
     blocks = split_md_blocks(md_text)
     changed, skipped, deleted, dropped, toggled = [], [], [], {}, {}
 
-    for e in _name_notes(md_text, edits):
+    for e in (edits if _named else _name_notes(md_text, edits)):
         i = int(e["i"])
         toggled.pop(i, None)            # a later edit of the block decides what it holds
         if not (0 <= i and i + _span <= len(blocks)):
@@ -1850,7 +1854,7 @@ def _restore(text, blocks, j, i, base, html, tomb, at, avoid, changed, skipped, 
 
 def _apply_one(md: str, html: str, **kw):
     """`apply_edits` of one edit, to the first block of `md` (and the `_span` after it, if given)."""
-    return apply_edits(md, [{"i": 0, "html": html}], **kw)
+    return apply_edits(md, [{"i": 0, "html": html}], _named=True, **kw)
 
 
 def _said(block) -> str:
@@ -2251,7 +2255,7 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
             pos = sum(len(x.text) for x in blocks[:j])
             text = text[:pos] + content + text[pos + len(mine):]
         n_before = len(split_md_blocks(text))
-        text, rep = apply_edits(text, [{"i": j, "html": html}], _tomb=tomb, _span=span)
+        text, rep = apply_edits(text, [{"i": j, "html": html}], _tomb=tomb, _span=span, _named=True)
         skipped += [(i, why) for _, why in rep["skipped"]]
         if as_held:
             toggled += rep["toggled"]

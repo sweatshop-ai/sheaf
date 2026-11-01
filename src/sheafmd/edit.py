@@ -867,10 +867,9 @@ TAG_RE = re.compile(r"^<(/?)([A-Za-z][A-Za-z0-9-]*)\b[^>]*?(/?)>$")
 
 def _raw_tags(content: str):
     """The raw inline tags of a block's source, in order, as (tags, lone, doc), each tag in the source's
-    bytes: `tags` holds (name, opening tag, closing tag or "", the opening tag as the page has it, the
-    index in `lone` of the closing tag of its name past the item, cell or emphasis it opened in, or None);
-    `lone`, (closing tag, its node in `doc`) for each closing tag with no opener of its name around it;
-    `doc`, pandoc's JSON of the block."""
+    bytes: `tags` holds (name, opening tag, closing tag or "", the opening tag as the page has it);
+    `lone`, (closing tag, its node in `doc`) for each closing tag with no opener of its name; `doc`,
+    pandoc's JSON of the block."""
     import json
 
     from .sanitize import ALSO_REMOVED, REMOVE
@@ -883,19 +882,19 @@ def _raw_tags(content: str):
     doc = json.loads(r.stdout)
     nodes = []
 
-    def walk(node, in_table=False, path=()):
+    def walk(node, in_table=False):
         if isinstance(node, dict):
             if node.get("t") == "RawInline" and node["c"][0] == "html":
-                nodes.append((node, in_table, path))
+                nodes.append((node, in_table))
             else:
-                walk(node.get("c"), in_table or node.get("t") == "Table", path)
+                walk(node.get("c"), in_table or node.get("t") == "Table")
         elif isinstance(node, list):
             for x in node:
-                walk(x, in_table, path + (id(node),))
+                walk(x, in_table)
 
     walk(doc["blocks"])
     tags, lone, open_, at = [], [], {}, 0
-    for node, in_table, path in nodes:
+    for node, in_table in nodes:
         raw = seen = node["c"][1]
         # In a table cell pandoc's RawInline has `|` where the source has `\|`, which keeps the cell
         # whole: the tag is the source's bytes. Nowhere else does pandoc take a backslash out of a tag.
@@ -910,22 +909,16 @@ def _raw_tags(content: str):
         if name in MARKDOWN_TAGS or name in REMOVE or name in ALSO_REMOVED:
             continue
         if closing:
-            # The page's element ends with the item, cell or emphasis it opened in, closed there by the
-            # sanitiser's parser: a closing tag past that end closes nothing, however the names match (#161).
-            stack = open_.get(name, [])
-            opener = next((j for j in reversed(range(len(stack))) if path[:len(stack[j][4])] == stack[j][4]), None)
-            if opener is not None:
-                stack.pop(opener)[2] = raw
+            if open_.get(name):
+                open_[name].pop()[2] = raw
             else:
                 lone.append((raw, node))
-                if stack:
-                    stack.pop()[5] = len(lone) - 1
             continue
-        tag = [name, raw, "", seen, path, None]
+        tag = [name, raw, "", seen]
         tags.append(tag)
         if not empty:
             open_.setdefault(name, []).append(tag)
-    return [tuple(t[:4]) + (t[5],) for t in tags], lone, doc
+    return [tuple(t) for t in tags], lone, doc
 
 
 def _texts(soup) -> list:
@@ -939,9 +932,6 @@ def _texts(soup) -> list:
 LONE_DIFF_MAX = 2000
 LONE_CONTEXT = 40
 _ENCLOSED = ("code", "pre")
-_EMPHASIS = {"b", "del", "em", "i", "s", "strike", "strong"}
-_BLOCK_NAMES = {"blockquote", "div", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "li", "ol", "p", "pre", "table",
-                "tbody", "td", "tfoot", "th", "thead", "tr", "ul"}
 # A comment's placeholder (`_convert_with_comments`) is text on the page side only.
 _COMMENT_TOKEN = re.compile("(?<!\u27e6)RDCMT[0-9A-F]{10}(?!\u27e7)")
 
@@ -1125,7 +1115,7 @@ def _html_blocks(md: str) -> int:
 def _tags_as_text(content: str, fragment: str, token):
     """(the fragment with each element that stands for a raw tag of `content` written as two
     placeholders around its words, {placeholder: the source's bytes})."""
-    from bs4 import BeautifulSoup, Tag
+    from bs4 import BeautifulSoup
 
     tags, lone, doc = _raw_tags(content)
     if not tags and not lone:
@@ -1137,24 +1127,12 @@ def _tags_as_text(content: str, fragment: str, token):
     # An element is the source tag that says the same: same name, same attributes, the
     # first one not yet taken. Of two that differ, the one left on the page keeps its own.
     unused = []
-    for name, opening, closing, seen, past in tags:
+    for name, opening, closing, seen in tags:
         el = BeautifulSoup(seen, "html.parser").find(True)
         if el is not None:
-            unused.append((key(el), opening, closing, past))
+            unused.append((key(el), opening, closing))
     soup = BeautifulSoup(fragment, "html.parser")
     placed = _lone_as_text(soup, lone, doc, token) if lone else {}
-
-    def between_blocks(p):
-        at = soup.find(string=p) if p in placed else None
-        return at is not None and all(x.name in _BLOCK_NAMES if x.name is not None else not x.strip() or str(x) in placed
-                                      for x in at.parent.children)
-
-    def unplace(past):
-        # The closing tag past the element's container goes from where the source had it.
-        p = lone[past][1]["c"]
-        if placed.pop(p, None) is not None:
-            for s in soup.find_all(string=p):
-                s.extract()
     for el in soup.find_all(True):
         # A math span's <sup> is the render's, not a tag of the source; a wrapper the page puts around the
         # source's words, as `div.tblwrap` around a table, is not (#157).
@@ -1171,23 +1149,9 @@ def _tags_as_text(content: str, fragment: str, token):
         # take the words' `_` for intraword and drop its escape, and `\_x\_` would come back as emphasis.
         a, b = f"\u27e6{token()}\u27e7", f"\u27e6{token()}\u27e7"
         placed[a], placed[b] = hit[1], hit[2]
-        # An element the source closed past its item, cell or emphasis ends there unclosed, which says the
-        # same only while it ends with its container on the page: with words after it, it closes at its end,
-        # and so it does when the words that closing tag followed went and left it between two blocks. A
-        # no-break space is words here, and an emphasis right after its own is one to pandoc, which merges them.
-        if hit[3] is not None and (any(s.name is not None or s.strip(" \t\r\n") and str(s) not in placed
-                                       for s in el.next_siblings)
-                                   or el.parent.name in _EMPHASIS and isinstance(el.parent.next_sibling, Tag)
-                                   or between_blocks(lone[hit[3]][1]["c"])):
-            placed[b] = lone[hit[3]][0]
-            unplace(hit[3])
         el.insert_before(a)
         el.insert_after(b)
         el.unwrap()
-    # An element deleted on the page takes that closing tag with it.
-    for hit in unused:
-        if hit[3] is not None:
-            unplace(hit[3])
     return (str(soup), placed) if placed else (fragment, {})
 
 

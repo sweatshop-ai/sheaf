@@ -16,6 +16,7 @@ import contextvars
 import os
 import re
 from collections import Counter
+from html import escape as html_escape, unescape as html_unescape
 from typing import NamedTuple
 
 from . import _pandoc
@@ -1155,6 +1156,69 @@ def _tags_as_text(content: str, fragment: str, token):
     return (str(soup), placed) if placed else (fragment, {})
 
 
+# ─────────────────────────────────────────────────────────────── footnotes ──
+# The page shows a citation as pandoc's `<a href="#fnN" class="footnote-ref">`, N its place among the
+# document's citations (pandoc numbers every citation, a label cited twice included), while the source
+# names it by its label, `[^1]` or `[^note]`. Pandoc's HTML reader takes that link for a footnote with no
+# words and writes an empty definition beside it, which the render shows in place of the note (sheaf #163).
+# So each ref is named by its label in the version the page rendered (`_name_notes`), and the conversion
+# writes `[^label]` where the ref was. A ref with no label is refused, never written as an empty note.
+
+NOTE_REF_RE = re.compile(r'<a\b(?=[^>]*\bclass="[^"]*\bfootnote-ref\b)[^>]*>[\s\S]*?</a>')
+NOTE_NAME_RE = re.compile(r'^<a data-rd-note="([^"]*)"')
+NOTE_DEF_RE = re.compile(r"^ {0,3}\[\^[^\]\n]+\]:", re.M)
+CITED_RE = re.compile(r"\[\^([^\]\s]+)\]")
+
+
+def _note_labels(text: str) -> dict:
+    """{page number: source label} for each citation of `text`, numbered as the page numbers them."""
+    r = _pandoc.run(["-f", "gfm+sourcepos", "-t", "html5", "--wrap=none"], text)
+    if r.returncode != 0:
+        return {}
+    lines, labels = text.split("\n"), {}
+    for m in re.finditer(r'data-pos="(\d+):(\d+)-(\d+):(\d+)"><a href="#fn(\d+)" class="footnote-ref"', r.stdout):
+        l1, c1, l2, c2, n = map(int, m.groups())
+        cited = CITED_RE.fullmatch(lines[l1 - 1][c1 - 1:c2 - 1]) if l1 == l2 <= len(lines) else None
+        if cited:
+            labels[n] = cited.group(1)
+    return labels
+
+
+def _name_notes(text: str, edits) -> list:
+    """The edits, each footnote ref in their HTML named by its label in `text`, the version the page rendered.
+    A ref already named is left as it is; one that `text` does not number stays unnamed, and is refused."""
+    edits = list(edits)
+    if not any(not NOTE_NAME_RE.match(m.group(0)) for e in edits for m in NOTE_REF_RE.finditer(e["html"])):
+        return edits
+    labels = _note_labels(text)
+
+    def name(m):
+        ref = m.group(0)
+        n = re.search(r'\bhref="#fn(\d+)"', ref)
+        label = labels.get(int(n.group(1))) if n else None
+        if NOTE_NAME_RE.match(ref) or label is None:
+            return ref
+        return f'<a data-rd-note="{html_escape(label, quote=True)}"' + ref[2:]
+
+    return [{**e, "html": NOTE_REF_RE.sub(name, e["html"])} for e in edits]
+
+
+def _notes_as_tokens(fragment: str, token):
+    """(fragment, {token: `[^label]`}): each footnote ref of the fragment as a placeholder pandoc keeps."""
+    placed = {}
+
+    def swap(m):
+        name = NOTE_NAME_RE.match(m.group(0))
+        cited = f"[^{html_unescape(name.group(1))}]" if name else ""
+        if not CITED_RE.fullmatch(cited):
+            raise EditError("block cites a footnote the edit cannot name; edit it in the .md")
+        t = token()
+        placed[t] = cited
+        return t
+
+    return NOTE_REF_RE.sub(swap, fragment), placed
+
+
 def _convert_with_comments(block, fragment: str, strays=None):
     """(new markdown for the block, comments left without text)."""
     parsed = rdc.parse(block.content).comments
@@ -1194,7 +1258,15 @@ def _convert_with_comments(block, fragment: str, strays=None):
 
     frag = RAW_COMMENT_RE.sub(keep, ANCHOR_RE.sub(swap, fragment))
     frag, tags = _tags_as_text(block.content, frag, token)
+    frag, notes = _notes_as_tokens(frag, token)
     new_md = html_block_to_md(frag, block.content, strays)
+    for t, cited in notes.items():
+        if new_md.count(t) != 1:
+            raise EditError("block cites a footnote the edit cannot keep; edit it in the .md")
+        new_md = new_md.replace(t, cited, 1)
+    if len(NOTE_DEF_RE.findall(new_md)) > len(NOTE_DEF_RE.findall(block.content)):
+        # A citation put back at the start of a line reads as a definition, and an empty one hides the note.
+        raise EditError("the edit leaves a footnote citation at the start of a line; edit it in the .md")
     if tags:
         before = _html_blocks(new_md)
         for t, raw in tags.items():
@@ -1304,7 +1376,7 @@ def apply_edits(md_text: str, edits, _tomb: str = "", _span: int = 1):
     blocks = split_md_blocks(md_text)
     changed, skipped, deleted, dropped, toggled = [], [], [], {}, {}
 
-    for e in edits:
+    for e in _name_notes(md_text, edits):
         i = int(e["i"])
         toggled.pop(i, None)            # a later edit of the block decides what it holds
         if not (0 <= i and i + _span <= len(blocks)):
@@ -1998,6 +2070,8 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
     """
     from difflib import SequenceMatcher
 
+    # The page numbered its footnote refs in the base: named there, before any block moves (`_name_notes`).
+    edits = _name_notes(base_text, edits)
     bb, cb = split_md_blocks(base_text), split_md_blocks(cur_text)
     bp, cp = [_prose(b.content) for b in bb], [_prose(b.content) for b in cb]
     sm = SequenceMatcher(None, bp, cp, autojunk=False)

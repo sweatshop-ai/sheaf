@@ -604,6 +604,26 @@ def _cell_breaks(fragment: str):
     return str(soup), token
 
 
+def _cell_code_pipes(fragment: str):
+    """(the fragment with each `|` in a table cell's code as a token, the token or None). Pandoc's writer
+    leaves a pipe in a cell's code bare, which ends the cell; GFM reads `\\|` there as the pipe. As wide as
+    `\\|`, so that pandoc pads the column for what the cell will say."""
+    from bs4 import BeautifulSoup, NavigableString
+
+    if "|" not in fragment or "<code" not in fragment.lower():
+        return fragment, None
+    soup = BeautifulSoup(fragment, "html.parser")
+    texts = [t for code in soup.find_all("code") if code.find_parent(["td", "th"])
+             for t in _texts(code) if "|" in t]
+    token = next((t for t in (chr(0xF000 + 2 * k) + chr(0xF001 + 2 * k) for k in range(1024))
+                  if t not in fragment), None)
+    if not texts or token is None:
+        return fragment, None
+    for t in texts:
+        t.replace_with(NavigableString(t.replace("|", token)))
+    return str(soup), token
+
+
 def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     """Convert one edited HTML block back to GitHub-flavoured markdown. With `source`, the block's markdown,
     markup the source did not have is unwrapped (`_unwrap_strays`) and named in `strays`."""
@@ -616,6 +636,7 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     clean = _without_placeholder_breaks(_boxes_as_text(_typed_tasks(sanitize(_sanitize(fragment, source, strays)))))
     if not clean.strip():
         return ""
+    clean, pipe = _cell_code_pipes(clean)
     cells, token = _cell_breaks(clean)
     r = _pandoc.run(["-f", "html", "-t", "gfm", "--wrap=none"], cells)
     if token is not None and r.returncode == 0 and r.stdout.count(token) != cells.count(token):
@@ -625,6 +646,13 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     if r.returncode != 0:
         raise EditError(f"pandoc: {r.stderr.strip()[:200]}")
     out = r.stdout if token is None else r.stdout.replace(token, "<br>")
+    if pipe is not None:
+        # A table pandoc writes as raw HTML has no cell for a bare pipe to end, and `\\|` would show.
+        parts, depth = re.split(r"(</?table\b)", out), 0
+        for k, part in enumerate(parts):
+            depth = depth + 1 if part == "<table" else max(0, depth - 1) if part == "</table" else depth
+            parts[k] = part.replace(pipe, "|" if depth else "\\|")
+        out = "".join(parts)
     # Pandoc's gfm writer wraps every bare URL as <https://...>. GFM autolinks a bare
     # URL anyway, so the two render identically - but the angle brackets show up as
     # noise on every line of a table the moment one cell is edited. Unwrap them. The
@@ -928,7 +956,7 @@ def _lone_as_text(soup, lone, doc, token) -> dict:
     import difflib
     import json
 
-    from bs4 import BeautifulSoup, NavigableString
+    from bs4 import BeautifulSoup, Comment, NavigableString
 
     placed = {}
     for raw, node in lone:
@@ -939,6 +967,10 @@ def _lone_as_text(soup, lone, doc, token) -> dict:
     if r.returncode != 0:
         return {}
     src = BeautifulSoup(r.stdout, "html.parser")
+    # A comment splits the source's words where the page has none.
+    for c in src.find_all(string=lambda x: isinstance(x, Comment)):
+        c.extract()
+    src.smooth()
     for t in _texts(src):
         parts = [x for x in re.split("(\u27e6[A-Z0-9]+\u27e7)", str(t)) if x]
         if len(parts) > 1:
@@ -954,6 +986,9 @@ def _lone_as_text(soup, lone, doc, token) -> dict:
         ups = {id(u) for u in t.parents}
         before = next((x for x in reversed(texts[:i]) if str(x) not in placed), None)
         after = next((x for x in texts[i + 1:] if str(x) not in placed), None)
+        # The line break between two blocks is not words before it, with words after it in its own block.
+        if before is not None and not before.strip() and "\n" in before and after is not None and after.strip():
+            before = None
         side = before if before is not None else after
         climb = sum(id(u) not in ups for u in side.parents) if side is not None else 0
         # The spaces between the words before it and the tag, in the same text.
@@ -1013,7 +1048,11 @@ def _lone_as_text(soup, lone, doc, token) -> dict:
         # goes with the word before it, then over as many plain spaces as it had, on the same text.
         o -= gap
         k = where(o)
-        if not (0 < o < len(old) and old[o - 1].isalnum() and old[o].isalnum()):
+        # Two items merged with no space leave it between the same words, which are not one word to it;
+        # a word that grew by the next word's letters holds them once more than the source did.
+        w = re.match(r"\s*(\w+)", old[o:])
+        if not (0 < o < len(old) and old[o - 1].isalnum() and old[o].isalnum()
+                or w and new.startswith(w.group(1), k) and new.count(w.group(1)) <= old.count(w.group(1))):
             while 0 < k < len(new) and new[k - 1].isalnum() and new[k].isalnum() and k not in edges:
                 k += 1 if back else -1
         for _ in range(gap):
@@ -1046,7 +1085,8 @@ def _lone_as_text(soup, lone, doc, token) -> dict:
             anchor, after_it = None, True
         else:
             anchor, after_it = t, j > 0
-            for _ in range(climb):
+            # Beside a tag placed already there is nothing to climb out of: it stands where this one goes.
+            for _ in range(0 if str(t) in placed else climb):
                 sib = anchor.next_sibling if after_it else anchor.previous_sibling
                 if sib is not None or anchor.parent is None or anchor.parent.name == "[document]":
                     break

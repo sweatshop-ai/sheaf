@@ -313,3 +313,186 @@ def test_a_closing_tag_with_no_opener_stays_in_its_item_when_enter_splits_it():
 
 def test_a_closing_tag_with_no_opener_after_an_element_and_a_space_keeps_the_space_before_it():
     assert saved("A <kbd>K</kbd> </x1>b here.") == "A <kbd>K</kbd> </x1>b there.\n"
+
+
+# Sheaf #161: the cases #157 left.
+
+@pytest.mark.parametrize("src,want", [
+    ("- one\n- </x1>three here", "- one</x1>three there\n"),
+    ("- one </x1>\n- three here", "- one</x1>three there\n"),
+])
+def test_a_closing_tag_with_no_opener_stays_between_two_items_merged_with_no_space(src, want):
+    assert saved(src, html="<ul><li>onethree there</li></ul>") == want
+
+
+@pytest.mark.parametrize("src,html", [
+    ("- Item one " + C1 + " </x1> more here\n- two",
+     '<ul><li>Item one<span class="rd-anchor" data-rd-id="c1"></span></li>'
+     "<li>&nbsp;&nbsp;more there</li><li>two</li></ul>"),
+    ("- Item one </x1> " + C1 + " more here\n- two",
+     '<ul><li>Item one</li><li>&nbsp;&nbsp;<span class="rd-anchor" data-rd-id="c1"></span> more there</li>'
+     "<li>two</li></ul>"),
+])
+def test_a_closing_tag_with_no_opener_stays_in_its_item_when_enter_splits_it_beside_a_comment(src, html):
+    out = saved(src, html=html)
+    assert out.startswith("- Item one</x1>") and out.count("</x1>") == 1 and C1 in out
+
+
+def test_a_closing_tag_inside_an_emphasis_still_closes_the_element_opened_before_it():
+    out = saved("Go <x1>a *b* c</x1> here.")
+    assert out == "Go <x1>a *b* c</x1> there.\n"
+
+
+@pytest.mark.parametrize("src,want", [
+    ("| a | b |\n|---|---|\n| `x\\|y` | here |", "`x\\|y`"),
+    ("| a | b |\n|---|---|\n| `x\\|y\\|z` <kbd>k</kbd> | here |", "`x\\|y\\|z`"),
+    ("| `x\\|y` | b |\n|---|---|\n| a | here |", "`x\\|y`"),
+])
+def test_a_code_span_in_a_table_cell_keeps_its_escaped_pipe(src, want):
+    out = saved(src)
+    assert want in out and "there" in out
+    assert "<td><code>" + want[1:-1].replace("\\|", "|") + "</code>" in page_fragment(out) \
+        or "<th><code>" + want[1:-1].replace("\\|", "|") + "</code>" in page_fragment(out)
+
+
+def test_a_pipe_in_code_outside_a_table_gets_no_backslash():
+    assert saved("Run `a|b` here.") == "Run `a|b` there.\n"
+
+
+def test_a_pipe_in_code_in_a_table_pandoc_writes_as_raw_html_gets_no_backslash():
+    html = "<table><tr><td><code>x|y</code></td><td>a<br>b\\c</td></tr></table>"
+    assert "\\|" not in rde.html_block_to_md(html)
+
+
+# Gate 1 on #161.
+
+@pytest.mark.parametrize("src", [
+    "Press <kbd><kbd>Ctrl</kbd>+<kbd>C</kbd></kbd> here.",
+    "Go <mark>a <mark>b</mark> c</mark> here.",
+    "Go <x1>a <x1>b <x1>c</x1> d</x1> e</x1> here.",
+])
+def test_nested_raw_elements_of_one_name_each_keep_their_closing_tag(src):
+    assert saved(src) == src.replace("here", "there") + "\n"
+
+
+def test_a_closing_tag_first_in_a_table_cell_stays_there():
+    out = saved("| a | b |\n|---|---|\n| k | </x1>c here |")
+    assert "| </x1>" in out and "there" in out and out.count("</x1>") == 1
+
+
+@pytest.mark.parametrize("src,want", [
+    ("> | a | b |\n> |---|---|\n> | `x\\|y` | here |", "`x\\|y`"),
+    ("- | a | `b\\|c` |\n  |---|---|\n  | k | here |", "`b\\|c`"),
+])
+def test_a_code_span_in_a_table_in_a_quote_or_an_item_keeps_its_escaped_pipe(src, want):
+    assert want in saved(src)
+
+
+def test_a_line_of_a_raw_html_table_that_starts_with_a_pipe_gets_no_backslash_in_code():
+    html = "<table><tr><td>a<br>\n| <code>x|y</code></td><td>b\\c</td></tr></table>"
+    assert "<code>x|y</code>" in rde.html_block_to_md(html)
+
+
+@pytest.mark.parametrize("src,old,new,want", [
+    ("Go un</x1> e due.", "un", "une", "Go une</x1> e due.\n"),
+    ("Go be</x1> a test.", "be", "bean", "Go bean</x1> a test.\n"),
+    ("Go foo</x1> bar here.", "foo", "foobar", "Go foobar</x1> bar here.\n"),
+])
+def test_a_closing_tag_with_no_opener_stays_out_of_a_word_that_grew_by_the_next_words_letters(src, old, new, want):
+    assert saved(src, old=old, new=new) == want
+
+
+def test_a_comment_in_a_cells_code_does_not_become_its_words():
+    out = rde.html_block_to_md("<table><tr><th>a</th></tr><tr><td><code><!-- MDB:a|b -->x|y</code></td></tr></table>")
+    assert "MDB" not in out and "x\\|y" in out
+
+
+# Gate 2 on #161.
+
+@pytest.mark.parametrize("src", [
+    "| a | b |\n|---|---|\n| here | </x1></x2> |",
+    "| a | b |\n|---|---|\n| here | k |\n| l | </x1></x2> |",
+    "> | a | b |\n> |---|---|\n> | here | </x1></x2> |",
+    "| a | b |\n|---|---|\n| here | </x1> |",
+    "| a | b |\n|---|---|\n| here | k |\n| l | </x1> |",
+])
+def test_a_closing_tag_with_no_words_after_it_in_a_tables_last_cell_keeps_the_table(src):
+    out = saved(src)
+    assert "|---" in out.replace("-|-", "---") and "</x1>" in out and "there" in out
+
+
+@pytest.mark.parametrize("src", ["> here\n>\n> - </x1></x2>", "- here\n  - </x1></x2>"])
+def test_a_closing_tag_alone_in_the_last_item_adds_no_item_save_after_save(src):
+    once = saved(src)
+    assert once.count("</x1>") == 1
+    assert saved(once.rstrip("\n"), old="there", new="there") == once
+
+
+@pytest.mark.parametrize("src,want", [
+    ("> a\n>\n> </x1></x2>**c** here", "> </x1></x2>**c** there\n"),
+    ("- </x1></x2>*c* here", "- </x1></x2>*c* there\n"),
+    ("- a\n- </x1></x2>*c* here", "- </x1></x2>*c* there\n"),
+])
+def test_two_closing_tags_first_in_a_block_stay_together_before_its_element(src, want):
+    assert saved(src).endswith(want)
+
+
+def test_a_pipe_after_a_table_nested_in_a_raw_html_table_gets_no_backslash():
+    src = "- <table><tr><td><table><tr><td>k</td></tr></table><code>m|n</code> here</td></tr></table>"
+    html = "<ul><li>" + src[2:].replace("here", "there") + "</li></ul>"
+    out = rde.html_block_to_md(html)
+    assert "<code>m|n</code>" in out and "\\|" not in out
+
+
+# Gate 3 on #161. A tag closed past its item, cell or emphasis pairs with its opener, as on main; these pin
+# that it renders as the page showed it (the source's own place for it is split out of #161).
+
+@pytest.mark.parametrize("src,html,want", [
+    ("*a <mark>b* c</mark> here.", "<p>a <mark>b</mark> c there.</p>", "a <mark>b</mark> c there.\n"),
+    ("[a <mark>b](u) c</mark> here.", "<p>a <mark>b</mark> c there.</p>", "a <mark>b</mark> c there.\n"),
+    ("- a <mark>b\n- c</mark> d here", "<ul><li>a <mark>b</mark>c d there</li></ul>", "- a <mark>b</mark>c d there\n"),
+    ("*a <mark>b* c</mark> here.", "<p><em>a <mark>b</mark> z</em> c there.</p>", "*a <mark>b</mark> z* c there.\n"),
+    ("- a <mark>b\n- c</mark> d here", "<ul><li>a <mark>b</mark> z</li><li>c d there</li></ul>",
+     "- a <mark>b</mark> z\n- c d there\n"),
+    ("> a <mark>b\n>\n> c</mark> here", "<blockquote><p>a <mark>b</mark> z</p><p>c there</p></blockquote>",
+     "> a <mark>b</mark> z\n>\n> c there\n"),
+])
+def test_a_tag_closed_past_its_container_is_closed_where_the_page_element_ends_once_words_follow_it(src, html, want):
+    assert saved(src, html=html) == want
+
+
+@pytest.mark.parametrize("src,html,want", [
+    ("**a <mark>b** c</mark> d here.", "<p><strong>a b</strong> c d there.</p>", "**a b** c d there.\n"),
+    ("- a <mark>b\n- c</mark> d here", "<ul><li>a b</li><li>c d there</li></ul>", "- a b\n- c d there\n"),
+])
+def test_a_tag_closed_past_its_container_and_deleted_on_the_page_takes_its_closing_tag_with_it(src, html, want):
+    assert saved(src, html=html) == want
+
+
+@pytest.mark.parametrize("src,html,want", [
+    ("> Note <mark>this\n>\n> and</mark> that here.", "<blockquote>\n<p>Note <mark>this</mark></p>\n\n</blockquote>",
+     "> Note <mark>this</mark>\n"),
+    ("> Note <mark>this\n>\n> and</mark> that here.",
+     "<blockquote>\n<p>Note <mark>this</mark></p>\n<p>that here.</p>\n</blockquote>",
+     "> Note <mark>this</mark>\n>\n> that here.\n"),
+    ("- one <mark>two\n\n- three</mark> four here", "<ul>\n<li><p>one <mark>two</mark></p></li>\n\n</ul>",
+     "- one <mark>two</mark>\n"),
+    ("- a <x1>b\n- c</x1> d here", "<ul>\n<li>a <x1>b</x1></li>\n<li>d here</li>\n</ul>", "- a <x1>b</x1>\n- d here\n"),
+    ("| a | b |\n|---|---|\n| <x1>k | c</x1> d here |",
+     "<table>\n<thead>\n<tr>\n<th>a</th>\n<th>b</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><x1>k</x1></td>\n"
+     "<td>d here</td>\n</tr>\n</tbody>\n</table>", "<x1>k</x1>"),
+])
+def test_a_tag_closed_past_its_container_whose_words_after_it_went_closes_at_the_elements_end(src, html, want):
+    out = saved(src, html=html)
+    assert out == want if want.endswith("\n") else want in out and "</x1> d here |" not in out
+
+
+@pytest.mark.parametrize("src,html,want", [
+    ("*a <mark>b* c</mark> here.", "<p><em>a <mark>b</mark></em><i>z</i> c there.</p>", "<mark>b</mark>"),
+    ("**a <x1>b** c</x1> here.", "<p><strong>a <x1>b</x1></strong><b>z</b> c there.</p>", "<x1>b</x1>"),
+    ("- a <x1>b\n- c</x1> d here", "<ul><li>a <x1>b</x1>&nbsp;</li><li>c d there</li></ul>", "<x1>b</x1>\xa0"),
+])
+def test_a_tag_closed_past_its_container_closes_at_its_end_before_a_merged_emphasis_or_a_no_break_space(
+        src, html, want):
+    out = saved(src, html=html)
+    assert want in out and out.count(want.split(">")[0].replace("<", "</") + ">") == 1

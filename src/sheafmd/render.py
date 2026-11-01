@@ -944,17 +944,14 @@ def doc_header(frag: str, by: str, for_: str | None) -> str:
 # with one of them is moved to the host (the theme's variables) or to the wrapper `.rd-root`, which stands where the body
 # stands on a page of its own. `rem` still resolves against the front's `html`, so the root font size is
 # the front's. Comments go first, so a word in one is never read as a selector.
-# The font is the theme's until the loader sets `--front-font` on the host's style, as it sets the colours (#152): then
-# the wrapper takes the front's family, as the old frame's body did; what the theme gives a family of its own (code)
-# keeps it. The match is on the style attribute's text, so no other variable may start with `--front-font`.
+# The front's font (#152) is a rule of page/mount.css, not of these styles.
 _MOUNT_TOP_RE = re.compile(r"(^|[{},]\s*)(?::root|html)(?=[\s{,>+~:\[.#]|$)")
 _MOUNT_BODY_RE = re.compile(r"(^|[{},]\s*)body(?=[\s{,>+~:\[.#]|$)")
-MOUNT_FRONT_FONT = ':host([style*="--front-font"]) .rd-root{font-family:var(--front-font)}'
 
 
 def mount_css(css: str) -> str:
     css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
-    return _MOUNT_BODY_RE.sub(r"\1.rd-root", _MOUNT_TOP_RE.sub(r"\1:host", css)) + "\n" + MOUNT_FRONT_FONT
+    return _MOUNT_BODY_RE.sub(r"\1.rd-root", _MOUNT_TOP_RE.sub(r"\1:host", css))
 
 
 def _page_asset(name: str) -> str:

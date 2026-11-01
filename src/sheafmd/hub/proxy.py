@@ -18,6 +18,7 @@ key 9.9 names is required, and anything missing, unknown or wrong is a ProxyErro
 hub's start with exit 1 and a `proxy-config` row: the hub never runs with part of the mode.
 """
 import errno
+import hashlib
 import os
 import pwd
 import re
@@ -220,8 +221,10 @@ def parse(t: dict, where) -> ProxyConfig:
 
 
 def default_email(mid: str, origin: str) -> str:
-    """The e-mail of a member's commits whose block names none (8.11): their id at the front's host."""
-    local = mid if re.fullmatch(r"[A-Za-z0-9._+-]+", mid) else "member"
+    """The e-mail of a member's commits whose block names none (8.11): their id at the front's host. An id an
+    address cannot hold (`auth0|123`) gives `member-` and 16 hex of its sha256, one address per member (#38)."""
+    local = mid if re.fullmatch(r"[A-Za-z0-9._+-]+", mid) else \
+        f"member-{hashlib.sha256(mid.encode('utf-8', 'surrogatepass')).hexdigest()[:16]}"
     return f"{local}@{urlsplit(origin).hostname}"
 
 

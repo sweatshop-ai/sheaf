@@ -16,6 +16,8 @@ import contextvars
 import os
 import re
 from collections import Counter
+from functools import lru_cache
+from html import escape as html_escape, unescape as html_unescape
 from typing import NamedTuple
 
 from . import _pandoc
@@ -1155,6 +1157,100 @@ def _tags_as_text(content: str, fragment: str, token):
     return (str(soup), placed) if placed else (fragment, {})
 
 
+# ─────────────────────────────────────────────────────────────── footnotes ──
+# The page shows a citation as pandoc's `<a href="#fnN" class="footnote-ref">`, N its place among the
+# document's citations (pandoc numbers every citation, a label cited twice included), while the source
+# names it by its label, `[^1]` or `[^note]`. Pandoc's HTML reader takes that link for a footnote with no
+# words and writes an empty definition beside it, which the render shows in place of the note (sheaf #163).
+# So each ref is named by its label in the version the page rendered (`_name_notes`), and the conversion
+# writes `[^label]` where the ref was. A ref with no label is refused, never written as an empty note.
+
+NOTE_REF_RE = re.compile(r'<a\b(?=[^>]*\bclass="[^"]*\bfootnote-ref\b)[^>]*>[\s\S]*?</a>')
+# A name keeps its quotes as `_name_notes` wrote them, or a parser's: BeautifulSoup writes one that holds `"` in `'`.
+NOTE_NAME_RE = re.compile(r'^<a\b[^>]*\bdata-rd-note=(?:"([^"]*)"|\'([^\']*)\')')
+# A ref's number on the page: `#fn3`, or `#u-fn3` on a mounted page (mount.js gives every fragment its prefix).
+NOTE_NUMBER_RE = re.compile(r'\bhref="#(?:u-)?fn(\d+)"')
+NOTE_DEF_RE = re.compile(r"^ {0,3}\[\^[^\]\n]+\]:", re.M)
+CITED_RE = re.compile(r"\[\^([^\]\n]+)\]")
+# A citation in pandoc's sourcepos render: where it is in the source, and its number on the page. In a tight
+# list item the span carries the item's place too, after its own.
+CITED_AT_RE = re.compile(r'data-pos="(\d+):(\d+)-(\d+):(\d+)"(?: data-pos="[^"]*")*><a href="#fn(\d+)" class="footnote-ref"')
+
+
+class _Unread(Exception):
+    pass
+
+
+def _note_labels(text: str) -> dict:
+    """{page number: source label} for each citation of `text`, numbered as the page numbers them. Kept for the
+    last few texts: a page that types on saves against one text again and again. The caller never changes it.
+    A run of pandoc that failed (a time limit on a busy machine) is not kept: the next save asks again."""
+    try:
+        return _read_labels(text)
+    except _Unread:
+        return {}
+
+
+@lru_cache(maxsize=8)
+def _read_labels(text: str) -> dict:
+    r = _pandoc.run(["-f", "gfm+sourcepos", "-t", "html5", "--wrap=none"], text)
+    if r.returncode != 0:
+        raise _Unread
+    lines, labels = text.split("\n"), {}
+    for m in CITED_AT_RE.finditer(r.stdout):
+        l1, c1, l2, c2, n = map(int, m.groups())
+        if l1 != l2 or l1 > len(lines):
+            continue
+        # Pandoc's columns count a tab to the next stop of 4: the citation is the one that starts at that column.
+        line = lines[l1 - 1]
+        cited = next((x for x in CITED_RE.finditer(line) if len(line[:x.start()].expandtabs(4)) + 1 == c1), None)
+        if cited and len(line[:cited.end()].expandtabs(4)) + 1 == c2:
+            labels[n] = cited.group(1)
+    return labels
+
+
+def _name_notes(text: str, edits) -> list:
+    """The edits, each footnote ref in their HTML named by its label in `text`, the version the page rendered.
+    A name the page sent is not the hub's and goes (SPEC 7.2); a ref that `text` does not number stays unnamed,
+    and is refused."""
+    edits = list(edits)
+    if not any(NOTE_REF_RE.search(e["html"]) for e in edits):
+        return edits
+    labels = _note_labels(text)
+
+    def name(m):
+        ref = re.sub(r'\s+data-rd-note=(?:"[^"]*"|\'[^\']*\')', "", m.group(0))
+        n = NOTE_NUMBER_RE.search(ref)
+        label = labels.get(int(n.group(1))) if n else None
+        if label is None:
+            return ref
+        return f'<a data-rd-note="{html_escape(label, quote=True)}"' + ref[2:]
+
+    return [{**e, "html": NOTE_REF_RE.sub(name, e["html"])} for e in edits]
+
+
+def _notes_as_tokens(fragment: str, token):
+    """(fragment, {token: `[^label]`}): each footnote ref of the fragment as a placeholder pandoc keeps."""
+    from bs4 import BeautifulSoup
+
+    placed = {}
+    if NOTE_REF_RE.search(fragment) and any(a.find_parent(["code", "pre", "samp", "tt", "var"]) for a in
+                                            BeautifulSoup(fragment, "html.parser").select("a.footnote-ref")):
+        # In code (pandoc's HTML reader takes samp, tt and var for code too) a citation is words: pandoc would no longer number it, and the page's numbers would be off.
+        raise EditError("block has a footnote citation inside code; edit it in the .md")
+
+    def swap(m):
+        name = NOTE_NAME_RE.match(m.group(0))
+        cited = f"[^{html_unescape(name.group(1) if name.group(1) is not None else name.group(2))}]" if name else ""
+        if not CITED_RE.fullmatch(cited):
+            raise EditError("block cites a footnote the edit cannot name; edit it in the .md")
+        t = token()
+        placed[t] = cited
+        return t
+
+    return NOTE_REF_RE.sub(swap, fragment), placed
+
+
 def _convert_with_comments(block, fragment: str, strays=None):
     """(new markdown for the block, comments left without text)."""
     parsed = rdc.parse(block.content).comments
@@ -1194,7 +1290,15 @@ def _convert_with_comments(block, fragment: str, strays=None):
 
     frag = RAW_COMMENT_RE.sub(keep, ANCHOR_RE.sub(swap, fragment))
     frag, tags = _tags_as_text(block.content, frag, token)
+    frag, notes = _notes_as_tokens(frag, token)
     new_md = html_block_to_md(frag, block.content, strays)
+    for t, cited in notes.items():
+        if new_md.count(t) != 1:
+            raise EditError("block cites a footnote the edit cannot keep; edit it in the .md")
+        new_md = new_md.replace(t, cited, 1)
+    if len(NOTE_DEF_RE.findall(new_md)) > len(NOTE_DEF_RE.findall(block.content)):
+        # A citation put back at the start of a line reads as a definition, and an empty one hides the note.
+        raise EditError("the edit leaves a footnote citation at the start of a line; edit it in the .md")
     if tags:
         before = _html_blocks(new_md)
         for t, raw in tags.items():
@@ -1288,7 +1392,7 @@ def _join(blocks, i: int, n: int) -> None:
         x.content = x.gap = ""
 
 
-def apply_edits(md_text: str, edits, _tomb: str = "", _span: int = 1):
+def apply_edits(md_text: str, edits, _tomb: str = "", _span: int = 1, _named: bool = False):
     """Splice edited blocks into the source. Returns (new_text, report).
 
     `edits` is an iterable of {"i": block index, "html": edited fragment}.
@@ -1299,12 +1403,14 @@ def apply_edits(md_text: str, edits, _tomb: str = "", _span: int = 1):
     `_tomb` and `_span`, for `merge_edits`, which passes one edit: an emptied block becomes this
     one line instead of going, so the block count and every index stay as they were; the edit
     takes the place of the `_span` blocks from its index, which the page's own earlier save made
-    of the one block the page still shows (`_own_span`). The page never sends a span.
+    of the one block the page still shows (`_own_span`). The page never sends a span. `_named`, for
+    `merge_edits` too: its footnote refs are named already, against the base (`_name_notes`).
     """
     blocks = split_md_blocks(md_text)
+    cited = [CITED_RE.findall(b.content) for b in blocks]
     changed, skipped, deleted, dropped, toggled = [], [], [], {}, {}
 
-    for e in edits:
+    for e in (edits if _named else _name_notes(md_text, edits)):
         i = int(e["i"])
         toggled.pop(i, None)            # a later edit of the block decides what it holds
         if not (0 <= i and i + _span <= len(blocks)):
@@ -1370,6 +1476,9 @@ def apply_edits(md_text: str, edits, _tomb: str = "", _span: int = 1):
     # paragraphs). That invalidates every index the open page is holding, so the
     # caller has to make the page reload rather than let it save against stale ids.
     remap = len(split_md_blocks(new_text)) != len(blocks)
+    # So does a save that took a footnote citation from a block, or put one in: the page numbers each citation
+    # by its place in the document (`_name_notes`), and the refs after it now have other numbers.
+    remap = remap or any(CITED_RE.findall(blocks[i].content) != cited[i] for i in changed)
     return new_text, {"changed": changed, "skipped": skipped, "remap": remap, "deleted": deleted,
                       "toggled": list(toggled.values())}
 
@@ -1777,8 +1886,9 @@ def _restore(text, blocks, j, i, base, html, tomb, at, avoid, changed, skipped, 
 
 
 def _apply_one(md: str, html: str, **kw):
-    """`apply_edits` of one edit, to the first block of `md` (and the `_span` after it, if given)."""
-    return apply_edits(md, [{"i": 0, "html": html}], **kw)
+    """`apply_edits` of one edit, to the first block of `md` (and the `_span` after it, if given), its footnote
+    refs named already by `merge_edits`."""
+    return apply_edits(md, [{"i": 0, "html": html}], _named=True, **kw)
 
 
 def _said(block) -> str:
@@ -1998,6 +2108,8 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
     """
     from difflib import SequenceMatcher
 
+    # The page numbered its footnote refs in the base: named there, before any block moves (`_name_notes`).
+    edits = _name_notes(base_text, edits)
     bb, cb = split_md_blocks(base_text), split_md_blocks(cur_text)
     bp, cp = [_prose(b.content) for b in bb], [_prose(b.content) for b in cb]
     sm = SequenceMatcher(None, bp, cp, autojunk=False)
@@ -2177,7 +2289,7 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
             pos = sum(len(x.text) for x in blocks[:j])
             text = text[:pos] + content + text[pos + len(mine):]
         n_before = len(split_md_blocks(text))
-        text, rep = apply_edits(text, [{"i": j, "html": html}], _tomb=tomb, _span=span)
+        text, rep = apply_edits(text, [{"i": j, "html": html}], _tomb=tomb, _span=span, _named=True)
         skipped += [(i, why) for _, why in rep["skipped"]]
         if as_held:
             toggled += rep["toggled"]

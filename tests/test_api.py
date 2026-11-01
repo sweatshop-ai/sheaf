@@ -386,10 +386,42 @@ def test_the_for_argument_is_written_as_text_never_as_markup(work):
 
 
 def test_an_empty_by_argument_is_not_the_same_as_none_it_leaves_the_byline_out(work):
-    # None means "the user's name" (SPEC 6.3); an empty string was asked for, and gets no byline.
+    # None means "the front matter's assistant, else the user's name" (SPEC 6.3); an empty string
+    # was asked for, and gets no byline.
     doc = write(work / "doc.md", "# T\n\ntext\n")
     assert "Document prepared by" not in sheafmd.render(doc, by="")
     assert "Document prepared by Ada</p>" in sheafmd.render(doc, by=None)
+
+
+@pytest.mark.parametrize("share", [True, False])
+def test_the_assistant_of_the_front_matter_prepared_the_document_not_the_user(work, share):
+    # #167: the list row named James and the page named the hub's person.
+    doc = write(work / "doc.md", "---\nassistant: James\nkind: question\n---\n\n# T\n\ntext\n")
+    page = sheafmd.render(doc, share=share)
+    assert "Document prepared by James</p>" in page and "Document prepared by Ada" not in page
+
+
+@pytest.mark.parametrize("share", [True, False])
+@pytest.mark.parametrize("note", ["late paying", "late paying, see invoice #2231"])
+def test_a_comment_in_the_assistant_never_reaches_the_byline(work, share, note):
+    # Opus review 1 on PR 170: read before the share copy's strip, it was escaped into visible text.
+    # Review 3: a " #" in the note, cut as a YAML comment before the strip, left an opener unremoved.
+    doc = write(work / "doc.md", f"---\nassistant: James <!-- {note} -->\n---\n\n# T\n\ntext\n")
+    page = sheafmd.render(doc, share=share)
+    assert "Document prepared by James</p>" in page and "late paying" not in page
+
+
+def test_the_by_argument_still_wins_over_the_assistant_of_the_front_matter(work):
+    doc = write(work / "doc.md", "---\nassistant: James\n---\n\n# T\n\ntext\n")
+    assert "Document prepared by Grace</p>" in sheafmd.render(doc, by="Grace")
+    assert "Document prepared by" not in sheafmd.render(doc, by="")
+
+
+@pytest.mark.parametrize("front", ["", "---\nkind: question\n---\n\n", "---\nassistant: ''\n---\n\n",
+                                   "---\nassistant: [James, Ada]\n---\n\n"])
+def test_without_an_assistant_in_the_front_matter_the_user_prepared_the_document(work, front):
+    doc = write(work / "doc.md", front + "# T\n\ntext\n")
+    assert "Document prepared by Ada</p>" in sheafmd.render(doc)
 
 
 def test_the_credit_argument_adds_the_line_and_false_overrides_the_root_config(work):

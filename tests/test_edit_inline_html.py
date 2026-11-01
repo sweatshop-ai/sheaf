@@ -374,3 +374,60 @@ def test_a_pipe_in_code_outside_a_table_gets_no_backslash():
 def test_a_pipe_in_code_in_a_table_pandoc_writes_as_raw_html_gets_no_backslash():
     html = "<table><tr><td><code>x|y</code></td><td>a<br>b\\c</td></tr></table>"
     assert "\\|" not in rde.html_block_to_md(html)
+
+
+# Gate 1 on #161.
+
+@pytest.mark.parametrize("src", [
+    "Press <kbd><kbd>Ctrl</kbd>+<kbd>C</kbd></kbd> here.",
+    "Go <mark>a <mark>b</mark> c</mark> here.",
+    "Go <x1>a <x1>b <x1>c</x1> d</x1> e</x1> here.",
+])
+def test_nested_raw_elements_of_one_name_each_keep_their_closing_tag(src):
+    assert saved(src) == src.replace("here", "there") + "\n"
+
+
+@pytest.mark.parametrize("src,want", [
+    ("> a <x1>b\n>\n> </x1>c here", "> a <x1>b\n>\n> </x1>c there\n"),
+    ("- a <x1>b\n\n  </x1>c here", "- a <x1>b\n\n  </x1>c there\n"),
+    ("- a <x1>b\n- </x1>c here", "- a <x1>b\n- </x1>c there\n"),
+])
+def test_a_closing_tag_first_in_the_next_paragraph_or_item_stays_there(src, want):
+    assert saved(src) == want
+
+
+@pytest.mark.parametrize("src", [
+    "| a | b |\n|---|---|\n| <x1>k | </x1>c here |",
+    "| <x1>a | </x1>b |\n|---|---|\n| k | c here |",
+    "| a | b |\n|---|---|\n| k | </x1>c here |",
+])
+def test_a_closing_tag_first_in_a_table_cell_stays_there(src):
+    out = saved(src)
+    assert "| </x1>" in out and "there" in out and out.count("</x1>") == 1
+
+
+@pytest.mark.parametrize("src,want", [
+    ("> | a | b |\n> |---|---|\n> | `x\\|y` | here |", "`x\\|y`"),
+    ("- | a | `b\\|c` |\n  |---|---|\n  | k | here |", "`b\\|c`"),
+])
+def test_a_code_span_in_a_table_in_a_quote_or_an_item_keeps_its_escaped_pipe(src, want):
+    assert want in saved(src)
+
+
+def test_a_line_of_a_raw_html_table_that_starts_with_a_pipe_gets_no_backslash_in_code():
+    html = "<table><tr><td>a<br>\n| <code>x|y</code></td><td>b\\c</td></tr></table>"
+    assert "<code>x|y</code>" in rde.html_block_to_md(html)
+
+
+@pytest.mark.parametrize("src,old,new,want", [
+    ("Go un</x1> e due.", "un", "une", "Go une</x1> e due.\n"),
+    ("Go be</x1> a test.", "be", "bean", "Go bean</x1> a test.\n"),
+    ("Go foo</x1> bar here.", "foo", "foobar", "Go foobar</x1> bar here.\n"),
+])
+def test_a_closing_tag_with_no_opener_stays_out_of_a_word_that_grew_by_the_next_words_letters(src, old, new, want):
+    assert saved(src, old=old, new=new) == want
+
+
+def test_a_comment_in_a_cells_code_does_not_become_its_words():
+    out = rde.html_block_to_md("<table><tr><th>a</th></tr><tr><td><code><!-- MDB:a|b -->x|y</code></td></tr></table>")
+    assert "MDB" not in out and "x\\|y" in out

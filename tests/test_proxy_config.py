@@ -4,6 +4,7 @@ instead of printing a warning, so the hub never runs with part of the mode."""
 import getpass
 import os
 import pwd
+import re
 import textwrap
 
 import pytest
@@ -212,3 +213,15 @@ def test_a_token_that_acts_for_two_members_stops_the_start():
                  f'\n[proxy.members."{BOB}"]\nname = "Bob"\nroots = ["/srv/pages/bob"]\ntokens = ["james"]\n')
     with pytest.raises(ProxyError, match="acts for another member already"):
         proxy.load()
+
+
+def test_member_ids_a_mail_address_cannot_hold_each_get_their_own_commit_email():
+    """#38: every such id was `member@<host>`, so their commits were one person's."""
+    a, b = proxy.default_email("auth0|123", "https://chat.example.com"), \
+        proxy.default_email("auth0|456", "https://chat.example.com")
+    assert a != b
+    assert a == proxy.default_email("auth0|123", "https://chat.example.com")
+    for mail in (a, b):
+        local, _, host = mail.partition("@")
+        assert host == "chat.example.com" and re.fullmatch(r"[A-Za-z0-9._+-]+", local)
+    assert proxy.default_email(ADA, "https://chat.example.com") == f"{ADA}@chat.example.com"

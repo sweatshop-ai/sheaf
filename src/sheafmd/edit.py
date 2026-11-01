@@ -614,7 +614,7 @@ def _cell_code_pipes(fragment: str):
         return fragment, None
     soup = BeautifulSoup(fragment, "html.parser")
     texts = [t for code in soup.find_all("code") if code.find_parent(["td", "th"])
-             for t in code.find_all(string=True) if "|" in t]
+             for t in _texts(code) if "|" in t]
     token = next((t for t in (chr(0xF000 + 2 * k) + chr(0xF001 + 2 * k) for k in range(1024))
                   if t not in fragment), None)
     if not texts or token is None:
@@ -648,8 +648,7 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     out = r.stdout if token is None else r.stdout.replace(token, "<br>")
     if pipe is not None:
         # A table pandoc writes as raw HTML has no cell for a bare pipe to end, and `\\|` would show.
-        out = "".join(ln.replace(pipe, "\\|" if ln.lstrip().startswith("|") else "|")
-                      for ln in out.splitlines(True))
+        out = re.sub(r"<table\b[\s\S]*?</table>", lambda m: m.group(0).replace(pipe, "|"), out).replace(pipe, "\\|")
     # Pandoc's gfm writer wraps every bare URL as <https://...>. GFM autolinks a bare
     # URL anyway, so the two render identically - but the angle brackets show up as
     # noise on every line of a table the moment one cell is edited. Unwrap them. The
@@ -906,13 +905,12 @@ def _raw_tags(content: str):
         if name in MARKDOWN_TAGS or name in REMOVE or name in ALSO_REMOVED:
             continue
         if closing:
-            # The browser ends an element with the item, cell or emphasis it opened in: a closing tag past
-            # that end closes nothing, however the names match (#161).
+            # The page's element ends with the item, cell or emphasis it opened in, closed there by the
+            # sanitiser's parser: a closing tag past that end closes nothing, however the names match (#161).
             stack = open_.get(name, [])
-            hit = next((t for t in reversed(stack) if path[:len(t[4])] == t[4]), None)
-            if hit:
-                stack.remove(hit)
-                hit[2] = raw
+            opener = next((j for j in reversed(range(len(stack))) if path[:len(stack[j][4])] == stack[j][4]), None)
+            if opener is not None:
+                stack.pop(opener)[2] = raw
             else:
                 lone.append((raw, node))
             continue
@@ -987,6 +985,9 @@ def _lone_as_text(soup, lone, doc, token) -> dict:
         # it, open between the tag and the words after it.
         ups = {id(u) for u in t.parents}
         before = next((x for x in reversed(texts[:i]) if str(x) not in placed), None)
+        # The line break between two blocks is not words before it: it is first in its own block.
+        if before is not None and not before.strip() and "\n" in before:
+            before = None
         after = next((x for x in texts[i + 1:] if str(x) not in placed), None)
         side = before if before is not None else after
         climb = sum(id(u) not in ups for u in side.parents) if side is not None else 0
@@ -1047,10 +1048,11 @@ def _lone_as_text(soup, lone, doc, token) -> dict:
         # goes with the word before it, then over as many plain spaces as it had, on the same text.
         o -= gap
         k = where(o)
-        # Two items merged with no space leave it between the same words, which are not one word to it.
-        next_word = re.match(r"\s*(\w+)", old[o:])
+        # Two items merged with no space leave it between the same words, which are not one word to it;
+        # a word that grew by the next word's letters holds them once more than the source did.
+        w = re.match(r"\s*(\w+)", old[o:])
         if not (0 < o < len(old) and old[o - 1].isalnum() and old[o].isalnum()
-                or next_word and new.startswith(next_word.group(1), k)):
+                or w and new.startswith(w.group(1), k) and new.count(w.group(1)) <= old.count(w.group(1))):
             while 0 < k < len(new) and new[k - 1].isalnum() and new[k].isalnum() and k not in edges:
                 k += 1 if back else -1
         for _ in range(gap):

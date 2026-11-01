@@ -648,7 +648,11 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     out = r.stdout if token is None else r.stdout.replace(token, "<br>")
     if pipe is not None:
         # A table pandoc writes as raw HTML has no cell for a bare pipe to end, and `\\|` would show.
-        out = re.sub(r"<table\b[\s\S]*?</table>", lambda m: m.group(0).replace(pipe, "|"), out).replace(pipe, "\\|")
+        parts, depth = re.split(r"(</?table\b)", out), 0
+        for k, part in enumerate(parts):
+            depth = depth + 1 if part == "<table" else max(0, depth - 1) if part == "</table" else depth
+            parts[k] = part.replace(pipe, "|" if depth else "\\|")
+        out = "".join(parts)
     # Pandoc's gfm writer wraps every bare URL as <https://...>. GFM autolinks a bare
     # URL anyway, so the two render identically - but the angle brackets show up as
     # noise on every line of a table the moment one cell is edited. Unwrap them. The
@@ -985,10 +989,10 @@ def _lone_as_text(soup, lone, doc, token) -> dict:
         # it, open between the tag and the words after it.
         ups = {id(u) for u in t.parents}
         before = next((x for x in reversed(texts[:i]) if str(x) not in placed), None)
-        # The line break between two blocks is not words before it: it is first in its own block.
-        if before is not None and not before.strip() and "\n" in before:
-            before = None
         after = next((x for x in texts[i + 1:] if str(x) not in placed), None)
+        # The line break between two blocks is not words before it, with words after it in its own block.
+        if before is not None and not before.strip() and "\n" in before and after is not None and after.strip():
+            before = None
         side = before if before is not None else after
         climb = sum(id(u) not in ups for u in side.parents) if side is not None else 0
         # The spaces between the words before it and the tag, in the same text.
@@ -1085,7 +1089,8 @@ def _lone_as_text(soup, lone, doc, token) -> dict:
             anchor, after_it = None, True
         else:
             anchor, after_it = t, j > 0
-            for _ in range(climb):
+            # Beside a tag placed already there is nothing to climb out of: it stands where this one goes.
+            for _ in range(0 if str(t) in placed else climb):
                 sib = anchor.next_sibling if after_it else anchor.previous_sibling
                 if sib is not None or anchor.parent is None or anchor.parent.name == "[document]":
                     break

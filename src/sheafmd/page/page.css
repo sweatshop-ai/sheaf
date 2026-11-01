@@ -194,10 +194,11 @@
 /* The action buttons at the top of a sheaf (SPEC 10.11): the list's, a one-off red, Share a blue toggle. */
 #rd-actions{display:flex;flex-wrap:wrap;gap:6px;max-width:var(--measure,760px);margin:16px auto 0;padding:0 16px;
  box-sizing:border-box}
-#rd-actions .rd-act{--rd-c:#c62828;font:13px/1.45 system-ui,sans-serif;border-radius:999px;padding:2px 10px;
- cursor:pointer;background:none;border:1px solid var(--rd-c);color:var(--rd-c)}
-#rd-actions .rd-act.toggle{--rd-c:#1f5fd6}
-@media (prefers-color-scheme:dark){#rd-actions .rd-act{--rd-c:#ff6b6b}#rd-actions .rd-act.toggle{--rd-c:#6ea2ff}}
+/* Light or dark by the page's `color-scheme`, not the OS's: a mounted page's is the one the loader sets on the host with
+   the front's colours (#169), the OS's where it sets none; a page of its own takes its theme's. */
+#rd-actions .rd-act{--rd-c:light-dark(#c62828,#ff6b6b);font:13px/1.45 system-ui,sans-serif;border-radius:999px;
+ padding:2px 10px;cursor:pointer;background:none;border:1px solid var(--rd-c);color:var(--rd-c)}
+#rd-actions .rd-act.toggle{--rd-c:light-dark(#1f5fd6,#6ea2ff)}
 /* On a phone, a touch target of 44 px, as the list's .list-act in hub/the_list.py (#112); the row wraps as it does
    on a desktop, and a Move to's slug without a hyphen breaks anywhere rather than scroll the page sideways. */
 @media (max-width:600px),(pointer:coarse){#rd-actions .rd-act{min-height:44px;min-width:44px;padding:2px 14px}}

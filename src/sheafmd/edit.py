@@ -956,11 +956,14 @@ def _lone_as_text(soup, lone, doc, token) -> dict:
         after = next((x for x in texts[i + 1:] if str(x) not in placed), None)
         side = before if before is not None else after
         climb = sum(id(u) not in ups for u in side.parents) if side is not None else 0
-        at.append((len(old), str(t), before is not None, climb))
+        # The spaces between the words before it and the tag, in the same text.
+        gap = len(before) - len(before.rstrip()) if before is not None and before.strip() else 0
+        at.append((len(old), str(t), before is not None, climb, gap))
     # A line break of the render and of the page is a space to the diff.
     old = re.sub(r"\s", " ", old)
     words = [_COMMENT_TOKEN.sub("", t) for t in _texts(soup)]
-    new = re.sub(r"\s", " ", "".join(words))
+    raw = "".join(words)
+    new = re.sub(r"\s", " ", raw)
     # Where one text of the page ends and the next begins: Enter puts a new item or line right after
     # the old one, with no space between their words.
     edges, cum = set(), 0
@@ -1002,21 +1005,27 @@ def _lone_as_text(soup, lone, doc, token) -> dict:
                 k = b0 + b + n
         return next((b0 + b for a, b, n in same if a == o), k)
 
-    def between_words(o, back):
+    def between_words(o, back, gap):
         # The diff matches letters: where the word before it was replaced, it can point into the new
         # word. A tag that stood between words in the source goes to the end of that word, or, with no
         # words before it, to the start of the word after it.
+        # Enter after a word moves the space after it to the new line, as a no-break space: a tag
+        # goes with the word before it, then over as many plain spaces as it had, on the same text.
+        o -= gap
         k = where(o)
-        if 0 < o < len(old) and old[o - 1].isalnum() and old[o].isalnum():
-            return k
-        while 0 < k < len(new) and new[k - 1].isalnum() and new[k].isalnum() and k not in edges:
-            k += 1 if back else -1
+        if not (0 < o < len(old) and old[o - 1].isalnum() and old[o].isalnum()):
+            while 0 < k < len(new) and new[k - 1].isalnum() and new[k].isalnum() and k not in edges:
+                k += 1 if back else -1
+        for _ in range(gap):
+            if k >= len(raw) or raw[k] not in " \t\n" or k in edges:
+                break
+            k += 1
         return k
 
     # From the end, so that the offsets still to place stay where they were; of two at one place, the
     # second goes first and the first lands before it.
-    for o, p, back, climb in reversed(sorted(((between_words(o, back), p, back, climb)
-                                              for o, p, back, climb in at), key=lambda x: x[0])):
+    for o, p, back, climb in reversed(sorted(((between_words(o, back, gap), p, back, climb)
+                                              for o, p, back, climb, gap in at), key=lambda x: x[0])):
         cum, spot = 0, None
         for t in _texts(soup):
             kept = _kept(str(t))

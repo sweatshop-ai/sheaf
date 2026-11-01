@@ -175,6 +175,34 @@ def test_the_mounted_page_wears_the_fronts_font_once_the_loader_sets_it_on_the_h
     assert f.js("return getComputedStyle(root.querySelector('.rd-root')).fontFamily;") == theme
 
 
+RULE = ':host([style*="--front-font"]) .rd-root{font-family:var(--front-font)}'
+
+
+@pytest.mark.parametrize("kept", [False, True], ids=["fresh", "kept-mount-css"])
+@pytest.mark.parametrize("tail", [".note{color:#333", ".note{color:#333}/* not closed"])
+def test_a_theme_that_ends_open_does_not_swallow_the_fronts_font(chromium, site, tmp_path, tail, kept):
+    """#152's gap: a user theme that ends inside a block or a comment swallows any rule after it in its stylesheet.
+    The rule that hands the wrapper `--front-font` comes before the theme, so the theme cannot reach it; and it does
+    with a `/_/mount.css` a browser kept from before the rule, which `?v=` names the same while the version stands."""
+    theme = tmp_path / "open-theme"
+    theme.mkdir()
+    (theme / "theme.toml").write_text('name = "open"\n', encoding="utf-8")
+    (theme / "theme.css").write_text("body{font-family:Georgia,serif}\n" + tail, encoding="utf-8")
+    site.hub.render(site.file, {"theme": str(theme)}, None)
+    c, f = _front(chromium, site)
+    if kept:
+        f.page.route("**/_/mount.css*", lambda r: r.fulfill(response=(got := r.fetch()),
+                                                             body=got.text().replace(RULE, "")))
+    try:
+        f.open()
+        assert "Georgia" in f.js("return getComputedStyle(root.querySelector('.rd-root')).fontFamily;")
+        f.page.evaluate("document.getElementById('pane').style.setProperty('--front-font', '\"Front Sans\", serif')")
+        assert f.js("return getComputedStyle(root.querySelector('.rd-root')).fontFamily;") == '"Front Sans", serif'
+        assert f.errors == []
+    finally:
+        close_context(c)
+
+
 def test_the_menu_opens_from_a_click_in_the_root_and_a_click_elsewhere_in_it_closes_it(front):
     front.open()
     front.click("#rd-menu-btn")

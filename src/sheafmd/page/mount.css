@@ -4,3 +4,9 @@
    page.css follows this file in /_/mount.css. */
 .rd-root { display: block; position: relative; height: 100%; overflow: auto; box-sizing: border-box; }
 .rd-root:focus { outline: none; }
+/* The font is the theme's until the loader sets `--front-font` on the host's style, as it sets the colours (#152): then
+   the wrapper takes the front's family, as the old frame's body did, a mounted page's and a mounted list's alike; what
+   the theme gives a family of its own (code) keeps it. A mounted page has it in /_/mount?doc= too, before the theme
+   (render.py, mount_css), so a copy of this file kept from before the rule leaves the page as it was. The match is on
+   the style attribute's text, so no other variable may start with `--front-font`. */
+:host([style*="--front-font"]) .rd-root{font-family:var(--front-font)}

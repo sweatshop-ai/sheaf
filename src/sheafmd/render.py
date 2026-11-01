@@ -1215,8 +1215,9 @@ def render_file(path, *, share: bool = True, theme=None, title: str | None = Non
         # source is read here once and handed on, so the byline and the page come from one text.
         if src is None:
             src = path.read_text(encoding="utf-8")
-        # Read without its comments: the byline is escaped, so a note there would show as text.
-        by = visibility.text(visibility.front_matter(strip_comments(src)), "assistant").strip() or config.user_name()
+        # The value without its comments: the byline is escaped, so a note there would show as text. The
+        # front matter itself is read raw, as the list reads it, so a comment left open cannot move its end.
+        by = strip_comments(visibility.text(visibility.front_matter(src), "assistant")).strip() or config.user_name()
     html_out = build(path, theme=theme, share=share, title=title, toc=toc,
                      max_image_width=max_image_width, by=by,
                      for_=for_ if for_ is not None else rc.for_,

@@ -454,10 +454,10 @@ def _forget_entries(stores, versions, prefix: str):
 
 def _stat_inside(top: Path, rel: str, folders: dict) -> tuple[os.stat_result, bool] | None:
     """The stat of the file `rel` in a root whose real folder is `top`, and whether the file is a
-    link; None when it is not a regular file, or when its real location is outside the root (what
-    `resolve` refuses): the file itself a link out, or a folder of its path (git lists `docs/a.md`
-    while it is tracked, though `docs` became a link out). `folders` remembers which folders were
-    found inside, so a listing resolves each folder once. A file that is no link costs the one
+    link; None when it is not a regular file, or when its real location is outside the root or in its
+    `.sheaf/` (what `resolve` refuses): the file itself a link there, or a folder of its path (git lists
+    `docs/a.md` while it is tracked, though `docs` became a link there, #38). `folders` remembers which
+    folders were found inside, so a listing resolves each folder once. A file that is no link costs the one
     `lstat`; a link is resolved and stat-ed too."""
     full = os.path.join(top, rel)
     try:
@@ -465,18 +465,23 @@ def _stat_inside(top: Path, rel: str, folders: dict) -> tuple[os.stat_result, bo
         if here:
             inside = folders.get(here)
             if inside is None:
-                inside = folders[here] = _inside(Path(os.path.realpath(os.path.dirname(full))), top)
+                inside = folders[here] = _servable_at(os.path.realpath(os.path.dirname(full)), top)
             if not inside:
                 return None
         st = os.lstat(full)
         linked = stat_mod.S_ISLNK(st.st_mode)
         if linked:
-            if not _inside(Path(os.path.realpath(full)), top):
+            if not _servable_at(os.path.realpath(full), top):
                 return None
             st = os.stat(full)
     except (OSError, ValueError):
         return None
     return (st, linked) if stat_mod.S_ISREG(st.st_mode) else None
+
+
+def _servable_at(real: str, top: Path) -> bool:
+    """Whether `real`, a path with its links resolved, lies inside the root `top` and outside its `.sheaf/`."""
+    return _inside(Path(real), top) and not _sheafs_own(os.path.relpath(real, top).replace(os.sep, "/"))
 
 
 _NOT_A_REPO = object()
@@ -562,8 +567,6 @@ def _capped(top: Path, names: Iterable[str], kept: Callable[[str, bool], bool]) 
     for rel in names:
         if not (_servable(rel) and (found := _stat_inside(top, rel, folders)) and kept(rel, found[1])):
             continue
-        if found[1] and _sheafs_own(os.path.relpath(os.path.realpath(top / rel), top)):
-            continue                                  # a link into `.sheaf/`, which `document` refuses
         if len(docs) < LIST_CAP:
             docs.append(Found(rel, found[0]))
         else:

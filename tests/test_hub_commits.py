@@ -1377,3 +1377,80 @@ def test_an_address_that_is_a_fifo_never_holds_the_pusher(box, sheaves, remote):
     box.hub.tick()
     assert box.hub.commits.settle(10)
     assert git(remote, "log", "-1", "--format=%s", "main") == f"versions: {folder.name}\n"
+
+
+@pytest.mark.parametrize("step", ["add", "commit"])
+def test_a_git_that_times_out_puts_back_what_was_staged_and_leaves_no_lock(box, sheaves, monkeypatch, step):
+    """#38: a git the hub killed on its bound leaves its `index.lock`, and the index as it had made it."""
+    from sheafmd.hub import commits
+    f = sheaves / "acme" / "blog" / "2026-10-28-plan.md"
+    original = f.read_text(encoding="utf-8")
+    f.write_text(original + "\nStaged by hand, never in the work tree again.\n", encoding="utf-8")
+    git(sheaves, "add", "acme/blog/2026-10-28-plan.md")
+    f.write_text(original, encoding="utf-8")
+    real = commits._git
+
+    def killed(folder, *args, **kw):
+        if step in args and "--" in args:
+            if step == "add":
+                real(folder, *args, **kw)                  # killed after it staged the write
+            (sheaves / ".git" / "index.lock").write_text("", encoding="utf-8")   # what a SIGKILL leaves
+            raise subprocess.TimeoutExpired(args, 20)
+        return real(folder, *args, **kw)
+
+    monkeypatch.setattr(commits, "_git", killed)
+    edit(box, sheaves)
+    (row,) = rows("commit-failed")
+    assert row["doc"] == DOC
+    assert not (sheaves / ".git" / "index.lock").exists()
+    assert "Staged by hand" in git(sheaves, "show", ":acme/blog/2026-10-28-plan.md")
+    assert git(sheaves, "diff", "--cached", "--name-only") == "acme/blog/2026-10-28-plan.md\n"
+
+
+def test_a_lock_another_git_took_after_the_add_is_left_where_it_is(box, sheaves, monkeypatch):
+    """#38: only the add and the commit take the index lock; a later git that times out never made one."""
+    from sheafmd.hub import commits
+    real = commits._git
+    lock = sheaves / ".git" / "index.lock"
+
+    def slow(folder, *args, **kw):
+        if args[:2] == ("diff", "--cached"):
+            lock.write_text("", encoding="utf-8")       # a person's `git commit`, its editor open
+            raise subprocess.TimeoutExpired(args, 20)
+        return real(folder, *args, **kw)
+
+    monkeypatch.setattr(commits, "_git", slow)
+    edit(box, sheaves)
+    assert rows("commit-failed")
+    assert lock.exists()
+
+
+def test_a_git_commit_killed_once_the_commit_is_made_counts_as_made(box, sheaves, remote, monkeypatch):
+    """#38: the branch moved before the kill, so the index is not put back under it and no row says it failed."""
+    from sheafmd.hub import commits
+    real = commits._git
+
+    def killed(folder, *args, **kw):
+        r = real(folder, *args, **kw)
+        if "commit" in args and "--" in args:
+            (sheaves / ".git" / "index.lock").write_text("", encoding="utf-8")
+            raise subprocess.TimeoutExpired(args, 20)
+        return r
+
+    monkeypatch.setattr(commits, "_git", killed)
+    edit(box, sheaves)
+    assert rows("commit-failed") == []
+    assert not (sheaves / ".git" / "index.lock").exists()
+    assert git(sheaves, "log", "-1", "--format=%s") == f"edit: acme/blog/2026-10-28-plan.md\n"
+    assert git(sheaves, "diff", "--cached", "--name-only") == ""
+
+
+def test_a_repo_with_an_email_but_no_name_commits_as_sheaf(box, sheaves, remote):
+    """#38: the hub's committer stood in only for a missing `user.email`; with no `user.name` either git refused."""
+    git(sheaves, "config", "--unset", "user.name")
+    git(sheaves, "config", "user.useConfigOnly", "true")
+    edit(box, sheaves)
+    assert rows("commit-failed") == []
+    (who, _), _ = pushed(box, remote)
+    assert who.startswith("Bea <bea@example.com>|")
+    assert git(remote, "log", "-1", "--format=%cn <%ce>", "main") == "sheaf <sheaf@localhost>\n"

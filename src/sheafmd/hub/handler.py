@@ -70,6 +70,10 @@ PROXY_SIGN_IN = ("This browser is not signed in to this site, or its sign-in has
                  "site again, then reload this page.")
 WRONG_KEY = ("This link does not hold this hub's key. On the machine that runs the hub, run "
              "<code>sheaf signin-url</code> again and open what it prints in this browser.")
+# The files each mount asset joins, in order: the loader's own, then the page's and the list's, which their pages of
+# their own inline. Served under `?v=<version>` and kept for a year, so a change to any of them needs a new version
+# (#172; tests/asset_versions.txt holds what each version served).
+MOUNT_ASSETS = {"mount.js": ("mount.js", "page.js", "list.js"), "mount.css": ("mount.css", "page.css", "list.css")}
 SETTING_TYPES = {"title": str, "toc": str, "max_image_width": int, "by": str, "for": str,
                  "theme": str, "credit": bool}
 _ID_RE = re.compile(r"[A-Za-z0-9_-]{1,40}")
@@ -861,9 +865,7 @@ class Handler:
         """The loader's script and the page's style, the hub's own files. A request that names this hub's version
         (`?v=`) may be kept for a year: a new version is a new address. Any other is asked again each time."""
         page = resources.files("sheafmd") / "page"
-        # The page's and the list's own script and style follow the loader's: the same files their pages of their own inline.
-        after = {"mount.js": ("page.js", "list.js"), "mount.css": ("page.css", "list.css")}[name]
-        body = b"\n".join((page / f).read_bytes() for f in (name, *after))
+        body = b"\n".join((page / f).read_bytes() for f in MOUNT_ASSETS[name])
         if name == "mount.js":       # the script knows the hub it came from, to tell an upgrade from a remount
             body = body.replace(b"'@@SHEAF_VERSION@@'", json.dumps(self.hub.version).encode(), 1)
         named = req.query.get("v") == self.hub.version

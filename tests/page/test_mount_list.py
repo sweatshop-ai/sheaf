@@ -7,7 +7,7 @@ handler as Nell, as tests/page/test_page_list.py does for the page of its own. T
 import json
 
 import pytest
-from pagehelp import HOST, RED, close_context, contrast, new_context, until
+from pagehelp import HOST, RED, assert_readable, close_context, drop_host, new_context, until, wear_host
 from test_hub_list import JOEY, NELL, box, github, sheaves  # noqa: F401  (the hub with its list, as there)
 from test_mount_page import KEEP_ROOT
 
@@ -259,12 +259,10 @@ def test_the_mounted_list_wears_the_colours_the_loader_sets_on_the_host_not_the_
     off again, the list's own set for the OS comes back."""
     for m in mount_the_list(chromium, box, color_scheme=os):
         assert m.js(COLOURS) == OWN[os]
-        for name, value in HOST[front].items():
-            m.page.evaluate("([n, v]) => document.getElementById('pane').style.setProperty(n, v)", [name, value])
+        wear_host(m.page, front)
         h = HOST[front]
         assert m.js(COLOURS) == [h["--bg"], h["--fg"], h["--muted"], h["--rule"], h["--accent"]]
-        for name in HOST[front]:
-            m.page.evaluate("(n) => document.getElementById('pane').style.removeProperty(n)", name)
+        drop_host(m.page, front)
         assert m.js(COLOURS) == OWN[os]
 
 
@@ -292,7 +290,7 @@ REDS = """const cs = (s) => getComputedStyle(root.querySelector(s)), list = root
 def assert_reds_of(got, red):
     assert [got["border"], got["text"], got["pressed"][0], got["error"]] == [red] * 4, got
     assert got["pressed"][1] == got["bg"], got
-    assert contrast(red, got["bg"]) >= 4.5, (red, got["bg"], contrast(red, got["bg"]))
+    assert_readable(red, got["bg"])
 
 
 @pytest.mark.parametrize("os, front", [("dark", "light"), ("light", "dark"), ("dark", "dark"), ("light", "light")])
@@ -302,11 +300,9 @@ def test_the_mounted_lists_reds_follow_the_scheme_the_loader_sets_on_the_host_no
     background. They follow the `color-scheme` the loader sets on the host, and the OS's while the host sets none."""
     for m in mount_the_list(chromium, box, color_scheme=os):
         assert_reds_of(m.js(REDS), RED[os])
-        for name, value in HOST[front].items():
-            m.page.evaluate("([n, v]) => document.getElementById('pane').style.setProperty(n, v)", [name, value])
+        wear_host(m.page, front)
         assert_reds_of(m.js(REDS), RED[front])
-        for name in HOST[front]:
-            m.page.evaluate("(n) => document.getElementById('pane').style.removeProperty(n)", name)
+        drop_host(m.page, front)
         assert_reds_of(m.js(REDS), RED[os])
 
 
@@ -316,4 +312,3 @@ def test_the_reds_of_the_list_of_its_own_follow_the_os(chromium, box, os):  # no
         own = m.page.context.new_page()
         own.goto(ORIGIN + "/list")
         assert_reds_of(own.evaluate("(() => { const root = document; " + REDS + " })()"), RED[os])
-        own.close()

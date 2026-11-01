@@ -35,6 +35,22 @@ def contrast(a, b):
     return (hi + 0.05) / (lo + 0.05)
 
 
+def assert_readable(colour, bg):
+    """WCAG AA for the 13 px text of the action buttons: 4.5:1."""
+    assert contrast(colour, bg) >= 4.5, (colour, bg, contrast(colour, bg))
+
+
+def wear_host(page, scheme):
+    """Set on the host (`#pane`) what the loader sets from the front's theme: HOST's colours and scheme."""
+    for name, value in HOST[scheme].items():
+        page.evaluate("([n, v]) => document.getElementById('pane').style.setProperty(n, v)", [name, value])
+
+
+def drop_host(page, scheme):
+    for name in HOST[scheme]:
+        page.evaluate("(n) => document.getElementById('pane').style.removeProperty(n)", name)
+
+
 def at(css, text, k=0):
     """A point in the page: `k` characters into the first text node under `css` that holds `text`
     (k = None puts it at the end of that text)."""

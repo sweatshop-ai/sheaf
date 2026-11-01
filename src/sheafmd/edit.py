@@ -1165,11 +1165,12 @@ def _tags_as_text(content: str, fragment: str, token):
 # writes `[^label]` where the ref was. A ref with no label is refused, never written as an empty note.
 
 NOTE_REF_RE = re.compile(r'<a\b(?=[^>]*\bclass="[^"]*\bfootnote-ref\b)[^>]*>[\s\S]*?</a>')
-NOTE_NAME_RE = re.compile(r'^<a data-rd-note="([^"]*)"')
+NOTE_NAME_RE = re.compile(r'^<a\b[^>]*\bdata-rd-note="([^"]*)"')
 NOTE_DEF_RE = re.compile(r"^ {0,3}\[\^[^\]\n]+\]:", re.M)
-CITED_RE = re.compile(r"\[\^([^\]\s]+)\]")
-# A citation in pandoc's sourcepos render: where it is in the source, and its number on the page.
-CITED_AT_RE = re.compile(r'data-pos="(\d+):(\d+)-(\d+):(\d+)"><a href="#fn(\d+)" class="footnote-ref"')
+CITED_RE = re.compile(r"\[\^([^\]\n]+)\]")
+# A citation in pandoc's sourcepos render: where it is in the source, and its number on the page. In a tight
+# list item the span carries the item's place too, after its own.
+CITED_AT_RE = re.compile(r'data-pos="(\d+):(\d+)-(\d+):(\d+)"(?: data-pos="[^"]*")*><a href="#fn(\d+)" class="footnote-ref"')
 
 
 def _note_labels(text: str) -> dict:
@@ -1853,7 +1854,8 @@ def _restore(text, blocks, j, i, base, html, tomb, at, avoid, changed, skipped, 
 
 
 def _apply_one(md: str, html: str, **kw):
-    """`apply_edits` of one edit, to the first block of `md` (and the `_span` after it, if given)."""
+    """`apply_edits` of one edit, to the first block of `md` (and the `_span` after it, if given), its footnote
+    refs named already by `merge_edits`."""
     return apply_edits(md, [{"i": 0, "html": html}], _named=True, **kw)
 
 

@@ -224,6 +224,23 @@ def _restage(folder: Path, before: dict, paths: list) -> bool:
                 given="".join(e + "\0" for e in gone + back)).returncode == 0
 
 
+def _locking(folder: Path, *args, author=None):
+    """`_git` for a command that takes the index lock (`add`, `commit`). Killed on its bound, it leaves the lock: that
+    goes (#38), unless it was there before, another git's (the command then fails on it, no timeout). One a person's
+    git took while the hub's hung before taking it goes too, a window the repo's lock cannot close."""
+    lock = _git(folder, "rev-parse", "--path-format=absolute", "--git-path", "index.lock").stdout.strip()
+    held = bool(lock) and os.path.lexists(lock)
+    try:
+        return _git(folder, *args, author=author)
+    except subprocess.TimeoutExpired:
+        if lock and not held:
+            try:
+                os.unlink(lock)
+            except FileNotFoundError:
+                pass
+        raise
+
+
 def _last_line(r) -> str:
     lines = (r.stderr or r.stdout or "").strip().splitlines()
     return lines[-1][:300] if lines else f"git exited {r.returncode}"
@@ -380,7 +397,20 @@ class Commits:
             record("commit-failed", address, error="the index holds a merge conflict on this document")
             return False
         before = _staged(folder, paths)
-        r = _git(folder, "add", "-A", "--", *paths)   # a file an ignore rule names, in the folder, stays out
+        head = _git(folder, "rev-parse", "-q", "--verify", "HEAD").stdout.strip()
+        try:
+            return self._add_and_commit(folder, paths, before, author, subject, address, record)
+        except subprocess.TimeoutExpired as e:
+            # A git killed on its bound left the index as far as it got (#38); `_locking` took away its lock.
+            if head and _git(folder, "rev-parse", "-q", "--verify", "HEAD^").stdout.strip() == head:
+                return True                           # killed once the commit moved the branch on: it is made
+            kept = _restage(folder, before, paths)
+            record("commit-failed", address, error=str(e)[:300] + ("" if kept else "; the index could not be put back"))
+            return False
+
+    def _add_and_commit(self, folder: Path, paths: list, before: dict, author: Author, subject: str, address: str,
+                        record) -> bool:
+        r = _locking(folder, "add", "-A", "--", *paths)   # a file an ignore rule names, in the folder, stays out
         if r.returncode != 0:
             kept = _restage(folder, before, paths)
             record("commit-failed", address,
@@ -392,12 +422,14 @@ class Commits:
                 record("commit-failed", address, error="the index could not be put back")
             return False
         who = []
-        if _git(folder, "config", "user.email").returncode != 0:
+        # Either one missing and git refuses the commit (`user.useConfigOnly`, no name from the account): the
+        # hub commits as itself then, never half as the repo's committer (#38).
+        if any(_git(folder, "config", f"user.{k}").returncode != 0 for k in ("name", "email")):
             who = ["-c", f"user.name={COMMITTER[0]}", "-c", f"user.email={COMMITTER[1]}"]
         if not author.email:
             mail = _git(folder, "config", "user.email")
             author = Author(author.name, mail.stdout.strip() if mail.returncode == 0 else COMMITTER[1])
-        r = _git(folder, *who, "commit", "-q", "--no-verify", "-m", subject, "--", *paths, author=author)
+        r = _locking(folder, *who, "commit", "-q", "--no-verify", "-m", subject, "--", *paths, author=author)
         if r.returncode != 0:
             kept = _restage(folder, before, paths)
             record("commit-failed", address,

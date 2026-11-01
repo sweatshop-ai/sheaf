@@ -409,6 +409,15 @@ def test_a_comment_in_the_assistant_never_reaches_the_byline(work, share):
     assert "Document prepared by James</p>" in page and "late paying" not in page
 
 
+def test_a_comment_left_open_in_the_front_matter_never_moves_its_end(work):
+    # Opus review 2 on PR 170: stripped as a whole, the open comment ran to a `-->` in the body and the
+    # front matter ended at a later `---`, so the page named Mallory where the list named James.
+    doc = write(work / "doc.md", "---\nassistant: James <!-- oops\n---\n\n# T\n\ntext -->\n\n"
+                                 "assistant: Mallory\n\n---\n")
+    page = sheafmd.render(doc, share=False)
+    assert "Document prepared by James" in page and "Document prepared by Mallory" not in page
+
+
 def test_the_by_argument_still_wins_over_the_assistant_of_the_front_matter(work):
     doc = write(work / "doc.md", "---\nassistant: James\n---\n\n# T\n\ntext\n")
     assert "Document prepared by Grace</p>" in sheafmd.render(doc, by="Grace")

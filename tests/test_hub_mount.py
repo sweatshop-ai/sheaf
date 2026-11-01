@@ -128,13 +128,14 @@ def test_the_mounted_css_selects_the_host_and_the_wrapper_where_a_page_of_its_ow
     assert re.search(r":host\s*\{[^}]*--bg", css) and re.search(r"\.rd-root\s*\{[^}]*overflow-wrap:break-word", css)
 
 
-def test_only_the_mount_stylesheet_takes_the_fronts_font_and_the_page_and_the_share_copy_keep_the_themes(browser, hostile):
-    """#152: the rule that hands the wrapper the host's `--front-font` is in the hub's `/_/mount.css` alone, which a
-    mounted page and a mounted list both load: never in the theme's text, where a theme that ends open would swallow it."""
+def test_only_the_mounted_styles_take_the_fronts_font_and_the_page_and_the_share_copy_keep_the_themes(browser, hostile):
+    """#152: the rule that hands the wrapper the host's `--front-font` is in the hub's `/_/mount.css`, which a mounted list
+    loads, and first in a mounted page's styles, which are never kept: before the theme, which cannot swallow it there."""
     attach(browser, hostile)
     rule = ':host([style*="--front-font"]) .rd-root{font-family:var(--front-font)}'
     assert browser.get("/_/mount.css", cookie=False).text.count(rule) == 1
-    assert "--front-font" not in browser.get(f"/_/mount?doc={DOC}").json()["css"]
+    css = browser.get(f"/_/mount?doc={DOC}").json()["css"]
+    assert css.startswith(rule + "\n") and css.count(rule) == 1
     page = browser.get("/work/plan.md")
     assert page.status == 200 and "--front-font" not in page.text
     assert "--front-font" not in sheafmd.render(hostile, share=True)

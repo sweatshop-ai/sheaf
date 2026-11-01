@@ -313,3 +313,64 @@ def test_a_closing_tag_with_no_opener_stays_in_its_item_when_enter_splits_it():
 
 def test_a_closing_tag_with_no_opener_after_an_element_and_a_space_keeps_the_space_before_it():
     assert saved("A <kbd>K</kbd> </x1>b here.") == "A <kbd>K</kbd> </x1>b there.\n"
+
+
+# Sheaf #161: the cases #157 left.
+
+@pytest.mark.parametrize("src,want", [
+    ("- one\n- </x1>three here", "- one</x1>three there\n"),
+    ("- one </x1>\n- three here", "- one</x1>three there\n"),
+])
+def test_a_closing_tag_with_no_opener_stays_between_two_items_merged_with_no_space(src, want):
+    assert saved(src, html="<ul><li>onethree there</li></ul>") == want
+
+
+@pytest.mark.parametrize("src,html", [
+    ("- Item one " + C1 + " </x1> more here\n- two",
+     '<ul><li>Item one<span class="rd-anchor" data-rd-id="c1"></span></li>'
+     "<li>&nbsp;&nbsp;more there</li><li>two</li></ul>"),
+    ("- Item one </x1> " + C1 + " more here\n- two",
+     '<ul><li>Item one</li><li>&nbsp;&nbsp;<span class="rd-anchor" data-rd-id="c1"></span> more there</li>'
+     "<li>two</li></ul>"),
+])
+def test_a_closing_tag_with_no_opener_stays_in_its_item_when_enter_splits_it_beside_a_comment(src, html):
+    out = saved(src, html=html)
+    assert out.startswith("- Item one</x1>") and out.count("</x1>") == 1 and C1 in out
+
+
+@pytest.mark.parametrize("src", [
+    "- a <x1>b\n- c</x1> here\n",
+    "*a <x1>b* c</x1> here.\n",
+    "> a <x1>b\n>\n> c</x1> here\n",
+    "| a | b |\n|---|---|\n| <x1>k | c</x1> here |\n",
+])
+def test_a_tag_opened_in_one_item_cell_or_emphasis_and_closed_in_another_stays_where_each_was(src):
+    out = saved(src.rstrip("\n"))
+    assert "<x1>b" in out or "<x1>k" in out
+    assert "c</x1> there" in out and out.count("</x1>") == 1
+
+
+def test_a_closing_tag_inside_an_emphasis_still_closes_the_element_opened_before_it():
+    out = saved("Go <x1>a *b* c</x1> here.")
+    assert out == "Go <x1>a *b* c</x1> there.\n"
+
+
+@pytest.mark.parametrize("src,want", [
+    ("| a | b |\n|---|---|\n| `x\\|y` | here |", "`x\\|y`"),
+    ("| a | b |\n|---|---|\n| `x\\|y\\|z` <kbd>k</kbd> | here |", "`x\\|y\\|z`"),
+    ("| `x\\|y` | b |\n|---|---|\n| a | here |", "`x\\|y`"),
+])
+def test_a_code_span_in_a_table_cell_keeps_its_escaped_pipe(src, want):
+    out = saved(src)
+    assert want in out and "there" in out
+    assert "<td><code>" + want[1:-1].replace("\\|", "|") + "</code>" in page_fragment(out) \
+        or "<th><code>" + want[1:-1].replace("\\|", "|") + "</code>" in page_fragment(out)
+
+
+def test_a_pipe_in_code_outside_a_table_gets_no_backslash():
+    assert saved("Run `a|b` here.") == "Run `a|b` there.\n"
+
+
+def test_a_pipe_in_code_in_a_table_pandoc_writes_as_raw_html_gets_no_backslash():
+    html = "<table><tr><td><code>x|y</code></td><td>a<br>b\\c</td></tr></table>"
+    assert "\\|" not in rde.html_block_to_md(html)

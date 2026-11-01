@@ -604,6 +604,26 @@ def _cell_breaks(fragment: str):
     return str(soup), token
 
 
+def _cell_code_pipes(fragment: str):
+    """(the fragment with each `|` in a table cell's code as a token, the token or None). Pandoc's writer
+    leaves a pipe in a cell's code bare, which ends the cell; GFM reads `\\|` there as the pipe. As wide as
+    `\\|`, so that pandoc pads the column for what the cell will say."""
+    from bs4 import BeautifulSoup, NavigableString
+
+    if "|" not in fragment or "<code" not in fragment.lower():
+        return fragment, None
+    soup = BeautifulSoup(fragment, "html.parser")
+    texts = [t for code in soup.find_all("code") if code.find_parent(["td", "th"])
+             for t in code.find_all(string=True) if "|" in t]
+    token = next((t for t in (chr(0xF000 + 2 * k) + chr(0xF001 + 2 * k) for k in range(1024))
+                  if t not in fragment), None)
+    if not texts or token is None:
+        return fragment, None
+    for t in texts:
+        t.replace_with(NavigableString(t.replace("|", token)))
+    return str(soup), token
+
+
 def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     """Convert one edited HTML block back to GitHub-flavoured markdown. With `source`, the block's markdown,
     markup the source did not have is unwrapped (`_unwrap_strays`) and named in `strays`."""
@@ -616,6 +636,7 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     clean = _without_placeholder_breaks(_boxes_as_text(_typed_tasks(sanitize(_sanitize(fragment, source, strays)))))
     if not clean.strip():
         return ""
+    clean, pipe = _cell_code_pipes(clean)
     cells, token = _cell_breaks(clean)
     r = _pandoc.run(["-f", "html", "-t", "gfm", "--wrap=none"], cells)
     if token is not None and r.returncode == 0 and r.stdout.count(token) != cells.count(token):
@@ -625,6 +646,10 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     if r.returncode != 0:
         raise EditError(f"pandoc: {r.stderr.strip()[:200]}")
     out = r.stdout if token is None else r.stdout.replace(token, "<br>")
+    if pipe is not None:
+        # A table pandoc writes as raw HTML has no cell for a bare pipe to end, and `\\|` would show.
+        out = "".join(ln.replace(pipe, "\\|" if ln.lstrip().startswith("|") else "|")
+                      for ln in out.splitlines(True))
     # Pandoc's gfm writer wraps every bare URL as <https://...>. GFM autolinks a bare
     # URL anyway, so the two render identically - but the angle brackets show up as
     # noise on every line of a table the moment one cell is edited. Unwrap them. The
@@ -840,8 +865,8 @@ TAG_RE = re.compile(r"^<(/?)([A-Za-z][A-Za-z0-9-]*)\b[^>]*?(/?)>$")
 def _raw_tags(content: str):
     """The raw inline tags of a block's source, in order, as (tags, lone, doc), each tag in the source's
     bytes: `tags` holds (name, opening tag, closing tag or "", the opening tag as the page has it);
-    `lone`, (closing tag, its node in `doc`) for each closing tag with no opener of its name; `doc`,
-    pandoc's JSON of the block."""
+    `lone`, (closing tag, its node in `doc`) for each closing tag with no opener of its name around it;
+    `doc`, pandoc's JSON of the block."""
     import json
 
     from .sanitize import ALSO_REMOVED, REMOVE
@@ -854,19 +879,19 @@ def _raw_tags(content: str):
     doc = json.loads(r.stdout)
     nodes = []
 
-    def walk(node, in_table=False):
+    def walk(node, in_table=False, path=()):
         if isinstance(node, dict):
             if node.get("t") == "RawInline" and node["c"][0] == "html":
-                nodes.append((node, in_table))
+                nodes.append((node, in_table, path))
             else:
-                walk(node.get("c"), in_table or node.get("t") == "Table")
+                walk(node.get("c"), in_table or node.get("t") == "Table", path)
         elif isinstance(node, list):
             for x in node:
-                walk(x, in_table)
+                walk(x, in_table, path + (id(node),))
 
     walk(doc["blocks"])
     tags, lone, open_, at = [], [], {}, 0
-    for node, in_table in nodes:
+    for node, in_table, path in nodes:
         raw = seen = node["c"][1]
         # In a table cell pandoc's RawInline has `|` where the source has `\|`, which keeps the cell
         # whole: the tag is the source's bytes. Nowhere else does pandoc take a backslash out of a tag.
@@ -881,16 +906,21 @@ def _raw_tags(content: str):
         if name in MARKDOWN_TAGS or name in REMOVE or name in ALSO_REMOVED:
             continue
         if closing:
-            if open_.get(name):
-                open_[name].pop()[2] = raw
+            # The browser ends an element with the item, cell or emphasis it opened in: a closing tag past
+            # that end closes nothing, however the names match (#161).
+            stack = open_.get(name, [])
+            hit = next((t for t in reversed(stack) if path[:len(t[4])] == t[4]), None)
+            if hit:
+                stack.remove(hit)
+                hit[2] = raw
             else:
                 lone.append((raw, node))
             continue
-        tag = [name, raw, "", seen]
+        tag = [name, raw, "", seen, path]
         tags.append(tag)
         if not empty:
             open_.setdefault(name, []).append(tag)
-    return [tuple(t) for t in tags], lone, doc
+    return [tuple(t[:4]) for t in tags], lone, doc
 
 
 def _texts(soup) -> list:
@@ -928,7 +958,7 @@ def _lone_as_text(soup, lone, doc, token) -> dict:
     import difflib
     import json
 
-    from bs4 import BeautifulSoup, NavigableString
+    from bs4 import BeautifulSoup, Comment, NavigableString
 
     placed = {}
     for raw, node in lone:
@@ -939,6 +969,10 @@ def _lone_as_text(soup, lone, doc, token) -> dict:
     if r.returncode != 0:
         return {}
     src = BeautifulSoup(r.stdout, "html.parser")
+    # A comment splits the source's words where the page has none.
+    for c in src.find_all(string=lambda x: isinstance(x, Comment)):
+        c.extract()
+    src.smooth()
     for t in _texts(src):
         parts = [x for x in re.split("(\u27e6[A-Z0-9]+\u27e7)", str(t)) if x]
         if len(parts) > 1:
@@ -1013,7 +1047,10 @@ def _lone_as_text(soup, lone, doc, token) -> dict:
         # goes with the word before it, then over as many plain spaces as it had, on the same text.
         o -= gap
         k = where(o)
-        if not (0 < o < len(old) and old[o - 1].isalnum() and old[o].isalnum()):
+        # Two items merged with no space leave it between the same words, which are not one word to it.
+        next_word = re.match(r"\s*(\w+)", old[o:])
+        if not (0 < o < len(old) and old[o - 1].isalnum() and old[o].isalnum()
+                or next_word and new.startswith(next_word.group(1), k)):
             while 0 < k < len(new) and new[k - 1].isalnum() and new[k].isalnum() and k not in edges:
                 k += 1 if back else -1
         for _ in range(gap):

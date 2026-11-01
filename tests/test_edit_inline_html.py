@@ -251,3 +251,18 @@ def test_two_edits_far_apart_leave_a_closing_tag_with_no_opener_where_it_was():
     src = "First " + WORDS + "x</x1> " + WORDS + "here."
     html = "<p>Once " + WORDS + "x " + WORDS + "there.</p>"
     assert saved(src, html=html) == src.replace("First", "Once").replace("here", "there") + "\n"
+
+
+# Gate 3 on #157: a tag between words in the source stays between words when the word before it changes.
+
+@pytest.mark.parametrize("src,html,want", [
+    ("The red car</x1> is here.", "<p>The red cat is there.</p>", "The red cat</x1> is there.\n"),
+    ("Click Save</x1> now here.", "<p>Click Submit now there.</p>", "Click Submit</x1> now there.\n"),
+    ("one two</x1> three here.", "<p>one three there.</p>", "one three</x1> there.\n"),
+])
+def test_a_closing_tag_with_no_opener_is_not_put_inside_a_word(src, html, want):
+    assert saved(src, html=html) == want
+
+
+def test_a_closing_tag_with_no_opener_inside_a_word_in_the_source_stays_there():
+    assert saved("A wo</x1>rd here.") == "A wo</x1>rd there.\n"

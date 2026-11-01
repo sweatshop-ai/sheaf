@@ -994,10 +994,21 @@ def _lone_as_text(soup, lone, doc, token) -> dict:
                 k = b0 + b + n
         return k
 
+    def between_words(o, back):
+        # The diff matches letters: where the word before it was replaced, it can point into the new
+        # word. A tag that stood between words in the source goes to the end of that word, or, with no
+        # words before it, to the start of the word after it.
+        k = where(o)
+        if 0 < o < len(old) and old[o - 1].isalnum() and old[o].isalnum():
+            return k
+        while 0 < k < len(new) and new[k - 1].isalnum() and new[k].isalnum():
+            k += 1 if back else -1
+        return k
+
     # From the end, so that the offsets still to place stay where they were; of two at one place, the
     # second goes first and the first lands before it.
-    for o, p, back, climb in reversed(sorted(((where(o), p, back, climb) for o, p, back, climb in at),
-                                             key=lambda x: x[0])):
+    for o, p, back, climb in reversed(sorted(((between_words(o, back), p, back, climb)
+                                              for o, p, back, climb in at), key=lambda x: x[0])):
         cum, spot = 0, None
         for t in _texts(soup):
             kept = _kept(str(t))

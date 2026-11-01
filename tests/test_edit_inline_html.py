@@ -227,3 +227,27 @@ def test_placing_a_closing_tag_with_no_opener_compares_only_the_words_the_edit_c
     src = "word " * 8000 + "x</x1> here."
     assert saved(src) == src.replace("here", "there") + "\n"
     assert max(sizes, default=0) < 2100
+
+
+# Gate 2 on #157: a comment's placeholder is text on the page side only, and two edits far apart leave a
+# long stretch between them.
+
+C1 = '<!-- sheaf-comment id=c1 by="Ada" at=2026-10-14T09:00 status=open quote="Start"\nA note.\n-->'
+WORDS = "w " * 1200
+
+
+@pytest.mark.parametrize("comment,anchor", [
+    (C1, '<span class="rd-anchor" data-rd-id="c1"></span>'),
+    ("<!-- foreign -->", "<!-- foreign -->"),
+])
+def test_a_comment_far_away_does_not_move_a_closing_tag_with_no_opener(comment, anchor):
+    src = "Start" + comment + " " + WORDS + "x</x1> " + WORDS + "here."
+    html = "<p>Start" + anchor + " " + WORDS + "x " + WORDS + "there.</p>"
+    out = saved(src, html=html)
+    assert " w x</x1> w " in out and out.count("</x1>") == 1
+
+
+def test_two_edits_far_apart_leave_a_closing_tag_with_no_opener_where_it_was():
+    src = "First " + WORDS + "x</x1> " + WORDS + "here."
+    html = "<p>Once " + WORDS + "x " + WORDS + "there.</p>"
+    assert saved(src, html=html) == src.replace("First", "Once").replace("here", "there") + "\n"

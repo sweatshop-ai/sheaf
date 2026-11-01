@@ -6,7 +6,7 @@
 .rd-root:focus { outline: none; }
 /* The font is the theme's until the loader sets `--front-font` on the host's style, as it sets the colours (#152): then
    the wrapper takes the front's family, as the old frame's body did, a mounted page's and a mounted list's alike; what
-   the theme gives a family of its own (code) keeps it. The rule is here, not in the theme's styles of /_/mount?doc=,
-   so a theme that ends inside a block or a comment cannot swallow it. The match is on the style attribute's text, so no
-   other variable may start with `--front-font`. */
+   the theme gives a family of its own (code) keeps it. A mounted page has it in /_/mount?doc= too, before the theme
+   (render.py, mount_css), so a copy of this file kept from before the rule leaves the page as it was. The match is on
+   the style attribute's text, so no other variable may start with `--front-font`. */
 :host([style*="--front-font"]) .rd-root{font-family:var(--front-font)}

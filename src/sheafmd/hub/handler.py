@@ -24,6 +24,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+from importlib import resources
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote
 
@@ -242,6 +243,9 @@ class Handler:
             ("GET", "/_/open", "open", OPEN, self._open),
             ("GET", "/_/live", "live", COOKIE, self._live),
             ("GET", "/_/doc", "doc", EITHER, self._doc),
+            ("GET", "/_/mount", "mount", EITHER, self._mount),
+            ("GET", "/_/mount.js", "mount-js", OPEN, lambda req: self._mount_asset(req, "mount.js", "text/javascript; charset=utf-8")),
+            ("GET", "/_/mount.css", "mount-css", OPEN, lambda req: self._mount_asset(req, "mount.css", "text/css; charset=utf-8")),
             ("GET", "/_/index.json", "index", EITHER, self._index_json),
             ("GET", "/_/jobs", "jobs", KEY, self._jobs),
             ("POST", "/_/save", "save", COOKIE, self._save),
@@ -431,8 +435,10 @@ class Handler:
     @staticmethod
     def _for_members(found) -> bool:
         """A route a member may use: one 8.5 marks `cookie` or `cookie or key`, but not Ask and
-        Tell, which run the hub account's own agent session."""
+        Tell, which run the hub account's own agent session; and the two open files the front mounts a page from (#116)."""
         name, who, _ = found
+        if name in ("mount-js", "mount-css"):
+            return True
         return who in (COOKIE, EITHER, MEMBER, MINT) and name not in ("ask", "tell", "cancel", "jump")
 
     def _route_proxy(self, req: Req, raw: bytes) -> Response:
@@ -822,6 +828,47 @@ class Handler:
                    asking=self.hub.runner.active("ask", e.address),
                    question=e.live.session_question(), target=v.agent(),
                    capabilities=sorted(v.caps), lines=v.lines)
+
+    def _mount(self, req: Req) -> Response:
+        """The sheaf as JSON for the front's loader to mount (#116): the body through the sanitiser's mount mode and the
+        meta block the page route sends. The same gate as the page: a member sees what they could open. With `list=`
+        instead of `doc=`, the list."""
+        if "list" in req.query:
+            return self._mount_list(req)
+        doc = req.query.get("doc")
+        _shape(isinstance(doc, str) and doc.endswith(".md"), "doc must be the address of a sheaf")
+        with self._reading(doc):
+            e = self._entry(req, doc)
+            self.hub.catch_up(e)
+            try:
+                got = self.hub.mount_doc(e, req.member)
+            except RenderError as ex:
+                raise Refuse(500, f"the page could not be rendered: {ex}") from None
+            return _json(200, got, {"X-Content-Type-Options": "nosniff"})
+
+    def _mount_list(self, req: Req) -> Response:
+        """The list (9.10) as data for the front to mount (#116): its rows as the page at `/<root>` shows them to the
+        member, every title and name as text, never markup. A member's alone, of the root the list is, as that page is."""
+        name, the = req.query.get("list"), self.hub.the_list
+        root = self.hub.roots.get(name) if isinstance(name, str) else None
+        if req.member is None or the is None or root is None or not self.hub.owns(req.member, root) or not the.serves(name):
+            raise Refuse(404, "no such list")
+        return _json(200, {"kind": "list", "title": "Actions", "version": self.hub.version,
+                           "list": the.data(req.member, req.query.get("show", ""))},
+                     {"X-Content-Type-Options": "nosniff"})
+
+    def _mount_asset(self, req: Req, name: str, kind: str) -> Response:
+        """The loader's script and the page's style, the hub's own files. A request that names this hub's version
+        (`?v=`) may be kept for a year: a new version is a new address. Any other is asked again each time."""
+        page = resources.files("sheafmd") / "page"
+        # The page's and the list's own script and style follow the loader's: the same files their pages of their own inline.
+        after = {"mount.js": ("page.js", "list.js"), "mount.css": ("page.css", "list.css")}[name]
+        body = b"\n".join((page / f).read_bytes() for f in (name, *after))
+        if name == "mount.js":       # the script knows the hub it came from, to tell an upgrade from a remount
+            body = body.replace(b"'@@SHEAF_VERSION@@'", json.dumps(self.hub.version).encode(), 1)
+        named = req.query.get("v") == self.hub.version
+        return Response(200, {"Content-Type": kind, "X-Content-Type-Options": "nosniff",
+                              "Cache-Control": "public, max-age=31536000, immutable" if named else "no-store"}, body)
 
     def _index_json(self, req: Req) -> Response:
         rendered = req.query.get("rendered", "0")

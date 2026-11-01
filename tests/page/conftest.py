@@ -99,6 +99,7 @@ def chromium():
     except BaseException:
         pw.stop()
         raise
+    b.pw = pw               # the one driver of this thread: another engine is launched from it (test_mount_page.py)
     # A page of its own for the waits: a call on it delivers the events of every page (pagehelp.until).
     idle = new_context(b).new_page()
     was = use_pump(lambda seconds: idle.wait_for_timeout(seconds * 1000))

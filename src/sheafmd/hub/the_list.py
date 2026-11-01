@@ -33,6 +33,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from importlib import resources
 from pathlib import Path
 from urllib.parse import quote
 
@@ -717,7 +718,10 @@ class TheList:
         r = self.hub.roots.lookup(self.cfg.root / projects.FILE)
         return r is not None and r.name == name and r.path == Path(os.path.realpath(self.cfg.root))
 
-    def page(self, member, show: str, nonce: str) -> str:
+    def data(self, member, show: str) -> dict:
+        """The list as `member` reads it, as data: {show, filters, sections}, each section {key, title, count, groups},
+        each group {name, rows}, each row {title, href, assistant, meta, actions}. The page of its own is drawn from
+        this and the front mounts it (#116): both show the same rows, and the mount carries text, never markup."""
         snap = self._snap
         show = show if show in SHOWS else "projects"
         members = list(self.hub.proxy.members.values())
@@ -745,16 +749,22 @@ class TheList:
                                            and projects.grants(entries, row.sheaf.rel, member.short)):
                 continue
             sections[row.record.status].append((row, owners, is_owner))
-        body = "".join(self._section(title, sections[key], member, root.name)
-                       for key, title in (("waiting", "Waiting on you"), ("open", "In progress")))
+        return {"show": show,
+                "filters": [{"key": key, "label": label, "href": _href(root.name, key), "on": key == show}
+                            for key, label in SHOWS.items()],
+                "sections": [self._section(key, title, sections[key], member, root.name)
+                             for key, title in (("waiting", "Waiting on you"), ("open", "In progress"))]}
+
+    def page(self, member, show: str, nonce: str) -> str:
+        d = self.data(member, show)
         current = ' aria-current="page"'
         filters = "".join(
-            f'<a class="list-filter{" on" if key == show else ""}" href="{_href(root.name, key)}"'
-            f'{current if key == show else ""}>{html.escape(label)}</a>'
-            for key, label in SHOWS.items())
+            f'<a class="list-filter{" on" if f["on"] else ""}" href="{html.escape(f["href"])}"'
+            f'{current if f["on"] else ""}>{html.escape(f["label"])}</a>' for f in d["filters"])
+        body = "".join(_section_html(x) for x in d["sections"])
         return ('<!doctype html>\n<html lang="en"><head><meta charset="utf-8">'
                 '<meta name="viewport" content="width=device-width,initial-scale=1">'
-                f'<title>Actions</title><style>{CSS}</style></head><body>'
+                f'<title>Actions</title><style>{PAGE_CSS}</style></head><body class="sheaf-list">'
                 f'<header><h1>Waiting on you</h1><span class="list-sub">and what is in progress</span></header>'
                 f'<nav class="list-filters">{filters}</nav><p class="list-error" role="alert" hidden></p><main>{body}</main>'
                 f'<script nonce="{nonce}">{SCRIPT}</script></body></html>')
@@ -781,17 +791,15 @@ class TheList:
             return None
         return Row(sheaf, row.record, row.group, key, row.file)
 
-    def _section(self, title: str, rows: list, member, root: str) -> str:
+    def _section(self, key: str, title: str, rows: list, member, root: str) -> dict:
         groups: dict = {}
         for row, owners, is_owner in rows:
             groups.setdefault(row.group, []).append((row, owners, is_owner))
-        out = []
-        for group in sorted(groups):
-            items = sorted(groups[group], key=lambda r: -r[0].record.updated)
-            out.append(f'<div class="list-group"><h3>{html.escape(group)}</h3><ul>'
-                       + "".join(self._row(r, o, mine, member, root) for r, o, mine in items) + "</ul></div>")
-        return (f'<section class="list-section"><h2>{html.escape(title)} <span class="list-count">{len(rows)}'
-                f'</span></h2>{"".join(out)}</section>')
+        return {"key": key, "title": title, "count": len(rows),
+                "groups": [{"name": group,
+                            "rows": [self._row(r, o, mine, member, root)
+                                     for r, o, mine in sorted(groups[group], key=lambda r: -r[0].record.updated)]}
+                           for group in sorted(groups)]}
 
     def _pressers(self, root, s: Sheaf) -> dict:
         """`pressers` of the pressed boxes of `s`, from the file that holds its name now when that file is still the
@@ -808,24 +816,17 @@ class TheList:
             return {}
         return pressers(self.hub.blamed, f, text, lines)
 
-    def _row(self, row: Row, owners: list, is_owner: bool, member, root: str) -> str:
+    def _row(self, row: Row, owners: list, is_owner: bool, member, root: str) -> dict:
         s, rec = row.sheaf, row.record
-        doc, acts = html.escape(f"{root}/{s.rel}"), []
+        doc, acts = f"{root}/{s.rel}", []
         # A toggle's number is its place among the actions, or among the pressed boxes when it is pressed (#110).
+        # A pressed one-off is drawn locked, with who pressed it, and names no action and no text.
         for x in buttons(s, self._pressers(self.root(), s), self.hub, member, is_owner):
-            label = html.escape(x["label"])
-            data = f'data-doc="{doc}" data-word="{html.escape(x["word"])}"'
-            if x["toggle"]:
-                acts.append(f'<button type="button" class="list-act toggle" aria-pressed="{str(x["pressed"]).lower()}"'
-                            f'{"" if x["may"] else " disabled"} {data} data-action="{x["n"]}"'
-                            f'{" data-release" if x["release"] else ""} data-hash="{html.escape(s.hash)}">{label}</button>')
-            elif x["pressed"]:
-                locked = f"{label} ✓" + (f" {html.escape(x['by'])}" if x["by"] else "")
-                acts.append(f'<button type="button" class="list-act one-off pressed" disabled {data}>{locked}</button>')
-            else:                       # a one-off is a plain button to a screen reader
-                acts.append(f'<button type="button" class="list-act one-off" {data} data-action="{x["n"]}"'
-                            f' data-hash="{html.escape(s.hash)}">{label}</button>')
-        assistant = f' <span class="list-assistant">{html.escape(s.assistant)}</span>' if s.assistant else ""
+            locked = not x["toggle"] and x["pressed"]
+            label = f'{x["label"]} ✓' + (f' {x["by"]}' if x["by"] else "") if locked else x["label"]
+            acts.append({"doc": doc, "word": x["word"], "label": label, "toggle": x["toggle"], "pressed": x["pressed"],
+                         "disabled": locked or (x["toggle"] and not x["may"]), "release": bool(x["toggle"] and x["release"]),
+                         "n": None if locked else x["n"], "hash": None if locked else s.hash})
         by_login = {m.github.lower(): m for m in self.hub.proxy.members.values() if m.github}
         first = by_login.get(rec.assignees[0].lower()) if rec.assignees else None
         if is_owner:
@@ -837,10 +838,36 @@ class TheList:
         else:
             owner = "nobody"
         meta = " · ".join(x for x in (s.kind, owner, f"#{s.issue[2]}", _age(self.hub.clock() - rec.updated)) if x)
-        href = roots_mod.url_path(f"{root}/{s.rel}")
-        return (f'<li class="list-row"><div class="list-main"><a class="list-title" href="{html.escape(href)}">'
-                f'{html.escape(s.title)}</a>{assistant}<div class="list-meta">{html.escape(meta)}</div></div>'
-                f'<div class="list-actions">{"".join(acts)}</div></li>')
+        return {"title": s.title, "href": roots_mod.url_path(f"{root}/{s.rel}"), "assistant": s.assistant or "",
+                "meta": meta, "actions": acts}
+
+
+def _section_html(x: dict) -> str:
+    groups = "".join(f'<div class="list-group"><h3>{html.escape(g["name"])}</h3><ul>'
+                     + "".join(_row_html(r) for r in g["rows"]) + "</ul></div>" for g in x["groups"])
+    return (f'<section class="list-section"><h2>{html.escape(x["title"])} <span class="list-count">{x["count"]}'
+            f'</span></h2>{groups}</section>')
+
+
+def _row_html(r: dict) -> str:
+    """A row of `TheList.data` as the page of its own draws it; list.js `render` draws the same for the mount."""
+    acts = []
+    for a in r["actions"]:
+        label = html.escape(a["label"])
+        data = f'data-doc="{html.escape(a["doc"])}" data-word="{html.escape(a["word"])}"'
+        if a["toggle"]:
+            acts.append(f'<button type="button" class="list-act toggle" aria-pressed="{str(a["pressed"]).lower()}"'
+                        f'{" disabled" if a["disabled"] else ""} {data} data-action="{a["n"]}"'
+                        f'{" data-release" if a["release"] else ""} data-hash="{html.escape(a["hash"])}">{label}</button>')
+        elif a["pressed"]:
+            acts.append(f'<button type="button" class="list-act one-off pressed" disabled {data}>{label}</button>')
+        else:                       # a one-off is a plain button to a screen reader
+            acts.append(f'<button type="button" class="list-act one-off" {data} data-action="{a["n"]}"'
+                        f' data-hash="{html.escape(a["hash"])}">{label}</button>')
+    assistant = f' <span class="list-assistant">{html.escape(r["assistant"])}</span>' if r["assistant"] else ""
+    return (f'<li class="list-row"><div class="list-main"><a class="list-title" href="{html.escape(r["href"])}">'
+            f'{html.escape(r["title"])}</a>{assistant}<div class="list-meta">{html.escape(r["meta"])}</div></div>'
+            f'<div class="list-actions">{"".join(acts)}</div></li>')
 
 
 def _href(root: str, show: str) -> str:
@@ -857,94 +884,8 @@ def _age(seconds: float) -> str:
     return f"{seconds // 86400} d"
 
 
-# A press of a row's button shows Undo for UNDO_MS, then posts the action's tick to the hub; Undo in that window
-# sends nothing. While a press of a row waits or is sent, the row's other buttons cannot be pressed: they name their
-# action by the text the list read, which the tick changes. The list reloads once every press has been answered, so a
-# reload never drops a press still in its window; a refusal is said above the rows, after that reload too, and gives
-# the button back. A button drawn locked (a pressed one-off, another's Share) stays locked; a pressed toggle's press
-# releases it (#110).
-SCRIPT = """
-var UNDO_MS = 5000, open = 0, ticked = false, reloading = false, SAID = 'sheaf-list-said';
-var said = document.querySelector('.list-error'), refused = new Map();   // button: its refusal on this page
-function say(text) { said.textContent = text; said.hidden = false; }
-// A refusal beside a press that went through is said again after that press's reload, once: only the refusals
-// made on this page are kept, never one said again here (sessionStorage may refuse).
-try { var kept = sessionStorage.getItem(SAID); sessionStorage.removeItem(SAID); if (kept) say(kept); } catch (e) {}
-function settled() {
-  if (--open !== 0 || !ticked) return;
-  reloading = true;               // a press from now on would die with the page
-  try { if (refused.size) sessionStorage.setItem(SAID, Array.from(refused.values()).join(' ')); } catch (e) {}
-  location.reload();
-}
-document.querySelectorAll('.list-row button.list-act:not(:disabled)').forEach(function (b) {
-  var word = b.textContent, waiting = null, pressed = b.getAttribute('aria-pressed');
-  var others = Array.prototype.filter.call(b.closest('.list-row').querySelectorAll('button.list-act:not(:disabled)'),
-    function (o) { return o !== b; });
-  function lock(on) { others.forEach(function (o) { o.disabled = on; }); }
-  function back() { b.textContent = word; b.classList.remove('pending'); b.removeAttribute('aria-label'); }
-  function send() {
-    waiting = null;
-    back();
-    b.disabled = true;
-    if (pressed !== null) b.setAttribute('aria-pressed', pressed === 'true' ? 'false' : 'true');
-    var tick = {doc: b.dataset.doc, action: Number(b.dataset.action), word: b.dataset.word, hash: b.dataset.hash};
-    if (b.hasAttribute('data-release')) tick.release = true;
-    fetch('/_/tick', {method: 'POST', headers: {'Content-Type': 'application/json'}, credentials: 'same-origin',
-      body: JSON.stringify(tick)})
-      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) {
-        if (r.ok) { ticked = true; refused.delete(b); return; }
-        throw new Error(j.error || ('the hub answered ' + r.status));
-      }); })
-      .catch(function (e) {
-        if (pressed !== null) b.setAttribute('aria-pressed', pressed);
-        b.disabled = false; lock(false);
-        refused.set(b, e.message); say(e.message);
-      })
-      .then(settled);
-  }
-  b.addEventListener('click', function () {
-    if (reloading) return;
-    if (waiting !== null) { clearTimeout(waiting); waiting = null; back(); lock(false); settled(); return; }
-    open++;
-    lock(true);
-    b.textContent = 'Undo'; b.classList.add('pending'); b.setAttribute('aria-label', 'Undo ' + word);
-    waiting = setTimeout(send, UNDO_MS);
-  });
-});
-"""
-
-CSS = """
-:root{--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--chip:#1f5fd6;--once:#c62828;--bg:#fff}
-@media (prefers-color-scheme:dark){:root{--fg:#f2f2f7;--muted:#a1a1a6;--line:#38383a;--chip:#6ea2ff;--once:#ff6b6b;--bg:#1c1c1e}}
-body{margin:0;padding:24px 16px;font:15px/1.45 system-ui,sans-serif;color:var(--fg);background:var(--bg);
-overflow-wrap:anywhere}
-header{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
-h1{font-size:20px;margin:0}.list-sub{color:var(--muted);font-size:13px}
-.list-filters{display:flex;gap:8px;margin:12px 0 20px;flex-wrap:wrap}
-.list-filter{border:1px solid var(--line);border-radius:999px;padding:3px 12px;color:var(--muted);text-decoration:none}
-.list-filter.on{border-color:var(--fg);color:var(--fg)}
-h2{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:24px 0 8px}
-h3{font-size:15px;margin:16px 0 4px}
-ul{list-style:none;margin:0;padding:0}
-.list-row{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
-.list-main{flex:1;min-width:0}
-.list-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start;justify-content:flex-end;max-width:50%}
-.list-act{font:inherit;font-size:13px;border-radius:999px;padding:2px 10px;cursor:pointer;background:none}
-.list-act.one-off{border:1px solid var(--once);color:var(--once)}
-.list-act.toggle{border:1px solid var(--chip);color:var(--chip)}
-.list-act.one-off.pending,.list-act.one-off.pressed{background:var(--once);color:var(--bg)}
-.list-act.toggle.pending,.list-act.toggle[aria-pressed=true]{background:var(--chip);color:var(--bg)}
-.list-act:disabled{cursor:default;opacity:.7}
-/* The list never scrolls sideways: a word wider than the screen breaks (body above), in a button (#112) as in a
-   title, a heading or a refusal (#130).
-   On a phone the buttons go under the title, 44 px, as the page's #rd-actions in page/page.css (#112). */
-@media (max-width:600px){.list-row{flex-wrap:wrap}.list-main{flex-basis:100%}
-.list-actions{max-width:none;justify-content:flex-start}}
-@media (max-width:600px),(pointer:coarse){.list-act{min-height:44px;min-width:44px;padding:2px 14px}}
-.list-title{color:var(--fg);text-decoration:none}.list-title:hover{text-decoration:underline}
-.list-assistant{display:inline-block;font-size:12px;border:1px solid var(--chip);color:var(--chip);
-border-radius:999px;padding:0 8px;margin-left:6px}
-.list-assistant{border-color:var(--line);color:var(--muted)}
-.list-meta{color:var(--muted);font-size:13px}
-.list-error{color:#c62828}
-"""
+# The list's script and style are files of the page package (page/list.js, page/list.css): the page of its own inlines
+# them, and /_/mount.js and /_/mount.css carry them to the front (#116).
+SCRIPT = (resources.files("sheafmd") / "page" / "list.js").read_text(encoding="utf-8")
+CSS = (resources.files("sheafmd") / "page" / "list.css").read_text(encoding="utf-8")
+PAGE_CSS = "body{margin:0}\n" + CSS

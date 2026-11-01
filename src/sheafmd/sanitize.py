@@ -27,6 +27,15 @@ processing instructions and declarations (a browser ends them at the first ">"),
 comment a browser could end before this parser does (a "--!>", or a start with ">").
 A second pass over the result makes sure that what came out is a fixed point.
 
+MOUNT MODE (`sanitize(..., mount=True)`, #116 step 2). The sheaf page used to run in a frame under a CSP of its own;
+mounted in the front's document it has none, so this module also closes what that CSP closed. Beyond the above:
+audio, video, picture and their sources are removed, an <img> is kept only for a relative path or data:image/(png|jpeg|gif|webp)
+(any other address is a tracking pixel; the alt text stays), svg <use>, <image>, <foreignObject>, animation and links, and all
+MathML, are removed, a link keeps http, https, mailto and relative addresses with rel="noopener noreferrer" and no target,
+a style attribute keeps only the declarations of an allow-list with a strict value grammar, and the names the page itself
+uses (rd- classes and ids, data-rd-*, a name attribute) are removed. The browser rebuilds the tree again from an allow-list
+(page/mount.js); neither layer relies on the other.
+
 The hub also sends a Content-Security-Policy with a nonce (SPEC 9.5), which is the
 defence that holds when this one is wrong. A share copy has no such header, so this
 module is the only defence there, and the share copy has no comments at all.
@@ -58,6 +67,40 @@ _SAFE_DATA = re.compile(r"^data:image/(?:png|jpeg|gif|webp)[;,]", re.I)
 _SCHEME = re.compile(r"^([^/?#]*):")
 _STRIP_CONTROL = re.compile(r"[\x00-\x20\x7f]+")
 MAX_PASSES = 3
+
+# Mount mode.
+MOUNT_REMOVED = frozenset({
+    "video", "audio", "source", "track", "canvas", "portal", "use", "image", "foreignobject", "animate", "set",
+    "animatetransform", "animatemotion", "math", "maction", "annotation-xml", "mglyph", "semantics",
+})
+MOUNT_MAX_DEPTH = 100          # no real page nests deeper; Chromium's DOMParser costs the square of the depth (20 s at 100,000)
+_MOUNT_LINK_SCHEMES = frozenset({"http", "https", "mailto"})
+_MOUNT_DROPPED_ATTRS = frozenset({"target", "name", "background", "action", "poster", "longdesc", "manifest", "formtarget"})
+_EXTERNAL_URL = re.compile(r"url\(\s*['\"]?\s*(?!#)", re.I)
+_LENGTH = r"(?:0|\d{1,4}(?:\.\d{1,3})?(?:px|em|rem|%|pt|ch|ex))"
+_COLOR = (r"(?:#[0-9a-f]{3,8}|[a-z]{3,24}|(?:rgb|hsl)a?\(\s*\d{1,3}(?:\.\d+)?%?(?:\s*,\s*\d{1,3}(?:\.\d+)?%?){2}"
+          r"(?:\s*,\s*(?:0|1|0?\.\d+|\d{1,3}%))?\s*\))")
+_LINE_STYLE = r"(?:none|hidden|dotted|dashed|solid|double|groove|ridge|inset|outset)"
+_SIDES = r"(?:-top|-right|-bottom|-left)?"
+_MOUNT_STYLE = {                       # property -> the whole value, as a regex; nothing else is kept
+    "text-align": r"(?:left|right|center|justify|start|end)",
+    "vertical-align": r"(?:baseline|sub|super|top|middle|bottom|text-top|text-bottom)",
+    "font-weight": r"(?:normal|bold|bolder|lighter|[1-9]00)",
+    "font-style": r"(?:normal|italic|oblique)",
+    "text-decoration": r"(?:none|(?:underline|overline|line-through)(?: (?:underline|overline|line-through))*)",
+    "color": _COLOR,
+    "background-color": _COLOR,
+    "fill": _COLOR,
+    "stroke": _COLOR,
+    "width": _LENGTH,
+    "max-width": _LENGTH,
+    "list-style-type": r"(?:none|disc|circle|square|decimal|lower-alpha|upper-alpha|lower-roman|upper-roman|lower-latin|upper-latin)",
+}
+for _side in ("", "-top", "-right", "-bottom", "-left"):
+    _MOUNT_STYLE["margin" + _side] = rf"{_LENGTH}(?: {_LENGTH}){{0,3}}"
+    _MOUNT_STYLE["padding" + _side] = rf"{_LENGTH}(?: {_LENGTH}){{0,3}}"
+    _MOUNT_STYLE["border" + _side] = rf"(?:{_LENGTH}|{_LINE_STYLE}|{_COLOR})(?: (?:{_LENGTH}|{_LINE_STYLE}|{_COLOR})){{0,2}}"
+_MOUNT_STYLE = {k: re.compile(v + r"\Z", re.I) for k, v in _MOUNT_STYLE.items()}
 # What the pre-pass walks over, in the order a browser meets it: an empty comment opener
 # (`<!-->` or `<!--->`), which is the one to rewrite; a whole comment; the body of a title or
 # a textarea, which is text; a tag with its quoted attribute values. Only the first is changed.
@@ -116,13 +159,100 @@ def _url_ok(tag, attr: str, value: str) -> bool:
             and bool(_SAFE_DATA.match(v)))
 
 
+def _flatten_deep(soup, log: list[str]) -> None:
+    """Replace every element nested deeper than MOUNT_MAX_DEPTH by its text. Walks with a stack, not recursion."""
+    stack = [(child, 1) for child in soup.contents]
+    while stack:
+        node, depth = stack.pop()
+        if not isinstance(node, Tag):
+            continue
+        if depth > MOUNT_MAX_DEPTH:
+            log.append(f"  - <{node.name}> nested deeper than {MOUNT_MAX_DEPTH} replaced by its text")
+            node.replace_with(node.get_text())
+            continue
+        stack.extend((child, depth + 1) for child in node.contents)
+
+
+def _mount_style(value: str) -> str:
+    """The declarations of a style attribute that the allow-list names, written out normalised; "" when none is left.
+    Each declaration stands or falls alone, and the value grammar has no quote, backslash, slash, bang or function
+    call but colours, so a comment, an escape or a url() cannot get through however the text is split."""
+    kept = []
+    for decl in value.split(";"):
+        prop, sep, val = decl.partition(":")
+        prop, val = prop.strip().lower(), " ".join(val.split()).lower()
+        grammar = _MOUNT_STYLE.get(prop)
+        if sep and grammar and grammar.match(val):
+            kept.append(f"{prop}:{val}")
+    return ";".join(kept)
+
+
+def _mount_img_ok(value: str) -> bool:
+    v = _STRIP_CONTROL.sub("", value)
+    if "\\" in v or v.startswith("//"):
+        return False
+    return not _SCHEME.match(v) or bool(_SAFE_DATA.match(v))
+
+
+def _mount_link_ok(value: str) -> bool:
+    v = _STRIP_CONTROL.sub("", value)
+    if "\\" in v:
+        return False
+    m = _SCHEME.match(v)
+    return not m or m.group(1).lower() in _MOUNT_LINK_SCHEMES
+
+
+def _mount_attrs(tag, name: str, log: list[str]) -> None:
+    for attr in list(tag.attrs):
+        a = attr.lower()
+        value = tag[attr]
+        value = " ".join(value) if isinstance(value, list) else str(value)
+        drop = None
+        if a in _MOUNT_DROPPED_ATTRS or a.startswith(("rd-", "data-rd")):
+            drop = "reserved or not needed on a mounted page"
+        elif a == "src" and name != "img":
+            drop = "only an image loads"
+        elif a in ("href", "xlink:href"):
+            if name == "a" and a == "href":
+                if not _mount_link_ok(value):
+                    drop = "not an allowed address"
+            elif not value.strip().startswith("#"):
+                drop = "only a fragment may be referenced here"
+        elif a == "id" and value.strip().lower().startswith("rd-"):
+            drop = "the page's own name"
+        elif a == "style":
+            clean = _mount_style(value)
+            if clean != value:
+                if clean:
+                    tag[attr] = clean
+                else:
+                    drop = "nothing the page allows"
+                log.append(f"  - style trimmed on <{name}>")
+        elif a == "class":
+            kept = [c for c in value.split() if not c.lower().startswith("rd-")]
+            if kept != value.split():
+                if kept:
+                    tag[attr] = " ".join(kept)
+                else:
+                    drop = "the page's own class"
+        elif _EXTERNAL_URL.search(value):
+            drop = "an address outside the page"
+        if drop:
+            log.append(f"  - {attr} removed from <{name}>: {drop}")
+            del tag[attr]
+    if name == "a" and "href" in tag.attrs:
+        tag["rel"] = "noopener noreferrer"
+
+
 def _comment_ok(text: str) -> bool:
     """A comment that every parser reads as ending at the same place as this one."""
     return not (text.startswith((">", "->")) or "--!>" in text or "<!--" in text)
 
 
-def _pass(fragment: str, comments: bool, log: list[str]) -> str:
+def _pass(fragment: str, comments: bool, log: list[str], mount: bool = False) -> str:
     soup = BeautifulSoup(_end_empty_comments(fragment), "html.parser", element_classes={Tag: _Tag})
+    if mount:
+        _flatten_deep(soup, log)
 
     for node in list(soup.find_all(string=True)):
         if not isinstance(node, PreformattedString):
@@ -152,6 +282,21 @@ def _pass(fragment: str, comments: bool, log: list[str]) -> str:
             log.append(f"  - <{name}> that sets a link removed from the document")
             tag.decompose()
             continue
+        if mount:
+            if name in MOUNT_REMOVED:
+                log.append(f"  - <{name}> removed from the document")
+                tag.decompose()
+                continue
+            if name == "source" or (name in ("picture", "a") and (name == "picture" or tag.find_parent("svg"))):
+                tag.unwrap()
+                continue
+            if name == "img":
+                src = tag.get("src")
+                if not _mount_img_ok(" ".join(src) if isinstance(src, list) else str(src or "")):
+                    log.append("  - <img> removed from the document: not an address the page loads")
+                    alt = str(tag.get("alt") or "").strip()
+                    tag.replace_with(alt) if alt else tag.decompose()
+                    continue
         for attr in list(tag.attrs):
             a = attr.lower()
             if a.startswith("on") or a in DROPPED_ATTRS:
@@ -164,18 +309,21 @@ def _pass(fragment: str, comments: bool, log: list[str]) -> str:
                 if not _url_ok(tag, a, str(value)):
                     log.append(f"  - {attr} removed from <{name}>: not an allowed address")
                     del tag[attr]
+        if mount:
+            _mount_attrs(tag, name, log)
     return str(soup)
 
 
-def sanitize(fragment: str, *, comments: bool = True, log: list[str] | None = None) -> str:
+def sanitize(fragment: str, *, comments: bool = True, log: list[str] | None = None, mount: bool = False) -> str:
     """Pandoc's HTML with everything that can run, load or navigate removed.
 
-    comments=False also drops every HTML comment: the share copy has none. Each
+    comments=False also drops every HTML comment: the share copy has none. mount=True is the stricter
+    mode for a page mounted in the front's document (see the module text). Each
     removal is appended to `log` as a "  - ..." line when a list is given."""
     log = log if log is not None else []
     out = fragment
     for _ in range(MAX_PASSES):
-        again = _pass(out, comments, log)
+        again = _pass(out, comments, log, mount)
         if again == out:
             break
         out = again

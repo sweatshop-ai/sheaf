@@ -238,9 +238,29 @@ def test_the_wheel_is_built_and_installed_as_a_user_would(text):
 
 def test_the_browsers_system_packages_are_installed_by_the_job_only_where_it_can_use_sudo(text):
     # `--with-deps` runs apt through sudo, so the job passes it only where sudo exists.
-    block = text[text.index("Page tests (Playwright, Chromium)"):]
+    block = text[text.index("Page tests (Playwright, Chromium, Firefox, WebKit)"):]
     assert re.search(r'if \[ "\$RUNNER_OS" = "Linux" \] && command -v sudo >/dev/null; then deps="--with-deps"; fi', block)
-    assert 'playwright install $deps chromium' in block
+    assert 'playwright install $deps chromium firefox webkit' in block
+
+
+def test_no_step_name_holds_a_colon_and_a_space_or_a_hash_that_YAML_reads_as_syntax(text):
+    # GitHub refuses a file it cannot parse ("workflow file issue", a run that fails in the second it starts), and the tests
+    # above read the text only: a step name "Page tests (Playwright: Chromium, ...)" passed them all (2026-10-31, 56d4a5b).
+    # PyYAML is not in the lock, so this checks the hazard itself: a plain scalar with ": " or " #" in it.
+    for ln in text.splitlines():
+        m = re.match(r"^\s*(?:- )?name: (?P<v>[^'\"|>].*)$", ln)
+        if m:
+            assert ": " not in m["v"] and " #" not in m["v"], ln
+
+
+def test_the_other_engines_are_installed_only_in_the_page_test_step(text):
+    # The mount tests (#116) run in Chromium, Firefox and WebKit. The install is scoped to the step that runs
+    # them, so a pull request that skips the page tests pays for no extra browser, and the unit-test step is as fast as before.
+    i = text.index("- name: Page tests (Playwright, Chromium, Firefox, WebKit)")
+    j = text.index("\n      - name:", i + 1)
+    assert "firefox" in text[i:j]
+    assert "install" not in text[text.index("- name: Install from the lock"):text.index("- name: Tests")].replace("Install from the lock", "").replace("uv sync", "")
+    assert text.count("playwright install") == 1          # one install line, and it is the one in this step
 
 
 def test_a_failed_job_prints_the_state_of_the_host_the_browser_died_on(text):

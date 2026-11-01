@@ -113,19 +113,21 @@ jobs:
           path: ${{ runner.os == 'macOS' && '~/Library/Caches/ms-playwright' || '~/.cache/ms-playwright' }}
           key: playwright-${{ runner.os }}-${{ steps.image.outputs.os }}-${{ hashFiles('uv.lock') }}
 
-      - name: Page tests (Playwright, Chromium)
+      - name: Page tests (Playwright, Chromium, Firefox, WebKit)
         if: hashFiles('tests/page/**') != '' && steps.page.outputs.run == 'true'
         shell: bash
         run: |
           set -o pipefail
-          # --with-deps installs Chromium's system packages through sudo, which GitHub's runners have.
+          # --with-deps installs the browsers' system packages through sudo, which GitHub's runners have.
+          # Firefox and WebKit are here, and only here, for the mount tests (#116: the sheaf mounts in a shadow root
+          # and its selection code must hold in all three engines); the other steps install no browser.
           deps=""
           if [ "$RUNNER_OS" = "Linux" ] && command -v sudo >/dev/null; then deps="--with-deps"; fi
-          uv run --no-sync playwright install $deps chromium
+          uv run --no-sync playwright install $deps chromium firefox webkit
           uv run --no-sync python tools/ci/stall_watch.py -- uv run --no-sync pytest -v --durations=25 -m page -rs 2>&1 | tee page-tests.txt
           # A page test that cannot start its browser skips with a reason. Here that is a failure.
           if grep -Eq '[0-9]+ skipped' page-tests.txt; then
-            echo "::error::page tests were skipped, so Chromium did not run them"
+            echo "::error::page tests were skipped, so a browser (Chromium, Firefox or WebKit) did not start"
             exit 1
           fi
 

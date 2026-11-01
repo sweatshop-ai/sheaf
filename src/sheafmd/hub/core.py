@@ -285,7 +285,7 @@ class Hub:
         s = self.docs.get(address)
         return {k: s.get(k) for k in SETTING_KEYS}
 
-    def _build(self, e: Entry, text: str) -> str:
+    def _build(self, e: Entry, text: str, *, mount: bool = False, count: bool = True) -> str:
         s = self._settings(e.address)
         root = self.roots.get(roots_mod.Address.parse(e.address).root)
         meta = {"doc": e.address, "root": e.root_id, "boot": self.boot, "version": self.version,
@@ -300,9 +300,10 @@ class Hub:
                            by=s["by"], for_=s["for"], theme=s["theme"], credit=s["credit"], log=log,
                            root=root.path if root else None, extra_meta=meta,
                            script_nonce=self.placeholder, image_ok=self._image_rule(root, e.path, e.address, scope),
-                           warn=e.warnings.append if e.first else None)
-        e.log, e.first = log, False
-        e.images_scope = scope          # once the build worked
+                           warn=e.warnings.append if e.first and count else None, mount=mount)
+        if count:
+            e.log, e.first = log, False
+            e.images_scope = scope          # once the build worked
         return html
 
     def share_copy(self, e: Entry) -> str:
@@ -379,24 +380,38 @@ class Hub:
         found = list(_META_RE.finditer(html))
         if found:
             m = found[-1]
-            meta = json.loads(m.group(2))
-            # The buttons of the text the page draws: a write since its render brings a `changed` and a reload,
-            # so none are drawn on the old text meanwhile (10.11).
-            h, text = e.live.current()
-            meta["actions"] = self.actions(e, member, text) if h == meta.get("hash") else []
-            if member is None:
-                meta["seen"] = self.seen.get(e.address)
-                v = self.asktell.view(e.address)
-                meta["agent"], meta["can"], meta["lines"] = v.agent(), v.can(), v.lines
-            else:
-                meta.update(me=member.name, seen=self.member_seen.get(member.id, e.address),
-                            agent=None, can=[], lines=proxy_mod.member_lines(), proxy=True,
-                            member=member.id)
-                work, meta["can"] = self.member_work(e, member)
-                if work is not None:
-                    meta["work"] = work
+            meta = self._fresh_meta(e, json.loads(m.group(2)), member)
             html = (html[:m.start(2)] + json.dumps(meta).replace("<", "\\u003c") + html[m.end(2):])
         return html
+
+    def _fresh_meta(self, e: Entry, meta: dict, member) -> dict:
+        """The meta block as it is now: the read state and what changes without the page being rendered again. The page
+        route and the mount route (#116) both send this, so a page mounted in the front reads what a framed one does."""
+        # The buttons of the text the page draws: a write since its render brings a `changed` and a reload,
+        # so none are drawn on the old text meanwhile (10.11).
+        h, text = e.live.current()
+        meta["actions"] = self.actions(e, member, text) if h == meta.get("hash") else []
+        if member is None:
+            meta["seen"] = self.seen.get(e.address)
+            v = self.asktell.view(e.address)
+            meta["agent"], meta["can"], meta["lines"] = v.agent(), v.can(), v.lines
+        else:
+            meta.update(me=member.name, seen=self.member_seen.get(member.id, e.address),
+                        agent=None, can=[], lines=proxy_mod.member_lines(), proxy=True,
+                        member=member.id)
+            work, meta["can"] = self.member_work(e, member)
+            if work is not None:
+                meta["work"] = work
+        return meta
+
+    def mount_doc(self, e: Entry, member=None) -> dict:
+        """The sheaf as the front mounts it (#116): {title, toc, html, config, css, version}. The text is rendered now
+        through the sanitiser's mount mode; the config is the meta block of `page`, so both read the same state."""
+        h, text = e.live.current()
+        got = json.loads(self._build(e, text, mount=True, count=False))
+        got["config"] = self._fresh_meta(e, got["config"], member)
+        got["version"] = self.version
+        return got
 
     def actions(self, e: Entry, member, text: str | None = None) -> list:
         """The buttons at the top of the page of `e` as `member` (None: the hub's own person) reads them (10.11,

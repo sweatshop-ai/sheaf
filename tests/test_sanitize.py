@@ -407,7 +407,7 @@ def test_the_result_is_taken_through_again_until_nothing_changes(monkeypatch):
     from sheafmd import sanitize as S
     calls = []
 
-    def fake(fragment, comments, log):
+    def fake(fragment, comments, log, mount=False):
         calls.append(fragment)
         return fragment[:-1] if fragment.endswith("x") else fragment
     monkeypatch.setattr(S, "_pass", fake)

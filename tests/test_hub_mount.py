@@ -5,7 +5,6 @@ The page route and the share copy are unchanged."""
 import hashlib
 import re
 import json
-from importlib import resources
 from pathlib import Path
 
 import pytest
@@ -13,7 +12,7 @@ from helpers import page_meta
 
 import sheafmd
 from sheafmd import __version__
-from sheafmd.hub.handler import MOUNT_ASSETS
+from sheafmd.hub.handler import MOUNT_ASSETS, mount_asset_body
 
 DOC = "work/plan.md"
 HOSTILE = """# Plan
@@ -107,7 +106,7 @@ def test_the_mount_assets_are_the_hubs_own_files_and_cache_by_version(browser):
     assert "sheafPage" in js.text and "#rd-menu-btn" in css.text
 
 
-def served_bodies():
+def recorded_hashes():
     """Each version's recorded hash of each mount asset, from tests/asset_versions.txt."""
     out = {}
     for line in (Path(__file__).parent / "asset_versions.txt").read_text(encoding="utf-8").splitlines():
@@ -121,9 +120,8 @@ def served_bodies():
 @pytest.mark.parametrize("asset", sorted(MOUNT_ASSETS))
 def test_an_asset_served_under_a_version_never_changes_without_the_version(asset):
     # #172: #152 changed mount.css under 1.0.1, and browsers that had kept 1.0.1's for a year never saw the change.
-    page = resources.files("sheafmd") / "page"
-    now = hashlib.sha256(b"\n".join((page / f).read_bytes() for f in MOUNT_ASSETS[asset])).hexdigest()
-    recorded = served_bodies().get((__version__, asset))
+    now = hashlib.sha256(mount_asset_body(asset)).hexdigest()
+    recorded = recorded_hashes().get((__version__, asset))
     assert recorded is not None, (f"no record of {asset} for {__version__}: add `{__version__} {asset} {now}` to "
                                   "tests/asset_versions.txt")
     assert now == recorded, (f"{asset} changed under {__version__}, which browsers keep for a year: raise __version__ "

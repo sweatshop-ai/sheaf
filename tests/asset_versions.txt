@@ -5,7 +5,8 @@
 # change a line: when a test says an asset changed, raise __version__ in src/sheafmd/__init__.py and add
 # that version's lines below.
 #
-# 1.0.1 as the hub served it at 8a15c7b. #152 changed mount.css after it under the same version.
+# 1.0.1 as the deployed hub serves it, at 8a15c7b; 1.0.1 served other bodies before that, from f3c500d4
+# on, unrecorded. #152 changed mount.css after it under the same version.
 1.0.1 mount.js c011a5a5481a7065fd3f4f68e08b13d16acdfbb1b99520b07cec1c4174f95c01
 1.0.1 mount.css 2967b2ee073bf5835bcff3126f3ee2bf2ab478ad79e942b3bd9e4685aa1940b5
 #

@@ -75,7 +75,7 @@ def test_a_lone_closing_tag_beside_a_footnote_is_still_refused():
     doc = "# T\n\nA here[^1] </x1>b.\n\n[^1]: the note\n"
     frag = page_paragraph(doc).replace("here", "there").replace("</x1>", "")
     out, rep = rde.apply_edits(doc, [{"i": 1, "html": frag}])
-    assert out == doc and rep["skipped"]
+    assert out == doc and rep["skipped"] == [(1, "block holds raw HTML the edit cannot keep; edit it in the .md")]
 
 
 def test_a_merged_save_maps_the_ref_against_the_page_version_not_the_file():
@@ -101,3 +101,19 @@ def test_a_label_the_page_sends_is_not_trusted():
     frag = page_paragraph(doc).replace("here", "there").replace("<a ", '<a data-rd-note="forged" ', 1)
     out, rep = rde.apply_edits(doc, [{"i": 1, "html": frag}])
     assert out == "# T\n\nA there[^1].\n\n[^1]: the note\n" and rep["skipped"] == []
+
+
+def test_a_citation_in_a_tight_list_item_keeps_its_label():
+    doc = "# T\n\n- A here[^n].\n- B\n\n[^n]: the note\n"
+    page = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], doc)
+    html = re.search(r"<ul>[\s\S]*?</ul>", page).group(0).replace("here", "there")
+    out, rep = rde.apply_edits(doc, [{"i": 1, "html": html}])
+    assert rep["skipped"] == []
+    assert out == doc.replace("A here", "A there")
+
+
+def test_a_label_with_a_space_keeps_its_label():
+    doc = "# T\n\nA here[^a b].\n\n[^a b]: the note\n"
+    out, rep = edit(doc, 1)
+    assert rep["skipped"] == []
+    assert out == doc.replace("A here", "A there")

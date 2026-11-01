@@ -4515,3 +4515,34 @@ def test_an_edit_of_a_line_with_raw_inline_html_keeps_each_tag_in_the_file(tab):
     tab.page.clock.run_for(3000)
     until(lambda: "typed" in f.read_text(encoding="utf-8"), what="the save")
     assert f.read_text(encoding="utf-8") == RAW.replace("this line.", "this line. typed")
+
+
+LONE = "# Plan\n\nA <x1>ref</x2> and a lone </x3> close in this line.\n\nBody paragraph.\n"
+
+
+def test_an_edit_of_a_line_with_a_closing_tag_with_no_opener_keeps_it_in_the_file(tab):
+    """sheaf #157: the browser drops a closing tag with no opener, and the save of `<x1>ref</x2>` wrote
+    `<x1>ref`."""
+    f = tab.site.file
+    f.write_text(LONE, encoding="utf-8")
+    tab.page.clock.install()
+    tab.open()
+    type_at_end(tab.page, "main p:has-text('this line')", " typed")
+    tab.page.clock.run_for(3000)
+    until(lambda: "typed" in f.read_text(encoding="utf-8"), what="the save")
+    assert f.read_text(encoding="utf-8") == LONE.replace("this line.", "this line. typed")
+
+
+PIPE = '# Plan\n\n| A | B |\n|---|---|\n| <abbr title="a\\|b">X</abbr> | the cell |\n\nBody paragraph.\n'
+
+
+def test_an_edit_of_a_table_keeps_the_escaped_pipe_in_a_raw_tags_attribute(tab):
+    """sheaf #157: the save wrote `title="a|b"`, and the bare pipe split the cell."""
+    f = tab.site.file
+    f.write_text(PIPE, encoding="utf-8")
+    tab.page.clock.install()
+    tab.open()
+    type_at_end(tab.page, "main td:has-text('the cell')", " typed")
+    tab.page.clock.run_for(3000)
+    until(lambda: "typed" in f.read_text(encoding="utf-8"), what="the save")
+    assert '| <abbr title="a\\|b">X</abbr> | the cell typed |' in f.read_text(encoding="utf-8")

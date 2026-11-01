@@ -131,3 +131,185 @@ def test_a_raw_element_inside_code_on_the_page_stays_text():
     # Pandoc writes it as it did before #155; the tag is never put back inside the backticks as text.
     out = saved("A <kbd>x</kbd> here.", html="<p>A <code><kbd>x</kbd></code> there.</p>")
     assert "`<kbd>" not in out and "`x`" in out
+
+
+# A closing tag with no opener (sheaf #157): the browser drops it, so the page has no element to put back.
+
+@pytest.mark.parametrize("src,html", [
+    ("A <x1>b</x2> here.", "<p>A <x1>b there.</x1></p>"),
+    ("A </x1> stray close here.", "<p>A  stray close there.</p>"),
+    ("Two </x1></x2> strays here.", "<p>Two  strays there.</p>"),
+    ("Text </kbd> and <kbd>K</kbd> here.", "<p>Text  and <kbd>K</kbd> there.</p>"),
+    ("End of the line here.</x1>", "<p>End of the line there.</p>"),
+])
+def test_a_closing_tag_with_no_opener_is_kept_where_it_was(src, html):
+    assert saved(src, html=html) == src.replace("here", "there") + "\n"
+
+
+def test_a_closing_tag_with_no_opener_survives_in_a_list_item():
+    assert saved("- one </x1> item\n- two here") == "- one </x1> item\n- two there\n"
+
+
+def test_a_closing_tag_with_no_opener_survives_in_a_table_cell():
+    out = saved("| A | B |\n|---|---|\n| a </x1> cell | here |")
+    assert "| a </x1> cell" in out and "| there" in out
+
+
+def test_a_closing_tag_with_no_opener_stays_after_the_words_before_it_when_others_change():
+    out = saved("Before </x1> after here.", html="<p>Before  something else there.</p>")
+    assert out == "Before </x1> something else there.\n"
+
+
+# An escaped pipe in a tag's attribute in a table cell (sheaf #157): pandoc's RawInline holds it without the
+# backslash, and a bare `|` splits the cell.
+
+@pytest.mark.parametrize("attr", [r'title="a\|b"', r'title="a\|b\|c" lang="x"'])
+def test_an_escaped_pipe_in_a_raw_tags_attribute_keeps_its_backslash_in_a_table(attr):
+    out = saved(f"| A | B |\n|---|---|\n| <abbr {attr}>X</abbr> | here |")
+    assert f"| <abbr {attr}>X</abbr> | there |" in out
+
+
+def test_a_raw_tag_in_a_table_the_page_wraps_in_its_tblwrap_is_kept():
+    # The page sends a table inside its own <div class="tblwrap">, which hid every raw tag of the table.
+    src = "| A | B |\n|---|---|\n| <kbd>K</kbd> cell | here |"
+    out = saved(src, html='<div class="tblwrap">' + page_fragment(src).replace("here", "there") + "</div>")
+    assert "| <kbd>K</kbd> cell |" in out and "| there" in out
+
+
+def test_a_pipe_in_a_raw_tags_attribute_outside_a_table_is_not_given_a_backslash():
+    assert saved('A <abbr title="a|b">X</abbr> here.') == 'A <abbr title="a|b">X</abbr> there.\n'
+
+
+# Gate 1 on #157.
+
+@pytest.mark.parametrize("src", [
+    r'`<abbr title="a\|b">` and <abbr title="a|b">X</abbr> here.',
+    r'\<abbr title="a\|b"> and <abbr title="a|b">X</abbr> here.',
+])
+def test_a_pipe_outside_a_table_is_not_given_the_backslash_of_the_same_tag_written_as_text(src):
+    # Pandoc's writer escapes the text's `>` as `\>`, as on main; the tag keeps its bytes.
+    assert saved(src).endswith(' and <abbr title="a|b">X</abbr> there.\n')
+
+
+@pytest.mark.parametrize("src,html", [
+    ("Press <kbd>K</kbd></x1> now here.", "<p>Press <kbd>K</kbd> now there.</p>"),
+    ("A [a](http://u)</x1> link here.", '<p>A <a href="http://u">a</a> link there.</p>'),
+    ("An *a*</x1> here.", "<p>An <em>a</em> there.</p>"),
+    # At the start of a paragraph the tag would open an HTML block; a heading has none.
+    ("## </x1><kbd>K</kbd> first here", "<h2><kbd>K</kbd> first there</h2>"),
+])
+def test_a_closing_tag_with_no_opener_stays_outside_the_element_beside_it(src, html):
+    assert saved(src, html=html) == src.replace("here", "there") + "\n"
+
+
+def test_a_closing_tag_with_no_opener_after_math_stays_outside_the_math_span():
+    html = '<p>Area <span class="math inline"><em>x</em><sup>2</sup></span> there.</p>'
+    out = saved("Area $x^2$</x1> here.", html=html)
+    assert out.endswith("</span></x1> there.\n") and "</x1></sup>" not in out
+
+
+def test_a_closing_tag_with_no_opener_keeps_its_place_in_a_line_the_render_wraps():
+    src = "a " * 27 + "x</x1> here."
+    assert saved(src) == src.replace("here", "there") + "\n"
+
+
+def test_placing_a_closing_tag_with_no_opener_compares_only_the_words_the_edit_changed(monkeypatch):
+    # A diff of the whole block is quadratic: a paragraph of 47 KB took 54 s.
+    import difflib
+
+    sizes, real = [], difflib.SequenceMatcher
+
+    def counted(isjunk=None, a="", b="", autojunk=True):
+        sizes.append(max(len(a), len(b)))
+        return real(isjunk, a, b, autojunk)
+
+    monkeypatch.setattr(difflib, "SequenceMatcher", counted)
+    src = "word " * 8000 + "x</x1> here."
+    assert saved(src) == src.replace("here", "there") + "\n"
+    assert max(sizes, default=0) < 2100
+
+
+# Gate 2 on #157: a comment's placeholder is text on the page side only, and two edits far apart leave a
+# long stretch between them.
+
+C1 = '<!-- sheaf-comment id=c1 by="Ada" at=2026-10-14T09:00 status=open quote="Start"\nA note.\n-->'
+WORDS = "w " * 1200
+
+
+@pytest.mark.parametrize("comment,anchor", [
+    (C1, '<span class="rd-anchor" data-rd-id="c1"></span>'),
+    ("<!-- foreign -->", "<!-- foreign -->"),
+])
+def test_a_comment_far_away_does_not_move_a_closing_tag_with_no_opener(comment, anchor):
+    src = "Start" + comment + " " + WORDS + "x</x1> " + WORDS + "here."
+    html = "<p>Start" + anchor + " " + WORDS + "x " + WORDS + "there.</p>"
+    out = saved(src, html=html)
+    assert " w x</x1> w " in out and out.count("</x1>") == 1
+
+
+def test_two_edits_far_apart_leave_a_closing_tag_with_no_opener_where_it_was():
+    src = "First " + WORDS + "x</x1> " + WORDS + "here."
+    html = "<p>Once " + WORDS + "x " + WORDS + "there.</p>"
+    assert saved(src, html=html) == src.replace("First", "Once").replace("here", "there") + "\n"
+
+
+# Gate 3 on #157: a tag between words in the source stays between words when the word before it changes.
+
+@pytest.mark.parametrize("src,html,want", [
+    ("The red car</x1> is here.", "<p>The red cat is there.</p>", "The red cat</x1> is there.\n"),
+    ("Click Save</x1> now here.", "<p>Click Submit now there.</p>", "Click Submit</x1> now there.\n"),
+    ("one two</x1> three here.", "<p>one three there.</p>", "one three</x1> there.\n"),
+])
+def test_a_closing_tag_with_no_opener_is_not_put_inside_a_word(src, html, want):
+    assert saved(src, html=html) == want
+
+
+def test_a_closing_tag_with_no_opener_inside_a_word_in_the_source_stays_there():
+    assert saved("A wo</x1>rd here.") == "A wo</x1>rd there.\n"
+
+
+# Gate 4 on #157: Enter puts a new item or line right after the old one, with no space between their words.
+
+@pytest.mark.parametrize("src,html,want", [
+    ("- one</x1>\n- two here", "<ul>\n<li>one</li><li>new</li>\n<li>two there</li>\n</ul>",
+     "- one</x1>\n- new\n- two there\n"),
+    ("1. Do it</x1>\n2. two here", "<ol>\n<li>Do it</li><li>More</li>\n<li>two there</li>\n</ol>",
+     "1.  Do it</x1>\n2.  More\n3.  two there\n"),
+])
+def test_a_closing_tag_with_no_opener_stays_in_its_item_when_enter_adds_one_after_it(src, html, want):
+    assert saved(src, html=html) == want
+
+
+def test_a_closing_tag_with_no_opener_stays_on_its_line_when_enter_adds_one_after_it():
+    out = saved("A b</x1> here.", html="<p>A b there.<div>new</div></p>")
+    assert out.startswith("A b</x1> there.") and "new</x1>" not in out
+
+
+@pytest.mark.parametrize("src,html,want", [
+    ("Go bar</x1> more here.", "<p>Go qux more there.</p>", "Go qux</x1> more there.\n"),
+    ("a b</x1>. here", "<p>a c. there</p>", "a c</x1>. there\n"),
+])
+def test_a_closing_tag_with_no_opener_follows_a_word_replaced_by_one_with_no_letter_in_common(src, html, want):
+    assert saved(src, html=html) == want
+
+
+# Gate 5 on #157: Enter after a word moves the space after it to the new line, as a no-break space.
+
+@pytest.mark.parametrize("src,html,want", [
+    ("Line one ends here </x1>\nline two.", "<p>Line one ends here<div>&nbsp;line two.</div></p>",
+     "Line one ends here</x1>\n\nline two.\n"),
+    ("Word </x1> end.", "<p>Word<div>x end.</div></p>", "Word</x1>\n\nx end.\n"),
+    ("A b </x1>c d here.", "<p>A b&nbsp;<div>c d here.</div></p>", "A b</x1>\n\nc d here.\n"),
+    ("A </x1> stray close here.", "<p>A&nbsp;<div>stray close here.</div></p>", "A</x1>\n\nstray close here.\n"),
+])
+def test_a_closing_tag_with_no_opener_stays_with_the_word_before_it_when_enter_splits_the_line(src, html, want):
+    assert saved(src, html=html) == want
+
+
+def test_a_closing_tag_with_no_opener_stays_in_its_item_when_enter_splits_it():
+    out = saved("- Item one </x1> more\n- two", html="<ul><li>Item one</li><li>&nbsp;more</li><li>two</li></ul>")
+    assert out.startswith("- Item one</x1>\n") and out.count("</x1>") == 1
+
+
+def test_a_closing_tag_with_no_opener_after_an_element_and_a_space_keeps_the_space_before_it():
+    assert saved("A <kbd>K</kbd> </x1>b here.") == "A <kbd>K</kbd> </x1>b there.\n"

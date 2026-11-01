@@ -853,8 +853,8 @@ class Handler:
         if req.member is None or the is None or root is None or not self.hub.owns(req.member, root) or not the.serves(name):
             raise Refuse(404, "no such list")
         return _json(200, {"kind": "list", "title": "Actions", "version": self.hub.version,
-                           "assets": self.hub.mount_names(),
-                           "list":the.data(req.member, req.query.get("show", ""))},
+                           **self.hub.mount_fields(),
+                           "list": the.data(req.member, req.query.get("show", ""))},
                      {"X-Content-Type-Options": "nosniff"})
 
     def _mount_asset(self, req: Req, name: str, kind: str) -> Response:

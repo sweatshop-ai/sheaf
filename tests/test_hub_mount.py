@@ -12,7 +12,6 @@ from helpers import browser_on, page_meta
 import sheafmd
 from sheafmd import __version__, paths
 from sheafmd.hub import assets
-from sheafmd.hub.assets import MOUNT_ASSETS
 from sheafmd.hub.core import Hub
 
 DOC = "work/plan.md"
@@ -107,7 +106,7 @@ def test_the_mount_assets_are_the_hubs_own_files_and_cache_by_content(browser):
     assert "sheafPage" in js.text and "#rd-menu-btn" in css.text
 
 
-@pytest.mark.parametrize("asset", sorted(MOUNT_ASSETS))
+@pytest.mark.parametrize("asset", sorted(assets.MOUNT_ASSETS))
 def test_the_name_kept_for_a_year_is_the_hash_of_what_is_served(browser, asset):
     # #172: #152 changed mount.css under 1.0.1's `?v=`, and browsers that had kept it for a year never saw the change.
     # #179: the name is the content, so no change can keep the old name.
@@ -125,7 +124,7 @@ def test_an_asset_asked_without_its_hash_is_not_cached_for_a_year(browser):
 
 def copy_of_the_page_files(to):
     to.mkdir()
-    for files in MOUNT_ASSETS.values():
+    for files in assets.MOUNT_ASSETS.values():
         for f in files:
             (to / f).write_bytes((assets.installed() / f).read_bytes())
     return to
@@ -138,8 +137,12 @@ def test_two_installs_with_different_files_name_their_assets_differently(tmp_pat
     old, new = assets.load("1.0.0", a), assets.load("1.0.0", b)
     assert old["mount.css"].tag != new["mount.css"].tag and old["mount.css"].body != new["mount.css"].body
     assert old["mount.js"] == new["mount.js"]
-    # mount.js carries the hub's version: another version is another file, under another name
+    # mount.js carries the hub's version: another version is another file, under another name, of the same scripts
     assert assets.load("1.0.1", a)["mount.js"].tag != old["mount.js"].tag
+    assert assets.load("1.0.1", a)["mount.js"].source == old["mount.js"].source
+    # other scripts under the same version are other scripts: a page in memory takes it for an upgrade
+    (b / "page.js").write_text((b / "page.js").read_text(encoding="utf-8") + "\n// changed\n", encoding="utf-8")
+    assert assets.load("1.0.0", b)["mount.js"].source != old["mount.js"].source
 
 
 def test_a_hub_serves_the_files_it_started_with_while_a_reinstall_changes_them_under_it(work, tmp_path, monkeypatch):
@@ -158,10 +161,11 @@ def test_a_hub_serves_the_files_it_started_with_while_a_reinstall_changes_them_u
     assert new.get(f"/_/mount.css?v={tag}", cookie=False).headers["Cache-Control"] == "no-store"
 
 
-def test_the_mount_answer_names_the_style_the_loader_links(browser, hostile):
+def test_the_mount_answer_names_the_style_the_loader_links_and_the_scripts_the_hub_serves(browser, hostile):
     attach(browser, hostile)
     got = browser.get(f"/_/mount?doc={DOC}").json()
     assert got["assets"] == {"mount.css": browser.hub.assets["mount.css"].tag}
+    assert got["script"] == browser.hub.assets["mount.js"].source
 
 
 def test_the_mount_json_cannot_be_framed_or_sniffed_into_a_page(browser, hostile):
@@ -201,4 +205,5 @@ def test_the_mount_script_knows_the_version_of_the_hub_that_served_it(browser):
     tell by knowing its own (#116 slice v, Ines's P2)."""
     js = browser.get("/_/mount.js", cookie=False).text
     assert f"const VERSION = {json.dumps(__version__)};" in js
-    assert "@@SHEAF_VERSION@@" not in js
+    assert f"const SCRIPT = {json.dumps(browser.hub.assets['mount.js'].source)};" in js       # and its scripts' (#179)
+    assert "@@SHEAF_VERSION@@" not in js and "@@SHEAF_SCRIPT@@" not in js

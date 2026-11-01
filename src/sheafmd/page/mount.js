@@ -17,9 +17,11 @@
   const HTML_NS = 'http://www.w3.org/1999/xhtml';
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const ID_PREFIX = 'u-';
-  // The version of the hub that served this file, written in by the hub (handler._mount_asset). A hub answering with
-  // another version was upgraded under the page, and the page.js in memory is the old one.
+  // The version of the hub that served this file and the name of its scripts, written in by the hub (hub/assets.py). A
+  // hub answering with another version, or other scripts under the same one (#179), was upgraded under the page, and
+  // the page.js in memory is the old one.
   const VERSION = '@@SHEAF_VERSION@@';
+  const SCRIPT = '@@SHEAF_SCRIPT@@';
   const KNOWN = !VERSION.startsWith('@@');
   // Each pane's closed root, kept here: attachShadow works once per element, so a pane mounted again (a failed first
   // try, the list after a sheaf) reuses its root, and `live` is the mount standing in it. `seq` counts the mount()
@@ -382,7 +384,7 @@
       }
       if (stale()) return got;
       if (list && (fresh.kind !== 'list' || !render)) throw new Error('the hub sent no list');
-      const upgraded = KNOWN && fresh.version !== VERSION;
+      const upgraded = KNOWN && (fresh.version !== VERSION || fresh.script !== SCRIPT);
       if (upgraded && typeof opts.upgrade === 'function') {
         got = got || fresh;
         // Every remount of the old page is said, not the first only: its settle had set `settling` and written the keep,

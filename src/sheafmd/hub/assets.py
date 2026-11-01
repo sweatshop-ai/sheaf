@@ -16,12 +16,19 @@ from importlib import resources
 MOUNT_ASSETS = {"mount.js": ("mount.js", "page.js", "list.js"), "mount.css": ("mount.css", "page.css", "list.css")}
 TAG_LENGTH = 16                       # hex digits of the sha256: 64 bits, the name of one body
 VERSION_MARK = b"'@@SHEAF_VERSION@@'"
+SCRIPT_MARK = b"'@@SHEAF_SCRIPT@@'"
 
 
 @dataclass(frozen=True)
 class Asset:
     body: bytes
     tag: str                          # the `?v=` that names this body
+    source: str                       # the files' own name, before the hub writes into them: a page in memory
+                                      # whose script names other files than the hub's runs an old script
+
+
+def _tag(b: bytes) -> str:
+    return hashlib.sha256(b).hexdigest()[:TAG_LENGTH]
 
 
 def installed():
@@ -31,12 +38,14 @@ def installed():
 
 def load(version: str, page=None) -> dict:
     """Each mount asset as the hub of `version` serves it: the files of `page` (the installed ones by default) joined,
-    and the version written into mount.js, which tells an upgrade from a remount by it."""
+    and the version and the scripts' own name written into mount.js, which tells an upgrade from a remount by them."""
     page = installed() if page is None else page
     out = {}
     for name, files in MOUNT_ASSETS.items():
         body = b"\n".join((page / f).read_bytes() for f in files)
+        source = _tag(body)
         if name == "mount.js":
             body = body.replace(VERSION_MARK, json.dumps(version).encode(), 1)
-        out[name] = Asset(body, hashlib.sha256(body).hexdigest()[:TAG_LENGTH])
+            body = body.replace(SCRIPT_MARK, json.dumps(source).encode(), 1)
+        out[name] = Asset(body, _tag(body), source)
     return out

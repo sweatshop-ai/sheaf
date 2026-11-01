@@ -157,3 +157,23 @@ def test_a_label_with_a_double_quote_beside_raw_inline_html_keeps_its_label():
     doc = '# T\n\nA <kbd>K</kbd> here[^a"b].\n\n[^a"b]: note\n'
     out, rep = edit(doc, 1)
     assert rep["skipped"] == [] and out == doc.replace("A <kbd>K</kbd> here", "A <kbd>K</kbd> there")
+
+
+def test_a_pandoc_run_that_failed_is_not_kept_for_the_next_save(monkeypatch):
+    # Opus review 2, P3: a timeout once must not refuse every later save against that text
+    doc = "# T\n\nA here[^1].\n\n[^1]: the note, timed out once\n"
+    real = rde._pandoc.run
+    monkeypatch.setattr(rde._pandoc, "run", lambda args, text: rde._pandoc.subprocess.CompletedProcess(args, 124, "", "timeout")
+                        if "gfm+sourcepos" in args else real(args, text))
+    assert edit(doc, 1)[1]["skipped"]
+    monkeypatch.setattr(rde._pandoc, "run", real)
+    out, rep = edit(doc, 1)
+    assert rep["skipped"] == [] and out == doc.replace("A here", "A there")
+
+
+def test_a_ref_inside_code_is_refused():
+    # Opus review 2, P3: written as code text, the citation is no longer numbered, and nothing would remap
+    doc = "# T\n\nA here[^a] b.\n\n[^a]: note\n"
+    frag = page_paragraph(doc).replace("here", "<code>there").replace("</a>", "</a></code>")
+    out, rep = rde.apply_edits(doc, [{"i": 1, "html": frag}])
+    assert out == doc and rep["skipped"]

@@ -1177,13 +1177,25 @@ CITED_RE = re.compile(r"\[\^([^\]\n]+)\]")
 CITED_AT_RE = re.compile(r'data-pos="(\d+):(\d+)-(\d+):(\d+)"(?: data-pos="[^"]*")*><a href="#fn(\d+)" class="footnote-ref"')
 
 
-@lru_cache(maxsize=8)
+class _Unread(Exception):
+    pass
+
+
 def _note_labels(text: str) -> dict:
     """{page number: source label} for each citation of `text`, numbered as the page numbers them. Kept for the
-    last few texts: a page that types on saves against one text again and again. The caller never changes it."""
+    last few texts: a page that types on saves against one text again and again. The caller never changes it.
+    A run of pandoc that failed (a time limit on a busy machine) is not kept: the next save asks again."""
+    try:
+        return _read_labels(text)
+    except _Unread:
+        return {}
+
+
+@lru_cache(maxsize=8)
+def _read_labels(text: str) -> dict:
     r = _pandoc.run(["-f", "gfm+sourcepos", "-t", "html5", "--wrap=none"], text)
     if r.returncode != 0:
-        return {}
+        raise _Unread
     lines, labels = text.split("\n"), {}
     for m in CITED_AT_RE.finditer(r.stdout):
         l1, c1, l2, c2, n = map(int, m.groups())
@@ -1219,7 +1231,13 @@ def _name_notes(text: str, edits) -> list:
 
 def _notes_as_tokens(fragment: str, token):
     """(fragment, {token: `[^label]`}): each footnote ref of the fragment as a placeholder pandoc keeps."""
+    from bs4 import BeautifulSoup
+
     placed = {}
+    if NOTE_REF_RE.search(fragment) and any(a.find_parent(["code", "pre"]) for a in
+                                            BeautifulSoup(fragment, "html.parser").select("a.footnote-ref")):
+        # In code a citation is words: pandoc would no longer number it, and the page's numbers would be off.
+        raise EditError("block has a footnote citation inside code; edit it in the .md")
 
     def swap(m):
         name = NOTE_NAME_RE.match(m.group(0))

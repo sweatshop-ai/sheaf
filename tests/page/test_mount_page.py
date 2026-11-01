@@ -417,8 +417,8 @@ def test_this_mount_js_served_by_a_hub_from_before_179_mounts_by_the_version_alo
     front.page.route("**/_/mount.js*", as_the_old_hub_serves_it)
     front.page.route("**/_/mount?doc=*", as_the_old_hub_answers)
     front.open()
-    assert front.js("return root.querySelector('link[rel=stylesheet]').getAttribute('href');") == \
-        f"/_/mount.css?v={front.site.hub.version}"
+    # Opus review 2, P2: not `?v=<version>`, which that hub keeps for a year whatever files are on its disk
+    assert front.js("return root.querySelector('link[rel=stylesheet]').getAttribute('href');") == "/_/mount.css"
     front.site.file.write_text(front.site.file.read_text().replace("about pears", "about plums"), encoding="utf-8")
     until(lambda: "plums" in front.js("return root.querySelector('main').textContent;"), what="the remount")
     assert front.page.evaluate("window.__upgrades || null") is None

@@ -25,9 +25,9 @@
   const SCRIPT = '@@SHEAF_SCRIPT@@';
   const KNOWN = !VERSION.startsWith('@@');
   const SCRIPT_KNOWN = !SCRIPT.startsWith('@@');
-  // The name an answer gives one of the hub's assets (`assets`, #179), or the version where it gives none.
-  const nameOf = (answer, asset) =>
-    answer.assets && typeof answer.assets[asset] === 'string' ? answer.assets[asset] : answer.version;
+  // The name an answer gives the new mount.js (`assets`, #179), or the version where it gives none.
+  const scriptName = (answer) =>
+    answer.assets && typeof answer.assets['mount.js'] === 'string' ? answer.assets['mount.js'] : answer.version;
   // Each pane's closed root, kept here: attachShadow works once per element, so a pane mounted again (a failed first
   // try, the list after a sheaf) reuses its root, and `live` is the mount standing in it. `seq` counts the mount()
   // calls on the pane: the one called last takes it, whichever answer comes in first.
@@ -398,7 +398,7 @@
         if (page && page.failed) page.failed('sheaf was updated on the hub: the new version is loading.');
         // The loader loads `/_/mount.js?v=<this>` once per value: the new script's own name, one per build, so a second
         // upgrade under one version (a rollback and a re-apply, #179) is loaded too, and kept by the name of its body.
-        if (!told) { told = true; opts.upgrade(nameOf(fresh, 'mount.js')); }
+        if (!told) { told = true; opts.upgrade(scriptName(fresh)); }
         return got;
       }
       if (!root) {
@@ -425,7 +425,10 @@
       }
       const link = doc.createElement('link');
       link.rel = 'stylesheet';
-      link.href = '/_/mount.css?v=' + encodeURIComponent(nameOf(got, 'mount.css'));   // its content's name (#179)
+      // By its content's name (#179). A hub from before #179 gives none: then no name at all, asked again each time,
+      // as that hub keeps `?v=<version>` for a year whatever is on its disk (the reinstall window of an upgrade).
+      const css = got.assets && typeof got.assets['mount.css'] === 'string' ? got.assets['mount.css'] : null;
+      link.href = css === null ? '/_/mount.css' : '/_/mount.css?v=' + encodeURIComponent(css);
       const wrap = doc.createElement('div');
       wrap.className = list ? 'rd-root sheaf-list' : 'rd-root' + (got.toc ? '' : ' notoc');
       wrap.tabIndex = -1;

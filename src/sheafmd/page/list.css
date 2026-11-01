@@ -12,6 +12,9 @@
 @media (prefers-color-scheme:dark){.sheaf-list{--sl-fg:var(--fg,#f2f2f7);--sl-muted:var(--muted,#a1a1a6);
 --sl-line:var(--rule,#38383a);--sl-chip:var(--accent,#6ea2ff);--sl-bg:var(--bg,#1c1c1e)}}
 body.sheaf-list{color-scheme:light dark}
+/* A browser without light-dark() keeps the OS's red, as before #169. */
+@supports not (color:light-dark(#000,#fff)){.sheaf-list{--sl-once:#c62828}
+@media (prefers-color-scheme:dark){.sheaf-list{--sl-once:#ff6b6b}}}
 .sheaf-list{padding:24px 16px;font:15px/1.45 system-ui,sans-serif;color:var(--sl-fg);background:var(--sl-bg);
 overflow-wrap:anywhere}
 .sheaf-list header{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}

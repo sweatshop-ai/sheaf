@@ -10,7 +10,8 @@ import json
 
 import pytest
 from helpers import PLAN
-from pagehelp import BLUE, DOC, HOST, PAGE_TIMEOUT_MS, RED, close_context, contrast, new_context, until
+from pagehelp import (BLUE, DOC, HOST, PAGE_TIMEOUT_MS, RED, assert_readable, close_context, drop_host, new_context, until,
+                      wear_host)
 
 from sheafmd import comments as rdc
 
@@ -510,10 +511,10 @@ def test_a_link_to_a_page_of_the_hub_goes_to_the_loader_and_a_modified_click_doe
     assert front.page.evaluate("window.__moves") == ["/list?show=mine"]
 
 
-# A sheaf's own action buttons (page.css, #rd-actions): a one-off, a toggle, and each pressed, put at the top of the
-# page's wrapper if the sheaf has none; their colours and the background of the wrapper they stand on.
-ACTS = """const top = root.querySelector('.rd-root') || document.body;
-  let bar = root.getElementById ? root.getElementById('rd-actions') : null;
+# A sheaf's own action buttons (page.css, #rd-actions): a one-off, a toggle, and each pressed, put at the top of `arg`
+# (the mounted page's wrapper) or of the body; their colours and the background they stand on.
+ACTS = """const top = arg ? root.querySelector(arg) : document.body;
+  let bar = root.getElementById('rd-actions');
   if (!bar) { bar = document.createElement('div'); bar.id = 'rd-actions'; top.prepend(bar); }
   bar.replaceChildren(...[['one-off', 'Approve'], ['toggle', 'Share'], ['one-off pressed', 'Approved'],
     ['toggle pressed', 'Shared']].map(([c, t]) => Object.assign(document.createElement('button'),
@@ -526,56 +527,75 @@ ACTS = """const top = root.querySelector('.rd-root') || document.body;
           bg: getComputedStyle(top).backgroundColor};"""
 
 
+def acts_of_own(page):
+    return page.evaluate("([arg]) => { const root = document; " + ACTS + " }", [None])
+
+
 def assert_acts_of(got, scheme):
     assert got["once"] == [RED[scheme]] * 2 and got["toggle"] == [BLUE[scheme]] * 2, got
-    assert got["pressed"][:2] == [RED[scheme], BLUE[scheme]], got
+    assert got["pressed"] == [RED[scheme], BLUE[scheme], got["bg"]], got
     for c in (RED[scheme], BLUE[scheme]):
-        assert contrast(c, got["bg"]) >= 4.5, (c, got["bg"], contrast(c, got["bg"]))
+        assert_readable(c, got["bg"])
 
 
-@pytest.mark.parametrize("os, front_", [("dark", "light"), ("light", "dark"), ("dark", "dark"), ("light", "light")])
-def test_a_mounted_sheafs_action_buttons_follow_the_scheme_the_loader_sets_on_the_host_not_the_oss(front, os, front_):
+@pytest.mark.parametrize("os, host", [("dark", "light"), ("light", "dark"), ("dark", "dark"), ("light", "light")])
+def test_a_mounted_sheafs_action_buttons_follow_the_scheme_the_loader_sets_on_the_host_not_the_oss(front, os, host):
     """#169: `#rd-actions .rd-act` took its red and blue from `prefers-color-scheme` while the mounted page's background
     is the front's. They follow the `color-scheme` the loader sets on the host, and the OS's while the host sets none."""
-    f = front
-    f.page.emulate_media(color_scheme=os)
-    f.open()
-    assert_acts_of(f.js(ACTS), os)
-    for name, value in HOST[front_].items():
-        f.page.evaluate("([n, v]) => document.getElementById('pane').style.setProperty(n, v)", [name, value])
-    got = f.js(ACTS)
-    assert got["bg"] == HOST[front_]["--bg"], got
-    assert_acts_of(got, front_)
-    assert got["pressed"][2] == HOST[front_]["--bg"], got
-    for name in HOST[front_]:
-        f.page.evaluate("(n) => document.getElementById('pane').style.removeProperty(n)", name)
-    assert_acts_of(f.js(ACTS), os)
+    front.page.emulate_media(color_scheme=os)
+    front.open()
+    assert_acts_of(front.js(ACTS, ".rd-root"), os)
+    wear_host(front.page, host)
+    got = front.js(ACTS, ".rd-root")
+    assert got["bg"] == HOST[host]["--bg"], got
+    assert_acts_of(got, host)
+    drop_host(front.page, host)
+    assert_acts_of(front.js(ACTS, ".rd-root"), os)
 
 
 @pytest.mark.parametrize("os", ["light", "dark"])
 def test_a_sheafs_action_buttons_on_its_own_page_follow_the_os(tab, os):
     tab.page.emulate_media(color_scheme=os)
     tab.open()
-    got = tab.page.evaluate("(() => { const root = document; " + ACTS.replace("root.querySelector('.rd-root') ||", "")
-                            + " })()")
-    assert_acts_of(got, os)
+    assert_acts_of(acts_of_own(tab.page), os)
+
+
+def a_theme(tmp_path, name, css):
+    theme = tmp_path / name
+    theme.mkdir()
+    (theme / "theme.toml").write_text(f'name = "{name}"\n', encoding="utf-8")
+    (theme / "theme.css").write_text(css, encoding="utf-8")
+    return str(theme)
+
+
+LIGHT_THEME = ":root{--bg:#fff;--fg:#111;color-scheme:light}body{background:var(--bg)}\n"
+# Dark on a dark OS, with no `color-scheme` said.
+SILENT_THEME = (":root{--bg:#fff;--fg:#111}@media (prefers-color-scheme:dark){:root{--bg:#14171a;--fg:#eee}}"
+                "body{background:var(--bg)}\n")
+
+
+@pytest.mark.parametrize("css, scheme", [(LIGHT_THEME, "light"), (SILENT_THEME, "dark")], ids=["says-light", "says-none"])
+def test_on_its_own_page_a_theme_that_says_its_scheme_keeps_it_and_one_that_says_none_follows_the_os(tab, site, tmp_path,
+                                                                                                     css, scheme):
+    """#169 review: the buttons follow the page's `color-scheme`; a theme that goes dark on a dark OS without saying so
+    had the light red on its dark background (2.9:1). page.css gives the root the OS's scheme in a layer, so a theme's
+    own still wins: on a dark OS, a light theme keeps light buttons and a silent one gets dark ones."""
+    site.hub.render(site.file, {"theme": a_theme(tmp_path, "t", css)}, None)
+    tab.page.emulate_media(color_scheme="dark")
+    tab.open()
+    assert_acts_of(acts_of_own(tab.page), scheme)
 
 
 def test_a_mounted_theme_that_says_its_own_scheme_keeps_it_over_the_mounts_fallback(chromium, site, tmp_path):
     """#169: mount.css gives the host `color-scheme: light dark` where the loader sets none, so the buttons follow the OS
     there; a theme that says a scheme of its own on its :root (its :host in the mount) keeps it, the fallback being in
     a layer. Here a light theme on a dark OS: light buttons."""
-    theme = tmp_path / "light-theme"
-    theme.mkdir()
-    (theme / "theme.toml").write_text('name = "light"\n', encoding="utf-8")
-    (theme / "theme.css").write_text(":root{--bg:#fff;--fg:#111;color-scheme:light}body{background:var(--bg)}\n",
-                                     encoding="utf-8")
-    site.hub.render(site.file, {"theme": str(theme)}, None)
+    site.hub.render(site.file, {"theme": a_theme(tmp_path, "light", LIGHT_THEME)}, None)
     c, f = _front(chromium, site)
     try:
         f.page.emulate_media(color_scheme="dark")
         f.open()
-        assert_acts_of(f.js(ACTS), "light")
+        assert_acts_of(f.js(ACTS, ".rd-root"), "light")
         assert f.errors == []
     finally:
         close_context(c)

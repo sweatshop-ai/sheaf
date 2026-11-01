@@ -237,3 +237,46 @@ def test_a_filter_and_a_title_clicked_in_the_mounted_list_go_to_the_loader_not_t
     until(lambda: len(m.page.evaluate("window.__moves")) == 2, what="the second move")
     assert m.page.evaluate("window.__moves")[1] == title
     assert m.page.evaluate("[location.pathname, window.__front]") == [FRONT, True]
+
+
+# The colours the loader writes on the host from the front's theme (#164), one light set and one dark, as rgb() reads.
+HOST = {"light": {"--bg": "rgb(250, 250, 250)", "--fg": "rgb(10, 20, 30)", "--muted": "rgb(90, 90, 100)",
+                  "--rule": "rgb(200, 210, 220)", "--accent": "rgb(0, 100, 200)", "color-scheme": "light"},
+        "dark": {"--bg": "rgb(20, 22, 24)", "--fg": "rgb(230, 231, 232)", "--muted": "rgb(150, 151, 152)",
+                 "--rule": "rgb(50, 51, 52)", "--accent": "rgb(120, 170, 250)", "color-scheme": "dark"}}
+# The list's own, light and dark (page/list.css), for a list with no host colours.
+OWN = {"light": ["rgb(255, 255, 255)", "rgb(29, 29, 31)", "rgb(110, 110, 115)", "rgb(229, 229, 234)", "rgb(31, 95, 214)"],
+       "dark": ["rgb(28, 28, 30)", "rgb(242, 242, 247)", "rgb(161, 161, 166)", "rgb(56, 56, 58)", "rgb(110, 162, 255)"]}
+# Background and text of the list, the muted text of a row, a filter's border (--rule) and a toggle's (--accent): the
+# list of the fixture has no toggle, so one is put in the list for it.
+COLOURS = """const cs = (s) => getComputedStyle(root.querySelector(s));
+  if (!root.querySelector('.list-act.toggle')) root.querySelector('.sheaf-list').appendChild(
+    Object.assign(document.createElement('button'), {className: 'list-act toggle'}));
+  return [cs('.sheaf-list').backgroundColor, cs('.sheaf-list').color, cs('.list-meta').color,
+          cs('.list-filter:not(.on)').borderTopColor, cs('.list-act.toggle').borderTopColor];"""
+
+
+@pytest.mark.parametrize("os, front", [("dark", "light"), ("light", "dark"), ("dark", "dark"), ("light", "light")])
+def test_the_mounted_list_wears_the_colours_the_loader_sets_on_the_host_not_the_oss(chromium, box, os, front):  # noqa: F811
+    """#164: the list declared its colours on `.sheaf-list`, a light set and a `prefers-color-scheme` dark one, and they
+    beat the ones the loader sets on the host: with Open WebUI on light and the OS on dark the sheafs were light and the
+    list dark. The list takes the host's `--bg --fg --muted`, its `--rule` for lines and its `--accent` for toggles; taken
+    off again, the list's own set for the OS comes back."""
+    for m in mount_the_list(chromium, box, color_scheme=os):
+        assert m.js(COLOURS) == OWN[os]
+        for name, value in HOST[front].items():
+            m.page.evaluate("([n, v]) => document.getElementById('pane').style.setProperty(n, v)", [name, value])
+        h = HOST[front]
+        assert m.js(COLOURS) == [h["--bg"], h["--fg"], h["--muted"], h["--rule"], h["--accent"]]
+        for name in HOST[front]:
+            m.page.evaluate("(n) => document.getElementById('pane').style.removeProperty(n)", name)
+        assert m.js(COLOURS) == OWN[os]
+
+
+@pytest.mark.parametrize("os", ["light", "dark"])
+def test_the_list_of_its_own_follows_the_os(chromium, box, os):  # noqa: F811
+    """#164: served alone, outside a front, nothing sets the host's colours and the list wears its own set for the OS."""
+    for m in mount_the_list(chromium, box, color_scheme=os):
+        own = m.page.context.new_page()
+        own.goto(ORIGIN + "/list")
+        assert own.evaluate("(() => { const root = document; " + COLOURS + " })()") == OWN[os]

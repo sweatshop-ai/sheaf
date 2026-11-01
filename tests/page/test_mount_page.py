@@ -7,6 +7,7 @@ reference an init script keeps (`window.__root`), and acts on it with the real m
 measures there. The comment test runs in Chromium, Firefox and WebKit: selection in a shadow root is where they differ.
 """
 import json
+import re
 
 import pytest
 from helpers import PLAN
@@ -347,10 +348,16 @@ def test_a_pane_mounts_again_after_an_unmount_and_over_a_page_still_standing(fro
     assert front.page.evaluate("window.__streams.filter((e) => e.readyState !== 2).length") == 1
 
 
+# The name of the new hub's mount.js, which the page hands the loader to load (#179): one name per build, so the
+# loader's once-per-name guard lets every upgrade through, a second one under the same version too.
+NEXT_JS = "9" * 16
+
+
 def _another_version(route):
     res = route.fetch()
     got = res.json()
     got["version"] = "9.9.9-next"
+    got["assets"]["mount.js"] = NEXT_JS
     route.fulfill(response=res, body=json.dumps(got))
 
 
@@ -361,13 +368,13 @@ def test_a_hub_of_another_version_hands_the_remount_to_the_loader(front):
     front.js("root.querySelector('main').__old = 1;")
     front.page.route("**/_/mount?doc=*", _another_version)
     front.site.file.write_text(front.site.file.read_text().replace("about pears", "about plums"), encoding="utf-8")
-    assert until(lambda: front.page.evaluate("window.__upgrades || null"), what="the loader told") == ["9.9.9-next"]
+    assert until(lambda: front.page.evaluate("window.__upgrades || null"), what="the loader told") == [NEXT_JS]
     front.page.wait_for_timeout(300)
     assert front.js("return root.querySelector('main').__old;") == 1, "the old script built the new page"
     # Told once: a later trigger of a remount does not call the loader again, and the old page says what is happening.
     front.site.file.write_text(front.site.file.read_text().replace("about plums", "about figs"), encoding="utf-8")
     front.page.wait_for_timeout(2500)
-    assert front.page.evaluate("window.__upgrades") == ["9.9.9-next"]
+    assert front.page.evaluate("window.__upgrades") == [NEXT_JS]
     assert "updated" in front.js("return root.getElementById('rd-toast').textContent;")
 
 
@@ -375,6 +382,7 @@ def _another_script(route):
     res = route.fetch()
     got = res.json()
     got["script"] = "f" * 16
+    got["assets"]["mount.js"] = NEXT_JS
     route.fulfill(response=res, body=json.dumps(got))
 
 
@@ -385,9 +393,35 @@ def test_a_hub_with_other_scripts_under_the_same_version_hands_the_remount_to_th
     front.js("root.querySelector('main').__old = 1;")
     front.page.route("**/_/mount?doc=*", _another_script)
     front.site.file.write_text(front.site.file.read_text().replace("about pears", "about plums"), encoding="utf-8")
-    assert until(lambda: front.page.evaluate("window.__upgrades || null"), what="the loader told") == [front.site.hub.version]
+    assert until(lambda: front.page.evaluate("window.__upgrades || null"), what="the loader told") == [NEXT_JS]
     front.page.wait_for_timeout(300)
     assert front.js("return root.querySelector('main').__old;") == 1, "the old script built the new page"
+
+
+def test_this_mount_js_served_by_a_hub_from_before_179_mounts_by_the_version_alone(front):
+    """Opus review 1 of #180, P1: between the reinstall and the restart of an upgrade from 1.0.2, the old hub serves this
+    mount.js with only the version written in, and answers with no `script` and no `assets`. The page mounts as a 1.0.2
+    page would, and never takes the mark it was not given for another hub's scripts (an upgrade on every answer)."""
+    def as_the_old_hub_serves_it(route):
+        res = route.fetch()
+        body = re.sub(r'const SCRIPT = "[0-9a-f]+";', "const SCRIPT = '@@SHEAF_SCRIPT@@';", res.text(), count=1)
+        assert "@@SHEAF_SCRIPT@@" in body
+        route.fulfill(response=res, body=body)
+
+    def as_the_old_hub_answers(route):
+        res = route.fetch()
+        got = res.json()
+        del got["script"], got["assets"]
+        route.fulfill(response=res, body=json.dumps(got))
+
+    front.page.route("**/_/mount.js*", as_the_old_hub_serves_it)
+    front.page.route("**/_/mount?doc=*", as_the_old_hub_answers)
+    front.open()
+    assert front.js("return root.querySelector('link[rel=stylesheet]').getAttribute('href');") == \
+        f"/_/mount.css?v={front.site.hub.version}"
+    front.site.file.write_text(front.site.file.read_text().replace("about pears", "about plums"), encoding="utf-8")
+    until(lambda: "plums" in front.js("return root.querySelector('main').textContent;"), what="the remount")
+    assert front.page.evaluate("window.__upgrades || null") is None
 
 
 _TYPED = ("const e = new InputEvent('beforeinput', {cancelable: true, bubbles: true});"
@@ -408,13 +442,13 @@ def test_every_remount_after_an_upgrade_leaves_the_old_page_writable(front):
           what="the second change said in the page")
     assert front.js(_TYPED) is False, "typing is refused after the second change"
     assert front.page.evaluate("Object.keys(sessionStorage).filter((k) => k.endsWith('rd-keep'))") == []
-    assert front.page.evaluate("window.__upgrades") == ["9.9.9-next"]
+    assert front.page.evaluate("window.__upgrades") == [NEXT_JS]
 
 
 def test_a_first_mount_of_another_version_builds_nothing_and_without_a_loader_says_reload(front):
     front.page.route("**/_/mount?doc=*", _another_version)
     front.page.goto(front.site.base + FRONT)
-    assert until(lambda: front.page.evaluate("window.__upgrades || null"), what="the loader told") == ["9.9.9-next"]
+    assert until(lambda: front.page.evaluate("window.__upgrades || null"), what="the loader told") == [NEXT_JS]
     assert not front.has("#rd-menu-btn")
     # It took nothing of the pane: no root was attached, so the loader's new script can still attach its own there.
     assert front.page.evaluate("window.__root === undefined")

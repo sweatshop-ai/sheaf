@@ -19,10 +19,15 @@
   const ID_PREFIX = 'u-';
   // The version of the hub that served this file and the name of its scripts, written in by the hub (hub/assets.py). A
   // hub answering with another version, or other scripts under the same one (#179), was upgraded under the page, and
-  // the page.js in memory is the old one.
+  // the page.js in memory is the old one. A hub from before #179 writes in the version only, and answers with no
+  // `script` and no `assets`: the page then goes by the version alone, as the pages of that hub do.
   const VERSION = '@@SHEAF_VERSION@@';
   const SCRIPT = '@@SHEAF_SCRIPT@@';
   const KNOWN = !VERSION.startsWith('@@');
+  const SCRIPT_KNOWN = !SCRIPT.startsWith('@@');
+  // The name an answer gives one of the hub's assets (`assets`, #179), or the version where it gives none.
+  const nameOf = (answer, asset) =>
+    answer.assets && typeof answer.assets[asset] === 'string' ? answer.assets[asset] : answer.version;
   // Each pane's closed root, kept here: attachShadow works once per element, so a pane mounted again (a failed first
   // try, the list after a sheaf) reuses its root, and `live` is the mount standing in it. `seq` counts the mount()
   // calls on the pane: the one called last takes it, whichever answer comes in first.
@@ -384,13 +389,16 @@
       }
       if (stale()) return got;
       if (list && (fresh.kind !== 'list' || !render)) throw new Error('the hub sent no list');
-      const upgraded = KNOWN && (fresh.version !== VERSION || fresh.script !== SCRIPT);
+      const upgraded = KNOWN && (fresh.version !== VERSION
+        || (SCRIPT_KNOWN && typeof fresh.script === 'string' && fresh.script !== SCRIPT));
       if (upgraded && typeof opts.upgrade === 'function') {
         got = got || fresh;
         // Every remount of the old page is said, not the first only: its settle had set `settling` and written the keep,
         // and a page left so refuses typing in silence while the loader's new script is slow or failed.
         if (page && page.failed) page.failed('sheaf was updated on the hub: the new version is loading.');
-        if (!told) { told = true; opts.upgrade(fresh.version); }
+        // The loader loads `/_/mount.js?v=<this>` once per value: the new script's own name, one per build, so a second
+        // upgrade under one version (a rollback and a re-apply, #179) is loaded too, and kept by the name of its body.
+        if (!told) { told = true; opts.upgrade(nameOf(fresh, 'mount.js')); }
         return got;
       }
       if (!root) {
@@ -417,7 +425,7 @@
       }
       const link = doc.createElement('link');
       link.rel = 'stylesheet';
-      link.href = '/_/mount.css?v=' + encodeURIComponent(got.assets['mount.css']);   // its content's name (#179)
+      link.href = '/_/mount.css?v=' + encodeURIComponent(nameOf(got, 'mount.css'));   // its content's name (#179)
       const wrap = doc.createElement('div');
       wrap.className = list ? 'rd-root sheaf-list' : 'rd-root' + (got.toc ? '' : ' notoc');
       wrap.tabIndex = -1;

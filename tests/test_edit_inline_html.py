@@ -431,3 +431,40 @@ def test_a_closing_tag_with_no_opener_stays_out_of_a_word_that_grew_by_the_next_
 def test_a_comment_in_a_cells_code_does_not_become_its_words():
     out = rde.html_block_to_md("<table><tr><th>a</th></tr><tr><td><code><!-- MDB:a|b -->x|y</code></td></tr></table>")
     assert "MDB" not in out and "x\\|y" in out
+
+
+# Gate 2 on #161.
+
+@pytest.mark.parametrize("src", [
+    "| a | b |\n|---|---|\n| here | </x1></x2> |",
+    "| a | b |\n|---|---|\n| here | k |\n| l | </x1></x2> |",
+    "> | a | b |\n> |---|---|\n> | here | </x1></x2> |",
+    "| a | b |\n|---|---|\n| here | </x1> |",
+    "| a | b |\n|---|---|\n| here | k |\n| l | </x1> |",
+])
+def test_a_closing_tag_with_no_words_after_it_in_a_tables_last_cell_keeps_the_table(src):
+    out = saved(src)
+    assert "|---" in out.replace("-|-", "---") and "</x1>" in out and "there" in out
+
+
+@pytest.mark.parametrize("src", ["> here\n>\n> - </x1></x2>", "- here\n  - </x1></x2>"])
+def test_a_closing_tag_alone_in_the_last_item_adds_no_item_save_after_save(src):
+    once = saved(src)
+    assert once.count("</x1>") == 1
+    assert saved(once.rstrip("\n"), old="there", new="there") == once
+
+
+@pytest.mark.parametrize("src,want", [
+    ("> a\n>\n> </x1></x2>**c** here", "> </x1></x2>**c** there\n"),
+    ("- </x1></x2>*c* here", "- </x1></x2>*c* there\n"),
+    ("- a\n- </x1></x2>*c* here", "- </x1></x2>*c* there\n"),
+])
+def test_two_closing_tags_first_in_a_block_stay_together_before_its_element(src, want):
+    assert saved(src).endswith(want)
+
+
+def test_a_pipe_after_a_table_nested_in_a_raw_html_table_gets_no_backslash():
+    src = "- <table><tr><td><table><tr><td>k</td></tr></table><code>m|n</code> here</td></tr></table>"
+    html = "<ul><li>" + src[2:].replace("here", "there") + "</li></ul>"
+    out = rde.html_block_to_md(html)
+    assert "<code>m|n</code>" in out and "\\|" not in out

@@ -468,3 +468,36 @@ def test_a_pipe_after_a_table_nested_in_a_raw_html_table_gets_no_backslash():
     html = "<ul><li>" + src[2:].replace("here", "there") + "</li></ul>"
     out = rde.html_block_to_md(html)
     assert "<code>m|n</code>" in out and "\\|" not in out
+
+
+# Gate 3 on #161.
+
+@pytest.mark.parametrize("src,html,want", [
+    ("*a <mark>b* c</mark> here.", "<p>a <mark>b</mark> c there.</p>", "a <mark>b</mark> c there.\n"),
+    ("[a <mark>b](u) c</mark> here.", "<p>a <mark>b</mark> c there.</p>", "a <mark>b</mark> c there.\n"),
+    ("- a <mark>b\n- c</mark> d here", "<ul><li>a <mark>b</mark>c d there</li></ul>", "- a <mark>b</mark>c d there\n"),
+    ("*a <mark>b* c</mark> here.", "<p><em>a <mark>b</mark> z</em> c there.</p>", "*a <mark>b</mark> z* c there.\n"),
+    ("- a <mark>b\n- c</mark> d here", "<ul><li>a <mark>b</mark> z</li><li>c d there</li></ul>",
+     "- a <mark>b</mark> z\n- c d there\n"),
+    ("> a <mark>b\n>\n> c</mark> here", "<blockquote><p>a <mark>b</mark> z</p><p>c there</p></blockquote>",
+     "> a <mark>b</mark> z\n>\n> c there\n"),
+])
+def test_a_tag_closed_past_its_container_is_closed_where_the_page_element_ends_once_words_follow_it(src, html, want):
+    assert saved(src, html=html) == want
+
+
+@pytest.mark.parametrize("src,html,want", [
+    ("*a <mark>b* c</mark> here.", "<p><em>a <mark>b</mark></em> c there.</p>", "*a <mark>b* c</mark> there.\n"),
+    ("- a <mark>b\n- c</mark> d here", "<ul><li>a <mark>b</mark></li><li>c d there</li></ul>",
+     "- a <mark>b\n- c</mark> d there\n"),
+])
+def test_a_tag_closed_past_its_container_keeps_the_source_while_the_page_element_ends_with_it(src, html, want):
+    assert saved(src, html=html) == want
+
+
+@pytest.mark.parametrize("src,html,want", [
+    ("**a <mark>b** c</mark> d here.", "<p><strong>a b</strong> c d there.</p>", "**a b** c d there.\n"),
+    ("- a <mark>b\n- c</mark> d here", "<ul><li>a b</li><li>c d there</li></ul>", "- a b\n- c d there\n"),
+])
+def test_a_tag_closed_past_its_container_and_deleted_on_the_page_takes_its_closing_tag_with_it(src, html, want):
+    assert saved(src, html=html) == want

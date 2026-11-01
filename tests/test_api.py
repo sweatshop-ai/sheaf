@@ -386,7 +386,8 @@ def test_the_for_argument_is_written_as_text_never_as_markup(work):
 
 
 def test_an_empty_by_argument_is_not_the_same_as_none_it_leaves_the_byline_out(work):
-    # None means "the user's name" (SPEC 6.3); an empty string was asked for, and gets no byline.
+    # None means "the front matter's assistant, else the user's name" (SPEC 6.3); an empty string
+    # was asked for, and gets no byline.
     doc = write(work / "doc.md", "# T\n\ntext\n")
     assert "Document prepared by" not in sheafmd.render(doc, by="")
     assert "Document prepared by Ada</p>" in sheafmd.render(doc, by=None)
@@ -411,14 +412,6 @@ def test_the_by_argument_still_wins_over_the_assistant_of_the_front_matter(work)
 def test_without_an_assistant_in_the_front_matter_the_user_prepared_the_document(work, front):
     doc = write(work / "doc.md", front + "# T\n\ntext\n")
     assert "Document prepared by Ada</p>" in sheafmd.render(doc)
-
-
-def test_the_hub_reads_the_assistant_from_the_text_it_renders_not_the_file(work):
-    # The hub renders the text it holds (`src`), which may be ahead of the file on disk.
-    from sheafmd.render import render_file
-    doc = write(work / "doc.md", "# T\n\ntext\n")
-    page = render_file(doc, share=False, src="---\nassistant: James\n---\n\n# T\n\ntext\n", log=[])
-    assert "Document prepared by James</p>" in page
 
 
 def test_the_credit_argument_adds_the_line_and_false_overrides_the_root_config(work):

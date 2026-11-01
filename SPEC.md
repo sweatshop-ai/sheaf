@@ -228,7 +228,7 @@ A state file the hub cannot read as JSON of the kind it expects (`tokens.json`, 
 
 ```toml
 port = 27419        # the hub port; one per account on a shared box
-name = "Ada"        # who you are: author of your comments and default byline
+name = "Ada"        # who you are: author of your comments and default byline (6.3)
 browser = true      # false: sheaf never opens a browser window
 ```
 

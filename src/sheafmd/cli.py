@@ -109,7 +109,7 @@ def add_render_options(p: argparse.ArgumentParser):
                    help="the table of contents; auto shows it from 6 headings")
     g.add_argument("--max-image-width", type=_positive, default=1400, metavar="N",
                    help="embedded images wider than N pixels are downscaled (default 1400)")
-    g.add_argument("--by", help="who prepared the document (default: your name from config)")
+    g.add_argument("--by", help="who prepared the document (default: `assistant` in its front matter, else your name from config)")
     g.add_argument("--for", dest="for_", metavar="NAME",
                    help="who it is prepared for (default: `for` in .sheaf.toml; an empty NAME leaves it out)")
     g.add_argument("--theme", metavar="NAME|PATH",

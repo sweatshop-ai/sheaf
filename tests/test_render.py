@@ -348,6 +348,13 @@ def test_a_comment_in_a_heading_stays_out_of_the_contents_and_the_id(tmp_path):
     assert "ZQ-HEAD" not in nav and 'id="budget"' in out
 
 
+def test_the_byline_reads_the_assistant_from_the_given_source_text_not_the_file(tmp_path):
+    # The hub renders the text it holds (#167), which may be ahead of the file on disk.
+    p = doc(tmp_path, "# T\n\ntext\n")
+    out = R.render_file(p, share=False, log=[], src="---\nassistant: James\n---\n\n# T\n\ntext\n")
+    assert "Document prepared by James</p>" in out
+
+
 def test_a_given_source_text_is_rendered_instead_of_the_file(tmp_path):
     p = doc(tmp_path, "# From disk\n")
     out = R.render_file(p, share=False, log=[], src="# From the hub\n")

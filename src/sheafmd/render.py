@@ -1198,7 +1198,8 @@ def render_file(path, *, share: bool = True, theme=None, title: str | None = Non
                 mount: bool = False) -> str:
     """Everything `sheafmd.render` does, plus the arguments only the CLI and the hub
     use (`warn`, `src`, `extra_meta`, `root`, `script_nonce`, `image_ok`). Reads the root's `.sheaf.toml` itself:
-    `for`, `links`, `link_tlds`, `credit` and the theme.
+    `for`, `links`, `link_tlds`, `credit` and the theme. Without a `by`, the byline names the
+    `assistant` of the source's front matter, else the user (SPEC 6.3).
 
     `log` receives every render-log line. Without one, the warnings ("  !") go to
     stderr: a font that is missing or a comment that was removed is never silent."""

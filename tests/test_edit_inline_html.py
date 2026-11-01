@@ -291,3 +291,25 @@ def test_a_closing_tag_with_no_opener_stays_on_its_line_when_enter_adds_one_afte
 ])
 def test_a_closing_tag_with_no_opener_follows_a_word_replaced_by_one_with_no_letter_in_common(src, html, want):
     assert saved(src, html=html) == want
+
+
+# Gate 5 on #157: Enter after a word moves the space after it to the new line, as a no-break space.
+
+@pytest.mark.parametrize("src,html,want", [
+    ("Line one ends here </x1>\nline two.", "<p>Line one ends here<div>&nbsp;line two.</div></p>",
+     "Line one ends here</x1>\n\nline two.\n"),
+    ("Word </x1> end.", "<p>Word<div>x end.</div></p>", "Word</x1>\n\nx end.\n"),
+    ("A b </x1>c d here.", "<p>A b&nbsp;<div>c d here.</div></p>", "A b</x1>\n\nc d here.\n"),
+    ("A </x1> stray close here.", "<p>A&nbsp;<div>stray close here.</div></p>", "A</x1>\n\nstray close here.\n"),
+])
+def test_a_closing_tag_with_no_opener_stays_with_the_word_before_it_when_enter_splits_the_line(src, html, want):
+    assert saved(src, html=html) == want
+
+
+def test_a_closing_tag_with_no_opener_stays_in_its_item_when_enter_splits_it():
+    out = saved("- Item one </x1> more\n- two", html="<ul><li>Item one</li><li>&nbsp;more</li><li>two</li></ul>")
+    assert out.startswith("- Item one</x1>\n") and out.count("</x1>") == 1
+
+
+def test_a_closing_tag_with_no_opener_after_an_element_and_a_space_keeps_the_space_before_it():
+    assert saved("A <kbd>K</kbd> </x1>b here.") == "A <kbd>K</kbd> </x1>b there.\n"

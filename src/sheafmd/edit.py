@@ -1234,9 +1234,9 @@ def _notes_as_tokens(fragment: str, token):
     from bs4 import BeautifulSoup
 
     placed = {}
-    if NOTE_REF_RE.search(fragment) and any(a.find_parent(["code", "pre"]) for a in
+    if NOTE_REF_RE.search(fragment) and any(a.find_parent(["code", "pre", "samp", "tt", "var"]) for a in
                                             BeautifulSoup(fragment, "html.parser").select("a.footnote-ref")):
-        # In code a citation is words: pandoc would no longer number it, and the page's numbers would be off.
+        # In code (pandoc's HTML reader takes samp, tt and var for code too) a citation is words: pandoc would no longer number it, and the page's numbers would be off.
         raise EditError("block has a footnote citation inside code; edit it in the .md")
 
     def swap(m):

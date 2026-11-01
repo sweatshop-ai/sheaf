@@ -939,6 +939,9 @@ def _texts(soup) -> list:
 LONE_DIFF_MAX = 2000
 LONE_CONTEXT = 40
 _ENCLOSED = ("code", "pre")
+_EMPHASIS = {"b", "del", "em", "i", "s", "strike", "strong"}
+_BLOCK_NAMES = {"blockquote", "div", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "li", "ol", "p", "pre", "table",
+                "tbody", "td", "tfoot", "th", "thead", "tr", "ul"}
 # A comment's placeholder (`_convert_with_comments`) is text on the page side only.
 _COMMENT_TOKEN = re.compile("(?<!\u27e6)RDCMT[0-9A-F]{10}(?!\u27e7)")
 
@@ -1122,7 +1125,7 @@ def _html_blocks(md: str) -> int:
 def _tags_as_text(content: str, fragment: str, token):
     """(the fragment with each element that stands for a raw tag of `content` written as two
     placeholders around its words, {placeholder: the source's bytes})."""
-    from bs4 import BeautifulSoup
+    from bs4 import BeautifulSoup, Tag
 
     tags, lone, doc = _raw_tags(content)
     if not tags and not lone:
@@ -1140,6 +1143,11 @@ def _tags_as_text(content: str, fragment: str, token):
             unused.append((key(el), opening, closing, past))
     soup = BeautifulSoup(fragment, "html.parser")
     placed = _lone_as_text(soup, lone, doc, token) if lone else {}
+
+    def between_blocks(p):
+        at = soup.find(string=p) if p in placed else None
+        return at is not None and all(x.name in _BLOCK_NAMES if x.name is not None else not x.strip() or str(x) in placed
+                                      for x in at.parent.children)
 
     def unplace(past):
         # The closing tag past the element's container goes from where the source had it.
@@ -1164,9 +1172,13 @@ def _tags_as_text(content: str, fragment: str, token):
         a, b = f"\u27e6{token()}\u27e7", f"\u27e6{token()}\u27e7"
         placed[a], placed[b] = hit[1], hit[2]
         # An element the source closed past its item, cell or emphasis ends there unclosed, which says the
-        # same only while it ends with its container on the page: with words after it, it closes at its end.
-        if hit[3] is not None and any(s.name is not None or s.strip() and str(s) not in placed
-                                      for s in el.next_siblings):
+        # same only while it ends with its container on the page: with words after it, it closes at its end,
+        # and so it does when the words that closing tag followed went and left it between two blocks. A
+        # no-break space is words here, and an emphasis right after its own is one to pandoc, which merges them.
+        if hit[3] is not None and (any(s.name is not None or s.strip(" \t\r\n") and str(s) not in placed
+                                       for s in el.next_siblings)
+                                   or el.parent.name in _EMPHASIS and isinstance(el.parent.next_sibling, Tag)
+                                   or between_blocks(lone[hit[3]][1]["c"])):
             placed[b] = lone[hit[3]][0]
             unplace(hit[3])
         el.insert_before(a)

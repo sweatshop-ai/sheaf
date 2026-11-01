@@ -162,6 +162,19 @@ def test_the_mounted_page_wears_its_theme_in_the_root_and_leaves_the_front_alone
     assert f.page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--accent')") == ""
 
 
+def test_the_mounted_page_wears_the_fronts_font_once_the_loader_sets_it_on_the_host(front):
+    """#152: the loader sets `--front-font` on the host, as it sets the colours, and the wrapper takes it as its family,
+    as the old frame's body took `body.style.fontFamily`: code keeps its own. Taken off again, the theme's comes back."""
+    f = front.open()
+    theme = f.js("return getComputedStyle(root.querySelector('.rd-root')).fontFamily;")
+    f.page.evaluate("document.getElementById('pane').style.setProperty('--front-font', '\"Front Sans\", serif')")
+    got = f.js("""const of = (s) => getComputedStyle(root.querySelector(s)).fontFamily;
+      return [of('.rd-root'), of('main p'), of('main pre code')];""")
+    assert got[0] == '"Front Sans", serif' and got[1] == got[0] and got[2] != got[0], got
+    f.page.evaluate("document.getElementById('pane').style.removeProperty('--front-font')")
+    assert f.js("return getComputedStyle(root.querySelector('.rd-root')).fontFamily;") == theme
+
+
 def test_the_menu_opens_from_a_click_in_the_root_and_a_click_elsewhere_in_it_closes_it(front):
     front.open()
     front.click("#rd-menu-btn")

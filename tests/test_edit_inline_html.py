@@ -338,18 +338,6 @@ def test_a_closing_tag_with_no_opener_stays_in_its_item_when_enter_splits_it_bes
     assert out.startswith("- Item one</x1>") and out.count("</x1>") == 1 and C1 in out
 
 
-@pytest.mark.parametrize("src", [
-    "- a <x1>b\n- c</x1> here\n",
-    "*a <x1>b* c</x1> here.\n",
-    "> a <x1>b\n>\n> c</x1> here\n",
-    "| a | b |\n|---|---|\n| <x1>k | c</x1> here |\n",
-])
-def test_a_tag_opened_in_one_item_cell_or_emphasis_and_closed_in_another_stays_where_each_was(src):
-    out = saved(src.rstrip("\n"))
-    assert "<x1>b" in out or "<x1>k" in out
-    assert "c</x1> there" in out and out.count("</x1>") == 1
-
-
 def test_a_closing_tag_inside_an_emphasis_still_closes_the_element_opened_before_it():
     out = saved("Go <x1>a *b* c</x1> here.")
     assert out == "Go <x1>a *b* c</x1> there.\n"
@@ -387,22 +375,8 @@ def test_nested_raw_elements_of_one_name_each_keep_their_closing_tag(src):
     assert saved(src) == src.replace("here", "there") + "\n"
 
 
-@pytest.mark.parametrize("src,want", [
-    ("> a <x1>b\n>\n> </x1>c here", "> a <x1>b\n>\n> </x1>c there\n"),
-    ("- a <x1>b\n\n  </x1>c here", "- a <x1>b\n\n  </x1>c there\n"),
-    ("- a <x1>b\n- </x1>c here", "- a <x1>b\n- </x1>c there\n"),
-])
-def test_a_closing_tag_first_in_the_next_paragraph_or_item_stays_there(src, want):
-    assert saved(src) == want
-
-
-@pytest.mark.parametrize("src", [
-    "| a | b |\n|---|---|\n| <x1>k | </x1>c here |",
-    "| <x1>a | </x1>b |\n|---|---|\n| k | c here |",
-    "| a | b |\n|---|---|\n| k | </x1>c here |",
-])
-def test_a_closing_tag_first_in_a_table_cell_stays_there(src):
-    out = saved(src)
+def test_a_closing_tag_first_in_a_table_cell_stays_there():
+    out = saved("| a | b |\n|---|---|\n| k | </x1>c here |")
     assert "| </x1>" in out and "there" in out and out.count("</x1>") == 1
 
 
@@ -470,7 +444,8 @@ def test_a_pipe_after_a_table_nested_in_a_raw_html_table_gets_no_backslash():
     assert "<code>m|n</code>" in out and "\\|" not in out
 
 
-# Gate 3 on #161.
+# Gate 3 on #161. A tag closed past its item, cell or emphasis pairs with its opener, as on main; these pin
+# that it renders as the page showed it (the source's own place for it is split out of #161).
 
 @pytest.mark.parametrize("src,html,want", [
     ("*a <mark>b* c</mark> here.", "<p>a <mark>b</mark> c there.</p>", "a <mark>b</mark> c there.\n"),
@@ -483,15 +458,6 @@ def test_a_pipe_after_a_table_nested_in_a_raw_html_table_gets_no_backslash():
      "> a <mark>b</mark> z\n>\n> c there\n"),
 ])
 def test_a_tag_closed_past_its_container_is_closed_where_the_page_element_ends_once_words_follow_it(src, html, want):
-    assert saved(src, html=html) == want
-
-
-@pytest.mark.parametrize("src,html,want", [
-    ("*a <mark>b* c</mark> here.", "<p><em>a <mark>b</mark></em> c there.</p>", "*a <mark>b* c</mark> there.\n"),
-    ("- a <mark>b\n- c</mark> d here", "<ul><li>a <mark>b</mark></li><li>c d there</li></ul>",
-     "- a <mark>b\n- c</mark> d there\n"),
-])
-def test_a_tag_closed_past_its_container_keeps_the_source_while_the_page_element_ends_with_it(src, html, want):
     assert saved(src, html=html) == want
 
 

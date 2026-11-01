@@ -3,11 +3,18 @@
 /* The colours are the host's when the loader sets them, as a mounted page's are (#164): its --bg --fg --muted, its --rule
    for lines and its --accent for toggles. The list's own set, light or for a dark OS, stands only where they are unset,
    as for the page of its own. The list's names are its own (--sl-…): one declared on .sheaf-list as --bg would beat the
-   host's that it inherits. The one-off's red has no colour of the host's and stays the OS's, as #rd-actions in page.css. */
+   host's that it inherits. The one-off's red has no colour of the host's: it is light or dark by the `color-scheme` the
+   loader sets on the host with the colours (#169), as #rd-actions in page.css, and by the OS where it sets none (the
+   fallback on :host in mount.css). The page of its own says its scheme on its body, never on .sheaf-list: the mounted
+   list's wrapper would then hide the host's. */
 .sheaf-list{--sl-fg:var(--fg,#1d1d1f);--sl-muted:var(--muted,#6e6e73);--sl-line:var(--rule,#e5e5ea);
---sl-chip:var(--accent,#1f5fd6);--sl-once:#c62828;--sl-bg:var(--bg,#fff)}
+--sl-chip:var(--accent,#1f5fd6);--sl-once:light-dark(#c62828,#ff6b6b);--sl-bg:var(--bg,#fff)}
 @media (prefers-color-scheme:dark){.sheaf-list{--sl-fg:var(--fg,#f2f2f7);--sl-muted:var(--muted,#a1a1a6);
---sl-line:var(--rule,#38383a);--sl-chip:var(--accent,#6ea2ff);--sl-once:#ff6b6b;--sl-bg:var(--bg,#1c1c1e)}}
+--sl-line:var(--rule,#38383a);--sl-chip:var(--accent,#6ea2ff);--sl-bg:var(--bg,#1c1c1e)}}
+body.sheaf-list{color-scheme:light dark}
+/* A browser without light-dark() keeps the OS's red, as before #169. */
+@supports not (color:light-dark(#000,#fff)){.sheaf-list{--sl-once:#c62828}
+@media (prefers-color-scheme:dark){.sheaf-list{--sl-once:#ff6b6b}}}
 .sheaf-list{padding:24px 16px;font:15px/1.45 system-ui,sans-serif;color:var(--sl-fg);background:var(--sl-bg);
 overflow-wrap:anywhere}
 .sheaf-list header{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
@@ -38,4 +45,4 @@ overflow-wrap:anywhere}
 border-radius:999px;padding:0 8px;margin-left:6px}
 .sheaf-list .list-assistant{border-color:var(--sl-line);color:var(--sl-muted)}
 .sheaf-list .list-meta{color:var(--sl-muted);font-size:13px}
-.sheaf-list .list-error{color:#c62828}
+.sheaf-list .list-error{color:var(--sl-once)}

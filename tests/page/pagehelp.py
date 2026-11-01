@@ -15,6 +15,41 @@ P2 = "main p:nth-of-type(3)"
 T0 = 1_800_000_000_000          # a fixed "now" for the page, in ms
 PAGE_TIMEOUT_MS = 20_000        # how long a click, a fill or a wait for a selector may take (Playwright's own is 30 s)
 
+# The colours the loader writes on the host from the front's theme (#164), one light set and one dark, as rgb() reads.
+HOST = {"light": {"--bg": "rgb(250, 250, 250)", "--fg": "rgb(10, 20, 30)", "--muted": "rgb(90, 90, 100)",
+                  "--rule": "rgb(200, 210, 220)", "--accent": "rgb(0, 100, 200)", "color-scheme": "light"},
+        "dark": {"--bg": "rgb(20, 22, 24)", "--fg": "rgb(230, 231, 232)", "--muted": "rgb(150, 151, 152)",
+                 "--rule": "rgb(50, 51, 52)", "--accent": "rgb(120, 170, 250)", "color-scheme": "dark"}}
+# The one-off's red and the toggle's blue of the list and of #rd-actions, light and dark (#169).
+RED = {"light": "rgb(198, 40, 40)", "dark": "rgb(255, 107, 107)"}
+BLUE = {"light": "rgb(31, 95, 214)", "dark": "rgb(110, 162, 255)"}
+
+
+def contrast(a, b):
+    """WCAG's contrast ratio of two colours read as `rgb(r, g, b)`."""
+    def lum(c):
+        ch = [int(v) / 255 for v in c[c.index("(") + 1:c.index(")")].split(",")[:3]]
+        ch = [v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4 for v in ch]
+        return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2]
+    hi, lo = sorted((lum(a), lum(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def assert_readable(colour, bg):
+    """WCAG AA for the 13 px text of the action buttons: 4.5:1."""
+    assert contrast(colour, bg) >= 4.5, (colour, bg, contrast(colour, bg))
+
+
+def wear_host(page, scheme):
+    """Set on the host (`#pane`) what the loader sets from the front's theme: HOST's colours and scheme."""
+    for name, value in HOST[scheme].items():
+        page.evaluate("([n, v]) => document.getElementById('pane').style.setProperty(n, v)", [name, value])
+
+
+def drop_host(page, scheme):
+    for name in HOST[scheme]:
+        page.evaluate("(n) => document.getElementById('pane').style.removeProperty(n)", name)
+
 
 def at(css, text, k=0):
     """A point in the page: `k` characters into the first text node under `css` that holds `text`

@@ -371,6 +371,25 @@ def test_a_hub_of_another_version_hands_the_remount_to_the_loader(front):
     assert "updated" in front.js("return root.getElementById('rd-toast').textContent;")
 
 
+def _another_script(route):
+    res = route.fetch()
+    got = res.json()
+    got["script"] = "f" * 16
+    route.fulfill(response=res, body=json.dumps(got))
+
+
+def test_a_hub_with_other_scripts_under_the_same_version_hands_the_remount_to_the_loader(front):
+    """#179: the page's scripts changed under the hub's version (a build between releases, #152's way). The page.js in
+    memory is the old one all the same, so the hub's script name, not its version, tells an upgrade."""
+    front.open()
+    front.js("root.querySelector('main').__old = 1;")
+    front.page.route("**/_/mount?doc=*", _another_script)
+    front.site.file.write_text(front.site.file.read_text().replace("about pears", "about plums"), encoding="utf-8")
+    assert until(lambda: front.page.evaluate("window.__upgrades || null"), what="the loader told") == [front.site.hub.version]
+    front.page.wait_for_timeout(300)
+    assert front.js("return root.querySelector('main').__old;") == 1, "the old script built the new page"
+
+
 _TYPED = ("const e = new InputEvent('beforeinput', {cancelable: true, bubbles: true});"
           "root.querySelector('main').dispatchEvent(e); return e.defaultPrevented;")
 

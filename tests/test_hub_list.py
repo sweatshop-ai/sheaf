@@ -1837,7 +1837,8 @@ def test_the_mounted_list_is_the_rows_the_page_shows_as_data(box, show):
     j = got.json()
     assert j["kind"] == "list" and j["title"] == "Actions" and j["version"] == box.hub.version
     assert j["assets"] == {"mount.css": box.hub.assets["mount.css"].tag}      # the style mount.js links (#179)
-    assert "html" not in j                      # no markup: the front builds every node from text (layer b)
+    assert j["script"] == box.hub.assets["mount.js"].source                   # the scripts the hub serves (#179)
+    assert "html" not in j                       # no markup: the front builds every node from text (layer b)
     assert got.headers["X-Content-Type-Options"] == "nosniff"
 
 
@@ -1889,7 +1890,9 @@ def test_the_list_script_and_style_are_files_the_mount_assets_carry(box, browser
 def test_a_member_on_the_proxy_gets_the_mount_assets(box):
     """The front loads `/_/mount.js` and `/_/mount.css` through the proxy, as a member: the open routes the proxy
     otherwise refuses to members."""
-    for path, kind in (("/_/mount.js", "text/javascript"), ("/_/mount.css", "text/css")):
-        r = box.get(f"{path}?v={box.hub.version}", member=NELL)
+    for name, kind in (("mount.js", "text/javascript"), ("mount.css", "text/css")):
+        path = f"/_/{name}"
+        r = box.get(f"{path}?v={box.hub.assets[name].tag}", member=NELL)
+        assert "immutable" in r.headers.get("Cache-Control", ""), (path, r.headers)
         assert r.status == 200 and r.headers["Content-Type"].startswith(kind), (path, r.status)
     assert box.get("/_/health", member=NELL).status == 404          # the other open routes stay off the proxy

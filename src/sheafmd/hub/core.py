@@ -87,7 +87,7 @@ class Hub:
                  version: str = __version__, clock=time.time, proxy=None):
         self.port, self.version, self.service = port, version, service
         self.assets = assets_mod.load(version)   # /_/mount.js and .css as this hub serves them to its end (#179)
-        self.proxy = proxy                      # the checked `[proxy]` table (9.9), None in loopback mode
+        self.proxy = proxy                       # the checked `[proxy]` table (9.9), None in loopback mode
         self.started_by, self.clock = started_by, clock
         self.auth = Auth(key, port)
         self.boot = str(uuid.uuid4())
@@ -407,20 +407,22 @@ class Hub:
         return meta
 
     def mount_doc(self, e: Entry, member=None) -> dict:
-        """The sheaf as the front mounts it (#116): {title, toc, html, config, css, version, assets}. The text is
-        rendered now through the sanitiser's mount mode; the config is the meta block of `page`, so both read the same
-        state."""
+        """The sheaf as the front mounts it (#116): {title, toc, html, config, css, version, script, assets}. The text
+        is rendered now through the sanitiser's mount mode; the config is the meta block of `page`, so both read the
+        same state."""
         h, text = e.live.current()
         got = json.loads(self._build(e, text, mount=True, count=False))
         got["config"] = self._fresh_meta(e, got["config"], member)
         got["version"] = self.version
-        got["assets"] = self.mount_names()
+        got.update(self.mount_fields())
         return got
 
-    def mount_names(self) -> dict:
-        """The name (`?v=`) of each asset the loader links after a mount answer: the style. mount.js itself is loaded
-        by the front without one."""
-        return {"mount.css": self.assets["mount.css"].tag}
+    def mount_fields(self) -> dict:
+        """What every mount answer carries for mount.js (#179): `script`, the name of the scripts this hub serves, which
+        a page running other scripts takes for an upgrade even under the same version; and `assets`, the name (`?v=`)
+        of the style it links. The front loads mount.js itself bare, or after an upgrade under the version mount.js
+        hands its `upgrade()`, both `no-store`."""
+        return {"script": self.assets["mount.js"].source, "assets": {"mount.css": self.assets["mount.css"].tag}}
 
     def actions(self, e: Entry, member, text: str | None = None) -> list:
         """The buttons at the top of the page of `e` as `member` (None: the hub's own person) reads them (10.11,

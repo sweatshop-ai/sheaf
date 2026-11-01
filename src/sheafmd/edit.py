@@ -959,7 +959,14 @@ def _lone_as_text(soup, lone, doc, token) -> dict:
         at.append((len(old), str(t), before is not None, climb))
     # A line break of the render and of the page is a space to the diff.
     old = re.sub(r"\s", " ", old)
-    new = re.sub(r"\s", " ", "".join(_COMMENT_TOKEN.sub("", t) for t in _texts(soup)))
+    words = [_COMMENT_TOKEN.sub("", t) for t in _texts(soup)]
+    new = re.sub(r"\s", " ", "".join(words))
+    # Where one text of the page ends and the next begins: Enter puts a new item or line right after
+    # the old one, with no space between their words.
+    edges, cum = set(), 0
+    for w in words:
+        cum += len(w)
+        edges.add(cum)
     pre = 0
     while pre < min(len(old), len(new)) and old[pre] == new[pre]:
         pre += 1
@@ -985,14 +992,15 @@ def _lone_as_text(soup, lone, doc, token) -> dict:
         if same is None:
             same = [m for m in difflib.SequenceMatcher(None, old[a0:a1], new[b0:b1], autojunk=False)
                     .get_matching_blocks() if m.size]
-        # After the same words when they are still there, else after the last words before it that are.
+        # After the same words when they are still there, else before the words after it when those
+        # are, else after the last words before it that are.
         o, k = o - a0, b0
         for a, b, n in same:
             if a < o <= a + n:
                 return b0 + b + o - a
             if a + n <= o:
                 k = b0 + b + n
-        return k
+        return next((b0 + b for a, b, n in same if a == o), k)
 
     def between_words(o, back):
         # The diff matches letters: where the word before it was replaced, it can point into the new
@@ -1001,7 +1009,7 @@ def _lone_as_text(soup, lone, doc, token) -> dict:
         k = where(o)
         if 0 < o < len(old) and old[o - 1].isalnum() and old[o].isalnum():
             return k
-        while 0 < k < len(new) and new[k - 1].isalnum() and new[k].isalnum():
+        while 0 < k < len(new) and new[k - 1].isalnum() and new[k].isalnum() and k not in edges:
             k += 1 if back else -1
         return k
 

@@ -380,6 +380,24 @@ class Commits:
             record("commit-failed", address, error="the index holds a merge conflict on this document")
             return False
         before = _staged(folder, paths)
+        lock = _git(folder, "rev-parse", "--path-format=absolute", "--git-path", "index.lock").stdout.strip()
+        locked = bool(lock) and os.path.lexists(lock)
+        try:
+            return self._add_and_commit(folder, paths, before, author, subject, address, record)
+        except subprocess.TimeoutExpired as e:
+            # The git killed on its bound left its lock, and the index as far as it got (#38). A lock there before
+            # the add is another git's (the add then fails on it, no timeout), so it is never taken away.
+            if lock and not locked:
+                try:
+                    os.unlink(lock)
+                except FileNotFoundError:
+                    pass
+            kept = _restage(folder, before, paths)
+            record("commit-failed", address, error=str(e)[:300] + ("" if kept else "; the index could not be put back"))
+            return False
+
+    def _add_and_commit(self, folder: Path, paths: list, before: dict, author: Author, subject: str, address: str,
+                        record) -> bool:
         r = _git(folder, "add", "-A", "--", *paths)   # a file an ignore rule names, in the folder, stays out
         if r.returncode != 0:
             kept = _restage(folder, before, paths)

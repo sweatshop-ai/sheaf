@@ -228,7 +228,7 @@ A state file the hub cannot read as JSON of the kind it expects (`tokens.json`, 
 
 ```toml
 port = 27419        # the hub port; one per account on a shared box
-name = "Ada"        # who you are: author of your comments and default byline
+name = "Ada"        # who you are: author of your comments and default byline (6.3)
 browser = true      # false: sheaf never opens a browser window
 ```
 
@@ -400,7 +400,7 @@ The page must stay self-contained: no CDN, no external stylesheet, no remote fon
 
 ### 6.3 Byline
 
-`by` comes from `--by`, else the user's `name` (4.3). `for` comes from `--for`, else `.sheaf.toml`. There is no default "for". `--for ""` (an empty string) leaves the "for" out of that render even when `.sheaf.toml` has one, as `--by ""` leaves the byline out. It applies to the page, the share copy and the PDF printed from it, and is kept with the other render settings (8.3).
+`by` comes from `--by`, else the `assistant` of the document's front matter, read as the list reads it (9.10) (#167), else the user's `name` (4.3). `for` comes from `--for`, else `.sheaf.toml`. There is no default "for". `--for ""` (an empty string) leaves the "for" out of that render even when `.sheaf.toml` has one, as `--by ""` leaves the byline out. It applies to the page, the share copy and the PDF printed from it, and is kept with the other render settings (8.3).
 
 ### 6.4 Theme
 

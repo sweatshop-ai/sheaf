@@ -34,6 +34,7 @@ from . import comments as rdc
 from . import sanitize as sanitizer
 from . import source as src_mod
 from .blocks import SENTINEL_RE, instrument, split_md_blocks
+from .hub import visibility
 from .theme import Theme, css_string, font_css, load_theme
 
 FLAG_RE = re.compile(r'\b(correction|corrected|retracted|retraction|superseded)\b', re.I)
@@ -1197,7 +1198,8 @@ def render_file(path, *, share: bool = True, theme=None, title: str | None = Non
                 mount: bool = False) -> str:
     """Everything `sheafmd.render` does, plus the arguments only the CLI and the hub
     use (`warn`, `src`, `extra_meta`, `root`, `script_nonce`, `image_ok`). Reads the root's `.sheaf.toml` itself:
-    `for`, `links`, `link_tlds`, `credit` and the theme.
+    `for`, `links`, `link_tlds`, `credit` and the theme. Without a `by`, the byline names the
+    `assistant` of the source's front matter, else the user (SPEC 6.3).
 
     `log` receives every render-log line. Without one, the warnings ("  !") go to
     stderr: a font that is missing or a comment that was removed is never silent."""
@@ -1208,9 +1210,15 @@ def render_file(path, *, share: bool = True, theme=None, title: str | None = Non
     rc = config.load_root_config(root, lambda s: log.append(s))
     if not isinstance(theme, Theme):
         theme = load_theme(theme or rc.theme or "plain", root, lambda s: log.append(s))
+    if by is None:
+        # The assistant of the front matter prepared the sheaf, as the list row says (#167); the
+        # source is read here once and handed on, so the byline and the page come from one text.
+        if src is None:
+            src = path.read_text(encoding="utf-8")
+        # Read without its comments: the byline is escaped, so a note there would show as text.
+        by = visibility.text(visibility.front_matter(strip_comments(src)), "assistant").strip() or config.user_name()
     html_out = build(path, theme=theme, share=share, title=title, toc=toc,
-                     max_image_width=max_image_width,
-                     by=by if by is not None else config.user_name(),
+                     max_image_width=max_image_width, by=by,
                      for_=for_ if for_ is not None else rc.for_,
                      credit=rc.credit if credit is None else credit,
                      link_rule=rc.links, link_tlds=rc.link_tlds, log=log, src=src,

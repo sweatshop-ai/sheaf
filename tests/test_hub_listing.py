@@ -338,6 +338,18 @@ def test_a_tracked_file_under_a_folder_that_became_a_link_inside_the_root_is_lis
     assert "docs/a.md" in listed(r)
 
 
+def test_a_tracked_file_under_a_folder_that_became_a_link_into_the_roots_sheaf_folder_is_not_listed(tmp_path):
+    """#38: inside the root, but in its `.sheaf/`, which `resolve` refuses whether or not the file is a link."""
+    r = roots.Root("proj", make_repo(tmp_path / "proj"), True)
+    md(r.path / "a.md")
+    md(r.path / "docs" / "v.md")
+    git(r.path, "add", "a.md", "docs/v.md")
+    md(r.path / ".sheaf" / "versions" / "0123456789abcdef" / "v.md")
+    (r.path / "docs" / "v.md").unlink()
+    (r.path / "docs").rmdir()
+    (r.path / "docs").symlink_to(r.path / ".sheaf" / "versions" / "0123456789abcdef")
+    assert listed(r) == ["a.md"]
+
 @pytest.mark.parametrize("kind", ["git", "plain"])
 def test_a_symlink_that_stays_inside_the_root_is_listed(tmp_path, kind):
     r = (roots.Root("proj", make_repo(tmp_path / "proj"), True) if kind == "git"

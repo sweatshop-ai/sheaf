@@ -420,9 +420,8 @@ class Hub:
     def mount_fields(self) -> dict:
         """What every mount answer carries for mount.js (#179): `script`, the name of the scripts this hub serves, which
         a page running other scripts takes for an upgrade even under the same version; and `assets`, the name (`?v=`)
-        of the style it links. The front loads mount.js itself bare, or after an upgrade under the version mount.js
-        hands its `upgrade()`, both `no-store`."""
-        return {"script": self.assets["mount.js"].source, "assets": {"mount.css": self.assets["mount.css"].tag}}
+        of each asset: the style it links, and the script it hands the front's loader to load after an upgrade."""
+        return {"script": self.assets["mount.js"].source, "assets": {n: a.tag for n, a in self.assets.items()}}
 
     def actions(self, e: Entry, member, text: str | None = None) -> list:
         """The buttons at the top of the page of `e` as `member` (None: the hub's own person) reads them (10.11,

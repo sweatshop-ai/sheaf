@@ -164,7 +164,7 @@ def test_a_hub_serves_the_files_it_started_with_while_a_reinstall_changes_them_u
 def test_the_mount_answer_names_the_style_the_loader_links_and_the_scripts_the_hub_serves(browser, hostile):
     attach(browser, hostile)
     got = browser.get(f"/_/mount?doc={DOC}").json()
-    assert got["assets"] == {"mount.css": browser.hub.assets["mount.css"].tag}
+    assert got["assets"] == {n: a.tag for n, a in browser.hub.assets.items()}
     assert got["script"] == browser.hub.assets["mount.js"].source
 
 

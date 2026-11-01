@@ -1377,3 +1377,32 @@ def test_an_address_that_is_a_fifo_never_holds_the_pusher(box, sheaves, remote):
     box.hub.tick()
     assert box.hub.commits.settle(10)
     assert git(remote, "log", "-1", "--format=%s", "main") == f"versions: {folder.name}\n"
+
+
+@pytest.mark.parametrize("step", ["add", "commit"])
+def test_a_git_that_times_out_puts_back_what_was_staged_and_leaves_no_lock(box, sheaves, monkeypatch, step):
+    """#38: a git the hub killed on its bound leaves its `index.lock`, and the index as it had made it."""
+    from sheafmd.hub import commits
+    f = sheaves / "acme" / "blog" / "2026-10-28-plan.md"
+    original = f.read_text(encoding="utf-8")
+    f.write_text(original + "\nStaged by hand, never in the work tree again.\n", encoding="utf-8")
+    git(sheaves, "add", "acme/blog/2026-10-28-plan.md")
+    f.write_text(original, encoding="utf-8")
+    real = commits._git
+
+    def killed(folder, *args, **kw):
+        if step in args and "--" in args:
+            if step == "add":
+                real(folder, *args, **kw)                  # killed once it staged the write: the index is its
+            (sheaves / ".git" / "index.lock").write_text("", encoding="utf-8")   # what a SIGKILL leaves
+            raise subprocess.TimeoutExpired(args, 20)
+        return real(folder, *args, **kw)
+
+    monkeypatch.setattr(commits, "_git", killed)
+    edit(box, sheaves)
+    (row,) = rows("commit-failed")
+    assert row["doc"] == DOC
+    assert not (sheaves / ".git" / "index.lock").exists()
+    assert "Staged by hand" in git(sheaves, "show", ":acme/blog/2026-10-28-plan.md")
+    assert git(sheaves, "diff", "--cached", "--name-only") == "acme/blog/2026-10-28-plan.md\n"
+

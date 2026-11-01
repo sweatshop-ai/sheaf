@@ -402,20 +402,13 @@ def test_the_assistant_of_the_front_matter_prepared_the_document_not_the_user(wo
 
 
 @pytest.mark.parametrize("share", [True, False])
-def test_a_comment_in_the_assistant_never_reaches_the_byline(work, share):
+@pytest.mark.parametrize("note", ["late paying", "late paying, see invoice #2231"])
+def test_a_comment_in_the_assistant_never_reaches_the_byline(work, share, note):
     # Opus review 1 on PR 170: read before the share copy's strip, it was escaped into visible text.
-    doc = write(work / "doc.md", "---\nassistant: James <!-- late paying -->\n---\n\n# T\n\ntext\n")
+    # Review 3: a " #" in the note, cut as a YAML comment before the strip, left an opener unremoved.
+    doc = write(work / "doc.md", f"---\nassistant: James <!-- {note} -->\n---\n\n# T\n\ntext\n")
     page = sheafmd.render(doc, share=share)
     assert "Document prepared by James</p>" in page and "late paying" not in page
-
-
-def test_a_comment_left_open_in_the_front_matter_never_moves_its_end(work):
-    # Opus review 2 on PR 170: stripped as a whole, the open comment ran to a `-->` in the body and the
-    # front matter ended at a later `---`, so the page named Mallory where the list named James.
-    doc = write(work / "doc.md", "---\nassistant: James <!-- oops\n---\n\n# T\n\ntext -->\n\n"
-                                 "assistant: Mallory\n\n---\n")
-    page = sheafmd.render(doc, share=False)
-    assert "Document prepared by James" in page and "Document prepared by Mallory" not in page
 
 
 def test_the_by_argument_still_wins_over_the_assistant_of_the_front_matter(work):

@@ -1407,6 +1407,26 @@ def test_a_git_that_times_out_puts_back_what_was_staged_and_leaves_no_lock(box, 
     assert git(sheaves, "diff", "--cached", "--name-only") == "acme/blog/2026-10-28-plan.md\n"
 
 
+def test_a_git_commit_killed_once_the_commit_is_made_counts_as_made(box, sheaves, remote, monkeypatch):
+    """#38: the branch moved before the kill, so the index is not put back under it and no row says it failed."""
+    from sheafmd.hub import commits
+    real = commits._git
+
+    def killed(folder, *args, **kw):
+        r = real(folder, *args, **kw)
+        if "commit" in args and "--" in args:
+            (sheaves / ".git" / "index.lock").write_text("", encoding="utf-8")
+            raise subprocess.TimeoutExpired(args, 20)
+        return r
+
+    monkeypatch.setattr(commits, "_git", killed)
+    edit(box, sheaves)
+    assert rows("commit-failed") == []
+    assert not (sheaves / ".git" / "index.lock").exists()
+    assert git(sheaves, "log", "-1", "--format=%s") == f"edit: acme/blog/2026-10-28-plan.md\n"
+    assert git(sheaves, "diff", "--cached", "--name-only") == ""
+
+
 def test_a_repo_with_an_email_but_no_name_commits_as_sheaf(box, sheaves, remote):
     """#38: the hub's committer stood in only for a missing `user.email`; with no `user.name` either git refused."""
     git(sheaves, "config", "--unset", "user.name")

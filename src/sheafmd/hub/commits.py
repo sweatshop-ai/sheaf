@@ -382,16 +382,20 @@ class Commits:
         before = _staged(folder, paths)
         lock = _git(folder, "rev-parse", "--path-format=absolute", "--git-path", "index.lock").stdout.strip()
         held_before = bool(lock) and os.path.lexists(lock)
+        head = _git(folder, "rev-parse", "-q", "--verify", "HEAD").stdout.strip()
         try:
             return self._add_and_commit(folder, paths, before, author, subject, address, record)
         except subprocess.TimeoutExpired as e:
             # The git killed on its bound left its lock, and the index as far as it got (#38). A lock there before
-            # the add is another git's (the add then fails on it, no timeout), so it is never taken away.
+            # the add is another git's (the add then fails on it, no timeout), so it is never taken away; one a
+            # person's git took while the hub's hung before taking it is, a window the repo's lock cannot close.
             if lock and not held_before:
                 try:
                     os.unlink(lock)
                 except FileNotFoundError:
                     pass
+            if _git(folder, "rev-parse", "-q", "--verify", "HEAD").stdout.strip() != head:
+                return True                           # killed once the branch moved: the commit is made, the index its
             kept = _restage(folder, before, paths)
             record("commit-failed", address, error=str(e)[:300] + ("" if kept else "; the index could not be put back"))
             return False

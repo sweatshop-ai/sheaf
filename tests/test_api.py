@@ -392,6 +392,35 @@ def test_an_empty_by_argument_is_not_the_same_as_none_it_leaves_the_byline_out(w
     assert "Document prepared by Ada</p>" in sheafmd.render(doc, by=None)
 
 
+@pytest.mark.parametrize("share", [True, False])
+def test_the_assistant_of_the_front_matter_prepared_the_document_not_the_user(work, share):
+    # #167: the list row named James and the page named the hub's person.
+    doc = write(work / "doc.md", "---\nassistant: James\nkind: question\n---\n\n# T\n\ntext\n")
+    page = sheafmd.render(doc, share=share)
+    assert "Document prepared by James</p>" in page and "Document prepared by Ada" not in page
+
+
+def test_the_by_argument_still_wins_over_the_assistant_of_the_front_matter(work):
+    doc = write(work / "doc.md", "---\nassistant: James\n---\n\n# T\n\ntext\n")
+    assert "Document prepared by Grace</p>" in sheafmd.render(doc, by="Grace")
+    assert "Document prepared by" not in sheafmd.render(doc, by="")
+
+
+@pytest.mark.parametrize("front", ["", "---\nkind: question\n---\n\n", "---\nassistant: ''\n---\n\n",
+                                   "---\nassistant: [James, Ada]\n---\n\n"])
+def test_without_an_assistant_in_the_front_matter_the_user_prepared_the_document(work, front):
+    doc = write(work / "doc.md", front + "# T\n\ntext\n")
+    assert "Document prepared by Ada</p>" in sheafmd.render(doc)
+
+
+def test_the_hub_reads_the_assistant_from_the_text_it_renders_not_the_file(work):
+    # The hub renders the text it holds (`src`), which may be ahead of the file on disk.
+    from sheafmd.render import render_file
+    doc = write(work / "doc.md", "# T\n\ntext\n")
+    page = render_file(doc, share=False, src="---\nassistant: James\n---\n\n# T\n\ntext\n", log=[])
+    assert "Document prepared by James</p>" in page
+
+
 def test_the_credit_argument_adds_the_line_and_false_overrides_the_root_config(work):
     doc = write(work / "doc.md", "# T\n\ntext\n")
     assert sheafmd.render(doc, credit=True).count(CREDIT) == 1

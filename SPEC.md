@@ -400,7 +400,7 @@ The page must stay self-contained: no CDN, no external stylesheet, no remote fon
 
 ### 6.3 Byline
 
-`by` comes from `--by`, else the user's `name` (4.3). `for` comes from `--for`, else `.sheaf.toml`. There is no default "for". `--for ""` (an empty string) leaves the "for" out of that render even when `.sheaf.toml` has one, as `--by ""` leaves the byline out. It applies to the page, the share copy and the PDF printed from it, and is kept with the other render settings (8.3).
+`by` comes from `--by`, else the `assistant` of the document's front matter, read as the list reads it (9.10) (#167), else the user's `name` (4.3). `for` comes from `--for`, else `.sheaf.toml`. There is no default "for". `--for ""` (an empty string) leaves the "for" out of that render even when `.sheaf.toml` has one, as `--by ""` leaves the byline out. It applies to the page, the share copy and the PDF printed from it, and is kept with the other render settings (8.3).
 
 ### 6.4 Theme
 

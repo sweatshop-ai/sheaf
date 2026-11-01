@@ -266,3 +266,28 @@ def test_a_closing_tag_with_no_opener_is_not_put_inside_a_word(src, html, want):
 
 def test_a_closing_tag_with_no_opener_inside_a_word_in_the_source_stays_there():
     assert saved("A wo</x1>rd here.") == "A wo</x1>rd there.\n"
+
+
+# Gate 4 on #157: Enter puts a new item or line right after the old one, with no space between their words.
+
+@pytest.mark.parametrize("src,html,want", [
+    ("- one</x1>\n- two here", "<ul>\n<li>one</li><li>new</li>\n<li>two there</li>\n</ul>",
+     "- one</x1>\n- new\n- two there\n"),
+    ("1. Do it</x1>\n2. two here", "<ol>\n<li>Do it</li><li>More</li>\n<li>two there</li>\n</ol>",
+     "1.  Do it</x1>\n2.  More\n3.  two there\n"),
+])
+def test_a_closing_tag_with_no_opener_stays_in_its_item_when_enter_adds_one_after_it(src, html, want):
+    assert saved(src, html=html) == want
+
+
+def test_a_closing_tag_with_no_opener_stays_on_its_line_when_enter_adds_one_after_it():
+    out = saved("A b</x1> here.", html="<p>A b there.<div>new</div></p>")
+    assert out.startswith("A b</x1> there.") and "new</x1>" not in out
+
+
+@pytest.mark.parametrize("src,html,want", [
+    ("Go bar</x1> more here.", "<p>Go qux more there.</p>", "Go qux</x1> more there.\n"),
+    ("a b</x1>. here", "<p>a c. there</p>", "a c</x1>. there\n"),
+])
+def test_a_closing_tag_with_no_opener_follows_a_word_replaced_by_one_with_no_letter_in_common(src, html, want):
+    assert saved(src, html=html) == want

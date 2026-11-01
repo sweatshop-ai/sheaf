@@ -401,6 +401,14 @@ def test_the_assistant_of_the_front_matter_prepared_the_document_not_the_user(wo
     assert "Document prepared by James</p>" in page and "Document prepared by Ada" not in page
 
 
+@pytest.mark.parametrize("share", [True, False])
+def test_a_comment_in_the_assistant_never_reaches_the_byline(work, share):
+    # Opus review 1 on PR 170: read before the share copy's strip, it was escaped into visible text.
+    doc = write(work / "doc.md", "---\nassistant: James <!-- late paying -->\n---\n\n# T\n\ntext\n")
+    page = sheafmd.render(doc, share=share)
+    assert "Document prepared by James</p>" in page and "late paying" not in page
+
+
 def test_the_by_argument_still_wins_over_the_assistant_of_the_front_matter(work):
     doc = write(work / "doc.md", "---\nassistant: James\n---\n\n# T\n\ntext\n")
     assert "Document prepared by Grace</p>" in sheafmd.render(doc, by="Grace")

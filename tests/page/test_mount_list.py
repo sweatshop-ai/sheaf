@@ -7,7 +7,7 @@ handler as Nell, as tests/page/test_page_list.py does for the page of its own. T
 import json
 
 import pytest
-from pagehelp import close_context, new_context, until
+from pagehelp import HOST, RED, assert_readable, close_context, drop_host, new_context, until, wear_host
 from test_hub_list import JOEY, NELL, box, github, sheaves  # noqa: F401  (the hub with its list, as there)
 from test_mount_page import KEEP_ROOT
 
@@ -239,11 +239,6 @@ def test_a_filter_and_a_title_clicked_in_the_mounted_list_go_to_the_loader_not_t
     assert m.page.evaluate("[location.pathname, window.__front]") == [FRONT, True]
 
 
-# The colours the loader writes on the host from the front's theme (#164), one light set and one dark, as rgb() reads.
-HOST = {"light": {"--bg": "rgb(250, 250, 250)", "--fg": "rgb(10, 20, 30)", "--muted": "rgb(90, 90, 100)",
-                  "--rule": "rgb(200, 210, 220)", "--accent": "rgb(0, 100, 200)", "color-scheme": "light"},
-        "dark": {"--bg": "rgb(20, 22, 24)", "--fg": "rgb(230, 231, 232)", "--muted": "rgb(150, 151, 152)",
-                 "--rule": "rgb(50, 51, 52)", "--accent": "rgb(120, 170, 250)", "color-scheme": "dark"}}
 # The list's own, light and dark (page/list.css), for a list with no host colours.
 OWN = {"light": ["rgb(255, 255, 255)", "rgb(29, 29, 31)", "rgb(110, 110, 115)", "rgb(229, 229, 234)", "rgb(31, 95, 214)"],
        "dark": ["rgb(28, 28, 30)", "rgb(242, 242, 247)", "rgb(161, 161, 166)", "rgb(56, 56, 58)", "rgb(110, 162, 255)"]}
@@ -264,12 +259,10 @@ def test_the_mounted_list_wears_the_colours_the_loader_sets_on_the_host_not_the_
     off again, the list's own set for the OS comes back."""
     for m in mount_the_list(chromium, box, color_scheme=os):
         assert m.js(COLOURS) == OWN[os]
-        for name, value in HOST[front].items():
-            m.page.evaluate("([n, v]) => document.getElementById('pane').style.setProperty(n, v)", [name, value])
+        wear_host(m.page, front)
         h = HOST[front]
         assert m.js(COLOURS) == [h["--bg"], h["--fg"], h["--muted"], h["--rule"], h["--accent"]]
-        for name in HOST[front]:
-            m.page.evaluate("(n) => document.getElementById('pane').style.removeProperty(n)", name)
+        drop_host(m.page, front)
         assert m.js(COLOURS) == OWN[os]
 
 
@@ -280,3 +273,42 @@ def test_the_list_of_its_own_follows_the_os(chromium, box, os):  # noqa: F811
         own = m.page.context.new_page()
         own.goto(ORIGIN + "/list")
         assert own.evaluate("(() => { const root = document; " + COLOURS + " })()") == OWN[os]
+
+
+# The one-off's red as its border, its text, and pressed (red behind the background's colour); the refusal's red; and
+# the background they stand on. A pressed one-off and a refusal are put in the list for it.
+REDS = """const cs = (s) => getComputedStyle(root.querySelector(s)), list = root.querySelector('.sheaf-list');
+  if (!root.querySelector('.list-act.one-off.pressed')) list.appendChild(
+    Object.assign(document.createElement('button'), {className: 'list-act one-off pressed', textContent: 'Approved'}));
+  if (!root.querySelector('.list-error')) list.appendChild(
+    Object.assign(document.createElement('p'), {className: 'list-error'}));
+  const once = cs('.list-act.one-off:not(.pressed)'), pressed = cs('.list-act.one-off.pressed');
+  return {border: once.borderTopColor, text: once.color, pressed: [pressed.backgroundColor, pressed.color],
+          error: cs('.list-error').color, bg: cs('.sheaf-list').backgroundColor};"""
+
+
+def assert_reds_of(got, red):
+    assert [got["border"], got["text"], got["pressed"][0], got["error"]] == [red] * 4, got
+    assert got["pressed"][1] == got["bg"], got
+    assert_readable(red, got["bg"])
+
+
+@pytest.mark.parametrize("os, front", [("dark", "light"), ("light", "dark"), ("dark", "dark"), ("light", "light")])
+def test_the_mounted_lists_reds_follow_the_scheme_the_loader_sets_on_the_host_not_the_oss(chromium, box, os, front):  # noqa: F811
+    """#169: the one-off's red (border, text, pressed) and the refusal's took the OS's scheme while the background took
+    the front's, 2.66:1 with a dark OS on a light front, 3.23:1 the other way; the refusal had the light red on any
+    background. They follow the `color-scheme` the loader sets on the host, and the OS's while the host sets none."""
+    for m in mount_the_list(chromium, box, color_scheme=os):
+        assert_reds_of(m.js(REDS), RED[os])
+        wear_host(m.page, front)
+        assert_reds_of(m.js(REDS), RED[front])
+        drop_host(m.page, front)
+        assert_reds_of(m.js(REDS), RED[os])
+
+
+@pytest.mark.parametrize("os", ["light", "dark"])
+def test_the_reds_of_the_list_of_its_own_follow_the_os(chromium, box, os):  # noqa: F811
+    for m in mount_the_list(chromium, box, color_scheme=os):
+        own = m.page.context.new_page()
+        own.goto(ORIGIN + "/list")
+        assert_reds_of(own.evaluate("(() => { const root = document; " + REDS + " })()"), RED[os])

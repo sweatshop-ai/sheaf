@@ -1407,6 +1407,24 @@ def test_a_git_that_times_out_puts_back_what_was_staged_and_leaves_no_lock(box, 
     assert git(sheaves, "diff", "--cached", "--name-only") == "acme/blog/2026-10-28-plan.md\n"
 
 
+def test_a_lock_another_git_took_after_the_add_is_left_where_it_is(box, sheaves, monkeypatch):
+    """#38: only the add and the commit take the index lock; a later git that times out never made one."""
+    from sheafmd.hub import commits
+    real = commits._git
+    lock = sheaves / ".git" / "index.lock"
+
+    def slow(folder, *args, **kw):
+        if args[:2] == ("diff", "--cached"):
+            lock.write_text("", encoding="utf-8")       # a person's `git commit`, its editor open
+            raise subprocess.TimeoutExpired(args, 20)
+        return real(folder, *args, **kw)
+
+    monkeypatch.setattr(commits, "_git", slow)
+    edit(box, sheaves)
+    assert rows("commit-failed")
+    assert lock.exists()
+
+
 def test_a_git_commit_killed_once_the_commit_is_made_counts_as_made(box, sheaves, remote, monkeypatch):
     """#38: the branch moved before the kill, so the index is not put back under it and no row says it failed."""
     from sheafmd.hub import commits

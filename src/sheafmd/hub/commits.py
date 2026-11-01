@@ -402,8 +402,8 @@ class Commits:
             return self._add_and_commit(folder, paths, before, author, subject, address, record)
         except subprocess.TimeoutExpired as e:
             # A git killed on its bound left the index as far as it got (#38); `_locking` took away its lock.
-            if _git(folder, "rev-parse", "-q", "--verify", "HEAD").stdout.strip() != head:
-                return True                           # killed once the branch moved: the commit is made, the index its
+            if head and _git(folder, "rev-parse", "-q", "--verify", "HEAD^").stdout.strip() == head:
+                return True                           # killed once the commit moved the branch on: it is made
             kept = _restage(folder, before, paths)
             record("commit-failed", address, error=str(e)[:300] + ("" if kept else "; the index could not be put back"))
             return False

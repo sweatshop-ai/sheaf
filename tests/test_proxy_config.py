@@ -227,3 +227,4 @@ def test_member_ids_a_mail_address_cannot_hold_each_get_their_own_commit_email()
     assert proxy.default_email(ADA, "https://chat.example.com") == f"{ADA}@chat.example.com"
     taken = a.partition("@")[0]                          # an id chosen to read as another's hashed address
     assert proxy.default_email(taken, "https://chat.example.com") != a
+    assert proxy.default_email(taken.capitalize(), "https://chat.example.com").lower() != a   # e-mails compare in lower case

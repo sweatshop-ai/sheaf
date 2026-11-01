@@ -252,7 +252,8 @@ def test_a_document_of_a_million_nodes_is_cut_off_and_says_so(env):
 
 
 def test_mount_builds_a_closed_root_from_the_hubs_answer_and_nothing_reaches_it_from_outside(env):
-    answer = {"title": "T", "toc": False, "version": "1.0.1", "css": "p{color:#111}", "config": {"name": "t.md"},
+    answer = {"title": "T", "toc": False, "version": "1.0.1", "assets": {"mount.css": "0123456789abcdef"},
+              "css": "p{color:#111}", "config": {"name": "t.md"},
               "html": "<h1 id=\"t\">T</h1><p>body</p><img src=\"http://evil.test/p.gif\" alt=\"px\"><script>" + PWN + "</script>"}
     env.route(ORIGIN + "/_/mount*", lambda r: r.fulfill(content_type="application/json", body=json.dumps(answer)))
     env.route(ORIGIN + "/_/mount.css*", lambda r: r.fulfill(content_type="text/css", body=":host{display:block}"))

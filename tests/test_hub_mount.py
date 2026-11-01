@@ -1,18 +1,18 @@
 """The routes the front's loader mounts a sheaf from (#116 step 2): `/_/mount?doc=` answers the page as JSON
-{title, html, config, css, toc, version} with the body already through the MOUNT sanitiser, `/_/mount.js` and
-`/_/mount.css` are the hub's own files, named by the version in the address so a browser keeps them.
-The page route and the share copy are unchanged."""
+{title, html, config, css, toc, version, assets} with the body already through the MOUNT sanitiser, `/_/mount.js` and
+`/_/mount.css` are the hub's own files, read when it starts and named by their content in the address so a browser
+keeps them (#179). The page route and the share copy are unchanged."""
 import hashlib
 import re
 import json
-from pathlib import Path
 
 import pytest
-from helpers import page_meta
+from helpers import browser_on, page_meta
 
 import sheafmd
-from sheafmd import __version__
-from sheafmd.hub.handler import MOUNT_ASSETS, mount_asset_body
+from sheafmd import __version__, paths
+from sheafmd.hub import assets
+from sheafmd.hub.core import Hub
 
 DOC = "work/plan.md"
 HOSTILE = """# Plan
@@ -93,9 +93,9 @@ def test_a_document_that_is_not_there_is_refused_not_rendered(browser, hostile, 
     assert browser.get(f"/_/mount?doc={doc}").status in (400, 404)
 
 
-def test_the_mount_assets_are_the_hubs_own_files_and_cache_by_version(browser):
-    js = browser.get(f"/_/mount.js?v={__version__}", cookie=False)
-    css = browser.get(f"/_/mount.css?v={__version__}", cookie=False)
+def test_the_mount_assets_are_the_hubs_own_files_and_cache_by_content(browser):
+    js = browser.get(f"/_/mount.js?v={browser.hub.assets['mount.js'].tag}", cookie=False)
+    css = browser.get(f"/_/mount.css?v={browser.hub.assets['mount.css'].tag}", cookie=False)
     assert js.status == 200 and js.headers["Content-Type"].startswith("text/javascript")
     assert css.status == 200 and css.headers["Content-Type"].startswith("text/css")
     for r in (js, css):
@@ -106,32 +106,66 @@ def test_the_mount_assets_are_the_hubs_own_files_and_cache_by_version(browser):
     assert "sheafPage" in js.text and "#rd-menu-btn" in css.text
 
 
-def recorded_hashes():
-    """Each version's recorded hash of each mount asset, from tests/asset_versions.txt."""
-    out = {}
-    for line in (Path(__file__).parent / "asset_versions.txt").read_text(encoding="utf-8").splitlines():
-        if line.strip() and not line.startswith("#"):
-            version, asset, digest = line.split()
-            assert (version, asset) not in out, f"{version} {asset} is recorded twice"
-            out[version, asset] = digest
-    return out
+@pytest.mark.parametrize("asset", sorted(assets.MOUNT_ASSETS))
+def test_the_name_kept_for_a_year_is_the_hash_of_what_is_served(browser, asset):
+    # #172: #152 changed mount.css under 1.0.1's `?v=`, and browsers that had kept it for a year never saw the change.
+    # #179: the name is the content, so no change can keep the old name.
+    r = browser.get(f"/_/{asset}?v={browser.hub.assets[asset].tag}", cookie=False)
+    assert browser.hub.assets[asset].tag == hashlib.sha256(r.body).hexdigest()[:assets.TAG_LENGTH]
+    assert "immutable" in r.headers["Cache-Control"]
 
 
-@pytest.mark.parametrize("asset", sorted(MOUNT_ASSETS))
-def test_an_asset_served_under_a_version_never_changes_without_the_version(asset):
-    # #172: #152 changed mount.css under 1.0.1, and browsers that had kept 1.0.1's for a year never saw the change.
-    now = hashlib.sha256(mount_asset_body(asset)).hexdigest()
-    recorded = recorded_hashes().get((__version__, asset))
-    assert recorded is not None, (f"no record of {asset} for {__version__}: add `{__version__} {asset} {now}` to "
-                                  "tests/asset_versions.txt")
-    assert now == recorded, (f"{asset} changed under {__version__}, which browsers keep for a year: raise __version__ "
-                             "and record the new version in tests/asset_versions.txt")
-
-
-def test_an_asset_asked_without_the_current_version_is_not_cached_for_a_year(browser):
-    r = browser.get("/_/mount.js?v=0.0.0-old", cookie=False)
-    assert r.status == 200 and "immutable" not in r.headers["Cache-Control"]
+def test_an_asset_asked_without_its_hash_is_not_cached_for_a_year(browser):
+    for v in ("0.0.0-old", __version__):          # a version is no longer a name the hub keeps
+        r = browser.get(f"/_/mount.js?v={v}", cookie=False)
+        assert r.status == 200 and r.headers["Cache-Control"] == "no-store"
     assert browser.get("/_/mount.js", cookie=False).headers["Cache-Control"] == "no-store"
+
+
+def copy_of_the_page_files(to):
+    to.mkdir()
+    for files in assets.MOUNT_ASSETS.values():
+        for f in files:
+            (to / f).write_bytes((assets.installed() / f).read_bytes())
+    return to
+
+
+def test_two_installs_with_different_files_name_their_assets_differently(tmp_path):
+    a, b = copy_of_the_page_files(tmp_path / "a"), copy_of_the_page_files(tmp_path / "b")
+    assert assets.load("1.0.0", a) == assets.load("1.0.0", b)
+    (b / "page.css").write_text((b / "page.css").read_text(encoding="utf-8") + "\n.x{color:red}\n", encoding="utf-8")
+    old, new = assets.load("1.0.0", a), assets.load("1.0.0", b)
+    assert old["mount.css"].tag != new["mount.css"].tag and old["mount.css"].body != new["mount.css"].body
+    assert old["mount.js"] == new["mount.js"]
+    # mount.js carries the hub's version: another version is another file, under another name, of the same scripts
+    assert assets.load("1.0.1", a)["mount.js"].tag != old["mount.js"].tag
+    assert assets.load("1.0.1", a)["mount.js"].source == old["mount.js"].source
+    # other scripts under the same version are other scripts: a page in memory takes it for an upgrade
+    (b / "page.js").write_text((b / "page.js").read_text(encoding="utf-8") + "\n// changed\n", encoding="utf-8")
+    assert assets.load("1.0.0", b)["mount.js"].source != old["mount.js"].source
+
+
+def test_a_hub_serves_the_files_it_started_with_while_a_reinstall_changes_them_under_it(work, tmp_path, monkeypatch):
+    """#179: an upgrade in place reinstalls the package, then restarts the hub. In between, the old hub must not hand
+    out the new files under the name it gave the old ones, which browsers keep for a year; nor a rollback the reverse."""
+    page = copy_of_the_page_files(tmp_path / "page")
+    monkeypatch.setattr(assets, "installed", lambda: page)
+    old = browser_on(Hub(port=27419, key=paths.ensure_key(), started_by="test"))
+    tag, body = old.hub.assets["mount.css"].tag, old.get("/_/mount.css", cookie=False).body
+    (page / "mount.css").write_text(":host{color:red}\n", encoding="utf-8")        # the reinstall, before the restart
+    r = old.get(f"/_/mount.css?v={tag}", cookie=False)
+    assert r.body == body and "immutable" in r.headers["Cache-Control"]
+    new = browser_on(Hub(port=27419, key=paths.ensure_key(), started_by="test"))   # the restart
+    assert new.hub.assets["mount.css"].tag != tag
+    assert new.get(f"/_/mount.css?v={new.hub.assets['mount.css'].tag}", cookie=False).body.startswith(b":host{color:red}")
+    assert new.get(f"/_/mount.css?v={tag}", cookie=False).headers["Cache-Control"] == "no-store"
+
+
+def test_the_mount_answer_names_the_style_the_loader_links_and_the_scripts_the_hub_serves(browser, hostile):
+    attach(browser, hostile)
+    got = browser.get(f"/_/mount?doc={DOC}").json()
+    assert got["assets"] == {n: a.tag for n, a in browser.hub.assets.items()}
+    assert got["script"] == browser.hub.assets["mount.js"].source
 
 
 def test_the_mount_json_cannot_be_framed_or_sniffed_into_a_page(browser, hostile):
@@ -171,4 +205,5 @@ def test_the_mount_script_knows_the_version_of_the_hub_that_served_it(browser):
     tell by knowing its own (#116 slice v, Ines's P2)."""
     js = browser.get("/_/mount.js", cookie=False).text
     assert f"const VERSION = {json.dumps(__version__)};" in js
-    assert "@@SHEAF_VERSION@@" not in js
+    assert f"const SCRIPT = {json.dumps(browser.hub.assets['mount.js'].source)};" in js       # and its scripts' (#179)
+    assert "@@SHEAF_VERSION@@" not in js and "@@SHEAF_SCRIPT@@" not in js

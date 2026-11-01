@@ -26,6 +26,7 @@ from ..agents import registry
 from ..agents.base import Adapter, Target
 from ..render import render_file
 from ..source import STAMP_FORMAT, file_lock, lock_key
+from . import assets as assets_mod
 from . import boxwait
 from . import place
 from . import projects
@@ -85,7 +86,8 @@ class Hub:
     def __init__(self, port: int, key: str, *, started_by: str = "cli", service: bool = False,
                  version: str = __version__, clock=time.time, proxy=None):
         self.port, self.version, self.service = port, version, service
-        self.proxy = proxy                       # the checked `[proxy]` table (9.9), None in loopback mode
+        self.assets = assets_mod.load(version)   # /_/mount.js and .css as this hub serves them to its end (#179)
+        self.proxy = proxy                      # the checked `[proxy]` table (9.9), None in loopback mode
         self.started_by, self.clock = started_by, clock
         self.auth = Auth(key, port)
         self.boot = str(uuid.uuid4())
@@ -405,13 +407,20 @@ class Hub:
         return meta
 
     def mount_doc(self, e: Entry, member=None) -> dict:
-        """The sheaf as the front mounts it (#116): {title, toc, html, config, css, version}. The text is rendered now
-        through the sanitiser's mount mode; the config is the meta block of `page`, so both read the same state."""
+        """The sheaf as the front mounts it (#116): {title, toc, html, config, css, version, assets}. The text is
+        rendered now through the sanitiser's mount mode; the config is the meta block of `page`, so both read the same
+        state."""
         h, text = e.live.current()
         got = json.loads(self._build(e, text, mount=True, count=False))
         got["config"] = self._fresh_meta(e, got["config"], member)
         got["version"] = self.version
+        got["assets"] = self.mount_names()
         return got
+
+    def mount_names(self) -> dict:
+        """The name (`?v=`) of each asset the loader links after a mount answer: the style. mount.js itself is loaded
+        by the front without one."""
+        return {"mount.css": self.assets["mount.css"].tag}
 
     def actions(self, e: Entry, member, text: str | None = None) -> list:
         """The buttons at the top of the page of `e` as `member` (None: the hub's own person) reads them (10.11,

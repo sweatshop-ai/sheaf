@@ -1836,7 +1836,8 @@ def test_the_mounted_list_is_the_rows_the_page_shows_as_data(box, show):
     assert mounted(got) == read(page)
     j = got.json()
     assert j["kind"] == "list" and j["title"] == "Actions" and j["version"] == box.hub.version
-    assert "html" not in j                       # no markup: the front builds every node from text (layer b)
+    assert j["assets"] == {"mount.css": box.hub.assets["mount.css"].tag}      # the style mount.js links (#179)
+    assert "html" not in j                      # no markup: the front builds every node from text (layer b)
     assert got.headers["X-Content-Type-Options"] == "nosniff"
 
 

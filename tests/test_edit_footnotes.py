@@ -8,6 +8,8 @@ builds them: the document rendered by pandoc, the block's paragraph taken from i
 """
 import re
 
+import pytest
+
 from helpers import pandoc
 from sheafmd import edit as rde
 
@@ -171,9 +173,10 @@ def test_a_pandoc_run_that_failed_is_not_kept_for_the_next_save(monkeypatch):
     assert rep["skipped"] == [] and out == doc.replace("A here", "A there")
 
 
-def test_a_ref_inside_code_is_refused():
-    # Opus review 2, P3: written as code text, the citation is no longer numbered, and nothing would remap
+@pytest.mark.parametrize("tag", ["code", "samp", "tt", "var"])
+def test_a_ref_inside_code_is_refused(tag):
+    # Opus review 2 and 3, P3: written as code text, the citation is no longer numbered, and nothing would remap
     doc = "# T\n\nA here[^a] b.\n\n[^a]: note\n"
-    frag = page_paragraph(doc).replace("here", "<code>there").replace("</a>", "</a></code>")
+    frag = page_paragraph(doc).replace("here", f"<{tag}>there").replace("</a>", f"</a></{tag}>")
     out, rep = rde.apply_edits(doc, [{"i": 1, "html": frag}])
     assert out == doc and rep["skipped"]

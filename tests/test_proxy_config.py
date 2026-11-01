@@ -225,3 +225,5 @@ def test_member_ids_a_mail_address_cannot_hold_each_get_their_own_commit_email()
         local, _, host = mail.partition("@")
         assert host == "chat.example.com" and re.fullmatch(r"[A-Za-z0-9._+-]+", local)
     assert proxy.default_email(ADA, "https://chat.example.com") == f"{ADA}@chat.example.com"
+    taken = a.partition("@")[0]                          # an id chosen to read as another's hashed address
+    assert proxy.default_email(taken, "https://chat.example.com") != a

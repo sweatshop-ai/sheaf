@@ -184,7 +184,7 @@ RULE = ':host([style*="--front-font"]) .rd-root{font-family:var(--front-font)}'
 def test_a_theme_that_ends_open_does_not_swallow_the_fronts_font(chromium, site, tmp_path, tail, kept):
     """#152's gap: a user theme that ends inside a block or a comment swallows any rule after it in its stylesheet.
     The rule that hands the wrapper `--front-font` comes before the theme, so the theme cannot reach it; and it does
-    with a `/_/mount.css` a browser kept from before the rule, which `?v=` names the same while the version stands."""
+    with a `/_/mount.css` a browser kept from before the rule (under 1.0.1's `?v=`, before #179 named it by content)."""
     theme = tmp_path / "open-theme"
     theme.mkdir()
     (theme / "theme.toml").write_text('name = "open"\n', encoding="utf-8")

@@ -415,7 +415,7 @@
       }
       const link = doc.createElement('link');
       link.rel = 'stylesheet';
-      link.href = '/_/mount.css?v=' + encodeURIComponent(got.version);
+      link.href = '/_/mount.css?v=' + encodeURIComponent(got.assets['mount.css']);   // its content's name (#179)
       const wrap = doc.createElement('div');
       wrap.className = list ? 'rd-root sheaf-list' : 'rd-root' + (got.toc ? '' : ' notoc');
       wrap.tabIndex = -1;

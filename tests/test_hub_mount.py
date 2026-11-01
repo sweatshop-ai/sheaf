@@ -8,6 +8,7 @@ import json
 import pytest
 from helpers import page_meta
 
+import sheafmd
 from sheafmd import __version__
 
 DOC = "work/plan.md"
@@ -125,6 +126,16 @@ def test_the_mounted_css_selects_the_host_and_the_wrapper_where_a_page_of_its_ow
     words = {w for s in selectors for part in s.split(",") for w in [part.strip().split()[0] if part.strip() else ""]}
     assert not {w for w in words if re.match(r"(?:html|body|:root)(?![\w-])", w)}, sorted(words)
     assert re.search(r":host\s*\{[^}]*--bg", css) and re.search(r"\.rd-root\s*\{[^}]*overflow-wrap:break-word", css)
+
+
+def test_only_the_mounted_css_takes_the_fronts_font_and_the_page_and_the_share_copy_keep_the_themes(browser, hostile):
+    """#152: the rule that hands the wrapper the host's `--front-font` is added to the mounted page's styles alone."""
+    attach(browser, hostile)
+    rule = ':host([style*="--front-font"]) .rd-root{font-family:var(--front-font)}'
+    assert browser.get(f"/_/mount?doc={DOC}").json()["css"].count(rule) == 1
+    page = browser.get("/work/plan.md")
+    assert page.status == 200 and "--front-font" not in page.text
+    assert "--front-font" not in sheafmd.render(hostile, share=True)
 
 
 def test_the_mount_script_knows_the_version_of_the_hub_that_served_it(browser):

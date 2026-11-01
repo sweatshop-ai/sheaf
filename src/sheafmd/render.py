@@ -34,6 +34,7 @@ from . import comments as rdc
 from . import sanitize as sanitizer
 from . import source as src_mod
 from .blocks import SENTINEL_RE, instrument, split_md_blocks
+from .hub import visibility
 from .theme import Theme, css_string, font_css, load_theme
 
 FLAG_RE = re.compile(r'\b(correction|corrected|retracted|retraction|superseded)\b', re.I)
@@ -1208,9 +1209,14 @@ def render_file(path, *, share: bool = True, theme=None, title: str | None = Non
     rc = config.load_root_config(root, lambda s: log.append(s))
     if not isinstance(theme, Theme):
         theme = load_theme(theme or rc.theme or "plain", root, lambda s: log.append(s))
+    if by is None:
+        # The assistant of the front matter prepared the sheaf, as the list row says (#167); the
+        # source is read here once and handed on, so the byline and the page come from one text.
+        if src is None:
+            src = path.read_text(encoding="utf-8")
+        by = visibility.text(visibility.front_matter(src), "assistant") or config.user_name()
     html_out = build(path, theme=theme, share=share, title=title, toc=toc,
-                     max_image_width=max_image_width,
-                     by=by if by is not None else config.user_name(),
+                     max_image_width=max_image_width, by=by,
                      for_=for_ if for_ is not None else rc.for_,
                      credit=rc.credit if credit is None else credit,
                      link_rule=rc.links, link_tlds=rc.link_tlds, log=log, src=src,

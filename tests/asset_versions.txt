@@ -10,6 +10,6 @@
 1.0.1 mount.js c011a5a5481a7065fd3f4f68e08b13d16acdfbb1b99520b07cec1c4174f95c01
 1.0.1 mount.css 2967b2ee073bf5835bcff3126f3ee2bf2ab478ad79e942b3bd9e4685aa1940b5
 #
-# 1.0.2: #152's --front-font rule in mount.css.
+# 1.0.2: #152's --front-font rule in mount.css, and #169's scheme reds in mount.css, page.css and list.css.
 1.0.2 mount.js c011a5a5481a7065fd3f4f68e08b13d16acdfbb1b99520b07cec1c4174f95c01
-1.0.2 mount.css 215a4e7ca151f1855e9858ff8696541b212f0d4f35d253fd7703096baa53fd35
+1.0.2 mount.css 98443fd64b8539d09bf1fdcb1afb28edf4875966038c6b71a084e4c549c843da

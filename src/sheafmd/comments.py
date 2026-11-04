@@ -582,34 +582,44 @@ def _opener(text: str, i: int) -> int:
     return m.start(1) if m else -1
 
 
-def _inside_another_comment(md: str, c) -> bool:
-    """True when an earlier `<!--` is still open where c starts: c's own --> is what closes it.
-    Read left to right per block like CommonMark: inline code is skipped, but only where no
-    comment is open, so a backtick inside an ordinary comment pairs with nothing."""
-    blocks = split_md_blocks(md)
-    is_open, pos = False, 0
-    for bi, b in enumerate(blocks[:c.block + 1]):
-        text = b.content if bi == c.block else b.content + b.gap
-        if bi == c.block:
-            text = text[:c.start - pos]
+def _comment_spans(md: str) -> list:
+    """Every `<!-- ... -->` of the page as (start, end), read left to right per block like
+    CommonMark: inline code is skipped, but only where no comment is open, so a backtick inside
+    an ordinary comment pairs with nothing. One never closed runs to the end."""
+    spans, start, pos = [], None, 0
+    for b in split_md_blocks(md):
+        text, base = b.content, pos
         pos += len(b.text)
         if b.kind in CODE_KINDS:
             continue
         i = 0
         while True:
-            if is_open:
+            if start is not None:
                 e = text.find("-->", i)
                 if e < 0:
                     break
-                i, is_open = e + 3, False
+                spans.append((start, base + e + 3))
+                i, start = e + 3, None
             o, span = _opener(text, i), CODE_SPAN_RE.search(text, i)
             if span and (o < 0 or span.start() < o):
                 i = span.end()
             elif o >= 0:
-                i, is_open = o + 4, True
+                i, start = o + 4, base + o
             else:
                 break
-    return is_open
+    if start is not None:
+        spans.append((start, len(md)))
+    return spans
+
+
+def _refuse_changing_neighbours(md: str, c, out: str) -> None:
+    """Taking c out must leave every other comment of the page as it was, and no new one: c's
+    --> may be what closes the comment around it, and what is left on both sides may join into
+    a `<!--` or a `-->`. Either way text that was on the page would go (or appear)."""
+    kept = [md[s:e] for s, e in _comment_spans(md) if s != c.start]
+    if [out[s:e] for s, e in _comment_spans(out)] != kept:
+        raise AnchorError(f"comment {c.id} cannot be deleted: taking it out would change the "
+                          "comments around it, separate them in the page text first")
 
 
 def _find(md: str, cid: str):
@@ -666,18 +676,16 @@ def edit_body(md: str, cid: str, body: str) -> str:
 def delete(md: str, cid: str) -> str:
     c = _find(md, cid)
     _refuse_nested(md, c)
-    if _inside_another_comment(md, c):
-        # c's --> is what closes the comment around it; without it that comment would run on
-        # to the next --> and take the text between off the page.
-        raise AnchorError(f"comment {cid} is inside another comment and cannot be deleted, "
-                          "separate them in the page text first")
     if c.standalone:
         # An orphan is a block of its own: take its line and the blank after it.
         end = c.end
         while end < len(md) and md[end] == "\n":
             end += 1
-        return md[:c.start] + md[end:]
-    return md[:c.start] + md[c.end:]
+        out = md[:c.start] + md[end:]
+    else:
+        out = md[:c.start] + md[c.end:]
+    _refuse_changing_neighbours(md, c, out)
+    return out
 
 
 def apply_op(md: str, op: str, fields: dict, by: str = "", at: str = "",

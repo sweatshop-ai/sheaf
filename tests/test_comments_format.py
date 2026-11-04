@@ -307,7 +307,7 @@ def test_delete_of_a_comment_inside_another_html_comment_refuses_and_hides_nothi
     # the plain comment run on to the next --> and swallow that prose off the page.
     md = f"Intro.\n\n<!-- a note\n\n{_head('c2')}\ninner\n-->\n\nouter prose\n-->\n\nafter\n"
     assert [c.id for c in rdc.parse(md).comments] == ["c2"]
-    with pytest.raises(rdc.AnchorError, match="inside another comment") as ex:
+    with pytest.raises(rdc.AnchorError, match="change the comments around it") as ex:
         rdc.delete(md, "c2")
     assert not isinstance(ex.value, rdc.NoComment)
 
@@ -407,5 +407,17 @@ def test_a_comment_opener_after_an_escaped_backslash_still_encloses_what_follows
     # `\\<!--` is a backslash, then a real opener: deleting c2 would let it run on to the next -->.
     md = f"Intro \\\\<!-- a note\n\n{_head('c2')}\ninner\n-->\n\nouter prose\n-->\n\nafter\n"
     assert [c.id for c in rdc.parse(md).comments] == ["c2"]
-    with pytest.raises(rdc.AnchorError, match="inside another comment"):
+    with pytest.raises(rdc.AnchorError, match="change the comments around it"):
         rdc.delete(md, "c2")
+
+
+def test_delete_that_would_splice_a_new_comment_opener_or_closer_out_of_its_neighbours_refuses():
+    # "<!" + c2 + "-- hidden" becomes an opener once c2 is gone: text that was on the page is hidden.
+    opener = f"Word <!{_head('c2')}\ninner\n-->-- hidden\n\nmore -->\n\nafter\n"
+    assert [c.id for c in rdc.parse(opener).comments] == ["c2"]
+    with pytest.raises(rdc.AnchorError, match="change the comments around it"):
+        rdc.delete(opener, "c2")
+    # "--" + c2 + ">" becomes a closer: the plain comment before it would end early.
+    closer = f"Word <!-- a note --{_head('c2')}\ninner\n-->> shown\n"
+    with pytest.raises(rdc.AnchorError, match="change the comments around it"):
+        rdc.delete(closer, "c2")

@@ -1476,3 +1476,28 @@ def test_a_comment_request_that_changes_nothing_commits_nothing(box, sheaves):
     assert git(sheaves, "rev-parse", "HEAD") == head
     assert "Bea's own edit" in git(sheaves, "diff", "--", "acme/blog/2026-10-28-plan.md")
 
+
+
+def test_a_door_resolve_that_lost_the_race_to_a_resolve_commits_nothing_not_even_what_another_hand_left(
+        box, browser, sheaves, monkeypatch):
+    """The door checks the thread is open before it writes; a page resolved it in between, so its write changes
+    nothing (8.11)."""
+    import types
+    from helpers import call
+    from sheafmd import mcp
+    f = sheaves / "acme" / "blog" / "2026-10-28-plan.md"
+    text = f.read_text(encoding="utf-8")
+    i = next(i for i, b in enumerate(split_md_blocks(text)) if b.content.startswith("First"))
+    cid = box.post("/_/comment", {"doc": DOC, "op": "add", "hash": md_hash(text), "block": i, "start": 0,
+                                  "end": 5, "quote": "First", "body": "Is this right?"}, member=CAL).json()["id"]
+    assert box.post("/_/comment", {"doc": DOC, "op": "status", "id": cid, "status": "resolved",
+                                   "hash": md_hash(text)}, member=CAL).status == 200
+    box.hub.commits.settle()
+    f.write_text(f.read_text(encoding="utf-8") + "\nTyped in an editor, not saved by Bea.\n", encoding="utf-8")
+    head = git(sheaves, "rev-parse", "HEAD")
+    monkeypatch.setattr(mcp.Door, "_comment", lambda self, *a, **k: types.SimpleNamespace(status="open"))
+    is_error, got = call(browser, "resolve", as_name="Claude", doc=DOC, id=cid)
+    assert not is_error, got
+    box.hub.commits.settle()
+    assert git(sheaves, "rev-parse", "HEAD") == head
+    assert "Typed in an editor" in git(sheaves, "diff", "--", "acme/blog/2026-10-28-plan.md")

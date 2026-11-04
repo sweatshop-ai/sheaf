@@ -259,3 +259,38 @@ def test_a_plain_author_and_one_with_a_space_are_written_as_before():
     assert (c.by, c.quote, c.body) == ("Eve Mallory", "Alpha", "review text")
     plain = rdc.reply(out, c.id, "ok", "Eve", AT)
     assert "\n@Eve " in plain and rdc.parse(plain).comments[0].replies[0].by == "Eve"
+
+
+ODD_LEADERS = ["\x0b", "\x0c", "\x1c", "\x85", "\xa0", " ", "　"]
+
+
+@pytest.mark.parametrize("lead", ODD_LEADERS)
+@pytest.mark.parametrize("starter", ["- item one", "", "# head", "> quote"])
+def test_a_body_line_led_by_odd_whitespace_never_cuts_the_comment_into_blocks(lead, starter):
+    # A line that opens with \x0b and a list marker is a block of its own to the splitter,
+    # so a selection there wrote a second comment inside the first and an answer wrecked it.
+    md, c1 = rdc.add_comment("Hello word here.\n", 0, *rdc.find_quote("Hello word here.\n", "word")[1:],
+                             "word", f"note\n{lead}{starter}\nend", "Ann", AT)
+    assert len([b for b in split_md_blocks(md) if b.kind != "blank"]) == 1
+    for out in (md, rdc.reply(md, c1, "answer", "Bob", AT), rdc.set_status(md, c1, "resolved")):
+        parsed = rdc.parse(out)
+        assert parsed.malformed == []
+        [c] = parsed.comments
+        assert c.id == c1 and c.body.startswith("note\n") and c.body.endswith("\nend")
+        assert out.replace(out[c.start:c.end], "") == "Hello word here.\n"
+
+
+def test_an_answer_on_a_comment_that_holds_another_refuses_instead_of_wrecking_it():
+    # Pages written before the body guard can hold a comment inside a comment: the outer's
+    # span ends at the inner's -->, and rewriting that span strands the rest of the outer.
+    md = ('Hello word<!-- sheaf-comment id=c1 by="Ann" at=2026-11-04T10:00 status=open quote="word"\n'
+          'note <!-- sheaf-comment id=c2 by="Ann" at=2026-11-04T10:01 status=open quote="x"\n'
+          'inner\n-->\nrest of the outer\n--> here.\n')
+    for act in (lambda m: rdc.reply(m, "c1", "answer", "Bob", AT),
+                lambda m: rdc.set_status(m, "c1", "resolved"),
+                lambda m: rdc.edit_body(m, "c1", "new")):
+        with pytest.raises(rdc.AnchorError, match="holds another comment"):
+            act(md)
+    with pytest.raises(rdc.AnchorError, match="holds another comment"):
+        rdc.delete(md, "c1")        # deleting the span would leave "rest of the outer" as page text
+    assert not issubclass(rdc.AnchorError, rdc.NoComment)

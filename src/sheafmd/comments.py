@@ -165,6 +165,14 @@ def _guard(line: str) -> str:
     """Make a continuation line unable to start a markdown block."""
     if line and line[0] in GUARD_FIRST:
         return f"&#{ord(line[0])};" + line[1:]
+    if line and line[0].isspace():
+        # Other whitespace (\x0b, \xa0, \u2028 ...) is skipped by the block splitter before
+        # a marker, so the line would start a block of its own and cut the comment in two.
+        # html.unescape drops \x0b and \x1c-\x1f and maps \x85 to an ellipsis: a space instead.
+        lead = ord(line[0])
+        if _dec(f"&#{lead};") != line[0]:
+            lead = ord(" ")
+        return f"&#{lead};" + line[1:]
     return line
 
 
@@ -558,10 +566,19 @@ def find_quote(md: str, quote: str):
 
 # ─────────────────────────────────────────────────── changing a comment ──
 
+def _refuse_nested(md: str, c) -> None:
+    if "<!--" in md[c.start + len("<!--"):c.end]:
+        # parse ends a comment at the first -->, which here is a further comment's: changing
+        # the span would leave the rest of the outer on the page as text.
+        raise AnchorError(f"comment {c.id} holds another comment and cannot be changed, "
+                          "separate them in the page text first")
+
+
 def _rewrite(md: str, cid: str, change) -> str:
     c = parse(md).by_id(cid)
     if c is None:
         raise NoComment(f"no comment {cid} in this document")
+    _refuse_nested(md, c)
     change(c)
     kind = split_md_blocks(md)[c.block].kind
     raw = format(c, one_line=kind in ONE_LINE_KINDS and not c.standalone)
@@ -596,6 +613,7 @@ def delete(md: str, cid: str) -> str:
     c = parse(md).by_id(cid)
     if c is None:
         raise NoComment(f"no comment {cid} in this document")
+    _refuse_nested(md, c)
     if c.standalone:
         # An orphan is a block of its own: take its line and the blank after it.
         end = c.end

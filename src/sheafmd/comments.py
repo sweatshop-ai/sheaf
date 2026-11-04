@@ -575,6 +575,12 @@ def _refuse_nested(md: str, c) -> None:
                           "separate them in the page text first")
 
 
+def _opener(text: str, i: int) -> int:
+    """Where the next `<!--` that opens a comment starts: a backslash before it makes it text."""
+    m = re.compile(r"(?<!\\)<!--").search(text, i)
+    return m.start() if m else -1
+
+
 def _inside_another_comment(md: str, c) -> bool:
     """True when an earlier `<!--` is still open where c starts: c's own --> is what closes it.
     Read left to right per block like CommonMark: inline code is skipped, but only where no
@@ -595,7 +601,7 @@ def _inside_another_comment(md: str, c) -> bool:
                 if e < 0:
                     break
                 i, is_open = e + 3, False
-            o, span = text.find("<!--", i), CODE_SPAN_RE.search(text, i)
+            o, span = _opener(text, i), CODE_SPAN_RE.search(text, i)
             if span and (o < 0 or span.start() < o):
                 i = span.end()
             elif o >= 0:
@@ -616,7 +622,9 @@ def _find(md: str, cid: str):
     for m in parsed.malformed:      # the head's fields may be in any order here
         if re.search(ident, m.text.split("\n", 1)[0]):
             raise AnchorError(f"comment {cid} is in the page but cannot be read ({m.reason})")
-    if re.search(rf"<!--\s*{MARKER}\s+{ident}", md):
+    heads = rf"<!--\s*{MARKER}\b[^\n]*?{ident}"
+    if re.search(rf"<!--\s*{MARKER}\s+{ident}", md) or any(
+            b.kind in CODE_KINDS and re.search(heads, b.content) for b in split_md_blocks(md)):
         raise AnchorError(f"comment {cid} is in the page but cannot be read (inside code)")
     raise NoComment(f"no comment {cid} in this document")
 

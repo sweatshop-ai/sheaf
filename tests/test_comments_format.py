@@ -380,3 +380,24 @@ def test_an_unreadable_comment_is_found_whatever_the_order_of_its_head_fields():
     with pytest.raises(rdc.AnchorError, match="in the page but cannot be read") as ex:
         rdc.delete(md, "c1")
     assert not isinstance(ex.value, rdc.NoComment)
+
+
+def test_a_delete_after_an_escaped_comment_opener_still_works():
+    md = f"Write \\<!-- to show it.\n\nWord{_head('c2')}\ninner\n-->\n\nafter\n"
+    assert [c.id for c in rdc.parse(md).comments] == ["c2"]
+    assert rdc.delete(md, "c2") == "Write \\<!-- to show it.\n\nWord\n\nafter\n"
+
+
+def test_a_comment_in_a_code_block_is_found_whatever_the_order_of_its_head_fields():
+    md = ('```\n<!-- sheaf-comment by="Ann" id=c1 at=2026-11-04T10:00 status=open quote="w"\nbody\n-->\n```\n')
+    assert rdc.parse(md).comments == []
+    with pytest.raises(rdc.AnchorError, match="in the page but cannot be read") as ex:
+        rdc.reply(md, "c1", "x", "Bob", AT)
+    assert not isinstance(ex.value, rdc.NoComment)
+
+
+def test_a_comment_that_merely_names_another_id_in_its_quote_does_not_keep_a_deleted_one_alive():
+    md = f'Word{_head("c2").replace(chr(34) + "w" + chr(34), chr(34) + "id=c1 here" + chr(34))}\nbody\n-->\n'
+    assert [c.id for c in rdc.parse(md).comments] == ["c2"]
+    with pytest.raises(rdc.NoComment):
+        rdc.delete(md, "c1")

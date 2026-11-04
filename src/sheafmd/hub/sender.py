@@ -8,8 +8,8 @@ runs, and the row names the signal only (SPEC 8.4, 15).
 
 CPython's `sigtimedwait`, interrupted (EINTR: a stop and SIGCONT, a debugger attaching) once its
 deadline has passed, returns the siginfo the kernel never filled in instead of None: stack garbage
-(sheaf#78, every CPython up to 3.14 at least). Only a siginfo that names SIGTERM or SIGINT is a
-signal; any other is logged as its raw numbers and the hub goes on."""
+(sheaf#78, every CPython up to 3.14 at least). Only a siginfo that names SIGTERM or SIGINT with a
+si_code a sender writes is a signal; any other is logged as its raw numbers and the hub goes on."""
 import contextlib
 import signal
 import subprocess
@@ -22,6 +22,10 @@ from .. import diagnostics
 STOPPING = (signal.SIGTERM, signal.SIGINT)
 POLL = 0.25                              # how long the watcher waits before it looks at `done` again
 UNREAD_EVERY = 60.0                      # at most one signal-unread row a minute: a tracer that keeps pausing the hub
+# si_code of a signal a sender wrote (<bits/siginfo-consts.h>): kill, tkill, tgkill, pidfd_send_signal and
+# `systemctl stop` give SI_USER, sigqueue SI_QUEUE, a Ctrl-C at a terminal SI_KERNEL
+SI_USER, SI_QUEUE, SI_TKILL, SI_KERNEL = 0, -1, -6, 0x80
+SENT_BY = (SI_USER, SI_QUEUE, SI_TKILL, SI_KERNEL)
 BLOCKS = hasattr(signal, "sigtimedwait") and hasattr(signal, "pthread_sigmask")
 
 
@@ -47,11 +51,18 @@ def raw(info) -> dict:
     return {"si_signo": info.si_signo, "si_code": info.si_code, "si_pid": info.si_pid, "si_uid": info.si_uid}
 
 
+def stopping(info) -> bool:
+    """A siginfo some sender wrote naming SIGTERM or SIGINT. The signal number alone is not enough:
+    the unfilled siginfo is stack garbage, and on 3.14 it reads si_signo 2. A real one carries a
+    si_code the kernel writes for a sender; the garbage carries an arbitrary int there."""
+    return info.si_signo in STOPPING and info.si_code in SENT_BY
+
+
 def who(info) -> dict:
     """The row fields for one siginfo: the signal, and the sender when the kernel names a process
     (si_pid is 0 for a signal the kernel itself raised). A siginfo that names no stopping signal
     names no sender either: its numbers go under `raw`, as they came."""
-    if info.si_signo not in STOPPING:
+    if not stopping(info):
         return {"signal": "unknown", "raw": raw(info)}
     row = {"signal": name(info.si_signo)}
     if info.si_pid > 0:
@@ -122,7 +133,7 @@ class Signals:
             info = signal.sigtimedwait(STOPPING, POLL)
             if info is None:
                 continue
-            if info.si_signo in STOPPING:
+            if stopping(info):
                 deliver(info.si_signo, who(info))
                 continue
             unread += 1

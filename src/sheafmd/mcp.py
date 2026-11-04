@@ -451,11 +451,14 @@ class Door:
             with place.held(self.hub, address):
                 entry = self.hub.entries.get(address)
                 if entry is not None:
-                    entry.live.comment(op, fields, None, by=caller.display, role=role, announce=True, guard=guard)
+                    wrote = entry.live.comment(op, fields, None, by=caller.display, role=role, announce=True,
+                                               guard=guard)["wrote"]
                 else:
-                    update_file(self.hub.roots.document(address),
-                                lambda t: rdc.apply_op(guard(t) or t, op, fields, caller.display, now(), role))
-                self.hub.committed(address, by=caller.display, what="comment")     # under the lock, as every write's
+                    old, new = update_file(self.hub.roots.document(address),
+                                           lambda t: rdc.apply_op(guard(t) or t, op, fields, caller.display, now(), role))
+                    wrote = new != old
+                if wrote:                               # a write that changed nothing commits nothing (8.11)
+                    self.hub.committed(address, by=caller.display, what="comment")     # under the lock, as every write's
         except rdc.AnchorError as e:
             raise ToolError(f"{e}.") from None
         except (OSError, UnicodeDecodeError, NotFound):

@@ -168,16 +168,17 @@ def _guard(line: str) -> str:
     if line and line[0].isspace():
         # Other whitespace (\x0b, \xa0, \u2028 ...) is skipped by the block splitter before
         # a marker, so the line would start a block of its own and cut the comment in two.
-        # html.unescape drops \x0b and \x1c-\x1f and maps \x85 to an ellipsis: a space instead.
-        lead = ord(line[0])
-        if _dec(f"&#{lead};") != line[0]:
-            lead = ord(" ")
-        return f"&#{lead};" + line[1:]
+        return f"&#{ord(line[0])};" + line[1:]
     return line
 
 
+# html.unescape drops these as a numeric reference (\x0b, \x1c-\x1f) or maps them to another
+# character (\x85 to an ellipsis), so a leading one written as &#N; by _guard is read here.
+_KEPT_REF_RE = re.compile(r"&#(11|28|29|30|31|133);")
+
+
 def _dec(s: str) -> str:
-    return _html.unescape(s)
+    return _html.unescape(_KEPT_REF_RE.sub(lambda m: chr(int(m.group(1))), s))
 
 
 def _val(v: str) -> str:
@@ -574,10 +575,36 @@ def _refuse_nested(md: str, c) -> None:
                           "separate them in the page text first")
 
 
+def _inside_another_comment(md: str, c) -> bool:
+    """True when an earlier `<!--` (code spans and code blocks left out, as parse does) is
+    still open where c starts: c's own --> is what closes it."""
+    blocks = split_md_blocks(md)
+    before, pos = [], 0
+    for b in blocks[:c.block]:
+        if b.kind not in CODE_KINDS:
+            before.append(_mask_code(b.content) + b.gap)
+        pos += len(b.text)
+    before.append(_mask_code(blocks[c.block].content)[:c.start - pos])
+    text = "".join(before)
+    i = text.rfind("<!--")
+    return i >= 0 and "-->" not in text[i + 4:]
+
+
+def _find(md: str, cid: str):
+    """The comment `cid`. NoComment only when nothing of it is in the page; a comment that is
+    there but parse cannot read (malformed, or inside code) is an AnchorError that says so."""
+    parsed = parse(md)
+    c = parsed.by_id(cid)
+    if c is not None:
+        return c
+    if re.search(rf"<!--\s*{MARKER}\s+id={re.escape(cid)}(?![\w-])", md):
+        why = next((m.reason for m in parsed.malformed if f"id={cid}" in m.text), "inside code")
+        raise AnchorError(f"comment {cid} is in the page but cannot be read ({why})")
+    raise NoComment(f"no comment {cid} in this document")
+
+
 def _rewrite(md: str, cid: str, change) -> str:
-    c = parse(md).by_id(cid)
-    if c is None:
-        raise NoComment(f"no comment {cid} in this document")
+    c = _find(md, cid)
     _refuse_nested(md, c)
     change(c)
     kind = split_md_blocks(md)[c.block].kind
@@ -610,10 +637,13 @@ def edit_body(md: str, cid: str, body: str) -> str:
 
 
 def delete(md: str, cid: str) -> str:
-    c = parse(md).by_id(cid)
-    if c is None:
-        raise NoComment(f"no comment {cid} in this document")
+    c = _find(md, cid)
     _refuse_nested(md, c)
+    if _inside_another_comment(md, c):
+        # c's --> is what closes the comment around it; without it that comment would run on
+        # to the next --> and take the text between off the page.
+        raise AnchorError(f"comment {cid} is inside another comment and cannot be deleted, "
+                          "separate them in the page text first")
     if c.standalone:
         # An orphan is a block of its own: take its line and the blank after it.
         end = c.end

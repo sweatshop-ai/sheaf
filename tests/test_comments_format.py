@@ -401,3 +401,11 @@ def test_a_comment_that_merely_names_another_id_in_its_quote_does_not_keep_a_del
     assert [c.id for c in rdc.parse(md).comments] == ["c2"]
     with pytest.raises(rdc.NoComment):
         rdc.delete(md, "c1")
+
+
+def test_a_comment_opener_after_an_escaped_backslash_still_encloses_what_follows():
+    # `\\<!--` is a backslash, then a real opener: deleting c2 would let it run on to the next -->.
+    md = f"Intro \\\\<!-- a note\n\n{_head('c2')}\ninner\n-->\n\nouter prose\n-->\n\nafter\n"
+    assert [c.id for c in rdc.parse(md).comments] == ["c2"]
+    with pytest.raises(rdc.AnchorError, match="inside another comment"):
+        rdc.delete(md, "c2")

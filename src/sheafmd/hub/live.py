@@ -281,8 +281,9 @@ class LiveDocument:
         long document); sent again, the same text comes with the same id. A write already taken with
         that id, the same text, the same button (resolve, Ask, Tell) and, for an add, the same passage
         (`block`, `start`, `end`) writes and tells nothing again: the answer is the snapshot as it is
-        now, with the comment's id and `again`. It is not looked for in the file: a thread deleted or
-        an edit overwritten since still answers `again`. `taken_rids` names the ids kept. The
+        now, with the comment's id and `again`. `wrote` is whether the write changed the file (a status set
+        to the status it has does not): a caller commits only a write that did. It is not looked for in the
+        file: a thread deleted or an edit overwritten since still answers `again`. `taken_rids` names the ids kept. The
         `changed` event of a write names its id, so the tab that gave up hears that it was taken.
         The last RIDS ids are kept, in memory. `guard(text)` sees the file's text under the file lock
         before anything is written, and raises to write nothing."""
@@ -345,7 +346,8 @@ class LiveDocument:
                                         "only your own comments can be edited")
                 return rdc.apply_op(t, op, fields, by or self._by, now, role)
 
-            rds.update_file(self._file(), change)
+            old, new = rds.update_file(self._file(), change)
+            made["wrote"] = new != old
             self._after_write()
             self._rerender()
             if wait:
@@ -358,7 +360,7 @@ class LiveDocument:
             snap = self._snapshot(self._text)
             if announce and self._text != before:        # one event per write that changed the file
                 self._announce(snap, before, **({"rid": rid} if rid is not None else {}))
-            return self._answer(made.get("id"), base_hash, snap)
+            return {**self._answer(made.get("id"), base_hash, snap), "wrote": made["wrote"]}
 
     @staticmethod
     def _take(kept, rid, sent, answer):

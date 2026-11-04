@@ -1543,7 +1543,7 @@ class Handler:
             except (rdc.AnchorError, ValueError, TypeError) as ex:
                 raise Refuse(400, str(ex)) from None
             self.hub.index.touch(e.address)
-            if not snap.get("again"):
+            if not snap.get("again") and snap.pop("wrote", True):   # a write that changed nothing commits nothing
                 self.hub.committed(e.address, member, "comment")
         if snap.get("again"):
             # Taken before under this request id: what the first request started (an Ask, a Tell's wait)

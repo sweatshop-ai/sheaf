@@ -270,8 +270,8 @@ def for_door(text_: str, old: str | None) -> str:
     fm = front_matter(text_)
     was = front_matter(old) if old is not None else {}
     closed = old is not None and effective(was) == "owner"
-    owner = text(was, "owner")
-    if not fm and not closed and not (owner or text(was, "issue")):
+    owner, issue = text(was, "owner"), text(was, "issue")
+    if not fm and not closed and not (owner or issue):     # a text with no front matter still gets the two kept
         return text_
     mine = {s for s in sources(fm) if private(s)}
     kept = text(was, "shared") if text(was, "shared") and mine <= set(sources(was)) else None
@@ -281,8 +281,8 @@ def for_door(text_: str, old: str | None) -> str:
         # an update neither gives nor changes the owner, nor the issue whose assignee is the owner; the door
         # gives a sheaf that no member owns its token's member (mcp `_owned`, #30)
         values["owner"] = owner or None
-        values["issue"] = text(was, "issue") or None
+        values["issue"] = issue or None
     if want == "project" and not ({"visibility", "sources", "shared"} & fm.keys()) \
-            and text(fm, "owner") == owner and (old is None or text(fm, "issue") == text(was, "issue")):
+            and text(fm, "owner") == owner and (old is None or text(fm, "issue") == issue):
         return text_
     return set_keys(text_, values)

@@ -1454,3 +1454,25 @@ def test_a_repo_with_an_email_but_no_name_commits_as_sheaf(box, sheaves, remote)
     (who, _), _ = pushed(box, remote)
     assert who.startswith("Bea <bea@example.com>|")
     assert git(remote, "log", "-1", "--format=%cn <%ce>", "main") == "sheaf <sheaf@localhost>\n"
+
+
+def test_a_comment_request_that_changes_nothing_commits_nothing(box, sheaves):
+    """A status set to the status it has leaves the file as it was: the person's own uncommitted edit of the
+    document stays theirs to commit, never taken into a commit under the requester's name."""
+    f = sheaves / "acme" / "blog" / "2026-10-28-plan.md"
+    text = f.read_text(encoding="utf-8")
+    i = next(i for i, b in enumerate(split_md_blocks(text)) if b.content.startswith("First"))
+    r = box.post("/_/comment", {"doc": DOC, "op": "add", "hash": md_hash(text), "block": i, "start": 0,
+                                "end": 5, "quote": "First", "body": "Is this right?"}, member=CAL)
+    assert r.status == 200, r.text
+    box.hub.commits.settle()
+    cid = r.json()["id"]
+    f.write_text(f.read_text(encoding="utf-8") + "\nBea's own edit, not yet committed.\n", encoding="utf-8")
+    head = git(sheaves, "rev-parse", "HEAD")
+    r = box.post("/_/comment", {"doc": DOC, "op": "status", "id": cid, "status": "open",
+                                "hash": md_hash(text)}, member=CAL)
+    assert r.status == 200, r.text
+    box.hub.commits.settle()
+    assert git(sheaves, "rev-parse", "HEAD") == head
+    assert "Bea's own edit" in git(sheaves, "diff", "--", "acme/blog/2026-10-28-plan.md")
+

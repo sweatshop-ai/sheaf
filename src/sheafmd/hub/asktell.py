@@ -394,8 +394,10 @@ class AskTell:
                             expect=rdc.thread_identity(c))
         except rdc.ThreadChanged:
             fail(f"the comment changed while {who(t, ad)} was answering")
-        except rdc.AnchorError:
+        except rdc.NoComment:
             fail(f"the comment was deleted while {who(t, ad)} was answering")
+        except rdc.AnchorError as ex:
+            fail(f"the answer of {who(t, ad)} was not written: {ex}")
 
     # ── Tell ─────────────────────────────────────────────────────────────────
     def start_tell(self, address: str, cid: str, waiting: bool = False, held=None):

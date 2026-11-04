@@ -566,14 +566,19 @@ def find_quote(md: str, quote: str):
 
 # ─────────────────────────────────────────────────── changing a comment ──
 
+def _refuse_nested(md: str, c) -> None:
+    if "<!--" in md[c.start + len("<!--"):c.end]:
+        # parse ends a comment at the first -->, which here is a further comment's: changing
+        # the span would leave the rest of the outer on the page as text.
+        raise AnchorError(f"comment {c.id} holds another comment and cannot be changed, "
+                          "separate them in the page text first")
+
+
 def _rewrite(md: str, cid: str, change) -> str:
     c = parse(md).by_id(cid)
     if c is None:
         raise NoComment(f"no comment {cid} in this document")
-    if "<!--" in md[c.start + len("<!--"):c.end]:
-        # parse ends a comment at the first -->, which here is a further comment's: rewriting
-        # the span would leave the rest of the outer on the page as text.
-        raise AnchorError(f"comment {cid} holds another comment and cannot be rewritten, separate them in the page text first")
+    _refuse_nested(md, c)
     change(c)
     kind = split_md_blocks(md)[c.block].kind
     raw = format(c, one_line=kind in ONE_LINE_KINDS and not c.standalone)
@@ -608,6 +613,7 @@ def delete(md: str, cid: str) -> str:
     c = parse(md).by_id(cid)
     if c is None:
         raise NoComment(f"no comment {cid} in this document")
+    _refuse_nested(md, c)
     if c.standalone:
         # An orphan is a block of its own: take its line and the blank after it.
         end = c.end

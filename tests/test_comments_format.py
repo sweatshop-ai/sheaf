@@ -291,3 +291,6 @@ def test_an_answer_on_a_comment_that_holds_another_refuses_instead_of_wrecking_i
                 lambda m: rdc.edit_body(m, "c1", "new")):
         with pytest.raises(rdc.AnchorError, match="holds another comment"):
             act(md)
+    with pytest.raises(rdc.AnchorError, match="holds another comment"):
+        rdc.delete(md, "c1")        # deleting the span would leave "rest of the outer" as page text
+    assert not issubclass(rdc.AnchorError, rdc.NoComment)

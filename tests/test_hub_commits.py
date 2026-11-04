@@ -1501,3 +1501,40 @@ def test_a_door_resolve_that_lost_the_race_to_a_resolve_commits_nothing_not_even
     box.hub.commits.settle()
     assert git(sheaves, "rev-parse", "HEAD") == head
     assert "Typed in an editor" in git(sheaves, "diff", "--", "acme/blog/2026-10-28-plan.md")
+
+
+def _first_comment(box, sheaves):
+    f = sheaves / "acme" / "blog" / "2026-10-28-plan.md"
+    text = f.read_text(encoding="utf-8")
+    i = next(i for i, b in enumerate(split_md_blocks(text)) if b.content.startswith("First"))
+    cid = box.post("/_/comment", {"doc": DOC, "op": "add", "hash": md_hash(text), "block": i, "start": 0,
+                                  "end": 5, "quote": "First", "body": "Is this right?"}, member=CAL).json()["id"]
+    box.hub.commits.settle()
+    return text, cid
+
+
+def test_a_comment_request_that_changes_something_commits_it(box, sheaves):
+    """The twin of the no-op test: a status that really changes, and an edit of the body, each take a commit.
+    A `wrote` that was always false would pass the no-op tests and fail here."""
+    text, cid = _first_comment(box, sheaves)
+    for payload in ({"op": "status", "id": cid, "status": "resolved"},
+                    {"op": "edit", "id": cid, "body": "Is this really right?"}):
+        head = git(sheaves, "rev-parse", "HEAD")
+        r = box.post("/_/comment", {"doc": DOC, "hash": md_hash(text), **payload}, member=CAL)
+        assert r.status == 200, r.text
+        box.hub.commits.settle()
+        assert git(sheaves, "rev-parse", "HEAD") != head, payload
+
+
+@pytest.mark.parametrize("open_in_hub", [True, False], ids=["page open", "no live entry"])
+def test_a_door_reply_and_a_door_resolve_that_change_something_commit_them(box, browser, sheaves, open_in_hub):
+    from helpers import call
+    _, cid = _first_comment(box, sheaves)
+    if not open_in_hub:
+        box.hub.entries.clear()         # the door then writes the file itself, with no live document
+    for tool, args in (("reply", {"text": "Yes, it is."}), ("resolve", {})):
+        head = git(sheaves, "rev-parse", "HEAD")
+        is_error, got = call(browser, tool, as_name="Claude", doc=DOC, id=cid, **args)
+        assert not is_error, got
+        box.hub.commits.settle()
+        assert git(sheaves, "rev-parse", "HEAD") != head, tool

@@ -281,9 +281,9 @@ class LiveDocument:
         long document); sent again, the same text comes with the same id. A write already taken with
         that id, the same text, the same button (resolve, Ask, Tell) and, for an add, the same passage
         (`block`, `start`, `end`) writes and tells nothing again: the answer is the snapshot as it is
-        now, with the comment's id and `again`. `wrote` is whether the write changed the file (a status set to
-        the status it has does not): a caller commits only a write that did. It is not looked for in the file: a thread deleted or
-        an edit overwritten since still answers `again`. `taken_rids` names the ids kept. The
+        now, with the comment's id and `again`. `wrote` is whether the write changed the file (a status set
+        to the status it has does not): a caller commits only a write that did. It is not looked for in the
+        file: a thread deleted or an edit overwritten since still answers `again`. `taken_rids` names the ids kept. The
         `changed` event of a write names its id, so the tab that gave up hears that it was taken.
         The last RIDS ids are kept, in memory. `guard(text)` sees the file's text under the file lock
         before anything is written, and raises to write nothing."""

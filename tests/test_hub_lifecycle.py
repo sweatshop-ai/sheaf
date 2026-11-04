@@ -276,8 +276,8 @@ def test_a_siginfo_that_names_no_stopping_signal_is_written_as_its_raw_numbers()
 
 
 def watch(monkeypatch, infos):
-    """Run the watcher over `infos` as sigtimedwait's answers; it ends after the first stopping
-    signal it delivers. Returns what it delivered."""
+    """Run the watcher over `infos` as sigtimedwait's answers; it ends after the last. Returns
+    what it delivered."""
     waits = iter(infos)
     held = sender.Signals.__new__(sender.Signals)
     held._done = threading.Event()
@@ -285,7 +285,7 @@ def watch(monkeypatch, infos):
 
     def fake_wait(sigset, timeout):
         info = next(waits)
-        if info is not None and sender.stopping(info):
+        if info is infos[-1]:
             held._done.set()
         return info
     monkeypatch.setattr(sender.signal, "sigtimedwait", fake_wait)
@@ -310,16 +310,17 @@ def test_a_siginfo_that_names_a_stopping_signal_with_a_code_no_sender_writes_is_
 
 @pytest.mark.skipif(not LINUX_SIGINFO, reason="struct_siginfo and sigtimedwait exist where the OS gives siginfo")
 @pytest.mark.parametrize("code,sender_of", [
-    (0, "kill(2), tkill, tgkill, pidfd_send_signal, systemctl stop (SI_USER)"),
-    (-1, "sigqueue(3) (SI_QUEUE)"),
-    (-6, "tkill/tgkill on kernels that mark them (SI_TKILL)"),
-    (0x80, "the kernel: Ctrl-C at a terminal (SI_KERNEL, si_pid 0)"),
+    (sender.SI_USER, "kill(2), tkill, tgkill, pidfd_send_signal, systemctl stop"),
+    (sender.SI_QUEUE, "sigqueue(3)"),
+    (-2, "a timer (SI_TIMER)"),
+    (sender.SI_TKILL, "tkill/tgkill on kernels that mark them"),
+    (sender.SI_KERNEL, "the kernel: Ctrl-C at a terminal, si_pid 0"),
 ])
 @pytest.mark.parametrize("signo", [signal.SIGTERM, signal.SIGINT])
 def test_a_real_stopping_signal_from_every_sender_still_stops_the_hub(monkeypatch, signo, code, sender_of):
     """The other direction of the guard above: a stop that never lands is worse than a hub that
     stops on garbage, since the unit then runs to its timeout and is killed."""
-    pid = 0 if code == 0x80 else 4242
+    pid = 0 if code == sender.SI_KERNEL else 4242
     got = watch(monkeypatch, [siginfo(signo, code=code, pid=pid, uid=995)])
     assert [g[0] for g in got] == [signo], sender_of
     assert got[0][1]["signal"] == signal.Signals(signo).name

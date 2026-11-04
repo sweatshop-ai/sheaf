@@ -22,10 +22,11 @@ from .. import diagnostics
 STOPPING = (signal.SIGTERM, signal.SIGINT)
 POLL = 0.25                              # how long the watcher waits before it looks at `done` again
 UNREAD_EVERY = 60.0                      # at most one signal-unread row a minute: a tracer that keeps pausing the hub
-# si_code of a signal a sender wrote (<bits/siginfo-consts.h>): kill, tkill, tgkill, pidfd_send_signal and
-# `systemctl stop` give SI_USER, sigqueue SI_QUEUE, a Ctrl-C at a terminal SI_KERNEL
+# si_code of a signal some sender wrote, Linux values (<bits/siginfo-consts.h>): kill, tkill, tgkill,
+# pidfd_send_signal and `systemctl stop` give SI_USER, sigqueue SI_QUEUE, a Ctrl-C at a terminal
+# SI_KERNEL; a timer, message queue or aio completion (SI_TIMER..SI_SIGIO) can name any signal too
 SI_USER, SI_QUEUE, SI_TKILL, SI_KERNEL = 0, -1, -6, 0x80
-SENT_BY = (SI_USER, SI_QUEUE, SI_TKILL, SI_KERNEL)
+SENDER_CODES = (SI_USER, SI_QUEUE, -2, -3, -4, -5, SI_TKILL, SI_KERNEL)
 BLOCKS = hasattr(signal, "sigtimedwait") and hasattr(signal, "pthread_sigmask")
 
 
@@ -55,7 +56,7 @@ def stopping(info) -> bool:
     """A siginfo some sender wrote naming SIGTERM or SIGINT. The signal number alone is not enough:
     the unfilled siginfo is stack garbage, and on 3.14 it reads si_signo 2. A real one carries a
     si_code the kernel writes for a sender; the garbage carries an arbitrary int there."""
-    return info.si_signo in STOPPING and info.si_code in SENT_BY
+    return info.si_signo in STOPPING and info.si_code in SENDER_CODES
 
 
 def who(info) -> dict:

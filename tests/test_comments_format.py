@@ -364,3 +364,19 @@ def test_a_comment_in_the_page_that_parse_cannot_read_is_not_reported_as_missing
     for act in (lambda: rdc.reply("Hello.\n", "c1", "x", "Bob", AT), lambda: rdc.delete("Hello.\n", "c1")):
         with pytest.raises(rdc.NoComment):
             act()
+
+
+def test_a_delete_beside_an_ordinary_comment_whose_backtick_pairs_with_a_later_one_still_works():
+    # `_mask_code` would pair the backtick inside the plain comment with the one after it and blank
+    # the plain comment's -->, so c2 would look enclosed by it.
+    md = f"Intro <!-- a `note --> and `code` here.\n\nWord{_head('c2')}\ninner\n-->\n\nafter\n"
+    assert [c.id for c in rdc.parse(md).comments] == ["c2"]
+    assert rdc.delete(md, "c2") == "Intro <!-- a `note --> and `code` here.\n\nWord\n\nafter\n"
+
+
+def test_an_unreadable_comment_is_found_whatever_the_order_of_its_head_fields():
+    md = 'Word<!-- sheaf-comment by="Ann" id=c1 at=2026-11-04T10:00 status=bogus quote="w"\nbody\n-->\n'
+    assert rdc.parse(md).by_id("c1") is None
+    with pytest.raises(rdc.AnchorError, match="in the page but cannot be read") as ex:
+        rdc.delete(md, "c1")
+    assert not isinstance(ex.value, rdc.NoComment)

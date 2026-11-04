@@ -294,3 +294,73 @@ def test_an_answer_on_a_comment_that_holds_another_refuses_instead_of_wrecking_i
     with pytest.raises(rdc.AnchorError, match="holds another comment"):
         rdc.delete(md, "c1")        # deleting the span would leave "rest of the outer" as page text
     assert not issubclass(rdc.AnchorError, rdc.NoComment)
+
+
+# ── a delete that would change what the comments around it are ──────────────────────────────
+
+def _head(cid):
+    return f'<!-- sheaf-comment id={cid} by="Ann" at=2026-11-04T10:00 status=open quote="w"'
+
+
+def test_delete_of_a_comment_inside_another_html_comment_refuses_and_hides_nothing():
+    # The plain comment ends at c2's own -->, so "outer prose" shows. Taking c2 away would let
+    # the plain comment run on to the next --> and swallow that prose off the page.
+    md = f"Intro.\n\n<!-- a note\n\n{_head('c2')}\ninner\n-->\n\nouter prose\n-->\n\nafter\n"
+    assert [c.id for c in rdc.parse(md).comments] == ["c2"]
+    with pytest.raises(rdc.AnchorError, match="inside another comment") as ex:
+        rdc.delete(md, "c2")
+    assert not isinstance(ex.value, rdc.NoComment)
+
+
+def test_delete_still_works_beside_a_closed_comment_and_a_comment_example_in_code():
+    # The twin: an earlier comment that is closed, and `<!--` in inline code, do not enclose c2.
+    md = (f"Intro <!-- a closed note --> and `<!-- example` here.\n\n"
+          f"Word{_head('c2')}\ninner\n-->\n\nouter prose\n")
+    assert rdc.delete(md, "c2") == ("Intro <!-- a closed note --> and `<!-- example` here.\n\n"
+                                    "Word\n\nouter prose\n")
+    standalone = f"Intro.\n\n{_head('c2')}\ninner\n-->\n\nafter\n"
+    assert rdc.delete(standalone, "c2") == "Intro.\n\nafter\n"
+
+
+# ── odd whitespace at a line start keeps its text ──────────────────────────────────────────
+
+ALL_ODD_LEADERS = ["\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x1f", "\x85", "\xa0", " ", "　",
+                   " ", " "]
+
+
+@pytest.mark.parametrize("lead", ALL_ODD_LEADERS)
+def test_a_body_line_led_by_odd_whitespace_keeps_that_character_and_stays_one_comment(lead):
+    body = f"note\n{lead}- item one\n{lead}{lead}# head\nend"
+    md, c1 = rdc.add_comment("Hello word here.\n", 0, *rdc.find_quote("Hello word here.\n", "word")[1:],
+                             "word", body, "Ann", AT)
+    assert len([b for b in split_md_blocks(md) if b.kind != "blank"]) == 1
+    reply = rdc.reply(md, c1, f"{lead}- first\n{lead}second", "Bob", AT)
+    for out in (md, reply, rdc.set_status(md, c1, "resolved")):
+        parsed = rdc.parse(out)
+        assert parsed.malformed == []
+        [c] = parsed.comments
+        assert c.body == body
+    assert rdc.parse(reply).comments[0].replies[0].text == f"{lead}- first\n{lead}second"
+
+
+def test_a_literal_numeric_reference_in_a_body_is_not_turned_into_the_character():
+    body = "note\n&#11;- not a vertical tab\nend"
+    md, c1 = rdc.add_comment("Hello word here.\n", 0, *rdc.find_quote("Hello word here.\n", "word")[1:],
+                             "word", body, "Ann", AT)
+    assert rdc.parse(md).comments[0].body == body
+
+
+# ── a comment that is in the page but cannot be read is not a deleted one ──────────────────
+
+def test_a_comment_in_the_page_that_parse_cannot_read_is_not_reported_as_missing():
+    good = rdc.add_comment("Hello word here.\n", 0, *rdc.find_quote("Hello word here.\n", "word")[1:],
+                           "word", "note", "Ann", AT)[0]
+    broken = good.replace("status=open", "status=bogus")
+    assert rdc.parse(broken).by_id("c1") is None
+    for act in (lambda: rdc.reply(broken, "c1", "x", "Bob", AT), lambda: rdc.delete(broken, "c1")):
+        with pytest.raises(rdc.AnchorError, match="in the page but cannot be read") as ex:
+            act()
+        assert not isinstance(ex.value, rdc.NoComment)
+    for act in (lambda: rdc.reply("Hello.\n", "c1", "x", "Bob", AT), lambda: rdc.delete("Hello.\n", "c1")):
+        with pytest.raises(rdc.NoComment):
+            act()

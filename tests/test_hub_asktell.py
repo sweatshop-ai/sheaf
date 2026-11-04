@@ -471,7 +471,25 @@ def test_ask_answering_a_comment_that_was_deleted_meanwhile_fails_and_writes_not
     assert wait_until(lambda: session.claude.calls() != [])
     update_file(ready, lambda t: rdc.delete(t, "c1"))
     finish(hub)
-    assert named(events(sub), "ask-failed") and "too late" not in ready.read_text(encoding="utf-8")
+    [failed] = named(events(sub), "ask-failed")
+    assert "was deleted" in failed["error"] and "too late" not in ready.read_text(encoding="utf-8")
+
+
+def test_ask_answering_a_comment_that_is_still_in_the_page_but_unreadable_does_not_say_deleted(
+        browser, hub, ready, session):
+    """A hand edit made the head unreadable while the answer was being written: the comment is in the
+    file, so the failure says that, never that it was deleted."""
+    FakeClaude(session.claude.dir, answer="too late", sleep=1)
+    sub = tab(hub)
+    sub.drain()
+    post(browser, "/_/ask")
+    assert wait_until(lambda: session.claude.calls() != [])
+    update_file(ready, lambda t: t.replace("status=open", "status=bogus", 1))
+    finish(hub)
+    [failed] = named(events(sub), "ask-failed")
+    assert "deleted" not in failed["error"]
+    assert "in the page but cannot be read" in failed["error"] and "was not written" in failed["error"]
+    assert "too late" not in ready.read_text(encoding="utf-8")
 
 
 def test_an_answer_never_lands_in_another_thread_that_took_the_id_of_the_asked_one(

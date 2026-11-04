@@ -166,11 +166,13 @@ def _guard(line: str) -> str:
     if line and line[0] in GUARD_FIRST:
         return f"&#{ord(line[0])};" + line[1:]
     if line and line[0].isspace():
-        # Other whitespace (\x0b, \xa0,   ...) is skipped by the block splitter before
+        # Other whitespace (\x0b, \xa0, \u2028 ...) is skipped by the block splitter before
         # a marker, so the line would start a block of its own and cut the comment in two.
         # html.unescape drops \x0b and \x1c-\x1f and maps \x85 to an ellipsis: a space instead.
-        c = line[0] if _dec(f"&#{ord(line[0])};") == line[0] else " "
-        return f"&#{ord(c)};" + line[1:]
+        lead = ord(line[0])
+        if _dec(f"&#{lead};") != line[0]:
+            lead = ord(" ")
+        return f"&#{lead};" + line[1:]
     return line
 
 
@@ -568,10 +570,10 @@ def _rewrite(md: str, cid: str, change) -> str:
     c = parse(md).by_id(cid)
     if c is None:
         raise NoComment(f"no comment {cid} in this document")
-    if "<!--" in md[c.start + 4:c.end]:
+    if "<!--" in md[c.start + len("<!--"):c.end]:
         # parse ends a comment at the first -->, which here is a further comment's: rewriting
         # the span would leave the rest of the outer on the page as text.
-        raise AnchorError(f"comment {cid} holds another comment, remove the inner one first")
+        raise AnchorError(f"comment {cid} holds another comment and cannot be rewritten, separate them in the page text first")
     change(c)
     kind = split_md_blocks(md)[c.block].kind
     raw = format(c, one_line=kind in ONE_LINE_KINDS and not c.standalone)

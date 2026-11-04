@@ -309,11 +309,12 @@ def test_a_siginfo_that_names_a_stopping_signal_with_a_code_no_sender_writes_is_
 
 
 @pytest.mark.skipif(not LINUX_SIGINFO, reason="struct_siginfo and sigtimedwait exist where the OS gives siginfo")
+# the codes are Linux's ABI, written out here so a wrong constant in sender.py fails this test
 @pytest.mark.parametrize("code,sender_of", [
     (0, "kill(2), tkill, tgkill, pidfd_send_signal, systemctl stop"),
     (-1, "sigqueue(3)"),
     (-2, "a timer (SI_TIMER)"),
-    (-6, "tkill/tgkill on kernels that mark them"),
+    (-6, "the kernel's code for a send aimed at one thread"),
     (0x80, "the kernel: Ctrl-C at a terminal, si_pid 0"),
 ])
 @pytest.mark.parametrize("signo", [signal.SIGTERM, signal.SIGINT])

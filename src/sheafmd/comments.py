@@ -576,9 +576,10 @@ def _refuse_nested(md: str, c) -> None:
 
 
 def _opener(text: str, i: int) -> int:
-    """Where the next `<!--` that opens a comment starts: a backslash before it makes it text."""
-    m = re.compile(r"(?<!\\)<!--").search(text, i)
-    return m.start() if m else -1
+    """Where the next `<!--` that opens a comment starts: one backslash before it makes it text,
+    two are a backslash and the opener."""
+    m = re.compile(r"(?<!\\)(?:\\\\)*(<!--)").search(text, i)
+    return m.start(1) if m else -1
 
 
 def _inside_another_comment(md: str, c) -> bool:

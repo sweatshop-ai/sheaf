@@ -3,8 +3,9 @@
 A Python signal handler is not told who sent the signal. Where the OS gives siginfo (Linux), the
 hub blocks SIGTERM and SIGINT in every thread and one thread takes them with `sigtimedwait`, which
 returns the sender's pid; the command line is read from /proc at that moment, since the sender may
-be gone a second later. Without `sigtimedwait` (macOS) nothing is blocked, the ordinary handler
-runs, and the row names the signal only (SPEC 8.4, 15).
+be gone a second later. Where the OS does not give it (macOS, and anything else that is not Linux:
+the si_code numbers below are Linux's) nothing is blocked, the ordinary handler runs, and the row
+names the signal only (SPEC 8.4, 15).
 
 CPython's `sigtimedwait`, interrupted (EINTR: a stop and SIGCONT, a debugger attaching) once its
 deadline has passed, returns the siginfo the kernel never filled in instead of None: stack garbage
@@ -13,6 +14,7 @@ si_code a sender writes is a signal; any other is logged as its raw numbers and 
 import contextlib
 import signal
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -22,12 +24,15 @@ from .. import diagnostics
 STOPPING = (signal.SIGTERM, signal.SIGINT)
 POLL = 0.25                              # how long the watcher waits before it looks at `done` again
 UNREAD_EVERY = 60.0                      # at most one signal-unread row a minute: a tracer that keeps pausing the hub
-# si_code of a signal some sender wrote, Linux values (<bits/siginfo-consts.h>): kill, tkill, tgkill,
-# pidfd_send_signal and `systemctl stop` give SI_USER, sigqueue SI_QUEUE, a Ctrl-C at a terminal
-# SI_KERNEL; a timer, message queue or aio completion (SI_TIMER..SI_SIGIO) can name any signal too
+# si_code of a signal some sender wrote, Linux values (<bits/siginfo-consts.h>, which is why BLOCKS
+# asks for Linux: FreeBSD's SI_USER is 0x10001): kill, tkill and `systemctl stop` give SI_USER,
+# sigqueue SI_QUEUE, a Ctrl-C at a terminal SI_KERNEL; a timer, message queue or aio completion
+# (SI_TIMER..SI_SIGIO) can name any signal too. SI_TKILL is what the kernel writes for a send aimed
+# at one thread; tgkill and tkill from another process, and pidfd_send_signal, read SI_USER
+# (measured on kernel 7.0). Both are accepted
 SI_USER, SI_QUEUE, SI_TKILL, SI_KERNEL = 0, -1, -6, 0x80
 SENDER_CODES = (SI_USER, SI_QUEUE, -2, -3, -4, -5, SI_TKILL, SI_KERNEL)
-BLOCKS = hasattr(signal, "sigtimedwait") and hasattr(signal, "pthread_sigmask")
+BLOCKS = sys.platform.startswith("linux") and hasattr(signal, "sigtimedwait") and hasattr(signal, "pthread_sigmask")
 
 
 def name(signum: int) -> str:

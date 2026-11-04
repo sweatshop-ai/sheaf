@@ -228,7 +228,7 @@ def test_a_sigterm_that_arrives_while_the_port_is_being_bound_is_still_a_clean_s
 
 # ── who sent the signal ─────────────────────────────────
 
-LINUX_SIGINFO = hasattr(signal, "sigtimedwait")
+LINUX_SIGINFO = sender.BLOCKS
 SENDER = ("import os, signal, sys, time\n"
           "from sheafmd import signals\n"
           "signals.send(int(sys.argv[1]), getattr(signal, sys.argv[2]))\n"
@@ -309,18 +309,19 @@ def test_a_siginfo_that_names_a_stopping_signal_with_a_code_no_sender_writes_is_
 
 
 @pytest.mark.skipif(not LINUX_SIGINFO, reason="struct_siginfo and sigtimedwait exist where the OS gives siginfo")
+# the codes are Linux's ABI, written out here so a wrong constant in sender.py fails this test
 @pytest.mark.parametrize("code,sender_of", [
-    (sender.SI_USER, "kill(2), tkill, tgkill, pidfd_send_signal, systemctl stop"),
-    (sender.SI_QUEUE, "sigqueue(3)"),
+    (0, "kill(2), tkill, tgkill, pidfd_send_signal, systemctl stop"),
+    (-1, "sigqueue(3)"),
     (-2, "a timer (SI_TIMER)"),
-    (sender.SI_TKILL, "tkill/tgkill on kernels that mark them"),
-    (sender.SI_KERNEL, "the kernel: Ctrl-C at a terminal, si_pid 0"),
+    (-6, "the kernel's code for a send aimed at one thread"),
+    (0x80, "the kernel: Ctrl-C at a terminal, si_pid 0"),
 ])
 @pytest.mark.parametrize("signo", [signal.SIGTERM, signal.SIGINT])
 def test_a_real_stopping_signal_from_every_sender_still_stops_the_hub(monkeypatch, signo, code, sender_of):
     """The other direction of the guard above: a stop that never lands is worse than a hub that
     stops on garbage, since the unit then runs to its timeout and is killed."""
-    pid = 0 if code == sender.SI_KERNEL else 4242
+    pid = 0 if code == 0x80 else 4242
     got = watch(monkeypatch, [siginfo(signo, code=code, pid=pid, uid=995)])
     assert [g[0] for g in got] == [signo], sender_of
     assert got[0][1]["signal"] == signal.Signals(signo).name

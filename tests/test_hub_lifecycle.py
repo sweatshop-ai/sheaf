@@ -275,6 +275,56 @@ def test_a_siginfo_that_names_no_stopping_signal_is_written_as_its_raw_numbers()
                    "raw": {"si_signo": -1532110032, "si_code": -1532110000, "si_pid": 443239200, "si_uid": 7}}
 
 
+def watch(monkeypatch, infos):
+    """Run the watcher over `infos` as sigtimedwait's answers; it ends after the first stopping
+    signal it delivers. Returns what it delivered."""
+    waits = iter(infos)
+    held = sender.Signals.__new__(sender.Signals)
+    held._done = threading.Event()
+    delivered = []
+
+    def fake_wait(sigset, timeout):
+        info = next(waits)
+        if info is not None and sender.stopping(info):
+            held._done.set()
+        return info
+    monkeypatch.setattr(sender.signal, "sigtimedwait", fake_wait)
+    held._wait(lambda signum, fields: delivered.append((signum, fields)))
+    return delivered
+
+
+@pytest.mark.skipif(not LINUX_SIGINFO, reason="struct_siginfo and sigtimedwait exist where the OS gives siginfo")
+@pytest.mark.parametrize("signo", [signal.SIGTERM, signal.SIGINT])
+def test_a_siginfo_that_names_a_stopping_signal_with_a_code_no_sender_writes_is_not_a_signal(monkeypatch, signo):
+    """The siginfo CPython returns unfilled (sheaf#78) holds stack garbage, and on 3.14 the garbage
+    reads si_signo 2 (SIGINT) with si_pid 1: the signal number alone does not tell it from a signal.
+    The hub stopped on it, exit 0, in the nightly of 2026-10-31 on."""
+    garbage = siginfo(signo, code=-1910714544, pid=1)
+    assert sender.stopping(garbage) is False
+    assert sender.who(garbage)["signal"] == "unknown"
+    assert watch(monkeypatch, [garbage, None, siginfo(signal.SIGTERM, pid=4242, uid=995)]) == \
+        [(signal.SIGTERM, {"signal": "SIGTERM", "sender_pid": 4242, "sender_uid": 995})]
+    row, = hub_rows("signal-unread")
+    assert row["raw"] == {"si_signo": int(signo), "si_code": -1910714544, "si_pid": 1, "si_uid": 0}
+
+
+@pytest.mark.skipif(not LINUX_SIGINFO, reason="struct_siginfo and sigtimedwait exist where the OS gives siginfo")
+@pytest.mark.parametrize("code,sender_of", [
+    (0, "kill(2), tkill, tgkill, pidfd_send_signal, systemctl stop (SI_USER)"),
+    (-1, "sigqueue(3) (SI_QUEUE)"),
+    (-6, "tkill/tgkill on kernels that mark them (SI_TKILL)"),
+    (0x80, "the kernel: Ctrl-C at a terminal (SI_KERNEL, si_pid 0)"),
+])
+@pytest.mark.parametrize("signo", [signal.SIGTERM, signal.SIGINT])
+def test_a_real_stopping_signal_from_every_sender_still_stops_the_hub(monkeypatch, signo, code, sender_of):
+    """The other direction of the guard above: a stop that never lands is worse than a hub that
+    stops on garbage, since the unit then runs to its timeout and is killed."""
+    pid = 0 if code == 0x80 else 4242
+    got = watch(monkeypatch, [siginfo(signo, code=code, pid=pid, uid=995)])
+    assert [g[0] for g in got] == [signo], sender_of
+    assert got[0][1]["signal"] == signal.Signals(signo).name
+
+
 @pytest.mark.skipif(not LINUX_SIGINFO, reason="struct_siginfo and sigtimedwait exist where the OS gives siginfo")
 def test_the_watcher_takes_only_a_stopping_signal_and_logs_the_rest(monkeypatch):
     """CPython's sigtimedwait, interrupted (EINTR) once its deadline has passed, returns the

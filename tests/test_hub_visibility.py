@@ -1169,3 +1169,45 @@ def test_an_unreadable_file_that_replaced_the_one_a_token_saw_is_told_as_none(te
     is_error, got = call(browser, "read", token=token, doc=f"work/{DOC}")
     _, missing = call(browser, "read", token=token, doc="work/thinkingtoo/tiroir/nothing.md")
     assert is_error and got == missing.replace("nothing.md", DOC.rsplit("/", 1)[1])
+
+
+OPEN = PRIVATE.replace("sources: [library:doc-123]\n", "")
+
+
+def hans_door(team, browser, work, rel):
+    """The door update of `rel` by Hans's assistant, over a sheaf Thierry owns that is open to the project:
+    a function of the change to the text."""
+    team.hub.proxy = members(work, hans=["hansdoor"])
+    token = Tokens().add("hansdoor", write=True)
+
+    def update(change):
+        is_error, got = call(browser, "read", token=token, doc=f"work/{rel}")
+        assert not is_error, got
+        return call(browser, "update", token=token, doc=f"work/{rel}", text=change(got["text"]),
+                    expected_hash=got["hash"])
+    return update
+
+
+@pytest.mark.parametrize("change", [
+    lambda t: t.split("---\n", 2)[2],
+    lambda t: "---\n---\n" + t.split("---\n", 2)[2],
+    lambda t: "---\nclient: thinkingtoo\n" + t.split("---\n", 2)[2]], ids=["no front matter", "empty", "no closing line"])
+def test_a_door_update_of_an_open_sheaf_keeps_its_owner_and_issue_whatever_the_text_says(team, browser, work, change):
+    put(team, work, DOC, OPEN)
+    is_error, got = door_update(team, browser, work, DOC, change)
+    assert not is_error, got
+    fm = front_matter((work / DOC).read_text(encoding="utf-8"))
+    assert (fm.get("owner"), fm.get("issue")) == ("thierry", "thinkingtoo/tt-tiroir#9")
+
+
+def test_a_door_write_that_drops_the_front_matter_cannot_give_an_open_sheaf_to_another_members_assistant(team, browser, work):
+    put(team, work, DOC, OPEN)
+    update = hans_door(team, browser, work, DOC)
+    is_error, got = update(lambda t: t.split("---\n", 2)[2])
+    assert not is_error, got
+    is_error, got = update(lambda t: "---\nsources: [mail:x]\n---\n" + t)
+    assert not is_error, got
+    fm = front_matter((work / DOC).read_text(encoding="utf-8"))
+    assert fm.get("owner") == "thierry" and fm.get("issue") == "thinkingtoo/tt-tiroir#9"
+    assert team.get(f"/work/{DOC}", member=HANS).status == 404
+    assert team.get(f"/work/{DOC}", member=THIERRY).status == 200

@@ -271,7 +271,7 @@ def for_door(text_: str, old: str | None) -> str:
     was = front_matter(old) if old is not None else {}
     closed = old is not None and effective(was) == "owner"
     owner = text(was, "owner")
-    if not fm and not closed:
+    if not fm and not closed and not (owner or text(was, "issue")):
         return text_
     mine = {s for s in sources(fm) if private(s)}
     kept = text(was, "shared") if text(was, "shared") and mine <= set(sources(was)) else None

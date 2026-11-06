@@ -580,7 +580,7 @@ def test_a_quarantined_sheaf_keeps_its_name_and_its_path_is_no_address(team, wor
     put(team, work, SHARED, NOBODY)
     team.hub.the_list.poll()
     root = team.hub.roots.get("work")
-    assert place.physical(team.hub, root, SHARED) == QUARANTINE
+    assert place.physical(team.hub, root, SHARED) == (root, QUARANTINE)
     assert absent(browser, tokens["hans"], QUARANTINE) == absent(browser, tokens["hans"], MISSING)
     assert team.get(f"/work/{QUARANTINE}", member=HANS).status == 404
 
@@ -1207,8 +1207,8 @@ def test_a_holder_that_turns_into_a_link_while_the_poll_moves_it_deadlocks_nothi
     hub, top = team.hub, Path(os.path.realpath(work))
     real_one, swapped, holding = place._one, threading.Event(), threading.Event()
 
-    def one(t, name):
-        got = real_one(t, name)
+    def one(h, r, name):
+        got = real_one(h, r, name)
         if name == other and threading.current_thread().name == "poll" and not swapped.is_set():
             os.unlink(work / other)
             os.symlink(NAME, work / other)          # by hand, or a pull, between the poll's look and its file lock

@@ -481,6 +481,18 @@ def _run(started_by: str, signals: "sender.Signals") -> int:
                 if any(the_list._within(str(folder), r) for r in m.roots):
                     raise the_list.ListError(f"'{key}' of [list] of {paths.config_file()} is inside a root of "
                                              f"{m.name}: {folder}")
+        for mid, dirs in (list_cfg.member_dirs if list_cfg is not None else {}).items():
+            # The same rules for a member's own James, and the map names members of [proxy] only: an id that is
+            # none would leave its member on the shared James without a word.
+            if mid not in cfg.members:
+                raise the_list.ListError(f"'member_dirs' of [list] of {paths.config_file()} names {mid}, "
+                                         f"who is no member of [proxy]")
+            for key in the_list.FOLDER_KEYS:
+                folder = getattr(dirs, key)
+                for m in cfg.members.values() if folder is not None else ():
+                    if any(the_list._within(str(folder), r) for r in m.roots):
+                        raise the_list.ListError(f"'{key}' of [list.member_dirs.\"{mid}\"] of {paths.config_file()} "
+                                                 f"is inside a root of {m.name}: {folder}")
     except the_list.ListError as e:
         return _list_refused(e)
     # From reading the key to holding the port, `sheaf rotate` on a machine with no hub waits: it

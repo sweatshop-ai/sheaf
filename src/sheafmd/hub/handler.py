@@ -230,6 +230,7 @@ class Handler:
         self.peer_check = peer_check
         self.door = Door(hub)
         self.door.called = self._james_called
+        self._pending_members: dict = {}    # address -> the member whose James wrote the waiting session: his copy is looked in
         self._pending_sessions: dict = {}   # address -> (James's session it waits for, since, its write's seq) (9.12)
         self._session_seqs: dict = {}       # address -> the seq of James's latest write to it: the newest one wins
         self._pending_lock = threading.Lock()
@@ -1095,7 +1096,8 @@ class Handler:
             if the is not None and the.serves(Address.parse(e.address).root):
                 self._stop_tells(project, m)
             # The box's supervisor reads the line as `<client>/<project>` (tt-tiroir routines/james, stops).
-            drop = work.drop(the.cfg.stop_dir if the is not None else None, project,
+            # The Stop goes to the James of the member who ticked it, as their Tells do (`member_dirs`).
+            drop = work.drop(the.cfg.dirs_for(m).stop_dir if the is not None else None, project,
                              (project + "\n").encode("utf-8"), "no stop_dir in [list]")
         self.hub.record("stop-james", e.address, project=project, assistant=assistant,
                         by=(m.short or m.name) if m is not None else self.hub.person, drop=drop)
@@ -1107,7 +1109,7 @@ class Handler:
         is dropped, and a reply in each one's thread, signed by the member who stopped him, saying it never reached
         him (9.12): a Stop ends the work, and none of it goes on unseen. A `tell-stopped` row for each, without
         its text. The box's supervisor clears what is left of the project's the same way (tt-tiroir #136)."""
-        folder = self.hub.the_list.cfg.tell_dir
+        folder = self.hub.the_list.cfg.dirs_for(member).tell_dir
         by = work.member_word(member) if member is not None else self.hub.person
         if folder is None:
             return
@@ -1184,7 +1186,7 @@ class Handler:
                 text = self.hub.roots.document(address).read_text(encoding="utf-8")
             except (NotFound, OSError, UnicodeDecodeError):
                 raise Refuse(404, "no such document") from None
-        return address, visibility.front_matter(text), work.state(self.hub, address, text)
+        return address, visibility.front_matter(text), work.state(self.hub, address, text, req.member)
 
     def _code_sheaf(self, req: Req, doc):
         """`_sheaf` for a request of a sign-in code (9.13): the code's own sheaf, open to its member, else the 404
@@ -1241,7 +1243,7 @@ class Handler:
             address, fm, st = self._code_sheaf(req, req.query.get("doc"))
             if work.code_session(st, code.session) is None:
                 raise self._code_moved(req)
-            body = work.open_transcript(st.cfg, "/".join(Address.parse(address).rel.split("/")[:2]), code.session)
+            body = work.open_transcript(st.cfg, "/".join(Address.parse(address).rel.split("/")[:2]), code.session, req.member)
             if body is None:
                 raise Refuse(404, "this sheaf has no such session on the box")
             if not self.codes.serve(code):                  # one of two racing GETs: the flag is set before a byte
@@ -1253,9 +1255,9 @@ class Handler:
         _shape(sid is None or work.UUID_RE.fullmatch(sid), "id must be a session id (a lowercase UUID)")
         if sid is None:
             sid = st.forkable           # a live session on a laptop: none, never an older box copy to fork
-        if sid not in st.box or not work.serves(st.cfg):
+        if sid not in st.box or not work.serves(st.cfg, req.member):
             raise Refuse(404, "this sheaf has no such session on the box")
-        body = work.open_transcript(st.cfg, "/".join(Address.parse(address).rel.split("/")[:2]), sid)
+        body = work.open_transcript(st.cfg, "/".join(Address.parse(address).rel.split("/")[:2]), sid, req.member)
         if body is None:
             raise Refuse(404, "this sheaf has no such session on the box")
         return self._transcript(req, address, fm, sid, body)
@@ -1277,7 +1279,7 @@ class Handler:
                "thread": thread, "address": e.address, "abs_path": str(e.path)}
         if kind == "tell":
             out.update(id=str(uuid.uuid4()), message=self._tell_message(req, e, thread))
-        drop, name = work.drop_named(self.hub.the_list.cfg.tell_dir, project, json.dumps(out).encode("utf-8"),
+        drop, name = work.drop_named(self.hub.the_list.cfg.dirs_for(req.member).tell_dir, project, json.dumps(out).encode("utf-8"),
                                      "no tell_dir in [list]")
         self.hub.record("tell-dropped", e.address, what=kind, project=project, by=by, drop=drop,
                         **({"tell": out["id"]} if "id" in out else {}))
@@ -1288,10 +1290,10 @@ class Handler:
         c = rdc.parse(e.live.current()[1]).by_id(thread)
         return prompts.tell(e.address, str(e.path), req.member.name, c, self.hub.asktell.links(e.address))
 
-    def _work_route(self, address: str, text: str, kind: str) -> str | None:
+    def _work_route(self, address: str, text: str, kind: str, member=None) -> str | None:
         """Where a member's Ask or Tell goes on the sheaf whose text is `text` (9.12, 9.14): "box" to James's
         window, "relay" to the fork's relay (a Tell only), None nowhere."""
-        st = work.state(self.hub, address, text)
+        st = work.state(self.hub, address, text, member)
         can = st.can if st is not None else []
         if f"box-{kind}" in can:
             return "box"
@@ -1336,14 +1338,21 @@ class Handler:
                 old = self._pending_sessions.get(address)
                 since = old[1] if old and old[0] == sid else _clock()     # the same session keeps its clock
                 self._pending_sessions[address] = (sid, since, seq)
+                self._pending_members[address] = self._token_member(caller)
+            members = {at: self._pending_members.get(at) for at, _ in waiting}
         for at, (wanted, since_, seq_) in waiting:
             try:
-                self._record_james(at, wanted, caller, since_, seq_)
+                self._record_james(at, wanted, caller, since_, seq_, members[at])
             except Exception:                           # one sheaf's failure never stops the others nor this write
                 self._drop_waiting(at, seq_)
                 self.hub.record_exception("session-hook-failed", at)
         if address is not None:
-            self._record_james(address, sid, caller, since, seq)
+            self._record_james(address, sid, caller, since, seq, self._token_member(caller))
+
+    def _token_member(self, caller):
+        """The member the door token of `caller` acts for: whose James wrote, so whose copy holds his session."""
+        proxy = self.hub.proxy
+        return proxy.member_of_token(caller.token.name) if proxy is not None and caller.token is not None else None
 
     def _latest(self, address: str, seq: int) -> bool:
         """Whether `seq` is still James's latest write to `address`: an older session never replaces a newer one."""
@@ -1356,9 +1365,10 @@ class Handler:
             if self._pending_sessions.get(address, (None, None, None))[2] != seq:
                 return False
             del self._pending_sessions[address]
+            self._pending_members.pop(address, None)
             return True
 
-    def _record_james(self, address: str, sid: str, caller, since: float, seq: int):
+    def _record_james(self, address: str, sid: str, caller, since: float, seq: int, member=None):
         """James's session `sid`, named by his write `seq` to `address`, becomes the sheaf's live session, the first of
         `sessions`, when it is a sheaf of James on the list's root, `[list]` names a box, and the copy holds `sid` as a
         session of its project. The hub is the only writer of `sessions` (9.12). Nothing when it is the live one
@@ -1376,7 +1386,8 @@ class Handler:
             self._drop_waiting(address, seq)                  # an item names the box: without one there is nothing to write
             return
         project = "/".join(Address.parse(address).rel.split("/")[:2])
-        found = work.james_has(the.cfg, project, sid)
+        # The copy of the James that wrote: the member its token acts for, none for a token bound to nobody.
+        found = work.james_has(the.cfg, project, sid, member)
         if found is None and _clock() - since < PENDING_S:
             return                                      # it waits for the copy
         if not found:
@@ -1445,7 +1456,7 @@ class Handler:
             if code is not None:
                 # Under the lock, where the fork is written: the code's session still the forkable one, an id
                 # that is no box session's to push out, and one fork of two racing POSTs.
-                if work.code_session(work.state(self.hub, e.address, text), code.session) is None:
+                if work.code_session(work.state(self.hub, e.address, text, req.member), code.session) is None:
                     raise self._code_moved(req)
                 if any(s["id"] == sid for s in work.sessions(fm)):
                     raise self._code_refused(req, code, "listed", 409, LISTED)
@@ -1506,7 +1517,7 @@ class Handler:
         if member is not None and (b.get("ask") or b.get("tell")):
             _shape(not (b.get("ask") and b.get("tell")), "a comment is sent with Ask or with Tell, not both")
             to_box = "ask" if b.get("ask") else "tell"
-            route = self._work_route(e.address, e.live.current()[1], to_box) if starts else None
+            route = self._work_route(e.address, e.live.current()[1], to_box, req.member) if starts else None
             _shape(route is not None, proxy.PROXY_LINE)
         ask, tell = starts and bool(b.get("ask")) and not to_box, starts and bool(b.get("tell")) and not to_box
         # A Tell that cannot go out still writes the comment, and then starts no wait. A reply
@@ -1525,7 +1536,7 @@ class Handler:
                 fm = visibility.front_matter(text)
                 if not self.hub.may_open(member, e.address, fm):
                     raise Refuse(404, "no such document")
-                if to_box and self._work_route(e.address, text, to_box) != route:
+                if to_box and self._work_route(e.address, text, to_box, req.member) != route:
                     raise Refuse(400, proxy.PROXY_LINE)
                 if route == "relay":        # the fork the Tell goes to: no newer one (#134)
                     judged[:] = [work.sessions(fm)[0]["id"]]
@@ -1561,7 +1572,8 @@ class Handler:
                 snap[f"{to_box}Error"] = "The hub could not send this to James's window; the comment is written."
             else:
                 # Open on the sheaf's pages until a reply lands in the thread, or past the Tell wait (#115).
-                self.hub.box_waits.add(e.address, snap["id"], to_box, e.live.current()[1], name)
+                self.hub.box_waits.add(e.address, snap["id"], to_box, e.live.current()[1], name,
+                                       self.hub.the_list.cfg.dirs_for(req.member).tell_dir)
         # The job looks the document up again when it starts: it names its thread in the text the
         # comment was just written in, so a forget in between, and another folder that takes the name,
         # cannot hand it that folder's thread of the same id (SPEC 7.3). A forget that leaves no folder

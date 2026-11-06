@@ -312,13 +312,14 @@ class Hub:
             e = self.entries.get(address)
             if e is not None and self.private_roots and place.applies(self, name):
                 # The store and the file an entry uses cannot outlive the root they were chosen for: one bound to
-                # a private root is refused when its file is not there (`file_at`); one bound to another root is
-                # dropped when the file has moved to a private root, and made again.
-                if e.file_root in self.private_roots:
-                    place.file_at(self, address, e.file_root)
-                elif (got := place.file_at(self, address)) is not None and got[0].id != e.file_root:
+                # a private root is refused when its file is not there (`file_at`); one bound to a root other than the one that now holds the file is
+                # dropped, and made again.
+                got = place.where_is(self, address)
+                if got is not None and got[0].id != e.file_root:
                     del self.entries[address]
                     e = None
+                elif e.file_root in self.private_roots:
+                    place.file_at(self, address, e.file_root)
             if e is not None:
                 return e
             if self.roots.get(name) != root:

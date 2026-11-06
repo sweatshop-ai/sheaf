@@ -42,7 +42,7 @@ from ..source import md_hash
 from ..blocks import _split_lines, split_md_blocks
 from ..edit import TASK_MARK_RE, ticked_html
 from .. import comments as rdc
-from . import commits, place, projects
+from . import commits, place, projects, state
 from . import proxy as proxy_mod
 from . import roots as roots_mod
 from . import visibility
@@ -157,7 +157,7 @@ def parse(t: dict, where) -> ListConfig:
         raise ListError(f"'james_token' and 'james_tokens' are both in {here}; keep 'james_tokens'")
     if "james_tokens" in t:
         names = t["james_tokens"]
-        if not names or any(not isinstance(n, str) or not n for n in names) or len(set(names)) != len(names):
+        if not names or any(not state._TOKEN_NAME_RE.fullmatch(n) if isinstance(n, str) else True for n in names) or len(set(names)) != len(names):
             raise ListError(f"'james_tokens' must be a list of different token names, in {here}: {names!r}")
     if "box" in t and not _BOX_RE.fullmatch(t["box"]):
         raise ListError(f"'box' must be a host name, 1 to 63 letters, digits, dots or dashes, in {here}: {t['box']!r}")

@@ -139,7 +139,7 @@ class Caller:
     display: str
     token: TokenRow | None = None
     session: str | None = None      # James's session, from X-James-Session: set only for a token of `[list]`'s james_tokens (9.12)
-    own_session: bool = True        # False on a james_tokens entry but the first: its header is read, never resolved to an own session
+    own_session: bool = False       # False on a james_tokens entry but the first: its header is read, never resolved to an own session
 
     @property
     def token_name(self) -> str | None:

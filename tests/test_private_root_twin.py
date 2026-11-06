@@ -1,4 +1,4 @@
-"""A hub with no private root behaves as it did before private roots (the gate): one scripted session (create, edit,
+"""A hub with no private root (SPEC 9.9) behaves as it did before private roots (the gate): one scripted session (create, edit,
 tick, close to the owner, change the owner, share again, pull a remote change) runs on the code of a named older commit
 and on this tree, with the git dates and the hub's clock pinned, and the files and the git log of the list repo must
 match byte for byte. tests/twin_session.py is the session; it uses only what the older commit has."""
@@ -11,7 +11,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 TREE = HERE.parent
-# The commit before private roots: sheaf's main when the gate was written. A later ticket never moves it, so the
+# The commit before private roots: sheaf's main when the gate was written. A later change never moves it, so the
 # session is compared with the same behaviour for as long as the gate stands.
 BASE = "ca80ef57b98a62f83e170d7ca84b45f03ae4de3c"
 SOURCE = "https://github.com/sweatshop-ai/sheaf.git"
@@ -23,11 +23,18 @@ def git(*args, **kw):
 
 def base_source(into: Path) -> Path:
     """`src` of the commit BASE, taken out of git's objects into `into`. A shallow checkout (CI fetches two commits)
-    may not hold it, so it is fetched by its hash then; if it cannot be, the test fails: a gate that skips is no gate."""
-    if git("cat-file", "-e", f"{BASE}^{{commit}}").returncode != 0:
-        got = git("fetch", "--quiet", "--depth=1", SOURCE, BASE)
-        assert got.returncode == 0, f"the base commit {BASE} is not here and cannot be fetched: {got.stderr.decode()}"
-    packed = git("archive", "--format=tar", BASE, "src", check=True).stdout
+    may not hold it, so it is fetched by its hash into a scratch repo then, leaving this checkout alone; if it cannot
+    be, the test fails: a gate that skips is no gate."""
+    scratch = into.parent / "base.git"
+    if git("cat-file", "-e", f"{BASE}^{{commit}}").returncode == 0:
+        archive = ["git", "-C", str(TREE), "archive", "--format=tar", BASE, "src"]
+    else:
+        subprocess.run(["git", "init", "-q", "--bare", str(scratch)], check=True)
+        got = subprocess.run(["git", "-C", str(scratch), "fetch", "--quiet", "--depth=1", SOURCE, BASE],
+                             capture_output=True, text=True)
+        assert got.returncode == 0, f"the base commit {BASE} is not here and cannot be fetched: {got.stderr}"
+        archive = ["git", "-C", str(scratch), "archive", "--format=tar", BASE, "src"]
+    packed = subprocess.run(archive, check=True, capture_output=True).stdout
     with tarfile.open(fileobj=io.BytesIO(packed)) as tar:
         tar.extractall(into, filter="data")
     return into / "src"

@@ -85,7 +85,9 @@ def by_hand(change):
 
 
 tool("create", doc=DOC, text="---\nclient: acme\nproject: blog\n---\n# Plan\n\n- [ ] Approve\n\nFirst paragraph.\n")
+hub.entry(DOC)                                                                          # a page is opened: rendered, its versions kept
 rewrite(lambda t: t.replace("First", "Second"))                                         # edit
+hub.entry(DOC).live.refresh(force=True)
 with place.held(hub, DOC):                                                              # tick, as the list's tick writes it
     Path(hub.file(DOC)).write_text(now_text().replace("- [ ] Approve", "- [x] Approve"), encoding="utf-8")
     hub.committed(DOC, cfg.members["id-a"], "tick")

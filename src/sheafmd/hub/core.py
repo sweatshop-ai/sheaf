@@ -468,7 +468,7 @@ class Hub:
         """The `work` of a member's page (None when it is not a sheaf of the list's root) and its `can`:
         box-ask and box-tell while the live session runs on the box and `[list]` names a `tell_dir` (10.1).
         The meta block and every /_/doc answer carry both, so a fork seen by the page changes what it offers."""
-        st = work_mod.state(self, e.address, e.live.current()[1])
+        st = work_mod.state(self, e.address, e.live.current()[1], member)
         if st is None:
             return None, []
         return self.work_meta(e, member, st), st.can
@@ -482,7 +482,7 @@ class Hub:
             out["relay"] = st.relay         # whether Tell reaches the fork now (9.14, 10.1)
         # The fork fetches the live session's transcript from /_/session: one on a laptop, none, or no
         # copy to serve it from (sessions_dir and work_dir, #146), nothing to fork.
-        if st.forkable and work_mod.serves(st.cfg):
+        if st.forkable and work_mod.serves(st.cfg, st.member):
             out["fork"] = (f"uvx --from {work_mod.FORK_CLIENT} tiroir work "
                            f"{self.proxy.origin}{roots_mod.url_path(e.address)}")
         # James names a project's window <client>_<project>: with a dash, a-b/c and a/b-c would share one.
@@ -781,11 +781,12 @@ class Hub:
         """What the box's supervisor says of each drop still open, in its `<drop>.status` (9.15, #139): a change
         is a `drop-status` row and the page's `box-status`, or `box-failed` with its error, which ends the drop;
         a `delivered` begun moves a member's dot (one that ends is `cleared`)."""
-        folder = self.the_list.cfg.tell_dir if self.the_list is not None else None
-        if folder is None:
+        if self.the_list is None:
             return
         for address, thread, d in self.box_waits.drops():
-            got = boxwait.read_status(folder, d.name) if d.name else None
+            # The folder the drop was written in: the James of the member who sent it (`member_dirs`).
+            folder = d.folder if d.folder is not None else self.the_list.cfg.tell_dir
+            got = boxwait.read_status(folder, d.name) if d.name and folder is not None else None
             what, was = self.box_waits.observe(address, thread, got, d)
             row = {"what": d.kind, "project": _project(address), "thread": thread}
             if what == "ignored":

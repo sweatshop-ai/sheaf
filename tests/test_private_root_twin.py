@@ -3,6 +3,7 @@ tick, close to the owner, change the owner, share again, pull a remote change) r
 and on this tree, with the git dates and the hub's clock pinned, and the files and the git log of the list repo must
 match byte for byte. tests/twin_session.py is the session; it uses only what the older commit has."""
 import io
+import json
 import os
 import subprocess
 import sys
@@ -69,3 +70,9 @@ def test_twin_no_private_root_byte_for_byte(tmp_path):
     assert "remote edit" in log and "tick:" in log
     assert files_of(after) == files_of(before)
     assert log_of(after) == log
+    shown = json.loads((before.parent / "snapshot.json").read_text(encoding="utf-8"))
+    names = lambda step, who: [d["doc"] for d in shown[step][list(shown[step])[0]][who]["documents"]]      # noqa: E731
+    assert [list(step)[0] for step in shown] == ["created", "ticked", "closed", "owner changed", "shared again",
+                                                 "door update closing", "door update editing"]
+    assert len(names(2, "a")) == 2 and len(names(2, "b")) == 1 and len(names(3, "a")) == 1    # the session did close it
+    assert json.loads((after.parent / "snapshot.json").read_text(encoding="utf-8")) == shown      # what each member sees

@@ -218,8 +218,9 @@ class Roots:
         self._lock = threading.RLock()
         self._roots: dict[str, Root] = {}
         self._added: dict[str, str] = {}
-        # `(root, rel) -> rel`: the path of the file an address names, where it is not the address's own path, or
-        # NotFound (a sheaf's name in the list's root, 9.11). Set by the hub; None names every file by its path.
+        # `(root, rel) -> (root, rel)`: the root and the path in it of the file an address names, where it is not the
+        # address's own root and path, or NotFound (a sheaf's name in the list's root, 9.11; the file may be in a
+        # private root). Set by the hub; None names every file by its own path.
         self.placer = None
         if self._load():
             with self._changing():
@@ -388,7 +389,10 @@ class Roots:
             raise NotFound(address)
         if _sheafs_own(at.rel):
             raise NotFound(address)
-        rel = at.rel if self.placer is None else self.placer(root, at.rel)
+        if self.placer is not None:
+            root, rel = self.placer(root, at.rel)       # the root of the file, which is not always the address's
+        else:
+            rel = at.rel
         try:
             top = Path(os.path.realpath(root.path))
             real = Path(os.path.realpath(root.path / rel))

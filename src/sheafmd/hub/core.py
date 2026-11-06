@@ -141,6 +141,22 @@ class Hub:
         self.runner = Jobs()
         self.sender = f"uds:{paths.hub_socket(port)}"
         self.asktell = AskTell(self)
+        self.private_roots: dict[str, str] = {}  # root id -> id of the member whose private root it is; empty without one
+        self._register_private_roots()
+
+    def _register_private_roots(self):
+        """Register the private root of each member that has one, as the list's root is registered. A folder that
+        is no git work tree of its own, or is gone, is none: the row says so and it is not marked private."""
+        for m in self.proxy.members.values() if self.proxy is not None else ():
+            if not m.private_root:
+                continue
+            folder = Path(os.path.realpath(m.private_root))
+            root = self.roots.for_document(folder / projects.FILE) if folder.is_dir() else None
+            if root is None or root.path != folder or not root.git:
+                self.record("private-root-refused", None, member=m.id,
+                            error="the private root is not the top folder of a git work tree")
+                continue
+            self.private_roots[root.id] = m.id
 
     # ── documents ────────────────────────────────────────────────────────────
     def _versions_of(self, root) -> state.Versions:

@@ -17,6 +17,7 @@ version is never pushed, and git refuses to write the remote's over it, even the
     Author(name, email)          who a commit is by
     Commits(record, guard, roots)  `guard(root, files)`: the locks a writer of `files` holds before the repo's;
                                  `roots()`: the registered roots, whose settings the repo's push agrees with
+                                 `refuse_rewrite`: refuse a remote branch that lost the tip last seen there
     Commits.saved(root, rel, author, what)
     Commits.poll(roots)          the watcher's tick: hand each repo that pushes to the pusher, once a minute
     Commits.settle(timeout)      wait until no push is due (a test)
@@ -51,6 +52,8 @@ STOP_SECONDS = 15               # how long a stopping hub lets the pull and push
 END_GRACE = 5                   # from the SIGTERM of a git the stop ends to its SIGKILL
 # Who a commit is committed by when the repo names nobody: the hub, not the author.
 COMMITTER = ("sheaf", "sheaf@localhost")
+LAST_SEEN = "refs/sheaf/last-seen"  # per branch: the remote tip the hub last took in or pushed (the rewrite guard)
+REWRITTEN = "the remote's branch no longer holds what it held"
 EVEN = "even"                   # `_pull`: the hub's branch is the remote's, nothing to push
 
 
@@ -272,14 +275,18 @@ def _again(folder: Path, commit: str, onto: str):
 
 
 class Commits:
-    def __init__(self, record, guard=None, roots=None):
+    def __init__(self, record, guard=None, roots=None, refuse_rewrite=False):
         """`record(kind, doc, **detail)` writes a diagnostics row (15). `guard(root, files)` gives a context that
         holds what a writer of each of `files` (absolute paths) holds before the repo's lock (9.11): a pull takes
         it before it changes them. `roots()` gives the registered roots: the repo of one pushes only when its other
-        roots that commit push too (#89), judged by the pusher when it takes the repo."""
+        roots that commit push too (#89), judged by the pusher when it takes the repo. `refuse_rewrite`, a bool or a
+        function that gives one: whether a pull refuses a remote branch that no longer holds the tip the hub last
+        saw there (a force-push), kept in the repo's own ref `refs/sheaf/last-seen/<branch>`; off, no ref is read
+        or written and a pull is as it was."""
         self._record = record
         self._guard = guard or (lambda root, files: nullcontext())
         self._roots = roots or (lambda: ())
+        self._refuse = refuse_rewrite if callable(refuse_rewrite) else (lambda: refuse_rewrite)
         # A repo is keyed by its git dir (`_repo`): the pull, the push and their rows are the repo's (#89).
         self._repos: dict[str, threading.Lock] = {}  # repo -> its commit lock
         self._lock = threading.Lock()
@@ -500,11 +507,13 @@ class Commits:
                 # The poll pushes a write's push that failed, never what a person committed or branched by hand.
                 if go is not EVEN and repo in self._owed:
                     # Not under the repo's lock: a save meanwhile commits, and the next push carries it.
+                    sent = _git(folder, "rev-parse", "HEAD").stdout.strip()    # a save meanwhile commits past it
                     r = _git(folder, "push", "-q", "origin", "HEAD", seconds=PUSH_SECONDS, children=self._children)
                     if r.returncode != 0:
                         # The commit stays; the next write's push, or the next poll, carries it.
                         record("push-failed", address, error=_last_line(r))
                         continue
+                    self._last_seen(folder, sent)        # the remote's branch holds what was sent
                 with self._lock:
                     self._owed.discard(repo)
                 self._told.pop(repo, None)
@@ -543,20 +552,32 @@ class Commits:
         branch = _git(folder, "symbolic-ref", "-q", "--short", "HEAD")
         if branch.returncode != 0:
             return True                                # a detached HEAD: the push says what it says
+        guarded = self._refuse()
+        # Read before the fetch, which moves `refs/remotes/origin/<branch>` too; the ref is the hub's own, so a
+        # person's `git fetch` in the clone does not move it.
+        prev = _git(folder, "rev-parse", "-q", "--verify", f"{LAST_SEEN}/{branch.stdout.strip()}^{{commit}}"
+                    ).stdout.strip() if guarded else ""
         r = _git(folder, "fetch", "-q", "--no-tags", "origin", f"refs/heads/{branch.stdout.strip()}",
                  seconds=seconds, children=self._children)
         if r.returncode != 0:
             if "couldn't find remote ref" in r.stderr:
+                if prev:                               # the branch was there and is gone: not ours to push back
+                    record("push-diverged", address, paths=[], error=REWRITTEN)
+                    return False
                 return True
             record("push-failed", address, error=_last_line(r))
             return False
         theirs = _git(folder, "rev-parse", "--verify", "-q", "FETCH_HEAD^{commit}").stdout.strip()
+        if prev and _git(folder, "merge-base", "--is-ancestor", prev, theirs).returncode != 0:
+            record("push-diverged", address, paths=[], error=REWRITTEN)
+            return False                               # the ref stays, so the next pull is refused too
         base = _git(folder, "merge-base", "HEAD", theirs)
         if base.returncode != 0:
             record("push-diverged", address, paths=[], error="the remote's branch shares no history with the hub's")
             return False
         base = base.stdout.strip()
         if base == theirs:                             # nothing new on the remote
+            self._last_seen(folder, theirs)
             return EVEN if _git(folder, "rev-parse", "HEAD").stdout.strip() == theirs else True
         top = Path(_git(folder, "rev-parse", "--show-toplevel").stdout.strip())
         changed = [p for p in _git(folder, "diff", "--name-only", "--no-renames", "-z", base, theirs).stdout.split("\0")
@@ -565,7 +586,41 @@ class Commits:
         # the look at it and its new text, and no commit of any root of the repo between the hub's HEAD read and moved.
         with self._guard(root, [top / p for p in changed]), self._repo_lock(folder):
             self._sweep(root, _repo(folder))           # what a page made since the pusher's sweep, before the work tree moves
-            return self._catch_up(folder, theirs, address, record)
+            go = self._catch_up(folder, theirs, address, record)
+            if go:
+                self._last_seen(folder, theirs)
+            return go
+
+    def seed(self, roots):
+        """At hub start: for each repo of `roots` (git work trees) that has no last-seen ref for its branch yet, set it
+        from `refs/remotes/origin/<branch>`, what the clone last fetched, so the first pull is guarded. A repo that never
+        fetched has none and is guarded from its first pull that passes. Never raises for one root."""
+        if not self._refuse():
+            return
+        seen = set()
+        for root in roots:
+            try:
+                if not root.git or (repo := _repo(root.path)) in seen:
+                    continue
+                seen.add(repo)
+                branch = _git(root.path, "symbolic-ref", "-q", "--short", "HEAD").stdout.strip()
+                if branch and _git(root.path, "rev-parse", "-q", "--verify", f"{LAST_SEEN}/{branch}").returncode != 0:
+                    tip = _git(root.path, "rev-parse", "-q", "--verify", f"refs/remotes/origin/{branch}^{{commit}}")
+                    if tip.returncode == 0:
+                        self._last_seen(root.path, tip.stdout.strip())
+            except (OSError, ValueError, subprocess.SubprocessError):
+                continue
+
+    def _last_seen(self, folder: Path, rev: str):
+        """Move the branch's last-seen ref to `rev`, a commit the remote's branch holds: after a pull that passed or
+        a push of the hub's HEAD, never after a refused pull. A ref that cannot be written stays behind the remote,
+        which a later pull still passes; the guard only loosens by being slow, never by being wrong."""
+        if not self._refuse():
+            return
+        branch = _git(folder, "symbolic-ref", "-q", "--short", "HEAD").stdout.strip()
+        sha = _git(folder, "rev-parse", "-q", "--verify", f"{rev}^{{commit}}").stdout.strip()
+        if branch and sha:
+            _git(folder, "update-ref", f"{LAST_SEEN}/{branch}", sha)
 
     def _sweep(self, root, repo: str):
         """Commit what git does not hold yet of the versions stores of `repo`'s roots that commit and keep their

@@ -174,6 +174,11 @@ def test_private_root_config_refused_same_repo_spelled_otherwise(roots):
     git(roots.list_repo, "remote", "set-url", "origin", "git@host.example:Org/repo.git")
     refused_as_the_lists(roots, independent_repo(base, "https-spelling", {"origin": "https://host.example/org/repo/"}))
     refused_as_the_lists(roots, independent_repo(base, "ssh-url", {"origin": "ssh://git@host.example:22/org/repo.git"}))
+    for place in (roots.list_repo, roots.list_repo / ".git", str(roots.list_repo) + "/"):      # a remote that is the list itself
+        refused_as_the_lists(roots, independent_repo(base, f"points-at-{len(list(base.iterdir()))}", {"origin": str(place)}))
+    elsewhere = independent_repo(base, "history-on-a-branch", {})
+    git(elsewhere, "fetch", "-q", str(roots.list_repo), "main:borrowed")
+    refused_as_the_lists(roots, elsewhere)                                    # the list's history is on another branch
     copy = base / "copy"
     subprocess.run(["cp", "-a", str(roots.list_repo), str(copy)], check=True)
     git(copy, "remote", "remove", "origin")
@@ -284,3 +289,22 @@ def test_a_table_the_hub_refuses_still_names_its_members_to_token_add(roots):
     with pytest.raises(ProxyError):
         proxy.load()
     assert cli._member_named("member a") == "Member A"
+
+
+def test_a_remote_naming_the_private_repo_itself_is_refused_for_another_member(roots):
+    """A member's ordinary root whose origin is the private repo's own folder pulls and pushes into it."""
+    mine = roots.base / "bobs"
+    subprocess.run(["git", "init", "-q", str(mine)], check=True)
+    git(mine, "commit", "-q", "--allow-empty", "-m", "bob")
+    git(mine, "remote", "add", "origin", str(roots.private_repo / ".git"))
+    with pytest.raises(ProxyError, match="same git repo as the root .* of Member B"):
+        proxy.parse(roots.table(b={"roots": [str(roots.list_repo), str(mine)]}), "the test", roots.list_table())
+
+
+def test_git_config_variables_of_the_hub_reach_the_check(roots, monkeypatch):
+    """The check runs git as the hub's own git does, so a config variable of the unit is judged too."""
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "url.file:///nowhere/.insteadOf")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", str(roots.list_repo))
+    got = proxy._git(str(roots.private_repo), "config", "--get", "url.file:///nowhere/.insteadOf")
+    assert got is not None and got[1] == str(roots.list_repo)

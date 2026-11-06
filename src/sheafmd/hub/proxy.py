@@ -193,13 +193,16 @@ def _relation(a: str, b: str) -> str | None:
     return "around" if b.startswith(a.rstrip("/") + "/") else None
 
 
+_REPO_VARS = frozenset({"GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                        "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CEILING_DIRECTORIES", "GIT_NAMESPACE"})
 GIT_TIMEOUT = 10                # seconds git may take to answer one question about a folder
 
 
 def _git(folder: str, *args) -> tuple[int, str, str] | None:
-    """(exit code, stdout, stderr) of `git -C folder args`, run in English and with no `GIT_*` variable of ours
-    (they could point git at another repo); None when git cannot be run or does not answer in time."""
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")} | {"LC_ALL": "C"}
+    """(exit code, stdout, stderr) of `git -C folder args`, run in English and with the environment the hub's own git
+    runs in, less the variables that name a repo (they could point git at another one), so the config judged is the
+    config that pushes; None when git cannot be run or does not answer in time."""
+    env = {k: v for k, v in os.environ.items() if k not in _REPO_VARS} | {"LC_ALL": "C"}
     try:
         r = subprocess.run(["git", "-C", folder, *args], capture_output=True, text=True, timeout=GIT_TIMEOUT, env=env)
     except (OSError, ValueError, subprocess.SubprocessError):
@@ -232,7 +235,8 @@ def _normal_url(url: str, folder: str) -> str:
         u = urlsplit(url)
         host, path = u.hostname or "", u.path
     else:
-        return _real(os.path.join(folder, url)).rstrip("/").removesuffix(".git").casefold()
+        place = _real(os.path.join(folder, url)).rstrip("/").removesuffix("/.git").removesuffix(".git")
+        return place.rstrip("/").casefold()
     return f"{host}/{path.strip('/')}".removesuffix(".git").casefold()
 
 
@@ -252,19 +256,14 @@ def _repo_facts(folder: str) -> tuple[set, set, set] | None:
             return None
         raise unsure
     common = {_real(top[1]).casefold()}
-    born = _git(folder, "rev-parse", "--verify", "--quiet", "HEAD")
-    if born is None or born[0] not in (0, 1):
+    got = _git(folder, "rev-list", "--max-parents=0", "--all")       # every branch: one that holds the other's history counts
+    if got is None or got[0] != 0:
         raise unsure
-    first = set()
-    if born[0] == 0:
-        got = _git(folder, "rev-list", "--max-parents=0", "HEAD")
-        if got is None or got[0] != 0:
-            raise unsure
-        first = set(got[1].split())
+    first = set(got[1].split())
     names = _git(folder, "remote")
     if names is None or names[0] != 0:
         raise unsure
-    urls = set()
+    urls = {_normal_url(top[1], folder)}        # its own place too: a remote that names the other repo's folder is a share
     for name in names[1].split():
         for flags in ((), ("--push",)):
             got = _git(folder, "remote", "get-url", *flags, "--all", name)

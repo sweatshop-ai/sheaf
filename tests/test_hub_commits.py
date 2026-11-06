@@ -1705,21 +1705,46 @@ def test_a_branch_switched_after_the_push_gets_the_ref_of_the_branch_pushed(guar
                           capture_output=True).returncode != 0
 
 
-def test_a_remote_rewound_between_the_fetch_and_the_push_is_not_pushed_over(guarded, sheaves, remote, tmp_path,
-                                                                           monkeypatch):
+def test_a_remote_rewound_between_the_fetch_and_the_push_is_not_pushed_over(guarded, sheaves, remote, monkeypatch):
+    """Rewound to an ancestor of what the hub sends: a plain push would be a fast-forward and put it all back."""
     pulled = guarded.hub.commits._pull
-    tips = []
+    rewound = []
 
     def then_rewind(root, *args, **kw):
         go = pulled(root, *args, **kw)
-        if go:
-            tips.append(force_pushed(tmp_path, remote))
+        if go and not rewound:
+            git(remote, "update-ref", "refs/heads/main", "main~1")
+            rewound.append(git(remote, "rev-parse", "main").strip())
         return go
     monkeypatch.setattr(guarded.hub.commits, "_pull", then_rewind)
     edit(guarded, sheaves, words="Second, over a rewind.")
     assert guarded.hub.commits.settle()
-    assert git(remote, "rev-parse", "main").strip() == tips[0]
+    assert git(remote, "rev-parse", "main").strip() == rewound[0]
     assert rows("push-failed")
+
+
+def test_what_is_pushed_is_the_commit_read_not_where_head_has_moved_to(guarded, sheaves, remote, monkeypatch):
+    from sheafmd.hub import commits
+    first = git(sheaves, "rev-list", "--max-parents=0", "HEAD").strip()
+    git(sheaves, "branch", "draft", first)
+    real = commits._git
+    moved = []
+
+    def then_switch(folder, *args, **kw):
+        if args[:1] == ("push",) and not moved:
+            moved.append(git(sheaves, "rev-parse", "HEAD").strip())
+            git(sheaves, "checkout", "-q", "draft")             # between the read of HEAD and the push
+        return real(folder, *args, **kw)
+    monkeypatch.setattr(commits, "_git", then_switch)
+    edit(guarded, sheaves, words="Second, with a switch before the push.")
+    assert guarded.hub.commits.settle()
+    assert git(remote, "rev-parse", "main").strip() == moved[0]            # main got main's commit, not draft's
+
+
+def test_a_ref_behind_an_unchanged_remote_catches_up_at_the_next_poll(guarded, sheaves, remote):
+    git(sheaves, "update-ref", "refs/sheaf/last-seen/main", "main~1")
+    poll_now(guarded, sheaves)
+    assert last_seen(sheaves) == git(remote, "rev-parse", "main").strip()
 
 
 def test_a_root_registered_after_the_start_is_guarded_from_what_the_clone_had_fetched(box, sheaves, remote, tmp_path):

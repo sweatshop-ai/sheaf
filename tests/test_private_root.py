@@ -331,3 +331,21 @@ def test_a_relative_remote_is_read_from_the_top_of_the_work_tree(roots):
     git(team, "remote", "add", "origin", "../" + roots.private_repo.name)
     with pytest.raises(ProxyError, match="same git repo as the root .* of Member B"):
         proxy.parse(roots.table(b={"roots": [str(roots.list_repo), str(team / "docs")]}), "the test", roots.list_table())
+
+
+def test_the_rewrite_guard_is_on_with_a_private_root_and_seeded_in_the_private_repo_at_start(roots):
+    hub = roots.hub()
+    assert hub.commits._refuse()
+    repo = roots.private_repo                                   # a repo registered later is seeded at its first pull
+    assert git(repo, "rev-parse", "refs/sheaf/last-seen/main").strip() == git(repo, "rev-parse", "HEAD").strip()
+    hub.roots.forget(hub.roots.lookup(roots.private_repo / "x.md").name)
+    assert hub.commits._refuse()                                # configured, so still guarded when forgotten
+
+
+def test_the_rewrite_guard_is_off_without_a_private_root_and_leaves_no_ref(tmp_path):
+    base = two_roots(tmp_path)
+    table = base.table()
+    del table["members"][A]["private_root"]
+    hub = base.hub(proxy.parse(table, "the test", base.list_table()))
+    assert not hub.commits._refuse()
+    assert git(base.list_repo, "for-each-ref", "refs/sheaf").strip() == ""

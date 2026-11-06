@@ -507,13 +507,25 @@ class Commits:
                 # The poll pushes a write's push that failed, never what a person committed or branched by hand.
                 if go is not EVEN and repo in self._owed:
                     # Not under the repo's lock: a save meanwhile commits, and the next push carries it.
-                    sent = _git(folder, "rev-parse", "HEAD").stdout.strip()    # a save meanwhile commits past it
-                    r = _git(folder, "push", "-q", "origin", "HEAD", seconds=PUSH_SECONDS, children=self._children)
+                    # A save meanwhile commits past what is sent; the branch is the one pushed, not where HEAD is later.
+                    guarded = self._refuse()
+                    sent = on = ""
+                    if guarded:
+                        sent = _git(folder, "rev-parse", "HEAD").stdout.strip()
+                        on = _git(folder, "symbolic-ref", "-q", "--short", "HEAD").stdout.strip()
+                    lease = []
+                    if guarded and on:
+                        # The remote's branch must still be the tip the pull took in: one rewound since is refused.
+                        seen = _git(folder, "rev-parse", "-q", "--verify", f"{LAST_SEEN}/{on}^{{commit}}").stdout.strip()
+                        if seen:
+                            lease = [f"--force-with-lease=refs/heads/{on}:{seen}"]
+                    r = _git(folder, "push", "-q", *lease, "origin", "HEAD", seconds=PUSH_SECONDS,
+                             children=self._children)
                     if r.returncode != 0:
                         # The commit stays; the next write's push, or the next poll, carries it.
                         record("push-failed", address, error=_last_line(r))
                         continue
-                    self._last_seen(folder, sent)        # the remote's branch holds what was sent
+                    self._last_seen(folder, on, sent)    # the remote's branch holds what was sent
                 with self._lock:
                     self._owed.discard(repo)
                 self._told.pop(repo, None)
@@ -555,8 +567,11 @@ class Commits:
         guarded = self._refuse()
         # Read before the fetch, which moves `refs/remotes/origin/<branch>` too; the ref is the hub's own, so a
         # person's `git fetch` in the clone does not move it.
-        prev = _git(folder, "rev-parse", "-q", "--verify", f"{LAST_SEEN}/{branch.stdout.strip()}^{{commit}}"
-                    ).stdout.strip() if guarded else ""
+        name = branch.stdout.strip()
+        prev = _git(folder, "rev-parse", "-q", "--verify", f"{LAST_SEEN}/{name}^{{commit}}").stdout.strip() \
+            if guarded else ""
+        if guarded and not prev:                       # a root registered after the start: seed from what was fetched
+            prev = _git(folder, "rev-parse", "-q", "--verify", f"refs/remotes/origin/{name}^{{commit}}").stdout.strip()
         r = _git(folder, "fetch", "-q", "--no-tags", "origin", f"refs/heads/{branch.stdout.strip()}",
                  seconds=seconds, children=self._children)
         if r.returncode != 0:
@@ -577,7 +592,7 @@ class Commits:
             return False
         base = base.stdout.strip()
         if base == theirs:                             # nothing new on the remote
-            self._last_seen(folder, theirs)
+            self._last_seen(folder, name, theirs)
             return EVEN if _git(folder, "rev-parse", "HEAD").stdout.strip() == theirs else True
         top = Path(_git(folder, "rev-parse", "--show-toplevel").stdout.strip())
         changed = [p for p in _git(folder, "diff", "--name-only", "--no-renames", "-z", base, theirs).stdout.split("\0")
@@ -588,7 +603,7 @@ class Commits:
             self._sweep(root, _repo(folder))           # what a page made since the pusher's sweep, before the work tree moves
             go = self._catch_up(folder, theirs, address, record)
             if go:
-                self._last_seen(folder, theirs)
+                self._last_seen(folder, name, theirs)
             return go
 
     def seed(self, roots):
@@ -607,17 +622,16 @@ class Commits:
                 if branch and _git(root.path, "rev-parse", "-q", "--verify", f"{LAST_SEEN}/{branch}").returncode != 0:
                     tip = _git(root.path, "rev-parse", "-q", "--verify", f"refs/remotes/origin/{branch}^{{commit}}")
                     if tip.returncode == 0:
-                        self._last_seen(root.path, tip.stdout.strip())
+                        self._last_seen(root.path, branch, tip.stdout.strip())
             except (OSError, ValueError, subprocess.SubprocessError):
                 continue
 
-    def _last_seen(self, folder: Path, rev: str):
-        """Move the branch's last-seen ref to `rev`, a commit the remote's branch holds: after a pull that passed or
+    def _last_seen(self, folder: Path, branch: str, rev: str):
+        """Move `branch`'s last-seen ref (the branch pulled or pushed, not where HEAD is by now) to `rev`, a commit the remote's branch holds: after a pull that passed or
         a push of the hub's HEAD, never after a refused pull. A ref that cannot be written stays behind the remote,
         which a later pull still passes; the guard only loosens by being slow, never by being wrong."""
         if not self._refuse():
             return
-        branch = _git(folder, "symbolic-ref", "-q", "--short", "HEAD").stdout.strip()
         sha = _git(folder, "rev-parse", "-q", "--verify", f"{rev}^{{commit}}").stdout.strip()
         if branch and sha:
             _git(folder, "update-ref", f"{LAST_SEEN}/{branch}", sha)

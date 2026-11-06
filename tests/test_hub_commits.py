@@ -1604,6 +1604,7 @@ def test_a_rewrite_is_replayed_when_the_guard_is_off(box, sheaves, remote, tmp_p
 
 
 def test_rewrite_refused_on_second_poll(guarded, sheaves, remote, tmp_path):
+    before = last_seen(sheaves)
     tip = force_pushed(tmp_path, remote)
     for _ in range(2):
         poll_now(guarded, sheaves)
@@ -1613,7 +1614,7 @@ def test_rewrite_refused_on_second_poll(guarded, sheaves, remote, tmp_path):
     assert guarded.hub.commits.settle()
     assert git(remote, "rev-parse", "main").strip() == tip
     assert rows("push-diverged") and all(r["error"] == SAW for r in rows("push-diverged"))
-    assert last_seen(sheaves) != tip
+    assert last_seen(sheaves) == before
 
 
 def test_rewrite_refusal_is_per_repo(guarded, sheaves, remote, tmp_path):
@@ -1684,3 +1685,50 @@ def test_fast_forward_unaffected(guarded, sheaves, remote, tmp_path):
     poll_now(guarded, sheaves)                                              # and a remote ahead alone
     assert (sheaves / "README.md").read_text(encoding="utf-8") == "# Sheaves\n" and rows("push-diverged") == []
     assert last_seen(sheaves) == git(remote, "rev-parse", "main").strip()
+
+
+def test_a_branch_switched_after_the_push_gets_the_ref_of_the_branch_pushed(guarded, sheaves, remote, monkeypatch):
+    from sheafmd.hub import commits
+    git(sheaves, "branch", "draft")
+    real = commits._git
+
+    def then_switch(folder, *args, **kw):
+        r = real(folder, *args, **kw)
+        if args[:1] == ("push",):
+            git(sheaves, "checkout", "-q", "draft")             # after the push, before the ref is written
+        return r
+    monkeypatch.setattr(commits, "_git", then_switch)
+    edit(guarded, sheaves, words="Second, on the way to a branch switch.")
+    assert guarded.hub.commits.settle()
+    assert last_seen(sheaves) == git(remote, "rev-parse", "main").strip()
+    assert subprocess.run(["git", "-C", str(sheaves), "rev-parse", "-q", "--verify", "refs/sheaf/last-seen/draft"],
+                          capture_output=True).returncode != 0
+
+
+def test_a_remote_rewound_between_the_fetch_and_the_push_is_not_pushed_over(guarded, sheaves, remote, tmp_path,
+                                                                           monkeypatch):
+    pulled = guarded.hub.commits._pull
+    tips = []
+
+    def then_rewind(root, *args, **kw):
+        go = pulled(root, *args, **kw)
+        if go:
+            tips.append(force_pushed(tmp_path, remote))
+        return go
+    monkeypatch.setattr(guarded.hub.commits, "_pull", then_rewind)
+    edit(guarded, sheaves, words="Second, over a rewind.")
+    assert guarded.hub.commits.settle()
+    assert git(remote, "rev-parse", "main").strip() == tips[0]
+    assert rows("push-failed")
+
+
+def test_a_root_registered_after_the_start_is_guarded_from_what_the_clone_had_fetched(box, sheaves, remote, tmp_path):
+    box.hub.commits._refuse = lambda: True
+    merged_on_github(tmp_path, remote, {"README.md": "# The sheaves\n"}, "a README")
+    git(sheaves, "fetch", "-q", "origin")
+    tip = force_pushed(tmp_path, remote)
+    assert last_seen(sheaves) == ""
+    edit(box, sheaves)
+    assert box.hub.commits.settle()
+    assert git(remote, "rev-parse", "main").strip() == tip
+    assert rows("push-diverged")[0]["error"] == SAW

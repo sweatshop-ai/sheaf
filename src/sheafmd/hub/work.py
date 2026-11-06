@@ -4,7 +4,7 @@ file Ask, Tell and Stop James drop for James's window.
 
     state(hub, address, text)       a sheaf's sessions and where its live session runs; None for another page
     sessions(fm)                    the items of the front matter's `sessions` that parse, as written (newest first)
-    serves(cfg)                     whether the hub keeps a copy it serves transcripts from (sessions_dir and work_dir)
+    serves(cfg, member)             whether the hub keeps a copy it serves `member` transcripts from (sessions_dir and work_dir)
     code_session(st, recorded)      the session a sign-in code serves (9.13): made, downloaded and forked by one rule
     with_session(text, line, id)    the text with `line` as the first of `sessions`, the rest as written
     open_transcript(cfg, project, id)  the bytes of `id`'s transcript in `project`'s folder of the copy, or None
@@ -66,6 +66,7 @@ class State:
     cfg: object                 # the list's the_list.ListConfig
     james: bool = False         # the sheaf's `assistant` is James
     relay: bool = False         # a relay of the live session, a member's fork, is connected with a good token (9.14)
+    member: object = None       # the member whose James the page offers: theirs in `member_dirs`, else the `[list]` one
 
     @property
     def box(self) -> list:
@@ -85,16 +86,16 @@ class State:
         or on a sheaf of James with no session yet (the hub records his when it finds it), and `[list]`
         names the box and the folder to drop them in; Tell goes to a fork's connected relay."""
         to_james = self.live == "box" or (self.live == "" and self.james)
-        if to_james and self.cfg.box and self.cfg.tell_dir is not None:
+        if to_james and self.cfg.box and self.cfg.dirs_for(self.member).tell_dir is not None:
             return ["box-ask", "box-tell"]
         # Tell, never Ask, goes to a member's fork through its relay while that relay is connected (9.14).
         return ["relay-tell"] if self.live == "laptop" and self.relay else []
 
 
-def serves(cfg) -> bool:
-    """Whether the hub keeps a copy it serves transcripts from: `sessions_dir`, and `work_dir`, which names the
-    project's one folder in it (#146). Without both there is no transcript, so no fork and no sign-in code."""
-    return cfg.sessions_dir is not None and cfg.work_dir is not None
+def serves(cfg, member=None) -> bool:
+    """Whether the hub keeps a copy it serves `member` transcripts from: `sessions_dir`, and `work_dir`, which names
+    the project's one folder in it (#146). Without both there is no transcript, so no fork and no sign-in code."""
+    return bool(cfg.copies(member))
 
 
 def code_session(st: State | None, recorded: str | None = None) -> str | None:
@@ -102,7 +103,7 @@ def code_session(st: State | None, recorded: str | None = None) -> str | None:
     GET and its POST: the sheaf's forkable session, while the hub keeps the copy that serves it. Asked with no
     `recorded`, the id a new code records; asked with a code's `recorded` id, that id while it is still the
     forkable one, else None: a newer live session, James's or a member's fork, needs a new code."""
-    sid = st.forkable if st is not None and serves(st.cfg) else None
+    sid = st.forkable if st is not None and serves(st.cfg, st.member) else None
     return sid if sid is not None and recorded in (None, sid) else None
 
 
@@ -112,9 +113,10 @@ def is_sheaf(hub, address: str) -> bool:
     return hub.the_list is not None and hub.the_list.serves(at.root) and at.rel.count("/") == 2
 
 
-def state(hub, address: str, text: str) -> State | None:
+def state(hub, address: str, text: str, asked_by=None) -> State | None:
     """The sessions of the sheaf at `address` whose text is `text`, when it is a sheaf of the list's root at
-    `<client>/<project>/<file>.md`; None for any other document, which has no Work on this."""
+    `<client>/<project>/<file>.md`; None for any other document, which has no Work on this. `asked_by` is the member the
+    answer is for: it picks which James's folders count (`[list]`'s `member_dirs`), none the `[list]` ones."""
     if not is_sheaf(hub, address):
         return None
     cfg = hub.the_list.cfg
@@ -129,7 +131,7 @@ def state(hub, address: str, text: str) -> State | None:
     members = getattr(hub.proxy, "members", {})
     # A relay whose member may no longer open the sheaf is not connected, in its grace too (9.14, #135).
     relay = bool(member) and member in members and hub.may_open(members[member], address, fm)
-    return State(items, live, cfg, isinstance(assistant, str) and assistant.casefold() == "james", relay)
+    return State(items, live, cfg, isinstance(assistant, str) and assistant.casefold() == "james", relay, asked_by)
 
 
 def member_word(member) -> str:
@@ -193,16 +195,25 @@ def _with_session(text: str, line: str, id: str) -> str:
     return "\n".join(raw[:at] + [key, (lead or "  - ") + line + cr] + kept + raw[n:])
 
 
-def open_transcript(cfg, project: str, id: str) -> bytes | None:
+def open_transcript(cfg, project: str, id: str, member=None) -> bytes | None:
     """The transcript of `id` as a session of `project`, from the copy: `<id>.jsonl` in the folder Claude names after
     `<work_dir>/<project>` and in no other folder of the copy (#146), a regular file and no link, whose first `cwd` is
     that very path and whose `sessionId` is `id`, as `james_has` asks. None when there is none, or when the copy or
-    `work_dir` is not set. `id` is a UUID already (UUID_RE), so it names no other path."""
-    if cfg.sessions_dir is None or cfg.work_dir is None or not UUID_RE.fullmatch(id):
+    `work_dir` is not set. `id` is a UUID already (UUID_RE), so it names no other path. Only the copies `member` may
+    be served from are tried (`cfg.copies`), theirs first: a member the map does not name reads the `[list]` copy."""
+    if not UUID_RE.fullmatch(id):
         return None
-    cwd = os.path.join(cfg.work_dir, project)
+    for sessions_dir, work_dir in cfg.copies(member):
+        if (body := _open_in(sessions_dir, work_dir, project, id)) is not None:
+            return body
+    return None
+
+
+def _open_in(sessions_dir, work_dir, project: str, id: str) -> bytes | None:
+    """`open_transcript` in one copy."""
+    cwd = os.path.join(work_dir, project)
     try:
-        dfd = _project_folder(cfg.sessions_dir, cwd)
+        dfd = _project_folder(sessions_dir, cwd)
     except OSError:
         return None
     try:
@@ -226,16 +237,18 @@ def open_transcript(cfg, project: str, id: str) -> bytes | None:
     return body if _cwd_of(body[:1 << 20]) == (cwd, id) else None
 
 
-def james_has(cfg, project: str, id: str) -> bool | None:
+def james_has(cfg, project: str, id: str, member=None) -> bool | None:
     """Whether the copy of James's transcripts holds `id` as a session of `project`: `<id>.jsonl` in the folder Claude
     names after `<work_dir>/<project>`, a regular file and no link, whose first `cwd` is that very path and whose
     `sessionId` is `id` (Claude's folder name is lossy: `a-b/c` and `a/b-c` share one). None when the file is not there (yet: the copy is a minute
-    behind), False when it is there and is not that, or when the copy or `work_dir` is not set."""
-    if cfg.sessions_dir is None or cfg.work_dir is None or not UUID_RE.fullmatch(id):
+    behind), False when it is there and is not that, or when the copy or `work_dir` is not set. The copy is the
+    one of the James that works for `member` (`cfg.writes`): a session of another James's is not his."""
+    copy = cfg.writes(member)
+    if copy is None or not UUID_RE.fullmatch(id):
         return False
-    cwd = os.path.join(cfg.work_dir, project)
+    cwd = os.path.join(copy[1], project)
     try:
-        dfd = _project_folder(cfg.sessions_dir, cwd)
+        dfd = _project_folder(copy[0], cwd)
     except FileNotFoundError:
         return None
     except OSError:

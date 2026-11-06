@@ -240,11 +240,12 @@ def _normal_url(url: str, folder: str) -> str:
     return f"{host}/{path.strip('/')}".removesuffix(".git").casefold()
 
 
-def _repo_facts(folder: str) -> tuple[set, set, set] | None:
+def _repo_facts(folder: str, extra: frozenset = frozenset()) -> tuple[set, set, set] | None:
     """What identifies the repo of the work tree `folder`: its common git dir, its root commits and its remotes
     (url and pushurl of each, normalised). None when `folder` is no repo (absent, or git says so and no `.git` is
     there); a ProxyError when git gives no answer (a timeout, dubious ownership, an unreadable `.git`), because a
-    folder we cannot tell about is not one we may call separate."""
+    folder we cannot tell about is not one we may call separate. `extra` are further addresses of the repo, already
+    normalised (the list's issue repo on its host)."""
     if not os.path.isdir(folder):
         return None
     unsure = ProxyError(f"cannot tell whether {folder} shares a repo with another folder: git gave no answer")
@@ -263,23 +264,25 @@ def _repo_facts(folder: str) -> tuple[set, set, set] | None:
     names = _git(folder, "remote")
     if names is None or names[0] != 0:
         raise unsure
-    urls = {_normal_url(top[1], folder)}        # its own place too: a remote that names the other repo's folder is a share
+    up = _git(folder, "rev-parse", "--show-toplevel")           # git resolves a relative remote from the top of the work tree
+    base = up[1] if up is not None and up[0] == 0 and up[1] else folder
+    urls = {_normal_url(top[1], base)} | set(extra)   # its own place too: a remote that names the other repo's folder is a share
     for name in names[1].split():
         for flags in ((), ("--push",)):
             got = _git(folder, "remote", "get-url", *flags, "--all", name)
             if got is None or got[0] != 0:
                 raise unsure
-            urls |= {_normal_url(u, folder) for u in got[1].splitlines() if u.strip()}
+            urls |= {_normal_url(u, base) for u in got[1].splitlines() if u.strip()}
     return common, first, urls
 
 
-def _same_repo(a: str, b: str) -> bool:
+def _same_repo(a: str, b: str, extra_b: frozenset = frozenset()) -> bool:
     """Whether the work trees `a` and `b` share a repo: the same common git dir (a linked worktree has a git dir of
     its own but shares objects, refs and remote with its main tree), a root commit in common (a copy of the repo
     whatever its remotes; a shallow clone's oldest commit is not its root, the one case this misses), or a remote
     in common (two clones push to one place, however each spells its address). A folder that is no repo shares
-    none; git giving no answer for either is a ProxyError, never a "no"."""
-    fa, fb = _repo_facts(a), _repo_facts(b)
+    none; git giving no answer for either is a ProxyError, never a "no". `extra_b` are further addresses of `b`'s repo."""
+    fa, fb = _repo_facts(a), _repo_facts(b, extra_b)
     return fa is not None and fb is not None and any(x & y for x, y in zip(fa, fb))
 
 
@@ -304,15 +307,17 @@ def _private_root(m: dict, roots: list, list_table: dict | None, mhere: str) -> 
     if git_top(value).casefold() != value.casefold():
         raise ProxyError(f"'private_root' {value} must be the top folder of a git work tree of its own, in {mhere}")
     if listed:
-        if _shares_repo(value, list_root, mhere):
+        repo = list_table.get("repo")           # where the list's issues live: a private root that pushes there shares it
+        issues = frozenset({f"github.com/{repo.strip('/')}".removesuffix(".git").casefold()}) if isinstance(repo, str) else frozenset()
+        if _shares_repo(value, list_root, mhere, issues):
             raise ProxyError(f"'private_root' {value} is in the same git repo as the list's root, in {mhere}")
     return value
 
 
-def _shares_repo(a: str, b: str, mhere: str) -> bool:
+def _shares_repo(a: str, b: str, mhere: str, extra_b: frozenset = frozenset()) -> bool:
     """`_same_repo`, with the member's block named when git gives no answer."""
     try:
-        return _same_repo(a, b)
+        return _same_repo(a, b, extra_b)
     except ProxyError as e:
         raise ProxyError(f"{e}, in {mhere}") from None
 

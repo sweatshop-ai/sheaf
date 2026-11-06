@@ -153,3 +153,40 @@ def test_list_entry_is_dropped_when_its_name_moves_to_a_private_root(two):
     assert "Private edit." in (two.private_repo / NAME).read_text(encoding="utf-8")
     assert untouched(two)[0] == before[0]                                       # the list repo's tree is untouched
     assert sorted(p for p in two.list_repo.rglob("*") if ".git" not in p.parts) == tree      # no versions store either
+
+
+def test_cached_list_entry_writes_nothing_to_the_list_repo_once_its_name_is_private(two):
+    hub = hub_of(two)
+    (two.list_repo / NAME).write_text(OPEN, encoding="utf-8")
+    a = address(hub)
+    hub.entry(a)
+    (two.list_repo / NAME).unlink()
+    (two.private_repo / NAME).write_text(PRIVATE_TEXT, encoding="utf-8")
+    seen = untouched(two)
+    with place.held(hub, a):
+        e = hub.entries.get(a)                                                  # a writer that skips `Hub.entry`
+        with pytest.raises(roots_mod.NotFound):
+            e.live.comment("add", {"anchor": "x", "body": "hi"}, md_hash(PRIVATE_TEXT))
+    assert untouched(two) == seen and "Secret words." not in "".join(
+        p.read_text(encoding="utf-8") for p in two.list_repo.rglob("*.md") if ".git" not in p.parts)
+    assert "hi" not in (two.private_repo / NAME).read_text(encoding="utf-8")
+
+
+def test_untouched_sees_an_untracked_versions_file(two):
+    hub_of(two)
+    seen = untouched(two)
+    (two.list_repo / ".sheaf/versions/k").mkdir(parents=True)
+    (two.list_repo / ".sheaf/versions/k/v.md").write_text("x", encoding="utf-8")
+    assert untouched(two) != seen                                               # the control of the tests above
+
+
+def test_a_read_of_a_name_two_roots_hold_is_refused_not_raised(two):
+    hub = hub_of(two)
+    for repo in (two.list_repo, two.private_repo):
+        (repo / NAME).write_text(PRIVATE_TEXT, encoding="utf-8")
+    a = address(hub)
+    member = hub.proxy.members["member-a-id"]
+    hub.visible(member, a)                                                      # answers; raises nothing
+    assert hub.file(a).name == "post.md"
+    with pytest.raises(roots_mod.NotFound):
+        hub.file(a, bound=next(iter(hub.private_roots)))                        # a write's file is never found

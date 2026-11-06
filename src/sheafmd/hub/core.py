@@ -96,7 +96,8 @@ class Hub:
         self.roots = roots_mod.Roots()
         self.roots.placer = lambda root, rel: place.physical(self, root, rel)
         self.versions = state.Versions()
-        self.commits = Commits(self.record, self._writers_out, self.roots.all)   # the roots that commit (8.11)
+        self.commits = Commits(self.record, self._writers_out, self.roots.all,
+                               lambda: bool(self._private_paths))   # the roots that commit (8.11); the rewrite guard while a private root is configured
         self._told_projects: set = set()         # what check_projects warned of this run (8.12)
         self._projects: dict = {}                # root id -> (stat key, entries | Invalid | None) of its projects.toml
         self._grants_seen: dict = {}             # root id -> the projects_of answer the open tabs were last told (8.12)
@@ -143,6 +144,7 @@ class Hub:
         self.asktell = AskTell(self)
         self._private_paths: dict[str, str] = {}   # real path of a private root -> id of the member whose it is
         self._register_private_roots()
+        self.commits.seed(self.roots.all())      # the rewrite guard's first pull is guarded, not free
 
     @property
     def private_roots(self) -> dict[str, str]:

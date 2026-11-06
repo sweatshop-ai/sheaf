@@ -889,7 +889,7 @@ class Hub:
                     continue
                 try:
                     st = e.path.stat()
-                except OSError:
+                except (OSError, roots_mod.NotFound):      # a bound entry's file may be gone from its root
                     continue
                 key = (st.st_mtime_ns, st.st_size)
                 if key == e.last_stat:
@@ -1000,7 +1000,7 @@ class Hub:
         try:
             st = e.path.stat()
             key = (st.st_mtime_ns, st.st_size)
-        except OSError:
+        except (OSError, roots_mod.NotFound):
             key = None
         failure = (key, f"{type(ex).__name__}: {ex}")
         if failure != e.rebuild_failure:

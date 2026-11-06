@@ -190,3 +190,23 @@ def test_a_read_of_a_name_two_roots_hold_is_refused_not_raised(two):
     assert hub.file(a).name == "post.md"
     with pytest.raises(roots_mod.NotFound):
         hub.file(a, bound=next(iter(hub.private_roots)))                        # a write's file is never found
+
+
+def test_tick_and_wrote_survive_a_bound_entry_whose_file_has_gone(two):
+    hub = hub_of(two)
+    (two.private_repo / NAME).write_text(PRIVATE_TEXT, encoding="utf-8")
+    a = address(hub)
+    e = hub.entry(a)
+    e.bus.subscribe()                                                           # an open tab: the pass looks at the file
+    (two.private_repo / NAME).unlink()
+    hub.tick()                                                                  # the watcher thread has no try
+    hub.wrote(a)
+
+
+def test_tick_survives_a_list_entry_whose_name_moved_to_a_private_root(two):
+    hub = hub_of(two)
+    (two.list_repo / NAME).write_text(OPEN, encoding="utf-8")
+    hub.entry(address(hub)).bus.subscribe()
+    (two.list_repo / NAME).unlink()
+    (two.private_repo / NAME).write_text(PRIVATE_TEXT, encoding="utf-8")
+    hub.tick()

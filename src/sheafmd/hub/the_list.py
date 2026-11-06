@@ -51,7 +51,7 @@ from .visibility import front_matter, text as fm_text
 TABLE_KEYS = {"root": str, "repo": str, "project": int, "token_file": str}
 OPTIONAL_KEYS = {"api": str, "poll": int, "waiting": str, "in_progress": str, "stop_dir": str,
                  "tell_dir": str, "sessions_dir": str, "box": str, "attach": str, "work_dir": str,
-                 "james_token": str}
+                 "james_token": str, "james_tokens": list}
 # The folders of `[list]` the hub writes in or serves from: absolute, and never inside the list's root or a
 # member's root, where a file would be a document (9.11, 9.12).
 FOLDER_KEYS = ("stop_dir", "tell_dir", "sessions_dir")
@@ -97,7 +97,8 @@ class ListConfig:
     box: str = ""                               # the host name of a box-hosted session (9.12)
     attach: str = ""                            # the attach command, `{window}` for <client>_<project> (9.12)
     work_dir: Path | None = None                # the folder James works in, <work_dir>/<client>/<project> (9.12)
-    james_token: str = ""                       # the door token James writes with: its X-James-Session is read (9.12)
+    james_tokens: tuple = ()                    # the door tokens James writes with: X-James-Session is read on each (9.12);
+                                                # the first is James's own, the only one whose session the hub resolves
 
     @property
     def owner(self) -> str:
@@ -120,6 +121,13 @@ def _within(path: str, folder: str) -> bool:
     return p == f or p.startswith(f.rstrip("/") + "/")
 
 
+def _james_tokens(t: dict) -> tuple:
+    """The door tokens of `[list]`: `james_tokens`, else the one `james_token` an older config names."""
+    if "james_tokens" in t:
+        return tuple(t["james_tokens"])
+    return (t["james_token"],) if t.get("james_token") else ()
+
+
 def parse(t: dict, where) -> ListConfig:
     here = f"[list] of {where}"
     for key in t:
@@ -131,7 +139,7 @@ def parse(t: dict, where) -> ListConfig:
                 raise ListError(f"'{key}' is missing from {here}")
             continue
         if not isinstance(t[key], typ) or (typ is int and isinstance(t[key], bool)):
-            raise ListError(f"'{key}' must be {'a number' if typ is int else 'text'}, not {t[key]!r}, in {here}")
+            raise ListError(f"'{key}' must be {'a number' if typ is int else 'a list' if typ is list else 'text'}, not {t[key]!r}, in {here}")
     for key in ("root", "token_file"):
         if not t[key].startswith("/"):
             raise ListError(f"'{key}' must be an absolute path, in {here}: {t[key]!r}")
@@ -145,6 +153,12 @@ def parse(t: dict, where) -> ListConfig:
             raise ListError(f"'{key}' must not be inside the list's root, in {here}: {t[key]!r}")
     if "work_dir" in t and not t["work_dir"].startswith("/"):
         raise ListError(f"'work_dir' must be an absolute path, in {here}: {t['work_dir']!r}")
+    if "james_token" in t and "james_tokens" in t:
+        raise ListError(f"'james_token' and 'james_tokens' are both in {here}; keep 'james_tokens'")
+    if "james_tokens" in t:
+        names = t["james_tokens"]
+        if not names or any(not isinstance(n, str) or not n for n in names) or len(set(names)) != len(names):
+            raise ListError(f"'james_tokens' must be a list of different token names, in {here}: {names!r}")
     if "box" in t and not _BOX_RE.fullmatch(t["box"]):
         raise ListError(f"'box' must be a host name, 1 to 63 letters, digits, dots or dashes, in {here}: {t['box']!r}")
     if "attach" in t and (not t["attach"].strip() or any(ord(c) < 32 or ord(c) == 127 for c in t["attach"])):
@@ -163,7 +177,7 @@ def parse(t: dict, where) -> ListConfig:
                       t.get("in_progress", DEFAULTS["in_progress"]),
                       *(Path(t[k].rstrip("/") or "/") if k in t else None for k in FOLDER_KEYS),
                       t.get("box", ""), t.get("attach", ""),
-                      Path(t["work_dir"].rstrip("/") or "/") if "work_dir" in t else None, t.get("james_token", ""))
+                      Path(t["work_dir"].rstrip("/") or "/") if "work_dir" in t else None, _james_tokens(t))
 
 
 # ── a sheaf, as its file says ───────────────────────────────────────────────

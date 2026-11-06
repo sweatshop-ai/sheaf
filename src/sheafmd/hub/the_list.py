@@ -192,6 +192,12 @@ def parse(t: dict, where) -> ListConfig:
     if "work_dir" in t and not t["work_dir"].startswith("/"):
         raise ListError(f"'work_dir' must be an absolute path, in {here}: {t['work_dir']!r}")
     member_dirs = _member_dirs(t.get("member_dirs", {}), t["root"], here)
+    for mid, d in member_dirs.items():
+        for key in FOLDER_KEYS:
+            mine, shared = getattr(d, key), t.get(key)
+            if mine is not None and shared is not None and (_within(str(mine), shared) or _within(shared, str(mine))):
+                raise ListError(f"'{key}' of [list.member_dirs.\"{mid}\"] is, or is inside or around, the one of [list], "
+                                f"in {here}: {mine}")
     if "box" in t and not _BOX_RE.fullmatch(t["box"]):
         raise ListError(f"'box' must be a host name, 1 to 63 letters, digits, dots or dashes, in {here}: {t['box']!r}")
     if "attach" in t and (not t["attach"].strip() or any(ord(c) < 32 or ord(c) == 127 for c in t["attach"])):
@@ -232,6 +238,9 @@ def _member_dirs(table: dict, root: str, here: str) -> dict:
                 raise ListError(f"'{key}' must not be inside the list's root, in {where}: {value!r}")
         if ("sessions_dir" in d) != ("work_dir" in d):
             raise ListError(f"'sessions_dir' and 'work_dir' go together, in {where}")
+        if ("tell_dir" in d) != ("stop_dir" in d):
+            raise ListError(f"'tell_dir' and 'stop_dir' go together, in {where}: a Stop clears the Tells of the "
+                            f"James it stops")
         out[mid] = Dirs(*(Path(d[k].rstrip("/") or "/") if k in d else None for k in DIR_KEYS))
     return out
 

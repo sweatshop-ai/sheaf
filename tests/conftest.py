@@ -328,7 +328,8 @@ def other(tmp_path):
 @pytest.fixture
 def front(hub, work, other, browser):
     """The hub in proxy mode, and the proxy in front of it: Bea's roots are `work`, Cal's
-    `other`. `front.hub` is `browser.hub`, so a test can compare the two listeners."""
+    `other`. `front.hub` is `browser.hub`, so a test can compare the two listeners. The proxy is set after the hub
+    is built, so no private root is registered here: a test that needs one builds its hub from `two_roots`."""
     import pwd
     from helpers import BEA, CAL, FRONT, Front
     from sheafmd.hub import proxy

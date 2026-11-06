@@ -127,7 +127,7 @@ A new session on a member's machine, started from the transcript of a sheaf's bo
 _Avoid_: copy, clone, move
 
 **Box-hosted session**:
-A sheaf's session whose `host` in its `sessions` front matter is `[list] box`: James's, on the deployment's box (SPEC 9.12). The hub serves the transcript of no other session, and only when one is the live session, the first item, do Ask and Tell go to James's window by a file in `[list] tell_dir`.
+A sheaf's session whose `host` in its `sessions` front matter is `[list] box`: James's, on the deployment's box (SPEC 9.12). The hub serves the transcript of no other session, and only when one is the live session, the first item, do Tells go to James's window by a file in `[list] tell_dir`.
 _Avoid_: remote session, server session
 
 **Agent adapter**:
@@ -137,23 +137,28 @@ How the hub reaches an agent session: ask it a question, deliver a Tell, read it
 How an agent reaches the hub: read a document's threads and its text, reply, resolve, and, with the right to write, make a page and change its text. Any agent that speaks MCP can use it, whether the hub runs on the same machine or on a box it connects to.
 _Avoid_: MCP server, plugin
 
+**Agent**:
+One AI client acting for one member: `ChatGPT (Hans)`, `Claude (Hans)`, `tiroir (Hans)`. It reaches the hub through the MCP door with its own MCP token, sees only that member's roots, signs its replies `Client (Member)`, and can be the target of a Tell. `tiroir` names the assistant inside Open WebUI only; ChatGPT reaching the hub through the tiroir connector is still `ChatGPT`.
+_Avoid_: bot, assistant, integration
+
 **MCP token**:
 A named, revocable secret that lets one agent use the hub's HTTP MCP door, and nothing else. A token made with `--write` may also read, make and change pages through the door.
 _Avoid_: API key, hub key
 
-**Target session**:
-The agent session a document's Ask and Tell reach: the last one that rendered it from an agent.
-
-**Ask**:
-A question on a comment thread, answered in the thread by a fork of the target session, which changes nothing.
+**Target**:
+Who a document's Tell reaches: the last agent session or agent that worked on it, which the page names and lets the person change.
+_Avoid_: target session (when the target is an agent)
 
 **Tell**:
-A comment sent into the running target session, which acts on it and replies in the thread.
+A comment that asks the target to act. Delivered into a running agent session when there is one to reach; for an agent that nothing can reach from outside (ChatGPT, Claude.ai), it waits on the document until that agent next asks what waits for it, with no expiry, and the person can cancel it from the page. Either way the target acts and replies in the thread.
 _Avoid_: send, push
 
 **Role**:
-What a reply is, recorded apart from who wrote it: `answer` for an Ask, `action` for what a session did after a Tell.
+What a reply is, recorded apart from who wrote it: `answer` for a reply that changed nothing, `action` for what the target did after a Tell.
 _Avoid_: reply type, magic author name
+
+**Ask** (retired):
+A question answered by a fork of the target session without changing anything. Retired in 2026-11: unused, and impossible for an agent that has no session to fork. Replies it left keep their role `answer`.
 
 **Pin**:
 A version of a document that the hub keeps beside the newest because a page holds its reload on it (`POST /_/pin`), so what the page sends later against that version is still taken. It is not the popover a page fixes on screen.

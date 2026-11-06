@@ -1891,15 +1891,15 @@ def test_own_james_token_must_be_text(tmp_path):
     refused(tmp_path, "'own_james_token' must be text", james_tokens=["james"], own_james_token=1)
 
 
-@pytest.fixture
-def two_james_tokens(team, at_work, browser):
+@pytest.fixture(params=[("james", "james-shared"), ("james-shared", "james")], ids=["own-first", "own-second"])
+def two_james_tokens(request, team, at_work, browser):
     """`[list]` names an own and a shared door token; (own, shared, the callers the hub heard of)."""
     from sheafmd.hub.state import Tokens
     tokens = Tokens()
     own, shared = tokens.add("james", write=True), tokens.add("james-shared", write=True)
     cfg = team.hub.the_list.cfg
     team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{
-        **cfg.__dict__, "james_tokens": ("james", "james-shared"), "own_james_token": "james"}))
+        **cfg.__dict__, "james_tokens": request.param, "own_james_token": "james"}))
     heard, hook = [], browser.handler.door.called
     browser.handler.door.called = lambda caller, address: (heard.append(caller), hook(caller, address))
     return own, shared, heard
@@ -1911,7 +1911,7 @@ def test_session_header_read_on_both_tokens(team, browser, work, two_james_token
     for token in (own, shared):
         assert not james_door(browser, token, "reply", session=NEW, doc=ADDRESS, id=cid, text="Sent.")[0]
     assert [c.session for c in heard] == [NEW, NEW]
-    assert [c.own_session for c in heard] == [True, False]
+    assert [c.own_session for c in heard] == [True, False]      # the same in either list order
 
 
 def test_a_header_on_the_shared_token_never_resolves_an_own_session(team, browser, work, two_james_tokens):

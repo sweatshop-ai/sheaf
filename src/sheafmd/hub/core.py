@@ -141,22 +141,32 @@ class Hub:
         self.runner = Jobs()
         self.sender = f"uds:{paths.hub_socket(port)}"
         self.asktell = AskTell(self)
-        self.private_roots: dict[str, str] = {}  # root id -> id of the member whose private root it is; empty without one
+        self._private_paths: dict[str, str] = {}   # real path of a private root -> id of the member whose it is
         self._register_private_roots()
+
+    @property
+    def private_roots(self) -> dict[str, str]:
+        """Root id -> id of the member whose private root it is; empty without one. Judged by the root's real path,
+        not by its id: a root forgotten and registered again has a new id and is still private."""
+        return {r.id: self._private_paths[str(r.path)] for r in self.roots.all() if str(r.path) in self._private_paths}
 
     def _register_private_roots(self):
         """Register the private root of each member that has one, as the list's root is registered. A folder that
-        is no git work tree of its own, or is gone, is none: the row says so and it is not marked private."""
+        is gone, or is not the top of a git work tree of its own, is none: git is asked first, so such a folder
+        writes nothing to the roots registry, and the row says so. A root registered at an earlier start whose
+        `.git` has gone since is refused again here, whatever the registry still says."""
         for m in self.proxy.members.values() if self.proxy is not None else ():
             if not m.private_root:
                 continue
             folder = Path(os.path.realpath(m.private_root))
-            root = self.roots.for_document(folder / projects.FILE) if folder.is_dir() else None
+            root = None
+            if folder.is_dir() and proxy_mod.git_top(str(folder)).casefold() == str(folder).casefold():
+                root = self.roots.for_document(folder / projects.FILE)
             if root is None or root.path != folder or not root.git:
                 self.record("private-root-refused", None, member=m.id,
                             error="the private root is not the top folder of a git work tree")
                 continue
-            self.private_roots[root.id] = m.id
+            self._private_paths[str(folder)] = m.id
 
     # ── documents ────────────────────────────────────────────────────────────
     def _versions_of(self, root) -> state.Versions:

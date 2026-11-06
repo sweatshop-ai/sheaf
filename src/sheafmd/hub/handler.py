@@ -1324,6 +1324,8 @@ class Handler:
         for again at his next call. The session is never the request's to choose: only an id whose transcript is
         James's in that project's folder is taken."""
         sid = caller.session
+        if not caller.own_session:       # the copy holds the own window's transcripts only (9.12)
+            return
         if not work.UUID_RE.fullmatch(sid or ""):
             return
         with self._pending_lock:
@@ -1690,9 +1692,11 @@ class Handler:
     def _mcp(self, req: Req) -> Response:
         if req.token:
             the = self.hub.the_list
-            james = the is not None and the.cfg.james_token and req.token.name == the.cfg.james_token
+            names = the.cfg.james_tokens if the is not None else ()
+            james = req.token.name in names
             caller = Caller(req.token.display, req.token,
-                            session=req.headers.get("x-james-session", "") if james else None)
+                            session=req.headers.get("x-james-session", "") if james else None,
+                            own_session=bool(names) and req.token.name == names[0])
         else:
             caller = Caller(req.display)
         status, answer = self.door.handle(req.raw, caller)

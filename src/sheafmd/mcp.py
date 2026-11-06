@@ -138,7 +138,8 @@ class Caller:
     made to work on pages; None is the key (the stdio door, which runs as the user)."""
     display: str
     token: TokenRow | None = None
-    session: str | None = None      # James's session, from X-James-Session: set only for `[list]`'s james_token (9.12)
+    session: str | None = None      # James's session, from X-James-Session: set only for a token of `[list]`'s james_tokens (9.12)
+    own_session: bool = False       # False on a james_tokens entry but the first: its header is read, never resolved to an own session
 
     @property
     def token_name(self) -> str | None:

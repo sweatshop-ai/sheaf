@@ -42,6 +42,7 @@ class Drop:
     replies: int                # the thread's replies when it was dropped: one more is the answer
     at: float
     name: str | None = None     # its file in `tell_dir`
+    folder: Path | None = None  # the `tell_dir` it was written in: the James of the member who sent it, whose status it reads
     state: str = "sent"         # the supervisor's last word on it, read by the hub: "sent" until it says one
     ignored: bool = False       # a status of another shape was written down once
 
@@ -53,13 +54,13 @@ class BoxWaits:
         self._drops: dict[str, dict[str, Drop]] = {}       # {doc: {thread: Drop}}
         self._cleared: set[str] = set()                    # sheaves where a `delivered` drop ended since asked
 
-    def add(self, doc: str, thread: str, kind: str, text: str, name: str | None = None):
+    def add(self, doc: str, thread: str, kind: str, text: str, name: str | None = None, folder: Path | None = None):
         c = rdc.parse(text).by_id(thread)
         if c is None:
             return
         with self._lock:
             self._end(doc, thread)              # a drop sent again on the thread: the older one ends here
-            self._drops.setdefault(doc, {})[thread] = Drop(kind, len(c.replies), self._clock(), name)
+            self._drops.setdefault(doc, {})[thread] = Drop(kind, len(c.replies), self._clock(), name, folder=folder)
 
     def pending(self, doc: str, text: str) -> list:
         with self._lock:

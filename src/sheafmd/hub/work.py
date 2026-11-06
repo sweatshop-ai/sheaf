@@ -7,8 +7,8 @@ file Ask, Tell and Stop James drop for James's window.
     serves(cfg, member)             whether the hub keeps a copy it serves `member` transcripts from (sessions_dir and work_dir)
     code_session(st, recorded)      the session a sign-in code serves (9.13): made, downloaded and forked by one rule
     with_session(text, line, id)    the text with `line` as the first of `sessions`, the rest as written
-    open_transcript(cfg, project, id)  the bytes of `id`'s transcript in `project`'s folder of the copy, or None
-    james_has(cfg, project, id)     whether the copy holds `id` as James's session of `project` (None: not yet)
+    open_transcript(cfg, project, id, member)  the bytes of `id`'s transcript in `project`'s folder of the copy, or None
+    james_has(cfg, project, id, member)     whether the copy holds `id` as James's session of `project` (None: not yet)
     drop(folder, project, body, missing)  a file in `folder` for the box's supervisor: "written" or why not
     drop_named(…)                         the same, and the file's name when it is written (#139)
 

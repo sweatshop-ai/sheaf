@@ -85,10 +85,10 @@ def test_no_map_means_all_shared(team, box, work):
 
 
 def test_a_key_the_member_leaves_out_is_the_list_s(team, mapped):
-    cfg = cfg_of(team, member_dirs={THIERRY: Dirs(tell_dir=mapped["own"]["tell"])})
+    cfg = cfg_of(team, member_dirs={THIERRY: Dirs(tell_dir=mapped["own"]["tell"], stop_dir=mapped["own"]["stop"])})
     mine = cfg.dirs_for(team.hub.proxy.members[THIERRY])
-    assert mine.tell_dir == mapped["own"]["tell"]
-    assert (mine.stop_dir, mine.sessions_dir, mine.work_dir) == (cfg.stop_dir, cfg.sessions_dir, cfg.work_dir)
+    assert (mine.tell_dir, mine.stop_dir) == (mapped["own"]["tell"], mapped["own"]["stop"])
+    assert (mine.sessions_dir, mine.work_dir) == (cfg.sessions_dir, cfg.work_dir)
 
 
 def test_without_a_default_tell_dir_a_member_not_in_the_map_can_not_tell(team, work, mapped):
@@ -180,9 +180,9 @@ def parse(work, tmp_path, **extra):
 
 
 def test_member_dirs_read(work, tmp_path):
-    cfg = parse(work, tmp_path, member_dirs={THIERRY: {"tell_dir": "/run/own/tell/", "sessions_dir": "/var/own",
+    cfg = parse(work, tmp_path, member_dirs={THIERRY: {"tell_dir": "/run/own/tell/", "stop_dir": "/run/own/stop", "sessions_dir": "/var/own",
                                                        "work_dir": "/home/own/work"}})
-    assert cfg.member_dirs == {THIERRY: Dirs(Path("/run/own/tell"), None, Path("/var/own"), Path("/home/own/work"))}
+    assert cfg.member_dirs == {THIERRY: Dirs(Path("/run/own/tell"), Path("/run/own/stop"), Path("/var/own"), Path("/home/own/work"))}
     assert cfg.tell_dir == Path("/run/shared/tell")
 
 
@@ -193,6 +193,11 @@ def test_member_dirs_read(work, tmp_path):
     ({"x": {"tell_dir": 5}}, "absolute path"),
     ({"x": {"sessions_dir": "/var/own"}}, "go together"),
     ({"x": {"work_dir": "/home/own/work"}}, "go together"),
+    ({"x": {"tell_dir": "/run/own/tell"}}, "'tell_dir' and 'stop_dir' go together"),
+    ({"x": {"stop_dir": "/run/own/stop"}}, "'tell_dir' and 'stop_dir' go together"),
+    ({"x": {"tell_dir": "/run/shared/tell", "stop_dir": "/run/own/stop"}}, "is, or is inside or around"),
+    ({"x": {"tell_dir": "/run/shared/tell/own", "stop_dir": "/run/own/stop"}}, "is, or is inside or around"),
+    ({"x": {"tell_dir": "/run", "stop_dir": "/run/own/stop"}}, "is, or is inside or around"),
     ({"x": {"stop_dir": "@ROOT@/stop"}}, "inside the list's root"),
     ({"x": {"tell_dir": "@ROOT@"}}, "inside the list's root"),
 ])
@@ -214,8 +219,8 @@ def test_a_members_own_folder_inside_a_members_root_stops_the_start(proxy_folder
     from test_hub_list import NELL, configure_list
     from test_proxy_start import refused_start
     table = f'[list.member_dirs."{NELL}"]\n{key} = "/srv/nell/box"\n'
-    if key == "sessions_dir":
-        table += 'work_dir = "/home/own/work"\n'
+    table += {"sessions_dir": 'work_dir = "/home/own/work"\n', "tell_dir": 'stop_dir = "/run/own/stop"\n',
+              "stop_dir": 'tell_dir = "/run/own/tell"\n'}[key]
     configure_list(f"{proxy_folder}/hub.sock", "/srv/nell",
                    'root = "/srv/list"\nrepo = "a/b"\nproject = 1\ntoken_file = "/run/t"\n')
     from sheafmd import paths
@@ -234,7 +239,7 @@ def test_a_member_dirs_id_that_is_no_member_stops_the_start(proxy_folder):
                    'root = "/srv/list"\nrepo = "a/b"\nproject = 1\ntoken_file = "/run/t"\n')
     from sheafmd import paths
     p = paths.config_file()
-    p.write_text(p.read_text(encoding="utf-8") + '\n[list.member_dirs."nobody"]\ntell_dir = "/run/own/tell"\n',
+    p.write_text(p.read_text(encoding="utf-8") + '\n[list.member_dirs."nobody"]\ntell_dir = "/run/own/tell"\nstop_dir = "/run/own/stop"\n',
                  encoding="utf-8")
     code, err, rows = refused_start()
     assert code == 1 and "who is no member of [proxy]" in rows[0]["reason"]

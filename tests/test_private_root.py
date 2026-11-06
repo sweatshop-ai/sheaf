@@ -311,12 +311,15 @@ def test_git_config_variables_of_the_hub_reach_the_check(roots, monkeypatch):
 
 
 def test_private_root_config_refused_when_its_remote_is_the_lists_issue_repo(roots):
-    """`[list] repo` names where the list lives on the host; a private root that pushes there shares the list's repo."""
-    table = {**roots.list_table(), "repo": "acme/record"}
-    for spelling in ("git@github.com:acme/record.git", "https://github.com/Acme/record/"):
-        own = independent_repo(roots.base, "issues-" + str(len(spelling)), {"origin": spelling})
-        with pytest.raises(ProxyError, match="same git repo as the list's root"):
-            proxy.parse(roots.table({"private_root": own, "roots": [own]}), "the test", table)
+    """`[list] repo` names where the list lives on the host; a private root that pushes there shares the list's repo,
+    whether or not the list's own folder is a repo."""
+    plain = roots.base / "plain-list"
+    plain.mkdir()
+    for lists in ({**roots.list_table(), "repo": "acme/record"}, {"root": str(plain), "repo": "acme/record"}):
+        for spelling in ("git@github.com:acme/record.git", "https://github.com/Acme/record/"):
+            own = independent_repo(roots.base, f"issues-{len(spelling)}-{len(lists['root'])}", {"origin": spelling})
+            with pytest.raises(ProxyError, match="list's repo acme/record|same git repo as the list's root"):
+                proxy.parse(roots.table({"private_root": own, "roots": [own]}), "the test", lists)
 
 
 def test_a_relative_remote_is_read_from_the_top_of_the_work_tree(roots):

@@ -205,3 +205,36 @@ def test_member_dirs_refuses(work, tmp_path, table, word):
 def test_member_dirs_must_be_a_table(work, tmp_path):
     with pytest.raises(the_list.ListError, match="a table"):
         parse(work, tmp_path, member_dirs="x")
+
+
+# ── the hub's start ──────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("key", ["stop_dir", "tell_dir", "sessions_dir"])
+def test_a_members_own_folder_inside_a_members_root_stops_the_start(proxy_folder, key):
+    from test_hub_list import NELL, configure_list
+    from test_proxy_start import refused_start
+    table = f'[list.member_dirs."{NELL}"]\n{key} = "/srv/nell/box"\n'
+    if key == "sessions_dir":
+        table += 'work_dir = "/home/own/work"\n'
+    configure_list(f"{proxy_folder}/hub.sock", "/srv/nell",
+                   'root = "/srv/list"\nrepo = "a/b"\nproject = 1\ntoken_file = "/run/t"\n')
+    from sheafmd import paths
+    p = paths.config_file()
+    p.write_text(p.read_text(encoding="utf-8") + "\n" + table, encoding="utf-8")
+    code, err, rows = refused_start()
+    assert code == 1
+    assert [r["kind"] for r in rows] == ["list-config"], rows
+    assert f"'{key}' of [list.member_dirs" in rows[0]["reason"] and "inside a root of Nell" in rows[0]["reason"]
+
+
+def test_a_member_dirs_id_that_is_no_member_stops_the_start(proxy_folder):
+    from test_hub_list import configure_list
+    from test_proxy_start import refused_start
+    configure_list(f"{proxy_folder}/hub.sock", "/srv/nell",
+                   'root = "/srv/list"\nrepo = "a/b"\nproject = 1\ntoken_file = "/run/t"\n')
+    from sheafmd import paths
+    p = paths.config_file()
+    p.write_text(p.read_text(encoding="utf-8") + '\n[list.member_dirs."nobody"]\ntell_dir = "/run/own/tell"\n',
+                 encoding="utf-8")
+    code, err, rows = refused_start()
+    assert code == 1 and "who is no member of [proxy]" in rows[0]["reason"]

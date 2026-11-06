@@ -230,6 +230,7 @@ class Handler:
         self.peer_check = peer_check
         self.door = Door(hub)
         self.door.called = self._james_called
+        self._pending_members: dict = {}    # address -> the member whose James wrote the waiting session: his copy is looked in
         self._pending_sessions: dict = {}   # address -> (James's session it waits for, since, its write's seq) (9.12)
         self._session_seqs: dict = {}       # address -> the seq of James's latest write to it: the newest one wins
         self._pending_lock = threading.Lock()
@@ -1335,14 +1336,21 @@ class Handler:
                 old = self._pending_sessions.get(address)
                 since = old[1] if old and old[0] == sid else _clock()     # the same session keeps its clock
                 self._pending_sessions[address] = (sid, since, seq)
+                self._pending_members[address] = self._token_member(caller)
+            members = {at: self._pending_members.get(at) for at, _ in waiting}
         for at, (wanted, since_, seq_) in waiting:
             try:
-                self._record_james(at, wanted, caller, since_, seq_)
+                self._record_james(at, wanted, caller, since_, seq_, members[at])
             except Exception:                           # one sheaf's failure never stops the others nor this write
                 self._drop_waiting(at, seq_)
                 self.hub.record_exception("session-hook-failed", at)
         if address is not None:
-            self._record_james(address, sid, caller, since, seq)
+            self._record_james(address, sid, caller, since, seq, self._token_member(caller))
+
+    def _token_member(self, caller):
+        """The member the door token of `caller` acts for: whose James wrote, so whose copy holds his session."""
+        proxy = self.hub.proxy
+        return proxy.member_of_token(caller.token.name) if proxy is not None and caller.token is not None else None
 
     def _latest(self, address: str, seq: int) -> bool:
         """Whether `seq` is still James's latest write to `address`: an older session never replaces a newer one."""
@@ -1355,9 +1363,10 @@ class Handler:
             if self._pending_sessions.get(address, (None, None, None))[2] != seq:
                 return False
             del self._pending_sessions[address]
+            self._pending_members.pop(address, None)
             return True
 
-    def _record_james(self, address: str, sid: str, caller, since: float, seq: int):
+    def _record_james(self, address: str, sid: str, caller, since: float, seq: int, member=None):
         """James's session `sid`, named by his write `seq` to `address`, becomes the sheaf's live session, the first of
         `sessions`, when it is a sheaf of James on the list's root, `[list]` names a box, and the copy holds `sid` as a
         session of its project. The hub is the only writer of `sessions` (9.12). Nothing when it is the live one
@@ -1375,9 +1384,7 @@ class Handler:
             self._drop_waiting(address, seq)                  # an item names the box: without one there is nothing to write
             return
         project = "/".join(Address.parse(address).rel.split("/")[:2])
-        # The copy of the James that holds this token: the member it acts for, none for a token bound to nobody.
-        proxy = self.hub.proxy
-        member = proxy.member_of_token(caller.token.name) if proxy is not None and caller.token is not None else None
+        # The copy of the James that wrote: the member its token acts for, none for a token bound to nobody.
         found = work.james_has(the.cfg, project, sid, member)
         if found is None and _clock() - since < PENDING_S:
             return                                      # it waits for the copy

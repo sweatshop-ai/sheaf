@@ -110,18 +110,12 @@ def test_private_file_gone_same_name_list_file_no_write(two):
     git(two.list_repo, "commit", "-q", "-m", "arrives")
     git(two.list_repo, "push", "-q", "origin", "HEAD:main")
     seen = untouched(two)
-    with pytest.raises(roots_mod.NotFound):
-        save(hub)
-    with pytest.raises(roots_mod.NotFound):
-        hub.entry(a)                                                           # render
-    with pytest.raises(roots_mod.NotFound):
-        e.live.comment("add", {"anchor": "x", "body": "hi"}, md_hash(OPEN))    # comment
     with place.held(hub, a):
-        hub.committed(a, by="Member A")                                        # nothing to commit there
-    assert hub.commits.settle()
+        with pytest.raises(roots_mod.NotFound):
+            e.live.comment("add", {"anchor": "x", "body": "hi"}, md_hash(OPEN))    # the old handle writes nowhere
     assert untouched(two) == seen
     assert (two.list_repo / NAME).read_text(encoding="utf-8") == OPEN
-    assert [r["doc"] for r in hub_rows("commit-refused")] == [a]
+    assert hub.entry(a).file_root == hub.the_list.root().id                    # a page opens on the list file
 
 
 def test_private_file_back_where_it_was_opens_again(two):
@@ -210,3 +204,17 @@ def test_tick_survives_a_list_entry_whose_name_moved_to_a_private_root(two):
     (two.list_repo / NAME).unlink()
     (two.private_repo / NAME).write_text(PRIVATE_TEXT, encoding="utf-8")
     hub.tick()
+
+
+def test_private_entry_is_dropped_when_its_name_comes_back_in_the_list(two):
+    hub = hub_of(two)
+    (two.private_repo / NAME).write_text(PRIVATE_TEXT, encoding="utf-8")
+    a = address(hub)
+    e = hub.entry(a)
+    (two.private_repo / NAME).unlink()
+    with pytest.raises(roots_mod.NotFound):
+        hub.entry(a)
+    (two.list_repo / NAME).write_text(OPEN, encoding="utf-8")
+    hub.tick()
+    again = hub.entry(a)                                                        # not a 404 until the hub restarts
+    assert again is not e and again.file_root == hub.the_list.root().id

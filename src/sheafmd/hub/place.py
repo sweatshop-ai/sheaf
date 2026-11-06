@@ -7,11 +7,12 @@ sheafmd.hub.place — where the file of a sheaf of the list's root is (SPEC 9.11
     physical(hub, root, rel)         the path of the file a sheaf's name holds now (for `Roots`, at each lookup)
     file_rel(top, rel)               the same without a check: the path to read or write, or `rel`
     named(hub, root, top, rel)       the name a listed file is shown by, None for a file no name shows
-    home(hub, root, name, text)      the path in the root where that text lives, None when it has none
+    home_in(hub, root, name, text)   (the root, the path in it) where that text lives, None when it has none
+    where_is(hub, address)           (the root, the path in it) of the one file a sheaf's name holds, else None
     place(hub, address, ...)         the file moved to its home: the path it left, or None
     owner_short(hub, root, address, fm)   the `short` that names the sheaf's private folder
     make_folders(top, rel)           the folder of `rel`, made on the way, walked without following a link
-    taken(top, name), holders(top, name)  whether a logical name is held, and by which paths
+    taken(hub, root, name), holders(hub, root, name)  whether a logical name is held, and by which (root, path)
     held(hub, address)               the lock of the sheaf's name, for every read and write of its file
     owns(hub, address)               whether this thread holds that lock (a commit asserts it)
     ahead(hub, address, old, new)    a writer's move of the file to the home of the text it is about to write;
@@ -55,6 +56,7 @@ PRIVATE = "private"
 QUARANTINE = "~unplaced"
 NO_SHORT = "it is its owner's alone and no owner of it has a short to name its private folder"
 IGNORED = "the repo ignores the private folder"
+PRIVATE_ROOT = "its home is a private root, and a sheaf cannot be moved between roots yet"
 
 
 class Refused(Exception):
@@ -171,12 +173,12 @@ def _real(top: Path, rel: str) -> bool:
     return os.path.realpath(top / rel) == str(top / rel)
 
 
-def _one(top: Path, name: str):
-    """(the path of the one file that holds the name `name`, or `name` when none does; the count of files that
-    hold it). Two entries that are one file (a move between its link and its unlink) count once; an entry that
-    holds no name (`_holds`) is not counted."""
-    rels, seen = [], set()
-    for rel in holders(top, name):
+def _holding(top: Path, rels: list) -> list:
+    """Those of `rels` (paths in the root at the real path `top`) that hold a name, each file once: two entries that
+    are one file (a move between its link and its unlink) count once; an entry that holds no name (`_holds`) is not
+    counted."""
+    found, seen = [], set()
+    for rel in rels:
         try:
             st = os.lstat(top / rel)
             key = (st.st_dev, st.st_ino)
@@ -186,23 +188,44 @@ def _one(top: Path, name: str):
             continue
         if key not in seen:
             seen.add(key)
-            rels.append(rel)
-    return (rels[0] if rels else name), len(rels)
+            found.append(rel)
+    return found
+
+
+def _one(hub, root, name: str):
+    """((the root and the path in it of the one file that holds the name `name`, or `root` and `name` when none
+    does), the count of files that hold it), looking in `root`, the list's, and in each private root (a name held
+    in two roots counts twice)."""
+    top = Path(os.path.realpath(root.path))
+    found = [(root, rel) for rel in _holding(top, _scan(top, name))]
+    for private in _private_roots(hub).values():
+        ptop = Path(os.path.realpath(private.path))
+        found += [(private, rel) for rel in _holding(ptop, [name] if os.path.lexists(ptop / name) else [])]
+    return (found[0] if found else (root, name)), len(found)
+
+
+def _private_roots(hub) -> dict:
+    """The registered private roots by the id of their member; none for a hub without one."""
+    if not getattr(hub, "private_roots", None):
+        return {}
+    by_id = {r.id: r for r in hub.roots.all()}
+    return {member: by_id[rid] for rid, member in hub.private_roots.items() if rid in by_id}
 
 
 def _twice(hub, address: str, n: int):
     _refused(hub, address, f"its name is held by {n} files")
 
 
-def physical(hub, root, rel: str) -> str:
-    """The path in `root` of the file the document `rel` names (`Roots` asks it at each lookup): `rel` itself where
+def physical(hub, root, rel: str) -> tuple:
+    """(the root, the path in it) of the file the document `rel` names (`Roots` asks it at each lookup): `root` and
+    `rel` itself where
     the hub does not place sheaves; for a sheaf's name, the one file that holds it, at its home or at any private
     home. Raises NotFound for any path under a project's `private` folder (or in a project called `private`), at
     any depth, which is no address; for a path that is a link or passes through one, at any depth, made or not;
     for a name that two files hold (made by hand: nothing repairs it), which a `place-refused` row names; and for
     a name whose entries hold none (a link: `_holds`)."""
     if not applies(hub, root.name):
-        return rel
+        return root, rel
     if names_private(rel):
         raise NotFound(f"{root.name}/{rel}")
     top = Path(os.path.realpath(root.path))
@@ -210,12 +233,12 @@ def physical(hub, root, rel: str) -> str:
     if name is None:
         if not _real(top, rel):
             raise NotFound(f"{root.name}/{rel}")        # no address reaches a file through a link (9.11)
-        return rel
-    got, n = _one(top, name)
+        return root, rel
+    got, n = _one(hub, root, name)
     if n > 1:
         _twice(hub, f"{root.name}/{name}", n)
         raise NotFound(f"{root.name}/{rel}")
-    if n == 0 and taken(top, name):
+    if n == 0 and taken(hub, root, name):
         raise NotFound(f"{root.name}/{rel}")
     return got
 
@@ -226,8 +249,8 @@ def file_rel(top: Path, rel: str) -> str:
     name = logical(rel)
     if name is None or name != rel:
         return rel
-    got, n = _one(top, name)
-    return got if n == 1 else rel
+    found = _holding(top, _scan(top, name))
+    return found[0] if len(found) == 1 else rel
 
 
 def named(hub, root, top: Path, rel: str) -> str | None:
@@ -239,11 +262,11 @@ def named(hub, root, top: Path, rel: str) -> str | None:
     name = logical(rel)
     if name is None:
         return None if names_private(rel) or not _real(top, rel) else rel
-    got, n = _one(top, name)
+    (at, got), n = _one(hub, root, name)
     if n > 1:
         _twice(hub, f"{root.name}/{name}", n)
         return None
-    return name if n == 1 and got == rel else None
+    return name if n == 1 and at.id == root.id and got == rel else None
 
 
 def tell_link(hub, root, top: Path, rel: str):
@@ -262,25 +285,36 @@ def owner_short(hub, root, address: str, fm: dict) -> str | None:
     """The `short` that names the private folder of the sheaf at `address` whose front matter is `fm`: of the
     member its `owner` names, when that member is one of its owners; else of the first owner, in the config's
     order, that has one. Only members whose roots hold `root` count (9.9). None when no owner has one."""
-    members = [m for m in hub.proxy.members.values() if hub.owns(m, root)]
-    owners = [m for m in visibility.owner_of(fm, members, hub.assignees(address, fm)) if _segment(m.short)]
+    owners = [m for m in _owners(hub, root, address, fm) if _segment(m.short)]
     named_ = visibility.text(fm, "owner").casefold()
     return next((m.short for m in owners if m.short.casefold() == named_), None) or \
         next((m.short for m in owners), None)
 
 
-def home(hub, root, name: str, text: str) -> str | None:
-    """The path in `root` where the file of the sheaf named `name` lives once it holds `text`: `name` when it is
-    open to the project, `<client>/<project>/private/<short>/<file>` when it is its owner's alone. None for one
-    that is its owner's alone with no owner that has a short."""
+def home_in(hub, root, name: str, text: str):
+    """(the root, the path in it) where the file of the sheaf named `name` lives once it holds `text`: `root` and
+    `name` when it is open to the project; the one owner's private root and `name` when it is its owner's alone, it
+    has exactly one owner, and that owner has a private root; else `root` and
+    `<client>/<project>/private/<short>/<file>`. None for one that is its owner's alone with no owner that has a
+    short."""
     fm = visibility.front_matter(text)
     if visibility.effective(fm) == "project":
-        return name
-    short = owner_short(hub, root, f"{root.name}/{name}", fm)
+        return root, name
+    address = f"{root.name}/{name}"
+    owners = _owners(hub, root, address, fm)
+    if len(owners) == 1 and (private := _private_roots(hub).get(owners[0].id)) is not None:
+        return private, name
+    short = owner_short(hub, root, address, fm)
     if short is None:
         return None
     client, project, file = name.split("/")
-    return f"{client}/{project}/{PRIVATE}/{short}/{file}"
+    return root, f"{client}/{project}/{PRIVATE}/{short}/{file}"
+
+
+def _owners(hub, root, address: str, fm: dict) -> list:
+    """The members, of those whose roots hold `root`, that own the sheaf at `address` whose front matter is `fm`."""
+    members = [m for m in hub.proxy.members.values() if hub.owns(m, root)]
+    return visibility.owner_of(fm, members, hub.assignees(address, fm))
 
 
 def make_folders(top, rel: str):
@@ -385,6 +419,16 @@ def _where(hub, address: str):
     return root, Path(os.path.realpath(root.path)), at.rel
 
 
+def where_is(hub, address: str):
+    """(the root, the path in it) of the one file that holds the sheaf's name `address`, in the list's root or a
+    private root; None for a name the hub does not place, held by no file, or by more than one."""
+    got = _where(hub, address)
+    if got is None:
+        return None
+    found, n = _one(hub, got[0], got[2])
+    return found if n == 1 else None
+
+
 def ahead(hub, address: str, old: str, new: str) -> str | None:
     """A writer that is about to write `new` over `old`, the text of the file of the sheaf named `address`, holding
     the name's lock and the file's lock, moves the file to the home of `new` first (9.11), so the new text is
@@ -399,10 +443,10 @@ def ahead(hub, address: str, old: str, new: str) -> str | None:
         return None
     root, top, name = got
     with _name_lock(top, name), folders_lock(top, name):
-        rel, n = _one(top, name)
-        if n != 1:
+        (at, rel), n = _one(hub, root, name)
+        if n != 1 or at.id != root.id:          # a file of a private root is not moved by the list's root
             return None
-        strict = home(hub, root, name, old) == rel
+        strict = home_in(hub, root, name, old) == (root, rel)
         gone = _move(hub, root, top, rel, name, address, text=new, strict=strict)
         if gone is not None:
             _tidy(top, gone)
@@ -423,17 +467,17 @@ def place(hub, address: str, member=None, by: str | None = None, commit: bool = 
         return None
     root, top, name = got
     with _name_lock(top, name):
-        rel, n = _one(top, name)
+        (at, rel), n = _one(hub, root, name)
         if n > 1:
             _twice(hub, address, n)
             return None
         gone = None
-        if n:
+        if n and at.id == root.id:
             # The file's lock before the folders', as a writer that moves holds them (`ahead`): one order (9.11),
             # so a path that turns into a link to another sheaf's file meanwhile waits for that writer, and is
             # then looked at again.
             with file_lock(top / rel), folders_lock(top, name):
-                if _one(top, name) == (rel, 1):
+                if _one(hub, root, name) == ((root, rel), 1):
                     gone = _move(hub, root, top, rel, name, address)
                     if gone is not None:
                         _tidy(top, gone)
@@ -483,9 +527,12 @@ def _move(hub, root, top: Path, rel: str, name: str, address: str, text: str | N
                     text = f.read().decode("utf-8")
         except (OSError, UnicodeDecodeError):
             return None             # gone, or not a text the hub reads: nothing to judge it on
-        target = home(hub, root, name, text)
-        if target is None:
+        got = home_in(hub, root, name, text)
+        if got is None:
             return refused(NO_SHORT)
+        where, target = got
+        if where.id != root.id:
+            return refused(PRIVATE_ROOT)
         if target == rel:
             return None
         if ignores(top, target):
@@ -551,15 +598,25 @@ def _tidy(top: Path, rel: str):
             return
 
 
-def taken(top: Path, name: str) -> bool:
+def taken(hub, root, name: str) -> bool:
     """Whether the logical name `name` is held: by a file at `<client>/<project>/<name>.md` or at any
-    `<client>/<project>/private/*/<name>.md`, whatever the caller may see (9.11: a create tells that a name is
-    taken, never what holds it)."""
-    return bool(holders(top, name))
+    `<client>/<project>/private/*/<name>.md` of `root`, or at `<client>/<project>/<name>.md` of a private root,
+    whatever the caller may see (9.11: a create tells that a name is taken, never what holds it)."""
+    return bool(holders(hub, root, name))
 
 
-def holders(top: Path, name: str) -> list:
-    """The paths in the root, under `top`, of every entry that holds the logical name `name`: at
+def holders(hub, root, name: str) -> list:
+    """(root, path in it) of every entry that holds the logical name `name`: in `root`, the list's, and in each
+    private root, a link or a dangling one included."""
+    held_ = [(root, rel) for rel in _scan(Path(os.path.realpath(root.path)), name)]
+    for private in _private_roots(hub).values():
+        if os.path.lexists(Path(os.path.realpath(private.path)) / name):
+            held_.append((private, name))
+    return held_
+
+
+def _scan(top: Path, name: str) -> list:
+    """The paths in the list's root, under `top`, of every entry that holds the logical name `name`: at
     `<client>/<project>/<name>.md` and at each `<client>/<project>/private/*/<name>.md`, a link or a dangling one
     included."""
     client, project, file = name.split("/")

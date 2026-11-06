@@ -279,8 +279,15 @@ class Hub:
             placed = place.applies(self, at.root)
         if not placed:
             return root.path / at.rel
-        if self.private_roots and (got := place.file_at(self, address, bound)):
-            return got[0].path / got[1]
+        if self.private_roots:
+            try:
+                got = place.file_at(self, address, bound)
+            except roots_mod.NotFound:
+                if bound:
+                    raise                       # a write's file is never found anywhere else
+                got = None                      # a read answers as it did: the list root's path, judged by its caller
+            if got:
+                return got[0].path / got[1]
         return root.path / place.file_rel(Path(os.path.realpath(root.path)), at.rel)
 
     def url(self, address: str) -> str:
@@ -307,8 +314,9 @@ class Hub:
                 # The store and the file an entry uses cannot outlive the root they were chosen for: one bound to
                 # a private root is refused when its file is not there (`file_at`); one bound to another root is
                 # dropped when the file has moved to a private root, and made again.
-                got = place.file_at(self, address, e.file_root)
-                if got is not None and got[0].id != e.file_root:
+                if e.file_root in self.private_roots:
+                    place.file_at(self, address, e.file_root)
+                elif (got := place.file_at(self, address)) is not None and got[0].id != e.file_root:
                     del self.entries[address]
                     e = None
             if e is not None:

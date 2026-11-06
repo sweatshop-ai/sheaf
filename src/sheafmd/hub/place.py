@@ -439,8 +439,8 @@ def where_is(hub, address: str):
 def file_at(hub, address: str, bound: str = ""):
     """(the root, the path in it) of the file to read or write for the sheaf named `address`, or None for a name the
     hub does not place. The one file that holds the name, in the list's root or a private root; where a private root
-    is involved and there is not exactly one, or the file is not in `bound` (the id of the private root an open
-    document was made for), raises NotFound: the write goes nowhere, and never to the list's root under the name
+    is involved and there is not exactly one, or the file is not in `bound` (the id of the root an open document was
+    made for), raises NotFound: the write goes nowhere, and never to the list's root under the name
     (the fallback below is for a hub with no private holder of it)."""
     got = _where(hub, address)
     if got is None:
@@ -449,7 +449,7 @@ def file_at(hub, address: str, bound: str = ""):
     found = _found(hub, root, name)
     private = set(getattr(hub, "private_roots", None) or ())
     if len(found) == 1:
-        if bound in private and found[0][0].id != bound:
+        if bound and found[0][0].id != bound:       # whichever root the document was opened for, it follows no other
             raise NotFound(address)
         return found[0]
     if bound in private or any(r.id in private for r, _ in found):

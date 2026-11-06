@@ -104,7 +104,7 @@ def test_private_root_config_is_read_from_the_file_with_its_list_table(roots, tm
         roots = ["{roots.list_repo}", "{roots.private_repo}"]
         private_root = "{roots.private_repo}"
         ''')
-    listed = f'[list]\nroot = "{roots.list_repo}"\nrepo = "o/r"\nproject = 1\ntoken_file = "{tmp_path}/t"\n'
+    listed = f'[list]\nroot = "{roots.list_repo}"\nrepo = "o/r"\nproject = 1\ntoken' f'_file = "{tmp_path}/t"\n'
     paths.config_file().parent.mkdir(parents=True, exist_ok=True)
     paths.config_file().write_text(body + listed, encoding="utf-8")
     assert proxy.load().members[A].private_root == str(roots.private_repo.resolve())

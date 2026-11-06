@@ -1705,10 +1705,11 @@ class Handler:
         if req.token:
             the = self.hub.the_list
             names = the.cfg.james_tokens if the is not None else ()
+            own = the.cfg.own_token if the is not None else ""
             james = req.token.name in names
             caller = Caller(req.token.display, req.token,
                             session=req.headers.get("x-james-session", "") if james else None,
-                            own_session=bool(names) and req.token.name == names[0])
+                            own_session=bool(own) and req.token.name == own)
         else:
             caller = Caller(req.display)
         status, answer = self.door.handle(req.raw, caller)

@@ -51,10 +51,13 @@ from .visibility import front_matter, text as fm_text
 TABLE_KEYS = {"root": str, "repo": str, "project": int, "token_file": str}
 OPTIONAL_KEYS = {"api": str, "poll": int, "waiting": str, "in_progress": str, "stop_dir": str,
                  "tell_dir": str, "sessions_dir": str, "box": str, "attach": str, "work_dir": str,
-                 "james_token": str, "james_tokens": list}
+                 "james_token": str, "james_tokens": list, "member_dirs": dict}
 # The folders of `[list]` the hub writes in or serves from: absolute, and never inside the list's root or a
 # member's root, where a file would be a document (9.11, 9.12).
 FOLDER_KEYS = ("stop_dir", "tell_dir", "sessions_dir")
+# What a `[list.member_dirs."<member id>"]` table may hold: the member's own folders, for the one James that works
+# for them alone. A member with no table, or a key it leaves out, gets the `[list]` folder of the same name.
+DIR_KEYS = ("tell_dir", "stop_dir", "sessions_dir", "work_dir")
 DEFAULTS = {"api": "https://api.github.com", "poll": 60, "waiting": "Waiting on member",
             "in_progress": "In progress"}
 WORDS = ("Approve", "Run it", "Don't run", "Undo skip", "Done", "Share", "Stop James", "Move to")
@@ -82,6 +85,16 @@ class ListError(Exception):
 
 
 @dataclass(frozen=True)
+class Dirs:
+    """The folders of one James: where his Tells and Stops are dropped, the copy of his transcripts, and the
+    folder he works in. A member's `[list.member_dirs]` table names them, a key left out is the `[list]` one."""
+    tell_dir: Path | None = None
+    stop_dir: Path | None = None
+    sessions_dir: Path | None = None
+    work_dir: Path | None = None
+
+
+@dataclass(frozen=True)
 class ListConfig:
     root: Path                  # the folder of the root whose page is the list, absolute
     repo: str                   # the record's issues repo, `owner/name`; its owner holds the Project
@@ -99,10 +112,43 @@ class ListConfig:
     work_dir: Path | None = None                # the folder James works in, <work_dir>/<client>/<project> (9.12)
     james_tokens: tuple = ()                    # the door tokens James writes with: X-James-Session is read on each (9.12);
                                                 # the first is James's own, the only one whose session the hub resolves
+    member_dirs: dict = field(default_factory=dict)  # member id -> Dirs: the members whose James has folders of his own
 
     @property
     def owner(self) -> str:
         return self.repo.split("/")[0]
+
+    @property
+    def default_dirs(self) -> Dirs:
+        """The `[list]` folders: the James of every member that `member_dirs` does not name. A config with no
+        `member_dirs` has this one James only, and every Tell, Stop and transcript goes to him."""
+        return Dirs(self.tell_dir, self.stop_dir, self.sessions_dir, self.work_dir)
+
+    def dirs_for(self, member) -> Dirs:
+        """The folders of the James that works for `member` (a proxy.Member, or None): theirs in `member_dirs`, a
+        key left out the `[list]` one. A member the map does not name, and no member at all, get the `[list]`
+        folders, so a missing entry never reaches another member's James: the map holds the exceptions."""
+        base = self.default_dirs
+        own = self.member_dirs.get(getattr(member, "id", None))
+        if own is None:
+            return base
+        return Dirs(*(getattr(own, k) or getattr(base, k) for k in DIR_KEYS))
+
+    def copies(self, member) -> tuple:
+        """The copies of transcripts `member` may be served from, `(sessions_dir, work_dir)` each, theirs first and
+        then the `[list]` one. Only a member the map names reads a copy but the `[list]` one."""
+        base, mine = self.default_dirs, self.dirs_for(member)
+        out = []
+        for d in (mine, base):
+            if d.sessions_dir is not None and d.work_dir is not None and (d.sessions_dir, d.work_dir) not in out:
+                out.append((d.sessions_dir, d.work_dir))
+        return tuple(out)
+
+    def writes(self, member) -> tuple:
+        """The one copy `(sessions_dir, work_dir)` of the James that works for `member`, where a session he names
+        must be, or None when it has none."""
+        d = self.dirs_for(member)
+        return (d.sessions_dir, d.work_dir) if d.sessions_dir is not None and d.work_dir is not None else None
 
 
 def load() -> ListConfig | None:
@@ -139,7 +185,7 @@ def parse(t: dict, where) -> ListConfig:
                 raise ListError(f"'{key}' is missing from {here}")
             continue
         if not isinstance(t[key], typ) or (typ is int and isinstance(t[key], bool)):
-            raise ListError(f"'{key}' must be {'a number' if typ is int else 'a list' if typ is list else 'text'}, not {t[key]!r}, in {here}")
+            raise ListError(f"'{key}' must be {'a number' if typ is int else 'a table' if typ is dict else 'a list' if typ is list else 'text'}, not {t[key]!r}, in {here}")
     for key in ("root", "token_file"):
         if not t[key].startswith("/"):
             raise ListError(f"'{key}' must be an absolute path, in {here}: {t[key]!r}")
@@ -153,6 +199,13 @@ def parse(t: dict, where) -> ListConfig:
             raise ListError(f"'{key}' must not be inside the list's root, in {here}: {t[key]!r}")
     if "work_dir" in t and not t["work_dir"].startswith("/"):
         raise ListError(f"'work_dir' must be an absolute path, in {here}: {t['work_dir']!r}")
+    member_dirs = _member_dirs(t.get("member_dirs", {}), t["root"], here)
+    for mid, d in member_dirs.items():
+        for key in FOLDER_KEYS:
+            mine, shared = getattr(d, key), t.get(key)
+            if mine is not None and shared is not None and (_within(str(mine), shared) or _within(shared, str(mine))):
+                raise ListError(f"'{key}' of [list.member_dirs.\"{mid}\"] is, or is inside or around, the one of [list], "
+                                f"in {here}: {mine}")
     if "james_token" in t and "james_tokens" in t:
         raise ListError(f"'james_token' and 'james_tokens' are both in {here}; keep 'james_tokens'")
     if "james_tokens" in t:
@@ -177,7 +230,33 @@ def parse(t: dict, where) -> ListConfig:
                       t.get("in_progress", DEFAULTS["in_progress"]),
                       *(Path(t[k].rstrip("/") or "/") if k in t else None for k in FOLDER_KEYS),
                       t.get("box", ""), t.get("attach", ""),
-                      Path(t["work_dir"].rstrip("/") or "/") if "work_dir" in t else None, _james_tokens(t))
+                      Path(t["work_dir"].rstrip("/") or "/") if "work_dir" in t else None, _james_tokens(t),
+                      member_dirs)
+
+
+def _member_dirs(table: dict, root: str, here: str) -> dict:
+    """`[list.member_dirs."<member id>"]` tables as {id: Dirs}: each a table of `DIR_KEYS` only, absolute paths, the
+    three folders the hub writes in or serves from outside the list's root, and a copy of transcripts with the
+    folder it was made for (`sessions_dir` and `work_dir` together)."""
+    out = {}
+    for mid, d in table.items():
+        where = f'[list.member_dirs."{mid}"] in {here}'
+        if not isinstance(d, dict):
+            raise ListError(f"{where} must be a table of folders")
+        for key, value in d.items():
+            if key not in DIR_KEYS:
+                raise ListError(f"unknown key '{key}' in {where}")
+            if not isinstance(value, str) or not value.startswith("/"):
+                raise ListError(f"'{key}' must be an absolute path, in {where}: {value!r}")
+            if key in FOLDER_KEYS and _within(value, root):
+                raise ListError(f"'{key}' must not be inside the list's root, in {where}: {value!r}")
+        if ("sessions_dir" in d) != ("work_dir" in d):
+            raise ListError(f"'sessions_dir' and 'work_dir' go together, in {where}")
+        if ("tell_dir" in d) != ("stop_dir" in d):
+            raise ListError(f"'tell_dir' and 'stop_dir' go together, in {where}: a Stop clears the Tells of the "
+                            f"James it stops")
+        out[mid] = Dirs(*(Path(d[k].rstrip("/") or "/") if k in d else None for k in DIR_KEYS))
+    return out
 
 
 # ── a sheaf, as its file says ───────────────────────────────────────────────

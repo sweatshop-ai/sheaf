@@ -1287,9 +1287,9 @@ def test_a_fork_that_lands_after_the_gate_keeps_the_tell_from_james(team, box, w
     real = handler_mod.Handler._work_route
     seen = []
 
-    def box_at_the_gate(self, address, text, kind):
+    def box_at_the_gate(self, address, text, kind, member=None):
         seen.append(1)
-        return "box" if len(seen) == 1 else real(self, address, text, kind)
+        return "box" if len(seen) == 1 else real(self, address, text, kind, member)
     monkeypatch.setattr(handler_mod.Handler, "_work_route", box_at_the_gate)
     got = comment(team, work, "tell")
     assert got.status == 400 and got.json()["error"] == proxy.PROXY_LINE
@@ -1303,9 +1303,9 @@ def test_a_fork_that_lands_while_the_hub_looks_for_james_session_stays_live(team
     james_wrote({"sessions": team.hub.the_list.cfg.sessions_dir}, NEW)
     found = work_mod.james_has
 
-    def a_fork_lands_meanwhile(cfg, project, id):
+    def a_fork_lands_meanwhile(cfg, project, id, member=None):
         (work / DOC).write_text(ON_A_LAPTOP, encoding="utf-8")
-        return found(cfg, project, id)
+        return found(cfg, project, id, member)
     monkeypatch.setattr(work_mod, "james_has", a_fork_lands_meanwhile)
     assert not james_door(browser, james_writes, "reply", session=NEW, doc=ADDRESS, id=cid, text="Sent.")[0]
     assert "thierry-laptop" in sessions_of(work)[0] and not [s for s in sessions_of(work) if NEW in s]
@@ -1724,6 +1724,11 @@ def test_a_sessions_list_the_hub_cannot_rewrite_says_so_once_not_at_every_later_
 
 # --- path traversal in the project and session ids (tt-tiroir #8, #9) -------------------------------------
 
+def list_cfg(sessions_dir, work_dir):
+    return the_list.ListConfig(root=the_list.Path("/"), repo="a/b", project=1, token_file=the_list.Path("/t"),
+                               sessions_dir=sessions_dir, work_dir=the_list.Path(work_dir))
+
+
 def _transcript(folder, cwd, id):
     folder.mkdir(parents=True, exist_ok=True)
     (folder / f"{id}.jsonl").write_text(json.dumps({"cwd": cwd, "sessionId": id}) + "\n", encoding="utf-8")
@@ -1736,7 +1741,7 @@ def test_james_has_with_a_project_that_climbs_never_reads_outside_sessions_dir(t
     sessions.mkdir()
     work_dir.mkdir(parents=True)
     project = project.replace("/OUTSIDE", str(tmp_path / "outside"))
-    cfg = SimpleNamespace(sessions_dir=sessions, work_dir=str(work_dir))
+    cfg = list_cfg(sessions, str(work_dir))
     # A transcript that matches if `<work_dir>/<project>` were opened as a path: the kernel would land in tmp_path/outside.
     _transcript(tmp_path / "outside", os.path.join(cfg.work_dir, project), sid)
     assert os.path.isdir(os.path.join(cfg.work_dir, project, ""))
@@ -1746,7 +1751,7 @@ def test_james_has_with_a_project_that_climbs_never_reads_outside_sessions_dir(t
 def test_james_has_refuses_a_session_id_that_is_not_a_uuid(tmp_path):
     from types import SimpleNamespace
     sessions = tmp_path / "sessions"
-    cfg = SimpleNamespace(sessions_dir=sessions, work_dir="/home/james/work")
+    cfg = list_cfg(sessions, "/home/james/work")
     cwd = "/home/james/work/thinkingtoo/tiroir"
     _transcript(sessions / re.sub(r"[^A-Za-z0-9]", "-", cwd), cwd, "x")
     for sid in ("../x", "x", "%2e%2e%2fx", "x\0", str(uuid.uuid4()) + "/../x"):
@@ -1760,14 +1765,14 @@ def test_james_has_refuses_a_projects_folder_that_is_a_link(tmp_path):
     cwd = "/home/james/work/thinkingtoo/tiroir"
     _transcript(tmp_path / "elsewhere", cwd, sid)
     (sessions / re.sub(r"[^A-Za-z0-9]", "-", cwd)).symlink_to(tmp_path / "elsewhere")
-    cfg = SimpleNamespace(sessions_dir=sessions, work_dir="/home/james/work")
+    cfg = list_cfg(sessions, "/home/james/work")
     assert work_mod.james_has(cfg, "thinkingtoo/tiroir", sid) is False
 
 
 def test_open_transcript_refuses_an_id_that_is_not_a_uuid(tmp_path):
     from types import SimpleNamespace
     (tmp_path / "s" / FOLDER).mkdir(parents=True)
-    cfg = SimpleNamespace(sessions_dir=tmp_path / "s", work_dir="/home/james/work")
+    cfg = list_cfg(tmp_path / "s", "/home/james/work")
     # Each id below names one of these, a transcript of the project's as far as its first line goes, without the guard.
     for sid, planted in (("../../x", tmp_path / "x.jsonl"), ("../x", tmp_path / "s" / "x.jsonl"),
                          ("x", tmp_path / "s" / FOLDER / "x.jsonl")):

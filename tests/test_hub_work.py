@@ -1262,7 +1262,7 @@ def test_the_recorded_session_is_committed_as_james_s_door_token(committing, bro
     cfg = team.hub.the_list.cfg
     team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{
         **cfg.__dict__, "sessions_dir": sessions, "tell_dir": tell, "work_dir": the_list.Path("/home/james/work"),
-        "james_token": "james"}))
+        "james_tokens": ("james",)}))
     james_wrote({"sessions": sessions}, NEW)
     read = json.loads(james_door(browser, james_token, "read", doc=f"sheaves/{DOC}")[1])
     got = james_door(browser, james_token, "update", session=NEW, doc=f"sheaves/{DOC}",
@@ -1421,7 +1421,7 @@ def test_with_work_dir_the_filesystem_root_james_s_write_records_his_session(tea
     # `work_dir = "/"` is accepted; James then works in /<client>/<project>, never //<client>/<project>.
     cfg = listing(tmp_path, work_dir="/")
     team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{
-        **team.hub.the_list.cfg.__dict__, "work_dir": cfg.work_dir, "james_token": "james"}))
+        **team.hub.the_list.cfg.__dict__, "work_dir": cfg.work_dir, "james_tokens": ("james",)}))
     james_wrote(box, NEW, cwd="/thinkingtoo/tiroir", folder="-thinkingtoo-tiroir")
     cid = a_thread(team, work)
     assert not james_door(browser, james_token, "reply", session=NEW, doc=ADDRESS, id=cid, text="Sent.")[0]
@@ -1448,7 +1448,7 @@ def test_without_sessions_dir_or_work_dir_a_box_sheaf_offers_no_fork(team, box, 
 def james_writes(team, at_work, james_token):
     """`[list]` names the token James's door writes with."""
     cfg = team.hub.the_list.cfg
-    team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{**cfg.__dict__, "james_token": "james"}))
+    team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{**cfg.__dict__, "james_tokens": ("james",)}))
     return james_token
 
 
@@ -1796,3 +1796,62 @@ def test_a_drop_never_writes_through_a_link_planted_at_its_name(tmp_path, monkey
     said, wrote = work_mod.drop_named(folder, "thinkingtoo/tiroir", b"{}", "missing")
     assert said == "written" and not target.exists()
     assert not (folder / wrote).is_symlink() and (folder / wrote).read_bytes() == b"{}"
+
+
+# ── `[list]` names several door tokens: the header is read on each, only the first is James's own ─────────
+def test_an_old_james_token_key_still_parses(tmp_path):
+    assert listing(tmp_path, james_token="james").james_tokens == ("james",)
+    assert listing(tmp_path).james_tokens == ()
+
+
+def test_james_tokens_parse_as_a_list_and_stop_the_start_when_malformed(tmp_path):
+    assert listing(tmp_path, james_tokens=["james", "james-shared"]).james_tokens == ("james", "james-shared")
+    for bad in ([], ["a", "a"], ["a", ""], ["a", 1]):
+        with pytest.raises(the_list.ListError, match="'james_tokens' must be a list of different token names"):
+            listing(tmp_path, james_tokens=bad)
+    with pytest.raises(the_list.ListError, match="'james_tokens' must be a list"):
+        listing(tmp_path, james_tokens="james")
+    with pytest.raises(the_list.ListError, match="both in"):
+        listing(tmp_path, james_token="james", james_tokens=["james"])
+
+
+@pytest.fixture
+def two_james_tokens(team, at_work, browser):
+    """`[list]` names an own and a shared door token; (own, shared, the callers the hub heard of)."""
+    from sheafmd.hub.state import Tokens
+    tokens = Tokens()
+    own, shared = tokens.add("james", write=True), tokens.add("james-shared", write=True)
+    cfg = team.hub.the_list.cfg
+    team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{
+        **cfg.__dict__, "james_tokens": ("james", "james-shared")}))
+    heard, hook = [], browser.handler.door.called
+    browser.handler.door.called = lambda caller, address: (heard.append(caller), hook(caller, address))
+    return own, shared, heard
+
+
+def test_session_header_read_on_both_tokens(team, browser, work, two_james_tokens):
+    own, shared, heard = two_james_tokens
+    cid = a_thread(team, work)
+    for token in (own, shared):
+        assert not james_door(browser, token, "reply", session=NEW, doc=ADDRESS, id=cid, text="Sent.")[0]
+    assert [c.session for c in heard] == [NEW, NEW]
+    assert [c.own_session for c in heard] == [True, False]
+
+
+def test_a_header_on_the_shared_token_never_resolves_an_own_session(team, browser, work, two_james_tokens):
+    own, shared, heard = two_james_tokens
+    cid = a_thread(team, work)
+    james_wrote({"sessions": team.hub.the_list.cfg.sessions_dir}, NEW)      # NEW is a transcript of the own copy
+    assert not james_door(browser, shared, "reply", session=NEW, doc=ADDRESS, id=cid, text="Sent.")[0]
+    assert LIVE in sessions_of(work)[0] and not [s for s in sessions_of(work) if NEW in s]
+    assert hub_rows("session-recorded") == [] and hub_rows("session-not-recorded") == []
+    assert not james_door(browser, own, "reply", session=NEW, doc=ADDRESS, id=cid, text="Again.")[0]
+    assert NEW in sessions_of(work)[0]
+
+
+def test_a_token_outside_james_tokens_is_not_read(team, browser, work, two_james_tokens):
+    from sheafmd.hub.state import Tokens
+    other = Tokens().add("mistral", write=True)
+    cid = a_thread(team, work)
+    assert not james_door(browser, other, "reply", session=NEW, doc=ADDRESS, id=cid, text="Sent.")[0]
+    assert two_james_tokens[2] == [] or two_james_tokens[2][0].session is None

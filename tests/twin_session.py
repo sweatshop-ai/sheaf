@@ -1,7 +1,8 @@
 """One scripted session on a hub with no private root, run by tests/test_private_root_twin.py once against the
 code of a named older commit and once against this tree (`python twin_session.py <work folder>`, with PYTHONPATH
 naming the `src` folder to run). It writes the list repo under <work folder>/list; the test compares those files
-and the git log of the two runs byte for byte. It uses only what the older commit has too."""
+and the git log of the two runs byte for byte. It uses only what the older commit has too. Besides the list repo it writes <work folder>/snapshot.json: what each
+member's index and door `documents` list show, after each step that changes who may see a sheaf."""
 import json
 import os
 import pwd
@@ -23,6 +24,7 @@ import sheafmd  # noqa: E402
 from sheafmd import paths  # noqa: E402
 from sheafmd.hub import place, proxy, the_list  # noqa: E402
 from sheafmd.hub.core import Hub  # noqa: E402
+from sheafmd.hub.state import TokenRow  # noqa: E402
 from sheafmd.mcp import Caller, Door  # noqa: E402
 from sheafmd.source import md_hash  # noqa: E402
 
@@ -48,31 +50,50 @@ git(repo, "push", "-q", "origin", "HEAD:main")
 member = {"roots": [str(repo)]}
 cfg = proxy.parse({"origin": "https://front.example.com", "socket": "/run/sheaf-proxy/hub.sock",
                    "proxy_user": pwd.getpwuid(os.getuid()).pw_name,
-                   "members": {"id-a": {"name": "Member A", "short": "a", "email": "a@example.com", **member},
-                               "id-b": {"name": "Member B", "short": "b", "email": "b@example.com", **member}}},
+                   "members": {"id-a": {"name": "Member A", "short": "a", "email": "a@example.com", "tokens": ["tok-a"], **member},
+                               "id-b": {"name": "Member B", "short": "b", "email": "b@example.com", "tokens": ["tok-b"], **member}}},
                   "the twin")
 hub = Hub(port=39001, key=paths.ensure_key(), started_by="test", clock=lambda: NOW, proxy=cfg)
 hub.the_list = the_list.TheList(hub, the_list.ListConfig(repo, "acme/record", 1, work / "token"))
 root = hub.the_list.root()
 door, caller = Door(hub), Caller("Claude")
+callers = {"a": Caller("Claude", TokenRow("tok-a", "Claude", True)), "b": Caller("Claude", TokenRow("tok-b", "Claude", True))}
 DOC = f"{root.name}/acme/blog/2026-01-02-plan.md"
 
 
-def tool(name, **args):
+def tool(name, who=None, **args):
     _, out = door.handle(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                                     "params": {"name": name, "arguments": args}}).encode(), caller)
+                                     "params": {"name": name, "arguments": args}}).encode(), who or caller)
     got = out["result"]
     assert not got["isError"], got
     return json.loads(got["content"][0]["text"])
+
+
+SNAPSHOTS = []
+
+
+def scrubbed(value):
+    """`value` without the keys that hold a time the file system or the clock set (they differ between two runs)."""
+    if isinstance(value, dict):
+        return {k: scrubbed(v) for k, v in value.items() if k not in ("mtime", "ago", "when", "at")}
+    return [scrubbed(v) for v in value] if isinstance(value, list) else value
+
+
+def snapshot(label):
+    """What each member's index and door list show now, with the times and paths that differ between runs taken out."""
+    shown = {}
+    for short, member in (("a", cfg.members["id-a"]), ("b", cfg.members["id-b"])):
+        shown[short] = {"index": hub.index.data(member=member), "documents": tool("documents", who=callers[short], open_only=False)}
+    SNAPSHOTS.append({label: scrubbed(json.loads(json.dumps(shown, default=str).replace(str(work), "<work>")))})
 
 
 def now_text():
     return Path(hub.file(DOC)).read_text(encoding="utf-8")
 
 
-def rewrite(change):
+def rewrite(change, who=None):
     text = now_text()
-    tool("update", doc=DOC, text=change(text), expected_hash=md_hash(text))
+    tool("update", who=who, doc=DOC, text=change(text), expected_hash=md_hash(text))
 
 
 def by_hand(change):
@@ -86,14 +107,24 @@ def by_hand(change):
 
 tool("create", doc=DOC, text="---\nclient: acme\nproject: blog\n---\n# Plan\n\n- [ ] Approve\n\nFirst paragraph.\n")
 hub.entry(DOC)                                                                          # a page is opened: rendered, its versions kept
+snapshot("created")
 rewrite(lambda t: t.replace("First", "Second"))                                         # edit
 hub.entry(DOC).live.refresh(force=True)
 with place.held(hub, DOC):                                                              # tick, as the list's tick writes it
     Path(hub.file(DOC)).write_text(now_text().replace("- [ ] Approve", "- [x] Approve"), encoding="utf-8")
     hub.committed(DOC, cfg.members["id-a"], "tick")
+hub.the_list.ticked(DOC)                                                                # the list's tick, after the handler's
+snapshot("ticked")
 by_hand(lambda t: t.replace("client: acme", "visibility: owner\nowner: a\nclient: acme"))   # closed: to a private home
+snapshot("closed")
 by_hand(lambda t: t.replace("owner: a", "owner: b"))                                    # owner change: to the other's
+snapshot("owner changed")
 by_hand(lambda t: t.replace("visibility: owner\n", "").replace("owner: b\n", ""))       # shared again: back to the project
+snapshot("shared again")
+rewrite(lambda t: t.replace("client: acme", "visibility: owner\nowner: b\nclient: acme"), callers["a"])     # a door update that asks to close it
+snapshot("door update closing")
+rewrite(lambda t: t.replace("# Plan", "# Plan (revised)"), callers["b"])                          # and a plain edit by the other member's token, on a line the remote edit leaves alone
+snapshot("door update editing")
 hub.commits.settle()
 
 subprocess.run(["git", "clone", "-q", str(remote), str(other)], check=True, capture_output=True)    # a remote change
@@ -104,3 +135,4 @@ git(other, "push", "-q", "origin", "HEAD:main")
 hub.commits.poll(hub.roots.all())                                                       # the watcher's pull
 hub.commits.settle()
 hub.commits.stop()
+(work / "snapshot.json").write_text(json.dumps(SNAPSHOTS, indent=1, sort_keys=True), encoding="utf-8")

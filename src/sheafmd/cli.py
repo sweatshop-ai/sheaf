@@ -872,12 +872,12 @@ def cmd_mcp(argv: list[str]) -> int:
 
 def _member_named(display: str) -> str | None:
     """The name of the member of proxy mode (9.9) that `display` would pass for, or None. A
-    `[proxy]` table that cannot be read is the hub's start to refuse, and names nobody here."""
+    `[proxy]` table the hub would refuse still names its members here."""
     from .hub import proxy
     try:
         cfg = proxy.load()
     except proxy.ProxyError:
-        return None
+        return next((n for n in proxy.member_names() if proxy.same_name(n, display)), None)
     return next((m.name for m in (cfg.members.values() if cfg else ()) if proxy.same_name(m.name, display)), None)
 
 

@@ -1806,7 +1806,7 @@ def test_an_old_james_token_key_still_parses(tmp_path):
 
 def test_james_tokens_parse_as_a_list_and_stop_the_start_when_malformed(tmp_path):
     assert listing(tmp_path, james_tokens=["james", "james-shared"]).james_tokens == ("james", "james-shared")
-    for bad in ([], ["a", "a"], ["a", ""], ["a", 1]):
+    for bad in ([], ["a", "a"], ["a", ""], ["a", 1], ["a/b"], [" james"]):
         with pytest.raises(the_list.ListError, match="'james_tokens' must be a list of different token names"):
             listing(tmp_path, james_tokens=bad)
     with pytest.raises(the_list.ListError, match="'james_tokens' must be a list"):
@@ -1855,3 +1855,15 @@ def test_a_token_outside_james_tokens_is_not_read(team, browser, work, two_james
     cid = a_thread(team, work)
     assert not james_door(browser, other, "reply", session=NEW, doc=ADDRESS, id=cid, text="Sent.")[0]
     assert two_james_tokens[2] == [] or two_james_tokens[2][0].session is None
+
+
+def test_a_shared_call_leaves_the_own_token_s_waiting_session_alone(team, browser, work, two_james_tokens):
+    own, shared, heard = two_james_tokens
+    cid = a_thread(team, work)
+    assert not james_door(browser, own, "reply", session=NEW, doc=ADDRESS, id=cid, text="One.")[0]   # NEW not in the copy yet
+    assert LIVE in sessions_of(work)[0]
+    james_wrote({"sessions": team.hub.the_list.cfg.sessions_dir}, NEW)
+    assert not james_door(browser, shared, "reply", session=NEW, doc=ADDRESS, id=cid, text="Two.")[0]
+    assert LIVE in sessions_of(work)[0] and hub_rows("session-recorded") == []
+    assert not james_door(browser, own, "reply", session=NEW, doc=ADDRESS, id=cid, text="Three.")[0]
+    assert NEW in sessions_of(work)[0]

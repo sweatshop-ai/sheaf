@@ -112,6 +112,17 @@ def load() -> ProxyConfig | None:
     return parse(data["proxy"], paths.config_file(), data.get("list"))
 
 
+def member_names() -> list[str]:
+    """The `name` of each member the `[proxy]` table lists, read without the checks `load` makes: a table the hub
+    would refuse (git cannot tell about a folder, say) still names the people a token's replies must not pass for.
+    Empty when there is no table or it cannot be read."""
+    try:
+        members = _read().get("proxy", {}).get("members", {})
+        return [clean_display(m["name"]) for m in members.values() if isinstance(m, dict) and isinstance(m.get("name"), str)]
+    except (config.ConfigError, AttributeError):
+        return []
+
+
 def configured() -> bool:
     """Whether config.toml has a `[proxy]` table, whatever it holds: what a command that runs
     without the hub asks (`sheaf share`), so that a table the hub would refuse counts too. Raises
@@ -163,9 +174,18 @@ def _origin(origin: str, where: str) -> tuple[str, str]:
     return "https://" + netloc, netloc
 
 
+def _real(path: str) -> str:
+    """The real path of `path`; a NUL byte is a ProxyError, not a traceback."""
+    try:
+        return os.path.realpath(path)
+    except ValueError:
+        raise ProxyError(f"a folder in the configuration holds a NUL byte: {path!r}") from None
+
+
 def _relation(a: str, b: str) -> str | None:
-    """How the folder `a` stands to `b`, by their real paths: "the same as", "inside", "around", or None."""
-    a, b = os.path.realpath(a), os.path.realpath(b)
+    """How the folder `a` stands to `b`, by their real paths: "the same as", "inside", "around", or None. Compared
+    with case folded, so on a case-insensitive filesystem two spellings of one folder are one."""
+    a, b = _real(a).casefold(), _real(b).casefold()
     if a == b:
         return "the same as"
     if a.startswith(b.rstrip("/") + "/"):
@@ -173,23 +193,98 @@ def _relation(a: str, b: str) -> str | None:
     return "around" if b.startswith(a.rstrip("/") + "/") else None
 
 
+_REPO_VARS = frozenset({"GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                        "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CEILING_DIRECTORIES", "GIT_NAMESPACE"})
+GIT_TIMEOUT = 10                # seconds git may take to answer one question about a folder
+
+
+def _git(folder: str, *args) -> tuple[int, str, str] | None:
+    """(exit code, stdout, stderr) of `git -C folder args`, run in English and with the environment the hub's own git
+    runs in, less the variables that name a repo (they could point git at another one), so the config judged is the
+    config that pushes; None when git cannot be run or does not answer in time."""
+    env = {k: v for k, v in os.environ.items() if k not in _REPO_VARS} | {"LC_ALL": "C"}
+    try:
+        r = subprocess.run(["git", "-C", folder, *args], capture_output=True, text=True, timeout=GIT_TIMEOUT, env=env)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    return r.returncode, r.stdout.strip(), r.stderr
+
+
 def _git_out(folder: str, *args) -> str:
     """What `git -C folder args` prints, "" when git cannot say (no such folder, no repo)."""
-    try:
-        r = subprocess.run(["git", "-C", folder, *args], capture_output=True, text=True, timeout=10)
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    return r.stdout.strip() if r.returncode == 0 else ""
+    got = _git(folder, *args)
+    return got[1] if got is not None and got[0] == 0 else ""
+
+
+def git_top(folder: str) -> str:
+    """The top folder of the git work tree that holds `folder`, "" when there is none or git cannot say."""
+    return _git_out(folder, "rev-parse", "--show-toplevel")
+
+
+def _normal_url(url: str, folder: str) -> str:
+    """A remote's address as one spelling, so two clones that push to one place compare equal: a place on this
+    machine by its real path, otherwise `host/path` in lower case with no scheme, user, port, `.git` or trailing slash
+    (`git@host:o/r.git`, `ssh://host/o/r` and `https://host/o/r/` are one)."""
+    url = url.strip()
+    if url.startswith("file://"):
+        url = url[len("file://"):]
+    scp = re.fullmatch(r"(?:[^@/:]+@)?([^/:]+):(?!//)(.*)", url)
+    if scp and not url.startswith("/"):
+        host, path = scp.groups()
+    elif "://" in url:
+        u = urlsplit(url)
+        host, path = u.hostname or "", u.path
+    else:
+        place = _real(os.path.join(folder, url)).rstrip("/").removesuffix("/.git").removesuffix(".git")
+        return place.rstrip("/").casefold()
+    return f"{host}/{path.strip('/')}".removesuffix(".git").casefold()
+
+
+def _repo_facts(folder: str) -> tuple[set, set, set] | None:
+    """What identifies the repo of the work tree `folder`: its common git dir, its root commits and its remotes
+    (url and pushurl of each, normalised). None when `folder` is no repo (absent, or git says so and no `.git` is
+    there); a ProxyError when git gives no answer (a timeout, dubious ownership, an unreadable `.git`), because a
+    folder we cannot tell about is not one we may call separate."""
+    if not os.path.isdir(folder):
+        return None
+    unsure = ProxyError(f"cannot tell whether {folder} shares a repo with another folder: git gave no answer")
+    top = _git(folder, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if top is None:
+        raise unsure
+    if top[0] != 0:
+        if "not a git repository" in top[2] and not os.path.lexists(os.path.join(folder, ".git")):
+            return None
+        raise unsure
+    common = {_real(top[1]).casefold()}
+    got = _git(folder, "rev-list", "--max-parents=0", "--all")       # every branch: one that holds the other's history counts
+    if got is None or got[0] != 0:
+        raise unsure
+    first = set(got[1].split())
+    names = _git(folder, "remote")
+    if names is None or names[0] != 0:
+        raise unsure
+    up = _git(folder, "rev-parse", "--show-toplevel")           # git resolves a relative remote from the top of the work tree
+    if up is None or up[0] != 0 or not up[1]:
+        raise unsure
+    base = up[1]
+    urls = {_normal_url(top[1], base)}   # its own place too: a remote that names the other repo's folder is a share
+    for name in names[1].split():
+        for flags in ((), ("--push",)):
+            got = _git(folder, "remote", "get-url", *flags, "--all", name)
+            if got is None or got[0] != 0:
+                raise unsure
+            urls |= {_normal_url(u, base) for u in got[1].splitlines() if u.strip()}
+    return common, first, urls
 
 
 def _same_repo(a: str, b: str) -> bool:
     """Whether the work trees `a` and `b` share a repo: the same common git dir (a linked worktree has a git dir of
-    its own but shares objects, refs and remote with its main tree), or the same `origin` (two clones push to one)."""
-    ca, cb = (_git_out(f, "rev-parse", "--path-format=absolute", "--git-common-dir") for f in (a, b))
-    if ca and os.path.realpath(ca) == os.path.realpath(cb or "/nonexistent"):
-        return True
-    ua, ub = (_git_out(f, "config", "--get", "remote.origin.url") for f in (a, b))
-    return bool(ua) and ua == ub
+    its own but shares objects, refs and remote with its main tree), a root commit in common (a copy of the repo
+    whatever its remotes; a shallow clone's oldest commit is not its root, the one case this misses), or a remote
+    in common (two clones push to one place, however each spells its address). A folder that is no repo shares
+    none; git giving no answer for either is a ProxyError, never a "no"."""
+    fa, fb = _repo_facts(a), _repo_facts(b)
+    return fa is not None and fb is not None and any(x & y for x, y in zip(fa, fb))
 
 
 def _private_root(m: dict, roots: list, list_table: dict | None, mhere: str) -> str:
@@ -201,8 +296,8 @@ def _private_root(m: dict, roots: list, list_table: dict | None, mhere: str) -> 
     if not isinstance(value, str) or not value.startswith("/"):
         what = "one absolute path, not a list" if isinstance(value, list) else "an absolute path"
         raise ProxyError(f"'private_root' must be {what}, not {value!r}, in {mhere}; a member has at most one")
-    value = os.path.realpath(value)
-    if not any(os.path.realpath(r) == value for r in roots):
+    value = _real(value)
+    if not any(_real(r) == value for r in roots):
         raise ProxyError(f"'private_root' {value} must also be one of the member's 'roots', in {mhere}")
     if list_table is None:
         raise ProxyError(f"'private_root' needs a [list] table: the list is where a private sheaf is named, in {mhere}")
@@ -210,12 +305,28 @@ def _private_root(m: dict, roots: list, list_table: dict | None, mhere: str) -> 
     listed = isinstance(list_root, str) and list_root.startswith("/")
     if listed and (how := _relation(value, list_root)) is not None:
         raise ProxyError(f"'private_root' {value} is {how} the list's root {list_root}, in {mhere}")
-    if _git_out(value, "rev-parse", "--show-toplevel") != value:
+    if git_top(value).casefold() != value.casefold():
         raise ProxyError(f"'private_root' {value} must be the top folder of a git work tree of its own, in {mhere}")
-    if listed:
-        if _same_repo(value, list_root):
-            raise ProxyError(f"'private_root' {value} is in the same git repo as the list's root, in {mhere}")
+    if listed and _shares_repo(value, list_root, mhere):
+        raise ProxyError(f"'private_root' {value} is in the same git repo as the list's root, in {mhere}")
+    repo = list_table.get("repo")               # where the list's issues live: a private root that pushes there shares it
+    if isinstance(repo, str):
+        issues = f"github.com/{repo.strip('/')}".removesuffix(".git").casefold()
+        try:
+            mine = _repo_facts(value)
+        except ProxyError as e:
+            raise ProxyError(f"{e}, in {mhere}") from None
+        if mine is not None and issues in mine[2]:
+            raise ProxyError(f"'private_root' {value} has the list's repo {repo} as a remote, in {mhere}")
     return value
+
+
+def _shares_repo(a: str, b: str, mhere: str) -> bool:
+    """`_same_repo`, with the member's block named when git gives no answer."""
+    try:
+        return _same_repo(a, b)
+    except ProxyError as e:
+        raise ProxyError(f"{e}, in {mhere}") from None
 
 
 def parse(t: dict, where, list_table: dict | None = None) -> ProxyConfig:
@@ -281,7 +392,8 @@ def parse(t: dict, where, list_table: dict | None = None) -> ProxyConfig:
 
 def _check_private_roots(members: dict, where) -> None:
     """A private root is no other member's root, nor inside or around one, and is not inside or around another
-    private root, nor in the same git repo as one."""
+    private root, nor in the same git repo as one, nor as any root of another member (a clone or a linked
+    worktree of a private repo is no ordinary root)."""
     for mid, m in members.items():
         if not m.private_root:
             continue
@@ -293,8 +405,11 @@ def _check_private_roots(members: dict, where) -> None:
                 raise ProxyError(f"'private_root' {m.private_root} is also, or is inside or around, a root of {o.name}, in {mhere}")
             if o.private_root and (how := _relation(m.private_root, o.private_root)) is not None:
                 raise ProxyError(f"'private_root' {m.private_root} is {how} the private root of {o.name}, in {mhere}")
-            if o.private_root and _same_repo(m.private_root, o.private_root):
+            if o.private_root and _shares_repo(m.private_root, o.private_root, mhere):
                 raise ProxyError(f"'private_root' {m.private_root} is in the same git repo as the private root of "
+                                 f"{o.name}, in {mhere}")
+            if (mine := next((r for r in o.roots if _shares_repo(m.private_root, r, mhere)), None)) is not None:
+                raise ProxyError(f"'private_root' {m.private_root} is in the same git repo as the root {mine} of "
                                  f"{o.name}, in {mhere}")
 
 

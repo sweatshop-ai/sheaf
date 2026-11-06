@@ -26,7 +26,7 @@ def repo_with_remote(base: Path, name: str) -> Path:
     subprocess.run(["git", "clone", "-q", str(base / f"{name}.git"), str(repo)], check=True, capture_output=True)
     (repo / ".sheaf.toml").write_text('versions = "root"\ncommit = true\npush = true\n', encoding="utf-8")
     git(repo, "add", "-A")
-    git(repo, "commit", "-q", "-m", "first")
+    git(repo, "commit", "-q", "-m", f"first of {name}")   # a name of its own: two repos made at once must not share a root commit
     git(repo, "push", "-q", "origin", "HEAD:main")
     return repo
 
@@ -52,6 +52,9 @@ class TwoRoots:
         return proxy.parse(self.table(**over), "the test", self.list_table())
 
     def hub(self, cfg: proxy.ProxyConfig | None = None) -> Hub:
+        """A hub built WITH the config: private roots are registered at construction only. A test that sets `hub.proxy`
+        afterwards (conftest's `front`, the list, commits and grants tests do) registers none, and one that needs a
+        private root builds its hub here."""
         hub = Hub(port=config.port(), key=paths.ensure_key(), started_by="test", proxy=cfg or self.config())
         hub.the_list = the_list.TheList(hub, the_list.ListConfig(self.list_repo, "acme/record", 1,
                                                                  self.base / "token"))

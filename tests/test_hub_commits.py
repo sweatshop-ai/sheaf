@@ -1732,3 +1732,37 @@ def test_a_root_registered_after_the_start_is_guarded_from_what_the_clone_had_fe
     assert box.hub.commits.settle()
     assert git(remote, "rev-parse", "main").strip() == tip
     assert rows("push-diverged")[0]["error"] == SAW
+
+
+def test_a_repo_met_after_the_start_is_refused_on_its_second_poll_too(box, sheaves, remote, tmp_path):
+    box.hub.commits._refuse = lambda: True
+    merged_on_github(tmp_path, remote, {"README.md": "# The sheaves\n"}, "a README")
+    git(sheaves, "fetch", "-q", "origin")
+    tip = force_pushed(tmp_path, remote)
+    for _ in range(2):
+        poll_now(box, sheaves)
+        assert not (sheaves / "rewritten.txt").exists()
+    edit(box, sheaves)
+    assert box.hub.commits.settle()
+    assert git(remote, "rev-parse", "main").strip() == tip
+    assert last_seen(sheaves) not in ("", tip)                       # kept where it was seeded
+
+
+def test_a_reset_between_the_pull_and_the_push_is_not_forced_over_the_remote(guarded, sheaves, remote, tmp_path,
+                                                                            monkeypatch):
+    first = git(sheaves, "rev-list", "--max-parents=0", "HEAD").strip()
+    merged_on_github(tmp_path, remote, {"README.md": "# The sheaves\n"}, "a README")
+    pulled = guarded.hub.commits._pull
+
+    def then_reset(root, *args, **kw):
+        go = pulled(root, *args, **kw)
+        git(sheaves, "reset", "-q", "--hard", first)
+        (sheaves / "own.txt").write_text("a person's own\n", encoding="utf-8")
+        git(sheaves, "add", "-A")
+        git(sheaves, "commit", "-q", "-m", "a person's own")
+        return go
+    monkeypatch.setattr(guarded.hub.commits, "_pull", then_reset)
+    edit(guarded, sheaves, words="Second, over a reset.")
+    assert guarded.hub.commits.settle()
+    assert git(remote, "log", "-1", "--format=%s", "main").strip() == "a README"       # not forced over
+    assert rows("push-failed")

@@ -513,13 +513,15 @@ class Commits:
                     if guarded:
                         sent = _git(folder, "rev-parse", "HEAD").stdout.strip()
                         on = _git(folder, "symbolic-ref", "-q", "--short", "HEAD").stdout.strip()
-                    lease = []
-                    if guarded and on:
+                    lease, what = [], "HEAD"
+                    if guarded and on and sent:
                         # The remote's branch must still be the tip the pull took in: one rewound since is refused.
+                        # A lease also forces, so it is used only for a commit that holds that tip (a fast-forward),
+                        # and pushes that commit to that branch, not whatever HEAD has become.
                         seen = _git(folder, "rev-parse", "-q", "--verify", f"{LAST_SEEN}/{on}^{{commit}}").stdout.strip()
-                        if seen:
-                            lease = [f"--force-with-lease=refs/heads/{on}:{seen}"]
-                    r = _git(folder, "push", "-q", *lease, "origin", "HEAD", seconds=PUSH_SECONDS,
+                        if seen and _git(folder, "merge-base", "--is-ancestor", seen, sent).returncode == 0:
+                            lease, what = [f"--force-with-lease=refs/heads/{on}:{seen}"], f"{sent}:refs/heads/{on}"
+                    r = _git(folder, "push", "-q", *lease, "origin", what, seconds=PUSH_SECONDS,
                              children=self._children)
                     if r.returncode != 0:
                         # The commit stays; the next write's push, or the next poll, carries it.
@@ -572,6 +574,8 @@ class Commits:
             if guarded else ""
         if guarded and not prev:                       # a root registered after the start: seed from what was fetched
             prev = _git(folder, "rev-parse", "-q", "--verify", f"refs/remotes/origin/{name}^{{commit}}").stdout.strip()
+            if prev:                                   # kept: the fetch moves the tracking ref, this one stays
+                self._last_seen(folder, name, prev)
         r = _git(folder, "fetch", "-q", "--no-tags", "origin", f"refs/heads/{branch.stdout.strip()}",
                  seconds=seconds, children=self._children)
         if r.returncode != 0:

@@ -56,6 +56,7 @@ class Entry:
     address: str
     file: Callable[[], Path]     # where its file is now: a sheaf of the list's root is found by its name (9.11)
     root_id: str = ""            # the id of the root it was made for (SPEC 8.2), which its page carries (10.1)
+    file_root: str = ""          # the id of the root its file was found in when it was opened (rule I): see `Hub._entry`
     live: LiveDocument | None = None
     bus: Bus = field(default_factory=Bus)
     html: str = ""
@@ -213,14 +214,19 @@ class Hub:
         moves a sheaf of another root holds its name before its files, as the pull does, and the two never wait on
         each other (#76)."""
         names = set()
+        listed = next((r for r in self.roots.all() if place.applies(self, r.name)), None)
         for r in self.roots.all():
-            if not place.applies(self, r.name):
+            if place.applies(self, r.name):
+                at = r
+            elif r.id in self.private_roots and listed is not None:
+                at = listed                  # a file of a private root is named, and locked, as the list's
+            else:
                 continue
             top = os.path.realpath(r.path)
             for f in files:
                 rel = os.path.relpath(f, top)
                 if not rel.startswith("..") and (name := place.logical(rel.replace(os.sep, "/"))):
-                    names.add((top, name, r.name))
+                    names.add((os.path.realpath(at.path), name, at.name))
         with ExitStack() as held:
             for _, name, at in sorted(names):
                 held.enter_context(place.held(self, f"{at}/{name}"))
@@ -242,7 +248,16 @@ class Hub:
         root = self.roots.get(a.root)
         if root is None:
             return
-        rel = place.file_rel(Path(os.path.realpath(root.path)), a.rel) if place.applies(self, a.root) else a.rel
+        if place.applies(self, a.root):
+            try:
+                held = self.entries.get(address)         # the file an open document was made for, no other
+                got = place.file_at(self, address, held.file_root if held else "") if self.private_roots else None
+            except roots_mod.NotFound:
+                self.record("commit-refused", address, why="its file is not where the sheaf was opened")
+                return
+            root, rel = got if got else (root, place.file_rel(Path(os.path.realpath(root.path)), a.rel))
+        else:
+            rel = a.rel
         if author is not None:
             who = author
         elif member is not None:
@@ -251,10 +266,11 @@ class Hub:
             who = Author(by or self.person, "")
         self.commits.saved(root, rel, who, what, gone=gone, key=a.rel)
 
-    def file(self, address: str, placed: bool | None = None) -> Path:
+    def file(self, address: str, placed: bool | None = None, bound: str = "") -> Path:
         """The path of the file the document at `address` names, there or not, unchecked: in the list's root the one
         file that holds a sheaf's name, wherever it lives (9.11), else the address's own path. `placed` is whether
-        the hub places the root's sheaves (`place.applies`), when the caller knows it."""
+        the hub places the root's sheaves (`place.applies`), when the caller knows it. `bound`: the private root an
+        open document was made for; its file is never found anywhere else (`place.file_at`)."""
         at = roots_mod.Address.parse(address)
         root = self.roots.get(at.root)
         if root is None:
@@ -263,6 +279,8 @@ class Hub:
             placed = place.applies(self, at.root)
         if not placed:
             return root.path / at.rel
+        if self.private_roots and (got := place.file_at(self, address, bound)):
+            return got[0].path / got[1]
         return root.path / place.file_rel(Path(os.path.realpath(root.path)), at.rel)
 
     def url(self, address: str) -> str:
@@ -285,6 +303,14 @@ class Hub:
         path = self.roots.document(address)
         with self._lock:
             e = self.entries.get(address)
+            if e is not None and self.private_roots and place.applies(self, name):
+                # The store and the file an entry uses cannot outlive the root they were chosen for: one bound to
+                # a private root is refused when its file is not there (`file_at`); one bound to another root is
+                # dropped when the file has moved to a private root, and made again.
+                got = place.file_at(self, address, e.file_root)
+                if got is not None and got[0].id != e.file_root:
+                    del self.entries[address]
+                    e = None
             if e is not None:
                 return e
             if self.roots.get(name) != root:
@@ -293,16 +319,18 @@ class Hub:
                 # Keyed by the sheaf's name: its file is found again at each read, and under the name's lock at
                 # each write, so a move of the file changes nothing the hub keeps (9.11).
                 def file():
-                    return Path(os.path.realpath(self.file(address, placed=True)))
+                    return Path(os.path.realpath(self.file(address, placed=True, bound=e.file_root)))
 
                 def hold():
                     return place.held(self, address)
             else:
                 file, hold = (lambda: path), None
             e = Entry(address, file, root.id)
+            at = place.file_at(self, address) if self.private_roots and place.applies(self, name) else None
+            e.file_root = at[0].id if at else root.id
             e.live = LiveDocument(file, render=lambda text: self._rendered(e, text),
                                   publish=e.bus.publish, by=self.person, clock=self.clock,
-                                  versions=self._versions_of(root), address=address, hold=hold)
+                                  versions=self._versions_of(at[0] if at else root), address=address, hold=hold)
             e.live.refresh(force=True)           # the first render: e.html
             self.entries[address] = e
             return e

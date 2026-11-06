@@ -308,3 +308,23 @@ def test_git_config_variables_of_the_hub_reach_the_check(roots, monkeypatch):
     monkeypatch.setenv("GIT_CONFIG_VALUE_0", str(roots.list_repo))
     got = proxy._git(str(roots.private_repo), "config", "--get", "url.file:///nowhere/.insteadOf")
     assert got is not None and got[1] == str(roots.list_repo)
+
+
+def test_private_root_config_refused_when_its_remote_is_the_lists_issue_repo(roots):
+    """`[list] repo` names where the list lives on the host; a private root that pushes there shares the list's repo."""
+    table = {**roots.list_table(), "repo": "acme/record"}
+    for spelling in ("git@github.com:acme/record.git", "https://github.com/Acme/record/"):
+        own = independent_repo(roots.base, "issues-" + str(len(spelling)), {"origin": spelling})
+        with pytest.raises(ProxyError, match="same git repo as the list's root"):
+            proxy.parse(roots.table({"private_root": own, "roots": [own]}), "the test", table)
+
+
+def test_a_relative_remote_is_read_from_the_top_of_the_work_tree(roots):
+    """Another member's root in a subfolder of a repo whose `origin = ../private` pushes into the private repo."""
+    team = roots.base / "team"
+    subprocess.run(["git", "init", "-q", str(team)], check=True)
+    git(team, "commit", "-q", "--allow-empty", "-m", "team")
+    (team / "docs").mkdir()
+    git(team, "remote", "add", "origin", "../" + roots.private_repo.name)
+    with pytest.raises(ProxyError, match="same git repo as the root .* of Member B"):
+        proxy.parse(roots.table(b={"roots": [str(roots.list_repo), str(team / "docs")]}), "the test", roots.list_table())

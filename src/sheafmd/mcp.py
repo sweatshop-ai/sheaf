@@ -695,7 +695,7 @@ class Door:
             # on the way points to.
             check_create(top, rel)
             # A sheaf's name is taken by its file at home and at every private home (9.11), whoever's it is.
-            if name is not None and place.taken(top, name):
+            if name is not None and place.taken(self.hub, root, name):
                 raise FileExistsError(errno.EEXIST, "File exists", rel)
         except OSError as e:
             raise _not_made(address, e) from None
@@ -706,9 +706,13 @@ class Door:
         self._check_size(text)      # again: the owner `_owned` gave it is part of the page
         # Made at its home (9.11), so no file, and no commit, ever holds a sheaf that is its owner's alone at the
         # project's path: one with no home is not made.
-        if name is not None and (home := place.home(self.hub, root, name, text)) != rel:
-            if home is None:
+        if name is not None and (found := place.home_in(self.hub, root, name, text)) != (root, rel):
+            if found is None:
                 raise ToolError(f"{address} cannot be made: {place.NO_SHORT}, so it would have no home.", "path")
+            home_root, home = found
+            if home_root.id != root.id:
+                # Not yet: made in the list's root it would be a private sheaf in the shared repo (9.11).
+                raise ToolError(f"{address} cannot be made: {place.PRIVATE_ROOT}.", "path")
             if place.ignores(top, home):
                 # Made there, it would be untracked and leave the listing (8.6): refused as a move there is.
                 raise ToolError(f"{address} cannot be made: {place.IGNORED}, so it would have no home.", "path")

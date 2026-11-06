@@ -141,7 +141,7 @@ class Hub:
         self.runner = Jobs()
         self.sender = f"uds:{paths.hub_socket(port)}"
         self.asktell = AskTell(self)
-        self.private_roots: dict = {}            # root id -> id of the member whose private root it is; empty without one
+        self.private_roots: dict[str, str] = {}  # root id -> id of the member whose private root it is; empty without one
         self._register_private_roots()
 
     def _register_private_roots(self):

@@ -25,6 +25,7 @@ import re
 import socket
 import stat
 import struct
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -172,27 +173,47 @@ def _relation(a: str, b: str) -> str | None:
     return "around" if b.startswith(a.rstrip("/") + "/") else None
 
 
+def _git_out(folder: str, *args) -> str:
+    """What `git -C folder args` prints, "" when git cannot say (no such folder, no repo)."""
+    try:
+        r = subprocess.run(["git", "-C", folder, *args], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def _same_repo(a: str, b: str) -> bool:
+    """Whether the work trees `a` and `b` share a repo: the same common git dir (a linked worktree has a git dir of
+    its own but shares objects, refs and remote with its main tree), or the same `origin` (two clones push to one)."""
+    ca, cb = (_git_out(f, "rev-parse", "--path-format=absolute", "--git-common-dir") for f in (a, b))
+    if ca and os.path.realpath(ca) == os.path.realpath(cb or "/nonexistent"):
+        return True
+    ua, ub = (_git_out(f, "config", "--get", "remote.origin.url") for f in (a, b))
+    return bool(ua) and ua == ub
+
+
 def _private_root(m: dict, roots: list, list_table: dict | None, mhere: str) -> str:
     """The member's `private_root`, checked on its own and against the list (private roots); "" without the key.
     What it must not be next to another member's roots or private roots is checked once all members are read."""
     if "private_root" not in m:
         return ""
     value = m["private_root"]
-    if isinstance(value, list):
-        raise ProxyError(f"a member has at most one 'private_root', not {len(value)}, in {mhere}")
     if not isinstance(value, str) or not value.startswith("/"):
-        raise ProxyError(f"'private_root' must be an absolute path, not {value!r}, in {mhere}")
-    value = value.rstrip("/") or "/"
-    if not any(os.path.realpath(r) == os.path.realpath(value) for r in roots):
+        what = "one absolute path, not a list" if isinstance(value, list) else "an absolute path"
+        raise ProxyError(f"'private_root' must be {what}, not {value!r}, in {mhere}; a member has at most one")
+    value = os.path.realpath(value)
+    if not any(os.path.realpath(r) == value for r in roots):
         raise ProxyError(f"'private_root' {value} must also be one of the member's 'roots', in {mhere}")
     if list_table is None:
         raise ProxyError(f"'private_root' needs a [list] table: the list is where a private sheaf is named, in {mhere}")
     list_root = list_table.get("root")
-    if isinstance(list_root, str) and list_root.startswith("/"):
-        if (how := _relation(value, list_root)) is not None:
-            raise ProxyError(f"'private_root' {value} is {how} the list's root {list_root}, in {mhere}")
-        from .commits import _repo          # the repo a commit goes to: two folders of one repo are one root
-        if _repo(Path(value)) == _repo(Path(list_root)):
+    listed = isinstance(list_root, str) and list_root.startswith("/")
+    if listed and (how := _relation(value, list_root)) is not None:
+        raise ProxyError(f"'private_root' {value} is {how} the list's root {list_root}, in {mhere}")
+    if _git_out(value, "rev-parse", "--show-toplevel") != value:
+        raise ProxyError(f"'private_root' {value} must be the top folder of a git work tree of its own, in {mhere}")
+    if listed:
+        if _same_repo(value, list_root):
             raise ProxyError(f"'private_root' {value} is in the same git repo as the list's root, in {mhere}")
     return value
 
@@ -259,7 +280,8 @@ def parse(t: dict, where, list_table: dict | None = None) -> ProxyConfig:
 
 
 def _check_private_roots(members: dict, where) -> None:
-    """A private root is in no other member's `roots` and is not inside or around another private root."""
+    """A private root is no other member's root, nor inside or around one, and is not inside or around another
+    private root, nor in the same git repo as one."""
     for mid, m in members.items():
         if not m.private_root:
             continue
@@ -267,10 +289,13 @@ def _check_private_roots(members: dict, where) -> None:
         for o in members.values():
             if o.id == mid:
                 continue
-            if any(os.path.realpath(r) == os.path.realpath(m.private_root) for r in o.roots):
-                raise ProxyError(f"'private_root' {m.private_root} is also one of the roots of {o.name}, in {mhere}")
+            if any(_relation(m.private_root, r) is not None for r in o.roots):
+                raise ProxyError(f"'private_root' {m.private_root} is also, or is inside or around, a root of {o.name}, in {mhere}")
             if o.private_root and (how := _relation(m.private_root, o.private_root)) is not None:
                 raise ProxyError(f"'private_root' {m.private_root} is {how} the private root of {o.name}, in {mhere}")
+            if o.private_root and _same_repo(m.private_root, o.private_root):
+                raise ProxyError(f"'private_root' {m.private_root} is in the same git repo as the private root of "
+                                 f"{o.name}, in {mhere}")
 
 
 def default_email(mid: str, origin: str) -> str:

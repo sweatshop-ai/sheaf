@@ -19,7 +19,7 @@ def git(at, *args):
                           check=True, capture_output=True, text=True).stdout
 
 
-def make_repo(base: Path, name: str) -> Path:
+def repo_with_remote(base: Path, name: str) -> Path:
     """A work tree `base/name` that commits and pushes to a bare `base/name.git`, with a first commit."""
     subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(base / f"{name}.git")], check=True)
     repo = base / name
@@ -51,13 +51,12 @@ class TwoRoots:
     def config(self, **over) -> proxy.ProxyConfig:
         return proxy.parse(self.table(**over), "the test", self.list_table())
 
-    def hub(self, cfg: proxy.ProxyConfig | None = None, with_list: bool = True) -> Hub:
+    def hub(self, cfg: proxy.ProxyConfig | None = None) -> Hub:
         hub = Hub(port=config.port(), key=paths.ensure_key(), started_by="test", proxy=cfg or self.config())
-        if with_list:
-            hub.the_list = the_list.TheList(hub, the_list.ListConfig(self.list_repo, "acme/record", 1,
-                                                                     self.base / "token"))
+        hub.the_list = the_list.TheList(hub, the_list.ListConfig(self.list_repo, "acme/record", 1,
+                                                                 self.base / "token"))
         return hub
 
 
 def two_roots(base: Path) -> TwoRoots:
-    return TwoRoots(base, make_repo(base, "list"), make_repo(base, "private"))
+    return TwoRoots(base, repo_with_remote(base, "list"), repo_with_remote(base, "private"))

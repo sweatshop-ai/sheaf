@@ -30,7 +30,7 @@ from .agents import detect
 from .hub.auth import clean_display
 from .hub.client import HubUnavailable
 from .hub.roots import Address, NotFound, address_of_url, in_git_dir
-from .hub import place, visibility
+from .hub import place, targets, visibility
 from .hub.state import TokenRow
 from .render import COMMENT_RE as HTML_COMMENT_RE, strip_comments
 from .source import check_create, create_file, md_hash, now, update_file
@@ -329,6 +329,17 @@ class Door:
             self.hub.record_exception("session-hook-failed", address, tool=name)
 
     # ── naming a document ────────────────────────────────────────────────────
+    def _agent_wrote(self, address: str, caller: Caller):
+        """A write made with an agent's token makes that agent the document's target: the member's own when the
+        token acts for one, else the hub person's (SPEC 9.8). A read never gets here. The write stands whatever
+        the hub does with it."""
+        if caller.token is None or caller.token.client is None:
+            return
+        try:
+            targets.note_write(self.hub, address, caller.token, self._member(caller))
+        except Exception:
+            self.hub.record_exception("target-failed", address)
+
     def _address(self, doc: str, caller: Caller) -> str:
         """`<root>/<path>` of the document `doc` names: that address itself, the URL of its page,
         or the absolute path of the .md. A caller who may add roots (the key) has the root of a
@@ -568,6 +579,7 @@ class Door:
         self._write(address, caller, args["doc"], "reply",
                     {"id": cid, "body": text, "resolve": args.get("resolve", False)},
                     role=args.get("role", "answer"))
+        self._agent_wrote(address, caller)
         c = self._comment(address, cid, caller, args["doc"])
         return {"id": cid, "status": c.status, "replies": c.as_dict()["replies"]}
 
@@ -576,6 +588,7 @@ class Door:
         cid = args["id"]
         if self._comment(address, cid, caller, args["doc"]).status != "resolved":
             self._write(address, caller, args["doc"], "status", {"id": cid, "status": "resolved"})
+            self._agent_wrote(address, caller)
         return {"id": cid, "status": "resolved"}
 
     def _read(self, args: dict, caller: Caller):
@@ -682,6 +695,7 @@ class Door:
             text = self._make(root, top, rel, name, address, text, caller)
             self.hub.wrote(address)
             self.hub.committed(address, by=caller.display, what="create")
+        self._agent_wrote(address, caller)
         return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text)}
 
     def _make(self, root, top: Path, rel: str, name: str | None, address: str, text: str, caller: Caller):
@@ -746,6 +760,8 @@ class Door:
             finally:
                 if moved:                           # moved, then failed before its commit: the move is committed
                     self.hub.committed(address, by=caller.display, what="update", gone=moved.pop())
+        if before != text:
+            self._agent_wrote(address, caller)
         return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text), "changed": before != text}
 
     def _updated(self, address: str, args: dict, text: str, expected: str, caller: Caller, moved: list):

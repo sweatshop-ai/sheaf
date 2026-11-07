@@ -4,7 +4,9 @@
 
 **Blocked by:** 03 (The target is a session or an agent, and the person can change it)
 
-**Status:** ready-for-agent
+**Claimed by:** Naya 2026-11-07 05:18
+
+**Status:** in-progress
 
 - [ ] Tell (button or comment with `tell`) to an agent target writes the comment and records a waiting Tell in the state folder; it survives a hub restart and has no expiry
 - [ ] `documents` with that agent's token lists the document first, even with no other open comment, with `tells` holding the Tell's message; no other token, and no other member's agent, ever sees it

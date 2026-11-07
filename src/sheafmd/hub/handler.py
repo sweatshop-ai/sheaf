@@ -1601,6 +1601,7 @@ class Handler:
                     e.live.stop_waiting(snap["id"])
                 snap["tellError"] = r.message
             snap["telling"] = e.live.waiting()
+        snap["waits"] = self.hub.waiting_tells.waits(e.address, member)     # the Tells that wait for an agent (9.8)
         return _ok(**(proxy.for_member(snap) if member else snap))
 
     @staticmethod

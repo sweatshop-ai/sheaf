@@ -25,7 +25,7 @@ def test_change_lists_the_other_targets_and_picking_one_moves_the_target(tab, ag
     assert site.hub.docs.get(DOC)["session"]["session"] == "s-1"
     until(lambda: tab.page.text_content("#rd-agent").startswith(f"ChatGPT ({site.hub.person})"),
           what="the Agent line to name the agent")
-    assert "not available yet" in tab.page.text_content("#rd-agent")
+    assert "Tell → ChatGPT" in tab.page.text_content("#rd-agent")
     tab.page.click("#rd-target-change")                                # now the session can be taken back
     assert tab.page.locator("#rd-targets button.rd-current").inner_text().strip().startswith(f"ChatGPT ({site.hub.person})")
     tab.page.click("#rd-targets button:not(.rd-current)")

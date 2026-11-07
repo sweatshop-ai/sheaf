@@ -46,9 +46,9 @@ def prose(text):
 class LiveDocument:
     def __init__(self, md, render, publish, by="unknown", clock=time.time,
                  versions=None, address=None, hold=None):
-        """`versions` (a `state.Versions`) and `address` (`<root>/<path>`) together keep every
-        text this document hands a page on disk too (SPEC 7.4), so a save made against a page
-        rendered before a restart still merges.
+        """`versions` (a `state.Versions`, or a callable that finds it at each use, or None for no store) and
+        `address` (`<root>/<path>`) together keep every text this document hands a page on disk too
+        (SPEC 7.4), so a save made against a page rendered before a restart still merges.
 
         `md` is the file, or a callable that finds it at each read and write: a sheaf of the list's
         root is the document of its name wherever its file is (9.11). `hold()` is a context held
@@ -110,14 +110,20 @@ class LiveDocument:
         """Test seam, a no-op: a save or a comment calls it after its write and before its
         render, with the lock held and the file lock released."""
 
+    def _stored(self):
+        """The versions store now: found at each use when `versions` is a callable, so it follows the file."""
+        s = self._store
+        return s() if callable(s) else s
+
     def _remember(self, text):
         v = self._versions
         v[rds.md_hash(text)] = text
         while len(v) > VERSIONS:
             v.pop(next(iter(v)))
-        if self._store is not None and self._address is not None:
+        store = self._stored()
+        if store is not None and self._address is not None:
             try:
-                self._store.put(self._address, text)
+                store.put(self._address, text)
             except OSError:
                 pass            # a full disk costs a merge after a restart, never a save
 
@@ -134,8 +140,9 @@ class LiveDocument:
         text = self._versions.get(h)
         if text is None:
             text = self._pins.get(h)
-        if text is None and self._store is not None and self._address is not None:
-            text = self._store.get(self._address, h)
+        store = self._stored() if text is None else None
+        if store is not None and self._address is not None:
+            text = store.get(self._address, h)
         return text
 
     def _rerender(self):
@@ -429,8 +436,9 @@ class LiveDocument:
         memory only from now on. Under the lock, so the text of a write still under way is on disk by
         then and goes with the others."""
         with self._held():
-            if self._store is not None and self._address is not None:
-                self._store.forget(self._address)
+            store = self._stored()
+            if store is not None and self._address is not None:
+                store.forget(self._address)
             self._store = None
 
     def pin(self, h):
@@ -447,9 +455,10 @@ class LiveDocument:
             self._pins[h] = text
             while len(self._pins) > PINS:
                 self._pins.pop(next(iter(self._pins)))
-            if self._store is not None and self._address is not None:
+            store = self._stored()
+            if store is not None and self._address is not None:
                 try:
-                    self._store.pin(self._address, text)
+                    store.pin(self._address, text)
                 except OSError:
                     pass        # a full disk costs the pin after a restart, never the one in memory
             return True

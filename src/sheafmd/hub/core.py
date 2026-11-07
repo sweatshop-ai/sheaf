@@ -147,6 +147,7 @@ class Hub:
         # Real path of every CONFIGURED private root -> id of the member whose it is: recorded before any validation,
         # whether the root registers or is refused, and never shrunk (`place.in_private`, SPEC 9.11 rule A).
         self._private_paths: dict[str, str] = {}
+        self._private_ids: dict[tuple, str] = {}    # (st_dev, st_ino) of each, so a spelling in another case is the same folder
         self._private_good: set[str] = set()       # those that registered: placement only, never privacy
         self._register_private_roots()
         self.commits.seed(self.roots.all())      # the rewrite guard's first pull is guarded, not free
@@ -166,6 +167,8 @@ class Hub:
             if not m.private_root:
                 continue
             folder = Path(os.path.realpath(m.private_root))
+            if (ident := place.identity(str(folder))) is not None:
+                self._private_ids[ident] = m.id
             self._private_paths[str(folder)] = m.id     # before the checks below: a refused root is as private as any
             root = None
             if folder.is_dir() and proxy_mod.git_top(str(folder)).casefold() == str(folder).casefold():
@@ -749,9 +752,10 @@ class Hub:
             return False
         return visibility.visible_to(fm, member, self.assignees(address, fm), self.granted(member, address))
 
-    def granted(self, member, address: str) -> bool:
+    def granted(self, member, address: str, by_name: bool = False) -> bool:
         """Whether the `projects.toml` of the root of `address` lets `member` into its project (8.12): always in
-        loopback mode, and in a root with no such file."""
+        loopback mode, and in a root with no such file. `by_name`: judged by the address alone, not by where the file
+        is (a `create` on a name a private root holds is answered as one a shared root holds, 9.11)."""
         at = roots_mod.Address.parse(address)
         root = self.roots.get(at.root)
         if self.proxy is None or root is None:
@@ -761,6 +765,8 @@ class Hub:
             return True
         # Judged where the file is as well as by the address: a link in one project to a sheaf of another (a root
         # the hub does not place follows it) opens it only to a member both name.
+        if by_name:
+            return projects.grants(entries, at.rel, member.short)
         top = os.path.realpath(root.path)
         real = os.path.realpath(self.file(address))
         if not real.startswith(top.rstrip("/") + "/"):

@@ -423,7 +423,10 @@ class Door:
             if caller.may_add_roots:
                 if not path.endswith(".md") or not paths.is_file(md):
                     raise ToolError(f"{path} is not an existing .md file.")
-                return roots.address(md, alias=lambda root, rel: place.alias(self.hub, root, rel))
+                try:
+                    return roots.address(md, alias=lambda root, rel: place.alias(self.hub, root, rel))
+                except NotFound:        # a file of a private root that no list name reaches
+                    raise ToolError(f"{path} cannot be used as a document.") from None
             root = roots.lookup(md)
             if root is None or ((member := self._member(caller)) is not None and not self.hub.owns(member, root)):
                 # a root of another member's is no root to a token bound to one (9.11)

@@ -177,9 +177,15 @@ class Hub:
         self._private_ids: dict[tuple, str] = {}    # (st_dev, st_ino) of each, so a spelling in another case is the same folder
         self._private_good: set[str] = set()       # those that registered: placement only, never privacy
         self.roots.private_paths = lambda: self._private_paths
-        self.roots.hidden = lambda root: str(root.path) in self._private_paths     # rule E: no address of its own, registered or refused
+        self.roots.hidden = self._is_private_root       # rule E: no address of its own, registered or refused
         self._register_private_roots()
         self.commits.seed(self.roots.all())      # the rewrite guard's first pull is guarded, not free
+
+    def _is_private_root(self, root) -> bool:
+        """Whether `root` is a private root: by its path, and by the identity of its folder, so a second spelling of
+        it (a bind mount, a case-folded name) is no address either."""
+        return str(root.path) in self._private_paths or (
+            bool(self._private_ids) and place.identity(str(root.path)) in self._private_ids)
 
     @property
     def private_roots(self) -> dict[str, str]:

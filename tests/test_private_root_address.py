@@ -99,3 +99,17 @@ def test_nested_root_check_still_sees_private_root(world):
     assert w.hub.roots.for_document(w.two.private_repo / NAME) == mine
     assert mine in w.hub.roots.all() and mine not in w.hub.roots.listed()
     assert w.hub.roots.get(mine.name) is None
+
+
+def test_a_second_spelling_of_the_private_folder_is_hidden_too(world):
+    w = world
+    mine = private_root(w)
+    sub = w.two.private_repo / "acme"
+    other = roots_mod.Root("alias", w.two.private_repo / "acme" / "..", True, "id-alias")     # same folder, spelled again
+    assert sub.is_dir() or sub.mkdir()
+    assert w.hub.roots.hidden(mine) and w.hub.roots.hidden(other)
+    assert not w.hub.roots.hidden(w.hub.the_list.root())             # positive control
+    w.put(PRIVATE)
+    (w.two.private_repo / "readme.md").write_text("# r\n", encoding="utf-8")
+    is_error, said = call(w.door, "read", doc=str(w.two.private_repo / "readme.md"))   # the key, no list name for it
+    assert is_error and "failed" not in said

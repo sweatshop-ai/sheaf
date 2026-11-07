@@ -874,8 +874,7 @@ class Hub:
             self._tell_drop(address, "box-failed", {"id": thread, "kind": d.kind, "minutes": minutes})
         self._read_drop_statuses()
         for address in self.box_waits.cleared():          # however it ended, here or on a page's ask: the orange goes
-            if not self.box_waits.working(address):
-                self.index.moved_for_members(address)
+            self.index.moved_for_members(address)         # each member's orange is their own: another's may stay on
 
     def _read_drop_statuses(self):
         """What the box's supervisor says of each drop still open, in its `<drop>.status` (9.15, #139): a change

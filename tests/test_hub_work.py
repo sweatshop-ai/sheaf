@@ -902,6 +902,25 @@ def test_a_delivered_drop_turns_the_orange_of_the_member_who_sent_it_and_no_othe
     assert dot(team, THIERRY) == "orange" and dot(team, HANS) == "blue"
 
 
+def test_a_members_drop_that_fails_tells_their_index_while_another_members_drop_still_works(team, box, work):
+    # The orange of each is their own (9.9): the end of Hans's must reach his index stream although Thierry's goes on.
+    h = comment(team, work, "tell", as_=HANS).json()["id"]
+    t = comment(team, work, "tell", as_=THIERRY, body="And the second draft?").json()["id"]
+    for who, cid in ((HANS, t), (THIERRY, h)):
+        assert team.post("/_/seen", {"doc": ADDRESS, "id": cid, "count": 1}, member=who).status == 200
+    first, second = [f for f in drops(box) if not f.name.endswith(".status")]
+    for f, state in ((first, "delivered"), (second, "delivered")):
+        (box["tell"] / f"{f.name}.status").write_text(json.dumps({"state": state}), encoding="utf-8")
+    team.hub.tick()
+    assert dot(team, HANS) == dot(team, THIERRY) == "orange"
+    mine = team.get("/_/live", member=HANS).stream
+    mine.drain()
+    (box["tell"] / f"{first.name}.status").write_text(json.dumps({"state": "failed", "error": "no"}), encoding="utf-8")
+    team.hub.tick()
+    assert ("status", {"doc": ADDRESS, "root": "work"}) in mine.drain()
+    assert dot(team, HANS) == "blue" and dot(team, THIERRY) == "orange"
+
+
 def test_a_delivered_drop_answered_while_a_page_asks_still_clears_the_members_orange(team, box, work):
     # A page's /_/doc settles the drop before the pass does: the pass still tells the members' indexes (#139).
     from sheafmd.hub.index import Status

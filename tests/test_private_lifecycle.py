@@ -46,10 +46,15 @@ def everything_of(repo) -> str:
 def test_private_lifecycle_leaves_list_repo_untouched(two):
     w = World(two, ["login-a"])
     git(two.list_repo, "push", "-q", "origin", "HEAD:main")
-    def refs():     # every ref but the rewrite guard's own, which the hub keeps at the list repo's head
-        return tuple([l for l in git(r, "for-each-ref").splitlines() if "refs/sheaf/last-seen/" not in l]
-                     for r in (two.list_repo, two.base / "list.git"))
-    before = (untouched(two), git(two.list_repo, "rev-parse", "HEAD"), git(two.base / "list.git", "rev-parse", "main"), refs())
+    def refs():     # every ref but the rewrite guard's own (checked below), and every object
+        return tuple(("".join(l + "\n" for l in git(r, "for-each-ref", "--format=%(refname) %(objectname)").splitlines()
+                              if "refs/sheaf/last-seen/" not in l),
+                      git(r, "cat-file", "--batch-all-objects", "--batch-check")) for r in (two.list_repo, two.base / "list.git"))
+
+    def tree():     # every folder and file of the list repo's work tree, empty folders and ignored files included
+        return sorted(str(p.relative_to(two.list_repo)) for p in two.list_repo.rglob("*") if ".git" not in p.relative_to(two.list_repo).parts)
+
+    before = (untouched(two), git(two.list_repo, "rev-parse", "HEAD"), git(two.base / "list.git", "rev-parse", "main"), refs(), tree())
 
     made = call(w.door, "create", token=w.tokens["tok-a"], doc=w.address, text=TEXT)
     assert not made[0], made
@@ -79,10 +84,12 @@ def test_private_lifecycle_leaves_list_repo_untouched(two):
     assert w.hub.commits.settle()
 
     # the list repo shows nothing new: no file, no commit, nothing waiting to be pushed, no word of the sheaf's text
-    assert (untouched(two), git(two.list_repo, "rev-parse", "HEAD"), git(two.base / "list.git", "rev-parse", "main"), refs()) == before
+    assert (untouched(two), git(two.list_repo, "rev-parse", "HEAD"), git(two.base / "list.git", "rev-parse", "main"), refs(), tree()) == before
+    guard = git(two.list_repo, "for-each-ref", "--format=%(objectname)", "refs/sheaf/last-seen/").split()
+    assert set(guard) <= {before[1].strip()}                  # the rewrite guard's ref sits where the list repo's head was
     assert not (two.list_repo / state.INSIDE).exists()
     for repo in (two.list_repo, two.base / "list.git"):
-        assert not any(word in everything_of(repo) for word in (SECRET, "Secret edit.", "A private remark.", "pic.png"))
+        assert not any(word in everything_of(repo) for word in (SECRET, "Secret edit.", "A private remark.", "pic.png", NAME, "post.md"))
 
     # the private repo holds all of it, and has pushed it
     assert NAME in git(two.private_repo, "ls-files")

@@ -580,7 +580,7 @@ def private_member(hub, address: str, fm: dict | None = None, opened=UNJUDGED):
     return owner
 
 
-def _undecided(hub, name: str) -> bool:
+def undecided(hub, name: str) -> bool:
     """Whether a private root cannot be looked at for the name `name` (SPEC 9.11, rule B): a configured one that is not
     registered (refused at start, or forgotten), not a folder the hub can read, not a git work tree now (a re-clone
     under way), or holding a link at the name. Its names are then undecided, not absent."""
@@ -606,16 +606,14 @@ def file_at(hub, address: str, bound: str = ""):
     """(the root, the path in it) of the file to read or write for the sheaf named `address`, or None for a name the
     hub does not place. The one file that holds the name, in the list's root or a private root; a name no file
     holds is the list's root and the name. Raises `Undecided` (a NotFound), so the write goes nowhere and never to
-    the list's root under the name, when a private root is configured and the file cannot be decided: a private
-    root that cannot be looked at (`_undecided`), a name a private root holds with any other holder, or a file that
-    is not in `bound` (the id of the root an open document was made for), whether or not that root is still
-    registered."""
+    the list's root under the name, when a name is held by a private root and any other, or the file is not in
+    `bound` (the id of the root an open document was made for), whether or not that root is still registered or can
+    be looked at. A private root that cannot be looked at (`undecided`) is judged where a name's home is decided:
+    `ahead`, the poll's move and a create."""
     got = _where(hub, address)
     if got is None:
         return None
     root, top, name = got
-    if _undecided(hub, name):
-        raise Undecided(address)
     found = _found(hub, root, name)
     if len(found) == 1:
         if bound and found[0][0].id != bound:       # whichever root the document was opened for, it follows no other
@@ -641,7 +639,7 @@ def ahead(hub, address: str, old: str, new: str) -> str | None:
         return None
     root, top, name = got
     with _name_lock(top, name), folders_lock(top, name):
-        if _undecided(hub, name):
+        if undecided(hub, name):
             raise Refused(UNDECIDED)
         found = _found(hub, root, name)
         private = set(getattr(hub, "private_roots", None) or ())
@@ -653,7 +651,8 @@ def ahead(hub, address: str, old: str, new: str) -> str | None:
         if at.id != root.id:                    # a file of a private root is not moved, nor shared, by a write
             fo, fn = visibility.front_matter(old), visibility.front_matter(new)
             if (visibility.effective(fn) == "project" and visibility.effective(fo) != "project") \
-                    or visibility.text(fn, "owner").casefold() != visibility.text(fo, "owner").casefold():
+                    or visibility.text(fn, "owner").casefold() != visibility.text(fo, "owner").casefold() \
+                    or home_in(hub, root, name, new) not in (home_in(hub, root, name, old), (at, rel)):
                 raise Refused(SHARE)        # Share, or an owner who is another's: the file would leave the root
         strict = home_in(hub, root, name, old) == (root, rel)
         gone = _move(hub, root, top, rel, name, address, text=new, strict=strict)
@@ -676,6 +675,9 @@ def place(hub, address: str, member=None, by: str | None = None, commit: bool = 
         return None
     root, top, name = got
     with _name_lock(top, name):
+        if undecided(hub, name):
+            _refused(hub, address, UNDECIDED)
+            return None
         (at, rel), n = _one(hub, root, name)
         if n > 1:
             _twice(hub, address, n)

@@ -1,5 +1,5 @@
 """A member on the proxy socket (SPEC 9.9 "The member", "The credential"; 18 Proxy mode): their roots,
-matched by folder; what they write and how it is signed; their seen state and red dot; Ask and Tell
+matched by folder; what they write and how it is signed; their seen state and red dot; Tell
 off; their streams, which carry nothing of the hub account's session and end after 5 minutes.
 In memory through the handler (`front`), but for the stream's end, which a real socket shows."""
 import http.client
@@ -8,7 +8,7 @@ import subprocess
 import time
 
 import pytest
-from helpers import (BEA, CAL, FRONT, GIT_FAILS, PLAN, UnixHTTP, git_fails, hold_job, page_meta, thread,
+from helpers import (BEA, CAL, FRONT, GIT_FAILS, PLAN, UnixHTTP, git_fails, page_meta, thread,
                      with_threads)
 
 import sheafmd.comments as rdc
@@ -222,15 +222,14 @@ def test_a_members_comment_and_reply_are_signed_with_their_name(front, plan):
     assert c["by"] == "Bea" and [r["by"] for r in c["replies"]] == ["Bea"]
 
 
-@pytest.mark.parametrize("flag", ["ask", "tell"])
 @pytest.mark.parametrize("op", ["add", "reply"])
-def test_a_comment_with_ask_or_tell_is_400_and_writes_nothing(front, plan, flag, op):
+def test_a_comment_with_tell_is_400_and_writes_nothing(front, plan, op):
     plan.write_text(with_threads(thread("c1", "Bea")), encoding="utf-8")
     before = text(plan)
     if op == "add":
-        r = add(front, **{flag: True})
+        r = add(front, tell=True)
     else:
-        r = front.post("/_/comment", {"doc": DOC, "op": "reply", "id": "c1", "body": "x", flag: True})
+        r = front.post("/_/comment", {"doc": DOC, "op": "reply", "id": "c1", "body": "x", "tell": True})
     assert r.status == 400 and r.json()["error"] == PROXY_LINE
     assert text(plan) == before
 
@@ -314,32 +313,13 @@ def test_a_member_gets_no_dot_of_the_hub_accounts_session(front, browser, plan, 
     assert dot(browser) == "orange" and dot(front) == "green"
 
 
-def test_a_member_gets_no_orange_dot_while_the_hub_accounts_ask_runs(front, browser, plan):
-    plan.write_text(with_threads(thread("c1", "Bea", status="resolved")), encoding="utf-8")
-    _, release = hold_job(front.hub, DOC)
-    try:
-        assert dot(browser) == "orange" and dot(front) == "green"
-        assert 'data-dot="orange"' not in front.get("/work/").text
-    finally:
-        release.set()
-
-
 def test_doc_carries_nothing_of_the_hub_accounts_session(front, browser, plan, monkeypatch):
     e = front.hub.entry(DOC)
     monkeypatch.setattr(e.live, "session_question", lambda: "Which file?")
     got = front.get(f"/_/doc?doc={DOC}").json()
     assert got["question"] == "" and got["capabilities"] == [] and got["target"] is None
-    assert got["lines"] == {"ask": PROXY_LINE, "tell": PROXY_LINE}
+    assert got["lines"] == {"tell": PROXY_LINE}
     assert browser.get(f"/_/doc?doc={DOC}").json()["question"] == "Which file?"
-
-
-def test_doc_does_not_say_whether_the_hub_accounts_ask_runs(front, browser, plan):
-    _, release = hold_job(front.hub, DOC)
-    try:
-        assert browser.get(f"/_/doc?doc={DOC}").json()["asking"] == ["c1"]
-        assert front.get(f"/_/doc?doc={DOC}").json()["asking"] == []
-    finally:
-        release.set()
 
 
 @pytest.fixture
@@ -360,16 +340,14 @@ def test_the_page_meta_block_is_the_members(front, browser, plan):
     meta = page_meta(front.get("/work/plan.md").text)
     assert meta["me"] == "Bea" and meta["can"] == [] and meta["agent"] is None
     assert meta["proxy"] is True and meta["member"] == BEA
-    assert meta["lines"] == {"ask": PROXY_LINE, "tell": PROXY_LINE}
+    assert meta["lines"] == {"tell": PROXY_LINE}
     own = page_meta(browser.get("/work/plan.md").text)
     assert own["me"] == "Ada" and "proxy" not in own and "member" not in own
 
 
 # ── the streams (9.9 "The credential"; 8.8) ──────────────────────────────────
 
-JOB_EVENTS = [("ask-started", {"id": "c1"}),
-              ("ask-failed", {"id": "c1", "error": "claude exited with 1: Error: cannot read /home/ada/.claude.json"}),
-              ("ask-cancelled", {"id": "c1"}), ("tell-sent", {"id": "c1"}),
+JOB_EVENTS = [("tell-sent", {"id": "c1"}),
               ("tell-waiting", {"ids": ["c1"], "question": "Which file?"}), ("tell-working", {"ids": ["c1"]}),
               ("tell-failed", {"id": "c1", "error": "the tmux pane %3 of session ada-main is gone"}),
               ("tell-cancelled", {"id": "c1", "sent": True})]
@@ -432,10 +410,10 @@ def test_the_changes_a_member_is_sent_do_not_name_the_threads_told(told, front, 
     live = front.hub.entry(DOC).live
     plan.write_text(text(plan).replace("about pears", "about plums"), encoding="utf-8")
     live.refresh()
-    live.reply_as("c1", "Plums.", "Claude", "answer", "ask-done")
+    live.comment("reply", {"id": "c1", "body": "Plums."}, live.current()[0], by="Claude", role="answer")
     for stream, telling in ((own, ["c1"]), (mine, [])):
         got = [e for e in stream.drain() if e[0] != "hello"]
-        assert [n for n, _ in got] == ["changed", "ask-done"]
+        assert [n for n, _ in got] == ["changed", "changed"]
         assert [d["telling"] for _, d in got] == [telling, telling]
 
 
@@ -453,19 +431,16 @@ def statuses(stream):
     return [d for n, d in stream.drain() if n == "status"]
 
 
-def test_a_members_index_stream_is_not_told_when_the_hub_accounts_ask_starts(front, browser, plan):
+def test_a_members_index_stream_is_not_told_when_the_hub_accounts_tell_starts(front, browser, plan, monkeypatch):
     plan.write_text(with_threads(thread("c1", "Bea", status="resolved")), encoding="utf-8")
     mine, own = front.get("/_/live").stream, browser.get("/_/live").stream
-    _, release = hold_job(front.hub, DOC)
-    try:
-        front.hub.index.touch(DOC)
-        assert [d["dot"] for d in statuses(own)] == ["orange"]
-        assert statuses(mine) == []
-        plan.write_text(text(plan) + "\nA third paragraph.\n", encoding="utf-8")    # the file moves
-        front.hub.index.touch(DOC)
-        assert len(statuses(own)) == 1 and statuses(mine) == [{"doc": DOC, "root": "work"}]
-    finally:
-        release.set()
+    monkeypatch.setattr(front.hub.entry(DOC).live, "peek", lambda: (True, ""))   # told, and working
+    front.hub.index.touch(DOC)
+    assert [d["dot"] for d in statuses(own)] == ["orange"]
+    assert statuses(mine) == []
+    plan.write_text(text(plan) + "\nA third paragraph.\n", encoding="utf-8")    # the file moves
+    front.hub.index.touch(DOC)
+    assert len(statuses(own)) == 1 and statuses(mine) == [{"doc": DOC, "root": "work"}]
 
 
 def test_a_members_index_stream_is_not_told_when_the_hubs_person_reads_a_thread(front, browser, plan):

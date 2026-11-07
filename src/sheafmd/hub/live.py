@@ -75,7 +75,7 @@ class LiveDocument:
         self._remember(text)
         # Threads told to a live session: the count of its action replies each had when it was
         # sent, and when. A thread stays "working" until it has more (comments.action_replies,
-        # the replies whose effective role is action): an Ask answer or a reader's reply is not
+        # the replies whose effective role is action): an old Ask answer or a reader's reply is not
         # the answer.
         self._telling, self._told_at = {}, {}
         # The question the told session put to its person in its own chat, while it waits for
@@ -249,7 +249,7 @@ class LiveDocument:
                     return text
                 return guard(text, new, got["report"]["toggled"]) if guard is not None else new
             # The version check happens inside change(), under the file lock: the CLI and an
-            # Ask job write this file from other processes.
+            # Tell job write this file from other processes.
             md = self._file()
             token = rde.DOC.set(md)
             try:
@@ -302,7 +302,7 @@ class LiveDocument:
         `rid` is the page's request id. A page stops waiting for an answer after 30 s and gives the
         form back, while this write may still be running (behind a long save, or its own render of a
         long document); sent again, the same text comes with the same id. A write already taken with
-        that id, the same text, the same button (resolve, Ask, Tell) and, for an add, the same passage
+        that id, the same text, the same button (resolve, Tell) and, for an add, the same passage
         (`block`, `start`, `end`) writes and tells nothing again: the answer is the snapshot as it is
         now, with the comment's id and `again`. `wrote` is whether the write changed the file (a status set
         to the status it has does not): a caller commits only a write that did. It is not looked for in the
@@ -311,7 +311,7 @@ class LiveDocument:
         The last RIDS ids are kept, in memory. `guard(text)` sees the file's text under the file lock
         before anything is written, and raises to write nothing."""
         sent = (op, fields.get("id", ""), fields.get("body", ""), fields.get("quote", ""), by or self._by,
-                bool(fields.get("resolve")), bool(fields.get("ask")), bool(fields.get("tell")),
+                bool(fields.get("resolve")), bool(fields.get("tell")),
                 fields.get("block"), fields.get("start"), fields.get("end"))
         with self._hold(), self._held():
             if rid is not None and rid in self._rids and self._rids[rid][0] == sent:
@@ -417,26 +417,6 @@ class LiveDocument:
         snap["textSame"] = base is not None and prose(base) == prose(self._text)
         return {"id": cid, **snap}
 
-    def reply_as(self, cid, text, by, role, event, expect=None):
-        """Write `text` as a reply by `by` with `role` (an Ask's answer), render it, and publish
-        `event` with the snapshot as `refresh` makes it: the hash the tabs measure from
-        (`base`) and whether the prose is the same, so a tab adopts the comments only when it
-        holds that base. The event leaves with the lock held, in the order the text changed.
-        `expect` is the `rdc.thread_identity` of the thread the text answers: another thread
-        under that id is ThreadChanged. Raises AnchorError when the thread is gone, writing and
-        saying nothing."""
-        def write(t):
-            c = rdc.parse(t).by_id(cid)
-            if expect is not None and c is not None and rdc.thread_identity(c) != expect:
-                raise rdc.ThreadChanged(cid)
-            return rdc.reply(t, cid, text, by, rds.now(), False, role)
-        with self._hold(), self._held():
-            before = self._text
-            self._update(lambda t, op: write(t))
-            self._after_write()
-            self._rerender()
-            return self._announce(self._snapshot(self._text), before, event, id=cid)
-
     def rewrite(self, change):
         """Write `change(text)` over the file's text as it is under the file lock, so a write that landed
         meanwhile is kept, then render and tell the tabs, as a save does. Returns the hash of the text
@@ -480,7 +460,7 @@ class LiveDocument:
     def pin(self, h):
         """A page keeps the version `h` past a change of the file: a form holds the reload that change
         needs, a merged save's reload among them (SPEC 7.4, 10.4). Keep it beside the newest VERSIONS,
-        so that what the page sends with it once the form is done (a save, a reply, an Ask, a Tell) is
+        so that what the page sends with it once the form is done (a save, a reply, a Tell) is
         still taken however much was written meanwhile. The PINS pinned last are kept, in memory and on
         disk; pinned again, a version counts from then. False when the document does not know `h`."""
         with self._held():
@@ -500,7 +480,7 @@ class LiveDocument:
             return True
 
     def knows(self, h):
-        """`_names` for the file as it is now: what an Ask or a Tell of a thread by its id must hold."""
+        """`_names` for the file as it is now: what a Tell of a thread by its id must hold."""
         if not h:
             return True
         with self._hold(), self._held():        # the name's lock (9.11), as every read of the file
@@ -582,8 +562,8 @@ class LiveDocument:
         """Catch up with a write from outside (the CLI, an agent, an editor). Publishes
         `changed` and returns its snapshot, or returns None when nothing moved.
 
-        force: render whatever the file holds and return the snapshot, publishing nothing: an
-        Ask that just wrote announces its own event."""
+        force: render whatever the file holds and return the snapshot, publishing nothing: the
+        caller announces the result itself."""
         with self._hold(), self._held():
             if force:
                 self._rerender()

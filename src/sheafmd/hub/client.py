@@ -112,7 +112,7 @@ class NotSent(Exception):
 
 
 class JobsRunning(Exception):
-    """The hub would not stop for an upgrade: an Ask or Tell started after the command looked."""
+    """The hub would not stop for an upgrade: a Tell started after the command looked."""
 
 
 class SignInRefused(Exception):
@@ -281,7 +281,7 @@ def client() -> HubClient:
 
 def _clean_env() -> dict:
     """The environment of a hub: the user's own, without any agent's variables, so the hub and
-    the Ask children it will start never inherit one session (SPEC 8.4)."""
+    the Tell children it will start never inherit one session (SPEC 8.4)."""
     return {k: v for k, v in os.environ.items() if not k.startswith(_AGENT_ENV_PREFIXES)}
 
 
@@ -328,13 +328,13 @@ def stop_and_explain(c: HubClient, got: dict, reason: str, force: bool = False) 
     otherwise a few plain words on what was there when STOP_WAIT ran out: that it refused, that a
     hub still answers (this one or another), that the process it waited for still runs. Never the
     hub's own text. An upgrade stop that is not `force`d (`sheaf restart` forces its own) is
-    refused while an Ask or Tell runs, which raises JobsRunning."""
+    refused while a Tell runs, which raises JobsRunning."""
     from . import server
     info = server.read_pid_file() or {}
     pid = info.get("pid") if info.get("boot") == got.get("boot") and info.get("pid") != os.getpid() else None
     status, res = c.call("POST", "/_/stop", {"reason": reason, **({"force": True} if force else {})})
     if status == 409 and reason == "upgrade" and not force:
-        raise JobsRunning(res.get("error") or "an Ask or Tell is running")
+        raise JobsRunning(res.get("error") or "a Tell is running")
     if status != 200 or not res.get("ok"):
         return "it refused the stop"
     deadline = time.time() + STOP_WAIT
@@ -399,14 +399,14 @@ def _meet_version(c: HubClient, got: dict, warn) -> tuple[dict, bool]:
     if status != 200:                                   # cannot tell whether a job runs: leave it
         warn(mismatch)
         return got, False
-    if jobs.get("asking") or jobs.get("telling"):
-        warn(f"  ! the hub runs {theirs} and an Ask or Tell is running; this is {__version__}. "
+    if jobs.get("telling"):
+        warn(f"  ! the hub runs {theirs} and a Tell is running; this is {__version__}. "
              "Run sheaf restart when it is done.")
         return got, False
     try:
         left = stop_and_explain(c, got, "upgrade")
     except JobsRunning:                                 # a job started after the look at /_/jobs
-        warn(f"  ! the hub runs {theirs} and an Ask or Tell is running; this is {__version__}. "
+        warn(f"  ! the hub runs {theirs} and a Tell is running; this is {__version__}. "
              "Run sheaf restart when it is done.")
         return got, False
     if left:

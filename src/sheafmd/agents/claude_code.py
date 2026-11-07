@@ -1,8 +1,7 @@
 """
 sheafmd.agents.claude_code — the Claude Code adapter (SPEC 11.4).
 
-Ask forks the session (`claude -p --resume <id> --fork-session`), which answers on stdout and
-never touches the real session. Tell pushes one JSON line on the session's own socket, the
+Tell pushes one JSON line on the session's own socket, the
 direct push (measured: under a second, against twelve for the courier); where that does
 not apply it falls back to the courier, a headless `claude -p` allowed nothing but SendMessage.
 
@@ -26,8 +25,6 @@ from .. import diagnostics, signals
 from . import envelope
 from .base import DeliveryCancelled, DeliveryError, Runner, State, Target
 
-TOOLS = "Read,Grep,Glob"
-WRITERS = "Bash,Edit,Write,NotebookEdit"
 COURIER_TIMEOUT = 3 * 60
 PS_TIMEOUT = 2                     # seconds `ps` may take to say when a process started
 SOCKS_ROOT = Path("/run/user")        # <root>/<uid>/cc-socks/<pid>.sock (SPEC 11.4)
@@ -232,23 +229,12 @@ class ClaudeCodeAdapter:
     # ── the interface ────────────────────────────────────────────────────────
     def capabilities(self, t: Target) -> frozenset[str]:
         caps = set()
-        if t.session and t.bin and os.path.isfile(t.bin) and os.access(t.bin, os.X_OK):
-            caps.add("ask")
         rec = self._record(t)
         if rec is not None:
             caps.add("state")
         if self._socket(t, rec):
             caps |= {"deliver", "stop"}
         return frozenset(caps)
-
-    def ask_command(self, t: Target) -> list[str]:
-        """The command; its prompt is its stdin (`claude -p` reads it there), never an argument.
-        The fork may only read. `--allowedTools` only pre-approves, so a user whose settings allow
-        Edit or Bash would let it write: `--tools` leaves it nothing else, the writers are denied
-        by name again, and no MCP server starts, since the settings may allow its tools."""
-        return [t.bin, "-p", "--resume", t.session, "--fork-session", "--tools", TOOLS,
-                "--allowedTools", TOOLS, "--disallowedTools", WRITERS, "--strict-mcp-config",
-                "--output-format", "text"]
 
     def child_env(self, t: Target) -> dict | None:
         """The environment of `claude` when the hub runs it for this session: `--resume` finds a

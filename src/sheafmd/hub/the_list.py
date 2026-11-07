@@ -105,7 +105,7 @@ class ListConfig:
     waiting: str = DEFAULTS["waiting"]          # the Project's Status option of `waiting`
     in_progress: str = DEFAULTS["in_progress"]  # and of `open`
     stop_dir: Path | None = None                # where a Stop James tick drops its file (9.11)
-    tell_dir: Path | None = None                # where Ask and Tell on a box-hosted sheaf drop theirs (9.12)
+    tell_dir: Path | None = None                # where Tell on a box-hosted sheaf drop theirs (9.12)
     sessions_dir: Path | None = None            # the copy of James's transcripts, <folder>/<id>.jsonl (9.12)
     box: str = ""                               # the host name of a box-hosted session (9.12)
     attach: str = ""                            # the attach command, `{window}` for <client>_<project> (9.12)

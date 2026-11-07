@@ -294,7 +294,7 @@ def test_a_wrong_token_is_not_rescued_by_a_cookie(browser):
 PAGE_AND_API = [
     ("GET", "/_/health"), ("GET", "/_/live"), ("GET", "/_/live?doc=work/plan.md"),
     ("GET", "/_/doc?doc=work/plan.md"), ("GET", "/_/jobs"), ("GET", "/work/plan.md"), ("GET", "/"),
-    ("POST", "/_/save"), ("POST", "/_/comment"), ("POST", "/_/ask"), ("POST", "/_/tell"),
+    ("POST", "/_/save"), ("POST", "/_/comment"), ("POST", "/_/tell"),
     ("POST", "/_/jump"), ("POST", "/_/cancel"), ("POST", "/_/seen"), ("POST", "/_/export"), ("POST", "/_/diag"),
     ("POST", "/_/render"), ("POST", "/_/stop"), ("POST", "/_/rotate"), ("POST", "/_/nothing"),
 ]
@@ -305,7 +305,7 @@ def test_a_token_is_refused_on_every_other_route(browser, plan, token, method, p
     before = plan.read_bytes()
     roots = sorted(r.name for r in browser.hub.roots.all())
     body = {"doc": "work/plan.md", "hash": "x", "edits": [], "op": "add", "path": str(plan),
-            "settings": {}, "reason": "stop", "kind": "html", "what": "ask", "id": "c1", "count": 1}
+            "settings": {}, "reason": "stop", "kind": "html", "what": "tell", "id": "c1", "count": 1}
     res = browser.request(method, path, body=body if method == "POST" else None, cookie=False,
                           headers={"Authorization": f"Bearer {token}"}, origin=False)
     assert res.status in (401, 403, 404), (method, path, res.status)

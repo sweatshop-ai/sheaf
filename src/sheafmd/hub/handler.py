@@ -37,7 +37,7 @@ from ..mcp import Caller, Door
 from ..render import RenderError
 from ..source import StaleError, md_hash
 from . import auth, codes, events, peer, place, proxy, relay, the_list, visibility, work
-from .asktell import NO_AGENT, JobRefused
+from .tell import NO_AGENT, JobRefused
 from .index import Status
 from .live import UNKNOWN, NotAuthor
 from .roots import Address, NotFound, address_of_url, root_of_url
@@ -73,6 +73,7 @@ SETTING_TYPES = {"title": str, "toc": str, "max_image_width": int, "by": str, "f
                  "theme": str, "credit": bool}
 _ID_RE = re.compile(r"[A-Za-z0-9_-]{1,40}")
 _RID_RE = re.compile(r"[A-Za-z0-9_-]{16,64}")     # a page's request id (/_/comment, /_/save)
+ASK_RETIRED = "Ask was retired: use Tell, or reply."
 _RESERVED = {"kind", "source", "doc", "at", "pid", "session", "member"}
 
 
@@ -216,7 +217,7 @@ def _shape(cond, message: str):
 
 def _document_events(name: str, data):
     """What a member's document stream is sent (9.9): the events of `proxy.DOCUMENT_EVENTS` only,
-    and in them nothing of the hub account's agent session. So no Ask or Tell of it, no thread told
+    and in them nothing of the hub account's agent session. So no Tell of it, no thread told
     to it, no question it put to its person, and no `signed-out`, since `sheaf rotate` does not
     touch a member."""
     if name not in proxy.DOCUMENT_EVENTS:
@@ -255,7 +256,6 @@ class Handler:
             ("POST", "/_/sessions", "sessions", MEMBER, self._sessions),
             ("POST", "/_/code", "code", MINT, self._code),
             ("POST", "/_/comment", "comment", COOKIE, self._comment),
-            ("POST", "/_/ask", "ask", COOKIE, self._ask),
             ("POST", "/_/tell", "tell", COOKIE, self._tell),
             ("POST", "/_/cancel", "cancel", COOKIE, self._cancel),
             ("POST", "/_/jump", "jump", COOKIE, self._jump),
@@ -434,12 +434,12 @@ class Handler:
 
     @staticmethod
     def _for_members(found) -> bool:
-        """A route a member may use: one 8.5 marks `cookie` or `cookie or key`, but not Ask and
-        Tell, which run the hub account's own agent session; and the two open files the front mounts a page from (#116)."""
+        """A route a member may use: one 8.5 marks `cookie` or `cookie or key`, but not Tell,
+        which runs the hub account's own agent session; and the two open files the front mounts a page from (#116)."""
         name, who, _ = found
         if name in ("mount-js", "mount-css"):
             return True
-        return who in (COOKIE, EITHER, MEMBER, MINT) and name not in ("ask", "tell", "cancel", "jump")
+        return who in (COOKIE, EITHER, MEMBER, MINT) and name not in ("tell", "cancel", "jump")
 
     def _route_proxy(self, req: Req, raw: bytes) -> Response:
         cfg = self.hub.proxy
@@ -816,16 +816,15 @@ class Handler:
         snap["rids"] = e.live.taken_rids()
         if req.member is not None:
             # Their own seen state, and nothing of the hub account's agent session (9.9).
-            # A sheaf's Work on this and its Ask and Tell for James's window are refreshed as the meta's (9.12).
+            # A sheaf's Work on this and its Tell for James's window are refreshed as the meta's (9.12).
             self.hub.expire_relayed()
             work, can = self.hub.member_work(e, req.member)
             extra = {} if work is None else {"work": work}
             return _ok(**proxy.for_member(snap), seen=self.hub.member_seen.get(req.member.id, e.address),
-                       asking=[], question="", target=None, capabilities=can, lines=proxy.member_lines(),
+                       question="", target=None, capabilities=can, lines=proxy.member_lines(),
                        sent=self.hub.box_waits.pending(e.address, e.live.current()[1]), **extra)
-        v = self.hub.asktell.view(e.address)
+        v = self.hub.tell.view(e.address)
         return _ok(**snap, seen=self.hub.seen.get(e.address),
-                   asking=self.hub.runner.active("ask", e.address),
                    question=e.live.session_question(), target=v.agent(),
                    capabilities=sorted(v.caps), lines=v.lines)
 
@@ -1105,7 +1104,7 @@ class Handler:
     STOPPED = "Stopped before delivery: Stop James closed this project's window before James took this."
 
     def _stop_tells(self, project: str, member):
-        """Every Ask and Tell for `project` still waiting in `tell_dir` for James's window, removed before the Stop
+        """Every Tell for `project` still waiting in `tell_dir` for James's window, removed before the Stop
         is dropped, and a reply in each one's thread, signed by the member who stopped him, saying it never reached
         him (9.12): a Stop ends the work, and none of it goes on unseen. A `tell-stopped` row for each, without
         its text. The box's supervisor clears what is left of the project's the same way (tt-tiroir #136)."""
@@ -1273,36 +1272,35 @@ class Handler:
         return Response(200, {"Content-Type": "application/x-ndjson", "Content-Disposition": _disposition(f"{sid}.jsonl"),
                               "Cache-Control": "no-store", "X-Sheaf-Session": sid}, body)
 
-    def _drop_for_james(self, req: Req, e, kind: str, body: str, thread: str) -> tuple[str, str | None]:
-        """The file Ask or Tell drops in `[list]`'s `tell_dir` for the box's supervisor to hand to James's session
+    def _drop_for_james(self, req: Req, e, body: str, thread: str) -> tuple[str, str | None]:
+        """The file a Tell drops in `[list]`'s `tell_dir` for the box's supervisor to hand to James's session
         for the project with `sheaf deliver`, and its `tell-dropped` row. The hub runs no agent of its own for it.
         A Tell carries its id and the words of a local Tell (`message`), so every path says the same (9.12).
         (`written` or why not, the file's name when written)."""
         project = "/".join(Address.parse(e.address).rel.split("/")[:2])
         by = work.member_word(req.member)
-        out = {"project": project, "member": by, "sheaf": e.address, "text": body[:work.TEXT_MAX], "kind": kind,
-               "thread": thread, "address": e.address, "abs_path": str(e.path)}
-        if kind == "tell":
-            out.update(id=str(uuid.uuid4()), message=self._tell_message(req, e, thread))
+        out = {"project": project, "member": by, "sheaf": e.address, "text": body[:work.TEXT_MAX], "kind": "tell",
+               "thread": thread, "address": e.address, "abs_path": str(e.path),
+               "id": str(uuid.uuid4()), "message": self._tell_message(req, e, thread)}
         drop, name = work.drop_named(self.hub.the_list.cfg.dirs_for(req.member).tell_dir, project, json.dumps(out).encode("utf-8"),
                                      "no tell_dir in [list]")
-        self.hub.record("tell-dropped", e.address, what=kind, project=project, by=by, drop=drop,
-                        **({"tell": out["id"]} if "id" in out else {}))
+        self.hub.record("tell-dropped", e.address, what="tell", project=project, by=by, drop=drop,
+                        tell=out["id"])
         return drop, name
 
     def _tell_message(self, req: Req, e, thread: str) -> str:
         """What a member's Tell on the thread `thread` says to the session, in the words of a local Tell (11.3)."""
         c = rdc.parse(e.live.current()[1]).by_id(thread)
-        return prompts.tell(e.address, str(e.path), req.member.name, c, self.hub.asktell.links(e.address))
+        return prompts.tell(e.address, str(e.path), req.member.name, c, self.hub.tell.links(e.address))
 
-    def _work_route(self, address: str, text: str, kind: str, member=None) -> str | None:
-        """Where a member's Ask or Tell goes on the sheaf whose text is `text` (9.12, 9.14): "box" to James's
+    def _work_route(self, address: str, text: str, member=None) -> str | None:
+        """Where a member's Tell goes on the sheaf whose text is `text` (9.12, 9.14): "box" to James's
         window, "relay" to the fork's relay (a Tell only), None nowhere."""
         st = work.state(self.hub, address, text, member)
         can = st.can if st is not None else []
-        if f"box-{kind}" in can:
+        if "box-tell" in can:
             return "box"
-        return "relay" if kind == "tell" and "relay-tell" in can else None
+        return "relay" if "relay-tell" in can else None
 
     def _relay_tell(self, req: Req, e, thread: str, session: str) -> str | None:
         """Queue a member's Tell for the relay of the fork `session`, the live session the comment was judged on,
@@ -1503,6 +1501,7 @@ class Handler:
         e = self._entry(req, b.get("doc"))
         op = b.get("op")
         _shape(op in OPS, f"op must be one of {', '.join(OPS)}")
+        _shape(not (op in ("add", "reply") and b.get("ask")), ASK_RETIRED)
         h = self._page_hash(req)
         for k in ("id", "body", "quote", "status"):
             _shape(k not in b or isinstance(b[k], str), f"{k} must be text")
@@ -1515,34 +1514,33 @@ class Handler:
                 _shape(type(b.get(k)) is int, f"{k} must be a whole number")
         member = req.member
         starts = op in ("add", "reply")
-        # Ask and Tell run the hub account's own session, which a member is not (9.9); on a sheaf whose live
-        # session is James's on the box they go to his window instead, by a file the hub drops (9.12), and a Tell
-        # on a sheaf whose live session is a member's fork goes to that fork's relay while it is connected (9.14).
+        # Tell runs the hub account's own session, which a member is not (9.9); on a sheaf whose live
+        # session is James's on the box it goes to his window instead, by a file the hub drops (9.12), and on
+        # a sheaf whose live session is a member's fork it goes to that fork's relay while it is connected (9.14).
         to_box = route = None
-        if member is not None and (b.get("ask") or b.get("tell")):
-            _shape(not (b.get("ask") and b.get("tell")), "a comment is sent with Ask or with Tell, not both")
-            to_box = "ask" if b.get("ask") else "tell"
-            route = self._work_route(e.address, e.live.current()[1], to_box, req.member) if starts else None
+        if member is not None and b.get("tell"):
+            to_box = True
+            route = self._work_route(e.address, e.live.current()[1], req.member) if starts else None
             _shape(route is not None, proxy.PROXY_LINE)
-        ask, tell = starts and bool(b.get("ask")) and not to_box, starts and bool(b.get("tell")) and not to_box
+        tell = starts and bool(b.get("tell")) and not to_box
         # A Tell that cannot go out still writes the comment, and then starts no wait. A reply
         # sent with Tell to a thread that is being told is such a Tell: the wait the first one
         # began stays as it is (SPEC 11.3).
-        tell_line = self.hub.asktell.refusal(e.address, "tell") if tell else None
+        tell_line = self.hub.tell.refusal(e.address) if tell else None
         if tell and tell_line is None and op == "reply":
-            tell_line = self.hub.asktell.telling_line(e.address, b.get("id", ""))
+            tell_line = self.hub.tell.telling_line(e.address, b.get("id", ""))
         can_tell = tell and tell_line is None
         signed = {"by": member.name, "author": member.name} if member else {}
         judged = []
         if member is not None:
             def still_visible(text, opened=None):
                 # The gate (_entry) read the file before the lock: a write that closed the sheaf since is seen here,
-                # and a live session that moved since keeps Ask and Tell from the window or relay it no longer is.
+                # and a live session that moved since keeps Tell from the window or relay it no longer is.
                 fm = visibility.front_matter(text)
                 seen = place.UNJUDGED if opened is None else place.opened_private(self.hub, opened)
                 if not self.hub.may_open(member, e.address, fm, seen):
                     raise Refuse(404, "no such document")
-                if to_box and self._work_route(e.address, text, to_box, req.member) != route:
+                if to_box and self._work_route(e.address, text, req.member) != route:
                     raise Refuse(400, proxy.PROXY_LINE)
                 if route == "relay":        # the fork the Tell goes to: no newer one (#134)
                     judged[:] = [work.sessions(fm)[0]["id"]]
@@ -1565,35 +1563,30 @@ class Handler:
             if not snap.get("again") and snap.pop("wrote", True):   # a write that changed nothing commits nothing
                 self.hub.committed(e.address, member, "comment")
         if snap.get("again"):
-            # Taken before under this request id: what the first request started (an Ask, a Tell's wait)
+            # Taken before under this request id: what the first request started (a Tell's wait)
             # is running or done, and the page hears of it by its events.
-            ask = tell = False
+            tell = False
             to_box = None
         if to_box and route == "relay":
             if (line := self._relay_tell(req, e, snap["id"], judged[0] if judged else "")) is not None:
                 snap["tellError"] = line
         elif to_box:
-            drop, name = self._drop_for_james(req, e, to_box, b["body"], snap["id"])
+            drop, name = self._drop_for_james(req, e, b["body"], snap["id"])
             if drop != "written":
-                snap[f"{to_box}Error"] = "The hub could not send this to James's window; the comment is written."
+                snap["tellError"] = "The hub could not send this to James's window; the comment is written."
             else:
                 # Open on the sheaf's pages until a reply lands in the thread, or past the Tell wait (#115).
-                self.hub.box_waits.add(e.address, snap["id"], to_box, e.live.current()[1], name,
+                self.hub.box_waits.add(e.address, snap["id"], "tell", e.live.current()[1], name,
                                        self.hub.the_list.cfg.dirs_for(req.member).tell_dir)
         # The job looks the document up again when it starts: it names its thread in the text the
         # comment was just written in, so a forget in between, and another folder that takes the name,
         # cannot hand it that folder's thread of the same id (SPEC 7.3). A forget that leaves no folder
         # under the name, or a file gone meanwhile, is refused as well: the comment is still answered.
-        if ask:
-            try:
-                self.hub.asktell.start_ask(e.address, snap["id"], held=snap["hash"])
-            except JobRefused as r:
-                snap["askError"] = r.message
         if tell:
             try:
                 if not can_tell:
                     raise JobRefused(409, tell_line or NO_AGENT)
-                self.hub.asktell.start_tell(e.address, snap["id"], waiting=True, held=snap["hash"])
+                self.hub.tell.start_tell(e.address, snap["id"], waiting=True, held=snap["hash"])
             except JobRefused as r:
                 if can_tell and not r.leaves_wait:   # a wait this request began, and no other
                     e.live.stop_waiting(snap["id"])
@@ -1620,18 +1613,10 @@ class Handler:
         _shape(isinstance(cid, str) and _ID_RE.fullmatch(cid), "id is not a comment id")
         return cid
 
-    def _ask(self, req: Req) -> Response:
-        e, cid = self._thread_job(req)
-        try:
-            self.hub.asktell.start_ask(e.address, cid, held=self._page_hash(req))
-        except JobRefused as r:
-            raise Refuse(r.status, r.message) from None
-        return _ok()
-
     def _tell(self, req: Req) -> Response:
         e, cid = self._thread_job(req)
         try:
-            self.hub.asktell.start_tell(e.address, cid, held=self._page_hash(req))
+            self.hub.tell.start_tell(e.address, cid, held=self._page_hash(req))
         except JobRefused as r:
             raise Refuse(r.status, r.message) from None
         return _ok()
@@ -1641,7 +1626,7 @@ class Handler:
         names a document; which command runs, and for which session, is not the request's to say."""
         e = self._entry(req, req.body.get("doc"))
         try:
-            self.hub.asktell.jump(e.address)
+            self.hub.tell.jump(e.address)
         except JobRefused as r:
             raise Refuse(r.status, r.message) from None
         return _ok()
@@ -1651,9 +1636,7 @@ class Handler:
         that is gone, or whose root was forgotten, has nothing left to stop, and the answer is ok."""
         doc = self._owned(req, req.body.get("doc"))
         cid = self._comment_id(req)
-        what = req.body.get("what")
-        _shape(what in ("ask", "tell"), "what must be ask or tell")
-        self.hub.asktell.cancel(doc, cid, what)
+        self.hub.tell.cancel(doc, cid)
         return _ok()
 
     def _seen(self, req: Req) -> Response:
@@ -1774,5 +1757,5 @@ class Handler:
         _shape(reason in ("stop", "upgrade"), "reason must be stop or upgrade")
         _shape(isinstance(force, bool), "force must be true or false")
         if not self.hub.request_stop(reason, force):
-            raise Refuse(409, "an Ask or Tell is running, so the hub was not stopped for the upgrade")
+            raise Refuse(409, "a Tell is running, so the hub was not stopped for the upgrade")
         return _ok()

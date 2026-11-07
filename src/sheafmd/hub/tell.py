@@ -1,11 +1,8 @@
 """
-sheafmd.hub.asktell — Ask, Tell and Cancel (SPEC 11.2, 11.3), and what the page is told about the
-agent (10.5, 10.6).
+sheafmd.hub.tell — Tell and Cancel (SPEC 11.3), and what the page is told about the agent (10.5, 10.6).
 
-An Ask forks the session through the adapter's command and writes the stdout as a reply with the
-role `answer`; the real session never hears of it. A Tell hands the message to the adapter's
-`deliver` and then the thread waits (LiveDocument) for a reply with the role `action`. The
-processes belong to the job runner (jobs.py).
+A Tell hands the message to the adapter's `deliver` and then the thread waits (LiveDocument) for a
+reply with the role `action`. The processes belong to the job runner (jobs.py).
 
 A job is aimed only at the target the document's render recorded in `docs.json`: nothing in a
 request names a session, a socket or a command.
@@ -28,11 +25,10 @@ from . import roots as roots_mod
 from .auth import clean_display
 from .live import BY_ID
 
-ASK_TIMEOUT = 10 * 60
 STOP_WAITS = 15.0      # seconds a stop message waits for the delivery it cancels to end
 
-NO_AGENT = "Render this page from an agent session to Ask and Tell it."
-NOT_YET = ("{product} can answer threads through the MCP door. Ask and Tell need an adapter "
+NO_AGENT = "Render this page from an agent session to Tell it."
+NOT_YET = ("{product} can answer threads through the MCP door. Tell needs an adapter "
            "sheaf does not have yet.")
 ENDED = "The {product} session that rendered this page has ended. Render it again from a session."
 NO_SOCKET = ("Tell needs the session's message socket, which was not found. Render the page "
@@ -47,8 +43,6 @@ NOT_MINE = ("No session to jump to: it is not run by this account, or its record
 JUMP_BUSY = "A jump is already running."
 JUMP_TIMEOUT = 5.0
 _PLACEHOLDER = re.compile(r"\{(session|pid|name|agent)\}")
-NO_ASK = ("Ask needs the {product} session id and its command, which were not found. Render the "
-          "page again from the session.")
 GONE = "The document is no longer on the hub: its folder was forgotten, or its file is gone."
 
 
@@ -84,7 +78,7 @@ class View:
         return out
 
     def can(self) -> list:
-        return sorted(self.caps & {"ask", "deliver"})
+        return sorted(self.caps & {"deliver"})
 
 
 def who(t: Target, ad: Adapter) -> str:
@@ -99,26 +93,19 @@ def _one_line(text: str, limit: int = 200) -> str:
     return " ".join(text.split())[:limit].strip()
 
 
-def _span(seconds: float) -> str:
-    return f"{int(seconds // 60)} minutes" if seconds >= 60 and seconds % 60 == 0 \
-        else f"{seconds:g} seconds"
-
-
-class AskTell:
+class Tell:
     def __init__(self, hub):
         self.hub = hub
-        self.ask_timeout = ASK_TIMEOUT
         self._jumping = threading.Lock()
 
     # ── what the page is told ────────────────────────────────────────────────
     def view(self, address: str) -> View:
         t = self.hub.target(address)
         if t is None:
-            return View(None, None, frozenset(), {"ask": NO_AGENT, "tell": NO_AGENT})
+            return View(None, None, frozenset(), {"tell": NO_AGENT})
         ad = self.hub.adapter(t.agent)
         caps = ad.capabilities(t)
-        lines = {"ask": None if "ask" in caps else self._line("ask", t, ad),
-                 "tell": None if "deliver" in caps else self._line("tell", t, ad)}
+        lines = {"tell": None if "deliver" in caps else self._line(t, ad)}
         return View(t, ad, caps, lines, jump=ad.implemented and self._jump_set())
 
     @staticmethod
@@ -129,12 +116,10 @@ class AskTell:
             return False                    # the click says why (jump below)
 
     @staticmethod
-    def _line(which: str, t: Target, ad: Adapter) -> str:
+    def _line(t: Target, ad: Adapter) -> str:
         """Why a button does not work (SPEC 10.6)."""
         if not ad.implemented:
             return NOT_YET.format(product=ad.product)
-        if which == "ask":
-            return NO_ASK.format(product=ad.product)
         state = ad.state(t)
         if state is not None and state.status == "gone":
             return ENDED.format(product=ad.product)
@@ -212,14 +197,14 @@ class AskTell:
         t = self.hub.target(address)
         return self.hub.adapter(t.agent).product if t else "agent"
 
-    def _require(self, view: View, which: str):
-        line = view.lines[which]
+    def _require(self, view: View):
+        line = view.lines["tell"]
         if line is not None:
             raise JobRefused(409, line)
 
-    def refusal(self, address: str, which: str) -> str | None:
-        """The line that says why `which` ("ask" or "tell") cannot start now, or None."""
-        return self.view(address).lines[which]
+    def refusal(self, address: str) -> str | None:
+        """The line that says why a Tell cannot start now, or None."""
+        return self.view(address).lines["tell"]
 
     def _pair(self, address: str):
         v = self.view(address)
@@ -255,7 +240,7 @@ class AskTell:
         """Inside `_admitting`: no Tell of a thread starts while the cancel of its Tell is not over. The
         cancel would end the new Tell's wait and send a stop message for a delivery it never cancelled,
         or its stop message would reach the session after the new Tell (SPEC 11.3). Only a Tell is
-        refused: an Ask touches no wait."""
+        refused."""
         if self._cancelling(address, cid):
             raise JobRefused(409, CANCELLING, leaves_wait=True)
 
@@ -328,86 +313,15 @@ class AskTell:
         except config.ConfigError:
             return True
 
-    def _cwd(self, e) -> str:
-        """The root of the document: where an Ask runs (SPEC 11.2)."""
-        root = self.hub.roots.get(roots_mod.Address.parse(e.address).root)
-        for d in (root.path if root else None, e.path.parent):
-            if d is not None and d.is_dir():
-                return str(d)
-        return str(e.path.parent)
-
-    # ── Ask ──────────────────────────────────────────────────────────────────
-    def start_ask(self, address: str, cid: str, held=None):
-        """Start answering thread `cid`, named in the version `held`: the page's, or the text the comment
-        route has just written the comment in; None when no page is behind it. Raises JobRefused with the
-        status and the sentence."""
-        e = self._entry(address)
-        self._version(e, held)
-        v = self.view(address)
-        self._require(v, "ask")
-        self._thread(e, cid)
-        t, ad = v.target, v.adapter
-
-        def work(job):
-            self._ask(e, ad, t, cid, job)
-
-        def failed(ex):
-            self._emit(e, "ask-failed", {"id": cid, "error": f"the hub failed to ask "
-                                         f"({type(ex).__name__}); the details are in `sheaf diag`"})
-        with self._admitting():
-            started = self._start(e, "ask", cid, work, failed)
-        if started is None:
-            raise JobRefused(409, f"{who(t, ad)} is already answering this comment")
-
-    def _ask(self, e, ad: Adapter, t: Target, cid: str, job):
-        def fail(message: str):
-            self._emit(e, "ask-failed", {"id": cid, "error": message})
-
-        self._emit(e, "ask-started", {"id": cid})
-        try:
-            c = rdc.parse(e.read()).by_id(cid)
-        except OSError:
-            return fail("the document is gone")
-        if c is None:
-            return fail(f"no comment {cid} in this document")
-        prompt = prompts.ask(str(e.path), c, self.links(e.address))
-        try:
-            r = job.run(ad.ask_command(t), timeout=self.ask_timeout, env=ad.child_env(t),
-                        cwd=self._cwd(e), input=prompt)
-        except FileNotFoundError:
-            return fail(f"the {ad.product} command was not found")
-        except subprocess.TimeoutExpired:
-            return fail(f"{who(t, ad)} did not answer within {_span(self.ask_timeout)}")
-        if job.cancelled:
-            self._emit(e, "ask-cancelled", {"id": cid})
-            return
-        tail = " ".join((r.stderr or "").strip().splitlines()[-3:])
-        if r.returncode < 0:
-            return fail(f"{ad.product} was stopped by signal {-r.returncode}")
-        answer = (r.stdout or "").strip()
-        if r.returncode != 0:
-            return fail(f"{ad.product} exited with {r.returncode}: {tail or 'no output'}")
-        if not answer:
-            return fail(f"{who(t, ad)} gave no answer" + (f": {tail}" if tail else ""))
-        try:
-            e.live.reply_as(cid, answer, ad.display, "answer", "ask-done",
-                            expect=rdc.thread_identity(c))
-        except rdc.ThreadChanged:
-            fail(f"the comment changed while {who(t, ad)} was answering")
-        except rdc.NoComment:
-            fail(f"the comment was deleted while {who(t, ad)} was answering")
-        except rdc.AnchorError as ex:
-            fail(f"the answer of {who(t, ad)} was not written: {ex}")
-
     # ── Tell ─────────────────────────────────────────────────────────────────
     def start_tell(self, address: str, cid: str, waiting: bool = False, held=None):
         """Deliver thread `cid` to the session. `waiting`: the thread already waits for the
         reply (a comment written with Tell starts the wait when it is written). `held`: as for an
-        Ask. Raises JobRefused."""
+        a Tell begun by hand. Raises JobRefused."""
         e = self._entry(address)
         self._version(e, held)
         v = self.view(address)
-        self._require(v, "tell")
+        self._require(v)
         # Before the wait is touched: a second Tell must leave the first one's as it is.
         if self.hub.runner.running("tell", address, cid):
             raise JobRefused(409, self._already_telling(v.target, v.adapter))
@@ -465,25 +379,19 @@ class AskTell:
         self._emit(e, "tell-failed", {"id": cid, "error": message})
 
     # ── Cancel ───────────────────────────────────────────────────────────────
-    def cancel(self, address: str, cid: str, what: str):
+    def cancel(self, address: str, cid: str):
         # The entry as it is held, not looked up in the file: a cancel of a job on a file that has
         # gone must still stop it. No entry means a forget took the document; a job that started on
         # its entry after the forget counted the jobs is still stopped, with no page left to tell.
         e = self.hub.entries.get(address)
         if e is None:
-            self.hub.runner.cancel(what, address, cid)
-            return
-        if what == "ask":
-            # A running Ask says so itself when its child ends. Nothing running means the answer
-            # has just landed or it never started: clear the page all the same.
-            if not self.hub.runner.cancel("ask", address, cid):
-                self._emit(e, "ask-cancelled", {"id": cid})
+            self.hub.runner.cancel("tell", address, cid)
             return
         # Under the admission lock only what an upgrade stop must not come between: the end of the
         # delivery's job and the hold that says the stop message is on its way (8.4). The wait ends
         # after, outside the lock, because it needs the document's lock and the name's (9.11), which a
         # write holds for as long as pandoc or mmdc take and its commit, and an upgrade stop (the announced SIGTERM of `sheaf restart`
-        # too) and every Ask and Tell start wait on the admission lock. The hold stays until the cancel
+        # too) and every Tell start wait on the admission lock. The hold stays until the cancel
         # is over: no Tell of the thread starts meanwhile (`_not_cancelling`).
         with self.hub.admit:
             deliveries = self.hub.runner.worker_threads("tell", address, cid)

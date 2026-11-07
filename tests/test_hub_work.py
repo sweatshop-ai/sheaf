@@ -1,5 +1,5 @@
 """Work on this (SPEC 9.12): a member downloads the transcript of a sheaf's box-hosted session, reports the
-fork they made of it on their machine, and on a sheaf whose live session runs on the box sends Ask and Tell
+fork they made of it on their machine, and on a sheaf whose live session runs on the box sends Tell
 to James's window by a file the hub drops. Through the handler in proxy mode, with the list's root as the
 members' root: Thierry owns the sheaves, Hans is a member of the project, Bea is a member of another root."""
 import json
@@ -514,7 +514,7 @@ def test_a_write_that_landed_before_the_fork_is_kept(team, box, work):
     assert text.endswith("\nA paragraph from another hand.\n") and f"{{id: {FORK}, " in text
 
 
-# ── Ask and Tell to James's window ───────────────────────────────────────────
+# ── Tell to James's window ───────────────────────────────────────────
 
 def comment(team, work, kind, as_=HANS, body="Can you send the draft to Joey?", **extra):
     from sheafmd.blocks import split_md_blocks
@@ -529,23 +529,22 @@ def drops(box):
     return sorted(box["tell"].iterdir())
 
 
-@pytest.mark.parametrize("kind", ["ask", "tell"])
-def test_ask_and_tell_on_a_box_sheaf_write_the_comment_and_drop_it_for_james(team, box, work, kind):
-    got = comment(team, work, kind)
+def test_tell_on_a_box_sheaf_writes_the_comment_and_drops_it_for_james(team, box, work):
+    got = comment(team, work, "tell")
     assert got.status == 200, got.text
-    assert got.json()["telling"] == [] and "tellError" not in got.json() and "askError" not in got.json()
+    assert got.json()["telling"] == [] and "tellError" not in got.json()
     assert "Can you send the draft to Joey?" in (work / DOC).read_text(encoding="utf-8")
     f, = drops(box)
     assert f.name.startswith("thinkingtoo--tiroir-20") and f.name.endswith("Z")
     d = json.loads(f.read_bytes())
-    tell_keys = {"id": d.get("id"), "message": d.get("message")} if kind == "tell" else {}
+    tell_keys = {"id": d.get("id"), "message": d.get("message")}
     assert d == {"project": "thinkingtoo/tiroir", "member": "hans", "sheaf": ADDRESS,
-                 "text": "Can you send the draft to Joey?", "kind": kind, "thread": got.json()["id"],
+                 "text": "Can you send the draft to Joey?", "kind": "tell", "thread": got.json()["id"],
                  "address": ADDRESS, "abs_path": str(work / DOC), **tell_keys}
     assert list(f.read_bytes().decode()) == list(json.dumps(json.loads(f.read_bytes())))
     row, = hub_rows("tell-dropped")
-    assert (row["what"], row["project"], row["by"], row["drop"]) == (kind, "thinkingtoo/tiroir", "hans", "written")
-    assert team.hub.runner.active("ask", ADDRESS) == team.hub.runner.active("tell", ADDRESS) == []
+    assert (row["what"], row["project"], row["by"], row["drop"]) == ("tell", "thinkingtoo/tiroir", "hans", "written")
+    assert team.hub.runner.active("tell", ADDRESS) == []
 
 
 def test_the_text_dropped_for_james_is_cut_at_3000_characters(team, box, work):
@@ -581,34 +580,35 @@ def test_a_second_drop_in_the_same_second_takes_the_next_name(team, box, work, m
     import time as time_mod
     monkeypatch.setattr(time_mod, "gmtime", lambda *a: time_mod.struct_time((2026, 10, 28, 5, 12, 3, 2, 301, 0)))
     for _ in range(3):
-        assert comment(team, work, "ask").status == 200
+        assert comment(team, work, "tell").status == 200
     assert [f.name for f in drops(box)] == ["thinkingtoo--tiroir-20261028T051203Z",
                                             "thinkingtoo--tiroir-20261028T051203Z-1",
                                             "thinkingtoo--tiroir-20261028T051203Z-2"]
 
 
-@pytest.mark.parametrize("kind", ["ask", "tell"])
-def test_on_a_sheaf_whose_live_session_is_on_a_laptop_ask_and_tell_stay_refused(team, box, work, kind):
+def test_on_a_sheaf_whose_live_session_is_on_a_laptop_tell_stays_refused(team, box, work):
     put(team, work, DOC, SHEAF.replace("host: tiroir-tt, member: james, date: 2026-10-28T05:12:03Z",
                                        "host: thierry-laptop, member: thierry, date: 2026-10-28T05:12:03Z"))
     before = (work / DOC).read_text(encoding="utf-8")
-    got = comment(team, work, kind)
+    got = comment(team, work, "tell")
     assert got.status == 400 and got.json()["error"] == proxy.PROXY_LINE
     assert (work / DOC).read_text(encoding="utf-8") == before and drops(box) == []
 
 
-def test_without_a_tell_dir_or_outside_the_list_ask_stays_refused(team, box, work, tmp_path):
+def test_without_a_tell_dir_or_outside_the_list_tell_stays_refused(team, box, work, tmp_path):
     cfg = team.hub.the_list.cfg
     team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{**cfg.__dict__, "tell_dir": None}))
-    assert comment(team, work, "ask").json()["error"] == proxy.PROXY_LINE
+    assert comment(team, work, "tell").json()["error"] == proxy.PROXY_LINE
     team.hub.the_list = None
     assert comment(team, work, "tell").json()["error"] == proxy.PROXY_LINE
     assert hub_rows("tell-dropped") == []
 
 
-def test_ask_and_tell_both_are_refused_on_the_box(team, box, work):
-    got = comment(team, work, "ask", tell=True)
-    assert got.status == 400 and "not both" in got.json()["error"] and drops(box) == []
+def test_ask_is_refused_on_the_box_before_anything_is_written(team, box, work):
+    before = (work / DOC).read_text(encoding="utf-8")
+    got = comment(team, work, "ask")
+    assert got.status == 400 and got.json()["error"] == "Ask was retired: use Tell, or reply."
+    assert (work / DOC).read_text(encoding="utf-8") == before and drops(box) == []
 
 
 def test_a_request_sent_again_drops_once(team, box, work):
@@ -619,7 +619,7 @@ def test_a_request_sent_again_drops_once(team, box, work):
 
 
 def test_a_reply_with_tell_drops_the_reply(team, box, work):
-    cid = comment(team, work, "ask").json()["id"]
+    cid = comment(team, work, "tell").json()["id"]
     got = team.post("/_/comment", {"doc": ADDRESS, "op": "reply", "id": cid, "body": "And the invoice.",
                                    "tell": True}, member=THIERRY)
     assert got.status == 200, got.text
@@ -647,10 +647,9 @@ def sent(team, member=HANS):
     return got.json()["sent"]
 
 
-@pytest.mark.parametrize("kind", ["ask", "tell"])
-def test_a_drop_for_james_is_sent_on_every_members_page_until_a_reply_lands_in_its_thread(team, box, work, kind):
-    cid = comment(team, work, kind).json()["id"]
-    assert sent(team) == sent(team, THIERRY) == [{"id": cid, "kind": kind, "state": "sent"}]
+def test_a_drop_for_james_is_sent_on_every_members_page_until_a_reply_lands_in_its_thread(team, box, work):
+    cid = comment(team, work, "tell").json()["id"]
+    assert sent(team) == sent(team, THIERRY) == [{"id": cid, "kind": "tell", "state": "sent"}]
     got = team.post("/_/comment", {"doc": ADDRESS, "op": "reply", "id": cid, "body": "Sent it."}, member=THIERRY)
     assert got.status == 200, got.text
     assert sent(team) == []
@@ -723,20 +722,19 @@ def status(box, state, **extra):
     tmp.replace(box["tell"] / f"{f.name}.status")
 
 
-@pytest.mark.parametrize("kind", ["ask", "tell"])
-def test_the_supervisors_picked_up_then_delivered_is_told_to_the_page_once_each(team, box, work, kind):
+def test_the_supervisors_picked_up_then_delivered_is_told_to_the_page_once_each(team, box, work):
     tab = team.get(f"/_/live?doc={ADDRESS}", member=HANS).stream
-    cid = comment(team, work, kind).json()["id"]
-    assert sent(team) == [{"id": cid, "kind": kind, "state": "sent"}]
+    cid = comment(team, work, "tell").json()["id"]
+    assert sent(team) == [{"id": cid, "kind": "tell", "state": "sent"}]
     status(box, "picked-up")
     team.hub.tick()
     team.hub.tick()
-    assert sent(team) == [{"id": cid, "kind": kind, "state": "picked-up"}]
+    assert sent(team) == [{"id": cid, "kind": "tell", "state": "picked-up"}]
     status(box, "delivered")
     team.hub.tick()
-    assert sent(team) == [{"id": cid, "kind": kind, "state": "delivered"}]
+    assert sent(team) == [{"id": cid, "kind": "tell", "state": "delivered"}]
     told = [d for n, d in tab.drain() if n == "box-status"]
-    assert told == [{"id": cid, "kind": kind, "state": "picked-up"}, {"id": cid, "kind": kind, "state": "delivered"}]
+    assert told == [{"id": cid, "kind": "tell", "state": "picked-up"}, {"id": cid, "kind": "tell", "state": "delivered"}]
     assert [r["state"] for r in hub_rows("drop-status")] == ["picked-up", "delivered"]
 
 
@@ -884,13 +882,13 @@ def meta(team, member=HANS, doc=DOC):
     return page_meta(got.text)
 
 
-def test_the_meta_block_of_a_box_sheaf_carries_the_fork_command_the_sessions_and_box_ask_tell(team, box):
+def test_the_meta_block_of_a_box_sheaf_carries_the_fork_command_the_sessions_and_box_tell(team, box):
     m = meta(team)
     assert m["work"] == {"fork": f"uvx --from {work_mod.FORK_CLIENT} tiroir work {FRONT}/{ADDRESS}", "live": "box", "sessions": [
         {"id": LIVE, "host": "tiroir-tt", "member": "james", "date": "2026-10-28T05:12:03Z"},
         {"id": LAPTOP, "host": "thierry-laptop", "member": "thierry", "date": "2026-10-27T09:00:00Z"},
         {"id": OLDER, "host": "tiroir-tt", "member": "james", "date": "2026-10-26T08:00:00Z"}]}
-    assert m["can"] == ["box-ask", "box-tell"]
+    assert m["can"] == ["box-tell"]
 
 
 def test_the_fork_client_is_pinned_to_one_exact_version():
@@ -1002,9 +1000,9 @@ def doc_answer(team, member=HANS, doc=ADDRESS):
     return got.json()
 
 
-def test_the_doc_answer_of_a_box_sheaf_keeps_box_ask_tell_and_the_work(team, box):
+def test_the_doc_answer_of_a_box_sheaf_keeps_box_tell_and_the_work(team, box):
     j = doc_answer(team)
-    assert j["capabilities"] == ["box-ask", "box-tell"]
+    assert j["capabilities"] == ["box-tell"]
     assert j["work"] == meta(team)["work"]
 
 
@@ -1156,7 +1154,7 @@ def test_a_door_create_cannot_list_a_session_but_may_write_an_empty_list(team, b
     assert not is_error, got
 
 
-# ── the hub records James's session from its own Ask and Tell (9.12) ─────────
+# ── the hub records James's session from its own Tell (9.12) ─────────
 NEW = "abcdef01-2345-4678-89ab-cdef01234567"
 
 
@@ -1225,10 +1223,10 @@ def test_when_the_live_session_is_still_the_newest_the_file_keeps_its_front_matt
     assert hub_rows("session-recorded") == []
 
 
-def test_a_sheaf_of_james_with_no_session_yet_takes_ask_and_tell_and_records_his_when_he_writes(team, browser, work,
+def test_a_sheaf_of_james_with_no_session_yet_takes_tell_and_records_his_when_he_writes(team, browser, work,
                                                                                               james_writes):
     put(team, work, DOC, SHEAF.split("sessions:\n")[0] + "---\n# T\n\nA quote from the contract.\n")
-    assert meta(team)["can"] == ["box-ask", "box-tell"]
+    assert meta(team)["can"] == ["box-tell"]
     cid = a_thread(team, work)
     assert len(drops({"tell": team.hub.the_list.cfg.tell_dir})) == 1
     assert sessions_of(work) == []                              # James has not answered yet
@@ -1287,9 +1285,9 @@ def test_a_fork_that_lands_after_the_gate_keeps_the_tell_from_james(team, box, w
     real = handler_mod.Handler._work_route
     seen = []
 
-    def box_at_the_gate(self, address, text, kind, member=None):
+    def box_at_the_gate(self, address, text, member=None):
         seen.append(1)
-        return "box" if len(seen) == 1 else real(self, address, text, kind, member)
+        return "box" if len(seen) == 1 else real(self, address, text, member)
     monkeypatch.setattr(handler_mod.Handler, "_work_route", box_at_the_gate)
     got = comment(team, work, "tell")
     assert got.status == 400 and got.json()["error"] == proxy.PROXY_LINE
@@ -1577,7 +1575,7 @@ def replies(team, cid):
 
 def test_stop_james_removes_the_project_s_waiting_tells_and_says_so_in_each_thread(team, work, stoppable):
     first = comment(team, work, "tell", body="Send the draft.").json()["id"]
-    second = comment(team, work, "ask", body="Which draft?").json()["id"]
+    second = comment(team, work, "tell", body="Which draft?").json()["id"]
     # named with the project's prefix, but another project's: only `project` tells them apart
     other = stoppable["tell"] / "thinkingtoo--tiroir-x-20261029T200000Z"
     other.write_text(json.dumps({"project": "thinkingtoo/tiroir-x", "member": "hans",

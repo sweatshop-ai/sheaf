@@ -496,7 +496,7 @@ def test_a_sheaf_closed_with_the_same_size_and_time_is_closed_at_once(team, work
 
 
 def test_two_stop_james_in_one_second_leave_two_drops_and_two_rows(team, work, stop_dir, monkeypatch):
-    # Through work.drop, as Ask and Tell: the second takes `-1`, and never writes over a drop James has not read.
+    # Through work.drop, as Tell: the second takes `-1`, and never writes over a drop James has not read.
     put(team, work, DOC, STOPPABLE.replace("- [ ] Stop James", "- [ ] Stop James\n- [ ] Stop James"))
     second = time.gmtime()
     monkeypatch.setattr(time, "gmtime", lambda *_: second)

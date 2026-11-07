@@ -19,7 +19,7 @@ URL = "/work/plan.md"
 COOKIE_ROUTES = [
     ("GET", URL), ("GET", "/"), ("GET", "/work/"), ("GET", f"/_/live?doc={DOC}"),
     ("GET", f"/_/doc?doc={DOC}"), ("POST", "/_/save"), ("POST", "/_/comment"),
-    ("POST", "/_/ask"), ("POST", "/_/tell"), ("POST", "/_/cancel"), ("POST", "/_/seen"),
+    ("POST", "/_/tell"), ("POST", "/_/cancel"), ("POST", "/_/seen"),
     ("POST", "/_/export"), ("POST", "/_/diag"), ("POST", "/_/pin")]
 KEY_ROUTES = [("GET", "/_/jobs"), ("POST", "/_/render"), ("POST", "/_/stop"), ("POST", "/_/signin"),
               ("POST", "/_/restarting"), ("DELETE", "/_/restarting")]
@@ -128,7 +128,7 @@ def test_the_key_header_opens_the_key_routes_and_the_cookie_does_not(browser, pl
 
 
 def test_the_key_header_does_not_open_a_cookie_route_that_writes(browser, plan):
-    for path in ("/_/save", "/_/comment", "/_/seen", "/_/export", "/_/diag", "/_/ask", "/_/pin", "/_/jump"):
+    for path in ("/_/save", "/_/comment", "/_/seen", "/_/export", "/_/diag", "/_/pin", "/_/jump"):
         r = browser.post(path, {"doc": DOC}, cookie=False, key=True)
         assert r.status == 403, path
     assert browser.get(URL, cookie=False, key=True).status == 403
@@ -387,7 +387,7 @@ def test_a_doc_field_that_leaves_the_root_is_404_on_every_route(browser, outside
     assert browser.get(f"/_/live?doc={doc}").status == 404
     for route, body in (("/_/save", {"hash": "x", "edits": []}), ("/_/comment", {"op": "delete", "id": "c1"}),
                         ("/_/seen", {"id": "c1", "count": 1}), ("/_/export", {"kind": "html"}),
-                        ("/_/ask", {"id": "c1"})):
+                        ("/_/tell", {"id": "c1"})):
         assert browser.post(route, {"doc": doc, **body}).status == 404, route
     assert outside.read_text() == SECRET
 

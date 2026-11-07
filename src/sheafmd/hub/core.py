@@ -172,16 +172,31 @@ class Hub:
             self._private_paths[str(folder)] = m.id
 
     # ── documents ────────────────────────────────────────────────────────────
-    def _versions_of(self, root) -> state.Versions:
+    def _versions_of(self, root, named: str = "") -> state.Versions:
         """The versions store of `root`'s documents: inside it with `versions = "root"` (7.4), else the
-        state folder's, also when its `.sheaf.toml` cannot be read."""
+        state folder's, also when its `.sheaf.toml` cannot be read. `named` is the root of the documents'
+        addresses when it is not `root` (a private sheaf is addressed under the list's root): the prefix the
+        store strips, so its folder is the one a commit of the file names."""
         try:
             inside = config.load_root_config(root.path, warn=lambda line: None).versions_inside
         except config.ConfigError:
             inside = False
         if inside:
-            return state.Versions(root.path, root.name)
+            return state.Versions(root.path, named or root.name)
         return self.versions
+
+    def _store_of(self, address: str, root):
+        """The versions store of the sheaf named `address` as its file is now placed, found at each call, not when
+        its document was opened: a document opened for a file of the list's root keeps no private text there once
+        a private file holds the name. None when the file cannot be decided (a name two roots hold, a private root
+        that cannot be looked at): nothing is stored, a full disk's cost."""
+        if not (self.private_roots and place.applies(self, roots_mod.Address.parse(address).root)):
+            return self._versions_of(root)
+        try:
+            at = place.file_at(self, address)
+        except roots_mod.NotFound:
+            return None
+        return self._versions_of(at[0] if at else root, root.name)
 
     def check_projects(self, root, rels):
         """Warn of each sheaf folder of `root` (its documents `rels`) that the root's `projects.toml`
@@ -339,7 +354,7 @@ class Hub:
             e.file_root = at[0].id if at else root.id
             e.live = LiveDocument(file, render=lambda text: self._rendered(e, text),
                                   publish=e.bus.publish, by=self.person, clock=self.clock,
-                                  versions=self._versions_of(at[0] if at else root), address=address, hold=hold)
+                                  versions=lambda: self._store_of(address, root), address=address, hold=hold)
             e.live.refresh(force=True)           # the first render: e.html
             self.entries[address] = e
             return e

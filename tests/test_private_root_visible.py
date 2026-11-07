@@ -120,7 +120,7 @@ def test_assignee_does_not_open_private_sheaf(world):
 def test_assignee_has_no_row_and_no_event(world, monkeypatch):
     w = world
     w.put(PRIVATE)
-    assert not listed(w, B)          # the owner's row, under the list's name, is the next change's (rule D)
+    assert listed(w, A) and not listed(w, B)
     now = [time.time()]
     w.hub.clock = lambda: now[0]
     monkeypatch.setattr(w.hub.index, "_start_sweep", lambda run: run())          # a sweep inside the tick
@@ -133,7 +133,7 @@ def test_assignee_has_no_row_and_no_event(world, monkeypatch):
     (w.two.private_repo / NAME).unlink()                  # a change both streams would be told of if both could see it
     now[0] += SWEEP_SECONDS
     w.hub.tick()
-    mine.drain()                                          # the owner's status, under the list's name, is the next change's
+    assert [d["doc"][-len(NAME):] for n, d in mine.drain() if n == "status"] == [NAME]       # the owner's stream hears it
     assert [d for n, d in theirs.drain() if n == "status"] == []
 
 
@@ -183,9 +183,9 @@ def test_door_gives_an_assignee_and_a_loose_token_nothing_of_private_sheaf(world
 def test_door_listings_leave_out_private_sheaf(world):
     w = world
     w.put(PRIVATE)
-    for token in ("tok-a", "tok-b", "loose"):         # the owner's rows, under the list's name, are the next change's (rule D)
+    for token, seen in (("tok-a", True), ("tok-b", False), ("loose", False)):
         is_error, got = call(w.door, "documents", token=w.tokens[token], open_only=False)
-        assert not is_error and NAME not in str(got), (token, got)
+        assert not is_error and (NAME in str(got)) is seen, (token, got)
 
 
 def test_unbound_token_private_root(world):
@@ -756,6 +756,39 @@ def test_a_local_image_is_read_beneath_its_root_and_never_from_a_private_one(wor
     w.hub._private_ids[(st.st_dev, st.st_ino)] = "member-a-id"
     with pytest.raises(PermissionError):
         read(top.resolve() / "one" / "pic.png")
+
+
+def test_private_sheaf_image_shows(world):
+    """The images of a private sheaf are judged against the root its file is in (rule H): its own member's page
+    embeds the picture beside it, and the picture is a private one that no other root's sheaf could embed."""
+    w = world
+    w.put(PRIVATE + "\n![pic](pic.png)\n")
+    png = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8ffff3f0005fe02fea7c2f3050000000049454e44ae426082")
+    (w.two.private_repo / "acme/blog/pic.png").write_bytes(png)
+    html = w.front.get(f"/_/mount?doc={w.address}", member=A).json()["html"]
+    assert "data:image/png;base64," in html
+    assert w.front.get(f"/_/mount?doc={w.address}", member=B).status == 404                  # the positive control's other side
+    # a sheaf of the list's root cannot embed a picture of the private root
+    (w.two.list_repo / "acme/blog/other.md").write_text("# other\n\n![pic](pic.png)\n", encoding="utf-8")
+    (w.two.list_repo / "acme/blog/pic.png").unlink(missing_ok=True)
+    other = w.front.get(f"/_/mount?doc={w.root.name}/acme/blog/other.md", member=A).json()["html"]
+    assert "data:image/png" not in other
+
+
+def test_index_and_documents_show_private_names(world):
+    """Rule D: a member's private sheaves are listed under their list names to that member alone: the index data, the
+    door's `documents`, and the board the streams are told from, which tells the hub's person nothing of them."""
+    w = world
+    w.put(PRIVATE)
+    index = w.hub.index
+    names = lambda member: [d["doc"] for r in index.data(member=member)["roots"] for d in r["docs"]]    # noqa: E731
+    assert w.address in names(w.hub.proxy.members[A]) and w.address not in names(w.hub.proxy.members[B])
+    assert w.address not in names(None)                                      # the hub's person: no private file
+    assert w.address in index._rows()                                        # the board holds it for the members' streams
+    assert names(w.hub.proxy.members[A]) == [w.address]                      # one row: the private root is no second entry
+    assert index.accepting(None)("status", index._event(w.address, None, True, 0, None)) is None      # not the person's
+    is_error, own = call(w.door, "documents", token=w.tokens["tok-a"], open_only=False)
+    assert not is_error and [d["doc"] for d in own] == [w.address]
 
 
 def test_the_share_copy_is_rendered_from_the_text_the_descriptor_gave(world, mode, monkeypatch):

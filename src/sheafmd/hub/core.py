@@ -132,7 +132,7 @@ class Hub:
         self._projects: dict = {}                # root id -> (stat key, entries | Invalid | None) of its projects.toml
         self._grants_seen: dict = {}             # root id -> the projects_of answer the open tabs were last told (8.12)
         self._grants_last: dict = {}             # root id -> what projects_of gave the last tick
-        self.told_place: set = set()             # (address, quarantined) a place-refused row named this run (9.11)
+        self.told_place: set = set()             # (address, quarantined | "undecided") a place-refused row named this run (9.11)
         self.told_link: set = set()              # the (root id, path) a link-ignored row named this run (9.11)
         self.told_ignored: set = set()           # the roots a private-ignored row named this run (9.11)
         self._front: dict = {}                   # {file: (its stat, its front matter, its assignees)}, for 9.11
@@ -332,11 +332,11 @@ class Hub:
         if place.applies(self, a.root):
             try:
                 held = self._bound(address)              # the file an open document was made for, no other
-                got = place.file_at(self, address, held.file_root if held else "") if self.private_roots else None
+                got = place.file_at(self, address, held.file_root if held else "")
             except roots_mod.NotFound:
                 self.record("commit-refused", address, why="its file is not where the sheaf was opened")
                 return
-            root, rel = got if got else (root, place.file_rel(Path(os.path.realpath(root.path)), a.rel))
+            root, rel = got if got else (root, place.file_rel(self, root, a.rel))
         else:
             rel = a.rel
         if author is not None:
@@ -360,16 +360,8 @@ class Hub:
             placed = place.applies(self, at.root)
         if not placed:
             return root.path / at.rel
-        if self.private_roots:
-            try:
-                got = place.file_at(self, address, bound)
-            except roots_mod.NotFound:
-                if bound:
-                    raise                       # a write's file is never found anywhere else
-                got = None                      # a read answers as it did: the list root's path, judged by its caller
-            if got:
-                return got[0].path / got[1]
-        return root.path / place.file_rel(Path(os.path.realpath(root.path)), at.rel)
+        got = place.file_at(self, address, bound)       # raises where the file cannot be decided: never the list's path
+        return got[0].path / got[1] if got else root.path / place.file_rel(self, root, at.rel)
 
     def _where_of(self, e, name: str) -> tuple:
         """`where` for an entry. A root forgotten while a write or a rebuild of the entry is under way leaves it the folder
@@ -392,16 +384,8 @@ class Hub:
         if not place.applies(self, at.root):
             top, rel = self.roots.locate(address)
             return top.path, rel
-        if self.private_roots:
-            try:
-                got = place.file_at(self, address, bound)
-            except roots_mod.NotFound:
-                if bound:
-                    raise
-                got = None
-            if got:
-                return got[0].path, got[1]
-        return root.path, place.file_rel(Path(os.path.realpath(root.path)), at.rel)
+        got = place.file_at(self, address, bound)
+        return (got[0].path, got[1]) if got else (root.path, place.file_rel(self, root, at.rel))
 
     def open_in(self, root, rel: str):
         """`rel` below the root `root` opened beneath it (`sheafmd.beneath`), for the hub's own reads: judged on what was
@@ -438,7 +422,8 @@ class Hub:
         e = self.entries.get(address)
         if e is not None and self.private_roots:
             got = place.where_is(self, address)
-            if got is not None and got[0].id != e.file_root:
+            if got is not None and got[0].id != e.file_root \
+                    and not place.undecided(self, roots_mod.Address.parse(address).rel):     # as `_entry`: kept, so the commit raises
                 with self._lock:
                     if self.entries.get(address) is e:
                         del self.entries[address]
@@ -456,7 +441,8 @@ class Hub:
                 # a private root is refused when its file is not there (`file_at`); one bound to a root other than the one that now holds the file is
                 # dropped, and made again.
                 got = place.where_is(self, address)
-                if got is not None and got[0].id != e.file_root:
+                if got is not None and got[0].id != e.file_root \
+                        and not place.undecided(self, roots_mod.Address.parse(address).rel):     # never rebound while a private root is not seen
                     del self.entries[address]
                     e = None
                 elif e.file_root in self.private_roots:
@@ -960,7 +946,10 @@ class Hub:
         if by_name:
             return projects.grants(entries, at.rel, member.short)
         top = os.path.realpath(root.path)
-        real = os.path.realpath(self.file(address))
+        try:
+            real = os.path.realpath(self.file(address))
+        except roots_mod.NotFound:
+            return False                    # a file that cannot be decided (rule B) opens to no one
         if not real.startswith(top.rstrip("/") + "/"):
             return False
         return all(projects.grants(entries, rel, member.short) for rel in {at.rel, os.path.relpath(real, top)})
@@ -1003,9 +992,12 @@ class Hub:
                 rel = rel.as_posix()
                 # The list knows a sheaf by its name (9.11), wherever its file is.
                 address = f"{root.name}/{(place.logical(rel) if placed else None) or rel}"
-            except ValueError:
+            except (ValueError, roots_mod.NotFound):     # a file that cannot be decided (rule B) renames nothing
                 pass
-        return self.the_list.assignees(address, visibility.text(fm, "issue"))
+        try:
+            return self.the_list.assignees(address, visibility.text(fm, "issue"))
+        except roots_mod.NotFound:                       # a name two roots hold: no record's assignees for it
+            return None
 
     def jobs(self) -> dict:
         telling = []

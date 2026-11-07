@@ -313,11 +313,11 @@ class Hub:
         if place.applies(self, a.root):
             try:
                 held = self._bound(address)              # the file an open document was made for, no other
-                got = place.file_at(self, address, held.file_root if held else "") if self.private_roots else None
+                got = place.file_at(self, address, held.file_root if held else "")
             except roots_mod.NotFound:
                 self.record("commit-refused", address, why="its file is not where the sheaf was opened")
                 return
-            root, rel = got if got else (root, place.file_rel(Path(os.path.realpath(root.path)), a.rel))
+            root, rel = got if got else (root, place.file_rel(self, root, a.rel))
         else:
             rel = a.rel
         if author is not None:
@@ -341,16 +341,8 @@ class Hub:
             placed = place.applies(self, at.root)
         if not placed:
             return root.path / at.rel
-        if self.private_roots:
-            try:
-                got = place.file_at(self, address, bound)
-            except roots_mod.NotFound:
-                if bound:
-                    raise                       # a write's file is never found anywhere else
-                got = None                      # a read answers as it did: the list root's path, judged by its caller
-            if got:
-                return got[0].path / got[1]
-        return root.path / place.file_rel(Path(os.path.realpath(root.path)), at.rel)
+        got = place.file_at(self, address, bound)       # raises where the file cannot be decided: never the list's path
+        return got[0].path / got[1] if got else root.path / place.file_rel(self, root, at.rel)
 
     def _where_of(self, e, name: str) -> tuple:
         """`where` for an entry. A root forgotten while a write or a rebuild of the entry is under way leaves it the folder
@@ -373,16 +365,8 @@ class Hub:
         if not place.applies(self, at.root):
             top, rel = self.roots.locate(address)
             return top.path, rel
-        if self.private_roots:
-            try:
-                got = place.file_at(self, address, bound)
-            except roots_mod.NotFound:
-                if bound:
-                    raise
-                got = None
-            if got:
-                return got[0].path, got[1]
-        return root.path, place.file_rel(Path(os.path.realpath(root.path)), at.rel)
+        got = place.file_at(self, address, bound)
+        return (got[0].path, got[1]) if got else (root.path, place.file_rel(self, root, at.rel))
 
     def open_in(self, root, rel: str):
         """`rel` below the root `root` opened beneath it (`sheafmd.beneath`), for the hub's own reads: judged on what was
@@ -897,7 +881,10 @@ class Hub:
         if by_name:
             return projects.grants(entries, at.rel, member.short)
         top = os.path.realpath(root.path)
-        real = os.path.realpath(self.file(address))
+        try:
+            real = os.path.realpath(self.file(address))
+        except roots_mod.NotFound:
+            return False                    # a file that cannot be decided (rule B) opens to no one
         if not real.startswith(top.rstrip("/") + "/"):
             return False
         return all(projects.grants(entries, rel, member.short) for rel in {at.rel, os.path.relpath(real, top)})

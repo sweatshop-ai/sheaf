@@ -33,7 +33,7 @@ from .atomic import write_text_atomic
 from .hub import client as hubclient
 from .hub import roots as hubroots
 from .hub import server as hubserver
-from .hub.auth import clean_display
+from .hub.auth import agent_name, clean_display, name_key
 from .hub.roots import url_path
 from .hub.state import TokenError, Tokens
 from .render import RenderError, UnclosedComment, render_file
@@ -881,16 +881,44 @@ def _member_named(display: str) -> str | None:
     return next((m.name for m in (cfg.members.values() if cfg else ()) if proxy.same_name(m.name, display)), None)
 
 
+def _proxy_table():
+    """The checked `[proxy]` table, or None when there is none or the hub would refuse it."""
+    from .hub import proxy
+    try:
+        return proxy.load()
+    except proxy.ProxyError:
+        return None
+
+
+def _signed_by_others(tokens: Tokens, cfg, person: str) -> list[str]:
+    """The name each token already made signs with, whose replies a new one's must not pass for."""
+    return [r.signed(person, cfg) for r in tokens.list() if not r.invalid]
+
+
+def _agent_clash(client: str, built: str, cfg, person: str, others: list[str]) -> str | None:
+    """What a new agent's `client`, or the `built` name it would sign with, would pass for: the hub's person, a member of
+    proxy mode, or a name another token signs with (SPEC 9.7). Compared by `name_key`: case, accents and width ignored."""
+    from .hub import proxy
+    members = [m.name for m in cfg.members.values()] if cfg is not None else proxy.member_names()
+    for name in (person, *members, *others):
+        if name_key(name) in (name_key(client), name_key(built)):
+            return name
+    return None
+
+
 def cmd_token(argv: list[str]) -> int:
-    p = _parser("token", "token add NAME [--as DISPLAY] [--write] | list | revoke NAME",
+    p = _parser("token", "token add NAME [--client CLIENT | --as DISPLAY] [--write] | list | revoke NAME",
                 "MCP tokens: a named, revocable secret that lets one agent use the hub's HTTP MCP "
                 "door. Only a hash is kept; the token itself is shown once, by `add`.")
     sub = p.add_subparsers(dest="action", required=True, metavar="add|list|revoke")
-    add = sub.add_parser("add", usage="sheaf token add NAME [--as DISPLAY] [--write]",
+    add = sub.add_parser("add", usage="sheaf token add NAME [--client CLIENT | --as DISPLAY] [--write]",
                          help="make a token and print it once")
     add.add_argument("name", metavar="NAME", help="what the token is called, to list or revoke it")
     add.add_argument("--as", dest="display", metavar="DISPLAY",
                      help="the name its replies are signed with (default: NAME)")
+    add.add_argument("--client", metavar="CLIENT",
+                     help="make an agent's token: the AI client it speaks for (ChatGPT, Claude, ...); its replies are "
+                          "signed 'CLIENT (member)', built by sheaf, not with --as")
     add.add_argument("--write", action="store_true",
                      help="it may also read pages, make them and change their text (default: it "
                           "reads and answers comments only)")
@@ -900,7 +928,30 @@ def cmd_token(argv: list[str]) -> int:
     args = p.parse_args(argv)
     tokens = Tokens()
     tokens_file = Tokens.path()                    # the hub reads its own SHEAF_HOME; a hand run may not
-    if args.action == "add":
+    if args.action == "add" and args.client is not None:
+        if args.display is not None:
+            _err("sheaf: --client and --as together: an agent's name is built from its client, never typed")
+            return EXIT_FAILED
+        cfg, person = _proxy_table(), config.user_name()
+        member = cfg.member_of_token(args.name) if cfg is not None else None
+        built = agent_name(clean_display(args.client), member.name if member is not None else person)
+        if (taken := _agent_clash(clean_display(args.client), built, cfg, person,
+                                  _signed_by_others(tokens, cfg, person))) is not None:
+            _err(f"sheaf: {taken!r} is already a name in use here (the hub's person, a member of proxy mode, or "
+                 f"another token's); a token that signs {built!r} would pass for it")
+            return EXIT_FAILED
+        try:
+            token = tokens.add(args.name, write=args.write, client=args.client)
+        except TokenError as e:
+            _err(f"sheaf: {e}")
+            return EXIT_FAILED
+        _out(f"  + token {args.name}, an agent's: its replies are signed {built!r}"
+             + (", it may read, make and change pages" if args.write else ""))
+        _out(f"    {token}")
+        _out(f"  Written to {tokens_file}")
+        _out(f"  Shown once. Send it as `Authorization: Bearer <token>` to "
+             f"http://127.0.0.1:{config.port()}/_/mcp")
+    elif args.action == "add":
         if (taken := _member_named(args.name if args.display is None else args.display)) is not None:
             _err(f"sheaf: {taken!r} is the name of a member of proxy mode (config.toml [proxy]); "
                  "a token's replies must not pass for that member's")
@@ -920,9 +971,12 @@ def cmd_token(argv: list[str]) -> int:
         rows = tokens.list()
         if not rows:
             _out(f"  no tokens in {tokens_file}")
-        wide = [max((len(w) for w in col), default=0) for col in ([r.name_text for r in rows], [r.display_text for r in rows])]
-        for r in rows:
-            _out(f"  {r.name_text:<{wide[0]}}  {r.display_text:<{wide[1]}}  created {r.created_text}"
+        cfg, person = _proxy_table(), config.user_name()
+        shown = [f"{r.client} -> {r.signed(person, cfg)}" if r.client is not None and not r.invalid else r.display_text
+                 for r in rows]
+        wide = [max((len(w) for w in col), default=0) for col in ([r.name_text for r in rows], shown)]
+        for r, show in zip(rows, shown):
+            _out(f"  {r.name_text:<{wide[0]}}  {show:<{wide[1]}}  created {r.created_text}"
                  f"  last used {r.last_used_text}"
                  + ("  may write" if r.write else "")
                  + ("  refused by verify: its name or display is not one `token add` writes" if r.invalid else ""))
@@ -1026,7 +1080,7 @@ COMMAND_HELP.update({
     "diag": ("diag [--since DAYS] [--json]", "summarise the diagnostics log"),
     "diag note": ("diag note TEXT [FILE]", "record what only a session can see"),
     "mcp": ("mcp [--agent NAME]", "run the stdio MCP door for an agent (comments, replies, pages)"),
-    "token add": ("token add NAME [--as DISPLAY] [--write]",
+    "token add": ("token add NAME [--client CLIENT | --as DISPLAY] [--write]",
                   "make an MCP token for an agent that reaches the hub over HTTP; shown once"),
     "token list": ("token list", "MCP tokens: name, display name, created, last used"),
     "token revoke": ("token revoke NAME", "end an MCP token"),

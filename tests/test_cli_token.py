@@ -129,7 +129,7 @@ def test_the_help_says_what_a_token_is_in_the_glossarys_words(sheaf):
 
 def test_the_help_lists_the_command(sheaf):
     out = sheaf("--help").out
-    assert "token add NAME [--as DISPLAY] [--write]" in out and "token revoke NAME" in out
+    assert "token add NAME [--client CLIENT | --as DISPLAY] [--write]" in out and "token revoke NAME" in out
 
 
 # ── the right to write pages (9.7) ───────────────────────────────────────────

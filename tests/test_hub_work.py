@@ -1803,14 +1803,14 @@ def test_a_drop_never_writes_through_a_link_planted_at_its_name(tmp_path, monkey
     assert not (folder / wrote).is_symlink() and (folder / wrote).read_bytes() == b"{}"
 
 
-# ── `[list]` names several door tokens: the header is read on each, only the first is James's own ─────────
+# ── `[list]` names several door tokens: the header is read on each, only the named own one is James's ─────
 def test_an_old_james_token_key_still_parses(tmp_path):
     assert listing(tmp_path, james_token="james").james_tokens == ("james",)
     assert listing(tmp_path).james_tokens == ()
 
 
 def test_james_tokens_parse_as_a_list_and_stop_the_start_when_malformed(tmp_path):
-    assert listing(tmp_path, james_tokens=["james", "james-shared"]).james_tokens == ("james", "james-shared")
+    assert listing(tmp_path, james_tokens=["james", "james-shared"], own_james_token="james").james_tokens == ("james", "james-shared")
     for bad in ([], ["a", "a"], ["a", ""], ["a", 1], ["a/b"], [" james"]):
         with pytest.raises(the_list.ListError, match="'james_tokens' must be a list of different token names"):
             listing(tmp_path, james_tokens=bad)
@@ -1820,15 +1820,91 @@ def test_james_tokens_parse_as_a_list_and_stop_the_start_when_malformed(tmp_path
         listing(tmp_path, james_token="james", james_tokens=["james"])
 
 
-@pytest.fixture
-def two_james_tokens(team, at_work, browser):
+# ── the own-token rule (SPEC 9.12): one table, one test per row ─────────────────────────────────────────
+def refused(tmp_path, match, **keys):
+    with pytest.raises(the_list.ListError, match=match):
+        listing(tmp_path, **keys)
+
+
+def test_no_token_key_starts_as_today(tmp_path):
+    cfg = listing(tmp_path)
+    assert cfg.james_tokens == () and cfg.own_token == ""
+
+
+def test_old_james_token_alone_is_own(tmp_path):
+    assert listing(tmp_path, james_token="james").own_token == "james"
+
+
+def test_own_james_token_with_the_old_key_stops_the_start(tmp_path):
+    refused(tmp_path, "needs 'james_tokens'", james_token="james", own_james_token="james")
+
+
+def test_a_single_token_is_the_own_one_without_the_key(tmp_path):
+    assert listing(tmp_path, james_tokens=["james"]).own_token == "james"
+
+
+def test_own_james_token_on_a_single_token_must_name_it(tmp_path):
+    assert listing(tmp_path, james_tokens=["james"], own_james_token="james").own_token == "james"
+    refused(tmp_path, "must name one of", james_tokens=["james"], own_james_token="other")
+
+
+def test_list_order_does_not_pick_the_own_token(tmp_path):
+    for names in (["james", "james-shared"], ["james-shared", "james"]):
+        cfg = listing(tmp_path, james_tokens=names, own_james_token="james")
+        assert cfg.own_token == "james"
+
+
+def test_two_tokens_without_own_james_token_stop_the_start(tmp_path):
+    refused(tmp_path, "'own_james_token' is needed", james_tokens=["james", "james-shared"])
+
+
+def test_own_james_token_outside_the_list_stops_the_start(tmp_path):
+    refused(tmp_path, "must name one of", james_tokens=["james", "james-shared"], own_james_token="mistral")
+
+
+def test_both_token_keys_stop_the_start(tmp_path):
+    for own in ({}, {"own_james_token": "james"}):
+        refused(tmp_path, "both in", james_token="james", james_tokens=["james"], **own)
+
+
+def test_own_james_token_without_any_token_list_stops_the_start(tmp_path):
+    refused(tmp_path, "needs 'james_tokens'", own_james_token="james")
+
+
+def test_an_empty_old_james_token_counts_as_absent(tmp_path):
+    assert listing(tmp_path, james_token="").own_token == ""
+
+
+def test_an_empty_old_james_token_beside_james_tokens_stops_the_start(tmp_path):
+    refused(tmp_path, "both in", james_token="", james_tokens=["james"])
+
+
+def test_an_empty_own_james_token_counts_as_absent(tmp_path):
+    assert listing(tmp_path, own_james_token="").own_token == ""
+    assert listing(tmp_path, james_token="james", own_james_token="").own_token == "james"
+
+
+def test_an_empty_own_james_token_beside_one_token_is_absent(tmp_path):
+    assert listing(tmp_path, james_tokens=["james"], own_james_token="").own_token == "james"
+
+
+def test_an_empty_own_james_token_beside_two_tokens_stops_the_start(tmp_path):
+    refused(tmp_path, "'own_james_token' is needed", james_tokens=["james", "james-shared"], own_james_token="")
+
+
+def test_own_james_token_must_be_text(tmp_path):
+    refused(tmp_path, "'own_james_token' must be text", james_tokens=["james"], own_james_token=1)
+
+
+@pytest.fixture(params=[("james", "james-shared"), ("james-shared", "james")], ids=["own-first", "own-second"])
+def two_james_tokens(request, team, at_work, browser):
     """`[list]` names an own and a shared door token; (own, shared, the callers the hub heard of)."""
     from sheafmd.hub.state import Tokens
     tokens = Tokens()
     own, shared = tokens.add("james", write=True), tokens.add("james-shared", write=True)
     cfg = team.hub.the_list.cfg
     team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{
-        **cfg.__dict__, "james_tokens": ("james", "james-shared")}))
+        **cfg.__dict__, "james_tokens": request.param, "own_james_token": "james"}))
     heard, hook = [], browser.handler.door.called
     browser.handler.door.called = lambda caller, address: (heard.append(caller), hook(caller, address))
     return own, shared, heard
@@ -1840,7 +1916,7 @@ def test_session_header_read_on_both_tokens(team, browser, work, two_james_token
     for token in (own, shared):
         assert not james_door(browser, token, "reply", session=NEW, doc=ADDRESS, id=cid, text="Sent.")[0]
     assert [c.session for c in heard] == [NEW, NEW]
-    assert [c.own_session for c in heard] == [True, False]
+    assert [c.own_session for c in heard] == [True, False]      # the same in either list order
 
 
 def test_a_header_on_the_shared_token_never_resolves_an_own_session(team, browser, work, two_james_tokens):

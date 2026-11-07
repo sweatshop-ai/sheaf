@@ -159,6 +159,15 @@ def logical(rel: str) -> str | None:
     return f"{parts[0]}/{parts[1]}/{parts[4]}" if parts[2] == PRIVATE else None
 
 
+def alias(hub, root, rel: str) -> str | None:
+    """The address `rel` of the private root `root` is named by: the list's root and the same path, for a sheaf at
+    project depth; None for any other path or a root that is none of the hub's private roots (rule E)."""
+    the_list = getattr(hub, "the_list", None)
+    if the_list is None or root.id not in getattr(hub, "private_roots", {}) or logical(rel) != rel:
+        return None
+    return str(Address(the_list.root().name, rel))
+
+
 def names_private(rel: str) -> bool:
     """Whether `rel` names a project called `private`, or a `private` folder directly under a project: where
     only the hub places sheaves, so a door create there is refused (9.11, 12)."""
@@ -240,6 +249,21 @@ def _private_roots(hub) -> dict:
     return {member: by_id[rid] for rid, member in hub.private_roots.items() if rid in by_id}
 
 
+def private_listed(hub, member, board: bool = False) -> list:
+    """The private roots whose files a listing shows under their names (rule D): `member`'s own; every member's for
+    the index's board (`board`), which tells each stream only what that stream may take."""
+    if member is not None:
+        return [r] if (r := _private_roots(hub).get(member.id)) is not None else []
+    return list(_private_roots(hub).values()) if board else []
+
+
+def held_privately(hub, address: str) -> bool:
+    """Whether the sheaf's name `address` is held by a file of a private root now, judged on the name and not on what a
+    sweep has met: what the hub's person is shown no row and told no change of (rule D)."""
+    got = where_is(hub, address)
+    return got is not None and got[0].id in (getattr(hub, "private_roots", None) or {})
+
+
 def _twice(hub, address: str, n: int):
     _refused(hub, address, f"its name is held by {n} files")
 
@@ -300,6 +324,19 @@ def named(hub, root, top: Path, rel: str) -> str | None:
         _twice(hub, f"{root.name}/{name}", n)
         return None
     return name if n == 1 and at.id == root.id and got == rel else None
+
+
+def named_in(hub, root, private, rel: str) -> str | None:
+    """The sheaf's name that the listed file `rel` of the private root `private` is shown by: `rel` itself, when it is
+    the one file in the list's root `root` or any private root that holds the name; None for a name held twice (a
+    `place-refused` row names it) and for any path that is not a sheaf's name."""
+    if logical(rel) != rel:
+        return None
+    (at, got), n = _one(hub, root, rel)
+    if n > 1:
+        _twice(hub, f"{root.name}/{rel}", n)
+        return None
+    return rel if n == 1 and at.id == private.id and got == rel else None
 
 
 def tell_link(hub, root, top: Path, rel: str):

@@ -3,9 +3,8 @@
 A working page for a markdown document, shared between a person and their agent.
 The `.md` stays the source; everything done on the page lands back in it.
 
-You read the document in your browser, edit it in place, and comment on passages. Press **Ask** on a
-comment and a copy of the agent session that wrote the document answers in the thread; press
-**Tell** and the running session acts on it and replies. Every edit and every comment is written
+You read the document in your browser, edit it in place, and comment on passages. Press **Tell** on a
+comment and the running agent session acts on it and replies in the thread. Every edit and every comment is written
 into the `.md`, so the agent reads the same file you do, and `git diff` shows what happened.
 
 Three things set it apart:
@@ -15,7 +14,7 @@ Three things set it apart:
   paragraph changed on both sides is a conflict, and even then nothing is lost.
 - **A share copy with the comments taken out.** `sheaf plan.md --share` writes one self-contained
   HTML file (and, with `--pdf`, a PDF) that you can send to someone outside the conversation.
-- **Ask and Tell from the page, at any time.** The agent does not have to be waiting.
+- **Tell from the page, at any time.** The agent does not have to be waiting.
 
 ## Install
 
@@ -52,7 +51,7 @@ it also installs a skill in `~/.claude/skills/sheaf`. `init` never replaces what
 a server called `sheaf` that is set up differently, a skill file of your own, or a file it cannot
 read is left as it is, and it says why and what to do.
 
-Ask and Tell from the page work with Claude Code. The other agents reach sheaf through the MCP
+Tell from the page works with Claude Code. The other agents reach sheaf through the MCP
 door; adapters for them come later.
 
 For an agent that has no skills, or a project that wants the instruction in the repository, put
@@ -97,7 +96,7 @@ and checks that it restarts the hub after a `kill -9` and after an upgrade. The 
 checked only by tests that pretend to be a Mac: nobody has run it on a Mac of their own yet.
 
 After you upgrade sheaf, the next `sheaf` command restarts an idle hub on the new version and open
-pages reload by themselves. If an Ask or Tell is running, it says so and leaves the hub alone: run
+pages reload by themselves. If a Tell is running, it says so and leaves the hub alone: run
 `sheaf restart` when it is done. A page with edits you have not saved, or a comment half written,
 is never reloaded; it tells you instead.
 
@@ -135,10 +134,10 @@ local user without it gets nothing but the hub's name and version. The sign-in l
 `sheaf open` hands your browser works once, and on Linux only for a browser of your own user: another
 user who reads it from the process list is refused (macOS cannot check that). Raw HTML in a document is
 sanitised and every page carries a content security policy, also for a page an agent wrote. An
-agent's token reaches the door's tools and nothing else: it cannot use the page's routes, run Ask
-or Tell, or add a folder, and it reads, makes and changes pages only when it was made with
+agent's token reaches the door's tools and nothing else: it cannot use the page's routes, run Tell,
+or add a folder, and it reads, makes and changes pages only when it was made with
 `--write`. sheaf collects nothing and opens no connection to another machine: its commands, your
-browser and the hub talk over `127.0.0.1`, and Ask and Tell go through your own agent.
+browser and the hub talk over `127.0.0.1`, and Tell goes through your own agent.
 
 ---
 

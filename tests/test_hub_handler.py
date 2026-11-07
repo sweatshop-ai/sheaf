@@ -99,9 +99,8 @@ def answers(browser, doc):
            "save": browser.post("/_/save", {"doc": doc, "hash": h, "edits": []}),
            "comment": browser.post("/_/comment", {"doc": doc, "op": "add", "hash": h, "block": 0,
                                                   "quote": "Second", "body": "Why?"}),
-           "ask": browser.post("/_/ask", {"doc": doc, "id": "c1"}),
            "tell": browser.post("/_/tell", {"doc": doc, "id": "c1"}),
-           "cancel": browser.post("/_/cancel", {"doc": doc, "id": "c1", "what": "ask"}),
+           "cancel": browser.post("/_/cancel", {"doc": doc, "id": "c1"}),
            "seen": browser.post("/_/seen", {"doc": doc, "id": "c1", "count": 1}),
            "export": browser.post("/_/export", {"doc": doc, "kind": "html"})}
     return {route: (r.status, r.body) for route, r in got.items()}
@@ -171,8 +170,8 @@ def test_doc_gives_what_a_page_needs_on_load(browser, plan):
     browser.get(URL)
     got = browser.get(f"/_/doc?doc={DOC}").json()
     assert got == {"ok": True, "hash": md_hash(PLAN), "telling": [], "comments": [],
-                   "malformed": [], "seen": {}, "asking": [], "question": "", "target": None,
-                   "capabilities": [], "lines": {"ask": NO_AGENT, "tell": NO_AGENT},
+                   "malformed": [], "seen": {}, "question": "", "target": None, "targets": [],
+                   "capabilities": [], "lines": {"tell": NO_AGENT},
                    "root": browser.hub.roots.get("work").id, "rids": []}
 
 
@@ -426,7 +425,7 @@ def test_a_save_without_a_request_id_still_lands_and_is_not_remembered(browser, 
 
 @pytest.mark.parametrize("raw", [b"not json", b"[1]", b'"s"', b"5", b"null", b"\xff\xfe"])
 def test_a_body_that_is_not_a_json_object_is_400(browser, plan, raw):
-    for route in ("/_/save", "/_/comment", "/_/seen", "/_/export", "/_/diag", "/_/ask"):
+    for route in ("/_/save", "/_/comment", "/_/seen", "/_/export", "/_/diag"):
         assert browser.post(route, raw=raw).status == 400, route
 
 
@@ -558,28 +557,45 @@ def test_a_comment_add_with_a_position_that_is_not_a_whole_number_is_400_and_wri
     assert rows("request-failed") == [], "a refusal is not a failure of the hub"
 
 
-def test_ask_and_tell_on_a_comment_say_there_is_no_agent_and_still_write_it(browser, plan):
-    got = add(browser, ask=True, tell=True).json()
-    assert got["ok"] is True and got["askError"] == NO_AGENT and got["tellError"] == NO_AGENT
+def test_tell_on_a_comment_says_there_is_no_agent_and_still_writes_it(browser, plan):
+    got = add(browser, tell=True).json()
+    assert got["ok"] is True and got["tellError"] == NO_AGENT and "askError" not in got
     assert got["telling"] == [] and rdc.parse(plan.read_text()).by_id("c1") is not None
 
 
-# ── ask, tell, cancel: no agent in this build ────────────────────────────────
-
-def test_ask_and_tell_are_409_without_an_agent(browser, plan):
+@pytest.mark.parametrize("op", ["add", "reply"])
+def test_a_comment_carrying_ask_is_refused_and_writes_nothing(browser, plan, op):
     add(browser)
-    for route in ("/_/ask", "/_/tell"):
-        r = browser.post(route, {"doc": DOC, "id": "c1"})
-        assert r.status == 409 and r.json() == {"ok": False, "error": NO_AGENT}
+    before = plan.read_bytes()
+    text = before.decode("utf-8")
+    blk, s, e = rdc.find_quote(text, "Second paragraph")
+    r = browser.post("/_/comment", {"doc": DOC, "op": op, "id": "c1", "hash": md_hash(text), "block": blk,
+                                    "start": s, "end": e, "quote": "Second paragraph", "body": "Why?",
+                                    "ask": True})
+    assert r.status == 400 and r.json()["error"] == "Ask was retired: use Tell, or reply."
+    assert plan.read_bytes() == before
+
+
+# ── tell, cancel: no agent in this build ─────────────────────────────────────
+
+def test_tell_is_409_without_an_agent(browser, plan):
+    add(browser)
+    r = browser.post("/_/tell", {"doc": DOC, "id": "c1"})
+    assert r.status == 409 and r.json() == {"ok": False, "error": NO_AGENT}
+
+
+def test_the_ask_route_is_gone(browser, plan):
+    add(browser)
+    assert browser.post("/_/ask", {"doc": DOC, "id": "c1"}).status == 404
 
 
 def test_cancel_with_nothing_running_is_a_quiet_ok(browser, plan):
-    for what in ("ask", "tell"):
-        assert browser.post("/_/cancel", {"doc": DOC, "id": "c1", "what": what}).json() == {"ok": True}
+    assert browser.post("/_/cancel", {"doc": DOC, "id": "c1"}).json() == {"ok": True}
 
 
-def test_cancel_of_neither_is_400(browser, plan):
-    assert browser.post("/_/cancel", {"doc": DOC, "id": "c1", "what": "both"}).status == 400
+@pytest.mark.parametrize("what", ["ask", "tell", "both"])
+def test_cancel_ignores_a_what_it_is_given(browser, plan, what):
+    assert browser.post("/_/cancel", {"doc": DOC, "id": "c1", "what": what}).json() == {"ok": True}
 
 
 # ── /_/seen ──────────────────────────────────────────────────────────────────
@@ -840,8 +856,7 @@ def test_render_of_a_file_that_is_not_markdown_is_400(browser, work):
 
 
 def test_jobs_lists_what_runs_in_every_document(browser, plan):
-    assert browser.get("/_/jobs", cookie=False, key=True).json() == {"ok": True, "asking": [],
-                                                                      "telling": []}
+    assert browser.get("/_/jobs", cookie=False, key=True).json() == {"ok": True, "telling": []}
 
 
 def test_stop_asks_the_hub_to_stop_with_a_reason(browser, plan):

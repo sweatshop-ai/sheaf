@@ -93,7 +93,7 @@ def test_what_a_session_sends_is_logged_as_tell_socket_message_and_nothing_else_
     assert row["source"] == "hub" and "Done, see the comment" in row["message"]
     time.sleep(0.2)
     assert f.read_bytes() == before and asked == []
-    assert hub.jobs() == {"asking": [], "telling": []}
+    assert hub.jobs() == {"telling": []}
 
 
 def test_a_message_is_clipped_to_2000_characters(hubsrv):

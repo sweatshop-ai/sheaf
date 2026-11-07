@@ -10,7 +10,7 @@ import time
 import pytest
 
 import sheafmd.comments as rdc
-from helpers import NOW, PLAN, browser_on, hold_job, make_repo, read_events, thread, with_threads
+from helpers import NOW, PLAN, browser_on, make_repo, read_events, thread, with_threads
 from sheafmd import diagnostics, paths
 from sheafmd.agents.base import State
 from sheafmd.blocks import split_md_blocks
@@ -346,28 +346,12 @@ def test_a_page_opened_by_its_address_but_not_listed_is_not_announced_and_not_ta
     assert statuses(sub) == []
 
 
-def test_an_ask_that_starts_and_ends_moves_the_dot_at_the_next_second(world, put, clock):
-    put("a.md", with_threads(thread("c1", "Ada")))
-    world.hub.entry("work/a.md")
-    sub = open_index(world)
-    sub.drain()
-    job, release = hold_job(world.hub, "work/a.md")
-    clock.advance(1)
-    world.hub.tick()
-    assert [d["dot"] for d in statuses(sub)] == ["orange"]
-    release.set()
-    world.hub.runner.join(5)
-    clock.advance(1)
-    world.hub.tick()
-    assert [d["dot"] for d in statuses(sub)] == ["blue"]
-
-
 def test_a_tell_that_starts_moves_the_dot_at_the_next_second(world, put, clock, monkeypatch):
     put("a.md", with_threads(thread("c1", "Ada")))
     e = world.hub.entry("work/a.md")
     # The watcher reads the session's state from the adapter every second; this test sets the
     # state itself, so the adapter is not asked (a document with no target reads as none).
-    monkeypatch.setattr(world.hub.asktell, "observe", lambda entry: None)
+    monkeypatch.setattr(world.hub.tell, "observe", lambda entry: None)
     sub = open_index(world)
     sub.drain()
     e.live.await_reply("c1")
@@ -755,7 +739,7 @@ def test_a_root_forgotten_while_the_watchers_pass_goes_through_the_documents_doe
     hub = world.hub
     hub.entry("work/b.md")
     e = hub.entry("work/a.md")
-    monkeypatch.setattr(hub.asktell, "observe", lambda entry: None)
+    monkeypatch.setattr(hub.tell, "observe", lambda entry: None)
     sub = open_index(world)
     sub.drain()
     e.live.await_reply("c1")                            # a Tell runs on the old folder's a.md

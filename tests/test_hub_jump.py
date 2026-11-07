@@ -177,7 +177,7 @@ def test_without_a_jump_table_the_answer_says_so(browser, plan, session):
 def test_a_page_with_no_session_cannot_jump(browser, plan, probe):
     set_jump(probe, "{session}")
     r = jump(browser)
-    assert r.status == 409 and r.json()["error"] == "Render this page from an agent session to Ask and Tell it."
+    assert r.status == 409 and r.json()["error"] == "Render this page from an agent session, or let one of your agents work on it, to Tell it."
     assert not probe[1].exists()
 
 
@@ -243,8 +243,8 @@ def test_a_command_that_is_not_there_says_so(browser, plan, session):
 
 
 def test_a_command_that_hangs_is_stopped_after_its_time(browser, plan, session, monkeypatch):
-    from sheafmd.hub import asktell
-    monkeypatch.setattr(asktell, "JUMP_TIMEOUT", 0.3)
+    from sheafmd.hub import tell
+    monkeypatch.setattr(tell, "JUMP_TIMEOUT", 0.3)
     write_config(f'[jump]\ncommand = {toml_list([sys.executable, "-c", "import time; time.sleep(30)"])}\n')
     attach(browser, plan, session)
     r = jump(browser)
@@ -289,7 +289,7 @@ def test_a_session_id_that_could_pass_for_an_option_or_split_is_not_given_to_the
 def test_a_second_jump_while_one_runs_is_refused(browser, hub, plan, session, probe):
     set_jump(probe, "{session}")
     attach(browser, plan, session)
-    with hub.asktell._jumping:
+    with hub.tell._jumping:
         r = jump(browser)
     assert r.status == 409 and r.json()["error"] == "A jump is already running."
     assert not probe[1].exists()
@@ -331,8 +331,8 @@ def test_an_unknown_key_in_the_jump_table_is_warned_about_when_a_jump_is_asked_f
 
 
 def test_a_command_that_leaves_a_helper_holding_its_output_still_counts_as_done(browser, plan, session, monkeypatch):
-    from sheafmd.hub import asktell
-    monkeypatch.setattr(asktell, "JUMP_TIMEOUT", 2.0)
+    from sheafmd.hub import tell
+    monkeypatch.setattr(tell, "JUMP_TIMEOUT", 2.0)
     script = "import subprocess, sys; subprocess.Popen(['sleep', '6']); sys.exit(0)"
     write_config(f'[jump]\ncommand = {toml_list([sys.executable, "-c", script])}\n')
     attach(browser, plan, session)

@@ -138,6 +138,9 @@ def cmd_deliver(argv: list[str]) -> int:
         _err("sheaf: --from must be uds: and a socket path, without quotes, angle brackets, & or control characters")
         return EXIT_USAGE
     drop = _parse_drop()
+    if drop is not None and drop.get("kind") == "ask":
+        _err("sheaf: Ask was retired: a drop of kind ask is not delivered")
+        return EXIT_USAGE
     text = _tell_text(drop) if drop is not None else None
     if text is None:
         _err("sheaf: stdin must be one JSON object, a drop of tell_dir")

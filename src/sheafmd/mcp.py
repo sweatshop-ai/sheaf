@@ -30,7 +30,8 @@ from .agents import detect
 from .hub.auth import clean_display
 from .hub.client import HubUnavailable
 from .hub.roots import Address, NotFound, address_of_url, in_git_dir
-from .hub import place, visibility
+from .agents import prompts
+from .hub import place, targets, visibility
 from .hub.state import TokenRow
 from .render import COMMENT_RE as HTML_COMMENT_RE, strip_comments
 from .beneath import Private
@@ -40,7 +41,9 @@ PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")
 INSTRUCTIONS = (
     "sheaf keeps comment threads inside markdown files. Use `threads` to read what was asked on "
     "a document, `reply` to answer (role `action` after you acted on a Tell, `answer` when you "
-    "only answer), and `resolve` when a thread is done. A Tell from sheaf names the document and "
+    "only answer), and `resolve` when a thread is done. Call `documents` first, every time you are "
+    "asked to work on a page: a Tell from the person waits there, in the `tells` of a document, with "
+    "the whole message; answer it with `reply` and role `action`. A Tell from sheaf names the document and "
     "the comment id. Where you may work on pages, `read` gives a document's text and its hash, "
     "`create` makes a new page and `update` replaces the text of one, given the hash you read it "
     "with; keep every comment in the text you send.")
@@ -330,6 +333,28 @@ class Door:
             self.hub.record_exception("session-hook-failed", address, tool=name)
 
     # ── naming a document ────────────────────────────────────────────────────
+    def _agent_wrote(self, address: str, caller: Caller):
+        """A write made with an agent's token makes that agent the document's target: the member's own when the
+        token acts for one, else the hub person's (SPEC 9.8). A read never gets here. The write stands whatever
+        the hub does with it."""
+        if caller.token is None or caller.token.client is None:
+            return
+        try:
+            targets.note_write(self.hub, address, caller.token, self._member(caller))
+        except Exception:
+            self.hub.record_exception("target-failed", address)
+
+    def _ends_tells(self, address: str, cid: str, caller: Caller, role=None, resolved=False):
+        """What a write ends of the Tells that wait for an agent (SPEC 9.8): an action reply by an agent's token ends
+        its own Tell as done; a resolve ends every Tell of the thread. The write stands whatever this does."""
+        try:
+            if role == "action" and caller.token is not None and caller.token.client is not None:
+                self.hub.waiting_tells.end(address, cid, "done", row=caller.token)
+            if resolved:
+                self.hub.waiting_tells.end(address, cid, "cancelled", reason="resolved")
+        except Exception:
+            self.hub.record_exception("tell-end-failed", address)
+
     def _address(self, doc: str, caller: Caller) -> str:
         """`<root>/<path>` of the document `doc` names: that address itself, the URL of its page,
         or the absolute path of the .md. A caller who may add roots (the key) has the root of a
@@ -423,11 +448,21 @@ class Door:
             if caller.may_add_roots:
                 if not path.endswith(".md") or not paths.is_file(md):
                     raise ToolError(f"{path} is not an existing .md file.")
-                return roots.address(md)
+                try:
+                    return roots.address(md, alias=lambda root, rel: place.alias(self.hub, root, rel))
+                except NotFound:        # a file of a private root that no list name reaches
+                    raise ToolError(f"{path} cannot be used as a document.") from None
             root = roots.lookup(md)
             if root is None or ((member := self._member(caller)) is not None and not self.hub.owns(member, root)):
                 # a root of another member's is no root to a token bound to one (9.11)
                 raise ToolError("A token cannot add a root, and the hub has no root that holds that file.")
+            if roots.hidden(root):
+                # A private root has no address (rule E): its member's token names the file by the list's name, any
+                # other token, bound to nobody too, is told what it is told of a path in no root.
+                named = place.alias(self.hub, root, Path(os.path.realpath(md)).relative_to(root.path).as_posix())
+                if named is None or getattr(member, "id", None) != self.hub.private_roots[root.id]:
+                    raise ToolError("A token cannot add a root, and the hub has no root that holds that file.")
+                return named
             return str(Address(root.name, Path(os.path.realpath(md)).relative_to(root.path).as_posix()))
         except (OSError, ValueError) as e:
             # The key's caller runs as the hub's account and is told why. A token, held to the roots
@@ -485,17 +520,18 @@ class Door:
             raise ToolError(f"{address} could not be written.") from None
 
     # ── the tools ────────────────────────────────────────────────────────────
-    def _open_in(self, address: str) -> tuple:
-        """(open threads, front matter, mtime_ns, the member whose private root holds it) of the file the sheaf at `address`
-        names, from one open beneath its root: all of it is of that descriptor (9.11)."""
+    def _open_in(self, address: str, whole: bool = False) -> tuple:
+        """(open threads, front matter, mtime_ns, the member whose private root holds it, the text) of the file the sheaf
+        at `address` names, from one open beneath its root: all of it is of that descriptor (9.11). The text is None
+        unless `whole`, which reads it from that descriptor even when the threads are kept."""
         top, rel = self.hub.where(address)
         with beneath.open_beneath(top, rel) as op:
             st = os.fstat(op.fd)
             private = place.opened_private(self.hub, op)
             key = (st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
             cached = self._open_threads.get(address)
-            if cached and cached[0] == key:
-                return (*cached[1:], st.st_mtime_ns, private)
+            if cached and cached[0] == key and not whole:
+                return (*cached[1:], st.st_mtime_ns, private, None)
             text = op.text()
         threads = []
         if "comment id=" in text:
@@ -504,14 +540,14 @@ class Door:
                     last = c.display(c.replies[-1]) if c.replies else c.by
                     threads.append((c.id, 1 + len(c.replies), last))
         self._open_threads[address] = (key, threads, visibility.front_matter(text))
-        return (*self._open_threads[address][1:], st.st_mtime_ns, private)
+        return (*self._open_threads[address][1:], st.st_mtime_ns, private, text if whole else None)
 
-    def _dot(self, address: str, unread: int, open_: int, asking: set) -> str:
-        """The dot of 8.6, as the index page gives it: `asking` holds the documents an Ask runs on."""
+    def _dot(self, address: str, unread: int, open_: int) -> str:
+        """The dot of 8.6, as the index page gives it."""
         entry = self.hub.entries.get(address)
         if unread or (entry is not None and entry.live.session_question()):
             return "red"
-        if address in asking or self.hub.waiting(address):
+        if self.hub.waiting(address):
             return "orange"
         return "blue" if open_ else "green"
 
@@ -524,9 +560,10 @@ class Door:
                 raise ToolError(f"There is no root named {args['root']}.")
             wanted = [root]
         else:
-            wanted = [r for r in hub.roots.all() if member is None or hub.owns(member, r)]
-        asking = {doc for doc, _ in hub.jobs_asking()}
+            wanted = [r for r in hub.roots.listed() if member is None or hub.owns(member, r)]
         rows, shut = [], []
+        agent = caller.token if caller.token is not None and caller.token.client is not None else None
+        pending = hub.waiting_tells.pending(agent) if agent is not None else set()    # the Tells that wait for it (9.8)
         in_git = {}                             # (root, real folder) -> whether 8.2 keeps its files from the root
         owned = {}                              # (root, real folder) -> whether its files are the member's (9.11)
         for root in wanted:
@@ -538,23 +575,28 @@ class Door:
                 continue
             placed = place.applies(hub, root.name)
             top = Path(os.path.realpath(root.path)) if placed else None
-            for found in markdown_files(root):
+            # The files of a member's private root are listed to that member alone, under the list root's names (rule D).
+            privates = [p for p in place.private_listed(hub, member) if p.closed() is None and not p.missing()] if placed else []
+            for src, found in [(root, f) for f in markdown_files(root)] + [(p, f) for p in privates for f in markdown_files(p)]:
                 # A sheaf of the list's root is listed by its name (9.11), wherever its file is; a private path is
                 # none. Each file is read under its name's lock, as every read.
                 logical = place.logical(found) if placed else None
                 with place.held(hub, f"{root.name}/{logical}") if logical else contextlib.nullcontext():
-                    rel = place.named(hub, root, top, found) if placed else found
+                    if src is not root:
+                        rel = place.named_in(hub, root, src, found)
+                    else:
+                        rel = place.named(hub, root, top, found) if placed else found
                     if rel is None:
                         continue
                     address = str(Address(root.name, rel))
                     try:
                         path = hub.roots.resolve(address)          # never a file outside its root
-                        folder = (root.name, path.parent)
+                        folder = (src.name, path.parent)
                         if folder not in in_git:
-                            in_git[folder] = in_git_dir(path, root)
+                            in_git[folder] = in_git_dir(path, src)
                         if in_git[folder]:
                             continue                               # nor one in a git directory
-                        threads, fm, mtime, private = self._open_in(address)
+                        threads, fm, mtime, private, text = self._open_in(address, whole=address in pending)
                     except (NotFound, OSError, UnicodeDecodeError):
                         continue
                 # Whether the member owns a file asks git of its folder (8.2), and every file of a folder has the
@@ -563,15 +605,26 @@ class Door:
                     owned[folder] = hub.member_owns(member, address)
                 if not self._sees(fm, address, caller, owned.get(folder), private):
                     continue                                   # nor a sheaf the caller may not see (9.11)
-                if args.get("open_only", True) and not threads:
+                tells = self._tells(address, text, agent) if text is not None else []
+                if args.get("open_only", True) and not threads and not tells:
                     continue
                 seen = hub.seen.get(address)
                 unread = sum(1 for cid, n, last in threads if last != hub.person and n > seen.get(cid, 0))
-                dot = self._dot(address, unread, len(threads), asking)
-                rows.append((DOT_ORDER[dot], -mtime, address,
+                dot = self._dot(address, unread, len(threads))
+                rows.append((-1 if tells else DOT_ORDER[dot], -mtime, address,
                              {"doc": address, "url": hub.url(address), "path": str(path),
-                              "open": len(threads), "unread": unread, "dot": dot}))
+                              "open": len(threads), "unread": unread, "dot": dot, "tells": tells}))
         return [row[3] for row in sorted(rows, key=lambda r: r[:3])] + shut
+
+    def _tells(self, address: str, text: str, agent: TokenRow) -> list:
+        """The Tells that wait for `agent` on this document, as they are listed to it (SPEC 9.8): the first listing
+        marks each seen. Of `text`, read from the descriptor that was judged (9.11)."""
+        try:
+            got = rdc.parse(text)
+        except (OSError, UnicodeDecodeError):
+            return []
+        links = self.hub.tell.links(address)
+        return self.hub.waiting_tells.take(address, agent, got, lambda c, t: prompts.tell_agent(address, t["by"], c, links))
 
     def _threads(self, args: dict, caller: Caller):
         address = self._address(args["doc"], caller)
@@ -591,6 +644,8 @@ class Door:
         self._write(address, caller, args["doc"], "reply",
                     {"id": cid, "body": text, "resolve": args.get("resolve", False)},
                     role=args.get("role", "answer"))
+        self._agent_wrote(address, caller)
+        self._ends_tells(address, cid, caller, role=args.get("role", "answer"), resolved=bool(args.get("resolve")))
         c = self._comment(address, cid, caller, args["doc"])
         return {"id": cid, "status": c.status, "replies": c.as_dict()["replies"]}
 
@@ -599,6 +654,8 @@ class Door:
         cid = args["id"]
         if self._comment(address, cid, caller, args["doc"]).status != "resolved":
             self._write(address, caller, args["doc"], "status", {"id": cid, "status": "resolved"})
+            self._agent_wrote(address, caller)
+            self._ends_tells(address, cid, caller, resolved=True)
         return {"id": cid, "status": "resolved"}
 
     def _read(self, args: dict, caller: Caller):
@@ -666,8 +723,17 @@ class Door:
                 root = roots.lookup(Path(doc))
                 if root is not None and self._hidden_root(root, caller):
                     root = None     # a root of another member's is none (9.11), before the link's message
+                if root is not None and self.hub.roots.hidden(root):
+                    # A private root has no address (rule E), and a sheaf is not made in it by its path: to anyone
+                    # but its member and the key a path in no root, to them the refusal of a private create (9.11).
+                    if self._judged(caller) and place.in_private(self.hub, os.path.realpath(Path(doc))) not in (
+                            None, getattr(self._member(caller), "id", None)):
+                        raise ToolError(f"{doc} {NOT_IN_A_ROOT}", "path")
+                    raise ToolError(f"{doc} cannot be made: {place.PRIVATE_ROOT}.", "path")
                 rel = Path(doc).relative_to(root.path).as_posix() if root is not None else ""
             except (OSError, ValueError):
+                if not caller.may_add_roots:    # a token is told of a path no root holds as of one a root holds only by its spelling
+                    raise ToolError(f"{doc} {NOT_IN_A_ROOT}", "path") from None
                 raise ToolError(f"{doc} {NOT_IN_A_ROOT} Name it `<root>/<path>`, or by the real "
                                 "path of its folder.", "path") from None
         else:
@@ -720,6 +786,7 @@ class Door:
                 raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path") from None
             self.hub.wrote(address)
             self.hub.committed(address, by=caller.display, what="create")
+        self._agent_wrote(address, caller)
         return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text)}
 
     def _make(self, root, top: Path, rel: str, name: str | None, address: str, text: str, caller: Caller):
@@ -789,6 +856,8 @@ class Door:
             finally:
                 if moved:                           # moved, then failed before its commit: the move is committed
                     self.hub.committed(address, by=caller.display, what="update", gone=moved.pop())
+        if before != text:
+            self._agent_wrote(address, caller)
         return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text), "changed": before != text}
 
     def _updated(self, address: str, args: dict, text: str, expected: str, caller: Caller, moved: list):

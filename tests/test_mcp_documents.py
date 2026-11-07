@@ -5,12 +5,12 @@ from pathlib import Path
 import pytest
 
 import sheafmd.comments as rdc
-from helpers import GIT_FAILS, PLAN, call, comment, git_fails, hold_job, ok, refused
+from helpers import GIT_FAILS, PLAN, call, comment, git_fails, ok, refused
 from sheafmd.agents.base import State
 from sheafmd.hub.state import Tokens
 from sheafmd.source import update_file
 
-ROW = ["doc", "dot", "open", "path", "unread", "url"]
+ROW = ["doc", "dot", "open", "path", "tells", "unread", "url"]
 
 
 def doc(root: Path, name: str, text: str = PLAN) -> Path:
@@ -117,15 +117,13 @@ def test_a_thread_that_was_told_and_waits_makes_the_dot_orange(browser, notes):
     assert docs(browser)[0]["dot"] == "blue"
 
 
-def test_an_ask_running_on_the_document_makes_the_dot_orange_and_it_goes_back_when_the_ask_ends(browser, notes):
-    """SPEC 8.6: orange is "an Ask or Tell is running", the same as on the index page."""
+def test_a_tell_running_on_the_document_makes_the_dot_orange_and_it_goes_back_when_the_tell_ends(browser, notes):
+    """SPEC 8.6: orange is "a Tell is running", the same as on the index page."""
     assert docs(browser)[0]["dot"] == "blue"
-    job, release = hold_job(browser.hub, "notes/busy.md")
-    try:
-        assert docs(browser)[0]["dot"] == "orange"
-    finally:
-        release.set()
-    browser.hub.runner.join(5)
+    e = browser.hub.entry("notes/busy.md")
+    e.live.await_reply("c1")
+    assert docs(browser)[0]["dot"] == "orange"
+    assert e.live.stop_waiting("c1")
     assert docs(browser)[0]["dot"] == "blue"
 
 

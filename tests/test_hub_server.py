@@ -468,7 +468,7 @@ def test_a_page_ignores_the_event_of_its_own_write_whichever_reaches_it_first():
 def test_only_the_writes_that_change_the_file_hold_the_events_of_the_page():
     post = js_function("post")
     assert "'/_/save'" in post and "'/_/comment'" in post and "ownWrites" in post
-    assert "'/_/seen'" not in post and "'/_/ask'" not in post and "'/_/tell'" not in post
+    assert "'/_/seen'" not in post and "'/_/tell'" not in post
     assert "heard(" in changed_listener()
 
 

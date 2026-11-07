@@ -5,7 +5,7 @@ import os
 import pytest
 
 import sheafmd.comments as rdc
-from helpers import NOW, PLAN, hold_job, make_repo, thread, with_threads
+from helpers import NOW, PLAN, make_repo, thread, with_threads
 from sheafmd.agents.base import State
 from sheafmd.hub import index as index_mod
 
@@ -157,19 +157,6 @@ def test_a_tell_running_on_the_document_is_orange(world, put):
     assert e.live.await_reply("c1")
     assert row(world, "work/a.md")["dot"] == "orange"
     e.live.stop_waiting("c1")
-    assert row(world, "work/a.md")["dot"] == "blue"
-
-
-def test_an_ask_running_on_the_document_is_orange_and_the_dot_goes_back_when_it_ends(world, put):
-    put("a.md", with_threads(thread("c1", "Ada")))
-    assert row(world, "work/a.md")["dot"] == "blue"
-    job, release = hold_job(world.hub, "work/a.md")
-    try:
-        assert row(world, "work/a.md")["dot"] == "orange"
-        assert world.hub.jobs_asking() == [["work/a.md", "c1"]]
-    finally:
-        release.set()
-    world.hub.runner.join(5)
     assert row(world, "work/a.md")["dot"] == "blue"
 
 

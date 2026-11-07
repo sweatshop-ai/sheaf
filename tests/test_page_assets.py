@@ -196,7 +196,7 @@ def test_thread_colours_come_from_the_reply_role_and_no_agent_is_named():
     assert "Claude" not in js
     assert "role === 'answer'" in js and "role === 'action'" in js
     assert "CFG.can" in js
-    assert "Render this page from an agent session to Ask and Tell it." in js
+    assert "Render this page from an agent session, or let one of your agents work on it, to Tell it." in js
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
@@ -218,22 +218,25 @@ def test_the_page_takes_a_comments_only_change_in_place_only_from_the_version_it
 def test_the_menu_names_the_target_the_hub_recorded_and_the_buttons_it_cannot_serve_are_disabled():
     """The page's behaviour is checked by hand in a browser against a scratch hub (Claude Code,
     Codex, no agent, a session without a socket); this pins the pieces: the line reads
-    "Ask and Tell → <label> · <product>" from CFG.agent, which never holds a session id; a button
+    "Tell → <label> · <product>" from CFG.agent, which never holds a session id; a button
     the agent cannot serve is disabled with its line from CFG.lines, in the popover, the reply
     form and the new-comment form; `/_/doc` refreshes all three at load."""
     js = text("page.js")
-    assert "'Ask and Tell'" in js and "' → ' + a.label + ' · ' + a.product" in js
+    assert "'Tell → ' + a.label + ' · ' + a.product" in js
     assert "a.session" not in js
     assert js.count("agentButtons(") == 3                 # the definition, the reply form, the new comment
-    assert "offButton('ask'" in js and "offButton('tell'" in js and "offLines(" in js
+    assert "offButton('tell'" in js and "offLines(" in js
     assert "CFG.lines" in js and "'capabilities' in j" in js and "CFG.agent = j.target" in js
     assert "rd-na" in text("page.css") and "rd-agent-line" in text("page.css")
 
 
-def test_an_answer_from_an_ask_is_taken_in_place_only_from_the_version_the_page_holds():
+def test_the_page_has_no_ask_left():
+    """Ask was retired (SPEC 11.2, D25): no button, no route, no state, no event. A reply with the role `answer`
+    still reads as "<name>'s answer"."""
     js = text("page.js")
-    m = re.search(r"addEventListener\('ask-done'.*?\n      \}\);", js, re.S)
-    assert m and re.search(r"d\.textSame && d\.base === hash && applyComments\(d\)", m.group(0))
+    assert "/_/ask" not in js and "canAsk" not in js and not re.search(r"\basking\[", js) and "rd-ask" not in js
+    assert not re.search(r"ask-(started|done|failed|cancelled)", js)
+    assert "'s answer</span>'" in js.replace(r"\u2019", "'")
 
 
 def test_the_page_knows_the_eight_words_as_the_hub_reads_them():

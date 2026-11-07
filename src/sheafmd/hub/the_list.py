@@ -706,7 +706,7 @@ class TheList:
                 if s.issue is not None and not s.moved:
                     sheaves.append(s)
             try:
-                entries = projects.read(root.path) or {}
+                entries = projects.read(root.path, self.hub) or {}
             except projects.Invalid:
                 entries = {}
             if placed:

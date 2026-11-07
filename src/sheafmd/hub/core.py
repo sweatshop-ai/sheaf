@@ -249,7 +249,7 @@ class Hub:
         """Warn of each sheaf folder of `root` (its documents `rels`) that the root's `projects.toml`
         does not name, and of a file that cannot be read, once per hub run (8.12)."""
         try:
-            entries = projects.read(root.path)
+            entries = projects.read(root.path, self)
         except projects.Invalid as e:
             if (root.id, None) not in self._told_projects:
                 self._told_projects.add((root.id, None))
@@ -906,23 +906,16 @@ class Hub:
         """The entries of `root`'s `projects.toml`, None without the file, an `Invalid` for one the hub cannot
         read: read again only when the file changed (its inode, times or size), so an edit takes effect at the
         next request, with no restart."""
-        f = root.path / projects.FILE
-        try:
-            st = f.stat()
-            key = (st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
-        except FileNotFoundError:
+        key, got = projects.load(root.path, self)       # one open beneath the root: the key and the text are of one file
+        if key is None:
             self._grants_seen.setdefault(root.id, None)
             return None
-        except OSError as e:
-            key = ("unreadable", e.errno)            # kept as one answer, so the tick tells the tabs once
         hit = self._projects.get(root.id)
         if hit is not None and hit[0] == key:
             return hit[1]
-        if key[0] == "unreadable":
-            got = projects.Invalid(f"cannot be read ({os.strerror(key[1])})")
-            self._projects[root.id] = (key, got)
-            self._grants_seen.setdefault(root.id, got)
-            return got
+        self._projects[root.id] = (key, got)          # a swap of one item: no lock, any reader sees one or the other
+        self._grants_seen.setdefault(root.id, got)    # what the tick compares with, from the first read on
+        return got
         try:
             got = projects.read(root.path)
         except projects.Invalid as e:

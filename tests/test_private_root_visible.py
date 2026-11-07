@@ -936,3 +936,87 @@ def test_a_root_folder_exchanged_for_a_link_to_the_private_root_again_and_again_
         stop.set()
         t.join()
     assert hits == 0 and made > 0
+
+
+# ── projects.toml and the locks are opened beneath their folder too (rule 2) ─────────────────────────────────────
+
+SHARED_SHEAF = """---
+issue: acme/record#2
+sources: [issue:acme/record#2]
+---
+# shared
+
+Shared words.
+"""
+
+
+def _b_status(w: World) -> int:
+    return w.front.get(f"/_/doc?doc={w.root.name}/acme/blog/shared.md", member=B).status
+
+
+def test_a_projects_toml_that_is_a_link_to_a_private_root_gives_no_oracle_and_no_grants(two, mode):
+    w = World(two, [])
+    (w.two.list_repo / "acme/blog/shared.md").write_text(SHARED_SHEAF, encoding="utf-8")
+    toml = w.two.list_repo / "projects.toml"
+    toml.unlink()
+    toml.symlink_to(w.two.private_repo / NAME)          # out of the shared root, to a file of A's private root
+    absent = _b_status(w)
+    w.put(PRIVATE)
+    present = _b_status(w)
+    assert absent == present                            # B learns nothing of whether A's file is there
+    (w.two.private_repo / NAME).write_text('[projects."acme/blog"]\nmembers = ["b"]\nstatus = "live"\n', encoding="utf-8")
+    assert _b_status(w) == absent                       # and a private file shaped as a projects.toml grants nothing
+
+
+def test_a_projects_toml_is_read_beneath_its_root_in_both_modes(tmp_path, mode):
+    from sheafmd.hub import projects
+    root, out = tmp_path / "root", tmp_path / "out"
+    root.mkdir(), out.mkdir()
+    good = '[projects."acme/blog"]\nmembers = ["a"]\nstatus = "live"\n'
+    assert projects.read(root) is None                                      # missing: as before
+    (root / "real.toml").write_text(good, encoding="utf-8")
+    (root / "projects.toml").symlink_to("real.toml")
+    assert set(projects.read(root)) == {"acme/blog"}                        # a link inside the root is followed
+    (root / "projects.toml").unlink()
+    (out / "x.toml").write_text(good, encoding="utf-8")
+    (root / "projects.toml").symlink_to(out / "x.toml")
+    with pytest.raises(projects.Invalid):                                   # a link that leaves the root: refused, not absent
+        projects.read(root)
+    (root / "projects.toml").unlink()
+    (root / ".git").mkdir()
+    (root / ".git" / "config").write_text(good, encoding="utf-8")
+    (root / "projects.toml").symlink_to(".git/config")
+    with pytest.raises(projects.Invalid):                                   # a link into the hub's own folders: refused
+        projects.read(root)
+    (root / "projects.toml").unlink()
+    os.link(root / "real.toml", root / "projects.toml")
+    with pytest.raises(projects.Invalid):                                   # a file with two names: refused
+        projects.read(root)
+
+
+def test_a_projects_toml_the_descriptors_say_is_private_is_refused(tmp_path, mode):
+    from types import SimpleNamespace
+    from sheafmd.hub import projects
+    st = tmp_path.stat()
+    hub = SimpleNamespace(_private_ids={(st.st_dev, st.st_ino): "a"}, _private_paths={})
+    (tmp_path / "projects.toml").write_text('[projects."acme/blog"]\nmembers = ["a"]\nstatus = "live"\n', encoding="utf-8")
+    assert set(projects.read(tmp_path)) == {"acme/blog"}
+    with pytest.raises(projects.Invalid):
+        projects.read(tmp_path, hub)
+
+
+def test_a_legacy_lock_that_is_a_link_creates_nothing_where_it_points(tmp_path, monkeypatch):
+    import tempfile
+    from sheafmd import source
+    fake = tmp_path / "faketmp"
+    locks = fake / "render-doc" / "locks"
+    locks.mkdir(parents=True)
+    monkeypatch.setattr(tempfile, "tempdir", str(fake))
+    doc = tmp_path / "d.md"
+    doc.write_text("# d\n", encoding="utf-8")
+    victim = tmp_path / "elsewhere" / "planted"
+    victim.parent.mkdir()
+    (locks / f"{source.lock_key(doc)}.lock").symlink_to(victim)
+    source.update_file(doc, lambda t: t + "x\n")                    # the update itself still goes through
+    assert doc.read_text(encoding="utf-8") == "# d\nx\n"
+    assert not victim.exists()

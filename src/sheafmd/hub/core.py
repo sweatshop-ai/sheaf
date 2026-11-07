@@ -500,7 +500,7 @@ class Hub:
 
     def _build(self, e: Entry, text: str, *, mount: bool = False, count: bool = True) -> str:
         s = self._settings(e.address)
-        root = self.roots.get(roots_mod.Address.parse(e.address).root)
+        root = self._file_root(e)
         meta = {"doc": e.address, "root": e.root_id, "boot": self.boot, "version": self.version,
                 "service": self.service, "me": self.person,
                 "agent": None, "can": [], "lines": {}, "seen": {}}
@@ -523,26 +523,37 @@ class Hub:
     def share_copy(self, e: Entry) -> str:
         """The share copy of the document as the file is now, with the settings it is shown with."""
         s = self._settings(e.address)
-        root = self.roots.get(roots_mod.Address.parse(e.address).root)
+        root = self._file_root(e)
         return render_file(e.path, share=True, src=e.read(), title=s["title"], toc=s["toc"] or "auto",
                            max_image_width=s["max_image_width"] or 1400, by=s["by"],
                            for_=s["for"], theme=s["theme"], credit=s["credit"], log=[],
                            root=root.path if root else None, image_ok=self._image_rule(root, e.path, e.address),
                            image_read=self._image_read(root) if self.proxy is not None else None)
 
+    def _file_root(self, e: Entry):
+        """The root the image rules judge the page of `e` against: the root its file is in, so the images of a sheaf of
+        a member's private root are judged there and show (rule H); the root of its address for any other sheaf."""
+        at = self.roots.get(roots_mod.Address.parse(e.address).root)
+        if at is None or not self.private_roots:
+            return at
+        found = self.roots.lookup(e.path)
+        return found if found is not None and found.id in self.private_roots else at
+
     def _image_read(self, root):
         """The bytes of a local image, from one open beneath `root` (`sheafmd.beneath`), refused when what was opened is
-        in a private root (9.11): the rule above judges the image's real path, this judges what is read."""
+        in a private root other than `root` itself (9.11): the rule above judges the image's real path, this judges what
+        is read. A private `root` is the one its sheaf is in, and opens only beneath itself."""
         if root is None:                    # the image rule leaves every image out of a document in no root
             return None
         top = os.path.realpath(root.path)
+        own = self.private_roots.get(root.id)
 
         def read(path) -> bytes:
             rel = os.path.relpath(path, top)
             if rel == ".." or rel.startswith("../"):
                 raise PermissionError(errno.EACCES, "outside the root", str(path))
             with beneath.open_beneath(top, rel) as op:
-                if place.opened_private(self, op) is not None:
+                if place.opened_private(self, op) not in (None, own):
                     raise PermissionError(errno.EACCES, "in a private root", str(path))
                 return op.bytes()
         return read
@@ -595,8 +606,7 @@ class Hub:
         give now."""
         if e.images_scope is None:
             return False
-        root = self.roots.get(roots_mod.Address.parse(e.address).root)
-        return e.images_scope != self._image_scope(root, e.address)
+        return e.images_scope != self._image_scope(self._file_root(e), e.address)
 
     def page(self, e: Entry, nonce: str, member=None) -> str:
         """The page to send: the nonce of this response on its script, and the read state as it

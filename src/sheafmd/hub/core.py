@@ -700,6 +700,8 @@ class Hub:
         fm = hit[1] if hit is not None and hit[0] == key else visibility.front_matter(f.read_text(encoding="utf-8"))
         assignees = self.assignees(address, fm)
         self._front[kept] = (key, fm, assignees)
+        if self.private_roots:
+            place.private_member(self, address, fm)         # remembered whoever read the file first (rule A)
         return fm, assignees
 
     def last_judged(self, address: str):

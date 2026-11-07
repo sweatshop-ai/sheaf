@@ -115,7 +115,7 @@ def test_a_cancel_given_up_takes_the_busy_button_away_whether_or_not_it_reached_
     assert "A cancel that fails otherwise (the hub unreachable, an error answer) leaves them." in s
 
 
-def test_an_ask_a_given_up_cancel_did_not_stop_shows_idle_and_a_tell_shows_again_with_a_snapshot():
+def test_a_tell_a_given_up_cancel_did_not_stop_shows_again_with_a_snapshot():
     s = flat(section("10.4"))
-    assert "An Ask the cancel did not stop may still run: the page shows it idle until its answer arrives in its thread or the page is loaded again." in s
+    assert "An Ask the cancel" not in s  # Ask was retired (SPEC 11.2)
     assert "A Tell still waiting shows again with the next snapshot the page applies, or when the page is loaded again." in s

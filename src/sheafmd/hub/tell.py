@@ -109,7 +109,7 @@ class Tell:
         if targets.is_agent(raw) and not session:
             shape, line, reaches = targets.agent_view(self.hub, raw)
             return View(None, None, frozenset({"queue"}) if reaches else frozenset(), {"tell": line}, shape=shape)
-        t = self.hub.target(address)
+        t = self.hub.target(address, kept=session)
         if t is None:
             return View(None, None, frozenset(), {"tell": NO_AGENT})
         ad = self.hub.adapter(t.agent)
@@ -203,7 +203,7 @@ class Tell:
                 raise JobRefused(409, f"The jump command failed (exit {p.returncode}){why}")
 
     def product(self, address: str) -> str:
-        t = self.hub.target(address)
+        t = self.hub.target(address, kept=True)
         return self.hub.adapter(t.agent).product if t else "agent"
 
     def _require(self, view: View):
@@ -462,5 +462,5 @@ class Tell:
         """What the told session is doing, for the threads waiting on it."""
         if not (e.live.waiting() or e.live.session_question()):
             return
-        t = self.hub.target(e.address)
+        t = self.hub.target(e.address, kept=True)
         e.live.observe(self.hub.adapter(t.agent).state(t) if t else None)

@@ -579,14 +579,15 @@ class Hub:
         return out
 
     # ── the agent of a document ──────────────────────────────────────────────
-    def target(self, address: str) -> Target | None:
-        """The session the document's last render attached (the one kept beside an agent target, too), or None (also for a stored target
-        that cannot be read: it is never guessed at)."""
+    def target(self, address: str, kept: bool = False) -> Target | None:
+        """The session the document's last render attached, or None (also for a stored target that cannot be
+        read: it is never guessed at). `kept`: when the target is not a session now (an agent, or none), the
+        session kept beside it, which a Tell already sent to it still runs in (a stop and the watcher use it)."""
         entry = self.docs.get(address)
         raw = entry.get("target")
-        if targets_mod.is_agent(raw):                  # an agent is no session (SPEC 9.8): the one kept beside it is
+        if kept and (not raw or targets_mod.is_agent(raw)):    # an agent is no session (SPEC 9.8)
             raw = entry.get("session")
-        if not raw:
+        if not raw or targets_mod.is_agent(raw):
             return None
         try:
             return Target.from_dict(raw)

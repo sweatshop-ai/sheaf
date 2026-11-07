@@ -563,7 +563,7 @@ class Index:
                 theirs[key] = hub.roots.lookup(path) == root
             return theirs[key]
 
-        for root in hub.roots.all():
+        for root in hub.roots.listed():
             if only is not None and root.name != only:
                 continue
             if member is not None and not hub.owns(member, root):

@@ -77,6 +77,10 @@ class LiveDocument:
         # the replies whose effective role is action): an old Ask answer or a reader's reply is not
         # the answer.
         self._telling, self._told_at = {}, {}
+        # Who the told session is called, and the Tells of an agent that wait on this document (SPEC 8.5: both
+        # are in `telling`). The hub sets them; read under the lock, so neither may call back into this document.
+        self.session_to = lambda: ""
+        self.agent_tells = lambda: []
         # The question the told session put to its person in its own chat, while it waits for
         # them there ("" when it is not waiting).
         self._question = ""
@@ -155,13 +159,20 @@ class LiveDocument:
         self._text, self._hash = text, rds.md_hash(text)
         self._remember(text)
 
+    def _telling_view(self):
+        """`[{id, to, state}]` (SPEC 8.5): the threads told to the session, `working`, or `waiting` while it
+        asks its person, then those that wait for an agent, `queued` or `seen`."""
+        to = self.session_to() if self._telling else ""
+        state = "waiting" if self._question else "working"
+        return [{"id": cid, "to": to, "state": state} for cid in sorted(self._telling)] + list(self.agent_tells())
+
     def _snapshot(self, text):
         """What an open page needs to update its comments in place, without a reload."""
         got = rdc.parse(text)
         for c in got.comments:
             if c.id in self._telling and rdc.action_replies(c) > self._telling[c.id]:
                 del self._telling[c.id]
-        return {"hash": rds.md_hash(text), "telling": sorted(self._telling),
+        return {"hash": rds.md_hash(text), "telling": self._telling_view(),
                 "comments": [c.as_dict() for c in got.comments],
                 "malformed": [{"line": m.line, "reason": m.reason} for m in got.malformed]}
 
@@ -472,6 +483,11 @@ class LiveDocument:
                 return self._names(h, self._read())
             except OSError:
                 return self._known(h) is not None
+
+    def telling(self):
+        """`[{id, to, state}]`, as a snapshot holds it (SPEC 8.5)."""
+        with self._held():
+            return self._telling_view()
 
     def waiting(self):
         """The threads still waiting for an action reply."""

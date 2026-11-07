@@ -293,7 +293,7 @@ def test_a_told_comment_tells_the_tabs_which_threads_are_waiting(made):
     doc, md, rendered, events, _ = made(WITH_C1)
     doc.comment("reply", {"id": "c1", "body": "Please."}, rds.md_hash(WITH_C1), await_action=True)
     (name, data), = events
-    assert name == "changed" and data["telling"] == ["c1"]
+    assert name == "changed" and [t["id"] for t in data["telling"]] == ["c1"]
 
 
 def test_a_reply_names_its_thread_not_a_version(made):
@@ -413,18 +413,29 @@ def test_a_told_thread_waits_for_an_action_reply_and_nothing_else(made):
     doc, md, rendered, events, clock = made(WITH_C1)
     got = doc.comment("reply", {"id": "c1", "body": "Please."}, rds.md_hash(WITH_C1),
                       await_action=True)
-    assert got["telling"] == ["c1"] and doc.waiting() == ["c1"]
+    assert [t["id"] for t in got["telling"]] == ["c1"] and doc.waiting() == ["c1"]
     got = doc.comment("reply", {"id": "c1", "body": "Me too"}, got["hash"])
-    assert got["telling"] == ["c1"]                               # a reader's reply is not the answer
+    assert [t["id"] for t in got["telling"]] == ["c1"]                               # a reader's reply is not the answer
     rds.update_file(md, lambda t: rdc.reply(t, "c1", "Done.", "Claude", "2026-09-30T10:05", role="action"))
     assert doc.refresh()["telling"] == [] and doc.waiting() == []
+
+
+def test_telling_names_each_thread_with_whom_it_is_told_and_its_state(made):
+    doc, md, rendered, events, _ = made(WITH_C1)
+    doc.session_to = lambda: "Ada"
+    doc.agent_tells = lambda: [{"id": "c9", "to": "ChatGPT (Bea)", "state": "queued"}]
+    doc.await_reply("c1")
+    assert doc.snapshot()["telling"] == [{"id": "c1", "to": "Ada", "state": "working"},
+                                         {"id": "c9", "to": "ChatGPT (Bea)", "state": "queued"}]
+    doc.observe(type("S", (), {"status": "waiting", "question": "Which pears?"})())
+    assert doc.snapshot()["telling"][0] == {"id": "c1", "to": "Ada", "state": "waiting"}
 
 
 def test_an_answer_does_not_end_a_tell_wait_unless_its_role_is_action(made):
     doc, md, rendered, events, _ = made(WITH_C1)
     doc.await_reply("c1")
     rds.update_file(md, lambda t: rdc.reply(t, "c1", "Just an answer.", "Claude", "2026-09-30T10:05", role="answer"))
-    assert doc.refresh()["telling"] == ["c1"] and doc.waiting() == ["c1"]
+    assert [t["id"] for t in doc.refresh()["telling"]] == ["c1"] and doc.waiting() == ["c1"]
 
 
 def test_waiting_only_follows_an_add_or_a_reply(made):
@@ -526,7 +537,7 @@ def test_an_action_reply_landing_while_the_told_comment_renders_answers_it(made)
     doc._render = render
     got = doc.comment("reply", {"id": "c1", "body": "Please."}, rds.md_hash(WITH_C1),
                       await_action=True)
-    assert got["telling"] == ["c1"]
+    assert [t["id"] for t in got["telling"]] == ["c1"]
     assert doc.refresh()["telling"] == [] and doc.waiting() == []
 
 

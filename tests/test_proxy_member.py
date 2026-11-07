@@ -330,7 +330,7 @@ def told(front, plan):
 
 
 def test_no_answer_says_which_threads_wait_for_the_hub_accounts_session(told, front, browser):
-    assert browser.get(f"/_/doc?doc={DOC}").json()["telling"] == ["c1"]
+    assert [t["id"] for t in browser.get(f"/_/doc?doc={DOC}").json()["telling"]] == ["c1"]
     assert front.get(f"/_/doc?doc={DOC}").json()["telling"] == []
     r = add(front)
     assert r.status == 200 and r.json()["telling"] == []
@@ -414,7 +414,7 @@ def test_the_changes_a_member_is_sent_do_not_name_the_threads_told(told, front, 
     for stream, telling in ((own, ["c1"]), (mine, [])):
         got = [e for e in stream.drain() if e[0] != "hello"]
         assert [n for n, _ in got] == ["changed", "changed"]
-        assert [d["telling"] for _, d in got] == [telling, telling]
+        assert [[t["id"] for t in d["telling"]] for _, d in got] == [telling, telling]
 
 
 def test_a_members_index_stream_names_only_their_documents(mine, other):

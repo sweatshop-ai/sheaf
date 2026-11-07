@@ -39,7 +39,7 @@ from . import the_list
 from . import waiting as waiting_mod
 from . import visibility
 from . import work as work_mod
-from .tell import Tell
+from .tell import Tell, who as session_who
 from .auth import Auth
 from .commits import Author, Commits
 from .events import Bus
@@ -364,6 +364,8 @@ class Hub:
                                   publish=e.bus.publish, by=self.person, clock=self.clock,
                                   versions=(lambda: self._store_of(address, root, e.file_root)) if self.private_roots and place.applies(self, name)
                                   else self._versions_of(root), address=address, hold=hold)
+            e.live.session_to = lambda: self.session_name(address)
+            e.live.agent_tells = lambda: self.waiting_tells.waits(address, None, sweep=False)   # the hub person's (9.8)
             e.live.refresh(force=True)           # the first render: e.html
             self.entries[address] = e
             return e
@@ -595,6 +597,14 @@ class Hub:
             return Target.from_dict(raw)
         except ValueError:
             return None
+
+    def session_name(self, address: str) -> str:
+        """What the page calls the session a Tell of this document goes to ("" when there is none)."""
+        try:
+            t = self.target(address, kept=True)
+            return "" if t is None else session_who(t, self.adapter(t.agent))
+        except Exception:
+            return ""
 
     def adapter(self, agent: str) -> Adapter:
         return registry.adapter_for(agent, self.sender)

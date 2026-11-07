@@ -245,7 +245,7 @@ def test_an_answer_does_not_end_a_tell_wait(browser, talk):
     ok(browser, "reply", doc=DOC, id="c1", text="Only words.", role="answer")
     assert e.live.waiting() == ["c1"]
     (name, data), = tab.drain()
-    assert name == "changed" and data["telling"] == ["c1"]
+    assert name == "changed" and [t["id"] for t in data["telling"]] == ["c1"]
 
 
 def test_a_resolve_through_a_reply_ends_no_wait_by_itself_but_is_seen(browser, talk):

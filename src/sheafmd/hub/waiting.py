@@ -162,9 +162,11 @@ class Waiting:
         self._change(change)
 
     # ── the page ─────────────────────────────────────────────────────────────
-    def waits(self, address: str, member=None) -> list:
-        """`[{id, to, state}]` of the reader's own Tells on this document: `queued`, or `seen`."""
-        self.sweep()
+    def waits(self, address: str, member=None, sweep: bool = True) -> list:
+        """`[{id, to, state}]` of the reader's own Tells on this document: `queued`, or `seen`. `sweep` False is a
+        look that changes nothing, for a caller that holds a document's lock."""
+        if sweep:
+            self.sweep()
         mine = member.id if member else None
         return [{"id": t["thread"], "to": self._name(t), "state": "queued" if t["seen"] is None else "seen"}
                 for t in read_json(_file(), [], aside=False)

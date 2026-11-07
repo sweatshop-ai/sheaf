@@ -776,7 +776,10 @@ class Handler:
             # opened before it (9.11). A change of `projects.toml` that shuts the member out is told `gone`, with
             # why (8.12): that alone, never a file of the sheaf that cannot be read for a moment.
             if hub.visible(member, e.address):
-                return _document_events(name, data)
+                data = _document_events(name, data)
+                if name == "changed" and isinstance(data, dict) and "telling" in data:     # their own, not the hub person's (9.9)
+                    data = {**data, "telling": hub.waiting_tells.waits(e.address, member, sweep=False)}
+                return data
             if name == "grants" and not hub.granted(member, e.address):
                 return events.Renamed("gone", {"doc": e.address, "why": "access"})
             return None
@@ -812,10 +815,10 @@ class Handler:
             if r.status == 404:         # a file gone from its root, or a root gone from its name (10.7)
                 r.answer = {"root": self._root_id(req, doc)}
             raise
+        self.hub.waiting_tells.sweep()      # a revoked token's Tells end here (9.8), before they are named
         snap = e.live.snapshot()
         snap["root"] = self._root_id(req, e.address)
         snap["rids"] = e.live.taken_rids()
-        snap["waits"] = self.hub.waiting_tells.waits(e.address, req.member)        # the Tells that wait for an agent (9.8)
         if req.member is not None:
             # Their own seen state, and nothing of the hub account's agent session (9.9).
             # A sheaf's Work on this and its Tell for James's window are refreshed as the meta's (9.12).
@@ -823,7 +826,8 @@ class Handler:
             work, can = self.hub.member_work(e, req.member)
             extra = {} if work is None else {"work": work}
             agent, can, lines, picks = self.hub.member_target(e.address, req.member, can)
-            return _ok(**proxy.for_member(snap), seen=self.hub.member_seen.get(req.member.id, e.address),
+            return _ok(**{**proxy.for_member(snap), "telling": self.hub.waiting_tells.waits(e.address, req.member)},
+                       seen=self.hub.member_seen.get(req.member.id, e.address),
                        question="", target=agent, targets=picks, capabilities=can, lines=lines,
                        sent=self.hub.box_waits.pending(e.address, e.live.current()[1]), **extra)
         v = self.hub.tell.view(e.address)
@@ -1600,9 +1604,11 @@ class Handler:
                 if can_tell and not r.leaves_wait:   # a wait this request began, and no other
                     e.live.stop_waiting(snap["id"])
                 snap["tellError"] = r.message
-            snap["telling"] = e.live.waiting()
-        snap["waits"] = self.hub.waiting_tells.waits(e.address, member)     # the Tells that wait for an agent (9.8)
-        return _ok(**(proxy.for_member(snap) if member else snap))
+        self.hub.waiting_tells.sweep()
+        snap["telling"] = e.live.telling()
+        if member:      # only their own Tells that wait for an agent (9.8, 9.9)
+            snap = {**proxy.for_member(snap), "telling": self.hub.waiting_tells.waits(e.address, member)}
+        return _ok(**snap)
 
     @staticmethod
     def _page_hash(req: Req):

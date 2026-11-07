@@ -676,7 +676,6 @@ class Door:
                 root = roots.lookup(Path(doc))
                 if root is not None and self._hidden_root(root, caller):
                     root = None     # a root of another member's is none (9.11), before the link's message
-                rel = Path(doc).relative_to(root.path).as_posix() if root is not None else ""
                 if root is not None and self.hub.roots.hidden(root):
                     # A private root has no address (rule E), and a sheaf is not made in it by its path: to anyone
                     # but its member and the key a path in no root, to them the refusal of a private create (9.11).
@@ -684,7 +683,10 @@ class Door:
                             None, getattr(self._member(caller), "id", None)):
                         raise ToolError(f"{doc} {NOT_IN_A_ROOT}", "path")
                     raise ToolError(f"{doc} cannot be made: {place.PRIVATE_ROOT}.", "path")
+                rel = Path(doc).relative_to(root.path).as_posix() if root is not None else ""
             except (OSError, ValueError):
+                if not caller.may_add_roots:    # a token is told of a path no root holds as of one a root holds only by its spelling
+                    raise ToolError(f"{doc} {NOT_IN_A_ROOT}", "path") from None
                 raise ToolError(f"{doc} {NOT_IN_A_ROOT} Name it `<root>/<path>`, or by the real "
                                 "path of its folder.", "path") from None
         else:

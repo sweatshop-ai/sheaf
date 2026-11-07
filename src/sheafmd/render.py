@@ -981,7 +981,7 @@ def build(md: Path, *, theme: Theme, share: bool = True, title: str | None = Non
           for_: str | None = None, credit: bool = False, link_rule: bool = True,
           link_tlds=(), log: list[str], src: str | None = None, warn=None,
           extra_meta: dict | None = None, script_nonce: str | None = None, image_ok=None,
-          mount: bool = False) -> str:
+          mount: bool = False, image_read=None) -> str:
     """The HTML of `md`, as a share copy (`share=True`) or as the page.
 
     `mount=True` (never with `share`) is the page for the front's document (#116): the body through the
@@ -994,7 +994,7 @@ def build(md: Path, *, theme: Theme, share: bool = True, title: str | None = Non
     rendered, not on every save. `extra_meta` is what the hub adds to the page's
     meta block (SPEC 10.1). `script_nonce` is the CSP nonce the hub puts on the page's script
     element (SPEC 9.5). `image_ok(path)`, when given, is which local images may be embedded
-    (proxy mode, SPEC 9.9): any other is left out."""
+    (proxy mode, SPEC 9.9): any other is left out. `image_read(path)` gives the bytes of one that may (SPEC 9.11)."""
     md = Path(md)
     # 1. Read the source. A share copy loses every HTML comment, in the source.
     if src is None:
@@ -1090,7 +1090,7 @@ def build(md: Path, *, theme: Theme, share: bool = True, title: str | None = Non
     frag = charts.render_charts(frag)
     frag = charts.render_mermaid(frag, log)
     # 7. Local images, embedded.
-    frag = images.process_images(frag, md.parent, max_image_width, log, image_ok)
+    frag = images.process_images(frag, md.parent, max_image_width, log, image_ok, image_read)
     # 8. Absolute local paths become file:// links.
     frag = linkify_paths(frag)
     # 9. The link rule: a warning, never a block, and only for a command-line render.
@@ -1195,7 +1195,7 @@ def render_file(path, *, share: bool = True, theme=None, title: str | None = Non
                 warn=None,
                 src: str | None = None, extra_meta: dict | None = None,
                 root: Path | None = None, script_nonce: str | None = None, image_ok=None,
-                mount: bool = False) -> str:
+                mount: bool = False, image_read=None) -> str:
     """Everything `sheafmd.render` does, plus the arguments only the CLI and the hub
     use (`warn`, `src`, `extra_meta`, `root`, `script_nonce`, `image_ok`). Reads the root's `.sheaf.toml` itself:
     `for`, `links`, `link_tlds`, `credit` and the theme. Without a `by`, the byline names the
@@ -1222,7 +1222,8 @@ def render_file(path, *, share: bool = True, theme=None, title: str | None = Non
                      for_=for_ if for_ is not None else rc.for_,
                      credit=rc.credit if credit is None else credit,
                      link_rule=rc.links, link_tlds=rc.link_tlds, log=log, src=src,
-                     warn=warn, extra_meta=extra_meta, script_nonce=script_nonce, image_ok=image_ok, mount=mount)
+                     warn=warn, extra_meta=extra_meta, script_nonce=script_nonce, image_ok=image_ok, mount=mount,
+                     image_read=image_read)
     if own:
         import sys
         for line in log:

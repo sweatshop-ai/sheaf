@@ -37,7 +37,7 @@ from importlib import resources
 from pathlib import Path
 from urllib.parse import quote
 
-from .. import config, paths
+from .. import beneath, config, paths
 from ..source import md_hash
 from ..blocks import _split_lines, split_md_blocks
 from ..edit import TASK_MARK_RE, ticked_html
@@ -691,8 +691,9 @@ class TheList:
                             place.tell_link(self.hub, root, top, found.rel)
                         continue
                     try:
-                        key = _stat_key((root.path / found.rel).stat())     # before the read: a change after it shows
-                        text = (root.path / found.rel).read_text(encoding="utf-8")
+                        with self.hub.open_in(root, found.rel) as op:      # beneath the root, judged on what was opened (9.11)
+                            key = _stat_key(os.fstat(op.fd))               # before the read: a change after it shows
+                            text = op.text()
                     except (OSError, UnicodeDecodeError):
                         continue
                 read[rel] = key
@@ -705,7 +706,7 @@ class TheList:
                 if s.issue is not None and not s.moved:
                     sheaves.append(s)
             try:
-                entries = projects.read(root.path) or {}
+                entries = projects.read(root.path, self.hub) or {}
             except projects.Invalid:
                 entries = {}
             if placed:
@@ -774,8 +775,8 @@ class TheList:
             for row in self._snap.rows:
                 if row.sheaf.rel == a.rel:
                     try:
-                        sheaf = read_sheaf(a.rel, self._file(root, a.rel).read_text(encoding="utf-8"))
-                    except (OSError, UnicodeDecodeError):
+                        sheaf = read_sheaf(a.rel, self._read(root, a.rel)[0])
+                    except (OSError, UnicodeDecodeError, roots_mod.NotFound):
                         sheaf = row.sheaf
                     if not _same_issue(sheaf.issue, row.sheaf.issue):
                         self._take_off({row.file, os.path.realpath(self._file(root, a.rel))}, {a.rel}, sheaf.issue)
@@ -807,6 +808,13 @@ class TheList:
     def _file(self, root, rel: str) -> Path:
         """The file of the sheaf at `rel` in `root`, the list's, wherever it is (9.11): placed in proxy mode."""
         return self.hub.file(f"{root.name}/{rel}", placed=self.hub.proxy is not None)
+
+    def _read(self, root, rel: str) -> tuple:
+        """(text, stat key, the member whose private root holds the file) of the sheaf at `rel` in `root`, as `_file` finds
+        it, from one open beneath its root (`sheafmd.beneath`): all of it is of that descriptor."""
+        top, found = self.hub.where(f"{root.name}/{rel}")
+        with beneath.open_beneath(top, found) as op:
+            return op.text(), _stat_key(os.fstat(op.fd)), place.opened_private(self.hub, op)
 
     # ── the page ────────────────────────────────────────────────────────────
     def assignees(self, address: str, issue: str):
@@ -898,18 +906,16 @@ class TheList:
         see: it may have changed since `visible` judged it. Found and read under the name's lock (9.11)."""
         try:
             with place.held(self.hub, address):
-                f = self._file(root, row.sheaf.rel)
-                key = _stat_key(f.stat())
+                text, key, private = self._read(root, row.sheaf.rel)
                 if key == row.read:
                     return row
-                text = f.read_text(encoding="utf-8")
             sheaf = read_sheaf(row.sheaf.rel, text)
         except Exception:                   # unreadable, or one the reader trips on, as the poll leaves it out
             return None
         if not _same_issue(sheaf.issue, row.sheaf.issue) or sheaf.moved:
             return None
         fm = visibility.front_matter(text)
-        if not self.hub.may_open(member, address, fm):
+        if not self.hub.may_open(member, address, fm, private):
             return None
         return Row(sheaf, row.record, row.group, key, row.file)
 
@@ -930,11 +936,11 @@ class TheList:
         if not lines or not root.git:
             return {}
         try:
-            f = Path(os.path.realpath(self._file(root, s.rel)))
-            text = f.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+            text, _, private = self._read(root, s.rel)         # the text from one open beneath the root, judged on it
+            f = Path(os.path.realpath(self._file(root, s.rel)))     # git's history of the name: names and dates, no text
+        except (OSError, UnicodeDecodeError, roots_mod.NotFound):
             return {}
-        if md_hash(text) != s.hash:
+        if private is not None or md_hash(text) != s.hash:
             return {}
         return pressers(self.hub.blamed, f, text, lines)
 

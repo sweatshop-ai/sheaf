@@ -121,7 +121,8 @@ var create = function (ROOT, CFG, opts) {
     AGENT = toBox ? upper(liveSession().member) || 'James'
           : (CFG.agent && (CFG.agent.name || CFG.agent.display)) || 'the agent';
     AGENT_UC = AGENT.charAt(0).toUpperCase() + AGENT.slice(1);
-    canTell = CAN.indexOf('relay-tell') >= 0 || CAN.indexOf(toBox ? 'box-tell' : 'deliver') >= 0;
+    canTell = CAN.indexOf('relay-tell') >= 0 || CAN.indexOf(toBox ? 'box-tell' : 'deliver') >= 0 ||
+              (!toBox && CAN.indexOf('queue') >= 0);        // an agent: the Tell waits for it (SPEC 9.8)
   }
   function liveSession() { return (CFG.work && CFG.work.sessions && CFG.work.sessions[0]) || {}; }
   // Where a member's Tell goes: James's window on the box, or the fork's session through its relay (9.14).
@@ -156,7 +157,7 @@ var create = function (ROOT, CFG, opts) {
   function agentLine() {
     if (toBox && canTell) return 'Tell → ' + whereTo();
     var a = CFG.agent;
-    if (a && a.kind === 'agent') return a.label + ' · ' + lineOf('tell');      // an agent is named; its line says why Tell waits (SPEC 10.6)
+    if (a && a.kind === 'agent') return canTell ? 'Tell → ' + a.label : a.label + ' · ' + lineOf('tell');      // an agent is named; its line says why it cannot be told (SPEC 10.6)
     if (!a || !canTell) return lineOf('tell');
     return 'Tell → ' + a.label + ' · ' + a.product;
   }
@@ -342,6 +343,13 @@ var create = function (ROOT, CFG, opts) {
   // only an outage raises and only the hub's return clears.
   var editing = false, hash = CFG.hash, stale = false, dead = false;
   var telling = {}, tellQ = '';
+  // The Tells that wait for an agent (SPEC 9.8, 10.5): thread id -> {to, state: queued | seen}. They run nothing, so
+  // `telling` does not hold them: the thread shows no spinner and no orange dot, and the line has no clock.
+  var waits = {};
+  function takeWaits(list) {
+    waits = {};
+    (list || []).forEach(function (w) { waits[w.id] = { to: w.to, state: w.state }; });
+  }
 
   if (!canSave && !COMMENTS.length && !(CFG.malformed || []).length) {
     // No server and nothing to show: a copy of the file, forwarded or opened
@@ -1447,6 +1455,7 @@ var create = function (ROOT, CFG, opts) {
     if (!j || j.ok === false) return;
     if (heardBefore !== jobsHeard) return;      // an event came while the answer was out: it is the newer word
     (j.telling || []).forEach(function (id) { telling[id] = true; });
+    if ('waits' in j) { var had = Object.keys(waits); takeWaits(j.waits); had.concat(Object.keys(waits)).forEach(touched); }
     // The drops for James's window the hub still holds open (#115): the line comes back on a new load.
     if (toBox) (j.sent || []).forEach(function (d) {
       if (!byId[d.id]) return;
@@ -1900,6 +1909,8 @@ var create = function (ROOT, CFG, opts) {
       var c = (j.comments || []).filter(function (x) { return x.id === id; })[0] || byId[id];
       sentBox[id] = { n: ((c && c.replies) || []).length, to: AGENT };
       if (CAN.indexOf('relay-tell') >= 0) sentBox[id].at = whereTo();
+    } else if (j && j.waits) {
+      takeWaits(j.waits);
     } else telling[id] = true;
   }
   // The Tell entry of a form: a working button when the agent can be told, a disabled one carrying
@@ -1919,6 +1930,14 @@ var create = function (ROOT, CFG, opts) {
     return '<button class="rd-alt rd-na rd-' + what + '" disabled title="' + esc(lineOf(what)) + '">' + esc(label) + '</button>';
   }
   var DOTS = '<span class="rd-dots" aria-hidden="true"><i></i><i></i><i></i></span>';
+  // A Tell that waits for an agent: said in the thread, with no spinner and no clock, across a reload and a restart.
+  function waitLine(id) {
+    var w = waits[id];
+    if (!w) return '';
+    return '<div class="rd-msg rd-sent rd-waits">' + (w.state === 'seen'
+      ? esc(w.to) + ' has seen it; its action appears in this thread.'
+      : 'Waiting for ' + esc(w.to) + ': it sees this the next time you talk to it.') + '</div>';
+  }
   function fillPopover(id) {
     var c = byId[id], sc = pop.querySelector('.rd-scroll');
     if (telling[id]) delete interrupted[id];       // sent again: no longer interrupted
@@ -1931,7 +1950,7 @@ var create = function (ROOT, CFG, opts) {
                      (tellQ ? '<div class="rd-text">is waiting for your answer in your session: ' + esc(tellQ) + '</div>' +
                               answerButton() + '</div>'
                             : '<div class="rd-text">is working on it in your session' + DOTS + '</div></div>') : '') +
-      sentLine(id) +
+      sentLine(id) + waitLine(id) +
       (interrupted[id] ? '<div class="rd-msg rd-reply rd-interrupted"><span class="rd-who">' + esc(AGENT_UC) + '</span>' +
                          '<div class="rd-text">interrupted by a hub restart, send it again</div></div>' : '') + '</div>';
     var ans = pop.querySelector('.rd-answer');
@@ -1941,11 +1960,13 @@ var create = function (ROOT, CFG, opts) {
       acts.hidden = sentOf(id);      // a reply or an edit of this thread is out: its buttons wait for the answer
       acts.innerHTML = '<button data-a="reply">Reply</button>' +
         (telling[id] ? busy('tell', AGENT_UC + ' is working')
+         : waits[id] ? '<button class="rd-alt rd-busy rd-tell" data-a="cancel-tell" title="Click to cancel"><span class="rd-on">' +
+                       esc(waits[id].to) + ' is waiting</span><span class="rd-off">Cancel</span></button>'
          : canTell ? '<button class="rd-alt rd-tell" data-a="tell" title="' + esc(tellTip()) + '">Tell ' + esc(AGENT) + '</button>'
          : offButton('tell', 'Tell ' + AGENT)) +
         '<button class="rd-alt" data-a="status">' + (c.status === 'open' ? 'Resolve' : 'Reopen') + '</button>' +
         (mine(c) ? '<button class="rd-alt" data-a="edit">Edit</button><button class="rd-alt" data-a="delete">Delete</button>' : '') +
-        offLines(telling[id]);
+        offLines(telling[id] || waits[id]);
       pop.appendChild(acts);
       acts.addEventListener('click', function (e) {
         var t = e.target.closest ? e.target.closest('button') : null;
@@ -2082,11 +2103,12 @@ var create = function (ROOT, CFG, opts) {
     return e.unreachable && e.message === UNREACHABLE ? what + ' did not go out: the hub is unreachable.' : e.message;
   }
   async function cancel(id) {
-    var off = function () { delete telling[id]; touched(id); };
+    var off = function () { delete telling[id]; delete waits[id]; touched(id); };
+    var waited = waits[id];
     try {
       await post('/_/cancel', { id: id });
       off();
-      say('Tell ' + AGENT + ' cancelled. If it had arrived, the session was told to stop.');
+      if (!waited) say('Tell ' + AGENT + ' cancelled. If it had arrived, the session was told to stop.');
     } catch (e) {
       // Not answered within WAIT, the cancel may have arrived all the same, and the hub says nothing of one
       // that found nothing running: the job comes off as on an answer. A Tell still waiting shows again with
@@ -2099,7 +2121,8 @@ var create = function (ROOT, CFG, opts) {
     if (needClean()) return;
     try {
       await post('/_/tell', { id: id, hash: hash });   // the id names a thread of this text (SPEC 7.3)
-      telling[id] = true;
+      if (CFG.agent && CFG.agent.kind === 'agent') waits[id] = waits[id] || { to: CFG.agent.label, state: 'queued' };
+      else telling[id] = true;
       touched(id);
     } catch (e) { say(notSent(e, 'Tell ' + AGENT), true); }
   }
@@ -3526,10 +3549,29 @@ var create = function (ROOT, CFG, opts) {
       });
       live.addEventListener('tell-cancelled', function (ev) {
         var d = JSON.parse(ev.data || '{}');
+        var waited = waits[d.id];
         delete telling[d.id];
+        delete waits[d.id];
+        touched(d.id);
+        if (waited) say('Cancelled.' + (d.seen ? ' ' + waited.to + ' had already seen it; look at the document before you Tell again.' : ''));
+      });
+      // A Tell that waits for an agent (SPEC 9.8, 10.5): queued, listed to the agent, ended by its action reply.
+      live.addEventListener('tell-queued', function (ev) {
+        var d = JSON.parse(ev.data || '{}');
+        waits[d.id] = { to: d.agent, state: 'queued' };
         touched(d.id);
       });
-      ['tell-sent', 'tell-waiting', 'tell-working',
+      live.addEventListener('tell-seen', function (ev) {
+        var d = JSON.parse(ev.data || '{}');
+        if (waits[d.id]) waits[d.id].state = 'seen';
+        touched(d.id);
+      });
+      live.addEventListener('tell-done', function (ev) {
+        var d = JSON.parse(ev.data || '{}');
+        delete waits[d.id];
+        touched(d.id);
+      });
+      ['tell-sent', 'tell-waiting', 'tell-working', 'tell-queued', 'tell-seen', 'tell-done',
        'tell-failed', 'tell-cancelled'].forEach(function (name) {
         live.addEventListener(name, function () { jobsHeard++; });
       });

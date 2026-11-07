@@ -781,7 +781,7 @@ class Handler:
                     return dict(data) if getattr(data, "member", None) == member.id else None
                 data = _document_events(name, data)
                 if name == "changed" and isinstance(data, dict) and "telling" in data:     # their own, not the hub person's (9.9)
-                    data = {**data, "telling": hub.waiting_tells.waits(e.address, member, sweep=False)}
+                    data = {**data, "telling": self._member_telling(e.address, member, sweep=False, comments=data.get("comments"))}
                 return data
             if name == "grants" and not hub.granted(member, e.address):
                 return events.Renamed("gone", {"doc": e.address, "why": "access"})
@@ -832,7 +832,7 @@ class Handler:
             work, can = self.hub.member_work(e, req.member)
             extra = {} if work is None else {"work": work}
             agent, can, lines, picks = self.hub.member_target(e.address, req.member, can)
-            return _ok(**{**proxy.for_member(snap), "telling": self.hub.waiting_tells.waits(e.address, req.member)},
+            return _ok(**{**proxy.for_member(snap), "telling": self._member_telling(e.address, req.member, text=e.live.current()[1])},
                        seen=self.hub.member_seen.get(req.member.id, e.address),
                        question="", target=agent, targets=picks, capabilities=can, lines=lines,
                        sent=self.hub.box_waits.pending(e.address, e.live.current()[1]), **extra)
@@ -841,6 +841,12 @@ class Handler:
                    question=e.live.session_question(), target=v.agent(),
                    targets=targets.choices(self.hub, e.address),
                    capabilities=sorted(v.caps), lines=v.lines)
+
+    def _member_telling(self, address, member, sweep=True, comments=None, text=None) -> list:
+        """A member's `telling` (9.9): their own Tells that wait for an agent (9.8) and their own drops for
+        James's window (9.12), and nothing of the hub account's session or of another member's."""
+        return (self.hub.waiting_tells.waits(address, member, sweep=sweep)
+                + self.hub.box_waits.telling(address, member.id, comments=comments, text=text))
 
     def _mount(self, req: Req) -> Response:
         """The sheaf as JSON for the front's loader to mount (#116): the body through the sanitiser's mount mode and the
@@ -1598,7 +1604,7 @@ class Handler:
             else:
                 # Open on the sheaf's pages until a reply lands in the thread, or past the Tell wait (#115).
                 self.hub.box_waits.add(e.address, snap["id"], "tell", e.live.current()[1], name,
-                                       self.hub.the_list.cfg.dirs_for(req.member).tell_dir)
+                                       self.hub.the_list.cfg.dirs_for(req.member).tell_dir, req.member.id)
         # The job looks the document up again when it starts: it names its thread in the text the
         # comment was just written in, so a forget in between, and another folder that takes the name,
         # cannot hand it that folder's thread of the same id (SPEC 7.3). A forget that leaves no folder
@@ -1615,7 +1621,7 @@ class Handler:
         self.hub.waiting_tells.sweep()
         snap["telling"] = e.live.telling()
         if member:      # only their own Tells that wait for an agent (9.8, 9.9)
-            snap = {**proxy.for_member(snap), "telling": self.hub.waiting_tells.waits(e.address, member)}
+            snap = {**proxy.for_member(snap), "telling": self._member_telling(e.address, member, comments=snap.get("comments"))}
         return _ok(**snap)
 
     @staticmethod

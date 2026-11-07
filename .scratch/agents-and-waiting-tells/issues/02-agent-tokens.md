@@ -4,7 +4,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Claimed by:** Mikkel 2026-11-07 01:42
+
+**Status:** in-progress
 
 - [ ] `sheaf token add <name> --client <client> [--write]` makes an agent's token; `--client` and `--as` together are refused; the client is cleaned by the display-name rule, at most 40 characters, without parentheses
 - [ ] The row stores `client` and no `display`; `add` prints the name it will sign with; `list` shows the client and that name

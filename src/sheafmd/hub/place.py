@@ -22,6 +22,18 @@ sheafmd.hub.place — where the file of a sheaf of the list's root is (SPEC 9.11
     ignores(top, target)             whether a private home is one the root's repo ignores
     tell_ignored(hub, root, folders) a `private-ignored` row when the root's repo ignores a private home
 
+Rule A (SPEC 9.11), the invariant: the set of private real paths is the real paths of every CONFIGURED private root,
+recorded before any validation, whether the root registers or is refused, and never shrunk at runtime
+(`hub._private_paths`). Every door verb that resolves an address passes one test, `in_private`, which refuses a
+caller that is not the root's member when the real path of what it names is inside that set; `private_member`
+adds only the sheaves a private root holds under the list's name, and a deleted file's owner (`_private_seen`).
+Nothing else decides privacy: not the registry, not a name, not the front matter.
+For a caller who may not see a private root, every door answer about a name inside it is identical to the answer for
+the same name held in a shared root, or for a free name after deletion.
+Privacy is judged on the object opened, through the same descriptors that read or write it; no path is resolved twice
+(`sheafmd.beneath`, `opened_private`); a root's own folder too (`judge_for`: create, move, quarantine, tidying). No registered root encloses, equals or lies inside a private root, checked at
+start and on every registration, so a link that stays beneath a shared root never reaches a private one.
+
 In proxy mode, in the list's root (9.10) only, a sheaf at project depth has one name, its address
 `<client>/<project>/<name>.md`, and one home for its file: open to the project, that path; its owner's alone,
 `<client>/<project>/private/<short>/<name>.md`, where `short` is its owner's (the member its `owner` names when that
@@ -44,6 +56,7 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 
+from ..beneath import Private
 from ..source import _folder_of, file_lock
 from . import commits as commits_mod
 from . import visibility
@@ -324,11 +337,36 @@ def _owners(hub, root, address: str, fm: dict) -> list:
     return visibility.owner_of(fm, members, hub.assignees(address, fm))
 
 
-def make_folders(top, rel: str):
+def make_folders(top, rel: str, judge=None):
     """(fd of the folder of `rel` under `top`, the file's name), making each missing folder on the way as the
     umask gives a new folder. Each folder is opened from the one above it without following a link, as
-    `create_file` walks, so a link on the way is an OSError wherever it points."""
-    return _folder_of(top, rel, make=True)
+    `create_file` walks, so a link on the way is an OSError wherever it points. `judge`: see `judge_for`."""
+    return _folder_of(top, rel, make=True, judge=judge)
+
+
+def judge_for(hub, root):
+    """The `judge` that `source._folder_of` calls on the folders it opens beneath a root, or None for a hub with no
+    private root and for a root that is itself a private root. It refuses (`beneath.Private`) when the root's folder, as
+    opened, or one of its parents or of the folders under it, is a private root's, by identity: the folder of a shared
+    root swapped for a link to a private one between the checks by path and the open is judged on the descriptor, so
+    nothing is made, read or moved there (rule 2 on the root's folder, SPEC 9.11)."""
+    if not getattr(hub, "_private_ids", None) or str(root.path) in (getattr(hub, "_private_paths", None) or {}):
+        return None
+
+    def judge(idents):
+        if opened_private(hub, _Idents(idents)) is not None:
+            raise Private(root.name)
+    return judge
+
+
+class _Idents:
+    """What `opened_private` asks of an opened object: the identities it lies in."""
+
+    def __init__(self, idents):
+        self._idents = list(idents)
+
+    def idents(self):
+        return self._idents
 
 
 def _refused(hub, address: str, why: str, quarantined_: bool = False, tried: bool = False):
@@ -436,6 +474,99 @@ def where_is(hub, address: str):
     return found if n == 1 else None
 
 
+def identity(path: str, stat=os.stat):
+    """(st_dev, st_ino) of `path`, None when it cannot be stat'ed (a folder that is not there)."""
+    try:
+        st = stat(path)
+    except OSError:
+        return None
+    return (st.st_dev, st.st_ino)
+
+
+def in_private(hub, real: str, stat=os.stat):
+    """The id of the member whose private root holds the real path `real`, else None. The one test of rule A by
+    place: the real paths of every configured private root (`hub._private_paths`, recorded before any validation,
+    registered or refused, never shrunk), and a path equal to or below one. Nothing about a name decides it.
+    By path text, and by file identity as well: the nearest existing ancestor chain of `real` is tested by
+    (st_dev, st_ino) against the identities of the private roots (`hub._private_ids`, recorded with the paths), so a
+    spelling that differs in case, on a filesystem that folds it, is the same folder. `stat` is a seam for tests."""
+    for private, member in (getattr(hub, "_private_paths", None) or {}).items():
+        top = os.path.realpath(private)
+        if real == top or real.startswith(top.rstrip("/") + "/"):
+            return member
+    ids = getattr(hub, "_private_ids", None)
+    if ids:
+        here = real
+        while True:
+            if (found := ids.get(identity(here, stat))) is not None:
+                return found
+            parent = os.path.dirname(here)
+            if parent == here:
+                return None
+            here = parent
+    return None
+
+
+UNJUDGED = object()         # `private_member`: the file was not opened by the caller, so its real path is looked at
+
+
+def opened_private(hub, opened):
+    """The id of the member whose private root the object `opened` (a `beneath.Opened`) is in, else None. Judged on the
+    descriptors of the walk that opened it: the identity (st_dev, st_ino) of the root's folder and its parents, of every
+    folder the walk went into and of the file, against `hub._private_ids`. No path is resolved for it."""
+    ids = getattr(hub, "_private_ids", None)
+    if ids is None:
+        return None
+    for folder, member in (getattr(hub, "_private_paths", None) or {}).items():
+        try:
+            st = os.stat(folder)                        # a private root's folder made new at its path (a fresh clone, a
+        except OSError:                                 # restore) is private all the same: the set only grows
+            continue
+        ids.setdefault((st.st_dev, st.st_ino), member)
+    return next((ids[i] for i in opened.idents() if i in ids), None)
+
+
+def private_member(hub, address: str, fm: dict | None = None, opened=UNJUDGED):
+    """Rule A: the id of the one member the sheaf named `address` is private to, or None when the hub holds it for
+    the project as usual. A sheaf held by a private root is that root's member's whatever its text, its assignees or
+    `projects.toml` say, and when the name is held by a private root and another file too, still theirs. With `fm`, the
+    front matter of the file: a sheaf its owner's alone that names one owner who has a private root, held by the list's
+    root only, is nobody's (""): a private root is where its owner's sheaves live, so a copy pushed into the shared
+    repo is shown to no one. A file that went away is still the member's it was (`hub._private_seen`), so its going
+    is told to no one else. `opened`: what `opened_private` gave for the file the caller opened (a member id or None):
+    then the file's place is that, and no path is resolved again."""
+    paths = getattr(hub, "_private_paths", None)
+    if not paths:
+        return None
+    at = Address.parse(address)
+    if opened is not UNJUDGED:
+        if opened is not None:
+            hub._private_seen[address] = opened         # its going away is told to no one else, whoever read it first
+            return opened
+    elif (named := hub.roots.get(at.root)) is not None:
+        # Judged by where the file really is, not by the root the address names: the private root's own name, a root
+        # around it and a link into it all reach the same file. The real paths of the private roots, not the roots
+        # the registry holds now: one that was forgotten while a root around it stays is private still.
+        if (member := in_private(hub, os.path.realpath(named.path / at.rel))) is not None:
+            return member
+    if not getattr(hub, "private_roots", None):
+        return hub._private_seen.get(address)
+    got = _where(hub, address)
+    if got is None:
+        return None
+    root, _, name = got
+    found = _found(hub, root, name)
+    if not found:
+        return hub._private_seen.get(address)
+    owner = next((hub.private_roots[r.id] for r, _ in found if r.id in hub.private_roots), None)
+    if owner is None and fm is not None and visibility.effective(fm) != "project":
+        owners = _owners(hub, root, address, fm)
+        owner = "" if len(owners) == 1 and owners[0].id in _private_roots(hub) else None
+    if owner is not None or fm is not None:     # a look without the front matter never forgets a sheaf that was nobody's
+        hub._private_seen[address] = owner
+    return owner
+
+
 def file_at(hub, address: str, bound: str = ""):
     """(the root, the path in it) of the file to read or write for the sheaf named `address`, or None for a name the
     hub does not place. The one file that holds the name, in the list's root or a private root; where a private root
@@ -477,7 +608,7 @@ def ahead(hub, address: str, old: str, new: str) -> str | None:
         strict = home_in(hub, root, name, old) == (root, rel)
         gone = _move(hub, root, top, rel, name, address, text=new, strict=strict)
         if gone is not None:
-            _tidy(top, gone)
+            _tidy(top, gone, judge_for(hub, root))
     return gone
 
 
@@ -508,7 +639,7 @@ def place(hub, address: str, member=None, by: str | None = None, commit: bool = 
                 if _one(hub, root, name) == ((root, rel), 1):
                     gone = _move(hub, root, top, rel, name, address)
                     if gone is not None:
-                        _tidy(top, gone)
+                        _tidy(top, gone, judge_for(hub, root))
         if gone is None:
             return None
         # Rendered and committed under the name's lock (9.11), after the folders' is let go: no other writer of
@@ -530,18 +661,20 @@ def _move(hub, root, top: Path, rel: str, name: str, address: str, text: str | N
     quarantine instead when it is at the project's path (#61) or in the private folder of a member who no longer owns
     it (#66): either way a Library glob would file it for someone it is not for. One in a folder of an owner it
     still has waits there."""
+    judge = judge_for(hub, root)
+
     def refused(why: str, target: str | None = None):
         if strict:
             raise Refused(why)
         gone = None
         if target != name and not quarantined(rel) and (rel == name or not _an_owners(hub, root, address, rel, text)):
-            gone = _to_quarantine(top, sfd, sname, rel, name)
+            gone = _to_quarantine(top, sfd, sname, rel, name, judge)
             _refused(hub, address, why, gone is not None, tried=True)
         else:
             _refused(hub, address, why, quarantined(rel))
         return gone
     try:
-        sfd, sname = _folder_of(top, rel)
+        sfd, sname = _folder_of(top, rel, judge=judge)
     except OSError as e:
         return refused(f"its folder could not be opened ({e.strerror})") if strict else None
     try:
@@ -566,7 +699,7 @@ def _move(hub, root, top: Path, rel: str, name: str, address: str, text: str | N
         if ignores(top, target):
             return refused(IGNORED, target)
         try:
-            dfd, dname = make_folders(top, target)
+            dfd, dname = make_folders(top, target, judge)
         except OSError as e:
             return refused(f"its folder could not be made ({e.strerror})", target)
         try:
@@ -591,16 +724,16 @@ def _an_owners(hub, root, address: str, rel: str, text: str) -> bool:
     return rel.split("/")[3] in {m.short for m in visibility.owner_of(fm, members, hub.assignees(address, fm))}
 
 
-def _to_quarantine(top: Path, sfd: int, sname: str, rel: str, name: str) -> str | None:
+def _to_quarantine(top: Path, sfd: int, sname: str, rel: str, name: str, judge=None) -> str | None:
     """Link the file `sname` in the folder `sfd`, the sheaf named `name` at `rel` (the project's path, or an owner's
     private folder that is not its home), into its quarantine, never over anything, then unlink it: `rel`, the path
     it left, or None when it stays (a quarantine the repo ignores, taken, or a folder that cannot be made). The
-    caller holds the name's lock, the file's and the folders'."""
+    caller holds the name's lock, the file's and the folders'. `judge`: see `judge_for`."""
     target = quarantine(name)
     if ignores(top, target):
         return None
     try:
-        dfd, dname = make_folders(top, target)
+        dfd, dname = make_folders(top, target, judge)
     except OSError:
         return None
     try:
@@ -613,17 +746,24 @@ def _to_quarantine(top: Path, sfd: int, sname: str, rel: str, name: str) -> str 
     return rel
 
 
-def _tidy(top: Path, rel: str):
+def _tidy(top: Path, rel: str, judge=None):
     """Take away the private folders a move out left empty, `private/<short>` and then `private`: git keeps no
-    folder, and an empty one says nothing. A folder that holds anything, or is a link, stays."""
+    folder, and an empty one says nothing. A folder that holds anything, or is a link, stays. Each is removed from
+    the descriptor of the folder above it, opened beneath the root and judged (`judge_for`), not by its path."""
     parts = rel.split("/")
     if len(parts) != 5 or parts[2] != PRIVATE:
         return
-    for folder in (top.joinpath(*parts[:4]), top.joinpath(*parts[:3])):
+    for folder in ("/".join(parts[:4]), "/".join(parts[:3])):
         try:
-            os.rmdir(folder)
+            fd, name = _folder_of(top, folder, judge=judge)
         except OSError:
             return
+        try:
+            os.rmdir(name, dir_fd=fd)
+        except OSError:
+            return
+        finally:
+            os.close(fd)
 
 
 def taken(hub, root, name: str) -> bool:

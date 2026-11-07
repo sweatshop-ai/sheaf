@@ -420,6 +420,13 @@ def test_a_told_thread_waits_for_an_action_reply_and_nothing_else(made):
     assert doc.refresh()["telling"] == [] and doc.waiting() == []
 
 
+def test_an_answer_does_not_end_a_tell_wait_unless_its_role_is_action(made):
+    doc, md, rendered, events, _ = made(WITH_C1)
+    doc.await_reply("c1")
+    rds.update_file(md, lambda t: rdc.reply(t, "c1", "Just an answer.", "Claude", "2026-09-30T10:05", role="answer"))
+    assert doc.refresh()["telling"] == ["c1"] and doc.waiting() == ["c1"]
+
+
 def test_waiting_only_follows_an_add_or_a_reply(made):
     doc, *_ = made(WITH_C1)
     doc.comment("status", {"id": "c1", "status": "resolved"}, "", await_action=True)

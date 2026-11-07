@@ -139,8 +139,16 @@ def legacy_dir():
     return Path(tempfile.gettempdir()) / "render-doc" / "locks"
 
 
+def make_legacy_dir():
+    """The folder the old servers made, as ours alone (the hub takes none that others can write)."""
+    legacy_dir().mkdir(parents=True, exist_ok=True)
+    for d in (legacy_dir(), legacy_dir().parent):
+        os.chmod(d, 0o755)
+
+
 def test_an_update_also_waits_for_a_legacy_render_doc_lock_while_that_folder_exists(tmp_path):
     key = rds.lock_key(tmp_path / "d.md")
+    make_legacy_dir()
     assert blocked_until_released(tmp_path, legacy_dir() / f"{key}.lock")
 
 
@@ -152,7 +160,7 @@ def test_without_the_legacy_folder_nothing_is_created_there(tmp_path):
 
 def test_the_legacy_lock_is_taken_after_the_sheaf_lock_and_both_are_released(tmp_path):
     p = make(tmp_path)
-    legacy_dir().mkdir(parents=True)
+    make_legacy_dir()
     with rds.file_lock(p) as lk:
         assert [x.name for x in lk.paths] == [rds.lock_key(p) + ".lock"] * 2
         assert lk.paths[0].parent == paths.runtime_dir() / "locks" and lk.paths[1].parent == legacy_dir()

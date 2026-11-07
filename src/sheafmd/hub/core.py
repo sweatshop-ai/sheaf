@@ -71,6 +71,7 @@ class Entry:
     images_scope: tuple | None = None              # the image rule its last build read: `Hub._image_scope` (9.9)
 
     where: Callable[[], tuple] | None = None     # (the root's folder, the path in it) of its file now: what is opened beneath
+    last_where: tuple | None = None              # what `where` last found: kept for a root forgotten under a write
     judge: Callable | None = None                # raises for an opened file that is not the one this document is of
 
     @property
@@ -351,6 +352,17 @@ class Hub:
                 return got[0].path / got[1]
         return root.path / place.file_rel(Path(os.path.realpath(root.path)), at.rel)
 
+    def _where_of(self, e, name: str) -> tuple:
+        """`where` for an entry. A root forgotten while a write or a rebuild of the entry is under way leaves it the folder
+        it last found: the work finishes there, opened beneath that folder and judged as ever, and never in the folder
+        that takes the name next."""
+        try:
+            e.last_where = self.where(e.address, bound=e.file_root if place.applies(self, name) else "")
+        except roots_mod.NotFound:
+            if self.roots.get(roots_mod.Address.parse(e.address).root) is not None or e.last_where is None:
+                raise
+        return e.last_where
+
     def where(self, address: str, bound: str = "") -> tuple:
         """(the folder of the root, the path in it) of the file the document at `address` names, as `file` finds it, to be
         opened beneath that folder: no path is resolved to a file here. `bound` as in `file`."""
@@ -447,7 +459,7 @@ class Hub:
             e = Entry(address, file, root.id)
             at = place.file_at(self, address) if self.private_roots and place.applies(self, name) else None
             e.file_root = at[0].id if at else root.id
-            e.where = lambda: self.where(address, bound=e.file_root if place.applies(self, name) else "")
+            e.where = lambda: self._where_of(e, name)
             e.judge = lambda op: self.check_opened(op, self.private_roots.get(e.file_root))
             e.live = LiveDocument(file, render=lambda text: self._rendered(e, text), entry=e,
                                   publish=e.bus.publish, by=self.person, clock=self.clock,

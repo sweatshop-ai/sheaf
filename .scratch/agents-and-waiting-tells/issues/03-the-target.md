@@ -4,7 +4,9 @@
 
 **Blocked by:** 01 (Retire Ask end to end), 02 (Agent tokens signed `Client (Member)`)
 
-**Status:** ready-for-agent
+**Claimed by:** Mikkel 2026-11-07 03:32
+
+**Status:** in-progress
 
 - [ ] A door write (`reply`, `resolve`, `create`, `update`) with an agent's token makes that agent the target; `documents`, `threads` and `read` change nothing
 - [ ] A render from a session still makes the session the target; the session is kept beside an agent target so the person can take it back

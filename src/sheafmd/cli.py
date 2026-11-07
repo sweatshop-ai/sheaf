@@ -976,7 +976,7 @@ def cmd_token(argv: list[str]) -> int:
                  for r in rows]
         wide = [max((len(w) for w in col), default=0) for col in ([r.name_text for r in rows], shown)]
         for r, show in zip(rows, shown):
-            _out(f"  {r.name_text:<{wide[0]}}  {show:<{wide[1]}}  created {r.created_text}"
+            _out(f"  {r.name_text:<{wide[0]}}  {show:<{wide[1]}}  id {r.id or '-':<16}  created {r.created_text}"
                  f"  last used {r.last_used_text}"
                  + ("  may write" if r.write else "")
                  + ("  refused by verify: its name or display is not one `token add` writes" if r.invalid else ""))

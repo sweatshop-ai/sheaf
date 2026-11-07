@@ -10,6 +10,7 @@ import hmac
 import json
 import os
 import re
+import secrets
 import shutil
 import stat
 import threading
@@ -310,11 +311,13 @@ class NewToken(str):
 
     display: str
     client: str | None
+    id: str
 
-    def __new__(cls, token: str, display: str = "", client: str | None = None):
+    def __new__(cls, token: str, display: str = "", client: str | None = None, id: str = ""):
         self = super().__new__(cls, token)
         self.display = display
         self.client = client
+        self.id = id
         return self
 
 
@@ -341,6 +344,7 @@ class TokenRow:
     last_used: str | None = None
     invalid: bool = False           # set by `of` only: `verify` refuses this row for its name, display or client
     client: str | None = None       # an agent's token (SPEC 9.7): the AI client it speaks for, and no display
+    id: str | None = None           # random, written by `add`: tells a revoked token from a new one of its name; none on older rows
 
     @classmethod
     def of(cls, entry) -> "TokenRow | None":
@@ -352,7 +356,8 @@ class TokenRow:
         client = entry.get("client")
         return cls(entry["name"], entry.get("display"), entry.get("write") is True,
                    entry.get("created"), entry.get("last_used"), not _row_addable(entry),
-                   client if isinstance(client, str) else None)
+                   client if isinstance(client, str) else None,
+                   entry["id"] if isinstance(entry.get("id"), str) else None)
 
     def signed(self, person: str, cfg=None) -> str:
         """The name this token's replies are signed with. An agent's is built, never typed: `<client> (<member>)`,
@@ -444,10 +449,11 @@ class Tokens:
                 raise TokenError(f"a token named {name} already exists")
             token = new_token()
             who = {"client": client} if client is not None else {"display": shown}
-            rows.append({"name": name, **who, "sha256": token_hash(token),
+            token_id = secrets.token_hex(8)         # not a secret: it is never compared as one
+            rows.append({"name": name, "id": token_id, **who, "sha256": token_hash(token),
                          "created": self._stamp(), "last_used": None, "write": write is True})
             self._write(rows)
-        return NewToken(token, shown if client is None else "", client)
+        return NewToken(token, shown if client is None else "", client, token_id)
 
     def list(self) -> list[TokenRow]:
         """Every token: its name, display name, created, last used and whether it may write. Never
@@ -485,7 +491,8 @@ class Tokens:
         row = found[0]
         if self._stale(row.get("last_used")) and not self._touch(row["sha256"]):
             return None
-        return TokenRow(row["name"], row.get("display"), row.get("write") is True, client=row.get("client"))
+        return TokenRow(row["name"], row.get("display"), row.get("write") is True, client=row.get("client"),
+                        id=row["id"] if isinstance(row.get("id"), str) else None)
 
     def _stale(self, last_used) -> bool:
         try:

@@ -175,3 +175,37 @@ def test_add_refuses_a_client_whose_built_name_is_another_tokens_display(sheaf):
 def test_add_refuses_a_second_token_that_would_sign_the_same_name(sheaf):
     assert sheaf("token", "add", "one", "--client", "ChatGPT").code == 0
     assert sheaf("token", "add", "two", "--client", "chatgpt").code != 0
+
+
+# ── a token's id: what tells a revoked token from a new one of the same name ─
+
+def test_every_new_token_gets_a_random_id_that_the_door_sees_on_the_resolved_token():
+    token = Tokens().add("bea-chatgpt", client="ChatGPT")
+    [row] = stored()
+    assert isinstance(row["id"], str) and len(row["id"]) == 16 and int(row["id"], 16) >= 0
+    assert Tokens().verify(token).id == row["id"] and token.id == row["id"]
+    assert token not in json.dumps(row)                        # an id is not the secret
+
+
+def test_revoking_a_token_and_adding_one_of_the_same_name_gives_a_different_id():
+    first = Tokens().add("bea-chatgpt", client="ChatGPT")
+    Tokens().revoke("bea-chatgpt")
+    second = Tokens().add("bea-chatgpt", client="ChatGPT")
+    assert first.id != second.id and Tokens().verify(second).id == second.id
+    assert Tokens().verify(first) is None
+
+
+def test_an_old_row_has_no_id_and_is_not_given_one():
+    token = Tokens().add("codex", "Codex")
+    rows = stored()
+    del rows[0]["id"]
+    Tokens.path().write_text(json.dumps(rows), encoding="utf-8")
+    assert Tokens().verify(token).id is None
+    assert "id" not in stored()[0]                             # verify, even when it stamps last_used, backfills nothing
+
+
+def test_list_shows_the_id_and_never_a_token(sheaf):
+    out = sheaf("token", "add", "bea-chatgpt", "--client", "ChatGPT").out
+    token = [w for w in out.split() if w.startswith("sheaf_mcp_")][0]
+    listed = sheaf("token", "list").out
+    assert stored()[0]["id"] in listed and token not in listed

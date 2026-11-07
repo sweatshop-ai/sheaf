@@ -7,6 +7,7 @@ the server (server.py) drives. A test builds one and calls `tick()` itself.
 A document is served from an Entry: its LiveDocument, its event bus, and the page's HTML in
 memory (no file in /tmp, SPEC 8.9).
 """
+import errno
 import json
 import os
 import re
@@ -479,6 +480,7 @@ class Hub:
                            by=s["by"], for_=s["for"], theme=s["theme"], credit=s["credit"], log=log,
                            root=root.path if root else None, extra_meta=meta,
                            script_nonce=self.placeholder, image_ok=self._image_rule(root, e.path, e.address, scope),
+                           image_read=self._image_read(root) if self.proxy is not None else None,
                            warn=e.warnings.append if e.first and count else None, mount=mount)
         if count:
             e.log, e.first = log, False
@@ -489,10 +491,28 @@ class Hub:
         """The share copy of the document as the file is now, with the settings it is shown with."""
         s = self._settings(e.address)
         root = self.roots.get(roots_mod.Address.parse(e.address).root)
-        return render_file(e.path, share=True, title=s["title"], toc=s["toc"] or "auto",
+        return render_file(e.path, share=True, src=e.read(), title=s["title"], toc=s["toc"] or "auto",
                            max_image_width=s["max_image_width"] or 1400, by=s["by"],
                            for_=s["for"], theme=s["theme"], credit=s["credit"], log=[],
-                           root=root.path if root else None, image_ok=self._image_rule(root, e.path, e.address))
+                           root=root.path if root else None, image_ok=self._image_rule(root, e.path, e.address),
+                           image_read=self._image_read(root) if self.proxy is not None else None)
+
+    def _image_read(self, root):
+        """The bytes of a local image, from one open beneath `root` (`sheafmd.beneath`), refused when what was opened is
+        in a private root (9.11): the rule above judges the image's real path, this judges what is read."""
+        if root is None:                    # the image rule leaves every image out of a document in no root
+            return None
+        top = os.path.realpath(root.path)
+
+        def read(path) -> bytes:
+            rel = os.path.relpath(path, top)
+            if rel == ".." or rel.startswith("../"):
+                raise PermissionError(errno.EACCES, "outside the root", str(path))
+            with beneath.open_beneath(top, rel) as op:
+                if place.opened_private(self, op) is not None:
+                    raise PermissionError(errno.EACCES, "in a private root", str(path))
+                return op.bytes()
+        return read
 
     def _image_rule(self, root, doc, address: str, scope: tuple | None = None):
         """In proxy mode, a local image is embedded only when the root 8.2 finds for its file is the

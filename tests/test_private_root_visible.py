@@ -3,6 +3,7 @@ assignees, `projects.toml` or the front matter say, another member and a token b
 document, and a file that names a member as its owner in the list's repo is nobody's. Each refusal has the owner's own
 call as its positive control, on the same route."""
 import os
+from pathlib import Path
 import time
 
 import pytest
@@ -705,3 +706,74 @@ def test_a_document_the_hub_holds_never_opens_a_file_that_the_descriptors_say_is
     with pytest.raises(OSError):
         e.live.rewrite(lambda t: t + "\nmore\n")
     assert (top / "one" / NAME).read_text(encoding="utf-8") == before
+
+
+def test_a_file_with_two_names_is_not_opened_in_either_mode(tmp_path, mode):
+    from sheafmd import beneath
+    top = tmp_path / "top"
+    top.mkdir()
+    (top / "one.md").write_text("hi", encoding="utf-8")
+    with beneath.open_beneath(top, "one.md") as op:
+        assert op.text() == "hi"
+    os.link(top / "one.md", top / "two.md")
+    for rel in ("one.md", "two.md"):
+        with pytest.raises(beneath.Linked):
+            beneath.open_beneath(top, rel)
+    os.unlink(top / "two.md")
+    with beneath.open_beneath(top, "one.md") as op:
+        assert op.text() == "hi"
+
+
+def test_a_private_file_hard_linked_into_a_shared_root_is_read_by_no_door(world, mode):
+    w = world
+    w.put("# Plain\n\nSecret words, visible to the project.\n")      # nothing in its text keeps it from a token
+    root, top, _ = _shared_root(w)
+    try:
+        os.link(w.two.private_repo / NAME, top / "twin.md")
+    except OSError:
+        pytest.skip("this folder cannot hard-link across to the private repo")
+    for tool, args in (("read", {}), ("threads", {}), ("reply", {"id": "c1", "text": "Done."})):
+        is_error, got = call(w.door, tool, token=w.tokens["loose"], doc=f"{root.name}/twin.md", **args)
+        assert is_error and "Secret" not in str(got), tool
+
+
+def test_a_local_image_is_read_beneath_its_root_and_never_from_a_private_one(world, mode):
+    w = world
+    root, top, link = _shared_root(w)
+    (top / "one" / "pic.png").write_bytes(b"PNG shared")
+    read = w.hub._image_read(root)
+    assert read(top.resolve() / "one" / "pic.png") == b"PNG shared"
+    (w.two.private_repo / "secret.png").write_bytes(b"PNG secret")
+    (top / "out.png").symlink_to(w.two.private_repo / "secret.png")
+    for path in (top.resolve() / "out.png", w.two.private_repo / "secret.png", top.resolve() / ".." / "x.png"):
+        with pytest.raises(OSError):
+            read(path)
+    st = os.stat(top)                               # as if the root were a private root's (a mount)
+    w.hub._private_ids[(st.st_dev, st.st_ino)] = "member-a-id"
+    with pytest.raises(PermissionError):
+        read(top.resolve() / "one" / "pic.png")
+
+
+def test_the_share_copy_is_rendered_from_the_text_the_descriptor_gave(world, mode, monkeypatch):
+    from sheafmd.hub import core
+    w = world
+    root, top, _ = _shared_root(w)
+    e = w.hub.entry(f"{root.name}/one/{NAME}")
+    seen = {}
+    monkeypatch.setattr(core, "render_file", lambda path, **kw: seen.update(kw) or "<html></html>")
+    w.hub.share_copy(e)
+    assert seen["src"] == e.read()
+
+
+def test_the_blame_of_a_list_row_is_not_asked_of_a_private_file(world, monkeypatch):
+    from types import SimpleNamespace
+
+    from sheafmd.hub import the_list
+    blamed = []
+    monkeypatch.setattr(the_list, "pressers", lambda *a: blamed.append(a) or {"x": 1})
+    s = SimpleNamespace(pressed=[(0, 0, 3, 0)], hash=the_list.md_hash("text"), rel="a.md")
+    me = SimpleNamespace(root=lambda: SimpleNamespace(git=True), hub=SimpleNamespace(blamed={}),
+                         _file=lambda root, rel: Path("/x/a.md"))
+    for private, want in ((None, {"x": 1}), ("member-a-id", {})):
+        me._read = lambda root, rel, p=private: ("text", (), p)
+        assert the_list.TheList._pressers(me, me.root(), s) == want

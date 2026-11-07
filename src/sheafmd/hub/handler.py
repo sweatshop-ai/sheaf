@@ -436,11 +436,11 @@ class Handler:
     @staticmethod
     def _for_members(found) -> bool:
         """A route a member may use: one 8.5 marks `cookie` or `cookie or key`, but not Tell,
-        which runs the hub account's own agent session; and the two open files the front mounts a page from (#116)."""
+        which a member uses only for an agent of theirs (_tell); and the two open files the front mounts a page from (#116)."""
         name, who, _ = found
         if name in ("mount-js", "mount-css"):
             return True
-        return who in (COOKIE, EITHER, MEMBER, MINT) and name not in ("tell", "jump")
+        return who in (COOKIE, EITHER, MEMBER, MINT) and name != "jump"
 
     def _route_proxy(self, req: Req, raw: bytes) -> Response:
         cfg = self.hub.proxy
@@ -1632,6 +1632,11 @@ class Handler:
     def _tell(self, req: Req) -> Response:
         e, cid = self._thread_job(req)
         try:
+            if req.member is not None:      # the hub account's session is off for them: only an agent of theirs (9.9)
+                if targets.live(self.hub, targets.stored(self.hub, e.address, req.member), req.member) is None:
+                    raise Refuse(400, proxy.PROXY_LINE)
+                self.hub.tell.start_member_tell(e.address, cid, req.member, held=self._page_hash(req))
+                return _ok()
             self.hub.tell.start_tell(e.address, cid, held=self._page_hash(req))
         except JobRefused as r:
             raise Refuse(r.status, r.message) from None

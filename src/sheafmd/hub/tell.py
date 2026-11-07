@@ -383,6 +383,14 @@ class Tell:
         if started is None:                  # a Tell of this thread began between the check and here
             raise JobRefused(409, self._already_telling(t, ad))
 
+    def start_member_tell(self, address: str, cid: str, member, held=None):
+        """A member's Tell by hand: the thread waits for the agent that is their target (SPEC 9.8, 9.9). The hub account's
+        session is never theirs to tell. Raises JobRefused."""
+        e = self._entry(address)
+        self._version(e, held)
+        self._thread(e, cid)
+        self.queue_agent(address, cid, member)
+
     def queue_agent(self, address: str, cid: str, member=None):
         """The Tell of thread `cid` waits for the agent that is the reader's target (SPEC 9.8). Raises JobRefused.
         The target is read inside the refusal's own look, so a target changed or revoked since is the one judged."""

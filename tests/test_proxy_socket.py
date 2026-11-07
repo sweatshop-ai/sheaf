@@ -15,9 +15,9 @@ NOBODY = pwd.getpwnam("nobody").pw_uid
 
 MEMBER_ROUTES = [("GET", URL), ("GET", "/work/"), ("GET", f"/_/live?doc={DOC}"), ("GET", f"/_/doc?doc={DOC}"),
                  ("GET", "/_/index.json"), ("POST", "/_/save"), ("POST", "/_/comment"), ("POST", "/_/seen"),
-                 ("POST", "/_/export"), ("POST", "/_/diag"), ("POST", "/_/pin"), ("POST", "/_/cancel")]
+                 ("POST", "/_/export"), ("POST", "/_/diag"), ("POST", "/_/pin"), ("POST", "/_/cancel"), ("POST", "/_/tell")]
 NOT_HERE = [("GET", "/_/health"), ("GET", "/_/open?key=x&next=/"), ("GET", "/_/open?nonce=ab&next=/"),
-            ("POST", "/_/mcp"), ("GET", "/_/mcp"), ("POST", "/_/tell"),
+            ("POST", "/_/mcp"), ("GET", "/_/mcp"),
             ("POST", "/_/jump"), ("GET", "/_/jobs"), ("POST", "/_/render"), ("POST", "/_/forget"), ("POST", "/_/stop"),
             ("POST", "/_/rotate"), ("POST", "/_/signin"), ("POST", "/_/restarting"), ("DELETE", "/_/restarting"),
             ("GET", "/_/nothing")]

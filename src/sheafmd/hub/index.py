@@ -213,17 +213,21 @@ class Index:
         self._sending = threading.Lock()
 
     # ── one file ─────────────────────────────────────────────────────────────
-    def summary(self, address: str, path: Path, st: os.stat_result, member=None) -> Summary:
+    def summary(self, address: str, path: Path, st: os.stat_result, member=None, op=None,
+                private_ok: bool = False) -> Summary | None:
         """The comments of a file, parsed again only when its `(mtime_ns, size)` moved. The file is opened beneath its root
-        and what is counted is that descriptor's: a member is told nothing of a file of a private root that is not theirs
-        (`member` None is the hub's own account), however the path came to name it (9.11)."""
+        (`op`, when the caller of a row opened it: the one open) and what is counted is that descriptor's: a member is told
+        nothing of a file of a private root that is not theirs, and the hub's own account (`member` None) none of one unless
+        `private_ok`; None for what is not theirs, judged on that descriptor, however the path came to name it (9.11)."""
         key = str(path)
         try:
-            top, rel = self.hub.where(address)
-            with beneath.open_beneath(top, rel) as op:
+            with contextlib.ExitStack() as stack:
+                if op is None:
+                    top, rel = self.hub.where(address)
+                    op = stack.enter_context(beneath.open_beneath(top, rel))
                 private = place.opened_private(self.hub, op)
-                if member is not None and private not in (None, member.id):
-                    return EMPTY
+                if private is not None and (private != member.id if member else not private_ok):
+                    return None
                 fst = os.fstat(op.fd)
                 stamp = (fst.st_mtime_ns, fst.st_size)
                 with self._lock:
@@ -258,9 +262,12 @@ class Index:
         return waiting, running
 
     def _row(self, address: str, path: Path, st: os.stat_result, waiting: set, running: set,
-             member=None) -> dict:
+             member=None, op=None, private_ok: bool = False) -> dict | None:
+        """The row of a file, or None when what was opened to count its comments is a private root's and the row is
+        not for its member (`private_ok`: the board's rows of the private roots, which the streams are told from)."""
         hub = self.hub
-        s = self.summary(address, path, st, member)
+        if (s := self.summary(address, path, st, member, op, private_ok)) is None:
+            return None
         seen = hub.member_seen.get(member.id, address) if member else hub.seen.get(address)
         me = member.name if member else hub.person
         # SPEC 8.7: unread is an open thread whose last message is not the person's and that has
@@ -482,18 +489,21 @@ class Index:
         """Test seam: where a sweep runs."""
         threading.Thread(target=run, name="sheaf-sweep", daemon=True).start()
 
-    def _stat_of(self, root, address: str):
-        """`(path, stat)` of the document the hub would serve at `address`, or None when `resolve`
-        refuses it or the file cannot be statted. A sheaf's name in the list's root is its file's, wherever
-        that is (9.11)."""
-        try:
-            self.hub.roots.resolve(address)
-            path = self.hub.file(address)
-            top, rel = self.hub.where(address)
-            with beneath.open_beneath(top, rel) as op:      # the stat is of the descriptor opened beneath the root
-                return path, os.fstat(op.fd)
-        except (roots_mod.NotFound, OSError):
-            return None
+    @contextlib.contextmanager
+    def _opened(self, address: str):
+        """`(path, the file opened beneath its root)` of the document the hub would serve at `address`, or None when
+        `resolve` refuses it or the file cannot be opened. A sheaf's name in the list's root is its file's, wherever
+        that is (9.11). The one open of a row: what is judged private and what is counted are that descriptor's."""
+        with contextlib.ExitStack() as stack:
+            try:
+                self.hub.roots.resolve(address)
+                path = self.hub.file(address)
+                top, rel = self.hub.where(address)
+                op = stack.enter_context(beneath.open_beneath(top, rel))
+            except (roots_mod.NotFound, OSError):
+                yield None
+                return
+            yield path, op
 
     def touch(self, address: str):
         """Look at one document and tell the open indexes if it moved. Every write path calls
@@ -512,10 +522,15 @@ class Index:
         at = roots_mod.Address.parse(address)
         root, got = hub.roots.get(at.root), None
         with place.held(hub, address):              # every read of a sheaf's file holds its name's lock (9.11)
-            if root is not None and (found := self._stat_of(root, address)):
-                path, st = found
-                waiting, running = self._live_state(address)
-                got = (at.root, self._row(address, path, st, waiting, running))
+            with self._opened(address) as found:
+                if root is not None and found:
+                    path, op = found
+                    if place.opened_private(hub, op) is not None:
+                        with self._lock:
+                            self._private_docs.add(address)     # judged on the file opened: the event is the members' alone
+                    waiting, running = self._live_state(address)
+                    row = self._row(address, path, os.fstat(op.fd), waiting, running, op=op, private_ok=True)
+                    got = (at.root, row) if row else None
         self._queue_look({address: got}, since)
         self._publish()
 
@@ -595,7 +610,8 @@ class Index:
                     keys.add(str(path))
                     have.add(address)
                     if shown(root, path) and (member is None or hub.visible(member, address)):
-                        rows.append(self._row(address, path, f.stat, waiting, running, member))
+                        if row := self._row(address, path, f.stat, waiting, running, member):
+                            rows.append(row)
             # The files of a member's private root are listed to that member alone, under the list root's names (rule D).
             for private in place.private_listed(hub, member, board) if placed else ():
                 if private.closed() is not None or private.missing():
@@ -611,20 +627,21 @@ class Index:
                         have.add(address)
                         privately.add(address)
                         if shown(private, path) and (member is None or hub.visible(member, address)):
-                            rows.append(self._row(address, path, f.stat, waiting, running, member))
+                            if row := self._row(address, path, f.stat, waiting, running, member, private_ok=True):
+                                rows.append(row)
             for address in sorted(a for a in named - have if a.startswith(roots_mod.Address.prefix(root.name))):
-                with place.held(hub, address):          # every read of a sheaf's file holds its name's lock (9.11)
-                    if member is None and place.held_privately(hub, address):
-                        if board:
-                            privately.add(address)      # the board holds it for the members' streams; its end is theirs alone
-                        else:
-                            continue                    # a private file is no row of the hub's person, rendered or not (rule D)
-                    if not (found := self._stat_of(root, address)):
+                with place.held(hub, address), self._opened(address) as found:   # every read of a sheaf's file holds its name's lock (9.11)
+                    if not found:
                         continue
-                    path, st = found
+                    path, op = found
+                    if member is None and place.opened_private(hub, op) is not None:   # judged on the file opened, not on the name
+                        if not board:
+                            continue                    # a private file is no row of the hub's person, rendered or not (rule D)
+                        privately.add(address)          # the board holds it for the members' streams; its end is theirs alone
                     keys.add(str(path))
                     if shown(root, path) and (member is None or hub.visible(member, address)):
-                        rows.append(self._row(address, path, st, waiting, running, member))
+                        if row := self._row(address, path, os.fstat(op.fd), waiting, running, member, op, private_ok=board):
+                            rows.append(row)
             if rendered and not rows:
                 continue
             rows.sort(key=lambda r: (RANK[r["dot"]], -r["mtime"], r["doc"]))

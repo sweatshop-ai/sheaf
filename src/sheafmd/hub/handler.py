@@ -28,7 +28,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote
 
 from .. import comments as rdc
-from .. import diagnostics, pdf
+from .. import beneath, diagnostics, pdf
 from ..agents import prompts
 from ..agents.base import Target
 from ..config import ConfigError
@@ -1082,7 +1082,7 @@ class Handler:
         rel = Address.parse(e.address).rel
         project = "/".join(rel.split("/")[:2]) if rel.count("/") >= 2 else ""
         try:
-            fm = visibility.front_matter((e.path).read_text(encoding="utf-8"))
+            fm = visibility.front_matter(e.read())
         except (OSError, UnicodeDecodeError):
             fm = {}
         assistant = visibility.text(fm, "assistant")
@@ -1183,7 +1183,12 @@ class Handler:
             if not work.is_sheaf(self.hub, address):
                 raise Refuse(404, "no such document")
             try:
-                text = self.hub.roots.document(address).read_text(encoding="utf-8")
+                top, rel = self.hub.where(address)
+                with beneath.open_beneath(top, rel) as op:      # judged on what was opened (9.11, rule A)
+                    text = op.text()
+                    private = place.opened_private(self.hub, op)
+                if private is not None and private != getattr(req.member, "id", None):
+                    raise Refuse(404, "no such document")
             except (NotFound, OSError, UnicodeDecodeError):
                 raise Refuse(404, "no such document") from None
         return address, visibility.front_matter(text), work.state(self.hub, address, text, req.member)

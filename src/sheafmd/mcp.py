@@ -484,22 +484,26 @@ class Door:
             raise ToolError(f"{address} could not be written.") from None
 
     # ── the tools ────────────────────────────────────────────────────────────
-    def _open_in(self, path: Path) -> tuple:
-        """(open threads, front matter) of the file at `path`, both from one read."""
-        st = path.stat()
-        key = (st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
-        cached = self._open_threads.get(path)
-        if cached and cached[0] == key:
-            return cached[1:]
-        text = path.read_text(encoding="utf-8")
+    def _open_in(self, address: str) -> tuple:
+        """(open threads, front matter, mtime_ns, the member whose private root holds it) of the file the sheaf at `address`
+        names, from one open beneath its root: all of it is of that descriptor (9.11)."""
+        top, rel = self.hub.where(address)
+        with beneath.open_beneath(top, rel) as op:
+            st = os.fstat(op.fd)
+            private = place.opened_private(self.hub, op)
+            key = (st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
+            cached = self._open_threads.get(address)
+            if cached and cached[0] == key:
+                return (*cached[1:], st.st_mtime_ns, private)
+            text = op.text()
         threads = []
         if "comment id=" in text:
             for c in rdc.parse(text).comments:
                 if c.status == "open":
                     last = c.display(c.replies[-1]) if c.replies else c.by
                     threads.append((c.id, 1 + len(c.replies), last))
-        self._open_threads[path] = (key, threads, visibility.front_matter(text))
-        return self._open_threads[path][1:]
+        self._open_threads[address] = (key, threads, visibility.front_matter(text))
+        return (*self._open_threads[address][1:], st.st_mtime_ns, private)
 
     def _dot(self, address: str, unread: int, open_: int, asking: set) -> str:
         """The dot of 8.6, as the index page gives it: `asking` holds the documents an Ask runs on."""
@@ -549,15 +553,14 @@ class Door:
                             in_git[folder] = in_git_dir(path, root)
                         if in_git[folder]:
                             continue                               # nor one in a git directory
-                        threads, fm = self._open_in(path)
-                        mtime = path.stat().st_mtime_ns
+                        threads, fm, mtime, private = self._open_in(address)
                     except (NotFound, OSError, UnicodeDecodeError):
                         continue
                 # Whether the member owns a file asks git of its folder (8.2), and every file of a folder has the
                 # same answer: asked once a folder, not once a file.
                 if member is not None and folder not in owned:
                     owned[folder] = hub.member_owns(member, address)
-                if not self._sees(fm, address, caller, owned.get(folder)):
+                if not self._sees(fm, address, caller, owned.get(folder), private):
                     continue                                   # nor a sheaf the caller may not see (9.11)
                 if args.get("open_only", True) and not threads:
                     continue

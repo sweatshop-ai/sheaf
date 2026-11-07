@@ -20,15 +20,19 @@ from collections import deque
 
 FALLBACK = False                  # tests: take the walk of our own although the kernel has openat2
 MAX_HOPS = 40                     # links followed in one walk; more is a loop
+_RESOLVE_NO_SYMLINKS = 0x04
 _RESOLVE_BENEATH = 0x08
 _SYS_OPENAT2 = 437                # the same number on every architecture that has it
 
 
-class Escapes(OSError):
-    """The path leaves the root, or loops: read as a file that is not there."""
+class Escapes(FileNotFoundError):
+    """The path leaves the root, loops, or names a place that is the hub's own: read as a file that is not there."""
 
     def __init__(self, rel):
-        super().__init__(errno.ENOENT, "outside the root or a loop", rel)
+        super().__init__(errno.ENOENT, "outside the root, a loop, or not served", rel)
+
+
+OWN = (".sheaf", ".git")          # names no walk goes through, in a path or in the target of a link (SPEC 8.2)
 
 
 class _How(ctypes.Structure):
@@ -46,13 +50,13 @@ _LIBC = _libc()
 _HAS_OPENAT2 = None               # None until tried: True or False after the first call
 
 
-def _openat2(dirfd: int, rel: str, flags: int) -> int:
+def _openat2(dirfd: int, rel: str, flags: int, resolve: int = _RESOLVE_BENEATH) -> int:
     """The descriptor of `rel` below `dirfd`, the kernel refusing anything that leaves it (EXDEV). NotImplementedError
     where there is no such call."""
     global _HAS_OPENAT2
     if _HAS_OPENAT2 is False or _LIBC is None or not hasattr(_LIBC, "syscall"):
         raise NotImplementedError
-    how = _How(flags | os.O_CLOEXEC, 0, _RESOLVE_BENEATH)
+    how = _How(flags | os.O_CLOEXEC, 0, resolve)
     fd = _LIBC.syscall(_SYS_OPENAT2, dirfd, rel.encode(), ctypes.byref(how), ctypes.sizeof(how))
     if fd < 0:
         err = ctypes.get_errno()
@@ -102,6 +106,10 @@ class Opened:
                 f.flush()
                 os.fchmod(f.fileno(), mode)
                 os.fsync(f.fileno())
+                made = ident(f.fileno())
+            sib = os.stat(tmp, dir_fd=pfd, follow_symlinks=False)       # a folder writer may swap the sibling while it is written
+            if (sib.st_dev, sib.st_ino) != made:
+                raise OSError(errno.ESTALE, "the new text was swapped out of its place", tmp)
             st = os.stat(name, dir_fd=pfd, follow_symlinks=False)
             if (st.st_dev, st.st_ino) != self.file:
                 raise OSError(errno.ESTALE, "the file is no longer the one that was opened", name)
@@ -161,8 +169,8 @@ def _root_dirs(rootfd: int) -> list:
 def _walk(top, rel: str):
     """(file fd, file identity, identities of the folders on the way, folder fd, name): one name at a time, each
     opened from the descriptor above it with O_NOFOLLOW. A link is read with `readlinkat` and its target walked by us,
-    from the root or from the folder of the link, so that it never leaves the root: `..` past it is refused. Absolute
-    targets are walked from the root when they name a place below it, refused otherwise."""
+    from the root or from the folder of the link, so that it never leaves the root: `..` past it is refused, and so is
+    a name of `OWN` anywhere on the way. An absolute target is made relative to the root and walked from it."""
     top = os.fspath(top)
     base = os.path.realpath(top)
     rootfd = os.open(top, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
@@ -175,6 +183,8 @@ def _walk(top, rel: str):
             name = pending.popleft()
             if name in ("", "."):
                 continue
+            if name in OWN:
+                raise Escapes(rel)
             if name == "..":
                 if len(stack) == 1:
                     raise Escapes(rel)
@@ -197,13 +207,10 @@ def _walk(top, rel: str):
                     hops += 1
                     if hops > MAX_HOPS:
                         raise Escapes(rel)
-                    if target.startswith("/"):
-                        inside = os.path.normpath(target)
-                        if inside != base and not inside.startswith(base.rstrip("/") + "/"):
-                            raise Escapes(rel)
+                    if target.startswith("/"):          # from the root: a place outside it comes out as `..`, refused above
                         while len(stack) > 1:
                             os.close(stack.pop())
-                        target = os.path.relpath(inside, base)
+                        target = os.path.relpath(os.path.normpath(target), base)
                     pending.extendleft(reversed(target.split("/")))
                     break
                 if last:
@@ -230,13 +237,16 @@ def open_beneath(top, rel: str) -> Opened:
     if not FALLBACK:
         rootfd = os.open(top, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
         try:
+            if any(n in OWN for n in rel.split("/")):
+                raise Escapes(rel)
             try:
-                fd = _openat2(rootfd, rel, os.O_RDONLY)
+                # No link at all, first: the kernel alone then decides, and every name of the path is the one checked above.
+                fd = _openat2(rootfd, rel, os.O_RDONLY, _RESOLVE_BENEATH | _RESOLVE_NO_SYMLINKS)
             except NotImplementedError:
                 pass
             except OSError as e:
-                if e.errno != errno.EXDEV:          # a link the kernel will not follow (an absolute one, or one that
-                    raise                           # leaves the root): our walk decides, and refuses what leaves it
+                if e.errno not in (errno.ELOOP, errno.EXDEV):   # a link on the way: our walk follows it inside the root,
+                    raise                                       # names what it goes through, and refuses what leaves
             else:
                 st = os.fstat(fd)
                 if not stat.S_ISREG(st.st_mode):

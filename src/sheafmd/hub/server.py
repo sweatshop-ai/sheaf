@@ -465,7 +465,7 @@ def _run(started_by: str, signals: "sender.Signals") -> int:
     try:
         cfg = proxy.load()
         if cfg is not None:
-            proxy.check_names(cfg, config.user_name(), [t.display for t in state.Tokens().list()])
+            proxy.check_names(cfg, config.user_name(), [t.signed(config.user_name(), cfg) for t in state.Tokens().list()])
             proxy.check_folder(cfg)
     except proxy.ProxyError as e:
         return _proxy_refused(e)

@@ -16,6 +16,7 @@ import re
 import secrets
 import threading
 import time
+import unicodedata
 from urllib.parse import quote
 
 from ..paths import key_bytes   # noqa: F401  (the key's 32 bytes; every HMAC uses these)
@@ -108,6 +109,27 @@ def clean_display(name) -> str:
     text = name if isinstance(name, str) else ""
     text = "".join(c for c in text if c.isspace() or c.isprintable())
     return " ".join(text.split())[:DISPLAY_MAX].strip()
+
+
+CLIENT_MAX = 40
+
+
+def client_ok(client) -> bool:
+    """Whether `client` is one an agent's token may keep (SPEC 9.7): a string the display-name rule leaves as it is,
+    not empty, at most CLIENT_MAX, without a parenthesis (the built name ends in one, and 5.3 reads `(action)`)."""
+    return (isinstance(client, str) and 0 < len(client) <= CLIENT_MAX and clean_display(client) == client
+            and "(" not in client and ")" not in client)
+
+
+def agent_name(client: str, member: str) -> str:
+    """What an agent's replies are signed with: `ChatGPT (Hans)`, built here and never typed (SPEC D27)."""
+    return f"{client} ({member})"
+
+
+def name_key(name) -> str:
+    """Two names a reader would take for one share this key: cleaned, case, accents and width ignored."""
+    text = unicodedata.normalize("NFKD", clean_display(name))
+    return "".join(c for c in text if not unicodedata.combining(c)).casefold()
 
 
 def _digest(text: str) -> str:

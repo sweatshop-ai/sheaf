@@ -421,23 +421,21 @@ def test_the_hub_forgets_a_root_with_its_documents_entries(tmp_path):
     assert hub.forget_root("drop") is None
 
 
-def test_forgetting_a_root_cancels_the_asks_and_tells_running_on_its_documents(tmp_path):
+def test_forgetting_a_root_cancels_the_tells_running_on_its_documents(tmp_path):
     hub = Hub(port=27419, key=paths.ensure_key(), started_by="test")
     for f in (md(tmp_path / "drop" / "a.md"), md(tmp_path / "keep" / "a.md")):
         hub.render(f, {}, None)
-    ask, release_ask = hold_job(hub, "drop/a.md", "c1", "ask")
     tell, release_tell = hold_job(hub, "drop/a.md", "c2", "tell")
     stop, release_stop = hold_job(hub, "drop/a.md", "c2", "stop")
-    kept, release_kept = hold_job(hub, "keep/a.md", "c1", "ask")
+    kept, release_kept = hold_job(hub, "keep/a.md", "c1", "tell")
     try:
         assert hub.forget_root("drop").name == "drop"
-        assert (ask.cancelled, tell.cancelled) == (True, True)
+        assert tell.cancelled is True
         assert (stop.cancelled, kept.cancelled) == (False, False)    # the stop message goes on
         # The job's thread may take a moment to end; the name must not read as asked meanwhile.
-        assert hub.jobs_asking() == [["keep/a.md", "c1"]]
-        assert hub.jobs()["asking"] == [["keep/a.md", "c1"]]
+        assert hub.runner.active("tell") == [["keep/a.md", "c1"]]
     finally:
-        for r in (release_ask, release_tell, release_stop, release_kept):
+        for r in (release_tell, release_stop, release_kept):
             r.set()
         hub.runner.join(5)
 
@@ -566,14 +564,13 @@ def test_a_page_of_a_forgotten_root_cannot_act_on_a_comment_of_the_folder_that_t
     assert new.read_text(encoding="utf-8") != kept
 
 
-@pytest.mark.parametrize("write", ["reply", "save", "answer"])
+@pytest.mark.parametrize("write", ["reply", "save"])
 def test_a_write_under_way_while_its_root_is_forgotten_leaves_no_version_the_next_folder_knows(
         browser, tmp_path, monkeypatch, write):
     """A page's write still under way when its root is forgotten puts the text it wrote among the
     document's versions on disk after the forget dropped them, and the page takes that text's hash.
     Once another folder takes the name, the document there would know the hash, and take the old
-    page's comment by id, its Ask, its Tell or its save as made against a version it handed out. An
-    Ask's answer is written as the job writes it, and the page takes its hash from `ask-done`."""
+    page's comment by id, its Tell or its save as made against a version it handed out."""
     hub = browser.hub
     old = md(tmp_path / "x" / "notes" / "a.md", PLAN)
     comment(old, body="The old question.")
@@ -589,15 +586,12 @@ def test_a_write_under_way_while_its_root_is_forgotten_leaves_no_version_the_nex
     monkeypatch.setattr(live, "_after_write", forgotten_meanwhile)
     held = md_hash(old.read_text(encoding="utf-8"))
     block = next(i for i, b in enumerate(split_md_blocks(PLAN)) if b.content.startswith("Second paragraph"))
-    if write == "answer":
-        adopted = live.reply_as("c1", "Under way.", "Claude", "answer", "ask-done")["hash"]
-    else:
-        r = (browser.post("/_/comment", {"doc": "notes/a.md", "op": "reply", "id": "c1", "hash": held,
-                                         "body": "Under way."}) if write == "reply" else
-             browser.post("/_/save", {"doc": "notes/a.md", "hash": held,
-                                      "edits": [{"i": block, "html": "<p>Under way.</p>"}]}))
-        assert r.status == 200, r.json()
-        adopted = r.json()["hash"]
+    r = (browser.post("/_/comment", {"doc": "notes/a.md", "op": "reply", "id": "c1", "hash": held,
+                                     "body": "Under way."}) if write == "reply" else
+         browser.post("/_/save", {"doc": "notes/a.md", "hash": held,
+                                  "edits": [{"i": block, "html": "<p>Under way.</p>"}]}))
+    assert r.status == 200, r.json()
+    adopted = r.json()["hash"]
     forget[0].join(10)
     assert done["root"].name == "notes" and "notes/a.md" not in hub.entries
     assert adopted == md_hash(old.read_text(encoding="utf-8"))

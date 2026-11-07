@@ -233,10 +233,11 @@ def test_a_tell_on_a_fork_goes_to_its_relay_with_the_full_message(team, box, wor
     assert (row["tell"], row["thread"], row["by"]) == (t["id"], got.json()["id"], "thierry")
 
 
-def test_ask_on_a_fork_stays_refused_with_a_relay_connected(team, box, work):
+def test_ask_on_a_fork_is_refused_as_retired_with_a_relay_connected(team, box, work):
     token = forked(team)
     listen(team, token)
-    assert comment(team, work, "ask").status == 400
+    got = comment(team, work, "ask")
+    assert got.status == 400 and got.json()["error"] == "Ask was retired: use Tell, or reply."
 
 
 def test_a_tell_is_sent_again_on_reconnect_with_the_same_id_until_acked(team, box, work):

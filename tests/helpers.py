@@ -601,8 +601,8 @@ def writes_from_outside(path, live, n):
         live.refresh()
 
 
-def hold_job(hub, address, cid="c1", kind="ask"):
-    """A job of the hub's runner that runs until the returned event is set: an Ask or a Tell
+def hold_job(hub, address, cid="c1", kind="tell"):
+    """A job of the hub's runner that runs until the returned event is set: a Tell
     without a child process. `(job, release)`."""
     release = threading.Event()
     job = hub.runner.start(kind, address, cid, lambda j: release.wait(10))

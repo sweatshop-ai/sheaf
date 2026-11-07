@@ -1213,16 +1213,17 @@ def upgrade(browser, **body):
     return browser.post("/_/stop", {"reason": "upgrade", **body}, cookie=False, key=True)
 
 
-def test_an_upgrade_stop_is_refused_while_a_tell_runs_and_the_tell_goes_on(browser, hub, ready, session):
-    FakeClaude(session.claude.dir, answer="sent", sleep=30)
-    session.record(peerProtocol=2)
+def test_an_upgrade_stop_is_refused_while_a_tell_runs_and_the_tell_goes_on(browser, hub, ready, monkeypatch):
+    slow = SlowDelivery()
+    monkeypatch.setattr(hub, "adapter", lambda agent: slow)
     post(browser, "/_/tell")
-    assert wait_until(lambda: session.claude.calls() != [])
+    assert wait_until(lambda: slow.log == ["deliver-start"])
     r = upgrade(browser)
     assert r.status == 409 and r.json()["ok"] is False and "a Tell is running" in r.json()["error"]
     assert hub.stop_requested is None
-    assert hub.runner.active("tell") == [[DOC, "c1"]] and not ended(session.claude.calls()[0]["pid"])
+    assert hub.runner.active("tell") == [[DOC, "c1"]] and slow.log == ["deliver-start"]
     post(browser, "/_/cancel")
+    slow.release.set()
     finish(hub)
     assert upgrade(browser).status == 200 and hub.stop_requested == "upgrade"
 

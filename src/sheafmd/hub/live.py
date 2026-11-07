@@ -537,8 +537,8 @@ class LiveDocument:
         """Catch up with a write from outside (the CLI, an agent, an editor). Publishes
         `changed` and returns its snapshot, or returns None when nothing moved.
 
-        force: render whatever the file holds and return the snapshot, publishing nothing: an
-        Ask that just wrote announces its own event."""
+        force: render whatever the file holds and return the snapshot, publishing nothing: the
+        caller announces the result itself."""
         with self._hold(), self._held():
             if force:
                 self._rerender()

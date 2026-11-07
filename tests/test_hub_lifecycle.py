@@ -407,7 +407,7 @@ def test_no_child_the_hub_starts_inherits_the_blocked_signals():
         try:
             assert {signal.SIGTERM, signal.SIGINT} <= signal.pthread_sigmask(signal.SIG_BLOCK, set())
             seen["run"] = int(subprocess.run(mask, capture_output=True, text=True).stdout.split()[1], 16)
-            seen["job"] = int(Job(Jobs(), "ask", "a", "c1").run(mask, timeout=20).stdout.split()[1], 16)
+            seen["job"] = int(Job(Jobs(), "tell", "a", "c1").run(mask, timeout=20).stdout.split()[1], 16)
             seen["after"] = signal.pthread_sigmask(signal.SIG_BLOCK, set())     # the thread is blocked again
         finally:
             held.close()

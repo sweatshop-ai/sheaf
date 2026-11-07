@@ -33,7 +33,7 @@ from urllib.parse import urlsplit
 from .. import config, paths
 from ..agents.detect import TABLE
 from ..edit import MERGE_BY
-from .auth import clean_display
+from .auth import clean_display, name_key
 
 TABLE_KEYS = {"origin": str, "socket": str, "proxy_user": str, "members": dict}
 MEMBER_KEYS = {"name": str, "roots": list}
@@ -454,6 +454,16 @@ def check_names(cfg: ProxyConfig, person: str, tokens) -> None:
             raise ProxyError(f"the name {m.name!r} of {here} is sheaf's own, which signs the notes of a merge")
         if m.name.casefold().endswith("(action)"):
             raise ProxyError(f"the name {m.name!r} of {here} ends in (action), which a reply reads as its role")
+
+
+def check_agent_names(signed: list[tuple[bool, str]]) -> None:
+    """No agent's token may sign a name another token signs (9.7): `add` checks with the bindings of the day,
+    and the config may change them later. `signed` is (is an agent's, signed name) per token; an old token
+    is compared with agents only, never with another old token, which may share a display today. Raises ProxyError."""
+    for i, (agent, name) in enumerate(signed):
+        if agent and any(name_key(name) == name_key(other) for j, (_, other) in enumerate(signed) if j != i):
+            raise ProxyError(f"an agent's token signs {name!r}, which another token signs too (sheaf token list): "
+                             "give one of them another client or member")
 
 
 # ── the proxy socket (9.9 "Two listeners") ───────────────────────────────────

@@ -1516,11 +1516,14 @@ class Handler:
         # session is James's on the box it goes to his window instead, by a file the hub drops (9.12), and on
         # a sheaf whose live session is a member's fork it goes to that fork's relay while it is connected (9.14).
         to_box = route = None
-        if member is not None and b.get("tell"):
+        # An agent that is the reader's target (SPEC 9.8) is not reached: the Tell waits for it, after the write.
+        to_agent = (starts and bool(b.get("tell"))
+                    and targets.live(self.hub, targets.stored(self.hub, e.address, member), member) is not None)
+        if member is not None and b.get("tell") and not to_agent:
             to_box = True
             route = self._work_route(e.address, e.live.current()[1], req.member) if starts else None
             _shape(route is not None, proxy.PROXY_LINE)
-        tell = starts and bool(b.get("tell")) and not to_box
+        tell = starts and bool(b.get("tell")) and not to_box and not to_agent
         # A Tell that cannot go out still writes the comment, and then starts no wait. A reply
         # sent with Tell to a thread that is being told is such a Tell: the wait the first one
         # began stays as it is (SPEC 11.3).
@@ -1563,8 +1566,13 @@ class Handler:
             # Taken before under this request id: what the first request started (a Tell's wait)
             # is running or done, and the page hears of it by its events.
             tell = False
-            to_box = None
-        if to_box and route == "relay":
+            to_box = to_agent = None
+        if to_agent:
+            try:
+                self.hub.tell.queue_agent(e.address, snap["id"], member)
+            except JobRefused as r:
+                snap["tellError"] = r.message
+        elif to_box and route == "relay":
             if (line := self._relay_tell(req, e, snap["id"], judged[0] if judged else "")) is not None:
                 snap["tellError"] = line
         elif to_box:

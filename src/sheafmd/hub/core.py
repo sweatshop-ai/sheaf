@@ -172,16 +172,36 @@ class Hub:
             self._private_paths[str(folder)] = m.id
 
     # ── documents ────────────────────────────────────────────────────────────
-    def _versions_of(self, root) -> state.Versions:
+    def _versions_of(self, root, named: str = "", strict: bool = False) -> state.Versions | None:
         """The versions store of `root`'s documents: inside it with `versions = "root"` (7.4), else the
-        state folder's, also when its `.sheaf.toml` cannot be read."""
+        state folder's, also when its `.sheaf.toml` cannot be read; with `strict` (a private root's) that is
+        None instead, so its text never reaches the state folder. `named` is the root of the documents'
+        addresses when it is not `root` (a private sheaf is addressed under the list's root): the prefix the
+        store strips, so its folder is the one a commit of the file names."""
         try:
             inside = config.load_root_config(root.path, warn=lambda line: None).versions_inside
         except config.ConfigError:
+            if strict:
+                return None
             inside = False
         if inside:
-            return state.Versions(root.path, root.name)
-        return self.versions
+            return state.Versions(root.path, named or root.name)
+        return None if strict else self.versions
+
+    def _store_of(self, address: str, root, bound: str):
+        """The versions store of the sheaf named `address` as its file is now placed, found at each call, not when
+        its document was opened, for a document bound to the root `bound`: one opened for a file of the list's root
+        keeps no private text there once a private file holds the name, and one opened for a private file stores
+        nothing once that file is gone. None when the file cannot be decided (a name two roots hold, a private root
+        that cannot be looked at, a file that left the root the document was made for): nothing is stored, a full
+        disk's cost."""
+        try:
+            at = place.file_at(self, address, bound)
+        except roots_mod.NotFound:
+            return None
+        if at is None:
+            return self._versions_of(root)
+        return self._versions_of(at[0], root.name, strict=at[0].id in self.private_roots)
 
     def check_projects(self, root, rels):
         """Warn of each sheaf folder of `root` (its documents `rels`) that the root's `projects.toml`
@@ -339,7 +359,8 @@ class Hub:
             e.file_root = at[0].id if at else root.id
             e.live = LiveDocument(file, render=lambda text: self._rendered(e, text),
                                   publish=e.bus.publish, by=self.person, clock=self.clock,
-                                  versions=self._versions_of(at[0] if at else root), address=address, hold=hold)
+                                  versions=(lambda: self._store_of(address, root, e.file_root)) if self.private_roots and place.applies(self, name)
+                                  else self._versions_of(root), address=address, hold=hold)
             e.live.refresh(force=True)           # the first render: e.html
             self.entries[address] = e
             return e

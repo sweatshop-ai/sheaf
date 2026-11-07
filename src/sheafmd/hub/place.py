@@ -241,6 +241,14 @@ def _private_roots(hub) -> dict:
     return {member: by_id[rid] for rid, member in hub.private_roots.items() if rid in by_id}
 
 
+def private_listed(hub, member, board: bool = False) -> list:
+    """The private roots whose files a listing shows under their names (rule D): `member`'s own; every member's for
+    the index's board (`board`), which tells each stream only what that stream may take."""
+    if member is not None:
+        return [r] if (r := _private_roots(hub).get(member.id)) is not None else []
+    return list(_private_roots(hub).values()) if board else []
+
+
 def _twice(hub, address: str, n: int):
     _refused(hub, address, f"its name is held by {n} files")
 

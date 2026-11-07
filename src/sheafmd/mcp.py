@@ -548,20 +548,25 @@ class Door:
                 continue
             placed = place.applies(hub, root.name)
             top = Path(os.path.realpath(root.path)) if placed else None
-            for found in markdown_files(root):
+            # The files of a member's private root are listed to that member alone, under the list root's names (rule D).
+            privates = [p for p in place.private_listed(hub, member) if p.closed() is None and not p.missing()] if placed else []
+            for src, found in [(root, f) for f in markdown_files(root)] + [(p, f) for p in privates for f in markdown_files(p)]:
                 # A sheaf of the list's root is listed by its name (9.11), wherever its file is; a private path is
                 # none. Each file is read under its name's lock, as every read.
                 logical = place.logical(found) if placed else None
                 with place.held(hub, f"{root.name}/{logical}") if logical else contextlib.nullcontext():
-                    rel = place.named(hub, root, top, found) if placed else found
+                    if src is not root:
+                        rel = place.named_in(hub, root, src, found)
+                    else:
+                        rel = place.named(hub, root, top, found) if placed else found
                     if rel is None:
                         continue
                     address = str(Address(root.name, rel))
                     try:
                         path = hub.roots.resolve(address)          # never a file outside its root
-                        folder = (root.name, path.parent)
+                        folder = (src.name, path.parent)
                         if folder not in in_git:
-                            in_git[folder] = in_git_dir(path, root)
+                            in_git[folder] = in_git_dir(path, src)
                         if in_git[folder]:
                             continue                               # nor one in a git directory
                         threads, fm, mtime, private = self._open_in(address)

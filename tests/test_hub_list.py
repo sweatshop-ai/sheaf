@@ -579,7 +579,7 @@ def now(box, body):
     """`body` with the hash of its sheaf's text as it is now: the tick of a list read just now. The file is the one
     that holds the sheaf's name, wherever it is placed (9.11)."""
     top = box.hub.the_list.root().path
-    rel = place.file_rel(top, body["doc"].split("/", 1)[1])
+    rel = place.file_rel(box.hub, box.hub.the_list.root(), body["doc"].split("/", 1)[1])
     return {**body, "hash": md_hash((top / rel).read_text(encoding="utf-8"))}
 
 
@@ -1714,7 +1714,7 @@ def test_the_owner_releases_a_pressed_share_from_the_row(committing, box, sheave
     r = box.post("/_/tick", press, member=NELL)
     assert r.status == 200, r.text
     top = box.hub.the_list.root().path
-    text = (top / place.file_rel(top, JOEY[5:])).read_text(encoding="utf-8")
+    text = (top / place.file_rel(box.hub, box.hub.the_list.root(), JOEY[5:])).read_text(encoding="utf-8")
     assert "- [ ] Share\n" in text and front_matter(text)["visibility"] == "owner"
     assert git(sheaves, "log", "-1", "--format=%an|%s").startswith("Nell|")
     assert row_buttons(box.get("/list", member=NELL), JOEY)[1] == ("Share", "1", False, "false")

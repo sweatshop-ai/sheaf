@@ -35,6 +35,7 @@ from . import proxy as proxy_mod
 from . import relay as relay_mod
 from . import roots as roots_mod
 from . import state
+from . import targets as targets_mod
 from . import the_list
 from . import visibility
 from . import work as work_mod
@@ -622,14 +623,29 @@ class Hub:
             meta["seen"] = self.seen.get(e.address)
             v = self.tell.view(e.address)
             meta["agent"], meta["can"], meta["lines"] = v.agent(), v.can(), v.lines
+            meta["targets"] = targets_mod.choices(self, e.address)
         else:
-            meta.update(me=member.name, seen=self.member_seen.get(member.id, e.address),
-                        agent=None, can=[], lines=proxy_mod.member_lines(), proxy=True,
+            meta.update(me=member.name, seen=self.member_seen.get(member.id, e.address), proxy=True,
                         member=member.id)
-            work, meta["can"] = self.member_work(e, member)
+            work, can = self.member_work(e, member)
             if work is not None:
                 meta["work"] = work
+            meta["agent"], meta["can"], meta["lines"], meta["targets"] = self.member_target(e.address, member, can)
         return meta
+
+    def member_target(self, address: str, member, can: list) -> tuple:
+        """(agent, can, lines, targets) of a member's page (SPEC 9.8, 10.1): their own target, an agent of theirs,
+        never the hub account's session. On a sheaf whose Tells go to James's window or a fork's relay (9.12) the
+        target is not theirs to choose: none is shown and `targets` is empty."""
+        lines = proxy_mod.member_lines()
+        if {"box-tell", "relay-tell"} & set(can):
+            return None, can, lines, []
+        pickable = targets_mod.choices(self, address, member)
+        raw = targets_mod.stored(self, address, member)
+        if raw is None:
+            return None, can, lines, pickable
+        shape, line, reaches = targets_mod.agent_view(self, raw, member)
+        return shape, sorted({*can, "queue"}) if reaches else can, {"tell": line}, pickable
 
     def mount_doc(self, e: Entry, member=None) -> dict:
         """The sheaf as the front mounts it (#116): {title, toc, html, config, css, version, script, assets}. The text
@@ -702,11 +718,15 @@ class Hub:
         return out
 
     # ── the agent of a document ──────────────────────────────────────────────
-    def target(self, address: str) -> Target | None:
-        """The session the document's last render attached, or None (also for a stored target
-        that cannot be read: it is never guessed at)."""
-        raw = self.docs.get(address).get("target")
-        if not raw:
+    def target(self, address: str, kept: bool = False) -> Target | None:
+        """The session the document's last render attached, or None (also for a stored target that cannot be
+        read: it is never guessed at). `kept`: when the target is not a session now (an agent, or none), the
+        session kept beside it, which a Tell already sent to it still runs in (a stop and the watcher use it)."""
+        entry = self.docs.get(address)
+        raw = entry.get("target")
+        if kept and (not raw or targets_mod.is_agent(raw)):    # an agent is no session (SPEC 9.8)
+            raw = entry.get("session")
+        if not raw or targets_mod.is_agent(raw):
             return None
         try:
             return Target.from_dict(raw)
@@ -742,19 +762,21 @@ class Hub:
         except roots_mod.NotFound:
             raise RenderError(f"{md} is not in a root the hub serves.") from None
         with place.held(self, address), self._lock:        # the name's lock first (9.11), as `entry` takes it
-            old = self.docs.get(address)
-            new = dict(old)
-            new["path"] = str(md)
-            new["rendered"] = time.strftime(STAMP_FORMAT)
-            for k in SETTING_KEYS:
-                new[k] = settings.get(k)
-            # The latest render from an agent sets the target; a render that finds no agent keeps
-            # it; only `--agent none` clears it (SPEC 8.3, D19).
-            if target is not None:
-                new["target"] = None if target.get("agent") == "none" else target
-            else:
-                new.setdefault("target", None)
-            self.docs.put(address, new)
+            def settle(new: dict) -> dict:
+                new["path"] = str(md)
+                new["rendered"] = time.strftime(STAMP_FORMAT)
+                for k in SETTING_KEYS:
+                    new[k] = settings.get(k)
+                # The latest render from an agent session sets the target; a render that finds no agent keeps
+                # it, an agent's too; only `--agent none` clears it (SPEC 8.3, D19). The session an agent's
+                # write took the target from is the new one's, so none is kept beside it.
+                if target is not None:
+                    new["target"] = None if target.get("agent") == "none" else {"kind": "session", **target}
+                    new.pop("session", None)
+                else:
+                    new.setdefault("target", None)
+                return new
+            old, new = self.docs.change(address, settle)
             existed = address in self.entries
             e = self.entry(address)
             if existed and (any(old.get(k) != new[k] for k in SETTING_KEYS)

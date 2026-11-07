@@ -529,6 +529,19 @@ class Docs(_Store):
             return None, True
         self._change(change)
 
+    def change(self, address: str, settle) -> tuple[dict, dict]:
+        """Read the entry, let `settle(copy)` return the new one and write it, all under the file's lock, so
+        a render and a change of target never overwrite each other. (the entry before, the entry after)"""
+        def go(data):
+            e = data.get(address)
+            old = dict(e) if isinstance(e, dict) else {}
+            new = settle(dict(old))
+            if new == old:
+                return (old, new), False
+            data[address] = new
+            return (old, new), True
+        return self._change(go)
+
 
 class Seen(_Store):
     """`seen.json`: `{"<root>/<path>": {"c3": 2}}`, how many messages of each thread the

@@ -45,7 +45,7 @@ STREAM_SECONDS = 300            # a stream of the proxy socket is closed after t
 # `signed-out` (9.9).
 DOCUMENT_EVENTS = ("hello", "changed", "hub-stopping", "gone", "tell-relay-failed", "box-failed",
                    "box-status", "relay")
-PROXY_LINE = "Tell works only on the machine that runs the hub."     # 10.6
+PROXY_LINE = "Let one of your agents work on this page to Tell it."     # 10.6
 NO_DOCUMENTS = "This account has no documents on this hub."
 FOLDER_MODE = 0o2750            # the socket's folder: the hub's account, the proxy's group, setgid
 SOCKET_MODE = 0o660

@@ -102,7 +102,7 @@ var create = function (ROOT, CFG, opts) {
   // CFG.can lists what it can do: "deliver" offers Tell. What it cannot do shows as a disabled
   // button with one line under it, CFG.lines.tell (SPEC 10.6). The hub's answer to /_/doc
   // refreshes all three (takeTarget).
-  var NO_AGENT = 'Render this page from an agent session to Tell it.';
+  var NO_AGENT = 'Render this page from an agent session, or let one of your agents work on it, to Tell it.';
   // Drafts are kept per hub and per document. On the loopback port the port tells hubs apart; through
   // the proxy socket (SPEC 9.9) every member shares the front's origin, so the key holds the member's
   // id, which a rename in the hub's config does not change (10.4, 10.8).
@@ -134,8 +134,9 @@ var create = function (ROOT, CFG, opts) {
   // an open page by any of the three places that ask (SPEC 10.5).
   function takeTarget(j) {
     if (!j || !('capabilities' in j)) return;
-    var before = JSON.stringify([CFG.agent, CFG.can, CFG.lines, CFG.work]);
+    var before = JSON.stringify([CFG.agent, CFG.can, CFG.lines, CFG.work, CFG.targets]);
     CFG.agent = j.target || null;
+    if ('targets' in j) CFG.targets = j.targets || [];
     CFG.can = j.capabilities || [];
     CFG.lines = j.lines || {};
     if ('work' in j) CFG.work = j.work;       // a fork moves the live session off the box (9.12)
@@ -145,7 +146,7 @@ var create = function (ROOT, CFG, opts) {
     buildMenu();
     if (wasOpen) openMenu();
     // An open thread draws the agent's name and the Answer button; it is drawn again when they changed.
-    if (before !== JSON.stringify([CFG.agent, CFG.can, CFG.lines, CFG.work]) && pop && popId && byId[popId]) fillPopover(popId);
+    if (before !== JSON.stringify([CFG.agent, CFG.can, CFG.lines, CFG.work, CFG.targets]) && pop && popId && byId[popId]) fillPopover(popId);
   }
   // A sheaf whose live session runs on a member's machine is worked on there (SPEC 10.6).
   function lineOf(what) {
@@ -155,8 +156,44 @@ var create = function (ROOT, CFG, opts) {
   function agentLine() {
     if (toBox && canTell) return 'Tell → ' + whereTo();
     var a = CFG.agent;
+    if (a && a.kind === 'agent') return a.label + ' · ' + lineOf('tell');      // an agent is named; its line says why Tell waits (SPEC 10.6)
     if (!a || !canTell) return lineOf('tell');
     return 'Tell → ' + a.label + ' · ' + a.product;
+  }
+  // The target now, as POST /_/target names it (SPEC 9.8), and the other targets the reader may pick: Change is
+  // offered when there is one.
+  function targetNow() { return !CFG.agent ? 'none' : CFG.agent.kind === 'agent' ? (CFG.agent.revoked ? 'revoked' : 'agent:' + CFG.agent.token) : 'session'; }
+  function otherTargets() {
+    var now = targetNow();
+    return (CFG.targets || []).filter(function (t) { return t.target !== now; });
+  }
+  var changing = false;
+  function changeHtml() {
+    var others = otherTargets();
+    if (!others.length) { changing = false; return ''; }
+    var h = '<button id="rd-target-change"><span>Change</span></button>';
+    if (changing) {
+      var now = targetNow();
+      h += '<div id="rd-targets">' + CFG.targets.map(function (t) {
+        var here = t.target === now;
+        return '<button class="rd-target' + (here ? ' rd-current' : '') + '" data-target="' + esc(t.target) + '"' +
+               (here ? ' aria-current="true"' : '') + '><span>' + esc(t.label) + '</span><span>' + (here ? '✓' : '') + '</span></button>';
+      }).join('') + '</div>';
+    }
+    return h;
+  }
+  async function pickTarget(target) {
+    try {
+      var j = await post('/_/target', { target: target });
+      var got = { target: j.target, targets: j.targets };
+      try {
+        var r = await readDoc();
+        if (r.ok) got = await r.json();
+      } catch (e) {}
+      changing = false;
+      if ('capabilities' in got) takeTarget(got); else { CFG.agent = j.target || null; CFG.targets = j.targets || []; buildMenu(); }
+      if (menu.classList.contains('open')) openMenu();
+    } catch (e) { say(e.message, true); }
   }
   function yourSession() {
     return CFG.agent ? 'your ' + AGENT + ' session' : 'the session';
@@ -458,6 +495,7 @@ var create = function (ROOT, CFG, opts) {
                       ' · select text to comment</div>';
     if (canSave) {
       h += '<div class="rd-group">Agent</div><div class="rd-as" id="rd-agent">' + esc(agentLine()) + '</div>';
+      h += changeHtml();
       h += '<div class="rd-group">Export</div>' +
            '<button id="rd-html" title="Download the share copy as one self-contained HTML file"><span>Share copy · HTML</span></button>' +
            '<button id="rd-pdf" title="Download the share copy as a PDF"><span>Share copy · PDF</span></button>';
@@ -467,6 +505,12 @@ var create = function (ROOT, CFG, opts) {
     q('#rd-save') && q('#rd-save').addEventListener('click', function () { closeMenu(); save(); });
     q('#rd-show').addEventListener('click', function () { closeMenu(); openPanel(); });
     q('#rd-work-btn') && q('#rd-work-btn').addEventListener('click', function (e) { e.stopPropagation(); closeMenu(); openWork(); });
+    q('#rd-target-change') && q('#rd-target-change').addEventListener('click', function (e) {
+      e.stopPropagation(); changing = !changing; buildMenu(); openMenu();
+    });
+    menu.querySelectorAll('button.rd-target').forEach(function (b) {
+      b.addEventListener('click', function (e) { e.stopPropagation(); pickTarget(b.getAttribute('data-target')); });
+    });
     q('#rd-html') && q('#rd-html').addEventListener('click', function () { closeMenu(); grab('html'); });
     q('#rd-pdf') && q('#rd-pdf').addEventListener('click', function () { closeMenu(); grab('pdf'); });
     refresh();

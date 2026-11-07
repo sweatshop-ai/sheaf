@@ -1,12 +1,11 @@
 """Where the file of a sheaf lives when a member has a private root (SPEC 9.11): `home_in` names the root as well as
-the path, a name is looked for in the list's root and in each private root, the placer answers a root and a path, and a
-door create whose home is another root is refused until a private create exists."""
+the path, a name is looked for in the list's root and in each private root, and the placer answers a root and a path
+(the door's create into a private root is in test_private_root_create.py)."""
 import pytest
-from helpers import browser_on, call, hub_rows
+from helpers import hub_rows
 from two_roots import A, TwoRoots, two_roots
 
 from sheafmd.hub import place, roots as roots_mod
-from sheafmd.hub.state import Tokens
 
 NAME = "acme/blog/post.md"
 OPEN = "# post\n"
@@ -122,23 +121,6 @@ def test_resolve_refuses_a_link_that_leaves_the_private_root(two, tmp_path):
     assert hub.roots.resolve(f"{root.name}/acme/blog/real.md")          # a regular file in it is found
     with pytest.raises(roots_mod.NotFound):
         hub.roots.resolve(f"{root.name}/{NAME}")                        # a link holds no name; nothing is served
-
-
-def test_make_refused_until_private_create(two):
-    token = Tokens().add("james-a", write=True)
-    hub = hub_of(two, a={"tokens": ["james-a"]})
-    (two.list_repo / "acme/blog").mkdir(parents=True)
-    (two.list_repo / "projects.toml").write_text('[projects."acme/blog"]\nmembers = ["a"]\nstatus = "live"\n',
-                                                 encoding="utf-8")
-    door = browser_on(hub)
-    root = list_root(hub)
-    is_error, got = call(door, "create", token=token, doc=f"{root.name}/{NAME}", text=OWNED_BY_A)
-    assert is_error and "cannot be made" in got and "private root" in got, got
-    assert not (two.list_repo / NAME).exists() and not (two.private_repo / NAME).exists()
-    assert not any(p.name == "post.md" for p in two.list_repo.rglob("*.md"))      # not in the shared repo either
-    is_error, got = call(door, "create", token=token, doc=f"{root.name}/{NAME}", text=OPEN)       # positive control
-    assert not is_error, got
-    assert (two.list_repo / NAME).is_file()
 
 
 def test_resolve_refuses_the_git_dir_and_state_of_the_returned_root(two, monkeypatch):

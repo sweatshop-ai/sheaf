@@ -12,7 +12,8 @@ In memory: a restart forgets it.
     .expire(wait, text_of)                end every drop answered in `text_of(doc)` (None: not read), then take off
                                           every drop older than `wait` seconds: [(doc, thread, Drop)]
     .drops()                              [(doc, thread, Drop)] of every open drop
-    .working(doc)                         whether James's session works on a drop of the sheaf: one `delivered`
+    .working(doc, member=None)            whether James's session works on a drop of the sheaf (of `member`'s, when
+                                          given): one `delivered`
     .cleared()                            the sheaves where a `delivered` drop ended since the last ask
     .observe(doc, thread, got, drop)      take in `read_status`'s `got` for `drop`: (what changed, its state
                                           before), what being None, "ignored", "state" or "failed" (which ends it)
@@ -45,6 +46,7 @@ class Drop:
     folder: Path | None = None  # the `tell_dir` it was written in: the James of the member who sent it, whose status it reads
     state: str = "sent"         # the supervisor's last word on it, read by the hub: "sent" until it says one
     ignored: bool = False       # a status of another shape was written down once
+    member: str | None = None   # the member who sent it: whose `telling` names it (9.9)
 
 
 class BoxWaits:
@@ -54,19 +56,31 @@ class BoxWaits:
         self._drops: dict[str, dict[str, Drop]] = {}       # {doc: {thread: Drop}}
         self._cleared: set[str] = set()                    # sheaves where a `delivered` drop ended since asked
 
-    def add(self, doc: str, thread: str, kind: str, text: str, name: str | None = None, folder: Path | None = None):
+    def add(self, doc: str, thread: str, kind: str, text: str, name: str | None = None, folder: Path | None = None,
+            member: str | None = None):
         c = rdc.parse(text).by_id(thread)
         if c is None:
             return
         with self._lock:
             self._end(doc, thread)              # a drop sent again on the thread: the older one ends here
-            self._drops.setdefault(doc, {})[thread] = Drop(kind, len(c.replies), self._clock(), name, folder=folder)
+            self._drops.setdefault(doc, {})[thread] = Drop(kind, len(c.replies), self._clock(), name, folder=folder, member=member)
 
     def pending(self, doc: str, text: str) -> list:
         with self._lock:
             self._settle(doc, text)
             return [{"id": thread, "kind": d.kind, "state": d.state}
                     for thread, d in self._drops.get(doc, {}).items()]
+
+    def telling(self, doc: str, member: str, comments: list | None = None, text: str | None = None) -> list:
+        """`[{id, to, state}]` (SPEC 8.5) of `member`'s own open drops on `doc`: what their `telling` holds beside
+        their Tells that wait for an agent. A look that ends nothing: a drop whose thread has a reply (or is gone)
+        in `text`, or in `comments` (a snapshot's, as dicts), is left out and ended by the next pass."""
+        with self._lock:
+            threads = {c["id"]: len(c.get("replies") or []) for c in comments} if comments is not None else (
+                {c.id: len(c.replies) for c in rdc.parse(text).comments} if text is not None else None)
+            return [{"id": thread, "to": "James", "state": d.state}
+                    for thread, d in self._drops.get(doc, {}).items()
+                    if d.member == member and (threads is None or (thread in threads and threads[thread] <= d.replies))]
 
     def expire(self, wait: int, text_of: Callable[[str], str | None]) -> list:
         with self._lock:
@@ -88,9 +102,10 @@ class BoxWaits:
         with self._lock:
             return [(doc, thread, d) for doc, drops in self._drops.items() for thread, d in drops.items()]
 
-    def working(self, doc: str) -> bool:
+    def working(self, doc: str, member: str | None = None) -> bool:
         with self._lock:
-            return any(d.state == "delivered" for d in self._drops.get(doc, {}).values())
+            return any(d.state == "delivered" and (member is None or d.member == member)
+                       for d in self._drops.get(doc, {}).values())
 
     def observe(self, doc: str, thread: str, got, drop: Drop) -> tuple[str | None, str]:
         with self._lock:

@@ -347,13 +347,14 @@ var create = function (ROOT, CFG, opts) {
   // `telling` does not hold them: the thread shows no spinner and no orange dot, and the line has no clock.
   var waits = {};
   // The hub's `telling`, `[{id, to, state}]` (SPEC 8.5): `working` and `waiting` are a session's, in `telling`;
-  // `queued` and `seen` an agent's, in `waits`. `keep`: a session's threads already known stay (jobs are only added).
+  // `queued` and `seen` an agent's, in `waits`; `sent`, `picked-up` and `delivered` are a drop for James's window
+  // (9.12), which `sentBox` shows from `sent`: no spinner here. `keep`: a session's threads already known stay (jobs are only added).
   function takeTelling(list, keep) {
     if (!keep) telling = {};
     waits = {};
     (list || []).forEach(function (w) {
       if (w.state === 'queued' || w.state === 'seen') waits[w.id] = { to: w.to, state: w.state };
-      else telling[w.id] = true;
+      else if (w.state === 'working' || w.state === 'waiting') telling[w.id] = true;
     });
   }
 

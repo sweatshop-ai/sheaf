@@ -268,8 +268,8 @@ class Index:
         # nor that a Tell of it runs.
         unread = sum(1 for cid, n, by in s.threads if by != me and n > seen.get(cid, 0))
         sees_session = member is None
-        # A member's orange is James's session working on a drop of theirs, by its supervisor's word (9.15).
-        works = (sees_session and address in running) or (member is not None and hub.box_waits.working(address))
+        # A member's orange is James's session working on a drop of their own, by its supervisor's word (9.15).
+        works = (sees_session and address in running) or (member is not None and hub.box_waits.working(address, member.id))
         dot = ("red" if (sees_session and address in waiting) or unread else
                "orange" if works else "blue" if s.open else "green")
         e = hub.entries.get(address)

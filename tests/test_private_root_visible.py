@@ -837,3 +837,102 @@ def test_the_kernel_open_judges_the_folders_between_the_root_and_the_file_too(tm
         assert (here.st_dev, here.st_ino) in op.idents(), mode
         up = os.stat(top / "a")
         assert (up.st_dev, up.st_ino) in op.idents(), mode
+
+
+# ── rule 2 on the root's own folder: a create is made, and judged, on the folder as opened ───────────────────────
+
+def _created_root(w: World):
+    """A registered root that is no private root's, with `acme/blog` and a file in it: (root, its folder)."""
+    top = w.two.base / "shared"
+    (top / "acme/blog").mkdir(parents=True)
+    (top / "note.md").write_text("# note\n", encoding="utf-8")
+    root = w.hub.roots.for_document(top / "note.md")
+    assert root.path == top.resolve()
+    return root, top
+
+
+def _planted(w: World, name: str) -> bool:
+    return (w.two.private_repo / "acme/blog" / name).exists()
+
+
+def test_the_folder_of_a_root_swapped_for_the_private_root_before_a_create_opens_it_is_refused_whatever_the_name(world, mode, monkeypatch):
+    """The folder of a shared root is exchanged for a link to the private repo between the checks by path and the open
+    (G1): nothing is made there, and the answer for a name the private root holds is the answer for a free one."""
+    from sheafmd import mcp
+    w = world
+    w.put(PRIVATE)
+    root, top = _created_root(w)
+    real, swapped, answers = mcp.check_create, [], {}
+
+    def swapping(t, rel, judge=None):
+        if not swapped:
+            swapped.append(1)
+            os.rename(top, top.with_name("shared.real"))
+            top.symlink_to(w.two.private_repo)
+        return real(t, rel, judge)
+    monkeypatch.setattr(mcp, "check_create", swapping)
+    for name in ("post.md", "free.md"):
+        swapped.clear()
+        if top.is_symlink():
+            top.unlink()
+            os.rename(top.with_name("shared.real"), top)
+        answers[name] = call(w.door, "create", token=w.tokens["loose"], doc=f"{root.name}/acme/blog/{name}", text="# x\n")
+        assert not _planted(w, "free.md")
+    said = {n: (e, text.replace(n, "NAME")) for n, (e, text) in answers.items()}
+    assert said["post.md"][0] and said["post.md"] == said["free.md"] and "not inside a root" in said["free.md"][1]
+    assert (w.two.private_repo / NAME).read_text(encoding="utf-8") == PRIVATE
+
+
+def test_a_root_folder_opened_as_a_private_one_is_refused_by_every_folder_open_that_writes(world, mode, tmp_path):
+    """`create_file`, `check_create`, `make_folders` and the tidying all open the root's folder through the judge, and a
+    root that is itself a private root has none."""
+    from sheafmd import beneath, source
+    from sheafmd.hub import place
+    w = world
+    root, top = _created_root(w)
+    judge = place.judge_for(w.hub, root)
+    assert judge is not None and place.judge_for(w.hub, w.hub.roots.get(w.root.name)) is not None
+    link = w.two.base / "linked"
+    link.symlink_to(w.two.private_repo)
+    for act in (lambda: source.create_file(link, "acme/blog/n.md", "x", judge),
+                lambda: source.check_create(link, "acme/blog/n.md", judge),
+                lambda: place.make_folders(link, "acme/blog/new/n.md", judge)):
+        with pytest.raises(beneath.Private):
+            act()
+    (w.two.private_repo / "acme/blog/private/a").mkdir(parents=True)
+    place._tidy(link, "acme/blog/private/a/n.md", judge)            # tidies nothing: refused, and says nothing
+    assert (w.two.private_repo / "acme/blog/private/a").is_dir()
+    place._tidy(link, "acme/blog/private/a/n.md")                    # control: without the judge it removes it
+    assert not (w.two.private_repo / "acme/blog/private/a").exists()
+    assert not (w.two.private_repo / "acme/blog/n.md").exists() and not (w.two.private_repo / "acme/blog/new").exists()
+    source.create_file(top, "acme/blog/n.md", "x", judge)          # the same calls on the root itself go through
+    assert (top / "acme/blog/n.md").read_text(encoding="utf-8") == "x"
+
+
+def test_a_root_folder_exchanged_for_a_link_to_the_private_root_again_and_again_never_gets_a_file(world, mode):
+    """The real race: a thread exchanges (RENAME_EXCHANGE) the folder of a shared root and a link to the private repo
+    while SHEAF_RACE_CREATES (default 300) door creates run. Not one file in the private root."""
+    import ctypes
+    import threading
+    w = world
+    w.put(PRIVATE)
+    root, top = _created_root(w)
+    alt = top.with_name("shared.link")
+    alt.symlink_to(w.two.private_repo)
+    libc, stop, hits, made = ctypes.CDLL(None, use_errno=True), threading.Event(), 0, 0
+    n_tries = int(os.environ.get("SHEAF_RACE_CREATES", "300"))
+
+    def flip():
+        while not stop.is_set():
+            libc.renameat2(-100, str(top).encode(), -100, str(alt).encode(), 2)        # RENAME_EXCHANGE
+    t = threading.Thread(target=flip)
+    t.start()
+    try:
+        for i in range(n_tries):
+            is_error, _ = call(w.door, "create", token=w.tokens["loose"], doc=f"{root.name}/acme/blog/race{i}.md", text="# x\n")
+            hits += _planted(w, f"race{i}.md")
+            made += not is_error
+    finally:
+        stop.set()
+        t.join()
+    assert hits == 0 and made > 0

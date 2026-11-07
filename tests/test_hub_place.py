@@ -173,12 +173,12 @@ def test_two_creates_of_one_name_with_different_homes_make_one_file(team, work, 
     def second():
         answers.append(call(browser, "create", token=tokens["thierry"], doc=f"work/{SHARED}", text=OPEN))
 
-    def first_writes(top, rel, text):
+    def first_writes(top, rel, text, judge=None):
         monkeypatch.setattr(mcp, "create_file", real)
         t = threading.Thread(target=second)
         t.start()
         t.join(1)
-        real(top, rel, text)
+        real(top, rel, text, judge)
         threads.append(t)
     threads = []
     monkeypatch.setattr(mcp, "create_file", first_writes)
@@ -198,14 +198,14 @@ def test_a_move_out_of_private_leaves_the_folder_a_create_just_made(team, work, 
     (work / other).rename(work / "other.md")                    # out of the way while the create makes the folder
     real, threads = mcp.create_file, []
 
-    def create_while_moving(top, rel, text):
+    def create_while_moving(top, rel, text, judge=None):
         monkeypatch.setattr(mcp, "create_file", real)
         os.rename(work / "other.md", work / other)              # an open sheaf in the folder, the poll's to move
         t = threading.Thread(target=place.place, args=(team.hub, "work/thinkingtoo/tiroir/other.md"))
         t.start()
         t.join(1)
         threads.append(t)
-        real(top, rel, text)
+        real(top, rel, text, judge)
     monkeypatch.setattr(mcp, "create_file", create_while_moving)
     is_error, got = call(browser, "create", token=tokens["thierry"], doc=f"work/{SHARED}", text=PRIVATE)
     threads[0].join(10)

@@ -151,6 +151,15 @@ def logical(rel: str) -> str | None:
     return f"{parts[0]}/{parts[1]}/{parts[4]}" if parts[2] == PRIVATE else None
 
 
+def alias(hub, root, rel: str) -> str | None:
+    """The address `rel` of the private root `root` is named by: the list's root and the same path, for a sheaf at
+    project depth; None for any other path or a root that is none of the hub's private roots (rule E)."""
+    the_list = getattr(hub, "the_list", None)
+    if the_list is None or root.id not in getattr(hub, "private_roots", {}) or logical(rel) != rel:
+        return None
+    return str(Address(the_list.root().name, rel))
+
+
 def names_private(rel: str) -> bool:
     """Whether `rel` names a project called `private`, or a `private` folder directly under a project: where
     only the hub places sheaves, so a door create there is refused (9.11, 12)."""

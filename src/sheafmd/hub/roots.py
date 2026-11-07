@@ -233,6 +233,11 @@ class Roots:
         # private root). Set by the hub; None names every file by its own path.
         self.placer = None
         self.private_paths: Callable[[], Iterable[str]] = tuple     # the real paths of the private roots (set by the hub)
+        # Whether a root is a private root (set by the hub): it holds files, it is no address (SPEC 9.11 rule E).
+        # `get` answers None for it, `listed` leaves it out, `address` names no file in it by its own name; `all`,
+        # `lookup` and `for_document` still see it: the commits, the list's nested-root check and the image rule
+        # judge a path against every root there is.
+        self.hidden: Callable[[Root], bool] = lambda root: False
         if self._load():
             with self._changing():
                 self._save()
@@ -282,9 +287,16 @@ class Roots:
         with self._lock:
             return list(self._roots.values())
 
-    def get(self, name: str) -> Root | None:
+    def listed(self) -> list[Root]:
+        """The roots that have an address: `all` without the private roots."""
         with self._lock:
-            return self._roots.get(name)
+            return [r for r in self._roots.values() if not self.hidden(r)]
+
+    def get(self, name: str) -> Root | None:
+        """The root registered by `name`, for an address; None for a private root, which has none."""
+        with self._lock:
+            root = self._roots.get(name)
+            return None if root is not None and self.hidden(root) else root
 
     def _add(self, path: Path, git: bool) -> Root:
         with self._lock:
@@ -374,11 +386,17 @@ class Roots:
             root, top = self._find(folder, list(self._roots.values()))
             return root or self._add(top or folder, git=bool(top))
 
-    def address(self, md: Path) -> str:
-        """`<root>/<path-in-root>` of `md`, registering its root."""
+    def address(self, md: Path, alias: Callable[[Root, str], str | None] | None = None) -> str:
+        """`<root>/<path-in-root>` of `md`, registering its root. A file of a private root has no such address:
+        `alias(root, path-in-root)` names it by the list's name, or None; with no `alias`, or None from it, NotFound."""
         md = Path(os.path.realpath(md))
         root = self.for_document(md)
-        return str(Address(root.name, md.relative_to(root.path).as_posix()))
+        rel = md.relative_to(root.path).as_posix()
+        if self.hidden(root):
+            if alias is None or (named := alias(root, rel)) is None:
+                raise NotFound(rel)
+            return named
+        return str(Address(root.name, rel))
 
     def resolve(self, address: str) -> Path:
         """The file an address names. Refuses (NotFound) an unknown root, a `.` or `..` or

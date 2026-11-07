@@ -29,7 +29,7 @@ DOC = "work/plan.md"
 URL = "/work/plan.md"
 NOT_YET = ("{product} can answer threads through the MCP door. Tell needs an adapter "
            "sheaf does not have yet.")
-ENDED = "The Claude Code session that rendered this page has ended. Render it again from a session."
+ENDED = "The Claude Code session that rendered this page has ended. Render it again from a session, or pick another target."
 NO_SOCKET = ("Tell needs the session's message socket, which was not found. Render the page "
              "again from the session.")
 GONE = "The document is no longer on the hub: its folder was forgotten, or its file is gone."
@@ -194,8 +194,8 @@ def test_a_page_rendered_from_a_claude_code_session_offers_tell_to_it(
         browser, plan, session):
     attach(browser, plan, session.target())
     meta = page_meta(browser.get(URL).text)
-    assert meta["agent"] == {"agent": "claude-code", "display": "Claude", "product": "Claude Code",
-                             "name": "Cosima", "label": "Cosima"}
+    assert meta["agent"] == {"kind": "session", "agent": "claude-code", "display": "Claude",
+                             "product": "Claude Code", "name": "Cosima", "label": "Cosima"}
     assert meta["can"] == ["deliver"]
     assert meta["lines"] == {"tell": None}
 
@@ -296,7 +296,7 @@ def test_a_session_whose_socket_was_not_found_says_that_under_tell(browser, plan
 def test_doc_gives_the_public_part_of_the_target_and_what_it_can_do(browser, plan, session):
     attach(browser, plan, session.target())
     got = browser.get(f"/_/doc?doc={DOC}").json()
-    assert got["target"] == {"agent": "claude-code", "display": "Claude",
+    assert got["target"] == {"kind": "session", "agent": "claude-code", "display": "Claude",
                              "product": "Claude Code", "name": "Cosima", "label": "Cosima"}
     assert got["capabilities"] == ["deliver", "state", "stop"]
     assert got["telling"] == [] and got["question"] == ""
@@ -1435,9 +1435,9 @@ def test_cancelling_a_tell_looks_the_session_up_without_the_admission_lock(
         other.join()
         return got[0]
 
-    def view(address):
+    def view(address, **kw):
         free.append(can_admit())
-        return real(address)
+        return real(address, **kw)
     post(browser, "/_/tell")
     assert wait_until(lambda: slow.log == ["deliver-start"])
     monkeypatch.setattr(hub.tell, "view", view)
@@ -1511,7 +1511,7 @@ def test_cancelling_a_tell_looks_the_session_up_only_when_a_stop_message_is_to_g
         post(browser, "/_/cancel")          # its wait ends and its stop message goes out
         finish(hub)
     looked, real = [], hub.tell.view
-    monkeypatch.setattr(hub.tell, "view", lambda address: looked.append(address) or real(address))
+    monkeypatch.setattr(hub.tell, "view", lambda address, **kw: looked.append(address) or real(address, **kw))
     assert post(browser, "/_/cancel").json() == {"ok": True}
     finish(hub)
     assert looked == ([] if state == "ended" else [DOC])

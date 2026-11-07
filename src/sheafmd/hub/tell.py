@@ -22,15 +22,16 @@ from .. import config, diagnostics, signals
 from ..agents import prompts
 from ..agents.base import Adapter, DeliveryCancelled, DeliveryError, Target
 from . import roots as roots_mod
+from . import targets
 from .auth import clean_display
 from .live import BY_ID
 
 STOP_WAITS = 15.0      # seconds a stop message waits for the delivery it cancels to end
 
-NO_AGENT = "Render this page from an agent session to Tell it."
+NO_AGENT = "Render this page from an agent session, or let one of your agents work on it, to Tell it."
 NOT_YET = ("{product} can answer threads through the MCP door. Tell needs an adapter "
            "sheaf does not have yet.")
-ENDED = "The {product} session that rendered this page has ended. Render it again from a session."
+ENDED = "The {product} session that rendered this page has ended. Render it again from a session, or pick another target."
 NO_SOCKET = ("Tell needs the session's message socket, which was not found. Render the page "
              "again from the session.")
 UPGRADING = "The hub is restarting for an upgrade. Try again in a moment."
@@ -63,22 +64,25 @@ class View:
     caps: frozenset
     lines: dict               # the line under a disabled button, or None when it works
     jump: bool = False        # a [jump] command is set up and the adapter can name the session to it
+    shape: dict | None = None  # the target is an agent (SPEC 9.8): its shape of 10.1; `target` is None then
 
     def agent(self) -> dict | None:
         """The part of the target a page may hold: never the session id, the socket or the
         command."""
         t, ad = self.target, self.adapter
+        if self.shape is not None:
+            return self.shape
         if t is None:
             return None
         name = clean_display(ad.name(t)) or clean_display(t.name)
-        out = {"agent": t.agent, "display": ad.display, "product": ad.product, "name": name,
+        out = {"kind": "session", "agent": t.agent, "display": ad.display, "product": ad.product, "name": name,
                "label": name or t.session[:8]}
         if self.jump:
             out["jump"] = True
         return out
 
     def can(self) -> list:
-        return sorted(self.caps & {"deliver"})
+        return sorted(self.caps & {"deliver", "queue"})
 
 
 def who(t: Target, ad: Adapter) -> str:
@@ -99,8 +103,13 @@ class Tell:
         self._jumping = threading.Lock()
 
     # ── what the page is told ────────────────────────────────────────────────
-    def view(self, address: str) -> View:
-        t = self.hub.target(address)
+    def view(self, address: str, session: bool = False) -> View:
+        """`session`: the session a Tell was sent to, even when an agent is the target now (a stop goes there)."""
+        raw = targets.stored(self.hub, address)
+        if targets.is_agent(raw) and not session:
+            shape, line, reaches = targets.agent_view(self.hub, raw)
+            return View(None, None, frozenset({"queue"}) if reaches else frozenset(), {"tell": line}, shape=shape)
+        t = self.hub.target(address, kept=session)
         if t is None:
             return View(None, None, frozenset(), {"tell": NO_AGENT})
         ad = self.hub.adapter(t.agent)
@@ -194,7 +203,7 @@ class Tell:
                 raise JobRefused(409, f"The jump command failed (exit {p.returncode}){why}")
 
     def product(self, address: str) -> str:
-        t = self.hub.target(address)
+        t = self.hub.target(address, kept=True)
         return self.hub.adapter(t.agent).product if t else "agent"
 
     def _require(self, view: View):
@@ -424,7 +433,7 @@ class Tell:
 
     def _send_stop(self, e, cid: str, deliveries: list[threading.Thread], held) -> bool:
         """Start the stop message as a job. True when its job has the cancel from here on and ends it."""
-        v = self.view(e.address)               # reads files and asks the adapter: not under the lock
+        v = self.view(e.address, session=True)  # reads files and asks the adapter: not under the lock
         if v.target is None or "stop" not in v.caps:
             diagnostics.record("hub", "tell-stop-skipped", e.address, id=cid,
                                reason="the session cannot be reached")
@@ -453,5 +462,5 @@ class Tell:
         """What the told session is doing, for the threads waiting on it."""
         if not (e.live.waiting() or e.live.session_question()):
             return
-        t = self.hub.target(e.address)
+        t = self.hub.target(e.address, kept=True)
         e.live.observe(self.hub.adapter(t.agent).state(t) if t else None)

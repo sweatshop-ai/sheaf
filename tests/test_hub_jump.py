@@ -177,7 +177,7 @@ def test_without_a_jump_table_the_answer_says_so(browser, plan, session):
 def test_a_page_with_no_session_cannot_jump(browser, plan, probe):
     set_jump(probe, "{session}")
     r = jump(browser)
-    assert r.status == 409 and r.json()["error"] == "Render this page from an agent session to Tell it."
+    assert r.status == 409 and r.json()["error"] == "Render this page from an agent session, or let one of your agents work on it, to Tell it."
     assert not probe[1].exists()
 
 

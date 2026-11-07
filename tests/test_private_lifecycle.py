@@ -46,7 +46,8 @@ def everything_of(repo) -> str:
 def test_private_lifecycle_leaves_list_repo_untouched(two):
     w = World(two, ["login-a"])
     git(two.list_repo, "push", "-q", "origin", "HEAD:main")
-    before = (untouched(two), git(two.list_repo, "rev-parse", "HEAD"), git(two.base / "list.git", "rev-parse", "main"))
+    refs = lambda: (git(two.list_repo, "for-each-ref"), git(two.base / "list.git", "for-each-ref"))      # noqa: E731
+    before = (untouched(two), git(two.list_repo, "rev-parse", "HEAD"), git(two.base / "list.git", "rev-parse", "main"), refs())
 
     made = call(w.door, "create", token=w.tokens["tok-a"], doc=w.address, text=TEXT)
     assert not made[0], made
@@ -76,7 +77,7 @@ def test_private_lifecycle_leaves_list_repo_untouched(two):
     assert w.hub.commits.settle()
 
     # the list repo shows nothing new: no file, no commit, nothing waiting to be pushed, no word of the sheaf's text
-    assert (untouched(two), git(two.list_repo, "rev-parse", "HEAD"), git(two.base / "list.git", "rev-parse", "main")) == before
+    assert (untouched(two), git(two.list_repo, "rev-parse", "HEAD"), git(two.base / "list.git", "rev-parse", "main"), refs()) == before
     assert not (two.list_repo / state.INSIDE).exists()
     for repo in (two.list_repo, two.base / "list.git"):
         assert not any(word in everything_of(repo) for word in (SECRET, "Secret edit.", "A private remark.", "pic.png"))

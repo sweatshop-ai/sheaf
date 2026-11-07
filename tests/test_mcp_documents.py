@@ -10,7 +10,7 @@ from sheafmd.agents.base import State
 from sheafmd.hub.state import Tokens
 from sheafmd.source import update_file
 
-ROW = ["doc", "dot", "open", "path", "unread", "url"]
+ROW = ["doc", "dot", "open", "path", "tells", "unread", "url"]
 
 
 def doc(root: Path, name: str, text: str = PLAN) -> Path:

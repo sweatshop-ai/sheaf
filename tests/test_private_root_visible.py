@@ -777,3 +777,32 @@ def test_the_blame_of_a_list_row_is_not_asked_of_a_private_file(world, monkeypat
     for private, want in ((None, {"x": 1}), ("member-a-id", {})):
         me._read = lambda root, rel, p=private: ("text", (), p)
         assert the_list.TheList._pressers(me, me.root(), s) == want
+
+
+def test_a_write_that_moves_the_file_writes_only_the_file_it_opened(world, mode, monkeypatch):
+    """A door update that makes a sheaf owner-only moves its file to its home first. A link swapped in for the moved
+    file before the write must not carry the text into another member's private root: the file at its home is opened
+    again beneath the root and written only if it is the one opened first."""
+    from sheafmd import beneath
+    w = world
+    secret = w.two.private_repo / "acme/other/post.md"
+    secret.parent.mkdir(parents=True)
+    secret.write_text("# A's other private note\n", encoding="utf-8")
+    shared = PROJECT_WIDE.replace("owner: a", "owner: b")
+    (w.two.list_repo / NAME).write_text(shared, encoding="utf-8")
+    owner_only = shared.replace("sources: [issue:acme/record#1]", "sources: [library:doc-1]")
+    real, calls = beneath.open_beneath, []
+
+    def swapping(top, rel, *a, **k):
+        calls.append(rel)
+        if "private/" in rel and not any("private/" in c for c in calls[:-1]):   # the first open of the file at its home
+            home = Path(top) / rel
+            os.unlink(home)
+            os.symlink(secret, home)            # a folder writer of the list root swaps it for a link
+        return real(top, rel, *a, **k)
+    monkeypatch.setattr(beneath, "open_beneath", swapping)
+    is_error, got = call(w.door, "update", token=w.tokens["tok-b"], doc=w.address, text=owner_only,
+                         expected_hash=md_hash(shared))
+    assert any("private/" in c for c in calls), calls
+    assert is_error, got
+    assert secret.read_text(encoding="utf-8") == "# A's other private note\n"

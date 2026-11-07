@@ -2,7 +2,7 @@
 sheafmd.agents.generic — an agent sheaf detects but has no adapter for (SPEC 11.5).
 
 Codex, Cursor, opencode and Gemini are found by their variable and get a target; they have no
-capability in v1, so the page shows Ask and Tell disabled with the line of 10.6. They keep the
+capability in v1, so the page shows Tell disabled with the line of 10.6. They keep the
 MCP door. An agent named with `--agent` that is none of those gets its own name for display.
 """
 from typing import Mapping
@@ -34,9 +34,6 @@ class GenericAdapter:
 
     def capabilities(self, t: Target) -> frozenset[str]:
         return frozenset()
-
-    def ask_command(self, t: Target) -> list[str]:
-        raise NotImplementedError(f"{self.product} has no Ask in this version")
 
     def child_env(self, t: Target) -> dict | None:
         return None

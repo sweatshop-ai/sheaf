@@ -80,7 +80,7 @@ LEGACY_ANSWER_BY = "Claude"
 
 def action_replies(c):
     """How many replies in c's thread came from a Tell's session. A Tell is
-    answered only by one of these: an Ask answer or a reader's reply landing in
+    answered only by one of these: a reader's reply or an old Ask answer landing in
     the same thread must not stop the "Claude is working" spinner."""
     return sum(1 for r in c.replies if c.effective_role(r) == "action")
 

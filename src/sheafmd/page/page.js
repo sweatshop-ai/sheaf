@@ -1,4 +1,4 @@
-// sheaf page script: block editing, the ☰ menu, review comments, Ask and Tell.
+// sheaf page script: block editing, the ☰ menu, review comments and Tell.
 //
 // Injected by sheaf into editable renders only. Self-contained: no CDN, no external
 // stylesheet. The page talks to one sheaf hub, always at absolute /_/ paths, with the
@@ -97,35 +97,34 @@ var create = function (ROOT, CFG, opts) {
 
   // The agent this page was rendered from, if any: CFG.agent is {agent, display, product,
   // name, label}, never its session id or its socket. Its own name when it has one, else its
-  // display name, labels the Ask and Tell buttons and its replies; nothing in the page names an
+  // display name, labels the Tell button and its replies; nothing in the page names an
   // agent itself.
-  // CFG.can lists what it can do: "ask" offers Ask, "deliver" offers Tell. What it cannot
-  // do shows as a disabled button with one line under it, CFG.lines.ask or .tell (SPEC
-  // 10.6). The hub's answer to /_/doc refreshes all three (takeTarget).
-  var NO_AGENT = 'Render this page from an agent session to Ask and Tell it.';
+  // CFG.can lists what it can do: "deliver" offers Tell. What it cannot do shows as a disabled
+  // button with one line under it, CFG.lines.tell (SPEC 10.6). The hub's answer to /_/doc
+  // refreshes all three (takeTarget).
+  var NO_AGENT = 'Render this page from an agent session to Tell it.';
   // Drafts are kept per hub and per document. On the loopback port the port tells hubs apart; through
   // the proxy socket (SPEC 9.9) every member shares the front's origin, so the key holds the member's
   // id, which a rename in the hub's config does not change (10.4, 10.8).
   var DRAFTS_OF = CFG.proxy ? 'm:' + CFG.member : location.port;
-  // On a member's page of a sheaf whose live session runs on the box, CFG.can holds "box-ask" and "box-tell":
-  // Ask and Tell go with the comment to /_/comment, the hub drops it for James's window, and James answers in
+  // On a member's page of a sheaf whose live session runs on the box, CFG.can holds "box-tell":
+  // Tell goes with the comment to /_/comment, the hub drops it for James's window, and James answers in
   // the thread through the door. The page starts no wait of its own for it (SPEC 9.12). On a sheaf whose live
   // session is a member's fork, CFG.can holds "relay-tell" while that fork's relay is connected: Tell goes the
-  // same way, to the relay, and Ask is not offered (9.14).
-  var AGENT, AGENT_UC, CAN, canAsk, canTell, toBox;
+  // same way, to the relay (9.14).
+  var AGENT, AGENT_UC, CAN, canTell, toBox;
   function takeAgent() {
     CAN = CFG.can || [];
-    toBox = CAN.indexOf('box-ask') >= 0 || CAN.indexOf('box-tell') >= 0 || CAN.indexOf('relay-tell') >= 0;
+    toBox = CAN.indexOf('box-tell') >= 0 || CAN.indexOf('relay-tell') >= 0;
     // The session's own name when it has one ("Linnea"), else the agent's display name (SPEC 10.5); on a
     // box sheaf the member the live session runs as (James), and James on his sheaf with no session yet.
     AGENT = toBox ? upper(liveSession().member) || 'James'
           : (CFG.agent && (CFG.agent.name || CFG.agent.display)) || 'the agent';
     AGENT_UC = AGENT.charAt(0).toUpperCase() + AGENT.slice(1);
-    canAsk = CAN.indexOf(toBox ? 'box-ask' : 'ask') >= 0;
     canTell = CAN.indexOf('relay-tell') >= 0 || CAN.indexOf(toBox ? 'box-tell' : 'deliver') >= 0;
   }
   function liveSession() { return (CFG.work && CFG.work.sessions && CFG.work.sessions[0]) || {}; }
-  // Where a member's Ask or Tell goes: James's window on the box, or the fork's session through its relay (9.14).
+  // Where a member's Tell goes: James's window on the box, or the fork's session through its relay (9.14).
   function whereTo() {
     return CAN.indexOf('relay-tell') >= 0 ? AGENT + '’s session on ' + liveSession().host : AGENT + '’s window on the box';
   }
@@ -154,11 +153,10 @@ var create = function (ROOT, CFG, opts) {
     return (CFG.lines && CFG.lines[what]) || NO_AGENT;
   }
   function agentLine() {
-    if (toBox && (canAsk || canTell)) return (canAsk && canTell ? 'Ask and Tell' : canAsk ? 'Ask' : 'Tell') + ' → ' + whereTo();
+    if (toBox && canTell) return 'Tell → ' + whereTo();
     var a = CFG.agent;
-    if (!a || (!canAsk && !canTell)) return lineOf('ask');
-    return (canAsk && canTell ? 'Ask and Tell' : canAsk ? 'Ask' : 'Tell') +
-           ' → ' + a.label + ' · ' + a.product;
+    if (!a || !canTell) return lineOf('tell');
+    return 'Tell → ' + a.label + ' · ' + a.product;
   }
   function yourSession() {
     return CFG.agent ? 'your ' + AGENT + ' session' : 'the session';
@@ -188,10 +186,10 @@ var create = function (ROOT, CFG, opts) {
   // rewrite what a comment says.
   var anchors = {};
   // The badge says where a thread stands, in the colours of the popover's buttons,
-  // decided by the role of the last message (SPEC 5.3): blue after an answer (Ask),
+  // decided by the role of the last message (SPEC 5.3): blue after an answer (an old Ask),
   // orange after an action (Tell), ink when a person spoke last (or a reply without
   // a role), grey once resolved. Filled means this viewer has not read the latest
-  // message yet; a hollow ring means read. A running Ask or Tell takes its colour at
+  // message yet; a hollow ring means read. A running Tell takes its colour at
   // once and breathes until the reply lands.
   function lastReply(c) {
     var r = c.replies || [];
@@ -203,7 +201,6 @@ var create = function (ROOT, CFG, opts) {
   }
   function badgeState(c) {
     if (c.status === 'resolved') return 'res';
-    if (asking && asking[c.id]) return 'ask';
     if (telling && telling[c.id]) return 'tell';
     var r = lastReply(c), role = r ? r.role : null;
     return role === 'answer' ? 'ask' : role === 'action' ? 'tell' : 'ink';
@@ -239,7 +236,7 @@ var create = function (ROOT, CFG, opts) {
   function badgeClass(c) {
     var st = badgeState(c);
     return ' rd-st-' + st + (unread(c) ? ' rd-unread' : '') +
-           (st !== 'res' && ((asking && asking[c.id]) || (telling && telling[c.id] && !tellQ)) ? ' rd-working' : '');
+           (st !== 'res' && ((telling && telling[c.id] && !tellQ)) ? ' rd-working' : '');
   }
   function anchorClass(c) {
     return 'rd-anchor' + (c.status === 'resolved' ? ' rd-resolved' : '') + (c.orphan ? ' rd-orphan' : '') +
@@ -307,7 +304,7 @@ var create = function (ROOT, CFG, opts) {
   // out of reach or the document is gone from it (`meetDocGone`). `lost`: the outage banner is up, which
   // only an outage raises and only the hub's return clears.
   var editing = false, hash = CFG.hash, stale = false, dead = false;
-  var asking = {}, telling = {}, tellQ = '';
+  var telling = {}, tellQ = '';
 
   if (!canSave && !COMMENTS.length && !(CFG.malformed || []).length) {
     // No server and nothing to show: a copy of the file, forwarded or opened
@@ -792,7 +789,7 @@ var create = function (ROOT, CFG, opts) {
   // POST, whatever its path, read by `afterWrites`, which waits for the last one before a reload (an upgrade,
   // a sign-out). `ownWrites`: the POSTs to /_/save and /_/comment only, the writes whose `changed` event the
   // hub also tells this page, read by `heard` and `checkText`, which hold what they would do until the last
-  // one is answered; a standalone Ask, Tell, cancel or pin sends no such event, so counting them there would
+  // one is answered; a standalone Tell, cancel or pin sends no such event, so counting them there would
   // hold events for as long as a job runs. `out` (below): the forms between their click and their answer,
   // each with the popover it holds, read by `writingNow`, `sendingIn` and the `sent*` questions.
   var writes = 0, afterWrites = [], docGone = false;     // docGone: no request goes out any more (meetDocGone)
@@ -800,7 +797,7 @@ var create = function (ROOT, CFG, opts) {
   var ownWrites = 0, ownSeq = 0, held = [];       // ownSeq: how many of them have started
   var lateSends = {};          // the request ids of the sends the page gave up on, until the hub's event names them
   var lastLate = {};           // of those, the ones whose latest attempt was given up on (a send again may have failed otherwise)
-  // The answer of a send started its Ask or Tell: the hub reports none that failed (`errKey`), and the send
+  // The answer of a send started its Tell: the hub reports none that failed (`errKey`), and the send
   // is not `again`, which the hub took earlier and started nothing for.
   function took(j, errKey) { return !!j && !j[errKey] && !j.again; }
   // A send sent again under its id that fails for another reason is not one the page gave up on this time, but the
@@ -1209,7 +1206,7 @@ var create = function (ROOT, CFG, opts) {
   }
   // A held reload keeps the hash of the text on screen until it runs, a merged save's among them (save). The hub
   // keeps only its newest versions of a document, so the page asks it to keep this one too (SPEC 7.4): what it
-  // sends with that hash once the form is done (a save, the reply, an Ask, a Tell) is then taken however much
+  // sends with that hash once the form is done (a save, the reply, a Tell) is then taken however much
   // was written meanwhile. Once per version, not for every change that comes while it holds, nor while that
   // request is out: one that failed is made again with the next change after its answer, one the hub refused
   // (a version it no longer knows, 409) is not, and what is sent with that version is refused as before.
@@ -1400,12 +1397,11 @@ var create = function (ROOT, CFG, opts) {
     if (late) say('What you sent reached the hub after all.');
   }
   // The jobs the hub is running on this document and the read state as it has it now, from the start-up read
-  // and from every check after a hello: an Ask or a Tell started while the page could not hear it shows in its
+  // and from every check after a hello: a Tell started while the page could not hear it shows in its
   // thread at once. Jobs are only added here; one that ended is taken off by its own event or by the reload.
   function takeJobs(j, heardBefore) {
     if (!j || j.ok === false) return;
     if (heardBefore !== jobsHeard) return;      // an event came while the answer was out: it is the newer word
-    (j.asking || []).forEach(function (id) { asking[id] = true; });
     (j.telling || []).forEach(function (id) { telling[id] = true; });
     // The drops for James's window the hub still holds open (#115): the line comes back on a new load.
     if (toBox) (j.sent || []).forEach(function (d) {
@@ -1417,7 +1413,7 @@ var create = function (ROOT, CFG, opts) {
     tellQ = j.question || '';
     Object.keys(j.seen || {}).forEach(function (id) { SEEN[id] = Math.max(SEEN[id] || 0, j.seen[id]); });
     reBadge();
-    (j.asking || []).concat(j.telling || []).forEach(touched);
+    (j.telling || []).forEach(touched);
     refresh();
   }
   // A request id for a form's send: random, so that the same words sent twice on purpose are two comments.
@@ -1658,8 +1654,8 @@ var create = function (ROOT, CFG, opts) {
       return '<p>' + lines.map(inline).join('<br>') + '</p>';
     }).join('');
   }
-  // A reply's kind is its role, derived by the hub (SPEC 5.3): "answer" is an Ask
-  // answer (blue), "action" is what a session did after a Tell (orange). Anything
+  // A reply's kind is its role, derived by the hub (SPEC 5.3): "answer" is a reply that
+  // changed nothing (blue; Ask, which wrote them, was retired), "action" is what a session did after a Tell (orange). Anything
   // else, a person or a reply without a role, is the plain name in ink.
   // The agent's own replies are signed with its display name in the file (SPEC 5.2); a reply
   // of the agent attached to this page is shown by the session's name, the file unchanged.
@@ -1694,9 +1690,9 @@ var create = function (ROOT, CFG, opts) {
   }
 
   // ---- comments update in place ---------------------------------------------
-  // Every comment write returns the document's comments, and so do the `changed`
-  // and `ask-done` events. The page takes them without reloading, so an open
-  // popover stays open while the agent answers, and the answer appears in it.
+  // Every comment write returns the document's comments, and so does the `changed`
+  // event. The page takes them without reloading, so an open popover stays open
+  // while the agent answers, and the answer appears in it.
   function flash(id) {
     var a = anchors[id];
     if (!a) return;
@@ -1830,13 +1826,9 @@ var create = function (ROOT, CFG, opts) {
   }
 
   // ---- the popover of one thread ----------------------------------------------
-  // Two agent buttons that do different things, told apart by colour as well as
-  // by name: Ask (blue) answers in the thread, like /btw, and changes nothing;
-  // Tell (orange) sends the comment into the live session, which acts on it. Each
-  // is offered only when the agent can do it (CFG.can); a job already running
-  // always shows, so it can be cancelled.
-  var ASK_TIP = 'Answers here in the thread, from a copy of the session. Reads, changes nothing.';
-  function askTip() { return toBox ? 'Sends this to ' + whereTo() + '; ' + AGENT + ' answers here in the thread.' : ASK_TIP; }
+  // One agent button: Tell (orange) sends the comment into the live session, which acts on it. It is
+  // offered only when the agent can do it (CFG.can); a job already running always shows, so it can be
+  // cancelled.
   function tellTip() {
     return toBox ? 'Sends this to ' + whereTo() + ', to act on; ' + AGENT + ' replies here.'
                  : 'Sends this to ' + yourSession() + ', which acts on it and replies here.';
@@ -1856,7 +1848,7 @@ var create = function (ROOT, CFG, opts) {
       ' is working on it in his window' + DOTS + '</div>';
     return '<div class="rd-msg rd-sent">Sent to ' + esc(s.to) + '’s window; his answer appears in this thread.</div>';
   }
-  // What a send with Ask or Tell started: on a box sheaf the line, counted from the thread as the hub's answer
+  // What a send with Tell started: on a box sheaf the line, counted from the thread as the hub's answer
   // holds it (the send's own reply in it), else the page's own wait.
   function started(id, k, j) {
     if (!took(j, k + 'Error')) return;
@@ -1864,23 +1856,19 @@ var create = function (ROOT, CFG, opts) {
       var c = (j.comments || []).filter(function (x) { return x.id === id; })[0] || byId[id];
       sentBox[id] = { n: ((c && c.replies) || []).length, to: AGENT };
       if (CAN.indexOf('relay-tell') >= 0) sentBox[id].at = whereTo();
-    } else if (k === 'ask') asking[id] = true;
-    else telling[id] = true;
+    } else telling[id] = true;
   }
-  // The Ask and Tell entries of a form: a working button for what the agent can do, a
-  // disabled one carrying its line for what it cannot (textForm shows the lines).
-  function agentButtons(askLabel, tellLabel) {
-    return [canAsk ? { k: 'ask', label: askLabel, cls: 'rd-ask', tip: askTip() }
-                   : { off: lineOf('ask'), label: askLabel, cls: 'rd-ask' },
-            canTell ? { k: 'tell', label: tellLabel, cls: 'rd-tell', tip: tellTip() }
+  // The Tell entry of a form: a working button when the agent can be told, a disabled one carrying
+  // its line when it cannot (textForm shows the line).
+  function agentButtons(tellLabel) {
+    return [canTell ? { k: 'tell', label: tellLabel, cls: 'rd-tell', tip: tellTip() }
                     : { off: lineOf('tell'), label: tellLabel, cls: 'rd-tell' }];
   }
-  // The lines under the disabled buttons, each once. A job still running keeps its own
-  // busy button, so it needs no line.
-  function offLines(skipAsk, skipTell) {
+  // The line under the disabled button. A job still running keeps its own busy button, so it
+  // needs no line.
+  function offLines(skipTell) {
     var seen = [];
-    if (!canAsk && !skipAsk) seen.push(lineOf('ask'));
-    if (!canTell && !skipTell && seen.indexOf(lineOf('tell')) < 0) seen.push(lineOf('tell'));
+    if (!canTell && !skipTell) seen.push(lineOf('tell'));
     return seen.map(function (l) { return '<div class="rd-agent-line">' + esc(l) + '</div>'; }).join('');
   }
   function offButton(what, label) {
@@ -1889,14 +1877,12 @@ var create = function (ROOT, CFG, opts) {
   var DOTS = '<span class="rd-dots" aria-hidden="true"><i></i><i></i><i></i></span>';
   function fillPopover(id) {
     var c = byId[id], sc = pop.querySelector('.rd-scroll');
-    if (asking[id] || telling[id]) delete interrupted[id];       // sent again: no longer interrupted
+    if (telling[id]) delete interrupted[id];       // sent again: no longer interrupted
     var atEnd = !sc || sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 4;
     // Every form that is still to be sent goes through the redraw, not the first one only: a failed send
     // whose text is not in the store stays on the page beside the form of this thread.
     var forms = Array.prototype.filter.call(pop.querySelectorAll('.rd-form'), function (x) { return !x.hasAttribute('data-done'); });
     pop.innerHTML = '<div class="rd-scroll">' + thread(c) +
-      (asking[id] ? '<div class="rd-msg rd-reply rd-pending"><span class="rd-who rd-who-ask">' + esc(AGENT_UC) + '</span>' +
-                    '<div class="rd-text">is answering' + DOTS + '</div></div>' : '') +
       (telling[id] ? '<div class="rd-msg rd-reply rd-pending rd-pending-tell"><span class="rd-who rd-who-tell">' + esc(AGENT_UC) + '</span>' +
                      (tellQ ? '<div class="rd-text">is waiting for your answer in your session: ' + esc(tellQ) + '</div>' +
                               answerButton() + '</div>'
@@ -1910,24 +1896,20 @@ var create = function (ROOT, CFG, opts) {
       var acts = el('div', { 'class': 'rd-actions' });
       acts.hidden = sentOf(id);      // a reply or an edit of this thread is out: its buttons wait for the answer
       acts.innerHTML = '<button data-a="reply">Reply</button>' +
-        (asking[id] ? busy('ask', AGENT_UC + ' is answering')
-         : canAsk ? '<button class="rd-alt rd-ask" data-a="ask" title="' + esc(askTip()) + '">Ask ' + esc(AGENT) + '</button>'
-         : offButton('ask', 'Ask ' + AGENT)) +
         (telling[id] ? busy('tell', AGENT_UC + ' is working')
          : canTell ? '<button class="rd-alt rd-tell" data-a="tell" title="' + esc(tellTip()) + '">Tell ' + esc(AGENT) + '</button>'
          : offButton('tell', 'Tell ' + AGENT)) +
         '<button class="rd-alt" data-a="status">' + (c.status === 'open' ? 'Resolve' : 'Reopen') + '</button>' +
         (mine(c) ? '<button class="rd-alt" data-a="edit">Edit</button><button class="rd-alt" data-a="delete">Delete</button>' : '') +
-        offLines(asking[id], telling[id]);
+        offLines(telling[id]);
       pop.appendChild(acts);
       acts.addEventListener('click', function (e) {
         var t = e.target.closest ? e.target.closest('button') : null;
         var a = t && t.getAttribute('data-a');
         if (!a) return;
-        if (a === 'cancel-ask' || a === 'cancel-tell') { cancel(id, a.slice(7)); return; }
-        // On a box sheaf Ask and Tell carry a text for James: they open the reply form, which sends it (9.12).
-        if ((a === 'ask' || a === 'tell') && toBox) { replyForm(id); return; }
-        if (a === 'ask') { ask(id); return; }
+        if (a === 'cancel-tell') { cancel(id); return; }
+        // On a box sheaf Tell carries a text for James: it opens the reply form, which sends it (9.12).
+        if (a === 'tell' && toBox) { replyForm(id); return; }
         if (a === 'tell') { tell(id); return; }
         if (a === 'status') op({ op: 'status', id: id, status: c.status === 'open' ? 'resolved' : 'open' });
         else if (a === 'delete') op({ op: 'delete', id: id });
@@ -1967,17 +1949,16 @@ var create = function (ROOT, CFG, opts) {
     var c = byId[id];
     textForm(pop, text || '', [{ k: 'ok', label: 'Send reply' },
                                { k: 'res', label: 'Send and resolve' }].concat(
-                               agentButtons('Send and ask ' + AGENT, 'Send and tell ' + AGENT)),
+                               agentButtons('Send and tell ' + AGENT)),
              function (t, k, rid, line) {
-      // The Ask and the Tell go with the reply, as they do with a new comment: the hub starts
-      // them when it takes it. A request of its own after the answer would race the reload
+      // The Tell goes with the reply, as it does with a new comment: the hub starts
+      // it when it takes it. A request of its own after the answer would race the reload
       // that op() may be starting, and be lost with the page. Taken before (`again`), the reply
-      // started them then, and the page hears of them by their events.
+      // started it then, and the page hears of it by its events.
       threadKeep(c, 'reply', t, rid, line, Date.now());
-      return op({ op: 'reply', id: id, body: t, resolve: k === 'res', ask: k === 'ask', tell: k === 'tell', rid: rid }).then(function (j) {
+      return op({ op: 'reply', id: id, body: t, resolve: k === 'res', tell: k === 'tell', rid: rid }).then(function (j) {
         if (j) threadKeep(c, 'reply', null, rid);
-        if (k === 'ask' || k === 'tell') { started(id, k, j); touched(id); }
-        if (j && j.askError) say(j.askError, true);
+        if (k === 'tell') { started(id, k, j); touched(id); }
         if (j && j.tellError) say(j.tellError, true);
         return j;
       });
@@ -2030,10 +2011,7 @@ var create = function (ROOT, CFG, opts) {
     paint(id);
     keptThreadForm(id, kind, which);
   }
-  // Ask: the session that rendered this page answers, in a fork that has the
-  // whole conversation the document came from (the agent adapter's ask). The
-  // popover stays open and shows the answer when it lands.
-  // A running Ask or Tell shows as a busy button; hovering it turns it into
+  // A running Tell shows as a busy button; hovering it turns it into
   // Cancel, and a click cancels. Tell already delivered gets a second message
   // telling the session to stop.
   function busy(what, label) {
@@ -2059,17 +2037,16 @@ var create = function (ROOT, CFG, opts) {
   function notSent(e, what) {
     return e.unreachable && e.message === UNREACHABLE ? what + ' did not go out: the hub is unreachable.' : e.message;
   }
-  async function cancel(id, what) {
-    var off = function () { if (what === 'ask') delete asking[id]; else delete telling[id]; touched(id); };
+  async function cancel(id) {
+    var off = function () { delete telling[id]; touched(id); };
     try {
-      await post('/_/cancel', { id: id, what: what });
+      await post('/_/cancel', { id: id });
       off();
-      say(what === 'ask' ? 'Ask ' + AGENT + ' cancelled.'
-                         : 'Tell ' + AGENT + ' cancelled. If it had arrived, the session was told to stop.');
+      say('Tell ' + AGENT + ' cancelled. If it had arrived, the session was told to stop.');
     } catch (e) {
       // Not answered within WAIT, the cancel may have arrived all the same, and the hub says nothing of one
       // that found nothing running: the job comes off as on an answer. A Tell still waiting shows again with
-      // the hub's next snapshot (applyComments), an Ask still running ends in its thread.
+      // the hub's next snapshot (applyComments).
       if (e.late) off();
       say(notSent(e, 'Cancel'), true);
     }
@@ -2081,14 +2058,6 @@ var create = function (ROOT, CFG, opts) {
       telling[id] = true;
       touched(id);
     } catch (e) { say(notSent(e, 'Tell ' + AGENT), true); }
-  }
-  async function ask(id) {
-    if (needClean()) return;
-    try {
-      await post('/_/ask', { id: id, hash: hash });
-      asking[id] = true;
-      touched(id);
-    } catch (e) { say(notSent(e, 'Ask ' + AGENT), true); }
   }
   // buttons: [{k, label}], the first is the primary one. done(text, k, rid) may return a promise;
   // it settles to null or false when nothing was sent, and the form comes back with its text.
@@ -2596,14 +2565,14 @@ var create = function (ROOT, CFG, opts) {
     // quote in another paragraph is another comment.
     var own = function (x) { return (d && x.quote === d.quote && x.at === d.at) || wrote.indexOf(x.rid) >= 0; };
     var mine = function (r) { return r.own === null && r.host === host; };    // this form's entry of `out`
-    textForm(pop, d || '', [{ k: 'ok', label: 'Comment' }].concat(agentButtons('Ask ' + AGENT, 'Tell ' + AGENT)),
+    textForm(pop, d || '', [{ k: 'ok', label: 'Comment' }].concat(agentButtons('Tell ' + AGENT)),
              async function (text, k, rid) {
       if (needClean()) return false;
       wrote.push(rid);
       draftsReplace(own, { quote: t.quote, body: text, block: t.block, head: t.head, tail: t.tail, occ: t.occ, rid: rid });
       try {
         var j = await post('/_/comment', { op: 'add', block: t.block, start: t.start, end: t.end,
-                                        quote: t.quote, body: text, hash: hash, ask: k === 'ask',
+                                        quote: t.quote, body: text, hash: hash,
                                         tell: k === 'tell', rid: rid });
         // The page puts the anchor where the selection ended, as the server did in
         // the file, and moves that block's pristine with it: the block is not edited.
@@ -2615,7 +2584,7 @@ var create = function (ROOT, CFG, opts) {
           r.insertNode(a);
           b.pristine = pristineWithAnchor(b, a, before);
         }
-        if (k === 'ask' || k === 'tell') started(j.id, k, j);
+        if (k === 'tell') started(j.id, k, j);
         getSel().removeAllRanges();
         draftsReplace(own);
         if (j.textSame === false || reloadPending || !applyComments(j, [j.id])) {
@@ -2636,7 +2605,6 @@ var create = function (ROOT, CFG, opts) {
         }
         // The failed form of another thread may have come back into this popover during the send: it stays.
         if (!writingNow({ text: true })) openComment(j.id);
-        if (j.askError) say(j.askError, true);
         if (j.tellError) say(j.tellError, true);
         return true;
       } catch (e) {
@@ -3116,7 +3084,7 @@ var create = function (ROOT, CFG, opts) {
   // hub knows a tab is open on the document: there is no ping. An EventSource is
   // held by the browser process rather than the renderer, so it survives a hidden
   // tab's throttled timers and closes when the tab really does. It carries
-  // `changed` and the progress of Ask and Tell.
+  // `changed` and the progress of Tell.
   var overLine = null;        // the line showNoticeOverOffer put over the offer, while the notice still holds it
   function showNotice(html) { notice.innerHTML = html; notice.hidden = false; overLine = null; }
   function hideNotice() { notice.hidden = true; notice.innerHTML = ''; overLine = null; }
@@ -3303,8 +3271,8 @@ var create = function (ROOT, CFG, opts) {
   }
   // A new boot lost every job the old hub was running: say so in their threads, and let them be sent again.
   function interruptJobs() {
-    var ids = Object.keys(asking).concat(Object.keys(telling));
-    asking = {}; telling = {}; tellQ = '';
+    var ids = Object.keys(telling);
+    telling = {}; tellQ = '';
     ids.forEach(function (id) { interrupted[id] = true; touched(id); });
   }
   // Whether the hub's answer for this address (`/_/doc`, or its 404) names a root other than the one this
@@ -3373,7 +3341,7 @@ var create = function (ROOT, CFG, opts) {
     });
 
     var live = null;
-    // How many job events (ask-*, tell-*) the stream has brought: a `/_/doc` answer read before the last of them
+    // How many job events (tell-*) the stream has brought: a `/_/doc` answer read before the last of them
     // adds no job (takeJobs), or it would bring back one that an event has ended since.
     var jobsHeard = 0;
     var data = function (ev) { try { return JSON.parse(ev.data || '{}') || {}; } catch (e) { return {}; } };
@@ -3461,23 +3429,6 @@ var create = function (ROOT, CFG, opts) {
         heardAfterCheck(function () { heard(d); });
         if (late) say('What you sent reached the hub after all.');      // over the news of applyComments
       });
-      live.addEventListener('ask-started', function (ev) {
-        var id = JSON.parse(ev.data || '{}').id;
-        asking[id] = true;
-        touched(id);
-      });
-      live.addEventListener('ask-done', function (ev) {
-        var d = JSON.parse(ev.data || '{}');
-        delete asking[d.id];
-        // Like `changed`: the comments are taken in place only when the hub measured the
-        // answer against the text this page holds (d.base); else only a reload is safe.
-        heardAfterCheck(function () {
-          if (!(d.textSame && d.base === hash && applyComments(d))) {
-            if (dirty().length) { stale = true; refresh(); say(AGENT_UC + ' answered comment ' + d.id + '. Copy your edits, then reload to read it.'); }     // a stale page refuses Save
-            else reloadWhenFree(d.id);
-          }
-        });
-      });
       live.addEventListener('tell-sent', function (ev) {
         say('Sent to ' + yourSession() + '. Its reply will appear in the thread.');
       });
@@ -3517,7 +3468,7 @@ var create = function (ROOT, CFG, opts) {
         var d = JSON.parse(ev.data || '{}');
         delete sentBox[d.id];
         touched(d.id);
-        var what = (d.kind === 'ask' ? 'Ask ' : 'Tell ') + AGENT;
+        var what = 'Tell ' + AGENT;
         say((d.error !== undefined ? what + ' failed: ' + (d.error || 'the box could not deliver it') + '.'
              : what + ': no answer from ' + AGENT + '’s window after ' + d.minutes + ' min.') +
             ' The comment is written: reply here, or send it again.', true);
@@ -3529,20 +3480,12 @@ var create = function (ROOT, CFG, opts) {
         sentBox[d.id].state = d.state;
         touched(d.id);
       });
-      ['ask-cancelled', 'tell-cancelled'].forEach(function (name) {
-        live.addEventListener(name, function (ev) {
-          var d = JSON.parse(ev.data || '{}');
-          if (name === 'ask-cancelled') delete asking[d.id]; else delete telling[d.id];
-          touched(d.id);
-        });
-      });
-      live.addEventListener('ask-failed', function (ev) {
+      live.addEventListener('tell-cancelled', function (ev) {
         var d = JSON.parse(ev.data || '{}');
-        delete asking[d.id];
+        delete telling[d.id];
         touched(d.id);
-        say('Ask ' + AGENT + ' failed: ' + (d.error || 'unknown error'), true);
       });
-      ['ask-started', 'ask-done', 'ask-failed', 'ask-cancelled', 'tell-sent', 'tell-waiting', 'tell-working',
+      ['tell-sent', 'tell-waiting', 'tell-working',
        'tell-failed', 'tell-cancelled'].forEach(function (name) {
         live.addEventListener(name, function () { jobsHeard++; });
       });
@@ -3554,7 +3497,7 @@ var create = function (ROOT, CFG, opts) {
       if (document.visibilityState !== 'visible') return;
       if (!live || live.readyState === 2) connect();
     });
-    // The jobs already running on this document (an Ask from another tab, a Tell
+    // The jobs already running on this document (a Tell from another tab
     // waiting on its person), and the read state as the hub has it now.
     var jobs = jobsHeard;
     readDoc().then(function (r) { return r.json(); }).then(function (j) {

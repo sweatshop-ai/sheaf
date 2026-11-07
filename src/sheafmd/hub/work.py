@@ -1,6 +1,6 @@
 """
 sheafmd.hub.work — Work on this (SPEC 9.12): a sheaf's sessions, the transcript of a box-hosted one, and the
-file Ask, Tell and Stop James drop for James's window.
+file Tell and Stop James drop for James's window.
 
     state(hub, address, text)       a sheaf's sessions and where its live session runs; None for another page
     sessions(fm)                    the items of the front matter's `sessions` that parse, as written (newest first)
@@ -82,13 +82,13 @@ class State:
 
     @property
     def can(self) -> list:
-        """The page's `can` (10.1): Ask and Tell go to James's window while the live session is on the box,
+        """The page's `can` (10.1): Tell goes to James's window while the live session is on the box,
         or on a sheaf of James with no session yet (the hub records his when it finds it), and `[list]`
         names the box and the folder to drop them in; Tell goes to a fork's connected relay."""
         to_james = self.live == "box" or (self.live == "" and self.james)
         if to_james and self.cfg.box and self.cfg.dirs_for(self.member).tell_dir is not None:
-            return ["box-ask", "box-tell"]
-        # Tell, never Ask, goes to a member's fork through its relay while that relay is connected (9.14).
+            return ["box-tell"]
+        # Tell goes to a member's fork through its relay while that relay is connected (9.14).
         return ["relay-tell"] if self.live == "laptop" and self.relay else []
 
 

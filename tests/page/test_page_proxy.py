@@ -1,6 +1,6 @@
 """A page served through the proxy socket (SPEC 9.9, 10.1, 10.6, 10.8): its meta block says `proxy`
 and the member's id, so it keeps drafts under keys that hold that id, says to sign in to the front
-again where it would say `sheaf open`, and shows the line of 10.6 under Ask and Tell. The page is
+again where it would say `sheaf open`, and shows the line of 10.6 under Tell. The page is
 served here by the loopback port with a member's meta block: what the script does with it is the
 same whichever listener served it."""
 import base64
@@ -51,6 +51,6 @@ def test_a_member_is_told_to_sign_in_to_the_front_again_not_to_run_sheaf_open(ta
     assert "Sign in to this site again" in n and "sheaf open" not in n and "signin-url" not in n
 
 
-def test_ask_and_tell_show_the_line_of_10_6(tab, site, as_member):
+def test_tell_shows_the_line_of_10_6(tab, site, as_member):
     tab.open()
     assert proxy.PROXY_LINE in tab.page.content()

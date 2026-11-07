@@ -8,7 +8,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent_fakes import FakeClaude
 from helpers import comment, writes_from_outside
 from pagehelp import (DOC, P1, P2, T0, at, comment_draft_key, comment_on, gone, key, mark, reload_on_clock, reloaded,
                       select, select_by_touch, toast, toasted, type_at_end, until)
@@ -2150,65 +2149,66 @@ def replies(f):
     return [r.text for r in rdc.parse(f.read_text()).comments[0].replies]
 
 
-def test_send_and_ask_starts_one_ask_and_its_answer_comes_into_the_thread(agent, thread):
+def comment_posts(page):
+    """The bodies of the /_/comment requests the page sends from here on."""
+    sent = []
+    page.on("request", lambda r: sent.append(json.loads(r.post_data))
+            if r.method == "POST" and r.url.endswith("/_/comment") else None)
+    return sent
+
+
+def test_send_and_tell_starts_one_tell_and_the_thread_waits_for_its_reply(agent, thread):
+    sent = comment_posts(thread.page)
     open_reply(thread, "and plums?")
-    thread.page.click("#rd-popover button[data-f=ask]")
-    until(lambda: replies(thread.site.file) == ["and plums?", "The answer."], what="the answer in the file")
-    until(lambda: "The answer." in thread.page.inner_text("#rd-popover .rd-scroll"), what="the answer in the thread")
-    assert len(agent.calls()) == 1
+    thread.page.click("#rd-popover button[data-f=tell]")
+    thread.page.wait_for_selector("#rd-popover .rd-pending-tell")
+    assert replies(thread.site.file) == ["and plums?"]
+    assert [(b["op"], b["tell"], "ask" in b) for b in sent] == [("reply", True, False)]
 
 
-@pytest.mark.parametrize("what", ["ask", "tell"])
-def test_ask_and_tell_of_a_thread_send_the_hash_of_the_text_the_page_holds(agent, thread, what):
+def test_tell_of_a_thread_sends_the_hash_of_the_text_the_page_holds(agent, thread):
     # The id names a thread of that text, and the hub checks it as it checks a reply's.
     held = md_hash(thread.site.file.read_text(encoding="utf-8"))
     sent = []
     thread.page.on("request", lambda r: sent.append(json.loads(r.post_data))
-                   if r.method == "POST" and r.url.endswith("/_/" + what) else None)
-    thread.page.click(f"#rd-popover button[data-a={what}]")
+                   if r.method == "POST" and r.url.endswith("/_/tell") else None)
+    thread.page.click("#rd-popover button[data-a=tell]")
     until(lambda: sent, what="the request")
     assert [(s["id"], s["hash"]) for s in sent] == [("c1", held)]
 
 
-def test_send_and_ask_while_a_reload_waits_still_starts_one_ask_and_the_page_sends_no_other(agent, thread):
-    # The Ask goes with the reply, so the page that is about to reload has nothing left to send:
+def test_send_and_tell_while_a_reload_waits_still_starts_one_tell_and_the_page_sends_no_other(agent, thread):
+    # The Tell goes with the reply, so the page that is about to reload has nothing left to send:
     # a follow-up request from it would race the navigation and could be lost with it.
-    FakeClaude(agent.dir, sleep=3)           # the Ask is still running when the page has reloaded
     open_reply(thread, "and plums?")
     sent = []
-    thread.page.on("request", lambda r: sent.append(r.url) if r.method == "POST" and r.url.endswith("/_/ask") else None)
+    thread.page.on("request", lambda r: sent.append(r.url) if r.method == "POST" and r.url.endswith("/_/tell") else None)
     mark(thread.page)
     f = thread.site.file
     f.write_text(f.read_text() + "\nA new paragraph from outside.\n", encoding="utf-8")
     thread.page.wait_for_selector("#rd-popover .rd-hold")
-    thread.page.click("#rd-popover button[data-f=ask]")
+    thread.page.click("#rd-popover button[data-f=tell]")
     reloaded(thread.page)
-    # The page that comes back is told by the hub that the thread is being answered.
-    thread.page.wait_for_selector("#rd-popover .rd-pending")
-    until(lambda: replies(f) == ["and plums?", "The answer."], timeout=15, what="the answer in the file")
-    until(lambda: "The answer." in thread.page.inner_text("#rd-popover .rd-scroll"), what="the answer in the thread")
-    assert len(agent.calls()) == 1
+    # The page that comes back is told by the hub that the thread is being told.
+    thread.page.wait_for_selector("#rd-popover .rd-pending-tell")
+    assert replies(f) == ["and plums?"]
     assert sent == []
 
 
-def test_a_new_comment_sent_with_ask_while_a_reload_waits_has_its_ask_running_on_the_page_that_comes_back(agent, tab):
-    FakeClaude(agent.dir, sleep=3)
+def test_a_new_comment_sent_with_tell_while_a_reload_waits_has_its_tell_waiting_on_the_page_that_comes_back(agent, tab):
     tab.open()
     open_comment_form(tab, P2, "pears")
     tab.page.fill("#rd-popover textarea", "about the pears")
     sent = []
-    tab.page.on("request", lambda r: sent.append(r.url) if r.method == "POST" and r.url.endswith("/_/ask") else None)
+    tab.page.on("request", lambda r: sent.append(r.url) if r.method == "POST" and r.url.endswith("/_/tell") else None)
     mark(tab.page)
     f = tab.site.file
     f.write_text(f.read_text() + "\nA new paragraph from outside.\n", encoding="utf-8")
     tab.page.wait_for_selector("#rd-popover .rd-hold")
-    tab.page.click("#rd-popover button[data-f=ask]")
+    tab.page.click("#rd-popover button[data-f=tell]")
     reloaded(tab.page)
-    tab.page.wait_for_selector("#rd-popover .rd-pending")
-    until(lambda: replies(f) == ["The answer."], timeout=15, what="the answer in the file")
-    until(lambda: "The answer." in tab.page.inner_text("#rd-popover .rd-scroll"), what="the answer in the thread")
+    tab.page.wait_for_selector("#rd-popover .rd-pending-tell")
     assert rdc.parse(f.read_text()).comments[0].body == "about the pears"
-    assert len(agent.calls()) == 1
     assert sent == []
 
 
@@ -2534,7 +2534,7 @@ def test_a_new_comment_whose_send_never_answers_comes_back_after_30_seconds_and_
     until(lambda: "Why pears?" in p.inner_text("#rd-popover"), what="the thread of the badge")
 
 
-# The same for a reply: its thread's buttons, the Cancel of a running Ask or Tell among them, were hidden
+# The same for a reply: its thread's buttons, the Cancel of a running Tell among them, were hidden
 # for as long as its send was out, so for ever when it never answered.
 def test_a_reply_whose_send_never_answers_comes_back_after_30_seconds_with_the_threads_buttons_behind_it(thread):
     p = thread.page
@@ -3964,8 +3964,8 @@ def test_enter_on_a_loose_task_item_with_an_empty_first_line_keeps_its_other_par
 
 # ── an unreachable hub, said for what failed ───────────────────────────────────
 
-@pytest.mark.parametrize("what", ["ask", "tell", "cancel-tell"])
-def test_an_ask_tell_or_cancel_the_hub_cannot_be_reached_for_says_that_it_did_not_go_out(agent, thread, what):
+@pytest.mark.parametrize("what", ["tell", "cancel-tell"])
+def test_a_tell_or_cancel_the_hub_cannot_be_reached_for_says_that_it_did_not_go_out(agent, thread, what):
     # "nothing was saved. Your edits stay on screen" is the sentence of a save; these save nothing.
     p = thread.page
     if what == "cancel-tell":
@@ -3976,12 +3976,12 @@ def test_an_ask_tell_or_cancel_the_hub_cannot_be_reached_for_says_that_it_did_no
     until(lambda: "did not go out" in toast(p) or p.wait_for_timeout(20), what="the toast")
     says = toast(p)
     assert "nothing was saved" not in says
-    assert says.startswith({"ask": "Ask", "tell": "Tell", "cancel-tell": "Cancel"}[what])
+    assert says.startswith({"tell": "Tell", "cancel-tell": "Cancel"}[what])
     p.unroute(f"**/_/{what.split('-')[0]}")
 
 
 # A comment, reply, edit, status change or deletion the hub cannot be reached for saves nothing either: the
-# page says what did not go out, as for an Ask, Tell or Cancel, not "nothing was saved".
+# page says what did not go out, as for a Tell or Cancel, not "nothing was saved".
 @pytest.mark.parametrize("what, says", [("reply", "Your reply"), ("edit", "Your edit"), ("status", "The status change"),
                                          ("delete", "The deletion"), ("comment", "Your comment")])
 def test_a_comment_reply_edit_status_or_deletion_the_hub_cannot_be_reached_for_says_that_it_did_not_go_out(thread, what, says):

@@ -1,9 +1,9 @@
 """
-sheafmd.hub.jobs — the job runner of the hub (SPEC 8.10): the processes of every Ask and Tell.
+sheafmd.hub.jobs — the job runner of the hub (SPEC 8.10): the processes of every Tell.
 
 One runner owns them all. Each child runs in its own process group (`start_new_session`), so
 Cancel, a timeout and a hub stop signal that group and nothing else: the only signal this module
-sends is `killpg` on the group of a child it started. A thread has at most one Ask and at most
+sends is `killpg` on the group of a child it started. A thread has at most
 one Tell. Jobs die with the hub; nothing reattaches.
 
 `Job.run` is the `Runner` an adapter delivers through: a child that was killed comes back with a
@@ -112,12 +112,12 @@ class Jobs:
         self._threads: list[threading.Thread] = []
 
     def start(self, kind: str, address: str, cid: str, work, on_error=None) -> Job | None:
-        """Run `work(job)` in a thread. None when `kind` is "ask" or "tell" and this thread
+        """Run `work(job)` in a thread. None when `kind` is "tell" and this thread
         already has one running. `on_error(exception)` runs when `work` raises; the failure is
         written to the diagnostics log either way."""
         job = Job(self, kind, address, cid)
         with self._lock:
-            if kind in ("ask", "tell") and any(j.is_on(kind, address, cid) for j, _ in self._jobs):
+            if kind == "tell" and any(j.is_on(kind, address, cid) for j, _ in self._jobs):
                 return None
             t = threading.Thread(target=self._go, args=(job, work, on_error), daemon=True)
             # Started under the lock: the job is listed only with a thread that runs (a `kill_all` or a
@@ -187,9 +187,9 @@ class Jobs:
             j.cancel()
         return bool(found)
 
-    def cancel_under(self, prefix: str, kinds=("ask", "tell")) -> int:
+    def cancel_under(self, prefix: str, kinds=("tell",)) -> int:
         """Cancel the jobs of `kinds` on every document whose address starts with `prefix`
-        (`<root>/`): a root that is forgotten takes its running Asks and Tells with it. A "stop"
+        (`<root>/`): a root that is forgotten takes its running Tells with it. A "stop"
         message to a session is not one of them. Returns how many."""
         with self._lock:
             found = [j for j, _ in self._jobs if j.kind in kinds and j.address.startswith(prefix)]

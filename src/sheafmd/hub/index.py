@@ -51,7 +51,7 @@ class Status(dict):
     """The data of a `status` event (8.8), marked with whether the file itself moved: the
     document came or went, or its open comments or its last change differ. The mark is not
     sent (`json.dumps` reads only the items). A member's index stream is sent only these: a dot
-    that moved alone says what the hub's person read, or that the hub account's Ask or Tell
+    that moved alone says what the hub's person read, or that the hub account's Tell
     started or ended (9.9)."""
     def __init__(self, data: dict, files: bool, at: int | None = None, sig: tuple | None = None,
                  members_only: bool = False):
@@ -116,7 +116,7 @@ def _row_html(d: dict, now: float) -> str:
         label = (f"{_plural(d['unread'], 'thread')} with a message you have not read"
                  if d["unread"] else "a session is waiting for you")
     else:
-        label = {"orange": "an Ask or Tell is running", "green": "no open comments"}.get(
+        label = {"orange": "a Tell is running", "green": "no open comments"}.get(
             d["dot"]) or f"{_plural(d['open'], 'open comment')}"
     count = ""
     if d["open"]:
@@ -232,7 +232,7 @@ class Index:
     def _live_state(self, only: str | None = None) -> tuple[set, set]:
         """The documents whose session waits on the person, and those a job runs on; `only` names the
         one document that is asked about."""
-        waiting, running = set(), {doc for doc, _ in self.hub.jobs_asking() if only in (None, doc)}
+        waiting, running = set(), set()
         entries = self.hub.entries
         for address, e in (list(entries.items()) if only is None else [(only, entries.get(only))]):
             if e is None:
@@ -253,7 +253,7 @@ class Index:
         # SPEC 8.7: unread is an open thread whose last message is not the person's and that has
         # more messages than they have seen. A member is the person of their own index (9.9), and
         # is told nothing of the hub account's agent session: neither that it waits on its person
-        # nor that an Ask or a Tell of it runs.
+        # nor that a Tell of it runs.
         unread = sum(1 for cid, n, by in s.threads if by != me and n > seen.get(cid, 0))
         sees_session = member is None
         # A member's orange is James's session working on a drop of theirs, by its supervisor's word (9.15).

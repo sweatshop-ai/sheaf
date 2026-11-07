@@ -1,5 +1,5 @@
 """Work on this (SPEC 10.2, 10.6): on a member's page of a sheaf, the ☰ menu offers the ways to work on the
-session behind it (attach on the box, fork to your machine) and lists its sessions; and Ask and Tell reach
+session behind it (attach on the box, fork to your machine) and lists its sessions; and Tell reaches
 James's window on the box when the live session is there, or are off when it runs on someone's laptop.
 The page is served by the loopback port with a member's meta block that holds `work` (and `can`) as the
 hub's proxy socket writes it: what the script does with it is the same whichever listener served it."""
@@ -250,16 +250,16 @@ def test_a_click_outside_closes_the_popover(tab):
     assert not tab.page.locator("#rd-work").is_visible()
 
 
-# ---- Ask and Tell on a box-hosted sheaf (10.6, 9.12) ---------------------------------------------------------
+# ---- Tell on a box-hosted sheaf (10.6, 9.12) ---------------------------------------------------------
 
-BOX_CAN = ("box-ask", "box-tell")
+BOX_CAN = ("box-tell",)
 START, END = at(P1, "apples"), at(P1, "apples", None)
 
 
 def agent_buttons(page, scope):
-    """The Ask and Tell buttons of the form or the actions in `scope`: (label, enabled) each."""
+    """The Tell button of the form or the actions in `scope`: (label, enabled)."""
     out = []
-    for k in ("ask", "tell"):
+    for k in ("tell",):
         b = page.locator(f"{scope} button.rd-{k}").first
         out.append((b.inner_text(), b.is_enabled()))
     return out
@@ -272,78 +272,77 @@ def comment_form(tab):
 
 
 def sent_to_box(tab):
-    """The bodies of the page's /_/comment requests, which go on to the hub without ask and tell (the loopback
-    hub has no James); and the paths of any /_/ask or /_/tell request, which a box sheaf never sends."""
+    """The bodies of the page's /_/comment requests, which go on to the hub without tell (the loopback
+    hub has no James); and the paths of any /_/tell request, which a box sheaf never sends."""
     bodies, others = [], []
 
     def comment(route):
         b = json.loads(route.request.post_data)
         bodies.append(b)
-        route.continue_(post_data=json.dumps({**b, "ask": False, "tell": False}))
+        route.continue_(post_data=json.dumps({**b, "tell": False}))
 
     tab.page.route(re.compile(r"/_/comment$"), comment)
-    tab.page.route(re.compile(r"/_/(ask|tell)$"), lambda route: (others.append(route.request.url), route.abort()))
+    tab.page.route(re.compile(r"/_/tell$"), lambda route: (others.append(route.request.url), route.abort()))
     return bodies, others
 
 
-def test_on_a_box_sheaf_ask_and_tell_name_james_and_outlast_the_doc_answer(tab):
+def test_on_a_box_sheaf_tell_names_james_and_outlasts_the_doc_answer(tab):
     as_member(tab, work(), can=BOX_CAN)
     tab.open()
     until(lambda: tab.docs, what="the page's /_/doc answer")
     comment_form(tab)
-    assert agent_buttons(tab.page, "#rd-popover .rd-form") == [("Ask James", True), ("Tell James", True)]
+    assert agent_buttons(tab.page, "#rd-popover .rd-form") == [("Tell James", True)]
     assert tab.page.locator("#rd-popover .rd-agent-line").count() == 0
     tab.page.click("#rd-menu-btn")
-    assert tab.page.inner_text("#rd-agent") == "Ask and Tell → James’s window on the box"
+    assert tab.page.inner_text("#rd-agent") == "Tell → James’s window on the box"
 
 
-@pytest.mark.parametrize("k", ["ask", "tell"])
-def test_a_comment_sent_to_james_goes_with_the_comment_and_says_so_without_a_spinner(tab, k):
+def test_a_comment_sent_to_james_goes_with_the_comment_and_says_so_without_a_spinner(tab):
     as_member(tab, work(), can=BOX_CAN)
     tab.open()
     bodies, others = sent_to_box(tab)
     comment_form(tab)
     tab.page.fill("#rd-popover textarea", "What does James think?")
-    tab.page.click(f"#rd-popover .rd-form button.rd-{k}")
+    tab.page.click("#rd-popover .rd-form button.rd-tell")
     until(lambda: SENT in tab.page.inner_text("#rd-popover"), what="the sent line in the thread")
-    assert [(b["op"], b["ask"], b["tell"]) for b in bodies] == [("add", k == "ask", k == "tell")]
+    assert [(b["op"], b.get("ask"), b["tell"]) for b in bodies] == [("add", None, True)]
     assert others == []
     assert tab.page.locator("#rd-popover .rd-pending, #rd-popover .rd-dots").count() == 0
     assert tab.page.locator("#rd-popover .rd-busy").count() == 0
 
 
-def test_the_threads_own_ask_opens_the_reply_form_and_sends_through_the_comment(tab):
+def test_the_threads_own_tell_opens_the_reply_form_and_sends_through_the_comment(tab):
     update_file(tab.site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
                                                          "Ada", "2026-10-14T10:00")[0])
     as_member(tab, work(), can=BOX_CAN)
     tab.open()
     bodies, others = sent_to_box(tab)
     tab.page.click(".rd-badge")
-    tab.page.click("#rd-popover .rd-actions button.rd-ask")
+    tab.page.click("#rd-popover .rd-actions button.rd-tell")
     tab.page.wait_for_selector("#rd-popover .rd-form textarea")
     tab.page.fill("#rd-popover .rd-form textarea", "And you, James?")
-    tab.page.click("#rd-popover .rd-form button.rd-ask")
+    tab.page.click("#rd-popover .rd-form button.rd-tell")
     until(lambda: SENT in tab.page.inner_text("#rd-popover"), what="the sent line in the thread")
-    assert [(b["op"], b["ask"], b["tell"]) for b in bodies] == [("reply", True, False)]
+    assert [(b["op"], b.get("ask"), b["tell"]) for b in bodies] == [("reply", None, True)]
     assert others == []
 
 
-def test_a_sheaf_live_on_a_laptop_turns_ask_and_tell_off_with_its_line(tab):
+def test_a_sheaf_live_on_a_laptop_turns_tell_off_with_its_line(tab):
     as_member(tab, work(sessions=[LAPTOP, BOX], live="laptop"))
     tab.open()
     comment_form(tab)
     line = "This session runs on Thierry’s machine: open it there."
-    assert [e for _, e in agent_buttons(tab.page, "#rd-popover .rd-form")] == [False, False]
+    assert [e for _, e in agent_buttons(tab.page, "#rd-popover .rd-form")] == [False]
     assert tab.page.locator("#rd-popover .rd-agent-line").all_inner_texts() == [line]
     assert proxy.PROXY_LINE not in tab.page.inner_text("#rd-popover")
 
 
-def test_a_fork_the_doc_answer_reports_turns_box_ask_and_tell_off(tab):
+def test_a_fork_the_doc_answer_reports_turns_box_tell_off(tab):
     as_member(tab, work(), can=BOX_CAN, doc_work=work(sessions=[LAPTOP, BOX], live="laptop"), doc_can=())
     tab.open()
     until(lambda: tab.docs, what="the page's /_/doc answer")
     comment_form(tab)
-    assert [e for _, e in agent_buttons(tab.page, "#rd-popover .rd-form")] == [False, False]
+    assert [e for _, e in agent_buttons(tab.page, "#rd-popover .rd-form")] == [False]
     assert "Thierry’s machine" in tab.page.inner_text("#rd-popover .rd-agent-line")
 
 
@@ -360,7 +359,7 @@ def test_a_sheaf_of_james_with_no_session_yet_names_james(tab):
     as_member(tab, work(sessions=[], live="", fork=None, attach=None), can=BOX_CAN)
     tab.open()
     comment_form(tab)
-    assert agent_buttons(tab.page, "#rd-popover .rd-form") == [("Ask James", True), ("Tell James", True)]
+    assert agent_buttons(tab.page, "#rd-popover .rd-form") == [("Tell James", True)]
 
 
 def test_the_sent_line_outlasts_the_reload_a_recorded_session_brings(tab):
@@ -549,17 +548,17 @@ def relayed(connected):
     return {**work(sessions=[LAPTOP, BOX], attach=None, live="laptop", fork=None), "relay": connected}
 
 
-def test_a_fork_with_its_relay_connected_offers_tell_to_its_session_and_no_ask(tab):
+def test_a_fork_with_its_relay_connected_offers_tell_to_its_session(tab):
     as_member(tab, relayed(True), can=["relay-tell"])
     tab.open()
     bodies, others = sent_to_box(tab)
     comment_form(tab)
-    assert [e for _, e in agent_buttons(tab.page, "#rd-popover .rd-form")] == [False, True]
+    assert [e for _, e in agent_buttons(tab.page, "#rd-popover .rd-form")] == [True]
     tab.page.fill("#rd-popover textarea", "Send the draft to Joey")
     tab.page.click("#rd-popover .rd-form button.rd-tell")
     sent = "Sent to Thierry’s session on thierry-laptop; the answer appears in this thread."
     until(lambda: sent in tab.page.inner_text("#rd-popover"), what="the sent line in the thread")
-    assert [(b["op"], b["ask"], b["tell"]) for b in bodies] == [("add", False, True)]
+    assert [(b["op"], b.get("ask"), b["tell"]) for b in bodies] == [("add", None, True)]
     assert others == []
     open_work(tab.page)
     assert tab.page.inner_text("#rd-work .rd-relay") == "Tell goes to Thierry’s session on thierry-laptop."
@@ -580,14 +579,14 @@ def test_a_relay_that_connects_turns_tell_on_without_a_reload(tab):
     tab.open()
     until(lambda: tab.docs, what="the page's first /_/doc answer")
     comment_form(tab)
-    assert [e for _, e in agent_buttons(tab.page, "#rd-popover .rd-form")] == [False, False]
+    assert [e for _, e in agent_buttons(tab.page, "#rd-popover .rd-form")] == [False]
     w["relay"], can[:] = True, ["relay-tell"]
     seen = len(tab.docs)
     tab.site.hub.entry(DOC).bus.publish("relay", {})
     until(lambda: len(tab.docs) > seen, what="the /_/doc the relay event asks for")
     tab.page.keyboard.press("Escape")
     comment_form(tab)
-    assert [e for _, e in agent_buttons(tab.page, "#rd-popover .rd-form")] == [False, True]
+    assert [e for _, e in agent_buttons(tab.page, "#rd-popover .rd-form")] == [True]
 
 
 def test_a_relay_gone_past_its_grace_turns_tell_off_without_a_reload(tab):
@@ -600,4 +599,4 @@ def test_a_relay_gone_past_its_grace_turns_tell_off_without_a_reload(tab):
     tab.site.hub.entry(DOC).bus.publish("relay", {})
     until(lambda: len(tab.docs) > seen, what="the /_/doc the relay event asks for")
     comment_form(tab)
-    assert [e for _, e in agent_buttons(tab.page, "#rd-popover .rd-form")] == [False, False]
+    assert [e for _, e in agent_buttons(tab.page, "#rd-popover .rd-form")] == [False]

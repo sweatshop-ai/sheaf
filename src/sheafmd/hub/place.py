@@ -446,8 +446,15 @@ def private_member(hub, address: str, fm: dict | None = None):
     is told to no one else."""
     if not getattr(hub, "private_roots", None):
         return None
-    if (at := hub.roots.get(Address.parse(address).root)) is not None and at.id in hub.private_roots:
-        return hub.private_roots[at.id]         # the private root addressed by its own name: all of it is the member's
+    at = Address.parse(address)
+    if (named := hub.roots.get(at.root)) is not None:
+        # Judged by where the file really is, not by the root the address names: the private root's own name, a root
+        # around it and a link into it all reach the same file.
+        real = os.path.realpath(named.path / at.rel)
+        for member, private in _private_roots(hub).items():
+            top = os.path.realpath(private.path)
+            if real == top or real.startswith(top.rstrip("/") + "/"):
+                return member
     got = _where(hub, address)
     if got is None:
         return None

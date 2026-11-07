@@ -258,3 +258,29 @@ def test_door_write_through_an_entry_bound_to_the_list_repo(world, tool):
     assert w.hub.commits.settle()
     assert NAME in git(w.two.base / "private.git", "log", "--name-only", "--format=").split()
     assert not (w.two.list_repo / NAME).exists() and not hub_rows("commit-refused")
+
+
+def test_unbound_token_by_a_root_around_the_private_root(world):
+    w = world
+    w.put(PROJECT_WIDE)
+    (w.two.base / "note.md").write_text("# note\n", encoding="utf-8")
+    outer = w.hub.roots.for_document(w.two.base / "note.md")          # a folder above both repos, as a render registers it
+    assert outer.id not in w.hub.private_roots
+    doc = f"{outer.name}/private/{NAME}"
+    for tool, args in (("read", {}), ("threads", {}),
+                       ("update", {"text": PROJECT_WIDE + "x", "expected_hash": md_hash(PROJECT_WIDE)})):
+        assert call(w.door, tool, token=w.tokens["loose"], doc=doc, **args)[0], tool
+    is_error, got = call(w.door, "documents", token=w.tokens["loose"], open_only=False, root=outer.name)
+    assert NAME not in str(got)
+    assert (w.two.private_repo / NAME).read_text(encoding="utf-8") == PROJECT_WIDE
+    assert not call(w.door, "read", token=w.tokens["tok-a"], doc=w.address)[0]         # the owner reads it by the list's name
+
+
+def test_a_deletion_is_told_to_nobody_else_whoever_read_the_file_first(world, monkeypatch):
+    w = world
+    w.put(PRIVATE)
+    w.hub.entry(w.address)                                # the file read by the hub alone, never through a member's check
+    w.hub.judged(w.address)
+    (w.two.private_repo / NAME).unlink()
+    b = w.hub.proxy.members[B]
+    assert not w.hub.visible(b, w.address, never_read=False)

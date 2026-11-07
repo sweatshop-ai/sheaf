@@ -2,6 +2,7 @@
 assignees, `projects.toml` or the front matter say, another member and a token bound to nobody get the 404 of a missing
 document, and a file that names a member as its owner in the list's repo is nobody's. Each refusal has the owner's own
 call as its positive control, on the same route."""
+import os
 import time
 
 import pytest
@@ -260,20 +261,36 @@ def test_door_write_through_an_entry_bound_to_the_list_repo(world, tool):
     assert not (w.two.list_repo / NAME).exists() and not hub_rows("commit-refused")
 
 
-def test_unbound_token_by_a_root_around_the_private_root(world):
+def test_a_root_around_the_private_root_is_not_registered(world):
+    """Rule 1 (SPEC 9.11): no registered root encloses, equals or lies inside a private root: a render of a folder above
+    both repos registers nothing."""
+    from sheafmd.hub.roots import Nested
     w = world
-    w.put(PROJECT_WIDE)
     (w.two.base / "note.md").write_text("# note\n", encoding="utf-8")
-    outer = w.hub.roots.for_document(w.two.base / "note.md")          # a folder above both repos, as a render registers it
-    assert outer.id not in w.hub.private_roots
-    doc = f"{outer.name}/private/{NAME}"
-    for tool, args in (("read", {}), ("threads", {}),
-                       ("update", {"text": PROJECT_WIDE + "x", "expected_hash": md_hash(PROJECT_WIDE)})):
-        assert call(w.door, tool, token=w.tokens["loose"], doc=doc, **args)[0], tool
-    is_error, got = call(w.door, "documents", token=w.tokens["loose"], open_only=False, root=outer.name)
-    assert NAME not in str(got)
-    assert (w.two.private_repo / NAME).read_text(encoding="utf-8") == PROJECT_WIDE
-    assert not call(w.door, "read", token=w.tokens["tok-a"], doc=w.address)[0]         # the owner reads it by the list's name
+    before = {r.name for r in w.hub.roots.all()}
+    with pytest.raises(Nested):
+        w.hub.roots.for_document(w.two.base / "note.md")
+    assert {r.name for r in w.hub.roots.all()} == before
+
+
+def test_the_hub_does_not_start_with_a_root_around_a_private_root(two):
+    from sheafmd.hub.proxy import ProxyError
+    cfg = two.config(a={"github": "login-a", "tokens": ["tok-a"]}, b={"github": "login-b", "tokens": ["tok-b"]})
+    (two.base / "note.md").write_text("# note\n", encoding="utf-8")
+    from sheafmd.hub.roots import Roots
+    Roots()._add(two.base, False)                       # the registry holds a root above both repos, as an older hub left it
+    with pytest.raises(ProxyError, match="encloses or lies inside the private root"):
+        two.hub(cfg)
+
+
+def test_the_hub_does_not_start_without_the_private_root_folder(two):
+    import shutil
+
+    from sheafmd.hub.proxy import ProxyError
+    cfg = two.config(a={"github": "login-a", "tokens": ["tok-a"]}, b={"github": "login-b", "tokens": ["tok-b"]})
+    shutil.rmtree(two.private_repo)
+    with pytest.raises(ProxyError, match="is not a folder"):
+        two.hub(cfg)
 
 
 def test_a_deletion_is_told_to_nobody_else_whoever_read_the_file_first(world, monkeypatch):
@@ -286,18 +303,11 @@ def test_a_deletion_is_told_to_nobody_else_whoever_read_the_file_first(world, mo
     assert not w.hub.visible(b, w.address, never_read=False)
 
 
-def _enclosing(w: World):
-    (w.two.base / "note.md").write_text("# note\n", encoding="utf-8")
-    return w.hub.roots.for_document(w.two.base / "note.md")
-
-
 def _create_docs(w: World) -> dict:
     """The ways a door `create` can name a new page inside the private root: its own registered name, a root around it."""
     own = w.hub.roots.get(w.hub.roots.lookup(w.two.private_repo / NAME).name).name
     return {"own": f"{own}/acme/blog/new.md", "own-taken": f"{own}/{NAME}",
-            "own-nofolder": f"{own}/nowhere/at/all/new.md", "outer": f"{_enclosing(w).name}/private/acme/blog/new.md",
-            "outer-taken": f"{_enclosing(w).name}/private/{NAME}",
-            "outer-nofolder": f"{_enclosing(w).name}/private/nowhere/at/all/new.md"}
+            "own-nofolder": f"{own}/nowhere/at/all/new.md"}
 
 
 @pytest.mark.parametrize("who", ["loose", "tok-b"])
@@ -320,26 +330,21 @@ def test_door_create_in_a_private_root_by_a_loose_token_writes_no_commit(world):
     w = world
     w.put(PROJECT_WIDE)
     before = git(w.two.private_repo, "rev-list", "--count", "HEAD")
-    call(w.door, "create", token=w.tokens["loose"], doc=_create_docs(w)["outer"], text="# new\n")
+    call(w.door, "create", token=w.tokens["loose"], doc=_create_docs(w)["own"], text="# new\n")
     assert w.hub.commits.settle()
     assert git(w.two.private_repo, "rev-list", "--count", "HEAD") == before
     assert not (w.two.private_repo / "acme/blog/new.md").exists()
 
 
-def test_a_private_root_forgotten_while_a_root_around_it_stays_is_still_private(world):
+def test_a_forgotten_private_root_is_still_private(world):
     w = world
     w.put(PROJECT_WIDE)
-    outer = _enclosing(w)
-    doc = f"{outer.name}/private/{NAME}"
-    assert call(w.door, "read", token=w.tokens["loose"], doc=doc)[0]
     own = w.hub.roots.lookup(w.two.private_repo / NAME).name
     w.hub.forget_root(own)
     assert own not in {r.name for r in w.hub.roots.all()} and w.hub._private_paths
     for tool, args in (("read", {}), ("threads", {}),
                        ("update", {"text": PROJECT_WIDE + "x", "expected_hash": md_hash(PROJECT_WIDE)})):
-        assert call(w.door, tool, token=w.tokens["loose"], doc=doc, **args)[0], tool
-    is_error, got = call(w.door, "documents", token=w.tokens["loose"], open_only=False, root=outer.name)
-    assert NAME not in str(got)
+        assert call(w.door, tool, token=w.tokens["loose"], doc=w.address, **args)[0], tool
     assert (w.two.private_repo / NAME).read_text(encoding="utf-8") == PROJECT_WIDE
 
 
@@ -350,7 +355,7 @@ def test_door_comment_verbs_by_a_loose_token_reach_nothing_of_a_private_root(wor
     w.put(PROJECT_WIDE)
     comment(w.two.private_repo / NAME, quote="Secret words.")
     own = w.hub.roots.lookup(w.two.private_repo / NAME).name
-    docs = [f"{own}/{NAME}", f"{_enclosing(w).name}/private/{NAME}"]
+    docs = [f"{own}/{NAME}", w.address]
     if forget:
         w.hub.forget_root(own)
         docs = docs[1:]
@@ -382,15 +387,13 @@ def _state_world(two, monkeypatch, state):
     w.put(PROJECT_WIDE)
     comment(two.private_repo / NAME, quote="Secret words.")
     own = w.hub.roots.lookup(two.private_repo / NAME).name
-    outer = _enclosing(w).name
     if state == "refused":
         assert not w.hub.private_roots and w.hub._private_paths
     if state == "forgotten":
         w.hub.forget_root(own)
-    docs = {"registered": [f"{own}/{NAME}", w.address, f"{outer}/private/{NAME}"],
-            "refused": [f"{own}/{NAME}", f"{outer}/private/{NAME}"],
-            "forgotten": [f"{outer}/private/{NAME}"],
-            "enclosing": [f"{outer}/private/{NAME}"],
+    docs = {"registered": [f"{own}/{NAME}", w.address],
+            "refused": [f"{own}/{NAME}"],
+            "forgotten": [w.address],
             "list": [w.address]}[state]
     return w, docs
 
@@ -401,12 +404,14 @@ def _args(tool, doc):
             "create": {"text": "# new\n"}}[tool]
 
 
-@pytest.mark.parametrize("state", ["registered", "refused", "forgotten", "enclosing", "list"])
+@pytest.mark.parametrize("state", ["registered", "refused", "forgotten", "list"])
 @pytest.mark.parametrize("kind", ["tok-b", "loose"])
 @pytest.mark.parametrize("tool", ["read", "threads", "reply", "resolve", "update", "create", "documents"])
 def test_invariant_table_a_caller_that_is_not_the_member_gets_nothing_inside_the_set(two, monkeypatch, state, kind, tool):
     w, docs = _state_world(two, monkeypatch, state)
     before = (two.private_repo / NAME).read_text(encoding="utf-8")
+    if state == "forgotten" and tool == "create":
+        docs = []           # a forgotten root holds no name: a list name is free to make, as any free name (9.11)
     for doc in docs:
         if tool == "documents":
             root = doc.split("/")[0]
@@ -429,8 +434,6 @@ def test_invariant_table_the_member_and_the_key_are_the_controls(two, monkeypatc
     w, docs = _state_world(two, monkeypatch, state)
     token = w.tokens[kind] if kind else None
     for doc in docs:
-        if doc == f"{_enclosing(w).name}/private/{NAME}":
-            continue                                   # a root around the private one is not the member's (9.11)
         is_error, got = call(w.door, tool, token=token, doc=doc, **_args(tool, doc))
         assert not is_error, (kind, doc, got)
 
@@ -490,3 +493,159 @@ def test_in_private_by_identity_is_off_without_a_stat_answer():
 def test_the_hub_records_the_identity_of_each_configured_private_root(world):
     w = world
     assert list(w.hub._private_ids.values()) == list(w.hub._private_paths.values()) == ["member-a-id"]
+
+
+# ── rule 2: one open, judged on what was opened (sheafmd.beneath) ───────────────────────────────────────────────
+
+@pytest.fixture(params=["openat2", "walk"])
+def mode(request, monkeypatch):
+    from sheafmd import beneath
+    monkeypatch.setattr(beneath, "FALLBACK", request.param == "walk")
+    return request.param
+
+
+def _shared_root(w: World):
+    """A root that is no private root's, with a link `x` inside it that the test swaps: (its name, the folder, the link)."""
+    top = w.two.base / "shared"
+    for sub in ("one", "two"):
+        (top / sub / "acme/blog").mkdir(parents=True)
+        (top / sub / NAME).write_text(f"# {sub}\n\nShared words {sub}.\n", encoding="utf-8")
+    (top / "x").symlink_to("one")
+    (top / "note.md").write_text("# note\n", encoding="utf-8")
+    root = w.hub.roots.for_document(top / "note.md")          # a folder of its own: a root that holds `one`, `two` and `x`
+    assert root.path == top.resolve()
+    return root, top, top / "x"
+
+
+def _swap(link, target):
+    tmp = link.with_name(link.name + ".tmp")
+    tmp.symlink_to(target)
+    os.replace(tmp, link)
+
+
+def test_a_link_swapped_between_the_check_and_the_open_to_a_private_root_gives_no_private_byte(world, mode, monkeypatch):
+    """The reviewer's race, made deterministic: the link is swapped for one to the private repo after the first look at
+    the address and before the file is opened. The open is beneath the root, so a link out of it is refused."""
+    from sheafmd import beneath
+    w = world
+    w.put(PRIVATE)
+    root, top, link = _shared_root(w)
+    doc = f"{root.name}/x/{NAME}"
+    assert not call(w.door, "read", token=w.tokens["loose"], doc=doc)[0]
+    real = beneath.open_beneath
+    calls = []
+
+    def swapping(t, rel):
+        if not calls:
+            calls.append(1)
+            _swap(link, w.two.private_repo)
+        return real(t, rel)
+    monkeypatch.setattr(beneath, "open_beneath", swapping)
+    is_error, got = call(w.door, "read", token=w.tokens["loose"], doc=doc)
+    assert calls and "Secret words" not in str(got)
+    assert is_error
+
+
+def test_a_link_swapped_to_another_place_inside_the_root_is_followed_as_before(world, mode, monkeypatch):
+    from sheafmd import beneath
+    w = world
+    root, top, link = _shared_root(w)
+    doc = f"{root.name}/x/{NAME}"
+    real = beneath.open_beneath
+    monkeypatch.setattr(beneath, "open_beneath", lambda t, rel: (_swap(link, "two"), real(t, rel))[1])
+    is_error, got = call(w.door, "read", token=w.tokens["loose"], doc=doc)
+    assert not is_error and "Shared words two." in str(got)
+
+
+def test_a_link_to_a_private_root_in_the_path_of_a_door_read_update_and_comment_is_refused(world, mode):
+    w = world
+    w.put(PRIVATE)
+    comment(w.two.private_repo / NAME, quote="Secret words.")
+    root, top, link = _shared_root(w)
+    link.unlink()
+    link.symlink_to(w.two.private_repo)             # a folder link, then a file link, to the private repo
+    (top / "f.md").symlink_to(w.two.private_repo / NAME)
+    before = (w.two.private_repo / NAME).read_text(encoding="utf-8")
+    for doc in (f"{root.name}/x/{NAME}", f"{root.name}/f.md"):
+        for tool, args in (("read", {}), ("threads", {}), ("reply", {"id": "c1", "text": "Done."}),
+                           ("update", {"text": PRIVATE + "x", "expected_hash": md_hash(PRIVATE)})):
+            is_error, got = call(w.door, tool, token=w.tokens["loose"], doc=doc, **args)
+            assert is_error and "Secret" not in str(got), (doc, tool)
+    assert (w.two.private_repo / NAME).read_text(encoding="utf-8") == before
+
+
+def test_the_walk_and_the_kernel_open_say_the_same_for_links(tmp_path, mode):
+    from sheafmd import beneath
+    top, out = tmp_path / "top", tmp_path / "out"
+    (top / "a/b").mkdir(parents=True)
+    out.mkdir()
+    (top / "a/b/f.md").write_text("hi", encoding="utf-8")
+    (out / "s.md").write_text("secret", encoding="utf-8")
+    (top / "a/lnk").symlink_to("b")
+    (top / "rel.md").symlink_to("a/b/f.md")
+    (top / "abs.md").symlink_to(top / "a/b/f.md")
+    (top / "out.md").symlink_to(out / "s.md")
+    (top / "up.md").symlink_to("../out/s.md")
+    (top / "a/dots.md").symlink_to("../../out/s.md")
+    (top / "loop.md").symlink_to("loop.md")
+    for rel in ("a/b/f.md", "a/lnk/f.md", "rel.md", "abs.md", "a/../a/b/f.md"):
+        with beneath.open_beneath(top, rel) as op:
+            assert op.text() == "hi", rel
+    for rel in ("out.md", "up.md", "a/dots.md", "loop.md", "../out/s.md", "a", "nope.md"):
+        with pytest.raises(OSError):
+            beneath.open_beneath(top, rel)
+
+
+def test_a_write_through_a_link_replaces_the_target_and_only_while_it_is_the_opened_file(tmp_path, mode):
+    from sheafmd import beneath
+    top = tmp_path / "top"
+    top.mkdir()
+    (top / "f.md").write_text("one", encoding="utf-8")
+    (top / "l.md").symlink_to("f.md")
+    with beneath.open_beneath(top, "l.md") as op:
+        op.write("two")
+    assert (top / "l.md").is_symlink() and (top / "f.md").read_text(encoding="utf-8") == "two"
+    with beneath.open_beneath(top, "l.md") as op:
+        (top / "g.md").write_text("other", encoding="utf-8")
+        os.replace(top / "g.md", top / "f.md")              # someone else replaced the file since it was opened
+        with pytest.raises(OSError):
+            op.write("three")
+    assert (top / "f.md").read_text(encoding="utf-8") == "other" and not list(top.glob(".*tmp"))
+
+
+def test_privacy_is_judged_on_the_descriptors_of_the_open(world, mode):
+    from sheafmd import beneath
+    from sheafmd.hub import place
+    w = world
+    w.put(PRIVATE)
+    with beneath.open_beneath(w.two.private_repo, NAME) as op:
+        assert place.opened_private(w.hub, op) == "member-a-id"
+    root, top, _ = _shared_root(w)
+    with beneath.open_beneath(root.path, f"x/{NAME}") as op:
+        assert place.opened_private(w.hub, op) is None
+
+
+def test_a_link_swapped_at_random_between_a_shared_folder_and_a_private_one_never_gives_a_private_byte(world, mode):
+    """The real race, many reads: SHEAF_RACE_READS (default 150) door reads while a thread swaps the link `x`."""
+    import threading
+    w = world
+    w.put(PRIVATE)
+    root, top, link = _shared_root(w)
+    doc, stop, got_shared, leaked = f"{root.name}/x/{NAME}", threading.Event(), 0, 0
+
+    def swapper():
+        n = 0
+        while not stop.is_set():
+            _swap(link, w.two.private_repo if n % 2 else "one")
+            n += 1
+    t = threading.Thread(target=swapper)
+    t.start()
+    try:
+        for _ in range(int(os.environ.get("SHEAF_RACE_READS", "150"))):
+            is_error, got = call(w.door, "read", token=w.tokens["loose"], doc=doc)
+            leaked += "Secret words" in str(got)
+            got_shared += (not is_error) and "Shared words one" in str(got)
+    finally:
+        stop.set()
+        t.join()
+    assert leaked == 0 and got_shared > 0

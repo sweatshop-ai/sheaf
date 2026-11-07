@@ -749,13 +749,13 @@ def test_a_comment_written_as_the_poll_moves_the_file_lands_in_the_one_file(team
     assert team.get(f"/work/{SHARED}", member=THIERRY).status == 200
     real, threads = live.rds.update_file, []
 
-    def poll_then_write(path, change, **kw):
+    def poll_then_write(path, *a, **kw):
         monkeypatch.setattr(live.rds, "update_file", real)
         t = threading.Thread(target=team.hub.the_list.poll)
         t.start()
         t.join(1)
         threads.append(t)
-        return real(path, change, **kw)
+        return real(path, *a, **kw)
     monkeypatch.setattr(live.rds, "update_file", poll_then_write)
     blk, start, end = rdc.find_quote(PRIVATE, "A quote")
     got = team.post("/_/comment", {"doc": f"work/{SHARED}", "op": "add", "hash": md_hash(PRIVATE), "block": blk,
@@ -912,16 +912,16 @@ def test_a_door_update_and_a_poll_at_once_leave_one_file_with_the_update(team, w
     sheaf by its name."""
     from sheafmd import mcp
     put(team, work, SHARED, PRIVATE)                           # written before the rule: the poll would move it
-    real, threads = mcp.update_file, []
+    real, threads = mcp.update_beneath, []
 
-    def write_then_poll(path, change, **kw):
-        got = real(path, change, **kw)
+    def write_then_poll(path, *a, **kw):
+        got = real(path, *a, **kw)
         t = threading.Thread(target=team.hub.the_list.poll)
         t.start()
         t.join(1)
         threads.append(t)
         return got
-    monkeypatch.setattr(mcp, "update_file", write_then_poll)
+    monkeypatch.setattr(mcp, "update_beneath", write_then_poll)
     is_error, got = call(browser, "update", token=tokens["thierry"], doc=f"work/{SHARED}",
                          text=PRIVATE + "\nMore.\n", expected_hash=md_hash(PRIVATE))
     threads[0].join(10)
@@ -938,15 +938,15 @@ def test_a_door_reply_with_no_page_open_and_a_poll_at_once_lands_in_the_moved_fi
                                 'by="Hans" at=2026-10-14T09:00 status=open quote="A quote"\nSource?\n-->\n')
     put(team, work, SHARED, commented)                         # written before the rule: the poll would move it
     assert f"work/{SHARED}" not in team.hub.entries
-    real, threads = mcp.update_file, []
+    real, threads = mcp.update_beneath, []
 
-    def poll_then_write(path, change, **kw):
+    def poll_then_write(path, *a, **kw):
         t = threading.Thread(target=team.hub.the_list.poll)
         t.start()
         t.join(1)
         threads.append(t)
-        return real(path, change, **kw)
-    monkeypatch.setattr(mcp, "update_file", poll_then_write)
+        return real(path, *a, **kw)
+    monkeypatch.setattr(mcp, "update_beneath", poll_then_write)
     is_error, got = call(browser, "reply", token=tokens["thierry"], doc=f"work/{SHARED}", id="c1",
                          text="The second page.")
     threads[0].join(10)

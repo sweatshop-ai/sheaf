@@ -335,11 +335,11 @@ class TokenRow:
     """One token as the hub and the CLI see it: who it is, never its hash. `created` and
     `last_used` are the stamps of the file as they are."""
     name: str
-    display: str | None             # None only for a hand-edited row that lacks one (`verify` refuses such a row)
+    display: str | None             # None for an agent's row (it has a client) and for a hand-edited row that lacks one (`verify` refuses that)
     write: bool = False
     created: str | None = None
     last_used: str | None = None
-    invalid: bool = False           # set by `of` only: `verify` refuses this row for its name or display
+    invalid: bool = False           # set by `of` only: `verify` refuses this row for its name, display or client
     client: str | None = None       # an agent's token (SPEC 9.7): the AI client it speaks for, and no display
 
     @classmethod

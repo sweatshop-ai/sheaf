@@ -8,6 +8,7 @@ import pytest
 from helpers import browser_on, call, hub_rows
 from two_roots import TwoRoots, git, two_roots
 
+from sheafmd.blocks import split_md_blocks
 from sheafmd.hub import place, proxy, roots as roots_mod
 from sheafmd.hub.state import Tokens
 from sheafmd.source import md_hash
@@ -41,11 +42,13 @@ def untouched(two):
             git(two.list_repo, "log", "origin/main..", "--oneline"))
 
 
-def comment(hub, a, text):
+def comment(hub, a, text, quote="pos"):
     """A comment on the open page, as the handler writes it, then the commit it makes."""
     with place.held(hub, a):
         e = hub.entry(a)
-        e.live.comment("add", {"block": 0, "start": 0, "end": 3, "quote": "pos", "body": "hi"}, None)
+        blocks = split_md_blocks(e.path.read_text(encoding="utf-8"))
+        i = next(i for i, b in enumerate(blocks) if b.content.lstrip("# ").lower().startswith(quote.lower()))
+        e.live.comment("add", {"block": i, "start": 0, "end": 3, "quote": quote, "body": "hi"}, None)
         hub.committed(a, by="Member A")
 
 
@@ -106,11 +109,12 @@ def test_a_bound_entry_whose_file_is_held_by_no_root_finds_no_list_path(two):
 @pytest.mark.parametrize("how", ["unreadable", "missing", "no-git", "link"])
 def test_unreadable_private_root_fails_closed(two, how, tmp_path):
     hub = hub_of(two)
-    (two.list_repo / NAME).write_text(OPEN, encoding="utf-8")
+    (two.private_repo / NAME).write_text(PRIVATE_TEXT, encoding="utf-8")
     a = address(hub)
-    assert hub.file(a).name == "post.md"                                       # control: decided, the list file is found
     with place.held(hub, a):
-        hub.entry(a)
+        hub.entry(a)                                                           # the page is open on the private file
+    (two.private_repo / NAME).rename(two.private_repo / "away.txt") if how == "link" else None
+    (two.list_repo / NAME).write_text(OPEN, encoding="utf-8")                  # the list repo's file of that name is the only one seen
     seen = untouched(two)
     gone = tmp_path / "away"
     if how == "unreadable":
@@ -119,13 +123,14 @@ def test_unreadable_private_root_fails_closed(two, how, tmp_path):
         two.private_repo.rename(gone)
     elif how == "no-git":
         (two.private_repo / ".git").rename(tmp_path / "git-away")
+        (two.private_repo / NAME).rename(two.private_repo / "away.txt")
     else:
         (two.private_repo / NAME).symlink_to(two.list_repo / NAME)
     try:
         with pytest.raises(roots_mod.NotFound):
-            hub.file(a)
+            hub.file(a, bound=hub.entry(a).file_root)
         with pytest.raises(roots_mod.NotFound):
-            comment(hub, a, OPEN)
+            comment(hub, a, PRIVATE_TEXT)
         assert untouched(two) == seen
         assert "hi" not in (two.list_repo / NAME).read_text(encoding="utf-8")
     finally:
@@ -135,10 +140,26 @@ def test_unreadable_private_root_fails_closed(two, how, tmp_path):
             gone.rename(two.private_repo)
         elif how == "no-git":
             (tmp_path / "git-away").rename(two.private_repo / ".git")
+            (two.private_repo / "away.txt").rename(two.private_repo / NAME)
         else:
             (two.private_repo / NAME).unlink()
-    comment(hub, a, OPEN)                                                      # control: looked at again, it writes
-    assert "hi" in (two.list_repo / NAME).read_text(encoding="utf-8")
+            (two.private_repo / "away.txt").rename(two.private_repo / NAME)
+    (two.list_repo / NAME).unlink()
+    comment(hub, a, PRIVATE_TEXT, quote="Sec")                                 # control: looked at again, it writes
+    assert "hi" in (two.private_repo / NAME).read_text(encoding="utf-8")
+
+
+def test_a_list_page_keeps_working_while_another_members_private_root_cannot_be_looked_at(two):
+    hub = hub_of(two)
+    (two.list_repo / OTHER).write_text(OPEN.replace("post", "other"), encoding="utf-8")
+    a = address(hub, OTHER)
+    b = hub.proxy.members["member-b-id"]
+    (two.list_repo / "projects.toml").write_text('[projects."acme/blog"]\nmembers = ["a", "b"]\nstatus = "live"\n',
+                                                 encoding="utf-8")
+    (two.private_repo / ".git").rename(two.base / "git-away")
+    assert hub.visible(b, a) is True and hub.assignees(a, {}) is not False
+    comment(hub, a, OPEN, quote="oth")                                         # a list-bound page is not another member's concern
+    assert "hi" in (two.list_repo / OTHER).read_text(encoding="utf-8")
 
 
 def test_ahead_refuses_while_a_private_root_cannot_be_looked_at(two):
@@ -163,8 +184,9 @@ def test_a_private_root_refused_at_start_is_undecided_not_absent(two):
     (two.list_repo / "acme/blog").mkdir(parents=True)
     (two.list_repo / NAME).write_text(OPEN, encoding="utf-8")
     assert not hub.private_roots
-    with pytest.raises(roots_mod.NotFound):
-        hub.file(address(hub))
+    with place.held(hub, address(hub)):
+        with pytest.raises(place.Refused):
+            place.ahead(hub, address(hub), OPEN, OPEN + "more\n")
 
 
 def test_duplicate_name_does_not_break_visible(two):
@@ -242,28 +264,35 @@ def test_a_hub_without_a_private_root_still_finds_a_list_file_wherever_it_is(tmp
     assert place.file_rel(hub, hub.the_list.root(), OTHER) == OTHER            # a name no file holds: itself
 
 
-def test_unbound_lookup_after_a_private_root_is_forgotten_raises(two):
+def test_a_write_that_decides_a_home_is_refused_after_a_private_root_is_forgotten(two):
     hub = hub_of(two)
     (two.list_repo / NAME).write_text(OPEN, encoding="utf-8")
     a = address(hub)
     hub.forget_root(next(r.name for r in hub.roots.all() if r.id in hub.private_roots))
-    with pytest.raises(roots_mod.NotFound):
-        hub.file(a)                                                            # configured, not registered: undecided
+    with place.held(hub, a):
+        with pytest.raises(place.Refused):
+            place.ahead(hub, a, OPEN, OPEN + "more\n")                        # configured, not registered: undecided
+    assert place.place(hub, a) is None and hub_rows("place-refused")
 
 
 def test_a_folder_below_the_private_root_that_cannot_be_read_is_undecided(two):
     hub = hub_of(two)
-    for repo in (two.list_repo, two.private_repo):
-        (repo / NAME).write_text(PRIVATE_TEXT, encoding="utf-8")
+    (two.private_repo / NAME).write_text(PRIVATE_TEXT, encoding="utf-8")
     a = address(hub)
+    with place.held(hub, a):
+        hub.entry(a)
+    (two.list_repo / NAME).write_text(PRIVATE_TEXT, encoding="utf-8")
     seen = untouched(two)
     os.chmod(two.private_repo / "acme", 0)
     try:
         with pytest.raises(roots_mod.NotFound):
-            hub.file(a)
+            hub.file(a, bound=hub.entry(a).file_root)
         with pytest.raises(roots_mod.NotFound):
             comment(hub, a, PRIVATE_TEXT)
         assert untouched(two) == seen
+        with place.held(hub, a):
+            with pytest.raises(place.Refused):
+                place.ahead(hub, a, PRIVATE_TEXT, PRIVATE_TEXT + "more\n")
     finally:
         os.chmod(two.private_repo / "acme", 0o755)
 
@@ -302,3 +331,47 @@ def test_poll_of_an_owner_only_list_file_while_a_private_root_is_undecided_is_a_
     assert place.place(hub, a) is None
     assert (two.list_repo / NAME).is_file() and not list((two.list_repo / "acme/blog").glob("private/**/*"))
     assert [r["doc"] for r in hub_rows("place-refused")] == [a] and not hub_rows("place-failed")
+
+
+def test_poll_moves_nothing_while_a_private_root_cannot_be_looked_at(two):
+    hub = hub_of(two)
+    (two.list_repo / "acme/blog/private/b").mkdir(parents=True)
+    held = "acme/blog/private/b/post.md"
+    (two.list_repo / held).write_text("---\nvisibility: project\nowner: b\n---\n# post\n", encoding="utf-8")
+    (two.private_repo / ".git").rename(two.base / "git-away")
+    seen = untouched(two)
+    assert place.place(hub, address(hub)) is None
+    assert (two.list_repo / held).is_file() and not (two.list_repo / NAME).exists()
+    assert untouched(two) == seen
+
+
+def test_a_new_owner_by_the_issue_s_assignees_is_a_refused_share(two, monkeypatch):
+    hub = hub_of(two)
+    (two.private_repo / NAME).write_text(PRIVATE_TEXT, encoding="utf-8")
+    a = address(hub)
+    members = hub.proxy.members
+    monkeypatch.setattr(place, "_owners",         # the record's assignees: A for the old text, B for the new
+                        lambda hub_, root, address, fm: [members["member-b-id" if fm.get("issue") else "member-a-id"]])
+    with place.held(hub, a):
+        with pytest.raises(place.Refused, match="cannot be shared yet"):
+            place.ahead(hub, a, PRIVATE_TEXT, PRIVATE_TEXT.replace("owner: a\n", "owner: a\nissue: acme/record#5\n"))
+
+
+def test_assignees_of_a_name_two_roots_hold_answer_instead_of_raising(two):
+    hub = hub_of(two)
+    for repo in (two.list_repo, two.private_repo):
+        (repo / NAME).write_text(PRIVATE_TEXT.replace("owner: a\n", "owner: a\nissue: acme/record#5\n"), encoding="utf-8")
+    hub.assignees(address(hub), {"issue": "acme/record#5"})                    # a member's page asks it; raises nothing
+
+
+def test_create_is_refused_while_a_private_root_cannot_be_looked_at(two):
+    token = Tokens().add("james-a", write=True)
+    hub = hub_of(two, a={"tokens": ["james-a"]})
+    (two.list_repo / "projects.toml").write_text('[projects."acme/blog"]\nmembers = ["a"]\nstatus = "live"\n',
+                                                 encoding="utf-8")
+    door = browser_on(hub)
+    (two.private_repo / ".git").rename(two.base / "git-away")
+    is_error, got = call(door, "create", token=token, doc=address(hub, OTHER), text=OPEN)
+    assert is_error and not (two.list_repo / OTHER).exists() and not hub_rows("mcp-failed"), got
+    (two.base / "git-away").rename(two.private_repo / ".git")
+    assert not call(door, "create", token=token, doc=address(hub, OTHER), text=OPEN)[0]       # control

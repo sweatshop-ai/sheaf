@@ -421,7 +421,8 @@ class Hub:
                 # a private root is refused when its file is not there (`file_at`); one bound to a root other than the one that now holds the file is
                 # dropped, and made again.
                 got = place.where_is(self, address)
-                if got is not None and got[0].id != e.file_root:
+                if got is not None and got[0].id != e.file_root \
+                        and not place.undecided(self, roots_mod.Address.parse(address).rel):     # never rebound while a private root is not seen
                     del self.entries[address]
                     e = None
                 elif e.file_root in self.private_roots:
@@ -929,7 +930,10 @@ class Hub:
                 address = f"{root.name}/{(place.logical(rel) if placed else None) or rel}"
             except (ValueError, roots_mod.NotFound):     # a file that cannot be decided (rule B) renames nothing
                 pass
-        return self.the_list.assignees(address, visibility.text(fm, "issue"))
+        try:
+            return self.the_list.assignees(address, visibility.text(fm, "issue"))
+        except roots_mod.NotFound:                       # a name two roots hold: no record's assignees for it
+            return None
 
     def jobs(self) -> dict:
         telling = []

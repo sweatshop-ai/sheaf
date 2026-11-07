@@ -45,10 +45,10 @@ def prose(text):
 
 class LiveDocument:
     def __init__(self, md, render, publish, by="unknown", clock=time.time,
-                 versions=None, address=None, hold=None):
-        """`versions` (a `state.Versions`) and `address` (`<root>/<path>`) together keep every
-        text this document hands a page on disk too (SPEC 7.4), so a save made against a page
-        rendered before a restart still merges.
+                 versions=None, address=None, hold=None, entry=None):
+        """`versions` (a `state.Versions`, or a callable that finds it at each use, or None for no store) and
+        `address` (`<root>/<path>`) together keep every text this document hands a page on disk too
+        (SPEC 7.4), so a save made against a page rendered before a restart still merges.
 
         `md` is the file, or a callable that finds it at each read and write: a sheaf of the list's
         root is the document of its name wherever its file is (9.11). `hold()` is a context held
@@ -56,6 +56,7 @@ class LiveDocument:
         sheaf's name, under which no move comes, so the file found under it is the one written or
         read. The first read, here, is its maker's to hold (`Hub.entry`)."""
         self._file = md if callable(md) else (lambda: md)
+        self._entry = entry          # when given, its file is opened beneath its root, judged, for every read and write (9.11)
         self._hold = hold or contextlib.nullcontext
         self._render, self._publish = render, publish
         self._by, self._clock = by, clock
@@ -88,7 +89,22 @@ class LiveDocument:
     def _read(self):
         """The file's text, found where it is now: under the name's lock (`hold`), so no move takes it between
         finding it and reading it (9.11)."""
+        if self._entry is not None:
+            return self._entry.read()
         return self._file().read_text(encoding="utf-8")
+
+    def _update(self, change, move=None):
+        """`rds.update_file` of this document's file; `change(text, opened)`. With an entry the file is opened once beneath
+        its root, judged, read from that descriptor and written through it (`rds.update_beneath`); `opened` is that
+        open, None where the document has no entry."""
+        if self._entry is None:
+            return rds.update_file(self._file(), lambda t: change(t, None), move=move)
+        top, rel = self._entry.where()
+
+        def judged(t, op):
+            self._entry.judge(op)
+            return change(t, op)
+        return rds.update_beneath(top, rel, judged, move=move)
 
     # ── the lock, and the guard against a callback calling back in ─────────────
     def _held(self):
@@ -110,14 +126,20 @@ class LiveDocument:
         """Test seam, a no-op: a save or a comment calls it after its write and before its
         render, with the lock held and the file lock released."""
 
+    def _stored(self):
+        """The versions store now: found at each use when `versions` is a callable, so it follows the file."""
+        s = self._store
+        return s() if callable(s) else s
+
     def _remember(self, text):
         v = self._versions
         v[rds.md_hash(text)] = text
         while len(v) > VERSIONS:
             v.pop(next(iter(v)))
-        if self._store is not None and self._address is not None:
+        store = self._stored()
+        if store is not None and self._address is not None:
             try:
-                self._store.put(self._address, text)
+                store.put(self._address, text)
             except OSError:
                 pass            # a full disk costs a merge after a restart, never a save
 
@@ -134,8 +156,9 @@ class LiveDocument:
         text = self._versions.get(h)
         if text is None:
             text = self._pins.get(h)
-        if text is None and self._store is not None and self._address is not None:
-            text = self._store.get(self._address, h)
+        store = self._stored() if text is None else None
+        if store is not None and self._address is not None:
+            text = store.get(self._address, h)
         return text
 
     def _rerender(self):
@@ -230,7 +253,7 @@ class LiveDocument:
             md = self._file()
             token = rde.DOC.set(md)
             try:
-                _, new_text = rds.update_file(md, change, move=move)
+                _, new_text = self._update(lambda t, op: change(t), move=move)
             finally:
                 rde.DOC.reset(token)
             self._after_write()
@@ -298,9 +321,9 @@ class LiveDocument:
             wait = await_action and op in ("add", "reply")
             before = self._text
 
-            def change(t):
+            def change(t, opened=None):
                 if guard is not None:
-                    guard(t)
+                    guard(t, opened)
                 new = write(t)
                 if wait:
                     # The Tell's baseline comes from the very text written, inside the file
@@ -346,7 +369,7 @@ class LiveDocument:
                                         "only your own comments can be edited")
                 return rdc.apply_op(t, op, fields, by or self._by, now, role)
 
-            old, new = rds.update_file(self._file(), change)
+            old, new = self._update(change)
             made["wrote"] = new != old
             self._after_write()
             self._rerender()
@@ -409,7 +432,7 @@ class LiveDocument:
             return rdc.reply(t, cid, text, by, rds.now(), False, role)
         with self._hold(), self._held():
             before = self._text
-            rds.update_file(self._file(), write)
+            self._update(lambda t, op: write(t))
             self._after_write()
             self._rerender()
             return self._announce(self._snapshot(self._text), before, event, id=cid)
@@ -420,7 +443,7 @@ class LiveDocument:
         written (9.12: the hub's own line in the front matter)."""
         with self._hold(), self._held():
             before = self._text
-            _, new_text = rds.update_file(self._file(), change)
+            _, new_text = self._update(lambda t, op: change(t))
             self._after_write()
             self._remember(new_text)
             if new_text != before:
@@ -449,8 +472,9 @@ class LiveDocument:
         memory only from now on. Under the lock, so the text of a write still under way is on disk by
         then and goes with the others."""
         with self._held():
-            if self._store is not None and self._address is not None:
-                self._store.forget(self._address)
+            store = self._stored()
+            if store is not None and self._address is not None:
+                store.forget(self._address)
             self._store = None
 
     def pin(self, h):
@@ -467,9 +491,10 @@ class LiveDocument:
             self._pins[h] = text
             while len(self._pins) > PINS:
                 self._pins.pop(next(iter(self._pins)))
-            if self._store is not None and self._address is not None:
+            store = self._stored()
+            if store is not None and self._address is not None:
                 try:
-                    self._store.pin(self._address, text)
+                    store.pin(self._address, text)
                 except OSError:
                     pass        # a full disk costs the pin after a restart, never the one in memory
             return True

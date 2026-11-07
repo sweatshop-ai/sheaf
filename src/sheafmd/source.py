@@ -60,9 +60,36 @@ def _legacy_lock_path(md_path):
     return d / (lock_key(md_path) + ".lock") if d.is_dir() else None
 
 
-def _open_lock(path):
-    # 0600: a lock file is the user's own, and the folder is theirs alone.
-    return os.fdopen(os.open(path, os.O_RDWR | os.O_CREAT, 0o600), "a+")
+def _open_lock(path, under=None):
+    # 0600: a lock file is the user's own, and the folder is theirs alone. Never through a link (a local user who can
+    # write the folder would make the lock where the link points, in a private root), and only a regular file of ours.
+    # `under`: a folder not ours (the legacy locks, in the temp folder): each folder from it down to the lock is opened
+    # from the one above without following a link, and must be owned by us and not writable by anyone else.
+    flags = os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC
+    if under is None:
+        fd = os.open(path, flags, 0o600)
+    else:
+        *folders, name = Path(path).relative_to(under).parts
+        dir_fd = os.open(under, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+        try:
+            for part in folders:
+                nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dir_fd)
+                os.close(dir_fd)
+                dir_fd = nxt
+                st = os.fstat(dir_fd)
+                if st.st_uid != os.getuid() or st.st_mode & 0o022:
+                    raise PermissionError(errno.EPERM, "a lock folder that is not ours alone", str(path))
+            fd = os.open(name, flags, 0o600, dir_fd=dir_fd)
+        finally:
+            os.close(dir_fd)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid():
+            raise PermissionError(errno.EPERM, "a lock that is not a file of ours", str(path))
+    except BaseException:
+        os.close(fd)
+        raise
+    return os.fdopen(fd, "a+")
 
 
 class file_lock:
@@ -76,7 +103,7 @@ class file_lock:
         try:
             for p in self.paths:
                 try:
-                    f = _open_lock(p)
+                    f = _open_lock(p, None if p is self.paths[0] else Path(tempfile.gettempdir()))
                 except OSError:
                     if p is self.paths[0]:
                         raise
@@ -216,7 +243,39 @@ def update_file(md_path, change, expected_hash=None, move=None):
         return text, new
 
 
-def create_file(top, rel: str, text: str):
+def update_beneath(top, rel: str, change, move=None):
+    """`update_file` for the file `rel` below the folder `top`, opened once (`sheafmd.beneath`): `change(text, opened)`
+    sees the text read from the descriptor of that open and the `Opened` it came from, so the caller judges what was
+    opened, and the new text is written through the same walk's folder descriptor. The lock is named by the path
+    (as every writer's is) and opened before the file, so a writer that replaces the file leaves nothing stale.
+    `move(text, new)` as in `update_file`: the path it gives is opened again beneath `top` and written only if it is the file opened first. Returns (old, new)."""
+    from .beneath import open_beneath
+    with file_lock(Path(top) / rel):
+        with open_beneath(top, rel) as op:
+            text = op.text()
+            new = change(text, op)
+            if new != text:
+                q = move(text, new) if move is not None else None
+                if q is None:
+                    op.write(new)
+                else:
+                    # The file was linked to its home inside this root and unlinked where it was: the same inode. It is
+                    # opened again beneath the root and written through that walk only while it is still the file opened
+                    # first; the path `move` gave is never written to.
+                    try:
+                        home = os.path.relpath(os.path.realpath(q), os.path.realpath(top)).replace(os.sep, "/")
+                    except ValueError:
+                        home = ".."
+                    if home == ".." or home.startswith("../"):
+                        raise OSError(errno.ESTALE, "the file's home is not in the root it was opened in", rel)
+                    with file_lock(q), open_beneath(top, home) as at_home:
+                        if at_home.file != op.file:
+                            raise OSError(errno.ESTALE, "the file at its home is not the one that was opened", home)
+                        at_home.write(new)
+            return text, new
+
+
+def create_file(top, rel: str, text: str, judge=None):
     """Write the new file `rel` (`/` separators, every folder of it existing) under the folder
     `top`, whole, and never over anything (SPEC 12, `create`).
 
@@ -225,8 +284,8 @@ def create_file(top, rel: str, text: str):
     cannot carry the write elsewhere. The text goes into a hidden sibling first and is linked into
     place: a reader never sees half a page, and the link fails (FileExistsError) when the name is
     taken by anything, a dangling link included, even one that appeared a moment ago. The file gets
-    the mode the umask gives a new file. A missing folder is FileNotFoundError."""
-    fd, name = _folder_of(top, rel)
+    the mode the umask gives a new file. A missing folder is FileNotFoundError. `judge`: see `_folder_of`."""
+    fd, name = _folder_of(top, rel, judge=judge)
     try:
         tmp = f".{name}.sheaf-new-{secrets.token_hex(6)}"
         out = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o666, dir_fd=fd)
@@ -245,11 +304,11 @@ def create_file(top, rel: str, text: str):
         os.close(fd)
 
 
-def check_create(top, rel: str):
+def check_create(top, rel: str, judge=None):
     """Raise what `create_file(top, rel, …)` would raise for its path, writing nothing: FileExistsError when the
     name is taken by anything, a dangling link included, and the OSError of its walk for a missing folder or a
     link on the way. So a create refused for another reason can answer as the path alone would."""
-    fd, name = _folder_of(top, rel)
+    fd, name = _folder_of(top, rel, judge=judge)
     try:
         try:
             os.stat(name, dir_fd=fd, follow_symlinks=False)
@@ -260,13 +319,20 @@ def check_create(top, rel: str):
         os.close(fd)
 
 
-def _folder_of(top, rel: str, make: bool = False):
+def _folder_of(top, rel: str, make: bool = False, judge=None):
     """(fd of the folder of `rel` under `top`, the file's name): each folder opened from the one above it
     without following a link, so a link on the way is an OSError wherever it points. With `make`, a missing
-    folder is made on the way, as the umask gives a new folder, and then opened as any other."""
+    folder is made on the way, as the umask gives a new folder, and then opened as any other.
+
+    `judge(identities)` is called with the (st_dev, st_ino) of the root's folder and its parents, taken from the
+    descriptor `top` was opened to, before anything is made or read, and with that of each folder opened after: it
+    raises to refuse (a private root, SPEC 9.11). The folder is judged as opened, never by the path it was opened by."""
+    from .beneath import _root_dirs, ident
     parts = rel.split("/")
     fd = os.open(top, os.O_RDONLY | os.O_DIRECTORY)
     try:
+        if judge is not None:
+            judge(_root_dirs(fd))
         for seg in parts[:-1]:
             if make:
                 try:
@@ -276,6 +342,8 @@ def _folder_of(top, rel: str, make: bool = False):
             inner = os.open(seg, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
             os.close(fd)
             fd = inner
+            if judge is not None:
+                judge([ident(fd)])
     except BaseException:
         os.close(fd)
         raise

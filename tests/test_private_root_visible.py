@@ -649,3 +649,59 @@ def test_a_link_swapped_at_random_between_a_shared_folder_and_a_private_one_neve
         stop.set()
         t.join()
     assert leaked == 0 and got_shared > 0
+
+
+def test_no_walk_goes_through_a_sheaf_or_git_folder_by_its_path_or_by_a_link(tmp_path, mode):
+    from sheafmd import beneath
+    top = tmp_path / "top"
+    for own in (".git", ".sheaf"):
+        (top / own).mkdir(parents=True)
+        (top / own / "f.md").write_text("own", encoding="utf-8")
+    (top / "ok.md").write_text("ok", encoding="utf-8")
+    (top / "viagit.md").symlink_to(".git/f.md")                 # a link whose target names it
+    (top / "viasheaf.md").symlink_to(".sheaf/f.md")
+    (top / "folder").symlink_to(".git")                          # a link to the folder, then a name below it
+    (top / "okay.md").symlink_to("ok.md")
+    for rel in (".git/f.md", ".sheaf/f.md", "viagit.md", "viasheaf.md", "folder/f.md", "a/.git/f.md"):
+        with pytest.raises(FileNotFoundError):
+            beneath.open_beneath(top, rel)
+    with beneath.open_beneath(top, "okay.md") as op:
+        assert op.text() == "ok"
+
+
+def test_an_absolute_link_is_followed_from_the_root_wherever_the_walk_is_and_refused_outside_it(tmp_path, mode):
+    from sheafmd import beneath
+    top, out = tmp_path / "top", tmp_path / "out"
+    (top / "a/b").mkdir(parents=True)
+    out.mkdir()
+    (top / "f.md").write_text("hi", encoding="utf-8")
+    (out / "s.md").write_text("secret", encoding="utf-8")
+    (top / "a/b/in.md").symlink_to(top / "f.md")                # from a folder deep in the walk, to a place above it
+    (top / "a/b/out.md").symlink_to(out / "s.md")
+    (top / "a/b/root.md").symlink_to(top)                       # the root itself is no file
+    with beneath.open_beneath(top, "a/b/in.md") as op:
+        assert op.text() == "hi"
+    for rel in ("a/b/out.md", "a/b/root.md"):
+        with pytest.raises(OSError):
+            beneath.open_beneath(top, rel)
+
+
+def test_a_document_the_hub_holds_never_opens_a_file_that_the_descriptors_say_is_a_private_roots(world, mode):
+    w = world
+    w.put(PRIVATE)
+    root, top, _ = _shared_root(w)
+    address = f"{root.name}/one/{NAME}"
+    e = w.hub.entry(address)
+    assert "Shared words one" in e.read()
+    st = os.stat(top / "one" / NAME)
+    w.hub._private_ids[(st.st_dev, st.st_ino)] = "member-a-id"     # as if the folder it lies in were a private root's (a mount)
+    before = (top / "one" / NAME).read_text(encoding="utf-8")
+    with pytest.raises(OSError):
+        e.read()
+    with pytest.raises(OSError):
+        e.stat()
+    with pytest.raises(OSError):
+        e.live.comment("add", {"block": 0, "start": 0, "end": 3, "quote": "abc", "body": "leak"}, None)
+    with pytest.raises(OSError):
+        e.live.rewrite(lambda t: t + "\nmore\n")
+    assert (top / "one" / NAME).read_text(encoding="utf-8") == before

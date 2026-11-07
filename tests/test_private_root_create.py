@@ -172,3 +172,18 @@ def test_create_by_the_private_folders_path_says_to_use_the_list_name(two):
         assert "moved" not in got                   # nothing is moved: a create by this path is simply not how it is made
     w.nothing_written()
     assert not w.create("tok-a", OWNED_BY_A)[0]     # positive control: the list name, the same text, the same member
+
+
+def test_other_callers_are_told_a_path_in_no_root_and_a_taken_name(two, tmp_path):
+    w = World(two)
+    assert not w.create("tok-a", OWNED_BY_A)[0]
+    elsewhere = tmp_path / "nowhere" / NAME
+    for who in ("tok-b", "loose"):
+        said = call(w.door, "create", doc=str(two.private_repo / NAME), text=OPEN, token=w.tokens[who])
+        none = call(w.door, "create", doc=str(elsewhere), text=OPEN, token=w.tokens[who])
+        assert said[0] and said[1].replace(str(two.private_repo / NAME), "P") == none[1].replace(str(elsewhere), "P"), (said, none)
+        # a name only the private root holds is a taken name to them, as one held by a shared root is
+        (two.list_repo / "acme/blog/shared.md").write_text(OPEN, encoding="utf-8")
+        mine = call(w.door, "create", doc=w.address, text=OPEN, token=w.tokens[who])
+        shared = call(w.door, "create", doc=w.address.replace("post", "shared"), text=OPEN, token=w.tokens[who])
+        assert mine[0] and shared[0] and mine[1].replace("post", "X") == shared[1].replace("shared", "X"), (mine, shared)

@@ -440,7 +440,7 @@ class Handler:
         name, who, _ = found
         if name in ("mount-js", "mount-css"):
             return True
-        return who in (COOKIE, EITHER, MEMBER, MINT) and name not in ("tell", "cancel", "jump")
+        return who in (COOKIE, EITHER, MEMBER, MINT) and name not in ("tell", "jump")
 
     def _route_proxy(self, req: Req, raw: bytes) -> Response:
         cfg = self.hub.proxy
@@ -815,6 +815,7 @@ class Handler:
         snap = e.live.snapshot()
         snap["root"] = self._root_id(req, e.address)
         snap["rids"] = e.live.taken_rids()
+        snap["waits"] = self.hub.waiting_tells.waits(e.address, req.member)        # the Tells that wait for an agent (9.8)
         if req.member is not None:
             # Their own seen state, and nothing of the hub account's agent session (9.9).
             # A sheaf's Work on this and its Tell for James's window are refreshed as the meta's (9.12).
@@ -1562,6 +1563,9 @@ class Handler:
             self.hub.index.touch(e.address)
             if not snap.get("again") and snap.pop("wrote", True):   # a write that changed nothing commits nothing
                 self.hub.committed(e.address, member, "comment")
+        if not snap.get("again") and (op == "delete" or (op == "status" and b.get("status") == "resolved")
+                                      or (op == "reply" and b.get("resolve"))):
+            self.hub.waiting_tells.end(e.address, b["id"], "cancelled", reason="closed")   # nothing left to answer (9.8)
         if snap.get("again"):
             # Taken before under this request id: what the first request started (a Tell's wait)
             # is running or done, and the page hears of it by its events.
@@ -1656,7 +1660,11 @@ class Handler:
         that is gone, or whose root was forgotten, has nothing left to stop, and the answer is ok."""
         doc = self._owned(req, req.body.get("doc"))
         cid = self._comment_id(req)
-        self.hub.tell.cancel(doc, cid)
+        # A Tell that waits for an agent ends here, the reader's own and no other's (9.8). A member has no
+        # session to stop: theirs is only a waiting Tell.
+        self.hub.waiting_tells.end(doc, cid, "cancelled", member=req.member, only_member=True)
+        if req.member is None:
+            self.hub.tell.cancel(doc, cid)
         return _ok()
 
     def _seen(self, req: Req) -> Response:

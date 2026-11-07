@@ -166,7 +166,7 @@ def _root_dirs(rootfd: int) -> list:
         os.close(fd)
 
 
-def _walk(top, rel: str):
+def _walk(top, rel: str, meta: bool = False):
     """(file fd, file identity, identities of the folders on the way, folder fd, name): one name at a time, each
     opened from the descriptor above it with O_NOFOLLOW. A link is read with `readlinkat` and its target walked by us,
     from the root or from the folder of the link, so that it never leaves the root: `..` past it is refused, and so is
@@ -193,8 +193,14 @@ def _walk(top, rel: str):
             last = not pending
             while True:
                 try:
-                    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | (0 if last else os.O_DIRECTORY),
-                                 dir_fd=stack[-1])
+                    try:
+                        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | (0 if last else os.O_DIRECTORY),
+                                     dir_fd=stack[-1])
+                    except PermissionError:
+                        if not (meta and last):
+                            raise
+                        # a file that cannot be read still has an identity: a descriptor that reads nothing
+                        fd = os.open(name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=stack[-1])
                 except OSError as e:
                     if e.errno not in (errno.ELOOP, errno.ENOTDIR):
                         raise
@@ -229,8 +235,9 @@ def _walk(top, rel: str):
             os.close(fd)
 
 
-def open_beneath(top, rel: str) -> Opened:
-    """`rel` (`/` separators) below the folder `top`, opened for reading. OSError when it is not a file below it:
+def open_beneath(top, rel: str, meta: bool = False) -> Opened:
+    """`rel` (`/` separators) below the folder `top`, opened for reading. `meta`: a file that cannot be read is opened
+    all the same, by a descriptor that reads nothing (`O_PATH`), for what only its identity is asked. OSError when it is not a file below it:
     missing, a link that leaves the root, a loop, a folder. The folder `top` itself is opened by its name once, and
     every judgement after that is of descriptors."""
     top = os.fspath(top)
@@ -241,7 +248,12 @@ def open_beneath(top, rel: str) -> Opened:
                 raise Escapes(rel)
             try:
                 # No link at all, first: the kernel alone then decides, and every name of the path is the one checked above.
-                fd = _openat2(rootfd, rel, os.O_RDONLY, _RESOLVE_BENEATH | _RESOLVE_NO_SYMLINKS)
+                try:
+                    fd = _openat2(rootfd, rel, os.O_RDONLY, _RESOLVE_BENEATH | _RESOLVE_NO_SYMLINKS)
+                except PermissionError:
+                    if not meta:
+                        raise
+                    fd = _openat2(rootfd, rel, os.O_PATH, _RESOLVE_BENEATH | _RESOLVE_NO_SYMLINKS)
             except NotImplementedError:
                 pass
             except OSError as e:
@@ -255,5 +267,5 @@ def open_beneath(top, rel: str) -> Opened:
                 return Opened(fd, (st.st_dev, st.st_ino), _root_dirs(rootfd), None, None, "openat2", top, rel)
         finally:
             os.close(rootfd)
-    fd, file, dirs, parent, name = _walk(top, rel)
+    fd, file, dirs, parent, name = _walk(top, rel, meta)
     return Opened(fd, file, dirs, parent, name, "walk", top, rel)

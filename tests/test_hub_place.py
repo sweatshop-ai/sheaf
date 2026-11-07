@@ -747,16 +747,16 @@ def test_a_comment_written_as_the_poll_moves_the_file_lands_in_the_one_file(team
     from sheafmd.hub import live
     put(team, work, SHARED, PRIVATE)                           # written before the rule: the poll would move it
     assert team.get(f"/work/{SHARED}", member=THIERRY).status == 200
-    real, threads = live.rds.update_file, []
+    real, threads = live.rds.update_beneath, []
 
-    def poll_then_write(path, *a, **kw):
-        monkeypatch.setattr(live.rds, "update_file", real)
+    def poll_then_write(top, rel, *a, **kw):
+        monkeypatch.setattr(live.rds, "update_beneath", real)
         t = threading.Thread(target=team.hub.the_list.poll)
         t.start()
         t.join(1)
         threads.append(t)
-        return real(path, *a, **kw)
-    monkeypatch.setattr(live.rds, "update_file", poll_then_write)
+        return real(top, rel, *a, **kw)
+    monkeypatch.setattr(live.rds, "update_beneath", poll_then_write)
     blk, start, end = rdc.find_quote(PRIVATE, "A quote")
     got = team.post("/_/comment", {"doc": f"work/{SHARED}", "op": "add", "hash": md_hash(PRIVATE), "block": blk,
                                    "start": start, "end": end, "quote": "A quote", "body": "Which clause?"},

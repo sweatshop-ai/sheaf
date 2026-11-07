@@ -25,7 +25,7 @@ from typing import Callable
 from .. import __version__, beneath, config, diagnostics, paths
 from ..agents import registry
 from ..agents.base import Adapter, Target
-from ..render import render_file
+from ..render import RenderError, render_file
 from ..source import STAMP_FORMAT, file_lock, lock_key
 from . import assets as assets_mod
 from . import boxwait
@@ -178,10 +178,26 @@ class Hub:
         # whether the root registers or is refused, and never shrunk (`place.in_private`, SPEC 9.11 rule A).
         self._private_paths: dict[str, str] = {}
         self._private_ids: dict[tuple, str] = {}    # (st_dev, st_ino) of each, so a spelling in another case is the same folder
+        self._private_by_identity: set[str] = set()     # ids of roots whose folder is a private one, spelled otherwise
         self._private_good: set[str] = set()       # those that registered: placement only, never privacy
         self.roots.private_paths = lambda: self._private_paths
+        self.roots.hidden = self._is_private_root
+        self.roots.registered = self._note_identity       # rule E: no address of its own, registered or refused
         self._register_private_roots()
+        for r in self.roots.all():
+            self._note_identity(r)      # the roots of an earlier run, registered before the private folders were known
         self.commits.seed(self.roots.all())      # the rewrite guard's first pull is guarded, not free
+
+    def _is_private_root(self, root) -> bool:
+        """Whether `root` is a private root: by its path, and by the identity of its folder, so a second spelling of
+        it (a bind mount, a case-folded name) is no address either."""
+        return str(root.path) in self._private_paths or root.id in self._private_by_identity
+
+    def _note_identity(self, root) -> None:
+        """Once, as `root` is registered (never at a request, where a folder exchanged for a link would be read
+        as the private one for as long as it is cached): whether its folder is a private one under another spelling."""
+        if self._private_ids and place.identity(str(root.path)) in self._private_ids:
+            self._private_by_identity.add(root.id)
 
     @property
     def private_roots(self) -> dict[str, str]:
@@ -753,7 +769,10 @@ class Hub:
         page. A render with other settings re-renders and tells the open tabs; it never
         restarts anything."""
         md = Path(md).resolve()
-        address = self.roots.address(md)
+        try:
+            address = self.roots.address(md)       # a file of a private root has no address of its own (9.11)
+        except roots_mod.NotFound:
+            raise RenderError(f"{md} is not in a root the hub serves.") from None
         with place.held(self, address), self._lock:        # the name's lock first (9.11), as `entry` takes it
             def settle(new: dict) -> dict:
                 new["path"] = str(md)

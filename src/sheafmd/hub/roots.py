@@ -238,6 +238,7 @@ class Roots:
         # `lookup` and `for_document` still see it: the commits, the list's nested-root check and the image rule
         # judge a path against every root there is.
         self.hidden: Callable[[Root], bool] = lambda root: False
+        self.registered: Callable[[Root], None] = lambda root: None     # called with each root as it is registered (set by the hub)
         if self._load():
             with self._changing():
                 self._save()
@@ -321,6 +322,7 @@ class Roots:
             self._roots[name] = root
             self._added[name] = time.strftime(STAMP_FORMAT)
             self._save()
+            self.registered(root)
             return root
 
     def forget(self, name: str) -> Root | None:

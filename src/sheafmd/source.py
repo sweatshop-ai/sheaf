@@ -1,6 +1,6 @@
 """The Source file: the .md a page is rendered from, and the one way to write it.
 
-The hub, the CLI and an Ask job are separate processes. A Python lock inside one
+The hub, the CLI and a Tell job are separate processes. A Python lock inside one
 of them protects nothing against the others, so every write takes an exclusive
 flock across read, hash check and replace. The lock file lives in the runtime
 folder, keyed by the document's path, so no dotfile appears next to the .md.

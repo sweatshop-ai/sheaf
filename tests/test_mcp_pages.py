@@ -508,7 +508,7 @@ def test_a_write_token_still_gets_401_on_the_page_routes(browser, plan):
     auth = {"Authorization": f"Bearer {token}"}
     for path, body in [("/_/save", {"doc": DOC, "hash": md_hash(PLAN), "edits": []}),
                        ("/_/comment", {"doc": DOC, "op": "status", "id": "c1", "status": "resolved"}),
-                       ("/_/ask", {"doc": DOC, "id": "c1"}), ("/_/tell", {"doc": DOC, "id": "c1"})]:
+                       ("/_/tell", {"doc": DOC, "id": "c1"})]:
         assert browser.request("POST", path, body=body, cookie=False, headers=auth).status == 401, path
     assert browser.request("GET", "/work/plan.md", cookie=False, headers=auth).status == 401
     assert plan.read_text(encoding="utf-8") == PLAN

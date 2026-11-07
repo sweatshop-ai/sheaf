@@ -11,7 +11,7 @@ import subprocess
 from dataclasses import asdict, dataclass, fields
 from typing import Callable, Mapping, Protocol
 
-CAPS = frozenset({"ask", "deliver", "state", "stop"})
+CAPS = frozenset({"deliver", "state", "stop"})
 
 # run(argv, *, timeout, env=None, cwd=None, input=None): a child in its own process group, `input`
 # on its stdin (what is private goes there, never on the command line, which every user of the
@@ -86,12 +86,11 @@ class Adapter(Protocol):
     agent: str           # "claude-code"
     display: str         # "Claude": the name on replies and buttons
     product: str         # "Claude Code"
-    implemented: bool    # False for an agent that is only detected (no Ask, no Tell yet)
+    implemented: bool    # False for an agent that is only detected (no Tell yet)
 
     def detect(self, env: Mapping[str, str], *, force: bool = False,
                session: str = "") -> Target | None: ...
     def capabilities(self, t: Target) -> frozenset[str]: ...
-    def ask_command(self, t: Target) -> list[str]: ...                   # the prompt is its stdin, stdout the answer
     def child_env(self, t: Target) -> dict | None: ...                   # its commands' env; None: the hub's own
     def deliver(self, t: Target, text: str, run: Runner) -> None: ...    # raises DeliveryError
     def state(self, t: Target) -> State | None: ...

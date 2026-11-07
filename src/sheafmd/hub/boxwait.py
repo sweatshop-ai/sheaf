@@ -1,11 +1,11 @@
 """
-sheafmd.hub.boxwait — the wait of each Ask and Tell the hub drops for James's window (SPEC 9.12, sheaf#115). The
+sheafmd.hub.boxwait — the wait of each Tell the hub drops for James's window (SPEC 9.12, sheaf#115). The
 hub runs no session for it: it keeps the drop open on the sheaf's page until a reply lands in its thread, or until
 the Tell wait has passed, and reads what the box's supervisor says of it in `<drop>.status` beside it (sheaf#139).
 In memory: a restart forgets it.
 
     BoxWaits(clock)
-    .add(doc, thread, kind, text, name)   a drop of `kind` ("ask" or "tell") on `thread`, the sheaf's text `text`
+    .add(doc, thread, kind, text, name)   a drop of `kind` ("tell") on `thread`, the sheaf's text `text`
                                           then, written as the file `name` of `tell_dir`
     .pending(doc, text)                   [{id, kind, state}] of the sheaf's drops with no reply in its text `text`;
                                           the drops answered there end

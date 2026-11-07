@@ -1,4 +1,4 @@
-"""Ask, Tell and Cancel through the hub (SPEC 8.10, 10.5, 10.6, 11.2, 11.3).
+"""Tell and Cancel through the hub (SPEC 8.10, 10.5, 10.6, 11.3).
 
 The handler runs in the test's process, with no HTTP socket. The session is a record in the
 test's config folder, its message socket a Unix socket that a thread of the test listens on,
@@ -27,7 +27,7 @@ from sheafmd.source import md_hash, update_file
 
 DOC = "work/plan.md"
 URL = "/work/plan.md"
-NOT_YET = ("{product} can answer threads through the MCP door. Ask and Tell need an adapter "
+NOT_YET = ("{product} can answer threads through the MCP door. Tell needs an adapter "
            "sheaf does not have yet.")
 ENDED = "The Claude Code session that rendered this page has ended. Render it again from a session."
 NO_SOCKET = ("Tell needs the session's message socket, which was not found. Render the page "
@@ -190,14 +190,14 @@ def wait_until(cond, seconds=5.0):
 
 # ── what the page is told about the agent ────────────────────────────────────
 
-def test_a_page_rendered_from_a_claude_code_session_offers_ask_and_tell_to_it(
+def test_a_page_rendered_from_a_claude_code_session_offers_tell_to_it(
         browser, plan, session):
     attach(browser, plan, session.target())
     meta = page_meta(browser.get(URL).text)
     assert meta["agent"] == {"agent": "claude-code", "display": "Claude", "product": "Claude Code",
                              "name": "Cosima", "label": "Cosima"}
-    assert meta["can"] == ["ask", "deliver"]
-    assert meta["lines"] == {"ask": None, "tell": None}
+    assert meta["can"] == ["deliver"]
+    assert meta["lines"] == {"tell": None}
 
 
 def test_a_session_without_a_name_is_labelled_by_the_start_of_its_id(browser, plan, session):
@@ -246,59 +246,51 @@ def test_the_page_never_holds_the_session_id_the_socket_or_the_command(browser, 
         assert not holds_number(text, pid), pid
 
 
-def test_a_page_with_no_session_says_so_under_both_buttons(browser, plan):
+def test_a_page_with_no_session_says_so_under_the_tell_button(browser, plan):
     meta = page_meta(browser.get(URL).text)
     assert meta["agent"] is None and meta["can"] == []
-    assert meta["lines"] == {"ask": NO_AGENT, "tell": NO_AGENT}
+    assert meta["lines"] == {"tell": NO_AGENT}
 
 
 @pytest.mark.parametrize("agent, product", [("codex", "Codex CLI"), ("cursor", "Cursor agent"),
                                             ("opencode", "opencode"), ("gemini", "Gemini CLI")])
-def test_an_agent_without_an_adapter_gets_disabled_buttons_with_their_line(
+def test_an_agent_without_an_adapter_gets_a_disabled_button_with_its_line(
         browser, plan, agent, product):
     attach(browser, plan, {"agent": agent, "session": "t-1"})
     meta = page_meta(browser.get(URL).text)
     line = NOT_YET.format(product=product)
-    assert meta["can"] == [] and meta["lines"] == {"ask": line, "tell": line}
+    assert meta["can"] == [] and meta["lines"] == {"tell": line}
     assert meta["agent"]["product"] == product
     got = browser.get(f"/_/doc?doc={DOC}").json()
-    assert got["capabilities"] == [] and got["lines"] == {"ask": line, "tell": line}
-    for route in ("/_/ask", "/_/tell"):
-        comment(plan)
-        r = post(browser, route)
-        assert (r.status, r.json()["error"]) == (409, line)
+    assert got["capabilities"] == [] and got["lines"] == {"tell": line}
+    comment(plan)
+    r = post(browser, "/_/tell")
+    assert (r.status, r.json()["error"]) == (409, line)
 
 
 def test_an_agent_the_user_named_that_sheaf_does_not_know_shows_that_name(browser, plan):
     attach(browser, plan, {"agent": "foo"})
     meta = page_meta(browser.get(URL).text)
     assert meta["agent"]["display"] == "foo"
-    assert meta["lines"]["ask"] == NOT_YET.format(product="foo")
+    assert meta["lines"]["tell"] == NOT_YET.format(product="foo")
 
 
-def test_a_session_that_has_ended_disables_tell_with_its_line_and_still_may_ask(
+def test_a_session_that_has_ended_disables_tell_with_its_line(
         browser, plan, session):
     attach(browser, plan, session.target())
     (session.cfg / "sessions" / f"{PID}.json").unlink()
     session.peer.close()
     os.unlink(session.peer.path)
     meta = page_meta(browser.get(URL).text)
-    assert meta["can"] == ["ask"]
-    assert meta["lines"] == {"ask": None, "tell": ENDED}
+    assert meta["can"] == []
+    assert meta["lines"] == {"tell": ENDED}
 
 
-def test_a_session_whose_socket_was_not_found_says_that_under_tell_only(browser, plan, session):
+def test_a_session_whose_socket_was_not_found_says_that_under_tell(browser, plan, session):
     session.record(messagingSocketPath="")
     attach(browser, plan, session.target(socket=""))
     meta = page_meta(browser.get(URL).text)
-    assert meta["can"] == ["ask"] and meta["lines"] == {"ask": None, "tell": NO_SOCKET}
-
-
-def test_without_the_command_ask_is_disabled_with_a_line(browser, plan, session):
-    attach(browser, plan, session.target(bin=""))
-    meta = page_meta(browser.get(URL).text)
-    assert meta["can"] == ["deliver"]
-    assert "Ask needs" in meta["lines"]["ask"] and meta["lines"]["tell"] is None
+    assert meta["can"] == [] and meta["lines"] == {"tell": NO_SOCKET}
 
 
 def test_doc_gives_the_public_part_of_the_target_and_what_it_can_do(browser, plan, session):
@@ -306,8 +298,8 @@ def test_doc_gives_the_public_part_of_the_target_and_what_it_can_do(browser, pla
     got = browser.get(f"/_/doc?doc={DOC}").json()
     assert got["target"] == {"agent": "claude-code", "display": "Claude",
                              "product": "Claude Code", "name": "Cosima", "label": "Cosima"}
-    assert got["capabilities"] == ["ask", "deliver", "state", "stop"]
-    assert got["asking"] == [] and got["telling"] == [] and got["question"] == ""
+    assert got["capabilities"] == ["deliver", "state", "stop"]
+    assert got["telling"] == [] and got["question"] == ""
 
 
 # ── the target a render records ──────────────────────────────────────────────
@@ -327,7 +319,7 @@ def test_a_render_that_finds_no_agent_keeps_the_stored_target_and_none_clears_it
     assert r.status == 200 and browser.hub.docs.get(DOC)["target"]["session"] == "s-1"
     attach(browser, plan, {"agent": "none"})
     assert browser.hub.docs.get(DOC)["target"] is None
-    assert page_meta(browser.get(URL).text)["lines"]["ask"] == NO_AGENT
+    assert page_meta(browser.get(URL).text)["lines"]["tell"] == NO_AGENT
 
 
 def test_the_page_cannot_set_the_target(browser, plan, session):
@@ -336,268 +328,74 @@ def test_the_page_cannot_set_the_target(browser, plan, session):
     assert browser.hub.docs.get(DOC).get("target") is None
 
 
-# ── Ask ──────────────────────────────────────────────────────────────────────
+# ── a Tell that runs, and what the jobs and the dot say of it ────────────────
 
-def test_ask_forks_the_session_and_writes_its_answer_as_a_reply_with_the_role_answer(
-        browser, hub, ready, session, work):
-    sub = tab(hub)
-    sub.drain()
-    asked = thread(ready)
-    held = hub.entry(DOC).live.snapshot()["hash"]               # the text a tab holds when it asks
-    r = post(browser, "/_/ask")
-    assert r.status == 200 and r.json() == {"ok": True}
-    finish(hub)
-    evs = events(sub)
-    assert [n for n, _ in evs] == ["ask-started", "ask-done"]
-    c = thread(ready)
-    assert [(x.by, x.role, x.text) for x in c.replies] == [("Claude", "answer", "The answer.")]
-    done = named(evs, "ask-done")[0]
-    assert done["id"] == "c1" and done["hash"] == md_hash(ready.read_text(encoding="utf-8"))
-    assert done["textSame"] is True and done["base"] == held != done["hash"]
-    assert done["comments"][0]["replies"][0]["role"] == "answer"
-    [call] = session.claude.calls()
-    prompt = prompts.ask(str(ready), asked, links=True)
-    assert call["argv"] == ["-p", "--resume", "s-1", "--fork-session", "--tools", "Read,Grep,Glob",
-                            "--allowedTools", "Read,Grep,Glob", "--disallowedTools",
-                            "Bash,Edit,Write,NotebookEdit", "--strict-mcp-config",
-                            "--output-format", "text"]
-    assert call["stdin"] == prompt                      # the thread and the path never go on argv
-    assert not [a for a in call["argv"] if "Why pears?" in a or str(ready) in a]
-    assert call["cwd"] == os.path.realpath(work)
-
-
-def test_ask_and_the_courier_run_under_the_config_folder_of_the_session(
+def test_the_courier_runs_under_the_config_folder_of_the_session(
         browser, hub, ready, session, tmp_path, monkeypatch):
     """`--resume` finds a session in the config folder it runs under: the hub's own may be
     another one than the session's."""
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "the-hubs-own"))
-    post(browser, "/_/ask")
-    finish(hub)
     FakeClaude(session.claude.dir, answer="sent")
     session.record(peerProtocol=2)
     post(browser, "/_/tell")
     finish(hub)
-    asked, told = session.claude.calls()
-    assert asked["config_var"] == told["config_var"] == str(session.cfg)
+    [told] = session.claude.calls()
+    assert told["config_var"] == str(session.cfg)
 
 
-def test_ask_that_is_already_running_on_the_thread_is_refused(browser, hub, ready, session):
-    FakeClaude(session.claude.dir, answer="x", sleep=30)
-    assert post(browser, "/_/ask").status == 200
+def test_a_tell_that_is_already_running_on_the_thread_is_refused(browser, hub, ready, session):
+    FakeClaude(session.claude.dir, answer="sent", sleep=30)
+    session.record(peerProtocol=2)
+    assert post(browser, "/_/tell").status == 200
     assert wait_until(lambda: session.claude.calls() != [])
-    r = post(browser, "/_/ask")
-    assert r.status == 409 and r.json()["error"] == "Cosima is already answering this comment"
-    assert hub.runner.active("ask") == [[DOC, "c1"]]
-    assert browser.get(f"/_/doc?doc={DOC}").json()["asking"] == ["c1"]
-    assert browser.get("/_/jobs", cookie=False, key=True).json()["asking"] == [[DOC, "c1"]]
+    r = post(browser, "/_/tell")
+    assert r.status == 409 and r.json()["error"] == "Cosima is already being told about this comment"
+    assert hub.runner.active("tell") == [[DOC, "c1"]]
+    assert browser.get(f"/_/doc?doc={DOC}").json()["telling"] == ["c1"]
+    assert browser.get("/_/jobs", cookie=False, key=True).json()["telling"] == [[DOC, "c1"]]
 
 
-def test_an_ask_that_runs_turns_the_dot_of_its_document_orange_and_cancel_turns_it_back(
+def test_a_tell_that_waits_turns_the_dot_of_its_document_orange_and_cancel_turns_it_back(
         browser, hub, ready, session):
-    FakeClaude(session.claude.dir, answer="x", sleep=30)
-
     def dot():
         [d] = [d for r in browser.get("/_/index.json").json()["roots"] for d in r["docs"]
                if d["doc"] == DOC]
         return d["dot"]
     assert dot() == "blue"
-    assert post(browser, "/_/ask").status == 200
-    assert wait_until(lambda: session.claude.calls() != [])
+    assert post(browser, "/_/tell").status == 200
+    finish(hub)
     assert dot() == "orange"
-    assert post(browser, "/_/cancel", what="ask").json() == {"ok": True}
+    assert post(browser, "/_/cancel").json() == {"ok": True}
     finish(hub)
     assert dot() == "blue"
 
 
-def test_a_second_thread_may_be_asked_at_the_same_time(browser, hub, ready, session):
-    FakeClaude(session.claude.dir, answer="x", sleep=30)
+def test_a_second_thread_may_be_told_at_the_same_time(browser, hub, ready, session):
+    FakeClaude(session.claude.dir, answer="sent", sleep=30)
+    session.record(peerProtocol=2)
     update_file(ready, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "First paragraph"),
                                                  "First paragraph", "Why?", "Ada", "2026-10-14T10:01")[0])
-    assert post(browser, "/_/ask", id="c1").status == 200
-    assert post(browser, "/_/ask", id="c2").status == 200
+    assert post(browser, "/_/tell", id="c1").status == 200
+    assert post(browser, "/_/tell", id="c2").status == 200
 
 
-def test_ask_failing_says_the_last_three_lines_of_stderr_and_writes_nothing(
-        browser, hub, ready, session):
-    FakeClaude(session.claude.dir, answer="", err="one\ntwo\nthree\nfour", code=1)
-    sub = tab(hub)
-    sub.drain()
-    before = ready.read_text(encoding="utf-8")
-    post(browser, "/_/ask")
-    finish(hub)
-    [failed] = named(events(sub), "ask-failed")
-    assert failed["id"] == "c1" and "two three four" in failed["error"] and "one" not in failed["error"]
-    assert ready.read_text(encoding="utf-8") == before
-    assert hub.runner.active("ask") == []
-
-
-def test_an_empty_answer_is_a_failure_too(browser, hub, ready, session):
-    FakeClaude(session.claude.dir, answer="  \n", err="")
-    sub = tab(hub)
-    sub.drain()
-    post(browser, "/_/ask")
-    finish(hub)
-    [failed] = named(events(sub), "ask-failed")
-    assert "no answer" in failed["error"] and thread(ready).replies == []
-
-
-def test_ask_that_takes_too_long_is_killed_and_fails(browser, hub, ready, session):
-    FakeClaude(session.claude.dir, answer="late", sleep=30)
-    hub.asktell.ask_timeout = 0.5
-    sub = tab(hub)
-    sub.drain()
-    post(browser, "/_/ask")
-    finish(hub)
-    [failed] = named(events(sub), "ask-failed")
-    assert failed["error"].startswith("Cosima did not answer within")
-    [call] = session.claude.calls()
-    assert ended(call["pid"]) and thread(ready).replies == []
-
-
-def test_ask_whose_command_is_missing_says_so(browser, hub, ready, session):
-    sub = tab(hub)
-    sub.drain()
-    session.claude.bin.unlink()
-    r = post(browser, "/_/ask")
-    assert r.status == 409 and "Ask needs" in r.json()["error"]
-
-
-def test_ask_answering_a_comment_that_was_deleted_meanwhile_fails_and_writes_nothing(
-        browser, hub, ready, session):
-    FakeClaude(session.claude.dir, answer="too late", sleep=1)
-    sub = tab(hub)
-    sub.drain()
-    post(browser, "/_/ask")
-    assert wait_until(lambda: session.claude.calls() != [])
-    update_file(ready, lambda t: rdc.delete(t, "c1"))
-    finish(hub)
-    [failed] = named(events(sub), "ask-failed")
-    assert "was deleted" in failed["error"] and "too late" not in ready.read_text(encoding="utf-8")
-
-
-def test_ask_answering_a_comment_that_is_still_in_the_page_but_unreadable_does_not_say_deleted(
-        browser, hub, ready, session):
-    """A hand edit made the head unreadable while the answer was being written: the comment is in the
-    file, so the failure says that, never that it was deleted."""
-    FakeClaude(session.claude.dir, answer="too late", sleep=1)
-    sub = tab(hub)
-    sub.drain()
-    post(browser, "/_/ask")
-    assert wait_until(lambda: session.claude.calls() != [])
-    update_file(ready, lambda t: t.replace("status=open", "status=bogus", 1))
-    finish(hub)
-    [failed] = named(events(sub), "ask-failed")
-    assert "deleted" not in failed["error"]
-    assert "in the page but cannot be read" in failed["error"] and "was not written" in failed["error"]
-    assert "too late" not in ready.read_text(encoding="utf-8")
-
-
-def test_an_answer_never_lands_in_another_thread_that_took_the_id_of_the_asked_one(
-        browser, hub, ready, session):
-    """Ids are the highest plus one, so deleting the last comment frees its id for the next
-    one. The answer belongs to the thread the prompt was made from."""
-    FakeClaude(session.claude.dir, answer="too late", sleep=1)
-    sub = tab(hub)
-    sub.drain()
-    post(browser, "/_/ask")
-    assert wait_until(lambda: session.claude.calls() != [])
-    update_file(ready, lambda t: rdc.delete(t, "c1"))
-    update_file(ready, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "Second paragraph"),
-                                                 "Second paragraph", "Unrelated!", "Bo",
-                                                 "2026-10-14T11:30")[0])
-    finish(hub)
-    [failed] = named(events(sub), "ask-failed")
-    assert failed["id"] == "c1" and "the comment changed" in failed["error"]
-    assert thread(ready).by == "Bo" and thread(ready).replies == []
-    assert "too late" not in ready.read_text(encoding="utf-8")
-
-
-def test_an_answer_still_lands_when_others_replied_to_the_thread_meanwhile(
-        browser, hub, ready, session):
-    FakeClaude(session.claude.dir, answer="The answer.", sleep=1)
-    sub = tab(hub)
-    sub.drain()
-    post(browser, "/_/ask")
-    assert wait_until(lambda: session.claude.calls() != [])
-    update_file(ready, lambda t: rdc.reply(t, "c1", "Me too", "Bo", "2026-10-14T11:30", False, None))
-    finish(hub)
-    assert named(events(sub), "ask-done")
-    assert [r.text for r in thread(ready).replies] == ["Me too", "The answer."]
-
-
-def test_ask_of_a_comment_that_is_not_there_is_404(browser, ready, session):
-    r = post(browser, "/_/ask", id="c9")
-    assert r.status == 404 and r.json()["error"] == "no comment c9 in this document"
-    assert session.claude.calls() == []
-
-
-def test_ask_of_a_document_with_no_session_is_409_whatever_the_comment(browser, plan):
-    assert post(browser, "/_/ask", id="c9").json() == {"ok": False, "error": NO_AGENT}
-
-
-def test_a_comment_added_with_ask_starts_the_ask_and_one_without_a_session_says_why(
-        browser, hub, plan, session):
-    attach(browser, plan, session.target())
-    text = plan.read_text(encoding="utf-8")
-    blk, s, e = rdc.find_quote(text, "Second paragraph")
-    r = browser.post("/_/comment", {"doc": DOC, "op": "add", "hash": md_hash(text), "block": blk,
-                                    "start": s, "end": e, "quote": "Second paragraph",
-                                    "body": "Why pears?", "ask": True})
-    assert r.json()["ok"] is True and "askError" not in r.json()
-    finish(hub)
-    assert [x.text for x in thread(plan).replies] == ["The answer."]
-
-
-def test_a_reply_sent_with_ask_starts_the_ask_too(browser, hub, ready, session):
-    text = ready.read_text(encoding="utf-8")
-    r = browser.post("/_/comment", {"doc": DOC, "op": "reply", "id": "c1", "hash": md_hash(text),
-                                    "body": "And plums?", "ask": True})
-    assert r.json()["ok"] is True and "askError" not in r.json()
-    finish(hub)
-    assert [(x.by, x.role) for x in thread(ready).replies] == [("Ada", None), ("Claude", "answer")]
+def test_tell_of_a_document_with_no_session_is_409_whatever_the_comment(browser, plan):
+    assert post(browser, "/_/tell", id="c9").json() == {"ok": False, "error": NO_AGENT}
 
 
 # The page gave up on the answer and sends the reply again with its request id: the hub took the first, so the
-# second writes nothing and starts no second Ask.
-def test_a_reply_sent_again_with_its_request_id_starts_no_second_ask(browser, hub, ready, session):
+# second writes nothing and starts no second Tell.
+def test_a_reply_sent_again_with_its_request_id_starts_no_second_tell(browser, hub, ready, session):
     text = ready.read_text(encoding="utf-8")
-    body = {"doc": DOC, "op": "reply", "id": "c1", "hash": md_hash(text), "body": "And plums?", "ask": True,
+    body = {"doc": DOC, "op": "reply", "id": "c1", "hash": md_hash(text), "body": "And plums?", "tell": True,
             "rid": "r0123456789abcdef"}
     assert browser.post("/_/comment", body).json()["ok"] is True
     finish(hub)
     again = browser.post("/_/comment", body).json()
-    assert again["ok"] is True and again["again"] is True and "askError" not in again
+    assert again["ok"] is True and again["again"] is True and "tellError" not in again
     finish(hub)
-    assert [(x.by, x.role) for x in thread(ready).replies] == [("Ada", None), ("Claude", "answer")]
-    assert len(session.claude.calls()) == 1
-
-
-# ── Cancel an Ask ────────────────────────────────────────────────────────────
-
-def test_cancelling_an_ask_kills_the_fork_writes_nothing_and_says_cancelled(
-        browser, hub, ready, session):
-    FakeClaude(session.claude.dir, answer="partial", sleep=30)
-    sub = tab(hub)
-    sub.drain()
-    before = ready.read_text(encoding="utf-8")
-    post(browser, "/_/ask")
-    assert wait_until(lambda: session.claude.calls() != [])
-    pid = session.claude.calls()[0]["pid"]
-    r = post(browser, "/_/cancel", what="ask")
-    assert r.json() == {"ok": True}
-    finish(hub)
-    names = [n for n, _ in events(sub)]
-    assert names == ["ask-started", "ask-cancelled"]
-    assert ended(pid) and ready.read_text(encoding="utf-8") == before
-    assert hub.runner.active("ask") == []
-
-
-def test_cancelling_an_ask_that_is_no_longer_running_still_clears_the_page(
-        browser, hub, ready):
-    sub = tab(hub)
-    sub.drain()
-    assert post(browser, "/_/cancel", what="ask").json() == {"ok": True}
-    assert events(sub) == [("ask-cancelled", {"id": "c1"})]
+    assert [(x.by, x.role) for x in thread(ready).replies] == [("Ada", None)]
+    assert len(session.peer.wait_for(1)) == 1 and len(session.peer.messages) == 1
 
 
 # ── Tell ─────────────────────────────────────────────────────────────────────
@@ -751,7 +549,8 @@ def test_a_tell_without_a_socket_is_refused_with_its_line_and_waits_for_nothing(
 
 def test_tell_of_a_comment_that_is_not_there_is_404_and_pushes_nothing(browser, ready, session):
     r = post(browser, "/_/tell", id="c9")
-    assert r.status == 404 and session.peer.data == b""
+    assert r.status == 404 and r.json()["error"] == "no comment c9 in this document"
+    assert session.peer.data == b""
 
 
 def test_a_comment_added_with_tell_is_written_delivered_and_waits(browser, hub, plan, session):
@@ -828,42 +627,37 @@ def test_a_second_tell_goes_out_once_the_first_is_over(browser, hub, ready, sess
     assert len(session.peer.wait_for(2)) == 2
 
 
-# ── Ask and Tell name their thread by id, in the text the page holds (SPEC 7.3) ──
+# ── Tell names its thread by id, in the text the page holds (SPEC 7.3) ──
 
-@pytest.mark.parametrize("route", ["/_/ask", "/_/tell"])
-def test_an_ask_or_a_tell_from_a_page_whose_version_the_document_does_not_know_is_refused(
-        browser, hub, ready, session, route):
+def test_a_tell_from_a_page_whose_version_the_document_does_not_know_is_refused(
+        browser, hub, ready, session):
     """In a text the document never handed out (another folder's file took the address, or the
-    version aged out) the id may name another thread: its answer would go there, or the session
-    would be told of it. Nothing starts and nothing waits."""
+    version aged out) the id may name another thread: the session would be told of it. Nothing
+    starts and nothing waits."""
     kept = ready.read_text(encoding="utf-8")
-    r = post(browser, route, hash=md_hash("A text this document never handed out.\n"))
+    r = post(browser, "/_/tell", hash=md_hash("A text this document never handed out.\n"))
     assert r.status == 409, r.json()
     assert r.json()["error"] == ("the .md changed on disk and this page's version is no longer known to "
                                  "the hub, so this comment may not be the one on the page. Reload the page")
     finish(hub)
     assert session.claude.calls() == [] and session.peer.messages == []
-    assert hub.runner.active("ask") == [] and hub.entry(DOC).live.waiting() == []
+    assert hub.runner.active("tell") == [] and hub.entry(DOC).live.waiting() == []
     assert ready.read_text(encoding="utf-8") == kept
 
 
 @pytest.mark.parametrize("which", ["current", "older", "none"])
-@pytest.mark.parametrize("route", ["/_/ask", "/_/tell"])
-def test_an_ask_or_a_tell_from_the_current_version_an_older_known_one_or_none_starts(
-        browser, hub, ready, session, route, which):
+def test_a_tell_from_the_current_version_an_older_known_one_or_none_starts(
+        browser, hub, ready, session, which):
     """An older version the document knows still names its threads: the page and an agent both
     writing in one document stays allowed. A request with no hash is not checked."""
     held = hub.entry(DOC).live.snapshot()["hash"]
     if which == "older":
         update_file(ready, lambda t: t + "\nA paragraph from outside.\n")
         assert md_hash(ready.read_text(encoding="utf-8")) != held
-    r = post(browser, route, **({} if which == "none" else {"hash": held}))
+    r = post(browser, "/_/tell", **({} if which == "none" else {"hash": held}))
     assert r.status == 200, r.json()
     finish(hub)
-    if route == "/_/ask":
-        assert len(session.claude.calls()) == 1
-    else:
-        assert len(session.peer.wait_for(1)) == 1
+    assert len(session.peer.wait_for(1)) == 1
 
 
 # More writes than the hub keeps versions of, in memory and on disk (SPEC 7.4).
@@ -871,11 +665,10 @@ MANY = max(live.VERSIONS, state.VERSIONS_KEPT) + 1
 
 
 @pytest.mark.parametrize("pinned", [True, False], ids=["pinned", "not-pinned"])
-@pytest.mark.parametrize("route", ["/_/ask", "/_/tell"])
-def test_an_ask_or_a_tell_from_a_page_that_pinned_its_version_starts_after_more_writes_than_the_hub_keeps(
-        browser, hub, ready, session, route, pinned):
-    """The page keeps its version while a form holds the reload a change needs, and pins it (SPEC 7.4): an
-    Ask or a Tell sent with it starts however much was written meanwhile. Unpinned, that version goes with
+def test_a_tell_from_a_page_that_pinned_its_version_starts_after_more_writes_than_the_hub_keeps(
+        browser, hub, ready, session, pinned):
+    """The page keeps its version while a form holds the reload a change needs, and pins it (SPEC 7.4): a
+    Tell sent with it starts however much was written meanwhile. Unpinned, that version goes with
     the oldest, and the request is refused as before."""
     e = hub.entry(DOC)
     e.live.refresh()
@@ -884,25 +677,22 @@ def test_an_ask_or_a_tell_from_a_page_that_pinned_its_version_starts_after_more_
     if pinned:
         pin = browser.post("/_/pin", {"doc": DOC, "hash": held})
     writes_from_outside(ready, e.live, MANY)
-    r = post(browser, route, hash=held)
+    r = post(browser, "/_/tell", hash=held)
     finish(hub)
     if not pinned:
         assert r.status == 409 and session.claude.calls() == [] and session.peer.messages == []
         return
     assert r.status == 200, r.json()
-    if route == "/_/ask":
-        assert len(session.claude.calls()) == 1
-    else:
-        assert len(session.peer.wait_for(1)) == 1
+    assert len(session.peer.wait_for(1)) == 1
     assert pin.status == 200
 
 
 @pytest.mark.parametrize("pinned", [True, False], ids=["pinned", "not-pinned"])
-@pytest.mark.parametrize("what", ["reply", "ask", "tell"])
-def test_a_reply_an_ask_or_a_tell_from_a_page_that_pinned_its_version_is_taken_after_a_restart_and_more_writes(
+@pytest.mark.parametrize("what", ["reply", "tell"])
+def test_a_reply_or_a_tell_from_a_page_that_pinned_its_version_is_taken_after_a_restart_and_more_writes(
         browser, hub, ready, session, clock, what, pinned):
     """The pins are on disk too (SPEC 7.4): a page that held its reload through a restart of the hub (10.7)
-    still replies, asks and tells with its version. Unpinned, the hub that comes back knows only the newest
+    still replies and tells with its version. Unpinned, the hub that comes back knows only the newest
     on disk, and the request is refused as before."""
     e = hub.entry(DOC)
     e.live.refresh()
@@ -922,8 +712,6 @@ def test_a_reply_an_ask_or_a_tell_from_a_page_that_pinned_its_version_is_taken_a
         assert r.status == (200 if pinned else 409), r.json()
         if what == "reply":
             assert [x.text for x in thread(ready).replies] == (["Because."] if pinned else [])
-        elif what == "ask":
-            assert len(session.claude.calls()) == (1 if pinned else 0)
         elif pinned:
             assert len(session.peer.wait_for(1)) == 1
         else:
@@ -934,11 +722,10 @@ def test_a_reply_an_ask_or_a_tell_from_a_page_that_pinned_its_version_is_taken_a
         fresh.runner.join(10)
 
 
-@pytest.mark.parametrize("route", ["/_/ask", "/_/tell"])
-def test_a_page_of_a_forgotten_root_cannot_ask_or_tell_a_thread_of_the_folder_that_takes_the_name(
-        browser, hub, ready, session, tmp_path, route):
+def test_a_page_of_a_forgotten_root_cannot_tell_a_thread_of_the_folder_that_takes_the_name(
+        browser, hub, ready, session, tmp_path):
     """The folder that takes the name has a c1 of its own, rendered from the same session. The old
-    page's Ask would write its answer there, its Tell would hand that thread to the session."""
+    page's Tell would hand that thread to the session."""
     old_hash = md_hash(ready.read_text(encoding="utf-8"))
     assert hub.forget_root("work").name == "work"
     new = tmp_path / "y" / "work" / "plan.md"
@@ -947,17 +734,16 @@ def test_a_page_of_a_forgotten_root_cannot_ask_or_tell_a_thread_of_the_folder_th
     assert attach(browser, new, session.target()).json()["doc"] == DOC
     comment(new, body="The new question.")
     kept = new.read_text(encoding="utf-8")
-    assert post(browser, route, hash=old_hash).status == 409
+    assert post(browser, "/_/tell", hash=old_hash).status == 409
     finish(hub)
     assert session.claude.calls() == [] and session.peer.messages == []
     assert new.read_text(encoding="utf-8") == kept
-    assert post(browser, route, hash=md_hash(kept)).status == 200      # the new document's own page
+    assert post(browser, "/_/tell", hash=md_hash(kept)).status == 200      # the new document's own page
     finish(hub)
 
 
-@pytest.mark.parametrize("route", ["/_/ask", "/_/tell"])
-def test_an_ask_or_a_tell_is_checked_on_the_document_it_starts_on(
-        browser, hub, ready, session, tmp_path, monkeypatch, route):
+def test_a_tell_is_checked_on_the_document_it_starts_on(
+        browser, hub, ready, session, tmp_path, monkeypatch):
     """The route finds the document, and the job looks it up again when it starts. A forget in
     between, and another folder that takes the name: the version is checked on the document the job
     then runs on, never on the one it was found as."""
@@ -968,7 +754,7 @@ def test_an_ask_or_a_tell_is_checked_on_the_document_it_starts_on(
     comment(new, body="The new question.")
     kept = new.read_text(encoding="utf-8")
     asked = at_the_jobs_own_look(monkeypatch, hub, forgotten_and_taken(browser, hub, new, session))
-    assert post(browser, route, hash=old_hash).status == 409
+    assert post(browser, "/_/tell", hash=old_hash).status == 409
     finish(hub)
     assert len(asked) == 2
     assert session.claude.calls() == [] and session.peer.messages == []
@@ -976,13 +762,12 @@ def test_an_ask_or_a_tell_is_checked_on_the_document_it_starts_on(
 
 
 @pytest.mark.parametrize("op", ["add", "reply"])
-@pytest.mark.parametrize("button", ["ask", "tell"])
-def test_a_comment_sent_with_ask_or_tell_starts_its_job_only_on_the_text_it_was_written_in(
-        browser, hub, ready, session, tmp_path, monkeypatch, button, op):
+def test_a_comment_sent_with_tell_starts_its_job_only_on_the_text_it_was_written_in(
+        browser, hub, ready, session, tmp_path, monkeypatch, op):
     """The comment route writes the comment, and the job looks the document up again when it starts. A
     forget in between, and another folder that takes the name: the job would run on that folder's
     thread of the same id (c1 for the reply, c2 for the new comment), which the comment was never
-    written in. The comment stays written; the job is refused as an Ask or a Tell from a version the
+    written in. The comment stays written; the job is refused as a Tell from a version the
     document does not know is."""
     new = tmp_path / "y" / "work" / "plan.md"
     new.parent.mkdir(parents=True)
@@ -998,10 +783,10 @@ def test_a_comment_sent_with_ask_or_tell_starts_its_job_only_on_the_text_it_was_
         blk, start, end = rdc.find_quote(text, "First paragraph")
         fields = {"block": blk, "start": start, "end": end, "quote": "First paragraph"}
     r = browser.post("/_/comment", {"doc": DOC, "op": op, "hash": md_hash(text), "body": "And plums?",
-                                    button: True, **fields})
+                                    "tell": True, **fields})
     got = r.json()
     assert r.status == 200 and got["id"] == ("c1" if op == "reply" else "c2") and len(asked) == 2, got
-    assert got[f"{button}Error"] == ("the .md changed on disk and this page's version is no longer known to "
+    assert got["tellError"] == ("the .md changed on disk and this page's version is no longer known to "
                                      "the hub, so this comment may not be the one on the page. Reload the page")
     finish(hub)
     assert session.claude.calls() == [] and session.peer.messages == []
@@ -1011,32 +796,27 @@ def test_a_comment_sent_with_ask_or_tell_starts_its_job_only_on_the_text_it_was_
     assert got.get("telling", []) == [] and hub.entry(DOC).live.waiting() == []
 
 
-@pytest.mark.parametrize("button", ["ask", "tell"])
-def test_a_comment_sent_with_ask_or_tell_still_starts_when_the_file_moved_before_the_job_did(
-        browser, hub, ready, session, monkeypatch, button):
+def test_a_comment_sent_with_tell_still_starts_when_the_file_moved_before_the_job_did(
+        browser, hub, ready, session, monkeypatch):
     """The control: a write from outside between the comment and the job's start leaves the text the
     comment was written in a version the document knows, so the job starts."""
     asked = at_the_jobs_own_look(monkeypatch, hub,
                                  lambda: update_file(ready, lambda t: t + "\nA paragraph from outside.\n"))
     text = ready.read_text(encoding="utf-8")
     got = browser.post("/_/comment", {"doc": DOC, "op": "reply", "id": "c1", "hash": md_hash(text),
-                                      "body": "And plums?", button: True}).json()
-    assert got["ok"] is True and f"{button}Error" not in got and len(asked) == 2, got
+                                      "body": "And plums?", "tell": True}).json()
+    assert got["ok"] is True and "tellError" not in got and len(asked) == 2, got
     assert md_hash(ready.read_text(encoding="utf-8")) != got["hash"]
     finish(hub)
-    if button == "ask":
-        assert len(session.claude.calls()) == 1
-    else:
-        assert len(session.peer.wait_for(1)) == 1
+    assert len(session.peer.wait_for(1)) == 1
 
 
 @pytest.mark.parametrize("op", ["add", "reply"])
-@pytest.mark.parametrize("button", ["ask", "tell"])
-def test_a_comment_sent_with_ask_or_tell_whose_root_is_forgotten_before_the_job_starts_is_answered(
-        browser, hub, ready, session, monkeypatch, button, op):
+def test_a_comment_sent_with_tell_whose_root_is_forgotten_before_the_job_starts_is_answered(
+        browser, hub, ready, session, monkeypatch, op):
     """The comment route writes the comment, and the job looks the document up again when it starts. A
     forget in between, and no folder that takes the name: the job finds no document. The comment was
-    written, so the route answers 200 with the refusal in askError or tellError, as it does for a text
+    written, so the route answers 200 with the refusal in tellError, as it does for a text
     the document does not know, and the wait the Tell began is ended."""
     def forget():
         assert hub.forget_root("work").name == "work"
@@ -1048,10 +828,10 @@ def test_a_comment_sent_with_ask_or_tell_whose_root_is_forgotten_before_the_job_
         blk, start, end = rdc.find_quote(text, "First paragraph")
         fields = {"block": blk, "start": start, "end": end, "quote": "First paragraph"}
     r = browser.post("/_/comment", {"doc": DOC, "op": op, "hash": md_hash(text), "body": "And plums?",
-                                    button: True, **fields})
+                                    "tell": True, **fields})
     got = r.json()
     assert r.status == 200 and got["id"] == ("c1" if op == "reply" else "c2") and len(asked) == 2, got
-    assert got[f"{button}Error"] == GONE
+    assert got["tellError"] == GONE
     assert hub.roots.get("work") is None
     finish(hub)
     assert session.claude.calls() == [] and session.peer.messages == []
@@ -1061,9 +841,8 @@ def test_a_comment_sent_with_ask_or_tell_whose_root_is_forgotten_before_the_job_
 
 
 @pytest.mark.parametrize("gone", ["forgotten", "deleted"])
-@pytest.mark.parametrize("route", ["/_/ask", "/_/tell"])
-def test_an_ask_or_a_tell_whose_document_goes_before_the_job_starts_is_refused_as_one_not_there(
-        browser, hub, ready, session, monkeypatch, route, gone):
+def test_a_tell_whose_document_goes_before_the_job_starts_is_refused_as_one_not_there(
+        browser, hub, ready, session, monkeypatch, gone):
     """The route finds the document, and the job looks it up again when it starts. Its root forgotten in
     between with no folder that takes the name, or its file deleted: the job finds no document, and the
     request is refused with 404, as one for a document that is not there, not as a failure of the hub."""
@@ -1075,88 +854,81 @@ def test_an_ask_or_a_tell_whose_document_goes_before_the_job_starts_is_refused_a
         else:
             ready.unlink()
     asked = at_the_jobs_own_look(monkeypatch, hub, go)
-    r = post(browser, route, hash=held)
+    r = post(browser, "/_/tell", hash=held)
     assert (r.status, r.json()) == (404, {"ok": False, "error": GONE}) and len(asked) == 2
     finish(hub)
     assert session.claude.calls() == [] and session.peer.messages == []
 
 
-@pytest.mark.parametrize("route", ["/_/ask", "/_/tell"])
-def test_an_ask_or_a_tell_admitted_after_a_forget_that_came_between_its_look_and_its_start_is_refused(
-        browser, hub, ready, session, monkeypatch, route):
+def test_a_tell_admitted_after_a_forget_that_came_between_its_look_and_its_start_is_refused(
+        browser, hub, ready, session, monkeypatch):
     """The job holds its entry and is about to be admitted; the root is forgotten right there, and the forget's
     cancel finds no job yet. The job must not start after it: it would run on a document that is gone,
     after Cancel answered ok."""
     held = md_hash(ready.read_text(encoding="utf-8"))
     sub = tab(hub)
     sub.drain()
-    real, forgotten = hub.asktell._thread, []
+    real, forgotten = hub.tell._thread, []
 
     def forgotten_after(e, cid):          # the last look before the job is admitted
         found = real(e, cid)
         forgotten.append(hub.forget_root("work").name)
         return found
-    monkeypatch.setattr(hub.asktell, "_thread", forgotten_after)
-    r = post(browser, route, hash=held)
+    monkeypatch.setattr(hub.tell, "_thread", forgotten_after)
+    r = post(browser, "/_/tell", hash=held)
     assert forgotten == ["work"]
     assert (r.status, r.json()) == (404, {"ok": False, "error": GONE})
     finish(hub)
-    assert wait_until(lambda: not hub.runner.running("ask", DOC, "c1")
-                      and not hub.runner.running("tell", DOC, "c1"))
-    assert hub.runner.active("ask") == [] and hub.runner.active("tell") == []
+    assert wait_until(lambda: not hub.runner.running("tell", DOC, "c1"))
+    assert hub.runner.active("tell") == []
     assert session.claude.calls() == [] and session.peer.messages == []
     heard = events(sub)
     assert [n for n, _ in heard if n != "gone"] == [], heard
 
 
-@pytest.mark.parametrize("route", ["/_/ask", "/_/tell"])
 def test_a_job_registered_when_a_forget_comes_is_refused_and_its_work_never_runs(
-        browser, hub, ready, session, monkeypatch, route):
+        browser, hub, ready, session, monkeypatch):
     """The forget comes after the job is registered and before the entry is looked at: its cancel finds
     the job, the look finds the entry gone, and the job is held back from its work either way."""
     held = md_hash(ready.read_text(encoding="utf-8"))
     sub = tab(hub)
     sub.drain()
-    real, forgotten = hub.asktell._is_current, []
+    real, forgotten = hub.tell._is_current, []
 
     def forgotten_first(e):
         forgotten.append(hub.forget_root("work").name)
         return real(e)
-    monkeypatch.setattr(hub.asktell, "_is_current", forgotten_first)
-    r = post(browser, route, hash=held)
+    monkeypatch.setattr(hub.tell, "_is_current", forgotten_first)
+    r = post(browser, "/_/tell", hash=held)
     assert forgotten == ["work"]
     assert (r.status, r.json()) == (404, {"ok": False, "error": GONE})
     finish(hub)
-    assert wait_until(lambda: not hub.runner.running("ask", DOC, "c1")
-                      and not hub.runner.running("tell", DOC, "c1"))
+    assert wait_until(lambda: not hub.runner.running("tell", DOC, "c1"))
     heard = events(sub)
     assert [n for n, _ in heard if n != "gone"] == [], heard
     assert session.claude.calls() == [] and session.peer.messages == []
     assert hub.jobs()["telling"] == []
 
 
-@pytest.mark.parametrize("route", ["/_/ask", "/_/tell"])
 def test_a_job_whose_start_fails_after_it_was_registered_never_runs_and_is_not_left_waiting(
-        browser, hub, ready, session, monkeypatch, route):
+        browser, hub, ready, session, monkeypatch):
     """The job is registered, held back from its work until the entry is looked at. When the look
     raises, the job is cancelled and let go: its thread ends, and nothing runs."""
     held = md_hash(ready.read_text(encoding="utf-8"))
 
     def broken(e):
         raise RuntimeError("the look failed")
-    monkeypatch.setattr(hub.asktell, "_is_current", broken)
-    post(browser, route, hash=held)
+    monkeypatch.setattr(hub.tell, "_is_current", broken)
+    post(browser, "/_/tell", hash=held)
     finish(hub)
-    assert wait_until(lambda: not hub.runner.running("ask", DOC, "c1")
-                      and not hub.runner.running("tell", DOC, "c1"))
-    assert hub.runner.active("ask") == [] and hub.runner.active("tell") == []
+    assert wait_until(lambda: not hub.runner.running("tell", DOC, "c1"))
+    assert hub.runner.active("tell") == []
     assert session.claude.calls() == [] and session.peer.messages == []
     assert hub.jobs()["telling"] == []
 
 
-@pytest.mark.parametrize("what", ["ask", "tell"])
 def test_a_forget_of_a_root_the_registry_no_longer_holds_still_cancels_the_jobs_of_its_entries(
-        hub, ready, what):
+        hub, ready):
     """Another process forgot the root and this hub reloaded roots.json: the entries are still here, the
     root is not, and the forget pops the entries all the same, so it cancels their jobs too."""
     hub.entry(DOC)
@@ -1167,7 +939,7 @@ def test_a_forget_of_a_root_the_registry_no_longer_holds_still_cancels_the_jobs_
         while not job.cancelled:
             time.sleep(0.01)
         stopped.set()
-    assert hub.runner.start(what, DOC, "c1", work) is not None
+    assert hub.runner.start("tell", DOC, "c1", work) is not None
     assert hub.forget_root("work") is None
     assert stopped.wait(5)
 
@@ -1181,7 +953,7 @@ def test_cancelling_a_tell_already_sent_ends_the_wait_and_tells_the_session_to_s
     post(browser, "/_/tell")
     finish(hub)
     events(sub)
-    r = post(browser, "/_/cancel", what="tell")
+    r = post(browser, "/_/cancel")
     assert r.json() == {"ok": True}
     finish(hub)
     assert events(sub) == [("tell-cancelled", {"id": "c1", "sent": True})]
@@ -1224,12 +996,14 @@ def test_cancelling_a_delivery_still_running_kills_it_and_sends_the_stop_message
     session.record(peerProtocol=2)
     sub = tab(hub)
     sub.drain()
+    before = ready.read_text(encoding="utf-8")
     post(browser, "/_/tell")
     assert wait_until(lambda: session.claude.calls() != [])
     first = session.claude.calls()[0]["pid"]
-    r = post(browser, "/_/cancel", what="tell")
+    r = post(browser, "/_/cancel")
     assert r.json() == {"ok": True}
     assert wait_until(lambda: ended(first))
+    assert ready.read_text(encoding="utf-8") == before
     names = [n for n, _ in events(sub)]
     assert names == ["tell-cancelled"]                         # not "sent", not "failed"
     assert hub.entry(DOC).live.waiting() == []
@@ -1270,7 +1044,7 @@ def test_the_stop_message_goes_out_only_after_the_delivery_it_cancels_has_ended(
     monkeypatch.setattr(hub, "adapter", lambda agent: slow)
     post(browser, "/_/tell")
     assert wait_until(lambda: slow.log == ["deliver-start"])
-    assert post(browser, "/_/cancel", what="tell").json() == {"ok": True}
+    assert post(browser, "/_/cancel").json() == {"ok": True}
     time.sleep(0.3)
     assert slow.log == ["deliver-start"]                      # the stop waits for the Tell
     slow.release.set()
@@ -1305,34 +1079,31 @@ def test_a_tell_cancelled_before_its_delivery_starts_delivers_nothing(
 def test_cancelling_a_tell_that_is_over_is_a_quiet_ok(browser, hub, ready, session):
     sub = tab(hub)
     sub.drain()
-    assert post(browser, "/_/cancel", what="tell").json() == {"ok": True}
+    assert post(browser, "/_/cancel").json() == {"ok": True}
     assert events(sub) == [] and session.peer.data == b""
 
 
-@pytest.mark.parametrize("what", ["ask", "tell"])
-def test_a_cancel_after_the_root_was_forgotten_is_a_quiet_ok(browser, hub, ready, what):
+def test_a_cancel_after_the_root_was_forgotten_is_a_quiet_ok(browser, hub, ready):
     assert hub.forget_root("work").name == "work"
-    assert post(browser, "/_/cancel", what=what).json() == {"ok": True}
+    assert post(browser, "/_/cancel").json() == {"ok": True}
 
 
-@pytest.mark.parametrize("what", ["ask", "tell"])
 def test_a_cancel_that_a_forget_overtakes_answers_ok_and_not_500(
-        browser, hub, ready, monkeypatch, what):
+        browser, hub, ready, monkeypatch):
     """The root is forgotten after the request was read and before the cancel looks at the
     document: the cancel finds nothing to clear."""
-    real, forgotten = hub.asktell.cancel, []
+    real, forgotten = hub.tell.cancel, []
 
-    def forgotten_first(address, cid, kind):
+    def forgotten_first(address, cid):
         forgotten.append(hub.forget_root("work").name)
-        return real(address, cid, kind)
-    monkeypatch.setattr(hub.asktell, "cancel", forgotten_first)
-    assert post(browser, "/_/cancel", what=what).json() == {"ok": True}
+        return real(address, cid)
+    monkeypatch.setattr(hub.tell, "cancel", forgotten_first)
+    assert post(browser, "/_/cancel").json() == {"ok": True}
     assert forgotten == ["work"]
 
 
-@pytest.mark.parametrize("what", ["ask", "tell"])
 def test_a_cancel_stops_a_job_that_started_on_an_entry_a_forget_had_taken(
-        browser, hub, ready, what):
+        browser, hub, ready):
     """A job that was admitted just before a forget runs on after it, on the entry it held."""
     assert hub.forget_root("work").name == "work"
     stopped = threading.Event()
@@ -1341,20 +1112,9 @@ def test_a_cancel_stops_a_job_that_started_on_an_entry_a_forget_had_taken(
         while not job.cancelled:
             time.sleep(0.01)
         stopped.set()
-    assert hub.runner.start(what, DOC, "c1", work) is not None
-    assert post(browser, "/_/cancel", what=what).json() == {"ok": True}
+    assert hub.runner.start("tell", DOC, "c1", work) is not None
+    assert post(browser, "/_/cancel").json() == {"ok": True}
     assert stopped.wait(5)
-
-
-def test_a_cancel_of_an_ask_on_a_file_that_has_gone_still_stops_it(browser, hub, ready, session):
-    FakeClaude(session.claude.dir, answer="partial", sleep=30)
-    post(browser, "/_/ask")
-    assert wait_until(lambda: session.claude.calls() != [])
-    pid = session.claude.calls()[0]["pid"]
-    ready.unlink()
-    assert post(browser, "/_/cancel", what="ask").json() == {"ok": True}
-    finish(hub)
-    assert ended(pid) and hub.runner.active("ask") == []
 
 
 def test_a_cancel_of_a_delivery_on_a_file_that_has_gone_still_stops_it(
@@ -1365,7 +1125,7 @@ def test_a_cancel_of_a_delivery_on_a_file_that_has_gone_still_stops_it(
     assert wait_until(lambda: session.claude.calls() != [])
     pid = session.claude.calls()[0]["pid"]
     ready.unlink()
-    assert post(browser, "/_/cancel", what="tell").json() == {"ok": True}
+    assert post(browser, "/_/cancel").json() == {"ok": True}
     assert wait_until(lambda: ended(pid))
     # The Tell's job has ended; the stop job is left running on purpose: its courier is the 30 s
     # FakeClaude, and the stop message is the next test's business, not this one's.
@@ -1437,9 +1197,10 @@ def test_a_pid_another_session_took_never_receives_the_tell(browser, hub, ready,
 
 # ── stopping ─────────────────────────────────────────────────────────────────
 
-def test_stopping_the_hub_kills_the_asks_in_flight(browser, hub, ready, session):
-    FakeClaude(session.claude.dir, answer="x", sleep=30)
-    post(browser, "/_/ask")
+def test_stopping_the_hub_kills_the_deliveries_in_flight(browser, hub, ready, session):
+    FakeClaude(session.claude.dir, answer="sent", sleep=30)
+    session.record(peerProtocol=2)
+    post(browser, "/_/tell")
     assert wait_until(lambda: session.claude.calls() != [])
     pid = session.claude.calls()[0]["pid"]
     hub.stop_jobs()
@@ -1452,15 +1213,16 @@ def upgrade(browser, **body):
     return browser.post("/_/stop", {"reason": "upgrade", **body}, cookie=False, key=True)
 
 
-def test_an_upgrade_stop_is_refused_while_an_ask_runs_and_the_ask_goes_on(browser, hub, ready, session):
-    FakeClaude(session.claude.dir, answer="x", sleep=30)
-    post(browser, "/_/ask")
+def test_an_upgrade_stop_is_refused_while_a_tell_runs_and_the_tell_goes_on(browser, hub, ready, session):
+    FakeClaude(session.claude.dir, answer="sent", sleep=30)
+    session.record(peerProtocol=2)
+    post(browser, "/_/tell")
     assert wait_until(lambda: session.claude.calls() != [])
     r = upgrade(browser)
-    assert r.status == 409 and r.json()["ok"] is False and "Ask or Tell" in r.json()["error"]
+    assert r.status == 409 and r.json()["ok"] is False and "a Tell is running" in r.json()["error"]
     assert hub.stop_requested is None
-    assert hub.runner.active("ask") == [[DOC, "c1"]] and not ended(session.claude.calls()[0]["pid"])
-    post(browser, "/_/cancel", what="ask")
+    assert hub.runner.active("tell") == [[DOC, "c1"]] and not ended(session.claude.calls()[0]["pid"])
+    post(browser, "/_/cancel")
     finish(hub)
     assert upgrade(browser).status == 200 and hub.stop_requested == "upgrade"
 
@@ -1479,8 +1241,9 @@ def test_an_upgrade_stop_with_nothing_running_is_taken(browser, hub, ready):
 
 def test_sheaf_restart_may_force_an_upgrade_stop_and_a_plain_stop_never_waits(
         browser, hub, ready, session):
-    FakeClaude(session.claude.dir, answer="x", sleep=30)
-    post(browser, "/_/ask")
+    FakeClaude(session.claude.dir, answer="sent", sleep=30)
+    session.record(peerProtocol=2)
+    post(browser, "/_/tell")
     assert wait_until(lambda: session.claude.calls() != [])
     assert upgrade(browser, force=True).status == 200 and hub.stop_requested == "upgrade"
     hub.stop_requested = None
@@ -1492,12 +1255,12 @@ def test_force_must_be_true_or_false(browser, hub, ready):
     assert upgrade(browser, force="yes").status == 400 and hub.stop_requested is None
 
 
-def test_no_ask_or_tell_starts_once_an_upgrade_stop_is_taken(browser, hub, ready, session):
+def test_no_tell_starts_once_an_upgrade_stop_is_taken(browser, hub, ready, session):
     assert upgrade(browser).status == 200
-    ask, tell = post(browser, "/_/ask"), post(browser, "/_/tell")
-    assert ask.status == 409 and tell.status == 409
-    assert "restarting for an upgrade" in ask.json()["error"]
-    assert hub.entry(DOC).live.waiting() == [] and hub.runner.active("ask") == []
+    tell = post(browser, "/_/tell")
+    assert tell.status == 409
+    assert "restarting for an upgrade" in tell.json()["error"]
+    assert hub.entry(DOC).live.waiting() == [] and hub.runner.active("tell") == []
     finish(hub)
     assert session.claude.calls() == []
     r = browser.post("/_/comment", {"doc": DOC, "op": "reply", "id": "c1", "body": "Because.",
@@ -1506,9 +1269,8 @@ def test_no_ask_or_tell_starts_once_an_upgrade_stop_is_taken(browser, hub, ready
     assert r.json().get("tellError") and "restarting for an upgrade" in r.json()["tellError"]
 
 
-def test_an_ask_that_starts_while_an_upgrade_stop_is_being_admitted_is_refused_not_killed(
+def test_a_tell_that_starts_while_an_upgrade_stop_is_being_admitted_is_refused_not_killed(
         browser, hub, ready, session):
-    FakeClaude(session.claude.dir, answer="x", sleep=30)
     real = hub.jobs
     looked, go = threading.Event(), threading.Event()
 
@@ -1522,14 +1284,14 @@ def test_an_ask_that_starts_while_an_upgrade_stop_is_being_admitted_is_refused_n
     stopper = threading.Thread(target=lambda: got.update(stop=upgrade(browser)))
     stopper.start()
     assert looked.wait(10)
-    asker = threading.Thread(target=lambda: got.update(ask=post(browser, "/_/ask")))
-    asker.start()
+    teller = threading.Thread(target=lambda: got.update(tell=post(browser, "/_/tell")))
+    teller.start()
     go.set()
     stopper.join(10)
-    asker.join(10)
-    assert got["stop"].status == 200 and got["ask"].status == 409
+    teller.join(10)
+    assert got["stop"].status == 200 and got["tell"].status == 409
     finish(hub)
-    assert session.claude.calls() == [] and hub.runner.active("ask") == []
+    assert session.peer.messages == [] and hub.runner.active("tell") == []
 
 
 def test_a_second_tell_that_loses_the_race_to_start_is_refused_and_leaves_the_wait_of_the_first(
@@ -1569,7 +1331,7 @@ def test_an_upgrade_stop_is_refused_while_a_delivery_runs_whose_wait_has_ended(
     assert wait_until(lambda: slow.log == ["deliver-start"])
     end_the_wait(hub, ready, clock, how)
     r = upgrade(browser)
-    assert r.status == 409 and "Ask or Tell" in r.json()["error"]
+    assert r.status == 409 and "a Tell is running" in r.json()["error"]
     assert hub.stop_requested is None and not hub.upgrading
     slow.release.set()
     finish(hub)
@@ -1595,8 +1357,8 @@ def test_an_upgrade_stop_is_refused_while_a_stop_message_waits_for_its_delivery(
     monkeypatch.setattr(hub, "adapter", lambda agent: slow)
     post(browser, "/_/tell")
     assert wait_until(lambda: slow.log == ["deliver-start"])
-    assert post(browser, "/_/cancel", what="tell").json() == {"ok": True}
-    assert hub.jobs() == {"asking": [], "telling": []}        # what GET /_/jobs lists is as it was
+    assert post(browser, "/_/cancel").json() == {"ok": True}
+    assert hub.jobs() == {"telling": []}        # what GET /_/jobs lists is as it was
     assert hub.runner.active("stop") == [[DOC, "c1"]]
     r = upgrade(browser)
     assert r.status == 409 and hub.stop_requested is None and not hub.upgrading
@@ -1611,7 +1373,7 @@ def test_a_plain_stop_never_waits_for_a_stop_message(browser, hub, ready, sessio
     monkeypatch.setattr(hub, "adapter", lambda agent: slow)
     post(browser, "/_/tell")
     assert wait_until(lambda: slow.log == ["deliver-start"])
-    post(browser, "/_/cancel", what="tell")
+    post(browser, "/_/cancel")
     assert browser.post("/_/stop", {"reason": "stop"}, cookie=False, key=True).status == 200
     assert hub.stop_requested == "stop"
     slow.release.set()
@@ -1654,11 +1416,11 @@ def test_an_upgrade_stop_that_comes_while_a_tell_is_being_cancelled_waits_for_it
 
 def test_cancelling_a_tell_looks_the_session_up_without_the_admission_lock(
         browser, hub, ready, session, monkeypatch):
-    """The look at the session reads files and asks the adapter, which can be slow; every Ask and
-    Tell start, every upgrade stop and the signal handler wait on the admission lock."""
+    """The look at the session reads files and asks the adapter, which can be slow; every Tell
+    start, every upgrade stop and the signal handler wait on the admission lock."""
     slow = SlowDelivery()
     monkeypatch.setattr(hub, "adapter", lambda agent: slow)
-    real, free = hub.asktell.view, []
+    real, free = hub.tell.view, []
 
     def can_admit():
         got = []
@@ -1677,8 +1439,8 @@ def test_cancelling_a_tell_looks_the_session_up_without_the_admission_lock(
         return real(address)
     post(browser, "/_/tell")
     assert wait_until(lambda: slow.log == ["deliver-start"])
-    monkeypatch.setattr(hub.asktell, "view", view)
-    assert post(browser, "/_/cancel", what="tell").json() == {"ok": True}
+    monkeypatch.setattr(hub.tell, "view", view)
+    assert post(browser, "/_/cancel").json() == {"ok": True}
     assert free and all(free)
     slow.release.set()
     finish(hub)
@@ -1706,7 +1468,7 @@ def stall_the_rebuild(hub, plan, monkeypatch):
 def test_cancelling_a_tell_leaves_the_admission_lock_free_while_a_render_holds_the_document(
         browser, hub, ready, session, monkeypatch, render):
     """Ending a Tell's wait takes the document's lock, which a rebuild holds across its render. Every
-    Ask and Tell start, every upgrade stop and the signal handler wait on the admission lock, so a
+    Tell start, every upgrade stop and the signal handler wait on the admission lock, so a
     cancel must not sit on it meanwhile: `sheaf restart` stops the hub at once."""
     slow = SlowDelivery()
     monkeypatch.setattr(hub, "adapter", lambda agent: slow)
@@ -1745,11 +1507,11 @@ def test_cancelling_a_tell_looks_the_session_up_only_when_a_stop_message_is_to_g
     post(browser, "/_/tell")
     finish(hub)
     if state == "ended":
-        post(browser, "/_/cancel", what="tell")          # its wait ends and its stop message goes out
+        post(browser, "/_/cancel")          # its wait ends and its stop message goes out
         finish(hub)
-    looked, real = [], hub.asktell.view
-    monkeypatch.setattr(hub.asktell, "view", lambda address: looked.append(address) or real(address))
-    assert post(browser, "/_/cancel", what="tell").json() == {"ok": True}
+    looked, real = [], hub.tell.view
+    monkeypatch.setattr(hub.tell, "view", lambda address: looked.append(address) or real(address))
+    assert post(browser, "/_/cancel").json() == {"ok": True}
     finish(hub)
     assert looked == ([] if state == "ended" else [DOC])
 
@@ -1769,10 +1531,10 @@ def test_a_cancel_that_fails_leaves_no_stop_message_listed_as_on_its_way(
             raise RuntimeError("the document's lock failed")
         return real(cid)
     monkeypatch.setattr(live, "stop_waiting", broken_once)
-    r = post(browser, "/_/cancel", what="tell")
+    r = post(browser, "/_/cancel")
     assert r.status == 500 and hub.runner.active("stop") == []
     assert upgrade(browser).status == 409                  # the Tell's wait is still there, nothing else
-    assert post(browser, "/_/cancel", what="tell").json() == {"ok": True}
+    assert post(browser, "/_/cancel").json() == {"ok": True}
     finish(hub)
     assert upgrade(browser).status == 200
 
@@ -1782,16 +1544,6 @@ def test_a_cancel_that_fails_leaves_no_stop_message_listed_as_on_its_way(
 CANCELLING = "The Tell of this comment is still being cancelled. Try again when that is done."
 WAIT_ENDED = ("This Tell ended before it went out: it was cancelled, answered or failed. "
               "Tell again if you still want it.")
-
-
-class SlowDeliveryAsk(SlowDelivery):
-    """The same, and it answers an Ask with a command that stands still until the test ends it."""
-
-    def capabilities(self, t):
-        return super().capabilities(t) | {"ask"}
-
-    def ask_command(self, t):
-        return ["sleep", "30"]
 
 
 class SlowStop(SlowDelivery):
@@ -1903,7 +1655,7 @@ def test_a_tell_is_refused_until_the_stop_message_of_its_cancel_has_been_sent(
     slow = SlowStop()
     monkeypatch.setattr(hub, "adapter", lambda agent: slow)
     told_and_over(browser, hub, slow)
-    assert post(browser, "/_/cancel", what="tell").json() == {"ok": True}
+    assert post(browser, "/_/cancel").json() == {"ok": True}
     assert wait_until(lambda: slow.log[-1:] == ["stop-start"])      # the cancel is over, the message is not out
     assert refusal(tell_by(browser, route), route) == CANCELLING
     slow.stop_release.set()
@@ -1920,30 +1672,13 @@ def test_a_tell_is_accepted_again_once_the_cancel_of_its_thread_is_over(
     slow = SlowDelivery()
     monkeypatch.setattr(hub, "adapter", lambda agent: slow)
     told_and_over(browser, hub, slow)
-    assert post(browser, "/_/cancel", what="tell").json() == {"ok": True}
+    assert post(browser, "/_/cancel").json() == {"ok": True}
     finish(hub)
     assert slow.log == ["deliver-start", "deliver-end", "stop"] and hub.runner.active("stop") == []
     r = tell_by(browser, route)
     assert r.status == 200 and refusal(r, route) is None
     finish(hub)
     assert slow.log.count("deliver-start") == 2 and hub.entry(DOC).live.waiting() == ["c1"]
-
-
-def test_an_ask_is_not_refused_while_the_cancel_of_a_tell_on_its_thread_is_under_way(
-        browser, hub, ready, session, monkeypatch):
-    """Only a Tell is kept out by the cancel of a Tell: an Ask does not touch the wait."""
-    slow = SlowDeliveryAsk()
-    monkeypatch.setattr(hub, "adapter", lambda agent: slow)
-    go, canceller, got = cancel_under_way(browser, hub, ready, slow, monkeypatch, "render")
-    try:
-        assert post(browser, "/_/ask").status == 200
-        assert hub.runner.active("ask") == [[DOC, "c1"]]
-    finally:
-        post(browser, "/_/cancel", what="ask")
-        go()
-        canceller.join(10)
-    finish(hub)
-    assert got["cancel"].json() == {"ok": True}
 
 
 @pytest.mark.parametrize("cancel", ["under way", "over"])
@@ -1958,7 +1693,7 @@ def test_a_tell_that_a_cancel_overtakes_between_its_wait_and_its_delivery_delive
     slow = SlowDelivery()
     monkeypatch.setattr(hub, "adapter", lambda agent: slow)
     told_and_over(browser, hub, slow)
-    got, real_thread = {}, hub.asktell._thread
+    got, real_thread = {}, hub.tell._thread
     canceller = threading.Thread(target=lambda: got.update(cancel=post(browser, "/_/cancel",
                                                                        what="tell")), daemon=True)
     if cancel == "under way":
@@ -1972,7 +1707,7 @@ def test_a_tell_that_a_cancel_overtakes_between_its_wait_and_its_delivery_delive
             canceller.run()                      # the whole cancel, here and not in a thread of its own
             finish(hub)
         return real_thread(e, cid)
-    monkeypatch.setattr(hub.asktell, "_thread", between_the_two_admissions)
+    monkeypatch.setattr(hub.tell, "_thread", between_the_two_admissions)
     try:
         r = tell_by(browser, route)
     finally:
@@ -1996,13 +1731,13 @@ def test_a_wait_that_a_reply_begins_during_a_cancel_is_ended_with_it(
     monkeypatch.setattr(hub, "adapter", lambda agent: slow)
     sub = tab(hub)
     told_and_over(browser, hub, slow)
-    got, real_line = {}, hub.asktell.telling_line
+    got, real_line = {}, hub.tell.telling_line
 
     def line_then_a_whole_cancel(address, cid):
         line = real_line(address, cid)           # no cancel yet
-        got["cancel"] = post(browser, "/_/cancel", what="tell")      # the wait ends, the stop message waits
+        got["cancel"] = post(browser, "/_/cancel")      # the wait ends, the stop message waits
         return line
-    monkeypatch.setattr(hub.asktell, "telling_line", line_then_a_whole_cancel)
+    monkeypatch.setattr(hub.tell, "telling_line", line_then_a_whole_cancel)
     r = tell_by(browser, "comment")
     assert refusal(r, "comment") == CANCELLING and got["cancel"].json() == {"ok": True}
     slow.stop_release.set()
@@ -2011,13 +1746,13 @@ def test_a_wait_that_a_reply_begins_during_a_cancel_is_ended_with_it(
     assert slow.log == ["deliver-start", "deliver-end", "stop-start", "stop-end"]
     # the page that sent the reply holds the wait it was told of ("working"): the end of it is said
     assert named(events(sub), "tell-cancelled") == [{"id": "c1", "sent": True}, {"id": "c1"}]
-    monkeypatch.setattr(hub.asktell, "telling_line", real_line)
+    monkeypatch.setattr(hub.tell, "telling_line", real_line)
     assert refusal(tell_by(browser, "comment"), "comment") is None        # and the thread takes a Tell again
 
 
 def test_is_waiting_answers_while_a_render_holds_the_document(browser, hub, ready, session, monkeypatch):
     """It is asked under the admission lock: a read that waited for the document's lock would hold
-    every Ask and Tell start and every upgrade stop up behind a render."""
+    every Tell start and every upgrade stop up behind a render."""
     slow = SlowDelivery()
     monkeypatch.setattr(hub, "adapter", lambda agent: slow)
     told_and_over(browser, hub, slow)

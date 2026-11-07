@@ -1,5 +1,5 @@
-"""What the page says when there is no agent to Ask or Tell (SPEC 10.6): the buttons are there,
-disabled, each with the hub's reason for it."""
+"""What the page says when there is no agent to Tell (SPEC 10.6): the button is there,
+disabled, with the hub's reason for it."""
 import json
 import os
 import re
@@ -17,7 +17,7 @@ from sheafmd.source import update_file
 pytestmark = pytest.mark.page
 
 META = re.compile(r'(<script id="rd-edit-meta" type="application/json">)(.*?)(</script>)', re.S)
-LINES = {"ask": "Ask is off: the reason of the hub.", "tell": "Tell is off: another reason."}
+LINES = {"tell": "Tell is off: another reason."}
 
 
 def with_lines(tab):
@@ -40,37 +40,37 @@ def with_lines(tab):
     tab.page.route(re.compile(r"/_/doc\?"), doc)
 
 
-def test_the_ask_and_tell_buttons_that_cannot_work_say_why_with_the_hubs_lines(tab):
+def test_the_tell_button_that_cannot_work_says_why_with_the_hubs_line(tab):
     with_lines(tab)
     tab.open()
     select(tab.page, at(P1, "apples"), at(P1, "apples", None))
     tab.page.click("#rd-comment-btn")
     tab.page.wait_for_selector("#rd-popover textarea")
-    ask, tell = (tab.page.query_selector(f"#rd-popover button.rd-{k}") for k in ("ask", "tell"))
-    assert ask.is_disabled() and tell.is_disabled()
-    assert ask.get_attribute("title") == LINES["ask"]
+    tell = tab.page.query_selector("#rd-popover button.rd-tell")
+    assert tell.is_disabled()
     assert tell.get_attribute("title") == LINES["tell"]
-    assert tab.page.inner_text("#rd-popover .rd-agent-line:nth-of-type(1)") == LINES["ask"]
-    assert tab.page.text_content("#rd-agent") == LINES["ask"]       # the menu says it too
+    assert tab.page.query_selector("#rd-popover button.rd-ask") is None      # Ask was retired (SPEC 11.2)
+    assert tab.page.inner_text("#rd-popover .rd-agent-line:nth-of-type(1)") == LINES["tell"]
+    assert tab.page.text_content("#rd-agent") == LINES["tell"]       # the menu says it too
 
 
-def test_a_thread_and_its_reply_form_say_why_their_ask_and_tell_buttons_cannot_work(tab):
+def test_a_thread_and_its_reply_form_say_why_their_tell_button_cannot_work(tab):
     update_file(tab.site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
                                                          "Ada", "2026-10-14T10:00")[0])
     with_lines(tab)
     tab.open()
     tab.page.click(".rd-badge")
     tab.page.wait_for_selector("#rd-popover button[data-a=reply]")
-    ask, tell = (tab.page.query_selector(f"#rd-popover .rd-actions button.rd-{k}") for k in ("ask", "tell"))
-    assert ask.is_disabled() and tell.is_disabled()
-    assert ask.get_attribute("title") == LINES["ask"]
+    tell = tab.page.query_selector("#rd-popover .rd-actions button.rd-tell")
+    assert tell.is_disabled()
+    assert tab.page.query_selector("#rd-popover .rd-actions button.rd-ask") is None
     assert tell.get_attribute("title") == LINES["tell"]
     assert tab.page.locator("#rd-popover .rd-actions .rd-agent-line").all_inner_texts() == list(LINES.values())
     tab.page.click("#rd-popover button[data-a=reply]")
     tab.page.wait_for_selector("#rd-popover textarea")
-    ask, tell = (tab.page.query_selector(f"#rd-popover .rd-form button.rd-{k}") for k in ("ask", "tell"))
-    assert ask.is_disabled() and tell.is_disabled()
-    assert ask.get_attribute("title") == LINES["ask"]
+    tell = tab.page.query_selector("#rd-popover .rd-form button.rd-tell")
+    assert tell.is_disabled()
+    assert tab.page.query_selector("#rd-popover .rd-form button.rd-ask") is None
     assert tell.get_attribute("title") == LINES["tell"]
     assert tab.page.locator("#rd-popover .rd-form .rd-agent-line").all_inner_texts() == list(LINES.values())
 
@@ -87,12 +87,12 @@ def buttons(tab):
     select(tab.page, at(P1, "apples"), at(P1, "apples", None))
     tab.page.click("#rd-comment-btn")
     tab.page.wait_for_selector("#rd-popover textarea")
-    return [tab.page.inner_text(f"#rd-popover button.rd-{k}") for k in ("ask", "tell")]
+    return [tab.page.inner_text(f"#rd-popover button.rd-{k}") for k in ("tell",)]
 
 
 def test_the_buttons_name_the_session_by_its_own_name(tab, agent):
     tab.open()
-    assert buttons(tab) == ["Ask Cosima", "Tell Cosima"]
+    assert buttons(tab) == ["Tell Cosima"]
 
 
 def test_a_session_with_no_name_is_called_by_its_display_name(tab, agent, tmp_path):
@@ -100,7 +100,7 @@ def test_a_session_with_no_name_is_called_by_its_display_name(tab, agent, tmp_pa
     target = tab.site.hub.target(DOC).as_dict()
     tab.site.hub.render(tab.site.file, {}, {**target, "name": ""})
     tab.open()
-    assert buttons(tab) == ["Ask Claude", "Tell Claude"]
+    assert buttons(tab) == ["Tell Claude"]
 
 
 def test_an_answer_and_an_action_are_labelled_with_the_name_but_stay_signed_as_they_were(tab, agent):
@@ -126,7 +126,7 @@ def test_a_rename_during_an_outage_reaches_the_open_page_when_the_hub_comes_back
     tab.site.reopen()
     tab.page.wait_for_function("() => document.getElementById('rd-agent').textContent.includes('Beatrix')",
                                timeout=30000)
-    assert buttons(tab) == ["Ask Beatrix", "Tell Beatrix"]
+    assert buttons(tab) == ["Tell Beatrix"]
 
 
 PROBE = ("import json, os, sys\n"

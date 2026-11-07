@@ -113,3 +113,17 @@ def test_a_second_spelling_of_the_private_folder_is_hidden_too(world):
     (w.two.private_repo / "readme.md").write_text("# r\n", encoding="utf-8")
     is_error, said = call(w.door, "read", doc=str(w.two.private_repo / "readme.md"))   # the key, no list name for it
     assert is_error and "failed" not in said
+
+
+def test_a_dotdot_or_link_path_into_the_private_root_is_a_path_in_no_root(world):
+    w = world
+    w.put(PRIVATE)
+    link = w.two.base / "elsewhere"
+    link.symlink_to(w.two.private_repo)
+    spelled = f"{w.two.base}/nowhere/../private/acme/blog/new.md"
+    for doc in (spelled, str(link / "acme/blog/new.md")):
+        nothing = str(w.two.base / "nowhere/../none/acme/blog/new.md")
+        for who in (w.tokens["loose"], w.tokens["tok-b"]):
+            got = call(w.door, "create", token=who, doc=doc, text="# n\n")[1]
+            _, base = call(w.door, "create", token=who, doc=nothing, text="# n\n")
+            assert got.replace(doc, "X") == base.replace(nothing, "X"), (doc, who, got)

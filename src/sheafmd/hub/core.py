@@ -175,6 +175,7 @@ class Hub:
         # whether the root registers or is refused, and never shrunk (`place.in_private`, SPEC 9.11 rule A).
         self._private_paths: dict[str, str] = {}
         self._private_ids: dict[tuple, str] = {}    # (st_dev, st_ino) of each, so a spelling in another case is the same folder
+        self._identity_seen: dict[str, bool] = {}   # root path -> whether its folder is a private one (`_is_private_root`)
         self._private_good: set[str] = set()       # those that registered: placement only, never privacy
         self.roots.private_paths = lambda: self._private_paths
         self.roots.hidden = self._is_private_root       # rule E: no address of its own, registered or refused
@@ -184,8 +185,14 @@ class Hub:
     def _is_private_root(self, root) -> bool:
         """Whether `root` is a private root: by its path, and by the identity of its folder, so a second spelling of
         it (a bind mount, a case-folded name) is no address either."""
-        return str(root.path) in self._private_paths or (
-            bool(self._private_ids) and place.identity(str(root.path)) in self._private_ids)
+        where = str(root.path)
+        if where in self._private_paths:
+            return True
+        if not self._private_ids:
+            return False
+        if where not in self._identity_seen:        # one stat per folder, not one per request under the registry's lock
+            self._identity_seen[where] = place.identity(where) in self._private_ids
+        return self._identity_seen[where]
 
     @property
     def private_roots(self) -> dict[str, str]:

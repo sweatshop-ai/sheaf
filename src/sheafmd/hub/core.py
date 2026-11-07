@@ -25,7 +25,7 @@ from typing import Callable
 from .. import __version__, beneath, config, diagnostics, paths
 from ..agents import registry
 from ..agents.base import Adapter, Target
-from ..render import render_file
+from ..render import RenderError, render_file
 from ..source import STAMP_FORMAT, file_lock, lock_key
 from . import assets as assets_mod
 from . import boxwait
@@ -177,6 +177,7 @@ class Hub:
         self._private_ids: dict[tuple, str] = {}    # (st_dev, st_ino) of each, so a spelling in another case is the same folder
         self._private_good: set[str] = set()       # those that registered: placement only, never privacy
         self.roots.private_paths = lambda: self._private_paths
+        self.roots.hidden = lambda root: str(root.path) in self._private_paths     # rule E: no address of its own, registered or refused
         self._register_private_roots()
         self.commits.seed(self.roots.all())      # the rewrite guard's first pull is guarded, not free
 
@@ -721,7 +722,10 @@ class Hub:
         page. A render with other settings re-renders and tells the open tabs; it never
         restarts anything."""
         md = Path(md).resolve()
-        address = self.roots.address(md)
+        try:
+            address = self.roots.address(md)       # a file of a private root has no address of its own (9.11)
+        except roots_mod.NotFound:
+            raise RenderError(f"{md} is not in a root the hub serves.") from None
         with place.held(self, address), self._lock:        # the name's lock first (9.11), as `entry` takes it
             old = self.docs.get(address)
             new = dict(old)

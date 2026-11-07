@@ -192,15 +192,22 @@ def _holding(top: Path, rels: list) -> list:
     return found
 
 
-def _one(hub, root, name: str):
-    """((the root and the path in it of the one file that holds the name `name`, or `root` and `name` when none
-    does), the count of files that hold it), looking in `root`, the list's, and in each private root (a name held
-    in two roots counts twice)."""
+def _found(hub, root, name: str) -> list:
+    """The (root, path in it) of each file that holds the name `name`, in `root`, the list's, then in each private
+    root."""
     top = Path(os.path.realpath(root.path))
     found = [(root, rel) for rel in _holding(top, _scan(top, name))]
     for private in _private_roots(hub).values():
         ptop = Path(os.path.realpath(private.path))
         found += [(private, rel) for rel in _holding(ptop, [name] if os.path.lexists(ptop / name) else [])]
+    return found
+
+
+def _one(hub, root, name: str):
+    """((the root and the path in it of the one file that holds the name `name`, or `root` and `name` when none
+    does), the count of files that hold it), looking in `root`, the list's, and in each private root (a name held
+    in two roots counts twice)."""
+    found = _found(hub, root, name)
     return (found[0] if found else (root, name)), len(found)
 
 
@@ -427,6 +434,27 @@ def where_is(hub, address: str):
         return None
     found, n = _one(hub, got[0], got[2])
     return found if n == 1 else None
+
+
+def file_at(hub, address: str, bound: str = ""):
+    """(the root, the path in it) of the file to read or write for the sheaf named `address`, or None for a name the
+    hub does not place. The one file that holds the name, in the list's root or a private root; where a private root
+    is involved and there is not exactly one, or the file is not in `bound` (the id of the root an open document was
+    made for), raises NotFound: the write goes nowhere, and never to the list's root under the name
+    (the fallback below is for a hub with no private holder of it)."""
+    got = _where(hub, address)
+    if got is None:
+        return None
+    root, top, name = got
+    found = _found(hub, root, name)
+    private = set(getattr(hub, "private_roots", None) or ())
+    if len(found) == 1:
+        if bound and found[0][0].id != bound:       # whichever root the document was opened for, it follows no other
+            raise NotFound(address)
+        return found[0]
+    if bound in private or any(r.id in private for r, _ in found):
+        raise NotFound(address)
+    return root, file_rel(top, name)
 
 
 def ahead(hub, address: str, old: str, new: str) -> str | None:

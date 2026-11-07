@@ -337,3 +337,32 @@ def test_a_tell_survives_a_real_restart_of_the_hub_process(work):
         assert [(w["id"], w["state"]) for w in page["waits"]] == [("c1", "seen")]
     finally:
         hub.stop()
+
+
+# ── a waiting Tell runs nothing ──────────────────────────────────────────────
+
+def test_a_waiting_tell_gives_no_orange_dot_and_does_not_hold_an_upgrade_back(browser, talk):
+    token = agent_token()
+    target(browser)
+    assert tell(browser).status == 200
+    hub = browser.hub
+    assert not hub.busy() and not hub.waiting(DOC) and browser.get("/_/jobs", key=True, cookie=False).json()["telling"] == []
+    row, = documents(browser, token)
+    assert row["dot"] == "blue"
+
+
+def test_the_instructions_tell_the_agent_to_call_documents_first(browser):
+    from helpers import door, rpc
+    got = door(browser, rpc("initialize", {"protocolVersion": "2025-06-18"})).json()["result"]["instructions"]
+    assert "Call `documents` first" in got and "`tells`" in got
+
+
+# ── a Tell the target cannot take ────────────────────────────────────────────
+
+def test_a_tell_to_a_revoked_agent_is_refused_with_the_revoked_line(browser, talk):
+    agent_token()
+    target(browser)
+    Tokens().revoke("ada-chatgpt")
+    r = tell(browser)
+    assert r.status == 409 and "token was revoked" in r.json()["error"]
+    assert browser.hub.waiting_tells.waits(DOC) == []

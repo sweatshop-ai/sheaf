@@ -1,6 +1,6 @@
 # Agents, waiting Tells and the retirement of Ask
 
-**Decided:** 2026-11-07, grilling between Thierry and Claude (session Leire). **Status:** design; SPEC text to follow in this PR, code in the tickets below.
+**Decided:** 2026-11-07, grilling between Thierry and Claude (session Leire). **Status:** design; SPEC text in this PR (D25 to D27 and the sections below), code in the tickets below.
 
 Sheaf should be usable from ChatGPT, Claude.ai and the assistant inside Open WebUI, through MCP, for the members of a proxy-mode hub. Today the MCP door answers on loopback only and takes a fixed token, and a Tell can only be pushed into a running Claude Code session. This page records what was decided and the order of the work.
 

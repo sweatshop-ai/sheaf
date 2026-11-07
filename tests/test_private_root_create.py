@@ -130,3 +130,27 @@ def test_private_folder_swapped_for_a_link_after_the_checks_is_refused(two, monk
     two.private_repo.unlink()
     two.private_repo.with_name("moved").rename(two.private_repo)
     assert not w.create("tok-a", OWNED_BY_A)[0]            # positive control: the folder back, the same create is made
+
+
+def test_private_folder_swap_after_a_read_recorded_it_is_refused(two, monkeypatch, tmp_path):
+    w = World(two)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    other = w.address.replace("post", "other")
+    assert not w.call("create", "tok-b", doc=other, text=OPEN)[0]
+    moved = two.private_repo.with_name("moved")
+    two.private_repo.rename(moved)
+    two.private_repo.symlink_to(elsewhere)
+    assert not w.call("read", "tok-b", doc=other)[0]       # a read records what is at the private path
+    two.private_repo.unlink()
+    moved.rename(two.private_repo)
+    real = place.make_folders
+
+    def swapped(top, rel, judge=None):
+        two.private_repo.rename(moved)
+        two.private_repo.symlink_to(elsewhere)
+        return real(top, rel, judge)
+    monkeypatch.setattr(place, "make_folders", swapped)
+    is_error, got = w.create("tok-a", OWNED_BY_A)
+    assert is_error, got
+    assert not list(elsewhere.rglob("post.md"))

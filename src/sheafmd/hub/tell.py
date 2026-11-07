@@ -103,9 +103,10 @@ class Tell:
         self._jumping = threading.Lock()
 
     # ── what the page is told ────────────────────────────────────────────────
-    def view(self, address: str) -> View:
+    def view(self, address: str, session: bool = False) -> View:
+        """`session`: the session a Tell was sent to, even when an agent is the target now (a stop goes there)."""
         raw = targets.stored(self.hub, address)
-        if targets.is_agent(raw):
+        if targets.is_agent(raw) and not session:
             shape, line, reaches = targets.agent_view(self.hub, raw)
             return View(None, None, frozenset({"queue"}) if reaches else frozenset(), {"tell": line}, shape=shape)
         t = self.hub.target(address)
@@ -432,7 +433,7 @@ class Tell:
 
     def _send_stop(self, e, cid: str, deliveries: list[threading.Thread], held) -> bool:
         """Start the stop message as a job. True when its job has the cancel from here on and ends it."""
-        v = self.view(e.address)               # reads files and asks the adapter: not under the lock
+        v = self.view(e.address, session=True)  # reads files and asks the adapter: not under the lock
         if v.target is None or "stop" not in v.caps:
             diagnostics.record("hub", "tell-stop-skipped", e.address, id=cid,
                                reason="the session cannot be reached")

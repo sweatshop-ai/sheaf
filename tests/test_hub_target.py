@@ -142,11 +142,22 @@ def test_a_revoked_token_is_no_target_and_a_new_token_of_its_name_is_not_the_old
     got = browser.get(f"/_/doc?doc={DOC}").json()
     assert got["target"]["token"] == "ada-chatgpt"
     assert got["lines"]["tell"] == REVOKED.format(agent="ada-chatgpt") and got["capabilities"] == []
+    assert got["target"]["revoked"] is True                       # the page takes no token of this name for it
     Tokens().add("ada-chatgpt", client="ChatGPT")
     assert row("ada-chatgpt").id != old
     got = browser.get(f"/_/doc?doc={DOC}").json()
     assert got["lines"]["tell"] == REVOKED.format(agent="ada-chatgpt")        # the new token is not the target
     assert stored(browser)["target"]["id"] == old
+
+
+def test_a_stop_still_finds_the_session_a_tell_was_sent_to_when_an_agent_is_the_target_now(browser, talk):
+    render(browser, talk)
+    token = Tokens().add("ada-chatgpt", client="ChatGPT")
+    ok(browser, "reply", doc=DOC, id="c1", text="Done.", token=token)
+    assert stored(browser)["target"]["kind"] == "agent"
+    assert browser.hub.target(DOC).session == "s-1"               # the session kept beside the agent
+    assert browser.hub.tell.view(DOC, session=True).target.session == "s-1"
+    assert browser.hub.tell.view(DOC).target is None              # the page's view is the agent's
 
 
 def test_the_wire_form_names_the_token_and_the_server_stores_its_id(browser, talk):

@@ -580,10 +580,13 @@ class Hub:
 
     # ── the agent of a document ──────────────────────────────────────────────
     def target(self, address: str) -> Target | None:
-        """The session the document's last render attached, or None (also for a stored target
+        """The session the document's last render attached (the one kept beside an agent target, too), or None (also for a stored target
         that cannot be read: it is never guessed at)."""
-        raw = self.docs.get(address).get("target")
-        if not raw or targets_mod.is_agent(raw):       # an agent is no session (SPEC 9.8)
+        entry = self.docs.get(address)
+        raw = entry.get("target")
+        if targets_mod.is_agent(raw):                  # an agent is no session (SPEC 9.8): the one kept beside it is
+            raw = entry.get("session")
+        if not raw:
             return None
         try:
             return Target.from_dict(raw)

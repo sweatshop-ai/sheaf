@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import quote
 
+from .. import beneath
 from .. import comments as rdc
 from . import place
 from . import roots as roots_mod
@@ -211,20 +212,31 @@ class Index:
         self._sending = threading.Lock()
 
     # ── one file ─────────────────────────────────────────────────────────────
-    def summary(self, address: str, path: Path, st: os.stat_result) -> Summary:
-        """The comments of a file, parsed again only when its `(mtime_ns, size)` moved."""
-        key, stamp = str(path), (st.st_mtime_ns, st.st_size)
-        with self._lock:
-            hit = self._cache.get(key)
-        if hit and hit[0] == stamp:
-            return hit[1]
+    def summary(self, address: str, path: Path, st: os.stat_result, member=None) -> Summary:
+        """The comments of a file, parsed again only when its `(mtime_ns, size)` moved. The file is opened beneath its root
+        and what is counted is that descriptor's: a member is told nothing of a file of a private root that is not theirs
+        (`member` None is the hub's own account), however the path came to name it (9.11)."""
+        key = str(path)
         try:
-            got = summarize(Path(path).read_text(encoding="utf-8"))
-        except (OSError, ValueError):               # unreadable, or not text: listed, no comments
+            top, rel = self.hub.where(address)
+            with beneath.open_beneath(top, rel) as op:
+                private = place.opened_private(self.hub, op)
+                if member is not None and private not in (None, member.id):
+                    return EMPTY
+                fst = os.fstat(op.fd)
+                stamp = (fst.st_mtime_ns, fst.st_size)
+                with self._lock:
+                    hit = self._cache.get(key)
+                if hit and hit[0] == stamp:
+                    return hit[1]
+                got = summarize(op.text())
+        except (OSError, ValueError, roots_mod.NotFound):     # unreadable, or not text: listed, no comments
             got = EMPTY
+            stamp = (st.st_mtime_ns, st.st_size)
         except Exception:
             self.hub.record_exception("status-failed", address)
             got = EMPTY
+            stamp = (st.st_mtime_ns, st.st_size)
         with self._lock:
             self._cache[key] = (stamp, got)
         return got
@@ -247,7 +259,7 @@ class Index:
     def _row(self, address: str, path: Path, st: os.stat_result, waiting: set, running: set,
              member=None) -> dict:
         hub = self.hub
-        s = self.summary(address, path, st)
+        s = self.summary(address, path, st, member)
         seen = hub.member_seen.get(member.id, address) if member else hub.seen.get(address)
         me = member.name if member else hub.person
         # SPEC 8.7: unread is an open thread whose last message is not the person's and that has
@@ -469,7 +481,9 @@ class Index:
         try:
             self.hub.roots.resolve(address)
             path = self.hub.file(address)
-            return path, os.stat(path)
+            top, rel = self.hub.where(address)
+            with beneath.open_beneath(top, rel) as op:      # the stat is of the descriptor opened beneath the root
+                return path, os.fstat(op.fd)
         except (roots_mod.NotFound, OSError):
             return None
 

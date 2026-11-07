@@ -177,6 +177,25 @@ def test_add_refuses_a_second_token_that_would_sign_the_same_name(sheaf):
     assert sheaf("token", "add", "two", "--client", "chatgpt").code != 0
 
 
+def test_add_refuses_a_typed_display_that_is_the_name_an_agent_signs_with(sheaf):
+    assert sheaf("token", "add", "one", "--client", "ChatGPT").code == 0
+    r = sheaf("token", "add", "evil", "--as", "chatgpt (ADA)")
+    assert r.code != 0 and [t.name for t in Tokens().list()] == ["one"]
+
+
+@pytest.mark.parametrize("old", ["claude", "codex", "ai"])
+def test_an_old_token_named_like_a_client_does_not_block_that_agent(sheaf, old):
+    assert sheaf("token", "add", old).code == 0
+    assert sheaf("token", "add", "agent-" + old, "--client", old.capitalize()).code == 0
+
+
+def test_the_hub_refuses_to_start_when_two_agents_sign_the_same_name_after_a_rebinding():
+    names = ["ChatGPT (Bea)", "chatgpt (Bea)"]
+    with pytest.raises(proxy.ProxyError, match="two agents"):
+        proxy.check_agent_names(names)
+    proxy.check_agent_names(["ChatGPT (Bea)", "ChatGPT (Bob)"])
+
+
 # ── a token's id: what tells a revoked token from a new one of the same name ─
 
 def test_every_new_token_gets_a_random_id_that_the_door_sees_on_the_resolved_token():

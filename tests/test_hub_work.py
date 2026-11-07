@@ -712,6 +712,41 @@ def test_a_drop_answered_in_the_file_from_outside_is_never_given_up_on(team, box
     assert hub_rows("box-expired") == []
 
 
+# ── the member's `telling` holds their own drops (SPEC 9.9, 9.12) ──────────
+
+def telling(team, member=HANS):
+    return team.get(f"/_/doc?doc={ADDRESS}", member=member).json()["telling"]
+
+
+def test_a_members_telling_holds_their_own_drop_for_james_and_no_other_members(team, box, work):
+    cid = comment(team, work, "tell").json()["id"]
+    assert telling(team) == [{"id": cid, "to": "James", "state": "sent"}]
+    assert telling(team, THIERRY) == []                                   # `sent` stays every member's (9.12)
+    assert sent(team, THIERRY) == [{"id": cid, "kind": "tell", "state": "sent"}]
+
+
+def test_the_drops_telling_follows_the_supervisors_word_and_ends_with_the_reply(team, box, work):
+    cid = comment(team, work, "tell").json()["id"]
+    status(box, "delivered")
+    team.hub.tick()
+    assert telling(team) == [{"id": cid, "to": "James", "state": "delivered"}]
+    team.post("/_/comment", {"doc": ADDRESS, "op": "reply", "id": cid, "body": "Sent it."}, member=THIERRY)
+    assert telling(team) == []
+
+
+def test_the_answer_of_a_comment_and_a_later_changed_event_carry_the_drop_in_telling_to_its_member_only(team, box, work):
+    mine, theirs = (team.get(f"/_/live?doc={ADDRESS}", member=m).stream for m in (HANS, THIERRY))
+    got = comment(team, work, "tell")
+    cid = got.json()["id"]
+    assert got.json()["telling"] == [{"id": cid, "to": "James", "state": "sent"}]
+    mine.drain(), theirs.drain()
+    comment(team, work, "note", as_=THIERRY, body="Another thread.")                      # a change of the sheaf
+    last = lambda sub: [d for n, d in sub.drain() if n == "changed"][-1]["telling"]
+    assert last(mine) == [{"id": cid, "to": "James", "state": "sent"}] and last(theirs) == []
+    team.post("/_/comment", {"doc": ADDRESS, "op": "reply", "id": cid, "body": "Done."}, member=THIERRY)
+    assert last(mine) == [] and telling(team) == []
+
+
 # ── the drop's status, from the box's supervisor (#139) ──────────────────────
 
 def status(box, state, **extra):

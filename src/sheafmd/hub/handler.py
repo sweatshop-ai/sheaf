@@ -36,8 +36,7 @@ from ..edit import EditError
 from ..mcp import Caller, Door
 from ..render import RenderError
 from ..source import StaleError, md_hash
-from . import auth, codes, events, peer, place, proxy, relay, the_list, visibility, work
-from . import targets
+from . import auth, codes, events, peer, place, proxy, relay, targets, the_list, visibility, work
 from .tell import NO_AGENT, JobRefused
 from .index import Status
 from .live import UNKNOWN, NotAuthor

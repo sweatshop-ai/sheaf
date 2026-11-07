@@ -29,7 +29,7 @@ DOC = "work/plan.md"
 URL = "/work/plan.md"
 NOT_YET = ("{product} can answer threads through the MCP door. Tell needs an adapter "
            "sheaf does not have yet.")
-ENDED = "The Claude Code session that rendered this page has ended. Render it again from a session."
+ENDED = "The Claude Code session that rendered this page has ended. Render it again from a session, or pick another target."
 NO_SOCKET = ("Tell needs the session's message socket, which was not found. Render the page "
              "again from the session.")
 GONE = "The document is no longer on the hub: its folder was forgotten, or its file is gone."

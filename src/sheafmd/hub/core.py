@@ -7,6 +7,7 @@ the server (server.py) drives. A test builds one and calls `tick()` itself.
 A document is served from an Entry: its LiveDocument, its event bus, and the page's HTML in
 memory (no file in /tmp, SPEC 8.9).
 """
+import errno
 import json
 import os
 import re
@@ -21,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from .. import __version__, config, diagnostics, paths
+from .. import __version__, beneath, config, diagnostics, paths
 from ..agents import registry
 from ..agents.base import Adapter, Target
 from ..render import render_file
@@ -71,10 +72,36 @@ class Entry:
     first: bool = True                             # no build has run yet
     images_scope: tuple | None = None              # the image rule its last build read: `Hub._image_scope` (9.9)
 
+    where: Callable[[], tuple] | None = None     # (the root's folder, the path in it) of its file now: what is opened beneath
+    last_where: tuple | None = None              # what `where` last found: kept for a root forgotten under a write
+    judge: Callable | None = None                # raises for an opened file that is not the one this document is of
+
     @property
     def path(self) -> Path:
         """The document's file as it is found now (9.11: a move renames the file of a sheaf, never its entry)."""
         return self.file()
+
+    def open(self):
+        """Its file opened beneath its root, the one open (`sheafmd.beneath`), judged: NotFound-like OSError for a file of
+        a private root this document is not of, or one that left the root."""
+        top, rel = self.where()
+        op = beneath.open_beneath(top, rel)
+        try:
+            self.judge(op)
+        except BaseException:
+            op.close()
+            raise
+        return op
+
+    def stat(self):
+        """The `os.stat_result` of its file, of the descriptor that was opened and judged."""
+        with self.open() as op:
+            return os.fstat(op.fd)
+
+    def read(self) -> str:
+        """Its file's text, read from the descriptor that was judged."""
+        with self.open() as op:
+            return op.text()
 
 
 RESTART_TOLD_TTL = 30            # seconds a restart that was announced is still expected
@@ -109,6 +136,7 @@ class Hub:
         self.told_link: set = set()              # the (root id, path) a link-ignored row named this run (9.11)
         self.told_ignored: set = set()           # the roots a private-ignored row named this run (9.11)
         self._front: dict = {}                   # {file: (its stat, its front matter, its assignees)}, for 9.11
+        self._private_seen: dict = {}            # {address: the member a private root held it for}, `place.private_member`
         self.the_list = None                     # the list (9.10): a the_list.TheList, set by the server
         self.blamed: dict = {}                   # {(real path, md_hash): (pressers, monotonic time or None)}: once per text,
                                                  # for the list's rows and the pages' buttons alike (9.10, 10.11)
@@ -146,7 +174,12 @@ class Hub:
         self.runner = Jobs()
         self.sender = f"uds:{paths.hub_socket(port)}"
         self.tell = Tell(self)
-        self._private_paths: dict[str, str] = {}   # real path of a private root -> id of the member whose it is
+        # Real path of every CONFIGURED private root -> id of the member whose it is: recorded before any validation,
+        # whether the root registers or is refused, and never shrunk (`place.in_private`, SPEC 9.11 rule A).
+        self._private_paths: dict[str, str] = {}
+        self._private_ids: dict[tuple, str] = {}    # (st_dev, st_ino) of each, so a spelling in another case is the same folder
+        self._private_good: set[str] = set()       # those that registered: placement only, never privacy
+        self.roots.private_paths = lambda: self._private_paths
         self._register_private_roots()
         self.commits.seed(self.roots.all())      # the rewrite guard's first pull is guarded, not free
 
@@ -154,7 +187,7 @@ class Hub:
     def private_roots(self) -> dict[str, str]:
         """Root id -> id of the member whose private root it is; empty without one. Judged by the root's real path,
         not by its id: a root forgotten and registered again has a new id and is still private."""
-        return {r.id: self._private_paths[str(r.path)] for r in self.roots.all() if str(r.path) in self._private_paths}
+        return {r.id: self._private_paths[str(r.path)] for r in self.roots.all() if str(r.path) in self._private_good}
 
     def _register_private_roots(self):
         """Register the private root of each member that has one, as the list's root is registered. A folder that
@@ -165,6 +198,11 @@ class Hub:
             if not m.private_root:
                 continue
             folder = Path(os.path.realpath(m.private_root))
+            if (ident := place.identity(str(folder))) is None or not folder.is_dir():
+                raise proxy_mod.ProxyError(f"the private root {folder} of {m.name} is not a folder: the hub does not start "
+                                           "without it (SPEC 9.11)")
+            self._private_ids[ident] = m.id
+            self._private_paths[str(folder)] = m.id     # before the checks below: a refused root is as private as any
             root = None
             if folder.is_dir() and proxy_mod.git_top(str(folder)).casefold() == str(folder).casefold():
                 root = self.roots.for_document(folder / projects.FILE)
@@ -172,7 +210,11 @@ class Hub:
                 self.record("private-root-refused", None, member=m.id,
                             error="the private root is not the top folder of a git work tree")
                 continue
-            self._private_paths[str(folder)] = m.id
+            self._private_good.add(str(folder))
+        for r in self.roots.all():              # rule A: no root encloses, or lies inside, a private root
+            if (inner := next((p for p in self._private_paths if roots_mod.nests(r.path, p)), None)) is not None:
+                raise proxy_mod.ProxyError(f"the root {r.path} encloses or lies inside the private root {inner}: "
+                                           "the hub does not start with one (SPEC 9.11)")
 
     # ── documents ────────────────────────────────────────────────────────────
     def _versions_of(self, root, named: str = "", strict: bool = False) -> state.Versions | None:
@@ -210,7 +252,7 @@ class Hub:
         """Warn of each sheaf folder of `root` (its documents `rels`) that the root's `projects.toml`
         does not name, and of a file that cannot be read, once per hub run (8.12)."""
         try:
-            entries = projects.read(root.path)
+            entries = projects.read(root.path, self)
         except projects.Invalid as e:
             if (root.id, None) not in self._told_projects:
                 self._told_projects.add((root.id, None))
@@ -273,7 +315,7 @@ class Hub:
             return
         if place.applies(self, a.root):
             try:
-                held = self.entries.get(address)         # the file an open document was made for, no other
+                held = self._bound(address)              # the file an open document was made for, no other
                 got = place.file_at(self, address, held.file_root if held else "") if self.private_roots else None
             except roots_mod.NotFound:
                 self.record("commit-refused", address, why="its file is not where the sheaf was opened")
@@ -313,6 +355,53 @@ class Hub:
                 return got[0].path / got[1]
         return root.path / place.file_rel(Path(os.path.realpath(root.path)), at.rel)
 
+    def _where_of(self, e, name: str) -> tuple:
+        """`where` for an entry. A root forgotten while a write or a rebuild of the entry is under way leaves it the folder
+        it last found: the work finishes there, opened beneath that folder and judged as ever, and never in the folder
+        that takes the name next."""
+        try:
+            e.last_where = self.where(e.address, bound=e.file_root if place.applies(self, name) else "")
+        except roots_mod.NotFound:
+            if self.roots.get(roots_mod.Address.parse(e.address).root) is not None or e.last_where is None:
+                raise
+        return e.last_where
+
+    def where(self, address: str, bound: str = "") -> tuple:
+        """(the folder of the root, the path in it) of the file the document at `address` names, as `file` finds it, to be
+        opened beneath that folder: no path is resolved to a file here. `bound` as in `file`."""
+        at = roots_mod.Address.parse(address)
+        root = self.roots.get(at.root)
+        if root is None:
+            raise roots_mod.NotFound(address)
+        if not place.applies(self, at.root):
+            top, rel = self.roots.locate(address)
+            return top.path, rel
+        if self.private_roots:
+            try:
+                got = place.file_at(self, address, bound)
+            except roots_mod.NotFound:
+                if bound:
+                    raise
+                got = None
+            if got:
+                return got[0].path, got[1]
+        return root.path, place.file_rel(Path(os.path.realpath(root.path)), at.rel)
+
+    def open_in(self, root, rel: str):
+        """`rel` below the root `root` opened beneath it (`sheafmd.beneath`), for the hub's own reads: judged on what was
+        opened, a file of a private root only where `root` is that private root (rule A, SPEC 9.11). OSError for what is
+        not a file below the root, or is a private root's under another root."""
+        op = beneath.open_beneath(root.path, rel)
+        self.check_opened(op, self.private_roots.get(root.id))
+        return op
+
+    def check_opened(self, op, member):
+        """`op` closed and a FileNotFoundError raised unless the private root it lies in is `member`'s (None: no private
+        root). The one judgement of every document the hub opens for itself."""
+        if place.opened_private(self, op) != member:
+            op.close()
+            raise FileNotFoundError(2, "not a file of this root", op.rel)
+
     def url(self, address: str) -> str:
         return f"http://127.0.0.1:{self.port}{roots_mod.url_path(address)}"
 
@@ -326,6 +415,19 @@ class Hub:
         the hub's: the file is found and first read and rendered where no move takes it."""
         with place.held(self, address):
             return self._entry(address)
+
+    def _bound(self, address: str):
+        """The entry the hub holds for `address`, None when there is none or when another root now holds its file,
+        which drops it: a write that does not go through `entry` (the door's) commits in the root of the file."""
+        e = self.entries.get(address)
+        if e is not None and self.private_roots:
+            got = place.where_is(self, address)
+            if got is not None and got[0].id != e.file_root:
+                with self._lock:
+                    if self.entries.get(address) is e:
+                        del self.entries[address]
+                return None
+        return e
 
     def _entry(self, address: str) -> Entry:
         name = roots_mod.Address.parse(address).root
@@ -360,7 +462,9 @@ class Hub:
             e = Entry(address, file, root.id)
             at = place.file_at(self, address) if self.private_roots and place.applies(self, name) else None
             e.file_root = at[0].id if at else root.id
-            e.live = LiveDocument(file, render=lambda text: self._rendered(e, text),
+            e.where = lambda: self._where_of(e, name)
+            e.judge = lambda op: self.check_opened(op, self.private_roots.get(e.file_root))
+            e.live = LiveDocument(file, render=lambda text: self._rendered(e, text), entry=e,
                                   publish=e.bus.publish, by=self.person, clock=self.clock,
                                   versions=(lambda: self._store_of(address, root, e.file_root)) if self.private_roots and place.applies(self, name)
                                   else self._versions_of(root), address=address, hold=hold)
@@ -393,6 +497,7 @@ class Hub:
                            by=s["by"], for_=s["for"], theme=s["theme"], credit=s["credit"], log=log,
                            root=root.path if root else None, extra_meta=meta,
                            script_nonce=self.placeholder, image_ok=self._image_rule(root, e.path, e.address, scope),
+                           image_read=self._image_read(root) if self.proxy is not None else None,
                            warn=e.warnings.append if e.first and count else None, mount=mount)
         if count:
             e.log, e.first = log, False
@@ -403,10 +508,28 @@ class Hub:
         """The share copy of the document as the file is now, with the settings it is shown with."""
         s = self._settings(e.address)
         root = self.roots.get(roots_mod.Address.parse(e.address).root)
-        return render_file(e.path, share=True, title=s["title"], toc=s["toc"] or "auto",
+        return render_file(e.path, share=True, src=e.read(), title=s["title"], toc=s["toc"] or "auto",
                            max_image_width=s["max_image_width"] or 1400, by=s["by"],
                            for_=s["for"], theme=s["theme"], credit=s["credit"], log=[],
-                           root=root.path if root else None, image_ok=self._image_rule(root, e.path, e.address))
+                           root=root.path if root else None, image_ok=self._image_rule(root, e.path, e.address),
+                           image_read=self._image_read(root) if self.proxy is not None else None)
+
+    def _image_read(self, root):
+        """The bytes of a local image, from one open beneath `root` (`sheafmd.beneath`), refused when what was opened is
+        in a private root (9.11): the rule above judges the image's real path, this judges what is read."""
+        if root is None:                    # the image rule leaves every image out of a document in no root
+            return None
+        top = os.path.realpath(root.path)
+
+        def read(path) -> bytes:
+            rel = os.path.relpath(path, top)
+            if rel == ".." or rel.startswith("../"):
+                raise PermissionError(errno.EACCES, "outside the root", str(path))
+            with beneath.open_beneath(top, rel) as op:
+                if place.opened_private(self, op) is not None:
+                    raise PermissionError(errno.EACCES, "in a private root", str(path))
+                return op.bytes()
+        return read
 
     def _image_rule(self, root, doc, address: str, scope: tuple | None = None):
         """In proxy mode, a local image is embedded only when the root 8.2 finds for its file is the
@@ -715,6 +838,8 @@ class Hub:
         if root is None or not at.plain:
             return []
         mine = [m for m in members if self.owns(m, root)]
+        if mine and (private := place.private_member(self, address)) is not None:
+            mine = [m for m in mine if m.id == private]       # rule A: a private root's file is its member's alone
         return mine if mine and self.roots.lookup(root.path / at.rel) == root else []
 
     def judged(self, address: str):
@@ -727,18 +852,24 @@ class Hub:
         root = self.roots.get(at.root)
         if root is None:
             return {}, None
-        # Kept by the address's own path, a sheaf's name (9.11), and read where its file is now.
-        kept, f = root.path / at.rel, self.file(address)
+        # Kept by the address's own path, a sheaf's name (9.11), and read where its file is now: opened beneath its root
+        # once, judged on that descriptor, and read from it.
+        kept = root.path / at.rel
         try:
-            st = f.stat()
-        except FileNotFoundError:
+            top, rel = self.where(address)
+            op = beneath.open_beneath(top, rel)
+        except (FileNotFoundError, roots_mod.NotFound):
             hit = self._front.get(kept)
             return None if hit is None else hit[1:]
-        key = (st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
-        hit = self._front.get(kept)
-        fm = hit[1] if hit is not None and hit[0] == key else visibility.front_matter(f.read_text(encoding="utf-8"))
-        assignees = self.assignees(address, fm)
-        self._front[kept] = (key, fm, assignees)
+        with op:
+            st = os.fstat(op.fd)
+            key = (st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
+            hit = self._front.get(kept)
+            fm = hit[1] if hit is not None and hit[0] == key else visibility.front_matter(op.text())
+            assignees = self.assignees(address, fm)
+            self._front[kept] = (key, fm, assignees)
+            if self.private_roots:
+                place.private_member(self, address, fm, place.opened_private(self, op))   # remembered whoever read the file first (rule A)
         return fm, assignees
 
     def last_judged(self, address: str):
@@ -751,8 +882,10 @@ class Hub:
         if hit is None:
             return None
         try:
-            same = self.file(address).stat().st_ino == hit[0][0]
-        except OSError:
+            top, rel = self.where(address)
+            with beneath.open_beneath(top, rel, meta=True) as op:
+                same = os.fstat(op.fd).st_ino == hit[0][0]
+        except (OSError, roots_mod.NotFound):
             return None
         return hit[1:] if same else None
 
@@ -767,18 +900,25 @@ class Hub:
             judged = self.judged(address)
         except (OSError, UnicodeDecodeError):
             return False
+        private = place.private_member(self, address, None if judged is None else judged[0])
+        if private is not None and private != member.id:        # rule A, before anything the file or the issue says
+            return False
         if judged is None:
             return never_read and self.granted(member, address)
         return visibility.visible_to(judged[0], member, judged[1], self.granted(member, address))
 
-    def may_open(self, member, address: str, fm: dict) -> bool:
+    def may_open(self, member, address: str, fm: dict, opened=place.UNJUDGED) -> bool:
         """Whether `member` may open the sheaf at `address` whose front matter is `fm`, a text read under its lock
         (9.11): as `visible` judges the file on disk, with `projects.toml`'s grant (8.12)."""
+        private = place.private_member(self, address, fm, opened)
+        if private is not None and private != member.id:        # rule A
+            return False
         return visibility.visible_to(fm, member, self.assignees(address, fm), self.granted(member, address))
 
-    def granted(self, member, address: str) -> bool:
+    def granted(self, member, address: str, by_name: bool = False) -> bool:
         """Whether the `projects.toml` of the root of `address` lets `member` into its project (8.12): always in
-        loopback mode, and in a root with no such file."""
+        loopback mode, and in a root with no such file. `by_name`: judged by the address alone, not by where the file
+        is (a `create` on a name a private root holds is answered as one a shared root holds, 9.11)."""
         at = roots_mod.Address.parse(address)
         root = self.roots.get(at.root)
         if self.proxy is None or root is None:
@@ -788,6 +928,8 @@ class Hub:
             return True
         # Judged where the file is as well as by the address: a link in one project to a sheaf of another (a root
         # the hub does not place follows it) opens it only to a member both name.
+        if by_name:
+            return projects.grants(entries, at.rel, member.short)
         top = os.path.realpath(root.path)
         real = os.path.realpath(self.file(address))
         if not real.startswith(top.rstrip("/") + "/"):
@@ -798,27 +940,13 @@ class Hub:
         """The entries of `root`'s `projects.toml`, None without the file, an `Invalid` for one the hub cannot
         read: read again only when the file changed (its inode, times or size), so an edit takes effect at the
         next request, with no restart."""
-        f = root.path / projects.FILE
-        try:
-            st = f.stat()
-            key = (st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
-        except FileNotFoundError:
+        key, got = projects.load(root.path, self)       # one open beneath the root: the key and the text are of one file
+        if key is None:
             self._grants_seen.setdefault(root.id, None)
             return None
-        except OSError as e:
-            key = ("unreadable", e.errno)            # kept as one answer, so the tick tells the tabs once
         hit = self._projects.get(root.id)
         if hit is not None and hit[0] == key:
             return hit[1]
-        if key[0] == "unreadable":
-            got = projects.Invalid(f"cannot be read ({os.strerror(key[1])})")
-            self._projects[root.id] = (key, got)
-            self._grants_seen.setdefault(root.id, got)
-            return got
-        try:
-            got = projects.read(root.path)
-        except projects.Invalid as e:
-            got = e
         self._projects[root.id] = (key, got)          # a swap of one item: no lock, any reader sees one or the other
         self._grants_seen.setdefault(root.id, got)    # what the tick compares with, from the first read on
         return got
@@ -940,7 +1068,7 @@ class Hub:
                 if not (e.bus.count() or e.live.waiting()):
                     continue
                 try:
-                    st = e.path.stat()
+                    st = e.stat()
                 except (OSError, roots_mod.NotFound):      # a bound entry's file may be gone from its root
                     continue
                 key = (st.st_mtime_ns, st.st_size)
@@ -1016,7 +1144,7 @@ class Hub:
         which tells the tabs. A rebuild that fails is written down and the last good page is
         served; it is tried again on the next request."""
         try:
-            st = e.path.stat()
+            st = e.stat()
             key = (st.st_mtime_ns, st.st_size)
             if key != e.last_stat:
                 e.live.refresh()
@@ -1035,7 +1163,7 @@ class Hub:
         e = self.entries.get(address)
         if e is not None:
             try:
-                st = e.path.stat()
+                st = e.stat()
                 if moved:
                     e.live.rebuild()
                 else:
@@ -1054,7 +1182,7 @@ class Hub:
         the capped file. The same failure is the same only while no rebuild has worked in
         between (`_rendered` clears it) and the file is the same."""
         try:
-            st = e.path.stat()
+            st = e.stat()
             key = (st.st_mtime_ns, st.st_size)
         except (OSError, roots_mod.NotFound):
             key = None

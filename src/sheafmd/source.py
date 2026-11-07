@@ -221,7 +221,7 @@ def update_beneath(top, rel: str, change, move=None):
     sees the text read from the descriptor of that open and the `Opened` it came from, so the caller judges what was
     opened, and the new text is written through the same walk's folder descriptor. The lock is named by the path
     (as every writer's is) and opened before the file, so a writer that replaces the file leaves nothing stale.
-    `move(text, new)` as in `update_file`: a path it gives is written to by that path, as there. Returns (old, new)."""
+    `move(text, new)` as in `update_file`: the path it gives is opened again beneath `top` and written only if it is the file opened first. Returns (old, new)."""
     from .beneath import open_beneath
     with file_lock(Path(top) / rel):
         with open_beneath(top, rel) as op:
@@ -232,8 +232,19 @@ def update_beneath(top, rel: str, change, move=None):
                 if q is None:
                     op.write(new)
                 else:
-                    with file_lock(q):
-                        _write_atomic(Path(q), new)
+                    # The file was linked to its home inside this root and unlinked where it was: the same inode. It is
+                    # opened again beneath the root and written through that walk only while it is still the file opened
+                    # first; the path `move` gave is never written to.
+                    try:
+                        home = os.path.relpath(os.path.realpath(q), os.path.realpath(top)).replace(os.sep, "/")
+                    except ValueError:
+                        home = ".."
+                    if home == ".." or home.startswith("../"):
+                        raise OSError(errno.ESTALE, "the file's home is not in the root it was opened in", rel)
+                    with file_lock(q), open_beneath(top, home) as at_home:
+                        if at_home.file != op.file:
+                            raise OSError(errno.ESTALE, "the file at its home is not the one that was opened", home)
+                        at_home.write(new)
             return text, new
 
 

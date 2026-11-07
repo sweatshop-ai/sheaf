@@ -4,7 +4,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Claimed by:** Anders 2026-11-07 01:42
+
+**Status:** in-progress
 
 - [ ] The page has no Ask button, no "Send and ask", no "is answering" line, and its Agent menu line reads "Tell → …"
 - [ ] `/_/ask` is gone; a comment add or reply carrying `ask` is refused 400 "Ask was retired: use Tell, or reply." and writes nothing

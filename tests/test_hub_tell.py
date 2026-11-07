@@ -351,7 +351,7 @@ def test_a_tell_that_is_already_running_on_the_thread_is_refused(browser, hub, r
     r = post(browser, "/_/tell")
     assert r.status == 409 and r.json()["error"] == "Cosima is already being told about this comment"
     assert hub.runner.active("tell") == [[DOC, "c1"]]
-    assert browser.get(f"/_/doc?doc={DOC}").json()["telling"] == ["c1"]
+    assert [t["id"] for t in browser.get(f"/_/doc?doc={DOC}").json()["telling"]] == ["c1"]
     assert browser.get("/_/jobs", cookie=False, key=True).json()["telling"] == [[DOC, "c1"]]
 
 
@@ -420,7 +420,7 @@ def test_tell_pushes_the_message_to_the_session_in_under_a_second_and_waits(
     assert body == prompts.tell(DOC, str(ready), "Ada", thread(ready), links=True)
     finish(hub)
     assert [n for n, _ in events(sub)] == ["tell-sent"]
-    assert browser.get(f"/_/doc?doc={DOC}").json()["telling"] == ["c1"]
+    assert [t["id"] for t in browser.get(f"/_/doc?doc={DOC}").json()["telling"]] == ["c1"]
     assert browser.get("/_/jobs", cookie=False, key=True).json()["telling"] == [[DOC, "c1"]]
 
 
@@ -433,7 +433,7 @@ def test_the_thread_waits_until_a_reply_with_the_role_action_lands(browser, hub,
     at = "2026-10-14T10:05"
     update_file(ready, lambda t: rdc.reply(t, "c1", "Just chatting.", "Claude", at, role="answer"))
     hub.tick()
-    assert browser.get(f"/_/doc?doc={DOC}").json()["telling"] == ["c1"]
+    assert [t["id"] for t in browser.get(f"/_/doc?doc={DOC}").json()["telling"]] == ["c1"]
     update_file(ready, lambda t: rdc.reply(t, "c1", "Done.", "Claude", at, role="action"))
     hub.tick()
     changed = named(events(sub), "changed")[-1]
@@ -561,7 +561,7 @@ def test_a_comment_added_with_tell_is_written_delivered_and_waits(browser, hub, 
                                     "start": s, "end": e, "quote": "Second paragraph",
                                     "body": "Fix this.", "tell": True})
     got = r.json()
-    assert got["ok"] is True and got["telling"] == ["c1"] and "tellError" not in got
+    assert got["ok"] is True and [t["id"] for t in got["telling"]] == ["c1"] and "tellError" not in got
     finish(hub)
     content = json.loads(session.peer.wait_for(1)[0])["message"]["content"]
     assert "pressed Tell on comment c1" in content and "Fix this." in content
@@ -582,7 +582,7 @@ def test_a_reply_sent_with_tell_delivers_and_waits(browser, hub, ready, session)
     text = ready.read_text(encoding="utf-8")
     r = browser.post("/_/comment", {"doc": DOC, "op": "reply", "id": "c1", "hash": md_hash(text),
                                     "body": "Do it now.", "tell": True})
-    assert r.json()["telling"] == ["c1"]
+    assert [t["id"] for t in r.json()["telling"]] == ["c1"]
     finish(hub)
     assert "Do it now." in json.loads(session.peer.wait_for(1)[0])["message"]["content"]
 
@@ -613,7 +613,7 @@ def test_a_reply_sent_with_tell_on_a_thread_that_is_being_told_is_written_and_le
                                     "body": "And this too.", "tell": True})
     got = r.json()
     assert got["ok"] is True and got["tellError"] == "Cosima is already being told about this comment"
-    assert got["telling"] == ["c1"]
+    assert [t["id"] for t in got["telling"]] == ["c1"]
     assert [r.text for r in thread(ready).replies][-1] == "And this too."
     assert len(session.claude.calls()) == 1
     assert hub.entry(DOC).live.waiting() == ["c1"]            # the wait the first one began stays

@@ -16,7 +16,6 @@ from sheafmd.hub.state import Tokens
 DOC = "work/plan.md"
 URL = "/work/plan.md"
 SESSION = {"agent": "claude-code", "session": "s-1", "name": "Cosima"}
-LATER = "Tell to {agent} is not available yet."
 REVOKED = "{agent} can no longer reach this hub: its token was revoked. Pick another target."
 
 
@@ -190,15 +189,13 @@ def test_the_person_picks_an_agent_a_session_or_none(browser, talk):
     assert [t["target"] for t in gone["targets"]] == ["session", "agent:ada-chatgpt"]     # the session can be taken back
 
 
-def test_a_picked_agent_leaves_the_tell_it_cannot_take_yet_with_its_line(browser, talk):
+def test_a_picked_agent_can_be_told_and_the_page_shows_no_line_under_tell(browser, talk):
     Tokens().add("ada-chatgpt", client="ChatGPT")
-    person = browser.hub.person
     pick(browser, "agent:ada-chatgpt")
     meta = page_meta(browser.get(URL).text)
     assert meta["agent"]["kind"] == "agent" and meta["can"] == ["queue"]
-    assert meta["lines"]["tell"] == LATER.format(agent=f"ChatGPT ({person})")
-    r = browser.post("/_/tell", {"doc": DOC, "id": "c1"})
-    assert r.status == 409 and r.json()["error"] == LATER.format(agent=f"ChatGPT ({person})")
+    assert meta["lines"]["tell"] is None
+    assert browser.post("/_/tell", {"doc": DOC, "id": "c1"}).status == 200
 
 
 @pytest.mark.parametrize("target", ["", "everyone", "agent:", "agent:nobody", "Session",

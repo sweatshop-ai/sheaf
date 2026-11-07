@@ -22,6 +22,13 @@ sheafmd.hub.place — where the file of a sheaf of the list's root is (SPEC 9.11
     ignores(top, target)             whether a private home is one the root's repo ignores
     tell_ignored(hub, root, folders) a `private-ignored` row when the root's repo ignores a private home
 
+Rule A (SPEC 9.11), the invariant: the set of private real paths is the real paths of every CONFIGURED private root,
+recorded before any validation, whether the root registers or is refused, and never shrunk at runtime
+(`hub._private_paths`). Every door verb that resolves an address passes one test, `in_private`, which refuses a
+caller that is not the root's member when the real path of what it names is inside that set; `private_member`
+adds only the sheaves a private root holds under the list's name, and a deleted file's owner (`_private_seen`).
+Nothing else decides privacy: not the registry, not a name, not the front matter.
+
 In proxy mode, in the list's root (9.10) only, a sheaf at project depth has one name, its address
 `<client>/<project>/<name>.md`, and one home for its file: open to the project, that path; its owner's alone,
 `<client>/<project>/private/<short>/<name>.md`, where `short` is its owner's (the member its `owner` names when that
@@ -436,6 +443,17 @@ def where_is(hub, address: str):
     return found if n == 1 else None
 
 
+def in_private(hub, real: str):
+    """The id of the member whose private root holds the real path `real`, else None. The one test of rule A by
+    place: the real paths of every configured private root (`hub._private_paths`, recorded before any validation,
+    registered or refused, never shrunk), and a path equal to or below one. Nothing about a name decides it."""
+    for private, member in (getattr(hub, "_private_paths", None) or {}).items():
+        top = os.path.realpath(private)
+        if real == top or real.startswith(top.rstrip("/") + "/"):
+            return member
+    return None
+
+
 def private_member(hub, address: str, fm: dict | None = None):
     """Rule A: the id of the one member the sheaf named `address` is private to, or None when the hub holds it for
     the project as usual. A sheaf held by a private root is that root's member's whatever its text, its assignees or
@@ -452,11 +470,8 @@ def private_member(hub, address: str, fm: dict | None = None):
         # Judged by where the file really is, not by the root the address names: the private root's own name, a root
         # around it and a link into it all reach the same file. The real paths of the private roots, not the roots
         # the registry holds now: one that was forgotten while a root around it stays is private still.
-        real = os.path.realpath(named.path / at.rel)
-        for private, member in paths.items():
-            top = os.path.realpath(private)
-            if real == top or real.startswith(top.rstrip("/") + "/"):
-                return member
+        if (member := in_private(hub, os.path.realpath(named.path / at.rel))) is not None:
+            return member
     if not getattr(hub, "private_roots", None):
         return hub._private_seen.get(address)
     got = _where(hub, address)

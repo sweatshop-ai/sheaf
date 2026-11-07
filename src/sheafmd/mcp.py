@@ -662,7 +662,7 @@ class Door:
                             "empty, `..` or a hidden name.", "path")
         if in_git_dir(root.path / rel, root):
             raise ToolError(f"{doc} {NOT_IN_A_ROOT}", "path")
-        if self._judged(caller) and place.private_member(self.hub, str(Address(root.name, rel))) not in (
+        if self._judged(caller) and place.in_private(self.hub, os.path.realpath(root.path / rel)) not in (
                 None, getattr(self._member(caller), "id", None)):
             raise ToolError(f"{doc} {NOT_IN_A_ROOT}", "path")     # a private root is its member's alone (9.11): no probe, no write
         return root, rel

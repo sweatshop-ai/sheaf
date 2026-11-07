@@ -359,3 +359,89 @@ def test_door_comment_verbs_by_a_loose_token_reach_nothing_of_a_private_root(wor
     for doc in docs:
         assert call(w.door, tool, token=w.tokens["loose"], doc=doc, **args)[0], doc
     assert (w.two.private_repo / NAME).read_text(encoding="utf-8") == before
+
+
+# ── the invariant, as a table (place.py, Rule A): what a caller gets is decided by the real path alone ──────────
+
+def _refuse_registration(monkeypatch, repo):
+    import dataclasses
+
+    from sheafmd.hub.roots import Roots
+    real = Roots.for_document
+
+    def for_document(self, md):
+        root = real(self, md)
+        return dataclasses.replace(root, git=False) if str(root.path) == str(repo.resolve()) else root
+    monkeypatch.setattr(Roots, "for_document", for_document)
+
+
+def _state_world(two, monkeypatch, state):
+    if state == "refused":
+        _refuse_registration(monkeypatch, two.private_repo)
+    w = World(two, ["login-a", "login-b"])
+    w.put(PROJECT_WIDE)
+    comment(two.private_repo / NAME, quote="Secret words.")
+    own = w.hub.roots.lookup(two.private_repo / NAME).name
+    outer = _enclosing(w).name
+    if state == "refused":
+        assert not w.hub.private_roots and w.hub._private_paths
+    if state == "forgotten":
+        w.hub.forget_root(own)
+    docs = {"registered": [f"{own}/{NAME}", w.address, f"{outer}/private/{NAME}"],
+            "refused": [f"{own}/{NAME}", f"{outer}/private/{NAME}"],
+            "forgotten": [f"{outer}/private/{NAME}"],
+            "enclosing": [f"{outer}/private/{NAME}"],
+            "list": [w.address]}[state]
+    return w, docs
+
+
+def _args(tool, doc):
+    return {"read": {}, "threads": {}, "reply": {"id": "c1", "text": "Done."}, "resolve": {"id": "c1"},
+            "update": {"text": PROJECT_WIDE + "x", "expected_hash": md_hash(PROJECT_WIDE)},
+            "create": {"text": "# new\n"}}[tool]
+
+
+@pytest.mark.parametrize("state", ["registered", "refused", "forgotten", "enclosing", "list"])
+@pytest.mark.parametrize("kind", ["tok-b", "loose"])
+@pytest.mark.parametrize("tool", ["read", "threads", "reply", "resolve", "update", "create", "documents"])
+def test_invariant_table_a_caller_that_is_not_the_member_gets_nothing_inside_the_set(two, monkeypatch, state, kind, tool):
+    w, docs = _state_world(two, monkeypatch, state)
+    before = (two.private_repo / NAME).read_text(encoding="utf-8")
+    for doc in docs:
+        if tool == "documents":
+            root = doc.split("/")[0]
+            is_error, got = call(w.door, tool, token=w.tokens[kind], open_only=False, root=root)
+            assert NAME not in str(got), (doc, got)
+            continue
+        # a new page in the list's root is the caller's to make; the name already taken is not made again
+        target = doc.replace(NAME, "acme/blog/new.md") if tool == "create" and doc != w.address else doc
+        is_error, got = call(w.door, tool, token=w.tokens[kind], doc=target, **_args(tool, doc))
+        assert is_error, (doc, got)
+    assert w.hub.commits.settle()
+    assert (two.private_repo / NAME).read_text(encoding="utf-8") == before
+    assert not (two.private_repo / "acme/blog/new.md").exists()
+
+
+@pytest.mark.parametrize("state", ["registered", "list"])
+@pytest.mark.parametrize("kind", ["tok-a", None])
+@pytest.mark.parametrize("tool", ["read", "threads"])
+def test_invariant_table_the_member_and_the_key_are_the_controls(two, monkeypatch, state, kind, tool):
+    w, docs = _state_world(two, monkeypatch, state)
+    token = w.tokens[kind] if kind else None
+    for doc in docs:
+        if doc == f"{_enclosing(w).name}/private/{NAME}":
+            continue                                   # a root around the private one is not the member's (9.11)
+        is_error, got = call(w.door, tool, token=token, doc=doc, **_args(tool, doc))
+        assert not is_error, (kind, doc, got)
+
+
+def test_a_list_address_create_tells_a_privately_held_name_from_none_no_more_than_a_shared_one(world):
+    w = world
+    w.put(PROJECT_WIDE)
+    (w.two.list_repo / "acme/blog/shared.md").write_text("# shared\n", encoding="utf-8")
+    held = call(w.door, "create", token=w.tokens["loose"], doc=w.address, text="# new\n")
+    shared = call(w.door, "create", token=w.tokens["loose"], doc=f"{w.root.name}/acme/blog/shared.md", text="# new\n")
+    assert held[0] and shared[0]
+    assert held[1].replace(w.address, "<d>") == shared[1].replace(f"{w.root.name}/acme/blog/shared.md", "<d>")
+    (w.two.private_repo / NAME).unlink()
+    assert not call(w.door, "create", token=w.tokens["loose"], doc=w.address, text="# new\n")[0]   # free again once gone

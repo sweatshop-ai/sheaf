@@ -31,7 +31,7 @@ STOP_WAITS = 15.0      # seconds a stop message waits for the delivery it cancel
 NO_AGENT = "Render this page from an agent session, or let one of your agents work on it, to Tell it."
 NOT_YET = ("{product} can answer threads through the MCP door. Tell needs an adapter "
            "sheaf does not have yet.")
-ENDED = "The {product} session that rendered this page has ended. Render it again from a session."
+ENDED = "The {product} session that rendered this page has ended. Render it again from a session, or pick another target."
 NO_SOCKET = ("Tell needs the session's message socket, which was not found. Render the page "
              "again from the session.")
 UPGRADING = "The hub is restarting for an upgrade. Try again in a moment."

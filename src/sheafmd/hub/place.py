@@ -444,17 +444,21 @@ def private_member(hub, address: str, fm: dict | None = None):
     root only, is nobody's (""): a private root is where its owner's sheaves live, so a copy pushed into the shared
     repo is shown to no one. A file that went away is still the member's it was (`hub._private_seen`), so its going
     is told to no one else."""
-    if not getattr(hub, "private_roots", None):
+    paths = getattr(hub, "_private_paths", None)
+    if not paths:
         return None
     at = Address.parse(address)
     if (named := hub.roots.get(at.root)) is not None:
         # Judged by where the file really is, not by the root the address names: the private root's own name, a root
-        # around it and a link into it all reach the same file.
+        # around it and a link into it all reach the same file. The real paths of the private roots, not the roots
+        # the registry holds now: one that was forgotten while a root around it stays is private still.
         real = os.path.realpath(named.path / at.rel)
-        for member, private in _private_roots(hub).items():
-            top = os.path.realpath(private.path)
+        for private, member in paths.items():
+            top = os.path.realpath(private)
             if real == top or real.startswith(top.rstrip("/") + "/"):
                 return member
+    if not getattr(hub, "private_roots", None):
+        return hub._private_seen.get(address)
     got = _where(hub, address)
     if got is None:
         return None

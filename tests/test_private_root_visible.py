@@ -284,3 +284,78 @@ def test_a_deletion_is_told_to_nobody_else_whoever_read_the_file_first(world, mo
     (w.two.private_repo / NAME).unlink()
     b = w.hub.proxy.members[B]
     assert not w.hub.visible(b, w.address, never_read=False)
+
+
+def _enclosing(w: World):
+    (w.two.base / "note.md").write_text("# note\n", encoding="utf-8")
+    return w.hub.roots.for_document(w.two.base / "note.md")
+
+
+def _create_docs(w: World) -> dict:
+    """The ways a door `create` can name a new page inside the private root: its own registered name, a root around it."""
+    own = w.hub.roots.get(w.hub.roots.lookup(w.two.private_repo / NAME).name).name
+    return {"own": f"{own}/acme/blog/new.md", "own-taken": f"{own}/{NAME}",
+            "own-nofolder": f"{own}/nowhere/at/all/new.md", "outer": f"{_enclosing(w).name}/private/acme/blog/new.md",
+            "outer-taken": f"{_enclosing(w).name}/private/{NAME}",
+            "outer-nofolder": f"{_enclosing(w).name}/private/nowhere/at/all/new.md"}
+
+
+@pytest.mark.parametrize("who", ["loose", "tok-b"])
+def test_door_create_in_a_private_root_is_a_path_in_no_root_and_probes_nothing(world, who):
+    w = world
+    w.put(PROJECT_WIDE)
+    docs = _create_docs(w)
+    answers = {}
+    for key, doc in docs.items():
+        is_error, got = call(w.door, "create", token=w.tokens[who], doc=doc, text="# new\n")
+        assert is_error, (key, got)
+        answers[key] = str(got).replace(doc, "<doc>")
+    assert len(set(answers.values())) == 1, answers          # taken, free and no folder are told apart by nothing
+    assert not (w.two.private_repo / "acme/blog/new.md").exists()
+    assert not (w.two.private_repo / "nowhere").exists()
+    assert (w.two.private_repo / NAME).read_text(encoding="utf-8") == PROJECT_WIDE
+
+
+def test_door_create_in_a_private_root_by_a_loose_token_writes_no_commit(world):
+    w = world
+    w.put(PROJECT_WIDE)
+    before = git(w.two.private_repo, "rev-list", "--count", "HEAD")
+    call(w.door, "create", token=w.tokens["loose"], doc=_create_docs(w)["outer"], text="# new\n")
+    assert w.hub.commits.settle()
+    assert git(w.two.private_repo, "rev-list", "--count", "HEAD") == before
+    assert not (w.two.private_repo / "acme/blog/new.md").exists()
+
+
+def test_a_private_root_forgotten_while_a_root_around_it_stays_is_still_private(world):
+    w = world
+    w.put(PROJECT_WIDE)
+    outer = _enclosing(w)
+    doc = f"{outer.name}/private/{NAME}"
+    assert call(w.door, "read", token=w.tokens["loose"], doc=doc)[0]
+    own = w.hub.roots.lookup(w.two.private_repo / NAME).name
+    w.hub.forget_root(own)
+    assert own not in {r.name for r in w.hub.roots.all()} and w.hub._private_paths
+    for tool, args in (("read", {}), ("threads", {}),
+                       ("update", {"text": PROJECT_WIDE + "x", "expected_hash": md_hash(PROJECT_WIDE)})):
+        assert call(w.door, tool, token=w.tokens["loose"], doc=doc, **args)[0], tool
+    is_error, got = call(w.door, "documents", token=w.tokens["loose"], open_only=False, root=outer.name)
+    assert NAME not in str(got)
+    assert (w.two.private_repo / NAME).read_text(encoding="utf-8") == PROJECT_WIDE
+
+
+@pytest.mark.parametrize("forget", [False, True])
+@pytest.mark.parametrize("tool", ["reply", "resolve", "threads"])
+def test_door_comment_verbs_by_a_loose_token_reach_nothing_of_a_private_root(world, tool, forget):
+    w = world
+    w.put(PROJECT_WIDE)
+    comment(w.two.private_repo / NAME, quote="Secret words.")
+    own = w.hub.roots.lookup(w.two.private_repo / NAME).name
+    docs = [f"{own}/{NAME}", f"{_enclosing(w).name}/private/{NAME}"]
+    if forget:
+        w.hub.forget_root(own)
+        docs = docs[1:]
+    args = {"reply": {"id": "c1", "text": "Done."}, "resolve": {"id": "c1"}, "threads": {}}[tool]
+    before = (w.two.private_repo / NAME).read_text(encoding="utf-8")
+    for doc in docs:
+        assert call(w.door, tool, token=w.tokens["loose"], doc=doc, **args)[0], doc
+    assert (w.two.private_repo / NAME).read_text(encoding="utf-8") == before

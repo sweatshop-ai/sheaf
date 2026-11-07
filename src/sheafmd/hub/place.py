@@ -409,8 +409,8 @@ def judge_for(hub, root):
     return judge
 
 
-def judge_home(hub, root, member_id: str):
-    """The `judge` for a create at `root`, a private root (`member_id`'s): it refuses (`beneath.Private`) when the
+def judge_home(hub, root):
+    """The `judge` for a create at `root`, a private root: it refuses (`beneath.Private`) when the
     root's folder, as `_folder_of` opens it, is not the folder that a walk to the root's real path, taking no link,
     reaches. A folder swapped for a link between the checks by path and the open is another folder than that, wherever
     it points. The identity is taken here from the walk and not from `hub._private_ids`, which records whatever a read

@@ -1,6 +1,8 @@
 """Rule F (SPEC 9.11): a door create makes an owner-only sheaf at its owner's private root, and only for a caller bound to
 that root's member; a create or a move into a private root by anyone else is refused with the ordinary "cannot be made"
 line and writes nothing. Each refusal has the member's own create as its positive control, on the same route."""
+import shutil
+
 import pytest
 from helpers import browser_on, call
 from two_roots import TwoRoots, git, two_roots
@@ -154,3 +156,8 @@ def test_private_folder_swap_after_a_read_recorded_it_is_refused(two, monkeypatc
     is_error, got = w.create("tok-a", OWNED_BY_A)
     assert is_error, got
     assert not list(elsewhere.rglob("post.md"))
+    monkeypatch.setattr(place, "make_folders", real)
+    elsewhere.joinpath("acme").exists() and shutil.rmtree(elsewhere / "acme")
+    two.private_repo.unlink()
+    moved.rename(two.private_repo)
+    assert not w.create("tok-a", OWNED_BY_A)[0]            # positive control: the folder back, the same create is made

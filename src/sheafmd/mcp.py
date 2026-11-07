@@ -670,13 +670,17 @@ class Door:
     def _create(self, args: dict, caller: Caller):
         root, rel = self._new_address(args["doc"], caller)
         address, text = str(Address(root.name, rel)), _as_read(args["text"])
-        if (member := self._member(caller)) is not None and not self.hub.member_owns(member, address):
-            raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path")     # a root of another member's
+        if (member := self._member(caller)) is not None and not (
+                self.hub.owns(member, root) and self.hub.roots.lookup(root.path / rel) == root):
+            # A root of another member's. Root ownership alone, not rule A: `_new_address` already refused a real path
+            # inside a private root, and a list name a private root holds falls to `place.taken` below, as a shared one.
+            raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path")
         placed = place.applies(self.hub, root.name)
         if placed and place.names_private(rel):
             raise ToolError(f"{_named(args['doc'])} cannot be made: the hub places owner-only sheaves itself: name "
                             "`<client>/<project>/<name>.md`.", "path")
-        if member is not None and not self.hub.granted(member, address):
+        held = place.in_private(self.hub, os.path.realpath(self.hub.file(address))) is not None
+        if member is not None and not self.hub.granted(member, address, by_name=held):
             raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path")     # a project not theirs (8.12)
         self._check_size(text)
         _check_comments("", text)

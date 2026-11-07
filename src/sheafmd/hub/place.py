@@ -28,6 +28,8 @@ recorded before any validation, whether the root registers or is refused, and ne
 caller that is not the root's member when the real path of what it names is inside that set; `private_member`
 adds only the sheaves a private root holds under the list's name, and a deleted file's owner (`_private_seen`).
 Nothing else decides privacy: not the registry, not a name, not the front matter.
+For a caller who may not see a private root, every door answer about a name inside it is identical to the answer for
+the same name held in a shared root, or for a free name after deletion.
 
 In proxy mode, in the list's root (9.10) only, a sheaf at project depth has one name, its address
 `<client>/<project>/<name>.md`, and one home for its file: open to the project, that path; its owner's alone,
@@ -443,14 +445,36 @@ def where_is(hub, address: str):
     return found if n == 1 else None
 
 
-def in_private(hub, real: str):
+def identity(path: str, stat=os.stat):
+    """(st_dev, st_ino) of `path`, None when it cannot be stat'ed (a folder that is not there)."""
+    try:
+        st = stat(path)
+    except OSError:
+        return None
+    return (st.st_dev, st.st_ino)
+
+
+def in_private(hub, real: str, stat=os.stat):
     """The id of the member whose private root holds the real path `real`, else None. The one test of rule A by
     place: the real paths of every configured private root (`hub._private_paths`, recorded before any validation,
-    registered or refused, never shrunk), and a path equal to or below one. Nothing about a name decides it."""
+    registered or refused, never shrunk), and a path equal to or below one. Nothing about a name decides it.
+    By path text, and by file identity as well: the nearest existing ancestor chain of `real` is tested by
+    (st_dev, st_ino) against the identities of the private roots (`hub._private_ids`, recorded with the paths), so a
+    spelling that differs in case, on a filesystem that folds it, is the same folder. `stat` is a seam for tests."""
     for private, member in (getattr(hub, "_private_paths", None) or {}).items():
         top = os.path.realpath(private)
         if real == top or real.startswith(top.rstrip("/") + "/"):
             return member
+    ids = getattr(hub, "_private_ids", None)
+    if ids:
+        here = real
+        while True:
+            if (found := ids.get(identity(here, stat))) is not None:
+                return found
+            parent = os.path.dirname(here)
+            if parent == here:
+                return None
+            here = parent
     return None
 
 

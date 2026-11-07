@@ -435,13 +435,58 @@ def test_invariant_table_the_member_and_the_key_are_the_controls(two, monkeypatc
         assert not is_error, (kind, doc, got)
 
 
-def test_a_list_address_create_tells_a_privately_held_name_from_none_no_more_than_a_shared_one(world):
+@pytest.mark.parametrize("who", ["loose", "tok-b"])
+def test_a_list_address_create_tells_a_privately_held_name_from_none_no_more_than_a_shared_one(world, who):
     w = world
     w.put(PROJECT_WIDE)
     (w.two.list_repo / "acme/blog/shared.md").write_text("# shared\n", encoding="utf-8")
-    held = call(w.door, "create", token=w.tokens["loose"], doc=w.address, text="# new\n")
-    shared = call(w.door, "create", token=w.tokens["loose"], doc=f"{w.root.name}/acme/blog/shared.md", text="# new\n")
+    held = call(w.door, "create", token=w.tokens[who], doc=w.address, text="# new\n")
+    shared = call(w.door, "create", token=w.tokens[who], doc=f"{w.root.name}/acme/blog/shared.md", text="# new\n")
     assert held[0] and shared[0]
+    # byte for byte: private-held, shared-held, and (after deletion) free
     assert held[1].replace(w.address, "<d>") == shared[1].replace(f"{w.root.name}/acme/blog/shared.md", "<d>")
     (w.two.private_repo / NAME).unlink()
-    assert not call(w.door, "create", token=w.tokens["loose"], doc=w.address, text="# new\n")[0]   # free again once gone
+    assert not call(w.door, "create", token=w.tokens[who], doc=w.address, text="# new\n")[0]   # free again once gone
+
+
+# ── in_private by file identity: a spelling in another case is the same folder where the filesystem folds case ───
+
+class _Hub:
+    def __init__(self, paths, ids):
+        self._private_paths, self._private_ids = paths, ids
+
+
+def _fake_stat(table):
+    """A stat for a filesystem that folds case: a path's identity is that of its lowercased spelling."""
+    import types
+
+    def stat(path):
+        if path.lower() not in table:
+            raise FileNotFoundError(path)
+        dev, ino = table[path.lower()]
+        return types.SimpleNamespace(st_dev=dev, st_ino=ino, st_mode=0)
+    return stat
+
+
+def test_in_private_by_identity_finds_a_case_variant_spelling_of_the_private_root():
+    from sheafmd.hub import place
+    hub = _Hub({"/outer/private/acme": "a"}, {(1, 42): "a"})
+    stat = _fake_stat({"/": (1, 1), "/outer": (1, 2), "/outer/private": (1, 3), "/outer/private/acme": (1, 42),
+                       "/outer/private/acme/blog": (1, 43)})
+    assert place.in_private(hub, "/outer/Private/acme/blog/new.md", stat) == "a"      # the file is not there yet
+    assert place.in_private(hub, "/outer/PRIVATE/ACME", stat) == "a"                  # the top itself
+    assert place.in_private(hub, "/outer/private/acme/blog/post.md", stat) == "a"     # the path test, unchanged
+    assert place.in_private(hub, "/outer/Shared/acme/blog/new.md", stat) is None      # a neighbour is not inside
+    assert place.in_private(hub, "/outer/Private/other/x.md", stat) is None
+    assert place.in_private(_Hub({}, {}), "/outer/Private/acme/x.md", stat) is None
+
+
+def test_in_private_by_identity_is_off_without_a_stat_answer():
+    from sheafmd.hub import place
+    hub = _Hub({"/outer/private/acme": "a"}, {(1, 42): "a"})
+    assert place.in_private(hub, "/elsewhere/x.md", _fake_stat({})) is None
+
+
+def test_the_hub_records_the_identity_of_each_configured_private_root(world):
+    w = world
+    assert list(w.hub._private_ids.values()) == list(w.hub._private_paths.values()) == ["member-a-id"]

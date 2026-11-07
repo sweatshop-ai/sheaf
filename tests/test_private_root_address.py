@@ -107,6 +107,8 @@ def test_a_second_spelling_of_the_private_folder_is_hidden_too(world):
     sub = w.two.private_repo / "acme"
     other = roots_mod.Root("alias", w.two.private_repo / "acme" / "..", True, "id-alias")     # same folder, spelled again
     assert sub.is_dir() or sub.mkdir()
+    assert not w.hub.roots.hidden(other)             # not until it is registered: judged then, never at a request
+    w.hub.roots.registered(other)
     assert w.hub.roots.hidden(mine) and w.hub.roots.hidden(other)
     assert not w.hub.roots.hidden(w.hub.the_list.root())             # positive control
     w.put(PRIVATE)

@@ -175,24 +175,26 @@ class Hub:
         # whether the root registers or is refused, and never shrunk (`place.in_private`, SPEC 9.11 rule A).
         self._private_paths: dict[str, str] = {}
         self._private_ids: dict[tuple, str] = {}    # (st_dev, st_ino) of each, so a spelling in another case is the same folder
-        self._identity_seen: dict[str, bool] = {}   # root path -> whether its folder is a private one (`_is_private_root`)
+        self._private_by_identity: set[str] = set()     # ids of roots whose folder is a private one, spelled otherwise
         self._private_good: set[str] = set()       # those that registered: placement only, never privacy
         self.roots.private_paths = lambda: self._private_paths
-        self.roots.hidden = self._is_private_root       # rule E: no address of its own, registered or refused
+        self.roots.hidden = self._is_private_root
+        self.roots.registered = self._note_identity       # rule E: no address of its own, registered or refused
         self._register_private_roots()
+        for r in self.roots.all():
+            self._note_identity(r)      # the roots of an earlier run, registered before the private folders were known
         self.commits.seed(self.roots.all())      # the rewrite guard's first pull is guarded, not free
 
     def _is_private_root(self, root) -> bool:
         """Whether `root` is a private root: by its path, and by the identity of its folder, so a second spelling of
         it (a bind mount, a case-folded name) is no address either."""
-        where = str(root.path)
-        if where in self._private_paths:
-            return True
-        if not self._private_ids:
-            return False
-        if where not in self._identity_seen:        # one stat per folder, not one per request under the registry's lock
-            self._identity_seen[where] = place.identity(where) in self._private_ids
-        return self._identity_seen[where]
+        return str(root.path) in self._private_paths or root.id in self._private_by_identity
+
+    def _note_identity(self, root) -> None:
+        """Once, as `root` is registered (never at a request, where a folder exchanged for a link would be read
+        as the private one for as long as it is cached): whether its folder is a private one under another spelling."""
+        if self._private_ids and place.identity(str(root.path)) in self._private_ids:
+            self._private_by_identity.add(root.id)
 
     @property
     def private_roots(self) -> dict[str, str]:

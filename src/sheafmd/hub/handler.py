@@ -1535,11 +1535,12 @@ class Handler:
         signed = {"by": member.name, "author": member.name} if member else {}
         judged = []
         if member is not None:
-            def still_visible(text):
+            def still_visible(text, opened=None):
                 # The gate (_entry) read the file before the lock: a write that closed the sheaf since is seen here,
                 # and a live session that moved since keeps Ask and Tell from the window or relay it no longer is.
                 fm = visibility.front_matter(text)
-                if not self.hub.may_open(member, e.address, fm):
+                seen = place.UNJUDGED if opened is None else place.opened_private(self.hub, opened)
+                if not self.hub.may_open(member, e.address, fm, seen):
                     raise Refuse(404, "no such document")
                 if to_box and self._work_route(e.address, text, to_box, req.member) != route:
                     raise Refuse(400, proxy.PROXY_LINE)

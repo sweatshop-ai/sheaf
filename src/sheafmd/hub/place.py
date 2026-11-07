@@ -507,6 +507,7 @@ def private_member(hub, address: str, fm: dict | None = None, opened=UNJUDGED):
     at = Address.parse(address)
     if opened is not UNJUDGED:
         if opened is not None:
+            hub._private_seen[address] = opened         # its going away is told to no one else, whoever read it first
             return opened
     elif (named := hub.roots.get(at.root)) is not None:
         # Judged by where the file really is, not by the root the address names: the private root's own name, a root

@@ -817,7 +817,7 @@ class Hub:
             return None
         try:
             top, rel = self.where(address)
-            with beneath.open_beneath(top, rel) as op:
+            with beneath.open_beneath(top, rel, meta=True) as op:
                 same = os.fstat(op.fd).st_ino == hit[0][0]
         except (OSError, roots_mod.NotFound):
             return None

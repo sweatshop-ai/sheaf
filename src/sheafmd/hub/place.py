@@ -436,6 +436,31 @@ def where_is(hub, address: str):
     return found if n == 1 else None
 
 
+def private_member(hub, address: str, fm: dict | None = None):
+    """Rule A: the id of the one member the sheaf named `address` is private to, or None when the hub holds it for
+    the project as usual. A sheaf held by a private root is that root's member's whatever its text, its assignees or
+    `projects.toml` say, and when the name is held by a private root and another file too, still theirs. With `fm`, the
+    front matter of the file: a sheaf its owner's alone that names one owner who has a private root, held by the list's
+    root only, is nobody's (""): a private root is where its owner's sheaves live, so a copy pushed into the shared
+    repo is shown to no one. A file that went away is still the member's it was (`hub._private_seen`), so its going
+    is told to no one else."""
+    if not getattr(hub, "private_roots", None):
+        return None
+    got = _where(hub, address)
+    if got is None:
+        return None
+    root, _, name = got
+    found = _found(hub, root, name)
+    if not found:
+        return hub._private_seen.get(address)
+    owner = next((hub.private_roots[r.id] for r, _ in found if r.id in hub.private_roots), None)
+    if owner is None and fm is not None and visibility.effective(fm) != "project":
+        owners = _owners(hub, root, address, fm)
+        owner = "" if len(owners) == 1 and owners[0].id in _private_roots(hub) else None
+    hub._private_seen[address] = owner
+    return owner
+
+
 def file_at(hub, address: str, bound: str = ""):
     """(the root, the path in it) of the file to read or write for the sheaf named `address`, or None for a name the
     hub does not place. The one file that holds the name, in the list's root or a private root; where a private root

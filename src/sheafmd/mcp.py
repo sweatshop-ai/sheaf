@@ -729,7 +729,7 @@ class Door:
                     if self._judged(caller) and place.in_private(self.hub, os.path.realpath(Path(doc))) not in (
                             None, getattr(self._member(caller), "id", None)):
                         raise ToolError(f"{doc} {NOT_IN_A_ROOT}", "path")
-                    raise ToolError(f"{doc} cannot be made: {place.PRIVATE_ROOT}.", "path")
+                    raise ToolError(f"{doc} cannot be made: {place.PRIVATE_PATH}.", "path")
                 rel = Path(doc).relative_to(root.path).as_posix() if root is not None else ""
             except (OSError, ValueError):
                 if not caller.may_add_roots:    # a token is told of a path no root holds as of one a root holds only by its spelling

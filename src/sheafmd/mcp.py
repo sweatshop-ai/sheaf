@@ -824,7 +824,7 @@ class Door:
                 member = self._member(caller)
                 if member is None or self.hub.private_roots.get(home_root.id) != member.id:
                     raise ToolError(f"{address} cannot be made: {place.PRIVATE_ROOT}.", "path")
-                root, top, judge = home_root, Path(os.path.realpath(home_root.path)), place.judge_for(self.hub, home_root)
+                root, top, judge = home_root, Path(os.path.realpath(home_root.path)), place.judge_home(self.hub, home_root, member.id)
                 private_home = True     # the member's repo may not hold the project's folder yet: made as a private folder is
             if place.ignores(top, home):
                 # Made there, it would be untracked and leave the listing (8.6): refused as a move there is.

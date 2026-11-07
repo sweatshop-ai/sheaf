@@ -614,8 +614,11 @@ class Index:
                             rows.append(self._row(address, path, f.stat, waiting, running, member))
             for address in sorted(a for a in named - have if a.startswith(roots_mod.Address.prefix(root.name))):
                 with place.held(hub, address):          # every read of a sheaf's file holds its name's lock (9.11)
-                    if member is None and not board and place.held_privately(hub, address):
-                        continue                        # a private file is no row of the hub's person, rendered or not (rule D)
+                    if member is None and place.held_privately(hub, address):
+                        if board:
+                            privately.add(address)      # the board holds it for the members' streams; its end is theirs alone
+                        else:
+                            continue                    # a private file is no row of the hub's person, rendered or not (rule D)
                     if not (found := self._stat_of(root, address)):
                         continue
                     path, st = found

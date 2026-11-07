@@ -812,6 +812,22 @@ def test_a_private_name_rendered_by_the_persons_hand_is_no_row_and_no_event_of_t
     assert [d for n, d in person.drain() if n == "status"] == []        # nor the end of what they were never shown
 
 
+def test_a_private_name_the_board_was_armed_with_while_rendered_is_gone_unheard_by_the_person(world):
+    """A private file the repo ignores is no listing's, but a render puts its name on the board at `arm`; its end is
+    told to its member's stream and not to the hub's person."""
+    w = world
+    (w.two.private_repo / ".gitignore").write_text("post.md\n", encoding="utf-8")
+    w.put(PRIVATE)
+    index = w.hub.index
+    w.hub.render(w.two.list_repo / NAME, {}, None)
+    person = w.hub.index_bus.subscribe(lambda n: {}, index.accepting(None))
+    index.arm()
+    assert w.address in index._board
+    (w.two.private_repo / NAME).unlink()
+    index.sweep()
+    assert [d for n, d in person.drain() if n == "status"] == []
+
+
 def test_the_share_copy_is_rendered_from_the_text_the_descriptor_gave(world, mode, monkeypatch):
     from sheafmd.hub import core
     w = world

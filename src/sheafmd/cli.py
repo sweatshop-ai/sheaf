@@ -900,8 +900,11 @@ def _agent_clash(client: str, built: str, cfg, person: str, others: list[str]) -
     proxy mode, or a name another token signs with (SPEC 9.7). Compared by `name_key`: case, accents and width ignored."""
     from .hub import proxy
     members = [m.name for m in cfg.members.values()] if cfg is not None else proxy.member_names()
-    for name in (person, *members, *others):
+    for name in (person, *members):
         if name_key(name) in (name_key(client), name_key(built)):
+            return name
+    for name in others:                            # a token's display defaults to its name: only the built name is compared
+        if name_key(name) == name_key(built):
             return name
     return None
 
@@ -952,7 +955,15 @@ def cmd_token(argv: list[str]) -> int:
         _out(f"  Shown once. Send it as `Authorization: Bearer <token>` to "
              f"http://127.0.0.1:{config.port()}/_/mcp")
     elif args.action == "add":
-        if (taken := _member_named(args.name if args.display is None else args.display)) is not None:
+        shown_as = args.name if args.display is None else args.display
+        cfg, person = _proxy_table(), config.user_name()
+        if (taken := next((r.signed(person, cfg) for r in tokens.list()
+                           if r.client is not None and not r.invalid and name_key(r.signed(person, cfg)) == name_key(shown_as)),
+                          None)) is not None:
+            _err(f"sheaf: {taken!r} is the name an agent's token signs with, built by sheaf and never typed; "
+                 "a token's replies must not pass for it")
+            return EXIT_FAILED
+        if (taken := _member_named(shown_as)) is not None:
             _err(f"sheaf: {taken!r} is the name of a member of proxy mode (config.toml [proxy]); "
                  "a token's replies must not pass for that member's")
             return EXIT_FAILED

@@ -293,7 +293,14 @@ class Index:
         root, row = got if got else (roots_mod.Address.parse(address).root, None)
         return Status({"doc": address, "root": root, "dot": row and row["dot"],
                        "open": row["open"] if row else 0, "changed": row and row["mtime"]}, files, at, sig,
-                      members_only=address in self._private_docs or place.held_privately(self.hub, address))      # a private sheaf is no event of the hub's person
+                      members_only=self._met_private(address))      # a private sheaf is no event of the hub's person
+
+    def _met_private(self, address: str) -> bool:
+        """Whether the name `address` is, or was, a member's private sheaf: judged on the name now, and kept, so the
+        end of it (the file gone, the name held twice) is no more the hub's person's than the rest."""
+        if address not in self._private_docs and place.held_privately(self.hub, address):
+            self._private_docs.add(address)
+        return address in self._private_docs
 
     def _rows(self) -> dict:
         return {d["doc"]: (r["name"], d) for r in self.data(board=True)["roots"] for d in r["docs"]}

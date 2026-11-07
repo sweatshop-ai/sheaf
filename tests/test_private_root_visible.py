@@ -804,6 +804,12 @@ def test_a_private_name_rendered_by_the_persons_hand_is_no_row_and_no_event_of_t
     assert [d for n, d in person.drain() if n == "status"] == []
     names = lambda member: [d["doc"] for r in index.data(member=member)["roots"] for d in r["docs"]]    # noqa: E731
     assert w.address not in names(None) and w.address in names(w.hub.proxy.members[A])
+    (w.two.private_repo / NAME).unlink()                # gone, or held twice: the name is judged by none now
+    index.touch(w.address)
+    index.sweep()
+    (w.two.list_repo / NAME).write_text("# a hand-made twin\n", encoding="utf-8")
+    index.touch(w.address)
+    assert [d for n, d in person.drain() if n == "status"] == []        # nor the end of what they were never shown
 
 
 def test_the_share_copy_is_rendered_from_the_text_the_descriptor_gave(world, mode, monkeypatch):

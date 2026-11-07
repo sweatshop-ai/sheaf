@@ -32,6 +32,14 @@ class Escapes(FileNotFoundError):
         super().__init__(errno.ENOENT, "outside the root, a loop, or not served", rel)
 
 
+class Linked(FileNotFoundError):
+    """A file with more than one name: a hard link can put a private file under a name that no folder's identity
+    judges, so no door opens one (SPEC 9.11). Read as a file that is not there."""
+
+    def __init__(self, rel):
+        super().__init__(errno.ENOENT, "more than one name for the file", rel)
+
+
 OWN = (".sheaf", ".git")          # names no walk goes through, in a path or in the target of a link (SPEC 8.2)
 
 
@@ -84,10 +92,13 @@ class Opened:
     def idents(self) -> list:
         return [*self.dirs, self.file]
 
-    def text(self) -> str:
+    def bytes(self) -> bytes:
         with os.fdopen(os.dup(self.fd), "rb") as f:
             f.seek(0)
-            return f.read().decode("utf-8")
+            return f.read()
+
+    def text(self) -> str:
+        return self.bytes().decode("utf-8")
 
     def write(self, text: str):
         """Replace the file with `text` whole, through the folder descriptor of the walk: a sibling made there and
@@ -224,6 +235,9 @@ def _walk(top, rel: str, meta: bool = False):
                     if not stat.S_ISREG(st.st_mode):
                         os.close(fd)
                         raise OSError(errno.EISDIR, "not a file", name)
+                    if st.st_nlink > 1:
+                        os.close(fd)
+                        raise Linked(rel)
                     parent = os.dup(stack[-1])
                     return fd, (st.st_dev, st.st_ino), seen, parent, name
                 stack.append(fd)
@@ -264,6 +278,9 @@ def open_beneath(top, rel: str, meta: bool = False) -> Opened:
                 if not stat.S_ISREG(st.st_mode):
                     os.close(fd)
                     raise OSError(errno.EISDIR, "not a file", rel)
+                if st.st_nlink > 1:
+                    os.close(fd)
+                    raise Linked(rel)
                 return Opened(fd, (st.st_dev, st.st_ino), _root_dirs(rootfd), None, None, "openat2", top, rel)
         finally:
             os.close(rootfd)

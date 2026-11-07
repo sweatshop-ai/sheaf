@@ -936,11 +936,11 @@ class TheList:
         if not lines or not root.git:
             return {}
         try:
-            f = Path(os.path.realpath(self._file(root, s.rel)))
-            text = f.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+            text, _, private = self._read(root, s.rel)         # the text from one open beneath the root, judged on it
+            f = Path(os.path.realpath(self._file(root, s.rel)))     # git's history of the name: names and dates, no text
+        except (OSError, UnicodeDecodeError, roots_mod.NotFound):
             return {}
-        if md_hash(text) != s.hash:
+        if private is not None or md_hash(text) != s.hash:
             return {}
         return pressers(self.hub.blamed, f, text, lines)
 

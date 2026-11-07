@@ -1,5 +1,6 @@
 """`sheaf token add | list | revoke` (SPEC 9.7, 13). They need no hub: they work on tokens.json,
 and the hub reads that file afresh on every request."""
+from dataclasses import replace
 import json
 import re
 
@@ -17,7 +18,7 @@ def test_add_prints_the_token_once_and_the_hub_knows_it_at_once(sheaf):
     [token] = TOKEN.findall(r.out)
     assert r.out.count(token) == 1
     assert "codex" in r.out and "Codex" in r.out
-    assert Tokens().verify(token) == TokenRow("codex", "Codex", False)
+    assert replace(Tokens().verify(token), id=None) == TokenRow("codex", "Codex", False)
     assert "write" not in r.out                     # a token reads and answers unless told more
 
 
@@ -69,7 +70,7 @@ def test_list_shows_a_row_verify_refuses_and_says_so(sheaf, display):
     assert len(lines) == 3
     assert lines[2].split()[:2] == ["edited", "(invalid)"] and "refused" in lines[2]
     assert "refused" not in lines[0] + lines[1]             # a good row is listed as before
-    assert Tokens().verify(token) == TokenRow("codex", "Codex", False)
+    assert replace(Tokens().verify(token), id=None) == TokenRow("codex", "Codex", False)
 
 
 def test_list_with_no_tokens_says_so(sheaf):
@@ -138,7 +139,7 @@ def test_add_with_write_makes_a_token_that_may_work_on_pages_and_says_so(sheaf):
     r = sheaf("token", "add", "writer", "--write")
     assert r.code == 0 and r.err == ""
     token = TOKEN.search(r.out).group(0)
-    assert Tokens().verify(token) == TokenRow("writer", "writer", True)
+    assert replace(Tokens().verify(token), id=None) == TokenRow("writer", "writer", True)
     assert "may read, make and change pages" in r.out
 
 

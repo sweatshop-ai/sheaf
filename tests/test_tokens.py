@@ -2,6 +2,7 @@
 
 The store is a file the CLI writes and the hub reads, two processes, so every test that checks a
 token builds a second `Tokens` over the same folder where it matters."""
+from dataclasses import replace
 import hashlib
 import json
 import re
@@ -221,8 +222,8 @@ def test_a_file_another_reader_already_moved_aside_leaves_no_failure_row(monkeyp
 
 def test_a_token_writes_pages_only_when_it_was_made_to():
     reader, writer = Tokens().add("codex"), Tokens().add("writer", write=True)
-    assert Tokens().verify(reader) == TokenRow("codex", "codex", False)
-    assert Tokens().verify(writer) == TokenRow("writer", "writer", True)
+    assert replace(Tokens().verify(reader), id=None) == TokenRow("codex", "codex", False)
+    assert replace(Tokens().verify(writer), id=None) == TokenRow("writer", "writer", True)
     rows = {r["name"]: r for r in json.loads(the_file().read_text(encoding="utf-8"))}
     assert rows["codex"]["write"] is False and rows["writer"]["write"] is True
 

@@ -37,6 +37,7 @@ from ..mcp import Caller, Door
 from ..render import RenderError
 from ..source import StaleError, md_hash
 from . import auth, codes, events, peer, place, proxy, relay, the_list, visibility, work
+from . import targets
 from .tell import NO_AGENT, JobRefused
 from .index import Status
 from .live import UNKNOWN, NotAuthor
@@ -257,6 +258,7 @@ class Handler:
             ("POST", "/_/code", "code", MINT, self._code),
             ("POST", "/_/comment", "comment", COOKIE, self._comment),
             ("POST", "/_/tell", "tell", COOKIE, self._tell),
+            ("POST", "/_/target", "target", COOKIE, self._target),
             ("POST", "/_/cancel", "cancel", COOKIE, self._cancel),
             ("POST", "/_/jump", "jump", COOKIE, self._jump),
             ("POST", "/_/seen", "seen", COOKIE, self._seen),
@@ -820,12 +822,14 @@ class Handler:
             self.hub.expire_relayed()
             work, can = self.hub.member_work(e, req.member)
             extra = {} if work is None else {"work": work}
+            agent, can, lines, picks = self.hub.member_target(e.address, req.member, can)
             return _ok(**proxy.for_member(snap), seen=self.hub.member_seen.get(req.member.id, e.address),
-                       question="", target=None, capabilities=can, lines=proxy.member_lines(),
+                       question="", target=agent, targets=picks, capabilities=can, lines=lines,
                        sent=self.hub.box_waits.pending(e.address, e.live.current()[1]), **extra)
         v = self.hub.tell.view(e.address)
         return _ok(**snap, seen=self.hub.seen.get(e.address),
                    question=e.live.session_question(), target=v.agent(),
+                   targets=targets.choices(self.hub, e.address),
                    capabilities=sorted(v.caps), lines=v.lines)
 
     def _mount(self, req: Req) -> Response:
@@ -1614,6 +1618,21 @@ class Handler:
         except JobRefused as r:
             raise Refuse(r.status, r.message) from None
         return _ok()
+
+    def _target(self, req: Req) -> Response:
+        """Change the target of a Tell (SPEC 9.8): `session`, `agent:<token name>` or `none`. A member picks
+        only one of their own agents; the hub account's session is not theirs to take. The answer is the target
+        and what the reader may pick, as /_/doc gives them."""
+        e = self._entry(req, req.body.get("doc"))
+        try:
+            targets.pick(self.hub, e.address, req.member, req.body.get("target"))
+        except targets.Refused as r:
+            raise Refuse(400, str(r)) from None
+        if req.member is not None:
+            can = self.hub.member_work(e, req.member)[1]
+            agent, _, _, picks = self.hub.member_target(e.address, req.member, can)
+            return _ok(target=agent, targets=picks)
+        return _ok(target=self.hub.tell.view(e.address).agent(), targets=targets.choices(self.hub, e.address))
 
     def _jump(self, req: Req) -> Response:
         """Bring the session's terminal forward by the command of config.toml (SPEC 4.3, 8.5). The body

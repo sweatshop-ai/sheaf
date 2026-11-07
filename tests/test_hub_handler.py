@@ -170,7 +170,7 @@ def test_doc_gives_what_a_page_needs_on_load(browser, plan):
     browser.get(URL)
     got = browser.get(f"/_/doc?doc={DOC}").json()
     assert got == {"ok": True, "hash": md_hash(PLAN), "telling": [], "comments": [],
-                   "malformed": [], "seen": {}, "question": "", "target": None,
+                   "malformed": [], "seen": {}, "question": "", "target": None, "targets": [],
                    "capabilities": [], "lines": {"tell": NO_AGENT},
                    "root": browser.hub.roots.get("work").id, "rids": []}
 

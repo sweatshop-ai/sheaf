@@ -194,8 +194,8 @@ def test_a_page_rendered_from_a_claude_code_session_offers_tell_to_it(
         browser, plan, session):
     attach(browser, plan, session.target())
     meta = page_meta(browser.get(URL).text)
-    assert meta["agent"] == {"agent": "claude-code", "display": "Claude", "product": "Claude Code",
-                             "name": "Cosima", "label": "Cosima"}
+    assert meta["agent"] == {"kind": "session", "agent": "claude-code", "display": "Claude",
+                             "product": "Claude Code", "name": "Cosima", "label": "Cosima"}
     assert meta["can"] == ["deliver"]
     assert meta["lines"] == {"tell": None}
 
@@ -296,7 +296,7 @@ def test_a_session_whose_socket_was_not_found_says_that_under_tell(browser, plan
 def test_doc_gives_the_public_part_of_the_target_and_what_it_can_do(browser, plan, session):
     attach(browser, plan, session.target())
     got = browser.get(f"/_/doc?doc={DOC}").json()
-    assert got["target"] == {"agent": "claude-code", "display": "Claude",
+    assert got["target"] == {"kind": "session", "agent": "claude-code", "display": "Claude",
                              "product": "Claude Code", "name": "Cosima", "label": "Cosima"}
     assert got["capabilities"] == ["deliver", "state", "stop"]
     assert got["telling"] == [] and got["question"] == ""

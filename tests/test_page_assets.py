@@ -196,7 +196,7 @@ def test_thread_colours_come_from_the_reply_role_and_no_agent_is_named():
     assert "Claude" not in js
     assert "role === 'answer'" in js and "role === 'action'" in js
     assert "CFG.can" in js
-    assert "Render this page from an agent session to Tell it." in js
+    assert "Render this page from an agent session, or let one of your agents work on it, to Tell it." in js
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")

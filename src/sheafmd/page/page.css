@@ -21,6 +21,8 @@
 #rd-menu button[disabled]{opacity:.4;cursor:default}
 #rd-menu .rd-key{opacity:.55}
 #rd-menu .rd-as{padding:2px 14px 6px;font-size:11px;opacity:.6}
+#rd-menu #rd-targets{padding:0 0 4px 12px}
+#rd-menu #rd-target-change{opacity:.8}
 /* Work on this (SPEC 10.2): where the menu stands, the commands that work on the sheaf's session. */
 #rd-work{position:fixed;right:18px;bottom:74px;z-index:401;width:420px;max-width:calc(100vw - 32px);
  max-height:calc(100vh - 90px);overflow-y:auto;box-sizing:border-box;

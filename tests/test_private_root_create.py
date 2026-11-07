@@ -161,3 +161,14 @@ def test_private_folder_swap_after_a_read_recorded_it_is_refused(two, monkeypatc
     two.private_repo.unlink()
     moved.rename(two.private_repo)
     assert not w.create("tok-a", OWNED_BY_A)[0]            # positive control: the folder back, the same create is made
+
+
+def test_create_by_the_private_folders_path_says_to_use_the_list_name(two):
+    w = World(two)
+    path = str(two.private_repo / NAME)
+    for who in ("tok-a", None):                    # the member, and the key
+        is_error, got = call(w.door, "create", doc=path, text=OWNED_BY_A, **({"token": w.tokens[who]} if who else {}))
+        assert is_error and "cannot be made" in got and place.PRIVATE_PATH in got, got
+        assert "moved" not in got                   # nothing is moved: a create by this path is simply not how it is made
+    w.nothing_written()
+    assert not w.create("tok-a", OWNED_BY_A)[0]     # positive control: the list name, the same text, the same member

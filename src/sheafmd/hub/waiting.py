@@ -115,7 +115,7 @@ class Waiting:
             for address in {t["doc"] for t in rows}:
                 e = self.hub.entries.get(address)
                 try:
-                    got = None if e is None else rdc.parse(e.path.read_text(encoding="utf-8"))
+                    got = None if e is None else rdc.parse(e.read())
                 except Exception:
                     got = None
                 if got is None:

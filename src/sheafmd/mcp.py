@@ -434,11 +434,21 @@ class Door:
             if caller.may_add_roots:
                 if not path.endswith(".md") or not paths.is_file(md):
                     raise ToolError(f"{path} is not an existing .md file.")
-                return roots.address(md)
+                try:
+                    return roots.address(md, alias=lambda root, rel: place.alias(self.hub, root, rel))
+                except NotFound:        # a file of a private root that no list name reaches
+                    raise ToolError(f"{path} cannot be used as a document.") from None
             root = roots.lookup(md)
             if root is None or ((member := self._member(caller)) is not None and not self.hub.owns(member, root)):
                 # a root of another member's is no root to a token bound to one (9.11)
                 raise ToolError("A token cannot add a root, and the hub has no root that holds that file.")
+            if roots.hidden(root):
+                # A private root has no address (rule E): its member's token names the file by the list's name, any
+                # other token, bound to nobody too, is told what it is told of a path in no root.
+                named = place.alias(self.hub, root, Path(os.path.realpath(md)).relative_to(root.path).as_posix())
+                if named is None or getattr(member, "id", None) != self.hub.private_roots[root.id]:
+                    raise ToolError("A token cannot add a root, and the hub has no root that holds that file.")
+                return named
             return str(Address(root.name, Path(os.path.realpath(md)).relative_to(root.path).as_posix()))
         except (OSError, ValueError) as e:
             # The key's caller runs as the hub's account and is told why. A token, held to the roots
@@ -535,7 +545,7 @@ class Door:
                 raise ToolError(f"There is no root named {args['root']}.")
             wanted = [root]
         else:
-            wanted = [r for r in hub.roots.all() if member is None or hub.owns(member, r)]
+            wanted = [r for r in hub.roots.listed() if member is None or hub.owns(member, r)]
         rows, shut = [], []
         in_git = {}                             # (root, real folder) -> whether 8.2 keeps its files from the root
         owned = {}                              # (root, real folder) -> whether its files are the member's (9.11)
@@ -678,8 +688,17 @@ class Door:
                 root = roots.lookup(Path(doc))
                 if root is not None and self._hidden_root(root, caller):
                     root = None     # a root of another member's is none (9.11), before the link's message
+                if root is not None and self.hub.roots.hidden(root):
+                    # A private root has no address (rule E), and a sheaf is not made in it by its path: to anyone
+                    # but its member and the key a path in no root, to them the refusal of a private create (9.11).
+                    if self._judged(caller) and place.in_private(self.hub, os.path.realpath(Path(doc))) not in (
+                            None, getattr(self._member(caller), "id", None)):
+                        raise ToolError(f"{doc} {NOT_IN_A_ROOT}", "path")
+                    raise ToolError(f"{doc} cannot be made: {place.PRIVATE_ROOT}.", "path")
                 rel = Path(doc).relative_to(root.path).as_posix() if root is not None else ""
             except (OSError, ValueError):
+                if not caller.may_add_roots:    # a token is told of a path no root holds as of one a root holds only by its spelling
+                    raise ToolError(f"{doc} {NOT_IN_A_ROOT}", "path") from None
                 raise ToolError(f"{doc} {NOT_IN_A_ROOT} Name it `<root>/<path>`, or by the real "
                                 "path of its folder.", "path") from None
         else:

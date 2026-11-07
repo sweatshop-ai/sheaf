@@ -24,9 +24,10 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 
-def embed_image(path: Path, max_w: int):
+def embed_image(path: Path, max_w: int, read=None):
     """Downscale + base64 into a data: URI. Returns (uri, note) or (None, reason). A file this
-    account cannot reach or read is missing, like one that is not there."""
+    account cannot reach or read is missing, like one that is not there. `read(path)`, when given, gives the file's
+    bytes in place of a read by its path (the hub opens it beneath its root, SPEC 9.11)."""
     if not os.path.exists(path):
         return None, f"not found: {path}"
     mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -35,7 +36,7 @@ def embed_image(path: Path, max_w: int):
     if not mime:
         return None, f"unsupported type: {path.suffix}"
     try:
-        raw, note = path.read_bytes(), ""
+        raw, note = (path.read_bytes() if read is None else read(path)), ""
     except OSError as e:
         return None, f"cannot be read: {path} ({e.strerror})"
     if mime != "image/svg+xml":
@@ -84,7 +85,7 @@ def local_paths(src: str, base: Path):
     return out
 
 
-def process_images(hml, base: Path, max_w: int, log, allow=None):
+def process_images(hml, base: Path, max_w: int, log, allow=None, read=None):
     """Every local <img> of `hml` embedded. `allow(path)`, when given, says which files may be: a
     local image whose file it refuses is left out, element and all, and the log says so, whether
     or not the file exists (proxy mode, SPEC 9.9 "Local images"). A symlink loop is a file that is
@@ -110,7 +111,7 @@ def process_images(hml, base: Path, max_w: int, log, allow=None):
                 log.append(f"  ! image outside this document's root left out: {src}")
                 return ""
         p = next((c for c in found if os.path.isfile(c)), found[0])
-        uri, note = embed_image(Path(os.path.realpath(p)), max_w)
+        uri, note = embed_image(Path(os.path.realpath(p)), max_w, read)
         if not uri:
             return missing(src, note)
         log.append(f"  + embedded {p.name} ({note})")

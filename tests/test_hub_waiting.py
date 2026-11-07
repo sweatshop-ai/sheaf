@@ -72,6 +72,17 @@ def test_a_tell_to_an_agent_waits_is_listed_first_and_ends_on_its_action_reply(b
     assert named(sub.drain(), "tell-done") == [{"id": "c1"}]
 
 
+def test_the_changes_of_the_document_carry_the_tell_that_waits_as_telling(browser, talk):
+    agent_token()
+    target(browser)
+    sub = tab(browser.hub)
+    assert tell(browser).status == 200
+    browser.hub.entry(DOC).live.refresh(force=True)
+    browser.hub.entry(DOC).live.rebuild()
+    got = [d for n, d in sub.drain() if n == "changed"]
+    assert got and got[-1]["telling"] == [{"id": "c1", "to": "ChatGPT (" + browser.hub.person + ")", "state": "queued"}]
+
+
 def test_a_token_that_only_reads_and_answers_comments_can_take_a_tell_and_end_it(browser, talk):
     token = agent_token()                                       # no --write: the right to pages, not to replies
     target(browser)
@@ -111,7 +122,7 @@ def test_revoking_a_token_ends_its_tells_as_cancelled_and_the_page_hears_of_it(b
     Tokens().revoke("ada-chatgpt")
     browser.get(f"/_/doc?doc={DOC}")
     assert named(sub.drain(), "tell-cancelled")[0]["id"] == "c1"
-    assert browser.get(f"/_/doc?doc={DOC}").json()["waits"] == []
+    assert browser.get(f"/_/doc?doc={DOC}").json()["telling"] == []
 
 
 # ── one Tell waits per thread and agent ──────────────────────────────────────
@@ -187,7 +198,7 @@ def test_a_members_tell_waits_for_their_own_agent_only(front, browser, talk, wor
     assert t["by"] == "Bea" and "Please do." in t["message"]
     assert documents(browser, cal) == [] or all("tells" not in d for d in documents(browser, cal))
     assert all("tells" not in d for d in documents(browser, loose))
-    assert front.get(f"/_/doc?doc={DOC}").json()["waits"] == [{"id": "c1", "to": "ChatGPT (Bea)", "state": "seen"}]
+    assert front.get(f"/_/doc?doc={DOC}").json()["telling"] == [{"id": "c1", "to": "ChatGPT (Bea)", "state": "seen"}]
 
 
 def test_a_members_cancel_ends_only_their_own_tell_and_the_hub_persons_cancel_leaves_it(front, browser, talk, work, other):
@@ -334,7 +345,7 @@ def test_a_tell_survives_a_real_restart_of_the_hub_process(work):
         rows = json.loads(got["result"]["content"][0]["text"])
         assert status == 200 and rows[0]["doc"] == DOC and rows[0]["tells"][0]["thread"] == "c1"
         status, page = hub.send("GET", f"/_/doc?doc={DOC}", None, signed_in)
-        assert [(w["id"], w["state"]) for w in page["waits"]] == [("c1", "seen")]
+        assert [(w["id"], w["state"]) for w in page["telling"]] == [("c1", "seen")]
     finally:
         hub.stop()
 

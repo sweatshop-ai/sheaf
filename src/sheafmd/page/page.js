@@ -346,9 +346,15 @@ var create = function (ROOT, CFG, opts) {
   // The Tells that wait for an agent (SPEC 9.8, 10.5): thread id -> {to, state: queued | seen}. They run nothing, so
   // `telling` does not hold them: the thread shows no spinner and no orange dot, and the line has no clock.
   var waits = {};
-  function takeWaits(list) {
+  // The hub's `telling`, `[{id, to, state}]` (SPEC 8.5): `working` and `waiting` are a session's, in `telling`;
+  // `queued` and `seen` an agent's, in `waits`. `keep`: a session's threads already known stay (jobs are only added).
+  function takeTelling(list, keep) {
+    if (!keep) telling = {};
     waits = {};
-    (list || []).forEach(function (w) { waits[w.id] = { to: w.to, state: w.state }; });
+    (list || []).forEach(function (w) {
+      if (w.state === 'queued' || w.state === 'seen') waits[w.id] = { to: w.to, state: w.state };
+      else telling[w.id] = true;
+    });
   }
 
   if (!canSave && !COMMENTS.length && !(CFG.malformed || []).length) {
@@ -1454,8 +1460,9 @@ var create = function (ROOT, CFG, opts) {
   function takeJobs(j, heardBefore) {
     if (!j || j.ok === false) return;
     if (heardBefore !== jobsHeard) return;      // an event came while the answer was out: it is the newer word
-    (j.telling || []).forEach(function (id) { telling[id] = true; });
-    if ('waits' in j) { var had = Object.keys(waits); takeWaits(j.waits); had.concat(Object.keys(waits)).forEach(touched); }
+    var had = Object.keys(waits);
+    takeTelling(j.telling, true);
+    had.concat(Object.keys(waits)).forEach(touched);
     // The drops for James's window the hub still holds open (#115): the line comes back on a new load.
     if (toBox) (j.sent || []).forEach(function (d) {
       if (!byId[d.id]) return;
@@ -1466,7 +1473,7 @@ var create = function (ROOT, CFG, opts) {
     tellQ = j.question || '';
     Object.keys(j.seen || {}).forEach(function (id) { SEEN[id] = Math.max(SEEN[id] || 0, j.seen[id]); });
     reBadge();
-    (j.telling || []).forEach(touched);
+    (j.telling || []).forEach(function (w) { touched(w.id); });
     refresh();
   }
   // A request id for a form's send: random, so that the same words sent twice on purpose are two comments.
@@ -1786,7 +1793,7 @@ var create = function (ROOT, CFG, opts) {
       if (actsOwed && actsOwed.hash === hash) actsOwed.hash = d.hash;
       hash = d.hash;
     }
-    if (d.telling) { telling = {}; d.telling.forEach(function (id) { telling[id] = true; }); }
+    if (d.telling) takeTelling(d.telling);
     Object.keys(anchors).forEach(function (id) {
       var c = byId[id], a = anchors[id];
       if (!c) { forget(id); return; }
@@ -1909,8 +1916,8 @@ var create = function (ROOT, CFG, opts) {
       var c = (j.comments || []).filter(function (x) { return x.id === id; })[0] || byId[id];
       sentBox[id] = { n: ((c && c.replies) || []).length, to: AGENT };
       if (CAN.indexOf('relay-tell') >= 0) sentBox[id].at = whereTo();
-    } else if (j && j.waits) {
-      takeWaits(j.waits);
+    } else if (j && j.telling) {
+      takeTelling(j.telling);
     } else telling[id] = true;
   }
   // The Tell entry of a form: a working button when the agent can be told, a disabled one carrying

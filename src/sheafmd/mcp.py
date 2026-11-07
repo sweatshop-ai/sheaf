@@ -516,12 +516,12 @@ class Door:
         self._open_threads[address] = (key, threads, visibility.front_matter(text))
         return (*self._open_threads[address][1:], st.st_mtime_ns, private)
 
-    def _dot(self, address: str, unread: int, open_: int, asking: set) -> str:
-        """The dot of 8.6, as the index page gives it: `asking` holds the documents an Ask runs on."""
+    def _dot(self, address: str, unread: int, open_: int) -> str:
+        """The dot of 8.6, as the index page gives it."""
         entry = self.hub.entries.get(address)
         if unread or (entry is not None and entry.live.session_question()):
             return "red"
-        if address in asking or self.hub.waiting(address):
+        if self.hub.waiting(address):
             return "orange"
         return "blue" if open_ else "green"
 
@@ -535,7 +535,6 @@ class Door:
             wanted = [root]
         else:
             wanted = [r for r in hub.roots.listed() if member is None or hub.owns(member, r)]
-        asking = {doc for doc, _ in hub.jobs_asking()}
         rows, shut = [], []
         in_git = {}                             # (root, real folder) -> whether 8.2 keeps its files from the root
         owned = {}                              # (root, real folder) -> whether its files are the member's (9.11)
@@ -577,7 +576,7 @@ class Door:
                     continue
                 seen = hub.seen.get(address)
                 unread = sum(1 for cid, n, last in threads if last != hub.person and n > seen.get(cid, 0))
-                dot = self._dot(address, unread, len(threads), asking)
+                dot = self._dot(address, unread, len(threads))
                 rows.append((DOT_ORDER[dot], -mtime, address,
                              {"doc": address, "url": hub.url(address), "path": str(path),
                               "open": len(threads), "unread": unread, "dot": dot}))

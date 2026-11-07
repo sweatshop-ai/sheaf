@@ -303,7 +303,7 @@ def test_the_meta_block_has_none_of_the_hubs_values(tmp_path):
     out = sheafmd.render(doc(tmp_path, "# T\n"), share=False)
     meta = json.loads(re.search(r'<script id="rd-edit-meta" type="application/json">(.*?)</script>', out,
                                 re.S).group(1))
-    for hub_only in ("doc", "token", "boot", "service", "agent", "can", "seen", "md", "ask", "tell"):
+    for hub_only in ("doc", "token", "boot", "service", "agent", "can", "seen", "md", "tell"):
         assert hub_only not in meta
 
 

@@ -208,7 +208,7 @@ def test_a_request_id_sent_with_other_text_is_another_comment(made):
 
 
 # "Send reply" given up, then "Send and resolve" with the same text: the resolve was dropped as `again`.
-@pytest.mark.parametrize("button", [{"resolve": True}, {"ask": True}, {"tell": True}])
+@pytest.mark.parametrize("button", [{"resolve": True}, {"tell": True}])
 def test_a_request_id_sent_again_with_another_button_is_another_write(made, button):
     doc, md, *_ = made(WITH_C1)
     doc.comment("reply", {"id": "c1", "body": "Done"}, "", rid=RID)
@@ -418,6 +418,13 @@ def test_a_told_thread_waits_for_an_action_reply_and_nothing_else(made):
     assert got["telling"] == ["c1"]                               # a reader's reply is not the answer
     rds.update_file(md, lambda t: rdc.reply(t, "c1", "Done.", "Claude", "2026-09-30T10:05", role="action"))
     assert doc.refresh()["telling"] == [] and doc.waiting() == []
+
+
+def test_an_answer_does_not_end_a_tell_wait_unless_its_role_is_action(made):
+    doc, md, rendered, events, _ = made(WITH_C1)
+    doc.await_reply("c1")
+    rds.update_file(md, lambda t: rdc.reply(t, "c1", "Just an answer.", "Claude", "2026-09-30T10:05", role="answer"))
+    assert doc.refresh()["telling"] == ["c1"] and doc.waiting() == ["c1"]
 
 
 def test_waiting_only_follows_an_add_or_a_reply(made):
@@ -665,7 +672,7 @@ def test_a_save_against_a_version_a_page_pinned_merges_after_more_writes_than_th
 def test_a_comment_by_id_from_a_page_that_pinned_its_version_is_written_after_more_writes_than_the_document_keeps(
         made, op, fields):
     """A reply sent from the form that held the reload, among them: the id still names the comment of the
-    text the page holds. So does an Ask or a Tell (`knows`)."""
+    text the page holds. So does a Tell (`knows`)."""
     doc, md, *_ = made(WITH_C1)
     h = rds.md_hash(WITH_C1)
     writes_from_outside(md, doc, 1)
@@ -778,7 +785,7 @@ def test_a_rebuild_renders_the_same_text_again_and_says_the_page_is_not_the_same
     assert snap["hash"] == rds.md_hash(WITH_C1)
 
 
-# ── the product named in the expiry, and an answer written by the agent (SPEC 8.9, 11.2) ──────
+# ── the product named in the expiry, (SPEC 8.9, 11.2) ──────
 
 def test_the_expiry_names_the_product_of_the_session_told(made):
     doc, md, rendered, events, clock = made(WITH_C1)
@@ -799,56 +806,15 @@ def test_nothing_observed_means_nothing_said(made):
     assert events == [] and doc.session_question() == ""
 
 
-def test_an_answer_is_a_reply_by_the_agent_announced_with_the_text_it_was_measured_from(made):
-    doc, md, rendered, events, _ = made(WITH_C1)
-    snap = doc.reply_as("c1", "It is fine.", "Claude", "answer", "ask-done")
-    text = md.read_text(encoding="utf-8")
-    c = rdc.parse(text).by_id("c1")
-    assert [(r.by, r.role, r.text) for r in c.replies] == [("Claude", "answer", "It is fine.")]
-    assert rendered[-1] == text
-    [(name, data)] = events
-    assert name == "ask-done" and data["id"] == "c1"
-    assert data["hash"] == rds.md_hash(text) and data["base"] == rds.md_hash(WITH_C1)
-    assert data["textSame"] is True
-    assert data["comments"][0]["replies"][0]["role"] == "answer"
-    assert snap["hash"] == data["hash"] and snap["base"] == data["base"]
-    assert doc.refresh() is None                          # the watcher has nothing left to announce
-
-
-def test_an_answer_over_text_that_moved_on_says_the_prose_is_not_the_pages(made):
-    """An outside edit the hub has not caught up with: the tabs hold the old text, so the
-    answer must not be adopted by them over it."""
-    doc, md, rendered, events, _ = made(WITH_C1)
-    rds.update_file(md, lambda t: t.replace("First paragraph.", "First, reworded."))
-    doc.reply_as("c1", "It is fine.", "Claude", "answer", "ask-done")
-    [(name, data)] = events
-    assert data["textSame"] is False and data["base"] == rds.md_hash(WITH_C1)
-
-
-def test_an_answer_to_a_thread_that_is_gone_writes_and_says_nothing(made):
-    doc, md, rendered, events, _ = made(WITH_C1)
-    before = md.read_text(encoding="utf-8")
-    with pytest.raises(rdc.AnchorError):
-        doc.reply_as("c9", "x", "Claude", "answer", "ask-done")
-    assert md.read_text(encoding="utf-8") == before and events == []
-
-
-def test_an_answer_does_not_end_a_tell_wait_unless_its_role_is_action(made):
-    doc, md, rendered, events, _ = made(WITH_C1)
-    doc.await_reply("c1")
-    doc.reply_as("c1", "Just an answer.", "Claude", "answer", "ask-done")
-    assert doc.waiting() == ["c1"]
-
-
 def test_announce_publishes_the_snapshot_measured_from_the_text_the_tabs_hold(made):
     doc, md, rendered, events, _ = made()
     held = doc._text
     rds.update_file(md, lambda t: t.replace("First paragraph.", "First, reworded."))
     doc._rerender()
     snap = doc._snapshot(doc._text)
-    sent = doc._announce(snap, held, "ask-done", id="c1")
+    sent = doc._announce(snap, held, "changed", id="c1")
     measured = {"textSame": False, "base": rds.md_hash(held)}
-    assert events == [("ask-done", {**snap, **measured, "id": "c1"})]
+    assert events == [("changed", {**snap, **measured, "id": "c1"})]
     assert sent == {**snap, **measured}                  # the extras are not in it
     assert "id" not in snap and "base" not in snap       # the caller's snapshot is not changed
 

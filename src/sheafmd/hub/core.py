@@ -38,7 +38,7 @@ from . import state
 from . import the_list
 from . import visibility
 from . import work as work_mod
-from .asktell import AskTell
+from .tell import Tell
 from .auth import Auth
 from .commits import Author, Commits
 from .events import Bus
@@ -167,10 +167,10 @@ class Hub:
         self._restart_told_at: float | None = None
         self.tell_wait = config.tell_wait()
         self.versions.prune()
-        # Every Ask and Tell child, and the address a push says it comes from (SPEC 8.10, 11.4).
+        # Every Tell child, and the address a push says it comes from (SPEC 8.10, 11.4).
         self.runner = Jobs()
         self.sender = f"uds:{paths.hub_socket(port)}"
-        self.asktell = AskTell(self)
+        self.tell = Tell(self)
         # Real path of every CONFIGURED private root -> id of the member whose it is: recorded before any validation,
         # whether the root registers or is refused, and never shrunk (`place.in_private`, SPEC 9.11 rule A).
         self._private_paths: dict[str, str] = {}
@@ -620,7 +620,7 @@ class Hub:
         meta["actions"] = self.actions(e, member, text) if h == meta.get("hash") else []
         if member is None:
             meta["seen"] = self.seen.get(e.address)
-            v = self.asktell.view(e.address)
+            v = self.tell.view(e.address)
             meta["agent"], meta["can"], meta["lines"] = v.agent(), v.can(), v.lines
         else:
             meta.update(me=member.name, seen=self.member_seen.get(member.id, e.address),
@@ -675,7 +675,7 @@ class Hub:
 
     def member_work(self, e: Entry, member):
         """The `work` of a member's page (None when it is not a sheaf of the list's root) and its `can`:
-        box-ask and box-tell while the live session runs on the box and `[list]` names a `tell_dir` (10.1).
+        box-tell while the live session runs on the box and `[list]` names a `tell_dir` (10.1).
         The meta block and every /_/doc answer carry both, so a fork seen by the page changes what it offers."""
         st = work_mod.state(self, e.address, e.live.current()[1], member)
         if st is None:
@@ -717,7 +717,7 @@ class Hub:
         return registry.adapter_for(agent, self.sender)
 
     def stop_jobs(self):
-        """Kill every Ask and Tell child's process group, and let the pushes due go out within a bound, then end
+        """Kill every Tell child's process group, and let the pushes due go out within a bound, then end
         the hub's git (a clean stop, SPEC 8.4, 8.11, #95)."""
         self.runner.kill_all()
         self.commits.stop()
@@ -782,7 +782,7 @@ class Hub:
                 e.live.forget()
                 # After that write's own `changed`, which the page takes in first.
                 e.bus.publish("gone", {"doc": address})
-            # An Ask or a Tell still running on a document that is gone: its dot, its
+            # A Tell still running on a document that is gone: its dot, its
             # answer and its wait have nowhere to go, and the name may be taken at once. Also
             # when the registry no longer holds the root (another process forgot it, and this hub
             # reloaded the file): its entries were popped above all the same.
@@ -967,11 +967,7 @@ class Hub:
         telling = []
         for address, e in list(self.entries.items()):
             telling += [[address, cid] for cid in e.live.waiting()]
-        return {"asking": self.jobs_asking(), "telling": telling}
-
-    def jobs_asking(self) -> list:
-        """`[[doc, id], …]` of the Asks that run: what turns a document's dot orange (SPEC 8.6)."""
-        return self.runner.active("ask")
+        return {"telling": telling}
 
     # ── the watcher's step (SPEC 8.9) ────────────────────────────────────────
     def _watch_drops(self):
@@ -1052,7 +1048,7 @@ class Hub:
         stops the pass."""
         for e in list(self.entries.values()):
             try:
-                e.live.expire(self.tell_wait, self.asktell.product(e.address))
+                e.live.expire(self.tell_wait, self.tell.product(e.address))
                 self._observe(e)
                 if not (e.bus.count() or e.live.waiting()):
                     continue
@@ -1118,7 +1114,7 @@ class Hub:
         """What the session told by this document is doing. A failure here is written down and
         never stops the pass."""
         try:
-            self.asktell.observe(e)
+            self.tell.observe(e)
         except Exception as ex:
             diagnostics.record("hub", "session-state-failed", e.address,
                                error=f"{type(ex).__name__}: {ex}")
@@ -1193,7 +1189,7 @@ class Hub:
         self.index_bus.publish("signed-out", {})        # the index pages too: they hold the list
 
     def request_stop(self, reason: str, force: bool = True) -> bool:
-        """Ask the hub to stop. An upgrade stop is taken only while no Ask or Tell runs, unless
+        """Ask the hub to stop. An upgrade stop is taken only while no Tell runs, unless
         `force` (`sheaf restart`: the person's own decision): False when it was refused, and the
         hub goes on. Once an upgrade stop is taken no job starts, so none is killed by it (8.4).
         A stop or a signal that is under way is not turned into an upgrade by a later upgrade stop:
@@ -1237,12 +1233,12 @@ class Hub:
         self._restart_told_at = None
 
     def busy(self) -> bool:
-        """Whether an Ask runs or a Tell waits anywhere (what `GET /_/jobs` lists), or a Tell's
+        """Whether a Tell waits anywhere (what `GET /_/jobs` lists), or a Tell's
         delivery or a stop message is still on its way: a delivery whose wait has ended (the
         reply came first, or the clock gave up) and the stop message of a cancelled Tell have
         no wait to show, and an upgrade stop would kill them half-way (8.4)."""
         j = self.jobs()
-        return bool(j["asking"] or j["telling"]
+        return bool(j["telling"]
                     or self.runner.active("tell") or self.runner.active("stop"))
 
     # ── the diagnostics log, as the hub ──────────────────────────────────────

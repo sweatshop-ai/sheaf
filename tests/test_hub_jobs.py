@@ -1,5 +1,5 @@
-"""The job runner (SPEC 8.10): every Ask and Tell child runs in its own process group, Cancel
-kills that group and nothing else, a timeout kills the group, and a thread has at most one Ask.
+"""The job runner (SPEC 8.10): every Tell child runs in its own process group, Cancel
+kills that group and nothing else, a timeout kills the group, and a thread has at most one Tell.
 
 The children are real processes, small shell scripts of the test's own; the unrelated process
 the tests keep beside them stands for everything else on the machine, which a Cancel must leave
@@ -102,14 +102,14 @@ def test_a_script_runs_while_a_forked_sibling_still_holds_a_write_handle_on_it(j
             assert busy.errno == 26
         else:
             pytest.skip("this kernel runs a file that is open for writing; the race is Linux's")
-        _, done = run_in(jobs, "ask", "c1", lambda job: job.run(sh(child), timeout=10))
+        _, done = run_in(jobs, "tell", "c1", lambda job: job.run(sh(child), timeout=10))
         jobs.join(10)
     assert done[0].stdout == "ran\n"
 
 def test_a_child_runs_in_its_own_process_group_and_its_output_comes_back(jobs, tmp_path):
     pidfile = tmp_path / "pid"
     child = script(tmp_path, f'echo $$ > {pidfile}\necho out\necho err >&2\nexit 3')
-    started, done = run_in(jobs, "ask", "c1", lambda job: job.run(sh(child), timeout=10))
+    started, done = run_in(jobs, "tell", "c1", lambda job: job.run(sh(child), timeout=10))
     jobs.join(10)
     r = done[0]
     assert (r.returncode, r.stdout, r.stderr) == (3, "out\n", "err\n")
@@ -119,7 +119,7 @@ def test_a_child_runs_in_its_own_process_group_and_its_output_comes_back(jobs, t
 def test_the_childs_group_is_its_own_not_the_hubs(jobs, tmp_path):
     seen = tmp_path / "pgid"
     child = script(tmp_path, f'ps -o pgid= -p $$ > {seen}\nsleep 0.2')
-    run_in(jobs, "ask", "c1", lambda job: job.run(sh(child), timeout=10))
+    run_in(jobs, "tell", "c1", lambda job: job.run(sh(child), timeout=10))
     jobs.join(10)
     assert int(seen.read_text()) != os.getpgrp()
 
@@ -127,7 +127,7 @@ def test_the_childs_group_is_its_own_not_the_hubs(jobs, tmp_path):
 def test_a_child_gets_no_input_and_the_environment_and_folder_it_is_given(jobs, tmp_path):
     # the count is unquoted so the shell drops the blanks BSD wc pads it with
     child = script(tmp_path, 'echo "$FOO" "$(pwd)"; echo $(cat | wc -c)')
-    _, done = run_in(jobs, "ask", "c1", lambda job: job.run(
+    _, done = run_in(jobs, "tell", "c1", lambda job: job.run(
         sh(child), timeout=10, env={**os.environ, "FOO": "bar"}, cwd=str(tmp_path)))
     jobs.join(10)
     assert done[0].stdout == f"bar {tmp_path}\n0\n"
@@ -135,14 +135,14 @@ def test_a_child_gets_no_input_and_the_environment_and_folder_it_is_given(jobs, 
 
 def test_the_input_a_child_is_given_reaches_its_stdin_and_never_its_arguments(jobs, tmp_path):
     child = script(tmp_path, 'echo "$#"; cat')
-    _, done = run_in(jobs, "ask", "c1", lambda job: job.run(sh(child), timeout=10, input="private text\n"))
+    _, done = run_in(jobs, "tell", "c1", lambda job: job.run(sh(child), timeout=10, input="private text\n"))
     jobs.join(10)
     assert done[0].stdout == "0\nprivate text\n"
 
 
 def test_a_child_that_never_reads_its_input_does_not_hang_the_job(jobs, tmp_path):
     child = script(tmp_path, "exit 3")
-    _, done = run_in(jobs, "ask", "c1", lambda job: job.run(sh(child), timeout=10, input="x" * 1_000_000))
+    _, done = run_in(jobs, "tell", "c1", lambda job: job.run(sh(child), timeout=10, input="x" * 1_000_000))
     jobs.join(10)
     assert done[0].returncode == 3
 
@@ -154,11 +154,11 @@ def test_cancel_kills_the_childs_whole_group_and_nothing_else(jobs, tmp_path, by
     sibling = tmp_path / "sibling"
     child = script(tmp_path, f'sleep 60 &\necho $! > {other}\necho $$ > {mine}\nwait')
     other_job = script(tmp_path, f'echo $$ > {sibling}\nsleep 60', "other.sh")
-    _, a = run_in(jobs, "ask", "c1", lambda job: job.run(sh(child), timeout=60))
-    _, b = run_in(jobs, "ask", "c2", lambda job: job.run(sh(other_job), timeout=60))
+    _, a = run_in(jobs, "tell", "c1", lambda job: job.run(sh(child), timeout=60))
+    _, b = run_in(jobs, "tell", "c2", lambda job: job.run(sh(other_job), timeout=60))
     child_pid, grandchild_pid = int(wait_for(mine)), int(wait_for(other))
     sibling_pid = int(wait_for(sibling))
-    assert jobs.cancel("ask", "work/plan.md", "c1") is True
+    assert jobs.cancel("tell", "work/plan.md", "c1") is True
     wait_done(a)
     assert a[0].returncode < 0                                 # killed, not finished
     assert wait_dead(child_pid) and wait_dead(grandchild_pid)
@@ -170,10 +170,10 @@ def test_cancel_kills_the_childs_whole_group_and_nothing_else(jobs, tmp_path, by
 def test_cancel_reaches_a_grandchild_that_outlives_its_parent(jobs, tmp_path):
     grand = tmp_path / "grand"
     child = script(tmp_path, f'sleep 60 &\necho $! > {grand}\nexit 0')
-    _, done = run_in(jobs, "ask", "c1", lambda job: job.run(sh(child), timeout=60))
+    _, done = run_in(jobs, "tell", "c1", lambda job: job.run(sh(child), timeout=60))
     gpid = int(wait_for(grand))
     time.sleep(0.2)                                            # the parent has exited by now
-    assert jobs.cancel("ask", "work/plan.md", "c1") is True
+    assert jobs.cancel("tell", "work/plan.md", "c1") is True
     jobs.join(10)
     assert wait_dead(gpid)
 
@@ -181,9 +181,9 @@ def test_cancel_reaches_a_grandchild_that_outlives_its_parent(jobs, tmp_path):
 def test_a_child_that_ignores_sigterm_is_killed_after_the_grace(jobs, tmp_path):
     pidfile = tmp_path / "pid"
     child = script(tmp_path, f'trap "" TERM\necho $$ > {pidfile}\nwhile true; do sleep 0.1; done')
-    _, done = run_in(jobs, "ask", "c1", lambda job: job.run(sh(child), timeout=60))
+    _, done = run_in(jobs, "tell", "c1", lambda job: job.run(sh(child), timeout=60))
     pid = int(wait_for(pidfile))
-    jobs.cancel("ask", "work/plan.md", "c1")
+    jobs.cancel("tell", "work/plan.md", "c1")
     jobs.join(10)
     assert wait_dead(pid)
     assert done[0].returncode == -signal.SIGKILL
@@ -196,13 +196,13 @@ def test_a_cancel_that_comes_before_the_child_starts_stops_it_from_starting(jobs
     def work(job):
         job.cancel()
         return job.run(sh(child), timeout=10)
-    _, done = run_in(jobs, "ask", "c1", work)
+    _, done = run_in(jobs, "tell", "c1", work)
     jobs.join(10)
     assert done[0].returncode < 0 and not marker.exists()
 
 
 def test_cancel_of_a_job_that_is_not_running_says_so(jobs):
-    assert jobs.cancel("ask", "work/plan.md", "nope") is False
+    assert jobs.cancel("tell", "work/plan.md", "nope") is False
 
 
 def test_cancel_names_a_kind_and_never_touches_the_other(jobs, tmp_path):
@@ -210,7 +210,7 @@ def test_cancel_names_a_kind_and_never_touches_the_other(jobs, tmp_path):
     child = script(tmp_path, f'echo $$ > {pidfile}\nsleep 60')
     run_in(jobs, "tell", "c1", lambda job: job.run(sh(child), timeout=60))
     pid = int(wait_for(pidfile))
-    assert jobs.cancel("ask", "work/plan.md", "c1") is False
+    assert jobs.cancel("stop", "work/plan.md", "c1") is False
     assert alive(pid)
     assert jobs.cancel("tell", "work/plan.md", "c1") is True
     jobs.join(10)
@@ -220,9 +220,9 @@ def test_cancel_names_a_kind_and_never_touches_the_other(jobs, tmp_path):
 def test_a_cancel_on_another_document_does_not_touch_this_one(jobs, tmp_path):
     pidfile = tmp_path / "pid"
     child = script(tmp_path, f'echo $$ > {pidfile}\nsleep 60')
-    run_in(jobs, "ask", "c1", lambda job: job.run(sh(child), timeout=60), address="work/a.md")
+    run_in(jobs, "tell", "c1", lambda job: job.run(sh(child), timeout=60), address="work/a.md")
     pid = int(wait_for(pidfile))
-    assert jobs.cancel("ask", "work/b.md", "c1") is False
+    assert jobs.cancel("tell", "work/b.md", "c1") is False
     assert alive(pid)
 
 
@@ -238,7 +238,7 @@ def test_a_timeout_kills_the_whole_group_and_raises(jobs, tmp_path):
             job.run(sh(child), timeout=0.4)
         except subprocess.TimeoutExpired as e:
             errors.append(e)
-    run_in(jobs, "ask", "c1", work)
+    run_in(jobs, "tell", "c1", work)
     gpid = int(wait_for(grand))
     jobs.join(10)
     assert len(errors) == 1 and wait_dead(gpid)
@@ -250,7 +250,7 @@ def test_stopping_the_hub_kills_every_jobs_group(jobs, tmp_path, bystander):
         f = tmp_path / f"pid{n}"
         files.append(f)
         child = script(tmp_path, f'echo $$ > {f}\nsleep 60', f"c{n}.sh")
-        run_in(jobs, "ask" if n % 2 else "tell", f"c{n}", lambda job, c=child: job.run(sh(c), timeout=60))
+        run_in(jobs, "tell", f"c{n}", lambda job, c=child: job.run(sh(c), timeout=60))
     pids = [int(wait_for(f)) for f in files]
     jobs.kill_all()
     jobs.join(10)
@@ -263,7 +263,7 @@ def test_a_hub_stop_returns_only_when_a_child_that_ignores_sigterm_is_dead(jobs,
     after the grace dies with it: a stop that returned on SIGTERM would leave the child running."""
     pidfile = tmp_path / "pid"
     child = script(tmp_path, f'trap "" TERM\necho $$ > {pidfile}\nwhile true; do sleep 0.1; done')
-    _, done = run_in(jobs, "ask", "c1", lambda job: job.run(sh(child), timeout=60))
+    _, done = run_in(jobs, "tell", "c1", lambda job: job.run(sh(child), timeout=60))
     pid = int(wait_for(pidfile))
     started = time.monotonic()
     jobs.kill_all()
@@ -301,7 +301,7 @@ def test_a_cancel_after_the_child_was_reaped_signals_no_group(jobs, tmp_path, mo
     def work(job):
         holder.append(job)
         return job.run(sh(child), timeout=10)
-    _, done = run_in(jobs, "ask", "c1", work)
+    _, done = run_in(jobs, "tell", "c1", work)
     wait_done(done)
     assert done[0].returncode == 0
     assert sent == []
@@ -309,26 +309,12 @@ def test_a_cancel_after_the_child_was_reaped_signals_no_group(jobs, tmp_path, mo
 
 # ── the registry ─────────────────────────────────────────────────────────────
 
-def test_a_thread_has_at_most_one_ask_at_a_time(jobs, tmp_path):
-    pidfile = tmp_path / "pid"
-    child = script(tmp_path, f'echo $$ > {pidfile}\nsleep 60')
-    first, _ = run_in(jobs, "ask", "c1", lambda job: job.run(sh(child), timeout=60))
-    wait_for(pidfile)
-    second, _ = run_in(jobs, "ask", "c1", lambda job: None)
-    other_thread, _ = run_in(jobs, "ask", "c2", lambda job: None)
-    assert first is not None and second is None and other_thread is not None
-    jobs.cancel("ask", "work/plan.md", "c1")
-    jobs.join(10)
-    again, _ = run_in(jobs, "ask", "c1", lambda job: None)
-    assert again is not None
-
-
 def test_a_thread_has_at_most_one_tell_and_a_stop_beside_it(jobs, tmp_path):
     pidfile = tmp_path / "pid"
     child = script(tmp_path, f'echo $$ > {pidfile}\nsleep 60')
     first, _ = run_in(jobs, "tell", "c1", lambda job: job.run(sh(child), timeout=60))
     wait_for(pidfile)
-    assert jobs.running("tell", "work/plan.md", "c1") and not jobs.running("ask", "work/plan.md", "c1")
+    assert jobs.running("tell", "work/plan.md", "c1") and not jobs.running("stop", "work/plan.md", "c1")
     second, _ = run_in(jobs, "tell", "c1", lambda job: None)
     other_thread, _ = run_in(jobs, "tell", "c2", lambda job: None)
     stop, _ = run_in(jobs, "stop", "c1", lambda job: None)
@@ -342,32 +328,32 @@ def test_a_thread_has_at_most_one_tell_and_a_stop_beside_it(jobs, tmp_path):
 def test_the_running_jobs_are_listed_by_kind(jobs, tmp_path):
     pidfile = tmp_path / "pid"
     child = script(tmp_path, f'echo $$ > {pidfile}\nsleep 60')
-    run_in(jobs, "ask", "c1", lambda job: job.run(sh(child), timeout=60), address="work/a.md")
+    run_in(jobs, "tell", "c1", lambda job: job.run(sh(child), timeout=60), address="work/a.md")
     wait_for(pidfile)
-    assert jobs.active("ask") == [["work/a.md", "c1"]]
-    assert jobs.active("tell") == []
-    assert jobs.active("ask", "work/a.md") == ["c1"] and jobs.active("ask", "work/b.md") == []
-    jobs.cancel("ask", "work/a.md", "c1")
+    assert jobs.active("tell") == [["work/a.md", "c1"]]
+    assert jobs.active("stop") == []
+    assert jobs.active("tell", "work/a.md") == ["c1"] and jobs.active("tell", "work/b.md") == []
+    jobs.cancel("tell", "work/a.md", "c1")
     jobs.join(10)
-    assert jobs.active("ask") == []
+    assert jobs.active("tell") == []
 
 
 def test_a_job_that_raises_is_written_down_and_leaves_the_registry(jobs):
     errors = []
-    started = jobs.start("ask", "work/plan.md", "c1", lambda job: 1 / 0,
+    started = jobs.start("tell", "work/plan.md", "c1", lambda job: 1 / 0,
                          on_error=lambda e: errors.append(type(e).__name__))
     jobs.join(10)
     assert started is not None and errors == ["ZeroDivisionError"]
-    assert jobs.active("ask") == []
+    assert jobs.active("tell") == []
     assert [r for r in diagnostics.read() if r["kind"] == "job-failed"]
 
 
 def test_a_job_that_raises_in_its_error_handler_still_leaves_the_registry(jobs):
     def broken(e):
         raise RuntimeError("again")
-    jobs.start("ask", "work/plan.md", "c1", lambda job: 1 / 0, on_error=broken)
+    jobs.start("tell", "work/plan.md", "c1", lambda job: 1 / 0, on_error=broken)
     jobs.join(10)
-    assert jobs.active("ask") == []
+    assert jobs.active("tell") == []
 
 
 def test_a_hold_counts_as_an_active_job_of_its_kind_until_it_is_released(jobs):
@@ -422,8 +408,8 @@ def test_a_job_whose_thread_cannot_start_is_not_left_listed(jobs, monkeypatch):
     with monkeypatch.context() as m:
         m.setattr(threading.Thread, "start", refuse)
         with pytest.raises(RuntimeError):
-            jobs.start("ask", "work/a.md", "c1", lambda job: None)
-    assert jobs.running("ask", "work/a.md", "c1") is False and jobs.active("ask") == []
+            jobs.start("tell", "work/a.md", "c1", lambda job: None)
+    assert jobs.running("tell", "work/a.md", "c1") is False and jobs.active("tell") == []
     jobs.join(1)                                # no thread that never started is waited for
     jobs.kill_all()
-    assert jobs.start("ask", "work/a.md", "c1", lambda job: None) is not None
+    assert jobs.start("tell", "work/a.md", "c1", lambda job: None) is not None

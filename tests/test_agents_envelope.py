@@ -88,17 +88,13 @@ def test_a_drop_as_the_hub_writes_it_today_is_told_with_the_sheaf_and_how_to_ans
         "</cross-session-message>")
 
 
-def test_an_ask_drop_asks_for_an_answer_in_the_thread_and_no_edit(deliver, peer):
-    r = deliver("--socket", peer.path, "--from", SENDER, stdin={**TODAYS_DROP, "kind": "ask"})
-    assert r.code == 0, r.err
-    assert content_of(peer.received()) == (
-        f'<cross-session-message from="{SENDER}" from-name="sheaf" from-mode="prompting">\n'
-        "Ask from sheaf, on the page of acme/site/brief.md.\n"
-        "hans pressed Ask on comment c7: answer it in the thread, short, in the language it was "
-        "written in. Do not edit any file.\n\n"
-        "The comment:\nShorten the intro.\n\n"
-        'Answer with the sheaf MCP tool: reply(doc="acme/site/brief.md", id="c7", text="<your answer>")\n'
-        "</cross-session-message>")
+@pytest.mark.parametrize("extra", [{}, {"message": "Ask from sheaf: answer it"}])
+def test_a_drop_of_kind_ask_is_refused_and_nothing_is_pushed(deliver, peer, extra):
+    """Ask was retired (SPEC 11.2): a drop a hub of before still wrote exits 2, with or without a message."""
+    r = deliver("--socket", peer.path, "--from", SENDER, stdin={**TODAYS_DROP, "kind": "ask", **extra})
+    assert r.code == 2 and "ask" in r.err.lower()
+    time.sleep(0.1)
+    assert peer.accepted == 0
 
 
 @pytest.mark.parametrize("stdin", ["not json", "[]", {"kind": "tell"}, {**TODAYS_DROP, "kind": "other"},

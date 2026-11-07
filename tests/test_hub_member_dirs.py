@@ -104,7 +104,7 @@ def test_without_a_default_tell_dir_a_member_not_in_the_map_can_not_tell(team, w
 def test_the_page_offers_a_tell_by_the_dirs_of_the_member_it_is_for(team, work, mapped):
     cfg_of(team, tell_dir=None)
     assert meta(team, member=HANS)["can"] == []
-    assert meta(team, member=THIERRY)["can"] == ["box-ask", "box-tell"]
+    assert meta(team, member=THIERRY)["can"] == ["box-tell"]
 
 
 def test_a_drop_s_status_is_read_in_the_dir_it_was_written_in(team, work, mapped):

@@ -10,7 +10,7 @@ sheafmd.hub.proxy — proxy mode: the hub behind a front's sign-in, through a Un
     bind(cfg)               the proxy socket, listening; a stale one replaced
     unlink(cfg, made)       the proxy socket removed at a clean exit, if it is still the one made
     peer(conn)              the uid of the process at the other end of a connection
-    member_lines()          the lines under Ask and Tell on a member's page (10.6)
+    member_lines()          the line under Tell on a member's page (10.6)
     for_member(state)       a document's state as a member is told it: no thread told to the session
 
 A `[proxy]` table in config.toml is the one switch (4.3): no flag, no environment variable. Every
@@ -38,23 +38,22 @@ from .auth import clean_display, name_key
 TABLE_KEYS = {"origin": str, "socket": str, "proxy_user": str, "members": dict}
 MEMBER_KEYS = {"name": str, "roots": list}
 STREAM_SECONDS = 300            # a stream of the proxy socket is closed after this (9.9 "The credential")
-# The only events a member's document stream is sent: the document's changes (an Ask's answer is
-# one), the hub's stop, and `gone` when its root is forgotten, which names only the address the stream
+# The only events a member's document stream is sent: the document's changes, the hub's stop, and `gone` when its root is forgotten, which names only the address the stream
 # was opened on, a member's Tell that its fork's relay will not deliver (9.14), and what became of a drop for
 # James's window: its supervisor's word on it (9.15), and its failure or no answer within the Tell wait (9.12), and
 # `relay` when a fork's relay connects or is gone (9.14). Never a job of the hub account's agent session, nor
 # `signed-out` (9.9).
-DOCUMENT_EVENTS = ("hello", "changed", "ask-done", "hub-stopping", "gone", "tell-relay-failed", "box-failed",
+DOCUMENT_EVENTS = ("hello", "changed", "hub-stopping", "gone", "tell-relay-failed", "box-failed",
                    "box-status", "relay")
-PROXY_LINE = "Ask and Tell work only on the machine that runs the hub."     # 10.6
+PROXY_LINE = "Tell works only on the machine that runs the hub."     # 10.6
 NO_DOCUMENTS = "This account has no documents on this hub."
 FOLDER_MODE = 0o2750            # the socket's folder: the hub's account, the proxy's group, setgid
 SOCKET_MODE = 0o660
 
 
 def member_lines() -> dict:
-    """What the page shows under its Ask and Tell buttons for a member (10.6)."""
-    return {"ask": PROXY_LINE, "tell": PROXY_LINE}
+    """What the page shows under its Tell button for a member (10.6)."""
+    return {"tell": PROXY_LINE}
 
 
 def for_member(state: dict) -> dict:

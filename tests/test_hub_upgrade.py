@@ -395,16 +395,16 @@ def thread_hub(port, work):
 
 def test_a_newer_command_with_a_job_running_says_so_and_uses_the_running_hub(port, thread_hub):
     hub = thread_hub(OLD)
-    hub.jobs = lambda: {"asking": [], "telling": [["work/plan.md", "c1"]]}
+    hub.jobs = lambda: {"telling": [["work/plan.md", "c1"]]}
     out, err = [], []
     c, started = hubclient.ensure_hub("cli", out.append, err.append)
-    assert err == [f"  ! the hub runs {OLD} and an Ask or Tell is running; this is {__version__}. "
+    assert err == [f"  ! the hub runs {OLD} and a Tell is running; this is {__version__}. "
                    "Run sheaf restart when it is done."]
     assert started is False and c.challenge()["boot"] == hub.boot
     assert not hub.stop_requested
 
 
-def test_an_ask_that_starts_between_the_idle_check_and_the_stop_is_not_killed_by_the_upgrade(
+def test_a_tell_that_starts_between_the_idle_check_and_the_stop_is_not_killed_by_the_upgrade(
         port, thread_hub):
     hub = thread_hub(OLD)
     asked = []
@@ -412,11 +412,11 @@ def test_an_ask_that_starts_between_the_idle_check_and_the_stop_is_not_killed_by
     def jobs():                          # idle when the command looks, busy when it posts the stop
         asked.append(1)
         busy = len(asked) > 1
-        return {"asking": [["work/plan.md", "c1"]] if busy else [], "telling": []}
+        return {"telling": [["work/plan.md", "c1"]] if busy else []}
     hub.jobs = jobs
     out, err = [], []
     c, started = hubclient.ensure_hub("cli", out.append, err.append)
-    assert err == [f"  ! the hub runs {OLD} and an Ask or Tell is running; this is {__version__}. "
+    assert err == [f"  ! the hub runs {OLD} and a Tell is running; this is {__version__}. "
                    "Run sheaf restart when it is done."]
     assert started is False and c.challenge()["boot"] == hub.boot
     assert not hub.stop_requested

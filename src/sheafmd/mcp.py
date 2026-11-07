@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from . import __version__, paths
+from . import __version__, beneath, paths
 from . import comments as rdc
 from .agents import detect
 from .hub.auth import clean_display
@@ -33,7 +33,8 @@ from .hub.roots import Address, NotFound, address_of_url, in_git_dir
 from .hub import place, targets, visibility
 from .hub.state import TokenRow
 from .render import COMMENT_RE as HTML_COMMENT_RE, strip_comments
-from .source import check_create, create_file, md_hash, now, update_file
+from .beneath import Private
+from .source import check_create, create_file, md_hash, now, update_beneath
 
 PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")
 INSTRUCTIONS = (
@@ -380,7 +381,17 @@ class Door:
         the key, a token bound to nobody, and every caller in loopback mode."""
         return self.hub.proxy.member_of_token(caller.token.name) if self._judged(caller) else None
 
-    def _sees(self, fm: dict, address: str, caller: Caller, owns: bool | None = None) -> bool:
+    def _open(self, address: str):
+        """The file of `address` opened beneath its root, the one open of the door (`sheafmd.beneath`): NotFound for
+        what is not a file below it. What is judged is `place.opened_private` of this, and what is read is it."""
+        root, rel = self.hub.roots.locate(address)
+        try:
+            return beneath.open_beneath(root.path, rel)
+        except OSError:
+            raise NotFound(address) from None
+
+    def _sees(self, fm: dict, address: str, caller: Caller, owns: bool | None = None,
+              opened=place.UNJUDGED) -> bool:
         """Whether `caller` may see the sheaf at `address` whose front matter is `fm` (9.11). In proxy mode a
         token acts for the member whose `tokens` name it and sees what that member sees, in that member's
         roots only; a token bound to nobody sees every root (9.7) and no sheaf that is its owner's alone. The
@@ -394,13 +405,14 @@ class Door:
         if member is not None and not owns:
             return False
         if member is None:
-            return visibility.effective(fm) == "project"
-        return self.hub.may_open(member, address, fm)        # projects.toml grants a bound token's member (8.12)
+            # rule A: no file of a private root is any unbound token's, whatever its front matter says
+            return visibility.effective(fm) == "project" and place.private_member(self.hub, address, fm, opened) is None
+        return self.hub.may_open(member, address, fm, opened)        # projects.toml grants a bound token's member (8.12)
 
-    def _seen(self, text: str, address: str, caller: Caller, doc: str) -> str:
+    def _seen(self, text: str, address: str, caller: Caller, doc: str, opened=place.UNJUDGED) -> str:
         """`text`, the text of the document at `address`, when `caller` may see it; else the answer to a
-        `doc` that names no document."""
-        if not self._sees(visibility.front_matter(text), address, caller):
+        `doc` that names no document. `opened`: what `place.opened_private` gave for the file `text` was read from."""
+        if not self._sees(visibility.front_matter(text), address, caller, opened=opened):
             raise _absent(doc)
         return text
 
@@ -438,11 +450,11 @@ class Door:
         """The comments of the document as the file is now, not as a page was rendered. `doc` is how the
         caller named it, for the answer to one it may not see. Under the name's lock (9.11), as every read."""
         try:
-            with place.held(self.hub, address):
-                text = self.hub.roots.document(address).read_text(encoding="utf-8")
+            with place.held(self.hub, address), self._open(address) as op:
+                text, private = op.text(), place.opened_private(self.hub, op)
         except (OSError, UnicodeDecodeError, NotFound):
             raise _unreadable(address) from None
-        return rdc.parse(self._seen(text, address, caller, doc))
+        return rdc.parse(self._seen(text, address, caller, doc, private))
 
     def _comment(self, address: str, cid: str, caller: Caller, doc: str):
         c = self._comments(address, caller, doc).by_id(cid)
@@ -457,17 +469,24 @@ class Door:
         again on the file under its lock, so a sheaf that closed since the check takes nothing. Both
         under the lock of the sheaf's name (9.11), the file found again under it, so no move comes
         between finding the file and writing it."""
-        def guard(t):
-            self._seen(t, address, caller, doc)
+        def guard(t, op=None):
+            if op is None:                  # a page's own write reads the file by its path: the text must be the one
+                with self._open(address) as seen:     # the file now opened beneath its root holds (9.11)
+                    if seen.text() != t:
+                        raise OSError(f"{address} is not the file that was opened")
+                    return self._seen(t, address, caller, doc, place.opened_private(self.hub, seen))
+            self._seen(t, address, caller, doc, place.opened_private(self.hub, op))
         try:
             with place.held(self.hub, address):
-                entry = self.hub.entries.get(address)
+                # Through `Hub.entry` when the hub holds a page, which drops one bound to a root that no longer holds the file.
+                entry = self.hub.entry(address) if address in self.hub.entries else None
                 if entry is not None:
                     wrote = entry.live.comment(op, fields, None, by=caller.display, role=role, announce=True,
                                                guard=guard)["wrote"]
                 else:
-                    old, new = update_file(self.hub.roots.document(address),
-                                           lambda t: rdc.apply_op(guard(t) or t, op, fields, caller.display, now(), role))
+                    top, rel = self.hub.roots.locate(address)
+                    old, new = update_beneath(top.path, rel, lambda t, o: rdc.apply_op(
+                        guard(t, o) or t, op, fields, caller.display, now(), role))
                     wrote = new != old
                 if wrote:                               # a write that changed nothing commits nothing (8.11)
                     self.hub.committed(address, by=caller.display, what="comment")     # under the lock, as every write's
@@ -477,22 +496,26 @@ class Door:
             raise ToolError(f"{address} could not be written.") from None
 
     # ── the tools ────────────────────────────────────────────────────────────
-    def _open_in(self, path: Path) -> tuple:
-        """(open threads, front matter) of the file at `path`, both from one read."""
-        st = path.stat()
-        key = (st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
-        cached = self._open_threads.get(path)
-        if cached and cached[0] == key:
-            return cached[1:]
-        text = path.read_text(encoding="utf-8")
+    def _open_in(self, address: str) -> tuple:
+        """(open threads, front matter, mtime_ns, the member whose private root holds it) of the file the sheaf at `address`
+        names, from one open beneath its root: all of it is of that descriptor (9.11)."""
+        top, rel = self.hub.where(address)
+        with beneath.open_beneath(top, rel) as op:
+            st = os.fstat(op.fd)
+            private = place.opened_private(self.hub, op)
+            key = (st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
+            cached = self._open_threads.get(address)
+            if cached and cached[0] == key:
+                return (*cached[1:], st.st_mtime_ns, private)
+            text = op.text()
         threads = []
         if "comment id=" in text:
             for c in rdc.parse(text).comments:
                 if c.status == "open":
                     last = c.display(c.replies[-1]) if c.replies else c.by
                     threads.append((c.id, 1 + len(c.replies), last))
-        self._open_threads[path] = (key, threads, visibility.front_matter(text))
-        return self._open_threads[path][1:]
+        self._open_threads[address] = (key, threads, visibility.front_matter(text))
+        return (*self._open_threads[address][1:], st.st_mtime_ns, private)
 
     def _dot(self, address: str, unread: int, open_: int) -> str:
         """The dot of 8.6, as the index page gives it."""
@@ -541,15 +564,14 @@ class Door:
                             in_git[folder] = in_git_dir(path, root)
                         if in_git[folder]:
                             continue                               # nor one in a git directory
-                        threads, fm = self._open_in(path)
-                        mtime = path.stat().st_mtime_ns
+                        threads, fm, mtime, private = self._open_in(address)
                     except (NotFound, OSError, UnicodeDecodeError):
                         continue
                 # Whether the member owns a file asks git of its folder (8.2), and every file of a folder has the
                 # same answer: asked once a folder, not once a file.
                 if member is not None and folder not in owned:
                     owned[folder] = hub.member_owns(member, address)
-                if not self._sees(fm, address, caller, owned.get(folder)):
+                if not self._sees(fm, address, caller, owned.get(folder), private):
                     continue                                   # nor a sheaf the caller may not see (9.11)
                 if args.get("open_only", True) and not threads:
                     continue
@@ -594,11 +616,11 @@ class Door:
     def _read(self, args: dict, caller: Caller):
         address = self._address(args["doc"], caller)
         try:
-            with place.held(self.hub, address):         # no move between finding the file and reading it (9.11)
-                text = self.hub.roots.document(address).read_text(encoding="utf-8")
+            with place.held(self.hub, address), self._open(address) as op:     # no move between finding the file and reading it (9.11)
+                text, private = op.text(), place.opened_private(self.hub, op)
         except (OSError, UnicodeDecodeError, NotFound):
             raise _unreadable(address) from None
-        out = self._seen(text, address, caller, args["doc"])
+        out = self._seen(text, address, caller, args["doc"], private)
         if not args.get("comments", True):
             out = strip_comments(text)
             if "<!--" in out:
@@ -672,18 +694,25 @@ class Door:
                             "empty, `..` or a hidden name.", "path")
         if in_git_dir(root.path / rel, root):
             raise ToolError(f"{doc} {NOT_IN_A_ROOT}", "path")
+        if self._judged(caller) and place.in_private(self.hub, os.path.realpath(root.path / rel)) not in (
+                None, getattr(self._member(caller), "id", None)):
+            raise ToolError(f"{doc} {NOT_IN_A_ROOT}", "path")     # a private root is its member's alone (9.11): no probe, no write
         return root, rel
 
     def _create(self, args: dict, caller: Caller):
         root, rel = self._new_address(args["doc"], caller)
         address, text = str(Address(root.name, rel)), _as_read(args["text"])
-        if (member := self._member(caller)) is not None and not self.hub.member_owns(member, address):
-            raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path")     # a root of another member's
+        if (member := self._member(caller)) is not None and not (
+                self.hub.owns(member, root) and self.hub.roots.lookup(root.path / rel) == root):
+            # A root of another member's. Root ownership alone, not rule A: `_new_address` already refused a real path
+            # inside a private root, and a list name a private root holds falls to `place.taken` below, as a shared one.
+            raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path")
         placed = place.applies(self.hub, root.name)
         if placed and place.names_private(rel):
             raise ToolError(f"{_named(args['doc'])} cannot be made: the hub places owner-only sheaves itself: name "
                             "`<client>/<project>/<name>.md`.", "path")
-        if member is not None and not self.hub.granted(member, address):
+        held = place.in_private(self.hub, os.path.realpath(self.hub.file(address))) is not None
+        if member is not None and not self.hub.granted(member, address, by_name=held):
             raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path")     # a project not theirs (8.12)
         self._check_size(text)
         _check_comments("", text)
@@ -692,7 +721,10 @@ class Door:
         # The name's lock (9.11) from the first look at its homes to the file made: a create of the same name, or a
         # move, that comes meanwhile waits, and then finds the name taken.
         with place.held(self.hub, address):
-            text = self._make(root, top, rel, name, address, text, caller)
+            try:
+                text = self._make(root, top, rel, name, address, text, caller)
+            except Private:         # the root's folder, as opened, is a private root's: answered as a path in no root
+                raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path") from None
             self.hub.wrote(address)
             self.hub.committed(address, by=caller.display, what="create")
         self._agent_wrote(address, caller)
@@ -701,15 +733,18 @@ class Door:
     def _make(self, root, top: Path, rel: str, name: str | None, address: str, text: str, caller: Caller):
         """The file of a create, at its home when the hub places it (9.11): the text written. The sheaf's address is
         its name wherever its file is."""
+        judge = place.judge_for(self.hub, root)
         try:
             # The owner is judged by the list's row for the address, which a sheaf already there may have: what
             # the path alone answers, walked as the write walks it, comes before every answer that judgement
             # shapes (the refusal, the size with the owner line), so none tells what is there, nor what a link
             # on the way points to.
-            check_create(top, rel)
+            check_create(top, rel, judge)
             # A sheaf's name is taken by its file at home and at every private home (9.11), whoever's it is.
             if name is not None and place.taken(self.hub, root, name):
                 raise FileExistsError(errno.EEXIST, "File exists", rel)
+        except Private:
+            raise
         except OSError as e:
             raise _not_made(address, e) from None
         # Every create, open or not, tells the list its address has no file now: the row of a sheaf that went
@@ -733,10 +768,12 @@ class Door:
         try:
             if name is not None and rel != name:        # the private folders, walked as create_file walks
                 with place.folders_lock(top, name):     # so no move's tidying takes them before the file is in
-                    os.close(place.make_folders(top, rel)[0])
-                    create_file(top, rel, text)
+                    os.close(place.make_folders(top, rel, judge)[0])
+                    create_file(top, rel, text, judge)
             else:
-                create_file(top, rel, text)
+                create_file(top, rel, text, judge)
+        except Private:
+            raise
         except OSError as e:
             raise _not_made(address, e) from None
         return text
@@ -770,10 +807,10 @@ class Door:
         so the caller commits it whatever comes after."""
         written = [text]
 
-        def change(now_text):
+        def change(now_text, opened):
             # Each check on the file as it is, under its lock; a sheaf the caller may not see first, so a
-            # wrong hash does not tell it from no document (9.11).
-            self._seen(now_text, address, caller, args["doc"])
+            # wrong hash does not tell it from no document (9.11). Judged on the file this open holds.
+            self._seen(now_text, address, caller, args["doc"], place.opened_private(self.hub, opened))
             if md_hash(now_text) != expected:
                 raise Stale(f"{address} has changed since that hash was read; read it again, make the "
                             "change on that text and send it with its hash.")
@@ -795,7 +832,8 @@ class Door:
             moved.append(gone)
             return self.hub.file(address, placed=True)
         try:
-            before, _ = update_file(self.hub.roots.document(address), change, move=move)
+            top, rel = self.hub.roots.locate(address)
+            before, _ = update_beneath(top.path, rel, change, move=move)
         except (OSError, UnicodeDecodeError, NotFound):
             raise ToolError(f"{address} could not be written.", "not written") from None
         text = written[0]

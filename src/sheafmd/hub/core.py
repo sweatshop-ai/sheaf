@@ -144,7 +144,10 @@ class Hub:
         self.runner = Jobs()
         self.sender = f"uds:{paths.hub_socket(port)}"
         self.asktell = AskTell(self)
-        self._private_paths: dict[str, str] = {}   # real path of a private root -> id of the member whose it is
+        # Real path of every CONFIGURED private root -> id of the member whose it is: recorded before any validation,
+        # whether the root registers or is refused, and never shrunk (`place.in_private`, SPEC 9.11 rule A).
+        self._private_paths: dict[str, str] = {}
+        self._private_good: set[str] = set()       # those that registered: placement only, never privacy
         self._register_private_roots()
         self.commits.seed(self.roots.all())      # the rewrite guard's first pull is guarded, not free
 
@@ -152,7 +155,7 @@ class Hub:
     def private_roots(self) -> dict[str, str]:
         """Root id -> id of the member whose private root it is; empty without one. Judged by the root's real path,
         not by its id: a root forgotten and registered again has a new id and is still private."""
-        return {r.id: self._private_paths[str(r.path)] for r in self.roots.all() if str(r.path) in self._private_paths}
+        return {r.id: self._private_paths[str(r.path)] for r in self.roots.all() if str(r.path) in self._private_good}
 
     def _register_private_roots(self):
         """Register the private root of each member that has one, as the list's root is registered. A folder that
@@ -163,6 +166,7 @@ class Hub:
             if not m.private_root:
                 continue
             folder = Path(os.path.realpath(m.private_root))
+            self._private_paths[str(folder)] = m.id     # before the checks below: a refused root is as private as any
             root = None
             if folder.is_dir() and proxy_mod.git_top(str(folder)).casefold() == str(folder).casefold():
                 root = self.roots.for_document(folder / projects.FILE)
@@ -170,7 +174,7 @@ class Hub:
                 self.record("private-root-refused", None, member=m.id,
                             error="the private root is not the top folder of a git work tree")
                 continue
-            self._private_paths[str(folder)] = m.id
+            self._private_good.add(str(folder))
 
     # ── documents ────────────────────────────────────────────────────────────
     def _versions_of(self, root) -> state.Versions:

@@ -927,7 +927,7 @@ class Hub:
                 rel = rel.as_posix()
                 # The list knows a sheaf by its name (9.11), wherever its file is.
                 address = f"{root.name}/{(place.logical(rel) if placed else None) or rel}"
-            except ValueError:
+            except (ValueError, roots_mod.NotFound):     # a file that cannot be decided (rule B) renames nothing
                 pass
         return self.the_list.assignees(address, visibility.text(fm, "issue"))
 

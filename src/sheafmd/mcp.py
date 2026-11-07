@@ -699,7 +699,10 @@ class Door:
         if placed and place.names_private(rel):
             raise ToolError(f"{_named(args['doc'])} cannot be made: the hub places owner-only sheaves itself: name "
                             "`<client>/<project>/<name>.md`.", "path")
-        held = place.in_private(self.hub, os.path.realpath(self.hub.file(address))) is not None
+        try:
+            held = place.in_private(self.hub, os.path.realpath(self.hub.file(address))) is not None
+        except NotFound:          # a name two roots hold, or a private root that cannot be looked at (rule B)
+            raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path") from None
         if member is not None and not self.hub.granted(member, address, by_name=held):
             raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path")     # a project not theirs (8.12)
         self._check_size(text)

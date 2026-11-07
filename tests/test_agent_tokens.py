@@ -11,6 +11,7 @@ import sheafmd.comments as rdc
 from helpers import BEA, FRONT, comment, ok
 from sheafmd import paths
 from sheafmd.hub import proxy
+from sheafmd.hub.auth import CLIENT_MAX
 from sheafmd.hub.state import TokenError, Tokens
 
 DOC = "work/plan.md"
@@ -90,13 +91,13 @@ def test_the_row_of_an_agent_stores_the_client_and_no_display(work):
     assert row["client"] == "ChatGPT" and "display" not in row and row["write"] is False
 
 
-@pytest.mark.parametrize("given,kept", [("  Chat   GPT ", "Chat GPT"), ("Claude\x07", "Claude"), ("x" * 40, "x" * 40)])
+@pytest.mark.parametrize("given,kept", [("  Chat   GPT ", "Chat GPT"), ("Claude\x07", "Claude"), ("x" * CLIENT_MAX, "x" * CLIENT_MAX)])
 def test_the_client_is_cleaned_by_the_display_name_rule(given, kept):
     Tokens().add("t", client=given)
     assert stored()[0]["client"] == kept
 
 
-@pytest.mark.parametrize("given", ["", "  ", "\x00", "x" * 41, "Chat(GPT)", "Chat)", "(", "é" * 41])
+@pytest.mark.parametrize("given", ["", "  ", "\x00", "x" * (CLIENT_MAX + 1), "Chat(GPT)", "Chat)", "(", "é" * (CLIENT_MAX + 1)])
 def test_a_client_that_is_empty_too_long_or_holds_a_parenthesis_is_refused(given):
     with pytest.raises(TokenError, match="client"):
         Tokens().add("t", client=given)
@@ -115,7 +116,7 @@ def test_a_row_with_neither_display_nor_client_loads_and_is_listed_as_invalid(br
     assert row.name == "bare" and row.display is None and row.client is None and row.invalid
 
 
-def test_a_hub_of_the_previous_code_refuses_an_agents_row_rather_than_misreading_it():
+def test_an_agents_row_has_no_display_which_the_previous_reader_requires_so_it_refuses_it():
     """The old reader wants a `display` of every row; an agent's has none, so it answers 401, never a wrong name."""
     token = Tokens().add("t", client="ChatGPT")
     row = stored()[0]

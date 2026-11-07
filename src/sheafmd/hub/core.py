@@ -403,7 +403,8 @@ class Hub:
         e = self.entries.get(address)
         if e is not None and self.private_roots:
             got = place.where_is(self, address)
-            if got is not None and got[0].id != e.file_root:
+            if got is not None and got[0].id != e.file_root \
+                    and not place.undecided(self, roots_mod.Address.parse(address).rel):     # as `_entry`: kept, so the commit raises
                 with self._lock:
                     if self.entries.get(address) is e:
                         del self.entries[address]

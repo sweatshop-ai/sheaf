@@ -779,7 +779,11 @@ class TheList:
                     except (OSError, UnicodeDecodeError, roots_mod.NotFound):
                         sheaf = row.sheaf
                     if not _same_issue(sheaf.issue, row.sheaf.issue):
-                        self._take_off({row.file, os.path.realpath(self._file(root, a.rel))}, {a.rel}, sheaf.issue)
+                        try:
+                            real = os.path.realpath(self._file(root, a.rel))
+                        except roots_mod.NotFound:          # a name two roots hold: the row's own file goes
+                            real = row.file
+                        self._take_off({row.file, real}, {a.rel}, sheaf.issue)
                         return
                     row.sheaf = sheaf
                     self._answered[a.rel] = row.record.updated

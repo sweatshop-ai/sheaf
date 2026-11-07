@@ -4,11 +4,11 @@ on the same route."""
 import subprocess
 
 import pytest
-from helpers import Front, browser_on
+from helpers import Front, browser_on, hub_rows
 from test_hub_list import TOKEN, FakeGitHub, ago, read, row_press
-from two_roots import A, B, TwoRoots, git, two_roots
+from two_roots import A, B, TwoRoots, git, repo_with_remote, two_roots
 
-from sheafmd.hub import the_list
+from sheafmd.hub import proxy, the_list
 from sheafmd.source import md_hash
 
 NAME = "acme/blog/post.md"
@@ -146,3 +146,59 @@ def test_list_row_of_private_file_judged_on_the_file_read(two, monkeypatch):
         assert len(read(w.front.get(f"/{w.root.name}?show=all", member=A))["Waiting on you 1"][ROW]) == 1
     finally:
         w.github.close()
+
+
+def test_list_name_in_two_private_roots_no_row_no_tick(tmp_path):
+    """One name in the private roots of A and of B: a row in neither, no title or tick of one reaches the other, and a
+    tick commits nowhere. The control: with B's file gone, A's row is back and A's tick lands in A's repo only."""
+    two = two_roots(tmp_path)
+    other = repo_with_remote(tmp_path, "private-b")
+    table = two.table(b={"short": "b", "roots": [str(two.list_repo), str(other)], "private_root": str(other)})
+    github = FakeGitHub()
+    github.issues = {1: {"status": "Waiting on member", "assignees": ["login-a", "login-b"], "updated": ago(3600)}}
+    (tmp_path / "token").write_text(TOKEN + "\n", encoding="utf-8")
+    table["members"][A]["github"], table["members"][B]["github"] = "login-a", "login-b"
+    hub = two.hub(proxy.parse(table, "the test", two.list_table()))
+    hub.the_list = the_list.TheList(hub, the_list.parse(
+        {"root": str(two.list_repo), "repo": "acme/record", "project": 1, "token_file": str(tmp_path / "token"),
+         "api": github.url}, "the test"))
+    try:
+        for repo in (two.list_repo, two.private_repo, other):
+            (repo / "acme/blog").mkdir(parents=True, exist_ok=True)
+        (two.list_repo / "projects.toml").write_text('[projects."acme/blog"]\nmembers = ["a", "b"]\nstatus = "live"\n',
+                                                     encoding="utf-8")
+        mine, theirs = TEXT, TEXT.replace("# Post", "# Theirs").replace("Secret", "Hidden")
+        (two.private_repo / NAME).write_text(mine, encoding="utf-8")
+        (other / NAME).write_text(theirs, encoding="utf-8")
+        for repo in (two.private_repo, other):
+            git(repo, "add", "-A"), git(repo, "commit", "-q", "-m", "post")
+        front = Front(hub, browser_on(hub).handler)
+        address = f"{hub.the_list.root().name}/{NAME}"
+
+        def shown(member):
+            hub.the_list.poll()
+            return front.get(f"/{hub.the_list.root().name}?show=all", member=member)
+
+        heads = lambda: tuple(git(r, "rev-parse", "HEAD").strip() for r in (two.list_repo, two.private_repo, other))
+        for member in (A, B):
+            page = shown(member)
+            assert "Post" not in page.body.decode() and "Theirs" not in page.body.decode()
+        refused = [r for r in hub_rows("place-refused") if r["doc"].endswith(NAME)]
+        assert refused and "held by 2 files" in refused[0]["why"]
+        before = heads()
+        for member, text in ((A, mine), (B, theirs)):
+            body = {"doc": address, "action": 0, "word": "Approve", "hash": md_hash(text)}
+            assert front.request("POST", "/_/tick", member=member, body=body).status != 200
+        assert heads() == before
+        assert (two.private_repo / NAME).read_text(encoding="utf-8") == mine
+        assert (other / NAME).read_text(encoding="utf-8") == theirs
+        assert not (two.list_repo / NAME).exists()
+        (other / NAME).unlink()
+        shown(A)
+        assert "Post" in shown(A).body.decode() and "Theirs" not in shown(A).body.decode()
+        assert "Post" not in shown(B).body.decode()
+        press = row_press(front.get(f"/{hub.the_list.root().name}", member=A), address)
+        assert front.request("POST", "/_/tick", member=A, body=press).status == 200
+        assert heads()[0] == before[0] and heads()[1] != before[1]
+    finally:
+        github.close()

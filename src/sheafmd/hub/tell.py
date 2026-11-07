@@ -23,6 +23,7 @@ from ..agents import prompts
 from ..agents.base import Adapter, DeliveryCancelled, DeliveryError, Target
 from . import roots as roots_mod
 from . import targets
+from . import waiting as waiting_mod
 from .auth import clean_display
 from .live import BY_ID
 
@@ -331,6 +332,9 @@ class Tell:
         self._version(e, held)
         v = self.view(address)
         self._require(v)
+        if v.shape is not None:                      # an agent: the Tell waits for it (9.8)
+            self._thread(e, cid)
+            return self.queue_agent(address, cid)
         # Before the wait is touched: a second Tell must leave the first one's as it is.
         if self.hub.runner.running("tell", address, cid):
             raise JobRefused(409, self._already_telling(v.target, v.adapter))
@@ -378,6 +382,25 @@ class Tell:
             raise
         if started is None:                  # a Tell of this thread began between the check and here
             raise JobRefused(409, self._already_telling(t, ad))
+
+    def start_member_tell(self, address: str, cid: str, member, held=None):
+        """A member's Tell by hand: the thread waits for the agent that is their target (SPEC 9.8, 9.9). The hub account's
+        session is never theirs to tell. Raises JobRefused."""
+        e = self._entry(address)
+        self._version(e, held)
+        self._thread(e, cid)
+        self.queue_agent(address, cid, member)
+
+    def queue_agent(self, address: str, cid: str, member=None):
+        """The Tell of thread `cid` waits for the agent that is the reader's target (SPEC 9.8). Raises JobRefused.
+        The target is read inside the refusal's own look, so a target changed or revoked since is the one judged."""
+        row = targets.live(self.hub, targets.stored(self.hub, address, member), member)
+        if row is None:
+            raise JobRefused(409, targets.REVOKED.format(agent="The agent"))
+        try:
+            self.hub.waiting_tells.queue(address, cid, row, member.name if member else self.hub.person, member)
+        except waiting_mod.Refused as r:
+            raise JobRefused(r.status, r.message) from None
 
     @staticmethod
     def _already_telling(t: Target, ad: Adapter) -> str:

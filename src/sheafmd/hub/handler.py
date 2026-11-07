@@ -37,6 +37,7 @@ from ..mcp import Caller, Door
 from ..render import RenderError
 from ..source import StaleError, md_hash
 from . import auth, codes, events, peer, place, proxy, relay, targets, the_list, visibility, work
+from . import waiting as waiting_mod
 from .tell import NO_AGENT, JobRefused
 from .index import Status
 from .live import UNKNOWN, NotAuthor
@@ -436,11 +437,11 @@ class Handler:
     @staticmethod
     def _for_members(found) -> bool:
         """A route a member may use: one 8.5 marks `cookie` or `cookie or key`, but not Tell,
-        which runs the hub account's own agent session; and the two open files the front mounts a page from (#116)."""
+        which a member uses only for an agent of theirs (_tell); and the two open files the front mounts a page from (#116)."""
         name, who, _ = found
         if name in ("mount-js", "mount-css"):
             return True
-        return who in (COOKIE, EITHER, MEMBER, MINT) and name not in ("tell", "cancel", "jump")
+        return who in (COOKIE, EITHER, MEMBER, MINT) and name != "jump"
 
     def _route_proxy(self, req: Req, raw: bytes) -> Response:
         cfg = self.hub.proxy
@@ -776,13 +777,21 @@ class Handler:
             # opened before it (9.11). A change of `projects.toml` that shuts the member out is told `gone`, with
             # why (8.12): that alone, never a file of the sheaf that cannot be read for a moment.
             if hub.visible(member, e.address):
-                return _document_events(name, data)
+                if name in waiting_mod.EVENTS:      # a Tell that waits for an agent: the member's own, and no other's (9.9)
+                    return dict(data) if getattr(data, "member", None) == member.id else None
+                data = _document_events(name, data)
+                if name == "changed" and isinstance(data, dict) and "telling" in data:     # their own, not the hub person's (9.9)
+                    data = {**data, "telling": hub.waiting_tells.waits(e.address, member, sweep=False)}
+                return data
             if name == "grants" and not hub.granted(member, e.address):
                 return events.Renamed("gone", {"doc": e.address, "why": "access"})
             return None
+        def for_person(name, data):
+            # The hub person's page is not told of a member's Tell, nor of the agent it waits for (9.8, 9.9).
+            return None if name in waiting_mod.EVENTS and getattr(data, "member", None) is not None else data
         sub = e.bus.subscribe(lambda tabs: {"boot": hub.boot, "version": hub.version,
                                             "service": hub.service, "tabs": tabs},
-                              for_member if member else None)
+                              for_member if member else for_person)
         if member is None and hub.auth is not req.auth:       # a rotation overtook this request, after it told the open streams
             sub.put("signed-out", {})
         if hub.entries.get(e.address) is not e:               # a forget overtook this request, after it told the open streams
@@ -812,6 +821,7 @@ class Handler:
             if r.status == 404:         # a file gone from its root, or a root gone from its name (10.7)
                 r.answer = {"root": self._root_id(req, doc)}
             raise
+        self.hub.waiting_tells.sweep()      # a revoked token's Tells end here (9.8), before they are named
         snap = e.live.snapshot()
         snap["root"] = self._root_id(req, e.address)
         snap["rids"] = e.live.taken_rids()
@@ -822,7 +832,8 @@ class Handler:
             work, can = self.hub.member_work(e, req.member)
             extra = {} if work is None else {"work": work}
             agent, can, lines, picks = self.hub.member_target(e.address, req.member, can)
-            return _ok(**proxy.for_member(snap), seen=self.hub.member_seen.get(req.member.id, e.address),
+            return _ok(**{**proxy.for_member(snap), "telling": self.hub.waiting_tells.waits(e.address, req.member)},
+                       seen=self.hub.member_seen.get(req.member.id, e.address),
                        question="", target=agent, targets=picks, capabilities=can, lines=lines,
                        sent=self.hub.box_waits.pending(e.address, e.live.current()[1]), **extra)
         v = self.hub.tell.view(e.address)
@@ -1521,11 +1532,16 @@ class Handler:
         # session is James's on the box it goes to his window instead, by a file the hub drops (9.12), and on
         # a sheaf whose live session is a member's fork it goes to that fork's relay while it is connected (9.14).
         to_box = route = None
-        if member is not None and b.get("tell"):
+        if member is not None and starts and b.get("tell"):
+            route = self._work_route(e.address, e.live.current()[1], req.member)     # James's window or a fork comes first (9.8)
+        # An agent that is the reader's target (SPEC 9.8) is not reached: the Tell waits for it, after the write,
+        # on every sheaf where the box and a fork's relay do not take it.
+        to_agent = (starts and bool(b.get("tell")) and route is None
+                    and targets.live(self.hub, targets.stored(self.hub, e.address, member), member) is not None)
+        if member is not None and b.get("tell") and not to_agent:
             to_box = True
-            route = self._work_route(e.address, e.live.current()[1], req.member) if starts else None
             _shape(route is not None, proxy.PROXY_LINE)
-        tell = starts and bool(b.get("tell")) and not to_box
+        tell = starts and bool(b.get("tell")) and not to_box and not to_agent
         # A Tell that cannot go out still writes the comment, and then starts no wait. A reply
         # sent with Tell to a thread that is being told is such a Tell: the wait the first one
         # began stays as it is (SPEC 11.3).
@@ -1565,12 +1581,20 @@ class Handler:
             self.hub.index.touch(e.address)
             if not snap.get("again") and snap.pop("wrote", True):   # a write that changed nothing commits nothing
                 self.hub.committed(e.address, member, "comment")
+        if not snap.get("again") and (op == "delete" or (op == "status" and b.get("status") == "resolved")
+                                      or (op == "reply" and b.get("resolve"))):
+            self.hub.waiting_tells.end(e.address, b["id"], "cancelled", reason="closed")   # nothing left to answer (9.8)
         if snap.get("again"):
             # Taken before under this request id: what the first request started (a Tell's wait)
             # is running or done, and the page hears of it by its events.
             tell = False
-            to_box = None
-        if to_box and route == "relay":
+            to_box = to_agent = None
+        if to_agent:
+            try:
+                self.hub.tell.queue_agent(e.address, snap["id"], member)
+            except JobRefused as r:
+                snap["tellError"] = r.message
+        elif to_box and route == "relay":
             if (line := self._relay_tell(req, e, snap["id"], judged[0] if judged else "")) is not None:
                 snap["tellError"] = line
         elif to_box:
@@ -1594,8 +1618,11 @@ class Handler:
                 if can_tell and not r.leaves_wait:   # a wait this request began, and no other
                     e.live.stop_waiting(snap["id"])
                 snap["tellError"] = r.message
-            snap["telling"] = e.live.waiting()
-        return _ok(**(proxy.for_member(snap) if member else snap))
+        self.hub.waiting_tells.sweep()
+        snap["telling"] = e.live.telling()
+        if member:      # only their own Tells that wait for an agent (9.8, 9.9)
+            snap = {**proxy.for_member(snap), "telling": self.hub.waiting_tells.waits(e.address, member)}
+        return _ok(**snap)
 
     @staticmethod
     def _page_hash(req: Req):
@@ -1619,6 +1646,12 @@ class Handler:
     def _tell(self, req: Req) -> Response:
         e, cid = self._thread_job(req)
         try:
+            if req.member is not None:      # the hub account's session is off for them: only an agent of theirs (9.9)
+                if (targets.live(self.hub, targets.stored(self.hub, e.address, req.member), req.member) is None
+                        or self._work_route(e.address, e.live.current()[1], req.member) is not None):    # the box and a relay come first
+                    raise Refuse(400, proxy.PROXY_LINE)
+                self.hub.tell.start_member_tell(e.address, cid, req.member, held=self._page_hash(req))
+                return _ok()
             self.hub.tell.start_tell(e.address, cid, held=self._page_hash(req))
         except JobRefused as r:
             raise Refuse(r.status, r.message) from None
@@ -1654,7 +1687,11 @@ class Handler:
         that is gone, or whose root was forgotten, has nothing left to stop, and the answer is ok."""
         doc = self._owned(req, req.body.get("doc"))
         cid = self._comment_id(req)
-        self.hub.tell.cancel(doc, cid)
+        # A Tell that waits for an agent ends here, the reader's own and no other's (9.8). A member has no
+        # session to stop: theirs is only a waiting Tell.
+        self.hub.waiting_tells.end(doc, cid, "cancelled", member=req.member, only_member=True)
+        if req.member is None:
+            self.hub.tell.cancel(doc, cid)
         return _ok()
 
     def _seen(self, req: Req) -> Response:

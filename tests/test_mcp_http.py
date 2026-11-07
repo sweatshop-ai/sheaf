@@ -16,7 +16,9 @@ from sheafmd.hub.state import Tokens
 INSTRUCTIONS = (
     "sheaf keeps comment threads inside markdown files. Use `threads` to read what was asked on "
     "a document, `reply` to answer (role `action` after you acted on a Tell, `answer` when you "
-    "only answer), and `resolve` when a thread is done. A Tell from sheaf names the document and "
+    "only answer), and `resolve` when a thread is done. Call `documents` first, every time you are "
+    "asked to work on a page: a Tell from the person waits there, in the `tells` of a document, with "
+    "the whole message; answer it with `reply` and role `action`. A Tell from sheaf names the document and "
     "the comment id. Where you may work on pages, `read` gives a document's text and its hash, "
     "`create` makes a new page and `update` replaces the text of one, given the hash you read it "
     "with; keep every comment in the text you send.")

@@ -30,6 +30,7 @@ from .agents import detect
 from .hub.auth import clean_display
 from .hub.client import HubUnavailable
 from .hub.roots import Address, NotFound, address_of_url, in_git_dir
+from .agents import prompts
 from .hub import place, targets, visibility
 from .hub.state import TokenRow
 from .render import COMMENT_RE as HTML_COMMENT_RE, strip_comments
@@ -40,7 +41,9 @@ PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")
 INSTRUCTIONS = (
     "sheaf keeps comment threads inside markdown files. Use `threads` to read what was asked on "
     "a document, `reply` to answer (role `action` after you acted on a Tell, `answer` when you "
-    "only answer), and `resolve` when a thread is done. A Tell from sheaf names the document and "
+    "only answer), and `resolve` when a thread is done. Call `documents` first, every time you are "
+    "asked to work on a page: a Tell from the person waits there, in the `tells` of a document, with "
+    "the whole message; answer it with `reply` and role `action`. A Tell from sheaf names the document and "
     "the comment id. Where you may work on pages, `read` gives a document's text and its hash, "
     "`create` makes a new page and `update` replaces the text of one, given the hash you read it "
     "with; keep every comment in the text you send.")
@@ -341,6 +344,17 @@ class Door:
         except Exception:
             self.hub.record_exception("target-failed", address)
 
+    def _ends_tells(self, address: str, cid: str, caller: Caller, role=None, resolved=False):
+        """What a write ends of the Tells that wait for an agent (SPEC 9.8): an action reply by an agent's token ends
+        its own Tell as done; a resolve ends every Tell of the thread. The write stands whatever this does."""
+        try:
+            if role == "action" and caller.token is not None and caller.token.client is not None:
+                self.hub.waiting_tells.end(address, cid, "done", row=caller.token)
+            if resolved:
+                self.hub.waiting_tells.end(address, cid, "cancelled", reason="resolved")
+        except Exception:
+            self.hub.record_exception("tell-end-failed", address)
+
     def _address(self, doc: str, caller: Caller) -> str:
         """`<root>/<path>` of the document `doc` names: that address itself, the URL of its page,
         or the absolute path of the .md. A caller who may add roots (the key) has the root of a
@@ -506,17 +520,18 @@ class Door:
             raise ToolError(f"{address} could not be written.") from None
 
     # ── the tools ────────────────────────────────────────────────────────────
-    def _open_in(self, address: str) -> tuple:
-        """(open threads, front matter, mtime_ns, the member whose private root holds it) of the file the sheaf at `address`
-        names, from one open beneath its root: all of it is of that descriptor (9.11)."""
+    def _open_in(self, address: str, whole: bool = False) -> tuple:
+        """(open threads, front matter, mtime_ns, the member whose private root holds it, the text) of the file the sheaf
+        at `address` names, from one open beneath its root: all of it is of that descriptor (9.11). The text is None
+        unless `whole`, which reads it from that descriptor even when the threads are kept."""
         top, rel = self.hub.where(address)
         with beneath.open_beneath(top, rel) as op:
             st = os.fstat(op.fd)
             private = place.opened_private(self.hub, op)
             key = (st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
             cached = self._open_threads.get(address)
-            if cached and cached[0] == key:
-                return (*cached[1:], st.st_mtime_ns, private)
+            if cached and cached[0] == key and not whole:
+                return (*cached[1:], st.st_mtime_ns, private, None)
             text = op.text()
         threads = []
         if "comment id=" in text:
@@ -525,7 +540,7 @@ class Door:
                     last = c.display(c.replies[-1]) if c.replies else c.by
                     threads.append((c.id, 1 + len(c.replies), last))
         self._open_threads[address] = (key, threads, visibility.front_matter(text))
-        return (*self._open_threads[address][1:], st.st_mtime_ns, private)
+        return (*self._open_threads[address][1:], st.st_mtime_ns, private, text if whole else None)
 
     def _dot(self, address: str, unread: int, open_: int) -> str:
         """The dot of 8.6, as the index page gives it."""
@@ -547,6 +562,8 @@ class Door:
         else:
             wanted = [r for r in hub.roots.listed() if member is None or hub.owns(member, r)]
         rows, shut = [], []
+        agent = caller.token if caller.token is not None and caller.token.client is not None else None
+        pending = hub.waiting_tells.pending(agent) if agent is not None else set()    # the Tells that wait for it (9.8)
         in_git = {}                             # (root, real folder) -> whether 8.2 keeps its files from the root
         owned = {}                              # (root, real folder) -> whether its files are the member's (9.11)
         for root in wanted:
@@ -574,7 +591,7 @@ class Door:
                             in_git[folder] = in_git_dir(path, root)
                         if in_git[folder]:
                             continue                               # nor one in a git directory
-                        threads, fm, mtime, private = self._open_in(address)
+                        threads, fm, mtime, private, text = self._open_in(address, whole=address in pending)
                     except (NotFound, OSError, UnicodeDecodeError):
                         continue
                 # Whether the member owns a file asks git of its folder (8.2), and every file of a folder has the
@@ -583,15 +600,26 @@ class Door:
                     owned[folder] = hub.member_owns(member, address)
                 if not self._sees(fm, address, caller, owned.get(folder), private):
                     continue                                   # nor a sheaf the caller may not see (9.11)
-                if args.get("open_only", True) and not threads:
+                tells = self._tells(address, text, agent) if text is not None else []
+                if args.get("open_only", True) and not threads and not tells:
                     continue
                 seen = hub.seen.get(address)
                 unread = sum(1 for cid, n, last in threads if last != hub.person and n > seen.get(cid, 0))
                 dot = self._dot(address, unread, len(threads))
-                rows.append((DOT_ORDER[dot], -mtime, address,
+                rows.append((-1 if tells else DOT_ORDER[dot], -mtime, address,
                              {"doc": address, "url": hub.url(address), "path": str(path),
-                              "open": len(threads), "unread": unread, "dot": dot}))
+                              "open": len(threads), "unread": unread, "dot": dot, "tells": tells}))
         return [row[3] for row in sorted(rows, key=lambda r: r[:3])] + shut
+
+    def _tells(self, address: str, text: str, agent: TokenRow) -> list:
+        """The Tells that wait for `agent` on this document, as they are listed to it (SPEC 9.8): the first listing
+        marks each seen. Of `text`, read from the descriptor that was judged (9.11)."""
+        try:
+            got = rdc.parse(text)
+        except (OSError, UnicodeDecodeError):
+            return []
+        links = self.hub.tell.links(address)
+        return self.hub.waiting_tells.take(address, agent, got, lambda c, t: prompts.tell_agent(address, t["by"], c, links))
 
     def _threads(self, args: dict, caller: Caller):
         address = self._address(args["doc"], caller)
@@ -612,6 +640,7 @@ class Door:
                     {"id": cid, "body": text, "resolve": args.get("resolve", False)},
                     role=args.get("role", "answer"))
         self._agent_wrote(address, caller)
+        self._ends_tells(address, cid, caller, role=args.get("role", "answer"), resolved=bool(args.get("resolve")))
         c = self._comment(address, cid, caller, args["doc"])
         return {"id": cid, "status": c.status, "replies": c.as_dict()["replies"]}
 
@@ -621,6 +650,7 @@ class Door:
         if self._comment(address, cid, caller, args["doc"]).status != "resolved":
             self._write(address, caller, args["doc"], "status", {"id": cid, "status": "resolved"})
             self._agent_wrote(address, caller)
+            self._ends_tells(address, cid, caller, resolved=True)
         return {"id": cid, "status": "resolved"}
 
     def _read(self, args: dict, caller: Caller):

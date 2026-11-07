@@ -17,6 +17,19 @@ def _reply_action(address: str, cid: str) -> str:
     return f'reply(doc="{address}", id="{cid}", text="<what you did>", role="action")'
 
 
+def tell_agent(address: str, by: str, c, links: bool = True) -> str:
+    """A Tell that waited for an agent (9.8): the agent reads it from `documents`, where it has no shell, and
+    answers through the door."""
+    rule = f"{RULE}\n\n" if links else ""
+    return (f"Tell from sheaf, on the page of {address}.\n"
+            f'{by} pressed Tell on comment {c.id} by {c.by}, at line {c.line}, on the passage '
+            f'"{c.quote}": act on it here, in this conversation.\n\n'
+            f"Thread:\n{_thread(c)}\n\n"
+            f"{rule}"
+            "When you are done, answer in the thread so the page shows it, with the role action, "
+            f"with the sheaf MCP tool: {_reply_action(address, c.id)}")
+
+
 def tell(address: str, abs_path: str, me: str, c, links: bool = True) -> str:
     rule = f"{RULE}\n\n" if links else ""
     return (f"Tell from sheaf, on the page of {address} ({abs_path}).\n"

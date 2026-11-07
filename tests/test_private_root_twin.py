@@ -62,6 +62,14 @@ def log_of(repo: Path) -> str:
                           check=True, capture_output=True, text=True).stdout
 
 
+def without_empty_tells(node):
+    """The door's `documents` rows carry `tells: []` since the Tells that wait (SPEC 12); the older commit has no such
+    field, and nothing else of a row may differ."""
+    if isinstance(node, dict):
+        return {k: without_empty_tells(v) for k, v in node.items() if not (k == "tells" and v == [] and "doc" in node)}
+    return [without_empty_tells(v) for v in node] if isinstance(node, list) else node
+
+
 def test_twin_no_private_root_byte_for_byte(tmp_path):
     before = run_session(base_source(tmp_path / "base"), tmp_path / "before")
     after = run_session(TREE / "src", tmp_path / "after")
@@ -75,4 +83,4 @@ def test_twin_no_private_root_byte_for_byte(tmp_path):
     assert [list(step)[0] for step in shown] == ["created", "ticked", "closed", "owner changed", "shared again",
                                                  "door update closing", "door update editing"]
     assert len(names(2, "a")) == 2 and len(names(2, "b")) == 1 and len(names(3, "a")) == 1    # the session did close it
-    assert json.loads((after.parent / "snapshot.json").read_text(encoding="utf-8")) == shown      # what each member sees
+    assert without_empty_tells(json.loads((after.parent / "snapshot.json").read_text(encoding="utf-8"))) == shown   # what each member sees

@@ -306,7 +306,7 @@ class Tell:
 
     def _thread(self, e, cid: str):
         try:
-            c = rdc.parse(e.path.read_text(encoding="utf-8")).by_id(cid)
+            c = rdc.parse(e.read()).by_id(cid)
         except OSError:
             raise JobRefused(404, "no such document") from None
         if c is None:

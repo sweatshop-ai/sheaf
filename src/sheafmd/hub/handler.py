@@ -1690,7 +1690,7 @@ class Handler:
             names = the.cfg.james_tokens if the is not None else ()
             own = the.cfg.own_token if the is not None else ""
             james = req.token.name in names
-            caller = Caller(req.token.display, req.token,
+            caller = Caller(req.token.signed(self.hub.person, self.hub.proxy), req.token,
                             session=req.headers.get("x-james-session", "") if james else None,
                             own_session=bool(own) and req.token.name == own)
         else:

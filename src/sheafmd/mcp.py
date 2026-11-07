@@ -383,7 +383,8 @@ class Door:
         if member is not None and not owns:
             return False
         if member is None:
-            return visibility.effective(fm) == "project"
+            # rule A: no file of a private root is any unbound token's, whatever its front matter says
+            return visibility.effective(fm) == "project" and place.private_member(self.hub, address, fm) is None
         return self.hub.may_open(member, address, fm)        # projects.toml grants a bound token's member (8.12)
 
     def _seen(self, text: str, address: str, caller: Caller, doc: str) -> str:
@@ -450,7 +451,8 @@ class Door:
             self._seen(t, address, caller, doc)
         try:
             with place.held(self.hub, address):
-                entry = self.hub.entries.get(address)
+                # Through `Hub.entry` when the hub holds a page, which drops one bound to a root that no longer holds the file.
+                entry = self.hub.entry(address) if address in self.hub.entries else None
                 if entry is not None:
                     wrote = entry.live.comment(op, fields, None, by=caller.display, role=role, announce=True,
                                                guard=guard)["wrote"]

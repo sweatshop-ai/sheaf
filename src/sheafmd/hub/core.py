@@ -107,6 +107,7 @@ class Hub:
         self.told_link: set = set()              # the (root id, path) a link-ignored row named this run (9.11)
         self.told_ignored: set = set()           # the roots a private-ignored row named this run (9.11)
         self._front: dict = {}                   # {file: (its stat, its front matter, its assignees)}, for 9.11
+        self._private_seen: dict = {}            # {address: the member a private root held it for}, `place.private_member`
         self.the_list = None                     # the list (9.10): a the_list.TheList, set by the server
         self.blamed: dict = {}                   # {(real path, md_hash): (pressers, monotonic time or None)}: once per text,
                                                  # for the list's rows and the pages' buttons alike (9.10, 10.11)
@@ -250,7 +251,7 @@ class Hub:
             return
         if place.applies(self, a.root):
             try:
-                held = self.entries.get(address)         # the file an open document was made for, no other
+                held = self._bound(address)              # the file an open document was made for, no other
                 got = place.file_at(self, address, held.file_root if held else "") if self.private_roots else None
             except roots_mod.NotFound:
                 self.record("commit-refused", address, why="its file is not where the sheaf was opened")
@@ -303,6 +304,19 @@ class Hub:
         the hub's: the file is found and first read and rendered where no move takes it."""
         with place.held(self, address):
             return self._entry(address)
+
+    def _bound(self, address: str):
+        """The entry the hub holds for `address`, None when there is none or when another root now holds its file,
+        which drops it: a write that does not go through `entry` (the door's) commits in the root of the file."""
+        e = self.entries.get(address)
+        if e is not None and self.private_roots:
+            got = place.where_is(self, address)
+            if got is not None and got[0].id != e.file_root:
+                with self._lock:
+                    if self.entries.get(address) is e:
+                        del self.entries[address]
+                return None
+        return e
 
     def _entry(self, address: str) -> Entry:
         name = roots_mod.Address.parse(address).root
@@ -660,6 +674,8 @@ class Hub:
         if root is None or not at.plain:
             return []
         mine = [m for m in members if self.owns(m, root)]
+        if mine and (private := place.private_member(self, address)) is not None:
+            mine = [m for m in mine if m.id == private]       # rule A: a private root's file is its member's alone
         return mine if mine and self.roots.lookup(root.path / at.rel) == root else []
 
     def judged(self, address: str):
@@ -712,6 +728,9 @@ class Hub:
             judged = self.judged(address)
         except (OSError, UnicodeDecodeError):
             return False
+        private = place.private_member(self, address, None if judged is None else judged[0])
+        if private is not None and private != member.id:        # rule A, before anything the file or the issue says
+            return False
         if judged is None:
             return never_read and self.granted(member, address)
         return visibility.visible_to(judged[0], member, judged[1], self.granted(member, address))
@@ -719,6 +738,9 @@ class Hub:
     def may_open(self, member, address: str, fm: dict) -> bool:
         """Whether `member` may open the sheaf at `address` whose front matter is `fm`, a text read under its lock
         (9.11): as `visible` judges the file on disk, with `projects.toml`'s grant (8.12)."""
+        private = place.private_member(self, address, fm)
+        if private is not None and private != member.id:        # rule A
+            return False
         return visibility.visible_to(fm, member, self.assignees(address, fm), self.granted(member, address))
 
     def granted(self, member, address: str) -> bool:

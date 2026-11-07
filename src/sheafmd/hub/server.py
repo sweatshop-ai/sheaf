@@ -464,8 +464,11 @@ def _run(started_by: str, signals: "sender.Signals") -> int:
     # the socket the first one holds. The hub never runs with part of the mode (9.9).
     try:
         cfg = proxy.load()
+        rows = [t for t in state.Tokens().list() if not t.invalid]
+        signed = [(t.client is not None, t.signed(config.user_name(), cfg)) for t in rows]
+        proxy.check_agent_names(signed)               # in loopback too: a config may change the person's name
         if cfg is not None:
-            proxy.check_names(cfg, config.user_name(), [t.display for t in state.Tokens().list()])
+            proxy.check_names(cfg, config.user_name(), [name for _, name in signed])
             proxy.check_folder(cfg)
     except proxy.ProxyError as e:
         return _proxy_refused(e)

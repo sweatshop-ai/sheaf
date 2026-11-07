@@ -591,7 +591,13 @@ def _undecided(hub, name: str) -> bool:
         if path not in good or path not in registered or not os.path.isdir(top) \
                 or not os.access(top, os.R_OK | os.X_OK) or not os.path.lexists(top / ".git"):
             return True
-        if os.path.lexists(top / name) and not _holds(top, name):
+        try:
+            os.lstat(top / name)
+        except (FileNotFoundError, NotADirectoryError):
+            continue                        # nothing there
+        except OSError:
+            return True                     # a folder on the way that cannot be read: the name may be held
+        if not _holds(top, name):
             return True
     return False
 
@@ -645,9 +651,10 @@ def ahead(hub, address: str, old: str, new: str) -> str | None:
             return None
         (at, rel), = found
         if at.id != root.id:                    # a file of a private root is not moved, nor shared, by a write
-            if home_in(hub, root, name, old) == (at, rel) and home_in(hub, root, name, new) != (at, rel):
-                raise Refused(SHARE)        # at its home, and the text would take it elsewhere; one elsewhere is written as before
-            return None
+            fo, fn = visibility.front_matter(old), visibility.front_matter(new)
+            if (visibility.effective(fn) == "project" and visibility.effective(fo) != "project") \
+                    or visibility.text(fn, "owner").casefold() != visibility.text(fo, "owner").casefold():
+                raise Refused(SHARE)        # Share, or an owner who is another's: the file would leave the root
         strict = home_in(hub, root, name, old) == (root, rel)
         gone = _move(hub, root, top, rel, name, address, text=new, strict=strict)
         if gone is not None:
@@ -731,7 +738,10 @@ def _move(hub, root, top: Path, rel: str, name: str, address: str, text: str | N
                     text = f.read().decode("utf-8")
         except (OSError, UnicodeDecodeError):
             return None             # gone, or not a text the hub reads: nothing to judge it on
-        got = home_in(hub, root, name, text)
+        try:
+            got = home_in(hub, root, name, text)
+        except NotFound:                    # a private root that cannot be looked at: the home is undecided
+            return refused(UNDECIDED, keep=True)
         if got is None:
             return refused(NO_SHORT)
         where, target = got

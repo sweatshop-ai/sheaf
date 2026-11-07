@@ -240,3 +240,65 @@ def test_a_hub_without_a_private_root_still_finds_a_list_file_wherever_it_is(tmp
     assert hub.file(a) == two.list_repo / NAME
     assert place.file_rel(hub, hub.the_list.root(), NAME) == NAME
     assert place.file_rel(hub, hub.the_list.root(), OTHER) == OTHER            # a name no file holds: itself
+
+
+def test_unbound_lookup_after_a_private_root_is_forgotten_raises(two):
+    hub = hub_of(two)
+    (two.list_repo / NAME).write_text(OPEN, encoding="utf-8")
+    a = address(hub)
+    hub.forget_root(next(r.name for r in hub.roots.all() if r.id in hub.private_roots))
+    with pytest.raises(roots_mod.NotFound):
+        hub.file(a)                                                            # configured, not registered: undecided
+
+
+def test_a_folder_below_the_private_root_that_cannot_be_read_is_undecided(two):
+    hub = hub_of(two)
+    for repo in (two.list_repo, two.private_repo):
+        (repo / NAME).write_text(PRIVATE_TEXT, encoding="utf-8")
+    a = address(hub)
+    seen = untouched(two)
+    os.chmod(two.private_repo / "acme", 0)
+    try:
+        with pytest.raises(roots_mod.NotFound):
+            hub.file(a)
+        with pytest.raises(roots_mod.NotFound):
+            comment(hub, a, PRIVATE_TEXT)
+        assert untouched(two) == seen
+    finally:
+        os.chmod(two.private_repo / "acme", 0o755)
+
+
+def test_ahead_refuses_a_name_two_roots_hold(two):
+    hub = hub_of(two)
+    for repo in (two.list_repo, two.private_repo):
+        (repo / NAME).write_text(PRIVATE_TEXT, encoding="utf-8")
+    a = address(hub)
+    with place.held(hub, a):
+        with pytest.raises(place.Refused):
+            place.ahead(hub, a, PRIVATE_TEXT, PRIVATE_TEXT + "more\n")
+    (two.list_repo / NAME).unlink()
+    with place.held(hub, a):
+        assert place.ahead(hub, a, PRIVATE_TEXT, PRIVATE_TEXT + "more\n") is None      # control
+
+
+def test_create_of_a_name_two_roots_hold_is_refused_not_a_hub_failure(two):
+    token = Tokens().add("james-a", write=True)
+    hub = hub_of(two, a={"tokens": ["james-a"]})
+    (two.list_repo / "projects.toml").write_text('[projects."acme/blog"]\nmembers = ["a"]\nstatus = "live"\n',
+                                                 encoding="utf-8")
+    for repo in (two.list_repo, two.private_repo):
+        (repo / NAME).write_text(PRIVATE_TEXT, encoding="utf-8")
+    door = browser_on(hub)
+    is_error, got = call(door, "create", token=token, doc=address(hub), text=OPEN)
+    assert is_error and "failed on this call" not in got, got
+    assert not hub_rows("mcp-failed")
+
+
+def test_poll_of_an_owner_only_list_file_while_a_private_root_is_undecided_is_a_refusal_row(two):
+    hub = hub_of(two)
+    (two.list_repo / NAME).write_text(PRIVATE_TEXT.replace("owner: a", "owner: b"), encoding="utf-8")
+    a = address(hub)
+    (two.private_repo / ".git").rename(two.base / "git-away")
+    assert place.place(hub, a) is None
+    assert (two.list_repo / NAME).is_file() and not list((two.list_repo / "acme/blog").glob("private/**/*"))
+    assert [r["doc"] for r in hub_rows("place-refused")] == [a] and not hub_rows("place-failed")

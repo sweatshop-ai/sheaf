@@ -289,6 +289,19 @@ def named(hub, root, top: Path, rel: str) -> str | None:
     return name if n == 1 and at.id == root.id and got == rel else None
 
 
+def named_in(hub, root, private, rel: str) -> str | None:
+    """The sheaf's name that the listed file `rel` of the private root `private` is shown by: `rel` itself, when it is
+    the one file in the list's root `root` or any private root that holds the name; None for a name held twice (a
+    `place-refused` row names it) and for any path that is not a sheaf's name."""
+    if logical(rel) != rel:
+        return None
+    (at, got), n = _one(hub, root, rel)
+    if n > 1:
+        _twice(hub, f"{root.name}/{rel}", n)
+        return None
+    return rel if n == 1 and at.id == private.id and got == rel else None
+
+
 def tell_link(hub, root, top: Path, rel: str):
     """A `link-ignored` row (15) with the root and the path, and a line on stderr, once per path per hub run, for an
     entry the listing gave that is a link or under a linked folder (9.11), at a sheaf's path or any other:

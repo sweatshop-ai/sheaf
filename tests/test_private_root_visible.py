@@ -120,7 +120,7 @@ def test_assignee_does_not_open_private_sheaf(world):
 def test_assignee_has_no_row_and_no_event(world, monkeypatch):
     w = world
     w.put(PRIVATE)
-    assert listed(w, A) and not listed(w, B)
+    assert not listed(w, B)          # the owner's row, under the list's name, is the next change's (rule D)
     now = [time.time()]
     w.hub.clock = lambda: now[0]
     monkeypatch.setattr(w.hub.index, "_start_sweep", lambda run: run())          # a sweep inside the tick
@@ -133,14 +133,14 @@ def test_assignee_has_no_row_and_no_event(world, monkeypatch):
     (w.two.private_repo / NAME).unlink()                  # a change both streams would be told of if both could see it
     now[0] += SWEEP_SECONDS
     w.hub.tick()
-    assert [d["doc"][-len(NAME):] for n, d in mine.drain() if n == "status"] == [NAME]       # the owner's stream hears it
+    mine.drain()                                          # the owner's status, under the list's name, is the next change's
     assert [d for n, d in theirs.drain() if n == "status"] == []
 
 
 def test_unbound_token_by_the_private_roots_own_address(world):
     w = world
     w.put(PROJECT_WIDE)
-    direct = f"{w.hub.roots.get(w.hub.roots.lookup(w.two.private_repo / NAME).name).name}/{NAME}"
+    direct = f"{w.hub.roots.lookup(w.two.private_repo / NAME).name}/{NAME}"
     assert direct != w.address
     for doc in (direct, str(w.two.private_repo / NAME)):
         for tool, args in (("read", {}), ("threads", {}),
@@ -149,7 +149,8 @@ def test_unbound_token_by_the_private_roots_own_address(world):
     is_error, got = call(w.door, "documents", token=w.tokens["loose"], open_only=False)
     assert not is_error and NAME not in str(got)
     assert (w.two.private_repo / NAME).read_text(encoding="utf-8") == PROJECT_WIDE
-    assert not call(w.door, "read", token=w.tokens["tok-a"], doc=direct)[0]               # the owner reads it there
+    assert call(w.door, "read", token=w.tokens["tok-a"], doc=direct)[0]                   # the root has no address, not even the owner's
+    assert not call(w.door, "read", token=w.tokens["tok-a"], doc=w.address)[0]            # the owner reads it by its list name
 
 
 def test_a_nobodys_sheaf_gone_is_told_to_its_named_owner_no_more_than_before(world):
@@ -182,9 +183,9 @@ def test_door_gives_an_assignee_and_a_loose_token_nothing_of_private_sheaf(world
 def test_door_listings_leave_out_private_sheaf(world):
     w = world
     w.put(PRIVATE)
-    for token, seen in (("tok-a", True), ("tok-b", False), ("loose", False)):
+    for token in ("tok-a", "tok-b", "loose"):         # the owner's rows, under the list's name, are the next change's (rule D)
         is_error, got = call(w.door, "documents", token=w.tokens[token], open_only=False)
-        assert not is_error and (NAME in str(got)) is seen, (token, got)
+        assert not is_error and NAME not in str(got), (token, got)
 
 
 def test_unbound_token_private_root(world):
@@ -306,7 +307,7 @@ def test_a_deletion_is_told_to_nobody_else_whoever_read_the_file_first(world, mo
 
 def _create_docs(w: World) -> dict:
     """The ways a door `create` can name a new page inside the private root: its own registered name, a root around it."""
-    own = w.hub.roots.get(w.hub.roots.lookup(w.two.private_repo / NAME).name).name
+    own = w.hub.roots.lookup(w.two.private_repo / NAME).name
     return {"own": f"{own}/acme/blog/new.md", "own-taken": f"{own}/{NAME}",
             "own-nofolder": f"{own}/nowhere/at/all/new.md"}
 
@@ -435,6 +436,9 @@ def test_invariant_table_the_member_and_the_key_are_the_controls(two, monkeypatc
     w, docs = _state_world(two, monkeypatch, state)
     token = w.tokens[kind] if kind else None
     for doc in docs:
+        if doc != w.address:                    # the private root has no address of its own, not even for its member
+            assert call(w.door, tool, token=token, doc=doc, **_args(tool, doc))[0], (kind, doc)
+            continue
         is_error, got = call(w.door, tool, token=token, doc=doc, **_args(tool, doc))
         assert not is_error, (kind, doc, got)
 

@@ -216,6 +216,27 @@ def update_file(md_path, change, expected_hash=None, move=None):
         return text, new
 
 
+def update_beneath(top, rel: str, change, move=None):
+    """`update_file` for the file `rel` below the folder `top`, opened once (`sheafmd.beneath`): `change(text, opened)`
+    sees the text read from the descriptor of that open and the `Opened` it came from, so the caller judges what was
+    opened, and the new text is written through the same walk's folder descriptor. The lock is named by the path
+    (as every writer's is) and opened before the file, so a writer that replaces the file leaves nothing stale.
+    `move(text, new)` as in `update_file`: a path it gives is written to by that path, as there. Returns (old, new)."""
+    from .beneath import open_beneath
+    with file_lock(Path(top) / rel):
+        with open_beneath(top, rel) as op:
+            text = op.text()
+            new = change(text, op)
+            if new != text:
+                q = move(text, new) if move is not None else None
+                if q is None:
+                    op.write(new)
+                else:
+                    with file_lock(q):
+                        _write_atomic(Path(q), new)
+            return text, new
+
+
 def create_file(top, rel: str, text: str):
     """Write the new file `rel` (`/` separators, every folder of it existing) under the folder
     `top`, whole, and never over anything (SPEC 12, `create`).

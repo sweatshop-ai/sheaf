@@ -30,6 +30,9 @@ adds only the sheaves a private root holds under the list's name, and a deleted 
 Nothing else decides privacy: not the registry, not a name, not the front matter.
 For a caller who may not see a private root, every door answer about a name inside it is identical to the answer for
 the same name held in a shared root, or for a free name after deletion.
+Privacy is judged on the object opened, through the same descriptors that read or write it; no path is resolved twice
+(`sheafmd.beneath`, `opened_private`). No registered root encloses, equals or lies inside a private root, checked at
+start and on every registration, so a link that stays beneath a shared root never reaches a private one.
 
 In proxy mode, in the list's root (9.10) only, a sheaf at project depth has one name, its address
 `<client>/<project>/<name>.md`, and one home for its file: open to the project, that path; its owner's alone,
@@ -478,19 +481,34 @@ def in_private(hub, real: str, stat=os.stat):
     return None
 
 
-def private_member(hub, address: str, fm: dict | None = None):
+UNJUDGED = object()         # `private_member`: the file was not opened by the caller, so its real path is looked at
+
+
+def opened_private(hub, opened):
+    """The id of the member whose private root the object `opened` (a `beneath.Opened`) is in, else None. Judged on the
+    descriptors of the walk that opened it: the identity (st_dev, st_ino) of the root's folder and its parents, of every
+    folder the walk went into and of the file, against `hub._private_ids`. No path is resolved for it."""
+    ids = getattr(hub, "_private_ids", None) or {}
+    return next((ids[i] for i in opened.idents() if i in ids), None)
+
+
+def private_member(hub, address: str, fm: dict | None = None, opened=UNJUDGED):
     """Rule A: the id of the one member the sheaf named `address` is private to, or None when the hub holds it for
     the project as usual. A sheaf held by a private root is that root's member's whatever its text, its assignees or
     `projects.toml` say, and when the name is held by a private root and another file too, still theirs. With `fm`, the
     front matter of the file: a sheaf its owner's alone that names one owner who has a private root, held by the list's
     root only, is nobody's (""): a private root is where its owner's sheaves live, so a copy pushed into the shared
     repo is shown to no one. A file that went away is still the member's it was (`hub._private_seen`), so its going
-    is told to no one else."""
+    is told to no one else. `opened`: what `opened_private` gave for the file the caller opened (a member id or None):
+    then the file's place is that, and no path is resolved again."""
     paths = getattr(hub, "_private_paths", None)
     if not paths:
         return None
     at = Address.parse(address)
-    if (named := hub.roots.get(at.root)) is not None:
+    if opened is not UNJUDGED:
+        if opened is not None:
+            return opened
+    elif (named := hub.roots.get(at.root)) is not None:
         # Judged by where the file really is, not by the root the address names: the private root's own name, a root
         # around it and a link into it all reach the same file. The real paths of the private roots, not the roots
         # the registry holds now: one that was forgotten while a root around it stays is private still.

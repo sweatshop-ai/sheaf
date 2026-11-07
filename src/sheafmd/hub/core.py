@@ -149,6 +149,7 @@ class Hub:
         self._private_paths: dict[str, str] = {}
         self._private_ids: dict[tuple, str] = {}    # (st_dev, st_ino) of each, so a spelling in another case is the same folder
         self._private_good: set[str] = set()       # those that registered: placement only, never privacy
+        self.roots.private_paths = lambda: self._private_paths
         self._register_private_roots()
         self.commits.seed(self.roots.all())      # the rewrite guard's first pull is guarded, not free
 
@@ -167,8 +168,10 @@ class Hub:
             if not m.private_root:
                 continue
             folder = Path(os.path.realpath(m.private_root))
-            if (ident := place.identity(str(folder))) is not None:
-                self._private_ids[ident] = m.id
+            if (ident := place.identity(str(folder))) is None or not folder.is_dir():
+                raise proxy_mod.ProxyError(f"the private root {folder} of {m.name} is not a folder: the hub does not start "
+                                           "without it (SPEC 9.11)")
+            self._private_ids[ident] = m.id
             self._private_paths[str(folder)] = m.id     # before the checks below: a refused root is as private as any
             root = None
             if folder.is_dir() and proxy_mod.git_top(str(folder)).casefold() == str(folder).casefold():
@@ -178,6 +181,10 @@ class Hub:
                             error="the private root is not the top folder of a git work tree")
                 continue
             self._private_good.add(str(folder))
+        for r in self.roots.all():              # rule A: no root encloses, or lies inside, a private root
+            if (inner := next((p for p in self._private_paths if roots_mod.nests(r.path, p)), None)) is not None:
+                raise proxy_mod.ProxyError(f"the root {r.path} encloses or lies inside the private root {inner}: "
+                                           "the hub does not start with one (SPEC 9.11)")
 
     # ── documents ────────────────────────────────────────────────────────────
     def _versions_of(self, root, named: str = "", strict: bool = False) -> state.Versions | None:
@@ -765,10 +772,10 @@ class Hub:
             return never_read and self.granted(member, address)
         return visibility.visible_to(judged[0], member, judged[1], self.granted(member, address))
 
-    def may_open(self, member, address: str, fm: dict) -> bool:
+    def may_open(self, member, address: str, fm: dict, opened=place.UNJUDGED) -> bool:
         """Whether `member` may open the sheaf at `address` whose front matter is `fm`, a text read under its lock
         (9.11): as `visible` judges the file on disk, with `projects.toml`'s grant (8.12)."""
-        private = place.private_member(self, address, fm)
+        private = place.private_member(self, address, fm, opened)
         if private is not None and private != member.id:        # rule A
             return False
         return visibility.visible_to(fm, member, self.assignees(address, fm), self.granted(member, address))

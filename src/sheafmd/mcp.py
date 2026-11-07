@@ -813,19 +813,25 @@ class Door:
         self._check_size(text)      # again: the owner `_owned` gave it is part of the page
         # Made at its home (9.11), so no file, and no commit, ever holds a sheaf that is its owner's alone at the
         # project's path: one with no home is not made.
+        private_home = False
         if name is not None and (found := place.home_in(self.hub, root, name, text)) != (root, rel):
             if found is None:
                 raise ToolError(f"{address} cannot be made: {place.NO_SHORT}, so it would have no home.", "path")
             home_root, home = found
             if home_root.id != root.id:
-                # Not yet: made in the list's root it would be a private sheaf in the shared repo (9.11).
-                raise ToolError(f"{address} cannot be made: {place.PRIVATE_ROOT}.", "path")
+                # Rule F: its home is a private root, made there only for the token bound to that root's member. The
+                # owner is the one the text now names (`_owned` has given it), so assignees open no root to a caller.
+                member = self._member(caller)
+                if member is None or self.hub.private_roots.get(home_root.id) != member.id:
+                    raise ToolError(f"{address} cannot be made: {place.PRIVATE_ROOT}.", "path")
+                root, top, judge = home_root, Path(os.path.realpath(home_root.path)), place.judge_home(self.hub, home_root)
+                private_home = True     # the member's repo may not hold the project's folder yet: made as a private folder is
             if place.ignores(top, home):
                 # Made there, it would be untracked and leave the listing (8.6): refused as a move there is.
                 raise ToolError(f"{address} cannot be made: {place.IGNORED}, so it would have no home.", "path")
             rel = home
         try:
-            if name is not None and rel != name:        # the private folders, walked as create_file walks
+            if name is not None and (rel != name or private_home):    # the folders, walked as create_file walks
                 with place.folders_lock(top, name):     # so no move's tidying takes them before the file is in
                     os.close(place.make_folders(top, rel, judge)[0])
                     create_file(top, rel, text, judge)

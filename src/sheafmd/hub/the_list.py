@@ -213,6 +213,17 @@ def parse(t: dict, where) -> ListConfig:
             if mine is not None and shared is not None and (_within(str(mine), shared) or _within(shared, str(mine))):
                 raise ListError(f"'{key}' of [list.member_dirs.\"{mid}\"] is, or is inside or around, the one of [list], "
                                 f"in {here}: {mine}")
+    seen = []        # (member id, key, folder) of the tables read so far: no folder may equal, lie in or around another
+    for mid, d in member_dirs.items():
+        for key in FOLDER_KEYS:
+            mine = getattr(d, key)
+            if mine is None:
+                continue
+            for other_mid, other_key, other in seen:
+                if _within(str(mine), str(other)) or _within(str(other), str(mine)):
+                    raise ListError(f"'{key}' of [list.member_dirs.\"{mid}\"] is, or is inside or around, "
+                                    f"'{other_key}' of [list.member_dirs.\"{other_mid}\"], in {here}: {mine} and {other}")
+            seen.append((mid, key, mine))
     if "james_token" in t and "james_tokens" in t:
         raise ListError(f"'james_token' and 'james_tokens' are both in {here}; keep 'james_tokens'")
     if "james_tokens" in t:

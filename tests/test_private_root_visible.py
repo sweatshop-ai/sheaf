@@ -1225,7 +1225,7 @@ def test_a_private_file_made_by_hand_after_the_row_was_opened_counts_nothing_of_
             yield got
     monkeypatch.setattr(index, "_opened", late)
     rows = [d for r in index.data()["roots"] for d in r["docs"] if d["doc"] == w.address]
-    assert all(d["open"] == 0 and d["dot"] == "green" for d in rows), rows
+    assert len(rows) == 1 and rows[0]["open"] == 0 and rows[0]["dot"] == "green", rows
     monkeypatch.undo()
     mine = [d for r in index.data(member=w.hub.proxy.members[A])["roots"] for d in r["docs"] if d["doc"] == w.address]
     assert [d["open"] for d in mine] == [1]             # the control: its member's row counts the thread
@@ -1294,3 +1294,44 @@ def test_a_name_that_was_private_and_is_shared_later_is_only_over_hidden_from_th
     assert [d["doc"] for n, d in member.drain() if n == "status"] == [w.address]        # the members' streams are told
     assert w.address in [d["doc"] for r in index.data()["roots"] for d in r["docs"]]     # and the person's page lists it
     assert not any("Secret" in str(d) for n, d in person.drain())
+
+
+def test_the_board_marks_a_name_whose_file_opened_was_private_though_the_name_is_held_by_the_list_root_again(world, monkeypatch):
+    """The private file takes the name by hand before the open and the list root's takes it back before the event is
+    judged: the board met the name as private on the file it opened, which a judging by the name would miss."""
+    w = world
+    index = w.hub.index
+    (w.two.list_repo / ".gitignore").write_text("post.md\n", encoding="utf-8")
+    (w.two.list_repo / NAME).write_text(PROJECT_WIDE.replace("owner: a\n", ""), encoding="utf-8")
+    index.arm()
+    w.hub.render(w.two.list_repo / NAME, {}, None)
+    index._private_docs.discard(w.address)
+    kept = (w.two.list_repo / NAME).read_text(encoding="utf-8")
+    real = index._opened
+
+    @contextlib.contextmanager
+    def late(address):
+        _swapped_to_private(w)
+        with real(address) as got:
+            (w.two.private_repo / NAME).unlink()
+            (w.two.list_repo / NAME).write_text(kept, encoding="utf-8")
+            yield got
+    monkeypatch.setattr(index, "_opened", late)
+    index.data(board=True)
+    assert w.address in index._private_docs
+
+
+def test_the_comment_cache_is_keyed_by_the_file_opened(world, monkeypatch):
+    """The name looked up for the cache key may name the list root's file while the private root's is the one opened."""
+    w = world
+    index = w.hub.index
+    (w.two.list_repo / ".gitignore").write_text("post.md\n", encoding="utf-8")
+    (w.two.list_repo / NAME).write_text(PROJECT_WIDE.replace("owner: a\n", ""), encoding="utf-8")
+    index.arm()
+    w.hub.render(w.two.list_repo / NAME, {}, None)
+    listed_path = w.hub.file(w.address)
+    _swapped_to_private(w)
+    monkeypatch.setattr(w.hub, "file", lambda address, *a, **k: listed_path)
+    _person_tells(w)                # `touch` looks only while an index stream is open
+    index.touch(w.address)
+    assert str(listed_path) not in index._cache

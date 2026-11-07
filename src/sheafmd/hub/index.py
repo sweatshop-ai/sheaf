@@ -219,12 +219,12 @@ class Index:
         (`op`, when the caller of a row opened it: the one open) and what is counted is that descriptor's: a member is told
         nothing of a file of a private root that is not theirs, and the hub's own account (`member` None) none of one unless
         `private_ok`; None for what is not theirs, judged on that descriptor, however the path came to name it (9.11)."""
-        key = str(path)
         try:
             with contextlib.ExitStack() as stack:
                 if op is None:
                     top, rel = self.hub.where(address)
                     op = stack.enter_context(beneath.open_beneath(top, rel))
+                key = str(Path(op.top) / op.rel)        # the cache is keyed by the file opened, not by a name looked up again
                 private = place.opened_private(self.hub, op)
                 if private is not None and (private != member.id if member else not private_ok):
                     return None
@@ -236,11 +236,11 @@ class Index:
                     return hit[1]
                 got = summarize(op.text())
         except (OSError, ValueError, roots_mod.NotFound):     # unreadable, or not text: listed, no comments
-            got = EMPTY
+            key, got = str(path), EMPTY
             stamp = (st.st_mtime_ns, st.st_size)
         except Exception:
             self.hub.record_exception("status-failed", address)
-            got = EMPTY
+            key, got = str(path), EMPTY
             stamp = (st.st_mtime_ns, st.st_size)
         with self._lock:
             self._cache[key] = (stamp, got)

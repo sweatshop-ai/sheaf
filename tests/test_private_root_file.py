@@ -181,7 +181,8 @@ def test_a_read_of_a_name_two_roots_hold_is_refused_not_raised(two):
     a = address(hub)
     member = hub.proxy.members["member-a-id"]
     hub.visible(member, a)                                                      # answers; raises nothing
-    assert hub.file(a).name == "post.md"
+    with pytest.raises(roots_mod.NotFound):
+        hub.file(a)                                                             # no read falls back to the list's path (rule B)
     with pytest.raises(roots_mod.NotFound):
         hub.file(a, bound=next(iter(hub.private_roots)))                        # a write's file is never found
 

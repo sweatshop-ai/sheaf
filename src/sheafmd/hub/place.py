@@ -5,7 +5,7 @@ sheafmd.hub.place — where the file of a sheaf of the list's root is (SPEC 9.11
     names_private(rel)               whether a path names a folder where only the hub places sheaves
     applies(hub, root_name)          whether the hub places the sheaves of that root
     physical(hub, root, rel)         the path of the file a sheaf's name holds now (for `Roots`, at each lookup)
-    file_rel(top, rel)               the same without a check: the path to read or write, or `rel`
+    file_rel(hub, root, rel)         the same without a check: the path to read or write, or `rel`; `Undecided` (rule B)
     named(hub, root, top, rel)       the name a listed file is shown by, None for a file no name shows
     home_in(hub, root, name, text)   (the root, the path in it) where that text lives, None when it has none
     where_is(hub, address)           (the root, the path in it) of the one file a sheaf's name holds, else None
@@ -70,6 +70,14 @@ QUARANTINE = "~unplaced"
 NO_SHORT = "it is its owner's alone and no owner of it has a short to name its private folder"
 IGNORED = "the repo ignores the private folder"
 PRIVATE_ROOT = "its home is a private root, and a sheaf cannot be moved between roots yet"
+SHARE = "a sheaf of a private root cannot be shared yet"
+UNDECIDED = "its file cannot be told from another of the same name, or a private root cannot be looked at"
+
+
+class Undecided(NotFound):
+    """The file of a sheaf cannot be decided now (SPEC 9.11, rule B): a private root holds its name and another root
+    does too, or a private root cannot be looked at, or the document was made for a root that no longer holds the
+    file. A NotFound, so every reader that treats a missing file treats this so; the write goes nowhere."""
 
 
 class Refused(Exception):
@@ -263,14 +271,19 @@ def physical(hub, root, rel: str) -> tuple:
     return got
 
 
-def file_rel(top: Path, rel: str) -> str:
-    """The path to read or write for the sheaf named `rel` in the root at `top`, which the hub places: the one file
-    that holds the name, else `rel` (a name with no file, or with two, whose lookup `physical` refuses)."""
+def file_rel(hub, root, rel: str) -> str:
+    """The path in `root`, the list's, to read or write for the sheaf named `rel`, which the hub places: the one file
+    that holds the name, else `rel` (a name with no file, or with two there). Raises `Undecided` where a private root
+    could hold the file instead (`file_at`), and for a name that one holds: the path of another root is no answer."""
     name = logical(rel)
     if name is None or name != rel:
         return rel
-    found = _holding(top, _scan(top, name))
-    return found[0] if len(found) == 1 else rel
+    got = file_at(hub, f"{root.name}/{rel}")
+    if got is None:
+        return rel
+    if got[0].id != root.id:
+        raise Undecided(f"{root.name}/{rel}")
+    return got[1]
 
 
 def named(hub, root, top: Path, rel: str) -> str | None:
@@ -567,25 +580,45 @@ def private_member(hub, address: str, fm: dict | None = None, opened=UNJUDGED):
     return owner
 
 
+def _undecided(hub, name: str) -> bool:
+    """Whether a private root cannot be looked at for the name `name` (SPEC 9.11, rule B): a configured one that is not
+    registered (refused at start, or forgotten), not a folder the hub can read, not a git work tree now (a re-clone
+    under way), or holding a link at the name. Its names are then undecided, not absent."""
+    registered = {str(r.path) for r in hub.roots.all()}
+    good = getattr(hub, "_private_good", set())
+    for path in getattr(hub, "_private_paths", None) or ():
+        top = Path(path)
+        if path not in good or path not in registered or not os.path.isdir(top) \
+                or not os.access(top, os.R_OK | os.X_OK) or not os.path.lexists(top / ".git"):
+            return True
+        if os.path.lexists(top / name) and not _holds(top, name):
+            return True
+    return False
+
+
 def file_at(hub, address: str, bound: str = ""):
     """(the root, the path in it) of the file to read or write for the sheaf named `address`, or None for a name the
-    hub does not place. The one file that holds the name, in the list's root or a private root; where a private root
-    is involved and there is not exactly one, or the file is not in `bound` (the id of the root an open document was
-    made for), raises NotFound: the write goes nowhere, and never to the list's root under the name
-    (the fallback below is for a hub with no private holder of it)."""
+    hub does not place. The one file that holds the name, in the list's root or a private root; a name no file
+    holds is the list's root and the name. Raises `Undecided` (a NotFound), so the write goes nowhere and never to
+    the list's root under the name, when a private root is configured and the file cannot be decided: a private
+    root that cannot be looked at (`_undecided`), a name a private root holds with any other holder, or a file that
+    is not in `bound` (the id of the root an open document was made for), whether or not that root is still
+    registered."""
     got = _where(hub, address)
     if got is None:
         return None
     root, top, name = got
+    if _undecided(hub, name):
+        raise Undecided(address)
     found = _found(hub, root, name)
-    private = set(getattr(hub, "private_roots", None) or ())
     if len(found) == 1:
         if bound and found[0][0].id != bound:       # whichever root the document was opened for, it follows no other
-            raise NotFound(address)
+            raise Undecided(address)
         return found[0]
-    if bound in private or any(r.id in private for r, _ in found):
-        raise NotFound(address)
-    return root, file_rel(top, name)
+    private = set(getattr(hub, "private_roots", None) or ())
+    if (bound and bound != root.id) or any(r.id in private for r, _ in found):
+        raise Undecided(address)
+    return root, name
 
 
 def ahead(hub, address: str, old: str, new: str) -> str | None:
@@ -602,8 +635,18 @@ def ahead(hub, address: str, old: str, new: str) -> str | None:
         return None
     root, top, name = got
     with _name_lock(top, name), folders_lock(top, name):
-        (at, rel), n = _one(hub, root, name)
-        if n != 1 or at.id != root.id:          # a file of a private root is not moved by the list's root
+        if _undecided(hub, name):
+            raise Refused(UNDECIDED)
+        found = _found(hub, root, name)
+        private = set(getattr(hub, "private_roots", None) or ())
+        if any(r.id in private for r, _ in found) and len(found) != 1:
+            raise Refused(UNDECIDED)
+        if len(found) != 1:
+            return None
+        (at, rel), = found
+        if at.id != root.id:                    # a file of a private root is not moved, nor shared, by a write
+            if home_in(hub, root, name, old) == (at, rel) and home_in(hub, root, name, new) != (at, rel):
+                raise Refused(SHARE)        # at its home, and the text would take it elsewhere; one elsewhere is written as before
             return None
         strict = home_in(hub, root, name, old) == (root, rel)
         gone = _move(hub, root, top, rel, name, address, text=new, strict=strict)
@@ -663,11 +706,11 @@ def _move(hub, root, top: Path, rel: str, name: str, address: str, text: str | N
     still has waits there."""
     judge = judge_for(hub, root)
 
-    def refused(why: str, target: str | None = None):
+    def refused(why: str, target: str | None = None, keep: bool = False):
         if strict:
             raise Refused(why)
         gone = None
-        if target != name and not quarantined(rel) and (rel == name or not _an_owners(hub, root, address, rel, text)):
+        if not keep and target != name and not quarantined(rel) and (rel == name or not _an_owners(hub, root, address, rel, text)):
             gone = _to_quarantine(top, sfd, sname, rel, name, judge)
             _refused(hub, address, why, gone is not None, tried=True)
         else:
@@ -693,7 +736,7 @@ def _move(hub, root, top: Path, rel: str, name: str, address: str, text: str | N
             return refused(NO_SHORT)
         where, target = got
         if where.id != root.id:
-            return refused(PRIVATE_ROOT)
+            return refused(PRIVATE_ROOT, keep=True)      # left where it is (rule A hides it), not filed anywhere
         if target == rel:
             return None
         if ignores(top, target):

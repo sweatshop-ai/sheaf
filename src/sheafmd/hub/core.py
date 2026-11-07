@@ -36,6 +36,7 @@ from . import roots as roots_mod
 from . import state
 from . import targets as targets_mod
 from . import the_list
+from . import waiting as waiting_mod
 from . import visibility
 from . import work as work_mod
 from .tell import Tell
@@ -116,6 +117,7 @@ class Hub:
         self.member_seen = state.MemberSeen()
         self.index = Index(self)
         self.tokens = state.Tokens()
+        self.waiting_tells = waiting_mod.Waiting(self)    # the Tells that wait for an agent (9.8)
         self.relays = relay_mod.Relays()     # the forks' relay tokens, queued Tells and streams (9.14)
         self.box_waits = boxwait.BoxWaits(lambda: self.clock())    # the drops for James's window (9.12, #115)
         self.entries: dict[str, Entry] = {}

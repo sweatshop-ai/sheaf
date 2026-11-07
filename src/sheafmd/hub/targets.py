@@ -20,7 +20,6 @@ from __future__ import annotations
 from ..agents.base import Target
 from .state import TokenRow
 
-LATER = "Tell to {agent} is not available yet."
 REVOKED = "{agent} can no longer reach this hub: its token was revoked. Pick another target."
 WHAT = "The target is session, agent:<token name> or none."
 
@@ -81,7 +80,7 @@ def agent_view(hub, raw: dict, member=None) -> tuple[dict, str | None, bool]:
     shape = {"kind": "agent", "token": raw.get("token"), "display": name, "label": name}
     if row is None:
         shape["revoked"] = True                     # the page takes no token of this name for the current target
-    return shape, (LATER if row is not None else REVOKED).format(agent=name), row is not None
+    return shape, None if row is not None else REVOKED.format(agent=name), row is not None
 
 
 def choices(hub, address: str, member=None) -> list[dict]:

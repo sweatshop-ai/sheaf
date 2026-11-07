@@ -30,6 +30,7 @@ from .agents import detect
 from .hub.auth import clean_display
 from .hub.client import HubUnavailable
 from .hub.roots import Address, NotFound, address_of_url, in_git_dir
+from .agents import prompts
 from .hub import place, targets, visibility
 from .hub.state import TokenRow
 from .render import COMMENT_RE as HTML_COMMENT_RE, strip_comments
@@ -39,7 +40,9 @@ PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")
 INSTRUCTIONS = (
     "sheaf keeps comment threads inside markdown files. Use `threads` to read what was asked on "
     "a document, `reply` to answer (role `action` after you acted on a Tell, `answer` when you "
-    "only answer), and `resolve` when a thread is done. A Tell from sheaf names the document and "
+    "only answer), and `resolve` when a thread is done. Call `documents` first, every time you are "
+    "asked to work on a page: a Tell from the person waits there, in the `tells` of a document, with "
+    "the whole message; answer it with `reply` and role `action`. A Tell from sheaf names the document and "
     "the comment id. Where you may work on pages, `read` gives a document's text and its hash, "
     "`create` makes a new page and `update` replaces the text of one, given the hash you read it "
     "with; keep every comment in the text you send.")
@@ -340,6 +343,17 @@ class Door:
         except Exception:
             self.hub.record_exception("target-failed", address)
 
+    def _ends_tells(self, address: str, cid: str, caller: Caller, role=None, resolved=False):
+        """What a write ends of the Tells that wait for an agent (SPEC 9.8): an action reply by an agent's token ends
+        its own Tell as done; a resolve ends every Tell of the thread. The write stands whatever this does."""
+        try:
+            if role == "action" and caller.token is not None and caller.token.client is not None:
+                self.hub.waiting_tells.end(address, cid, "done", row=caller.token)
+            if resolved:
+                self.hub.waiting_tells.end(address, cid, "cancelled", reason="resolved")
+        except Exception:
+            self.hub.record_exception("tell-end-failed", address)
+
     def _address(self, doc: str, caller: Caller) -> str:
         """`<root>/<path>` of the document `doc` names: that address itself, the URL of its page,
         or the absolute path of the .md. A caller who may add roots (the key) has the root of a
@@ -514,6 +528,8 @@ class Door:
         else:
             wanted = [r for r in hub.roots.all() if member is None or hub.owns(member, r)]
         rows, shut = [], []
+        agent = caller.token if caller.token is not None and caller.token.client is not None else None
+        pending = hub.waiting_tells.pending(agent) if agent is not None else set()    # the Tells that wait for it (9.8)
         in_git = {}                             # (root, real folder) -> whether 8.2 keeps its files from the root
         owned = {}                              # (root, real folder) -> whether its files are the member's (9.11)
         for root in wanted:
@@ -551,15 +567,26 @@ class Door:
                     owned[folder] = hub.member_owns(member, address)
                 if not self._sees(fm, address, caller, owned.get(folder)):
                     continue                                   # nor a sheaf the caller may not see (9.11)
-                if args.get("open_only", True) and not threads:
+                tells = self._tells(address, path, agent) if address in pending else []
+                if args.get("open_only", True) and not threads and not tells:
                     continue
                 seen = hub.seen.get(address)
                 unread = sum(1 for cid, n, last in threads if last != hub.person and n > seen.get(cid, 0))
                 dot = self._dot(address, unread, len(threads))
-                rows.append((DOT_ORDER[dot], -mtime, address,
+                rows.append((-1 if tells else DOT_ORDER[dot], -mtime, address,
                              {"doc": address, "url": hub.url(address), "path": str(path),
-                              "open": len(threads), "unread": unread, "dot": dot}))
+                              "open": len(threads), "unread": unread, "dot": dot, **({"tells": tells} if tells else {})}))
         return [row[3] for row in sorted(rows, key=lambda r: r[:3])] + shut
+
+    def _tells(self, address: str, path: Path, agent: TokenRow) -> list:
+        """The Tells that wait for `agent` on this document, as they are listed to it (SPEC 9.8): the first listing
+        marks each seen. Read from the file as it is now."""
+        try:
+            got = rdc.parse(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError):
+            return []
+        links = self.hub.tell.links(address)
+        return self.hub.waiting_tells.take(address, agent, got, lambda c, t: prompts.tell_agent(address, t["by"], c, links))
 
     def _threads(self, args: dict, caller: Caller):
         address = self._address(args["doc"], caller)
@@ -580,6 +607,7 @@ class Door:
                     {"id": cid, "body": text, "resolve": args.get("resolve", False)},
                     role=args.get("role", "answer"))
         self._agent_wrote(address, caller)
+        self._ends_tells(address, cid, caller, role=args.get("role", "answer"), resolved=bool(args.get("resolve")))
         c = self._comment(address, cid, caller, args["doc"])
         return {"id": cid, "status": c.status, "replies": c.as_dict()["replies"]}
 
@@ -589,6 +617,7 @@ class Door:
         if self._comment(address, cid, caller, args["doc"]).status != "resolved":
             self._write(address, caller, args["doc"], "status", {"id": cid, "status": "resolved"})
             self._agent_wrote(address, caller)
+            self._ends_tells(address, cid, caller, resolved=True)
         return {"id": cid, "status": "resolved"}
 
     def _read(self, args: dict, caller: Caller):

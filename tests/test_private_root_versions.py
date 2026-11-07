@@ -50,19 +50,20 @@ def test_versions_store_follows_file_root(two):
     hub = hub_of(two)
     (two.list_repo / NAME).write_text(OPEN, encoding="utf-8")
     a = address(hub)
-    hub.entry(a)                                               # opened as a list sheaf
+    live = hub.entry(a).live                                   # opened as a list sheaf, the handle kept
     (two.list_repo / NAME).unlink()
     git(two.list_repo, "add", "-A")
     git(two.list_repo, "commit", "-q", "-m", "gone")
     git(two.list_repo, "push", "-q", "origin", "HEAD:main")
     seen = untouched(two)
     (two.private_repo / NAME).write_text(PRIVATE_TEXT, encoding="utf-8")   # a private sheaf at the same name
+    live._remember("# post\n\nPrivate edit, through the old handle.\n")
     edit(hub, NAME, "Private edit.")
     hub.tick()                                                 # the sweep of each repo's versions
     assert hub.commits.settle()
     assert untouched(two) == seen
     assert (two.private_repo / state.INSIDE / state.doc_key(NAME)).is_dir()
-    assert "Private edit." not in "".join(p.read_text(encoding="utf-8") for p in (two.list_repo / state.INSIDE).rglob("*.md"))
+    assert "Private edit" not in "".join(p.read_text(encoding="utf-8") for p in (two.list_repo / state.INSIDE).rglob("*.md"))
 
 
 def test_stale_handle_with_both_roots_holding_the_name_stores_nothing(two):
@@ -89,3 +90,34 @@ def test_sweep_private_versions_in_private_repo(two):
     assert f"versions: {NAME}" in subjects
     assert f"versions: {address(hub)}" not in subjects
     assert state.doc_key(NAME) in git(two.private_repo, "ls-files")
+
+
+def test_private_file_gone_stores_nothing_in_the_list_repo(two):
+    hub = hub_of(two)
+    (two.private_repo / NAME).write_text(PRIVATE_TEXT, encoding="utf-8")
+    live = hub.entry(address(hub)).live
+    (two.private_repo / NAME).unlink()                         # no holder left: not a reason to use the list root's store
+    live._remember(PRIVATE_TEXT)
+    hub.tick()
+    assert hub.commits.settle()
+    assert not (two.list_repo / state.INSIDE).exists()
+    assert "versions:" not in git(two.list_repo, "log", "--format=%s")
+
+
+def test_private_repo_away_pins_nothing_in_the_list_repo(two):
+    hub = hub_of(two)
+    (two.private_repo / NAME).write_text(PRIVATE_TEXT, encoding="utf-8")
+    live = hub.entry(address(hub)).live
+    two.private_repo.rename(two.base / "private-away")
+    assert live.pin(md_hash(PRIVATE_TEXT))                     # the page keeps the version in memory
+    assert not (two.list_repo / state.INSIDE).exists()
+
+
+def test_private_root_config_unreadable_stores_nothing_in_the_state_folder(two, monkeypatch):
+    hub = hub_of(two)
+    (two.private_repo / NAME).write_text(PRIVATE_TEXT, encoding="utf-8")
+    live = hub.entry(address(hub)).live
+    (two.private_repo / ".sheaf.toml").write_text("versions = [", encoding="utf-8")
+    live._remember("# post\n\nA later private text.\n")
+    assert not (state.paths.state_dir() / "versions").exists() or not any(
+        "A later private text" in p.read_text(encoding="utf-8") for p in (state.paths.state_dir() / "versions").rglob("*.md"))

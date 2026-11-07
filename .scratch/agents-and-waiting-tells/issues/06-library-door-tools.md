@@ -4,7 +4,9 @@
 
 **Blocked by:** 02 (Agent tokens signed `Client (Member)`), 04 (A Tell to an agent waits on the document)
 
-**Status:** ready-for-agent
+**Claimed by:** Manon 2026-11-07 07:17
+
+**Status:** in-progress
 
 - [ ] The door offers `documents`, `threads`, `read` (read-only, marked so), `reply` and `resolve`; not `create` or `update`
 - [ ] It calls the hub on loopback with the token of the agent that called, chosen from the caller's MCP `clientInfo`; an unknown client or none uses the member's `AI` token; the client names each app really sends are recorded from observed `initialize` calls

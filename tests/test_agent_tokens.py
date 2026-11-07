@@ -189,11 +189,14 @@ def test_an_old_token_named_like_a_client_does_not_block_that_agent(sheaf, old):
     assert sheaf("token", "add", "agent-" + old, "--client", old.capitalize()).code == 0
 
 
-def test_the_hub_refuses_to_start_when_two_agents_sign_the_same_name_after_a_rebinding():
-    names = ["ChatGPT (Bea)", "chatgpt (Bea)"]
-    with pytest.raises(proxy.ProxyError, match="two agents"):
-        proxy.check_agent_names(names)
-    proxy.check_agent_names(["ChatGPT (Bea)", "ChatGPT (Bob)"])
+def test_the_hub_refuses_to_start_when_an_agent_signs_a_name_another_token_signs():
+    with pytest.raises(proxy.ProxyError, match="another token"):
+        proxy.check_agent_names([(True, "ChatGPT (Bea)"), (True, "chatgpt (Bea)")])
+    with pytest.raises(proxy.ProxyError, match="another token"):
+        proxy.check_agent_names([(False, "ChatGPT (Hans)"), (True, "ChatGPT (Hans)")])    # a typed display, after a rebinding
+    proxy.check_agent_names([(True, "ChatGPT (Bea)"), (True, "ChatGPT (Bob)")])
+    proxy.check_agent_names([(False, "Codex"), (False, "codex")])                       # old tokens may share a display
+
 
 
 # ── a token's id: what tells a revoked token from a new one of the same name ─

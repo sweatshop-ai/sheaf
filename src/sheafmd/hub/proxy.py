@@ -457,14 +457,14 @@ def check_names(cfg: ProxyConfig, person: str, tokens) -> None:
             raise ProxyError(f"the name {m.name!r} of {here} ends in (action), which a reply reads as its role")
 
 
-def check_agent_names(signed: list[str]) -> None:
-    """Two agents' tokens must not sign the same name once the config binds them to members (9.7):
-    `add` checks it with the bindings of the day, and the config may change them later. Raises ProxyError."""
-    seen: list[str] = []
-    for name in signed:
-        if any(name_key(name) == name_key(other) for other in seen):
-            raise ProxyError(f"two agents' tokens sign {name!r} (sheaf token list): give one of them another client or member")
-        seen.append(name)
+def check_agent_names(signed: list[tuple[bool, str]]) -> None:
+    """No agent's token may sign a name another token signs (9.7): `add` checks with the bindings of the day,
+    and the config may change them later. `signed` is (is an agent's, signed name) per token; an old token
+    is compared with agents only, never with another old token, which may share a display today. Raises ProxyError."""
+    for i, (agent, name) in enumerate(signed):
+        if agent and any(name_key(name) == name_key(other) for j, (_, other) in enumerate(signed) if j != i):
+            raise ProxyError(f"an agent's token signs {name!r}, which another token signs too (sheaf token list): "
+                             "give one of them another client or member")
 
 
 # ── the proxy socket (9.9 "Two listeners") ───────────────────────────────────

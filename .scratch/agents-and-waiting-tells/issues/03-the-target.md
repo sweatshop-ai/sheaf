@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 (Retire Ask end to end), 02 (Agent tokens signed `Client (Member)`)
 
-**Claimed by:** Mikkel 2026-11-07 03:32
+**Claimed by:** Hugo 2026-11-07 03:32
 
 **Status:** in-progress
 

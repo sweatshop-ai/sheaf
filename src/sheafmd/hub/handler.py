@@ -998,7 +998,7 @@ class Handler:
             if gone is None:
                 return None
             moved.append(gone)
-            return self.hub.file(e.address, placed=True)
+            return self.hub.file(e.address, placed=True, bound=e.file_root)
         return move, moved
 
     @contextlib.contextmanager

@@ -12,7 +12,8 @@ In memory: a restart forgets it.
     .expire(wait, text_of)                end every drop answered in `text_of(doc)` (None: not read), then take off
                                           every drop older than `wait` seconds: [(doc, thread, Drop)]
     .drops()                              [(doc, thread, Drop)] of every open drop
-    .working(doc)                         whether James's session works on a drop of the sheaf: one `delivered`
+    .working(doc, member=None)            whether James's session works on a drop of the sheaf (of `member`'s, when
+                                          given): one `delivered`
     .cleared()                            the sheaves where a `delivered` drop ended since the last ask
     .observe(doc, thread, got, drop)      take in `read_status`'s `got` for `drop`: (what changed, its state
                                           before), what being None, "ignored", "state" or "failed" (which ends it)
@@ -101,9 +102,10 @@ class BoxWaits:
         with self._lock:
             return [(doc, thread, d) for doc, drops in self._drops.items() for thread, d in drops.items()]
 
-    def working(self, doc: str) -> bool:
+    def working(self, doc: str, member: str | None = None) -> bool:
         with self._lock:
-            return any(d.state == "delivered" for d in self._drops.get(doc, {}).values())
+            return any(d.state == "delivered" and (member is None or d.member == member)
+                       for d in self._drops.get(doc, {}).values())
 
     def observe(self, doc: str, thread: str, got, drop: Drop) -> tuple[str | None, str]:
         with self._lock:

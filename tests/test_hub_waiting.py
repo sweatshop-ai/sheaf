@@ -447,3 +447,42 @@ def test_a_tell_to_a_revoked_agent_is_refused_with_the_revoked_line(browser, tal
     r = tell(browser)
     assert r.status == 409 and "token was revoked" in r.json()["error"]
     assert browser.hub.waiting_tells.waits(DOC) == []
+
+
+# ── one open: the file is judged and read through the same descriptor (SPEC 9.11) ─────────────────────────────
+
+def test_a_file_swapped_after_documents_judged_it_builds_no_tell_from_the_swapped_in_text(browser, talk, work, monkeypatch):
+    from sheafmd import beneath
+    token = agent_token()
+    target(browser)
+    assert tell(browser).status == 200
+    other = work / "plan.swap"
+    other.write_text(PLAN, encoding="utf-8")
+    comment(other, body="SWAPPED IN")
+    real, swapped = beneath.open_beneath, []
+
+    def swapping(top, rel):
+        op = real(top, rel)
+        if not swapped and str(rel).endswith("plan.md"):
+            swapped.append(1)
+            os.replace(other, talk)                       # the name now holds another file; `op` holds the judged one
+        return op
+    monkeypatch.setattr(beneath, "open_beneath", swapping)
+    first, = documents(browser, token)
+    assert swapped
+    t, = first["tells"]
+    assert "Why pears?" in t["message"] and "SWAPPED IN" not in t["message"]
+
+
+def test_the_watcher_reads_a_document_through_the_judged_open_and_ends_nothing_from_a_file_that_is_refused(browser, talk):
+    agent_token()
+    target(browser)
+    assert tell(browser).status == 200
+    update_file(talk, lambda t: rdc.set_status(t, "c1", "resolved"))
+    e = browser.hub.entry(DOC)
+
+    def refuse(op):
+        raise PermissionError(13, "in a private root of another member")
+    e.judge = refuse
+    browser.hub.tick()
+    assert [w["id"] for w in browser.hub.waiting_tells.waits(DOC, sweep=False)] == ["c1"]   # not decided from it

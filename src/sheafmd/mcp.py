@@ -510,17 +510,18 @@ class Door:
             raise ToolError(f"{address} could not be written.") from None
 
     # ── the tools ────────────────────────────────────────────────────────────
-    def _open_in(self, address: str) -> tuple:
-        """(open threads, front matter, mtime_ns, the member whose private root holds it) of the file the sheaf at `address`
-        names, from one open beneath its root: all of it is of that descriptor (9.11)."""
+    def _open_in(self, address: str, whole: bool = False) -> tuple:
+        """(open threads, front matter, mtime_ns, the member whose private root holds it, the text) of the file the sheaf
+        at `address` names, from one open beneath its root: all of it is of that descriptor (9.11). The text is None
+        unless `whole`, which reads it from that descriptor even when the threads are kept."""
         top, rel = self.hub.where(address)
         with beneath.open_beneath(top, rel) as op:
             st = os.fstat(op.fd)
             private = place.opened_private(self.hub, op)
             key = (st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
             cached = self._open_threads.get(address)
-            if cached and cached[0] == key:
-                return (*cached[1:], st.st_mtime_ns, private)
+            if cached and cached[0] == key and not whole:
+                return (*cached[1:], st.st_mtime_ns, private, None)
             text = op.text()
         threads = []
         if "comment id=" in text:
@@ -529,7 +530,7 @@ class Door:
                     last = c.display(c.replies[-1]) if c.replies else c.by
                     threads.append((c.id, 1 + len(c.replies), last))
         self._open_threads[address] = (key, threads, visibility.front_matter(text))
-        return (*self._open_threads[address][1:], st.st_mtime_ns, private)
+        return (*self._open_threads[address][1:], st.st_mtime_ns, private, text if whole else None)
 
     def _dot(self, address: str, unread: int, open_: int) -> str:
         """The dot of 8.6, as the index page gives it."""
@@ -580,7 +581,7 @@ class Door:
                             in_git[folder] = in_git_dir(path, root)
                         if in_git[folder]:
                             continue                               # nor one in a git directory
-                        threads, fm, mtime, private = self._open_in(address)
+                        threads, fm, mtime, private, text = self._open_in(address, whole=address in pending)
                     except (NotFound, OSError, UnicodeDecodeError):
                         continue
                 # Whether the member owns a file asks git of its folder (8.2), and every file of a folder has the
@@ -589,7 +590,7 @@ class Door:
                     owned[folder] = hub.member_owns(member, address)
                 if not self._sees(fm, address, caller, owned.get(folder), private):
                     continue                                   # nor a sheaf the caller may not see (9.11)
-                tells = self._tells(address, path, agent) if address in pending else []
+                tells = self._tells(address, text, agent) if text is not None else []
                 if args.get("open_only", True) and not threads and not tells:
                     continue
                 seen = hub.seen.get(address)
@@ -600,11 +601,11 @@ class Door:
                               "open": len(threads), "unread": unread, "dot": dot, "tells": tells}))
         return [row[3] for row in sorted(rows, key=lambda r: r[:3])] + shut
 
-    def _tells(self, address: str, path: Path, agent: TokenRow) -> list:
+    def _tells(self, address: str, text: str, agent: TokenRow) -> list:
         """The Tells that wait for `agent` on this document, as they are listed to it (SPEC 9.8): the first listing
-        marks each seen. Read from the file as it is now."""
+        marks each seen. Of `text`, read from the descriptor that was judged (9.11)."""
         try:
-            got = rdc.parse(path.read_text(encoding="utf-8"))
+            got = rdc.parse(text)
         except (OSError, UnicodeDecodeError):
             return []
         links = self.hub.tell.links(address)

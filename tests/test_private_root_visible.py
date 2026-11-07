@@ -2,6 +2,7 @@
 assignees, `projects.toml` or the front matter say, another member and a token bound to nobody get the 404 of a missing
 document, and a file that names a member as its owner in the list's repo is nobody's. Each refusal has the owner's own
 call as its positive control, on the same route."""
+import contextlib
 import os
 from pathlib import Path
 import time
@@ -1144,3 +1145,193 @@ def test_a_private_roots_own_projects_toml_is_read_for_its_member(tmp_path, mode
     hub = SimpleNamespace(_private_ids={(st.st_dev, st.st_ino): "a"}, _private_paths={str(tmp_path): "a"})
     (tmp_path / "projects.toml").write_text('[projects."acme/blog"]\nmembers = ["a"]\nstatus = "live"\n', encoding="utf-8")
     assert set(projects.read(tmp_path, hub)) == {"acme/blog"}
+
+
+# ── the residuals of the listing and the board: privacy is judged on the object opened (SPEC 9.11) ────────────────
+
+def _person_tells(w: World):
+    """The hub's person's index stream, as the page holds it: `drain()` gives what it was sent."""
+    return w.hub.index_bus.subscribe(lambda n: {}, w.hub.index.accepting(None))
+
+
+def _rendered_by_hand(w: World):
+    w.hub.index.arm()
+    w.put(PRIVATE)                  # made after the board was taken: no sweep has met the name
+    assert w.hub.render(w.two.list_repo / NAME, {}, None)["doc"] == w.address
+
+
+def test_a_private_file_gone_between_the_look_at_it_and_the_judging_is_told_to_the_person_no_more(world, monkeypatch):
+    """`touch` reads a row of the file the name holds; the file goes (or is moved) before the event is judged. The name is
+    judged on what was opened, not on what the name holds a moment later."""
+    w = world
+    index = w.hub.index
+    _rendered_by_hand(w)
+    person = _person_tells(w)
+    real = index._queue_look
+
+    def late(found, since):
+        (w.two.private_repo / NAME).unlink()
+        return real(found, since)
+    monkeypatch.setattr(index, "_queue_look", late)
+    index.touch(w.address)
+    assert [d for n, d in person.drain() if n == "status"] == []
+
+
+def _swapped_to_private(w: World):
+    """The list root's file of the name goes and the private root's takes the name, by hand."""
+    (w.two.list_repo / NAME).unlink()
+    w.put(PRIVATE)
+
+
+def test_a_private_file_made_by_hand_after_the_name_was_judged_is_no_row_of_the_person(world, monkeypatch):
+    """The name is held by a file of the list root when the listing judges it; the private root's takes it by hand before
+    the row's file is opened. The row is judged on the file opened, so the person is shown none."""
+    w = world
+    index = w.hub.index
+    (w.two.list_repo / NAME).write_text(PROJECT_WIDE.replace("owner: a\n", ""), encoding="utf-8")
+    index.arm()
+    w.hub.render(w.two.list_repo / NAME, {}, None)
+    real = index._row
+
+    def late(*a, **k):
+        _swapped_to_private(w)
+        return real(*a, **k)
+    monkeypatch.setattr(index, "_row", late)
+    names = lambda member: [d["doc"] for r in index.data(member=member)["roots"] for d in r["docs"]]    # noqa: E731
+    assert w.address not in names(None)
+    monkeypatch.undo()
+    assert w.address in names(w.hub.proxy.members[A])           # the control: its member is shown it
+
+
+def test_a_private_file_made_by_hand_after_the_row_was_opened_counts_nothing_of_it_for_the_person(world, monkeypatch):
+    """The row is opened once: the private file that takes the name after it is no row's text, so the open comments of the
+    private file are not counted into the person's row (a file the repo ignores is no listing's: its row is opened by name)."""
+    w = world
+    index = w.hub.index
+    (w.two.list_repo / ".gitignore").write_text("post.md\n", encoding="utf-8")
+    w.put(PRIVATE)
+    comment(w.two.private_repo / NAME, quote="Secret words.")
+    (w.two.private_repo / NAME).rename(w.two.private_repo / "kept.md")
+    (w.two.list_repo / NAME).write_text(PROJECT_WIDE.replace("owner: a\n", ""), encoding="utf-8")
+    index.arm()
+    w.hub.render(w.two.list_repo / NAME, {}, None)
+    real = index._opened
+
+    @contextlib.contextmanager
+    def late(address):
+        with real(address) as got:
+            (w.two.list_repo / NAME).unlink()
+            (w.two.private_repo / "kept.md").rename(w.two.private_repo / NAME)
+            yield got
+    monkeypatch.setattr(index, "_opened", late)
+    rows = [d for r in index.data()["roots"] for d in r["docs"] if d["doc"] == w.address]
+    assert len(rows) == 1 and rows[0]["open"] == 0 and rows[0]["dot"] == "green", rows
+    monkeypatch.undo()
+    mine = [d for r in index.data(member=w.hub.proxy.members[A])["roots"] for d in r["docs"] if d["doc"] == w.address]
+    assert [d["open"] for d in mine] == [1]             # the control: its member's row counts the thread
+
+
+def test_a_name_that_moved_from_the_list_root_to_a_private_one_is_told_gone_as_a_deletion_is(world):
+    """The person was shown the name as a sheaf of the list root. A sweep between the file going from there and its coming
+    to the private root tells them what a delete tells them, and nothing after; a sweep after both tells them nothing
+    new. Neither says that the name is now private."""
+    w = world
+    index = w.hub.index
+    told = []
+    for private_arrives_before_the_sweep in (False, True, None):
+        (w.two.list_repo / NAME).write_text(PROJECT_WIDE.replace("owner: a\n", ""), encoding="utf-8")
+        for f in w.two.private_repo.glob("acme/blog/*.md"):
+            f.unlink()
+        index.sweep()
+        index.arm()
+        person = _person_tells(w)
+        (w.two.list_repo / NAME).unlink()
+        if private_arrives_before_the_sweep:
+            w.put(PRIVATE)
+        if private_arrives_before_the_sweep is not None:
+            index.sweep()
+        if private_arrives_before_the_sweep is False:
+            w.put(PRIVATE)
+            index.sweep()
+        told.append([(d["doc"], d["dot"]) for n, d in person.drain() if n == "status"])
+        index.arm()
+    assert told[0] == [(w.address, None)]              # gone, as a plain deletion is told (the control, third round)
+    assert told[1] == [] and told[2] == []
+
+
+def test_a_private_file_made_by_hand_before_a_row_is_opened_by_name_is_no_row_of_the_person(world, monkeypatch):
+    """The same for a name the listing leaves out (the repo ignores the file): the file that takes the name before the open
+    is the one judged."""
+    w = world
+    index = w.hub.index
+    (w.two.list_repo / ".gitignore").write_text("post.md\n", encoding="utf-8")
+    (w.two.list_repo / NAME).write_text(PROJECT_WIDE.replace("owner: a\n", ""), encoding="utf-8")
+    index.arm()
+    w.hub.render(w.two.list_repo / NAME, {}, None)
+    real = index._opened
+
+    def late(address):
+        _swapped_to_private(w)
+        return real(address)
+    monkeypatch.setattr(index, "_opened", late)
+    assert w.address not in [d["doc"] for r in index.data()["roots"] for d in r["docs"]]
+    monkeypatch.undo()
+    assert w.address in [d["doc"] for r in index.data(member=w.hub.proxy.members[A])["roots"] for d in r["docs"]]
+
+
+def test_a_name_that_was_private_and_is_shared_later_is_only_over_hidden_from_the_persons_stream(world):
+    """The set of names the board met as private only grows. A name that a file of the list root takes after the private
+    one is gone is still listed to the person; what the set holds back is their events, never a row or a byte to anyone."""
+    w = world
+    index = w.hub.index
+    w.put(PRIVATE)
+    index.arm()
+    assert w.address in index._private_docs
+    (w.two.private_repo / NAME).unlink()
+    (w.two.list_repo / NAME).write_text(PROJECT_WIDE.replace("owner: a\n", ""), encoding="utf-8")
+    person, member = _person_tells(w), w.hub.index_bus.subscribe(lambda n: {}, index.accepting(lambda n, d: d))
+    index.sweep()
+    assert [d["doc"] for n, d in member.drain() if n == "status"] == [w.address]        # the members' streams are told
+    assert w.address in [d["doc"] for r in index.data()["roots"] for d in r["docs"]]     # and the person's page lists it
+    assert not any("Secret" in str(d) for n, d in person.drain())
+
+
+def test_the_board_marks_a_name_whose_file_opened_was_private_though_the_name_is_held_by_the_list_root_again(world, monkeypatch):
+    """The private file takes the name by hand before the open and the list root's takes it back before the event is
+    judged: the board met the name as private on the file it opened, which a judging by the name would miss."""
+    w = world
+    index = w.hub.index
+    (w.two.list_repo / ".gitignore").write_text("post.md\n", encoding="utf-8")
+    (w.two.list_repo / NAME).write_text(PROJECT_WIDE.replace("owner: a\n", ""), encoding="utf-8")
+    index.arm()
+    w.hub.render(w.two.list_repo / NAME, {}, None)
+    index._private_docs.discard(w.address)
+    kept = (w.two.list_repo / NAME).read_text(encoding="utf-8")
+    real = index._opened
+
+    @contextlib.contextmanager
+    def late(address):
+        _swapped_to_private(w)
+        with real(address) as got:
+            (w.two.private_repo / NAME).unlink()
+            (w.two.list_repo / NAME).write_text(kept, encoding="utf-8")
+            yield got
+    monkeypatch.setattr(index, "_opened", late)
+    index.data(board=True)
+    assert w.address in index._private_docs
+
+
+def test_the_comment_cache_is_keyed_by_the_file_opened(world, monkeypatch):
+    """The name looked up for the cache key may name the list root's file while the private root's is the one opened."""
+    w = world
+    index = w.hub.index
+    (w.two.list_repo / ".gitignore").write_text("post.md\n", encoding="utf-8")
+    (w.two.list_repo / NAME).write_text(PROJECT_WIDE.replace("owner: a\n", ""), encoding="utf-8")
+    index.arm()
+    w.hub.render(w.two.list_repo / NAME, {}, None)
+    listed_path = w.hub.file(w.address)
+    _swapped_to_private(w)
+    monkeypatch.setattr(w.hub, "file", lambda address, *a, **k: listed_path)
+    _person_tells(w)                # `touch` looks only while an index stream is open
+    index.touch(w.address)
+    assert str(listed_path) not in index._cache

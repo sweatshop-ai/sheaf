@@ -248,7 +248,7 @@ def update_beneath(top, rel: str, change, move=None):
             return text, new
 
 
-def create_file(top, rel: str, text: str):
+def create_file(top, rel: str, text: str, judge=None):
     """Write the new file `rel` (`/` separators, every folder of it existing) under the folder
     `top`, whole, and never over anything (SPEC 12, `create`).
 
@@ -257,8 +257,8 @@ def create_file(top, rel: str, text: str):
     cannot carry the write elsewhere. The text goes into a hidden sibling first and is linked into
     place: a reader never sees half a page, and the link fails (FileExistsError) when the name is
     taken by anything, a dangling link included, even one that appeared a moment ago. The file gets
-    the mode the umask gives a new file. A missing folder is FileNotFoundError."""
-    fd, name = _folder_of(top, rel)
+    the mode the umask gives a new file. A missing folder is FileNotFoundError. `judge`: see `_folder_of`."""
+    fd, name = _folder_of(top, rel, judge=judge)
     try:
         tmp = f".{name}.sheaf-new-{secrets.token_hex(6)}"
         out = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o666, dir_fd=fd)
@@ -277,11 +277,11 @@ def create_file(top, rel: str, text: str):
         os.close(fd)
 
 
-def check_create(top, rel: str):
+def check_create(top, rel: str, judge=None):
     """Raise what `create_file(top, rel, …)` would raise for its path, writing nothing: FileExistsError when the
     name is taken by anything, a dangling link included, and the OSError of its walk for a missing folder or a
     link on the way. So a create refused for another reason can answer as the path alone would."""
-    fd, name = _folder_of(top, rel)
+    fd, name = _folder_of(top, rel, judge=judge)
     try:
         try:
             os.stat(name, dir_fd=fd, follow_symlinks=False)
@@ -292,13 +292,20 @@ def check_create(top, rel: str):
         os.close(fd)
 
 
-def _folder_of(top, rel: str, make: bool = False):
+def _folder_of(top, rel: str, make: bool = False, judge=None):
     """(fd of the folder of `rel` under `top`, the file's name): each folder opened from the one above it
     without following a link, so a link on the way is an OSError wherever it points. With `make`, a missing
-    folder is made on the way, as the umask gives a new folder, and then opened as any other."""
+    folder is made on the way, as the umask gives a new folder, and then opened as any other.
+
+    `judge(identities)` is called with the (st_dev, st_ino) of the root's folder and its parents, taken from the
+    descriptor `top` was opened to, before anything is made or read, and with that of each folder opened after: it
+    raises to refuse (a private root, SPEC 9.11). The folder is judged as opened, never by the path it was opened by."""
+    from .beneath import _root_dirs, ident
     parts = rel.split("/")
     fd = os.open(top, os.O_RDONLY | os.O_DIRECTORY)
     try:
+        if judge is not None:
+            judge(_root_dirs(fd))
         for seg in parts[:-1]:
             if make:
                 try:
@@ -308,6 +315,8 @@ def _folder_of(top, rel: str, make: bool = False):
             inner = os.open(seg, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
             os.close(fd)
             fd = inner
+            if judge is not None:
+                judge([ident(fd)])
     except BaseException:
         os.close(fd)
         raise

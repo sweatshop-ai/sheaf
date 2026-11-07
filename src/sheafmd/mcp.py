@@ -33,6 +33,7 @@ from .hub.roots import Address, NotFound, address_of_url, in_git_dir
 from .hub import place, visibility
 from .hub.state import TokenRow
 from .render import COMMENT_RE as HTML_COMMENT_RE, strip_comments
+from .beneath import Private
 from .source import check_create, create_file, md_hash, now, update_beneath
 
 PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")
@@ -708,7 +709,10 @@ class Door:
         # The name's lock (9.11) from the first look at its homes to the file made: a create of the same name, or a
         # move, that comes meanwhile waits, and then finds the name taken.
         with place.held(self.hub, address):
-            text = self._make(root, top, rel, name, address, text, caller)
+            try:
+                text = self._make(root, top, rel, name, address, text, caller)
+            except Private:         # the root's folder, as opened, is a private root's: answered as a path in no root
+                raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path") from None
             self.hub.wrote(address)
             self.hub.committed(address, by=caller.display, what="create")
         return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text)}
@@ -716,15 +720,18 @@ class Door:
     def _make(self, root, top: Path, rel: str, name: str | None, address: str, text: str, caller: Caller):
         """The file of a create, at its home when the hub places it (9.11): the text written. The sheaf's address is
         its name wherever its file is."""
+        judge = place.judge_for(self.hub, root)
         try:
             # The owner is judged by the list's row for the address, which a sheaf already there may have: what
             # the path alone answers, walked as the write walks it, comes before every answer that judgement
             # shapes (the refusal, the size with the owner line), so none tells what is there, nor what a link
             # on the way points to.
-            check_create(top, rel)
+            check_create(top, rel, judge)
             # A sheaf's name is taken by its file at home and at every private home (9.11), whoever's it is.
             if name is not None and place.taken(self.hub, root, name):
                 raise FileExistsError(errno.EEXIST, "File exists", rel)
+        except Private:
+            raise
         except OSError as e:
             raise _not_made(address, e) from None
         # Every create, open or not, tells the list its address has no file now: the row of a sheaf that went
@@ -748,10 +755,12 @@ class Door:
         try:
             if name is not None and rel != name:        # the private folders, walked as create_file walks
                 with place.folders_lock(top, name):     # so no move's tidying takes them before the file is in
-                    os.close(place.make_folders(top, rel)[0])
-                    create_file(top, rel, text)
+                    os.close(place.make_folders(top, rel, judge)[0])
+                    create_file(top, rel, text, judge)
             else:
-                create_file(top, rel, text)
+                create_file(top, rel, text, judge)
+        except Private:
+            raise
         except OSError as e:
             raise _not_made(address, e) from None
         return text

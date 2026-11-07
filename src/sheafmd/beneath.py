@@ -32,6 +32,11 @@ class Escapes(FileNotFoundError):
         super().__init__(errno.ENOENT, "outside the root, a loop, or not served", rel)
 
 
+class Private(Escapes):
+    """The folder opened for a write or a move is in a private root that the root it was opened beneath is not
+    (SPEC 9.11): read as a folder that is not there; a door `create` answers as for a path in no root."""
+
+
 class Linked(FileNotFoundError):
     """A file with more than one name: a hard link can put a private file under a name that no folder's identity
     judges, so no door opens one (SPEC 9.11). Read as a file that is not there."""

@@ -676,7 +676,9 @@ def place(hub, address: str, member=None, by: str | None = None, commit: bool = 
     root, top, name = got
     with _name_lock(top, name):
         if undecided(hub, name):
-            _refused(hub, address, UNDECIDED)
+            if (address, "undecided") not in hub.told_place:      # its own key: the refusal that comes later is still told
+                hub.told_place.add((address, "undecided"))
+                hub.record("place-refused", address, why=UNDECIDED)
             return None
         (at, rel), n = _one(hub, root, name)
         if n > 1:

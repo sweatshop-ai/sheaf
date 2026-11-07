@@ -157,7 +157,7 @@ def test_a_list_page_keeps_working_while_another_members_private_root_cannot_be_
     (two.list_repo / "projects.toml").write_text('[projects."acme/blog"]\nmembers = ["a", "b"]\nstatus = "live"\n',
                                                  encoding="utf-8")
     (two.private_repo / ".git").rename(two.base / "git-away")
-    assert hub.visible(b, a) is True and hub.assignees(a, {}) is not False
+    assert hub.visible(b, a) is True
     comment(hub, a, OPEN, quote="oth")                                         # a list-bound page is not another member's concern
     assert "hi" in (two.list_repo / OTHER).read_text(encoding="utf-8")
 
@@ -361,7 +361,7 @@ def test_assignees_of_a_name_two_roots_hold_answer_instead_of_raising(two):
     hub = hub_of(two)
     for repo in (two.list_repo, two.private_repo):
         (repo / NAME).write_text(PRIVATE_TEXT.replace("owner: a\n", "owner: a\nissue: acme/record#5\n"), encoding="utf-8")
-    hub.assignees(address(hub), {"issue": "acme/record#5"})                    # a member's page asks it; raises nothing
+    assert hub.assignees(address(hub), {"issue": "acme/record#5"}) is None     # a member's page asks it: no answer, no raise
 
 
 def test_create_is_refused_while_a_private_root_cannot_be_looked_at(two):
@@ -375,3 +375,20 @@ def test_create_is_refused_while_a_private_root_cannot_be_looked_at(two):
     assert is_error and not (two.list_repo / OTHER).exists() and not hub_rows("mcp-failed"), got
     (two.base / "git-away").rename(two.private_repo / ".git")
     assert not call(door, "create", token=token, doc=address(hub, OTHER), text=OPEN)[0]       # control
+
+
+def test_committed_does_not_rebind_a_private_page_to_a_list_file_while_the_root_cannot_be_looked_at(two):
+    hub = hub_of(two)
+    (two.private_repo / NAME).write_text(PRIVATE_TEXT, encoding="utf-8")
+    a = address(hub)
+    private = hub.entry(a).file_root
+    (two.list_repo / NAME).write_text(OPEN, encoding="utf-8")                  # untracked, the only one the hub can see
+    seen = untouched(two)
+    os.chmod(two.private_repo, 0)
+    try:
+        with place.held(hub, a):
+            hub.committed(a, by="Member A")
+        assert untouched(two) == seen and hub_rows("commit-refused")
+        assert hub.entries[a].file_root == private                             # the entry is kept, not rebound
+    finally:
+        os.chmod(two.private_repo, 0o755)

@@ -2,12 +2,15 @@
 assignees, `projects.toml` or the front matter say, another member and a token bound to nobody get the 404 of a missing
 document, and a file that names a member as its owner in the list's repo is nobody's. Each refusal has the owner's own
 call as its positive control, on the same route."""
+import time
+
 import pytest
 from helpers import Front, browser_on, call, comment, hub_rows
 from two_roots import A, B, TwoRoots, git, two_roots
 
 from sheafmd.blocks import split_md_blocks
 from sheafmd.hub import the_list
+from sheafmd.hub.index import SWEEP_SECONDS
 from sheafmd.hub.state import Tokens
 from sheafmd.source import md_hash
 
@@ -106,19 +109,56 @@ def test_assignee_does_not_open_private_sheaf(world):
         missing = w.front.request(method, other, member=B, body=body and {**body, "doc": body["doc"].replace("post.md", "none.md")})
         assert (gone.status, gone.body) == (missing.status, missing.body) or name == "page", name
     assert (w.two.private_repo / NAME).read_text(encoding="utf-8") == PRIVATE        # nothing was written
+    assert "Secret words." in w.front.get(f"/_/mount?doc={w.address}", member=A).json()["html"]
     for name, method, path, body in table:                                           # the owner's call, the same route
         own = w.front.request(method, path, member=A, body=body)
         assert not (own.status == 404 and b"no such document" in own.body), (name, own.status, own.body[:200])
 
 
-def test_assignee_has_no_row_and_no_event(world):
+def test_assignee_has_no_row_and_no_event(world, monkeypatch):
     w = world
     w.put(PRIVATE)
     assert listed(w, A) and not listed(w, B)
+    now = [time.time()]
+    w.hub.clock = lambda: now[0]
+    monkeypatch.setattr(w.hub.index, "_start_sweep", lambda run: run())          # a sweep inside the tick
     mine, theirs = (w.front.get("/_/live", member=m).stream for m in (A, B))
-    w.hub.entry(w.address).live.refresh(force=True)
+    for m in (A, B):
+        w.front.get("/_/index.json", member=m)
+    now[0] += SWEEP_SECONDS
     w.hub.tick()
-    assert [d["doc"] for n, d in theirs.drain() if n == "status"] == []
+    mine.drain(), theirs.drain()
+    (w.two.private_repo / NAME).unlink()                  # a change both streams would be told of if both could see it
+    now[0] += SWEEP_SECONDS
+    w.hub.tick()
+    assert [d["doc"][-len(NAME):] for n, d in mine.drain() if n == "status"] == [NAME]       # the owner's stream hears it
+    assert [d for n, d in theirs.drain() if n == "status"] == []
+
+
+def test_unbound_token_by_the_private_roots_own_address(world):
+    w = world
+    w.put(PROJECT_WIDE)
+    direct = f"{w.hub.roots.get(w.hub.roots.lookup(w.two.private_repo / NAME).name).name}/{NAME}"
+    assert direct != w.address
+    for doc in (direct, str(w.two.private_repo / NAME)):
+        for tool, args in (("read", {}), ("threads", {}),
+                           ("update", {"text": PROJECT_WIDE + "x", "expected_hash": md_hash(PROJECT_WIDE)})):
+            assert call(w.door, tool, token=w.tokens["loose"], doc=doc, **args)[0], (doc, tool)
+    is_error, got = call(w.door, "documents", token=w.tokens["loose"], open_only=False)
+    assert not is_error and NAME not in str(got)
+    assert (w.two.private_repo / NAME).read_text(encoding="utf-8") == PROJECT_WIDE
+    assert not call(w.door, "read", token=w.tokens["tok-a"], doc=direct)[0]               # the owner reads it there
+
+
+def test_a_nobodys_sheaf_gone_is_told_to_its_named_owner_no_more_than_before(world):
+    w = world
+    w.put(PRIVATE, w.two.list_repo)
+    w.hub.assignees = lambda address, fm: None
+    a = w.hub.proxy.members[A]
+    assert not w.hub.visible(a, w.address)
+    w.hub.member_owns(a, w.address)                       # a call with no front matter must not forget it was nobody's
+    (w.two.list_repo / NAME).unlink()
+    assert not w.hub.visible(a, w.address, never_read=False)
 
 
 @pytest.mark.parametrize("tool", ["read", "update", "threads"])

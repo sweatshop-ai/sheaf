@@ -446,6 +446,8 @@ def private_member(hub, address: str, fm: dict | None = None):
     is told to no one else."""
     if not getattr(hub, "private_roots", None):
         return None
+    if (at := hub.roots.get(Address.parse(address).root)) is not None and at.id in hub.private_roots:
+        return hub.private_roots[at.id]         # the private root addressed by its own name: all of it is the member's
     got = _where(hub, address)
     if got is None:
         return None
@@ -457,7 +459,8 @@ def private_member(hub, address: str, fm: dict | None = None):
     if owner is None and fm is not None and visibility.effective(fm) != "project":
         owners = _owners(hub, root, address, fm)
         owner = "" if len(owners) == 1 and owners[0].id in _private_roots(hub) else None
-    hub._private_seen[address] = owner
+    if owner is not None or fm is not None:     # a look without the front matter never forgets a sheaf that was nobody's
+        hub._private_seen[address] = owner
     return owner
 
 

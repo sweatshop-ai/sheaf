@@ -660,8 +660,13 @@ class TheList:
         """The registered root of the list's folder, registered on the first ask."""
         return self.hub.roots.for_document(self.cfg.root / projects.FILE)
 
+    def private(self) -> list:
+        """The registered private roots (SPEC 9.11), each its member's alone; none for a hub without one."""
+        by_id = {r.id: r for r in self.hub.roots.all()}
+        return [by_id[i] for i in self.hub.private_roots if i in by_id]
+
     def poll(self):
-        """Read every sheaf of the root and the record of their issues, and keep the rows."""
+        """Read every sheaf of the root, and of each private root, and the record of their issues, and keep the rows."""
         with self._poll_lock:
             with self._off_lock:
                 started = next(self._ask)
@@ -672,32 +677,41 @@ class TheList:
                                 error=f"{self.cfg.root} is not the top folder of its root ({root.path})")
                 self._records, self._answered, self._snap = {}, {}, Snapshot()
                 return
-            sheaves, read, files = [], {}, {}
+            sheaves, read, files, held = [], {}, {}, set()     # held: the names of the private roots' files
             placed, top = place.applies(self.hub, root.name), Path(os.path.realpath(root.path))
-            for found in roots_mod.list_documents(root).docs:
+            walk = [(root, f) for f in roots_mod.list_documents(root).docs]
+            for p in self.private():
+                walk += [(p, f) for f in roots_mod.list_documents(p).docs]
+            for src, found in walk:
                 if found.rel.count("/") < 2:
-                    if placed:
+                    if placed and src is root:
                         place.tell_link(self.hub, root, top, found.rel)     # a link there is none either (9.11)
                     continue                # above `<client>/<project>`: no sheaf
-                if self.hub.roots.lookup(root.path / found.rel) != root:
+                if self.hub.roots.lookup(src.path / found.rel) != src:
                     continue                # a nested root's (8.2): 9.9 keeps it from the list's members
                 # A sheaf is known by its name (9.11), wherever its file is; a name two files hold is none, and so is
-                # a link. Found and read under its name's lock, as every read: no move comes between.
+                # a link. Found and read under its name's lock, as every read: no move comes between. A file of a
+                # private root is named by its path, which is no other root's: the list lists it for its member only.
                 logical = place.logical(found.rel) if placed else None
+                if src is not root and logical != found.rel:
+                    continue
                 with place.held(self.hub, f"{root.name}/{logical}") if logical else contextlib.nullcontext():
-                    rel = place.named(self.hub, root, top, found.rel) if placed else found.rel
+                    rel = (place.named(self.hub, root, top, found.rel) if src is root
+                           else place.named_in(self.hub, root, src, found.rel)) if placed else found.rel
                     if rel is None:
-                        if placed:
+                        if placed and src is root:
                             place.tell_link(self.hub, root, top, found.rel)
                         continue
                     try:
-                        with self.hub.open_in(root, found.rel) as op:      # beneath the root, judged on what was opened (9.11)
+                        with self.hub.open_in(src, found.rel) as op:       # beneath the root, judged on what was opened (9.11)
                             key = _stat_key(os.fstat(op.fd))               # before the read: a change after it shows
                             text = op.text()
                     except (OSError, UnicodeDecodeError):
                         continue
+                if src is not root:
+                    held.add(rel)
                 read[rel] = key
-                files[rel] = os.path.realpath(root.path / found.rel)
+                files[rel] = os.path.realpath(src.path / found.rel)
                 try:
                     s = read_sheaf(rel, text)
                 except Exception:           # one sheaf the reader trips on leaves the rest of the list
@@ -710,7 +724,7 @@ class TheList:
             except projects.Invalid:
                 entries = {}
             if placed:
-                place.tell_ignored(self.hub, root, set(entries) | {"/".join(r.split("/")[:2]) for r in read})
+                place.tell_ignored(self.hub, root, set(entries) | {"/".join(r.split("/")[:2]) for r in read if r not in held})
             wanted = sorted({s.issue for s in sheaves})
             try:
                 self._records = fetch(self.cfg, wanted) if wanted else {}   # an issue it does not hold is off
@@ -740,7 +754,7 @@ class TheList:
             # read places on the ones before it, as every other judgement of the hub reads them): the
             # first poll moves what was written before the rule, a later one what an owner change made another's.
             for rel in read if placed else ():
-                if place.logical(rel) == rel:
+                if rel not in held and place.logical(rel) == rel:
                     try:
                         place.place(self.hub, f"{root.name}/{rel}")
                     except Exception:       # one sheaf that cannot move leaves the others

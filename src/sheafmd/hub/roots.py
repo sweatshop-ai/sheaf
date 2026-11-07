@@ -27,6 +27,16 @@ COUNT_LIMIT = 100_000           # documents counted past the cap before the coun
 _GIT_LIST_SECONDS = 20
 
 
+class Nested(ValueError):
+    """A root that encloses, or lies inside, a private root (SPEC 9.11, rule A): none is registered."""
+
+
+def nests(a, b) -> bool:
+    """Whether the real paths `a` and `b` are different folders, one of them inside the other."""
+    a, b = os.path.realpath(a), os.path.realpath(b)
+    return a != b and (a.startswith(b.rstrip("/") + "/") or b.startswith(a.rstrip("/") + "/"))
+
+
 class NotFound(Exception):
     """An address that is no markdown file inside a root."""
 
@@ -222,6 +232,7 @@ class Roots:
         # address's own root and path, or NotFound (a sheaf's name in the list's root, 9.11; the file may be in a
         # private root). Set by the hub; None names every file by its own path.
         self.placer = None
+        self.private_paths: Callable[[], Iterable[str]] = tuple     # the real paths of the private roots (set by the hub)
         if self._load():
             with self._changing():
                 self._save()
@@ -283,6 +294,8 @@ class Roots:
             for r in self._roots.values():
                 if r.path == path:
                     return r
+            if (private := next((p for p in self.private_paths() if nests(path, p)), None)) is not None:
+                raise Nested(f"{path} encloses or lies inside the private root {private}: no root is registered there")
             if {n: r.path for n, r in self._roots.items()} != known:
                 # another process changed the registry since the caller chose this root: choose again
                 found = self._find(path, list(self._roots.values()))[0]
@@ -381,6 +394,20 @@ class Roots:
         if in_git_dir(real, root):
             raise NotFound(address)
         return real
+
+    def locate(self, address: str) -> tuple[Root, str]:
+        """(the root, the path in it) of the file an address names, resolved by no path: the door opens it beneath the
+        root (`sheafmd.beneath`). NotFound for what `document` refuses by its name alone."""
+        at = Address.parse(address)
+        root = self.get(at.root)
+        if root is None or not at.plain or not at.rel.endswith(".md") or _sheafs_own(at.rel):
+            raise NotFound(address)
+        rel = at.rel
+        if self.placer is not None:
+            root, rel = self.placer(root, rel)
+        if in_git_dir(root.path / rel, root) or _sheafs_own(rel):
+            raise NotFound(address)
+        return root, rel
 
     def _resolve(self, address: str) -> tuple[Root, Path]:
         at = Address.parse(address)

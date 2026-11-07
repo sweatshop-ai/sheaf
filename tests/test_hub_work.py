@@ -532,7 +532,7 @@ def drops(box):
 def test_tell_on_a_box_sheaf_writes_the_comment_and_drops_it_for_james(team, box, work):
     got = comment(team, work, "tell")
     assert got.status == 200, got.text
-    assert got.json()["telling"] == [] and "tellError" not in got.json()
+    assert got.json()["telling"] == [{"id": got.json()["id"], "to": "James", "state": "sent"}] and "tellError" not in got.json()
     assert "Can you send the draft to Joey?" in (work / DOC).read_text(encoding="utf-8")
     f, = drops(box)
     assert f.name.startswith("thinkingtoo--tiroir-20") and f.name.endswith("Z")
@@ -712,6 +712,41 @@ def test_a_drop_answered_in_the_file_from_outside_is_never_given_up_on(team, box
     assert hub_rows("box-expired") == []
 
 
+# ── the member's `telling` holds their own drops (SPEC 9.9, 9.12) ──────────
+
+def telling(team, member=HANS):
+    return team.get(f"/_/doc?doc={ADDRESS}", member=member).json()["telling"]
+
+
+def test_a_members_telling_holds_their_own_drop_for_james_and_no_other_members(team, box, work):
+    cid = comment(team, work, "tell").json()["id"]
+    assert telling(team) == [{"id": cid, "to": "James", "state": "sent"}]
+    assert telling(team, THIERRY) == []                                   # `sent` stays every member's (9.12)
+    assert sent(team, THIERRY) == [{"id": cid, "kind": "tell", "state": "sent"}]
+
+
+def test_the_drops_telling_follows_the_supervisors_word_and_ends_with_the_reply(team, box, work):
+    cid = comment(team, work, "tell").json()["id"]
+    status(box, "delivered")
+    team.hub.tick()
+    assert telling(team) == [{"id": cid, "to": "James", "state": "delivered"}]
+    team.post("/_/comment", {"doc": ADDRESS, "op": "reply", "id": cid, "body": "Sent it."}, member=THIERRY)
+    assert telling(team) == []
+
+
+def test_the_answer_of_a_comment_and_a_later_changed_event_carry_the_drop_in_telling_to_its_member_only(team, box, work):
+    mine, theirs = (team.get(f"/_/live?doc={ADDRESS}", member=m).stream for m in (HANS, THIERRY))
+    got = comment(team, work, "tell")
+    cid = got.json()["id"]
+    assert got.json()["telling"] == [{"id": cid, "to": "James", "state": "sent"}]
+    mine.drain(), theirs.drain()
+    comment(team, work, "note", as_=THIERRY, body="Another thread.")                      # a change of the sheaf
+    last = lambda sub: [d for n, d in sub.drain() if n == "changed"][-1]["telling"]
+    assert last(mine) == [{"id": cid, "to": "James", "state": "sent"}] and last(theirs) == []
+    team.post("/_/comment", {"doc": ADDRESS, "op": "reply", "id": cid, "body": "Done."}, member=THIERRY)
+    assert last(mine) == [] and telling(team) == []
+
+
 # ── the drop's status, from the box's supervisor (#139) ──────────────────────
 
 def status(box, state, **extra):
@@ -856,6 +891,34 @@ def test_a_delivered_drop_turns_the_members_dot_orange_and_tells_their_index_alo
     assert ("status", {"doc": ADDRESS, "root": "work"}) in mine.drain()
     assert [d for n, d in hubs.drain() if n == "status" and d.get("doc") == ADDRESS and "dot" not in d] == []
 
+
+
+def test_a_delivered_drop_turns_the_orange_of_the_member_who_sent_it_and_no_other_members(team, box, work):
+    # 9.9: a member's orange is James working on a drop of theirs, never on another member's.
+    cid = comment(team, work, "tell", as_=THIERRY).json()["id"]
+    assert team.post("/_/seen", {"doc": ADDRESS, "id": cid, "count": 1}, member=HANS).status == 200   # no red to outrank it
+    status(box, "delivered")
+    team.hub.tick()
+    assert dot(team, THIERRY) == "orange" and dot(team, HANS) == "blue"
+
+
+def test_a_members_drop_that_fails_tells_their_index_while_another_members_drop_still_works(team, box, work):
+    # The orange of each is their own (9.9): the end of Hans's must reach his index stream although Thierry's goes on.
+    h = comment(team, work, "tell", as_=HANS).json()["id"]
+    t = comment(team, work, "tell", as_=THIERRY, body="And the second draft?").json()["id"]
+    for who, cid in ((HANS, t), (THIERRY, h)):
+        assert team.post("/_/seen", {"doc": ADDRESS, "id": cid, "count": 1}, member=who).status == 200
+    first, second = [f for f in drops(box) if not f.name.endswith(".status")]
+    for f, state in ((first, "delivered"), (second, "delivered")):
+        (box["tell"] / f"{f.name}.status").write_text(json.dumps({"state": state}), encoding="utf-8")
+    team.hub.tick()
+    assert dot(team, HANS) == dot(team, THIERRY) == "orange"
+    mine = team.get("/_/live", member=HANS).stream
+    mine.drain()
+    (box["tell"] / f"{first.name}.status").write_text(json.dumps({"state": "failed", "error": "no"}), encoding="utf-8")
+    team.hub.tick()
+    assert ("status", {"doc": ADDRESS, "root": "work"}) in mine.drain()
+    assert dot(team, HANS) == "blue" and dot(team, THIERRY) == "orange"
 
 
 def test_a_delivered_drop_answered_while_a_page_asks_still_clears_the_members_orange(team, box, work):

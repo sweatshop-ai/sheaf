@@ -30,6 +30,18 @@ HAS_IT = "{agent} has this comment waiting already: cancel it first, or reply in
 GONE = "{agent} can no longer reach this hub: its token was revoked. Pick another target."
 
 
+EVENTS = ("tell-queued", "tell-seen", "tell-done", "tell-cancelled")
+
+
+class Owned(dict):
+    """An event's data that remembers whose Tell it is (`member`: a member's id, None for the hub person), so a
+    stream tells a page of its own reader's Tells only. It is a dict in every other way."""
+
+    def __init__(self, data: dict, member):
+        super().__init__(data)
+        self.member = member
+
+
 class Refused(Exception):
     """A Tell that cannot wait: one sentence and the HTTP status."""
 
@@ -64,17 +76,17 @@ class Waiting:
         row = next((r for r in self.hub.tokens.list() if r.name == t.get("token") and r.id == t.get("tid")), None)
         return row.signed(self.hub.person, self.hub.proxy) if row is not None else str(t.get("token", ""))
 
-    def _emit(self, address: str, name: str, data: dict):
+    def _emit(self, address: str, name: str, data: dict, member=None):
         e = self.hub.entries.get(address)
         if e is not None:
-            e.bus.publish(name, data)
+            e.bus.publish(name, Owned(data, member))
 
     def _end(self, rows: list, gone: list, how: str, **extra):
         """Inside `_change`: take `gone` out of `rows`, and tell the page and the log of each."""
         for t in gone:
             rows.remove(t)
-            data = {"id": t["thread"], **extra}
-            self._emit(t["doc"], f"tell-{how}", data)
+            data = {"id": t["thread"], **({"seen": bool(t["seen"])} if how == "cancelled" else {}), **extra}
+            self._emit(t["doc"], f"tell-{how}", data, t.get("member"))
             self.hub.record(f"tell-{how}", t["doc"], thread=t["thread"], token=t["token"], tid=t["tid"],
                             **{k: v for k, v in extra.items() if k == "reason"})
 
@@ -130,7 +142,7 @@ class Waiting:
             if member is not None:
                 t["member"] = member.id
             rows.append(t)
-            self._emit(address, "tell-queued", {"id": cid, "agent": name})
+            self._emit(address, "tell-queued", {"id": cid, "agent": name}, t.get("member"))
             self.hub.record("tell-queued", address, thread=cid, token=row.name, tid=row.id, by=by)
             return t, True
         return self._change(change)
@@ -155,7 +167,7 @@ class Waiting:
                     continue
                 if t["seen"] is None:
                     t["seen"] = time.strftime(STAMP_FORMAT)
-                    self._emit(address, "tell-seen", {"id": t["thread"]})
+                    self._emit(address, "tell-seen", {"id": t["thread"]}, t.get("member"))
                     self.hub.record("tell-seen", address, thread=t["thread"], token=t["token"], tid=t["tid"])
                     save = True
                 out.append({"id": t["id"], "thread": t["thread"], "message": message(c, t), "by": t["by"],

@@ -135,7 +135,7 @@ def test_a_revoke_by_the_cli_ends_the_tell_at_the_watchers_next_pass_with_no_pag
     sub.drain()
     Tokens().revoke("ada-chatgpt")                      # the CLI, in its own process: the hub is not called
     browser.hub.tick()
-    assert named(sub.drain(), "tell-cancelled") == [{"id": "c1", "reason": "revoked"}]
+    assert named(sub.drain(), "tell-cancelled") == [{"id": "c1", "seen": False, "reason": "revoked"}]
     assert browser.hub.waiting_tells.waits(DOC, sweep=False) == []
 
 
@@ -228,6 +228,39 @@ def test_a_members_tell_waits_for_their_own_agent_only(front, browser, talk, wor
     assert front.get(f"/_/doc?doc={DOC}").json()["telling"] == [{"id": "c1", "to": "ChatGPT (Bea)", "state": "seen"}]
 
 
+def test_each_page_is_told_of_its_own_tells_only(front, browser, talk, work, other):
+    """The hub person's page never hears of a member's Tell nor of the agent it waits for, and a member's page hears of
+    their own, whole: queued, seen, cancelled (SPEC 9.9)."""
+    bea, loose = agent_token("bea-chatgpt"), agent_token("ada-chatgpt")
+    front.hub.proxy = members(work, other, bea=["bea-chatgpt"], cal=[])
+    assert pick(front, "agent:bea-chatgpt").status == 200
+    target(browser)
+    mine, own = front.get(f"/_/live?doc={DOC}").stream, browser.get(f"/_/live?doc={DOC}").stream
+
+    def heard(sub):
+        return [(n, d) for n, d in sub.drain() if n.startswith("tell-")]
+    r = front.post("/_/comment", {"doc": DOC, "op": "reply", "id": "c1", "body": "Please do.", "tell": True})
+    assert r.status == 200 and "tellError" not in r.json(), r.text
+    assert heard(mine) == [("tell-queued", {"id": "c1", "agent": "ChatGPT (Bea)"})] and heard(own) == []
+    documents(browser, bea)
+    assert heard(mine) == [("tell-seen", {"id": "c1"})] and heard(own) == []
+    assert tell(browser).status == 200                                 # the hub person's, on the same thread
+    assert heard(own) == [("tell-queued", {"id": "c1", "agent": "ChatGPT (" + browser.hub.person + ")"})] and heard(mine) == []
+    assert front.post("/_/cancel", {"doc": DOC, "id": "c1"}).status == 200
+    assert heard(mine) == [("tell-cancelled", {"id": "c1", "seen": True})] and heard(own) == []
+
+
+def test_the_box_or_a_relay_comes_before_a_members_agent(front, browser, talk, work, other, monkeypatch):
+    from sheafmd.hub.handler import Handler
+    agent_token("bea-chatgpt")
+    front.hub.proxy = members(work, other, bea=["bea-chatgpt"], cal=[])
+    assert pick(front, "agent:bea-chatgpt").status == 200
+    monkeypatch.setattr(Handler, "_work_route", lambda self, *a, **k: "box")
+    assert front.post("/_/tell", {"doc": DOC, "id": "c1"}).status == 400
+    front.post("/_/comment", {"doc": DOC, "op": "reply", "id": "c1", "body": "Please do.", "tell": True})
+    assert front.hub.waiting_tells.pending(row("bea-chatgpt")) == set()
+
+
 def test_a_member_with_no_agent_of_theirs_is_refused_the_tell_route_with_the_line_of_10_6(front, browser, talk, work, other):
     agent_token("bea-chatgpt")
     front.hub.proxy = members(work, other, bea=["bea-chatgpt"], cal=[])
@@ -266,12 +299,12 @@ def test_a_cancel_that_comes_while_the_first_listing_is_out_ends_it_once_and_see
     waiting, order, done = browser.hub.waiting_tells, [], []
     real = waiting._emit
 
-    def emit(address, name, data):
+    def emit(address, name, data, member=None):
         if name == "tell-seen" and not order:
             c = threading.Thread(target=lambda: (browser.post("/_/cancel", {"doc": DOC, "id": "c1"}), done.append(1)))
             c.start()
             order.append(c)                                          # the cancel waits for the listing's lock
-        real(address, name, data)
+        real(address, name, data, member)
     waiting._emit = emit
     first = documents(browser, token)[0]
     order[0].join(5)

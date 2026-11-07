@@ -10,7 +10,6 @@ import json
 import os
 import re
 import time
-from types import SimpleNamespace
 
 import pytest
 
@@ -245,9 +244,8 @@ def test_the_same_boot_leaves_a_running_job_alone(running_tell):
     assert running_tell.page.query_selector("#rd-popover .rd-pending-tell") is not None
 
 
-@pytest.mark.parametrize("kind", ["ask", "tell"])
-def test_a_job_started_while_the_page_could_not_hear_the_hub_shows_in_its_thread_after_the_hello(tab, kind):
-    # `ask-started` and `tell-started` are missed in a blip of the same boot; the hello alone has to bring the
+def test_a_job_started_while_the_page_could_not_hear_the_hub_shows_in_its_thread_after_the_hello(tab):
+    # `tell-started` is missed in a blip of the same boot; the hello alone has to bring the
     # job in (a reload would only come when the answer reaches the file and the hash moves).
     tab.page.add_init_script(WATCH)
     tab.open()
@@ -256,14 +254,10 @@ def test_a_job_started_while_the_page_could_not_hear_the_hub_shows_in_its_thread
     tab.site.kill()
     until(lambda: stream(tab.page)["errors"] >= 1, what="the stream to fail")
     hub = tab.site.hub
-    if kind == "ask":
-        hub.runner._holds.append(SimpleNamespace(kind="ask", address=hub.entry(DOC).address, cid=c.id,
-                                                       cancelled=False))
-    else:
-        hub.entry(DOC).live._telling[c.id] = 0
+    hub.entry(DOC).live._telling[c.id] = 0
     tab.site.reopen()
     until(lambda: stream(tab.page)["opens"] >= 2, what="the stream to come back")
-    tab.page.wait_for_selector("#rd-popover .rd-pending" if kind == "ask" else "#rd-popover .rd-pending-tell")
+    tab.page.wait_for_selector("#rd-popover .rd-pending-tell")
     assert tab.page.query_selector("#rd-popover .rd-interrupted") is None
 
 
@@ -816,35 +810,6 @@ def test_the_signed_out_notice_goes_when_the_hub_says_hello_again(tab, site):
     until(lambda: stream(tab.page)["opens"] >= 2, timeout=15, what="the stream to come back")
     until(lambda: notice(tab.page) == "", what="the hello to clear the notice")
     assert "plums" in tab.page.inner_text(P2)
-
-
-def test_the_ask_answer_notice_of_a_stale_page_does_not_tell_the_person_to_save(tab, site):
-    # A stale page refuses Save, so the notice says what works: copy the edits, then reload.
-    tab.open()
-    c = comment_on(tab, at(P1, "apples"), at(P1, "apples", None), "Why apples?")
-    tab.page.wait_for_selector("#rd-popover .rd-msg")
-    tab.page.keyboard.press("Escape")
-    tab.page.keyboard.press("e")
-    tab.page.evaluate(f"document.querySelector({P2!r}).append(' and plums')")      # on screen, not saved
-    site.hub.entry(DOC).bus.publish(
-        "ask-done", {"id": c.id, "textSame": False, "base": "0" * 16, "comments": []})
-    until(lambda: "answered comment" in toast(tab.page), what="the notice")
-    says = toast(tab.page)
-    assert "Save, then reload" not in says
-    assert "copy your edits" in says.lower()
-
-
-def test_an_ask_answer_measured_against_another_text_reloads_a_page_with_no_edits(tab, site):
-    # The answer cannot be taken in place (the hub measured it against a text this page does not hold), and
-    # nothing is typed: the page reloads onto the file.
-    tab.open()
-    c = comment_on(tab, at(P1, "apples"), at(P1, "apples", None), "Why apples?")
-    tab.page.wait_for_selector("#rd-popover .rd-msg")
-    tab.page.keyboard.press("Escape")
-    mark(tab.page)
-    site.hub.entry(DOC).bus.publish(
-        "ask-done", {"id": c.id, "textSame": False, "base": "0" * 16, "comments": []})
-    reloaded(tab.page)
 
 
 def test_an_autosave_missed_in_a_short_outage_is_made_again_when_the_hub_answers(tab):

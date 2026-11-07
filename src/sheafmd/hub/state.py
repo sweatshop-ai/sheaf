@@ -10,6 +10,7 @@ import hmac
 import json
 import os
 import re
+import secrets
 import shutil
 import stat
 import threading
@@ -21,7 +22,8 @@ from pathlib import Path
 
 from .. import diagnostics, paths
 from ..source import STAMP_FORMAT, md_hash
-from .auth import MAX_TOKEN, TOKEN_PREFIX, clean_display, new_token, token_hash
+from .auth import (CLIENT_MAX, MAX_TOKEN, TOKEN_PREFIX, agent_name, clean_display, client_ok, new_token,
+                   token_hash)
 
 try:
     import fcntl
@@ -304,22 +306,31 @@ TOKEN_USED_EVERY = 60            # seconds: how often a busy token rewrites toke
 
 
 class NewToken(str):
-    """A token as `Tokens.add` makes it: the secret itself, which also knows the display name that was kept."""
+    """A token as `Tokens.add` makes it: the secret itself, which also knows the display name that was kept
+    (for an agent's token, the client, which `signed` builds the name from)."""
 
     display: str
+    client: str | None
+    id: str
 
-    def __new__(cls, token: str, display: str = ""):
+    def __new__(cls, token: str, display: str = "", client: str | None = None, id: str = ""):
         self = super().__new__(cls, token)
         self.display = display
+        self.client = client
+        self.id = id
         return self
 
 
 def _row_addable(row: dict) -> bool:
     """Whether `Tokens.add` could have written this row's name and display: a name that fullmatches
-    `_TOKEN_NAME_RE`, and a display that is a string `clean_display` leaves as it is and not empty."""
+    `_TOKEN_NAME_RE`, and either a display that is a string `clean_display` leaves as it is and not empty,
+    or (an agent's) a `client` that `client_ok` accepts and no display."""
     name, display = row.get("name"), row.get("display")
-    return (isinstance(name, str) and _TOKEN_NAME_RE.fullmatch(name) is not None
-            and isinstance(display, str) and display != "" and clean_display(display) == display)
+    if not (isinstance(name, str) and _TOKEN_NAME_RE.fullmatch(name) is not None):
+        return False
+    if "client" in row:
+        return "display" not in row and client_ok(row["client"])
+    return isinstance(display, str) and display != "" and clean_display(display) == display
 
 
 @dataclass(frozen=True)
@@ -327,11 +338,13 @@ class TokenRow:
     """One token as the hub and the CLI see it: who it is, never its hash. `created` and
     `last_used` are the stamps of the file as they are."""
     name: str
-    display: str | None             # None only for a hand-edited row that lacks one (`verify` refuses such a row)
+    display: str | None             # None for an agent's row (it has a client) and for a hand-edited row that lacks one (`verify` refuses that)
     write: bool = False
     created: str | None = None
     last_used: str | None = None
-    invalid: bool = False           # set by `of` only: `verify` refuses this row for its name or display
+    invalid: bool = False           # set by `of` only: `verify` refuses this row for its name, display or client
+    client: str | None = None       # an agent's token (SPEC 9.7): the AI client it speaks for, and no display
+    id: str | None = None           # random, written by `add`: tells a revoked token from a new one of its name; none on older rows
 
     @classmethod
     def of(cls, entry) -> "TokenRow | None":
@@ -340,8 +353,20 @@ class TokenRow:
         for its name or display, so a listing can show the row and say so."""
         if not isinstance(entry, dict) or not isinstance(entry.get("name"), str):
             return None
+        client = entry.get("client")
         return cls(entry["name"], entry.get("display"), entry.get("write") is True,
-                   entry.get("created"), entry.get("last_used"), not _row_addable(entry))
+                   entry.get("created"), entry.get("last_used"), not _row_addable(entry),
+                   client if isinstance(client, str) else None,
+                   entry["id"] if isinstance(entry.get("id"), str) else None)
+
+    def signed(self, person: str, cfg=None) -> str:
+        """The name this token's replies are signed with. An agent's is built, never typed: `<client> (<member>)`,
+        the member the config's `tokens` name this token for (`cfg`, the checked `[proxy]` table), else the hub's
+        `person`. Any other token keeps its display."""
+        if self.client is None:
+            return self.display or ""
+        member = cfg.member_of_token(self.name) if cfg is not None else None
+        return agent_name(self.client, member.name if member is not None else person)
 
     @property
     def name_text(self) -> str:
@@ -400,11 +425,19 @@ class Tokens:
     def _stamp(self) -> str:
         return time.strftime(STAMP_FORMAT, time.localtime(self._clock()))
 
-    def add(self, name: str, display: str | None = None, write: bool = False) -> NewToken:
+    def add(self, name: str, display: str | None = None, write: bool = False,
+            client: str | None = None) -> NewToken:
         """Make a token and keep its hash. The token is returned here and nowhere else, with the
-        display name its replies are signed with."""
+        display name its replies are signed with; an agent's (`client`) keeps the cleaned client and
+        no display."""
         if not isinstance(name, str) or not _TOKEN_NAME_RE.fullmatch(name):
             raise TokenError("a token name is 1 to 40 letters, digits, dots, dashes or underscores")
+        if client is not None:
+            if display is not None:
+                raise TokenError("a token has a client or a display name, not both")
+            client = clean_display(client)
+            if not client_ok(client):
+                raise TokenError(f"a client is 1 to {CLIENT_MAX} printable characters, without parentheses")
         shown = name
         if display is not None:
             shown = clean_display(display)
@@ -415,10 +448,12 @@ class Tokens:
             if any(r.get("name") == name for r in self._entries(rows)):
                 raise TokenError(f"a token named {name} already exists")
             token = new_token()
-            rows.append({"name": name, "display": shown, "sha256": token_hash(token),
+            who = {"client": client} if client is not None else {"display": shown}
+            token_id = secrets.token_hex(8)         # not a secret: it is never compared as one
+            rows.append({"name": name, "id": token_id, **who, "sha256": token_hash(token),
                          "created": self._stamp(), "last_used": None, "write": write is True})
             self._write(rows)
-        return NewToken(token, shown)
+        return NewToken(token, shown if client is None else "", client, token_id)
 
     def list(self) -> list[TokenRow]:
         """Every token: its name, display name, created, last used and whether it may write. Never
@@ -456,7 +491,8 @@ class Tokens:
         row = found[0]
         if self._stale(row.get("last_used")) and not self._touch(row["sha256"]):
             return None
-        return TokenRow(row["name"], row["display"], row.get("write") is True)
+        return TokenRow(row["name"], row.get("display"), row.get("write") is True, client=row.get("client"),
+                        id=row["id"] if isinstance(row.get("id"), str) else None)
 
     def _stale(self, last_used) -> bool:
         try:
@@ -492,6 +528,19 @@ class Docs(_Store):
             data[address] = dict(entry)
             return None, True
         self._change(change)
+
+    def change(self, address: str, settle) -> tuple[dict, dict]:
+        """Read the entry, let `settle(copy)` return the new one and write it, all under the file's lock, so
+        a render and a change of target never overwrite each other. (the entry before, the entry after)"""
+        def go(data):
+            e = data.get(address)
+            old = dict(e) if isinstance(e, dict) else {}
+            new = settle(dict(old))
+            if new == old:
+                return (old, new), False
+            data[address] = new
+            return (old, new), True
+        return self._change(go)
 
 
 class Seen(_Store):

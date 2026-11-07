@@ -140,7 +140,7 @@ def test_assignee_has_no_row_and_no_event(world, monkeypatch):
 def test_unbound_token_by_the_private_roots_own_address(world):
     w = world
     w.put(PROJECT_WIDE)
-    direct = f"{w.hub.roots.get(w.hub.roots.lookup(w.two.private_repo / NAME).name).name}/{NAME}"
+    direct = f"{w.hub.roots.lookup(w.two.private_repo / NAME).name}/{NAME}"
     assert direct != w.address
     for doc in (direct, str(w.two.private_repo / NAME)):
         for tool, args in (("read", {}), ("threads", {}),
@@ -149,7 +149,8 @@ def test_unbound_token_by_the_private_roots_own_address(world):
     is_error, got = call(w.door, "documents", token=w.tokens["loose"], open_only=False)
     assert not is_error and NAME not in str(got)
     assert (w.two.private_repo / NAME).read_text(encoding="utf-8") == PROJECT_WIDE
-    assert not call(w.door, "read", token=w.tokens["tok-a"], doc=direct)[0]               # the owner reads it there
+    assert call(w.door, "read", token=w.tokens["tok-a"], doc=direct)[0]                   # the root has no address, not even the owner's
+    assert not call(w.door, "read", token=w.tokens["tok-a"], doc=w.address)[0]            # the owner reads it by its list name
 
 
 def test_a_nobodys_sheaf_gone_is_told_to_its_named_owner_no_more_than_before(world):
@@ -306,7 +307,7 @@ def test_a_deletion_is_told_to_nobody_else_whoever_read_the_file_first(world, mo
 
 def _create_docs(w: World) -> dict:
     """The ways a door `create` can name a new page inside the private root: its own registered name, a root around it."""
-    own = w.hub.roots.get(w.hub.roots.lookup(w.two.private_repo / NAME).name).name
+    own = w.hub.roots.lookup(w.two.private_repo / NAME).name
     return {"own": f"{own}/acme/blog/new.md", "own-taken": f"{own}/{NAME}",
             "own-nofolder": f"{own}/nowhere/at/all/new.md"}
 
@@ -435,6 +436,9 @@ def test_invariant_table_the_member_and_the_key_are_the_controls(two, monkeypatc
     w, docs = _state_world(two, monkeypatch, state)
     token = w.tokens[kind] if kind else None
     for doc in docs:
+        if doc != w.address:                    # the private root has no address of its own, not even for its member
+            assert call(w.door, tool, token=token, doc=doc, **_args(tool, doc))[0], (kind, doc)
+            continue
         is_error, got = call(w.door, tool, token=token, doc=doc, **_args(tool, doc))
         assert not is_error, (kind, doc, got)
 
@@ -752,6 +756,76 @@ def test_a_local_image_is_read_beneath_its_root_and_never_from_a_private_one(wor
     w.hub._private_ids[(st.st_dev, st.st_ino)] = "member-a-id"
     with pytest.raises(PermissionError):
         read(top.resolve() / "one" / "pic.png")
+
+
+def test_private_sheaf_image_shows(world):
+    """The images of a private sheaf are judged against the root its file is in (rule H): its own member's page
+    embeds the picture beside it, and the picture is a private one that no other root's sheaf could embed."""
+    w = world
+    w.put(PRIVATE + "\n![pic](pic.png)\n")
+    png = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8ffff3f0005fe02fea7c2f3050000000049454e44ae426082")
+    (w.two.private_repo / "acme/blog/pic.png").write_bytes(png)
+    html = w.front.get(f"/_/mount?doc={w.address}", member=A).json()["html"]
+    assert "data:image/png;base64," in html
+    assert w.front.get(f"/_/mount?doc={w.address}", member=B).status == 404                  # the positive control's other side
+    # a sheaf of the list's root cannot embed a picture of the private root
+    (w.two.list_repo / "acme/blog/other.md").write_text("# other\n\n![pic](pic.png)\n", encoding="utf-8")
+    (w.two.list_repo / "acme/blog/pic.png").symlink_to(w.two.private_repo / "acme/blog/pic.png")      # even through a link
+    other = w.front.get(f"/_/mount?doc={w.root.name}/acme/blog/other.md", member=A).json()["html"]
+    assert "data:image/png" not in other
+
+
+def test_index_and_documents_show_private_names(world):
+    """Rule D: a member's private sheaves are listed under their list names to that member alone: the index data, the
+    door's `documents`, and the board the streams are told from, which tells the hub's person nothing of them."""
+    w = world
+    w.put(PRIVATE)
+    index = w.hub.index
+    names = lambda member: [d["doc"] for r in index.data(member=member)["roots"] for d in r["docs"]]    # noqa: E731
+    assert w.address in names(w.hub.proxy.members[A]) and w.address not in names(w.hub.proxy.members[B])
+    assert w.address not in names(None)                                      # the hub's person: no private file
+    assert w.address in index._rows()                                        # the board holds it for the members' streams
+    assert names(w.hub.proxy.members[A]) == [w.address]                      # one row: the private root is no second entry
+    assert index.accepting(None)("status", index._event(w.address, None, True, 0, None)) is None      # not the person's
+    is_error, own = call(w.door, "documents", token=w.tokens["tok-a"], open_only=False)
+    assert not is_error and [d["doc"] for d in own] == [w.address]
+
+
+def test_a_private_name_rendered_by_the_persons_hand_is_no_row_and_no_event_of_theirs(world):
+    """`sheaf render` of the list root's path of a private sheaf gives the list name; the hub's person is shown no row
+    of it and told no change, whether or not a sweep has met the name, and its member is shown both."""
+    w = world
+    index = w.hub.index
+    index.arm()
+    w.put(PRIVATE)                  # made after the board was taken: no sweep has met the name
+    person = w.hub.index_bus.subscribe(lambda n: {}, index.accepting(None))          # the hub's person's stream
+    assert w.hub.render(w.two.list_repo / NAME, {}, None)["doc"] == w.address
+    index.touch(w.address)
+    assert [d for n, d in person.drain() if n == "status"] == []
+    names = lambda member: [d["doc"] for r in index.data(member=member)["roots"] for d in r["docs"]]    # noqa: E731
+    assert w.address not in names(None) and w.address in names(w.hub.proxy.members[A])
+    (w.two.private_repo / NAME).unlink()                # gone, or held twice: the name is judged by none now
+    index.touch(w.address)
+    index.sweep()
+    (w.two.list_repo / NAME).write_text("# a hand-made twin\n", encoding="utf-8")
+    index.touch(w.address)
+    assert [d for n, d in person.drain() if n == "status"] == []        # nor the end of what they were never shown
+
+
+def test_a_private_name_the_board_was_armed_with_while_rendered_is_gone_unheard_by_the_person(world):
+    """A private file the repo ignores is no listing's, but a render puts its name on the board at `arm`; its end is
+    told to its member's stream and not to the hub's person."""
+    w = world
+    (w.two.private_repo / ".gitignore").write_text("post.md\n", encoding="utf-8")
+    w.put(PRIVATE)
+    index = w.hub.index
+    w.hub.render(w.two.list_repo / NAME, {}, None)
+    person = w.hub.index_bus.subscribe(lambda n: {}, index.accepting(None))
+    index.arm()
+    assert w.address in index._board
+    (w.two.private_repo / NAME).unlink()
+    index.sweep()
+    assert [d for n, d in person.drain() if n == "status"] == []
 
 
 def test_the_share_copy_is_rendered_from_the_text_the_descriptor_gave(world, mode, monkeypatch):

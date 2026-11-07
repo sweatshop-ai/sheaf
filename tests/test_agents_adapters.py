@@ -93,8 +93,8 @@ class Runs:
 
 # ── the interface ────────────────────────────────────────────────────────────
 
-def test_the_four_capabilities_are_the_spec_set():
-    assert CAPS == frozenset({"ask", "deliver", "state", "stop"})
+def test_the_three_capabilities_are_the_spec_set_and_ask_is_not_one():
+    assert CAPS == frozenset({"deliver", "state", "stop"})
 
 
 def test_a_state_is_a_status_and_the_question_of_a_waiting_session():
@@ -117,6 +117,16 @@ def test_the_other_agents_are_detected_and_have_no_capabilities(name):
     assert a.capabilities(t) == frozenset()
     assert a.state(t) is None
     with pytest.raises(DeliveryError):
+        a.deliver(t, "hello", Runs())
+
+
+@pytest.mark.parametrize("name", ["codex", "cursor", "opencode", "gemini", "foo"])
+def test_the_generic_adapter_has_no_ask_and_cannot_take_a_tell(name):
+    a = adapter_for(name)
+    t = Target(agent=name)
+    assert not hasattr(a, "ask_command")
+    assert "ask" not in a.capabilities(t) and a.capabilities(t) == frozenset()
+    with pytest.raises(DeliveryError, match="cannot receive a Tell in this version"):
         a.deliver(t, "hello", Runs())
 
 
@@ -212,22 +222,32 @@ def test_every_read_of_a_record_tolerates_a_missing_or_malformed_file(cfg, fake_
 
 # ── capabilities ─────────────────────────────────────────────────────────────
 
-def test_ask_needs_a_session_and_a_command(cfg, fake_bin):
+def test_a_session_with_nothing_to_push_into_and_no_record_has_no_capability(cfg, fake_bin):
+    """Ask was retired: a session, a command and an executable no longer give any capability."""
     a = ClaudeCodeAdapter(SENDER)
-    assert "ask" in a.capabilities(target(cfg, fake_bin))
-    assert "ask" not in a.capabilities(target(cfg, fake_bin, session=""))
-    assert "ask" not in a.capabilities(target(cfg, fake_bin, bin=""))
-    assert "ask" not in a.capabilities(target(cfg, fake_bin, bin=str(fake_bin) + "-gone"))
+    assert a.capabilities(target(cfg, fake_bin)) == frozenset()
+    assert a.capabilities(target(cfg, fake_bin, session="")) == frozenset()
+    assert a.capabilities(target(cfg, fake_bin, bin="")) == frozenset()
+
+
+def test_the_claude_code_adapter_has_no_ask_and_still_takes_a_tell(cfg, fake_bin, peer):
+    a = ClaudeCodeAdapter(SENDER)
+    assert not hasattr(a, "ask_command")
+    t = target(cfg, fake_bin, socket=peer.path)
+    assert "ask" not in a.capabilities(t) and "deliver" in a.capabilities(t)
+    write_record(cfg, PID, messagingSocketPath=peer.path, peerProtocol=1)
+    a.deliver(target(cfg, fake_bin), "Tell me", Runs())
+    assert json.loads(peer.received())["message"]["content"].count("Tell me") == 1
 
 
 def test_deliver_and_stop_need_a_socket_that_exists_state_needs_a_record(cfg, fake_bin, peer):
     a = ClaudeCodeAdapter(SENDER)
-    assert a.capabilities(target(cfg, fake_bin)) == {"ask"}
-    assert a.capabilities(target(cfg, fake_bin, socket=peer.path)) == {"ask", "deliver", "stop"}
+    assert a.capabilities(target(cfg, fake_bin)) == set()
+    assert a.capabilities(target(cfg, fake_bin, socket=peer.path)) == {"deliver", "stop"}
     write_record(cfg, PID, messagingSocketPath=peer.path)
-    assert a.capabilities(target(cfg, fake_bin)) == {"ask", "deliver", "stop", "state"}
+    assert a.capabilities(target(cfg, fake_bin)) == {"deliver", "stop", "state"}
     write_record(cfg, PID, messagingSocketPath=peer.path + ".gone")
-    assert a.capabilities(target(cfg, fake_bin, socket=peer.path)) == {"ask", "state"}
+    assert a.capabilities(target(cfg, fake_bin, socket=peer.path)) == {"state"}
 
 
 def test_a_socket_path_that_is_not_a_socket_is_no_delivery(cfg, fake_bin, tmp_path):
@@ -235,14 +255,6 @@ def test_a_socket_path_that_is_not_a_socket_is_no_delivery(cfg, fake_bin, tmp_pa
     f.write_text("x")
     assert "deliver" not in ClaudeCodeAdapter(SENDER).capabilities(
         target(cfg, fake_bin, socket=str(f)))
-
-
-def test_the_command_that_answers_an_ask_forks_the_session_and_may_only_read(cfg, fake_bin):
-    argv = ClaudeCodeAdapter(SENDER).ask_command(target(cfg, fake_bin))
-    assert argv == [str(fake_bin), "-p", "--resume", "s-1", "--fork-session",
-                    "--tools", "Read,Grep,Glob", "--allowedTools", "Read,Grep,Glob",
-                    "--disallowedTools", "Bash,Edit,Write,NotebookEdit", "--strict-mcp-config",
-                    "--output-format", "text"]   # the prompt is stdin
 
 
 def test_the_children_of_a_session_run_under_the_config_folder_it_was_rendered_under(
@@ -259,21 +271,6 @@ def test_the_children_of_a_session_run_under_the_config_folder_it_was_rendered_u
     assert ad.child_env(target(cfg, fake_bin, config_dir=default)) is None
     assert ad.child_env(target(cfg, fake_bin))["CLAUDE_CONFIG_DIR"] == str(cfg)
     assert ad.child_env(target(cfg, fake_bin, config_dir="")) is None
-
-
-def test_an_ask_has_no_tool_that_writes_whatever_the_users_settings_allow(cfg, fake_bin):
-    """`--allowedTools` only pre-approves: a user whose settings allow Edit or Bash would let the
-    fork write. `--tools` leaves the fork nothing else, the deny list names the writers again,
-    and no MCP server (whose tools the settings may allow) is started."""
-    argv = ClaudeCodeAdapter(SENDER).ask_command(target(cfg, fake_bin))
-
-    def value(flag):
-        return argv[argv.index(flag) + 1].split(",")
-
-    assert sorted(value("--tools")) == ["Glob", "Grep", "Read"]
-    assert {"Bash", "Edit", "Write", "NotebookEdit"} <= set(value("--disallowedTools"))
-    assert not set(value("--tools")) & set(value("--disallowedTools"))
-    assert "--strict-mcp-config" in argv and "--mcp-config" not in argv
 
 
 # ── the direct push (SPEC 11.4) ──────────────────────────────────────────────
@@ -566,7 +563,7 @@ def test_a_record_under_the_same_pid_but_another_process_is_not_the_target(cfg, 
                  messagingSocketPath=peer.path)
     t = target(cfg, fake_bin, pid=me, proc_start="999", socket="")
     a = ClaudeCodeAdapter(SENDER)
-    assert a.capabilities(t) == {"ask"}
+    assert a.capabilities(t) == set()
     with pytest.raises(DeliveryError):
         a.deliver(t, "secret", Runs())
     assert peer.data == b""
@@ -579,12 +576,12 @@ def test_a_stored_socket_is_not_used_once_its_pid_belongs_to_another_process(cfg
     me = os.getpid()
     a = ClaudeCodeAdapter(SENDER)
     t = target(cfg, fake_bin, pid=me, proc_start="999", socket=peer.path)      # no record at all
-    assert a.capabilities(t) == {"ask"}
+    assert a.capabilities(t) == set()
     with pytest.raises(DeliveryError):
         a.deliver(t, "secret", Runs())
     write_record(cfg, me, sessionId="someone-else", procStart=proc_start(me),
                  messagingSocketPath=peer.path)                                # another session's record
-    assert a.capabilities(t) == {"ask"}
+    assert a.capabilities(t) == set()
     with pytest.raises(DeliveryError):
         a.deliver(t, "secret", Runs())
     assert peer.data == b""
@@ -596,11 +593,11 @@ def test_a_resumed_session_never_gets_the_socket_stored_for_its_old_process(cfg,
     write_record(cfg, other.pid, sessionId="s-1", messagingSocketPath="")
     a = ClaudeCodeAdapter(SENDER)
     t = target(cfg, fake_bin, pid=ended_pid(), socket=peer.path)
-    assert a.capabilities(t) == {"ask", "state"}
+    assert a.capabilities(t) == {"state"}
     with pytest.raises(DeliveryError):
         a.deliver(t, "secret", Runs())
     t = target(cfg, fake_bin, pid=os.getpid(), socket=peer.path)             # a live pid, no start stored
-    assert a.capabilities(t) == {"ask", "state"}
+    assert a.capabilities(t) == {"state"}
     with pytest.raises(DeliveryError):
         a.deliver(t, "secret", Runs())
     assert peer.data == b""
@@ -614,14 +611,14 @@ def test_the_start_of_the_sessions_own_process_is_stored_even_when_no_record_was
 def test_a_pid_no_process_can_have_is_no_process(cfg, fake_bin, peer):
     write_record(cfg, 2 ** 70, sessionId="s-1", messagingSocketPath=peer.path)
     a = ClaudeCodeAdapter(SENDER)
-    assert a.capabilities(target(cfg, fake_bin, pid=2 ** 70)) == {"ask"}
+    assert a.capabilities(target(cfg, fake_bin, pid=2 ** 70)) == set()
     assert a.state(target(cfg, fake_bin, pid=2 ** 70, session="s-9")).status == "gone"
 
 
 def test_a_stored_socket_of_a_process_that_has_ended_is_not_used(cfg, fake_bin, peer):
     a = ClaudeCodeAdapter(SENDER)
     t = target(cfg, fake_bin, pid=ended_pid(), socket=peer.path)
-    assert a.capabilities(t) == {"ask"}
+    assert a.capabilities(t) == set()
     with pytest.raises(DeliveryError):
         a.deliver(t, "x", Runs())
     assert peer.data == b""

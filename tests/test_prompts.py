@@ -1,4 +1,4 @@
-"""What the hub says to a session: the Ask prompt, the Tell message and the Cancel message
+"""What the hub says to a session: the Tell message and the Cancel message
 (SPEC 11.2, 11.3). The wording is the contract, so these tests hold it whole."""
 import sheafmd.comments as rdc
 from sheafmd.agents import prompts
@@ -15,24 +15,12 @@ def thread():
     return rdc.parse(md).by_id(cid)
 
 
-def test_the_ask_prompt_is_the_one_of_the_spec():
-    c = thread()
-    assert prompts.ask("/w/plan.md", c, links=True) == (
-        'A comment was left on the document /w/plan.md, at line 3, on the passage "price". '
-        "The thread so far:\n\n"
-        "Ada (2026-10-14T10:00): Is this right?\n"
-        "Bob (2026-10-14T10:05): I think so.\n"
-        "Claude (2026-10-14T10:09): Checked.\n\n"
-        "Answer the last message in the thread, the way you would answer it here in the "
-        "conversation: short, in the language it was written in, and only from what you know or "
-        f"can read. Do not edit any file. {RULE} Your answer is written into the document as "
-        "your reply, as it is, so give only the answer: no preamble, no sign-off.")
-
-
-def test_the_link_rule_is_left_out_of_the_ask_prompt_when_the_root_turns_links_off():
-    p = prompts.ask("/w/plan.md", thread(), links=False)
-    assert RULE not in p
-    assert "Do not edit any file. Your answer is written into the document" in p
+def test_ask_is_retired_there_is_no_ask_prompt_and_no_drop_of_kind_ask():
+    assert not hasattr(prompts, "ask")
+    drop = {"kind": "ask", "member": "Grace", "sheaf": "work/plan.md", "text": "Is this right?",
+            "thread": "c1"}
+    assert prompts.dropped(drop) is None
+    assert prompts.dropped({**drop, "kind": "tell"}) is not None
 
 
 def test_the_tell_message_names_the_page_the_person_and_both_ways_to_answer():
@@ -69,5 +57,5 @@ def test_a_legacy_action_reply_is_shown_under_its_plain_author_name():
     md, cid = rdc.add_comment(MD, *rdc.find_quote(MD, "price"), "price", "Q", "Ada",
                              "2026-10-14T10:00")
     md = rdc.reply(md, cid, "done", "Claude (action)", "2026-10-14T10:01")
-    p = prompts.ask("/w/plan.md", rdc.parse(md).by_id(cid), links=True)
+    p = prompts.tell("work/plan.md", "/w/plan.md", "Grace", rdc.parse(md).by_id(cid), links=True)
     assert "Claude (2026-10-14T10:01): done" in p

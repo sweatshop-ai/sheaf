@@ -2,11 +2,11 @@
 
 A reader who meets "the employee-buyout page" has to go and find it. A reader who meets
 a link clicks. So the rule is the same for whoever writes: the author of a document, the
-session that answers a Tell, the fork that answers an Ask.
+session that answers a Tell, the session that answers a thread through the door.
 
 Two halves, both here so they cannot drift apart:
 
-  RULE                 the sentence the page hands an agent (Tell, Ask).
+  RULE                 the sentence the page hands an agent (Tell).
   unlinked_mentions()  the check at render time: host names and site paths that stand in
                        prose without a link. A warning, never a block. It cannot see a page
                        named in words alone ("the pricing page"); that is what RULE is for.

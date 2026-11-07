@@ -120,10 +120,9 @@ def site(work, port):
 
 @pytest.fixture
 def agent(site, tmp_path, short_tmp):
-    """A Claude Code session the hub can Ask and Tell, as the page's document is rendered from it.
+    """A Claude Code session the hub can Tell, as the page's document is rendered from it.
     Nothing real is reached: the session is a record in the test's own folder, its socket a thread
-    of the test, and `claude` (the value of this fixture) a script that answers "The answer." and
-    writes down each call. Open the page after this fixture has run."""
+    of the test, and `claude` (the value of this fixture) a script that writes down each call. Open the page after this fixture has run."""
     cfg = tmp_path / "claude-config"
     peer = Peer(os.path.join(short_tmp, "s.sock"))
     claude = FakeClaude(tmp_path / "fake")

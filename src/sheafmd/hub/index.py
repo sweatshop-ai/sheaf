@@ -52,7 +52,7 @@ class Status(dict):
     """The data of a `status` event (8.8), marked with whether the file itself moved: the
     document came or went, or its open comments or its last change differ. The mark is not
     sent (`json.dumps` reads only the items). A member's index stream is sent only these: a dot
-    that moved alone says what the hub's person read, or that the hub account's Ask or Tell
+    that moved alone says what the hub's person read, or that the hub account's Tell
     started or ended (9.9)."""
     def __init__(self, data: dict, files: bool, at: int | None = None, sig: tuple | None = None,
                  members_only: bool = False):
@@ -117,7 +117,7 @@ def _row_html(d: dict, now: float) -> str:
         label = (f"{_plural(d['unread'], 'thread')} with a message you have not read"
                  if d["unread"] else "a session is waiting for you")
     else:
-        label = {"orange": "an Ask or Tell is running", "green": "no open comments"}.get(
+        label = {"orange": "a Tell is running", "green": "no open comments"}.get(
             d["dot"]) or f"{_plural(d['open'], 'open comment')}"
     count = ""
     if d["open"]:
@@ -190,6 +190,7 @@ class Index:
         # What the open indexes were last told, per document: (dot, open, unread, mtime). Only
         # kept up while an index stream is open; the first one that opens starts it afresh.
         self._board: dict[str, tuple] = {}
+        self._private_docs: set[str] = set()       # the names the board has met as a member's private sheaf (`data(board=True)`)
         self._swept = 0.0
         # A sweep runs on a thread of its own, one at a time: listing a root can take git up to
         # 20 s, and the watcher's pass must go on meanwhile (8.9). Every look at a document outside
@@ -244,7 +245,7 @@ class Index:
     def _live_state(self, only: str | None = None) -> tuple[set, set]:
         """The documents whose session waits on the person, and those a job runs on; `only` names the
         one document that is asked about."""
-        waiting, running = set(), {doc for doc, _ in self.hub.jobs_asking() if only in (None, doc)}
+        waiting, running = set(), set()
         entries = self.hub.entries
         for address, e in (list(entries.items()) if only is None else [(only, entries.get(only))]):
             if e is None:
@@ -265,11 +266,11 @@ class Index:
         # SPEC 8.7: unread is an open thread whose last message is not the person's and that has
         # more messages than they have seen. A member is the person of their own index (9.9), and
         # is told nothing of the hub account's agent session: neither that it waits on its person
-        # nor that an Ask or a Tell of it runs.
+        # nor that a Tell of it runs.
         unread = sum(1 for cid, n, by in s.threads if by != me and n > seen.get(cid, 0))
         sees_session = member is None
-        # A member's orange is James's session working on a drop of theirs, by its supervisor's word (9.15).
-        works = (sees_session and address in running) or (member is not None and hub.box_waits.working(address))
+        # A member's orange is James's session working on a drop of their own, by its supervisor's word (9.15).
+        works = (sees_session and address in running) or (member is not None and hub.box_waits.working(address, member.id))
         dot = ("red" if (sees_session and address in waiting) or unread else
                "orange" if works else "blue" if s.open else "green")
         e = hub.entries.get(address)
@@ -288,14 +289,21 @@ class Index:
     def _sig(row: dict) -> tuple:
         return (row["dot"], row["open"], row["unread"], row["mtime"])
 
-    @staticmethod
-    def _event(address: str, got, files: bool, at: int, sig: tuple | None) -> Status:
+    def _event(self, address: str, got, files: bool, at: int, sig: tuple | None) -> Status:
         root, row = got if got else (roots_mod.Address.parse(address).root, None)
         return Status({"doc": address, "root": root, "dot": row and row["dot"],
-                       "open": row["open"] if row else 0, "changed": row and row["mtime"]}, files, at, sig)
+                       "open": row["open"] if row else 0, "changed": row and row["mtime"]}, files, at, sig,
+                      members_only=self._met_private(address))      # a private sheaf is no event of the hub's person
+
+    def _met_private(self, address: str) -> bool:
+        """Whether the name `address` is, or was, a member's private sheaf: judged on the name now, and kept, so the
+        end of it (the file gone, the name held twice) is no more the hub's person's than the rest."""
+        if address not in self._private_docs and place.held_privately(self.hub, address):
+            self._private_docs.add(address)
+        return address in self._private_docs
 
     def _rows(self) -> dict:
-        return {d["doc"]: (r["name"], d) for r in self.data()["roots"] for d in r["docs"]}
+        return {d["doc"]: (r["name"], d) for r in self.data(board=True)["roots"] for d in r["docs"]}
 
     def arm(self):
         """The first index stream is opening: take the index as it stands and say nothing about
@@ -539,18 +547,19 @@ class Index:
             self.touch(address)
 
     # ── the whole index ──────────────────────────────────────────────────────
-    def data(self, only: str | None = None, rendered: bool = False, member=None) -> dict:
+    def data(self, only: str | None = None, rendered: bool = False, member=None, board: bool = False) -> dict:
         """`{roots: [{name, path, missing, closed, dot, docs: [...]}], more: {root: n}}` (SPEC 8.5).
         Roots go by their most recently changed document; documents by dot, then last change.
         `only` limits it to one root. A document rendered since the hub started is listed even
         when the listing leaves it out (a gitignored file the person named). `rendered` lists
         only those, with no listing of any folder: what `sheaf list` asks for. For a `member` of
         proxy mode, only their roots, and in them only their documents: a root nested inside one
-        of theirs is another root (9.9), and a sheaf that is another member's alone is none (9.11)."""
+        of theirs is another root (9.9), and a sheaf that is another member's alone is none (9.11). `board` adds every
+        member's private files, for the board that the streams are told from (`_rows`): never for a person's page."""
         hub = self.hub
         waiting, running = self._live_state()
         named = {a for a, e in list(hub.entries.items()) if e.rendered}
-        out, more, keys = [], {}, set()
+        out, more, keys, privately = [], {}, set(), set()
         theirs: dict = {}                           # (root, folder) -> whether 8.2 gives its documents that root
 
         def shown(root, path) -> bool:
@@ -563,7 +572,7 @@ class Index:
                 theirs[key] = hub.roots.lookup(path) == root
             return theirs[key]
 
-        for root in hub.roots.all():
+        for root in hub.roots.listed():
             if only is not None and root.name != only:
                 continue
             if member is not None and not hub.owns(member, root):
@@ -587,8 +596,29 @@ class Index:
                     have.add(address)
                     if shown(root, path) and (member is None or hub.visible(member, address)):
                         rows.append(self._row(address, path, f.stat, waiting, running, member))
+            # The files of a member's private root are listed to that member alone, under the list root's names (rule D).
+            for private in place.private_listed(hub, member, board) if placed else ():
+                if private.closed() is not None or private.missing():
+                    continue
+                for f in roots_mod.list_documents(private).docs:
+                    if (name := place.logical(f.rel)) is None or name != f.rel:
+                        continue
+                    with place.held(hub, f"{root.name}/{name}"):
+                        if (rel := place.named_in(hub, root, private, f.rel)) is None:
+                            continue
+                        address, path = str(roots_mod.Address(root.name, rel)), private.path / f.rel
+                        keys.add(str(path))
+                        have.add(address)
+                        privately.add(address)
+                        if shown(private, path) and (member is None or hub.visible(member, address)):
+                            rows.append(self._row(address, path, f.stat, waiting, running, member))
             for address in sorted(a for a in named - have if a.startswith(roots_mod.Address.prefix(root.name))):
                 with place.held(hub, address):          # every read of a sheaf's file holds its name's lock (9.11)
+                    if member is None and place.held_privately(hub, address):
+                        if board:
+                            privately.add(address)      # the board holds it for the members' streams; its end is theirs alone
+                        else:
+                            continue                    # a private file is no row of the hub's person, rendered or not (rule D)
                     if not (found := self._stat_of(root, address)):
                         continue
                     path, st = found
@@ -608,4 +638,6 @@ class Index:
         if only is None and member is None and not rendered:
             with self._lock:                        # files that are gone, roots that were forgotten
                 self._cache = {k: v for k, v in self._cache.items() if k in keys}
+        if board:
+            self._private_docs |= privately
         return {"roots": out, "more": more}

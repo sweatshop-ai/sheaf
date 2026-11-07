@@ -95,7 +95,7 @@ def test_a_key_the_member_leaves_out_is_the_list_s(team, mapped):
 def test_without_a_default_tell_dir_a_member_not_in_the_map_can_not_tell(team, work, mapped):
     cfg_of(team, tell_dir=None)
     got = comment(team, work, "tell", as_=HANS)
-    assert got.status == 400 and "only on the machine that runs the hub" in got.json()["error"]
+    assert got.status == 400 and "work on this page to Tell it" in got.json()["error"]
     assert files(mapped["own"]["tell"]) == []
     assert comment(team, work, "tell", as_=THIERRY).status == 200
     assert len(files(mapped["own"]["tell"])) == 1
@@ -104,7 +104,7 @@ def test_without_a_default_tell_dir_a_member_not_in_the_map_can_not_tell(team, w
 def test_the_page_offers_a_tell_by_the_dirs_of_the_member_it_is_for(team, work, mapped):
     cfg_of(team, tell_dir=None)
     assert meta(team, member=HANS)["can"] == []
-    assert meta(team, member=THIERRY)["can"] == ["box-ask", "box-tell"]
+    assert meta(team, member=THIERRY)["can"] == ["box-tell"]
 
 
 def test_a_drop_s_status_is_read_in_the_dir_it_was_written_in(team, work, mapped):

@@ -307,7 +307,7 @@ class StandInHub:
         key, owner = paths.ensure_key(), self
         self.log, self.headers, self.proofs, self.refusals = [], [], 0, 0
         self.at_proof, self.on_request, self.ending = lambda n: False, {}, False
-        self.answers = {"/_/jobs": {"ok": True, "asking": [], "telling": []}}
+        self.answers = {"/_/jobs": {"ok": True, "telling": []}}
         numbers = itertools.count(1)            # a connection's number; `id(handler)` is reused once it is freed
 
         class Handler(BaseHTTPRequestHandler):
@@ -676,13 +676,13 @@ def test_a_command_whose_hub_ends_two_connections_after_its_proof_says_it_proved
 def test_the_doors_version_check_asks_for_the_jobs_on_the_connection_that_proved_the_hub(work, monkeypatch):
     """A hub that runs an older version: the door looks at its jobs before it decides to stop it."""
     stand_in = StandInHub(version="0.0.1")
-    stand_in.answers["/_/jobs"] = {"ok": True, "asking": ["a"], "telling": []}
+    stand_in.answers["/_/jobs"] = {"ok": True, "telling": ["a"]}
     monkeypatch.setenv("SHEAF_PORT", str(stand_in.port))
     said_out = []
     link = client.DoorLink("Claude", say=said_out.append)
     assert said(link, rpc("ping"))[0] == 200
     assert asked_before(stand_in, "GET", "/_/jobs") == ["GET /_/health"]
-    assert any("an Ask or Tell is running" in line for line in said_out)
+    assert any("a Tell is running" in line for line in said_out)
     assert stand_in.headers[0]["X-Sheaf-Key"] == key_of_the_test()
 
 
@@ -907,7 +907,7 @@ def test_a_door_whose_version_check_loses_the_hub_fails_the_message_clearly_and_
     """The older hub's jobs are asked on the proof's connection (`_meet_version`); losing it there used to
     end the door with a traceback."""
     stand_in = StandInHub(version="0.0.1")
-    stand_in.answers["/_/jobs"] = {"ok": True, "asking": ["a"], "telling": []}      # a job runs: no upgrade stop
+    stand_in.answers["/_/jobs"] = {"ok": True, "telling": ["a"]}      # a job runs: no upgrade stop
     stand_in.on_request["/_/jobs"] = "close"
     monkeypatch.setenv("SHEAF_PORT", str(stand_in.port))
     link = client.DoorLink("Claude", say=lambda s: None)
@@ -1025,7 +1025,7 @@ def test_a_door_whose_start_up_version_check_loses_the_hub_stays_up_and_says_why
     """`sheaf mcp` against a hub of an older version that closes on the request for its jobs: the
     start-up check is not the end of the door."""
     stand_in = StandInHub(version="0.0.1")
-    stand_in.answers["/_/jobs"] = {"ok": True, "asking": ["a"], "telling": []}
+    stand_in.answers["/_/jobs"] = {"ok": True, "telling": ["a"]}
     stand_in.on_request["/_/jobs"] = "close"
     p = sheaf_mcp(lines(rpc("initialize", id=1)), env={"SHEAF_PORT": str(stand_in.port)})
     got = [json.loads(x) for x in p.stdout.splitlines()]

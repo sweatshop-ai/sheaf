@@ -25,7 +25,7 @@ from typing import Callable
 from .. import __version__, beneath, config, diagnostics, paths
 from ..agents import registry
 from ..agents.base import Adapter, Target
-from ..render import render_file
+from ..render import RenderError, render_file
 from ..source import STAMP_FORMAT, file_lock, lock_key
 from . import assets as assets_mod
 from . import boxwait
@@ -35,10 +35,12 @@ from . import proxy as proxy_mod
 from . import relay as relay_mod
 from . import roots as roots_mod
 from . import state
+from . import targets as targets_mod
 from . import the_list
+from . import waiting as waiting_mod
 from . import visibility
 from . import work as work_mod
-from .asktell import AskTell
+from .tell import Tell, who as session_who
 from .auth import Auth
 from .commits import Author, Commits
 from .events import Bus
@@ -143,6 +145,7 @@ class Hub:
         self.member_seen = state.MemberSeen()
         self.index = Index(self)
         self.tokens = state.Tokens()
+        self.waiting_tells = waiting_mod.Waiting(self)    # the Tells that wait for an agent (9.8)
         self.relays = relay_mod.Relays()     # the forks' relay tokens, queued Tells and streams (9.14)
         self.box_waits = boxwait.BoxWaits(lambda: self.clock())    # the drops for James's window (9.12, #115)
         self.entries: dict[str, Entry] = {}
@@ -167,18 +170,34 @@ class Hub:
         self._restart_told_at: float | None = None
         self.tell_wait = config.tell_wait()
         self.versions.prune()
-        # Every Ask and Tell child, and the address a push says it comes from (SPEC 8.10, 11.4).
+        # Every Tell child, and the address a push says it comes from (SPEC 8.10, 11.4).
         self.runner = Jobs()
         self.sender = f"uds:{paths.hub_socket(port)}"
-        self.asktell = AskTell(self)
+        self.tell = Tell(self)
         # Real path of every CONFIGURED private root -> id of the member whose it is: recorded before any validation,
         # whether the root registers or is refused, and never shrunk (`place.in_private`, SPEC 9.11 rule A).
         self._private_paths: dict[str, str] = {}
         self._private_ids: dict[tuple, str] = {}    # (st_dev, st_ino) of each, so a spelling in another case is the same folder
+        self._private_by_identity: set[str] = set()     # ids of roots whose folder is a private one, spelled otherwise
         self._private_good: set[str] = set()       # those that registered: placement only, never privacy
         self.roots.private_paths = lambda: self._private_paths
+        self.roots.hidden = self._is_private_root
+        self.roots.registered = self._note_identity       # rule E: no address of its own, registered or refused
         self._register_private_roots()
+        for r in self.roots.all():
+            self._note_identity(r)      # the roots of an earlier run, registered before the private folders were known
         self.commits.seed(self.roots.all())      # the rewrite guard's first pull is guarded, not free
+
+    def _is_private_root(self, root) -> bool:
+        """Whether `root` is a private root: by its path, and by the identity of its folder, so a second spelling of
+        it (a bind mount, a case-folded name) is no address either."""
+        return str(root.path) in self._private_paths or root.id in self._private_by_identity
+
+    def _note_identity(self, root) -> None:
+        """Once, as `root` is registered (never at a request, where a folder exchanged for a link would be read
+        as the private one for as long as it is cached): whether its folder is a private one under another spelling."""
+        if self._private_ids and place.identity(str(root.path)) in self._private_ids:
+            self._private_by_identity.add(root.id)
 
     @property
     def private_roots(self) -> dict[str, str]:
@@ -451,6 +470,8 @@ class Hub:
                                   publish=e.bus.publish, by=self.person, clock=self.clock,
                                   versions=(lambda: self._store_of(address, root, e.file_root)) if self.private_roots and place.applies(self, name)
                                   else self._versions_of(root), address=address, hold=hold)
+            e.live.session_to = lambda: self.session_name(address)
+            e.live.agent_tells = lambda: self.waiting_tells.waits(address, None, sweep=False)   # the hub person's (9.8)
             e.live.refresh(force=True)           # the first render: e.html
             self.entries[address] = e
             return e
@@ -465,7 +486,7 @@ class Hub:
 
     def _build(self, e: Entry, text: str, *, mount: bool = False, count: bool = True) -> str:
         s = self._settings(e.address)
-        root = self.roots.get(roots_mod.Address.parse(e.address).root)
+        root = self._file_root(e)
         meta = {"doc": e.address, "root": e.root_id, "boot": self.boot, "version": self.version,
                 "service": self.service, "me": self.person,
                 "agent": None, "can": [], "lines": {}, "seen": {}}
@@ -488,26 +509,37 @@ class Hub:
     def share_copy(self, e: Entry) -> str:
         """The share copy of the document as the file is now, with the settings it is shown with."""
         s = self._settings(e.address)
-        root = self.roots.get(roots_mod.Address.parse(e.address).root)
+        root = self._file_root(e)
         return render_file(e.path, share=True, src=e.read(), title=s["title"], toc=s["toc"] or "auto",
                            max_image_width=s["max_image_width"] or 1400, by=s["by"],
                            for_=s["for"], theme=s["theme"], credit=s["credit"], log=[],
                            root=root.path if root else None, image_ok=self._image_rule(root, e.path, e.address),
                            image_read=self._image_read(root) if self.proxy is not None else None)
 
+    def _file_root(self, e: Entry):
+        """The root the image rules judge the page of `e` against: the root its file is in, so the images of a sheaf of
+        a member's private root are judged there and show (rule H); the root of its address for any other sheaf."""
+        at = self.roots.get(roots_mod.Address.parse(e.address).root)
+        if at is None or not self.private_roots:
+            return at
+        found = self.roots.lookup(e.path)
+        return found if found is not None and found.id in self.private_roots else at
+
     def _image_read(self, root):
         """The bytes of a local image, from one open beneath `root` (`sheafmd.beneath`), refused when what was opened is
-        in a private root (9.11): the rule above judges the image's real path, this judges what is read."""
+        in a private root other than `root` itself (9.11): the rule above judges the image's real path, this judges what
+        is read. A private `root` is the one its sheaf is in, and opens only beneath itself."""
         if root is None:                    # the image rule leaves every image out of a document in no root
             return None
         top = os.path.realpath(root.path)
+        own = self.private_roots.get(root.id)
 
         def read(path) -> bytes:
             rel = os.path.relpath(path, top)
             if rel == ".." or rel.startswith("../"):
                 raise PermissionError(errno.EACCES, "outside the root", str(path))
             with beneath.open_beneath(top, rel) as op:
-                if place.opened_private(self, op) is not None:
+                if place.opened_private(self, op) not in (None, own):
                     raise PermissionError(errno.EACCES, "in a private root", str(path))
                 return op.bytes()
         return read
@@ -560,8 +592,7 @@ class Hub:
         give now."""
         if e.images_scope is None:
             return False
-        root = self.roots.get(roots_mod.Address.parse(e.address).root)
-        return e.images_scope != self._image_scope(root, e.address)
+        return e.images_scope != self._image_scope(self._file_root(e), e.address)
 
     def page(self, e: Entry, nonce: str, member=None) -> str:
         """The page to send: the nonce of this response on its script, and the read state as it
@@ -590,16 +621,31 @@ class Hub:
         meta["actions"] = self.actions(e, member, text) if h == meta.get("hash") else []
         if member is None:
             meta["seen"] = self.seen.get(e.address)
-            v = self.asktell.view(e.address)
+            v = self.tell.view(e.address)
             meta["agent"], meta["can"], meta["lines"] = v.agent(), v.can(), v.lines
+            meta["targets"] = targets_mod.choices(self, e.address)
         else:
-            meta.update(me=member.name, seen=self.member_seen.get(member.id, e.address),
-                        agent=None, can=[], lines=proxy_mod.member_lines(), proxy=True,
+            meta.update(me=member.name, seen=self.member_seen.get(member.id, e.address), proxy=True,
                         member=member.id)
-            work, meta["can"] = self.member_work(e, member)
+            work, can = self.member_work(e, member)
             if work is not None:
                 meta["work"] = work
+            meta["agent"], meta["can"], meta["lines"], meta["targets"] = self.member_target(e.address, member, can)
         return meta
+
+    def member_target(self, address: str, member, can: list) -> tuple:
+        """(agent, can, lines, targets) of a member's page (SPEC 9.8, 10.1): their own target, an agent of theirs,
+        never the hub account's session. On a sheaf whose Tells go to James's window or a fork's relay (9.12) the
+        target is not theirs to choose: none is shown and `targets` is empty."""
+        lines = proxy_mod.member_lines()
+        if {"box-tell", "relay-tell"} & set(can):
+            return None, can, lines, []
+        pickable = targets_mod.choices(self, address, member)
+        raw = targets_mod.stored(self, address, member)
+        if raw is None:
+            return None, can, lines, pickable
+        shape, line, reaches = targets_mod.agent_view(self, raw, member)
+        return shape, sorted({*can, "queue"}) if reaches else can, {"tell": line}, pickable
 
     def mount_doc(self, e: Entry, member=None) -> dict:
         """The sheaf as the front mounts it (#116): {title, toc, html, config, css, version, script, assets}. The text
@@ -645,7 +691,7 @@ class Hub:
 
     def member_work(self, e: Entry, member):
         """The `work` of a member's page (None when it is not a sheaf of the list's root) and its `can`:
-        box-ask and box-tell while the live session runs on the box and `[list]` names a `tell_dir` (10.1).
+        box-tell while the live session runs on the box and `[list]` names a `tell_dir` (10.1).
         The meta block and every /_/doc answer carry both, so a fork seen by the page changes what it offers."""
         st = work_mod.state(self, e.address, e.live.current()[1], member)
         if st is None:
@@ -672,22 +718,34 @@ class Hub:
         return out
 
     # ── the agent of a document ──────────────────────────────────────────────
-    def target(self, address: str) -> Target | None:
-        """The session the document's last render attached, or None (also for a stored target
-        that cannot be read: it is never guessed at)."""
-        raw = self.docs.get(address).get("target")
-        if not raw:
+    def target(self, address: str, kept: bool = False) -> Target | None:
+        """The session the document's last render attached, or None (also for a stored target that cannot be
+        read: it is never guessed at). `kept`: when the target is not a session now (an agent, or none), the
+        session kept beside it, which a Tell already sent to it still runs in (a stop and the watcher use it)."""
+        entry = self.docs.get(address)
+        raw = entry.get("target")
+        if kept and (not raw or targets_mod.is_agent(raw)):    # an agent is no session (SPEC 9.8)
+            raw = entry.get("session")
+        if not raw or targets_mod.is_agent(raw):
             return None
         try:
             return Target.from_dict(raw)
         except ValueError:
             return None
 
+    def session_name(self, address: str) -> str:
+        """What the page calls the session a Tell of this document goes to ("" when there is none)."""
+        try:
+            t = self.target(address, kept=True)
+            return "" if t is None else session_who(t, self.adapter(t.agent))
+        except Exception:
+            return ""
+
     def adapter(self, agent: str) -> Adapter:
         return registry.adapter_for(agent, self.sender)
 
     def stop_jobs(self):
-        """Kill every Ask and Tell child's process group, and let the pushes due go out within a bound, then end
+        """Kill every Tell child's process group, and let the pushes due go out within a bound, then end
         the hub's git (a clean stop, SPEC 8.4, 8.11, #95)."""
         self.runner.kill_all()
         self.commits.stop()
@@ -707,21 +765,26 @@ class Hub:
         page. A render with other settings re-renders and tells the open tabs; it never
         restarts anything."""
         md = Path(md).resolve()
-        address = self.roots.address(md)
+        try:
+            address = self.roots.address(md)       # a file of a private root has no address of its own (9.11)
+        except roots_mod.NotFound:
+            raise RenderError(f"{md} is not in a root the hub serves.") from None
         with place.held(self, address), self._lock:        # the name's lock first (9.11), as `entry` takes it
-            old = self.docs.get(address)
-            new = dict(old)
-            new["path"] = str(md)
-            new["rendered"] = time.strftime(STAMP_FORMAT)
-            for k in SETTING_KEYS:
-                new[k] = settings.get(k)
-            # The latest render from an agent sets the target; a render that finds no agent keeps
-            # it; only `--agent none` clears it (SPEC 8.3, D19).
-            if target is not None:
-                new["target"] = None if target.get("agent") == "none" else target
-            else:
-                new.setdefault("target", None)
-            self.docs.put(address, new)
+            def settle(new: dict) -> dict:
+                new["path"] = str(md)
+                new["rendered"] = time.strftime(STAMP_FORMAT)
+                for k in SETTING_KEYS:
+                    new[k] = settings.get(k)
+                # The latest render from an agent session sets the target; a render that finds no agent keeps
+                # it, an agent's too; only `--agent none` clears it (SPEC 8.3, D19). The session an agent's
+                # write took the target from is the new one's, so none is kept beside it.
+                if target is not None:
+                    new["target"] = None if target.get("agent") == "none" else {"kind": "session", **target}
+                    new.pop("session", None)
+                else:
+                    new.setdefault("target", None)
+                return new
+            old, new = self.docs.change(address, settle)
             existed = address in self.entries
             e = self.entry(address)
             if existed and (any(old.get(k) != new[k] for k in SETTING_KEYS)
@@ -749,7 +812,7 @@ class Hub:
                 e.live.forget()
                 # After that write's own `changed`, which the page takes in first.
                 e.bus.publish("gone", {"doc": address})
-            # An Ask or a Tell still running on a document that is gone: its dot, its
+            # A Tell still running on a document that is gone: its dot, its
             # answer and its wait have nowhere to go, and the name may be taken at once. Also
             # when the registry no longer holds the root (another process forgot it, and this hub
             # reloaded the file): its entries were popped above all the same.
@@ -940,11 +1003,7 @@ class Hub:
         telling = []
         for address, e in list(self.entries.items()):
             telling += [[address, cid] for cid in e.live.waiting()]
-        return {"asking": self.jobs_asking(), "telling": telling}
-
-    def jobs_asking(self) -> list:
-        """`[[doc, id], …]` of the Asks that run: what turns a document's dot orange (SPEC 8.6)."""
-        return self.runner.active("ask")
+        return {"telling": telling}
 
     # ── the watcher's step (SPEC 8.9) ────────────────────────────────────────
     def _watch_drops(self):
@@ -964,8 +1023,7 @@ class Hub:
             self._tell_drop(address, "box-failed", {"id": thread, "kind": d.kind, "minutes": minutes})
         self._read_drop_statuses()
         for address in self.box_waits.cleared():          # however it ended, here or on a page's ask: the orange goes
-            if not self.box_waits.working(address):
-                self.index.moved_for_members(address)
+            self.index.moved_for_members(address)         # each member's orange is their own: another's may stay on
 
     def _read_drop_statuses(self):
         """What the box's supervisor says of each drop still open, in its `<drop>.status` (9.15, #139): a change
@@ -1025,7 +1083,7 @@ class Hub:
         stops the pass."""
         for e in list(self.entries.values()):
             try:
-                e.live.expire(self.tell_wait, self.asktell.product(e.address))
+                e.live.expire(self.tell_wait, self.tell.product(e.address))
                 self._observe(e)
                 if not (e.bus.count() or e.live.waiting()):
                     continue
@@ -1059,6 +1117,10 @@ class Hub:
         except Exception:
             self.record_exception("grants-failed")
         try:
+            self.waiting_tells.watch()            # a revoke or a close from outside ends a waiting Tell (9.8)
+        except Exception:
+            self.record_exception("tell-end-failed")
+        try:
             self.index.tick(self.clock())
         except Exception:               # a traceback, not `error=`: see `record_exception`
             self.record_exception("status-failed")
@@ -1091,7 +1153,7 @@ class Hub:
         """What the session told by this document is doing. A failure here is written down and
         never stops the pass."""
         try:
-            self.asktell.observe(e)
+            self.tell.observe(e)
         except Exception as ex:
             diagnostics.record("hub", "session-state-failed", e.address,
                                error=f"{type(ex).__name__}: {ex}")
@@ -1166,7 +1228,7 @@ class Hub:
         self.index_bus.publish("signed-out", {})        # the index pages too: they hold the list
 
     def request_stop(self, reason: str, force: bool = True) -> bool:
-        """Ask the hub to stop. An upgrade stop is taken only while no Ask or Tell runs, unless
+        """Ask the hub to stop. An upgrade stop is taken only while no Tell runs, unless
         `force` (`sheaf restart`: the person's own decision): False when it was refused, and the
         hub goes on. Once an upgrade stop is taken no job starts, so none is killed by it (8.4).
         A stop or a signal that is under way is not turned into an upgrade by a later upgrade stop:
@@ -1210,12 +1272,12 @@ class Hub:
         self._restart_told_at = None
 
     def busy(self) -> bool:
-        """Whether an Ask runs or a Tell waits anywhere (what `GET /_/jobs` lists), or a Tell's
+        """Whether a Tell waits anywhere (what `GET /_/jobs` lists), or a Tell's
         delivery or a stop message is still on its way: a delivery whose wait has ended (the
         reply came first, or the clock gave up) and the stop message of a cancelled Tell have
         no wait to show, and an upgrade stop would kill them half-way (8.4)."""
         j = self.jobs()
-        return bool(j["asking"] or j["telling"]
+        return bool(j["telling"]
                     or self.runner.active("tell") or self.runner.active("stop"))
 
     # ── the diagnostics log, as the hub ──────────────────────────────────────

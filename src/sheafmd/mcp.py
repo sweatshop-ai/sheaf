@@ -575,7 +575,7 @@ class Door:
                 dot = self._dot(address, unread, len(threads))
                 rows.append((-1 if tells else DOT_ORDER[dot], -mtime, address,
                              {"doc": address, "url": hub.url(address), "path": str(path),
-                              "open": len(threads), "unread": unread, "dot": dot, **({"tells": tells} if tells else {})}))
+                              "open": len(threads), "unread": unread, "dot": dot, "tells": tells}))
         return [row[3] for row in sorted(rows, key=lambda r: r[:3])] + shut
 
     def _tells(self, address: str, path: Path, agent: TokenRow) -> list:

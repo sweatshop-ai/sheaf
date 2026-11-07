@@ -13,6 +13,7 @@ A row names the token and the thread, never the Tell's text: the message is buil
     end(address, cid, how, ...)             a Tell ends: done, cancelled
     waits(address, member)                  what the page is told: [{id, to, state}] of the reader's own
     sweep()                                 the Tells of a token no longer there end as cancelled
+    watch()                                 the watcher's pass: sweep, and a thread closed from outside ends its Tell
 """
 from __future__ import annotations
 
@@ -21,6 +22,7 @@ import time
 import uuid
 from pathlib import Path
 
+from .. import comments as rdc
 from .. import paths
 from .state import STAMP_FORMAT, TokenRow, file_locked, read_json, write_json
 
@@ -85,6 +87,31 @@ class Waiting:
         def change(rows):
             n = len(rows)
             self._revoked(rows)
+            return None, len(rows) != n
+        self._change(change)
+
+    def watch(self):
+        """One look of the watcher (8.9): a token revoked by the CLI, and a thread resolved or deleted from outside
+        (the CLI, a hand edit), end their Tells now, so a page that stays open stops saying it waits. A document the
+        hub holds no entry for is left to the next listing (`take`)."""
+        if not read_json(_file(), [], aside=False):
+            return
+
+        def change(rows):
+            n = len(rows)
+            self._revoked(rows)
+            for address in {t["doc"] for t in rows}:
+                e = self.hub.entries.get(address)
+                try:
+                    got = None if e is None else rdc.parse(e.path.read_text(encoding="utf-8"))
+                except Exception:
+                    got = None
+                if got is None:
+                    continue
+                for t in [t for t in rows if t["doc"] == address]:
+                    c = got.by_id(t["thread"])
+                    if c is None or c.status != "open":
+                        self._end(rows, [t], "cancelled", reason="closed")
             return None, len(rows) != n
         self._change(change)
 

@@ -15,6 +15,8 @@ import pytest
 
 import sheafmd
 from helpers import PLAN, claim_port, comment, hub_rows, ok
+from sheafmd import comments as rdc
+from sheafmd.source import update_file
 from test_hub_tell import wait_until
 from sheafmd.hub.state import Tokens
 from test_hub_target import DOC, agent, members, pick, row
@@ -68,7 +70,7 @@ def test_a_tell_to_an_agent_waits_is_listed_first_and_ends_on_its_action_reply(b
     assert documents(browser, token)[0]["tells"][0]["id"] == t["id"]       # listed again, seen once
     assert named(sub.drain(), "tell-seen") == []
     ok(browser, "reply", doc=DOC, id="c1", text="Done.", role="action", token=token)
-    assert "tells" not in documents(browser, token)[0]
+    assert documents(browser, token)[0]["tells"] == []
     assert named(sub.drain(), "tell-done") == [{"id": "c1"}]
 
 
@@ -89,7 +91,7 @@ def test_a_token_that_only_reads_and_answers_comments_can_take_a_tell_and_end_it
     assert tell(browser).status == 200
     assert documents(browser, token)[0]["tells"]
     ok(browser, "reply", doc=DOC, id="c1", text="Done.", role="action", token=token)
-    assert "tells" not in documents(browser, token)[0]
+    assert documents(browser, token)[0]["tells"] == []
 
 
 def test_a_comment_sent_with_tell_writes_it_and_the_tell_waits(browser, talk):
@@ -109,7 +111,7 @@ def test_a_token_made_again_under_the_same_name_never_receives_the_old_tell(brow
     assert tell(browser).status == 200
     Tokens().revoke("ada-chatgpt")
     new = agent_token()
-    assert "tells" not in documents(browser, new)[0]
+    assert documents(browser, new)[0]["tells"] == []
     assert browser.hub.waiting_tells.waits(DOC) == []
     assert [r["token"] for r in hub_rows("tell-cancelled")] == ["ada-chatgpt"]
 
@@ -123,6 +125,31 @@ def test_revoking_a_token_ends_its_tells_as_cancelled_and_the_page_hears_of_it(b
     browser.get(f"/_/doc?doc={DOC}")
     assert named(sub.drain(), "tell-cancelled")[0]["id"] == "c1"
     assert browser.get(f"/_/doc?doc={DOC}").json()["telling"] == []
+
+
+def test_a_revoke_by_the_cli_ends_the_tell_at_the_watchers_next_pass_with_no_page_asking(browser, talk):
+    agent_token()
+    target(browser)
+    sub = tab(browser.hub)
+    assert tell(browser).status == 200
+    sub.drain()
+    Tokens().revoke("ada-chatgpt")                      # the CLI, in its own process: the hub is not called
+    browser.hub.tick()
+    assert named(sub.drain(), "tell-cancelled") == [{"id": "c1", "reason": "revoked"}]
+    assert browser.hub.waiting_tells.waits(DOC, sweep=False) == []
+
+
+@pytest.mark.parametrize("how", ["resolved", "deleted"])
+def test_a_thread_closed_from_outside_ends_the_tell_at_the_watchers_next_pass(browser, talk, how):
+    agent_token()
+    target(browser)
+    sub = tab(browser.hub)
+    assert tell(browser).status == 200
+    sub.drain()
+    update_file(talk, (lambda t: rdc.set_status(t, "c1", "resolved")) if how == "resolved" else (lambda t: rdc.delete(t, "c1")))
+    browser.hub.tick()
+    assert named(sub.drain(), "tell-cancelled")[0]["id"] == "c1"
+    assert browser.hub.waiting_tells.waits(DOC, sweep=False) == []
 
 
 # ── one Tell waits per thread and agent ──────────────────────────────────────
@@ -153,7 +180,7 @@ def test_resolving_or_deleting_the_thread_ends_the_tell(browser, talk, how):
     else:
         assert browser.post("/_/comment", {"doc": DOC, "op": "delete", "id": "c1"}).status == 200
     assert browser.hub.waiting_tells.waits(DOC) == []
-    assert documents(browser, token, open_only=False)[0].get("tells") is None
+    assert documents(browser, token, open_only=False)[0]["tells"] == []
 
 
 def test_a_cancel_from_the_page_ends_it_and_says_whether_the_agent_had_seen_it(browser, talk):
@@ -163,7 +190,7 @@ def test_a_cancel_from_the_page_ends_it_and_says_whether_the_agent_had_seen_it(b
     assert tell(browser).status == 200
     assert browser.post("/_/cancel", {"doc": DOC, "id": "c1"}).status == 200
     assert named(sub.drain(), "tell-cancelled") == [{"id": "c1", "seen": False}]
-    assert "tells" not in documents(browser, token)[0]
+    assert documents(browser, token)[0]["tells"] == []
     assert tell(browser).status == 200
     documents(browser, token)
     sub.drain()
@@ -177,7 +204,7 @@ def test_a_token_never_sees_the_tell_of_another_and_another_agents_reply_does_no
     ada, bob = agent_token(), agent_token("bob-claude", "Claude")
     target(browser)
     assert tell(browser).status == 200
-    assert "tells" not in documents(browser, bob)[0]
+    assert documents(browser, bob)[0]["tells"] == []
     ok(browser, "reply", doc=DOC, id="c1", text="Mine.", role="action", token=bob)
     assert documents(browser, ada)[0]["tells"]
 
@@ -196,8 +223,8 @@ def test_a_members_tell_waits_for_their_own_agent_only(front, browser, talk, wor
     bea, cal, loose = bea_tells(front, browser, work, other)
     t, = documents(browser, bea)[0]["tells"]
     assert t["by"] == "Bea" and "Please do." in t["message"]
-    assert documents(browser, cal) == [] or all("tells" not in d for d in documents(browser, cal))
-    assert all("tells" not in d for d in documents(browser, loose))
+    assert all(d["tells"] == [] for d in documents(browser, cal))
+    assert all(d["tells"] == [] for d in documents(browser, loose))
     assert front.get(f"/_/doc?doc={DOC}").json()["telling"] == [{"id": "c1", "to": "ChatGPT (Bea)", "state": "seen"}]
 
 
@@ -213,10 +240,10 @@ def test_a_members_cancel_ends_only_their_own_tell_and_the_hub_persons_cancel_le
     target(browser, "loose")                                         # the hub person has a Tell on the same thread
     assert tell(browser).status == 200
     assert browser.post("/_/cancel", {"doc": DOC, "id": "c1"}).status == 200
-    assert documents(browser, bea)[0]["tells"] and "tells" not in documents(browser, loose)[0]
+    assert documents(browser, bea)[0]["tells"] and documents(browser, loose)[0]["tells"] == []
     assert tell(browser).status == 200
     assert front.post("/_/cancel", {"doc": DOC, "id": "c1"}).status == 200
-    assert "tells" not in documents(browser, bea)[0] and documents(browser, loose)[0]["tells"]
+    assert documents(browser, bea)[0]["tells"] == [] and documents(browser, loose)[0]["tells"]
 
 
 def test_a_member_tells_through_the_tell_route_only_their_own_agent_and_cannot_cancel_a_document_that_is_not_theirs(front, browser, talk, work, other):
@@ -249,7 +276,7 @@ def test_a_cancel_that_comes_while_the_first_listing_is_out_ends_it_once_and_see
     first = documents(browser, token)[0]
     order[0].join(5)
     assert first["tells"] and done == [1]
-    assert "tells" not in documents(browser, token)[0]
+    assert documents(browser, token)[0]["tells"] == []
     assert waiting.waits(DOC) == []
     assert [r["thread"] for r in hub_rows("tell-seen")] == ["c1"] and len(hub_rows("tell-cancelled")) == 1
 
@@ -259,7 +286,7 @@ def test_a_cancel_first_leaves_nothing_to_list_and_nothing_seen(browser, talk):
     target(browser)
     assert tell(browser).status == 200
     browser.post("/_/cancel", {"doc": DOC, "id": "c1"})
-    assert "tells" not in documents(browser, token)[0]
+    assert documents(browser, token)[0]["tells"] == []
     assert hub_rows("tell-seen") == []
 
 

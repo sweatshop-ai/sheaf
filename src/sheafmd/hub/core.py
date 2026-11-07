@@ -969,6 +969,10 @@ class Hub:
         except Exception:
             self.record_exception("grants-failed")
         try:
+            self.waiting_tells.watch()            # a revoke or a close from outside ends a waiting Tell (9.8)
+        except Exception:
+            self.record_exception("tell-end-failed")
+        try:
             self.index.tick(self.clock())
         except Exception:               # a traceback, not `error=`: see `record_exception`
             self.record_exception("status-failed")

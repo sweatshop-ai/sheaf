@@ -111,7 +111,7 @@ def test_placer_returns_root_and_rel(two):
     assert hub.roots.resolve(f"{root.name}/{NAME}") == (two.private_repo / NAME).resolve()
 
 
-def test_resolve_refuses_a_path_whose_real_location_is_outside_the_returned_root(two, tmp_path):
+def test_resolve_refuses_a_link_that_leaves_the_private_root(two, tmp_path):
     hub = hub_of(two)
     root = list_root(hub)
     (two.private_repo / "acme/blog").mkdir(parents=True)
@@ -139,3 +139,13 @@ def test_make_refused_until_private_create(two):
     is_error, got = call(door, "create", token=token, doc=f"{root.name}/{NAME}", text=OPEN)       # positive control
     assert not is_error, got
     assert (two.list_repo / NAME).is_file()
+
+
+def test_resolve_refuses_the_git_dir_and_state_of_the_returned_root(two, monkeypatch):
+    hub = hub_of(two)
+    root, private = list_root(hub), private_root(hub)
+    (two.private_repo / ".sheaf").mkdir()
+    (two.private_repo / ".sheaf/x.md").write_text(OPEN, encoding="utf-8")
+    monkeypatch.setattr(hub.roots, "placer", lambda r, rel: (private, ".sheaf/x.md"))      # a placer's answer is judged
+    with pytest.raises(roots_mod.NotFound):                                                 # against its own root
+        hub.roots.resolve(f"{root.name}/acme/blog/x.md")

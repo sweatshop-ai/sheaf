@@ -70,6 +70,7 @@ QUARANTINE = "~unplaced"
 NO_SHORT = "it is its owner's alone and no owner of it has a short to name its private folder"
 IGNORED = "the repo ignores the private folder"
 PRIVATE_ROOT = "its home is a private root, and a sheaf cannot be moved between roots yet"
+PRIVATE_PATH = "a sheaf of a private root is made by its name under the list's root, not by the path of the private folder"
 SHARE = "a sheaf of a private root cannot be shared yet"
 UNDECIDED = "its file cannot be told from another of the same name, or a private root cannot be looked at"
 

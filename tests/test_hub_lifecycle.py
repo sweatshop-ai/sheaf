@@ -182,7 +182,7 @@ def test_restart_replaces_the_hub_and_open_tabs_ride_through_without_a_stop_bann
 
 
 def test_restart_forces_the_upgrade_stop_because_the_person_asked_for_it(sheaf, port, monkeypatch):
-    """A hub refuses an upgrade stop while an Ask or Tell runs (8.4); `sheaf restart` is the person's
+    """A hub refuses an upgrade stop while a Tell runs (8.4); `sheaf restart` is the person's
     own decision, so what it posts says `force`."""
     from sheafmd.hub import client as hubclient
     sheaf("start")

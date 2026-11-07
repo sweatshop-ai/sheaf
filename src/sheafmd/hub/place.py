@@ -241,6 +241,21 @@ def _private_roots(hub) -> dict:
     return {member: by_id[rid] for rid, member in hub.private_roots.items() if rid in by_id}
 
 
+def private_listed(hub, member, board: bool = False) -> list:
+    """The private roots whose files a listing shows under their names (rule D): `member`'s own; every member's for
+    the index's board (`board`), which tells each stream only what that stream may take."""
+    if member is not None:
+        return [r] if (r := _private_roots(hub).get(member.id)) is not None else []
+    return list(_private_roots(hub).values()) if board else []
+
+
+def held_privately(hub, address: str) -> bool:
+    """Whether the sheaf's name `address` is held by a file of a private root now, judged on the name and not on what a
+    sweep has met: what the hub's person is shown no row and told no change of (rule D)."""
+    got = where_is(hub, address)
+    return got is not None and got[0].id in (getattr(hub, "private_roots", None) or {})
+
+
 def _twice(hub, address: str, n: int):
     _refused(hub, address, f"its name is held by {n} files")
 

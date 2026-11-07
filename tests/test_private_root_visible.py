@@ -770,7 +770,7 @@ def test_private_sheaf_image_shows(world):
     assert w.front.get(f"/_/mount?doc={w.address}", member=B).status == 404                  # the positive control's other side
     # a sheaf of the list's root cannot embed a picture of the private root
     (w.two.list_repo / "acme/blog/other.md").write_text("# other\n\n![pic](pic.png)\n", encoding="utf-8")
-    (w.two.list_repo / "acme/blog/pic.png").unlink(missing_ok=True)
+    (w.two.list_repo / "acme/blog/pic.png").symlink_to(w.two.private_repo / "acme/blog/pic.png")      # even through a link
     other = w.front.get(f"/_/mount?doc={w.root.name}/acme/blog/other.md", member=A).json()["html"]
     assert "data:image/png" not in other
 
@@ -789,6 +789,21 @@ def test_index_and_documents_show_private_names(world):
     assert index.accepting(None)("status", index._event(w.address, None, True, 0, None)) is None      # not the person's
     is_error, own = call(w.door, "documents", token=w.tokens["tok-a"], open_only=False)
     assert not is_error and [d["doc"] for d in own] == [w.address]
+
+
+def test_a_private_name_rendered_by_the_persons_hand_is_no_row_and_no_event_of_theirs(world):
+    """`sheaf render` of the list root's path of a private sheaf gives the list name; the hub's person is shown no row
+    of it and told no change, whether or not a sweep has met the name, and its member is shown both."""
+    w = world
+    index = w.hub.index
+    index.arm()
+    w.put(PRIVATE)                  # made after the board was taken: no sweep has met the name
+    person = w.hub.index_bus.subscribe(lambda n: {}, index.accepting(None))          # the hub's person's stream
+    assert w.hub.render(w.two.list_repo / NAME, {}, None)["doc"] == w.address
+    index.touch(w.address)
+    assert [d for n, d in person.drain() if n == "status"] == []
+    names = lambda member: [d["doc"] for r in index.data(member=member)["roots"] for d in r["docs"]]    # noqa: E731
+    assert w.address not in names(None) and w.address in names(w.hub.proxy.members[A])
 
 
 def test_the_share_copy_is_rendered_from_the_text_the_descriptor_gave(world, mode, monkeypatch):

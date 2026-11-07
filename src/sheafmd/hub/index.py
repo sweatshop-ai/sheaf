@@ -293,7 +293,7 @@ class Index:
         root, row = got if got else (roots_mod.Address.parse(address).root, None)
         return Status({"doc": address, "root": root, "dot": row and row["dot"],
                        "open": row["open"] if row else 0, "changed": row and row["mtime"]}, files, at, sig,
-                      members_only=address in self._private_docs)      # a private sheaf is no event of the hub's person
+                      members_only=address in self._private_docs or place.held_privately(self.hub, address))      # a private sheaf is no event of the hub's person
 
     def _rows(self) -> dict:
         return {d["doc"]: (r["name"], d) for r in self.data(board=True)["roots"] for d in r["docs"]}
@@ -607,6 +607,8 @@ class Index:
                             rows.append(self._row(address, path, f.stat, waiting, running, member))
             for address in sorted(a for a in named - have if a.startswith(roots_mod.Address.prefix(root.name))):
                 with place.held(hub, address):          # every read of a sheaf's file holds its name's lock (9.11)
+                    if member is None and not board and place.held_privately(hub, address):
+                        continue                        # a private file is no row of the hub's person, rendered or not (rule D)
                     if not (found := self._stat_of(root, address)):
                         continue
                     path, st = found

@@ -201,6 +201,13 @@ def test_a_members_tell_waits_for_their_own_agent_only(front, browser, talk, wor
     assert front.get(f"/_/doc?doc={DOC}").json()["telling"] == [{"id": "c1", "to": "ChatGPT (Bea)", "state": "seen"}]
 
 
+def test_a_member_with_no_agent_of_theirs_is_refused_the_tell_route_with_the_line_of_10_6(front, browser, talk, work, other):
+    agent_token("bea-chatgpt")
+    front.hub.proxy = members(work, other, bea=["bea-chatgpt"], cal=[])
+    r = front.post("/_/tell", {"doc": DOC, "id": "c1"})
+    assert r.status == 400 and r.json()["error"] == "Let one of your agents work on this page to Tell it."
+
+
 def test_a_members_cancel_ends_only_their_own_tell_and_the_hub_persons_cancel_leaves_it(front, browser, talk, work, other):
     bea, cal, loose = bea_tells(front, browser, work, other)
     target(browser, "loose")                                         # the hub person has a Tell on the same thread
@@ -212,9 +219,12 @@ def test_a_members_cancel_ends_only_their_own_tell_and_the_hub_persons_cancel_le
     assert "tells" not in documents(browser, bea)[0] and documents(browser, loose)[0]["tells"]
 
 
-def test_a_member_cannot_tell_through_the_tell_route_nor_cancel_a_document_that_is_not_theirs(front, browser, talk, work, other):
+def test_a_member_tells_through_the_tell_route_only_their_own_agent_and_cannot_cancel_a_document_that_is_not_theirs(front, browser, talk, work, other):
     bea_tells(front, browser, work, other)
-    assert front.post("/_/tell", {"doc": DOC, "id": "c1"}).status in (403, 404, 405)
+    assert front.post("/_/tell", {"doc": DOC, "id": "c1"}).status == 409        # her agent has the Tell on the thread already
+    assert front.post("/_/cancel", {"doc": DOC, "id": "c1"}).status == 200
+    assert front.post("/_/tell", {"doc": DOC, "id": "c1"}).status == 200        # the button, after a cancel
+    assert [t["state"] for t in front.get(f"/_/doc?doc={DOC}").json()["telling"]] == ["queued"]
     (other / "theirs.md").write_text("# Theirs\n\nText.\n", encoding="utf-8")
     browser.hub.roots.for_document(other / "theirs.md")
     assert front.post("/_/cancel", {"doc": "other/theirs.md", "id": "c1"}).status == 404

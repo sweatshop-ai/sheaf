@@ -488,7 +488,15 @@ def opened_private(hub, opened):
     """The id of the member whose private root the object `opened` (a `beneath.Opened`) is in, else None. Judged on the
     descriptors of the walk that opened it: the identity (st_dev, st_ino) of the root's folder and its parents, of every
     folder the walk went into and of the file, against `hub._private_ids`. No path is resolved for it."""
-    ids = getattr(hub, "_private_ids", None) or {}
+    ids = getattr(hub, "_private_ids", None)
+    if ids is None:
+        return None
+    for folder, member in (getattr(hub, "_private_paths", None) or {}).items():
+        try:
+            st = os.stat(folder)                        # a private root's folder made new at its path (a fresh clone, a
+        except OSError:                                 # restore) is private all the same: the set only grows
+            continue
+        ids.setdefault((st.st_dev, st.st_ino), member)
     return next((ids[i] for i in opened.idents() if i in ids), None)
 
 

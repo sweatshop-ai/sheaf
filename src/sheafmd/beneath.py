@@ -177,6 +177,36 @@ def _root_dirs(rootfd: int) -> list:
         os.close(fd)
 
 
+def _folders_of(rootfd: int, rel: str, file: tuple) -> list:
+    """The identities of the folders that hold the file `openat2` opened: the root's, its parents' and every folder
+    between the root and the file. The file's folder is opened beneath the root the same way (no link), the name in it
+    must be the file opened (else ESTALE: something moved meanwhile), and the folders above it are read by `..` up to
+    the root, so what is judged is what the file lies in, not a path read again."""
+    parts = rel.split("/")
+    if any(n in ("", ".", "..") for n in parts):
+        raise OSError(errno.ESTALE, "a path with dots is walked, not opened by the kernel", rel)
+    out = _root_dirs(rootfd)
+    if len(parts) == 1:
+        return out
+    here = _openat2(rootfd, "/".join(parts[:-1]), os.O_RDONLY | os.O_DIRECTORY, _RESOLVE_BENEATH | _RESOLVE_NO_SYMLINKS)
+    try:
+        st = os.stat(parts[-1], dir_fd=here, follow_symlinks=False)
+        if (st.st_dev, st.st_ino) != file:
+            raise OSError(errno.ESTALE, "the file is no longer the one that was opened", rel)
+        root, mid = ident(rootfd), []
+        for _ in range(len(parts)):
+            now = ident(here)
+            if now == root:
+                return [*mid, *out]
+            mid.append(now)
+            up = os.open("..", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC, dir_fd=here)
+            os.close(here)
+            here = up
+        raise OSError(errno.ESTALE, "the file's folders do not lead up to its root", rel)
+    finally:
+        os.close(here)
+
+
 def _walk(top, rel: str, meta: bool = False):
     """(file fd, file identity, identities of the folders on the way, folder fd, name): one name at a time, each
     opened from the descriptor above it with O_NOFOLLOW. A link is read with `readlinkat` and its target walked by us,
@@ -255,7 +285,7 @@ def open_beneath(top, rel: str, meta: bool = False) -> Opened:
     missing, a link that leaves the root, a loop, a folder. The folder `top` itself is opened by its name once, and
     every judgement after that is of descriptors."""
     top = os.fspath(top)
-    if not FALLBACK:
+    if not FALLBACK and not any(n in ("", ".", "..") for n in rel.split("/")):   # dots are for the walk
         rootfd = os.open(top, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
         try:
             if any(n in OWN for n in rel.split("/")):
@@ -281,7 +311,12 @@ def open_beneath(top, rel: str, meta: bool = False) -> Opened:
                 if st.st_nlink > 1:
                     os.close(fd)
                     raise Linked(rel)
-                return Opened(fd, (st.st_dev, st.st_ino), _root_dirs(rootfd), None, None, "openat2", top, rel)
+                try:
+                    dirs = _folders_of(rootfd, rel, (st.st_dev, st.st_ino))
+                except BaseException:
+                    os.close(fd)
+                    raise
+                return Opened(fd, (st.st_dev, st.st_ino), dirs, None, None, "openat2", top, rel)
         finally:
             os.close(rootfd)
     fd, file, dirs, parent, name = _walk(top, rel, meta)

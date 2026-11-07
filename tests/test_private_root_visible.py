@@ -806,3 +806,34 @@ def test_a_write_that_moves_the_file_writes_only_the_file_it_opened(world, mode,
     assert any("private/" in c for c in calls), calls
     assert is_error, got
     assert secret.read_text(encoding="utf-8") == "# A's other private note\n"
+
+
+def test_a_private_root_made_new_at_its_path_is_private_still_to_a_listing_and_a_read(world, mode):
+    """A private root's folder replaced at its path while the hub runs (a fresh clone, a restore) has a new identity: it is
+    private all the same, so a token bound to nobody is shown neither its name nor its thread counts, and reads nothing."""
+    import shutil
+    w = world
+    w.put(PRIVATE)
+    w.put(PROJECT_WIDE)                                  # the private root also holds a sheaf that says visibility: project
+    comment(w.two.private_repo / NAME, quote="Secret words.")
+    pname = w.hub.roots.lookup(w.two.private_repo / NAME).name
+    p = w.two.private_repo
+    shutil.move(str(p), str(p) + ".old")
+    shutil.copytree(str(p) + ".old", str(p), symlinks=True)
+    is_error, got = call(w.door, "documents", token=w.tokens["loose"], open_only=False, root=pname)
+    assert "post.md" not in str(got) and "Secret words" not in str(got), got
+    for tool in ("read", "threads"):
+        is_error, got = call(w.door, tool, token=w.tokens["loose"], doc=f"{pname}/{NAME}")
+        assert "Secret words" not in str(got), (tool, got)
+
+
+def test_the_kernel_open_judges_the_folders_between_the_root_and_the_file_too(tmp_path, mode):
+    from sheafmd import beneath
+    top = tmp_path / "top"
+    (top / "a/b").mkdir(parents=True)
+    (top / "a/b/f.md").write_text("hi", encoding="utf-8")
+    here = os.stat(top / "a/b")
+    with beneath.open_beneath(top, "a/b/f.md") as op:
+        assert (here.st_dev, here.st_ino) in op.idents(), mode
+        up = os.stat(top / "a")
+        assert (up.st_dev, up.st_ino) in op.idents(), mode

@@ -7,11 +7,10 @@ import threading
 
 import pytest
 
-from helpers import BEA, CAL, FRONT, Front
+from helpers import BEA, CAL, FRONT
 from sheafmd.hub import proxy
-from sheafmd.hub.state import Tokens
-from test_hub_target import DOC, pick, row
-from test_hub_waiting import agent_token, documents, named, talk  # noqa: F401  (talk is a fixture)
+from test_hub_target import DOC, pick
+from test_hub_waiting import agent_token, documents, talk  # noqa: F401  (talk is a fixture)
 
 LINE = "Let one of your agents work on this page to Tell it."
 
@@ -45,7 +44,7 @@ def post(front, member, path, **body):
 
 
 class As:
-    """A member's client: `pick` wants an object with `.post`."""
+    """A member's client for the helpers that take an object with `.post`."""
     def __init__(self, front, member):
         self.front, self.member = front, member
 

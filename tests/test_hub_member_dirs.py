@@ -222,12 +222,16 @@ OVERLAPS = {
     "same-member-equal": ({"x": own("x", tell_dir="/data/xs")}, ("tell_dir", "x"), ("stop_dir", "x")),
     "same-member-stop-in-tell": ({"x": own("x", stop_dir="/data/xt/tell/stop")}, ("tell_dir", "x"), ("stop_dir", "x")),
     "same-member-tell-in-stop": ({"x": own("x", tell_dir="/data/xs/tell")}, ("tell_dir", "x"), ("stop_dir", "x")),
-    "same-member-stop-in-sessions": ({"x": own("x", sessions_dir="/data/xs", work_dir="/w")}, ("sessions_dir", "x"), ("stop_dir", "x")),
+    "same-member-stop-equals-sessions": ({"x": own("x", sessions_dir="/data/xs", work_dir="/w")}, ("sessions_dir", "x"), ("stop_dir", "x")),
     "members-same-key-equal": (two(tell_dir="/data/xt/tell"), ("tell_dir", "y"), ("tell_dir", "x")),
     "members-same-key-inside": (two(tell_dir="/data/xt/tell/y"), ("tell_dir", "y"), ("tell_dir", "x")),
     "members-same-key-around": (two(tell_dir="/data/xt"), ("tell_dir", "y"), ("tell_dir", "x")),
     "members-other-key-equal": (two(tell_dir="/data/xs"), ("tell_dir", "y"), ("stop_dir", "x")),
     "members-other-key-inside": (two(stop_dir="/data/xt/tell/ys"), ("stop_dir", "y"), ("tell_dir", "x")),
+    "same-member-tell-in-sessions": ({"x": own("x", sessions_dir="/data/xv", work_dir="/w", tell_dir="/data/xv/tell")},
+                                     ("sessions_dir", "x"), ("tell_dir", "x")),
+    "members-sessions-equal": ({"x": own("x", sessions_dir="/data/v", work_dir="/w"),
+                                "y": own("y", sessions_dir="/data/v/", work_dir="/w")}, ("sessions_dir", "y"), ("sessions_dir", "x")),
     "members-other-key-sessions": ({"x": own("x", sessions_dir="/data/xv", work_dir="/w"), "y": own("y", tell_dir="/data/xv/y")},
                                    ("tell_dir", "y"), ("sessions_dir", "x")),
 }
@@ -239,6 +243,17 @@ def test_member_dirs_folders_overlap_across_keys_and_members(work, tmp_path, nam
     said = f"'{key}' of [list.member_dirs.\"{who}\"] is, or is inside or around, '{other}' of [list.member_dirs.\"{other_who}\"]"
     with pytest.raises(the_list.ListError, match=re.escape(said)):
         parse(work, tmp_path, member_dirs=tables)
+
+
+@pytest.mark.parametrize("table, key, shared_key", [
+    (dict(tell_dir="/data/t", stop_dir="/run/shared/tell"), "stop_dir", "tell_dir"),
+    (dict(tell_dir="/run/shared/tell/own", stop_dir="/data/s"), "tell_dir", "tell_dir"),
+    (dict(tell_dir="/data/t", stop_dir="/data/s", sessions_dir="/run/shared", work_dir="/w"), "sessions_dir", "tell_dir"),
+])
+def test_member_dirs_folder_meets_another_key_of_the_list(work, tmp_path, table, key, shared_key):
+    said = f"'{key}' of [list.member_dirs.\"x\"] is, or is inside or around, '{shared_key}' of [list]"
+    with pytest.raises(the_list.ListError, match=re.escape(said)):
+        parse(work, tmp_path, member_dirs={"x": table})
 
 
 def test_member_dirs_folders_that_only_share_a_prefix_start(work, tmp_path):

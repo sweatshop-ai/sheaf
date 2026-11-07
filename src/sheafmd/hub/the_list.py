@@ -207,12 +207,14 @@ def parse(t: dict, where) -> ListConfig:
     if "work_dir" in t and not t["work_dir"].startswith("/"):
         raise ListError(f"'work_dir' must be an absolute path, in {here}: {t['work_dir']!r}")
     member_dirs = _member_dirs(t.get("member_dirs", {}), t["root"], here)
+    shared_dirs = [(k, t[k]) for k in FOLDER_KEYS if k in t]
     for mid, d in member_dirs.items():
         for key in FOLDER_KEYS:
-            mine, shared = getattr(d, key), t.get(key)
-            if mine is not None and shared is not None and (_within(str(mine), shared) or _within(shared, str(mine))):
-                raise ListError(f"'{key}' of [list.member_dirs.\"{mid}\"] is, or is inside or around, the one of [list], "
-                                f"in {here}: {mine}")
+            mine = getattr(d, key)
+            for shared_key, shared in shared_dirs:
+                if mine is not None and (_within(str(mine), shared) or _within(shared, str(mine))):
+                    raise ListError(f"'{key}' of [list.member_dirs.\"{mid}\"] is, or is inside or around, "
+                                    f"'{shared_key}' of [list], in {here}: {mine}")
     seen = []        # (member id, key, folder) of the tables read so far: no folder may equal, lie in or around another
     for mid, d in member_dirs.items():
         for key in FOLDER_KEYS:

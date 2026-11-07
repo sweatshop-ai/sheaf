@@ -86,7 +86,7 @@ def test_private_lifecycle_leaves_list_repo_untouched(two):
     # the list repo shows nothing new: no file, no commit, nothing waiting to be pushed, no word of the sheaf's text
     assert (untouched(two), git(two.list_repo, "rev-parse", "HEAD"), git(two.base / "list.git", "rev-parse", "main"), refs(), tree()) == before
     guard = git(two.list_repo, "for-each-ref", "--format=%(objectname)", "refs/sheaf/last-seen/").split()
-    assert set(guard) <= {before[1].strip()}                  # the rewrite guard's ref sits where the list repo's head was
+    assert set(guard) == {before[1].strip()}                  # the rewrite guard's ref sits where the list repo's head was
     assert not (two.list_repo / state.INSIDE).exists()
     for repo in (two.list_repo, two.base / "list.git"):
         assert not any(word in everything_of(repo) for word in (SECRET, "Secret edit.", "A private remark.", "pic.png", NAME, "post.md"))

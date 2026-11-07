@@ -79,6 +79,8 @@ def agent_view(hub, raw: dict, member=None) -> tuple[dict, str | None, bool]:
     row = live(hub, raw, member)
     name = row.signed(hub.person, hub.proxy) if row is not None else str(raw.get("token", ""))
     shape = {"kind": "agent", "token": raw.get("token"), "display": name, "label": name}
+    if row is None:
+        shape["revoked"] = True                     # the page takes no token of this name for the current target
     return shape, (LATER if row is not None else REVOKED).format(agent=name), row is not None
 
 

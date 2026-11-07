@@ -1435,9 +1435,9 @@ def test_cancelling_a_tell_looks_the_session_up_without_the_admission_lock(
         other.join()
         return got[0]
 
-    def view(address):
+    def view(address, **kw):
         free.append(can_admit())
-        return real(address)
+        return real(address, **kw)
     post(browser, "/_/tell")
     assert wait_until(lambda: slow.log == ["deliver-start"])
     monkeypatch.setattr(hub.tell, "view", view)
@@ -1511,7 +1511,7 @@ def test_cancelling_a_tell_looks_the_session_up_only_when_a_stop_message_is_to_g
         post(browser, "/_/cancel")          # its wait ends and its stop message goes out
         finish(hub)
     looked, real = [], hub.tell.view
-    monkeypatch.setattr(hub.tell, "view", lambda address: looked.append(address) or real(address))
+    monkeypatch.setattr(hub.tell, "view", lambda address, **kw: looked.append(address) or real(address, **kw))
     assert post(browser, "/_/cancel").json() == {"ok": True}
     finish(hub)
     assert looked == ([] if state == "ended" else [DOC])

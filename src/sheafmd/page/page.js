@@ -162,7 +162,7 @@ var create = function (ROOT, CFG, opts) {
   }
   // The target now, as POST /_/target names it (SPEC 9.8), and the other targets the reader may pick: Change is
   // offered when there is one.
-  function targetNow() { return !CFG.agent ? 'none' : CFG.agent.kind === 'agent' ? 'agent:' + CFG.agent.token : 'session'; }
+  function targetNow() { return !CFG.agent ? 'none' : CFG.agent.kind === 'agent' ? (CFG.agent.revoked ? 'revoked' : 'agent:' + CFG.agent.token) : 'session'; }
   function otherTargets() {
     var now = targetNow();
     return (CFG.targets || []).filter(function (t) { return t.target !== now; });

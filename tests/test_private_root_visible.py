@@ -1020,3 +1020,53 @@ def test_a_legacy_lock_that_is_a_link_creates_nothing_where_it_points(tmp_path, 
     source.update_file(doc, lambda t: t + "x\n")                    # the update itself still goes through
     assert doc.read_text(encoding="utf-8") == "# d\nx\n"
     assert not victim.exists()
+
+
+def _legacy_world(tmp_path, monkeypatch):
+    import tempfile
+    from sheafmd import source
+    fake = tmp_path / "faketmp"
+    (fake / "render-doc").mkdir(parents=True)
+    monkeypatch.setattr(tempfile, "tempdir", str(fake))
+    doc = tmp_path / "d.md"
+    doc.write_text("# d\n", encoding="utf-8")
+    return fake, doc, source
+
+
+def test_a_legacy_lock_folder_that_is_a_link_creates_nothing_where_it_points(tmp_path, monkeypatch):
+    fake, doc, source = _legacy_world(tmp_path, monkeypatch)
+    target = tmp_path / "private" / "acme"
+    target.mkdir(parents=True)
+    os.chmod(target, 0o755)                                         # a folder of ours: only the link itself is refused
+    os.chmod(fake / "render-doc", 0o755)
+    (fake / "render-doc" / "locks").symlink_to(target)              # the folder is the link, not the lock
+    source.update_file(doc, lambda t: t + "x\n")
+    assert doc.read_text(encoding="utf-8") == "# d\nx\n" and list(target.iterdir()) == []
+
+
+def test_a_legacy_lock_folder_others_can_write_is_not_used(tmp_path, monkeypatch):
+    fake, doc, source = _legacy_world(tmp_path, monkeypatch)
+    locks = fake / "render-doc" / "locks"
+    locks.mkdir()
+    os.chmod(locks, 0o777)                                          # another user could swap what is in it
+    source.update_file(doc, lambda t: t + "x\n")
+    assert list(locks.iterdir()) == []
+
+
+def test_a_legacy_lock_folder_that_is_ours_is_still_taken(tmp_path, monkeypatch):
+    fake, doc, source = _legacy_world(tmp_path, monkeypatch)
+    locks = fake / "render-doc" / "locks"
+    locks.mkdir()
+    for d in (locks, locks.parent):
+        os.chmod(d, 0o755)
+    source.update_file(doc, lambda t: t + "x\n")
+    assert [p.name for p in locks.iterdir()] == [source.lock_key(doc) + ".lock"]
+
+
+def test_a_private_roots_own_projects_toml_is_read_for_its_member(tmp_path, mode):
+    from types import SimpleNamespace
+    from sheafmd.hub import projects
+    st = tmp_path.stat()
+    hub = SimpleNamespace(_private_ids={(st.st_dev, st.st_ino): "a"}, _private_paths={str(tmp_path): "a"})
+    (tmp_path / "projects.toml").write_text('[projects."acme/blog"]\nmembers = ["a"]\nstatus = "live"\n', encoding="utf-8")
+    assert set(projects.read(tmp_path, hub)) == {"acme/blog"}

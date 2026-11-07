@@ -916,13 +916,6 @@ class Hub:
         self._projects[root.id] = (key, got)          # a swap of one item: no lock, any reader sees one or the other
         self._grants_seen.setdefault(root.id, got)    # what the tick compares with, from the first read on
         return got
-        try:
-            got = projects.read(root.path)
-        except projects.Invalid as e:
-            got = e
-        self._projects[root.id] = (key, got)          # a swap of one item: no lock, any reader sees one or the other
-        self._grants_seen.setdefault(root.id, got)    # what the tick compares with, from the first read on
-        return got
 
     def owners(self, address: str, members) -> list:
         """Those of `members` who own the sheaf at `address`, by its front matter now, as `visible` judges."""

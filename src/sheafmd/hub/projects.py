@@ -33,6 +33,12 @@ class Invalid(Exception):
     """A `projects.toml` the hub cannot read. The message names the reason."""
 
 
+def _is_private_root(hub, folder) -> bool:
+    """Whether `folder` is a private root itself: its own file is its member's to read (as `place.judge_for` lets the
+    root's own folder be opened), and no one else is served from it."""
+    return os.path.realpath(folder) in (getattr(hub, "_private_paths", None) or {})
+
+
 def load(folder: Path, hub=None) -> tuple:
     """(key, got) of the file: `got` the entries, None without the file, or an `Invalid` it returns and does not raise;
     `key` says which file it was (inode, times, size), so a caller reads it again only when it changed. The file is
@@ -41,7 +47,7 @@ def load(folder: Path, hub=None) -> tuple:
     cannot read, which grants nobody, and not as one that is not there, which grants as before."""
     try:
         with beneath.open_beneath(folder, FILE) as op:
-            if hub is not None and place.opened_private(hub, op) is not None:
+            if hub is not None and not _is_private_root(hub, folder) and place.opened_private(hub, op) is not None:
                 return ("refused",), Invalid("is a file of a private root")
             st = os.fstat(op.fd)
             key = (st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)

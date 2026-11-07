@@ -60,10 +60,28 @@ def _legacy_lock_path(md_path):
     return d / (lock_key(md_path) + ".lock") if d.is_dir() else None
 
 
-def _open_lock(path):
+def _open_lock(path, under=None):
     # 0600: a lock file is the user's own, and the folder is theirs alone. Never through a link (a local user who can
     # write the folder would make the lock where the link points, in a private root), and only a regular file of ours.
-    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    # `under`: a folder not ours (the legacy locks, in the temp folder): each folder from it down to the lock is opened
+    # from the one above without following a link, and must be owned by us and not writable by anyone else.
+    flags = os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC
+    if under is None:
+        fd = os.open(path, flags, 0o600)
+    else:
+        *folders, name = Path(path).relative_to(under).parts
+        dir_fd = os.open(under, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+        try:
+            for part in folders:
+                nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dir_fd)
+                os.close(dir_fd)
+                dir_fd = nxt
+                st = os.fstat(dir_fd)
+                if st.st_uid != os.getuid() or st.st_mode & 0o022:
+                    raise PermissionError(errno.EPERM, "a lock folder that is not ours alone", str(path))
+            fd = os.open(name, flags, 0o600, dir_fd=dir_fd)
+        finally:
+            os.close(dir_fd)
     try:
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid():
@@ -85,7 +103,7 @@ class file_lock:
         try:
             for p in self.paths:
                 try:
-                    f = _open_lock(p)
+                    f = _open_lock(p, None if p is self.paths[0] else Path(tempfile.gettempdir()))
                 except OSError:
                     if p is self.paths[0]:
                         raise

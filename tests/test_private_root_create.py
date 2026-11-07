@@ -5,6 +5,7 @@ import pytest
 from helpers import browser_on, call
 from two_roots import TwoRoots, git, two_roots
 
+from sheafmd.hub import place
 from sheafmd.hub.state import Tokens
 from sheafmd.source import md_hash
 
@@ -51,7 +52,7 @@ class World:
 
 
 def refused(is_error, got):
-    assert is_error and "cannot be made" in got, got
+    assert is_error and "cannot be made" in got and place.PRIVATE_ROOT in got, got
 
 
 def test_create_lands_in_private_root(two):
@@ -100,3 +101,32 @@ def test_update_owner_flip_refused(two):
     is_error, got = w.call("update", "tok-a", doc=w.address, text=OPEN + "\nmore\n", expected_hash=md_hash(before))
     assert not is_error, got                        # positive control: an update that stays in its root
     assert "more" in path.read_text(encoding="utf-8")
+
+
+def test_create_refused_for_the_key_like_for_other_callers(two):
+    w = World(two)
+    other = w.create("tok-b", OWNED_BY_A)
+    key = call(w.door, "create", doc=w.address, text=OWNED_BY_A)      # no token: the key
+    refused(*key)
+    assert key == other
+    w.nothing_written()
+
+
+def test_private_folder_swapped_for_a_link_after_the_checks_is_refused(two, monkeypatch):
+    w = World(two)
+    real = place.make_folders
+
+    def swapped(top, rel, judge=None):
+        # between the checks by path and the open: the member's folder becomes a link to the list repo
+        moved = two.private_repo.with_name("moved")
+        two.private_repo.rename(moved)
+        two.private_repo.symlink_to(two.list_repo)
+        return real(top, rel, judge)
+    monkeypatch.setattr(place, "make_folders", swapped)
+    is_error, got = w.create("tok-a", OWNED_BY_A)
+    assert is_error, got
+    assert not list(two.list_repo.rglob("post.md"))
+    monkeypatch.setattr(place, "make_folders", real)
+    two.private_repo.unlink()
+    two.private_repo.with_name("moved").rename(two.private_repo)
+    assert not w.create("tok-a", OWNED_BY_A)[0]            # positive control: the folder back, the same create is made

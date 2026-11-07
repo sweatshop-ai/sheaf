@@ -409,6 +409,20 @@ def judge_for(hub, root):
     return judge
 
 
+def judge_home(hub, root, member_id: str):
+    """The `judge` for a create at `root`, a private root: it refuses (`beneath.Private`) when the root's folder, as
+    opened, is not the one recorded for `member_id` (a folder swapped for a link to another root between the checks by path and
+    the open). Judged on the descriptors, as `judge_for` is."""
+    def judge(idents):
+        # The identities recorded by the checks before, not `opened_private`'s: that one records whatever is now at a
+        # private root's path, which is the folder a swap put there.
+        ids = getattr(hub, "_private_ids", None) or {}
+        # Only the root's folder and its parents (several identities) are judged: no private root lies inside another.
+        if len(idents) > 1 and {ids[i] for i in idents if i in ids} != {member_id}:
+            raise Private(root.name)
+    return judge
+
+
 class _Idents:
     """What `opened_private` asks of an opened object: the identities it lies in."""
 

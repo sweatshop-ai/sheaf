@@ -61,8 +61,17 @@ def _legacy_lock_path(md_path):
 
 
 def _open_lock(path):
-    # 0600: a lock file is the user's own, and the folder is theirs alone.
-    return os.fdopen(os.open(path, os.O_RDWR | os.O_CREAT, 0o600), "a+")
+    # 0600: a lock file is the user's own, and the folder is theirs alone. Never through a link (a local user who can
+    # write the folder would make the lock where the link points, in a private root), and only a regular file of ours.
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid():
+            raise PermissionError(errno.EPERM, "a lock that is not a file of ours", str(path))
+    except BaseException:
+        os.close(fd)
+        raise
+    return os.fdopen(fd, "a+")
 
 
 class file_lock:

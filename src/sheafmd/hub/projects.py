@@ -9,16 +9,18 @@ in the hub's log and in the diagnostics log (15), once per folder per hub run.
     status = "live"                   # or "closed"
     assistants = ["james"]            # optional: the agents that work on it for its members, for the Library
 
-    read(folder)              the entries, or None without the file; raises Invalid
+    read(folder, hub)         the entries, or None without the file; raises Invalid (`load`: with its key, no raise)
     unlisted(entries, rels)   the `<client>/<project>` folders of `rels` that the entries do not name
     grants(entries, rel, short)   whether the member `short` may open the shared sheaves at `rel`
     groups(entries)           what `sheaf projects groups` prints for the Library: the same judgement
     image_in_reach(doc, image, outsider)   whether a page of `doc` may embed the local image `image` (9.9)
 """
+import os
 import re
 import tomllib
 from pathlib import Path
 
+from .. import beneath
 from . import place
 
 FILE = "projects.toml"
@@ -31,13 +33,39 @@ class Invalid(Exception):
     """A `projects.toml` the hub cannot read. The message names the reason."""
 
 
-def read(folder: Path) -> dict | None:
+def load(folder: Path, hub=None) -> tuple:
+    """(key, got) of the file: `got` the entries, None without the file, or an `Invalid` it returns and does not raise;
+    `key` says which file it was (inode, times, size), so a caller reads it again only when it changed. The file is
+    opened once beneath `folder` (rule 2, SPEC 9.11): a link that leaves the folder, goes into `.git` or `.sheaf`, a file
+    with two names, and with `hub` a file the descriptors say is in a private root, are refused as a file the hub
+    cannot read, which grants nobody, and not as one that is not there, which grants as before."""
     try:
-        raw = (Path(folder) / FILE).read_bytes()
+        with beneath.open_beneath(folder, FILE) as op:
+            if hub is not None and place.opened_private(hub, op) is not None:
+                return ("refused",), Invalid("is a file of a private root")
+            st = os.fstat(op.fd)
+            key = (st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
+            raw = op.bytes()
+    except (beneath.Escapes, beneath.Linked):
+        return ("refused",), Invalid("is a link that leaves the folder, a file of the hub's own or a file with two names")
     except FileNotFoundError:
-        return None
+        return None, None
     except OSError as e:
-        raise Invalid(f"cannot be read ({e.strerror})") from None
+        return ("unreadable", e.errno), Invalid(f"cannot be read ({e.strerror})")
+    try:
+        return key, parse(raw)
+    except Invalid as e:
+        return key, e
+
+
+def read(folder: Path, hub=None) -> dict | None:
+    got = load(folder, hub)[1]
+    if isinstance(got, Invalid):
+        raise got
+    return got
+
+
+def parse(raw: bytes) -> dict:
     try:
         data = tomllib.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, tomllib.TOMLDecodeError) as e:

@@ -155,9 +155,12 @@ def test_a_stop_still_finds_the_session_a_tell_was_sent_to_when_an_agent_is_the_
     token = Tokens().add("ada-chatgpt", client="ChatGPT")
     ok(browser, "reply", doc=DOC, id="c1", text="Done.", token=token)
     assert stored(browser)["target"]["kind"] == "agent"
-    assert browser.hub.target(DOC).session == "s-1"               # the session kept beside the agent
+    assert browser.hub.target(DOC) is None and browser.hub.target(DOC, kept=True).session == "s-1"
     assert browser.hub.tell.view(DOC, session=True).target.session == "s-1"
     assert browser.hub.tell.view(DOC).target is None              # the page's view is the agent's
+    assert pick(browser, "none").status == 200                    # none keeps the session for a running Tell too
+    assert browser.hub.tell.view(DOC).target is None and browser.hub.tell.view(DOC).lines["tell"]
+    assert browser.hub.tell.view(DOC, session=True).target.session == "s-1"
 
 
 def test_the_wire_form_names_the_token_and_the_server_stores_its_id(browser, talk):

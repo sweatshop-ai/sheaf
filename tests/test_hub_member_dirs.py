@@ -3,6 +3,7 @@ unknown one and a Tell with no member reach the `[list]` folders. The map holds 
 the shared James, so a missing or wrong entry never lands a Tell, a Stop or a transcript at another member's James.
 Through the handler in proxy mode on the fixtures of test_hub_work: Thierry has a James of his own, Hans has none."""
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -205,6 +206,59 @@ def test_member_dirs_refuses(work, tmp_path, table, word):
     table = json.loads(json.dumps(table).replace("@ROOT@", str(work)))
     with pytest.raises(the_list.ListError, match=word):
         parse(work, tmp_path, member_dirs=table)
+
+
+def own(who, **dirs):
+    """A table of folders of its own: nothing in it overlaps another, the case changes one folder."""
+    return {"tell_dir": f"/data/{who}t/tell", "stop_dir": f"/data/{who}s", **dirs}
+
+
+def two(**y):
+    return {"x": own("x"), "y": own("y", **y)}
+
+
+# (tables, the folder named first, the one it meets): a folder is checked against those of the tables before it
+OVERLAPS = {
+    "same-member-equal": ({"x": own("x", tell_dir="/data/xs")}, ("tell_dir", "x"), ("stop_dir", "x")),
+    "same-member-stop-in-tell": ({"x": own("x", stop_dir="/data/xt/tell/stop")}, ("tell_dir", "x"), ("stop_dir", "x")),
+    "same-member-tell-in-stop": ({"x": own("x", tell_dir="/data/xs/tell")}, ("tell_dir", "x"), ("stop_dir", "x")),
+    "same-member-stop-equals-sessions": ({"x": own("x", sessions_dir="/data/xs", work_dir="/w")}, ("sessions_dir", "x"), ("stop_dir", "x")),
+    "members-same-key-equal": (two(tell_dir="/data/xt/tell"), ("tell_dir", "y"), ("tell_dir", "x")),
+    "members-same-key-inside": (two(tell_dir="/data/xt/tell/y"), ("tell_dir", "y"), ("tell_dir", "x")),
+    "members-same-key-around": (two(tell_dir="/data/xt"), ("tell_dir", "y"), ("tell_dir", "x")),
+    "members-other-key-equal": (two(tell_dir="/data/xs"), ("tell_dir", "y"), ("stop_dir", "x")),
+    "members-other-key-inside": (two(stop_dir="/data/xt/tell/ys"), ("stop_dir", "y"), ("tell_dir", "x")),
+    "same-member-tell-in-sessions": ({"x": own("x", sessions_dir="/data/xv", work_dir="/w", tell_dir="/data/xv/tell")},
+                                     ("sessions_dir", "x"), ("tell_dir", "x")),
+    "members-sessions-equal": ({"x": own("x", sessions_dir="/data/v", work_dir="/w"),
+                                "y": own("y", sessions_dir="/data/v/", work_dir="/w")}, ("sessions_dir", "y"), ("sessions_dir", "x")),
+    "members-other-key-sessions": ({"x": own("x", sessions_dir="/data/xv", work_dir="/w"), "y": own("y", tell_dir="/data/xv/y")},
+                                   ("tell_dir", "y"), ("sessions_dir", "x")),
+}
+
+
+@pytest.mark.parametrize("name", OVERLAPS)
+def test_member_dirs_folders_overlap_across_keys_and_members(work, tmp_path, name):
+    tables, (key, who), (other, other_who) = OVERLAPS[name]
+    said = f"'{key}' of [list.member_dirs.\"{who}\"] is, or is inside or around, '{other}' of [list.member_dirs.\"{other_who}\"]"
+    with pytest.raises(the_list.ListError, match=re.escape(said)):
+        parse(work, tmp_path, member_dirs=tables)
+
+
+@pytest.mark.parametrize("table, key, shared_key", [
+    (dict(tell_dir="/data/t", stop_dir="/run/shared/tell"), "stop_dir", "tell_dir"),
+    (dict(tell_dir="/run/shared/tell/own", stop_dir="/data/s"), "tell_dir", "tell_dir"),
+    (dict(tell_dir="/data/t", stop_dir="/data/s", sessions_dir="/run/shared", work_dir="/w"), "sessions_dir", "tell_dir"),
+])
+def test_member_dirs_folder_meets_another_key_of_the_list(work, tmp_path, table, key, shared_key):
+    said = f"'{key}' of [list.member_dirs.\"x\"] is, or is inside or around, '{shared_key}' of [list]"
+    with pytest.raises(the_list.ListError, match=re.escape(said)):
+        parse(work, tmp_path, member_dirs={"x": table})
+
+
+def test_member_dirs_folders_that_only_share_a_prefix_start(work, tmp_path):
+    cfg = parse(work, tmp_path, member_dirs=two(tell_dir="/data/xt/tell2", stop_dir="/data/xs2"))
+    assert set(cfg.member_dirs) == {"x", "y"}
 
 
 def test_member_dirs_must_be_a_table(work, tmp_path):

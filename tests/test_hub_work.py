@@ -532,7 +532,7 @@ def drops(box):
 def test_tell_on_a_box_sheaf_writes_the_comment_and_drops_it_for_james(team, box, work):
     got = comment(team, work, "tell")
     assert got.status == 200, got.text
-    assert got.json()["telling"] == [] and "tellError" not in got.json()
+    assert got.json()["telling"] == [{"id": got.json()["id"], "to": "James", "state": "sent"}] and "tellError" not in got.json()
     assert "Can you send the draft to Joey?" in (work / DOC).read_text(encoding="utf-8")
     f, = drops(box)
     assert f.name.startswith("thinkingtoo--tiroir-20") and f.name.endswith("Z")
@@ -891,6 +891,15 @@ def test_a_delivered_drop_turns_the_members_dot_orange_and_tells_their_index_alo
     assert ("status", {"doc": ADDRESS, "root": "work"}) in mine.drain()
     assert [d for n, d in hubs.drain() if n == "status" and d.get("doc") == ADDRESS and "dot" not in d] == []
 
+
+
+def test_a_delivered_drop_turns_the_orange_of_the_member_who_sent_it_and_no_other_members(team, box, work):
+    # 9.9: a member's orange is James working on a drop of theirs, never on another member's.
+    cid = comment(team, work, "tell", as_=THIERRY).json()["id"]
+    assert team.post("/_/seen", {"doc": ADDRESS, "id": cid, "count": 1}, member=HANS).status == 200   # no red to outrank it
+    status(box, "delivered")
+    team.hub.tick()
+    assert dot(team, THIERRY) == "orange" and dot(team, HANS) == "blue"
 
 
 def test_a_delivered_drop_answered_while_a_page_asks_still_clears_the_members_orange(team, box, work):

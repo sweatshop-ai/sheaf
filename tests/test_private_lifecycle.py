@@ -46,7 +46,9 @@ def everything_of(repo) -> str:
 def test_private_lifecycle_leaves_list_repo_untouched(two):
     w = World(two, ["login-a"])
     git(two.list_repo, "push", "-q", "origin", "HEAD:main")
-    refs = lambda: (git(two.list_repo, "for-each-ref"), git(two.base / "list.git", "for-each-ref"))      # noqa: E731
+    def refs():     # every ref but the rewrite guard's own, which the hub keeps at the list repo's head
+        return tuple([l for l in git(r, "for-each-ref").splitlines() if "refs/sheaf/last-seen/" not in l]
+                     for r in (two.list_repo, two.base / "list.git"))
     before = (untouched(two), git(two.list_repo, "rev-parse", "HEAD"), git(two.base / "list.git", "rev-parse", "main"), refs())
 
     made = call(w.door, "create", token=w.tokens["tok-a"], doc=w.address, text=TEXT)

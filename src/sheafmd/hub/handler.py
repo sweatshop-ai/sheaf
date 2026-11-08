@@ -74,7 +74,7 @@ SETTING_TYPES = {"title": str, "toc": str, "max_image_width": int, "by": str, "f
                  "theme": str, "credit": bool}
 _ID_RE = re.compile(r"[A-Za-z0-9_-]{1,40}")
 _RID_RE = re.compile(r"[A-Za-z0-9_-]{16,64}")     # a page's request id (/_/comment, /_/save)
-ASK_RETIRED = "Ask was retired: use Tell, or reply."
+ASK_RETIRED = f"{prompts.ASK_RETIRED}: use Tell, or reply."
 _RESERVED = {"kind", "source", "doc", "at", "pid", "session", "member"}
 
 
@@ -1521,7 +1521,7 @@ class Handler:
         e = self._entry(req, b.get("doc"))
         op = b.get("op")
         _shape(op in OPS, f"op must be one of {', '.join(OPS)}")
-        _shape(not (op in ("add", "reply") and b.get("ask")), ASK_RETIRED)
+        _shape(not (op in ("add", "reply") and "ask" in b), ASK_RETIRED)
         h = self._page_hash(req)
         for k in ("id", "body", "quote", "status"):
             _shape(k not in b or isinstance(b[k], str), f"{k} must be text")

@@ -831,10 +831,10 @@ class Handler:
             self.hub.expire_relayed()
             work, can = self.hub.member_work(e, req.member)
             extra = {} if work is None else {"work": work}
-            agent, can, lines, picks = self.hub.member_target(e.address, req.member, can)
+            mt = self.hub.member_target(e.address, req.member, can)
             return _ok(**{**proxy.for_member(snap), "telling": self._member_telling(e.address, req.member, text=e.live.current()[1])},
                        seen=self.hub.member_seen.get(req.member.id, e.address),
-                       question="", target=agent, targets=picks, capabilities=can, lines=lines,
+                       question="", target=mt.agent, targets=mt.picks, capabilities=mt.can, lines=mt.lines,
                        sent=self.hub.box_waits.pending(e.address, e.live.current()[1]), **extra)
         v = self.hub.tell.view(e.address)
         return _ok(**snap, seen=self.hub.seen.get(e.address),
@@ -1667,15 +1667,16 @@ class Handler:
         """Change the target of a Tell (SPEC 9.8): `session`, `agent:<token name>` or `none`. A member picks
         only one of their own agents; the hub account's session is not theirs to take. The answer is the target
         and what the reader may pick, as /_/doc gives them."""
-        e = self._entry(req, req.body.get("doc"))
-        try:
-            targets.pick(self.hub, e.address, req.member, req.body.get("target"))
-        except targets.Refused as r:
-            raise Refuse(400, str(r)) from None
+        with self._reading(req.body.get("doc")):        # the sheaf is judged and the target stored in one step (9.11)
+            e = self._entry(req, req.body.get("doc"))
+            try:
+                targets.pick(self.hub, e.address, req.member, req.body.get("target"))
+            except targets.Refused as r:
+                raise Refuse(400, str(r)) from None
         if req.member is not None:
             can = self.hub.member_work(e, req.member)[1]
-            agent, _, _, picks = self.hub.member_target(e.address, req.member, can)
-            return _ok(target=agent, targets=picks)
+            mt = self.hub.member_target(e.address, req.member, can)
+            return _ok(target=mt.agent, targets=mt.picks)
         return _ok(target=self.hub.tell.view(e.address).agent(), targets=targets.choices(self.hub, e.address))
 
     def _jump(self, req: Req) -> Response:

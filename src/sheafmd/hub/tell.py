@@ -23,6 +23,7 @@ from ..agents import prompts
 from ..agents.base import Adapter, DeliveryCancelled, DeliveryError, Target
 from . import roots as roots_mod
 from . import targets
+from .targets import who
 from . import waiting as waiting_mod
 from .auth import clean_display
 from .live import BY_ID
@@ -86,12 +87,6 @@ class View:
         return sorted(self.caps & {"deliver", "queue"})
 
 
-def who(t: Target, ad: Adapter) -> str:
-    """What the page calls the session: its own name (cleaned by the rule of a display name),
-    else the stored one, else the adapter's display name (SPEC 10.5)."""
-    return clean_display(ad.name(t)) or clean_display(t.name) or ad.display
-
-
 def _one_line(text: str, limit: int = 200) -> str:
     """`text` on one line, printable characters only, at most `limit` of them."""
     text = "".join(c for c in text if c.isspace() or c.isprintable())
@@ -108,8 +103,8 @@ class Tell:
         """`session`: the session a Tell was sent to, even when an agent is the target now (a stop goes there)."""
         raw = targets.stored(self.hub, address)
         if targets.is_agent(raw) and not session:
-            shape, line, reaches = targets.agent_view(self.hub, raw)
-            return View(None, None, frozenset({"queue"}) if reaches else frozenset(), {"tell": line}, shape=shape)
+            v = targets.agent_view(self.hub, raw)
+            return View(None, None, frozenset({"queue"}) if v.reaches else frozenset(), {"tell": v.line}, shape=v.shape)
         t = self.hub.target(address, kept=session)
         if t is None:
             return View(None, None, frozenset(), {"tell": NO_AGENT})

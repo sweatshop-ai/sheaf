@@ -176,6 +176,37 @@ def test_a_door_write_while_a_tell_runs_leaves_the_session_kept_for_it(browser, 
         browser.hub.runner.join(10)
 
 
+def test_a_tell_is_live_while_its_cancel_is_under_way_and_is_asked_without_the_documents_lock(browser, talk):
+    release = threading.Event()
+    render(browser, talk)
+    hub = browser.hub
+    assert not hub.tell_live(DOC)
+    hub.runner.start("stop", DOC, "c1", lambda job: release.wait(10))
+    try:
+        with hub.entry(DOC).live._held():        # a rebuild holds it while it reads the docs: no wait here
+            assert hub.tell_live(DOC)
+    finally:
+        release.set()
+        hub.runner.join(10)
+
+
+def test_the_kept_session_stays_when_a_render_moved_the_target_off_the_session_a_tell_starts_for(browser, talk):
+    release = threading.Event()
+    render(browser, talk)
+    told = browser.hub.target(DOC)                                  # the session the Tell was looked up for
+    browser.hub.runner.start("tell", DOC, "c9", lambda job: release.wait(10))
+    try:
+        render(browser, talk, dict(SESSION, session="s-2"))
+        assert stored(browser)["session"]["session"] == "s-1"
+    finally:
+        release.set()
+        browser.hub.runner.join(10)
+    browser.hub.drop_kept(DOC, "c1", told)                          # the Tell of c1 begins, a render came between
+    assert stored(browser)["session"]["session"] == "s-1"
+    browser.hub.drop_kept(DOC, "c1", browser.hub.target(DOC))       # one that goes to the target drops it
+    assert "session" not in stored(browser)
+
+
 def test_a_pick_while_a_tell_runs_does_not_replace_the_session_kept_for_it(browser, talk):
     release = threading.Event()
     token = Tokens().add("ada-chatgpt", client="ChatGPT")

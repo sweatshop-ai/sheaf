@@ -185,6 +185,27 @@ def test_an_unknown_key_in_the_config_warns_once_however_many_tokens_there_are(p
     assert code == 1 and err.count("unknown key 'frobnicate'") == 1, err
 
 
+def test_an_unknown_key_in_the_config_warns_once_on_a_hub_that_starts(port, folder, monkeypatch):
+    monkeypatch.delenv("SHEAF_NAME")                                       # the name is then read from the config
+    Tokens().add("agent-0", client="Client0")
+    configure(folder / "hub.sock", extra='name = "Ada"\nfrobnicate = 1\n')   # the person is not a member: the hub starts
+    p = run_hub()
+    try:
+        wait_up(port, folder / "hub.sock")
+    finally:
+        p.send_signal(signal.SIGTERM)
+        _, err = p.communicate(timeout=30)
+    assert p.returncode == 0 and err.count("unknown key 'frobnicate'") == 1, err
+
+
+def test_the_messages_name_both_tokens_that_clash_and_the_token_that_signs_the_persons_name(port, folder):
+    Tokens().add("old", "ChatGPT (Ada)")
+    Tokens().add("new", client="ChatGPT")
+    configure(folder / "hub.sock")
+    _, err, _ = refused_start()
+    assert "'old'" in err and "'new'" in err, err
+
+
 def test_the_token_set_of_stage_sheaf_agents_hub_2026_11_07_passes_the_start_check(folder, sheaf, work):
     """The members and tokens that tt-tiroir's stage sheaf-agents-hub-2026-11-07 writes on tiroir-tt (files/params.toml,
     lib.sh AGENT_TOKENS): the person `Thierry`, four members, the six live old tokens, and the eight agents made by

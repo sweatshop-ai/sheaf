@@ -441,14 +441,16 @@ def reads_as_role(name: str) -> bool:
     return any(key.endswith(f"({role})") for role in ROLES)
 
 
-def check_names(cfg: ProxyConfig, person: str, tokens) -> None:
+def check_names(cfg: ProxyConfig, person: str, tokens, token_names=None) -> None:
     """A comment's name is the only record of its author in the file (5.2), so a member's name
     must not pass for anyone else's: another member's, the hub's person's (4.3), an agent's of
     11.5, an MCP token's display name (9.7), or `sheaf`, which signs the notes of a merge; and it
-    must not end in `(action)`, which 5.3 reads as a role. Raises ProxyError."""
-    for t in tokens:
+    must not end in `(action)`, which 5.3 reads as a role. `tokens` are the names the tokens sign, `token_names` (when
+    given) their own names in the same order, which the messages put first. Raises ProxyError."""
+    for i, t in enumerate(tokens):
         if same_name(t, person):
-            raise ProxyError(f"a token signs {t!r}, which is the hub's person's name ({person!r}, config.toml name): "
+            who = f"the token {token_names[i]!r}" if token_names else "a token"
+            raise ProxyError(f"{who} signs {t!r}, which is the hub's person's name ({person!r}, config.toml name): "
                              "give the token another display name (sheaf token list)")
     seen = []
     for m in cfg.members.values():
@@ -460,8 +462,10 @@ def check_names(cfg: ProxyConfig, person: str, tokens) -> None:
             raise ProxyError(f"the name {m.name!r} of {here} is the hub's person's (config.toml name)")
         if any(same_name(m.name, a.display) for a in TABLE):
             raise ProxyError(f"the name {m.name!r} of {here} is an agent's (11.5)")
-        if any(same_name(m.name, t) for t in tokens):
-            raise ProxyError(f"the name {m.name!r} of {here} is an MCP token's display name (sheaf token list)")
+        for i, t in enumerate(tokens):
+            if same_name(m.name, t):
+                who = f" (the token {token_names[i]!r})" if token_names else ""
+                raise ProxyError(f"the name {m.name!r} of {here} is an MCP token's display name{who} (sheaf token list)")
         if same_name(m.name, MERGE_BY):
             raise ProxyError(f"the name {m.name!r} of {here} is sheaf's own, which signs the notes of a merge")
         if name_key(m.name).endswith("(action)"):
@@ -473,31 +477,34 @@ class TokenNamesError(ProxyError):
     table may be absent, so it is not a `proxy-config` refusal."""
 
 
-def check_agent_names(signed: list[tuple[bool, str]], members: bool = True) -> None:
+def check_agent_names(signed: list[tuple[bool, str, str]], proxy_mode: bool = True) -> None:
     """No agent's token may sign a name another token signs, nor one that reads as a role (9.7, 5.3): `add` checks
-    with the bindings of the day, and the config may change them later. `signed` is (is an agent's, signed name) per
+    with the bindings of the day, and the config may change them later. `signed` is (is an agent's, signed name, token name) per
     token; an old token is compared with agents only, never with another old token, which `add` lets share a display.
-    `members` is whether proxy mode is on: with no member there is none to give a token to. Raises TokenNamesError."""
-    for i, (agent, name) in enumerate(signed):
+    `proxy_mode` is whether proxy mode is on: with no member there is none to give a token to. Raises TokenNamesError."""
+    whose = "the member" if proxy_mode else "the hub's person"
+    for i, (agent, name, token) in enumerate(signed):
         if not agent:
             continue
         if reads_as_role(name):
-            raise TokenNamesError(f"an agent's token signs {name!r}, which ends in a role word that a reply reads as its "
-                                  f"role (5.3): give {'the member' if members else 'the hub' + chr(39) + 's person'} "
+            raise TokenNamesError(f"the agent's token {token!r} signs {name!r}, which ends in a role word that a reply "
+                                  f"reads as its role (5.3): give {whose} "
                                   "another name, or the token another client")
-        if any(name_key(name) == name_key(other) for j, (_, other) in enumerate(signed) if j != i):
-            raise TokenNamesError(f"an agent's token signs {name!r}, which another token signs too (sheaf token list): "
-                                  f"give one of them another client{' or member' if members else ''}")
+        for j, (_, other, other_token) in enumerate(signed):
+            if j != i and name_key(name) == name_key(other):
+                raise TokenNamesError(f"the agent's token {token!r} signs {name!r}, which the token {other_token!r} "
+                                      f"signs too (sheaf token list): give one of them another client"
+                                      f"{' or member' if proxy_mode else ''}")
 
 
 def check_start_names(cfg: "ProxyConfig | None", person: str, rows) -> None:
     """What the hub checks of the names at its start, from the token rows it reads: the agents' (`check_agent_names`,
     in loopback too: a config may change the person's name), then, in proxy mode, the members' (`check_names`).
     Raises ProxyError."""
-    signed = [(t.client is not None, t.signed(person, cfg)) for t in rows]
-    check_agent_names(signed, members=cfg is not None)
+    signed = [(t.client is not None, t.signed(person, cfg), t.name) for t in rows]
+    check_agent_names(signed, proxy_mode=cfg is not None)
     if cfg is not None:
-        check_names(cfg, person, [name for _, name in signed])
+        check_names(cfg, person, [name for _, name, _ in signed], [token for _, _, token in signed])
 
 
 # ── the proxy socket (9.9 "Two listeners") ───────────────────────────────────

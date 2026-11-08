@@ -114,7 +114,7 @@ def _project(address: str) -> str:
 
 class Hub:
     def __init__(self, port: int, key: str, *, started_by: str = "cli", service: bool = False,
-                 version: str = __version__, clock=time.time, proxy=None):
+                 version: str = __version__, clock=time.time, proxy=None, person: str | None = None):
         self.port, self.version, self.service = port, version, service
         self.assets = assets_mod.load(version)   # /_/mount.js and .css as this hub serves them to its end (#179)
         self.proxy = proxy                       # the checked `[proxy]` table (9.9), None in loopback mode
@@ -122,7 +122,7 @@ class Hub:
         self.auth = Auth(key, port)
         self.boot = str(uuid.uuid4())
         self.started = time.time()
-        self.person = config.user_name()
+        self.person = person if person is not None else config.user_name()   # the start hands over the one it read
         self.roots = roots_mod.Roots()
         self.roots.placer = lambda root, rel: place.physical(self, root, rel)
         self.versions = state.Versions()

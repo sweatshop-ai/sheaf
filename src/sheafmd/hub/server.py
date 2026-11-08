@@ -516,7 +516,7 @@ def _run(started_by: str, signals: "sender.Signals") -> int:
         except proxy.ProxyError as e:
             sock.close()
             return _proxy_refused(e)
-    hub = Hub(port=port, key=key, started_by=started_by, service=started_by == "service", proxy=cfg)
+    hub = Hub(port=port, key=key, started_by=started_by, service=started_by == "service", proxy=cfg, person=person)
     srv = HubServer(hub, sock, proxy_sock)
     if list_cfg is not None:
         hub.the_list = the_list.TheList(hub, list_cfg)

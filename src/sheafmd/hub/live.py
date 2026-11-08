@@ -301,7 +301,7 @@ class LiveDocument:
         `announce=False` is for a caller that tells the tabs itself. `before_announce()` runs once the file is
         written and rendered, just before the tabs are told, and only when they will be: what a tab fetches the
         moment it hears is then what the caller set there (the agent target of a door write, 9.8). It runs
-        under the document's lock; what it raises is the caller's to handle.
+        under the document's lock; the tabs are told whatever it raises, and what it raises is the caller's.
 
         No whole-file version check: reply, status, edit and delete find their comment by id,
         and add finds its paragraph again in the file as it is now. Refusing them because a
@@ -396,9 +396,11 @@ class LiveDocument:
                 self._take(self._rids, rid, sent, made.get("id"))
             snap = self._snapshot(self._text)
             if announce and self._text != before:        # one event per write that changed the file
-                if before_announce is not None:
-                    before_announce()
-                self._announce(snap, before, **({"rid": rid} if rid is not None else {}))
+                try:
+                    if before_announce is not None:
+                        before_announce()
+                finally:                                 # the tabs hear of a written file whatever it raised
+                    self._announce(snap, before, **({"rid": rid} if rid is not None else {}))
             return {**self._answer(made.get("id"), base_hash, snap), "wrote": made["wrote"]}
 
     @staticmethod

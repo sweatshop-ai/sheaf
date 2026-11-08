@@ -566,3 +566,24 @@ def test_targets_and_tell_import_each_other_nowhere_inside_a_function():
     assert inside == []
     assert not any(isinstance(n, ast.ImportFrom) and n.module == "tell" and n.level == 1
                    for n in ast.walk(tree)), "targets must not import tell"
+
+
+def test_a_reply_on_a_sheaf_no_page_has_open_notes_the_target_under_the_sheafs_name(browser, talk, monkeypatch):
+    import contextlib
+    from sheafmd.hub import place, targets
+    token = Tokens().add("ada-chatgpt", client="ChatGPT")
+    depth, at = [], []
+
+    @contextlib.contextmanager
+    def held(h, address):
+        depth.append(address)
+        try:
+            yield True
+        finally:
+            depth.pop()
+    real = targets.note_write
+    monkeypatch.setattr(place, "held", held)
+    monkeypatch.setattr(targets, "note_write", lambda *a, **k: at.append(bool(depth)) or real(*a, **k))
+    assert DOC not in browser.hub.entries
+    ok(browser, "reply", doc=DOC, id="c1", text="Done.", token=token)
+    assert at == [True]

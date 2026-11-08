@@ -559,7 +559,7 @@ An address whose file 8.2 keeps from the root it names for lying in a git direct
 }}
 ```
 
-`null` means "use the default". A document opened from the index without ever being rendered uses the defaults and has no target. **The latest render from an agent session sets the target**, and so does a door write with an agent's token (9.8). A render that detects no agent (a plain shell) keeps the stored target; only `--agent none` clears it (D19). A render with other settings updates the entry and pushes `changed` (with `textSame: false`) to open tabs; it never restarts anything.
+`null` means "use the default". A document opened from the index without ever being rendered uses the defaults and has no target. **The latest render from an agent session sets the target**, and so does a door write with an agent's token (9.8). A render that detects no agent (a plain shell) keeps the stored target; only `--agent none` clears it (D19). While a Tell runs on the document, a render that clears or replaces the session it was sent to keeps that session beside the new target (`session` in `docs.json`), so a Cancel stops the session that runs the Tell; the page's target line says the new target, and the next render with no Tell running drops the kept session. A render with other settings updates the entry and pushes `changed` (with `textSame: false`) to open tabs; it never restarts anything.
 
 ### 8.4 Lifecycle
 

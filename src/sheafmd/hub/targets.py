@@ -111,12 +111,12 @@ def note_write(hub, address: str, row: TokenRow | None, member=None) -> None:
         return
 
     def settle(entry: dict) -> dict:
-        _set(entry, _keep(row), member)
+        _set(entry, _keep(row), member, hub.tell_live(address))
         return entry
     hub.docs.change(address, settle)
 
 
-def _set(entry: dict, agent: dict | None, member) -> None:
+def _set(entry: dict, agent: dict | None, member, told: bool = False) -> None:
     if member is not None:
         targets = dict(entry["targets"]) if isinstance(entry.get("targets"), dict) else {}
         if agent is None:
@@ -131,8 +131,9 @@ def _set(entry: dict, agent: dict | None, member) -> None:
     old = entry.get("target")
     if agent is None and not old:
         return
-    if isinstance(old, dict) and old and not is_agent(old):
+    if isinstance(old, dict) and old and not is_agent(old) and not (told and entry.get("session")):
         entry["session"] = old                      # kept beside the agent, so the person can take it back
+        # (not over the one a running Tell was sent to, which a render kept there: a stop goes to that)
     entry["target"] = agent
 
 
@@ -143,7 +144,7 @@ def pick(hub, address: str, member, choice) -> None:
         raise Refused(WHAT)
     if choice == "none":
         def settle(entry):
-            _set(entry, None, member)
+            _set(entry, None, member, hub.tell_live(address))
             return entry
     elif choice == "session":
         if member is not None:
@@ -151,6 +152,8 @@ def pick(hub, address: str, member, choice) -> None:
 
         def settle(entry):
             session = _session_of(entry)
+            if isinstance(entry.get("target"), dict) and session == entry["target"]:
+                return entry                        # it is the target already; what is kept beside it stays
             if session is None:
                 raise Refused("No session rendered this page, so there is none to take back.")
             entry["target"] = session
@@ -163,7 +166,7 @@ def pick(hub, address: str, member, choice) -> None:
             raise Refused(f"{name} is not one of your agents.")
 
         def settle(entry):
-            _set(entry, _keep(row), member)
+            _set(entry, _keep(row), member, hub.tell_live(address))
             return entry
     else:
         raise Refused(WHAT)

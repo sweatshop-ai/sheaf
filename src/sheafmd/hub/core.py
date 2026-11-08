@@ -741,11 +741,14 @@ class Hub:
         return bool(self.runner.active("tell", address) or self.runner.active("stop", address)
                     or (e is not None and e.live.peek()[0]))
 
-    def drop_kept(self, address: str, cid: str, told) -> None:
+    def drop_kept(self, address: str, cid: str, told, again: bool = False) -> None:
         """The Tell of thread `cid` is about to be sent to `told`, the session the target was when it was
         looked up: the session a render kept beside the target for an earlier Tell is of no use now, and a
         Cancel of this one must not find it. Kept while a Tell of another thread still runs, and when a render
-        moved the target off `told` since (the kept one is then the session this Tell goes to)."""
+        moved the target off `told` since: that Tell goes to `told`, so it is kept beside the target if none is.
+        A re-Tell of a thread still waiting (`again`) leaves what is kept: the first Tell runs there."""
+        if again:
+            return
         e = self.entries.get(address)
         busy = set(self.runner.active("tell", address)) | set(self.runner.active("stop", address))
         busy |= set(e.live.waiting() if e else ())
@@ -756,6 +759,8 @@ class Hub:
             raw = entry.get("target")
             if isinstance(raw, dict) and not targets_mod.is_agent(raw) and raw.get("session") == told.session:
                 entry.pop("session", None)
+            elif not entry.get("session"):
+                entry["session"] = {"kind": "session", **told.as_dict()}
             return entry
         self.docs.change(address, settle)
 
@@ -818,7 +823,7 @@ class Hub:
                 # write took the target from is the new one's, so none is kept beside it, unless a Tell is
                 # running: it was sent to the session the render drops or replaces, and a Cancel stops that one.
                 if target is not None:
-                    kept = self._told_session(old, live)
+                    kept = self._told_session(old, live or self.tell_live(address))
                     new["target"] = None if target.get("agent") == "none" else {"kind": "session", **target}
                     new.pop("session", None)
                     if kept and kept != new["target"]:

@@ -1712,6 +1712,17 @@ def test_a_stop_whose_reply_fails_still_drops_the_stop_and_says_why(team, work, 
     assert row["said"] == "not written: the hub failed on it (sheaf diag)"
 
 
+def test_a_drop_file_written_with_kind_tell_is_still_read_and_recorded_as_a_tell(team, work, stoppable):
+    # Files dropped before `BoxWaits` lost its kind are still in the box's folder after a restart.
+    cid = comment(team, work, "tell", body="Send the draft.").json()["id"]
+    drop, = drops(stoppable)
+    assert json.loads(drop.read_text(encoding="utf-8"))["kind"] == "tell"
+    assert stop_james(team, work).status == 200
+    assert drops(stoppable) == []
+    row, = hub_rows("tell-stopped")
+    assert row["thread"] == cid and row["what"] == "tell"
+
+
 def test_a_waiting_tell_naming_a_sheaf_of_another_project_is_removed_with_no_reply_there(team, work, stoppable):
     elsewhere = put(team, work, "acme/site/x.md", SHEAF.replace("project: tiroir", "project: site"))
     stoppable["tell"].joinpath("thinkingtoo--tiroir-20261029T200000Z").write_text(json.dumps(

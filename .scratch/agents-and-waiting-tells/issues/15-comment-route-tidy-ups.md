@@ -10,11 +10,11 @@
 
 **Blocked by:** 09 (Waiting Tells: per-owner seen, the route re-checked, a recycled thread id)
 
-**Status:** ready-for-agent
+**Status:** done-in-PR
 
 **Size:** small, one session; 09 edits the same lines of `_comment`, hence the block
 
-- [ ] Test first, where there is one: the comment route's existing tests for box, relay, agent and session stay green without edit; `BoxWaits.add` loses `kind` and its callers and tests change in the same commit
-- [ ] The old drop files with `kind: "tell"` still read after a restart (one test)
-- [ ] Row 16 is decided, not guessed: keep the class names (and say the asset cache needs no bump), or rename them and bump the asset version; the PR records which and why
-- [ ] The docstring reads as English
+- [x] Test first, where there is one: the comment route's existing tests for box, relay, agent and session stay green without edit; `BoxWaits.add` loses `kind` and its callers and tests change in the same commit
+- [x] The old drop files with `kind: "tell"` still read after a restart (one test)
+- [x] Row 16 is decided, not guessed: keep the class names (and say the asset cache needs no bump), or rename them and bump the asset version; the PR records which and why
+- [x] The docstring reads as English

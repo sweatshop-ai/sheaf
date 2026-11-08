@@ -5,7 +5,7 @@ the Tell wait has passed, and reads what the box's supervisor says of it in `<dr
 In memory: a restart forgets it.
 
     BoxWaits(clock)
-    .add(doc, thread, kind, text, name)   a drop of `kind` ("tell") on `thread`, the sheaf's text `text`
+    .add(doc, thread, text, name)         a drop (always a Tell, `KIND`) on `thread`, the sheaf's text `text`
                                           then, written as the file `name` of `tell_dir`
     .pending(doc, text)                   [{id, kind, state}] of the sheaf's drops with no reply in its text `text`;
                                           the drops answered there end
@@ -35,11 +35,11 @@ STATES = ("picked-up", "delivered", "failed")      # what the supervisor writes 
 ERROR_MAX = 200
 STATUS_MAX = 4096           # bytes: a status is one small object
 BAD = "bad"
+KIND = "tell"            # what every drop is, in the rows and events about it and in the file the box reads
 
 
 @dataclass
 class Drop:
-    kind: str
     replies: int                # the thread's replies when it was dropped: one more is the answer
     at: float
     name: str | None = None     # its file in `tell_dir`
@@ -56,19 +56,19 @@ class BoxWaits:
         self._drops: dict[str, dict[str, Drop]] = {}       # {doc: {thread: Drop}}
         self._cleared: set[str] = set()                    # sheaves where a `delivered` drop ended since asked
 
-    def add(self, doc: str, thread: str, kind: str, text: str, name: str | None = None, folder: Path | None = None,
+    def add(self, doc: str, thread: str, text: str, name: str | None = None, folder: Path | None = None,
             member: str | None = None):
         c = rdc.parse(text).by_id(thread)
         if c is None:
             return
         with self._lock:
             self._end(doc, thread)              # a drop sent again on the thread: the older one ends here
-            self._drops.setdefault(doc, {})[thread] = Drop(kind, len(c.replies), self._clock(), name, folder=folder, member=member)
+            self._drops.setdefault(doc, {})[thread] = Drop(len(c.replies), self._clock(), name, folder=folder, member=member)
 
     def pending(self, doc: str, text: str) -> list:
         with self._lock:
             self._settle(doc, text)
-            return [{"id": thread, "kind": d.kind, "state": d.state}
+            return [{"id": thread, "kind": KIND, "state": d.state}
                     for thread, d in self._drops.get(doc, {}).items()]
 
     def telling(self, doc: str, member: str, comments: list | None = None, text: str | None = None) -> list:

@@ -910,6 +910,7 @@ def _agent_clash(client: str, built: str, cfg, person: str, others: list[str]) -
 
 
 def cmd_token(argv: list[str]) -> int:
+    from .hub import proxy
     p = _parser("token", "token add NAME [--client CLIENT | --as DISPLAY] [--write] | list | revoke NAME",
                 "MCP tokens: a named, revocable secret that lets one agent use the hub's HTTP MCP "
                 "door. Only a hash is kept; the token itself is shown once, by `add`.")
@@ -938,6 +939,10 @@ def cmd_token(argv: list[str]) -> int:
         cfg, person = _proxy_table(), config.user_name()
         member = cfg.member_of_token(args.name) if cfg is not None else None
         built = agent_name(clean_display(args.client), member.name if member is not None else person)
+        if proxy.reads_as_role(built):
+            _err(f"sheaf: a token that signs {built!r} would end in a role word, which a reply reads as its role "
+                 "(SPEC 5.3): give the member or the client another name")
+            return EXIT_FAILED
         if (taken := _agent_clash(clean_display(args.client), built, cfg, person,
                                   _signed_by_others(tokens, cfg, person))) is not None:
             _err(f"sheaf: {taken!r} is already a name in use here (the hub's person, a member of proxy mode, or "
@@ -966,6 +971,10 @@ def cmd_token(argv: list[str]) -> int:
         if (taken := _member_named(shown_as)) is not None:
             _err(f"sheaf: {taken!r} is the name of a member of proxy mode (config.toml [proxy]); "
                  "a token's replies must not pass for that member's")
+            return EXIT_FAILED
+        if cfg is not None and name_key(shown_as) == name_key(person):
+            _err(f"sheaf: {person!r} is the name of the hub's person (config.toml); in proxy mode a token's "
+                 "replies must not pass for theirs")
             return EXIT_FAILED
         try:
             token = tokens.add(args.name, args.display, write=args.write)

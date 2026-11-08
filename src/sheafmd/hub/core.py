@@ -849,6 +849,8 @@ class Hub:
         are files and stay where they are. Each page open on one of them is told `gone`, the last
         event of its stream (SPEC 8.8). Returns the root, or None when there was none."""
         with self._lock:
+            # Before the entries go, so the pages open on them hear `tell-cancelled` ahead of `gone`.
+            self.waiting_tells.end_root(name, "the folder was forgotten")
             root = roots_mod.forget(self.roots, self.docs, self.seen, self.versions, name,
                                     members=self.member_seen)
             for address in [a for a in self.entries if a.startswith(roots_mod.Address.prefix(name))]:

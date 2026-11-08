@@ -14,6 +14,7 @@ A row names the token and the thread, never the Tell's text: the message is buil
     waits(address, member)                  what the page is told: [{id, to, state}] of the reader's own
     sweep()                                 the Tells of a token no longer there end as cancelled
     watch()                                 the watcher's pass: sweep, and a thread closed from outside ends its Tell
+    end_root(name, reason)                  every Tell on the documents of a root ends as cancelled (the root was forgotten)
 """
 from __future__ import annotations
 
@@ -24,6 +25,7 @@ from pathlib import Path
 
 from .. import comments as rdc
 from .. import paths
+from .roots import Address
 from .state import STAMP_FORMAT, TokenRow, file_locked, read_json, write_json
 
 HAS_IT = "{agent} has this comment waiting already: cancel it first, or reply in the thread."
@@ -118,24 +120,29 @@ class Waiting:
         """One look of the watcher (8.9): a token revoked by the CLI, and a thread resolved or deleted from outside
         (the CLI, a hand edit), end their Tells now, so a page that stays open stops saying it waits. A document the
         hub holds no entry for is left to the next listing (`take`)."""
-        if not read_json(_file(), [], aside=False):
+        seen = [t for t in read_json(_file(), [], aside=False) if isinstance(t, dict)]
+        if not seen:
             return
+        # Each document is read under its own locks (the name's, 9.11, and its Live Document's) before `_change` takes ours: a save in two steps (an editor
+        # that truncates, then writes) is never caught half done, and a lock is never asked for while `tells.lock`
+        # is held, which is the order the locks are taken in everywhere else. Only a row that was there when its
+        # document was read is judged from that read.
+        got = {}
+        for address in {t["doc"] for t in seen}:
+            e = self.hub.entries.get(address)
+            try:
+                got[address] = None if e is None else rdc.parse(e.live.read_now())
+            except Exception:
+                got[address] = None
+        ids = {t["id"] for t in seen}
 
         def change(rows):
             n = len(rows)
             self._revoked(rows)
-            for address in {t["doc"] for t in rows}:
-                e = self.hub.entries.get(address)
-                try:
-                    got = None if e is None else rdc.parse(e.read())
-                except Exception:
-                    got = None
-                if got is None:
-                    continue
-                for t in [t for t in rows if t["doc"] == address]:
-                    c = got.by_id(t["thread"])
-                    if _stale(t, c):
-                        self._end(rows, [t], "cancelled", reason="closed")
+            for t in [t for t in rows if t["id"] in ids]:
+                parsed = got.get(t["doc"])
+                if parsed is not None and _stale(t, parsed.by_id(t["thread"])):
+                    self._end(rows, [t], "cancelled", reason="closed")
             return None, len(rows) != n
         self._change(change)
 
@@ -205,10 +212,13 @@ class Waiting:
             return gone, bool(gone)
         return self._change(change)
 
-    def end_document(self, address: str, reason: str):
-        """Every Tell of a document ends as cancelled (its folder was forgotten)."""
+    def end_root(self, name: str, reason: str):
+        """Every Tell on the documents of the root `name` ends as cancelled (its folder was forgotten), whether the
+        hub still holds an entry for the document or not; the other roots' Tells, of any token, stay."""
+        prefix = Address.prefix(name)
+
         def change(rows):
-            gone = [t for t in rows if t["doc"] == address]
+            gone = [t for t in rows if t["doc"].startswith(prefix)]
             self._end(rows, gone, "cancelled", reason=reason)
             return gone, bool(gone)
         self._change(change)

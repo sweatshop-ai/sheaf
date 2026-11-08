@@ -738,6 +738,21 @@ class Hub:
         e = self.entries.get(address)
         return bool(self.runner.active("tell", address) or (e is not None and e.live.waiting()))
 
+    def drop_kept(self, address: str, cid: str) -> None:
+        """The Tell of thread `cid` is about to be sent to the target (a session): the session a render kept
+        beside it for an earlier Tell is of no use now, and a Cancel of this one must not find it. Kept while
+        a Tell of another thread still runs."""
+        e = self.entries.get(address)
+        others = set(self.runner.active("tell", address)) | set(e.live.waiting() if e else ())
+        if others - {cid}:
+            return
+
+        def settle(entry: dict) -> dict:
+            if isinstance(entry.get("target"), dict) and not targets_mod.is_agent(entry["target"]):
+                entry.pop("session", None)
+            return entry
+        self.docs.change(address, settle)
+
     def _told_session(self, address: str, entry: dict) -> dict | None:
         """The session a Tell running on this document was sent to, as `entry` holds it, or None when no Tell
         runs: a render that would drop or replace it keeps it beside the target (a stop goes there)."""

@@ -162,6 +162,20 @@ def test_a_render_while_a_tell_runs_leaves_a_session_beside_an_agent_alone(brows
         browser.hub.runner.join(10)
 
 
+def test_a_door_write_while_a_tell_runs_leaves_the_session_kept_for_it(browser, talk):
+    release = threading.Event()
+    token = Tokens().add("ada-chatgpt", client="ChatGPT")
+    render(browser, talk)
+    browser.hub.runner.start("tell", DOC, "c1", lambda job: release.wait(10))
+    try:
+        render(browser, talk, dict(SESSION, session="s-2"))
+        ok(browser, "reply", doc=DOC, id="c1", text="Done.", token=token)
+        assert stored(browser)["target"]["kind"] == "agent" and stored(browser)["session"]["session"] == "s-1"
+    finally:
+        release.set()
+        browser.hub.runner.join(10)
+
+
 def test_a_pick_while_a_tell_runs_does_not_replace_the_session_kept_for_it(browser, talk):
     release = threading.Event()
     token = Tokens().add("ada-chatgpt", client="ChatGPT")

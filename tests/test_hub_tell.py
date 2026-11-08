@@ -1018,6 +1018,21 @@ def test_a_session_kept_for_a_cancelled_tell_is_gone_when_the_next_tell_starts(
     assert hub.target(DOC, kept=True).session == "s-3"
 
 
+def test_a_cancel_of_a_tell_started_after_the_first_one_ended_stops_the_target_not_the_kept_session(
+        browser, hub, ready, session):
+    post(browser, "/_/tell")
+    finish(hub)
+    attach(browser, ready, session.target(session="s-2", socket=session.peer.path))
+    assert hub.docs.get(DOC)["session"]["session"] == "s-1"        # kept for the first Tell, still waiting
+    post(browser, "/_/cancel")
+    finish(hub)
+    assert hub.docs.get(DOC)["session"]["session"] == "s-1"        # that Tell is over; the render has not come yet
+    post(browser, "/_/tell")                                       # a Tell to s-2
+    finish(hub)
+    assert "session" not in hub.docs.get(DOC)
+    assert hub.target(DOC, kept=True).session == "s-2"
+
+
 def test_finish_names_a_job_that_outlives_it_instead_of_returning(hub):
     release = threading.Event()
     hub.runner.start("stop", DOC, "c1", lambda job: release.wait(10))

@@ -522,12 +522,12 @@ class Door:
                     wrote = new != old
                 if wrote:                               # a write that changed nothing commits nothing (8.11)
                     self.hub.committed(address, by=caller.display, what="comment")     # under the lock, as every write's
+                if not noted:                           # no tab was told (none open, or nothing changed): still under the name
+                    self._agent_wrote(address, caller)
         except rdc.AnchorError as e:
             raise ToolError(f"{e}.") from None
         except (OSError, UnicodeDecodeError, NotFound):
             raise ToolError(f"{address} could not be written.") from None
-        if not noted:                                   # no tab was told (none open, or nothing changed)
-            self._agent_wrote(address, caller)
 
     # ── the tools ────────────────────────────────────────────────────────────
     def _open_in(self, address: str, whole: bool = False) -> tuple:

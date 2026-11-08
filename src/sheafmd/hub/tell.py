@@ -347,6 +347,7 @@ class Tell:
         except JobRefused:
             e.live.stop_waiting(cid)
             raise
+        self.hub.drop_kept(address, cid)             # a Tell to the target: no session kept for an earlier one
         t, ad = v.target, v.adapter
         text = prompts.tell(address, str(e.path), self.hub.person, c, self.links(address))
 

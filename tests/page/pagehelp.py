@@ -125,6 +125,7 @@ def use_pump(pump):
     return was
 
 
+CLOSE_BOUND = 20.0       # seconds that taking the routes off a context, and closing it, may take each
 STALL_GRACE = 5.0       # seconds past its deadline that one poll may take before the page counts as stalled
 
 
@@ -340,7 +341,12 @@ def new_context(browser, error=None, **options):
 def close_context(context):
     """Close a context of new_context. A route of its pages still in `route.fetch` would otherwise fail
     there, and Playwright raises that failure in the next call into the browser: another test's new_context."""
-    for page in context.pages:
-        page.unroute_all(behavior="ignoreErrors")
-    context.unroute_all(behavior="ignoreErrors")
-    context.close()
+    try:
+        with stalls_after(CLOSE_BOUND, "the routes to come off"):
+            for page in context.pages:
+                page.unroute_all(behavior="ignoreErrors")
+            context.unroute_all(behavior="ignoreErrors")
+    except PageStalled:     # a handler that does not end (CI, PR 227: 360 s): closing the context ends it
+        pass
+    with stalls_after(CLOSE_BOUND, "the context to close"):
+        context.close()

@@ -5,6 +5,7 @@ is never the old target. A door write with an agent's token makes that agent the
 changes nothing. In proxy mode each member has a target of their own, never the hub person's."""
 import os
 import pwd
+import threading
 
 import pytest
 
@@ -129,6 +130,52 @@ def test_a_render_with_no_agent_keeps_an_agent_target_and_none_clears_everything
     assert stored(browser)["target"]["token"] == "ada-chatgpt"
     render(browser, talk, {"agent": "none"})
     assert stored(browser)["target"] is None and "session" not in stored(browser)
+
+
+def test_a_render_while_a_tell_runs_keeps_the_session_it_was_sent_to_beside_the_new_target(browser, talk):
+    release = threading.Event()
+    render(browser, talk)
+    browser.hub.runner.start("tell", DOC, "c1", lambda job: release.wait(10))
+    try:
+        render(browser, talk, {"agent": "none"})
+        assert stored(browser)["target"] is None and stored(browser)["session"]["session"] == "s-1"
+        assert browser.hub.target(DOC) is None and browser.hub.target(DOC, kept=True).session == "s-1"
+        render(browser, talk, dict(SESSION, session="s-2"))
+        assert stored(browser)["target"]["session"] == "s-2" and stored(browser)["session"]["session"] == "s-1"
+        assert browser.hub.target(DOC).session == "s-2" and browser.hub.target(DOC, kept=True).session == "s-1"
+    finally:
+        release.set()
+        browser.hub.runner.join(10)
+
+
+def test_a_render_while_a_tell_runs_leaves_a_session_beside_an_agent_alone(browser, talk):
+    release = threading.Event()
+    token = Tokens().add("ada-chatgpt", client="ChatGPT")
+    render(browser, talk)
+    ok(browser, "reply", doc=DOC, id="c1", text="Done.", token=token)
+    browser.hub.runner.start("tell", DOC, "c1", lambda job: release.wait(10))
+    try:
+        render(browser, talk, {"agent": "none"})
+        assert stored(browser)["target"] is None and stored(browser)["session"]["session"] == "s-1"
+    finally:
+        release.set()
+        browser.hub.runner.join(10)
+
+
+def test_a_pick_while_a_tell_runs_does_not_replace_the_session_kept_for_it(browser, talk):
+    release = threading.Event()
+    token = Tokens().add("ada-chatgpt", client="ChatGPT")
+    render(browser, talk)
+    browser.hub.runner.start("tell", DOC, "c1", lambda job: release.wait(10))
+    try:
+        render(browser, talk, dict(SESSION, session="s-2"))
+        assert pick(browser, "session").status == 200               # the target is that session already
+        assert stored(browser)["session"]["session"] == "s-1"
+        assert pick(browser, "agent:ada-chatgpt").status == 200
+        assert stored(browser)["session"]["session"] == "s-1" and browser.hub.target(DOC, kept=True).session == "s-1"
+    finally:
+        release.set()
+        browser.hub.runner.join(10)
 
 
 # ── the id, not the name, is the agent ───────────────────────────────────────

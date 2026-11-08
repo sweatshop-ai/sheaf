@@ -724,14 +724,29 @@ class Hub:
         session kept beside it, which a Tell already sent to it still runs in (a stop and the watcher use it)."""
         entry = self.docs.get(address)
         raw = entry.get("target")
-        if kept and (not raw or targets_mod.is_agent(raw)):    # an agent is no session (SPEC 9.8)
-            raw = entry.get("session")
+        if kept and entry.get("session"):       # beside an agent, or beside the session a render replaced
+            raw = entry["session"]
         if not raw or targets_mod.is_agent(raw):
             return None
         try:
             return Target.from_dict(raw)
         except ValueError:
             return None
+
+    def tell_live(self, address: str) -> bool:
+        """Whether a Tell runs on this document or waits for its reply."""
+        e = self.entries.get(address)
+        return bool(self.runner.active("tell", address) or (e is not None and e.live.waiting()))
+
+    def _told_session(self, address: str, entry: dict) -> dict | None:
+        """The session a Tell running on this document was sent to, as `entry` holds it, or None when no Tell
+        runs: a render that would drop or replace it keeps it beside the target (a stop goes there)."""
+        if not self.tell_live(address):
+            return None
+        for raw in (entry.get("session"), entry.get("target")):
+            if isinstance(raw, dict) and raw and not targets_mod.is_agent(raw):
+                return raw
+        return None
 
     def session_name(self, address: str) -> str:
         """What the page calls the session a Tell of this document goes to ("" when there is none)."""
@@ -771,16 +786,21 @@ class Hub:
             raise RenderError(f"{md} is not in a root the hub serves.") from None
         with place.held(self, address), self._lock:        # the name's lock first (9.11), as `entry` takes it
             def settle(new: dict) -> dict:
+                old = dict(new)
                 new["path"] = str(md)
                 new["rendered"] = time.strftime(STAMP_FORMAT)
                 for k in SETTING_KEYS:
                     new[k] = settings.get(k)
                 # The latest render from an agent session sets the target; a render that finds no agent keeps
                 # it, an agent's too; only `--agent none` clears it (SPEC 8.3, D19). The session an agent's
-                # write took the target from is the new one's, so none is kept beside it.
+                # write took the target from is the new one's, so none is kept beside it, unless a Tell is
+                # running: it was sent to the session the render drops or replaces, and a Cancel stops that one.
                 if target is not None:
+                    kept = self._told_session(address, old)
                     new["target"] = None if target.get("agent") == "none" else {"kind": "session", **target}
                     new.pop("session", None)
+                    if kept and kept != new["target"]:
+                        new["session"] = kept
                 else:
                     new.setdefault("target", None)
                 return new

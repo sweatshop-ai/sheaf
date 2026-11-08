@@ -40,3 +40,40 @@ No finding in the review-round comments was missing from the PR bodies; the comm
 | 30 | #212 | — | SPEC line 935 | A member's `telling` also holds the 9.12 box drops. | Deferred to ticket 05 by the PR itself; not a fix in the stack |
 
 **Counts.** 30 rows. 1 fixed in the stack (22). 18 open and checked in the code (2, 3, 4, 5, 7, 8, 11–16, 20, 24–28). 1 partly checked (29). 7 not checked (6, 9, 10, 18, 19, 21, 23). 3 are not code items (1, 17, 30).
+
+## Rows to tickets
+
+Settled on 2026-11-08 at origin/main fac5160 (tickets in `issues/`, 08–17). Rows marked open were re-read there; the lines in the tickets are those of fac5160, not of e515777. Rows 6, 9, 10, 18, 19, 21, 23 and 29 were "not checked" and are now checked: all are open.
+
+| # | Ticket or outcome |
+|---|-------------------|
+| 1 | not a ticket (a Codex pass on each head after 2026-11-11 08:36; its findings become tickets then) |
+| 2 | 13 |
+| 3 | 13 |
+| 4 | 14 |
+| 5 | 13 |
+| 6 | 14 (open: `cli.py:936-947` checks the clash outside `Tokens.add`'s lock, `state.py:446-455`) |
+| 7 | 13 |
+| 8 | 13 |
+| 9 | 17 (open: `tests/test_agent_tokens.py:119`) |
+| 10 | 17 (open: only unit tests of `check_agent_names`, `tests/test_agent_tokens.py:190-198`) |
+| 11 | 11 |
+| 12 | 15 |
+| 13 | 15 |
+| 14 | 11 |
+| 15 | 15 |
+| 16 | 15 |
+| 17 | not a ticket (a WIP commit in the history of #210; it cannot change without rewriting the branch) |
+| 18 | 12 (open: `_write` announces at `mcp.py:508`, `_agent_wrote` runs after at `:647`, `:657`, `:789`, `:866`) |
+| 19 | 12 (open: `hub/handler.py:1666-1679` takes no `place.held` / `_reading`) |
+| 20 | 08 |
+| 21 | 17 (open: none of the five tests is in `tests/test_hub_target.py` or `tests/page/test_page_target.py`) |
+| 22 | fixed (`hub/handler.py:1536`, as the table says) |
+| 23 | 12 (open: `hub/targets.py:75`, `:98`, `hub/core.py:636`) |
+| 24 | 09 |
+| 25 | 09 |
+| 26 | 09 |
+| 27 | 10 |
+| 28 | 10 |
+| 29 | 16 (open: `hub/waiting.py:30` duplicates `hub/targets.py:23`, `hub/tell.py:399` says "The agent"; the rest is checked first in the ticket) |
+| 30 | not a ticket (deferred to ticket 05 by #212; 05 is done, so the PR of 05 settles it) |

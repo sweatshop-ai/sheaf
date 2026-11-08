@@ -8,7 +8,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** done-in-PR (see the PR for its number)
+**Status:** done-in-PR #231
 
 **Size:** one session (cli.py, state.py, tests/test_cli_token.py)
 

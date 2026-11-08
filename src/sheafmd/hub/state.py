@@ -15,6 +15,7 @@ import shutil
 import stat
 import threading
 import time
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -426,7 +427,8 @@ class Tokens:
         return time.strftime(STAMP_FORMAT, time.localtime(self._clock()))
 
     def add(self, name: str, display: str | None = None, write: bool = False,
-            client: str | None = None, clash=None) -> NewToken:
+            client: str | None = None,
+            clash: "Callable[[list[TokenRow]], str | None] | None" = None) -> NewToken:
         """Make a token and keep its hash. The token is returned here and nowhere else, with the
         display name its replies are signed with; an agent's (`client`) keeps the cleaned client and
         no display. `clash`, when given, is called with the rows the file holds once the lock is ours (so two adds at

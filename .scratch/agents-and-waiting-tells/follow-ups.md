@@ -76,4 +76,4 @@ Settled on 2026-11-08 at origin/main fac5160 (tickets in `issues/`, 08–17). Ro
 | 27 | 10 |
 | 28 | 10 |
 | 29 | 16 (open: `hub/waiting.py:30` duplicates `hub/targets.py:23`, `hub/tell.py:399` says "The agent"; the rest is checked first in the ticket) |
-| 30 | not a ticket (deferred to ticket 05 by #212; 05 is done, so the PR of 05 settles it) |
+| 30 | not a ticket (deferred to ticket 05 by #212; 05 is done (#213); whether it closed the line was not read here) |

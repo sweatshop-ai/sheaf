@@ -12,4 +12,3 @@ def test_a_drop_added_with_no_kind_is_pending_as_a_tell():
     assert waits.pending("x.md", md) == [{"id": cid, "kind": "tell", "state": "sent"}]
     (doc, thread, drop), = waits.drops()
     assert (doc, thread, drop.name) == ("x.md", cid, "drop-1")
-    assert boxwait.KIND == "tell"

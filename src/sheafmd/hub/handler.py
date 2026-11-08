@@ -36,7 +36,7 @@ from ..edit import EditError
 from ..mcp import Caller, Door
 from ..render import RenderError
 from ..source import StaleError, md_hash
-from . import auth, codes, events, peer, place, proxy, relay, targets, the_list, visibility, work
+from . import auth, boxwait, codes, events, peer, place, proxy, relay, targets, the_list, visibility, work
 from . import waiting as waiting_mod
 from .tell import NO_AGENT, JobRefused
 from .index import Status
@@ -1299,12 +1299,12 @@ class Handler:
         (`written` or why not, the file's name when written)."""
         project = "/".join(Address.parse(e.address).rel.split("/")[:2])
         by = work.member_word(req.member)
-        out = {"project": project, "member": by, "sheaf": e.address, "text": body[:work.TEXT_MAX], "kind": "tell",
+        out = {"project": project, "member": by, "sheaf": e.address, "text": body[:work.TEXT_MAX], "kind": boxwait.KIND,
                "thread": thread, "address": e.address, "abs_path": str(e.path),
                "id": str(uuid.uuid4()), "message": self._tell_message(req, e, thread)}
         drop, name = work.drop_named(self.hub.the_list.cfg.dirs_for(req.member).tell_dir, project, json.dumps(out).encode("utf-8"),
                                      "no tell_dir in [list]")
-        self.hub.record("tell-dropped", e.address, what="tell", project=project, by=by, drop=drop,
+        self.hub.record("tell-dropped", e.address, what=boxwait.KIND, project=project, by=by, drop=drop,
                         tell=out["id"])
         return drop, name
 

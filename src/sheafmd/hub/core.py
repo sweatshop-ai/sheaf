@@ -851,6 +851,13 @@ class Hub:
         with self._lock:
             root = roots_mod.forget(self.roots, self.docs, self.seen, self.versions, name,
                                     members=self.member_seen)
+            # After the registry lets go (a Tell queued from now on is refused, `Waiting.queue`) and before the
+            # entries go, so the pages open on them hear `tell-cancelled` ahead of `gone`. A failure here must not
+            # keep the root from being forgotten.
+            try:
+                self.waiting_tells.end_root(name, "the folder was forgotten")
+            except Exception:
+                self.record_exception("tell-end-failed")
             for address in [a for a in self.entries if a.startswith(roots_mod.Address.prefix(name))]:
                 e = self.entries.pop(address)
                 # Its versions go under its own lock: a write still under way would put its text among

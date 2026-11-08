@@ -487,12 +487,18 @@ class Door:
         return c
 
     def _write(self, address: str, caller: Caller, doc: str, op: str, fields: dict, role=None):
-        """A change to one comment. Through the document's Live Document when the hub has one,
+        """A change to one comment, and the agent of its token made the target (9.8) before the tabs hear of it. Through the document's Live Document when the hub has one,
         so open tabs hear of it at once and a Tell wait sees an action reply; straight into the
         file when the hub holds no page for it. Either way the caller's sight of it (9.11) is judged
         again on the file under its lock, so a sheaf that closed since the check takes nothing. Both
         under the lock of the sheaf's name (9.11), the file found again under it, so no move comes
         between finding the file and writing it."""
+        noted = []
+
+        def note():
+            noted.append(True)
+            self._agent_wrote(address, caller)
+
         def guard(t, op=None):
             if op is None:                  # a page's own write reads the file by its path: the text must be the one
                 with self._open(address) as seen:     # the file now opened beneath its root holds (9.11)
@@ -506,7 +512,7 @@ class Door:
                 entry = self.hub.entry(address) if address in self.hub.entries else None
                 if entry is not None:
                     wrote = entry.live.comment(op, fields, None, by=caller.display, role=role, announce=True,
-                                               guard=guard)["wrote"]
+                                               guard=guard, before_announce=note)["wrote"]
                 else:
                     top, rel = self.hub.roots.locate(address)
                     old, new = update_beneath(top.path, rel, lambda t, o: rdc.apply_op(
@@ -518,6 +524,8 @@ class Door:
             raise ToolError(f"{e}.") from None
         except (OSError, UnicodeDecodeError, NotFound):
             raise ToolError(f"{address} could not be written.") from None
+        if not noted:                                   # no tab was told (none open, or nothing changed)
+            self._agent_wrote(address, caller)
 
     # ── the tools ────────────────────────────────────────────────────────────
     def _open_in(self, address: str, whole: bool = False) -> tuple:
@@ -644,7 +652,6 @@ class Door:
         self._write(address, caller, args["doc"], "reply",
                     {"id": cid, "body": text, "resolve": args.get("resolve", False)},
                     role=args.get("role", "answer"))
-        self._agent_wrote(address, caller)
         self._ends_tells(address, cid, caller, role=args.get("role", "answer"), resolved=bool(args.get("resolve")))
         c = self._comment(address, cid, caller, args["doc"])
         return {"id": cid, "status": c.status, "replies": c.as_dict()["replies"]}
@@ -654,7 +661,6 @@ class Door:
         cid = args["id"]
         if self._comment(address, cid, caller, args["doc"]).status != "resolved":
             self._write(address, caller, args["doc"], "status", {"id": cid, "status": "resolved"})
-            self._agent_wrote(address, caller)
             self._ends_tells(address, cid, caller, resolved=True)
         return {"id": cid, "status": "resolved"}
 
@@ -784,9 +790,9 @@ class Door:
                 text = self._make(root, top, rel, name, address, text, caller)
             except Private:         # the root's folder, as opened, is a private root's: answered as a path in no root
                 raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path") from None
+            self._agent_wrote(address, caller)          # before the tabs and indexes hear of it
             self.hub.wrote(address)
             self.hub.committed(address, by=caller.display, what="create")
-        self._agent_wrote(address, caller)
         return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text)}
 
     def _make(self, root, top: Path, rel: str, name: str | None, address: str, text: str, caller: Caller):
@@ -862,8 +868,6 @@ class Door:
             finally:
                 if moved:                           # moved, then failed before its commit: the move is committed
                     self.hub.committed(address, by=caller.display, what="update", gone=moved.pop())
-        if before != text:
-            self._agent_wrote(address, caller)
         return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text), "changed": before != text}
 
     def _updated(self, address: str, args: dict, text: str, expected: str, caller: Caller, moved: list):
@@ -903,6 +907,7 @@ class Door:
             raise ToolError(f"{address} could not be written.", "not written") from None
         text = written[0]
         if before != text:
+            self._agent_wrote(address, caller)          # before the tabs hear of it (9.8)
             self.hub.wrote(address)
         # A text that changed nothing may still move the file to its home; its address stays.
         return before, text, moved[0] if moved else place.place(self.hub, address, commit=False)

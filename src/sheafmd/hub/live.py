@@ -288,7 +288,7 @@ class LiveDocument:
             return answer
 
     def comment(self, op, fields, base_hash, await_action=False, *, by=None, role=None,
-                announce=True, author=None, rid=None, guard=None):
+                announce=True, author=None, rid=None, guard=None, before_announce=None):
         """add / reply / status / edit / delete, written as this document's reader.
 
         `by` signs an add or a reply as someone else, and `role` gives a reply a role of its own
@@ -298,7 +298,10 @@ class LiveDocument:
         The open tabs hear of every change with one `changed` event
         (SPEC 7.3: every tab, whoever wrote), as they do for a write from outside; the page
         that wrote already holds the new hash by then, or takes the event in after its answer.
-        `announce=False` is for a caller that tells the tabs itself.
+        `announce=False` is for a caller that tells the tabs itself. `before_announce()` runs once the file is
+        written and rendered, just before the tabs are told, and only when they will be: what a tab fetches the
+        moment it hears is then what the caller set there (the agent target of a door write, 9.8). It runs
+        under the document's lock; what it raises is the caller's to handle.
 
         No whole-file version check: reply, status, edit and delete find their comment by id,
         and add finds its paragraph again in the file as it is now. Refusing them because a
@@ -393,6 +396,8 @@ class LiveDocument:
                 self._take(self._rids, rid, sent, made.get("id"))
             snap = self._snapshot(self._text)
             if announce and self._text != before:        # one event per write that changed the file
+                if before_announce is not None:
+                    before_announce()
                 self._announce(snap, before, **({"rid": rid} if rid is not None else {}))
             return {**self._answer(made.get("id"), base_hash, snap), "wrote": made["wrote"]}
 

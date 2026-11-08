@@ -54,6 +54,16 @@ SETTING_KEYS = ("title", "toc", "max_image_width", "by", "for", "theme", "credit
 _META_RE = re.compile(r'(<script id="rd-edit-meta" type="application/json">)(.*?)(</script>)', re.S)
 
 
+@dataclass(frozen=True)
+class MemberTarget:
+    """What a member's page is told of its target (10.1): the agent shape or None, what the reader can do, the
+    lines under Tell, and the targets they may pick."""
+    agent: dict | None
+    can: list
+    lines: dict
+    picks: list
+
+
 @dataclass
 class Entry:
     address: str
@@ -630,22 +640,23 @@ class Hub:
             work, can = self.member_work(e, member)
             if work is not None:
                 meta["work"] = work
-            meta["agent"], meta["can"], meta["lines"], meta["targets"] = self.member_target(e.address, member, can)
+            mt = self.member_target(e.address, member, can)
+            meta["agent"], meta["can"], meta["lines"], meta["targets"] = mt.agent, mt.can, mt.lines, mt.picks
         return meta
 
-    def member_target(self, address: str, member, can: list) -> tuple:
-        """(agent, can, lines, targets) of a member's page (SPEC 9.8, 10.1): their own target, an agent of theirs,
-        never the hub account's session. On a sheaf whose Tells go to James's window or a fork's relay (9.12) the
-        target is not theirs to choose: none is shown and `targets` is empty."""
+    def member_target(self, address: str, member, can: list) -> MemberTarget:
+        """The target of a member's page (SPEC 9.8, 10.1): their own, an agent of theirs, never the hub account's
+        session. On a sheaf whose Tells go to James's window or a fork's relay (9.12) the target is not theirs to
+        choose: none is shown and `picks` is empty."""
         lines = proxy_mod.member_lines()
         if {"box-tell", "relay-tell"} & set(can):
-            return None, can, lines, []
+            return MemberTarget(None, can, lines, [])
         pickable = targets_mod.choices(self, address, member)
         raw = targets_mod.stored(self, address, member)
         if raw is None:
-            return None, can, lines, pickable
-        shape, line, reaches = targets_mod.agent_view(self, raw, member)
-        return shape, sorted({*can, "queue"}) if reaches else can, {"tell": line}, pickable
+            return MemberTarget(None, can, lines, pickable)
+        v = targets_mod.agent_view(self, raw, member)
+        return MemberTarget(v.shape, sorted({*can, "queue"}) if v.reaches else can, {"tell": v.line}, pickable)
 
     def mount_doc(self, e: Entry, member=None) -> dict:
         """The sheaf as the front mounts it (#116): {title, toc, html, config, css, version, script, assets}. The text

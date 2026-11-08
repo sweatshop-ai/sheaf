@@ -11,21 +11,55 @@ the old target. The wire form `agent:<token name>` is resolved to the id here, o
 
     note_write(hub, address, row, member)   a door write with an agent's token
     pick(hub, address, member, choice)      POST /_/target: the entry after the change; raises Refused
-    agent_view(hub, raw, member)            (agent shape, tell line) of a stored agent target
+    agent_view(hub, raw, member)            an AgentView of a stored agent target
+    parse(choice) / wire(name)              the wire grammar, read and written here alone: session | none | agent:<name>
     choices(hub, address, member)           what the person may make the target
     stored(hub, address, member)            the raw target of whose it is, or None
 """
 from __future__ import annotations
 
-from ..agents.base import Target
+from dataclasses import dataclass
+
+from ..agents.base import Adapter, Target
+from .auth import clean_display
 from .state import TokenRow
 
 REVOKED = "{agent} can no longer reach this hub: its token was revoked. Pick another target."
 WHAT = "The target is session, agent:<token name> or none."
+AGENT_PREFIX = "agent:"           # page/page.js `targetNow` reads the same three words; a test holds the two together
+
+
+@dataclass(frozen=True)
+class AgentView:
+    """A stored agent target as the page is told it (10.1, 10.6)."""
+    shape: dict             # the agent shape of 10.1
+    line: str | None        # the line under Tell: why the agent cannot be told, None when it can
+    reaches: bool           # whether the token still reaches the hub
 
 
 class Refused(Exception):
     """A target the reader may not pick: one sentence, a 400."""
+
+
+def who(t: Target, ad: Adapter) -> str:
+    """What the page calls the session: its own name (cleaned by the rule of a display name),
+    else the stored one, else the adapter's display name (SPEC 10.5)."""
+    return clean_display(ad.name(t)) or clean_display(t.name) or ad.display
+
+
+def wire(name: str) -> str:
+    """The wire form of the agent whose token is `name`."""
+    return AGENT_PREFIX + name
+
+
+def parse(choice) -> tuple[str, str | None]:
+    """(kind, token name) of a wire target: ("none", None), ("session", None) or ("agent", name). Raises Refused
+    for anything else, the empty name included."""
+    if choice in ("none", "session"):
+        return choice, None
+    if isinstance(choice, str) and choice.startswith(AGENT_PREFIX) and len(choice) > len(AGENT_PREFIX):
+        return "agent", choice[len(AGENT_PREFIX):]
+    raise Refused(WHAT)
 
 
 def is_agent(raw) -> bool:
@@ -72,15 +106,14 @@ def _session_of(entry: dict) -> dict | None:
     return None
 
 
-def agent_view(hub, raw: dict, member=None) -> tuple[dict, str | None, bool]:
-    """(the agent shape of 10.1, the line under Tell, whether the token still reaches the hub) of a stored agent
-    target. A revoked token has no signature to build: its shape names the token."""
+def agent_view(hub, raw: dict, member=None) -> AgentView:
+    """The AgentView of a stored agent target. A revoked token has no signature to build: its shape names the token."""
     row = live(hub, raw, member)
     name = row.signed(hub.person, hub.proxy) if row is not None else str(raw.get("token", ""))
     shape = {"kind": "agent", "token": raw.get("token"), "display": name, "label": name}
     if row is None:
         shape["revoked"] = True                     # the page takes no token of this name for the current target
-    return shape, None if row is not None else REVOKED.format(agent=name), row is not None
+    return AgentView(shape, None if row is not None else REVOKED.format(agent=name), row is not None)
 
 
 def choices(hub, address: str, member=None) -> list[dict]:
@@ -95,11 +128,10 @@ def choices(hub, address: str, member=None) -> list[dict]:
             except ValueError:
                 t = None
             if t is not None:
-                from .tell import who
                 ad = hub.adapter(t.agent)
                 out.append({"target": "session", "label": f"{who(t, ad)} · {ad.product}"})
     for row in agents(hub, member):
-        out.append({"target": f"agent:{row.name}", "label": row.signed(hub.person, hub.proxy)})
+        out.append({"target": wire(row.name), "label": row.signed(hub.person, hub.proxy)})
     return out
 
 
@@ -142,14 +174,13 @@ def _set(entry: dict, agent: dict | None, member, told: bool = False) -> None:
 def pick(hub, address: str, member, choice) -> None:
     """Change the target to `choice`: "session", "agent:<token name>" or "none" (9.8). Raises Refused for a
     target the reader may not pick."""
-    if not isinstance(choice, str):
-        raise Refused(WHAT)
+    kind, name = parse(choice)
     told = hub.tell_live(address)                   # beside the docs lock, not inside it
-    if choice == "none":
+    if kind == "none":
         def settle(entry):
             _set(entry, None, member, told)
             return entry
-    elif choice == "session":
+    elif kind == "session":
         if member is not None:
             raise Refused("Tell reaches only your own agents here.")
 
@@ -162,8 +193,7 @@ def pick(hub, address: str, member, choice) -> None:
             entry["target"] = session
             entry.pop("session", None)
             return entry
-    elif choice.startswith("agent:") and len(choice) > 6:
-        name = choice[6:]
+    else:
         row = next((r for r in agents(hub, member) if r.name == name), None)
         if row is None:
             raise Refused(f"{name} is not one of your agents.")
@@ -171,6 +201,4 @@ def pick(hub, address: str, member, choice) -> None:
         def settle(entry):
             _set(entry, _keep(row), member, told)
             return entry
-    else:
-        raise Refused(WHAT)
     hub.docs.change(address, settle)

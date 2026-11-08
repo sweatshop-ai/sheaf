@@ -10,7 +10,7 @@ import threading
 import pytest
 
 import sheafmd.comments as rdc
-from helpers import BEA, CAL, FRONT, call, comment, ok, page_meta, refused
+from helpers import BEA, CAL, FRONT, call, comment, hub_rows, ok, page_meta, refused
 from sheafmd.hub import proxy
 from sheafmd.hub.state import Tokens
 
@@ -79,6 +79,52 @@ def test_create_and_update_are_door_writes(browser, talk):
     other = Tokens().add("ada-claude", client="Claude", write=True)
     ok(browser, "update", doc="work/new.md", text="# New\n\nMore.\n", expected_hash=made["hash"], token=other)
     assert browser.hub.docs.get("work/new.md")["target"]["token"] == "ada-claude"
+
+
+def tabs_hear(browser, doc=DOC):
+    """[(event, the document's stored target when the tabs were told)] of `doc`: what a tab that fetches /_/doc the
+    moment it hears reads (ticket 12, row 18)."""
+    live = browser.hub.entry(doc).live
+    heard, real = [], live._publish
+
+    def publish(name, data):
+        heard.append((name, browser.hub.docs.get(doc).get("target")))
+        real(name, data)
+    live._publish = publish
+    return heard
+
+
+@pytest.mark.parametrize("tool,args", [("reply", {"id": "c1", "text": "Done."}), ("resolve", {"id": "c1"})])
+def test_the_tabs_hear_of_a_comment_write_after_its_agent_is_the_target(browser, talk, tool, args):
+    token = Tokens().add("ada-chatgpt", client="ChatGPT")
+    render(browser, talk)
+    heard = tabs_hear(browser)
+    ok(browser, tool, doc=DOC, token=token, **args)
+    told = [target for name, target in heard if name == "changed"]
+    assert told and all(t == agent("ada-chatgpt", row("ada-chatgpt").id) for t in told)
+
+
+def test_the_tabs_hear_of_an_update_after_its_agent_is_the_target(browser, talk):
+    token = Tokens().add("ada-chatgpt", client="ChatGPT", write=True)
+    render(browser, talk)
+    heard = tabs_hear(browser)
+    ok(browser, "update", doc=DOC, text=talk.read_text() + "\nMore.\n", token=token,
+       expected_hash=ok(browser, "read", doc=DOC, token=token)["hash"])
+    told = [target for name, target in heard if name == "changed"]
+    assert told and all(t == agent("ada-chatgpt", row("ada-chatgpt").id) for t in told)
+
+
+def test_a_reply_that_the_target_cannot_follow_still_stands(browser, talk, monkeypatch):
+    token = Tokens().add("ada-chatgpt", client="ChatGPT")
+    render(browser, talk)
+
+    def boom(*a, **k):
+        raise RuntimeError("docs.json is gone")
+    monkeypatch.setattr("sheafmd.hub.targets.note_write", boom)
+    heard = tabs_hear(browser)
+    ok(browser, "reply", doc=DOC, id="c1", text="Done.", token=token)
+    assert "Done." in talk.read_text() and [n for n, _ in heard].count("changed") == 1
+    assert [r["kind"] for r in hub_rows("target-failed")] == ["target-failed"]
 
 
 def test_documents_threads_and_read_change_nothing(browser, talk):
@@ -442,3 +488,69 @@ def test_each_member_has_their_own_target_on_the_same_document(front, browser, t
     assert stored(browser)["targets"].keys() == {BEA}
     assert call(browser, "reply", doc=DOC, id="c1", text="Done.", token=b)[0] is True     # Cal has no right to Bea's page
     assert stored(browser)["targets"].keys() == {BEA}
+
+
+# ── POST /_/target takes the sheaf's name, as /_/export does (9.11) ──────────
+
+def test_the_target_is_judged_and_stored_under_the_sheafs_name(front, browser, talk, work, monkeypatch):
+    """A sheaf closed to the member between the check and the store takes no target: the check and the store are
+    one step under the name's lock, as /_/export reads (9.11)."""
+    import contextlib
+    from sheafmd.hub import place, targets
+    Tokens().add("bea-chatgpt", client="ChatGPT")
+    front.hub.proxy = members(work, bea=["bea-chatgpt"])
+    render(browser, talk)
+    hub, held_at = browser.hub, {}
+    depth = []
+
+    @contextlib.contextmanager
+    def held(h, address):
+        depth.append(address)
+        try:
+            yield True
+        finally:
+            depth.pop()
+    real_visible, real_pick = hub.visible, targets.pick
+    monkeypatch.setattr(place, "held", held)
+    monkeypatch.setattr(hub, "visible", lambda member, doc: held_at.update(visible=bool(depth)) or real_visible(member, doc))
+    monkeypatch.setattr(targets, "pick", lambda *a: held_at.update(pick=bool(depth)) or real_pick(*a))
+    assert pick(front, "agent:bea-chatgpt").status == 200
+    assert held_at == {"visible": True, "pick": True}
+
+
+def test_a_sheaf_closed_to_the_member_takes_no_target_and_is_a_404(front, browser, talk, work, monkeypatch):
+    Tokens().add("bea-chatgpt", client="ChatGPT")
+    front.hub.proxy = members(work, bea=["bea-chatgpt"])
+    render(browser, talk)
+    monkeypatch.setattr(browser.hub, "visible", lambda member, doc: False)
+    assert pick(front, "agent:bea-chatgpt").status == 404
+    assert BEA not in stored(browser).get("targets", {})
+
+
+# ── the wire grammar is named once (ticket 12, row 23) ───────────────────────
+
+def test_the_wire_grammar_is_read_in_one_place_and_the_page_reads_the_same_words():
+    from pathlib import Path
+    from sheafmd.hub import targets
+    assert targets.parse("none") == ("none", None) and targets.parse("session") == ("session", None)
+    assert targets.parse("agent:ada-chatgpt") == ("agent", "ada-chatgpt")
+    assert targets.wire("ada-chatgpt") == "agent:ada-chatgpt"
+    for bad in ("agent:", "agent", "", "Session", None, 3, {"kind": "agent"}):
+        with pytest.raises(targets.Refused):
+            targets.parse(bad)
+    js = (Path(targets.__file__).parents[1] / "page" / "page.js").read_text()
+    reads = js[js.index("function targetNow()"):js.index("function otherTargets()")]
+    for word in ("'none'", "'session'", f"'{targets.AGENT_PREFIX}'"):
+        assert word in reads, f"page.js targetNow no longer says {word}"
+
+
+def test_targets_and_tell_import_each_other_nowhere_inside_a_function():
+    import ast
+    from pathlib import Path
+    from sheafmd.hub import targets
+    tree = ast.parse(Path(targets.__file__).read_text())
+    inside = [n for f in ast.walk(tree) if isinstance(f, ast.FunctionDef)
+              for n in ast.walk(f) if isinstance(n, (ast.Import, ast.ImportFrom))]
+    assert inside == []
+    assert not any(isinstance(n, ast.ImportFrom) and n.module == "tell" and n.level == 1
+                   for n in ast.walk(tree)), "targets must not import tell"

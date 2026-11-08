@@ -6,13 +6,13 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done-in-PR
 
 **Size:** one session; the first step reads SPEC 12 and 9.8 against the five places and writes the list of differences in the PR before any edit
 
-- [ ] Start with a list, in the PR: each difference of the row's text, open or not, with file:line at the head you branch from
-- [ ] Test first: the revoked line for a Tell names the agent by its signed name, not "The agent"
-- [ ] `waiting.GONE` is `targets.REVOKED` (one constant); no test text changes except where the SPEC does
-- [ ] `instructions` and `tell_agent` carry the SPEC's words; a test compares them with the SPEC's quoted lines
-- [ ] The `tid` / token match is in one helper; the `Waiting` docstring and `take()` signature are true
-- [ ] A reason `closed` that also covers resolved is either split or the SPEC line says it covers both; the PR says which
+- [x] Start with a list, in the PR: each difference of the row's text, open or not, with file:line at the head you branch from
+- [x] Test first: the revoked line for a Tell names the agent by its signed name, not "The agent"  (the token's name: a revoked token has no signature, as the page's line)
+- [x] `waiting.GONE` is `targets.REVOKED` (one constant); no test text changes except where the SPEC does
+- [x] `instructions` and `tell_agent` carry the SPEC's words; a test compares them with the SPEC's quoted lines
+- [x] The `tid` / token match is in one helper; the `Waiting` docstring and `take()` signature are true
+- [x] A reason `closed` that also covers resolved is either split or the SPEC line says it covers both; the PR says which

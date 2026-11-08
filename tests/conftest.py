@@ -6,7 +6,9 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+import traceback
 from pathlib import Path
 
 import pytest
@@ -39,6 +41,50 @@ def pytest_sessionstart(session):
         # faulthandler dumps at most 100 threads, newest first, so with 100 leaked threads the main
         # thread is the one it leaves out. The watcher signals the main thread with this one first.
         faulthandler.register(signal.SIGUSR2, file=out, all_threads=False)
+
+
+MAIN_STACK_AT = 0.9     # of pytest-timeout's limit: when the main thread's own stack is written
+
+
+@pytest.fixture(autouse=True)
+def the_main_thread_names_its_frame(request):
+    """Write the main thread's stack to stderr at 90% of the test's timeout (setup, call and teardown
+    together), so a hang names the call it stands in. pytest-timeout prints every thread but the one it
+    interrupts, and faulthandler's dump of every thread stops at 100, newest first, which leaves out
+    the main thread, the oldest, of a run that leaked threads: CI, PR 227, 3,900 of them. This one is
+    a thread of its own that reads the main thread's frame, so it speaks with the main thread stuck in
+    a Playwright wait too. The test goes on; the timeout still ends it."""
+    config = request.config
+    if not config.pluginmanager.hasplugin("timeout"):     # -p no:timeout: nothing ends a test, nothing to announce
+        yield
+        return
+    limit = config.getoption("timeout", None)       # --timeout, even 0, wins over the ini value
+    limit = float(config.getini("timeout") or 0) if limit is None else float(limit)
+    mark = request.node.get_closest_marker("timeout")
+    if mark and mark.args:
+        limit = float(mark.args[0])
+    if limit <= 0:
+        yield
+        return
+    main = threading.main_thread().ident
+
+    def speak():
+        frame = sys._current_frames().get(main)
+        if frame is None:
+            return
+        text = f"\n--- {request.node.nodeid}: still running after {limit * MAIN_STACK_AT:.0f} s; the main thread is in:\n"
+        text += "".join(traceback.format_stack(frame)) + "---\n"
+        capture = request.config.pluginmanager.getplugin("capturemanager")
+        with capture.global_and_fixture_disabled():
+            sys.stderr.write(text)
+            sys.stderr.flush()
+
+    timer = threading.Timer(limit * MAIN_STACK_AT, speak)
+    timer.daemon = True
+    timer.start()
+    yield
+    timer.cancel()
+    timer.join()
 
 
 @pytest.fixture(autouse=True)

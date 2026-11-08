@@ -588,14 +588,15 @@ def test_a_reply_on_a_sheaf_no_page_has_open_notes_the_target_under_the_sheafs_n
     ok(browser, "reply", doc=DOC, id="c1", text="Done.", token=token)
     assert at == [True]
 
-# ── cases the reviews of #211 asked for ──────────────────────────────────────
+
+# ── more cases of the target ─────────────────────────────────────────────────
 
 def test_a_second_members_write_is_kept_beside_the_first_members(front, browser, talk, work):
-    a = Tokens().add("bea-chatgpt", client="ChatGPT")
-    b = Tokens().add("cal-claude", client="Claude")
+    bea = Tokens().add("bea-chatgpt", client="ChatGPT")
+    cal = Tokens().add("cal-claude", client="Claude")
     front.hub.proxy = members(work, work, bea=["bea-chatgpt"], cal=["cal-claude"])      # one page in both members' roots
-    ok(browser, "reply", doc=DOC, id="c1", text="Done.", token=a)
-    ok(browser, "reply", doc=DOC, id="c1", text="Done too.", token=b)
+    ok(browser, "reply", doc=DOC, id="c1", text="Done.", token=bea)
+    ok(browser, "reply", doc=DOC, id="c1", text="Done too.", token=cal)
     assert stored(browser)["targets"] == {BEA: agent("bea-chatgpt", row("bea-chatgpt").id),
                                           CAL: agent("cal-claude", row("cal-claude").id)}
     assert stored(browser).get("target") is None

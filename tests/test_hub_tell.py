@@ -963,6 +963,90 @@ def test_cancelling_a_tell_already_sent_ends_the_wait_and_tells_the_session_to_s
         prompts.cancel(DOC, "Ada", "c1"))
 
 
+def test_a_render_with_agent_none_while_a_tell_waits_leaves_the_session_to_stop(
+        browser, hub, ready, session):
+    sub = tab(hub)
+    sub.drain()
+    post(browser, "/_/tell")
+    finish(hub)
+    events(sub)
+    attach(browser, ready, {"agent": "none"})
+    assert hub.target(DOC) is None                          # the page's target line says none
+    assert post(browser, "/_/cancel").json() == {"ok": True}
+    finish(hub)
+    assert events(sub)[-1:] == [("tell-cancelled", {"id": "c1", "sent": True})]
+    msgs = _arrived(hub, session.peer, 2)
+    assert json.loads(msgs[1])["message"]["content"].split(">\n", 1)[1].startswith(
+        prompts.cancel(DOC, "Ada", "c1"))
+    assert "tell-stop-skipped" not in [r["kind"] for r in diagnostics.read()]
+
+
+def test_a_render_from_a_second_session_while_a_tell_waits_leaves_the_first_to_stop(
+        browser, hub, ready, session):
+    sub = tab(hub)
+    sub.drain()
+    post(browser, "/_/tell")
+    finish(hub)
+    events(sub)
+    attach(browser, ready, session.target(session="s-2", socket="/nonexistent/s-2.sock"))
+    assert hub.target(DOC).session == "s-2"                 # the latest render is the target (8.3)
+    assert post(browser, "/_/cancel").json() == {"ok": True}
+    finish(hub)
+    msgs = _arrived(hub, session.peer, 2)                   # the stop reached s-1, the session that was told
+    assert json.loads(msgs[1])["message"]["content"].split(">\n", 1)[1].startswith(
+        prompts.cancel(DOC, "Ada", "c1"))
+
+
+def test_a_render_with_no_tell_running_clears_the_session_and_keeps_none_beside_the_new_one(
+        browser, hub, ready, session):
+    attach(browser, ready, session.target(session="s-2"))
+    assert "session" not in hub.docs.get(DOC)
+    attach(browser, ready, {"agent": "none"})
+    assert hub.docs.get(DOC)["target"] is None and "session" not in hub.docs.get(DOC)
+
+
+def test_a_session_kept_for_a_cancelled_tell_is_gone_when_the_next_tell_starts(
+        browser, hub, ready, session):
+    post(browser, "/_/tell")
+    finish(hub)
+    attach(browser, ready, session.target(session="s-2", socket="/nonexistent/s-2.sock"))
+    post(browser, "/_/cancel")
+    finish(hub)
+    assert hub.docs.get(DOC)["session"]["session"] == "s-1"
+    attach(browser, ready, session.target(session="s-3", socket=session.peer.path))
+    assert "session" not in hub.docs.get(DOC)               # no Tell was running at that render
+    assert hub.target(DOC, kept=True).session == "s-3"
+
+
+def test_a_cancel_of_a_tell_started_after_the_first_one_ended_stops_the_target_not_the_kept_session(
+        browser, hub, ready, session):
+    post(browser, "/_/tell")
+    finish(hub)
+    attach(browser, ready, session.target(session="s-2", socket=session.peer.path))
+    assert hub.docs.get(DOC)["session"]["session"] == "s-1"        # kept for the first Tell, still waiting
+    post(browser, "/_/cancel")
+    finish(hub)
+    assert hub.docs.get(DOC)["session"]["session"] == "s-1"        # that Tell is over; the render has not come yet
+    post(browser, "/_/tell")                                       # a Tell to s-2
+    finish(hub)
+    assert "session" not in hub.docs.get(DOC)
+    assert hub.target(DOC, kept=True).session == "s-2"
+
+
+def test_a_comment_sent_with_tell_after_the_first_tell_ended_drops_the_kept_session_too(
+        browser, hub, ready, session):
+    post(browser, "/_/tell")
+    finish(hub)
+    attach(browser, ready, session.target(session="s-2", socket=session.peer.path))
+    post(browser, "/_/cancel")
+    finish(hub)
+    assert hub.docs.get(DOC)["session"]["session"] == "s-1"
+    assert tell_by(browser, "comment").status == 200               # a reply with Tell: its own wait is begun first
+    finish(hub)
+    assert "session" not in hub.docs.get(DOC)
+    assert hub.target(DOC, kept=True).session == "s-2"
+
+
 def test_finish_names_a_job_that_outlives_it_instead_of_returning(hub):
     release = threading.Event()
     hub.runner.start("stop", DOC, "c1", lambda job: release.wait(10))

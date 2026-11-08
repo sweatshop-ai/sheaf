@@ -27,7 +27,7 @@ from .agents.base import DeliveryCancelled, DeliveryError, Target
 from .agents.claude_code import ClaudeCodeAdapter, _own_socket, config_dir_of
 from .hub.jobs import Job
 
-ASK_DROP_RETIRED = f"sheaf: {prompts.ASK_RETIRED}: a drop of kind ask is not delivered"
+ASK_DROP_RETIRED = f"sheaf: {prompts.ASK_RETIRED_HEAD}: a drop of kind ask is not delivered"
 
 EXIT_OK, EXIT_FAILED, EXIT_USAGE = 0, 1, 2
 POLL_S = 0.2

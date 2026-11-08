@@ -74,7 +74,7 @@ SETTING_TYPES = {"title": str, "toc": str, "max_image_width": int, "by": str, "f
                  "theme": str, "credit": bool}
 _ID_RE = re.compile(r"[A-Za-z0-9_-]{1,40}")
 _RID_RE = re.compile(r"[A-Za-z0-9_-]{16,64}")     # a page's request id (/_/comment, /_/save)
-ASK_RETIRED = f"{prompts.ASK_RETIRED}: use Tell, or reply."
+ASK_RETIRED = f"{prompts.ASK_RETIRED_HEAD}: use Tell, or reply."
 _RESERVED = {"kind", "source", "doc", "at", "pid", "session", "member"}
 
 

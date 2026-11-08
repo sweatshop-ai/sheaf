@@ -592,11 +592,15 @@ def test_a_comment_with_any_ask_value_is_refused_and_writes_nothing(browser, pla
 
 
 def test_the_retired_ask_line_exists_once():
+    """The words "Ask was retired" are written in one place in src; the hub and the CLI both build on that one."""
+    from pathlib import Path
+    import sheafmd
     from sheafmd import deliver
     from sheafmd.agents import prompts
     from sheafmd.hub import handler
-    assert handler.ASK_RETIRED == f"{prompts.ASK_RETIRED}: use Tell, or reply."
-    assert deliver.ASK_DROP_RETIRED == f"sheaf: {prompts.ASK_RETIRED}: a drop of kind ask is not delivered"
+    assert handler.ASK_RETIRED.startswith(prompts.ASK_RETIRED_HEAD) and deliver.ASK_DROP_RETIRED.count(prompts.ASK_RETIRED_HEAD) == 1
+    holders = [f.name for f in Path(sheafmd.__file__).parent.rglob("*.py") if "Ask was retired" in f.read_text(encoding="utf-8")]
+    assert holders == ["prompts.py"]
 
 
 # ── tell, cancel: no agent in this build ─────────────────────────────────────

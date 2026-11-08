@@ -71,9 +71,9 @@ def test_the_message_to_an_agent_is_the_one_quoted_in_the_spec():
     c = thread()
     quoted = SPEC.split("Message to an agent (`prompts.tell_agent`)", 1)[1].split("It names no file path", 1)[0]
     block = "\n".join(l[2:] if l.startswith("> ") else l[1:] for l in quoted.splitlines() if l.startswith(">"))
-    want = (block.replace("{root}/{path}", "work/plan.md").replace("{me}", "Grace").replace("{id}", c.id)
-            .replace("{author}", "Ada").replace("{quote}", "price").replace("{RULE}", RULE)
-            .replace("{author} ({at}): {body}", "Ada (2026-10-14T10:00): Is this right?")
+    want = (block.replace("{author} ({at}): {body}", "Ada (2026-10-14T10:00): Is this right?")
             .replace("{each reply the same way}", "Bob (2026-10-14T10:05): I think so.\n"
-                     "Claude (2026-10-14T10:09): Checked."))
+                     "Claude (2026-10-14T10:09): Checked.")
+            .replace("{root}/{path}", "work/plan.md").replace("{me}", "Grace").replace("{id}", c.id)
+            .replace("{author}", "Ada").replace("{quote}", "price").replace("{RULE}", RULE))
     assert prompts.tell_agent("work/plan.md", "Grace", c, links=True) == want

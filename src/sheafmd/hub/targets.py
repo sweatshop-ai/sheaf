@@ -81,7 +81,7 @@ def live(hub, raw, member=None) -> TokenRow | None:
     id) or, for a member, is no longer one of theirs."""
     if not is_agent(raw):
         return None
-    return next((r for r in agents(hub, member) if r.name == raw.get("token") and r.id == raw.get("id")), None)
+    return next((r for r in agents(hub, member) if r.is_pair(raw.get("token"), raw.get("id"))), None)
 
 
 def stored(hub, address: str, member=None) -> dict | None:

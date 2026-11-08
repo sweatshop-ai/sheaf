@@ -430,6 +430,20 @@ def test_an_edit_a_reply_and_a_watcher_pass_leave_the_tell_of_the_same_comment_a
     assert browser.hub.waiting_tells.waits(DOC, sweep=False) != [] and hub_rows("tell-cancelled") == []
 
 
+def test_a_new_comment_of_the_same_author_in_the_same_minute_on_another_passage_does_not_get_the_old_tell(browser, talk):
+    agent_token()
+    target(browser)
+    assert tell(browser).status == 200
+    def swap(t):
+        t = rdc.delete(t, "c1")
+        blk, s, e = rdc.find_quote(t, "First paragraph")
+        return rdc.add_comment(t, blk, s, e, "First paragraph", "Another thing.", "Ada", "2026-10-14T10:00")[0]
+    update_file(talk, swap)
+    assert rdc.parse(talk.read_text(encoding="utf-8")).by_id("c1").quote == "First paragraph"
+    browser.hub.tick()
+    assert browser.hub.waiting_tells.waits(DOC, sweep=False) == []
+
+
 def test_the_row_stores_the_comments_author_and_time(browser, talk):
     from sheafmd import paths
     agent_token()

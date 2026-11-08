@@ -2,6 +2,7 @@
 import signal
 import socket
 import stat
+import threading
 import time
 
 import pytest
@@ -192,7 +193,7 @@ class StuckContext:
         self.pages, self.closed = [self], False
 
     def unroute_all(self, **kwargs):
-        time.sleep(60)
+        threading.Event().wait(60)
 
     def close(self):
         self.closed = True

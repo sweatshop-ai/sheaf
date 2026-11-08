@@ -3,6 +3,8 @@
 Protocol and authentication here; the four tools are in test_mcp_tools.py, the stdio transport in
 test_mcp_stdio.py."""
 import json
+import re
+from pathlib import Path
 
 import pytest
 
@@ -13,15 +15,8 @@ from sheafmd.hub import auth
 from sheafmd.hub.handler import MAX_BODY
 from sheafmd.hub.state import Tokens
 
-INSTRUCTIONS = (
-    "sheaf keeps comment threads inside markdown files. Use `threads` to read what was asked on "
-    "a document, `reply` to answer (role `action` after you acted on a Tell, `answer` when you "
-    "only answer), and `resolve` when a thread is done. Call `documents` first, every time you are "
-    "asked to work on a page: a Tell from the person waits there, in the `tells` of a document, with "
-    "the whole message; answer it with `reply` and role `action`. A Tell from sheaf names the document and "
-    "the comment id. Where you may work on pages, `read` gives a document's text and its hash, "
-    "`create` makes a new page and `update` replaces the text of one, given the hash you read it "
-    "with; keep every comment in the text you send.")
+SPEC = (Path(__file__).resolve().parent.parent / "SPEC.md").read_text()
+INSTRUCTIONS = re.search(r'^`instructions`: "(.*)"$', SPEC, re.M).group(1)      # the line SPEC 12 quotes
 
 
 def result(res):

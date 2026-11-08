@@ -22,7 +22,7 @@ from .. import config, diagnostics, signals
 from ..agents import prompts
 from ..agents.base import Adapter, DeliveryCancelled, DeliveryError, Target
 from . import roots as roots_mod
-from . import targets
+from . import proxy, targets
 from .targets import who
 from . import waiting as waiting_mod
 from .auth import clean_display
@@ -394,7 +394,8 @@ class Tell:
         raw = targets.stored(self.hub, address, member)
         row = targets.live(self.hub, raw, member)
         if row is None:     # the page's own line (10.6): a revoked token is named, as the page names it
-            line = targets.agent_view(self.hub, raw, member).line if targets.is_agent(raw) else NO_AGENT
+            line = (targets.agent_view(self.hub, raw, member).line if targets.is_agent(raw)
+                    else proxy.PROXY_LINE if member is not None else NO_AGENT)
             raise JobRefused(409, line)
         thread = self._thread(self._entry(address), cid)
         try:

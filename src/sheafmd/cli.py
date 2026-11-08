@@ -890,6 +890,16 @@ def _proxy_table():
         return None
 
 
+def _proxy_declared() -> bool:
+    """Whether config.toml has a `[proxy]` table, also one the hub would refuse: a token made now must still not
+    sign the person's name there, or the start refuses it once the table is mended."""
+    from .hub import proxy
+    try:
+        return proxy.configured()
+    except config.ConfigError:
+        return False
+
+
 def _signed_by_others(tokens: Tokens, cfg, person: str) -> list[str]:
     """The name each token already made signs with, whose replies a new one's must not pass for."""
     return [r.signed(person, cfg) for r in tokens.list() if not r.invalid]
@@ -941,7 +951,7 @@ def cmd_token(argv: list[str]) -> int:
         built = agent_name(clean_display(args.client), member.name if member is not None else person)
         if proxy.reads_as_role(built):
             _err(f"sheaf: a token that signs {built!r} would end in a role word, which a reply reads as its role "
-                 "(SPEC 5.3): give the member or the client another name")
+                 "(SPEC 5.3): give the client another name, or the name it is built from (the member's, else the hub's person's)")
             return EXIT_FAILED
         if (taken := _agent_clash(clean_display(args.client), built, cfg, person,
                                   _signed_by_others(tokens, cfg, person))) is not None:
@@ -972,7 +982,7 @@ def cmd_token(argv: list[str]) -> int:
             _err(f"sheaf: {taken!r} is the name of a member of proxy mode (config.toml [proxy]); "
                  "a token's replies must not pass for that member's")
             return EXIT_FAILED
-        if cfg is not None and name_key(shown_as) == name_key(person):
+        if (cfg is not None or _proxy_declared()) and name_key(shown_as) == name_key(person):
             _err(f"sheaf: {person!r} is the name of the hub's person (config.toml); in proxy mode a token's "
                  "replies must not pass for theirs")
             return EXIT_FAILED

@@ -482,7 +482,7 @@ def check_agent_names(signed: list[tuple[bool, str, str]], proxy_mode: bool = Tr
     with the bindings of the day, and the config may change them later. `signed` is (is an agent's, signed name, token name) per
     token; an old token is compared with agents only, never with another old token, which `add` lets share a display.
     `proxy_mode` is whether proxy mode is on: with no member there is none to give a token to. Raises TokenNamesError."""
-    whose = "the member" if proxy_mode else "the hub's person"
+    whose = "the member or the hub's person" if proxy_mode else "the hub's person"
     for i, (agent, name, token) in enumerate(signed):
         if not agent:
             continue

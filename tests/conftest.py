@@ -54,7 +54,12 @@ def the_main_thread_names_its_frame(request):
     the main thread, the oldest, of a run that leaked threads: CI, PR 227, 3,900 of them. This one is
     a thread of its own that reads the main thread's frame, so it speaks with the main thread stuck in
     a Playwright wait too. The test goes on; the timeout still ends it."""
-    limit = float(request.config.getoption("timeout", None) or request.config.getini("timeout") or 0)
+    config = request.config
+    if not config.pluginmanager.hasplugin("timeout"):     # -p no:timeout: nothing ends a test, nothing to announce
+        yield
+        return
+    limit = config.getoption("timeout", None)       # --timeout, even 0, wins over the ini value
+    limit = float(config.getini("timeout") or 0) if limit is None else float(limit)
     mark = request.node.get_closest_marker("timeout")
     if mark and mark.args:
         limit = float(mark.args[0])

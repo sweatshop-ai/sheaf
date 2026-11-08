@@ -11,13 +11,15 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done-in-PR #225 (merged at 2a9d000f)
+
+**Evidence:** every box below was ticked in the body of PR #225 (sweatshop-ai/sheaf), with the test names and the review rounds; the file was not updated there.
 
 **Size:** one session (proxy.py, server.py, tests/test_proxy_config.py, tests/test_proxy_start.py)
 
-- [ ] Test first (3): names that differ only by accent or width are one name in both `check_names` and `add`; a hub whose config `add` accepted always starts, and the reverse
-- [ ] Test first (2): two old tokens, and a token and the person, that sign the same name, are refused at the start with a message that names both (old tokens may still share a display if SPEC 9.7 says so: read it, say which in the PR)
-- [ ] Test first (5): a client `action` (or a role word) in an agent's built name is refused at `token add` and at the start
-- [ ] Test first (7): a refusal from `check_agent_names` is logged under its own label and its message does not offer "another member" in loopback
-- [ ] Test first (8): `config.user_name()` runs once; an unknown config key warns once
-- [ ] The existing start tests (`tests/test_proxy_start.py`) stay green
+- [x] Test first (3): names that differ only by accent or width are one name in both `check_names` and `add`; a hub whose config `add` accepted always starts, and the reverse
+- [x] Test first (2): two old tokens, and a token and the person, that sign the same name, are refused at the start with a message that names both (old tokens may still share a display if SPEC 9.7 says so: read it, say which in the PR)
+- [x] Test first (5): a client `action` (or a role word) in an agent's built name is refused at `token add` and at the start
+- [x] Test first (7): a refusal from `check_agent_names` is logged under its own label and its message does not offer "another member" in loopback
+- [x] Test first (8): `config.user_name()` runs once; an unknown config key warns once
+- [x] The existing start tests (`tests/test_proxy_start.py`) stay green

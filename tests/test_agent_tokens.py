@@ -312,3 +312,154 @@ def test_list_shows_the_id_and_never_a_token(sheaf):
     token = [w for w in out.split() if w.startswith("sheaf_mcp_")][0]
     listed = sheaf("token", "list").out
     assert stored()[0]["id"] in listed and token not in listed
+
+
+# ── a broken `[proxy]` table, and two adds at once (14) ─────────────────────
+
+def broken_proxy_config(work):
+    """A table the hub refuses (`proxy_user` is missing) that still binds `bea-chatgpt` to Bea."""
+    proxy_config(work, tokens=["bea-chatgpt"])
+    text = paths.config_file().read_text(encoding="utf-8")
+    paths.config_file().write_text(text.replace(f'proxy_user = "{pwd.getpwuid(os.getuid()).pw_name}"\n', ""),
+                                   encoding="utf-8")
+
+
+def test_add_a_client_refuses_with_the_tables_error_and_writes_nothing_while_the_proxy_table_is_broken(sheaf, work):
+    broken_proxy_config(work)
+    with pytest.raises(proxy.ProxyError) as table:
+        proxy.load()
+    r = sheaf("token", "add", "bea-chatgpt", "--client", "ChatGPT")
+    assert r.code != 0 and str(table.value) in r.err and "[proxy]" in r.err
+    assert "sheaf_mcp_" not in r.out and Tokens().list() == []
+
+
+def test_list_says_the_table_is_broken_and_names_no_signature_built_on_the_person(sheaf, work):
+    proxy_config(work, tokens=["bea-chatgpt"])
+    assert sheaf("token", "add", "bea-chatgpt", "--client", "ChatGPT").code == 0
+    assert sheaf("token", "add", "old", "--as", "Codex").code == 0
+    broken_proxy_config(work)
+    with pytest.raises(proxy.ProxyError) as table:
+        proxy.load()
+    r = sheaf("token", "list")
+    assert str(table.value) in r.err and "[proxy]" in r.err
+    assert "(Ada)" not in r.out and "ChatGPT (Bea)" not in r.out         # neither the person's nor a guess at the member's
+    [agent] = [line for line in r.out.splitlines() if line.split()[:1] == ["bea-chatgpt"]]
+    assert "ChatGPT" in agent and "table is broken" in agent
+    [old] = [line for line in r.out.splitlines() if line.split()[:1] == ["old"]]
+    assert old.split()[:2] == ["old", "Codex"]                                  # a typed display needs no table
+
+
+def test_list_without_a_proxy_table_still_signs_an_agent_with_the_person(sheaf):
+    assert sheaf("token", "add", "t", "--client", "ChatGPT").code == 0
+    r = sheaf("token", "list")
+    assert r.err == "" and "ChatGPT -> ChatGPT (Ada)" in r.out
+
+
+def test_a_running_hub_keeps_the_binding_it_started_with_while_the_table_is_broken_on_disk(browser, talk, work):
+    """The hub reads its `[proxy]` table once, at the start (9.9): a file mended or broken later changes the next
+    start, never the signatures of this one."""
+    token = Tokens().add("bea-chatgpt", client="ChatGPT")
+    browser.hub.proxy = members(work, tokens=["bea-chatgpt"])
+    broken_proxy_config(work)
+    reply(browser, token)
+    assert last_by(talk) == "ChatGPT (Bea)"
+
+
+CLASH_CHILD = """
+import os, sys
+from pathlib import Path
+from sheafmd.hub import state
+real = state.file_locked
+def marked(name):
+    if name == "tokens.lock":                   # the child stands at the lock: the parent holds it
+        Path(os.environ["REACHED"]).touch()
+    return real(name)
+state.file_locked = marked
+from sheafmd.cli import main
+sys.exit(main(sys.argv[1:]))
+"""
+
+
+def test_two_adds_of_one_client_and_member_at_once_write_exactly_one(work, tmp_path):
+    """Two real processes, both past the config read and standing at `tokens.lock` while this test holds it: the
+    clash check has to run once the lock is theirs, or both pass it on the same empty file and both are written."""
+    import subprocess
+    import sys
+    import time
+
+    from sheafmd.hub.state import file_locked
+    proxy_config(work, tokens=["bea-a", "bea-b"])                       # both sign `ChatGPT (Bea)`
+    kids = []
+    with file_locked("tokens.lock"):
+        for name in ("bea-a", "bea-b"):
+            reached = tmp_path / f"reached-{name}"
+            kids.append((name, reached, subprocess.Popen(
+                [sys.executable, "-c", CLASH_CHILD, "token", "add", name, "--client", "ChatGPT"],
+                env={**os.environ, "REACHED": str(reached)}, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)))
+        deadline = time.monotonic() + 60
+        while not all(r.exists() for _, r, _ in kids) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert all(r.exists() for _, r, _ in kids)
+        time.sleep(0.5)                                                  # from the touch to the flock call
+    ran = [(name, p.communicate(timeout=120), p.returncode) for name, _, p in kids]
+    written = [t.name for t in Tokens().list()]
+    assert len(written) == 1, ran
+    [(_, (out, err), code)] = [r for r in ran if r[0] not in written]
+    assert code != 0 and "ChatGPT (Bea)" in err and "sheaf_mcp_" not in out
+    [(_, (out, err), code)] = [r for r in ran if r[0] in written]
+    assert code == 0 and "sheaf_mcp_" in out
+
+
+def test_the_clash_check_of_add_runs_inside_the_lock_with_the_rows_of_that_moment(work):
+    """The check is handed to `Tokens.add` and is called under `tokens.lock` with the rows the file holds then."""
+    seen = []
+
+    def check(rows):
+        seen.append([r.name for r in rows])
+        return "taken" if rows else None
+
+    tokens = Tokens()
+    tokens.add("a", client="ChatGPT", clash=check)
+    with pytest.raises(TokenError, match="taken"):
+        tokens.add("b", client="ChatGPT", clash=check)
+    assert seen == [[], ["a"]] and [t.name for t in tokens.list()] == ["a"]
+
+
+def test_the_config_is_read_before_the_lock_is_taken(sheaf, work, monkeypatch):
+    """No lock is held across the config read: `add` reads the table and the person, then locks."""
+    from sheafmd import config
+    from sheafmd.hub import state
+    held = []
+    real_lock, real_name = state.file_locked, config.user_name
+    depth = []
+
+    def watched_lock(name):
+        cm = real_lock(name)
+
+        class Held:
+            def __enter__(self):
+                depth.append(name)
+                return cm.__enter__()
+
+            def __exit__(self, *a):
+                try:
+                    return cm.__exit__(*a)
+                finally:
+                    depth.pop()
+        return Held()
+
+    def watched_name():
+        held.append(list(depth))
+        return real_name()
+    monkeypatch.setattr(state, "file_locked", watched_lock)
+    monkeypatch.setattr(config, "user_name", watched_name)
+    proxy_config(work, tokens=["bea-chatgpt"])
+    assert sheaf("token", "add", "bea-chatgpt", "--client", "ChatGPT").code == 0
+    assert held and all(h == [] for h in held)
+
+
+def test_the_clash_message_of_add_is_the_one_it_always_was(sheaf):
+    sheaf("token", "add", "old", "--as", "ChatGPT (Ada)")
+    r = sheaf("token", "add", "new", "--client", "ChatGPT")
+    assert r.err == ("sheaf: 'ChatGPT (Ada)' is already a name in use here (the hub's person, a member of proxy mode, "
+                     "or another token's); a token that signs 'ChatGPT (Ada)' would pass for it\n")

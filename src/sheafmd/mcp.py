@@ -487,16 +487,18 @@ class Door:
         return c
 
     def _write(self, address: str, caller: Caller, doc: str, op: str, fields: dict, role=None):
-        """A change to one comment, and the agent of its token made the target (9.8) before the tabs hear of it. Through the document's Live Document when the hub has one,
+        """A change to one comment, and the agent of its token made the target (9.8) before the tabs hear
+        of it. Through the document's Live Document when the hub has one,
         so open tabs hear of it at once and a Tell wait sees an action reply; straight into the
         file when the hub holds no page for it. Either way the caller's sight of it (9.11) is judged
         again on the file under its lock, so a sheaf that closed since the check takes nothing. Both
         under the lock of the sheaf's name (9.11), the file found again under it, so no move comes
         between finding the file and writing it."""
-        noted = []
+        noted = False
 
         def note():
-            noted.append(True)
+            nonlocal noted
+            noted = True
             self._agent_wrote(address, caller)
 
         def guard(t, op=None):

@@ -492,6 +492,18 @@ def test_each_member_has_their_own_target_on_the_same_document(front, browser, t
 
 # ── POST /_/target takes the sheaf's name, as /_/export does (9.11) ──────────
 
+def test_a_create_and_an_update_still_stand_when_the_target_cannot_follow(browser, talk, monkeypatch):
+    token = Tokens().add("ada-chatgpt", client="ChatGPT", write=True)
+
+    def boom(*a, **k):
+        raise RuntimeError("docs.json is gone")
+    monkeypatch.setattr("sheafmd.hub.targets.note_write", boom)
+    made = ok(browser, "create", doc="work/new.md", text="# New\n\nText.\n", token=token)
+    ok(browser, "update", doc="work/new.md", text="# New\n\nMore.\n", expected_hash=made["hash"], token=token)
+    assert (talk.parent / "new.md").read_text() == "# New\n\nMore.\n"
+    assert [r["kind"] for r in hub_rows("target-failed")] == ["target-failed"] * 2
+
+
 def test_the_target_is_judged_and_stored_under_the_sheafs_name(front, browser, talk, work, monkeypatch):
     """A sheaf closed to the member between the check and the store takes no target: the check and the store are
     one step under the name's lock, as /_/export reads (9.11)."""

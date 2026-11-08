@@ -1,8 +1,8 @@
 """Rule A (SPEC 9.11) on the door token of a second James that works shared projects (SPEC 9.12): a token listed in
 `[list] james_tokens` but not the own one, bound to a member whose `roots` name the list root only and who has no
 `private_root`, reaches nothing of a private root. It gets the 404 of a missing document on every door tool, cannot
-create into the private root, and its listings leave the private file out, with or without an `X-James-Session`
-header. Each refusal has the owner's own token as its positive control, on the same tool."""
+create into the private root, and its listings leave the private file out. A file that is open to the project
+(an `issue:` source) is refused just the same: Rule A holds whatever the file's front matter says. Each refusal has the owner's own token as its positive control, on the same tool."""
 import pytest
 from helpers import browser_on, call, door, rpc
 from two_roots import TwoRoots, git, two_roots
@@ -14,6 +14,8 @@ from sheafmd.source import md_hash
 NAME = "acme/blog/post.md"
 SID = "6f1c0e9a-2b3d-4c5e-8f70-1a2b3c4d5e6f"
 OWNED_BY_ALICE = "---\nowner: alice\nsources: [library:doc-1]\n---\n# post\n\nSecret words.\n"
+PROJECT_WIDE = OWNED_BY_ALICE.replace("sources: [library:doc-1]", "sources: [issue:acme/record#1]")    # open to the project
+TEXTS = {"owner-only": OWNED_BY_ALICE, "project-wide": PROJECT_WIDE}
 OPEN = "# post\n"
 SHARED = "shared"       # the member a shared window acts for: a name, not an id a front user could carry
 OWN = "own"             # the own James's door token, bound to alice
@@ -72,21 +74,29 @@ def test_the_shared_token_is_a_james_token_of_a_member_with_no_private_root(worl
 
 
 @pytest.mark.parametrize("tool", ["read", "threads", "update", "reply", "resolve"])
-@pytest.mark.parametrize("by", ["list name", "root address"])
-def test_james_shared_token_404_on_private_sheaf(world, tool, by):
-    w = world
-    w.put(OWNED_BY_ALICE)
-    doc = w.address if by == "list name" else f"{w.hub.roots.lookup(w.two.private_repo / NAME).name}/{NAME}"
+@pytest.mark.parametrize("by", ["list name", "root address", "absolute path"])
+@pytest.mark.parametrize("kind", TEXTS)
+def test_james_shared_token_404_on_private_sheaf(world, tmp_path, tool, by, kind):
+    w, text = world, TEXTS[kind]
+    w.put(text)
+    root_name = w.hub.roots.lookup(w.two.private_repo / NAME).name
+    doc, twin = {"list name": (w.address, w.address.replace("post.md", "none.md")),
+                 "root address": (f"{root_name}/{NAME}", f"{root_name}/acme/blog/none.md"),
+                 "absolute path": (str(w.two.private_repo / NAME), str(tmp_path / "nowhere" / NAME))}[by]
     args = {"read": {}, "threads": {}, "reply": {"id": "c1", "text": "Done."}, "resolve": {"id": "c1"},
-            "update": {"text": OWNED_BY_ALICE.replace("Secret", "Changed"), "expected_hash": md_hash(OWNED_BY_ALICE)}}[tool]
+            "update": {"text": text.replace("Secret", "Changed"), "expected_hash": md_hash(text)}}[tool]
+    heads = (w.commits(w.two.list_repo), w.commits(w.two.private_repo))
     is_error, got = w.call(tool, SHARED, doc=doc, **args)
-    _, missing = w.call(tool, SHARED, doc=doc.replace("post.md", "none.md"), **args)
-    assert is_error and got.replace("post.md", "none.md") == missing, (tool, got)
+    _, missing = w.call(tool, SHARED, doc=twin, **args)
+    assert is_error and got.replace(doc, "D") == missing.replace(twin, "D"), (tool, got)
     assert w.hub.commits.settle()
-    assert (w.two.private_repo / NAME).read_text(encoding="utf-8") == OWNED_BY_ALICE       # nothing was written
-    if tool == "read" and by == "list name":
-        is_error, got = w.call("read", OWN, doc=doc)                                        # positive control
-        assert not is_error and "Secret words." in str(got)
+    assert (w.two.private_repo / NAME).read_text(encoding="utf-8") == text                  # nothing was written
+    assert (w.commits(w.two.list_repo), w.commits(w.two.private_repo)) == heads             # and nothing committed
+    if by == "list name":                                                                   # positive control: the owner's token
+        is_error, got = w.call(tool, OWN, doc=doc, **args)
+        assert not (is_error and "no document" in got.lower()), (tool, got)
+        if tool == "read":
+            assert not is_error and "Secret words." in str(got)
 
 
 def test_a_session_header_on_the_shared_token_opens_no_private_sheaf(world):
@@ -118,19 +128,25 @@ def test_james_shared_token_cannot_move_a_shared_sheaf_into_private_root(world):
     assert not w.call("create", SHARED, doc=w.address, text=OPEN)[0]                        # an open sheaf of the list
     path = w.two.list_repo / NAME
     before = path.read_text(encoding="utf-8")
+    heads = (w.commits(w.two.list_repo), w.commits(w.two.private_repo))
     is_error, got = w.call("update", SHARED, doc=w.address, text=OWNED_BY_ALICE, expected_hash=md_hash(before))
-    assert is_error, got
+    assert is_error and "cannot be moved between roots" in got, got
+    assert w.hub.commits.settle()
     assert path.read_text(encoding="utf-8") == before and not (w.two.private_repo / NAME).exists()
+    assert (w.commits(w.two.list_repo), w.commits(w.two.private_repo)) == heads
 
 
 def test_james_shared_token_lists_no_private_file(world):
     w = world
     w.put(OWNED_BY_ALICE)
     private_root = w.hub.roots.lookup(w.two.private_repo / NAME).name
-    for args in ({}, {"open_only": False}, {"root": w.root.name, "open_only": False},
-                 {"root": private_root, "open_only": False}):
+    for args in ({"open_only": False}, {"root": w.root.name, "open_only": False}):
         is_error, got = w.call("documents", SHARED, **args)
-        assert NAME not in str(got) and "Secret" not in str(got), (args, got)
+        assert not is_error and NAME not in str(got), (args, got)
+    # the private root is no root of this hub to it: the answer for a root that does not exist
+    named = w.call("documents", SHARED, root=private_root, open_only=False)
+    none = w.call("documents", SHARED, root="nosuchroot", open_only=False)
+    assert named[0] and named[1].replace(private_root, "R") == none[1].replace("nosuchroot", "R"), (named, none)
     is_error, got = w.call("documents", OWN, open_only=False)                               # positive control
     assert not is_error and NAME in str(got), got
     (w.two.list_repo / "acme/blog/open.md").write_text(OPEN, encoding="utf-8")              # a shared file is listed

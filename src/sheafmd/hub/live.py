@@ -500,6 +500,12 @@ class LiveDocument:
             except OSError:
                 return self._known(h) is not None
 
+    def read_now(self):
+        """The file's text as it is now, read under the name's lock and this document's lock: a write or a
+        render of the hub's own is over, or has not begun (`knows` reads the same way)."""
+        with self._hold(), self._held():
+            return self._read()
+
     def telling(self):
         """`[{id, to, state}]`, as a snapshot holds it (SPEC 8.5)."""
         with self._held():

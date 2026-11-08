@@ -241,6 +241,17 @@ def test_add_refuses_an_old_token_that_signs_the_hubs_persons_name_in_proxy_mode
     assert sheaf("token", "add", "ada").code != 0                           # the name stands for the display
 
 
+def test_add_refuses_the_persons_name_also_while_the_proxy_table_is_one_the_hub_would_refuse(sheaf, work):
+    """A table that `load` refuses (no `proxy_user`) is still proxy mode once it is mended: a token made now must
+    not be one the start then refuses."""
+    paths.config_file().parent.mkdir(parents=True, exist_ok=True)
+    paths.config_file().write_text(
+        f'[proxy]\norigin = "{FRONT}"\nsocket = "/run/sheaf-proxy/hub.sock"\n'
+        f'[proxy.members."{BEA}"]\nname = "Bea"\nroots = ["{work}"]\n', encoding="utf-8")
+    r = sheaf("token", "add", "t", "--as", "ada")
+    assert r.code != 0 and "hub's person" in r.err and Tokens().list() == []
+
+
 def test_add_accepts_what_the_start_accepts_two_old_tokens_with_one_display(sheaf, work):
     proxy_config(work)
     assert sheaf("token", "add", "one", "--as", "Codex").code == 0

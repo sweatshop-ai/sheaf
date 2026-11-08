@@ -252,6 +252,27 @@ def test_add_refuses_the_persons_name_also_while_the_proxy_table_is_one_the_hub_
     assert r.code != 0 and "hub's person" in r.err and Tokens().list() == []
 
 
+def test_add_judges_a_display_against_the_agents_of_the_bound_member_while_the_proxy_table_is_one_the_hub_would_refuse(sheaf, work):
+    proxy_config(work, tokens=["bea-chatgpt"])
+    assert sheaf("token", "add", "bea-chatgpt", "--client", "ChatGPT").code == 0     # signs `ChatGPT (Bea)`
+    text = paths.config_file().read_text(encoding="utf-8")
+    paths.config_file().write_text(text.replace(f'proxy_user = "{pwd.getpwuid(os.getuid()).pw_name}"\n', ""), encoding="utf-8")
+    r = sheaf("token", "add", "t", "--as", "ChatGPT (Bea)")
+    assert r.code != 0 and "ChatGPT (Bea)" in r.err and [t.name for t in Tokens().list()] == ["bea-chatgpt"]
+
+
+def test_add_fails_closed_when_config_toml_cannot_be_read(sheaf, work):
+    paths.config_file().parent.mkdir(parents=True, exist_ok=True)
+    paths.config_file().write_text('[proxy\nname = "Bea"\n', encoding="utf-8")        # a syntax error; SHEAF_NAME is Ada
+    r = sheaf("token", "add", "t", "--as", "ada")
+    assert r.code != 0 and Tokens().list() == []
+
+
+def test_a_role_word_is_read_at_the_end_of_a_built_name_longer_than_the_display_cut():
+    assert not proxy.reads_as_role("OpenWebUI-assistant-for-the-whole-team-x (Ann Lee-B (action) Smith)")
+    assert proxy.reads_as_role("OpenWebUI-assistant-for-the-whole-team-x (action)")
+
+
 def test_add_accepts_what_the_start_accepts_two_old_tokens_with_one_display(sheaf, work):
     proxy_config(work)
     assert sheaf("token", "add", "one", "--as", "Codex").code == 0

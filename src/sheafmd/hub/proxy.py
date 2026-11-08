@@ -26,6 +26,7 @@ import socket
 import stat
 import struct
 import subprocess
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -437,7 +438,9 @@ def same_name(a: str, b: str) -> bool:
 
 def reads_as_role(name: str) -> bool:
     """Whether `name` ends in `(action)` or `(answer)`, which 5.3 reads as a role and not as part of a name."""
-    key = name_key(name)
+    # Folded like `name_key` but not cut at DISPLAY_MAX: the door signs a built name whole, so its end is its end.
+    text = unicodedata.normalize("NFKD", " ".join(name.split()) if isinstance(name, str) else "")
+    key = "".join(c for c in text if not unicodedata.combining(c)).casefold().strip()
     return any(key.endswith(f"({role})") for role in ROLES)
 
 
@@ -451,7 +454,7 @@ def check_names(cfg: ProxyConfig, person: str, tokens, token_names=None) -> None
         if same_name(t, person):
             who = f"the token {token_names[i]!r}" if token_names else "a token"
             raise ProxyError(f"{who} signs {t!r}, which is the hub's person's name ({person!r}, config.toml name): "
-                             "give the token another display name (sheaf token list)")
+                             "revoke the token and make it again with another --as (sheaf token list)")
     seen = []
     for m in cfg.members.values():
         here = f'[proxy.members."{m.id}"]'
@@ -489,7 +492,7 @@ def check_agent_names(signed: list[tuple[bool, str, str]], proxy_mode: bool = Tr
         if reads_as_role(name):
             raise TokenNamesError(f"the agent's token {token!r} signs {name!r}, which ends in a role word that a reply "
                                   f"reads as its role (5.3): give {whose} "
-                                  "another name, or the token another client")
+                                  "another name")
         for j, (_, other, other_token) in enumerate(signed):
             if j != i and name_key(name) == name_key(other):
                 raise TokenNamesError(f"the agent's token {token!r} signs {name!r}, which the token {other_token!r} "

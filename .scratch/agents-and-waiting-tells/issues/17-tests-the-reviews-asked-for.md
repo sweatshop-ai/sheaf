@@ -9,7 +9,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** done-in-PR (sweatshop-ai/sheaf#PRNUM)
+**Status:** done-in-PR (sweatshop-ai/sheaf#234)
 
 **Size:** one session; if the Playwright test is slow or flaky, drop it to its own ticket and say so
 

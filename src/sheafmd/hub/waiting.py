@@ -119,22 +119,24 @@ class Waiting:
     def watch(self):
         """One look of the watcher (8.9): a token revoked by the CLI, and a thread resolved or deleted from outside
         (the CLI, a hand edit), end their Tells now, so a page that stays open stops saying it waits. A document the
-        hub holds no entry for is left to the next listing (`take`)."""
-        seen = [t for t in read_json(_file(), [], aside=False) if isinstance(t, dict)]
-        if not seen:
+        hub holds no entry for, one that cannot be read and one read empty (a save under way) are left alone: the next
+        pass or listing (`take`) judges them."""
+        rows = [t for t in read_json(_file(), [], aside=False) if isinstance(t, dict)]
+        if not rows:
             return
-        # Each document is read under its own locks (the name's, 9.11, and its Live Document's) before `_change` takes ours: a save in two steps (an editor
-        # that truncates, then writes) is never caught half done, and a lock is never asked for while `tells.lock`
-        # is held, which is the order the locks are taken in everywhere else. Only a row that was there when its
-        # document was read is judged from that read.
+        # Each document is read under its Live Document's locks (the name's, 9.11, and its own) before `_change` takes
+        # `tells.lock`, so no lock is asked for while that one is held. An empty text is the mark of a save caught
+        # between its truncate and its write, by an editor that holds none of our locks: it ends nothing, and the next
+        # pass reads the whole file. Only rows there when a document was read are judged from that read.
         got = {}
-        for address in {t["doc"] for t in seen}:
+        for address in {t["doc"] for t in rows}:
             e = self.hub.entries.get(address)
             try:
-                got[address] = None if e is None else rdc.parse(e.live.read_now())
+                text = None if e is None else e.live.read_now()
+                got[address] = rdc.parse(text) if text and text.strip() else None
             except Exception:
                 got[address] = None
-        ids = {t["id"] for t in seen}
+        ids = {t["id"] for t in rows}
 
         def change(rows):
             n = len(rows)

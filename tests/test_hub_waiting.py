@@ -676,7 +676,7 @@ def test_forgetting_a_root_ends_its_tells_and_the_page_hears_why_and_the_other_r
 
 def test_forgetting_a_root_whose_name_starts_like_another_leaves_that_roots_tells(browser, talk, tmp_path):
     agent_token()
-    other_doc = second_root(tmp_path, browser.hub)           
+    other_doc = second_root(tmp_path, browser.hub)
     assert pick(browser, "agent:ada-chatgpt", other_doc).status == 200
     assert tell(browser, doc=other_doc).status == 200
     browser.hub.forget_root("sec")                            # no such root, a prefix of `second` only as text
@@ -715,6 +715,30 @@ def test_a_document_caught_truncated_in_a_save_does_not_end_its_tell_and_the_nex
     watcher.join(10)
     assert not watcher.is_alive()
     assert [w["id"] for w in browser.hub.waiting_tells.waits(DOC, sweep=False)] == ["c1"]
+    browser.hub.waiting_tells.watch()
+    assert [w["id"] for w in browser.hub.waiting_tells.waits(DOC, sweep=False)] == ["c1"]
+    assert hub_rows("tell-cancelled") == []
+
+
+def test_forgetting_a_root_ends_the_tell_of_a_document_the_hub_holds_no_entry_for(browser, talk):
+    agent_token()
+    target(browser)
+    assert tell(browser).status == 200
+    del browser.hub.entries[DOC]
+    browser.hub.forget_root("work")
+    assert json.loads(Path(sheafmd.paths.state_dir(), "tells.json").read_text()) == []
+    assert [r["doc"] for r in hub_rows("tell-cancelled")] == [DOC]
+
+
+def test_a_document_an_editor_left_empty_ends_no_tell_and_the_pass_after_the_write_keeps_it(browser, talk):
+    """An editor outside the hub takes none of its locks: the empty file is read, and is no sign the thread is gone."""
+    agent_token()
+    target(browser)
+    assert tell(browser).status == 200
+    whole = talk.read_text(encoding="utf-8")
+    talk.write_text("", encoding="utf-8")
+    browser.hub.waiting_tells.watch()
+    talk.write_text(whole, encoding="utf-8")
     browser.hub.waiting_tells.watch()
     assert [w["id"] for w in browser.hub.waiting_tells.waits(DOC, sweep=False)] == ["c1"]
     assert hub_rows("tell-cancelled") == []

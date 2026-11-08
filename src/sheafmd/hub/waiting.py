@@ -121,15 +121,15 @@ class Waiting:
     def watch(self):
         """One look of the watcher (8.9): a token revoked by the CLI, and a thread resolved or deleted from outside
         (the CLI, a hand edit), end their Tells now, so a page that stays open stops saying it waits. A document the
-        hub holds no entry for, one that cannot be read and one read empty (a save under way) are left alone: the next
-        pass or listing (`take`) judges them."""
+        hub holds no entry for, one that cannot be read and one that changes between two reads (a save under way) are left
+        alone: the next pass or listing (`take`) judges them."""
         rows = [t for t in read_json(_file(), [], aside=False) if isinstance(t, dict)]
         if not rows:
             return
         # Each document is read under its Live Document's locks (the name's, 9.11, and its own) before `_change` takes
-        # `tells.lock`, so no lock is asked for while that one is held. An empty text is the mark of a save caught
-        # between its truncate and its write, by an editor that holds none of our locks: it ends nothing, and the next
-        # pass reads the whole file. Only rows there when a document was read are judged from that read.
+        # `tells.lock`, so no lock is asked for while that one is held. An editor outside the hub holds none of our locks,
+        # so a thread that looks gone is read for again before it ends anything (`_judged_read`). Only rows there when
+        # a document was read are judged from that read.
         got = {}
         for address in {t["doc"] for t in rows}:
             e = self.hub.entries.get(address)
@@ -152,10 +152,9 @@ class Waiting:
     def _judged_read(self, e, rows: list):
         """The document's comments, parsed, or None when nothing may be ended from this read. A thread that looks
         gone is read again after `REREAD` seconds, and ends only if the text is the same both times: an outside
-        editor's save, caught part way, is not the same file a moment later."""
+        editor's save, caught part way or between its truncate and its write, is not the same file a moment later; a file
+        left empty for good is."""
         text = e.live.read_now()
-        if not text.strip():
-            return None
         got = rdc.parse(text)
         if any(_stale(t, got.by_id(t["thread"])) for t in rows):
             self._pause()

@@ -730,18 +730,29 @@ def test_forgetting_a_root_ends_the_tell_of_a_document_the_hub_holds_no_entry_fo
     assert [r["doc"] for r in hub_rows("tell-cancelled")] == [DOC]
 
 
-def test_a_document_an_editor_left_empty_ends_no_tell_and_the_pass_after_the_write_keeps_it(browser, talk):
-    """An editor outside the hub takes none of its locks: the empty file is read, and is no sign the thread is gone."""
+def test_a_document_an_editor_left_empty_for_a_moment_ends_no_tell(browser, talk):
+    """An editor outside the hub takes none of its locks: the empty file is read, and the write lands before the second read."""
     agent_token()
     target(browser)
     assert tell(browser).status == 200
     whole = talk.read_text(encoding="utf-8")
     talk.write_text("", encoding="utf-8")
-    browser.hub.waiting_tells.watch()
-    talk.write_text(whole, encoding="utf-8")
-    browser.hub.waiting_tells.watch()
-    assert [w["id"] for w in browser.hub.waiting_tells.waits(DOC, sweep=False)] == ["c1"]
+    waiting = browser.hub.waiting_tells
+    waiting._pause = lambda: talk.write_text(whole, encoding="utf-8")
+    waiting.watch()
+    waiting.watch()
+    assert [w["id"] for w in waiting.waits(DOC, sweep=False)] == ["c1"]
     assert hub_rows("tell-cancelled") == []
+
+
+def test_a_document_emptied_for_good_ends_its_tell_at_the_next_pass(browser, talk):
+    agent_token()
+    target(browser)
+    assert tell(browser).status == 200
+    talk.write_text("", encoding="utf-8")
+    browser.hub.waiting_tells.watch()
+    assert browser.hub.waiting_tells.waits(DOC, sweep=False) == []
+    assert [r["reason"] for r in hub_rows("tell-cancelled")] == ["closed"]
 
 
 def test_a_failing_forget_leaves_the_tells_and_a_failing_end_does_not_keep_the_root(browser, talk, monkeypatch):
@@ -771,8 +782,9 @@ def test_a_tell_queued_after_its_root_was_forgotten_is_refused_and_leaves_no_row
     with pytest.raises(sheafmd.hub.waiting.Refused) as ex:
         browser.hub.waiting_tells.queue(DOC, "c1", row, "Ada", None, None)
     assert ex.value.status == 409
-    assert not [t for t in json.loads(Path(sheafmd.paths.state_dir(), "tells.json").read_text())] if Path(
-        sheafmd.paths.state_dir(), "tells.json").exists() else True
+    assert "was forgotten" in ex.value.message
+    f = Path(sheafmd.paths.state_dir(), "tells.json")
+    assert not f.exists() or json.loads(f.read_text()) == []
 
 
 def test_a_document_caught_part_way_through_a_save_ends_no_tell_when_the_text_changes_between_the_two_reads(browser, talk):

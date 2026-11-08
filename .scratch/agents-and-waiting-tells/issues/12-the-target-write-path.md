@@ -9,14 +9,21 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done-in-PR (sweatshop-ai/sheaf#233)
 
 **Size:** one session if row 23 is taken as two small moves only (the import cycle, the tuples → a small named type); anything more goes in a new ticket and the PR says so
 
-- [ ] Test first (18): a tab fetches `/_/doc` the moment after an agent's `reply`; it already shows the new Agent line, and the event the tab got carries it (order: the target is set before `changed` is published, or `_agent_wrote` runs inside the same step)
-- [ ] The write still stands when `note_write` raises (`target-failed` row), as today
-- [ ] Test first (19): a sheaf closed between the check and the `/_/target` call; the member's own target is not stored and the answer is 404 as for any closed sheaf (9.11)
-- [ ] `/_/target` takes the same hold as `/_/cancel` or `/_/comment`; the existing target tests stay green
-- [ ] (23) `targets.choices` no longer imports inside the function: no import cycle between `targets` and `tell`
-- [ ] (23) `member_target` / `agent_view` return a named type or a dataclass; every caller is changed, no behaviour is
-- [ ] (23) the three places that know the wire grammar share one parse in Python; `page.js` keeps its own reading and a test names the grammar once for both
+- [x] Test first (18): a tab fetches `/_/doc` the moment after an agent's `reply`; it already shows the new Agent line, and the event the tab got carries it (order: the target is set before `changed` is published, or `_agent_wrote` runs inside the same step)
+  - Evidence: `tests/test_hub_target.py::test_the_tabs_hear_of_a_comment_write_after_its_agent_is_the_target[reply|resolve]` and `test_the_tabs_hear_of_an_update_after_its_agent_is_the_target` (red before the fix: the stored target was still the session when `changed` was published; green after): `LiveDocument.comment(before_announce=...)` runs `_agent_wrote` before `_announce`; create and update note the target before `hub.wrote`
+- [x] The write still stands when `note_write` raises (`target-failed` row), as today
+  - Evidence: `test_a_reply_that_the_target_cannot_follow_still_stands`: `note_write` patched to raise; the reply is in the file, one `changed` was published, one `target-failed` row
+- [x] Test first (19): a sheaf closed between the check and the `/_/target` call; the member's own target is not stored and the answer is 404 as for any closed sheaf (9.11)
+  - Evidence: `test_the_target_is_judged_and_stored_under_the_sheafs_name` (red without the `_reading` in `_target`): the visibility check and `targets.pick` both run inside `place.held`; `test_a_sheaf_closed_to_the_member_takes_no_target_and_is_a_404`: 404 and `BEA` not in the stored `targets`
+- [x] `/_/target` takes the same hold as `/_/cancel` or `/_/comment`; the existing target tests stay green
+  - Evidence: `handler.py` `_target` runs `_entry` and `pick` under `self._reading(doc)`, as `_export`; the 53 tests of `test_hub_target.py` and `test_proxy_own_agents.py` stay green
+- [x] (23) `targets.choices` no longer imports inside the function: no import cycle between `targets` and `tell`
+  - Evidence: `who` moved to `hub/targets.py` (`tell.py` imports it from there, `core.py`'s `from .tell import who` still works); `test_targets_and_tell_import_each_other_nowhere_inside_a_function` (AST: no import in any function of `targets.py`, none from `tell`)
+- [x] (23) `member_target` / `agent_view` return a named type or a dataclass; every caller is changed, no behaviour is
+  - Evidence: `AgentView` (targets.py) and `MemberTarget` (core.py), frozen dataclasses; callers changed: `tell.py` view, `core.py` `_fresh_meta`, `handler.py` `/_/doc` and `_target`; the existing target, proxy and tell tests unchanged and green
+- [x] (23) the three places that know the wire grammar share one parse in Python; `page.js` keeps its own reading and a test names the grammar once for both
+  - Evidence: `targets.parse(choice)` and `targets.wire(name)` are the Python reading and writing (`pick`, `choices`); `test_the_wire_grammar_is_read_in_one_place_and_the_page_reads_the_same_words` names the grammar and holds `page.js` `targetNow` to `'none'`, `'session'` and `'agent:'`

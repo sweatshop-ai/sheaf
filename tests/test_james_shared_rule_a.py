@@ -209,41 +209,47 @@ def test_the_listing_filter_alone_keeps_a_private_file_from_the_shared_member(wo
 @pytest.fixture
 def private_file(world):
     """A private file seen from the hub: its address under the list's name (a private root has no address of its own, so
-    this is the one the hub's Rule A functions are asked about), and its front matter."""
+    this is the one the hub's Rule A functions are asked about), its front matter, and the two members."""
     w = world
     w.put(PROJECT_WIDE)                                         # open to the project: only Rule A keeps it from the shared member
     fm = w.hub.judged(w.address)[0]
-    return w, (w.address,), fm
+    return w, fm, w.hub.proxy.member_of_token(OWN), w.hub.proxy.member_of_token(SHARED)
 
 
 def test_members_owning_alone_leaves_the_shared_member_out(private_file):
     """The site in `members_owning`: asked of the shared member and the owner together, only the owner owns it. The shared
     member owns the list root, so no other rule of this call takes it out."""
-    w, addresses, _ = private_file
-    alice, shared = w.hub.proxy.member_of_token(OWN), w.hub.proxy.member_of_token(SHARED)
+    w, _, alice, shared = private_file
     assert w.hub.owns(shared, w.hub.roots.get(w.address.split("/")[0]))
-    for address in addresses:
-        assert [m.id for m in w.hub.members_owning([alice, shared], address)] == ["alice-id"], address
-        assert not w.hub.member_owns(shared, address), address
+    assert [m.id for m in w.hub.members_owning([alice, shared], w.address)] == ["alice-id"]
+    assert not w.hub.member_owns(shared, w.address)
     assert w.hub.member_owns(alice, w.address)                  # positive control: the owner owns it by the list's name
 
 
 def test_visible_alone_hides_the_private_file_from_the_shared_member(private_file):
-    """The site in `visible`, called on its own: the file is open to the project and the grant is there or is not asked,
-    so only Rule A answers no."""
-    w, addresses, _ = private_file
-    alice, shared = w.hub.proxy.member_of_token(OWN), w.hub.proxy.member_of_token(SHARED)
-    for address in addresses:
-        assert not w.hub.visible(shared, address), address
-        assert not w.hub.visible(shared, address, never_read=False), address
+    """The site in `visible`, called on its own: the file is open to the project, so only Rule A and, in the granted
+    variant, the grant check answer no (the next test shows which of them does)."""
+    w, _, alice, shared = private_file
+    assert not w.hub.visible(shared, w.address)
+    assert not w.hub.visible(shared, w.address, never_read=False)
     assert w.hub.visible(alice, w.address)                      # positive control: the owner sees it
 
 
 def test_may_open_alone_refuses_the_private_file_to_the_shared_member(private_file):
     """The site in `may_open`, called on its own with the file's own front matter, as the door and the handlers do."""
-    w, addresses, fm = private_file
-    alice, shared = w.hub.proxy.member_of_token(OWN), w.hub.proxy.member_of_token(SHARED)
-    for address in addresses:
-        assert not w.hub.may_open(shared, address, fm), address
+    w, fm, alice, shared = private_file
+    assert not w.hub.may_open(shared, w.address, fm)
     assert w.hub.may_open(alice, w.address, fm)                 # positive control: the owner opens it
 
+
+def test_rule_a_is_what_refuses_in_the_two_tests_above(private_file, monkeypatch):
+    """The isolation control: with Rule A's lookup answering "nobody's", the shared member is refused by nothing else
+    when no `projects.toml` grants the project (the ungranted variant, in which the two tests above isolate their site),
+    and by the grant check alone when one does. So if another rule ever starts refusing the ungranted case, this fails."""
+    w, fm, alice, shared = private_file
+    has_grants = (w.two.list_repo / "projects.toml").exists()   # there, the grant check refuses a file whose real path lies outside the list root
+    monkeypatch.setattr(place, "private_member", lambda *a, **kw: None)
+    assert w.hub.granted(shared, w.address) is not has_grants
+    assert w.hub.visible(shared, w.address) is not has_grants
+    assert w.hub.may_open(shared, w.address, fm) is not has_grants
+    assert [m.id for m in w.hub.members_owning([alice, shared], w.address)] == ["alice-id", "shared"]

@@ -183,6 +183,7 @@ def test_names_that_differ_from_everyone_pass():
     (("sheaf",), "Grace", [], "sheaf"),                             # the author of merge notes
     (("Ada (action)",), "Grace", [], "(action)"),
     (("Ada (ACTION)",), "Grace", [], "(action)"),
+    (("Ada （action）",), "Grace", [], "(action)"),                 # full-width brackets fold to the same role
 ])
 def test_a_name_that_could_pass_for_someone_else_stops_the_start(names, person, tokens, words):
     with pytest.raises(ProxyError) as e:
@@ -252,8 +253,8 @@ def test_a_token_that_signs_the_hubs_persons_name_stops_the_start_and_the_messag
     for signed in ("Grace", "grace", "Grâce", "Ｇｒａｃｅ", "ChatGPT (Grace)"):
         person = "ChatGPT (Grace)" if signed == "ChatGPT (Grace)" else "Grace"
         with pytest.raises(ProxyError) as e:
-            proxy.check_names(members("Ada"), person=person, tokens=["Codex", signed])
-        assert repr(signed) in str(e.value) and "the hub's person" in str(e.value) and "token" in str(e.value)
+            proxy.check_names(members("Ada"), person=person, tokens=["Codex", signed], token_names=["codex", "helper"])
+        assert repr(signed) in str(e.value) and "the hub's person" in str(e.value) and "'helper'" in str(e.value)
 
 
 def test_two_old_tokens_that_share_a_display_still_start_because_add_makes_them():
@@ -266,18 +267,18 @@ def test_two_old_tokens_that_share_a_display_still_start_because_add_makes_them(
                                   "ChatGPT (Ａｃｔｉｏｎ)", "ChatGPT (action) "])
 def test_an_agents_built_name_that_reads_as_a_role_stops_the_start(name):
     with pytest.raises(proxy.TokenNamesError, match="role"):
-        proxy.check_agent_names([(True, name)])
+        proxy.check_agent_names([(True, name, "t")])
 
 
 def test_a_role_word_in_an_old_tokens_typed_display_is_left_to_the_door_that_never_builds_it():
-    proxy.check_agent_names([(False, "Codex (action)")])           # an old token signs what it was given
+    proxy.check_agent_names([(False, "Codex (action)", "t")])           # an old token signs what it was given
 
 
 def test_an_agent_name_clash_is_a_token_names_error_with_its_own_wording():
-    clash = [(True, "ChatGPT (Ada)"), (True, "chatgpt (ada)")]
+    clash = [(True, "ChatGPT (Ada)", "old"), (True, "chatgpt (ada)", "new")]
     with pytest.raises(proxy.TokenNamesError) as e:
-        proxy.check_agent_names(clash, members=True)
+        proxy.check_agent_names(clash, proxy_mode=True)
     assert isinstance(e.value, ProxyError) and "another client or member" in str(e.value)
     with pytest.raises(proxy.TokenNamesError) as e:
-        proxy.check_agent_names(clash, members=False)             # loopback: there is no member to give it to
+        proxy.check_agent_names(clash, proxy_mode=False)             # loopback: there is no member to give it to
     assert "member" not in str(e.value).replace("(sheaf token list)", "") and "another client" in str(e.value)

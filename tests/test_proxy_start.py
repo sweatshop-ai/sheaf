@@ -208,7 +208,7 @@ def test_the_messages_name_both_tokens_that_clash_and_the_token_that_signs_the_p
 
 def test_the_token_set_of_stage_sheaf_agents_hub_2026_11_07_passes_the_start_check(folder, sheaf, work):
     """The members and tokens that tt-tiroir's stage sheaf-agents-hub-2026-11-07 writes on tiroir-tt (files/params.toml,
-    lib.sh AGENT_TOKENS): the person `Thierry`, four members, the six live old tokens, and the eight agents made by
+    lib.sh AGENT_TOKENS): the person `Thierry`, four members, the eight live old tokens (names and displays read off the box's tokens.json on 2026-11-08), and the eight agents made by
     `sheaf token add NAME --client CLIENT --write` once the config is in place. A hub that refuses this is an outage."""
     ids = {"thierry": "503b2f77-83de-452c-817a-a357faf85929", "sven": "f9979e4c-b8f9-4767-b4ba-d094a4b089f3",
            "hans": "0ce2df60-3e1f-4a15-b5a1-41ca61579780", "marina": "8d1a62b6-cf44-45bf-a4c3-9b5eaf263f91"}
@@ -223,8 +223,10 @@ def test_the_token_set_of_stage_sheaf_agents_hub_2026_11_07_passes_the_start_che
         'name = "Thierry"\n' + proxy_table(folder / "hub.sock", {}) + block("thierry", "Thierry De Marre", thierry)
         + block("sven", "Sven van den Broek", []) + block("hans", "Hans Hermans", hans)
         + block("marina", "Marina Scalafiotti", []), encoding="utf-8")
-    for old in thierry[:6]:                                    # the box's rows: a display each, the name by default
-        Tokens().add(old, old.capitalize() if old in ("james", "mistral") else None)
+    for old, shown in [("tiroir-mail", "tiroir"), ("laptop-revise", "tiroir"), ("mistral", "Mistral"), ("james", "James"),
+                       ("tiroir-mail-list", "Mail"), ("assistant-thierry", "James"),
+                       ("sheaf-filter-thierry", "Plan session"), ("starter-thierry", "Starter")]:
+        Tokens().add(old, shown)                               # the box's rows; two share `tiroir`, two share `James`
     for name, client in [("thierry-chatgpt", "ChatGPT"), ("thierry-claude", "Claude"), ("thierry-tiroir", "tiroir"),
                          ("thierry-ai", "AI"), ("hans-chatgpt", "ChatGPT"), ("hans-claude", "Claude"),
                          ("hans-tiroir", "tiroir"), ("hans-ai", "AI")]:

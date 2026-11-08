@@ -50,6 +50,11 @@ class Refused(Exception):
         self.status, self.message = status, message
 
 
+def _stale(t: dict, c) -> bool:
+    """The thread is gone or closed, or it is another comment now: the Tell has nothing left to say."""
+    return c is None or c.status != "open" or _recycled(t, c)
+
+
 def _recycled(t: dict, c) -> bool:
     """The row remembers whose comment it was told about and when it was written (`thread_by`, `thread_at`): a
     thread id the file hands out again (`next_id` is the highest plus one) is another comment, and the old Tell
@@ -129,13 +134,13 @@ class Waiting:
                     continue
                 for t in [t for t in rows if t["doc"] == address]:
                     c = got.by_id(t["thread"])
-                    if c is None or c.status != "open" or _recycled(t, c):
+                    if _stale(t, c):
                         self._end(rows, [t], "cancelled", reason="closed")
             return None, len(rows) != n
         self._change(change)
 
     # ── queued ───────────────────────────────────────────────────────────────
-    def queue(self, address: str, cid: str, row: TokenRow, by: str, member=None, thread=None) -> dict:
+    def queue(self, address: str, cid: str, row: TokenRow, by: str, member, thread) -> dict:
         """The Tell waits for `row`'s agent. A second one for the thread and the agent is refused 409. `thread` is
         the comment it is about: its author and time are kept in the row (see `_recycled`)."""
         def change(rows):
@@ -171,7 +176,7 @@ class Waiting:
             out, save = [], False
             for t in [t for t in rows if t["doc"] == address and t["tid"] == row.id and t["token"] == row.name]:
                 c = got.by_id(t["thread"])
-                if c is None or c.status != "open" or _recycled(t, c):
+                if _stale(t, c):
                     self._end(rows, [t], "cancelled", reason="closed")
                     save = True
                     continue

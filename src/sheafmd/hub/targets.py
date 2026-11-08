@@ -110,8 +110,10 @@ def note_write(hub, address: str, row: TokenRow | None, member=None) -> None:
     if row is None or row.client is None:
         return
 
+    told = hub.tell_live(address)                   # beside the docs lock, not inside it
+
     def settle(entry: dict) -> dict:
-        _set(entry, _keep(row), member, hub.tell_live(address))
+        _set(entry, _keep(row), member, told)
         return entry
     hub.docs.change(address, settle)
 
@@ -142,9 +144,10 @@ def pick(hub, address: str, member, choice) -> None:
     target the reader may not pick."""
     if not isinstance(choice, str):
         raise Refused(WHAT)
+    told = hub.tell_live(address)                   # beside the docs lock, not inside it
     if choice == "none":
         def settle(entry):
-            _set(entry, None, member, hub.tell_live(address))
+            _set(entry, None, member, told)
             return entry
     elif choice == "session":
         if member is not None:
@@ -166,7 +169,7 @@ def pick(hub, address: str, member, choice) -> None:
             raise Refused(f"{name} is not one of your agents.")
 
         def settle(entry):
-            _set(entry, _keep(row), member, hub.tell_live(address))
+            _set(entry, _keep(row), member, told)
             return entry
     else:
         raise Refused(WHAT)

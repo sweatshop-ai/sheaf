@@ -734,29 +734,35 @@ class Hub:
             return None
 
     def tell_live(self, address: str) -> bool:
-        """Whether a Tell runs on this document or waits for its reply."""
+        """Whether a Tell runs on this document, waits for its reply or is being cancelled. Read without the
+        document's lock (as `peek` is): callers ask it beside the docs lock, and a rebuild holds the other
+        while it reads the first."""
         e = self.entries.get(address)
-        return bool(self.runner.active("tell", address) or (e is not None and e.live.waiting()))
+        return bool(self.runner.active("tell", address) or self.runner.active("stop", address)
+                    or (e is not None and e.live.peek()[0]))
 
-    def drop_kept(self, address: str, cid: str) -> None:
-        """The Tell of thread `cid` is about to be sent to the target (a session): the session a render kept
-        beside it for an earlier Tell is of no use now, and a Cancel of this one must not find it. Kept while
-        a Tell of another thread still runs."""
+    def drop_kept(self, address: str, cid: str, told) -> None:
+        """The Tell of thread `cid` is about to be sent to `told`, the session the target was when it was
+        looked up: the session a render kept beside the target for an earlier Tell is of no use now, and a
+        Cancel of this one must not find it. Kept while a Tell of another thread still runs, and when a render
+        moved the target off `told` since (the kept one is then the session this Tell goes to)."""
         e = self.entries.get(address)
-        others = set(self.runner.active("tell", address)) | set(e.live.waiting() if e else ())
-        if others - {cid}:
+        busy = set(self.runner.active("tell", address)) | set(self.runner.active("stop", address))
+        busy |= set(e.live.waiting() if e else ())
+        if busy - {cid}:
             return
 
         def settle(entry: dict) -> dict:
-            if isinstance(entry.get("target"), dict) and not targets_mod.is_agent(entry["target"]):
+            raw = entry.get("target")
+            if isinstance(raw, dict) and not targets_mod.is_agent(raw) and raw.get("session") == told.session:
                 entry.pop("session", None)
             return entry
         self.docs.change(address, settle)
 
-    def _told_session(self, address: str, entry: dict) -> dict | None:
+    def _told_session(self, entry: dict, live: bool) -> dict | None:
         """The session a Tell running on this document was sent to, as `entry` holds it, or None when no Tell
         runs: a render that would drop or replace it keeps it beside the target (a stop goes there)."""
-        if not self.tell_live(address):
+        if not live:
             return None
         for raw in (entry.get("session"), entry.get("target")):
             if isinstance(raw, dict) and raw and not targets_mod.is_agent(raw):
@@ -800,6 +806,7 @@ class Hub:
         except roots_mod.NotFound:
             raise RenderError(f"{md} is not in a root the hub serves.") from None
         with place.held(self, address), self._lock:        # the name's lock first (9.11), as `entry` takes it
+            live = self.tell_live(address)         # beside the docs lock, not inside it
             def settle(new: dict) -> dict:
                 old = dict(new)
                 new["path"] = str(md)
@@ -811,7 +818,7 @@ class Hub:
                 # write took the target from is the new one's, so none is kept beside it, unless a Tell is
                 # running: it was sent to the session the render drops or replaces, and a Cancel stops that one.
                 if target is not None:
-                    kept = self._told_session(address, old)
+                    kept = self._told_session(old, live)
                     new["target"] = None if target.get("agent") == "none" else {"kind": "session", **target}
                     new.pop("session", None)
                     if kept and kept != new["target"]:

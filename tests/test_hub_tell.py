@@ -1033,6 +1033,20 @@ def test_a_cancel_of_a_tell_started_after_the_first_one_ended_stops_the_target_n
     assert hub.target(DOC, kept=True).session == "s-2"
 
 
+def test_a_comment_sent_with_tell_after_the_first_tell_ended_drops_the_kept_session_too(
+        browser, hub, ready, session):
+    post(browser, "/_/tell")
+    finish(hub)
+    attach(browser, ready, session.target(session="s-2", socket=session.peer.path))
+    post(browser, "/_/cancel")
+    finish(hub)
+    assert hub.docs.get(DOC)["session"]["session"] == "s-1"
+    assert tell_by(browser, "comment").status == 200               # a reply with Tell: its own wait is begun first
+    finish(hub)
+    assert "session" not in hub.docs.get(DOC)
+    assert hub.target(DOC, kept=True).session == "s-2"
+
+
 def test_finish_names_a_job_that_outlives_it_instead_of_returning(hub):
     release = threading.Event()
     hub.runner.start("stop", DOC, "c1", lambda job: release.wait(10))

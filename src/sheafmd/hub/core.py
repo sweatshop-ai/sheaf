@@ -826,7 +826,7 @@ class Hub:
                     kept = self._told_session(old, live or self.tell_live(address))
                     new["target"] = None if target.get("agent") == "none" else {"kind": "session", **target}
                     new.pop("session", None)
-                    if kept and kept != new["target"]:
+                    if kept and (new["target"] or {}).get("session") != kept.get("session"):
                         new["session"] = kept
                 else:
                     new.setdefault("target", None)

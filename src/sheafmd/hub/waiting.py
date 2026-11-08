@@ -14,6 +14,7 @@ A row names the token and the thread, never the Tell's text: the message is buil
     waits(address, member)                  what the page is told: [{id, to, state}] of the reader's own
     sweep()                                 the Tells of a token no longer there end as cancelled
     watch()                                 the watcher's pass: sweep, and a thread closed from outside ends its Tell
+    end_root(name, reason)                  every Tell on the documents of a root ends as cancelled (the root was forgotten)
 """
 from __future__ import annotations
 
@@ -24,11 +25,14 @@ from pathlib import Path
 
 from .. import comments as rdc
 from .. import paths
+from .roots import Address
 from .state import STAMP_FORMAT, TokenRow, file_locked, read_json, write_json
 
 HAS_IT = "{agent} has this comment waiting already: cancel it first, or reply in the thread."
 GONE = "{agent} can no longer reach this hub: its token was revoked. Pick another target."
 
+
+REREAD = 0.1          # seconds between the two reads of a document where a thread looks gone
 
 EVENTS = ("tell-queued", "tell-seen", "tell-done", "tell-cancelled")
 
@@ -117,27 +121,49 @@ class Waiting:
     def watch(self):
         """One look of the watcher (8.9): a token revoked by the CLI, and a thread resolved or deleted from outside
         (the CLI, a hand edit), end their Tells now, so a page that stays open stops saying it waits. A document the
-        hub holds no entry for is left to the next listing (`take`)."""
-        if not read_json(_file(), [], aside=False):
+        hub holds no entry for, one that cannot be read and one that changes between two reads (a save under way) are left
+        alone: the next pass or listing (`take`) judges them."""
+        rows = [t for t in read_json(_file(), [], aside=False) if isinstance(t, dict)]
+        if not rows:
             return
+        # Each document is read under its Live Document's locks (the name's, 9.11, and its own) before `_change` takes
+        # `tells.lock`, so no lock is asked for while that one is held. An editor outside the hub holds none of our locks,
+        # so a thread that looks gone is read for again before it ends anything (`_judged_read`). Only rows there when
+        # a document was read are judged from that read.
+        got = {}
+        for address in {t["doc"] for t in rows}:
+            e = self.hub.entries.get(address)
+            try:
+                got[address] = None if e is None else self._judged_read(e, [t for t in rows if t["doc"] == address])
+            except Exception:
+                got[address] = None
+        ids = {t["id"] for t in rows}
 
         def change(rows):
             n = len(rows)
             self._revoked(rows)
-            for address in {t["doc"] for t in rows}:
-                e = self.hub.entries.get(address)
-                try:
-                    got = None if e is None else rdc.parse(e.read())
-                except Exception:
-                    got = None
-                if got is None:
-                    continue
-                for t in [t for t in rows if t["doc"] == address]:
-                    c = got.by_id(t["thread"])
-                    if _stale(t, c):
-                        self._end(rows, [t], "cancelled", reason="closed")
+            for t in [t for t in rows if t["id"] in ids]:
+                parsed = got.get(t["doc"])
+                if parsed is not None and _stale(t, parsed.by_id(t["thread"])):
+                    self._end(rows, [t], "cancelled", reason="closed")
             return None, len(rows) != n
         self._change(change)
+
+    def _judged_read(self, e, rows: list):
+        """The document's comments, parsed, or None when nothing may be ended from this read. A thread that looks
+        gone is read again after `REREAD` seconds, and ends only if the text is the same both times: an outside
+        editor's save, caught part way or between its truncate and its write, is not the same file a moment later; a file
+        left empty for good is."""
+        text = e.live.read_now()
+        got = rdc.parse(text)
+        if any(_stale(t, got.by_id(t["thread"])) for t in rows):
+            self._pause()
+            if e.live.read_now() != text:
+                return None
+        return got
+
+    def _pause(self):
+        time.sleep(REREAD)
 
     # ── queued ───────────────────────────────────────────────────────────────
     def queue(self, address: str, cid: str, row: TokenRow, by: str, member, thread) -> dict:
@@ -147,6 +173,8 @@ class Waiting:
             self._revoked(rows)
             if not any((r.name, r.id) == (row.name, row.id) for r in self.hub.tokens.list()):
                 raise Refused(409, GONE.format(agent=row.signed(self.hub.person, self.hub.proxy)))
+            if self.hub.roots.get(Address.parse(address).root) is None:      # forgotten meanwhile: `end_root` came first
+                raise Refused(409, "The folder of this document was forgotten.")
             name = row.signed(self.hub.person, self.hub.proxy)
             if any(t["doc"] == address and t["thread"] == cid and t["tid"] == row.id for t in rows):
                 raise Refused(409, HAS_IT.format(agent=name))
@@ -205,10 +233,13 @@ class Waiting:
             return gone, bool(gone)
         return self._change(change)
 
-    def end_document(self, address: str, reason: str):
-        """Every Tell of a document ends as cancelled (its folder was forgotten)."""
+    def end_root(self, name: str, reason: str):
+        """Every Tell on the documents of the root `name` ends as cancelled (its folder was forgotten), whether the
+        hub still holds an entry for the document or not; the other roots' Tells, of any token, stay."""
+        prefix = Address.prefix(name)
+
         def change(rows):
-            gone = [t for t in rows if t["doc"] == address]
+            gone = [t for t in rows if t["doc"].startswith(prefix)]
             self._end(rows, gone, "cancelled", reason=reason)
             return gone, bool(gone)
         self._change(change)

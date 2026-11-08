@@ -643,3 +643,160 @@ def test_the_watcher_reads_a_document_through_the_judged_open_and_ends_nothing_f
     e.judge = refuse
     browser.hub.tick()
     assert [w["id"] for w in browser.hub.waiting_tells.waits(DOC, sweep=False)] == ["c1"]   # not decided from it
+
+
+# ── row 27: a forgotten root takes its Tells with it ─────────────────────────
+
+def second_root(tmp_path, hub):
+    """A second root, `second`, holding a `plan.md` with the comment c1 on it."""
+    folder = tmp_path / "second"
+    folder.mkdir()
+    f = folder / "plan.md"
+    f.write_text(PLAN, encoding="utf-8")
+    comment(f)
+    hub.roots.for_document(f)
+    return "second/plan.md"
+
+
+def test_forgetting_a_root_ends_its_tells_and_the_page_hears_why_and_the_other_roots_tells_stay(browser, talk, tmp_path):
+    agent_token()
+    other_doc = second_root(tmp_path, browser.hub)
+    target(browser)
+    assert pick(browser, "agent:ada-chatgpt", other_doc).status == 200
+    assert tell(browser).status == 200
+    assert tell(browser, doc=other_doc).status == 200          # the same token, the other root
+    sub = tab(browser.hub)
+    browser.hub.forget_root("work")
+    assert named(sub.drain(), "tell-cancelled") == [{"id": "c1", "seen": False, "reason": "the folder was forgotten"}]
+    assert [t["doc"] for t in json.loads(Path(sheafmd.paths.state_dir(), "tells.json").read_text())] == [other_doc]
+    row, = hub_rows("tell-cancelled")
+    assert row["doc"] == DOC and row["reason"] == "the folder was forgotten"
+    assert browser.hub.waiting_tells.waits(other_doc, sweep=False) != []
+
+
+def test_forgetting_a_root_whose_name_starts_like_another_leaves_that_roots_tells(browser, talk, tmp_path):
+    agent_token()
+    other_doc = second_root(tmp_path, browser.hub)
+    assert pick(browser, "agent:ada-chatgpt", other_doc).status == 200
+    assert tell(browser, doc=other_doc).status == 200
+    browser.hub.forget_root("sec")                            # no such root, a prefix of `second` only as text
+    assert [t["doc"] for t in json.loads(Path(sheafmd.paths.state_dir(), "tells.json").read_text())] == [other_doc]
+
+
+# ── row 28: the watcher reads a document under its lock ──────────────────────
+
+def test_a_document_caught_truncated_in_a_save_does_not_end_its_tell_and_the_next_pass_keeps_it(browser, talk):
+    agent_token()
+    target(browser)
+    assert tell(browser).status == 200
+    live = browser.hub.entry(DOC).live
+    whole = talk.read_text(encoding="utf-8")
+    truncated, release, done = threading.Event(), threading.Event(), threading.Event()
+
+    def editor():                                              # an editor that saves by truncating and then writing
+        with live._hold(), live._held():                       # the locks every write of the hub holds
+            talk.write_text("", encoding="utf-8")
+            truncated.set()
+            release.wait(10)
+            talk.write_text(whole, encoding="utf-8")
+        done.set()
+
+    def pass_():
+        browser.hub.waiting_tells.watch()
+    ed = threading.Thread(target=editor, daemon=True)
+    ed.start()
+    assert truncated.wait(10)
+    watcher = threading.Thread(target=pass_, daemon=True)
+    watcher.start()
+    watcher.join(0.5)
+    assert watcher.is_alive()                                  # it waits for the lock, it does not read the half file
+    release.set()
+    assert done.wait(10)
+    watcher.join(10)
+    assert not watcher.is_alive()
+    assert [w["id"] for w in browser.hub.waiting_tells.waits(DOC, sweep=False)] == ["c1"]
+    browser.hub.waiting_tells.watch()
+    assert [w["id"] for w in browser.hub.waiting_tells.waits(DOC, sweep=False)] == ["c1"]
+    assert hub_rows("tell-cancelled") == []
+
+
+def test_forgetting_a_root_ends_the_tell_of_a_document_the_hub_holds_no_entry_for(browser, talk):
+    agent_token()
+    target(browser)
+    assert tell(browser).status == 200
+    del browser.hub.entries[DOC]
+    browser.hub.forget_root("work")
+    assert json.loads(Path(sheafmd.paths.state_dir(), "tells.json").read_text()) == []
+    assert [r["doc"] for r in hub_rows("tell-cancelled")] == [DOC]
+
+
+def test_a_document_an_editor_left_empty_for_a_moment_ends_no_tell(browser, talk):
+    """An editor outside the hub takes none of its locks: the empty file is read, and the write lands before the second read."""
+    agent_token()
+    target(browser)
+    assert tell(browser).status == 200
+    whole = talk.read_text(encoding="utf-8")
+    talk.write_text("", encoding="utf-8")
+    waiting = browser.hub.waiting_tells
+    waiting._pause = lambda: talk.write_text(whole, encoding="utf-8")
+    waiting.watch()
+    waiting.watch()
+    assert [w["id"] for w in waiting.waits(DOC, sweep=False)] == ["c1"]
+    assert hub_rows("tell-cancelled") == []
+
+
+def test_a_document_emptied_for_good_ends_its_tell_at_the_next_pass(browser, talk):
+    agent_token()
+    target(browser)
+    assert tell(browser).status == 200
+    talk.write_text("", encoding="utf-8")
+    browser.hub.waiting_tells.watch()
+    assert browser.hub.waiting_tells.waits(DOC, sweep=False) == []
+    assert [r["reason"] for r in hub_rows("tell-cancelled")] == ["closed"]
+
+
+def test_a_failing_forget_leaves_the_tells_and_a_failing_end_does_not_keep_the_root(browser, talk, monkeypatch):
+    from sheafmd.hub import core
+    agent_token()
+    target(browser)
+    assert tell(browser).status == 200
+
+    def refuse(*a, **k):
+        raise OSError(28, "No space left on device")
+    real = core.roots_mod.forget
+    monkeypatch.setattr(core.roots_mod, "forget", refuse)
+    with pytest.raises(OSError):
+        browser.hub.forget_root("work")
+    assert [w["id"] for w in browser.hub.waiting_tells.waits(DOC, sweep=False)] == ["c1"]    # still told, root still there
+    monkeypatch.setattr(core.roots_mod, "forget", real)
+    monkeypatch.setattr(browser.hub.waiting_tells, "end_root", refuse)
+    assert browser.hub.forget_root("work").name == "work"
+    assert hub_rows("tell-end-failed")
+
+
+def test_a_tell_queued_after_its_root_was_forgotten_is_refused_and_leaves_no_row(browser, talk):
+    token = agent_token()
+    target(browser)
+    row = next(r for r in browser.hub.tokens.list() if r.name == "ada-chatgpt")
+    browser.hub.forget_root("work")
+    with pytest.raises(sheafmd.hub.waiting.Refused) as ex:
+        browser.hub.waiting_tells.queue(DOC, "c1", row, "Ada", None, None)
+    assert ex.value.status == 409
+    assert "was forgotten" in ex.value.message
+    f = Path(sheafmd.paths.state_dir(), "tells.json")
+    assert not f.exists() or json.loads(f.read_text()) == []
+
+
+def test_a_document_caught_part_way_through_a_save_ends_no_tell_when_the_text_changes_between_the_two_reads(browser, talk):
+    agent_token()
+    target(browser)
+    assert tell(browser).status == 200
+    whole = talk.read_text(encoding="utf-8")
+    partial = whole.split("<!--")[0]
+    assert partial.strip() and rdc.parse(partial).by_id("c1") is None      # not empty, and the comment is not in it
+    talk.write_text(partial, encoding="utf-8")
+    waiting = browser.hub.waiting_tells
+    waiting._pause = lambda: talk.write_text(whole, encoding="utf-8")        # the editor's write lands between the reads
+    waiting.watch()
+    assert [w["id"] for w in waiting.waits(DOC, sweep=False)] == ["c1"]
+    assert hub_rows("tell-cancelled") == []

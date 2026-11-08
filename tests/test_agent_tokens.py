@@ -190,13 +190,94 @@ def test_an_old_token_named_like_a_client_does_not_block_that_agent(sheaf, old):
 
 
 def test_the_hub_refuses_to_start_when_an_agent_signs_a_name_another_token_signs():
-    with pytest.raises(proxy.ProxyError, match="another token"):
-        proxy.check_agent_names([(True, "ChatGPT (Bea)"), (True, "chatgpt (Bea)")])
-    with pytest.raises(proxy.ProxyError, match="another token"):
-        proxy.check_agent_names([(False, "ChatGPT (Hans)"), (True, "ChatGPT (Hans)")])    # a typed display, after a rebinding
-    proxy.check_agent_names([(True, "ChatGPT (Bea)"), (True, "ChatGPT (Bob)")])
-    proxy.check_agent_names([(False, "Codex"), (False, "codex")])                       # old tokens may share a display
+    with pytest.raises(proxy.ProxyError, match="signs too"):
+        proxy.check_agent_names([(True, "ChatGPT (Bea)", "a"), (True, "chatgpt (Bea)", "b")])
+    with pytest.raises(proxy.ProxyError, match="signs too"):
+        proxy.check_agent_names([(False, "ChatGPT (Hans)", "a"), (True, "ChatGPT (Hans)", "b")])    # a typed display, after a rebinding
+    proxy.check_agent_names([(True, "ChatGPT (Bea)", "a"), (True, "ChatGPT (Bob)", "b")])
+    proxy.check_agent_names([(False, "Codex", "a"), (False, "codex", "b")])                       # old tokens may share a display
 
+
+
+# ── `add` and the start fold and judge names the same way (13) ──────────────
+
+def proxy_config(work, member="Bea", tokens=()):
+    paths.config_file().parent.mkdir(parents=True, exist_ok=True)
+    listed = ", ".join(json.dumps(t) for t in tokens)
+    paths.config_file().write_text(
+        f'[proxy]\norigin = "{FRONT}"\nsocket = "/run/sheaf-proxy/hub.sock"\n'
+        f'proxy_user = "{pwd.getpwuid(os.getuid()).pw_name}"\n'
+        f'[proxy.members."{BEA}"]\nname = {json.dumps(member)}\nroots = ["{work}"]\ntokens = [{listed}]\n',
+        encoding="utf-8")
+
+
+@pytest.mark.parametrize("shown", ["Béa", "Ｂｅａ", "bea"])
+def test_add_refuses_a_typed_display_that_a_member_has_by_accent_or_width(sheaf, work, shown):
+    proxy_config(work)
+    r = sheaf("token", "add", "t", "--as", shown)
+    assert r.code != 0 and "Bea" in r.err and Tokens().list() == []
+
+
+@pytest.mark.parametrize("member", ["action", "Action", "answer", "ＡＣＴＩＯＮ"])
+def test_add_refuses_an_agent_whose_built_name_reads_as_a_role(sheaf, work, member):
+    proxy_config(work, member, tokens=["t"])
+    r = sheaf("token", "add", "t", "--client", "ChatGPT")
+    assert r.code != 0 and "role" in r.err and Tokens().list() == []
+
+
+def test_add_refuses_an_agent_whose_built_name_reads_as_a_role_in_loopback_too(sheaf, monkeypatch):
+    monkeypatch.setenv("SHEAF_NAME", "action")
+    r = sheaf("token", "add", "t", "--client", "ChatGPT")
+    assert r.code != 0 and "role" in r.err and Tokens().list() == []
+
+
+def test_add_refuses_an_old_token_that_signs_the_hubs_persons_name_in_proxy_mode_only(sheaf, work):
+    assert sheaf("token", "add", "loop", "--as", "ada").code == 0         # loopback: as before
+    Tokens().revoke("loop")
+    proxy_config(work)
+    for shown in ("ada", "Ａｄａ", "Adá"):
+        r = sheaf("token", "add", "t", "--as", shown)
+        assert r.code != 0 and "Ada" in r.err and "hub's person" in r.err and Tokens().list() == []
+    assert sheaf("token", "add", "ada").code != 0                           # the name stands for the display
+
+
+def test_add_refuses_the_persons_name_also_while_the_proxy_table_is_one_the_hub_would_refuse(sheaf, work):
+    """A table that `load` refuses (no `proxy_user`) is still proxy mode once it is mended: a token made now must
+    not be one the start then refuses."""
+    paths.config_file().parent.mkdir(parents=True, exist_ok=True)
+    paths.config_file().write_text(
+        f'[proxy]\norigin = "{FRONT}"\nsocket = "/run/sheaf-proxy/hub.sock"\n'
+        f'[proxy.members."{BEA}"]\nname = "Bea"\nroots = ["{work}"]\n', encoding="utf-8")
+    r = sheaf("token", "add", "t", "--as", "ada")
+    assert r.code != 0 and "hub's person" in r.err and Tokens().list() == []
+
+
+def test_add_judges_a_display_against_the_agents_of_the_bound_member_while_the_proxy_table_is_one_the_hub_would_refuse(sheaf, work):
+    proxy_config(work, tokens=["bea-chatgpt"])
+    assert sheaf("token", "add", "bea-chatgpt", "--client", "ChatGPT").code == 0     # signs `ChatGPT (Bea)`
+    text = paths.config_file().read_text(encoding="utf-8")
+    paths.config_file().write_text(text.replace(f'proxy_user = "{pwd.getpwuid(os.getuid()).pw_name}"\n', ""), encoding="utf-8")
+    r = sheaf("token", "add", "t", "--as", "ChatGPT (Bea)")
+    assert r.code != 0 and "ChatGPT (Bea)" in r.err and [t.name for t in Tokens().list()] == ["bea-chatgpt"]
+
+
+def test_add_fails_closed_when_config_toml_cannot_be_read(sheaf, work):
+    paths.config_file().parent.mkdir(parents=True, exist_ok=True)
+    paths.config_file().write_text('[proxy\nname = "Bea"\n', encoding="utf-8")        # a syntax error; SHEAF_NAME is Ada
+    r = sheaf("token", "add", "t", "--as", "ada")
+    assert r.code != 0 and Tokens().list() == []
+
+
+def test_a_role_word_is_read_at_the_end_of_a_built_name_longer_than_the_display_cut():
+    assert not proxy.reads_as_role("OpenWebUI-assistant-for-the-whole-team-x (Ann Lee-B (action) Smith)")
+    assert proxy.reads_as_role("OpenWebUI-assistant-for-the-whole-team-x (action)")
+
+
+def test_add_accepts_what_the_start_accepts_two_old_tokens_with_one_display(sheaf, work):
+    proxy_config(work)
+    assert sheaf("token", "add", "one", "--as", "Codex").code == 0
+    assert sheaf("token", "add", "two", "--as", "codex").code == 0
+    proxy.check_names(proxy.load(), "Ada", [t.signed("Ada", proxy.load()) for t in Tokens().list()])
 
 
 # ── a token's id: what tells a revoked token from a new one of the same name ─

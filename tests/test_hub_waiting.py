@@ -742,3 +742,49 @@ def test_a_document_an_editor_left_empty_ends_no_tell_and_the_pass_after_the_wri
     browser.hub.waiting_tells.watch()
     assert [w["id"] for w in browser.hub.waiting_tells.waits(DOC, sweep=False)] == ["c1"]
     assert hub_rows("tell-cancelled") == []
+
+
+def test_a_failing_forget_leaves_the_tells_and_a_failing_end_does_not_keep_the_root(browser, talk, monkeypatch):
+    from sheafmd.hub import core
+    agent_token()
+    target(browser)
+    assert tell(browser).status == 200
+
+    def refuse(*a, **k):
+        raise OSError(28, "No space left on device")
+    real = core.roots_mod.forget
+    monkeypatch.setattr(core.roots_mod, "forget", refuse)
+    with pytest.raises(OSError):
+        browser.hub.forget_root("work")
+    assert [w["id"] for w in browser.hub.waiting_tells.waits(DOC, sweep=False)] == ["c1"]    # still told, root still there
+    monkeypatch.setattr(core.roots_mod, "forget", real)
+    monkeypatch.setattr(browser.hub.waiting_tells, "end_root", refuse)
+    assert browser.hub.forget_root("work").name == "work"
+    assert hub_rows("tell-end-failed")
+
+
+def test_a_tell_queued_after_its_root_was_forgotten_is_refused_and_leaves_no_row(browser, talk):
+    token = agent_token()
+    target(browser)
+    row = next(r for r in browser.hub.tokens.list() if r.name == "ada-chatgpt")
+    browser.hub.forget_root("work")
+    with pytest.raises(sheafmd.hub.waiting.Refused) as ex:
+        browser.hub.waiting_tells.queue(DOC, "c1", row, "Ada", None, None)
+    assert ex.value.status == 409
+    assert not [t for t in json.loads(Path(sheafmd.paths.state_dir(), "tells.json").read_text())] if Path(
+        sheafmd.paths.state_dir(), "tells.json").exists() else True
+
+
+def test_a_document_caught_part_way_through_a_save_ends_no_tell_when_the_text_changes_between_the_two_reads(browser, talk):
+    agent_token()
+    target(browser)
+    assert tell(browser).status == 200
+    whole = talk.read_text(encoding="utf-8")
+    partial = whole.split("<!--")[0]
+    assert partial.strip() and rdc.parse(partial).by_id("c1") is None      # not empty, and the comment is not in it
+    talk.write_text(partial, encoding="utf-8")
+    waiting = browser.hub.waiting_tells
+    waiting._pause = lambda: talk.write_text(whole, encoding="utf-8")        # the editor's write lands between the reads
+    waiting.watch()
+    assert [w["id"] for w in waiting.waits(DOC, sweep=False)] == ["c1"]
+    assert hub_rows("tell-cancelled") == []

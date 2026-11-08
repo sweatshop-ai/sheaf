@@ -32,6 +32,8 @@ HAS_IT = "{agent} has this comment waiting already: cancel it first, or reply in
 GONE = "{agent} can no longer reach this hub: its token was revoked. Pick another target."
 
 
+REREAD = 0.1          # seconds between the two reads of a document where a thread looks gone
+
 EVENTS = ("tell-queued", "tell-seen", "tell-done", "tell-cancelled")
 
 
@@ -132,8 +134,7 @@ class Waiting:
         for address in {t["doc"] for t in rows}:
             e = self.hub.entries.get(address)
             try:
-                text = None if e is None else e.live.read_now()
-                got[address] = rdc.parse(text) if text and text.strip() else None
+                got[address] = None if e is None else self._judged_read(e, [t for t in rows if t["doc"] == address])
             except Exception:
                 got[address] = None
         ids = {t["id"] for t in rows}
@@ -148,6 +149,23 @@ class Waiting:
             return None, len(rows) != n
         self._change(change)
 
+    def _judged_read(self, e, rows: list):
+        """The document's comments, parsed, or None when nothing may be ended from this read. A thread that looks
+        gone is read again after `REREAD` seconds, and ends only if the text is the same both times: an outside
+        editor's save, caught part way, is not the same file a moment later."""
+        text = e.live.read_now()
+        if not text.strip():
+            return None
+        got = rdc.parse(text)
+        if any(_stale(t, got.by_id(t["thread"])) for t in rows):
+            self._pause()
+            if e.live.read_now() != text:
+                return None
+        return got
+
+    def _pause(self):
+        time.sleep(REREAD)
+
     # ── queued ───────────────────────────────────────────────────────────────
     def queue(self, address: str, cid: str, row: TokenRow, by: str, member, thread) -> dict:
         """The Tell waits for `row`'s agent. A second one for the thread and the agent is refused 409. `thread` is
@@ -156,6 +174,8 @@ class Waiting:
             self._revoked(rows)
             if not any((r.name, r.id) == (row.name, row.id) for r in self.hub.tokens.list()):
                 raise Refused(409, GONE.format(agent=row.signed(self.hub.person, self.hub.proxy)))
+            if self.hub.roots.get(Address.parse(address).root) is None:      # forgotten meanwhile: `end_root` came first
+                raise Refused(409, "The folder of this document was forgotten.")
             name = row.signed(self.hub.person, self.hub.proxy)
             if any(t["doc"] == address and t["thread"] == cid and t["tid"] == row.id for t in rows):
                 raise Refused(409, HAS_IT.format(agent=name))

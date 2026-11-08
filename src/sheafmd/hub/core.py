@@ -724,14 +724,55 @@ class Hub:
         session kept beside it, which a Tell already sent to it still runs in (a stop and the watcher use it)."""
         entry = self.docs.get(address)
         raw = entry.get("target")
-        if kept and (not raw or targets_mod.is_agent(raw)):    # an agent is no session (SPEC 9.8)
-            raw = entry.get("session")
+        if kept and entry.get("session"):       # beside an agent, or beside the session a render replaced
+            raw = entry["session"]
         if not raw or targets_mod.is_agent(raw):
             return None
         try:
             return Target.from_dict(raw)
         except ValueError:
             return None
+
+    def tell_live(self, address: str) -> bool:
+        """Whether a Tell runs on this document, waits for its reply or is being cancelled. Read without the
+        document's lock (as `peek` is): callers ask it beside the docs lock, and a rebuild holds the other
+        while it reads the first."""
+        e = self.entries.get(address)
+        return bool(self.runner.active("tell", address) or self.runner.active("stop", address)
+                    or (e is not None and e.live.peek()[0]))
+
+    def drop_kept(self, address: str, cid: str, told, again: bool = False) -> None:
+        """The Tell of thread `cid` is about to be sent to `told`, the session the target was when it was
+        looked up: the session a render kept beside the target for an earlier Tell is of no use now, and a
+        Cancel of this one must not find it. Kept while a Tell of another thread still runs, and when a render
+        moved the target off `told` since: that Tell goes to `told`, so it is kept beside the target if none is.
+        A re-Tell of a thread still waiting (`again`) leaves what is kept: the first Tell runs there."""
+        if again:
+            return
+        e = self.entries.get(address)
+        busy = set(self.runner.active("tell", address)) | set(self.runner.active("stop", address))
+        busy |= set(e.live.waiting() if e else ())
+        if busy - {cid}:
+            return
+
+        def settle(entry: dict) -> dict:
+            raw = entry.get("target")
+            if isinstance(raw, dict) and not targets_mod.is_agent(raw) and raw.get("session") == told.session:
+                entry.pop("session", None)
+            elif not entry.get("session"):
+                entry["session"] = {"kind": "session", **told.as_dict()}
+            return entry
+        self.docs.change(address, settle)
+
+    def _told_session(self, entry: dict, live: bool) -> dict | None:
+        """The session a Tell running on this document was sent to, as `entry` holds it, or None when no Tell
+        runs: a render that would drop or replace it keeps it beside the target (a stop goes there)."""
+        if not live:
+            return None
+        for raw in (entry.get("session"), entry.get("target")):
+            if isinstance(raw, dict) and raw and not targets_mod.is_agent(raw):
+                return raw
+        return None
 
     def session_name(self, address: str) -> str:
         """What the page calls the session a Tell of this document goes to ("" when there is none)."""
@@ -770,17 +811,23 @@ class Hub:
         except roots_mod.NotFound:
             raise RenderError(f"{md} is not in a root the hub serves.") from None
         with place.held(self, address), self._lock:        # the name's lock first (9.11), as `entry` takes it
+            live = self.tell_live(address)         # beside the docs lock, not inside it
             def settle(new: dict) -> dict:
+                old = dict(new)
                 new["path"] = str(md)
                 new["rendered"] = time.strftime(STAMP_FORMAT)
                 for k in SETTING_KEYS:
                     new[k] = settings.get(k)
                 # The latest render from an agent session sets the target; a render that finds no agent keeps
                 # it, an agent's too; only `--agent none` clears it (SPEC 8.3, D19). The session an agent's
-                # write took the target from is the new one's, so none is kept beside it.
+                # write took the target from is the new one's, so none is kept beside it, unless a Tell is
+                # running: it was sent to the session the render drops or replaces, and a Cancel stops that one.
                 if target is not None:
+                    kept = self._told_session(old, live or self.tell_live(address))
                     new["target"] = None if target.get("agent") == "none" else {"kind": "session", **target}
                     new.pop("session", None)
+                    if kept and (new["target"] or {}).get("session") != kept.get("session"):
+                        new["session"] = kept
                 else:
                     new.setdefault("target", None)
                 return new

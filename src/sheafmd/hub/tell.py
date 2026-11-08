@@ -335,6 +335,7 @@ class Tell:
         if v.shape is not None:                      # an agent: the Tell waits for it (9.8)
             self._thread(e, cid)
             return self.queue_agent(address, cid)
+        again = not waiting and e.live.is_waiting(cid)   # told before, no answer yet: a re-Tell (a comment's own wait is no sign)
         # Before the wait is touched: a second Tell must leave the first one's as it is.
         if self.hub.runner.running("tell", address, cid):
             raise JobRefused(409, self._already_telling(v.target, v.adapter))
@@ -347,6 +348,7 @@ class Tell:
         except JobRefused:
             e.live.stop_waiting(cid)
             raise
+        self.hub.drop_kept(address, cid, v.target, again)             # a Tell to the target: no session kept for an earlier one
         t, ad = v.target, v.adapter
         text = prompts.tell(address, str(e.path), self.hub.person, c, self.links(address))
 

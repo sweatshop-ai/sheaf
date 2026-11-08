@@ -368,3 +368,44 @@ def test_a_socket_folder_of_another_group_or_owner_is_refused(folder):
             proxy.check_folder(cfg)
     finally:
         os.getuid = real
+
+
+# ── two agents that sign one name stop the start (SPEC 9.7), through `_run` ──────────────────────
+
+def two_agents_one_name():
+    """Two agent tokens that sign `ChatGPT (Ada)`: the second row written by hand, as `add` refuses to make it."""
+    Tokens().add("one", client="ChatGPT")
+    rows = json.loads(Tokens.path().read_text(encoding="utf-8"))
+    rows.append({**rows[0], "name": "two", "id": "f" * 16, "sha256": "1" * 64, "client": "chatgpt"})
+    Tokens.path().write_text(json.dumps(rows), encoding="utf-8")
+
+
+def test_a_hub_in_loopback_with_two_agent_tokens_that_sign_one_name_stops_the_start(port):
+    two_agents_one_name()                                        # no config: loopback
+    code, err, rows = refused_start()
+    assert code == 1 and [r["kind"] for r in rows] == ["token-names"], rows
+    assert "signs too" in rows[0]["reason"] and "signs too" in err
+    assert err.rstrip().endswith("another client")               # loopback has no member to give a token to
+    assert wait_until_refused(port, 1)
+
+
+def test_a_hub_with_a_proxy_table_and_two_agent_tokens_that_sign_one_name_stops_the_start(port, folder):
+    two_agents_one_name()
+    configure(folder / "hub.sock")
+    code, err, rows = refused_start()
+    assert code == 1 and [r["kind"] for r in rows] == ["token-names"], rows
+    assert "signs too" in rows[0]["reason"] and rows[0]["reason"].endswith("another client or member")
+    assert wait_until_refused(port, 1)
+
+
+def test_a_hub_with_two_agent_tokens_that_sign_different_names_starts(port, folder):
+    Tokens().add("one", client="ChatGPT")
+    Tokens().add("two", client="Claude")
+    sock = folder / "hub.sock"
+    configure(sock)
+    p = run_hub()
+    try:
+        wait_up(port, sock)
+    finally:
+        assert stop(p) == 0
+    assert hub_rows("proxy-config", "token-names") == []

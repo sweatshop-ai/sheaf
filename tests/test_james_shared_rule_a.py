@@ -29,7 +29,7 @@ def two(tmp_path) -> TwoRoots:
 class World:
     """Alice has the private root and the own token; the shared token acts for `shared`, who has the list root only."""
 
-    def __init__(self, two: TwoRoots):
+    def __init__(self, two: TwoRoots, grants=True):
         self.two = two
         self.tokens = {n: Tokens().add(n, write=True) for n in (OWN, SHARED)}
         table = two.table(a={"name": "Alice", "short": "alice", "github": "login-alice", "tokens": [OWN]})
@@ -44,8 +44,9 @@ class World:
         self.root = self.hub.the_list.root()
         for repo in (two.list_repo, two.private_repo):
             (repo / "acme/blog").mkdir(parents=True, exist_ok=True)
-        (two.list_repo / "projects.toml").write_text('[projects."acme/blog"]\nmembers = ["alice", "shared"]\n'
-                                                     'status = "live"\n', encoding="utf-8")
+        if grants:      # without it the hub's grant check (SPEC 8.12) refuses the file too; Rule A alone decides when it is off
+            (two.list_repo / "projects.toml").write_text('[projects."acme/blog"]\nmembers = ["alice", "shared"]\n'
+                                                         'status = "live"\n', encoding="utf-8")
         self.door = browser_on(self.hub)
         self.address = f"{self.root.name}/{NAME}"
 
@@ -59,9 +60,11 @@ class World:
         return int(git(repo, "rev-list", "--count", "HEAD"))
 
 
-@pytest.fixture
-def world(two) -> World:
-    return World(two)
+@pytest.fixture(params=["granted", "ungranted"])
+def world(two, request) -> World:
+    """With a `projects.toml` that grants the shared member the project, and without one: the first is the deployed
+    shape, the second is the one in which no grant check refuses the file and Rule A alone does."""
+    return World(two, grants=request.param == "granted")
 
 
 def test_the_shared_token_is_a_james_token_of_a_member_with_no_private_root(world):
@@ -92,21 +95,30 @@ def test_james_shared_token_404_on_private_sheaf(world, tmp_path, tool, by, kind
     assert w.hub.commits.settle()
     assert (w.two.private_repo / NAME).read_text(encoding="utf-8") == text                  # nothing was written
     assert (w.commits(w.two.list_repo), w.commits(w.two.private_repo)) == heads             # and nothing committed
-    if by == "list name":                                                                   # positive control: the owner's token
-        is_error, got = w.call(tool, OWN, doc=doc, **args)
-        assert not (is_error and "no document" in got.lower()), (tool, got)
-        if tool == "read":
-            assert not is_error and "Secret words." in str(got)
+    is_error, got = w.call(tool, OWN, doc=w.address, **args)                                # positive control: the owner
+    assert not (is_error and "no document" in got.lower()), (tool, got)
+    if tool == "read":
+        assert not is_error and "Secret words." in str(got)
 
 
-def test_a_session_header_on_the_shared_token_opens_no_private_sheaf(world):
+@pytest.mark.parametrize("tool", ["read", "threads", "update", "reply", "resolve"])
+def test_a_session_header_on_the_shared_token_opens_no_private_sheaf(world, tool):
     w = world
-    w.put(OWNED_BY_ALICE)
+    w.put(PROJECT_WIDE)
+    args = {"read": {}, "threads": {}, "reply": {"id": "c1", "text": "Done."}, "resolve": {"id": "c1"},
+            "update": {"text": PROJECT_WIDE.replace("Secret", "Changed"), "expected_hash": md_hash(PROJECT_WIDE)}}[tool]
+    heads = (w.commits(w.two.list_repo), w.commits(w.two.private_repo))
     for doc in (w.address, str(w.two.private_repo / NAME)):
-        res = door(w.door, rpc("tools/call", {"name": "read", "arguments": {"doc": doc}}), token=w.tokens[SHARED],
+        res = door(w.door, rpc("tools/call", {"name": tool, "arguments": {"doc": doc, **args}}), token=w.tokens[SHARED],
                    headers={"X-James-Session": SID})
         assert res.status == 200 and res.json()["result"]["isError"], (doc, res.text)
         assert "Secret words." not in res.text
+    res = door(w.door, rpc("tools/call", {"name": "create", "arguments": {"doc": w.address, "text": PROJECT_WIDE}}),
+               token=w.tokens[SHARED], headers={"X-James-Session": SID})
+    assert res.json()["result"]["isError"]
+    assert w.hub.commits.settle()
+    assert (w.two.private_repo / NAME).read_text(encoding="utf-8") == PROJECT_WIDE
+    assert (w.commits(w.two.list_repo), w.commits(w.two.private_repo)) == heads
 
 
 def test_james_shared_token_cannot_create_in_private_root(world):
@@ -136,9 +148,10 @@ def test_james_shared_token_cannot_move_a_shared_sheaf_into_private_root(world):
     assert (w.commits(w.two.list_repo), w.commits(w.two.private_repo)) == heads
 
 
-def test_james_shared_token_lists_no_private_file(world):
+@pytest.mark.parametrize("kind", TEXTS)
+def test_james_shared_token_lists_no_private_file(world, kind):
     w = world
-    w.put(OWNED_BY_ALICE)
+    w.put(TEXTS[kind])
     private_root = w.hub.roots.lookup(w.two.private_repo / NAME).name
     for args in ({"open_only": False}, {"root": w.root.name, "open_only": False}):
         is_error, got = w.call("documents", SHARED, **args)

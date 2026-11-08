@@ -1,5 +1,7 @@
 """What the hub says to a session: the Tell message and the Cancel message
 (SPEC 11.2, 11.3). The wording is the contract, so these tests hold it whole."""
+from pathlib import Path
+
 import sheafmd.comments as rdc
 from sheafmd.agents import prompts
 from sheafmd.links import RULE
@@ -59,3 +61,19 @@ def test_a_legacy_action_reply_is_shown_under_its_plain_author_name():
     md = rdc.reply(md, cid, "done", "Claude (action)", "2026-10-14T10:01")
     p = prompts.tell("work/plan.md", "/w/plan.md", "Grace", rdc.parse(md).by_id(cid), links=True)
     assert "Claude (2026-10-14T10:01): done" in p
+
+
+SPEC = (Path(__file__).resolve().parent.parent / "SPEC.md").read_text()
+
+
+def test_the_message_to_an_agent_is_the_one_quoted_in_the_spec():
+    """SPEC 11.3 quotes `prompts.tell_agent`; the words an agent acts on are the SPEC's, placeholders filled."""
+    c = thread()
+    quoted = SPEC.split("Message to an agent (`prompts.tell_agent`)", 1)[1].split("It names no file path", 1)[0]
+    block = "\n".join(l[2:] if l.startswith("> ") else l[1:] for l in quoted.splitlines() if l.startswith(">"))
+    want = (block.replace("{root}/{path}", "work/plan.md").replace("{me}", "Grace").replace("{id}", c.id)
+            .replace("{author}", "Ada").replace("{quote}", "price").replace("{RULE}", RULE)
+            .replace("{author} ({at}): {body}", "Ada (2026-10-14T10:00): Is this right?")
+            .replace("{each reply the same way}", "Bob (2026-10-14T10:05): I think so.\n"
+                     "Claude (2026-10-14T10:09): Checked."))
+    assert prompts.tell_agent("work/plan.md", "Grace", c, links=True) == want

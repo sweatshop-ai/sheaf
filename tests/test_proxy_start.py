@@ -3,6 +3,7 @@ sheafmd hub` whose config.toml holds a `[proxy]` table. What stops the start (ex
 `proxy-config` row, never a hub that runs with part of the mode), the proxy socket it makes, the
 stale one it replaces and the one it removes at a clean stop, and the uid it reads off each
 connection. The proxy's account is the test's own, so nobody needs root."""
+import json
 import os
 import pwd
 import signal
@@ -17,6 +18,7 @@ from helpers import UnixHTTP, hub_rows, proxy_table, wait_until_refused
 
 from sheafmd import paths
 from sheafmd.hub import server
+from sheafmd.hub.state import Tokens
 
 ME = pwd.getpwuid(os.getuid()).pw_name
 BEA = "0f8fad5b-d9cb-469f-a165-70867728950e"
@@ -117,6 +119,123 @@ def test_a_member_named_as_a_token_stops_the_start(port, folder, sheaf):
     assert sheaf("token", "add", "codex", "--as", "Quill").code == 0
     configure(folder / "hub.sock", {BEA: ("Quill", ["/srv"])})
     assert_refused(port, "MCP token")
+
+
+@pytest.mark.parametrize("member, shown", [("Béa", "Bea"), ("Ｂｅａ", "Bea"), ("Bea", "Béa"), ("Bea", "Ｂｅａ")])
+def test_a_member_and_a_token_that_differ_by_accent_or_width_stop_the_start(port, folder, sheaf, member, shown):
+    assert sheaf("token", "add", "codex", "--as", shown).code == 0          # no proxy table yet: add takes it
+    configure(folder / "hub.sock", {BEA: (member, ["/srv"])})
+    assert_refused(port, "MCP token")
+
+
+def test_a_token_that_signs_the_hubs_persons_name_stops_the_start_and_names_both(port, folder, sheaf):
+    assert sheaf("token", "add", "helper", "--as", "ada").code == 0         # loopback: add takes it
+    configure(folder / "hub.sock")
+    row = assert_refused(port, "'ada'")
+    assert "the hub's person" in row["reason"] and "Ada" in row["reason"]
+
+
+def test_a_hub_with_two_old_tokens_that_share_a_display_starts(port, folder, sheaf):
+    assert sheaf("token", "add", "one", "--as", "Codex").code == 0
+    assert sheaf("token", "add", "two", "--as", "codex").code == 0
+    sock = folder / "hub.sock"
+    configure(sock)
+    p = run_hub()
+    try:
+        wait_up(port, sock)
+    finally:
+        assert stop(p) == 0
+    assert hub_rows("proxy-config", "token-names") == []
+
+
+def test_a_role_word_in_an_agents_built_name_stops_the_start(port, folder, sheaf):
+    configure(folder / "hub.sock", {BEA: ("action", ["/srv"])}, extra="")   # a member may be named `action`
+    paths.config_file().write_text(paths.config_file().read_text(encoding="utf-8").replace(
+        'roots = ["/srv"]', 'roots = ["/srv"]\ntokens = ["bea-chatgpt"]'), encoding="utf-8")
+    Tokens().add("bea-chatgpt", client="ChatGPT")                         # made before the member was renamed
+    code, err, rows = refused_start()
+    assert code == 1 and [r["kind"] for r in rows] == ["token-names"], rows
+    assert "ChatGPT (action)" in err and "role" in err
+
+
+def test_an_agent_clash_is_logged_as_the_tokens_and_does_not_offer_another_member_in_loopback(port):
+    Tokens().add("old", "ChatGPT (Ada)")                                      # a typed display, then an agent signs it
+    Tokens().add("new", client="ChatGPT")
+    code, err, rows = refused_start()
+    assert code == 1 and [r["kind"] for r in rows] == ["token-names"], rows
+    assert "another client" in err and "member" not in err.replace("(sheaf token list)", "")
+    assert wait_until_refused(port, 1)
+
+
+def test_an_agent_clash_in_proxy_mode_offers_another_member(port, folder):
+    Tokens().add("old", "ChatGPT (Ada)")
+    Tokens().add("new", client="ChatGPT")
+    configure(folder / "hub.sock")
+    code, err, rows = refused_start()
+    assert code == 1 and [r["kind"] for r in rows] == ["token-names"], rows
+    assert "another client or member" in err
+
+
+def test_an_unknown_key_in_the_config_warns_once_however_many_tokens_there_are(port, folder, monkeypatch):
+    monkeypatch.delenv("SHEAF_NAME")                                       # the name is then read from the config
+    for i in range(3):
+        Tokens().add(f"agent-{i}", client=f"Client{i}")
+    configure(folder / "hub.sock", {BEA: ("Ada", ["/srv"])}, extra='name = "Ada"\nfrobnicate = 1\n')
+    code, err, _ = refused_start()                                         # the member is the person: a start that stops
+    assert code == 1 and err.count("unknown key 'frobnicate'") == 1, err
+
+
+def test_an_unknown_key_in_the_config_warns_once_on_a_hub_that_starts(port, folder, monkeypatch):
+    monkeypatch.delenv("SHEAF_NAME")                                       # the name is then read from the config
+    Tokens().add("agent-0", client="Client0")
+    configure(folder / "hub.sock", extra='name = "Ada"\nfrobnicate = 1\n')   # the person is not a member: the hub starts
+    p = run_hub()
+    try:
+        wait_up(port, folder / "hub.sock")
+    finally:
+        p.send_signal(signal.SIGTERM)
+        _, err = p.communicate(timeout=30)
+    assert p.returncode == 0 and err.count("unknown key 'frobnicate'") == 1, err
+
+
+def test_the_messages_name_both_tokens_that_clash_and_the_token_that_signs_the_persons_name(port, folder):
+    Tokens().add("old", "ChatGPT (Ada)")
+    Tokens().add("new", client="ChatGPT")
+    configure(folder / "hub.sock")
+    _, err, _ = refused_start()
+    assert "'old'" in err and "'new'" in err, err
+
+
+def test_the_token_set_of_stage_sheaf_agents_hub_2026_11_07_passes_the_start_check(folder, sheaf, work, monkeypatch):
+    """The members and tokens that tt-tiroir's stage sheaf-agents-hub-2026-11-07 writes on tiroir-tt (files/params.toml,
+    lib.sh AGENT_TOKENS): the person `Thierry`, four members, the eight live old tokens (names and displays read off the box's tokens.json on 2026-11-08), and the eight agents made by
+    `sheaf token add NAME --client CLIENT --write` once the config is in place. A hub that refuses this is an outage."""
+    monkeypatch.delenv("SHEAF_NAME")                           # `add` reads the person from the config, as on the box
+    ids = {"thierry": "503b2f77-83de-452c-817a-a357faf85929", "sven": "f9979e4c-b8f9-4767-b4ba-d094a4b089f3",
+           "hans": "0ce2df60-3e1f-4a15-b5a1-41ca61579780", "marina": "8d1a62b6-cf44-45bf-a4c3-9b5eaf263f91"}
+    thierry = ["james", "mistral", "tiroir-mail-list", "assistant-thierry", "sheaf-filter-thierry", "starter-thierry",
+               "thierry-chatgpt", "thierry-claude", "thierry-tiroir", "thierry-ai"]
+    hans = ["hans-chatgpt", "hans-claude", "hans-tiroir", "hans-ai"]
+    block = lambda who, name, tokens: (f'\n[proxy.members."{ids[who]}"]\nname = "{name}"\nroots = ["{work}"]\n'
+                                       f'short = "{who}"\nshell = false\n'
+                                       + (f'tokens = {json.dumps(tokens)}\n' if tokens else ""))
+    paths.config_file().parent.mkdir(parents=True, exist_ok=True)
+    paths.config_file().write_text(
+        'name = "Thierry"\n' + proxy_table(folder / "hub.sock", {}) + block("thierry", "Thierry De Marre", thierry)
+        + block("sven", "Sven van den Broek", []) + block("hans", "Hans Hermans", hans)
+        + block("marina", "Marina Scalafiotti", []), encoding="utf-8")
+    for old, shown in [("tiroir-mail", "tiroir"), ("laptop-revise", "tiroir"), ("mistral", "Mistral"), ("james", "James"),
+                       ("tiroir-mail-list", "Mail"), ("assistant-thierry", "James"),
+                       ("sheaf-filter-thierry", "Plan session"), ("starter-thierry", "Starter")]:
+        Tokens().add(old, shown)                               # the box's rows; two share `tiroir`, two share `James`
+    for name, client in [("thierry-chatgpt", "ChatGPT"), ("thierry-claude", "Claude"), ("thierry-tiroir", "tiroir"),
+                         ("thierry-ai", "AI"), ("hans-chatgpt", "ChatGPT"), ("hans-claude", "Claude"),
+                         ("hans-tiroir", "tiroir"), ("hans-ai", "AI")]:
+        assert sheaf("token", "add", name, "--client", client, "--write").code == 0, name
+    from sheafmd.hub import proxy
+    cfg = proxy.load()
+    proxy.check_start_names(cfg, "Thierry", [t for t in Tokens().list() if not t.invalid])
+    assert {t.signed("Thierry", cfg) for t in Tokens().list()} >= {"ChatGPT (Thierry De Marre)", "AI (Hans Hermans)"}
 
 
 def test_a_proxy_socket_something_listens_on_stops_the_start(port, folder):

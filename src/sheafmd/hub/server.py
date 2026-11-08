@@ -413,7 +413,8 @@ def exit_code(hub: Hub) -> int:
 
 
 def _proxy_refused(e: "proxy.ProxyError") -> int:
-    diagnostics.record("hub", "proxy-config", None, reason=str(e))
+    label = "token-names" if isinstance(e, proxy.TokenNamesError) else "proxy-config"
+    diagnostics.record("hub", label, None, reason=str(e))
     print(f"sheaf hub: {e}", file=sys.stderr)
     return 1
 
@@ -465,10 +466,9 @@ def _run(started_by: str, signals: "sender.Signals") -> int:
     try:
         cfg = proxy.load()
         rows = [t for t in state.Tokens().list() if not t.invalid]
-        signed = [(t.client is not None, t.signed(config.user_name(), cfg)) for t in rows]
-        proxy.check_agent_names(signed)               # in loopback too: a config may change the person's name
+        person = config.user_name()                   # once: an unknown key in the config warns at each read
+        proxy.check_start_names(cfg, person, rows)
         if cfg is not None:
-            proxy.check_names(cfg, config.user_name(), [name for _, name in signed])
             proxy.check_folder(cfg)
     except proxy.ProxyError as e:
         return _proxy_refused(e)
@@ -516,7 +516,7 @@ def _run(started_by: str, signals: "sender.Signals") -> int:
         except proxy.ProxyError as e:
             sock.close()
             return _proxy_refused(e)
-    hub = Hub(port=port, key=key, started_by=started_by, service=started_by == "service", proxy=cfg)
+    hub = Hub(port=port, key=key, started_by=started_by, service=started_by == "service", proxy=cfg, person=person)
     srv = HubServer(hub, sock, proxy_sock)
     if list_cfg is not None:
         hub.the_list = the_list.TheList(hub, list_cfg)

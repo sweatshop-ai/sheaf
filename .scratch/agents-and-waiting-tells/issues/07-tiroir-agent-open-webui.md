@@ -4,7 +4,9 @@
 
 **Blocked by:** 06 (Sheaf's tools in the tiroir library door)
 
-**Status:** ready-for-agent
+**Claimed by:** Thierry 2026-11-08 (box steps)
+
+**Status:** in-progress (built as the tt-tiroir stage hermes-sheaf-2026-11-07, PR 745, merged; it waits on apply on tiroir-tt, which Thierry does; the boxes below stay open until then)
 
 - [ ] The Open WebUI assistant reaches the library door as the signed-in member and its calls use that member's `tiroir` token
 - [ ] Its replies on a page read `tiroir (Hans)` for Hans, never `ChatGPT` or `AI`

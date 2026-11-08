@@ -18,3 +18,5 @@
 - [x] The old drop files with `kind: "tell"` still read after a restart (one test)
 - [x] Row 16 is decided, not guessed: keep the class names (and say the asset cache needs no bump), or rename them and bump the asset version; the PR records which and why
 - [x] The docstring reads as English
+
+**Row 16 decision (PR 236):** kept `rd-st-ask` and `rd-who-ask`. `ask` is the thread state of an `answer` reply (`page.js:244`, one of `ask`/`tell`/`res`), not a leftover of the retired Ask. The asset cache needs no bump: mount assets are named by the hash of their content (`hub/assets.py`), so a changed body gets a new `?v=` and an unchanged one keeps its name.

@@ -909,9 +909,9 @@ def _agent_names_possible(row, person: str, cfg, declared: bool) -> list[str]:
     return [agent_name(row.client, n) for n in dict.fromkeys([person, *proxy.member_names()])]
 
 
-def _signed_by_others(tokens: Tokens, cfg, person: str) -> list[str]:
-    """The name each token already made signs with, whose replies a new one's must not pass for."""
-    return [r.signed(person, cfg) for r in tokens.list() if not r.invalid]
+def _signed_by_others(rows, cfg, person: str) -> list[str]:
+    """The name each token of `rows` signs with, whose replies a new one's must not pass for."""
+    return [r.signed(person, cfg) for r in rows if not r.invalid]
 
 
 def _agent_clash(client: str, built: str, cfg, person: str, others: list[str]) -> str | None:
@@ -955,20 +955,28 @@ def cmd_token(argv: list[str]) -> int:
         if args.display is not None:
             _err("sheaf: --client and --as together: an agent's name is built from its client, never typed")
             return EXIT_FAILED
-        cfg, person = _proxy_table(), config.user_name()
+        try:
+            cfg = proxy.load()                     # read before the lock; a table the hub refuses names no member
+        except proxy.ProxyError as e:
+            _err(f"sheaf: the [proxy] table in config.toml is broken, so the name this token would sign cannot be "
+                 f"told: {e}; mend it and add the token again")
+            return EXIT_FAILED
+        person = config.user_name()
         member = cfg.member_of_token(args.name) if cfg is not None else None
         built = agent_name(clean_display(args.client), member.name if member is not None else person)
         if proxy.reads_as_role(built):
             _err(f"sheaf: a token that signs {built!r} would end in a role word, which a reply reads as its role "
                  "(SPEC 5.3): give the member, or the hub's person, another name")
             return EXIT_FAILED
-        if (taken := _agent_clash(clean_display(args.client), built, cfg, person,
-                                  _signed_by_others(tokens, cfg, person))) is not None:
-            _err(f"sheaf: {taken!r} is already a name in use here (the hub's person, a member of proxy mode, or "
-                 f"another token's); a token that signs {built!r} would pass for it")
-            return EXIT_FAILED
+
+        def clash(rows) -> str | None:             # run under tokens.lock, on the rows of that moment
+            if (taken := _agent_clash(clean_display(args.client), built, cfg, person,
+                                      _signed_by_others(rows, cfg, person))) is not None:
+                return (f"{taken!r} is already a name in use here (the hub's person, a member of proxy mode, or "
+                        f"another token's); a token that signs {built!r} would pass for it")
+            return None
         try:
-            token = tokens.add(args.name, write=args.write, client=args.client)
+            token = tokens.add(args.name, write=args.write, client=args.client, clash=clash)
         except TokenError as e:
             _err(f"sheaf: {e}")
             return EXIT_FAILED
@@ -1011,9 +1019,17 @@ def cmd_token(argv: list[str]) -> int:
         rows = tokens.list()
         if not rows:
             _out(f"  no tokens in {tokens_file}")
-        cfg, person = _proxy_table(), config.user_name()
-        shown = [f"{r.client} -> {r.signed(person, cfg)}" if r.client is not None and not r.invalid else r.display_text
+        try:
+            cfg, broken = proxy.load(), None
+        except proxy.ProxyError as e:
+            cfg, broken = None, e
+        person = config.user_name()
+        shown = [(f"{r.client} -> (signed name unknown: the [proxy] table is broken)" if broken is not None
+                  else f"{r.client} -> {r.signed(person, cfg)}") if r.client is not None and not r.invalid else r.display_text
                  for r in rows]
+        if broken is not None and any(r.client is not None and not r.invalid for r in rows):
+            _err(f"sheaf: the [proxy] table in config.toml is broken, so the names an agent's token signs cannot be "
+                 f"told: {broken}")
         wide = [max((len(w) for w in col), default=0) for col in ([r.name_text for r in rows], shown)]
         for r, show in zip(rows, shown):
             _out(f"  {r.name_text:<{wide[0]}}  {show:<{wide[1]}}  id {r.id or '-':<16}  created {r.created_text}"

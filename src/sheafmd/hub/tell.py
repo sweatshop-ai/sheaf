@@ -397,8 +397,9 @@ class Tell:
         row = targets.live(self.hub, targets.stored(self.hub, address, member), member)
         if row is None:
             raise JobRefused(409, targets.REVOKED.format(agent="The agent"))
+        thread = self._thread(self._entry(address), cid)
         try:
-            self.hub.waiting_tells.queue(address, cid, row, member.name if member else self.hub.person, member)
+            self.hub.waiting_tells.queue(address, cid, row, member.name if member else self.hub.person, member, thread)
         except waiting_mod.Refused as r:
             raise JobRefused(r.status, r.message) from None
 

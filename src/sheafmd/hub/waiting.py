@@ -7,7 +7,7 @@ made inside `Waiting._change`, under one thread lock and the flock `tells.lock`;
 diagnostics rows of a change go out inside it too, so the page, `documents` and the log agree on which state won.
 A row names the token and the thread, never the Tell's text: the message is built when it is listed.
 
-    queue(address, cid, row, by, member)   put a Tell in the file; raises Refused
+    queue(address, cid, row, by, member, thread)   put a Tell in the file; raises Refused
     take(address, row, got)                 the Tells listed to `row` for this document; the first listing marks them seen
     pending(row)                            the documents where `row` has a Tell waiting
     end(address, cid, how, ...)             a Tell ends: done, cancelled
@@ -48,6 +48,13 @@ class Refused(Exception):
     def __init__(self, status: int, message: str):
         super().__init__(message)
         self.status, self.message = status, message
+
+
+def _recycled(t: dict, c) -> bool:
+    """The row remembers whose comment it was told about and when it was written (`thread_by`, `thread_at`): a
+    thread id the file hands out again (`next_id` is the highest plus one) is another comment, and the old Tell
+    is not its Tell. A row from before those two keys has nothing to compare and stays as it was."""
+    return "thread_at" in t and (t.get("thread_by"), t["thread_at"]) != (c.by, c.at)
 
 
 def _file() -> Path:
@@ -122,14 +129,15 @@ class Waiting:
                     continue
                 for t in [t for t in rows if t["doc"] == address]:
                     c = got.by_id(t["thread"])
-                    if c is None or c.status != "open":
+                    if c is None or c.status != "open" or _recycled(t, c):
                         self._end(rows, [t], "cancelled", reason="closed")
             return None, len(rows) != n
         self._change(change)
 
     # ── queued ───────────────────────────────────────────────────────────────
-    def queue(self, address: str, cid: str, row: TokenRow, by: str, member=None) -> dict:
-        """The Tell waits for `row`'s agent. A second one for the thread and the agent is refused 409."""
+    def queue(self, address: str, cid: str, row: TokenRow, by: str, member=None, thread=None) -> dict:
+        """The Tell waits for `row`'s agent. A second one for the thread and the agent is refused 409. `thread` is
+        the comment it is about: its author and time are kept in the row (see `_recycled`)."""
         def change(rows):
             self._revoked(rows)
             if not any((r.name, r.id) == (row.name, row.id) for r in self.hub.tokens.list()):
@@ -139,6 +147,8 @@ class Waiting:
                 raise Refused(409, HAS_IT.format(agent=name))
             t = {"id": str(uuid.uuid4()), "doc": address, "thread": cid, "token": row.name, "tid": row.id,
                  "by": by, "at": time.strftime(STAMP_FORMAT), "seen": None}
+            if thread is not None:
+                t["thread_by"], t["thread_at"] = thread.by, thread.at
             if member is not None:
                 t["member"] = member.id
             rows.append(t)
@@ -161,7 +171,7 @@ class Waiting:
             out, save = [], False
             for t in [t for t in rows if t["doc"] == address and t["tid"] == row.id and t["token"] == row.name]:
                 c = got.by_id(t["thread"])
-                if c is None or c.status != "open":
+                if c is None or c.status != "open" or _recycled(t, c):
                     self._end(rows, [t], "cancelled", reason="closed")
                     save = True
                     continue
@@ -185,9 +195,7 @@ class Waiting:
             gone = [t for t in rows if t["doc"] == address and t["thread"] == cid
                     and (row is None or (t["tid"], t["token"]) == (row.id, row.name))
                     and (not only_member or t.get("member") == (member.id if member else None))]
-            extra = {"seen": any(t["seen"] for t in gone)} if how == "cancelled" else {}
-            if reason:
-                extra["reason"] = reason
+            extra = {"reason": reason} if reason else {}      # `seen` is each row's own, set in `_end` (24)
             self._end(rows, gone, how, **extra)
             return gone, bool(gone)
         return self._change(change)

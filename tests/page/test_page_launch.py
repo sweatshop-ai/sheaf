@@ -2,6 +2,7 @@
 import signal
 import socket
 import stat
+import time
 
 import pytest
 
@@ -182,3 +183,28 @@ def test_a_route_unrouted_while_fetching_does_not_fail_the_next_context(chromium
             p.close()
         close_context(c)
     close_context(new_context(chromium))
+
+
+class StuckContext:
+    """A context whose routes will not come off: `unroute_all` of its page waits for a handler that never ends."""
+
+    def __init__(self):
+        self.pages, self.closed = [self], False
+
+    def unroute_all(self, **kwargs):
+        time.sleep(60)
+
+    def close(self):
+        self.closed = True
+
+
+def test_a_route_that_never_comes_off_cannot_hold_the_teardown_of_its_context(monkeypatch):
+    # CI, run of PR 227: a test cut off by pytest-timeout left a route in route.fetch, and unroute_all waited
+    # for it in the teardown for 360 s, until the stall watch ended the job. A stand-in for the wait: Playwright's
+    # own handler never held unroute_all here, so the real hang could not be made again.
+    monkeypatch.setattr(pagehelp, "CLOSE_BOUND", 1.0)
+    c = StuckContext()
+    began = time.monotonic()
+    close_context(c)
+    assert c.closed, "the context was not closed after its routes would not come off"
+    assert time.monotonic() - began < 10, "close_context outlasted its bound"

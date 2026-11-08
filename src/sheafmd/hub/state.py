@@ -15,6 +15,7 @@ import shutil
 import stat
 import threading
 import time
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -426,10 +427,12 @@ class Tokens:
         return time.strftime(STAMP_FORMAT, time.localtime(self._clock()))
 
     def add(self, name: str, display: str | None = None, write: bool = False,
-            client: str | None = None) -> NewToken:
+            client: str | None = None,
+            clash: "Callable[[list[TokenRow]], str | None] | None" = None) -> NewToken:
         """Make a token and keep its hash. The token is returned here and nowhere else, with the
         display name its replies are signed with; an agent's (`client`) keeps the cleaned client and
-        no display."""
+        no display. `clash`, when given, is called with the rows the file holds once the lock is ours (so two adds at
+        once cannot both pass it) and returns the reason to refuse, or None; the caller reads its config before."""
         if not isinstance(name, str) or not _TOKEN_NAME_RE.fullmatch(name):
             raise TokenError("a token name is 1 to 40 letters, digits, dots, dashes or underscores")
         if client is not None:
@@ -447,6 +450,8 @@ class Tokens:
             rows = self._rows()
             if any(r.get("name") == name for r in self._entries(rows)):
                 raise TokenError(f"a token named {name} already exists")
+            if clash is not None and (why := clash([r for r in map(TokenRow.of, rows) if r is not None])):
+                raise TokenError(why)
             token = new_token()
             who = {"client": client} if client is not None else {"display": shown}
             token_id = secrets.token_hex(8)         # not a secret: it is never compared as one

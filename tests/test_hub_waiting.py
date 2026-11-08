@@ -420,6 +420,16 @@ def test_a_new_comment_that_takes_a_deleted_threads_id_does_not_get_the_old_tell
     assert browser.hub.waiting_tells.waits(DOC, sweep=False) == []
 
 
+def test_an_edit_a_reply_and_a_watcher_pass_leave_the_tell_of_the_same_comment_alone(browser, talk):
+    agent_token()
+    target(browser)
+    assert tell(browser).status == 200
+    assert browser.post("/_/comment", {"doc": DOC, "op": "edit", "id": "c1", "body": "Why pears, exactly?"}).status == 200
+    assert browser.post("/_/comment", {"doc": DOC, "op": "reply", "id": "c1", "body": "A reply."}).status == 200
+    browser.hub.tick()
+    assert browser.hub.waiting_tells.waits(DOC, sweep=False) != [] and hub_rows("tell-cancelled") == []
+
+
 def test_the_row_stores_the_comments_author_and_time(browser, talk):
     from sheafmd import paths
     agent_token()

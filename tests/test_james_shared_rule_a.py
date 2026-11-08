@@ -4,9 +4,10 @@
 create into the private root, and its listings leave the private file out. A file that is open to the project
 (an `issue:` source) is refused just the same: Rule A holds whatever the file's front matter says. Each refusal has the owner's own token as its positive control, on the same tool."""
 import pytest
-from helpers import browser_on, call, door, rpc
+from helpers import browser_on, call, comment, door, rpc
 from two_roots import TwoRoots, git, two_roots
 
+from sheafmd import mcp
 from sheafmd.hub import place, proxy, the_list
 from sheafmd.hub.state import Tokens
 from sheafmd.source import md_hash
@@ -105,20 +106,44 @@ def test_james_shared_token_404_on_private_sheaf(world, tmp_path, tool, by, kind
 def test_a_session_header_on_the_shared_token_opens_no_private_sheaf(world, tool):
     w = world
     w.put(PROJECT_WIDE)
+    comment(w.two.private_repo / NAME, quote="Secret words.")      # a real c1, so reply and resolve fail on the document and not on the id
+    text = (w.two.private_repo / NAME).read_text(encoding="utf-8")
     args = {"read": {}, "threads": {}, "reply": {"id": "c1", "text": "Done."}, "resolve": {"id": "c1"},
-            "update": {"text": PROJECT_WIDE.replace("Secret", "Changed"), "expected_hash": md_hash(PROJECT_WIDE)}}[tool]
-    heads = (w.commits(w.two.list_repo), w.commits(w.two.private_repo))
-    for doc in (w.address, str(w.two.private_repo / NAME)):
-        res = door(w.door, rpc("tools/call", {"name": tool, "arguments": {"doc": doc, **args}}), token=w.tokens[SHARED],
+            "update": {"text": text.replace("# post", "# changed", 1), "expected_hash": md_hash(text)}}[tool]    # leaves the commented words alone
+
+    def with_header(name, arguments, who=SHARED):
+        res = door(w.door, rpc("tools/call", {"name": name, "arguments": arguments}), token=w.tokens[who],
                    headers={"X-James-Session": SID})
-        assert res.status == 200 and res.json()["result"]["isError"], (doc, res.text)
-        assert "Secret words." not in res.text
-    res = door(w.door, rpc("tools/call", {"name": "create", "arguments": {"doc": w.address, "text": PROJECT_WIDE}}),
-               token=w.tokens[SHARED], headers={"X-James-Session": SID})
-    assert res.json()["result"]["isError"]
+        assert res.status == 200, res.text
+        return res.json()["result"]["isError"], res.text
+
+    heads = (w.commits(w.two.list_repo), w.commits(w.two.private_repo))
+    for doc, twin in ((w.address, w.address.replace("post.md", "none.md")),
+                      (str(w.two.private_repo / NAME), str(w.two.private_repo / "acme/blog/none.md"))):
+        is_error, got = with_header(tool, {"doc": doc, **args})
+        _, missing = with_header(tool, {"doc": twin, **args})
+        assert is_error and "Secret words." not in got, (doc, got)
+        assert got.replace(doc, "D") == missing.replace(twin, "D"), (doc, got)               # the answer of a missing document
     assert w.hub.commits.settle()
-    assert (w.two.private_repo / NAME).read_text(encoding="utf-8") == PROJECT_WIDE
+    assert (w.two.private_repo / NAME).read_text(encoding="utf-8") == text
     assert (w.commits(w.two.list_repo), w.commits(w.two.private_repo)) == heads
+    control = with_header(tool, {"doc": w.address, **args}, who=OWN)                         # positive control: the owner opens it with the same header
+    assert not control[0], control[1]
+
+
+def test_a_session_header_on_the_shared_token_creates_nothing_in_the_private_root(world):
+    """Rule F with the header: a free name, so it is the home of the text and not a taken name that refuses."""
+    w = world
+    fresh = w.address.replace("post.md", "fresh.md")
+    heads = (w.commits(w.two.list_repo), w.commits(w.two.private_repo))
+    res = door(w.door, rpc("tools/call", {"name": "create", "arguments": {"doc": fresh, "text": OWNED_BY_ALICE}}),
+               token=w.tokens[SHARED], headers={"X-James-Session": SID})
+    assert res.json()["result"]["isError"] and "cannot be made" in res.text and place.PRIVATE_ROOT in res.text, res.text
+    assert w.hub.commits.settle()
+    assert not list(w.two.private_repo.rglob("fresh.md")) and not list(w.two.list_repo.rglob("fresh.md"))
+    assert (w.commits(w.two.list_repo), w.commits(w.two.private_repo)) == heads
+    assert not w.call("create", OWN, doc=fresh, text=OWNED_BY_ALICE)[0]                    # positive control: the owner makes it
+    assert (w.two.private_repo / "acme/blog/fresh.md").is_file()
 
 
 def test_james_shared_token_cannot_create_in_private_root(world):
@@ -165,3 +190,17 @@ def test_james_shared_token_lists_no_private_file(world, kind):
     (w.two.list_repo / "acme/blog/open.md").write_text(OPEN, encoding="utf-8")              # a shared file is listed
     is_error, got = w.call("documents", SHARED, open_only=False)
     assert not is_error and "acme/blog/open.md" in str(got) and NAME not in str(got)
+
+
+@pytest.mark.parametrize("kind", TEXTS)
+def test_the_listing_filter_alone_keeps_a_private_file_from_the_shared_member(world, monkeypatch, kind):
+    """Rule D on its own: with the door's per-file judgment (Rule A among it) answering yes to everything, the shared
+    member's listing still leaves out a private root's file, because that root is not listed to it."""
+    w = world
+    w.put(TEXTS[kind])
+    monkeypatch.setattr(mcp.Door, "_sees", lambda self, *a, **kw: True)
+    for args in ({"open_only": False}, {"root": w.root.name, "open_only": False}):
+        is_error, got = w.call("documents", SHARED, **args)
+        assert not is_error and NAME not in str(got), (args, got)
+    is_error, got = w.call("documents", OWN, open_only=False)                               # positive control: the owner's root is listed
+    assert not is_error and NAME in str(got), got

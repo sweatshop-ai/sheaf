@@ -198,6 +198,51 @@ def test_a_cancel_from_the_page_ends_it_and_says_whether_the_agent_had_seen_it(b
     assert named(sub.drain(), "tell-cancelled") == [{"id": "c1", "seen": True}]
 
 
+def test_ending_a_thread_tells_each_owners_page_its_own_seen_not_the_other_owners(front, browser, talk, work, other):
+    """Row 24: the hub person's Tell was seen and Bea's was not (and the other way round); the thread resolves, and
+    each page's toast says only what its own agent did."""
+    for hub_person_saw in (True, False):
+        ada, bea = agent_token("ada-chatgpt"), agent_token("bea-chatgpt")
+        front.hub.proxy = members(work, other, bea=["bea-chatgpt"], cal=[])
+        assert pick(front, "agent:bea-chatgpt").status == 200
+        target(browser)
+        mine, own = front.get(f"/_/live?doc={DOC}").stream, browser.get(f"/_/live?doc={DOC}").stream
+        assert tell(browser).status == 200
+        r = front.post("/_/comment", {"doc": DOC, "op": "reply", "id": "c1", "body": "Please do.", "tell": True})
+        assert r.status == 200 and "tellError" not in r.json(), r.text
+        documents(browser, ada if hub_person_saw else bea)
+        mine.drain(), own.drain()
+        assert browser.post("/_/comment", {"doc": DOC, "op": "status", "id": "c1", "status": "resolved"}).status == 200
+        assert named(own.drain(), "tell-cancelled") == [{"id": "c1", "seen": hub_person_saw, "reason": "closed"}]
+        assert named(mine.drain(), "tell-cancelled") == [{"id": "c1", "seen": not hub_person_saw, "reason": "closed"}]
+        browser.post("/_/comment", {"doc": DOC, "op": "status", "id": "c1", "status": "open"})
+        Tokens().revoke("ada-chatgpt"), Tokens().revoke("bea-chatgpt")
+
+
+# ── row 25: the route is judged again at the write, for every route ──────────
+
+@pytest.mark.parametrize("first, then", [(None, "box"), (None, "relay"), ("box", None), ("box", "relay"),
+                                          ("relay", None), ("relay", "box")])
+def test_a_route_that_changes_between_the_check_and_the_write_queues_nothing_for_the_agent(
+        front, browser, talk, work, other, monkeypatch, first, then):
+    from sheafmd.hub import proxy
+    from sheafmd.hub.handler import Handler
+    agent_token("bea-chatgpt")
+    front.hub.proxy = members(work, other, bea=["bea-chatgpt"], cal=[])
+    assert pick(front, "agent:bea-chatgpt").status == 200
+    before = talk.read_text(encoding="utf-8")
+    calls = []
+
+    def moving(self, *a, **k):
+        calls.append(1)
+        return first if len(calls) == 1 else then
+    monkeypatch.setattr(Handler, "_work_route", moving)
+    r = front.post("/_/comment", {"doc": DOC, "op": "reply", "id": "c1", "body": "Please do.", "tell": True})
+    assert r.status == 400 and r.json()["error"] == proxy.PROXY_LINE, r.text
+    assert talk.read_text(encoding="utf-8") == before
+    assert front.hub.waiting_tells.pending(row("bea-chatgpt")) == set()
+
+
 # ── isolation ────────────────────────────────────────────────────────────────
 
 def test_a_token_never_sees_the_tell_of_another_and_another_agents_reply_does_not_end_it(browser, talk):
@@ -338,6 +383,76 @@ def test_each_step_writes_a_row_with_the_tokens_name_and_id_and_never_the_text(b
         assert "pears" not in str(r)
 
 
+# ── row 26: a recycled thread id never carries the old Tell ──────────────────
+
+def swap_c1(path, at="2026-11-01T09:00", by="Eve", body="Why plums?"):
+    """Delete c1 and add a new comment, which `next_id` numbers c1 again, in one write from outside."""
+    def swap(t):
+        t = rdc.delete(t, "c1")
+        blk, s, e = rdc.find_quote(t, "Second paragraph")
+        return rdc.add_comment(t, blk, s, e, "Second paragraph", body, by, at)[0]
+    update_file(path, swap)
+    assert rdc.parse(path.read_text(encoding="utf-8")).by_id("c1").by == by
+
+
+def test_a_new_comment_that_takes_a_deleted_threads_id_does_not_get_the_old_tell_at_the_listing(browser, talk):
+    token = agent_token()
+    target(browser)
+    assert tell(browser).status == 200
+    swap_c1(talk)
+    browser.hub.entries.pop(DOC, None)                    # the hub holds nothing for the document: the watcher skips it
+    browser.hub.tick()
+    assert documents(browser, token)[0]["tells"] == []
+    assert browser.hub.waiting_tells.pending(row("ada-chatgpt")) == set()
+    r, = hub_rows("tell-cancelled")
+    assert r["token"] == "ada-chatgpt" and r["thread"] == "c1" and r["reason"] == "closed" and "plums" not in str(r)
+
+
+def test_a_new_comment_that_takes_a_deleted_threads_id_does_not_get_the_old_tell_at_the_watchers_pass(browser, talk):
+    agent_token()
+    target(browser)
+    sub = tab(browser.hub)
+    assert tell(browser).status == 200
+    sub.drain()
+    swap_c1(talk)
+    browser.hub.tick()
+    assert named(sub.drain(), "tell-cancelled")[0]["id"] == "c1"
+    assert browser.hub.waiting_tells.waits(DOC, sweep=False) == []
+
+
+def test_an_edit_a_reply_and_a_watcher_pass_leave_the_tell_of_the_same_comment_alone(browser, talk):
+    agent_token()
+    target(browser)
+    assert tell(browser).status == 200
+    assert browser.post("/_/comment", {"doc": DOC, "op": "edit", "id": "c1", "body": "Why pears, exactly?"}).status == 200
+    assert browser.post("/_/comment", {"doc": DOC, "op": "reply", "id": "c1", "body": "A reply."}).status == 200
+    browser.hub.tick()
+    assert browser.hub.waiting_tells.waits(DOC, sweep=False) != [] and hub_rows("tell-cancelled") == []
+
+
+def test_a_new_comment_of_the_same_author_in_the_same_minute_on_another_passage_does_not_get_the_old_tell(browser, talk):
+    agent_token()
+    target(browser)
+    assert tell(browser).status == 200
+    def swap(t):
+        t = rdc.delete(t, "c1")
+        blk, s, e = rdc.find_quote(t, "First paragraph")
+        return rdc.add_comment(t, blk, s, e, "First paragraph", "Another thing.", "Ada", "2026-10-14T10:00")[0]
+    update_file(talk, swap)
+    assert rdc.parse(talk.read_text(encoding="utf-8")).by_id("c1").quote == "First paragraph"
+    browser.hub.tick()
+    assert browser.hub.waiting_tells.waits(DOC, sweep=False) == []
+
+
+def test_the_row_stores_the_comments_author_and_time(browser, talk):
+    from sheafmd import paths
+    agent_token()
+    target(browser)
+    assert tell(browser).status == 200
+    row_, = json.loads((paths.state_dir() / "tells.json").read_text(encoding="utf-8"))
+    assert (row_["thread_by"], row_["thread_at"]) == ("Ada", "2026-10-14T10:00")
+
+
 # ── a real restart ───────────────────────────────────────────────────────────
 
 class Process:
@@ -416,6 +531,48 @@ def test_a_tell_survives_a_real_restart_of_the_hub_process(work):
         assert status == 200 and rows[0]["doc"] == DOC and rows[0]["tells"][0]["thread"] == "c1"
         status, page = hub.send("GET", f"/_/doc?doc={DOC}", None, signed_in)
         assert [(w["id"], w["state"]) for w in page["telling"]] == [("c1", "seen")]
+    finally:
+        hub.stop()
+
+
+def test_a_tell_written_before_row_26_still_lists_and_ends_after_a_real_restart(work):
+    from sheafmd import paths
+    from sheafmd.hub.core import Hub
+    port, release = claim_port()
+    release()
+    doc = work / "plan.md"
+    doc.write_text(PLAN, encoding="utf-8")
+    comment(doc)
+    token = agent_token()
+    key = paths.ensure_key()
+    cookie = Hub(port=port, key=key, started_by="test").auth
+    signed_in = {"Cookie": f"{cookie.cookie_name}={cookie.cookie_value()}"}
+    door = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    def call(name, arguments):
+        ask = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": arguments}}
+        status, got = hub.send("POST", "/_/mcp", ask, door)
+        return status, json.loads(got["result"]["content"][0]["text"])
+    hub = Process(port)
+    try:
+        hub.start()
+        assert hub.send("POST", "/_/render", {"path": str(doc), "settings": {}, "target": None},
+                        {"X-Sheaf-Key": key})[0] == 200
+        assert hub.send("POST", "/_/target", {"doc": DOC, "target": "agent:ada-chatgpt"}, signed_in)[0] == 200
+        assert hub.send("POST", "/_/tell", {"doc": DOC, "id": "c1"}, signed_in)[0] == 200
+        hub.stop()
+        file = paths.state_dir() / "tells.json"
+        rows = json.loads(file.read_text(encoding="utf-8"))
+        for r in rows:
+            r.pop("thread_by", None), r.pop("thread_at", None)                 # the shape a Tell had before row 26
+        file.write_text(json.dumps(rows), encoding="utf-8")
+        hub.start()
+        status, got = call("documents", {})
+        assert status == 200 and got[0]["tells"][0]["thread"] == "c1"
+        assert call("resolve", {"doc": DOC, "id": "c1"})[0] == 200
+        status, page = hub.send("GET", f"/_/doc?doc={DOC}", None, signed_in)
+        assert page["telling"] == []
+        assert json.loads(file.read_text(encoding="utf-8")) == []
     finally:
         hub.stop()
 

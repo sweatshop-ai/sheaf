@@ -1565,7 +1565,7 @@ class Handler:
                 seen = place.UNJUDGED if opened is None else place.opened_private(self.hub, opened)
                 if not self.hub.may_open(member, e.address, fm, seen):
                     raise Refuse(404, "no such document")
-                if to_box and self._work_route(e.address, text, req.member) != route:
+                if (to_box or to_agent) and self._work_route(e.address, text, req.member) != route:
                     raise Refuse(400, proxy.PROXY_LINE)
                 if route == "relay":        # the fork the Tell goes to: no newer one (#134)
                     judged[:] = [work.sessions(fm)[0]["id"]]

@@ -56,10 +56,10 @@ def _stale(t: dict, c) -> bool:
 
 
 def _recycled(t: dict, c) -> bool:
-    """The row remembers whose comment it was told about and when it was written (`thread_by`, `thread_at`): a
+    """The row remembers whose comment it was told about and when it was written (`thread_by`, `thread_at`, `thread_quote`: `at` is to the minute, so the quote tells two comments of one author apart): a
     thread id the file hands out again (`next_id` is the highest plus one) is another comment, and the old Tell
     is not its Tell. A row from before those two keys has nothing to compare and stays as it was."""
-    return "thread_at" in t and (t.get("thread_by"), t["thread_at"]) != (c.by, c.at)
+    return "thread_at" in t and (t.get("thread_by"), t["thread_at"], t.get("thread_quote")) != (c.by, c.at, c.quote)
 
 
 def _file() -> Path:
@@ -153,7 +153,7 @@ class Waiting:
             t = {"id": str(uuid.uuid4()), "doc": address, "thread": cid, "token": row.name, "tid": row.id,
                  "by": by, "at": time.strftime(STAMP_FORMAT), "seen": None}
             if thread is not None:
-                t["thread_by"], t["thread_at"] = thread.by, thread.at
+                t["thread_by"], t["thread_at"], t["thread_quote"] = thread.by, thread.at, thread.quote
             if member is not None:
                 t["member"] = member.id
             rows.append(t)

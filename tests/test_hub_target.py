@@ -207,6 +207,29 @@ def test_the_kept_session_stays_when_a_render_moved_the_target_off_the_session_a
     assert "session" not in stored(browser)
 
 
+def test_a_render_that_beat_the_tell_to_its_wait_still_leaves_the_session_the_tell_goes_to(browser, talk):
+    render(browser, talk)
+    told = browser.hub.target(DOC)                                  # the Tell looked the target up: s-1
+    render(browser, talk, dict(SESSION, session="s-2"))             # no Tell was live yet, so nothing was kept
+    assert "session" not in stored(browser)
+    browser.hub.drop_kept(DOC, "c1", told)                          # the Tell begins its wait and goes to s-1
+    assert stored(browser)["target"]["session"] == "s-2" and stored(browser)["session"]["session"] == "s-1"
+    assert browser.hub.target(DOC, kept=True).session == "s-1"
+
+
+def test_a_tell_sent_again_while_the_first_still_waits_leaves_the_session_kept_for_it(browser, talk):
+    release = threading.Event()
+    render(browser, talk)
+    browser.hub.runner.start("tell", DOC, "c1", lambda job: release.wait(10))
+    try:
+        render(browser, talk, dict(SESSION, session="s-2"))
+        browser.hub.drop_kept(DOC, "c1", browser.hub.target(DOC), True)
+        assert stored(browser)["session"]["session"] == "s-1"
+    finally:
+        release.set()
+        browser.hub.runner.join(10)
+
+
 def test_a_pick_while_a_tell_runs_does_not_replace_the_session_kept_for_it(browser, talk):
     release = threading.Event()
     token = Tokens().add("ada-chatgpt", client="ChatGPT")

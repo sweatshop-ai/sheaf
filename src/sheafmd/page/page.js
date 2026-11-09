@@ -478,10 +478,26 @@ var create = function (ROOT, CFG, opts) {
   }
 
   if (canEdit) {
-    var modes = el('div', { id: 'rd-mode' }, '<button data-m="comment">Comment</button><button data-m="edit">Edit</button>');
-    modes.addEventListener('click', function (e) {
-      var m = e.target.getAttribute('data-m');
-      if (m) setEditing(m === 'edit');
+    // One button, a toggle: Edit (E) in Comment mode, Save (Ctrl+S) in Edit mode. Both labels sit in one grid cell, the
+    // hidden one keeping the room, so the button is the same size either way. A touch screen has no keys to hint at.
+    var keys = !window.matchMedia('(pointer: coarse)').matches;
+    var modes = el('div', { id: 'rd-mode' }, '<button data-m="edit"><span class="rd-l-edit">Edit' + (keys ? ' (E)' : '') +
+                   '</span><span class="rd-l-save">Save' + (keys ? ' (Ctrl+S)' : '') + '</span></button>');
+    var leaving = false;
+    modes.addEventListener('click', async function (e) {
+      var b = e.target.closest ? e.target.closest('button') : null, m = b && b.getAttribute('data-m');
+      if (m === 'edit') { setEditing(true); return; }
+      if (m !== 'save' || leaving) return;
+      // Save, then Comment mode. A save that failed or was refused (save() has said so) keeps the person in Edit, and so
+      // does text typed while the request was out: nothing typed is left without its mode.
+      leaving = true;
+      try {
+        if (await save() && !dirty().length) {
+          setEditing(false);
+          // A save that merged reloads the page and the reload brings back the mode it was written with.
+          try { var kept = JSON.parse(sessionStorage.getItem(KEYS + 'rd-keep') || 'null'); if (kept) { kept.editing = false; sessionStorage.setItem(KEYS + 'rd-keep', JSON.stringify(kept)); } } catch (x) {}
+        }
+      } finally { leaving = false; }
     });
     BODY.appendChild(modes);
   }
@@ -740,6 +756,7 @@ var create = function (ROOT, CFG, opts) {
     if (!canEdit) return;
     editing = on;
     BODY.classList.toggle('rd-editing', on);
+    var tg = modes.querySelector('button'); if (tg) tg.setAttribute('data-m', on ? 'save' : 'edit');
     blocks.forEach(function (b) {
       var ok = editable.has(b.i);
       b.nodes.forEach(function (n) {
@@ -1661,19 +1678,25 @@ var create = function (ROOT, CFG, opts) {
     var sc = pop.querySelector('.rd-scroll');
     if (!sc) return;
     sc.style.minHeight = '';
-    sc.style.minHeight = Math.min(sc.scrollHeight, THREAD_FLOOR) + 'px';
+    // The floor is at least the last message, whole (up to LAST_ROOM): the thread opens on it and the field does not cut it.
+    var msgs = sc.querySelectorAll('.rd-msg'), lastH = msgs.length ? msgs[msgs.length - 1].offsetHeight + 8 : 0;
+    sc.style.minHeight = Math.min(sc.scrollHeight, Math.max(THREAD_FLOOR, Math.min(lastH, LAST_ROOM))) + 'px';
   }
   function replace() {
     if (!pop) return;
+    var sc = pop.querySelector('.rd-scroll'), atEnd = !!sc && sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 4;
     keepThread();
-    if (dock()) return;
-    undock();
-    if (pop._target && pop._target.isConnected && pop.style.position !== 'fixed') place(pop, pop._target);
+    if (!dock()) {
+      undock();
+      if (pop._target && pop._target.isConnected && pop.style.position !== 'fixed') place(pop, pop._target);
+    }
+    if (atEnd) sc.scrollTop = sc.scrollHeight;       // a thread that was at its last message stays there when the box changes size
   }
   // A touch screen's keyboard shrinks the visual viewport and leaves the layout viewport as it was (iOS), so a form
   // placed in the text can lie behind it. A popover with a form is docked, fixed, to the foot of what can be seen,
   // and above the suggestion bar and the AutoFill pill that iOS draws over the page there.
   var THREAD_FLOOR = 84;                // px of a thread kept in view when the form takes the rest: the author line and two lines
+  var LAST_ROOM = 160;                  // px at most that the floor grows to keep the last message whole (a longer one scrolls)
   var KEY_ROOM = 56;                    // px kept clear above the keyboard, for its suggestion bar and the AutoFill pill
   var DOCK_GAP = 8, DOCK_SIDE = 16;     // px kept clear of the head of the visible area, and of its sides
   var KEY_MIN = 100, ZOOMED = 1.01;     // a visual viewport this much shorter is a keyboard; a larger scale is a pinch zoom
@@ -1766,8 +1789,8 @@ var create = function (ROOT, CFG, opts) {
     if (m.role === 'action') return '<span class="rd-who rd-who-tell">' + name + '\u2019s action</span>';
     return '<span class="rd-who">' + name + '</span>';
   }
-  // The band of the box: the passage, then Minimize and Close. Closing an open thread resolves it; the little
-  // else the thread offers waits in the small menu.
+  // The band of the box: the passage, then Resolve (−, an open thread only) and Close (×, which keeps everything,
+  // as Escape does). The little else the thread offers waits in the small menu.
   function bandHtml(c) {
     var open = c.status === 'open', more = !open || mine(c);
     return '<div class="rd-head"><div class="rd-quote">“' + esc(c.quote) + '”' +
@@ -1775,9 +1798,8 @@ var create = function (ROOT, CFG, opts) {
       (!canSave ? '' : (more ? '<details class="rd-more"><summary aria-label="More" title="More">\u22EF</summary><div>' +
         (open ? '' : '<button data-a="status">Reopen</button>') +
         (mine(c) ? '<button data-a="edit">Edit</button><button data-a="delete">Delete</button>' : '') + '</div></details>' : '') +
-        '<button data-a="minimize" title="Minimize" aria-label="Minimize">\u2212</button>' +
-        (open ? '<button data-a="status" title="Resolve" aria-label="Resolve">\u00D7</button>'
-              : '<button data-a="minimize" title="Close" aria-label="Close">\u00D7</button>')) + '</div>';
+        (open ? '<button data-a="status" title="Resolve" aria-label="Resolve">\u2212</button>' : '') +
+        '<button data-a="minimize" title="Close" aria-label="Close">\u00D7</button>') + '</div>';
   }
   function thread(c) {
     var h = '<div class="rd-msg' + (mine(c) ? ' rd-mine' : '') + '">' + whoHtml({ by: c.by, role: null }) + '<span class="rd-when">' +
@@ -2015,7 +2037,7 @@ var create = function (ROOT, CFG, opts) {
         if (a === 'minimize') { closePopover(); return; }
         if (a === 'status') {
           var opened = c.status !== 'open';
-          if (!opened && !stashAll()) return;       // × resolves: not while its text has nowhere to go
+          if (!opened && !stashAll()) return;       // − resolves: not while its text has nowhere to go
           op({ op: 'status', id: id, status: opened ? 'open' : 'resolved' }).then(function (j) { if (j && !opened && popId === id) closePopover(); });
         }
         else if (a === 'delete') op({ op: 'delete', id: id });
@@ -2532,8 +2554,9 @@ var create = function (ROOT, CFG, opts) {
     if (!t) return;
     pending = t;
     // A refused selection gets the button's place, disabled, with the reason as its label.
+    // On a phone the bar quotes the selected words above the field's own line: it reads as the answer to the selection.
     cbtn = el('button', t.error ? { id: 'rd-comment-btn', disabled: '', title: t.error } : { id: 'rd-comment-btn' },
-              t.error || (COARSE.matches ? WRITE : 'Comment'));
+              t.error || (COARSE.matches ? '<span class="rd-bar-quote">“' + esc(t.quote) + '”</span><span class="rd-bar-write">' + WRITE + '</span>' : 'Comment'));
     BODY.appendChild(cbtn);
     if (COARSE.matches) {
       // A touch screen has a callout of its own (Copy, Search, ...) beside the selection, above or below it,

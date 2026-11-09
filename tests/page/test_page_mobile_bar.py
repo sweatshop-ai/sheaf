@@ -54,17 +54,20 @@ def test_touching_a_number_puts_the_cursor_in_the_field_too(phone, site):
     assert focused(p) == "TEXTAREA", "the cursor is not in the field"
 
 
-def test_the_bar_looks_like_the_chats_field(phone):
+def test_the_bar_is_shaped_like_the_chats_field_and_stronger(phone):
+    """Restated on 2026-11-09: the shape, size and font are the field's, the border is stronger (the bar was not noticed), and its
+    placeholder line is the field's; the quote line above it is tested in test_page_mobile_composer.py."""
     p = raise_bar(phone)
     bar = p.evaluate("""() => { const s = getComputedStyle(document.querySelector('#rd-comment-btn')), b = document.querySelector('#rd-comment-btn').getBoundingClientRect();
-      return {radius: s.borderTopLeftRadius, border: s.borderTopColor, size: s.fontSize, family: s.fontFamily, bg: s.backgroundColor, text: document.querySelector('#rd-comment-btn').textContent, w: b.width}; }""")
+      return {radius: s.borderTopLeftRadius, border: s.borderTopColor, size: s.fontSize, family: s.fontFamily, bg: s.backgroundColor, text: document.querySelector('#rd-comment-btn .rd-bar-write').textContent, w: b.width,
+      bw: parseFloat(s.borderTopWidth)}; }""")
     p.touchscreen.tap(*centre(p, BTN))
     p.wait_for_selector(FIELD)
     form = p.evaluate("""() => { const f = document.querySelector('#rd-popover .rd-form'), s = getComputedStyle(f), t = document.querySelector('#rd-popover textarea');
       return {radius: s.borderTopLeftRadius, border: s.borderTopColor, size: getComputedStyle(t).fontSize, family: getComputedStyle(t).fontFamily,
               bg: s.backgroundColor, text: t.placeholder}; }""")
     assert bar["text"] == form["text"], "the bar does not carry the field's placeholder"
-    assert bar["radius"] == form["radius"] and bar["border"] == form["border"]
+    assert bar["radius"] == form["radius"] and bar["border"] != form["border"] and bar["bw"] >= 1.5, bar
     assert bar["size"] == form["size"] and bar["family"] == form["family"]
     assert bar["w"] > 390 * 0.7, "the bar is not a wide field"
 

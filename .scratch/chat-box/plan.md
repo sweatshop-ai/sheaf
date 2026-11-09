@@ -25,18 +25,16 @@ La boîte reprend donc leur composition : grand cadre arrondi, texte en haut, ro
 | Défilement | Le fil s'ouvre sur le dernier message et défile vers le haut |
 | Curseur | Déjà dans le champ à l'ouverture, sur desktop et sur téléphone |
 | Sélection sur desktop | En mode Comment, la boîte s'ouvre directement |
-| Sélection sur téléphone | Barre en forme de champ en bas, un toucher ; le menu Copier reste libre |
+| Sélection sur téléphone | Barre en forme de champ en bas, qui cite les mots sélectionnés, bordure plus marquée et courte entrée ; un toucher ; le menu Copier reste libre |
 | Copier | Avec le champ vide, Ctrl+C copie le passage sélectionné |
-| Modes | Bascule Comment / Edit toujours visible ; en Edit, une sélection reste une sélection |
+| Modes | Un seul bouton à bascule toujours visible : « Edit (E) » en mode Comment, « Save (Ctrl+S) » en mode Edit (« Edit » et « Save » au toucher), même taille ; Save enregistre puis revient en mode Comment, et reste en Edit si l'enregistrement échoue ; en Edit, une sélection reste une sélection |
 
 ## Ce que font les boutons du bandeau et du menu
 
 | Contrôle | Info-bulle | Effet |
 |---|---|---|
-| − | Minimize | Ferme la boîte, la conversation et le texte restent ; même effet qu'Échap ou un clic à côté |
-| × sur un fil ouvert | Resolve | Résout le fil ; un texte non envoyé part dans la liste « not sent » |
-| × sur un fil résolu | Close | Ferme simplement |
-| × sur un nouveau message | Close | Ferme ; le texte part dans la liste « not sent » |
+| × | Close | Ferme la boîte et garde tout ; même effet qu'Échap ou un clic à côté ; sur un fil ouvert, un fil résolu et un nouveau message |
+| − sur un fil ouvert | Resolve | Résout le fil ; un texte non envoyé part dans la liste « not sent ». Absent sur un fil résolu et sur un nouveau message (Reopen reste dans ⋯) |
 | ⋯ | More | Edit et Delete sur ses propres messages, Reopen sur un fil résolu |
 
 ## Les blocs à copier pour un mail, un titre ou un prompt

@@ -73,11 +73,14 @@ def test_the_form_docks_at_the_head_of_the_screen_when_a_keyboard_opens_after_it
     assert got["pop"][1] <= 16, got
 
 
-def test_the_buttons_come_before_the_field_so_none_is_under_the_keyboard(phone):
+def test_the_field_comes_first_and_the_arrow_under_it_all_above_the_keyboard(phone):
+    """Restated on 2026-11-09 (the iPhone showed the arrow above the field, the hint between): the layout is the desktop's,
+    the text at the top of the frame, the round arrow under it, and none of them under the keyboard (the popover is docked
+    at the head of what can be seen, so everything of it is above the keyboard whatever its order)."""
     page = composer(phone)
     keyboard(page, 844 - KEYBOARD)
-    got = rects(page)
-    assert got["buttons"] and all(b[3] <= got["field"][1] for b in got["buttons"]), got
+    got = inside(page, 0, 844 - KEYBOARD - ACCESSORY)
+    assert got["buttons"] and all(b[1] >= got["field"][3] - 1 for b in got["buttons"]), got
 
 
 def test_the_form_follows_the_visual_viewport_when_iOS_scrolls_it(phone):
@@ -212,7 +215,8 @@ def test_the_thread_floor_follows_the_width_the_thread_wraps_at(touch_tab):
     page.set_viewport_size({"width": 230, "height": 844})
     page.wait_for_timeout(300)
     got = page.evaluate("""(() => { const s = document.querySelector('#rd-popover .rd-scroll');
-        return [parseFloat(s.style.minHeight), Math.min(s.scrollHeight, 84)]; })()""")
+        const m = [...s.querySelectorAll('.rd-msg')].pop();
+        return [parseFloat(s.style.minHeight), Math.min(s.scrollHeight, Math.max(84, Math.min(m.offsetHeight + 8, 160)))]; })()""")
     assert abs(got[0] - got[1]) < 1 and got[1] > 80, got
 
 
@@ -229,5 +233,6 @@ def test_the_thread_floor_follows_a_resize_with_a_mouse_too(tab):
     page.set_viewport_size({"width": 230, "height": 844})
     page.wait_for_timeout(300)
     got = page.evaluate("""(() => { const s = document.querySelector('#rd-popover .rd-scroll');
-        return [parseFloat(s.style.minHeight), Math.min(s.scrollHeight, 84)]; })()""")
+        const m = [...s.querySelectorAll('.rd-msg')].pop();
+        return [parseFloat(s.style.minHeight), Math.min(s.scrollHeight, Math.max(84, Math.min(m.offsetHeight + 8, 160)))]; })()""")
     assert abs(got[0] - got[1]) < 1 and got[1] > 80, got

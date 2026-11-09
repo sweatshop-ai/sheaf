@@ -98,17 +98,38 @@ def test_without_an_agent_the_message_stays_a_comment_and_the_box_says_why(tab, 
     until(lambda: "Noted." in site.file.read_text(encoding="utf-8"), what="the reply in the file")
 
 
-def test_resolve_is_a_small_button_at_the_top_right_and_stays_while_writing(tab, site):
+def test_the_minus_resolves_an_open_thread_and_stays_while_writing(tab, site):
+    """The minus is Resolve and the cross is Close (swapped on 2026-11-09 after a trial: the cross resolved a thread by accident)."""
     p = open_thread(tab, site)
-    button, box = p.locator("#rd-popover button[data-a=status]").bounding_box(), p.locator("#rd-popover").bounding_box()
-    assert button["y"] - box["y"] < 24 and box["x"] + box["width"] - (button["x"] + button["width"]) < 60, button
+    button, box = p.locator("#rd-popover button[title=Resolve]").bounding_box(), p.locator("#rd-popover").bounding_box()
+    assert button["y"] - box["y"] < 24 and box["x"] + box["width"] - (button["x"] + button["width"]) < 90, button
+    assert p.inner_text("#rd-popover button[title=Resolve]") == "\u2212" and p.inner_text("#rd-popover button[title=Close]") == "\u00D7"
+    assert p.locator("#rd-popover button[title=Minimize]").count() == 0
     p.fill(FIELD, "half a thought")
-    assert p.is_visible("#rd-popover button[data-a=status]")
-    assert p.get_attribute("#rd-popover button[data-a=status]", "title") == "Resolve"
-    p.click("#rd-popover button[data-a=status]")
+    assert p.is_visible("#rd-popover button[title=Resolve]")
+    p.click("#rd-popover button[title=Resolve]")
     until(lambda: rdc.parse(site.file.read_text(encoding="utf-8")).comments[0].status == "resolved", what="the thread resolved")
     until(lambda: not p.is_visible("#rd-popover textarea") or p.input_value("#rd-popover textarea") == "", what="the box to close")
     until(lambda: p.locator("#rd-unsent").count() == 1, what="the text kept in the unsent list")
+
+
+def test_the_cross_closes_an_open_thread_and_keeps_everything(tab, site):
+    p = open_thread(tab, site)
+    p.fill(FIELD, "half a thought")
+    p.click("#rd-popover button[title=Close]")
+    assert p.locator("#rd-popover").count() == 0
+    assert rdc.parse(site.file.read_text(encoding="utf-8")).comments[0].status == "open", "the cross resolved the thread"
+    p.click(".rd-badge")
+    until(lambda: p.input_value(FIELD) == "half a thought", what="the text back in the box")
+
+
+def test_there_is_no_minus_where_there_is_nothing_to_resolve(tab, site):
+    p = open_thread(tab, site)
+    p.keyboard.press("Escape")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    assert p.locator("#rd-popover button[title=Close]").count() == 1
+    assert p.locator("#rd-popover button[title=Resolve]").count() == 0, "a new message offers Resolve"
 
 
 def test_edit_and_delete_wait_in_a_small_menu(tab, site):
@@ -228,7 +249,7 @@ def test_in_edit_mode_a_selection_only_selects(tab, site):
     tab.page.wait_for_timeout(500)
     assert tab.page.locator("#rd-popover").count() == 0
     assert tab.page.locator("#rd-comment-btn").count() == 0
-    tab.page.click("#rd-mode button[data-m=comment]")
+    tab.page.click("#rd-mode button[data-m=save]")
     select(tab.page, at(P1, "apples"), at(P1, "apples", None))
     tab.page.wait_for_selector(FIELD)
 
@@ -256,7 +277,8 @@ def test_a_resolved_thread_closes_with_the_cross_and_reopens_from_the_menu(tab, 
     p.click(".rd-badge")
     p.wait_for_selector(FIELD)
     assert p.get_attribute("#rd-popover .rd-head > button:last-child", "title") == "Close"
-    assert p.locator("#rd-popover .rd-head button[data-a=status][title=Resolve]").count() == 0
+    assert p.locator("#rd-popover .rd-head button[title=Resolve]").count() == 0, "a resolved thread offers Resolve"
+    assert p.inner_text("#rd-popover .rd-head > button:last-child") == "\u00D7"
     p.click("#rd-popover .rd-more summary")
     assert p.is_visible("#rd-popover .rd-more button[data-a=status]:has-text('Reopen')")
     assert p.is_visible("#rd-popover .rd-more button[data-a=edit]") and p.is_visible("#rd-popover .rd-more button[data-a=delete]")

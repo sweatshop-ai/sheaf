@@ -295,7 +295,7 @@ def test_in_edit_mode_typing_over_a_selected_word_raises_no_button_and_paints_no
 def test_a_word_selected_in_edit_mode_gives_the_whole_run_when_the_person_switches_to_comment_and_selects_again(editing):
     p = editing.page
     double_click(p, "main strong", "deadline")
-    p.click("#rd-mode button[data-m=comment]")
+    p.click("#rd-mode button[data-m=save]")
     select(p, at("main strong", "deadline"), at("main strong", "deadline", None))
     p.wait_for_selector(FIELD)
     assert quoted(p) == "Important note about the deadline"

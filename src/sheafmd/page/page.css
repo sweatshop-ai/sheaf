@@ -121,10 +121,11 @@
 #rd-comment-btn.rd-bar{position:fixed;left:8px;max-width:calc(100vw - 96px);min-height:44px;padding:8px 16px;font-size:14px;text-align:left;white-space:normal}
 /* iOS zooms into a field under 16px and pans the page sideways with it. */
 @media (pointer:coarse){#rd-popover textarea,#rd-notice textarea{font-size:16px}html{overflow-x:clip}}
-/* Docked above the keyboard: the quote, the buttons, then the field. */
-#rd-popover.rd-docked .rd-form{display:flex;flex-direction:column}
-#rd-popover.rd-docked .rd-form .rd-actions{order:-1;margin:0 0 8px}
-#rd-popover.rd-docked .rd-form textarea{margin-top:0}
+/* The bar quotes the selection above its own line, and wears a stronger border than the field's with a short rise. */
+#rd-comment-btn.rd-bar .rd-bar-quote{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px;line-height:1.4;font-style:italic;color:var(--fg,#000);opacity:.85;margin-bottom:2px}
+#rd-comment-btn.rd-bar .rd-bar-write{display:block}
+@keyframes rd-bar-rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:no-preference){#rd-comment-btn.rd-bar:not(:disabled){animation:rd-bar-rise .2s ease-out}}
 #rd-comment-btn:disabled{opacity:.75;cursor:not-allowed;box-shadow:none}
 
 #rd-panel{position:fixed;top:0;right:0;bottom:0;z-index:399;width:360px;max-width:100vw;overflow:auto;
@@ -181,10 +182,11 @@
 /* What was typed on a page whose document left the hub, to copy. */
 #rd-notice textarea{display:block;box-sizing:border-box;width:100%;margin-top:6px;font:inherit;resize:vertical}
 #rd-mode{position:fixed;right:18px;bottom:74px;z-index:400;display:flex;padding:2px;border-radius:14px;background:var(--bg,#fff);border:1px solid rgba(127,127,127,.4);box-shadow:0 2px 8px rgba(0,0,0,.15)}
-#rd-mode button{cursor:pointer;border:0;border-radius:12px;padding:3px 9px;background:var(--fg,#000);color:var(--bg,#fff);font:600 11px system-ui,sans-serif}
-#rd-mode button[data-m=edit],.rd-editing #rd-mode button[data-m=comment]{background:transparent;color:var(--fg,#000)}
-.rd-editing #rd-mode button[data-m=edit]{background:var(--fg,#000);color:var(--bg,#fff)}
-#rd-comment-btn.rd-bar:not(:disabled){right:74px;left:8px;max-width:none;border-radius:24px;padding:14px 16px;font:16px/1.4 system-ui,sans-serif;background:var(--bg,#fff);color:rgb(127,127,127);border:1px solid rgba(127,127,127,.25);box-shadow:0 10px 15px -3px rgba(0,0,0,.2)}
+#rd-mode button{cursor:pointer;border:0;border-radius:12px;padding:3px 9px;background:var(--fg,#000);color:var(--bg,#fff);font:600 11px system-ui,sans-serif;display:inline-grid}
+#rd-mode button>span{grid-area:1/1;text-align:center;white-space:nowrap}
+#rd-mode button .rd-l-save,.rd-editing #rd-mode button .rd-l-edit{visibility:hidden}
+.rd-editing #rd-mode button .rd-l-save{visibility:visible}
+#rd-comment-btn.rd-bar:not(:disabled){right:74px;left:8px;max-width:none;border-radius:24px;padding:14px 16px;font:16px/1.4 system-ui,sans-serif;background:var(--bg,#fff);color:rgb(127,127,127);border:2px solid var(--fg,#000);box-shadow:0 10px 15px -3px rgba(0,0,0,.3)}
 @media print{#rd-mode,#rd-menu-btn,#rd-menu,#rd-work,#rd-toast,#rd-notice,#rd-unsent,#rd-popover,#rd-panel,#rd-comment-btn,.rd-badge{display:none!important}}
 
 /* "Claude is answering": three dots that rise in turn, so a wait looks alive. */

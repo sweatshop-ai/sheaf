@@ -107,7 +107,7 @@
 /* The band of the box: the passage on the left, the little that is not talking to the agent on the right. */
 #rd-popover .rd-head{flex:0 0 auto;display:flex;align-items:center;gap:2px;margin-bottom:8px}
 #rd-popover .rd-head .rd-quote{flex:1 1 auto;min-width:0;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#rd-popover .rd-head[hidden],#rd-popover:has(.rd-form[data-done]) .rd-head,#rd-popover:has(.rd-form[data-for]) .rd-head{display:none}
+#rd-popover .rd-head[hidden],#rd-popover:has(.rd-form[data-done]) .rd-head{display:none}
 #rd-popover .rd-head button,#rd-popover .rd-more summary{cursor:pointer;background:transparent;color:var(--fg,#000);border:0;border-radius:10px;padding:2px 7px;font:600 14px/1 system-ui,sans-serif;opacity:.65}
 #rd-popover .rd-head button:hover,#rd-popover .rd-more summary:hover{opacity:1;background:rgba(127,127,127,.18)}
 #rd-popover .rd-more{position:relative}

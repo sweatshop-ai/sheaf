@@ -193,6 +193,18 @@ def open_box(page):
         page.click("#rd-comment-btn")
 
 
+def pasted(page):
+    """What a real Ctrl+V brings into a plain input of the document: the clipboard as the browser holds it after a
+    real Ctrl+C. The input is outside the page's own interface, off screen; it is focused by script, not clicked,
+    so nothing of the page's is clicked away."""
+    page.evaluate("""() => { let i = document.getElementById('probe-for-paste');
+      if (!i) { i = document.createElement('input'); i.id = 'probe-for-paste'; i.style.cssText = 'position:fixed;left:-400px;top:0';
+                document.body.appendChild(i); }
+      i.value = ''; i.focus(); }""")
+    page.keyboard.press("ControlOrMeta+v")
+    return page.evaluate("document.getElementById('probe-for-paste').value")
+
+
 def typed(page):
     """The texts in the popover's fields that are not empty. The reply field is open from the start, so an
     empty field is the rest state; what a test must not find is text put into one."""

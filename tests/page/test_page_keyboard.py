@@ -126,9 +126,7 @@ def test_with_a_mouse_the_form_is_never_docked(tab, site):
     tab.page.add_init_script(FAKE_VV)
     tab.open()
     select(tab.page, at(MAIN, "Second"), at(MAIN, "paragraph", None))
-    tab.page.wait_for_selector(BTN)
-    tab.page.click(BTN)
-    tab.page.wait_for_selector(POP + " textarea")
+    tab.page.wait_for_selector(POP + " textarea")      # a mouse selection opens the box by itself
     tab.page.evaluate("window.__keyboard(400, 0)")
     tab.page.wait_for_timeout(300)
     assert tab.page.evaluate("document.querySelector('#rd-popover').style.maxWidth") == ""

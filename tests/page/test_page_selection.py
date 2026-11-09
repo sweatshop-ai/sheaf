@@ -3,7 +3,7 @@ whole run and the comment lands after it; one that cannot hold a comment shows a
 that says why, before the click."""
 import pytest
 
-from pagehelp import at, box, select, select_by_touch, selected, until
+from pagehelp import at, box, open_box, select, select_by_touch, selected, until
 from sheafmd import comments as rdc
 
 pytestmark = pytest.mark.page
@@ -29,6 +29,7 @@ print("code")
 BOLD_P = "p:has(strong)"
 MAIN = "main"           # the second paragraph's words are found by their text, under the page's one <main>
 BTN = "#rd-comment-btn"
+FIELD = "#rd-popover textarea"
 
 
 @pytest.fixture
@@ -42,8 +43,14 @@ def settled(page):
     page.wait_for_timeout(600)
 
 
+def quoted(page):
+    """The passage the open box quotes, without the quotation marks round it."""
+    return page.inner_text("#rd-popover .rd-quote").strip("\u201c\u201d")
+
+
 def comment_on_selection(tab, text="A thought."):
-    tab.page.click(BTN)
+    """A mouse selection has opened the box by itself; a touch screen is offered the Comment bar first."""
+    open_box(tab.page)
     tab.page.fill("#rd-popover textarea", text)
     tab.page.click("#rd-popover button[data-f=ok]")
     return until(lambda: rdc.parse(tab.site.file.read_text()).comments or None, what="the comment in the file")
@@ -51,8 +58,8 @@ def comment_on_selection(tab, text="A thought."):
 
 def test_a_selection_ending_inside_a_bold_word_is_widened_and_the_comment_lands_after_it(doc):
     select(doc.page, at(BOLD_P, "Some "), at(BOLD_P + " strong", "bold word", 2))
-    doc.page.wait_for_selector(BTN)
-    assert selected(doc.page) == "Some bold word"
+    doc.page.wait_for_selector(FIELD)
+    assert quoted(doc.page) == "Some bold word"
     (c,) = comment_on_selection(doc)
     md = doc.site.file.read_text()
     assert c.quote == "Some bold word"
@@ -61,16 +68,16 @@ def test_a_selection_ending_inside_a_bold_word_is_widened_and_the_comment_lands_
 
 def test_a_selection_starting_inside_a_bold_word_is_widened_too(doc):
     select(doc.page, at(BOLD_P + " strong", "bold word", 2), at(BOLD_P, " and a ", None))
-    doc.page.wait_for_selector(BTN)
-    assert selected(doc.page).strip() == "bold word and a"
+    doc.page.wait_for_selector(FIELD)
+    assert quoted(doc.page) == "bold word and a"
     (c,) = comment_on_selection(doc)
     assert c.quote == "bold word and a"
 
 
 def test_a_selection_ending_inside_a_link_is_widened_and_the_comment_lands_after_it(doc):
     select(doc.page, at(BOLD_P, " and a "), at(BOLD_P + " a", "link text", 3))
-    doc.page.wait_for_selector(BTN)
-    assert selected(doc.page).strip() == "and a link text"
+    doc.page.wait_for_selector(FIELD)
+    assert quoted(doc.page) == "and a link text"
     (c,) = comment_on_selection(doc)
     md = doc.site.file.read_text()
     assert c.quote == "and a link text"
@@ -79,8 +86,8 @@ def test_a_selection_ending_inside_a_link_is_widened_and_the_comment_lands_after
 
 def test_a_selection_that_starts_after_a_bold_word_does_not_take_it_in(doc):
     select(doc.page, at(BOLD_P, " and a ", 1), at(BOLD_P + " a", "link text", 4))
-    doc.page.wait_for_selector(BTN)
-    assert "bold" not in selected(doc.page)
+    doc.page.wait_for_selector(FIELD)
+    assert "bold" not in quoted(doc.page)
 
 
 @pytest.mark.parametrize("start, end, reason", [
@@ -101,37 +108,39 @@ def test_a_selection_that_cannot_hold_a_comment_shows_a_disabled_button_with_its
     assert rdc.parse(doc.site.file.read_text()).comments == []
 
 
-def test_with_a_mouse_the_button_is_under_the_selection_and_on_the_screen(doc):
-    select(doc.page, at(MAIN, "Second"), at(MAIN, "paragraph", None))
+def test_with_a_mouse_the_refused_selections_button_is_under_the_selection_and_on_the_screen(doc):
+    select(doc.page, at(MAIN, "Second"), at("ul", "first item", 5))      # two blocks: refused, so the button stays
     doc.page.wait_for_selector(BTN)
     assert doc.page.evaluate("getComputedStyle(document.querySelector('#rd-comment-btn')).position") == "absolute"
     b = doc.page.locator(BTN).bounding_box()
-    sel = box(doc.page, MAIN, "Second paragraph")
-    assert b["y"] >= sel["y"] + sel["height"]
+    assert b["y"] >= doc.page.evaluate("getSelection().getRangeAt(0).getBoundingClientRect().bottom")
+    assert b["y"] + b["height"] <= doc.page.viewport_size["height"]
 
 
 def test_a_triple_click_on_a_paragraph_is_that_paragraph(doc):
     doc.page.click("p:has-text('Second paragraph')", click_count=3)
-    btn = doc.page.wait_for_selector(BTN)
-    assert btn.inner_text() == "Comment" and not btn.is_disabled()
+    doc.page.wait_for_selector(FIELD)
+    assert quoted(doc.page) == "Second paragraph, about pears."
     (c,) = comment_on_selection(doc)
     assert c.quote == "Second paragraph, about pears."
 
 
-def test_a_selection_extended_with_shift_and_the_arrows_gets_the_button_for_what_it_now_holds(doc):
-    """SPEC 10.4: the keyboard fires `selectionchange` too; the button follows the selection."""
+def test_a_selection_changed_with_shift_and_the_arrows_opens_the_box_once_it_is_usable(doc):
+    """SPEC 10.4: the keyboard fires `selectionchange` too; the offer follows the selection. A refused one keeps
+    its disabled button; once the arrows bring the selection back inside one paragraph, the box opens by itself."""
     p = doc.page
-    b = box(p, MAIN, "Second")
-    p.mouse.dblclick(b["x"] + b["width"] / 2, b["y"] + b["height"] / 2)
-    p.wait_for_selector(BTN)
-    assert selected(p) == "Second"
-    for _ in range(len(" paragraph")):
-        p.keyboard.press("Shift+ArrowRight")
-    until(lambda: p.evaluate("getSelection().toString()") == "Second paragraph", what="the longer selection")
+    select(p, at(MAIN, "Second"), at("ul", "first item", 2))
+    assert p.wait_for_selector(BTN).is_disabled()
+    p.keyboard.press("Shift+ArrowLeft")
     settled(p)
-    assert p.locator(BTN).count() == 1
+    assert p.locator(FIELD).count() == 0 and p.locator(BTN).is_disabled()      # still across two blocks
+    for _ in range(2):
+        p.keyboard.press("Shift+ArrowLeft")
+    p.wait_for_selector(FIELD)
+    assert quoted(p) == "Second paragraph, about pears."
+    assert p.locator(BTN).count() == 0
     (c,) = comment_on_selection(doc)
-    assert c.quote == "Second paragraph"
+    assert c.quote == "Second paragraph, about pears."
 
 
 LIST_TABLE_MD = """# Plan
@@ -182,7 +191,8 @@ def editing(tab, site):
 def double_click(page, css, word):
     b = box(page, css, word)
     page.mouse.dblclick(b["x"] + b["width"] / 2, b["y"] + b["height"] / 2)
-    page.wait_for_selector(BTN)
+    until(lambda: selected(page) == word, what="the word selected")
+    settled(page)                       # a button or a box would have come by now
 
 
 def test_in_edit_mode_typing_over_a_double_clicked_word_of_a_bold_run_replaces_only_that_word(editing):
@@ -202,7 +212,7 @@ def test_in_edit_mode_typing_over_a_drag_into_a_link_keeps_the_rest_of_the_link(
     p.mouse.down()
     p.mouse.move(z["x"] + z["width"] - 1, z["y"] + z["height"] / 2)
     p.mouse.up()
-    p.wait_for_selector(BTN)
+    until(lambda: selected(p), what="the dragged selection")
     p.keyboard.type("our")
     # The browser keeps the space before the link as a no-break space.
     assert p.inner_text("main p:has-text('today.')").replace("\xa0", " ") == "Read our plan today."
@@ -212,44 +222,53 @@ def test_in_edit_mode_typing_over_a_drag_into_a_link_keeps_the_rest_of_the_link(
     assert "plan](https://example.com/p) today." in editing.site.file.read_text()
 
 
-def test_in_edit_mode_a_comment_on_a_word_of_a_bold_run_still_quotes_the_whole_run(editing):
+def test_in_edit_mode_a_double_clicked_word_of_a_bold_run_stays_that_word_and_offers_nothing(editing):
+    """Was: a comment on the word still quotes the whole run. In Edit a selection only selects: no button, no
+    box, and nothing painted over it, so what is typed replaces the word the person chose. The whole-run quote
+    is the Comment mode's (the bold-run tests above)."""
     p = editing.page
     double_click(p, "main strong", "deadline")
     assert selected(p) == "deadline"
-    # What the comment will quote is painted instead of selected.
-    assert p.evaluate("[...CSS.highlights.get('rd-widened')].map(String)") == ["Important note about the deadline"]
-    (c,) = comment_on_selection(editing)
-    md = editing.site.file.read_text()
-    assert c.quote == "Important note about the deadline"
-    assert md[:md.index("<!--")].endswith("**Important note about the deadline**")
+    assert p.evaluate("CSS.highlights.has('rd-widened')") is False
+    assert p.locator(BTN).count() == 0 and p.locator("#rd-popover").count() == 0
 
 
-def test_in_edit_mode_a_selection_changed_from_the_keyboard_is_painted_and_offered_again(editing):
+def test_in_edit_mode_a_selection_changed_from_the_keyboard_is_not_painted_or_offered(editing):
+    """Was: painted and offered again. The selection grows as the person made it; nothing answers it."""
     p = editing.page
     double_click(p, "main strong", "deadline")
     for _ in range(len(" for")):
         p.keyboard.press("Shift+ArrowRight")
-    until(lambda: p.evaluate("[...(CSS.highlights.get('rd-widened') || [])].map(String)") ==
-          ["Important note about the deadline for"], what="the passage painted again")
-    assert p.locator(BTN).count() == 1
-    (c,) = comment_on_selection(editing)
-    assert c.quote == "Important note about the deadline for"
+    until(lambda: selected(p) == "deadline for", what="the longer selection")
+    settled(p)
+    assert p.evaluate("CSS.highlights.has('rd-widened')") is False
+    assert p.locator(BTN).count() == 0 and p.locator("#rd-popover").count() == 0
 
 
-def test_in_edit_mode_collapsing_the_selection_from_the_keyboard_takes_the_highlight_and_the_button(editing):
+def test_in_edit_mode_collapsing_the_selection_from_the_keyboard_leaves_no_highlight_and_no_button(editing):
     p = editing.page
     double_click(p, "main strong", "deadline")
     p.keyboard.press("ArrowRight")
-    until(lambda: not p.evaluate("CSS.highlights.has('rd-widened')") and p.locator(BTN).count() == 0,
-          what="the highlight and the button gone")
+    until(lambda: selected(p) == "", what="the selection collapsed")
+    settled(p)
+    assert not p.evaluate("CSS.highlights.has('rd-widened')") and p.locator(BTN).count() == 0
 
 
-def test_in_edit_mode_the_button_is_gone_the_moment_a_selected_word_is_typed_over(editing):
+def test_in_edit_mode_typing_over_a_selected_word_raises_no_button_and_paints_nothing(editing):
     p = editing.page
     double_click(p, "main strong", "deadline")
     p.keyboard.insert_text("date")          # one input event; far less than the 350 ms of a settled selection
     assert p.locator(BTN).count() == 0
     assert p.evaluate("CSS.highlights.has('rd-widened')") is False
+
+
+def test_a_word_selected_in_edit_mode_gives_the_whole_run_when_the_person_switches_to_comment_and_selects_again(editing):
+    p = editing.page
+    double_click(p, "main strong", "deadline")
+    p.click("#rd-mode button[data-m=comment]")
+    select(p, at("main strong", "deadline"), at("main strong", "deadline", None))
+    p.wait_for_selector(FIELD)
+    assert quoted(p) == "Important note about the deadline"
 
 
 def _centre(b):

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from helpers import comment, writes_from_outside
-from pagehelp import (DOC, P1, P2, T0, at, comment_draft_key, comment_on, gone, key, mark, reload_on_clock, reloaded,
+from pagehelp import (DOC, P1, P2, T0, at, comment_draft_key, comment_on, gone, key, mark, open_box, reload_on_clock, reloaded,
                       select, select_by_touch, toast, toasted, type_at_end, until)
 from sheafmd import comments as rdc
 from sheafmd.hub import live as hub_live
@@ -714,7 +714,7 @@ def kept(tab):
 def refuse_a_comment_on_pears(tab, old="about pears", new="about ripe pears", more=""):
     f = tab.site.file
     select(tab.page, at(P2, "pears"), at(P2, "pears", None))
-    tab.page.click("#rd-comment-btn")
+    open_box(tab.page)
     tab.page.fill("#rd-popover textarea", "about the pears")
     mark(tab.page)
     f.write_text(f.read_text().replace(old, new) + more, encoding="utf-8")
@@ -773,7 +773,7 @@ def test_a_409_without_the_code_is_a_failure_even_in_the_old_words(tab):
 
 def open_comment_form(tab, css, word):
     select(tab.page, at(css, word), at(css, word, None))
-    tab.page.click("#rd-comment-btn")
+    open_box(tab.page)
     tab.page.wait_for_selector("#rd-popover textarea")
 
 

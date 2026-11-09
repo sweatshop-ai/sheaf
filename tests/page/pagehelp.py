@@ -185,15 +185,20 @@ def until(check, timeout=8.0, what="the condition"):
         _pump(0.05)
 
 
+def open_box(page):
+    """After a selection: wait for the box, and press the Comment bar only when the box did not open itself."""
+    until(lambda: page.query_selector("#rd-popover textarea") or page.query_selector("#rd-comment-btn"),
+          what="the box or the Comment button")
+    if not page.query_selector("#rd-popover textarea"):
+        page.click("#rd-comment-btn")
+
+
 def comment_on(tab, start, end, body):
     """Select, type and send; returns the comment once it is in the file. A mouse selection opens the box by
     itself; a touch screen offers the Comment bar first."""
     from sheafmd import comments as rdc
     select(tab.page, start, end)
-    until(lambda: tab.page.query_selector("#rd-popover textarea") or tab.page.query_selector("#rd-comment-btn"),
-          what="the box or the Comment button")
-    if not tab.page.query_selector("#rd-popover textarea"):
-        tab.page.click("#rd-comment-btn")
+    open_box(tab.page)
     tab.page.fill("#rd-popover textarea", body)
     tab.page.click("#rd-popover button[data-f=ok], #rd-popover button[data-f=tell]")
     return until(lambda: (rdc.parse(tab.site.file.read_text()).comments or [None])[0],

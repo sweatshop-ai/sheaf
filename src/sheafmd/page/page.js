@@ -1537,7 +1537,9 @@ var create = function (ROOT, CFG, opts) {
   };
   // Is the comment `c` the person's own: the only one the thread offers to edit or delete, and the only kept edit it takes.
   function mine(c) { return c.by === CFG.me; }
-  function kindOf(d) { return KINDS[d.kind] || KINDS.reply; }
+  // A new comment put away unsent (d.min) has no thread and no number yet: the line calls it a message.
+  var MESSAGE = { one: 'message', many: 'messages' };
+  function kindOf(d) { return d.min ? MESSAGE : KINDS[d.kind] || KINDS.reply; }
   // Can the thread `c` take the kept reply or edit `d` in its form: `d` is its entry (keptOf), and an edit is
   // of the person's own comment, the only one the thread offers to edit.
   function sendable(d, c) {
@@ -1576,8 +1578,8 @@ var create = function (ROOT, CFG, opts) {
       unsentBtn.addEventListener('click', function () { if (pop && pop.hasAttribute('data-unsent')) closePopover(); else showUnsent(); });
       BODY.appendChild(unsentBtn);
     }
-    unsentBtn.textContent = Object.keys(KINDS).map(function (name) {
-      var k = KINDS[name], n = ds.filter(function (d) { return kindOf(d) === k; }).length;
+    unsentBtn.textContent = Object.keys(KINDS).map(function (name) { return KINDS[name]; }).concat([MESSAGE]).map(function (k) {
+      var n = ds.filter(function (d) { return kindOf(d) === k; }).length;
       return n ? n + ' ' + (n > 1 ? k.many : k.one) : '';
     }).filter(Boolean).join(' and ') + ' not sent · Show';
     if (listed) showUnsent();
@@ -2321,7 +2323,7 @@ var create = function (ROOT, CFG, opts) {
     if (popId === id) closePopover(); else openComment(id);
   });
   listen(PAGE_EV, 'mousedown', function (e) {
-    if (pop && !standing() && !pop.contains(e.target) && !(e.target.closest && e.target.closest('.rd-badge, #rd-panel, #rd-unsent'))) leavePopover();
+    if (pop && !standing() && !pop.contains(e.target) && !(e.target.closest && e.target.closest('.rd-badge, #rd-panel, #rd-unsent, #rd-actions, #rd-notice, #rd-menu-btn, #rd-menu, #rd-mode, #rd-work'))) leavePopover();
   });
 
   // ---- side panel -----------------------------------------------------------

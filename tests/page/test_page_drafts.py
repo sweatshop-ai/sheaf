@@ -128,7 +128,7 @@ def test_a_restore_the_hub_took_is_not_written_back_when_its_answer_times_out_be
     page.goto(tab.site.url)
     page.wait_for_selector("#rd-notice button[data-d=restore]")
     page.click(".rd-badge")
-    page.click("#rd-popover button[data-a=reply]")
+    page.wait_for_selector("#rd-popover textarea")
     page.fill("#rd-popover textarea", "my reply text")      # an open form holds the reload
     held = []
 
@@ -156,7 +156,7 @@ def test_a_draft_restored_while_a_reply_is_typed_reloads_only_once_the_reply_is_
     page.goto(tab.site.url)
     page.wait_for_selector("#rd-notice button[data-d=restore]")
     page.click(".rd-badge")
-    page.click("#rd-popover button[data-a=reply]")
+    page.wait_for_selector("#rd-popover textarea")
     page.fill("#rd-popover textarea", "my reply text")
     mark(page)
     page.click("#rd-notice button[data-d=restore]")
@@ -414,7 +414,7 @@ def test_a_tick_whose_save_failed_while_a_draft_is_offered_is_kept_once_the_draf
     comment(f, quote="apples", body="Why apples?")
     page = offered_with_a_failed_tick(tab, context)
     page.click(".rd-badge")
-    page.click("#rd-popover button[data-a=reply]")
+    page.wait_for_selector("#rd-popover textarea")
     page.fill("#rd-popover textarea", "my reply text")
     page.click("#rd-notice button[data-d=restore]")
     until(lambda: "and plums" in f.read_text(), what="the restored edit")

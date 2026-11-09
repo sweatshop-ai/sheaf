@@ -33,6 +33,13 @@ def thread(tab):
     return tab
 
 
+def tick(p, box):
+    """Tick a task box from the keyboard: a press of the mouse on the document is a click beside the open box,
+    which puts the box away (and a reply put away holds no reload), and these tests need the reply still being written."""
+    box.focus()
+    p.keyboard.press("Space")
+
+
 def open_reply(tab, text):
     tab.page.wait_for_selector("#rd-popover textarea")
     tab.page.fill("#rd-popover textarea", text)
@@ -86,8 +93,10 @@ def test_a_click_outside_or_escape_does_not_throw_away_typed_text(thread):
     open_reply(thread, "important words")
     thread.page.mouse.click(5, 400)
     thread.page.keyboard.press("Escape")
+    assert "1 reply not sent" in thread.page.inner_text(UNSENT)      # put away, not thrown away
+    thread.page.click(".rd-badge")
     assert thread.page.input_value("#rd-popover textarea") == "important words"
-    thread.page.click("#rd-popover button[data-f=no]")
+    discard_unsent(thread.page, "important words")
     assert not typed(thread.page)
 
 
@@ -1140,7 +1149,7 @@ def test_a_ticked_task_box_that_merges_waits_for_the_reply_being_written_before_
     mark(p)
     f.write_text(f.read_text() + "\nA new paragraph from outside.\n", encoding="utf-8")
     p.wait_for_selector("#rd-popover .rd-hold")
-    p.locator("main input[type=checkbox]").first.click()
+    tick(p, p.locator("main input[type=checkbox]").first)
     until(lambda: "- [x] first task" in f.read_text(), what="the ticked box in the file")
     p.wait_for_timeout(1500)
     assert p.evaluate("window.__same_load") is True, "the page reloaded under the reply"
@@ -1555,10 +1564,10 @@ def test_a_second_tick_while_a_reply_holds_the_reload_of_the_first_writes_no_con
     mark(p)
     outside_change(frozen)
     p.wait_for_selector("#rd-popover .rd-hold")
-    boxes.nth(0).click()                    # merged onto the change from outside; the reload waits
+    tick(p, boxes.nth(0))                   # merged onto the change from outside; the reload waits
     until(lambda: "- [x] first task" in f.read_text(), what="the first tick in the file")
     if second:
-        boxes.nth(1).click()
+        tick(p, boxes.nth(1))
         until(lambda: "- [x] second task" in f.read_text(), what="the second tick in the file")
     p.wait_for_timeout(500)
     assert p.input_value("#rd-popover textarea") == "my reply text"

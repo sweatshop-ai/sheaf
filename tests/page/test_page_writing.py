@@ -2028,12 +2028,14 @@ def test_an_answer_that_reloads_saves_the_edits_typed_while_it_was_out_and_asks_
     dialogs = asked(p)
     p.keyboard.press("e")
     p.click(".rd-badge")
-    p.wait_for_selector(f"#rd-popover button[data-a={act}]")
+    p.wait_for_selector("#rd-popover textarea")      # the reply field stands open; Edit and Delete are in the ⋯ menu
     if act in ("reply", "edit"):
         held = send_held(frozen, act, "my words")
     else:
         held = []
         p.route("**/_/comment", lambda route: held.append(route))
+        if act == "delete":
+            p.click("#rd-popover .rd-more summary")
         p.click(f"#rd-popover button[data-a={act}]")
         until(lambda: held or p.wait_for_timeout(20), what="the send to go out")
     if typed:

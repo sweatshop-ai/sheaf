@@ -189,8 +189,7 @@ def test_a_replys_answer_that_reloads_the_page_waits_for_a_press_in_its_undo(tab
     p.reload()
     p.wait_for_selector("#rd-actions button")
     p.click(".rd-badge")
-    p.wait_for_selector("#rd-popover button[data-a=reply]")
-    p.click("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     p.fill("#rd-popover textarea", "my reply")
     f.write_text(f.read_text(encoding="utf-8") + "\nFrom outside.\n", encoding="utf-8")
     p.wait_for_selector("#rd-popover .rd-hold")         # the form holds the reload

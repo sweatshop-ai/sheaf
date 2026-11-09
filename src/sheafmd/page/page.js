@@ -1157,14 +1157,26 @@ var create = function (ROOT, CFG, opts) {
   // closes a thread may start a drag that ends where the kept comment is pinned, and a mouseup on the popover
   // is no selection of the document. It comes back after the mouseup (keptAfterMouse).
   var keptDue = false;
+  // Typed text goes to the store before its box closes. When the store refuses it (quota full, storage blocked)
+  // the box stays and says so: closing would lose the text. Every way out goes through closePopover, which
+  // asks; × on an open thread asks before it resolves. An empty field has nothing to keep.
+  var storeOk = true;
+  function stashAll() {
+    var bad = false;
+    if (pop) Array.prototype.forEach.call(pop.querySelectorAll(OPEN_FORM), function (f) { if (f.stash && f.stash() === false) bad = true; });
+    if (bad) say('Your text could not be kept: the browser\u2019s storage is full or blocked. Copy it before you close this box.', true);
+    return !bad;
+  }
+  // True when no popover is left open, false when one stays because its text could not be kept.
   function closePopover() {
     if (pop) {
       // Closed is minimized: what is typed is kept and comes back in the field.
-      Array.prototype.forEach.call(pop.querySelectorAll(OPEN_FORM), function (f) { if (f.stash) f.stash(); });
+      if (!stashAll()) return false;
       unpaintWidened();
       pop.remove(); pop = null; popId = null; paint(null); setTimeout(flushHold, 0);
       setTimeout(function () { if (mouseDown) keptDue = true; else drawKept(); }, 0);
     }
+    return true;
   }
   function drawKept() { if (!pop && canSave) showKept(); }
   function keptAfterMouse() { if (keptDue) { keptDue = false; setTimeout(drawKept, 0); } }
@@ -1390,12 +1402,13 @@ var create = function (ROOT, CFG, opts) {
   // Every write of the store goes through here, so the line of replies and edits not sent, which says what the
   // store holds, is drawn again here: a writer added later cannot leave it behind.
   function commentDraftsSave(ds) {
+    storeOk = true;
     try {
       var all = commentDraftsRaw().filter(ofOtherRoot).concat(ds.map(function (d) {
         return d.root === undefined && CFG.root ? Object.assign({ root: CFG.root }, d) : d;
       }));
       if (all.length) localStorage.setItem(COMMENT_DRAFT_KEY, JSON.stringify(all)); else localStorage.removeItem(COMMENT_DRAFT_KEY);
-    } catch (e) {}
+    } catch (e) { storeOk = false; }
     unsentLine();
   }
   // The entries `gone` names go, then `add` (if any) is added, in one write, stamped `at` now unless it brings its
@@ -1495,7 +1508,7 @@ var create = function (ROOT, CFG, opts) {
   // A popover of kept texts: one form per entry of `ds`, drawn by `html`, its textarea filled with the entry's
   // text; `wire(f, d)` gives each form its buttons. `attr` names which popover it is.
   function keptForms(attr, ds, html, wire) {
-    closePopover();
+    if (!closePopover()) return;
     var a = { id: 'rd-popover', role: 'dialog' };
     a[attr] = '';
     pop = el('div', a, ds.map(html).join(''));
@@ -1537,7 +1550,9 @@ var create = function (ROOT, CFG, opts) {
   };
   // Is the comment `c` the person's own: the only one the thread offers to edit or delete, and the only kept edit it takes.
   function mine(c) { return c.by === CFG.me; }
-  function kindOf(d) { return KINDS[d.kind] || KINDS.reply; }
+  // A new comment put away unsent (d.min) has no thread and no number yet: the line calls it a message.
+  var MESSAGE = { one: 'message', many: 'messages' };
+  function kindOf(d) { return d.min ? MESSAGE : KINDS[d.kind] || KINDS.reply; }
   // Can the thread `c` take the kept reply or edit `d` in its form: `d` is its entry (keptOf), and an edit is
   // of the person's own comment, the only one the thread offers to edit.
   function sendable(d, c) {
@@ -1576,8 +1591,8 @@ var create = function (ROOT, CFG, opts) {
       unsentBtn.addEventListener('click', function () { if (pop && pop.hasAttribute('data-unsent')) closePopover(); else showUnsent(); });
       BODY.appendChild(unsentBtn);
     }
-    unsentBtn.textContent = Object.keys(KINDS).map(function (name) {
-      var k = KINDS[name], n = ds.filter(function (d) { return kindOf(d) === k; }).length;
+    unsentBtn.textContent = Object.keys(KINDS).map(function (name) { return KINDS[name]; }).concat([MESSAGE]).map(function (k) {
+      var n = ds.filter(function (d) { return kindOf(d) === k; }).length;
       return n ? n + ' ' + (n > 1 ? k.many : k.one) : '';
     }).filter(Boolean).join(' and ') + ' not sent · Show';
     if (listed) showUnsent();
@@ -1996,6 +2011,7 @@ var create = function (ROOT, CFG, opts) {
         if (a === 'minimize') { closePopover(); return; }
         if (a === 'status') {
           var opened = c.status !== 'open';
+          if (!opened && !stashAll()) return;       // × resolves: not while its text has nowhere to go
           op({ op: 'status', id: id, status: opened ? 'open' : 'resolved' }).then(function (j) { if (j && !opened && popId === id) closePopover(); });
         }
         else if (a === 'delete') op({ op: 'delete', id: id });
@@ -2078,7 +2094,7 @@ var create = function (ROOT, CFG, opts) {
   function openComment(id, kind, which) {
     var c = byId[id];
     if (!c) return;
-    closePopover();
+    if (!closePopover()) return;
     hideCommentBtn();
     popId = id;
     pop = el('div', { id: 'rd-popover', role: 'dialog' });
@@ -2299,7 +2315,7 @@ var create = function (ROOT, CFG, opts) {
       if (mirror && sent.text !== null && c && (born === null || c.at === born)) mirror(ta.value, ta.value === sent.text ? sent.rid : undefined, line);
     };
     if (mirror) ta.addEventListener('input', keep);
-    f.stash = function () { if (mirror && ta.value.trim()) mirror(ta.value, undefined, line); };
+    f.stash = function () { if (mirror && ta.value.trim()) { storeOk = true; mirror(ta.value, undefined, line); return storeOk; } return true; };
     // Cancel clears what the store keeps for the form before restore, which draws the thread's other kept text.
     f.addEventListener('click', function (e) {
       var b = e.target.closest && e.target.closest('[data-f]'), k = b && b.getAttribute('data-f');
@@ -2321,7 +2337,7 @@ var create = function (ROOT, CFG, opts) {
     if (popId === id) closePopover(); else openComment(id);
   });
   listen(PAGE_EV, 'mousedown', function (e) {
-    if (pop && !standing() && !pop.contains(e.target) && !(e.target.closest && e.target.closest('.rd-badge, #rd-panel, #rd-unsent'))) leavePopover();
+    if (pop && !standing() && !pop.contains(e.target) && !(e.target.closest && e.target.closest('.rd-badge, #rd-panel, #rd-unsent, #rd-actions, #rd-notice, #rd-menu-btn, #rd-menu, #rd-mode, #rd-work'))) leavePopover();
   });
 
   // ---- side panel -----------------------------------------------------------
@@ -2607,7 +2623,7 @@ var create = function (ROOT, CFG, opts) {
   }
   function newComment(t, anchorEl) {
     if (needClean() || writingFirst()) return;
-    closePopover();
+    if (!closePopover()) return;
     pop = el('div', { id: 'rd-popover', role: 'dialog' },
              '<div class="rd-head"><div class="rd-quote">“' + esc(t.quote) + '”</div>' +
              '<button data-a="minimize" title="Close" aria-label="Close">\u00D7</button></div>');
@@ -2706,7 +2722,10 @@ var create = function (ROOT, CFG, opts) {
     if (field) {
       // Closed before it is sent, it is kept quietly for this passage: not in the notice of refused comments.
       field.stash = function () {
-        if (box.value.trim()) draftsReplace(own, { quote: t.quote, body: box.value, block: t.block, head: t.head, tail: t.tail, occ: t.occ, min: true });
+        if (!box.value.trim()) return true;
+        storeOk = true;
+        draftsReplace(own, { quote: t.quote, body: box.value, block: t.block, head: t.head, tail: t.tail, occ: t.occ, min: true });
+        return storeOk;
       };
       // The cursor is in the field, not on the passage: with nothing typed, Ctrl+C still copies the passage.
       box.addEventListener('copy', function (e) {

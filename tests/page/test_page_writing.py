@@ -58,16 +58,16 @@ def test_a_changed_event_while_a_reply_form_holds_text_leaves_the_form_alone(thr
     toasted(thread.page, "text changed while you wrote")
 
 
-def test_cancelling_the_form_runs_the_reload_that_waited(thread):
+def test_putting_the_form_away_runs_the_reload_that_waited(thread):
     open_reply(thread, "never mind")
     mark(thread.page)
     f = thread.site.file
     f.write_text(f.read_text() + "\nAnother paragraph.\n", encoding="utf-8")
     thread.page.wait_for_selector("#rd-popover .rd-hold")
-    thread.page.click("#rd-popover button[data-f=no]")
+    thread.page.click("#rd-popover button[data-a=minimize]")
     reloaded(thread.page)
-    thread.page.wait_for_selector("#rd-popover .rd-msg")
     assert rdc.parse(f.read_text()).comments[0].replies == []
+    assert "1 reply not sent" in thread.page.inner_text(UNSENT)        # the put-away text is kept, not sent
 
 
 def test_a_reply_that_arrives_from_outside_updates_the_thread_and_leaves_the_form_alone(thread):
@@ -1300,7 +1300,8 @@ def test_a_page_that_keeps_holding_its_reload_pins_its_version_again_every_day_u
     p.clock.fast_forward(24 * 3_600_000)
     until(lambda: len(pins) > 2 or p.wait_for_timeout(20), what="the page pinning its version a third time")
     mark(p)
-    p.click("#rd-popover button[data-f=no]")        # the form is cancelled: the hold is over, the page reloads
+    p.click("#rd-popover button[data-a=minimize]")        # the form is put away: the hold is over, the page reloads
+    p.clock.fast_forward(1000)                            # on the frozen clock, the timer that ends the hold
     reloaded(p)
 
 
@@ -1355,7 +1356,8 @@ def test_a_renewal_of_the_pin_that_failed_is_made_again_within_the_hour(frozen):
     p.clock.fast_forward(3_600_000)
     until(lambda: len(pins) > 2 or p.wait_for_timeout(20), what="the renewal being made again")
     mark(p)
-    p.click("#rd-popover button[data-f=no]")
+    p.click("#rd-popover button[data-a=minimize]")
+    p.clock.fast_forward(1000)                       # on the frozen clock, the timer that ends the hold
     reloaded(p)
 
 

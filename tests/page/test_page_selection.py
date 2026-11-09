@@ -125,6 +125,36 @@ def test_a_triple_click_on_a_paragraph_is_that_paragraph(doc):
     assert c.quote == "Second paragraph, about pears."
 
 
+def test_the_click_that_ends_a_real_double_click_or_drag_does_not_close_the_box_it_opened(doc):
+    p = doc.page
+    b = box(p, MAIN, "Second")
+    p.mouse.dblclick(b["x"] + b["width"] / 2, b["y"] + b["height"] / 2)
+    p.wait_for_selector(FIELD)
+    settled(p)
+    assert p.locator(FIELD).count() == 1 and quoted(p) == "Second"
+    p.click("#rd-popover .rd-quote")                  # a press inside the box is nothing beside it
+    a, z = box(p, MAIN, "Second"), box(p, MAIN, "pears")
+    p.mouse.move(a["x"] + 1, a["y"] + a["height"] / 2)
+    p.mouse.down()
+    p.mouse.move(z["x"] + z["width"] - 1, z["y"] + z["height"] / 2, steps=5)
+    p.mouse.up()
+    until(lambda: quoted(p) == "Second paragraph, about pears", what="the box for the dragged passage")
+    settled(p)
+    assert p.locator("#rd-popover").count() == 1 and p.evaluate("document.activeElement.tagName") == "TEXTAREA"
+
+
+def test_the_passage_stays_marked_in_the_text_while_the_box_is_open_and_the_mark_goes_with_it(doc):
+    p = doc.page
+    select(p, at(MAIN, "Second"), at(MAIN, "paragraph", None))
+    p.wait_for_selector(FIELD)
+    marked = "[...(CSS.highlights.get('rd-widened') || [])].map(String)"
+    assert p.evaluate(marked) == ["Second paragraph"]
+    settled(p)
+    assert p.evaluate(marked) == ["Second paragraph"]      # the cursor left the text for the field; the mark stays
+    p.click("#rd-popover button[data-a=minimize]")
+    until(lambda: p.evaluate(marked) == [], what="the mark gone with the box")
+
+
 def test_a_selection_changed_with_shift_and_the_arrows_opens_the_box_once_it_is_usable(doc):
     """SPEC 10.4: the keyboard fires `selectionchange` too; the offer follows the selection. A refused one keeps
     its disabled button; once the arrows bring the selection back inside one paragraph, the box opens by itself."""

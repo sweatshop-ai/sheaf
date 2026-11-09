@@ -344,7 +344,10 @@ def test_a_sheaf_live_on_a_laptop_turns_tell_off_with_its_line(tab):
     comment_form(tab)
     line = "This session runs on Thierry’s machine: open it there."
     assert tell_offered(tab.page, "#rd-popover .rd-form") is False
-    assert tab.page.locator("#rd-popover .rd-agent-line").all_inner_texts() == [line]
+    # Restated on 2026-11-09 (G): no line under the field any more; the reason is in the menu's Agent line.
+    assert tab.page.locator("#rd-popover .rd-agent-line").count() == 0 and line not in tab.page.inner_text("#rd-popover")
+    tab.page.click("#rd-menu-btn")
+    assert tab.page.inner_text("#rd-agent") == line
     assert proxy.PROXY_LINE not in tab.page.inner_text("#rd-popover")
 
 
@@ -354,7 +357,9 @@ def test_a_fork_the_doc_answer_reports_turns_box_tell_off(tab):
     until(lambda: tab.docs, what="the page's /_/doc answer")
     comment_form(tab)
     assert tell_offered(tab.page, "#rd-popover .rd-form") is False
-    assert "Thierry’s machine" in tab.page.inner_text("#rd-popover .rd-agent-line")
+    assert tab.page.locator("#rd-popover .rd-agent-line").count() == 0      # restated (G): the reason is in the menu only
+    tab.page.click("#rd-menu-btn")
+    assert "Thierry’s machine" in tab.page.inner_text("#rd-agent")
 
 
 def test_the_menu_button_closes_the_popover(tab):

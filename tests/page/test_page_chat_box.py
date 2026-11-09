@@ -89,10 +89,12 @@ def test_talking_to_the_agent_is_the_only_action_of_the_box(tab, site):
     assert "Please look at this." in site.file.read_text(encoding="utf-8")
 
 
-def test_without_an_agent_the_message_stays_a_comment_and_the_box_says_why(tab, site):
+def test_without_an_agent_the_message_stays_a_comment_and_the_box_carries_no_hint(tab, site):
+    """Restated on 2026-11-09 (G): the box no longer says why, anywhere, desktop too ("Render this page from an agent session...")."""
     p = open_thread(tab, site)
     assert p.locator("#rd-popover .rd-form button.rd-tell").count() == 0
-    assert p.locator("#rd-popover .rd-form .rd-agent-line").count() == 1
+    assert p.locator("#rd-popover .rd-agent-line").count() == 0
+    assert "agent session" not in p.inner_text("#rd-popover")
     p.fill("#rd-popover textarea", "Noted.")
     p.keyboard.press("Enter")
     until(lambda: "Noted." in site.file.read_text(encoding="utf-8"), what="the reply in the file")

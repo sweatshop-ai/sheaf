@@ -622,6 +622,8 @@ var create = function (ROOT, CFG, opts) {
     var d = dirty().length;
     btn.classList.toggle('on', editing);
     btn.classList.toggle('dirty', d > 0);
+    var tg = document.getElementById('rd-mode');         // the Edit / Save toggle wears the ball's colour, from the same classes
+    if (tg) { tg.classList.toggle('on', editing); tg.classList.toggle('dirty', d > 0); }
     btn.title = stateText();
     var st = q('#rd-state');
     if (st) st.textContent = stateText();
@@ -2617,6 +2619,31 @@ var create = function (ROOT, CFG, opts) {
     if (!sel || sel.isCollapsed || sel.toString() === touchFrom) return;
     clearTimeout(offerTimer);
     offerSettled();                    // the box's form puts the cursor in its field as it is built, still inside this event
+  }, true);
+  // iOS may leave the keyboard down after a selection. A box that stands open with its field unfocused takes the cursor on one
+  // touch in its empty area (the box's padding, the band, the thread's background, the composer frame), made inside that touch's
+  // own event, which is what lets the keyboard rise. A control (×, −, ⋯, a link), a bubble and a selection in the box keep their
+  // own meaning, and a touch that moved is a scroll.
+  var emptyTouch = null;
+  listen(document, 'touchstart', function (e) {
+    var t = e.touches && e.touches.length === 1 ? e.touches[0] : null;
+    emptyTouch = t ? { x: t.clientX, y: t.clientY, moved: false } : null;
+  }, true);
+  listen(document, 'touchmove', function (e) {
+    var t = e.touches && e.touches[0];
+    if (emptyTouch && t && (Math.abs(t.clientX - emptyTouch.x) > 8 || Math.abs(t.clientY - emptyTouch.y) > 8)) emptyTouch.moved = true;
+  }, true);
+  listen(document, 'touchend', function (e) {
+    var from = emptyTouch, box = ROOT.getElementById('rd-popover');
+    emptyTouch = null;
+    if (!COARSE.matches || !from || from.moved || !box || !e.target.closest || !box.contains(e.target)) return;
+    if (e.target.closest('button, a, summary, details, input, textarea, select, .rd-msg')) return;
+    var sel = getSel();
+    if (sel && !sel.isCollapsed && sel.anchorNode && box.contains(sel.anchorNode)) return;
+    var ta = box.querySelector('.rd-form:not([data-done]) textarea:not([readonly]):not([disabled])');
+    if (!ta) return;
+    if (document.activeElement !== ta) ta.focus();
+    e.preventDefault();       // else the mouse events the browser makes of a touch land on a non-field and take the cursor away again
   }, true);
   // Which block of those that open with the same 12 characters this is (0 for the first): a block added or
   // removed above changes a block's index, never its place among the blocks that open like it.

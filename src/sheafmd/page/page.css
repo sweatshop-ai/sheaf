@@ -5,9 +5,12 @@
  border-radius:50%;border:2px solid var(--fg,#000);background:var(--bg,#fff);color:var(--fg,#000);
  font:600 20px/1 ui-monospace,monospace;cursor:pointer;box-shadow:3px 3px 0 rgba(0,0,0,.18)}
 #rd-menu-btn .rd-dot{position:absolute;top:1px;right:1px;width:12px;height:12px;border-radius:50%;
- background:#999;border:2px solid var(--bg,#fff)}
-#rd-menu-btn.on .rd-dot{background:#16a34a}
-#rd-menu-btn.dirty .rd-dot{background:#ea580c}
+ background:var(--rd-ball);border:2px solid var(--bg,#fff)}
+/* The state colour, once: the ball by the round menu and the Edit / Save toggle's border both read --rd-ball, and refresh()
+   gives both elements the same classes. Grey idle, green in Edit mode, red-orange with a changed block (dirty wins). */
+#rd-menu-btn,#rd-mode{--rd-ball:#999}
+#rd-menu-btn.on,#rd-mode.on{--rd-ball:#16a34a}
+#rd-menu-btn.dirty,#rd-mode.dirty{--rd-ball:#ea580c}
 #rd-menu{position:fixed;right:18px;bottom:74px;z-index:401;min-width:240px;max-width:calc(100vw - 32px);
  background:var(--bg,#fff);color:var(--fg,#000);border:2px solid var(--fg,#000);border-radius:3px;
  box-shadow:4px 4px 0 rgba(0,0,0,.18);padding:6px 0;font:500 13px/1.3 'DM Mono',ui-monospace,monospace;
@@ -181,7 +184,7 @@
 #rd-notice code{font:inherit;font-weight:700}
 /* What was typed on a page whose document left the hub, to copy. */
 #rd-notice textarea{display:block;box-sizing:border-box;width:100%;margin-top:6px;font:inherit;resize:vertical}
-#rd-mode{position:fixed;right:18px;bottom:74px;z-index:400;display:flex;padding:2px;border-radius:14px;background:var(--bg,#fff);border:1px solid rgba(127,127,127,.4);box-shadow:0 2px 8px rgba(0,0,0,.15)}
+#rd-mode{position:fixed;right:18px;bottom:74px;z-index:400;display:flex;padding:2px;border-radius:14px;background:var(--bg,#fff);border:2px solid var(--rd-ball);box-shadow:0 2px 8px rgba(0,0,0,.15)}
 #rd-mode button{cursor:pointer;border:0;border-radius:12px;padding:3px 9px;background:var(--fg,#000);color:var(--bg,#fff);font:600 11px system-ui,sans-serif;display:inline-grid}
 #rd-mode button>span{grid-area:1/1;text-align:center;white-space:nowrap}
 #rd-mode button .rd-l-save,.rd-editing #rd-mode button .rd-l-edit{visibility:hidden}

@@ -36,7 +36,7 @@ from ..edit import EditError
 from ..mcp import Caller, Door
 from ..render import RenderError
 from ..source import StaleError, md_hash
-from . import auth, codes, events, peer, place, proxy, relay, targets, the_list, visibility, work
+from . import auth, boxwait, codes, events, peer, place, proxy, relay, targets, the_list, visibility, work
 from . import waiting as waiting_mod
 from .tell import NO_AGENT, JobRefused
 from .index import Status
@@ -1299,12 +1299,12 @@ class Handler:
         (`written` or why not, the file's name when written)."""
         project = "/".join(Address.parse(e.address).rel.split("/")[:2])
         by = work.member_word(req.member)
-        out = {"project": project, "member": by, "sheaf": e.address, "text": body[:work.TEXT_MAX], "kind": "tell",
+        out = {"project": project, "member": by, "sheaf": e.address, "text": body[:work.TEXT_MAX], "kind": boxwait.KIND,
                "thread": thread, "address": e.address, "abs_path": str(e.path),
                "id": str(uuid.uuid4()), "message": self._tell_message(req, e, thread)}
         drop, name = work.drop_named(self.hub.the_list.cfg.dirs_for(req.member).tell_dir, project, json.dumps(out).encode("utf-8"),
                                      "no tell_dir in [list]")
-        self.hub.record("tell-dropped", e.address, what="tell", project=project, by=by, drop=drop,
+        self.hub.record("tell-dropped", e.address, what=boxwait.KIND, project=project, by=by, drop=drop,
                         tell=out["id"])
         return drop, name
 
@@ -1537,7 +1537,7 @@ class Handler:
         # Tell runs the hub account's own session, which a member is not (9.9); on a sheaf whose live
         # session is James's on the box it goes to his window instead, by a file the hub drops (9.12), and on
         # a sheaf whose live session is a member's fork it goes to that fork's relay while it is connected (9.14).
-        to_box = route = None
+        route = None
         if member is not None and starts and b.get("tell"):
             route = self._work_route(e.address, e.live.current()[1], req.member)     # James's window or a fork comes first (9.8)
         # An agent that is the reader's target (SPEC 9.8) is not reached: the Tell waits for it, after the write,
@@ -1545,9 +1545,8 @@ class Handler:
         to_agent = (starts and bool(b.get("tell")) and route is None
                     and targets.live(self.hub, targets.stored(self.hub, e.address, member), member) is not None)
         if member is not None and b.get("tell") and not to_agent:
-            to_box = True
-            _shape(route is not None, proxy.PROXY_LINE)
-        tell = starts and bool(b.get("tell")) and not to_box and not to_agent
+            _shape(route is not None, proxy.PROXY_LINE)     # a member's Tell goes to the box, a relay or an agent, or is refused
+        tell = starts and bool(b.get("tell")) and route is None and not to_agent
         # A Tell that cannot go out still writes the comment, and then starts no wait. A reply
         # sent with Tell to a thread that is being told is such a Tell: the wait the first one
         # began stays as it is (SPEC 11.3).
@@ -1565,7 +1564,7 @@ class Handler:
                 seen = place.UNJUDGED if opened is None else place.opened_private(self.hub, opened)
                 if not self.hub.may_open(member, e.address, fm, seen):
                     raise Refuse(404, "no such document")
-                if (to_box or to_agent) and self._work_route(e.address, text, req.member) != route:
+                if (route or to_agent) and self._work_route(e.address, text, req.member) != route:
                     raise Refuse(400, proxy.PROXY_LINE)
                 if route == "relay":        # the fork the Tell goes to: no newer one (#134)
                     judged[:] = [work.sessions(fm)[0]["id"]]
@@ -1594,22 +1593,22 @@ class Handler:
             # Taken before under this request id: what the first request started (a Tell's wait)
             # is running or done, and the page hears of it by its events.
             tell = False
-            to_box = to_agent = None
+            route = to_agent = None
         if to_agent:
             try:
                 self.hub.tell.queue_agent(e.address, snap["id"], member)
             except JobRefused as r:
                 snap["tellError"] = r.message
-        elif to_box and route == "relay":
+        elif route == "relay":
             if (line := self._relay_tell(req, e, snap["id"], judged[0] if judged else "")) is not None:
                 snap["tellError"] = line
-        elif to_box:
+        elif route == "box":
             drop, name = self._drop_for_james(req, e, b["body"], snap["id"])
             if drop != "written":
                 snap["tellError"] = "The hub could not send this to James's window; the comment is written."
             else:
                 # Open on the sheaf's pages until a reply lands in the thread, or past the Tell wait (#115).
-                self.hub.box_waits.add(e.address, snap["id"], "tell", e.live.current()[1], name,
+                self.hub.box_waits.add(e.address, snap["id"], e.live.current()[1], name,
                                        self.hub.the_list.cfg.dirs_for(req.member).tell_dir, req.member.id)
         # The job looks the document up again when it starts: it names its thread in the text the
         # comment was just written in, so a forget in between, and another folder that takes the name,

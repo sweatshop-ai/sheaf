@@ -1712,6 +1712,19 @@ def test_a_stop_whose_reply_fails_still_drops_the_stop_and_says_why(team, work, 
     assert row["said"] == "not written: the hub failed on it (sheaf diag)"
 
 
+def test_a_drop_file_written_with_kind_tell_is_still_read_and_recorded_as_a_tell(team, work, stoppable):
+    # A file dropped before `BoxWaits` lost its kind, still in the box's folder when the hub restarts: written by
+    # hand here, as the old hub wrote it, and read by Stop James for what it says.
+    stoppable["tell"].joinpath("thinkingtoo--tiroir-20261029T200000Z").write_text(json.dumps(
+        {"project": "thinkingtoo/tiroir", "member": "hans", "sheaf": ADDRESS, "text": "Send the draft.",
+         "kind": "tell", "thread": "c1"}), encoding="utf-8")
+    assert len(drops(stoppable)) == 1
+    assert stop_james(team, work).status == 200
+    assert drops(stoppable) == []
+    row, = hub_rows("tell-stopped")
+    assert row["thread"] == "c1" and row["what"] == "tell" and row["project"] == "thinkingtoo/tiroir"
+
+
 def test_a_waiting_tell_naming_a_sheaf_of_another_project_is_removed_with_no_reply_there(team, work, stoppable):
     elsewhere = put(team, work, "acme/site/x.md", SHEAF.replace("project: tiroir", "project: site"))
     stoppable["tell"].joinpath("thinkingtoo--tiroir-20261029T200000Z").write_text(json.dumps(

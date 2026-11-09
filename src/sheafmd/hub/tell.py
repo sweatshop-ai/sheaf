@@ -321,8 +321,8 @@ class Tell:
     # ── Tell ─────────────────────────────────────────────────────────────────
     def start_tell(self, address: str, cid: str, waiting: bool = False, held=None):
         """Deliver thread `cid` to the session. `waiting`: the thread already waits for the
-        reply (a comment written with Tell starts the wait when it is written). `held`: as for an
-        a Tell begun by hand. Raises JobRefused."""
+        reply (a comment written with Tell starts the wait when it is written). `held`: as for a Tell
+        begun by hand. Raises JobRefused."""
         e = self._entry(address)
         self._version(e, held)
         v = self.view(address)

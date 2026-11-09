@@ -836,7 +836,7 @@ def test_a_comment_sent_on_another_passage_leaves_the_kept_comment_kept(kept):
     assert kept.page.input_value("#rd-popover textarea") == "about the pears"
 
 
-def test_a_failed_send_on_another_passage_keeps_both_texts_and_its_cancel_clears_only_its_own(kept):
+def test_a_failed_send_on_another_passage_keeps_both_texts_and_its_discard_clears_only_its_own(kept):
     open_comment_form(kept, P1, "apples")
     kept.page.fill("#rd-popover textarea", "about the apples")
     kept.site.kill()
@@ -845,7 +845,7 @@ def test_a_failed_send_on_another_passage_keeps_both_texts_and_its_cancel_clears
     assert kept.page.input_value("#rd-popover textarea") == "about the apples"
     s = comment_store(kept)
     assert "about the pears" in s and "about the apples" in s
-    kept.page.click("#rd-popover button[data-f=no]")
+    discard_unsent(kept.page, "about the apples")          # a new message has no Cancel: Discard on its entry
     s = comment_store(kept)
     assert "about the pears" in s and "about the apples" not in s
 
@@ -3142,11 +3142,11 @@ def test_a_thread_deleted_elsewhere_keeps_its_popover_while_a_reply_is_typed(thr
     assert thread.page.input_value("#rd-popover textarea") == "my reply text"
 
 
-def test_cancelling_the_form_of_a_deleted_thread_closes_its_popover(thread):
+def test_putting_away_the_form_of_a_deleted_thread_closes_its_popover(thread):
     open_reply(thread, "my reply text")
     delete_the_thread(thread)
     thread.page.wait_for_selector("#rd-popover .rd-hold:has-text('deleted')")
-    thread.page.click("#rd-popover button[data-f=no]")
+    thread.page.click("#rd-popover button[data-a=minimize]")
     until(lambda: thread.page.locator("#rd-popover").count() == 0, what="the popover to close")
 
 
@@ -3165,7 +3165,7 @@ def test_the_form_of_a_deleted_thread_cannot_be_sent_only_copied_or_cancelled(th
     delete_the_thread(thread)
     p.wait_for_selector("#rd-popover .rd-hold:has-text('deleted')")
     assert p.locator("#rd-popover .rd-form button[data-f]:not([data-f=no]):enabled").count() == 0
-    assert p.is_enabled("#rd-popover button[data-f=no]")
+    assert p.is_enabled("#rd-popover button[data-f=no]" if form == "edit" else "#rd-popover button[data-a=minimize]")   # a reply is put away, an edit cancelled
     p.route("**/_/comment", lambda route: sent.append(route))
     p.focus("#rd-popover textarea")
     p.keyboard.press("Control+Enter")
@@ -3227,8 +3227,8 @@ def test_a_reply_to_a_deleted_thread_closed_by_escape_during_its_send_comes_back
     assert "deleted" in p.inner_text("#rd-popover .rd-form")
     assert "being sent" not in p.inner_text("#rd-popover")
     assert p.locator("#rd-popover button[data-f]:not([data-f=no]):enabled").count() == 0, "it can still be sent"
-    p.click("#rd-popover button[data-f=no]")
-    until(lambda: p.locator("#rd-popover").count() == 0, what="the popover to close once the form is cancelled")
+    p.click("#rd-popover button[data-a=minimize]")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the popover to close once the form is put away")
     assert comment_store(thread) == ""
 
 
@@ -3268,7 +3268,7 @@ def test_a_reply_or_edit_for_a_thread_deleted_elsewhere_during_its_send_leaves_t
     until(lambda: p.locator("#rd-popover textarea").count() == 1, what="the form to come back")
     assert p.input_value("#rd-popover textarea") == "words for a gone thread"
     until(lambda: comment_store(thread) == "", what="the store to let the text of a thread that is gone go")
-    p.click("#rd-popover button[data-f=no]")
+    p.click("#rd-popover button[data-f=no]" if form == "edit" else "#rd-popover button[data-a=minimize]")
     assert comment_store(thread) == ""
 
 
@@ -3302,12 +3302,14 @@ def test_a_reply_to_a_deleted_thread_stays_beside_text_typed_in_another_thread_a
     assert second.locator("button[data-f]:not([data-f=no]):enabled").count() == 0, "it can still be sent"
     # Its own form cancelled and the second thread deleted in turn: the line about the second thread does not
     # go on the first thread's form, the only one left.
-    first.locator("button[data-f=no]").click()
+    first.locator("textarea").fill("")              # a reply form has no Cancel: its text is taken out and its field stays
     delete_comment(two_threads, 0)
     until(lambda: p.locator(".rd-badge").count() == 0, what="the second thread to go")
     p.wait_for_timeout(300)
-    assert p.locator("#rd-popover .rd-gone").count() == 0, "the line about the second thread went on the first thread's form"
-    assert p.input_value("#rd-popover textarea") == "words for a gone thread"
+    # The emptied field stays on the popover's own form, which may say its thread is gone; the line must not be on
+    # the form of the other thread (data-for), the one that holds the text.
+    assert typed(p) == ["words for a gone thread"]
+    assert p.locator("#rd-popover .rd-form[data-for] .rd-gone").count() == 0, "the line about the second thread went on the first thread's form"
 
 
 # Refused while a new comment was being sent, it came back into the new comment's popover, and the answer of
@@ -4328,7 +4330,7 @@ def test_cancel_of_a_form_that_was_never_sent_leaves_the_kept_text_of_a_send_out
 
 
 # An entry with no request id (an older entry's) goes with any clear (SPEC 10.8): here the Cancel of the form it fills.
-def test_cancel_clears_an_entry_that_has_no_request_id(thread):
+def test_discard_clears_an_entry_that_has_no_request_id(thread):
     (c,) = rdc.parse(thread.site.file.read_text()).comments
     keep_on_disk(thread, {"thread": c.id, "kind": "reply", "body": "an older entry's reply", "at": "2026-10-20T10:00:00Z"})
     p = thread.page
@@ -4336,7 +4338,7 @@ def test_cancel_clears_an_entry_that_has_no_request_id(thread):
     p.wait_for_selector("#rd-menu-btn", state="attached")
     p.click(".rd-badge")
     p.wait_for_selector("#rd-popover textarea")
-    p.click("#rd-popover button[data-f=no]")
+    discard_unsent(p, "an older entry's reply")      # a reply form has no Cancel: Discard on its entry in the list
     until(lambda: stored_bodies(thread) == [], what="the entry to go")
 
 
@@ -4524,7 +4526,7 @@ def test_a_new_comment_refused_while_a_failed_reply_form_is_open_in_its_popover_
     p.wait_for_timeout(1000)
     assert p.evaluate("window.__same_load") is True, "the refusal reloaded the page under the open form"
     assert p.input_value("#rd-popover textarea") == "words for a gone thread"
-    p.click("#rd-popover button[data-f=no]")
+    p.click("#rd-popover button[data-a=minimize]")
     reloaded(p)
     p.wait_for_selector(KEPT)
     assert p.input_value("#rd-popover textarea") == "about the pears"

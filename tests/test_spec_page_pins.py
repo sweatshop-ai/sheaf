@@ -74,12 +74,13 @@ def test_sends_are_counted_per_form():
 
 # ---- 10.4: a selection in edit mode ---------------------------------------------------------------------
 
-def test_in_edit_mode_the_selection_is_not_redrawn_and_the_widened_run_is_painted():
+def test_in_edit_mode_the_selection_is_not_redrawn_and_nothing_is_painted_or_opened_over_it():
     s = flat(section("10.4"))
     assert "outside edit mode" in s
-    assert "In edit mode the selection stays as the person made it" in s
+    assert "In edit mode a selection is for the text and only for it" in s
     assert "typing replaces only what was selected" in s
-    assert "where the browser has CSS highlights" in s
+    assert "paints nothing and opens nothing over it" in s
+    assert "Switching back to Comment with a selection still standing opens nothing" in s
 
 
 # ---- 10.8: what the stores hold and who reads them -------------------------------------------------------

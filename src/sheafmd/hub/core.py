@@ -1084,8 +1084,8 @@ class Hub:
             return e.live.current()[1]
         minutes = max(1, -(-self.tell_wait // 60))
         for address, thread, d in self.box_waits.expire(self.tell_wait, text_of):
-            self.record("box-expired", address, what=d.kind, project=_project(address), thread=thread)
-            self._tell_drop(address, "box-failed", {"id": thread, "kind": d.kind, "minutes": minutes})
+            self.record("box-expired", address, what=boxwait.KIND, project=_project(address), thread=thread)
+            self._tell_drop(address, "box-failed", {"id": thread, "kind": boxwait.KIND, "minutes": minutes})
         self._read_drop_statuses()
         for address in self.box_waits.cleared():          # however it ended, here or on a page's ask: the orange goes
             self.index.moved_for_members(address)         # each member's orange is their own: another's may stay on
@@ -1101,15 +1101,15 @@ class Hub:
             folder = d.folder if d.folder is not None else self.the_list.cfg.tell_dir
             got = boxwait.read_status(folder, d.name) if d.name and folder is not None else None
             what, was = self.box_waits.observe(address, thread, got, d)
-            row = {"what": d.kind, "project": _project(address), "thread": thread}
+            row = {"what": boxwait.KIND, "project": _project(address), "thread": thread}
             if what == "ignored":
                 self.record("drop-status-ignored", address, **row, drop=d.name)
             elif what == "failed":
                 self.record("drop-status", address, **row, state="failed", error=got[1])
-                self._tell_drop(address, "box-failed", {"id": thread, "kind": d.kind, "error": got[1]})
+                self._tell_drop(address, "box-failed", {"id": thread, "kind": boxwait.KIND, "error": got[1]})
             elif what == "state":
                 self.record("drop-status", address, **row, state=got[0])
-                self._tell_drop(address, "box-status", {"id": thread, "kind": d.kind, "state": got[0]})
+                self._tell_drop(address, "box-status", {"id": thread, "kind": boxwait.KIND, "state": got[0]})
             if what == "state" and got[0] == "delivered":
                 self.index.moved_for_members(address)
 

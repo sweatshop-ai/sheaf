@@ -2301,26 +2301,37 @@ def still_written(tab, text):
     assert tab.page.input_value("#rd-popover textarea") == text
 
 
-def test_another_comments_badge_leaves_a_reply_with_text_alone(two_threads):
+# Text typed in a reply no longer stops another thread from opening ("Send or cancel ... first" is gone): the
+# box moves to the other thread, the text is kept and listed, and it is in the field when its thread is opened again.
+def kept_and_back(tab, text):
+    assert "1 reply not sent" in tab.page.inner_text(UNSENT)
+    tab.page.locator(".rd-badge").first.dispatch_event("click")
+    until(lambda: "Why apples?" in tab.page.inner_text("#rd-popover"), what="the first thread")
+    assert tab.page.input_value("#rd-popover textarea") == text
+
+
+def test_another_comments_badge_keeps_a_reply_with_text_and_opens_that_comment(two_threads):
     open_reply(two_threads, "my reply text")
     two_threads.page.locator(".rd-badge").nth(1).dispatch_event("click")
-    still_written(two_threads, "my reply text")
-    assert "Why apples?" in two_threads.page.inner_text("#rd-popover")
+    until(lambda: "Why pears?" in two_threads.page.inner_text("#rd-popover"), what="the second thread")
+    assert not typed(two_threads.page)
+    kept_and_back(two_threads, "my reply text")
 
 
-def test_the_badge_of_the_open_thread_leaves_a_reply_with_text_alone(two_threads):
+def test_the_badge_of_the_open_thread_puts_a_reply_with_text_away_and_keeps_it(two_threads):
     open_reply(two_threads, "my reply text")
     two_threads.page.locator(".rd-badge").first.dispatch_event("click")
-    still_written(two_threads, "my reply text")
+    until(lambda: two_threads.page.locator("#rd-popover").count() == 0, what="the box to close")
+    kept_and_back(two_threads, "my reply text")
 
 
-def test_a_panel_item_leaves_a_reply_with_text_alone(two_threads):
+def test_a_panel_item_keeps_a_reply_with_text_and_opens_that_comment(two_threads):
     open_reply(two_threads, "my reply text")
     two_threads.page.click("#rd-menu-btn")
     two_threads.page.click("#rd-show")
     two_threads.page.locator("#rd-panel button[data-id]").nth(1).click()
-    still_written(two_threads, "my reply text")
-    assert "Why apples?" in two_threads.page.inner_text("#rd-popover")
+    until(lambda: "Why pears?" in two_threads.page.inner_text("#rd-popover"), what="the second thread")
+    kept_and_back(two_threads, "my reply text")
 
 
 def test_the_comment_button_leaves_a_reply_with_text_alone(two_threads):

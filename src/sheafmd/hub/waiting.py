@@ -8,7 +8,7 @@ diagnostics rows of a change go out inside it too, so the page, `documents` and 
 A row names the token and the thread, never the Tell's text: the message is built when it is listed.
 
     queue(address, cid, row, by, member, thread)   put a Tell in the file; raises Refused
-    take(address, row, got)                 the Tells listed to `row` for this document; the first listing marks them seen
+    take(address, row, got, message)        the Tells listed to `row` for this document, `message(c, t)` their words; the first listing marks them seen
     pending(row)                            the documents where `row` has a Tell waiting
     end(address, cid, how, ...)             a Tell ends: done, cancelled
     waits(address, member)                  what the page is told: [{id, to, state}] of the reader's own
@@ -25,11 +25,12 @@ from pathlib import Path
 
 from .. import comments as rdc
 from .. import paths
+from . import targets
 from .roots import Address
 from .state import STAMP_FORMAT, TokenRow, file_locked, read_json, write_json
 
 HAS_IT = "{agent} has this comment waiting already: cancel it first, or reply in the thread."
-GONE = "{agent} can no longer reach this hub: its token was revoked. Pick another target."
+GONE = targets.REVOKED
 
 
 REREAD = 0.1          # seconds between the two reads of a document where a thread looks gone
@@ -66,6 +67,11 @@ def _recycled(t: dict, c) -> bool:
     return "thread_at" in t and (t.get("thread_by"), t["thread_at"], t.get("thread_quote")) != (c.by, c.at, c.quote)
 
 
+def belongs(t: dict, row: TokenRow) -> bool:
+    """The Tell's row is for this token (`TokenRow.is_pair`): a row with no `tid` matches no token that has an id."""
+    return row.is_pair(t.get("token"), t.get("tid"))
+
+
 def _file() -> Path:
     return paths.state_dir() / "tells.json"
 
@@ -85,11 +91,11 @@ class Waiting:
             return result
 
     # ── what ends and what shows ─────────────────────────────────────────────
-    def _live_ids(self) -> set:
-        return {(r.name, r.id) for r in self.hub.tokens.list() if r.client is not None and not r.invalid}
+    def _live(self) -> list:
+        return [r for r in self.hub.tokens.list() if r.client is not None and not r.invalid]
 
     def _name(self, t: dict) -> str:
-        row = next((r for r in self.hub.tokens.list() if r.name == t.get("token") and r.id == t.get("tid")), None)
+        row = next((r for r in self.hub.tokens.list() if belongs(t, r)), None)
         return row.signed(self.hub.person, self.hub.proxy) if row is not None else str(t.get("token", ""))
 
     def _emit(self, address: str, name: str, data: dict, member=None):
@@ -107,9 +113,8 @@ class Waiting:
                             **{k: v for k, v in extra.items() if k == "reason"})
 
     def _revoked(self, rows: list):
-        live = self._live_ids()
-        self._end(rows, [t for t in rows if (t.get("token"), t.get("tid")) not in live], "cancelled",
-                  reason="revoked")
+        live = self._live()
+        self._end(rows, [t for t in rows if not any(belongs(t, r) for r in live)], "cancelled", reason="revoked")
 
     def sweep(self):
         def change(rows):
@@ -171,12 +176,12 @@ class Waiting:
         the comment it is about: its author and time are kept in the row (see `_recycled`)."""
         def change(rows):
             self._revoked(rows)
-            if not any((r.name, r.id) == (row.name, row.id) for r in self.hub.tokens.list()):
+            if not any(r.is_pair(row.name, row.id) for r in self.hub.tokens.list()):
                 raise Refused(409, GONE.format(agent=row.signed(self.hub.person, self.hub.proxy)))
             if self.hub.roots.get(Address.parse(address).root) is None:      # forgotten meanwhile: `end_root` came first
                 raise Refused(409, "The folder of this document was forgotten.")
             name = row.signed(self.hub.person, self.hub.proxy)
-            if any(t["doc"] == address and t["thread"] == cid and t["tid"] == row.id for t in rows):
+            if any(t["doc"] == address and t["thread"] == cid and belongs(t, row) for t in rows):
                 raise Refused(409, HAS_IT.format(agent=name))
             t = {"id": str(uuid.uuid4()), "doc": address, "thread": cid, "token": row.name, "tid": row.id,
                  "by": by, "at": time.strftime(STAMP_FORMAT), "seen": None}
@@ -194,7 +199,7 @@ class Waiting:
     def pending(self, row: TokenRow) -> set:
         """The addresses where `row` has a Tell waiting (a look, nothing changes)."""
         return {t["doc"] for t in read_json(_file(), [], aside=False)
-                if isinstance(t, dict) and t.get("tid") == row.id and t.get("token") == row.name}
+                if isinstance(t, dict) and belongs(t, row)}
 
     def take(self, address: str, row: TokenRow, got, message) -> list:
         """The Tells listed to `row` on `address`; `got` is the document's parsed comments and `message(c, t)`
@@ -202,7 +207,7 @@ class Waiting:
         def change(rows):
             self._revoked(rows)
             out, save = [], False
-            for t in [t for t in rows if t["doc"] == address and t["tid"] == row.id and t["token"] == row.name]:
+            for t in [t for t in rows if t["doc"] == address and belongs(t, row)]:
                 c = got.by_id(t["thread"])
                 if _stale(t, c):
                     self._end(rows, [t], "cancelled", reason="closed")
@@ -226,7 +231,7 @@ class Waiting:
         person), for a Cancel from a page. The Tells ended, as they were."""
         def change(rows):
             gone = [t for t in rows if t["doc"] == address and t["thread"] == cid
-                    and (row is None or (t["tid"], t["token"]) == (row.id, row.name))
+                    and (row is None or belongs(t, row))
                     and (not only_member or t.get("member") == (member.id if member else None))]
             extra = {"reason": reason} if reason else {}      # `seen` is each row's own, set in `_end` (24)
             self._end(rows, gone, how, **extra)

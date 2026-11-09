@@ -360,6 +360,11 @@ class TokenRow:
                    client if isinstance(client, str) else None,
                    entry["id"] if isinstance(entry.get("id"), str) else None)
 
+    def is_pair(self, name, tid) -> bool:
+        """Whether a stored `token` name and `id` (a Tell's `token`, `tid`; a target's `token`, `id`) name this token:
+        both together, so a token revoked and made again under the same name is not the old one (9.7, 9.8)."""
+        return self.name == name and self.id == tid
+
     def signed(self, person: str, cfg=None) -> str:
         """The name this token's replies are signed with. An agent's is built, never typed: `<client> (<member>)`,
         the member the config's `tokens` name this token for (`cfg`, the checked `[proxy]` table), else the hub's

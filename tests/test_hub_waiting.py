@@ -19,7 +19,8 @@ from sheafmd import comments as rdc
 from sheafmd.source import update_file
 from test_hub_tell import wait_until
 from sheafmd.hub.state import Tokens
-from test_hub_target import DOC, agent, members, pick, row
+from sheafmd.hub import targets, waiting
+from test_hub_target import DOC, REVOKED, agent, members, pick, row
 
 SECOND = "{agent} has this comment waiting already: cancel it first, or reply in the thread."
 
@@ -604,6 +605,31 @@ def test_a_tell_to_a_revoked_agent_is_refused_with_the_revoked_line(browser, tal
     r = tell(browser)
     assert r.status == 409 and "token was revoked" in r.json()["error"]
     assert browser.hub.waiting_tells.waits(DOC) == []
+
+
+def test_the_revoked_line_of_the_queue_names_the_agent_as_the_page_does(browser, talk):
+    """The token goes between the check of the target and the queue (`queue_agent` looks again): the line is the
+    page's, with the token's name, never "The agent"."""
+    from sheafmd.hub.tell import JobRefused
+    agent_token()
+    target(browser)
+    Tokens().revoke("ada-chatgpt")
+    with pytest.raises(JobRefused) as got:
+        browser.hub.tell.queue_agent(DOC, "c1")
+    assert got.value.status == 409 and got.value.message == REVOKED.format(agent="ada-chatgpt")
+
+
+def test_the_revoked_line_is_one_constant_for_the_page_the_refusal_and_the_queue():
+    assert waiting.GONE is targets.REVOKED
+
+
+def test_a_row_belongs_to_a_token_by_its_name_and_its_id_together(browser, talk):
+    Tokens().add("ada-chatgpt", client="ChatGPT")
+    t = {"token": "ada-chatgpt", "tid": row("ada-chatgpt").id}
+    assert waiting.belongs(t, row("ada-chatgpt"))
+    assert not waiting.belongs({**t, "tid": "another-id"}, row("ada-chatgpt"))
+    assert not waiting.belongs({**t, "token": "other"}, row("ada-chatgpt"))
+    assert not waiting.belongs({"token": "ada-chatgpt"}, row("ada-chatgpt"))      # a row with no id is nobody's
 
 
 # ── one open: the file is judged and read through the same descriptor (SPEC 9.11) ─────────────────────────────

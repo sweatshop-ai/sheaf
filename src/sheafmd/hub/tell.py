@@ -22,7 +22,7 @@ from .. import config, diagnostics, signals
 from ..agents import prompts
 from ..agents.base import Adapter, DeliveryCancelled, DeliveryError, Target
 from . import roots as roots_mod
-from . import targets
+from . import proxy, targets
 from .targets import who
 from . import waiting as waiting_mod
 from .auth import clean_display
@@ -391,9 +391,12 @@ class Tell:
     def queue_agent(self, address: str, cid: str, member=None):
         """The Tell of thread `cid` waits for the agent that is the reader's target (SPEC 9.8). Raises JobRefused.
         The target is read inside the refusal's own look, so a target changed or revoked since is the one judged."""
-        row = targets.live(self.hub, targets.stored(self.hub, address, member), member)
-        if row is None:
-            raise JobRefused(409, targets.REVOKED.format(agent="The agent"))
+        raw = targets.stored(self.hub, address, member)
+        row = targets.live(self.hub, raw, member)
+        if row is None:     # the page's own line (10.6): a revoked token is named, as the page names it
+            line = (targets.agent_view(self.hub, raw, member).line if targets.is_agent(raw)
+                    else proxy.PROXY_LINE if member is not None else NO_AGENT)
+            raise JobRefused(409, line)
         thread = self._thread(self._entry(address), cid)
         try:
             self.hub.waiting_tells.queue(address, cid, row, member.name if member else self.hub.person, member, thread)

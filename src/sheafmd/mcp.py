@@ -39,14 +39,13 @@ from .source import check_create, create_file, md_hash, now, update_beneath
 
 PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")
 INSTRUCTIONS = (
-    "sheaf keeps comment threads inside markdown files. Use `threads` to read what was asked on "
-    "a document, `reply` to answer (role `action` after you acted on a Tell, `answer` when you "
-    "only answer), and `resolve` when a thread is done. Call `documents` first, every time you are "
-    "asked to work on a page: a Tell from the person waits there, in the `tells` of a document, with "
-    "the whole message; answer it with `reply` and role `action`. A Tell from sheaf names the document and "
-    "the comment id. Where you may work on pages, `read` gives a document's text and its hash, "
-    "`create` makes a new page and `update` replaces the text of one, given the hash you read it "
-    "with; keep every comment in the text you send.")
+    "sheaf keeps comment threads inside markdown files. Call `documents` first: it lists the "
+    "documents with open comments and, under `tells`, what the person asked you to do (a Tell). "
+    "Use `threads` to read what was asked on a document, `reply` to answer (role `action` after "
+    "you acted on a Tell, `answer` when you only answer and changed nothing), and `resolve` when "
+    "a thread is done. A Tell names the document and the comment id. Where you may work on pages, "
+    "`read` gives a document's text and its hash, `create` makes a new page and `update` replaces "
+    "the text of one, given the hash you read it with; keep every comment in the text you send.")
 
 WALK_LIMIT = 2000                # files of a root that is not a git work tree (SPEC 8.6, D15)
 DOT_ORDER = {"red": 0, "orange": 1, "blue": 2, "green": 3}

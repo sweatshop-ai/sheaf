@@ -21,15 +21,15 @@ def _reply_action(address: str, cid: str) -> str:
 
 def tell_agent(address: str, by: str, c, links: bool = True) -> str:
     """A Tell that waited for an agent (9.8): the agent reads it from `documents`, where it has no shell, and
-    answers through the door."""
+    answers through the door. The words are those SPEC 11.3 quotes."""
     rule = f"{RULE}\n\n" if links else ""
     return (f"Tell from sheaf, on the page of {address}.\n"
-            f'{by} pressed Tell on comment {c.id} by {c.by}, at line {c.line}, on the passage '
-            f'"{c.quote}": act on it here, in this conversation.\n\n'
+            f'{by} pressed Tell on comment {c.id} by {c.by}, on the passage "{c.quote}": '
+            "act on it now, in this conversation.\n\n"
             f"Thread:\n{_thread(c)}\n\n"
             f"{rule}"
-            "When you are done, answer in the thread so the page shows it, with the role action, "
-            f"with the sheaf MCP tool: {_reply_action(address, c.id)}")
+            "When you are done, answer in the thread with the sheaf tool, so the page shows it: "
+            f"{_reply_action(address, c.id)}. If you cannot do it, reply without the role and say why.")
 
 
 def tell(address: str, abs_path: str, me: str, c, links: bool = True) -> str:

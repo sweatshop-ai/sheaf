@@ -4558,7 +4558,7 @@ def test_a_new_comment_refused_while_a_failed_reply_form_is_open_in_its_popover_
     p.wait_for_timeout(1000)
     assert p.evaluate("window.__same_load") is True, "the refusal reloaded the page under the open form"
     assert p.input_value("#rd-popover textarea") == "words for a gone thread"
-    p.click("#rd-popover button[data-a=minimize]")
+    p.keyboard.press("Escape")       # the band (Minimize) is hidden while a form of another thread is drawn here (page.css)
     reloaded(p)
     p.wait_for_selector(KEPT)
     assert p.input_value("#rd-popover textarea") == "about the pears"

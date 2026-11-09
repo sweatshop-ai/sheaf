@@ -185,13 +185,36 @@ def until(check, timeout=8.0, what="the condition"):
         _pump(0.05)
 
 
+def open_box(page):
+    """After a selection: wait for the box, and press the Comment bar only when the box did not open itself."""
+    until(lambda: page.query_selector("#rd-popover textarea") or page.query_selector("#rd-comment-btn"),
+          what="the box or the Comment button")
+    if not page.query_selector("#rd-popover textarea"):
+        page.click("#rd-comment-btn")
+
+
+def typed(page):
+    """The texts in the popover's fields that are not empty. The reply field is open from the start, so an
+    empty field is the rest state; what a test must not find is text put into one."""
+    return page.eval_on_selector_all("#rd-popover textarea", "els => els.map(e => e.value).filter(v => v)")
+
+
+def open_form(page, form):
+    """The form of a reply or an edit. A reply field is open from the start; Edit is in the thread's ⋯ menu."""
+    if form == "edit":
+        page.click("#rd-popover .rd-more summary")
+        page.click("#rd-popover button[data-a=edit]")
+    page.wait_for_selector("#rd-popover textarea")
+
+
 def comment_on(tab, start, end, body):
-    """Select, press Comment, type and send; returns the comment once it is in the file."""
+    """Select, type and send; returns the comment once it is in the file. A mouse selection opens the box by
+    itself; a touch screen offers the Comment bar first."""
     from sheafmd import comments as rdc
     select(tab.page, start, end)
-    tab.page.click("#rd-comment-btn")
+    open_box(tab.page)
     tab.page.fill("#rd-popover textarea", body)
-    tab.page.click("#rd-popover button[data-f=ok]")
+    tab.page.click("#rd-popover button[data-f=ok], #rd-popover button[data-f=tell]")
     return until(lambda: (rdc.parse(tab.site.file.read_text()).comments or [None])[0],
                  what="the comment in the file")
 

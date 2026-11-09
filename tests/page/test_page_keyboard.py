@@ -92,7 +92,9 @@ def test_the_form_goes_back_to_its_place_when_the_keyboard_closes(phone):
     before = rects(page)["pop"]
     keyboard(page, 844 - KEYBOARD)
     keyboard(page, 844)
-    assert rects(page)["pop"] == before
+    # Chromium lays out in 1/64 px: the first cycle settles the popover one such unit higher (726.40625 to 726.390625)
+    # and six more cycles leave it there, so it is rounding, not drift. Compared to a unit, not exactly.
+    assert rects(page)["pop"] == pytest.approx(before, abs=1 / 64 + 1e-6)
     assert page.evaluate("document.querySelector('#rd-popover').classList.contains('rd-docked')") is False
 
 
@@ -155,7 +157,6 @@ def test_the_thread_stays_readable_above_the_reply_field_in_a_short_frame(touch_
     page = touch_tab.open().page
     page.set_viewport_size({"width": 390, "height": 320})
     page.click(".rd-badge")
-    page.click(POP + " button[data-a=reply]")
     page.wait_for_selector(POP + " textarea")
     got = page.evaluate("""() => { const p = document.querySelector('#rd-popover'), r = (e) => e.getBoundingClientRect();
         const s = p.querySelector('.rd-scroll'), m = s.querySelector('.rd-msg'), t = p.querySelector('textarea');
@@ -174,7 +175,6 @@ def test_a_long_thread_leaves_the_field_in_reach_above_the_keyboard(phone):
                                                            "Nearly good, only a pity about my name. " * 20, "Ada", "2026-10-25T21:01")[0])
     page = phone.open().page
     page.click(".rd-badge")
-    page.click(POP + " button[data-a=reply]")
     page.wait_for_selector(POP + " textarea")
     page.focus(POP + " textarea")
     keyboard(page, 450)

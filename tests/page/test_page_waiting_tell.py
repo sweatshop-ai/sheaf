@@ -20,7 +20,7 @@ def ask_agent(tab, site):
                                                         "id": next(r.id for r in Tokens().list() if r.name == "ada-chatgpt")}})
     tab.open()
     tab.page.click(".rd-badge")
-    tab.page.wait_for_selector("#rd-popover button[data-a=reply]")
+    tab.page.wait_for_selector("#rd-popover textarea")
     return token
 
 
@@ -31,7 +31,7 @@ def line(tab):
 def test_tell_waits_then_is_seen_and_the_line_survives_a_reload(tab, site):
     token = ask_agent(tab, site)
     name = f"ChatGPT ({site.hub.person})"
-    tab.page.click("#rd-popover button[data-a=reply]")
+    tab.page.wait_for_selector("#rd-popover textarea")
     tab.page.fill("#rd-popover textarea", "Please do.")
     tab.page.click("#rd-popover .rd-form button.rd-tell")
     until(lambda: line(tab) == [f"Waiting for {name}: it sees this the next time you talk to it."], what="the waiting line")
@@ -46,7 +46,7 @@ def test_tell_waits_then_is_seen_and_the_line_survives_a_reload(tab, site):
 
 def test_cancel_ends_the_wait_and_says_the_agent_had_seen_it(tab, site):
     token = ask_agent(tab, site)
-    tab.page.click("#rd-popover button[data-a=reply]")
+    tab.page.wait_for_selector("#rd-popover textarea")
     tab.page.fill("#rd-popover textarea", "Please do.")
     tab.page.click("#rd-popover .rd-form button.rd-tell")
     until(lambda: bool(line(tab)), what="the waiting line")
@@ -61,7 +61,7 @@ def test_cancel_ends_the_wait_and_says_the_agent_had_seen_it(tab, site):
 
 def test_an_action_reply_ends_the_wait(tab, site):
     token = ask_agent(tab, site)
-    tab.page.click("#rd-popover button[data-a=reply]")
+    tab.page.wait_for_selector("#rd-popover textarea")
     tab.page.fill("#rd-popover textarea", "Please do.")
     tab.page.click("#rd-popover .rd-form button.rd-tell")
     until(lambda: bool(line(tab)), what="the waiting line")

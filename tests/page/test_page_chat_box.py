@@ -1,7 +1,7 @@
 """The popover of a comment is a chat box: narrow, its messages in bubbles, a field to write in under them."""
 import pytest
 
-from pagehelp import DOC, P1, at, comment_draft_key, mark, open_box, reloaded, select, toast, until
+from pagehelp import DOC, P1, at, box, comment_draft_key, mark, open_box, pasted, reloaded, select, toast, until
 from sheafmd import comments as rdc
 from sheafmd.hub.state import Tokens
 from sheafmd.source import update_file
@@ -173,6 +173,54 @@ def test_ctrl_c_in_an_empty_field_copies_the_passage(tab, site):
     assert got == "apples"
 
 
+def real_selection(page, css, word):
+    """A double click with the real mouse on `word` under `css`: the page hears mousedown, mouseup, click."""
+    b = box(page, css, word)
+    page.mouse.dblclick(b["x"] + b["width"] / 2, b["y"] + b["height"] / 2)
+
+
+def test_a_real_ctrl_c_in_the_empty_field_puts_the_passage_on_the_clipboard(tab, site):
+    """The keystroke and the clipboard are the browser's own: the copy event above is built by hand."""
+    tab.open()
+    real_selection(tab.page, P1, "apples")
+    tab.page.wait_for_selector(FIELD)
+    assert tab.page.evaluate("document.activeElement.value") == ""
+    tab.page.keyboard.press("ControlOrMeta+c")
+    assert pasted(tab.page) == "apples"
+
+
+def test_a_real_ctrl_c_copies_what_is_selected_in_the_field_once_it_holds_text(tab, site):
+    tab.open()
+    real_selection(tab.page, P1, "apples")
+    tab.page.wait_for_selector(FIELD)
+    tab.page.fill(FIELD, "my words")
+    tab.page.keyboard.press("ControlOrMeta+a")
+    tab.page.keyboard.press("ControlOrMeta+c")
+    assert pasted(tab.page) == "my words"
+
+
+def test_a_real_ctrl_c_on_text_selected_in_a_bubble_copies_that_text_not_the_cited_passage(tab, site):
+    p = open_thread(tab, site)
+    p.locator(THREAD).first.click(click_count=3)
+    until(lambda: p.evaluate("getSelection().toString().trim()") == "Why?", what="the bubble's text selected")
+    p.keyboard.press("ControlOrMeta+c")
+    assert pasted(p).strip() == "Why?"
+
+
+def test_a_real_ctrl_c_on_a_bubble_of_the_thread_just_started_copies_that_text_not_the_cited_passage(tab, site):
+    tab.open()
+    real_selection(tab.page, P1, "apples")
+    tab.page.wait_for_selector(FIELD)
+    tab.page.fill(FIELD, "Why the apples?")
+    tab.page.keyboard.press("Enter")
+    tab.page.wait_for_selector("#rd-popover .rd-msg")
+    p = tab.page
+    p.locator(THREAD).first.click(click_count=3)
+    until(lambda: p.evaluate("getSelection().toString().trim()") == "Why the apples?", what="the bubble's text selected")
+    p.keyboard.press("ControlOrMeta+c")
+    assert pasted(p).strip() == "Why the apples?"
+
+
 def test_in_edit_mode_a_selection_only_selects(tab, site):
     tab.open()
     tab.page.click("#rd-mode button[data-m=edit]")
@@ -245,6 +293,20 @@ def test_an_empty_box_does_not_hold_a_reload_but_typed_text_does(tab, site):
     p.wait_for_timeout(1000)
     assert p.evaluate("window.__same_load") is True, "the page reloaded under the typed text"
     assert p.input_value(FIELD) == "half a thought"
+
+
+def test_emptying_the_last_typed_field_lifts_the_held_reload(tab, site):
+    """An empty field is not writing: the reload that waited for the text runs once the field is emptied, without
+    the box being closed."""
+    p = open_thread(tab, site)
+    p.fill(FIELD, "half a thought")
+    mark(p)
+    site.file.write_text(site.file.read_text(encoding="utf-8") + "\nFrom outside.\n", encoding="utf-8")
+    p.wait_for_selector("#rd-popover .rd-hold")
+    p.wait_for_timeout(500)
+    assert p.evaluate("window.__same_load") is True, "the page reloaded under the typed text"
+    p.fill(FIELD, "")
+    reloaded(p)
 
 
 def test_enter_during_an_ime_composition_does_not_send(tab, site):

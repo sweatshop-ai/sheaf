@@ -1220,9 +1220,13 @@ var create = function (ROOT, CFG, opts) {
   // localStorage from every keystroke, and it is drawn again after any close. So it is neither
   // the open form nor a reason to hold a reload, and Escape and a click outside leave it alone.
   var OPEN_FORM = '.rd-form:not([data-done]):not([data-kept])';
-  // A kept comment with the cursor in it, or a selection that has its Comment button: what a thread opened by
-  // itself would take away. (A form with text typed in it is `writingNow`.)
-  function writingElsewhere() { return !!cbtn || (!!pop && pop.hasAttribute('data-kept') && pop.contains(ROOT.activeElement)); }
+  // A kept comment with the cursor in it, or a selection that has its Comment button or its box (a popover of no
+  // thread: the box of a new comment): what a thread opened by itself would take away. (A form with text typed in
+  // it is `writingNow`.)
+  function writingElsewhere() {
+    return !!cbtn || (!!pop && popId === null && !pop.hasAttribute('data-kept')) ||
+      (!!pop && pop.hasAttribute('data-kept') && pop.contains(ROOT.activeElement));
+  }
   function openForm() { return pop ? pop.querySelector(OPEN_FORM) : null; }
   // The open form of the popover's own thread: the form of another thread's failed send put here (data-for)
   // carries a line of its own about its thread.
@@ -1338,7 +1342,7 @@ var create = function (ROOT, CFG, opts) {
     return true;
   }
   // The hub refuses what is sent to a thread that is gone ("no comment"), so the text can only be copied.
-  var GONE = 'This thread was deleted elsewhere, so what you wrote cannot be sent to it. Copy it, then cancel.';
+  var GONE = 'This thread was deleted elsewhere, so what you wrote cannot be sent to it. Copy it, then put the box away.';
   function goneNote() { goneLine(ownForm()); }
   function goneLine(f) {
     if (!f) return;
@@ -2196,6 +2200,8 @@ var create = function (ROOT, CFG, opts) {
       if (own !== null) { keptThreadForm(own); compose(own); }     // the other text the store keeps for this thread, if any
     };
     var ta = f.querySelector('textarea');
+    // An empty field is not writing: the reload that waited for the text runs once it is emptied.
+    ta.addEventListener('input', function () { if (!ta.value) flushHold(); });
     var from = initial && typeof initial === 'object' ? initial : { body: initial || '' };
     // The text last sent, and its id: a form drawn from the store holds a text that was sent (an older store kept
     // no id with it).
@@ -2238,7 +2244,7 @@ var create = function (ROOT, CFG, opts) {
           while (old) { old.remove(); old = f.querySelector('.rd-for, .rd-gone'); }     // "this thread" would be the open one
           f.setAttribute('data-for', '');
           f.insertAdjacentHTML('afterbegin', '<div class="rd-hold rd-for">This is for the thread “' + esc(about) + '”' +
-                               (gone ? ', which was deleted elsewhere: it cannot be sent. Copy it, then cancel.' : ', not this one.') + '</div>');
+                               (gone ? ', which was deleted elsewhere: it cannot be sent. Copy it, then put the box away.' : ', not this one.') + '</div>');
           if (gone) noSend(f);
         } else if (gone) {
           closePopover();

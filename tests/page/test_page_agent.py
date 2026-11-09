@@ -8,7 +8,7 @@ import sys
 import pytest
 
 from agent_fakes import PID, write_record
-from pagehelp import DOC, P1, at, select, until
+from pagehelp import open_box, DOC, P1, at, select, until
 from sheafmd import comments as rdc
 from sheafmd import paths
 from sheafmd.agents.claude_code import proc_start
@@ -40,15 +40,16 @@ def with_lines(tab):
     tab.page.route(re.compile(r"/_/doc\?"), doc)
 
 
-def test_the_tell_button_that_cannot_work_says_why_with_the_hubs_line(tab):
+def test_a_tell_that_cannot_work_is_no_button_and_the_box_says_why_with_the_hubs_line(tab):
+    """Was a disabled Tell button whose title carried the line. Where Tell cannot work the box offers the plain
+    send (data-f=ok) and the hub's line under the field (d35825a)."""
     with_lines(tab)
     tab.open()
     select(tab.page, at(P1, "apples"), at(P1, "apples", None))
-    tab.page.click("#rd-comment-btn")
+    open_box(tab.page)
     tab.page.wait_for_selector("#rd-popover textarea")
-    tell = tab.page.query_selector("#rd-popover button.rd-tell")
-    assert tell.is_disabled()
-    assert tell.get_attribute("title") == LINES["tell"]
+    assert tab.page.query_selector("#rd-popover button.rd-tell") is None
+    assert tab.page.query_selector("#rd-popover button[data-f=ok]") is not None
     assert tab.page.query_selector("#rd-popover button.rd-ask") is None      # Ask was retired (SPEC 11.2)
     assert tab.page.inner_text("#rd-popover .rd-agent-line:nth-of-type(1)") == LINES["tell"]
     assert tab.page.text_content("#rd-agent") == LINES["tell"]       # the menu says it too
@@ -82,7 +83,7 @@ def write_config(text):
 
 def buttons(tab):
     select(tab.page, at(P1, "apples"), at(P1, "apples", None))
-    tab.page.click("#rd-comment-btn")
+    open_box(tab.page)
     tab.page.wait_for_selector("#rd-popover textarea")
     return [tab.page.inner_text(f"#rd-popover button.rd-{k}") for k in ("tell",)]
 

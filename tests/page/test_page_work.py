@@ -9,7 +9,7 @@ import re
 import pytest
 
 from helpers import BEA
-from pagehelp import DOC, P1, at, select, toast, until
+from pagehelp import open_box, DOC, P1, at, select, toast, until
 from sheafmd import comments as rdc
 from sheafmd.hub import proxy
 from sheafmd.source import update_file
@@ -265,9 +265,20 @@ def agent_buttons(page, scope):
     return out
 
 
+def tell_offered(page, scope):
+    """Whether the form in `scope` offers Tell. Where Tell cannot work there is no disabled Tell button (d35825a):
+    the form shows the plain send, and the hub's line says why."""
+    tells = page.locator(f"{scope} button.rd-tell")
+    if tells.count():
+        assert tells.first.is_enabled()
+        return True
+    assert page.locator(f"{scope} button[data-f=ok]").count() == 1
+    return False
+
+
 def comment_form(tab):
     select(tab.page, START, END)
-    tab.page.click("#rd-comment-btn")
+    open_box(tab.page)
     tab.page.wait_for_selector("#rd-popover .rd-form")
 
 
@@ -332,7 +343,7 @@ def test_a_sheaf_live_on_a_laptop_turns_tell_off_with_its_line(tab):
     tab.open()
     comment_form(tab)
     line = "This session runs on Thierry’s machine: open it there."
-    assert [e for _, e in agent_buttons(tab.page, "#rd-popover .rd-form")] == [False]
+    assert tell_offered(tab.page, "#rd-popover .rd-form") is False
     assert tab.page.locator("#rd-popover .rd-agent-line").all_inner_texts() == [line]
     assert proxy.PROXY_LINE not in tab.page.inner_text("#rd-popover")
 
@@ -342,7 +353,7 @@ def test_a_fork_the_doc_answer_reports_turns_box_tell_off(tab):
     tab.open()
     until(lambda: tab.docs, what="the page's /_/doc answer")
     comment_form(tab)
-    assert [e for _, e in agent_buttons(tab.page, "#rd-popover .rd-form")] == [False]
+    assert tell_offered(tab.page, "#rd-popover .rd-form") is False
     assert "Thierry’s machine" in tab.page.inner_text("#rd-popover .rd-agent-line")
 
 
@@ -553,7 +564,7 @@ def test_a_fork_with_its_relay_connected_offers_tell_to_its_session(tab):
     tab.open()
     bodies, others = sent_to_box(tab)
     comment_form(tab)
-    assert [e for _, e in agent_buttons(tab.page, "#rd-popover .rd-form")] == [True]
+    assert tell_offered(tab.page, "#rd-popover .rd-form") is True
     tab.page.fill("#rd-popover textarea", "Send the draft to Joey")
     tab.page.click("#rd-popover .rd-form button.rd-tell")
     sent = "Sent to Thierry’s session on thierry-laptop; the answer appears in this thread."
@@ -579,14 +590,14 @@ def test_a_relay_that_connects_turns_tell_on_without_a_reload(tab):
     tab.open()
     until(lambda: tab.docs, what="the page's first /_/doc answer")
     comment_form(tab)
-    assert [e for _, e in agent_buttons(tab.page, "#rd-popover .rd-form")] == [False]
+    assert tell_offered(tab.page, "#rd-popover .rd-form") is False
     w["relay"], can[:] = True, ["relay-tell"]
     seen = len(tab.docs)
     tab.site.hub.entry(DOC).bus.publish("relay", {})
     until(lambda: len(tab.docs) > seen, what="the /_/doc the relay event asks for")
     tab.page.keyboard.press("Escape")
     comment_form(tab)
-    assert [e for _, e in agent_buttons(tab.page, "#rd-popover .rd-form")] == [True]
+    assert tell_offered(tab.page, "#rd-popover .rd-form") is True
 
 
 def test_a_relay_gone_past_its_grace_turns_tell_off_without_a_reload(tab):
@@ -599,4 +610,4 @@ def test_a_relay_gone_past_its_grace_turns_tell_off_without_a_reload(tab):
     tab.site.hub.entry(DOC).bus.publish("relay", {})
     until(lambda: len(tab.docs) > seen, what="the /_/doc the relay event asks for")
     comment_form(tab)
-    assert [e for _, e in agent_buttons(tab.page, "#rd-popover .rd-form")] == [False]
+    assert tell_offered(tab.page, "#rd-popover .rd-form") is False

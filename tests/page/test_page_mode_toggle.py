@@ -116,7 +116,8 @@ def test_the_toggle_is_a_page_control_not_a_click_beside_an_open_box(doc, site):
     from sheafmd import comments as rdc
     from sheafmd.source import update_file
     update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?", "Bea", "2026-10-14T10:00")[0])
-    p = doc.open().page
+    p = doc.page
+    p.wait_for_selector(".rd-badge")          # the page reloads itself when the comment arrives
     p.click(".rd-badge")
     p.wait_for_selector("#rd-popover textarea")
     p.click(TOGGLE)

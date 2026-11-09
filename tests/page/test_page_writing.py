@@ -2199,13 +2199,14 @@ def test_tell_of_a_thread_sends_the_hash_of_the_text_the_page_holds(agent, threa
     # The id names a thread of that text, and the hub checks it as it checks a reply's.
     held = md_hash(thread.site.file.read_text(encoding="utf-8"))
     sent = []
+    # The thread has no Tell of its own any more: the form's Tell goes with the reply, as one /_/comment.
     thread.page.on("request", lambda r: sent.append(json.loads(r.post_data))
-                   if r.method == "POST" and r.url.endswith("/_/tell") else None)
+                   if r.method == "POST" and r.url.endswith("/_/comment") else None)
     thread.page.wait_for_selector("#rd-popover textarea")
     thread.page.fill("#rd-popover textarea", "Please do.")
     thread.page.click("#rd-popover .rd-form button.rd-tell")
     until(lambda: sent, what="the request")
-    assert [(s["id"], s["hash"]) for s in sent] == [("c1", held)]
+    assert [(s["op"], s["tell"], s["id"], s["hash"]) for s in sent] == [("reply", True, "c1", held)]
 
 
 def test_send_and_tell_while_a_reload_waits_still_starts_one_tell_and_the_page_sends_no_other(agent, thread):
@@ -3376,7 +3377,7 @@ def test_the_threads_buttons_come_back_when_the_send_is_taken(thread):
     p.unroute("**/_/comment")
     f = thread.site.file
     until(lambda: "a reply that goes through" in f.read_text(), what="the reply in the file")
-    until(lambda: p.locator("#rd-popover .rd-form").count() == 0, what="the sent form to go")
+    until(lambda: not typed(p), what="the sent text to leave the field")        # the field stays open, empty
     assert p.is_visible("#rd-popover textarea"), "the thread's field did not come back"
     until(lambda: "a reply that goes through" in p.inner_text("#rd-popover"), what="the reply in the thread")
 
@@ -4019,18 +4020,25 @@ def test_enter_on_a_loose_task_item_with_an_empty_first_line_keeps_its_other_par
 def test_a_tell_or_cancel_the_hub_cannot_be_reached_for_says_that_it_did_not_go_out(agent, thread, what):
     # "nothing was saved. Your edits stay on screen" is the sentence of a save; these save nothing.
     p = thread.page
+    thread.page.wait_for_selector("#rd-popover textarea")
+    thread.page.fill("#rd-popover textarea", "Please do.")
     if what == "cancel-tell":
-        thread.page.wait_for_selector("#rd-popover textarea")
-        thread.page.fill("#rd-popover textarea", "Please do.")
         thread.page.click("#rd-popover .rd-form button.rd-tell")
         p.wait_for_selector("#rd-popover button[data-a=cancel-tell]")
-    p.route(f"**/_/{what.split('-')[0]}", lambda route: route.abort())
-    p.click(f"#rd-popover button[data-a={what}]")
+        route = "**/_/cancel"
+        p.route(route, lambda route: route.abort())
+        p.click("#rd-popover button[data-a=cancel-tell]")
+    else:
+        # The thread has no Tell of its own any more: the form's Tell goes with the reply, so the hub that cannot
+        # be reached refuses the reply, and the page says that the reply did not go out.
+        route = "**/_/comment"
+        p.route(route, lambda route: route.abort())
+        thread.page.click("#rd-popover .rd-form button.rd-tell")
     until(lambda: "did not go out" in toast(p) or p.wait_for_timeout(20), what="the toast")
     says = toast(p)
     assert "nothing was saved" not in says
-    assert says.startswith({"tell": "Tell", "cancel-tell": "Cancel"}[what])
-    p.unroute(f"**/_/{what.split('-')[0]}")
+    assert says.startswith({"tell": "Your reply", "cancel-tell": "Cancel"}[what])
+    p.unroute(route)
 
 
 # A comment, reply, edit, status change or deletion the hub cannot be reached for saves nothing either: the
@@ -4047,6 +4055,8 @@ def test_a_comment_reply_edit_status_or_deletion_the_hub_cannot_be_reached_for_s
         open_form(p, what)
         p.fill("#rd-popover textarea", "never sent")
     p.route("**/_/comment", lambda route: route.abort())
+    if what == "delete":
+        p.click("#rd-popover .rd-more summary")
     p.click("#rd-popover button[data-f=ok]" if what in ("reply", "edit", "comment") else f"#rd-popover button[data-a={what}]")
     until(lambda: "did not go out" in toast(p) or p.wait_for_timeout(20), what="the toast")
     assert toast(p) == f"{says} did not go out: the hub is unreachable."

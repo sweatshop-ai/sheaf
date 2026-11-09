@@ -554,7 +554,7 @@ def test_a_page_with_a_reply_or_edit_being_typed_asks_before_it_is_left(thread, 
 def test_a_page_with_a_new_comment_being_typed_asks_before_it_is_left(tab, context):
     tab.open()
     select(tab.page, at(P1, "apples"), at(P1, "apples", None))
-    tab.page.click("#rd-comment-btn")
+    open_box(tab.page)
     tab.page.fill("#rd-popover textarea", "a comment I am still writing")
     assert left_with(tab, context) == (["beforeunload"], False)
 
@@ -716,7 +716,7 @@ def test_a_new_comment_refused_because_its_paragraph_changed_keeps_its_text(tab)
     key = comment_draft_key(tab.site)
     assert "about the pears" in tab.page.evaluate(f"localStorage.getItem({key!r})")
     select(tab.page, at(P2, "pears"), at(P2, "pears", None))
-    tab.page.click("#rd-comment-btn")
+    open_box(tab.page)
     assert tab.page.input_value("#rd-popover textarea") == "about the pears"
     tab.page.click("#rd-popover button[data-f=ok]")
     until(lambda: rdc.parse(f.read_text()).comments, what="the comment in the file")
@@ -752,7 +752,7 @@ def test_a_409_with_the_select_again_code_keeps_the_comment_whatever_its_words(t
     p.route("**/_/comment", lambda route: route.fulfill(
         status=409, json={"ok": False, "error": "Another sentence entirely.", "code": "select-again"}))
     select(p, at(P2, "pears"), at(P2, "pears", None))
-    p.click("#rd-comment-btn")
+    open_box(p)
     p.fill("#rd-popover textarea", "about the pears")
     mark(p)
     p.click("#rd-popover button[data-f=ok]")
@@ -786,7 +786,7 @@ def test_a_409_without_the_code_is_a_failure_even_in_the_old_words(tab):
     p.route("**/_/comment", lambda route: route.fulfill(
         status=409, json={"ok": False, "error": "select the text again"}))
     select(p, at(P2, "pears"), at(P2, "pears", None))
-    p.click("#rd-comment-btn")
+    open_box(p)
     p.fill("#rd-popover textarea", "about the pears")
     p.click("#rd-popover button[data-f=ok]")
     toasted(p, "select the text again")
@@ -882,7 +882,7 @@ def test_a_kept_comment_is_not_put_in_the_form_of_the_same_word_in_another_parag
                  encoding="utf-8")
     tab.open()
     select(tab.page, at("main", "pears too"), at("main", "pears too", 5))
-    tab.page.click("#rd-comment-btn")
+    open_box(tab.page)
     tab.page.fill("#rd-popover textarea", "about the second pears")
     mark(tab.page)
     f.write_text(f.read_text().replace("pears too", "ripe pears too"), encoding="utf-8")
@@ -891,11 +891,11 @@ def test_a_kept_comment_is_not_put_in_the_form_of_the_same_word_in_another_parag
     reloaded(tab.page)
     tab.page.wait_for_selector(KEPT)
     select(tab.page, at("main", "first paragraph, about pears", 23), at("main", "first paragraph, about pears", 28))
-    tab.page.click("#rd-comment-btn")
+    open_box(tab.page)
     tab.page.wait_for_selector("#rd-popover textarea")
     assert tab.page.input_value("#rd-popover textarea") == ""
-    tab.page.click("#rd-popover button[data-f=no]")
-    assert "about the second pears" in comment_store(tab), "Cancel of another paragraph's form cleared the kept comment"
+    tab.page.click("#rd-popover button[data-a=minimize]")        # a new comment's form has no Cancel
+    assert "about the second pears" in comment_store(tab), "putting away another paragraph's form cleared the kept comment"
 
 
 def test_a_comment_sent_on_the_same_word_of_another_paragraph_leaves_the_kept_comment_kept(tab):
@@ -904,7 +904,7 @@ def test_a_comment_sent_on_the_same_word_of_another_paragraph_leaves_the_kept_co
                  encoding="utf-8")
     tab.open()
     select(tab.page, at("main", "pears too"), at("main", "pears too", 5))
-    tab.page.click("#rd-comment-btn")
+    open_box(tab.page)
     tab.page.fill("#rd-popover textarea", "about the second pears")
     mark(tab.page)
     f.write_text(f.read_text().replace("pears too", "ripe pears too"), encoding="utf-8")
@@ -913,7 +913,7 @@ def test_a_comment_sent_on_the_same_word_of_another_paragraph_leaves_the_kept_co
     reloaded(tab.page)
     tab.page.wait_for_selector(KEPT)
     select(tab.page, at("main", "first paragraph, about pears", 23), at("main", "first paragraph, about pears", 28))
-    tab.page.click("#rd-comment-btn")
+    open_box(tab.page)
     tab.page.fill("#rd-popover textarea", "about the first pears")
     tab.page.click("#rd-popover button[data-f=ok]")
     until(lambda: rdc.parse(f.read_text()).comments, what="the comment in the file")
@@ -935,7 +935,7 @@ def test_a_new_comment_retried_with_other_words_after_a_failed_send_leaves_nothi
             route.continue_()
     p.route("**/_/comment", hub)
     select(p, at(P1, "apples"), at(P1, "apples", None))
-    p.click("#rd-comment-btn")
+    open_box(p)
     p.fill("#rd-popover textarea", "first words")
     p.click("#rd-popover button[data-f=ok]")
     toasted(p, "Hub trouble.")
@@ -953,7 +953,7 @@ def test_a_kept_comment_is_not_put_in_the_form_of_a_paragraph_that_opens_with_th
     f.write_text("# Plan\n\nSame opening words, about apples.\n\nSame opening words, about pears.\n", encoding="utf-8")
     tab.open()
     select(tab.page, at("main", "about pears", 6), at("main", "about pears", None))
-    tab.page.click("#rd-comment-btn")
+    open_box(tab.page)
     tab.page.fill("#rd-popover textarea", "about the pears")
     mark(tab.page)
     f.write_text(f.read_text().replace("# Plan\n", "# Plan\n\nAdded above both.\n").replace("about pears", "about ripe pears"),
@@ -963,13 +963,13 @@ def test_a_kept_comment_is_not_put_in_the_form_of_a_paragraph_that_opens_with_th
     reloaded(tab.page)
     tab.page.wait_for_selector(KEPT)
     select(tab.page, at("main", "about apples", 6), at("main", "about apples", None))
-    tab.page.click("#rd-comment-btn")
+    open_box(tab.page)
     tab.page.wait_for_selector("#rd-popover textarea")
     assert tab.page.input_value("#rd-popover textarea") == ""
-    tab.page.click("#rd-popover button[data-f=no]")
+    tab.page.click("#rd-popover button[data-a=minimize]")
     assert "about the pears" in comment_store(tab)
     select(tab.page, at("main", "about ripe pears", 6), at("main", "about ripe pears", None))
-    tab.page.click("#rd-comment-btn")
+    open_box(tab.page)
     tab.page.wait_for_selector("#rd-popover textarea")
     assert tab.page.input_value("#rd-popover textarea") == "about the pears"
 
@@ -2083,7 +2083,7 @@ def new_comment_held(tab):
     p, held = tab.page, []
     select(p, at(P2, "pears"), at(P2, "pears", None))
     p.clock.run_for(50)                     # the Comment button comes on a timer, and this clock stands still
-    p.click("#rd-comment-btn")
+    open_box(p)
     p.fill("#rd-popover textarea", "about the pears")
     p.route("**/_/comment", lambda route: held.append(route))
     p.keyboard.press("Control+Enter")
@@ -2100,7 +2100,8 @@ def new_comment_held(tab):
 def test_words_typed_where_a_comments_anchor_goes_or_comes_are_still_unsaved_and_ctrl_s_saves_them(frozen, how, typed):
     p, f = frozen.page, frozen.site.file
     para, held = (P2 if how == "a new comment" else P1), []
-    p.keyboard.press("e")
+    if how != "a new comment":
+        p.keyboard.press("e")
     if how == "deleted on this page":
         p.click(".rd-badge")
         p.wait_for_selector("#rd-popover .rd-more summary")
@@ -2108,7 +2109,8 @@ def test_words_typed_where_a_comments_anchor_goes_or_comes_are_still_unsaved_and
         p.route("**/_/comment", lambda route: held.append(route))
         p.click("#rd-popover button[data-a=delete]")
     elif how == "a new comment":
-        held = new_comment_held(frozen)
+        held = new_comment_held(frozen)             # in Comment mode: in Edit a selection opens no box
+        p.click("#rd-mode button[data-m=edit]")
     if how == "deleted on this page":
         until(lambda: held or p.wait_for_timeout(20), what="the send to go out")
     if typed != "nothing":
@@ -2152,9 +2154,11 @@ def test_words_typed_where_a_comments_anchor_goes_or_comes_are_still_unsaved_and
 def test_words_typed_where_a_comments_anchor_went_or_came_are_saved_by_the_next_reload_without_a_question(frozen, how):
     p, f = frozen.page, frozen.site.file
     dialogs, held = asked(p), []
-    p.keyboard.press("e")
     if how == "a new comment":
-        held = new_comment_held(frozen)
+        held = new_comment_held(frozen)             # in Comment mode: in Edit a selection opens no box
+        p.click("#rd-mode button[data-m=edit]")
+    else:
+        p.keyboard.press("e")
     p.focus(P2 if how == "a new comment" else P1)
     p.keyboard.press(key("Control+End"))
     p.keyboard.type(" and plums")
@@ -2335,12 +2339,15 @@ def test_a_panel_item_keeps_a_reply_with_text_and_opens_that_comment(two_threads
     kept_and_back(two_threads, "my reply text")
 
 
-def test_the_comment_button_leaves_a_reply_with_text_alone(two_threads):
+def test_a_selection_keeps_a_reply_with_text_and_opens_its_own_box(two_threads):
+    # Was "the Comment button leaves a reply with text alone": the selection opens the box itself, and the text
+    # of the reply is kept and listed ("Send or cancel ... first" is gone), back in its field with its thread.
     open_reply(two_threads, "my reply text")
     select(two_threads.page, at(P2, "Second"), at(P2, "Second", None))
-    two_threads.page.click("#rd-comment-btn")
-    still_written(two_threads, "my reply text")
-    assert "Why apples?" in two_threads.page.inner_text("#rd-popover")
+    open_box(two_threads.page)
+    until(lambda: two_threads.page.inner_text("#rd-popover .rd-quote") == "\u201cSecond\u201d", what="the box of the selection")
+    assert "Why apples?" not in two_threads.page.inner_text("#rd-popover")
+    kept_and_back(two_threads, "my reply text")
 
 
 def test_a_form_without_text_gives_way_to_another_badge(two_threads):
@@ -2365,7 +2372,7 @@ def open_thread_by(tab, how):
         p.locator("#rd-panel button[data-id]").nth(1).click()
     else:
         select(p, at(P2, "Second"), at(P2, "Second", None))
-        p.click("#rd-comment-btn")
+        open_box(p)
 
 
 @pytest.mark.parametrize("how", ["a badge", "a panel item", "the Comment button"])
@@ -2534,7 +2541,7 @@ def test_a_new_comment_that_is_being_sent_holds_what_would_close_it_and_says_why
         p.locator("#rd-panel button[data-id]").first.click()
     else:
         select(p, at(P2, "pears"), at(P2, "pears", None))
-        p.click("#rd-comment-btn")
+        open_box(p)
     toasted(p, BEING_SENT)
     p.wait_for_timeout(150)
     assert "apples" in p.inner_text("#rd-popover .rd-quote")
@@ -3571,7 +3578,7 @@ def test_a_kept_comment_of_another_folder_is_neither_shown_nor_dropped(tab):
     assert sorted(d["body"] for d in got) == ["about the pears", "theirs"]
     # Sending it clears only its own entry.
     select(tab.page, at(P2, "pears"), at(P2, "pears", None))
-    tab.page.click("#rd-comment-btn")
+    open_box(tab.page)
     tab.page.click("#rd-popover button[data-f=ok]")
     until(lambda: [d["body"] for d in json.loads(tab.page.evaluate(f"localStorage.getItem({comment_draft_key(tab.site)!r})"))] == ["theirs"],
           what="only its own entry to leave the store")
@@ -3582,7 +3589,7 @@ def test_a_kept_comment_of_an_earlier_build_with_no_root_is_this_pages_own(tab):
     old = {"quote": "pears", "body": "about the pears", "block": 2, "head": "x", "at": "2026-10-01T10:00:00Z"}
     tab.page.evaluate("([k, v]) => localStorage.setItem(k, v)", [comment_draft_key(tab.site), json.dumps([old])])
     select(tab.page, at(P2, "pears"), at(P2, "pears", None))
-    tab.page.click("#rd-comment-btn")
+    open_box(tab.page)
     assert tab.page.input_value("#rd-popover textarea") == "about the pears"
 
 
@@ -4409,7 +4416,7 @@ def kept_entry(quote, body, block, head, occ=0, rid="k1", **more):
 # A press outside the thread closes it and the kept popover is drawn again at once, pinned at the top right;
 # a drag that starts with that press and ends over the pinned spot let go of the mouse on the popover, which the
 # page does not read as a selection of the document. The kept popover waits for the mouse to be let go.
-def test_a_drag_that_starts_outside_a_thread_and_ends_over_the_place_of_the_kept_comment_gets_the_comment_button(kept):
+def test_a_drag_that_starts_outside_a_thread_and_ends_over_the_place_of_the_kept_comment_gets_the_box_of_the_selection(kept):
     p = kept.page
     open_comment_form(kept, P1, "apples")
     p.fill("#rd-popover textarea", "about the apples")
@@ -4423,8 +4430,11 @@ def test_a_drag_that_starts_outside_a_thread_and_ends_over_the_place_of_the_kept
     p.mouse.down()
     p.mouse.move(spot[0], spot[1], steps=8)
     p.mouse.up()
-    p.wait_for_selector("#rd-comment-btn", timeout=3000)
-    p.wait_for_selector(PINNED)
+    p.wait_for_selector("#rd-popover textarea", timeout=3000)
+    # The mouse was let go over the kept popover: the drag is still read as a selection of the document, and its
+    # box takes the popover's place. The kept comment is not lost: it waits in the store.
+    assert "apples" in p.inner_text("#rd-popover .rd-quote") and p.locator(PINNED).count() == 0
+    assert "about the pears" in comment_store(kept)
 
 
 # Opening the thread of a failed send took the keyboard from a kept comment being typed in, closed it, and
@@ -4471,16 +4481,18 @@ def test_a_failed_reply_leaves_a_kept_comment_being_typed_in_open_and_says_where
     assert "my reply" in comment_store(thread)
 
 
-def test_a_failed_reply_does_not_take_the_comment_button_of_a_selection_away(thread):
+def test_a_failed_reply_does_not_take_the_box_of_a_selection_away(thread):
     p = thread.page
     held = reply_out_and_popover_left(thread, "my reply")
     select(p, at(P2, "pears"), at(P2, "pears", None))
-    p.wait_for_selector("#rd-comment-btn")
+    p.wait_for_selector("#rd-popover textarea")          # the selection opens its box by itself
     fail_held(p, held)
     toasted(p, "Your text is kept in the thread it was for")
     p.wait_for_timeout(300)
-    assert p.locator("#rd-comment-btn").count() == 1, "the failed reply took the Comment button away"
-    assert p.locator("#rd-popover").count() == 0, "the failed reply opened its thread over the selection"
+    assert p.locator("#rd-popover").count() == 1 and p.inner_text("#rd-popover .rd-quote") == "\u201cpears\u201d", \
+        "the failed reply took the box of the selection away"
+    assert "my reply" not in p.inner_text("#rd-popover") and not p.locator("#rd-popover .rd-msg").count(), \
+        "the failed reply opened its thread over the selection"
     p.click(".rd-badge")                       # the thread still has the reply, in its form
     p.wait_for_selector("#rd-popover textarea")
     assert p.input_value("#rd-popover textarea") == "my reply"
@@ -4558,7 +4570,8 @@ def test_a_new_comment_refused_while_a_failed_reply_form_is_open_in_its_popover_
     p.wait_for_timeout(1000)
     assert p.evaluate("window.__same_load") is True, "the refusal reloaded the page under the open form"
     assert p.input_value("#rd-popover textarea") == "words for a gone thread"
-    p.keyboard.press("Escape")       # the band (Minimize) is hidden while a form of another thread is drawn here (page.css)
+    assert "cancel" not in p.inner_text("#rd-popover .rd-for").lower(), "a reply has no Cancel to name"
+    p.click("#rd-popover button[data-a=minimize]")       # the band stays while a form of another thread is drawn here
     reloaded(p)
     p.wait_for_selector(KEPT)
     assert p.input_value("#rd-popover textarea") == "about the pears"

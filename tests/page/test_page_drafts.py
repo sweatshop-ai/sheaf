@@ -5,7 +5,7 @@ import re
 import pytest
 
 from helpers import comment
-from pagehelp import P1, P2, T0, at, comment_draft_key, draft_key, mark, reloaded, select, toast, toasted, type_at_end, until
+from pagehelp import open_box, P1, P2, T0, at, comment_draft_key, draft_key, mark, reloaded, select, toast, toasted, type_at_end, until
 from sheafmd import comments as rdc
 
 pytestmark = pytest.mark.page
@@ -515,7 +515,7 @@ def upgraded_over_an_offer(lost_edit, context, writing=False):
     lost_edit.site.kill()
     if writing:
         select(page, at(P2, "pears"), at(P2, "pears", None))
-        page.click("#rd-comment-btn")
+        open_box(page)
         page.fill("#rd-popover textarea", "about the pears")
     else:
         type_at_end(page, P2, " and kiwis")

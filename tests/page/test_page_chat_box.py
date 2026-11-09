@@ -1,7 +1,7 @@
 """The popover of a comment is a chat box: narrow, its messages in bubbles, a field to write in under them."""
 import pytest
 
-from pagehelp import DOC, P1, at, comment_draft_key, mark, reloaded, select, until
+from pagehelp import DOC, P1, at, comment_draft_key, mark, open_box, reloaded, select, toast, until
 from sheafmd import comments as rdc
 from sheafmd.hub.state import Tokens
 from sheafmd.source import update_file
@@ -288,3 +288,77 @@ def test_a_click_on_a_page_control_is_not_a_click_beside_the_box(tab, site):
     p.wait_for_timeout(500)
     assert p.locator("#rd-popover").count() == 1, "the mode switch closed the box"
     assert p.input_value(FIELD) == "half a thought"
+
+
+# ---- text the store cannot keep: the box stays (SPEC 10.4, Isolde 2026-11-09) -------------------------------
+
+def store_full(p, full=True):
+    """The comment store refuses writes (quota full, storage blocked), or accepts them again."""
+    p.evaluate("""(full) => {
+      if (!window.__realSet) window.__realSet = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (k, v) {
+        if (full && String(k).startsWith('sheaf-comment-draft')) throw new Error('quota');
+        return window.__realSet.call(this, k, v);
+      };
+    }""", full)
+
+
+def two_threads(tab, site):
+    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "pears"), "pears", "Why pears?",
+                                                     "Bea", "2026-10-14T10:01")[0])
+    return open_thread(tab, site)
+
+
+WAYS = {
+    "escape": lambda p: p.keyboard.press("Escape"),
+    "a click beside": lambda p: p.mouse.click(5, 700),
+    "minimize": lambda p: p.click("#rd-popover button[data-a=minimize]"),
+    "resolve": lambda p: p.click("#rd-popover button[data-a=status]"),
+    "another badge": lambda p: p.locator(".rd-badge").nth(1).dispatch_event("click"),
+}
+
+
+@pytest.mark.parametrize("way", list(WAYS))
+def test_text_the_store_cannot_keep_holds_the_box_open_and_says_so(tab, site, way):
+    p = two_threads(tab, site)
+    store_full(p)
+    p.fill(FIELD, "words I must not lose")
+    WAYS[way](p)
+    until(lambda: "could not be kept" in toast(p), what="the toast that says the text could not be kept")
+    assert p.locator("#rd-popover").count() == 1, f"{way} closed the box on text that was not kept"
+    assert p.input_value(FIELD) == "words I must not lose"
+    assert "resolved" not in site.file.read_text(encoding="utf-8").split("Why?")[-1].split("Why pears?")[0], \
+        "the thread was resolved while its text could not go to the not-sent list"
+
+
+def test_a_new_message_the_store_cannot_keep_stays_open_on_its_close(tab, site):
+    p = open_thread(tab, site)
+    p.keyboard.press("Escape")
+    store_full(p)
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    p.fill(FIELD, "a new message that cannot be kept")
+    p.click("#rd-popover button[data-a=minimize]")
+    until(lambda: "could not be kept" in toast(p), what="the toast")
+    assert p.locator("#rd-popover").count() == 1
+    assert p.input_value(FIELD) == "a new message that cannot be kept"
+
+
+def test_an_empty_field_closes_even_when_the_store_is_full(tab, site):
+    p = open_thread(tab, site)
+    store_full(p)
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close")
+
+
+def test_the_box_closes_normally_once_the_store_works_again(tab, site):
+    p = open_thread(tab, site)
+    store_full(p)
+    p.fill(FIELD, "kept at last")
+    p.keyboard.press("Escape")
+    until(lambda: "could not be kept" in toast(p), what="the refusal")
+    store_full(p, False)
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close")
+    p.click(".rd-badge")
+    until(lambda: p.input_value(FIELD) == "kept at last", what="the text back in the box")

@@ -3072,9 +3072,11 @@ def test_cancelling_the_form_beside_the_text_that_could_not_be_kept_leaves_that_
     held[0].fulfill(status=500, json={"ok": False, "error": "the hub broke off"})
     p.unroute("**/_/comment")
     until(lambda: p.locator("#rd-popover textarea").count() == 2, what="both forms on the page")
-    p.locator("#rd-popover .rd-form").first.locator("button[data-f=no]").click()
+    # A reply form has no Cancel any more: giving up the text of the second thread is emptying its field.
+    p.locator("#rd-popover textarea").evaluate_all(
+        "els => els.filter(e => e.value === 'words for the second thread').forEach(e => { e.value = ''; e.dispatchEvent(new Event('input', {bubbles: true})); })")
     p.wait_for_timeout(200)
-    assert [t.input_value() for t in p.locator("#rd-popover textarea").all()] == ["words for the first thread"]
+    assert typed(p) == ["words for the first thread"]
     assert not p.is_visible("#rd-popover > .rd-actions"), "the thread's buttons are on the page beside the form of another thread"
 
 
@@ -3091,7 +3093,7 @@ def test_a_badge_waits_for_the_text_that_could_not_be_kept_even_when_the_form_be
     until(lambda: p.locator("#rd-popover textarea").count() == 2, what="both forms on the page")
     p.locator("#rd-popover textarea").first.fill("")
     p.locator(".rd-badge").first.dispatch_event("click")
-    toasted(p, WRITING_FIRST)
+    toasted(p, "could not be kept")               # "Send or cancel ... first" is gone: the box stays because its text has nowhere to go
     assert sorted(t.input_value() for t in p.locator("#rd-popover textarea").all()) == ["", "words for the first thread"]
 
 
@@ -3103,8 +3105,7 @@ def test_a_failed_send_whose_text_could_not_be_kept_comes_back_in_its_own_thread
     until(lambda: "Why pears?" in p.inner_text("#rd-popover"), what="the second thread")
     fail_the_send(p, held)
     until(lambda: "Why apples?" in p.inner_text("#rd-popover"), what="the first thread to come back")
-    assert p.locator("#rd-popover textarea").count() == 1
-    assert p.input_value("#rd-popover textarea") == "words for the first thread"
+    assert typed(p) == ["words for the first thread"]
 
 
 # A write from outside that truncates the file and then fills it can be read half done by the hub's watcher

@@ -2549,7 +2549,8 @@ def test_a_new_comment_whose_send_never_answers_comes_back_after_30_seconds_and_
     assert p.input_value("#rd-popover textarea") == "about the apples"
     assert "about the apples" in comment_store(tab)
     p.unroute("**/_/comment")
-    p.click("#rd-popover button[data-f=no]")
+    p.click("#rd-popover button[data-a=minimize]")      # a new message has no Cancel: it is put away, its text kept
+    assert "about the apples" in comment_store(tab)
     p.locator(".rd-badge").dispatch_event("click")
     until(lambda: "Why pears?" in p.inner_text("#rd-popover"), what="the thread of the badge")
 
@@ -2566,8 +2567,10 @@ def test_a_reply_whose_send_never_answers_comes_back_after_30_seconds_with_the_t
     toasted(p, LATE)
     assert p.input_value("#rd-popover textarea") == "a reply that is never answered"
     p.unroute("**/_/comment")
-    p.click("#rd-popover button[data-f=no]")
-    assert p.is_visible("#rd-popover textarea"), "the thread's field did not come back"
+    discard_unsent(p, "a reply that is never answered")        # a reply form has no Cancel: Discard in the not-sent list
+    p.click(".rd-badge")
+    p.wait_for_selector("#rd-popover textarea")
+    assert not typed(p), "the thread's field came back with the text"
     assert held
 
 
@@ -2855,8 +2858,8 @@ def test_the_answer_of_a_delete_keeps_the_popover_of_its_thread_while_a_reply_is
     p.unroute("**/_/comment")
     p.wait_for_selector("#rd-popover .rd-hold:has-text('deleted')")
     assert p.input_value("#rd-popover textarea") == "words typed while the delete was out"
-    p.click("#rd-popover button[data-f=no]")
-    until(lambda: p.locator("#rd-popover").count() == 0, what="the popover to close once the form is cancelled")
+    p.click("#rd-popover button[data-a=minimize]")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the popover to close once the form is put away")
 
 
 # The answer of a reply reloaded the page over a second form opened while the send was
@@ -3006,7 +3009,7 @@ def test_a_failed_send_does_not_take_over_a_popover_with_text_typed_in_it(two_th
     assert "Why pears?" in p.inner_text("#rd-popover")
     assert p.locator("#rd-popover textarea").count() == 1
     assert p.input_value("#rd-popover textarea") == "words for the second thread"
-    p.click("#rd-popover button[data-f=no]")
+    p.click("#rd-popover button[data-a=minimize]")
     p.locator(".rd-badge").first.dispatch_event("click")
     until(lambda: "Why apples?" in p.inner_text("#rd-popover"), what="the first thread")
     until(lambda: p.locator("#rd-popover textarea").count() == 1, what="the kept text in the form")

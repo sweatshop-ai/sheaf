@@ -184,7 +184,7 @@
 #rd-mode button{cursor:pointer;border:0;border-radius:12px;padding:3px 9px;background:var(--fg,#000);color:var(--bg,#fff);font:600 11px system-ui,sans-serif}
 #rd-mode button[data-m=edit],.rd-editing #rd-mode button[data-m=comment]{background:transparent;color:var(--fg,#000)}
 .rd-editing #rd-mode button[data-m=edit]{background:var(--fg,#000);color:var(--bg,#fff)}
-#rd-comment-btn.rd-bar:not(:disabled){right:74px;left:8px;max-width:none;border-radius:24px;padding:14px 16px;font:14px/1.4 system-ui,sans-serif;background:var(--bg,#fff);color:rgb(127,127,127);border:1px solid rgba(127,127,127,.4);box-shadow:0 10px 15px -3px rgba(0,0,0,.2)}
+#rd-comment-btn.rd-bar:not(:disabled){right:74px;left:8px;max-width:none;border-radius:24px;padding:14px 16px;font:16px/1.4 system-ui,sans-serif;background:var(--bg,#fff);color:rgb(127,127,127);border:1px solid rgba(127,127,127,.25);box-shadow:0 10px 15px -3px rgba(0,0,0,.2)}
 @media print{#rd-mode,#rd-menu-btn,#rd-menu,#rd-work,#rd-toast,#rd-notice,#rd-unsent,#rd-popover,#rd-panel,#rd-comment-btn,.rd-badge{display:none!important}}
 
 /* "Claude is answering": three dots that rise in turn, so a wait looks alive. */

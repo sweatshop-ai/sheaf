@@ -477,6 +477,14 @@ var create = function (ROOT, CFG, opts) {
     });
   }
 
+  if (canEdit) {
+    var modes = el('div', { id: 'rd-mode' }, '<button data-m="comment">Comment</button><button data-m="edit">Edit</button>');
+    modes.addEventListener('click', function (e) {
+      var m = e.target.getAttribute('data-m');
+      if (m) setEditing(m === 'edit');
+    });
+    BODY.appendChild(modes);
+  }
   var btn = el('button', { id: 'rd-menu-btn', title: 'Menu', 'aria-label': 'Menu' },
                '☰<span class="rd-dot"></span>');
   var menu = el('div', { id: 'rd-menu', role: 'menu' });
@@ -1151,6 +1159,9 @@ var create = function (ROOT, CFG, opts) {
   var keptDue = false;
   function closePopover() {
     if (pop) {
+      // Closed is minimized: what is typed is kept and comes back in the field.
+      Array.prototype.forEach.call(pop.querySelectorAll(OPEN_FORM), function (f) { if (f.stash) f.stash(); });
+      unpaintWidened();
       pop.remove(); pop = null; popId = null; paint(null); setTimeout(flushHold, 0);
       setTimeout(function () { if (mouseDown) keptDue = true; else drawKept(); }, 0);
     }
@@ -1225,7 +1236,7 @@ var create = function (ROOT, CFG, opts) {
     if (o.sent === 'any' && out.length > 0) return true;
     if (o.sent === 'new' && newSentHere()) return true;
     if (o.page) return formsWithText(true).length > 0;
-    return o.text ? formsWithText().length > 0 : !!openForm();
+    return formsWithText().length > 0;      // the field stands open in every thread: empty, it is nobody writing
   }
   // What the leave question asks about: text in a form that the store does not hold. A form filled from the
   // store (a reply or an edit whose send failed, a comment refused for its paragraph) holds the store's text
@@ -1246,15 +1257,13 @@ var create = function (ROOT, CFG, opts) {
   // being sent does not wait for anything: a failed send goes back to its own thread.
   var BEING_SENT = 'Your comment is being sent. Wait for its answer first.';
   function writingFirst() {
-    if (writingNow({ text: true })) { say('Send or cancel the comment you are writing first.'); return true; }
     if (newSentHere()) { say(BEING_SENT); return true; }
     return false;
   }
-  // Escape or a click outside the open popover: it closes, unless that would throw typed text away.
+  // Escape or a click outside the open popover: it closes, what is typed in it stays (closePopover).
   // A new comment that is being sent says why it stays.
   function leavePopover() {
-    if (!writingNow({ text: true, sent: 'new' })) closePopover();
-    else if (newSentHere()) say(BEING_SENT);
+    if (newSentHere()) say(BEING_SENT); else closePopover();
   }
   function holdNote() {
     var f = ownForm() || openForm();
@@ -1312,7 +1321,7 @@ var create = function (ROOT, CFG, opts) {
   // them too, and runs when the last of them is answered (flushHold). `mine` tells the answered send's
   // own entry of `out`, if it has one.
   function holdForOpenForm(mine, why) {
-    if (!openForm() && !out.some(function (r) { return !mine(r); })) return false;
+    if (!writingNow({ text: true }) && !out.some(function (r) { return !mine(r); })) return false;
     holdReload(why);
     return true;
   }
@@ -1394,7 +1403,7 @@ var create = function (ROOT, CFG, opts) {
   function draftsReplace(gone, add) {
     var ds = commentDraftsLoad().filter(function (d) { return !gone(d); });
     if (add) ds.push({ quote: add.quote, body: add.body, block: add.block, head: add.head, tail: add.tail, occ: add.occ, rid: add.rid,
-                       at: add.at || new Date().toISOString() });
+                       at: add.at || new Date().toISOString(), min: add.min });
     commentDraftsSave(ds);
   }
   // Is `d` the kept `kind` entry of the thread `c`: its id, its `at` (born) and its quote (about) all agree.
@@ -1500,7 +1509,7 @@ var create = function (ROOT, CFG, opts) {
   // typed text come back; the next selection and Comment in that paragraph prefills the
   // form with them.
   function showKept() {
-    var ds = commentDraftsLoad().filter(function (d) { return typeof d.quote === 'string' && d.body.trim(); });
+    var ds = commentDraftsLoad().filter(function (d) { return typeof d.quote === 'string' && d.body.trim() && !d.min; });
     if (!ds.length) return;
     keptForms('data-kept', ds, function (d) {
       return '<div class="rd-quote">“' + esc(d.quote) + '”</div>' +
@@ -1544,7 +1553,7 @@ var create = function (ROOT, CFG, opts) {
   var unsentBtn = null;
   function sendsKept() {
     return commentDraftsLoad().filter(function (d) {
-      return typeof d.thread === 'string' && d.body.trim() && !inFlight(d) && !out.some(function (r) { return r.rid === d.rid; });
+      return (typeof d.thread === 'string' || d.min) && d.body.trim() && !inFlight(d) && !out.some(function (r) { return r.rid === d.rid; });
     });
   }
   var lapseTmr = null;
@@ -1592,6 +1601,9 @@ var create = function (ROOT, CFG, opts) {
   // its thread's form, which sends it. One its thread can take opens that thread; one it cannot, its thread
   // deleted or its comment no longer the person's own (another name), is there to copy. Each can be discarded.
   function keptSend(d) {
+    if (d.min) return '<div class="rd-quote">“' + esc(d.quote) + '”</div><div class="rd-form" data-kept><div class="rd-hold">' +
+                      'Your message was not sent. It is kept: select the passage again to send it.</div><textarea readonly></textarea>' +
+                      '<div class="rd-actions"><button class="rd-alt" data-f="no">Discard</button></div></div>';
     var c = byId[d.thread], k = kindOf(d), ok = sendable(d, c);
     var why = c && keptOf(d, c, d.kind) && k.own ? 'only your own comments can be edited' : k.went + ' was deleted';
     var line = 'Your ' + k.one + ' was not sent' + (ok ? '. It is kept: open its thread to send it.'
@@ -1607,6 +1619,7 @@ var create = function (ROOT, CFG, opts) {
     var open = f.querySelector('[data-f="open"]');
     if (open) open.addEventListener('click', function () { openComment(d.thread, d.kind, sendOf(d)); });
     f.querySelector('[data-f="no"]').addEventListener('click', function () {
+      if (d.min) { draftsReplace(function (x) { return x.quote === d.quote && x.at === d.at; }); return; }
       threadKeep({ id: d.thread, at: d.born, quote: d.about }, d.kind, null, sendOf(d));
     });
   }
@@ -1734,11 +1747,21 @@ var create = function (ROOT, CFG, opts) {
     if (m.role === 'action') return '<span class="rd-who rd-who-tell">' + name + '\u2019s action</span>';
     return '<span class="rd-who">' + name + '</span>';
   }
+  // The band of the box: the passage, then Minimize and Close. Closing an open thread resolves it; the little
+  // else the thread offers waits in the small menu.
+  function bandHtml(c) {
+    var open = c.status === 'open', more = !open || mine(c);
+    return '<div class="rd-head"><div class="rd-quote">“' + esc(c.quote) + '”' +
+      (c.orphan ? '<span class="rd-tag">text deleted</span>' : '') + (open ? '' : '<span class="rd-tag">resolved</span>') + '</div>' +
+      (!canSave ? '' : (more ? '<details class="rd-more"><summary aria-label="More" title="More">\u22EF</summary><div>' +
+        (open ? '' : '<button data-a="status">Reopen</button>') +
+        (mine(c) ? '<button data-a="edit">Edit</button><button data-a="delete">Delete</button>' : '') + '</div></details>' : '') +
+        '<button data-a="minimize" title="Minimize" aria-label="Minimize">\u2212</button>' +
+        (open ? '<button data-a="status" title="Resolve" aria-label="Resolve">\u00D7</button>'
+              : '<button data-a="minimize" title="Close" aria-label="Close">\u00D7</button>')) + '</div>';
+  }
   function thread(c) {
-    var h = '<div class="rd-quote">“' + esc(c.quote) + '”' +
-            (c.orphan ? '<span class="rd-tag">text deleted</span>' : '') +
-            (c.status === 'resolved' ? '<span class="rd-tag">resolved</span>' : '') + '</div>' +
-            '<div class="rd-msg' + (mine(c) ? ' rd-mine' : '') + '">' + whoHtml({ by: c.by, role: null }) + '<span class="rd-when">' +
+    var h = '<div class="rd-msg' + (mine(c) ? ' rd-mine' : '') + '">' + whoHtml({ by: c.by, role: null }) + '<span class="rd-when">' +
             esc(c.at) + '</span><div class="rd-text">' + mdLite(c.body) + '</div></div>';
     (c.replies || []).forEach(function (r) {
       h += '<div class="rd-msg rd-reply' + (mine(r) ? ' rd-mine' : '') + '">' + whoHtml(r) + '<span class="rd-when">' +
@@ -1929,13 +1952,6 @@ var create = function (ROOT, CFG, opts) {
     return canTell ? [{ k: 'tell', label: 'Tell ' + AGENT, cls: 'rd-tell', tip: tellTip() }]
                    : [{ k: 'ok', label: label }, { off: lineOf('tell') }];
   }
-  // The line under the disabled button. A job still running keeps its own busy button, so it
-  // needs no line.
-  function offLines(skipTell) {
-    var seen = [];
-    if (!canTell && !skipTell) seen.push(lineOf('tell'));
-    return seen.map(function (l) { return '<div class="rd-agent-line">' + esc(l) + '</div>'; }).join('');
-  }
   var DOTS = '<span class="rd-dots" aria-hidden="true"><i></i><i></i><i></i></span>';
   // A Tell that waits for an agent: said in the thread, with no spinner and no clock, across a reload and a restart.
   function waitLine(id) {
@@ -1952,7 +1968,7 @@ var create = function (ROOT, CFG, opts) {
     // Every form that is still to be sent goes through the redraw, not the first one only: a failed send
     // whose text is not in the store stays on the page beside the form of this thread.
     var forms = Array.prototype.filter.call(pop.querySelectorAll('.rd-form'), function (x) { return !x.hasAttribute('data-done'); });
-    pop.innerHTML = '<div class="rd-scroll">' + thread(c) +
+    pop.innerHTML = bandHtml(c) + '<div class="rd-scroll">' + thread(c) +
       (telling[id] ? '<div class="rd-msg rd-reply rd-pending rd-pending-tell"><span class="rd-who rd-who-tell">' + esc(AGENT_UC) + '</span>' +
                      (tellQ ? '<div class="rd-text">is waiting for your answer in your session: ' + esc(tellQ) + '</div>' +
                               answerButton() + '</div>'
@@ -1960,43 +1976,37 @@ var create = function (ROOT, CFG, opts) {
       sentLine(id) + waitLine(id) +
       (interrupted[id] ? '<div class="rd-msg rd-reply rd-interrupted"><span class="rd-who">' + esc(AGENT_UC) + '</span>' +
                          '<div class="rd-text">interrupted by a hub restart, send it again</div></div>' : '') + '</div>';
+    var head = pop.querySelector('.rd-head');
     var ans = pop.querySelector('.rd-answer');
     if (ans) ans.addEventListener('click', function () { jumpToSession(ans); });
     if (canSave) {
       var acts = el('div', { 'class': 'rd-actions' });
       acts.hidden = sentOf(id);      // a reply or an edit of this thread is out: its buttons wait for the answer
-      // Reply is drawn as the field of a chat; pressed, the form takes its place.
-      acts.innerHTML = '<button class="rd-compose" data-a="reply">' + WRITE + '</button>' +
-        (telling[id] ? busy('tell', AGENT_UC + ' is working')
+      acts.innerHTML = (telling[id] ? busy('tell', AGENT_UC + ' is working')
          : waits[id] ? '<button class="rd-alt rd-busy rd-tell" data-a="cancel-tell" title="Click to cancel"><span class="rd-on">' +
                        esc(waits[id].to) + ' is waiting</span><span class="rd-off">Cancel</span></button>'
-         : '') + offLines(telling[id] || waits[id]);
-      // Talking to the agent is what the box is for; the rest stands small at its head, out of the way.
-      var head = el('div', { 'class': 'rd-head' });
-      head.hidden = sentOf(id);
-      head.innerHTML = '<button data-a="status">' + (c.status === 'open' ? 'Resolve' : 'Reopen') + '</button>' +
-        (mine(c) ? '<details class="rd-more"><summary aria-label="More" title="More">\u22EF</summary><div>' +
-                   '<button data-a="edit">Edit</button><button data-a="delete">Delete</button></div></details>' : '');
-      pop.appendChild(head);
+         : '');
+      if (head) head.hidden = sentOf(id);
       pop.appendChild(acts);
       var act = function (e) {
         var t = e.target.closest ? e.target.closest('button') : null;
         var a = t && t.getAttribute('data-a');
         if (!a) return;
         if (a === 'cancel-tell') { cancel(id); return; }
-        if (a === 'status') op({ op: 'status', id: id, status: c.status === 'open' ? 'resolved' : 'open' });
+        if (a === 'minimize') { closePopover(); return; }
+        if (a === 'status') {
+          var opened = c.status !== 'open';
+          op({ op: 'status', id: id, status: opened ? 'open' : 'resolved' }).then(function (j) { if (j && !opened && popId === id) closePopover(); });
+        }
         else if (a === 'delete') op({ op: 'delete', id: id });
         else if (a === 'edit') editForm(id);
-        else replyForm(id);
       };
-      head.addEventListener('click', act);
+      if (head) head.addEventListener('click', act);
       acts.addEventListener('click', act);
     }
-    if (forms.length) {
-      forms.forEach(function (x) { pop.appendChild(x); });
-      var a2 = pop.querySelector(':scope > .rd-actions');
-      if (a2) a2.hidden = true;
-    }
+    var writing = forms.some(function (x) { return x.contains(ROOT.activeElement); });
+    forms.forEach(function (x) { pop.appendChild(x); });
+    if (writing) forms[0].querySelector('textarea').focus();       // moved in the page, the field lost the cursor
     sendingIn(pop);
     sc = pop.querySelector('.rd-scroll');
     if (atEnd) sc.scrollTop = sc.scrollHeight;
@@ -2014,7 +2024,7 @@ var create = function (ROOT, CFG, opts) {
   function editForm(id, text) {
     var c = byId[id];
     if (!c) return;          // the thread went (a 410) while its button was still drawn
-    textForm(pop, text === undefined ? c.body : text, [{ k: 'ok', label: 'Save' }], function (t, k, rid, line) {
+    textForm(pop, text === undefined ? c.body : text, [{ k: 'ok', label: 'Save', cancel: true }], function (t, k, rid, line) {
       threadKeep(c, 'edit', t, rid, line, Date.now());
       return op({ op: 'edit', id: id, body: t, rid: rid }).then(function (j) { if (j) threadKeep(c, 'edit', null, rid); return j; });
     }, function (line) { threadKeep(c, 'edit', null, line); }, 'Your edit is being sent…', function (t) { return keptFor(id, t, 'edit'); },
@@ -2078,11 +2088,14 @@ var create = function (ROOT, CFG, opts) {
     touched(id);
     place(pop, target || btn);
     if (!target) pin(pop);
-    var sc = pop.querySelector('.rd-scroll');
-    sc.scrollTop = sc.scrollHeight;
     paint(id);
     keptThreadForm(id, kind, which);
+    compose(id);
+    var sc = pop.querySelector('.rd-scroll');       // last: the field takes its height from the thread
+    sc.scrollTop = sc.scrollHeight;
   }
+  // The field stands open under the thread, with the cursor in it.
+  function compose(id) { if (canSave && pop && popId !== null && same(popId, id) && byId[id] && !openForm() && !sentOf(id)) replyForm(id); }
   // A running Tell shows as a busy button; hovering it turns it into
   // Cancel, and a click cancels. Tell already delivered gets a second message
   // telling the session to stop.
@@ -2148,15 +2161,10 @@ var create = function (ROOT, CFG, opts) {
         }
         return '<button data-f="' + b.k + '" class="' + (i ? 'rd-alt ' : 'rd-send ') + (b.cls || '') + '"' +
                (b.tip || !i ? ' title="' + esc(b.tip || b.label) + '"' : '') + '>' + esc(b.label) + (i ? '' : ARROW) + '</button>';
-      }).join('') + '<button class="rd-alt rd-x" data-f="no" title="Cancel">Cancel</button>' +
+      }).join('') + (buttons[0].cancel ? '<button class="rd-alt rd-x" data-f="no" title="Cancel">Cancel</button>' : '') +
       offs.map(function (l) { return '<div class="rd-agent-line">' + esc(l) + '</div>'; }).join('') + '</div>');
     f.kept = kept;
     host.appendChild(f);
-    // The thread's own buttons would sit above the form's and ignore what is being
-    // typed, so they step aside until the form is cancelled or its send is answered: a second
-    // Reply, a Resolve or a Delete under a send that may still fail is not offered.
-    var acts = host.querySelector(':scope > .rd-actions');
-    if (acts) acts.hidden = true;
     // The popover this form belongs to, if it is open; the buttons are looked up again: a live
     // update may have rebuilt them.
     var vanished = function () { return own !== null && !byId[own]; };
@@ -2167,7 +2175,9 @@ var create = function (ROOT, CFG, opts) {
       // send that the store could not keep is one): Reply would remove it and Delete would close it.
       if (!a || (own !== null && sentOf(own)) || h.querySelector('.rd-form:not([data-done])')) return;
       a.hidden = false;
-      if (own !== null) keptThreadForm(own);     // the other text the store keeps for this thread, if any
+      var head = h.querySelector('.rd-head');
+      if (head) head.hidden = false;
+      if (own !== null) { keptThreadForm(own); compose(own); }     // the other text the store keeps for this thread, if any
     };
     var ta = f.querySelector('textarea');
     var from = initial && typeof initial === 'object' ? initial : { body: initial || '' };
@@ -2230,8 +2240,6 @@ var create = function (ROOT, CFG, opts) {
       if (gone && !f.hasAttribute('data-for')) goneLine(f);
       at = at || pop || host;
       if (f.parentNode !== at) at.appendChild(f);
-      var a = at.querySelector(':scope > .rd-actions');
-      if (a) a.hidden = true;
       sendingIn(at);          // a popover shown again still has the line it had when it was left
       replace();
       ta.focus();
@@ -2291,6 +2299,7 @@ var create = function (ROOT, CFG, opts) {
       if (mirror && sent.text !== null && c && (born === null || c.at === born)) mirror(ta.value, ta.value === sent.text ? sent.rid : undefined, line);
     };
     if (mirror) ta.addEventListener('input', keep);
+    f.stash = function () { if (mirror && ta.value.trim()) mirror(ta.value, undefined, line); };
     // Cancel clears what the store keeps for the form before restore, which draws the thread's other kept text.
     f.addEventListener('click', function (e) {
       var b = e.target.closest && e.target.closest('[data-f]'), k = b && b.getAttribute('data-f');
@@ -2398,7 +2407,7 @@ var create = function (ROOT, CFG, opts) {
   var BAR_CLEAR = 24;                   // px between the touch bar and a selection before the bar moves out of its way
   var TAP_SLOP = 8, TAP_MOVE = 10;      // px a finger may be off the button, and may travel, and still tap it
   var SETTLE = 350;                     // ms a touch selection stands still before the button is offered
-  var IN_UI = '#rd-popover, #rd-panel, #rd-menu, #rd-work, #rd-comment-btn';   // selections that are not the document's
+  var IN_UI = '#rd-popover, #rd-panel, #rd-menu, #rd-work, #rd-comment-btn, #rd-mode';   // selections that are not the document's
   function unpaintWidened() { if (HL) CSS.highlights.delete('rd-widened'); }
   function dropCommentBtn() { if (cbtn) { cbtn.remove(); cbtn = null; } clearTimeout(thumbTimer); thumbOn = false; }
   function hideCommentBtn() { dropCommentBtn(); unpaintWidened(); }
@@ -2492,6 +2501,7 @@ var create = function (ROOT, CFG, opts) {
     return { block: b1.i, head: blockHead(b1), tail: blockTail(b1), occ: headOccurrence(b1), start: start, end: end, quote: quote, rect: r.getBoundingClientRect(), range: r.cloneRange() };
   }
   function offerComment() {
+    if (editing) { hideCommentBtn(); return; }     // in Edit a selection is for the text, and only for it
     unpaintWidened();                   // selectionTarget paints the passage again when this selection has one
     var t = selectionTarget();
     // The widened selection is redrawn and fires one more selectionchange: the button already there stands.
@@ -2501,7 +2511,7 @@ var create = function (ROOT, CFG, opts) {
     pending = t;
     // A refused selection gets the button's place, disabled, with the reason as its label.
     cbtn = el('button', t.error ? { id: 'rd-comment-btn', disabled: '', title: t.error } : { id: 'rd-comment-btn' },
-              t.error || 'Comment');
+              t.error || (COARSE.matches ? WRITE : 'Comment'));
     BODY.appendChild(cbtn);
     if (COARSE.matches) {
       // A touch screen has a callout of its own (Copy, Search, ...) beside the selection, above or below it,
@@ -2535,6 +2545,8 @@ var create = function (ROOT, CFG, opts) {
         else if (!mouseDown && !ROOT.getElementById('rd-popover')) offerComment();   // a selection made meanwhile was held back by the thumb: the button is for it now
       }, 2000);
     });
+    // With a mouse the box opens by itself. A finger stays offered the bar: its selection has no end to wait for, and the phone's Copy stands beside it.
+    if (!t.error && !COARSE.matches) { newComment(t, cbtn); return; }
     if (!t.error) {
       var target = pending, btn = cbtn;
       cbtn.addEventListener('click', function () { newComment(target, btn); });
@@ -2597,9 +2609,12 @@ var create = function (ROOT, CFG, opts) {
     if (needClean() || writingFirst()) return;
     closePopover();
     pop = el('div', { id: 'rd-popover', role: 'dialog' },
-             '<div class="rd-quote">“' + esc(t.quote) + '”</div>');
+             '<div class="rd-head"><div class="rd-quote">“' + esc(t.quote) + '”</div>' +
+             '<button data-a="minimize" title="Close" aria-label="Close">\u00D7</button></div>');
+    pop.querySelector('[data-a="minimize"]').addEventListener('click', closePopover);
     place(pop, anchorEl);
     hideCommentBtn();
+    if (HL) CSS.highlights.set('rd-widened', new Highlight(t.range));      // the cursor leaves the text: the passage stays marked
     // A kept text belongs to the passage it was written for: any selection in the paragraph it was written
     // in (it changed, which is why the comment was refused) takes it into the form, and no selection of
     // another paragraph does, whatever its words. The paragraph is told by its opening words and which
@@ -2687,6 +2702,19 @@ var create = function (ROOT, CFG, opts) {
     }, function () { draftsReplace(own); }, 'Your comment is being sent…', function (text) {
       return commentDraftsLoad().some(function (x) { return own(x) && x.body === text; });
     });
+    var field = host.querySelector('.rd-form'), box = field && field.querySelector('textarea');
+    if (field) {
+      // Closed before it is sent, it is kept quietly for this passage: not in the notice of refused comments.
+      field.stash = function () {
+        if (box.value.trim()) draftsReplace(own, { quote: t.quote, body: box.value, block: t.block, head: t.head, tail: t.tail, occ: t.occ, min: true });
+      };
+      // The cursor is in the field, not on the passage: with nothing typed, Ctrl+C still copies the passage.
+      box.addEventListener('copy', function (e) {
+        if (box.value || !e.clipboardData) return;
+        e.preventDefault();
+        e.clipboardData.setData('text/plain', t.quote);
+      });
+    }
     // The quote above is the selection's; the text below it may be a comment kept on other words.
     if (d && d.quote !== t.quote) {
       var f = host.querySelector('.rd-form'), ta = f && f.querySelector('textarea');

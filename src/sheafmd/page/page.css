@@ -97,26 +97,23 @@
  box-shadow:inset 0 0 0 1.5px currentColor}
 #rd-popover .rd-actions button:not(.rd-compose){border-radius:12px;padding:3px 9px;font-size:11px}
 /* The field and the form it opens into are the same box: a rounded frame, the text on top, the round arrow under it. */
-#rd-popover .rd-actions button.rd-compose,#rd-popover .rd-form{box-sizing:border-box;border:1px solid rgba(127,127,127,.25);border-radius:24px;box-shadow:0 10px 15px -3px rgba(0,0,0,.1)}
-#rd-popover .rd-actions button.rd-compose{position:relative;flex:1 0 100%;min-height:86px;display:flex;align-items:flex-start;padding:12px 14px;
- background:transparent;color:rgb(127,127,127);font:14px/1.4 system-ui,sans-serif;text-align:left}
-#rd-popover .rd-actions button.rd-compose::after{content:"\2191";position:absolute;right:9px;bottom:9px;width:30px;height:30px;border-radius:50%;
- background:rgba(127,127,127,.25);color:var(--bg,#fff);font:600 16px/30px system-ui,sans-serif;text-align:center}
+#rd-popover .rd-form{box-sizing:border-box;border:1px solid rgba(127,127,127,.25);border-radius:24px;box-shadow:0 10px 15px -3px rgba(0,0,0,.1)}
 #rd-popover .rd-form .rd-actions{align-items:center}
 #rd-popover .rd-form .rd-actions button.rd-send{order:9;margin-left:auto;display:flex;align-items:center;justify-content:center;width:30px;height:30px;padding:0;
  border-radius:50%;font-size:0;background:var(--fg,#000);color:var(--bg,#fff);box-shadow:none}
 #rd-popover .rd-send svg{width:20px;height:20px}
 #rd-popover .rd-form .rd-actions button.rd-x{width:30px;height:30px;padding:0;border-radius:50%;font-size:0;box-shadow:none;opacity:.6}
 #rd-popover .rd-form .rd-actions button.rd-x::before{content:"\00D7";font:400 20px/30px system-ui,sans-serif}
-/* The little that is not talking to the agent, at the top right of the box. */
-#rd-popover .rd-head{position:absolute;top:8px;right:10px;display:flex;align-items:center;gap:4px;font-size:11px}
+/* The band of the box: the passage on the left, the little that is not talking to the agent on the right. */
+#rd-popover .rd-head{flex:0 0 auto;display:flex;align-items:center;gap:2px;margin-bottom:8px}
+#rd-popover .rd-head .rd-quote{flex:1 1 auto;min-width:0;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #rd-popover .rd-head[hidden],#rd-popover:has(.rd-form[data-done]) .rd-head,#rd-popover:has(.rd-form[data-for]) .rd-head{display:none}
-#rd-popover .rd-scroll .rd-quote{padding-right:92px}
-#rd-popover .rd-head button,#rd-popover .rd-more summary{cursor:pointer;background:transparent;color:var(--fg,#000);border:0;border-radius:10px;padding:2px 7px;font:600 11px system-ui,sans-serif;opacity:.65}
+#rd-popover .rd-head button,#rd-popover .rd-more summary{cursor:pointer;background:transparent;color:var(--fg,#000);border:0;border-radius:10px;padding:2px 7px;font:600 14px/1 system-ui,sans-serif;opacity:.65}
 #rd-popover .rd-head button:hover,#rd-popover .rd-more summary:hover{opacity:1;background:rgba(127,127,127,.18)}
 #rd-popover .rd-more{position:relative}
 #rd-popover .rd-more summary{list-style:none}
 #rd-popover .rd-more summary::-webkit-details-marker{display:none}
+#rd-popover .rd-more>div button{font-size:12px;white-space:nowrap}
 #rd-popover .rd-more>div{position:absolute;right:0;top:100%;z-index:1;display:flex;flex-direction:column;background:var(--bg,#fff);
  border:1px solid rgba(127,127,127,.4);border-radius:10px;padding:4px;box-shadow:0 8px 28px rgba(0,0,0,.22)}
 #rd-popover .rd-warn{font-size:12px;opacity:.75;margin:8px 0 0}
@@ -183,7 +180,12 @@
 #rd-notice code{font:inherit;font-weight:700}
 /* What was typed on a page whose document left the hub, to copy. */
 #rd-notice textarea{display:block;box-sizing:border-box;width:100%;margin-top:6px;font:inherit;resize:vertical}
-@media print{#rd-menu-btn,#rd-menu,#rd-work,#rd-toast,#rd-notice,#rd-unsent,#rd-popover,#rd-panel,#rd-comment-btn,.rd-badge{display:none!important}}
+#rd-mode{position:fixed;right:18px;bottom:74px;z-index:400;display:flex;padding:2px;border-radius:14px;background:var(--bg,#fff);border:1px solid rgba(127,127,127,.4);box-shadow:0 2px 8px rgba(0,0,0,.15)}
+#rd-mode button{cursor:pointer;border:0;border-radius:12px;padding:3px 9px;background:var(--fg,#000);color:var(--bg,#fff);font:600 11px system-ui,sans-serif}
+#rd-mode button[data-m=edit],.rd-editing #rd-mode button[data-m=comment]{background:transparent;color:var(--fg,#000)}
+.rd-editing #rd-mode button[data-m=edit]{background:var(--fg,#000);color:var(--bg,#fff)}
+#rd-comment-btn.rd-bar:not(:disabled){right:74px;left:8px;max-width:none;border-radius:24px;padding:14px 16px;font:14px/1.4 system-ui,sans-serif;background:var(--bg,#fff);color:rgb(127,127,127);border:1px solid rgba(127,127,127,.4);box-shadow:0 10px 15px -3px rgba(0,0,0,.2)}
+@media print{#rd-mode,#rd-menu-btn,#rd-menu,#rd-work,#rd-toast,#rd-notice,#rd-unsent,#rd-popover,#rd-panel,#rd-comment-btn,.rd-badge{display:none!important}}
 
 /* "Claude is answering": three dots that rise in turn, so a wait looks alive. */
 .rd-dots{display:inline-flex;gap:3px;margin-left:5px;vertical-align:middle}

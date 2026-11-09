@@ -64,10 +64,11 @@ def test_a_thread_and_its_reply_form_say_why_their_tell_button_cannot_work(tab):
     # The field is open from the start and it is the only place a Tell is offered: the thread's own buttons have none.
     assert tab.page.query_selector("#rd-popover > .rd-actions button.rd-tell") is None
     assert tab.page.query_selector("#rd-popover .rd-ask") is None
-    tell = tab.page.query_selector("#rd-popover .rd-form button.rd-tell")
-    assert tell.is_disabled()
+    # Where the hub's line says Tell cannot work, the form has no disabled Tell button any more (d35825a): it
+    # shows the Send reply button and the line, the same words the disabled button's title carried.
+    assert tab.page.query_selector("#rd-popover .rd-form button.rd-tell") is None
     assert tab.page.query_selector("#rd-popover .rd-form button.rd-ask") is None
-    assert tell.get_attribute("title") == LINES["tell"]
+    assert tab.page.query_selector("#rd-popover .rd-form button[data-f=ok]") is not None
     assert tab.page.locator("#rd-popover .rd-form .rd-agent-line").all_inner_texts() == list(LINES.values())
 
 

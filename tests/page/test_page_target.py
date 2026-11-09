@@ -49,3 +49,20 @@ def test_a_revoked_agent_shows_its_line_and_change_offers_the_session(tab, agent
     tab.page.click("#rd-target-change")
     assert tab.page.locator("#rd-targets button").all_inner_texts() == ["Cosima · Claude Code"]
     assert tab.page.query_selector("#rd-targets button.rd-current") is None      # a revoked agent is no pick, so none is ticked
+
+
+def test_change_lists_the_targets_and_picks_one_in_a_tab_signed_in_again_after_a_key_rotation(tab, agent, site, context):
+    Tokens().add("ada-chatgpt", client="ChatGPT")
+    tab.open()
+    site.hub.rotate()                                          # every tab is signed out; the targets are the hub's, not the key's
+    context.clear_cookies()
+    context.add_cookies([site.cookie()])                       # the cookie of the new key
+    again = type(tab)(context.new_page(), site).open()
+    assert "Cosima" in menu_text(again)
+    again.page.click("#rd-target-change")
+    listed = again.page.locator("#rd-targets button").all_inner_texts()
+    assert [t.replace("\n", " ").strip() for t in listed] == ["Cosima · Claude Code ✓", f"ChatGPT ({site.hub.person})"]
+    again.page.click("#rd-targets button:not(.rd-current)")
+    until(lambda: site.hub.docs.get(DOC)["target"].get("token") == "ada-chatgpt", what="the hub to take the agent")
+    assert again.errors == []
+    again.page.close()

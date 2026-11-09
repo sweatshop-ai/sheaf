@@ -409,7 +409,7 @@ def test_a_new_boot_meets_the_popover_of_a_deleted_thread_that_holds_a_reply_wit
     # The popover of a thread deleted elsewhere stays while a reply is typed; `touched` then drew the
     # thread that is gone, threw, and stopped `interruptJobs`.
     p, f = running_tell.page, running_tell.site.file
-    p.click("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     p.fill("#rd-popover textarea", "my reply text")
     (c,) = rdc.parse(f.read_text()).comments
     f.write_text(rdc.delete(f.read_text(), c.id), encoding="utf-8")
@@ -441,7 +441,7 @@ def replying(tab):
     # No `input` event, so no autosave and no mirror of the draft: the edit is on screen only.
     tab.page.evaluate(f"document.querySelector({P2!r}).append(' and plums')")
     tab.page.click(".rd-badge")
-    tab.page.click("#rd-popover button[data-a=reply]")
+    tab.page.wait_for_selector("#rd-popover textarea")
     tab.page.fill("#rd-popover textarea", "my reply text")
     count_streams(tab)
     return tab

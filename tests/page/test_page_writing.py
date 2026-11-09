@@ -29,12 +29,12 @@ def thread(tab):
     tab.page.reload()
     tab.page.wait_for_selector("#rd-menu-btn", state="attached")
     tab.page.click(".rd-badge")
-    tab.page.wait_for_selector("#rd-popover button[data-a=reply]")
+    tab.page.wait_for_selector("#rd-popover textarea")
     return tab
 
 
 def open_reply(tab, text):
-    tab.page.click("#rd-popover button[data-a=reply]")
+    tab.page.wait_for_selector("#rd-popover textarea")
     tab.page.fill("#rd-popover textarea", text)
 
 
@@ -538,7 +538,7 @@ def test_a_page_with_a_new_comment_being_typed_asks_before_it_is_left(tab, conte
 
 
 def test_a_page_with_an_empty_form_is_left_without_a_question(thread, context):
-    thread.page.click("#rd-popover button[data-a=reply]")
+    thread.page.wait_for_selector("#rd-popover textarea")
     thread.page.fill("#rd-popover textarea", "  ")
     assert left_with(thread, context) == ([], True)
 
@@ -747,7 +747,7 @@ def test_a_reply_the_hub_takes_with_the_text_changed_leaves_the_store_empty_afte
         r = route.fetch()
         route.fulfill(response=r, json={**r.json(), "textSame": False})
     p.route("**/_/comment", changed)
-    p.click("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     p.fill("#rd-popover textarea", "my reply text")
     mark(p)
     p.keyboard.press("Control+Enter")
@@ -1073,7 +1073,7 @@ def test_a_save_that_merges_waits_for_the_reply_being_written_before_it_reloads(
     p, f = frozen.page, frozen.site.file
     type_at_end(p, P2, " and plums")
     p.click(".rd-badge")
-    p.wait_for_selector("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     open_reply(frozen, "my reply text")
     mark(p)
     f.write_text(f.read_text() + "\nA new paragraph from outside.\n", encoding="utf-8")
@@ -1096,7 +1096,7 @@ def test_an_autosave_that_merges_waits_for_the_reply_being_written_before_it_rel
     p, f = frozen.page, frozen.site.file
     type_at_end(p, P2, " and plums")
     p.click(".rd-badge")
-    p.wait_for_selector("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     open_reply(frozen, "my reply text")
     mark(p)
     f.write_text(f.read_text() + "\nA new paragraph from outside.\n", encoding="utf-8")
@@ -1121,7 +1121,7 @@ def test_a_ticked_task_box_that_merges_waits_for_the_reply_being_written_before_
     reloaded(p)
     p.wait_for_selector("main input[type=checkbox]")
     p.click(".rd-badge")
-    p.wait_for_selector("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     open_reply(frozen, "my reply text")
     mark(p)
     f.write_text(f.read_text() + "\nA new paragraph from outside.\n", encoding="utf-8")
@@ -1145,7 +1145,7 @@ def test_while_a_merge_waits_for_a_reply_a_later_save_does_not_overwrite_what_th
     p, f = frozen.page, frozen.site.file
     type_at_end(p, P2, " and plums")
     p.click(".rd-badge")
-    p.wait_for_selector("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     open_reply(frozen, "my reply text")
     f.write_text(f.read_text().replace("Last paragraph.", "Last paragraph, rewritten outside."), encoding="utf-8")
     p.wait_for_selector("#rd-popover .rd-hold")
@@ -1175,7 +1175,7 @@ def test_while_a_reply_holds_the_reload_the_edit_and_the_reply_are_taken_after_m
     p.on("requestfinished", lambda r: pins.append(r.post_data) if r.url.endswith("/_/pin") else None)
     type_at_end(p, P2, " and plums")
     p.click(".rd-badge")
-    p.wait_for_selector("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     open_reply(frozen, "my reply text")
     mark(p)
     held = md_hash(f.read_text())
@@ -1223,7 +1223,7 @@ def test_a_page_asks_the_hub_to_keep_its_version_once_and_again_only_after_a_req
     p.reload()
     p.wait_for_selector("#rd-menu-btn", state="attached")
     p.click(".rd-badge")
-    p.wait_for_selector("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     open_reply(thread, "my reply text")
 
     def hears(n):
@@ -1265,7 +1265,7 @@ def test_a_page_that_keeps_holding_its_reload_pins_its_version_again_every_day_u
     held_pin = []
     p.route("**/_/pin", lambda route: route.continue_() if held_pin else held_pin.append(route))
     p.click(".rd-badge")
-    p.wait_for_selector("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     open_reply(frozen, "my reply text")
     held = md_hash(f.read_text())
     update_file(f, lambda t: t + "\nA new paragraph from outside.\n")
@@ -1312,7 +1312,7 @@ def test_a_page_whose_document_is_gone_stops_renewing_its_pin(frozen):
     p.reload()
     p.wait_for_selector("#rd-menu-btn", state="attached")
     p.click(".rd-badge")
-    p.wait_for_selector("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     open_reply(frozen, "my reply text")
     update_file(f, lambda t: t + "\nA new paragraph from outside.\n")
     p.wait_for_selector("#rd-popover .rd-hold")
@@ -1329,7 +1329,7 @@ def test_a_renewal_of_the_pin_that_failed_is_made_again_within_the_hour(frozen):
     p.on("request", lambda r: pins.append(1) if r.url.endswith("/_/pin") else None)
     p.route("**/_/pin", lambda route: route.abort() if fail[0] else route.continue_())
     p.click(".rd-badge")
-    p.wait_for_selector("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     open_reply(frozen, "my reply text")
     update_file(f, lambda t: t + "\nA new paragraph from outside.\n")
     p.wait_for_selector("#rd-popover .rd-hold")
@@ -2174,7 +2174,7 @@ def test_tell_of_a_thread_sends_the_hash_of_the_text_the_page_holds(agent, threa
     sent = []
     thread.page.on("request", lambda r: sent.append(json.loads(r.post_data))
                    if r.method == "POST" and r.url.endswith("/_/tell") else None)
-    thread.page.click("#rd-popover button[data-a=reply]")
+    thread.page.wait_for_selector("#rd-popover textarea")
     thread.page.fill("#rd-popover textarea", "Please do.")
     thread.page.click("#rd-popover .rd-form button.rd-tell")
     until(lambda: sent, what="the request")
@@ -2264,7 +2264,7 @@ def two_threads(thread):
     thread.page.reload()
     thread.page.wait_for_selector("#rd-menu-btn", state="attached")
     thread.page.locator(".rd-badge").first.click()
-    thread.page.wait_for_selector("#rd-popover button[data-a=reply]")
+    thread.page.wait_for_selector("#rd-popover textarea")
     return thread
 
 
@@ -2305,7 +2305,7 @@ def test_the_comment_button_leaves_a_reply_with_text_alone(two_threads):
 
 
 def test_a_form_without_text_gives_way_to_another_badge(two_threads):
-    two_threads.page.click("#rd-popover button[data-a=reply]")
+    two_threads.page.wait_for_selector("#rd-popover textarea")
     two_threads.page.locator(".rd-badge").nth(1).dispatch_event("click")
     until(lambda: "Why pears?" in two_threads.page.inner_text("#rd-popover"), what="the second thread")
 
@@ -2454,8 +2454,8 @@ def test_a_change_heard_between_a_replys_answer_and_its_end_reloads_when_the_sen
     p, f, held = two_threads.page, two_threads.site.file, []
     heard = hearing(two_threads)
     p.locator(".rd-badge").first.click()
-    p.wait_for_selector("#rd-popover button[data-a=reply]")
-    p.click("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
+    p.wait_for_selector("#rd-popover textarea")
     p.fill("#rd-popover textarea", "a reply that goes through")
     answer_held_after_the_hub_took_it(p, held)
     p.keyboard.press("Control+Enter")
@@ -2544,7 +2544,7 @@ def test_a_reply_whose_send_never_answers_comes_back_after_30_seconds_with_the_t
     p = thread.page
     reload_on_clock(p)
     p.click(".rd-badge")
-    p.wait_for_selector("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     held = send_held(thread, "reply", "a reply that is never answered")
     p.clock.fast_forward(30_500)
     toasted(p, LATE)
@@ -2641,7 +2641,7 @@ def test_a_reply_kept_after_the_hub_took_it_is_cleared_when_the_page_loads(threa
     thread.open()
     until(lambda: MISSED not in comment_store(thread), what="the kept reply to leave localStorage")
     thread.page.click(".rd-badge")
-    thread.page.wait_for_selector("#rd-popover button[data-a=reply]")
+    thread.page.wait_for_selector("#rd-popover textarea")
     assert thread.page.locator("#rd-popover textarea").count() == 0, "the reply came back as a kept form"
 
 
@@ -2713,11 +2713,11 @@ def test_a_reply_given_up_while_text_is_typed_in_another_thread_still_says_it_ma
     p = two_threads.page
     reload_on_clock(p)
     p.locator(".rd-badge").first.click()
-    p.wait_for_selector("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     held = send_held(two_threads, "reply", "words for the first thread")
     open_thread_by(two_threads, "a badge")
     until(lambda: "Why pears?" in p.inner_text("#rd-popover"), what="the second thread")
-    p.click("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     p.fill("#rd-popover textarea", "words for the second thread")
     p.clock.fast_forward(30_500)
     toasted(p, "is kept")
@@ -2732,7 +2732,7 @@ def test_a_text_sent_again_after_a_give_up_and_failing_for_another_reason_is_not
     p = two_threads.page
     reload_on_clock(p)
     p.locator(".rd-badge").first.click()
-    p.wait_for_selector("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     held = send_held(two_threads, "reply", "words for the first thread")
     p.clock.fast_forward(30_500)
     toasted(p, LATE)
@@ -2744,7 +2744,7 @@ def test_a_text_sent_again_after_a_give_up_and_failing_for_another_reason_is_not
     until(lambda: again or p.wait_for_timeout(20), what="the second send to go out")
     open_thread_by(two_threads, "a badge")
     until(lambda: "Why pears?" in p.inner_text("#rd-popover"), what="the second thread")
-    p.click("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     p.fill("#rd-popover textarea", "words for the second thread")
     again[0].abort()
     toasted(p, "Not sent")
@@ -2832,7 +2832,7 @@ def test_the_answer_of_a_delete_keeps_the_popover_of_its_thread_while_a_reply_is
     p.click("#rd-popover .rd-more summary")
     p.click("#rd-popover button[data-a=delete]")
     until(lambda: held or p.wait_for_timeout(20), what="the delete to go out")
-    p.click("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     p.fill("#rd-popover textarea", "words typed while the delete was out")
     held[0].continue_()
     until(lambda: not rdc.parse(thread.site.file.read_text()).comments, what="the thread gone from the file")
@@ -2981,7 +2981,7 @@ def test_a_failed_send_does_not_take_over_a_popover_with_text_typed_in_it(two_th
     held = send_held(two_threads, "reply", "words for the first thread")
     open_thread_by(two_threads, "a badge")
     until(lambda: "Why pears?" in p.inner_text("#rd-popover"), what="the second thread")
-    p.click("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     p.fill("#rd-popover textarea", "words for the second thread")
     held[0].fulfill(status=500, json={"ok": False, "error": "the hub broke off"})
     p.unroute("**/_/comment")
@@ -3016,7 +3016,7 @@ def test_a_failed_send_does_not_drop_its_form_when_the_text_could_not_be_kept(tw
     held = send_held(two_threads, "reply", "words for the first thread")
     open_thread_by(two_threads, "a badge")
     until(lambda: "Why pears?" in p.inner_text("#rd-popover"), what="the second thread")
-    p.click("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     p.fill("#rd-popover textarea", "words for the second thread")
     held[0].fulfill(status=500, json={"ok": False, "error": "the hub broke off"})
     p.unroute("**/_/comment")
@@ -3032,7 +3032,7 @@ def test_the_text_that_could_not_be_kept_is_still_on_the_page_when_the_popover_i
     held = send_held(two_threads, "reply", "words for the first thread")
     open_thread_by(two_threads, "a badge")
     until(lambda: "Why pears?" in p.inner_text("#rd-popover"), what="the second thread")
-    p.click("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     p.fill("#rd-popover textarea", "words for the second thread")
     held[0].fulfill(status=500, json={"ok": False, "error": "the hub broke off"})
     p.unroute("**/_/comment")
@@ -3053,7 +3053,7 @@ def test_cancelling_the_form_beside_the_text_that_could_not_be_kept_leaves_that_
     held = send_held(two_threads, "reply", "words for the first thread")
     open_thread_by(two_threads, "a badge")
     until(lambda: "Why pears?" in p.inner_text("#rd-popover"), what="the second thread")
-    p.click("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     p.fill("#rd-popover textarea", "words for the second thread")
     held[0].fulfill(status=500, json={"ok": False, "error": "the hub broke off"})
     p.unroute("**/_/comment")
@@ -3070,7 +3070,7 @@ def test_a_badge_waits_for_the_text_that_could_not_be_kept_even_when_the_form_be
     held = send_held(two_threads, "reply", "words for the first thread")
     open_thread_by(two_threads, "a badge")
     until(lambda: "Why pears?" in p.inner_text("#rd-popover"), what="the second thread")
-    p.click("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     p.fill("#rd-popover textarea", "words for the second thread")
     held[0].fulfill(status=500, json={"ok": False, "error": "the hub broke off"})
     p.unroute("**/_/comment")
@@ -3219,7 +3219,7 @@ def test_a_deletion_heard_while_a_reply_is_still_out_leaves_its_form_with_the_li
     p = thread.page
     heard = hearing(thread)
     p.click(".rd-badge")
-    p.wait_for_selector("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     before = p.locator("#rd-popover").bounding_box()
     held = gone_and_sent(thread, "words for a gone thread")
     heard_changes(p, heard, 1)     # the deletion's event reaches the page and waits behind the write
@@ -3269,7 +3269,7 @@ def test_a_reply_to_a_deleted_thread_stays_beside_text_typed_in_another_thread_a
     held = gone_and_sent(two_threads, "words for a gone thread")
     p.locator(".rd-badge").last.dispatch_event("click")
     until(lambda: "Why pears?" in p.inner_text("#rd-popover"), what="the second thread")
-    p.click("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     p.fill("#rd-popover textarea", "words for the second thread")
     refused(p, held)
     until(lambda: p.locator("#rd-popover textarea").count() == 2, what="the form beside the one being typed")
@@ -3976,7 +3976,7 @@ def test_a_tell_or_cancel_the_hub_cannot_be_reached_for_says_that_it_did_not_go_
     # "nothing was saved. Your edits stay on screen" is the sentence of a save; these save nothing.
     p = thread.page
     if what == "cancel-tell":
-        thread.page.click("#rd-popover button[data-a=reply]")
+        thread.page.wait_for_selector("#rd-popover textarea")
         thread.page.fill("#rd-popover textarea", "Please do.")
         thread.page.click("#rd-popover .rd-form button.rd-tell")
         p.wait_for_selector("#rd-popover button[data-a=cancel-tell]")
@@ -4044,7 +4044,7 @@ def test_a_reply_taken_while_the_reload_waits_for_another_send_shows_in_its_thre
     comment(f, quote="Last paragraph", body="From outside", by="Ada")
     p.wait_for_timeout(500)
     open_thread_by(two_threads, "a badge")
-    p.wait_for_selector("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     mark(p)
     open_reply(two_threads, "second reply")
     p.keyboard.press("Control+Enter")
@@ -4060,7 +4060,7 @@ def test_a_reply_taken_while_the_reload_waits_for_another_send_shows_in_its_thre
 # store follows both.
 def fail_a_reply(tab, text):
     p, held = tab.page, []
-    p.click("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     p.fill("#rd-popover textarea", text)
     p.route("**/_/comment", lambda route: held.append(route))
     p.keyboard.press("Control+Enter")
@@ -4248,7 +4248,7 @@ def test_a_page_that_opens_a_thread_while_a_send_of_it_is_out_on_another_page_do
     b = second_page(thread, context)
     assert b.locator(UNSENT).count() == 0, "a send that is out is said as not sent"
     b.click(".rd-badge")
-    b.wait_for_selector("#rd-popover button[data-a=reply]")
+    b.wait_for_selector("#rd-popover textarea")
     b.wait_for_timeout(500)
     assert b.locator("#rd-popover textarea").count() == 0, "the text of a send that is out was put into a form"
     held[0].fulfill(status=500, json={"ok": False, "error": "the hub broke off"})
@@ -4400,7 +4400,7 @@ def test_a_failed_reply_leaves_a_kept_comment_being_typed_in_open_and_says_where
     held = []
     p.route("**/_/comment", lambda route: held.append(route))
     p.locator(".rd-badge").dispatch_event("click")       # the kept comment sits over the badge
-    p.wait_for_selector("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     open_reply(thread, "my reply")
     p.keyboard.press("Control+Enter")
     until(lambda: held or p.wait_for_timeout(20), what="the reply to go out")

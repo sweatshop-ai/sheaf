@@ -1,9 +1,10 @@
-"""The bar a phone is offered after a selection (plan: "Sélection sur téléphone"), in a touch emulation: one touch opens the box
-with the cursor in the field, a number does the same, the bar looks like the chat's field, and the selection is left alone while the
-bar shows (the phone's own Copy menu needs it). A real keyboard and the Copy menu can only be judged on a phone."""
+"""What a phone does after a selection (plan: "Sélection sur téléphone"), in a touch emulation: the box opens by itself with the
+cursor in the field, a number does the same, and a touchscreen laptop takes the desktop path. A real keyboard can only be judged on a phone.
+Restated on 2026-11-09 (ticket 03, E): the bar a selection used to offer is gone for a usable selection; four tests of it
+(bar shaped like the field, selection left intact for the phone's Copy menu, touchstart cancelled, bar opens box) no longer apply."""
 import pytest
 
-from pagehelp import at, close_context, new_context, select, select_by_touch, selected, until
+from pagehelp import at, close_context, new_context, select, select_by_touch
 from sheafmd import comments as rdc
 from sheafmd.source import update_file
 
@@ -22,12 +23,6 @@ def phone(touch_tab, site):
     return touch_tab.open()
 
 
-def raise_bar(phone):
-    select_by_touch(phone.page, at(MAIN, "Second"), at(MAIN, "paragraph", None))
-    phone.page.wait_for_selector(BTN)
-    return phone.page
-
-
 def centre(p, css):
     b = p.locator(css).bounding_box()
     return b["x"] + b["width"] / 2, b["y"] + b["height"] / 2
@@ -37,12 +32,11 @@ def focused(p):
     return p.evaluate("(() => { const a = document.activeElement; return a ? a.tagName + (a.id ? '#' + a.id : '') : null; })()")
 
 
-def test_touching_the_bar_opens_the_box_with_the_cursor_in_the_field(phone):
-    p = raise_bar(phone)
-    p.touchscreen.tap(*centre(p, BTN))
-    p.wait_for_selector(FIELD)
-    assert focused(p) == "TEXTAREA", "the cursor is not in the field"
-    assert p.evaluate("document.activeElement.matches('#rd-popover textarea')")
+def test_a_touch_selection_opens_the_box_with_the_cursor_in_the_field_and_no_bar(phone):
+    select_by_touch(phone.page, at(MAIN, "Second"), at(MAIN, "paragraph", None))
+    phone.page.wait_for_selector(FIELD)
+    assert focused(phone.page) == "TEXTAREA", "the cursor is not in the field"
+    assert phone.page.locator(BTN).count() == 0
 
 
 def test_touching_a_number_puts_the_cursor_in_the_field_too(phone, site):
@@ -52,47 +46,6 @@ def test_touching_a_number_puts_the_cursor_in_the_field_too(phone, site):
     p.touchscreen.tap(*centre(p, ".rd-badge"))
     p.wait_for_selector(FIELD)
     assert focused(p) == "TEXTAREA", "the cursor is not in the field"
-
-
-def test_the_bar_is_shaped_like_the_chats_field_and_stronger(phone):
-    """Restated on 2026-11-09: the shape, size and font are the field's, the border is stronger (the bar was not noticed), and its
-    placeholder line is the field's; the quote line above it is tested in test_page_mobile_composer.py."""
-    p = raise_bar(phone)
-    bar = p.evaluate("""() => { const s = getComputedStyle(document.querySelector('#rd-comment-btn')), b = document.querySelector('#rd-comment-btn').getBoundingClientRect();
-      return {radius: s.borderTopLeftRadius, border: s.borderTopColor, size: s.fontSize, family: s.fontFamily, bg: s.backgroundColor, text: document.querySelector('#rd-comment-btn .rd-bar-write').textContent, w: b.width,
-      bw: parseFloat(s.borderTopWidth)}; }""")
-    p.touchscreen.tap(*centre(p, BTN))
-    p.wait_for_selector(FIELD)
-    form = p.evaluate("""() => { const f = document.querySelector('#rd-popover .rd-form'), s = getComputedStyle(f), t = document.querySelector('#rd-popover textarea');
-      return {radius: s.borderTopLeftRadius, border: s.borderTopColor, size: getComputedStyle(t).fontSize, family: getComputedStyle(t).fontFamily,
-              bg: s.backgroundColor, text: t.placeholder}; }""")
-    assert bar["text"] == form["text"], "the bar does not carry the field's placeholder"
-    assert bar["radius"] == form["radius"] and bar["border"] != form["border"] and bar["bw"] >= 1.5, bar
-    assert bar["size"] == form["size"] and bar["family"] == form["family"]
-    assert bar["w"] > 390 * 0.7, "the bar is not a wide field"
-
-
-def test_the_selection_is_left_intact_while_the_bar_shows_so_the_phones_copy_menu_has_it(phone):
-    p = raise_bar(phone)
-    p.wait_for_timeout(1500)
-    assert selected(p) == "Second paragraph", "the bar took the selection"
-    assert p.locator(BTN).count() == 1
-    assert focused(p) != "BUTTON#rd-comment-btn", "the bar holds the focus: the selection would be gone on a phone"
-    assert p.evaluate("document.activeElement === document.body"), "something took the focus from the selection"
-    # A touch on the page's other controls does not change what is selected.
-    p.evaluate("window.scrollBy(0, 3)")
-    p.wait_for_timeout(500)
-    assert selected(p) == "Second paragraph"
-
-
-def test_a_touch_on_the_bar_does_not_move_the_cursor_before_the_box_has_opened(phone):
-    """The touchstart on the bar is cancelled: the browser may not collapse the selection nor focus the bar."""
-    p = raise_bar(phone)
-    p.evaluate("""() => { window.__prevented = null;
-      document.addEventListener('touchstart', e => { setTimeout(() => { window.__prevented = e.defaultPrevented; }, 0); }, false); }""")
-    p.touchscreen.tap(*centre(p, BTN))
-    p.wait_for_selector(FIELD)
-    assert p.evaluate("window.__prevented") is True
 
 
 @pytest.fixture

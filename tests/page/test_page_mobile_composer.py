@@ -2,11 +2,11 @@
 
 Thierry's iPhone showed the field under the hint and away from the arrow, and the last bubble cut by the composer. The
 keyboard is a `visualViewport` that the test controls (as in test_page_keyboard.py); only a real iPhone shows the real one.
-The bar a selection offers on a phone carries the selected words, so it is read as the answer to the selection."""
+"""
 import pytest
 
 from conftest import Tab
-from pagehelp import at, close_context, new_context, select_by_touch, until
+from pagehelp import new_context
 from sheafmd import comments as rdc
 from sheafmd.source import update_file
 
@@ -92,15 +92,15 @@ LAYOUT = """() => { const r = (e) => { const b = e.getBoundingClientRect(); retu
 
 
 def assert_composer_order(got):
-    """The text at the top of the frame, the round arrow under it at the right, the hint below the text, as on a desktop."""
+    """The text field and the round arrow in one row, the arrow at the top right of the box, and no hint line (G, third trial)."""
+    assert got["line"] is None, f"the hint line is still drawn: {got}"
     assert got["field"]["top"] - got["form"]["top"] < 24, f"the field is not at the top of the frame: {got}"
-    assert got["send"]["top"] >= got["field"]["bottom"] - 1, f"the arrow is not under the field: {got}"
+    assert got["send"]["left"] >= got["field"]["right"] - 1, f"the arrow is not beside the field: {got}"
+    assert abs(got["send"]["top"] - got["field"]["top"]) < 12, f"the arrow is not at the top of the box: {got}"
     assert got["send"]["right"] > got["form"]["right"] - 40, f"the arrow is not at the right: {got}"
-    if got["line"]:
-        assert got["line"]["top"] >= got["field"]["bottom"] - 1, f"the hint is above the field: {got}"
 
 
-def test_with_the_keyboard_up_the_field_is_at_the_top_of_the_frame_and_the_arrow_under_it_as_on_a_desktop(phone):
+def test_with_the_keyboard_up_the_field_and_the_arrow_share_a_row_arrow_at_the_top_right(phone):
     page = open_thread(phone)
     assert_composer_order(page.evaluate(LAYOUT))
     keyboard(page, 844 - KEYBOARD)
@@ -109,10 +109,19 @@ def test_with_the_keyboard_up_the_field_is_at_the_top_of_the_frame_and_the_arrow
     assert_composer_order(got)
 
 
-def test_the_hint_stays_under_the_field_too_with_no_agent_and_the_keyboard_up(phone):
+def test_the_hint_line_is_gone_with_no_agent_and_the_keyboard_up(phone):
+    """Restated: the hint "Render this page from an agent session..." used to stay under the field; it is not drawn at all now."""
     page = open_thread(phone, up=844 - KEYBOARD)
     got = page.evaluate(LAYOUT)
-    assert got["line"] is not None and got["docked"], got
+    assert got["line"] is None and got["docked"], got
+    assert_composer_order(got)
+
+
+def test_a_growing_field_keeps_the_arrow_at_the_top(phone):
+    page = open_thread(phone)
+    page.fill(FIELD, "A long message. " * 12)
+    got = page.evaluate(LAYOUT)
+    assert got["field"]["bottom"] - got["field"]["top"] > 60, got
     assert_composer_order(got)
 
 
@@ -135,47 +144,6 @@ def test_the_keyboard_rising_after_the_box_opened_leaves_the_last_message_fully_
     assert got["last"]["bottom"] <= min(got["scroll"]["bottom"], got["form"]["top"]) + 0.5, f"the last bubble is cut: {got}"
 
 
-# ── the bar a selection offers is tied to the selection ─────────────────────────────
-
-def raise_bar(phone, start="Second", end="paragraph"):
-    phone.open()
-    select_by_touch(phone.page, at(MAIN, start), at(MAIN, end, None))
-    phone.page.wait_for_selector(BTN)
-    return phone.page
-
-
-def test_the_bar_quotes_the_selected_words_above_the_field_text(phone):
-    p = raise_bar(phone)
-    got = p.evaluate("""() => { const b = document.querySelector('#rd-comment-btn'), q = b.querySelector('.rd-bar-quote'), w = b.querySelector('.rd-bar-write');
-      return { quote: q && q.textContent, write: w && w.textContent, qTop: q && q.getBoundingClientRect().top, wTop: w && w.getBoundingClientRect().top }; }""")
-    assert got["quote"] == "“Second paragraph”", got
-    assert got["write"] == "Write a message…", got
-    assert got["qTop"] < got["wTop"], got
-
-
-def test_a_long_selection_is_quoted_on_one_line_cut_with_an_ellipsis(phone):
-    p = raise_bar(phone, "Second", "pears")
-    got = p.evaluate("""() => { const q = document.querySelector('#rd-comment-btn .rd-bar-quote'), s = getComputedStyle(q), b = document.querySelector('#rd-comment-btn');
-      return { white: s.whiteSpace, over: s.overflow, ell: s.textOverflow, h: q.getBoundingClientRect().height, line: parseFloat(s.lineHeight), bar: b.getBoundingClientRect().height }; }""")
-    assert got["white"] == "nowrap" and got["over"] == "hidden" and got["ell"] == "ellipsis", got
-    assert got["h"] <= got["line"] + 1, got
-
-
-def test_the_bar_changes_its_quote_with_the_selection(phone):
-    p = raise_bar(phone)
-    select_by_touch(p, at(MAIN, "A third"), at(MAIN, "apples", None))
-    until(lambda: p.locator(BTN + " .rd-bar-quote").inner_text().startswith("“A third"), what="the bar to quote the new selection")
-
-
-def test_the_bar_is_stronger_than_the_field_and_arrives_with_a_short_entrance(phone):
-    p = raise_bar(phone)
-    got = p.evaluate("""() => { const s = getComputedStyle(document.querySelector('#rd-comment-btn'));
-      return { w: parseFloat(s.borderTopWidth), colour: s.borderTopColor, anim: s.animationName, dur: parseFloat(s.animationDuration), shadow: s.boxShadow }; }""")
-    assert got["anim"] != "none" and 0 < got["dur"] <= 0.4, got
-    assert got["w"] >= 1.5 or "0.25" not in got["colour"], f"the bar wears the field's quiet border: {got}"
-
-
-def test_the_bar_holds_still_for_a_person_who_asks_for_less_motion(phone):
-    phone.page.emulate_media(reduced_motion="reduce")
-    p = raise_bar(phone)
-    assert p.evaluate("getComputedStyle(document.querySelector('#rd-comment-btn')).animationName") == "none"
+# The five tests of the bar that quoted the selection (quote line, ellipsis, quote changing, stronger border and entrance, reduced
+# motion) were removed on 2026-11-09 with the bar itself (ticket 03, E): a usable selection opens the box, so no bar is offered
+# and there is nothing to quote, animate or restyle. The refused selection's disabled bar is tested in test_page_selection.py.

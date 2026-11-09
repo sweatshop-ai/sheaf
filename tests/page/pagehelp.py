@@ -193,6 +193,20 @@ def open_box(page):
         page.click("#rd-comment-btn")
 
 
+def typed(page):
+    """The texts in the popover's fields that are not empty. The reply field is open from the start, so an
+    empty field is the rest state; what a test must not find is text put into one."""
+    return page.eval_on_selector_all("#rd-popover textarea", "els => els.map(e => e.value).filter(v => v)")
+
+
+def open_form(page, form):
+    """The form of a reply or an edit. A reply field is open from the start; Edit is in the thread's ⋯ menu."""
+    if form == "edit":
+        page.click("#rd-popover .rd-more summary")
+        page.click("#rd-popover button[data-a=edit]")
+    page.wait_for_selector("#rd-popover textarea")
+
+
 def comment_on(tab, start, end, body):
     """Select, type and send; returns the comment once it is in the file. A mouse selection opens the box by
     itself; a touch screen offers the Comment bar first."""

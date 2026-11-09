@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from helpers import comment, writes_from_outside
-from pagehelp import (DOC, P1, P2, T0, at, comment_draft_key, comment_on, gone, key, mark, open_box, reload_on_clock, reloaded,
+from pagehelp import (DOC, P1, P2, T0, at, comment_draft_key, comment_on, gone, key, mark, open_box, open_form, typed, reload_on_clock, reloaded,
                       select, select_by_touch, toast, toasted, type_at_end, until)
 from sheafmd import comments as rdc
 from sheafmd.hub import live as hub_live
@@ -88,7 +88,7 @@ def test_a_click_outside_or_escape_does_not_throw_away_typed_text(thread):
     thread.page.keyboard.press("Escape")
     assert thread.page.input_value("#rd-popover textarea") == "important words"
     thread.page.click("#rd-popover button[data-f=no]")
-    assert thread.page.query_selector("#rd-popover textarea") is None
+    assert not typed(thread.page)
 
 
 def test_a_send_that_fails_gives_the_form_back_with_its_text(thread):
@@ -134,7 +134,7 @@ def fail_the_send(p, held):
 def send_held(tab, form, text):
     """Open the reply or edit form, type, send with `/_/comment` held; returns the held requests."""
     p, held = tab.page, []
-    p.click(f"#rd-popover button[data-a={form}]")
+    open_form(p, form)
     p.fill("#rd-popover textarea", text)
     p.route("**/_/comment", lambda route: held.append(route))
     p.keyboard.press("Control+Enter")
@@ -146,7 +146,7 @@ def send_held(tab, form, text):
 @pytest.mark.parametrize("form", ["reply", "edit"])
 def test_a_reply_or_edit_whose_send_fails_after_escape_or_a_click_outside_comes_back_with_its_text(thread, form, close):
     p = thread.page
-    p.click(f"#rd-popover button[data-a={form}]")
+    open_form(p, form)
     p.fill("#rd-popover textarea", "words sent while closing")
     send_closed_and_failed(thread, close)
     assert p.is_visible("#rd-popover textarea"), "the form with the text is not on the page"
@@ -180,7 +180,7 @@ def test_escape_or_a_click_outside_during_a_reply_or_edits_send_closes_the_popov
 def failed_send(tab, form, text):
     """A reply or an edit sent while the hub is gone: it fails and the form comes back with its text."""
     p = tab.page
-    p.click(f"#rd-popover button[data-a={form}]")
+    open_form(p, form)
     p.fill("#rd-popover textarea", text)
     tab.site.kill()
     p.click("#rd-popover button[data-f=ok]")
@@ -212,11 +212,11 @@ def test_a_reply_or_edit_whose_send_failed_is_still_there_after_the_page_is_clos
 @pytest.mark.parametrize("form", ["reply", "edit"])
 def test_cancelling_a_reply_or_edit_whose_send_failed_clears_what_it_kept(thread, form):
     failed_send(thread, form, "words I gave up on")
-    thread.page.click("#rd-popover button[data-f=no]")
-    assert comment_store(thread) == ""
+    discard_unsent(thread.page)
+    until(lambda: comment_store(thread) == "", what="the discarded text to leave the store")
     reopen_thread(thread)
     thread.page.wait_for_timeout(300)
-    assert thread.page.query_selector("#rd-popover textarea") is None
+    assert not typed(thread.page)
 
 
 # A reply or an edit whose send failed came back only when its thread was opened, one entry of a thread at a
@@ -227,6 +227,19 @@ def test_cancelling_a_reply_or_edit_whose_send_failed_clears_what_it_kept(thread
 UNSENT = "#rd-unsent"
 UNSENT_LIST = "#rd-popover[data-unsent]"
 THREAD_OPEN = "#rd-popover:not([data-unsent]) .rd-msg"
+
+
+def discard_unsent(p, text=None):
+    """Give up a kept text the way the box now allows: put the form away (the text is kept), open the line's
+    list and press Discard on its entry holding `text` (the only one when it is None). A reply form has no Cancel any more."""
+    if p.query_selector("#rd-popover button[data-a=minimize]"):
+        p.click("#rd-popover button[data-a=minimize]")
+    p.click(UNSENT)
+    p.wait_for_selector(UNSENT_LIST, timeout=3000)
+    forms = p.locator(f"{UNSENT_LIST} .rd-form")
+    mine = [i for i in range(forms.count()) if text is None or forms.nth(i).locator("textarea").input_value() == text]
+    assert len(mine) == 1, f"{len(mine)} kept texts match {text!r}"
+    forms.nth(mine[0]).locator("button[data-f=no]").click()
 
 
 def unsent_list(p):
@@ -417,7 +430,7 @@ def test_a_send_taken_or_cancelled_on_one_page_leaves_the_kept_reply_of_a_send_s
         until(lambda: "words from page B" in thread.site.file.read_text(), what="B's reply in the file")
     else:
         fail_the_send(b, held_b)
-        b.click("#rd-popover button[data-f=no]")
+        discard_unsent(b, "words from page B")
     b.wait_for_timeout(500)
     assert "words from page A" in comment_store(thread), "the entry of A's send went with B's"
     held_a[0].fulfill(status=500, json={"ok": False, "error": "the hub broke off"})
@@ -524,7 +537,7 @@ def left_with(tab, context):
 def test_a_page_with_a_reply_or_edit_being_typed_asks_before_it_is_left(thread, context, form):
     # Only edits on screen asked. A reply or an edit being typed is in no
     # store until it is sent, so a closed tab or a reload threw it away without a word.
-    thread.page.click(f"#rd-popover button[data-a={form}]")
+    open_form(thread.page, form)
     thread.page.fill("#rd-popover textarea", "words I am still writing")
     assert left_with(thread, context) == (["beforeunload"], False)
 
@@ -780,7 +793,7 @@ def open_comment_form(tab, css, word):
 def test_a_kept_comment_is_not_put_in_the_form_of_another_passage(kept):
     open_comment_form(kept, P1, "apples")
     assert kept.page.input_value("#rd-popover textarea") == ""
-    kept.page.click("#rd-popover button[data-f=no]")
+    kept.page.click("#rd-popover button[data-a=minimize]")
     # The text of the other passage stays kept, and is offered when its own passage is commented again.
     key = comment_draft_key(kept.site)
     assert "about the pears" in kept.page.evaluate(f"localStorage.getItem({key!r})")
@@ -797,7 +810,8 @@ def test_cancelling_a_new_comment_whose_send_failed_clears_what_it_kept(tab):
     toasted(tab.page, "did not go out")
     key = comment_draft_key(tab.site)
     assert "never sent" in tab.page.evaluate(f"localStorage.getItem({key!r})")
-    tab.page.click("#rd-popover button[data-f=no]")
+    discard_unsent(tab.page)
+    until(lambda: tab.page.evaluate(f"localStorage.getItem({key!r})") is None, what="the discarded text to leave the store")
     assert tab.page.evaluate(f"localStorage.getItem({key!r})") is None
 
 
@@ -2256,7 +2270,7 @@ BEING_SENT = "Your comment is being sent"
 def two_threads(thread):
     """`thread` plus a second comment on 'pears'; the page reloaded and the first thread open."""
     select(thread.page, at(P2, "pears"), at(P2, "pears", None))
-    thread.page.click("#rd-comment-btn")
+    open_box(thread.page)
     thread.page.fill("#rd-popover textarea", "Why pears?")
     thread.page.click("#rd-popover button[data-f=ok]")
     until(lambda: len(rdc.parse(thread.site.file.read_text()).comments) == 2, what="both comments in the file")
@@ -2364,7 +2378,7 @@ def test_a_thread_that_was_left_while_its_reply_is_out_shows_no_second_form_and_
     p.locator(".rd-badge").first.dispatch_event("click")
     until(lambda: "Why apples?" in p.inner_text("#rd-popover"), what="the first thread again")
     p.wait_for_timeout(300)
-    assert p.locator("#rd-popover textarea").count() == 0, "the reply that is out was offered as a second form"
+    assert not typed(p), "the reply that is out was offered as a second form"
     assert not p.is_visible("#rd-popover .rd-actions"), "the thread shows its buttons under a send that is out"
     held[0].abort()
     p.unroute("**/_/comment")
@@ -2385,7 +2399,7 @@ def test_a_thread_says_that_its_reply_or_edit_is_being_sent_until_the_answer_als
     assert says in p.inner_text("#rd-popover")
     held[0].continue_()
     p.unroute("**/_/comment")
-    until(lambda: p.is_visible("#rd-popover button[data-a=reply]"), what="the thread's buttons")
+    until(lambda: p.is_visible("#rd-popover textarea"), what="the thread's field")
     assert says not in p.inner_text("#rd-popover")
     assert "words that go through" in p.inner_text("#rd-popover")
 
@@ -2551,7 +2565,7 @@ def test_a_reply_whose_send_never_answers_comes_back_after_30_seconds_with_the_t
     assert p.input_value("#rd-popover textarea") == "a reply that is never answered"
     p.unroute("**/_/comment")
     p.click("#rd-popover button[data-f=no]")
-    assert p.is_visible("#rd-popover button[data-a=reply]"), "the thread's buttons did not come back"
+    assert p.is_visible("#rd-popover textarea"), "the thread's field did not come back"
     assert held
 
 
@@ -2598,10 +2612,10 @@ def test_a_reply_given_up_that_the_hub_took_after_all_goes_from_the_page_and_the
     given_up(thread, slow_hub, "reply")
     slow_hub.release()
     toasted(p, TAKEN)
-    until(lambda: p.locator("#rd-popover textarea").count() == 0, what="the form to go")
+    until(lambda: not typed(p), what="the form to go")
     assert p.inner_text("#rd-popover").count(SLOW) == 1
     assert SLOW not in comment_store(thread)
-    assert p.is_visible("#rd-popover button[data-a=reply]"), "the thread's buttons did not come back"
+    assert p.is_visible("#rd-popover textarea"), "the thread's field did not come back"
 
 
 def test_a_new_comment_given_up_that_the_hub_took_after_all_is_not_kept_on_the_page_that_comes_back(thread, slow_hub):
@@ -2613,7 +2627,7 @@ def test_a_new_comment_given_up_that_the_hub_took_after_all_is_not_kept_on_the_p
     p.wait_for_selector("#rd-menu-btn", state="attached")
     until(lambda: p.locator(".rd-badge").count() == 2, what="the new comment's badge")
     p.wait_for_timeout(300)
-    assert p.locator("#rd-popover textarea").count() == 0, "the text came back as a kept comment"
+    assert not typed(p), "the text came back as a kept comment"
     assert SLOW not in comment_store(thread)
 
 
@@ -2642,7 +2656,7 @@ def test_a_reply_kept_after_the_hub_took_it_is_cleared_when_the_page_loads(threa
     until(lambda: MISSED not in comment_store(thread), what="the kept reply to leave localStorage")
     thread.page.click(".rd-badge")
     thread.page.wait_for_selector("#rd-popover textarea")
-    assert thread.page.locator("#rd-popover textarea").count() == 0, "the reply came back as a kept form"
+    assert not typed(thread.page), "the reply came back as a kept form"
 
 
 @pytest.mark.parametrize("same_birth", [True, False])
@@ -2658,7 +2672,7 @@ def test_a_kept_reply_is_offered_only_to_the_thread_of_its_own_birth_not_to_one_
     thread.page.click(".rd-badge")
     thread.page.wait_for_selector("#rd-popover .rd-scroll")
     thread.page.wait_for_timeout(500)
-    assert (thread.page.locator("#rd-popover textarea").count() == 1) is same_birth
+    assert bool(typed(thread.page)) is same_birth
 
 
 def test_a_thread_with_a_kept_edit_and_a_kept_reply_draws_the_first_of_the_store_and_says_the_other_is_kept(thread):
@@ -2690,7 +2704,7 @@ def test_a_new_comment_kept_after_the_hub_took_it_is_cleared_when_the_page_loads
     tab.page.wait_for_selector("#rd-menu-btn", state="attached")
     until(lambda: MISSED not in comment_store(tab), what="the kept comment to leave localStorage")
     tab.page.wait_for_timeout(300)
-    assert tab.page.locator("#rd-popover textarea").count() == 0, "the text came back as a kept comment"
+    assert not typed(tab.page), "the text came back as a kept comment"
 
 
 @pytest.mark.parametrize("form", ["reply", "new comment"])
@@ -2701,7 +2715,7 @@ def test_a_send_given_up_and_sent_again_while_the_hub_still_writes_it_is_written
     p.keyboard.press("Control+Enter")
     p.wait_for_timeout(300)                     # the second request waits in the hub behind the first
     slow_hub.release()
-    until(lambda: p.locator("#rd-popover textarea").count() == 0, what="the form to go")
+    until(lambda: not typed(p), what="the form to go")
     p.wait_for_timeout(300)
     assert f.read_text().count(SLOW) == 1
     assert SLOW not in comment_store(thread)
@@ -2770,7 +2784,7 @@ def test_a_send_again_that_fails_to_reach_the_hub_does_not_hide_that_the_send_be
     p.unroute("**/_/comment")
     slow_hub.release()
     toasted(p, TAKEN)
-    until(lambda: p.locator("#rd-popover textarea").count() == 0, what="the form to go")
+    until(lambda: not typed(p), what="the form to go")
     assert SLOW not in comment_store(thread)
 
 
@@ -3140,7 +3154,7 @@ def test_a_thread_deleted_elsewhere_closes_its_popover_when_nothing_is_typed(thr
 @pytest.mark.parametrize("form", ["reply", "edit"])
 def test_the_form_of_a_deleted_thread_cannot_be_sent_only_copied_or_cancelled(thread, form):
     p, sent = thread.page, []
-    p.click(f"#rd-popover button[data-a={form}]")
+    open_form(p, form)
     p.fill("#rd-popover textarea", "words for a gone thread")
     delete_the_thread(thread)
     p.wait_for_selector("#rd-popover .rd-hold:has-text('deleted')")
@@ -3333,7 +3347,7 @@ def test_the_threads_buttons_come_back_when_the_send_is_taken(thread):
     f = thread.site.file
     until(lambda: "a reply that goes through" in f.read_text(), what="the reply in the file")
     until(lambda: p.locator("#rd-popover .rd-form").count() == 0, what="the sent form to go")
-    assert p.is_visible("#rd-popover button[data-a=reply]"), "the thread's buttons did not come back"
+    assert p.is_visible("#rd-popover textarea"), "the thread's field did not come back"
     until(lambda: "a reply that goes through" in p.inner_text("#rd-popover"), what="the reply in the thread")
 
 
@@ -3351,8 +3365,8 @@ def test_a_kept_reply_or_edit_is_not_put_into_a_new_comment_that_got_the_id_of_a
     assert new.id == old.id
     p.wait_for_selector("#rd-popover .rd-msg")
     p.wait_for_timeout(300)
-    assert p.query_selector("#rd-popover textarea") is None
-    p.click(f"#rd-popover button[data-a={form}]")
+    assert not typed(p)
+    open_form(p, form)
     assert p.input_value("#rd-popover textarea") == then
 
 
@@ -3366,7 +3380,7 @@ def test_a_kept_comment_is_not_put_into_the_form_of_the_paragraph_that_took_its_
     kept.page.wait_for_selector(KEPT)
     open_comment_form(kept, P2, "apples")
     assert kept.page.input_value("#rd-popover textarea") == ""
-    kept.page.click("#rd-popover button[data-f=no]")
+    kept.page.click("#rd-popover button[data-a=minimize]")
     assert "about the pears" in comment_store(kept)
     open_comment_form(kept, "main p:nth-of-type(4)", "ripe pears")
     assert kept.page.input_value("#rd-popover textarea") == "about the pears"
@@ -3395,7 +3409,7 @@ def test_a_kept_comment_is_not_put_into_the_form_of_another_paragraph_that_opens
     kept.page.wait_for_selector(KEPT)
     open_comment_form(kept, "main p:nth-of-type(4)", "plums")
     assert kept.page.input_value("#rd-popover textarea") == ""
-    kept.page.click("#rd-popover button[data-f=no]")
+    kept.page.click("#rd-popover button[data-a=minimize]")
     assert "about the pears" in comment_store(kept)
     open_comment_form(kept, P2, "ripe pears")
     assert kept.page.input_value("#rd-popover textarea") == "about the pears"
@@ -4000,7 +4014,7 @@ def test_a_comment_reply_edit_status_or_deletion_the_hub_cannot_be_reached_for_s
         open_comment_form(thread, P2, "pears")
         p.fill("#rd-popover textarea", "never sent")
     elif what in ("reply", "edit"):
-        p.click(f"#rd-popover button[data-a={what}]")
+        open_form(p, what)
         p.fill("#rd-popover textarea", "never sent")
     p.route("**/_/comment", lambda route: route.abort())
     p.click("#rd-popover button[data-f=ok]" if what in ("reply", "edit", "comment") else f"#rd-popover button[data-a={what}]")
@@ -4095,7 +4109,7 @@ def test_a_form_that_a_failed_send_brought_back_and_was_emptied_and_closed_with_
     p.click(".rd-badge")
     p.wait_for_selector("#rd-popover .rd-scroll")
     p.wait_for_timeout(300)
-    assert p.locator("#rd-popover textarea").count() == 0, "the emptied form is offered again"
+    assert not typed(p), "the emptied form is offered again"
     assert "sent words" not in comment_store(thread), "the emptied form's text is still in the store"
 
 
@@ -4130,7 +4144,7 @@ def test_a_reply_the_hub_took_and_told_of_before_the_page_gave_up_goes_from_the_
     until(lambda: SLOW not in comment_store(thread), what="the page to hear the event of the write")
     p.clock.fast_forward(30_500)
     toasted(p, TAKEN)
-    until(lambda: p.locator("#rd-popover textarea").count() == 0, what="the form to go")
+    until(lambda: not typed(p), what="the form to go")
     try:
         until(lambda: p.inner_text("#rd-popover").count(SLOW) == 1, what="the reply in its thread")
     except AssertionError as e:
@@ -4140,7 +4154,7 @@ def test_a_reply_the_hub_took_and_told_of_before_the_page_gave_up_goes_from_the_
                              f"{'holds' if SLOW in thread.site.file.read_text() else 'lacks'} it; the page keeps "
                              f"{comment_store(thread)!r}") from None
     assert SLOW not in comment_store(thread)
-    assert p.is_visible("#rd-popover button[data-a=reply]"), "the thread's buttons did not come back"
+    assert p.is_visible("#rd-popover textarea"), "the thread's field did not come back"
     answer_after_event.release()
 
 
@@ -4250,7 +4264,7 @@ def test_a_page_that_opens_a_thread_while_a_send_of_it_is_out_on_another_page_do
     b.click(".rd-badge")
     b.wait_for_selector("#rd-popover textarea")
     b.wait_for_timeout(500)
-    assert b.locator("#rd-popover textarea").count() == 0, "the text of a send that is out was put into a form"
+    assert not typed(b), "the text of a send that is out was put into a form"
     held[0].fulfill(status=500, json={"ok": False, "error": "the hub broke off"})
     a.unroute("**/_/comment")
     assert unsent_line(b, timeout=3000) == "1 reply not sent · Show"
@@ -4291,15 +4305,15 @@ def test_discard_in_the_unsent_list_takes_the_text_typed_into_a_returned_form_si
     until(lambda: stored_bodies(thread) == [], what="the entry to go")
 
 
-# A form never sent writes nothing, so its Cancel clears nothing of another send's.
+# A form never sent writes nothing, so giving it up (Discard in the not-sent list) clears nothing of another send's.
 @pytest.mark.parametrize("form", ["reply", "edit"])
 def test_cancel_of_a_form_that_was_never_sent_leaves_the_kept_text_of_a_send_out_on_another_page(thread, context, form):
     a, b = thread.page, second_page(thread, context)
-    a.click(f"#rd-popover button[data-a={form}]")
+    open_form(a, form)
     a.fill("#rd-popover textarea", "typed, never sent")
     b.click(".rd-badge")
     held = send_held(SimpleNamespace(page=b, site=thread.site), form, "words from page B")
-    a.click("#rd-popover button[data-f=no]")
+    discard_unsent(a, "typed, never sent")
     b.wait_for_timeout(500)
     assert stored_bodies(thread) == ["words from page B"]
     held[0].fulfill(status=500, json={"ok": False, "error": "the hub broke off"})
@@ -4456,7 +4470,7 @@ def test_a_kept_comment_goes_to_the_paragraph_that_ends_with_its_words_not_to_on
     p.wait_for_selector(PINNED)
     open_comment_form(tab, P1, "apples")
     assert p.input_value("#rd-popover textarea") == "", "the paragraph that took over the opening words got the comment"
-    p.click("#rd-popover button[data-f=no]")
+    p.click("#rd-popover button[data-a=minimize]")
     open_comment_form(tab, P2, "pears")
     assert p.input_value("#rd-popover textarea") == "about the pears"
 

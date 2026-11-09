@@ -4,7 +4,9 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Claimed by:** Kenji 2026-11-09 21:31
+
+**Status:** in-progress
 
 - [ ] Vérifié si le hub accepte d'être joint par un lien Tailscale temporaire ; sinon, simulation mobile montrée à la place
 - [ ] Toucher la barre ouvre la boîte avec le curseur dans le champ et le clavier levé

@@ -587,3 +587,48 @@ def test_a_reply_on_a_sheaf_no_page_has_open_notes_the_target_under_the_sheafs_n
     assert DOC not in browser.hub.entries
     ok(browser, "reply", doc=DOC, id="c1", text="Done.", token=token)
     assert at == [True]
+
+
+# ── more cases of the target ─────────────────────────────────────────────────
+
+def test_a_second_members_write_is_kept_beside_the_first_members(front, browser, talk, work):
+    bea = Tokens().add("bea-chatgpt", client="ChatGPT")
+    cal = Tokens().add("cal-claude", client="Claude")
+    front.hub.proxy = members(work, work, bea=["bea-chatgpt"], cal=["cal-claude"])      # one page in both members' roots
+    ok(browser, "reply", doc=DOC, id="c1", text="Done.", token=bea)
+    ok(browser, "reply", doc=DOC, id="c1", text="Done too.", token=cal)
+    assert stored(browser)["targets"] == {BEA: agent("bea-chatgpt", row("bea-chatgpt").id),
+                                          CAL: agent("cal-claude", row("cal-claude").id)}
+    assert stored(browser).get("target") is None
+
+
+def test_an_update_that_changes_no_text_does_not_make_its_agent_the_target(browser, talk):
+    first = Tokens().add("ada-chatgpt", client="ChatGPT", write=True)
+    second = Tokens().add("ada-claude", client="Claude", write=True)
+    ok(browser, "reply", doc=DOC, id="c1", text="Done.", token=first)
+    read = ok(browser, "read", doc=DOC, token=second)
+    got = ok(browser, "update", doc=DOC, text=read["text"], expected_hash=read["hash"], token=second)
+    assert got["changed"] is False
+    assert stored(browser)["target"]["token"] == "ada-chatgpt"
+
+
+def test_a_resolve_of_a_thread_that_is_resolved_already_does_not_make_its_agent_the_target(browser, talk):
+    first = Tokens().add("ada-chatgpt", client="ChatGPT")
+    second = Tokens().add("ada-claude", client="Claude")
+    ok(browser, "resolve", doc=DOC, id="c1", token=first)
+    ok(browser, "resolve", doc=DOC, id="c1", token=second)
+    assert stored(browser)["target"]["token"] == "ada-chatgpt"
+
+
+def test_a_members_agent_token_made_again_under_its_name_is_not_the_members_target(front, browser, talk, work):
+    token = Tokens().add("bea-chatgpt", client="ChatGPT")
+    front.hub.proxy = members(work, bea=["bea-chatgpt"])
+    ok(browser, "reply", doc=DOC, id="c1", text="Done.", token=token)
+    old = row("bea-chatgpt").id
+    Tokens().revoke("bea-chatgpt")
+    Tokens().add("bea-chatgpt", client="ChatGPT")                 # the config still lists the name
+    assert row("bea-chatgpt").id != old
+    got = front.get(f"/_/doc?doc={DOC}").json()
+    assert got["lines"]["tell"] == REVOKED.format(agent="bea-chatgpt") and got["capabilities"] == []
+    assert got["target"]["revoked"] is True
+    assert stored(browser)["targets"][BEA]["id"] == old

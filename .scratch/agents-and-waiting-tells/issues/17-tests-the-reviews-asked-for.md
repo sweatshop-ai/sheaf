@@ -9,11 +9,11 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done-in-PR (sweatshop-ai/sheaf#234)
 
 **Size:** one session; if the Playwright test is slow or flaky, drop it to its own ticket and say so
 
-- [ ] (9) rename the test to what it checks, or add the check it promises (the old row reader refuses a row without `display`)
-- [ ] (10) a hub started with two agent tokens that sign one name stops with a `proxy-config` row, in loopback and with `[proxy]`; a hub started with a good table starts
-- [ ] (21) five tests, one per case above, each failing when the code under it is broken (mutate once by hand, say so in the PR)
-- [ ] Each test is under 5 s (main-only slow-test check)
+- [x] (9) renamed to `test_an_agents_row_stores_no_display_and_verify_gives_back_its_client`, docstring says it does not run the previous reader (`tests/test_agent_tokens.py:119`). Not a guard of the old reader: that code is gone.
+- [x] (10) three tests through a real `python -m sheafmd hub` (`tests/test_proxy_start.py`, end of file): two agent tokens signing one name stop the start in loopback and with `[proxy]`, and a good table starts. The row's kind is `token-names`, not `proxy-config` (`_proxy_refused` labels a `TokenNamesError` that way, `hub/server.py:416`); the tests assert `token-names`. Guard, not red first: the check already worked; mutation below.
+- [x] (21) five tests, all guards (green on main, each red under one hand mutation, run once each): second member beside the first (`targets = {}` in `_set`), `update` with unchanged text (`if before != text` -> `if True` in `mcp.py`), `resolve` of a resolved thread (status check -> `if True`), same-name re-made token for a member (`and r.id == raw.get("id")` removed in `targets.live`), Change list after a key rotation, Playwright (`rotate` that empties `docs`). The start check test (10) was mutated by removing `check_start_names` in `_run`: red.
+- [x] Each test is under 5 s (slowest new one 0.5 s; `--durations` run) (main-only slow-test check)

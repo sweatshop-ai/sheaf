@@ -116,11 +116,11 @@ def test_a_row_with_neither_display_nor_client_loads_and_is_listed_as_invalid(br
     assert row.name == "bare" and row.display is None and row.client is None and row.invalid
 
 
-def test_an_agents_row_has_no_display_which_the_previous_reader_requires_so_it_refuses_it():
-    """The old reader wants a `display` of every row; an agent's has none, so it answers 401, never a wrong name."""
+def test_an_agents_row_stores_no_display_and_verify_gives_back_its_client():
+    """The previous reader wanted a `display` in every row, so it turned an agent's row away. This test does not run
+    that reader; it checks the row has no `display` and that `verify` still knows the client."""
     token = Tokens().add("t", client="ChatGPT")
-    row = stored()[0]
-    assert "display" not in row                                 # what the previous `_row_addable` demands
+    assert "display" not in stored()[0]
     assert Tokens().verify(token).client == "ChatGPT"
 
 

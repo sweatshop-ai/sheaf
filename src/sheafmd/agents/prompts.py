@@ -7,6 +7,8 @@ as content with its author, never filtered (9.8).
 """
 from ..links import RULE
 
+ASK_RETIRED_HEAD = "Ask was retired"  # the one place the retired-Ask line is worded (SPEC 11.2)
+
 
 def _thread(c) -> str:
     return "\n".join([f"{c.by} ({c.at}): {c.body}"]

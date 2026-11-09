@@ -576,6 +576,33 @@ def test_a_comment_carrying_ask_is_refused_and_writes_nothing(browser, plan, op)
     assert plan.read_bytes() == before
 
 
+# `null` counts as sent: the key is present, and the line says Ask is gone, not that its value was wrong.
+@pytest.mark.parametrize("op", ["add", "reply"])
+@pytest.mark.parametrize("value", [False, 0, "", None, True], ids=["false", "zero", "empty", "null_counts_as_sent", "true"])
+def test_a_comment_with_any_ask_value_is_refused_and_writes_nothing(browser, plan, op, value):
+    add(browser)
+    before = plan.read_bytes()
+    text = before.decode("utf-8")
+    blk, s, e = rdc.find_quote(text, "Second paragraph")
+    r = browser.post("/_/comment", {"doc": DOC, "op": op, "id": "c1", "hash": md_hash(text), "block": blk,
+                                    "start": s, "end": e, "quote": "Second paragraph", "body": "Why?",
+                                    "ask": value})
+    assert r.status == 400 and r.json()["error"] == "Ask was retired: use Tell, or reply."
+    assert plan.read_bytes() == before
+
+
+def test_the_retired_ask_line_exists_once():
+    """The words "Ask was retired" are written in one place in src; the hub and the CLI both build on that one."""
+    from pathlib import Path
+    import sheafmd
+    from sheafmd import deliver
+    from sheafmd.agents import prompts
+    from sheafmd.hub import handler
+    assert handler.ASK_RETIRED.startswith(prompts.ASK_RETIRED_HEAD) and deliver.ASK_DROP_RETIRED.count(prompts.ASK_RETIRED_HEAD) == 1
+    holders = [f.name for f in Path(sheafmd.__file__).parent.rglob("*.py") if "Ask was retired" in f.read_text(encoding="utf-8")]
+    assert holders == ["prompts.py"]
+
+
 # ── tell, cancel: no agent in this build ─────────────────────────────────────
 
 def test_tell_is_409_without_an_agent(browser, plan):

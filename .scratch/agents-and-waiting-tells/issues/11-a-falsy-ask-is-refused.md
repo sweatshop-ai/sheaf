@@ -6,11 +6,11 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done-in-PR
 
 **Size:** small, well under one session
 
-- [ ] Test first: `ask` set to `false`, `0`, `""`, `null` and `true` on add and on reply each answer 400 with the retired line and write nothing
-- [ ] A body with no `ask` key is accepted as today
-- [ ] Decide in the PR whether `null` counts as sent (key present) and say so in the test name
-- [ ] `deliver.py:142` and `handler.py:77` share one message (one constant, imported); the text of both answers is unchanged
+- [x] Test first: `ask` set to `false`, `0`, `""`, `null` and `true` on add and on reply each answer 400 with the retired line and write nothing (evidence: tests/test_hub_handler.py::test_a_comment_with_any_ask_value_is_refused_and_writes_nothing, 10 cases; red before the fix for false, 0, "", null on both ops)
+- [x] A body with no `ask` key is accepted as today (evidence: the existing add/reply tests in tests/test_hub_handler.py, tests/test_hub_work.py pass unchanged: 529 passed across the 5 touched files)
+- [x] Decide in the PR whether `null` counts as sent (key present) and say so in the test name (evidence: case id `null_counts_as_sent`; handler.py `"ask" in b`)
+- [x] `deliver.py:142` and `handler.py:77` share one message (one constant, imported); the text of both answers is unchanged (evidence: tests/test_hub_handler.py::test_the_retired_ask_line_exists_once; test_agents_envelope.py and the old handler tests still match the old text))

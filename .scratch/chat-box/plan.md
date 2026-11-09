@@ -20,13 +20,13 @@ La boîte reprend donc leur composition : grand cadre arrondi, texte en haut, ro
 |---|---|
 | Rôle de la boîte | Une seule action : parler à l'agent |
 | Envoi | Entrée envoie à l'agent, Maj+Entrée va à la ligne, la flèche envoie aussi |
-| Sans agent connecté | Le message reste un commentaire, une ligne l'explique |
+| Sans agent connecté | Le message reste un commentaire ; aucune ligne sous le champ (le menu dit pourquoi) |
 | Forme | Étroite et verticale, sur desktop comme sur mobile ; bulles, mes messages à droite |
 | Défilement | Le fil s'ouvre sur le dernier message et défile vers le haut |
 | Curseur | Déjà dans le champ à l'ouverture, sur desktop et sur téléphone |
 | Sélection sur desktop | En mode Comment, la boîte s'ouvre directement |
-| Sélection sur téléphone | Barre en forme de champ en bas, qui cite les mots sélectionnés, bordure plus marquée et courte entrée ; un toucher ; le menu Copier reste libre |
-| Copier | Avec le champ vide, Ctrl+C copie le passage sélectionné |
+| Sélection sur téléphone | La sélection ouvre directement la boîte, le curseur dans le champ (au lâcher du doigt, ou après 600 ms) ; un toucher à côté d'une sélection n'ouvre rien ; la barre ne reste que pour une sélection refusée |
+| Copier | Avec le champ vide, Ctrl+C copie le passage sélectionné ; sur téléphone la boîte s'ouvre à la place du menu Copier, la citation de la boîte reste |
 | Modes | Un seul bouton à bascule toujours visible : « Edit (E) » en mode Comment, « Save (Ctrl+S) » en mode Edit (« Edit » et « Save » au toucher), même taille ; Save enregistre puis revient en mode Comment, et reste en Edit si l'enregistrement échoue ; en Edit, une sélection reste une sélection |
 
 ## Ce que font les boutons du bandeau et du menu

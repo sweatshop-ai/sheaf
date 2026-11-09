@@ -27,6 +27,8 @@ from .agents.base import DeliveryCancelled, DeliveryError, Target
 from .agents.claude_code import ClaudeCodeAdapter, _own_socket, config_dir_of
 from .hub.jobs import Job
 
+ASK_DROP_RETIRED = f"sheaf: {prompts.ASK_RETIRED_HEAD}: a drop of kind ask is not delivered"
+
 EXIT_OK, EXIT_FAILED, EXIT_USAGE = 0, 1, 2
 POLL_S = 0.2
 # `--from` is written into the envelope's opening tag: a quote, an angle bracket or a control character in
@@ -139,7 +141,7 @@ def cmd_deliver(argv: list[str]) -> int:
         return EXIT_USAGE
     drop = _parse_drop()
     if drop is not None and drop.get("kind") == "ask":
-        _err("sheaf: Ask was retired: a drop of kind ask is not delivered")
+        _err(ASK_DROP_RETIRED)
         return EXIT_USAGE
     text = _tell_text(drop) if drop is not None else None
     if text is None:

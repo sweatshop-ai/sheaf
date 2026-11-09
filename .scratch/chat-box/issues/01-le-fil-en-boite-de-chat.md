@@ -6,6 +6,8 @@ Le code est déjà sur la branche `cleo/chat-box` ; ce ticket finit le travail e
 
 **Blocked by:** None (can start immediately)
 
+**Claimed by:** Suraya 2026-11-09 16:18
+
 **Status:** in-progress
 
 - [ ] Les anciens tests du formulaire décrivent le nouveau contrat : un champ vide n'est pas « en train d'écrire », un texte tapé est gardé au lieu de bloquer la fermeture, il n'y a plus de Cancel sauf pour Edit

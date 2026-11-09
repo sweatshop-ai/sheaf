@@ -1649,6 +1649,8 @@ var create = function (ROOT, CFG, opts) {
   // What iOS reads to offer AutoFill (key, card, location) over the foot of a field: a text field that refuses it, with
   // no name or id of a credential, address or card, and the password managers' own opt-outs.
   var NO_FILL = ' autocomplete="off" spellcheck="true" data-lpignore="true" data-1p-ignore data-form-type="other"';
+  var WRITE = 'Write a message…';
+  var ARROW = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M8 14a.75.75 0 0 1-.75-.75V4.56L4.03 7.78a.75.75 0 0 1-1.06-1.06l4.5-4.5a.75.75 0 0 1 1.06 0l4.5 4.5a.75.75 0 0 1-1.06 1.06L8.75 4.56v8.69A.75.75 0 0 1 8 14Z"/></svg>';
   // With the keyboard up, a popover with a field to write in is docked, fixed, to the head of what can be seen, its
   // quote, then its buttons, then the field, so that nothing of it is where the keyboard and its bars are drawn.
   function dock() {
@@ -1736,10 +1738,10 @@ var create = function (ROOT, CFG, opts) {
     var h = '<div class="rd-quote">“' + esc(c.quote) + '”' +
             (c.orphan ? '<span class="rd-tag">text deleted</span>' : '') +
             (c.status === 'resolved' ? '<span class="rd-tag">resolved</span>' : '') + '</div>' +
-            '<div class="rd-msg">' + whoHtml({ by: c.by, role: null }) + '<span class="rd-when">' +
+            '<div class="rd-msg' + (mine(c) ? ' rd-mine' : '') + '">' + whoHtml({ by: c.by, role: null }) + '<span class="rd-when">' +
             esc(c.at) + '</span><div class="rd-text">' + mdLite(c.body) + '</div></div>';
     (c.replies || []).forEach(function (r) {
-      h += '<div class="rd-msg rd-reply">' + whoHtml(r) + '<span class="rd-when">' +
+      h += '<div class="rd-msg rd-reply' + (mine(r) ? ' rd-mine' : '') + '">' + whoHtml(r) + '<span class="rd-when">' +
            esc(r.at) + '</span><div class="rd-text">' + mdLite(r.text) + '</div></div>';
     });
     return h;
@@ -1923,9 +1925,9 @@ var create = function (ROOT, CFG, opts) {
   }
   // The Tell entry of a form: a working button when the agent can be told, a disabled one carrying
   // its line when it cannot (textForm shows the line).
-  function agentButtons(tellLabel) {
-    return [canTell ? { k: 'tell', label: tellLabel, cls: 'rd-tell', tip: tellTip() }
-                    : { off: lineOf('tell'), label: tellLabel, cls: 'rd-tell' }];
+  function sendButtons(label) {
+    return canTell ? [{ k: 'tell', label: 'Tell ' + AGENT, cls: 'rd-tell', tip: tellTip() }]
+                   : [{ k: 'ok', label: label }, { off: lineOf('tell') }];
   }
   // The line under the disabled button. A job still running keeps its own busy button, so it
   // needs no line.
@@ -1933,9 +1935,6 @@ var create = function (ROOT, CFG, opts) {
     var seen = [];
     if (!canTell && !skipTell) seen.push(lineOf('tell'));
     return seen.map(function (l) { return '<div class="rd-agent-line">' + esc(l) + '</div>'; }).join('');
-  }
-  function offButton(what, label) {
-    return '<button class="rd-alt rd-na rd-' + what + '" disabled title="' + esc(lineOf(what)) + '">' + esc(label) + '</button>';
   }
   var DOTS = '<span class="rd-dots" aria-hidden="true"><i></i><i></i><i></i></span>';
   // A Tell that waits for an agent: said in the thread, with no spinner and no clock, across a reload and a restart.
@@ -1966,29 +1965,32 @@ var create = function (ROOT, CFG, opts) {
     if (canSave) {
       var acts = el('div', { 'class': 'rd-actions' });
       acts.hidden = sentOf(id);      // a reply or an edit of this thread is out: its buttons wait for the answer
-      acts.innerHTML = '<button data-a="reply">Reply</button>' +
+      // Reply is drawn as the field of a chat; pressed, the form takes its place.
+      acts.innerHTML = '<button class="rd-compose" data-a="reply">' + WRITE + '</button>' +
         (telling[id] ? busy('tell', AGENT_UC + ' is working')
          : waits[id] ? '<button class="rd-alt rd-busy rd-tell" data-a="cancel-tell" title="Click to cancel"><span class="rd-on">' +
                        esc(waits[id].to) + ' is waiting</span><span class="rd-off">Cancel</span></button>'
-         : canTell ? '<button class="rd-alt rd-tell" data-a="tell" title="' + esc(tellTip()) + '">Tell ' + esc(AGENT) + '</button>'
-         : offButton('tell', 'Tell ' + AGENT)) +
-        '<button class="rd-alt" data-a="status">' + (c.status === 'open' ? 'Resolve' : 'Reopen') + '</button>' +
-        (mine(c) ? '<button class="rd-alt" data-a="edit">Edit</button><button class="rd-alt" data-a="delete">Delete</button>' : '') +
-        offLines(telling[id] || waits[id]);
+         : '') + offLines(telling[id] || waits[id]);
+      // Talking to the agent is what the box is for; the rest stands small at its head, out of the way.
+      var head = el('div', { 'class': 'rd-head' });
+      head.hidden = sentOf(id);
+      head.innerHTML = '<button data-a="status">' + (c.status === 'open' ? 'Resolve' : 'Reopen') + '</button>' +
+        (mine(c) ? '<details class="rd-more"><summary aria-label="More" title="More">\u22EF</summary><div>' +
+                   '<button data-a="edit">Edit</button><button data-a="delete">Delete</button></div></details>' : '');
+      pop.appendChild(head);
       pop.appendChild(acts);
-      acts.addEventListener('click', function (e) {
+      var act = function (e) {
         var t = e.target.closest ? e.target.closest('button') : null;
         var a = t && t.getAttribute('data-a');
         if (!a) return;
         if (a === 'cancel-tell') { cancel(id); return; }
-        // On a box sheaf Tell carries a text for James: it opens the reply form, which sends it (9.12).
-        if (a === 'tell' && toBox) { replyForm(id); return; }
-        if (a === 'tell') { tell(id); return; }
         if (a === 'status') op({ op: 'status', id: id, status: c.status === 'open' ? 'resolved' : 'open' });
         else if (a === 'delete') op({ op: 'delete', id: id });
         else if (a === 'edit') editForm(id);
         else replyForm(id);
-      });
+      };
+      head.addEventListener('click', act);
+      acts.addEventListener('click', act);
     }
     if (forms.length) {
       forms.forEach(function (x) { pop.appendChild(x); });
@@ -2020,16 +2022,13 @@ var create = function (ROOT, CFG, opts) {
   }
   function replyForm(id, text) {
     var c = byId[id];
-    textForm(pop, text || '', [{ k: 'ok', label: 'Send reply' },
-                               { k: 'res', label: 'Send and resolve' }].concat(
-                               agentButtons('Send and tell ' + AGENT)),
-             function (t, k, rid, line) {
+    textForm(pop, text || '', sendButtons('Send reply'), function (t, k, rid, line) {
       // The Tell goes with the reply, as it does with a new comment: the hub starts
       // it when it takes it. A request of its own after the answer would race the reload
       // that op() may be starting, and be lost with the page. Taken before (`again`), the reply
       // started it then, and the page hears of it by its events.
       threadKeep(c, 'reply', t, rid, line, Date.now());
-      return op({ op: 'reply', id: id, body: t, resolve: k === 'res', tell: k === 'tell', rid: rid }).then(function (j) {
+      return op({ op: 'reply', id: id, body: t, tell: k === 'tell', rid: rid }).then(function (j) {
         if (j) threadKeep(c, 'reply', null, rid);
         if (k === 'tell') { started(id, k, j); touched(id); }
         if (j && j.tellError) say(j.tellError, true);
@@ -2125,15 +2124,6 @@ var create = function (ROOT, CFG, opts) {
       say(notSent(e, 'Cancel'), true);
     }
   }
-  async function tell(id) {
-    if (needClean()) return;
-    try {
-      await post('/_/tell', { id: id, hash: hash });   // the id names a thread of this text (SPEC 7.3)
-      if (CFG.agent && CFG.agent.kind === 'agent') waits[id] = waits[id] || { to: CFG.agent.label, state: 'queued' };
-      else telling[id] = true;
-      touched(id);
-    } catch (e) { say(notSent(e, 'Tell ' + AGENT), true); }
-  }
   // buttons: [{k, label}], the first is the primary one. done(text, k, rid) may return a promise;
   // it settles to null or false when nothing was sent, and the form comes back with its text.
   // cancelled() runs when the person cancels. `says` is the line its popover shows while its send is out.
@@ -2150,15 +2140,15 @@ var create = function (ROOT, CFG, opts) {
     var born = own !== null && byId[own] ? byId[own].at : null;       // its birth: next_id gives a deleted id to the next comment
     var offs = [];
     var f = el('div', { 'class': 'rd-form' },
-      '<textarea' + NO_FILL + '></textarea><div class="rd-actions">' +
+      '<textarea' + NO_FILL + ' placeholder="' + WRITE + '"></textarea><div class="rd-actions">' +
       buttons.map(function (b, i) {
         if (b.off) {
           if (offs.indexOf(b.off) < 0) offs.push(b.off);
-          return '<button class="rd-alt rd-na ' + (b.cls || '') + '" disabled title="' + esc(b.off) + '">' + esc(b.label) + '</button>';
+          return '';
         }
-        return '<button data-f="' + b.k + '" class="' + (i ? 'rd-alt ' : '') + (b.cls || '') + '"' +
-               (b.tip ? ' title="' + esc(b.tip) + '"' : '') + '>' + esc(b.label) + '</button>';
-      }).join('') + '<button class="rd-alt" data-f="no">Cancel</button>' +
+        return '<button data-f="' + b.k + '" class="' + (i ? 'rd-alt ' : 'rd-send ') + (b.cls || '') + '"' +
+               (b.tip || !i ? ' title="' + esc(b.tip || b.label) + '"' : '') + '>' + esc(b.label) + (i ? '' : ARROW) + '</button>';
+      }).join('') + '<button class="rd-alt rd-x" data-f="no" title="Cancel">Cancel</button>' +
       offs.map(function (l) { return '<div class="rd-agent-line">' + esc(l) + '</div>'; }).join('') + '</div>');
     f.kept = kept;
     host.appendChild(f);
@@ -2303,12 +2293,13 @@ var create = function (ROOT, CFG, opts) {
     if (mirror) ta.addEventListener('input', keep);
     // Cancel clears what the store keeps for the form before restore, which draws the thread's other kept text.
     f.addEventListener('click', function (e) {
-      var k = e.target.getAttribute && e.target.getAttribute('data-f');
+      var b = e.target.closest && e.target.closest('[data-f]'), k = b && b.getAttribute('data-f');
       if (k === 'no') { f.remove(); if (cancelled) cancelled(line); restore(); replace(); flushHold(); }
       else if (k) go(k);
     });
     ta.addEventListener('keydown', function (e) {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); go(buttons[0].k); }
+      // Enter sends, as in a chat; on a touch screen it stays a new line, the arrow sends there.
+      if (e.key === 'Enter' && !e.isComposing && (e.metaKey || e.ctrlKey || (!e.shiftKey && !COARSE.matches))) { e.preventDefault(); go(buttons[0].k); }
     });
   }
   main.addEventListener('click', function (e) {
@@ -2640,7 +2631,7 @@ var create = function (ROOT, CFG, opts) {
     // quote in another paragraph is another comment.
     var own = function (x) { return (d && x.quote === d.quote && x.at === d.at) || wrote.indexOf(x.rid) >= 0; };
     var mine = function (r) { return r.own === null && r.host === host; };    // this form's entry of `out`
-    textForm(pop, d || '', [{ k: 'ok', label: 'Comment' }].concat(agentButtons('Tell ' + AGENT)),
+    textForm(pop, d || '', sendButtons('Comment'),
              async function (text, k, rid) {
       if (needClean()) return false;
       wrote.push(rid);

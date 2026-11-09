@@ -148,7 +148,9 @@ def waiting_tell(tab, tmp_path, jump):
         write_config(f"[jump]\ncommand = {cmd}\n")
     tab.open()
     tab.page.click(".rd-badge")
-    tab.page.click("#rd-popover button[data-a=tell]")
+    tab.page.click("#rd-popover button[data-a=reply]")
+    tab.page.fill("#rd-popover textarea", "Please do.")
+    tab.page.click("#rd-popover .rd-form button.rd-tell")
     tab.page.wait_for_selector("#rd-popover .rd-pending-tell")
     write_record(tmp_path / "claude-config", name="Cosima", status="waiting", waitingFor="Which tagline?",
                  messagingSocketPath="", procStart=proc_start(PID))

@@ -63,11 +63,12 @@
 /* In edit mode, what a comment on the selection would quote: painted, the selection is left alone. */
 ::highlight(rd-widened){background:rgba(59,130,246,.18)}
 
-#rd-popover{position:absolute;z-index:402;width:380px;max-width:calc(100vw - 32px);
- max-height:calc(100vh - 32px);overflow-y:auto;box-sizing:border-box;display:flex;flex-direction:column;
- background:var(--bg,#fff);color:var(--fg,#000);border:2px solid var(--fg,#000);border-radius:3px;
- box-shadow:4px 4px 0 rgba(0,0,0,.18);padding:12px 14px;font:14px/1.45 system-ui,sans-serif}
-#rd-popover .rd-msg{margin:0 0 10px}
+#rd-popover{position:absolute;z-index:402;width:340px;max-width:calc(100vw - 32px);
+ max-height:min(560px,calc(100vh - 32px));overflow-y:auto;box-sizing:border-box;display:flex;flex-direction:column;
+ background:var(--bg,#fff);color:var(--fg,#000);border:1px solid rgba(127,127,127,.4);border-radius:16px;
+ box-shadow:0 8px 28px rgba(0,0,0,.22);padding:12px;font:14px/1.45 system-ui,sans-serif}
+#rd-popover .rd-msg{box-sizing:border-box;width:fit-content;max-width:85%;margin:0 0 8px;padding:6px 10px;border-radius:14px;background:rgba(127,127,127,.14)}
+#rd-popover .rd-msg.rd-mine{margin-left:auto;background:rgba(59,130,246,.18)}
 #rd-popover .rd-who{font:600 12px ui-monospace,monospace}
 #rd-popover .rd-who-ask,#rd-panel .rd-who-ask{color:#1d4ed8}
 #rd-popover .rd-who-tell,#rd-panel .rd-who-tell{color:#c2410c}
@@ -82,18 +83,42 @@
 #rd-popover .rd-text code{font:.86em ui-monospace,monospace;background:rgba(127,127,127,.15);
  padding:0 .25em;border-radius:2px}
 #rd-popover .rd-text a{color:inherit;text-decoration:underline}
-#rd-popover .rd-reply{border-left:3px solid rgba(127,127,127,.35);padding-left:10px}
 #rd-popover .rd-quote{font-size:12px;opacity:.7;margin-bottom:8px;font-style:italic}
 #rd-popover .rd-tag{font:600 10px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.06em;
  background:#e5e7eb;color:#111;border-radius:2px;padding:1px 5px;margin-left:6px}
-#rd-popover textarea{width:100%;box-sizing:border-box;min-height:70px;font:14px/1.4 system-ui,sans-serif;
- border:1.5px solid var(--fg,#000);border-radius:2px;padding:6px;background:var(--bg,#fff);color:var(--fg,#000)}
+#rd-popover .rd-form{margin-top:8px;padding:10px 10px 8px}
+#rd-popover textarea{display:block;width:100%;box-sizing:border-box;min-height:24px;max-height:140px;field-sizing:content;resize:none;font:14px/1.4 system-ui,sans-serif;
+ border:0;outline:0;padding:2px 4px;background:transparent;color:var(--fg,#000)}
 #rd-popover .rd-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
 #rd-popover .rd-actions[hidden]{display:none}
 #rd-popover .rd-actions button,#rd-comment-btn{font:600 12px ui-monospace,monospace;cursor:pointer;
  background:var(--fg,#000);color:var(--bg,#fff);border:0;border-radius:2px;padding:5px 10px}
 #rd-popover .rd-actions button.rd-alt{background:transparent;color:var(--fg,#000);
  box-shadow:inset 0 0 0 1.5px currentColor}
+#rd-popover .rd-actions button:not(.rd-compose){border-radius:12px;padding:3px 9px;font-size:11px}
+/* The field and the form it opens into are the same box: a rounded frame, the text on top, the round arrow under it. */
+#rd-popover .rd-actions button.rd-compose,#rd-popover .rd-form{box-sizing:border-box;border:1px solid rgba(127,127,127,.25);border-radius:24px;box-shadow:0 10px 15px -3px rgba(0,0,0,.1)}
+#rd-popover .rd-actions button.rd-compose{position:relative;flex:1 0 100%;min-height:86px;display:flex;align-items:flex-start;padding:12px 14px;
+ background:transparent;color:rgb(127,127,127);font:14px/1.4 system-ui,sans-serif;text-align:left}
+#rd-popover .rd-actions button.rd-compose::after{content:"\2191";position:absolute;right:9px;bottom:9px;width:30px;height:30px;border-radius:50%;
+ background:rgba(127,127,127,.25);color:var(--bg,#fff);font:600 16px/30px system-ui,sans-serif;text-align:center}
+#rd-popover .rd-form .rd-actions{align-items:center}
+#rd-popover .rd-form .rd-actions button.rd-send{order:9;margin-left:auto;display:flex;align-items:center;justify-content:center;width:30px;height:30px;padding:0;
+ border-radius:50%;font-size:0;background:var(--fg,#000);color:var(--bg,#fff);box-shadow:none}
+#rd-popover .rd-send svg{width:20px;height:20px}
+#rd-popover .rd-form .rd-actions button.rd-x{width:30px;height:30px;padding:0;border-radius:50%;font-size:0;box-shadow:none;opacity:.6}
+#rd-popover .rd-form .rd-actions button.rd-x::before{content:"\00D7";font:400 20px/30px system-ui,sans-serif}
+/* The little that is not talking to the agent, at the top right of the box. */
+#rd-popover .rd-head{position:absolute;top:8px;right:10px;display:flex;align-items:center;gap:4px;font-size:11px}
+#rd-popover .rd-head[hidden],#rd-popover:has(.rd-form[data-done]) .rd-head,#rd-popover:has(.rd-form[data-for]) .rd-head{display:none}
+#rd-popover .rd-scroll .rd-quote{padding-right:92px}
+#rd-popover .rd-head button,#rd-popover .rd-more summary{cursor:pointer;background:transparent;color:var(--fg,#000);border:0;border-radius:10px;padding:2px 7px;font:600 11px system-ui,sans-serif;opacity:.65}
+#rd-popover .rd-head button:hover,#rd-popover .rd-more summary:hover{opacity:1;background:rgba(127,127,127,.18)}
+#rd-popover .rd-more{position:relative}
+#rd-popover .rd-more summary{list-style:none}
+#rd-popover .rd-more summary::-webkit-details-marker{display:none}
+#rd-popover .rd-more>div{position:absolute;right:0;top:100%;z-index:1;display:flex;flex-direction:column;background:var(--bg,#fff);
+ border:1px solid rgba(127,127,127,.4);border-radius:10px;padding:4px;box-shadow:0 8px 28px rgba(0,0,0,.22)}
 #rd-popover .rd-warn{font-size:12px;opacity:.75;margin:8px 0 0}
 #rd-comment-btn{position:absolute;z-index:402;box-shadow:2px 2px 0 rgba(0,0,0,.2)}
 #rd-comment-btn.rd-bar{position:fixed;left:8px;max-width:calc(100vw - 96px);min-height:44px;padding:8px 16px;font-size:14px;text-align:left;white-space:normal}
@@ -178,10 +203,9 @@
 /* Tell (orange) makes the session act. */
 #rd-popover .rd-actions button.rd-tell{box-shadow:inset 0 0 0 2px #ea580c;color:#c2410c}
 #rd-popover .rd-interrupted .rd-text{font-style:italic;opacity:.75}
-#rd-popover .rd-pending-tell{border-left-color:#ea580c}
+#rd-popover .rd-pending-tell{box-shadow:inset 0 0 0 1.5px #ea580c}
 /* What the agent cannot do: the button is there, disabled, and one line says why (SPEC 10.6). */
-#rd-popover .rd-actions button.rd-na{box-shadow:inset 0 0 0 1.5px currentColor;color:var(--fg,#000);opacity:.4;cursor:default}
-#rd-popover .rd-agent-line{flex:1 0 100%;font-size:11px;opacity:.7;line-height:1.35}
+#rd-popover .rd-agent-line{order:10;flex:1 0 100%;font-size:11px;opacity:.7;line-height:1.35}
 /* Busy Tell: hovering shows Cancel over the label. Both stay laid out, so the
    button keeps its width and the pointer does not slide onto its neighbour. */
 #rd-popover .rd-actions button.rd-busy{display:inline-grid}

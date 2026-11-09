@@ -6,7 +6,7 @@ Le code est déjà sur la branche `cleo/chat-box` ; ce ticket finit le travail e
 
 **Blocked by:** 01 (les deux partagent l'aide de test qui crée un commentaire)
 
-**Claimed by:** Suraya 2026-11-09 20:28
+**Claimed by:** Reem 2026-11-09 20:28
 
 **Status:** in-progress
 

@@ -1220,9 +1220,13 @@ var create = function (ROOT, CFG, opts) {
   // localStorage from every keystroke, and it is drawn again after any close. So it is neither
   // the open form nor a reason to hold a reload, and Escape and a click outside leave it alone.
   var OPEN_FORM = '.rd-form:not([data-done]):not([data-kept])';
-  // A kept comment with the cursor in it, or a selection that has its Comment button: what a thread opened by
-  // itself would take away. (A form with text typed in it is `writingNow`.)
-  function writingElsewhere() { return !!cbtn || (!!pop && pop.hasAttribute('data-kept') && pop.contains(ROOT.activeElement)); }
+  // A kept comment with the cursor in it, or a selection that has its Comment button or its box (a popover of no
+  // thread: the box of a new comment): what a thread opened by itself would take away. (A form with text typed in
+  // it is `writingNow`.)
+  function writingElsewhere() {
+    return !!cbtn || (!!pop && popId === null && !pop.hasAttribute('data-kept')) ||
+      (!!pop && pop.hasAttribute('data-kept') && pop.contains(ROOT.activeElement));
+  }
   function openForm() { return pop ? pop.querySelector(OPEN_FORM) : null; }
   // The open form of the popover's own thread: the form of another thread's failed send put here (data-for)
   // carries a line of its own about its thread.

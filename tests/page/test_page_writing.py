@@ -431,6 +431,7 @@ def test_a_reply_and_an_edit_kept_for_one_thread_are_both_listed_and_neither_hid
     b.goto(thread.site.url)
     b.wait_for_selector("#rd-menu-btn", state="attached")
     b.click(".rd-badge")
+    b.click("#rd-popover .rd-more summary")
     b.click("#rd-popover button[data-a=edit]")
     b.fill("#rd-popover textarea", "Why apples, really?")
     open_reply(thread, "a reply about apples")
@@ -2075,7 +2076,8 @@ def test_words_typed_where_a_comments_anchor_goes_or_comes_are_still_unsaved_and
     p.keyboard.press("e")
     if how == "deleted on this page":
         p.click(".rd-badge")
-        p.wait_for_selector("#rd-popover button[data-a=delete]")
+        p.wait_for_selector("#rd-popover .rd-more summary")
+        p.click("#rd-popover .rd-more summary")
         p.route("**/_/comment", lambda route: held.append(route))
         p.click("#rd-popover button[data-a=delete]")
     elif how == "a new comment":
@@ -2172,7 +2174,9 @@ def test_tell_of_a_thread_sends_the_hash_of_the_text_the_page_holds(agent, threa
     sent = []
     thread.page.on("request", lambda r: sent.append(json.loads(r.post_data))
                    if r.method == "POST" and r.url.endswith("/_/tell") else None)
-    thread.page.click("#rd-popover button[data-a=tell]")
+    thread.page.click("#rd-popover button[data-a=reply]")
+    thread.page.fill("#rd-popover textarea", "Please do.")
+    thread.page.click("#rd-popover .rd-form button.rd-tell")
     until(lambda: sent, what="the request")
     assert [(s["id"], s["hash"]) for s in sent] == [("c1", held)]
 
@@ -2803,6 +2807,7 @@ def test_a_new_comment_sent_inside_the_60_ms_after_a_panel_item_was_clicked_is_n
 def test_the_answer_of_a_delete_does_not_close_a_new_comment_that_is_being_sent(thread):
     p, held = thread.page, []
     p.route("**/_/comment", lambda route: held.append(route))
+    p.click("#rd-popover .rd-more summary")
     p.click("#rd-popover button[data-a=delete]")
     until(lambda: held or p.wait_for_timeout(20), what="the delete to go out")
     open_comment_form(thread, P2, "pears")
@@ -2824,6 +2829,7 @@ def test_the_answer_of_a_delete_does_not_close_a_new_comment_that_is_being_sent(
 def test_the_answer_of_a_delete_keeps_the_popover_of_its_thread_while_a_reply_is_typed_in_it(thread):
     p, held = thread.page, []
     p.route("**/_/comment", lambda route: held.append(route))
+    p.click("#rd-popover .rd-more summary")
     p.click("#rd-popover button[data-a=delete]")
     until(lambda: held or p.wait_for_timeout(20), what="the delete to go out")
     p.click("#rd-popover button[data-a=reply]")
@@ -2923,6 +2929,7 @@ def test_the_answer_of_a_delete_does_not_reload_the_page_while_a_new_comment_is_
     p, f = thread.page, thread.site.file
     held = []
     p.route("**/_/comment", lambda route: held.append(route))
+    p.click("#rd-popover .rd-more summary")
     p.click("#rd-popover button[data-a=delete]")
     until(lambda: held or p.wait_for_timeout(20), what="the delete to go out")
     open_comment_form(thread, P2, "pears")
@@ -3969,7 +3976,9 @@ def test_a_tell_or_cancel_the_hub_cannot_be_reached_for_says_that_it_did_not_go_
     # "nothing was saved. Your edits stay on screen" is the sentence of a save; these save nothing.
     p = thread.page
     if what == "cancel-tell":
-        thread.page.click("#rd-popover button[data-a=tell]")
+        thread.page.click("#rd-popover button[data-a=reply]")
+        thread.page.fill("#rd-popover textarea", "Please do.")
+        thread.page.click("#rd-popover .rd-form button.rd-tell")
         p.wait_for_selector("#rd-popover button[data-a=cancel-tell]")
     p.route(f"**/_/{what.split('-')[0]}", lambda route: route.abort())
     p.click(f"#rd-popover button[data-a={what}]")

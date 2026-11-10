@@ -2069,6 +2069,10 @@ var create = function (ROOT, CFG, opts) {
   function editForm(id, text) {
     var c = byId[id];
     if (!c) return;          // the thread went (a 410) while its button was still drawn
+    // An edit form with changes stands: a fresh one would open on the old text and the next Save or Cancel
+    // would clear what was typed from the store.
+    var open = text === undefined && pop.querySelector('.rd-form [data-f=no]');
+    if (open) { var ta = open.closest('.rd-form').querySelector('textarea'); if (ta.value !== c.body) { ta.focus(); return; } }
     textForm(pop, text === undefined ? c.body : text, [{ k: 'ok', label: 'Save', cancel: true }], function (t, k, rid, line) {
       threadKeep(c, 'edit', t, rid, line, Date.now());
       return op({ op: 'edit', id: id, body: t, rid: rid }).then(function (j) { if (j) threadKeep(c, 'edit', null, rid); return j; });

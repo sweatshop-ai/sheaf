@@ -475,7 +475,8 @@ def my_thread(tab, site):
 
 
 def choose_edit(p):
-    p.click("#rd-popover .rd-more summary")
+    if not p.is_visible("#rd-popover button[data-a=edit]"):       # the menu stays open after a choice
+        p.click("#rd-popover .rd-more summary")
     p.click("#rd-popover button[data-a=edit]")
 
 
@@ -488,6 +489,26 @@ def test_choosing_edit_when_the_store_cannot_keep_the_reply_leaves_the_reply_in_
     until(lambda: "could not be kept" in toast(p), what="the toast that says the text could not be kept")
     assert p.input_value(FIELD) == "a reply that cannot be kept"
     assert p.locator("#rd-popover [data-f=no]").count() == 0, "the edit form replaced the reply"
+
+
+def test_choosing_edit_again_on_a_changed_edit_form_keeps_the_changes(tab, site):
+    """The edit form stands, with what was typed in it: a second Edit must not bring back the old text, which the next Save or Cancel would clear from the store."""
+    p = my_thread(tab, site)
+    choose_edit(p)
+    until(lambda: p.input_value(FIELD) == "Mine", what="the edit form, filled with the message")
+    p.fill(FIELD, "Mine, changed")
+    choose_edit(p)
+    assert p.input_value(FIELD) == "Mine, changed", "the second Edit brought back the old text"
+    assert p.locator("#rd-popover [data-f=no]").count() == 1
+
+
+def test_choosing_edit_again_on_an_unchanged_edit_form_opens_it_afresh(tab, site):
+    p = my_thread(tab, site)
+    choose_edit(p)
+    until(lambda: p.input_value(FIELD) == "Mine", what="the edit form")
+    choose_edit(p)
+    assert p.input_value(FIELD) == "Mine"
+    assert p.locator("#rd-popover [data-f=no]").count() == 1
 
 
 def test_closing_an_edit_form_that_was_not_changed_leaves_nothing_unsent(tab, site):

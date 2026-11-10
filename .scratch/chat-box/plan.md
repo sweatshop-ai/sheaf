@@ -25,7 +25,7 @@ La boîte reprend donc leur composition : grand cadre arrondi, texte en haut, ro
 | Défilement | Le fil s'ouvre sur le dernier message et défile vers le haut |
 | Curseur | Déjà dans le champ à l'ouverture, sur desktop et sur téléphone |
 | Sélection sur desktop | En mode Comment, la boîte s'ouvre directement |
-| Sélection sur téléphone | Barre en forme de champ en bas, un toucher ; le menu Copier reste libre |
+| Sélection sur téléphone | Appui long = un mot, appui long + glisser = une phrase ; au relâchement la boîte s'ouvre, curseur dans le champ ; pas de poignées à déplacer après coup (choix de Thierry, 2026-11-10) ; la barre ne reste que pour une sélection refusée |
 | Copier | Avec le champ vide, Ctrl+C copie le passage sélectionné |
 | Modes | Bascule Comment / Edit toujours visible ; en Edit, une sélection reste une sélection |
 

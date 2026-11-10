@@ -186,9 +186,11 @@ def until(check, timeout=8.0, what="the condition"):
 
 
 def open_box(page):
-    """After a selection: wait for the box, and press the Comment bar only when the box did not open itself."""
-    until(lambda: page.query_selector("#rd-popover textarea") or page.query_selector("#rd-comment-btn"),
-          what="the box or the Comment button")
+    """After a selection: wait for the box of the new comment, and press the Comment bar only when the box did not open itself.
+    A thread's box that stood before the selection has a field too and messages; it is not the box waited for (the mouseup offers the
+    new one a task later, and on a slow runner the field of the old box was filled instead)."""
+    until(lambda: (page.query_selector("#rd-popover textarea") and not page.query_selector("#rd-popover .rd-msg"))
+          or page.query_selector("#rd-comment-btn"), what="the box or the Comment button")
     if not page.query_selector("#rd-popover textarea"):
         page.click("#rd-comment-btn")
 

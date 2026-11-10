@@ -465,6 +465,31 @@ def test_choosing_edit_while_a_reply_is_typed_keeps_the_reply(tab, site):
     until(lambda: p.input_value(FIELD) == "my reply, half written", what="the reply back in the field after Cancel")
 
 
+def my_thread(tab, site):
+    """A comment of Ada's own on the page, its thread open: the menu offers Edit."""
+    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "pears"), "pears", "Mine", "Ada", "2026-10-14T10:00")[0])
+    tab.open()
+    tab.page.click(".rd-badge")
+    tab.page.wait_for_selector(FIELD)
+    return tab.page
+
+
+def choose_edit(p):
+    p.click("#rd-popover .rd-more summary")
+    p.click("#rd-popover button[data-a=edit]")
+
+
+def test_choosing_edit_when_the_store_cannot_keep_the_reply_leaves_the_reply_in_the_field(tab, site):
+    """Edit would replace the field: a reply the store refuses has nowhere else to go, so Edit does not open and says so."""
+    p = my_thread(tab, site)
+    store_full(p)
+    p.fill(FIELD, "a reply that cannot be kept")
+    choose_edit(p)
+    until(lambda: "could not be kept" in toast(p), what="the toast that says the text could not be kept")
+    assert p.input_value(FIELD) == "a reply that cannot be kept"
+    assert p.locator("#rd-popover [data-f=no]").count() == 0, "the edit form replaced the reply"
+
+
 def test_closing_an_edit_form_that_was_not_changed_leaves_nothing_unsent(tab, site):
     update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "pears"), "pears", "Mine", "Ada", "2026-10-14T10:00")[0])
     tab.open()

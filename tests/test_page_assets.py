@@ -141,7 +141,9 @@ def test_no_edit_token_and_no_per_document_server_left():
     assert "X-Edit-Token" not in js
     assert re.search(r"CFG\.(token|ask|tell)\b", js) is None
     strings = js_strings(js)
-    for gone in ("ping", "jobs", "incident", "live", "save", "comment", "export/"):
+    # restated on 2026-11-10 (ticket 03): the bare word "save" is the Edit / Save toggle's own mode name
+    # (data-m="save"), not a route; the hub's '/_/save' is a different string
+    for gone in ("ping", "jobs", "incident", "live", "comment", "export/"):
         assert gone not in strings, gone
 
 
@@ -218,16 +220,16 @@ def test_the_page_takes_a_comments_only_change_in_place_only_from_the_version_it
 def test_the_menu_names_the_target_the_hub_recorded_and_the_buttons_it_cannot_serve_are_disabled():
     """The page's behaviour is checked by hand in a browser against a scratch hub (Claude Code,
     Codex, no agent, a session without a socket); this pins the pieces: the line reads
-    "Tell → <label> · <product>" from CFG.agent, which never holds a session id; a button
-    the agent cannot serve is disabled with its line from CFG.lines, in the popover, the reply
-    form and the new-comment form; `/_/doc` refreshes all three at load."""
+    "Tell → <label> · <product>" from CFG.agent, which never holds a session id; a send
+    the agent cannot serve is a disabled entry with its line from CFG.lines, in the reply
+    form and the new-comment form (the thread's own action row no longer has a Tell); `/_/doc` refreshes all three at load."""
     js = text("page.js")
     assert "'Tell → ' + a.label + ' · ' + a.product" in js
     assert "a.session" not in js
-    assert js.count("agentButtons(") == 3                 # the definition, the reply form, the new comment
-    assert "offButton('tell'" in js and "offLines(" in js
+    assert js.count("sendButtons(") == 3                  # the definition, the reply form, the new comment
+    assert "{ off: lineOf('tell') }" in js                # the disabled entry carries the line; the thread has no Tell of its own
     assert "CFG.lines" in js and "'capabilities' in j" in js and "CFG.agent = j.target" in js
-    assert "rd-na" in text("page.css") and "rd-agent-line" in text("page.css")
+    assert "rd-agent-line" not in text("page.css")       # restated on 2026-11-10 (ticket 03): no line under the field, the reason is in the menu only (tests/page/test_page_chat_box.py counts 0 of them)
 
 
 def test_the_page_has_no_ask_left():

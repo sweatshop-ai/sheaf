@@ -5,7 +5,7 @@ import re
 
 import pytest
 
-from pagehelp import DOC, at, comment_on, draft_key, key, mark, reloaded, select, toast, toasted, type_at_end, until
+from pagehelp import open_box, DOC, at, comment_on, draft_key, key, mark, reloaded, select, toast, toasted, type_at_end, until
 
 pytestmark = pytest.mark.page
 
@@ -189,8 +189,7 @@ def test_a_replys_answer_that_reloads_the_page_waits_for_a_press_in_its_undo(tab
     p.reload()
     p.wait_for_selector("#rd-actions button")
     p.click(".rd-badge")
-    p.wait_for_selector("#rd-popover button[data-a=reply]")
-    p.click("#rd-popover button[data-a=reply]")
+    p.wait_for_selector("#rd-popover textarea")
     p.fill("#rd-popover textarea", "my reply")
     f.write_text(f.read_text(encoding="utf-8") + "\nFrom outside.\n", encoding="utf-8")
     p.wait_for_selector("#rd-popover .rd-hold")         # the form holds the reload
@@ -534,7 +533,7 @@ def test_a_comment_sent_while_the_tick_is_out_waits_for_its_answer(sheaf):
     held = []
     p.route("**/_/tick", lambda r: held.append(r))
     select(p, at("main", "Body"), at("main", "Body", None))
-    p.click("#rd-comment-btn")
+    open_box(p)
     p.fill("#rd-popover textarea", "Why?")
     stand_still(p)
     bar(p).nth(0).click()
@@ -552,7 +551,7 @@ def test_a_comment_answered_during_the_undo_does_not_move_the_text_the_press_nam
     # #148, 4: the comment's answer moved the page's hash and the press still named the text before it.
     p, f = sheaf.page, sheaf.site.file
     select(p, at("main", "Body"), at("main", "Body", None))
-    p.click("#rd-comment-btn")
+    open_box(p)
     p.fill("#rd-popover textarea", "Why?")
     stand_still(p)
     bar(p).nth(0).click()
@@ -694,7 +693,7 @@ def test_an_upgrade_while_a_comment_waits_for_the_tick_does_not_ask_to_send_it(s
     held = []
     p.route("**/_/tick", lambda r: held.append(r))
     select(p, at("main", "Body"), at("main", "Body", None))
-    p.click("#rd-comment-btn")
+    open_box(p)
     p.fill("#rd-popover textarea", "Why?")
     stand_still(p)
     bar(p).nth(0).click()
@@ -779,13 +778,14 @@ def test_an_upgrade_held_by_a_comment_form_during_a_press_does_not_say_the_text_
     until(lambda: heard(p, "hello"), what="the upgrade, whose reload waits for the press")
     select(p, at("main", "Body"), at("main", "Body", None))
     p.clock.run_for(500)                                # the Comment button shows after the selection settles
-    p.click("#rd-comment-btn")
+    open_box(p)
     p.fill("#rd-popover textarea", "Why?")
     mark(p)
     bar(p).nth(0).click()                               # Undo: the reload now waits for the form
     p.wait_for_timeout(300)
     assert p.evaluate("window.__same_load") is True, "the page reloaded under the comment form"
-    p.click("#rd-popover button[data-f=no]")
+    p.click("#rd-popover button[data-a=minimize]")     # a new comment has no Cancel: the box is put away
+    p.clock.run_for(100)                                # the held reload is lifted by a timer 0
     reloaded(p)
     p.wait_for_selector("#rd-actions button")
     toasted(p, "upgraded")
@@ -871,7 +871,7 @@ def test_a_comment_opened_while_a_reload_waits_for_the_restore_holds_that_reload
     until(lambda: saves or p.wait_for_timeout(20), what="the Restore, sent once the tick is answered")
     select(p, at("main", "Body"), at("main", "Body", None))
     p.clock.run_for(500)                                # the Comment button shows after the selection settles
-    p.click("#rd-comment-btn")
+    open_box(p)
     p.fill("#rd-popover textarea", "Why?")
     saves[0].continue_()
     p.unroute("**/_/save")

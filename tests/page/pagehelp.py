@@ -185,13 +185,50 @@ def until(check, timeout=8.0, what="the condition"):
         _pump(0.05)
 
 
+def open_box(page):
+    """After a selection: wait for the box of the new comment, and press the Comment bar only when the box did not open itself.
+    A thread's box that stood before the selection has a field too and messages; it is not the box waited for (the mouseup offers the
+    new one a task later, and on a slow runner the field of the old box was filled instead)."""
+    until(lambda: (page.query_selector("#rd-popover textarea") and not page.query_selector("#rd-popover .rd-msg"))
+          or page.query_selector("#rd-comment-btn"), what="the box or the Comment button")
+    if not page.query_selector("#rd-popover textarea"):
+        page.click("#rd-comment-btn")
+
+
+def pasted(page):
+    """What a real Ctrl+V brings into a plain input of the document: the clipboard as the browser holds it after a
+    real Ctrl+C. The input is outside the page's own interface, off screen; it is focused by script, not clicked,
+    so nothing of the page's is clicked away."""
+    page.evaluate("""() => { let i = document.getElementById('probe-for-paste');
+      if (!i) { i = document.createElement('input'); i.id = 'probe-for-paste'; i.style.cssText = 'position:fixed;left:-400px;top:0';
+                document.body.appendChild(i); }
+      i.value = ''; i.focus(); }""")
+    page.keyboard.press("ControlOrMeta+v")
+    return page.evaluate("document.getElementById('probe-for-paste').value")
+
+
+def typed(page):
+    """The texts in the popover's fields that are not empty. The reply field is open from the start, so an
+    empty field is the rest state; what a test must not find is text put into one."""
+    return page.eval_on_selector_all("#rd-popover textarea", "els => els.map(e => e.value).filter(v => v)")
+
+
+def open_form(page, form):
+    """The form of a reply or an edit. A reply field is open from the start; Edit is in the thread's ⋯ menu."""
+    if form == "edit":
+        page.click("#rd-popover .rd-more summary")
+        page.click("#rd-popover button[data-a=edit]")
+    page.wait_for_selector("#rd-popover textarea")
+
+
 def comment_on(tab, start, end, body):
-    """Select, press Comment, type and send; returns the comment once it is in the file."""
+    """Select, type and send; returns the comment once it is in the file. A mouse selection opens the box by
+    itself; a touch screen offers the Comment bar first."""
     from sheafmd import comments as rdc
     select(tab.page, start, end)
-    tab.page.click("#rd-comment-btn")
+    open_box(tab.page)
     tab.page.fill("#rd-popover textarea", body)
-    tab.page.click("#rd-popover button[data-f=ok]")
+    tab.page.click("#rd-popover button[data-f=ok], #rd-popover button[data-f=tell]")
     return until(lambda: (rdc.parse(tab.site.file.read_text()).comments or [None])[0],
                  what="the comment in the file")
 

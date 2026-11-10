@@ -17,6 +17,7 @@ sync_api = pytest.importorskip("playwright.sync_api")
 
 MOUNT_JS = (Path(sheafmd.__file__).parent / "page" / "mount.js").read_text(encoding="utf-8")
 ORIGIN = "http://sheaf.test"
+pytestmark = pytest.mark.page      # these need the session's browsers (the `chromium` fixture), which only the page step of CI installs
 ENGINES = ["chromium", "firefox", "webkit"]
 
 # Every payload sets a counter, or asks for a stranger's address. None of them is sanitised before it gets here.
@@ -83,10 +84,11 @@ ATTR_OK = set("""id class title lang dir href src alt width height colspan rowsp
 OPENS_FOREIGN_CONTENT = ("<math", "<!--", "<![if", "<svg></p>", "<noscript>", "<template>", "<form><math")
 
 
-@pytest.fixture(scope="module")
-def pw():
-    with sync_api.sync_playwright() as p:
-        yield p
+@pytest.fixture(scope="session")
+def pw(chromium):
+    """The session's one Playwright driver (conftest.py): a second `sync_playwright()` in this thread fails with "Sync API inside the
+    asyncio loop" once the driver of an earlier test is up, which is what 33 errors of the t-compute run at 9aed290 were."""
+    return chromium.pw
 
 
 @pytest.fixture(params=ENGINES)

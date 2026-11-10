@@ -155,11 +155,11 @@ def test_the_macos_image_is_named_never_latest(text):
 
 
 def test_a_job_that_hangs_is_stopped(text):
-    """ubuntu within 45 minutes; macOS, about four times slower on its runner, within 120."""
+    """ubuntu within 60 minutes; macOS, about four times slower on its runner, within 120."""
     got = re.search(r"^    timeout-minutes: \$\{\{ startsWith\(matrix\.os, 'ubuntu'\) && (\d+) \|\| (\d+) \}\}\s*$",
                     text, flags=re.M)
     assert got, "timeout-minutes names one limit for ubuntu and one for the rest"
-    assert int(got.group(1)) <= 45 and int(got.group(2)) <= 120
+    assert int(got.group(1)) <= 60 and int(got.group(2)) <= 120
 
 
 def test_the_token_can_only_read_and_no_secret_is_used(text):

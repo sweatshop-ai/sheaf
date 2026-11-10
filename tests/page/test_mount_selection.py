@@ -46,13 +46,15 @@ PAGE = """<!doctype html><html><body>
   };
 </script></body></html>"""
 
+pytestmark = pytest.mark.page      # these need the session's browsers (the `chromium` fixture), which only the page step of CI installs
 ENGINES = ["chromium", "firefox", "webkit"]
 
 
-@pytest.fixture(scope="module")
-def pw():
-    with sync_api.sync_playwright() as p:
-        yield p
+@pytest.fixture(scope="session")
+def pw(chromium):
+    """The session's one Playwright driver (conftest.py): a second `sync_playwright()` in this thread fails with "Sync API inside the
+    asyncio loop" once the driver of an earlier test is up, which is what 33 errors of the t-compute run at 9aed290 were."""
+    return chromium.pw
 
 
 @pytest.fixture(params=ENGINES)

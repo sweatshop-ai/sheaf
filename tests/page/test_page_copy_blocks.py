@@ -97,3 +97,18 @@ def test_the_text_copied_leaves_the_comment_badge_out(doc, site):
     press_copy(doc.page)
     until(lambda: clipboard(doc.page), what="the clipboard")
     assert clipboard(doc.page) == "Hello Anna, thanks for the call.\n\nBest, Thierry"
+
+
+def test_a_mounted_page_gets_the_button_too(chromium, site):
+    # The front's copy of the page (mount.js) drops every `rd-` class the render wrote; this one it keeps.
+    from test_mount_page import _front
+    from pagehelp import close_context
+    site.file.write_text(MD, encoding="utf-8")
+    c, f = _front(chromium, site)
+    try:
+        f.open()
+        until(lambda: f.has("blockquote.rd-copy > .rd-copybtn"), what="the Copy button in the root")
+        assert not f.has("blockquote:not(.rd-copy) .rd-copybtn")
+        assert f.errors == []
+    finally:
+        close_context(c)

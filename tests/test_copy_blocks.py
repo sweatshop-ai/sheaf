@@ -38,7 +38,7 @@ def test_the_share_copy_shows_a_plain_quote_without_marker_class_or_script(tmp_p
     out = page_of(tmp_path, DOC, share=True)
     [q] = quotes(out)
     assert q.startswith("<blockquote>")
-    assert "COPY" not in out and "rd-copy" not in out and "<button" not in out and "<script" not in out
+    assert "COPY" not in out and "class=\"rd-copy\"" not in out and "<button" not in out and "<script" not in out
     assert "Hello <strong>Anna</strong>" in q
 
 
@@ -50,7 +50,7 @@ def test_the_share_copy_shows_a_plain_quote_without_marker_class_or_script(tmp_p
 ])
 def test_anything_else_stays_a_quote_as_before(tmp_path, quote):
     out = page_of(tmp_path, "# T\n\n" + quote, share=False)
-    assert "rd-copy" not in out
+    assert 'class="rd-copy"' not in out
     assert out.count("<blockquote") == 1
 
 
@@ -61,7 +61,7 @@ def test_the_marker_may_be_followed_by_a_blank_quote_line(tmp_path):
 
 def test_a_copy_block_inside_a_list_item_is_left_as_a_quote(tmp_path):
     out = page_of(tmp_path, "# T\n\n- item\n\n  > [!COPY]\n  > text\n", share=False)
-    assert "rd-copy" not in out and "[!COPY]" in out
+    assert 'class="rd-copy"' not in out and "[!COPY]" in out
 
 
 # ── saving ──────────────────────────────────────────────────────────────────
@@ -117,3 +117,11 @@ def test_a_selection_in_a_copy_block_anchors_where_the_page_saw_it():
     j = i + len("thanksforthecall.")
     at = rdc.anchor_point(MAIL, i, j, "thanks for the call.")
     assert MAIL[:at].endswith("thanks for the call.")
+
+
+def test_a_tick_made_away_from_the_page_in_a_copy_block_takes_the_quick_path():
+    # ticked_html renders the block as the page does, so a task in a copy block is found as drawn.
+    md = "> [!COPY]\n> - [ ] first\n> - [ ] second\n"
+    block = blocks_of(md)[0]
+    frag = rde.ticked_html(block, 1)
+    assert frag is not None and 'class="rd-copy"' in frag

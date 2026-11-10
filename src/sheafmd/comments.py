@@ -39,6 +39,7 @@ import html as _html
 import re
 from dataclasses import dataclass, field
 
+from . import copyblock
 from .blocks import split_md_blocks
 
 CODE_KINDS = {"fence", "indented_code", "frontmatter"}
@@ -438,6 +439,8 @@ def projection(block: str) -> Projection:
         return min(starts[line - 1] + col - 1, len(block))
 
     text, chars, stack = [], [], []
+    # A copy block's marker is not on the page, so its characters are not counted.
+    hidden = [copyblock.skipped(block)]
     # A task list item's box comes out as a ☐ or ☒ right after <li>, outside any
     # source span. The page draws a checkbox there, which has no text, so the box
     # must not count: every offset after it would be one character off.
@@ -477,6 +480,9 @@ def projection(block: str) -> Projection:
                     data = lead[1:]
             for ch in data:
                 if ch.isspace():
+                    continue
+                if hidden[0]:
+                    hidden[0] -= 1
                     continue
                 k = len(text)
                 text.append(ch)

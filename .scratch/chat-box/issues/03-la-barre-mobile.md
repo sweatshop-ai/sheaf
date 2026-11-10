@@ -10,8 +10,8 @@
 
 - [x] Vérifié si le hub accepte d'être joint par un lien Tailscale temporaire ; sinon, simulation mobile montrée à la place
   Le hub refuse ce Host par conception ; un relais local (27529 vers 27519) réécrit Host et Origin. Preuve : `https://tiroir-xps-15-7590.tail23d36e.ts.net:8446/_/health` répond 200, et Thierry a ouvert la page sur son iPhone.
-- [x] Une sélection ouvre la boîte d'elle-même, le curseur dans le champ ; la barre ne reste que pour une sélection refusée
-  Remplace « Toucher la barre ouvre la boîte… » : à l'essai Thierry a choisi qu'une sélection ouvre la boîte (la barre demandait un toucher de trop). Preuve : `tests/page/test_page_mobile_bar.py` (boîte ouverte, curseur dans le champ, pas de barre) et `test_page_selection.py`.
+- [x] Une sélection ouvre la boîte d'elle-même ; la barre ne reste que pour une sélection refusée
+  Remplace « Toucher la barre ouvre la boîte… » : à l'essai Thierry a choisi qu'une sélection ouvre la boîte (la barre demandait un toucher de trop). Preuve : `tests/page/test_page_mobile_bar.py` (boîte ouverte, pas de barre) et `test_page_selection.py`. Le curseur dans le champ n'est prouvé qu'en émulation : sur son iPhone il a dû toucher le champ (verdict de Thierry, 2026-11-09 : « quand je select, la chat apparaît en haut (ok) mais le curseur n'est pas dedans (il faut le toucher avant) »), voir la case suivante.
 - [x] Toucher un numéro met le curseur dans le champ et lève le clavier
   Preuve : sa capture d'écran de 22:37 (clavier levé après un numéro) et `test_touching_a_number_puts_the_cursor_in_the_field_too`.
 - [x] Après une sélection, un toucher dans la zone vide de la boîte met le curseur dans le champ

@@ -429,6 +429,24 @@ The page must stay self-contained: no CDN, no external stylesheet, no remote fon
 
 Off by default. With `--credit` or `credit = true`, the page and the share copy end with `<p class="sheaf-credit">Made with <a href="https://github.com/sweatshop-ai/sheaf">sheaf</a></p>`. An organisation's `.sheaf.toml` never sets it.
 
+### 6.8 The copy block
+
+An agent that prepares a mail, a title, an instruction or a prompt writes it in a quote whose first line is `> [!COPY]`:
+
+```
+> [!COPY]
+> Hello Anna,
+> thanks for the call.
+```
+
+Any Markdown editor shows a quote with a first line `[!COPY]`, so the marking is readable everywhere. A copy block is a quote of the document itself (not one inside a list or another quote), whose first line is exactly `[!COPY]` in capitals (nothing after it on that line) and which has words after it. Anything else, `[!copy]`, `> [!COPY] words`, a marker alone, stays the quote it was.
+
+- **Page.** The marker is not shown. The quote carries `class="rd-copy"` and the page script (`page.js`) gives it a Copy button in its corner (`.rd-copybtn`, `data-rd-ui`, not editable, never sent by a save). The button copies the text the quote shows now, edits not yet saved included: a paragraph's lines run together, a `<br>` is a line break, paragraphs are a blank line apart, list items start with `- ` or `1. `, and a comment's badge is not text. It writes the clipboard where the browser lends it, else asks for a copy of a hidden field; if the browser refuses it says so in a toast. The button reads "Copied" for a moment.
+- **Edit and Comment.** The quote is editable in Edit mode and commentable in Comment mode like any quote. A save puts the `[!COPY]` line back (`copyblock.tokenize` and `restore`: the quote goes to pandoc with a paragraph of its own word first, which comes back as the marker line), so the marker survives any number of edits and the quote reads `> [!COPY]` then its words. A comment's offsets skip the marker's seven characters (`copyblock.skipped`), which the page does not show.
+- **Share copy and PDF.** A plain quote: no marker, no class, no button, no script (the share copy has none, and the PDF is printed from it).
+- **How it is found.** pandoc turns the line break after the marker into a space, so the rendered HTML cannot tell the marker line from `[!COPY] words`. `copyblock.hide` swaps the marker line of each copy block for a word of the module's before pandoc reads the source (in `render.pandoc_html` and in `edit._comparable`, which must render a block as the page does), and `copyblock.mark` takes that word off the HTML (after the sanitiser, step 4).
+- **The skill.** The `render-doc` skill tells agents to use it; it is in another repository and goes live once this has reached the hub.
+
 ---
 
 ## 7. Editing and saving

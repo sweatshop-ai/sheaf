@@ -31,6 +31,10 @@ _Avoid_: settings, project config
 A read-only render of a document with every comment removed, for someone outside the conversation.
 _Avoid_: client render, client version, public copy
 
+**Copy block**:
+A quote whose first line is `[!COPY]`: the page shows it with a Copy button, the Share copy and the PDF as a plain quote (SPEC 6.8).
+_Avoid_: callout, snippet
+
 **Share**:
 The action a sheaf's owner ticks to open it to every member whose roots hold it (SPEC 9.11). It renders nothing and makes no Share copy. Only the owner unticks it, which makes the sheaf their own alone again. In the list's root a Share moves the sheaf's file out of its owner's private folder, and unticking it moves the file back; the sheaf's name, its address, stays.
 _Avoid_: publish, unlock

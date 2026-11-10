@@ -16,17 +16,26 @@ from .blocks import split_md_blocks
 MARKER = "[!COPY]"
 PAGE_CLASS = "rd-copy"
 BUTTON_CLASS = "rd-copybtn"
-STAND_IN = "RDCOPYMARKQX7"
+STAND_IN = "RDCOPYMARK\ue000QX7"      # a private-use character in the middle: nobody types it
 
 # The first line of a top-level quote, and then at least one line with words.
 _LINE = re.compile(r"(\s{0,3}>[ \t]?)" + re.escape(MARKER) + r"[ \t]*(?=\r?(?:\n|$))")
 _WORDS = re.compile(r"^[ \t>]*[^\s>]", re.M)
+# An underline in the first paragraph makes the marker line part of a heading, which `mark` cannot take it off.
+_UNDERLINE = re.compile(r"^[ \t>]*(?:=+|-+)[ \t]*$")
 
 
 def is_copy_block(content: str) -> bool:
     """Is this block of the source (a quote, without the blank lines after it) a copy block?"""
     first, _, rest = content.partition("\n")
-    return bool(_LINE.fullmatch(first.rstrip("\r")) and _WORDS.search(rest))
+    if not (_LINE.fullmatch(first.rstrip("\r")) and _WORDS.search(rest)):
+        return False
+    for line in rest.split("\n"):
+        if not line.strip(" \t\r>"):
+            break                       # the first paragraph ends at the first blank quote line
+        if _UNDERLINE.match(line.rstrip("\r")):
+            return False
+    return True
 
 
 def hide(src: str) -> str:
@@ -57,8 +66,9 @@ def mark(fragment: str, page: bool) -> str:
 
 
 # A page block's copy blocks go to pandoc with a paragraph of STAND_IN first in each, which comes back as the
-# marker line, so the quote reads `> [!COPY]` and then its words, as an agent wrote it.
-_TOKEN_LINE = re.compile(rf"^([ \t]*(?:>[ ]?)+){STAND_IN}\n(?:[ \t]*(?:>[ ]?)+\n)?", re.M)
+# marker line. pandoc's blank quote line after it stays: a table, a fence or a list not starting at 1 would
+# otherwise run into the marker's paragraph and stop being what it was.
+_TOKEN_LINE = re.compile(rf"^([ \t]*(?:>[ ]?)+){STAND_IN}$", re.M)
 
 
 def tokenize(fragment: str) -> str:
@@ -69,6 +79,10 @@ def tokenize(fragment: str) -> str:
 
     soup = BeautifulSoup(fragment, "html.parser")
     for q in soup.select(f"blockquote.{PAGE_CLASS}"):
+        for b in q.select(f".{BUTTON_CLASS}"):
+            b.decompose()
+        if not q.get_text().strip() and not q.find(["img", "hr", "pre", "table"]):
+            continue                    # emptied: it goes like an emptied plain quote
         p = soup.new_tag("p")
         p.string = STAND_IN
         q.insert(0, p)
@@ -77,7 +91,7 @@ def tokenize(fragment: str) -> str:
 
 def restore(md: str) -> str:
     """pandoc's markdown for a tokenized block, the marker paragraphs written as `[!COPY]` lines."""
-    return _TOKEN_LINE.sub(lambda m: m.group(1) + MARKER + "\n", md) if STAND_IN in md else md
+    return _TOKEN_LINE.sub(lambda m: m.group(1) + MARKER, md) if STAND_IN in md else md
 
 
 def skipped(block: str) -> int:

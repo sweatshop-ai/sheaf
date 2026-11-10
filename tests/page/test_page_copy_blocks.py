@@ -66,7 +66,7 @@ def test_an_edit_is_saved_with_the_marker_and_without_the_button(doc, site):
     p.click(TOGGLE)
     until(lambda: "Really." in site.file.read_text(encoding="utf-8"), what="the saved edit")
     saved = site.file.read_text(encoding="utf-8")
-    assert "> [!COPY]\n> Hello **Anna**, thanks for the call.\n>\n> Best, Thierry Really." in saved
+    assert "> [!COPY]\n>\n> Hello **Anna**, thanks for the call.\n>\n> Best, Thierry Really." in saved
     assert "Copy" not in saved and "button" not in saved and "rd-" not in saved
     assert saved.count("[!COPY]") == 1
     assert "> A quote nobody copies." in saved

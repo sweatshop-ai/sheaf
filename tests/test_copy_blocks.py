@@ -79,7 +79,7 @@ def page_of_block(md):
 
 def test_an_edited_copy_block_keeps_its_marker_on_save():
     out = saved(MAIL, lambda h: h.replace("thanks for the call", "thanks for your time"))
-    assert out.startswith("> [!COPY]\n> Hello **Anna**")
+    assert out.startswith("> [!COPY]\n>\n> Hello **Anna**")
     assert "thanks for your time" in out and "the call" not in out
     assert out.count("[!COPY]") == 1 and "\\[" not in out
 
@@ -125,3 +125,45 @@ def test_a_tick_made_away_from_the_page_in_a_copy_block_takes_the_quick_path():
     block = blocks_of(md)[0]
     frag = rde.ticked_html(block, 1)
     assert frag is not None and 'class="rd-copy"' in frag
+
+
+# ── review of 163c92b: what a save does to the first thing in the block, and odd corners ──
+
+FIRST_CHILDREN = {
+    "fence": "> [!COPY]\n> ```\n> code line\n> ```\n> after\n",
+    "table": "> [!COPY]\n> | a | b |\n> |---|---|\n> | 1 | 2 |\n> after\n",
+    "ordered list from 3": "> [!COPY]\n> 3. three\n> 4. four\n",
+    "indented code": "> [!COPY]\n>\n>     code line\n>\n> after\n",
+}
+
+
+@pytest.mark.parametrize("md", FIRST_CHILDREN.values(), ids=FIRST_CHILDREN)
+def test_a_block_whose_first_child_is_not_a_paragraph_keeps_its_shape_through_a_save(md):
+    block = blocks_of(md)[0]
+    out = saved(md, lambda h: h.replace("after", "AFTER").replace("four", "FOUR").replace("code line", "code line!"))
+    again = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], copyblock.hide(out))
+    first = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], copyblock.hide(block.content))
+    shape = lambda h: re.findall(r"<(pre|table|ol|ul|p|h\d)\b", copyblock.mark(h, page=True))
+    assert shape(again) == shape(first), out
+
+
+def test_emptying_a_copy_block_deletes_it_as_it_does_a_plain_quote():
+    block = blocks_of(MAIL)[0]
+    assert rde.html_block_to_md('<blockquote class="rd-copy"><p><br></p></blockquote>', block.content) == ""
+
+
+def test_text_that_looks_like_the_stand_in_is_left_alone(tmp_path):
+    word = "RDCOPYMARKQX7"          # what the first draft used; a document may hold it (this repo's own notes do)
+    out = page_of(tmp_path, f"# T\n\nA paragraph saying {word} here.\n", share=True)
+    assert f"saying {word} here" in out and "[!COPY]" not in out
+    assert "\\[" not in rde.html_block_to_md(f"<p>saying {word} here</p>")
+
+
+@pytest.mark.parametrize("quote", [
+    "> [!COPY]\n> ---\n> text\n",
+    "> [!COPY]\n> text\n> ---\n",
+    "> [!COPY]\n> ===\n> text\n",
+])
+def test_a_setext_underline_in_the_first_paragraph_makes_it_no_copy_block(quote):
+    assert copyblock.skipped(quote) == 0
+    assert copyblock.hide(quote) == quote

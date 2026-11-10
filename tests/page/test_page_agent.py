@@ -8,7 +8,7 @@ import sys
 import pytest
 
 from agent_fakes import PID, write_record
-from pagehelp import DOC, P1, at, select, until
+from pagehelp import open_box, DOC, P1, at, select, until
 from sheafmd import comments as rdc
 from sheafmd import paths
 from sheafmd.agents.claude_code import proc_start
@@ -40,17 +40,18 @@ def with_lines(tab):
     tab.page.route(re.compile(r"/_/doc\?"), doc)
 
 
-def test_the_tell_button_that_cannot_work_says_why_with_the_hubs_line(tab):
+def test_a_tell_that_cannot_work_is_no_button_and_the_box_says_why_with_the_hubs_line(tab):
+    """Was a disabled Tell button whose title carried the line. Where Tell cannot work the box offers the plain
+    send (data-f=ok) and the hub's line under the field (d35825a)."""
     with_lines(tab)
     tab.open()
     select(tab.page, at(P1, "apples"), at(P1, "apples", None))
-    tab.page.click("#rd-comment-btn")
+    open_box(tab.page)
     tab.page.wait_for_selector("#rd-popover textarea")
-    tell = tab.page.query_selector("#rd-popover button.rd-tell")
-    assert tell.is_disabled()
-    assert tell.get_attribute("title") == LINES["tell"]
+    assert tab.page.query_selector("#rd-popover button.rd-tell") is None
+    assert tab.page.query_selector("#rd-popover button[data-f=ok]") is not None
     assert tab.page.query_selector("#rd-popover button.rd-ask") is None      # Ask was retired (SPEC 11.2)
-    assert tab.page.inner_text("#rd-popover .rd-agent-line:nth-of-type(1)") == LINES["tell"]
+    assert tab.page.locator("#rd-popover .rd-agent-line").count() == 0      # restated on 2026-11-09 (G): no line under the field
     assert tab.page.text_content("#rd-agent") == LINES["tell"]       # the menu says it too
 
 
@@ -60,19 +61,16 @@ def test_a_thread_and_its_reply_form_say_why_their_tell_button_cannot_work(tab):
     with_lines(tab)
     tab.open()
     tab.page.click(".rd-badge")
-    tab.page.wait_for_selector("#rd-popover button[data-a=reply]")
-    tell = tab.page.query_selector("#rd-popover .rd-actions button.rd-tell")
-    assert tell.is_disabled()
-    assert tab.page.query_selector("#rd-popover .rd-actions button.rd-ask") is None
-    assert tell.get_attribute("title") == LINES["tell"]
-    assert tab.page.locator("#rd-popover .rd-actions .rd-agent-line").all_inner_texts() == list(LINES.values())
-    tab.page.click("#rd-popover button[data-a=reply]")
     tab.page.wait_for_selector("#rd-popover textarea")
-    tell = tab.page.query_selector("#rd-popover .rd-form button.rd-tell")
-    assert tell.is_disabled()
+    # The field is open from the start and it is the only place a Tell is offered: the thread's own buttons have none.
+    assert tab.page.query_selector("#rd-popover > .rd-actions button.rd-tell") is None
+    assert tab.page.query_selector("#rd-popover .rd-ask") is None
+    # Where the hub's line says Tell cannot work, the form has no disabled Tell button any more (d35825a): it
+    # shows the Send reply button and the line, the same words the disabled button's title carried.
+    assert tab.page.query_selector("#rd-popover .rd-form button.rd-tell") is None
     assert tab.page.query_selector("#rd-popover .rd-form button.rd-ask") is None
-    assert tell.get_attribute("title") == LINES["tell"]
-    assert tab.page.locator("#rd-popover .rd-form .rd-agent-line").all_inner_texts() == list(LINES.values())
+    assert tab.page.query_selector("#rd-popover .rd-form button[data-f=ok]") is not None
+    assert tab.page.locator("#rd-popover .rd-agent-line").count() == 0      # restated (G): the reason is in the menu's Agent line only
 
 
 def write_config(text):
@@ -85,7 +83,7 @@ def write_config(text):
 
 def buttons(tab):
     select(tab.page, at(P1, "apples"), at(P1, "apples", None))
-    tab.page.click("#rd-comment-btn")
+    open_box(tab.page)
     tab.page.wait_for_selector("#rd-popover textarea")
     return [tab.page.inner_text(f"#rd-popover button.rd-{k}") for k in ("tell",)]
 
@@ -148,7 +146,9 @@ def waiting_tell(tab, tmp_path, jump):
         write_config(f"[jump]\ncommand = {cmd}\n")
     tab.open()
     tab.page.click(".rd-badge")
-    tab.page.click("#rd-popover button[data-a=tell]")
+    tab.page.wait_for_selector("#rd-popover textarea")
+    tab.page.fill("#rd-popover textarea", "Please do.")
+    tab.page.click("#rd-popover .rd-form button.rd-tell")
     tab.page.wait_for_selector("#rd-popover .rd-pending-tell")
     write_record(tmp_path / "claude-config", name="Cosima", status="waiting", waitingFor="Which tagline?",
                  messagingSocketPath="", procStart=proc_start(PID))

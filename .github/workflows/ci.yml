@@ -58,7 +58,7 @@ jobs:
     # same suite about four times slower: a process start costs 50 ms there and pandoc's 210 ms, against 1 and
     # 4 ms on ubuntu (run 40997993309), and the tests start thousands. Its non-page tests alone take about
     # 45 minutes, so macOS gets 120; stall_watch still ends a hang 10 quiet minutes after it starts.
-    timeout-minutes: ${{ startsWith(matrix.os, 'ubuntu') && 45 || 120 }}
+    timeout-minutes: ${{ startsWith(matrix.os, 'ubuntu') && 60 || 120 }}
     strategy:
       fail-fast: false
       matrix:

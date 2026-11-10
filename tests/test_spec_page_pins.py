@@ -44,15 +44,16 @@ def test_a_new_version_reloads_a_page_with_nothing_only_on_screen_and_gives_a_no
 def test_escape_with_text_typed_in_a_comment_form_closes_nothing_and_cancel_closes_the_form():
     s = flat(section("10.2"))
     assert "Escape closes one thing per press: popover, side panel, menu, then edit mode" in s
-    assert "A popover whose form holds typed text" in s
+    assert "A popover from which a new comment is being sent is not closed by Escape" in s
     assert "closes nothing" in s and "the press is spent" in s
+    assert "Otherwise Escape minimizes the box and the typed text is kept (10.4)" in s
     assert "A popover that holds only a kept comment (10.4) is no popover for this" in s
-    assert "Cancel closes the form" in s
+    assert "Cancel exists on the Edit form only" in s
 
 
 def test_a_click_outside_leaves_typed_text_alone_as_escape_does():
     s = flat(section("10.4"))
-    assert "**Escape and a click outside** leave a popover whose form holds typed text alone (10.2)" in s
+    assert "**Escape and a click outside** minimize the box and keep what is typed" in s
     assert "A kept comment is a notice, not a form being written" in s
     assert "its popover says \"Your comment is being sent…\", and the press or click says" in s
 
@@ -60,9 +61,10 @@ def test_a_click_outside_leaves_typed_text_alone_as_escape_does():
 def test_sends_are_counted_per_form():
     s = flat(section("10.4"))
     assert "**A send is per form.**" in s
+    assert "Send or cancel" not in s                       # typed text is kept now, nothing waits for a cancel
     for phrase in ("a new comment that is being sent", "a reply or an edit that is out",
                  "Your comment is being sent. Wait for its answer first.",
-                 "Send or cancel the comment you are writing first.",
+                 "so they close it and keep the typed text",
                  "write but a save fails after 30 s without an answer",
                  "a reload waits for every send that is out",
                  "\"Your reply is being sent…\"",
@@ -72,12 +74,13 @@ def test_sends_are_counted_per_form():
 
 # ---- 10.4: a selection in edit mode ---------------------------------------------------------------------
 
-def test_in_edit_mode_the_selection_is_not_redrawn_and_the_widened_run_is_painted():
+def test_in_edit_mode_the_selection_is_not_redrawn_and_nothing_is_painted_or_opened_over_it():
     s = flat(section("10.4"))
     assert "outside edit mode" in s
-    assert "In edit mode the selection stays as the person made it" in s
+    assert "In edit mode a selection is for the text and only for it" in s
     assert "typing replaces only what was selected" in s
-    assert "where the browser has CSS highlights" in s
+    assert "paints nothing and opens nothing over it" in s
+    assert "Switching back to Comment with a selection still standing opens nothing" in s
 
 
 # ---- 10.8: what the stores hold and who reads them -------------------------------------------------------

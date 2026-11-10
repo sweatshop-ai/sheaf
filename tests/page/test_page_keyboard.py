@@ -13,7 +13,6 @@ pytestmark = pytest.mark.page
 
 MD = "# Plan\n\nSecond paragraph, about pears.\n"
 MAIN = "main"
-BTN = "#rd-comment-btn"
 POP = "#rd-popover"
 ACCESSORY = 48          # px the form must keep clear above the keyboard, for the suggestion bar and the AutoFill pill (the page keeps 56)
 KEYBOARD = 336          # px of keyboard on a 390x844 iPhone
@@ -36,10 +35,8 @@ def phone(touch_tab, site):
 
 
 def composer(phone):
+    """A selection by touch opens the box by itself (ticket 03, E); the cursor goes to the field as a tap in it would."""
     select_by_touch(phone.page, at(MAIN, "Second"), at(MAIN, "paragraph", None))
-    phone.page.wait_for_selector(BTN)
-    b = phone.page.locator(BTN).bounding_box()
-    phone.page.touchscreen.tap(b["x"] + b["width"] / 2, b["y"] + b["height"] / 2)
     phone.page.wait_for_selector(POP + " textarea")
     phone.page.focus(POP + " textarea")
     return phone.page
@@ -73,11 +70,35 @@ def test_the_form_docks_at_the_head_of_the_screen_when_a_keyboard_opens_after_it
     assert got["pop"][1] <= 16, got
 
 
-def test_the_buttons_come_before_the_field_so_none_is_under_the_keyboard(phone):
+def test_the_field_comes_first_and_the_arrow_beside_it_at_the_top_all_above_the_keyboard(phone):
+    """Restated on 2026-11-09 (G): the field and the round arrow are in one row, the arrow at the top right of the box, as
+    Thierry asked after the third trial (the first layout had the arrow above, the second under the field); none of them under
+    the keyboard (the popover is docked at the head of what can be seen)."""
     page = composer(phone)
     keyboard(page, 844 - KEYBOARD)
-    got = rects(page)
-    assert got["buttons"] and all(b[3] <= got["field"][1] for b in got["buttons"]), got
+    got = inside(page, 0, 844 - KEYBOARD - ACCESSORY)
+    assert got["buttons"] and all(b[0] >= got["field"][2] - 1 for b in got["buttons"]), got
+    assert all(abs(b[1] - got["field"][1]) < 12 for b in got["buttons"]), got
+
+
+def test_a_selection_made_with_the_keyboard_already_up_opens_the_box_above_the_keyboard(phone):
+    """F: the keyboard is up before the selection (another field had it); the box that opens by itself is docked in what can be seen."""
+    page = phone.page
+    keyboard(page, 844 - KEYBOARD)
+    select_by_touch(page, at(MAIN, "Second"), at(MAIN, "paragraph", None))
+    page.wait_for_selector(POP + " textarea")
+    page.wait_for_timeout(300)
+    got = inside(page, 0, 844 - KEYBOARD - ACCESSORY)
+    assert page.evaluate("document.querySelector('#rd-popover').classList.contains('rd-docked')"), got
+
+
+def test_the_box_opened_by_a_touchend_with_the_keyboard_rising_afterwards_stays_above_it(phone):
+    """F: the order on a phone is box first, keyboard a moment later (the focus raises it)."""
+    page = phone.page
+    select_by_touch(page, at(MAIN, "Second"), at(MAIN, "paragraph", None))
+    page.wait_for_selector(POP + " textarea")
+    keyboard(page, 844 - KEYBOARD, 60)
+    inside(page, 60, 60 + 844 - KEYBOARD - ACCESSORY)
 
 
 def test_the_form_follows_the_visual_viewport_when_iOS_scrolls_it(phone):
@@ -92,7 +113,9 @@ def test_the_form_goes_back_to_its_place_when_the_keyboard_closes(phone):
     before = rects(page)["pop"]
     keyboard(page, 844 - KEYBOARD)
     keyboard(page, 844)
-    assert rects(page)["pop"] == before
+    # Chromium lays out in 1/64 px: the first cycle settles the popover one such unit higher (726.40625 to 726.390625)
+    # and six more cycles leave it there, so it is rounding, not drift. Compared to a unit, not exactly.
+    assert rects(page)["pop"] == pytest.approx(before, abs=1 / 64 + 1e-6)
     assert page.evaluate("document.querySelector('#rd-popover').classList.contains('rd-docked')") is False
 
 
@@ -124,9 +147,7 @@ def test_with_a_mouse_the_form_is_never_docked(tab, site):
     tab.page.add_init_script(FAKE_VV)
     tab.open()
     select(tab.page, at(MAIN, "Second"), at(MAIN, "paragraph", None))
-    tab.page.wait_for_selector(BTN)
-    tab.page.click(BTN)
-    tab.page.wait_for_selector(POP + " textarea")
+    tab.page.wait_for_selector(POP + " textarea")      # a mouse selection opens the box by itself
     tab.page.evaluate("window.__keyboard(400, 0)")
     tab.page.wait_for_timeout(300)
     assert tab.page.evaluate("document.querySelector('#rd-popover').style.maxWidth") == ""
@@ -155,7 +176,6 @@ def test_the_thread_stays_readable_above_the_reply_field_in_a_short_frame(touch_
     page = touch_tab.open().page
     page.set_viewport_size({"width": 390, "height": 320})
     page.click(".rd-badge")
-    page.click(POP + " button[data-a=reply]")
     page.wait_for_selector(POP + " textarea")
     got = page.evaluate("""() => { const p = document.querySelector('#rd-popover'), r = (e) => e.getBoundingClientRect();
         const s = p.querySelector('.rd-scroll'), m = s.querySelector('.rd-msg'), t = p.querySelector('textarea');
@@ -174,7 +194,6 @@ def test_a_long_thread_leaves_the_field_in_reach_above_the_keyboard(phone):
                                                            "Nearly good, only a pity about my name. " * 20, "Ada", "2026-10-25T21:01")[0])
     page = phone.open().page
     page.click(".rd-badge")
-    page.click(POP + " button[data-a=reply]")
     page.wait_for_selector(POP + " textarea")
     page.focus(POP + " textarea")
     keyboard(page, 450)
@@ -214,7 +233,8 @@ def test_the_thread_floor_follows_the_width_the_thread_wraps_at(touch_tab):
     page.set_viewport_size({"width": 230, "height": 844})
     page.wait_for_timeout(300)
     got = page.evaluate("""(() => { const s = document.querySelector('#rd-popover .rd-scroll');
-        return [parseFloat(s.style.minHeight), Math.min(s.scrollHeight, 84)]; })()""")
+        const m = [...s.querySelectorAll('.rd-msg')].pop();
+        return [parseFloat(s.style.minHeight), Math.min(s.scrollHeight, Math.max(84, Math.min(m.offsetHeight + 8, 160)))]; })()""")
     assert abs(got[0] - got[1]) < 1 and got[1] > 80, got
 
 
@@ -231,5 +251,6 @@ def test_the_thread_floor_follows_a_resize_with_a_mouse_too(tab):
     page.set_viewport_size({"width": 230, "height": 844})
     page.wait_for_timeout(300)
     got = page.evaluate("""(() => { const s = document.querySelector('#rd-popover .rd-scroll');
-        return [parseFloat(s.style.minHeight), Math.min(s.scrollHeight, 84)]; })()""")
+        const m = [...s.querySelectorAll('.rd-msg')].pop();
+        return [parseFloat(s.style.minHeight), Math.min(s.scrollHeight, Math.max(84, Math.min(m.offsetHeight + 8, 160)))]; })()""")
     assert abs(got[0] - got[1]) < 1 and got[1] > 80, got

@@ -2604,6 +2604,7 @@ var create = function (ROOT, CFG, opts) {
     return true;
   }
   listen(document, 'selectionchange', function () {
+    letGoOfPageWords();
     clearTimeout(offerTimer);
     if (!canSave || mouseDown) return;
     offerTimer = setTimeout(offerSettled, COARSE.matches ? SETTLE_TOUCH : SETTLE);
@@ -2613,13 +2614,28 @@ var create = function (ROOT, CFG, opts) {
   // began on the words already selected (a tap away from a standing selection) ends nothing, so it opens nothing.
   var touchFrom = '';
   listen(document, 'touchstart', function () { var sel = getSel(); touchFrom = sel ? sel.toString() : ''; }, true);
-  listen(document, 'touchend', function (e) {
-    if (!canSave || !COARSE.matches || mouseDown || (e.target.closest && e.target.closest(IN_UI))) return;
+  // iOS selects the words again a few ms after the release that opened the box, with the field still the active element: the
+  // selection, not the field, then holds the cursor. For one second after a touch opened the box, a selection of the page's words
+  // is let go and the caret goes to the end of the field; the passage stays marked (rd-widened) and quoted.
+  var TOUCH_OPEN_MS = 1000, touchOpenedAt = 0;
+  function letGoOfPageWords() {
+    var box = ROOT.getElementById('rd-popover'), sel = getSel(), ta = document.activeElement;
+    if (!touchOpenedAt || performance.now() - touchOpenedAt > TOUCH_OPEN_MS || !box || !sel || sel.isCollapsed) return;
+    if (!ta || ta.tagName !== 'TEXTAREA' || !box.contains(ta) || !sel.anchorNode || !main.contains(sel.anchorNode)) return;
+    sel.removeAllRanges();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+  }
+  function selectionEnded(e) {
+    if (!canSave || !COARSE.matches || mouseDown || e.pointerType === 'mouse' || (e.target.closest && e.target.closest(IN_UI))) return;
     var sel = getSel();
     if (!sel || sel.isCollapsed || sel.toString() === touchFrom) return;
     clearTimeout(offerTimer);
+    var had = ROOT.getElementById('rd-popover');
     offerSettled();                    // the box's form puts the cursor in its field as it is built, still inside this event
-  }, true);
+    if (!had && ROOT.getElementById('rd-popover')) { touchOpenedAt = performance.now(); letGoOfPageWords(); }
+  }
+  // Trial: every event a finger's end may arrive as, not only touchend (iOS may send touchcancel or only a pointer event).
+  ['touchend', 'touchcancel', 'pointerup', 'pointercancel', 'click'].forEach(function (n) { listen(document, n, selectionEnded, true); });
   // iOS may leave the keyboard down after a selection. A box that stands open with its field unfocused takes the cursor on one
   // touch in its empty area (the box's padding, the band, the thread's background, the composer frame), made inside that touch's
   // own event, which is what lets the keyboard rise. A control (×, −, ⋯, a link), a bubble and a selection in the box keep their

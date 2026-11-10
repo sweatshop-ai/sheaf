@@ -228,15 +228,15 @@ def test_a_comment_on_a_selection_dragged_in_the_root_reaches_the_file(any_front
 
 def test_the_mounted_page_keeps_the_mode_switch_and_a_selection_only_opens_the_box_in_comment_mode(any_front):
     f = any_front.open()
-    until(lambda: f.has("#rd-mode"), what="the Comment / Edit switch in the root")
-    assert f.js("return [...root.querySelectorAll('#rd-mode button')].map(b => b.textContent);") == ["Comment", "Edit"]
+    until(lambda: f.has("#rd-mode"), what="the Edit / Save toggle in the root")
+    assert f.js("return [...root.querySelectorAll('#rd-mode button')].map(b => b.innerText.trim());") == ["Edit (E)"]
     f.click("#rd-mode button[data-m=edit]")
     until(lambda: f.has(".rd-root.rd-editing"), what="edit mode")
     f.drag(f.point("main", "about", end=False), f.point("main", "apples", end=True))
     f.page.wait_for_timeout(700)                          # past the 350 ms a selection must stand still
     assert not f.has("#rd-popover") and not f.has("#rd-comment-btn")
-    f.click("#rd-mode button[data-m=comment]")
-    until(lambda: not f.has(".rd-root.rd-editing"), what="comment mode")
+    f.click("#rd-mode button[data-m=save]")
+    until(lambda: not f.has(".rd-root.rd-editing"), what="comment mode")      # Save with nothing changed: back to Comment mode
     f.click("main p")                                     # a press inside the standing selection would start a drag of its text
     f.drag(f.point("main", "about", end=False), f.point("main", "apples", end=True))
     until(lambda: f.has("#rd-popover textarea"), what="the box, opened by the selection")

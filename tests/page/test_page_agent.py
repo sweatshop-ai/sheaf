@@ -51,7 +51,7 @@ def test_a_tell_that_cannot_work_is_no_button_and_the_box_says_why_with_the_hubs
     assert tab.page.query_selector("#rd-popover button.rd-tell") is None
     assert tab.page.query_selector("#rd-popover button[data-f=ok]") is not None
     assert tab.page.query_selector("#rd-popover button.rd-ask") is None      # Ask was retired (SPEC 11.2)
-    assert tab.page.inner_text("#rd-popover .rd-agent-line:nth-of-type(1)") == LINES["tell"]
+    assert tab.page.locator("#rd-popover .rd-agent-line").count() == 0      # restated on 2026-11-09 (G): no line under the field
     assert tab.page.text_content("#rd-agent") == LINES["tell"]       # the menu says it too
 
 
@@ -70,7 +70,7 @@ def test_a_thread_and_its_reply_form_say_why_their_tell_button_cannot_work(tab):
     assert tab.page.query_selector("#rd-popover .rd-form button.rd-tell") is None
     assert tab.page.query_selector("#rd-popover .rd-form button.rd-ask") is None
     assert tab.page.query_selector("#rd-popover .rd-form button[data-f=ok]") is not None
-    assert tab.page.locator("#rd-popover .rd-form .rd-agent-line").all_inner_texts() == list(LINES.values())
+    assert tab.page.locator("#rd-popover .rd-agent-line").count() == 0      # restated (G): the reason is in the menu's Agent line only
 
 
 def write_config(text):

@@ -2670,7 +2670,8 @@ var create = function (ROOT, CFG, opts) {
     var t = e.touches && e.touches[0];
     if (emptyTouch && t && (Math.abs(t.clientX - emptyTouch.x) > 8 || Math.abs(t.clientY - emptyTouch.y) > 8)) emptyTouch.moved = true;
   }, true);
-  listen(document, 'touchend', function (e) {
+  // On the mounted page the event is heard on the root: from the document, its target is the host.
+  listen(PAGE_EV, 'touchend', function (e) {
     var from = emptyTouch, box = ROOT.getElementById('rd-popover');
     emptyTouch = null;
     if (!COARSE.matches || !from || from.moved || !box || !e.target.closest || !box.contains(e.target)) return;

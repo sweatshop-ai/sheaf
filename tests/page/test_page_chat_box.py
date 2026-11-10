@@ -10,6 +10,7 @@ pytestmark = pytest.mark.page
 
 FIELD = "#rd-popover textarea"
 THREAD = "#rd-popover .rd-msg"
+THREAD_BOX = "#rd-popover"
 
 
 def open_thread(tab, site):
@@ -509,6 +510,39 @@ def test_choosing_edit_again_on_an_unchanged_edit_form_opens_it_afresh(tab, site
     choose_edit(p)
     assert p.input_value(FIELD) == "Mine"
     assert p.locator("#rd-popover [data-f=no]").count() == 1
+
+
+def second_form_beside_the_first(p):
+    """What a failed send of another thread leaves in this box: a second form, the cursor in it."""
+    p.evaluate("""() => {
+      const first = document.querySelector('#rd-popover .rd-form');
+      const second = first.cloneNode(true);
+      second.querySelector('textarea').value = 'the other form';
+      first.after(second);
+      second.querySelector('textarea').focus();
+    }""")
+
+
+def an_answer_arrives(site, p):
+    """A reply written to the file: the page redraws the thread (fillPopover)."""
+    update_file(site.file, lambda t: rdc.reply(t, "c1", "An answer", "Bea", "2026-10-14T11:00"))
+    until(lambda: "An answer" in p.inner_text(THREAD_BOX), what="the answer in the thread")
+
+
+def test_a_redraw_leaves_the_cursor_in_the_form_it_was_in(tab, site):
+    """With two forms in the box the cursor must not jump to the first while the second is typed in."""
+    p = open_thread(tab, site)
+    second_form_beside_the_first(p)
+    an_answer_arrives(site, p)
+    assert p.evaluate("document.activeElement.value") == "the other form", "the cursor jumped to the first form"
+
+
+def test_a_redraw_leaves_the_cursor_in_the_only_form(tab, site):
+    p = open_thread(tab, site)
+    p.focus(FIELD)
+    an_answer_arrives(site, p)
+    assert p.evaluate("document.activeElement.tagName") == "TEXTAREA"
+    assert p.locator("#rd-popover .rd-form").count() == 1
 
 
 def test_closing_an_edit_form_that_was_not_changed_leaves_nothing_unsent(tab, site):

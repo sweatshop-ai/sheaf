@@ -19,7 +19,7 @@ BUTTON_CLASS = "rd-copybtn"
 TOKEN = "RDCOPYMARKQX7"
 
 # The first line of a top-level quote, and then at least one line with words.
-_LINE = re.compile(r"(\s{0,3}>[ \t]?)\[!COPY\][ \t]*(?=\r?(?:\n|$))")
+_LINE = re.compile(r"(\s{0,3}>[ \t]?)" + re.escape(MARKER) + r"[ \t]*(?=\r?(?:\n|$))")
 _WORDS = re.compile(r"^[ \t>]*[^\s>]", re.M)
 
 
@@ -53,7 +53,7 @@ def mark(fragment: str, page: bool) -> str:
     open_tag = f'<blockquote class="{PAGE_CLASS}">' if page else "<blockquote>"
     fragment = _START.sub(lambda m: open_tag + m.group(1) + ("" if m.group(2).startswith("</p>") else "<p>"),
                           fragment)
-    return fragment.replace(TOKEN, MARKER)      # one pandoc did not put first in a quote shows as written
+    return fragment.replace(TOKEN, MARKER)      # a word left anywhere else (not first in its quote) shows as the marker
 
 
 # A page block's copy blocks go to pandoc with a paragraph of TOKEN first in each, which comes back as the

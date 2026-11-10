@@ -50,7 +50,7 @@ def _sanitize(fragment: str, source=None, strays=None) -> str:
         _unwrap_strays(soup, source, strays)
     for el in soup.select("[contenteditable]"):
         del el["contenteditable"]
-    for el in soup.select(".rd-lock, .rd-blockmark, .rd-copybtn"):
+    for el in soup.select(f".rd-lock, .rd-blockmark, .{copyblock.BUTTON_CLASS}"):
         el.decompose()
     # The byline under the title shares the title's block on the page; it is drawn
     # from --by, never from the .md, so an edited title must not carry it back.
@@ -771,12 +771,13 @@ def ticked_html(block, k: int, tick: bool = True):
 
     if not block.editable:
         return None
-    r = _pandoc.run(["-f", "gfm", "-t", "html5", "--no-highlight"], block.content)
+    r = _pandoc.run(["-f", "gfm", "-t", "html5", "--no-highlight"], copyblock.hide(block.content))
     if r.returncode != 0:
         return None
     # The page shows each comment as its anchor; the anchor is what keeps the comment through a save.
     soup = BeautifulSoup(COMMENT_HTML_RE.sub(
-        lambda m: f'<span class="rd-anchor" data-rd-id="{m.group(1)}"></span>', r.stdout), "html.parser")
+        lambda m: f'<span class="rd-anchor" data-rd-id="{m.group(1)}"></span>', copyblock.mark(r.stdout, page=True)),
+        "html.parser")
     found = soup.select('input[type="checkbox"]')
     marks = list(TASK_MARK_RE.finditer(block.content))
     if not 0 <= k < min(len(found), len(marks)) or found[k].has_attr("checked") == tick:

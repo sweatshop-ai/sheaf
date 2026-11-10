@@ -1989,8 +1989,8 @@ var create = function (ROOT, CFG, opts) {
       takeTelling(j.telling);
     } else telling[id] = true;
   }
-  // The Tell entry of a form: a working button when the agent can be told, a disabled one carrying
-  // its line when it cannot (textForm shows the line).
+  // The Tell entry of a form: a working button when the agent can be told; when it cannot, the form has no Tell
+  // (the reason is the menu's Agent line, none under the field).
   function sendButtons(label) {
     return canTell ? [{ k: 'tell', label: 'Tell ' + AGENT, cls: 'rd-tell', tip: tellTip() }]
                    : [{ k: 'ok', label: label }, { off: lineOf('tell') }];

@@ -43,6 +43,27 @@ def test_the_page_words_selected_again_after_the_open_are_let_go_and_the_caret_s
     assert got["marked"] == ["Second paragraph"], "the passage is no longer marked"
 
 
+def test_a_finger_still_down_after_the_selection_appeared_opens_nothing_until_its_release_and_the_release_opens_it_with_the_cursor(phone):
+    """Trial of 2026-11-10: a long press followed by a slide kept the finger down past the 600 ms settle; the timer opened the box and
+    cut the selection under the moving finger, outside any gesture. The release is the page's moment."""
+    p = phone.page
+    p.evaluate(TOUCH_START)
+    select_by_touch(p, at(MAIN, "Second"), at(MAIN, "paragraph", None))
+    p.wait_for_timeout(1000)            # well past the settle (600 ms on a phone), finger still down
+    assert p.locator("#rd-popover").count() == 0, "the timer opened the box under a finger that was still down"
+    got = p.evaluate(TOUCH_END)
+    assert got == {"box": True, "active": "TEXTAREA"}, got
+
+
+def test_a_touch_that_never_ended_does_not_hold_the_settle_for_ever(phone):
+    p = phone.page
+    p.evaluate(TOUCH_START)
+    p.evaluate("window.__ends = 0; document.addEventListener('touchend', () => window.__ends++, true)")
+    p.evaluate("document.dispatchEvent(new TouchEvent('touchcancel', {bubbles: true}))")     # the finger is gone, no touchend
+    select_by_touch(p, at(MAIN, "Second"), at(MAIN, "paragraph", None))
+    p.wait_for_selector(FIELD)          # the settle opens it: the cancelled touch is not a finger down
+
+
 def test_a_selection_of_the_page_long_after_the_open_is_left_alone(phone):
     p = phone.page
     opened_by_touchend(p)

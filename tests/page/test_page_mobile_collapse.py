@@ -55,13 +55,21 @@ def test_a_finger_still_down_after_the_selection_appeared_opens_nothing_until_it
     assert got == {"box": True, "active": "TEXTAREA"}, got
 
 
-def test_a_touch_that_never_ended_does_not_hold_the_settle_for_ever(phone):
+def test_a_touch_cancelled_before_the_selection_is_not_a_finger_down_and_the_settle_opens_the_box(phone):
     p = phone.page
     p.evaluate(TOUCH_START)
-    p.evaluate("window.__ends = 0; document.addEventListener('touchend', () => window.__ends++, true)")
     p.evaluate("document.dispatchEvent(new TouchEvent('touchcancel', {bubbles: true}))")     # the finger is gone, no touchend
     select_by_touch(p, at(MAIN, "Second"), at(MAIN, "paragraph", None))
-    p.wait_for_selector(FIELD)          # the settle opens it: the cancelled touch is not a finger down
+    p.wait_for_selector(FIELD, timeout=5000)     # the settle (600 ms) opens it, well before the 10 s ceiling
+
+
+def test_a_touch_that_never_ended_stops_holding_the_settle_after_ten_seconds(phone):
+    """No touchend and no touchcancel reached the page (restated 2026-11-10: the old test fired a touchcancel, so the ceiling was never reached)."""
+    p = phone.page
+    p.evaluate(TOUCH_START)
+    p.wait_for_timeout(10300)                    # the touch start is older than FINGER_MAX_MS and nothing ended it
+    select_by_touch(p, at(MAIN, "Second"), at(MAIN, "paragraph", None))
+    p.wait_for_selector(FIELD, timeout=5000)     # the settle opens it; a finger still counting would hold it back
 
 
 def test_a_selection_of_the_page_long_after_the_open_is_left_alone(phone):

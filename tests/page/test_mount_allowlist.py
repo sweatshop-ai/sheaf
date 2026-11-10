@@ -17,6 +17,7 @@ sync_api = pytest.importorskip("playwright.sync_api")
 
 MOUNT_JS = (Path(sheafmd.__file__).parent / "page" / "mount.js").read_text(encoding="utf-8")
 ORIGIN = "http://sheaf.test"
+pytestmark = pytest.mark.page      # these need the session's browsers (the `chromium` fixture), which only the page step of CI installs
 ENGINES = ["chromium", "firefox", "webkit"]
 
 # Every payload sets a counter, or asks for a stranger's address. None of them is sanitised before it gets here.

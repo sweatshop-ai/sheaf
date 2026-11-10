@@ -46,6 +46,7 @@ PAGE = """<!doctype html><html><body>
   };
 </script></body></html>"""
 
+pytestmark = pytest.mark.page      # these need the session's browsers (the `chromium` fixture), which only the page step of CI installs
 ENGINES = ["chromium", "firefox", "webkit"]
 
 

@@ -2,7 +2,9 @@
 
 **What to build:** Le test d'Échap (keep / drawKept / closePopover) échoue parfois en CI alors qu'il passe sur un portable. La cause n'est pas établie. Issu de la review du bug hunt de la PR #238 (P2 n° 4) : https://github.com/sweatshop-ai/sheaf/pull/238#issuecomment-6772147551
 
-**Blocked by:** 04
+**Blocked by:**
+- 04
+- External: la CI doit rejouer l'échec pour que le relevé de 54abdda en donne la cause
 
 **Status:** ready-for-agent
 

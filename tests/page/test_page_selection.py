@@ -295,7 +295,7 @@ def test_in_edit_mode_typing_over_a_selected_word_raises_no_button_and_paints_no
 def test_a_word_selected_in_edit_mode_gives_the_whole_run_when_the_person_switches_to_comment_and_selects_again(editing):
     p = editing.page
     double_click(p, "main strong", "deadline")
-    p.click("#rd-mode button[data-m=comment]")
+    p.click("#rd-mode button[data-m=save]")
     select(p, at("main strong", "deadline"), at("main strong", "deadline", None))
     p.wait_for_selector(FIELD)
     assert quoted(p) == "Important note about the deadline"
@@ -314,30 +314,48 @@ def phone(touch_tab, site):
     return touch_tab.open()
 
 
-def test_a_touch_selection_with_no_mouse_event_raises_the_comment_button(phone):
-    select_by_touch(phone.page, at(MAIN, "Second"), at(MAIN, "paragraph", None))
-    phone.page.wait_for_selector(BTN)
-    assert phone.page.locator(BTN).is_enabled()
+def touch_box(phone, start="Second", end="paragraph"):
+    """A selection by touch, and the box it opens by itself once settled."""
+    select_by_touch(phone.page, at(MAIN, start), at(MAIN, end, None))
+    phone.page.wait_for_selector(FIELD)
+    return phone.page
 
 
-def test_a_touch_selection_gives_a_button_that_opens_the_form_and_the_comment_is_saved(phone):
-    select_by_touch(phone.page, at(MAIN, "Second"), at(MAIN, "paragraph", None))
+def refuse_by_touch(phone):
+    select_by_touch(phone.page, at(BOLD_P, "Some "), at(MAIN, "pears", None))
     phone.page.wait_for_selector(BTN)
+    return phone.page
+
+
+# Restated on 2026-11-09 (ticket 03, E): on a phone a usable selection opens the box by itself, as with a mouse; no bar is offered
+# for it. The bar stays only for a refused selection (a disabled button with its reason). The tests of the tappable bar are gone:
+# a tap on the bar, a finger that travels from it, a click eaten by the browser, the thumb that collapses the selection, and the
+# 2 s thumb timer (six tests) no longer apply, since nothing tappable is offered; their ground is the touchend test below.
+
+def test_a_touch_selection_with_no_mouse_event_opens_the_box_by_itself_with_no_bar(phone):
+    p = touch_box(phone)
+    assert p.locator(BTN).count() == 0, "a bar was offered for a usable selection"
+    assert quoted(p) == "Second paragraph"
+
+
+def test_a_touch_selection_opens_a_box_whose_comment_is_saved(phone):
+    select_by_touch(phone.page, at(MAIN, "Second"), at(MAIN, "paragraph", None))
     (c,) = comment_on_selection(phone, "From the phone.")
     assert c.quote == "Second paragraph"
 
 
 def test_a_touch_selection_ending_inside_a_bold_word_is_widened(phone):
     select_by_touch(phone.page, at(BOLD_P, "Some "), at(BOLD_P + " strong", "bold word", 2))
-    phone.page.wait_for_selector(BTN)
-    assert selected(phone.page) == "Some bold word"
+    phone.page.wait_for_selector(FIELD)
+    assert quoted(phone.page) == "Some bold word"
+    assert phone.page.evaluate("[...(CSS.highlights.get('rd-widened') || [])].map(String)") == ["Some bold word"]      # the cursor is in the field: the passage is marked
 
 
 def test_a_touch_selection_across_two_paragraphs_gets_the_disabled_button_with_its_reason(phone):
-    select_by_touch(phone.page, at(BOLD_P, "Some "), at(MAIN, "pears", None))
-    phone.page.wait_for_selector(BTN)
+    refuse_by_touch(phone)
     assert phone.page.locator(BTN).is_disabled()
     assert phone.page.locator(BTN).inner_text() == "One paragraph at a time"
+    assert phone.page.locator(FIELD).count() == 0
 
 
 def test_a_touch_selection_in_code_gets_the_disabled_button_with_its_reason(phone):
@@ -346,38 +364,36 @@ def test_a_touch_selection_in_code_gets_the_disabled_button_with_its_reason(phon
     assert phone.page.locator(BTN).is_disabled()
 
 
-def test_dragging_a_handle_raises_one_button_for_the_selection_it_ends_on(phone):
-    """Each step of a drag fires selectionchange; the button waits for the drag to settle."""
+def test_dragging_a_handle_opens_one_box_for_the_selection_it_ends_on(phone):
+    """Each step of a drag fires selectionchange; the box waits for the drag to settle."""
     p = phone.page
     for end in ("Sec", "Second", "Second para"):
         select_by_touch(p, at(MAIN, "Second"), at(MAIN, end, None))
         p.wait_for_timeout(40)
-        assert p.locator(BTN).count() == 0
-    p.wait_for_selector(BTN)
-    assert p.locator(BTN).count() == 1
+        assert p.locator("#rd-popover").count() == 0
+    p.wait_for_selector(FIELD)
+    assert p.locator("#rd-popover").count() == 1
+    assert quoted(p) == "Second para"
 
 
-def test_clearing_a_touch_selection_removes_the_button(phone):
-    select_by_touch(phone.page, at(MAIN, "Second"), at(MAIN, "paragraph", None))
-    phone.page.wait_for_selector(BTN)
+def test_clearing_a_refused_touch_selection_removes_the_button(phone):
+    refuse_by_touch(phone)
     phone.page.evaluate("getSelection().removeAllRanges()")
     phone.page.wait_for_selector(BTN, state="detached")
 
 
 def test_typing_in_the_comment_form_raises_no_button(phone):
-    select_by_touch(phone.page, at(MAIN, "Second"), at(MAIN, "paragraph", None))
-    phone.page.wait_for_selector(BTN)
-    phone.page.click(BTN)
-    phone.page.fill("#rd-popover textarea", "words typed")
-    phone.page.wait_for_timeout(600)
-    assert phone.page.locator(BTN).count() == 0
+    p = touch_box(phone)
+    p.fill(FIELD, "words typed")
+    p.wait_for_timeout(900)
+    assert p.locator(BTN).count() == 0
+    assert p.locator("#rd-popover").count() == 1
 
 
-def test_on_a_phone_the_button_is_a_fixed_bar_at_the_foot_of_the_screen_not_beside_the_selection(phone):
+def test_the_refused_selections_bar_is_fixed_at_the_foot_of_the_screen_not_beside_the_selection(phone):
     """iOS draws its own callout (Copy / Search / >) beside the selection, above or below it, over
-    anything there: the button waits at the foot of the screen, where no callout is."""
-    select_by_touch(phone.page, at(MAIN, "Second"), at(MAIN, "paragraph", None))
-    phone.page.wait_for_selector(BTN)
+    anything there: the bar waits at the foot of the screen, where no callout is."""
+    refuse_by_touch(phone)
     assert phone.page.evaluate("getComputedStyle(document.querySelector('#rd-comment-btn')).position") == "fixed"
     b = phone.page.locator(BTN).bounding_box()
     assert 0 <= b["x"] and b["x"] + b["width"] <= 390
@@ -388,59 +404,14 @@ def test_on_a_phone_the_button_is_a_fixed_bar_at_the_foot_of_the_screen_not_besi
     assert phone.page.locator(BTN).bounding_box()["y"] == b["y"]
 
 
-def test_a_selection_at_the_foot_of_a_phone_is_not_covered_by_the_button(phone):
-    phone.page.evaluate("""() => { const p = [...document.querySelectorAll('main p')].find(e => e.textContent.includes('Second paragraph'));
+def test_a_refused_selection_at_the_foot_of_a_phone_is_not_covered_by_the_bar(phone):
+    phone.page.evaluate("""() => { const p = [...document.querySelectorAll('main p')].find(e => e.textContent.includes('pears'));
       window.scrollBy(0, p.getBoundingClientRect().bottom - window.innerHeight + 4); }""")
-    select_by_touch(phone.page, at(MAIN, "Second"), at(MAIN, "paragraph", None))
-    phone.page.wait_for_selector(BTN)
+    refuse_by_touch(phone)
     b = phone.page.locator(BTN).bounding_box()
     sel = phone.page.evaluate("(() => { const r = getSelection().getRangeAt(0).getBoundingClientRect(); return {y: r.y, h: r.height}; })()")
     assert 0 <= b["y"] and b["y"] + b["height"] <= 844
     assert b["y"] >= sel["y"] + sel["h"] or b["y"] + b["height"] <= sel["y"]
-
-
-def test_a_finger_that_travels_from_the_button_is_not_a_tap(phone):
-    select_by_touch(phone.page, at(MAIN, "Second"), at(MAIN, "paragraph", None))
-    phone.page.wait_for_selector(BTN)
-    x, y = _centre(phone.page.locator(BTN).bounding_box())
-    phone.page.evaluate("""([x, y]) => {
-      const b = document.querySelector('#rd-comment-btn'), t = (cy) => new Touch({identifier: 1, target: b, clientX: x, clientY: cy});
-      b.dispatchEvent(new TouchEvent('touchstart', {bubbles: true, cancelable: true, touches: [t(y)], changedTouches: [t(y)]}));
-      b.dispatchEvent(new TouchEvent('touchend', {bubbles: true, cancelable: true, touches: [], changedTouches: [t(y - 20)]})); }""", [x, y])
-    phone.page.wait_for_timeout(500)
-    assert phone.page.locator("#rd-popover").count() == 0
-    phone.page.touchscreen.tap(x, y)
-    phone.page.wait_for_selector("#rd-popover textarea")
-
-
-def test_a_tap_opens_the_form_even_when_the_browser_eats_the_click(phone):
-    """iOS can take a tap on a selection for the end of the selection and send no click."""
-    select_by_touch(phone.page, at(MAIN, "Second"), at(MAIN, "paragraph", None))
-    phone.page.wait_for_selector(BTN)
-    phone.page.evaluate("window.addEventListener('click', e => e.stopImmediatePropagation(), true)")
-    phone.page.touchscreen.tap(*_centre(phone.page.locator(BTN).bounding_box()))
-    phone.page.wait_for_selector("#rd-popover textarea")
-    assert "Second paragraph" in phone.page.locator("#rd-popover .rd-quote").inner_text()
-
-
-def test_a_tap_that_clears_the_selection_at_touchstart_still_opens_the_form_with_that_selection(phone):
-    select_by_touch(phone.page, at(MAIN, "Second"), at(MAIN, "paragraph", None))
-    phone.page.wait_for_selector(BTN)
-    phone.page.evaluate("""() => {
-      document.addEventListener('touchstart', () => getSelection().removeAllRanges(), true);
-      window.addEventListener('click', e => e.stopImmediatePropagation(), true); }""")
-    phone.page.touchscreen.tap(*_centre(phone.page.locator(BTN).bounding_box()))
-    phone.page.wait_for_selector("#rd-popover textarea")
-    assert "Second paragraph" in phone.page.locator("#rd-popover .rd-quote").inner_text()
-
-
-def test_one_tap_opens_one_form_when_the_click_arrives_too(phone):
-    select_by_touch(phone.page, at(MAIN, "Second"), at(MAIN, "paragraph", None))
-    phone.page.wait_for_selector(BTN)
-    phone.page.touchscreen.tap(*_centre(phone.page.locator(BTN).bounding_box()))
-    phone.page.wait_for_selector("#rd-popover textarea")
-    phone.page.wait_for_timeout(500)
-    assert phone.page.locator("#rd-popover").count() == 1
 
 
 def test_a_touch_selection_across_two_table_cells_gets_the_disabled_button_with_its_reason(phone):
@@ -449,62 +420,52 @@ def test_a_touch_selection_across_two_table_cells_gets_the_disabled_button_with_
     assert phone.page.locator(BTN).inner_text() == "One table cell at a time"
 
 
-def test_the_button_stays_when_the_selection_collapses_under_the_thumb_that_taps_it(phone):
-    select_by_touch(phone.page, at(MAIN, "Second"), at(MAIN, "paragraph", None))
-    phone.page.wait_for_selector(BTN)
-    phone.page.dispatch_event(BTN, "pointerdown")
-    phone.page.evaluate("getSelection().removeAllRanges()")
-    phone.page.wait_for_timeout(700)
-    phone.page.click(BTN)
-    phone.page.wait_for_selector("#rd-popover textarea")
-
-
 def test_a_mouse_that_was_never_let_go_does_not_silence_a_touch_selection(phone):
     phone.page.evaluate("document.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}))")
     phone.page.evaluate("window.dispatchEvent(new Event('blur'))")
-    select_by_touch(phone.page, at(MAIN, "Second"), at(MAIN, "paragraph", None))
-    phone.page.wait_for_selector(BTN)
+    touch_box(phone)
 
 
 def test_a_late_selectionchange_does_not_raise_a_button_over_the_open_form(phone):
-    """Widening a selection redraws it and fires one more selectionchange, after the button is up."""
+    """Widening a selection redraws it and fires one more selectionchange, after the box is up."""
     select_by_touch(phone.page, at(BOLD_P, "Some "), at(BOLD_P + " strong", "bold word", 2))
-    phone.page.wait_for_selector(BTN)
-    phone.page.click(BTN)
-    phone.page.wait_for_selector("#rd-popover textarea")
-    phone.page.wait_for_timeout(800)
+    phone.page.wait_for_selector(FIELD)
+    phone.page.wait_for_timeout(1000)
     assert phone.page.locator(BTN).count() == 0
     assert phone.page.locator("#rd-popover").count() == 1
 
 
-def test_a_tap_that_never_landed_does_not_leave_a_button_for_the_old_passage_after_a_new_selection(phone):
-    select_by_touch(phone.page, at(MAIN, "Second"), at(MAIN, "paragraph", None))
-    phone.page.wait_for_selector(BTN)
-    phone.page.dispatch_event(BTN, "pointerdown")        # the finger went down on the button and slid off: no click, no tap
-    select_by_touch(phone.page, at(MAIN, "first"), at(MAIN, "item", None))        # within the 2 s: a long press elsewhere
-    phone.page.wait_for_timeout(2600)                    # the thumb's 2 s are over
-    phone.page.click(BTN)
-    phone.page.wait_for_selector("#rd-popover textarea")
-    quote = phone.page.locator("#rd-popover .rd-quote").inner_text()
-    assert "first item" in quote and "Second" not in quote
+def test_the_passage_stays_marked_and_quoted_when_the_selection_collapses_as_the_field_takes_the_cursor(phone):
+    p = touch_box(phone)
+    marked = "[...(CSS.highlights.get('rd-widened') || [])].map(String)"
+    p.evaluate("getSelection().removeAllRanges()")
+    p.wait_for_timeout(900)
+    assert p.evaluate(marked) == ["Second paragraph"]
+    assert quoted(p) == "Second paragraph" and p.locator("#rd-popover").count() == 1
 
 
-def test_a_second_tap_on_the_old_bar_inside_the_two_seconds_opens_the_form_on_the_new_passage(phone):
-    select_by_touch(phone.page, at(MAIN, "Second"), at(MAIN, "paragraph", None))
-    phone.page.wait_for_selector(BTN)
-    x, y = _centre(phone.page.locator(BTN).bounding_box())
-    phone.page.dispatch_event(BTN, "pointerdown")        # the finger went down on the bar and slid off
-    select_by_touch(phone.page, at(MAIN, "first"), at(MAIN, "item", None))        # within the 2 s: a long press elsewhere
-    phone.page.wait_for_timeout(800)                     # the selection has settled, the thumb's 2 s are not over
-    phone.page.touchscreen.tap(x, y)                     # a second tap on the bar, where it stood
-    phone.page.wait_for_selector("#rd-popover textarea")
-    quote = phone.page.locator("#rd-popover .rd-quote").inner_text()
-    assert "first item" in quote and "Second" not in quote
+TOUCH_END = """() => { document.dispatchEvent(new TouchEvent('touchend', {bubbles: true, cancelable: true, composed: true}));
+  const a = document.activeElement; return {box: !!document.querySelector('#rd-popover'), active: a && a.tagName}; }"""
+TOUCH_START = "() => document.dispatchEvent(new TouchEvent('touchstart', {bubbles: true, cancelable: true, composed: true}))"
 
 
-def test_a_button_whose_tap_never_clicked_goes_when_the_selection_is_gone(phone):
-    select_by_touch(phone.page, at(MAIN, "Second"), at(MAIN, "paragraph", None))
-    phone.page.wait_for_selector(BTN)
-    phone.page.dispatch_event(BTN, "pointerdown")
-    phone.page.evaluate("getSelection().removeAllRanges()")
-    phone.page.wait_for_selector(BTN, state="detached", timeout=4000)
+def test_the_touchend_that_ends_a_selection_opens_the_box_and_puts_the_cursor_in_the_field_in_that_same_event(phone):
+    """iOS raises the keyboard for a focus() made inside a touch event and not for one made later: no settle delay here."""
+    p = phone.page
+    p.evaluate(TOUCH_START)
+    select_by_touch(p, at(MAIN, "Second"), at(MAIN, "paragraph", None))
+    got = p.evaluate(TOUCH_END)         # in the same task, 600 ms before the settle would have opened it
+    assert got == {"box": True, "active": "TEXTAREA"}, got
+
+
+def test_a_tap_away_from_a_standing_selection_does_not_open_the_box(phone):
+    """The finger lands on a selection that stands (same words at touchstart and touchend): that touch ends nothing, and the tap
+    then clears the selection, so the settled selection that follows is empty."""
+    p = phone.page
+    select_by_touch(p, at(MAIN, "Second"), at(MAIN, "paragraph", None))
+    p.evaluate(TOUCH_START)
+    got = p.evaluate(TOUCH_END)
+    assert got["box"] is False, got
+    p.evaluate("getSelection().removeAllRanges()")
+    p.wait_for_timeout(900)
+    assert p.locator("#rd-popover").count() == 0

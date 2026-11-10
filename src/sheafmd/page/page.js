@@ -478,10 +478,26 @@ var create = function (ROOT, CFG, opts) {
   }
 
   if (canEdit) {
-    var modes = el('div', { id: 'rd-mode' }, '<button data-m="comment">Comment</button><button data-m="edit">Edit</button>');
-    modes.addEventListener('click', function (e) {
-      var m = e.target.getAttribute('data-m');
-      if (m) setEditing(m === 'edit');
+    // One button, a toggle: Edit (E) in Comment mode, Save (Ctrl+S) in Edit mode. Both labels sit in one grid cell, the
+    // hidden one keeping the room, so the button is the same size either way. A touch screen has no keys to hint at.
+    var keys = !window.matchMedia('(pointer: coarse)').matches;
+    var modes = el('div', { id: 'rd-mode' }, '<button data-m="edit"><span class="rd-l-edit">Edit' + (keys ? ' (E)' : '') +
+                   '</span><span class="rd-l-save">Save' + (keys ? ' (Ctrl+S)' : '') + '</span></button>');
+    var leaving = false;
+    modes.addEventListener('click', async function (e) {
+      var b = e.target.closest ? e.target.closest('button') : null, m = b && b.getAttribute('data-m');
+      if (m === 'edit') { setEditing(true); return; }
+      if (m !== 'save' || leaving) return;
+      // Save, then Comment mode. A save that failed or was refused (save() has said so) keeps the person in Edit, and so
+      // does text typed while the request was out: nothing typed is left without its mode.
+      leaving = true;
+      try {
+        if (await save() && !dirty().length) {
+          setEditing(false);
+          // A save that merged reloads the page and the reload brings back the mode it was written with.
+          try { var kept = JSON.parse(sessionStorage.getItem(KEYS + 'rd-keep') || 'null'); if (kept) { kept.editing = false; sessionStorage.setItem(KEYS + 'rd-keep', JSON.stringify(kept)); } } catch (x) {}
+        }
+      } finally { leaving = false; }
     });
     BODY.appendChild(modes);
   }
@@ -606,6 +622,8 @@ var create = function (ROOT, CFG, opts) {
     var d = dirty().length;
     btn.classList.toggle('on', editing);
     btn.classList.toggle('dirty', d > 0);
+    var tg = document.getElementById('rd-mode');         // the Edit / Save toggle wears the ball's colour, from the same classes
+    if (tg) { tg.classList.toggle('on', editing); tg.classList.toggle('dirty', d > 0); }
     btn.title = stateText();
     var st = q('#rd-state');
     if (st) st.textContent = stateText();
@@ -740,6 +758,7 @@ var create = function (ROOT, CFG, opts) {
     if (!canEdit) return;
     editing = on;
     BODY.classList.toggle('rd-editing', on);
+    var tg = modes.querySelector('button'); if (tg) tg.setAttribute('data-m', on ? 'save' : 'edit');
     blocks.forEach(function (b) {
       var ok = editable.has(b.i);
       b.nodes.forEach(function (n) {
@@ -1661,19 +1680,25 @@ var create = function (ROOT, CFG, opts) {
     var sc = pop.querySelector('.rd-scroll');
     if (!sc) return;
     sc.style.minHeight = '';
-    sc.style.minHeight = Math.min(sc.scrollHeight, THREAD_FLOOR) + 'px';
+    // The floor is at least the last message, whole (up to LAST_ROOM): the thread opens on it and the field does not cut it.
+    var msgs = sc.querySelectorAll('.rd-msg'), lastH = msgs.length ? msgs[msgs.length - 1].offsetHeight + 8 : 0;
+    sc.style.minHeight = Math.min(sc.scrollHeight, Math.max(THREAD_FLOOR, Math.min(lastH, LAST_ROOM))) + 'px';
   }
   function replace() {
     if (!pop) return;
+    var sc = pop.querySelector('.rd-scroll'), atEnd = !!sc && sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 4;
     keepThread();
-    if (dock()) return;
-    undock();
-    if (pop._target && pop._target.isConnected && pop.style.position !== 'fixed') place(pop, pop._target);
+    if (!dock()) {
+      undock();
+      if (pop._target && pop._target.isConnected && pop.style.position !== 'fixed') place(pop, pop._target);
+    }
+    if (atEnd) sc.scrollTop = sc.scrollHeight;       // a thread that was at its last message stays there when the box changes size
   }
   // A touch screen's keyboard shrinks the visual viewport and leaves the layout viewport as it was (iOS), so a form
   // placed in the text can lie behind it. A popover with a form is docked, fixed, to the foot of what can be seen,
   // and above the suggestion bar and the AutoFill pill that iOS draws over the page there.
   var THREAD_FLOOR = 84;                // px of a thread kept in view when the form takes the rest: the author line and two lines
+  var LAST_ROOM = 160;                  // px at most that the floor grows to keep the last message whole (a longer one scrolls)
   var KEY_ROOM = 56;                    // px kept clear above the keyboard, for its suggestion bar and the AutoFill pill
   var DOCK_GAP = 8, DOCK_SIDE = 16;     // px kept clear of the head of the visible area, and of its sides
   var KEY_MIN = 100, ZOOMED = 1.01;     // a visual viewport this much shorter is a keyboard; a larger scale is a pinch zoom
@@ -1766,8 +1791,8 @@ var create = function (ROOT, CFG, opts) {
     if (m.role === 'action') return '<span class="rd-who rd-who-tell">' + name + '\u2019s action</span>';
     return '<span class="rd-who">' + name + '</span>';
   }
-  // The band of the box: the passage, then Minimize and Close. Closing an open thread resolves it; the little
-  // else the thread offers waits in the small menu.
+  // The band of the box: the passage, then Resolve (−, an open thread only) and Close (×, which keeps everything,
+  // as Escape does). The little else the thread offers waits in the small menu.
   function bandHtml(c) {
     var open = c.status === 'open', more = !open || mine(c);
     return '<div class="rd-head"><div class="rd-quote">“' + esc(c.quote) + '”' +
@@ -1775,9 +1800,8 @@ var create = function (ROOT, CFG, opts) {
       (!canSave ? '' : (more ? '<details class="rd-more"><summary aria-label="More" title="More">\u22EF</summary><div>' +
         (open ? '' : '<button data-a="status">Reopen</button>') +
         (mine(c) ? '<button data-a="edit">Edit</button><button data-a="delete">Delete</button>' : '') + '</div></details>' : '') +
-        '<button data-a="minimize" title="Minimize" aria-label="Minimize">\u2212</button>' +
-        (open ? '<button data-a="status" title="Resolve" aria-label="Resolve">\u00D7</button>'
-              : '<button data-a="minimize" title="Close" aria-label="Close">\u00D7</button>')) + '</div>';
+        (open ? '<button data-a="status" title="Resolve" aria-label="Resolve">\u2212</button>' : '') +
+        '<button data-a="minimize" title="Close" aria-label="Close">\u00D7</button>') + '</div>';
   }
   function thread(c) {
     var h = '<div class="rd-msg' + (mine(c) ? ' rd-mine' : '') + '">' + whoHtml({ by: c.by, role: null }) + '<span class="rd-when">' +
@@ -2015,7 +2039,7 @@ var create = function (ROOT, CFG, opts) {
         if (a === 'minimize') { closePopover(); return; }
         if (a === 'status') {
           var opened = c.status !== 'open';
-          if (!opened && !stashAll()) return;       // × resolves: not while its text has nowhere to go
+          if (!opened && !stashAll()) return;       // − resolves: not while its text has nowhere to go
           op({ op: 'status', id: id, status: opened ? 'open' : 'resolved' }).then(function (j) { if (j && !opened && popId === id) closePopover(); });
         }
         else if (a === 'delete') op({ op: 'delete', id: id });
@@ -2171,18 +2195,14 @@ var create = function (ROOT, CFG, opts) {
     var own = host === pop ? popId : null;       // the thread this form is for; a new comment has none
     var about = own !== null && byId[own] ? byId[own].quote : '';     // its quote, still known once it is gone
     var born = own !== null && byId[own] ? byId[own].at : null;       // its birth: next_id gives a deleted id to the next comment
-    var offs = [];
     var f = el('div', { 'class': 'rd-form' },
       '<textarea' + NO_FILL + ' placeholder="' + WRITE + '"></textarea><div class="rd-actions">' +
       buttons.map(function (b, i) {
-        if (b.off) {
-          if (offs.indexOf(b.off) < 0) offs.push(b.off);
-          return '';
-        }
+        if (b.off) return '';             // Tell is off: the reason is the menu's Agent line, not a line under the field
         return '<button data-f="' + b.k + '" class="' + (i ? 'rd-alt ' : 'rd-send ') + (b.cls || '') + '"' +
                (b.tip || !i ? ' title="' + esc(b.tip || b.label) + '"' : '') + '>' + esc(b.label) + (i ? '' : ARROW) + '</button>';
       }).join('') + (buttons[0].cancel ? '<button class="rd-alt rd-x" data-f="no" title="Cancel">Cancel</button>' : '') +
-      offs.map(function (l) { return '<div class="rd-agent-line">' + esc(l) + '</div>'; }).join('') + '</div>');
+      '</div>');
     f.kept = kept;
     host.appendChild(f);
     // The popover this form belongs to, if it is open; the buttons are looked up again: a live
@@ -2424,14 +2444,13 @@ var create = function (ROOT, CFG, opts) {
 
   // ---- adding a comment -----------------------------------------------------
   var cbtn = null, pending = null;
-  var mouseDown = false, offerTimer = null, thumbOn = false, thumbTimer = null;
+  var mouseDown = false, offerTimer = null;
   var COARSE = window.matchMedia('(pointer: coarse)');   // a touch screen: iOS draws a callout beside the selection
   var BAR_CLEAR = 24;                   // px between the touch bar and a selection before the bar moves out of its way
-  var TAP_SLOP = 8, TAP_MOVE = 10;      // px a finger may be off the button, and may travel, and still tap it
-  var SETTLE = 350;                     // ms a touch selection stands still before the button is offered
+  var SETTLE = 350, SETTLE_TOUCH = 600;  // ms a selection stands still before it is offered; a handle's drag fires many events, so a finger waits longer
   var IN_UI = '#rd-popover, #rd-panel, #rd-menu, #rd-work, #rd-comment-btn, #rd-mode';   // selections that are not the document's
   function unpaintWidened() { if (HL) CSS.highlights.delete('rd-widened'); }
-  function dropCommentBtn() { if (cbtn) { cbtn.remove(); cbtn = null; } clearTimeout(thumbTimer); thumbOn = false; }
+  function dropCommentBtn() { if (cbtn) { cbtn.remove(); cbtn = null; } }
   function hideCommentBtn() { dropCommentBtn(); unpaintWidened(); }
   // One function decides what a selection is, on every mouseup and every settled selectionchange
   // (SPEC 10.4, D24): it is trimmed of what the renderer added, widened to the whole of a
@@ -2532,12 +2551,11 @@ var create = function (ROOT, CFG, opts) {
     if (!t) return;
     pending = t;
     // A refused selection gets the button's place, disabled, with the reason as its label.
-    cbtn = el('button', t.error ? { id: 'rd-comment-btn', disabled: '', title: t.error } : { id: 'rd-comment-btn' },
-              t.error || (COARSE.matches ? WRITE : 'Comment'));
+    cbtn = el('button', t.error ? { id: 'rd-comment-btn', disabled: '', title: t.error } : { id: 'rd-comment-btn' }, t.error || 'Comment');
     BODY.appendChild(cbtn);
-    if (COARSE.matches) {
+    if (COARSE.matches && t.error) {
       // A touch screen has a callout of its own (Copy, Search, ...) beside the selection, above or below it,
-      // drawn over anything there: the button is a bar at the foot of the screen, fixed, clear
+      // drawn over anything there: the refused selection's reason is a bar at the foot of the screen, fixed, clear
       // of the ☰ button. A selection that reaches the foot takes the bar to the head of the screen instead.
       cbtn.className = 'rd-bar';
       var band = cbtn.offsetHeight + BAR_CLEAR,
@@ -2555,39 +2573,8 @@ var create = function (ROOT, CFG, opts) {
       cbtn.style.top = Math.max(o.y + v.top + 8, Math.min(top, foot)) + 'px';
     }
     cbtn.addEventListener('mousedown', function (ev) { ev.preventDefault(); });
-    // A thumb on the button may collapse the selection before the click arrives: the button stays meanwhile.
-    cbtn.addEventListener('pointerdown', function () {
-      thumbOn = true;
-      clearTimeout(thumbTimer);
-      thumbTimer = setTimeout(function () {   // a click that never came (the finger slid off) leaves no stale button
-        thumbOn = false;
-        if (!cbtn) return;
-        var sel = getSel();
-        if (!sel || sel.isCollapsed) hideCommentBtn();
-        else if (!mouseDown && !ROOT.getElementById('rd-popover')) offerComment();   // a selection made meanwhile was held back by the thumb: the button is for it now
-      }, 2000);
-    });
-    // With a mouse the box opens by itself. A finger stays offered the bar: its selection has no end to wait for, and the phone's Copy stands beside it.
-    if (!t.error && !COARSE.matches) { newComment(t, cbtn); return; }
-    if (!t.error) {
-      var target = pending, btn = cbtn;
-      cbtn.addEventListener('click', function () { newComment(target, btn); });
-      // On a phone the browser can take a tap on a selection for the end of the selection (it clears it, or sends
-      // no click). The form opens on touchend, with the selection the button was raised for, and the click that
-      // would follow is cancelled with it.
-      var from = null;
-      cbtn.addEventListener('touchstart', function (ev) {
-        if (ev.cancelable) ev.preventDefault();
-        from = ev.changedTouches[0];
-      });
-      cbtn.addEventListener('touchend', function (ev) {
-        if (ev.cancelable) ev.preventDefault();
-        var f = ev.changedTouches[0], r = btn.getBoundingClientRect();
-        // A finger that travelled (a scroll that began on the bar) is not a tap.
-        if (!f || !from || Math.abs(f.clientX - from.clientX) > TAP_MOVE || Math.abs(f.clientY - from.clientY) > TAP_MOVE) return;
-        if (f.clientX >= r.left - TAP_SLOP && f.clientX <= r.right + TAP_SLOP && f.clientY >= r.top - TAP_SLOP && f.clientY <= r.bottom + TAP_SLOP) newComment(target, btn);
-      });
-    }
+    // A usable selection opens the box by itself, with a mouse or a finger; the button stays only for a refused one.
+    if (!t.error) newComment(t, cbtn);
   }
   // The mouse is down from mousedown to the next mouseup anywhere, or until the window loses focus
   // (a mouseup outside the page, or in another frame, never reaches it).
@@ -2605,18 +2592,83 @@ var create = function (ROOT, CFG, opts) {
   // event (SPEC 10.4, D24), so the page also listens to `selectionchange`. Each step of a handle's drag
   // fires one, so the button waits until the selection has stood still for SETTLE ms. A selection
   // made with the mouse is left to `mouseup`: nothing is offered while a mouse button is held.
+  // What a settled selection is offered, by timer or by the touchend that ends it: nothing while a button is held, a comment is
+  // written, or the selection is in the page's own interface; a collapsed selection takes the refused one's bar away.
+  function offerSettled() {
+    var sel = getSel(), anchor = sel && sel.anchorNode && elementOf(sel.anchorNode);
+    if (mouseDown || ROOT.getElementById('rd-popover')) return false;   // not while a comment is written
+    // The form's own text box, the panel and the menu hold selections of their own.
+    if (anchor && anchor.closest && anchor.closest(IN_UI + ', input, textarea')) return false;
+    if (!sel || sel.isCollapsed) { hideCommentBtn(); return false; }
+    offerComment();
+    return true;
+  }
   listen(document, 'selectionchange', function () {
+    letGoOfPageWords();
     clearTimeout(offerTimer);
     if (!canSave || mouseDown) return;
+    // A finger still down (a long press, then a slide) is not a selection that stands still: its release opens the box, in
+    // its own event. A touch that never ended (no touchend reached the page) stops counting after FINGER_MAX_MS.
     offerTimer = setTimeout(function () {
-      var sel = getSel(), anchor = sel && sel.anchorNode && elementOf(sel.anchorNode);
-      if (mouseDown || ROOT.getElementById('rd-popover')) return;   // not while a comment is written
-      // The form's own text box, the panel and the menu hold selections of their own.
-      if (anchor && anchor.closest && anchor.closest(IN_UI + ', input, textarea')) return;
-      if (!sel || sel.isCollapsed) { if (!thumbOn) hideCommentBtn(); return; }   // a thumb on the button keeps it through a collapse
-      offerComment();   // a selection that stands, thumb or not: the button is for it, so a second tap cannot reach the old passage
-    }, SETTLE);
+      if (touchDownAt && performance.now() - touchDownAt < FINGER_MAX_MS) return;
+      offerSettled();
+    }, COARSE.matches ? SETTLE_TOUCH : SETTLE);
   });
+  var touchDownAt = 0, FINGER_MAX_MS = 10000;
+  listen(document, 'touchstart', function () { touchDownAt = performance.now(); }, true);
+  ['touchend', 'touchcancel'].forEach(function (n) { listen(document, n, function () { touchDownAt = 0; }, true); });
+  // On a phone the keyboard rises only for a focus() made inside the touch event that ends a selection, not for one made
+  // after a delay: the touchend that ends a selection opens the box and puts the cursor in its field right then. A touch that
+  // began on the words already selected (a tap away from a standing selection) ends nothing, so it opens nothing.
+  var touchFrom = '';
+  listen(document, 'touchstart', function () { var sel = getSel(); touchFrom = sel ? sel.toString() : ''; }, true);
+  // iOS selects the words again a few ms after the release that opened the box, with the field still the active element: the
+  // selection, not the field, then holds the cursor. For one second after a touch opened the box, a selection of the page's words
+  // is let go and the caret goes to the end of the field; the passage stays marked (rd-widened) and quoted.
+  var TOUCH_OPEN_MS = 1000, touchOpenedAt = 0;
+  function letGoOfPageWords() {
+    var box = ROOT.getElementById('rd-popover'), sel = getSel(), ta = document.activeElement;
+    if (!touchOpenedAt || performance.now() - touchOpenedAt > TOUCH_OPEN_MS || !box || !sel || sel.isCollapsed) return;
+    if (!ta || ta.tagName !== 'TEXTAREA' || !box.contains(ta) || !sel.anchorNode || !main.contains(sel.anchorNode)) return;
+    sel.removeAllRanges();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+  }
+  function selectionEnded(e) {
+    if (!canSave || !COARSE.matches || mouseDown || e.pointerType === 'mouse' || (e.target.closest && e.target.closest(IN_UI))) return;
+    var sel = getSel();
+    if (!sel || sel.isCollapsed || sel.toString() === touchFrom) return;
+    clearTimeout(offerTimer);
+    var had = ROOT.getElementById('rd-popover');
+    offerSettled();                    // the box's form puts the cursor in its field as it is built, still inside this event
+    if (!had && ROOT.getElementById('rd-popover')) { touchOpenedAt = performance.now(); letGoOfPageWords(); }
+  }
+  // Trial: every event a finger's end may arrive as, not only touchend (iOS may send touchcancel or only a pointer event).
+  ['touchend', 'touchcancel', 'pointerup', 'pointercancel', 'click'].forEach(function (n) { listen(document, n, selectionEnded, true); });
+  // iOS may leave the keyboard down after a selection. A box that stands open with its field unfocused takes the cursor on one
+  // touch in its empty area (the box's padding, the band, the thread's background, the composer frame), made inside that touch's
+  // own event, which is what lets the keyboard rise. A control (×, −, ⋯, a link), a bubble and a selection in the box keep their
+  // own meaning, and a touch that moved is a scroll.
+  var emptyTouch = null;
+  listen(document, 'touchstart', function (e) {
+    var t = e.touches && e.touches.length === 1 ? e.touches[0] : null;
+    emptyTouch = t ? { x: t.clientX, y: t.clientY, moved: false } : null;
+  }, true);
+  listen(document, 'touchmove', function (e) {
+    var t = e.touches && e.touches[0];
+    if (emptyTouch && t && (Math.abs(t.clientX - emptyTouch.x) > 8 || Math.abs(t.clientY - emptyTouch.y) > 8)) emptyTouch.moved = true;
+  }, true);
+  listen(document, 'touchend', function (e) {
+    var from = emptyTouch, box = ROOT.getElementById('rd-popover');
+    emptyTouch = null;
+    if (!COARSE.matches || !from || from.moved || !box || !e.target.closest || !box.contains(e.target)) return;
+    if (e.target.closest('button, a, summary, details, input, textarea, select, .rd-msg')) return;
+    var sel = getSel();
+    if (sel && !sel.isCollapsed && sel.anchorNode && box.contains(sel.anchorNode)) return;
+    var ta = box.querySelector('.rd-form:not([data-done]) textarea:not([readonly]):not([disabled])');
+    if (!ta) return;
+    if (document.activeElement !== ta) ta.focus();
+    e.preventDefault();       // else the mouse events the browser makes of a touch land on a non-field and take the cursor away again
+  }, true);
   // Which block of those that open with the same 12 characters this is (0 for the first): a block added or
   // removed above changes a block's index, never its place among the blocks that open like it.
   function blockHead(b) { return squashText(blockText(b)).slice(0, 12); }

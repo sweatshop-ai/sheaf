@@ -25,7 +25,7 @@ La boîte reprend donc leur composition : grand cadre arrondi, texte en haut, ro
 | Défilement | Le fil s'ouvre sur le dernier message et défile vers le haut |
 | Curseur | Déjà dans le champ à l'ouverture, sur desktop et sur téléphone |
 | Sélection sur desktop | En mode Comment, la boîte s'ouvre directement |
-| Sélection sur téléphone | La sélection ouvre directement la boîte, le curseur dans le champ (au lâcher du doigt, ou après 600 ms) ; un toucher à côté d'une sélection n'ouvre rien ; la barre ne reste que pour une sélection refusée ; si l'iPhone ne lève pas le clavier, un toucher dans la zone vide de la boîte (bandeau, fond du fil, cadre du champ) met le curseur dans le champ |
+| Sélection sur téléphone | Appui long = un mot, appui long + glisser = une phrase (choix de Thierry, 2026-11-10) ; au relâchement du doigt la boîte s'ouvre, le curseur dans le champ, dans cet événement ; pas de poignées à déplacer après coup, ni de menu Copier natif ; le délai de 600 ms n'ouvre rien tant qu'un doigt est posé ; un toucher à côté d'une sélection n'ouvre rien ; la barre ne reste que pour une sélection refusée ; en repli, un toucher dans la zone vide de la boîte met le curseur dans le champ |
 | Copier | Avec le champ vide, Ctrl+C copie le passage sélectionné ; sur téléphone la boîte s'ouvre à la place du menu Copier, la citation de la boîte reste |
 | Modes | Un seul bouton à bascule toujours visible : « Edit (E) » en mode Comment, « Save (Ctrl+S) » en mode Edit (« Edit » et « Save » au toucher), même taille, bord de la couleur de la boule d'état (gris, vert, rouge) ; Save enregistre puis revient en mode Comment, et reste en Edit si l'enregistrement échoue ; en Edit, une sélection reste une sélection |
 

@@ -4147,12 +4147,33 @@ def test_text_typed_into_the_form_a_failed_send_brought_back_comes_back_after_th
     assert kept_text(thread) == "sent words and more", "the later typing is not in the store"
 
 
+WATCH_POPOVER = """() => { window.__popoverLog = []; const t0 = performance.now();
+  new MutationObserver(ms => ms.forEach(m => { for (const n of m.removedNodes) if (n.id === 'rd-popover') window.__popoverLog.push(['removed', Math.round(performance.now() - t0)]);
+                                              for (const n of m.addedNodes) if (n.id === 'rd-popover') window.__popoverLog.push(['added', Math.round(performance.now() - t0), n.hasAttribute('data-kept')]); }))
+    .observe(document.body, {childList: true, subtree: true}); }"""
+POPOVER_STATE = """() => { const b = document.getElementById('rd-popover');
+  return {log: window.__popoverLog, box: b && {kept: b.hasAttribute('data-kept'), text: b.innerText.slice(0, 300),
+          forms: [...b.querySelectorAll('.rd-form')].map(f => ({kept: f.hasAttribute('data-kept'), 'for': f.getAttribute('data-for'),
+                  text: (f.querySelector('textarea') || {}).value, hold: (f.querySelector('.rd-hold') || {}).textContent}))}}; }"""
+
+
+def popover_goes(thread, timeout=20000):
+    """Wait for the box to be gone; when it stays, say what the page held (the box, its forms, when #rd-popover was removed
+    or added, the store), since a slow runner showed this wait fail where a laptop never does."""
+    p = thread.page
+    try:
+        p.wait_for_selector("#rd-popover", state="detached", timeout=timeout)
+    except Exception as e:
+        raise AssertionError(f"the box stayed after Escape: {json.dumps(p.evaluate(POPOVER_STATE))} store={comment_store(thread)}") from e
+
+
 def test_a_form_that_a_failed_send_brought_back_and_was_emptied_and_closed_with_escape_is_not_offered_again(thread):
     p = thread.page
     fail_a_reply(thread, "sent words")
     p.fill("#rd-popover textarea", "")
+    p.evaluate(WATCH_POPOVER)
     p.keyboard.press("Escape")
-    p.wait_for_selector("#rd-popover", state="detached")
+    popover_goes(thread)
     p.click(".rd-badge")
     p.wait_for_selector("#rd-popover .rd-scroll")
     p.wait_for_timeout(300)

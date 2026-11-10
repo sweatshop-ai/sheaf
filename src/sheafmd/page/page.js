@@ -2607,8 +2607,16 @@ var create = function (ROOT, CFG, opts) {
     letGoOfPageWords();
     clearTimeout(offerTimer);
     if (!canSave || mouseDown) return;
-    offerTimer = setTimeout(offerSettled, COARSE.matches ? SETTLE_TOUCH : SETTLE);
+    // A finger still down (a long press, then a slide) is not a selection that stands still: its release opens the box, in
+    // its own event. A touch that never ended (no touchend reached the page) stops counting after FINGER_MAX_MS.
+    offerTimer = setTimeout(function () {
+      if (touchDownAt && performance.now() - touchDownAt < FINGER_MAX_MS) return;
+      offerSettled();
+    }, COARSE.matches ? SETTLE_TOUCH : SETTLE);
   });
+  var touchDownAt = 0, FINGER_MAX_MS = 10000;
+  listen(document, 'touchstart', function () { touchDownAt = performance.now(); }, true);
+  ['touchend', 'touchcancel'].forEach(function (n) { listen(document, n, function () { touchDownAt = 0; }, true); });
   // On a phone the keyboard rises only for a focus() made inside the touch event that ends a selection, not for one made
   // after a delay: the touchend that ends a selection opens the box and puts the cursor in its field right then. A touch that
   // began on the words already selected (a tap away from a standing selection) ends nothing, so it opens nothing.

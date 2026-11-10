@@ -4,7 +4,9 @@
 
 **Blocked by:** 01, 02, 03
 
-**Status:** ready-for-agent
+**Claimed by:** Birgit 2026-11-10 10:33
+
+**Status:** in-progress
 
 - [ ] Review standards et spec, puis bug hunt Codex, chaque point traité ou écarté avec sa raison
 - [ ] Suite complète verte en CI sur le dernier commit de la PR

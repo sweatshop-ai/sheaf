@@ -2,7 +2,9 @@
 
 **What to build:** Un bouton micro dans la boîte de chat permet de dicter dans le champ, comme dans le chat de tiroir. La voix est transcrite par notre service, pas par la reconnaissance vocale de Google. Dans tiroir, la dictée s'appuie sur la transcription qu'Open WebUI expose déjà.
 
-**Blocked by:** 04
+**Blocked by:**
+- 04
+- External: Rocco lit la config de transcription de tiroir-tt après P7, puis Thierry choisit la source
 
 **Status:** ready-for-agent
 

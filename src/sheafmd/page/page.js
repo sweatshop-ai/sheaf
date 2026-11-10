@@ -2627,7 +2627,7 @@ var create = function (ROOT, CFG, opts) {
   // is let go and the caret goes to the end of the field; the passage stays marked (rd-widened) and quoted.
   var TOUCH_OPEN_MS = 1000, touchOpenedAt = 0;
   function letGoOfPageWords() {
-    var box = ROOT.getElementById('rd-popover'), sel = getSel(), ta = document.activeElement;
+    var box = ROOT.getElementById('rd-popover'), sel = getSel(), ta = ROOT.activeElement;
     if (!touchOpenedAt || performance.now() - touchOpenedAt > TOUCH_OPEN_MS || !box || !sel || sel.isCollapsed) return;
     if (!ta || ta.tagName !== 'TEXTAREA' || !box.contains(ta) || !sel.anchorNode || !main.contains(sel.anchorNode)) return;
     sel.removeAllRanges();
@@ -2666,7 +2666,7 @@ var create = function (ROOT, CFG, opts) {
     if (sel && !sel.isCollapsed && sel.anchorNode && box.contains(sel.anchorNode)) return;
     var ta = box.querySelector('.rd-form:not([data-done]) textarea:not([readonly]):not([disabled])');
     if (!ta) return;
-    if (document.activeElement !== ta) ta.focus();
+    if (ROOT.activeElement !== ta) ta.focus();
     e.preventDefault();       // else the mouse events the browser makes of a touch land on a non-field and take the cursor away again
   }, true);
   // Which block of those that open with the same 12 characters this is (0 for the first): a block added or

@@ -2014,7 +2014,7 @@ var create = function (ROOT, CFG, opts) {
     var forms = Array.prototype.filter.call(pop.querySelectorAll('.rd-form'), function (x) { return !x.hasAttribute('data-done'); });
     // The form that has the cursor, read before the redraw detaches it: a detached field has lost the focus.
     var writing = forms.filter(function (x) { return x.contains(ROOT.activeElement); })[0];
-    var caret = writing ? [ROOT.activeElement.selectionStart, ROOT.activeElement.selectionEnd] : null;
+    var caret = writing && ROOT.activeElement.tagName === 'TEXTAREA' ? [ROOT.activeElement.selectionStart, ROOT.activeElement.selectionEnd] : null;      // a button focused with Tab has none
     pop.innerHTML = bandHtml(c) + '<div class="rd-scroll">' + thread(c) +
       (telling[id] ? '<div class="rd-msg rd-reply rd-pending rd-pending-tell"><span class="rd-who rd-who-tell">' + esc(AGENT_UC) + '</span>' +
                      (tellQ ? '<div class="rd-text">is waiting for your answer in your session: ' + esc(tellQ) + '</div>' +
@@ -2056,7 +2056,7 @@ var create = function (ROOT, CFG, opts) {
     if (writing) {        // moved in the page, the field lost the cursor: it goes back to the form that had it
       var wt = writing.querySelector('textarea');
       wt.focus();
-      if (caret && caret[0] !== null) wt.setSelectionRange(caret[0], caret[1]);
+      if (caret) wt.setSelectionRange(caret[0], caret[1]);
     }
     sendingIn(pop);
     sc = pop.querySelector('.rd-scroll');
@@ -2077,8 +2077,8 @@ var create = function (ROOT, CFG, opts) {
     if (!c) return;          // the thread went (a 410) while its button was still drawn
     // An edit form with changes stands: a fresh one would open on the old text and the next Save or Cancel
     // would clear what was typed from the store.
-    var open = text === undefined && pop.querySelector('.rd-form [data-f=no]');
-    if (open) { var ta = open.closest('.rd-form').querySelector('textarea'); if (ta.value !== c.body) { ta.focus(); return; } }
+    var open = text === undefined && ownForm();
+    if (open && open.querySelector('[data-f=no]')) { var ta = open.querySelector('textarea'); if (ta.value !== open.began) { ta.focus(); return; } }
     textForm(pop, text === undefined ? c.body : text, [{ k: 'ok', label: 'Save', cancel: true }], function (t, k, rid, line) {
       threadKeep(c, 'edit', t, rid, line, Date.now());
       return op({ op: 'edit', id: id, body: t, rid: rid }).then(function (j) { if (j) threadKeep(c, 'edit', null, rid); return j; });
@@ -2235,6 +2235,7 @@ var create = function (ROOT, CFG, opts) {
     // An empty field is not writing: the reload that waited for the text runs once it is emptied.
     ta.addEventListener('input', function () { if (!ta.value) flushHold(); });
     var from = initial && typeof initial === 'object' ? initial : { body: initial || '' };
+    f.began = from.body;       // the text it opened with: what a changed form is measured against
     // The text last sent, and its id: a form drawn from the store holds a text that was sent (an older store kept
     // no id with it).
     var sent = { text: initial && typeof initial === 'object' ? from.body : null, rid: from.rid || null };

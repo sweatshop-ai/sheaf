@@ -16,3 +16,5 @@
 - [ ] PR séparée, CI verte
 
 **Preuve (2026-11-11):** `test_choosing_edit_again_on_a_changed_edit_form_keeps_the_changes` (tests/page/test_page_chat_box.py), rouge avant (« assert 'Mine' == 'Mine, changed' »), vert après. `editForm` laisse en place un formulaire d'édition dont le texte diffère du message et lui rend le curseur ; le cas intact reste rouvert à neuf : `test_choosing_edit_again_on_an_unchanged_edit_form_opens_it_afresh`, vert avant et après. « PR séparée » : voir le ticket 08, une seule PR pour 08, 09, 11, 07 (consigne d'Isolde).
+
+**Après la revue Opus (2026-11-11):** le garde de 09 mesure le formulaire contre le texte avec lequel il s'est ouvert (`f.began`), pas contre `c.body`, et ne regarde que le formulaire de ce fil (`ownForm()`) : `test_choosing_edit_on_an_edit_form_the_message_moved_away_from_opens_it_afresh`.

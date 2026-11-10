@@ -545,6 +545,28 @@ def test_a_redraw_leaves_the_cursor_in_the_only_form(tab, site):
     assert p.locator("#rd-popover .rd-form").count() == 1
 
 
+def test_a_redraw_keeps_the_caret_of_the_field_when_a_button_has_the_cursor(tab, site):
+    """Tab to Send, then an answer arrives: the typed text keeps its caret, it does not jump to the start."""
+    p = open_thread(tab, site)
+    p.fill(FIELD, "hello")
+    p.press(FIELD, "Tab")
+    assert p.evaluate("document.activeElement.tagName") == "BUTTON"
+    an_answer_arrives(site, p)
+    assert p.evaluate("document.activeElement.tagName") == "TEXTAREA"
+    assert p.evaluate("document.activeElement.selectionStart") == 5
+
+
+def test_choosing_edit_on_an_edit_form_the_message_moved_away_from_opens_it_afresh(tab, site):
+    """A live update changed the message while the edit form stood untouched: Edit shows the new text, not the stale one."""
+    p = my_thread(tab, site)
+    choose_edit(p)
+    until(lambda: p.input_value(FIELD) == "Mine", what="the edit form")
+    update_file(site.file, lambda t: rdc.edit_body(t, "c1", "Mine v2"))
+    until(lambda: p.evaluate("document.querySelector('#rd-popover').innerText.includes('Mine v2')") or p.input_value(FIELD) == "Mine v2", what="the live update")
+    choose_edit(p)
+    assert p.input_value(FIELD) == "Mine v2"
+
+
 def test_closing_an_edit_form_that_was_not_changed_leaves_nothing_unsent(tab, site):
     update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "pears"), "pears", "Mine", "Ada", "2026-10-14T10:00")[0])
     tab.open()

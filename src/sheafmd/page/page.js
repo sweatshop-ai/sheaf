@@ -2012,6 +2012,9 @@ var create = function (ROOT, CFG, opts) {
     // Every form that is still to be sent goes through the redraw, not the first one only: a failed send
     // whose text is not in the store stays on the page beside the form of this thread.
     var forms = Array.prototype.filter.call(pop.querySelectorAll('.rd-form'), function (x) { return !x.hasAttribute('data-done'); });
+    // The form that has the cursor, read before the redraw detaches it: a detached field has lost the focus.
+    var writing = forms.filter(function (x) { return x.contains(ROOT.activeElement); })[0];
+    var caret = writing ? [ROOT.activeElement.selectionStart, ROOT.activeElement.selectionEnd] : null;
     pop.innerHTML = bandHtml(c) + '<div class="rd-scroll">' + thread(c) +
       (telling[id] ? '<div class="rd-msg rd-reply rd-pending rd-pending-tell"><span class="rd-who rd-who-tell">' + esc(AGENT_UC) + '</span>' +
                      (tellQ ? '<div class="rd-text">is waiting for your answer in your session: ' + esc(tellQ) + '</div>' +
@@ -2049,9 +2052,12 @@ var create = function (ROOT, CFG, opts) {
       if (head) head.addEventListener('click', act);
       acts.addEventListener('click', act);
     }
-    var writing = forms.some(function (x) { return x.contains(ROOT.activeElement); });
     forms.forEach(function (x) { pop.appendChild(x); });
-    if (writing) forms[0].querySelector('textarea').focus();       // moved in the page, the field lost the cursor
+    if (writing) {        // moved in the page, the field lost the cursor: it goes back to the form that had it
+      var wt = writing.querySelector('textarea');
+      wt.focus();
+      if (caret && caret[0] !== null) wt.setSelectionRange(caret[0], caret[1]);
+    }
     sendingIn(pop);
     sc = pop.querySelector('.rd-scroll');
     if (atEnd) sc.scrollTop = sc.scrollHeight;

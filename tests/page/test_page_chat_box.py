@@ -448,3 +448,47 @@ def test_the_box_closes_normally_once_the_store_works_again(tab, site):
     until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close")
     p.click(".rd-badge")
     until(lambda: p.input_value(FIELD) == "kept at last", what="the text back in the box")
+
+
+def test_choosing_edit_while_a_reply_is_typed_keeps_the_reply(tab, site):
+    """Edit replaces the field by the edit form: the reply typed there must not be thrown away, and Cancel brings it back."""
+    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "pears"), "pears", "Mine", "Ada", "2026-10-14T10:00")[0])
+    tab.open()
+    tab.page.click(".rd-badge")
+    p = tab.page
+    p.wait_for_selector(FIELD)
+    p.fill(FIELD, "my reply, half written")
+    p.click("#rd-popover .rd-more summary")
+    p.click("#rd-popover button[data-a=edit]")
+    until(lambda: p.input_value(FIELD) == "Mine", what="the edit form, filled with the message")
+    p.click("#rd-popover button[data-f=no]")
+    until(lambda: p.input_value(FIELD) == "my reply, half written", what="the reply back in the field after Cancel")
+
+
+def test_closing_an_edit_form_that_was_not_changed_leaves_nothing_unsent(tab, site):
+    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "pears"), "pears", "Mine", "Ada", "2026-10-14T10:00")[0])
+    tab.open()
+    tab.page.click(".rd-badge")
+    p = tab.page
+    p.wait_for_selector(FIELD)
+    p.click("#rd-popover .rd-more summary")
+    p.click("#rd-popover button[data-a=edit]")
+    until(lambda: p.input_value(FIELD) == "Mine", what="the edit form")
+    p.click("#rd-popover button[title=Close]")
+    assert p.locator("#rd-popover").count() == 0
+    assert p.locator("#rd-unsent").count() == 0, "an edit nobody made is listed as not sent"
+    p.click(".rd-badge")
+    until(lambda: p.locator(FIELD).count() == 1, what="the box again")
+    assert p.locator("#rd-popover [data-f=no]").count() == 0, "the thread reopened in the edit form"
+
+
+@pytest.mark.parametrize("init", [{"isComposing": True}, {"isComposing": False, "keyCode": 229}], ids=["composing", "safari-keycode-229"])
+def test_the_enter_that_confirms_an_ime_composition_sends_nothing(tab, site, init):
+    """Safari ends the composition before the keydown of the Enter that confirms it: isComposing is false there, keyCode is 229."""
+    p = open_thread(tab, site)
+    p.fill(FIELD, "konnichiwa")
+    p.evaluate("(init) => document.querySelector('#rd-popover textarea').dispatchEvent(new KeyboardEvent('keydown', "
+               "Object.assign({key: 'Enter', bubbles: true, cancelable: true}, init)))", init)
+    p.wait_for_timeout(500)
+    assert p.input_value(FIELD) == "konnichiwa"
+    assert len(rdc.parse(site.file.read_text(encoding="utf-8")).comments[0].replies) == 0, "the confirming Enter sent the message"

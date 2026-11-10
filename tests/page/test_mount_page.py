@@ -710,3 +710,11 @@ def test_a_mounted_theme_that_says_its_own_scheme_keeps_it_over_the_mounts_fallb
         assert f.errors == []
     finally:
         close_context(c)
+
+
+def test_the_mounted_edit_toggle_wears_the_status_colour_classes_of_the_ball(front):
+    """`refresh` found the toggle with `document.getElementById`, which does not see into the closed root."""
+    f = front.open()
+    f.click("#rd-mode button[data-m=edit]")
+    until(lambda: f.has(".rd-root.rd-editing"), what="edit mode")
+    until(lambda: f.js("return root.querySelector('#rd-mode').classList.contains('on');"), what="the toggle's 'on' class, as the ball's")

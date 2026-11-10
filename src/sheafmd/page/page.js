@@ -622,7 +622,7 @@ var create = function (ROOT, CFG, opts) {
     var d = dirty().length;
     btn.classList.toggle('on', editing);
     btn.classList.toggle('dirty', d > 0);
-    var tg = document.getElementById('rd-mode');         // the Edit / Save toggle wears the ball's colour, from the same classes
+    var tg = ROOT.getElementById('rd-mode');         // the Edit / Save toggle wears the ball's colour, from the same classes
     if (tg) { tg.classList.toggle('on', editing); tg.classList.toggle('dirty', d > 0); }
     btn.title = stateText();
     var st = q('#rd-state');
@@ -2191,7 +2191,7 @@ var create = function (ROOT, CFG, opts) {
   // while it is that text.
   function textForm(host, initial, buttons, done, cancelled, says, kept, mirror) {
     var old = host.querySelector('.rd-form');
-    if (old) old.remove();
+    if (old) { if (old.stash) old.stash(); old.remove(); }      // what is typed in the form it replaces goes to the store first
     var own = host === pop ? popId : null;       // the thread this form is for; a new comment has none
     var about = own !== null && byId[own] ? byId[own].quote : '';     // its quote, still known once it is gone
     var born = own !== null && byId[own] ? byId[own].at : null;       // its birth: next_id gives a deleted id to the next comment
@@ -2341,7 +2341,8 @@ var create = function (ROOT, CFG, opts) {
       if (mirror && sent.text !== null && c && (born === null || c.at === born)) mirror(ta.value, ta.value === sent.text ? sent.rid : undefined, line);
     };
     if (mirror) ta.addEventListener('input', keep);
-    f.stash = function () { if (mirror && ta.value.trim()) { storeOk = true; mirror(ta.value, undefined, line); return storeOk; } return true; };
+    f.stash = function () { if (mirror && ta.value.trim() && !(typeof initial === 'string' && ta.value === initial)) {      // an edit form not changed holds nothing to keep
+      storeOk = true; mirror(ta.value, undefined, line); return storeOk; } return true; };
     // Cancel clears what the store keeps for the form before restore, which draws the thread's other kept text.
     f.addEventListener('click', function (e) {
       var b = e.target.closest && e.target.closest('[data-f]'), k = b && b.getAttribute('data-f');
@@ -2350,7 +2351,7 @@ var create = function (ROOT, CFG, opts) {
     });
     ta.addEventListener('keydown', function (e) {
       // Enter sends, as in a chat; on a touch screen it stays a new line, the arrow sends there.
-      if (e.key === 'Enter' && !e.isComposing && (e.metaKey || e.ctrlKey || (!e.shiftKey && !COARSE.matches))) { e.preventDefault(); go(buttons[0].k); }
+      if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229 && (e.metaKey || e.ctrlKey || (!e.shiftKey && !COARSE.matches))) { e.preventDefault(); go(buttons[0].k); }
     });
   }
   main.addEventListener('click', function (e) {

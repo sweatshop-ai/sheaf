@@ -1180,10 +1180,11 @@ var create = function (ROOT, CFG, opts) {
   // the box stays and says so: closing would lose the text. Every way out goes through closePopover, which
   // asks; × on an open thread asks before it resolves. An empty field has nothing to keep.
   var storeOk = true;
+  function sayNotKept() { say('Your text could not be kept: the browser\u2019s storage is full or blocked. Copy it before you close this box.', true); }
   function stashAll() {
     var bad = false;
     if (pop) Array.prototype.forEach.call(pop.querySelectorAll(OPEN_FORM), function (f) { if (f.stash && f.stash() === false) bad = true; });
-    if (bad) say('Your text could not be kept: the browser\u2019s storage is full or blocked. Copy it before you close this box.', true);
+    if (bad) sayNotKept();
     return !bad;
   }
   // True when no popover is left open, false when one stays because its text could not be kept.
@@ -2191,7 +2192,8 @@ var create = function (ROOT, CFG, opts) {
   // while it is that text.
   function textForm(host, initial, buttons, done, cancelled, says, kept, mirror) {
     var old = host.querySelector('.rd-form');
-    if (old) { if (old.stash) old.stash(); old.remove(); }      // what is typed in the form it replaces goes to the store first
+    // what is typed in the form it replaces goes to the store first; when the store refuses it, that form stays
+    if (old) { if (old.stash && old.stash() === false) { sayNotKept(); return; } old.remove(); }
     var own = host === pop ? popId : null;       // the thread this form is for; a new comment has none
     var about = own !== null && byId[own] ? byId[own].quote : '';     // its quote, still known once it is gone
     var born = own !== null && byId[own] ? byId[own].at : null;       // its birth: next_id gives a deleted id to the next comment

@@ -141,7 +141,9 @@ def test_no_edit_token_and_no_per_document_server_left():
     assert "X-Edit-Token" not in js
     assert re.search(r"CFG\.(token|ask|tell)\b", js) is None
     strings = js_strings(js)
-    for gone in ("ping", "jobs", "incident", "live", "save", "comment", "export/"):
+    # restated on 2026-11-10 (ticket 03): the bare word "save" is the Edit / Save toggle's own mode name
+    # (data-m="save"), not a route; the hub's '/_/save' is a different string
+    for gone in ("ping", "jobs", "incident", "live", "comment", "export/"):
         assert gone not in strings, gone
 
 
@@ -227,7 +229,7 @@ def test_the_menu_names_the_target_the_hub_recorded_and_the_buttons_it_cannot_se
     assert js.count("sendButtons(") == 3                  # the definition, the reply form, the new comment
     assert "{ off: lineOf('tell') }" in js                # the disabled entry carries the line; the thread has no Tell of its own
     assert "CFG.lines" in js and "'capabilities' in j" in js and "CFG.agent = j.target" in js
-    assert "rd-agent-line" in text("page.css")           # the line under the form; the disabled Tell button (rd-na) went with the thread's own Tell
+    assert "rd-agent-line" not in text("page.css")       # restated on 2026-11-10 (ticket 03): no line under the field, the reason is in the menu only (tests/page/test_page_chat_box.py counts 0 of them)
 
 
 def test_the_page_has_no_ask_left():

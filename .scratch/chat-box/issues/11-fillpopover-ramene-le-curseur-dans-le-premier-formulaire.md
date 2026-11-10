@@ -4,7 +4,9 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Claimed by:** Birgit 2026-11-11 00:19
+
+**Status:** in-progress
 
 **Ce qui ne va pas :** `page.js:2052-2053`. `fillPopover` refocalise `forms[0]` dès qu'un formulaire avait le focus. Avec deux formulaires ouverts, le curseur peut sauter du second au premier pendant qu'on tape.
 

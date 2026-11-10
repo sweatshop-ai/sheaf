@@ -4,7 +4,9 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Claimed by:** Birgit 2026-11-11 00:18
+
+**Status:** in-progress
 
 **Ce qui ne va pas :** `page.js:2032`. Avec un formulaire d'édition ouvert et modifié, ⋯ → Edit perd les changements au Save ou Cancel suivant. Ce défaut existait avant la PR #238 : la PR ne l'a pas introduit, et la review l'a classé P2 pour cette raison.
 

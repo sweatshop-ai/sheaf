@@ -4,7 +4,9 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Claimed by:** Birgit 2026-11-11 00:18
+
+**Status:** in-progress
 
 **Ce qui ne va pas :** `page.js:2194`. ⋯ → Edit appelle `stash()` sans lire son retour. Si `stash()` renvoie faux (stockage plein ou bloqué), l'ouverture du formulaire d'édition continue et la réponse tapée est abandonnée.
 

@@ -16,15 +16,17 @@ from .blocks import split_md_blocks
 MARKER = "[!COPY]"
 PAGE_CLASS = "rd-copy"
 BUTTON_CLASS = "rd-copybtn"
-STAND_IN = "RDCOPYMARK\ue000QX7"      # a private-use character in the middle: nobody types it
+STAND_IN = "RDCOPYMARKQX7Z4K9T2M"      # one word for pandoc, long enough that no document holds it
 
 # The first line of a top-level quote, and then at least one line with words.
 _LINE = re.compile(r"(\s{0,3}>[ \t]?)" + re.escape(MARKER) + r"[ \t]*(?=\r?(?:\n|$))")
 _WORDS = re.compile(r"^[ \t>]*[^\s>]", re.M)
 # An underline in the first paragraph makes the marker line part of a heading, which `mark` cannot take it off.
-_UNDERLINE = re.compile(r"^[ \t>]*(?:=+|-+)[ \t]*$")
+_UNDERLINE = re.compile(r"^ {0,3}(?:=+|-+)[ \t]*$")
 _QUOTE_PREFIX = re.compile(r"^\s{0,3}>[ \t]?")
-_OPENS_BLOCK = re.compile(r"^(?: {4}|\t|\s{0,3}(?:```|~~~|#{1,6}(?:\s|$)|[-*+]\s|\d{1,9}[.)]\s|>))")
+# What ends a paragraph under GFM (CommonMark's interrupt rules): a fence, a heading, a quote, a thematic break
+# of `*` or `_` (a bare `---` stays an underline), a bullet or a list starting at 1 with words after it.
+_OPENS_BLOCK = re.compile(r"^\s{0,3}(?:```|~~~|#{1,6}(?:\s|$)|>|(?:[*_][ \t]*){3,}$|[-*+][ \t]+\S|0*1[.)][ \t]+\S)")
 
 
 def is_copy_block(content: str) -> bool:
@@ -36,8 +38,9 @@ def is_copy_block(content: str) -> bool:
         line = line.rstrip("\r")
         if not line.strip(" \t>"):
             break                       # the first paragraph ends at the first blank quote line
-        if _OPENS_BLOCK.match(_QUOTE_PREFIX.sub("", line)):
-            break                       # and at the line that opens a fence, code, a list, a heading or a quote
+        line = _QUOTE_PREFIX.sub("", line)
+        if _OPENS_BLOCK.match(line):
+            break                       # and at the line that opens a fence, a list, a heading or a quote
         if _UNDERLINE.match(line):
             return False
     return True
@@ -98,7 +101,3 @@ def restore(md: str) -> str:
     """pandoc's markdown for a tokenized block, the marker paragraphs written as `[!COPY]` lines."""
     return _TOKEN_LINE.sub(lambda m: m.group(1) + MARKER, md) if STAND_IN in md else md
 
-
-def skipped(block: str) -> int:
-    """How many non-whitespace characters of a block's rendered text the page does not show: the marker's."""
-    return len(MARKER) if is_copy_block(block) else 0

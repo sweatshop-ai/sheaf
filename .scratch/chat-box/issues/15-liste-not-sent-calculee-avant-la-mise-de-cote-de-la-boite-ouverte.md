@@ -10,7 +10,7 @@
 
 **Ce qui ne va pas :** `page.js:1634-1636` et `1534`. `showUnsent()` lit `ds = sendsKept()`, puis `keptForms` appelle `closePopover()`, qui met le texte de la boîte ouverte de côté comme nouveau brouillon. La liste est dessinée depuis `ds`, qui n'a pas ce brouillon : elle et le compte disent deux choses jusqu'à ce qu'on la ferme et la rouvre. Codex propose de fermer/mettre de côté avant de rassembler les entrées, ou de relire `ds` après.
 
-- [ ] Boîte ouverte avec un texte tapé, clic sur « not sent » : la liste montre ce texte, comme le compte
-- [ ] Test rouge avant le correctif
-- [ ] Sans boîte ouverte, comportement inchangé
+- [x] Boîte ouverte avec un texte tapé, clic sur « not sent » : la liste montre ce texte, comme le compte — test_the_not_sent_list_opened_beside_an_open_box_holds_the_typed_text_as_the_count_does (a88669d)
+- [x] Test rouge avant le correctif — red: 'the list does not match the count' before the fix (a88669d)
+- [x] Sans boîte ouverte, comportement inchangé — test_the_not_sent_list_without_an_open_box_lists_what_was_kept (b1b3f24)
 - [ ] PR séparée, CI verte

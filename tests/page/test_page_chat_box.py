@@ -513,6 +513,10 @@ def test_a_thread_on_a_page_that_cannot_save_keeps_the_cross_and_no_write_contro
     p.wait_for_selector("#rd-popover")
     p.keyboard.press("Escape")
     assert p.locator("#rd-popover").count() == 0, "Escape does not close it"
+    p.click(".rd-badge")
+    p.wait_for_selector("#rd-popover")
+    p.mouse.click(5, 5)
+    assert p.locator("#rd-popover").count() == 0, "a click beside the box does not close it"
 
 
 def test_a_minimized_message_whose_field_is_emptied_is_gone_from_the_store_when_the_box_closes(tab, site):
@@ -558,3 +562,14 @@ def test_the_not_sent_list_opened_beside_an_open_box_holds_the_typed_text_as_the
     until(lambda: p.inner_text("#rd-unsent") == "2 messages not sent · Show", what="the count")
     assert p.locator("#rd-popover[data-unsent] .rd-form").count() == 2, "the list does not match the count"
     assert "pears" in p.inner_text("#rd-popover[data-unsent]")
+
+
+def test_the_not_sent_list_without_an_open_box_lists_what_was_kept(tab, site):
+    tab.open()
+    p = tab.page
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    p.fill(FIELD, "Why apples?")
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-unsent").count() == 1, what="the not-sent line")
+    p.click("#rd-unsent")
+    until(lambda: p.locator("#rd-popover[data-unsent] .rd-form").count() == 1, what="the list")

@@ -2785,7 +2785,10 @@ var create = function (ROOT, CFG, opts) {
       // Closed before it is sent, it is kept quietly for this passage: not in the notice of refused comments.
       field.stash = function () {
         storeOk = true;
-        if (!box.value.trim()) { draftsReplace(own); return storeOk; }      // emptied: a draft kept before goes too
+        if (!box.value.trim()) {      // emptied: a draft kept before goes too; nothing kept, nothing to write
+          if (d || wrote.length) draftsReplace(own);        // known from this form, not read back from a store that may refuse
+          return storeOk;
+        }
         draftsReplace(own, { quote: t.quote, body: box.value, block: t.block, head: t.head, tail: t.tail, occ: t.occ, min: true });
         return storeOk;
       };

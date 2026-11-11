@@ -74,7 +74,8 @@ def saved(md, edit=lambda h: h):
 
 
 def page_of_block(md):
-    return copyblock.mark(pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], copyblock.hide(md)).strip(), page=True)
+    html = copyblock.mark(pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], copyblock.hide(md)).strip(), page=True)
+    return re.sub(r"[ \t]*\n[ \t]*(?=[^<\s])", " ", html)      # pandoc wraps at 72 columns, a test edits words
 
 
 def test_an_edited_copy_block_keeps_its_marker_on_save():
@@ -165,7 +166,7 @@ def test_text_that_looks_like_the_stand_in_is_left_alone(tmp_path):
     "> [!COPY]\n> ===\n> text\n",
 ])
 def test_a_setext_underline_in_the_first_paragraph_makes_it_no_copy_block(quote):
-    assert copyblock.skipped(quote) == 0
+    assert not copyblock.is_copy_block(quote.rstrip("\n"))
     assert copyblock.hide(quote) == quote
 
 
@@ -176,4 +177,33 @@ def test_a_setext_underline_in_the_first_paragraph_makes_it_no_copy_block(quote)
     "> [!COPY]\n> - a\n>   ---\n",                           # a list item's own heading
 ])
 def test_an_underline_after_the_first_paragraph_ended_is_no_reason_to_refuse_the_block(quote):
-    assert copyblock.skipped(quote) == len("[!COPY]")
+    assert copyblock.is_copy_block(quote.rstrip("\n"))
+
+
+# The page and the comment offsets must agree whatever the source: the offsets are read from pandoc's own tree.
+ODD = [
+    "> [!COPY]\n> a\n>     b\n> ---\n",
+    "> [!COPY]\n> a\n> \tb\n> ---\n",
+    "> [!COPY]\n> a\n> 2024. Year\n> ---\n",
+    "> [!COPY]\n> a\n> 1. \n> ---\n",
+    "> [!COPY]\n> a\n> - \n> ---\n",
+    "> [!COPY]\n> a\n> ***\n> b\n> ---\n",
+    "> [!COPY]\n> words\n> ---\n",
+    "> [!COPY]\n> ===\n> text\n",
+    "> [!COPY]\n> ```yaml\n> ---\n> a: 1\n> ```\n",
+    "> [!COPY]\n> - a\n>   ---\n",
+    "> [!COPY]\n> text\n",
+]
+
+
+def shown(md):
+    """The characters the page shows for a block of the source, as the render writes them."""
+    from bs4 import BeautifulSoup
+    html = copyblock.mark(pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], copyblock.hide(md)), page=True)
+    return "".join(BeautifulSoup(html, "html.parser").get_text().split())
+
+
+@pytest.mark.parametrize("md", ODD)
+def test_the_comment_offsets_count_what_the_page_shows(md):
+    block = md.rstrip("\n")
+    assert rdc.projection(block).text == shown(block).replace("[!COPY]", "[!COPY]")

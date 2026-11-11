@@ -81,10 +81,10 @@ def test_entering_edit_mode_does_not_make_the_block_changed(doc, site):
 
 
 def test_a_comment_on_the_block_is_anchored_in_the_source_after_the_selected_words(doc, site):
-    c = comment_on(doc, at(QUOTE, "thanks for the call"), at(QUOTE, "thanks for the call", None), "Warmer?")
+    c = comment_on(doc, at(QUOTE, "thanks"), at(QUOTE, "thanks", None), "Warmer?")
     saved = site.file.read_text(encoding="utf-8")
-    assert saved.startswith("# Plan") and "> [!COPY]\n> Hello **Anna**,\n> thanks for the call" in saved
-    end = saved.index("thanks for the call") + len("thanks for the call")
+    assert saved.startswith("# Plan") and "> [!COPY]\n> Hello **Anna**,\n> thanks" in saved
+    end = saved.index("thanks") + len("thanks")
     assert saved[end:].startswith(saved[c.start:c.end])          # the comment sits right behind the words selected
     assert rdc.parse(saved).by_id(c.id).body == "Warmer?"
     until(lambda: doc.page.locator(f"{QUOTE} .rd-anchor").count() == 1, what="the badge in the quote")
@@ -92,7 +92,7 @@ def test_a_comment_on_the_block_is_anchored_in_the_source_after_the_selected_wor
 
 
 def test_the_text_copied_leaves_the_comment_badge_out(doc, site):
-    comment_on(doc, at(QUOTE, "thanks for the call"), at(QUOTE, "thanks for the call", None), "Warmer?")
+    comment_on(doc, at(QUOTE, "thanks"), at(QUOTE, "thanks", None), "Warmer?")
     doc.page.wait_for_selector(f"{QUOTE} .rd-anchor")
     press_copy(doc.page)
     until(lambda: clipboard(doc.page), what="the clipboard")

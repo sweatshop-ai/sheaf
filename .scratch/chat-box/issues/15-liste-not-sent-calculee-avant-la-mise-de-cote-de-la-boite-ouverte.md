@@ -4,7 +4,9 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Claimed by:** Emil 2026-11-11 11:19
+
+**Status:** in-progress
 
 **Ce qui ne va pas :** `page.js:1634-1636` et `1534`. `showUnsent()` lit `ds = sendsKept()`, puis `keptForms` appelle `closePopover()`, qui met le texte de la boîte ouverte de côté comme nouveau brouillon. La liste est dessinée depuis `ds`, qui n'a pas ce brouillon : elle et le compte disent deux choses jusqu'à ce qu'on la ferme et la rouvre. Codex propose de fermer/mettre de côté avant de rassembler les entrées, ou de relire `ds` après.
 

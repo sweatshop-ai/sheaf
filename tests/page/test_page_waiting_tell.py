@@ -112,9 +112,10 @@ def test_a_seen_tell_is_not_lent_to_the_queued_tell_of_another_agent_on_the_same
     assert line(tab) == ["Waiting for Claude (Ada): it sees this the next time you talk to it."], line(tab)
     for a, k in held:                       # the event comes after all: it says the same thing
         emit(*a, **k)
-    # The stream keeps its order: what is said after the event is on the page once the event has been taken.
-    update_file(site.file, lambda t: rdc.reply(t, "c1", "A second word.", "Ada", "2026-10-14T11:05"))
-    tab.page.wait_for_selector("#rd-popover :text('A second word.')")
+    # The stream keeps its order: an event that carries no Tells, said after the held one, is on the page once the
+    # held one has been taken (a snapshot would decide the line by itself).
+    emit(DOC, "tell-sent", {"id": "c1"})
+    toasted(tab.page, "Sent to your")
     until(lambda: line(tab) == ["Waiting for Claude (Ada): it sees this the next time you talk to it."], what="the line after the event")
 
 

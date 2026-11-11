@@ -112,4 +112,29 @@ def test_a_seen_tell_is_not_lent_to_the_queued_tell_of_another_agent_on_the_same
     assert line(tab) == ["Waiting for Claude (Ada): it sees this the next time you talk to it."], line(tab)
     for a, k in held:                       # the event comes after all: it says the same thing
         emit(*a, **k)
+    # The stream keeps its order: what is said after the event is on the page once the event has been taken.
+    update_file(site.file, lambda t: rdc.reply(t, "c1", "A second word.", "Ada", "2026-10-14T11:05"))
+    tab.page.wait_for_selector("#rd-popover :text('A second word.')")
     until(lambda: line(tab) == ["Waiting for Claude (Ada): it sees this the next time you talk to it."], what="the line after the event")
+
+
+def test_a_snapshot_that_is_not_the_answer_to_a_send_does_not_keep_a_seen_line(tab, site):
+    # Only the answer to a send can pass the event of the sight (ticket 18). Any other snapshot (a reconnect, a change
+    # of the file) is the hub's state as it is: a new Tell of the same agent that the page never heard of is queued.
+    token = ask_agent(tab, site)
+    name = f"ChatGPT ({site.hub.person})"
+    tab.page.fill("#rd-popover textarea", "Please do.")
+    tab.page.click("#rd-popover .rd-form button.rd-tell")
+    until(lambda: bool(line(tab)), what="the waiting line")
+    call(browser_on(site.hub), "documents", token=token)
+    until(lambda: line(tab) == [f"{name} has seen it; its action appears in this thread."], what="the seen line")
+    thread = rdc.parse(site.file.read_text()).by_id("c1")
+    # The page misses the end of the first Tell and the start of the second (a dropped stream).
+    emit = site.hub.waiting_tells._emit
+    site.hub.waiting_tells._emit = lambda *a, **k: None
+    site.hub.waiting_tells.end(DOC, "c1", "cancelled")
+    site.hub.waiting_tells.queue(DOC, "c1", next(r for r in Tokens().list() if r.name == "ada-chatgpt"), site.hub.person, None, thread)
+    site.hub.waiting_tells._emit = emit
+    update_file(site.file, lambda t: rdc.reply(t, "c1", "A word from outside.", "Ada", "2026-10-14T11:00"))
+    tab.page.wait_for_selector("#rd-popover :text('A word from outside.')")
+    until(lambda: line(tab) == [f"Waiting for {name}: it sees this the next time you talk to it."], what="the queued line")

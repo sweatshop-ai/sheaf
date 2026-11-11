@@ -349,14 +349,15 @@ var create = function (ROOT, CFG, opts) {
   // The hub's `telling`, `[{id, to, state}]` (SPEC 8.5): `working` and `waiting` are a session's, in `telling`;
   // `queued` and `seen` an agent's, in `waits`; `sent`, `picked-up` and `delivered` are a drop for James's window
   // (9.12), which `sentBox` shows from `sent`: no spinner here. `keep`: a session's threads already known stay (jobs are only added).
-  function takeTelling(list, keep) {
+  function takeTelling(list, keep, answer) {
     if (!keep) telling = {};
     var was = waits;
     waits = {};
     (list || []).forEach(function (w) {
-      // A snapshot is the hub's state when it wrote it, and the answer to a send can reach the page after the event of
-      // the agent seeing the Tell: a Tell seen does not go back to queued (the same agent's; another agent's Tell on the thread is its own).
-      if (w.state === 'queued' && was[w.id] && was[w.id].state === 'seen' && was[w.id].to === w.to) waits[w.id] = was[w.id];
+      // A snapshot is the hub's state when it wrote it, and the answer to a send (`answer`) can reach the page after the
+      // event of the agent seeing the Tell: a Tell seen does not go back to queued (the same agent's; another agent's Tell
+      // on the thread is its own). Any other snapshot is taken as it is: it may be the correction of an event the page missed.
+      if (answer && w.state === 'queued' && was[w.id] && was[w.id].state === 'seen' && was[w.id].to === w.to) waits[w.id] = was[w.id];
       else if (w.state === 'queued' || w.state === 'seen') waits[w.id] = { to: w.to, state: w.state };
       else if (w.state === 'working' || w.state === 'waiting') telling[w.id] = true;
     });
@@ -1853,7 +1854,7 @@ var create = function (ROOT, CFG, opts) {
   }
   // Returns false when a comment arrived that has no anchor on this page yet:
   // only a reload can place it, because only the server knows where it goes.
-  function applyComments(d, quiet) {
+  function applyComments(d, quiet, answer) {
     var missing = (d.comments || []).some(function (c) { return !c.orphan && !anchors[c.id]; });
     if (missing) return false;
     var before = counts();
@@ -1867,7 +1868,7 @@ var create = function (ROOT, CFG, opts) {
       if (actsOwed && actsOwed.hash === hash) actsOwed.hash = d.hash;
       hash = d.hash;
     }
-    if (d.telling) takeTelling(d.telling);
+    if (d.telling) takeTelling(d.telling, false, answer);
     Object.keys(anchors).forEach(function (id) {
       var c = byId[id], a = anchors[id];
       if (!c) { forget(id); return; }
@@ -1938,7 +1939,7 @@ var create = function (ROOT, CFG, opts) {
       if (j.textSame === false || reloadPending) { if (!holdForOpenForm(mine, j.textSame === false ? 'text' : holdWhy)) reloadNow(j.id); return j; }
       // An answer that cannot be taken in place reloads as a new comment's does: settle() saves what is typed
       // in the text first, so the reload asks nothing.
-      if (!applyComments(j, [j.id].concat(quiet || []))) {
+      if (!applyComments(j, [j.id].concat(quiet || []), true)) {
         if (!holdForOpenForm(mine, 'arrived')) reloadNow(j.id);
         else takeThread(j, body.id);          // held: the thread this answer is for shows it until the reload
       }
@@ -1991,7 +1992,7 @@ var create = function (ROOT, CFG, opts) {
       sentBox[id] = { n: ((c && c.replies) || []).length, to: AGENT };
       if (CAN.indexOf('relay-tell') >= 0) sentBox[id].at = whereTo();
     } else if (j && j.telling) {
-      takeTelling(j.telling);
+      takeTelling(j.telling, false, true);
     } else telling[id] = true;
   }
   // The Tell entry of a form: a working button when the agent can be told; when it cannot, the form has no Tell
@@ -2761,7 +2762,7 @@ var create = function (ROOT, CFG, opts) {
         if (k === 'tell') started(j.id, k, j);
         getSel().removeAllRanges();
         draftsReplace(own);
-        if (j.textSame === false || reloadPending || !applyComments(j, [j.id])) {
+        if (j.textSame === false || reloadPending || !applyComments(j, [j.id], true)) {
           // With another send out the reload waits for it (holdForOpenForm). This comment was taken, so its
           // popover goes; its thread is in the page that comes back.
           if (!holdForOpenForm(mine, j.textSame === false ? 'text' : reloadPending ? holdWhy : 'arrived')) reloadNow(j.id);

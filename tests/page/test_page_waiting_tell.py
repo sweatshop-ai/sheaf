@@ -110,3 +110,6 @@ def test_a_seen_tell_is_not_lent_to_the_queued_tell_of_another_agent_on_the_same
     update_file(site.file, lambda t: rdc.reply(t, "c1", "A word from outside.", "Ada", "2026-10-14T11:00"))
     tab.page.wait_for_selector("#rd-popover :text('A word from outside.')")       # the snapshot that lists both Tells is in
     assert line(tab) == ["Waiting for Claude (Ada): it sees this the next time you talk to it."], line(tab)
+    for a, k in held:                       # the event comes after all: it says the same thing
+        emit(*a, **k)
+    until(lambda: line(tab) == ["Waiting for Claude (Ada): it sees this the next time you talk to it."], what="the line after the event")

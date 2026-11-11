@@ -39,3 +39,37 @@ def test_on_the_mounted_page_the_page_words_selected_again_after_a_touch_opened_
     f.js(SELECT, ["pears", 5])                  # what iOS does a few ms after the release
     f.page.wait_for_timeout(200)
     assert f.js("const t = root.querySelector('#rd-popover textarea'); return [t.selectionStart, t.selectionEnd];") == [3, 3]
+
+
+TAP = """const [id] = arg;
+  const el = id === 'main' ? root.querySelector('main') : root.getElementById(id);
+  const r = el.getBoundingClientRect();
+  const touch = new Touch({identifier: 1, target: el, clientX: r.left + 2, clientY: r.top + 2});
+  const fire = (type, touches) => el.dispatchEvent(new TouchEvent(type, {bubbles: true, cancelable: true, composed: true,
+                                    touches, targetTouches: touches, changedTouches: [touch]}));
+  fire('touchstart', [touch]);
+  fire('touchend', []);"""
+
+
+def box_open_with_the_cursor_gone(f):
+    f.js(TOUCH, "touchstart")
+    f.js(SELECT, ["pears", 5])
+    f.js(TOUCH, "touchend")
+    until(lambda: f.has("#rd-popover textarea"), what="the box, opened by the release")
+    f.page.wait_for_timeout(300)          # past what the opening touch does to the field
+    f.js("root.activeElement && root.activeElement.blur(); getSelection().removeAllRanges();")
+    assert f.js("return root.activeElement && root.activeElement.tagName;") != "TEXTAREA"
+
+
+def test_on_the_mounted_page_a_tap_in_the_empty_area_of_the_box_puts_the_cursor_in_the_field(phone_front):
+    f = phone_front.open()
+    box_open_with_the_cursor_gone(f)
+    f.js(TAP, ["rd-popover"])
+    assert f.js("return root.activeElement && root.activeElement.tagName;") == "TEXTAREA"
+
+
+def test_on_the_mounted_page_a_tap_outside_the_box_focuses_nothing(phone_front):
+    f = phone_front.open()
+    box_open_with_the_cursor_gone(f)
+    f.js(TAP, ["main"])
+    assert f.js("return root.activeElement && root.activeElement.tagName;") != "TEXTAREA"

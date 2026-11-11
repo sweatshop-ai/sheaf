@@ -4,7 +4,9 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Claimed by:** Torsten 2026-11-11 00:01
+
+**Status:** in-progress
 
 - [ ] Le bouton Copier copie le texte du bloc tel qu'il est à l'écran, modifications comprises
 - [ ] Le bloc se modifie en mode Edit et se commente en mode Comment comme une citation

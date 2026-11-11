@@ -492,3 +492,24 @@ def test_the_enter_that_confirms_an_ime_composition_sends_nothing(tab, site, ini
     p.wait_for_timeout(500)
     assert p.input_value(FIELD) == "konnichiwa"
     assert len(rdc.parse(site.file.read_text(encoding="utf-8")).comments[0].replies) == 0, "the confirming Enter sent the message"
+
+
+def test_a_thread_on_a_page_that_cannot_save_keeps_the_cross_and_no_write_control(tab, site, context, tmp_path):
+    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
+                                                     "Bea", "2026-10-14T10:00")[0])
+    # The same page opened from a file: no hub to save to, so every write control is off.
+    saved = tmp_path / "page.html"
+    saved.write_text(context.request.get(site.url).text(), encoding="utf-8")
+    p = context.new_page()
+    p.goto(saved.as_uri())
+    p.click(".rd-badge")
+    p.wait_for_selector("#rd-popover")
+    assert p.locator("#rd-popover .rd-head button[data-a=minimize]").count() == 1, "no Close on a thread that cannot save"
+    for gone in ("status", "edit", "delete"):
+        assert p.locator(f"#rd-popover [data-a={gone}]").count() == 0, gone
+    p.click("#rd-popover button[data-a=minimize]")
+    assert p.locator("#rd-popover").count() == 0
+    p.click(".rd-badge")
+    p.wait_for_selector("#rd-popover")
+    p.keyboard.press("Escape")
+    assert p.locator("#rd-popover").count() == 0, "Escape does not close it"

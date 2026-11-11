@@ -1800,8 +1800,8 @@ var create = function (ROOT, CFG, opts) {
       (!canSave ? '' : (more ? '<details class="rd-more"><summary aria-label="More" title="More">\u22EF</summary><div>' +
         (open ? '' : '<button data-a="status">Reopen</button>') +
         (mine(c) ? '<button data-a="edit">Edit</button><button data-a="delete">Delete</button>' : '') + '</div></details>' : '') +
-        (open ? '<button data-a="status" title="Resolve" aria-label="Resolve">\u2212</button>' : '') +
-        '<button data-a="minimize" title="Close" aria-label="Close">\u00D7</button>') + '</div>';
+        (open ? '<button data-a="status" title="Resolve" aria-label="Resolve">\u2212</button>' : '')) +
+      '<button data-a="minimize" title="Close" aria-label="Close">\u00D7</button></div>';   // closing needs no right to write
   }
   function thread(c) {
     var h = '<div class="rd-msg' + (mine(c) ? ' rd-mine' : '') + '">' + whoHtml({ by: c.by, role: null }) + '<span class="rd-when">' +
@@ -2047,7 +2047,9 @@ var create = function (ROOT, CFG, opts) {
       };
       if (head) head.addEventListener('click', act);
       acts.addEventListener('click', act);
-    }
+    } else if (head) head.addEventListener('click', function (e) {      // Close is all a page that cannot save offers
+      if (e.target.closest && e.target.closest('button[data-a=minimize]')) closePopover();
+    });
     var writing = forms.some(function (x) { return x.contains(ROOT.activeElement); });
     forms.forEach(function (x) { pop.appendChild(x); });
     if (writing) forms[0].querySelector('textarea').focus();       // moved in the page, the field lost the cursor

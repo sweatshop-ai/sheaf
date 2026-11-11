@@ -355,8 +355,8 @@ var create = function (ROOT, CFG, opts) {
     waits = {};
     (list || []).forEach(function (w) {
       // A snapshot is the hub's state when it wrote it, and the answer to a send can reach the page after the event of
-      // the agent seeing the Tell: a Tell seen does not go back to queued.
-      if (w.state === 'queued' && was[w.id] && was[w.id].state === 'seen') waits[w.id] = was[w.id];
+      // the agent seeing the Tell: a Tell seen does not go back to queued (the same agent's; another agent's Tell on the thread is its own).
+      if (w.state === 'queued' && was[w.id] && was[w.id].state === 'seen' && was[w.id].to === w.to) waits[w.id] = was[w.id];
       else if (w.state === 'queued' || w.state === 'seen') waits[w.id] = { to: w.to, state: w.state };
       else if (w.state === 'working' || w.state === 'waiting') telling[w.id] = true;
     });

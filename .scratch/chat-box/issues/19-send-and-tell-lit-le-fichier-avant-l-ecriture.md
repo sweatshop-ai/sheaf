@@ -14,7 +14,7 @@
 - [x] La cause est écrite avec la preuve (un échec reproduit à la demande, ou la sortie d'une CI qui l'a relevée)
 - [x] Le correctif traite la cause, pas un délai ou une relance
 
-**Cause (preuve, 2026-11-11).** Défaut du test. La fixture `thread` fait son premier commentaire avec le bouton Tell (le seul bouton d'envoi quand un agent est là), donc `.rd-pending-tell` est déjà sur la page avant que la réponse parte : `wait_for_selector` rend la main aussitôt, et `replies(file)` est lu avant que le hub ait écrit la réponse. Mesuré : `PENDING BEFORE THE REPLY: 1`, `REPLIES BEFORE: []`. Reproduit à la demande : `/_/comment` retenu 800 ms donne `assert [] == ['and plums?']`, le message de la CI. Ni `started` ni `takeTelling` n'y sont pour rien.
+**Cause (reproduite en local avec le message de la CI, 2026-11-11).** Défaut du test. La fixture `thread` fait son premier commentaire avec le bouton Tell (le seul bouton d'envoi quand un agent est là), donc `.rd-pending-tell` est déjà sur la page avant que la réponse parte : `wait_for_selector` rend la main aussitôt, et `replies(file)` est lu avant que le hub ait écrit la réponse. Mesuré : `PENDING BEFORE THE REPLY: 1`, `REPLIES BEFORE: []`. Reproduit à la demande : `/_/comment` retenu 800 ms donne `assert [] == ['and plums?']`, le message de la CI. Ni `started` ni `takeTelling` n'y sont pour rien.
 
 **Correctif.** Le test attend la réponse dans le fichier (`until(replies == …)`), ce que le test vérifie, puis la ligne. Rouge avec l'ancienne attente et 800 ms de retard, vert avec la nouvelle.
 

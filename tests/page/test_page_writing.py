@@ -4673,4 +4673,3 @@ def test_an_edit_of_a_table_keeps_the_escaped_pipe_in_a_raw_tags_attribute(tab):
     tab.page.clock.run_for(3000)
     until(lambda: "typed" in f.read_text(encoding="utf-8"), what="the save")
     assert '| <abbr title="a\\|b">X</abbr> | the cell typed |' in f.read_text(encoding="utf-8")
-

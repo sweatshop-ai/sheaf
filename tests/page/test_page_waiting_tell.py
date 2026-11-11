@@ -87,3 +87,26 @@ def test_a_send_answered_after_the_agent_saw_it_does_not_take_the_seen_line_back
     until(lambda: line(tab) == [f"{name} has seen it; its action appears in this thread."], what="the seen line")
     tab.page.wait_for_timeout(2500)
     assert line(tab) == [f"{name} has seen it; its action appears in this thread."], line(tab)
+
+
+def test_a_seen_tell_is_not_lent_to_the_queued_tell_of_another_agent_on_the_same_thread(tab, site):
+    # One thread can wait for two agents (a target changed after the first Tell). The page keeps a Tell seen
+    # (ticket 18) only for the agent that saw it; the other agent's queued Tell is said as queued.
+    token = ask_agent(tab, site)
+    name = f"ChatGPT ({site.hub.person})"
+    tab.page.fill("#rd-popover textarea", "Please do.")
+    tab.page.click("#rd-popover .rd-form button.rd-tell")
+    until(lambda: bool(line(tab)), what="the waiting line")
+    call(browser_on(site.hub), "documents", token=token)
+    until(lambda: line(tab) == [f"{name} has seen it; its action appears in this thread."], what="the seen line")
+    Tokens().add("bea-claude", client="Claude")
+    other = next(r for r in Tokens().list() if r.name == "bea-claude")
+    thread = rdc.parse(site.file.read_text()).by_id("c1")
+    # The snapshot that lists both Tells reaches the page before the event of the second one (two connections).
+    emit, held = site.hub.waiting_tells._emit, []
+    site.hub.waiting_tells._emit = lambda *a, **k: held.append((a, k)) if a[1] == "tell-queued" else emit(*a, **k)
+    site.hub.waiting_tells.queue(DOC, "c1", other, site.hub.person, None, thread)
+    site.hub.waiting_tells._emit = emit
+    update_file(site.file, lambda t: rdc.reply(t, "c1", "A word from outside.", "Ada", "2026-10-14T11:00"))
+    tab.page.wait_for_selector("#rd-popover :text('A word from outside.')")       # the snapshot that lists both Tells is in
+    assert line(tab) == ["Waiting for Claude (Ada): it sees this the next time you talk to it."], line(tab)

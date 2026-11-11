@@ -66,3 +66,4 @@ L'agent sait quand un texte est fait pour être copié. Il l'écrit dans un bloc
 
 - **Transcription sur un hub local :** sans Open WebUI, il faudra décider d'où elle vient. La question se posera au ticket 06.
 - **Arrivée sur tiroir-tt :** elle passe par une montée de version du hub, faite par le track action-list après la fusion du ticket 04.
+| 22 | La page peut afficher une réponse déjà reçue jusqu'à 10 s en retard derrière une longue écriture | 04 | À faire |

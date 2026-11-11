@@ -4,7 +4,9 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Claimed by:** Emil 2026-11-11 11:19
+
+**Status:** in-progress
 
 **Ce qui ne va pas :** `page.js:2783-2784`. Le `stash` du champ d'un nouveau message rend `true` dès que `box.value.trim()` est vide, sans passer par `draftsReplace(own)`. L'entrée `min: true` écrite à la première fermeture reste donc dans `localStorage`. Codex propose de vider `own` dans la branche vide avant de laisser fermer.
 

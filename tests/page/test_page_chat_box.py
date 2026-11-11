@@ -1,7 +1,7 @@
 """The popover of a comment is a chat box: narrow, its messages in bubbles, a field to write in under them."""
 import pytest
 
-from pagehelp import DOC, P1, at, box, comment_draft_key, mark, open_box, pasted, reloaded, select, toast, until
+from pagehelp import DOC, P1, P2, at, box, comment_draft_key, mark, open_box, pasted, reloaded, select, toast, until
 from sheafmd import comments as rdc
 from sheafmd.hub.state import Tokens
 from sheafmd.source import update_file
@@ -513,3 +513,33 @@ def test_a_thread_on_a_page_that_cannot_save_keeps_the_cross_and_no_write_contro
     p.wait_for_selector("#rd-popover")
     p.keyboard.press("Escape")
     assert p.locator("#rd-popover").count() == 0, "Escape does not close it"
+
+
+def test_a_minimized_message_whose_field_is_emptied_is_gone_from_the_store_when_the_box_closes(tab, site):
+    tab.open()
+    p = tab.page
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    p.fill(FIELD, "Why apples?")
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-unsent").count() == 1, what="the not-sent line")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    p.wait_for_selector(FIELD)
+    until(lambda: p.input_value(FIELD) == "Why apples?", what="the kept text back in the box")
+    p.fill(FIELD, "")
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-unsent").count() == 0, what="the not-sent line gone")
+    assert "Why apples?" not in (p.evaluate("JSON.stringify(Object.values(localStorage))")), "the emptied draft stayed in the store"
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    p.wait_for_selector(FIELD)
+    assert p.input_value(FIELD) == "", "the erased text came back"
+
+
+def test_closing_an_empty_new_message_that_was_never_kept_changes_nothing(tab, site):
+    tab.open()
+    p = tab.page
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    p.wait_for_selector(FIELD)
+    p.keyboard.press("Escape")
+    assert p.locator("#rd-popover").count() == 0
+    assert p.locator("#rd-unsent").count() == 0
+

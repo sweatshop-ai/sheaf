@@ -1180,10 +1180,11 @@ var create = function (ROOT, CFG, opts) {
   // the box stays and says so: closing would lose the text. Every way out goes through closePopover, which
   // asks; × on an open thread asks before it resolves. An empty field has nothing to keep.
   var storeOk = true;
+  function sayNotKept() { say('Your text could not be kept: the browser\u2019s storage is full or blocked. Copy it before you close this box.', true); }
   function stashAll() {
     var bad = false;
     if (pop) Array.prototype.forEach.call(pop.querySelectorAll(OPEN_FORM), function (f) { if (f.stash && f.stash() === false) bad = true; });
-    if (bad) say('Your text could not be kept: the browser\u2019s storage is full or blocked. Copy it before you close this box.', true);
+    if (bad) sayNotKept();
     return !bad;
   }
   // True when no popover is left open, false when one stays because its text could not be kept.
@@ -2011,6 +2012,9 @@ var create = function (ROOT, CFG, opts) {
     // Every form that is still to be sent goes through the redraw, not the first one only: a failed send
     // whose text is not in the store stays on the page beside the form of this thread.
     var forms = Array.prototype.filter.call(pop.querySelectorAll('.rd-form'), function (x) { return !x.hasAttribute('data-done'); });
+    // The form that has the cursor, read before the redraw detaches it: a detached field has lost the focus.
+    var writing = forms.filter(function (x) { return x.contains(ROOT.activeElement); })[0];
+    var caret = writing && ROOT.activeElement.tagName === 'TEXTAREA' ? [ROOT.activeElement.selectionStart, ROOT.activeElement.selectionEnd] : null;      // a button focused with Tab has none
     pop.innerHTML = bandHtml(c) + '<div class="rd-scroll">' + thread(c) +
       (telling[id] ? '<div class="rd-msg rd-reply rd-pending rd-pending-tell"><span class="rd-who rd-who-tell">' + esc(AGENT_UC) + '</span>' +
                      (tellQ ? '<div class="rd-text">is waiting for your answer in your session: ' + esc(tellQ) + '</div>' +
@@ -2048,9 +2052,12 @@ var create = function (ROOT, CFG, opts) {
       if (head) head.addEventListener('click', act);
       acts.addEventListener('click', act);
     }
-    var writing = forms.some(function (x) { return x.contains(ROOT.activeElement); });
     forms.forEach(function (x) { pop.appendChild(x); });
-    if (writing) forms[0].querySelector('textarea').focus();       // moved in the page, the field lost the cursor
+    if (writing) {        // moved in the page, the field lost the cursor: it goes back to the form that had it
+      var wt = writing.querySelector('textarea');
+      wt.focus();
+      if (caret) wt.setSelectionRange(caret[0], caret[1]);
+    }
     sendingIn(pop);
     sc = pop.querySelector('.rd-scroll');
     if (atEnd) sc.scrollTop = sc.scrollHeight;
@@ -2068,6 +2075,10 @@ var create = function (ROOT, CFG, opts) {
   function editForm(id, text) {
     var c = byId[id];
     if (!c) return;          // the thread went (a 410) while its button was still drawn
+    // An edit form with changes stands: a fresh one would open on the old text and the next Save or Cancel
+    // would clear what was typed from the store.
+    var open = text === undefined && ownForm();
+    if (open && open.querySelector('[data-f=no]')) { var ta = open.querySelector('textarea'); if (ta.value !== open.began) { ta.focus(); return; } }
     textForm(pop, text === undefined ? c.body : text, [{ k: 'ok', label: 'Save', cancel: true }], function (t, k, rid, line) {
       threadKeep(c, 'edit', t, rid, line, Date.now());
       return op({ op: 'edit', id: id, body: t, rid: rid }).then(function (j) { if (j) threadKeep(c, 'edit', null, rid); return j; });
@@ -2191,7 +2202,8 @@ var create = function (ROOT, CFG, opts) {
   // while it is that text.
   function textForm(host, initial, buttons, done, cancelled, says, kept, mirror) {
     var old = host.querySelector('.rd-form');
-    if (old) { if (old.stash) old.stash(); old.remove(); }      // what is typed in the form it replaces goes to the store first
+    // what is typed in the form it replaces goes to the store first; when the store refuses it, that form stays
+    if (old) { if (old.stash && old.stash() === false) { sayNotKept(); return; } old.remove(); }
     var own = host === pop ? popId : null;       // the thread this form is for; a new comment has none
     var about = own !== null && byId[own] ? byId[own].quote : '';     // its quote, still known once it is gone
     var born = own !== null && byId[own] ? byId[own].at : null;       // its birth: next_id gives a deleted id to the next comment
@@ -2223,6 +2235,7 @@ var create = function (ROOT, CFG, opts) {
     // An empty field is not writing: the reload that waited for the text runs once it is emptied.
     ta.addEventListener('input', function () { if (!ta.value) flushHold(); });
     var from = initial && typeof initial === 'object' ? initial : { body: initial || '' };
+    f.began = from.body;       // the text it opened with: what a changed form is measured against
     // The text last sent, and its id: a form drawn from the store holds a text that was sent (an older store kept
     // no id with it).
     var sent = { text: initial && typeof initial === 'object' ? from.body : null, rid: from.rid || null };
@@ -2658,7 +2671,8 @@ var create = function (ROOT, CFG, opts) {
     var t = e.touches && e.touches[0];
     if (emptyTouch && t && (Math.abs(t.clientX - emptyTouch.x) > 8 || Math.abs(t.clientY - emptyTouch.y) > 8)) emptyTouch.moved = true;
   }, true);
-  listen(document, 'touchend', function (e) {
+  // On the mounted page the event is heard on the root: from the document, its target is the host.
+  listen(PAGE_EV, 'touchend', function (e) {
     var from = emptyTouch, box = ROOT.getElementById('rd-popover');
     emptyTouch = null;
     if (!COARSE.matches || !from || from.moved || !box || !e.target.closest || !box.contains(e.target)) return;

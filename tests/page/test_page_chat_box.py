@@ -10,6 +10,7 @@ pytestmark = pytest.mark.page
 
 FIELD = "#rd-popover textarea"
 THREAD = "#rd-popover .rd-msg"
+THREAD_BOX = "#rd-popover"
 
 
 def open_thread(tab, site):
@@ -463,6 +464,107 @@ def test_choosing_edit_while_a_reply_is_typed_keeps_the_reply(tab, site):
     until(lambda: p.input_value(FIELD) == "Mine", what="the edit form, filled with the message")
     p.click("#rd-popover button[data-f=no]")
     until(lambda: p.input_value(FIELD) == "my reply, half written", what="the reply back in the field after Cancel")
+
+
+def my_thread(tab, site):
+    """A comment of Ada's own on the page, its thread open: the menu offers Edit."""
+    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "pears"), "pears", "Mine", "Ada", "2026-10-14T10:00")[0])
+    tab.open()
+    tab.page.click(".rd-badge")
+    tab.page.wait_for_selector(FIELD)
+    return tab.page
+
+
+def choose_edit(p):
+    if not p.is_visible("#rd-popover button[data-a=edit]"):       # the menu stays open after a choice
+        p.click("#rd-popover .rd-more summary")
+    p.click("#rd-popover button[data-a=edit]")
+
+
+def test_choosing_edit_when_the_store_cannot_keep_the_reply_leaves_the_reply_in_the_field(tab, site):
+    """Edit would replace the field: a reply the store refuses has nowhere else to go, so Edit does not open and says so."""
+    p = my_thread(tab, site)
+    store_full(p)
+    p.fill(FIELD, "a reply that cannot be kept")
+    choose_edit(p)
+    until(lambda: "could not be kept" in toast(p), what="the toast that says the text could not be kept")
+    assert p.input_value(FIELD) == "a reply that cannot be kept"
+    assert p.locator("#rd-popover [data-f=no]").count() == 0, "the edit form replaced the reply"
+
+
+def test_choosing_edit_again_on_a_changed_edit_form_keeps_the_changes(tab, site):
+    """The edit form stands, with what was typed in it: a second Edit must not bring back the old text, which the next Save or Cancel would clear from the store."""
+    p = my_thread(tab, site)
+    choose_edit(p)
+    until(lambda: p.input_value(FIELD) == "Mine", what="the edit form, filled with the message")
+    p.fill(FIELD, "Mine, changed")
+    choose_edit(p)
+    assert p.input_value(FIELD) == "Mine, changed", "the second Edit brought back the old text"
+    assert p.locator("#rd-popover [data-f=no]").count() == 1
+
+
+def test_choosing_edit_again_on_an_unchanged_edit_form_opens_it_afresh(tab, site):
+    p = my_thread(tab, site)
+    choose_edit(p)
+    until(lambda: p.input_value(FIELD) == "Mine", what="the edit form")
+    choose_edit(p)
+    assert p.input_value(FIELD) == "Mine"
+    assert p.locator("#rd-popover [data-f=no]").count() == 1
+
+
+def second_form_beside_the_first(p):
+    """What a failed send of another thread leaves in this box: a second form, the cursor in it."""
+    p.evaluate("""() => {
+      const first = document.querySelector('#rd-popover .rd-form');
+      const second = first.cloneNode(true);
+      second.querySelector('textarea').value = 'the other form';
+      first.after(second);
+      second.querySelector('textarea').focus();
+    }""")
+
+
+def an_answer_arrives(site, p):
+    """A reply written to the file: the page redraws the thread (fillPopover)."""
+    update_file(site.file, lambda t: rdc.reply(t, "c1", "An answer", "Bea", "2026-10-14T11:00"))
+    until(lambda: "An answer" in p.inner_text(THREAD_BOX), what="the answer in the thread")
+
+
+def test_a_redraw_leaves_the_cursor_in_the_form_it_was_in(tab, site):
+    """With two forms in the box the cursor must not jump to the first while the second is typed in."""
+    p = open_thread(tab, site)
+    second_form_beside_the_first(p)
+    an_answer_arrives(site, p)
+    assert p.evaluate("document.activeElement.value") == "the other form", "the cursor jumped to the first form"
+
+
+def test_a_redraw_leaves_the_cursor_in_the_only_form(tab, site):
+    p = open_thread(tab, site)
+    p.focus(FIELD)
+    an_answer_arrives(site, p)
+    assert p.evaluate("document.activeElement.tagName") == "TEXTAREA"
+    assert p.locator("#rd-popover .rd-form").count() == 1
+
+
+def test_a_redraw_keeps_the_caret_of_the_field_when_a_button_has_the_cursor(tab, site):
+    """Tab to Send, then an answer arrives: the typed text keeps its caret, it does not jump to the start."""
+    p = open_thread(tab, site)
+    p.fill(FIELD, "hello")
+    p.press(FIELD, "Tab")
+    assert p.evaluate("document.activeElement.tagName") == "BUTTON"
+    an_answer_arrives(site, p)
+    assert p.evaluate("document.activeElement.tagName") == "TEXTAREA"
+    assert p.evaluate("document.activeElement.selectionStart") == 5
+
+
+def test_choosing_edit_on_an_edit_form_the_message_moved_away_from_opens_it_afresh(tab, site):
+    """A live update changed the message while the edit form stood untouched: Edit shows the new text, not the stale one."""
+    p = my_thread(tab, site)
+    choose_edit(p)
+    until(lambda: p.input_value(FIELD) == "Mine", what="the edit form")
+    update_file(site.file, lambda t: rdc.edit_body(t, "c1", "Mine v2"))
+    until(lambda: p.evaluate("document.querySelector('#rd-popover').innerText.includes('Mine v2')") or p.input_value(FIELD) == "Mine v2", what="the live update")
+    choose_edit(p)
+    assert p.input_value(FIELD) == "Mine v2"
 
 
 def test_closing_an_edit_form_that_was_not_changed_leaves_nothing_unsent(tab, site):

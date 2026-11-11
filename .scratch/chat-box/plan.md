@@ -51,6 +51,16 @@ L'agent sait quand un texte est fait pour être copié. Il l'écrit dans un bloc
 | 04 | Livrer la boîte : review, CI, fusion | 01, 02, 03 | À faire |
 | 05 | Les blocs à copier | 04 | À faire |
 | 06 | Le micro dans la boîte | 04 | À faire |
+| 07 | Page montée : un toucher dans la zone vide met le curseur dans le champ | 04 | À faire |
+| 08 | Menu ⋯ Edit : une réponse tapée est perdue quand le stockage refuse | 04 | À faire |
+| 09 | Menu ⋯ Edit : les changements d'un formulaire d'édition modifié sont perdus | 04 | À faire |
+| 10 | Le test d'Échap échoue de temps en temps en CI : trouver la cause | 04 | En cours (PR #241) |
+| 11 | fillPopover ramène le curseur dans le premier formulaire | 04 | À faire |
+| 12 | Revue Codex de la fusion cdb0e24 (après le 2026-11-11 08:36) | Rien | À faire |
+| 17 | Le test du toast d'annulation d'un Tell échoue de temps en temps en CI | 04 | À faire |
+| 18 | La ligne « vu » d'un Tell en attente n'arrive pas, de temps en temps, en CI | 04 | À faire |
+| 19 | Le test « envoyer et Tell » lit le fichier avant d'y trouver la réponse, de temps en temps en CI | 04 | À faire |
+| 20 | La réponse que le hub a prise n'apparaît pas dans la boîte quand la page abandonne l'envoi, de temps en temps en CI | 04 | À faire |
 
 ## Ce qui reste ouvert
 

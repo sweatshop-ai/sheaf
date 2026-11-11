@@ -2191,11 +2191,13 @@ def comment_posts(page):
 
 
 def test_send_and_tell_starts_one_tell_and_the_thread_waits_for_its_reply(agent, thread):
+    # The thread was itself made with Tell, so its waiting line is on the page before this reply is sent (ticket 19):
+    # the reply is what is waited for.
     sent = comment_posts(thread.page)
     open_reply(thread, "and plums?")
     thread.page.click("#rd-popover button[data-f=tell]")
+    until(lambda: replies(thread.site.file) == ["and plums?"], what="the reply in the file")
     thread.page.wait_for_selector("#rd-popover .rd-pending-tell")
-    assert replies(thread.site.file) == ["and plums?"]
     assert [(b["op"], b["tell"], "ask" in b) for b in sent] == [("reply", True, False)]
 
 
@@ -4660,3 +4662,4 @@ def test_an_edit_of_a_table_keeps_the_escaped_pipe_in_a_raw_tags_attribute(tab):
     tab.page.clock.run_for(3000)
     until(lambda: "typed" in f.read_text(encoding="utf-8"), what="the save")
     assert '| <abbr title="a\\|b">X</abbr> | the cell typed |' in f.read_text(encoding="utf-8")
+

@@ -2783,8 +2783,8 @@ var create = function (ROOT, CFG, opts) {
     if (field) {
       // Closed before it is sent, it is kept quietly for this passage: not in the notice of refused comments.
       field.stash = function () {
-        if (!box.value.trim()) return true;
         storeOk = true;
+        if (!box.value.trim()) { draftsReplace(own); return storeOk; }      // emptied: a draft kept before goes too
         draftsReplace(own, { quote: t.quote, body: box.value, block: t.block, head: t.head, tail: t.tail, occ: t.occ, min: true });
         return storeOk;
       };

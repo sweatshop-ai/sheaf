@@ -4036,9 +4036,11 @@ def test_a_tell_or_cancel_the_hub_cannot_be_reached_for_says_that_it_did_not_go_
         aborted.append(route.request.url)
         route.abort()
     if what == "cancel-tell":
+        # The thread was made with Tell, so its Cancel is on the page already (ticket 17): the reply's `tell-sent` says
+        # "Sent to…" in the toast, and would take the place of this one if it came after the refusal. The toast keeps
+        # its text when it hides, so the first Tell's "Sent to…" is wiped before the reply is sent.
+        p.evaluate("document.getElementById('rd-toast').textContent = ''")
         thread.page.click("#rd-popover .rd-form button.rd-tell")
-        # The thread was made with Tell, so its Cancel is on the page already (ticket 17): the reply's own answer says
-        # "Sent to…" in the toast, and would take the place of this one if it came after the refusal.
         toasted(p, "Sent to your")
         p.wait_for_selector("#rd-popover button[data-a=cancel-tell]")
         route = "**/_/cancel"

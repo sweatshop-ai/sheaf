@@ -4,7 +4,9 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Claimed by:** Emil 2026-11-11 11:19
+
+**Status:** in-progress
 
 **Ce qui ne va pas :** `page.js:1800-1804` (`bandHtml`). Quand `canSave` est faux, le test `!canSave ? '' : (...)` retire en bloc le menu ⋯, Resolve et Close. Le fil s'ouvre pourtant, mais n'a plus de ×. Close (`data-a="minimize"`) doit être rendu et branché indépendamment de Resolve, Reopen, Edit et Delete. À vérifier au passage : que la boîte se ferme encore par Échap et un clic à côté en lecture seule.
 

@@ -16,7 +16,7 @@ from .blocks import split_md_blocks
 MARKER = "[!COPY]"
 PAGE_CLASS = "rd-copy"
 BUTTON_CLASS = "rd-copybtn"
-STAND_IN = "RDCP7ZQ"      # one word for pandoc, as long as the marker so the columns of its line stay put
+STAND_IN = "RDCP7ZQ"      # one word for pandoc, as long as the marker so the columns of its line stay put; a document that holds this word in a copy block collides with it
 
 # The first line of a top-level quote, and then at least one line with words.
 _LINE = re.compile(r"(\s{0,3}>[ \t]?)" + re.escape(MARKER) + r"[ \t]*(?=\r?(?:\n|$))")

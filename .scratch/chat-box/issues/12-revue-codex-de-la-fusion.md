@@ -2,7 +2,8 @@
 
 **What to build:** Passer la chasse aux bugs de Codex sur la boîte de chat fusionnée. Codex n'a pas pu tourner pendant la PR #238 (plus de jetons jusqu'au 2026-11-11 08:36) ; un agent Opus l'a remplacé : https://github.com/sweatshop-ai/sheaf/pull/238#issuecomment-6772147551
 
-**Blocked by:** Rien (à partir du 2026-11-11 08:36)
+**Blocked by:**
+- External: quota Codex, disponible à partir du 2026-11-11 08:36
 
 **Status:** ready-for-agent
 

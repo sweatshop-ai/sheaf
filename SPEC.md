@@ -894,6 +894,8 @@ A Tell asks the document's **target** to act on a comment. It counts as the pers
 
 Nothing reaches a token from the hub but what it asks for: there is no push to an agent, no URL called back, and the token does not learn the Tells of another token.
 
+**Where an agent without push hears of its waiting Tells.** The tiroir library door (9.7, decision 1 of the agents design note) is the one place an agent that cannot be pushed to learns of a waiting Tell, and also of files its library could not read. The door answers `documents` as above, then hands the answer to its `NoticeHub`, which attaches to the tool result a `Notice:` block built by one `Notice` interface: the sources are `SheafTells` (the `tells` of that answer) and `UnreadableFiles` (the Memorizer's own state), and a new kind of notice is a new source, not a new path. The hub itself is unchanged by this: it still lists a Tell only when asked, and sets `seen` as above. Delivered in tiroir-library-mcp#241 (5341c19). The notice reads the Tell with the listing, so it sets `seen`; a peek that does not consume it is sweatshop-ai/sheaf#239.
+
 ### 9.9 Proxy mode
 
 Loopback mode, 9.1 to 9.8 as written above, is the default, and nothing in it changes. **Proxy mode** serves the hub's pages on the origin of another web application, **the front**, through a reverse proxy on the same machine, and lets the front's sign-in say who is asking: a **member**. It was written for Open WebUI as the front and Caddy as the proxy; the facts below that name them are theirs.

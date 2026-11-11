@@ -60,6 +60,7 @@ L'agent sait quand un texte est fait pour être copié. Il l'écrit dans un bloc
 | 14 | Un brouillon réduit dont on vide le champ reste dans le stockage | 04 | À faire |
 | 15 | La liste « not sent » est calculée avant que la boîte ouverte y mette son texte | 04 | À faire |
 | 16 | Un fil en lecture seule n'a pas de bouton Fermer | 04 | À faire |
+| 21 | draftsReplace lit une lecture refusée comme vide | 04 | À faire |
 
 ## Ce qui reste ouvert
 

@@ -4,7 +4,9 @@
 
 **Where (main cdb0e24):** `hub/core.py:724-728` `work_meta`: `window = "_".join(...rel.split("/")[:2])`, then `re.fullmatch(r"[A-Za-z0-9_-]+", window)`. `Address.parse` (`hub/roots.py:180-186`) restricts no segment. The fix: check each of the two parts against James's SLUG before joining; a part that fails gets no `attach` key. Nothing is lost: James has no window for such a project. Nothing changes on James's side.
 
-**Size:** small: one check in `core.py`, tests, one sentence in SPEC 9.12.
+**Size:** small: one check in `core.py`, tests, one sentence in SPEC 9.12. Once both parts pass SLUG, the `[A-Za-z0-9_-]+` check at `core.py:727` is redundant: keep it as a guard.
+
+**Not in scope:** Tell drops and Stop James match on the JSON `project` field, not the file name, so they need no rule (`handler.py:1137,1150`; `james.py:1231-1236,1265`). A box-hosted Tell is still offered (`work.py:88-90`) on a project James refuses (`james.py:1265-1270`, `tell_one` `REFUSED`); the member sees that failure (SPEC 9.15). That is a separate ticket if wanted.
 
 **Blocked by:** None (can start immediately)
 
@@ -12,5 +14,5 @@
 
 - [ ] Test first: `a_b/c` and `a/b_c` each get no `attach` key (evidence: a test with both addresses on a member with a shell and `attach` configured)
 - [ ] A part with an uppercase letter or a leading `-` gets no `attach` key either (evidence: a test for `Thinkingtoo/tiroir` and `-a/b`)
-- [ ] `thinkingtoo/tiroir` and a part with inner dashes (`a-b/c`) keep today's command (evidence: the attach tests at tests/test_hub_work.py:963-993 stay green and unchanged)
-- [ ] SPEC 9.12 states the rule and names James's SLUG as its source (evidence: the sentence, with the section number)
+- [ ] `thinkingtoo/tiroir` keeps today's command, and `a--b/c` and `a/b--c` get two different windows (evidence: the attach tests at tests/test_hub_work.py:963-993 stay green and unchanged; a new test for `a-b/c`, `a--b/c` and `a/b--c`)
+- [ ] SPEC 9.12 states the rule and names James's SLUG as its source (evidence: the sentence in "What the page offers", SPEC.md:1066)

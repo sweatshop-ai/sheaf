@@ -56,7 +56,10 @@ L'agent sait quand un texte est fait pour être copié. Il l'écrit dans un bloc
 | 09 | Menu ⋯ Edit : les changements d'un formulaire d'édition modifié sont perdus | 04 | À faire |
 | 10 | Le test d'Échap échoue de temps en temps en CI : trouver la cause | 04 | À faire |
 | 11 | fillPopover ramène le curseur dans le premier formulaire | 04 | À faire |
-| 12 | Revue Codex de la fusion cdb0e24 (après le 2026-11-11 08:36) | Rien | À faire |
+| 12 | Revue Codex de la fusion cdb0e24 | Rien | Fait : 3 trouvailles P2 → tickets 14 à 16 |
+| 14 | Un brouillon réduit dont on vide le champ reste dans le stockage | 04 | À faire |
+| 15 | La liste « not sent » est calculée avant que la boîte ouverte y mette son texte | 04 | À faire |
+| 16 | Un fil en lecture seule n'a pas de bouton Fermer | 04 | À faire |
 
 ## Ce qui reste ouvert
 

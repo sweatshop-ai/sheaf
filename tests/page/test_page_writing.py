@@ -4223,7 +4223,8 @@ def answer_after_event(tab):
     go.set()
 
 
-def test_a_reply_the_hub_took_and_told_of_before_the_page_gave_up_goes_from_the_page_when_it_gives_up(thread, answer_after_event):
+@pytest.mark.parametrize("hello", [False, True], ids=["as it comes", "a stream that says hello while the send is out"])
+def test_a_reply_the_hub_took_and_told_of_before_the_page_gave_up_goes_from_the_page_when_it_gives_up(thread, answer_after_event, hello):
     p = thread.page
     reload_on_clock(p)
     p.click(".rd-badge")
@@ -4232,8 +4233,15 @@ def test_a_reply_the_hub_took_and_told_of_before_the_page_gave_up_goes_from_the_
     p.keyboard.press("Control+Enter")
     until(lambda: SLOW in thread.site.file.read_text(), what="the hub's write")
     until(lambda: SLOW not in comment_store(thread), what="the page to hear the event of the write")
+    if hello:
+        # On a loaded runner the stream's first hello reaches the page while the send is out (ticket 20). The page then
+        # checks the document when the send ends, and holds the event of the write until that answer or CHECK_WAIT;
+        # the answer waits for the lock the hub holds until the release below.
+        thread.site.hub.entry(DOC).live._publish("hello", {})
+        p.wait_for_timeout(300)
     p.clock.fast_forward(30_500)
     toasted(p, TAKEN)
+    p.clock.fast_forward(10_500)      # the page's own end of that wait (CHECK_WAIT), on the clock the test drives
     until(lambda: not typed(p), what="the form to go")
     try:
         until(lambda: p.inner_text("#rd-popover").count(SLOW) == 1, what="the reply in its thread")

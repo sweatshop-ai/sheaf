@@ -2722,7 +2722,10 @@ var create = function (ROOT, CFG, opts) {
     var wrote = [];                       // the request ids of this form's sends (each text has its own): their entries are its own
     // This form's entries: the one it took into itself and those its own sends wrote, and no other: the same
     // quote in another paragraph is another comment.
-    var own = function (x) { return (d && x.quote === d.quote && x.at === d.at) || wrote.indexOf(x.rid) >= 0; };
+    var kept = null;       // the draft this form's stash last wrote (a close can stash and then stay open): its quote and stamp
+    var own = function (x) {
+      return (d && x.quote === d.quote && x.at === d.at) || (kept && x.quote === kept.quote && x.at === kept.at) || wrote.indexOf(x.rid) >= 0;
+    };
     var mine = function (r) { return r.own === null && r.host === host; };    // this form's entry of `out`
     textForm(pop, d || '', sendButtons('Comment'),
              async function (text, k, rid) {
@@ -2786,10 +2789,12 @@ var create = function (ROOT, CFG, opts) {
       field.stash = function () {
         storeOk = true;
         if (!box.value.trim()) {      // emptied: a draft kept before goes too; nothing kept, nothing to write
-          if (d || wrote.length) draftsReplace(own);        // known from this form, not read back from a store that may refuse
+          if (d || kept || wrote.length) draftsReplace(own);        // known from this form, not read back from a store that may refuse
           return storeOk;
         }
-        draftsReplace(own, { quote: t.quote, body: box.value, block: t.block, head: t.head, tail: t.tail, occ: t.occ, min: true });
+        var at = (kept || d || {}).at || new Date().toISOString();       // one stamp for the form's draft, so the next stash finds it
+        draftsReplace(own, { quote: t.quote, body: box.value, block: t.block, head: t.head, tail: t.tail, occ: t.occ, min: true, at: at });
+        if (storeOk) kept = { quote: t.quote, at: at };
         return storeOk;
       };
       // The cursor is in the field, not on the passage: with nothing typed, Ctrl+C still copies the passage.

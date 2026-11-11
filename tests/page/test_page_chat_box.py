@@ -573,3 +573,23 @@ def test_the_not_sent_list_without_an_open_box_lists_what_was_kept(tab, site):
     until(lambda: p.locator("#rd-unsent").count() == 1, what="the not-sent line")
     p.click("#rd-unsent")
     until(lambda: p.locator("#rd-popover[data-unsent] .rd-form").count() == 1, what="the list")
+
+
+def stored_drafts(page):
+    return page.evaluate("Object.values(localStorage).map(v => { try { return JSON.parse(v); } catch (e) { return null; } }).flat().filter(x => x && x.min)")
+
+
+def test_a_message_kept_by_a_close_that_was_then_aborted_is_removed_when_its_field_is_emptied(tab, site):
+    tab.open()
+    p = tab.page
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    p.fill(FIELD, "first words")
+    # What closePopover does to every form before it closes; another form's refusal would leave this box open.
+    p.evaluate("document.querySelector('#rd-popover .rd-form').stash()")
+    p.fill(FIELD, "first words, more")
+    p.evaluate("document.querySelector('#rd-popover .rd-form').stash()")
+    assert [d["body"] for d in stored_drafts(p)] == ["first words, more"], "a second stash of the same form made a second draft"
+    p.fill(FIELD, "")
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-unsent").count() == 0, what="the not-sent line gone")
+    assert stored_drafts(p) == [], "the emptied draft stayed in the store"

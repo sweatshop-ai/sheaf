@@ -1632,6 +1632,7 @@ var create = function (ROOT, CFG, opts) {
   // A list found empty (the store emptied without a word to this page) takes the line away instead.
   function showUnsent() {
     if (writingFirst()) return;
+    if (!closePopover()) return;       // an open box puts its text aside first, so the list is read with it
     var ds = sendsKept();
     if (ds.length) keptForms('data-unsent', ds, keptSend, keptSendButtons); else unsentLine();
   }

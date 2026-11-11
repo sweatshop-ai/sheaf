@@ -67,3 +67,23 @@ def test_an_action_reply_ends_the_wait(tab, site):
     until(lambda: bool(line(tab)), what="the waiting line")
     call(browser_on(site.hub), "reply", token=token, doc=DOC, id="c1", text="Done.", role="action")
     until(lambda: line(tab) == [], what="the line to go on the action reply")
+
+
+def test_a_send_answered_after_the_agent_saw_it_does_not_take_the_seen_line_back(tab, site):
+    # The answer to the send holds the Tells as the hub had them when it wrote it; the agent's seeing it is told by an
+    # event that a slow answer can pass. "Seen" does not go back to "queued" (ticket 18).
+    token = ask_agent(tab, site)
+    name = f"ChatGPT ({site.hub.person})"
+
+    def slow(route):
+        got = route.fetch()
+        tab.page.wait_for_timeout(1500)       # the page hears of the sight meanwhile
+        route.fulfill(response=got)
+    tab.page.route("**/_/comment", slow)
+    tab.page.fill("#rd-popover textarea", "Please do.")
+    tab.page.click("#rd-popover .rd-form button.rd-tell")
+    until(lambda: line(tab) == [f"Waiting for {name}: it sees this the next time you talk to it."], what="the waiting line")
+    call(browser_on(site.hub), "documents", token=token)
+    until(lambda: line(tab) == [f"{name} has seen it; its action appears in this thread."], what="the seen line")
+    tab.page.wait_for_timeout(2500)
+    assert line(tab) == [f"{name} has seen it; its action appears in this thread."], line(tab)

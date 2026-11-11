@@ -207,3 +207,16 @@ def shown(md):
 def test_the_comment_offsets_count_what_the_page_shows(md):
     block = md.rstrip("\n")
     assert rdc.projection(block).text == shown(block).replace("[!COPY]", "[!COPY]")
+
+
+def test_the_stand_in_is_as_long_as_the_marker_so_columns_on_its_line_keep_their_place():
+    assert len(copyblock.STAND_IN) == len(copyblock.MARKER)
+
+
+def test_a_comment_on_a_marker_pandoc_does_not_hide_lands_on_it_not_two_lines_below():
+    # A backtick in a fence's info string is no fence: the page shows `[!COPY]` in a heading.
+    block = "> [!COPY]\n> a\n> ```lo`ng\n> ---"
+    proj = rdc.projection(block).text
+    i = proj.index("[!COPY]")
+    at = rdc.anchor_point(block, i, i + 7, "[!COPY]")
+    assert block[:at].endswith("[!COPY]")

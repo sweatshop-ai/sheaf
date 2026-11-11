@@ -23,6 +23,8 @@ _LINE = re.compile(r"(\s{0,3}>[ \t]?)" + re.escape(MARKER) + r"[ \t]*(?=\r?(?:\n
 _WORDS = re.compile(r"^[ \t>]*[^\s>]", re.M)
 # An underline in the first paragraph makes the marker line part of a heading, which `mark` cannot take it off.
 _UNDERLINE = re.compile(r"^[ \t>]*(?:=+|-+)[ \t]*$")
+_QUOTE_PREFIX = re.compile(r"^\s{0,3}>[ \t]?")
+_OPENS_BLOCK = re.compile(r"^(?: {4}|\t|\s{0,3}(?:```|~~~|#{1,6}(?:\s|$)|[-*+]\s|\d{1,9}[.)]\s|>))")
 
 
 def is_copy_block(content: str) -> bool:
@@ -31,9 +33,12 @@ def is_copy_block(content: str) -> bool:
     if not (_LINE.fullmatch(first.rstrip("\r")) and _WORDS.search(rest)):
         return False
     for line in rest.split("\n"):
-        if not line.strip(" \t\r>"):
+        line = line.rstrip("\r")
+        if not line.strip(" \t>"):
             break                       # the first paragraph ends at the first blank quote line
-        if _UNDERLINE.match(line.rstrip("\r")):
+        if _OPENS_BLOCK.match(_QUOTE_PREFIX.sub("", line)):
+            break                       # and at the line that opens a fence, code, a list, a heading or a quote
+        if _UNDERLINE.match(line):
             return False
     return True
 

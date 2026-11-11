@@ -167,3 +167,13 @@ def test_text_that_looks_like_the_stand_in_is_left_alone(tmp_path):
 def test_a_setext_underline_in_the_first_paragraph_makes_it_no_copy_block(quote):
     assert copyblock.skipped(quote) == 0
     assert copyblock.hide(quote) == quote
+
+
+@pytest.mark.parametrize("quote", [
+    "> [!COPY]\n> ```yaml\n> ---\n> a: 1\n> ```\n",           # a prompt holding YAML front matter
+    "> [!COPY]\n> ```\n> Title\n> =====\n> ```\n",           # a mail with a rule of its own in a fence
+    "> [!COPY]\n>     ---\n",                                 # indented code
+    "> [!COPY]\n> - a\n>   ---\n",                           # a list item's own heading
+])
+def test_an_underline_after_the_first_paragraph_ended_is_no_reason_to_refuse_the_block(quote):
+    assert copyblock.skipped(quote) == len("[!COPY]")

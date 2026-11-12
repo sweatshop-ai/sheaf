@@ -23,7 +23,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .. import __version__, config, diagnostics, paths
 from ..source import STAMP_FORMAT
-from . import peer, proxy, sender, service, state, the_list
+from . import peer, proxy, sender, service, state, the_list, transcribe
 from .client import STOPPING
 from .core import Hub
 from .events import KEEPALIVE, KEEPALIVE_SECONDS, PREAMBLE, frame
@@ -498,6 +498,12 @@ def _run(started_by: str, signals: "sender.Signals") -> int:
                                                  f"is inside a root of {m.name}: {folder}")
     except the_list.ListError as e:
         return _list_refused(e)
+    try:
+        transcribe_cfg = transcribe.load()
+    except transcribe.TranscribeError as e:
+        diagnostics.record("hub", "transcribe-config", None, reason=str(e))
+        print(f"sheaf hub: {e}", file=sys.stderr)
+        return 1
     # From reading the key to holding the port, `sheaf rotate` on a machine with no hub waits: it
     # must not replace the key of a hub that is a moment from listening on the old one.
     with paths.key_lock():
@@ -517,6 +523,8 @@ def _run(started_by: str, signals: "sender.Signals") -> int:
             sock.close()
             return _proxy_refused(e)
     hub = Hub(port=port, key=key, started_by=started_by, service=started_by == "service", proxy=cfg, person=person)
+    if transcribe_cfg is not None:
+        hub.transcribe = transcribe.Relay(transcribe_cfg, record=hub.record)
     srv = HubServer(hub, sock, proxy_sock)
     if list_cfg is not None:
         hub.the_list = the_list.TheList(hub, list_cfg)

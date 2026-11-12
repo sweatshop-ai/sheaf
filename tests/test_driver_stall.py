@@ -10,7 +10,7 @@ from pathlib import Path
 TESTS = Path(__file__).resolve().parent
 
 # A driver that never answers, laid out as Playwright's is: the frame `greenlet_main` of
-# playwright/sync_api/_context_manager.py, where the main thread waits for the driver.
+# the `_context_manager` module of playwright.sync_api, where the main thread waits for the driver.
 FAKE_DRIVER = '''
 import threading
 

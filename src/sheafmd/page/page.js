@@ -353,8 +353,11 @@ var create = function (ROOT, CFG, opts) {
     if (waits[id]) { delete waits[id][agent]; if (!Object.keys(waits[id]).length) delete waits[id]; }
   }
   function waitList(id) { return waits[id] ? Object.keys(waits[id]).map(function (a) { return waits[id][a]; }) : []; }
-  // `seenSeq` counts the `tell-seen` events taken; `seenAt[thread + '\n' + agent]` is its count at the last one of that pair.
-  var seenSeq = 0, seenAt = {};
+  // `seenSeq` counts the Tell events taken (`tell-seen`, `tell-queued`, `tell-done`, `tell-cancelled`); `seenAt`, `queuedAt`
+  // and `endedAt` [thread + '\n' + agent] are its count at the last one of that kind for that pair. A snapshot (`since`: the
+  // count when it was asked) never overrides an event taken after it: not a sight, a Tell queued, nor an end.
+  var seenSeq = 0, seenAt = {}, queuedAt = {}, endedAt = {};
+  var cancelled = {};          // thread -> the places a Cancel of this page took off, for the events that follow its answer
   // The hub's `telling`, `[{id, to, state}]` (SPEC 8.5): `working` and `waiting` are a session's, in `telling`;
   // `queued` and `seen` an agent's, in `waits`; `sent`, `picked-up` and `delivered` are a drop for James's window
   // (9.12), which `sentBox` shows from `sent`: no spinner here. `keep`: a session's threads already known stay (jobs are only added).
@@ -363,6 +366,7 @@ var create = function (ROOT, CFG, opts) {
     var was = waits;
     waits = {};
     (list || []).forEach(function (w) {
+      if (since !== undefined && endedAt[w.id + '\n' + w.to] > since) return;      // it ended after the snapshot was written
       // A snapshot is the hub's state when it wrote it, and it can reach the page after the event of the agent seeing the
       // Tell: a Tell seen does not go back to queued when its `tell-seen` was taken after the page got the snapshot
       // (`since`: `seenSeq` then) and for the same agent (another agent's Tell on the thread is its own). A snapshot
@@ -372,6 +376,11 @@ var create = function (ROOT, CFG, opts) {
         waitAt(w.id, w.to, old);
       else if (w.state === 'queued' || w.state === 'seen') waitAt(w.id, w.to, { to: w.to, state: w.state });
       else if (w.state === 'working' || w.state === 'waiting') telling[w.id] = true;
+    });
+    if (since !== undefined) Object.keys(was).forEach(function (id) {        // a Tell queued after the snapshot was written
+      Object.keys(was[id]).forEach(function (agent) {
+        if (queuedAt[id + '\n' + agent] > since && !(waits[id] && waits[id][agent])) waitAt(id, agent, was[id][agent]);
+      });
     });
   }
 
@@ -2274,8 +2283,26 @@ var create = function (ROOT, CFG, opts) {
   function notSent(e, what) {
     return e.unreachable && e.message === UNREACHABLE ? what + ' did not go out: the hub is unreachable.' : e.message;
   }
+  // One Cancel ends the Tell of each agent, each with an event of its own, and a toast replaces the one before it: the
+  // events of a moment are said once, naming every agent that had already seen its Tell.
+  var cancelNote = null;
+  function cancelSaid(to, seen) {
+    if (!cancelNote) {
+      cancelNote = { seen: [] };
+      setTimeout(function () {
+        var n = cancelNote;
+        cancelNote = null;
+        say('Cancelled.' + (n.seen.length ? ' ' + n.seen.join(' and ') + ' had already seen it; look at the document before you Tell again.' : ''));
+      }, 60);
+    }
+    if (seen) cancelNote.seen.push(to);
+  }
   async function cancel(id) {
-    var off = function () { delete telling[id]; delete waits[id]; touched(id); };
+    var off = function () {
+      cancelled[id] = waits[id];               // the events that follow still find what to say of each agent
+      setTimeout(function () { delete cancelled[id]; }, 5000);
+      delete telling[id]; delete waits[id]; touched(id);
+    };
     var waited = waits[id];
     try {
       await post('/_/cancel', { id: id });
@@ -3774,16 +3801,17 @@ var create = function (ROOT, CFG, opts) {
       });
       live.addEventListener('tell-cancelled', function (ev) {
         var d = JSON.parse(ev.data || '{}');
-        var waited = d.agent !== undefined ? (waits[d.id] || {})[d.agent] : null;
+        var waited = d.agent !== undefined ? (waits[d.id] || cancelled[d.id] || {})[d.agent] : null;
         delete telling[d.id];
-        if (d.agent !== undefined) waitOff(d.id, d.agent);     // a Tell job's end names no agent: it ends no agent's Tell
+        if (d.agent !== undefined) { waitOff(d.id, d.agent); endedAt[d.id + '\n' + d.agent] = ++seenSeq; }   // a Tell job's end names no agent: it ends no agent's Tell
         touched(d.id);
-        if (waited) say('Cancelled.' + (d.seen ? ' ' + waited.to + ' had already seen it; look at the document before you Tell again.' : ''));
+        if (waited) cancelSaid(waited.to, d.seen);
       });
       // A Tell that waits for an agent (SPEC 9.8, 10.5): queued, listed to the agent, ended by its action reply.
       live.addEventListener('tell-queued', function (ev) {
         var d = JSON.parse(ev.data || '{}');
         waitAt(d.id, d.agent, { to: d.agent, state: 'queued' });
+        queuedAt[d.id + '\n' + d.agent] = ++seenSeq;
         touched(d.id);
       });
       live.addEventListener('tell-seen', function (ev) {
@@ -3795,6 +3823,7 @@ var create = function (ROOT, CFG, opts) {
       live.addEventListener('tell-done', function (ev) {
         var d = JSON.parse(ev.data || '{}');
         waitOff(d.id, d.agent);
+        endedAt[d.id + '\n' + d.agent] = ++seenSeq;
         touched(d.id);
       });
       ['tell-sent', 'tell-waiting', 'tell-working', 'tell-queued', 'tell-seen', 'tell-done',

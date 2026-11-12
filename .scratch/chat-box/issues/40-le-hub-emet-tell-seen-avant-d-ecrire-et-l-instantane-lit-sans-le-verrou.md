@@ -2,7 +2,8 @@
 
 **What to build:** Reste du ticket 23 (paragraphe « À regarder », revue Opus du 2026-11-11), séparé du ticket 23 parce qu'il touche l'ordre des écritures du hub et non le nom de l'agent. Dans `src/sheafmd/hub/waiting.py`, `take` appelle `_emit("tell-seen", …)` dans la fonction `change`, avant que `_change` écrive le fichier ; `waits()` lit `tells.json` sans le verrou des attentes (`waiting.py` autour des lignes 220 et 261, appelé par `core.py:484`, `live.py:183`, `mcp.py:636`). Un instantané pris entre l'émission et l'écriture peut dire « queued » juste après `tell-seen` et remettre la ligne de la page à « en attente » jusqu'au prochain événement. Classe : c (course, pas reproduite).
 
-**Blocked by:** aucun
+**Blocked by:**
+- External: the PR of chat-box/23 (ticket 23) merged into main (same waiting.py)
 
 **Établi (preuves) :** relu par la revue Opus du tour 1 du ticket 23 (`pr-23-reviews/opus-round1.md`) : les deux moitiés sont encore vraies sur chat-box/23 (bbf4dbe). Aucun test ne pose la fenêtre.
 

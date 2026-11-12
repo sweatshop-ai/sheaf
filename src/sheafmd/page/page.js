@@ -2274,7 +2274,7 @@ var create = function (ROOT, CFG, opts) {
   // One recording at a time, and the sound is never kept: not in the store, not in the file. `dict` is the recording in
   // hand ({f, chunks, discard, ...}) until its answer is in; `dictOff` is the time until which the service is held gone.
   var DICTATE_TYPES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
-  var DICTATE_MAX = 120000;
+  var DICTATE_MAX = 120000, DICTATE_WATCH = 15000;   // a recording asks the hub every 15 s whether it is still there
   var MIC = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1a2.5 2.5 0 0 0-2.5 2.5v4a2.5 2.5 0 0 0 5 0v-4A2.5 2.5 0 0 0 8 1ZM3.5 7a.75.75 0 0 1 1.5 0 3 3 0 0 0 6 0A.75.75 0 0 1 12.5 7a4.5 4.5 0 0 1-3.75 4.44v1.81h1.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5h1.5v-1.81A4.5 4.5 0 0 1 3.5 7Z"/></svg>';
   var dict = null, dictOff = 0;
   // Stops the recording and, with `discard`, throws the sound away (nothing is sent; a late answer is dropped). The
@@ -2284,6 +2284,7 @@ var create = function (ROOT, CFG, opts) {
     if (!d) return;
     if (discard) d.discard = true;
     clearTimeout(d.timer);
+    clearInterval(d.watch);
     if (d.rec && d.rec.state !== 'inactive') d.rec.stop();
   }
   function dictationAvailable() {
@@ -2373,6 +2374,13 @@ var create = function (ROOT, CFG, opts) {
           rec.start();
           b.title = 'Stop'; b.setAttribute('aria-pressed', 'true');
           d.timer = setTimeout(function () { stopDictation(false); }, DICTATE_MAX);
+          if (!MOUNTED) d.watch = setInterval(function () {   // the service lost during the recording: the sound is dropped
+            dictationAvailable().then(function (yes) {
+              if (yes || dict !== d || !d.rec || d.rec.state !== 'recording') return;
+              stopDictation(true);
+              lost('gone');
+            });
+          }, DICTATE_WATCH);
         }, function (e) {
           dict = null;
           says(e && (e.name === 'NotAllowedError' || e.name === 'SecurityError') ? 'Microphone blocked: allow it for this site.' : 'No microphone found.');

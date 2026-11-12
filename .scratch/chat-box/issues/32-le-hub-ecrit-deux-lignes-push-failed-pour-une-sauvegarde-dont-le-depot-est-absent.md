@@ -4,7 +4,9 @@
 
 **Blocked by:** aucun
 
-**Status:** ready-for-agent
+**Claimed by:** Elif 2026-11-12 14:05
+
+**Status:** in-progress
 
 **Établi (preuves) :**
 - Job 131187381864, `tests/test_hub_commits.py:169`, `ValueError: too many values to unpack (expected 1)`, `1 failed, 2704 passed, 2 skipped`. Le journal ne dit ni le nombre de lignes ni leur texte.

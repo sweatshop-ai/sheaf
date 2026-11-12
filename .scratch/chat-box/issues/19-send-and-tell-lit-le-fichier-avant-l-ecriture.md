@@ -5,7 +5,9 @@
 **Blocked by:**
 - 04
 
-**Status:** ready-for-agent
+**Claimed by:** Elif 2026-11-12 10:01
+
+**Status:** in-progress
 
 `assert [] == ['and plums?']` : `.rd-pending-tell` est là mais le fichier n'a pas encore la réponse. Dans la page, `telling[id]` n'est posé qu'à la réponse du hub (`started`) ou par un instantané du flux (`takeTelling`, ligne 357) ; laquelle des deux a dessiné la ligne n'est pas établi. PR #240 run 42923857640 tentative 1. Cause non prouvée, non reproduite en local. À faire : au timeout, dire ce que le fichier et la boîte contenaient et quelle requête avait été répondue.
 

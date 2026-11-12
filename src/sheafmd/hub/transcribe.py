@@ -14,11 +14,10 @@ import json
 import os
 import re
 import secrets
+import socket
 import stat
 import threading
 import time
-import urllib.error
-import urllib.request
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -95,41 +94,39 @@ def parse(t: dict, where) -> Config:
     return cfg
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *a, **k):
-        return None
-
-
-_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
-
-
 def _call(method, url, headers, body=None, timeout=CHECK_TIMEOUT) -> tuple[int, bytes]:
-    """(status, body); a connection that fails is a 0. A 3xx is an answer, not a road. `timeout` bounds the whole
-    call, not each read: a service that answers a byte at a time still ends at it."""
-    out: list = [(0, b"")]
-    deadline = time.monotonic() + timeout
+    """(status, body); a connection that fails is a 0. A 3xx is an answer, not a road: http.client follows no
+    redirect and reads no proxy variable. `timeout` bounds the whole call, not each read: at that moment a timer
+    shuts the socket down, so a service that answers a byte at a time ends there, with nothing left running."""
+    u = urlparse(url)
+    make = http.client.HTTPSConnection if u.scheme == "https" else http.client.HTTPConnection
+    conn = make(u.hostname, u.port, timeout=timeout)
+    expired, held = threading.Event(), []                     # `held`: the socket, which the response takes from conn
 
-    def go():
-        req = urllib.request.Request(url, data=body, headers=headers, method=method)
+    def cut():
+        expired.set()
         try:
-            with _OPENER.open(req, timeout=timeout) as r:
-                got = bytearray()
-                while len(got) < 1 << 20 and time.monotonic() < deadline:
-                    chunk = r.read(4096)
-                    if not chunk:
-                        out[0] = (r.status, bytes(got))
-                        return
-                    got += chunk
-                out[0] = (r.status, bytes(got)) if len(got) >= 1 << 20 else (0, b"")
-        except urllib.error.HTTPError as e:
-            out[0] = (e.code, b"")
-        except (OSError, ValueError, http.client.HTTPException):     # IncompleteRead and the like are no answer either
-            out[0] = (0, b"")
+            if held:
+                held[0].shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
 
-    worker = threading.Thread(target=go, daemon=True)
-    worker.start()
-    worker.join(timeout)
-    return out[0] if not worker.is_alive() else (0, b"")
+    timer = threading.Timer(timeout, cut)
+    timer.start()
+    try:
+        conn.connect()
+        held.append(conn.sock)
+        if expired.is_set():
+            return 0, b""
+        conn.request(method, (u.path or "/") + (f"?{u.query}" if u.query else ""), body, headers)
+        r = conn.getresponse()
+        data = r.read(1 << 20) if r.status < 300 else b""
+        return (0, b"") if expired.is_set() else (r.status, data)
+    except (OSError, ValueError, http.client.HTTPException):     # IncompleteRead and the like are no answer either
+        return 0, b""
+    finally:
+        timer.cancel()
+        conn.close()
 
 
 class Relay:

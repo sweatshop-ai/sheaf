@@ -155,6 +155,12 @@
 .rd-editing [contenteditable="true"]{outline:1px dashed rgba(120,120,120,.55);
  outline-offset:4px;border-radius:2px}
 .rd-editing [contenteditable="true"]:focus{outline:2px solid #2563eb;outline-offset:4px}
+/* The copy block's button sits inside the quote's corner, as the source-only tag does. */
+blockquote.rd-copy{position:relative;padding-right:5.5em}
+.rd-copybtn{position:absolute;top:6px;right:6px;font:600 11px ui-monospace,monospace;cursor:pointer;
+ background:var(--fg,#000);color:var(--bg,#fff);border:0;border-radius:2px;padding:4px 9px;user-select:none}
+.rd-copybtn:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
+@media print{.rd-copybtn{display:none}}
 .rd-editing .rd-locked{position:relative;opacity:.62}
 /* Inside the box, not above it: a <pre> scrolls, so it clips anything outside its edge. */
 .rd-editing .rd-locked::after{content:"source-only";position:absolute;top:4px;right:4px;

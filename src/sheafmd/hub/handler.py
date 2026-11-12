@@ -36,7 +36,7 @@ from ..edit import EditError
 from ..mcp import Caller, Door
 from ..render import RenderError
 from ..source import StaleError, md_hash
-from . import auth, boxwait, codes, events, peer, place, proxy, relay, targets, the_list, visibility, work
+from . import auth, boxwait, codes, events, peer, place, proxy, relay, targets, the_list, transcribe, visibility, work
 from . import waiting as waiting_mod
 from .tell import NO_AGENT, JobRefused
 from .index import Status
@@ -45,6 +45,8 @@ from .roots import Address, NotFound, address_of_url, root_of_url
 from .state import TokenRow
 
 MAX_BODY = 8 * 1024 * 1024
+MAX_AUDIO = 2 * 1024 * 1024
+DICTATION_FILE = re.compile(r"dictee\.(webm|mp4|ogg)")
 OPS = ("add", "reply", "status", "edit", "delete")
 SIGN_IN = ("This browser is not signed in to your sheaf hub. On the machine that runs the hub, "
            "run <code>sheaf open &lt;this url&gt;</code>. If the hub runs on another machine, "
@@ -162,6 +164,7 @@ KEY = Who(frozenset({"key"}), "this needs the hub key")
 # The dictation relay (8.5): a browser's own, never a member's, whose page speaks to its host (9.9). `Who` compares by
 # value, so `proxy=False` is what keeps `_for_members` from admitting it as it would a plain `COOKIE`.
 DICTATION = Who(frozenset({"cookie"}), _BROWSER, proxy=False)
+AUDIO = Who(frozenset({"cookie"}), _BROWSER, raw_body=True, proxy=False)     # the same, for the recording itself
 DOOR = Who(frozenset({"key", "token"}), "this needs the hub key or an MCP token", raw_body=True)
 # A member's alone, on the proxy socket (9.12): the loopback port answers 404, as for a route it has not.
 MEMBER = Who(frozenset({"member"}), "no such route")
@@ -268,6 +271,7 @@ class Handler:
             ("POST", "/_/seen", "seen", COOKIE, self._seen),
             ("POST", "/_/export", "export", COOKIE, self._export),
             ("GET", "/_/transcribe", "transcribe-ask", DICTATION, self._transcribe_ask),
+            ("POST", "/_/transcribe", "transcribe", AUDIO, self._transcribe),
             ("POST", "/_/diag", "diag", COOKIE, self._diag),
             ("POST", "/_/render", "render", KEY, self._render),
             ("POST", "/_/forget", "forget", KEY, self._forget),
@@ -1750,6 +1754,29 @@ class Handler:
     def _transcribe_ask(self, req: Req) -> Response:
         asked = self.hub.transcribe
         return _ok(available=asked is not None and asked.available())
+
+    def _transcribe(self, req: Req) -> Response:
+        """Dictation: the recording a page made, sent to t-compute, the text back. The sound is not kept and the
+        text is not written down; a refusal says only what the page needs to tell a person."""
+        name = req.headers.get("x-filename", "")
+        ctype = req.headers.get("content-type", "").lower()
+        if not DICTATION_FILE.fullmatch(name) or not ctype.startswith("audio/"):
+            raise Refuse(415, "send audio as dictee.webm, dictee.mp4 or dictee.ogg")
+        _shape(req.raw, "the recording is empty")
+        if len(req.raw) > MAX_AUDIO:
+            raise Refuse(413, "the recording is too large")
+        asked, began, result = self.hub.transcribe, time.monotonic(), "ok"
+        try:
+            if asked is None:
+                raise transcribe.Unavailable("dictation is not available")
+            text = asked.transcribe(req.raw, name[7:])
+        except (transcribe.Busy, transcribe.Unavailable, transcribe.Failed) as e:
+            result = type(e).__name__.lower()
+            raise Refuse({transcribe.Busy: 429, transcribe.Unavailable: 503, transcribe.Failed: 502}[type(e)], str(e)) from None
+        finally:
+            self.hub.record("transcribe", None, bytes=len(req.raw), ms=round((time.monotonic() - began) * 1000),
+                            result=result, by=self.hub.person)
+        return _ok(text=text)
 
     def _diag(self, req: Req) -> Response:
         b = req.body

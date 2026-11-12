@@ -13,13 +13,14 @@ from sheafmd import diagnostics
 from sheafmd.hub import auth, transcribe
 
 KEY = "fake-key-for-tests-0123"
+AUDIO = b"RIFF-not-really-audio"
 
 
 class FakeTCompute:
-    """/api/v1/status and /audio/gpu-status of t-compute, with what each answers."""
+    """/api/v1/status, /audio/gpu-status and /audio/transcribe of t-compute, with what each answers."""
 
     def __init__(self):
-        self.ready, self.gpu = True, 200
+        self.ready, self.gpu, self.reply = True, 200, (200, {"text": "hello there", "error": None})
         self.redirect = self.truncate = False
         self.seen = []                                    # (method, path, headers, body)
         outer = self
@@ -50,7 +51,7 @@ class FakeTCompute:
                     keyed = self.headers.get("X-API-Key") == KEY
                     status, obj = (outer.gpu if keyed else 401), {"gpu": "idle"}
                 else:
-                    status, obj = 404, {}
+                    status, obj = outer.reply
                 data = json.dumps(obj).encode()
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
@@ -105,16 +106,30 @@ def relay(browser, tcompute, key_file, clock):
     return browser.hub.transcribe
 
 
+def dictate(browser, data=AUDIO, name="dictee.webm", ctype="audio/webm", cookie=True, key=False, origin=None):
+    """What the page sends: the audio as it came. (`Browser.request` would make its Content-Type JSON.)"""
+    host = f"127.0.0.1:{browser.hub.port}"
+    h = {"Host": host, "Origin": origin or f"http://{host}", "Content-Type": ctype, "X-Filename": name,
+         "Content-Length": str(len(data))}
+    if cookie:
+        h["Cookie"] = f"{browser.hub.auth.cookie_name}={browser.hub.auth.cookie_value()}"
+    if key:
+        h["X-Sheaf-Key"] = browser.hub.auth.key
+    return browser.handler.handle("POST", "/_/transcribe", h, data)
+
+
 # ── the [transcribe] table ───────────────────────────────────────────────────
 
 def test_a_table_is_read_with_its_defaults(tcompute, key_file):
     cfg = transcribe.parse(table(tcompute, key_file), "the test")
     assert cfg.url == tcompute.url and cfg.key_file == key_file and cfg.key_name == "RAG_API_KEY"
+    assert (cfg.per_minute, cfg.per_hour) == (12, 120)
 
 
 @pytest.mark.parametrize("bad", [
     {"url": "ftp://h/api"}, {"url": "http:///api"}, {"url": "http://user:pw@h/api"}, {"url": 3},
-    {"key_file": "relative.env"}, {"nope": 1}, {"key_name": ""}])
+    {"key_file": "relative.env"}, {"nope": 1}, {"key_name": ""},
+    {"per_minute": 0}, {"per_hour": 0}, {"per_minute": "12"}, {"per_hour": True}])
 def test_a_table_that_cannot_be_used_stops_the_start(tcompute, key_file, bad):
     with pytest.raises(transcribe.TranscribeError, match="the test"):
         transcribe.parse({**table(tcompute, key_file), **bad}, "the test")
@@ -238,12 +253,127 @@ def test_the_answer_is_kept_for_30_seconds(browser, relay, tcompute, clock):
     assert available(browser) is False and len(tcompute.calls("/status")) == 2
 
 
+# ── the relay (POST) ─────────────────────────────────────────────────────────
+
+def test_the_audio_goes_to_t_compute_and_the_text_comes_back(browser, relay, tcompute):
+    r = dictate(browser)
+    assert r.status == 200 and r.json() == {"ok": True, "text": "hello there"}
+    method, path, h, body = tcompute.calls("/audio/transcribe")[0]
+    assert (method, path) == ("POST", "/api/v1/audio/transcribe")
+    assert h["X-Api-Key"] == KEY and h["X-Priority"] == "high"
+    assert h["Content-Type"].startswith("multipart/form-data; boundary=")
+    assert b'name="file"; filename="dictee.webm"' in body and AUDIO in body
+
+
+def test_each_extension_is_sent_under_its_fixed_name(browser, relay, tcompute):
+    assert dictate(browser, name="dictee.mp4", ctype="audio/mp4").status == 200
+    assert b'filename="dictee.mp4"' in tcompute.calls("/audio/transcribe")[0][3]
+
+
+@pytest.mark.parametrize("name", ["dictee.wav", "x.webm", "dictee.webm\r\nX: y", "../dictee.webm", "", "dictee.webm.exe"])
+def test_only_the_fixed_file_names_are_taken(browser, relay, tcompute, name):
+    assert dictate(browser, name=name).status == 415 and tcompute.calls("/audio/transcribe") == []
+
+
+def test_only_audio_is_taken(browser, relay, tcompute):
+    assert dictate(browser, ctype="text/html").status == 415 and tcompute.calls("/audio/transcribe") == []
+
+
+def test_an_empty_recording_is_refused(browser, relay):
+    assert dictate(browser, data=b"").status == 400
+
+
+def test_more_than_two_mebibytes_is_refused_before_t_compute_hears_of_it(browser, relay, tcompute):
+    assert dictate(browser, data=b"x" * (2 * 1024 * 1024 + 1)).status == 413
+    assert dictate(browser, data=b"x" * (2 * 1024 * 1024)).status == 200
+    assert len(tcompute.calls("/audio/transcribe")) == 1
+
+
+def test_a_browser_that_is_not_signed_in_or_not_from_the_page_is_refused(browser, relay, tcompute):
+    assert dictate(browser, cookie=False).status == 401
+    assert dictate(browser, origin="http://evil.example").status == 403
+    assert dictate(browser, key=True, cookie=False).status == 403          # the hub key is not a browser
+    assert tcompute.calls("/audio/transcribe") == []
+
+
+def test_no_relay_while_dictation_is_off(browser, relay, tcompute):
+    tcompute.ready = False
+    assert dictate(browser).status == 503 and tcompute.calls("/audio/transcribe") == []
+
+
+def test_no_relay_without_the_table(browser):
+    assert dictate(browser).status == 503
+
+
+LEAK = "Traceback /srv/t-compute/secret/path.py"
+
+
+@pytest.mark.parametrize("reply, status", [((200, {"text": "", "error": LEAK}), 502),
+                                           ((200, {"text": "  ", "error": None}), 502),
+                                           ((503, {"detail": LEAK}), 503),
+                                           ((422, {"detail": LEAK}), 502),
+                                           ((200, {"nope": 1}), 502)])
+def test_a_failed_transcription_is_a_short_safe_answer(browser, relay, tcompute, reply, status):
+    tcompute.reply = reply
+    r = dictate(browser)
+    assert r.status == status and "/srv" not in r.text and LEAK not in r.text and KEY not in r.text
+
+
+def test_a_service_that_drops_out_takes_the_button_away_for_30_seconds(browser, relay, tcompute, clock):
+    assert available(browser)
+    tcompute.reply = (503, {})
+    assert dictate(browser).status == 503
+    tcompute.reply = (200, {"text": "back", "error": None})
+    assert available(browser) is False
+    clock.advance(31)
+    assert available(browser) is True
+
+
+def test_a_t_compute_that_hangs_up_takes_the_button_away_too(browser, relay, tcompute):
+    assert available(browser)
+    tcompute.truncate = True
+    assert dictate(browser).status == 503
+    tcompute.truncate = False
+    assert available(browser) is False
+
+
+def test_one_relay_at_a_time(browser, relay, tcompute):
+    assert available(browser)
+    with relay._busy:
+        r = dictate(browser)
+    assert r.status == 429 and tcompute.calls("/audio/transcribe") == []
+
+
+def test_the_budget_per_minute_and_per_hour(browser, tcompute, key_file, clock):
+    browser.hub.transcribe = transcribe.Relay(
+        transcribe.parse(table(tcompute, key_file, per_minute=2, per_hour=3), "the test"), clock=clock)
+    assert [dictate(browser).status for _ in range(3)] == [200, 200, 429]
+    clock.advance(61)
+    assert dictate(browser).status == 200
+    clock.advance(61)
+    assert dictate(browser).status == 429                                 # the hour's third came before this one
+    clock.advance(3600)
+    assert dictate(browser).status == 200
+
+
+def test_the_default_budget_is_twelve_a_minute(browser, relay):
+    assert [dictate(browser).status for _ in range(13)] == [200] * 12 + [429]
+
+
+def test_a_relay_is_written_down_without_the_key_the_text_or_the_sound(browser, relay, tcompute):
+    dictate(browser)
+    row = [r for r in diagnostics.read() if r["kind"] == "transcribe"][0]
+    assert row["bytes"] == len(AUDIO) and row["result"] == "ok"
+    assert KEY not in json.dumps(diagnostics.read()) and "hello there" not in json.dumps(diagnostics.read())
+
+
 # ── not on the proxy socket, and the page's policy ───────────────────────────
 
 def test_the_proxy_socket_has_no_such_route(front, tcompute, key_file):
     front.hub.transcribe = transcribe.Relay(transcribe.parse(table(tcompute, key_file), "the test"))
     assert front.get("/_/transcribe").status == 404
-    assert tcompute.seen == []
+    r = front.request("POST", "/_/transcribe", raw=AUDIO, headers={"Content-Type": "audio/webm", "X-Filename": "dictee.webm"})
+    assert r.status == 404 and tcompute.seen == []
 
 
 def test_a_page_allows_the_microphone_to_itself_and_its_csp_is_unchanged(browser, plan):

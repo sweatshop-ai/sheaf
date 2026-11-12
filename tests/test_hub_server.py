@@ -449,7 +449,7 @@ var out = {};
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
 def test_a_page_ignores_the_event_of_its_own_write_whichever_reaches_it_first():
-    parts = [PAGE_STUBS, js_line("var SAVE_WAIT"), js_line("var WAIT"), js_line("var writes"), js_line("var ownWrites"), js_line("var checkAgain"), js_line("var lastLate"), js_line("function notLate"),
+    parts = [PAGE_STUBS, js_line("var SAVE_WAIT"), js_line("var WAIT"), js_line("var writes"), js_line("var ownWrites"), js_line("var checkAgain"), js_line("var lastLate"), js_line("var seenSeq"), js_line("function notLate"),
              "function checkText() {}", js_function("post"), js_function("heardAfterCheck"), js_function("heard"), js_function("replayHeld"), PAGE_SCENARIOS % {"listener": changed_listener()}]
     r = subprocess.run(["node", "-e", "\n".join(parts)], capture_output=True, text=True, timeout=30)
     assert r.returncode == 0, r.stderr

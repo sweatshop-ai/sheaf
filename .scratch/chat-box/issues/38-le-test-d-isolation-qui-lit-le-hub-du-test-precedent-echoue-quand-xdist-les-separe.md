@@ -20,7 +20,7 @@
 
 **Claimed by:** Isolde 2026-11-12 16:03
 
-**Status:** in-progress — fixed in PR 253, waiting for merge
+**Status:** done — PR 253 merged by Thierry, main 3b7a6cc; main CI run 43281135217 3/3 green; PR runs 43247947522 attempts 1 and 2 (6bad373), 43278368964 (35fb054)
 
 **Cause (reproduite, 2026-11-12):** CI lance `pytest -n 4` (`--dist load`) ; `IN_ORDER` ne garde un fichier entier que dans une tranche, pas sur un worker xdist. Trois tests de `test_isolation.py` sous `-n 2` donnent le même `assert ([])` que le run 43232192468. La lecture du code (Nia) est confirmée.
 

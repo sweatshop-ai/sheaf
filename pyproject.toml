@@ -27,6 +27,7 @@ dev = [
     "playwright==1.58.0",
     "pytest>=9",                      # faulthandler_exit_on_timeout, below
     "pytest-timeout>=2.3",
+    "pytest-xdist>=3.6",
 ]
 
 [tool.hatch.version]

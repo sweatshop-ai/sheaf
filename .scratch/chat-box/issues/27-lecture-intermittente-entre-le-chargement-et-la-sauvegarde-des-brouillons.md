@@ -2,7 +2,8 @@
 
 **What to build:** Les écrivains (`draftsReplace`, `threadKeep`, `taken`) construisent leur liste avec `commentDraftsLoad`, qui lit sans `strict`; ne rien écrire si cette première lecture est refusée.
 
-**Blocked by:** 21
+**Blocked by:**
+- External: PR 250 (ticket 21) merged into main
 
 **Claimed by:** 
 

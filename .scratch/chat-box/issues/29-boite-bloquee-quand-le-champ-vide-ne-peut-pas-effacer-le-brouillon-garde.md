@@ -2,7 +2,8 @@
 
 **What to build:** Avec un champ vide, `stash` rend vrai même si l'effacement du brouillon gardé échoue, pour que la boîte se ferme.
 
-**Blocked by:** 21
+**Blocked by:**
+- External: PR 250 (ticket 21) merged into main
 
 **Claimed by:** 
 

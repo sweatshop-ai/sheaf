@@ -4,7 +4,7 @@
 
 **Blocked by:** 04
 
-**Claimed by:** Elif 2026-11-12 13:52
+**Claimed by:** Berit 2026-11-12 17:55
 
 **Status:** in-progress
 

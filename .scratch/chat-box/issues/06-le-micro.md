@@ -14,4 +14,4 @@
 - [ ] La politique de sécurité de la page montée laisse passer le micro
 - [ ] Sans transcription disponible, pas de bouton micro mort
 
-**Plan :** `.scratch/chat-box/plan-06-micro.md` (branche `chat-box/06`). Aucun code avant sa relecture. Questions ouvertes du plan : A (hub en mode proxy, page non montée), B (authentification et disponibilité côté Open WebUI), C (clé de t-compute dédiée à sheaf), D (langue de la dictée).
+**Plan :** `.scratch/chat-box/plan-06-micro.md` (branche `chat-box/06`). Aucun code avant sa relecture. Décisions A à D de Halima (2026-11-12) dans le plan : pas de bouton en mode proxy hors montage ; lecture tiroir-tt par Rocco puis aller-retour réel par Thierry ; clé t-compute dédiée à sheaf ; langues mesurées pendant la construction.

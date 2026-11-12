@@ -6,7 +6,7 @@
 
 **Claimed by:** Otilia 2026-11-11 11:11
 
-**Status:** in-progress
+**Status:** done
 
 - [x] `/codex-review` lancé le 2026-11-11 sur `c562fc1..cdb0e24` (35 fichiers, 2 962 lignes) ; Codex a répondu, pas de repli sur Opus. Verdict posté sur la PR #238
 - [x] Chaque trouvaille devient un ticket numéroté à la suite (13, 14…) dans ce dossier et dans la table de `plan.md`, ou est écartée avec sa raison

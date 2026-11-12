@@ -416,7 +416,7 @@ class Handler:
         if req.method == "POST" and who.raw_body:
             if req.kind == "key":
                 req.display = self._door_name(req)
-            req.raw = self._body(req, raw)
+            req.raw = self._body(req, raw, MAX_AUDIO if who is AUDIO else MAX_BODY)
         elif req.method == "POST":
             self._read_body(req, self._body(req, raw))
         return fn(req)
@@ -659,17 +659,17 @@ class Handler:
             raise Refuse(400, "a request with the hub key needs X-Sheaf-As, the name its reply is signed with")
         return name
 
-    def _body(self, req: Req, raw) -> bytes:
+    def _body(self, req: Req, raw, limit: int = MAX_BODY) -> bytes:
         """The body, now that the caller is known to be let in: refused by its header when it is
         over the limit, before a byte of it is read."""
         try:
             n = int(req.headers.get("content-length") or (0 if callable(raw) else len(raw)))
         except ValueError:
             raise Refuse(400, "bad Content-Length") from None
-        if n > MAX_BODY:
+        if n > limit:
             raise Refuse(413, "the request is too large")
         raw = raw() if callable(raw) else raw
-        if len(raw) > MAX_BODY:
+        if len(raw) > limit:
             raise Refuse(413, "the request is too large")
         return raw
 

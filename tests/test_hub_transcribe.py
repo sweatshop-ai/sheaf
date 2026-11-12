@@ -5,6 +5,7 @@ nothing leaves the machine and no real key is read. No audio is decoded; the byt
 import json
 import os
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -21,7 +22,7 @@ class FakeTCompute:
 
     def __init__(self):
         self.ready, self.gpu, self.reply = True, 200, (200, {"text": "hello there", "error": None})
-        self.redirect = self.truncate = False
+        self.redirect = self.truncate = self.drip = False
         self.seen = []                                    # (method, path, headers, body)
         outer = self
 
@@ -38,6 +39,19 @@ class FakeTCompute:
                     self.send_header("Transfer-Encoding", "chunked")
                     self.end_headers()
                     self.wfile.write(b'1f4\r\n{"whisper"')              # a chunk of 500 bytes, 10 sent
+                    self.close_connection = True
+                    return
+                if outer.drip:                               # answers a byte at a time, each well inside any per-read limit
+                    self.send_response(200)
+                    self.send_header("Transfer-Encoding", "chunked")
+                    self.end_headers()
+                    try:
+                        for _ in range(100):
+                            self.wfile.write(b"1\r\n{\r\n")
+                            self.wfile.flush()
+                            time.sleep(0.2)
+                    except OSError:
+                        pass
                     self.close_connection = True
                     return
                 if outer.redirect:
@@ -244,6 +258,13 @@ def test_a_redirect_is_not_followed_and_the_key_goes_nowhere_else(browser, relay
     assert {s[1] for s in tcompute.seen} == {"/api/v1/status"}
 
 
+def test_the_limit_is_on_the_whole_call_not_on_each_read(tcompute, monkeypatch):
+    tcompute.drip = True
+    began = time.monotonic()
+    assert transcribe._call("POST", f"{tcompute.url}/audio/transcribe", {}, b"x", timeout=1) == (0, b"")
+    assert time.monotonic() - began < 2.5
+
+
 def test_an_answer_cut_short_is_no_answer(browser, relay, tcompute):
     tcompute.truncate = True
     assert available(browser) is False
@@ -291,6 +312,21 @@ def test_more_than_two_mebibytes_is_refused_before_t_compute_hears_of_it(browser
     assert dictate(browser, data=b"x" * (2 * 1024 * 1024 + 1)).status == 413
     assert dictate(browser, data=b"x" * (2 * 1024 * 1024)).status == 200
     assert len(tcompute.calls("/audio/transcribe")) == 1
+
+
+def test_a_recording_over_two_mebibytes_is_refused_by_its_header_before_a_byte_is_read(browser, relay, tcompute):
+    def never():
+        raise AssertionError("the body was read")
+    host = f"127.0.0.1:{browser.hub.port}"
+    h = {"Host": host, "Origin": f"http://{host}", "Content-Type": "audio/webm", "X-Filename": "dictee.webm",
+         "Content-Length": str(3 * 1024 * 1024), "Cookie": f"{browser.hub.auth.cookie_name}={browser.hub.auth.cookie_value()}"}
+    assert browser.handler.handle("POST", "/_/transcribe", h, never).status == 413
+
+
+def test_an_accepted_content_type_never_reaches_the_multipart(browser, relay, tcompute):
+    assert dictate(browser, ctype="audio/webm\r\nX-Evil: yes").status == 200
+    sent = tcompute.calls("/audio/transcribe")[0][3]
+    assert b"X-Evil" not in sent and b"Content-Type: audio/webm\r\n\r\n" in sent
 
 
 def test_a_browser_that_is_not_signed_in_or_not_from_the_page_is_refused(browser, relay, tcompute):

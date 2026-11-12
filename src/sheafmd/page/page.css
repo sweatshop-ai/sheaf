@@ -155,6 +155,7 @@
 .rd-editing [contenteditable="true"]{outline:1px dashed rgba(120,120,120,.55);
  outline-offset:4px;border-radius:2px}
 .rd-editing [contenteditable="true"]:focus{outline:2px solid #2563eb;outline-offset:4px}
+.rd-editing [contenteditable="true"].rd-saving{cursor:not-allowed;outline-style:dotted;opacity:.7}
 /* The copy block's button sits inside the quote's corner, as the source-only tag does. */
 blockquote.rd-copy{position:relative;padding-right:5.5em}
 .rd-copybtn{position:absolute;top:6px;right:6px;font:600 11px ui-monospace,monospace;cursor:pointer;

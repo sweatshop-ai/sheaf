@@ -2096,7 +2096,7 @@ var create = function (ROOT, CFG, opts) {
   function fillPopover(id) {
     var c = byId[id], sc = pop.querySelector('.rd-scroll');
     if (telling[id]) delete interrupted[id];       // sent again: no longer interrupted
-    var atEnd = !sc || sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 4;
+    var atEnd = !sc || sc._stuck || atEndOf(sc), kept = sc ? sc.scrollTop : 0;     // a reader mid-thread keeps their place
     // Every form that is still to be sent goes through the redraw, not the first one only: a failed send
     // whose text is not in the store stays on the page beside the form of this thread.
     var forms = Array.prototype.filter.call(pop.querySelectorAll('.rd-form'), function (x) { return !x.hasAttribute('data-done'); });
@@ -2150,8 +2150,24 @@ var create = function (ROOT, CFG, opts) {
     }
     sendingIn(pop);
     sc = pop.querySelector('.rd-scroll');
-    if (atEnd) sc.scrollTop = sc.scrollHeight;
+    stickToEnd(sc, atEnd);
+    if (!atEnd) sc.scrollTop = kept;
     replace();
+  }
+  // A thread at its end stays there while its box changes size after the draw (the field under it grows or
+  // shrinks, the line "being sent" goes): a scroll by the reader decides again whether it is stuck to the end.
+  function atEndOf(sc) { return sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 4; }
+  function stickToEnd(sc, stuck) {
+    var h = sc.clientHeight;       // its height as of the last resize: a resize and the scroll it causes come in one frame
+    sc._stuck = stuck;
+    if (stuck) sc.scrollTop = sc.scrollHeight;
+    sc.addEventListener('scroll', function () { sc._stuck = sc.scrollTop + h >= sc.scrollHeight - 4; });
+    if (window.ResizeObserver) {
+      new ResizeObserver(function () {
+        if (sc._stuck) sc.scrollTop = sc.scrollHeight;
+        h = sc.clientHeight;
+      }).observe(sc);
+    }
   }
   // Text typed into a form that was sent (a failed send brought it back, or the store drew it) is kept as typed,
   // so a closed tab loses none of it; emptied, it leaves the store, as Cancel clears it (Escape and a click

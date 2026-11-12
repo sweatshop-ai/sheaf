@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-from pagehelp import until
+from pagehelp import P1, at, comment_on, until
 from sheafmd import comments as rdc
 from sheafmd.source import update_file
 
@@ -30,7 +30,7 @@ FAKE_MIC = """(() => {
   window.MediaRecorder = class extends EventTarget {
     static isTypeSupported(t) { return mic.types.includes(t); }
     constructor(stream, o) { super(); this.mimeType = (o && o.mimeType) || ''; this.state = 'inactive'; mic.made.push(this); }
-    start() { this.state = 'recording'; }
+    start() { if (mic.failStart) throw new DOMException('no', 'NotSupportedError'); this.state = 'recording'; }
     stop() {
       this.state = 'inactive';
       const e = new Event('dataavailable'); e.data = new Blob([new Uint8Array([82, 73, 70, 70])], { type: this.mimeType });
@@ -68,6 +68,18 @@ def open_thread(tab, site):
     update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
                                                      "Bea", "2026-10-14T10:00")[0])
     tab.open()
+    tab.page.click(".rd-badge")
+    tab.page.wait_for_selector(FIELD)
+    return tab.page
+
+
+def own_thread(tab):
+    """A thread the viewer wrote through the page, so that its menu has Edit; its reply box open."""
+    tab.open()
+    comment_on(tab, at(P1, "apples"), at(P1, "apples", None), "Why apples?")
+    tab.page.wait_for_selector("#rd-popover .rd-msg")
+    tab.page.reload()
+    tab.page.wait_for_selector("#rd-menu-btn", state="attached")
     tab.page.click(".rd-badge")
     tab.page.wait_for_selector(FIELD)
     return tab.page
@@ -233,7 +245,68 @@ def test_a_late_answer_is_dropped_when_the_box_is_gone(tab, site, context):
     p.wait_for_function("window.__mic.made.length === 1 && window.__mic.made[0].state === 'recording'")
     p.click(MIC)
     until(lambda: "route" in gate, what="the sound on its way")
-    p.evaluate("document.querySelector('#rd-popover .rd-form textarea').closest('.rd-form').remove()")
+    assert p.locator(MIC).get_attribute("aria-label") == "Transcribing…", "a screen reader hears Dictate while it transcribes"
+    p.evaluate("window.__old = document.querySelector('#rd-popover textarea'); window.__old.closest('.rd-form').remove()")
     gate["route"].fulfill(status=200, content_type="application/json", body='{"text":"late"}')
     p.wait_for_timeout(300)
+    assert p.evaluate("window.__old.value") == "", "a late answer wrote into a field that is gone"
+    assert p.evaluate("document.activeElement === window.__old") is False, "a late answer took the focus back"
     assert p.evaluate("document.body.innerText.includes('late')") is False
+
+
+def test_another_form_replacing_the_one_that_records_throws_the_sound_away(tab, site, hub):
+    p = own_thread(tab)
+    p.wait_for_selector(MIC)
+    p.click(MIC)
+    p.wait_for_function("window.__mic.made.length === 1 && window.__mic.made[0].state === 'recording'")
+    p.click("#rd-popover .rd-more summary")
+    p.click("#rd-popover button[data-a=edit]")             # the edit form takes the place of the reply form
+    p.wait_for_function("window.__mic.stops === 1")
+    assert p.evaluate("window.__mic.made[0].state") == "inactive", "the form went and its microphone went on"
+    p.wait_for_timeout(300)
+    assert hub.posts == [], "the sound of a form that was replaced was sent"
+    p.wait_for_selector(MIC)
+    p.click(MIC)                                           # and the new form's microphone works
+    p.wait_for_function("window.__mic.made.length === 2 && window.__mic.made[1].state === 'recording'")
+
+
+def test_a_recorder_that_cannot_start_lets_the_microphone_go_and_the_next_press_work(tab, site, hub):
+    p = open_thread(tab, site)
+    p.wait_for_selector(MIC)
+    p.evaluate("window.__mic.failStart = true")
+    p.click(MIC)
+    p.wait_for_selector(SAYS)
+    assert "could not start" in p.inner_text(SAYS)
+    p.wait_for_function("window.__mic.stops === 1")        # the stream it got was let go
+    p.evaluate("window.__mic.failStart = false")
+    p.click(MIC)
+    p.wait_for_function("window.__mic.made.length === 2 && window.__mic.made[1].state === 'recording'")
+
+
+def test_closing_the_box_while_the_sound_is_on_its_way_cancels_the_request_and_frees_the_microphone(tab, site, context):
+    context.add_init_script(FAKE_MIC)
+    h = Hub(context)
+    gate = {}
+    real = h.answer
+
+    def slow(route):
+        if route.request.method == "POST":
+            gate["route"] = route                  # the hub took the sound and never answers
+            return
+        real(route)
+    context.unroute("**/_/transcribe")
+    context.route("**/_/transcribe", slow)
+    p = open_thread(tab, site)
+    failed = []
+    p.on("requestfailed", lambda r: failed.append(r.url))
+    p.wait_for_selector(MIC)
+    p.click(MIC)
+    p.wait_for_function("window.__mic.made.length === 1 && window.__mic.made[0].state === 'recording'")
+    p.click(MIC)
+    until(lambda: "route" in gate, what="the sound on its way")
+    p.keyboard.press("Escape")
+    until(lambda: any(u.endswith("/_/transcribe") for u in failed), what="the request cancelled")
+    p.click(".rd-badge")                                   # the box again: its microphone is free
+    p.wait_for_selector(MIC)
+    p.click(MIC)
+    p.wait_for_function("window.__mic.made.length === 2 && window.__mic.made[1].state === 'recording'")

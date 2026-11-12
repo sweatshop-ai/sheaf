@@ -24,7 +24,8 @@ def test_a_mounted_page_sends_the_sound_to_the_hosts_route_with_the_cookie_and_n
         seen.append({"url": route.request.url, "headers": route.request.headers, "body": route.request.post_data_buffer})
         route.fulfill(status=200, content_type="application/json", body='{"text":"from the host"}')
     front.page.route(ROUTE, answer)
-    front.page.add_init_script(FAKE_MIC + """(() => { window.__reads = [];
+    front.page.add_init_script(FAKE_MIC + """(() => { window.__reads = []; window.__creds = [];
+      const send = window.fetch; window.fetch = function (u, i) { window.__creds.push([String(u), i && i.credentials]); return send.apply(this, arguments); };
       const get = Storage.prototype.getItem; Storage.prototype.getItem = function (k) { window.__reads.push(k); return get.call(this, k); }; })();""")
     update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
                                                      "Bea", "2026-10-14T10:00")[0])
@@ -41,6 +42,8 @@ def test_a_mounted_page_sends_the_sound_to_the_hosts_route_with_the_cookie_and_n
     assert req["headers"]["content-type"].startswith("multipart/form-data")
     assert b'filename="dictee.webm"' in req["body"]
     assert "token" not in front.page.evaluate("window.__reads"), "the page read a stored token"
+    assert [c[1] for c in front.page.evaluate("window.__creds") if c[0].endswith("/api/v1/audio/transcriptions")] == [
+        "same-origin"], "the session cookie does not go with the sound"
 
 
 def test_a_hub_page_in_proxy_mode_that_is_not_mounted_has_no_microphone(tab, site, as_member):  # noqa: F811

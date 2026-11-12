@@ -17,3 +17,7 @@
 - [ ] Le test n'a plus besoin de l'ordre du fichier ni d'un état partagé entre deux tests ; il passe quel que soit le worker
 - [ ] Les deux tests d'arrêt de hub de `test_service` sont relus pour le même défaut
 - [ ] Les preuves de passage tournent en CI ou sur t-compute, pas ici ; CI verte sur deux passages de suite
+
+**Claimed by:** Isolde 2026-11-12 16:03
+
+**Status:** in-progress

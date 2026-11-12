@@ -20,7 +20,7 @@
 
 **Claimed by:** Isolde 2026-11-12 16:03
 
-**Status:** done (PR 253, head 6bad373)
+**Status:** in-progress — fixed in PR 253, waiting for merge
 
 **Cause (reproduite, 2026-11-12):** CI lance `pytest -n 4` (`--dist load`) ; `IN_ORDER` ne garde un fichier entier que dans une tranche, pas sur un worker xdist. Trois tests de `test_isolation.py` sous `-n 2` donnent le même `assert ([])` que le run 43232192468. La lecture du code (Nia) est confirmée.
 

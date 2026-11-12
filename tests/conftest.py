@@ -345,11 +345,30 @@ HUB_PORT = 27419
 def hub(work):
     from sheafmd import paths
     from sheafmd.hub.core import Hub
-    h = Hub(port=HUB_PORT, key=paths.ensure_key(), started_by="test")
-    yield h
-    # A push the test left due ends here, in this test's state: its pusher is a thread that outlives the test and
-    # writes its `push-failed` row into the state of whichever test runs next (#32).
-    assert h.commits.settle(30), "the hub's pusher did not finish within 30 s of the test's end"
+    return Hub(port=HUB_PORT, key=paths.ensure_key(), started_by="test")
+
+
+@pytest.fixture(autouse=True)
+def every_hub_settles_its_pusher(sheaf_env, monkeypatch):
+    """Every `Hub` this test builds, by whichever path (the `hub` fixture, `TwoRoots.hub()`, a fixture of a test
+    file, a direct `Hub(...)`), has its pusher settled when the test ends. A push the test left due ends here, in this
+    test's state: its pusher is a thread that outlives the test and writes its `push-failed` row into the state of
+    whichever test runs next (#32, #35). It asks for `sheaf_env` so that it is torn down before the environment is:
+    `diagnostics.record` reads the state folder from the environment at the call. A hub the test stopped itself
+    has no pusher left, and settles at once."""
+    from sheafmd.hub.core import Hub
+    built = []
+    real = Hub.__init__
+
+    def tracked(self, *args, **kwargs):
+        built.append(self)
+        real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Hub, "__init__", tracked)
+    yield
+    for h in built:
+        commits = getattr(h, "commits", None)         # a constructor that raised before it made them
+        assert commits is None or commits.settle(30), "a hub's pusher did not finish within 30 s of the test's end"
 
 
 @pytest.fixture

@@ -158,8 +158,8 @@ OPEN = None
 COOKIE = Who(frozenset({"cookie"}), _BROWSER)
 EITHER = Who(frozenset({"cookie", "key"}), _BROWSER)
 KEY = Who(frozenset({"key"}), "this needs the hub key")
-# The dictation relay (8.5): a browser's own, never a member's, whose page speaks to its host (9.9). A raw body, so no
-# member route (`_for_members`) is equal to it.
+# The dictation relay (8.5): a browser's own, never a member's, whose page speaks to its host (9.9). `Who` compares by
+# value, so `_for_members` does not admit it. The raw body is for the relay's POST, a later change.
 COOKIE_RAW = Who(frozenset({"cookie"}), _BROWSER, raw_body=True)
 DOOR = Who(frozenset({"key", "token"}), "this needs the hub key or an MCP token", raw_body=True)
 # A member's alone, on the proxy socket (9.12): the loopback port answers 404, as for a route it has not.
@@ -1747,8 +1747,8 @@ class Handler:
                               "Content-Disposition": _disposition(stem + ".pdf")}, data)
 
     def _transcribe_ask(self, req: Req) -> Response:
-        relay = self.hub.transcribe
-        return _ok(available=relay is not None and relay.available())
+        asked = self.hub.transcribe
+        return _ok(available=asked is not None and asked.available())
 
     def _diag(self, req: Req) -> Response:
         b = req.body

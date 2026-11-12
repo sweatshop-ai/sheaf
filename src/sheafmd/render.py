@@ -29,7 +29,7 @@ from importlib import resources
 from pathlib import Path
 
 
-from . import _pandoc, charts, config, images, links
+from . import _pandoc, charts, config, copyblock, images, links
 from . import comments as rdc
 from . import sanitize as sanitizer
 from . import source as src_mod
@@ -798,7 +798,7 @@ def _shown_head_line(src: str) -> int:
 
 def pandoc_html(text: str) -> str:
     """The bundled pandoc, never whatever is on PATH (SPEC 3.2)."""
-    r = _pandoc.run(["-f", "gfm", "-t", "html5", "--no-highlight"], text)
+    r = _pandoc.run(["-f", "gfm", "-t", "html5", "--no-highlight"], copyblock.hide(text))
     if r.returncode != 0:
         raise RenderError(f"pandoc could not read this document: {r.stderr.strip()[:200]}")
     return r.stdout
@@ -1060,6 +1060,7 @@ def build(md: Path, *, theme: Theme, share: bool = True, title: str | None = Non
         log.append(f"  ! line {open_element[1]}: <{open_element[0]}> is never closed, so the text "
                    "after it is removed from the document too")
     frag = sanitizer.sanitize(frag, comments=not share, log=log, mount=mount)
+    frag = copyblock.mark(frag, page=not share)
 
     # 5. Headings h1 to h4: ids, flags, the table of contents.
     slug, toc_rows, first_h1, first_head = slugger(), [], [], []

@@ -323,7 +323,8 @@ var create = function (ROOT, CFG, opts) {
             .replace(/\s*contenteditable="[^"]*"/g, '')
             .replace(/\s+class="rd-locked"/g, '')
             .replace(/(\s+class="[^"]*?)\s*\brd-locked\b/g, '$1')
-            .replace(/\s+title="Not editable here: [^"]*"/g, '');
+            .replace(/\s+title="Not editable here: [^"]*"/g, '')
+            .replace(/<button\b[^>]*\brd-copybtn\b[^>]*>[\s\S]*?<\/button>/g, '');
   }
   function ser(b) {
     return clean(b.nodes.map(function (n) {
@@ -611,6 +612,79 @@ var create = function (ROOT, CFG, opts) {
     clearTimeout(tmr);
     tmr = setTimeout(function () { toast.className = ''; }, err ? 7000 : 2600);
   }
+  // ---- copy blocks (SPEC 6.8) -----------------------------------------------
+  // A quote the renderer marked rd-copy gets a Copy button. It is the page's (data-rd-ui, never editable) and
+  // clean() leaves it out of what a save sends, so it is neither a change nor markdown.
+  // The text copied is what the quote holds now, edits not yet saved included, read as it is shown: a
+  // paragraph's lines run together, a <br> is a line break, paragraphs are a blank line apart.
+  function copyText(q) {
+    var c = q.cloneNode(true), paras = [], run = [];
+    Array.prototype.forEach.call(c.querySelectorAll('[data-rd-ui]'), function (u) { u.remove(); });
+    Array.prototype.forEach.call(c.querySelectorAll('br'), function (b) { b.replaceWith('\u0001'); });
+    var line = function (n) {
+      return n.textContent.replace(/\s+/g, ' ').replace(/ ?\u0001 ?/g, '\n').trim();
+    };
+    var flush = function () {
+      var t = line({ textContent: run.map(function (n) { return n.textContent; }).join('') });
+      if (t) paras.push(t);
+      run = [];
+    };
+    Array.prototype.forEach.call(c.childNodes, function (n) {
+      if (n.nodeType === 1 && /^(P|DIV|UL|OL|PRE|H[1-6]|BLOCKQUOTE|TABLE)$/.test(n.tagName)) {
+        flush();
+        if (n.tagName === 'PRE') { if (n.textContent.trim()) paras.push(n.textContent.replace(/\n$/, '')); }
+        else if (n.tagName === 'UL' || n.tagName === 'OL') {
+          var rows = Array.prototype.map.call(n.children, function (li, k) {
+            var t = line(li);
+            return t && (n.tagName === 'OL' ? (k + 1) + '. ' : '- ') + t;
+          }).filter(Boolean);
+          if (rows.length) paras.push(rows.join('\n'));
+        } else { var t = line(n); if (t) paras.push(t); }
+      } else if (n.nodeType === 1 || n.nodeType === 3) run.push(n);
+    });
+    flush();
+    return paras.join('\n\n');
+  }
+  function copyToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text);
+    return new Promise(function (ok, no) {
+      var t = document.createElement('textarea');
+      t.value = text;
+      t.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+      BODY.appendChild(t);
+      t.select();
+      var done = false;
+      try { done = document.execCommand('copy'); } catch (e) { /* refused below */ }
+      t.remove();
+      if (done) ok(); else no(new Error('copy refused'));
+    });
+  }
+  function copyButton(q) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'rd-copybtn';
+    b.textContent = 'Copy';
+    b.setAttribute('contenteditable', 'false');
+    b.setAttribute('data-rd-ui', '');
+    b.setAttribute('aria-label', 'Copy this block');
+    // The press must not take the caret out of the text being edited.
+    b.addEventListener('mousedown', function (e) { e.preventDefault(); });
+    b.addEventListener('click', function () {
+      copyToClipboard(copyText(q)).then(function () {
+        b.textContent = 'Copied';
+        setTimeout(function () { b.textContent = 'Copy'; }, 1600);
+      }, function () { say('The browser would not copy. Select the text and press Ctrl+C.', true); });
+    });
+    return b;
+  }
+  function copyButtons() {
+    Array.prototype.forEach.call(main.querySelectorAll('blockquote.rd-copy'), function (q) {
+      if (!q.querySelector(':scope > .rd-copybtn')) q.appendChild(copyButton(q));
+    });
+  }
+  copyButtons();
+  listen(main, 'input', copyButtons);   // Backspace over the button takes it out of the quote
+
   function dirty() {
     return blocks.filter(function (b) {
       return editable.has(b.i) && ser(b) !== b.pristine;
@@ -778,6 +852,7 @@ var create = function (ROOT, CFG, opts) {
         if (on && !ok) n.title = LOCKED_TIP; else if (n.title === LOCKED_TIP) n.removeAttribute('title');
       });
     });
+    copyButtons();
     hideCommentBtn();
     refresh();
   }

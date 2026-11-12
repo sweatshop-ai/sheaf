@@ -2,7 +2,8 @@
 
 **What to build:** Distinguer « illisible » de « vide » aussi quand `JSON.parse` lève dans `commentDraftsRaw`: ne pas l'écraser sans le dire (ou la mettre de côté sous une autre clé).
 
-**Blocked by:** 21
+**Blocked by:**
+- External: PR 250 (ticket 21) merged into main
 
 **Claimed by:** 
 

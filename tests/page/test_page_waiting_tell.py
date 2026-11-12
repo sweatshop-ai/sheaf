@@ -214,11 +214,12 @@ def test_the_timer_of_an_earlier_cancel_does_not_take_the_places_of_a_later_canc
     tab.page.click("#rd-popover .rd-form button.rd-tell")
     until(lambda: bool(line(tab)), what="the waiting line")
     mark("first line")
-    first = time.monotonic()
     tab.page.hover("#rd-popover button[data-a=cancel-tell]")
     tab.page.click("#rd-popover button[data-a=cancel-tell]")                  # a Tell nobody had seen: its timer starts
     until(lambda: line(tab) == [], what="the first line to go")
+    first = time.monotonic()
     mark("after the first Cancel")
+    tab.page.wait_for_timeout(1500)                                           # the second Cancel's own timer then ends well after the first's
     tab.page.fill("#rd-popover textarea", "Please do, again.")
     tab.page.click("#rd-popover .rd-form button.rd-tell")
     until(lambda: bool(line(tab)), what="the second waiting line")
@@ -232,7 +233,7 @@ def test_the_timer_of_an_earlier_cancel_does_not_take_the_places_of_a_later_canc
     until(lambda: line(tab) == [] and len(held) == 1, what="the second answer")
     mark("after the second Cancel, event held")
     assert time.monotonic() - first < 5, "the test came too late: the first timer has fired already"
-    tab.page.wait_for_timeout(max(0, int((first + 5.7 - time.monotonic()) * 1000)))      # the first timer fires meanwhile
+    tab.page.wait_for_timeout(max(0, int((first + 5.5 - time.monotonic()) * 1000)))      # the first timer fires meanwhile
     mark("after the first timer")
     holding = False
     for a, k in held:

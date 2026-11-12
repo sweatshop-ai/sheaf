@@ -3365,8 +3365,11 @@ def test_a_reply_to_a_deleted_thread_that_came_back_into_a_new_comments_popover_
 
     def drawn_again():
         seen[:] = [p.input_value("#rd-popover textarea")] if p.locator("#rd-popover textarea").count() else ["no field"]
-        return seen[0] != "about the pears"
-    until(drawn_again, what="the box to be drawn again after the answer")
+        return seen[0] not in ("about the pears", "")
+    try:
+        until(drawn_again, what="the box to be drawn again after the answer")
+    except AssertionError as e:
+        raise AssertionError(f"{e}; the first field held {seen}") from None
     assert seen == ["words for a gone thread"], f"the first field held {seen}"
     assert "“apples”, which was deleted" in p.inner_text("#rd-popover")
 

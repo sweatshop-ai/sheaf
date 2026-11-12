@@ -96,6 +96,14 @@ def the_main_thread_names_its_frame(request):
     timer.join()
 
 
+def pytest_itemcollected(item):
+    """Under xdist (`--dist loadgroup`, pyproject.toml) a file with IN_ORDER = True runs on one worker: its
+    tests share a module list, which a second worker does not have. xdist reads the group while it sorts the
+    items, so the mark goes on as each one is collected."""
+    if getattr(item.module, "IN_ORDER", False):
+        item.add_marker(pytest.mark.xdist_group(item.module.__name__))
+
+
 @pytest.hookimpl(trylast=True)
 def pytest_collection_modifyitems(config, items):
     """SHEAF_TEST_SLICE=i/n keeps the i-th of every n tests that are left after -m: ci.yml runs each

@@ -13,6 +13,15 @@ from pathlib import Path
 
 import pytest
 
+import sheafmd
+
+# Before anything else imports sheafmd's parts: another checkout's venv resolves it to that checkout, and the run
+# would be about code that is not here. tests/test_import_guard.py says why this refuses.
+_OWN_SOURCE = Path(__file__).resolve().parents[1] / "src"
+if not Path(sheafmd.__file__).resolve().is_relative_to(_OWN_SOURCE):
+    raise pytest.UsageError(f"this suite imports {sheafmd.__file__}, not the code under {_OWN_SOURCE}. "
+                            f"Run it with PYTHONPATH={_OWN_SOURCE}")
+
 from helpers import NOW, PLAN, Opener, browser_on, claim_port, proc_state, stop_hub
 # no_process_left_behind and the_test_that_is_running are the fixtures of tests/leakguard.py
 from leakguard import NODE_VAR, RUN_VAR, no_process_left_behind, stop_left, the_test_that_is_running  # noqa: F401
@@ -87,6 +96,31 @@ def the_main_thread_names_its_frame(request):
     timer.join()
 
 
+@pytest.hookimpl(trylast=True)
+def pytest_collection_modifyitems(config, items):
+    """SHEAF_TEST_SLICE=i/n keeps the i-th of every n tests that are left after -m: ci.yml runs each
+    Python as three jobs, one slice each. A file with IN_ORDER = True, whose tests read what the test
+    before them left, counts as one test and stays whole in one slice. Every xdist worker collects the
+    same tests in the same order, so each keeps the same slice."""
+    slice_ = os.environ.get("SHEAF_TEST_SLICE")
+    if not slice_:
+        return
+    i, n = (int(x) for x in slice_.split("/"))
+    units, whole = [], {}
+    for it in items:
+        if getattr(it.module, "IN_ORDER", False):
+            if it.module not in whole:
+                whole[it.module] = []
+                units.append(whole[it.module])
+            whole[it.module].append(it)
+        else:
+            units.append([it])
+    keep = [it for k, u in enumerate(units) if k % n == i - 1 for it in u]
+    kept = set(keep)
+    config.hook.pytest_deselected(items=[it for it in items if it not in kept])
+    items[:] = keep
+
+
 @pytest.fixture(autouse=True)
 def sheaf_env(tmp_path, monkeypatch, request):
     """Every test gets its own state, config, cache and runtime folders, its own
@@ -115,6 +149,8 @@ def sheaf_env(tmp_path, monkeypatch, request):
     for var in ("XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", *SSH_VARS, *agent_vars, *prefixed):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr(tempfile, "tempdir", str(tmp))
+    # a pytest run that a test starts runs all of its own tests, not a slice of them
+    monkeypatch.delenv("SHEAF_TEST_SLICE", raising=False)
 
 
 @pytest.fixture(autouse=True)

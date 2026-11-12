@@ -14,3 +14,7 @@
 - [ ] Un test pose le cas à la main (un hub hors fixture `hub` avec un push échoué en cours à la fin du test) et échoue sans le correctif
 - [ ] La fixture `hub` de `tests/conftest.py` n'a plus besoin de son propre `settle` (ou le garde, s'il reste plus simple), sans perdre le test de `tests/test_hub_pusher_settles.py`
 - [ ] CI verte sur deux passages de suite
+
+**Claimed by:** Isolde 2026-11-12 18:45
+
+**Status:** in-progress

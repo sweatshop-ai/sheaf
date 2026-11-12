@@ -68,3 +68,4 @@ L'agent sait quand un texte est fait pour être copié. Il l'écrit dans un bloc
 - **Arrivée sur tiroir-tt :** elle passe par une montée de version du hub, faite par le track action-list après la fusion du ticket 04.
 | 22 | La page peut afficher une réponse déjà reçue jusqu'à 10 s en retard derrière une longue écriture | 04 | À faire |
 | 23 | Les événements « vu » et « annulé » d'un Tell ne nomment pas l'agent : un fil qui attend deux agents les confond | 04 | À faire |
+| 24 | Le test du « moins » lit la valeur d'un champ que la boîte vient de fermer, de temps en temps en CI | 04 | En cours |

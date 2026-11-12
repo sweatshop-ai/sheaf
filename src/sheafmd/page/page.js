@@ -2296,7 +2296,7 @@ var create = function (ROOT, CFG, opts) {
   function stopDictation(discard) {
     var d = dict;
     if (!d) return;
-    if (discard) d.discard = true;
+    if (discard) { d.discard = true; if (d.abort) d.abort.abort(); }     // a sound on its way is called back too
     clearTimeout(d.timer);
     clearInterval(d.watch);
     if (d.rec && d.rec.state !== 'inactive') d.rec.stop();
@@ -2310,12 +2310,12 @@ var create = function (ROOT, CFG, opts) {
   }
   // The sound to text: rejects with an error whose `why` is 'denied' (the account may not dictate), 'gone' (the
   // service is not there) or 'failed'.
-  function transcribeSound(blob, ext) {
+  function transcribeSound(blob, ext, signal) {
     var fail = function (why) { var e = new Error(why); e.why = why; return e; };
     var req = MOUNTED
-      ? fetch('/api/v1/audio/transcriptions', { method: 'POST', credentials: 'same-origin',
+      ? fetch('/api/v1/audio/transcriptions', { method: 'POST', credentials: 'same-origin', signal: signal,
           body: (function () { var fd = new FormData(); fd.append('file', blob, 'dictee.' + ext); return fd; })() })
-      : fetch('/_/transcribe', { method: 'POST', headers: { 'Content-Type': (blob.type || 'audio/' + ext).split(';')[0], 'X-Filename': 'dictee.' + ext }, body: blob });
+      : fetch('/_/transcribe', { method: 'POST', headers: { 'Content-Type': (blob.type || 'audio/' + ext).split(';')[0], 'X-Filename': 'dictee.' + ext }, body: blob, signal: signal });
     return req.then(function (r) {
       if (r.status === 403 && MOUNTED) throw fail('denied');
       if (r.status === 503 || r.status === 404 || r.status === 401) throw fail('gone');
@@ -2350,7 +2350,7 @@ var create = function (ROOT, CFG, opts) {
         line.textContent = msg || '';
         if (!msg) { line.remove(); line = null; }
       };
-      var idle = function () { b.disabled = false; b.title = 'Dictate'; b.setAttribute('aria-pressed', 'false'); };
+      var idle = function () { b.disabled = false; b.title = 'Dictate'; b.setAttribute('aria-label', 'Dictate'); b.setAttribute('aria-pressed', 'false'); };
       var lost = function (why) {
         if (why === 'denied') { dictOff = Infinity; says('Dictation is not allowed for your account.'); b.remove(); }
         else if (why === 'gone') { dictOff = MOUNTED ? Infinity : Date.now() + 60000; says('The transcription did not work. Try again.'); b.remove(); }
@@ -2363,17 +2363,23 @@ var create = function (ROOT, CFG, opts) {
         navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
           var release = function () { stream.getTracks().forEach(function (t) { t.stop(); }); };
           if (d.discard || unmounted || !f.isConnected) { release(); dict = null; return; }
-          var type = DICTATE_TYPES.filter(function (t) { return MediaRecorder.isTypeSupported(t); })[0];
-          var rec = d.rec = type ? new MediaRecorder(stream, { mimeType: type }) : new MediaRecorder(stream);
-          type = rec.mimeType || type || 'audio/webm';
-          var ext = /mp4/.test(type) ? 'mp4' : /ogg/.test(type) ? 'ogg' : 'webm';
+          var type, rec, ext;
+          // A browser that takes the stream and then refuses the recorder (a type it cannot make, a start that throws)
+          // must not keep the microphone: the light goes out, and the next press is a new try.
+          try {
+            type = DICTATE_TYPES.filter(function (t) { return MediaRecorder.isTypeSupported(t); })[0];
+            rec = d.rec = type ? new MediaRecorder(stream, { mimeType: type }) : new MediaRecorder(stream);
+            type = rec.mimeType || type || 'audio/webm';
+            ext = /mp4/.test(type) ? 'mp4' : /ogg/.test(type) ? 'ogg' : 'webm';
+          } catch (e) { release(); dict = null; says('The recording could not start. Try again.'); return; }
           rec.addEventListener('dataavailable', function (e) { if (e.data && e.data.size) d.chunks.push(e.data); });
           rec.addEventListener('stop', function () {
             release();
             var gone = function () { return d.discard || unmounted || !f.isConnected; };
             if (gone() || !d.chunks.length) { dict = null; if (!gone()) { idle(); says('Nothing was recorded. Try again.'); } return; }
-            b.disabled = true; b.title = 'Transcribing…'; b.setAttribute('aria-pressed', 'false');
-            transcribeSound(new Blob(d.chunks, { type: type }), ext).then(function (text) {
+            b.disabled = true; b.title = 'Transcribing…'; b.setAttribute('aria-label', 'Transcribing…'); b.setAttribute('aria-pressed', 'false');
+            d.abort = new AbortController();
+            transcribeSound(new Blob(d.chunks, { type: type }), ext, d.abort.signal).then(function (text) {
               dict = null;
               if (gone()) return;
               idle();
@@ -2385,7 +2391,7 @@ var create = function (ROOT, CFG, opts) {
               lost(e.why);
             });
           });
-          rec.start();
+          try { rec.start(); } catch (e) { release(); dict = null; says('The recording could not start. Try again.'); return; }
           b.title = 'Stop'; b.setAttribute('aria-pressed', 'true');
           d.timer = setTimeout(function () { stopDictation(false); }, DICTATE_MAX);
           if (!MOUNTED) d.watch = setInterval(function () {   // the service lost during the recording: the sound is dropped
@@ -2414,7 +2420,11 @@ var create = function (ROOT, CFG, opts) {
   function textForm(host, initial, buttons, done, cancelled, says, kept, mirror) {
     var old = host.querySelector('.rd-form');
     // what is typed in the form it replaces goes to the store first; when the store refuses it, that form stays
-    if (old) { if (old.stash && old.stash() === false) { sayNotKept(); return; } old.remove(); }
+    if (old) {
+      if (old.stash && old.stash() === false) { sayNotKept(); return; }
+      if (dict && dict.f === old) stopDictation(true);     // its sound goes with it: the microphone is not left on for a form that is gone
+      old.remove();
+    }
     var own = host === pop ? popId : null;       // the thread this form is for; a new comment has none
     var about = own !== null && byId[own] ? byId[own].quote : '';     // its quote, still known once it is gone
     var born = own !== null && byId[own] ? byId[own].at : null;       // its birth: next_id gives a deleted id to the next comment

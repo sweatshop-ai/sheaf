@@ -187,6 +187,33 @@ def test_the_service_going_away_removes_the_button_and_says_so(tab, site, contex
     p.wait_for_function("document.querySelector('#rd-popover .rd-mic') === null")
 
 
+def test_a_recording_is_dropped_when_the_service_is_lost_during_it(tab, site, hub):
+    tab.page.clock.install()
+    p = open_thread(tab, site)
+    p.wait_for_selector(MIC)
+    p.click(MIC)
+    p.wait_for_function("window.__mic.made.length === 1 && window.__mic.made[0].state === 'recording'")
+    hub.available = False
+    p.clock.run_for(15000)
+    p.wait_for_function("window.__mic.stops === 1")
+    p.wait_for_function("document.querySelector('#rd-popover .rd-mic') === null")
+    assert "did not work" in p.inner_text(SAYS)
+    p.wait_for_timeout(300)
+    assert hub.posts == [], "a recording of a lost service was sent"
+    assert p.evaluate("window.__mic.made[0].state") == "inactive"
+
+
+def test_a_recording_goes_on_while_the_service_is_still_there(tab, site, hub):
+    tab.page.clock.install()
+    p = open_thread(tab, site)
+    p.wait_for_selector(MIC)
+    p.click(MIC)
+    p.wait_for_function("window.__mic.made.length === 1 && window.__mic.made[0].state === 'recording'")
+    p.clock.run_for(35000)
+    assert p.evaluate("window.__mic.made[0].state") == "recording"
+    assert p.locator(MIC).count() == 1
+
+
 def test_a_late_answer_is_dropped_when_the_box_is_gone(tab, site, context):
     context.add_init_script(FAKE_MIC)
     h = Hub(context)

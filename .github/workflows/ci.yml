@@ -52,7 +52,7 @@ permissions:
 
 jobs:
   test:
-    name: ${{ matrix.os }} py${{ matrix.python }}
+    name: ${{ matrix.os }} py${{ matrix.python }} slice ${{ matrix.slice }}/3
     runs-on: ${{ matrix.os }}
     # An ubuntu run takes about 25 minutes; 45 still stops a hang. A macOS runner (3 cores, an M1 VM) runs the
     # same suite about four times slower: a process start costs 50 ms there and pandoc's 210 ms, against 1 and
@@ -69,6 +69,12 @@ jobs:
         # no macOS run has been green yet; the pin keeps the image from moving under that work.
         os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.macos && '["ubuntu-24.04","macos-26"]' || '["ubuntu-24.04"]') }}
         python: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.python != 'all' && format('["{0}"]', inputs.python) || (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && '["3.11","3.13","3.14"]' || '["3.13"]') }}
+        # Each Python runs as three jobs, each with a third of the tests (SHEAF_TEST_SLICE, tests/conftest.py):
+        # the page tests wait on the browser one at a time and were most of a run. On 4 xdist workers in one
+        # runner a different page test or two failed on every run, so they are split across jobs instead.
+        slice: [1, 2, 3]
+    env:
+      SHEAF_TEST_SLICE: ${{ matrix.slice }}/3
     steps:
       - uses: actions/checkout@v4
         with:
@@ -88,7 +94,7 @@ jobs:
       # the process table and the pytest process's thread stacks when the output stops for six
       # minutes, then ends the run after ten, so a hung job names itself instead of being cancelled.
       - name: Tests
-        run: uv run --no-sync python tools/ci/stall_watch.py -- uv run --no-sync pytest -v --durations=25 -m "not page"
+        run: uv run --no-sync python tools/ci/stall_watch.py -- uv run --no-sync pytest -v -n 4 --durations=25 -m "not page"
 
       # The page tests drive Chromium through Playwright (tests/page) and take about half of a pull
       # request's run. A pull request that changes no path they load skips them, and says so here

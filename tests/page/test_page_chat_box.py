@@ -203,7 +203,8 @@ def test_a_reader_who_came_back_to_the_end_stays_there_when_the_field_grows(tab,
     p.evaluate("""() => { const s = document.querySelector('#rd-popover .rd-scroll'); s.scrollTop = 0; }""")
     p.evaluate("""() => { const s = document.querySelector('#rd-popover .rd-scroll'); s.scrollTop = s.scrollHeight; }""")
     p.fill(FIELD, "\n".join(["a line being typed"] * 12))
-    until(lambda: in_view(p, 0), what="the last message in view")
+    until(lambda: p.evaluate("(() => { const s = document.querySelector('#rd-popover .rd-scroll'); return s.scrollTop + s.clientHeight >= s.scrollHeight - 4; })()"),
+          what="the thread at its end")
 
 
 def test_an_answer_does_not_pull_down_a_reader_of_older_messages(tab, site):

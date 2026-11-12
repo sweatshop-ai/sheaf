@@ -203,8 +203,12 @@ def test_a_key_file_that_fails_after_it_is_open_is_not_used_said_once_and_closed
     closed = []
     monkeypatch.setattr(os, "close", lambda fd: closed.append(fd) or real_close(fd))
     if failing == "fstat":
+        real_fstat = os.fstat
+
         def fstat(fd):
-            raise OSError(5, "Input/output error")
+            if fd in opened and fd not in closed:            # only the key file's open descriptor; teardown fstats others
+                raise OSError(5, "Input/output error")
+            return real_fstat(fd)
         monkeypatch.setattr(os, "fstat", fstat)
     else:
         real_fdopen = os.fdopen

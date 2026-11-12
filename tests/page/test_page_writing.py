@@ -4026,22 +4026,31 @@ def test_enter_on_a_loose_task_item_with_an_empty_first_line_keeps_its_other_par
 @pytest.mark.parametrize("what", ["tell", "cancel-tell"])
 def test_a_tell_or_cancel_the_hub_cannot_be_reached_for_says_that_it_did_not_go_out(agent, thread, what):
     # "nothing was saved. Your edits stay on screen" is the sentence of a save; these save nothing.
-    p = thread.page
+    p, aborted, toasts = thread.page, [], []
     thread.page.wait_for_selector("#rd-popover textarea")
     thread.page.fill("#rd-popover textarea", "Please do.")
+
+    def refuse(route):
+        aborted.append(route.request.url)
+        route.abort()
     if what == "cancel-tell":
         thread.page.click("#rd-popover .rd-form button.rd-tell")
         p.wait_for_selector("#rd-popover button[data-a=cancel-tell]")
         route = "**/_/cancel"
-        p.route(route, lambda route: route.abort())
+        p.route(route, refuse)
         p.click("#rd-popover button[data-a=cancel-tell]")
     else:
         # The thread has no Tell of its own any more: the form's Tell goes with the reply, so the hub that cannot
         # be reached refuses the reply, and the page says that the reply did not go out.
         route = "**/_/comment"
-        p.route(route, lambda route: route.abort())
+        p.route(route, refuse)
         thread.page.click("#rd-popover .rd-form button.rd-tell")
-    until(lambda: "did not go out" in toast(p) or p.wait_for_timeout(20), what="the toast")
+    try:
+        # It timed out on CI and passed everywhere else (ticket 10): say whether the request went out and what the toast said.
+        until(lambda: "did not go out" in (toasts.append(toast(p)) or toasts[-1]) or p.wait_for_timeout(20), what="the toast")
+    except AssertionError as e:
+        raise AssertionError(f"{e}: {len(aborted)} request(s) to {route} were refused; the toasts seen, in turn: "
+                             f"{list(dict.fromkeys(toasts))}; the popover held {p.inner_text('#rd-popover')!r}") from None
     says = toast(p)
     assert "nothing was saved" not in says
     assert says.startswith({"tell": "Your reply", "cancel-tell": "Cancel"}[what])
@@ -4129,6 +4138,9 @@ def fail_a_reply(tab, text):
         until(lambda: held or p.wait_for_timeout(20), what="the send to go out")
         held[0].abort()
         p.unroute("**/_/comment")
+        # The field is there while the send is still out; the form is back when the page has said the send did not go
+        # out. Acting before that lets the failure land after it (Escape closed the box, then the failure opened it again).
+        toasted(p, "did not go out")
         p.wait_for_selector("#rd-popover textarea")
     except Exception as e:
         raise RuntimeError(f"the failed send did not bring its form back: {e}") from e
@@ -4169,11 +4181,16 @@ def popover_goes(thread, timeout=20000):
 
 def test_a_form_that_a_failed_send_brought_back_and_was_emptied_and_closed_with_escape_is_not_offered_again(thread):
     p = thread.page
+    # The failure reaches the page 400 ms late, as on a loaded runner: Escape must not come before it.
+    p.evaluate("""() => { const f = window.fetch;
+      window.fetch = (u, o) => f(u, o).catch(e => new Promise((_, rej) => setTimeout(() => rej(e), 400))); }""")
     fail_a_reply(thread, "sent words")
     p.fill("#rd-popover textarea", "")
     p.evaluate(WATCH_POPOVER)
     p.keyboard.press("Escape")
     popover_goes(thread)
+    p.wait_for_timeout(600)     # past the 400 ms above: a failure still out would open the box again by now
+    assert p.locator("#rd-popover").count() == 0, "the box came back after Escape"
     p.click(".rd-badge")
     p.wait_for_selector("#rd-popover .rd-scroll")
     p.wait_for_timeout(300)

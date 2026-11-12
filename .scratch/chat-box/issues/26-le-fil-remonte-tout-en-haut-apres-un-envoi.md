@@ -4,7 +4,9 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Claimed by:** Hakim 2026-11-12 12:31
+
+**Status:** in-progress
 
 **Ce qui ne va pas (une lecture du code, pas une preuve) :** `fillPopover` (`page.js:2008`) lit `atEnd` dans l'ancien `.rd-scroll` (`page.js:2011`) puis remplace tout le contenu de la boîte (`pop.innerHTML = …`, `page.js:2018`) : le `.rd-scroll` neuf démarre à `scrollTop = 0` et ne redescend que si `atEnd` était vrai (`page.js:2062-2063`). `atEnd` se mesure au moment de la lecture, avec la hauteur de la zone d'alors : le champ de saisie est sous le fil (`forms.forEach(pop.appendChild)`) et prend sa hauteur sur celle du fil, de sorte qu'un long texte tapé réduit le fil et que `scrollTop + clientHeight` peut rester à plus de 4 px de `scrollHeight`. Le redessin qui suit l'envoi lit alors `atEnd = false`, et le fil neuf reste en haut. À vérifier d'abord : reproduire sur un fil long avec un texte de plusieurs lignes, lire `atEnd` juste avant le redessin, et regarder si une autre voie (`openComment`, `page.js:2133-2150`, qui descend toujours) est celle qui est prise après l'envoi.
 

@@ -38,6 +38,8 @@ packages = ["src/sheafmd"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# A file with IN_ORDER = True stays on one worker under -n (tests/conftest.py); the other tests spread as before.
+addopts = "--dist loadgroup"
 markers = [
     "page: runs the page in Chromium through Playwright (skipped when it is not installed); -m \"not page\" leaves it out",
 ]

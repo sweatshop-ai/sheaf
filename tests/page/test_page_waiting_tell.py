@@ -191,32 +191,58 @@ def test_the_timer_of_an_earlier_cancel_does_not_take_the_places_of_a_later_canc
     # The timer of the first must not delete what the second kept, or the second says nothing of a Tell already seen.
     token = ask_agent(tab, site)
     name = f"ChatGPT ({site.hub.person})"
+    first = time.monotonic()
+    trace = []
+
+    def mark(step):
+        """What the page shows at a step: the thread's lines, whether its Cancel button is there, the toast."""
+        trace.append((round(time.monotonic() - first, 2), step, line(tab),
+                      tab.page.locator("#rd-popover button[data-a=cancel-tell]").count(), toast(tab.page)))
+
+    emit = site.hub.waiting_tells._emit
+    held = []
+
+    def watch(*a, **k):
+        trace.append((round(time.monotonic() - first, 2), "hub emits", a[1:3], a[3:] and str(a[3:])[:80], None))
+        if holding and a[1] == "tell-cancelled":
+            held.append((a, k))
+        else:
+            emit(*a, **k)
+    holding = False
+    site.hub.waiting_tells._emit = watch
     tab.page.fill("#rd-popover textarea", "Please do.")
     tab.page.click("#rd-popover .rd-form button.rd-tell")
     until(lambda: bool(line(tab)), what="the waiting line")
+    mark("first line")
     first = time.monotonic()
     tab.page.hover("#rd-popover button[data-a=cancel-tell]")
     tab.page.click("#rd-popover button[data-a=cancel-tell]")                  # a Tell nobody had seen: its timer starts
     until(lambda: line(tab) == [], what="the first line to go")
+    mark("after the first Cancel")
     tab.page.fill("#rd-popover textarea", "Please do, again.")
     tab.page.click("#rd-popover .rd-form button.rd-tell")
     until(lambda: bool(line(tab)), what="the second waiting line")
+    mark("second line")
     call(browser_on(site.hub), "documents", token=token)
     until(lambda: line(tab) == [f"{name} has seen it; its action appears in this thread."], what="the seen line")
-    emit, held = site.hub.waiting_tells._emit, []
-    site.hub.waiting_tells._emit = lambda *a, **k: held.append((a, k)) if a[1] == "tell-cancelled" else emit(*a, **k)
+    mark("seen line")
+    holding = True
     tab.page.hover("#rd-popover button[data-a=cancel-tell]")
     tab.page.click("#rd-popover button[data-a=cancel-tell]")                  # the answer comes, the event is held
     until(lambda: line(tab) == [] and len(held) == 1, what="the second answer")
+    mark("after the second Cancel, event held")
     assert time.monotonic() - first < 5, "the test came too late: the first timer has fired already"
     tab.page.wait_for_timeout(max(0, int((first + 5.7 - time.monotonic()) * 1000)))      # the first timer fires meanwhile
-    site.hub.waiting_tells._emit = emit
+    mark("after the first timer")
+    holding = False
     for a, k in held:
         emit(*a, **k)
+    site.hub.waiting_tells._emit = emit
     try:
         toasted(tab.page, f"{name} had already seen it; look at the document before you Tell again.")
     except AssertionError as e:
-        raise AssertionError(f"{e}; toast={toast(tab.page)!r} held={[x[0][1:3] for x in held]!r} lines={line(tab)!r}") from None
+        mark("failure")
+        raise AssertionError(f"{e}\n" + "\n".join(map(repr, trace))) from None
 
 
 def test_a_snapshot_that_is_not_the_answer_to_a_send_does_not_keep_a_seen_line(tab, site):

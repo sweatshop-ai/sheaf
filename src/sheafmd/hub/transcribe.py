@@ -115,16 +115,24 @@ class Relay:
         except OSError as e:
             self._refuse(f"the key file cannot be opened ({e.strerror})")
             return None
-        st = os.fstat(fd)
-        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o077:
-            os.close(fd)
-            self._refuse("the key file is not a regular file of the hub's account with mode 0600")
-            return None
-        with os.fdopen(fd, "r", encoding="utf-8", errors="replace") as f:
-            for line in f.read().splitlines():
-                m = re.fullmatch(rf"\s*(?:export\s+)?{re.escape(self.cfg.key_name)}\s*=\s*(.*?)\s*", line)
-                if m:
-                    return m.group(1).strip("\"'") or None
+        wrapped = False                                      # once fdopen has the descriptor, closing it is its job
+        try:
+            st = os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o077:
+                os.close(fd)
+                self._refuse("the key file is not a regular file of the hub's account with mode 0600")
+                return None
+            f = os.fdopen(fd, "r", encoding="utf-8", errors="replace")
+            wrapped = True
+            with f:
+                for line in f.read().splitlines():
+                    m = re.fullmatch(rf"\s*(?:export\s+)?{re.escape(self.cfg.key_name)}\s*=\s*(.*?)\s*", line)
+                    if m:
+                        return m.group(1).strip("\"'") or None
+        except OSError as e:
+            if not wrapped:
+                os.close(fd)
+            self._refuse(f"the key file cannot be read ({e.strerror})")
         return None
 
     def _check(self) -> bool:

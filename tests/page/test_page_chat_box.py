@@ -200,18 +200,19 @@ def test_an_answer_that_arrives_while_the_thread_is_at_its_end_keeps_it_there(ta
 
 def test_a_reader_who_came_back_to_the_end_stays_there_when_the_field_grows(tab, site):
     p = long_thread(tab, site)
-    p.evaluate("document.querySelector('#rd-popover .rd-scroll').scrollTop = 0")
-    p.evaluate("(() => { const s = document.querySelector('#rd-popover .rd-scroll'); s.scrollTop = s.scrollHeight; })()")
+    p.evaluate("""() => { const s = document.querySelector('#rd-popover .rd-scroll'); s.scrollTop = 0; }""")
+    p.evaluate("""() => { const s = document.querySelector('#rd-popover .rd-scroll'); s.scrollTop = s.scrollHeight; }""")
     p.fill(FIELD, "\n".join(["a line being typed"] * 12))
     until(lambda: in_view(p, 0), what="the last message in view")
 
 
 def test_an_answer_does_not_pull_down_a_reader_of_older_messages(tab, site):
     p = long_thread(tab, site)
-    p.evaluate("document.querySelector('#rd-popover .rd-scroll').scrollTop = 0")
+    p.evaluate("document.querySelector('#rd-popover .rd-scroll').scrollTop = 1000")
+    until(lambda: p.evaluate("document.querySelector('#rd-popover .rd-scroll').scrollTop") == 1000, what="the reader mid-thread")
     update_file(site.file, lambda t: rdc.reply(t, "c1", "An answer", "Bea", "2026-10-14T11:00"))
     until(lambda: "An answer" in p.inner_text(THREAD_BOX), what="the answer in the thread")
-    assert p.evaluate("document.querySelector('#rd-popover .rd-scroll').scrollTop") == 0, "the reader was pulled down"
+    until(lambda: p.evaluate("document.querySelector('#rd-popover .rd-scroll').scrollTop") == 1000, what="the reader's place kept")
 
 
 def test_minimize_closes_the_box_and_the_text_comes_back_even_after_a_reload(tab, site):

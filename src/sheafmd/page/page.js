@@ -2299,8 +2299,8 @@ var create = function (ROOT, CFG, opts) {
   }
   async function cancel(id) {
     var off = function () {
-      cancelled[id] = waits[id];               // the events that follow still find what to say of each agent
-      setTimeout(function () { delete cancelled[id]; }, 5000);
+      var mine = cancelled[id] = waits[id] || {};     // the events that follow still find what to say of each agent
+      setTimeout(function () { if (cancelled[id] === mine) delete cancelled[id]; }, 5000);   // not a later Cancel's
       delete telling[id]; delete waits[id]; touched(id);
     };
     var waited = waits[id];

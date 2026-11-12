@@ -19,3 +19,10 @@ def test_the_tests_of_a_file_that_read_what_the_test_before_left_run_on_one_work
     r = subprocess.run([sys.executable, "-m", "pytest", "-n", "2", "-p", "no:cacheprovider", *ids],
                        cwd=ROOT, capture_output=True, text=True, timeout=240)
     assert r.returncode == 0, r.stdout[-2000:]
+
+
+def test_a_run_without_the_xdist_plugin_is_not_a_usage_error():
+    """`--dist` is an option of the plugin: set in `addopts`, it made `-p no:xdist` fail before any test ran."""
+    r = subprocess.run([sys.executable, "-m", "pytest", "-p", "no:xdist", "-p", "no:cacheprovider", "--collect-only", "-q",
+                        "tests/test_in_order.py"], cwd=ROOT, capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stdout[-1000:] + r.stderr[-1000:]

@@ -234,7 +234,7 @@ def test_the_name_the_page_is_given_is_cleaned_by_the_rule_of_a_display_name(bro
     assert page_meta(browser.get(URL).text)["agent"]["name"] == "Cosima"
 
 
-@pytest.mark.parametrize("pid", [PID, 260])      # 260: a runner's pid; page.js holds "2600", which is not it
+@pytest.mark.parametrize("pid", [PID, 260], ids=["own-pid", "260"])      # 260: a runner's pid; page.js holds "2600", which is not it
 def test_the_page_never_holds_the_session_id_the_socket_or_the_command(browser, plan, session, pid):
     attach(browser, plan, session.target(session="s-secret-1"))
     session.record(sessionId="s-secret-1")

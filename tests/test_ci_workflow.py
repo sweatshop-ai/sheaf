@@ -95,7 +95,15 @@ def test_the_matrix_is_ubuntu_on_every_trigger_and_macos_only_when_a_manual_run_
     matrix = section(section(section(text, "jobs"), "test", 2), "strategy", 4)
     assert MATRIX_OS in matrix
     assert MATRIX_PYTHON in matrix
-    assert keys(section(matrix, "matrix", 6), 8) == ["os", "python"]
+    assert keys(section(matrix, "matrix", 6), 8) == ["os", "python", "slice"]
+
+
+def test_each_python_runs_as_three_jobs_each_with_a_third_of_the_tests(text):
+    # The page tests wait on the browser one at a time; three jobs take a third each (tests/conftest.py).
+    job = section(section(text, "jobs"), "test", 2)
+    assert re.search(r"^        slice: \[1, 2, 3\]\s*$", job, flags=re.M)
+    assert re.search(r"^      SHEAF_TEST_SLICE: \$\{\{ matrix\.slice \}\}/3\s*$", section(job, "env", 4), flags=re.M)
+    assert "    name: ${{ matrix.os }} py${{ matrix.python }} slice ${{ matrix.slice }}/3" in text
 
 
 def test_a_manual_run_picks_macos_and_the_python_version_and_macos_starts_off(text):
@@ -215,6 +223,9 @@ def test_both_pytest_runs_name_their_tests_and_go_through_the_stall_watch(text):
     for ln in runs:
         assert "tools/ci/stall_watch.py --" in ln and "pytest -v " in ln and "pytest -q" not in ln
         assert "--durations=25" in ln
+        # xdist on the plain tests only: on 4 workers in one runner the Chromium page tests failed a
+        # different test or two on every run (render-doc, 2026-11-12); they are split across jobs instead
+        assert ("-n 4" in ln) == ("-m page" not in ln)
 
 
 def test_the_page_tests_run_only_where_there_are_some_and_may_not_skip(text):

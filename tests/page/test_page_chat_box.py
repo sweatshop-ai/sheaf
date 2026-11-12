@@ -158,6 +158,66 @@ def test_a_long_thread_opens_on_its_last_message_and_scrolls_up(tab, site):
     assert full > room and top >= full - room - 4, (top, room, full)
 
 
+def long_thread(tab, site):
+    """A comment of Bea's with 200 paragraphs, its thread open on the last of them."""
+    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "\n\n".join(["Why?"] * 200),
+                                                     "Bea", "2026-10-14T10:00")[0])
+    tab.open()
+    tab.page.click(".rd-badge")
+    tab.page.wait_for_selector(FIELD)
+    return tab.page
+
+
+def in_view(p, nth):
+    """Is the nth message of the thread inside the visible part of the thread?"""
+    return p.evaluate("""(n) => {
+      const s = document.querySelector('#rd-popover .rd-scroll').getBoundingClientRect();
+      const m = document.querySelectorAll('#rd-popover .rd-msg')[n].getBoundingClientRect();
+      return m.top >= s.top - 1 && m.bottom <= s.bottom + 1;
+    }""", nth)
+
+
+def test_after_a_send_the_thread_shows_the_message_just_sent(tab, site):
+    p = long_thread(tab, site)
+    p.fill(FIELD, "Because.")
+    p.keyboard.press("Enter")
+    until(lambda: p.locator(THREAD).count() == 2, what="the reply in the thread")
+    until(lambda: in_view(p, 1), what="the sent message in view")
+
+
+def test_after_a_send_of_a_text_of_several_lines_the_thread_shows_the_message_just_sent(tab, site):
+    p = long_thread(tab, site)
+    p.fill(FIELD, "\n".join(["a line of the answer"] * 12))
+    p.keyboard.press("Enter")
+    until(lambda: p.locator(THREAD).count() == 2, what="the reply in the thread")
+    until(lambda: in_view(p, 1), what="the sent message in view")
+
+
+def test_an_answer_that_arrives_while_the_thread_is_at_its_end_keeps_it_there(tab, site):
+    p = long_thread(tab, site)
+    update_file(site.file, lambda t: rdc.reply(t, "c1", "An answer", "Bea", "2026-10-14T11:00"))
+    until(lambda: "An answer" in p.inner_text(THREAD_BOX), what="the answer in the thread")
+    until(lambda: in_view(p, 1), what="the answer in view")
+
+
+def test_a_reader_who_came_back_to_the_end_stays_there_when_the_field_grows(tab, site):
+    p = long_thread(tab, site)
+    p.evaluate("""() => { const s = document.querySelector('#rd-popover .rd-scroll'); s.scrollTop = 0; }""")
+    p.evaluate("""() => { const s = document.querySelector('#rd-popover .rd-scroll'); s.scrollTop = s.scrollHeight; }""")
+    p.fill(FIELD, "\n".join(["a line being typed"] * 12))
+    until(lambda: p.evaluate("(() => { const s = document.querySelector('#rd-popover .rd-scroll'); return s.scrollTop + s.clientHeight >= s.scrollHeight - 4; })()"),
+          what="the thread at its end")
+
+
+def test_an_answer_does_not_pull_down_a_reader_of_older_messages(tab, site):
+    p = long_thread(tab, site)
+    p.evaluate("document.querySelector('#rd-popover .rd-scroll').scrollTop = 1000")
+    until(lambda: p.evaluate("document.querySelector('#rd-popover .rd-scroll').scrollTop") == 1000, what="the reader mid-thread")
+    update_file(site.file, lambda t: rdc.reply(t, "c1", "An answer", "Bea", "2026-10-14T11:00"))
+    until(lambda: "An answer" in p.inner_text(THREAD_BOX), what="the answer in the thread")
+    until(lambda: p.evaluate("document.querySelector('#rd-popover .rd-scroll').scrollTop") == 1000, what="the reader's place kept")
+
+
 def test_minimize_closes_the_box_and_the_text_comes_back_even_after_a_reload(tab, site):
     p = open_thread(tab, site)
     p.fill(FIELD, "half a thought")
@@ -390,6 +450,17 @@ def store_full(p, full=True):
         return window.__realSet.call(this, k, v);
       };
     }""", full)
+
+
+def store_unreadable(p, blocked=True):
+    """The comment store refuses reads, or answers them again."""
+    p.evaluate("""(blocked) => {
+      if (!window.__realGet) window.__realGet = Storage.prototype.getItem;
+      Storage.prototype.getItem = function (k) {
+        if (blocked && String(k).startsWith('sheaf-comment-draft')) throw new Error('blocked');
+        return window.__realGet.call(this, k);
+      };
+    }""", blocked)
 
 
 def two_threads(tab, site):
@@ -697,3 +768,35 @@ def test_a_message_kept_by_a_close_that_was_then_aborted_is_removed_when_its_fie
     p.keyboard.press("Escape")
     until(lambda: p.locator("#rd-unsent").count() == 0, what="the not-sent line gone")
     assert stored_drafts(p) == [], "the emptied draft stayed in the store"
+
+
+def test_a_store_that_refuses_to_be_read_keeps_what_it_holds_and_says_the_text_was_not_kept(tab, site):
+    import json
+    p = open_thread(tab, site)
+    kept = [{"quote": "pears", "body": "a draft of another passage", "at": "2026-10-14T11:00:00.000Z"}]
+    p.evaluate("([k, v]) => localStorage.setItem(k, v)", [comment_draft_key(site), json.dumps(kept)])
+    store_unreadable(p)
+    p.fill(FIELD, "words I must not lose")
+    p.mouse.click(5, 700)
+    until(lambda: "could not be kept" in toast(p), what="the toast that says the text could not be kept")
+    store_unreadable(p, False)
+    held = p.evaluate("(k) => localStorage.getItem(k)", comment_draft_key(site))
+    assert held and "a draft of another passage" in held, "the read that failed emptied the store"
+
+
+def test_an_emptied_new_message_closes_when_the_store_that_kept_its_text_stops_being_readable(tab, site):
+    p = open_thread(tab, site)
+    p.keyboard.press("Escape")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    p.fill(FIELD, "kept for later")
+    p.click("#rd-popover button[data-a=minimize]")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    until(lambda: p.input_value(FIELD) == "kept for later", what="the kept text back in the box")
+    store_unreadable(p)
+    p.fill(FIELD, "")
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close on an empty field")
+

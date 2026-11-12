@@ -1500,9 +1500,11 @@ var create = function (ROOT, CFG, opts) {
   // port, one after the other, and the key cannot tell them apart. An entry of another root is not this page's:
   // not listed, not sent, and kept when this page writes the store. One with no `root` (an older entry) is
   // this page's, and takes its root when the store is next written.
-  function commentDraftsRaw() {
-    var v;
-    try { v = JSON.parse(localStorage.getItem(COMMENT_DRAFT_KEY) || '[]'); } catch (e) { return []; }
+  // `strict`: a store that refuses the read throws, instead of passing for an empty one (commentDraftsSave).
+  function commentDraftsRaw(strict) {
+    var v, raw;
+    try { raw = localStorage.getItem(COMMENT_DRAFT_KEY); } catch (e) { if (strict) throw e; return []; }
+    try { v = JSON.parse(raw || '[]'); } catch (e) { return []; }
     return (Array.isArray(v) ? v : [v]).filter(function (d) {
       return d && typeof d.body === 'string' && (typeof d.quote === 'string' || typeof d.thread === 'string');
     });
@@ -1514,7 +1516,7 @@ var create = function (ROOT, CFG, opts) {
   function commentDraftsSave(ds) {
     storeOk = true;
     try {
-      var all = commentDraftsRaw().filter(ofOtherRoot).concat(ds.map(function (d) {
+      var all = commentDraftsRaw(true).filter(ofOtherRoot).concat(ds.map(function (d) {
         return d.root === undefined && CFG.root ? Object.assign({ root: CFG.root }, d) : d;
       }));
       if (all.length) localStorage.setItem(COMMENT_DRAFT_KEY, JSON.stringify(all)); else localStorage.removeItem(COMMENT_DRAFT_KEY);
@@ -2095,7 +2097,7 @@ var create = function (ROOT, CFG, opts) {
   function fillPopover(id) {
     var c = byId[id], sc = pop.querySelector('.rd-scroll');
     if (telling[id]) delete interrupted[id];       // sent again: no longer interrupted
-    var atEnd = !sc || sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 4;
+    var atEnd = !sc || sc._stuck || atEndOf(sc), kept = sc ? sc.scrollTop : 0;     // a reader mid-thread keeps their place
     // Every form that is still to be sent goes through the redraw, not the first one only: a failed send
     // whose text is not in the store stays on the page beside the form of this thread.
     var forms = Array.prototype.filter.call(pop.querySelectorAll('.rd-form'), function (x) { return !x.hasAttribute('data-done'); });
@@ -2149,8 +2151,24 @@ var create = function (ROOT, CFG, opts) {
     }
     sendingIn(pop);
     sc = pop.querySelector('.rd-scroll');
-    if (atEnd) sc.scrollTop = sc.scrollHeight;
+    stickToEnd(sc, atEnd);
+    if (!atEnd) sc.scrollTop = kept;
     replace();
+  }
+  // A thread at its end stays there while its box changes size after the draw (the field under it grows or
+  // shrinks, the line "being sent" goes): a scroll by the reader decides again whether it is stuck to the end.
+  function atEndOf(sc) { return sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 4; }
+  function stickToEnd(sc, stuck) {
+    var h = sc.clientHeight;       // its height as of the last resize: a resize and the scroll it causes come in one frame
+    sc._stuck = stuck;
+    if (stuck) sc.scrollTop = sc.scrollHeight;
+    sc.addEventListener('scroll', function () { sc._stuck = sc.scrollTop + h >= sc.scrollHeight - 4; });
+    if (window.ResizeObserver) {
+      new ResizeObserver(function () {
+        if (sc._stuck) sc.scrollTop = sc.scrollHeight;
+        h = sc.clientHeight;
+      }).observe(sc);
+    }
   }
   // Text typed into a form that was sent (a failed send brought it back, or the store drew it) is kept as typed,
   // so a closed tab loses none of it; emptied, it leaves the store, as Cancel clears it (Escape and a click
@@ -2890,7 +2908,7 @@ var create = function (ROOT, CFG, opts) {
         storeOk = true;
         if (!box.value.trim()) {      // emptied: a draft kept before goes too; nothing kept, nothing to write
           if (d || kept || wrote.length) draftsReplace(own);        // known from this form, not read back from a store that may refuse
-          return storeOk;
+          return true;      // an empty field has no text to lose: a clear the store refused does not hold the box open
         }
         var at = (kept || d || {}).at || new Date().toISOString();       // one stamp for the form's draft, so the next stash finds it
         draftsReplace(own, { quote: t.quote, body: box.value, block: t.block, head: t.head, tail: t.tail, occ: t.occ, min: true, at: at });

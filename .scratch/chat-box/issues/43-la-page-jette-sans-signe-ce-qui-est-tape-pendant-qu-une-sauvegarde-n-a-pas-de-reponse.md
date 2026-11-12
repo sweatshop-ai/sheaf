@@ -13,8 +13,12 @@
 
 **Par où commencer :** mesurer la fenêtre (le temps entre l'envoi de `POST /_/save` et sa réponse, sur le hub réel et sur un hub lent), puis décider. Pour (a), `beforeinput` pourrait garder l'`inputType` et les données, puis les rejouer après `refresh()` ; attention à une réponse fusionnée qui recharge la page (les frappes en file doivent aller dans le bloc rechargé, ou être refusées). Pour (b), dire le blocage une fois par sauvegarde.
 
-- [ ] Un test de page tape un caractère pendant qu'une sauvegarde n'a pas de réponse et échoue tant que la frappe est perdue sans signe
-- [ ] La décision (file ou signe) est écrite dans le ticket avant le code
+- [x] Un test de page tape un caractère pendant qu'une sauvegarde n'a pas de réponse et échoue tant que la frappe est perdue sans signe
+- [x] La décision (file ou signe) est écrite dans le ticket avant le code
+
+**Décision (Halima, 2026-11-12) :** voie (b), pas de file. Pendant que la garde `beforeinput` refuse, le bloc édité porte `rd-saving` (trait pointillé, curseur `not-allowed`) et la première touche refusée est dite une fois par sauvegarde (« Saving… »). Pas de rejeu : rejouer à travers une sauvegarde dont la réponse peut recharger la page est la classe de course du jour.
+
+**Fait :** branche `chat-box/43` (test `test_typing_while_a_save_has_no_answer_is_said_once_and_the_block_shows_it_is_saving`, rouge avant le correctif sur t-compute, vert après; writing+drafts+actions 374 verts). Revue Codex : un P2 (la classe entrait dans `ser()` et dans le brouillon), corrigé dans `clean()`, avec une assertion sur le brouillon.
 
 **Claimed by:** Saskia 2026-11-12
 

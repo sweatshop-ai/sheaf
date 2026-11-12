@@ -4,7 +4,7 @@
 
 **Blocked by:** 04
 
-**Claimed by:** Torsten 2026-11-11 00:01
+**Claimed by:** Sami 2026-11-12 (PR 240)
 
 **Status:** in-progress
 

@@ -4,7 +4,7 @@
 
 **Blocked by:** 04
 
-**Claimed by:** Emil 2026-11-11 11:19
+**Claimed by:** unclaimed, waits on PR 240 merge (codex-p2 9f851d0)
 
 **Status:** in-progress
 

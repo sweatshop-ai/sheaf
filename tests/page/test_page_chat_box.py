@@ -695,3 +695,24 @@ def test_a_message_kept_by_a_close_that_was_then_aborted_is_removed_when_its_fie
     p.keyboard.press("Escape")
     until(lambda: p.locator("#rd-unsent").count() == 0, what="the not-sent line gone")
     assert stored_drafts(p) == [], "the emptied draft stayed in the store"
+
+
+def test_a_store_that_refuses_to_be_read_keeps_what_it_holds_and_says_the_text_was_not_kept(tab, site):
+    import json
+    p = open_thread(tab, site)
+    kept = [{"quote": "pears", "body": "a draft of another passage", "at": "2026-10-14T11:00:00.000Z"}]
+    p.evaluate("([k, v]) => localStorage.setItem(k, v)", [comment_draft_key(site), json.dumps(kept)])
+    p.evaluate("""() => {
+      window.__realGet = Storage.prototype.getItem;
+      Storage.prototype.getItem = function (k) {
+        if (String(k).startsWith('sheaf-comment-draft')) throw new Error('blocked');
+        return window.__realGet.call(this, k);
+      };
+    }""")
+    p.fill(FIELD, "words I must not lose")
+    p.mouse.click(5, 700)
+    until(lambda: "could not be kept" in toast(p), what="the toast that says the text could not be kept")
+    p.evaluate("() => { Storage.prototype.getItem = window.__realGet; }")
+    held = p.evaluate("(k) => localStorage.getItem(k)", comment_draft_key(site))
+    assert held and "a draft of another passage" in held, "the read that failed emptied the store"
+

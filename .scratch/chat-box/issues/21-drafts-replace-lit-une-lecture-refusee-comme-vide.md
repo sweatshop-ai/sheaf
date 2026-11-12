@@ -6,8 +6,8 @@
 
 **Claimed by:** Isolde 2026-11-12 10:14
 
-**Status:** in-progress
+**Status:** done
 
 **Ce qui ne va pas :** `page.js:1416-1418` : `commentDraftsRaw` rend `[]` quand `getItem` ou `JSON.parse` lève. `draftsReplace` (`page.js:1439-1444`) filtre cette liste vide et `commentDraftsSave` (`page.js:1427-1436`) écrit le résultat : si la lecture échoue et que l'écriture ou `removeItem` réussit, toute la clé partagée est vidée, brouillons des autres passages compris, et `storeOk` reste `true`. Le test manque aussi : l'aide de `tests/page/test_page_chat_box.py` (~381) ne fait refuser que `setItem`, jamais `getItem`. Codex propose de distinguer « vide » de « illisible » dans `commentDraftsRaw` et de ne rien écrire (`storeOk = false`) quand la lecture est refusée.
 
-- [ ] `getItem` refuse puis l'écriture passe : aucun brouillon existant n'est perdu et `storeOk` est faux, avec un test rouge avant le correctif (l'aide de test fait refuser `getItem`)
+- [x] `getItem` refuse puis l'écriture passe : aucun brouillon existant n'est perdu et `storeOk` est faux, avec un test rouge avant le correctif (l'aide de test fait refuser `getItem`)

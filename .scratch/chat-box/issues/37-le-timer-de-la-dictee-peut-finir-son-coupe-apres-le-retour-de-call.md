@@ -2,7 +2,8 @@
 
 **What to build:** Dans `src/sheafmd/hub/transcribe.py`, `finally` fait `timer.cancel()` puis `conn.close()`. `cancel()` n'attend pas un rappel déjà commencé : si le délai tombe au moment où une réponse complète vient d'être lue, `_call` peut rendre `(status, data)` pendant que `cut()` est encore dans `shutdown`. Le fil ne garde ni la clé, ni les en-têtes, ni le corps et ne peut plus rien lire, donc ce n'est pas une fuite ; mais « rien ne tourne » du docstring est trop fort. Classe : c (tour 3 de Codex, GO).
 
-**Blocked by:** aucun
+**Blocked by:**
+- External: the PR of chat-box/06b (ticket 06b) merged into main
 
 **Établi (preuves) :** `codex-round3.md` de pr-06b-reviews. Non reproduit.
 

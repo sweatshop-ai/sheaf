@@ -114,7 +114,8 @@ def test_a_browser_that_is_off_is_not_opened_and_the_url_is_still_printed(sheaf,
 def test_a_browser_that_cannot_be_started_says_so_and_still_exits_0(sheaf, opened_browser, doc, port):
     opened_browser.result = False
     r = sheaf("open", doc)
-    assert r.code == 0 and "no browser could be opened" in r.err
+    # exited 1 once on py3.14 in CI with nothing more to read (2026-11-12): the output says why next time
+    assert r.code == 0 and "no browser could be opened" in r.err, (r.code, r.out, r.err)
     assert key() not in r.out + r.err
 
 

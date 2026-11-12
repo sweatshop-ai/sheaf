@@ -3,11 +3,13 @@
 The t-compute here is a fake HTTP server on 127.0.0.1 and the key a throwaway one in a temp file:
 nothing leaves the machine and no real key is read. No audio is decoded; the bytes are a stand-in."""
 import json
+import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
+from sheafmd import diagnostics
 from sheafmd.hub import auth, transcribe
 
 KEY = "fake-key-for-tests-0123"
@@ -163,6 +165,18 @@ def test_dictation_is_off_when_t_compute_is_down(browser, tcompute, key_file):
 def test_a_key_file_others_can_read_is_not_used(browser, relay, tcompute, key_file, mode):
     key_file.chmod(mode)
     assert available(browser) is False and tcompute.seen == []
+
+
+@pytest.mark.parametrize("kind", ["directory", "fifo", "symlink"])
+def test_a_key_file_that_is_not_a_plain_file_is_not_used_and_said_once(browser, tcompute, tmp_path, kind):
+    real = tmp_path / "real.env"
+    real.write_text(f"RAG_API_KEY={KEY}\n")
+    real.chmod(0o600)
+    bad = tmp_path / "bad.env"
+    {"directory": bad.mkdir, "fifo": lambda: os.mkfifo(bad), "symlink": lambda: bad.symlink_to(real)}[kind]()
+    browser.hub.transcribe = transcribe.Relay(transcribe.parse(table(tcompute, bad), "the test"), record=browser.hub.record)
+    assert available(browser) is False and tcompute.seen == []
+    assert len([r for r in diagnostics.read() if r["kind"] == "transcribe-key-file"]) == 1
 
 
 def test_a_redirect_is_not_followed_and_the_key_goes_nowhere_else(browser, relay, tcompute):

@@ -15,3 +15,7 @@
 
 - [ ] Un test de page tape un caractère pendant qu'une sauvegarde n'a pas de réponse et échoue tant que la frappe est perdue sans signe
 - [ ] La décision (file ou signe) est écrite dans le ticket avant le code
+
+**Claimed by:** Berit 2026-11-12 20:26
+
+**Status:** in-progress

@@ -4682,7 +4682,7 @@ def test_typing_while_a_save_has_no_answer_is_said_once_and_the_block_shows_it_i
     tab.open()
     held = []
     p.route("**/_/save", lambda r: held.append(r))
-    type_at_end(p, "main p:has-text('Body')", " typed")
+    type_at_end(p, P1, " typed")
     p.keyboard.press("Control+s")
     until(lambda: held or p.wait_for_timeout(20), what="the save, held")
     p.keyboard.type("lost")

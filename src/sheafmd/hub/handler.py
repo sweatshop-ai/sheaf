@@ -36,7 +36,7 @@ from ..edit import EditError
 from ..mcp import Caller, Door
 from ..render import RenderError
 from ..source import StaleError, md_hash
-from . import auth, boxwait, codes, events, peer, place, proxy, relay, targets, the_list, transcribe, visibility, work
+from . import auth, boxwait, codes, events, peer, place, proxy, relay, targets, the_list, visibility, work
 from . import waiting as waiting_mod
 from .tell import NO_AGENT, JobRefused
 from .index import Status
@@ -144,6 +144,7 @@ class Who:
     kinds: frozenset[str]
     refusal: str
     raw_body: bool = False
+    proxy: bool = True               # False: never offered on the proxy socket, though it takes the same credentials as a kind that is
 
     def __contains__(self, kind) -> bool:
         return kind in self.kinds
@@ -159,8 +160,8 @@ COOKIE = Who(frozenset({"cookie"}), _BROWSER)
 EITHER = Who(frozenset({"cookie", "key"}), _BROWSER)
 KEY = Who(frozenset({"key"}), "this needs the hub key")
 # The dictation relay (8.5): a browser's own, never a member's, whose page speaks to its host (9.9). `Who` compares by
-# value, so `_for_members` does not admit it. The raw body is for the relay's POST, a later change.
-COOKIE_RAW = Who(frozenset({"cookie"}), _BROWSER, raw_body=True)
+# value, so `proxy=False` is what keeps `_for_members` from admitting it as it would a plain `COOKIE`.
+DICTATION = Who(frozenset({"cookie"}), _BROWSER, proxy=False)
 DOOR = Who(frozenset({"key", "token"}), "this needs the hub key or an MCP token", raw_body=True)
 # A member's alone, on the proxy socket (9.12): the loopback port answers 404, as for a route it has not.
 MEMBER = Who(frozenset({"member"}), "no such route")
@@ -266,7 +267,7 @@ class Handler:
             ("POST", "/_/jump", "jump", COOKIE, self._jump),
             ("POST", "/_/seen", "seen", COOKIE, self._seen),
             ("POST", "/_/export", "export", COOKIE, self._export),
-            ("GET", "/_/transcribe", "transcribe-ask", COOKIE_RAW, self._transcribe_ask),
+            ("GET", "/_/transcribe", "transcribe-ask", DICTATION, self._transcribe_ask),
             ("POST", "/_/diag", "diag", COOKIE, self._diag),
             ("POST", "/_/render", "render", KEY, self._render),
             ("POST", "/_/forget", "forget", KEY, self._forget),

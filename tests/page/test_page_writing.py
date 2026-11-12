@@ -4673,3 +4673,29 @@ def test_an_edit_of_a_table_keeps_the_escaped_pipe_in_a_raw_tags_attribute(tab):
     tab.page.clock.run_for(3000)
     until(lambda: "typed" in f.read_text(encoding="utf-8"), what="the save")
     assert '| <abbr title="a\\|b">X</abbr> | the cell typed |' in f.read_text(encoding="utf-8")
+
+
+def test_typing_while_a_save_has_no_answer_is_said_once_and_the_block_shows_it_is_saving(tab):
+    """chat-box 43: the page refuses input while a save is out (the reply may reload it), and said nothing."""
+    f = tab.site.file
+    p = tab.page
+    tab.open()
+    held = []
+    p.route("**/_/save", lambda r: held.append(r))
+    type_at_end(p, "main p:has-text('Body')", " typed")
+    p.keyboard.press("Control+s")
+    until(lambda: held or p.wait_for_timeout(20), what="the save, held")
+    p.keyboard.type("lost")
+    toasted(p, "Saving")
+    assert p.evaluate("document.activeElement.classList.contains('rd-saving')")
+    assert p.evaluate("getComputedStyle(document.activeElement).cursor") == "not-allowed"
+    assert "lost" not in p.evaluate("document.activeElement.textContent")
+    p.evaluate("document.querySelector('#rd-toast').textContent = ''")
+    p.keyboard.type("more")
+    assert toast(p) == ""                                    # said once for this save, not for every key
+    held[0].continue_()
+    p.unroute("**/_/save")
+    until(lambda: "typed" in f.read_text(encoding="utf-8"), what="the save to reach the file")
+    until(lambda: not p.evaluate("document.querySelector('.rd-saving')"), what="the mark to go")
+    p.keyboard.type("!")
+    assert p.evaluate("document.activeElement.textContent").endswith("typed!")

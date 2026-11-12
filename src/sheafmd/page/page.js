@@ -2968,6 +2968,8 @@ var create = function (ROOT, CFG, opts) {
   // between would be on screen only. A save takes a fraction of a second, and
   // autosave only starts once typing has paused. When the hub is slow to answer, the refusal is said: the
   // block shows it is saving (rd-saving) and the first refused key says so, once for that save.
+  // The mark is cleared by a poll, not where saving and settling fall: they fall in a dozen places (the reply,
+  // a failure, a give-up, a reload), and a mark that waits a tenth of a second too long costs nothing.
   var refusedSaid = false, refusedTmr;
   main.addEventListener('beforeinput', function (e) {
     if (!saving && !settling) return;

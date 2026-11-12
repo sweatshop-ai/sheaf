@@ -23,6 +23,7 @@ class FakeTCompute:
     def __init__(self):
         self.ready, self.gpu, self.reply = True, 200, (200, {"text": "hello there", "error": None})
         self.redirect = self.truncate = self.drip = False
+        self.dropped = threading.Event()                  # the drip found the connection gone
         self.seen = []                                    # (method, path, headers, body)
         outer = self
 
@@ -51,7 +52,7 @@ class FakeTCompute:
                             self.wfile.flush()
                             time.sleep(0.2)
                     except OSError:
-                        pass
+                        outer.dropped.set()
                     self.close_connection = True
                     return
                 if outer.redirect:
@@ -159,8 +160,8 @@ def available(browser):
 
 def test_dictation_is_available_when_t_compute_is_ready_and_takes_the_key(browser, relay, tcompute):
     assert available(browser) is True
-    assert "X-Api-Key" not in tcompute.calls("/status")[0][2]          # the open route is asked without the key
-    assert tcompute.calls("/audio/gpu-status")[0][2]["X-Api-Key"] == KEY
+    assert "x-api-key" not in {k.lower() for k in tcompute.calls("/status")[0][2]}          # the open route is asked without the key
+    assert {k.lower(): v for k, v in tcompute.calls("/audio/gpu-status")[0][2].items()}["x-api-key"] == KEY
 
 
 def test_only_a_signed_in_browser_is_told(browser, relay, tcompute):
@@ -263,6 +264,7 @@ def test_the_limit_is_on_the_whole_call_not_on_each_read(tcompute, monkeypatch):
     began = time.monotonic()
     assert transcribe._call("POST", f"{tcompute.url}/audio/transcribe", {}, b"x", timeout=1) == (0, b"")
     assert time.monotonic() - began < 2.5
+    assert tcompute.dropped.wait(2)                          # the connection was shut, not left to a thread
 
 
 def test_an_answer_cut_short_is_no_answer(browser, relay, tcompute):
@@ -285,8 +287,9 @@ def test_the_audio_goes_to_t_compute_and_the_text_comes_back(browser, relay, tco
     assert r.status == 200 and r.json() == {"ok": True, "text": "hello there"}
     method, path, h, body = tcompute.calls("/audio/transcribe")[0]
     assert (method, path) == ("POST", "/api/v1/audio/transcribe")
-    assert h["X-Api-Key"] == KEY and h["X-Priority"] == "high"
-    assert h["Content-Type"].startswith("multipart/form-data; boundary=")
+    h = {k.lower(): v for k, v in h.items()}
+    assert h["x-api-key"] == KEY and h["x-priority"] == "high"
+    assert h["content-type"].startswith("multipart/form-data; boundary=")
     assert b'name="file"; filename="dictee.webm"' in body and AUDIO in body
 
 

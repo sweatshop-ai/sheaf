@@ -115,10 +115,11 @@ class Relay:
         except OSError as e:
             self._refuse(f"the key file cannot be opened ({e.strerror})")
             return None
-        wrapped = False                                      # once fdopen has the descriptor, closing it is its job
+        wrapped = False                                      # once fdopen has the descriptor, or the refusal below has closed it, closing it again is not our job
         try:
             st = os.fstat(fd)
             if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o077:
+                wrapped = True                               # before the close: it may raise, and the descriptor is gone either way
                 os.close(fd)
                 self._refuse("the key file is not a regular file of the hub's account with mode 0600")
                 return None

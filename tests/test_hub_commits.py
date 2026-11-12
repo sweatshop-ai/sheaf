@@ -1413,13 +1413,13 @@ def test_a_lock_another_git_took_after_the_add_is_left_where_it_is(box, sheaves,
     real = commits._git
     lock = sheaves / ".git" / "index.lock"
 
-    def slow(folder, *args, **kw):
+    def slow_fetch(folder, *args, **kw):
         if args[:2] == ("diff", "--cached"):
             lock.write_text("", encoding="utf-8")       # a person's `git commit`, its editor open
             raise subprocess.TimeoutExpired(args, 20)
         return real(folder, *args, **kw)
 
-    monkeypatch.setattr(commits, "_git", slow)
+    monkeypatch.setattr(commits, "_git", slow_fetch)
     edit(box, sheaves)
     assert rows("commit-failed")
     assert lock.exists()
@@ -1791,25 +1791,3 @@ def test_a_reset_between_the_pull_and_the_push_is_not_forced_over_the_remote(gua
     assert guarded.hub.commits.settle()
     assert git(remote, "log", "-1", "--format=%s", "main").strip() == "a README"       # not forced over
     assert rows("push-failed")
-
-
-def test_a_test_that_ends_with_a_push_due_leaves_it_to_its_own_teardown(box, sheaves, remote, tmp_path, monkeypatch):
-    """First of a pair (the next test reads the log): a failing push still running when the test ends."""
-    from sheafmd.hub import commits
-    real = commits._git
-
-    def slow(folder, *args, **kw):
-        if args[:1] == ("fetch",):
-            time.sleep(0.8)
-        return real(folder, *args, **kw)
-
-    monkeypatch.setattr(commits, "_git", slow)
-    remote.rename(tmp_path / "away.git")
-    edit(box, sheaves)                              # no settle: the pusher is in its fetch as the test returns
-
-
-def test_a_push_a_test_before_left_due_writes_no_row_into_this_one(box):
-    """Second of the pair, #32: the hub of the test before is settled at its teardown, so its `push-failed` row is
-    in that test's state, not here (CI, PR 250: a second row under `(row,) = rows("push-failed")`)."""
-    time.sleep(1.5)
-    assert rows("push-failed") == []

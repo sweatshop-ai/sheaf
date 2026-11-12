@@ -9,6 +9,7 @@ and (a later change) sends it the audio a page recorded, so the key never reache
 The key is read from `key_file` at each call and goes to the host of `url` only: no redirect is followed and
 no proxy of the environment is used. It is never written to a row or an answer.
 """
+import http.client
 import json
 import os
 import re
@@ -89,7 +90,7 @@ def _call(method, url, headers) -> tuple[int, bytes]:
             return r.status, r.read(1 << 20)
     except urllib.error.HTTPError as e:
         return e.code, b""
-    except (OSError, ValueError):
+    except (OSError, ValueError, http.client.HTTPException):     # IncompleteRead and the like are no answer either
         return 0, b""
 
 

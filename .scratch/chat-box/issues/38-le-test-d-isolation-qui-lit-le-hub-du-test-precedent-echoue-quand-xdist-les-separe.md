@@ -13,11 +13,17 @@
 
 **Par où commencer :** lire les options xdist de CI, puis soit regrouper les deux tests (`pytest.mark.xdist_group` avec `--dist loadgroup`), soit les fondre en un seul test qui démarre le hub, relève le pid et vérifie l'arrêt dans la même fonction. Vérifier si le test voisin de `test_service` a le même défaut.
 
-- [ ] La cause est écrite avec la preuve (la liste des tests par worker d'un run rouge, ou une reproduction avec `-n 2`) ; la lecture ci-dessus est confirmée ou corrigée
-- [ ] Le test n'a plus besoin de l'ordre du fichier ni d'un état partagé entre deux tests ; il passe quel que soit le worker
-- [ ] Les deux tests d'arrêt de hub de `test_service` sont relus pour le même défaut
-- [ ] Les preuves de passage tournent en CI ou sur t-compute, pas ici ; CI verte sur deux passages de suite
+- [x] La cause est écrite avec la preuve (la liste des tests par worker d'un run rouge, ou une reproduction avec `-n 2`) ; la lecture ci-dessus est confirmée ou corrigée
+- [x] Le test n'a plus besoin de l'ordre du fichier ni d'un état partagé entre deux tests ; il passe quel que soit le worker
+- [x] Les deux tests d'arrêt de hub de `test_service` sont relus pour le même défaut
+- [x] Les preuves de passage tournent en CI ou sur t-compute, pas ici ; CI verte sur deux passages de suite
 
 **Claimed by:** Isolde 2026-11-12 16:03
 
-**Status:** in-progress
+**Status:** done (PR 253, head 6bad373)
+
+**Cause (reproduite, 2026-11-12):** CI lance `pytest -n 4` (`--dist load`) ; `IN_ORDER` ne garde un fichier entier que dans une tranche, pas sur un worker xdist. Trois tests de `test_isolation.py` sous `-n 2` donnent le même `assert ([])` que le run 43232192468. Le lecteur de la lecture du code avait raison.
+
+**Correctif :** `pytest_itemcollected` marque les tests d'un module `IN_ORDER` `xdist_group(<module>)` ; `pytest_configure` (tests/conftest.py) passe `--dist` à `loadgroup` sur le contrôleur et `loadgroup` sur le worker. Les trois paires qui lisent la liste d'un test précédent (deux dans `test_isolation`, une dans `test_service`) sont couvertes. Test : tests/test_in_order.py. Pas dans `addopts` : `-p no:xdist` ne démarrerait plus.
+
+**CI :** run 43247947522 sur 6bad373, tentative 1 verte (3/3) et tentative 2 verte (3/3). Revues : Codex indisponible (jeton), repli Opus GO ; revue des standards PASS ; trois P2 notées (worksteal explicite, suffixe de groupe dans les ids, dépendance aux internes de xdist), non corrigées (c/d). Fichiers : /home/tiroir/.claude/pm/chat-box-handoffs/pr-38-reviews/.

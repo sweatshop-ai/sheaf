@@ -1500,8 +1500,9 @@ var create = function (ROOT, CFG, opts) {
   // port, one after the other, and the key cannot tell them apart. An entry of another root is not this page's:
   // not listed, not sent, and kept when this page writes the store. One with no `root` (an older entry) is
   // this page's, and takes its root when the store is next written.
-  // `strict`: a store that refuses the read throws, instead of passing for an empty one (every writer reads so).
-  // A value that is not JSON is set aside under `:unreadable` first, so the write that follows does not destroy it.
+  // `strict`: a store that refuses the read throws, instead of passing for an empty one (the writers read so, commentDraftsHeld and taken).
+  // A value that is not JSON is set aside under `:unreadable` first, so the write that follows does not destroy it
+  // (a later one replaces an earlier one set aside: the store holds one at a time).
   function commentDraftsRaw(strict) {
     var v, raw;
     try { raw = localStorage.getItem(COMMENT_DRAFT_KEY); } catch (e) { if (strict) throw e; return []; }

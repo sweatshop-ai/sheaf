@@ -813,7 +813,6 @@ def test_an_emptied_new_message_closes_when_the_store_that_kept_its_text_stops_b
     until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close on an empty field")
 
 
-
 def test_a_read_of_the_store_that_fails_once_does_not_empty_the_drafts_of_the_page_at_the_next_write(tab, site):
     import json
     p = open_thread(tab, site)

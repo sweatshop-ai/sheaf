@@ -254,6 +254,38 @@ def test_a_late_answer_is_dropped_when_the_box_is_gone(tab, site, context):
     assert p.evaluate("document.body.innerText.includes('late')") is False
 
 
+def test_a_send_while_the_sound_is_on_its_way_that_fails_gives_the_form_back_with_a_working_microphone(tab, site, context):
+    context.add_init_script(FAKE_MIC)
+    h = Hub(context)
+    gate, sent = {}, []
+    real = h.answer
+
+    def slow(route):
+        if route.request.method == "POST":
+            gate["route"] = route                  # held: the sound stays on its way
+            return
+        real(route)
+    context.unroute("**/_/transcribe")
+    context.route("**/_/transcribe", slow)
+    p = open_thread(tab, site)
+    p.wait_for_selector(MIC)
+    p.fill(FIELD, "Typed while transcribing.")
+    p.click(MIC)
+    p.wait_for_function("window.__mic.made.length === 1 && window.__mic.made[0].state === 'recording'")
+    p.click(MIC)
+    until(lambda: "route" in gate, what="the sound on its way")
+    p.route("**/_/comment", lambda route: sent.append(route))
+    p.focus(FIELD)
+    p.keyboard.press("Control+Enter")
+    until(lambda: sent or p.wait_for_timeout(20), what="the send to go out")
+    sent[0].fulfill(status=500, json={"ok": False, "error": "the hub broke off"})
+    p.wait_for_selector(FIELD)
+    until(lambda: p.input_value(FIELD) == "Typed while transcribing.", what="the form back with its text")
+    assert p.locator(MIC).is_enabled(), "the microphone of the form that came back is dead"
+    assert p.locator(MIC).get_attribute("aria-label") == "Dictate", "a screen reader hears Transcribing of a form that is idle"
+    assert p.locator(MIC).get_attribute("aria-pressed") == "false"
+
+
 def test_another_form_replacing_the_one_that_records_throws_the_sound_away(tab, site, hub):
     p = own_thread(tab)
     p.wait_for_selector(MIC)

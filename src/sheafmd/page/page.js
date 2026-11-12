@@ -2392,18 +2392,20 @@ var create = function (ROOT, CFG, opts) {
           rec.addEventListener('stop', function () {
             release();
             var gone = function () { return d.discard || unmounted || !f.isConnected; };
-            if (gone() || !d.chunks.length) { dict = null; if (!gone()) { idle(); says('Nothing was recorded. Try again.'); } return; }
+            // A discarded sound leaves a form that may still be here (a send that fails gives it back): its button is idle again.
+            var here = function () { if (!unmounted && f.isConnected) idle(); };
+            if (gone() || !d.chunks.length) { dict = null; here(); if (!gone()) says('Nothing was recorded. Try again.'); return; }
             b.disabled = true; b.title = 'Transcribing…'; b.setAttribute('aria-label', 'Transcribing…'); b.setAttribute('aria-pressed', 'false');
             d.abort = new AbortController();
             transcribeSound(new Blob(d.chunks, { type: type }), ext, d.abort.signal).then(function (text) {
               dict = null;
+              here();
               if (gone()) return;
-              idle();
               insertDictated(ta, text);
             }, function (e) {
               dict = null;
+              here();
               if (gone()) return;
-              idle();
               lost(e.why);
             });
           });

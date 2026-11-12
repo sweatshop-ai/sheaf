@@ -2,7 +2,8 @@
 
 **What to build:** Dans `src/sheafmd/hub/transcribe.py`, `_call` coupe la socket par un `threading.Timer` à la fin de `timeout`, mais la socket n'est connue (`held`) qu'après le retour de `conn.connect()`. Une résolution DNS lente, une poignée de main TLS lente ou plusieurs adresses injoignables peuvent dépasser `timeout` : l'appelant reste bloqué, avec la clé et le corps, et le verrou `_busy` du relais tenu. Classe : c (tour 3 de Codex sur la branche chat-box/06b, verdict GO ; l'hôte est celui de `[transcribe] url`, posé par l'administrateur, pas par une requête).
 
-**Blocked by:** aucun
+**Blocked by:**
+- External: the PR of chat-box/06b (ticket 06b) merged into main
 
 **Établi (preuves) :** `codex-round3.md` de pr-06b-reviews. `socket.create_connection` borne chaque adresse par `timeout`, pas la somme ; `getaddrinfo` n'a pas de limite. Non reproduit.
 

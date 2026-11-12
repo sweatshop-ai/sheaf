@@ -1500,12 +1500,13 @@ var create = function (ROOT, CFG, opts) {
   // port, one after the other, and the key cannot tell them apart. An entry of another root is not this page's:
   // not listed, not sent, and kept when this page writes the store. One with no `root` (an older entry) is
   // this page's, and takes its root when the store is next written.
+  // `pendingClears`: tests of this page's entries that the person emptied while the store refused the read, so the
+  // clear could not be written. They stay out of the page's reads (commentDraftsLoad), and go from the store with the
+  // next write that lands (commentDraftsSave). Kept in memory: a reload before that write offers the entry again.
+  var pendingClears = [];
   // `strict`: a store that refuses the read throws, instead of passing for an empty one (the writers read so, commentDraftsHeld and taken).
   // A value that is not JSON is set aside under `:unreadable` first, so the write that follows does not destroy it
   // (a later one replaces an earlier one set aside: the store holds one at a time).
-  // `cleared`: tests of entries the person emptied while the store refused the read, so the clear could not be
-  // written. They stay out of every read, and go from the store with the next write that lands (commentDraftsSave).
-  var cleared = [];
   function commentDraftsRaw(strict) {
     var v, raw;
     try { raw = localStorage.getItem(COMMENT_DRAFT_KEY); } catch (e) { if (strict) throw e; return []; }
@@ -1514,12 +1515,15 @@ var create = function (ROOT, CFG, opts) {
       return [];
     }
     return (Array.isArray(v) ? v : [v]).filter(function (d) {
-      return d && typeof d.body === 'string' && (typeof d.quote === 'string' || typeof d.thread === 'string')
-        && !cleared.some(function (gone) { return gone(d); });
+      return d && typeof d.body === 'string' && (typeof d.quote === 'string' || typeof d.thread === 'string');
     });
   }
   function ofOtherRoot(d) { return !!CFG.root && d.root !== undefined && d.root !== CFG.root; }
-  function commentDraftsLoad(strict) { return commentDraftsRaw(strict).filter(function (d) { return !ofOtherRoot(d); }); }
+  function commentDraftsLoad(strict) {
+    return commentDraftsRaw(strict).filter(function (d) {
+      return !ofOtherRoot(d) && !pendingClears.some(function (gone) { return gone(d); });
+    });
+  }
   // A writer reads the store strictly, so a read that fails now and then does not pass for an empty store and the
   // write that follows does not drop what the page held. Says whether it could read: when not, nothing is written
   // and storeOk is false, as when the write itself is refused.
@@ -1535,7 +1539,7 @@ var create = function (ROOT, CFG, opts) {
         return d.root === undefined && CFG.root ? Object.assign({ root: CFG.root }, d) : d;
       }));
       if (all.length) localStorage.setItem(COMMENT_DRAFT_KEY, JSON.stringify(all)); else localStorage.removeItem(COMMENT_DRAFT_KEY);
-      cleared = [];
+      pendingClears = [];
     } catch (e) { storeOk = false; }
     unsentLine();
   }
@@ -1543,7 +1547,8 @@ var create = function (ROOT, CFG, opts) {
   // own. For a form that knows which entry is its own: the same quote in another paragraph is another comment.
   function draftsReplace(gone, add) {
     var ds = commentDraftsHeld();
-    if (!ds) { if (!add) cleared.push(gone); return; }        // a clear the store could not read for: held, not forgotten
+    // A clear (no `add`) the store could not be read for is held, not forgotten.
+    if (!ds) { if (!add) pendingClears.push(gone); return; }
     ds = ds.filter(function (d) { return !gone(d); });
     if (add) ds.push({ quote: add.quote, body: add.body, block: add.block, head: add.head, tail: add.tail, occ: add.occ, rid: add.rid,
                        at: add.at || new Date().toISOString(), min: add.min });

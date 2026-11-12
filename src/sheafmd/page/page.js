@@ -2125,7 +2125,7 @@ var create = function (ROOT, CFG, opts) {
       acts.hidden = sentOf(id);      // a reply or an edit of this thread is out: its buttons wait for the answer
       acts.innerHTML = (telling[id] ? busy('tell', AGENT_UC + ' is working')
          : waits[id] ? '<button class="rd-alt rd-busy rd-tell" data-a="cancel-tell" title="Click to cancel"><span class="rd-on">' +
-                       esc(waitList(id).map(function (w) { return w.to; }).join(' and ')) +
+                       esc(waitList(id).map(function (w) { return w.to; }).join(', ')) +
                        (waitList(id).length > 1 ? ' are waiting' : ' is waiting') + '</span><span class="rd-off">Cancel</span></button>'
          : '');
       if (head) head.hidden = sentOf(id);
@@ -3774,9 +3774,9 @@ var create = function (ROOT, CFG, opts) {
       });
       live.addEventListener('tell-cancelled', function (ev) {
         var d = JSON.parse(ev.data || '{}');
-        var waited = d.agent !== undefined ? (waits[d.id] || {})[d.agent] : waitList(d.id)[0];
+        var waited = d.agent !== undefined ? (waits[d.id] || {})[d.agent] : null;
         delete telling[d.id];
-        if (d.agent !== undefined) waitOff(d.id, d.agent); else delete waits[d.id];      // a Tell job's end names no agent
+        if (d.agent !== undefined) waitOff(d.id, d.agent);     // a Tell job's end names no agent: it ends no agent's Tell
         touched(d.id);
         if (waited) say('Cancelled.' + (d.seen ? ' ' + waited.to + ' had already seen it; look at the document before you Tell again.' : ''));
       });

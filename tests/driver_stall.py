@@ -8,7 +8,9 @@ has a timeout of its own (30 s), so a test still inside the driver after 300 s i
 Loaded by tests/conftest.py."""
 import pytest
 
-DRIVER_FRAME = "playwright/sync_api"     # a frame of the pytest-timeout traceback: the main thread was in the driver
+# Frames of the pytest-timeout traceback that say the main thread was waiting for the driver (the ticket's journal:
+# `playwright/sync_api/_context_manager.py`, `greenlet_main`), not in a call on a page
+DRIVER_FRAMES = ("playwright/sync_api/_context_manager.py", "in greenlet_main")
 TIMED_OUT = "from pytest-timeout"
 TAIL_LINES = 40
 
@@ -18,7 +20,7 @@ def stalled_in_driver(report):
     if not report.failed or report.longrepr is None:
         return None
     text = str(report.longrepr)
-    if TIMED_OUT in text and DRIVER_FRAME in text:
+    if TIMED_OUT in text and all(frame in text for frame in DRIVER_FRAMES):
         return text
     return None
 

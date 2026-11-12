@@ -1,0 +1,82 @@
+"""CI, run 43288137873: the Playwright driver of the session stopped answering in one page test, and the ten
+page tests after it each waited out their 300 s before the job's 60 min ended it, with no line saying why. The
+first test that times out inside the driver now ends the run, names itself and shows where it stood."""
+import subprocess
+import sys
+import textwrap
+import time
+from pathlib import Path
+
+TESTS = Path(__file__).resolve().parent
+
+# A driver that never answers, laid out as Playwright's is: the frame `greenlet_main` of
+# playwright/sync_api/_context_manager.py, where the main thread waits for the driver.
+FAKE_DRIVER = '''
+import threading
+
+
+def greenlet_main():
+    threading.Event().wait()
+'''
+
+SUITE = '''
+from playwright.sync_api._context_manager import greenlet_main
+
+
+def test_first_asks_the_driver():
+    greenlet_main()
+
+
+def test_second_asks_the_driver():
+    greenlet_main()
+
+
+def test_third_asks_the_driver():
+    greenlet_main()
+'''
+
+
+def run(tmp_path, *args):
+    driver = tmp_path / "fake" / "playwright" / "sync_api"
+    driver.mkdir(parents=True)
+    (driver.parent / "__init__.py").write_text("")
+    (driver / "__init__.py").write_text("")
+    (driver / "_context_manager.py").write_text(textwrap.dedent(FAKE_DRIVER))
+    suite = tmp_path / "suite"
+    suite.mkdir()
+    (suite / "test_driver.py").write_text(textwrap.dedent(SUITE))
+    env = {"PATH": "/usr/bin:/bin", "PYTHONPATH": f"{tmp_path / 'fake'}:{TESTS}"}
+    start = time.monotonic()
+    r = subprocess.run([sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "--timeout=1", "-v", *args],
+                       cwd=suite, env=env, capture_output=True, text=True, timeout=120)
+    return r, r.stdout + r.stderr, time.monotonic() - start
+
+
+def test_without_the_hook_every_test_waits_out_its_own_limit(tmp_path):
+    r, out, _ = run(tmp_path)
+
+    assert r.returncode == 1, out
+    assert out.count("Failed: Timeout (>1.0s)") >= 3, out
+
+
+def test_the_first_test_that_times_out_in_the_driver_ends_the_run_and_names_itself(tmp_path):
+    r, out, _ = run(tmp_path, "-p", "driver_stall")
+
+    assert r.returncode == 1, out
+    assert "test_driver.py::test_first_asks_the_driver" in out, out
+    assert "Playwright driver no longer answers" in out, out
+    assert "greenlet_main" in out, out        # where it stood, for the log that the cancel cuts short
+    assert "test_second_asks_the_driver" not in out, out
+
+
+def test_a_test_that_times_out_elsewhere_does_not_end_the_run(tmp_path):
+    (tmp_path / "suite").mkdir()
+    (tmp_path / "suite" / "test_slow.py").write_text(
+        "import threading\n\n\ndef test_slow():\n    threading.Event().wait()\n\n\ndef test_fine():\n    pass\n")
+    env = {"PATH": "/usr/bin:/bin", "PYTHONPATH": str(TESTS)}
+    r = subprocess.run([sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "--timeout=1", "-p", "driver_stall",
+                        "-v"], cwd=tmp_path / "suite", env=env, capture_output=True, text=True, timeout=120)
+    out = r.stdout + r.stderr
+
+    assert "test_fine PASSED" in out, out
+    assert "Playwright driver" not in out, out

@@ -4698,5 +4698,7 @@ def test_typing_while_a_save_has_no_answer_is_said_once_and_the_block_shows_it_i
     until(lambda: "typed" in f.read_text(encoding="utf-8"), what="the save to reach the file")
     until(lambda: not p.evaluate("document.querySelector('.rd-saving')"), what="the mark to go")
     assert p.evaluate(f"localStorage.getItem({draft_key(tab.site)!r})") is None      # the mark is not an edit
+    p.keyboard.press("Control+s")
+    toasted(p, "Nothing changed")                                                   # the mark left no class="" to save
     p.keyboard.type("!")
     assert p.evaluate("document.activeElement.textContent").endswith("typed!")

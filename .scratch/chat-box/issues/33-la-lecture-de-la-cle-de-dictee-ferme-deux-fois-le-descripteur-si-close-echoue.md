@@ -14,4 +14,4 @@
 
 **Claimed by:** Greta 2026-11-13 00:16
 
-**Status:** in-progress
+**Status:** in-progress — PR 266 open (tickets 33 and 34), head 1036820, CI green

@@ -366,9 +366,10 @@ def every_hub_settles_its_pusher(sheaf_env, monkeypatch):
 
     monkeypatch.setattr(Hub, "__init__", tracked)
     yield
-    for h in built:
-        commits = getattr(h, "commits", None)         # a constructor that raised before it made them
-        assert commits is None or commits.settle(30), "a hub's pusher did not finish within 30 s of the test's end"
+    # every hub is settled, then the test fails once: one that is stuck must not leave the others' pushers running
+    stuck = [i for i, h in enumerate(built, 1)
+             if not (getattr(h, "commits", None) is None or h.commits.settle(30))]    # None: the constructor raised first
+    assert not stuck, f"the pusher of hub {stuck} of {len(built)} built in this test did not finish within 30 s of its end"
 
 
 @pytest.fixture

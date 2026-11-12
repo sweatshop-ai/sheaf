@@ -2,11 +2,14 @@
 folder, and the hub that writes a version must neither reset an existing folder to 0700 nor make a new one so."""
 import os
 import stat
+import sys
 
 import pytest
 
 from sheafmd import paths
 from sheafmd.hub import state
+
+linux_only = pytest.mark.skipif(not sys.platform.startswith("linux"), reason="mkdir passes setgid on only on Linux")
 
 NAME = "list"
 SHARED = 0o2750
@@ -44,6 +47,7 @@ def test_put_leaves_the_modes_of_existing_folders(shared_root):
         assert mode(p) == m, f"{p} went {oct(m)} -> {oct(mode(p))}"
 
 
+@linux_only
 def test_a_new_document_folder_comes_out_with_the_parents_modes(shared_root):
     v = state.Versions(shared_root, NAME)
     v.put(f"{NAME}/b.md", "text two\n")
@@ -52,6 +56,7 @@ def test_a_new_document_folder_comes_out_with_the_parents_modes(shared_root):
     assert mode(folder) == SHARED and mode(folder / "pins") == SHARED
 
 
+@linux_only
 def test_a_store_made_from_nothing_inherits_the_roots_modes(tmp_path):
     old = os.umask(0o027)
     try:
@@ -81,3 +86,21 @@ def test_a_link_in_place_of_the_store_is_still_refused(tmp_path):
     with pytest.raises(paths.PathError):
         state.Versions(root, NAME).put(f"{NAME}/a.md", "x\n")
     assert not list(out.iterdir())
+
+
+@pytest.mark.parametrize("plant", ["file at .sheaf", "file at pins", "dangling link at the document folder"])
+def test_a_file_or_dangling_link_in_the_store_is_an_oserror(tmp_path, plant):
+    """`live` swallows an OSError (a full disk costs a merge); a plant must not become a 500."""
+    root = tmp_path / "root"
+    root.mkdir()
+    folder = root / state.INSIDE / state.doc_key("a.md")
+    if plant == "file at .sheaf":
+        (root / ".sheaf").write_text("x")
+    elif plant == "file at pins":
+        folder.mkdir(parents=True)
+        (folder / "pins").write_text("x")
+    else:
+        folder.parent.mkdir(parents=True)
+        folder.symlink_to(tmp_path / "nowhere")
+    with pytest.raises(OSError):
+        state.Versions(root, NAME).pin(f"{NAME}/a.md", "x\n")

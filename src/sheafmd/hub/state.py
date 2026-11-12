@@ -48,7 +48,9 @@ def inside_dir(path: Path) -> Path:
     try:
         os.mkdir(path, 0o777)
     except FileExistsError:
-        pass
+        st = os.lstat(path)
+        if not stat.S_ISDIR(st.st_mode) and not (stat.S_ISLNK(st.st_mode) and path.exists()):
+            raise               # a file or a dangling link stands there: an OSError, as `mkdir` gave before
     st = os.lstat(path)
     if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
         raise paths.PathError(f"{path} is not a folder of yours; sheaf will not use it")

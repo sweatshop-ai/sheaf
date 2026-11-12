@@ -10,11 +10,11 @@
 
 **Par où commencer :** régler tout hub à la fin du test depuis un seul endroit, pas fixture par fixture : par exemple une fixture autouse qui enregistre chaque `Hub` construit (enveloppe de `Hub.__init__`) et appelle `commits.settle` avant que `sheaf_env` ne soit défait. Attention : l'ordre de démontage (le réglage doit avoir lieu tant que l'environnement du test est encore en place) et les hubs que le test arrête lui-même (`stop_jobs`, le pusher se termine par `Stopped`).
 
-- [ ] Tout hub construit dans un test est réglé à la fin de ce test, d'un seul endroit
-- [ ] Un test pose le cas à la main (un hub hors fixture `hub` avec un push échoué en cours à la fin du test) et échoue sans le correctif
-- [ ] La fixture `hub` de `tests/conftest.py` n'a plus besoin de son propre `settle` (ou le garde, s'il reste plus simple), sans perdre le test de `tests/test_hub_pusher_settles.py`
-- [ ] CI verte sur deux passages de suite
+- [x] Tout hub construit dans un test est réglé à la fin de ce test, d'un seul endroit
+- [x] Un test pose le cas à la main (un hub hors fixture `hub` avec un push échoué en cours à la fin du test) et échoue sans le correctif
+- [x] La fixture `hub` de `tests/conftest.py` n'a plus besoin de son propre `settle` (ou le garde, s'il reste plus simple), sans perdre le test de `tests/test_hub_pusher_settles.py`
+- [x] CI verte sur deux passages de suite
 
 **Claimed by:** Isolde 2026-11-12 18:45
 
-**Status:** in-progress
+**Status:** done — PR 256 (head 71d94b7), CI run 43274033495 attempts 1 and 2 both 3/3 green; reviews in ~/.claude/pm/chat-box-handoffs/pr-35-reviews/ (Opus fallback GO, standards clean, spec no blocker)

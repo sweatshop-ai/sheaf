@@ -2142,11 +2142,12 @@ var create = function (ROOT, CFG, opts) {
   // shrinks, the line "being sent" goes): a scroll by the reader decides again whether it is stuck to the end.
   function stickToEnd(sc, stuck) {
     var pinned = null;       // where our own scroll left the thread: its event says nothing of the reader
-    var pin = function () { sc.scrollTop = sc.scrollHeight; pinned = sc.scrollTop; };
+    var pin = function () { var was = sc.scrollTop; sc.scrollTop = sc.scrollHeight; pinned = sc.scrollTop !== was ? sc.scrollTop : null; };
     sc._stuck = stuck;
     if (stuck) pin();
     sc.addEventListener('scroll', function () {
-      if (sc.scrollTop !== pinned) sc._stuck = sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 4;
+      if (sc.scrollTop === pinned) { pinned = null; return; }
+      sc._stuck = sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 4;
     });
     if (window.ResizeObserver) new ResizeObserver(function () { if (sc._stuck) pin(); }).observe(sc);
   }

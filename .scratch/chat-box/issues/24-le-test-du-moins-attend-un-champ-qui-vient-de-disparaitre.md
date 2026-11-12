@@ -13,4 +13,4 @@ La ligne attendue est `not p.is_visible("#rd-popover textarea") or p.input_value
 
 - [x] La cause est écrite avec la preuve (la sortie de la CI qui l'a relevée)
 - [x] Le correctif traite la cause : un seul `evaluate` lit la présence, la visibilité et la valeur du champ, sans fenêtre entre deux appels
-- [ ] CI verte sur deux passages de suite
+- [x] CI verte sur deux passages de suite : runs 43190504226 sur 08c8883 et 43201969936 sur 4455590, chacun vert aux tentatives 1 et 2

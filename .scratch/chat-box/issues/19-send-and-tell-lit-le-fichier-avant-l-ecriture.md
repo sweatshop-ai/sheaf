@@ -18,4 +18,4 @@
 
 **Correctif.** Le test attend la réponse dans le fichier (`until(replies == …)`), ce que le test vérifie, puis la ligne. Rouge avec l'ancienne attente et 800 ms de retard, vert avec la nouvelle.
 
-- [ ] CI verte sur trois passages de suite
+- [x] CI verte sur trois passages de suite : runs 43190504226 sur 08c8883 et 43201969936 sur 4455590, chacun vert aux tentatives 1 et 2

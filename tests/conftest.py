@@ -96,6 +96,27 @@ def the_main_thread_names_its_frame(request):
     timer.join()
 
 
+def pytest_configure(config):
+    """`-n` spreads tests with `--dist load` unless the run says otherwise; `loadgroup` keeps a file with
+    IN_ORDER = True on one worker (pytest_itemcollected) and spreads the rest as before. Not in `addopts`:
+    `--dist` belongs to the xdist plugin, and a run without it (`-p no:xdist`) would not start. A worker
+    reads its own `loadgroup` from the arguments it was started with, which do not have the change."""
+    if not config.pluginmanager.hasplugin("xdist"):
+        return
+    if hasattr(config, "workerinput"):
+        config.option.loadgroup = True
+    elif config.getoption("dist") == "load":
+        config.option.dist = "loadgroup"
+
+
+def pytest_itemcollected(item):
+    """Under xdist (`--dist loadgroup`, pytest_configure above) a file with IN_ORDER = True runs on one worker: its
+    tests share a module list, which a second worker does not have. xdist reads the group while it sorts the
+    items, so the mark goes on as each one is collected."""
+    if getattr(item.module, "IN_ORDER", False):
+        item.add_marker(pytest.mark.xdist_group(item.module.__name__))
+
+
 @pytest.hookimpl(trylast=True)
 def pytest_collection_modifyitems(config, items):
     """SHEAF_TEST_SLICE=i/n keeps the i-th of every n tests that are left after -m: ci.yml runs each
@@ -345,7 +366,11 @@ HUB_PORT = 27419
 def hub(work):
     from sheafmd import paths
     from sheafmd.hub.core import Hub
-    return Hub(port=HUB_PORT, key=paths.ensure_key(), started_by="test")
+    h = Hub(port=HUB_PORT, key=paths.ensure_key(), started_by="test")
+    yield h
+    # A push the test left due ends here, in this test's state: its pusher is a thread that outlives the test and
+    # writes its `push-failed` row into the state of whichever test runs next (#32).
+    assert h.commits.settle(30), "the hub's pusher did not finish within 30 s of the test's end"
 
 
 @pytest.fixture

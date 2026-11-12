@@ -112,7 +112,9 @@ def test_the_minus_resolves_an_open_thread_and_stays_while_writing(tab, site):
     assert p.is_visible("#rd-popover button[title=Resolve]")
     p.click("#rd-popover button[title=Resolve]")
     until(lambda: rdc.parse(site.file.read_text(encoding="utf-8")).comments[0].status == "resolved", what="the thread resolved")
-    until(lambda: not p.is_visible("#rd-popover textarea") or p.input_value("#rd-popover textarea") == "", what="the box to close")
+    # One evaluate, not is_visible then input_value: the box can close between the two, and input_value then waits for a
+    # field that is gone until the stall guard fires (ticket 24).
+    until(lambda: p.evaluate("() => { var t = document.querySelector('#rd-popover textarea'); return !t || t.offsetParent === null || t.value === ''; }"), what="the box to close")
     until(lambda: p.locator("#rd-unsent").count() == 1, what="the text kept in the unsent list")
 
 

@@ -39,6 +39,7 @@ import html as _html
 import re
 from dataclasses import dataclass, field
 
+from . import copyblock
 from .blocks import split_md_blocks
 
 CODE_KINDS = {"fence", "indented_code", "frontmatter"}
@@ -475,6 +476,15 @@ def projection(block: str) -> Projection:
                 lead = data.lstrip()
                 if not spans and lead[0] in TASK_BOXES:
                     data = lead[1:]
+            if copyblock.STAND_IN in data:
+                # The marker of a copy block is not on the page, and pandoc, not a guess at its rules, says whether
+                # this is one: the stand-in first in a paragraph of a quote that opens the block. Anywhere else the
+                # page shows it as the marker's own words.
+                tags = [t for t, _ in stack if t != "span"]
+                if not text and tags[-2:] == ["blockquote", "p"]:
+                    data = data.replace(copyblock.STAND_IN, "")
+                else:
+                    data = data.replace(copyblock.STAND_IN, copyblock.MARKER)
             for ch in data:
                 if ch.isspace():
                     continue
@@ -487,7 +497,7 @@ def projection(block: str) -> Projection:
                     s.last = k
 
     p = P(convert_charrefs=True)
-    p.feed(_sourcepos_html(block))
+    p.feed(_sourcepos_html(copyblock.hide(block)))
     p.close()
     return Projection("".join(text), chars)
 

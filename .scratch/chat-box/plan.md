@@ -57,6 +57,7 @@ L'agent sait quand un texte est fait pour être copié. Il l'écrit dans un bloc
 | 10 | Le test d'Échap échoue de temps en temps en CI : trouver la cause | 04 | En cours (PR #241) |
 | 11 | fillPopover ramène le curseur dans le premier formulaire | 04 | À faire |
 | 12 | Revue Codex de la fusion cdb0e24 (après le 2026-11-11 08:36) | Rien | À faire |
+| 13 | Bloc à copier : une ligne qui ouvre un bloc HTML avant `---` rend le bloc en citation simple | 05 | À faire |
 | 17 | Le test du toast d'annulation d'un Tell échoue de temps en temps en CI | 04 | À faire |
 | 18 | La ligne « vu » d'un Tell en attente n'arrive pas, de temps en temps, en CI | 04 | À faire |
 | 19 | Le test « envoyer et Tell » lit le fichier avant d'y trouver la réponse, de temps en temps en CI | 04 | À faire |

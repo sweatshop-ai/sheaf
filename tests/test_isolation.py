@@ -10,6 +10,10 @@ from helpers import gone, stop_hub
 from sheafmd import config, paths
 from sheafmd.hub import client, server
 
+# Some tests here read what the test before them left: a slice of the suite in CI keeps the file whole
+# (SHEAF_TEST_SLICE, tests/conftest.py).
+IN_ORDER = True
+
 STARTED = []
 
 

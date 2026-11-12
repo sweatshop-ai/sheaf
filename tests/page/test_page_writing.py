@@ -2191,11 +2191,13 @@ def comment_posts(page):
 
 
 def test_send_and_tell_starts_one_tell_and_the_thread_waits_for_its_reply(agent, thread):
+    # The thread was itself made with Tell, so its waiting line is on the page before this reply is sent (ticket 19):
+    # the reply is what is waited for.
     sent = comment_posts(thread.page)
     open_reply(thread, "and plums?")
     thread.page.click("#rd-popover button[data-f=tell]")
+    until(lambda: replies(thread.site.file) == ["and plums?"], what="the reply in the file")
     thread.page.wait_for_selector("#rd-popover .rd-pending-tell")
-    assert replies(thread.site.file) == ["and plums?"]
     assert [(b["op"], b["tell"], "ask" in b) for b in sent] == [("reply", True, False)]
 
 
@@ -4035,6 +4037,9 @@ def test_a_tell_or_cancel_the_hub_cannot_be_reached_for_says_that_it_did_not_go_
         route.abort()
     if what == "cancel-tell":
         thread.page.click("#rd-popover .rd-form button.rd-tell")
+        # The thread was made with Tell, so its Cancel is on the page already (ticket 17): the reply's own answer says
+        # "Sent to…" in the toast, and would take the place of this one if it came after the refusal.
+        toasted(p, "Sent to your")
         p.wait_for_selector("#rd-popover button[data-a=cancel-tell]")
         route = "**/_/cancel"
         p.route(route, refuse)
@@ -4218,7 +4223,8 @@ def answer_after_event(tab):
     go.set()
 
 
-def test_a_reply_the_hub_took_and_told_of_before_the_page_gave_up_goes_from_the_page_when_it_gives_up(thread, answer_after_event):
+@pytest.mark.parametrize("hello", [False, True], ids=["as it comes", "a stream that says hello while the send is out"])
+def test_a_reply_the_hub_took_and_told_of_before_the_page_gave_up_goes_from_the_page_when_it_gives_up(thread, answer_after_event, hello):
     p = thread.page
     reload_on_clock(p)
     p.click(".rd-badge")
@@ -4227,8 +4233,15 @@ def test_a_reply_the_hub_took_and_told_of_before_the_page_gave_up_goes_from_the_
     p.keyboard.press("Control+Enter")
     until(lambda: SLOW in thread.site.file.read_text(), what="the hub's write")
     until(lambda: SLOW not in comment_store(thread), what="the page to hear the event of the write")
+    if hello:
+        # On a loaded runner the stream's first hello reaches the page while the send is out (ticket 20). The page then
+        # checks the document when the send ends, and holds the event of the write until that answer or CHECK_WAIT;
+        # the answer waits for the lock the hub holds until the release below.
+        thread.site.hub.entry(DOC).live._publish("hello", {})
+        p.wait_for_timeout(300)
     p.clock.fast_forward(30_500)
     toasted(p, TAKEN)
+    p.clock.fast_forward(10_500)      # the page's own end of that wait (CHECK_WAIT), on the clock the test drives
     until(lambda: not typed(p), what="the form to go")
     try:
         until(lambda: p.inner_text("#rd-popover").count(SLOW) == 1, what="the reply in its thread")

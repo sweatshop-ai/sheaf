@@ -5,7 +5,7 @@ import time
 import pytest
 
 from helpers import browser_on, call
-from pagehelp import DOC, toasted, until
+from pagehelp import DOC, toast, toasted, until
 from sheafmd import comments as rdc
 from sheafmd.hub.state import Tokens
 from sheafmd.source import update_file
@@ -213,7 +213,10 @@ def test_the_timer_of_an_earlier_cancel_does_not_take_the_places_of_a_later_canc
     site.hub.waiting_tells._emit = emit
     for a, k in held:
         emit(*a, **k)
-    toasted(tab.page, f"{name} had already seen it; look at the document before you Tell again.")
+    try:
+        toasted(tab.page, f"{name} had already seen it; look at the document before you Tell again.")
+    except AssertionError as e:
+        raise AssertionError(f"{e}; toast={toast(tab.page)!r} held={[x[0][1:3] for x in held]!r} lines={line(tab)!r}") from None
 
 
 def test_a_snapshot_that_is_not_the_answer_to_a_send_does_not_keep_a_seen_line(tab, site):

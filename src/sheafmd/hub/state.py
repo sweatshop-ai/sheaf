@@ -41,12 +41,27 @@ _PINS = "pins"                  # in each versions folder: the versions pages ke
 INSIDE = Path(".sheaf") / "versions"    # a root's own versions store, inside it (7.4)
 
 
-def write_text_private(path: Path, text: str):
+def inside_dir(path: Path) -> Path:
+    """A folder of a root's own versions store (7.4), made when missing and returned. It is made as the
+    umask gives a new folder (`mkdir 0777`), so a setgid parent passes its group on, and an existing one is
+    never chmodded: the root's modes are the root's (a clone shared with a group), not the hub's to reset.
+    A link, or a folder of someone else, is refused as `paths.private_dir` refuses it."""
+    try:
+        os.mkdir(path, 0o777)
+    except FileExistsError:
+        pass
+    st = os.lstat(path)
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
+        raise paths.PathError(f"{path} is not a folder of yours; sheaf will not use it")
+    return path
+
+
+def write_text_private(path: Path, text: str, inside: bool = False):
     """Write `text` to `path`: complete or not at all, 0600. The hidden sibling is made new: whatever
     stands at its name (a link planted in a root's versions store, 7.4) goes first, never written
-    through."""
+    through. `inside`: the file is one of a root's versions store, whose folder keeps the modes it has."""
     path = Path(path)
-    paths.private_dir(path.parent)
+    (inside_dir if inside else paths.private_dir)(path.parent)
     tmp = path.with_name("." + path.name + ".tmp")
     try:
         os.unlink(tmp)
@@ -167,15 +182,18 @@ class Versions:
     def _make_folder(self, address: str) -> Path:
         """`_folder`, made when it is not there yet, with its `address` file."""
         if self._root is not None:
-            paths.private_dir(self._root / INSIDE.parent)   # `.sheaf` itself: never a link out of the root
-        folder = paths.private_dir(paths.private_dir(self.dir) / doc_key(self._key(address)))
+            inside_dir(self._root / INSIDE.parent)   # `.sheaf` itself: never a link out of the root
+        folder = self._dir(self._dir(self.dir) / doc_key(self._key(address)))
         named = folder / _ADDRESS_FILE
         if read_small(named) != self._key(address):     # a link, or a text planted there, is written over
-            write_text_private(named, self._key(address))
+            write_text_private(named, self._key(address), self._root is not None)
         return folder
 
-    @staticmethod
-    def _keep(folder: Path, text: str, newest: int) -> str:
+    def _dir(self, path: Path) -> Path:
+        """`path` as a folder of this store: private (0700) in the state folder, as it is in a root."""
+        return paths.private_dir(path) if self._root is None else inside_dir(path)
+
+    def _keep(self, folder: Path, text: str, newest: int) -> str:
         """Write `text` under its hash in `folder` (or count it as written now), and keep the
         `newest` files there. Only a file named by a hash counts or is deleted here: anything else
         is not a version (`get` would not believe it) and takes no slot."""
@@ -184,7 +202,7 @@ class Versions:
         if f.is_file():
             os.utime(f, follow_symlinks=False)
         else:
-            write_text_private(f, text)
+            write_text_private(f, text, self._root is not None)
         files = []
         for p in folder.glob("*.md"):
             if _HASH_RE.fullmatch(p.stem) and p.is_file():
@@ -205,7 +223,7 @@ class Versions:
     def pin(self, address: str, text: str) -> str:
         """Keep `text` as a version a page keeps, apart from the newest 60, which writes from
         outside push out."""
-        return self._keep(paths.private_dir(self._make_folder(address) / _PINS), text, PINS_KEPT)
+        return self._keep(self._dir(self._make_folder(address) / _PINS), text, PINS_KEPT)
 
     def get(self, address: str, h) -> str | None:
         """The text with hash `h`, among the newest or the pinned, or None. `h` comes from a

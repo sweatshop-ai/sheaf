@@ -56,14 +56,21 @@ L'agent sait quand un texte est fait pour être copié. Il l'écrit dans un bloc
 | 09 | Menu ⋯ Edit : les changements d'un formulaire d'édition modifié sont perdus | 04 | À faire |
 | 10 | Le test d'Échap échoue de temps en temps en CI : trouver la cause | 04 | En cours (PR #241) |
 | 11 | fillPopover ramène le curseur dans le premier formulaire | 04 | À faire |
-| 12 | Revue Codex de la fusion cdb0e24 (après le 2026-11-11 08:36) | Rien | À faire |
+| 12 | Revue Codex de la fusion cdb0e24 | Rien | Fait : 3 trouvailles P2 → tickets 14 à 16 |
 | 13 | Bloc à copier : une ligne qui ouvre un bloc HTML avant `---` rend le bloc en citation simple | 05 | À faire |
-| 17 | Le test du toast d'annulation d'un Tell échoue de temps en temps en CI | 04 | À faire |
-| 18 | La ligne « vu » d'un Tell en attente n'arrive pas, de temps en temps, en CI | 04 | À faire |
-| 19 | Le test « envoyer et Tell » lit le fichier avant d'y trouver la réponse, de temps en temps en CI | 04 | À faire |
-| 20 | La réponse que le hub a prise n'apparaît pas dans la boîte quand la page abandonne l'envoi, de temps en temps en CI | 04 | À faire |
+| 14 | Un brouillon réduit dont on vide le champ reste dans le stockage | 04 | À faire |
+| 15 | La liste « not sent » est calculée avant que la boîte ouverte y mette son texte | 04 | À faire |
+| 16 | Un fil en lecture seule n'a pas de bouton Fermer | 04 | À faire |
+| 17 | Le test du toast d'annulation d'un Tell échoue de temps en temps en CI | 04 | Fait |
+| 18 | La ligne « vu » d'un Tell en attente n'arrive pas, de temps en temps, en CI | 04 | Fait |
+| 19 | Le test « envoyer et Tell » lit le fichier avant d'y trouver la réponse, de temps en temps en CI | 04 | Fait |
+| 20 | La réponse que le hub a prise n'apparaît pas dans la boîte quand la page abandonne l'envoi, de temps en temps en CI | 04 | Fait |
+| 21 | draftsReplace lit une lecture refusée comme vide | 04 | À faire |
 
 ## Ce qui reste ouvert
 
 - **Transcription sur un hub local :** sans Open WebUI, il faudra décider d'où elle vient. La question se posera au ticket 06.
 - **Arrivée sur tiroir-tt :** elle passe par une montée de version du hub, faite par le track action-list après la fusion du ticket 04.
+| 22 | La page peut afficher une réponse déjà reçue jusqu'à 10 s en retard derrière une longue écriture | 04 | À faire |
+| 23 | Les événements « vu » et « annulé » d'un Tell ne nomment pas l'agent : un fil qui attend deux agents les confond | 04 | À faire |
+| 24 | Le test du « moins » lit la valeur d'un champ que la boîte vient de fermer, de temps en temps en CI | 04 | Fait |

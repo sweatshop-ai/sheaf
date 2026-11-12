@@ -463,6 +463,18 @@ def store_unreadable(p, blocked=True):
     }""", blocked)
 
 
+def store_unreadable_once(p):
+    """The next read of the comment store throws, the ones after it answer: a store that fails now and then."""
+    p.evaluate("""() => {
+      if (!window.__realGet) window.__realGet = Storage.prototype.getItem;
+      let armed = true;
+      Storage.prototype.getItem = function (k) {
+        if (armed && String(k).startsWith('sheaf-comment-draft')) { armed = false; throw new Error('once'); }
+        return window.__realGet.call(this, k);
+      };
+    }""")
+
+
 def two_threads(tab, site):
     update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "pears"), "pears", "Why pears?",
                                                      "Bea", "2026-10-14T10:01")[0])
@@ -800,3 +812,27 @@ def test_an_emptied_new_message_closes_when_the_store_that_kept_its_text_stops_b
     p.keyboard.press("Escape")
     until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close on an empty field")
 
+
+
+def test_a_read_of_the_store_that_fails_once_does_not_empty_the_drafts_of_the_page_at_the_next_write(tab, site):
+    import json
+    p = open_thread(tab, site)
+    kept = [{"quote": "pears", "body": "a draft of another passage", "at": "2026-10-14T11:00:00.000Z"}]
+    p.evaluate("([k, v]) => localStorage.setItem(k, v)", [comment_draft_key(site), json.dumps(kept)])
+    p.fill(FIELD, "words I must not lose")
+    store_unreadable_once(p)
+    p.mouse.click(5, 700)
+    until(lambda: "could not be kept" in toast(p), what="the toast that says the text could not be kept")
+    held = p.evaluate("(k) => localStorage.getItem(k)", comment_draft_key(site))
+    assert held and "a draft of another passage" in held, "the read that failed once emptied the drafts of the page"
+
+
+def test_a_value_that_is_not_json_in_the_store_is_set_aside_before_the_next_write_replaces_it(tab, site):
+    p = open_thread(tab, site)
+    p.evaluate("([k, v]) => localStorage.setItem(k, v)", [comment_draft_key(site), "[{broken"])
+    p.fill(FIELD, "words I must not lose")
+    p.mouse.click(5, 700)
+    until(lambda: "words I must not lose" in (p.evaluate("(k) => localStorage.getItem(k)", comment_draft_key(site)) or ""),
+          what="the text kept in the store")
+    aside = p.evaluate("(k) => localStorage.getItem(k)", comment_draft_key(site) + ":unreadable")
+    assert aside == "[{broken", "the value that could not be read was replaced and is kept nowhere"

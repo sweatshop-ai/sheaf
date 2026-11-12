@@ -4702,3 +4702,42 @@ def test_typing_while_a_save_has_no_answer_is_said_once_and_the_block_shows_it_i
     toasted(p, "Nothing changed")                                                   # the mark left no class="" to save
     p.keyboard.type("!")
     assert p.evaluate("document.activeElement.textContent").endswith("typed!")
+
+
+def test_the_mark_lands_on_the_block_typed_in_and_clears_with_the_save(tab):
+    p = tab.page
+    tab.open()
+    held = []
+    p.route("**/_/save", lambda r: held.append(r))
+    type_at_end(p, P1, " typed")
+    p.keyboard.press("Control+s")
+    until(lambda: held or p.wait_for_timeout(20), what="the save, held")
+    p.click(P2)                                              # moving to another block is not typing: not refused
+    p.keyboard.press("End")
+    p.keyboard.type("lost")
+    toasted(p, "Saving")
+    marked = lambda: p.evaluate("[...document.querySelectorAll('.rd-saving')].map(e => e.textContent)")
+    assert len(marked()) == 1 and marked()[0].startswith("Second paragraph")      # the one typed in, not the first
+    held[0].continue_()
+    p.unroute("**/_/save")
+    until(lambda: not marked(), what="the mark to go")
+    assert p.evaluate("document.querySelectorAll('main [class=\"\"]').length") == 0
+
+
+def test_typing_while_a_change_from_outside_settles_is_refused_and_said(tab):
+    """The settle's own save is out while the page reloads onto the change: a key typed then is refused, and said."""
+    f = tab.site.file
+    p = tab.page
+    p.clock.install()
+    tab.open()
+    held = []
+    p.route("**/_/save", lambda r: held.append(r))
+    type_at_end(p, P1, " typed")
+    f.write_text(f.read_text(encoding="utf-8") + "\nFrom outside.\n", encoding="utf-8")
+    until(lambda: held or p.wait_for_timeout(20), what="the settle's save, held")
+    p.keyboard.type("lost")
+    toasted(p, "Saving")
+    assert p.evaluate("document.querySelectorAll('.rd-saving').length") == 1
+    held[0].continue_()
+    p.unroute("**/_/save")
+    reloaded(p)

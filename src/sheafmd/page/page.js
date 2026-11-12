@@ -1708,6 +1708,7 @@ var create = function (ROOT, CFG, opts) {
   // A list found empty (the store emptied without a word to this page) takes the line away instead.
   function showUnsent() {
     if (writingFirst()) return;
+    if (!closePopover()) return;       // an open box puts its text aside first, so the list is read with it
     var ds = sendsKept();
     if (ds.length) keptForms('data-unsent', ds, keptSend, keptSendButtons); else unsentLine();
   }
@@ -1876,8 +1877,8 @@ var create = function (ROOT, CFG, opts) {
       (!canSave ? '' : (more ? '<details class="rd-more"><summary aria-label="More" title="More">\u22EF</summary><div>' +
         (open ? '' : '<button data-a="status">Reopen</button>') +
         (mine(c) ? '<button data-a="edit">Edit</button><button data-a="delete">Delete</button>' : '') + '</div></details>' : '') +
-        (open ? '<button data-a="status" title="Resolve" aria-label="Resolve">\u2212</button>' : '') +
-        '<button data-a="minimize" title="Close" aria-label="Close">\u00D7</button>') + '</div>';
+        (open ? '<button data-a="status" title="Resolve" aria-label="Resolve">\u2212</button>' : '')) +
+      '<button data-a="minimize" title="Close" aria-label="Close">\u00D7</button></div>';   // closing needs no right to write
   }
   function thread(c) {
     var h = '<div class="rd-msg' + (mine(c) ? ' rd-mine' : '') + '">' + whoHtml({ by: c.by, role: null }) + '<span class="rd-when">' +
@@ -2126,7 +2127,9 @@ var create = function (ROOT, CFG, opts) {
       };
       if (head) head.addEventListener('click', act);
       acts.addEventListener('click', act);
-    }
+    } else if (head) head.addEventListener('click', function (e) {      // Close is all a page that cannot save offers
+      if (e.target.closest && e.target.closest('button[data-a=minimize]')) closePopover();
+    });
     forms.forEach(function (x) { pop.appendChild(x); });
     if (writing) {        // moved in the page, the field lost the cursor: it goes back to the form that had it
       var wt = writing.querySelector('textarea');
@@ -2808,7 +2811,10 @@ var create = function (ROOT, CFG, opts) {
     var wrote = [];                       // the request ids of this form's sends (each text has its own): their entries are its own
     // This form's entries: the one it took into itself and those its own sends wrote, and no other: the same
     // quote in another paragraph is another comment.
-    var own = function (x) { return (d && x.quote === d.quote && x.at === d.at) || wrote.indexOf(x.rid) >= 0; };
+    var kept = null;       // the draft this form's stash last wrote (a close can stash and then stay open): its quote and stamp
+    var own = function (x) {
+      return (d && x.quote === d.quote && x.at === d.at) || (kept && x.quote === kept.quote && x.at === kept.at) || wrote.indexOf(x.rid) >= 0;
+    };
     var mine = function (r) { return r.own === null && r.host === host; };    // this form's entry of `out`
     textForm(pop, d || '', sendButtons('Comment'),
              async function (text, k, rid) {
@@ -2870,9 +2876,14 @@ var create = function (ROOT, CFG, opts) {
     if (field) {
       // Closed before it is sent, it is kept quietly for this passage: not in the notice of refused comments.
       field.stash = function () {
-        if (!box.value.trim()) return true;
         storeOk = true;
-        draftsReplace(own, { quote: t.quote, body: box.value, block: t.block, head: t.head, tail: t.tail, occ: t.occ, min: true });
+        if (!box.value.trim()) {      // emptied: a draft kept before goes too; nothing kept, nothing to write
+          if (d || kept || wrote.length) draftsReplace(own);        // known from this form, not read back from a store that may refuse
+          return storeOk;
+        }
+        var at = (kept || d || {}).at || new Date().toISOString();       // one stamp for the form's draft, so the next stash finds it
+        draftsReplace(own, { quote: t.quote, body: box.value, block: t.block, head: t.head, tail: t.tail, occ: t.occ, min: true, at: at });
+        if (storeOk) kept = { quote: t.quote, at: at };
         return storeOk;
       };
       // The cursor is in the field, not on the passage: with nothing typed, Ctrl+C still copies the passage.

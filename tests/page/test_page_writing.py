@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from helpers import comment, writes_from_outside
-from pagehelp import (DOC, P1, P2, T0, at, comment_draft_key, comment_on, gone, key, mark, open_box, open_form, typed, reload_on_clock, reloaded,
+from pagehelp import (DOC, P1, draft_key, P2, T0, at, comment_draft_key, comment_on, gone, key, mark, open_box, open_form, typed, reload_on_clock, reloaded,
                       select, select_by_touch, toast, toasted, type_at_end, until)
 from sheafmd import comments as rdc
 from sheafmd.hub import live as hub_live
@@ -4697,5 +4697,6 @@ def test_typing_while_a_save_has_no_answer_is_said_once_and_the_block_shows_it_i
     p.unroute("**/_/save")
     until(lambda: "typed" in f.read_text(encoding="utf-8"), what="the save to reach the file")
     until(lambda: not p.evaluate("document.querySelector('.rd-saving')"), what="the mark to go")
+    assert p.evaluate(f"localStorage.getItem({draft_key(tab.site)!r})") is None      # the mark is not an edit
     p.keyboard.type("!")
     assert p.evaluate("document.activeElement.textContent").endswith("typed!")

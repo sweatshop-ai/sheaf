@@ -7,7 +7,7 @@
 
 **Claimed by:** Isolde 2026-11-12 10:01
 
-**Status:** in-progress
+**Status:** done — fix 047a057, on main via 7dae7b2 (PR 241)
 
 **Ce qui ne va pas :** le test d'Échap. Ses assertions sont saines et la review n'a trouvé aucun bug de produit qui perde des données : Échap seul ne peut ni quitter la boîte ni la redessiner. Le commit `54abdda` n'a ajouté que des diagnostics : à l'échec, le test imprime ce que la page contenait (la boîte et ses formulaires, quand `#rd-popover` a été retiré ou ajouté, le stockage). Un `POPOVER_STATE` sans clé `log` veut dire que la page s'est rechargée. À lire à la prochaine occurrence, avant toute hypothèse.
 
@@ -26,6 +26,6 @@
 
 **Le test du toast d'annulation (`cancel-tell`).** Même famille d'échec en CI mais pas la même cause : il n'appelle pas `fail_a_reply`, et l'attente du toast a expiré sans qu'on sache si la requête est partie. Il ne se reproduit pas en local (12 passages). Le test relève maintenant le nombre de requêtes refusées et les toasts vus ; la suite est le ticket 17.
 
-- [ ] CI verte sur trois passages de suite
+- [x] CI verte sur trois passages de suite (runs push 43281135217 sur 3b7a6cc, 43315608007 sur 05a995b, 43316392163 sur 4571a64 : 3/3 tranches vertes chacun ; le test d'Échap `test_escape_is_minimize` et les `[reply-Escape]`/`[edit-Escape]` de `test_a_reply_or_edit_whose_send_fails_after_escape...` y passent, lus dans les logs des tranches)
 
 **CI après la fusion de #241 (2026-11-12).** Fusion `7dae7b2` : le run push 43103207367 est vert. Le run planifié 43180594189 sur le même sha échoue sur py3.11 (py3.13 et py3.14 verts), deux tests de page : `test_the_minus_resolves_an_open_thread_and_stays_while_writing` (`test_page_chat_box.py`, pas encore tracé) et `test_send_and_tell_starts_one_tell_and_the_thread_waits_for_its_reply` (`test_page_writing.py:2198`, `[] == ['and plums?']`, la famille des tickets 17 à 20). Ni l'un ni l'autre n'est le test d'Échap de ce ticket : `test_escape_is_minimize` et `test_a_reply_or_edit_whose_send_fails_after_escape_or_a_click_outside_comes_back_with_its_text[reply-Escape]` passent dans ce même run. La dernière case reste ouverte : un seul run push vert contient le correctif, le run planifié du même sha est rouge, et trois passages de suite ne sont pas atteints.

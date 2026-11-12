@@ -1456,6 +1456,10 @@ def test_without_a_form_the_settle_saves_and_reloads_without_a_question(frozen):
 @pytest.mark.parametrize("tick", [True, False])
 def test_what_is_saved_while_the_reload_waits_for_a_reply_is_merged_onto_the_change_from_outside(frozen, start, tick):
     p, f = frozen.page, frozen.site.file
+    out = {"n": 0}                          # saves sent and not yet answered
+    p.on("request", lambda r: out.update(n=out["n"] + 1) if r.method == "POST" and r.url.endswith("/_/save") else None)
+    p.on("requestfinished", lambda r: out.update(n=out["n"] - 1) if r.method == "POST" and r.url.endswith("/_/save") else None)
+    p.on("requestfailed", lambda r: out.update(n=out["n"] - 1) if r.method == "POST" and r.url.endswith("/_/save") else None)
     mark(p)
     f.write_text(f.read_text() + "\n- [ ] first task\n- [ ] second task\n", encoding="utf-8")
     reloaded(p)
@@ -1485,6 +1489,7 @@ def test_what_is_saved_while_the_reload_waits_for_a_reply_is_merged_onto_the_cha
     p.unroute("**/_/save")
     p.wait_for_selector("#rd-popover .rd-hold")
     until(lambda: p.text_content("#rd-state") == "Editing", what="the page to take in the last save")
+    until(lambda: out["n"] == 0 or p.wait_for_timeout(20), what="every save to be answered")    # the page takes no key while a save is out
     p.focus("main p:nth-of-type(4)")
     p.keyboard.press(key("Control+End"))
     p.keyboard.type(" and kiwis")

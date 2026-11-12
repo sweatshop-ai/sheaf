@@ -1,7 +1,7 @@
 """The popover of a comment is a chat box: narrow, its messages in bubbles, a field to write in under them."""
 import pytest
 
-from pagehelp import DOC, P1, at, box, comment_draft_key, mark, open_box, pasted, reloaded, select, toast, until
+from pagehelp import DOC, P1, P2, at, box, comment_draft_key, mark, open_box, pasted, reloaded, select, toast, until
 from sheafmd import comments as rdc
 from sheafmd.hub.state import Tokens
 from sheafmd.source import update_file
@@ -112,7 +112,9 @@ def test_the_minus_resolves_an_open_thread_and_stays_while_writing(tab, site):
     assert p.is_visible("#rd-popover button[title=Resolve]")
     p.click("#rd-popover button[title=Resolve]")
     until(lambda: rdc.parse(site.file.read_text(encoding="utf-8")).comments[0].status == "resolved", what="the thread resolved")
-    until(lambda: not p.is_visible("#rd-popover textarea") or p.input_value("#rd-popover textarea") == "", what="the box to close")
+    # One evaluate, not is_visible then input_value: the box can close between the two, and input_value then waits for a
+    # field that is gone until the stall guard fires (ticket 24).
+    until(lambda: p.evaluate("() => { var t = document.querySelector('#rd-popover textarea'); return !t || t.offsetParent === null || t.value === ''; }"), what="the box to close")
     until(lambda: p.locator("#rd-unsent").count() == 1, what="the text kept in the unsent list")
 
 
@@ -594,3 +596,104 @@ def test_the_enter_that_confirms_an_ime_composition_sends_nothing(tab, site, ini
     p.wait_for_timeout(500)
     assert p.input_value(FIELD) == "konnichiwa"
     assert len(rdc.parse(site.file.read_text(encoding="utf-8")).comments[0].replies) == 0, "the confirming Enter sent the message"
+
+
+def test_a_thread_on_a_page_that_cannot_save_keeps_the_cross_and_no_write_control(tab, site, context, tmp_path):
+    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
+                                                     "Bea", "2026-10-14T10:00")[0])
+    # The same page opened from a file: no hub to save to, so every write control is off.
+    saved = tmp_path / "page.html"
+    saved.write_text(context.request.get(site.url).text(), encoding="utf-8")
+    p = context.new_page()
+    p.goto(saved.as_uri())
+    p.click(".rd-badge")
+    p.wait_for_selector("#rd-popover")
+    assert p.locator("#rd-popover .rd-head button[data-a=minimize]").count() == 1, "no Close on a thread that cannot save"
+    for gone in ("status", "edit", "delete"):
+        assert p.locator(f"#rd-popover [data-a={gone}]").count() == 0, gone
+    p.click("#rd-popover button[data-a=minimize]")
+    assert p.locator("#rd-popover").count() == 0
+    p.click(".rd-badge")
+    p.wait_for_selector("#rd-popover")
+    p.keyboard.press("Escape")
+    assert p.locator("#rd-popover").count() == 0, "Escape does not close it"
+    p.click(".rd-badge")
+    p.wait_for_selector("#rd-popover")
+    p.mouse.click(5, 5)
+    assert p.locator("#rd-popover").count() == 0, "a click beside the box does not close it"
+
+
+def test_a_minimized_message_whose_field_is_emptied_is_gone_from_the_store_when_the_box_closes(tab, site):
+    tab.open()
+    p = tab.page
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    p.fill(FIELD, "Why apples?")
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-unsent").count() == 1, what="the not-sent line")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    p.wait_for_selector(FIELD)
+    until(lambda: p.input_value(FIELD) == "Why apples?", what="the kept text back in the box")
+    p.fill(FIELD, "")
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-unsent").count() == 0, what="the not-sent line gone")
+    assert "Why apples?" not in (p.evaluate("JSON.stringify(Object.values(localStorage))")), "the emptied draft stayed in the store"
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    p.wait_for_selector(FIELD)
+    assert p.input_value(FIELD) == "", "the erased text came back"
+
+
+def test_closing_an_empty_new_message_that_was_never_kept_changes_nothing(tab, site):
+    tab.open()
+    p = tab.page
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    p.wait_for_selector(FIELD)
+    p.keyboard.press("Escape")
+    assert p.locator("#rd-popover").count() == 0
+    assert p.locator("#rd-unsent").count() == 0
+
+
+def test_the_not_sent_list_opened_beside_an_open_box_holds_the_typed_text_as_the_count_does(tab, site):
+    tab.open()
+    p = tab.page
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    p.fill(FIELD, "Why apples?")
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-unsent").count() == 1, what="the not-sent line")
+    select(p, at(P2, "pears"), at(P2, "pears", None))
+    p.fill(FIELD, "And pears?")
+    p.click("#rd-unsent")
+    until(lambda: p.locator("#rd-popover[data-unsent]").count() == 1, what="the list")
+    until(lambda: p.inner_text("#rd-unsent") == "2 messages not sent · Show", what="the count")
+    assert p.locator("#rd-popover[data-unsent] .rd-form").count() == 2, "the list does not match the count"
+    assert "pears" in p.inner_text("#rd-popover[data-unsent]")
+
+
+def test_the_not_sent_list_without_an_open_box_lists_what_was_kept(tab, site):
+    tab.open()
+    p = tab.page
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    p.fill(FIELD, "Why apples?")
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-unsent").count() == 1, what="the not-sent line")
+    p.click("#rd-unsent")
+    until(lambda: p.locator("#rd-popover[data-unsent] .rd-form").count() == 1, what="the list")
+
+
+def stored_drafts(page):
+    return page.evaluate("Object.values(localStorage).map(v => { try { return JSON.parse(v); } catch (e) { return null; } }).flat().filter(x => x && x.min)")
+
+
+def test_a_message_kept_by_a_close_that_was_then_aborted_is_removed_when_its_field_is_emptied(tab, site):
+    tab.open()
+    p = tab.page
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    p.fill(FIELD, "first words")
+    # What closePopover does to every form before it closes; another form's refusal would leave this box open.
+    p.evaluate("document.querySelector('#rd-popover .rd-form').stash()")
+    p.fill(FIELD, "first words, more")
+    p.evaluate("document.querySelector('#rd-popover .rd-form').stash()")
+    assert [d["body"] for d in stored_drafts(p)] == ["first words, more"], "a second stash of the same form made a second draft"
+    p.fill(FIELD, "")
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-unsent").count() == 0, what="the not-sent line gone")
+    assert stored_drafts(p) == [], "the emptied draft stayed in the store"

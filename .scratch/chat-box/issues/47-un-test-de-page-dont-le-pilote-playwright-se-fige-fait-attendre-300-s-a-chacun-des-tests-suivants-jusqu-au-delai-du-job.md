@@ -21,6 +21,7 @@
 - [ ] Un test de `tests/` pose le cas à la main (un faux pilote qui bloque) et échoue sans le crochet
 - [ ] Le test qui s'est figé la première fois est nommé dans le journal sans qu'on ait à lire 7 800 lignes
 
-**Claimed by:** —
 
-**Status:** ready
+**Claimed by:** Elif 2026-11-12 21:27
+
+**Status:** in-progress

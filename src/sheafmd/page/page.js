@@ -2881,7 +2881,7 @@ var create = function (ROOT, CFG, opts) {
         storeOk = true;
         if (!box.value.trim()) {      // emptied: a draft kept before goes too; nothing kept, nothing to write
           if (d || kept || wrote.length) draftsReplace(own);        // known from this form, not read back from a store that may refuse
-          return storeOk;
+          return true;      // an empty field has no text to lose: a clear the store refused does not hold the box open
         }
         var at = (kept || d || {}).at || new Date().toISOString();       // one stamp for the form's draft, so the next stash finds it
         draftsReplace(own, { quote: t.quote, body: box.value, block: t.block, head: t.head, tail: t.tail, occ: t.occ, min: true, at: at });

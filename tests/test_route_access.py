@@ -27,8 +27,9 @@ def all_routes(handler):
 
 
 def test_only_the_door_accepts_a_token_and_reads_its_own_body(browser):
+    # raw_body is read on a POST only (_route); GET /_/transcribe carries it just to stay unequal to COOKIE (9.9)
     door_routes = [(m, p) for m, p, _, who in all_routes(browser.handler)
-                   if who is not OPEN and (who.token or who.raw_body)]
+                   if who is not OPEN and (who.token or (who.raw_body and m == "POST"))]
     assert door_routes == [("POST", "/_/mcp")]
     who = browser.handler.routes["/_/mcp"]["POST"][1]
     assert who is DOOR and who.token and who.raw_body

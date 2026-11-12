@@ -112,6 +112,12 @@
 #rd-popover .rd-send svg{width:20px;height:20px}
 #rd-popover .rd-form .rd-actions button.rd-x{width:30px;height:30px;padding:0;border-radius:50%;font-size:0;box-shadow:none;opacity:.6}
 #rd-popover .rd-form .rd-actions button.rd-x::before{content:"\00D7";font:400 20px/30px system-ui,sans-serif}
+/* The microphone: a round button beside the arrow; red while it records. Its line (a refusal, a failure) sits under the field. */
+#rd-popover .rd-form .rd-actions button.rd-mic{order:8;margin-left:auto;display:flex;align-items:center;justify-content:center;width:30px;height:30px;padding:0;border-radius:50%;font-size:0;background:transparent;color:var(--fg,#000);box-shadow:none;opacity:.7}
+#rd-popover .rd-form .rd-actions button.rd-mic+.rd-send{margin-left:0}
+#rd-popover .rd-mic svg{width:18px;height:18px}
+#rd-popover .rd-form .rd-actions button.rd-mic[aria-pressed="true"]{background:#c62828;color:#fff;opacity:1}
+#rd-popover .rd-mic-says{font:12px/1.4 ui-monospace,monospace;opacity:.8;margin:0 0 6px}
 /* The band of the box: the passage on the left, the little that is not talking to the agent on the right. */
 #rd-popover .rd-head{flex:0 0 auto;display:flex;align-items:center;gap:2px;margin-bottom:8px}
 #rd-popover .rd-head .rd-quote{flex:1 1 auto;min-width:0;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

@@ -226,19 +226,26 @@ def test_a_key_file_that_fails_after_it_is_open_is_not_used_said_once_and_closed
 def test_a_key_file_whose_close_fails_when_it_is_refused_is_closed_once_and_said_once(browser, tcompute, key_file, monkeypatch):
     key_file.chmod(0o644)                                    # refused after the fstat, on the branch that closes the descriptor itself
     browser.hub.transcribe = transcribe.Relay(transcribe.parse(table(tcompute, key_file), "the test"), record=browser.hub.record)
-    opened = []
+    opened, closed = [], []
     real_open, real_close = os.open, os.close
-    monkeypatch.setattr(os, "open", lambda *a, **k: opened.append(real_open(*a, **k)) or opened[-1])
-    closed = []
+
+    def open_(path, *a, **k):
+        fd = real_open(path, *a, **k)
+        if str(path) == str(key_file):                       # the diagnostics log opens and closes files through the same calls
+            opened.append(fd)
+        return fd
 
     def close(fd):
-        closed.append(fd)
+        mine = bool(opened) and fd == opened[0] and fd not in closed
+        if mine:
+            closed.append(fd)
         real_close(fd)
-        if fd in opened:
+        if mine:
             raise OSError(5, "Input/output error")           # a FUSE that fails at the flush; the descriptor is gone all the same
+    monkeypatch.setattr(os, "open", open_)
     monkeypatch.setattr(os, "close", close)
     assert available(browser) is False and tcompute.seen == []
-    assert [fd for fd in closed if fd in opened] == opened   # once: a second close could take another thread's descriptor
+    assert len(opened) == 1 and closed == opened             # once: a second close could take another thread's descriptor
     assert len([r for r in diagnostics.read() if r["kind"] == "transcribe-key-file"]) == 1
 
 

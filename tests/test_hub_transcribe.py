@@ -179,6 +179,46 @@ def test_a_key_file_that_is_not_a_plain_file_is_not_used_and_said_once(browser, 
     assert len([r for r in diagnostics.read() if r["kind"] == "transcribe-key-file"]) == 1
 
 
+@pytest.mark.parametrize("failing", ["fstat", "read"])
+def test_a_key_file_that_fails_after_it_is_open_is_not_used_said_once_and_closed(browser, tcompute, key_file, monkeypatch, failing):
+    browser.hub.transcribe = transcribe.Relay(transcribe.parse(table(tcompute, key_file), "the test"), record=browser.hub.record)
+    opened = []
+    real_open, real_close = os.open, os.close
+    monkeypatch.setattr(os, "open", lambda *a, **k: opened.append(real_open(*a, **k)) or opened[-1])
+    closed = []
+    monkeypatch.setattr(os, "close", lambda fd: closed.append(fd) or real_close(fd))
+    if failing == "fstat":
+        def fstat(fd):
+            raise OSError(5, "Input/output error")
+        monkeypatch.setattr(os, "fstat", fstat)
+    else:
+        real_fdopen = os.fdopen
+
+        class Unreadable:
+            def __init__(self, fd, *a, **k):
+                self.f = real_fdopen(fd, *a, **k)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                self.f.close()
+
+            def read(self):
+                raise OSError(5, "Input/output error")
+
+        def fdopen(fd, *a, **k):
+            return Unreadable(fd, *a, **k)
+        monkeypatch.setattr(os, "fdopen", fdopen)
+    assert available(browser) is False and tcompute.seen == []
+    assert len([r for r in diagnostics.read() if r["kind"] == "transcribe-key-file"]) == 1
+    if failing == "fstat":
+        assert closed == opened
+    else:
+        with pytest.raises(OSError):
+            os.fstat(opened[0])                              # the one descriptor was closed, once
+
+
 def test_a_redirect_is_not_followed_and_the_key_goes_nowhere_else(browser, relay, tcompute):
     tcompute.redirect = True
     assert available(browser) is False

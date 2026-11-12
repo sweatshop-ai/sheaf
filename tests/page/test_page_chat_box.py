@@ -156,6 +156,56 @@ def test_a_long_thread_opens_on_its_last_message_and_scrolls_up(tab, site):
     assert full > room and top >= full - room - 4, (top, room, full)
 
 
+def long_thread(tab, site):
+    """A comment of Bea's with 200 paragraphs, its thread open on the last of them."""
+    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "\n\n".join(["Why?"] * 200),
+                                                     "Bea", "2026-10-14T10:00")[0])
+    tab.open()
+    tab.page.click(".rd-badge")
+    tab.page.wait_for_selector(FIELD)
+    return tab.page
+
+
+def in_view(p, nth):
+    """Is the nth message of the thread inside the visible part of the thread?"""
+    return p.evaluate("""(n) => {
+      const s = document.querySelector('#rd-popover .rd-scroll').getBoundingClientRect();
+      const m = document.querySelectorAll('#rd-popover .rd-msg')[n].getBoundingClientRect();
+      return m.top >= s.top - 1 && m.bottom <= s.bottom + 1;
+    }""", nth)
+
+
+def test_after_a_send_the_thread_shows_the_message_just_sent(tab, site):
+    p = long_thread(tab, site)
+    p.fill(FIELD, "Because.")
+    p.keyboard.press("Enter")
+    until(lambda: p.locator(THREAD).count() == 2, what="the reply in the thread")
+    until(lambda: in_view(p, 1), what="the sent message in view")
+
+
+def test_after_a_send_of_a_text_of_several_lines_the_thread_shows_the_message_just_sent(tab, site):
+    p = long_thread(tab, site)
+    p.fill(FIELD, "\n".join(["a line of the answer"] * 12))
+    p.keyboard.press("Enter")
+    until(lambda: p.locator(THREAD).count() == 2, what="the reply in the thread")
+    until(lambda: in_view(p, 1), what="the sent message in view")
+
+
+def test_an_answer_that_arrives_while_the_thread_is_at_its_end_keeps_it_there(tab, site):
+    p = long_thread(tab, site)
+    update_file(site.file, lambda t: rdc.reply(t, "c1", "An answer", "Bea", "2026-10-14T11:00"))
+    until(lambda: "An answer" in p.inner_text(THREAD_BOX), what="the answer in the thread")
+    until(lambda: in_view(p, 1), what="the answer in view")
+
+
+def test_an_answer_does_not_pull_down_a_reader_of_older_messages(tab, site):
+    p = long_thread(tab, site)
+    p.evaluate("document.querySelector('#rd-popover .rd-scroll').scrollTop = 0")
+    update_file(site.file, lambda t: rdc.reply(t, "c1", "An answer", "Bea", "2026-10-14T11:00"))
+    until(lambda: "An answer" in p.inner_text(THREAD_BOX), what="the answer in the thread")
+    assert p.evaluate("document.querySelector('#rd-popover .rd-scroll').scrollTop") == 0, "the reader was pulled down"
+
+
 def test_minimize_closes_the_box_and_the_text_comes_back_even_after_a_reload(tab, site):
     p = open_thread(tab, site)
     p.fill(FIELD, "half a thought")

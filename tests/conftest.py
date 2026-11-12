@@ -15,6 +15,8 @@ import pytest
 
 import sheafmd
 
+pytest_plugins = ["driver_stall"]     # the first page test to time out in the Playwright driver ends the run
+
 # Before anything else imports sheafmd's parts: another checkout's venv resolves it to that checkout, and the run
 # would be about code that is not here. tests/test_import_guard.py says why this refuses.
 _OWN_SOURCE = Path(__file__).resolve().parents[1] / "src"

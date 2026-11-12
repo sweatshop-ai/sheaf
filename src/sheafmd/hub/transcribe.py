@@ -95,7 +95,7 @@ def _call(method, url, headers) -> tuple[int, bytes]:
 
 
 class Relay:
-    def __init__(self, cfg: Config, clock=time.time, record=lambda kind, **detail: None):
+    def __init__(self, cfg: Config, clock=time.monotonic, record=lambda kind, **detail: None):
         self.cfg, self.clock, self.record = cfg, clock, record
         self._state = threading.Lock()
         self._known: tuple[bool, float] | None = None        # (available, when it was found)
@@ -112,7 +112,7 @@ class Relay:
             if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o077:
                 if not self._refused:
                     self._refused = True
-                    self.record("transcribe-key-file", reason="the key file is not the owner's alone (mode 0600)")
+                    self.record("transcribe-key-file", reason="the key file is not a regular file of the hub's account with mode 0600")
                 return None
             for line in f.read().splitlines():
                 m = re.fullmatch(rf"\s*(?:export\s+)?{re.escape(self.cfg.key_name)}\s*=\s*(.*?)\s*", line)

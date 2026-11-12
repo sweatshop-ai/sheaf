@@ -311,7 +311,7 @@ var create = function (ROOT, CFG, opts) {
     });
   })();
 
-  // Edit mode itself writes contenteditable="true" and class="rd-locked" into the
+  // Edit mode itself writes contenteditable="true" and class="rd-locked" (and a refused key, rd-saving) into the
   // DOM. Those must be invisible to change detection, or merely ENTERING edit mode
   // marks every block dirty and the next save pushes the whole document through
   // pandoc - renumbering lists, reflowing tables, rewriting rules.
@@ -323,6 +323,8 @@ var create = function (ROOT, CFG, opts) {
             .replace(/\s*contenteditable="[^"]*"/g, '')
             .replace(/\s+class="rd-locked"/g, '')
             .replace(/(\s+class="[^"]*?)\s*\brd-locked\b/g, '$1')
+            .replace(/\s+class="rd-saving"/g, '')
+            .replace(/(\s+class="[^"]*?)\s*\brd-saving\b/g, '$1')
             .replace(/\s+title="Not editable here: [^"]*"/g, '')
             .replace(/<button\b[^>]*\brd-copybtn\b[^>]*>[\s\S]*?<\/button>/g, '');
   }

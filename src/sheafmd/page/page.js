@@ -2083,7 +2083,7 @@ var create = function (ROOT, CFG, opts) {
   function fillPopover(id) {
     var c = byId[id], sc = pop.querySelector('.rd-scroll');
     if (telling[id]) delete interrupted[id];       // sent again: no longer interrupted
-    var atEnd = !sc || sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 4;
+    var atEnd = !sc || sc._stuck || sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 4;
     // Every form that is still to be sent goes through the redraw, not the first one only: a failed send
     // whose text is not in the store stays on the page beside the form of this thread.
     var forms = Array.prototype.filter.call(pop.querySelectorAll('.rd-form'), function (x) { return !x.hasAttribute('data-done'); });
@@ -2135,8 +2135,20 @@ var create = function (ROOT, CFG, opts) {
     }
     sendingIn(pop);
     sc = pop.querySelector('.rd-scroll');
-    if (atEnd) sc.scrollTop = sc.scrollHeight;
+    stickToEnd(sc, atEnd);
     replace();
+  }
+  // A thread at its end stays there while its box changes size after the draw (the field under it grows or
+  // shrinks, the line "being sent" goes): a scroll by the reader decides again whether it is stuck to the end.
+  function stickToEnd(sc, stuck) {
+    var pinned = null;       // where our own scroll left the thread: its event says nothing of the reader
+    var pin = function () { sc.scrollTop = sc.scrollHeight; pinned = sc.scrollTop; };
+    sc._stuck = stuck;
+    if (stuck) pin();
+    sc.addEventListener('scroll', function () {
+      if (sc.scrollTop !== pinned) sc._stuck = sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 4;
+    });
+    if (window.ResizeObserver) new ResizeObserver(function () { if (sc._stuck) pin(); }).observe(sc);
   }
   // Text typed into a form that was sent (a failed send brought it back, or the store drew it) is kept as typed,
   // so a closed tab loses none of it; emptied, it leaves the store, as Cancel clears it (Escape and a click

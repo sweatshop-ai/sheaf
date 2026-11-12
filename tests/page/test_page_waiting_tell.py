@@ -77,6 +77,7 @@ def test_an_action_reply_ends_the_wait(tab, site):
     until(lambda: bool(line(tab)), what="the waiting line")
     call(browser_on(site.hub), "reply", token=token, doc=DOC, id="c1", text="Done.", role="action")
     until(lambda: line(tab) == [], what="the line to go on the action reply")
+    assert site.hub.waiting_tells.waits(DOC) == []       # a page that reloads has no line yet: the hub says whether the wait ended
 
 
 def test_a_send_answered_after_the_agent_saw_it_does_not_take_the_seen_line_back(tab, site):

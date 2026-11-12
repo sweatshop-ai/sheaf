@@ -429,6 +429,24 @@ The page must stay self-contained: no CDN, no external stylesheet, no remote fon
 
 Off by default. With `--credit` or `credit = true`, the page and the share copy end with `<p class="sheaf-credit">Made with <a href="https://github.com/sweatshop-ai/sheaf">sheaf</a></p>`. An organisation's `.sheaf.toml` never sets it.
 
+### 6.8 The copy block
+
+An agent that prepares a mail, a title, an instruction or a prompt writes it in a quote whose first line is `> [!COPY]`:
+
+```
+> [!COPY]
+> Hello Anna,
+> thanks for the call.
+```
+
+Any Markdown editor shows a quote with a first line `[!COPY]`, so the marking is readable everywhere. A copy block is a quote of the document itself (not one inside a list or another quote), whose first line is exactly `[!COPY]` in capitals (nothing after it on that line) and which has words after it, the first paragraph of which has no `---` or `===` underline (that would make the marker line a heading). Anything else, `[!copy]`, `> [!COPY] words`, a marker alone, stays the quote it was.
+
+- **Page.** The marker is not shown. The quote carries `class="rd-copy"` and the page script (`page.js`) gives it a Copy button in its corner (`.rd-copybtn`, `data-rd-ui`, not editable, never sent by a save). The button copies the text the quote shows now, edits not yet saved included: a paragraph's lines run together, a `<br>` is a line break, paragraphs are a blank line apart, list items start with `- ` or `1. `, and a comment's badge is not text. In the front's mounted copy (`mount.js`), `rd-copy` is the one `rd-` class kept, on a `blockquote`. It writes the clipboard where the browser lends it, else asks for a copy of a hidden field; if the browser refuses it says so in a toast. The button reads "Copied" for a moment.
+- **Edit and Comment.** The quote is editable in Edit mode and commentable in Comment mode like any quote. A save puts the `[!COPY]` line back (`copyblock.tokenize` and `restore`: the quote goes to pandoc with a paragraph of its own word first, which comes back as the marker line), so the marker survives any number of edits. It is written `> [!COPY]`, a blank quote line, then the words: a table, a fence or a list not starting at 1 straight under the marker would run into its paragraph. A quote emptied of its words is deleted, as an emptied plain quote is. A comment's offsets skip the marker's characters, which the page does not show: `comments.projection` reads them from pandoc's own tree of the hidden source (the stand-in first in a paragraph of a quote that opens the block), so they agree with the page whatever the source.
+- **Share copy and PDF.** A plain quote: no marker, no class, no button, no script (the share copy has none, and the PDF is printed from it).
+- **How it is found.** pandoc turns the line break after the marker into a space, so the rendered HTML cannot tell the marker line from `[!COPY] words`. `copyblock.hide` swaps the marker line of each copy block for a word of the module's before pandoc reads the source (in `render.pandoc_html`, and in `comments.projection`, `edit._comparable` and `edit.ticked_html`, which must render a block as the page does), and `copyblock.mark` takes that word off the HTML (after the sanitiser, step 4).
+- **The skill.** The `render-doc` skill tells agents to use it; it is in another repository and goes live once this has reached the hub.
+
 ---
 
 ## 7. Editing and saving
@@ -893,6 +911,8 @@ A Tell asks the document's **target** to act on a comment. It counts as the pers
 4. One Tell waits per thread and agent: a second `POST /_/tell` (or a comment with `tell`) to the same agent on that thread while one waits is refused `409` "<agent> has this comment waiting already: cancel it first, or reply in the thread." (as in 11.3, a reply sent with `tell` is still written, with `tellError`). A document's waiting Tells do not hold an upgrade back (8.4): they are on disk and nothing runs.
 
 Nothing reaches a token from the hub but what it asks for: there is no push to an agent, no URL called back, and the token does not learn the Tells of another token.
+
+**Where an agent that comes through the library door hears of its waiting Tells.** For ChatGPT, Claude.ai and the assistant inside Open WebUI the tiroir library door (9.7, decision 1 of the agents design note) is the one place they hear of a waiting Tell, and also of files their library could not read; an agent token that calls the hub's `/_/mcp` endpoint directly (9.7) gets the Tells from `documents` alone. The door answers `documents` as above, then hands the answer to its `NoticeHub`, which attaches to the tool result a `Notice:` block built by one `Notice` interface: the sources are `SheafTells` (the `tells` of that answer) and `UnreadableFiles` (the Memorizer's own state), and a new kind of notice is a new source, not a new path. The hub is unchanged by this: it lists a Tell only when asked, and sets `seen` when `documents` first lists it, as above; the notice only reports what that listing returned, so requesting `documents` marks the Tell seen before the notice reports it (the Tell stays queued until it ends as above). A listing that does not mark it seen is sweatshop-ai/sheaf#239. Delivered in thinkingtoo/tiroir-library-mcp#241 (5341c19).
 
 ### 9.9 Proxy mode
 

@@ -1152,6 +1152,16 @@ A drop for James's window (9.12) is answered in its thread, through the door; un
 
 **On a member's index** (8.5, 9.9). A sheaf with a drop in `delivered` has an orange dot on every member's index, unless red wins (8.7): James's session works on it. When a drop enters `delivered`, or one in `delivered` ends (a reply, `failed`, the Tell wait), the members' index streams are sent a `status` of the sheaf, `{doc, root}`, and ask for their index again; the hub's person's index is not told, since its dot is the hub account's session (8.6).
 
+### 9.16 Dictation: the key and the relay to t-compute
+
+`POST /_/transcribe` (8.5) is the one place the hub calls a service outside the box with a secret, so its rules are here.
+
+- **The URL.** The `url` of `[transcribe]` (4.3) is `http://` or `https://` with an explicit host and no login in it; any other makes the start refuse. The key goes to that host only. No redirect is followed and no proxy of the environment is used, so a redirect or a proxy variable cannot carry the key somewhere else.
+- **The key.** It is read from `key_file` at each use, as `NAME=value` lines that are never run, and never kept in memory between calls, in the config, in a row, in an answer or in a test. The file must be a regular file (a symlink is refused, and it is opened without blocking, so a FIFO cannot stall the hub), of the hub's own account, with no group or other permission bit. Otherwise dictation is off and one `transcribe-key-file` row says why, once per hub. The key is a key of its own, issued for sheaf and revocable alone, not the fleet's.
+- **The budget.** One relay at a time per hub, and at most `per_minute` (12) a sliding minute and `per_hour` (120) a sliding hour, counted on a monotonic clock; past either, `429`. The body is at most 2 MiB and the call to t-compute lasts at most 30 s. The signed-in browser is the only caller (the cookie, and the Origin check of 9.2), so the budget is the person's own and bounds what a leaked cookie can spend on t-compute.
+- **What the hub says.** An answer never repeats t-compute's error text or the key; the sound is not kept and the text is not written down. A `transcribe` row (15) holds the byte count, the time, the result and the person.
+- **Not on the proxy socket.** `GET` and `POST /_/transcribe` answer `404` on the proxy socket (9.9): a front, and the members behind it, cannot spend the hub's key.
+
 ## 10. The page
 
 What follows is the behaviour the page (`page/page.js`, `page/page.css`) has in v1.

@@ -347,14 +347,23 @@ var create = function (ROOT, CFG, opts) {
   // The Tells that wait for an agent (SPEC 9.8, 10.5): thread id -> {to, state: queued | seen}. They run nothing, so
   // `telling` does not hold them: the thread shows no spinner and no orange dot, and the line has no clock.
   var waits = {};
+  // `seenSeq` counts the `tell-seen` events taken; `seenAt[thread]` is its count at the last one of that thread.
+  var seenSeq = 0, seenAt = {};
   // The hub's `telling`, `[{id, to, state}]` (SPEC 8.5): `working` and `waiting` are a session's, in `telling`;
   // `queued` and `seen` an agent's, in `waits`; `sent`, `picked-up` and `delivered` are a drop for James's window
   // (9.12), which `sentBox` shows from `sent`: no spinner here. `keep`: a session's threads already known stay (jobs are only added).
-  function takeTelling(list, keep) {
+  function takeTelling(list, keep, since) {
     if (!keep) telling = {};
+    var was = waits;
     waits = {};
     (list || []).forEach(function (w) {
-      if (w.state === 'queued' || w.state === 'seen') waits[w.id] = { to: w.to, state: w.state };
+      // A snapshot is the hub's state when it wrote it, and it can reach the page after the event of the agent seeing the
+      // Tell: a Tell seen does not go back to queued when its `tell-seen` was taken after the page got the snapshot
+      // (`since`: `seenSeq` then) and for the same agent (another agent's Tell on the thread is its own). A snapshot
+      // without `since` is taken as it is: it may be the correction of an event the page missed.
+      if (since !== undefined && w.state === 'queued' && was[w.id] && was[w.id].state === 'seen' && was[w.id].to === w.to &&
+          seenAt[w.id] > since) waits[w.id] = was[w.id];
+      else if (w.state === 'queued' || w.state === 'seen') waits[w.id] = { to: w.to, state: w.state };
       else if (w.state === 'working' || w.state === 'waiting') telling[w.id] = true;
     });
   }
@@ -988,6 +997,7 @@ var create = function (ROOT, CFG, opts) {
     };
     writes++;
     if (own) { ownWrites++; ownSeq++; }
+    var seenSince = seenSeq;                  // a `tell-seen` taken after this is newer than the answer
     try {
       var res;
       try {
@@ -1014,6 +1024,7 @@ var create = function (ROOT, CFG, opts) {
         err.code = j.code;
         throw err;
       }
+      j.seenSince = seenSince;
       if (autosaveOwed && !isSave) setTimeout(payOwed, 0);    // after the caller has used its answer: the hub is there, so what an autosave missed goes now
       return j;
     } finally {
@@ -1941,7 +1952,7 @@ var create = function (ROOT, CFG, opts) {
       if (actsOwed && actsOwed.hash === hash) actsOwed.hash = d.hash;
       hash = d.hash;
     }
-    if (d.telling) takeTelling(d.telling);
+    if (d.telling) takeTelling(d.telling, false, d.seenSince);
     Object.keys(anchors).forEach(function (id) {
       var c = byId[id], a = anchors[id];
       if (!c) { forget(id); return; }
@@ -2065,7 +2076,7 @@ var create = function (ROOT, CFG, opts) {
       sentBox[id] = { n: ((c && c.replies) || []).length, to: AGENT };
       if (CAN.indexOf('relay-tell') >= 0) sentBox[id].at = whereTo();
     } else if (j && j.telling) {
-      takeTelling(j.telling);
+      takeTelling(j.telling, false, j.seenSince);
     } else telling[id] = true;
   }
   // The Tell entry of a form: a working button when the agent can be told; when it cannot, the form has no Tell
@@ -3700,6 +3711,7 @@ var create = function (ROOT, CFG, opts) {
       live.addEventListener('changed', function (ev) {
         var d = JSON.parse(ev.data || '{}');
         var late = !!d.rid && taken(d.rid);
+        d.seenSince = seenSeq;                 // the page may hold it a while (heard): a `tell-seen` taken meanwhile is newer
         heardAfterCheck(function () { heard(d); });
         if (late) say('What you sent reached the hub after all.');      // over the news of applyComments
       });
@@ -3771,6 +3783,7 @@ var create = function (ROOT, CFG, opts) {
       live.addEventListener('tell-seen', function (ev) {
         var d = JSON.parse(ev.data || '{}');
         if (waits[d.id]) waits[d.id].state = 'seen';
+        seenAt[d.id] = ++seenSeq;
         touched(d.id);
       });
       live.addEventListener('tell-done', function (ev) {

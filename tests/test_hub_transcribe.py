@@ -18,7 +18,7 @@ class FakeTCompute:
 
     def __init__(self):
         self.ready, self.gpu = True, 200
-        self.redirect = False
+        self.redirect = self.truncate = False
         self.seen = []                                    # (method, path, headers, body)
         outer = self
 
@@ -30,6 +30,13 @@ class FakeTCompute:
                 n = int(self.headers.get("Content-Length") or 0)
                 body = self.rfile.read(n) if n else b""
                 outer.seen.append((self.command, self.path, dict(self.headers), body))
+                if outer.truncate:                           # promises more than it sends, then hangs up
+                    self.send_response(200)
+                    self.send_header("Transfer-Encoding", "chunked")
+                    self.end_headers()
+                    self.wfile.write(b'1f4\r\n{"whisper"')              # a chunk of 500 bytes, 10 sent
+                    self.close_connection = True
+                    return
                 if outer.redirect:
                     self.send_response(302)
                     self.send_header("Location", "/elsewhere")
@@ -162,6 +169,11 @@ def test_a_redirect_is_not_followed_and_the_key_goes_nowhere_else(browser, relay
     tcompute.redirect = True
     assert available(browser) is False
     assert {s[1] for s in tcompute.seen} == {"/api/v1/status"}
+
+
+def test_an_answer_cut_short_is_no_answer(browser, relay, tcompute):
+    tcompute.truncate = True
+    assert available(browser) is False
 
 
 def test_the_answer_is_kept_for_30_seconds(browser, relay, tcompute, clock):

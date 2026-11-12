@@ -141,6 +141,49 @@ def test_an_event_of_one_agent_leaves_the_line_of_the_other_agent_on_the_same_th
     until(lambda: line(tab) == [f"Waiting for {other_name}: it sees this the next time you talk to it."], what="ChatGPT's line gone")
 
 
+def test_the_answer_to_a_send_does_not_erase_the_line_of_a_tell_queued_after_the_answer_was_written(tab, site):
+    # Codex round 3 of PR 257 (b1): the answer lists the Tells as the hub had them when it wrote it; the event of another
+    # agent's Tell queued meanwhile passes it, and the answer must not take that line away.
+    ask_agent(tab, site)
+    name, other_name = f"ChatGPT ({site.hub.person})", f"Claude ({site.hub.person})"
+    Tokens().add("bea-claude", client="Claude")
+    other = next(r for r in Tokens().list() if r.name == "bea-claude")
+    thread = rdc.parse(site.file.read_text()).by_id("c1")
+
+    def slow(route):
+        got = route.fetch()                   # lists the Tell of ChatGPT only
+        site.hub.waiting_tells.queue(DOC, "c1", other, site.hub.person, None, thread)
+        tab.page.wait_for_timeout(800)        # the page hears of the second Tell meanwhile
+        route.fulfill(response=got)
+    tab.page.route("**/_/comment", slow)
+    tab.page.fill("#rd-popover textarea", "Please do.")
+    tab.page.click("#rd-popover .rd-form button.rd-tell")
+    until(lambda: len(line(tab)) == 2, what="a line for each agent")
+    tab.page.wait_for_timeout(2000)           # the answer has come by now
+    assert line(tab) == [f"Waiting for {name}: it sees this the next time you talk to it.",
+                         f"Waiting for {other_name}: it sees this the next time you talk to it."], line(tab)
+
+
+def test_one_cancel_says_in_one_toast_which_agents_had_already_seen_the_tell(tab, site):
+    # Codex round 3 of PR 257 (b2): a toast replaces the one before it, so each agent's end must not say its own.
+    token = ask_agent(tab, site)
+    name, other_name = f"ChatGPT ({site.hub.person})", f"Claude ({site.hub.person})"
+    other_token = Tokens().add("bea-claude", client="Claude")
+    other = next(r for r in Tokens().list() if r.name == "bea-claude")
+    tab.page.fill("#rd-popover textarea", "Please do.")
+    tab.page.click("#rd-popover .rd-form button.rd-tell")
+    until(lambda: bool(line(tab)), what="the waiting line")
+    site.hub.waiting_tells.queue(DOC, "c1", other, site.hub.person, None, rdc.parse(site.file.read_text()).by_id("c1"))
+    until(lambda: len(line(tab)) == 2, what="a line for each agent")
+    call(browser_on(site.hub), "documents", token=token)
+    call(browser_on(site.hub), "documents", token=other_token)
+    until(lambda: all("has seen it" in x for x in line(tab)) and len(line(tab)) == 2, what="both seen")
+    tab.page.hover("#rd-popover button[data-a=cancel-tell]")
+    tab.page.click("#rd-popover button[data-a=cancel-tell]")
+    until(lambda: line(tab) == [], what="the lines to go")
+    toasted(tab.page, f"{name} and {other_name} had already seen it; look at the document before you Tell again.")
+
+
 def test_a_snapshot_that_is_not_the_answer_to_a_send_does_not_keep_a_seen_line(tab, site):
     # Only the answer to a send can pass the event of the sight (ticket 18). Any other snapshot (a reconnect, a change
     # of the file) is the hub's state as it is: a new Tell of the same agent that the page never heard of is queued.

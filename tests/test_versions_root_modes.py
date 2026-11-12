@@ -88,7 +88,7 @@ def test_a_link_in_place_of_the_store_is_still_refused(tmp_path):
     assert not list(out.iterdir())
 
 
-@pytest.mark.parametrize("plant", ["file at .sheaf", "file at pins", "dangling link at the document folder"])
+@pytest.mark.parametrize("plant", ["file at .sheaf", "file at pins", "dangling link at the document folder", "link to a file at the document folder"])
 def test_a_file_or_dangling_link_in_the_store_is_an_oserror(tmp_path, plant):
     """`live` swallows an OSError (a full disk costs a merge); a plant must not become a 500."""
     root = tmp_path / "root"
@@ -101,6 +101,8 @@ def test_a_file_or_dangling_link_in_the_store_is_an_oserror(tmp_path, plant):
         (folder / "pins").write_text("x")
     else:
         folder.parent.mkdir(parents=True)
-        folder.symlink_to(tmp_path / "nowhere")
+        if plant.startswith("link to a file"):
+            (tmp_path / "afile").write_text("x")
+        folder.symlink_to(tmp_path / ("afile" if plant.startswith("link to a file") else "nowhere"))
     with pytest.raises(OSError):
         state.Versions(root, NAME).pin(f"{NAME}/a.md", "x\n")

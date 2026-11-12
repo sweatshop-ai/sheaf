@@ -50,7 +50,7 @@ def inside_dir(path: Path) -> Path:
         os.mkdir(path, 0o777)
     except FileExistsError:
         st = os.lstat(path)
-        if not stat.S_ISDIR(st.st_mode) and not (stat.S_ISLNK(st.st_mode) and path.exists()):
+        if not stat.S_ISDIR(st.st_mode) and not (stat.S_ISLNK(st.st_mode) and path.is_dir()):
             raise               # a file or a dangling link stands there: an OSError, as `mkdir` gave before
     st = os.lstat(path)
     if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():

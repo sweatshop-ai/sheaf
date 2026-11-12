@@ -22,7 +22,7 @@
 
 **Status:** done (PR 253, head 6bad373)
 
-**Cause (reproduite, 2026-11-12):** CI lance `pytest -n 4` (`--dist load`) ; `IN_ORDER` ne garde un fichier entier que dans une tranche, pas sur un worker xdist. Trois tests de `test_isolation.py` sous `-n 2` donnent le même `assert ([])` que le run 43232192468. Le lecteur de la lecture du code avait raison.
+**Cause (reproduite, 2026-11-12):** CI lance `pytest -n 4` (`--dist load`) ; `IN_ORDER` ne garde un fichier entier que dans une tranche, pas sur un worker xdist. Trois tests de `test_isolation.py` sous `-n 2` donnent le même `assert ([])` que le run 43232192468. La lecture du code (Nia) est confirmée.
 
 **Correctif :** `pytest_itemcollected` marque les tests d'un module `IN_ORDER` `xdist_group(<module>)` ; `pytest_configure` (tests/conftest.py) passe `--dist` à `loadgroup` sur le contrôleur et `loadgroup` sur le worker. Les trois paires qui lisent la liste d'un test précédent (deux dans `test_isolation`, une dans `test_service`) sont couvertes. Test : tests/test_in_order.py. Pas dans `addopts` : `-p no:xdist` ne démarrerait plus.
 

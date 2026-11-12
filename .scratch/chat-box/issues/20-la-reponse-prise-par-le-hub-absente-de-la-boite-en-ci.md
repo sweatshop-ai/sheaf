@@ -24,4 +24,4 @@ Run 42923857640 tentative 2 : la boîte montre le fil sans la réponse (« Why a
 
 Ma tentative (envoi ralenti à 2,5 s par une route sur `**/_/comment`, réponse d'un tiers écrite dans le fichier, 300 ms, `documents`, attente du « seen », vérification après 500 ms) est verte sur HEAD **mais aussi verte sur 3e90b1e**, la règle fautive : elle ne discrimine pas, je l'ai retirée. Pourquoi, non établi : le `changed` de l'écriture extérieure n'est peut-être pas retenu (la route retient la réponse HTTP, pas forcément `ownWrites` côté page au moment de l'écriture), ou son `d.base` ne vaut pas le `hash` de la page et le `changed` provoque un rechargement (`reloadWhenFree`), qui relit l'état du hub (« seen ») au lieu de rejouer l'instantané. À vérifier avant d'écrire le test : un `console.log` dans `heard` et `takeTelling` (retenu ou non, `d.base === hash`, `seenSince`), puis une écriture qui laisse `textSame` vrai et `base` égal au `hash`. Le test doit être rouge sur 3e90b1e avant d'être gardé.
 
-- [ ] CI verte sur trois passages de suite
+- [x] CI verte sur trois passages de suite : runs 43190504226 sur 08c8883 et 43201969936 sur 4455590, chacun vert aux tentatives 1 et 2

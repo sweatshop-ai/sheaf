@@ -20,4 +20,4 @@ L'attente de la ligne « has seen it » expire. PR #240 run 42923857640 tentativ
 
 **Revue Codex (P2).** Un fil peut attendre deux agents (cible changée après le premier Tell) : restaurer `seen` par identifiant de fil prêtait le « has seen it » du premier au Tell en attente du second. Reproduit (test `…is_not_lent_to_the_queued_tell_of_another_agent…`, l'événement `tell-queued` retenu pour que l'instantané arrive avant), corrigé : `seen` ne revient que pour le même agent (`to`).
 
-- [ ] CI verte sur trois passages de suite
+- [x] CI verte sur trois passages de suite : runs 43190504226 sur 08c8883 et 43201969936 sur 4455590, chacun vert aux tentatives 1 et 2

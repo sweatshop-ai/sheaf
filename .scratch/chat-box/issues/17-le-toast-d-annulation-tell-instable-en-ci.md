@@ -24,4 +24,4 @@ L'attente du toast (8 s) expire. PR #241 run 42925663097 tentative 1 ; PR #240 r
 
 **Reste.** Le toast « Sent to your » peut venir de l'envoi du premier Tell (la fixture) arrivé tard sur la page rechargée, pas de la réponse : l'attente ne prouve pas laquelle. Revue Opus du 2026-11-11 ; aucun signal fiable de « première livraison finie » dans cette fixture (le premier Tell ne passe pas par `agent.calls()`). Fenêtre étroite, non vue.
 
-- [ ] CI verte sur trois passages de suite
+- [x] CI verte sur trois passages de suite : runs 43190504226 sur 08c8883 et 43201969936 sur 4455590, chacun vert aux tentatives 1 et 2

@@ -14,4 +14,6 @@ Scénario : les agents A et B ont chacun un Tell en attente sur c1 ; `tell-queue
 - [x] Décision écrite (ci-dessus)
 À regarder avec ce ticket (revue Opus du 2026-11-11, côté hub, antérieur à la branche) : `waiting.take` publie `tell-seen` avant `write_json`, et l'instantané de `changed` lit `tells.json` sans le verrou des attentes (`waiting.py:218`, `:259`, `core.py:484`, `live.py:183`, `mcp.py:636`). Un instantané peut donc dire « queued » juste après `tell-seen` et remettre la ligne à « en attente » jusqu'au prochain événement. Écrire avant d'émettre, lire sous le verrou.
 
-- [ ] Le test rouge puis vert, avec un test rouge puis vert (deux agents sur un fil, A voit son Tell : la ligne de B reste « en attente »)
+- Le paragraphe « À regarder » ci-dessus est sorti en ticket 40 (ordre des écritures du hub) ; les écarts de nom (ancienne ligne, renommage) en ticket 41.
+
+- [x] Le test rouge puis vert, avec un test rouge puis vert (deux agents sur un fil, A voit son Tell : la ligne de B reste « en attente »)

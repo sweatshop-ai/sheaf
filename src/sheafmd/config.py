@@ -24,7 +24,7 @@ DEFAULT_PORT = 27419
 ROOT_FILE = ".sheaf.toml"
 
 USER_KEYS = {"port": int, "name": str, "browser": bool, "proxy": dict, "jump": dict,
-             "list": dict}   # proxy: hub.proxy reads it (9.9); list: hub.the_list (9.10)
+             "list": dict, "transcribe": dict}   # proxy: hub.proxy reads it (9.9); list: hub.the_list (9.10); transcribe: hub.transcribe
 JUMP_KEYS = {"command": list}
 ROOT_KEYS = {"theme": str, "for": str, "links": bool, "link_tlds": list, "credit": bool,
              "versions": str, "commit": bool, "push": bool}

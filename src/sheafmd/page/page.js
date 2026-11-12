@@ -317,14 +317,18 @@ var create = function (ROOT, CFG, opts) {
   // pandoc - renumbering lists, reflowing tables, rewriting rules.
   var LOCKED_TIP = 'Not editable here: code, charts, images and raw HTML would not survive the ' +
                    'round trip. Edit this block in the .md file.';
+  // A class attribute loses the page's own marker classes, whole tokens only, and goes when nothing else is left;
+  // one that holds none of them is returned as it was.
+  function dropMarkers(all, sp, cls) {
+    var toks = cls.split(/\s+/), keep = toks.filter(function (t) { return t !== 'rd-locked' && t !== 'rd-saving'; });
+    if (keep.length === toks.length) return all;
+    return keep.length ? sp + 'class="' + keep.join(' ') + '"' : '';
+  }
   function clean(h) {
     return h.replace(/<span class="rd-anchor[^"]*" data-rd-id="([^"]+)"[^>]*>[\s\S]*?<\/span>/g,
                      '<span class="rd-anchor" data-rd-id="$1"></span>')
             .replace(/\s*contenteditable="[^"]*"/g, '')
-            .replace(/\s+class="rd-locked"/g, '')
-            .replace(/(\s+class="[^"]*?)\s*\brd-locked\b/g, '$1')
-            .replace(/\s+class="rd-saving"/g, '')
-            .replace(/(\s+class="[^"]*?)\s*\brd-saving\b/g, '$1')
+            .replace(/(\s+)class="([^"]*)"/g, dropMarkers)
             .replace(/\s+title="Not editable here: [^"]*"/g, '')
             .replace(/<button\b[^>]*\brd-copybtn\b[^>]*>[\s\S]*?<\/button>/g, '');
   }
@@ -2974,7 +2978,10 @@ var create = function (ROOT, CFG, opts) {
     if (!refusedTmr) refusedTmr = setInterval(function () {
       if (saving || settling) return;
       clearInterval(refusedTmr); refusedTmr = null; refusedSaid = false;
-      Array.prototype.forEach.call(main.querySelectorAll('.rd-saving'), function (x) { x.classList.remove('rd-saving'); });
+      Array.prototype.forEach.call(main.querySelectorAll('.rd-saving'), function (x) {
+        x.classList.remove('rd-saving');
+        if (!x.classList.length) x.removeAttribute('class');      // not a class="" left in what a save sends
+      });
     }, 100);
   });
 

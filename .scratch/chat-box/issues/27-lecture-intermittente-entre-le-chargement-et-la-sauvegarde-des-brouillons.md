@@ -2,12 +2,11 @@
 
 **What to build:** Les écrivains (`draftsReplace`, `threadKeep`, `taken`) construisent leur liste avec `commentDraftsLoad`, qui lit sans `strict`; ne rien écrire si cette première lecture est refusée.
 
-**Blocked by:**
-- External: PR 250 (ticket 21) merged into main
+**Blocked by:** none
 
-**Claimed by:** 
+**Claimed by:** Amaia 2026-11-12 23:03
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 **Ce qui ne va pas :** `page.js` ~1495-1502 et 1518, 1544, 1560 : si le premier `getItem` lève et que celui de `commentDraftsSave` réussit, la liste vient de `[]`, l'écriture ne garde que les entrées d'autres racines plus la nouvelle, et `storeOk` reste vrai. Il faut un `getItem` qui échoue par intermittence (un refus durable ne l'atteint pas). Issu de la revue Opus du PR 250 (ticket 21), trouvaille P2 mise de côté (cas rare, aucune perte de texte tapé).
 

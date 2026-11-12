@@ -6,7 +6,7 @@
 
 **Claimed by:** Amaia 2026-11-12 23:03
 
-**Status:** in-progress
+**Status:** in-progress — PR 262 open, waiting for merge
 
 **Ce qui ne va pas :** `page.js` ~1496 : une valeur corrompue rend `[]` et la sauvegarde suivante l'écrase. Le ticket 21 ne couvre que `getItem`. Issu de la revue Opus du PR 250 (ticket 21), trouvaille P2 mise de côté (cas rare, aucune perte de texte tapé).
 

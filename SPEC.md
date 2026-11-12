@@ -923,6 +923,8 @@ Nothing reaches a token from the hub but what it asks for: there is no push to a
 
 Loopback mode, 9.1 to 9.8 as written above, is the default, and nothing in it changes. **Proxy mode** serves the hub's pages on the origin of another web application, **the front**, through a reverse proxy on the same machine, and lets the front's sign-in say who is asking: a **member**. It was written for Open WebUI as the front and Caddy as the proxy; the facts below that name them are theirs.
 
+Dictation (10.4) follows the front: a page mounted in the front sends the sound to the front's own Open WebUI route with the member's session cookie, and the hub still calls nothing of the front's. A hub page in proxy mode that is not mounted has no microphone, and `GET` and `POST /_/transcribe` answer 404 on the proxy socket.
+
 **Switching it on.** Only a `[proxy]` table in the config file (4.3) does; the mode has no flag and no environment variable of its own. The hub reads the table, from the config file that 4.1 names for it, when it starts, and `sheaf restart` applies a change. A development hub beside a hub in proxy mode sets `SHEAF_HOME` (4.1), so that it reads a config of its own. A missing, unknown or wrong key in the table, a member's name that breaks the rule below, a socket folder that is not as below, no member, or a proxy socket that something already listens on stops the start: exit 1 and a `proxy-config` row that names the reason (15). The hub never runs with part of the mode.
 
 ```toml

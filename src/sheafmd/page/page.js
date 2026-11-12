@@ -2960,8 +2960,21 @@ var create = function (ROOT, CFG, opts) {
   // While a save is out, the page must stay exactly what was sent: a merge or a
   // split paragraph reloads the page on the reply, and a keystroke typed in
   // between would be on screen only. A save takes a fraction of a second, and
-  // autosave only starts once typing has paused.
-  main.addEventListener('beforeinput', function (e) { if (saving || settling) e.preventDefault(); });
+  // autosave only starts once typing has paused. When the hub is slow to answer, the refusal is said: the
+  // block shows it is saving (rd-saving) and the first refused key says so, once for that save.
+  var refusedSaid = false, refusedTmr;
+  main.addEventListener('beforeinput', function (e) {
+    if (!saving && !settling) return;
+    e.preventDefault();
+    var b = e.target && e.target.closest ? e.target.closest('[contenteditable="true"]') : null;
+    if (b) b.classList.add('rd-saving');
+    if (!refusedSaid) { refusedSaid = true; say('Saving… what you type now is not taken, wait a moment.'); }
+    if (!refusedTmr) refusedTmr = setInterval(function () {
+      if (saving || settling) return;
+      clearInterval(refusedTmr); refusedTmr = null; refusedSaid = false;
+      Array.prototype.forEach.call(main.querySelectorAll('.rd-saving'), function (x) { x.classList.remove('rd-saving'); });
+    }, 100);
+  });
 
   // ---- Enter in a task item ---------------------------------------------------
   // The browser's own Enter in an <li> makes an <li> with no box, which the .md would hold as a plain item.

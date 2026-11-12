@@ -4,7 +4,7 @@
 
 **Blocked by:** 04
 
-**Claimed by:** Emil 2026-11-11 11:19
+**Claimed by:** Isolde 2026-11-12 10:14
 
 **Status:** in-progress
 

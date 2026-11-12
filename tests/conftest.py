@@ -366,7 +366,11 @@ HUB_PORT = 27419
 def hub(work):
     from sheafmd import paths
     from sheafmd.hub.core import Hub
-    return Hub(port=HUB_PORT, key=paths.ensure_key(), started_by="test")
+    h = Hub(port=HUB_PORT, key=paths.ensure_key(), started_by="test")
+    yield h
+    # A push the test left due ends here, in this test's state: its pusher is a thread that outlives the test and
+    # writes its `push-failed` row into the state of whichever test runs next (#32).
+    assert h.commits.settle(30), "the hub's pusher did not finish within 30 s of the test's end"
 
 
 @pytest.fixture

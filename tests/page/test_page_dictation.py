@@ -261,7 +261,7 @@ def test_another_form_replacing_the_one_that_records_throws_the_sound_away(tab, 
     p.wait_for_function("window.__mic.made.length === 1 && window.__mic.made[0].state === 'recording'")
     p.click("#rd-popover .rd-more summary")
     p.click("#rd-popover button[data-a=edit]")             # the edit form takes the place of the reply form
-    p.wait_for_function("window.__mic.stops === 1")
+    until(lambda: p.evaluate("window.__mic.stops") == 1, what="the microphone of the replaced form let go")
     assert p.evaluate("window.__mic.made[0].state") == "inactive", "the form went and its microphone went on"
     p.wait_for_timeout(300)
     assert hub.posts == [], "the sound of a form that was replaced was sent"

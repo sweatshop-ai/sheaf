@@ -104,15 +104,32 @@ _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedire
 
 
 def _call(method, url, headers, body=None, timeout=CHECK_TIMEOUT) -> tuple[int, bytes]:
-    """(status, body); a connection that fails is a 0. A 3xx is an answer, not a road."""
-    req = urllib.request.Request(url, data=body, headers=headers, method=method)
-    try:
-        with _OPENER.open(req, timeout=timeout) as r:
-            return r.status, r.read(1 << 20)
-    except urllib.error.HTTPError as e:
-        return e.code, b""
-    except (OSError, ValueError, http.client.HTTPException):     # IncompleteRead and the like are no answer either
-        return 0, b""
+    """(status, body); a connection that fails is a 0. A 3xx is an answer, not a road. `timeout` bounds the whole
+    call, not each read: a service that answers a byte at a time still ends at it."""
+    out: list = [(0, b"")]
+    deadline = time.monotonic() + timeout
+
+    def go():
+        req = urllib.request.Request(url, data=body, headers=headers, method=method)
+        try:
+            with _OPENER.open(req, timeout=timeout) as r:
+                got = bytearray()
+                while len(got) < 1 << 20 and time.monotonic() < deadline:
+                    chunk = r.read(4096)
+                    if not chunk:
+                        out[0] = (r.status, bytes(got))
+                        return
+                    got += chunk
+                out[0] = (r.status, bytes(got)) if len(got) >= 1 << 20 else (0, b"")
+        except urllib.error.HTTPError as e:
+            out[0] = (e.code, b"")
+        except (OSError, ValueError, http.client.HTTPException):     # IncompleteRead and the like are no answer either
+            out[0] = (0, b"")
+
+    worker = threading.Thread(target=go, daemon=True)
+    worker.start()
+    worker.join(timeout)
+    return out[0] if not worker.is_alive() else (0, b"")
 
 
 class Relay:

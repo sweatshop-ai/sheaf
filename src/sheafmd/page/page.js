@@ -1267,6 +1267,7 @@ var create = function (ROOT, CFG, opts) {
     if (pop) {
       // Closed is minimized: what is typed is kept and comes back in the field.
       if (!stashAll()) return false;
+      stopDictation(true);
       unpaintWidened();
       pop.remove(); pop = null; popId = null; paint(null); setTimeout(flushHold, 0);
       setTimeout(function () { if (mouseDown) keptDue = true; else drawKept(); }, 0);
@@ -2267,6 +2268,119 @@ var create = function (ROOT, CFG, opts) {
       say(notSent(e, 'Cancel'), true);
     }
   }
+  // ---- dictation (SPEC 10.4, ticket 06) ----------------------------------------
+  // A microphone in the box. The sound goes to the hub (POST /_/transcribe, which relays it) or, on a page mounted in
+  // Open WebUI, to Open WebUI's own route with the session cookie; the text comes back into the field, to read and send.
+  // One recording at a time, and the sound is never kept: not in the store, not in the file. `dict` is the recording in
+  // hand ({f, chunks, discard, ...}) until its answer is in; `dictOff` is the time until which the service is held gone.
+  var DICTATE_TYPES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
+  var DICTATE_MAX = 120000;
+  var MIC = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1a2.5 2.5 0 0 0-2.5 2.5v4a2.5 2.5 0 0 0 5 0v-4A2.5 2.5 0 0 0 8 1ZM3.5 7a.75.75 0 0 1 1.5 0 3 3 0 0 0 6 0A.75.75 0 0 1 12.5 7a4.5 4.5 0 0 1-3.75 4.44v1.81h1.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5h1.5v-1.81A4.5 4.5 0 0 1 3.5 7Z"/></svg>';
+  var dict = null, dictOff = 0;
+  // Stops the recording and, with `discard`, throws the sound away (nothing is sent; a late answer is dropped). The
+  // microphone is released either way, so the browser's light goes out.
+  function stopDictation(discard) {
+    var d = dict;
+    if (!d) return;
+    if (discard) d.discard = true;
+    clearTimeout(d.timer);
+    if (d.rec && d.rec.state !== 'inactive') d.rec.stop();
+  }
+  function dictationAvailable() {
+    if (Date.now() < dictOff) return Promise.resolve(false);
+    if (MOUNTED) return Promise.resolve(true);        // Open WebUI answers or not; the first failure takes the button away
+    if (CFG.proxy) return Promise.resolve(false);     // the hub in proxy mode relays nothing (SPEC 9.9)
+    return fetch('/_/transcribe').then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { return !!(j && j.available === true); }, function () { return false; });
+  }
+  // The sound to text: rejects with an error whose `why` is 'denied' (the account may not dictate), 'gone' (the
+  // service is not there) or 'failed'.
+  function transcribeSound(blob, ext) {
+    var fail = function (why) { var e = new Error(why); e.why = why; return e; };
+    var req = MOUNTED
+      ? fetch('/api/v1/audio/transcriptions', { method: 'POST', credentials: 'same-origin',
+          body: (function () { var fd = new FormData(); fd.append('file', blob, 'dictee.' + ext); return fd; })() })
+      : fetch('/_/transcribe', { method: 'POST', headers: { 'Content-Type': (blob.type || 'audio/' + ext).split(';')[0], 'X-Filename': 'dictee.' + ext }, body: blob });
+    return req.then(function (r) {
+      if (r.status === 403 && MOUNTED) throw fail('denied');
+      if (r.status === 503 || r.status === 404 || r.status === 401) throw fail('gone');
+      if (!r.ok) throw fail('failed');
+      return r.json().then(function (j) {
+        var t = j && typeof j.text === 'string' ? j.text.trim() : '';
+        if (!t) throw fail('failed');
+        return t;
+      }, function () { throw fail('failed'); });
+    }, function () { throw fail('gone'); });
+  }
+  // The text goes where the cursor is, with a space between it and the words around it, and the field hears an input
+  // as for a typed text (the draft follows).
+  function insertDictated(ta, text) {
+    var v = ta.value, s = ta.selectionStart, e = ta.selectionEnd, pre = v.slice(0, s), post = v.slice(e);
+    var lead = pre && !/\s$/.test(pre) ? ' ' : '', trail = post && !/^\s/.test(post) ? ' ' : '';
+    ta.value = pre + lead + text + trail + post;
+    var at = pre.length + lead.length + text.length;
+    ta.setSelectionRange(at, at);
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    ta.focus();
+  }
+  function dictation(f, ta) {
+    if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder)) return;
+    dictationAvailable().then(function (yes) {
+      var acts = f.querySelector('.rd-actions');
+      if (!yes || unmounted || !f.isConnected || !acts || f.querySelector('.rd-mic')) return;
+      var b = el('button', { 'class': 'rd-mic', type: 'button', title: 'Dictate', 'aria-label': 'Dictate', 'aria-pressed': 'false' }, MIC);
+      var line = null;
+      var says = function (msg) {
+        if (!line) { line = el('div', { 'class': 'rd-mic-says', role: 'status' }); ta.insertAdjacentElement('afterend', line); }
+        line.textContent = msg || '';
+        if (!msg) { line.remove(); line = null; }
+      };
+      var idle = function () { b.disabled = false; b.title = 'Dictate'; b.setAttribute('aria-pressed', 'false'); };
+      var lost = function (why) {
+        if (why === 'denied') { dictOff = Infinity; says('Dictation is not allowed for your account.'); b.remove(); }
+        else if (why === 'gone') { dictOff = MOUNTED ? Infinity : Date.now() + 60000; says('The transcription did not work. Try again.'); b.remove(); }
+        else says('The transcription did not work. Try again.');
+      };
+      b.addEventListener('click', function () {
+        if (dict) { if (dict.f === f && dict.rec) stopDictation(false); return; }
+        says('');
+        var d = dict = { f: f, chunks: [], discard: false, rec: null };
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+          var release = function () { stream.getTracks().forEach(function (t) { t.stop(); }); };
+          if (d.discard || unmounted || !f.isConnected) { release(); dict = null; return; }
+          var type = DICTATE_TYPES.filter(function (t) { return MediaRecorder.isTypeSupported(t); })[0];
+          var rec = d.rec = type ? new MediaRecorder(stream, { mimeType: type }) : new MediaRecorder(stream);
+          type = rec.mimeType || type || 'audio/webm';
+          var ext = /mp4/.test(type) ? 'mp4' : /ogg/.test(type) ? 'ogg' : 'webm';
+          rec.addEventListener('dataavailable', function (e) { if (e.data && e.data.size) d.chunks.push(e.data); });
+          rec.addEventListener('stop', function () {
+            release();
+            var gone = function () { return d.discard || unmounted || !f.isConnected; };
+            if (gone() || !d.chunks.length) { dict = null; if (!gone()) { idle(); says('Nothing was recorded. Try again.'); } return; }
+            b.disabled = true; b.title = 'Transcribing…'; b.setAttribute('aria-pressed', 'false');
+            transcribeSound(new Blob(d.chunks, { type: type }), ext).then(function (text) {
+              dict = null;
+              if (gone()) return;
+              idle();
+              insertDictated(ta, text);
+            }, function (e) {
+              dict = null;
+              if (gone()) return;
+              idle();
+              lost(e.why);
+            });
+          });
+          rec.start();
+          b.title = 'Stop'; b.setAttribute('aria-pressed', 'true');
+          d.timer = setTimeout(function () { stopDictation(false); }, DICTATE_MAX);
+        }, function (e) {
+          dict = null;
+          says(e && (e.name === 'NotAllowedError' || e.name === 'SecurityError') ? 'Microphone blocked: allow it for this site.' : 'No microphone found.');
+        });
+      });
+      acts.insertBefore(b, acts.firstChild);
+    });
+  }
   // buttons: [{k, label}], the first is the primary one. done(text, k, rid) may return a promise;
   // it settles to null or false when nothing was sent, and the form comes back with its text.
   // cancelled() runs when the person cancels. `says` is the line its popover shows while its send is out.
@@ -2318,6 +2432,7 @@ var create = function (ROOT, CFG, opts) {
     // id of the last send, or, for a text changed since it was sent, the `of` of the entry it was drawn from.
     var line = from.rid || from.of || null;
     ta.value = from.body;
+    dictation(f, ta);
     replace();
     ta.focus();
     // A send of this form failed and the form came back: it holds the text sent, which the store keeps for the
@@ -2376,6 +2491,7 @@ var create = function (ROOT, CFG, opts) {
     };
     var go = function (k) {
       if (!ta.value.trim()) { ta.focus(); return; }
+      stopDictation(true);
       // The hub refuses it, or writes it into the comment that took the id: it is to copy. The buttons are off
       // for the same reason (noSend), whether or not the thread has come back since.
       if (vanished() || own !== null && ((born !== null && byId[own].at !== born) || f.hasAttribute('data-nosend'))) {
@@ -2434,7 +2550,7 @@ var create = function (ROOT, CFG, opts) {
     // Cancel clears what the store keeps for the form before restore, which draws the thread's other kept text.
     f.addEventListener('click', function (e) {
       var b = e.target.closest && e.target.closest('[data-f]'), k = b && b.getAttribute('data-f');
-      if (k === 'no') { f.remove(); if (cancelled) cancelled(line); restore(); replace(); flushHold(); }
+      if (k === 'no') { stopDictation(true); f.remove(); if (cancelled) cancelled(line); restore(); replace(); flushHold(); }
       else if (k) go(k);
     });
     ta.addEventListener('keydown', function (e) {
@@ -3946,6 +4062,7 @@ var create = function (ROOT, CFG, opts) {
   function unmount() {
     if (unmounted) return;
     unmounted = true;
+    stopDictation(true);
     unlistens.forEach(function (f) { f(); });
     unlistens = [];
     intervals.forEach(function (t) { window.clearInterval(t); });

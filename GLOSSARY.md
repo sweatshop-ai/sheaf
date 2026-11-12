@@ -171,3 +171,7 @@ _Avoid_: lock, snapshot
 **Versions store**:
 Where the hub keeps the texts it handed pages, per document, so a save against an older one is merged: the state folder's `versions/`, or with `versions = "root"` the root's own `.sheaf/versions/`, committed with the document in a root that commits.
 _Avoid_: history, backup, snapshots
+
+**Dictation**:
+Text spoken into the microphone button of a chat box and transcribed: it is put in the field at the cursor and stays editable. It is never sent to the agent by itself, and the sound is not kept.
+_Avoid_: voice message, speech-to-text send

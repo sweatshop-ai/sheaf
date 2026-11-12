@@ -13,6 +13,15 @@ from pathlib import Path
 
 import pytest
 
+import sheafmd
+
+# Before anything else imports sheafmd's parts: another checkout's venv resolves it to that checkout, and the run
+# would be about code that is not here. tests/test_import_guard.py says why this refuses.
+_OWN_SOURCE = Path(__file__).resolve().parents[1] / "src"
+if not Path(sheafmd.__file__).resolve().is_relative_to(_OWN_SOURCE):
+    raise pytest.UsageError(f"this suite imports {sheafmd.__file__}, not the code under {_OWN_SOURCE}. "
+                            f"Run it with PYTHONPATH={_OWN_SOURCE}")
+
 from helpers import NOW, PLAN, Opener, browser_on, claim_port, proc_state, stop_hub
 # no_process_left_behind and the_test_that_is_running are the fixtures of tests/leakguard.py
 from leakguard import NODE_VAR, RUN_VAR, no_process_left_behind, stop_left, the_test_that_is_running  # noqa: F401

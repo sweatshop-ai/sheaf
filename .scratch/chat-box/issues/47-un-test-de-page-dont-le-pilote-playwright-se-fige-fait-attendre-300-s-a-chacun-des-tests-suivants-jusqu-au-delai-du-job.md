@@ -17,11 +17,13 @@
 1. Arrêter l'étape au premier `Timeout` qui touche le pilote : `--maxfail=2` ne suffit pas (un échec ordinaire compte) ; un crochet `pytest_runtest_logreport` dans `tests/page/conftest.py` qui, au premier test expiré dont le fil principal est dans `greenlet_main`, appelle `pytest.exit("le pilote Playwright ne répond plus", returncode=1)`. Le run échoue au bout de 5 min au lieu de 60, avec la phrase qui nomme la cause.
 2. Garder le nom et la cause du premier test figé dans le journal : le traceback des tests échoués ne vient qu'en fin d'exécution, que l'annulation a coupée, donc imprimer au premier `Timeout` une ligne `nodeid` + pile (le crochet du point 1 la porte ; `the_main_thread_names_its_frame` écrit déjà la pile principale à 90 % de la limite).
 
-- [ ] Un pilote Playwright qui ne répond plus arrête l'étape « Page tests » au premier test expiré, avec un message qui le dit
-- [ ] Un test de `tests/` pose le cas à la main (un faux pilote qui bloque) et échoue sans le crochet
-- [ ] Le test qui s'est figé la première fois est nommé dans le journal sans qu'on ait à lire 7 800 lignes
+- [x] Un pilote Playwright qui ne répond plus arrête l'étape « Page tests » au premier test expiré, avec un message qui le dit (`tests/driver_stall.py`, PR 260, fusionnée en afbe595 ; le processus s'arrête par `os._exit(1)` après le rapport, car le démontage de session du fixture `chromium` ne revient jamais une fois le répartiteur du pilote tué ; vérifié sur t-compute avec un vrai pilote gelé par SIGSTOP : rc 1 en 8,2 s, second test non lancé)
+- [x] Un test de `tests/` pose le cas à la main (un faux pilote qui bloque) et échoue sans le crochet (`tests/test_driver_stall.py` : sans le plugin les trois tests expirent, avec lui le premier arrête le run ; un démontage de session qui bloque ne retient pas le run ; une expiration hors du pilote ne l'arrête pas)
+- [x] Le test qui s'est figé la première fois est nommé dans le journal sans qu'on ait à lire 7 800 lignes (le crochet écrit l'id du test et la pile, lignes de cadre seules, sur le terminal avant de sortir ; vu dans la sortie du vrai pilote gelé et dans `| tee` sous `pipefail`)
 
 
 **Claimed by:** Elif 2026-11-12 21:27
 
-**Status:** in-progress
+**Status:** done
+
+Fusionné : PR 260 en afbe595 (head a01aaea, CI 43327505448 verte, 3/3 tranches). Revues : `~/.claude/pm/chat-box-handoffs/pr-47-reviews/` (standards GO, spec GO, opus NO-GO corrigé, opus-2 GO). Limite connue : `--tb=line` ou `--tb=no` retire les cadres du rapport, le crochet ne se déclenche pas (la CI garde `--tb` par défaut). La cause du premier figement reste inconnue.

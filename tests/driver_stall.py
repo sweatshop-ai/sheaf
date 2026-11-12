@@ -9,7 +9,7 @@ Loaded by tests/conftest.py."""
 import pytest
 
 # Frames of the pytest-timeout traceback that say the main thread was waiting for the driver (the ticket's journal:
-# `playwright/sync_api/_context_manager.py`, `greenlet_main`), not in a call on a page
+# the `_context_manager` module of playwright.sync_api, `greenlet_main`), not in a call on a page
 DRIVER_FRAMES = ("playwright/sync_api/_context_manager.py", "in greenlet_main")
 TIMED_OUT = "from pytest-timeout"
 TAIL_LINES = 40

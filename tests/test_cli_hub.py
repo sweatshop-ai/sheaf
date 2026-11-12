@@ -34,15 +34,15 @@ def doc(work):
 
 
 def sign_in_link(r, opened_browser):
-    """The sign-in link the `sheaf open` that gave `r` handed to the browser. When there is none
-    (PR 248, run 43317866368, py3.13: `opened[0]` raised IndexError and nothing said why), the message
-    holds what `_open` decides on: what it printed (the tab count and the ssh tunnel show there), the
-    ssh seat, the browser settings and the environment behind them."""
-    seat_here = seat.remote(os.environ)
-    state = {"seat": seat_here and seat_here.host, "browser_enabled": config.browser_enabled(lambda *_: None),
-             "env": {k: os.environ.get(k) for k in (*seat.SSH_VARS, *seat.BROWSER_VARS, "SHEAF_NO_BROWSER")
-                     if os.environ.get(k) is not None}}
-    assert opened_browser.opened, f"`sheaf open` opened no browser: code {r.code}, out {r.out!r}, err {r.err!r}, {state}"
+    """The sign-in link that the `sheaf open` which gave `r` handed to the browser. When there is none
+    (PR 248 run 43317866368: `opened[0]` raised IndexError and nothing said why), the failure holds what
+    `_open` decides on: what it printed (the tab count and the ssh tunnel show there), the ssh seat,
+    the browser settings and the environment behind them."""
+    if not opened_browser.opened:
+        seat_here = seat.remote(os.environ)
+        env = {k: os.environ[k] for k in (*seat.SSH_VARS, *seat.BROWSER_VARS, "SHEAF_NO_BROWSER") if k in os.environ}
+        pytest.fail(f"`sheaf open` opened no browser: code {r.code}, out {r.out!r}, err {r.err!r}, "
+                    f"seat {seat_here}, browser_enabled {config.browser_enabled(lambda *_: None)}, env {env}")
     return opened_browser.opened[0]
 
 
@@ -170,8 +170,9 @@ def test_a_page_url_signs_the_browser_in_again_without_rendering(sheaf, opened_b
     opened_browser.opened.clear()
     r = sheaf("open", f"http://127.0.0.1:{port}/work/plan.md")
     assert r.code == 0 and key() not in r.out + r.err
-    assert len(opened_browser.opened) == 1 and key() not in opened_browser.opened[0]
-    assert NONCE_URL.fullmatch(opened_browser.opened[0].replace(str(port), "PORT", 1)), opened_browser.opened
+    link = sign_in_link(r, opened_browser)
+    assert len(opened_browser.opened) == 1 and key() not in link
+    assert NONCE_URL.fullmatch(link.replace(str(port), "PORT", 1)), opened_browser.opened
 
 
 def test_a_url_of_another_host_is_refused(sheaf, opened_browser, doc, port):

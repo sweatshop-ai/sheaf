@@ -1,6 +1,7 @@
 """A Tell to an agent waits on the document, and the page says so (SPEC 9.8, 10.5): "Waiting for <agent>…",
 then "<agent> has seen it…", with Cancel, across a reload and no orange dot."""
 import pytest
+from playwright.sync_api import Error as PlaywrightError
 
 from helpers import browser_on, call
 from pagehelp import DOC, toasted, until
@@ -25,6 +26,15 @@ def ask_agent(tab, site):
 
 
 def line(tab):
+    """The waiting lines of the open thread. The page reloads after every comment write (an agent's reply too), and
+    a read that meets the reload dies with 'Execution context was destroyed': it waits for the new load and reads again."""
+    for _ in range(3):
+        try:
+            return tab.page.locator("#rd-popover .rd-waits").all_inner_texts()
+        except PlaywrightError as e:
+            if "Execution context was destroyed" not in str(e):
+                raise
+            tab.page.wait_for_load_state("domcontentloaded")
     return tab.page.locator("#rd-popover .rd-waits").all_inner_texts()
 
 

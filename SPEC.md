@@ -1223,7 +1223,7 @@ The ☰ button bottom-right, its dot grey (reading), green (editing), orange (un
 
 ### 10.4 Comments
 
-Select text in one block (one table cell) → the chat box opens with its field (10.4), whose send is Tell <display> or, with no agent, Send; badges coloured by the last message (blue answer, orange action, ink a person, grey resolved), filled while unread, breathing while a Tell runs or waits; the popover as the chat box (10.4: bubbles, a field that is open, Resolve and Close in the band, Edit and Delete for your own messages in ⋯, Reopen on a resolved thread); a busy button turns into Cancel on hover; the side panel from the ☰ menu or the right window edge, filters open/resolved/all and by author, "Text deleted" and "Malformed" sections; `mdLite` rendering of comment text (escape first, then a small safe subset). Comments update in place from `changed` events when only comments moved (`textSame`), else the page settles and reloads. The answer of a comment, a reply, an edit, a status or a delete is taken the same way: one that cannot be taken in place settles too, so the edits on screen are saved before the reload.
+Select text in one block (one table cell) → the chat box opens with its field (10.4), whose send is Tell <display> or, with no agent, Send; badges coloured by the last message (blue answer, orange action, ink a person, grey resolved), filled while unread, breathing while a Tell runs or waits; the popover as the chat box (10.4: bubbles, a field that is open, Resolve and Close in the band, Edit and Delete for your own messages in ⋯, Reopen on a resolved thread); a busy button turns into Cancel on hover; the side panel from the ☰ menu or the right window edge, filters open/resolved/all and by author, "Text deleted" and "Malformed" sections; `mdLite` rendering of comment text (escape first, then a small safe subset: paragraphs at a blank line, `-`/`*`/`1.` lists, a line before a list kept as a paragraph, ``` code blocks, `#` headings shown bold, `>` quotes, `code`, bold, italic, `[text](url)` and bare http(s) links, which open in a new tab). Comments update in place from `changed` events when only comments moved (`textSame`), else the page settles and reloads. The answer of a comment, a reply, an edit, a status or a delete is taken the same way: one that cannot be taken in place settles too, so the edits on screen are saved before the reload.
 
 **The thread is a chat box.** A thread opens as a narrow, tall box (at most 340 px wide, on a desktop and a phone alike): a band at the top with the quoted passage, a ⋯ menu, **Resolve** (−, on an open thread only) and **Close** (×); the messages as bubbles, the person's own on the right; and a text field under them that is open from the start, the cursor already in it, the thread opened on its last message and scrolling up. There is no Reply button and no Cancel on a reply (Cancel exists on the Edit form only). **Enter** sends, **Shift+Enter** starts a new line (on a touch screen Enter is a new line and the arrow sends); Enter that confirms an IME composition (`isComposing`) sends nothing. The only send is to the agent (`Tell`, 9 and 10.5); with no agent connected the message stays a comment (`Send`). A Tell starts only from a message sent from the box (the arrow or Enter): the page has no Tell of a thread without new text (it had one until 2026-11). The box carries no hint line under the field, on a desktop or a phone (until 2026-11-09 it read "Render this page from an agent session…"); the menu's Agent line says why.
 
@@ -1478,6 +1478,8 @@ Message to an agent (`prompts.tell_agent`), listed by `documents` (9.8, 12):
 > {RULE}
 >
 > When you are done, answer in the thread with the sheaf tool, so the page shows it: reply(doc="{root}/{path}", id="{id}", text="<what you did>", role="action"). If you cannot do it, reply without the role and say why.
+>
+> The page shows your reply as markdown, to a person: short paragraphs with a blank line between them, a list for several items, `code` and ``` blocks for code, links written in full.
 
 It names no file path and no shell command: an agent has neither.
 
@@ -1536,6 +1538,8 @@ Cancel message (`prompts.cancel`):
 
   When you are done, answer in the thread so the page shows it, with the role action:
   - with the sheaf MCP tool: reply(doc="<sheaf>", id="<thread>", text="<what you did>", role="action")
+
+  The page shows your reply as markdown, to a person: short paragraphs with a blank line between them, a list for several items, `code` and ``` blocks for code, links written in full.
   ```
 
   Stdin is read as bytes and decoded as strict UTF-8, whatever the locale. A stdin that is no such drop (not UTF-8, not JSON, nested past the parser, not an object, or missing those keys) exits 2 and delivers nothing.

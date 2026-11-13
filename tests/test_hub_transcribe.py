@@ -1,13 +1,15 @@
-"""The dictation relay (ticket 06, plan-06-micro.md): `POST /_/transcribe` and `GET /_/transcribe`.
+"""The dictation relay (ticket 06, plan-06-standard-api.md): `POST /_/transcribe` and `GET /_/transcribe`.
 
-The t-compute here is a fake HTTP server on 127.0.0.1 and the key a throwaway one in a temp file:
-nothing leaves the machine and no real key is read. No audio is decoded; the bytes are a stand-in."""
+The provider here is a fake OpenAI-style transcription server on 127.0.0.1 and the key a throwaway one in a temp
+file: nothing leaves the machine and no real key is read. No audio is decoded; the bytes are a stand-in."""
 import json
 import os
 import socket
+import ssl
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 
@@ -16,13 +18,16 @@ from sheafmd.hub import auth, transcribe
 
 KEY = "fake-key-for-tests-0123"
 AUDIO = b"RIFF-not-really-audio"
+MODEL = "fake-model-1"
+TLS = Path(__file__).parent / "tls"
 
 
 class FakeTCompute:
-    """/api/v1/status, /audio/gpu-status and /audio/transcribe of t-compute, with what each answers."""
+    """`POST /v1/audio/transcriptions` of an OpenAI-style provider, with what it answers. `tls=True` serves https
+    with the certificate of tests/tls (valid for localhost and 127.0.0.1)."""
 
-    def __init__(self):
-        self.ready, self.gpu, self.reply = True, 200, (200, {"text": "hello there", "error": None})
+    def __init__(self, tls=False):
+        self.reply = (200, {"text": "hello there"})
         self.redirect = self.truncate = self.drip = False
         self.dropped = threading.Event()                  # the drip found the connection gone
         self.seen = []                                    # (method, path, headers, body)
@@ -40,7 +45,7 @@ class FakeTCompute:
                     self.send_response(200)
                     self.send_header("Transfer-Encoding", "chunked")
                     self.end_headers()
-                    self.wfile.write(b'1f4\r\n{"whisper"')              # a chunk of 500 bytes, 10 sent
+                    self.wfile.write(b'1f4\r\n{"text"')                   # a chunk of 500 bytes, 7 sent
                     self.close_connection = True
                     return
                 if outer.drip:                               # answers a byte at a time, each well inside any per-read limit
@@ -57,18 +62,12 @@ class FakeTCompute:
                     self.close_connection = True
                     return
                 if outer.redirect:
-                    self.send_response(302)
+                    self.send_response(outer.redirect if isinstance(outer.redirect, int) else 302)
                     self.send_header("Location", "/elsewhere")
                     self.end_headers()
                     return
-                if self.path.endswith("/status"):
-                    status, obj = 200, {"whisper": {"ready": outer.ready}}
-                elif self.path.endswith("/audio/gpu-status"):
-                    keyed = self.headers.get("X-API-Key") == KEY
-                    status, obj = (outer.gpu if keyed else 401), {"gpu": "idle"}
-                else:
-                    status, obj = outer.reply
-                data = json.dumps(obj).encode()
+                status, obj = outer.reply
+                data = obj if isinstance(obj, bytes) else json.dumps(obj).encode()
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(data)))
@@ -78,17 +77,36 @@ class FakeTCompute:
             do_GET = do_POST = _answer
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), H)
-        self.url = f"http://127.0.0.1:{self.server.server_port}/api/v1"
+        if tls:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(TLS / "loopback-cert.pem", TLS / "loopback-key-TEST-ONLY.pem")
+            self.server.socket = context.wrap_socket(self.server.socket, server_side=True)
+        self.url = f"{'https' if tls else 'http'}://127.0.0.1:{self.server.server_port}/v1"
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
 
-    def calls(self, suffix):
+    def calls(self, suffix="/audio/transcriptions"):
         return [s for s in self.seen if s[1].endswith(suffix)]
 
     def close(self):
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(5)
+
+
+def fields(body: bytes, headers: dict) -> dict:
+    """The parts of a multipart body: {name: (filename or None, content type or None, content)}."""
+    boundary = {k.lower(): v for k, v in headers.items()}["content-type"].split("boundary=")[1].encode()
+    parts = {}
+    for raw in body.split(b"--" + boundary)[1:-1]:
+        head, _, content = raw.strip(b"\r\n").partition(b"\r\n\r\n")
+        lines = head.decode().split("\r\n")
+        disposition = next(l for l in lines if l.lower().startswith("content-disposition"))
+        name = disposition.split('name="')[1].split('"')[0]
+        filename = disposition.split('filename="')[1].split('"')[0] if "filename=" in disposition else None
+        ctype = next((l.split(": ", 1)[1] for l in lines if l.lower().startswith("content-type")), None)
+        parts[name] = (filename, ctype, content)
+    return parts
 
 
 @pytest.fixture
@@ -106,14 +124,14 @@ def clock():
 
 @pytest.fixture
 def key_file(tmp_path):
-    f = tmp_path / "t-compute.env"
-    f.write_text(f"OTHER=1\nRAG_API_KEY={KEY}\n")
+    f = tmp_path / "provider.env"
+    f.write_text(f"OTHER=1\nTRANSCRIBE_API_KEY={KEY}\n")
     f.chmod(0o600)
     return f
 
 
 def table(tcompute, key_file, **extra):
-    return {"url": tcompute.url, "key_file": str(key_file), "key_name": "RAG_API_KEY", **extra}
+    return {"url": tcompute.url, "key_file": str(key_file), "model": MODEL, **extra}
 
 
 @pytest.fixture
@@ -138,17 +156,33 @@ def dictate(browser, data=AUDIO, name="dictee.webm", ctype="audio/webm", cookie=
 
 def test_a_table_is_read_with_its_defaults(tcompute, key_file):
     cfg = transcribe.parse(table(tcompute, key_file), "the test")
-    assert cfg.url == tcompute.url and cfg.key_file == key_file and cfg.key_name == "RAG_API_KEY"
+    assert cfg.url == tcompute.url and cfg.key_file == key_file and cfg.model == MODEL
+    assert cfg.key_name == "TRANSCRIBE_API_KEY"
     assert (cfg.per_minute, cfg.per_hour) == (12, 120)
 
 
 @pytest.mark.parametrize("bad", [
-    {"url": "ftp://h/api"}, {"url": "http:///api"}, {"url": "http://user:pw@h/api"}, {"url": 3},
+    {"url": "ftp://h/v1"}, {"url": "http:///v1"}, {"url": "http://user:pw@h/v1"}, {"url": 3},
+    {"url": "http://h/v1?x=1"}, {"url": "http://h/v1#frag"},
     {"key_file": "relative.env"}, {"nope": 1}, {"key_name": ""},
+    {"model": ""}, {"model": "two words"}, {"model": "a\nb"}, {"model": 'a"b'}, {"model": "x" * 101}, {"model": 3},
     {"per_minute": 0}, {"per_hour": 0}, {"per_minute": "12"}, {"per_hour": True}])
 def test_a_table_that_cannot_be_used_stops_the_start(tcompute, key_file, bad):
     with pytest.raises(transcribe.TranscribeError, match="the test"):
         transcribe.parse({**table(tcompute, key_file), **bad}, "the test")
+
+
+def test_a_table_without_a_model_says_what_changed(tcompute, key_file):
+    t = table(tcompute, key_file)
+    del t["model"]
+    with pytest.raises(transcribe.TranscribeError, match="'model' is missing") as e:
+        transcribe.parse(t, "the test")
+    assert "ending in /v1" in str(e.value)
+
+
+@pytest.mark.parametrize("model", ["gpt-transcribe", "voxtral-mini-latest", "whisper-1", "org/model:2_a.b", "x" * 100])
+def test_a_model_name_with_the_usual_characters_is_taken(tcompute, key_file, model):
+    assert transcribe.parse(table(tcompute, key_file, model=model), "the test").model == model
 
 
 # ── is dictation available (GET) ─────────────────────────────────────────────
@@ -159,10 +193,9 @@ def available(browser):
     return r.json()["available"]
 
 
-def test_dictation_is_available_when_t_compute_is_ready_and_takes_the_key(browser, relay, tcompute):
-    assert available(browser) is True
-    assert "x-api-key" not in {k.lower() for k in tcompute.calls("/status")[0][2]}          # the open route is asked without the key
-    assert {k.lower(): v for k, v in tcompute.calls("/audio/gpu-status")[0][2].items()}["x-api-key"] == KEY
+def test_dictation_is_available_with_a_usable_key_file_and_no_request_is_made(browser, relay, tcompute):
+    assert available(browser) is True and available(browser) is True
+    assert tcompute.seen == []
 
 
 def test_only_a_signed_in_browser_is_told(browser, relay, tcompute):
@@ -175,23 +208,6 @@ def test_dictation_is_off_without_the_table(browser):
     assert browser.hub.transcribe is None and available(browser) is False
 
 
-def test_dictation_is_off_when_the_model_is_not_ready(browser, relay, tcompute):
-    tcompute.ready = False
-    assert available(browser) is False
-
-
-def test_dictation_is_off_when_the_key_is_refused(browser, relay, tcompute):
-    tcompute.gpu = 401
-    assert available(browser) is False
-
-
-def test_dictation_is_off_when_t_compute_is_down(browser, tcompute, key_file):
-    t = table(tcompute, key_file)
-    tcompute.close()
-    browser.hub.transcribe = transcribe.Relay(transcribe.parse(t, "the test"))
-    assert available(browser) is False
-
-
 @pytest.mark.parametrize("mode", [0o644, 0o640, 0o604])
 def test_a_key_file_others_can_read_is_not_used(browser, relay, tcompute, key_file, mode):
     key_file.chmod(mode)
@@ -201,7 +217,7 @@ def test_a_key_file_others_can_read_is_not_used(browser, relay, tcompute, key_fi
 @pytest.mark.parametrize("kind", ["directory", "fifo", "symlink"])
 def test_a_key_file_that_is_not_a_plain_file_is_not_used_and_said_once(browser, tcompute, tmp_path, kind):
     real = tmp_path / "real.env"
-    real.write_text(f"RAG_API_KEY={KEY}\n")
+    real.write_text(f"TRANSCRIBE_API_KEY={KEY}\n")
     real.chmod(0o600)
     bad = tmp_path / "bad.env"
     {"directory": bad.mkdir, "fifo": lambda: os.mkfifo(bad), "symlink": lambda: bad.symlink_to(real)}[kind]()
@@ -280,20 +296,6 @@ def test_a_key_file_whose_close_fails_when_it_is_refused_is_closed_once_and_said
     assert len([r for r in diagnostics.read() if r["kind"] == "transcribe-key-file"]) == 1
 
 
-def test_a_redirect_is_not_followed_and_the_key_goes_nowhere_else(browser, relay, tcompute):
-    tcompute.redirect = True
-    assert available(browser) is False
-    assert {s[1] for s in tcompute.seen} == {"/api/v1/status"}
-
-
-def test_the_limit_is_on_the_whole_call_not_on_each_read(tcompute, monkeypatch):
-    tcompute.drip = True
-    began = time.monotonic()
-    assert transcribe._call("POST", f"{tcompute.url}/audio/transcribe", {}, b"x", timeout=1) == (0, b"")
-    assert time.monotonic() - began < 2.5
-    assert tcompute.dropped.wait(2)                          # the connection was shut, not left to a thread
-
-
 @pytest.fixture
 def full_backlog():
     """A listening socket that never accepts and whose queue is full: a connect to it waits for its timeout.
@@ -350,58 +352,50 @@ def test_call_returns_only_after_the_timer_has_finished_cutting(tcompute, monkey
             super().__init__(interval, slow)
             timers.append(self)
     monkeypatch.setattr(transcribe.threading, "Timer", SlowCut)
-    assert transcribe._call("POST", f"{tcompute.url}/audio/transcribe", {}, b"x", timeout=0.3) == (0, b"")
+    assert transcribe._call("POST", f"{tcompute.url}/audio/transcriptions", {}, b"x", timeout=0.3) == (0, b"")
     assert not timers[0].is_alive()
-
-
-def test_an_answer_cut_short_is_no_answer(browser, relay, tcompute):
-    tcompute.truncate = True
-    assert available(browser) is False
-
-
-def test_the_answer_is_kept_for_30_seconds(browser, relay, tcompute, clock):
-    assert available(browser) and available(browser)
-    assert len(tcompute.calls("/status")) == 1
-    clock.advance(31)
-    tcompute.ready = False
-    assert available(browser) is False and len(tcompute.calls("/status")) == 2
 
 
 # ── the relay (POST) ─────────────────────────────────────────────────────────
 
-def test_the_audio_goes_to_t_compute_and_the_text_comes_back(browser, relay, tcompute):
+def test_the_audio_goes_to_the_provider_and_the_text_comes_back(browser, relay, tcompute):
     r = dictate(browser)
     assert r.status == 200 and r.json() == {"ok": True, "text": "hello there"}
-    method, path, h, body = tcompute.calls("/audio/transcribe")[0]
-    assert (method, path) == ("POST", "/api/v1/audio/transcribe")
-    h = {k.lower(): v for k, v in h.items()}
-    assert h["x-api-key"] == KEY and h["x-priority"] == "high"
-    assert h["content-type"].startswith("multipart/form-data; boundary=")
-    assert b'name="file"; filename="dictee.webm"' in body and AUDIO in body
+    method, path, h, body = tcompute.calls()[0]
+    assert (method, path) == ("POST", "/v1/audio/transcriptions")
+    low = {k.lower(): v for k, v in h.items()}
+    assert low["authorization"] == f"Bearer {KEY}"
+    assert low["content-type"].startswith("multipart/form-data; boundary=")
+    assert not {"x-api-key", "x-priority"} & set(low)
+    sent = fields(body, h)
+    assert set(sent) == {"file", "model"}                                  # no response_format, no language
+    assert sent["file"] == ("dictee.webm", "audio/webm", AUDIO)
+    assert sent["model"][2] == MODEL.encode()
 
 
 def test_each_extension_is_sent_under_its_fixed_name(browser, relay, tcompute):
     assert dictate(browser, name="dictee.mp4", ctype="audio/mp4").status == 200
-    assert b'filename="dictee.mp4"' in tcompute.calls("/audio/transcribe")[0][3]
+    call = tcompute.calls()[0]
+    assert fields(call[3], call[2])["file"][:2] == ("dictee.mp4", "audio/mp4")
 
 
 @pytest.mark.parametrize("name", ["dictee.wav", "x.webm", "dictee.webm\r\nX: y", "../dictee.webm", "", "dictee.webm.exe"])
 def test_only_the_fixed_file_names_are_taken(browser, relay, tcompute, name):
-    assert dictate(browser, name=name).status == 415 and tcompute.calls("/audio/transcribe") == []
+    assert dictate(browser, name=name).status == 415 and tcompute.calls() == []
 
 
 def test_only_audio_is_taken(browser, relay, tcompute):
-    assert dictate(browser, ctype="text/html").status == 415 and tcompute.calls("/audio/transcribe") == []
+    assert dictate(browser, ctype="text/html").status == 415 and tcompute.calls() == []
 
 
 def test_an_empty_recording_is_refused(browser, relay):
     assert dictate(browser, data=b"").status == 400
 
 
-def test_more_than_two_mebibytes_is_refused_before_t_compute_hears_of_it(browser, relay, tcompute):
+def test_more_than_two_mebibytes_is_refused_before_the_provider_hears_of_it(browser, relay, tcompute):
     assert dictate(browser, data=b"x" * (2 * 1024 * 1024 + 1)).status == 413
     assert dictate(browser, data=b"x" * (2 * 1024 * 1024)).status == 200
-    assert len(tcompute.calls("/audio/transcribe")) == 1
+    assert len(tcompute.calls()) == 1
 
 
 def test_a_recording_over_two_mebibytes_is_refused_by_its_header_before_a_byte_is_read(browser, relay, tcompute):
@@ -415,7 +409,7 @@ def test_a_recording_over_two_mebibytes_is_refused_by_its_header_before_a_byte_i
 
 def test_an_accepted_content_type_never_reaches_the_multipart(browser, relay, tcompute):
     assert dictate(browser, ctype="audio/webm\r\nX-Evil: yes").status == 200
-    sent = tcompute.calls("/audio/transcribe")[0][3]
+    sent = tcompute.calls()[0][3]
     assert b"X-Evil" not in sent and b"Content-Type: audio/webm\r\n\r\n" in sent
 
 
@@ -423,55 +417,118 @@ def test_a_browser_that_is_not_signed_in_or_not_from_the_page_is_refused(browser
     assert dictate(browser, cookie=False).status == 401
     assert dictate(browser, origin="http://evil.example").status == 403
     assert dictate(browser, key=True, cookie=False).status == 403          # the hub key is not a browser
-    assert tcompute.calls("/audio/transcribe") == []
-
-
-def test_no_relay_while_dictation_is_off(browser, relay, tcompute):
-    tcompute.ready = False
-    assert dictate(browser).status == 503 and tcompute.calls("/audio/transcribe") == []
+    assert tcompute.calls() == []
 
 
 def test_no_relay_without_the_table(browser):
     assert dictate(browser).status == 503
 
 
-LEAK = "Traceback /srv/t-compute/secret/path.py"
+def test_no_relay_with_an_unusable_key_file(browser, relay, tcompute, key_file):
+    key_file.chmod(0o644)
+    assert dictate(browser).status == 503 and tcompute.seen == []
+
+
+LEAK = "Traceback /srv/provider/secret/path.py"
 
 
 @pytest.mark.parametrize("reply, status", [((200, {"text": "", "error": LEAK}), 502),
-                                           ((200, {"text": "  ", "error": None}), 502),
+                                           ((200, {"text": "  "}), 502),
+                                           ((200, {"nope": 1}), 502),
+                                           ((200, b"not json " + LEAK.encode()), 502),
+                                           ((400, {"error": {"message": LEAK}}), 502),
+                                           ((413, {"detail": LEAK}), 502),
+                                           ((500, {"detail": LEAK}), 502),
                                            ((503, {"detail": LEAK}), 503),
-                                           ((422, {"detail": LEAK}), 502),
-                                           ((200, {"nope": 1}), 502)])
-def test_a_failed_transcription_is_a_short_safe_answer(browser, relay, tcompute, reply, status):
+                                           ((401, {"detail": LEAK}), 503),
+                                           ((403, {"detail": LEAK}), 503),
+                                           ((404, {"detail": LEAK}), 503),
+                                           ((429, {"error": LEAK}), 429)])
+def test_a_provider_answer_is_a_short_safe_answer(browser, relay, tcompute, reply, status):
     tcompute.reply = reply
     r = dictate(browser)
     assert r.status == status and "/srv" not in r.text and LEAK not in r.text and KEY not in r.text
+    assert LEAK not in json.dumps(diagnostics.read()) and KEY not in json.dumps(diagnostics.read())
 
 
-def test_a_service_that_drops_out_takes_the_button_away_for_30_seconds(browser, relay, tcompute, clock):
+@pytest.mark.parametrize("code", [301, 302, 307])
+def test_a_redirect_on_the_post_is_an_answer_not_a_road(browser, relay, tcompute, code):
+    tcompute.redirect = code
+    assert dictate(browser).status == 502
+    assert len(tcompute.seen) == 1                                         # the Location was never asked, key and sound stayed here
+
+
+def test_the_key_goes_to_the_host_of_the_url_only(browser, relay, tcompute):
+    other = FakeTCompute()
+    try:
+        tcompute.redirect = True
+        dictate(browser)
+        assert other.seen == []
+    finally:
+        other.close()
+
+
+@pytest.mark.parametrize("reply", [(503, {}), (0, None)])
+def test_a_provider_that_drops_out_takes_the_button_away_for_30_seconds(browser, relay, tcompute, clock, reply):
     assert available(browser)
-    tcompute.reply = (503, {})
+    if reply[0] == 0:
+        tcompute.truncate = True
+    else:
+        tcompute.reply = reply
     assert dictate(browser).status == 503
-    tcompute.reply = (200, {"text": "back", "error": None})
+    tcompute.truncate, tcompute.reply = False, (200, {"text": "back"})
     assert available(browser) is False
+    clock.advance(29)
+    assert available(browser) is False
+    clock.advance(2)
+    assert available(browser) is True
+    assert dictate(browser).status == 200
+
+
+@pytest.mark.parametrize("code", [401, 403, 404])
+def test_a_refused_key_or_a_wrong_base_keeps_dictation_off_until_the_key_file_changes(browser, relay, tcompute, key_file, clock, code):
+    tcompute.reply = (code, {})
+    assert dictate(browser).status == 503
+    tcompute.reply = (200, {"text": "back"})
     clock.advance(31)
+    assert available(browser) is False                                     # 30 s are not the way out
+    clock.advance(3600)
+    assert available(browser) is False
+    assert dictate(browser).status == 503 and len(tcompute.calls()) == 1   # nothing is asked while it is off
+    key_file.write_text(f"TRANSCRIBE_API_KEY={KEY}-new\n")                 # a new key, same path
+    key_file.chmod(0o600)
+    assert available(browser) is True
+    assert dictate(browser).status == 200
+
+
+def test_a_touched_key_file_of_the_same_size_brings_dictation_back(browser, relay, tcompute, key_file):
+    tcompute.reply = (401, {})
+    dictate(browser)
+    before = key_file.stat()
+    os.utime(key_file, ns=(before.st_atime_ns, before.st_mtime_ns + 5_000_000_000))
     assert available(browser) is True
 
 
-def test_a_t_compute_that_hangs_up_takes_the_button_away_too(browser, relay, tcompute):
-    assert available(browser)
-    tcompute.truncate = True
-    assert dictate(browser).status == 503
-    tcompute.truncate = False
-    assert available(browser) is False
+def test_a_restart_brings_dictation_back_after_a_refused_key(browser, tcompute, key_file):
+    first = transcribe.Relay(transcribe.parse(table(tcompute, key_file), "the test"))
+    browser.hub.transcribe = first
+    tcompute.reply = (404, {})
+    dictate(browser)
+    assert first.available() is False
+    assert transcribe.Relay(first.cfg).available() is True
+
+
+def test_a_provider_that_is_busy_does_not_take_dictation_away(browser, relay, tcompute):
+    tcompute.reply = (429, {})
+    assert dictate(browser).status == 429
+    assert available(browser) is True
 
 
 def test_one_relay_at_a_time(browser, relay, tcompute):
     assert available(browser)
     with relay._busy:
         r = dictate(browser)
-    assert r.status == 429 and tcompute.calls("/audio/transcribe") == []
+    assert r.status == 429 and tcompute.calls() == []
 
 
 def test_the_budget_per_minute_and_per_hour(browser, tcompute, key_file, clock):
@@ -495,6 +552,107 @@ def test_a_relay_is_written_down_without_the_key_the_text_or_the_sound(browser, 
     row = [r for r in diagnostics.read() if r["kind"] == "transcribe"][0]
     assert row["bytes"] == len(AUDIO) and row["result"] == "ok"
     assert KEY not in json.dumps(diagnostics.read()) and "hello there" not in json.dumps(diagnostics.read())
+
+
+@pytest.mark.parametrize("reply, status", [((200, {"text": "x"}), 200), ((301, {}), 301), ((400, {}), 400),
+                                           ((401, {}), 401), ((503, {}), 503), ((429, {}), 429)])
+def test_the_row_holds_the_status_the_provider_gave(browser, relay, tcompute, reply, status):
+    tcompute.redirect = reply[0] if reply[0] == 301 else False
+    tcompute.reply = reply
+    dictate(browser)
+    assert [str(r["status"]) for r in diagnostics.read() if r["kind"] == "transcribe"] == [str(status)]
+
+
+def test_the_row_says_no_status_when_no_call_was_made(browser, tcompute, key_file):
+    browser.hub.transcribe = transcribe.Relay(transcribe.parse(table(tcompute, key_file), "the test"), record=browser.hub.record)
+    key_file.chmod(0o644)
+    dictate(browser)
+    assert [r for r in diagnostics.read() if r["kind"] == "transcribe"] and all("status" not in r for r in diagnostics.read() if r["kind"] == "transcribe")
+
+
+def test_the_row_has_no_status_for_a_busy_relay(browser, relay):
+    with relay._busy:
+        dictate(browser)
+    assert all("status" not in r for r in diagnostics.read() if r["kind"] == "transcribe")
+
+
+def test_a_provider_that_gave_no_answer_is_status_zero(browser, relay, tcompute):
+    tcompute.truncate = True
+    dictate(browser)
+    assert [str(r["status"]) for r in diagnostics.read() if r["kind"] == "transcribe"] == ["0"]
+
+
+@pytest.fixture
+def row_relay(browser, tcompute, key_file, clock):
+    browser.hub.transcribe = transcribe.Relay(transcribe.parse(table(tcompute, key_file), "the test"), clock=clock,
+                                              record=browser.hub.record)
+    return browser.hub.transcribe
+
+
+def refused(code=None):
+    return [r for r in diagnostics.read() if r["kind"] == "transcribe-refused" and (code is None or str(r["status"]) == str(code))]
+
+
+def test_the_first_refusal_of_each_code_is_said_once(browser, row_relay, tcompute, key_file, clock):
+    def touch():                                                           # a new key file turns dictation back on
+        key_file.write_text(f"TRANSCRIBE_API_KEY={KEY}-{time.monotonic_ns()}\n")
+        key_file.chmod(0o600)
+    tcompute.reply = (401, {})
+    dictate(browser)
+    assert len(refused(401)) == 1
+    touch()
+    dictate(browser)
+    assert len(refused(401)) == 1                                          # a second 401: no second row
+    touch()
+    tcompute.reply = (404, {})
+    dictate(browser)
+    assert len(refused(404)) == 1 and len(refused()) == 2
+    assert all(set(r) >= {"status"} and KEY not in json.dumps(r) and LEAK not in json.dumps(r) for r in refused())
+
+
+@pytest.mark.parametrize("reply, truncate", [((503, {}), False), ((429, {}), False), ((200, {"text": "x"}), True), ((500, {}), False)])
+def test_a_transient_answer_writes_no_refused_row(browser, row_relay, tcompute, reply, truncate):
+    tcompute.reply, tcompute.truncate = reply, truncate
+    dictate(browser)
+    assert refused() == []
+
+
+def test_a_first_503_cannot_hide_a_later_401(browser, row_relay, tcompute, clock):
+    tcompute.reply = (503, {})
+    dictate(browser)
+    clock.advance(31)
+    tcompute.reply = (401, {})
+    dictate(browser)
+    assert len(refused(401)) == 1
+
+
+# ── https: the one connection hook that every outside provider uses ───────────
+
+@pytest.fixture
+def trusting(monkeypatch):
+    """The hub trusts the fixture certificate (and nothing else) for the test."""
+    context = ssl.create_default_context(cafile=str(TLS / "loopback-cert.pem"))
+    monkeypatch.setattr(ssl, "_create_default_https_context", lambda *a, **k: context)
+
+
+def test_a_verified_https_provider_gets_the_key_and_the_sound(browser, key_file, trusting):
+    provider = FakeTCompute(tls=True)
+    try:
+        browser.hub.transcribe = transcribe.Relay(transcribe.parse(table(provider, key_file), "the test"))
+        assert dictate(browser).status == 200
+        assert {k.lower(): v for k, v in provider.calls()[0][2].items()}["authorization"] == f"Bearer {KEY}"
+    finally:
+        provider.close()
+
+
+def test_an_https_provider_with_a_certificate_nobody_trusts_is_refused_and_gets_no_key(browser, key_file):
+    provider = FakeTCompute(tls=True)
+    try:
+        browser.hub.transcribe = transcribe.Relay(transcribe.parse(table(provider, key_file), "the test"))
+        assert dictate(browser).status == 503
+        assert provider.seen == []
+    finally:
+        provider.close()
 
 
 # ── not on the proxy socket, and the page's policy ───────────────────────────

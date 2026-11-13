@@ -267,6 +267,61 @@ def test_the_limit_is_on_the_whole_call_not_on_each_read(tcompute, monkeypatch):
     assert tcompute.dropped.wait(2)                          # the connection was shut, not left to a thread
 
 
+@pytest.fixture
+def full_backlog():
+    """A listening socket that never accepts and whose queue is full: a connect to it waits for its timeout."""
+    import socket
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(0)
+    port, fill = listener.getsockname()[1], []
+    for _ in range(4):
+        c = socket.socket()
+        c.setblocking(False)
+        try:
+            c.connect(("127.0.0.1", port))
+        except BlockingIOError:
+            pass
+        fill.append(c)
+    yield port
+    for c in fill + [listener]:
+        c.close()
+
+
+def test_the_limit_covers_every_address_tried_for_the_connection(full_backlog, monkeypatch):
+    import socket
+    one = (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", full_backlog))
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [one, one, one])
+    began = time.monotonic()
+    assert transcribe._call("POST", f"http://tc.invalid:{full_backlog}/x", {}, b"x", timeout=1) == (0, b"")
+    assert time.monotonic() - began < 2.5                    # three addresses at 1 s each would take 3 s
+
+
+def test_the_limit_covers_the_resolution_of_the_name(monkeypatch):
+    import socket
+    release = threading.Event()
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: release.wait(5) and [])
+    began = time.monotonic()
+    try:
+        assert transcribe._call("POST", "http://tc.invalid:9/x", {}, b"x", timeout=1) == (0, b"")
+        assert time.monotonic() - began < 2.5
+    finally:
+        release.set()
+
+
+def test_call_returns_only_after_the_timer_has_finished_cutting(tcompute, monkeypatch):
+    tcompute.drip = True
+    timers = []
+
+    class SlowCut(threading.Timer):
+        def __init__(self, interval, fn):
+            super().__init__(interval, lambda: (fn(), time.sleep(0.5)))
+            timers.append(self)
+    monkeypatch.setattr(transcribe.threading, "Timer", SlowCut)
+    assert transcribe._call("POST", f"{tcompute.url}/audio/transcribe", {}, b"x", timeout=0.3) == (0, b"")
+    assert not timers[0].is_alive()
+
+
 def test_an_answer_cut_short_is_no_answer(browser, relay, tcompute):
     tcompute.truncate = True
     assert available(browser) is False

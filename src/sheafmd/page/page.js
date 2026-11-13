@@ -117,15 +117,19 @@ var create = function (ROOT, CFG, opts) {
   // The byline names who prepared the document. On a page rendered from a session that is the session ("Document
   // prepared by Yusuf"), not the hub's person, and its name brings the session to the front, or opens it again once
   // it has ended (SPEC 4.3, 8.5). A page with no session, and the share copy, keep the line as rendered.
-  var byline = main && main.querySelector('p.doc-by'), bylineAsRendered = byline ? byline.innerHTML : '';
+  var byline = main && main.querySelector('p.doc-by'), bylineAsRendered = byline ? byline.innerHTML : '',
+      bylineHtml = bylineAsRendered;
   function takeByline() {
     if (!byline) return;
-    var a = CFG.agent;
-    if (CFG.proxy || !a || a.kind !== 'session') { byline.innerHTML = bylineAsRendered; return; }
-    var name = esc(a.name || a.display), forWhom = byline.getAttribute('data-for');
-    byline.innerHTML = 'Document prepared by ' +
-      (a.jump ? '<button type="button" class="doc-by-who" title="Open this session">' + name + '</button>' : name) +
-      (forWhom ? ' for ' + esc(forWhom) : '');
+    var a = CFG.agent, html = bylineAsRendered;
+    if (!CFG.proxy && a && a.kind === 'session') {
+      var name = esc(a.name || a.display), forWhom = byline.getAttribute('data-for');
+      html = 'Document prepared by ' +
+        (a.jump ? '<button type="button" class="doc-by-who" title="Open this session">' + name + '</button>' : name) +
+        (forWhom ? ' for ' + esc(forWhom) : '');
+    }
+    // Only when it changed: every answer of /_/doc comes here, and new nodes would end a selection made in the line.
+    if (html !== bylineHtml) byline.innerHTML = bylineHtml = html;
   }
   if (byline) listen(byline, 'click', function (e) {
     var b = e.target.closest ? e.target.closest('button.doc-by-who') : null;

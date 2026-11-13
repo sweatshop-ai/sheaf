@@ -901,7 +901,8 @@ def test_a_reply_the_hub_took_while_its_answer_was_lost_and_the_store_refused_re
     p.fill(FIELD, "Because.")
     p.keyboard.press("Enter")
     until(lambda: "Because." in site.file.read_text(encoding="utf-8"), what="the reply in the file")
-    p.wait_for_timeout(1500)      # the hub's event that says it took the reply reaches the page
+    until(lambda: p.locator(THREAD).count() == 2, what="the reply in the thread, read from the hub's event")
+    p.wait_for_timeout(500)      # the page's clear of what the event named runs after it is taken in: while the store still refuses
     p.unroute("**/_/comment")
     store_unreadable(p, False)
     hold_time_passes(p)

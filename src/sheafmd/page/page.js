@@ -1528,8 +1528,8 @@ var create = function (ROOT, CFG, opts) {
   // `pendingClears`: tests of this page's entries that the person emptied while the store refused the read, so the
   // clear could not be written: a new message's field emptied (draftsReplace), a reply or an edit cleared (threadKeep),
   // a send the hub took (taken). They stay out of the page's reads (commentDraftsLoad), and go from the store with the
-  // first read that works, which writes the store without them (commentDraftsSave). Kept in memory: a reload while
-  // the store still refuses the read offers the entry again.
+  // first read that works, which writes the store without them (commentDraftsSave). Kept in memory: a reload before
+  // that read, while the store still refuses it, offers the entry again.
   var pendingClears = [];
   var readWorked = false, flushing = false;
   // `strict`: a store that refuses the read throws, instead of passing for an empty one (the writers read so, commentDraftsHeld and taken).
@@ -1550,13 +1550,21 @@ var create = function (ROOT, CFG, opts) {
   }
   function ofOtherRoot(d) { return !!CFG.root && d.root !== undefined && d.root !== CFG.root; }
   function commentDraftsLoad(strict) {
-    var held = commentDraftsRaw(strict).filter(function (d) {
-      return !ofOtherRoot(d) && !pendingClears.some(function (gone) { return gone(d); });
+    var raw = commentDraftsRaw(strict), cleared = false;
+    var held = raw.filter(function (d) {
+      if (ofOtherRoot(d)) return false;
+      if (!pendingClears.some(function (gone) { return gone(d); })) return true;
+      cleared = true;
+      return false;
     });
     // The first read that works after a clear was held writes it: a reload or another page does not offer the entry again.
+    // Nothing to write when the store no longer holds what the clear names.
     if (readWorked && pendingClears.length && !flushing) {
-      flushing = true;
-      try { commentDraftsSave(held); } finally { flushing = false; }
+      if (!cleared) pendingClears = [];
+      else {
+        flushing = true;
+        try { commentDraftsSave(held); } finally { flushing = false; }
+      }
     }
     return held;
   }

@@ -13,8 +13,8 @@
 
 - [x] Le choix (borne ou ligne de commande) est écrit avec sa raison : borne `>=3.6,<4`, `uv.lock` régénéré (PR 258) ; la ligne de commande aurait remis `--dist` sur chaque commande, ce qui a déjà cassé `-p no:xdist` (ticket 38)
 - [x] `tests/test_in_order.py` échoue toujours si le groupe cesse de fonctionner
-- [ ] CI verte
+- [x] CI verte
 
 **Claimed by:** Isolde 2026-11-12 20:12
 
-**Status:** in-progress — PR 258 open, waiting for merge (revue Opus de repli GO, deux nits : /home/tiroir/.claude/pm/chat-box-handoffs/pr-39-reviews/opus-fallback.md). Done with the merge sha.
+**Status:** done (PR 258, merged 0455284)

@@ -2,8 +2,7 @@
 
 **What to build:** La garde `beforeinput` de `src/sheafmd/page/page.js` (ticket 43, PR 259) pose `rd-saving` sur `e.target.closest('[contenteditable="true"]')`. Si la touche refusée tombe dans un `textarea` ou un `input` à l'intérieur de `main` (un formulaire de commentaire ou de réponse), `closest` rend null : le toast « Saving… » est dit, mais le champ ne porte ni trait pointillé ni curseur `not-allowed`, et rien ne reste à l'écran une fois le toast parti (2600 ms). La garde refusait déjà ces touches avant le ticket 43 ; elles sont toujours perdues, seul le toast le dit.
 
-**Blocked by:**
-- External: PR 259 (ticket 43) merged into main
+**Blocked by:** none
 
 **Établi (preuves) :** revue de spec de la PR 259 (`pr-43-reviews/standards.md`, section Spec (a)). Non reproduit par un test.
 
@@ -12,4 +11,4 @@
 - [ ] Un test de page tape dans un champ de formulaire pendant une sauvegarde sans réponse et échoue tant que le champ ne porte pas de marque
 - [ ] La marque part avec la sauvegarde et ne devient pas une modification
 
-**Status:** blocked (PR 259)
+**Status:** ready-for-agent

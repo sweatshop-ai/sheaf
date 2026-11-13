@@ -13,10 +13,10 @@ Les deux tests sont ceux qui précèdent immédiatement le test du ticket 52 dan
 
 **Par où commencer :** `toast()` ne doit pas lever pendant un rechargement : l'attraper dans la fonction que `until` appelle (rendre `""` quand l'évaluation échoue pour ces deux raisons), ou un `toast_text(page)` pour les attentes. Test de `tests/` qui pose le cas à la main (une page dont le `#rd-toast` n'existe pas encore). Ne pas élargir l'attrapage à toute erreur Playwright : un pilote figé doit rester visible.
 
-- [ ] La lecture du toast pendant un rechargement rend « pas encore » au lieu de lever, pour les deux erreurs relevées et pour elles seules
-- [ ] Un test pose le cas à la main et échoue sans le correctif
-- [ ] Huit passages du fichier entier sous quatre brûleurs sur t-compute, aucun rouge de ce type
+- [x] La lecture du toast pendant un rechargement rend « pas encore » au lieu de lever, pour les deux erreurs relevées et pour elles seules
+- [x] Un test pose le cas à la main et échoue sans le correctif
+- [x] Huit passages du fichier entier sous quatre brûleurs sur t-compute, aucun rouge de ce type
 
 **Claimed by:** Elias 2026-11-13 01:35
 
-**Status:** in-progress — PR 268 open (head 7c421ea, CI run 43340437252 green, reviews GO), waiting for merge
+**Status:** done (PR 268, merged acd42cb)

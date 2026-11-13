@@ -8,10 +8,10 @@
 
 **Par où commencer :** soit lire `who.proxy` dans `_for_members`, soit ajouter la ligne de test qui fixe le résultat. Choisir l'un des deux, ne pas laisser un champ mort.
 
-- [ ] `_for_members(("transcribe-ask", DICTATION, None))` vaut `False`, fixé par un test qui échoue si la route est admise
-- [ ] Le champ `proxy` est lu quelque part, ou il est retiré
-- [ ] `test_route_access.py` reste strict
+- [x] `_for_members(("transcribe-ask", DICTATION, None))` vaut `False`, fixé par un test qui échoue si la route est admise
+- [x] Le champ `proxy` est lu quelque part, ou il est retiré
+- [x] `test_route_access.py` reste strict
 
 **Claimed by:** Greta 2026-11-13 00:16
 
-**Status:** in-progress — PR 266 open (tickets 33 and 34), head 1036820, CI green
+**Status:** done (PR 266, merged 5086148)

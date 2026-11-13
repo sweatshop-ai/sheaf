@@ -2,8 +2,7 @@
 
 **What to build:** Dans `src/sheafmd/page/page.js` (branche `chat-box/06-page`, ticket 06 PR 2), le premier appui sur le micro appelle `getUserMedia` et pose `dict = {f, chunks, discard:false, rec:null}`. Tant que l'invite du navigateur reste ouverte, `stopDictation(true)` (Échap, fermeture de la boîte) ne fait que mettre `d.discard = true`, car `d.rec` et `d.abort` n'existent pas encore ; `dict` reste posé jusqu'à ce que la personne réponde à l'invite. Pendant ce temps, dans une boîte rouverte, `if (dict) { ...; return; }` (début du gestionnaire de clic) fait que chaque bouton micro ne fait rien, sans signe. Quand le flux arrive, il est bien relâché (`d.discard` → `release(); dict = null`). Le ticket demande de **décider** : (a) `stopDictation(true)` met `dict = null` tout de suite et le rappel de `getUserMedia` teste `dict !== d` en plus de `d.discard`, ou (b) un clic sur un autre formulaire remplace un `dict` encore sans `rec`. Classe : c, trouvé par la revue ronde 2 (Opus, repli de Codex) de la PR 2 du ticket 06 ; antérieur au correctif de la ronde 1, rejeté pour cette PR par Halima.
 
-**Blocked by:**
-- External: the PR of chat-box/06-page (ticket 06 page side) merged into main
+**Blocked by:** none
 
 **Établi (preuves) :** lecture du code seulement (`page.js`, gestionnaire de clic de `dictation()` et `stopDictation`), aucun test ne l'exerce.
 
@@ -12,6 +11,4 @@
 - [ ] La décision (a ou b) est écrite dans le ticket avant le code
 - [ ] Un test de page échoue tant que le micro d'une boîte rouverte ne répond pas pendant que l'invite de la précédente est ouverte
 
-**Claimed by:** —
-
-**Status:** blocked (PR of chat-box/06-page)
+**Status:** ready-for-agent

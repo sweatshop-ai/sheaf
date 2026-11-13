@@ -8,10 +8,10 @@
 
 **Par où commencer :** mettre `wrapped = True` avant le `close` de cette branche, ou sortir le `close` du `try`. Le descripteur est alors fermé une seule fois par celui qui le possède, quel que soit le chemin.
 
-- [ ] Un test fait lever `OSError` à `os.close` dans la branche « pas un fichier régulier » et échoue sans le correctif (descripteur fermé deux fois)
-- [ ] Le descripteur est fermé une seule fois sur chaque chemin ; l'échec de lecture donne `available: false` et une ligne de diagnostic `transcribe-key-file`, jamais un 500
+- [x] Un test fait lever `OSError` à `os.close` dans la branche « pas un fichier régulier » et échoue sans le correctif (descripteur fermé deux fois)
+- [x] Le descripteur est fermé une seule fois sur chaque chemin ; l'échec de lecture donne `available: false` et une ligne de diagnostic `transcribe-key-file`, jamais un 500
 - [ ] Aucune clé dans le test, le dépôt ni les journaux
 
 **Claimed by:** Greta 2026-11-13 00:16
 
-**Status:** in-progress — PR 266 open (tickets 33 and 34), head 1036820, CI green
+**Status:** done (PR 266, merged 5086148)

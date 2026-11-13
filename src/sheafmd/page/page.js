@@ -114,6 +114,23 @@ var create = function (ROOT, CFG, opts) {
   // session is a member's fork, CFG.can holds "relay-tell" while that fork's relay is connected: Tell goes the
   // same way, to the relay (9.14).
   var AGENT, AGENT_UC, CAN, canTell, toBox;
+  // The byline names who prepared the document. On a page rendered from a session that is the session ("Document
+  // prepared by Yusuf"), not the hub's person, and its name brings the session to the front, or opens it again once
+  // it has ended (SPEC 4.3, 8.5). A page with no session, and the share copy, keep the line as rendered.
+  var byline = main && main.querySelector('p.doc-by'), bylineAsRendered = byline ? byline.innerHTML : '';
+  function takeByline() {
+    if (!byline) return;
+    var a = CFG.agent;
+    if (CFG.proxy || !a || a.kind !== 'session') { byline.innerHTML = bylineAsRendered; return; }
+    var name = esc(a.name || a.display), forWhom = byline.getAttribute('data-for');
+    byline.innerHTML = 'Document prepared by ' +
+      (a.jump ? '<button type="button" class="doc-by-who" title="Open this session">' + name + '</button>' : name) +
+      (forWhom ? ' for ' + esc(forWhom) : '');
+  }
+  if (byline) listen(byline, 'click', function (e) {
+    var b = e.target.closest ? e.target.closest('button.doc-by-who') : null;
+    if (b) jumpToSession(b);
+  });
   function takeAgent() {
     CAN = CFG.can || [];
     toBox = CAN.indexOf('box-tell') >= 0 || CAN.indexOf('relay-tell') >= 0;
@@ -125,6 +142,7 @@ var create = function (ROOT, CFG, opts) {
     canTell = CAN.indexOf('relay-tell') >= 0 || CAN.indexOf(toBox ? 'box-tell' : 'deliver') >= 0 ||
               (!toBox && CAN.indexOf('reopen') >= 0) ||
               (!toBox && CAN.indexOf('queue') >= 0);        // an agent: the Tell waits for it (SPEC 9.8)
+    takeByline();
   }
   function liveSession() { return (CFG.work && CFG.work.sessions && CFG.work.sessions[0]) || {}; }
   // Where a member's Tell goes: James's window on the box, or the fork's session through its relay (9.14).

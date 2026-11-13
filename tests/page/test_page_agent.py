@@ -189,3 +189,17 @@ def test_the_answer_button_follows_the_jump_command_without_a_reload(tab, agent,
     tab.site.reopen()
     tab.page.wait_for_function("() => document.querySelectorAll('#rd-popover button.rd-answer').length === 0",
                                timeout=30000)
+
+
+def test_the_byline_names_the_session_and_its_name_opens_it(tab, agent, tmp_path):
+    out = tmp_path / "jumped.json"
+    probe = tmp_path / "probe.py"
+    probe.write_text(PROBE, encoding="utf-8")
+    write_config(f"[jump]\ncommand = {json.dumps([sys.executable, str(probe), str(out), '{session}', '{name}'])}\n")
+    write_record(tmp_path / "claude-config", name="Cosima", messagingSocketPath="", procStart=proc_start(PID))
+    tab.site.hub.render(tab.site.file, {"by": "tiroir"}, None)      # the hub's person, as `sheaf FILE.md` gives it
+    tab.open()
+    assert tab.page.inner_text("p.doc-by") == "Document prepared by Cosima"
+    tab.page.click("p.doc-by button.doc-by-who")
+    until(lambda: out.exists(), timeout=10, what="the jump command's output")
+    assert json.loads(out.read_text(encoding="utf-8")) == ["s-1", "Cosima"]

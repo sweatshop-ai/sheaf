@@ -190,6 +190,30 @@ def test_a_session_that_ended_is_not_jumped_to(browser, plan, session, probe, cf
     assert not probe[1].exists()
 
 
+def test_a_session_that_ended_is_opened_again_by_the_reopen_command(browser, plan, session, probe, cfg, tmp_path):
+    script, out = probe
+    reopened = tmp_path / "reopened.json"
+    write_config(f"[jump]\ncommand = {toml_list([sys.executable, str(script), str(out), '{session}'])}\n"
+                 f"[reopen]\ncommand = {toml_list([sys.executable, str(script), str(reopened), '{session}', '{name}'])}\n")
+    attach(browser, plan, session)
+    os.unlink(cfg / "sessions" / f"{PID}.json")
+    r = jump(browser)
+    assert r.status == 200, r.text
+    assert json.loads(reopened.read_text(encoding="utf-8"))["argv"] == ["s-1", ODD]
+    assert not out.exists(), "the jump command ran for a session that has ended"
+
+
+def test_a_failing_reopen_command_says_why_the_jump_did_not_happen(browser, plan, session, probe, cfg, monkeypatch):
+    script, out = probe
+    write_config(f"[jump]\ncommand = {toml_list(['true'])}\n"
+                 f"[reopen]\ncommand = {toml_list([sys.executable, str(script), str(out), '{session}'])}\n")
+    monkeypatch.setenv("PROBE_EXIT", "2")
+    attach(browser, plan, session)
+    os.unlink(cfg / "sessions" / f"{PID}.json")
+    r = jump(browser)
+    assert r.status == 409 and r.json()["error"] == "The reopen command failed (exit 2): no window found"
+
+
 def test_a_record_left_for_a_pid_another_process_took_is_not_jumped_to(browser, plan, session, probe, cfg):
     set_jump(probe, "{session}")
     attach(browser, plan, session)

@@ -31,6 +31,10 @@ _Avoid_: settings, project config
 A read-only render of a document with every comment removed, for someone outside the conversation.
 _Avoid_: client render, client version, public copy
 
+**Copy block**:
+A quote whose first line is `[!COPY]`: the page shows it with a Copy button, the Share copy and the PDF as a plain quote (SPEC 6.8).
+_Avoid_: callout, snippet
+
 **Share**:
 The action a sheaf's owner ticks to open it to every member whose roots hold it (SPEC 9.11). It renders nothing and makes no Share copy. Only the owner unticks it, which makes the sheaf their own alone again. In the list's root a Share moves the sheaf's file out of its owner's private folder, and unticking it moves the file back; the sheaf's name, its address, stays.
 _Avoid_: publish, unlock
@@ -99,19 +103,27 @@ _Avoid_: permission, privacy, ACL
 The action any member ticks on a sheaf of the assistant James to end his work on its project (SPEC 9.11). It is the one place the core names a deployment's assistant: the hub writes a diagnostics row and, with `[list] stop_dir`, a file the deployment's supervisor reads; stopping is the deployment's, a Layer concern the core only signals.
 
 **Move to**:
-The action that answers which client an unsure thread is for: one box per candidate, `- [ ] Move to <slug> (ref <thread>)`, the only word that takes an argument (SPEC 9.10). The boxes are the options of one answer: on the list each is a one-off button named by its slug, and once one is ticked the others are no actions and the hub refuses a second tick (#109); the deployment's mail module moves the thread.
+The action that answers which client an unsure thread is for: one box per candidate, `- [ ] Move to <slug> (ref <thread>)`, the one word with a slug and a thread (SPEC 9.10; Merge, Deploy and Install take the rest of the line). The boxes are the options of one answer: on the list each is a one-off button named by its slug, and once one is ticked the others are no actions and the hub refuses a second tick (#109); the deployment's mail module moves the thread.
 _Avoid_: reassign, transfer
 
 **One-off action**:
-An action a member presses once and that stays pressed: every word but Share (SPEC 9.10). On the list and at the top of its sheaf's page (#111) it is a red button that reads Undo for 5 seconds before the hub writes the tick; once pressed it stays on the row, filled and locked, with who pressed it and when (#110); the hub refuses a save that unticks it (#108); a Move to is a one-off too, one button per candidate.
+An action a member presses once and that stays pressed: every word but Share (SPEC 9.10), and the merge desk's Merge, Deploy and Install (action-buttons 04). On the list it is a red button; on a page it is a red button on its own line, where its box is (action-buttons 01; until then at the top of the page, #111). It reads Undo for 5 seconds before the hub writes the tick; once pressed it stays on the row, filled and locked, with who pressed it and when (#110); the hub refuses a save that unticks it (#108); a Move to is a one-off too, one button per candidate.
 _Avoid_: single-use, final
 
 **Pressed box**:
 A ticked box of an action's word, `- [x] Approve` (SPEC 9.10). On the list and on the sheaf's page a pressed one-off is a locked button that says who pressed it and when, from the commit that last changed its line (#110); a pressed toggle is one its owner may release.
 _Avoid_: done box, checked action
 
+**Tick box**:
+A task line's box that is switched on and off, `- [ ] Approved: the quote of 12 November`, drawn as a checkbox; its label ticks it too (action-buttons 02).
+_Avoid_: toggle (for the drawing), checkmark
+
+**Label**:
+The words of a tick box's line that belong to the box: those before the first `:` or ` — `, else the first word. A click on them ticks or unticks the box; the rest of the line is ordinary text, to select and comment on.
+_Avoid_: caption, title
+
 **Toggle action**:
-An action a member presses and may release again; today only Share (SPEC 9.10, 9.11). On the list and at the top of its sheaf's page it is a blue button with `aria-pressed`, pressed and released there by the sheaf's owner (#110, #111).
+An action a member presses and may release again; today only Share (SPEC 9.10, 9.11), which becomes a tick box (action-buttons 03): something switched on and off is a tick box, something launched once is a button (Thierry, 2026-11-13). On the list and at the top of its sheaf's page it is a blue button with `aria-pressed`, pressed and released there by the sheaf's owner (#110, #111).
 _Avoid_: switch
 
 **Pointer** (of a sheaf):
@@ -167,3 +179,7 @@ _Avoid_: lock, snapshot
 **Versions store**:
 Where the hub keeps the texts it handed pages, per document, so a save against an older one is merged: the state folder's `versions/`, or with `versions = "root"` the root's own `.sheaf/versions/`, committed with the document in a root that commits.
 _Avoid_: history, backup, snapshots
+
+**Dictation**:
+Text spoken into the microphone button of a chat box and transcribed: it is put in the field at the cursor and stays editable. It is never sent to the agent by itself, and the sound is not kept.
+_Avoid_: voice message, speech-to-text send

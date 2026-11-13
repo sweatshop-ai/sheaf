@@ -139,7 +139,9 @@
   function htmlAttr(el, tag, name, value) {
     if (name === 'id') { if (IDENT.test(value) && !/^rd-/i.test(value)) el.setAttribute('id', own(value)); return; }
     if (name === 'class') {
-      const kept = value.split(/\s+/).filter((c) => c && !/^rd-/i.test(c) && /^[\w:.-]{1,100}$/.test(c));
+      // rd-copy is the one class of the render the page needs: its script gives the quote a Copy button.
+      const kept = value.split(/\s+/).filter((c) => c && (!/^rd-/i.test(c) || (tag === 'blockquote' && c === 'rd-copy')) &&
+                                           /^[\w:.-]{1,100}$/.test(c));
       if (kept.length) el.setAttribute('class', kept.join(' '));
       return;
     }

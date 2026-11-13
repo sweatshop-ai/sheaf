@@ -8,6 +8,7 @@ import json
 import os
 import socket
 import subprocess
+import sys
 import threading
 import time
 
@@ -234,7 +235,7 @@ def test_the_name_the_page_is_given_is_cleaned_by_the_rule_of_a_display_name(bro
     assert page_meta(browser.get(URL).text)["agent"]["name"] == "Cosima"
 
 
-@pytest.mark.parametrize("pid", [PID, 260])      # 260: a runner's pid; page.js holds "2600", which is not it
+@pytest.mark.parametrize("pid", [PID, 260], ids=["own-pid", "260"])      # 260: a runner's pid; page.js holds "2600", which is not it
 def test_the_page_never_holds_the_session_id_the_socket_or_the_command(browser, plan, session, pid):
     attach(browser, plan, session.target(session="s-secret-1"))
     session.record(sessionId="s-secret-1")
@@ -284,6 +285,121 @@ def test_a_session_that_has_ended_disables_tell_with_its_line(
     meta = page_meta(browser.get(URL).text)
     assert meta["can"] == []
     assert meta["lines"] == {"tell": ENDED}
+
+
+# ── an ended session opened again for a Tell (SPEC 4.3 `[reopen]`) ─────────────
+
+REOPENER = '''\
+import json, os, sys
+out, record, rest = sys.argv[1], sys.argv[2], sys.argv[3:]
+env = {k: v for k, v in os.environ.items() if k.startswith("SHEAF_REOPEN_")}
+with open(out, "a", encoding="utf-8") as f:
+    f.write(json.dumps({"argv": rest, "env": env}) + "\\n")
+if os.environ.get("REOPEN_EXIT"):
+    sys.stderr.write("no transcript for that conversation any more\\n")
+    sys.exit(int(os.environ["REOPEN_EXIT"]))
+if record != "-":                           # the session comes back: its record, naming its socket
+    os.replace(record, os.path.join(os.path.dirname(record), "sessions", os.path.basename(record)))
+'''
+
+
+@pytest.fixture
+def reopener(tmp_path, session):
+    """A `[reopen]` command that writes down how it was called and brings the session's record back.
+    `back=False`: it exits 0 and the session never comes back."""
+    script, out = tmp_path / "reopen.py", tmp_path / "reopened.jsonl"
+    script.write_text(REOPENER, encoding="utf-8")
+
+    def set_up(*args, back=True):
+        record = "-"
+        if back:
+            rec = {"pid": PID, "sessionId": "s-1", "cwd": str(session.cwd), "kind": "interactive",
+                   "peerProtocol": 1, "messagingSocketPath": session.peer.path, "name": "Cosima",
+                   "status": "idle", "procStart": proc_start(PID)}
+            staged = session.cfg / f"{PID}.json"
+            staged.write_text(json.dumps(rec), encoding="utf-8")
+            record = str(staged)
+        command = [sys.executable, str(script), str(out), record, *args]
+        path = paths.config_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("[reopen]\ncommand = [" + ", ".join(json.dumps(a) for a in command) + "]\n",
+                        encoding="utf-8")
+
+    def calls():
+        return [json.loads(ln) for ln in out.read_text(encoding="utf-8").splitlines()] if out.exists() else []
+    set_up.calls = calls
+    return set_up
+
+
+@pytest.fixture
+def closed(browser, plan, session):
+    """The plan with a thread c1, rendered from Cosima, whose session has since been closed."""
+    attach(browser, plan, session.target(socket=""))
+    (session.cfg / "sessions" / f"{PID}.json").unlink()
+    comment(plan)
+    return plan
+
+
+def test_a_session_that_has_ended_keeps_tell_when_a_reopen_command_is_set_up(browser, closed, reopener):
+    reopener("{session}")
+    meta = page_meta(browser.get(URL).text)
+    assert meta["can"] == ["reopen"] and meta["lines"] == {"tell": None}
+    got = browser.get(f"/_/doc?doc={DOC}").json()
+    assert got["capabilities"] == ["reopen"] and got["lines"] == {"tell": None}
+
+
+def test_a_tell_to_an_ended_session_opens_it_again_and_then_delivers(browser, hub, closed, session, reopener):
+    reopener("--id", "{session}", "--", "{name}", "{cwd}")
+    sub = tab(hub)
+    sub.drain()
+    r = post(browser, "/_/tell")
+    assert r.status == 200 and r.json() == {"ok": True}
+    msg = json.loads(session.peer.received())
+    body = msg["message"]["content"].split(">\n", 1)[1].rsplit("\n</cross-session-message>", 1)[0]
+    assert body == prompts.tell(DOC, str(closed), "Ada", thread(closed), links=True)
+    finish(hub)
+    assert [n for n, _ in events(sub)] == ["tell-sent"]
+    [call] = reopener.calls()
+    assert call["argv"] == ["--id", "s-1", "--", "Cosima", str(session.cwd)]
+    assert call["env"] == {"SHEAF_REOPEN_SESSION": "s-1", "SHEAF_REOPEN_NAME": "Cosima",
+                           "SHEAF_REOPEN_AGENT": "claude-code", "SHEAF_REOPEN_CWD": str(session.cwd)}
+    assert page_meta(browser.get(URL).text)["can"] == ["deliver"]
+
+
+def test_a_running_session_is_told_without_the_reopen_command(browser, hub, ready, session, reopener):
+    reopener("{session}")
+    post(browser, "/_/tell")
+    session.peer.received()
+    finish(hub)
+    assert reopener.calls() == []
+
+
+def test_a_reopen_command_that_fails_fails_the_tell_with_its_line(
+        browser, hub, closed, session, reopener, monkeypatch):
+    reopener("{session}")
+    monkeypatch.setenv("REOPEN_EXIT", "3")
+    sub = tab(hub)
+    sub.drain()
+    assert post(browser, "/_/tell").status == 200
+    finish(hub)
+    [failed] = named(events(sub), "tell-failed")
+    assert failed["error"] == ("The reopen command failed (exit 3): no transcript for that "
+                               "conversation any more")
+    assert hub.entry(DOC).live.waiting() == [] and session.peer.messages == []
+
+
+def test_a_session_that_does_not_come_back_fails_the_tell_after_the_wait(
+        browser, hub, closed, session, reopener, monkeypatch):
+    monkeypatch.setattr("sheafmd.hub.tell.REOPEN_WAIT", 0.5)
+    reopener("{session}", back=False)
+    sub = tab(hub)
+    sub.drain()
+    assert post(browser, "/_/tell").status == 200
+    finish(hub)
+    [failed] = named(events(sub), "tell-failed")
+    assert failed["error"] == ("Cosima was opened again but could not take the message within 0.5 "
+                               "seconds. Tell again once it is open.")
+    assert len(reopener.calls()) == 1 and hub.entry(DOC).live.waiting() == []
 
 
 def test_a_session_whose_socket_was_not_found_says_that_under_tell(browser, plan, session):

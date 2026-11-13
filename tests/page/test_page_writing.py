@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from helpers import comment, writes_from_outside
-from pagehelp import (DOC, P1, P2, T0, at, comment_draft_key, comment_on, gone, key, mark, open_box, open_form, typed, reload_on_clock, reloaded,
+from pagehelp import (DOC, P1, draft_key, P2, T0, at, comment_draft_key, comment_on, gone, key, mark, open_box, open_form, typed, reload_on_clock, reloaded,
                       select, select_by_touch, toast, toasted, type_at_end, until)
 from sheafmd import comments as rdc
 from sheafmd.hub import live as hub_live
@@ -1456,6 +1456,10 @@ def test_without_a_form_the_settle_saves_and_reloads_without_a_question(frozen):
 @pytest.mark.parametrize("tick", [True, False])
 def test_what_is_saved_while_the_reload_waits_for_a_reply_is_merged_onto_the_change_from_outside(frozen, start, tick):
     p, f = frozen.page, frozen.site.file
+    out = {"n": 0}                          # saves sent and not yet answered
+    p.on("request", lambda r: out.update(n=out["n"] + 1) if r.method == "POST" and r.url.endswith("/_/save") else None)
+    p.on("requestfinished", lambda r: out.update(n=out["n"] - 1) if r.method == "POST" and r.url.endswith("/_/save") else None)
+    p.on("requestfailed", lambda r: out.update(n=out["n"] - 1) if r.method == "POST" and r.url.endswith("/_/save") else None)
     mark(p)
     f.write_text(f.read_text() + "\n- [ ] first task\n- [ ] second task\n", encoding="utf-8")
     reloaded(p)
@@ -1485,6 +1489,7 @@ def test_what_is_saved_while_the_reload_waits_for_a_reply_is_merged_onto_the_cha
     p.unroute("**/_/save")
     p.wait_for_selector("#rd-popover .rd-hold")
     until(lambda: p.text_content("#rd-state") == "Editing", what="the page to take in the last save")
+    until(lambda: out["n"] == 0 or p.wait_for_timeout(20), what="every save to be answered")    # the page takes no key while a save is out
     p.focus("main p:nth-of-type(4)")
     p.keyboard.press(key("Control+End"))
     p.keyboard.type(" and kiwis")
@@ -2191,11 +2196,13 @@ def comment_posts(page):
 
 
 def test_send_and_tell_starts_one_tell_and_the_thread_waits_for_its_reply(agent, thread):
+    # The thread was itself made with Tell, so its waiting line is on the page before this reply is sent (ticket 19):
+    # the reply is what is waited for.
     sent = comment_posts(thread.page)
     open_reply(thread, "and plums?")
     thread.page.click("#rd-popover button[data-f=tell]")
+    until(lambda: replies(thread.site.file) == ["and plums?"], what="the reply in the file")
     thread.page.wait_for_selector("#rd-popover .rd-pending-tell")
-    assert replies(thread.site.file) == ["and plums?"]
     assert [(b["op"], b["tell"], "ask" in b) for b in sent] == [("reply", True, False)]
 
 
@@ -3357,8 +3364,19 @@ def test_a_reply_to_a_deleted_thread_that_came_back_into_a_new_comments_popover_
     p.unroute("**/_/comment")
     until(lambda: any(c.body == "about the pears" for c in rdc.parse(f.read_text()).comments), what="the new comment in the file")
     until(lambda: "about the pears" not in comment_store(thread), what="the page to take the answer in")
-    p.wait_for_timeout(300)
-    assert p.input_value("#rd-popover textarea") == "words for a gone thread"
+    # The hub's `changed` can take the comment out of the store before the send's answer comes; until that answer
+    # the first field is the new comment's hidden form, still holding "about the pears". Wait for the answer to
+    # remove it, then say what the first field holds. A fixed sleep here failed on a loaded runner.
+    seen = []
+
+    def drawn_again():
+        seen[:] = [p.input_value("#rd-popover textarea")] if p.locator("#rd-popover textarea").count() else ["no field"]
+        return seen[0] not in ("about the pears", "")
+    try:
+        until(drawn_again, what="the answer to the send to remove the new comment's form")
+    except AssertionError as e:
+        raise AssertionError(f"{e}; the first field held {seen}") from None
+    assert seen == ["words for a gone thread"], f"the first field held {seen}"
     assert "“apples”, which was deleted" in p.inner_text("#rd-popover")
 
 
@@ -4035,6 +4053,9 @@ def test_a_tell_or_cancel_the_hub_cannot_be_reached_for_says_that_it_did_not_go_
         route.abort()
     if what == "cancel-tell":
         thread.page.click("#rd-popover .rd-form button.rd-tell")
+        # The thread was made with Tell, so its Cancel is on the page already (ticket 17): the reply's own answer says
+        # "Sent to…" in the toast, and would take the place of this one if it came after the refusal.
+        toasted(p, "Sent to your")
         p.wait_for_selector("#rd-popover button[data-a=cancel-tell]")
         route = "**/_/cancel"
         p.route(route, refuse)
@@ -4218,7 +4239,8 @@ def answer_after_event(tab):
     go.set()
 
 
-def test_a_reply_the_hub_took_and_told_of_before_the_page_gave_up_goes_from_the_page_when_it_gives_up(thread, answer_after_event):
+@pytest.mark.parametrize("hello", [False, True], ids=["as it comes", "a stream that says hello while the send is out"])
+def test_a_reply_the_hub_took_and_told_of_before_the_page_gave_up_goes_from_the_page_when_it_gives_up(thread, answer_after_event, hello):
     p = thread.page
     reload_on_clock(p)
     p.click(".rd-badge")
@@ -4227,8 +4249,15 @@ def test_a_reply_the_hub_took_and_told_of_before_the_page_gave_up_goes_from_the_
     p.keyboard.press("Control+Enter")
     until(lambda: SLOW in thread.site.file.read_text(), what="the hub's write")
     until(lambda: SLOW not in comment_store(thread), what="the page to hear the event of the write")
+    if hello:
+        # On a loaded runner the stream's first hello reaches the page while the send is out (ticket 20). The page then
+        # checks the document when the send ends, and holds the event of the write until that answer or CHECK_WAIT;
+        # the answer waits for the lock the hub holds until the release below.
+        thread.site.hub.entry(DOC).live._publish("hello", {})
+        p.wait_for_timeout(300)
     p.clock.fast_forward(30_500)
     toasted(p, TAKEN)
+    p.clock.fast_forward(10_500)      # the page's own end of that wait (CHECK_WAIT), on the clock the test drives
     until(lambda: not typed(p), what="the form to go")
     try:
         until(lambda: p.inner_text("#rd-popover").count(SLOW) == 1, what="the reply in its thread")
@@ -4660,3 +4689,71 @@ def test_an_edit_of_a_table_keeps_the_escaped_pipe_in_a_raw_tags_attribute(tab):
     tab.page.clock.run_for(3000)
     until(lambda: "typed" in f.read_text(encoding="utf-8"), what="the save")
     assert '| <abbr title="a\\|b">X</abbr> | the cell typed |' in f.read_text(encoding="utf-8")
+
+
+def test_typing_while_a_save_has_no_answer_is_said_once_and_the_block_shows_it_is_saving(tab):
+    """chat-box 43: the page refuses input while a save is out (the reply may reload it), and said nothing."""
+    f = tab.site.file
+    p = tab.page
+    tab.open()
+    held = []
+    p.route("**/_/save", lambda r: held.append(r))
+    type_at_end(p, P1, " typed")
+    p.keyboard.press("Control+s")
+    until(lambda: held or p.wait_for_timeout(20), what="the save, held")
+    p.keyboard.type("lost")
+    toasted(p, "Saving")
+    assert p.evaluate("document.activeElement.classList.contains('rd-saving')")
+    assert p.evaluate("getComputedStyle(document.activeElement).cursor") == "not-allowed"
+    assert "lost" not in p.evaluate("document.activeElement.textContent")
+    p.evaluate("document.querySelector('#rd-toast').textContent = ''")
+    p.keyboard.type("more")
+    assert toast(p) == ""                                    # said once for this save, not for every key
+    held[0].continue_()
+    p.unroute("**/_/save")
+    until(lambda: "typed" in f.read_text(encoding="utf-8"), what="the save to reach the file")
+    until(lambda: not p.evaluate("document.querySelector('.rd-saving')"), what="the mark to go")
+    assert p.evaluate(f"localStorage.getItem({draft_key(tab.site)!r})") is None      # the mark is not an edit
+    p.keyboard.press("Control+s")
+    toasted(p, "Nothing changed")                                                   # the mark left no class="" to save
+    p.keyboard.type("!")
+    assert p.evaluate("document.activeElement.textContent").endswith("typed!")
+
+
+def test_the_mark_lands_on_the_block_typed_in_and_clears_with_the_save(tab):
+    p = tab.page
+    tab.open()
+    held = []
+    p.route("**/_/save", lambda r: held.append(r))
+    type_at_end(p, P1, " typed")
+    p.keyboard.press("Control+s")
+    until(lambda: held or p.wait_for_timeout(20), what="the save, held")
+    p.click(P2)                                              # moving to another block is not typing: not refused
+    p.keyboard.press("End")
+    p.keyboard.type("lost")
+    toasted(p, "Saving")
+    marked = lambda: p.evaluate("[...document.querySelectorAll('.rd-saving')].map(e => e.textContent)")
+    assert len(marked()) == 1 and marked()[0].startswith("Second paragraph")      # the one typed in, not the first
+    held[0].continue_()
+    p.unroute("**/_/save")
+    until(lambda: not marked(), what="the mark to go")
+    assert p.evaluate("document.querySelectorAll('main [class=\"\"]').length") == 0
+
+
+def test_typing_while_a_change_from_outside_settles_is_refused_and_said(tab):
+    """The settle's own save is out while the page reloads onto the change: a key typed then is refused, and said."""
+    f = tab.site.file
+    p = tab.page
+    p.clock.install()
+    tab.open()
+    held = []
+    p.route("**/_/save", lambda r: held.append(r))
+    type_at_end(p, P1, " typed")
+    f.write_text(f.read_text(encoding="utf-8") + "\nFrom outside.\n", encoding="utf-8")
+    until(lambda: held or p.wait_for_timeout(20), what="the settle's save, held")
+    p.keyboard.type("lost")
+    toasted(p, "Saving")
+    assert p.evaluate("document.querySelectorAll('.rd-saving').length") == 1
+    held[0].continue_()
+    p.unroute("**/_/save")
+    reloaded(p)

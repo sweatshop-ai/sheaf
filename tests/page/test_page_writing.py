@@ -3364,8 +3364,19 @@ def test_a_reply_to_a_deleted_thread_that_came_back_into_a_new_comments_popover_
     p.unroute("**/_/comment")
     until(lambda: any(c.body == "about the pears" for c in rdc.parse(f.read_text()).comments), what="the new comment in the file")
     until(lambda: "about the pears" not in comment_store(thread), what="the page to take the answer in")
-    p.wait_for_timeout(300)
-    assert p.input_value("#rd-popover textarea") == "words for a gone thread"
+    # The hub's `changed` can take the comment out of the store before the send's answer comes; until that answer
+    # the first field is the new comment's hidden form, still holding "about the pears". Wait for the answer to
+    # remove it, then say what the first field holds. A fixed sleep here failed on a loaded runner.
+    seen = []
+
+    def drawn_again():
+        seen[:] = [p.input_value("#rd-popover textarea")] if p.locator("#rd-popover textarea").count() else ["no field"]
+        return seen[0] not in ("about the pears", "")
+    try:
+        until(drawn_again, what="the answer to the send to remove the new comment's form")
+    except AssertionError as e:
+        raise AssertionError(f"{e}; the first field held {seen}") from None
+    assert seen == ["words for a gone thread"], f"the first field held {seen}"
     assert "“apples”, which was deleted" in p.inner_text("#rd-popover")
 
 

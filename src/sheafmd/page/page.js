@@ -3377,9 +3377,9 @@ var create = function (ROOT, CFG, opts) {
       if (!isBox) {
         var lab = t && t.closest && t.closest('label');
         var own = lab && main.contains(lab) && lab.querySelector('input[type="checkbox"]');
-        if (!own) return;
+        if (!own || (t.closest && t.closest('a'))) return;       // a link in the line opens
         e.preventDefault();
-        if (editing || !onLabelWords(lab, e)) return;
+        if (editing || e.detail > 1 || !onLabelWords(lab, e)) return;       // a double or triple click selects, it does not tick again
         t = own;
       }
       // The browser's own toggle is cancelled and replaced by ours: inside a
@@ -3403,7 +3403,6 @@ var create = function (ROOT, CFG, opts) {
     return w ? w[0].length : 0;
   }
   function onLabelWords(lab, e) {
-    if (e.target.closest && e.target.closest('a')) return false;
     var sel = window.getSelection();
     if (sel && !sel.isCollapsed && lab.contains(sel.anchorNode)) return false;
     var walker = document.createTreeWalker(lab, NodeFilter.SHOW_TEXT), node, left = labelEnd(lab.textContent), first = null, last = null, end = 0;
@@ -3414,7 +3413,7 @@ var create = function (ROOT, CFG, opts) {
     if (!first) return false;
     var r = document.createRange();
     r.setStart(first, 0); r.setEnd(last, end);
-    var rects = r.getClientRects(), min = 44;
+    var rects = r.getClientRects(), min = window.matchMedia('(pointer:coarse)').matches ? 44 : 0;
     for (var i = 0; i < rects.length; i++) {
       var q = rects[i], pad = Math.max(0, (min - q.height) / 2);
       if (e.clientX >= q.left && e.clientX <= q.right && e.clientY >= q.top - pad && e.clientY <= q.bottom + pad) return true;

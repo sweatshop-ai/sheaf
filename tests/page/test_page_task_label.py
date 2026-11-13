@@ -11,6 +11,7 @@ SHEAF = """# Plan
 - [ ] Approved: the quote of 12 November
 - [ ] Ordered — the quote of 14 November
 - [ ] Plain words here
+- [ ] Linked: see [the quote](#elsewhere)
 
 Body paragraph.
 """
@@ -121,3 +122,21 @@ def test_in_edit_mode_a_click_on_the_label_is_for_the_caret_and_ticks_nothing(sh
     p.wait_for_timeout(600)
     assert f.read_text(encoding="utf-8") == SHEAF
     assert p.locator("main input[type=checkbox]").first.is_checked() is False
+
+
+def test_a_link_in_a_task_line_opens_and_ticks_nothing(sheaf):
+    p, f = sheaf.page, sheaf.site.file
+    p.locator("main li:nth-of-type(4) a").click()
+    p.wait_for_timeout(600)
+    assert p.url.endswith("#elsewhere")
+    assert "- [ ] Linked" in f.read_text(encoding="utf-8")
+
+
+def test_a_double_click_on_the_label_does_not_tick_it_twice(sheaf):
+    p, f = sheaf.page, sheaf.site.file
+    x, y = spot(p, 0, len("Approved"))[:2]
+    mark(p)
+    p.mouse.dblclick(x, y)
+    until(lambda: ON in f.read_text(encoding="utf-8"), what="the tick in the file")
+    p.wait_for_timeout(600)
+    assert ON in f.read_text(encoding="utf-8")

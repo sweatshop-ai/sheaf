@@ -30,4 +30,4 @@
 
 **Claimed by:** Elias 2026-11-13 02:05
 
-**Status:** in-progress — PR 269 open (draft until CI on 6ca37e5), waiting for review and merge
+**Status:** in-progress — PR 269 open (head ee91bb9, CI run 43345153038 green, 100 of 100 under load, reviews GO), waiting for merge

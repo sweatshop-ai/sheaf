@@ -3349,7 +3349,7 @@ var create = function (ROOT, CFG, opts) {
       // The browser's own toggle is cancelled and replaced by ours: inside a
       // contenteditable it is not reliable, and the attribute must move with it.
       e.preventDefault();
-      // A box of the eight words is pressed with its button at the top of the page (SPEC 10.11).
+      // A box of the eleven words is pressed with its button at the top of the page (SPEC 10.11).
       if (isActBox(t)) { say(PRESS_IT); return; }
       var b = blockOf(t);
       if (stale || dead || !b || !editable.has(b.i)) return;
@@ -3367,11 +3367,14 @@ var create = function (ROOT, CFG, opts) {
   // file's buttons: a save answered without them (merged, remapped, `again`), a tick taken, a reload held or under
   // way. A reload brings them, and is asked for when none is coming. Any other box ticks as a plain one.
   var boxWaits = new WeakSet();       // a box whose block's save is out: a second click would toggle it back
-  // The eight words as the hub reads them (the_list.WORDS and _ACTION_RE), so a box no button names yet can be told.
-  var ACTION_WORDS = ['Approve', 'Run it', 'Don\'t run', 'Undo skip', 'Done', 'Share', 'Stop James', 'Move to'];
-  var ACTION_LINE = new RegExp('^(?:(?:' + ACTION_WORDS.slice(0, -1).map(function (w) {
-    return w.replace(/'/g, '[\'’]');
-  }).join('|') + ')|Move to\\s+[A-Za-z0-9._\\\\-]+\\s+\\(ref\\s+[^()\\s]+\\))(?:\\s+@[A-Za-z0-9._-]+)?$');
+  // The eleven words as the hub reads them (the_list.WORDS and _ACTION_RE), so a box no button names yet can be told.
+  var ACTION_WORDS = ['Approve', 'Run it', 'Don\'t run', 'Undo skip', 'Done', 'Share', 'Stop James', 'Move to', 'Merge', 'Deploy', 'Install'];
+  // Move to takes `<slug> (ref <thread>)`, Merge, Deploy and Install the rest of the line, the others nothing.
+  var ACTION_ARG = { 'Move to': '\\s+[A-Za-z0-9._\\\\-]+\\s+\\(ref\\s+[^()\\s]+\\)(?:\\s+@[A-Za-z0-9._-]+)?',
+                     'Merge': '\\s+\\S.*', 'Deploy': '\\s+\\S.*', 'Install': '\\s+\\S.*' };
+  var ACTION_LINE = new RegExp('^(?:' + ACTION_WORDS.map(function (w) {
+    return w.replace(/'/g, '[\'’]') + (ACTION_ARG[w] || '(?:\\s+@[A-Za-z0-9._-]+)?');
+  }).join('|') + ')$');
   // The text of a box's own item, its nested lists left out; null for a box in no item.
   function itemLine(t) {
     var li = t.closest && t.closest('li');
@@ -3408,7 +3411,7 @@ var create = function (ROOT, CFG, opts) {
   }
 
   // ---- the action buttons (SPEC 10.11) ------------------------------------------
-  // The boxes of the eight words are the list's buttons at the top of the page (9.10): a one-off red, locked once
+  // The boxes of the eleven words are the list's buttons at the top of the page (9.10): a one-off red, locked once
   // pressed, with who and when; Share a toggle, its owner's alone. A press reads Undo for 5 seconds, then posts the
   // list's tick (`/_/tick`) with the hash of the text on screen; the hub's `changed` reloads the page onto the
   // ticked file, and a reload asked meanwhile waits for the press's answer. While a press waits or is sent, the other

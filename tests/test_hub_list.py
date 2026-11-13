@@ -1577,6 +1577,48 @@ def test_a_write_that_unticks_no_one_off_names_none(old, new):
     assert the_list.unticks_one_off(f"# A sheaf\n\n{old}", f"# A sheaf\n\n{new}") is None
 
 
+# ── Merge, Deploy and Install take the rest of the line (action-buttons 04) ──────────────────────────────
+
+MERGE = "- [ ] Merge sweatshop-ai/sheaf#272: Tickets: buttons on their own line\n"
+
+
+@pytest.mark.parametrize("word", ["Merge", "Deploy", "Install"])
+def test_merge_deploy_and_install_are_actions_that_take_the_rest_of_the_line(word):
+    sheaf = the_list.read_sheaf("x.md", f"# A sheaf\n\n- [ ] {word} a/b#1: text @nell, more\n- [x] {word} a/b#2: done\n")
+    assert [(a[0], a[1]) for a in sheaf.actions] == [(word, "")]
+    assert [p[0] for p in sheaf.pressed] == [word]
+
+
+@pytest.mark.parametrize("line", ["- [ ] Merge\n", "- [ ] Deploy   \n", "- [ ] Rebase a/b#1\n", "- [ ] merge a/b#1\n"])
+def test_a_bare_or_unlisted_word_is_no_action(line):
+    assert the_list.read_sheaf("x.md", f"# A sheaf\n\n{line}").actions == ()
+
+
+def test_a_write_that_unticks_a_pressed_merge_names_its_word():
+    old = "# A sheaf\n\n" + MERGE.replace("[ ]", "[x]") + "- [ ] Merge a/b#9: other\n"
+    assert the_list.unticks_one_off(old, old.replace("[x]", "[ ]")) == "Merge"
+
+
+def test_a_pressed_merge_writes_only_its_tick_and_the_hub_refuses_to_untick_it_but_an_outside_write_is_taken(
+        committing, box, sheaves, github):
+    path = sheaves / JOEY[5:]
+    path.write_text(path.read_text(encoding="utf-8") + "\n" + MERGE, encoding="utf-8")
+    box.hub.the_list.poll()
+    before = path.read_text(encoding="utf-8")
+    assert row_buttons(box.get("/list", member=NELL), JOEY)[-1][0] == "Merge"
+    press = row_press(box.get("/list", member=NELL), JOEY, "Merge")
+    r = box.post("/_/tick", press, member=NELL)
+    assert r.status == 200, r.text
+    assert path.read_text(encoding="utf-8") == before.replace("- [ ] Merge", "- [x] Merge")
+    pressed = path.read_text(encoding="utf-8")
+    r = box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Merge", "release": True}), member=NELL)
+    assert r.status == 409 and r.json()["error"] == "Merge is pressed once: its tick cannot be taken back."
+    assert path.read_text(encoding="utf-8") == pressed
+    path.write_text(pressed.replace("- [x] Merge", "- [ ] Merge"), encoding="utf-8")      # AgentView, not the hub
+    in_progress(box, github, 5)
+    assert row_buttons(box.get("/list", member=NELL), JOEY)[-1][0] == "Merge"
+
+
 # ── a pressed one-off shows locked, with who and when (#110) ─────────────────
 
 def git(at, *args):

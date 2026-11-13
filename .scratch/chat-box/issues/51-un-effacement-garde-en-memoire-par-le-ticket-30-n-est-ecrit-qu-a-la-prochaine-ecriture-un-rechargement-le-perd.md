@@ -4,13 +4,15 @@
 
 **Blocked by:** none
 
+Décision : (a). `commentDraftsLoad` écrit le stockage sans les entrées nommées par un effacement gardé dès la première lecture qui aboutit (stricte ou non), et seulement si le stockage contient encore une telle entrée. Limite : un rechargement avant cette lecture perd l'effacement (gardé en mémoire).
+
 **Établi (preuves) :** revue Opus de la PR 263 (`/home/tiroir/.claude/pm/chat-box-handoffs/pr-30-reviews/opus-fallback.md`, P2, scénarios A, B et C) et revue de spec (`standards.md`, « Partial »). Non reproduit par un test.
 
 **Par où commencer :** un test de page qui vide le champ pendant une lecture refusée, rétablit la lecture, recharge la page sans rien écrire d'autre, rouvre la boîte et vérifie que le champ est vide. Il échoue tant que l'effacement n'est qu'en mémoire. Attention au scénario C : l'effacement après un envoi réussi est suivi de `reloadNow`.
 
-- [ ] La décision (a ou b) est écrite dans le ticket avant le code
-- [ ] Si (a) : un test de page échoue tant qu'un rechargement avant toute autre écriture fait revenir l'entrée vidée
+- [x] La décision (a ou b) est écrite dans le ticket avant le code
+- [x] Si (a) : un test de page échoue tant qu'un rechargement avant toute autre écriture fait revenir l'entrée vidée — `test_a_new_message_emptied_while_the_store_refused_reads_stays_empty_after_a_reload_with_no_other_write` (tests/page/test_page_chat_box.py)
 
 **Claimed by:** Naya 2026-11-13 23:53
 
-**Status:** in-progress
+**Status:** in-review, PR 281

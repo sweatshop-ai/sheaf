@@ -857,3 +857,29 @@ def test_a_new_message_emptied_while_the_store_refuses_reads_does_not_come_back_
     open_box(p)
     assert p.input_value(FIELD) == "", "the text the person emptied came back when the store could be read"
     assert p.locator("#rd-unsent").count() == 0, "the emptied message is offered as not sent"
+
+
+READABLE_REPLY = ("Done. What changed:\n- the intro is shorter\n- `fetch_all` retries\n\n"
+                  "```\nif a < b:\n    go()\n```\n"
+                  "See https://example.com/a?b=1&c=2. Or [the doc](https://example.com/doc).\n"
+                  "<b>not bold</b>")
+
+
+def test_an_agent_reply_reads_as_paragraphs_lists_code_and_links(tab, site):
+    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
+                                                     "Bea", "2026-10-14T10:00")[0])
+    update_file(site.file, lambda t: rdc.reply(t, "c1", READABLE_REPLY, "Claude", "2026-10-14T10:01",
+                                               role="action"))
+    tab.open()
+    tab.page.click(".rd-badge")
+    text = tab.page.locator(f"{THREAD} .rd-text").nth(1)
+    text.wait_for()
+    assert text.locator("p").first.inner_text() == "Done. What changed:", "the line before the list is not its own paragraph"
+    assert text.locator("ul li").all_inner_texts() == ["the intro is shorter", "fetch_all retries"]
+    assert text.locator("ul li code").inner_text() == "fetch_all"
+    assert text.locator("pre code").inner_text() == "if a < b:\n    go()"
+    links = text.locator("a")
+    assert [links.nth(i).get_attribute("href") for i in range(links.count())] == [
+        "https://example.com/a?b=1&c=2", "https://example.com/doc"], "a link is not clickable"
+    assert links.first.get_attribute("target") == "_blank"
+    assert text.locator("b").count() == 0 and "<b>not bold</b>" in text.inner_text(), "a tag in the text became HTML"

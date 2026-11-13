@@ -84,7 +84,8 @@ TOOLS = {
                        "asked, `answer` when you only answer in words.",
         "properties": {
             "doc": _DOC, "id": _ID,
-            "text": {"type": "string", "description": "What you did, or your answer."},
+            "text": {"type": "string", "description": "What you did, or your answer, in markdown: the page "
+                                                     "renders paragraphs, lists, code and links."},
             "role": {"type": "string", "enum": list(rdc.ROLES),
                      "description": "`answer` (the default) or `action`."},
             "resolve": {"type": "boolean", "description": "Also mark the thread resolved."}},

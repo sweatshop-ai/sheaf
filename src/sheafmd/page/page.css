@@ -263,3 +263,5 @@ button.rd-act:disabled{cursor:default;opacity:.7}
 input[type="checkbox"]:has(+ button.rd-inline){display:none}
 button.rd-inline{margin:0 .5em 0 0;vertical-align:baseline;user-select:none}
 span.rd-actword{display:none}
+/* While editing the word is shown: a line of the word alone has nothing else to put the caret in. */
+.rd-editing span.rd-actword{display:inline}

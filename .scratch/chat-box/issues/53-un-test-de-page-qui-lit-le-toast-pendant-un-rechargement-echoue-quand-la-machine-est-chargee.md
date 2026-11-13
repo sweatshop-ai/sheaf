@@ -19,4 +19,4 @@ Les deux tests sont ceux qui précèdent immédiatement le test du ticket 52 dan
 
 **Claimed by:** Elias 2026-11-13 01:35
 
-**Status:** in-progress
+**Status:** in-progress — PR 268 open (head 7c421ea, CI run 43340437252 green, reviews GO), waiting for merge

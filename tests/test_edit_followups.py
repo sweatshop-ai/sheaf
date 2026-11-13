@@ -5,6 +5,7 @@ from helpers import pandoc
 
 from sheafmd import comments as rdc
 from sheafmd import edit as rde
+from sheafmd.blocks import split_md_blocks
 
 
 def doc(*paragraphs):
@@ -1017,3 +1018,12 @@ def test_a_comment_the_file_gained_on_words_of_a_heading_goes_back_at_the_end_of
     note = the_note(out)
     assert out.startswith("## Alpha edited Beta<!-- sheaf-comment") and out[note.end:].startswith("\n\nBody."), out
     assert rep["conflicts"] == [] and rdc.parse(out).malformed == []
+
+
+@pytest.mark.parametrize("heading", ["#", "# ", "##   "])
+def test_a_comment_put_back_in_a_heading_with_no_words_goes_on_a_line_of_its_own_and_the_heading_stays(heading):
+    md = heading + "\n\nBody.\n"
+    raw = rdc.format(agent_note(), False)
+    out = rde._insert_comment(md, 0, raw, "Alpha")
+    assert [b.kind for b in split_md_blocks(out)][0] == "heading" and rdc.parse(out).malformed == []
+    assert len(rdc.parse(out).comments) == 1 and out.startswith(heading)

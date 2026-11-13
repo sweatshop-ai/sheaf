@@ -526,21 +526,28 @@ def anchor_point(block: str, start: int, end: int, quote: str) -> int:
 _ATX_TEXT = re.compile(r"^( {0,3}#{1,6}[ \t]+)(.*?)(?:[ \t]+#+)?[ \t]*$")
 
 
-def heading_anchor(block: str) -> int:
+def heading_anchor(block: str) -> int | None:
     """Offset in a heading block where a comment on any of its words goes: the end of the heading's
-    text, so the words stay whole for every reader of the file (a block inside "Done<!-- … --> when"
-    makes the title another one). Before an ATX heading's closing hashes and before a setext
-    heading's underline, which a block after them would turn into text."""
+    text, so the words stay whole for every reader of the file (a block in the middle, as in
+    "Done<!-- … --> when", makes the title another one). Before an ATX heading's closing hashes and
+    before a setext heading's underline, which a block after them would turn into text; before a
+    backslash that ends the text, which would escape the block's `<`. None for an ATX heading with
+    no words, where a block right after the hashes would make the line a paragraph."""
     lines = block.rstrip("\n").split("\n")
     if len(lines) > 1 and SETEXT_RE.match(lines[-1]):          # setext: the text is the lines above the underline
-        return len("\n".join(lines[:-1]).rstrip())
-    m = _ATX_TEXT.match(lines[0])
-    return m.end(2) if m and m.group(2) else len(lines[0].rstrip())
+        at = len("\n".join(lines[:-1]).rstrip())
+    else:
+        m = _ATX_TEXT.match(lines[0])
+        if not m or not m.group(2):
+            return None
+        at = m.end(2)
+    run = len(block[:at]) - len(block[:at].rstrip("\\"))
+    return at - 1 if run % 2 else at
 
 
 def comment_point(kind: str, block: str, start: int, end: int, quote: str) -> int:
     """Offset in `block` (of the given kind) where a comment on the selection [start, end) goes."""
-    point = anchor_point(block, start, end, quote)
+    point = anchor_point(block, start, end, quote)      # a heading checks the selection too, then ignores where it ends
     return heading_anchor(block) if kind == "heading" else point
 
 

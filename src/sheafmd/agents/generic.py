@@ -47,6 +47,9 @@ class GenericAdapter:
     def jump_values(self, t: Target) -> dict | None:
         return None
 
+    def reopen_values(self, t: Target) -> dict | None:
+        return None
+
     def state(self, t: Target) -> State | None:
         return None
 

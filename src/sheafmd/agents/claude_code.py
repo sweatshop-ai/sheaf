@@ -275,6 +275,13 @@ class ClaudeCodeAdapter:
             return None                      # it becomes an argument: no option, no space, no odd bytes
         return {"session": session, "pid": str(pid), "name": self.name(t), "agent": t.agent}
 
+    def reopen_values(self, t: Target) -> dict | None:
+        """What a reopen command is given: the stored session id, name and folder. None while the
+        session runs (a Tell reaches it as it is), or when its id cannot be an argument."""
+        if self._record(t) is not None or not _SESSION_ID.fullmatch(t.session or ""):
+            return None
+        return {"session": t.session, "name": t.name, "agent": t.agent, "cwd": t.cwd}
+
     def state(self, t: Target) -> State:
         rec = self._record(t)
         if rec is None:

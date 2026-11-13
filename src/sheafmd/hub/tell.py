@@ -46,6 +46,11 @@ NOT_MINE = ("No session to jump to: it is not run by this account, or its record
 JUMP_BUSY = "A jump is already running."
 JUMP_TIMEOUT = 5.0
 _PLACEHOLDER = re.compile(r"\{(session|pid|name|agent)\}")
+REOPEN_WAIT = 60.0     # seconds an ended session opened again has to take the Tell
+REOPEN_POLL = 0.2
+REOPEN_LATE = ("{who} was opened again but could not take the message within {s:g} seconds. Tell again "
+               "once it is open.")
+_REOPEN_PLACEHOLDER = re.compile(r"\{(session|name|agent|cwd)\}")
 GONE = "The document is no longer on the hub: its folder was forgotten, or its file is gone."
 
 
@@ -84,7 +89,7 @@ class View:
         return out
 
     def can(self) -> list:
-        return sorted(self.caps & {"deliver", "queue"})
+        return sorted(self.caps & {"deliver", "queue", "reopen"})
 
 
 def _one_line(text: str, limit: int = 200) -> str:
@@ -97,6 +102,7 @@ class Tell:
     def __init__(self, hub):
         self.hub = hub
         self._jumping = threading.Lock()
+        self._reopening = threading.Lock()
 
     # ── what the page is told ────────────────────────────────────────────────
     def view(self, address: str, session: bool = False) -> View:
@@ -110,8 +116,17 @@ class Tell:
             return View(None, None, frozenset(), {"tell": NO_AGENT})
         ad = self.hub.adapter(t.agent)
         caps = ad.capabilities(t)
-        lines = {"tell": None if "deliver" in caps else self._line(t, ad)}
+        if "deliver" not in caps and ad.implemented and self._reopen_set() and ad.reopen_values(t) is not None:
+            caps |= {"reopen"}                # the session has ended, and a Tell opens it again first
+        lines = {"tell": None if caps & {"deliver", "reopen"} else self._line(t, ad)}
         return View(t, ad, caps, lines, jump=ad.implemented and self._jump_set())
+
+    @staticmethod
+    def _reopen_set() -> bool:
+        try:
+            return config.reopen_command(warn=lambda line: None) is not None
+        except config.ConfigError:
+            return False                    # the line under Tell says the session has ended
 
     @staticmethod
     def _jump_set() -> bool:
@@ -162,26 +177,27 @@ class Tell:
         if not self._jumping.acquire(blocking=False):
             raise JobRefused(409, JUMP_BUSY)
         try:
-            self._run_jump(argv, env)
+            self._run_command(argv, env)
         finally:
             self._jumping.release()
 
     @staticmethod
-    def _run_jump(argv: list, env: dict) -> None:
-        """Run the command to its end. Its stderr goes to a file, not a pipe: a helper it leaves
-        running would hold a pipe open and make a command that worked look as if it never ended."""
+    def _run_command(argv: list, env: dict, what: str = "jump") -> None:
+        """Run the `[jump]` or `[reopen]` command to its end. Its stderr goes to a file, not a pipe: a
+        helper it leaves running would hold a pipe open and make a command that worked look as if it
+        never ended."""
         try:
             err = tempfile.TemporaryFile()
         except OSError as e:
-            raise JobRefused(409, f"The jump command could not be started: {e.strerror or e}") from None
+            raise JobRefused(409, f"The {what} command could not be started: {e.strerror or e}") from None
         with err:
             try:
                 p = subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                      stderr=err, start_new_session=True)
             except FileNotFoundError:
-                raise JobRefused(409, "The jump command was not found.") from None
+                raise JobRefused(409, f"The {what} command was not found.") from None
             except OSError as e:
-                raise JobRefused(409, f"The jump command could not be started: {e.strerror or e}") from None
+                raise JobRefused(409, f"The {what} command could not be started: {e.strerror or e}") from None
             try:
                 p.wait(timeout=JUMP_TIMEOUT)
             except subprocess.TimeoutExpired:
@@ -190,13 +206,45 @@ class Tell:
                 except (OSError, signals.Refused):
                     pass
                 p.wait()
-                raise JobRefused(409, f"The jump command did not finish within {JUMP_TIMEOUT:g} seconds.") from None
+                raise JobRefused(409, f"The {what} command did not finish within {JUMP_TIMEOUT:g} seconds.") from None
             if p.returncode != 0:
                 err.seek(0)
                 lines = err.read(4000).decode("utf-8", "replace").splitlines()
                 first = next((ln.strip() for ln in lines if ln.strip()), "")
                 why = f": {_one_line(first)}" if first else ""
-                raise JobRefused(409, f"The jump command failed (exit {p.returncode}){why}")
+                raise JobRefused(409, f"The {what} command failed (exit {p.returncode}){why}")
+
+    # ── an ended session opened again for a Tell (SPEC 4.3, 11.3) ─────────────
+    def _reopen(self, t: Target, ad: Adapter, job) -> None:
+        """Open the ended session again by the `[reopen]` command, then wait until it can take a
+        message. One at a time: a second Tell to the same session finds it open and delivers. Raises
+        DeliveryError with the line that says why not, DeliveryCancelled on a Cancel."""
+        with self._reopening:
+            if "deliver" in ad.capabilities(t):
+                return
+            try:
+                command = config.reopen_command(warn=lambda line: None)
+            except config.ConfigError as e:
+                raise DeliveryError(str(e)) from None
+            values = ad.reopen_values(t)
+            if command is None or values is None:
+                raise DeliveryError(ENDED.format(product=ad.product))
+            # The adapter gives an id that is safe as it is; a name and a folder are text of the render's.
+            values["name"] = clean_display(values["name"]) or ad.display
+            values["agent"] = clean_display(values["agent"])
+            argv = [_REOPEN_PLACEHOLDER.sub(lambda m: values[m.group(1)], a) for a in command]
+            env = {**os.environ, **{f"SHEAF_REOPEN_{k.upper()}": x for k, x in values.items()}}
+            try:
+                self._run_command(argv, env, "reopen")
+            except JobRefused as r:
+                raise DeliveryError(r.message) from None
+            end = time.monotonic() + REOPEN_WAIT
+            while "deliver" not in ad.capabilities(t):
+                if job.cancelled:
+                    raise DeliveryCancelled()
+                if time.monotonic() >= end:
+                    raise DeliveryError(REOPEN_LATE.format(who=who(t, ad), s=REOPEN_WAIT))
+                time.sleep(REOPEN_POLL)
 
     def product(self, address: str) -> str:
         t = self.hub.target(address, kept=True)
@@ -345,12 +393,15 @@ class Tell:
             raise
         self.hub.drop_kept(address, cid, v.target, again)             # a Tell to the target: no session kept for an earlier one
         t, ad = v.target, v.adapter
+        reopen = "reopen" in v.caps
         text = prompts.tell(address, str(e.path), self.hub.person, c, self.links(address))
 
         def work(job):
             if job.cancelled:                      # the Cancel came before the first byte
                 return
             try:
+                if reopen:
+                    self._reopen(t, ad, job)
                 ad.deliver(t, text, job.run)
             except DeliveryCancelled:
                 return

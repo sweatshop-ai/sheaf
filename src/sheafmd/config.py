@@ -24,7 +24,7 @@ DEFAULT_PORT = 27419
 ROOT_FILE = ".sheaf.toml"
 
 USER_KEYS = {"port": int, "name": str, "browser": bool, "proxy": dict, "jump": dict,
-             "list": dict, "transcribe": dict}   # proxy: hub.proxy reads it (9.9); list: hub.the_list (9.10); transcribe: hub.transcribe
+             "reopen": dict, "list": dict, "transcribe": dict}   # proxy: hub.proxy reads it (9.9); list: hub.the_list (9.10); transcribe: hub.transcribe
 JUMP_KEYS = {"command": list}
 ROOT_KEYS = {"theme": str, "for": str, "links": bool, "link_tlds": list, "credit": bool,
              "versions": str, "commit": bool, "push": bool}
@@ -99,19 +99,30 @@ def port(warn=None) -> int:
 
 
 def jump_command(warn=None) -> list[str] | None:
-    """The argv of the `[jump]` table (SPEC 4.3), or None when there is no table. A list of
-    non-empty text: a string would need a shell, and none is ever started."""
+    """The argv of the `[jump]` table (SPEC 4.3), or None when there is no table."""
+    return _command_table("jump", warn)
+
+
+def reopen_command(warn=None) -> list[str] | None:
+    """The argv of the `[reopen]` table (SPEC 4.3): what opens an ended session again for a Tell. None
+    when there is no table."""
+    return _command_table("reopen", warn)
+
+
+def _command_table(name: str, warn=None) -> list[str] | None:
+    """The argv of a table that holds one `command`. A list of non-empty text: a string would need a
+    shell, and none is ever started."""
     warn = warn or _stderr
     path = paths.config_file()
-    table = read_toml(path, USER_KEYS, warn).get("jump")
+    table = read_toml(path, USER_KEYS, warn).get(name)
     if table is None:
         return None
     for key in table:
         if key not in JUMP_KEYS:
-            warn(f"  ! unknown key '{key}' in [jump] of {path}")
+            warn(f"  ! unknown key '{key}' in [{name}] of {path}")
     command = table.get("command")
     if not isinstance(command, list) or not command or not all(isinstance(a, str) and a for a in command):
-        raise ConfigError(f"{path}: 'command' in [jump] must be a list of text, the program and its "
+        raise ConfigError(f"{path}: 'command' in [{name}] must be a list of text, the program and its "
                           f"arguments, such as [\"curl\", \"-s\"]")
     return command
 

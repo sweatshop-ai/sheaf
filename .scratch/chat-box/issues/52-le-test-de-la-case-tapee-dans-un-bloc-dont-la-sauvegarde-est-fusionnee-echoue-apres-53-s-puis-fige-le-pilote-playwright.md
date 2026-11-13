@@ -22,4 +22,6 @@
 - [ ] CI verte sur deux passages de suite, la tranche qui porte ce fichier comprise
 - [ ] Un test de page qui échoue montre son traceback dans le journal dès son échec, sans attendre la fin du run
 
-**Status:** ready
+**Claimed by:** Elif 2026-11-13 01:15
+
+**Status:** in-progress

@@ -8,9 +8,9 @@
 
 **Par où commencer :** résoudre l'adresse avec une limite, ou connecter dans un fil borné qui ferme la socket ; ou, plus simple, borner le nombre d'adresses essayées et documenter que seul le DNS reste sans limite.
 
-- [ ] Un test avec un hôte qui n'accepte pas la connexion (socket d'écoute sans `accept` et file pleine, ou adresse non routable) montre `_call` rendant `(0, b"")` dans la limite, et échoue sans le correctif
-- [ ] Le docstring de `_call` ne promet que ce qui est tenu
+- [x] Un test avec un hôte qui n'accepte pas la connexion (socket d'écoute sans `accept` et file pleine, ou adresse non routable) montre `_call` rendant `(0, b"")` dans la limite, et échoue sans le correctif
+- [x] Le docstring de `_call` ne promet que ce qui est tenu
 
 **Claimed by:** Faisal 2026-11-13 10:34
 
-**Status:** claimed — one PR with ticket 37, branch chat-box/36-37 off origin/main
+**Status:** done (PR 272, merged b45caf3)

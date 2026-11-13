@@ -36,7 +36,7 @@
 - [ ] La cause de l'échec à 53 s est écrite avec la preuve (le traceback d'une apparition, ou une reproduction sur t-compute)
 - [ ] Le correctif est dans le test ou dans la page, et un test pose le cas à la main
 - [ ] CI verte sur deux passages de suite, la tranche qui porte ce fichier comprise
-- [ ] Un test de page qui échoue montre son traceback dans le journal dès son échec, sans attendre la fin du run
+- [x] Un test de page qui échoue montre son traceback dans le journal dès son échec, sans attendre la fin du run
 
 **Claimed by:** Elif 2026-11-13 01:15
 

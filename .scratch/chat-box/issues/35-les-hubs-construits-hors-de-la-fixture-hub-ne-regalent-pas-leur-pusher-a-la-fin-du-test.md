@@ -17,4 +17,4 @@
 
 **Claimed by:** Isolde 2026-11-12 18:45
 
-**Status:** in-progress — PR 256 open, waiting for merge (head 71d94b7, CI run 43274033495 attempts 1 and 2 both 3/3 green; reviews in ~/.claude/pm/chat-box-handoffs/pr-35-reviews/: Opus fallback GO, standards clean, spec no blocker). Done with the merge sha.
+**Status:** done (PR 256, merged 302211e)

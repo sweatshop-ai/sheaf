@@ -24,10 +24,10 @@
 2. Selon ce que montre la reproduction : si la requête n'est jamais partie, lire comment le minuteur de l'annulation de la page se pose sous `p.clock` quand un commentaire est répondu pendant l'annulation ; si elle est partie et a été lente, le délai de 8 s de `until` ne convient pas à cette attente et le test doit attendre l'événement (la requête), pas une durée.
 3. Corriger la cause, pas le délai.
 
-- [ ] La cause du rouge est écrite avec la preuve (une reproduction sur t-compute ou le traceback d'une apparition)
-- [ ] Le correctif est dans le test ou dans la page, et un test pose le cas à la main
-- [ ] Cent passages de ce test sous quatre brûleurs sur t-compute, aucun rouge de ce type
+- [x] La cause du rouge est écrite avec la preuve (une reproduction sur t-compute ou le traceback d'une apparition)
+- [x] Le correctif est dans le test ou dans la page, et un test pose le cas à la main
+- [x] Cent passages de ce test sous quatre brûleurs sur t-compute, aucun rouge de ce type
 
 **Claimed by:** Elias 2026-11-13 02:05
 
-**Status:** in-progress — PR 269 open (head ee91bb9, CI run 43345153038 green, 100 of 100 under load, reviews GO), waiting for merge
+**Status:** done (PR 269, merged cef6f06)

@@ -8,9 +8,9 @@
 
 **Par où commencer :** après `cancel()`, `join()` le timer (il ne dure que le temps d'un `shutdown`), ou corriger le docstring.
 
-- [ ] Le docstring de `_call` dit ce qui est vrai
-- [ ] Si `join` est ajouté : un test où le rappel est lent montre que `_call` ne rend la main qu'après lui
+- [x] Le docstring de `_call` dit ce qui est vrai
+- [x] Si `join` est ajouté : un test où le rappel est lent montre que `_call` ne rend la main qu'après lui
 
 **Claimed by:** Faisal 2026-11-13 10:34
 
-**Status:** claimed — one PR with ticket 36, branch chat-box/36-37 off origin/main
+**Status:** done (PR 272, merged b45caf3)

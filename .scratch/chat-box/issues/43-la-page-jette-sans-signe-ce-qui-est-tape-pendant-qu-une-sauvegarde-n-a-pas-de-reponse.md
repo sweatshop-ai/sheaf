@@ -22,4 +22,4 @@
 
 **Claimed by:** Saskia 2026-11-12
 
-**Status:** in-progress (PR 259 open)
+**Status:** done (PR 259, merged 38ae6bf)

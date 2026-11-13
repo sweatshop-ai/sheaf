@@ -6,7 +6,7 @@
 
 **Claimed by:** Berit 2026-11-12 17:55
 
-**Status:** in-progress
+**Status:** done (PR 255, merged 41678e3)
 
 **Ce qui ne va pas (une lecture, pas une preuve) :** la page navigue (rechargement) pendant que le test sonde `line()` ; l'appel `all_inner_texts` n'a aucune garde contre une navigation, et l'erreur de Playwright sort de `until` au lieu d'être sondée à nouveau. C'est la famille des tickets 17, 18 et 24. Le correctif de ces tickets n'a pas touché ce test. La relance du run n'a pas été faite ; le même test est vert sur le run de la PR #244 (43219440986, tête 35cf561), un seul passage, ce qui n'en dit pas plus. Les PR #246 et #247 (CI en 4 workers xdist, garde d'import) ne touchent ni `src/`, ni `page.js`, ni ce test ; la mise en 4 workers élargit peut-être les fenêtres de temps, ce qui n'est pas montré. À établir d'abord : ce qui fait naviguer la page à ce moment du test (un rechargement voulu par la page à la réponse de type `action`, ou un rechargement de la fixture).
 

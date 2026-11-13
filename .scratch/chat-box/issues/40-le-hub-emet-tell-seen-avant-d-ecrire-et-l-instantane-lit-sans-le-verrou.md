@@ -14,4 +14,4 @@
 
 - [x] Un test pose la fenêtre à la main (un instantané pris entre l'émission de `tell-seen` et l'écriture) et échoue sans le correctif — `tests/test_hub_waiting.py::test_tell_seen_goes_out_only_after_tells_json_holds_the_seen_row` et `::test_a_snapshot_asked_while_the_listing_writes_waits_for_it_and_never_says_queued_after_tell_seen` (rouges avant le correctif, 6df597d)
 - [x] `tell-seen` n'est publié qu'après l'écriture ; `waits()` ne lit pas un fichier à moitié remplacé — `_change` retient les événements et les envoie après `write_json`, toujours sous les deux verrous ; `waits()` lit sous le verrou de fil (pas celui du document). Le fichier n'est jamais à moitié écrit (`write_text_private` : écriture complète puis `os.replace`) ; ce que le verrou garantit, c'est qu'un instantané ne précède pas une écriture dont l'événement est déjà parti
-- [ ] Les tests de la page (CI) restent verts
+- [x] Les tests de la page (CI) restent verts — PR 280, tête 60f23be : total_count 3, trois tranches success (la tête finale ajoute la fusion de 4b62ad3)

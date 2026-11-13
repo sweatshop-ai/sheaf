@@ -565,13 +565,11 @@ def test_a_comment_answered_during_the_undo_does_not_move_the_text_the_press_nam
     p.click("#rd-popover button[data-f=ok]")
     if late:
         until(lambda: held or p.wait_for_timeout(20), what="the comment, held")
-        p.clock.run_for(5100)
         held[0].continue_()
     until(lambda: "Why?" in f.read_text(encoding="utf-8"), what="the comment, in the file during the Undo")
     p.wait_for_selector("main .rd-badge", state="attached")                 # the page has the answer
     p.wait_for_timeout(300)
-    if not late:
-        p.clock.run_for(5100)
+    p.clock.run_for(5100)
     until(lambda: "- [x] Approve" in f.read_text(encoding="utf-8"), what="the tick")
     assert "Why?" in f.read_text(encoding="utf-8")
 

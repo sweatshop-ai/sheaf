@@ -96,7 +96,7 @@ class Waiting:
 
     def _name(self, t: dict) -> str:
         row = next((r for r in self.hub.tokens.list() if belongs(t, r)), None)
-        return row.signed(self.hub.person, self.hub.proxy) if row is not None else str(t.get("token", ""))
+        return row.signed(self.hub.person, self.hub.proxy) if row is not None else str(t.get("agent") or t.get("token", ""))
 
     def _emit(self, address: str, name: str, data: dict, member=None):
         e = self.hub.entries.get(address)
@@ -107,7 +107,8 @@ class Waiting:
         """Inside `_change`: take `gone` out of `rows`, and tell the page and the log of each."""
         for t in gone:
             rows.remove(t)
-            data = {"id": t["thread"], **({"seen": bool(t["seen"])} if how == "cancelled" else {}), **extra}
+            data = {"id": t["thread"], **({"seen": bool(t["seen"])} if how == "cancelled" else {}), **extra,
+                    "agent": self._name(t)}
             self._emit(t["doc"], f"tell-{how}", data, t.get("member"))
             self.hub.record(f"tell-{how}", t["doc"], thread=t["thread"], token=t["token"], tid=t["tid"],
                             **{k: v for k, v in extra.items() if k == "reason"})
@@ -184,7 +185,8 @@ class Waiting:
             if any(t["doc"] == address and t["thread"] == cid and belongs(t, row) for t in rows):
                 raise Refused(409, HAS_IT.format(agent=name))
             t = {"id": str(uuid.uuid4()), "doc": address, "thread": cid, "token": row.name, "tid": row.id,
-                 "by": by, "at": time.strftime(STAMP_FORMAT), "seen": None}
+                 "by": by, "at": time.strftime(STAMP_FORMAT), "seen": None,
+                 "agent": name}              # the name the page was told: kept for the end of a Tell whose token is gone
             if thread is not None:
                 t["thread_by"], t["thread_at"], t["thread_quote"] = thread.by, thread.at, thread.quote
             if member is not None:
@@ -215,7 +217,7 @@ class Waiting:
                     continue
                 if t["seen"] is None:
                     t["seen"] = time.strftime(STAMP_FORMAT)
-                    self._emit(address, "tell-seen", {"id": t["thread"]}, t.get("member"))
+                    self._emit(address, "tell-seen", {"id": t["thread"], "agent": self._name(t)}, t.get("member"))
                     self.hub.record("tell-seen", address, thread=t["thread"], token=t["token"], tid=t["tid"])
                     save = True
                 out.append({"id": t["id"], "thread": t["thread"], "message": message(c, t), "by": t["by"],

@@ -6,9 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from pagehelp import PageStalled, reloaded, until
+from pagehelp import PageStalled, reloaded, toast, until
 
 pytestmark = pytest.mark.page
+
+PlaywrightError = pytest.importorskip("playwright.sync_api").Error
 
 
 def test_a_wait_gets_the_request_a_page_makes_after_the_test_last_called_playwright(tab):
@@ -83,3 +85,28 @@ def test_a_pending_timer_that_ends_sooner_is_left_alone(tab):
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
     assert 30 < left < 50
+
+
+class ReloadingPage:
+    """A page whose `evaluate` fails the way Playwright's does when a poll lands on a reload (ticket 53)."""
+    def __init__(self, message):
+        self.message = message
+
+    def evaluate(self, expression):
+        raise PlaywrightError(self.message)
+
+
+@pytest.mark.parametrize("message", [
+    "TypeError: Cannot read properties of null (reading 'textContent')",     # the new page has no #rd-toast yet
+    "Execution context was destroyed, most likely because of a navigation",  # the poll fell on the navigation
+])
+def test_reading_the_toast_during_a_reload_says_not_yet_instead_of_raising(message):
+    assert toast(ReloadingPage(message)) == ""
+    # a poll inside `until` gets "not yet" too, the way the refusal waits of test_page_actions.py call it
+    assert until(lambda: "reload the page" not in toast(ReloadingPage(message)), timeout=1, what="no toast yet")
+
+
+def test_reading_the_toast_still_raises_for_any_other_driver_error():
+    """A driver that has gone away must stay visible: only the two errors of a reload are an answer."""
+    with pytest.raises(PlaywrightError, match="Target closed"):
+        toast(ReloadingPage("Target page, context or browser has been closed: Target closed"))

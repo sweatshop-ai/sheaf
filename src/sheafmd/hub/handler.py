@@ -451,7 +451,7 @@ class Handler:
         name, who, _ = found
         if name in ("mount-js", "mount-css"):
             return True
-        return who in (COOKIE, EITHER, MEMBER, MINT) and name != "jump"
+        return who in (COOKIE, EITHER, MEMBER, MINT) and who.proxy and name != "jump"
 
     def _route_proxy(self, req: Req, raw: bytes) -> Response:
         cfg = self.hub.proxy

@@ -311,18 +311,24 @@ var create = function (ROOT, CFG, opts) {
     });
   })();
 
-  // Edit mode itself writes contenteditable="true" and class="rd-locked" into the
+  // Edit mode itself writes contenteditable="true" and class="rd-locked" (and a refused key, rd-saving) into the
   // DOM. Those must be invisible to change detection, or merely ENTERING edit mode
   // marks every block dirty and the next save pushes the whole document through
   // pandoc - renumbering lists, reflowing tables, rewriting rules.
   var LOCKED_TIP = 'Not editable here: code, charts, images and raw HTML would not survive the ' +
                    'round trip. Edit this block in the .md file.';
+  // A class attribute loses the page's own marker classes, whole tokens only, and goes when nothing else is left;
+  // one that holds none of them is returned as it was.
+  function dropMarkers(all, sp, cls) {
+    var toks = cls.split(/\s+/), keep = toks.filter(function (t) { return t !== 'rd-locked' && t !== 'rd-saving'; });
+    if (keep.length === toks.length) return all;
+    return keep.length ? sp + 'class="' + keep.join(' ') + '"' : '';
+  }
   function clean(h) {
     return h.replace(/<span class="rd-anchor[^"]*" data-rd-id="([^"]+)"[^>]*>[\s\S]*?<\/span>/g,
                      '<span class="rd-anchor" data-rd-id="$1"></span>')
             .replace(/\s*contenteditable="[^"]*"/g, '')
-            .replace(/\s+class="rd-locked"/g, '')
-            .replace(/(\s+class="[^"]*?)\s*\brd-locked\b/g, '$1')
+            .replace(/(\s+)class="([^"]*)"/g, dropMarkers)
             .replace(/\s+title="Not editable here: [^"]*"/g, '')
             .replace(/<button\b[^>]*\brd-copybtn\b[^>]*>[\s\S]*?<\/button>/g, '');
   }
@@ -3133,8 +3139,26 @@ var create = function (ROOT, CFG, opts) {
   // While a save is out, the page must stay exactly what was sent: a merge or a
   // split paragraph reloads the page on the reply, and a keystroke typed in
   // between would be on screen only. A save takes a fraction of a second, and
-  // autosave only starts once typing has paused.
-  main.addEventListener('beforeinput', function (e) { if (saving || settling) e.preventDefault(); });
+  // autosave only starts once typing has paused. When the hub is slow to answer, the refusal is said: the
+  // block shows it is saving (rd-saving) and the first refused key says so, once for that save.
+  // The mark is cleared by a poll, not where saving and settling fall: they fall in a dozen places (the reply,
+  // a failure, a give-up, a reload), and a mark that waits a tenth of a second too long costs nothing.
+  var refusedSaid = false, refusedTmr;
+  main.addEventListener('beforeinput', function (e) {
+    if (!saving && !settling) return;
+    e.preventDefault();
+    var b = e.target && e.target.closest ? e.target.closest('[contenteditable="true"]') : null;
+    if (b) b.classList.add('rd-saving');
+    if (!refusedSaid) { refusedSaid = true; say('Saving… what you type now is not taken, wait a moment.'); }
+    if (!refusedTmr) refusedTmr = setInterval(function () {
+      if (saving || settling) return;
+      clearInterval(refusedTmr); refusedTmr = null; refusedSaid = false;
+      Array.prototype.forEach.call(main.querySelectorAll('.rd-saving'), function (x) {
+        x.classList.remove('rd-saving');
+        if (!x.classList.length) x.removeAttribute('class');      // not a class="" left in what a save sends
+      });
+    }, 100);
+  });
 
   // ---- Enter in a task item ---------------------------------------------------
   // The browser's own Enter in an <li> makes an <li> with no box, which the .md would hold as a plain item.

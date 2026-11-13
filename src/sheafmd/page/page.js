@@ -1916,7 +1916,7 @@ var create = function (ROOT, CFG, opts) {
     var out = [], para = [], quote = [], list = null, lines = esc(src).split('\n'), m;
     var flush = function () {
       if (para.length) out.push('<p>' + para.join('<br>') + '</p>');
-      if (quote.length) out.push('<blockquote>' + quote.join('<br>') + '</blockquote>');
+      if (quote.length) out.push('<div class="rd-bq">' + quote.join('<br>') + '</div>');
       if (list) out.push('<' + list.tag + list.start + '>' + list.items.map(function (li) { return '<li>' + li + '</li>'; }).join('') +
                          '</' + list.tag + '>');
       para = []; quote = []; list = null;

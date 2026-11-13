@@ -10,7 +10,7 @@ import pytest
 from helpers import door, rpc
 from sheafmd import paths
 from sheafmd.hub import auth
-from sheafmd.hub.handler import COOKIE, EITHER, KEY, DOOR, OPEN, Handler
+from sheafmd.hub.handler import COOKIE, DICTATION, EITHER, KEY, DOOR, OPEN, Handler
 from sheafmd.hub.state import TokenError, TokenRow, Tokens
 
 
@@ -29,7 +29,8 @@ def all_routes(handler):
 def test_only_the_door_accepts_a_token_and_reads_its_own_body(browser):
     door_routes = [(m, p) for m, p, _, who in all_routes(browser.handler)
                    if who is not OPEN and (who.token or who.raw_body)]
-    assert door_routes == [("POST", "/_/mcp")]
+    assert sorted(door_routes) == [("POST", "/_/mcp"), ("POST", "/_/transcribe")]     # the door, and the recording the relay takes (8.5)
+    assert not browser.handler.routes["/_/transcribe"]["POST"][1].token
     who = browser.handler.routes["/_/mcp"]["POST"][1]
     assert who is DOOR and who.token and who.raw_body
 
@@ -52,6 +53,7 @@ def test_a_member_of_the_proxy_socket_is_offered_the_cookie_routes_only():
     assert Handler._for_members(("doc", EITHER, None)) is True
     assert Handler._for_members(("jobs", KEY, None)) is False
     assert Handler._for_members(("mcp", DOOR, None)) is False
+    assert Handler._for_members(("transcribe-ask", DICTATION, None)) is False   # same credentials as COOKIE, never on the proxy socket
 
 
 # ── what a refused caller is told ────────────────────────────────────────────

@@ -36,7 +36,7 @@ from ..edit import EditError
 from ..mcp import Caller, Door
 from ..render import RenderError
 from ..source import StaleError, md_hash
-from . import auth, boxwait, codes, events, peer, place, proxy, relay, targets, the_list, visibility, work
+from . import auth, boxwait, codes, events, peer, place, proxy, relay, targets, the_list, transcribe, visibility, work
 from . import waiting as waiting_mod
 from .tell import NO_AGENT, JobRefused
 from .index import Status
@@ -45,6 +45,8 @@ from .roots import Address, NotFound, address_of_url, root_of_url
 from .state import TokenRow
 
 MAX_BODY = 8 * 1024 * 1024
+MAX_AUDIO = 2 * 1024 * 1024
+DICTATION_FILE = re.compile(r"dictee\.(webm|mp4|ogg)")
 OPS = ("add", "reply", "status", "edit", "delete")
 SIGN_IN = ("This browser is not signed in to your sheaf hub. On the machine that runs the hub, "
            "run <code>sheaf open &lt;this url&gt;</code>. If the hub runs on another machine, "
@@ -144,6 +146,7 @@ class Who:
     kinds: frozenset[str]
     refusal: str
     raw_body: bool = False
+    proxy: bool = True               # False: never offered on the proxy socket, though it takes the same credentials as a kind that is
 
     def __contains__(self, kind) -> bool:
         return kind in self.kinds
@@ -158,6 +161,10 @@ OPEN = None
 COOKIE = Who(frozenset({"cookie"}), _BROWSER)
 EITHER = Who(frozenset({"cookie", "key"}), _BROWSER)
 KEY = Who(frozenset({"key"}), "this needs the hub key")
+# The dictation relay (8.5): a browser's own, never a member's, whose page speaks to its host (9.9). `Who` compares by
+# value, so `proxy=False` is what keeps `_for_members` from admitting it as it would a plain `COOKIE`.
+DICTATION = Who(frozenset({"cookie"}), _BROWSER, proxy=False)
+AUDIO = Who(frozenset({"cookie"}), _BROWSER, raw_body=True, proxy=False)     # the same, for the recording itself
 DOOR = Who(frozenset({"key", "token"}), "this needs the hub key or an MCP token", raw_body=True)
 # A member's alone, on the proxy socket (9.12): the loopback port answers 404, as for a route it has not.
 MEMBER = Who(frozenset({"member"}), "no such route")
@@ -263,6 +270,8 @@ class Handler:
             ("POST", "/_/jump", "jump", COOKIE, self._jump),
             ("POST", "/_/seen", "seen", COOKIE, self._seen),
             ("POST", "/_/export", "export", COOKIE, self._export),
+            ("GET", "/_/transcribe", "transcribe-ask", DICTATION, self._transcribe_ask),
+            ("POST", "/_/transcribe", "transcribe", AUDIO, self._transcribe),
             ("POST", "/_/diag", "diag", COOKIE, self._diag),
             ("POST", "/_/render", "render", KEY, self._render),
             ("POST", "/_/forget", "forget", KEY, self._forget),
@@ -336,6 +345,7 @@ class Handler:
             res.nonce = res.nonce or auth.new_nonce()
             framed = req is not None and req.via == "proxy"     # the front's own pages may frame it (9.5)
             h["Content-Security-Policy"] = auth.csp(res.nonce, "'self'" if framed else "'none'")
+            h["Permissions-Policy"] = "microphone=(self), camera=(), geolocation=()"
         if res.status >= 400 and req is not None and res.row is not False:     # False: counted, not written
             error = res.error or ""
             if not error and h.get("Content-Type") == "application/json":
@@ -406,7 +416,7 @@ class Handler:
         if req.method == "POST" and who.raw_body:
             if req.kind == "key":
                 req.display = self._door_name(req)
-            req.raw = self._body(req, raw)
+            req.raw = self._body(req, raw, MAX_AUDIO if who is AUDIO else MAX_BODY)
         elif req.method == "POST":
             self._read_body(req, self._body(req, raw))
         return fn(req)
@@ -441,7 +451,7 @@ class Handler:
         name, who, _ = found
         if name in ("mount-js", "mount-css"):
             return True
-        return who in (COOKIE, EITHER, MEMBER, MINT) and name != "jump"
+        return who in (COOKIE, EITHER, MEMBER, MINT) and who.proxy and name != "jump"
 
     def _route_proxy(self, req: Req, raw: bytes) -> Response:
         cfg = self.hub.proxy
@@ -649,17 +659,17 @@ class Handler:
             raise Refuse(400, "a request with the hub key needs X-Sheaf-As, the name its reply is signed with")
         return name
 
-    def _body(self, req: Req, raw) -> bytes:
+    def _body(self, req: Req, raw, limit: int = MAX_BODY) -> bytes:
         """The body, now that the caller is known to be let in: refused by its header when it is
         over the limit, before a byte of it is read."""
         try:
             n = int(req.headers.get("content-length") or (0 if callable(raw) else len(raw)))
         except ValueError:
             raise Refuse(400, "bad Content-Length") from None
-        if n > MAX_BODY:
+        if n > limit:
             raise Refuse(413, "the request is too large")
         raw = raw() if callable(raw) else raw
-        if len(raw) > MAX_BODY:
+        if len(raw) > limit:
             raise Refuse(413, "the request is too large")
         return raw
 
@@ -1740,6 +1750,33 @@ class Handler:
                 raise Refuse(503, " ".join(str(ex).split())) from None
         return Response(200, {"Content-Type": "application/pdf",
                               "Content-Disposition": _disposition(stem + ".pdf")}, data)
+
+    def _transcribe_ask(self, req: Req) -> Response:
+        asked = self.hub.transcribe
+        return _ok(available=asked is not None and asked.available())
+
+    def _transcribe(self, req: Req) -> Response:
+        """Dictation: the recording a page made, sent to t-compute, the text back. The sound is not kept and the
+        text is not written down; a refusal says only what the page needs to tell a person."""
+        name = req.headers.get("x-filename", "")
+        ctype = req.headers.get("content-type", "").lower()
+        if not DICTATION_FILE.fullmatch(name) or not ctype.startswith("audio/"):
+            raise Refuse(415, "send audio as dictee.webm, dictee.mp4 or dictee.ogg")
+        _shape(req.raw, "the recording is empty")
+        if len(req.raw) > MAX_AUDIO:
+            raise Refuse(413, "the recording is too large")
+        asked, began, result = self.hub.transcribe, time.monotonic(), "ok"
+        try:
+            if asked is None:
+                raise transcribe.Unavailable("dictation is not available")
+            text = asked.transcribe(req.raw, name[7:])
+        except (transcribe.Busy, transcribe.Unavailable, transcribe.Failed) as e:
+            result = type(e).__name__.lower()
+            raise Refuse({transcribe.Busy: 429, transcribe.Unavailable: 503, transcribe.Failed: 502}[type(e)], str(e)) from None
+        finally:
+            self.hub.record("transcribe", None, bytes=len(req.raw), ms=round((time.monotonic() - began) * 1000),
+                            result=result, by=self.hub.person)
+        return _ok(text=text)
 
     def _diag(self, req: Req) -> Response:
         b = req.body

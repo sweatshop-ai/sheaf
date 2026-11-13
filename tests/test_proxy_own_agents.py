@@ -82,8 +82,8 @@ def test_each_member_tells_waits_and_cancels_only_their_own_and_the_other_page_n
     assert [t["by"] for t in documents(browser, bea)[0]["tells"]] == ["Bea"]
     assert [t["by"] for t in documents(browser, cal)[0]["tells"]] == ["Cal"]
     assert post(pair, BEA, "/_/cancel").status == 200
-    assert heard(bea_tab) == [("tell-seen", {"id": "c1"}), ("tell-cancelled", {"id": "c1", "seen": True})]
-    assert heard(cal_tab) == [("tell-seen", {"id": "c1"})]                      # her own listing, nothing of Bea's end
+    assert heard(bea_tab) == [("tell-seen", {"id": "c1", "agent": "ChatGPT (Bea)"}), ("tell-cancelled", {"id": "c1", "seen": True, "agent": "ChatGPT (Bea)"})]
+    assert heard(cal_tab) == [("tell-seen", {"id": "c1", "agent": "Claude (Cal)"})]                      # her own listing, nothing of Bea's end
     assert doc(pair, BEA)["telling"] == []
     assert doc(pair, CAL)["telling"] == [{"id": "c1", "to": "Claude (Cal)", "state": "seen"}]
     assert documents(browser, bea)[0]["tells"] == [] and documents(browser, cal)[0]["tells"]

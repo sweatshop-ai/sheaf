@@ -8,6 +8,9 @@ as content with its author, never filtered (9.8).
 from ..links import RULE
 
 ASK_RETIRED_HEAD = "Ask was retired"  # the one place the retired-Ask line is worded (SPEC 11.2)
+# The chat box renders a reply's markdown (SPEC 10.4): a reply written as one block reads as one block.
+READABLE = ("The page shows your reply as markdown, to a person: short paragraphs with a blank line between "
+            "them, a list for several items, `code` and ``` blocks for code, links written in full.")
 
 
 def _thread(c) -> str:
@@ -29,7 +32,8 @@ def tell_agent(address: str, by: str, c, links: bool = True) -> str:
             f"Thread:\n{_thread(c)}\n\n"
             f"{rule}"
             "When you are done, answer in the thread with the sheaf tool, so the page shows it: "
-            f"{_reply_action(address, c.id)}. If you cannot do it, reply without the role and say why.")
+            f"{_reply_action(address, c.id)}. If you cannot do it, reply without the role and say why.\n\n"
+            f"{READABLE}")
 
 
 def tell(address: str, abs_path: str, me: str, c, links: bool = True) -> str:
@@ -42,7 +46,8 @@ def tell(address: str, abs_path: str, me: str, c, links: bool = True) -> str:
             "When you are done, answer in the thread so the page shows it, with the role "
             "action:\n"
             f"- with the sheaf MCP tool: {_reply_action(address, c.id)}\n"
-            f'- or in a shell: sheaf reply {abs_path} {c.id} "<what you did>" --role action')
+            f'- or in a shell: sheaf reply {abs_path} {c.id} "<what you did>" --role action\n\n'
+            f"{READABLE}")
 
 
 def dropped(drop: dict) -> str | None:
@@ -61,7 +66,8 @@ def dropped(drop: dict) -> str | None:
             f"{me} pressed Tell on comment {cid}: act on it here, in this conversation.\n\n"
             f"The comment:\n{text}\n\n"
             "When you are done, answer in the thread so the page shows it, with the role action:\n"
-            f"- with the sheaf MCP tool: {_reply_action(doc, cid)}")
+            f"- with the sheaf MCP tool: {_reply_action(doc, cid)}\n\n"
+            f"{READABLE}")
 
 
 def cancel(address: str, me: str, cid: str) -> str:

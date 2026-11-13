@@ -94,28 +94,65 @@ def parse(t: dict, where) -> Config:
     return cfg
 
 
+def _resolve(host, port):
+    """The addresses of `host`, or [] when the name does not resolve (the caller then has none to try)."""
+    try:
+        return socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except OSError:
+        return []
+
+
 def _call(method, url, headers, body=None, timeout=CHECK_TIMEOUT) -> tuple[int, bytes]:
     """(status, body); a connection that fails is a 0. A 3xx is an answer, not a road: http.client follows no
-    redirect and reads no proxy variable. `timeout` bounds the whole call, not each read: at that moment a timer
-    shuts the socket down, so a service that answers a byte at a time ends there, with nothing left running."""
+    redirect and reads no proxy variable. `timeout` bounds the whole call, name lookup and connection included, not
+    each step: at that moment a timer shuts the socket down, so a service that answers a byte at a time ends there.
+    The lookup runs on a thread of its own that holds the host name only; if the resolver never answers, that
+    thread outlives the call (nothing else can stop `getaddrinfo`), but it holds neither key nor body. When the
+    call returns, the timer is done: `_call` waits for a cut already begun."""
     u = urlparse(url)
     make = http.client.HTTPSConnection if u.scheme == "https" else http.client.HTTPConnection
     conn = make(u.hostname, u.port, timeout=timeout)
-    expired, held = threading.Event(), []                     # `held`: the socket, which the response takes from conn
+    expired, held = threading.Event(), []                     # `held`: a handle on the socket, taken before it connects
+    deadline = time.monotonic() + timeout
 
     def cut():
         expired.set()
-        try:
-            if held:
-                held[0].shutdown(socket.SHUT_RDWR)
-        except OSError:
-            pass
+        for sock in list(held):
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
 
+    def connect(address, _timeout, source_address=None):
+        """`socket.create_connection` with one deadline for the lookup and every address, and a handle in `held`
+        from the first moment, so that the timer can cut a connection or a TLS handshake that is still waiting."""
+        found = []
+        looking = threading.Thread(target=lambda: found.append(_resolve(*address)), daemon=True)
+        looking.start()
+        looking.join(max(0.0, deadline - time.monotonic()))
+        if not found:
+            raise TimeoutError("the name did not resolve in time")
+        error = OSError("the name has no address")
+        for family, kind, proto, _, target in found[0]:
+            left = deadline - time.monotonic()
+            if left <= 0 or expired.is_set():
+                break
+            sock = socket.socket(family, kind, proto)
+            held.append(sock.dup())
+            try:
+                sock.settimeout(left)
+                sock.connect(target)
+                return sock
+            except OSError as e:
+                sock.close()
+                error = e
+        raise error
+
+    conn._create_connection = connect                         # the hook http.client.connect() dials through (3.11 to 3.14)
     timer = threading.Timer(timeout, cut)
     timer.start()
     try:
         conn.connect()
-        held.append(conn.sock)
         if expired.is_set():
             return 0, b""
         conn.request(method, (u.path or "/") + (f"?{u.query}" if u.query else ""), body, headers)
@@ -126,7 +163,10 @@ def _call(method, url, headers, body=None, timeout=CHECK_TIMEOUT) -> tuple[int, 
         return 0, b""
     finally:
         timer.cancel()
+        timer.join()
         conn.close()
+        for sock in held:
+            sock.close()
 
 
 class Relay:

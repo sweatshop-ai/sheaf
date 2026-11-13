@@ -2729,7 +2729,7 @@ var create = function (ROOT, CFG, opts) {
     if (popId === id) closePopover(); else openComment(id);
   });
   listen(PAGE_EV, 'mousedown', function (e) {
-    if (pop && !standing() && !pop.contains(e.target) && !(e.target.closest && e.target.closest('.rd-badge, #rd-panel, #rd-unsent, #rd-actions, #rd-notice, #rd-menu-btn, #rd-menu, #rd-mode, #rd-work'))) leavePopover();
+    if (pop && !standing() && !pop.contains(e.target) && !(e.target.closest && e.target.closest('.rd-badge, #rd-panel, #rd-unsent, #rd-actions, .rd-inline, #rd-notice, #rd-menu-btn, #rd-menu, #rd-mode, #rd-work'))) leavePopover();
   });
 
   // ---- side panel -----------------------------------------------------------

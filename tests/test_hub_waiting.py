@@ -377,6 +377,82 @@ def test_a_cancel_that_comes_while_the_first_listing_is_out_ends_it_once_and_see
     assert [r["thread"] for r in hub_rows("tell-seen")] == ["c1"] and len(hub_rows("tell-cancelled")) == 1
 
 
+def test_tell_seen_goes_out_only_after_tells_json_holds_the_seen_row(browser, talk, monkeypatch):
+    token = agent_token()
+    target(browser)
+    assert tell(browser).status == 200
+    sub, held = tab(browser.hub), {}
+    real = waiting.write_json
+
+    def write(path, obj):
+        held["before"] = named(sub.drain(), "tell-seen")                     # what the page was told before the file changed
+        real(path, obj)
+        held["after"] = named(sub.drain(), "tell-seen")
+    monkeypatch.setattr(waiting, "write_json", write)
+    assert documents(browser, token)[0]["tells"]
+    assert held["before"] == []
+    assert len(held["after"]) + len(named(sub.drain(), "tell-seen")) == 1
+
+
+def test_a_snapshot_asked_while_the_listing_writes_waits_for_it_and_never_says_queued_after_tell_seen(
+        browser, talk, monkeypatch):
+    token = agent_token()
+    target(browser)
+    assert tell(browser).status == 200
+    snap, real = [], waiting.write_json
+
+    def ask():
+        snap.append(browser.hub.waiting_tells.waits(DOC, None, sweep=False))
+
+    def write(path, obj):
+        asker = threading.Thread(target=ask)
+        asker.start()
+        asker.join(0.5)                      # a snapshot that reads the file at once has answered by now: "queued"
+        real(path, obj)
+    monkeypatch.setattr(waiting, "write_json", write)
+    sub = tab(browser.hub)
+    assert documents(browser, token)[0]["tells"]
+    for _ in range(100):
+        if snap:
+            break
+        threading.Event().wait(0.05)
+    assert [w["state"] for w in snap[0]] == ["seen"] and named(sub.drain(), "tell-seen")
+
+
+def test_the_events_of_a_tell_name_the_agent_as_tell_queued_did_after_a_rename(browser, talk):
+    token = agent_token()
+    target(browser)
+    sub = tab(browser.hub)
+    assert tell(browser).status == 200
+    queued, = named(sub.drain(), "tell-queued")
+    browser.hub.person = "Someone Else"                                     # the signed name is built on the person
+    assert browser.hub.tokens.list()[0].signed(browser.hub.person) != queued["agent"]
+    assert documents(browser, token)[0]["tells"]
+    assert named(sub.drain(), "tell-seen") == [queued]
+    assert [w["to"] for w in browser.hub.waiting_tells.waits(DOC, None, sweep=False)] == [queued["agent"]]
+    assert browser.post("/_/cancel", {"doc": DOC, "id": "c1"}).status == 200
+    assert named(sub.drain(), "tell-cancelled") == [{"id": "c1", "seen": True, "agent": queued["agent"]}]
+
+
+def test_a_row_with_no_agent_gets_the_name_it_has_now_and_keeps_it_when_its_token_goes(browser, talk):
+    agent_token()
+    target(browser)
+    sub = tab(browser.hub)
+    assert tell(browser).status == 200
+    queued, = named(sub.drain(), "tell-queued")
+    file = Path(sheafmd.paths.state_dir(), "tells.json")
+    rows = json.loads(file.read_text(encoding="utf-8"))
+    for r in rows:
+        r.pop("agent")                                                      # the shape a Tell had before ticket 23
+    file.write_text(json.dumps(rows), encoding="utf-8")
+    browser.hub.waiting_tells.waits(DOC, None)                              # any pass of the hub over the file
+    assert [r["agent"] for r in json.loads(file.read_text(encoding="utf-8"))] == [queued["agent"]]
+    Tokens().revoke("ada-chatgpt")
+    browser.hub.waiting_tells.sweep()
+    assert named(sub.drain(), "tell-cancelled") == [{"id": "c1", "seen": False, "reason": "revoked",
+                                                      "agent": queued["agent"]}]
+
+
 def test_a_cancel_first_leaves_nothing_to_list_and_nothing_seen(browser, talk):
     token = agent_token()
     target(browser)

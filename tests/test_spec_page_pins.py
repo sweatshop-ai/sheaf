@@ -109,11 +109,11 @@ def test_the_known_limit_of_a_kept_comment_found_by_the_words_a_paragraph_ends_w
     assert "cannot tell this from a paragraph that took over the entry's opening words" in s
 
 
-def test_a_cancel_given_up_takes_the_busy_button_away_whether_or_not_it_reached_the_hub():
+def test_a_cancel_given_up_takes_the_cancel_button_away_whether_or_not_it_reached_the_hub():
     s = flat(section("10.4"))
     assert "**A cancel given up.**" in s
     assert "A cancel the hub does not answer within 30 s" in s
-    assert "takes the busy button" in s and "and the pending line away" in s
+    assert "takes the Cancel button" in s and "and the pending line away" in s
     assert "even though the cancel may never have reached the hub, or may have arrived all the same" in s
     assert "A cancel that fails otherwise (the hub unreachable, an error answer) leaves them." in s
 

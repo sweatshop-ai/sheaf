@@ -95,5 +95,6 @@ class Adapter(Protocol):
     def deliver(self, t: Target, text: str, run: Runner) -> None: ...    # raises DeliveryError
     def state(self, t: Target) -> State | None: ...
     def jump_values(self, t: Target) -> dict | None: ...                 # session, pid, name, agent of a live session of this account; None: none
+    def reopen_values(self, t: Target) -> dict | None: ...               # session, name, agent, cwd of an ended session; None: it cannot be opened again
     def name(self, t: Target) -> str: ...                                # its human name now, "" when it has none
     def stop(self, t: Target, text: str, run: Runner) -> None: ...

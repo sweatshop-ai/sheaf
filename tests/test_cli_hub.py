@@ -18,7 +18,7 @@ import pytest
 
 from agent_fakes import PID, FakeClaude, write_record
 from helpers import PLAN, Impostor, Silent, gone, http_get, hub_alive, hub_rows, key, silent_message
-from sheafmd import diagnostics, paths, signals
+from sheafmd import config, diagnostics, paths, seat, signals
 from sheafmd.hub import client as hubclient
 from sheafmd.hub import server
 
@@ -33,6 +33,19 @@ def doc(work):
     return f
 
 
+def sign_in_link(r, opened_browser):
+    """The sign-in link that the `sheaf open` which gave `r` handed to the browser. When there is none
+    (PR 248 run 43317866368: `opened[0]` raised IndexError and nothing said why), the failure holds what
+    `_open` decides on: what it printed (the tab count and the ssh tunnel show there), the ssh seat,
+    the browser settings and the environment behind them."""
+    if not opened_browser.opened:
+        seat_here = seat.remote(os.environ)
+        env = {k: os.environ[k] for k in (*seat.SSH_VARS, *seat.BROWSER_VARS, "SHEAF_NO_BROWSER") if k in os.environ}
+        pytest.fail(f"`sheaf open` opened no browser: code {r.code}, out {r.out!r}, err {r.err!r}, "
+                    f"seat {seat_here}, browser_enabled {config.browser_enabled(lambda *_: None)}, env {env}")
+    return opened_browser.opened[0]
+
+
 # ── sheaf open ───────────────────────────────────────────────────────────────
 
 def test_open_starts_a_hub_signs_the_browser_in_and_prints_only_the_clean_url(sheaf, opened_browser, doc, port):
@@ -44,7 +57,7 @@ def test_open_starts_a_hub_signs_the_browser_in_and_prints_only_the_clean_url(sh
     assert all(line.startswith("  +") for line in lines[1:-1])          # the render log, as always
     assert key() not in r.out + r.err and "key=" not in r.out + r.err
     assert [u.split("?")[0] for u in opened_browser.opened] == [f"http://127.0.0.1:{port}/_/open"]
-    sign_in = opened_browser.opened[0]
+    sign_in = sign_in_link(r, opened_browser)
     assert NONCE_URL.fullmatch(sign_in.replace(str(port), "PORT", 1)), sign_in
     assert key() not in sign_in and "key=" not in sign_in           # the launcher's argv never holds the key (9.3)
     path = sign_in.split(str(port), 1)[1]
@@ -81,8 +94,8 @@ def test_the_tip_comes_once_and_a_second_open_uses_the_same_hub(sheaf, opened_br
 
 
 def test_a_document_already_open_in_a_tab_is_not_opened_again(sheaf, opened_browser, doc, port):
-    sheaf("open", doc)
-    resp, _ = http_get(port, opened_browser.opened[0].split(str(port), 1)[1])
+    r = sheaf("open", doc)
+    resp, _ = http_get(port, sign_in_link(r, opened_browser).split(str(port), 1)[1])
     jar = resp.getheader("Set-Cookie").split(";")[0]
     tab = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
     tab.request("GET", "/_/live?doc=work/plan.md", headers={"Cookie": jar})
@@ -114,7 +127,8 @@ def test_a_browser_that_is_off_is_not_opened_and_the_url_is_still_printed(sheaf,
 def test_a_browser_that_cannot_be_started_says_so_and_still_exits_0(sheaf, opened_browser, doc, port):
     opened_browser.result = False
     r = sheaf("open", doc)
-    assert r.code == 0 and "no browser could be opened" in r.err
+    # exited 1 once on py3.14 in CI with nothing more to read (2026-11-12): the output says why next time
+    assert r.code == 0 and "no browser could be opened" in r.err, (r.code, r.out, r.err)
     assert key() not in r.out + r.err
 
 
@@ -122,7 +136,7 @@ def test_the_render_options_reach_the_page(sheaf, opened_browser, doc, port):
     r = sheaf("open", doc, "--title", "My plan", "--toc", "never", "--by", "Grace",
               "--max-image-width", "800")
     assert r.code == 0
-    resp, _ = http_get(port, opened_browser.opened[0].split(str(port), 1)[1])
+    resp, _ = http_get(port, sign_in_link(r, opened_browser).split(str(port), 1)[1])
     jar = resp.getheader("Set-Cookie").split(";")[0]
     _, body = http_get(port, "/work/plan.md", {"Cookie": jar})
     assert b"<title>My plan</title>" in body
@@ -135,7 +149,7 @@ def test_the_for_option_reaches_the_page_and_the_saved_settings(sheaf, opened_br
     (work / ".sheaf.toml").write_text('for = "Acme"\n', encoding="utf-8")
     r = sheaf("open", doc, "--by", "Grace", "--for", "Globex")
     assert r.code == 0, r.err
-    resp, _ = http_get(port, opened_browser.opened[0].split(str(port), 1)[1])
+    resp, _ = http_get(port, sign_in_link(r, opened_browser).split(str(port), 1)[1])
     jar = resp.getheader("Set-Cookie").split(";")[0]
     _, body = http_get(port, "/work/plan.md", {"Cookie": jar})
     assert b"Document prepared by Grace for Globex</p>" in body and b"Acme" not in body
@@ -156,8 +170,9 @@ def test_a_page_url_signs_the_browser_in_again_without_rendering(sheaf, opened_b
     opened_browser.opened.clear()
     r = sheaf("open", f"http://127.0.0.1:{port}/work/plan.md")
     assert r.code == 0 and key() not in r.out + r.err
-    assert len(opened_browser.opened) == 1 and key() not in opened_browser.opened[0]
-    assert NONCE_URL.fullmatch(opened_browser.opened[0].replace(str(port), "PORT", 1)), opened_browser.opened
+    link = sign_in_link(r, opened_browser)
+    assert len(opened_browser.opened) == 1 and key() not in link
+    assert NONCE_URL.fullmatch(link.replace(str(port), "PORT", 1)), opened_browser.opened
 
 
 def test_a_url_of_another_host_is_refused(sheaf, opened_browser, doc, port):
@@ -414,8 +429,8 @@ def test_stop_with_no_hub_is_not_an_error(sheaf, port):
 
 
 def test_the_key_and_the_cookie_survive_a_restart(sheaf, opened_browser, doc, port):
-    sheaf("open", doc)
-    resp, _ = http_get(port, opened_browser.opened[0].split(str(port), 1)[1])
+    r = sheaf("open", doc)
+    resp, _ = http_get(port, sign_in_link(r, opened_browser).split(str(port), 1)[1])
     jar = resp.getheader("Set-Cookie").split(";")[0]
     sheaf("stop")
     assert not hub_alive(port)

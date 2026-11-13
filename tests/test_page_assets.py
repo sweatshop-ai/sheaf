@@ -157,6 +157,10 @@ def test_every_request_goes_to_an_absolute_hub_path():
         arg = arg.strip()
         if arg.startswith("'/_/"):
             continue
+        # ticket 06: the dictation of a mounted page goes to the host's own Open WebUI route (SPEC 9.9), the one request
+        # that is not the hub's; any other host path stays a failure
+        if arg == "'/api/v1/audio/transcriptions'":
+            continue
         assert re.fullmatch(r"\w+", arg), (fn, arg)
         named = {f for f, p in defs.items() if p == arg}
         assert named, f"{fn}({arg}): {arg} is the first parameter of no function"
@@ -241,7 +245,7 @@ def test_the_page_has_no_ask_left():
     assert "'s answer</span>'" in js.replace(r"\u2019", "'")
 
 
-def test_the_page_knows_the_eight_words_as_the_hub_reads_them():
+def test_the_page_knows_the_action_words_as_the_hub_reads_them():
     # #148: a box no button names yet is told an action's by its line, with the hub's words, in the hub's order.
     from sheafmd.hub import the_list
     m = re.search(r"var ACTION_WORDS = \[(.*?)\];", (PAGE / "page.js").read_text(encoding="utf-8"))

@@ -352,9 +352,11 @@ var create = function (ROOT, CFG, opts) {
             .replace(/\s+title="Not editable here: [^"]*"/g, '')
             .replace(/<button\b[^>]*\brd-copybtn\b[^>]*>[\s\S]*?<\/button>/g, '');
   }
+  // A part of the page's own among a block's nodes (data-rd-ui: the byline, which the page writes again with the session's
+  // name) is no text of the block: changing it is no edit, and the hub drops it from a save all the same.
   function ser(b) {
     return clean(b.nodes.map(function (n) {
-      return n.nodeType === 1 ? n.outerHTML : (n.nodeType === 3 ? n.nodeValue : '');
+      return n.nodeType === 1 ? (n.hasAttribute('data-rd-ui') ? '' : n.outerHTML) : (n.nodeType === 3 ? n.nodeValue : '');
     }).join('')).trim();
   }
   blocks.forEach(function (b) { b.pristine = ser(b); });

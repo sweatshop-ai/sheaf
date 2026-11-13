@@ -17,4 +17,6 @@ Les deux tests sont ceux qui précèdent immédiatement le test du ticket 52 dan
 - [ ] Un test pose le cas à la main et échoue sans le correctif
 - [ ] Huit passages du fichier entier sous quatre brûleurs sur t-compute, aucun rouge de ce type
 
-**Status:** ready
+**Claimed by:** Elias 2026-11-13 01:35
+
+**Status:** in-progress

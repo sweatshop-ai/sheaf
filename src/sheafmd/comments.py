@@ -526,21 +526,44 @@ def anchor_point(block: str, start: int, end: int, quote: str) -> int:
 _ATX_TEXT = re.compile(r"^( {0,3}#{1,6}[ \t]+)(.*?)(?:[ \t]+#+)?[ \t]*$")
 
 
+def _unclosed_opener(text: str) -> int:
+    """Where a `<!--` outside code that nothing closes starts in `text`, or -1. Any `<!--`
+    counts, not only a sheaf comment's: a block written after it would close it."""
+    masked, i = _mask_code(text), 0
+    while True:
+        j = _opener(masked, i)
+        if j < 0:
+            return -1
+        e = masked.find("-->", j + 4)
+        if e < 0:
+            return j
+        i = e + 3
+
+
 def heading_anchor(block: str) -> int | None:
     """Offset in a heading block where a comment on any of its words goes: the end of the heading's
     text, so the words stay whole for every reader of the file (a block in the middle, as in
     "Done<!-- … --> when", makes the title another one). Before an ATX heading's closing hashes and
     before a setext heading's underline, which a block after them would turn into text; before a
-    backslash that ends the text, which would escape the block's `<`. None for an ATX heading with
-    no words, where a block right after the hashes would make the line a paragraph."""
+    backslash that ends the text, which would escape the block's `<`; before a `<!--` that nothing
+    closes, which a block after it would close, hiding the words it was meant to hold. None for a
+    heading with no words, where a block right after the hashes would make the line a paragraph,
+    and for a line that blocks.ATX_RE reads as a heading and pandoc as a paragraph (a no-break
+    space after the hashes), where the caller keeps the block after the selection."""
     lines = block.rstrip("\n").split("\n")
     if len(lines) > 1 and SETEXT_RE.match(lines[-1]):          # setext: the text is the lines above the underline
         at = len("\n".join(lines[:-1]).rstrip())
+        floor = 0
     else:
         m = _ATX_TEXT.match(lines[0])
-        if not m or not m.group(2):
+        if not m or not m.group(2) or set(m.group(2)) == {"#"}:    # `### ###` is an empty heading
             return None
-        at = m.end(2)
+        at, floor = m.end(2), len(m.group(1).rstrip())
+    open_at = _unclosed_opener(block[:at])
+    if open_at >= 0:
+        at = len(block[:open_at].rstrip())
+        if at <= floor:
+            return None
     run = len(block[:at]) - len(block[:at].rstrip("\\"))
     return at - 1 if run % 2 else at
 
@@ -548,7 +571,10 @@ def heading_anchor(block: str) -> int | None:
 def comment_point(kind: str, block: str, start: int, end: int, quote: str) -> int:
     """Offset in `block` (of the given kind) where a comment on the selection [start, end) goes."""
     point = anchor_point(block, start, end, quote)      # a heading checks the selection too, then ignores where it ends
-    return heading_anchor(block) if kind == "heading" else point
+    if kind != "heading":
+        return point
+    at = heading_anchor(block)
+    return point if at is None else at
 
 
 def _block_offsets(blocks):

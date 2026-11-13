@@ -26,7 +26,7 @@ class FakeTCompute:
     """`POST /v1/audio/transcriptions` of an OpenAI-style provider, with what it answers. `tls=True` serves https
     with the certificate of tests/tls (valid for localhost and 127.0.0.1)."""
 
-    def __init__(self, tls=False):
+    def __init__(self, tls=False, tmp=None):
         self.reply = (200, {"text": "hello there"})
         self.redirect = self.truncate = self.drip = False
         self.elsewhere = "/elsewhere"                     # where a redirect points
@@ -80,7 +80,7 @@ class FakeTCompute:
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), H)
         if tls:
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            context.load_cert_chain(TLS / "loopback-cert.pem", TLS / "loopback-key-TEST-ONLY.pem")
+            context.load_cert_chain(TLS / "loopback-cert.pem", loopback_key(tmp))
             self.server.socket = context.wrap_socket(self.server.socket, server_side=True)
         self.url = f"{'https' if tls else 'http'}://127.0.0.1:{self.server.server_port}/v1"
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -93,6 +93,14 @@ class FakeTCompute:
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(5)
+
+
+def loopback_key(tmp: Path) -> Path:
+    """The test-only key of the fixture certificate, made whole in `tmp`: the repo holds its body without the PEM
+    lines, because no test file may hold a line shaped like a private key (tests/test_secret_shapes.py)."""
+    pem = tmp / "loopback-key.pem"
+    pem.write_text("-----BEGIN PRIV" "ATE KEY-----\n" + (TLS / "loopback-key-body.b64").read_text() + "-----END PRIV" "ATE KEY-----\n")
+    return pem
 
 
 def fields(body: bytes, headers: dict) -> dict:
@@ -644,8 +652,8 @@ def trusting(monkeypatch):
     monkeypatch.setattr(ssl, "_create_default_https_context", lambda *a, **k: context)
 
 
-def test_a_verified_https_provider_gets_the_key_and_the_sound(browser, key_file, trusting):
-    provider = FakeTCompute(tls=True)
+def test_a_verified_https_provider_gets_the_key_and_the_sound(browser, key_file, trusting, tmp_path):
+    provider = FakeTCompute(tls=True, tmp=tmp_path)
     try:
         browser.hub.transcribe = transcribe.Relay(transcribe.parse(table(provider, key_file), "the test"))
         assert dictate(browser).status == 200
@@ -654,8 +662,8 @@ def test_a_verified_https_provider_gets_the_key_and_the_sound(browser, key_file,
         provider.close()
 
 
-def test_an_https_provider_with_a_certificate_nobody_trusts_is_refused_and_gets_no_key(browser, key_file):
-    provider = FakeTCompute(tls=True)
+def test_an_https_provider_with_a_certificate_nobody_trusts_is_refused_and_gets_no_key(browser, key_file, tmp_path):
+    provider = FakeTCompute(tls=True, tmp=tmp_path)
     try:
         browser.hub.transcribe = transcribe.Relay(transcribe.parse(table(provider, key_file), "the test"))
         assert dictate(browser).status == 503

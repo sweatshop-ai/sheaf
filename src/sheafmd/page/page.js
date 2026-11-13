@@ -3506,24 +3506,38 @@ var create = function (ROOT, CFG, opts) {
   // left out of what a save sends by clean(), as the Copy button is; the box is hidden behind it. A toggle (Share), and
   // a one-off whose box the page does not find, stay in the row above the document, which is drawn only for them.
   // The line's own words are what the button says (a Move to's slug too), so they are hidden under it, in a span
-  // clean() unwraps: the rest of the line is the button's text. The text around the span is kept as it was.
-  function hideWord(box, words) {
-    var t = box.nextSibling, m = null;
+  // clean() unwraps: the rest of the line is the button's text. The text around the span is kept as it was, and a
+  // span already in place is kept on a redraw: an autosave's answer redraws, and must not move the caret or the
+  // comments' ranges.
+  function wordPattern(w) {
+    return w.replace(/[^\w ’']/g, '\\$&').replace(/['’]/g, "['’]").replace(/ +/g, '\\s+');
+  }
+  function hideWord(box, words, kept) {
+    var t = box.nextSibling, m = null, sp = t && t.nodeType === 3 && t.nextSibling;
     if (!t || t.nodeType !== 3) return;
+    if (sp && sp.nodeName === 'SPAN' && sp.className === 'rd-actword' && !t.nodeValue.trim() &&
+        words.some(function (w) { return w && new RegExp('^' + wordPattern(w) + '$', 'i').test(sp.textContent); })) {
+      kept.add(sp);
+      return;
+    }
     words.some(function (w) {
-      m = w && new RegExp('^(\\s*)(' + w.replace(/[^\w ]/g, '\\$&').replace(/ +/g, '\\s+') + ')', 'i').exec(t.nodeValue);
+      m = w && new RegExp('^(\\s*)(' + wordPattern(w) + ')', 'i').exec(t.nodeValue);
       return m;
     });
     if (!m) return;
-    var sp = document.createElement('span'), rest = document.createTextNode(t.nodeValue.slice(m[0].length));
+    sp = document.createElement('span');
+    var rest = document.createTextNode(t.nodeValue.slice(m[0].length));
     sp.className = 'rd-actword';
     sp.textContent = m[2];
     t.nodeValue = m[1];
     t.parentNode.insertBefore(rest, t.nextSibling);
     t.parentNode.insertBefore(sp, rest);
+    kept.add(sp);
   }
-  function showWords() {
+  // The spans no button of this draw hides under any more (its line changed, or lost its action) give their word back.
+  function showWords(kept) {
     Array.prototype.forEach.call(main.querySelectorAll('span.rd-actword'), function (sp) {
+      if (kept.has(sp)) return;
       var before = sp.previousSibling, after = sp.nextSibling;
       if (before && before.nodeType === 3) {
         before.nodeValue += sp.textContent + (after && after.nodeType === 3 ? after.nodeValue : '');
@@ -3532,12 +3546,12 @@ var create = function (ROOT, CFG, opts) {
       } else sp.replaceWith(document.createTextNode(sp.textContent));
     });
   }
-  function inlineButton(btn, box, words) {
+  function inlineButton(btn, box, words, kept) {
     btn.classList.add('rd-inline');
     btn.setAttribute('contenteditable', 'false');
     btn.setAttribute('data-rd-ui', '');
     btn.addEventListener('mousedown', function (e) { e.preventDefault(); });   // the press must not move the caret
-    hideWord(box, words);
+    hideWord(box, words, kept);
     box.parentNode.insertBefore(btn, box.nextSibling);
   }
   function drawActions(acts, h) {
@@ -3547,8 +3561,8 @@ var create = function (ROOT, CFG, opts) {
     if (actBar) actBar.remove();
     actBar = null;
     Array.prototype.forEach.call(main.querySelectorAll('.rd-act.rd-inline'), function (b) { b.remove(); });
-    showWords();
-    if (!acts || !acts.length) return;
+    var kept = new WeakSet();
+    if (!acts || !acts.length) { showWords(kept); return; }
     var bar = el('div', { id: 'rd-actions', role: 'group', 'aria-label': 'Actions' });
     var all = acts.map(function (a, i) {
       var btn = document.createElement('button');
@@ -3559,10 +3573,11 @@ var create = function (ROOT, CFG, opts) {
       if (a.toggle) btn.setAttribute('aria-pressed', a.pressed ? 'true' : 'false');
       btn.disabled = !a.may;
       var box = !a.toggle && boxOfAct(a);
-      if (box) inlineButton(btn, box, [a.label.replace(/ @\S+$/, ''), a.word]); else bar.appendChild(btn);
+      if (box) inlineButton(btn, box, [a.label.replace(/ @\S+$/, ''), a.word], kept); else bar.appendChild(btn);
       return { btn: btn, a: a };
     });
     all.forEach(function (x) { if (!x.btn.disabled) pressable(x.btn, x.a, all); });
+    showWords(kept);
     if (bar.firstChild) { actBar = bar; main.parentNode.insertBefore(bar, main); }
   }
   function pressable(btn, a, all) {

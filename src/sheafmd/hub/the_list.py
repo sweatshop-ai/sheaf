@@ -352,7 +352,7 @@ def read_sheaf(rel: str, text: str) -> Sheaf:
 
 def _title(heading: str) -> str:
     """The text of a `# ` heading's line without its HTML comments, its spaces collapsed (9.10): a review comment
-    anchored in the heading is written on that line. A comment is what CommonMark reads as one, as the page does:
+    on the heading is written at the end of that line (10.4), one written before that rule may be inside its words. A comment is what CommonMark reads as one, as the page does:
     a `<!--` in a code span or after a backslash is text, and `<!-->` and `<!--->` are whole comments."""
     masked, kept, last, pos = rdc._mask_code(heading), [], 0, 0
     while m := _HEADING_COMMENT_RE.search(masked, pos):

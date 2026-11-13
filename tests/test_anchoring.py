@@ -153,25 +153,32 @@ HEADINGS = [
     ("# **Done** when\n", "Done", "# **Done** when|\n"),
     ("Done when\n=========\n", "Done", "Done when|\n=========\n"),
     ("Done\nwhen we ship\n---\n", "Done", "Done\nwhen we ship|\n---\n"),
+    # A backslash that ends the text would escape the `<` of the block: the block goes before it.
+    ("## A\\\n", "A", "## A|\\\n"),
+    ("## A \\\n", "A", "## A |\\\n"),
+    ("## A\\ ##\n", "A", "## A|\\ ##\n"),
+    ("Line A\\\n=======\n", "A", "Line A|\\\n=======\n"),
+    ("## A\\\\\n", "A", "## A\\\\|\n"),           # two backslashes are one escaped backslash
 ]
+
+
+def comment_on(md, quote):
+    s, e = sel(md, quote)
+    return rdc.add_comment(md, block=0, start=s, end=e, quote=quote, body="why", by="Ada", at="2026-11-13T10:00")
 
 
 @pytest.mark.parametrize("md, quote, expect", HEADINGS)
 def test_a_comment_on_words_of_a_heading_goes_at_the_end_of_the_heading(md, quote, expect):
-    s, e = sel(md, quote)
-    out, cid = rdc.add_comment(md, block=0, start=s, end=e, quote=quote, body="why",
-                               by="Ada", at="2026-11-13T10:00")
+    out, cid = comment_on(md, quote)
     raw = out[len(expect.split("|")[0]):out.index("-->") + 3]
     assert raw.startswith("<!-- sheaf-comment id=" + cid) and 'quote="%s"' % quote in raw
     assert out.replace(raw, "|", 1) == expect
     assert rdc.parse(out).comments[0].quote == quote
 
 
-@pytest.mark.parametrize("md, quote, expect", HEADINGS)
-def test_the_heading_is_whole_for_a_reader_that_drops_the_comment(md, quote, expect):
-    s, e = sel(md, quote)
-    out, _ = rdc.add_comment(md, block=0, start=s, end=e, quote=quote, body="why",
-                             by="Ada", at="2026-11-13T10:00")
+@pytest.mark.parametrize("md, quote", [(md, quote) for md, quote, _ in HEADINGS])
+def test_the_heading_is_whole_for_a_reader_that_drops_the_comment(md, quote):
+    out, _ = comment_on(md, quote)
     assert re.sub(r"<!--.*?-->", "", out) == md
     page = pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], out)
     assert page.count("<!--") == 1
@@ -183,3 +190,9 @@ def test_a_comment_on_a_paragraph_still_goes_after_the_selection():
     s, e = sel(md, "gap")
     out, _ = rdc.add_comment(md, 0, s, e, "gap", "why", "Ada", "2026-11-13T10:00")
     assert out.startswith("The gap<!-- sheaf-comment")
+
+
+def test_a_heading_quote_that_is_stale_is_still_refused():
+    # The anchor of a heading ignores the selection, but the selection is still checked (SPEC 10.4).
+    with pytest.raises(rdc.AnchorError, match="text changed"):
+        rdc.add_comment("## Done when\n", 0, 0, 4, "Nope", "why", "Ada", "2026-11-13T10:00")

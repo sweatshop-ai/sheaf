@@ -1653,8 +1653,10 @@ def _insert_comment(md_text: str, j: int, raw: str, quote: str, nth: int = 0) ->
     b = blocks[j]
     start = sum(len(x.text) for x in blocks[:j])
     at_off, own_line = len(b.content.rstrip("\n")), False
+    headless = False
     if b.kind == "heading":            # a heading keeps its words whole: the comment goes at its end (ticket 55)
-        at_off = rdc.heading_anchor(b.content)
+        headless = rdc.heading_anchor(b.content) is None
+        at_off = len(b.content.rstrip("\n")) if headless else rdc.heading_anchor(b.content)
     q = rdc.squash(quote)
     try:
         proj = rdc.projection(b.content)
@@ -1668,6 +1670,9 @@ def _insert_comment(md_text: str, j: int, raw: str, quote: str, nth: int = 0) ->
             own_line = False
     except Exception:
         pass
+    if headless:
+        # A heading with no words: a block right after its hashes would make the line a paragraph.
+        own_line = True
     if b.kind in LOCKED_KINDS:
         # Code, raw html, front matter: a comment inside is literal text, and a comment
         # block ends on its `-->` line, so nothing may follow it there.

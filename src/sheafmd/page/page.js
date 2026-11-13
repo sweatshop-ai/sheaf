@@ -99,7 +99,8 @@ var create = function (ROOT, CFG, opts) {
   // name, label}, never its session id or its socket. Its own name when it has one, else its
   // display name, labels the Tell button and its replies; nothing in the page names an
   // agent itself.
-  // CFG.can lists what it can do: "deliver" offers Tell. What it cannot do shows as a disabled
+  // CFG.can lists what it can do: "deliver" offers Tell, and so does "reopen" (the session has ended and
+  // the hub opens it again first, SPEC 4.3). What it cannot do shows as a disabled
   // button with one line under it, CFG.lines.tell (SPEC 10.6). The hub's answer to /_/doc
   // refreshes all three (takeTarget).
   var NO_AGENT = 'Render this page from an agent session, or let one of your agents work on it, to Tell it.';
@@ -122,6 +123,7 @@ var create = function (ROOT, CFG, opts) {
           : (CFG.agent && (CFG.agent.name || CFG.agent.display)) || 'the agent';
     AGENT_UC = AGENT.charAt(0).toUpperCase() + AGENT.slice(1);
     canTell = CAN.indexOf('relay-tell') >= 0 || CAN.indexOf(toBox ? 'box-tell' : 'deliver') >= 0 ||
+              (!toBox && CAN.indexOf('reopen') >= 0) ||
               (!toBox && CAN.indexOf('queue') >= 0);        // an agent: the Tell waits for it (SPEC 9.8)
   }
   function liveSession() { return (CFG.work && CFG.work.sessions && CFG.work.sessions[0]) || {}; }

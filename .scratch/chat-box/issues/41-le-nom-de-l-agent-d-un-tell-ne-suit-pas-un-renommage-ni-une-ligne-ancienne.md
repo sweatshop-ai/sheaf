@@ -4,7 +4,9 @@
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Claimed by:** Isolde 2026-11-13 23:53
+
+**Status:** in-progress
 
 **Établi (preuves) :** lecture de `waiting.py` `_name`, `queue`, `_end`, `take` à la tête bbf4dbe de chat-box/23. Non reproduit.
 

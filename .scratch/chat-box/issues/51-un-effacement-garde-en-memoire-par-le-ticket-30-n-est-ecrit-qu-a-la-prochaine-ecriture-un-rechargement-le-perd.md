@@ -11,4 +11,6 @@
 - [ ] La décision (a ou b) est écrite dans le ticket avant le code
 - [ ] Si (a) : un test de page échoue tant qu'un rechargement avant toute autre écriture fait revenir l'entrée vidée
 
-**Status:** ready-for-agent
+**Claimed by:** Naya 2026-11-13 23:53
+
+**Status:** in-progress

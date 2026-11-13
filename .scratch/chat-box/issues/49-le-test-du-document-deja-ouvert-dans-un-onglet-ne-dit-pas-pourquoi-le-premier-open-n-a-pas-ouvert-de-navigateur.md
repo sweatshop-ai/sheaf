@@ -6,11 +6,13 @@
 
 **Claimed by:** Isolde 2026-11-12
 
-**Status:** in-progress — PR 264 open, waiting for merge
+**Status:** done — PR 264 merged by Thierry, main 4e35ed7
 
 **Établi (preuves) :** dans `_open` (`src/sheafmd/cli.py`), le navigateur n'est pas ouvert quand `tabs > 0` (un flux `/_/live` déjà compté), quand `seat.remote(os.environ)` n'est pas `None` (SSH sans variable de navigateur), quand `--no-browser`, `SHEAF_NO_BROWSER=1` ou `browser = false`, ou quand le lien de connexion est refusé (`r.err`). Les deux premiers se lisent dans `r.out` ; le reste dans `r.err` et dans l'environnement.
 
 **Par où commencer :** les tests qui indexent `opened[0]` (lignes 85, 126, 139, 419 de `tests/test_cli_hub.py`) lisent le lien par une aide qui, si rien n'a été ouvert, échoue avec `r.out`, `r.err`, le siège distant, `browser_enabled` et les variables concernées. Modèle : le message de `test_a_browser_that_cannot_be_started_says_so_and_still_exits_0`. Test seul.
 
-- [ ] Un échec forcé montre `r.out`, `r.err` et l'état des onglets, du siège et du navigateur dans le message
-- [ ] Les tests de `tests/test_cli_hub.py` qui lisent `opened[0]` passent par cette aide
+- [x] Un échec forcé montre `r.out`, `r.err` et l'état des onglets, du siège et du navigateur dans le message
+- [x] Les tests de `tests/test_cli_hub.py` qui lisent `opened[0]` passent par cette aide
+
+CI : run 43333393718 sur cab77b8 (main fusionnée), 3/3 tranches vertes. Épreuve rouge à la main : `SHEAF_NO_BROWSER=1` fait échouer deux tests avec le message complet.

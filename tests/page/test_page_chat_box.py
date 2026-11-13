@@ -835,3 +835,25 @@ def test_a_value_that_is_not_json_in_the_store_is_set_aside_before_the_next_writ
           what="the text kept in the store")
     aside = p.evaluate("(k) => localStorage.getItem(k)", comment_draft_key(site) + ":unreadable")
     assert aside == "[{broken", "the value that could not be read was replaced and is kept nowhere"
+
+
+def test_a_new_message_emptied_while_the_store_refuses_reads_does_not_come_back_when_the_store_reads_again(tab, site):
+    p = open_thread(tab, site)
+    p.keyboard.press("Escape")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    p.fill(FIELD, "kept for later")
+    p.click("#rd-popover button[data-a=minimize]")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    until(lambda: p.input_value(FIELD) == "kept for later", what="the kept text back in the box")
+    store_unreadable(p)
+    p.fill(FIELD, "")
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close on an empty field")
+    store_unreadable(p, False)
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    assert p.input_value(FIELD) == "", "the text the person emptied came back when the store could be read"
+    assert p.locator("#rd-unsent").count() == 0, "the emptied message is offered as not sent"

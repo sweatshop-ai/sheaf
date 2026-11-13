@@ -4,6 +4,7 @@ The t-compute here is a fake HTTP server on 127.0.0.1 and the key a throwaway on
 nothing leaves the machine and no real key is read. No audio is decoded; the bytes are a stand-in."""
 import json
 import os
+import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -253,6 +254,32 @@ def test_a_key_file_that_fails_after_it_is_open_is_not_used_said_once_and_closed
             os.fstat(opened[0])                              # the one descriptor was closed, once
 
 
+def test_a_key_file_whose_close_fails_when_it_is_refused_is_closed_once_and_said_once(browser, tcompute, key_file, monkeypatch):
+    key_file.chmod(0o644)                                    # refused after the fstat, on the branch that closes the descriptor itself
+    browser.hub.transcribe = transcribe.Relay(transcribe.parse(table(tcompute, key_file), "the test"), record=browser.hub.record)
+    opened, closed = [], []
+    real_open, real_close = os.open, os.close
+
+    def open_(path, *a, **k):
+        fd = real_open(path, *a, **k)
+        if str(path) == str(key_file):                       # the diagnostics log opens and closes files through the same calls
+            opened.append(fd)
+        return fd
+
+    def close(fd):
+        mine = bool(opened) and fd == opened[0] and fd not in closed
+        if mine:
+            closed.append(fd)
+        real_close(fd)
+        if mine:
+            raise OSError(5, "Input/output error")           # a FUSE that fails at the flush; the descriptor is gone all the same
+    monkeypatch.setattr(os, "open", open_)
+    monkeypatch.setattr(os, "close", close)
+    assert available(browser) is False and tcompute.seen == []
+    assert len(opened) == 1 and closed == opened             # once: a second close could take another thread's descriptor
+    assert len([r for r in diagnostics.read() if r["kind"] == "transcribe-key-file"]) == 1
+
+
 def test_a_redirect_is_not_followed_and_the_key_goes_nowhere_else(browser, relay, tcompute):
     tcompute.redirect = True
     assert available(browser) is False
@@ -265,6 +292,66 @@ def test_the_limit_is_on_the_whole_call_not_on_each_read(tcompute, monkeypatch):
     assert transcribe._call("POST", f"{tcompute.url}/audio/transcribe", {}, b"x", timeout=1) == (0, b"")
     assert time.monotonic() - began < 2.5
     assert tcompute.dropped.wait(2)                          # the connection was shut, not left to a thread
+
+
+@pytest.fixture
+def full_backlog():
+    """A listening socket that never accepts and whose queue is full: a connect to it waits for its timeout.
+    Linux drops the SYN of a full queue; another kernel may refuse instead, and the test then proves nothing."""
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(0)
+    port, fill = listener.getsockname()[1], []
+    for _ in range(4):
+        c = socket.socket()
+        c.setblocking(False)
+        try:
+            c.connect(("127.0.0.1", port))
+        except BlockingIOError:
+            pass
+        fill.append(c)
+    yield port
+    for c in fill + [listener]:
+        c.close()
+
+
+def test_the_limit_covers_every_address_tried_for_the_connection(full_backlog, monkeypatch):
+    one = (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", full_backlog))
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [one, one, one])
+    began = time.monotonic()
+    assert transcribe._call("POST", f"http://tc.invalid:{full_backlog}/x", {}, b"x", timeout=1) == (0, b"")
+    assert time.monotonic() - began < 2.5                    # three addresses at 1 s each would take 3 s
+
+
+def test_the_limit_covers_the_resolution_of_the_name(monkeypatch):
+    release = threading.Event()
+
+    def stuck(*a, **k):
+        release.wait(5)
+        return []
+    monkeypatch.setattr(socket, "getaddrinfo", stuck)
+    began = time.monotonic()
+    try:
+        assert transcribe._call("POST", "http://tc.invalid:9/x", {}, b"x", timeout=1) == (0, b"")
+        assert time.monotonic() - began < 2.5
+    finally:
+        release.set()
+
+
+def test_call_returns_only_after_the_timer_has_finished_cutting(tcompute, monkeypatch):
+    tcompute.drip = True
+    timers = []
+
+    class SlowCut(threading.Timer):
+        def __init__(self, interval, fn):
+            def slow():
+                fn()
+                time.sleep(0.5)                              # the cut is still going on when the call has its answer
+            super().__init__(interval, slow)
+            timers.append(self)
+    monkeypatch.setattr(transcribe.threading, "Timer", SlowCut)
+    assert transcribe._call("POST", f"{tcompute.url}/audio/transcribe", {}, b"x", timeout=0.3) == (0, b"")
+    assert not timers[0].is_alive()
 
 
 def test_an_answer_cut_short_is_no_answer(browser, relay, tcompute):

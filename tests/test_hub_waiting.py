@@ -67,12 +67,12 @@ def test_a_tell_to_an_agent_waits_is_listed_first_and_ends_on_its_action_reply(b
     assert first["doc"] == DOC
     t, = first["tells"]
     assert t["thread"] == "c1" and "Why pears?" in t["message"] and 'role="action"' in t["message"]
-    assert named(sub.drain(), "tell-seen") == [{"id": "c1"}]
+    assert named(sub.drain(), "tell-seen") == [{"id": "c1", "agent": "ChatGPT (" + browser.hub.person + ")"}]
     assert documents(browser, token)[0]["tells"][0]["id"] == t["id"]       # listed again, seen once
     assert named(sub.drain(), "tell-seen") == []
     ok(browser, "reply", doc=DOC, id="c1", text="Done.", role="action", token=token)
     assert documents(browser, token)[0]["tells"] == []
-    assert named(sub.drain(), "tell-done") == [{"id": "c1"}]
+    assert named(sub.drain(), "tell-done") == [{"id": "c1", "agent": "ChatGPT (" + browser.hub.person + ")"}]
 
 
 def test_the_changes_of_the_document_carry_the_tell_that_waits_as_telling(browser, talk):
@@ -136,7 +136,7 @@ def test_a_revoke_by_the_cli_ends_the_tell_at_the_watchers_next_pass_with_no_pag
     sub.drain()
     Tokens().revoke("ada-chatgpt")                      # the CLI, in its own process: the hub is not called
     browser.hub.tick()
-    assert named(sub.drain(), "tell-cancelled") == [{"id": "c1", "seen": False, "reason": "revoked"}]
+    assert named(sub.drain(), "tell-cancelled") == [{"id": "c1", "seen": False, "reason": "revoked", "agent": "ChatGPT (Ada)"}]
     assert browser.hub.waiting_tells.waits(DOC, sweep=False) == []
 
 
@@ -190,13 +190,13 @@ def test_a_cancel_from_the_page_ends_it_and_says_whether_the_agent_had_seen_it(b
     sub = tab(browser.hub)
     assert tell(browser).status == 200
     assert browser.post("/_/cancel", {"doc": DOC, "id": "c1"}).status == 200
-    assert named(sub.drain(), "tell-cancelled") == [{"id": "c1", "seen": False}]
+    assert named(sub.drain(), "tell-cancelled") == [{"id": "c1", "seen": False, "agent": "ChatGPT (Ada)"}]
     assert documents(browser, token)[0]["tells"] == []
     assert tell(browser).status == 200
     documents(browser, token)
     sub.drain()
     browser.post("/_/cancel", {"doc": DOC, "id": "c1"})
-    assert named(sub.drain(), "tell-cancelled") == [{"id": "c1", "seen": True}]
+    assert named(sub.drain(), "tell-cancelled") == [{"id": "c1", "seen": True, "agent": "ChatGPT (Ada)"}]
 
 
 def test_ending_a_thread_tells_each_owners_page_its_own_seen_not_the_other_owners(front, browser, talk, work, other):
@@ -214,8 +214,8 @@ def test_ending_a_thread_tells_each_owners_page_its_own_seen_not_the_other_owner
         documents(browser, ada if hub_person_saw else bea)
         mine.drain(), own.drain()
         assert browser.post("/_/comment", {"doc": DOC, "op": "status", "id": "c1", "status": "resolved"}).status == 200
-        assert named(own.drain(), "tell-cancelled") == [{"id": "c1", "seen": hub_person_saw, "reason": "closed"}]
-        assert named(mine.drain(), "tell-cancelled") == [{"id": "c1", "seen": not hub_person_saw, "reason": "closed"}]
+        assert named(own.drain(), "tell-cancelled") == [{"id": "c1", "seen": hub_person_saw, "reason": "closed", "agent": "ChatGPT (Ada)"}]
+        assert named(mine.drain(), "tell-cancelled") == [{"id": "c1", "seen": not hub_person_saw, "reason": "closed", "agent": "ChatGPT (Bea)"}]
         browser.post("/_/comment", {"doc": DOC, "op": "status", "id": "c1", "status": "open"})
         Tokens().revoke("ada-chatgpt"), Tokens().revoke("bea-chatgpt")
 
@@ -255,6 +255,23 @@ def test_a_token_never_sees_the_tell_of_another_and_another_agents_reply_does_no
     assert documents(browser, ada)[0]["tells"]
 
 
+def test_the_events_of_a_thread_that_waits_for_two_agents_name_the_agent_they_are_about(browser, talk):
+    ada, bob = agent_token(), agent_token("bob-claude", "Claude")
+    ada_name, bob_name = "ChatGPT (" + browser.hub.person + ")", "Claude (" + browser.hub.person + ")"
+    sub = tab(browser.hub)
+    target(browser)
+    assert tell(browser).status == 200
+    target(browser, "bob-claude")
+    assert tell(browser).status == 200
+    assert named(sub.drain(), "tell-queued") == [{"id": "c1", "agent": ada_name}, {"id": "c1", "agent": bob_name}]
+    assert documents(browser, ada)[0]["tells"]
+    assert named(sub.drain(), "tell-seen") == [{"id": "c1", "agent": ada_name}]           # Bob's line stays "waiting"
+    ok(browser, "reply", doc=DOC, id="c1", text="Done.", role="action", token=ada)
+    assert named(sub.drain(), "tell-done") == [{"id": "c1", "agent": ada_name}]
+    assert browser.post("/_/cancel", {"doc": DOC, "id": "c1"}).status == 200
+    assert named(sub.drain(), "tell-cancelled") == [{"id": "c1", "seen": False, "agent": bob_name}]
+
+
 def bea_tells(front, browser, work, other, body="Please do."):
     """Bea has told her agent about c1 from her page; Cal and a token no member names are agents too."""
     bea, cal, loose = agent_token("bea-chatgpt"), agent_token("cal-chatgpt"), agent_token("loose", "Claude")
@@ -289,11 +306,11 @@ def test_each_page_is_told_of_its_own_tells_only(front, browser, talk, work, oth
     assert r.status == 200 and "tellError" not in r.json(), r.text
     assert heard(mine) == [("tell-queued", {"id": "c1", "agent": "ChatGPT (Bea)"})] and heard(own) == []
     documents(browser, bea)
-    assert heard(mine) == [("tell-seen", {"id": "c1"})] and heard(own) == []
+    assert heard(mine) == [("tell-seen", {"id": "c1", "agent": "ChatGPT (Bea)"})] and heard(own) == []
     assert tell(browser).status == 200                                 # the hub person's, on the same thread
     assert heard(own) == [("tell-queued", {"id": "c1", "agent": "ChatGPT (" + browser.hub.person + ")"})] and heard(mine) == []
     assert front.post("/_/cancel", {"doc": DOC, "id": "c1"}).status == 200
-    assert heard(mine) == [("tell-cancelled", {"id": "c1", "seen": True})] and heard(own) == []
+    assert heard(mine) == [("tell-cancelled", {"id": "c1", "seen": True, "agent": "ChatGPT (Bea)"})] and heard(own) == []
 
 
 def test_the_box_or_a_relay_comes_before_a_members_agent(front, browser, talk, work, other, monkeypatch):
@@ -693,7 +710,7 @@ def test_forgetting_a_root_ends_its_tells_and_the_page_hears_why_and_the_other_r
     assert tell(browser, doc=other_doc).status == 200          # the same token, the other root
     sub = tab(browser.hub)
     browser.hub.forget_root("work")
-    assert named(sub.drain(), "tell-cancelled") == [{"id": "c1", "seen": False, "reason": "the folder was forgotten"}]
+    assert named(sub.drain(), "tell-cancelled") == [{"id": "c1", "seen": False, "reason": "the folder was forgotten", "agent": "ChatGPT (Ada)"}]
     assert [t["doc"] for t in json.loads(Path(sheafmd.paths.state_dir(), "tells.json").read_text())] == [other_doc]
     row, = hub_rows("tell-cancelled")
     assert row["doc"] == DOC and row["reason"] == "the folder was forgotten"

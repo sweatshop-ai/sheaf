@@ -16,7 +16,7 @@ import pytest
 from agent_fakes import PID, FakeClaude, Peer, write_record
 from helpers import write_executable
 from sheafmd import config, paths, signals
-from sheafmd.agents import claude_code, envelope
+from sheafmd.agents import claude_code, envelope, prompts
 
 SENDER = "uds:/run/x/hub-27419.sock"
 MSG_ID = "0f8fad5b-d9cb-469f-a165-70867728950e"
@@ -84,7 +84,8 @@ def test_a_drop_as_the_hub_writes_it_today_is_told_with_the_sheaf_and_how_to_ans
         "The comment:\nShorten the intro.\n\n"
         "When you are done, answer in the thread so the page shows it, with the role action:\n"
         '- with the sheaf MCP tool: reply(doc="acme/site/brief.md", id="c7", text="<what you did>", '
-        'role="action")\n'
+        'role="action")\n\n'
+        f"{prompts.READABLE}\n"
         "</cross-session-message>")
 
 

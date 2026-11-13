@@ -463,6 +463,18 @@ def store_unreadable(p, blocked=True):
     }""", blocked)
 
 
+def store_unreadable_once(p):
+    """The next read of the comment store throws, the ones after it answer: a store that fails now and then."""
+    p.evaluate("""() => {
+      if (!window.__realGet) window.__realGet = Storage.prototype.getItem;
+      let armed = true;
+      Storage.prototype.getItem = function (k) {
+        if (armed && String(k).startsWith('sheaf-comment-draft')) { armed = false; throw new Error('once'); }
+        return window.__realGet.call(this, k);
+      };
+    }""")
+
+
 def two_threads(tab, site):
     update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "pears"), "pears", "Why pears?",
                                                      "Bea", "2026-10-14T10:01")[0])
@@ -800,3 +812,74 @@ def test_an_emptied_new_message_closes_when_the_store_that_kept_its_text_stops_b
     p.keyboard.press("Escape")
     until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close on an empty field")
 
+
+def test_a_read_of_the_store_that_fails_once_does_not_empty_the_drafts_of_the_page_at_the_next_write(tab, site):
+    import json
+    p = open_thread(tab, site)
+    kept = [{"quote": "pears", "body": "a draft of another passage", "at": "2026-10-14T11:00:00.000Z"}]
+    p.evaluate("([k, v]) => localStorage.setItem(k, v)", [comment_draft_key(site), json.dumps(kept)])
+    p.fill(FIELD, "words I must not lose")
+    store_unreadable_once(p)
+    p.mouse.click(5, 700)
+    until(lambda: "could not be kept" in toast(p), what="the toast that says the text could not be kept")
+    held = p.evaluate("(k) => localStorage.getItem(k)", comment_draft_key(site))
+    assert held and "a draft of another passage" in held, "the read that failed once emptied the drafts of the page"
+
+
+def test_a_value_that_is_not_json_in_the_store_is_set_aside_before_the_next_write_replaces_it(tab, site):
+    p = open_thread(tab, site)
+    p.evaluate("([k, v]) => localStorage.setItem(k, v)", [comment_draft_key(site), "[{broken"])
+    p.fill(FIELD, "words I must not lose")
+    p.mouse.click(5, 700)
+    until(lambda: "words I must not lose" in (p.evaluate("(k) => localStorage.getItem(k)", comment_draft_key(site)) or ""),
+          what="the text kept in the store")
+    aside = p.evaluate("(k) => localStorage.getItem(k)", comment_draft_key(site) + ":unreadable")
+    assert aside == "[{broken", "the value that could not be read was replaced and is kept nowhere"
+
+
+def test_a_new_message_emptied_while_the_store_refuses_reads_does_not_come_back_when_the_store_reads_again(tab, site):
+    p = open_thread(tab, site)
+    p.keyboard.press("Escape")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    p.fill(FIELD, "kept for later")
+    p.click("#rd-popover button[data-a=minimize]")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    until(lambda: p.input_value(FIELD) == "kept for later", what="the kept text back in the box")
+    store_unreadable(p)
+    p.fill(FIELD, "")
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close on an empty field")
+    store_unreadable(p, False)
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    assert p.input_value(FIELD) == "", "the text the person emptied came back when the store could be read"
+    assert p.locator("#rd-unsent").count() == 0, "the emptied message is offered as not sent"
+
+
+READABLE_REPLY = ("Done. What changed:\n- the intro is shorter\n- `fetch_all` retries\n\n"
+                  "```\nif a < b:\n    go()\n```\n"
+                  "See https://example.com/a?b=1&c=2. Or [the doc](https://example.com/doc).\n"
+                  "<b>not bold</b>")
+
+
+def test_an_agent_reply_reads_as_paragraphs_lists_code_and_links(tab, site):
+    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
+                                                     "Bea", "2026-10-14T10:00")[0])
+    update_file(site.file, lambda t: rdc.reply(t, "c1", READABLE_REPLY, "Claude", "2026-10-14T10:01",
+                                               role="action"))
+    tab.open()
+    tab.page.click(".rd-badge")
+    text = tab.page.locator(f"{THREAD} .rd-text").nth(1)
+    text.wait_for()
+    assert text.locator("p").first.inner_text() == "Done. What changed:", "the line before the list is not its own paragraph"
+    assert text.locator("ul li").all_inner_texts() == ["the intro is shorter", "fetch_all retries"]
+    assert text.locator("ul li code").inner_text() == "fetch_all"
+    assert text.locator("pre code").inner_text() == "if a < b:\n    go()"
+    links = text.locator("a")
+    assert [links.nth(i).get_attribute("href") for i in range(links.count())] == [
+        "https://example.com/a?b=1&c=2", "https://example.com/doc"], "a link is not clickable"
+    assert links.first.get_attribute("target") == "_blank"
+    assert text.locator("b").count() == 0 and "<b>not bold</b>" in text.inner_text(), "a tag in the text became HTML"

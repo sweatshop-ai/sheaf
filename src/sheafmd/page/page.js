@@ -99,7 +99,8 @@ var create = function (ROOT, CFG, opts) {
   // name, label}, never its session id or its socket. Its own name when it has one, else its
   // display name, labels the Tell button and its replies; nothing in the page names an
   // agent itself.
-  // CFG.can lists what it can do: "deliver" offers Tell. What it cannot do shows as a disabled
+  // CFG.can lists what it can do: "deliver" offers Tell, and so does "reopen" (the session has ended and
+  // the hub opens it again first, SPEC 4.3). What it cannot do shows as a disabled
   // button with one line under it, CFG.lines.tell (SPEC 10.6). The hub's answer to /_/doc
   // refreshes all three (takeTarget).
   var NO_AGENT = 'Render this page from an agent session, or let one of your agents work on it, to Tell it.';
@@ -122,6 +123,7 @@ var create = function (ROOT, CFG, opts) {
           : (CFG.agent && (CFG.agent.name || CFG.agent.display)) || 'the agent';
     AGENT_UC = AGENT.charAt(0).toUpperCase() + AGENT.slice(1);
     canTell = CAN.indexOf('relay-tell') >= 0 || CAN.indexOf(toBox ? 'box-tell' : 'deliver') >= 0 ||
+              (!toBox && CAN.indexOf('reopen') >= 0) ||
               (!toBox && CAN.indexOf('queue') >= 0);        // an agent: the Tell waits for it (SPEC 9.8)
   }
   function liveSession() { return (CFG.work && CFG.work.sessions && CFG.work.sessions[0]) || {}; }
@@ -311,18 +313,24 @@ var create = function (ROOT, CFG, opts) {
     });
   })();
 
-  // Edit mode itself writes contenteditable="true" and class="rd-locked" into the
+  // Edit mode itself writes contenteditable="true" and class="rd-locked" (and a refused key, rd-saving) into the
   // DOM. Those must be invisible to change detection, or merely ENTERING edit mode
   // marks every block dirty and the next save pushes the whole document through
   // pandoc - renumbering lists, reflowing tables, rewriting rules.
   var LOCKED_TIP = 'Not editable here: code, charts, images and raw HTML would not survive the ' +
                    'round trip. Edit this block in the .md file.';
+  // A class attribute loses the page's own marker classes, whole tokens only, and goes when nothing else is left;
+  // one that holds none of them is returned as it was.
+  function dropMarkers(all, sp, cls) {
+    var toks = cls.split(/\s+/), keep = toks.filter(function (t) { return t !== 'rd-locked' && t !== 'rd-saving'; });
+    if (keep.length === toks.length) return all;
+    return keep.length ? sp + 'class="' + keep.join(' ') + '"' : '';
+  }
   function clean(h) {
     return h.replace(/<span class="rd-anchor[^"]*" data-rd-id="([^"]+)"[^>]*>[\s\S]*?<\/span>/g,
                      '<span class="rd-anchor" data-rd-id="$1"></span>')
             .replace(/\s*contenteditable="[^"]*"/g, '')
-            .replace(/\s+class="rd-locked"/g, '')
-            .replace(/(\s+class="[^"]*?)\s*\brd-locked\b/g, '$1')
+            .replace(/(\s+)class="([^"]*)"/g, dropMarkers)
             .replace(/\s+title="Not editable here: [^"]*"/g, '')
             .replace(/<button\b[^>]*\brd-copybtn\b[^>]*>[\s\S]*?<\/button>/g, '');
   }
@@ -344,11 +352,20 @@ var create = function (ROOT, CFG, opts) {
   // only an outage raises and only the hub's return clears.
   var editing = false, hash = CFG.hash, stale = false, dead = false;
   var telling = {}, tellQ = '';
-  // The Tells that wait for an agent (SPEC 9.8, 10.5): thread id -> {to, state: queued | seen}. They run nothing, so
-  // `telling` does not hold them: the thread shows no spinner and no orange dot, and the line has no clock.
+  // The Tells that wait for an agent (SPEC 9.8, 10.5): thread id -> agent name -> {to, state: queued | seen}. A thread
+  // can wait for two agents, and each has its own place. They run nothing, so `telling` does not hold them: the thread
+  // shows no spinner and no orange dot, and the line has no clock.
   var waits = {};
-  // `seenSeq` counts the `tell-seen` events taken; `seenAt[thread]` is its count at the last one of that thread.
-  var seenSeq = 0, seenAt = {};
+  function waitAt(id, agent, place) { (waits[id] = waits[id] || {})[agent] = place; }
+  function waitOff(id, agent) {
+    if (waits[id]) { delete waits[id][agent]; if (!Object.keys(waits[id]).length) delete waits[id]; }
+  }
+  function waitList(id) { return waits[id] ? Object.keys(waits[id]).map(function (a) { return waits[id][a]; }) : []; }
+  // `seenSeq` counts the Tell events taken (`tell-seen`, `tell-queued`, `tell-done`, `tell-cancelled`); `seenAt`, `queuedAt`
+  // and `endedAt` [thread + '\n' + agent] are its count at the last one of that kind for that pair. A snapshot (`since`: the
+  // count when it was asked) never overrides an event taken after it: not a sight, a Tell queued, nor an end.
+  var seenSeq = 0, seenAt = {}, queuedAt = {}, endedAt = {};
+  var cancelled = {};          // thread -> the places a Cancel of this page took off, for the events that follow its answer
   // The hub's `telling`, `[{id, to, state}]` (SPEC 8.5): `working` and `waiting` are a session's, in `telling`;
   // `queued` and `seen` an agent's, in `waits`; `sent`, `picked-up` and `delivered` are a drop for James's window
   // (9.12), which `sentBox` shows from `sent`: no spinner here. `keep`: a session's threads already known stay (jobs are only added).
@@ -357,14 +374,21 @@ var create = function (ROOT, CFG, opts) {
     var was = waits;
     waits = {};
     (list || []).forEach(function (w) {
+      if (since !== undefined && endedAt[w.id + '\n' + w.to] > since) return;      // it ended after the snapshot was written
       // A snapshot is the hub's state when it wrote it, and it can reach the page after the event of the agent seeing the
       // Tell: a Tell seen does not go back to queued when its `tell-seen` was taken after the page got the snapshot
       // (`since`: `seenSeq` then) and for the same agent (another agent's Tell on the thread is its own). A snapshot
       // without `since` is taken as it is: it may be the correction of an event the page missed.
-      if (since !== undefined && w.state === 'queued' && was[w.id] && was[w.id].state === 'seen' && was[w.id].to === w.to &&
-          seenAt[w.id] > since) waits[w.id] = was[w.id];
-      else if (w.state === 'queued' || w.state === 'seen') waits[w.id] = { to: w.to, state: w.state };
+      var old = was[w.id] && was[w.id][w.to];
+      if (since !== undefined && w.state === 'queued' && old && old.state === 'seen' && seenAt[w.id + '\n' + w.to] > since)
+        waitAt(w.id, w.to, old);
+      else if (w.state === 'queued' || w.state === 'seen') waitAt(w.id, w.to, { to: w.to, state: w.state });
       else if (w.state === 'working' || w.state === 'waiting') telling[w.id] = true;
+    });
+    if (since !== undefined) Object.keys(was).forEach(function (id) {        // a Tell queued after the snapshot was written
+      Object.keys(was[id]).forEach(function (agent) {
+        if (queuedAt[id + '\n' + agent] > since && !(waits[id] && waits[id][agent])) waitAt(id, agent, was[id][agent]);
+      });
     });
   }
 
@@ -1278,6 +1302,7 @@ var create = function (ROOT, CFG, opts) {
     if (pop) {
       // Closed is minimized: what is typed is kept and comes back in the field.
       if (!stashAll()) return false;
+      stopDictation(true);
       unpaintWidened();
       pop.remove(); pop = null; popId = null; paint(null); setTimeout(flushHold, 0);
       setTimeout(function () { if (mouseDown) keptDue = true; else drawKept(); }, 0);
@@ -1500,17 +1525,36 @@ var create = function (ROOT, CFG, opts) {
   // port, one after the other, and the key cannot tell them apart. An entry of another root is not this page's:
   // not listed, not sent, and kept when this page writes the store. One with no `root` (an older entry) is
   // this page's, and takes its root when the store is next written.
-  // `strict`: a store that refuses the read throws, instead of passing for an empty one (commentDraftsSave).
+  // `pendingClears`: tests of this page's entries that the person emptied while the store refused the read, so the
+  // clear could not be written. They stay out of the page's reads (commentDraftsLoad), and go from the store with the
+  // next write that lands (commentDraftsSave). Kept in memory: a reload before that write offers the entry again.
+  var pendingClears = [];
+  // `strict`: a store that refuses the read throws, instead of passing for an empty one (the writers read so, commentDraftsHeld and taken).
+  // A value that is not JSON is set aside under `:unreadable` first, so the write that follows does not destroy it
+  // (a later one replaces an earlier one set aside: the store holds one at a time).
   function commentDraftsRaw(strict) {
     var v, raw;
     try { raw = localStorage.getItem(COMMENT_DRAFT_KEY); } catch (e) { if (strict) throw e; return []; }
-    try { v = JSON.parse(raw || '[]'); } catch (e) { return []; }
+    try { v = JSON.parse(raw || '[]'); } catch (e) {
+      if (strict) localStorage.setItem(COMMENT_DRAFT_KEY + ':unreadable', raw);
+      return [];
+    }
     return (Array.isArray(v) ? v : [v]).filter(function (d) {
       return d && typeof d.body === 'string' && (typeof d.quote === 'string' || typeof d.thread === 'string');
     });
   }
   function ofOtherRoot(d) { return !!CFG.root && d.root !== undefined && d.root !== CFG.root; }
-  function commentDraftsLoad() { return commentDraftsRaw().filter(function (d) { return !ofOtherRoot(d); }); }
+  function commentDraftsLoad(strict) {
+    return commentDraftsRaw(strict).filter(function (d) {
+      return !ofOtherRoot(d) && !pendingClears.some(function (gone) { return gone(d); });
+    });
+  }
+  // A writer reads the store strictly, so a read that fails now and then does not pass for an empty store and the
+  // write that follows does not drop what the page held. Says whether it could read: when not, nothing is written
+  // and storeOk is false, as when the write itself is refused.
+  function commentDraftsHeld() {
+    try { return commentDraftsLoad(true); } catch (e) { storeOk = false; unsentLine(); return null; }
+  }
   // Every write of the store goes through here, so the line of replies and edits not sent, which says what the
   // store holds, is drawn again here: a writer added later cannot leave it behind.
   function commentDraftsSave(ds) {
@@ -1520,13 +1564,17 @@ var create = function (ROOT, CFG, opts) {
         return d.root === undefined && CFG.root ? Object.assign({ root: CFG.root }, d) : d;
       }));
       if (all.length) localStorage.setItem(COMMENT_DRAFT_KEY, JSON.stringify(all)); else localStorage.removeItem(COMMENT_DRAFT_KEY);
+      pendingClears = [];
     } catch (e) { storeOk = false; }
     unsentLine();
   }
   // The entries `gone` names go, then `add` (if any) is added, in one write, stamped `at` now unless it brings its
   // own. For a form that knows which entry is its own: the same quote in another paragraph is another comment.
   function draftsReplace(gone, add) {
-    var ds = commentDraftsLoad().filter(function (d) { return !gone(d); });
+    var ds = commentDraftsHeld();
+    // A clear (no `add`) the store could not be read for is held, not forgotten.
+    if (!ds) { if (!add) pendingClears.push(gone); return; }
+    ds = ds.filter(function (d) { return !gone(d); });
     if (add) ds.push({ quote: add.quote, body: add.body, block: add.block, head: add.head, tail: add.tail, occ: add.occ, rid: add.rid,
                        at: add.at || new Date().toISOString(), min: add.min });
     commentDraftsSave(ds);
@@ -1553,7 +1601,9 @@ var create = function (ROOT, CFG, opts) {
   function threadKeep(c, kind, body, rid, line, out) {
     if (!c) return;
     var ends = body ? [rid, line] : [rid];
-    var ds = commentDraftsLoad().filter(function (d) { return !keptOf(d, c, kind) || (sendOf(d) && ends.indexOf(sendOf(d)) < 0); });
+    var ds = commentDraftsHeld();
+    if (!ds) return;
+    ds = ds.filter(function (d) { return !keptOf(d, c, kind) || (sendOf(d) && ends.indexOf(sendOf(d)) < 0); });
     if (body) ds.push({ thread: c.id, born: c.at, about: c.quote, kind: kind, body: body, rid: rid, of: rid ? undefined : line || undefined,
                         out: out, at: new Date().toISOString() });
     commentDraftsSave(ds);
@@ -1568,7 +1618,9 @@ var create = function (ROOT, CFG, opts) {
     // The draft offered on load is the text of a save the hub took: it is in the file, and the offer goes.
     var offeredTaken = !!offered && offered.rid === rid;
     if (offeredTaken) { decided(); dropOffer(); lateSends[rid] = true; }
-    var ds = commentDraftsLoad(), left = ds.filter(function (d) { return d.rid !== rid; });
+    var ds, left;
+    try { ds = commentDraftsLoad(true); } catch (e) { ds = []; }       // a store that cannot be read now is left as it is
+    left = ds.filter(function (d) { return d.rid !== rid; });
     if (left.length < ds.length) commentDraftsSave(left);
     // The notice of kept comments is drawn again from what is left (closePopover does it), unless it is being typed in.
     var shown = ds.some(function (d) { return d.rid === rid && typeof d.quote === 'string'; });
@@ -1841,28 +1893,65 @@ var create = function (ROOT, CFG, opts) {
 
   // Comments and replies are written in markdown, an agent's especially. A small safe
   // subset is rendered: everything is escaped first, so no tag in a comment ever
-  // becomes HTML, then bold, italic, inline code, http(s) links, lists, paragraphs.
+  // becomes HTML, then bold, italic, inline code, http(s) links (written as [text](url) or bare),
+  // lists (a line just before one stays a paragraph), ``` code blocks, # headings, > quotes, paragraphs.
   function mdLite(src) {
     var inline = function (t) {
-      var codes = [];
-      t = t.replace(/`([^`]+)`/g, function (m, c) { codes.push(c); return '\u0000' + (codes.length - 1) + '\u0000'; });
-      t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
-           .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      var kept = [];
+      var keep = function (html) { kept.push(html); return '\u0000' + (kept.length - 1) + '\u0000'; };
+      var link = function (url, label) { return keep('<a href="' + url + '" target="_blank" rel="noopener">' + label + '</a>'); };
+      t = t.replace(/`([^`]+)`/g, function (m, c) { return keep('<code>' + c + '</code>'); });
+      t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, function (m, label, url) { return link(url, label); });
+      // A bare link ends before the punctuation that closes its sentence. `&` is escaped by now: `&amp;` is
+      // part of a link, `&quot;` or `&gt;` ends it.
+      t = t.replace(/https?:\/\/(?:[^\s&]|&amp;)+/g, function (url) {
+        var tail = /[.,;:!?)]+$/.exec(url), cut = tail ? url.slice(0, -tail[0].length) : url;
+        return link(cut, cut) + (tail ? tail[0] : '');
+      });
+      t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
            .replace(/(^|[^*\w])\*([^*\s][^*]*)\*(?!\w)/g, '$1<em>$2</em>')
            .replace(/(^|[^\w])_([^_\s][^_]*)_(?!\w)/g, '$1<em>$2</em>');
-      return t.replace(/\u0000(\d+)\u0000/g, function (m, i) { return '<code>' + codes[+i] + '</code>'; });
+      return t.replace(/\u0000(\d+)\u0000/g, function (m, i) { return kept[+i]; });
     };
-    return esc(src).split(/\n\s*\n/).map(function (block) {
-      var lines = block.split('\n').filter(function (l) { return l.trim(); });
-      if (!lines.length) return '';
-      if (lines.every(function (l) { return /^\s*[-*+] /.test(l); })) {
-        return '<ul>' + lines.map(function (l) { return '<li>' + inline(l.replace(/^\s*[-*+] /, '')) + '</li>'; }).join('') + '</ul>';
+    var out = [], para = [], quote = [], list = null, lines = esc(src).split('\n'), m;
+    var flush = function () {
+      if (para.length) out.push('<p>' + para.join('<br>') + '</p>');
+      if (quote.length) out.push('<div class="rd-bq">' + quote.join('<br>') + '</div>');
+      if (list) out.push('<' + list.tag + list.start + '>' + list.items.map(function (li) { return '<li>' + li + '</li>'; }).join('') +
+                         '</' + list.tag + '>');
+      para = []; quote = []; list = null;
+    };
+    for (var i = 0; i < lines.length; i++) {
+      var l = lines[i];
+      if (/^\s*```/.test(l)) {                     // a code block runs to its closing fence, or to the end
+        flush();
+        var code = [];
+        while (++i < lines.length && !/^\s*```/.test(lines[i])) code.push(lines[i]);
+        out.push('<pre><code>' + code.join('\n') + '</code></pre>');
+      } else if (!l.trim()) {
+        flush();
+      } else if ((m = /^\s*(?:([-*+])|(\d+)[.)]) +(.*)$/.exec(l))) {
+        var tag = m[1] ? 'ul' : 'ol';
+        if (!list || list.tag !== tag) {
+          flush();
+          list = { tag: tag, start: tag === 'ol' && +m[2] !== 1 ? ' start="' + (+m[2]) + '"' : '', items: [] };
+        }
+        list.items.push(inline(m[3]));
+      } else if (list && /^\s+\S/.test(l)) {        // an indented line goes on with the item above it
+        list.items[list.items.length - 1] += '<br>' + inline(l.trim());
+      } else if ((m = /^#{1,6} +(.*)$/.exec(l))) {
+        flush();
+        out.push('<p class="rd-h"><strong>' + inline(m[1]) + '</strong></p>');
+      } else if ((m = /^&gt; ?(.*)$/.exec(l))) {
+        if (para.length || list) flush();
+        quote.push(inline(m[1]));
+      } else {
+        if (quote.length || list) flush();
+        para.push(inline(l));
       }
-      if (lines.every(function (l) { return /^\s*\d+[.)] /.test(l); })) {
-        return '<ol>' + lines.map(function (l) { return '<li>' + inline(l.replace(/^\s*\d+[.)] /, '')) + '</li>'; }).join('') + '</ol>';
-      }
-      return '<p>' + lines.map(inline).join('<br>') + '</p>';
-    }).join('');
+    }
+    flush();
+    return out.join('');
   }
   // A reply's kind is its role, derived by the hub (SPEC 5.3): "answer" is a reply that
   // changed nothing (blue; Ask, which wrote them, was retired), "action" is what a session did after a Tell (orange). Anything
@@ -2088,11 +2177,11 @@ var create = function (ROOT, CFG, opts) {
   var DOTS = '<span class="rd-dots" aria-hidden="true"><i></i><i></i><i></i></span>';
   // A Tell that waits for an agent: said in the thread, with no spinner and no clock, across a reload and a restart.
   function waitLine(id) {
-    var w = waits[id];
-    if (!w) return '';
-    return '<div class="rd-msg rd-sent rd-waits">' + (w.state === 'seen'
-      ? esc(w.to) + ' has seen it; its action appears in this thread.'
-      : 'Waiting for ' + esc(w.to) + ': it sees this the next time you talk to it.') + '</div>';
+    return waitList(id).map(function (w) {
+      return '<div class="rd-msg rd-sent rd-waits">' + (w.state === 'seen'
+        ? esc(w.to) + ' has seen it; its action appears in this thread.'
+        : 'Waiting for ' + esc(w.to) + ': it sees this the next time you talk to it.') + '</div>';
+    }).join('');
   }
   function fillPopover(id) {
     var c = byId[id], sc = pop.querySelector('.rd-scroll');
@@ -2120,7 +2209,8 @@ var create = function (ROOT, CFG, opts) {
       acts.hidden = sentOf(id);      // a reply or an edit of this thread is out: its buttons wait for the answer
       acts.innerHTML = (telling[id] ? busy('tell', AGENT_UC + ' is working')
          : waits[id] ? '<button class="rd-alt rd-busy rd-tell" data-a="cancel-tell" title="Click to cancel"><span class="rd-on">' +
-                       esc(waits[id].to) + ' is waiting</span><span class="rd-off">Cancel</span></button>'
+                       esc(waitList(id).map(function (w) { return w.to; }).join(', ')) +
+                       (waitList(id).length > 1 ? ' are waiting' : ' is waiting') + '</span><span class="rd-off">Cancel</span></button>'
          : '');
       if (head) head.hidden = sentOf(id);
       pop.appendChild(acts);
@@ -2284,8 +2374,26 @@ var create = function (ROOT, CFG, opts) {
   function notSent(e, what) {
     return e.unreachable && e.message === UNREACHABLE ? what + ' did not go out: the hub is unreachable.' : e.message;
   }
+  // One Cancel ends the Tell of each agent, each with an event of its own, and a toast replaces the one before it: the
+  // events of a moment are said once, naming every agent that had already seen its Tell.
+  var cancelNote = null;
+  function cancelSaid(to, seen) {
+    if (!cancelNote) {
+      cancelNote = { seen: [] };
+      setTimeout(function () {
+        var n = cancelNote;
+        cancelNote = null;
+        say('Cancelled.' + (n.seen.length ? ' ' + n.seen.join(' and ') + ' had already seen it; look at the document before you Tell again.' : ''));
+      }, 60);
+    }
+    if (seen) cancelNote.seen.push(to);
+  }
   async function cancel(id) {
-    var off = function () { delete telling[id]; delete waits[id]; touched(id); };
+    var off = function () {
+      var mine = cancelled[id] = waits[id] || {};     // the events that follow still find what to say of each agent
+      setTimeout(function () { if (cancelled[id] === mine) delete cancelled[id]; }, 5000);   // not a later Cancel's
+      delete telling[id]; delete waits[id]; touched(id);
+    };
     var waited = waits[id];
     try {
       await post('/_/cancel', { id: id });
@@ -2299,6 +2407,135 @@ var create = function (ROOT, CFG, opts) {
       say(notSent(e, 'Cancel'), true);
     }
   }
+  // ---- dictation (SPEC 10.4, ticket 06) ----------------------------------------
+  // A microphone in the box. The sound goes to the hub (POST /_/transcribe, which relays it) or, on a page mounted in
+  // Open WebUI, to Open WebUI's own route with the session cookie; the text comes back into the field, to read and send.
+  // One recording at a time, and the sound is never kept: not in the store, not in the file. `dict` is the recording in
+  // hand ({f, chunks, discard, ...}) until its answer is in; `dictOff` is the time until which the service is held gone.
+  var DICTATE_TYPES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
+  var DICTATE_MAX = 120000, DICTATE_WATCH = 15000;   // a recording asks the hub every 15 s whether it is still there
+  var MIC = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1a2.5 2.5 0 0 0-2.5 2.5v4a2.5 2.5 0 0 0 5 0v-4A2.5 2.5 0 0 0 8 1ZM3.5 7a.75.75 0 0 1 1.5 0 3 3 0 0 0 6 0A.75.75 0 0 1 12.5 7a4.5 4.5 0 0 1-3.75 4.44v1.81h1.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5h1.5v-1.81A4.5 4.5 0 0 1 3.5 7Z"/></svg>';
+  var dict = null, dictOff = 0;
+  // Stops the recording and, with `discard`, throws the sound away (nothing is sent; a late answer is dropped). The
+  // microphone is released either way, so the browser's light goes out.
+  function stopDictation(discard) {
+    var d = dict;
+    if (!d) return;
+    if (discard) { d.discard = true; if (d.abort) d.abort.abort(); }     // a sound on its way is called back too
+    clearTimeout(d.timer);
+    clearInterval(d.watch);
+    if (d.rec && d.rec.state !== 'inactive') d.rec.stop();
+  }
+  function dictationAvailable() {
+    if (Date.now() < dictOff) return Promise.resolve(false);
+    if (MOUNTED) return Promise.resolve(true);        // Open WebUI answers or not; the first failure takes the button away
+    if (CFG.proxy) return Promise.resolve(false);     // the hub in proxy mode relays nothing (SPEC 9.9)
+    return fetch('/_/transcribe').then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { return !!(j && j.available === true); }, function () { return false; });
+  }
+  // The sound to text: rejects with an error whose `why` is 'denied' (the account may not dictate), 'gone' (the
+  // service is not there) or 'failed'.
+  function transcribeSound(blob, ext, signal) {
+    var fail = function (why) { var e = new Error(why); e.why = why; return e; };
+    var req = MOUNTED
+      ? fetch('/api/v1/audio/transcriptions', { method: 'POST', credentials: 'same-origin', signal: signal,
+          body: (function () { var fd = new FormData(); fd.append('file', blob, 'dictee.' + ext); return fd; })() })
+      : fetch('/_/transcribe', { method: 'POST', headers: { 'Content-Type': (blob.type || 'audio/' + ext).split(';')[0], 'X-Filename': 'dictee.' + ext }, body: blob, signal: signal });
+    return req.then(function (r) {
+      if (r.status === 403 && MOUNTED) throw fail('denied');
+      if (r.status === 503 || r.status === 404 || r.status === 401) throw fail('gone');
+      if (!r.ok) throw fail('failed');
+      return r.json().then(function (j) {
+        var t = j && typeof j.text === 'string' ? j.text.trim() : '';
+        if (!t) throw fail('failed');
+        return t;
+      }, function () { throw fail('failed'); });
+    }, function () { throw fail('gone'); });
+  }
+  // The text goes where the cursor is, with a space between it and the words around it, and the field hears an input
+  // as for a typed text (the draft follows).
+  function insertDictated(ta, text) {
+    var v = ta.value, s = ta.selectionStart, e = ta.selectionEnd, pre = v.slice(0, s), post = v.slice(e);
+    var lead = pre && !/\s$/.test(pre) ? ' ' : '', trail = post && !/^\s/.test(post) ? ' ' : '';
+    ta.value = pre + lead + text + trail + post;
+    var at = pre.length + lead.length + text.length;
+    ta.setSelectionRange(at, at);
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    ta.focus();
+  }
+  function dictation(f, ta) {
+    if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder)) return;
+    dictationAvailable().then(function (yes) {
+      var acts = f.querySelector('.rd-actions');
+      if (!yes || unmounted || !f.isConnected || !acts || f.querySelector('.rd-mic')) return;
+      var b = el('button', { 'class': 'rd-mic', type: 'button', title: 'Dictate', 'aria-label': 'Dictate', 'aria-pressed': 'false' }, MIC);
+      var line = null;
+      var says = function (msg) {
+        if (!line) { line = el('div', { 'class': 'rd-mic-says', role: 'status' }); ta.insertAdjacentElement('afterend', line); }
+        line.textContent = msg || '';
+        if (!msg) { line.remove(); line = null; }
+      };
+      var idle = function () { b.disabled = false; b.title = 'Dictate'; b.setAttribute('aria-label', 'Dictate'); b.setAttribute('aria-pressed', 'false'); };
+      var lost = function (why) {
+        if (why === 'denied') { dictOff = Infinity; says('Dictation is not allowed for your account.'); b.remove(); }
+        else if (why === 'gone') { dictOff = MOUNTED ? Infinity : Date.now() + 60000; says('The transcription did not work. Try again.'); b.remove(); }
+        else says('The transcription did not work. Try again.');
+      };
+      b.addEventListener('click', function () {
+        if (dict) { if (dict.f === f && dict.rec) stopDictation(false); return; }
+        says('');
+        var d = dict = { f: f, chunks: [], discard: false, rec: null };
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+          var release = function () { stream.getTracks().forEach(function (t) { t.stop(); }); };
+          if (d.discard || unmounted || !f.isConnected) { release(); dict = null; return; }
+          var type, rec, ext;
+          // A browser that takes the stream and then refuses the recorder (a type it cannot make, a start that throws)
+          // must not keep the microphone: the light goes out, and the next press is a new try.
+          try {
+            type = DICTATE_TYPES.filter(function (t) { return MediaRecorder.isTypeSupported(t); })[0];
+            rec = d.rec = type ? new MediaRecorder(stream, { mimeType: type }) : new MediaRecorder(stream);
+            type = rec.mimeType || type || 'audio/webm';
+            ext = /mp4/.test(type) ? 'mp4' : /ogg/.test(type) ? 'ogg' : 'webm';
+          } catch (e) { release(); dict = null; says('The recording could not start. Try again.'); return; }
+          rec.addEventListener('dataavailable', function (e) { if (e.data && e.data.size) d.chunks.push(e.data); });
+          rec.addEventListener('stop', function () {
+            release();
+            var gone = function () { return d.discard || unmounted || !f.isConnected; };
+            // A discarded sound leaves a form that may still be here (a send that fails gives it back): its button is idle again.
+            var here = function () { if (!unmounted && f.isConnected) idle(); };
+            if (gone() || !d.chunks.length) { dict = null; here(); if (!gone()) says('Nothing was recorded. Try again.'); return; }
+            b.disabled = true; b.title = 'Transcribing…'; b.setAttribute('aria-label', 'Transcribing…'); b.setAttribute('aria-pressed', 'false');
+            d.abort = new AbortController();
+            transcribeSound(new Blob(d.chunks, { type: type }), ext, d.abort.signal).then(function (text) {
+              dict = null;
+              here();
+              if (gone()) return;
+              insertDictated(ta, text);
+            }, function (e) {
+              dict = null;
+              here();
+              if (gone()) return;
+              lost(e.why);
+            });
+          });
+          try { rec.start(); } catch (e) { release(); dict = null; says('The recording could not start. Try again.'); return; }
+          b.title = 'Stop'; b.setAttribute('aria-pressed', 'true');
+          d.timer = setTimeout(function () { stopDictation(false); }, DICTATE_MAX);
+          if (!MOUNTED) d.watch = setInterval(function () {   // the service lost during the recording: the sound is dropped
+            dictationAvailable().then(function (yes) {
+              if (yes || dict !== d || !d.rec || d.rec.state !== 'recording') return;
+              stopDictation(true);
+              lost('gone');
+            });
+          }, DICTATE_WATCH);
+        }, function (e) {
+          dict = null;
+          says(e && (e.name === 'NotAllowedError' || e.name === 'SecurityError') ? 'Microphone blocked: allow it for this site.' : 'No microphone found.');
+        });
+      });
+      acts.insertBefore(b, acts.firstChild);
+    });
+  }
   // buttons: [{k, label}], the first is the primary one. done(text, k, rid) may return a promise;
   // it settles to null or false when nothing was sent, and the form comes back with its text.
   // cancelled() runs when the person cancels. `says` is the line its popover shows while its send is out.
@@ -2310,7 +2547,11 @@ var create = function (ROOT, CFG, opts) {
   function textForm(host, initial, buttons, done, cancelled, says, kept, mirror) {
     var old = host.querySelector('.rd-form');
     // what is typed in the form it replaces goes to the store first; when the store refuses it, that form stays
-    if (old) { if (old.stash && old.stash() === false) { sayNotKept(); return; } old.remove(); }
+    if (old) {
+      if (old.stash && old.stash() === false) { sayNotKept(); return; }
+      if (dict && dict.f === old) stopDictation(true);     // its sound goes with it: the microphone is not left on for a form that is gone
+      old.remove();
+    }
     var own = host === pop ? popId : null;       // the thread this form is for; a new comment has none
     var about = own !== null && byId[own] ? byId[own].quote : '';     // its quote, still known once it is gone
     var born = own !== null && byId[own] ? byId[own].at : null;       // its birth: next_id gives a deleted id to the next comment
@@ -2350,6 +2591,7 @@ var create = function (ROOT, CFG, opts) {
     // id of the last send, or, for a text changed since it was sent, the `of` of the entry it was drawn from.
     var line = from.rid || from.of || null;
     ta.value = from.body;
+    dictation(f, ta);
     replace();
     ta.focus();
     // A send of this form failed and the form came back: it holds the text sent, which the store keeps for the
@@ -2408,6 +2650,7 @@ var create = function (ROOT, CFG, opts) {
     };
     var go = function (k) {
       if (!ta.value.trim()) { ta.focus(); return; }
+      stopDictation(true);
       // The hub refuses it, or writes it into the comment that took the id: it is to copy. The buttons are off
       // for the same reason (noSend), whether or not the thread has come back since.
       if (vanished() || own !== null && ((born !== null && byId[own].at !== born) || f.hasAttribute('data-nosend'))) {
@@ -2466,7 +2709,7 @@ var create = function (ROOT, CFG, opts) {
     // Cancel clears what the store keeps for the form before restore, which draws the thread's other kept text.
     f.addEventListener('click', function (e) {
       var b = e.target.closest && e.target.closest('[data-f]'), k = b && b.getAttribute('data-f');
-      if (k === 'no') { f.remove(); if (cancelled) cancelled(line); restore(); replace(); flushHold(); }
+      if (k === 'no') { stopDictation(true); f.remove(); if (cancelled) cancelled(line); restore(); replace(); flushHold(); }
       else if (k) go(k);
     });
     ta.addEventListener('keydown', function (e) {
@@ -2962,8 +3205,26 @@ var create = function (ROOT, CFG, opts) {
   // While a save is out, the page must stay exactly what was sent: a merge or a
   // split paragraph reloads the page on the reply, and a keystroke typed in
   // between would be on screen only. A save takes a fraction of a second, and
-  // autosave only starts once typing has paused.
-  main.addEventListener('beforeinput', function (e) { if (saving || settling) e.preventDefault(); });
+  // autosave only starts once typing has paused. When the hub is slow to answer, the refusal is said: the
+  // block shows it is saving (rd-saving) and the first refused key says so, once for that save.
+  // The mark is cleared by a poll, not where saving and settling fall: they fall in a dozen places (the reply,
+  // a failure, a give-up, a reload), and a mark that waits a tenth of a second too long costs nothing.
+  var refusedSaid = false, refusedTmr;
+  main.addEventListener('beforeinput', function (e) {
+    if (!saving && !settling) return;
+    e.preventDefault();
+    var b = e.target && e.target.closest ? e.target.closest('[contenteditable="true"]') : null;
+    if (b) b.classList.add('rd-saving');
+    if (!refusedSaid) { refusedSaid = true; say('Saving… what you type now is not taken, wait a moment.'); }
+    if (!refusedTmr) refusedTmr = setInterval(function () {
+      if (saving || settling) return;
+      clearInterval(refusedTmr); refusedTmr = null; refusedSaid = false;
+      Array.prototype.forEach.call(main.querySelectorAll('.rd-saving'), function (x) {
+        x.classList.remove('rd-saving');
+        if (!x.classList.length) x.removeAttribute('class');      // not a class="" left in what a save sends
+      });
+    }, 100);
+  });
 
   // ---- Enter in a task item ---------------------------------------------------
   // The browser's own Enter in an <li> makes an <li> with no box, which the .md would hold as a plain item.
@@ -3127,7 +3388,7 @@ var create = function (ROOT, CFG, opts) {
       // The browser's own toggle is cancelled and replaced by ours: inside a
       // contenteditable it is not reliable, and the attribute must move with it.
       e.preventDefault();
-      // A box of the eight words is pressed with its button at the top of the page (SPEC 10.11).
+      // A box of the eleven words is pressed with its button at the top of the page (SPEC 10.11).
       if (isActBox(t)) { say(PRESS_IT); return; }
       var b = blockOf(t);
       if (stale || dead || !b || !editable.has(b.i)) return;
@@ -3145,11 +3406,14 @@ var create = function (ROOT, CFG, opts) {
   // file's buttons: a save answered without them (merged, remapped, `again`), a tick taken, a reload held or under
   // way. A reload brings them, and is asked for when none is coming. Any other box ticks as a plain one.
   var boxWaits = new WeakSet();       // a box whose block's save is out: a second click would toggle it back
-  // The eight words as the hub reads them (the_list.WORDS and _ACTION_RE), so a box no button names yet can be told.
-  var ACTION_WORDS = ['Approve', 'Run it', 'Don\'t run', 'Undo skip', 'Done', 'Share', 'Stop James', 'Move to'];
-  var ACTION_LINE = new RegExp('^(?:(?:' + ACTION_WORDS.slice(0, -1).map(function (w) {
-    return w.replace(/'/g, '[\'’]');
-  }).join('|') + ')|Move to\\s+[A-Za-z0-9._\\\\-]+\\s+\\(ref\\s+[^()\\s]+\\))(?:\\s+@[A-Za-z0-9._-]+)?$');
+  // The eleven words as the hub reads them (the_list.WORDS and _ACTION_RE), so a box no button names yet can be told.
+  var ACTION_WORDS = ['Approve', 'Run it', 'Don\'t run', 'Undo skip', 'Done', 'Share', 'Stop James', 'Move to', 'Merge', 'Deploy', 'Install'];
+  // Move to takes `<slug> (ref <thread>)`, Merge, Deploy and Install the rest of the line, the others nothing.
+  var ACTION_ARG = { 'Move to': '\\s+[A-Za-z0-9._\\\\-]+\\s+\\(ref\\s+[^()\\s]+\\)(?:\\s+@[A-Za-z0-9._-]+)?',
+                     'Merge': '\\s+\\S.*', 'Deploy': '\\s+\\S.*', 'Install': '\\s+\\S.*' };
+  var ACTION_LINE = new RegExp('^(?:' + ACTION_WORDS.map(function (w) {
+    return w.replace(/'/g, '[\'’]') + (ACTION_ARG[w] || '(?:\\s+@[A-Za-z0-9._-]+)?');
+  }).join('|') + ')$');
   // The text of a box's own item, its nested lists left out; null for a box in no item.
   function itemLine(t) {
     var li = t.closest && t.closest('li');
@@ -3186,7 +3450,7 @@ var create = function (ROOT, CFG, opts) {
   }
 
   // ---- the action buttons (SPEC 10.11) ------------------------------------------
-  // The boxes of the eight words are the list's buttons at the top of the page (9.10): a one-off red, locked once
+  // The boxes of the eleven words are the list's buttons at the top of the page (9.10): a one-off red, locked once
   // pressed, with who and when; Share a toggle, its owner's alone. A press reads Undo for 5 seconds, then posts the
   // list's tick (`/_/tick`) with the hash of the text on screen; the hub's `changed` reloads the page onto the
   // ticked file, and a reload asked meanwhile waits for the press's answer. While a press waits or is sent, the other
@@ -3784,27 +4048,29 @@ var create = function (ROOT, CFG, opts) {
       });
       live.addEventListener('tell-cancelled', function (ev) {
         var d = JSON.parse(ev.data || '{}');
-        var waited = waits[d.id];
+        var waited = d.agent !== undefined ? (waits[d.id] || cancelled[d.id] || {})[d.agent] : null;
         delete telling[d.id];
-        delete waits[d.id];
+        if (d.agent !== undefined) { waitOff(d.id, d.agent); endedAt[d.id + '\n' + d.agent] = ++seenSeq; }   // a Tell job's end names no agent: it ends no agent's Tell
         touched(d.id);
-        if (waited) say('Cancelled.' + (d.seen ? ' ' + waited.to + ' had already seen it; look at the document before you Tell again.' : ''));
+        if (waited) cancelSaid(waited.to, d.seen);
       });
       // A Tell that waits for an agent (SPEC 9.8, 10.5): queued, listed to the agent, ended by its action reply.
       live.addEventListener('tell-queued', function (ev) {
         var d = JSON.parse(ev.data || '{}');
-        waits[d.id] = { to: d.agent, state: 'queued' };
+        waitAt(d.id, d.agent, { to: d.agent, state: 'queued' });
+        queuedAt[d.id + '\n' + d.agent] = ++seenSeq;
         touched(d.id);
       });
       live.addEventListener('tell-seen', function (ev) {
         var d = JSON.parse(ev.data || '{}');
-        if (waits[d.id]) waits[d.id].state = 'seen';
-        seenAt[d.id] = ++seenSeq;
+        if (waits[d.id] && waits[d.id][d.agent]) waits[d.id][d.agent].state = 'seen';
+        seenAt[d.id + '\n' + d.agent] = ++seenSeq;
         touched(d.id);
       });
       live.addEventListener('tell-done', function (ev) {
         var d = JSON.parse(ev.data || '{}');
-        delete waits[d.id];
+        waitOff(d.id, d.agent);
+        endedAt[d.id + '\n' + d.agent] = ++seenSeq;
         touched(d.id);
       });
       ['tell-sent', 'tell-waiting', 'tell-working', 'tell-queued', 'tell-seen', 'tell-done',
@@ -3988,6 +4254,7 @@ var create = function (ROOT, CFG, opts) {
   function unmount() {
     if (unmounted) return;
     unmounted = true;
+    stopDictation(true);
     unlistens.forEach(function (f) { f(); });
     unlistens = [];
     intervals.forEach(function (t) { window.clearInterval(t); });

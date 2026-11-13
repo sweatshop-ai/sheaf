@@ -3379,7 +3379,7 @@ var create = function (ROOT, CFG, opts) {
         var own = lab && main.contains(lab) && lab.querySelector('input[type="checkbox"]');
         if (!own) return;
         e.preventDefault();
-        if (!onLabelWords(lab, e)) return;
+        if (editing || !onLabelWords(lab, e)) return;
         t = own;
       }
       // The browser's own toggle is cancelled and replaced by ours: inside a
@@ -3394,7 +3394,7 @@ var create = function (ROOT, CFG, opts) {
   }
   var PRESS_IT = 'Press it with its button at the top of the page.';
   // A task line's label: the words before the first `:` or ` — `, else the first word. A click on them ticks the box
-  // like a <label>; the rest of the line is for the caret, a selection and its links. Told by where the click
+  // like a <label>, out of edit mode (in it the words are for the caret); the rest of the line is for the caret, a selection and its links. Told by where the click
   // landed against the label's words, so the document gets no element of its own. A touch gets 44 px of height.
   function labelEnd(text) {
     var m = /:|\s—\s/.exec(text);

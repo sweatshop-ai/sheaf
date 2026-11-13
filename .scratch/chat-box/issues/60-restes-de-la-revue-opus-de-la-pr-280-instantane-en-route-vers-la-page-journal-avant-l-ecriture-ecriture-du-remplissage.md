@@ -1,4 +1,4 @@
-# 59: Restes de la revue Opus de la PR 280 : l'instantané lu puis publié sans verrou, le journal écrit avant le fichier, le remplissage de `agent`
+# 60: Restes de la revue Opus de la PR 280 : l'instantané lu puis publié sans verrou, le journal écrit avant le fichier, le remplissage de `agent`
 
 **What to build:** Sept trouvailles de classe c (cas tirés par les cheveux) de `pr-40-reviews/opus-round1.md`, sorties de la PR 280 (tickets 40 et 41) selon la règle de la piste. Aucune n'est reproduite. À prendre ensemble si l'une est prise.
 

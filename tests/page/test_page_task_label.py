@@ -111,3 +111,13 @@ def test_on_a_phone_the_label_is_44_px_high_to_touch(touch_tab):
     assert h < 44
     p.touchscreen.tap(x, y + 20)           # 20 px under the middle of a line that is under 30 px high
     until(lambda: ON in f.read_text(encoding="utf-8"), what="the tick in the file")
+
+
+def test_in_edit_mode_a_click_on_the_label_is_for_the_caret_and_ticks_nothing(sheaf):
+    p, f = sheaf.page, sheaf.site.file
+    p.keyboard.press("e")
+    x, y = spot(p, 0, len("Approved"))[:2]
+    p.mouse.click(x, y)
+    p.wait_for_timeout(600)
+    assert f.read_text(encoding="utf-8") == SHEAF
+    assert p.locator("main input[type=checkbox]").first.is_checked() is False

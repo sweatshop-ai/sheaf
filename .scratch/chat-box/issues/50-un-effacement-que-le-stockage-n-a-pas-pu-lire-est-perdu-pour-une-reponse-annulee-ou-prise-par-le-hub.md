@@ -11,4 +11,6 @@
 - [ ] Un test de page échoue tant qu'une réponse acceptée par le hub, effacée pendant une lecture refusée, revient comme « not sent »
 - [ ] Même garde pour `taken(rid)` : un test avec un `changed` reçu pendant une lecture refusée
 
-**Status:** ready-for-agent
+**Claimed by:** Naya 2026-11-13 23:53
+
+**Status:** in-progress

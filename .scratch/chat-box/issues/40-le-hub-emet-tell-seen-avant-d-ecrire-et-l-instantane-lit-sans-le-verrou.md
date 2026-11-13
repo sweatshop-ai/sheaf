@@ -4,7 +4,9 @@
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Claimed by:** Isolde 2026-11-13 23:53
+
+**Status:** in-progress
 
 **Établi (preuves) :** relu par la revue Opus du tour 1 du ticket 23 (`pr-23-reviews/opus-round1.md`) : les deux moitiés sont encore vraies sur chat-box/23 (bbf4dbe). Aucun test ne pose la fenêtre.
 

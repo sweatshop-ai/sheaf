@@ -245,7 +245,7 @@ def test_the_page_has_no_ask_left():
     assert "'s answer</span>'" in js.replace(r"\u2019", "'")
 
 
-def test_the_page_knows_the_eight_words_as_the_hub_reads_them():
+def test_the_page_knows_the_action_words_as_the_hub_reads_them():
     # #148: a box no button names yet is told an action's by its line, with the hub's words, in the hub's order.
     from sheafmd.hub import the_list
     m = re.search(r"var ACTION_WORDS = \[(.*?)\];", (PAGE / "page.js").read_text(encoding="utf-8"))

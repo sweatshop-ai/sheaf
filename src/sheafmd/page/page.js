@@ -3368,11 +3368,13 @@ var create = function (ROOT, CFG, opts) {
   // way. A reload brings them, and is asked for when none is coming. Any other box ticks as a plain one.
   var boxWaits = new WeakSet();       // a box whose block's save is out: a second click would toggle it back
   // The eleven words as the hub reads them (the_list.WORDS and _ACTION_RE), so a box no button names yet can be told.
-  var ACTION_WORDS = ['Approve', 'Run it', 'Don\'t run', 'Undo skip', 'Done', 'Share', 'Stop James'];
-  var ACTION_LINE = new RegExp('^(?:(?:' + ACTION_WORDS.map(function (w) {
-    return w.replace(/'/g, '[\'’]');
-  }).join('|') + ')(?:\\s+@[A-Za-z0-9._-]+)?|(?:Merge|Deploy|Install)\\s+\\S.*|' +
-    'Move to\\s+[A-Za-z0-9._\\\\-]+\\s+\\(ref\\s+[^()\\s]+\\)(?:\\s+@[A-Za-z0-9._-]+)?)$');
+  var ACTION_WORDS = ['Approve', 'Run it', 'Don\'t run', 'Undo skip', 'Done', 'Share', 'Stop James', 'Move to', 'Merge', 'Deploy', 'Install'];
+  // Move to takes `<slug> (ref <thread>)`, Merge, Deploy and Install the rest of the line, the others nothing.
+  var ACTION_ARG = { 'Move to': '\\s+[A-Za-z0-9._\\\\-]+\\s+\\(ref\\s+[^()\\s]+\\)(?:\\s+@[A-Za-z0-9._-]+)?',
+                     'Merge': '\\s+\\S.*', 'Deploy': '\\s+\\S.*', 'Install': '\\s+\\S.*' };
+  var ACTION_LINE = new RegExp('^(?:' + ACTION_WORDS.map(function (w) {
+    return w.replace(/'/g, '[\'’]') + (ACTION_ARG[w] || '(?:\\s+@[A-Za-z0-9._-]+)?');
+  }).join('|') + ')$');
   // The text of a box's own item, its nested lists left out; null for a box in no item.
   function itemLine(t) {
     var li = t.closest && t.closest('li');

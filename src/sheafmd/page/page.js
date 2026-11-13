@@ -1501,9 +1501,11 @@ var create = function (ROOT, CFG, opts) {
   // port, one after the other, and the key cannot tell them apart. An entry of another root is not this page's:
   // not listed, not sent, and kept when this page writes the store. One with no `root` (an older entry) is
   // this page's, and takes its root when the store is next written.
-  function commentDraftsRaw() {
-    var v;
-    try { v = JSON.parse(localStorage.getItem(COMMENT_DRAFT_KEY) || '[]'); } catch (e) { return []; }
+  // `strict`: a store that refuses the read throws, instead of passing for an empty one (commentDraftsSave).
+  function commentDraftsRaw(strict) {
+    var v, raw;
+    try { raw = localStorage.getItem(COMMENT_DRAFT_KEY); } catch (e) { if (strict) throw e; return []; }
+    try { v = JSON.parse(raw || '[]'); } catch (e) { return []; }
     return (Array.isArray(v) ? v : [v]).filter(function (d) {
       return d && typeof d.body === 'string' && (typeof d.quote === 'string' || typeof d.thread === 'string');
     });
@@ -1515,7 +1517,7 @@ var create = function (ROOT, CFG, opts) {
   function commentDraftsSave(ds) {
     storeOk = true;
     try {
-      var all = commentDraftsRaw().filter(ofOtherRoot).concat(ds.map(function (d) {
+      var all = commentDraftsRaw(true).filter(ofOtherRoot).concat(ds.map(function (d) {
         return d.root === undefined && CFG.root ? Object.assign({ root: CFG.root }, d) : d;
       }));
       if (all.length) localStorage.setItem(COMMENT_DRAFT_KEY, JSON.stringify(all)); else localStorage.removeItem(COMMENT_DRAFT_KEY);
@@ -3042,7 +3044,7 @@ var create = function (ROOT, CFG, opts) {
         storeOk = true;
         if (!box.value.trim()) {      // emptied: a draft kept before goes too; nothing kept, nothing to write
           if (d || kept || wrote.length) draftsReplace(own);        // known from this form, not read back from a store that may refuse
-          return storeOk;
+          return true;      // an empty field has no text to lose: a clear the store refused does not hold the box open
         }
         var at = (kept || d || {}).at || new Date().toISOString();       // one stamp for the form's draft, so the next stash finds it
         draftsReplace(own, { quote: t.quote, body: box.value, block: t.block, head: t.head, tail: t.tail, occ: t.occ, min: true, at: at });

@@ -52,7 +52,7 @@ def browser():
 '''
 
 
-def run(tmp_path, *args, hanging_teardown=False):
+def run(tmp_path, *args, hanging_teardown=False, suite_text=SUITE):
     driver = tmp_path / "fake" / "playwright" / "sync_api"
     driver.mkdir(parents=True)
     (driver.parent / "__init__.py").write_text("")
@@ -60,7 +60,7 @@ def run(tmp_path, *args, hanging_teardown=False):
     (driver / "_context_manager.py").write_text(textwrap.dedent(FAKE_DRIVER))
     suite = tmp_path / "suite"
     suite.mkdir()
-    (suite / "test_driver.py").write_text(textwrap.dedent(SUITE) + (HANGING_TEARDOWN if hanging_teardown else ""))
+    (suite / "test_driver.py").write_text(textwrap.dedent(suite_text) + (HANGING_TEARDOWN if hanging_teardown else ""))
     env = {"PATH": "/usr/bin:/bin", "PYTHONPATH": f"{tmp_path / 'fake'}:{TESTS}"}
     start = time.monotonic()
     try:
@@ -108,3 +108,38 @@ def test_the_run_ends_at_once_though_the_session_teardown_would_ask_the_dead_dri
     assert r.returncode == 1, out
     assert "Playwright driver no longer answers" in out, out
     assert took < 20, out
+
+
+# CI, runs 43288137873 and 43326825430: the same page test failed 53 s after the one before it, with no traceback in
+# the log (pytest prints those at the end, which the cancelled job never reached), and the driver stopped answering
+# after it. The traceback is on the terminal when the test fails.
+FAILS_THEN_STALLS = '''
+import pytest
+from playwright.sync_api._context_manager import greenlet_main
+
+
+@pytest.mark.page
+def test_first_fails_on_its_own():
+    assert "the box is ticked" == "the box is not", "the distinctive failure"
+
+
+@pytest.mark.page
+def test_second_asks_the_driver():
+    greenlet_main()
+'''
+
+
+def test_a_page_test_that_fails_shows_its_traceback_at_once_not_at_the_end_of_the_run(tmp_path):
+    r, out, _ = run(tmp_path, "-p", "driver_stall", suite_text=FAILS_THEN_STALLS)
+
+    assert r.returncode == 1, out
+    assert "the distinctive failure" in out, out
+    assert "test_first_fails_on_its_own" in out, out
+    assert out.index("the distinctive failure") < out.index("Playwright driver no longer answers"), out
+
+
+def test_a_test_that_is_not_a_page_test_keeps_its_traceback_for_the_end_of_the_run(tmp_path):
+    r, out, _ = run(tmp_path, "-p", "driver_stall", suite_text=FAILS_THEN_STALLS.replace("@pytest.mark.page\n", ""))
+
+    assert r.returncode == 1, out
+    assert "the distinctive failure" not in out, out

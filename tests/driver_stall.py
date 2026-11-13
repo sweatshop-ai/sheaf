@@ -10,6 +10,8 @@ for good, and every later call into it spins for ever.
 That is also why the run is ended with `os._exit` and not `pytest.exit`: the session teardown of the `chromium`
 fixture closes the browser and stops the driver, and it never returns (the Opus review of PR 260: the job held
 until tools/ci/stall_watch.py killed it, 600 s of silence later). The process goes after the report is written.
+The stall can follow a failure the log never explained (runs 43288137873 and 43326825430: the same page test failed
+53 s in, then the driver stopped answering), so a page test that fails also shows its traceback at once.
 Loaded by tests/conftest.py."""
 import os
 import re
@@ -40,9 +42,21 @@ def pytest_configure(config):
     _config = config
 
 
+def say_a_page_test_failed(report):
+    """A page test that fails shows its traceback now. pytest prints it in the failure summary at the end of the
+    run, and a run that ends in the 60 min limit never gets there: CI, runs 43288137873 and 43326825430, the same
+    test failed 53 s in and the log never said why."""
+    if not report.failed or "page" not in report.keywords:
+        return
+    out = _config.pluginmanager.getplugin("terminalreporter")
+    out.write_line(f"\n--- {report.nodeid} failed ({report.when}):\n{report.longreprtext}\n---")
+    out.flush()
+
+
 def pytest_runtest_logreport(report):
     text = stalled_in_driver(report)
     if text is None:
+        say_a_page_test_failed(report)
         return
     stack = "\n".join(line for line in text.splitlines() if FRAME_LINE.match(line))
     # on the terminal at once: the failure summary, where pytest prints this traceback, is the part a cancelled job loses

@@ -86,6 +86,11 @@
 #rd-popover .rd-text code{font:.86em ui-monospace,monospace;background:rgba(127,127,127,.15);
  padding:0 .25em;border-radius:2px}
 #rd-popover .rd-text a{color:inherit;text-decoration:underline}
+#rd-popover .rd-text pre{margin:.2em 0 .5em;padding:.4em .6em;background:rgba(127,127,127,.12);border-radius:4px;
+ overflow-x:auto;white-space:pre}
+#rd-popover .rd-text pre code{background:none;padding:0;font-size:.86em}
+#rd-popover .rd-text blockquote{margin:.2em 0 .5em;padding-left:.6em;border-left:3px solid rgba(127,127,127,.4);opacity:.85}
+#rd-popover .rd-text li+li{margin-top:.15em}
 #rd-popover .rd-quote{font-size:12px;opacity:.7;margin-bottom:8px;font-style:italic}
 #rd-popover .rd-tag{font:600 10px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.06em;
  background:#e5e7eb;color:#111;border-radius:2px;padding:1px 5px;margin-left:6px}

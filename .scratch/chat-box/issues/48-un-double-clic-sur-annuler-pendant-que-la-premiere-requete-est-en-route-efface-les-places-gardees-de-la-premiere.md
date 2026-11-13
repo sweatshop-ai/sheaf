@@ -6,11 +6,11 @@
 
 **Claimed by:** Kian 2026-11-14 00:32
 
-**Status:** in-progress
+**Status:** done (PR 283, merged as 2a89ed3)
 
 **Établi (preuves) :** `opus-round5-fix.md` de pr-23-reviews, note 1 : lecture du code, non reproduit par un test.
 
 **Par où commencer :** ne remplacer `cancelled[id]` que si `waits[id]` existe (ou fusionner les places des deux Annuler) ; écrire un test de page qui tient l'événement du premier Annuler, double-clique Annuler, puis le libère.
 
-- [ ] Un test de page double-clique Annuler sur un Tell déjà vu et échoue sans le correctif
-- [ ] L'événement tardif du premier Annuler dit « had already seen it » après un deuxième Annuler
+- [x] Un test de page double-clique Annuler sur un Tell déjà vu et échoue sans le correctif
+- [x] L'événement tardif du premier Annuler dit « had already seen it » après un deuxième Annuler

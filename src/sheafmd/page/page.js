@@ -2170,11 +2170,9 @@ var create = function (ROOT, CFG, opts) {
     if (canSave) {
       var acts = el('div', { 'class': 'rd-actions' });
       acts.hidden = sentOf(id);      // a reply or an edit of this thread is out: its buttons wait for the answer
-      acts.innerHTML = (telling[id] ? busy('tell', AGENT_UC + ' is working')
-         : waits[id] ? '<button class="rd-alt rd-busy rd-tell" data-a="cancel-tell" title="Click to cancel"><span class="rd-on">' +
-                       esc(waitList(id).map(function (w) { return w.to; }).join(', ')) +
-                       (waitList(id).length > 1 ? ' are waiting' : ' is waiting') + '</span><span class="rd-off">Cancel</span></button>'
-         : '');
+      // The thread's own line already says who works on it or waits for it: the button only cancels.
+      acts.innerHTML = telling[id] || waits[id]
+        ? '<button class="rd-alt rd-tell" data-a="cancel-tell" title="Cancel the Tell">Cancel</button>' : '';
       if (head) head.hidden = sentOf(id);
       pop.appendChild(acts);
       var act = function (e) {
@@ -2314,10 +2312,6 @@ var create = function (ROOT, CFG, opts) {
   // A running Tell shows as a busy button; hovering it turns it into
   // Cancel, and a click cancels. Tell already delivered gets a second message
   // telling the session to stop.
-  function busy(what, label) {
-    return '<button class="rd-alt rd-busy rd-' + what + '" data-a="cancel-' + what + '" title="Click to cancel">' +
-           '<span class="rd-on">' + esc(label) + DOTS + '</span><span class="rd-off">Cancel</span></button>';
-  }
   // "Answer <name>" brings the session's terminal forward. The page only says "this document's
   // session"; the hub runs the command of its own config (SPEC 4.3, 8.5), so the page names
   // no session and no command.

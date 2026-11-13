@@ -189,3 +189,17 @@ def test_the_answer_button_follows_the_jump_command_without_a_reload(tab, agent,
     tab.site.reopen()
     tab.page.wait_for_function("() => document.querySelectorAll('#rd-popover button.rd-answer').length === 0",
                                timeout=30000)
+
+
+def test_a_running_tell_says_once_who_works_on_it_and_its_button_only_cancels(tab, agent):
+    update_file(tab.site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
+                                                         "Ada", "2026-10-14T10:00")[0])
+    tab.open()
+    tab.page.click(".rd-badge")
+    tab.page.wait_for_selector("#rd-popover textarea")
+    tab.page.fill("#rd-popover textarea", "Please do.")
+    tab.page.click("#rd-popover .rd-form button.rd-tell")
+    tab.page.wait_for_selector("#rd-popover .rd-pending-tell")
+    box = tab.page.inner_text("#rd-popover")
+    assert box.count("is working") == 1, box
+    assert tab.page.inner_text("#rd-popover button[data-a=cancel-tell]") == "Cancel"

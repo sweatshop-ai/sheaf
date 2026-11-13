@@ -3422,6 +3422,7 @@ var create = function (ROOT, CFG, opts) {
     if (!li) return null;
     var own = li.cloneNode(true);
     Array.prototype.forEach.call(own.querySelectorAll('ul, ol'), function (n) { n.remove(); });
+    Array.prototype.forEach.call(own.querySelectorAll('[data-rd-ui]'), function (n) { n.remove(); });
     return own.textContent.replace(/\s+/g, ' ').trim();
   }
   function mayBeAction(t) {
@@ -3504,32 +3505,40 @@ var create = function (ROOT, CFG, opts) {
   // A one-off's button is drawn where its box is, in the document, the page's own (data-rd-ui, never editable) and
   // left out of what a save sends by clean(), as the Copy button is; the box is hidden behind it. A toggle (Share), and
   // a one-off whose box the page does not find, stay in the row above the document, which is drawn only for them.
-  // The line's own word is what the button says, so it is hidden under it (a span clean() unwraps): the rest of the
-  // line is the button's text.
-  function hideWord(box, word) {
-    var t = box.nextSibling, m = t && t.nodeType === 3 && word &&
-            new RegExp('^(\\s*)(' + word.replace(/[^\w ]/g, '\\$&') + ')', 'i').exec(t.nodeValue);
+  // The line's own words are what the button says (a Move to's slug too), so they are hidden under it, in a span
+  // clean() unwraps: the rest of the line is the button's text. The text around the span is kept as it was.
+  function hideWord(box, words) {
+    var t = box.nextSibling, m = null;
+    if (!t || t.nodeType !== 3) return;
+    words.some(function (w) {
+      m = w && new RegExp('^(\\s*)(' + w.replace(/[^\w ]/g, '\\$&').replace(/ +/g, '\\s+') + ')', 'i').exec(t.nodeValue);
+      return m;
+    });
     if (!m) return;
-    var sp = document.createElement('span');
+    var sp = document.createElement('span'), rest = document.createTextNode(t.nodeValue.slice(m[0].length));
     sp.className = 'rd-actword';
     sp.textContent = m[2];
-    t.nodeValue = t.nodeValue.slice(m[0].length);
-    t.parentNode.insertBefore(sp, t);
+    t.nodeValue = m[1];
+    t.parentNode.insertBefore(rest, t.nextSibling);
+    t.parentNode.insertBefore(sp, rest);
   }
   function showWords() {
     Array.prototype.forEach.call(main.querySelectorAll('span.rd-actword'), function (sp) {
-      var t = sp.nextSibling;
-      if (t && t.nodeType === 3) { t.nodeValue = sp.textContent + t.nodeValue; sp.remove(); }
-      else sp.replaceWith(document.createTextNode(sp.textContent));
+      var before = sp.previousSibling, after = sp.nextSibling;
+      if (before && before.nodeType === 3) {
+        before.nodeValue += sp.textContent + (after && after.nodeType === 3 ? after.nodeValue : '');
+        if (after && after.nodeType === 3) after.remove();
+        sp.remove();
+      } else sp.replaceWith(document.createTextNode(sp.textContent));
     });
   }
-  function inlineButton(btn, box, word) {
+  function inlineButton(btn, box, words) {
     btn.classList.add('rd-inline');
     btn.setAttribute('contenteditable', 'false');
     btn.setAttribute('data-rd-ui', '');
     btn.addEventListener('mousedown', function (e) { e.preventDefault(); });   // the press must not move the caret
+    hideWord(box, words);
     box.parentNode.insertBefore(btn, box.nextSibling);
-    hideWord(box, word);
   }
   function drawActions(acts, h) {
     if (pressOpen) { actsOwed = { acts: acts, hash: h }; return; }
@@ -3550,7 +3559,7 @@ var create = function (ROOT, CFG, opts) {
       if (a.toggle) btn.setAttribute('aria-pressed', a.pressed ? 'true' : 'false');
       btn.disabled = !a.may;
       var box = !a.toggle && boxOfAct(a);
-      if (box) inlineButton(btn, box, a.word); else bar.appendChild(btn);
+      if (box) inlineButton(btn, box, [a.label.replace(/ @\S+$/, ''), a.word]); else bar.appendChild(btn);
       return { btn: btn, a: a };
     });
     all.forEach(function (x) { if (!x.btn.disabled) pressable(x.btn, x.a, all); });

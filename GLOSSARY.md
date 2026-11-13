@@ -103,7 +103,7 @@ _Avoid_: permission, privacy, ACL
 The action any member ticks on a sheaf of the assistant James to end his work on its project (SPEC 9.11). It is the one place the core names a deployment's assistant: the hub writes a diagnostics row and, with `[list] stop_dir`, a file the deployment's supervisor reads; stopping is the deployment's, a Layer concern the core only signals.
 
 **Move to**:
-The action that answers which client an unsure thread is for: one box per candidate, `- [ ] Move to <slug> (ref <thread>)`, the only word that takes an argument (SPEC 9.10). The boxes are the options of one answer: on the list each is a one-off button named by its slug, and once one is ticked the others are no actions and the hub refuses a second tick (#109); the deployment's mail module moves the thread.
+The action that answers which client an unsure thread is for: one box per candidate, `- [ ] Move to <slug> (ref <thread>)`, the one word with a slug and a thread (SPEC 9.10; Merge, Deploy and Install take the rest of the line). The boxes are the options of one answer: on the list each is a one-off button named by its slug, and once one is ticked the others are no actions and the hub refuses a second tick (#109); the deployment's mail module moves the thread.
 _Avoid_: reassign, transfer
 
 **One-off action**:

@@ -143,3 +143,13 @@ def test_a_test_that_is_not_a_page_test_keeps_its_traceback_for_the_end_of_the_r
 
     assert r.returncode == 1, out
     assert "the distinctive failure" not in out, out
+
+
+def test_a_failing_page_test_under_xdist_does_not_break_the_hook_of_a_worker(tmp_path):
+    # the hook runs in the controller (the reports of a worker travel to it), where the terminal reporter is
+    r, out, _ = run(tmp_path, "-p", "driver_stall", "-n", "1", suite_text=FAILS_THEN_STALLS.replace(
+        "    greenlet_main()", "    pass"))
+
+    assert "AttributeError" not in out, out
+    assert "INTERNALERROR" not in out, out
+    assert "the distinctive failure" in out, out

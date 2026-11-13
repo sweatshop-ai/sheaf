@@ -412,10 +412,7 @@ def test_a_snapshot_asked_while_the_listing_writes_waits_for_it_and_never_says_q
     monkeypatch.setattr(waiting, "write_json", write)
     sub = tab(browser.hub)
     assert documents(browser, token)[0]["tells"]
-    for _ in range(100):
-        if snap:
-            break
-        threading.Event().wait(0.05)
+    assert wait_until(lambda: snap)
     assert [w["state"] for w in snap[0]] == ["seen"] and named(sub.drain(), "tell-seen")
 
 
@@ -443,7 +440,7 @@ def test_a_row_with_no_agent_gets_the_name_it_has_now_and_keeps_it_when_its_toke
     file = Path(sheafmd.paths.state_dir(), "tells.json")
     rows = json.loads(file.read_text(encoding="utf-8"))
     for r in rows:
-        r.pop("agent")                                                      # the shape a Tell had before ticket 23
+        r.pop("agent")                                                      # the shape of a row written before `agent` was kept
     file.write_text(json.dumps(rows), encoding="utf-8")
     browser.hub.waiting_tells.waits(DOC, None)                              # any pass of the hub over the file
     assert [r["agent"] for r in json.loads(file.read_text(encoding="utf-8"))] == [queued["agent"]]

@@ -4,7 +4,8 @@ A Tell to an agent (ChatGPT, Claude.ai) cannot be pushed: it waits on the docume
 calls `documents`. A row is kept with the token's stable `id` (`tid`) beside its name, so a token revoked and
 made again under the same name never receives the old Tell. Every change of state (queued, seen, ended) is
 made inside `Waiting._change`, under one thread lock and the flock `tells.lock`; the page's events and the
-diagnostics rows of a change go out inside it too (the events once the file is written), so the page, `documents` and the log agree on which state won.
+diagnostics rows of a change go out inside it too (the events once the file is written), so the page, `documents` and
+the log agree on which state won.
 A row names the token and the thread, never the Tell's text: the message is built when it is listed.
 
     queue(address, cid, row, by, member, thread)   put a Tell in the file; raises Refused
@@ -89,19 +90,20 @@ class Waiting:
         with self._lock, file_locked("tells.lock"):
             rows = [r for r in read_json(_file(), []) if isinstance(r, dict)]
             filled = self._name_old_rows(rows)
-            self._held = held = []
+            outer, held = self._held, []
+            self._held = held
             try:
                 result, save = change(rows)
                 if save or filled:
                     write_json(_file(), rows)
             finally:
-                self._held = None
+                self._held = outer
             for address, name, data, member in held:
                 self._send(address, name, data, member)
             return result
 
     def _name_old_rows(self, rows: list) -> bool:
-        """A row written before the ticket 23 has no `agent`: it takes the signed name its token has now, the one
+        """A row written before `agent` was kept (SPEC 9.8) has none: it takes the signed name its token has now, the one
         its page was told if the name has not changed since, and keeps it when the token goes (SPEC 9.8)."""
         filled = False
         tokens = None
@@ -217,7 +219,7 @@ class Waiting:
                 raise Refused(409, HAS_IT.format(agent=name))
             t = {"id": str(uuid.uuid4()), "doc": address, "thread": cid, "token": row.name, "tid": row.id,
                  "by": by, "at": time.strftime(STAMP_FORMAT), "seen": None,
-                 "agent": name}              # the name the page was told: kept for the end of a Tell whose token is gone
+                 "agent": name}              # the name the page was told, the one every event and snapshot of the Tell uses (9.8)
             if thread is not None:
                 t["thread_by"], t["thread_at"], t["thread_quote"] = thread.by, thread.at, thread.quote
             if member is not None:

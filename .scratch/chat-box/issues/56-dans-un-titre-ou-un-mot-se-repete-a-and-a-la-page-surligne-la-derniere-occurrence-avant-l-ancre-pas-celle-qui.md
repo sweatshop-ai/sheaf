@@ -2,8 +2,7 @@
 
 **What to build:** Depuis le ticket 55 le bloc d'un commentaire sur des mots d'un titre est au bout du titre, quels que soient les mots choisis. La `quote` enregistre les mots, pas lesquels. Quand le titre répète le mot (`## A and A`, commentaire sur le premier `A`), la page (`src/sheafmd/page/page.js` `rangeFor`, `flat.lastIndexOf(q)`) surligne la dernière occurrence avant l'ancre, donc le second `A`; `edit.py` `_occurrence` (utilisé par `_insert_comment`) compte de la même façon. Classe : c (titre à mot répété, sélection d'une occurrence qui n'est pas la dernière).
 
-**Blocked by:**
-- External: PR 271 merged into main
+**Blocked by:** none
 
 **Claimed by:**
 

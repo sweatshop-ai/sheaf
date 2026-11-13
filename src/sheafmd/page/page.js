@@ -1523,17 +1523,28 @@ var create = function (ROOT, CFG, opts) {
   // port, one after the other, and the key cannot tell them apart. An entry of another root is not this page's:
   // not listed, not sent, and kept when this page writes the store. One with no `root` (an older entry) is
   // this page's, and takes its root when the store is next written.
-  // `strict`: a store that refuses the read throws, instead of passing for an empty one (commentDraftsSave).
+  // `strict`: a store that refuses the read throws, instead of passing for an empty one (the writers read so, commentDraftsHeld and taken).
+  // A value that is not JSON is set aside under `:unreadable` first, so the write that follows does not destroy it
+  // (a later one replaces an earlier one set aside: the store holds one at a time).
   function commentDraftsRaw(strict) {
     var v, raw;
     try { raw = localStorage.getItem(COMMENT_DRAFT_KEY); } catch (e) { if (strict) throw e; return []; }
-    try { v = JSON.parse(raw || '[]'); } catch (e) { return []; }
+    try { v = JSON.parse(raw || '[]'); } catch (e) {
+      if (strict) localStorage.setItem(COMMENT_DRAFT_KEY + ':unreadable', raw);
+      return [];
+    }
     return (Array.isArray(v) ? v : [v]).filter(function (d) {
       return d && typeof d.body === 'string' && (typeof d.quote === 'string' || typeof d.thread === 'string');
     });
   }
   function ofOtherRoot(d) { return !!CFG.root && d.root !== undefined && d.root !== CFG.root; }
-  function commentDraftsLoad() { return commentDraftsRaw().filter(function (d) { return !ofOtherRoot(d); }); }
+  function commentDraftsLoad(strict) { return commentDraftsRaw(strict).filter(function (d) { return !ofOtherRoot(d); }); }
+  // A writer reads the store strictly, so a read that fails now and then does not pass for an empty store and the
+  // write that follows does not drop what the page held. Says whether it could read: when not, nothing is written
+  // and storeOk is false, as when the write itself is refused.
+  function commentDraftsHeld() {
+    try { return commentDraftsLoad(true); } catch (e) { storeOk = false; unsentLine(); return null; }
+  }
   // Every write of the store goes through here, so the line of replies and edits not sent, which says what the
   // store holds, is drawn again here: a writer added later cannot leave it behind.
   function commentDraftsSave(ds) {
@@ -1549,7 +1560,9 @@ var create = function (ROOT, CFG, opts) {
   // The entries `gone` names go, then `add` (if any) is added, in one write, stamped `at` now unless it brings its
   // own. For a form that knows which entry is its own: the same quote in another paragraph is another comment.
   function draftsReplace(gone, add) {
-    var ds = commentDraftsLoad().filter(function (d) { return !gone(d); });
+    var ds = commentDraftsHeld();
+    if (!ds) return;
+    ds = ds.filter(function (d) { return !gone(d); });
     if (add) ds.push({ quote: add.quote, body: add.body, block: add.block, head: add.head, tail: add.tail, occ: add.occ, rid: add.rid,
                        at: add.at || new Date().toISOString(), min: add.min });
     commentDraftsSave(ds);
@@ -1576,7 +1589,9 @@ var create = function (ROOT, CFG, opts) {
   function threadKeep(c, kind, body, rid, line, out) {
     if (!c) return;
     var ends = body ? [rid, line] : [rid];
-    var ds = commentDraftsLoad().filter(function (d) { return !keptOf(d, c, kind) || (sendOf(d) && ends.indexOf(sendOf(d)) < 0); });
+    var ds = commentDraftsHeld();
+    if (!ds) return;
+    ds = ds.filter(function (d) { return !keptOf(d, c, kind) || (sendOf(d) && ends.indexOf(sendOf(d)) < 0); });
     if (body) ds.push({ thread: c.id, born: c.at, about: c.quote, kind: kind, body: body, rid: rid, of: rid ? undefined : line || undefined,
                         out: out, at: new Date().toISOString() });
     commentDraftsSave(ds);
@@ -1591,7 +1606,9 @@ var create = function (ROOT, CFG, opts) {
     // The draft offered on load is the text of a save the hub took: it is in the file, and the offer goes.
     var offeredTaken = !!offered && offered.rid === rid;
     if (offeredTaken) { decided(); dropOffer(); lateSends[rid] = true; }
-    var ds = commentDraftsLoad(), left = ds.filter(function (d) { return d.rid !== rid; });
+    var ds, left;
+    try { ds = commentDraftsLoad(true); } catch (e) { ds = []; }       // a store that cannot be read now is left as it is
+    left = ds.filter(function (d) { return d.rid !== rid; });
     if (left.length < ds.length) commentDraftsSave(left);
     // The notice of kept comments is drawn again from what is left (closePopover does it), unless it is being typed in.
     var shown = ds.some(function (d) { return d.rid === rid && typeof d.quote === 'string'; });

@@ -3390,14 +3390,14 @@ var create = function (ROOT, CFG, opts) {
       // The browser's own toggle is cancelled and replaced by ours: inside a
       // contenteditable it is not reliable, and the attribute must move with it.
       e.preventDefault();
-      // A box of the eleven words is pressed with its button at the top of the page (SPEC 10.11).
+      // A box of the eleven words is pressed with its button (SPEC 10.11).
       if (isActBox(t)) { say(PRESS_IT); return; }
       var b = blockOf(t);
       if (stale || dead || !b || !editable.has(b.i)) return;
       tickBox(t, b);
     });
   }
-  var PRESS_IT = 'Press it with its button at the top of the page.';
+  var PRESS_IT = 'Press it with its button.';
   // A box in a block whose words were edited and not saved may be an action typed there, which has no button yet:
   // the block is saved first, and the answer's actions say whether the box is one (SPEC 10.11). A save that brings a
   // reload (merged or remapped) brings none: the box is left for the page that follows. Ticks alone make no action.
@@ -3453,7 +3453,7 @@ var create = function (ROOT, CFG, opts) {
   }
 
   // ---- the action buttons (SPEC 10.11) ------------------------------------------
-  // The boxes of the eleven words are the list's buttons at the top of the page (9.10): a one-off red, locked once
+  // The boxes of the eleven words are the list's buttons, each where its line is (9.10): a one-off red, locked once
   // pressed, with who and when; Share a toggle, its owner's alone. A press reads Undo for 5 seconds, then posts the
   // list's tick (`/_/tick`) with the hash of the text on screen; the hub's `changed` reloads the page onto the
   // ticked file, and a reload asked meanwhile waits for the press's answer. While a press waits or is sent, the other
@@ -3538,12 +3538,25 @@ var create = function (ROOT, CFG, opts) {
   function showWords(kept) {
     Array.prototype.forEach.call(main.querySelectorAll('span.rd-actword'), function (sp) {
       if (kept.has(sp)) return;
-      var before = sp.previousSibling, after = sp.nextSibling;
+      var before = sp.previousSibling, after = sp.nextSibling, sel = getSelection(), at = sel.rangeCount ? sel : null;
+      var anchor = at && [at.anchorNode, at.anchorOffset], focus = at && [at.focusNode, at.focusOffset], into;
       if (before && before.nodeType === 3) {
+        var cut = before.nodeValue.length, mid = sp.textContent.length;
         before.nodeValue += sp.textContent + (after && after.nodeType === 3 ? after.nodeValue : '');
         if (after && after.nodeType === 3) after.remove();
         sp.remove();
-      } else sp.replaceWith(document.createTextNode(sp.textContent));
+        into = function (n, o) { return n === sp || (n && n.parentNode === sp) ? [before, cut + o] : n === after ? [before, cut + mid + o] : [n, o]; };
+      } else {
+        var text = document.createTextNode(sp.textContent);
+        sp.replaceWith(text);
+        into = function (n, o) { return n === sp || (n && n.parentNode === sp) ? [text, o] : [n, o]; };
+      }
+      // The caret was in a node that is gone: it goes to the same place in the text that took its place.
+      if (at && ((anchor[0] === sp || (anchor[0] && anchor[0].parentNode === sp) || anchor[0] === after) ||
+                 (focus[0] === sp || (focus[0] && focus[0].parentNode === sp) || focus[0] === after))) {
+        var A = into(anchor[0], anchor[1]), F = into(focus[0], focus[1]);
+        sel.setBaseAndExtent(A[0], A[1], F[0], F[1]);
+      }
     });
   }
   function inlineButton(btn, box, words, kept) {

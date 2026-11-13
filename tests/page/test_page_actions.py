@@ -164,7 +164,7 @@ def test_undo_in_the_five_seconds_sends_nothing(sheaf):
 def test_a_click_on_an_action_box_in_the_document_ticks_nothing_and_says_where_its_button_is(sheaf):
     p, f = sheaf.page, sheaf.site.file
     p.locator("main input[type=checkbox]").first.dispatch_event("click")      # hidden behind its button
-    until(lambda: "at the top of the page" in toast(p), what="the line that points to the button")
+    until(lambda: "with its button" in toast(p), what="the line that points to the button")
     p.wait_for_timeout(300)
     assert f.read_text(encoding="utf-8") == SHEAF
     assert p.locator("main input[type=checkbox]").first.is_checked() is False
@@ -389,7 +389,7 @@ def test_a_box_of_an_action_typed_and_not_yet_saved_is_not_ticked_by_a_click(she
     p.keyboard.press("Enter")
     p.keyboard.type("Run it")
     p.locator("main li:has-text('Run it') input[type=checkbox]").dispatch_event("click")
-    until(lambda: "at the top of the page" in toast(p), what="the line that points to the button")
+    until(lambda: "with its button" in toast(p), what="the line that points to the button")
     until(lambda: "- [ ] Run it" in f.read_text(encoding="utf-8"), what="the saved action")
     until(lambda: bar(p).all_inner_texts() == ["Approve", "Done", "Share", "Run it"], what="its button")
     assert "[x]" not in f.read_text(encoding="utf-8")

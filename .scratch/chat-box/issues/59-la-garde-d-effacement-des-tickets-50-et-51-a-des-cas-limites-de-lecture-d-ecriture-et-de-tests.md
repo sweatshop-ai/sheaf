@@ -10,8 +10,7 @@
 - F7 (d) : les deux tests du ticket 50 gardent `wait_for_timeout(500)` et `wait_for_timeout(300)` : sous charge le stockage peut déjà être relisible et le chemin tenu n'est pas exercé (faux vert) ; remplacer par un signal positif, comme le troisième test (`until(... stored_drafts ...)`).
 Classe : c, d.
 
-**Blocked by:**
-- External: PR 281 merged into main
+**Blocked by:** none
 
 **Claimed by:**
 

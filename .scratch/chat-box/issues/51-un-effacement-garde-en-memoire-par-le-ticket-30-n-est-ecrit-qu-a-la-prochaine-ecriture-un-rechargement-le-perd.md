@@ -15,4 +15,4 @@ Décision : (a). `commentDraftsLoad` écrit le stockage sans les entrées nommé
 
 **Claimed by:** Naya 2026-11-13 23:53
 
-**Status:** in-review, PR 281
+**Status:** done, PR 281 merged as 76284b4

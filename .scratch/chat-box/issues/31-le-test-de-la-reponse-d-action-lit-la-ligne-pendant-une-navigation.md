@@ -1,0 +1,16 @@
+# 31: Le test « une réponse d'action met fin à l'attente » lit la ligne d'attente pendant une navigation de la page, de temps en temps en CI
+
+**What to build:** `tests/page/test_page_waiting_tell.py::test_an_action_reply_ends_the_wait` a échoué sur main (run 43212771285, tête 597d52a = PR #247, job 131164313675, tranche 2/3, py3.13, 2026-11-12 vers 12:01 UTC : `1 failed, 326 passed`). Le test s'arrête ligne 69, `until(lambda: line(tab) == [], what="the line to go on the action reply")`, avec `playwright._impl._errors.Error: Locator.all_inner_texts: Execution context was destroyed, most likely because of a navigation`, levée dans l'aide `line()` (ligne 28 : `tab.page.locator("#rd-popover .rd-waits").all_inner_texts()`).
+
+**Blocked by:** 04
+
+**Claimed by:** Berit 2026-11-12 17:55
+
+**Status:** done (PR 255, merged 41678e3)
+
+**Ce qui ne va pas (une lecture, pas une preuve) :** la page navigue (rechargement) pendant que le test sonde `line()` ; l'appel `all_inner_texts` n'a aucune garde contre une navigation, et l'erreur de Playwright sort de `until` au lieu d'être sondée à nouveau. C'est la famille des tickets 17, 18 et 24. Le correctif de ces tickets n'a pas touché ce test. La relance du run n'a pas été faite ; le même test est vert sur le run de la PR #244 (43219440986, tête 35cf561), un seul passage, ce qui n'en dit pas plus. Les PR #246 et #247 (CI en 4 workers xdist, garde d'import) ne touchent ni `src/`, ni `page.js`, ni ce test ; la mise en 4 workers élargit peut-être les fenêtres de temps, ce qui n'est pas montré. À établir d'abord : ce qui fait naviguer la page à ce moment du test (un rechargement voulu par la page à la réponse de type `action`, ou un rechargement de la fixture).
+
+- [x] La cause est écrite avec la preuve (la sortie de la CI qui l'a relevée, plus ce qui fait naviguer la page) — cause cernée : une réponse d'action peut être suivie d'un rechargement (`heard()` page.js ~3394 ou le sondage de hash de `checkText` ~3613, tous deux par `reloadWhenFree`) pendant que le test lit la ligne ; la preuve de la CI est le run 43212771285 (`Execution context was destroyed` dans `line()`, ligne 69). Lequel des deux chemins a tiré dans ce run n'est pas établi (0 navigation en 25 passages, Elif ; pas de chasse en CI, décision de Halima). Le test tient pour l'un comme pour l'autre : la lecture de la ligne survit à un rechargement et le test affirme aussi l'état du hub
+- [x] Le correctif traite la cause (attendre la fin de la navigation, ou lire la ligne dans un seul `evaluate` qui reprend après une navigation), sans délai fixe ni relance aveugle ; si la page navigue sans raison, la cause est cherchée dans le code — PR 255 (sheaf, `chat-box/31`, tête 2e171d4) : `line()` attend le nouveau chargement (`wait_for_load_state`) et relit, trois fois au plus, toute autre erreur est relevée ; le test demande aussi au hub (`waiting_tells.waits(DOC) == []`) car une lecture vide juste après un rechargement ne prouve rien (revue Opus, P2). Rien dans `src/`
+- [x] La même lecture sûre sert aux autres tests du fichier qui sondent `line()` (tous lisent par `line()` ; la revue a passé les 19 appels en revue, aucun n'est affaibli)
+- [x] CI verte sur deux passages de suite — run 43271557101, tête 2e171d4, 3/3 tranches vertes aux tentatives 1 et 2 (même tête, deux passages)

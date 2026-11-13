@@ -2390,23 +2390,26 @@ var create = function (ROOT, CFG, opts) {
     return e.unreachable && e.message === UNREACHABLE ? what + ' did not go out: the hub is unreachable.' : e.message;
   }
   // One Cancel ends the Tell of each agent, each with an event of its own, and a toast replaces the one before it: the
-  // events of a moment are said once, naming every agent that had already seen its Tell.
-  var cancelNote = null;
-  function cancelSaid(to, seen) {
-    if (!cancelNote) {
-      cancelNote = { seen: [] };
+  // events of a moment are said once per thread, naming every agent of that thread that had already seen its Tell.
+  var cancelNote = {};
+  function cancelSaid(id, to, seen) {
+    if (!cancelNote[id]) {
+      var n = cancelNote[id] = { seen: [] };
       setTimeout(function () {
-        var n = cancelNote;
-        cancelNote = null;
+        delete cancelNote[id];
         say('Cancelled.' + (n.seen.length ? ' ' + n.seen.join(' and ') + ' had already seen it; look at the document before you Tell again.' : ''));
       }, 60);
     }
-    if (seen) cancelNote.seen.push(to);
+    if (seen) cancelNote[id].seen.push(to);
   }
   async function cancel(id) {
     var off = function () {
-      var mine = cancelled[id] = waits[id] || {};     // the events that follow still find what to say of each agent
-      setTimeout(function () { if (cancelled[id] === mine) delete cancelled[id]; }, 5000);   // not a later Cancel's
+      // The events that follow still find what to say of each agent. A Cancel that finds no place left (an earlier
+      // Cancel of this thread took them off, its answer still to come) leaves the earlier one's, and its timer.
+      if (waits[id]) {
+        var mine = cancelled[id] = waits[id];
+        setTimeout(function () { if (cancelled[id] === mine) delete cancelled[id]; }, 5000);   // not a later Cancel's
+      }
       delete telling[id]; delete waits[id]; touched(id);
     };
     var waited = waits[id];
@@ -4067,7 +4070,7 @@ var create = function (ROOT, CFG, opts) {
         delete telling[d.id];
         if (d.agent !== undefined) { waitOff(d.id, d.agent); endedAt[d.id + '\n' + d.agent] = ++seenSeq; }   // a Tell job's end names no agent: it ends no agent's Tell
         touched(d.id);
-        if (waited) cancelSaid(waited.to, d.seen);
+        if (waited) cancelSaid(d.id, waited.to, d.seen);
       });
       // A Tell that waits for an agent (SPEC 9.8, 10.5): queued, listed to the agent, ended by its action reply.
       live.addEventListener('tell-queued', function (ev) {

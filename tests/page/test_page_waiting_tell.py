@@ -276,3 +276,84 @@ def test_a_snapshot_that_is_not_the_answer_to_a_send_does_not_keep_a_seen_line(t
     update_file(site.file, lambda t: rdc.reply(t, "c1", "A word from outside.", "Ada", "2026-10-14T11:00"))
     tab.page.wait_for_selector("#rd-popover :text('A word from outside.')")
     until(lambda: line(tab) == [f"Waiting for {name}: it sees this the next time you talk to it."], what="the queued line")
+
+
+SAW = "had already seen it; look at the document before you Tell again."
+
+
+def hold_cancels(site):
+    """Hold the hub's `tell-cancelled` events, to let the page's Cancel answers come first. Returns (held, release)."""
+    emit = site.hub.waiting_tells._emit
+    held, state = [], {"on": True}
+
+    def watch(*a, **k):
+        if state["on"] and a[1] == "tell-cancelled":
+            held.append((a, k))
+        else:
+            emit(*a, **k)
+
+    def release():
+        state["on"] = False
+        site.hub.waiting_tells._emit = emit
+        for a, k in held:
+            emit(*a, **k)
+    site.hub.waiting_tells._emit = watch
+    return held, release
+
+
+def test_two_cancels_of_two_threads_in_a_row_say_one_toast_each(tab, site):
+    # Ticket 42 (Codex round 4 of PR 257, P2): the summary was one object for the whole page, so the events of two
+    # separate Cancels that came within 60 ms were one toast, "A and A had already seen it".
+    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "pears"), "pears", "And?",
+                                                     "Ada", "2026-10-14T10:01")[0])
+    token = ask_agent(tab, site)
+    name = f"ChatGPT ({site.hub.person})"
+    for k in (0, 1):                                     # a Tell on each thread, both seen
+        tab.page.keyboard.press("Escape")                # the box that is open keeps its place and gives way to the next
+        tab.page.locator(".rd-badge").nth(k).click()
+        tab.page.wait_for_selector("#rd-popover textarea")
+        tab.page.fill("#rd-popover textarea", "Please do.")
+        tab.page.click("#rd-popover .rd-form button.rd-tell")
+        until(lambda: bool(line(tab)), what=f"the waiting line of thread {k}")
+    call(browser_on(site.hub), "documents", token=token)
+    until(lambda: "has seen it" in " ".join(line(tab)), what="the seen line")
+    held, release = hold_cancels(site)
+    tab.page.evaluate("""() => { window.__toasts = [];
+        const t = document.querySelector('#rd-toast');
+        new MutationObserver(() => { if (t.textContent) window.__toasts.push(t.textContent); })
+            .observe(t, {childList: true, characterData: true, subtree: true}); }""")
+    for k in (1, 0):                                     # the open thread first, then the other
+        if k == 0:
+            tab.page.keyboard.press("Escape")
+            tab.page.locator(".rd-badge").nth(0).click()
+            tab.page.wait_for_selector("#rd-popover button[data-a=cancel-tell]")
+        tab.page.click("#rd-popover button[data-a=cancel-tell]")
+        until(lambda: len(held) == (2 if k == 0 else 1), what=f"the Cancel of thread {k} to reach the hub")
+    release()
+    until(lambda: len([t for t in tab.page.evaluate("window.__toasts") if SAW in t]) == 2, what="a toast for each Cancel")
+    assert [t for t in tab.page.evaluate("window.__toasts") if t.startswith("Cancelled.")] == \
+        [f"Cancelled. {name} {SAW}"] * 2
+
+
+def test_a_second_cancel_while_the_first_is_out_keeps_what_the_first_saw(tab, site):
+    # Ticket 48 (Opus round 5 of PR 257, note 1): the second Cancel's answer found no place left (the first had
+    # taken it off) and put {} over the first's, so the first's event no longer said "had already seen it".
+    token = ask_agent(tab, site)
+    name = f"ChatGPT ({site.hub.person})"
+    tab.page.fill("#rd-popover textarea", "Please do.")
+    tab.page.click("#rd-popover .rd-form button.rd-tell")
+    until(lambda: bool(line(tab)), what="the waiting line")
+    call(browser_on(site.hub), "documents", token=token)
+    until(lambda: "has seen it" in " ".join(line(tab)), what="the seen line")
+    held, release = hold_cancels(site)
+    routes = []
+    tab.page.route("**/_/cancel", lambda route: routes.append(route))
+    button = tab.page.locator("#rd-popover button[data-a=cancel-tell]")
+    button.click()
+    button.click()                                       # the first request is still out
+    until(lambda: len(routes) == 2, what="both Cancels out")
+    for r in routes:
+        r.continue_()
+    until(lambda: line(tab) == [] and len(held) >= 1, what="the answers")
+    release()
+    toasted(tab.page, f"{name} {SAW}")

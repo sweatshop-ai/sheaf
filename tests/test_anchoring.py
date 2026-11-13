@@ -200,7 +200,7 @@ def test_a_heading_quote_that_is_stale_is_still_refused():
 
 # ── heading edge cases (ticket 58) ──
 
-@pytest.mark.parametrize("space", [" ", "　"])
+@pytest.mark.parametrize("space", ["\u00a0", "\u3000"])
 def test_a_heading_with_a_no_break_or_full_width_space_after_the_hashes_takes_a_comment(space):
     # blocks.ATX_RE reads any \s after the hashes as a heading, pandoc reads a paragraph: the
     # heading anchor is None there and add_comment used to add it to the offset (TypeError).
@@ -228,3 +228,11 @@ def test_an_opener_in_a_code_span_of_a_heading_is_not_an_opener():
     md = "# Use `<!--` here\n"
     out, _ = comment_on(md, "here")
     assert out.startswith("# Use `<!--` here<!-- sheaf-comment")
+
+
+@pytest.mark.parametrize("md, quote", [("# <!-- marker\n", "marker"), ("## <!-- a b\n", "a")])
+def test_a_heading_whose_words_all_follow_an_unclosed_opener_refuses_the_comment(md, quote):
+    # A block after the selection would sit inside the opener and close it.
+    s, e = sel(md, quote)
+    with pytest.raises(rdc.AnchorError):
+        rdc.add_comment(md, 0, s, e, quote, "why", "Ada", "2026-11-13T10:00")

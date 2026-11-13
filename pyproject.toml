@@ -27,7 +27,7 @@ dev = [
     "playwright==1.58.0",
     "pytest>=9",                      # faulthandler_exit_on_timeout, below
     "pytest-timeout>=2.3",
-    "pytest-xdist>=3.6",
+    "pytest-xdist>=3.6,<4",     # tests/conftest.py sets two of its internals for IN_ORDER files (#39): read the fix again on a major version
 ]
 
 [tool.hatch.version]

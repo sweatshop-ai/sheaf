@@ -3369,15 +3369,18 @@ var create = function (ROOT, CFG, opts) {
   // sends; the server sees a block that differs only in its ticks and flips the
   // `[ ]` / `[x]` of that one item in the .md (sheafmd.edit._toggle_boxes).
   // A click on the item's text is for the caret and for selecting, so the
-  // <label> pandoc wraps around the item must not tick the box.
+  // <label> pandoc wraps around the item ticks the box only on the label's words (onLabelWords).
   if (canEdit) {
     main.addEventListener('click', function (e) {
       var t = e.target;
       var isBox = t && t.tagName === 'INPUT' && t.type === 'checkbox';
       if (!isBox) {
         var lab = t && t.closest && t.closest('label');
-        if (lab && main.contains(lab) && lab.querySelector('input[type="checkbox"]')) e.preventDefault();
-        return;
+        var own = lab && main.contains(lab) && lab.querySelector('input[type="checkbox"]');
+        if (!own) return;
+        e.preventDefault();
+        if (!onLabelWords(lab, e)) return;
+        t = own;
       }
       // The browser's own toggle is cancelled and replaced by ours: inside a
       // contenteditable it is not reliable, and the attribute must move with it.
@@ -3390,6 +3393,34 @@ var create = function (ROOT, CFG, opts) {
     });
   }
   var PRESS_IT = 'Press it with its button at the top of the page.';
+  // A task line's label: the words before the first `:` or ` — `, else the first word. A click on them ticks the box
+  // like a <label>; the rest of the line is for the caret, a selection and its links. Told by where the click
+  // landed against the label's words, so the document gets no element of its own. A touch gets 44 px of height.
+  function labelEnd(text) {
+    var m = /:|\s—\s/.exec(text);
+    if (m) return m.index;
+    var w = /^\s*\S+/.exec(text);
+    return w ? w[0].length : 0;
+  }
+  function onLabelWords(lab, e) {
+    if (e.target.closest && e.target.closest('a')) return false;
+    var sel = window.getSelection();
+    if (sel && !sel.isCollapsed && lab.contains(sel.anchorNode)) return false;
+    var walker = document.createTreeWalker(lab, NodeFilter.SHOW_TEXT), node, left = labelEnd(lab.textContent), first = null, last = null, end = 0;
+    while (left > 0 && (node = walker.nextNode())) {
+      if (!first) first = node;
+      last = node; end = Math.min(left, node.data.length); left -= end;
+    }
+    if (!first) return false;
+    var r = document.createRange();
+    r.setStart(first, 0); r.setEnd(last, end);
+    var rects = r.getClientRects(), min = 44;
+    for (var i = 0; i < rects.length; i++) {
+      var q = rects[i], pad = Math.max(0, (min - q.height) / 2);
+      if (e.clientX >= q.left && e.clientX <= q.right && e.clientY >= q.top - pad && e.clientY <= q.bottom + pad) return true;
+    }
+    return false;
+  }
   // A box in a block whose words were edited and not saved may be an action typed there, which has no button yet:
   // the block is saved first, and the answer's actions say whether the box is one (SPEC 10.11). A save that brings a
   // reload (merged or remapped) brings none: the box is left for the page that follows. Ticks alone make no action.

@@ -4,7 +4,9 @@
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Claimed by:** Kian 2026-11-14 00:32
+
+**Status:** in-progress
 
 **Établi (preuves) :** `codex-round4.md` de pr-23-reviews, constat P2. Non reproduit par un test. À noter : ce que le ticket 23 laissait de préexistant (un instantané tardif qui ressuscite un Tell terminé ; la réponse HTTP d'une annulation qui double les événements et supprime l'avertissement) est corrigé dans la PR #257 même (`endedAt`, `cancelled[id]`).
 

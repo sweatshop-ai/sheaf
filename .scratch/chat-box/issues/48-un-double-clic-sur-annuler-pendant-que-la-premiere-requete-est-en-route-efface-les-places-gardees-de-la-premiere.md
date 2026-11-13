@@ -4,7 +4,9 @@
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Claimed by:** Kian 2026-11-14 00:32
+
+**Status:** in-progress
 
 **Établi (preuves) :** `opus-round5-fix.md` de pr-23-reviews, note 1 : lecture du code, non reproduit par un test.
 

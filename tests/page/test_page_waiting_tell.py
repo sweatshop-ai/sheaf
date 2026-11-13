@@ -3,6 +3,7 @@ then "<agent> has seen it…", with Cancel, across a reload and no orange dot.""
 import time
 
 import pytest
+from playwright.sync_api import Error as PlaywrightError
 
 from helpers import browser_on, call
 from pagehelp import DOC, toast, toasted, until
@@ -27,6 +28,15 @@ def ask_agent(tab, site):
 
 
 def line(tab):
+    """The waiting lines of the open thread. The page reloads after every comment write (an agent's reply too), and
+    a read that meets the reload dies with 'Execution context was destroyed': it waits for the new load and reads again."""
+    for _ in range(3):
+        try:
+            return tab.page.locator("#rd-popover .rd-waits").all_inner_texts()
+        except PlaywrightError as e:
+            if "Execution context was destroyed" not in str(e):
+                raise
+            tab.page.wait_for_load_state("domcontentloaded")
     return tab.page.locator("#rd-popover .rd-waits").all_inner_texts()
 
 
@@ -69,6 +79,7 @@ def test_an_action_reply_ends_the_wait(tab, site):
     until(lambda: bool(line(tab)), what="the waiting line")
     call(browser_on(site.hub), "reply", token=token, doc=DOC, id="c1", text="Done.", role="action")
     until(lambda: line(tab) == [], what="the line to go on the action reply")
+    assert site.hub.waiting_tells.waits(DOC) == []       # a page that reloads has no line yet: the hub says whether the wait ended
 
 
 def test_a_send_answered_after_the_agent_saw_it_does_not_take_the_seen_line_back(tab, site):

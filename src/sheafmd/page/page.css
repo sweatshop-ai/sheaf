@@ -250,7 +250,7 @@ blockquote.rd-copy{position:relative;padding-right:5.5em}
    on a desktop, and a Move to's slug without a hyphen breaks anywhere rather than scroll the page sideways. */
 @media (max-width:600px),(pointer:coarse){#rd-actions .rd-act{min-height:44px;min-width:44px;padding:2px 14px}}
 /* A task line's label is a 44 px high target on a touch screen (SPEC 10.11): the words tick, the rest of the box is ordinary text (onLabelWords). */
-@media (pointer:coarse){main label:has(> input[type=checkbox]){display:block;min-height:44px;box-sizing:border-box}}
+@media (pointer:coarse){main label:has(> input[type=checkbox]){display:block;min-height:44px;padding:10px 0;box-sizing:border-box}}
 #rd-actions .rd-act{overflow-wrap:anywhere}
 #rd-actions .rd-act.pending,#rd-actions .rd-act.pressed,#rd-actions .rd-act[aria-pressed=true]{background:var(--rd-c);
  color:var(--bg,#fff)}

@@ -880,6 +880,8 @@ def test_a_reply_the_hub_took_while_the_store_refused_reads_is_not_offered_as_no
     p.fill(FIELD, "Because.")
     p.keyboard.press("Enter")
     until(lambda: "Because." in site.file.read_text(encoding="utf-8"), what="the reply in the file")
+    until(lambda: p.locator(THREAD).count() == 2, what="the reply in the thread")
+    p.wait_for_timeout(500)      # the page's clear of the kept reply runs after the answer is taken in: while the store still refuses
     p.unroute("**/_/comment")
     store_unreadable(p, False)
     hold_time_passes(p)

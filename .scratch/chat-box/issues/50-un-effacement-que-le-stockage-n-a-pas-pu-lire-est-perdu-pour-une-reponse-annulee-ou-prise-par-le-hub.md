@@ -8,9 +8,9 @@
 
 **Par où commencer :** un test de page : une réponse envoyée dont l'entrée gardée porte `out`, le stockage qui refuse la lecture au moment où le hub l'accepte (`store_unreadable` dans `tests/page/test_page_chat_box.py`), la lecture rétablie, `HELD` écoulé : l'entrée ne doit pas apparaître dans la ligne « not sent ». Il échoue tant que l'effacement est oublié. Réutiliser `pendingClears` du ticket 30 plutôt qu'un second mécanisme.
 
-- [ ] Un test de page échoue tant qu'une réponse acceptée par le hub, effacée pendant une lecture refusée, revient comme « not sent »
-- [ ] Même garde pour `taken(rid)` : un test avec un `changed` reçu pendant une lecture refusée
+- [x] Un test de page échoue tant qu'une réponse acceptée par le hub, effacée pendant une lecture refusée, revient comme « not sent » — `test_a_reply_the_hub_took_while_the_store_refused_reads_is_not_offered_as_not_sent_when_the_store_reads_again`
+- [x] Même garde pour `taken(rid)` : un test avec un `changed` reçu pendant une lecture refusée — `test_a_reply_the_hub_took_while_its_answer_was_lost_and_the_store_refused_reads_is_not_offered_as_not_sent`
 
 **Claimed by:** Naya 2026-11-13 23:53
 
-**Status:** in-progress
+**Status:** in-review, PR 281

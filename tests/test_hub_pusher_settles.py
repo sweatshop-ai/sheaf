@@ -1,5 +1,5 @@
-"""The `hub` fixture settles its hub's pusher when the test ends (#32): a push left due is the test's own, never a
-row in the state of the test that runs next."""
+"""Every hub of a test settles its pusher when the test ends, the `hub` fixture's too (#32, #35): a push left due is
+the test's own, never a row in the state of the test that runs next."""
 import time
 
 from test_hub_commits import box, edit, remote, rows, sheaves     # noqa: F401  (the fixtures and helpers of the hub's commit tests)

@@ -40,7 +40,7 @@ import re
 from dataclasses import dataclass, field
 
 from . import copyblock
-from .blocks import split_md_blocks
+from .blocks import SETEXT_RE, split_md_blocks
 
 CODE_KINDS = {"fence", "indented_code", "frontmatter"}
 ONE_LINE_KINDS = {"heading", "table"}
@@ -523,6 +523,27 @@ def anchor_point(block: str, start: int, end: int, quote: str) -> int:
     return inner.end
 
 
+_ATX_TEXT = re.compile(r"^( {0,3}#{1,6}[ \t]+)(.*?)(?:[ \t]+#+)?[ \t]*$")
+
+
+def heading_anchor(block: str) -> int:
+    """Offset in a heading block where a comment on any of its words goes: the end of the heading's
+    text, so the words stay whole for every reader of the file (a block inside "Done<!-- … --> when"
+    makes the title another one). Before an ATX heading's closing hashes and before a setext
+    heading's underline, which a block after them would turn into text."""
+    lines = block.rstrip("\n").split("\n")
+    if len(lines) > 1 and SETEXT_RE.match(lines[-1]):          # setext: the text is the lines above the underline
+        return len("\n".join(lines[:-1]).rstrip())
+    m = _ATX_TEXT.match(lines[0])
+    return m.end(2) if m and m.group(2) else len(lines[0].rstrip())
+
+
+def comment_point(kind: str, block: str, start: int, end: int, quote: str) -> int:
+    """Offset in `block` (of the given kind) where a comment on the selection [start, end) goes."""
+    point = anchor_point(block, start, end, quote)
+    return heading_anchor(block) if kind == "heading" else point
+
+
 def _block_offsets(blocks):
     pos, out = 0, []
     for b in blocks:
@@ -546,7 +567,7 @@ def add_comment(md: str, block: int, start: int, end: int, quote: str, body: str
         raise AnchorError("no such block")
     b = blocks[block]
     _check_kind(b)
-    at_off = anchor_point(b.content, start, end, quote)
+    at_off = comment_point(b.kind, b.content, start, end, quote)
     c = Comment(id=next_id(parse(md)), by=by, at=at, status="open",
                 quote=" ".join(quote.split()), body=body.strip("\n"))
     raw = format(c, one_line=b.kind in ONE_LINE_KINDS)

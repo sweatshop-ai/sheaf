@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from playwright.sync_api import Error as PlaywrightError
-
 from pagehelp import PageStalled, reloaded, toast, until
 
 pytestmark = pytest.mark.page
+
+PlaywrightError = pytest.importorskip("playwright.sync_api").Error
 
 
 def test_a_wait_gets_the_request_a_page_makes_after_the_test_last_called_playwright(tab):
@@ -102,6 +102,7 @@ class ReloadingPage:
 ])
 def test_reading_the_toast_during_a_reload_says_not_yet_instead_of_raising(message):
     assert toast(ReloadingPage(message)) == ""
+    # a poll inside `until` gets "not yet" too, the way the refusal waits of test_page_actions.py call it
     assert until(lambda: "reload the page" not in toast(ReloadingPage(message)), timeout=1, what="no toast yet")
 
 

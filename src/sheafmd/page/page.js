@@ -1893,28 +1893,65 @@ var create = function (ROOT, CFG, opts) {
 
   // Comments and replies are written in markdown, an agent's especially. A small safe
   // subset is rendered: everything is escaped first, so no tag in a comment ever
-  // becomes HTML, then bold, italic, inline code, http(s) links, lists, paragraphs.
+  // becomes HTML, then bold, italic, inline code, http(s) links (written as [text](url) or bare),
+  // lists (a line just before one stays a paragraph), ``` code blocks, # headings, > quotes, paragraphs.
   function mdLite(src) {
     var inline = function (t) {
-      var codes = [];
-      t = t.replace(/`([^`]+)`/g, function (m, c) { codes.push(c); return '\u0000' + (codes.length - 1) + '\u0000'; });
-      t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
-           .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      var kept = [];
+      var keep = function (html) { kept.push(html); return '\u0000' + (kept.length - 1) + '\u0000'; };
+      var link = function (url, label) { return keep('<a href="' + url + '" target="_blank" rel="noopener">' + label + '</a>'); };
+      t = t.replace(/`([^`]+)`/g, function (m, c) { return keep('<code>' + c + '</code>'); });
+      t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, function (m, label, url) { return link(url, label); });
+      // A bare link ends before the punctuation that closes its sentence. `&` is escaped by now: `&amp;` is
+      // part of a link, `&quot;` or `&gt;` ends it.
+      t = t.replace(/https?:\/\/(?:[^\s&]|&amp;)+/g, function (url) {
+        var tail = /[.,;:!?)]+$/.exec(url), cut = tail ? url.slice(0, -tail[0].length) : url;
+        return link(cut, cut) + (tail ? tail[0] : '');
+      });
+      t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
            .replace(/(^|[^*\w])\*([^*\s][^*]*)\*(?!\w)/g, '$1<em>$2</em>')
            .replace(/(^|[^\w])_([^_\s][^_]*)_(?!\w)/g, '$1<em>$2</em>');
-      return t.replace(/\u0000(\d+)\u0000/g, function (m, i) { return '<code>' + codes[+i] + '</code>'; });
+      return t.replace(/\u0000(\d+)\u0000/g, function (m, i) { return kept[+i]; });
     };
-    return esc(src).split(/\n\s*\n/).map(function (block) {
-      var lines = block.split('\n').filter(function (l) { return l.trim(); });
-      if (!lines.length) return '';
-      if (lines.every(function (l) { return /^\s*[-*+] /.test(l); })) {
-        return '<ul>' + lines.map(function (l) { return '<li>' + inline(l.replace(/^\s*[-*+] /, '')) + '</li>'; }).join('') + '</ul>';
+    var out = [], para = [], quote = [], list = null, lines = esc(src).split('\n'), m;
+    var flush = function () {
+      if (para.length) out.push('<p>' + para.join('<br>') + '</p>');
+      if (quote.length) out.push('<div class="rd-bq">' + quote.join('<br>') + '</div>');
+      if (list) out.push('<' + list.tag + list.start + '>' + list.items.map(function (li) { return '<li>' + li + '</li>'; }).join('') +
+                         '</' + list.tag + '>');
+      para = []; quote = []; list = null;
+    };
+    for (var i = 0; i < lines.length; i++) {
+      var l = lines[i];
+      if (/^\s*```/.test(l)) {                     // a code block runs to its closing fence, or to the end
+        flush();
+        var code = [];
+        while (++i < lines.length && !/^\s*```/.test(lines[i])) code.push(lines[i]);
+        out.push('<pre><code>' + code.join('\n') + '</code></pre>');
+      } else if (!l.trim()) {
+        flush();
+      } else if ((m = /^\s*(?:([-*+])|(\d+)[.)]) +(.*)$/.exec(l))) {
+        var tag = m[1] ? 'ul' : 'ol';
+        if (!list || list.tag !== tag) {
+          flush();
+          list = { tag: tag, start: tag === 'ol' && +m[2] !== 1 ? ' start="' + (+m[2]) + '"' : '', items: [] };
+        }
+        list.items.push(inline(m[3]));
+      } else if (list && /^\s+\S/.test(l)) {        // an indented line goes on with the item above it
+        list.items[list.items.length - 1] += '<br>' + inline(l.trim());
+      } else if ((m = /^#{1,6} +(.*)$/.exec(l))) {
+        flush();
+        out.push('<p class="rd-h"><strong>' + inline(m[1]) + '</strong></p>');
+      } else if ((m = /^&gt; ?(.*)$/.exec(l))) {
+        if (para.length || list) flush();
+        quote.push(inline(m[1]));
+      } else {
+        if (quote.length || list) flush();
+        para.push(inline(l));
       }
-      if (lines.every(function (l) { return /^\s*\d+[.)] /.test(l); })) {
-        return '<ol>' + lines.map(function (l) { return '<li>' + inline(l.replace(/^\s*\d+[.)] /, '')) + '</li>'; }).join('') + '</ol>';
-      }
-      return '<p>' + lines.map(inline).join('<br>') + '</p>';
-    }).join('');
+    }
+    flush();
+    return out.join('');
   }
   // A reply's kind is its role, derived by the hub (SPEC 5.3): "answer" is a reply that
   // changed nothing (blue; Ask, which wrote them, was retired), "action" is what a session did after a Tell (orange). Anything

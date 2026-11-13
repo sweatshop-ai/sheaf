@@ -2,8 +2,7 @@
 
 **What to build:** Dans `src/sheafmd/hub/transcribe.py`, `finally` fait `timer.cancel()` puis `conn.close()`. `cancel()` n'attend pas un rappel déjà commencé : si le délai tombe au moment où une réponse complète vient d'être lue, `_call` peut rendre `(status, data)` pendant que `cut()` est encore dans `shutdown`. Le fil ne garde ni la clé, ni les en-têtes, ni le corps et ne peut plus rien lire, donc ce n'est pas une fuite ; mais « rien ne tourne » du docstring est trop fort. Classe : c (tour 3 de Codex, GO).
 
-**Blocked by:**
-- External: the PR of chat-box/06b (ticket 06b) merged into main
+**Blocked by:** none (the PR of chat-box/06b merged into main as 7bc9a3e)
 
 **Établi (preuves) :** `codex-round3.md` de pr-06b-reviews. Non reproduit.
 
@@ -11,3 +10,7 @@
 
 - [ ] Le docstring de `_call` dit ce qui est vrai
 - [ ] Si `join` est ajouté : un test où le rappel est lent montre que `_call` ne rend la main qu'après lui
+
+**Claimed by:** Faisal 2026-11-13 10:34
+
+**Status:** claimed — one PR with ticket 36, branch chat-box/36-37 off origin/main

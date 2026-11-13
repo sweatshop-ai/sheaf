@@ -39,7 +39,8 @@ def test_the_tell_message_names_the_page_the_person_and_both_ways_to_answer():
         "When you are done, answer in the thread so the page shows it, with the role action:\n"
         f'- with the sheaf MCP tool: reply(doc="work/plan.md", id="{c.id}", '
         'text="<what you did>", role="action")\n'
-        f'- or in a shell: sheaf reply /w/plan.md {c.id} "<what you did>" --role action')
+        f'- or in a shell: sheaf reply /w/plan.md {c.id} "<what you did>" --role action\n\n'
+        f"{prompts.READABLE}")
 
 
 def test_the_link_rule_is_left_out_of_the_tell_message_with_its_blank_line():

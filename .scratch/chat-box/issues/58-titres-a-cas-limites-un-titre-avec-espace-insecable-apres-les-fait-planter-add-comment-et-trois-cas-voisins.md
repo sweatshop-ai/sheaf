@@ -9,9 +9,10 @@ Classe : c.
 
 **Blocked by:** none
 
-**Claimed by:**
 
-**Status:** ready-for-agent
+**Claimed by:** Viggo 2026-11-14 00:51
+
+**Status:** in-progress
 
 - [ ] Un titre `#<espace insécable>Foo` : commentaire ajouté sans erreur, bloc à un endroit qui garde les mots — preuve : test de `add_comment`, rouge avant
 - [ ] `### ###` : `heading_anchor` rend None, le bloc va sur sa propre ligne

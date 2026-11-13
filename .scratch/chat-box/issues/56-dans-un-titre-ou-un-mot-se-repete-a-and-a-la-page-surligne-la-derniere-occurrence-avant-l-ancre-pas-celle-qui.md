@@ -4,9 +4,10 @@
 
 **Blocked by:** none
 
-**Claimed by:**
 
-**Status:** ready-for-agent
+**Claimed by:** Viggo 2026-11-14 00:51
+
+**Status:** in-progress
 
 **Par où commencer :** décider si la `quote` doit porter la position (champ ou décalage dans le bloc) ou si le surlignage de la dernière occurrence est acceptable et se documente dans SPEC 10.4. Test d'abord : `## A and A`, sélection du premier `A`, le surlignage est sur le premier.
 

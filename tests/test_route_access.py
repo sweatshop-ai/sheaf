@@ -29,7 +29,8 @@ def all_routes(handler):
 def test_only_the_door_accepts_a_token_and_reads_its_own_body(browser):
     door_routes = [(m, p) for m, p, _, who in all_routes(browser.handler)
                    if who is not OPEN and (who.token or who.raw_body)]
-    assert door_routes == [("POST", "/_/mcp")]
+    assert sorted(door_routes) == [("POST", "/_/mcp"), ("POST", "/_/transcribe")]     # the door, and the recording the relay takes (8.5)
+    assert not browser.handler.routes["/_/transcribe"]["POST"][1].token
     who = browser.handler.routes["/_/mcp"]["POST"][1]
     assert who is DOOR and who.token and who.raw_body
 

@@ -3,6 +3,8 @@
 Offsets count non-whitespace characters of the block's rendered text, so the page
 and the server agree whatever whitespace each render happens to put between tags.
 """
+import re
+
 import pytest
 from helpers import pandoc
 
@@ -28,7 +30,6 @@ def sel(block, quote, occurrence=0):
     ("The gap is **52%** and it matters.\n", "The gap is 52%", "The gap is **52%**| and it matters.\n"),
     ("See [the report](http://x.y/z) now.\n", "the report", "See [the report](http://x.y/z)| now.\n"),
     ("Salt &amp; pepper.\n", "Salt &", "Salt &amp;| pepper.\n"),
-    ("## A heading here\n", "heading", "## A heading| here\n"),
     ("| A | B |\n|---|---|\n| cell **b** | x |\n", "cell b", "| A | B |\n|---|---|\n| cell **b**| | x |\n"),
     ("The gap is 52.\n", "ga", "The ga|p is 52.\n"),
     ("- one\n- two items\n", "two", "- one\n- two| items\n"),
@@ -138,3 +139,47 @@ def test_a_task_list_box_is_not_text():
 def test_a_box_typed_in_the_text_is_still_text():
     assert rdc.projection("Tick ☐ when done.\n").text == "Tick☐whendone."
     assert rdc.projection("- ☐ is a box\n").text == "☐isabox"
+
+
+# ── a comment on words of a heading goes at the end of the heading (ticket 55) ──
+
+HEADINGS = [
+    # (markdown, quote, the heading line with the block's place marked)
+    ("## Done when\n", "Done", "## Done when|\n"),
+    ("## Done when\n", "when", "## Done when|\n"),
+    ("## Done when   \n", "Done", "## Done when|   \n"),
+    ("## Done when ##\n", "Done", "## Done when| ##\n"),
+    ("## C#\n", "C", "## C#|\n"),
+    ("# **Done** when\n", "Done", "# **Done** when|\n"),
+    ("Done when\n=========\n", "Done", "Done when|\n=========\n"),
+    ("Done\nwhen we ship\n---\n", "Done", "Done\nwhen we ship|\n---\n"),
+]
+
+
+@pytest.mark.parametrize("md, quote, expect", HEADINGS)
+def test_a_comment_on_words_of_a_heading_goes_at_the_end_of_the_heading(md, quote, expect):
+    s, e = sel(md, quote)
+    out, cid = rdc.add_comment(md, block=0, start=s, end=e, quote=quote, body="why",
+                               by="Ada", at="2026-11-13T10:00")
+    raw = out[len(expect.split("|")[0]):out.index("-->") + 3]
+    assert raw.startswith("<!-- sheaf-comment id=" + cid) and 'quote="%s"' % quote in raw
+    assert out.replace(raw, "|", 1) == expect
+    assert rdc.parse(out).comments[0].quote == quote
+
+
+@pytest.mark.parametrize("md, quote, expect", HEADINGS)
+def test_the_heading_is_whole_for_a_reader_that_drops_the_comment(md, quote, expect):
+    s, e = sel(md, quote)
+    out, _ = rdc.add_comment(md, block=0, start=s, end=e, quote=quote, body="why",
+                             by="Ada", at="2026-11-13T10:00")
+    assert re.sub(r"<!--.*?-->", "", out) == md
+    page = pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], out)
+    assert page.count("<!--") == 1
+    assert re.sub(r"<!--.*?-->", "", page) == pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], md)
+
+
+def test_a_comment_on_a_paragraph_still_goes_after_the_selection():
+    md = "The gap is 52 and more.\n"
+    s, e = sel(md, "gap")
+    out, _ = rdc.add_comment(md, 0, s, e, "gap", "why", "Ada", "2026-11-13T10:00")
+    assert out.startswith("The gap<!-- sheaf-comment")

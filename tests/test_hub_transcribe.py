@@ -29,6 +29,7 @@ class FakeTCompute:
     def __init__(self, tls=False):
         self.reply = (200, {"text": "hello there"})
         self.redirect = self.truncate = self.drip = False
+        self.elsewhere = "/elsewhere"                     # where a redirect points
         self.dropped = threading.Event()                  # the drip found the connection gone
         self.seen = []                                    # (method, path, headers, body)
         outer = self
@@ -63,7 +64,7 @@ class FakeTCompute:
                     return
                 if outer.redirect:
                     self.send_response(outer.redirect if isinstance(outer.redirect, int) else 302)
-                    self.send_header("Location", "/elsewhere")
+                    self.send_header("Location", outer.elsewhere)
                     self.end_headers()
                     return
                 status, obj = outer.reply
@@ -340,6 +341,14 @@ def test_the_limit_covers_the_resolution_of_the_name(monkeypatch):
         release.set()
 
 
+def test_the_limit_is_on_the_whole_call_not_on_each_read(tcompute):
+    tcompute.drip = True
+    began = time.monotonic()
+    assert transcribe._call("POST", f"{tcompute.url}/audio/transcriptions", {}, b"x", timeout=1) == (0, b"")
+    assert time.monotonic() - began < 2.5
+    assert tcompute.dropped.wait(2)                          # the connection was shut, not left to a thread
+
+
 def test_call_returns_only_after_the_timer_has_finished_cutting(tcompute, monkeypatch):
     tcompute.drip = True
     timers = []
@@ -461,9 +470,9 @@ def test_a_redirect_on_the_post_is_an_answer_not_a_road(browser, relay, tcompute
 def test_the_key_goes_to_the_host_of_the_url_only(browser, relay, tcompute):
     other = FakeTCompute()
     try:
-        tcompute.redirect = True
-        dictate(browser)
-        assert other.seen == []
+        tcompute.redirect, tcompute.elsewhere = 302, other.url + "/audio/transcriptions"   # another host and port
+        assert dictate(browser).status == 502
+        assert len(tcompute.seen) == 1 and other.seen == []
     finally:
         other.close()
 

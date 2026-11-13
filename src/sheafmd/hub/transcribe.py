@@ -202,7 +202,7 @@ class Relay:
             self.record("transcribe-key-file", reason=why)
 
     def _key(self) -> tuple[str, tuple] | None:
-        """The key with the stamp of its file (mtime_ns, size, inode), or None: a file that is not a regular file of the hub's account with mode 0600, or that has no
+        """The key with the stamp of its file (mtime, ctime, size, inode), or None: a file that is not a regular file of the hub's account with mode 0600, or that has no
         such line, is not used. Opened without blocking (a FIFO would hang the open) and never through a symlink."""
         try:
             fd = os.open(self.cfg.key_file, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -217,14 +217,15 @@ class Relay:
                 os.close(fd)
                 self._refuse("the key file is not a regular file of the hub's account with mode 0600")
                 return None
-            stamp = (st.st_mtime_ns, st.st_size, st.st_ino)
+            stamp = (st.st_mtime_ns, st.st_ctime_ns, st.st_size, st.st_ino)
             f = os.fdopen(fd, "r", encoding="utf-8", errors="replace")
             wrapped = True
             with f:
                 for line in f.read().splitlines():
                     m = re.fullmatch(rf"\s*(?:export\s+)?{re.escape(self.cfg.key_name)}\s*=\s*(.*?)\s*", line)
                     if m:
-                        return (m.group(1).strip("\"'"), stamp) if m.group(1).strip("\"'") else None
+                        value = m.group(1).strip("\"'")
+                        return (value, stamp) if value else None
         except OSError as e:
             if not wrapped:
                 os.close(fd)

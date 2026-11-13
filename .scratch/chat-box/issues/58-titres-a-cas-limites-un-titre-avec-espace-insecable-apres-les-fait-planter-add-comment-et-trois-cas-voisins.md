@@ -7,8 +7,7 @@
 4. Existant, pas causé par le 55 : `_written_block` qui déplace un commentaire multi-lignes d'un paragraphe vers un titre le fait déborder de la ligne.
 Classe : c.
 
-**Blocked by:**
-- External: PR 271 merged into main
+**Blocked by:** none
 
 **Claimed by:**
 

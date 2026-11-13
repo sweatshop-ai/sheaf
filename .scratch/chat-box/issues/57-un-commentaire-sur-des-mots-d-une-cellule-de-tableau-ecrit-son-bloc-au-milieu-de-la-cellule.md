@@ -2,8 +2,7 @@
 
 **What to build:** Même défaut que le ticket 55, dans un tableau : une sélection au milieu d'une cellule met le bloc dans les mots de la cellule (`| on<!-- sheaf-comment … -->e | two |`, vérifié avec pandoc gfm : la cellule est « on<!--…-->e »), donc un lecteur qui compare le texte d'une cellule le voit coupé. Le correctif du titre ne s'y applique pas tel quel : la fin de la **ligne** est après le `|` final, hors de toute cellule, et l'ancre du badge se lit par cellule. Le bloc doit aller à la fin de la **cellule**, avant son `|`, en comptant `\|` et le code en ligne. Classe : c (autres lecteurs du fichier, tableaux).
 
-**Blocked by:**
-- External: PR 271 merged into main
+**Blocked by:** none
 
 **Claimed by:**
 

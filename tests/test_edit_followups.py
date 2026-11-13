@@ -5,6 +5,7 @@ from helpers import pandoc
 
 from sheafmd import comments as rdc
 from sheafmd import edit as rde
+from sheafmd.blocks import split_md_blocks
 
 
 def doc(*paragraphs):
@@ -1007,3 +1008,22 @@ def test_a_line_that_holds_a_heading_stays_in_its_task_item_and_gets_no_box_char
 def test_a_typed_box_directly_before_a_nested_line_keeps_its_characters():
     out = rde.html_block_to_md('<ul><li><input type="checkbox">a<div>- [x] <div>words</div></div></li></ul>', "- [ ] a", [])
     assert out == "- [ ] a\n- \\- \\[x\\]\\\n  words"
+
+
+def test_a_comment_the_file_gained_on_words_of_a_heading_goes_back_at_the_end_of_the_heading():
+    # Ticket 55: a block in the middle of a heading changes its title for every other reader.
+    base = "## Alpha Beta\n\nBody.\n"
+    cur = "## Alpha" + rdc.format(agent_note(), True) + " Beta\n\nBody.\n"
+    out, rep = rde.merge_edits(base, cur, [{"i": 0, "html": "<h2>Alpha edited Beta</h2>"}], AT)
+    note = the_note(out)
+    assert out.startswith("## Alpha edited Beta<!-- sheaf-comment") and out[note.end:].startswith("\n\nBody."), out
+    assert rep["conflicts"] == [] and rdc.parse(out).malformed == []
+
+
+@pytest.mark.parametrize("heading", ["#", "# ", "##   "])
+def test_a_comment_put_back_in_a_heading_with_no_words_goes_on_a_line_of_its_own_and_the_heading_stays(heading):
+    md = heading + "\n\nBody.\n"
+    raw = rdc.format(agent_note(), False)
+    out = rde._insert_comment(md, 0, raw, "Alpha")
+    assert [b.kind for b in split_md_blocks(out)][0] == "heading" and rdc.parse(out).malformed == []
+    assert len(rdc.parse(out).comments) == 1 and out.startswith(heading)

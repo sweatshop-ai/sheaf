@@ -2,7 +2,9 @@
 
 **What to build:** `tests/page/test_page_actions.py::test_a_box_typed_in_a_block_whose_save_is_merged_is_not_ticked_before_the_reload` (ligne 357 sur main afbe595) est le test qui a figé le pilote Playwright de la session deux fois en une journée, sur deux runs de main ou de PR sans rapport l'un avec l'autre. Les deux fois le même enchaînement : il échoue environ 53 s après le test précédent (bien avant la limite de 300 s), son démontage échoue dans la même seconde, puis le fil principal reste dans `greenlet_main` / `selector.poll` sans jamais en sortir, et chaque test suivant expire à 300 s. Le ticket 47 (PR 260, afbe595) arrête désormais le run au premier test expiré ; il ne dit pas pourquoi ce test échoue ni pourquoi le pilote ne répond plus ensuite. Ce ticket cherche la cause.
 
-**Blocked by:** none
+**Blocked by:**
+
+- External: PR 267 merged into main and a page-test freeze seen in CI with the traceback
 
 **Classe :** c (CI : un run de 60 min annulé à chaque apparition ; la cause n'est pas établie).
 
@@ -29,4 +31,4 @@
 
 **Claimed by:** Elif 2026-11-13 01:15
 
-**Status:** in-progress
+**Status:** blocked (PR 267 + next sighting)

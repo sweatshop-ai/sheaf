@@ -94,6 +94,14 @@ def parse(t: dict, where) -> Config:
     return cfg
 
 
+def _resolve(host, port):
+    """The addresses of `host`, or [] when the name does not resolve (the caller then has none to try)."""
+    try:
+        return socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except OSError:
+        return []
+
+
 def _call(method, url, headers, body=None, timeout=CHECK_TIMEOUT) -> tuple[int, bytes]:
     """(status, body); a connection that fails is a 0. A 3xx is an answer, not a road: http.client follows no
     redirect and reads no proxy variable. `timeout` bounds the whole call, name lookup and connection included, not
@@ -124,7 +132,7 @@ def _call(method, url, headers, body=None, timeout=CHECK_TIMEOUT) -> tuple[int, 
         looking.join(max(0.0, deadline - time.monotonic()))
         if not found:
             raise TimeoutError("the name did not resolve in time")
-        error = OSError("no address")
+        error = OSError("the name has no address")
         for family, kind, proto, _, target in found[0]:
             left = deadline - time.monotonic()
             if left <= 0 or expired.is_set():
@@ -140,7 +148,7 @@ def _call(method, url, headers, body=None, timeout=CHECK_TIMEOUT) -> tuple[int, 
                 error = e
         raise error
 
-    conn._create_connection = connect
+    conn._create_connection = connect                         # the hook http.client.connect() dials through (3.11 to 3.14)
     timer = threading.Timer(timeout, cut)
     timer.start()
     try:
@@ -159,13 +167,6 @@ def _call(method, url, headers, body=None, timeout=CHECK_TIMEOUT) -> tuple[int, 
         conn.close()
         for sock in held:
             sock.close()
-
-
-def _resolve(host, port):
-    try:
-        return socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-    except OSError:
-        return []
 
 
 class Relay:

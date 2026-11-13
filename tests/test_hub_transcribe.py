@@ -4,6 +4,7 @@ The t-compute here is a fake HTTP server on 127.0.0.1 and the key a throwaway on
 nothing leaves the machine and no real key is read. No audio is decoded; the bytes are a stand-in."""
 import json
 import os
+import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -269,8 +270,8 @@ def test_the_limit_is_on_the_whole_call_not_on_each_read(tcompute, monkeypatch):
 
 @pytest.fixture
 def full_backlog():
-    """A listening socket that never accepts and whose queue is full: a connect to it waits for its timeout."""
-    import socket
+    """A listening socket that never accepts and whose queue is full: a connect to it waits for its timeout.
+    Linux drops the SYN of a full queue; another kernel may refuse instead, and the test then proves nothing."""
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     listener.listen(0)
@@ -289,7 +290,6 @@ def full_backlog():
 
 
 def test_the_limit_covers_every_address_tried_for_the_connection(full_backlog, monkeypatch):
-    import socket
     one = (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", full_backlog))
     monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [one, one, one])
     began = time.monotonic()
@@ -298,9 +298,12 @@ def test_the_limit_covers_every_address_tried_for_the_connection(full_backlog, m
 
 
 def test_the_limit_covers_the_resolution_of_the_name(monkeypatch):
-    import socket
     release = threading.Event()
-    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: release.wait(5) and [])
+
+    def stuck(*a, **k):
+        release.wait(5)
+        return []
+    monkeypatch.setattr(socket, "getaddrinfo", stuck)
     began = time.monotonic()
     try:
         assert transcribe._call("POST", "http://tc.invalid:9/x", {}, b"x", timeout=1) == (0, b"")
@@ -315,7 +318,10 @@ def test_call_returns_only_after_the_timer_has_finished_cutting(tcompute, monkey
 
     class SlowCut(threading.Timer):
         def __init__(self, interval, fn):
-            super().__init__(interval, lambda: (fn(), time.sleep(0.5)))
+            def slow():
+                fn()
+                time.sleep(0.5)                              # the cut is still going on when the call has its answer
+            super().__init__(interval, slow)
             timers.append(self)
     monkeypatch.setattr(transcribe.threading, "Timer", SlowCut)
     assert transcribe._call("POST", f"{tcompute.url}/audio/transcribe", {}, b"x", timeout=0.3) == (0, b"")

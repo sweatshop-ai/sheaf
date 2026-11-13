@@ -23,6 +23,10 @@ from sheafmd.hub import service
 from sheafmd.hub import client as hubclient
 from sheafmd.hub import server
 
+# One test here reads the hub the test before it left: a slice of the suite in CI keeps the file whole
+# (SHEAF_TEST_SLICE, tests/conftest.py).
+IN_ORDER = True
+
 LABEL = "io.github.sweatshop-ai.sheaf"
 
 SPEC_UNIT = """\

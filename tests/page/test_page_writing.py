@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from helpers import comment, writes_from_outside
-from pagehelp import (DOC, P1, P2, T0, at, comment_draft_key, comment_on, gone, key, mark, open_box, open_form, typed, reload_on_clock, reloaded,
+from pagehelp import (DOC, P1, draft_key, P2, T0, at, comment_draft_key, comment_on, gone, key, mark, open_box, open_form, typed, reload_on_clock, reloaded,
                       select, select_by_touch, toast, toasted, type_at_end, until)
 from sheafmd import comments as rdc
 from sheafmd.hub import live as hub_live
@@ -4689,3 +4689,71 @@ def test_an_edit_of_a_table_keeps_the_escaped_pipe_in_a_raw_tags_attribute(tab):
     tab.page.clock.run_for(3000)
     until(lambda: "typed" in f.read_text(encoding="utf-8"), what="the save")
     assert '| <abbr title="a\\|b">X</abbr> | the cell typed |' in f.read_text(encoding="utf-8")
+
+
+def test_typing_while_a_save_has_no_answer_is_said_once_and_the_block_shows_it_is_saving(tab):
+    """chat-box 43: the page refuses input while a save is out (the reply may reload it), and said nothing."""
+    f = tab.site.file
+    p = tab.page
+    tab.open()
+    held = []
+    p.route("**/_/save", lambda r: held.append(r))
+    type_at_end(p, P1, " typed")
+    p.keyboard.press("Control+s")
+    until(lambda: held or p.wait_for_timeout(20), what="the save, held")
+    p.keyboard.type("lost")
+    toasted(p, "Saving")
+    assert p.evaluate("document.activeElement.classList.contains('rd-saving')")
+    assert p.evaluate("getComputedStyle(document.activeElement).cursor") == "not-allowed"
+    assert "lost" not in p.evaluate("document.activeElement.textContent")
+    p.evaluate("document.querySelector('#rd-toast').textContent = ''")
+    p.keyboard.type("more")
+    assert toast(p) == ""                                    # said once for this save, not for every key
+    held[0].continue_()
+    p.unroute("**/_/save")
+    until(lambda: "typed" in f.read_text(encoding="utf-8"), what="the save to reach the file")
+    until(lambda: not p.evaluate("document.querySelector('.rd-saving')"), what="the mark to go")
+    assert p.evaluate(f"localStorage.getItem({draft_key(tab.site)!r})") is None      # the mark is not an edit
+    p.keyboard.press("Control+s")
+    toasted(p, "Nothing changed")                                                   # the mark left no class="" to save
+    p.keyboard.type("!")
+    assert p.evaluate("document.activeElement.textContent").endswith("typed!")
+
+
+def test_the_mark_lands_on_the_block_typed_in_and_clears_with_the_save(tab):
+    p = tab.page
+    tab.open()
+    held = []
+    p.route("**/_/save", lambda r: held.append(r))
+    type_at_end(p, P1, " typed")
+    p.keyboard.press("Control+s")
+    until(lambda: held or p.wait_for_timeout(20), what="the save, held")
+    p.click(P2)                                              # moving to another block is not typing: not refused
+    p.keyboard.press("End")
+    p.keyboard.type("lost")
+    toasted(p, "Saving")
+    marked = lambda: p.evaluate("[...document.querySelectorAll('.rd-saving')].map(e => e.textContent)")
+    assert len(marked()) == 1 and marked()[0].startswith("Second paragraph")      # the one typed in, not the first
+    held[0].continue_()
+    p.unroute("**/_/save")
+    until(lambda: not marked(), what="the mark to go")
+    assert p.evaluate("document.querySelectorAll('main [class=\"\"]').length") == 0
+
+
+def test_typing_while_a_change_from_outside_settles_is_refused_and_said(tab):
+    """The settle's own save is out while the page reloads onto the change: a key typed then is refused, and said."""
+    f = tab.site.file
+    p = tab.page
+    p.clock.install()
+    tab.open()
+    held = []
+    p.route("**/_/save", lambda r: held.append(r))
+    type_at_end(p, P1, " typed")
+    f.write_text(f.read_text(encoding="utf-8") + "\nFrom outside.\n", encoding="utf-8")
+    until(lambda: held or p.wait_for_timeout(20), what="the settle's save, held")
+    p.keyboard.type("lost")
+    toasted(p, "Saving")
+    assert p.evaluate("document.querySelectorAll('.rd-saving').length") == 1
+    held[0].continue_()
+    p.unroute("**/_/save")
+    reloaded(p)

@@ -889,7 +889,7 @@ var create = function (ROOT, CFG, opts) {
     blocks.forEach(function (b) {
       var ok = editable.has(b.i);
       b.nodes.forEach(function (n) {
-        if (n.nodeType !== 1) return;
+        if (n.nodeType !== 1 || n.hasAttribute('data-rd-ui')) return;     // the byline is the page's, not the document's
         if (ok && on) n.setAttribute('contenteditable', 'true');
         else n.removeAttribute('contenteditable');
         n.classList.toggle('rd-locked', on && !ok);

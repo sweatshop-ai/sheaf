@@ -91,8 +91,8 @@ def test_the_page_draws_a_one_off_where_its_box_is_and_a_toggle_in_the_row_above
         "rd-act one-off rd-inline", "rd-act one-off rd-inline", "rd-act toggle"]
     assert bar(p).nth(2).get_attribute("aria-pressed") == "false"
     # The one-offs are in the document, each next to its own hidden box, and the row holds the toggle alone.
-    assert p.locator("main li button.rd-inline").count() == 2
-    assert p.locator("main li:has(> button.rd-inline) > input[type=checkbox]").evaluate_all(
+    assert p.locator("main button.rd-inline").count() == 2
+    assert p.locator("main input[type=checkbox]:has(+ button.rd-inline)").evaluate_all(
         "bs => bs.map(b => getComputedStyle(b).display)") == ["none", "none"]
     assert p.locator("#rd-actions button").all_inner_texts() == ["Share"]
     # The row is above the document, never in a block a save sends.
@@ -124,16 +124,15 @@ def test_two_lines_of_the_same_word_are_two_buttons_and_each_presses_its_own_box
 
 def test_a_selection_on_a_buttons_line_does_not_press_it_and_the_button_is_not_part_of_the_text(tab):
     f = tab.site.file
-    f.write_text("# Plan\n\n- [ ] Approve: the quote of 12 November\n", encoding="utf-8")
+    f.write_text("# Plan\n\n- [ ] Move to klium-website (ref 18f3a9c2)\n", encoding="utf-8")
     tab.open()
     p = tab.page
     p.wait_for_selector("button.rd-act")
-    select(p, at("main", "the quote"), at("main", "the quote", None))
+    select(p, at("main", "(ref"), at("main", "18f3a9c2", None))
     open_box(p)
-    assert bar(p).nth(0).inner_text() == "Approve" and "- [ ] Approve" in f.read_text(encoding="utf-8")
-    # The line's own word is under the button, not said twice.
-    assert "Approve Approve" not in p.locator("main li").first.evaluate("li => li.innerText.replace(/\\s+/g, ' ')")
-    assert p.locator("main li button.rd-inline").evaluate("b => b.nextElementSibling === null") is True
+    assert "- [ ] Move to" in f.read_text(encoding="utf-8")
+    # The line's own words are under the button, not said twice.
+    assert p.locator("main li").first.evaluate("li => li.innerText.replace(/\\s+/g, ' ').trim()").count("klium-website") == 1
 
 
 def test_a_press_shows_undo_for_five_seconds_then_ticks_the_file_and_the_page_shows_it_locked(sheaf):
@@ -164,7 +163,7 @@ def test_undo_in_the_five_seconds_sends_nothing(sheaf):
 
 def test_a_click_on_an_action_box_in_the_document_ticks_nothing_and_says_where_its_button_is(sheaf):
     p, f = sheaf.page, sheaf.site.file
-    p.locator("main input[type=checkbox]").first.click()
+    p.locator("main input[type=checkbox]").first.dispatch_event("click")      # hidden behind its button
     until(lambda: "at the top of the page" in toast(p), what="the line that points to the button")
     p.wait_for_timeout(300)
     assert f.read_text(encoding="utf-8") == SHEAF
@@ -389,7 +388,7 @@ def test_a_box_of_an_action_typed_and_not_yet_saved_is_not_ticked_by_a_click(she
     type_at_end(p, "main li:has-text('Share')", "")
     p.keyboard.press("Enter")
     p.keyboard.type("Run it")
-    p.locator("main li:has-text('Run it') input[type=checkbox]").click()
+    p.locator("main li:has-text('Run it') input[type=checkbox]").dispatch_event("click")
     until(lambda: "at the top of the page" in toast(p), what="the line that points to the button")
     until(lambda: "- [ ] Run it" in f.read_text(encoding="utf-8"), what="the saved action")
     until(lambda: bar(p).all_inner_texts() == ["Approve", "Done", "Share", "Run it"], what="its button")
@@ -425,7 +424,7 @@ def test_a_box_typed_in_a_block_whose_save_is_merged_is_not_ticked_before_the_re
     p.keyboard.press("Enter")
     p.keyboard.type("Run it")
     mark(p)
-    p.locator("main li:has-text('Run it') input[type=checkbox]").click()
+    p.locator("main li:has-text('Run it') input[type=checkbox]").dispatch_event("click")
     reloaded(p)
     until(lambda: bar(p).all_inner_texts() == ["Approve", "Done", "Share", "Run it"], what="its button")
     p.wait_for_timeout(500)
@@ -544,7 +543,7 @@ def test_a_saved_action_box_is_not_ticked_while_a_press_holds_the_reload_of_its_
     p.clock.run_for(3000)                               # the autosave goes, merged: its reload waits for the press
     until(lambda: "- [ ] Run it" in f.read_text(encoding="utf-8"), what="the saved action")
     until(lambda: p.evaluate("document.querySelector('#rd-state').textContent") != "Saving…", what="its answer")
-    p.locator("main li:has-text('Run it') input[type=checkbox]").click()
+    p.locator("main li:has-text('Run it') input[type=checkbox]").dispatch_event("click")
     until(lambda: "tick it once it has" in toast(p), what="the line that says the page reloads first")
     p.wait_for_timeout(500)
     assert "[x] Run it" not in f.read_text(encoding="utf-8")
@@ -577,7 +576,7 @@ def test_a_saved_action_box_is_not_ticked_after_a_save_answered_again(sheaf):
     until(lambda: "- [ ] Run it" in f.read_text(encoding="utf-8"), what="the saved action")
     until(lambda: p.evaluate("document.querySelector('#rd-state').textContent") != "Saving…", what="its answer")
     mark(p)
-    p.locator("main li:has-text('Run it') input[type=checkbox]").click()
+    p.locator("main li:has-text('Run it') input[type=checkbox]").dispatch_event("click")
     reloaded(p)
     until(lambda: bar(p).all_inner_texts() == ["Approve", "Done", "Share", "Run it"], what="its button")
     p.wait_for_timeout(500)

@@ -859,6 +859,83 @@ def test_a_new_message_emptied_while_the_store_refuses_reads_does_not_come_back_
     assert p.locator("#rd-unsent").count() == 0, "the emptied message is offered as not sent"
 
 
+def hold_time_passes(p):
+    """The page's clock jumps past the time a send is held (HELD), and the page is told the store changed, as the
+    timer that lets a held entry lapse would."""
+    p.evaluate("""() => {
+      const now = Date.now.bind(Date);
+      Date.now = () => now() + 40000;
+      window.dispatchEvent(new StorageEvent('storage'));
+    }""")
+
+
+def test_a_reply_the_hub_took_while_the_store_refused_reads_is_not_offered_as_not_sent_when_the_store_reads_again(tab, site):
+    p = open_thread(tab, site)
+
+    def refuse_reads_then_send(route):
+        store_unreadable(p)
+        route.continue_()
+
+    p.route("**/_/comment", refuse_reads_then_send)
+    p.fill(FIELD, "Because.")
+    p.keyboard.press("Enter")
+    until(lambda: "Because." in site.file.read_text(encoding="utf-8"), what="the reply in the file")
+    until(lambda: p.locator(THREAD).count() == 2, what="the reply in the thread")
+    p.wait_for_timeout(500)      # the page's clear of the kept reply runs after the answer is taken in: while the store still refuses
+    p.unroute("**/_/comment")
+    store_unreadable(p, False)
+    hold_time_passes(p)
+    p.wait_for_timeout(300)
+    assert p.locator("#rd-unsent").count() == 0, "the reply the hub took is offered as not sent, to be sent twice"
+
+
+def test_a_reply_the_hub_took_while_its_answer_was_lost_and_the_store_refused_reads_is_not_offered_as_not_sent(tab, site):
+    p = open_thread(tab, site)
+
+    def take_it_and_lose_the_answer(route):
+        store_unreadable(p)
+        route.fetch()
+        route.abort()
+
+    p.route("**/_/comment", take_it_and_lose_the_answer)
+    p.fill(FIELD, "Because.")
+    p.keyboard.press("Enter")
+    until(lambda: "Because." in site.file.read_text(encoding="utf-8"), what="the reply in the file")
+    until(lambda: p.locator(THREAD).count() == 2, what="the reply in the thread, read from the hub's event")
+    p.wait_for_timeout(500)      # the page's clear of what the event named runs after it is taken in: while the store still refuses
+    p.unroute("**/_/comment")
+    store_unreadable(p, False)
+    hold_time_passes(p)
+    p.wait_for_timeout(300)
+    assert p.locator("#rd-unsent").count() == 0, "the reply the hub took is offered as not sent, to be sent twice"
+
+
+def test_a_new_message_emptied_while_the_store_refused_reads_stays_empty_after_a_reload_with_no_other_write(tab, site):
+    p = open_thread(tab, site)
+    p.keyboard.press("Escape")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    p.fill(FIELD, "kept for later")
+    p.click("#rd-popover button[data-a=minimize]")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    until(lambda: p.input_value(FIELD) == "kept for later", what="the kept text back in the box")
+    store_unreadable(p)
+    p.fill(FIELD, "")
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close on an empty field")
+    store_unreadable(p, False)
+    p.evaluate("window.dispatchEvent(new StorageEvent('storage'))")      # the first read that works: nothing is written but the clear
+    until(lambda: stored_drafts(p) == [], what="the emptied message gone from the store")
+    p.reload()
+    p.wait_for_selector(".rd-badge")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    assert p.input_value(FIELD) == "", "the text the person emptied came back after a reload"
+    assert p.locator("#rd-unsent").count() == 0, "the emptied message is offered as not sent after a reload"
+
+
 READABLE_REPLY = ("Done. What changed:\n- the intro is shorter\n- `fetch_all` retries\n\n"
                   "```\nif a < b:\n    go()\n```\n"
                   "See https://example.com/a?b=1&c=2. Or [the doc](https://example.com/doc).\n"

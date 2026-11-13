@@ -1050,3 +1050,11 @@ def test_a_repeated_word_of_a_heading_is_put_back_at_the_end_whichever_occurrenc
     md = "## A and A" + rdc.format(agent_note(quote="A"), True) + "\n\nBody.\n"
     c = rdc.parse(md).comments[0]
     assert rde._occurrence(rde.split_md_blocks(md)[0].content, c) == 1
+
+
+def test_a_comment_of_several_lines_put_back_in_a_setext_heading_goes_on_a_line_of_its_own():
+    note = agent_note()
+    note.body = "first line\nsecond line"
+    out = rde._insert_comment("Alpha Beta\n==========\n\nBody.\n", 0, rdc.format(note, False), "Alpha")
+    assert out.startswith("Alpha Beta\n==========\n\n<!-- sheaf-comment") and rdc.parse(out).malformed == []
+    assert [b.kind for b in split_md_blocks(out)][0] == "heading"

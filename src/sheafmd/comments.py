@@ -574,7 +574,12 @@ def comment_point(kind: str, block: str, start: int, end: int, quote: str) -> in
     if kind != "heading":
         return point
     at = heading_anchor(block)
-    return point if at is None else at
+    if at is not None:
+        return at
+    lines = block.rstrip("\n").split("\n")
+    if not _ATX_TEXT.match(lines[0]) and not (len(lines) > 1 and SETEXT_RE.match(lines[-1])):
+        return point            # ATX_RE reads a heading, pandoc a paragraph: the selection is where it goes
+    raise AnchorError("this heading has no place for a comment, comment on a paragraph")
 
 
 def _block_offsets(blocks):

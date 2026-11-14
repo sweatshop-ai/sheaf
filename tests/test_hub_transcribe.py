@@ -649,7 +649,7 @@ def test_a_first_503_cannot_hide_a_later_401(browser, row_relay, tcompute, clock
 def trusting(monkeypatch):
     """The hub trusts the fixture certificate (and nothing else) for the test."""
     context = ssl.create_default_context(cafile=str(TLS / "loopback-cert.pem"))
-    monkeypatch.setattr(ssl, "_create_default_https_context", lambda *a, **k: context)
+    monkeypatch.setattr(ssl, "create_default_context", lambda *a, **k: context)
 
 
 def test_a_verified_https_provider_gets_the_key_and_the_sound(browser, key_file, trusting, tmp_path):
@@ -670,6 +670,79 @@ def test_an_https_provider_with_a_certificate_nobody_trusts_is_refused_and_gets_
         assert provider.seen == []
     finally:
         provider.close()
+
+
+def test_the_hub_does_not_take_its_trust_from_the_default_of_http_client(browser, key_file, tmp_path, monkeypatch):
+    """Another library that sets the default https context to an unverified one must not send the key unchecked."""
+    monkeypatch.setattr(ssl, "_create_default_https_context", ssl._create_unverified_context)
+    provider = FakeTCompute(tls=True, tmp=tmp_path)
+    try:
+        browser.hub.transcribe = transcribe.Relay(transcribe.parse(table(provider, key_file), "the test"))
+        assert dictate(browser).status == 503
+        assert provider.seen == []
+    finally:
+        provider.close()
+
+
+# ── the key file: what is read, and what is stamped ──────────────────────────
+
+def test_a_key_the_header_cannot_carry_is_refused_with_a_reason_and_never_quoted(browser, row_relay, tcompute, key_file):
+    secret = "k\u00e9y-\u65e5\u672c-0123"                             # not latin-1: http.client would refuse the header
+    key_file.write_text(f"TRANSCRIBE_API_KEY={secret}\n")
+    key_file.chmod(0o600)
+    assert available(browser) is False
+    assert dictate(browser).status == 503 and tcompute.seen == []
+    rows = [r for r in diagnostics.read() if r["kind"] == "transcribe-key-file"]
+    assert len(rows) == 1 and "latin-1" in rows[0]["reason"]
+    assert secret not in json.dumps(diagnostics.read()) and "0123" not in json.dumps(rows)
+
+
+def test_a_damaged_byte_in_the_key_is_refused_the_same_way(browser, row_relay, tcompute, key_file):
+    key_file.write_bytes(b"TRANSCRIBE_API_KEY=abc\xff\xfedef\n")          # not UTF-8: read as U+FFFD
+    key_file.chmod(0o600)
+    assert dictate(browser).status == 503 and tcompute.seen == []
+    assert [r["kind"] for r in diagnostics.read()].count("transcribe-key-file") == 1
+
+
+def test_a_latin_1_key_is_still_taken(browser, relay, tcompute, key_file):
+    key_file.write_text("TRANSCRIBE_API_KEY=cl\u00e9-0123\n")
+    key_file.chmod(0o600)
+    assert dictate(browser).status == 200 and len(tcompute.calls()) == 1
+
+
+def test_the_stamp_is_the_one_of_the_file_the_key_came_from(relay, key_file, monkeypatch):
+    """A writer that finishes between the stat and the read must not leave the old stamp with the new key."""
+    real, done = os.fstat, []
+
+    def fstat(fd):
+        st = real(fd)
+        if not done:                                                        # the writer finishes right after the first stat
+            done.append(1)
+            key_file.write_text(f"TRANSCRIBE_API_KEY={KEY}-rewritten-longer\n")
+        return st
+    monkeypatch.setattr(transcribe.os, "fstat", fstat)
+    key, stamp = relay._key()
+    fresh = key_file.stat()
+    assert key.endswith("rewritten-longer")
+    assert stamp == (fresh.st_mtime_ns, fresh.st_ctime_ns, fresh.st_size, fresh.st_ino)
+
+
+def test_two_dictations_in_line_do_not_send_a_refused_key_twice(browser, relay, tcompute):
+    """B passed `available()` while A was in flight; A's 401 comes first; B takes the lock after it."""
+    original, raced = relay.available, []
+
+    def available():
+        ok = original()
+        if not raced:
+            raced.append(1)
+            tcompute.reply = (401, {})
+            with pytest.raises(transcribe.Unavailable):
+                relay.transcribe(AUDIO, "webm")                             # A, whole, inside B's test of availability
+        return ok
+    relay.available = available
+    with pytest.raises(transcribe.Unavailable):
+        relay.transcribe(AUDIO, "webm")                                     # B
+    assert len(tcompute.calls()) == 1
 
 
 # ── not on the proxy socket, and the page's policy ───────────────────────────

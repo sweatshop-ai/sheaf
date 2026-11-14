@@ -115,7 +115,8 @@ L'agent sait quand un texte est fait pour être copié. Il l'écrit dans un bloc
 | 68 | Cellules de tableau : `<!-->` refusé, le merge sur un dernier rang sans `|` final, et trois cas que `parse` ou le découpeur de blocs lisent autrement que pandoc, restes des revues Opus de la PR 288 | Rien | À faire |
 | 69 | Bloc à copier : `<![CDATA[` insensible à la casse, colonnes de tabulation et commentaire de `is_copy_block`, restes de la revue Opus 1 de la PR 289 | Rien | À faire |
 | 70 | Sanitiseur : `-webkit-user-modify` en mode simple, un cas de test et une ligne de commentaire, restes de la revue Opus 1 de la PR 292 | Rien | À faire |
-| 71 | Dictée : restes de la revue Opus 1 de la PR 290, une assertion vide corrigée à vérifier et six finitions | Rien | À faire |
+| 71 | Dictée : restes de la revue Opus 1 de la PR 290, une assertion vide corrigée à vérifier et six finitions | Rien | Fait (PR 295, merge eb7b7ba) |
+| 73 | Dictée : trois formulations du SPEC 9.16, une assertion trop large et une théorie de double fermeture, restes de la revue Opus de la PR 295 | Rien | À faire |
 | 72 | Accent grave échappé ignoré par `CODE_SPAN_RE`, et un titre avec `<!-->` plus un commentaire refusé par la copie à partager, restes de la PR 291 | Rien | À faire |
 
 ## Ce qui reste ouvert

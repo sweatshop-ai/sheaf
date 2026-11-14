@@ -11,13 +11,15 @@
 
 **Blocked by:** none
 
-**Claimed by:**
+**Claimed by:** Bodhi
 
-**Status:** ready-for-agent
+**Status:** done — on main via eb7b7ba (PR 295), c1, d1 à d6 (le détail, `handoff-Bodhi-2026-11-14.md`)
 
 **Par où commencer :** `tests/test_hub_transcribe.py` : d1 (un fichier qui change à chaque `fstat` rend `_key` à None sans lever), puis d3 et c1.
 
-- [ ] c1 vérifié rouge, d1, d3 : tests
-- [ ] d2, d6 corrigés ou la limite écrite dans le SPEC 9.16, avec leur test
-- [ ] d4, d5 : closes ou écrites dans le SPEC 9.16
-- [ ] CI verte
+- [x] c1 vérifié rouge, d1, d3 : tests
+- [x] d2, d6 corrigés ou la limite écrite dans le SPEC 9.16, avec leur test
+- [x] d4, d5 : closes ou écrites dans le SPEC 9.16
+- [x] CI verte
+
+**Fait (Bodhi, 2026-11-14, PR 295, merge eb7b7ba) :** c1 : un test montre que l'ancienne forme de `json.dumps` ne voit pas une clé écrite dans une ligne. d1, d3 : tests. d2 : le mode et le propriétaire sont revérifiés après chaque lecture. d6 : lecture plafonnée à 65 536 caractères (`KEY_FILE_MAX`), refus avec une ligne au-delà. d4, d5 : écrits comme limites dans le SPEC 9.16. CI 3/3 verte. Revue : Opus de secours (Codex sans jetons jusqu'à 15 h), GO, `pr-71-reviews/opus-1.md`. Restes : ticket 73. Codex reste à passer après 15 h.

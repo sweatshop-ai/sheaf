@@ -446,7 +446,7 @@ def store_full(p, full=True):
     p.evaluate("""(full) => {
       if (!window.__realSet) window.__realSet = Storage.prototype.setItem;
       Storage.prototype.setItem = function (k, v) {
-        if (full && String(k).startsWith('sheaf-comment-draft')) throw new Error('quota');
+        if (full && String(k).startsWith('sheaf-comment-draft')) { window.__refusedSets = (window.__refusedSets || 0) + 1; throw new Error('quota'); }
         return window.__realSet.call(this, k, v);
       };
     }""", full)
@@ -986,8 +986,8 @@ def test_a_redraw_of_the_not_sent_line_that_fails_after_a_purge_does_not_make_a_
     p.fill(FIELD, "")
     p.keyboard.press("Escape")
     until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close on an empty field")
+    redraw_in_a_read_throws(p)      # in place before the store reads again: the first read that works purges the held clear
     store_unreadable(p, False)
-    redraw_in_a_read_throws(p)      # the first read that works purges the held clear, and redraws the line
     select(p, at(P1, "apples"), at(P1, "apples", None))
     open_box(p)
     p.fill(FIELD, "typed after")
@@ -995,6 +995,34 @@ def test_a_redraw_of_the_not_sent_line_that_fails_after_a_purge_does_not_make_a_
     until(lambda: [d["body"] for d in stored_drafts(p)] == ["typed after"], what="the text typed after the purge kept")
     assert "could not be kept" not in toast(p), "a failing redraw passed for a store that refused the read"
     assert p.evaluate("window.__redrawInRead") == 0, "the redraw ran inside the read, while its caller was still working"
+
+
+def test_a_held_clear_that_the_full_store_cannot_write_is_tried_by_the_reads_only_not_by_the_redraws_it_queues(tab, site):
+    p = open_thread(tab, site)
+    p.keyboard.press("Escape")
+    select(p, at(P2, "pears"), at(P2, "pears", None))      # a second entry, so the purge writes a list and does not remove the key
+    open_box(p)
+    p.fill(FIELD, "other")
+    p.click("#rd-popover button[data-a=minimize]")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    p.fill(FIELD, "kept for later")
+    p.click("#rd-popover button[data-a=minimize]")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    until(lambda: p.input_value(FIELD) == "kept for later", what="the kept text back in the box")
+    store_unreadable(p)
+    p.fill(FIELD, "")
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close on an empty field")
+    store_unreadable(p, False)
+    store_full(p)
+    p.evaluate("window.dispatchEvent(new StorageEvent('storage'))")      # one read that works: its purge cannot be written
+    until(lambda: p.evaluate("window.__refusedSets || 0") > 0, what="the purge to meet the full store")
+    p.evaluate("new Promise(r => setTimeout(r, 400))")      # an absence cannot be waited for by a signal: time for runaway redraws to show
+    assert p.evaluate("window.__refusedSets") < 20, "the redraws the purge queued purged again, each queueing more"
 
 
 READABLE_REPLY = ("Done. What changed:\n- the intro is shorter\n- `fetch_all` retries\n\n"

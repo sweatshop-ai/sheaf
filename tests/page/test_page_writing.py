@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from helpers import comment, writes_from_outside
-from pagehelp import (DOC, P1, RELOADING, draft_key, P2, T0, at, comment_on, kept_entries, kept_json, set_kept, gone, key, mark, open_box, open_form, typed, reload_on_clock, reloaded,
+from pagehelp import (DOC, P1, RELOADING, draft_key, P2, T0, at, comment_draft_key, comment_on, kept_entries, kept_json, set_kept, gone, key, mark, open_box, open_form, typed, reload_on_clock, reloaded,
                       select, select_by_touch, toast, toast_state, toasted, toasts_to_the_end, type_at_end, until)
 from pagehelp import TOAST_STEP, run_clock
 from sheafmd import comments as rdc

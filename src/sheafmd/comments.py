@@ -56,7 +56,10 @@ COMMENT_RE = re.compile(rf"<!--\s*{MARKER}\b")
 ROLES = ("answer", "action")
 # A CommonMark code span: a run of backticks, then the shortest text up to a run of
 # the same length that is not part of a longer one.
-CODE_SPAN_RE = re.compile(r"(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)")
+# A backslash escapes the backtick it precedes, so a run after an odd number of them opens nothing
+# there; what is left of an escaped run (one backtick shorter) may still open a span. Group 1 is
+# the opening run.
+CODE_SPAN_RE = re.compile(r"(?<!\\)(?:\\\\)*(?:(?<!`)|\\`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)")
 STRAY_RE = re.compile(r"^[ \t]*-->", re.M)
 REPLY_RE = re.compile(r'^@("(?:[^"]*)"|\S+) (\d{4}-\d\d-\d\dT\d\d:\d\d)(?: (answer|action))?:\s?(.*)$',
                       re.S)
@@ -278,7 +281,7 @@ def _scan(text: str):
     pos, found, no_closer = 0, {}, False
     # kind -> (pattern, group): an item starts at the group, which a tag's backslash prefix and
     # an opener's escape check put after the match's own start.
-    kinds = {"code": (CODE_SPAN_RE, 0), "tag": (_HTML_TAG_RE, "tag"), "comment": (_OPENER_RE, 1)}
+    kinds = {"code": (CODE_SPAN_RE, 1), "tag": (_HTML_TAG_RE, "tag"), "comment": (_OPENER_RE, 1)}
     while True:
         for kind, (rx, group) in kinds.items():
             m = found.get(kind, False)
@@ -789,7 +792,7 @@ def _comment_spans(md: str) -> list:
                 spans.append((start, base + e + 3))
                 i, start = e + 3, None
             o, span = _opener(text, i), CODE_SPAN_RE.search(text, i)
-            if span and (o < 0 or span.start() < o):
+            if span and (o < 0 or span.start(1) < o):
                 i = span.end()
             elif o >= 0:
                 i, start = o + 4, base + o

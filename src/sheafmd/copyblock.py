@@ -19,7 +19,7 @@ BUTTON_CLASS = "rd-copybtn"
 STAND_IN = "RDCP7ZQ"      # one word for pandoc, as long as the marker so the columns of its line stay put; a document that holds this word in a copy block collides with it
 
 # The first line of a top-level quote, and then at least one line with words.
-_LINE = re.compile(r"(\s{0,3}>[ \t]?)" + re.escape(MARKER) + r"[ \t]*(?=\r?(?:\n|$))")
+_LINE = re.compile(r"(\s{0,3}>[ \t]?)" + re.escape(MARKER) + r"[ \t]*(?=\n|$)")
 _WORDS = re.compile(r"^[ \t>]*[^\s>]", re.M)
 # An underline in the first paragraph makes the marker line part of a heading, which `mark` cannot take it off.
 _UNDERLINE = re.compile(r"^ {0,3}(?:=+|-+)[ \t]*$")

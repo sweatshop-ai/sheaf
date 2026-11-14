@@ -431,6 +431,7 @@ def test_the_stop_event_of_a_discarded_recorder_that_comes_late_leaves_the_new_r
     assert hub.posts == [], "a discarded sound was sent"
     p.click(MIC)                                            # the new recording is still the page's: this press stops it
     p.wait_for_function("window.__mic.made[1].state === 'inactive'")
+    p.evaluate("window.__mic.made[1].flush()")
     until(lambda: len(hub.posts) == 1, what="the new sound sent")
 
 

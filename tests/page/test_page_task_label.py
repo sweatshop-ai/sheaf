@@ -99,7 +99,9 @@ def test_a_drag_selection_from_the_label_opens_the_chat_box_and_ticks_nothing(sh
     p.mouse.up()
     open_box(p)
     assert p.locator("#rd-popover textarea").is_visible()
+    p.wait_for_timeout(600)
     assert f.read_text(encoding="utf-8") == SHEAF
+    assert p.locator("main input[type=checkbox]").first.is_checked() is False
 
 
 def test_on_a_phone_the_label_is_44_px_high_to_touch(touch_tab):

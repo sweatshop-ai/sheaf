@@ -177,6 +177,14 @@ def _flatten_deep(soup, log: list[str]) -> None:
         stack.extend((child, depth + 1) for child in node.contents)
 
 
+def _without_user_modify(value: str) -> str:
+    """A style attribute without the declarations that make text editable (`-webkit-user-modify`, `-moz-user-modify`,
+    `user-modify`): Chromium and WebKit let the reader type into such a span, and the page does not guard it. A name with
+    a backslash escape is dropped too, and the match is a search, so a comment before the name does not hide it."""
+    kept = [d for d in value.split(";") if not re.search(r"user-modify|\\", d.partition(":")[0], re.I)]
+    return ";".join(kept)
+
+
 def _mount_style(value: str) -> str:
     """The declarations of a style attribute that the allow-list names, written out normalised; "" when none is left.
     Each declaration stands or falls alone, and the value grammar has no quote, backslash, slash, bang or function
@@ -309,6 +317,8 @@ def _pass(fragment: str, comments: bool, log: list[str], mount: bool = False) ->
             if a.startswith("on") or a in DROPPED_ATTRS:
                 log.append(f"  - {attr} removed from <{name}>")
                 del tag[attr]
+            elif a == "style" and not mount:
+                tag[attr] = _without_user_modify(str(tag[attr]))
             elif a in URL_ATTRS:
                 value = tag[attr]
                 if isinstance(value, list):

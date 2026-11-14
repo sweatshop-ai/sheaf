@@ -180,39 +180,57 @@ def _flatten_deep(soup, log: list[str]) -> None:
 _EDITABLE_OR_ESCAPE = re.compile(r"user-modify|\\", re.I)
 
 
-_UNQUOTED_URL = re.compile(r"url\((?![ \t\n\r\f]*[\"'])[ \t\n\r\f]*(?:\\.|[^)\\])*(?:\)|\\?\Z)", re.I | re.S)
-_IDENT_CHAR = re.compile(r"[\w\-\\]|[^\x00-\x7f]")
+_UNQUOTED_URL = re.compile(r"(?![ \t\n\r\f]*[\"'])[ \t\n\r\f]*(?:\\.|[^)\\])*(?:\)|\\?\Z)", re.S)
+_NAME_RUN = re.compile(r"(?:[\w\-]|[^\x00-\x7f]|\\(?:[0-9a-fA-F]{1,6}(?:\r\n|[ \t\n\r\f])?|[^\n]|\Z))+")
+_ESCAPE = re.compile(r"\\(?:([0-9a-fA-F]{1,6})(?:\r\n|[ \t\n\r\f])?|(.))", re.S)
+_CLOSER = {"(": ")", "[": "]", "{": "}"}
+
+
+def _unescaped(name: str) -> str:
+    """A CSS name with its escapes read (`\\75 rl` is `url`), as CSS Syntax 3 does when it decides what a name is."""
+    return _ESCAPE.sub(lambda m: (chr(int(m[1], 16)) if m[1] and 0 < int(m[1], 16) <= 0x10FFFF else "\ufffd") if m[1] else (m[2] or "\ufffd"), name)
 
 
 def _declarations(value: str) -> list[str]:
-    """A style attribute cut at the `;` that end a declaration. A `;` inside a CSS string (a quote ends at the same quote,
-    or at a newline, and a backslash takes the next character), inside a comment or inside a `()`, `[]` or `{}` block
-    (`url(data:image/png;base64,…)`) does not end one. A `url(` that no quote follows, white space aside, is one token up to its first `)`
-    (a backslash takes the next character), so a `/*` or a quote inside it opens no comment and no string. A block left
-    open runs to the end, as in a browser; a closer with no opener is ignored. Only the pieces are cut here: the name is
-    searched in each piece whole, so a split that differs from a browser's can keep more or less, never hide the name."""
-    parts, start, i, n, quote, depth = [], 0, 0, len(value), "", 0
+    """A style attribute cut at the `;` that end a declaration, by the rules of the CSS Syntax 3 tokenizer. A `;` inside a CSS
+    string (a quote ends at the same quote, or at a newline, and a backslash takes the next character), inside a comment or inside
+    a `()`, `[]` or `{}` block (`url(data:image/png;base64,…)`) does not end one; a block ends only at its own closer, so
+    `(]` leaves a `(` open, and a closer with no opener is ignored. A name is read whole, escapes included, so `\\75 url(` and
+    `a\\:url(` are functions called something else, `@url(` and `#url(` an at-keyword and a hash followed by a `(`, and only a
+    name that reads `url` (any letter case), that no `@` or `#` leads and that `(` follows, is a url. A `url(` that no quote
+    follows, white space aside, is one token up to its first `)` (a backslash takes the next character), so a `/*` or a quote
+    inside it opens no comment and no string. A block left open runs to the end, as in a browser. Only the pieces are cut here:
+    the name is searched in each piece whole, so a split that differs from a browser's can keep more or less, never hide the name."""
+    parts, start, i, n, quote, blocks = [], 0, 0, len(value), "", []
     while i < n:
         c = value[i]
-        if c == "\\":
-            i += 2
-            continue
         if quote:
+            if c == "\\":
+                i += 2
+                continue
             if c == quote or c in "\n\r\f":
                 quote = ""
         elif c in "\"'":
             quote = c
-        elif c in "uU" and not (i and _IDENT_CHAR.match(value[i - 1])) and (m := _UNQUOTED_URL.match(value, i)):
-            i = m.end()
-            continue
         elif value.startswith("/*", i):
             end = value.find("*/", i + 2)
             i = n if end < 0 else end + 1
-        elif c in "([{":
-            depth += 1
-        elif c in ")]}":
-            depth = max(depth - 1, 0)
-        elif c == ";" and not depth:
+        elif c in "@#" and (m := _NAME_RUN.match(value, i + 1)):
+            i = m.end()
+            continue
+        elif m := _NAME_RUN.match(value, i):
+            i = m.end()
+            if i < n and value[i] == "(" and _unescaped(m[0]).lower() == "url" and (u := _UNQUOTED_URL.match(value, i + 1)):
+                i = u.end()
+            continue
+        elif c == "\\":
+            i += 2
+            continue
+        elif c in _CLOSER:
+            blocks.append(_CLOSER[c])
+        elif blocks and c == blocks[-1]:
+            blocks.pop()
+        elif c == ";" and not blocks:
             parts.append(value[start:i])
             start = i + 1
         i += 1
@@ -225,8 +243,8 @@ def _without_user_modify(value: str) -> str:
     `user-modify`): Chromium and WebKit let the reader type into such a span, and the page does not guard it. A declaration with
     a backslash is dropped too (an escape can spell the name; this also drops an ordinary `content:"\\201C"`), and the whole
     declaration is searched, not the text before its colon, so a comment before the name does not hide it, whatever the comment
-    holds. Where this splits differently from a browser (brackets are counted, not matched), the text is still searched
-    whole: a piece that holds the name is dropped."""
+    holds. Where this splits differently from a browser (see `_declarations`), the text is still searched whole: a piece that
+    holds the name is dropped."""
     return ";".join(d for d in _declarations(value) if not _EDITABLE_OR_ESCAPE.search(d))
 
 

@@ -7,3 +7,13 @@
 **Blocked by:** none
 
 **Claimed by:** Marek 2026-11-14 21:05
+
+**Status:** done (PR 338, merge bab11da)
+
+- [x] Le helper `phone_with` remplace l'installation répétée de `test_page_mobile_bar.py` et de `test_page_mobile_refocus.py`
+  - Preuve : `tests/page/pagehelp.py`, PR 338 ; revue Opus : même ordre écriture, commentaire, ouverture, mêmes arguments ; CI verte sur f4f7baa (3 tranches).
+- [x] La docstring périmée de `test_page_mobile_bar.py` a disparu ; `site = touch_tab.site` dans `test_page_keyboard.py`
+  - Preuve : diff de la PR 338.
+- [x] Reste c : un commentaire dit ce qui retient le rechargement après `delete_the_thread`
+  - Preuve : `test_page_writing.py`, comme corrigé après la revue (le texte de l'envoi échoué resté dans le formulaire, `page.js` `reloadWhenFree` → `writingNow`).
+- Restes de la PR 338 : ticket 111.

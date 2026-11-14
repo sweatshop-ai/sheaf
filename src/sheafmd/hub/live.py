@@ -82,6 +82,7 @@ class LiveDocument:
         # are in `telling`). The hub sets them; read under the lock, so neither may call back into this document.
         self.session_to = lambda: ""
         self.agent_tells = lambda: []
+        self.tells_lock = contextlib.nullcontext()      # the lock of the Tells' file: held while `telling` is read and published (`_publish_telling`)
         # The question the told session put to its person in its own chat, while it waits for
         # them there ("" when it is not waiting).
         self._question = ""
@@ -211,7 +212,7 @@ class LiveDocument:
             self._rerender()
             snap = self._snapshot(self._text)
             snap["textSame"] = False
-            self._publish("changed", snap)
+            self._publish_telling("changed", snap)
             return snap
 
     def save(self, base_hash, edits, rid=None, guard=None, move=None):
@@ -422,8 +423,15 @@ class LiveDocument:
         `base` is the hash of `start`. A tab that does not hold `start` (it missed a save) cannot
         use `textSame` and tells by `base`. `snap` is not changed."""
         sent = {**snap, "textSame": prose(start) == prose(self._text), "base": rds.md_hash(start)}
-        self._publish(event, {**extra, **sent})
+        self._publish_telling(event, {**extra, **sent})
         return sent
+
+    def _publish_telling(self, event, data):
+        """Publish `event` with its `telling` read again, both under the Tells' lock: a Tell changes (and its event goes
+        out) under that lock, so the page never hears `queued` in a snapshot after the `tell-seen` of the same Tell."""
+        with self.tells_lock:
+            data["telling"] = self._telling_view()
+            self._publish(event, data)
 
     def _answer(self, cid, base_hash, snap=None):
         """What a comment write answers the page: the snapshot with the comment's id. Without a version

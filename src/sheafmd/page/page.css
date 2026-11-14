@@ -253,3 +253,5 @@ blockquote.rd-copy{position:relative;padding-right:5.5em}
 #rd-actions .rd-act.pending,#rd-actions .rd-act.pressed,#rd-actions .rd-act[aria-pressed=true]{background:var(--rd-c);
  color:var(--bg,#fff)}
 #rd-actions .rd-act:disabled{cursor:default;opacity:.7}
+.doc-by .doc-by-who{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;
+ text-decoration:underline;text-underline-offset:2px}

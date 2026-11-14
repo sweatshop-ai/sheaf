@@ -165,7 +165,8 @@ class Tell:
             raise JobRefused(409, NOT_YET.format(product=ad.product))
         state = ad.state(t)
         if state is not None and state.status == "gone":
-            raise JobRefused(409, ENDED.format(product=ad.product))
+            self._reopen_for_jump(t, ad)            # an ended session is opened again, in front, where it can be
+            return
         values = ad.jump_values(t)
         if values is None:
             raise JobRefused(409, NOT_MINE)
@@ -178,6 +179,24 @@ class Tell:
             raise JobRefused(409, JUMP_BUSY)
         try:
             self._run_command(argv, env)
+        finally:
+            self._jumping.release()
+
+    def _reopen_for_jump(self, t: Target, ad: Adapter) -> None:
+        """A jump to a session that has ended: the `[reopen]` command opens it again (4.3), which puts it in
+        front. Without one, the line of 10.6."""
+        try:
+            command = config.reopen_command()
+        except config.ConfigError as e:
+            raise JobRefused(409, str(e)) from None
+        values = ad.reopen_values(t)
+        if command is None or values is None:
+            raise JobRefused(409, ENDED.format(product=ad.product))
+        if not self._jumping.acquire(blocking=False):
+            raise JobRefused(409, JUMP_BUSY)
+        try:
+            with self._reopening:
+                self._run_reopen(command, values, ad)
         finally:
             self._jumping.release()
 
@@ -229,13 +248,8 @@ class Tell:
             values = ad.reopen_values(t)
             if command is None or values is None:
                 raise DeliveryError(ENDED.format(product=ad.product))
-            # The adapter gives an id that is safe as it is; a name and a folder are text of the render's.
-            values["name"] = clean_display(values["name"]) or ad.display
-            values["agent"] = clean_display(values["agent"])
-            argv = [_REOPEN_PLACEHOLDER.sub(lambda m: values[m.group(1)], a) for a in command]
-            env = {**os.environ, **{f"SHEAF_REOPEN_{k.upper()}": x for k, x in values.items()}}
             try:
-                self._run_command(argv, env, "reopen")
+                self._run_reopen(command, values, ad)
             except JobRefused as r:
                 raise DeliveryError(r.message) from None
             end = time.monotonic() + REOPEN_WAIT
@@ -245,6 +259,15 @@ class Tell:
                 if time.monotonic() >= end:
                     raise DeliveryError(REOPEN_LATE.format(who=who(t, ad), s=REOPEN_WAIT))
                 time.sleep(REOPEN_POLL)
+
+    def _run_reopen(self, command: list, values: dict, ad: Adapter) -> None:
+        """Run the `[reopen]` command with the adapter's values. Raises JobRefused with its line."""
+        # The adapter gives an id that is safe as it is; a name and a folder are text of the render's.
+        values["name"] = clean_display(values["name"]) or ad.display
+        values["agent"] = clean_display(values["agent"])
+        argv = [_REOPEN_PLACEHOLDER.sub(lambda m: values[m.group(1)], a) for a in command]
+        env = {**os.environ, **{f"SHEAF_REOPEN_{k.upper()}": x for k, x in values.items()}}
+        self._run_command(argv, env, "reopen")
 
     def product(self, address: str) -> str:
         t = self.hub.target(address, kept=True)

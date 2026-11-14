@@ -6,6 +6,7 @@ Playwright's; a run without it, or without the package, skips these tests with t
 (the `CI` variable, which GitHub sets to true), where it fails.
 Every test here carries the `page` mark, so `-m "not page"` leaves them out.
 """
+import inspect
 import os
 import socket
 import time
@@ -207,6 +208,30 @@ def hub_journal(monkeypatch):
         finally:
             log.append((time.time(), f"/_/comment out: rid {req.body.get('rid')}"))
     monkeypatch.setattr(handler.Handler, "_comment", noting_comment)
+    try:
+        from playwright.sync_api import BrowserContext, Page
+    except ImportError:
+        Page = BrowserContext = None
+    for cls in (Page, BrowserContext):
+        if cls is None:
+            continue
+
+        def noting_route(self, url, handler, *a, _route=cls.route, _name=cls.__name__, **kw):
+            def noted(route):
+                log.append((time.time(), f"{_name}.route handler called for {route.request.method} {route.request.url[-30:]}"))
+            if len(inspect.signature(handler).parameters) == 1:      # Playwright passes the request too, to a handler that takes two
+                def called(route):
+                    noted(route)
+                    return handler(route)
+            else:
+                def called(route, request):
+                    noted(route)
+                    return handler(route, request)
+            log.append((time.time(), f"{_name}.route({url}) asked"))
+            out = _route(self, url, called, *a, **kw)
+            log.append((time.time(), f"{_name}.route({url}) registered"))
+            return out
+        monkeypatch.setattr(cls, "route", noting_route)
     monkeypatch.setattr(events.Bus, "publish", noting_publish)
     monkeypatch.setattr(server, "frame", noting_frame)
     return log

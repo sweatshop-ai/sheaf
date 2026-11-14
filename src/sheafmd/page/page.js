@@ -1614,7 +1614,12 @@ var create = function (ROOT, CFG, opts) {
       if (all.length) localStorage.setItem(COMMENT_DRAFT_KEY, JSON.stringify(all)); else localStorage.removeItem(COMMENT_DRAFT_KEY);
       pendingClears = [];
     } catch (e) { storeOk = false; }
-    if (later) setTimeout(unsentLine, 0); else unsentLine();
+    if (later) setTimeout(function () {
+      // Under the guard, as the redraw inside the purge was: a purge the full store refuses would else queue another.
+      flushing = true;
+      try { unsentLine(); } finally { flushing = false; }
+    }, 0);
+    else unsentLine();
   }
   // The entries `gone` names go, then `add` (if any) is added, in one write, stamped `at` now unless it brings its
   // own. For a form that knows which entry is its own: the same quote in another paragraph is another comment.

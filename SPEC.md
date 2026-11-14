@@ -1240,10 +1240,10 @@ Typed text is never lost by closing: Close, Escape and a click beside keep it in
 
 An emptied field, a cleared reply or edit, or a send the hub took, while the store refuses reads, is held in memory (`pendingClears`) and goes from the store with the first read that works, which writes the store without it. The limits of that guard:
 
-- A reload before any read that works brings the entry back once: the hold is in memory only (ticket 51's decision). A sent entry the hub took does not come back, its request id is read from the hub.
-- A purge writes the list the read returned, as every write does: an entry that is not well formed (no text, no quote and no thread) goes with it, though the person did not write.
+- A reload before any read that works brings the entry back once: the hold is in memory only (ticket 51's decision). A sent entry the hub took does not come back while the hub still holds its request id (the hub keeps them in memory, a number of them: after a hub restart it comes back).
+- A purge writes the list the read returned, as every write does: an entry that is not well formed (its text is not a string, or it has neither a quote nor a thread) goes with it, those of other roots too, though the person did not write.
 - Reading the store and writing it again are two steps of one task, not one atomic step between tabs; every writer of the store has this shape, and another tab's write lands between tasks, not inside one.
-- When the store answers reads but refuses writes (full), the clear stays held and every read tries the write again. Meanwhile an entry with no request id, written by another tab for the same thread and kind, is hidden from this page and goes with the clear when the write works. A read that makes that write fail sets the page's "store cannot keep it" state; the writers reset it before they use it.
+- When the store answers reads but refuses writes (full), the clear stays held and every read tries the write again. Meanwhile an entry with neither a request id nor an `of`, written by another tab for the same thread and kind, is hidden from this page and goes with the clear when the write works. A read that makes that write fail sets the page's "store cannot keep it" state; the writers reset it before they use it.
 - The line of messages not sent is drawn again after the read that purged, not inside it (a timer of 0 ms), so a list open at that moment is redrawn once its caller is done.
 
 Labels use the target's own name when it has one ("Tell Cosima", "Cosima's action"), else its display name ("Tell Claude", "Tell ChatGPT (Hans)"), never a hard-coded name (10.5). Read state goes to the hub (8.7) instead of `localStorage`.

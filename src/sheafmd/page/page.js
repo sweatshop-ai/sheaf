@@ -2430,12 +2430,8 @@ var create = function (ROOT, CFG, opts) {
   }
   async function cancel(id) {
     var off = function () {
-      // The events that follow still find what to say of each agent. A Cancel that finds no place left (an earlier
-      // Cancel of this thread took them off, its answer still to come) leaves the earlier one's, and its timer.
-      if (waits[id]) {
-        var mine = cancelled[id] = waits[id];
-        setTimeout(function () { if (cancelled[id] === mine) delete cancelled[id]; }, 5000);   // not a later Cancel's
-      }
+      var mine = cancelled[id] = waits[id] || {};
+      setTimeout(function () { if (cancelled[id] === mine) delete cancelled[id]; }, 5000);
       delete telling[id]; delete waits[id]; touched(id);
     };
     var waited = waits[id];

@@ -1975,6 +1975,7 @@ def _page_with_box_flipped(block, k):
     from bs4 import BeautifulSoup
     from sheafmd import copyblock
     from sheafmd.edit import _render_source
+    # The render is the cached one, as in production: it is the same text, and a cache hit changes nothing here.
     soup = BeautifulSoup(copyblock.mark(_render_source(block.content), page=True), "html.parser")
     box = soup.select('input[type="checkbox"]')[k]
     if box.has_attr("checked"):
@@ -2016,6 +2017,8 @@ def test_a_tick_never_lands_on_an_empty_task_item_standing_for_a_box_it_cannot_f
     ('- [ ]\n- [ ] b\n', 0),
 ])
 def test_an_empty_task_item_next_to_a_box_never_takes_its_tick(src, k):
+    # One box over two marks: the count check refuses these, the re-render check is not reached (as before PR 347).
+    # The cases that only the re-render check refuses are the `- - [ ] x` ones above.
     from sheafmd.blocks import split_md_blocks
     from sheafmd.edit import _toggle_boxes
     block = split_md_blocks(src)[0]
@@ -2080,3 +2083,26 @@ def test_a_task_mark_with_a_cr_inside_its_brackets_ends_after_the_bracket():
     src = "- [ \r] a\n"
     m = task_marks(src)[0]
     assert src[m.start():m.end()] == "- [ \r]"
+
+
+@pytest.mark.parametrize("src", ["1. [ ] a\n", "1) [x] a\n", "1. [ \r] a\n", "7.\r [ ] a\n"])
+def test_an_ordered_item_is_no_task_mark_because_pandoc_draws_it_no_box(src):
+    # c1 of ticket 128, measured on pandoc 3.9: `1. [ ] a` has no box, with a CR or without. The review put it on the
+    # CR in `1. [ \r] d`; the CR changes nothing, the marks only have to be the ones pandoc draws a box for.
+    from sheafmd import _pandoc
+    from sheafmd.edit import task_marks
+    assert "checkbox" not in _pandoc.run(["-f", "gfm", "-t", "html5"], src).stdout
+    assert task_marks(src) == []
+
+
+@pytest.mark.parametrize("src, k, want", [
+    ("- x\n  1. [ ] b\n- [ ] c\n", 0, "- x\n  1. [ ] b\n- [x] c\n"),
+    ("- x\r\n  1. [ ] b\r\n- [ ] c\r\n", 0, "- x\r\n  1. [ ] b\r\n- [x] c\r\n"),
+])
+def test_a_tick_beside_an_ordered_item_flips_its_line_and_leaves_the_rest(src, k, want):
+    # The ordered item drew no box, so the marks and the boxes had different counts and the tick went through pandoc,
+    # which rewrites the whole list.
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes
+    block = split_md_blocks(src)[0]
+    assert _toggle_boxes(block, _page_with_box_flipped(block, k)) == want

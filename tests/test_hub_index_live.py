@@ -909,6 +909,7 @@ def test_a_members_stream_slow_to_judge_an_event_holds_no_look_no_sweep_and_no_o
         release.set()
         first.join(5)
         reader.join(5)
+    assert not first.is_alive() and not reader.is_alive(), "the judging request and the reader did not finish after the release"
     assert got == [("status", {"doc": "work/a.md", "root": "work"})]
     assert statuses(mine) == [{"doc": "work/b.md", "root": "work"}, {"doc": "work/c.md", "root": "work"}]
 
@@ -968,6 +969,7 @@ def test_a_members_stream_waiting_on_git_holds_no_look_no_sweep_no_page_and_no_o
     finally:
         release.set()
         reader.join(5)
+    assert not reader.is_alive(), "the reader did not finish after the release"
     assert got == [("status", {"doc": "work/a.md", "root": "work"})]
     assert statuses(mine) == [{"doc": "work/b.md", "root": "work"}, {"doc": "work/c.md", "root": "work"}]
 

@@ -1070,12 +1070,12 @@ def test_a_clear_is_made_in_a_full_store_that_still_holds_an_earlier_builds_list
     select(p, at(P1, "apples"), at(P1, "apples", None))
     open_box(p)
     until(lambda: p.input_value(FIELD) == "kept for later", what="the kept text in the box")
-    store_full(p)
+    # full as a store is for a new key: it takes no entry key, and accepts the list it holds written shorter
+    p.evaluate("""() => { const set = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (k, v) { if (String(k).includes(':e:')) throw new Error('quota'); return set.call(this, k, v); }; }""")
     p.fill(FIELD, "")
     p.keyboard.press("Escape")
     until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close on an empty field")
-    p.wait_for_timeout(500)
-    print("HELD", store_as_held(p, site), p.evaluate("Object.keys(localStorage)"))
     until(lambda: [d["body"] for d in store_as_held(p, site)] == ["other"], what="the emptied message to leave the full store")
 
 

@@ -189,7 +189,7 @@ _CLOSER = {"(": ")", "[": "]", "{": "}"}
 
 def _unescaped(name: str) -> str:
     """A CSS name with its escapes read (`\\75 rl` is `url`), as CSS Syntax 3 does when it decides what a name is."""
-    return _ESCAPE.sub(lambda m: (chr(int(m[1], 16)) if m[1] and 0 < int(m[1], 16) <= 0x10FFFF and not 0xD800 <= int(m[1], 16) <= 0xDFFF else "\ufffd") if m[1] else (m[2] or "\ufffd"), name)
+    return _ESCAPE.sub(lambda m: (chr(int(m[1], 16)) if m[1] and 0 < int(m[1], 16) <= 0x10FFFF and not 0xD800 <= int(m[1], 16) <= 0xDFFF else "\ufffd") if m[1] else (m[2] if m[2] and m[2] != "\x00" else "\ufffd"), name)
 
 
 def _declarations(value: str) -> list[str]:

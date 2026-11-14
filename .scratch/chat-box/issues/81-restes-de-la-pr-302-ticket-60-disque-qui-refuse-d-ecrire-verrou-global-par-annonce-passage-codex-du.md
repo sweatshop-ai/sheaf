@@ -12,7 +12,7 @@
 
 **Blocked by:** none
 
-**Claimed by:**
+**Claimed by:** Gudrun
 
 **Status:** ready
 

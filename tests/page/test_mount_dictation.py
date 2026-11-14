@@ -79,7 +79,7 @@ def _refuse_and_remount(front, site, status):
     front.page.wait_for_timeout(500)
     if not front.has(FIELD):      # the remount keeps the thread open, so a click on the badge would close it
         front.click(".rd-badge")
-    front.page.wait_for_selector(FIELD)
+    until(lambda: front.has(FIELD), what="the form of the thread")     # the closed root: page selectors do not reach it
     front.page.wait_for_timeout(300)
 
 

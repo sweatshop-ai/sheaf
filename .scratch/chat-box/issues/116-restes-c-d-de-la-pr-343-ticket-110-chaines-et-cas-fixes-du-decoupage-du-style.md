@@ -9,4 +9,6 @@
 
 **Blocked by:** PR 343 fusionnée
 
+**Claimed by:** Marisol
+
 **Status:** ready-for-agent

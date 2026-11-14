@@ -4445,12 +4445,16 @@ var create = function (ROOT, CFG, opts) {
   buildMenu();
   paint(null);
   try {
-    var keep = JSON.parse(sessionStorage.getItem(KEYS + 'rd-keep') || 'null');
+    // All three keys are read raw and removed before either is parsed: a value that is not JSON (an older page's, a
+    // foreign write) must not stop this boot, nor be there again for the next load of the tab.
+    var rawKeep = sessionStorage.getItem(KEYS + 'rd-keep');
     var msg = sessionStorage.getItem(KEYS + 'rd-toast');
     var rawPress = sessionStorage.getItem(KEYS + 'rd-press-said');   // a press's refusal a reload waited for (10.11)
     sessionStorage.removeItem(KEYS + 'rd-keep');
     sessionStorage.removeItem(KEYS + 'rd-toast');
     sessionStorage.removeItem(KEYS + 'rd-press-said');
+    var keep = null;
+    try { keep = JSON.parse(rawKeep || 'null'); } catch (e) {}
     var refusedPress = null;      // an older page left the bare text here: that is no refusal to say again, and no reason to stop booting
     try { refusedPress = JSON.parse(rawPress || 'null'); } catch (e) {}
     if (!refusedPress || typeof refusedPress.text !== 'string' || typeof refusedPress.until !== 'number') refusedPress = null;

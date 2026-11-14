@@ -13,7 +13,7 @@
 
 **Claimed by:** Aurelio 2026-11-14 18:51
 
-**Status:** in-progress
+**Status:** done (merged into main as 16fb935, PR 327)
 
 **Par où commencer :** le point `pressSaid` jamais remis à zéro : écrire le test rouge (A refusé, B réussi, rechargement dans la fenêtre de A), sur t-compute, jamais sur le portable.
 

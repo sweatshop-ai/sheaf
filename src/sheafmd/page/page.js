@@ -3427,8 +3427,9 @@ var create = function (ROOT, CFG, opts) {
       if (!isBox) {
         var lab = t && t.closest && t.closest('label');
         var own = lab && main.contains(lab) && lab.querySelector('input[type="checkbox"]');
-        if (!own || (t.closest && t.closest('a, .rd-badge, [data-rd-ui]'))) return;       // a link opens, a comment's badge opens its thread
-        e.preventDefault();
+        if (!own || (t.closest && t.closest('a'))) return;       // a link in the line opens
+        e.preventDefault();                                       // the browser's own toggle of the label is cancelled
+        if (t.closest && t.closest('.rd-badge, [data-rd-ui]')) return;       // a comment's badge opens its thread, it does not tick
         if (editing || e.detail > 1 || !onLabelWords(lab, e)) return;       // a double or triple click selects, it does not tick again
         t = own;
       }

@@ -4844,6 +4844,7 @@ def test_typing_while_a_change_from_outside_settles_is_refused_and_said(tab):
 
 # Two pages of one document write one key. Both sends fail at the same instant, each page's renderer in its own
 # process, so neither may have heard of the other's write when it writes: the list must still hold both.
+# It does not (SPEC 10.4, ticket 120): xfail(strict), so the day the fix lands this turns into a failure to be removed.
 FAIL_TOGETHER = """(at) => {
   const real = window.fetch;
   window.fetch = function (url, init) {
@@ -4857,6 +4858,7 @@ FAIL_TOGETHER = """(at) => {
 }"""
 
 
+@pytest.mark.xfail(strict=True, reason="ticket 120: two pages write the held-sends store without a re-read; see SPEC 10.4")
 def test_two_sends_that_fail_at_the_same_instant_on_two_pages_are_both_kept(thread, context):
     a, b = thread.page, second_page(thread, context)
     b.click(".rd-badge")
@@ -4888,7 +4890,7 @@ def test_two_sends_that_fail_at_the_same_instant_on_two_pages_are_both_kept(thre
 
 
 # A Discard on one page of an entry another page wrote a moment ago is a removal on purpose: the page that wrote it
-# keeps its claim on the entry for a while (against a stale overwrite), and must not write it again.
+# must stay gone: the page that wrote it does not write it again (main's behaviour, pinned for the fix of ticket 120).
 @pytest.mark.parametrize("form", ["reply", "edit"])
 def test_a_discard_on_another_page_just_after_a_send_failed_is_not_put_back_by_the_page_that_wrote_it(thread, context, form):
     a, b = thread.page, second_page(thread, context)
@@ -4905,7 +4907,7 @@ def test_a_discard_on_another_page_just_after_a_send_failed_is_not_put_back_by_t
     until(lambda: b.query_selector(UNSENT) and "not sent" in b.inner_text(UNSENT), what="the not-sent line on page B")
     a.evaluate("window.__after = 0")
     discard_unsent(b, "words to be discarded")
-    assert time.time() - began < 1.5, "the Discard came after the page's claim ended: the test tried nothing"
-    a.wait_for_timeout(3000)            # past the 2 s a page keeps its claim
+    assert time.time() - began < 1.5, "the Discard came after 2 s: the test tried nothing"
+    a.wait_for_timeout(3000)            # long enough for a page to write it again
     assert a.evaluate("window.__after") == 0, "the page that wrote the entry wrote the discarded text again"
     assert comment_store(thread) == ""

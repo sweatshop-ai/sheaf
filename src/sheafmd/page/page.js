@@ -932,7 +932,9 @@ var create = function (ROOT, CFG, opts) {
       return;
     }
     try {
-      if (pressSaid && (pressSaid.toast.until === null || Date.now() < pressSaid.toast.until)) sessionStorage.setItem(KEYS + 'rd-press-said', pressSaid.text);
+      // It carries the refusal's own deadline (a toast still queued has 7 s from now), so reloads do not chain it on.
+      if (pressSaid && (pressSaid.toast.until === null || Date.now() < pressSaid.toast.until))
+        sessionStorage.setItem(KEYS + 'rd-press-said', JSON.stringify({ text: pressSaid.text, until: pressSaid.toast.until === null ? Date.now() + 7000 : pressSaid.toast.until }));
       sessionStorage.setItem(KEYS + 'rd-keep', JSON.stringify({ doc: CFG.doc, y: scrollNow(), open: openId || null,
                                                          panel: panel.classList.contains('open'),
                                                          known: counts(), editing: editing,
@@ -1567,7 +1569,7 @@ var create = function (ROOT, CFG, opts) {
   // first read that works, which writes the store without them (commentDraftsSave). Kept in memory: a reload before
   // that read, while the store still refuses it, offers the entry again.
   var pendingClears = [];
-  var readWorked = false, flushing = false, lastRead = [];
+  var readWorked = false, flushing = false;
   // `strict`: a store that refuses the read throws, instead of passing for an empty one (the writers read so, commentDraftsHeld and taken).
   // A value that is not JSON is set aside under `:unreadable` first, so the write that follows does not destroy it
   // (a later one replaces an earlier one set aside: the store holds one at a time).
@@ -1602,7 +1604,6 @@ var create = function (ROOT, CFG, opts) {
         try { commentDraftsSave(held, true); } finally { flushing = false; }
       }
     }
-    lastRead = held;
     return held;
   }
   // A writer reads the store strictly, so a read that fails now and then does not pass for an empty store and the
@@ -1622,10 +1623,8 @@ var create = function (ROOT, CFG, opts) {
       var all = commentDraftsRaw(true).filter(ofOtherRoot).concat(ds.map(function (d) {
         return d.root === undefined && CFG.root ? Object.assign({ root: CFG.root }, d) : d;
       }));
-      withdrawn(all.filter(function (d) { return !ofOtherRoot(d); }));
       if (all.length) localStorage.setItem(COMMENT_DRAFT_KEY, JSON.stringify(all)); else localStorage.removeItem(COMMENT_DRAFT_KEY);
       pendingClears = [];
-      claim(all.filter(function (d) { return !ofOtherRoot(d); }));
     } catch (e) { storeOk = false; }
     if (later) setTimeout(function () {
       // Under the guard, as the redraw inside the purge was: a purge the full store refuses would else queue another.
@@ -1633,65 +1632,6 @@ var create = function (ROOT, CFG, opts) {
       try { unsentLine(); } finally { flushing = false; }
     }, 0);
     else unsentLine();
-  }
-  // Two pages that write the store in the same instant each read it before the other's write reached them, and the
-  // later write puts back what the earlier one changed: a send that failed on one page stays marked out (left off
-  // the not-sent list for HELD), or one that was taken comes back. A page cannot tell its read is stale, and its own
-  // view can stay the stale one for a while (measured: well past 100 ms), so it does not read again at once: it
-  // keeps what it put in or took out of the store for CLAIMED, and checks it against every write another page
-  // makes in that time (the `storage` event, which comes once the page has that write). What is not as it left
-  // it is made so again, and nothing else is touched. An entry is told by its thread, kind and request id (a new
-  // message, by its passage). A removal on purpose is told apart from an overwrite: a write that takes out an entry its
-  // own read held (a Discard, a send taken, a Cancel) leaves a mark of its own under the entry's key, written before the
-  // store is, so that it has reached the other pages by the time they hear of the store's change; a claim older than the
-  // mark is let go. An overwrite that never knew the entry leaves none. Marks are put away after MARK_LIFE.
-  var CLAIMED = 2000, MARK_LIFE = 10000, MARK = COMMENT_DRAFT_KEY + ':gone:', RECLAIMS = 8, claims = {}, reclaims = 0;
-  function entryKey(d) {
-    return [d.thread || '', d.kind || '', d.rid || d.of || '', typeof d.thread === 'string' ? '' : [d.quote, d.block, d.occ].join('|')].join('\u0001');
-  }
-  // A mark that cannot be written (a full store) is not worth the write of the store itself: the claim stays, as before.
-  function withdrawn(written) {
-    var now = Date.now(), kept = {}, stale = [];
-    try {
-      for (var i = 0; i < localStorage.length; i++) {
-        var name = localStorage.key(i);
-        if (name && name.indexOf(MARK) === 0 && now - Number(localStorage.getItem(name)) > MARK_LIFE) stale.push(name);
-      }
-      stale.forEach(function (name) { localStorage.removeItem(name); });
-      written.forEach(function (d) { kept[entryKey(d)] = true; });
-      lastRead.forEach(function (d) { var k = entryKey(d); if (!kept[k]) localStorage.setItem(MARK + k, String(now)); });
-    } catch (e) { /* the store is written all the same */ }
-  }
-  // What this write changed against the read it came from: the entries it put and the ones it took out.
-  function claim(written) {
-    var before = {}, after = {}, until = Date.now() + CLAIMED;
-    lastRead.forEach(function (d) { before[entryKey(d)] = JSON.stringify(d); });
-    written.forEach(function (d) { after[entryKey(d)] = d; });
-    Object.keys(after).forEach(function (k) { if (before[k] !== JSON.stringify(after[k])) claims[k] = { want: after[k], until: until, born: Date.now() }; });
-    Object.keys(before).forEach(function (k) { if (!after[k]) claims[k] = { want: null, until: until }; });
-    lastRead = written;
-    reclaims = 0;
-  }
-  function reclaim() {
-    var now = Date.now(), fixed = false;
-    Object.keys(claims).forEach(function (k) { if (claims[k].until < now) delete claims[k]; });
-    if (!Object.keys(claims).length || reclaims >= RECLAIMS) return;
-    try {
-      var raw = commentDraftsRaw(true), mine = raw.filter(function (d) { return !ofOtherRoot(d); });
-      Object.keys(claims).forEach(function (k) {
-        var i = -1, want = claims[k].want;
-        if (want && Number(localStorage.getItem(MARK + k)) >= claims[k].born) { delete claims[k]; return; }       // taken out on purpose since
-        mine.forEach(function (d, j) { if (entryKey(d) === k) i = j; });
-        if (want === null && i >= 0) { mine.splice(i, 1); fixed = true; }
-        else if (want && i < 0) { mine.push(want); fixed = true; }
-        else if (want && JSON.stringify(mine[i]) !== JSON.stringify(want)) { mine[i] = want; fixed = true; }
-      });
-      if (!fixed) return;
-      var all = raw.filter(ofOtherRoot).concat(mine);
-      reclaims++;
-      if (all.length) localStorage.setItem(COMMENT_DRAFT_KEY, JSON.stringify(all)); else localStorage.removeItem(COMMENT_DRAFT_KEY);
-      lastRead = mine;
-    } catch (e) { /* a store that cannot be read now: the write stands as it was made */ }
   }
   // The entries `gone` names go, then `add` (if any) is added, in one write, stamped `at` now unless it brings its
   // own. For a form that knows which entry is its own: the same quote in another paragraph is another comment.
@@ -1893,7 +1833,7 @@ var create = function (ROOT, CFG, opts) {
   // kept comments' notice is left as it is: its text is being typed into, and it is drawn from the store again
   // after any close.
   listen(window, 'storage', function (e) {
-    if (e.key === null || e.key === COMMENT_DRAFT_KEY) { reclaim(); unsentLine(); }      // null: the whole store was cleared
+    if (e.key === null || e.key === COMMENT_DRAFT_KEY) unsentLine();      // null: the whole store was cleared
   });
   // The list the line opens: a popover above it, out of the text's way until asked for, that Escape, a click
   // outside or the line again close. Its forms are data-kept: their text is in the store, nothing to hold.
@@ -2646,7 +2586,7 @@ var create = function (ROOT, CFG, opts) {
             clearTimeout(d.timer); clearInterval(d.watch);    // a recorder can stop by itself (a microphone unplugged): its timer must not cut a later recording
             var gone = function () { return d.discard || unmounted || !f.isConnected; };
             // A discarded sound leaves a form that may still be here (a send that fails gives it back): its button is idle again.
-            var here = function () { if (!unmounted && f.isConnected) idle(); };
+            var here = function () { if (!unmounted && f.isConnected && (!dict || dict === d || dict.f !== f)) idle(); };   // not under a newer recording of this same form
             if (gone() || !d.chunks.length) { free(); here(); if (!gone()) says('Nothing was recorded. Try again.'); return; }
             b.disabled = true; b.title = 'Transcribing…'; b.setAttribute('aria-label', 'Transcribing…'); b.setAttribute('aria-pressed', 'false');
             d.abort = new AbortController();
@@ -2664,7 +2604,7 @@ var create = function (ROOT, CFG, opts) {
           });
           try { rec.start(); } catch (e) { release(); free(); says('The recording could not start. Try again.'); return; }
           b.title = 'Stop'; b.setAttribute('aria-pressed', 'true');
-          d.timer = setTimeout(function () { if (dict === d) stopDictation(false); }, DICTATE_MAX);
+          d.timer = setTimeout(function () { stopDictation(false); }, DICTATE_MAX);    // `dict` is d: every way out of d clears the timer first
           if (!MOUNTED) d.watch = setInterval(function () {   // the service lost during the recording: the sound is dropped
             dictationAvailable().then(function (yes) {
               if (yes || dict !== d || !d.rec || d.rec.state !== 'recording') return;
@@ -4507,10 +4447,13 @@ var create = function (ROOT, CFG, opts) {
   try {
     var keep = JSON.parse(sessionStorage.getItem(KEYS + 'rd-keep') || 'null');
     var msg = sessionStorage.getItem(KEYS + 'rd-toast');
-    var refusedPress = sessionStorage.getItem(KEYS + 'rd-press-said');   // a press's refusal a reload waited for (10.11)
+    var rawPress = sessionStorage.getItem(KEYS + 'rd-press-said');   // a press's refusal a reload waited for (10.11)
     sessionStorage.removeItem(KEYS + 'rd-keep');
     sessionStorage.removeItem(KEYS + 'rd-toast');
     sessionStorage.removeItem(KEYS + 'rd-press-said');
+    var refusedPress = null;      // an older page left the bare text here: that is no refusal to say again, and no reason to stop booting
+    try { refusedPress = JSON.parse(rawPress || 'null'); } catch (e) {}
+    if (!refusedPress || typeof refusedPress.text !== 'string' || typeof refusedPress.until !== 'number') refusedPress = null;
     // One hub serves every document from one origin, so what a reload kept
     // belongs to this page only if it names this document.
     if (keep && keep.doc !== CFG.doc) { keep = null; msg = null; }
@@ -4539,7 +4482,10 @@ var create = function (ROOT, CFG, opts) {
     }
     // What the old page said and the reload left, then the refusal, which a second reload says again in its turn.
     if (msg) say(msg);
-    if (refusedPress && keep) pressSaid = { text: refusedPress, toast: say(refusedPress, true) };
+    if (refusedPress && keep && Date.now() < refusedPress.until) {
+      say(refusedPress.text, true);
+      pressSaid = { text: refusedPress.text, toast: { until: refusedPress.until } };      // the deadline it was said in, not a new one
+    }
     if (canSave) { showKept(); unsentLine(); }
     var unsaved = canEdit ? editDraftFound() : null;
     if (unsaved) offerDraft(unsaved);

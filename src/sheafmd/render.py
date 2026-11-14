@@ -53,8 +53,15 @@ class RenderError(Exception):
 
 class UnclosedComment(RenderError):
     def __init__(self, line: int, note: bool = False, swallows: bool = False,
-                 unreadable: bool = False):
+                 unreadable: bool = False, empty: str = ""):
         self.line = line
+        if empty:
+            # `<!-->` and `<!--->`: a browser and pandoc end them at once, the strip does not know them.
+            super().__init__(
+                f"line {line} holds {empty}, an empty HTML comment, and the share copy cannot "
+                "read it: it takes a comment to run to the next -->, which would drop text the "
+                "page shows. Remove it, or write it as a comment with a body, and share again.")
+            return
         if unreadable:
             # The check could not read pandoc's tree, so it cannot say whether the stretch
             # loses text: the stretch may be a whole comment that loses nothing.
@@ -1030,8 +1037,12 @@ def build(md: Path, *, theme: Theme, share: bool = True, title: str | None = Non
         # pandoc made one of its own. Never ship it.
         line = _unclosed_line(original, frag)
         if line:
-            head = rdc.COMMENT_RE.search(original.split("\n")[line - 1])
-            raise UnclosedComment(line, note=bool(head))
+            text = original.split("\n")[line - 1]
+            head = rdc.COMMENT_RE.search(text)
+            first = next((m for m in re.finditer(r"<!--", text)
+                          if not any(a <= m.start() < b for a, b in (x.span() for x in COMMENT_RE.finditer(text)))), None)
+            empty = re.match(r"<!---?>", text[first.start():]) if first else None
+            raise UnclosedComment(line, note=bool(head), empty=empty.group() if empty else "")
         log.append("  ! pandoc produced an HTML comment in the share copy; it was removed")
         frag = strip_comments(frag, log)
 

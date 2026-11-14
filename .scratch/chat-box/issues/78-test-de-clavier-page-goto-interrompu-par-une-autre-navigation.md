@@ -10,7 +10,7 @@
 
 **Blocked by:** none
 
-**Claimed by:**
+**Claimed by:** Runa
 
 **Par où commencer :** le journal du run 43586766076, tentative 1, puis `tests/page/conftest.py:148`.
 

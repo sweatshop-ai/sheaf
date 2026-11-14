@@ -12,9 +12,9 @@ Classe : c.
 
 **Claimed by:** Viggo 2026-11-14 00:51
 
-**Status:** in-progress
+**Status:** done (PR 285, merge d9a969b)
 
-- [ ] Un titre `#<espace insécable>Foo` : commentaire ajouté sans erreur, bloc à un endroit qui garde les mots — preuve : test de `add_comment`, rouge avant
-- [ ] `### ###` : `heading_anchor` rend None, le bloc va sur sa propre ligne
-- [ ] Un titre avec `<!--` non fermé : décision écrite (refuser, ou bloc avant l'ouvreur) et test
-- [ ] Cas 4 : décision écrite
+- [x] Un titre `#<espace insécable>Foo` : commentaire ajouté sans erreur, bloc à un endroit qui garde les mots — preuve : test de `add_comment`, rouge avant
+- [ ] `### ###` : `heading_anchor` rend None (prouvé), le bloc va sur sa propre ligne (chemin du merge non prouvé pour ce titre : test dans le ticket 65)
+- [x] Un titre avec `<!--` non fermé : décision écrite (refuser, ou bloc avant l'ouvreur) et test
+- [x] Cas 4 : décision écrite (bloc multi-lignes sur sa propre ligne après le titre, SPEC 10.4)

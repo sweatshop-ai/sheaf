@@ -924,8 +924,9 @@ def doc_header(frag: str, by: str, for_: str | None) -> str:
     if by:
         # data-rd-ui: the page leaves it out of the title block's text, which the
         # server counts from the .md, where the byline is not.
-        head = (f'<p class="doc-by" data-rd-ui>Document prepared by {html.escape(by)}'
-                + (f' for {html.escape(for_)}' if for_ else "") + '</p>')
+        # data-for: the page writes the line again with the session's name (10.1) and keeps the client.
+        head = ((f'<p class="doc-by" data-rd-ui data-for="{html.escape(for_)}">' if for_ else '<p class="doc-by" data-rd-ui>')
+                + f'Document prepared by {html.escape(by)}' + (f' for {html.escape(for_)}' if for_ else "") + '</p>')
 
     # First paragraph after the title, and only if it opens with a bold label.
     pm = re.compile(r"<p([^>]*)>([\s\S]*?)</p>").search(frag, at)

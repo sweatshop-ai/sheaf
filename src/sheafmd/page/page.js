@@ -932,7 +932,9 @@ var create = function (ROOT, CFG, opts) {
       return;
     }
     try {
-      if (pressSaid && (pressSaid.toast.until === null || Date.now() < pressSaid.toast.until)) sessionStorage.setItem(KEYS + 'rd-press-said', pressSaid.text);
+      // It carries the refusal's own deadline (a toast still queued has 7 s from now), so reloads do not chain it on.
+      if (pressSaid && (pressSaid.toast.until === null || Date.now() < pressSaid.toast.until))
+        sessionStorage.setItem(KEYS + 'rd-press-said', JSON.stringify({ text: pressSaid.text, until: pressSaid.toast.until === null ? Date.now() + 7000 : pressSaid.toast.until }));
       sessionStorage.setItem(KEYS + 'rd-keep', JSON.stringify({ doc: CFG.doc, y: scrollNow(), open: openId || null,
                                                          panel: panel.classList.contains('open'),
                                                          known: counts(), editing: editing,
@@ -4445,7 +4447,7 @@ var create = function (ROOT, CFG, opts) {
   try {
     var keep = JSON.parse(sessionStorage.getItem(KEYS + 'rd-keep') || 'null');
     var msg = sessionStorage.getItem(KEYS + 'rd-toast');
-    var refusedPress = sessionStorage.getItem(KEYS + 'rd-press-said');   // a press's refusal a reload waited for (10.11)
+    var refusedPress = JSON.parse(sessionStorage.getItem(KEYS + 'rd-press-said') || 'null');   // a press's refusal a reload waited for (10.11)
     sessionStorage.removeItem(KEYS + 'rd-keep');
     sessionStorage.removeItem(KEYS + 'rd-toast');
     sessionStorage.removeItem(KEYS + 'rd-press-said');
@@ -4477,7 +4479,10 @@ var create = function (ROOT, CFG, opts) {
     }
     // What the old page said and the reload left, then the refusal, which a second reload says again in its turn.
     if (msg) say(msg);
-    if (refusedPress && keep) pressSaid = { text: refusedPress, toast: say(refusedPress, true) };
+    if (refusedPress && keep && Date.now() < refusedPress.until) {
+      say(refusedPress.text, true);
+      pressSaid = { text: refusedPress.text, toast: { until: refusedPress.until } };      // the deadline it was said in, not a new one
+    }
     if (canSave) { showKept(); unsentLine(); }
     var unsaved = canEdit ? editDraftFound() : null;
     if (unsaved) offerDraft(unsaved);

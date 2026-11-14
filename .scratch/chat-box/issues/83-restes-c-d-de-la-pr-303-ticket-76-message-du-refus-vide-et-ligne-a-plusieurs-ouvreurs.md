@@ -9,11 +9,12 @@
 
 **Blocked by:** none
 
-**Claimed by:**
 
 **Par où commencer :** `tests/test_share_copy.py`, `test_the_refusal_of_an_empty_comment_opener_does_not_say_it_is_never_closed`.
 
 - [ ] Points 1 à 5 traités
 - [ ] CI verte
 
-**Status:** ready-for-agent
+**Claimed by:** Mauro 2026-11-14 18:51
+
+**Status:** in-progress

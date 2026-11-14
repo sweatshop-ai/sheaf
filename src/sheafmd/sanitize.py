@@ -181,7 +181,7 @@ _EDITABLE_OR_ESCAPE = re.compile(r"user-modify|\\", re.I)
 
 
 _UNQUOTED_URL = re.compile(r"url\((?![ \t\n\r\f]*[\"'])[ \t\n\r\f]*(?:\\.|[^)\\])*(?:\)|\\?\Z)", re.I | re.S)
-_IDENT_CHAR = re.compile(r"[\w\-\\]")
+_IDENT_CHAR = re.compile(r"[\w\-\\]|[^\x00-\x7f]")
 
 
 def _declarations(value: str) -> list[str]:

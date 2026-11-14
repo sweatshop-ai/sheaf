@@ -65,6 +65,9 @@ WORDS = ("Approve", "Run it", "Don't run", "Undo skip", "Done", "Share", "Stop J
 MOVE = "Move to"                # a word that takes an argument: `<slug> (ref <thread>)`
 FREE = ("Merge", "Deploy", "Install")   # the words whose argument is the rest of the line, which the hub does not read
 TOGGLES = frozenset({"Share"})  # the words a member may press and release; every other word is pressed once
+# A box line may say its word in its own words: `- [ ] Shared with the team` is Share's tick box (9.11, 10.11). The hub
+# reads and gives the word, never the line's text, and never writes the label into a file that holds `- [ ] Share`.
+LABELS = {"Shared with the team": "Share"}
 SHOWS = {"projects": "My projects", "mine": "Only mine", "all": "All of the team"}
 BATCH = 50                      # issues per GraphQL request
 ITEMS = 100                     # Project items of an issue per page: the most GitHub gives
@@ -77,7 +80,7 @@ MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", 
 _BOX_RE = re.compile(r"[A-Za-z0-9.-]{1,63}")
 _REPO_RE = re.compile(r"[A-Za-z0-9-]+/[A-Za-z0-9._-]+")
 _ISSUE_RE = re.compile(r"([A-Za-z0-9-]+)/([A-Za-z0-9._-]+)#([0-9]+)")
-_ACTION_RE = re.compile(r"\s*[-*+] \[(?P<mark>[ xX])\] (?:(?P<word>" + "|".join(re.escape(w).replace("'", "['’]") for w in WORDS if w != MOVE and w not in FREE)
+_ACTION_RE = re.compile(r"\s*[-*+] \[(?P<mark>[ xX])\] (?:(?P<word>" + "|".join(re.escape(w).replace("'", "['’]") for w in (*LABELS, *WORDS) if w != MOVE and w not in FREE)
                         + r")|(?P<free>" + "|".join(FREE) + r")\s+\S.*|(?P<move>" + re.escape(MOVE) + r")\s+(?P<slug>[A-Za-z0-9._\\-]+)\s+\(ref\s+[^()\s]+\))"
                         + r"(?:\s+@(?P<short>[A-Za-z0-9._-]+))?\s*")
 
@@ -370,7 +373,8 @@ def _title(heading: str) -> str:
 
 def _word(m: re.Match) -> str:
     """The word of the action `_ACTION_RE` matched, its apostrophe straight."""
-    return (m["word"] or m["free"] or m["move"]).replace("’", "'")
+    word = (m["word"] or m["free"] or m["move"]).replace("’", "'")
+    return LABELS.get(word, word)
 
 
 def _slug(m: re.Match) -> str:

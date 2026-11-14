@@ -1211,3 +1211,60 @@ def test_a_door_write_that_drops_the_front_matter_cannot_give_an_open_sheaf_to_a
     assert fm.get("owner") == "thierry" and fm.get("issue") == "thinkingtoo/tt-tiroir#9"
     assert team.get(f"/work/{DOC}", member=HANS).status == 404
     assert team.get(f"/work/{DOC}", member=THIERRY).status == 200
+
+
+# ── the tick box's own words, "Shared with the team" (action-buttons 03) ──────────────────────────────────────
+
+LABELLED = PRIVATE.replace("- [ ] Share", "- [ ] Shared with the team")
+
+
+def test_the_owners_tick_of_the_labelled_box_shares_the_sheaf_as_share_does(team, work):
+    put(team, work, DOC, LABELLED)
+    assert tick(team, work, DOC, "Share", THIERRY).status == 200
+    text = (work / DOC).read_text(encoding="utf-8")
+    fm = front_matter(text)
+    assert fm["visibility"] == "project" and fm["shared"].startswith("thierry ")
+    assert "- [x] Shared with the team" in text
+    assert team.get(f"/work/{DOC}", member=HANS).status == 200
+
+
+def test_the_labelled_box_ticked_by_a_member_who_is_not_the_owner_is_refused_and_writes_nothing(team, work):
+    put(team, work, DOC, LABELLED.replace("sources: [library:doc-123]", "sources: [issue:x/y#1]"))
+    before = (work / DOC).read_text(encoding="utf-8")
+    got = tick(team, work, DOC, "Share", HANS)
+    assert got.status == 409 and "owner" in got.json()["error"]
+    assert (work / DOC).read_text(encoding="utf-8") == before
+
+
+def test_the_list_reads_the_labelled_box_as_the_share_action_and_gives_the_word_share(team, work):
+    sheaf = the_list.read_sheaf(DOC, LABELLED)
+    assert [a[0] for a in sheaf.actions] == ["Share"]
+    assert [a[0] for a in the_list.read_sheaf(DOC, LABELLED.replace("[ ]", "[x]")).pressed] == ["Share"]
+
+
+def test_the_owners_release_of_the_labelled_box_makes_the_sheaf_their_own_alone_again(team, work):
+    put(team, work, DOC, LABELLED)
+    assert tick(team, work, DOC, "Share", THIERRY).status == 200
+    text = (work / DOC).read_text(encoding="utf-8")
+    edit = the_list.tick_edit(text, 0, "Share", release=True)
+    got = team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text), "edits": [edit]}, member=HANS)
+    assert got.status == 409 and "owner" in got.json()["error"]
+    assert (work / DOC).read_text(encoding="utf-8") == text
+    got = team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text), "edits": [edit]}, member=THIERRY)
+    assert got.status == 200
+    text = (work / DOC).read_text(encoding="utf-8")
+    assert "- [ ] Shared with the team" in text and front_matter(text)["visibility"] == "owner"
+    assert team.get(f"/work/{DOC}", member=HANS).status == 404
+
+
+def test_the_hub_never_writes_the_new_label_into_a_file_that_holds_the_old_line(team, work):
+    """An existing file keeps `- [ ] Share` through every write the hub makes (share, release): the tt-tiroir
+    record routine reads only the old word, so the new label must come from a file's author, never from the hub."""
+    put(team, work, DOC, PRIVATE)
+    assert tick(team, work, DOC, "Share", THIERRY).status == 200
+    text = (work / DOC).read_text(encoding="utf-8")
+    assert "- [x] Share\n" in text and "Shared with the team" not in text
+    edit = the_list.tick_edit(text, 0, "Share", release=True)
+    assert team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text), "edits": [edit]}, member=THIERRY).status == 200
+    text = (work / DOC).read_text(encoding="utf-8")
+    assert "- [ ] Share\n" in text and "Shared with the team" not in text

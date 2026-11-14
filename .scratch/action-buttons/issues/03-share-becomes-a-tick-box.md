@@ -4,6 +4,8 @@
 
 **Blocked by:** 02
 
+**Claimed by:** Anika 2026-11-14 02:10
+
 **Status:** ready-for-agent
 
 - [ ] The owner ticks and unticks it by its label; another member's tick is refused as today

@@ -881,8 +881,8 @@ The page and index scripts are inline `<script nonce>` elements; the page script
 **Sanitiser** (`sanitize.py`), run on pandoc's output before sheaf adds its own SVG and images:
 
 - Remove these elements with their content: `script`, `style`, `iframe`, `frame`, `frameset`, `object`, `embed`, `applet`, `base`, `meta`, `link`, `form`, `button`, `textarea`, `select`, `template`, `noscript`.
-- Remove `input` unless `type="checkbox"` (task lists).
-- Remove every attribute starting with `on`, and `srcdoc`, `formaction`.
+- Remove `input` unless its `type` is exactly `checkbox`, ASCII case aside: no trimming, and no Unicode case folding (task lists).
+- Remove every attribute starting with `on`, and `srcdoc`, `formaction`, `srcset`, `ping`, `contenteditable` (the page sets editability itself; one the document brings is outside what it guards).
 - In `href`, `src`, `action`, `poster`, `background`, `xlink:href`: keep only relative URLs, fragments, `http:`, `https:`, `mailto:`, `file:`, and `data:image/(png|jpeg|gif|webp)` on `img src`. Remove the attribute otherwise.
 - Keep HTML comments (sentinels and sheaf comments depend on them) and harmless markup (`details`, `summary`, `sup`, `sub`, `br`, `kbd`, `mark`, tables, inline `svg` without scripts).
 

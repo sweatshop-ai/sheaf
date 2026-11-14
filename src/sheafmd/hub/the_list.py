@@ -40,7 +40,7 @@ from urllib.parse import quote
 from .. import beneath, config, paths
 from ..source import md_hash
 from ..blocks import _split_lines, split_md_blocks
-from ..edit import TASK_MARK_RE, ticked_html
+from ..edit import task_marks, ticked_html
 from .. import comments as rdc
 from . import commits, place, projects, state
 from . import proxy as proxy_mod
@@ -445,7 +445,7 @@ def box_place(text: str, line: int, blocks=None) -> tuple | None:
     b = blocks[i]
     own = _split_lines(b.content)
     offset = sum(len(x) for x in own[:line - b.start])
-    marks = list(TASK_MARK_RE.finditer(b.content))
+    marks = task_marks(b.content)
     k = sum(1 for m in marks if m.start() < offset)
     if k >= len(marks) or marks[k].start() != offset:
         return None                 # the mark found is not on the action's own line

@@ -701,3 +701,18 @@ def test_a_tab_after_a_container_marker_does_not_shift_the_comment(md, quote):
     assert page.count("<table>") == 1 and "&lt;!--" not in page
     assert re.search(r"<t[dh]>[^<]*%s[^<]*<!--" % quote, page), page
     assert [c.id for c in rdc.parse(out).comments] == [cid]
+
+
+@pytest.mark.parametrize("block, quote, expect", [
+    ("para\r Title\n", "Title", "para\r Title|\n"),
+    ("\r> quote Title\n", "Title", "\r> quote Title|\n"),
+    ("\r\r\r\r> quote Title\n", "Title", "\r\r\r\r> quote Title|\n"),
+    ("\r\r\r\r- item Title\n", "Title", "\r\r\r\r- item Title|\n"),
+    ("\r\r\r\rpara Title more\n", "Title", "\r\r\r\rpara Title| more\n"),
+    ("a\r\nb\r Title tail\n", "Title", "a\r\nb\r Title| tail\n"),
+])
+def test_a_cr_before_the_selection_does_not_pull_the_comment_into_the_word(block, quote, expect):
+    # Pandoc deletes a CR, and its columns count the line without it; the offset must be a place in the block as written.
+    s, e = sel(block, quote)
+    at = rdc.anchor_point(block, s, e, quote)
+    assert block[:at] + "|" + block[at:] == expect

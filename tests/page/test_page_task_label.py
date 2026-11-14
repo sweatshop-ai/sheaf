@@ -2,7 +2,7 @@
 else the first word, tick or untick it like a <label>; the rest of the line is ordinary text."""
 import pytest
 
-from pagehelp import mark, open_box, until
+from pagehelp import at, comment_on, mark, open_box, until
 
 pytestmark = pytest.mark.page
 
@@ -140,3 +140,14 @@ def test_a_double_click_on_the_label_does_not_tick_it_twice(sheaf):
     until(lambda: ON in f.read_text(encoding="utf-8"), what="the tick in the file")
     p.wait_for_timeout(600)
     assert ON in f.read_text(encoding="utf-8")
+
+
+def test_a_comments_badge_on_the_label_opens_its_thread_and_ticks_nothing(sheaf):
+    p, f = sheaf.page, sheaf.site.file
+    comment_on(sheaf, at(ITEM, "Approved"), at(ITEM, "Approved", None), "about the label")
+    before = f.read_text(encoding="utf-8")
+    p.locator("main li:nth-of-type(1) .rd-badge").first.click()
+    until(lambda: p.query_selector("#rd-popover .rd-msg"), what="the thread's box")
+    p.wait_for_timeout(600)
+    assert f.read_text(encoding="utf-8") == before and "- [x]" not in before
+    assert p.locator("main input[type=checkbox]").first.is_checked() is False

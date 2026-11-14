@@ -470,6 +470,16 @@ def does_not_reload_or_reconnect(tab, streams):
     assert len(tab.streams) == streams, "the page opened its stream again"
 
 
+def test_a_page_whose_root_is_forgotten_leaves_no_toast_for_the_next_page_of_the_tab(replying, site):
+    # Ticket 125 (c3 of #118): a save that merged wrote `rd-toast` before its reload, and the reload never came. With no
+    # keep to name the document, the next mount in this tab (or in its copy) would say that text.
+    p = replying.page
+    p.evaluate("sessionStorage.setItem('rd-toast', '1 block \u2192 plan.md')")
+    assert site.hub.forget_root("work").name == "work"
+    until(lambda: GONE in notice(p), what="the notice that the document is gone")
+    assert p.evaluate("sessionStorage.getItem('rd-toast')") is None
+
+
 def test_a_page_whose_root_is_forgotten_says_so_keeps_what_was_typed_and_saves_nothing(replying, site):
     p = replying.page
     mark(p)

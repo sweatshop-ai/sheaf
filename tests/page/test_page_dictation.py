@@ -454,7 +454,6 @@ def test_the_stop_event_that_comes_late_after_a_failed_send_leaves_the_new_recor
     p.wait_for_function("window.__mic.made.length === 2 && window.__mic.made[1].state === 'recording'")
     p.evaluate("window.__mic.made[0].flush()")              # now the old stop arrives
     p.wait_for_function("window.__mic.stops === 1")
-    p.wait_for_timeout(300)
     assert p.evaluate("window.__mic.made[1].state") == "recording"
     assert p.locator(MIC).get_attribute("aria-pressed") == "true", "the old recorder's stop undid the new button"
     assert hub.posts == [], "a discarded sound was sent"

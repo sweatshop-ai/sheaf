@@ -720,3 +720,56 @@ def test_a_cr_before_the_selection_does_not_pull_the_comment_into_the_word(block
     s, e = sel(block, quote)
     at = rdc.anchor_point(block, s, e, quote)
     assert block[:at] + "|" + block[at:] == expect
+
+
+def _stripped_comment(md):
+    return re.sub(r"<!--.*?-->", "", md, count=1, flags=re.S)
+
+
+@pytest.mark.parametrize("md, quote", [
+    # c3: a CR before the `>` of a quoted table
+    ("\r> | a | b |\n\r> |---|---|\n\r> | one two | y |\n", "one two"),
+    ("> | a | b |\n\r\r> |---|--\r\r-|\n> | one two | y |\n", "one two"),
+    # c4: a backslash in front of a CR, in front of the closing pipe
+    ("| a | b |\n|---|---|\n| x\\\r | y |\n", "x"),
+    ("| a | x\\\r\n|---|---|\n| c | d |\n", "x"),
+    # d5: a CR in the spaces before the closing pipe
+    ("| cell **b** \r| x y |\n|---|---|\n| a | b |\n", "cell b"),
+    ("| A | B |\n|---|---|\n| cell **b**\r | x |\n", "cell b"),
+])
+def test_a_cr_in_a_table_row_leaves_the_comment_in_its_cell(md, quote):
+    # Pandoc deletes every CR before it reads a table, so a row is read without them.
+    b = split_md_blocks(md)[0]
+    s, e = sel(b.content, quote)
+    out, cid = rdc.add_comment(md, 0, s, e, quote, "why", "Ada", "2026-11-14T10:00")
+    page = pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], out)
+    assert "&lt;!--" not in page, page
+    assert html(_stripped_comment(out)) == html(md)
+    assert [c.id for c in rdc.parse(out).comments] == [cid]
+    oracle, _ = rdc.add_comment(md.replace("\r", ""), 0, s, e, quote, "why", "Ada", "2026-11-14T10:00")
+    assert html(out.replace("\r", "")) == html(oracle)
+
+
+def test_a_cr_inside_an_existing_comment_opener_still_counts_its_id():
+    md = "Text with<!-- sheaf-comment id\r=c1 by=x at=2026-11-14T10:00 status=open -->\nMore words here\n"
+    s, e = sel(md, "words")
+    _, cid = rdc.add_comment(md, 0, s, e, "words", "why", "Ada", "2026-11-14T10:00")
+    assert cid == "c2"
+
+
+def test_a_cr_inside_a_comment_opener_that_parse_cannot_see_still_counts_its_id():
+    md = "Text with<!\r-- sheaf-comment id=c1 by=x at=2026-11-14T10:00 status=open -->\nMore words here\n"
+    s, e = sel(md, "words")
+    _, cid = rdc.add_comment(md, 0, s, e, "words", "why", "Ada", "2026-11-14T10:00")
+    assert cid == "c2"
+
+
+@pytest.mark.parametrize("block, quote, expect", [
+    ("Title\r\n", "Title", "Title|\r\n"),
+    ("Title\r\r\n", "Title", "Title|\r\r\n"),
+    ("a\r\nTitle\r\nz\n", "Title", "a\r\nTitle|\r\nz\n"),
+])
+def test_the_point_stays_before_a_run_of_crs_that_follows_it(block, quote, expect):
+    s, e = sel(block, quote)
+    at = rdc.anchor_point(block, s, e, quote)
+    assert block[:at] + "|" + block[at:] == expect

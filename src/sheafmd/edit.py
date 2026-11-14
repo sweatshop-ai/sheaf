@@ -716,7 +716,34 @@ def _unchanged(block, fragment: str) -> bool:
 # source and leaves every other byte alone. Pandoc would rewrite the whole list
 # (bullets, wrapping, a capital X), so one tick would touch every line.
 TASK_MARK_RE = re.compile(
-    r"^((?:[ \t\r]*>)*[ \t\r]*(?:[-*+]|\d{1,9}[.)])[ \t]+)\[([ xX])\](?=[ \t]|$)", re.M)
+    r"^((?:[ \t]*>)*[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+)\[([ xX])\](?=[ \t]|$)", re.M)
+
+
+class _Mark:
+    """A task mark found by `task_marks`: where its line and its box are in the block as written."""
+    __slots__ = ("_line", "_box", "_state")
+
+    def __init__(self, line: int, box: int, state: str):
+        self._line, self._box, self._state = line, box, state
+
+    def group(self, n: int) -> str:
+        return self._state
+
+    def start(self, group: int = 0) -> int:
+        return self._line if group == 0 else self._box
+
+    def end(self, group: int = 0) -> int:
+        return self._box + 1
+
+
+def task_marks(content: str) -> list:
+    """The task marks of `content`, read as pandoc reads it: without its CRs, which it deletes, so a CR anywhere
+    in a line neither hides a mark nor makes one pandoc does not draw. Offsets are in `content` itself."""
+    if "\r" not in content:
+        return list(TASK_MARK_RE.finditer(content))
+    keep = [i for i, ch in enumerate(content) if ch != "\r"]
+    return [_Mark(content.rfind("\n", 0, keep[m.start()]) + 1, keep[m.start(2)], m.group(2))
+            for m in TASK_MARK_RE.finditer(content.replace("\r", ""))]
 
 
 def _ticks(fragment: str):
@@ -751,7 +778,7 @@ def _toggle_boxes(block, fragment: str):
     # The marks found in the source must be the boxes the render drew, one for
     # one, or a tick could land on the wrong line (a `- [ ]` inside a code
     # block in the list, say). Any doubt and the edit takes the general path.
-    marks = list(TASK_MARK_RE.finditer(block.content))
+    marks = task_marks(block.content)
     if [m.group(2) != " " for m in marks] != have:
         return None
     out = block.content
@@ -779,7 +806,7 @@ def ticked_html(block, k: int, tick: bool = True):
         lambda m: f'<span class="rd-anchor" data-rd-id="{m.group(1)}"></span>', copyblock.mark(r.stdout, page=True)),
         "html.parser")
     found = soup.select('input[type="checkbox"]')
-    marks = list(TASK_MARK_RE.finditer(block.content))
+    marks = task_marks(block.content)
     if not 0 <= k < min(len(found), len(marks)) or found[k].has_attr("checked") == tick:
         return None
     if tick:

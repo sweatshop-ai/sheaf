@@ -435,6 +435,35 @@ def test_the_stop_event_of_a_discarded_recorder_that_comes_late_leaves_the_new_r
     until(lambda: len(hub.posts) == 1, what="the new sound sent")
 
 
+def test_the_stop_event_that_comes_late_after_a_failed_send_leaves_the_new_recording_of_the_same_form_alone(tab, site, hub):
+    p = open_thread(tab, site)
+    sent = []
+    p.wait_for_selector(MIC)
+    p.evaluate("window.__mic.lateStop = true")
+    p.click(MIC)
+    p.wait_for_function("window.__mic.made.length === 1 && window.__mic.made[0].state === 'recording'")
+    p.fill(FIELD, "Typed while recording.")
+    p.route("**/_/comment", lambda route: sent.append(route))
+    p.focus(FIELD)
+    p.keyboard.press("Control+Enter")                       # the sound is thrown away, its stop event is still on its way
+    until(lambda: sent or p.wait_for_timeout(20), what="the send to go out")
+    sent[0].fulfill(status=500, json={"ok": False, "error": "the hub broke off"})
+    p.wait_for_selector(FIELD)
+    until(lambda: p.input_value(FIELD) == "Typed while recording.", what="the form back with its text")
+    p.click(MIC)                                            # the same form, the same button: a new recording
+    p.wait_for_function("window.__mic.made.length === 2 && window.__mic.made[1].state === 'recording'")
+    p.evaluate("window.__mic.made[0].flush()")              # now the old stop arrives
+    p.wait_for_function("window.__mic.stops === 1")
+    p.wait_for_timeout(300)
+    assert p.evaluate("window.__mic.made[1].state") == "recording"
+    assert p.locator(MIC).get_attribute("aria-pressed") == "true", "the old recorder's stop undid the new button"
+    assert hub.posts == [], "a discarded sound was sent"
+    p.click(MIC)                                            # still the page's recording: this press stops it
+    p.wait_for_function("window.__mic.made[1].state === 'inactive'")
+    p.evaluate("window.__mic.made[1].flush()")
+    until(lambda: len(hub.posts) == 1, what="the new sound sent")
+
+
 def self_stopped_then_dictate_again(tab, site, hub):
     """The first recording ends by itself (a microphone unplugged, a recorder error) 60 s in, its text comes in, and a
     second one starts. Returns the page, the second recorder being up."""

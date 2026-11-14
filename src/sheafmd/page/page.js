@@ -2586,7 +2586,7 @@ var create = function (ROOT, CFG, opts) {
             clearTimeout(d.timer); clearInterval(d.watch);    // a recorder can stop by itself (a microphone unplugged): its timer must not cut a later recording
             var gone = function () { return d.discard || unmounted || !f.isConnected; };
             // A discarded sound leaves a form that may still be here (a send that fails gives it back): its button is idle again.
-            var here = function () { if (!unmounted && f.isConnected) idle(); };
+            var here = function () { if (!unmounted && f.isConnected && (!dict || dict === d)) idle(); };   // not under a newer recording of this same form
             if (gone() || !d.chunks.length) { free(); here(); if (!gone()) says('Nothing was recorded. Try again.'); return; }
             b.disabled = true; b.title = 'Transcribing…'; b.setAttribute('aria-label', 'Transcribing…'); b.setAttribute('aria-pressed', 'false');
             d.abort = new AbortController();
@@ -2604,7 +2604,7 @@ var create = function (ROOT, CFG, opts) {
           });
           try { rec.start(); } catch (e) { release(); free(); says('The recording could not start. Try again.'); return; }
           b.title = 'Stop'; b.setAttribute('aria-pressed', 'true');
-          d.timer = setTimeout(function () { if (dict === d) stopDictation(false); }, DICTATE_MAX);
+          d.timer = setTimeout(function () { stopDictation(false); }, DICTATE_MAX);    // `dict` is d: every way out of d clears the timer first
           if (!MOUNTED) d.watch = setInterval(function () {   // the service lost during the recording: the sound is dropped
             dictationAvailable().then(function (yes) {
               if (yes || dict !== d || !d.rec || d.rec.state !== 'recording') return;

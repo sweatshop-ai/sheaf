@@ -10,7 +10,8 @@ import pytest
 
 from helpers import comment, writes_from_outside
 from pagehelp import (DOC, P1, RELOADING, draft_key, P2, T0, at, comment_draft_key, comment_on, gone, key, mark, open_box, open_form, typed, reload_on_clock, reloaded,
-                      select, select_by_touch, toast, toast_state, toasted, toasts_to_the_end, type_at_end, until, run_clock, TOAST_STEP)
+                      select, select_by_touch, toast, toast_state, toasted, toasts_to_the_end, type_at_end, until)
+from pagehelp import TOAST_STEP, run_clock
 from sheafmd import comments as rdc
 from sheafmd.hub import live as hub_live
 from sheafmd.hub import state as hub_state
@@ -2682,8 +2683,13 @@ def test_a_reply_given_up_that_the_hub_took_after_all_goes_from_the_page_and_the
     if not hello:
         # Toasts queue (ticket 62): TAKEN waits behind the red LATE (7 s). `given_up` leaves the clock running at the real
         # pace (no pause), so the test runs it on while a toast is up, whatever the pace of the runner.
-        until(lambda: TAKEN in toast(p) or gone(p) or (toast_state(p)[1] and run_clock(p, TOAST_STEP)),
-              what="the toast, or the reload that wipes it")
+        def taken_or_gone():
+            if TAKEN in toast(p) or gone(p):
+                return True
+            if toast_state(p)[1]:
+                run_clock(p, TOAST_STEP)
+            return False
+        until(taken_or_gone, what="the toast, or the reload that wipes it")
     until(lambda: reply_is_in_its_thread(thread), what="the reply in its thread, the form gone, the store clear")
 
 
@@ -4475,6 +4481,38 @@ def test_discard_clears_an_entry_that_has_no_request_id(thread):
     until(lambda: stored_bodies(thread) == [], what="the entry to go")
 
 
+def still_out(tab, body):
+    """Does the store hold `body` as a send that is out (an `out` time on its entry)?"""
+    raw = comment_store(tab)
+    return any(d["body"] == body and d.get("out") for d in json.loads(raw)) if raw else False
+
+
+# The entry of a send is written with `out` when it is sent and again without it once it fails, and the list of
+# unsent texts leaves out an entry that is out. A page closed before it wrote the failure leaves the mark: its text
+# is listed when the mark lapses (inFlight, 32 s). The test below once failed now and then in CI for lack of a wait:
+# it left page A before A had written its failed send.
+def keep_out(thread, age_ms):
+    (c,) = rdc.parse(thread.site.file.read_text()).comments
+    keep_on_disk(thread, {"thread": c.id, "born": c.at, "about": c.quote, "kind": "reply", "body": "words left out",
+                          "rid": "r0123456789left", "at": "2026-10-22T10:00:00.000Z",
+                          "out": thread.page.evaluate("Date.now()") - age_ms})
+    thread.page.reload()
+    thread.page.wait_for_selector("#rd-menu-btn", state="attached")
+
+
+@pytest.mark.parametrize("age_ms, listed", [(1000, False), (40000, True)])
+def test_a_send_left_out_by_a_closed_page_is_listed_as_unsent_only_when_its_mark_is_old(thread, age_ms, listed):
+    keep_out(thread, age_ms)
+    thread.page.wait_for_timeout(500)
+    assert (thread.page.locator(UNSENT).count() == 1) == listed, f"the store held {comment_store(thread)}"
+
+
+def test_a_send_left_out_by_a_closed_page_is_listed_when_its_mark_lapses_with_no_other_write(thread):
+    keep_out(thread, 31000)       # HELD is 32 s: the mark lapses a second from now
+    assert thread.page.locator(UNSENT).count() == 0, f"the store held {comment_store(thread)}"
+    assert unsent_line(thread.page, timeout=4000) == "1 reply not sent · Show"
+
+
 # Open the thread on a listed entry draws that entry's text, also when the thread holds another of its kind.
 def test_open_the_thread_on_the_second_of_two_kept_replies_draws_that_reply(thread, context):
     a, b = thread.page, second_page(thread, context)
@@ -4484,10 +4522,15 @@ def test_open_the_thread_on_the_second_of_two_kept_replies_draws_that_reply(thre
     fail_the_send(b, held_b)
     held_a[0].fulfill(status=500, json={"ok": False, "error": "the hub broke off"})
     a.unroute("**/_/comment")
+    try:
+        until(lambda: not still_out(thread, "words from page A") and not still_out(thread, "words from page B"),
+              what="the failed sends of both pages to leave `out` in the store")
+    except AssertionError as e:
+        raise AssertionError(f"{e}; the store held {comment_store(thread)}") from None
     come_back(thread)
     unsent_line(a)
     texts = [t for _, _, t, _ in unsent_list(a)]
-    assert sorted(texts) == ["words from page A", "words from page B"]
+    assert sorted(texts) == ["words from page A", "words from page B"], f"the list held {texts}, the store {comment_store(thread)}"
     for n, text in enumerate(texts):
         if n:
             come_back(thread)

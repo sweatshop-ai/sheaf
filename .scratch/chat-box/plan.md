@@ -90,7 +90,7 @@ L'agent sait quand un texte est fait pour être copié. Il l'écrit dans un bloc
 | 43 | La page jette sans signe ce qui est tapé pendant qu'une sauvegarde n'a pas de réponse (`beforeinput` annulé quand `saving // settling`) | Rien | Fait (PR 259, merged 38ae6bf) |
 | 44 | Sur une page montée, `dictOff` est perdu à chaque remontage : un micro refusé ou un service perdu fait échouer un appui de plus par remontage | Rien | À faire |
 | 45 | Fermer la boîte pendant l'invite d'autorisation du micro bloque tous les boutons micro jusqu'à la réponse de la personne | Rien | À faire |
-| 46 | Une touche refusée pendant une sauvegarde dans un `textarea` ou un `input` de `main` est dite par le toast mais ne laisse aucune marque | Rien | À faire |
+| 46 | Une touche refusée pendant une sauvegarde dans un `textarea` ou un `input` de `main` est dite par le toast mais ne laisse aucune marque | Rien | Fait (PR 287, merge 050b878) |
 | 47 | Quand le pilote Playwright de la session se fige, chaque test de page suivant attend ses 300 s, et le job va jusqu'à ses 60 min sans rien nommer | Rien | Fait |
 | 48 | Un deuxième Annuler pendant que la requête du premier est en route remplace les places gardées du premier par `{}` : l'événement tardif du premier ne dit plus « had already seen it » | Rien | Fait (PR 283, merged as 2a89ed3) |
 | 49 | Le test « un document déjà ouvert dans un onglet n'est pas rouvert » échoue en CI sans dire pourquoi le premier `sheaf open` n'a pas ouvert de navigateur | Rien | Fait (PR 264 merged by Thierry, main 4e35ed7) |
@@ -110,6 +110,8 @@ L'agent sait quand un texte est fait pour être copié. Il l'écrit dans un bloc
 | 63 | Dictée (API standard) : finitions du relais de transcription, suites de la revue Opus 1 de la PR 284 | Rien | À faire |
 | 64 | Le test « ouvrir le fil sur la deuxième de deux réponses gardées » échoue de temps en temps en CI | Rien | À faire |
 | 65 | Titres : une régression sur les titres faits de dièses, et finitions, suites de la revue Opus 1 de la PR 285 | Rien | En cours |
+| 66 | Titres : un balayage quadratique et un accent grave dans un commentaire fermé, restes de la revue Opus 1 de la PR 286 | Rien | À faire |
+| 67 | Une touche refusée dans un bloc `contenteditable` imbriqué n'a pas de marque, et les restes de la revue Opus 3 de la PR 287 | Rien | À faire |
 
 ## Ce qui reste ouvert
 

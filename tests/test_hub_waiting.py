@@ -437,13 +437,19 @@ def test_a_changed_event_is_read_under_the_tells_lock_so_it_never_says_queued_af
     target(browser)
     assert tell(browser).status == 200
     live, sub = browser.hub.entry(DOC).live, tab(browser.hub)
-    real, answers, blocked = live._publish, [], threading.Event()
+    real, answers, blocked, sent = live._publish, [], threading.Event(), threading.Event()
+    send = browser.hub.waiting_tells._send
+
+    def sending(*a, **kw):
+        sent.set()
+        return send(*a, **kw)
+    browser.hub.waiting_tells._send = sending
     live.tells_lock = browser.hub.waiting_tells._lock = BlockedSignal(browser.hub.waiting_tells._lock, blocked)
 
     def publish(event, data):
         taker = threading.Thread(target=lambda: answers.append(documents(browser, token)))
         taker.start()
-        while not (blocked.is_set() or not taker.is_alive()):   # held back: the taker waits on the lock; not held back: it went by and sent `tell-seen`
+        while not (blocked.is_set() or sent.is_set()):          # held back: the taker waits on the lock; not held back: it went by and sent `tell-seen`
             time.sleep(0.001)
         real(event, data)
     live._publish = publish

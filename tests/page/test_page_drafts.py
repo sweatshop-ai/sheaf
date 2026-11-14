@@ -354,8 +354,7 @@ def test_a_page_that_is_stale_with_edits_on_screen_still_asks_before_it_is_left(
     type_at_end(tab.page, P2, " and plums")
     f = tab.site.file
     f.write_text(f.read_text() + "\nA new paragraph from outside.\n", encoding="utf-8")
-    until(lambda: "could not be merged" in p.evaluate("document.querySelector('#rd-toast').textContent"),
-          what="the page to go stale")
+    toasted(p, "could not be merged", timeout=20.0)     # behind the red toast of the refused save (7 s)
     p.close(run_before_unload=True)
     p.wait_for_timeout(500)          # the dialog event is delivered while the API is called
     assert dialogs == ["beforeunload"]

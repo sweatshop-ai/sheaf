@@ -12,4 +12,4 @@
 
 **Claimed by:** Jesper
 
-**Status:** ready-for-agent
+**Status:** done (merge d98c9a9, PR 334)

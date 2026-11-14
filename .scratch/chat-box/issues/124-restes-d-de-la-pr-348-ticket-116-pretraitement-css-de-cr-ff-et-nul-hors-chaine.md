@@ -7,4 +7,6 @@
 
 **Blocked by:** PR 348 fusionnée
 
-**Status:** ready-for-agent
+**Claimed by:** Marisol 2026-11-14 23:49
+
+**Status:** in-progress

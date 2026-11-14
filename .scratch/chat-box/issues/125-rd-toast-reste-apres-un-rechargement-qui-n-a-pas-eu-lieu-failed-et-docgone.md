@@ -7,9 +7,10 @@
 
 **Blocked by:** PR 352 merged
 
-**Claimed by:**
 
-**Status:** ready-for-agent
+**Claimed by:** Britt 2026-11-14 23:49
+
+**Status:** in-progress
 
 **Par où commencer :** `src/sheafmd/page/page.js` autour de 925, 1211 et 4517 ; tests dans `tests/page/test_page_actions.py` ; sur t-compute, jamais sur le portable.
 

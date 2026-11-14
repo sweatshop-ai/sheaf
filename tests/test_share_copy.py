@@ -804,6 +804,20 @@ def test_a_closed_reviewer_note_before_an_empty_opener_does_not_make_the_refusal
     assert "empty HTML comment" in str(e.value) and "note by a reviewer" not in str(e.value)
 
 
+@pytest.mark.parametrize("text", [
+    "A <!--> b `<!-- sheaf-comment x` c\n\nKEEP1\n",
+    "# A <!--> b `<!-- sheaf-comment x` c\n\nKEEP1\n",
+    "- A <!--> b `<!-- sheaf-comment x` c\n\nKEEP1\n",
+    "A <!---> b `<!-- sheaf-comment x` c\r\n\r\nKEEP1\r\n",
+])
+def test_a_note_head_written_in_a_code_span_after_an_empty_opener_does_not_make_it_a_note_refusal(tmp_path, text):
+    # Second review of PR 325: pandoc shows that head as code, so only the empty opener is at fault.
+    with pytest.raises(sheafmd.UnclosedComment) as e:
+        sheafmd.render(doc(tmp_path, text))
+    assert e.value.line == 1
+    assert "empty HTML comment" in str(e.value) and "note by a reviewer" not in str(e.value)
+
+
 def test_the_same_heading_without_the_empty_opener_makes_a_copy(tmp_path):
     out = sheafmd.render(doc(tmp_path, "# A b <!-- note -->\n\nKEEP1 para.\n"))
     assert "KEEP1" in out and "note" not in out

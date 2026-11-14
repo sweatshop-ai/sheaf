@@ -12,14 +12,14 @@
 
 **Par où commencer :** pour c1, une page de test minimale avec le span ci-dessus dans Chromium, Firefox et WebKit sur t-compute ; noter lesquels laissent taper.
 
-- [ ] c1 essayé dans les trois moteurs sur t-compute, résultat écrit dans le ticket
-- [ ] Si un moteur laisse taper : la propriété est retirée en mode simple, test rouge avant le correctif ; sinon SPEC 9.5 dit que la règle ne couvre que l'attribut
-- [ ] Un cas en majuscules et un cas en double dans le test de `contenteditable`
-- [ ] Le commentaire de `sanitize.py:65` se coupe comme ses voisins
-- [ ] PR séparée, CI verte
+- [x] c1 essayé dans les trois moteurs (en CI, pas sur t-compute), résultat écrit dans le ticket
+- [x] Si un moteur laisse taper : la propriété est retirée en mode simple, test rouge avant le correctif ; sinon SPEC 9.5 dit que la règle ne couvre que l'attribut
+- [x] Un cas en majuscules et un cas en double dans le test de `contenteditable`
+- [x] Le commentaire de `sanitize.py:65` se coupe comme ses voisins
+- [x] PR séparée, CI verte
 
 Claimed by: Jamal
 
-**Status:** ready-for-agent
+**Status:** done (PR 319, merge 2c2610b)
 
 **Résultat c1 (Jamal, 2026-11-14, PR 319) :** essayé dans la CI, qui installe Chromium, Firefox et WebKit (t-compute n'a pas été utilisé : la clé d'hôte ssh échoue depuis le portable). `tests/page/test_user_modify.py` clique dans le span puis tape « hello » : **Chromium et WebKit laissent taper** (`hellox`), **Firefox non** (`x`). Le mode simple retire donc `-webkit-user-modify`, `-moz-user-modify`, `user-modify` et toute déclaration dont le nom porte une barre oblique inverse ; SPEC 9.5 le dit. Test rouge avant le correctif (run 43619240498), vert après.

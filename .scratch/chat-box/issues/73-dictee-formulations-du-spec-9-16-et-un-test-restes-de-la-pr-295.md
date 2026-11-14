@@ -18,12 +18,12 @@ Codex sur la PR 297 (70a18f6) : trois constats (fuite du `dup`, test trop large,
 
 **Claimed by:**
 
-**Status:** ready-for-agent
+**Status:** done (PR 297, merge 8bcd20b)
 
 **Par où commencer :** `SPEC.md` 9.16 pour p1 à p3, puis p4 dans `tests/test_hub_transcribe.py`.
 
-- [ ] p1 à p3 : le SPEC 9.16 dit ce que le code fait
-- [ ] p4 : l'assertion limitée aux lignes de la clé
+- [x] p1 à p3 : le SPEC 9.16 dit ce que le code fait
+- [x] p4 : l'assertion limitée aux lignes de la clé
 - [x] p5 décidé : corrigé avec son test (PR 297, 34a1e98)
 - [x] Constats de Codex sur la PR 295 ajoutés ou écartés avec la raison
-- [ ] CI verte
+- [x] CI verte (PR 297, tête ad71cf2, 3/3 vert ; les tours Codex 1 et 2 corrigés, le tour 3 par Opus de secours : GO)

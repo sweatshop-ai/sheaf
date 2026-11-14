@@ -10,10 +10,12 @@
 
 **Claimed by:**
 
-**Status:** ready-for-agent
+**Fait :** PR 300, merge 1521562. Point 1 : corrigé, test rouge d'abord ; `CODE_SPAN_RE` est devenu `_CodeSpanFinder` (l'ouvreur par motif avec le préfixe de barres obliques inverses, le fermeur par recherche dans les suites d'accents graves du bloc), identique à l'ancienne expression sur plus de 40 000 chaînes tirées au hasard et à pandoc sur la comparaison par empan. Point 2 : décidé, pas codé. `render.COMMENT_RE` reste ce qu'il est et la limite est écrite dans le SPEC 6.2 : un `<!-->` ou `<!--->` dans un texte courant, un titre ou une liste fait refuser la copie à partager, avec ou sans commentaire après lui, parce que pandoc le lit comme un commentaire dans le texte mais comme une partie de l'adresse dans une destination de lien (`[l](http://x/<!-->)`), que la copie fait sans perte. Un test le fixe. Revues : Opus en deux passes (Codex sans jetons jusqu'à 15 h), GO deux fois, tout corrigé. Restes : ticket 76.
+
+**Status:** done
 
 **Par où commencer :** `tests/test_anchoring.py`, section « ticket 66 » : un test rouge pour le point 1 (`parse` doit trouver le commentaire après `\``).
 
-- [ ] Point 1 corrigé, test rouge d'abord
-- [ ] Point 2 décidé : corrigé sans casser les deux gardes, ou la limite écrite dans le SPEC 10.4
-- [ ] CI verte
+- [x] Point 1 corrigé, test rouge d'abord
+- [x] Point 2 décidé : la limite écrite dans le SPEC 6.2 (et non 10.4, où la copie à partager n'est pas décrite)
+- [x] CI verte (3/3 sur 190bc94, total_count 3)

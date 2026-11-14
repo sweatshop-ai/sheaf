@@ -5,7 +5,7 @@ import re
 import pytest
 
 from helpers import comment
-from pagehelp import open_box, P1, P2, T0, at, comment_draft_key, draft_key, mark, reloaded, select, toasted, toasts_to_the_end, type_at_end, until
+from pagehelp import open_box, P1, P2, T0, at, draft_key, mark, set_kept, reloaded, select, toasted, toasts_to_the_end, type_at_end, until
 from sheafmd import comments as rdc
 
 pytestmark = pytest.mark.page
@@ -311,9 +311,7 @@ def test_restore_with_a_kept_comment_on_screen_reloads_and_the_kept_comment_come
     page = context.new_page()
     page.goto(lost_edit.site.url)
     page.wait_for_selector("#rd-notice button[data-d=restore]")
-    slot = json.dumps([{"quote": "pears", "body": "about the pears", "at": "2026-10-13T10:00:00.000Z"}])
-    ckey = comment_draft_key(lost_edit.site)
-    page.evaluate(f"localStorage.setItem({ckey!r}, {json.dumps(slot)})")
+    set_kept(page, lost_edit.site, [{"quote": "pears", "body": "about the pears", "at": "2026-10-13T10:00:00.000Z"}])
     page.reload()
     page.wait_for_selector("#rd-notice button[data-d=restore]")
     page.wait_for_selector("#rd-popover .rd-hold:has-text('your comment is kept')")

@@ -323,7 +323,7 @@ def toasts_to_the_end(page, timeout=8.0, *, on_clock=False):
 
     def look():
         said, up = toast_state(page)
-        if up and (not seen or seen[-1] != said):       # the text stays in #rd-toast after the toast has gone
+        if up and said and (not seen or seen[-1] != said):       # the text stays in #rd-toast after the toast has gone
             seen.append(said)
         if up and on_clock:
             run_clock(page, TOAST_STEP)

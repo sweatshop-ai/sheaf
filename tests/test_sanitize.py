@@ -618,6 +618,8 @@ def test_an_unquoted_url_is_one_token_up_to_its_closing_bracket(style, want):
     ("a:x-url(it's);-webkit-user-modify:x;color:red", None),
     ('a:url("/*b");-webkit-user-modify:x;color:red', 'a:url("/*b");color:red'),
     ("a:url( 'it;s');-webkit-user-modify:x;color:red", "a:url( 'it;s');color:red"),
+    ('a:url( "b)c.png");color:red;-webkit-user-modify:x', 'a:url( "b)c.png");color:red'),
+    ("a:url(\n'b)c.png');color:red;-webkit-user-modify:x", "a:url(\n'b)c.png');color:red"),
     ('content:"url(/*";-webkit-user-modify:x;color:red', 'content:"url(/*";color:red'),
     ("/*url(*/-webkit-user-modify:x;color:red", "color:red"),
     ("a:url(b\\);c);color:red", "color:red"),

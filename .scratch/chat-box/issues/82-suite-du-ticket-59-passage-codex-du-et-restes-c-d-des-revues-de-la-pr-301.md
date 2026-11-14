@@ -12,6 +12,8 @@
 
 8. **Passage Codex dû sur la PR 302 (ticket 60, fusionnée 37c99b1), venu du ticket 81 :** les deux revues sont d'Opus (Codex sans jetons jusqu'à 20 h le 2026-11-14). `/codex-review --base` sur le diff de la PR 302 ; ses trouvailles deviennent des tickets, pas un retour en arrière.
 
+9. **Passage Codex dû sur la PR 305 (ticket 44, fusionnée 0f3a90a) :** les deux revues sont d'Opus de secours (Codex sans jetons jusqu'à 20 h le 2026-11-14), GO : `/home/tiroir/.claude/pm/chat-box-handoffs/pr-44-reviews/opus-fallback.md` et `opus-fallback-2-narrow.md`. `/codex-review --base` sur le diff de la PR 305 (`src/sheafmd/page/page.js`, `SPEC.md`, `tests/page/test_mount_dictation.py`) ; ses trouvailles deviennent des tickets, pas un retour en arrière.
+
 **Blocked by:** none
 
 **Claimed by:**

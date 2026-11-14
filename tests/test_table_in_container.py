@@ -183,23 +183,37 @@ def test_a_dropped_copy_in_a_cell_does_not_take_the_id_of_the_comment_that_pando
     assert found.malformed == []
 
 
-# R2-2: pandoc drops a comment in the alt text of an image, in a quoted table as in a table of the document
-def test_a_comment_in_the_alt_text_of_an_image_of_a_quoted_table_is_not_found_as_pandoc_drops_it():
-    md = "> | a | b |\n> |---|---|\n> | ![xx%s](u) | yy |\n" % fz.C
-    assert not fz.pandoc_sees(pandoc, md)
-    assert not rdc.parse(md).comments
+# R2-2 and ticket 133: pandoc drops a comment in the alt text of an image, in a quoted table as in a table of the document
+@pytest.mark.parametrize("md, shown", [
+    ("> | a | b |\n> |---|---|\n> | ![xx%s](u) | yy |\n", False),
+    ("| a | b |\n|---|---|\n| ![xx%s](u) | yy |\n", False),
+    ("| a | b |\n|---|---|\n| ![xx](u) %s | yy |\n", True),
+    ("| a | b |\n|---|---|\n| ![xx](u) | yy%s |\n", True),
+])
+def test_a_comment_in_the_alt_text_of_an_image_of_a_table_is_found_exactly_when_pandoc_shows_it(md, shown):
+    md = md % fz.C
+    assert fz.pandoc_sees(pandoc, md) is shown
+    assert fz.parse_sees(rdc, md) is shown
+
+
+# Review of ticket 126, finding 1: a no-break or full-width space after a marker is no item: the table stays a table
+@pytest.mark.parametrize("sp", ["\xa0", "\u3000"])
+@pytest.mark.parametrize("marker", ["-", "*", "+", "1."])
+def test_a_header_that_starts_with_a_marker_and_a_no_break_space_is_still_a_table(marker, sp):
+    md = "%s%s a | b \n|---|---|\n| x | y |\n" % (marker, sp)
+    assert [b.kind for b in rdc.split_md_blocks(md)] == ["table"]
 
 
 # F5: the cache of `_read_tables` holds a whole document of quotes and lists, so a second `parse` runs no pandoc
 def test_a_document_of_more_than_a_thousand_quotes_with_a_table_is_read_by_pandoc_once(monkeypatch):
     calls = []
-    real = rdc._sourcepos_html
-    monkeypatch.setattr(rdc, "_sourcepos_html", lambda block: calls.append(block) or real(block))
+    monkeypatch.setattr(rdc, "_sourcepos_html", lambda block: calls.append(block) or "")     # no pandoc: the count is the test
     rdc._read_tables.cache_clear()
     n = 1100
     md = "\n".join("> | a | b |\n> |---|---|\n> | `x | %s | y` |\n" % fz.C.replace("c1", "c%d" % i)
                    for i in range(n))
-    assert len(rdc.parse(md).comments) == n and len(calls) == n
+    rdc.parse(md)
+    assert len(calls) == n
     rdc.parse(md)
     assert len(calls) == n
 

@@ -185,14 +185,18 @@ def test_the_thread_stays_readable_above_the_reply_field_in_a_short_frame(touch_
     assert got["scroll"][1] <= got["field"][0] + 0.5, got   # and the field starts below it
 
 
-def test_a_long_thread_leaves_the_field_in_reach_above_the_keyboard(phone):
+def test_a_long_thread_leaves_the_field_in_reach_above_the_keyboard(touch_tab, site):
     """The thread gives way to the form, down to its floor: with a long comment and the keyboard up, the field and
-    its buttons are still inside the docked popover and above the keyboard."""
+    its buttons are still inside the docked popover and above the keyboard.
+    The comment is written before the page opens, as in the tests around it: the `phone` fixture has the page open
+    already, and a page open when its file changes reloads itself, which a second `open()` then races (ticket 78)."""
     from sheafmd import comments as rdc
     from sheafmd.source import update_file
-    update_file(phone.site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "Second paragraph"), "Second paragraph",
-                                                           "Nearly good, only a pity about my name. " * 20, "Ada", "2026-10-25T21:01")[0])
-    page = phone.open().page
+    site.file.write_text(MD, encoding="utf-8")
+    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "Second paragraph"), "Second paragraph",
+                                                     "Nearly good, only a pity about my name. " * 20, "Ada", "2026-10-25T21:01")[0])
+    touch_tab.page.add_init_script(FAKE_VV)
+    page = touch_tab.open().page
     page.click(".rd-badge")
     page.wait_for_selector(POP + " textarea")
     page.focus(POP + " textarea")

@@ -1058,3 +1058,23 @@ def test_a_comment_of_several_lines_put_back_in_a_setext_heading_goes_on_a_line_
     out = rde._insert_comment("Alpha Beta\n==========\n\nBody.\n", 0, rdc.format(note, False), "Alpha")
     assert out.startswith("Alpha Beta\n==========\n\n<!-- sheaf-comment") and rdc.parse(out).malformed == []
     assert [b.kind for b in split_md_blocks(out)][0] == "heading"
+
+
+def test_a_heading_that_is_only_hashes_puts_a_put_back_comment_on_a_line_of_its_own():
+    # Ticket 65, point 5 (ticket 58, case 2): `### ###` is an empty heading, so a block after its
+    # hashes would make the line a paragraph.
+    md = "### ###\n\nBody.\n"
+    out = rde._insert_comment(md, 0, rdc.format(agent_note(), False), "Alpha")
+    assert out.startswith("### ###\n\n<!-- sheaf-comment") and rdc.parse(out).malformed == []
+    assert [b.kind for b in split_md_blocks(out)][0] == "heading"
+
+
+def test_a_comment_of_several_lines_put_back_in_a_table_cell_does_not_split_the_row():
+    # Ticket 65, point 4: a block of several lines inside a row ends the table.
+    md = "| A | B |\n|---|---|\n| Alpha | x |\n\nBody.\n"
+    note = agent_note()
+    note.body = "first line\nsecond line"
+    out = rde._insert_comment(md, 0, rdc.format(note, False), "Alpha")
+    assert out.startswith("| A | B |\n|---|---|\n| Alpha | x |\n\n<!-- sheaf-comment"), out
+    assert [b.kind for b in split_md_blocks(out)][0] == "table" and rdc.parse(out).malformed == []
+    assert len(rdc.parse(out).comments) == 1

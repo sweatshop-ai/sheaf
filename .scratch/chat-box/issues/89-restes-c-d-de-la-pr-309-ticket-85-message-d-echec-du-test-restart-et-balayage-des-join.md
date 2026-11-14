@@ -6,7 +6,7 @@
 
 **Blocked by:** none
 
-**Claimed by:**
+**Claimed by:** Tove
 
 - [ ] Point 1 traité
 - [ ] Point 2 décidé (balayage ou abandon)

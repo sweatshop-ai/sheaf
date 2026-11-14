@@ -21,4 +21,6 @@
 
 **Blocked by:** aucun
 
+**Claimed by:** Lucia
+
 **Status:** ready-for-agent

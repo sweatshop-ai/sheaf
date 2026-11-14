@@ -4,6 +4,7 @@
 - **(c)** `SPEC.md` 6.2 : « one in a link destination is copied » n'est vrai que si aucune flèche ne suit : `[l](http://x/<!-->) KEEP1` suivi de `KEEP2 <!-- c -->` est refusé avec le message « swallows » (sûr, main fait pareil). Dire les deux cas.
 - **(b/c)** Fait dans la PR 325 : le commentaire du test dit qu'il épingle la phrase de la SPEC et passe aussi sur main.
 - **(d)** `src/sheafmd/comments.py:697`, docstring de `cell_end` (F3.1 de la revue de la PR 303) : « unless an odd run of backslashes escapes it » est faux depuis la PR 303, tout antislash juste avant le `|` l'échappe.
+- **(a, rare)** Revue 3 de la PR 325 (`pr-83-reviews/opus-3-narrow.md`, F2) : `A <!--> b `<!-- sheaf-comment ` + saut de ligne + `id=1` c`, plus une vraie note coupée à la ligne 4 : la tête de la ligne 1 est du code, mais le reste de la ligne (`<!-- sheaf-comment`) se retrouve ailleurs dans `frag`, donc le message est celui de la note au lieu de celui de l'ouvreur vide. Le test `in frag` regarde le document entier. Une piste : chercher la tête hors de `<code>`/`<pre>` à la position de la ligne (sourcepos).
 - **Passage Codex dû (point 5 du ticket 83) :** `/codex-review --base` sur le diff de la PR 300 (merge 1521562, tête 190bc94) et sur celui de la PR 303 (fusionnée ff5aaf7). Codex est sans jetons jusqu'à 20 h le 2026-11-14 ; ses trouvailles deviennent des tickets ou des corrections.
 
 **Blocked by:** PR 325 fusionnée (pour la SPEC) ; le passage Codex attend 20 h.

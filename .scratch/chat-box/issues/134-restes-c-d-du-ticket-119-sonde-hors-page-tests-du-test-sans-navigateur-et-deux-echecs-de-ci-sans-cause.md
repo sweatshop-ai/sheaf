@@ -9,6 +9,8 @@
 
 **Blocked by:** PR 346 (ticket 100) et la PR du ticket 119 fusionnées.
 
-**Status:** open
+**Claimed by:** Isolde 2026-11-15 00:12
+
+**Status:** in-progress
 
 - [ ] Chaque point : corrigé (test rouge d'abord quand c'est du code) ou la limite écrite

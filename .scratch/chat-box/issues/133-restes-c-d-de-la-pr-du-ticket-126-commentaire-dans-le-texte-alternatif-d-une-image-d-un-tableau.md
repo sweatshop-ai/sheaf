@@ -9,4 +9,6 @@
 
 **Blocked by:** PR du ticket 126 fusionnée
 
-**Status:** open
+**Claimed by:** Dries 2026-11-15 00:12
+
+**Status:** in-progress

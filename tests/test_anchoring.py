@@ -759,20 +759,6 @@ def test_rows_of_a_table_in_a_quote_or_a_list_are_never_more_than_pandoc_sees(md
     assert rows <= _pandoc_cell_lines(md), (rows, _pandoc_cell_lines(md))
 
 
-CODEX_A = ('> - a ` | b <!-- sheaf-comment id=c1 by="A" at=2026-01-01T00:00 status=open quote="b" why --> `\n'
-           '>   ---|---\n>   x | y\n')
-
-
-@pytest.mark.parametrize("md", [
-    CODEX_A,
-    "- > a ` | b %s `\n  > ---|---\n  > x | y\n" % C1,
-    "- - a ` | b %s `\n    ---|---\n    x | y\n" % C1,
-])
-def test_a_table_under_a_quote_and_a_list_item_keeps_its_comment(md):
-    assert _pandoc_cell_lines(md) >= {0, 2}
-    assert [c.id for c in rdc.parse(md).comments] == ["c1"]
-
-
 def test_a_line_of_many_container_markers_is_read_in_linear_time():
     md = "> " * 60000 + "`x`\n"
     t = time.perf_counter()
@@ -788,7 +774,6 @@ def test_a_line_of_many_container_markers_is_read_in_linear_time():
     ">     | a ` | b %s ` |\n>     |---|---|\n" % C1,
     "- q\n\n      | a ` | b %s ` |\n      |---|---|\n" % C1,
     "> - q\n>\n>       | a ` | b %s ` |\n>       |---|---|\n" % C1,
-    "> - q\n>\n>   | a | b |\n>   |---|---|\n>       | `x | `%s` | y` |\n" % C1,
     # c1: a continuation line sits 0 to 3 columns past the header's, tabs at their stops
     "- q\n\n  | a | b |\n  |---|---|\n   | x ` | b %s ` |\n" % C1,
     "- q\n\n  | a ` | b %s ` |\n   |---|---|\n" % C1,
@@ -801,3 +786,29 @@ def test_parse_agrees_with_pandoc_on_a_comment_in_a_quoted_or_listed_table(md):
     page = pandoc(["-f", "gfm", "-t", "html"], md)
     seen = "&lt;!-- sheaf" not in page and "<!-- sheaf-comment" in page
     assert [c.id for c in rdc.parse(md).comments] == (["c1"] if seen else [])
+
+
+@pytest.mark.parametrize("md", [
+    # round 4: shapes that are not plain are read whole, as on main
+    "1. > | a | b |\n  > |---|---|\n  > | `x | `%s` | y` |\n" % C1,
+    "1. > | a | b |\n   > |---|---|\n  > | `x | `%s` | y` |\n" % C1,
+    "> |a|b|\n>\t  |---|---|\n> | `x | `%s` | y` |\n" % C1,
+    ">- | a | b |\n>  |---|---|\n>  | `x | `%s` | y` |\n" % C1,
+    "> - q\n>\n>   | a | b |\n>   |---|---|\n> | `x | `%s` | y` |\n" % C1,
+])
+def test_a_table_in_a_shape_that_is_not_plain_is_read_whole_as_before(md):
+    page = pandoc(["-f", "gfm", "-t", "html"], md)
+    assert "<!-- sheaf-comment" in page and "&lt;!-- sheaf" not in page   # pandoc shows a comment
+    assert [c.id for c in rdc.parse(md).comments] == ["c1"]
+    assert rdc._table_row_lines(md) == frozenset()
+
+
+@pytest.mark.parametrize("md, rows", [
+    ("> | a | b |\n> |---|---|\n> | x | y |\n", {0, 1, 2}),
+    ("> > | a | b |\n> > |---|---|\n", {0, 1}),
+    ("- x\n\n  | a | b |\n  |---|---|\n  | x | y |\n", {2, 3, 4}),
+    ("- | a | b |\n  |---|---|\n", {0, 1}),
+    ("> p\n>\n> | a | b |\n> |---|---|\n", {2, 3}),
+])
+def test_a_table_in_a_plain_quote_or_a_plain_list_item_is_read_cell_by_cell(md, rows):
+    assert rdc._table_row_lines(md) == rows

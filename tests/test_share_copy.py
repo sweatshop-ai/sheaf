@@ -776,6 +776,7 @@ def test_the_empty_opener_message_does_not_claim_a_dropped_text(tmp_path):
 ])
 def test_an_empty_opener_that_a_later_arrow_would_close_gets_the_swallows_message(tmp_path, text):
     # Ticket 83, point 2 (SPEC 6.2): with a --> later in the document the refusal is the swallowing one.
+    # It pins the SPEC sentence; it also passes on main's render.py, as `_dropped_text_line` refused first.
     with pytest.raises(sheafmd.UnclosedComment) as e:
         sheafmd.render(doc(tmp_path, text))
     assert e.value.line == 1

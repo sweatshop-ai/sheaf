@@ -778,6 +778,33 @@ def test_an_item_typed_above_the_box_just_before_the_press_never_ticks_another_b
     assert "[x] Done" not in text and "[x] extra" not in text, text
 
 
+def test_share_pressed_with_the_hub_unreachable_and_an_owed_save_says_so_and_ticks_nothing(sheaf):
+    # action-buttons 05, Review 4 on 11ff860: pressShare returned on an owed save without a word, so the press looked
+    # dropped until the outage banner. It says so; the box stays; the edit is saved once the hub is back, unticked.
+    p, f = sheaf.page, sheaf.site.file
+    stand_still(p)
+    ticks = []
+    p.on("request", lambda r: ticks.append(r.url) if "/_/tick" in r.url else None)
+    p.route("**/_/save", lambda r: r.abort())
+    type_at_end(p, "main li:has-text('Approve')", "")
+    p.keyboard.press("Enter")
+    p.keyboard.type("extra")
+    until(lambda: "extra" in p.inner_text("main ul"), what="the new item on screen")
+    box = p.locator("main li:has-text('Share') input[type=checkbox]")
+    box.click()
+    toasted(p, "press Share again once it is back")
+    assert not ticks, ticks
+    assert box.get_attribute("checked") is None
+    assert "extra" not in f.read_text(encoding="utf-8") and "- [x] Share" not in f.read_text(encoding="utf-8")
+    p.unroute("**/_/save")
+    def saved():
+        p.clock.run_for(1100)
+        return "extra" in f.read_text(encoding="utf-8")
+    until(saved, what="the owed edit, saved once the hub is back")
+    p.wait_for_timeout(300)
+    assert "- [x] Share" not in f.read_text(encoding="utf-8") and not ticks, ticks
+
+
 def test_an_upgrade_while_a_comment_waits_for_the_tick_does_not_ask_to_send_it(sheaf, site):
     # #148, gate on 3b10c3c: the comment, sent and waiting for the tick's answer, did not count as a write out, and
     # the upgrade's notice asked to send or cancel it.

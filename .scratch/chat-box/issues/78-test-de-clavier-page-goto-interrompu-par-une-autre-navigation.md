@@ -14,8 +14,8 @@
 
 **Par où commencer :** le journal du run 43586766076, tentative 1, puis `tests/page/conftest.py:148`.
 
-- [ ] Cause trouvée (journal et reproduction)
-- [ ] Le correctif traite la cause, pas un délai ni une relance
-- [ ] CI verte trois fois de suite
+- [x] Cause trouvée (journal et reproduction)
+- [x] Le correctif traite la cause, pas un délai ni une relance
+- [x] Test du clavier vert dans 3 exécutions consécutives (43619245440, tentatives 1 à 3) ; les rouges des exécutions entières étaient les tickets 64 et 86
 
-**Status:** ready-for-agent
+**Status:** done (PR 321, fusion e44997a)

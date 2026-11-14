@@ -61,7 +61,7 @@ def test_a_hub_page_in_proxy_mode_that_is_not_mounted_has_no_microphone(tab, sit
     assert asked == [], "the page asked a relay that does not exist in proxy mode"
 
 
-def _refuse_and_remount(front, site, status):
+def _refuse_and_remount(front, site, status, between=lambda: None):
     front.page.route(ROUTE, lambda route: route.fulfill(status=status, content_type="application/json", body="{}"))
     front.page.add_init_script(FAKE_MIC)
     update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
@@ -72,6 +72,7 @@ def _refuse_and_remount(front, site, status):
     until(lambda: front.page.evaluate("window.__mic.made.length === 1 && window.__mic.made[0].state === 'recording'"), what="recording")
     front.click(MIC)
     until(lambda: not front.has(MIC), what="the button gone after the refusal")
+    between()
     front.js("root.querySelector('main').__old = 1;")
     front.page.evaluate("window.__page.remount()")
     until(lambda: front.js("return root.querySelector('main') && root.querySelector('main').__old === undefined;")
@@ -86,11 +87,40 @@ def _refuse_and_remount(front, site, status):
     front.page.wait_for_timeout(300)
 
 
-@pytest.mark.parametrize("status", [403, 404], ids=["denied", "gone"])
-def test_a_refused_dictation_stays_off_after_a_remount(front, site, status):  # noqa: F811
-    """SPEC 10.4: the first failure takes the button away 'for the session', not for the mount."""
-    _refuse_and_remount(front, site, status)
+def test_a_refusal_of_the_account_stays_off_after_a_remount(front, site):  # noqa: F811
+    """SPEC 10.4: a 403 takes the button away 'for the session', not for the mount."""
+    _refuse_and_remount(front, site, 403)
     assert not front.has(MIC), "the remount brought the button back"
+
+
+def test_a_lost_service_is_held_off_for_the_mount_only(front, site):  # noqa: F811
+    """A 404, a 401 or a network failure may be a moment, an expired login or a host without the route: a sign-in
+    must not leave it off for the tab (the ticket-44 review), so the next mount offers the button again."""
+    _refuse_and_remount(front, site, 404)
+    until(lambda: front.has(MIC), what="the button offered again by the next mount")
+
+
+def _as_member(front, who):
+    """The hub's answer for the mount names the member `who[0]`: a change of who[0] is a change of user."""
+    def answer(route):
+        got = route.fetch()
+        body = got.json()
+        body["config"]["proxy"], body["config"]["member"] = True, who[0]
+        route.fulfill(response=got, json=body)
+    front.page.route("**/_/mount?doc=*", answer)
+
+
+def test_a_refusal_does_not_follow_a_change_of_user_in_the_same_tab(front, site):  # noqa: F811
+    who = ["bea"]
+    _as_member(front, who)
+    _refuse_and_remount(front, site, 403, between=lambda: who.__setitem__(0, "carl"))
+    until(lambda: front.has(MIC), what="the button offered to the next user")
+
+
+def test_a_refusal_stays_with_the_same_user_after_a_remount(front, site):  # noqa: F811
+    _as_member(front, ["bea"])
+    _refuse_and_remount(front, site, 403)
+    assert not front.has(MIC), "the remount brought the button back for the same user"
 
 
 def test_a_session_storage_that_throws_does_not_break_the_dictation(front, site):  # noqa: F811

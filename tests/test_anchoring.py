@@ -453,6 +453,9 @@ def test_an_empty_comment_opener_is_a_whole_comment_not_an_unclosed_one(opener):
     "<!--> word `and` y",
     "<!---> word `and` y",
     "\\<!-- a `x --> word `and` y",         # an escaped opener opens nothing
+    "a \\` b \\` c",                          # an escaped backtick opens no span (ticket 72)
+    "a \\\\` b ` word `and` y",              # an escaped backslash does not escape the backtick
+    "a \\`` b `x` y",                        # the escape takes one backtick; the next one opens a span
 ])
 def test_parse_reads_text_that_looks_like_a_tag_or_comment_as_pandoc_does(para):
     # Point 5a: whether a backtick is code in pandoc is whether `_mask_code` blanks it.
@@ -476,6 +479,31 @@ def test_a_block_of_many_unclosed_openers_is_read_in_linear_time():
     t = time.perf_counter()
     assert rdc._mask_code(md).count("`") == 0
     assert rdc._unclosed_opener(md) == 2
+    assert time.perf_counter() - t < 0.3
+
+
+# ── ticket 72: what is left of PR 291 ──
+
+def test_a_comment_after_an_escaped_backtick_is_found():
+    # Point 1: `\\`` is a literal backtick to pandoc, so it opens no span that hides the comment.
+    md = "Type a \\` to quote. The word and `x` here.\n"
+    out, cid = comment_on(md, "word")
+    assert [c.id for c in rdc.parse(out).comments] == [cid]
+
+
+def test_a_heading_with_an_escaped_backtick_before_its_comment_is_found():
+    md = "# Use \\` then see `x`\n"
+    out, cid = comment_on(md, "then")
+    assert [c.id for c in rdc.parse(out).comments] == [cid]
+
+
+def test_a_block_of_escaped_backticks_that_open_nothing_is_read_in_linear_time():
+    # Opus review 1, a: each leftover backtick of an escaped run opens a span nothing closes, and a
+    # lazy search to the end of the block from every one of them took 1 s at 16 KB.
+    md = "a " + "\\`` " * 4000 + "x\n"
+    t = time.perf_counter()
+    rdc._mask_code(md)
+    rdc.parse(md)
     assert time.perf_counter() - t < 0.3
 
 

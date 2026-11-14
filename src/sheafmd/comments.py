@@ -594,9 +594,30 @@ def heading_anchor(block: str) -> int | None:
     return at - 1 if run % 2 else at
 
 
+_CELL_PIPE_RE = re.compile(r"(?<!\\)(?:\\\\)*(\|)")
+
+
+def cell_end(block: str, point: int) -> int:
+    """Offset where the table cell that holds `point` ends: before its closing `|` and the spaces in
+    front of it, so the cell's words stay whole for every reader of the file. A `|` ends a cell unless
+    an odd run of backslashes escapes it, in code as well (GFM and pandoc read `a|b` in a code span as
+    two cells). A row with no closing `|` ends at the end of its line."""
+    line_start = block.rfind("\n", 0, point) + 1
+    eol = block.find("\n", point)
+    line_end = len(block) if eol < 0 else eol
+    # Read from the start of the line: whether a `|` is escaped depends on the backslashes before it.
+    at = next((m.start(1) for m in _CELL_PIPE_RE.finditer(block, line_start, line_end) if m.start(1) >= point),
+              line_end)
+    while at > point and block[at - 1] in " \t":
+        at -= 1
+    return at
+
+
 def comment_point(kind: str, block: str, start: int, end: int, quote: str) -> int:
     """Offset in `block` (of the given kind) where a comment on the selection [start, end) goes."""
     point = anchor_point(block, start, end, quote)      # a heading checks the selection too, then ignores where it ends
+    if kind == "table":
+        return cell_end(block, point)
     if kind != "heading":
         return point
     at = heading_anchor(block)

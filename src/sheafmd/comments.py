@@ -723,11 +723,41 @@ def _cells(bare: str) -> int:
     return len(_CELL_PIPE_RE.split(inner)[::2])
 
 
+_QUOTE_GROUP_RE = re.compile(r" {0,3}> ?")
+
+
+def _plain(block: str) -> bool:
+    """Whether `block` is a plain quote (every container marker a `>` with its space, none inside a
+    list item) or a plain list item (one marker at most per line, no quote, no tab in the margin).
+    Only these shapes are read for tables as pandoc reads them; any other (a quote in an item, an item
+    in a quote, a tab after a marker, a bare `>`) is read whole, as before ticket 75 (ticket 87)."""
+    quoted = listed = False
+    for line in block.split("\n"):
+        pos, n = 0, 0
+        while (m := _CONTAINER_RE.match(line, pos)) and m.end() > pos:
+            g = m.group()
+            if g.lstrip(" ").startswith(">"):
+                if not _QUOTE_GROUP_RE.fullmatch(g) or (g.endswith(">") and line[m.end():].strip()):
+                    return False
+                quoted = True
+            else:
+                listed = True
+            n += 1
+            pos = m.end()
+        if n > 1 and listed or "\t" in line[:pos + len(line[pos:]) - len(line[pos:].lstrip(" \t"))]:
+            return False
+        if listed and quoted:
+            return False
+    return True
+
+
 @functools.lru_cache(maxsize=64)
 def _table_row_lines(block: str) -> frozenset:
     """The lines of `block` that are rows of a table a quote or a list holds, as pandoc reads it: a
     header row and a delimiter row of the same number of cells, the header not directly under a
     paragraph line, then lines with a `|` up to one without, or one that opens a new list item."""
+    if not _plain(block):
+        return frozenset()
     bare = [_bare(line) for line in block.split("\n")]
     # Per line, how far its text sits past the content column of the container it is in: 0 to 3 is
     # a header or delimiter row (the rows after them may sit further in), 4 or more is indented
@@ -763,12 +793,37 @@ def _table_row_lines(block: str) -> frozenset:
     return frozenset(rows)
 
 
+def _loose_table_row(block: str, point: int) -> bool:
+    """Before ticket 75 (and still for a shape that is not plain): whether `point` is on a row of a table that a quote or a list holds (`> | a | b |`, an item
+    with a paragraph before its table): a line with a `|`, under unbroken lines with one, down to
+    a delimiter row. The splitter reads such a block as a quote or a list, not a table, but a
+    comment in it must be written as one in a table: on one line, at the end of a cell."""
+    lines = block.split("\n")
+    n = block.count("\n", 0, point)
+    bare = []
+    for line in lines:
+        while (m := _CONTAINER_RE.match(line)) and m.end():
+            line = line[m.end():]
+        bare.append(line)
+    if (n + 1 < len(bare) and _CELL_PIPE_RE.search(bare[n]) and _CELL_PIPE_RE.search(bare[n + 1])
+            and TBLSEP_RE.match(bare[n + 1])):
+        return True                 # the header row, above its delimiter row
+    for i in range(n, -1, -1):
+        if not _CELL_PIPE_RE.search(bare[i]):
+            return False
+        if i and TBLSEP_RE.match(bare[i]) and _CELL_PIPE_RE.search(bare[i - 1]):
+            return True
+    return False
+
+
 def in_table_row(block: str, point: int) -> bool:
     """Whether `point` is on a row of a table that a quote or a list holds (`> | a | b |`, an item
-    with a paragraph before its table), as pandoc reads it (`_table_row_lines`). The splitter reads
-    such a block as a quote or a list, not a table, but a comment in it must be written as one in a
-    table: on one line, at the end of a cell."""
-    return block.count("\n", 0, point) in _table_row_lines(block)
+    with a paragraph before its table). The splitter reads such a block as a quote or a list, not a
+    table, but a comment in it must be written as one in a table: on one line, at the end of a cell.
+    In a plain shape (`_plain`) the rows are those pandoc reads (`_table_row_lines`)."""
+    if _plain(block):
+        return block.count("\n", 0, point) in _table_row_lines(block)
+    return _loose_table_row(block, point)
 
 
 def cell_end(block: str, point: int, cells: bool = True) -> int:
@@ -778,9 +833,11 @@ def cell_end(block: str, point: int, cells: bool = True) -> int:
     as well (GFM and pandoc read `a|b` in a code span as two cells); a row with no closing `|` ends the
     cell at the end of its line. Before a backslash that ends the cell's text, which would escape the
     block's `<`, and before a `<!--` in the cell that nothing closes, which a block after it would close,
-    hiding the words it was meant to hold. Where the cell's end is inside a code span, the block stays
-    after the selection: written there it would be code to `parse`, and the comment lost. `cells` is
-    `"rows"` in a quote or a list (see `_mask_code`)."""
+    hiding the words it was meant to hold. Where the cell's end is inside a code span that `parse` reads
+    across cells (pandoc splits the cells first), the block stays after the selection: written there it
+    would be code to `parse`, and the comment lost. `cells` is `"rows"` in a plain quote or list (see
+    `_plain`), false in any other shape, which `parse` reads whole: a span there may still run from one
+    cell to the next, and where even the selection's point is inside it the comment is refused."""
     line_start = block.rfind("\n", 0, point) + 1
     eol = block.find("\n", point)
     line_end = len(block) if eol < 0 else eol
@@ -799,6 +856,9 @@ def cell_end(block: str, point: int, cells: bool = True) -> int:
     if run % 2:
         at -= 1
     if _mask_code(block[:at] + "\0" + block[at:], cells)[at] == " ":
+        if not cells and _mask_code(block[:point] + "\0" + block[point:])[point] == " ":
+            raise AnchorError("this cell is inside a code span that runs across cells, "
+                              "comment on another cell")
         return point
     return at
 
@@ -809,7 +869,7 @@ def comment_point(kind: str, block: str, start: int, end: int, quote: str) -> in
     if kind == "table":
         return cell_end(block, point)
     if kind in ("quote", "list") and in_table_row(block, point):
-        return cell_end(block, point, cells="rows")
+        return cell_end(block, point, cells="rows" if _plain(block) else False)
     if kind != "heading":
         return point
     at = heading_anchor(block)

@@ -377,6 +377,19 @@ def _mask_code(text: str, cells: bool = False) -> str:
     return "".join(parts)
 
 
+def _read_block(kind: str, text: str):
+    """(masked, raw): `text` with its inline code blanked (`_mask_code`), and the heads of the comments that
+    pandoc shows as raw HTML, or None for "do not ask". A table that a quote or a list holds is read by
+    pandoc (`_read_tables`), which splits its cells before it reads a span, sets the span's range, drops the
+    cells beyond the table's columns and reads an indented line as code: where the block may hold one and
+    holds a comment, a comment that pandoc does not show as raw HTML is not one."""
+    if kind in ("quote", "list") and COMMENT_RE.search(text) and _may_hold_table(text):
+        read = _read_tables(text)
+        if read is not None:
+            return _blank(text, read[1]), read[2]
+    return _mask_code(text, kind == "table"), None
+
+
 def parse(md: str) -> Parsed:
     comments, malformed, seen = [], [], set()
     pos = 0
@@ -389,7 +402,7 @@ def parse(md: str) -> Parsed:
         # Inline code is literal text, so a comment written there is an example
         # (this spec has several). Search a copy with code spans blanked out, the
         # same length so every offset still points into the real text.
-        masked = _mask_code(text, b.kind == "table")
+        masked, raw_heads = _read_block(b.kind, text)
         i = 0
         while True:
             m = COMMENT_RE.search(masked, i)
@@ -404,6 +417,9 @@ def parse(md: str) -> Parsed:
                 break
             e += 3
             raw = text[a:e]
+            if raw_heads is not None and _head_of(raw) not in raw_heads:
+                i = e
+                continue
             c, why = _parse_one(raw)
             if c is None:
                 malformed.append(Malformed(line, why, start + a, start + e, raw))
@@ -507,9 +523,8 @@ def _sourcepos_html(block: str) -> str:
     return r.stdout
 
 
-def projection(block: str) -> Projection:
-    from html.parser import HTMLParser
-
+def _offset_fn(block: str):
+    """The function that turns a pandoc sourcepos (line, column), both from 1, into an offset in `block`."""
     starts = [0]
     for ln in block.split("\n")[:-1]:
         starts.append(starts[-1] + len(ln) + 1)
@@ -525,7 +540,97 @@ def projection(block: str) -> Projection:
             if seen >= col - 1:
                 return starts[line - 1] + i
             seen += 4 - seen % 4 if ch == "\t" else 1
-        return starts[line - 1] + len(text) + max(0, col - 1 - seen)
+        return min(starts[line - 1] + len(text) + max(0, col - 1 - seen), len(block))
+    return off
+
+
+# A table inside a quote or a list is read by pandoc, not by this module: where the rows are and which
+# characters are inline code are what its sourcepos says (`data-pos` on each span of a cell and on each `<code>`),
+# so no container marker is read by hand. A table needs a delimiter row, so a block with no line of only
+# `|`, `-`, `:`, blanks and the marks of a quote or a list is not sent: one run per block that may hold a table.
+_DELIMITER_LINE_RE = re.compile(r"^[ \t\r>\-+*.)0-9:|]*$")
+
+
+_HEAD_RE = re.compile(rf"<!--\s*{MARKER}\b.*?(?=-->|\n|$)")
+
+
+def _head_of(raw: str) -> str:
+    """What names a comment in the HTML pandoc writes: its first line up to a `-->`."""
+    m = _HEAD_RE.match(raw.replace("\r", ""))
+    return m.group(0) if m else raw
+
+
+def _may_hold_table(block: str) -> bool:
+    return "|" in block and any("|" in ln and "-" in ln and _DELIMITER_LINE_RE.match(ln)
+                                for ln in block.split("\n"))
+
+
+@functools.lru_cache(maxsize=64)
+def _read_tables(block: str):
+    """(rows, code, raw) as pandoc reads `block`, or None when pandoc fails: `rows` the lines (from 0) that carry a
+    cell of a table, `code` the (start, end) offsets of every inline code span, backticks included, `raw` the
+    heads (`_head_of`) of the comments that pandoc writes as raw HTML: one that it reads as code, drops with
+    a cell beyond the table's columns or shows as text is not in it. Pandoc
+    deletes a CR and counts columns without it, so it reads the block without its CRs and the offsets are
+    given back for the block as it is."""
+    from html.parser import HTMLParser
+
+    keep = [i for i, ch in enumerate(block) if ch != "\r"]
+    plain = block.replace("\r", "") if len(keep) < len(block) else block
+    try:
+        html = _sourcepos_html(plain)
+    except AnchorError:
+        return None
+    off = _offset_fn(plain)
+    back = (lambda o: keep[o] if o < len(keep) else len(block)) if plain is not block else (lambda o: o)
+    rows, code = set(), []
+
+    class P(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.stack = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag in VOID_TAGS:
+                return
+            self.stack.append(tag)
+            pos = next((v for k, v in attrs if k == "data-pos"), "")
+            ranges = [tuple(map(int, m.groups())) for m in POS_RE.finditer(pos)]
+            if tag == "code" and "pre" not in self.stack and ranges:
+                # A span over several lines has one range per line: the span runs from the first to the last,
+                # line breaks and container marks between them included.
+                code.append((back(off(ranges[0][0], ranges[0][1])), back(off(ranges[-1][2], ranges[-1][3]))))
+            if ranges and tag in ("span", "code") and ("td" in self.stack or "th" in self.stack):
+                rows.update(a - 1 for a, _, _, _ in ranges)
+
+        def handle_endtag(self, tag):
+            if tag in VOID_TAGS:
+                return
+            while self.stack:
+                if self.stack.pop() == tag:
+                    break
+
+    p = P()
+    p.feed(html)
+    p.close()
+    return rows, tuple(code), frozenset(_head_of(m.group(0)) for m in _HEAD_RE.finditer(html))
+
+
+def _blank(text: str, ranges) -> str:
+    """`text` with the given (start, end) ranges blanked, the same length."""
+    parts, last = [], 0
+    for a, b in sorted(ranges):
+        if a >= last:
+            parts += [text[last:a], " " * (b - a)]
+            last = b
+    parts.append(text[last:])
+    return "".join(parts)
+
+
+def projection(block: str) -> Projection:
+    from html.parser import HTMLParser
+
+    off = _offset_fn(block)
 
     text, chars, stack = [], [], []
     # A task list item's box comes out as a ☐ or ☒ right after <li>, outside any
@@ -544,10 +649,11 @@ def projection(block: str) -> Projection:
                 # the range of the block around it. The first is the one wanted
                 # (before 3.8 there is only one); dict(attrs) would keep the last.
                 pos = next((v for k, v in attrs if k == "data-pos"), None)
-                m = POS_RE.search(pos or "")
-                if m:
-                    a, b, c, d = map(int, m.groups())
-                    span = _Span(off(a, b), off(c, d))
+                # A span over several lines (in a quote or a list) has one range per line: it runs from the
+                # first range's start to the last range's end.
+                ranges = [tuple(map(int, m.groups())) for m in POS_RE.finditer(pos or "")]
+                if ranges:
+                    span = _Span(off(*ranges[0][:2]), off(*ranges[-1][2:]))
             stack.append((tag, span))
 
         def handle_endtag(self, tag):
@@ -695,9 +801,21 @@ _CONTAINER_RE = re.compile(r"[ \t]*(?:>|(?:[-+*]|\d{1,9}[.)])(?=[ \t]))[ \t]?")
 
 def in_table_row(block: str, point: int) -> bool:
     """Whether `point` is on a row of a table that a quote or a list holds (`> | a | b |`, an item
-    with a paragraph before its table): a line with a `|`, under unbroken lines with one, down to
-    a delimiter row. The splitter reads such a block as a quote or a list, not a table, but a
-    comment in it must be written as one in a table: on one line, at the end of a cell."""
+    with a paragraph before its table): a line that pandoc reads a cell on (`_read_tables`), or one
+    that the splitter would read as a row (`_in_table_row_by_markers`): the splitter cuts a block at a
+    delimiter row that pandoc does not read, and a comment of several lines written there is cut with it.
+    The splitter reads such a block as a quote or a list, not a table, but a comment in it must be written
+    as one in a table: on one line, at the end of a cell."""
+    if not _may_hold_table(block):
+        return False
+    read = _read_tables(block)
+    if read is not None and block.count("\n", 0, point) in read[0]:
+        return True
+    return _in_table_row_by_markers(block, point)
+
+
+def _in_table_row_by_markers(block: str, point: int) -> bool:
+    """The rows as the splitter reads them: the container markers read by hand, as far as they go."""
     lines = block.split("\n")
     n = block.count("\n", 0, point)
     bare = []
@@ -716,7 +834,7 @@ def in_table_row(block: str, point: int) -> bool:
     return False
 
 
-def cell_end(block: str, point: int, cells: bool = True) -> int:
+def cell_end(block: str, point: int, cells: bool = True, code=None) -> int:
     """Offset where a comment on a selection ending at `point` goes in a table: the end of the cell that
     holds `point`, before its closing `|` and the spaces in front of it, so the cell's words stay whole
     for every reader of the file. A `|` ends a cell unless a backslash stands right before it (pandoc counts no pairs), in code
@@ -725,8 +843,8 @@ def cell_end(block: str, point: int, cells: bool = True) -> int:
     block's `<`, and before a `<!--` in the cell that nothing closes, which a block after it would close,
     hiding the words it was meant to hold. Where the cell's end is inside a code span that `parse` reads
     across cells (pandoc splits the cells first), the block stays after the selection: written there it
-    would be code to `parse`, and the comment lost. `cells` is false in a quote or a list, which
-    `parse` reads whole: a span there may still run from one cell to the next."""
+    would be code to `parse`, and the comment lost. `code` is the inline code ranges that pandoc reads
+    in a quote or a list (`_read_tables`), which `parse` masks the same way."""
     line_start = block.rfind("\n", 0, point) + 1
     eol = block.find("\n", point)
     line_end = len(block) if eol < 0 else eol
@@ -744,6 +862,12 @@ def cell_end(block: str, point: int, cells: bool = True) -> int:
     run = len(block[cell_start:at]) - len(block[cell_start:at].rstrip("\\"))
     if run % 2:
         at -= 1
+    if code is not None:
+        if any(a < at < b for a, b in code):
+            if any(a < point < b for a, b in code):
+                raise AnchorError("this cell is inside a code span, comment on another cell")
+            return point
+        return at
     if _mask_code(block[:at] + "\0" + block[at:], cells)[at] == " ":
         if not cells and _mask_code(block[:point] + "\0" + block[point:])[point] == " ":
             raise AnchorError("this cell is inside a code span that runs across cells, "
@@ -758,7 +882,8 @@ def comment_point(kind: str, block: str, start: int, end: int, quote: str) -> in
     if kind == "table":
         return cell_end(block, point)
     if kind in ("quote", "list") and in_table_row(block, point):
-        return cell_end(block, point, cells=False)
+        read = _read_tables(block)
+        return cell_end(block, point, cells=False, code=read[1] if read else None)
     if kind != "heading":
         return point
     at = heading_anchor(block)

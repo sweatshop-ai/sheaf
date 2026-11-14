@@ -7,7 +7,7 @@
 
 **Claimed by:** Birgit 2026-11-11 12:58
 
-**Status:** in-progress
+**Status:** done (PR 244, merged as 3a04cb2)
 
 L'attente de la ligne « has seen it » expire. PR #240 run 42923857640 tentative 1. Pas l'attente d'Échap : aucun envoi n'est abandonné. Cause non prouvée, non reproduite en local. À faire : un diagnostic au timeout (lignes vues, texte de la boîte, état `waits` de la page), puis lire le prochain rouge.
 

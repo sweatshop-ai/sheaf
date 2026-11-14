@@ -7,7 +7,7 @@
 
 **Claimed by:** Birgit 2026-11-11 12:58
 
-**Status:** in-progress
+**Status:** done (PR 244, merged as 3a04cb2)
 
 L'attente du toast (8 s) expire. PR #241 run 42925663097 tentative 1 ; PR #240 run 42923857640 tentative 1 ; t-compute à 9aed290 (ticket 03). Pas la même cause qu'Échap (ticket 10) : le test n'appelle pas `fail_a_reply` et n'abandonne aucun envoi ; il ne se reproduit pas en local (12 passages). Le test relève maintenant le nombre de requêtes `/_/cancel` refusées, les toasts vus et le texte de la boîte (047a057) : le prochain rouge dit si le clic est perdu (0 requête) ou si le toast est remplacé (≥ 1).
 

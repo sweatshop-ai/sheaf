@@ -297,10 +297,10 @@ def test_the_button_of_a_refused_selection_sits_under_the_selection_in_the_pane(
 def test_an_edit_makes_the_page_dirty_for_the_loader_and_is_stored_under_a_key_of_its_own(front):
     front.open()
     assert front.page.evaluate("window.__page.dirty()") is False
-    front.click("main p")
+    front.click("main p:not(.doc-by)")
     front.page.keyboard.press("e")
     until(lambda: front.has(".rd-root.rd-editing main [contenteditable=true]"), what="edit mode")
-    front.click("main p")
+    front.click("main p:not(.doc-by)")
     front.page.keyboard.press("End")
     front.page.keyboard.type(" more")
     until(lambda: front.page.evaluate("window.__page.dirty()") is True, what="dirty")

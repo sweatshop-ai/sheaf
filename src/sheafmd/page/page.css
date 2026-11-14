@@ -231,11 +231,6 @@ blockquote.rd-copy{position:relative;padding-right:5.5em}
 /* What the agent cannot do: the button is there, disabled, and one line says why (SPEC 10.6). */
 /* Busy Tell: hovering shows Cancel over the label. Both stay laid out, so the
    button keeps its width and the pointer does not slide onto its neighbour. */
-#rd-popover .rd-actions button.rd-busy{display:inline-grid}
-#rd-popover .rd-actions button.rd-busy>span{grid-area:1/1;text-align:center}
-#rd-popover .rd-actions button.rd-busy .rd-off{visibility:hidden}
-#rd-popover .rd-actions button.rd-busy:hover .rd-on{visibility:hidden}
-#rd-popover .rd-actions button.rd-busy:hover .rd-off{visibility:visible}
 #rd-popover .rd-hold,#rd-popover .rd-also,#rd-popover .rd-kept-quote,#rd-popover .rd-sending{font:12px/1.4 ui-monospace,monospace;opacity:.8;margin:0 0 6px}
 /* A form's send is out: the line stands where the form and the thread's buttons were. */
 #rd-popover .rd-sending{margin:8px 0 0}
@@ -258,6 +253,8 @@ button.rd-act{overflow-wrap:anywhere}
 button.rd-act.pending,button.rd-act.pressed,button.rd-act[aria-pressed=true]{background:var(--rd-c);
  color:var(--bg,#fff)}
 button.rd-act:disabled{cursor:default;opacity:.7}
+.doc-by .doc-by-who{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;
+ text-decoration:underline;text-underline-offset:2px}
 
 /* A one-off's button sits where its box is (SPEC 10.11): the box is behind it, and the rest of the line is its text. */
 input[type="checkbox"]:has(+ button.rd-inline){display:none}

@@ -7,7 +7,7 @@
 
 **Claimed by:** Birgit 2026-11-11 12:58
 
-**Status:** in-progress
+**Status:** done (PR 244, merged as 3a04cb2)
 
 Run 42923857640 tentative 2 : la boîte montre le fil sans la réponse (« Why apples? / Send reply »), le fichier la contient, le stockage de la page est vide : le formulaire est parti et la réponse n'est pas affichée. Le `BrokenPipeError` du hub est dans la section « Captured stderr teardown » : le relâchement de la requête retenue à la fin du test ; le `no running event loop` est un avertissement Playwright attaché à un autre test (`test_a_text_sent_again_after_a_give_up…`). Ni l'un ni l'autre n'est la cause. Non reproduit en local ; le test s'appuie sur `p.clock` (horloge simulée), à examiner.
 

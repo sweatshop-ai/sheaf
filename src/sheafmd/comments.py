@@ -417,7 +417,7 @@ def parse(md: str) -> Parsed:
                 break
             e += 3
             raw = text[a:e]
-            if raw_heads is not None and _head_of(raw) not in raw_heads:
+            if raw_heads is not None and a not in raw_heads[0] and _head_of(raw) not in raw_heads[1]:
                 i = e
                 continue
             c, why = _parse_one(raw)
@@ -583,12 +583,12 @@ def _may_hold_table(block: str) -> bool:
                                 for ln in block.split("\n"))
 
 
-@functools.lru_cache(maxsize=64)
+@functools.lru_cache(maxsize=1024)
 def _read_tables(block: str):
     """(rows, code, raw, heads) as pandoc reads `block`, or None when pandoc fails: `rows` the lines (from 0) that carry a
     cell of a table, `code` the (start, end) offsets of every inline code span, backticks included, `heads` the
     (start, end) offsets of every heading, from the first to the last range pandoc gives it, `raw` the
-    heads (`_head_of`) of the comments that pandoc writes as raw HTML: one that it reads as code, drops with
+    starts of the comments that pandoc writes as raw HTML in a span (or, for one that is a block of its own, their heads, `_head_of`): one that it reads as code, drops with
     a cell beyond the table's columns or shows as text is not in it. Pandoc
     deletes a CR and counts columns without it, so it reads the block without its CRs and the offsets are
     given back for the block as it is."""
@@ -603,23 +603,28 @@ def _read_tables(block: str):
     off = _offset_fn(plain)
     back = (lambda o: keep[o] if o < len(keep) else len(block)) if plain is not block else (lambda o: o)
     rows, code, heads = set(), [], []
+    starts, heads_raw = set(), set()
 
     class P(HTMLParser):
         def __init__(self):
             super().__init__()
             self.stack = []
+            self.starts = []       # per open tag, where its range starts, or None
             self.head = None
 
         def handle_starttag(self, tag, attrs):
-            if tag in VOID_TAGS:
-                return
-            self.stack.append(tag)
             pos = next((v for k, v in attrs if k == "data-pos"), "")
             ranges = [tuple(map(int, m.groups())) for m in POS_RE.finditer(pos)]
+            if tag in VOID_TAGS:
+                if ranges and self.head is not None:         # an image ends a heading's words as well
+                    self.head.append((back(off(ranges[0][0], ranges[0][1])), back(off(ranges[-1][2], ranges[-1][3]))))
+                return
+            self.stack.append(tag)
             if tag == "code" and "pre" not in self.stack and ranges:
                 # A span over several lines has one range per line: the span runs from the first to the last,
                 # line breaks and container marks between them included.
                 code.append((back(off(ranges[0][0], ranges[0][1])), back(off(ranges[-1][2], ranges[-1][3]))))
+            self.starts.append(back(off(ranges[0][0], ranges[0][1])) if ranges else None)
             if tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
                 self.head = []
             elif ranges and self.head is not None:
@@ -636,13 +641,25 @@ def _read_tables(block: str):
                     heads.append((min(a for a, _ in self.head), max(b for _, b in self.head)))
                 self.head = None
             while self.stack:
+                self.starts.pop()
                 if self.stack.pop() == tag:
                     break
+
+        def handle_comment(self, data):
+            # Pandoc writes a comment inside a paragraph, a heading or a cell in a span that carries its range:
+            # the place names it (the text of its head is changed, a tab to spaces and `\\|` to `|`). One that
+            # is a block of its own has no span and is named by its head.
+            start = next((a for a in reversed(self.starts) if a is not None), None)
+            at = start if start is not None and self.stack and self.stack[-1] == "span" else None
+            if at is not None:
+                starts.add(at)
+            else:
+                heads_raw.add(_head_of("<!--%s-->" % data))
 
     p = P()
     p.feed(html)
     p.close()
-    return rows, tuple(code), frozenset(_head_of(m.group(0)) for m in _HEAD_RE.finditer(html)), tuple(heads)
+    return rows, tuple(code), (frozenset(starts), frozenset(heads_raw)), tuple(heads)
 
 
 def _blank(text: str, ranges) -> str:
@@ -916,7 +933,7 @@ def comment_point(kind: str, block: str, start: int, end: int, quote: str) -> in
         # A heading in a quote or a list: the comment goes at the end of its words, on its line (ticket 55).
         eol = block.find("\n", head[0])
         line = block[head[0]:len(block) if eol < 0 else eol]
-        at = _heading_anchor(line) if _atx_words(line) else None
+        at = heading_anchor(line) if _atx_words(line.replace("\r", "")) else None
         if at is None:
             raise AnchorError("this heading has no place for a comment, comment on a paragraph")
         return head[0] + at

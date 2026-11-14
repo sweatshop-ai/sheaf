@@ -1649,15 +1649,18 @@ var create = function (ROOT, CFG, opts) {
   function entryKey(d) {
     return [d.thread || '', d.kind || '', d.rid || d.of || '', typeof d.thread === 'string' ? '' : [d.quote, d.block, d.occ].join('|')].join('\u0001');
   }
+  // A mark that cannot be written (a full store) is not worth the write of the store itself: the claim stays, as before.
   function withdrawn(written) {
     var now = Date.now(), kept = {}, stale = [];
-    written.forEach(function (d) { kept[entryKey(d)] = true; });
-    lastRead.forEach(function (d) { var k = entryKey(d); if (!kept[k]) localStorage.setItem(MARK + k, String(now)); });
-    for (var i = 0; i < localStorage.length; i++) {
-      var name = localStorage.key(i);
-      if (name && name.indexOf(MARK) === 0 && now - Number(localStorage.getItem(name)) > MARK_LIFE) stale.push(name);
-    }
-    stale.forEach(function (name) { localStorage.removeItem(name); });
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var name = localStorage.key(i);
+        if (name && name.indexOf(MARK) === 0 && now - Number(localStorage.getItem(name)) > MARK_LIFE) stale.push(name);
+      }
+      stale.forEach(function (name) { localStorage.removeItem(name); });
+      written.forEach(function (d) { kept[entryKey(d)] = true; });
+      lastRead.forEach(function (d) { var k = entryKey(d); if (!kept[k]) localStorage.setItem(MARK + k, String(now)); });
+    } catch (e) { /* the store is written all the same */ }
   }
   // What this write changed against the read it came from: the entries it put and the ones it took out.
   function claim(written) {
@@ -1666,9 +1669,6 @@ var create = function (ROOT, CFG, opts) {
     written.forEach(function (d) { after[entryKey(d)] = d; });
     Object.keys(after).forEach(function (k) { if (before[k] !== JSON.stringify(after[k])) claims[k] = { want: after[k], until: until, born: Date.now() }; });
     Object.keys(before).forEach(function (k) { if (!after[k]) claims[k] = { want: null, until: until }; });
-    // A claim this write does not touch and whose entry is gone from what it wrote: another page took it out, and this page's own clear
-    // found it taken already (the hub's `changed` event reaches both). It is no longer wanted, or the next event would put it back.
-    Object.keys(claims).forEach(function (k) { if (claims[k].want && !after[k]) claims[k].want = null; });
     lastRead = written;
     reclaims = 0;
   }

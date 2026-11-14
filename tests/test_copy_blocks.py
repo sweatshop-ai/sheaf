@@ -254,3 +254,42 @@ def test_such_a_block_shows_its_copy_button_and_a_save_keeps_the_marker(tmp_path
 ])
 def test_an_inline_tag_line_does_not_end_the_paragraph_so_the_underline_still_refuses_the_block(quote):
     assert not copyblock.is_copy_block(quote.rstrip("\n"))
+
+
+# pandoc's rules, probed on 720 lines (five leading marks, sixteen mixes of tabs and spaces after the `>`, nine openers).
+@pytest.mark.parametrize("opener", ["<![cdata[", "<![Cdata[", "<![CDATA["])
+def test_only_upper_case_cdata_opens_an_html_block_before_an_underline(opener):
+    assert copyblock.is_copy_block(f"> [!COPY]\n> a\n> {opener}\n> ---") is (opener == "<![CDATA[")
+
+
+@pytest.mark.parametrize("line, opens", [
+    ("> \t<div>", True),                    # the tab leaves 3 columns after the one the `>` takes
+    (">\t <div>", True),
+    (">\t  <div>", False),                  # 4 columns: indented code, which cannot end a paragraph
+    (">\t\t<div>", False),
+    ("> \t <div>", True),                  # a space, a tab to column 4, a space: 3
+    (">  \t<div>", True),                   # the tab only reaches column 4: 1 column kept by the mark, 3 of indent
+    (">   \t<div>", False),
+    ("   >\t<div>", True),
+    ("  >\t <div>", True),
+    ("\t> <div>", False),                   # a tab before the `>` is no quote at all
+    (">\t  ```", False),
+    (">\t  # h", False),
+    (">\t <![CDATA[", True),
+])
+def test_a_tab_counts_as_the_columns_it_spans_when_a_line_opens_a_block(line, opens):
+    assert copyblock.is_copy_block(f"> [!COPY]\n> a\n{line}\n> ---") is opens
+
+
+@pytest.mark.parametrize("quote, copy", [
+    ("> [!COPY]\n> a\n===", True),                  # a lazy line is never an underline
+    ("> [!COPY]\n> a\n==", True),
+    ("> [!COPY]\n> a\n> ===", False),
+    ("> [!COPY]\n> a\n>\t  ---", True),             # 4 columns: paragraph text
+    ("   > [!COPY]\n> a\n   >\t ===", True),
+    ("> [!COPY]\n> a\n> \t---", False),             # 3 columns: an underline
+    ("> [!COPY]\n> a\n> - \u00a0\n> ---", True),   # a no-break space after a bullet is an item, not a blank
+    ("> [!COPY]\n> a\n> 1. \u00a0\n> ---", True),
+])
+def test_the_underline_and_list_rules_read_the_source_as_pandoc_does(quote, copy):
+    assert copyblock.is_copy_block(quote) is copy

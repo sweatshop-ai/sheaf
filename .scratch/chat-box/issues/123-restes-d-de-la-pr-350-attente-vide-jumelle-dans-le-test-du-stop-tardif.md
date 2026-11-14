@@ -10,3 +10,10 @@
 **Claimed by:** Mira
 
 **Status:** ready-for-agent
+
+## Decision (Mira, PR chat-box/122)
+
+1. The twin wait after `flush()` in `test_the_stop_event_that_comes_late_leaves_the_new_recording_alone` is out. So is the one in `test_the_stop_event_that_comes_late_leaves_the_idle_button_of_a_form_that_came_back_...`: also after `flush()` and a `stops === 1` wait, and it asserts only synchronous results (aria-pressed, recorder state).
+2. The other fourteen `wait_for_timeout(300)` stay. In the fake microphone `stop()` dispatches its events synchronously unless `lateStop` holds them for `flush()`; each wait that is left guards a negative assertion on something that comes after: a POST that must not go out (`hub.posts == []`, lines 178, 193, 220, 305), a late promise or route answer (258, 387, 406), a timer run on the clock (527, 542), or a page that must not render a button (117, 125).
+3. Items 2 and 3 of the ticket: nothing to do.
+

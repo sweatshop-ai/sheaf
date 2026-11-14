@@ -197,6 +197,7 @@ def test_the_service_going_away_removes_the_button_and_says_so(tab, site, contex
     p.wait_for_selector(SAYS)
     assert "did not work" in p.inner_text(SAYS)
     p.wait_for_function("document.querySelector('#rd-popover .rd-mic') === null")
+    assert p.evaluate("Object.keys(sessionStorage).filter(k => k.includes('rd-dict-off'))") == [], "a hub page kept the hold"
 
 
 def test_a_recording_is_dropped_when_the_service_is_lost_during_it(tab, site, hub):

@@ -2480,7 +2480,10 @@ var create = function (ROOT, CFG, opts) {
   var dict = null, dictOff = 0;
   // A mounted page is built again at each remount, so what lasts "for the session" (10.4) is kept in sessionStorage, not in this closure.
   var DICT_OFF_KEY = KEYS + 'rd-dict-off';
-  if (MOUNTED) { try { if (sessionStorage.getItem(DICT_OFF_KEY) === '1') dictOff = Infinity; } catch (e) {} }
+  function dictationHeldOff() {         // read at each ask, so a refusal in another mounted page of the tab is seen too
+    if (MOUNTED && dictOff !== Infinity) { try { if (sessionStorage.getItem(DICT_OFF_KEY) === '1') dictOff = Infinity; } catch (e) {} }
+    return Date.now() < dictOff;
+  }
   function holdDictationOff(until) {
     dictOff = until;
     if (MOUNTED && until === Infinity) { try { sessionStorage.setItem(DICT_OFF_KEY, '1'); } catch (e) {} }
@@ -2496,7 +2499,7 @@ var create = function (ROOT, CFG, opts) {
     if (d.rec && d.rec.state !== 'inactive') d.rec.stop();
   }
   function dictationAvailable() {
-    if (Date.now() < dictOff) return Promise.resolve(false);
+    if (dictationHeldOff()) return Promise.resolve(false);
     if (MOUNTED) return Promise.resolve(true);        // Open WebUI answers or not; the first failure takes the button away
     if (CFG.proxy) return Promise.resolve(false);     // the hub in proxy mode relays nothing (SPEC 9.9)
     return fetch('/_/transcribe').then(function (r) { return r.ok ? r.json() : null; })

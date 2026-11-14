@@ -76,8 +76,11 @@ def _refuse_and_remount(front, site, status):
     front.page.evaluate("window.__page.remount()")
     until(lambda: front.js("return root.querySelector('main') && root.querySelector('main').__old === undefined;")
           and front.has(".rd-badge"), what="the remounted page")
-    front.page.wait_for_timeout(500)
-    if not front.has(FIELD):      # the remount keeps the thread open, so a click on the badge would close it
+    for _ in range(30):           # the remount keeps the thread open, so a click on the badge would close it
+        if front.has(FIELD):
+            break
+        front.page.wait_for_timeout(100)
+    else:
         front.click(".rd-badge")
     until(lambda: front.has(FIELD), what="the form of the thread")     # the closed root: page selectors do not reach it
     front.page.wait_for_timeout(300)
@@ -93,7 +96,10 @@ def test_a_refused_dictation_stays_off_after_a_remount(front, site, status):  # 
 def test_a_session_storage_that_throws_does_not_break_the_dictation(front, site):  # noqa: F811
     front.page.add_init_script("""(() => { const set = Storage.prototype.setItem;
       Storage.prototype.setItem = function (k) { if (String(k).includes('rd-dict-off')) throw new DOMException('no', 'SecurityError');
-        return set.apply(this, arguments); }; })();""")
+        return set.apply(this, arguments); };
+      const get = Storage.prototype.getItem;
+      Storage.prototype.getItem = function (k) { if (String(k).includes('rd-dict-off')) throw new DOMException('no', 'SecurityError');
+        return get.apply(this, arguments); }; })();""")
     _refuse_and_remount(front, site, 403)
-    # Nothing could be kept, so the state is the mount's: the page works and the button may come back.
-    assert front.has(FIELD)
+    # Nothing could be kept, so the state is the mount's: the page works and the button is offered again.
+    until(lambda: front.has(MIC), what="the button offered again by a mount that kept nothing")

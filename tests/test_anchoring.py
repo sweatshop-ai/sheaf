@@ -288,6 +288,8 @@ def test_a_backtick_in_a_raw_tag_does_not_hide_the_opener_after_it():
     "\\<b title='`'> word `and` y",          # an escaped `<` opens no tag
     "x <b tè='`'> word `and` y",        # an attribute name is ASCII
     "x <b\u000btitle='`'> word `and` y",     # a vertical tab is no whitespace of a tag
+    "x <b\u000ctitle='`'> word `and` y",     # nor a form feed (pandoc, gfm)
+    "x <b title='`'\u000c> word `and` y",
 ])
 def test_text_that_only_looks_like_a_tag_does_not_hide_a_comment_from_parse(para):
     # Ticket 65 follow-up (Opus review 1, F1): the backtick in the "tag" opens a code span, as in
@@ -299,3 +301,12 @@ def test_text_that_only_looks_like_a_tag_does_not_hide_a_comment_from_parse(para
     assert [c.id for c in rdc.parse(out).comments] == [cid]
     _, cid2 = rdc.add_comment(out, 0, 0, 5, "Intro", "again", "Bob", "2026-11-14T10:01")
     assert cid2 != cid
+
+
+def test_a_tag_after_an_escaped_backslash_is_still_a_tag_and_hides_its_backtick():
+    # `\\<b ...>`: the backslash is escaped, so the `<` opens a tag and its backtick opens no span.
+    md = "Intro.\n\n\\\\<b title='`'> word `and` y\n"
+    s, e = sel(rdc.split_md_blocks(md)[1].content, "word")
+    out, cid = rdc.add_comment(md, 1, s, e, "word", "why", "Ada", "2026-11-14T10:00")
+    assert [c.id for c in rdc.parse(out).comments] == [cid]
+    assert "<code>" not in pandoc(["-f", "gfm", "-t", "html"], out.split("-->")[0].split("<!--")[0])

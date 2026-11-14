@@ -4,7 +4,7 @@
 
 **Blocked by:** none
 
-**Claimed by:**
+**Claimed by:** Oskar
 
 **Status:** ready-for-agent
 

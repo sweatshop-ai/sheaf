@@ -14,11 +14,11 @@
 
 **Par où commencer :** `tests/test_anchoring.py`, section « ticket 72 » : un test rouge par point, en commençant par le 1.
 
-- [ ] Point 1 corrigé, test rouge d'abord
-- [ ] Point 2 corrigé
-- [ ] Point 3 corrigé ou la limite gardée avec la raison
-- [ ] Point 4 : test à comparaison par empan
-- [ ] Passage Codex sur le diff de la PR 300 fait, ses points traités ou écartés
-- [ ] CI verte
+- [x] Point 1 corrigé, test rouge d'abord (PR 303, 31db0cc ; `test_the_comment_spans_of_a_block_of_many_comments_are_read_in_linear_time` rouge avant : 61 s sur l'entrée adverse, puis 8 ms ; la revue a remplacé le cas à backtick pair par un cas à backtick échappé, 5,6 s sur l'ancien code)
+- [x] Point 2 corrigé (PR 303 ; `test_the_refusal_of_an_empty_comment_opener_does_not_say_it_is_never_closed`, rouge d'abord ; SPEC 6.2 changé ; restes c/d : ticket 83)
+- [x] Point 3 corrigé (PR 303, 72269d9 ; `_CELL_PIPE_RE` lit comme pandoc gfm : un `|` précédé de n'importe quelle barre oblique inverse n'est pas une bordure, vérifié contre pandoc pour 0 à 5, et par la revue pour 0 à 6 ; test rouge pour 2 et 4)
+- [x] Point 4 : test à comparaison par empan (PR 303, efbf4da ; 9 330 chaînes fixes contre pandoc ; il échoue quand la règle d'échappement est retirée)
+- [ ] Passage Codex sur le diff de la PR 300 fait, ses points traités ou écartés (NON FAIT : Codex refusait encore à 14:28 le 2026-11-14, « try again at 3:00 PM » ; reporté dans le ticket 83, point 5)
+- [x] CI verte (tête 1472ba3 de la PR 303 : 3 tranches SUCCESS avant la fusion ; fusionnée en ff5aaf7, la CI de main tournait encore)
 
-**Status:** ready-for-agent
+**Status:** done (sauf le passage Codex, repris par le ticket 83)

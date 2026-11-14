@@ -1017,9 +1017,9 @@ def test_a_held_clear_that_the_full_store_cannot_write_is_tried_by_the_reads_onl
     p.fill(FIELD, "")
     p.keyboard.press("Escape")
     until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close on an empty field")
-    store_unreadable(p, False)
-    p.evaluate("window.dispatchEvent(new StorageEvent('storage'))")      # [REPRO-86] a read that works between the two
     store_full(p)
+    store_unreadable(p, False)
+    p.evaluate("window.dispatchEvent(new StorageEvent('storage'))")      # [REPRO-86] a read that works right after the store reads again
     p.evaluate("window.dispatchEvent(new StorageEvent('storage'))")      # one read that works: its purge cannot be written
     until(lambda: p.evaluate("window.__refusedSets || 0") > 0, what="the purge to meet the full store")
     p.evaluate("new Promise(r => setTimeout(r, 400))")      # an absence cannot be waited for by a signal: time for runaway redraws to show

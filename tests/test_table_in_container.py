@@ -210,6 +210,19 @@ def test_a_top_level_table_with_a_comment_is_read_as_pandoc_reads_it(md, shown):
     assert fz.parse_sees(rdc, md) is shown
 
 
+# Review round 3 of ticket 126 (b3): pandoc writes a tab in a comment that is a block of its own as spaces
+@pytest.mark.parametrize("doc", [
+    "%s | a\n|---|---|\n| q | r |\n",
+    "%s \\|\n|---|\nq\n",
+    "> %s\n",
+    "- %s\n",
+])
+def test_a_comment_with_a_tab_that_is_a_block_of_its_own_is_found(doc):
+    md = doc % fz.C.replace(" why", " t\tu")
+    assert fz.pandoc_sees(pandoc, md)
+    assert fz.parse_sees(rdc, md)
+
+
 # Review of ticket 126, finding 1: a no-break or full-width space after a marker is no item: the table stays a table
 @pytest.mark.parametrize("sp", ["\xa0", "\u3000"])
 @pytest.mark.parametrize("marker", ["-", "*", "+", "1."])

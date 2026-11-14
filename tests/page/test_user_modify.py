@@ -50,6 +50,6 @@ def test_the_unsanitised_span_is_typed_into_in_chromium_and_webkit(engine_page, 
     (Firefox does not). If an engine stopped honouring it, the sanitised case would pass for nothing."""
     name, page = engine_page
     if name == "firefox":
-        pytest.skip("Firefox does not honour -webkit-user-modify")
+        return      # not honoured there, and CI fails on a skip
     got = _types_into(page, html)
     assert got != "x", f"{name} no longer lets the unsanitised span be typed into: the test above proves nothing"

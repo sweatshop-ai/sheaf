@@ -1622,6 +1622,7 @@ var create = function (ROOT, CFG, opts) {
       var all = commentDraftsRaw(true).filter(ofOtherRoot).concat(ds.map(function (d) {
         return d.root === undefined && CFG.root ? Object.assign({ root: CFG.root }, d) : d;
       }));
+      withdrawn(all.filter(function (d) { return !ofOtherRoot(d); }));
       if (all.length) localStorage.setItem(COMMENT_DRAFT_KEY, JSON.stringify(all)); else localStorage.removeItem(COMMENT_DRAFT_KEY);
       pendingClears = [];
       claim(all.filter(function (d) { return !ofOtherRoot(d); }));
@@ -1640,17 +1641,30 @@ var create = function (ROOT, CFG, opts) {
   // keeps what it put in or took out of the store for CLAIMED, and checks it against every write another page
   // makes in that time (the `storage` event, which comes once the page has that write). What is not as it left
   // it is made so again, and nothing else is touched. An entry is told by its thread, kind and request id (a new
-  // message, by its passage). A Discard on another page within CLAIMED of the write it ends is put back too.
-  var CLAIMED = 2000, RECLAIMS = 8, claims = {}, reclaims = 0;
+  // message, by its passage). A removal on purpose is told apart from an overwrite: a write that takes out an entry its
+  // own read held (a Discard, a send taken, a Cancel) leaves a mark of its own under the entry's key, written before the
+  // store is, so that it has reached the other pages by the time they hear of the store's change; a claim older than the
+  // mark is let go. An overwrite that never knew the entry leaves none. Marks are put away after MARK_LIFE.
+  var CLAIMED = 2000, MARK_LIFE = 10000, MARK = COMMENT_DRAFT_KEY + ':gone:', RECLAIMS = 8, claims = {}, reclaims = 0;
   function entryKey(d) {
     return [d.thread || '', d.kind || '', d.rid || d.of || '', typeof d.thread === 'string' ? '' : [d.quote, d.block, d.occ].join('|')].join('\u0001');
+  }
+  function withdrawn(written) {
+    var now = Date.now(), kept = {}, stale = [];
+    written.forEach(function (d) { kept[entryKey(d)] = true; });
+    lastRead.forEach(function (d) { var k = entryKey(d); if (!kept[k]) localStorage.setItem(MARK + k, String(now)); });
+    for (var i = 0; i < localStorage.length; i++) {
+      var name = localStorage.key(i);
+      if (name && name.indexOf(MARK) === 0 && now - Number(localStorage.getItem(name)) > MARK_LIFE) stale.push(name);
+    }
+    stale.forEach(function (name) { localStorage.removeItem(name); });
   }
   // What this write changed against the read it came from: the entries it put and the ones it took out.
   function claim(written) {
     var before = {}, after = {}, until = Date.now() + CLAIMED;
     lastRead.forEach(function (d) { before[entryKey(d)] = JSON.stringify(d); });
     written.forEach(function (d) { after[entryKey(d)] = d; });
-    Object.keys(after).forEach(function (k) { if (before[k] !== JSON.stringify(after[k])) claims[k] = { want: after[k], until: until }; });
+    Object.keys(after).forEach(function (k) { if (before[k] !== JSON.stringify(after[k])) claims[k] = { want: after[k], until: until, born: Date.now() }; });
     Object.keys(before).forEach(function (k) { if (!after[k]) claims[k] = { want: null, until: until }; });
     // A claim this write does not touch and whose entry is gone from what it wrote: another page took it out, and this page's own clear
     // found it taken already (the hub's `changed` event reaches both). It is no longer wanted, or the next event would put it back.
@@ -1666,6 +1680,7 @@ var create = function (ROOT, CFG, opts) {
       var raw = commentDraftsRaw(true), mine = raw.filter(function (d) { return !ofOtherRoot(d); });
       Object.keys(claims).forEach(function (k) {
         var i = -1, want = claims[k].want;
+        if (want && Number(localStorage.getItem(MARK + k)) >= claims[k].born) { delete claims[k]; return; }       // taken out on purpose since
         mine.forEach(function (d, j) { if (entryKey(d) === k) i = j; });
         if (want === null && i >= 0) { mine.splice(i, 1); fixed = true; }
         else if (want && i < 0) { mine.push(want); fixed = true; }

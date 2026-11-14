@@ -317,8 +317,8 @@ def test_a_tag_after_an_escaped_backslash_is_still_a_tag_and_hides_its_backtick(
 # ── table cells (ticket 57) ──
 
 def _cells(row):
-    """The cells of a row as the GFM reader splits it: at every `|` with no odd run of backslashes before it."""
-    return [c.strip() for c in re.split(r"(?<!\\)(?:\\\\)*\|", row.strip())[1:-1]]
+    """The cells of a row as the GFM reader splits it: at every `|` with no backslash right before it."""
+    return [c.strip() for c in re.split(r"(?<!\\)\|", row.strip())[1:-1]]
 
 
 TABLES = [
@@ -330,7 +330,7 @@ TABLES = [
     ("| a | b |\n|---|---|\n| one\\|two | x |\n", "one", "| a | b |\n|---|---|\n| one\\|two", " | x |\n"),
     ("| a | b |\n|---|---|\n| `x\\|y` z | q |\n", "z", "| a | b |\n|---|---|\n| `x\\|y` z", " | q |\n"),
     ("| a | b |\n|---|---|\n| `x\\|y` z | q |\n", "x", "| a | b |\n|---|---|\n| `x\\|y` z", " | q |\n"),
-    ("| a | b |\n|---|---|\n| one \\\\| two |\n", "one", "| a | b |\n|---|---|\n| one \\\\", "| two |\n"),
+    ("| a | b |\n|---|---|\n| one \\\\| two |\n", "one", "| a | b |\n|---|---|\n| one \\\\| two", " |\n"),   # `\\|` is no border (ticket 76)
     ("| a | b |\n|---|---|\n| one | two\n", "one", "| a | b |\n|---|---|\n| one", " | two\n"),
     ("| a | b |\n|---|---|\n| one | two\n", "two", "| a | b |\n|---|---|\n| one | two", "\n"),
 ]
@@ -518,6 +518,16 @@ def test_the_comment_spans_of_a_block_of_many_comments_are_read_in_linear_time(u
     spans = rdc._comment_spans(md)
     assert time.perf_counter() - t < 0.3
     assert len(spans) == (n // 2 if unit[0] == "`" else n)     # the backticks pair off, hiding every second comment
+
+
+@pytest.mark.parametrize("slashes", range(0, 6))
+@pytest.mark.parametrize("cell", ["a {s}| b", "`a {s}| b`", "a `x` {s}| b"])
+def test_a_pipe_after_any_number_of_backslashes_is_no_cell_border_when_pandoc_reads_it_so(slashes, cell):
+    # Point 3: `\\|` is not a border to pandoc either: a pipe with a backslash right before it stays in its cell.
+    row = "| %s | c |" % cell.replace("{s}", "\\" * slashes)
+    out = pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], "| h | i |\n|---|---|\n" + row + "\n")
+    pandoc_splits = "<td>c</td>" not in out.split("<tbody>")[1]       # the third cell has no column and is dropped
+    assert (len(rdc._CELL_PIPE_RE.findall(row)) - 1 > 2) == pandoc_splits, row
 
 
 # ── ticket 68: what is left of PR 288 ──

@@ -39,6 +39,21 @@ def test_a_route_for_a_send_holds_the_send_the_page_makes_as_soon_as_route_retur
         p.unroute("**/_/comment")
 
 
+def test_the_stream_journal_leaves_eventsource_open_to_a_subclass_a_test_installs(tab):
+    """The journal wraps window.EventSource; test_page_actions.py's DEAF script does `class extends window.EventSource`
+    and overrides addEventListener. A wrapper that returns a native object lost the override (ticket 100, PR 346's CI)."""
+    p = tab.open().page
+    assert p.evaluate("""(() => {
+      class Deaf extends window.EventSource {
+        addEventListener(k, f, o) { Deaf.seen = true; return super.addEventListener(k, f, o); }
+      }
+      const d = new Deaf('/_/live?doc=work%2Fplan.md');
+      d.addEventListener('changed', () => {});
+      d.close();
+      return [d instanceof Deaf, !!Deaf.seen];
+    })()""") == [True, True]
+
+
 def test_no_page_test_waits_by_sleeping_or_by_a_wait_of_its_own():
     """`pagehelp.until` is the one wait. A sleep in a test thread, or a second `until`, brings the old
     defect back; a `time.sleep` inside a patch of the hub (it runs on the hub's thread) does not."""

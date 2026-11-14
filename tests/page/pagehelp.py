@@ -449,20 +449,19 @@ STREAM_JOURNAL_JS = """(() => {
   };
   const Native = window.EventSource;
   if (!Native) return;
-  window.EventSource = function (url, init) {
-    const es = new Native(url, init);
-    note('new', url);
-    es.addEventListener('open', () => note('open', url));
-    es.addEventListener('error', () => note('error', 'readyState ' + es.readyState));
-    const add = es.addEventListener.bind(es);
-    es.addEventListener = (name, fn, o) => {
-      if (name !== 'open' && name !== 'error') add(name, ev => note('event ' + name, ev.data), o);
-      return add(name, fn, o);
-    };
-    return es;
+  // A subclass, not a function that returns a native one: a test's own script may `class extends window.EventSource`.
+  window.EventSource = class extends Native {
+    constructor(url, init) {
+      super(url, init);
+      note('new', url);
+      super.addEventListener('open', () => note('open', url));
+      super.addEventListener('error', () => note('error', 'readyState ' + this.readyState));
+    }
+    addEventListener(name, fn, o) {
+      if (name !== 'open' && name !== 'error') super.addEventListener(name, ev => note('event ' + name, ev.data), o);
+      return super.addEventListener(name, fn, o);
+    }
   };
-  window.EventSource.prototype = Native.prototype;
-  for (const k of ['CONNECTING', 'OPEN', 'CLOSED']) window.EventSource[k] = Native[k];
 })()"""
 
 

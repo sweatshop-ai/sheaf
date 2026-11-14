@@ -137,3 +137,20 @@ def test_a_paragraph_without_an_image_stays_editable():
                  "An <imgur> tag and an <i>italic</i> one.\n"]:
         (b,) = [b for b in split_md_blocks(text) if b.kind == "para"]
         assert b.editable, text
+
+
+@pytest.mark.parametrize("line", [
+    "#\x0bh", "#\x0ch", "#\xa0h", "# h", "# h", "#\x85h", "#\x1ch", "#\rh", "  ##　h", "#\r\r\rh",
+])
+def test_a_hash_without_a_space_or_tab_after_it_is_text_so_the_quote_goes_on(line):
+    # Ticket 95: ATX_RE read `\s` after the hashes, so the splitter cut the quote at this lazy line where
+    # pandoc keeps the paragraph, and the page showed the line outside the quote. Measured against pandoc 3.9:
+    # 1,602 of 2,107 sources changed their HTML, 0 after.
+    text = f"> a\n{line}\n"
+    assert [b.kind for b in split_md_blocks(text)] == ["quote"]
+    assert "".join(b.text for b in split_md_blocks(text)) == text
+
+
+@pytest.mark.parametrize("line", ["# h", "#\th", "#", "## h"])
+def test_a_hash_with_a_space_a_tab_or_nothing_after_it_still_opens_a_heading(line):
+    assert [b.kind for b in split_md_blocks(f"> a\n{line}\n")] == ["quote", "heading"]

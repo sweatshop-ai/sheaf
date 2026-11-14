@@ -441,26 +441,47 @@ def test_a_click_on_a_page_control_is_not_a_click_beside_the_box(tab, site):
 
 # ---- text the store cannot keep: the box stays (SPEC 10.4, Isolde 2026-11-09) -------------------------------
 
+STORE_FULL = """(full) => {
+  if (!window.__realSet) window.__realSet = Storage.prototype.setItem;
+  Storage.prototype.setItem = function (k, v) {
+    if (full && String(k).startsWith('sheaf-comment-draft')) {
+      window.__refusedSets = (window.__refusedSets || 0) + 1;
+      if (new Error().stack.includes('commentDraftsLoad')) window.__refusedSetsInRead = (window.__refusedSetsInRead || 0) + 1;
+      throw new Error('quota');
+    }
+    return window.__realSet.call(this, k, v);
+  };
+}"""
+
+
 def store_full(p, full=True):
-    """The comment store refuses writes (quota full, storage blocked), or accepts them again."""
-    p.evaluate("""(full) => {
-      if (!window.__realSet) window.__realSet = Storage.prototype.setItem;
-      Storage.prototype.setItem = function (k, v) {
-        if (full && String(k).startsWith('sheaf-comment-draft')) { window.__refusedSets = (window.__refusedSets || 0) + 1; throw new Error('quota'); }
-        return window.__realSet.call(this, k, v);
-      };
-    }""", full)
+    """The comment store refuses writes (quota full, storage blocked), or accepts them again. It refuses setItem only,
+    never removeItem: a test that needs a refused purge keeps a second entry, so the purge writes a list."""
+    p.evaluate(STORE_FULL, full)
+
+
+STORE_UNREADABLE = """(blocked) => {
+  if (!window.__realGet) window.__realGet = Storage.prototype.getItem;
+  Storage.prototype.getItem = function (k) {
+    if (blocked && String(k).startsWith('sheaf-comment-draft')) { window.__refused = (window.__refused || 0) + 1; throw new Error('blocked'); }
+    return window.__realGet.call(this, k);
+  };
+}"""
 
 
 def store_unreadable(p, blocked=True):
     """The comment store refuses reads, or answers them again."""
-    p.evaluate("""(blocked) => {
-      if (!window.__realGet) window.__realGet = Storage.prototype.getItem;
-      Storage.prototype.getItem = function (k) {
-        if (blocked && String(k).startsWith('sheaf-comment-draft')) { window.__refused = (window.__refused || 0) + 1; throw new Error('blocked'); }
-        return window.__realGet.call(this, k);
-      };
-    }""", blocked)
+    p.evaluate(STORE_UNREADABLE, blocked)
+
+
+def reopen_reads(p, patch=None, patch_arg=None, then=""):
+    """The comment store answers reads again, in ONE evaluate with the patch of the page that has to be in place first
+    (`patch`, a JS function given `patch_arg`) and the statements that follow (`then`). Two calls leave a gap in which a
+    read of the page's own meets a working store, purges the held clear and writes it, so the test no longer shows the
+    path it names (ticket 86)."""
+    import json
+    first = f"({patch})({json.dumps(patch_arg)});" if patch else ""
+    p.evaluate(f"() => {{ {first} ({STORE_UNREADABLE})(false); {then} }}")
 
 
 def refused_reads(p):
@@ -870,14 +891,17 @@ def test_a_new_message_emptied_while_the_store_refuses_reads_does_not_come_back_
     assert p.locator("#rd-unsent").count() == 0, "the emptied message is offered as not sent"
 
 
+HOLD_TIME_PASSES = """
+  const now = Date.now.bind(Date);
+  Date.now = () => now() + 40000;
+  window.dispatchEvent(new StorageEvent('storage'));
+"""
+
+
 def hold_time_passes(p):
     """The page's clock jumps past the time a send is held (HELD), and the page is told the store changed, as the
     timer that lets a held entry lapse would."""
-    p.evaluate("""() => {
-      const now = Date.now.bind(Date);
-      Date.now = () => now() + 40000;
-      window.dispatchEvent(new StorageEvent('storage'));
-    }""")
+    p.evaluate(f"() => {{ {HOLD_TIME_PASSES} }}")
 
 
 def held_while_refusing(p, site):
@@ -901,8 +925,7 @@ def test_a_reply_the_hub_took_while_the_store_refused_reads_is_not_offered_as_no
     until(lambda: p.locator(THREAD).count() == 2, what="the reply in the thread")
     held_while_refusing(p, site)
     p.unroute("**/_/comment")
-    store_unreadable(p, False)
-    hold_time_passes(p)
+    reopen_reads(p, then=HOLD_TIME_PASSES)      # one call: a read between them would purge the held clear before the clock jumps
     until(lambda: store_as_held(p, site) == [], what="the reply the hub took gone from the store")
     assert p.locator("#rd-unsent").count() == 0, "the reply the hub took is offered as not sent, to be sent twice"
 
@@ -922,8 +945,7 @@ def test_a_reply_the_hub_took_while_its_answer_was_lost_and_the_store_refused_re
     until(lambda: p.locator(THREAD).count() == 2, what="the reply in the thread, read from the hub's event")
     held_while_refusing(p, site)
     p.unroute("**/_/comment")
-    store_unreadable(p, False)
-    hold_time_passes(p)
+    reopen_reads(p, then=HOLD_TIME_PASSES)      # one call: a read between them would purge the held clear before the clock jumps
     until(lambda: store_as_held(p, site) == [], what="the reply the hub took gone from the store")
     assert p.locator("#rd-unsent").count() == 0, "the reply the hub took is offered as not sent, to be sent twice"
 
@@ -954,21 +976,20 @@ def test_a_new_message_emptied_while_the_store_refused_reads_stays_empty_after_a
     assert p.locator("#rd-unsent").count() == 0, "the emptied message is offered as not sent after a reload"
 
 
-def redraw_in_a_read_throws(p):
-    """The first redraw of the not-sent line that runs inside a read of the store throws, as a failing redraw would;
-    __redrawInRead counts the redraws that ran inside a read."""
-    p.evaluate("""() => {
-      const real = window.clearTimeout;
-      window.__redrawInRead = 0;
-      window.clearTimeout = function (...a) {
-        const s = new Error().stack;
-        if (s.includes('unsentLine') && s.includes('commentDraftsLoad')) {
-          window.__redrawInRead++;
-          if (window.__redrawInRead === 1) throw new Error('redraw failed');
-        }
-        return real.apply(this, a);
-      };
-    }""")
+# The first redraw of the not-sent line that runs inside a read of the store throws, as a failing redraw would;
+# __redrawInRead counts the redraws that ran inside a read.
+REDRAW_IN_A_READ_THROWS = """() => {
+  const real = window.clearTimeout;
+  window.__redrawInRead = 0;
+  window.clearTimeout = function (...a) {
+    const s = new Error().stack;
+    if (s.includes('unsentLine') && s.includes('commentDraftsLoad')) {
+      window.__redrawInRead++;
+      if (window.__redrawInRead === 1) throw new Error('redraw failed');
+    }
+    return real.apply(this, a);
+  };
+}"""
 
 
 def test_a_redraw_of_the_not_sent_line_that_fails_after_a_purge_does_not_make_a_read_fail(tab, site):
@@ -986,8 +1007,7 @@ def test_a_redraw_of_the_not_sent_line_that_fails_after_a_purge_does_not_make_a_
     p.fill(FIELD, "")
     p.keyboard.press("Escape")
     until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close on an empty field")
-    redraw_in_a_read_throws(p)      # in place before the store reads again: the first read that works purges the held clear
-    store_unreadable(p, False)
+    reopen_reads(p, patch=REDRAW_IN_A_READ_THROWS)      # the patch is in place before the first read that works, which purges the held clear
     select(p, at(P1, "apples"), at(P1, "apples", None))
     open_box(p)
     p.fill(FIELD, "typed after")
@@ -1017,10 +1037,9 @@ def test_a_held_clear_that_the_full_store_cannot_write_is_tried_by_the_reads_onl
     p.fill(FIELD, "")
     p.keyboard.press("Escape")
     until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close on an empty field")
-    store_full(p)      # in place before the store reads again: a read of the page's own between the two would purge the store, and none would be refused
-    store_unreadable(p, False)
-    p.evaluate("window.dispatchEvent(new StorageEvent('storage'))")      # one read that works: its purge cannot be written
-    until(lambda: p.evaluate("window.__refusedSets || 0") > 0, what="the purge to meet the full store")
+    # a store that works and is full: one call, so no read of the page's own purges the store before it can refuse
+    reopen_reads(p, patch=STORE_FULL, patch_arg=True, then="window.dispatchEvent(new StorageEvent('storage'));")      # one read that works: its purge cannot be written
+    until(lambda: p.evaluate("window.__refusedSetsInRead || 0") > 0, what="a read's purge to meet the full store")
     p.evaluate("new Promise(r => setTimeout(r, 400))")      # an absence cannot be waited for by a signal: time for runaway redraws to show
     assert p.evaluate("window.__refusedSets") < 20, "the redraws the purge queued purged again, each queueing more"
 

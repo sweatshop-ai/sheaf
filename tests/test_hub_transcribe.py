@@ -687,14 +687,14 @@ def test_the_hub_does_not_take_its_trust_from_the_default_of_http_client(browser
 # ── the key file: what is read, and what is stamped ──────────────────────────
 
 def test_a_key_the_header_cannot_carry_is_refused_with_a_reason_and_never_quoted(browser, row_relay, tcompute, key_file):
-    secret = "k\u00e9y-\u65e5\u672c-0123"                             # not latin-1: http.client would refuse the header
-    key_file.write_text(f"TRANSCRIBE_API_KEY={secret}\n")
+    odd = "k\u00e9y-\u65e5\u672c-0123"                             # not latin-1: http.client would refuse the header
+    key_file.write_text(f"TRANSCRIBE_API_KEY={odd}\n")
     key_file.chmod(0o600)
     assert available(browser) is False
     assert dictate(browser).status == 503 and tcompute.seen == []
     rows = [r for r in diagnostics.read() if r["kind"] == "transcribe-key-file"]
     assert len(rows) == 1 and "latin-1" in rows[0]["reason"]
-    assert secret not in json.dumps(diagnostics.read()) and "0123" not in json.dumps(rows)
+    assert odd not in json.dumps(diagnostics.read(), ensure_ascii=False) and "0123" not in json.dumps(rows)
 
 
 def test_a_damaged_byte_in_the_key_is_refused_the_same_way(browser, row_relay, tcompute, key_file):

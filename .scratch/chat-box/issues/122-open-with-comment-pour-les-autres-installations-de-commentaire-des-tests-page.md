@@ -8,3 +8,7 @@ Décider pour chaque groupe : un paramètre `md=None` (ne pas écrire), ou laiss
 Revue de la PR 349 : classes c1, c2, d1 seulement (une remarque d'ordre sans effet, une docstring de 143 caractères), rien à corriger.
 
 **Blocked by:** none
+
+**Claimed by:** Mira
+
+**Status:** ready-for-agent

@@ -13,7 +13,7 @@
 
 **Claimed by:** Anselm 2026-11-14 19:33
 
-**Status:** in-progress
+**Status:** done, merge dc62826
 
 **Par où commencer :** `tests/page/pagehelp.py`, `toasts_to_the_end`.
 

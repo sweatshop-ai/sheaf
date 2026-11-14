@@ -16,3 +16,6 @@
 **Limites connues (revue du ticket 126, d, non corrigées) :**
 - Le cache de `_read_tables` (16384 entrées) est borné par le nombre d'entrées, pas par la mémoire : dans un hub qui tourne longtemps il peut tenir quelques dizaines de Mo avant d'évincer.
 - `write_outcome` du fuzzer ne vérifie que la présence du commentaire, pas que le rendu reste le même avant et après l'écriture ; une écriture qui détruit un tableau passe pour « ok ».
+- (c, revue ronde 3, pré-existant) Si l'en-tête a un autre nombre de cellules que la ligne de délimitation, pandoc lit tout le bloc comme un paragraphe ; un accent grave peut y ouvrir un code qui se ferme sur la ligne paresseuse suivante, que le découpeur coupe en bloc séparé : lu seul, le bloc n'a pas de fermeture et `parse` trouve un commentaire que pandoc cache dans le code. Rare, faux sur main aussi.
+- (c, revue ronde 3) Un commentaire que pandoc abandonne d'une cellule au-delà des colonnes n'est pas compté par `next_id_in` : `add_comment` peut écrire un second `id=c1` ; si le tableau gagne ensuite une colonne, le fichier a deux `c1`. Piste : faire compter à `next_id_in` tout `id=cN` brut.
+- (c, revue ronde 2) Une image par référence (`![x C][r]`, `[r]:` défini ailleurs) : le commentaire est trouvé, pandoc l'abandonne, car `_read_tables` lit le bloc seul. Les citations et les listes ont la même limite.

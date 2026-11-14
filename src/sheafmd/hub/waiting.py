@@ -85,7 +85,7 @@ class Waiting:
 
     def _change(self, change):
         """`change(rows)` on the file as it is now, under both locks; it returns `(result, save)`. The page's events
-        of the change are held and sent after the write, still under the locks, so a snapshot (`waits`, which reads
+        and the log rows of the change are held and sent after the write, still under the locks, so a snapshot (`waits`, which reads
         under the thread lock) never shows a state older than an event the page has heard."""
         with self._lock, file_locked("tells.lock"):
             rows = [r for r in read_json(_file(), []) if isinstance(r, dict)]
@@ -254,8 +254,9 @@ class Waiting:
         """The Tells listed to `row` on `address`; `got` is the document's parsed comments and `message(c, t)`
         the words of a Tell. A thread no longer open ends the Tell. The first listing marks it seen."""
         def change(rows):
+            n = len(rows)
             self._revoked(rows)
-            out, save = [], False
+            out, save = [], len(rows) != n                  # a revoked row's end is written, or the next pass sends it again
             for t in [t for t in rows if t["doc"] == address and belongs(t, row)]:
                 c = got.by_id(t["thread"])
                 if _stale(t, c):

@@ -1030,10 +1030,10 @@ def test_a_redraw_of_the_not_sent_line_that_fails_after_a_purge_does_not_make_a_
     assert p.evaluate("window.__redrawInRead") == 0, "the redraw ran inside the read, while its caller was still working"
 
 
-def test_a_held_clear_that_the_full_store_cannot_write_is_tried_by_the_reads_only_not_by_the_redraws_it_queues(tab, site):
+def test_a_held_clear_is_removed_from_a_full_store_by_the_read_that_works_and_writes_nothing(tab, site):
     p = open_thread(tab, site)
     p.keyboard.press("Escape")
-    select(p, at(P2, "pears"), at(P2, "pears", None))      # a second entry, so the purge writes a list and does not remove the key
+    select(p, at(P2, "pears"), at(P2, "pears", None))      # a second entry, so the store is not emptied
     open_box(p)
     p.fill(FIELD, "other")
     p.click("#rd-popover button[data-a=minimize]")
@@ -1050,11 +1050,12 @@ def test_a_held_clear_that_the_full_store_cannot_write_is_tried_by_the_reads_onl
     p.fill(FIELD, "")
     p.keyboard.press("Escape")
     until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close on an empty field")
-    # a store that works and is full: one call, so no read of the page's own purges the store before it can refuse
-    reopen_reads(p, patch=STORE_FULL, patch_arg=True, then="window.dispatchEvent(new StorageEvent('storage'));")      # one read that works: its purge cannot be written
-    until(lambda: p.evaluate("window.__refusedSetsInRead || 0") > 0, what="a read's purge to meet the full store")
+    # a store that works and is full: one read that works. The held clear is a removal, which a full store does not refuse,
+    # and each entry has its own key, so the purge writes no other entry: nothing is refused, nothing is queued again.
+    reopen_reads(p, patch=STORE_FULL, patch_arg=True, then="window.dispatchEvent(new StorageEvent('storage'));")
+    until(lambda: [d["body"] for d in store_as_held(p, site)] == ["other"], what="the held clear to leave the full store")
     p.evaluate("new Promise(r => setTimeout(r, 400))")      # an absence cannot be waited for by a signal: time for runaway redraws to show
-    assert p.evaluate("window.__refusedSets") < 20, "the redraws the purge queued purged again, each queueing more"
+    assert (p.evaluate("window.__refusedSets") or 0) == 0, "the purge wrote an entry into the full store"
 
 
 READABLE_REPLY = ("Done. What changed:\n- the intro is shorter\n- `fetch_all` retries\n\n"

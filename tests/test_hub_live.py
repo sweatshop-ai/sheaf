@@ -521,7 +521,7 @@ def test_events_leave_in_the_order_the_text_changed(made):
     doc.save(rds.md_hash(DOC), edit_other(DOC))
     doc.during = None
     racer["t"].join(5)
-    assert not racer["t"].is_alive(), "the racing save did not finish"
+    assert not racer["t"].is_alive(), "the racing write and refresh did not finish"
     final = rds.md_hash(md.read_text(encoding="utf-8"))
     assert order[-1] == final                                   # the newest text is published last
     assert len(order) == len(set(order))

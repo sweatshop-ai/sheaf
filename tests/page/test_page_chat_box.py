@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from pagehelp import DOC, P1, P2, at, box, comment_draft_key, mark, open_box, pasted, reloaded, select, toast, until
+from pagehelp import DOC, P1, P2, at, box, comment_draft_key, kept_json, mark, set_kept, open_box, pasted, reloaded, select, toast, until
 from sheafmd import comments as rdc
 from sheafmd.hub.state import Tokens
 from sheafmd.source import update_file
@@ -414,7 +414,7 @@ def test_a_reply_kept_by_the_older_page_is_listed_as_a_reply_and_comes_back_in_i
     tab.open()
     old = [{"thread": "c1", "kind": "reply", "body": "from the old page", "about": "apples", "born": "2026-10-14T10:00",
             "at": "2026-10-14T11:00:00.000Z"}]
-    tab.page.evaluate("([k, v]) => localStorage.setItem(k, v)", [comment_draft_key(site), json.dumps(old)])
+    set_kept(tab.page, site, old)
     tab.page.reload()
     until(lambda: tab.page.locator("#rd-unsent").count() == 1, what="the not-sent line")
     assert tab.page.inner_text("#rd-unsent") == "1 reply not sent · Show"
@@ -501,8 +501,10 @@ def refused_clears(p):
 
 def store_as_held(p, site):
     """What the comment store holds, read past a refusal: the test's own look, not the page's."""
-    return p.evaluate("""(k) => { const raw = (window.__realGet || Storage.prototype.getItem).call(localStorage, k);
-                                  return raw ? JSON.parse(raw) : []; }""", comment_draft_key(site))
+    return p.evaluate("""(k) => { const get = (window.__realGet || Storage.prototype.getItem).bind(localStorage);
+                                  const got = Object.keys(localStorage).filter(x => x.startsWith(k + ':e:')).sort().map(x => JSON.parse(get(x)));
+                                  const raw = get(k);
+                                  return got.concat(raw ? JSON.parse(raw) : []); }""", comment_draft_key(site))
 
 
 def store_unreadable_once(p):
@@ -827,13 +829,13 @@ def test_a_message_kept_by_a_close_that_was_then_aborted_is_removed_when_its_fie
 def test_a_store_that_refuses_to_be_read_keeps_what_it_holds_and_says_the_text_was_not_kept(tab, site):
     p = open_thread(tab, site)
     kept = [{"quote": "pears", "body": "a draft of another passage", "at": "2026-10-14T11:00:00.000Z"}]
-    p.evaluate("([k, v]) => localStorage.setItem(k, v)", [comment_draft_key(site), json.dumps(kept)])
+    set_kept(p, site, kept)
     store_unreadable(p)
     p.fill(FIELD, "words I must not lose")
     p.mouse.click(5, 700)
     until(lambda: "could not be kept" in toast(p), what="the toast that says the text could not be kept")
     store_unreadable(p, False)
-    held = p.evaluate("(k) => localStorage.getItem(k)", comment_draft_key(site))
+    held = kept_json(p, site)
     assert held and "a draft of another passage" in held, "the read that failed emptied the store"
 
 
@@ -857,12 +859,12 @@ def test_an_emptied_new_message_closes_when_the_store_that_kept_its_text_stops_b
 def test_a_read_of_the_store_that_fails_once_does_not_empty_the_drafts_of_the_page_at_the_next_write(tab, site):
     p = open_thread(tab, site)
     kept = [{"quote": "pears", "body": "a draft of another passage", "at": "2026-10-14T11:00:00.000Z"}]
-    p.evaluate("([k, v]) => localStorage.setItem(k, v)", [comment_draft_key(site), json.dumps(kept)])
+    set_kept(p, site, kept)
     p.fill(FIELD, "words I must not lose")
     store_unreadable_once(p)
     p.mouse.click(5, 700)
     until(lambda: "could not be kept" in toast(p), what="the toast that says the text could not be kept")
-    held = p.evaluate("(k) => localStorage.getItem(k)", comment_draft_key(site))
+    held = kept_json(p, site)
     assert held and "a draft of another passage" in held, "the read that failed once emptied the drafts of the page"
 
 
@@ -871,7 +873,7 @@ def test_a_value_that_is_not_json_in_the_store_is_set_aside_before_the_next_writ
     p.evaluate("([k, v]) => localStorage.setItem(k, v)", [comment_draft_key(site), "[{broken"])
     p.fill(FIELD, "words I must not lose")
     p.mouse.click(5, 700)
-    until(lambda: "words I must not lose" in (p.evaluate("(k) => localStorage.getItem(k)", comment_draft_key(site)) or ""),
+    until(lambda: "words I must not lose" in (kept_json(p, site) or ""),
           what="the text kept in the store")
     aside = p.evaluate("(k) => localStorage.getItem(k)", comment_draft_key(site) + ":unreadable")
     assert aside == "[{broken", "the value that could not be read was replaced and is kept nowhere"

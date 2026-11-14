@@ -1,5 +1,6 @@
 """What the page tests do with a page: select text the way a person's mouse does, and wait; and what a run says when its browser will not start."""
 import contextlib
+import json
 import signal
 import subprocess
 import sys
@@ -350,6 +351,31 @@ def draft_key(site):
 def comment_draft_key(site):
     """The localStorage key of the new comments, replies and edits the hub has not taken yet."""
     return f"sheaf-comment-draft:{site.port}:{DOC}"
+
+
+def kept_json(page, site):
+    """What the comment store holds, as the one JSON list the page used to keep under the key (None when it holds
+    nothing): its entries are one key each, `<key>:e:<id>`, and an older list under the key itself counts too."""
+    return page.evaluate("""(key) => {
+      const got = Object.keys(localStorage).filter(k => k.startsWith(key + ':e:')).sort()
+        .map(k => JSON.parse(localStorage.getItem(k)));
+      const old = localStorage.getItem(key);
+      return got.length || old ? JSON.stringify(got.concat(old ? JSON.parse(old) : [])) : null;
+    }""", comment_draft_key(site))
+
+
+def kept_entries(page, site):
+    """The entries of the comment store, oldest first."""
+    return json.loads(kept_json(page, site) or "[]")
+
+
+def set_kept(page, site, entries):
+    """Put exactly `entries` in the comment store, as a list under the key (an earlier build's, which the page moves into
+    entry keys at its next write and reads as it is until then)."""
+    page.evaluate("""([key, v]) => {
+      Object.keys(localStorage).filter(k => k.startsWith(key + ':e:')).forEach(k => localStorage.removeItem(k));
+      localStorage.setItem(key, v);
+    }""", [comment_draft_key(site), json.dumps(entries)])
 
 
 # What Playwright's Chromium does on macOS with these keys is what macOS does (its macEditingCommands): End and

@@ -3377,7 +3377,7 @@ var create = function (ROOT, CFG, opts) {
       if (!isBox) {
         var lab = t && t.closest && t.closest('label');
         var own = lab && main.contains(lab) && lab.querySelector('input[type="checkbox"]');
-        if (!own || (t.closest && t.closest('a'))) return;       // a link in the line opens
+        if (!own || (t.closest && t.closest('a, .rd-badge, [data-rd-ui]'))) return;       // a link opens, a comment's badge opens its thread
         e.preventDefault();
         if (editing || e.detail > 1 || !onLabelWords(lab, e)) return;       // a double or triple click selects, it does not tick again
         t = own;
@@ -3403,20 +3403,25 @@ var create = function (ROOT, CFG, opts) {
     return w ? w[0].length : 0;
   }
   function onLabelWords(lab, e) {
-    var sel = window.getSelection();
+    var sel = getSel();
     if (sel && !sel.isCollapsed && lab.contains(sel.anchorNode)) return false;
-    var walker = document.createTreeWalker(lab, NodeFilter.SHOW_TEXT), node, left = labelEnd(lab.textContent), first = null, last = null, end = 0;
-    while (left > 0 && (node = walker.nextNode())) {
-      if (!first) first = node;
-      last = node; end = Math.min(left, node.data.length); left -= end;
+    // The label's words are its own text: what the renderer added (a comment's badge, data-rd-ui) is not among them.
+    var nodes = [], walker = document.createTreeWalker(lab, NodeFilter.SHOW_TEXT), node;
+    while ((node = walker.nextNode())) if (!(node.parentElement && node.parentElement.closest('[data-rd-ui]'))) nodes.push(node);
+    var left = labelEnd(nodes.map(function (n) { return n.data; }).join('')), first = null, last = null, end = 0;
+    for (var k = 0; left > 0 && k < nodes.length; k++) {
+      if (!first) first = nodes[k];
+      last = nodes[k]; end = Math.min(left, nodes[k].data.length); left -= end;
     }
     if (!first) return false;
     var r = document.createRange();
     r.setStart(first, 0); r.setEnd(last, end);
     var rects = r.getClientRects(), min = window.matchMedia('(pointer:coarse)').matches ? 44 : 0;
     for (var i = 0; i < rects.length; i++) {
+      // The band reaches out of the label's first and last line only, never into its own other lines.
       var q = rects[i], pad = Math.max(0, (min - q.height) / 2);
-      if (e.clientX >= q.left && e.clientX <= q.right && e.clientY >= q.top - pad && e.clientY <= q.bottom + pad) return true;
+      var above = i === 0 ? pad : 0, below = i === rects.length - 1 ? pad : 0;
+      if (e.clientX >= q.left && e.clientX <= q.right && e.clientY >= q.top - above && e.clientY <= q.bottom + below) return true;
     }
     return false;
   }

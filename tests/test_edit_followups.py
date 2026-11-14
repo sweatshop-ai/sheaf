@@ -1029,6 +1029,21 @@ def test_a_comment_put_back_in_a_heading_with_no_words_goes_on_a_line_of_its_own
     assert len(rdc.parse(out).comments) == 1 and out.startswith(heading)
 
 
+# ── table cells of the merge (ticket 57) ──
+
+@pytest.mark.parametrize("row, quote, expect", [
+    ("| one two | x |", "one", "| one two{} | x |"),
+    ("| x | one\\|two y |", "one", "| x | one\\|two y{} |"),
+    ("| `a\\|b` c | x |", "a", "| `a\\|b` c{} | x |"),
+])
+def test_a_comment_put_back_in_a_table_cell_goes_at_the_end_of_the_cell(row, quote, expect):
+    md = "| h | i |\n|---|---|\n%s\n" % row
+    raw = rdc.format(agent_note(), True)
+    out = rde._insert_comment(md, 0, raw, quote)
+    assert out == md.replace(row, expect.format(raw)), out
+    assert rdc.parse(out).malformed == [] and len(rdc.parse(out).comments) == 1
+
+
 # ── heading edge cases of the merge (tickets 56 and 58) ──
 
 def test_a_comment_of_several_lines_put_back_in_a_heading_goes_on_a_line_of_its_own():

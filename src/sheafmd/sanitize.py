@@ -274,7 +274,10 @@ def _pass(fragment: str, comments: bool, log: list[str], mount: bool = False) ->
             log.append(f"  - <{name}> removed from the document")
             tag.decompose()
             continue
-        if name == "input" and str(tag.get("type", "")).strip().lower() != "checkbox":
+        # the browser matches `type` exactly, ASCII case aside: no trimming, and no str.lower() on its own, which turns
+        # U+212A (Kelvin sign) into an ASCII k
+        kind = str(tag.get("type", ""))
+        if name == "input" and not (kind.isascii() and kind.lower() == "checkbox"):
             log.append("  - <input> removed from the document")
             tag.decompose()
             continue

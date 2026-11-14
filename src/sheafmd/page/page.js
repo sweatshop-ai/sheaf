@@ -4040,6 +4040,7 @@ var create = function (ROOT, CFG, opts) {
     if (live) live.close();
     clearTimeout(closedTmr); closedTmr = null;
     failing = false; hubLine = false; dead = true; reloadPending = false; heldReload = false; holdWhy = null; holdOpen = null;
+    try { sessionStorage.removeItem(KEYS + 'rd-toast'); } catch (e) {}     // a merged save's toast, whose reload this ends (#125)
     stopRenewing();
     if (dirty().length) editDraftMirror();
     Array.prototype.forEach.call(ROOT.querySelectorAll('.rd-hold'), function (n) { if (n.textContent === HOLD) n.remove(); });
@@ -4514,7 +4515,7 @@ var create = function (ROOT, CFG, opts) {
   function failed(msg) {
     if (unmounted) return;
     settling = false;
-    try { sessionStorage.removeItem(KEYS + 'rd-keep'); } catch (e) {}     // the keep of a reload that did not happen
+    try { sessionStorage.removeItem(KEYS + 'rd-keep'); sessionStorage.removeItem(KEYS + 'rd-toast'); } catch (e) {}     // the keep and the toast of a reload that did not happen (#125)
     say(msg, true);
   }
   return { unmount: unmount, dirty: unsavedNow, failed: failed };

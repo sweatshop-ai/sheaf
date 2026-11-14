@@ -13,7 +13,7 @@
 - [x] `#\xa0h` avant un soulignement refuse le bloc, comme pandoc
 - [x] Les 830 écarts de `split_md_blocks` sont classés, corrigés ou écartés avec la preuve
 - [x] Les mentions de pandoc 3.7.0.2 sont corrigées en 3.9 là où le rendu est visé
-- [ ] PR séparée, CI verte
+- [x] PR séparée, CI verte (PR 315, 3/3 vertes sur 830be7c)
 
 **Claimed by:** Diego
 

@@ -3419,15 +3419,19 @@ var create = function (ROOT, CFG, opts) {
   // sends; the server sees a block that differs only in its ticks and flips the
   // `[ ]` / `[x]` of that one item in the .md (sheafmd.edit._toggle_boxes).
   // A click on the item's text is for the caret and for selecting, so the
-  // <label> pandoc wraps around the item must not tick the box.
+  // <label> pandoc wraps around the item ticks the box only on the label's words (onLabelWords).
   if (canEdit) {
     main.addEventListener('click', function (e) {
       var t = e.target;
       var isBox = t && t.tagName === 'INPUT' && t.type === 'checkbox';
       if (!isBox) {
         var lab = t && t.closest && t.closest('label');
-        if (lab && main.contains(lab) && lab.querySelector('input[type="checkbox"]')) e.preventDefault();
-        return;
+        var own = lab && main.contains(lab) && lab.querySelector('input[type="checkbox"]');
+        if (!own || (t.closest && t.closest('a'))) return;       // a link in the line opens
+        e.preventDefault();                                       // the browser's own toggle of the label is cancelled
+        if (t.closest && t.closest('.rd-badge, [data-rd-ui]')) return;       // a comment's badge opens its thread, it does not tick
+        if (editing || e.detail > 1 || !onLabelWords(lab, e)) return;       // a double or triple click selects, it does not tick again
+        t = own;
       }
       // The browser's own toggle is cancelled and replaced by ours: inside a
       // contenteditable it is not reliable, and the attribute must move with it.
@@ -3440,6 +3444,38 @@ var create = function (ROOT, CFG, opts) {
     });
   }
   var PRESS_IT = 'Press it with its button.';
+  // A task line's label: the words before the first `:` or ` — `, else the first word. A click on them ticks the box
+  // like a <label>, out of edit mode (in it the words are for the caret); the rest of the line is for the caret, a selection and its links. Told by where the click
+  // landed against the label's words, so the document gets no element of its own. A touch gets 44 px of height.
+  function labelEnd(text) {
+    var m = /:|\s—\s/.exec(text);
+    if (m) return m.index;
+    var w = /^\s*\S+/.exec(text);
+    return w ? w[0].length : 0;
+  }
+  function onLabelWords(lab, e) {
+    var sel = getSel();
+    if (sel && !sel.isCollapsed && lab.contains(sel.anchorNode)) return false;
+    // The label's words are its own text: what the renderer added (a comment's badge, data-rd-ui) is not among them.
+    var nodes = [], walker = document.createTreeWalker(lab, NodeFilter.SHOW_TEXT), node;
+    while ((node = walker.nextNode())) if (!(node.parentElement && node.parentElement.closest('[data-rd-ui]'))) nodes.push(node);
+    var left = labelEnd(nodes.map(function (n) { return n.data; }).join('')), first = null, last = null, end = 0;
+    for (var k = 0; left > 0 && k < nodes.length; k++) {
+      if (!first) first = nodes[k];
+      last = nodes[k]; end = Math.min(left, nodes[k].data.length); left -= end;
+    }
+    if (!first) return false;
+    var r = document.createRange();
+    r.setStart(first, 0); r.setEnd(last, end);
+    var rects = r.getClientRects(), min = window.matchMedia('(pointer:coarse)').matches ? 44 : 0;
+    for (var i = 0; i < rects.length; i++) {
+      // The band reaches out of the label's first and last line only, never into its own other lines.
+      var q = rects[i], pad = Math.max(0, (min - q.height) / 2);
+      var above = i === 0 ? pad : 0, below = i === rects.length - 1 ? pad : 0;
+      if (e.clientX >= q.left && e.clientX <= q.right && e.clientY >= q.top - above && e.clientY <= q.bottom + below) return true;
+    }
+    return false;
+  }
   // A box in a block whose words were edited and not saved may be an action typed there, which has no button yet:
   // the block is saved first, and the answer's actions say whether the box is one (SPEC 10.11). A save that brings a
   // reload (merged or remapped) brings none: the box is left for the page that follows. Ticks alone make no action.

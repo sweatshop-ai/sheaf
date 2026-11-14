@@ -114,6 +114,27 @@ var create = function (ROOT, CFG, opts) {
   // session is a member's fork, CFG.can holds "relay-tell" while that fork's relay is connected: Tell goes the
   // same way, to the relay (9.14).
   var AGENT, AGENT_UC, CAN, canTell, toBox;
+  // The byline names who prepared the document. On a page rendered from a session that is the session ("Document
+  // prepared by Yusuf"), not the hub's person, and its name brings the session to the front, or opens it again once
+  // it has ended (SPEC 4.3, 8.5). A page with no session, and the share copy, keep the line as rendered.
+  var byline = main && main.querySelector('p.doc-by'), bylineAsRendered = byline ? byline.innerHTML : '',
+      bylineHtml = bylineAsRendered;
+  function takeByline() {
+    if (!byline) return;
+    var a = CFG.agent, html = bylineAsRendered;
+    if (!CFG.proxy && a && a.kind === 'session') {
+      var name = esc(a.name || a.display), forWhom = byline.getAttribute('data-for');
+      html = 'Document prepared by ' +
+        (a.jump ? '<button type="button" class="doc-by-who" title="Open this session">' + name + '</button>' : name) +
+        (forWhom ? ' for ' + esc(forWhom) : '');
+    }
+    // Only when it changed: every answer of /_/doc comes here, and new nodes would end a selection made in the line.
+    if (html !== bylineHtml) byline.innerHTML = bylineHtml = html;
+  }
+  if (byline) listen(byline, 'click', function (e) {
+    var b = e.target.closest ? e.target.closest('button.doc-by-who') : null;
+    if (b) jumpToSession(b);
+  });
   function takeAgent() {
     CAN = CFG.can || [];
     toBox = CAN.indexOf('box-tell') >= 0 || CAN.indexOf('relay-tell') >= 0;
@@ -125,6 +146,7 @@ var create = function (ROOT, CFG, opts) {
     canTell = CAN.indexOf('relay-tell') >= 0 || CAN.indexOf(toBox ? 'box-tell' : 'deliver') >= 0 ||
               (!toBox && CAN.indexOf('reopen') >= 0) ||
               (!toBox && CAN.indexOf('queue') >= 0);        // an agent: the Tell waits for it (SPEC 9.8)
+    takeByline();
   }
   function liveSession() { return (CFG.work && CFG.work.sessions && CFG.work.sessions[0]) || {}; }
   // Where a member's Tell goes: James's window on the box, or the fork's session through its relay (9.14).
@@ -334,9 +356,11 @@ var create = function (ROOT, CFG, opts) {
             .replace(/\s+title="Not editable here: [^"]*"/g, '')
             .replace(/<button\b[^>]*\brd-copybtn\b[^>]*>[\s\S]*?<\/button>/g, '');
   }
+  // A part of the page's own among a block's nodes (data-rd-ui: the byline, which the page writes again with the session's
+  // name) is no text of the block: changing it is no edit, and the hub drops it from a save all the same.
   function ser(b) {
     return clean(b.nodes.map(function (n) {
-      return n.nodeType === 1 ? n.outerHTML : (n.nodeType === 3 ? n.nodeValue : '');
+      return n.nodeType === 1 ? (n.hasAttribute('data-rd-ui') ? '' : n.outerHTML) : (n.nodeType === 3 ? n.nodeValue : '');
     }).join('')).trim();
   }
   blocks.forEach(function (b) { b.pristine = ser(b); });
@@ -869,7 +893,7 @@ var create = function (ROOT, CFG, opts) {
     blocks.forEach(function (b) {
       var ok = editable.has(b.i);
       b.nodes.forEach(function (n) {
-        if (n.nodeType !== 1) return;
+        if (n.nodeType !== 1 || n.hasAttribute('data-rd-ui')) return;     // the byline is the page's, not the document's
         if (ok && on) n.setAttribute('contenteditable', 'true');
         else n.removeAttribute('contenteditable');
         n.classList.toggle('rd-locked', on && !ok);

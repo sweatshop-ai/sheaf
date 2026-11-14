@@ -692,15 +692,28 @@ _CELL_PIPE_RE = re.compile(r"(?<!\\)(\|)")
 _CONTAINER_RE = re.compile(r"[ \t]*(?:>|(?:[-+*]|\d{1,9}[.)])(?=[ \t]))[ \t]?")
 
 
-def _bare(line: str) -> tuple[str, tuple, int]:
-    """`line` without its container markers, those markers, and the width they took."""
-    marks, pos, col = [], 0, 0
+def _bare(line: str) -> tuple[str, tuple, int, int, int, int]:
+    """`line` without its container markers, and: those markers; the column where they end; the
+    width of the indentation after them (tabs to the next stop of 4, counted on the line); the
+    column where the last list marker ends, -1 when there is none; the quotes before that marker."""
+    marks, pos, col, lcol, lq = [], 0, 0, -1, 0
     while (m := _CONTAINER_RE.match(line, pos)) and m.end() > pos:
-        marks.append(m.group().strip())
-        col += len(m.group().expandtabs())
+        mark = m.group().strip()
+        if mark != ">":
+            lq = marks.count(">")
+        marks.append(mark)
+        for ch in m.group():
+            col += 4 - col % 4 if ch == "\t" else 1
+        if mark != ">":
+            lcol = col
         pos = m.end()
     rest = line[pos:]
-    return rest, tuple(marks), col + len(rest) - len(rest.lstrip(" \t"))
+    ind = 0
+    for ch in rest:
+        if ch not in " \t":
+            break
+        ind += 4 - (col + ind) % 4 if ch == "\t" else 1
+    return rest, tuple(marks), col, ind, lcol, lq
 
 
 def _cells(bare: str) -> int:
@@ -716,19 +729,33 @@ def _table_row_lines(block: str) -> frozenset:
     header row and a delimiter row of the same number of cells, the header not directly under a
     paragraph line, then lines with a `|` up to one without, or one that opens a new list item."""
     bare = [_bare(line) for line in block.split("\n")]
+    # Per line, how far its text sits past the content column of the container it is in: 0 to 3 is
+    # a header or delimiter row (the rows after them may sit further in), 4 or more is indented
+    # code, and under 0 the line has left the list item. A quote opened after the item's marker
+    # (`- > a`) is a container of its own: past its marker only the indentation counts.
+    rel, cc, cq = [], None, 0
+    for _, marks, col, ind, lcol, lq in bare:
+        nq = marks.count(">")
+        if lcol >= 0:
+            last_is_item = marks[-1] != ">"
+            cc, cq = lcol + (ind if last_is_item and ind <= 3 else 0), lq
+            rel.append(col + ind - cc if last_is_item else ind)
+        elif cc is None or nq > cq:
+            rel.append(ind)
+        else:
+            rel.append(col + ind - cc if nq == cq else -1)
     rows, i = set(), 0
     while i < len(bare) - 1:
-        (head, hm, hc), (sep, sm, sc) = bare[i], bare[i + 1]
+        (head, hm, *_), (sep, sm, *_) = bare[i], bare[i + 1]
         quotes = tuple(m for m in hm if m == ">")      # what every row of the table repeats
-        item = len(quotes) < len(hm) or not hm                 # a list item opens on the header
         if (_CELL_PIPE_RE.search(head) and TBLSEP_RE.match(sep) and _CELL_PIPE_RE.search(sep)
                 and _cells(head) == _cells(sep)
-                and sm == quotes and (not item or sc == hc)
+                and sm == quotes and 0 <= rel[i] <= 3 and 0 <= rel[i + 1] <= 3
                 and (i == 0 or not bare[i - 1][0].strip() or hm and not bare[i - 1][1])):
             rows.update((i, i + 1))
             i += 2
             while (i < len(bare) and _CELL_PIPE_RE.search(bare[i][0])
-                   and bare[i][1] == quotes and (not item or bare[i][2] == hc)):
+                   and bare[i][1] == quotes and rel[i] >= 0):
                 rows.add(i)
                 i += 1
         else:

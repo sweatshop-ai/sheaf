@@ -778,3 +778,26 @@ def test_a_line_of_many_container_markers_is_read_in_linear_time():
     t = time.perf_counter()
     rdc.parse(md)
     assert time.perf_counter() - t < 1.0
+
+
+@pytest.mark.parametrize("md", [
+    # b1: a row back at the quote's column ends the table of an item
+    "> - q\n>\n>   | a | b |\n>   |---|---|\n> | `x | `%s` | y` |\n" % C1,
+    "> - q\n>   - r\n>\n>     | a | b |\n>     |---|---|\n>   | `x | `%s` | y` |\n" % C1,
+    # b2: 4 columns past the container is code, not a table
+    ">     | a ` | b %s ` |\n>     |---|---|\n" % C1,
+    "- q\n\n      | a ` | b %s ` |\n      |---|---|\n" % C1,
+    "> - q\n>\n>       | a ` | b %s ` |\n>       |---|---|\n" % C1,
+    "> - q\n>\n>   | a | b |\n>   |---|---|\n>       | `x | `%s` | y` |\n" % C1,
+    # c1: a continuation line sits 0 to 3 columns past the header's, tabs at their stops
+    "- q\n\n  | a | b |\n  |---|---|\n   | x ` | b %s ` |\n" % C1,
+    "- q\n\n  | a ` | b %s ` |\n   |---|---|\n" % C1,
+    "- q\n\n   | a ` | b %s ` |\n  |---|---|\n" % C1,
+    # still tables
+    "- q\n\n  | a | b |\n  |---|---|\n  | `x | `%s` | y` |\n" % C1,
+    "> | a | b |\n> |---|---|\n>  | `x | `%s` | y` |\n" % C1,
+])
+def test_parse_agrees_with_pandoc_on_a_comment_in_a_quoted_or_listed_table(md):
+    page = pandoc(["-f", "gfm", "-t", "html"], md)
+    seen = "&lt;!-- sheaf" not in page and "<!-- sheaf-comment" in page
+    assert [c.id for c in rdc.parse(md).comments] == (["c1"] if seen else [])

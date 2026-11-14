@@ -265,8 +265,9 @@ def toast(page):
         raise
 
 
-def toasted(page, text, timeout=8.0):
-    """Wait for a toast that says `text`. (Not wait_for_function: the page's policy forbids eval.)"""
+def toasted(page, text, timeout=20.0):
+    """Wait for a toast that says `text`. (Not wait_for_function: the page's policy forbids eval.)
+    Toasts queue (ticket 62), so one behind a red toast (7 s) and another waits its turn."""
     until(lambda: text in toast(page), timeout, f"a toast saying {text!r}")
 
 

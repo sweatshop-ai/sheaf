@@ -6,11 +6,11 @@
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Status:** done (PR 323, merge 36ce4d0)
 
 **Établi (preuves) :** une défaillance sur 2 tentatives de 49be5dc ; aucune défaillance de ce test dans les logs des 16 derniers runs en échec sur les 100 derniers runs (43530281636, 43528478252, 43527615916, 43526211893, 43525374227, 43521980517, 43520149666, 43516866448, 43514478012, 43514300946, 43502942314, 43502870726, 43502440200, 43502218938, 43402531248, 43327923012). Non reproduit : les tests de page ne tournent pas sur le portable.
 
 **À faire :** au timeout, dire ce que le stockage et la liste contenaient ; relancer le test 20 fois en CI sur main avant de conclure.
 
-- [ ] Cause établie : test instable ou ordre d'écriture réel de la page
-- [ ] Correctif avec un test rouge avant (ou le test attend l'écriture de A)
+- [x] Cause établie : test instable ou ordre d'écriture réel de la page. Le test quittait la page A avant qu'elle ait écrit son envoi échoué (l'entrée garde `out`, la liste l'omet 32 s). Établi par lecture du code et par la revue Opus; 75/75 répétitions en CI n'ont pas reproduit l'échec.
+- [x] Correctif avec un test rouge avant (ou le test attend l'écriture de A) : le test attend l'écriture de A et de B ; deux tests fixent le délai de 32 s de la marque `out`.

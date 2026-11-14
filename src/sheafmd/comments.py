@@ -660,7 +660,9 @@ def heading_anchor(block: str) -> int | None:
     return at - 1 if run % 2 else at
 
 
-_CELL_PIPE_RE = re.compile(r"(?<!\\)(?:\\\\)*(\|)")
+# A cell border: a `|` with no backslash right before it. Unlike an escape in running text, pairs do not
+# count here: pandoc (gfm) keeps `a \\| b` in one cell, whatever number of backslashes stand before the pipe.
+_CELL_PIPE_RE = re.compile(r"(?<!\\)(\|)")
 
 
 _CONTAINER_RE = re.compile(r"[ \t]*(?:>|(?:[-+*]|\d{1,9}[.)])(?=[ \t]))[ \t]?")
@@ -692,7 +694,7 @@ def in_table_row(block: str, point: int) -> bool:
 def cell_end(block: str, point: int, cells: bool = True) -> int:
     """Offset where a comment on a selection ending at `point` goes in a table: the end of the cell that
     holds `point`, before its closing `|` and the spaces in front of it, so the cell's words stay whole
-    for every reader of the file. A `|` ends a cell unless an odd run of backslashes escapes it, in code
+    for every reader of the file. A `|` ends a cell unless a backslash stands right before it (pandoc counts no pairs), in code
     as well (GFM and pandoc read `a|b` in a code span as two cells); a row with no closing `|` ends the
     cell at the end of its line. Before a backslash that ends the cell's text, which would escape the
     block's `<`, and before a `<!--` in the cell that nothing closes, which a block after it would close,
@@ -822,7 +824,7 @@ def _comment_spans(md: str) -> list:
         pos += len(b.text)
         if b.kind in CODE_KINDS:
             continue
-        i = 0
+        i, o, span = 0, None, None
         while True:
             if start is not None:
                 e = text.find("-->", i)
@@ -830,7 +832,13 @@ def _comment_spans(md: str) -> list:
                     break
                 spans.append((start, base + e + 3))
                 i, start = e + 3, None
-            o, span = _opener(text, i), CODE_SPAN_RE.search(text, i)
+            # Each search is reused while its hit still lies ahead of i, as `_scan` does: a search
+            # from i finds what one from an earlier position found, so a block of many comments is
+            # read once, not once per comment.
+            if o is None or (o >= 0 and o < i):
+                o = _opener(text, i)
+            if span is None or (span is not False and span.start(1) < i):
+                span = CODE_SPAN_RE.search(text, i) or False
             if span and (o < 0 or span.start(1) < o):
                 i = span.end()
             elif o >= 0:

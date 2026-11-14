@@ -658,8 +658,10 @@ var create = function (ROOT, CFG, opts) {
   var toasts = [], toasting = false;
   function say(msg, err) {
     if (err) incident('toast', { message: msg });
-    toasts.push({ msg: msg, err: err });
+    var t = { msg: msg, err: err, until: null };      // `until` is when it stops being up, set once it is shown
+    toasts.push(t);
     if (!toasting) nextToast();
+    return t;
   }
   function nextToast() {
     var t = toasts.shift();
@@ -667,6 +669,7 @@ var create = function (ROOT, CFG, opts) {
     if (!t) return;
     toast.textContent = t.msg;
     toast.className = 'show' + (t.err ? ' err' : '');
+    t.until = Date.now() + (t.err ? 7000 : 2600);
     setTimeout(function () { toast.className = ''; nextToast(); }, t.err ? 7000 : 2600);
   }
   // ---- copy blocks (SPEC 6.8) -----------------------------------------------
@@ -929,7 +932,7 @@ var create = function (ROOT, CFG, opts) {
       return;
     }
     try {
-      if (pressSaid && Date.now() < pressSaid.until) sessionStorage.setItem(KEYS + 'rd-press-said', pressSaid.text);
+      if (pressSaid && (pressSaid.toast.until === null || Date.now() < pressSaid.toast.until)) sessionStorage.setItem(KEYS + 'rd-press-said', pressSaid.text);
       sessionStorage.setItem(KEYS + 'rd-keep', JSON.stringify({ doc: CFG.doc, y: scrollNow(), open: openId || null,
                                                          panel: panel.classList.contains('open'),
                                                          known: counts(), editing: editing,
@@ -3733,10 +3736,10 @@ var create = function (ROOT, CFG, opts) {
         if (a.toggle) btn.setAttribute('aria-pressed', a.pressed ? 'true' : 'false');
         btn.disabled = false;
         lock(false);
-        say(e.message, true);
+        var said = say(e.message, true);
         // A reload waits for this answer: the refusal is said again on the page it brings, if it comes while the
-        // toast would still be up, counted from the refusal (a form may hold the reload longer).
-        if (reloadAfterPress) pressSaid = { text: e.message, until: Date.now() + 7000 };
+        // toast is still waiting its turn or up (a form may hold the reload longer).
+        if (reloadAfterPress) pressSaid = { text: e.message, toast: said };
         done();
       }
     }

@@ -10,8 +10,8 @@
 
 **Par où commencer :** `tests/test_anchoring.py`, après la section « ticket 68 » : un test rouge par point.
 
-- [ ] Point 1 corrigé, test rouge d'abord
-- [ ] Point 2 corrigé ou la limite gardée avec la raison
-- [ ] CI verte
+- [x] Point 1 corrigé, test rouge d'abord
+- [x] Point 2 corrigé ou la limite gardée avec la raison
+- [x] CI verte
 
-**Status:** ready-for-agent
+**Status:** done (PR 307, head 5b8cf06, awaiting merge)

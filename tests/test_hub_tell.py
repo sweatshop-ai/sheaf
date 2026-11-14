@@ -1490,6 +1490,7 @@ def test_a_tell_that_starts_while_an_upgrade_stop_is_being_admitted_is_refused_n
     go.set()
     stopper.join(10)
     teller.join(10)
+    assert not stopper.is_alive() and not teller.is_alive(), "the stop and the Tell did not finish"
     assert got["stop"].status == 200 and got["tell"].status == 409
     finish(hub)
     assert session.peer.messages == [] and hub.runner.active("tell") == []
@@ -1608,6 +1609,7 @@ def test_an_upgrade_stop_that_comes_while_a_tell_is_being_cancelled_waits_for_it
     go.set()
     canceller.join(10)
     stopper.join(10)
+    assert not canceller.is_alive() and not stopper.is_alive(), "the cancel and the stop did not finish"
     assert got["cancel"].json() == {"ok": True}
     assert got["stop"].status == 409 and hub.stop_requested is None
     slow.release.set()
@@ -1693,6 +1695,7 @@ def test_cancelling_a_tell_leaves_the_admission_lock_free_while_a_render_holds_t
         release.set()
         canceller.join(10)
         stopper.join(10)
+    assert not canceller.is_alive() and not stopper.is_alive(), "the cancel and the stop did not finish after the release"
     assert got["stop"].status == 200 and hub.stop_requested == "upgrade"
     assert got["cancel"].json() == {"ok": True} and hub.entry(DOC).live.waiting() == []
     slow.release.set()
@@ -1839,6 +1842,7 @@ def test_a_tell_is_refused_while_the_cancel_of_its_thread_is_under_way(
         go()
         canceller.join(10)
         again.join(10)
+    assert not canceller.is_alive() and not again.is_alive(), "the cancel and the second request did not finish"
     if route == "comment":                          # the reply is kept, the Tell is not made
         assert refusal(got["again"], route) == CANCELLING
         assert [r.text for r in thread(ready).replies][-1] == "Again."
@@ -1915,6 +1919,7 @@ def test_a_tell_that_a_cancel_overtakes_between_its_wait_and_its_delivery_delive
         if cancel == "under way":
             released.set()
             canceller.join(10)
+    assert not canceller.is_alive(), "the cancel did not finish after the release"
     assert refusal(r, route) == (CANCELLING if cancel == "under way" else WAIT_ENDED)
     assert r.status == (409 if route == "tell" else 200) and got["cancel"].json() == {"ok": True}
     finish(hub)

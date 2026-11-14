@@ -67,6 +67,7 @@ class Supervisor:
             if p.poll() is None:
                 p.terminate()
         self._t.join(timeout=30)
+        assert not self._t.is_alive(), "the watch on the hub did not end after the stop"
         for p in self.procs:                 # one that the watch started just before `over` was set
             if p.poll() is None:
                 p.terminate()
@@ -360,6 +361,7 @@ def test_a_stop_that_comes_while_an_upgrade_stop_is_being_taken_is_not_overwritt
     hub.busy = busy
     assert hub.request_stop("upgrade", force=False) is True
     other.join(5)
+    assert not other.is_alive(), "the second stop did not finish"
     assert hub.stop_requested == "stop" and seen == ["upgrade", "stop"]
     assert server.exit_code(hub) == server.EXIT_STOPPED
 
@@ -377,6 +379,7 @@ def test_a_second_signal_that_interrupts_the_first_inside_the_admit_lock_does_no
     t = threading.Thread(target=second_signal_inside_the_first, daemon=True)
     t.start()
     t.join(3)
+    assert not t.is_alive(), "the second signal inside the first did not finish"
     assert done == [True] and hub.stop_requested == "upgrade"
 
 

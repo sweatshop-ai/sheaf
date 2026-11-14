@@ -372,6 +372,7 @@ def test_a_cancel_that_comes_while_the_first_listing_is_out_ends_it_once_and_see
     waiting._emit = emit
     first = documents(browser, token)[0]
     order[0].join(5)
+    assert not order[0].is_alive(), "the cancel did not finish"
     assert first["tells"] and done == [1]
     assert documents(browser, token)[0]["tells"] == []
     assert waiting.waits(DOC) == []

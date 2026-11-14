@@ -4485,17 +4485,19 @@ def still_out(tab, body):
 
 
 # The entry of a send is written with `out` when it is sent and again without it once it fails, and the list of
-# unsent texts leaves out an entry that is out. A page left while its send is still out leaves the mark: its text
-# is not listed until the mark lapses. (The test below once failed now and then in CI for lack of this wait: it
-# left page A before A had written its failed send.)
-def test_a_send_still_out_on_a_page_that_was_left_is_not_listed_as_unsent(thread):
-    a = thread.page
-    send_held(thread, "reply", "words still out")
-    assert still_out(thread, "words still out")
-    come_back(thread)
-    a.wait_for_timeout(500)
-    assert a.locator(UNSENT).count() == 0, f"the list offers a send that is out: {comment_store(thread)}"
-    assert still_out(thread, "words still out")
+# unsent texts leaves out an entry that is out. A page closed before it wrote the failure leaves the mark: its text
+# is listed when the mark lapses (inFlight, 32 s). The test below once failed now and then in CI for lack of a wait:
+# it left page A before A had written its failed send.
+@pytest.mark.parametrize("age_ms, listed", [(1000, False), (40000, True)])
+def test_a_send_left_out_by_a_closed_page_is_listed_as_unsent_only_once_its_mark_has_lapsed(thread, age_ms, listed):
+    (c,) = rdc.parse(thread.site.file.read_text()).comments
+    keep_on_disk(thread, {"thread": c.id, "born": c.at, "about": c.quote, "kind": "reply", "body": "words left out",
+                          "rid": "r0123456789left", "at": "2026-10-22T10:00:00.000Z",
+                          "out": thread.page.evaluate("Date.now()") - age_ms})
+    thread.page.reload()
+    thread.page.wait_for_selector("#rd-menu-btn", state="attached")
+    thread.page.wait_for_timeout(500)
+    assert (thread.page.locator(UNSENT).count() == 1) == listed, f"the store held {comment_store(thread)}"
 
 
 # Open the thread on a listed entry draws that entry's text, also when the thread holds another of its kind.

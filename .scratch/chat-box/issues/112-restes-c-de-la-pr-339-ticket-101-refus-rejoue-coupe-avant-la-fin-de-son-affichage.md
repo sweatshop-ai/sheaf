@@ -8,7 +8,7 @@ Aussi, de la relecture r2 (`pr-101-reviews/r2-narrow.md`) :
 
 **Blocked by:** PR 339 merged
 
-**Claimed by:**
+**Claimed by:** Malik
 
 **Status:** ready-for-agent
 

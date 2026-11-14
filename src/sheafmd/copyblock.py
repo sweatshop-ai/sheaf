@@ -39,7 +39,7 @@ _HTML_OPENS = (
     rf"|</?(?:{_HTML_TAGS})(?:[ \t]|/?>|$)"             # 6
 )
 _OPENS_BLOCK = re.compile(
-    r"^ {0,3}(?:```|~~~|#{1,6}(?:\s|$)|>|(?:[*_][ \t]*){3,}$|[-*+][ \t]+\S|0*1[.)][ \t]+\S|" + _HTML_OPENS + ")",
+    r"^ {0,3}(?:```|~~~|#{1,6}(?:\s|$)|>|(?:[*_][ \t]*){3,}$|[-*+][ \t]+[^ \t]|0*1[.)][ \t]+[^ \t]|" + _HTML_OPENS + ")",
     re.I)
 
 
@@ -69,13 +69,13 @@ def is_copy_block(content: str) -> bool:
     if not (_LINE.fullmatch(first.rstrip("\r")) and _WORDS.search(rest)):
         return False
     for line in rest.split("\n"):
-        line = line.rstrip("\r")
+        raw = line = line.rstrip("\r")
         if not line.strip(" \t>"):
             break                       # the first paragraph ends at the first blank quote line
         line = _unquote(line)
         if _OPENS_BLOCK.match(line):
             break                       # and at the line that opens a fence, a list, a heading, a quote or an HTML block
-        if _UNDERLINE.match(line):
+        if _QUOTE_MARK.match(raw) and _UNDERLINE.match(line):
             return False
     return True
 

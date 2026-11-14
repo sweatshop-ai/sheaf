@@ -89,6 +89,8 @@ def _looks_like_table(lines, i):
     if i + 1 >= len(lines):
         return False
     nxt = lines[i + 1]
+    if LIST_RE.match(lines[i]) or QUOTE_RE.match(lines[i]):
+        return False        # an item or a quote whose first line has pipes: its table, if pandoc reads one, is inside it
     return ("|" in lines[i]) and ("-" in nxt) and TBLSEP_RE.match(nxt) is not None and "|" in nxt
 
 

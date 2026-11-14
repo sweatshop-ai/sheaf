@@ -4,7 +4,8 @@ A Tell to an agent (ChatGPT, Claude.ai) cannot be pushed: it waits on the docume
 calls `documents`. A row is kept with the token's stable `id` (`tid`) beside its name, so a token revoked and
 made again under the same name never receives the old Tell. Every change of state (queued, seen, ended) is
 made inside `Waiting._change`, under one thread lock and the flock `tells.lock`; the page's events and the
-diagnostics rows of a change go out inside it too, so the page, `documents` and the log agree on which state won.
+diagnostics rows of a change go out inside it too (the events once the file is written), so the page, `documents` and
+the log agree on which state won.
 A row names the token and the thread, never the Tell's text: the message is built when it is listed.
 
     queue(address, cid, row, by, member, thread)   put a Tell in the file; raises Refused
@@ -80,25 +81,57 @@ class Waiting:
     def __init__(self, hub):
         self.hub = hub
         self._lock = threading.RLock()
+        self._held = None            # the events of the change under way, sent once the file holds it (`_change`)
 
     def _change(self, change):
-        """`change(rows)` on the file as it is now, under both locks; it returns `(result, save)`."""
+        """`change(rows)` on the file as it is now, under both locks; it returns `(result, save)`. The page's events
+        of the change are held and sent after the write, still under the locks, so a snapshot (`waits`, which reads
+        under the thread lock) never shows a state older than an event the page has heard."""
         with self._lock, file_locked("tells.lock"):
             rows = [r for r in read_json(_file(), []) if isinstance(r, dict)]
-            result, save = change(rows)
-            if save:
-                write_json(_file(), rows)
+            filled = self._name_old_rows(rows)
+            outer, held = self._held, []
+            self._held = held
+            try:
+                result, save = change(rows)
+                if save or filled:
+                    write_json(_file(), rows)
+            finally:
+                self._held = outer
+            for address, name, data, member in held:
+                self._send(address, name, data, member)
             return result
+
+    def _name_old_rows(self, rows: list) -> bool:
+        """A row written before `agent` was kept (SPEC 9.8) has none: it takes the signed name its token has now, the one
+        its page was told if the name has not changed since, and keeps it when the token goes (SPEC 9.8)."""
+        filled = False
+        tokens = None
+        for t in rows:
+            if "agent" not in t:
+                tokens = self.hub.tokens.list() if tokens is None else tokens
+                row = next((r for r in tokens if belongs(t, r)), None)
+                if row is not None:
+                    t["agent"] = row.signed(self.hub.person, self.hub.proxy)
+                    filled = True
+        return filled
 
     # ── what ends and what shows ─────────────────────────────────────────────
     def _live(self) -> list:
         return [r for r in self.hub.tokens.list() if r.client is not None and not r.invalid]
 
     def _name(self, t: dict) -> str:
-        row = next((r for r in self.hub.tokens.list() if belongs(t, r)), None)
-        return row.signed(self.hub.person, self.hub.proxy) if row is not None else str(t.get("token", ""))
+        """The agent as the page was told at `tell-queued`: the name kept in the row, whatever the token or the person
+        is called now. A row with none (its token was gone before the first pass that names it) has the token's name."""
+        return str(t.get("agent") or t.get("token", ""))
 
     def _emit(self, address: str, name: str, data: dict, member=None):
+        if self._held is not None:
+            self._held.append((address, name, data, member))
+        else:
+            self._send(address, name, data, member)
+
+    def _send(self, address: str, name: str, data: dict, member=None):
         e = self.hub.entries.get(address)
         if e is not None:
             e.bus.publish(name, Owned(data, member))
@@ -107,7 +140,8 @@ class Waiting:
         """Inside `_change`: take `gone` out of `rows`, and tell the page and the log of each."""
         for t in gone:
             rows.remove(t)
-            data = {"id": t["thread"], **({"seen": bool(t["seen"])} if how == "cancelled" else {}), **extra}
+            data = {"id": t["thread"], **({"seen": bool(t["seen"])} if how == "cancelled" else {}), **extra,
+                    "agent": self._name(t)}
             self._emit(t["doc"], f"tell-{how}", data, t.get("member"))
             self.hub.record(f"tell-{how}", t["doc"], thread=t["thread"], token=t["token"], tid=t["tid"],
                             **{k: v for k, v in extra.items() if k == "reason"})
@@ -184,7 +218,8 @@ class Waiting:
             if any(t["doc"] == address and t["thread"] == cid and belongs(t, row) for t in rows):
                 raise Refused(409, HAS_IT.format(agent=name))
             t = {"id": str(uuid.uuid4()), "doc": address, "thread": cid, "token": row.name, "tid": row.id,
-                 "by": by, "at": time.strftime(STAMP_FORMAT), "seen": None}
+                 "by": by, "at": time.strftime(STAMP_FORMAT), "seen": None,
+                 "agent": name}              # the name the page was told, the one every event and snapshot of the Tell uses (9.8)
             if thread is not None:
                 t["thread_by"], t["thread_at"], t["thread_quote"] = thread.by, thread.at, thread.quote
             if member is not None:
@@ -215,7 +250,7 @@ class Waiting:
                     continue
                 if t["seen"] is None:
                     t["seen"] = time.strftime(STAMP_FORMAT)
-                    self._emit(address, "tell-seen", {"id": t["thread"]}, t.get("member"))
+                    self._emit(address, "tell-seen", {"id": t["thread"], "agent": self._name(t)}, t.get("member"))
                     self.hub.record("tell-seen", address, thread=t["thread"], token=t["token"], tid=t["tid"])
                     save = True
                 out.append({"id": t["id"], "thread": t["thread"], "message": message(c, t), "by": t["by"],
@@ -256,6 +291,7 @@ class Waiting:
         if sweep:
             self.sweep()
         mine = member.id if member else None
+        with self._lock:                                  # not the document's lock: a change holds this one while it writes
+            rows = read_json(_file(), [], aside=False)
         return [{"id": t["thread"], "to": self._name(t), "state": "queued" if t["seen"] is None else "seen"}
-                for t in read_json(_file(), [], aside=False)
-                if isinstance(t, dict) and t.get("doc") == address and t.get("member") == mine]
+                for t in rows if isinstance(t, dict) and t.get("doc") == address and t.get("member") == mine]

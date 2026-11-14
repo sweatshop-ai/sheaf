@@ -14,7 +14,7 @@ GitHub Project. `waiting` is the Project's option named by `waiting`, `open` the
 The owner is the issue's assignee, told by the member whose `github` it is. The rest is the sheaf's front
 matter: `issue` (`owner/repo#n`; empty for a documentation sheaf, which is never listed), `assistant`,
 `kind`, `visibility`; its title is its first `# ` heading and its actions are its unticked boxes that
-carry one of the eight words (`- [ ] Approve`, `- [ ] Done @nell`, `- [ ] Move to klium (ref <thread>)`). A sheaf
+carry one of the eleven words (`- [ ] Approve`, `- [ ] Done @nell`, `- [ ] Move to klium (ref <thread>)`). A sheaf
 whose front matter has `moved_to:` is the pointer a move left, never a row.
 
 The record is read as the GitHub App the deployment installs: the hub reads an installation token from
@@ -60,8 +60,10 @@ FOLDER_KEYS = ("stop_dir", "tell_dir", "sessions_dir")
 DIR_KEYS = ("tell_dir", "stop_dir", "sessions_dir", "work_dir")
 DEFAULTS = {"api": "https://api.github.com", "poll": 60, "waiting": "Waiting on member",
             "in_progress": "In progress"}
-WORDS = ("Approve", "Run it", "Don't run", "Undo skip", "Done", "Share", "Stop James", "Move to")
-MOVE = "Move to"                # the one word that takes an argument: `<slug> (ref <thread>)`
+WORDS = ("Approve", "Run it", "Don't run", "Undo skip", "Done", "Share", "Stop James", "Move to",
+         "Merge", "Deploy", "Install")
+MOVE = "Move to"                # a word that takes an argument: `<slug> (ref <thread>)`
+FREE = ("Merge", "Deploy", "Install")   # the words whose argument is the rest of the line, which the hub does not read
 TOGGLES = frozenset({"Share"})  # the words a member may press and release; every other word is pressed once
 SHOWS = {"projects": "My projects", "mine": "Only mine", "all": "All of the team"}
 BATCH = 50                      # issues per GraphQL request
@@ -75,8 +77,8 @@ MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", 
 _BOX_RE = re.compile(r"[A-Za-z0-9.-]{1,63}")
 _REPO_RE = re.compile(r"[A-Za-z0-9-]+/[A-Za-z0-9._-]+")
 _ISSUE_RE = re.compile(r"([A-Za-z0-9-]+)/([A-Za-z0-9._-]+)#([0-9]+)")
-_ACTION_RE = re.compile(r"\s*[-*+] \[(?P<mark>[ xX])\] (?:(?P<word>" + "|".join(re.escape(w).replace("'", "['’]") for w in WORDS if w != MOVE)
-                        + r")|(?P<move>" + re.escape(MOVE) + r")\s+(?P<slug>[A-Za-z0-9._\\-]+)\s+\(ref\s+[^()\s]+\))"
+_ACTION_RE = re.compile(r"\s*[-*+] \[(?P<mark>[ xX])\] (?:(?P<word>" + "|".join(re.escape(w).replace("'", "['’]") for w in WORDS if w != MOVE and w not in FREE)
+                        + r")|(?P<free>" + "|".join(FREE) + r")\s+\S.*|(?P<move>" + re.escape(MOVE) + r")\s+(?P<slug>[A-Za-z0-9._\\-]+)\s+\(ref\s+[^()\s]+\))"
                         + r"(?:\s+@(?P<short>[A-Za-z0-9._-]+))?\s*")
 
 
@@ -304,7 +306,7 @@ class Sheaf:
     shared: str = ""
     hash: str = ""              # md_hash of the text read: a tick from its row is refused once the text is another
     moved: bool = False         # its front matter has `moved_to:`: the pointer a move left, never a row
-    pressed: tuple = ()         # its ticked boxes of the eight words, as `actions` holds its unticked ones (#110)
+    pressed: tuple = ()         # its ticked boxes of the eleven words, as `actions` holds its unticked ones (#110)
 
 
 def issue_of(written: str) -> tuple | None:
@@ -352,7 +354,7 @@ def read_sheaf(rel: str, text: str) -> Sheaf:
 
 def _title(heading: str) -> str:
     """The text of a `# ` heading's line without its HTML comments, its spaces collapsed (9.10): a review comment
-    anchored in the heading is written on that line. A comment is what CommonMark reads as one, as the page does:
+    on the heading is written at the end of that line (10.4), one written before that rule may be inside its words. A comment is what CommonMark reads as one, as the page does:
     a `<!--` in a code span or after a backslash is text, and `<!-->` and `<!--->` are whole comments."""
     masked, kept, last, pos = rdc._mask_code(heading), [], 0, 0
     while m := _HEADING_COMMENT_RE.search(masked, pos):
@@ -368,7 +370,7 @@ def _title(heading: str) -> str:
 
 def _word(m: re.Match) -> str:
     """The word of the action `_ACTION_RE` matched, its apostrophe straight."""
-    return (m["word"] or m["move"]).replace("’", "'")
+    return (m["word"] or m["free"] or m["move"]).replace("’", "'")
 
 
 def _slug(m: re.Match) -> str:
@@ -448,7 +450,7 @@ def box_place(text: str, line: int, blocks=None) -> tuple | None:
 
 def buttons(s: Sheaf, who: dict, hub, member, is_owner: bool) -> list:
     """The buttons of the sheaf `s` as `member` (None: the hub's own person) reads them, on the list's row and at
-    the top of its page alike (#110, #111): every box of the eight words in the order of the file, each
+    the top of its page alike (#110, #111): every box of the eleven words in the order of the file, each
     {word, label, line, toggle, pressed, may, n, release, by}. An action is a button to press (`n` its number among
     the actions); a pressed one-off a locked one that says who pressed it and when (`by`, from `who`, the
     `pressers` of `s`), with no `n`; a pressed toggle one its owner may release (`n` its number among the pressed

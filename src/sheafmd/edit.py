@@ -22,7 +22,7 @@ from typing import NamedTuple
 
 from . import _pandoc
 from . import comments as rdc
-from . import diagnostics
+from . import copyblock, diagnostics
 from .blocks import LOCKED_KINDS, split_md_blocks
 from .sanitize import sanitize
 
@@ -50,7 +50,7 @@ def _sanitize(fragment: str, source=None, strays=None) -> str:
         _unwrap_strays(soup, source, strays)
     for el in soup.select("[contenteditable]"):
         del el["contenteditable"]
-    for el in soup.select(".rd-lock, .rd-blockmark"):
+    for el in soup.select(f".rd-lock, .rd-blockmark, .{copyblock.BUTTON_CLASS}"):
         el.decompose()
     # The byline under the title shares the title's block on the page; it is drawn
     # from --by, never from the .md, so an edited title must not carry it back.
@@ -630,6 +630,7 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     """Convert one edited HTML block back to GitHub-flavoured markdown. With `source`, the block's markdown,
     markup the source did not have is unwrapped (`_unwrap_strays`) and named in `strays`."""
     _reject_irreversible(fragment)
+    fragment = copyblock.tokenize(fragment)
     # The page sends each block's outerHTML as the tab holds it, so what reaches pandoc
     # goes through the 9.5 sanitiser first: no handler, no script address, no element
     # that can run, and the .md never holds active markup a tool without a sanitiser
@@ -660,7 +661,7 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     # noise on every line of a table the moment one cell is edited. Unwrap them. The
     # scheme makes the match unambiguous against real tags.
     out = re.sub(r"<(https?://[^>\s]+)>", r"\1", out)
-    return out.strip("\n")
+    return copyblock.restore(out).strip("\n")
 
 
 def _norm_html(fragment: str) -> str:
@@ -677,13 +678,13 @@ def _norm_html(fragment: str) -> str:
 
 def _comparable(block, fragment: str):
     """(page fragment, source render) reduced to the same terms, or None."""
-    r = _pandoc.run(["-f", "gfm", "-t", "html5", "--no-highlight"], block.content)
+    r = _pandoc.run(["-f", "gfm", "-t", "html5", "--no-highlight"], copyblock.hide(block.content))
     if r.returncode != 0:
         return None
     # The page shows each comment as an anchor span; the source render has the
     # comment itself. Reduce both to the same marker, or every commented block
     # would look edited and go through pandoc on every save.
-    src = COMMENT_HTML_RE.sub(lambda m: f"<!--RDA:{m.group(1)}-->", r.stdout)
+    src = COMMENT_HTML_RE.sub(lambda m: f"<!--RDA:{m.group(1)}-->", copyblock.mark(r.stdout, page=True))
     frag = ANCHOR_RE.sub(lambda m: f"<!--RDA:{m.group(1)}-->", fragment)
     try:
         return _sanitize(frag), src
@@ -770,12 +771,13 @@ def ticked_html(block, k: int, tick: bool = True):
 
     if not block.editable:
         return None
-    r = _pandoc.run(["-f", "gfm", "-t", "html5", "--no-highlight"], block.content)
+    r = _pandoc.run(["-f", "gfm", "-t", "html5", "--no-highlight"], copyblock.hide(block.content))
     if r.returncode != 0:
         return None
     # The page shows each comment as its anchor; the anchor is what keeps the comment through a save.
     soup = BeautifulSoup(COMMENT_HTML_RE.sub(
-        lambda m: f'<span class="rd-anchor" data-rd-id="{m.group(1)}"></span>', r.stdout), "html.parser")
+        lambda m: f'<span class="rd-anchor" data-rd-id="{m.group(1)}"></span>', copyblock.mark(r.stdout, page=True)),
+        "html.parser")
     found = soup.select('input[type="checkbox"]')
     marks = list(TASK_MARK_RE.finditer(block.content))
     if not 0 <= k < min(len(found), len(marks)) or found[k].has_attr("checked") == tick:
@@ -1642,15 +1644,19 @@ def _quote_starts(text: str, q: str) -> list:
 def _insert_comment(md_text: str, j: int, raw: str, quote: str, nth: int = 0) -> str:
     """Put an existing comment's bytes into block j, after the `nth` occurrence of `quote`
     (the first unless said; a negative `nth` is none) if it is there, else at the end of
-    the block. When the block ends in code the end of the block is inside the code, and a
-    comment block ends on its `-->` line, so there the comment goes on a line of its own
-    after the block. Where that is still code (a fence the
+    the block; in a heading, always at the end of its text. When the block ends in code the end of
+    the block is inside the code, and a comment block ends on its `-->` line, so there the comment
+    goes on a line of its own after the block. Where that is still code (a fence the
     file never closed runs to the end of the file) the comment is text, and
     `sheaf comments` would not list it: it goes on a line of its own above the block."""
     blocks = split_md_blocks(md_text)
     b = blocks[j]
     start = sum(len(x.text) for x in blocks[:j])
     at_off, own_line = len(b.content.rstrip("\n")), False
+    headless = False
+    if b.kind == "heading":            # a heading keeps its words whole: the comment goes at its end (ticket 55)
+        headless = rdc.heading_anchor(b.content) is None
+        at_off = len(b.content.rstrip("\n")) if headless else rdc.heading_anchor(b.content)
     q = rdc.squash(quote)
     try:
         proj = rdc.projection(b.content)
@@ -1660,10 +1666,14 @@ def _insert_comment(md_text: str, j: int, raw: str, quote: str, nth: int = 0) ->
         k = starts[nth] if 0 <= nth < len(starts) else -1
         if k >= 0:
             # A quote anchor_point cannot place raises, and `except` keeps the end of the block.
-            at_off = rdc.anchor_point(b.content, k, k + len(q), quote)
+            at_off = rdc.comment_point(b.kind, b.content, k, k + len(q), quote)
             own_line = False
     except Exception:
         pass
+    if headless or (b.kind == "heading" and "\n" in raw):
+        # A heading with no words: a block right after its hashes would make the line a paragraph.
+        # A block of several lines at the end of a heading line runs into the lines after it.
+        own_line = True
     if b.kind in LOCKED_KINDS:
         # Code, raw html, front matter: a comment inside is literal text, and a comment
         # block ends on its `-->` line, so nothing may follow it there.

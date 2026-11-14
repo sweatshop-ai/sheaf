@@ -250,8 +250,19 @@ def reloaded(page, timeout=8.0):
     until(lambda: gone(page), timeout, "the page to reload")
 
 
+# What Playwright says when an evaluate falls on a page that is reloading: the new page has no #rd-toast yet, or
+# the poll landed on the navigation itself (ticket 53). Any other error stays an error.
+RELOADING = ("Cannot read properties of null (reading 'textContent')", "Execution context was destroyed")
+
+
 def toast(page):
-    return page.evaluate("document.querySelector('#rd-toast').textContent")
+    """The text of the toast; "" while the page reloads and has none yet."""
+    try:
+        return page.evaluate("document.querySelector('#rd-toast').textContent")
+    except Exception as e:      # a PageStalled is not an Exception, so a driver that stopped answering still fails
+        if any(said in str(e) for said in RELOADING):
+            return ""
+        raise
 
 
 def toasted(page, text, timeout=8.0):

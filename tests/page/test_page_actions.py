@@ -549,7 +549,12 @@ def test_a_comment_sent_while_the_tick_is_out_waits_for_its_answer(sheaf):
 
 def test_a_comment_answered_during_the_undo_does_not_move_the_text_the_press_names(sheaf):
     # #148, 4: the comment's answer moved the page's hash and the press still named the text before it.
+    # Ticket 54: the press sends only once the page has the comment's answer, and its wait for that is a timer of
+    # the paused page clock. The file having the comment is the hub's doing; the clock runs when the page has the
+    # answer too (the new badge), else the press's wait is stranded and the tick never goes (5d7df54 held the answer).
     p, f = sheaf.page, sheaf.site.file
+    badges = p.locator("main .rd-badge")
+    before = badges.count()
     select(p, at("main", "Body"), at("main", "Body", None))
     open_box(p)
     p.fill("#rd-popover textarea", "Why?")
@@ -557,6 +562,7 @@ def test_a_comment_answered_during_the_undo_does_not_move_the_text_the_press_nam
     bar(p).nth(0).click()
     p.click("#rd-popover button[data-f=ok]")
     until(lambda: "Why?" in f.read_text(encoding="utf-8"), what="the comment, in the file during the Undo")
+    until(lambda: badges.count() > before, what="the answer, in the page")
     p.wait_for_timeout(300)
     p.clock.run_for(5100)
     until(lambda: "- [x] Approve" in f.read_text(encoding="utf-8"), what="the tick")

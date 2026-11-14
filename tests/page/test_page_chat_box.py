@@ -1,7 +1,7 @@
 """The popover of a comment is a chat box: narrow, its messages in bubbles, a field to write in under them."""
 import pytest
 
-from pagehelp import DOC, P1, at, box, comment_draft_key, mark, open_box, pasted, reloaded, select, toast, until
+from pagehelp import DOC, P1, P2, at, box, comment_draft_key, mark, open_box, pasted, reloaded, select, toast, until
 from sheafmd import comments as rdc
 from sheafmd.hub.state import Tokens
 from sheafmd.source import update_file
@@ -112,7 +112,9 @@ def test_the_minus_resolves_an_open_thread_and_stays_while_writing(tab, site):
     assert p.is_visible("#rd-popover button[title=Resolve]")
     p.click("#rd-popover button[title=Resolve]")
     until(lambda: rdc.parse(site.file.read_text(encoding="utf-8")).comments[0].status == "resolved", what="the thread resolved")
-    until(lambda: not p.is_visible("#rd-popover textarea") or p.input_value("#rd-popover textarea") == "", what="the box to close")
+    # One evaluate, not is_visible then input_value: the box can close between the two, and input_value then waits for a
+    # field that is gone until the stall guard fires (ticket 24).
+    until(lambda: p.evaluate("() => { var t = document.querySelector('#rd-popover textarea'); return !t || t.offsetParent === null || t.value === ''; }"), what="the box to close")
     until(lambda: p.locator("#rd-unsent").count() == 1, what="the text kept in the unsent list")
 
 
@@ -154,6 +156,66 @@ def test_a_long_thread_opens_on_its_last_message_and_scrolls_up(tab, site):
     tab.page.wait_for_selector(FIELD)
     top, room, full = tab.page.locator("#rd-popover .rd-scroll").evaluate("s => [s.scrollTop, s.clientHeight, s.scrollHeight]")
     assert full > room and top >= full - room - 4, (top, room, full)
+
+
+def long_thread(tab, site):
+    """A comment of Bea's with 200 paragraphs, its thread open on the last of them."""
+    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "\n\n".join(["Why?"] * 200),
+                                                     "Bea", "2026-10-14T10:00")[0])
+    tab.open()
+    tab.page.click(".rd-badge")
+    tab.page.wait_for_selector(FIELD)
+    return tab.page
+
+
+def in_view(p, nth):
+    """Is the nth message of the thread inside the visible part of the thread?"""
+    return p.evaluate("""(n) => {
+      const s = document.querySelector('#rd-popover .rd-scroll').getBoundingClientRect();
+      const m = document.querySelectorAll('#rd-popover .rd-msg')[n].getBoundingClientRect();
+      return m.top >= s.top - 1 && m.bottom <= s.bottom + 1;
+    }""", nth)
+
+
+def test_after_a_send_the_thread_shows_the_message_just_sent(tab, site):
+    p = long_thread(tab, site)
+    p.fill(FIELD, "Because.")
+    p.keyboard.press("Enter")
+    until(lambda: p.locator(THREAD).count() == 2, what="the reply in the thread")
+    until(lambda: in_view(p, 1), what="the sent message in view")
+
+
+def test_after_a_send_of_a_text_of_several_lines_the_thread_shows_the_message_just_sent(tab, site):
+    p = long_thread(tab, site)
+    p.fill(FIELD, "\n".join(["a line of the answer"] * 12))
+    p.keyboard.press("Enter")
+    until(lambda: p.locator(THREAD).count() == 2, what="the reply in the thread")
+    until(lambda: in_view(p, 1), what="the sent message in view")
+
+
+def test_an_answer_that_arrives_while_the_thread_is_at_its_end_keeps_it_there(tab, site):
+    p = long_thread(tab, site)
+    update_file(site.file, lambda t: rdc.reply(t, "c1", "An answer", "Bea", "2026-10-14T11:00"))
+    until(lambda: "An answer" in p.inner_text(THREAD_BOX), what="the answer in the thread")
+    until(lambda: in_view(p, 1), what="the answer in view")
+
+
+def test_a_reader_who_came_back_to_the_end_stays_there_when_the_field_grows(tab, site):
+    p = long_thread(tab, site)
+    p.evaluate("""() => { const s = document.querySelector('#rd-popover .rd-scroll'); s.scrollTop = 0; }""")
+    p.evaluate("""() => { const s = document.querySelector('#rd-popover .rd-scroll'); s.scrollTop = s.scrollHeight; }""")
+    p.fill(FIELD, "\n".join(["a line being typed"] * 12))
+    until(lambda: p.evaluate("(() => { const s = document.querySelector('#rd-popover .rd-scroll'); return s.scrollTop + s.clientHeight >= s.scrollHeight - 4; })()"),
+          what="the thread at its end")
+
+
+def test_an_answer_does_not_pull_down_a_reader_of_older_messages(tab, site):
+    p = long_thread(tab, site)
+    p.evaluate("document.querySelector('#rd-popover .rd-scroll').scrollTop = 1000")
+    until(lambda: p.evaluate("document.querySelector('#rd-popover .rd-scroll').scrollTop") == 1000, what="the reader mid-thread")
+    update_file(site.file, lambda t: rdc.reply(t, "c1", "An answer", "Bea", "2026-10-14T11:00"))
+    until(lambda: "An answer" in p.inner_text(THREAD_BOX), what="the answer in the thread")
+    until(lambda: p.evaluate("document.querySelector('#rd-popover .rd-scroll').scrollTop") == 1000, what="the reader's place kept")
 
 
 def test_minimize_closes_the_box_and_the_text_comes_back_even_after_a_reload(tab, site):
@@ -390,6 +452,29 @@ def store_full(p, full=True):
     }""", full)
 
 
+def store_unreadable(p, blocked=True):
+    """The comment store refuses reads, or answers them again."""
+    p.evaluate("""(blocked) => {
+      if (!window.__realGet) window.__realGet = Storage.prototype.getItem;
+      Storage.prototype.getItem = function (k) {
+        if (blocked && String(k).startsWith('sheaf-comment-draft')) throw new Error('blocked');
+        return window.__realGet.call(this, k);
+      };
+    }""", blocked)
+
+
+def store_unreadable_once(p):
+    """The next read of the comment store throws, the ones after it answer: a store that fails now and then."""
+    p.evaluate("""() => {
+      if (!window.__realGet) window.__realGet = Storage.prototype.getItem;
+      let armed = true;
+      Storage.prototype.getItem = function (k) {
+        if (armed && String(k).startsWith('sheaf-comment-draft')) { armed = false; throw new Error('once'); }
+        return window.__realGet.call(this, k);
+      };
+    }""")
+
+
 def two_threads(tab, site):
     update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "pears"), "pears", "Why pears?",
                                                      "Bea", "2026-10-14T10:01")[0])
@@ -594,3 +679,284 @@ def test_the_enter_that_confirms_an_ime_composition_sends_nothing(tab, site, ini
     p.wait_for_timeout(500)
     assert p.input_value(FIELD) == "konnichiwa"
     assert len(rdc.parse(site.file.read_text(encoding="utf-8")).comments[0].replies) == 0, "the confirming Enter sent the message"
+
+
+def test_a_thread_on_a_page_that_cannot_save_keeps_the_cross_and_no_write_control(tab, site, context, tmp_path):
+    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
+                                                     "Bea", "2026-10-14T10:00")[0])
+    # The same page opened from a file: no hub to save to, so every write control is off.
+    saved = tmp_path / "page.html"
+    saved.write_text(context.request.get(site.url).text(), encoding="utf-8")
+    p = context.new_page()
+    p.goto(saved.as_uri())
+    p.click(".rd-badge")
+    p.wait_for_selector("#rd-popover")
+    assert p.locator("#rd-popover .rd-head button[data-a=minimize]").count() == 1, "no Close on a thread that cannot save"
+    for gone in ("status", "edit", "delete"):
+        assert p.locator(f"#rd-popover [data-a={gone}]").count() == 0, gone
+    p.click("#rd-popover button[data-a=minimize]")
+    assert p.locator("#rd-popover").count() == 0
+    p.click(".rd-badge")
+    p.wait_for_selector("#rd-popover")
+    p.keyboard.press("Escape")
+    assert p.locator("#rd-popover").count() == 0, "Escape does not close it"
+    p.click(".rd-badge")
+    p.wait_for_selector("#rd-popover")
+    p.mouse.click(5, 5)
+    assert p.locator("#rd-popover").count() == 0, "a click beside the box does not close it"
+
+
+def test_a_minimized_message_whose_field_is_emptied_is_gone_from_the_store_when_the_box_closes(tab, site):
+    tab.open()
+    p = tab.page
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    p.fill(FIELD, "Why apples?")
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-unsent").count() == 1, what="the not-sent line")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    p.wait_for_selector(FIELD)
+    until(lambda: p.input_value(FIELD) == "Why apples?", what="the kept text back in the box")
+    p.fill(FIELD, "")
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-unsent").count() == 0, what="the not-sent line gone")
+    assert "Why apples?" not in (p.evaluate("JSON.stringify(Object.values(localStorage))")), "the emptied draft stayed in the store"
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    p.wait_for_selector(FIELD)
+    assert p.input_value(FIELD) == "", "the erased text came back"
+
+
+def test_closing_an_empty_new_message_that_was_never_kept_changes_nothing(tab, site):
+    tab.open()
+    p = tab.page
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    p.wait_for_selector(FIELD)
+    p.keyboard.press("Escape")
+    assert p.locator("#rd-popover").count() == 0
+    assert p.locator("#rd-unsent").count() == 0
+
+
+def test_the_not_sent_list_opened_beside_an_open_box_holds_the_typed_text_as_the_count_does(tab, site):
+    tab.open()
+    p = tab.page
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    p.fill(FIELD, "Why apples?")
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-unsent").count() == 1, what="the not-sent line")
+    select(p, at(P2, "pears"), at(P2, "pears", None))
+    p.fill(FIELD, "And pears?")
+    p.click("#rd-unsent")
+    until(lambda: p.locator("#rd-popover[data-unsent]").count() == 1, what="the list")
+    until(lambda: p.inner_text("#rd-unsent") == "2 messages not sent · Show", what="the count")
+    assert p.locator("#rd-popover[data-unsent] .rd-form").count() == 2, "the list does not match the count"
+    assert "pears" in p.inner_text("#rd-popover[data-unsent]")
+
+
+def test_the_not_sent_list_without_an_open_box_lists_what_was_kept(tab, site):
+    tab.open()
+    p = tab.page
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    p.fill(FIELD, "Why apples?")
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-unsent").count() == 1, what="the not-sent line")
+    p.click("#rd-unsent")
+    until(lambda: p.locator("#rd-popover[data-unsent] .rd-form").count() == 1, what="the list")
+
+
+def stored_drafts(page):
+    return page.evaluate("Object.values(localStorage).map(v => { try { return JSON.parse(v); } catch (e) { return null; } }).flat().filter(x => x && x.min)")
+
+
+def test_a_message_kept_by_a_close_that_was_then_aborted_is_removed_when_its_field_is_emptied(tab, site):
+    tab.open()
+    p = tab.page
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    p.fill(FIELD, "first words")
+    # What closePopover does to every form before it closes; another form's refusal would leave this box open.
+    p.evaluate("document.querySelector('#rd-popover .rd-form').stash()")
+    p.fill(FIELD, "first words, more")
+    p.evaluate("document.querySelector('#rd-popover .rd-form').stash()")
+    assert [d["body"] for d in stored_drafts(p)] == ["first words, more"], "a second stash of the same form made a second draft"
+    p.fill(FIELD, "")
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-unsent").count() == 0, what="the not-sent line gone")
+    assert stored_drafts(p) == [], "the emptied draft stayed in the store"
+
+
+def test_a_store_that_refuses_to_be_read_keeps_what_it_holds_and_says_the_text_was_not_kept(tab, site):
+    import json
+    p = open_thread(tab, site)
+    kept = [{"quote": "pears", "body": "a draft of another passage", "at": "2026-10-14T11:00:00.000Z"}]
+    p.evaluate("([k, v]) => localStorage.setItem(k, v)", [comment_draft_key(site), json.dumps(kept)])
+    store_unreadable(p)
+    p.fill(FIELD, "words I must not lose")
+    p.mouse.click(5, 700)
+    until(lambda: "could not be kept" in toast(p), what="the toast that says the text could not be kept")
+    store_unreadable(p, False)
+    held = p.evaluate("(k) => localStorage.getItem(k)", comment_draft_key(site))
+    assert held and "a draft of another passage" in held, "the read that failed emptied the store"
+
+
+def test_an_emptied_new_message_closes_when_the_store_that_kept_its_text_stops_being_readable(tab, site):
+    p = open_thread(tab, site)
+    p.keyboard.press("Escape")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    p.fill(FIELD, "kept for later")
+    p.click("#rd-popover button[data-a=minimize]")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    until(lambda: p.input_value(FIELD) == "kept for later", what="the kept text back in the box")
+    store_unreadable(p)
+    p.fill(FIELD, "")
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close on an empty field")
+
+
+def test_a_read_of_the_store_that_fails_once_does_not_empty_the_drafts_of_the_page_at_the_next_write(tab, site):
+    import json
+    p = open_thread(tab, site)
+    kept = [{"quote": "pears", "body": "a draft of another passage", "at": "2026-10-14T11:00:00.000Z"}]
+    p.evaluate("([k, v]) => localStorage.setItem(k, v)", [comment_draft_key(site), json.dumps(kept)])
+    p.fill(FIELD, "words I must not lose")
+    store_unreadable_once(p)
+    p.mouse.click(5, 700)
+    until(lambda: "could not be kept" in toast(p), what="the toast that says the text could not be kept")
+    held = p.evaluate("(k) => localStorage.getItem(k)", comment_draft_key(site))
+    assert held and "a draft of another passage" in held, "the read that failed once emptied the drafts of the page"
+
+
+def test_a_value_that_is_not_json_in_the_store_is_set_aside_before_the_next_write_replaces_it(tab, site):
+    p = open_thread(tab, site)
+    p.evaluate("([k, v]) => localStorage.setItem(k, v)", [comment_draft_key(site), "[{broken"])
+    p.fill(FIELD, "words I must not lose")
+    p.mouse.click(5, 700)
+    until(lambda: "words I must not lose" in (p.evaluate("(k) => localStorage.getItem(k)", comment_draft_key(site)) or ""),
+          what="the text kept in the store")
+    aside = p.evaluate("(k) => localStorage.getItem(k)", comment_draft_key(site) + ":unreadable")
+    assert aside == "[{broken", "the value that could not be read was replaced and is kept nowhere"
+
+
+def test_a_new_message_emptied_while_the_store_refuses_reads_does_not_come_back_when_the_store_reads_again(tab, site):
+    p = open_thread(tab, site)
+    p.keyboard.press("Escape")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    p.fill(FIELD, "kept for later")
+    p.click("#rd-popover button[data-a=minimize]")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    until(lambda: p.input_value(FIELD) == "kept for later", what="the kept text back in the box")
+    store_unreadable(p)
+    p.fill(FIELD, "")
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close on an empty field")
+    store_unreadable(p, False)
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    assert p.input_value(FIELD) == "", "the text the person emptied came back when the store could be read"
+    assert p.locator("#rd-unsent").count() == 0, "the emptied message is offered as not sent"
+
+
+def hold_time_passes(p):
+    """The page's clock jumps past the time a send is held (HELD), and the page is told the store changed, as the
+    timer that lets a held entry lapse would."""
+    p.evaluate("""() => {
+      const now = Date.now.bind(Date);
+      Date.now = () => now() + 40000;
+      window.dispatchEvent(new StorageEvent('storage'));
+    }""")
+
+
+def test_a_reply_the_hub_took_while_the_store_refused_reads_is_not_offered_as_not_sent_when_the_store_reads_again(tab, site):
+    p = open_thread(tab, site)
+
+    def refuse_reads_then_send(route):
+        store_unreadable(p)
+        route.continue_()
+
+    p.route("**/_/comment", refuse_reads_then_send)
+    p.fill(FIELD, "Because.")
+    p.keyboard.press("Enter")
+    until(lambda: "Because." in site.file.read_text(encoding="utf-8"), what="the reply in the file")
+    until(lambda: p.locator(THREAD).count() == 2, what="the reply in the thread")
+    p.wait_for_timeout(500)      # the page's clear of the kept reply runs after the answer is taken in: while the store still refuses
+    p.unroute("**/_/comment")
+    store_unreadable(p, False)
+    hold_time_passes(p)
+    p.wait_for_timeout(300)
+    assert p.locator("#rd-unsent").count() == 0, "the reply the hub took is offered as not sent, to be sent twice"
+
+
+def test_a_reply_the_hub_took_while_its_answer_was_lost_and_the_store_refused_reads_is_not_offered_as_not_sent(tab, site):
+    p = open_thread(tab, site)
+
+    def take_it_and_lose_the_answer(route):
+        store_unreadable(p)
+        route.fetch()
+        route.abort()
+
+    p.route("**/_/comment", take_it_and_lose_the_answer)
+    p.fill(FIELD, "Because.")
+    p.keyboard.press("Enter")
+    until(lambda: "Because." in site.file.read_text(encoding="utf-8"), what="the reply in the file")
+    until(lambda: p.locator(THREAD).count() == 2, what="the reply in the thread, read from the hub's event")
+    p.wait_for_timeout(500)      # the page's clear of what the event named runs after it is taken in: while the store still refuses
+    p.unroute("**/_/comment")
+    store_unreadable(p, False)
+    hold_time_passes(p)
+    p.wait_for_timeout(300)
+    assert p.locator("#rd-unsent").count() == 0, "the reply the hub took is offered as not sent, to be sent twice"
+
+
+def test_a_new_message_emptied_while_the_store_refused_reads_stays_empty_after_a_reload_with_no_other_write(tab, site):
+    p = open_thread(tab, site)
+    p.keyboard.press("Escape")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    p.fill(FIELD, "kept for later")
+    p.click("#rd-popover button[data-a=minimize]")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    until(lambda: p.input_value(FIELD) == "kept for later", what="the kept text back in the box")
+    store_unreadable(p)
+    p.fill(FIELD, "")
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close on an empty field")
+    store_unreadable(p, False)
+    p.evaluate("window.dispatchEvent(new StorageEvent('storage'))")      # the first read that works: nothing is written but the clear
+    until(lambda: stored_drafts(p) == [], what="the emptied message gone from the store")
+    p.reload()
+    p.wait_for_selector(".rd-badge")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    assert p.input_value(FIELD) == "", "the text the person emptied came back after a reload"
+    assert p.locator("#rd-unsent").count() == 0, "the emptied message is offered as not sent after a reload"
+
+
+READABLE_REPLY = ("Done. What changed:\n- the intro is shorter\n- `fetch_all` retries\n\n"
+                  "```\nif a < b:\n    go()\n```\n"
+                  "See https://example.com/a?b=1&c=2. Or [the doc](https://example.com/doc).\n"
+                  "<b>not bold</b>")
+
+
+def test_an_agent_reply_reads_as_paragraphs_lists_code_and_links(tab, site):
+    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
+                                                     "Bea", "2026-10-14T10:00")[0])
+    update_file(site.file, lambda t: rdc.reply(t, "c1", READABLE_REPLY, "Claude", "2026-10-14T10:01",
+                                               role="action"))
+    tab.open()
+    tab.page.click(".rd-badge")
+    text = tab.page.locator(f"{THREAD} .rd-text").nth(1)
+    text.wait_for()
+    assert text.locator("p").first.inner_text() == "Done. What changed:", "the line before the list is not its own paragraph"
+    assert text.locator("ul li").all_inner_texts() == ["the intro is shorter", "fetch_all retries"]
+    assert text.locator("ul li code").inner_text() == "fetch_all"
+    assert text.locator("pre code").inner_text() == "if a < b:\n    go()"
+    links = text.locator("a")
+    assert [links.nth(i).get_attribute("href") for i in range(links.count())] == [
+        "https://example.com/a?b=1&c=2", "https://example.com/doc"], "a link is not clickable"
+    assert links.first.get_attribute("target") == "_blank"
+    assert text.locator("b").count() == 0 and "<b>not bold</b>" in text.inner_text(), "a tag in the text became HTML"

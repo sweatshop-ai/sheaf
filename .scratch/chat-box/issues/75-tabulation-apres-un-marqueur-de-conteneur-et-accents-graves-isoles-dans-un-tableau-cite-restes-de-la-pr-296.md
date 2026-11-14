@@ -10,8 +10,8 @@
 
 **Par où commencer :** `tests/test_anchoring.py`, après la section « ticket 68 » : un test rouge par point.
 
-- [x] Point 1 corrigé, test rouge d'abord
-- [x] Point 2 corrigé ou la limite gardée avec la raison
+- [x] Point 1 corrigé, test rouge d'abord (PR 307, `off()` de `projection`)
+- [x] Point 2 : gardé comme limite, déplacé au ticket 87. Raison : cinq rondes de revue de la PR 307 (`/home/tiroir/.claude/pm/chat-box-handoffs/pr-75-reviews/`) ont chacune trouvé le bord suivant d'une lecture à la main des marqueurs de conteneur (citation dans un item, item dans une citation, tabulations, `>` sans espace, titre, plusieurs tableaux) où la PR était pire que main ; la limite (1) du SPEC 10.4 reste
 - [x] CI verte
 
-**Status:** done (PR 307, head 5b8cf06, awaiting merge)
+**Status:** done (PR 307, point 1 seul ; point 2 gardé comme limite, déplacé au ticket 87)

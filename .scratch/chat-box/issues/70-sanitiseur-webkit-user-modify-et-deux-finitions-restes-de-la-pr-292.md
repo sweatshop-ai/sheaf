@@ -18,4 +18,6 @@
 - [ ] Le commentaire de `sanitize.py:65` se coupe comme ses voisins
 - [ ] PR séparée, CI verte
 
+Claimed by: Jamal
+
 **Status:** ready-for-agent

@@ -20,6 +20,8 @@
 
 **Status:** in-progress
 
+**PR 346 (2026-11-14) :** une des trois défaillances est établie : `page.route()` rend la main avant que Chromium n'intercepte, un envoi fait quelques ms plus tard part droit vers le hub (test_page_writing « timed out waiting for the send to go out »). Corrigé côté test (sonde) et journal du flux ajouté (une page rouge imprime « the event stream, page and hub »). Reste ouvert : le send-again (la route était vive, TAKEN ne vient pas) et « text changed while you wrote » ; il faut un échec réel avec le journal. Restes de revue : ticket 119. Handoff : /home/tiroir/.claude/pm/chat-box-handoffs/handoff-Isolde-100.md
+
 **Par où commencer :** `src/sheafmd/page/page.js` autour de `live.addEventListener('changed', …)` (≈ ligne 4180) et `meetTaken` (≈ ligne 1701).
 
 - [ ] La page note, dans un journal lu par le test à l'échec, l'ouverture, les erreurs et chaque message du flux (heure de la page), et le hub note l'heure de chaque publication ; sur un échec de CI, on lit les deux côte à côte

@@ -1093,3 +1093,27 @@ def test_a_comment_of_several_lines_put_back_in_a_table_cell_does_not_split_the_
     assert out.startswith("| A | B |\n|---|---|\n| Alpha | x |\n\n<!-- sheaf-comment"), out
     assert [b.kind for b in split_md_blocks(out)][0] == "table" and rdc.parse(out).malformed == []
     assert len(rdc.parse(out).comments) == 1
+
+
+def test_a_comment_put_back_in_a_last_row_with_an_unclosed_opener_goes_on_a_line_of_its_own():
+    # Ticket 68, point 2: cell_end refuses the cell, and the end of the block would close the opener
+    # and hide the cell's words.
+    md = "| h | i |\n|---|---|\n| y | <!-- x w\n\nBody.\n"
+    raw = rdc.format(agent_note(), True)
+    out = rde._insert_comment(md, 0, raw, "w")
+    assert out.startswith("| h | i |\n|---|---|\n| y | <!-- x w\n\n<!-- sheaf-comment"), out
+    assert [b.kind for b in split_md_blocks(out)][0] == "table" and rdc.parse(out).malformed == []
+    assert len(rdc.parse(out).comments) == 1
+
+
+@pytest.mark.parametrize("prefix", ["> ", "> > "])
+def test_a_comment_put_back_in_a_table_of_a_quote_stays_on_its_row_or_on_a_line_of_its_own(prefix):
+    # Ticket 68, point 4: the block is a quote, but a row of it ends where a line break is written.
+    md = "".join(prefix + r + "\n" for r in ["| h | i |", "|---|---|", "| Alpha Beta | x |"]) + "\nBody.\n"
+    out = rde._insert_comment(md, 0, rdc.format(agent_note(), True), "Alpha")
+    assert out.splitlines()[2].startswith(prefix + "| Alpha Beta<!-- sheaf-comment") and out.splitlines()[2].endswith("--> | x |")
+    note = agent_note()
+    note.body = "first line\nsecond line"
+    out = rde._insert_comment(md, 0, rdc.format(note, False), "Alpha")
+    assert out.startswith(md.split("\n\nBody")[0] + "\n\n<!-- sheaf-comment"), out
+    assert len(rdc.parse(out).comments) == 1 and rdc.parse(out).malformed == []

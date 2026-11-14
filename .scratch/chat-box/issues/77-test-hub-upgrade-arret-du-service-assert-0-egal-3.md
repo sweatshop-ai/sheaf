@@ -10,7 +10,7 @@
 
 **Blocked by:** none
 
-**Claimed by:**
+**Claimed by:** Zara
 
 **Par où commencer :** le journal du run 43588278884, puis le test dans `tests/test_hub_upgrade.py`.
 

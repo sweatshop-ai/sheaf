@@ -11,7 +11,7 @@ Revue : `/home/tiroir/.claude/pm/chat-box-handoffs/pr-77-reviews/review-1.md`.
 
 **Claimed by:** Lennart
 
-- [ ] c1 le test de `restart` peut échouer
-- [ ] c2 docstring de `ended()`
+- [x] c1 le test de `restart` peut échouer : il lance `sheaf restart` dans un sous-processus (seam `linux` forcé par un `-c`) et un thread du test attend l'enfant. Preuve : avec `server.exit_code` qui rend 1 (temporaire, annulé), le nouveau test échoue `assert [1] == [0]`, l'ancien passait ; refait après le correctif de la classe b. Corps de la PR 306. Le d (timeout=120 du `subprocess.run` du test du ticket 77) est fait aussi.
+- [x] c2 docstring de `ended()` : dit qu'un appelant qui attend lui-même ce pid perd le code de sortie à cause du reap (`src/sheafmd/hub/client.py`, PR 306).
 
-**Status:** ready-for-agent
+**Status:** done (PR 306, merged as 4acd660). Revue Opus : `/home/tiroir/.claude/pm/chat-box-handoffs/pr-84-reviews/review-1.md` (b corrigé dans la PR ; c et d au ticket 85). Deux tests rouges de la première CI notés aux tickets 79 et 86.

@@ -6,4 +6,6 @@
 
 **Blocked by:** PR 333 fusionnée
 
+**Claimed by:** Cormac
+
 **Status:** ready-for-agent

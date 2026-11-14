@@ -474,7 +474,7 @@ def refused_reads(p):
 
 
 def refused_clears(p):
-    """How many of those reads were made to end a send (taken, threadKeep): the clear itself met the refusal."""
+    """How many of those reads were made by the code that ends or rewrites a send's entry (taken, threadKeep): the page's own clear, not a redraw's read."""
     return p.evaluate("window.__refusedClears || 0")
 
 
@@ -891,7 +891,7 @@ def hold_time_passes(p):
 
 
 def held_while_refusing(p, site):
-    """Waits, with no fixed time, until the clear of the reply has met the refusing store (the read that ends the send was
+    """Waits, with no fixed time, until the clear of the reply has met the refusing store (a read of taken or threadKeep was
     refused: any other read the page makes while the store refuses does not count) while the taken reply is still in the
     store: the clear of it cannot have been written, so only the held path can remove it later."""
     until(lambda: refused_clears(p) > 0, what="the page's clear to meet the refused read")

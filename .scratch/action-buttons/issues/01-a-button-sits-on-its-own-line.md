@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** done (PR #274, merged as 6c55e1e via the merge desk, 2026-11-14 01:55:42)
 
 - [x] Two `- [ ] Approve` lines on one page are two buttons, each pressing its own box — `test_two_lines_of_the_same_word_are_two_buttons_and_each_presses_its_own_box` (tests/page/test_page_actions.py), green in CI on the PR head
 - [x] Selecting words on a button's line still opens the chat box, and does not press — `test_a_selection_on_a_buttons_line_does_not_press_it_and_the_button_is_not_part_of_the_text`, green in CI; a press no longer closes an open comment form (`.rd-inline` in the popover's mousedown exclusion)

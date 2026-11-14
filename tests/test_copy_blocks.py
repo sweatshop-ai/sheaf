@@ -290,6 +290,24 @@ def test_a_tab_counts_as_the_columns_it_spans_when_a_line_opens_a_block(line, op
     ("> [!COPY]\n> a\n> \t---", False),             # 3 columns: an underline
     ("> [!COPY]\n> a\n> - \u00a0\n> ---", True),   # a no-break space after a bullet is an item, not a blank
     ("> [!COPY]\n> a\n> 1. \u00a0\n> ---", True),
+    ("> [!COPY]\n> a\n> #\u00a0h\n> ---", False),   # no heading without a space or tab after the `#`: pandoc underlines it
+    ("> [!COPY]\n> a\n> #\u2003h\n> ---", False),
+    ("> [!COPY]\n> a\n> #\th\n> ---", True),       # a tab does open a heading
+    ("> [!COPY]\n> a\n> #\n> ---", True),           # and so does a bare `#`
+    ("> [!COPY]\n> a\n> #\r#\n> ---", True),       # a lone CR is a line end for pandoc: `#` alone, then text
+    ("> [!COPY]\n> a\n> #\r h\n> ---", True),
 ])
 def test_the_underline_and_list_rules_read_the_source_as_pandoc_does(quote, copy):
     assert copyblock.is_copy_block(quote) is copy
+
+
+@pytest.mark.parametrize("quote, heading", [
+    ("> [!COPY]\n> a\n<![cdata[\n> ---\n", "h2"),      # the splitter ends the quote at the lazy line; pandoc reads it as text and underlines it
+    ("> [!COPY]\n> a\n\t<div>\n> ===\n", "h1"),
+])
+def test_a_quote_the_splitter_cuts_short_still_shows_what_pandoc_makes_of_the_whole(tmp_path, quote, heading):
+    # Measured on 2,618 inputs (ticket 74): every such cut gives pandoc's own HTML. pandoc's heading id carries the
+    # stand-in, but the page replaces ids with its own, so the page is what is checked here.
+    out = page_of(tmp_path, quote)
+    assert f"<{heading}" in out and "[!COPY] a" in out and "rd-copy" not in out
+    assert copyblock.STAND_IN.lower() not in out.lower()

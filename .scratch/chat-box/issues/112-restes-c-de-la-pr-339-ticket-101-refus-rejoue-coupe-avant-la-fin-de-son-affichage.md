@@ -10,7 +10,7 @@ Aussi, de la relecture r2 (`pr-101-reviews/r2-narrow.md`) :
 
 **Claimed by:** Malik
 
-**Status:** ready-for-agent
+**Status:** done (merged as b130ac6, PR 345; leftovers in ticket 118)
 
 **Par où commencer :** `tests/page/test_page_actions.py`, le test du refus qui n'est plus rejoué après ses 7 secondes ; sur t-compute, jamais sur le portable.
 

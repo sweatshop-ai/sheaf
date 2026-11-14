@@ -11,4 +11,4 @@
 
 **Claimed by:** Mateus
 
-**Status:** ready-for-agent
+**Status:** done (merged 9ff6c18; leftovers in ticket 116)

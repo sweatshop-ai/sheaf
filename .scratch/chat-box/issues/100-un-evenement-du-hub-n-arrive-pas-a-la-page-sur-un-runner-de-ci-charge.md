@@ -15,9 +15,10 @@
 
 **Blocked by:** none
 
-**Claimed by:**
 
-**Status:** ready-for-agent
+**Claimed by:** Isolde 2026-11-14 18:59
+
+**Status:** in-progress
 
 **Par où commencer :** `src/sheafmd/page/page.js` autour de `live.addEventListener('changed', …)` (≈ ligne 4180) et `meetTaken` (≈ ligne 1701).
 

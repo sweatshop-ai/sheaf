@@ -8,7 +8,7 @@
 
 **Blocked by:** PR 353 fusionnée
 
-**Claimed by:** (libre)
+**Claimed by:** Dalia
 
 **Status:** ready-for-agent
 

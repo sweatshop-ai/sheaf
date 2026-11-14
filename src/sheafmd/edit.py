@@ -720,19 +720,27 @@ TASK_MARK_RE = re.compile(
 
 
 class _Mark:
-    """A task mark found by `task_marks`: where its line and its box are in the block as written."""
+    """A task mark found by `task_marks`, answering the part of `re.Match` the callers use: `start()` is the offset of
+    the mark's line, `start(2)` and `end(2)` those of its state character, `group(2)` the character. Any other
+    group is an error, not a wrong offset."""
     __slots__ = ("_line", "_box", "_state")
 
     def __init__(self, line: int, box: int, state: str):
         self._line, self._box, self._state = line, box, state
 
     def group(self, n: int) -> str:
+        if n != 2:
+            raise IndexError(f"a task mark has only group 2, not {n}")
         return self._state
 
     def start(self, group: int = 0) -> int:
+        if group not in (0, 2):
+            raise IndexError(f"a task mark has only group 2, not {group}")
         return self._line if group == 0 else self._box
 
-    def end(self, group: int = 0) -> int:
+    def end(self, group: int = 2) -> int:
+        if group != 2:
+            raise IndexError(f"a task mark has only group 2, not {group}")
         return self._box + 1
 
 
@@ -785,6 +793,21 @@ def _toggle_boxes(block, fragment: str):
     for m, w, h in reversed(list(zip(marks, want, have))):
         if w != h:
             out = out[:m.start(2)] + ("x" if w else " ") + out[m.end(2):]
+    # Equal counts and states do not make the marks the boxes: pandoc draws no box for an empty item (`- [ ]`) and
+    # does draw one the marks miss (`- - [ ] x`), so a tick could still land on the wrong line. The result is
+    # therefore rendered, and must draw exactly the boxes the page sent, ticked as the page sent them.
+    class _Out:
+        content = out
+
+    again = _comparable(_Out, fragment)
+    if again is None:
+        return None
+    try:
+        got, plain = _ticks(again[1])
+        if got != want or _norm_html(plain) != _norm_html(frag):
+            return None
+    except Exception:
+        return None
     return out
 
 
@@ -1787,7 +1810,7 @@ def _next_id(*texts: str) -> str:
     works from. The file's text alone is not enough: a paragraph that is put back
     brings the base's comments with it, and a note that took one of those ids first
     would make two comments of one."""
-    return max((rdc.next_id(rdc.parse(t)) for t in texts), key=lambda i: int(i[1:]))
+    return max((rdc.next_id_in(t) for t in texts), key=lambda i: int(i[1:]))
 
 
 def _reid(raw: str, new: str) -> str:

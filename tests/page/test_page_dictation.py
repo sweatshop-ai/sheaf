@@ -398,6 +398,7 @@ def test_a_prompt_refused_after_its_box_was_closed_says_nothing_and_leaves_the_n
     p.evaluate("window.__mic.hold = true")
     p.click(MIC)
     p.wait_for_function("window.__mic.asked === 1")
+    p.evaluate("window.__oldBox = document.querySelector('#rd-popover textarea').parentElement")   # the box that will be closed
     p.keyboard.press("Escape")
     p.click(".rd-badge")
     p.wait_for_selector(MIC)
@@ -405,6 +406,7 @@ def test_a_prompt_refused_after_its_box_was_closed_says_nothing_and_leaves_the_n
     p.wait_for_function("window.__mic.made.length === 1 && window.__mic.made[0].state === 'recording'")
     p.evaluate("window.__mic.refuse()")                    # the person refuses the first prompt late
     p.wait_for_timeout(300)
+    assert p.evaluate("window.__oldBox.querySelector('.rd-mic-says') === null"), "a refusal nobody waits for was written into the closed box"
     assert p.locator(SAYS).count() == 0 or p.locator(SAYS).inner_text() == "", "a refusal nobody waits for was shown"
     assert p.evaluate("window.__mic.made[0].state") == "recording", "the late refusal stopped the new recording"
     assert p.locator(MIC).get_attribute("aria-pressed") == "true"
@@ -427,6 +429,9 @@ def test_the_stop_event_of_a_discarded_recorder_that_comes_late_leaves_the_new_r
     assert p.evaluate("window.__mic.made[1].state") == "recording"
     assert p.locator(MIC).get_attribute("aria-pressed") == "true", "the old recorder's stop undid the new button"
     assert hub.posts == [], "a discarded sound was sent"
+    p.click(MIC)                                            # the new recording is still the page's: this press stops it
+    p.wait_for_function("window.__mic.made[1].state === 'inactive'")
+    until(lambda: len(hub.posts) == 1, what="the new sound sent")
 
 
 def self_stopped_then_dictate_again(tab, site, hub):
@@ -450,7 +455,7 @@ def test_a_recorder_that_stopped_by_itself_does_not_cut_the_next_recording_short
     p.clock.run_for(61000)                                  # past the first recording's 120 s, short of the second's
     p.wait_for_timeout(300)
     assert p.evaluate("window.__mic.made[1].state") == "recording", "the first recording's timer cut the second"
-    assert hub.posts and len(hub.posts) == 1, "the second recording was sent early"
+    assert len(hub.posts) == 1, "the second recording was sent early"
 
 
 def test_a_recorder_that_stopped_by_itself_leaves_no_watch_on_the_hub(tab, site, hub):

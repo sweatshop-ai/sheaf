@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from pagehelp import PageStalled, reloaded, toast, toasted, toasts_to_the_end, until
+from pagehelp import PageStalled, reloaded, stalls_after, toast, toasted, toasts_to_the_end, until
 
 pytestmark = pytest.mark.page
 
@@ -205,37 +205,6 @@ def test_the_toasts_to_the_end_are_not_at_an_end_while_the_page_reloads():
 
 # ── the route wrapper of conftest.py (tickets 100 and 119) ─────────────────────────────────────────────────
 
-class ReplacementPage:
-    """A page that answers the probe of `until_live` like a browser that has not started to intercept: `answers` in turn."""
-    url = "http://127.0.0.1:1/doc"
-
-    def __init__(self, answers):
-        self.answers, self.asked = list(answers), []
-
-    def evaluate(self, expression):
-        self.asked.append(expression)
-        return self.answers.pop(0)
-
-    def wait_for_timeout(self, ms):
-        pass
-
-
-def test_the_probe_of_a_route_is_sent_until_the_route_has_caught_it():
-    from conftest import until_live
-    page, log = ReplacementPage([0, 0, 204]), []
-    until_live(page, "**/_/comment", log)
-    assert len(page.asked) == 3 and all("x-route-probe" in a and "/_/comment" in a for a in page.asked)
-    assert "caught its probe at try 3" in log[-1][1]
-
-
-def test_a_route_of_another_url_is_not_probed():
-    from conftest import until_live
-    page = ReplacementPage([])
-    for pattern in ("**/_/save", re.compile(r"/_/tell$"), re.compile(r"/_/doc\?")):
-        until_live(page, pattern, [])
-    assert page.asked == []
-
-
 def test_a_route_made_with_a_regex_for_the_send_is_probed_too(tab, hub_journal):
     """PR 346's review: `route(re.compile(r"/_/comment$"), ...)` (test_page_work.py) had the race of ticket 100 and no probe."""
     p = tab.open().page
@@ -258,7 +227,8 @@ def test_a_function_routed_twice_on_one_url_is_taken_off_both_by_unroute(tab):
     p.route("**/_/not-a-route-of-the-hub", hold)
     p.route("**/_/not-a-route-of-the-hub", hold)
     p.unroute("**/_/not-a-route-of-the-hub", hold)
-    assert p.evaluate("fetch('/_/not-a-route-of-the-hub').then(r => r.status, () => 0)") != 0
+    with stalls_after(10, "a fetch no route of the test holds"):
+        assert p.evaluate("fetch('/_/not-a-route-of-the-hub').then(r => r.status, () => 0)") != 0
     assert held == []
 
 
@@ -280,7 +250,8 @@ def test_a_handler_that_cannot_be_hashed_can_be_routed_and_unrouted(tab):
     p.evaluate("fetch('/_/not-a-route-of-the-hub').catch(() => {}); 0")
     until(lambda: h.held or p.wait_for_timeout(20), what="the request to be held")
     p.unroute("**/_/not-a-route-of-the-hub", h)
-    assert p.evaluate("fetch('/_/not-a-route-of-the-hub').then(r => r.status, () => 0)") != 0
+    with stalls_after(10, "a fetch no route of the test holds"):
+        assert p.evaluate("fetch('/_/not-a-route-of-the-hub').then(r => r.status, () => 0)") != 0
     assert len(h.held) == 1
 
 

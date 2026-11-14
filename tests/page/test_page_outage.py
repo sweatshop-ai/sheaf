@@ -480,6 +480,24 @@ def test_a_page_whose_root_is_forgotten_leaves_no_toast_for_the_next_page_of_the
     assert p.evaluate("sessionStorage.getItem('rd-toast')") is None
 
 
+def test_a_merged_save_that_answers_after_the_root_was_forgotten_leaves_no_toast(tab, site):
+    # Ticket 125, review b2: a save out when the document went answers `merged`; its toast was written after the page had
+    # removed it, and the reload it was written for never comes (reloadWhenFree returns on docGone).
+    p = tab.page
+    tab.open()
+    held = []
+    p.route("**/_/save", lambda route: held.append(route))
+    type_at_end(p, P2, " typed")
+    p.keyboard.press("Control+s")
+    until(lambda: held or p.wait_for_timeout(20), what="the save to go out")
+    assert site.hub.forget_root("work").name == "work"
+    until(lambda: GONE in notice(p), what="the notice that the document is gone")
+    held[0].fulfill(status=200, content_type="application/json",
+                    body=json.dumps({"hash": "x", "changed": [1], "merged": True, "conflicts": []}))
+    p.wait_for_timeout(500)
+    assert p.evaluate("sessionStorage.getItem('rd-toast')") is None
+
+
 def test_a_page_whose_root_is_forgotten_says_so_keeps_what_was_typed_and_saves_nothing(replying, site):
     p = replying.page
     mark(p)

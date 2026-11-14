@@ -261,6 +261,39 @@ def test_a_replys_answer_that_reloads_the_page_waits_for_a_press_in_its_undo(tab
     until(lambda: "reload the page" in toast(p), what="the refusal after the reload")
 
 
+def test_a_refusal_queued_behind_a_red_toast_is_said_again_when_a_form_held_the_reload_past_7_seconds(tab):
+    # Ticket 62 (round 2): toasts queue, so a refusal's 7 s were counted from when it was said, not from when it was shown.
+    # A form held the reload for more than 7 s after the refusal, the refusal had been on screen for less than its
+    # time (or not at all, behind several red toasts), and the page it brought did not say it again.
+    p, f = tab.page, tab.site.file
+    f.write_text(SHEAF, encoding="utf-8")
+    tab.open()
+    body = "main"
+    comment_on(tab, at(body, "Body"), at(body, "Body", None), "Why?")
+    p.clock.install()
+    p.reload()
+    p.wait_for_selector("button.rd-act")
+    p.route("**/_/tick", lambda r: r.abort())
+    bar(p).nth(0).click()
+    p.clock.run_for(5100)
+    until(lambda: toast(p) != "", what="a red toast, up for 7 s")
+    p.unroute("**/_/tick")
+    p.click(".rd-badge")
+    p.wait_for_selector("#rd-popover textarea")
+    p.fill("#rd-popover textarea", "my reply")
+    f.write_text(f.read_text(encoding="utf-8") + "\nFrom outside.\n", encoding="utf-8")
+    p.wait_for_selector("#rd-popover .rd-hold")         # the form holds the reload
+    mark(p)
+    bar(p).nth(0).click()
+    p.clock.run_for(5100)                               # the press is refused: its toast waits behind the red one
+    p.clock.run_for(7500)                               # more than 7 s after the refusal was said
+    assert p.evaluate("window.__same_load") is True, "the page reloaded under the form"
+    p.click("#rd-popover button[data-f=ok]")            # the reply goes, and the held reload runs
+    until(lambda: "my reply" in f.read_text(encoding="utf-8"), what="the reply in the file")
+    reloaded(p)
+    until(lambda: "reload the page" in toast(p), what="the refusal, said again on the page the reload brings")
+
+
 def test_a_press_while_the_page_settles_onto_a_change_is_refused_and_the_page_reloads(sheaf):
     p, f = sheaf.page, sheaf.site.file
     held = []

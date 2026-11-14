@@ -196,7 +196,7 @@ def _declarations(value: str) -> list[str]:
     """A style attribute cut at the `;` that end a declaration, by the rules of the CSS Syntax 3 tokenizer. A `;` inside a CSS
     string (a quote ends at the same quote, or at a newline, and a backslash takes an escape: a hex one with the white space after it, a newline included, or the next character, CRLF counting as one), inside a comment or inside
     a `()`, `[]` or `{}` block (`url(data:image/png;base64,…)`) does not end one; a block ends only at its own closer, so
-    `(]` leaves a `(` open, and a closer that does not close the innermost open block is ignored. A name is read whole, escapes included, so `\\75 url(` and
+    `(]` leaves a `(` open, and a closer that does not close the innermost open block is ignored. A name is read whole, escapes included (CR and FF are newlines, so a backslash before one is no escape, and NUL is a name character), so `\\75 url(` and
     `a\\:url(` are functions called something else, `@url(` and `#url(` an at-keyword and a hash followed by a `(`, and only a
     name that reads `url` (any letter case), that no `@` or `#` leads and that `(` follows, is a url. A `url(` that no quote
     follows, white space aside, is one token up to its first `)` (a backslash takes the next character), so a `/*` or a quote

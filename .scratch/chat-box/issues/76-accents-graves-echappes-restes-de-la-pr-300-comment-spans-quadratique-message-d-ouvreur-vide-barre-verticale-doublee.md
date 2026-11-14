@@ -10,7 +10,7 @@
 
 **Blocked by:** none
 
-**Claimed by:**
+**Claimed by:** Isolde
 
 **Par où commencer :** `tests/test_anchoring.py`, section « ticket 72 » : un test rouge par point, en commençant par le 1.
 

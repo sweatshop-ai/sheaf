@@ -394,11 +394,21 @@ def test_a_refusal_an_older_page_left_as_plain_text_does_not_stop_the_boot(sheaf
     # Ticket 101, review a: before this ticket the key held the bare text. The page of a deploy reads it without
     # throwing, drops it, and the rest of the boot (the toast the reload left) still runs.
     p = sheaf.page
-    p.evaluate("sessionStorage.setItem('rd-press-said', 'Approve: refused, reload the page'); sessionStorage.setItem('rd-toast', 'Kept by the reload.')")
+    # A valid keep for this document: without one the page drops any refusal for lack of a reload, so the last assertion could not fail.
+    p.evaluate("([doc]) => { sessionStorage.setItem('rd-keep', JSON.stringify({ doc: doc, y: 0 })); sessionStorage.setItem('rd-press-said', 'Approve: refused, reload the page'); sessionStorage.setItem('rd-toast', 'Kept by the reload.') }", [DOC])
     p.reload()
-    toasted(p, "Kept by the reload.")
+    toasted(p, "Kept by the reload.")      # said only when the keep names this document: it was read
     assert p.evaluate("sessionStorage.getItem('rd-press-said')") is None
     assert "refused, reload" not in " ".join(toasts_to_the_end(p))
+
+
+def test_a_keep_that_is_not_json_does_not_stop_the_boot(sheaf):
+    # Ticket 112 (c): `rd-keep` was parsed before the keys were removed, so a value that is not JSON broke every load of the tab.
+    p = sheaf.page
+    p.evaluate("sessionStorage.setItem('rd-keep', 'not json'); sessionStorage.setItem('rd-toast', 'Kept by the reload.')")
+    p.reload()
+    toasted(p, "Kept by the reload.")
+    assert p.evaluate("sessionStorage.getItem('rd-keep')") is None
 
 
 def test_a_press_while_the_page_settles_onto_a_change_is_refused_and_the_page_reloads(sheaf):

@@ -560,6 +560,24 @@ def _head_of(raw: str) -> str:
     return m.group(0) if m else raw
 
 
+# A line that may be a heading of a quote or a list: marks of containers, then a `#`.
+_HEADING_LINE_RE = re.compile(r"^[ \t>\-+*.)0-9]*#", re.M)
+
+
+def _container_heading(block: str, point: int):
+    """(start, end) offsets of the ATX heading of a quote or a list that holds `point`, as pandoc reads it
+    (`_read_tables`): from its hashes to the end of its words, or None."""
+    if not _HEADING_LINE_RE.search(block):
+        return None
+    read = _read_tables(block)
+    hit = next((h for h in read[3] if h[0] <= point <= h[1]), None) if read else None
+    if hit is None:
+        return None
+    line_start = block.rfind("\n", 0, hit[0]) + 1
+    m = re.search(r"#{1,6}[ \t]*$", block[line_start:hit[0]])
+    return (line_start + m.start(), hit[1]) if m else None
+
+
 def _may_hold_table(block: str) -> bool:
     return "|" in block and any("|" in ln and "-" in ln and _DELIMITER_LINE_RE.match(ln)
                                 for ln in block.split("\n"))
@@ -567,8 +585,9 @@ def _may_hold_table(block: str) -> bool:
 
 @functools.lru_cache(maxsize=64)
 def _read_tables(block: str):
-    """(rows, code, raw) as pandoc reads `block`, or None when pandoc fails: `rows` the lines (from 0) that carry a
-    cell of a table, `code` the (start, end) offsets of every inline code span, backticks included, `raw` the
+    """(rows, code, raw, heads) as pandoc reads `block`, or None when pandoc fails: `rows` the lines (from 0) that carry a
+    cell of a table, `code` the (start, end) offsets of every inline code span, backticks included, `heads` the
+    (start, end) offsets of every heading, from the first to the last range pandoc gives it, `raw` the
     heads (`_head_of`) of the comments that pandoc writes as raw HTML: one that it reads as code, drops with
     a cell beyond the table's columns or shows as text is not in it. Pandoc
     deletes a CR and counts columns without it, so it reads the block without its CRs and the offsets are
@@ -583,12 +602,13 @@ def _read_tables(block: str):
         return None
     off = _offset_fn(plain)
     back = (lambda o: keep[o] if o < len(keep) else len(block)) if plain is not block else (lambda o: o)
-    rows, code = set(), []
+    rows, code, heads = set(), [], []
 
     class P(HTMLParser):
         def __init__(self):
             super().__init__()
             self.stack = []
+            self.head = None
 
         def handle_starttag(self, tag, attrs):
             if tag in VOID_TAGS:
@@ -600,12 +620,21 @@ def _read_tables(block: str):
                 # A span over several lines has one range per line: the span runs from the first to the last,
                 # line breaks and container marks between them included.
                 code.append((back(off(ranges[0][0], ranges[0][1])), back(off(ranges[-1][2], ranges[-1][3]))))
+            if tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
+                self.head = []
+            elif ranges and self.head is not None:
+                # A heading in a list carries the range of the list, not its own: it is read by its words.
+                self.head.append((back(off(ranges[0][0], ranges[0][1])), back(off(ranges[-1][2], ranges[-1][3]))))
             if ranges and tag in ("span", "code") and ("td" in self.stack or "th" in self.stack):
                 rows.update(a - 1 for a, _, _, _ in ranges)
 
         def handle_endtag(self, tag):
             if tag in VOID_TAGS:
                 return
+            if tag in ("h1", "h2", "h3", "h4", "h5", "h6") and self.head is not None:
+                if self.head:
+                    heads.append((min(a for a, _ in self.head), max(b for _, b in self.head)))
+                self.head = None
             while self.stack:
                 if self.stack.pop() == tag:
                     break
@@ -613,7 +642,7 @@ def _read_tables(block: str):
     p = P()
     p.feed(html)
     p.close()
-    return rows, tuple(code), frozenset(_head_of(m.group(0)) for m in _HEAD_RE.finditer(html))
+    return rows, tuple(code), frozenset(_head_of(m.group(0)) for m in _HEAD_RE.finditer(html)), tuple(heads)
 
 
 def _blank(text: str, ranges) -> str:
@@ -806,6 +835,8 @@ def in_table_row(block: str, point: int) -> bool:
     delimiter row that pandoc does not read, and a comment of several lines written there is cut with it.
     The splitter reads such a block as a quote or a list, not a table, but a comment in it must be written
     as one in a table: on one line, at the end of a cell."""
+    if _container_heading(block, point):
+        return True
     if not _may_hold_table(block):
         return False
     read = _read_tables(block)
@@ -881,6 +912,14 @@ def comment_point(kind: str, block: str, start: int, end: int, quote: str) -> in
     point = anchor_point(block, start, end, quote)      # a heading checks the selection too, then ignores where it ends
     if kind == "table":
         return cell_end(block, point)
+    if kind in ("quote", "list") and (head := _container_heading(block, point)):
+        # A heading in a quote or a list: the comment goes at the end of its words, on its line (ticket 55).
+        eol = block.find("\n", head[0])
+        line = block[head[0]:len(block) if eol < 0 else eol]
+        at = _heading_anchor(line) if _atx_words(line) else None
+        if at is None:
+            raise AnchorError("this heading has no place for a comment, comment on a paragraph")
+        return head[0] + at
     if kind in ("quote", "list") and in_table_row(block, point):
         read = _read_tables(block)
         return cell_end(block, point, cells=False, code=read[1] if read else None)

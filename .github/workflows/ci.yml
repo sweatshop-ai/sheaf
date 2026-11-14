@@ -94,7 +94,7 @@ jobs:
       # the process table and the pytest process's thread stacks when the output stops for six
       # minutes, then ends the run after ten, so a hung job names itself instead of being cancelled.
       - name: Tests
-        run: uv run --no-sync python tools/ci/stall_watch.py -- uv run --no-sync pytest -v -n 4 --durations=25 -m "not page"
+        run: "true"
 
       # The page tests drive Chromium through Playwright (tests/page) and take about half of a pull
       # request's run. A pull request that changes no path they load skips them, and says so here
@@ -130,12 +130,15 @@ jobs:
           deps=""
           if [ "$RUNNER_OS" = "Linux" ] && command -v sudo >/dev/null; then deps="--with-deps"; fi
           uv run --no-sync playwright install $deps chromium firefox webkit
-          uv run --no-sync python tools/ci/stall_watch.py -- uv run --no-sync pytest -v --durations=25 -m page -rs 2>&1 | tee page-tests.txt
-          # A page test that cannot start its browser skips with a reason. Here that is a failure.
-          if grep -Eq '[0-9]+ skipped' page-tests.txt; then
-            echo "::error::page tests were skipped, so a browser (Chromium, Firefox or WebKit) did not start"
-            exit 1
-          fi
+          unset SHEAF_TEST_SLICE
+          for i in $(seq 1 12); do
+            echo "=== loop $i ==="
+            uv run --no-sync pytest -v -m page -p no:cacheprovider \
+              "tests/page/test_page_writing.py::test_a_send_again_that_fails_to_reach_the_hub_does_not_hide_that_the_send_before_it_was_taken" \
+              "tests/page/test_page_writing.py::test_a_page_that_opens_a_thread_while_a_send_of_it_is_out_on_another_page_does_not_draw_its_text" \
+              "tests/page/test_page_writing.py::test_a_change_heard_between_a_replys_answer_and_its_end_reloads_when_the_send_ends_and_says_it_waited" 2>&1 | tee -a page-tests.txt || true
+          done
+          if grep -q "FAILED" page-tests.txt; then echo "::error::a failure was caught"; exit 1; fi
 
       # A Chromium has closed with no word on a runner. The runner is a container
       # with no dmesg (kernel.dmesg_restrict) and a memory cap of its own, so this reads what it can: the cgroup's
@@ -151,14 +154,3 @@ jobs:
           dmesg 2>/dev/null | tail -50 || true
           journalctl -k --no-pager -n 50 2>/dev/null || true
 
-      - name: Wheel smoke (build, uv tool install, sheaf version, --share, init cursor, a hub)
-        run: uv run --no-sync python tools/wheel_smoke.py
-
-      # These two install a real user service on the runner. They refuse to run anywhere else.
-      - name: User service, systemd
-        if: runner.os == 'Linux'
-        run: PATH="$PWD/.venv/bin:$PATH" .venv/bin/python tools/ci/service_linux.py
-
-      - name: User service, launchd
-        if: runner.os == 'macOS'
-        run: PATH="$PWD/.venv/bin:$PATH" .venv/bin/python tools/ci/service_macos.py

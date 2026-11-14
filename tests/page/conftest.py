@@ -8,6 +8,7 @@ Every test here carries the `page` mark, so `-m "not page"` leaves them out.
 """
 import inspect
 import os
+import re
 import socket
 import time
 
@@ -187,8 +188,16 @@ def tab(context, site):
 # time) and the hub's (each publish, each frame written to a stream), side by side, so a lost event shows as one
 # side without the other.
 PROBE = "x-route-probe"
-PROBED = ("**/_/comment",)      # the routes that are probed: a probe is a request, which a test's own `request` listener sees too,
+PROBED = ("**/_/comment",)      # the routes that are probed (and any regex that matches the probe's URL): a probe is a request, which a test's own `request` listener sees too,
                                 # and no test listens for /_/comment (the others do: _/pin, _/save, _/tell, _/tick, _/cancel)
+PROBE_PATH = "/_/comment"
+
+
+def probed(pattern, origin):
+    """Whether a route of this pattern is probed: the glob of PROBED, or a regex that the probe's own URL matches."""
+    if isinstance(pattern, re.Pattern):
+        return bool(pattern.search(origin + PROBE_PATH))
+    return isinstance(pattern, str) and pattern in PROBED
 
 
 def until_live(page, pattern, log):
@@ -196,11 +205,17 @@ def until_live(page, pattern, log):
     ms later (a send after Ctrl+Enter) went straight to the hub and the test's handler never saw it (ticket 100: three tests
     timed out "waiting for the send to go out", the hub's /_/comment in 2 ms after the page's fetch, no handler call). So the
     route counts as live once it has caught a request of its own: a GET with a probe header that the wrapper's handler answers
-    itself, with 204. Best effort: only the PROBED routes, and a page that is reloading is left."""
-    if page is None or pattern not in PROBED or not page.url.startswith("http"):
+    itself, with 204. Best effort. Limits: only the PROBED routes (the glob and the regex of /_/comment), whatever their handler;
+    a route of a context is probed through its first page, which says nothing of a send from another page; the wrapper answers a
+    probe for any route that matches it, so a broader route registered later takes the probe of an earlier one; a page that is
+    reloading is left."""
+    if page is None or not page.url.startswith("http"):
         return
     origin = "/".join(page.url.split("/")[:3])
-    probe = f"fetch({origin + pattern[2:]!r}, {{headers: {{{PROBE!r}: '1'}}}}).then(r => r.status, () => 0)"
+    if not probed(pattern, origin):
+        return
+    name = pattern.pattern if isinstance(pattern, re.Pattern) else pattern
+    probe = f"fetch({origin + PROBE_PATH!r}, {{headers: {{{PROBE!r}: '1'}}}}).then(r => r.status, () => 0)"
     began = time.monotonic()
     tries = 0
     while time.monotonic() - began < 5:
@@ -209,14 +224,13 @@ def until_live(page, pattern, log):
             with stalls_after(8, "a route's probe"):
                 caught = page.evaluate(probe) == 204
         except (Exception, PageStalled) as e:
-            log.append((time.time(), f"route {pattern} not probed: {str(e).splitlines()[0][:100]}"))
+            log.append((time.time(), f"route {name} not probed: {str(e).splitlines()[0][:100]}"))
             return
         if caught:
-            if tries > 1:
-                log.append((time.time(), f"route {pattern} caught its probe at try {tries}"))
+            log.append((time.time(), f"route {name} live: caught its probe at try {tries}"))
             return
         page.wait_for_timeout(50)
-    log.append((time.time(), f"route {pattern} did NOT catch its probe in {tries} tries over 5 s"))
+    log.append((time.time(), f"route {name} did NOT catch its probe in {tries} tries over 5 s"))
 
 
 @pytest.fixture(autouse=True)
@@ -249,7 +263,7 @@ def hub_journal(monkeypatch):
         if cls is None:
             continue
 
-        wrappers = {}       # (the object routed, url, the test's handler) -> the handler Playwright holds, for `unroute(url, handler)`
+        wrappers = {}       # (the object routed, url, id of the test's handler) -> the handlers Playwright holds, for `unroute(url, handler)`
 
         def noting_route(self, url, handler, *a, _route=cls.route, _name=cls.__name__, _wrappers=wrappers, **kw):
             def noted(route):
@@ -271,16 +285,25 @@ def hub_journal(monkeypatch):
             else:
                 def called(route, request):
                     return run(route, route, request)
-            _wrappers[(id(self), url, handler)] = called
+            _wrappers.setdefault((id(self), url, id(handler)), []).append(called)     # id: a handler need not be hashable
             log.append((time.time(), f"{_name}.route({url}) asked"))
             out = _route(self, url, called, *a, **kw)
             log.append((time.time(), f"{_name}.route({url}) registered"))
-            if isinstance(url, str) and n > 0 and "times" not in kw and not a:     # `times=` counts the probe as a use
+            if isinstance(url, (str, re.Pattern)) and n > 0 and "times" not in kw and not a:     # `times=` counts the probe as a use
                 until_live(self if _name == "Page" else (self.pages[0] if self.pages else None), url, log)
             return out
 
         def unrouting(self, url, handler=None, *, _unroute=cls.unroute, _wrappers=wrappers):
-            return _unroute(self, url, _wrappers.pop((id(self), url, handler), handler))
+            if handler is None:
+                for key in [k for k in _wrappers if k[:2] == (id(self), url)]:
+                    del _wrappers[key]
+                return _unroute(self, url)
+            held = _wrappers.pop((id(self), url, id(handler)), None)
+            if held is None:
+                return _unroute(self, url, handler)
+            for called in held:          # Playwright takes off every route of the pair; each registration here has a handler of its own
+                out = _unroute(self, url, called)
+            return out
         monkeypatch.setattr(cls, "unroute", unrouting)
         monkeypatch.setattr(cls, "route", noting_route)
     monkeypatch.setattr(events.Bus, "publish", noting_publish)

@@ -9,4 +9,6 @@
 
 **Blocked by:** PR 337 fusionnée
 
+**Claimed by:** Mateus
+
 **Status:** ready-for-agent

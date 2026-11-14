@@ -432,6 +432,31 @@ def launch_chromium(chromium, error, in_ci):
         unavailable(f"Chromium did not start:\n{e}\n{died_report(launched_binary(chromium.executable_path))}", in_ci)
 
 
+# The page's side of the stream journal (conftest.py `stream_journal`): it wraps EventSource and notes, in real
+# time (taken before a test's fake clock replaces the page's), each open, error and event into window.__sseJournal.
+STREAM_JOURNAL_JS = """(() => {
+  const now = performance.now.bind(performance), origin = performance.timeOrigin;
+  const log = window.__sseJournal = [];
+  const note = (what, data) => log.push([origin + now(), what, data === undefined ? '' : String(data).slice(0, 120)]);
+  const Native = window.EventSource;
+  if (!Native) return;
+  window.EventSource = function (url, init) {
+    const es = new Native(url, init);
+    note('new', url);
+    es.addEventListener('open', () => note('open', url));
+    es.addEventListener('error', () => note('error', 'readyState ' + es.readyState));
+    const add = es.addEventListener.bind(es);
+    es.addEventListener = (name, fn, o) => {
+      if (name !== 'open' && name !== 'error') add(name, ev => note('event ' + name, ev.data), o);
+      return add(name, fn, o);
+    };
+    return es;
+  };
+  window.EventSource.prototype = Native.prototype;
+  for (const k of ['CONNECTING', 'OPEN', 'CLOSED']) window.EventSource[k] = Native[k];
+})()"""
+
+
 def new_context(browser, error=None, **options):
     """A context of the browser (its clicks, fills and waits for a selector give up after PAGE_TIMEOUT_MS),
     or a failure that says whether the browser is still there. `error` is
@@ -441,6 +466,7 @@ def new_context(browser, error=None, **options):
     try:
         context = browser.new_context(**options)
         context.set_default_timeout(PAGE_TIMEOUT_MS)
+        context.add_init_script(STREAM_JOURNAL_JS)
         return context
     except error as e:
         pytest.fail(f"Chromium went away under a new context (connected={browser.is_connected()}):\n{e}")

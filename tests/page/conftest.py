@@ -8,16 +8,17 @@ Every test here carries the `page` mark, so `-m "not page"` leaves them out.
 """
 import os
 import socket
+import time
 
 import pytest
 
 from agent_fakes import PID, FakeClaude, Peer, write_record
 from helpers import PLAN
-from pagehelp import DOC, close_context, launch_chromium, new_context, unavailable, use_pump
+from pagehelp import DOC, PageStalled, close_context, launch_chromium, new_context, stalls_after, unavailable, use_pump
 from sheafmd import paths
 from sheafmd.agents.base import Target
 from sheafmd.agents.claude_code import proc_start
-from sheafmd.hub import server
+from sheafmd.hub import events, server
 from sheafmd.hub.core import Hub
 
 
@@ -177,3 +178,54 @@ def tab(context, site):
     t = Tab(context.new_page(), site)
     yield t
     assert t.errors == [], "the page raised script errors"
+
+
+# ── the journal of the event stream (ticket 100) ───────────────────────────────────────────────────────────
+# A hub event that does not reach the page was seen only on a loaded CI runner, never by hand. A failing test
+# says what the stream did: the page's side (`STREAM_JOURNAL_JS` of pagehelp: opens, errors, each event, in real
+# time) and the hub's (each publish, each frame written to a stream), side by side, so a lost event shows as one
+# side without the other.
+@pytest.fixture(autouse=True)
+def hub_journal(monkeypatch):
+    """What the hub published and wrote to a stream, with the time (time.time()), for `pytest_runtest_makereport`."""
+    log = []
+    publish, frame = events.Bus.publish, server.frame
+
+    def noting_publish(self, name, data):
+        log.append((time.time(), f"publish {name} to {self.count()} stream(s) {str(data)[:100]}"))
+        return publish(self, name, data)
+
+    def noting_frame(name, data):
+        log.append((time.time(), f"write {name}"))
+        return frame(name, data)
+    monkeypatch.setattr(events.Bus, "publish", noting_publish)
+    monkeypatch.setattr(server, "frame", noting_frame)
+    return log
+
+
+def stream_journal(pages, hub):
+    """The two journals as one text, oldest first, each line a time of day and the side it comes from."""
+    lines = [(t, "hub  ", what) for t, what in hub]
+    for i, page in enumerate(pages):
+        try:
+            with stalls_after(5, "the page's journal"):
+                got = page.evaluate("window.__sseJournal || []")
+        except (Exception, PageStalled) as e:
+            lines.append((time.time(), f"page{i}", f"journal unreadable: {str(e)[:80]}"))
+            continue
+        lines += [(t / 1000, f"page{i}", f"{what} {data}") for t, what, data in got]
+    return "\n".join(f"{time.strftime('%H:%M:%S', time.localtime(t))}.{int(t * 1000) % 1000:03d} {side} {what}"
+                     for t, side, what in sorted(lines))
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    out = yield
+    rep = out.get_result()
+    if rep.when != "call" or not rep.failed:
+        return
+    ctx = item.funcargs.get("context")
+    if ctx is None and "touch_tab" in item.funcargs:
+        ctx = item.funcargs["touch_tab"].page.context
+    if ctx is not None and "hub_journal" in item.fixturenames:
+        rep.sections.append(("the event stream, page and hub", stream_journal(ctx.pages, item.funcargs["hub_journal"])))

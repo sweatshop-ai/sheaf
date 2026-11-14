@@ -15,6 +15,6 @@
 
 **Blocked by:** PR 325 fusionnée (pour la SPEC) ; le passage Codex attend 20 h.
 
-**Claimed by:**
+**Claimed by:** Jamal
 
 **Status:** ready-for-agent

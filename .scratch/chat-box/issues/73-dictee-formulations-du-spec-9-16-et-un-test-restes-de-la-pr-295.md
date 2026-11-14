@@ -7,7 +7,12 @@
 - p4 : l'assertion `"def" not in shown` de `test_a_damaged_byte_in_the_key_is_refused_the_same_way` lit toutes les lignes : elle échoue si une autre ligne contient « default » ou « undefined ». La limiter aux lignes `transcribe-key-file`, ou chercher `abc` suivi de U+FFFD.
 - p5 (d'avant la PR) : si `os.fdopen` échouait après avoir construit son `FileIO`, il fermerait le descripteur lui-même et la branche `except` (`wrapped` encore faux) le fermerait une seconde fois : un numéro réutilisé par un autre fil pourrait être fermé. Aucun moyen de le déclencher trouvé (le descripteur est déjà vérifié, l'encodage est fixe). À décider : écrire ou fermer sans doute possible.
 
-Codex doit encore passer sur la PR 295 (sans jetons le 2026-11-14 jusqu'à 15 h) : ses constats s'ajoutent ici.
+**Codex's findings on PR 295** (Nabil, 2026-11-14, `/home/tiroir/.claude/pm/chat-box-handoffs/pr-61-reviews/codex-295.md`, VERDICT NO-GO sur la PR telle que mergée) : quatre constats, tous couverts par la PR 297, aucun nouveau ticket.
+- [P1] double fermeture si `os.fdopen` échoue : c'est p5. Corrigé dans la PR 297 (34a1e98) : plus de `dup`, `closefd=False`, le hub ferme une fois.
+- [P2] « no more than 65,536 read » : c'est p1, écrit dans la PR 297.
+- [P2] le test du chmod ne couvre qu'un chmod juste après le `fstat` d'ouverture, pas dans une passe suivante : nouveau, corrigé dans 34a1e98 (le fichier est réécrit après l'ouverture, chmod après la première passe, trois `fstat` attendus).
+- [P2] l'assertion « def » lit toutes les lignes : c'est p4, corrigé dans la PR 297.
+Codex sur la PR 297 (70a18f6) : trois constats (fuite du `dup`, test trop large, SPEC « après chaque lecture »), tous corrigés dans 34a1e98.
 
 **Blocked by:** none
 
@@ -19,6 +24,6 @@ Codex doit encore passer sur la PR 295 (sans jetons le 2026-11-14 jusqu'à 15 h)
 
 - [ ] p1 à p3 : le SPEC 9.16 dit ce que le code fait
 - [ ] p4 : l'assertion limitée aux lignes de la clé
-- [ ] p5 décidé : écrit, ou corrigé avec son test
-- [ ] Constats de Codex sur la PR 295 ajoutés ou écartés avec la raison
+- [x] p5 décidé : corrigé avec son test (PR 297, 34a1e98)
+- [x] Constats de Codex sur la PR 295 ajoutés ou écartés avec la raison
 - [ ] CI verte

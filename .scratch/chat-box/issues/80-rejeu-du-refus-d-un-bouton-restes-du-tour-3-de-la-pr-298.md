@@ -10,9 +10,10 @@
 
 **Blocked by:** none
 
-**Claimed by:**
 
-**Status:** ready-for-agent
+**Claimed by:** Aurelio 2026-11-14 18:51
+
+**Status:** in-progress
 
 **Par où commencer :** le point `pressSaid` jamais remis à zéro : écrire le test rouge (A refusé, B réussi, rechargement dans la fenêtre de A), sur t-compute, jamais sur le portable.
 

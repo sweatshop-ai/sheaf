@@ -40,7 +40,7 @@ import re
 from dataclasses import dataclass, field
 
 from . import copyblock
-from .blocks import SETEXT_RE, split_md_blocks
+from .blocks import SETEXT_RE, TBLSEP_RE, split_md_blocks
 
 CODE_KINDS = {"fence", "indented_code", "frontmatter"}
 ONE_LINE_KINDS = {"heading", "table"}
@@ -311,11 +311,21 @@ def _scan(text: str):
         yield "comment", a, pos
 
 
-def _mask_code(text: str) -> str:
+def _mask_code(text: str, cells: bool = False) -> str:
     """`text` with its inline code spans blanked, the same length (see `_scan` for what owns a
-    backtick)."""
+    backtick). `cells`: the text is a table, whose cells pandoc splits at every unescaped `|`
+    before it reads a span, so none runs from one cell or row to the next."""
     if "`" not in text:
         return text
+    if cells:
+        pieces = []
+        for line in text.split("\n"):
+            pos, parts = 0, []
+            for m in _CELL_PIPE_RE.finditer(line):
+                parts += [_mask_code(line[pos:m.start(1)]), "|"]
+                pos = m.end(1)
+            pieces.append("".join(parts) + _mask_code(line[pos:]))
+        return "\n".join(pieces)
     parts, last = [], 0
     for kind, a, b in _scan(text):
         if kind == "code":
@@ -337,7 +347,7 @@ def parse(md: str) -> Parsed:
         # Inline code is literal text, so a comment written there is an example
         # (this spec has several). Search a copy with code spans blanked out, the
         # same length so every offset still points into the real text.
-        masked = _mask_code(text)
+        masked = _mask_code(text, b.kind == "table")
         i = 0
         while True:
             m = COMMENT_RE.search(masked, i)
@@ -611,7 +621,33 @@ def heading_anchor(block: str) -> int | None:
 _CELL_PIPE_RE = re.compile(r"(?<!\\)(?:\\\\)*(\|)")
 
 
-def cell_end(block: str, point: int) -> int:
+_CONTAINER_RE = re.compile(r"[ \t]*(?:>|(?:[-+*]|\d{1,9}[.)])(?=[ \t]))[ \t]?")
+
+
+def in_table_row(block: str, point: int) -> bool:
+    """Whether `point` is on a row of a table that a quote or a list holds (`> | a | b |`, an item
+    with a paragraph before its table): a line with a `|`, under unbroken lines with one, down to
+    a delimiter row. The splitter reads such a block as a quote or a list, not a table, but a
+    comment in it must be written as one in a table: on one line, at the end of a cell."""
+    lines = block.split("\n")
+    n = block.count("\n", 0, point)
+    bare = []
+    for line in lines:
+        while (m := _CONTAINER_RE.match(line)) and m.end():
+            line = line[m.end():]
+        bare.append(line)
+    if (n + 1 < len(bare) and _CELL_PIPE_RE.search(bare[n]) and _CELL_PIPE_RE.search(bare[n + 1])
+            and TBLSEP_RE.match(bare[n + 1])):
+        return True                 # the header row, above its delimiter row
+    for i in range(n, -1, -1):
+        if not _CELL_PIPE_RE.search(bare[i]):
+            return False
+        if i and TBLSEP_RE.match(bare[i]) and _CELL_PIPE_RE.search(bare[i - 1]):
+            return True
+    return False
+
+
+def cell_end(block: str, point: int, cells: bool = True) -> int:
     """Offset where a comment on a selection ending at `point` goes in a table: the end of the cell that
     holds `point`, before its closing `|` and the spaces in front of it, so the cell's words stay whole
     for every reader of the file. A `|` ends a cell unless an odd run of backslashes escapes it, in code
@@ -620,7 +656,8 @@ def cell_end(block: str, point: int) -> int:
     block's `<`, and before a `<!--` in the cell that nothing closes, which a block after it would close,
     hiding the words it was meant to hold. Where the cell's end is inside a code span that `parse` reads
     across cells (pandoc splits the cells first), the block stays after the selection: written there it
-    would be code to `parse`, and the comment lost."""
+    would be code to `parse`, and the comment lost. `cells` is false in a quote or a list, which
+    `parse` reads whole: a span there may still run from one cell to the next."""
     line_start = block.rfind("\n", 0, point) + 1
     eol = block.find("\n", point)
     line_end = len(block) if eol < 0 else eol
@@ -638,7 +675,10 @@ def cell_end(block: str, point: int) -> int:
     run = len(block[cell_start:at]) - len(block[cell_start:at].rstrip("\\"))
     if run % 2:
         at -= 1
-    if _mask_code(block[:at] + "\0" + block[at:])[at] == " ":
+    if _mask_code(block[:at] + "\0" + block[at:], cells)[at] == " ":
+        if not cells and _mask_code(block[:point] + "\0" + block[point:])[point] == " ":
+            raise AnchorError("this cell is inside a code span that runs across cells, "
+                              "comment on another cell")
         return point
     return at
 
@@ -648,6 +688,8 @@ def comment_point(kind: str, block: str, start: int, end: int, quote: str) -> in
     point = anchor_point(block, start, end, quote)      # a heading checks the selection too, then ignores where it ends
     if kind == "table":
         return cell_end(block, point)
+    if kind in ("quote", "list") and in_table_row(block, point):
+        return cell_end(block, point, cells=False)
     if kind != "heading":
         return point
     at = heading_anchor(block)
@@ -685,7 +727,7 @@ def add_comment(md: str, block: int, start: int, end: int, quote: str, body: str
     at_off = comment_point(b.kind, b.content, start, end, quote)
     c = Comment(id=next_id(parse(md)), by=by, at=at, status="open",
                 quote=" ".join(quote.split()), body=body.strip("\n"))
-    raw = format(c, one_line=b.kind in ONE_LINE_KINDS)
+    raw = format(c, one_line=b.kind in ONE_LINE_KINDS or in_table_row(b.content, at_off))
     pos = _block_offsets(blocks)[block] + at_off
     return md[:pos] + raw + md[pos:], c.id
 
@@ -790,8 +832,10 @@ def _rewrite(md: str, cid: str, change) -> str:
     c = _find(md, cid)
     _refuse_nested(md, c)
     change(c)
-    kind = split_md_blocks(md)[c.block].kind
-    raw = format(c, one_line=kind in ONE_LINE_KINDS and not c.standalone)
+    blocks = split_md_blocks(md)
+    b = blocks[c.block]
+    row = in_table_row(b.content, c.start - _block_offsets(blocks)[c.block])
+    raw = format(c, one_line=(b.kind in ONE_LINE_KINDS or row) and not c.standalone)
     return md[:c.start] + raw + md[c.end:]
 
 

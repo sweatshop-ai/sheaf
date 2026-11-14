@@ -8,7 +8,7 @@
 
 **Claimed by:** Tove
 
-- [x] Point 1 traité (PR 313)
-- [x] Point 2 : balayage fait (PR 313). Revue : c1 accepté (thread non démarré dans le cas « over »), c2 corrigé, c3 accepté ; d : test_hub_tell.py:1697 joint un `stopper` non démarré dans un finally, hors périmètre
+- [x] Point 1 traité (PR 313, merge 44d4ba9)
+- [x] Point 2 : balayage fait (PR 313, merge 44d4ba9). Revue : c1 accepté (thread non démarré dans le cas « over »), c2 corrigé, c3 accepté ; d : test_hub_tell.py:1697 joint un `stopper` non démarré dans un finally, hors périmètre
 
 **Status:** ready-for-agent

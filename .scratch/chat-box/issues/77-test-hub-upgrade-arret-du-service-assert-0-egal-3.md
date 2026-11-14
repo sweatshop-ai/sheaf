@@ -14,8 +14,8 @@
 
 **Par où commencer :** le journal du run 43588278884, puis le test dans `tests/test_hub_upgrade.py`.
 
-- [ ] Cause trouvée (journal et reproduction)
-- [ ] Test corrigé, ou la raison de le laisser écrite
-- [ ] CI verte trois fois de suite
+- [x] Cause trouvée (journal et reproduction)
+- [x] Test corrigé, ou la raison de le laisser écrite
+- [x] CI verte trois fois de suite
 
-**Status:** ready-for-agent
+**Status:** PR 304, CI green 3 times, awaiting merge

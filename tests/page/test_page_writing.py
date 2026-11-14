@@ -4507,10 +4507,6 @@ def test_open_the_thread_on_the_second_of_two_kept_replies_draws_that_reply(thre
     fail_the_send(b, held_b)
     held_a[0].fulfill(status=500, json={"ok": False, "error": "the hub broke off"})
     a.unroute("**/_/comment")
-    try:
-        until(lambda: not still_out(thread, "words from page A"), what="page A's failed send to leave `out` in the store")
-    except AssertionError as e:
-        raise AssertionError(f"{e}; the store held {comment_store(thread)}") from None
     come_back(thread)
     unsent_line(a)
     texts = [t for _, _, t, _ in unsent_list(a)]

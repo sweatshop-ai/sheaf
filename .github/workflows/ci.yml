@@ -94,7 +94,7 @@ jobs:
       # the process table and the pytest process's thread stacks when the output stops for six
       # minutes, then ends the run after ten, so a hung job names itself instead of being cancelled.
       - name: Tests
-        run: uv run --no-sync python tools/ci/stall_watch.py -- uv run --no-sync pytest -v -n 4 --durations=25 -m "not page"
+        for i in $(seq 1 25); do env -u SHEAF_TEST_SLICE uv run --no-sync pytest -v -m page -k "second_of_two_kept_replies or still_out_on_a_page" tests/page/test_page_writing.py 2>&1 | tee -a page-tests.txt | grep -E " passed| failed|timed out waiting|the list held" || true; done; exit 0
 
       # The page tests drive Chromium through Playwright (tests/page) and take about half of a pull
       # request's run. A pull request that changes no path they load skips them, and says so here

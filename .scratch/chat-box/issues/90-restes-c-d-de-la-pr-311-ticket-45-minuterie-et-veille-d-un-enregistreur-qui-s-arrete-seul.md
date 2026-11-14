@@ -10,4 +10,6 @@
 
 **Blocked by:** PR 311
 
-**Status:** ready-for-agent
+**Claimed by:** Perla 2026-11-14 18:51
+
+**Status:** in-progress

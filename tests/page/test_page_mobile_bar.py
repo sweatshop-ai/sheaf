@@ -4,7 +4,7 @@ Restated on 2026-11-09 (ticket 03, E): the bar a selection used to offer is gone
 (bar shaped like the field, selection left intact for the phone's Copy menu, touchstart cancelled, bar opens box) no longer apply."""
 import pytest
 
-from pagehelp import at, close_context, new_context, phone_with, select, select_by_touch
+from pagehelp import at, close_context, new_context, open_with_comment, select, select_by_touch
 
 pytestmark = pytest.mark.page
 
@@ -38,7 +38,7 @@ def test_a_touch_selection_opens_the_box_with_the_cursor_in_the_field_and_no_bar
 
 
 def test_touching_a_number_puts_the_cursor_in_the_field_too(touch_tab):
-    p = phone_with(touch_tab, PLAN_MD, "apples", "Why?", "Bea")
+    p = open_with_comment(touch_tab, PLAN_MD, "apples", "Why?", "Bea")
     p.touchscreen.tap(*centre(p, ".rd-badge"))
     p.wait_for_selector(FIELD)
     assert focused(p) == "TEXTAREA", "the cursor is not in the field"

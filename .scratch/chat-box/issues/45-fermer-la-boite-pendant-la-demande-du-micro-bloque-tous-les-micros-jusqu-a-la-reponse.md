@@ -8,7 +8,7 @@
 
 **Par où commencer :** un test de page dont `getUserMedia` reste en suspens (promesse tenue par le test), qui ferme la boîte avec Échap, la rouvre, appuie sur le micro et attend un deuxième `getUserMedia` (`window.__mic.asked === 2`) ; il échoue tant que `dict` bloque.
 
-- [ ] La décision (a ou b) est écrite dans le ticket avant le code
-- [ ] Un test de page échoue tant que le micro d'une boîte rouverte ne répond pas pendant que l'invite de la précédente est ouverte
+- [x] La décision (a ou b) est écrite dans le ticket avant le code (a, commit 2308fe0 de la PR 311)
+- [x] Un test de page échoue tant que le micro d'une boîte rouverte ne répond pas pendant que l'invite de la précédente est ouverte (rouge : exécution 43611211257, tranche 1/3 ; vert : tête 9de6c85, 3/3)
 
-**Status:** ready-for-agent
+**Status:** done (PR 311, fusionnée en b4e02d1) ; restes c/d : ticket 90

@@ -538,6 +538,18 @@ def test_every_action_of_a_row_is_a_button_one_off_but_share_which_is_a_toggle(b
     assert share["aria-pressed"] == "false"
 
 
+def test_the_row_keeps_its_share_button_for_a_box_that_says_shared_with_the_team(box, sheaves):
+    path = sheaves / JOEY[5:]
+    path.write_text(path.read_text(encoding="utf-8").replace(
+        "- [ ] Approve\n", "- [ ] Approve\n- [ ] Shared with the team\n"), encoding="utf-8")
+    box.hub.the_list.poll()
+    res = box.get("/list", member=NELL)
+    assert [(b.action, b.word, b.kind) for b in buttons(res) if b.doc == JOEY] == [
+        ("0", "Approve", "one-off"), ("1", "Share", "toggle")]
+    share = BeautifulSoup(res.text, "html.parser").select_one(f'button[data-doc="{JOEY}"][data-word="Share"]')
+    assert share["aria-pressed"] == "false"
+
+
 def test_the_rows_second_button_ticks_the_second_action_and_no_other(box, sheaves):
     path = sheaves / JOEY[5:]
     path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [ ] Approve\n- [ ] Done\n"),

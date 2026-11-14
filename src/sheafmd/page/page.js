@@ -3420,6 +3420,20 @@ var create = function (ROOT, CFG, opts) {
   // `[ ]` / `[x]` of that one item in the .md (sheafmd.edit._toggle_boxes).
   // A click on the item's text is for the caret and for selecting, so the
   // <label> pandoc wraps around the item ticks the box only on the label's words (onLabelWords).
+  // Share's box is the control itself, pressed by its owner and refused to another member (SPEC 10.11), on a page whose
+  // block editing is off too, as the other words' buttons are: so it is not in the canEdit handler below.
+  if (canSave) {
+    main.addEventListener('click', function (e) {
+      var t = e.target, lab = t && t.closest && t.closest('label');
+      var box = t && t.tagName === 'INPUT' && t.type === 'checkbox' ? t : lab && main.contains(lab) && lab.querySelector('input[type="checkbox"]');
+      var share = box && toggleOf.get(box);
+      if (!share || (t !== box && t.closest('a'))) return;      // a link in the line opens
+      e.stopImmediatePropagation();                              // the canEdit handler below never sees it
+      e.preventDefault();                                       // the browser's own toggle is cancelled
+      if (t !== box && (t.closest('.rd-badge, [data-rd-ui]') || editing || e.detail > 1 || !onLabelWords(lab, e, true))) return;
+      pressShare(share, box);
+    });
+  }
   if (canEdit) {
     main.addEventListener('click', function (e) {
       var t = e.target;
@@ -3436,7 +3450,7 @@ var create = function (ROOT, CFG, opts) {
       // The browser's own toggle is cancelled and replaced by ours: inside a
       // contenteditable it is not reliable, and the attribute must move with it.
       e.preventDefault();
-      // A box of the eleven words is pressed with its button (SPEC 10.11).
+      // A box of the other words is pressed with its button (SPEC 10.11).
       if (isActBox(t)) { say(PRESS_IT); return; }
       var b = blockOf(t);
       if (stale || dead || !b || !editable.has(b.i)) return;
@@ -3447,19 +3461,20 @@ var create = function (ROOT, CFG, opts) {
   // A task line's label: the words before the first `:` or ` — `, else the first word. A click on them ticks the box
   // like a <label>, out of edit mode (in it the words are for the caret); the rest of the line is for the caret, a selection and its links. Told by where the click
   // landed against the label's words, so the document gets no element of its own. A touch gets 44 px of height.
-  function labelEnd(text) {
+  function labelEnd(text, whole) {
+    if (whole) return text.length;                  // Share's label is its whole line: "Shared with the team"
     var m = /:|\s—\s/.exec(text);
     if (m) return m.index;
     var w = /^\s*\S+/.exec(text);
     return w ? w[0].length : 0;
   }
-  function onLabelWords(lab, e) {
+  function onLabelWords(lab, e, whole) {
     var sel = getSel();
     if (sel && !sel.isCollapsed && lab.contains(sel.anchorNode)) return false;
     // The label's words are its own text: what the renderer added (a comment's badge, data-rd-ui) is not among them.
     var nodes = [], walker = document.createTreeWalker(lab, NodeFilter.SHOW_TEXT), node;
     while ((node = walker.nextNode())) if (!(node.parentElement && node.parentElement.closest('[data-rd-ui]'))) nodes.push(node);
-    var left = labelEnd(nodes.map(function (n) { return n.data; }).join('')), first = null, last = null, end = 0;
+    var left = labelEnd(nodes.map(function (n) { return n.data; }).join(''), whole), first = null, last = null, end = 0;
     for (var k = 0; left > 0 && k < nodes.length; k++) {
       if (!first) first = nodes[k];
       last = nodes[k]; end = Math.min(left, nodes[k].data.length); left -= end;
@@ -3491,8 +3506,9 @@ var create = function (ROOT, CFG, opts) {
   // Move to takes `<slug> (ref <thread>)`, Merge, Deploy and Install the rest of the line, the others nothing.
   var ACTION_ARG = { 'Move to': '\\s+[A-Za-z0-9._\\\\-]+\\s+\\(ref\\s+[^()\\s]+\\)(?:\\s+@[A-Za-z0-9._-]+)?',
                      'Merge': '\\s+\\S.*', 'Deploy': '\\s+\\S.*', 'Install': '\\s+\\S.*' };
+  // Share's tick box may say it in its own words (the_list.LABELS).
   var ACTION_LINE = new RegExp('^(?:' + ACTION_WORDS.map(function (w) {
-    return w.replace(/'/g, '[\'’]') + (ACTION_ARG[w] || '(?:\\s+@[A-Za-z0-9._-]+)?');
+    return w.replace(/'/g, '[\'’]').replace(/^Share$/, 'Share(?:d with the team)?') + (ACTION_ARG[w] || '(?:\\s+@[A-Za-z0-9._-]+)?');
   }).join('|') + ')$');
   // The text of a box's own item, its nested lists left out; null for a box in no item.
   function itemLine(t) {
@@ -3540,7 +3556,7 @@ var create = function (ROOT, CFG, opts) {
   // of the text it wrote (`actsOwed`, with its hash), drawn once no press is open; a press whose buttons that save
   // changed is not sent, since its number may now name another box. While the tick is out (`ticking`), a save
   // waits for its answer: it would move the text the tick names.
-  var UNDO_MS = 5000, actBoxes = new WeakSet(), actBar = null, pressOpen = false, reloadAfterPress = null;
+  var UNDO_MS = 5000, actBoxes = new WeakSet(), toggleOf = new WeakMap(), actBar = null, pressOpen = false, reloadAfterPress = null;
   var actsHash = CFG.hash, actsShown = [], actsOwed = null, pressSaid = null, ticking = null;
   // actsUnsure: the buttons drawn may not be the file's (tickBox). signOutLater: a sign-out met in a press's Undo,
   // gone on to once the press is undone (meetSignOut).
@@ -3649,6 +3665,7 @@ var create = function (ROOT, CFG, opts) {
     if (pressOpen) { actsOwed = { acts: acts, hash: h }; return; }
     actsHash = h; actsShown = acts || []; actsUnsure = false;
     actBoxes = boxesOfActs(acts);
+    toggleOf = new WeakMap();
     if (actBar) actBar.remove();
     actBar = null;
     Array.prototype.forEach.call(main.querySelectorAll('.rd-act.rd-inline'), function (b) { b.remove(); });
@@ -3663,15 +3680,36 @@ var create = function (ROOT, CFG, opts) {
       btn.textContent = a.label + (a.pressed && !a.toggle ? ' ✓' + (a.by ? ' ' + a.by : '') : '');
       if (a.toggle) btn.setAttribute('aria-pressed', a.pressed ? 'true' : 'false');
       btn.disabled = !a.may;
-      var box = !a.toggle && boxOfAct(a);
-      if (box) inlineButton(btn, box, [a.label.replace(/ @\S+$/, ''), a.word], kept); else bar.appendChild(btn);
+      var box = boxOfAct(a);
+      // Share is a tick box where its line is, with its own label; its button is kept off the page, as the one the box
+      // presses. A Share whose box the page does not find stays a button in the row.
+      if (a.toggle && box) toggleOf.set(box, { btn: btn, a: a });
+      else if (box) inlineButton(btn, box, [a.label.replace(/ @\S+$/, ''), a.word], kept); else bar.appendChild(btn);
       return { btn: btn, a: a };
     });
-    all.forEach(function (x) { if (!x.btn.disabled) pressable(x.btn, x.a, all); });
+    all.forEach(function (x) { if (!x.btn.disabled) pressable(x.btn, x.a, all, !!(x.a.toggle && boxOfAct(x.a))); });
     showWords(kept);
     if (bar.firstChild) { actBar = bar; main.parentNode.insertBefore(bar, main); }
   }
-  function pressable(btn, a, all) {
+  // A tick box's press is sent at once: its box shows the tick when the hub has taken it, and one more click releases it.
+  // A box in a block with edits not saved saves the block first, as a plain box does (tickBox), so the tick lands on
+  // the text the hub holds and the edits are not merged against it afterwards; the buttons the save's answer brings
+  // are the ones pressed.
+  async function pressShare(x, box) {
+    if (!x.a.may) { say(x.a.pressed ? 'Only the owner of this sheaf can withdraw its Share.' : 'Only the owner of this sheaf can share it.'); return; }
+    if (boxWaits.has(box)) return;
+    var b = blockOf(box);
+    if (b && unticked(ser(b)) !== unticked(b.pristine)) {
+      var res = {}, ok;
+      boxWaits.add(box);
+      try { ok = await save(true, res); } finally { boxWaits.delete(box); }
+      if ((!ok && !res.owed) || stale || docGone || !main.contains(box)) return;
+      x = toggleOf.get(box);
+      if (!x) return;
+    }
+    if (!x.btn.disabled) x.btn.click();
+  }
+  function pressable(btn, a, all, atOnce) {
     var word = btn.textContent, waiting = null, pressedBox = null;
     function lock(on) { all.forEach(function (o) { if (o.btn !== btn && o.a.may) o.btn.disabled = on; }); }
     function back() { btn.textContent = word; btn.classList.remove('pending'); btn.removeAttribute('aria-label'); }
@@ -3752,6 +3790,7 @@ var create = function (ROOT, CFG, opts) {
       var pb = boxOfAct(a);
       pressedBox = pb && !actsUnsure && hash === actsHash && savedBox(pb, a.box[1]) ? pb : null;
       lock(true);
+      if (atOnce) { send(); return; }
       btn.textContent = 'Undo'; btn.classList.add('pending'); btn.setAttribute('aria-label', 'Undo ' + word);
       waiting = setTimeout(send, UNDO_MS);
     });

@@ -211,7 +211,9 @@ def share(text_: str, by: str, date: str) -> str:
     return set_keys(text_, {"visibility": "project", "shared": f"{by} {date}"})
 
 
-_BOX_RE = re.compile(r"(\s*[-*+] \[)([ xX])(\] (Share|Stop James)(?:\s+@\S+)?\s*)")
+_BOX_RE = re.compile(r"(\s*[-*+] \[)([ xX])(\] (Shared with the team|Share|Stop James)(?:\s+@\S+)?\s*)")
+# Share's tick box says it in its own words (9.11); the word is Share. The_list.LABELS holds the same, and imports this module.
+_LABELS = {"Shared with the team": "Share"}
 
 
 def unshare(text_: str) -> str:
@@ -242,7 +244,7 @@ def _share_box(text_: str) -> str | None:
     for b in split_md_blocks(text_):
         if b.kind == "list":
             for line in _lines(b.content):
-                if (m := _BOX_RE.fullmatch(line)) and m.group(4) == "Share":
+                if (m := _BOX_RE.fullmatch(line)) and _LABELS.get(m.group(4), m.group(4)) == "Share":
                     marks.add(m.group(2).lower())
     return "x" if "x" in marks else (" " if marks else None)
 
@@ -257,7 +259,7 @@ def _flipped(toggled, was_marks: str, now_marks: str) -> set:
             m, n = _BOX_RE.fullmatch(was), _BOX_RE.fullmatch(now)
             if m and n and m.group(2) in was_marks and n.group(2) in now_marks \
                     and (m.group(1), m.group(3)) == (n.group(1), n.group(3)):
-                words.add(m.group(4))
+                words.add(_LABELS.get(m.group(4), m.group(4)))
     return words
 
 

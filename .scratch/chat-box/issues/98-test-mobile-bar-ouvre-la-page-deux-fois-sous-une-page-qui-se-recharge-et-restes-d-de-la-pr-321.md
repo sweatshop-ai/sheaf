@@ -9,4 +9,4 @@
 
 **Claimed by:** Ignacio 2026-11-14 19:45
 
-**Status:** in-progress
+**Status:** done (PR 331, merge e729023)

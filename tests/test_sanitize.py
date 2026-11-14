@@ -455,3 +455,14 @@ def test_a_tree_nested_hundreds_of_levels_deep_is_cleaned_like_a_shallow_one():
     assert out.count("<blockquote>") == n and "<p>KEEP<img/></p>" in out
     assert "script" not in out and "onerror" not in out and "javascript:" not in out
     assert len(log) == 3
+
+
+@pytest.mark.parametrize("decl", ["-webkit-user-modify: read-write", "-WEBKIT-USER-MODIFY:read-write-plaintext-only",
+                                  "-moz-user-modify: read-write", "user-modify: read-write",
+                                  "-webkit-user-\\6d odify: read-write", "/*;*/-webkit-user-modify: read-write"])
+def test_a_style_attribute_cannot_make_text_editable(decl):
+    """CSS makes a span editable in Chromium and WebKit (tests/page/test_user_modify.py), and the page's
+    closest('[contenteditable="true"]') does not see it. The other declarations of the attribute stay."""
+    out = sanitize(f'<p>a<span style="color: red; {decl}; width: 3px">b</span></p>')
+    assert "modify" not in out.lower() and "\\" not in out
+    assert "color: red" in out and "width: 3px" in out

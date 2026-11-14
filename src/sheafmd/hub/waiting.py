@@ -86,7 +86,8 @@ class Waiting:
     def _change(self, change):
         """`change(rows)` on the file as it is now, under both locks; it returns `(result, save)`. The page's events
         and the log rows of the change are held and sent after the write, still under the locks, so a snapshot (`waits`, which reads
-        under the thread lock) never shows a state older than an event the page has heard."""
+        under the thread lock) never shows a state older than an event the page has heard. A held step that raises does not
+        cost the others theirs: the first error is raised after all of them, the later ones attached to it as notes."""
         with self._lock, file_locked("tells.lock"):
             rows = [r for r in read_json(_file(), []) if isinstance(r, dict)]
             filled = self._name_old_rows(rows)
@@ -108,7 +109,10 @@ class Waiting:
                 try:
                     go()
                 except Exception as e:
-                    failed = failed or e
+                    if failed is None:
+                        failed = e
+                    else:
+                        failed.add_note(repr(e))
             if failed is not None:
                 raise failed
             return result

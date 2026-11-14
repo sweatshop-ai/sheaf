@@ -9,6 +9,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -442,7 +443,8 @@ def test_a_changed_event_is_read_under_the_tells_lock_so_it_never_says_queued_af
     def publish(event, data):
         taker = threading.Thread(target=lambda: answers.append(documents(browser, token)))
         taker.start()
-        blocked.wait(5)                      # held back: the taker waits on the lock; not held back: it went by and sent `tell-seen`
+        while not (blocked.is_set() or not taker.is_alive()):   # held back: the taker waits on the lock; not held back: it went by and sent `tell-seen`
+            time.sleep(0.001)
         real(event, data)
     live._publish = publish
     live.rebuild()
@@ -579,9 +581,9 @@ def test_a_listing_that_only_finds_a_revoked_row_writes_its_end_so_the_next_pass
     assert len(named(sub.drain(), "tell-cancelled")) == 1 and len(hub_rows("tell-cancelled")) == 1
 
 
-def test_a_held_step_that_raises_leaves_the_others_of_the_change_sent_and_the_error_reaches_the_caller(browser, talk, plan):
+def test_a_held_step_that_raises_leaves_the_others_of_the_change_sent_and_the_error_reaches_the_caller(browser, talk, plan, monkeypatch):
     agent_token()
-    bob = agent_token("bob-claude", client="Claude")
+    agent_token("bob-claude", client="Claude")
     target(browser, "bob-claude")
     assert tell(browser).status == 200
     target(browser)
@@ -598,12 +600,32 @@ def test_a_held_step_that_raises_leaves_the_others_of_the_change_sent_and_the_er
         if len(calls) == 1:
             raise RuntimeError("the log is gone")
         return real(kind, *a, **kw)
-    browser.hub.record = record
+    monkeypatch.setattr(browser.hub, "record", record)
     with pytest.raises(RuntimeError, match="the log is gone"):
         browser.hub.waiting_tells.sweep()
-    browser.hub.record = real
+    monkeypatch.setattr(browser.hub, "record", real)
     assert len(named(sub.drain(), "tell-cancelled")) == len(calls) == 2 and len(hub_rows("tell-cancelled")) == 1
     assert json.loads(Path(sheafmd.paths.state_dir(), "tells.json").read_text(encoding="utf-8")) == []
+
+
+def test_the_other_errors_of_held_steps_ride_on_the_first_as_notes(browser, talk, plan, monkeypatch):
+    agent_token()
+    agent_token("bob-claude", client="Claude")
+    target(browser, "bob-claude")
+    assert tell(browser).status == 200
+    target(browser)
+    comment(plan, quote="First paragraph", body="Why apples?")
+    assert tell(browser, id="c2").status == 200
+    Tokens().revoke("ada-chatgpt")
+    Tokens().revoke("bob-claude")
+    errors = [RuntimeError("the log is gone"), OSError(5, "and the disk too")]
+
+    def record(kind, *a, **kw):
+        raise errors.pop(0)
+    monkeypatch.setattr(browser.hub, "record", record)
+    with pytest.raises(RuntimeError, match="the log is gone") as caught:
+        browser.hub.waiting_tells.sweep()
+    assert caught.value.__notes__ == [repr(OSError(5, "and the disk too"))]
 
 
 def test_a_listing_that_only_finds_a_revoked_row_fails_on_a_disk_that_refuses_writes_as_a_sweep_does(browser, talk, monkeypatch):

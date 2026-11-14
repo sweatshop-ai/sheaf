@@ -446,14 +446,21 @@ def parse(md: str) -> Parsed:
     return Parsed(comments, malformed)
 
 
-def next_id(parsed: Parsed) -> str:
+def next_id_in(md: str) -> str:
+    """The first free `cN` in the document. Pandoc deletes a CR inside the opener of a comment (`<!\r--`, `id\r=c1`) and
+    shows the comment, so its id counts, though `parse` does not see it as written: the document is read both ways."""
+    return next_id(parse(md), *([parse(md.replace("\r", ""))] if "\r" in md else []))
+
+
+def next_id(parsed: Parsed, *more: Parsed) -> str:
+    """The first free `cN`. `more` are other readings of the same document (without its CRs, say), whose ids count too."""
     n = 0
-    for c in parsed.comments:
+    for c in [c for p in (parsed, *more) for c in p.comments]:
         m = re.fullmatch(r"c(\d+)", c.id)
         if m:
             n = max(n, int(m.group(1)))
-    for mm in parsed.malformed:
-        m = re.search(r"\bid=c(\d+)", mm.text)
+    for mm in [mm for p in (parsed, *more) for mm in p.malformed]:
+        m = re.search(r"\bid=c(\d+)", mm.text.replace("\r", ""))
         if m:
             n = max(n, int(m.group(1)))
     return f"c{n + 1}"
@@ -743,14 +750,25 @@ def projection(block: str) -> Projection:
     return Projection("".join(text), chars)
 
 
+def _kept(block: str) -> list[int]:
+    """The offsets of `block` that pandoc keeps: every one but a CR, which it deletes before it reads anything."""
+    return [i for i, ch in enumerate(block) if ch != "\r"]
+
+
+def _unstrip(keep: list[int], at: int, block: str) -> int:
+    """The offset in `block` of offset `at` in the block without its CRs: right after the character before it, so
+    a run of CRs that follows stays after the point (`Title|\r\n`), and the block's first character for 0."""
+    if at:
+        return keep[at - 1] + 1
+    return keep[0] if keep else len(block)
+
+
 def anchor_point(block: str, start: int, end: int, quote: str) -> int:
     """Offset in `block` where a comment on the selection [start, end) goes."""
     if "\r" in block:
         # Pandoc deletes a CR and counts its columns without it, so the point is found in the block without its CRs
-        # and given back as an offset in the block itself, before the next character that stays.
-        keep = [i for i, ch in enumerate(block) if ch != "\r"]
-        at = anchor_point(block.replace("\r", ""), start, end, quote)
-        return keep[at] if at < len(keep) else len(block)
+        # and given back as an offset in the block itself.
+        return _unstrip(_kept(block), anchor_point(block.replace("\r", ""), start, end, quote), block)
     proj = projection(block)
     if end <= start or proj.text[start:end] != squash(quote):
         raise AnchorError("the text changed since the page was rendered, select it again")
@@ -804,9 +822,8 @@ def heading_anchor(block: str) -> int | None:
     them so, and a heading may begin after four of them), given back as an offset in the block itself."""
     if "\r" not in block:
         return _heading_anchor(block)
-    keep = [i for i, ch in enumerate(block) if ch != "\r"]
     at = _heading_anchor(block.replace("\r", ""))
-    return None if at is None else (keep[at] if at < len(keep) else len(block))
+    return None if at is None else _unstrip(_kept(block), at, block)
 
 
 def _heading_anchor(block: str) -> int | None:
@@ -863,7 +880,10 @@ def in_table_row(block: str, point: int) -> bool:
 
 
 def _in_table_row_by_markers(block: str, point: int) -> bool:
-    """The rows as the splitter reads them: the container markers read by hand, as far as they go."""
+    """The rows as the splitter reads them: the container markers read by hand, as far as they go. Read without the
+    CRs pandoc deletes (a CR before a `>` or in a delimiter row does not make the table another block)."""
+    if "\r" in block:
+        return _in_table_row_by_markers(block.replace("\r", ""), sum(1 for i in _kept(block) if i < point))
     lines = block.split("\n")
     n = block.count("\n", 0, point)
     bare = []
@@ -892,7 +912,13 @@ def cell_end(block: str, point: int, cells: bool = True, code=None) -> int:
     hiding the words it was meant to hold. Where the cell's end is inside a code span that `parse` reads
     across cells (pandoc splits the cells first), the block stays after the selection: written there it
     would be code to `parse`, and the comment lost. `code` is the inline code ranges that pandoc reads
-    in a quote or a list (`_read_tables`), which `parse` masks the same way."""
+    in a quote or a list (`_read_tables`), which `parse` masks the same way. Read without the CRs pandoc
+    deletes, so a backslash or spaces before a CR and the pipe still stand before the pipe."""
+    if "\r" in block:
+        keep = _kept(block)
+        if code is not None:
+            code = tuple((sum(1 for i in keep if i < x), sum(1 for i in keep if i < y)) for x, y in code)
+        return _unstrip(keep, cell_end(block.replace("\r", ""), sum(1 for i in keep if i < point), cells, code), block)
     line_start = block.rfind("\n", 0, point) + 1
     eol = block.find("\n", point)
     line_end = len(block) if eol < 0 else eol
@@ -975,7 +1001,7 @@ def add_comment(md: str, block: int, start: int, end: int, quote: str, body: str
     b = blocks[block]
     _check_kind(b)
     at_off = comment_point(b.kind, b.content, start, end, quote)
-    c = Comment(id=next_id(parse(md)), by=by, at=at, status="open",
+    c = Comment(id=next_id_in(md), by=by, at=at, status="open",
                 quote=" ".join(quote.split()), body=body.strip("\n"))
     raw = format(c, one_line=b.kind in ONE_LINE_KINDS or in_table_row(b.content, at_off))
     pos = _block_offsets(blocks)[block] + at_off

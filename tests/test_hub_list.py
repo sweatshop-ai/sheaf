@@ -1980,3 +1980,42 @@ def test_a_cr_never_makes_the_tick_land_on_a_mark_in_a_code_block(src, k):
     fragment = ticked_html(block, k)
     out = _toggle_boxes(block, fragment) if fragment else None
     assert out is None or out == src.replace("- \r[ ] B", "- \r[x] B")
+
+
+@pytest.mark.parametrize("src", [
+    '- [ ]\n- - [ ] x\n',               # pandoc 3.9 draws no box for the empty item; `- - [ ] x` is a box the marks miss
+    '- [ ]\r\n- - [ ] x\r\n',
+    '- [ ]\n-\r - [ ] x\n',
+])
+def test_a_tick_never_lands_on_an_empty_task_item_standing_for_a_box_it_cannot_find(src):
+    # The marks and the boxes drawn were the same in number and state, but not the same items: the tick
+    # of "x" was written on the empty item's line (measured on pandoc 3.9, no CR needed).
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes, ticked_html
+    block = split_md_blocks(src)[0]
+    fragment = ticked_html(block, 0)
+    out = _toggle_boxes(block, fragment) if fragment else None
+    assert out is None
+
+
+@pytest.mark.parametrize("src, k", [
+    ('- [ ]\n-\r [ ] b\n', 0),          # c2 of ticket 113: the page ticks b, the save used to tick the other line
+    ('- [ ]\n- [ ]\r b\n', 0),
+    ('- [ ]\n- [ ] b\n', 0),
+])
+def test_an_empty_task_item_next_to_a_box_never_takes_its_tick(src, k):
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes, ticked_html
+    block = split_md_blocks(src)[0]
+    fragment = ticked_html(block, k)
+    out = _toggle_boxes(block, fragment) if fragment else None
+    assert out is None or out.splitlines()[0].replace("\r", "") == "- [ ]"
+
+
+def test_a_task_mark_read_through_crs_refuses_a_group_it_does_not_have():
+    from sheafmd.edit import task_marks
+    m = task_marks("\r- [ ] a\n")[0]
+    assert (m.start(), m.start(2), m.end(2), m.group(2)) == (0, 4, 5, " ")
+    for call in (lambda: m.group(1), lambda: m.start(1), lambda: m.end(1), lambda: m.end(0)):
+        with pytest.raises(IndexError):
+            call()

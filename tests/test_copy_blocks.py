@@ -279,3 +279,17 @@ def test_only_upper_case_cdata_opens_an_html_block_before_an_underline(opener):
 ])
 def test_a_tab_counts_as_the_columns_it_spans_when_a_line_opens_a_block(line, opens):
     assert copyblock.is_copy_block(f"> [!COPY]\n> a\n{line}\n> ---") is opens
+
+
+@pytest.mark.parametrize("quote, copy", [
+    ("> [!COPY]\n> a\n===", True),                  # a lazy line is never an underline
+    ("> [!COPY]\n> a\n==", True),
+    ("> [!COPY]\n> a\n> ===", False),
+    ("> [!COPY]\n> a\n>\t  ---", True),             # 4 columns: paragraph text
+    ("   > [!COPY]\n> a\n   >\t ===", True),
+    ("> [!COPY]\n> a\n> \t---", False),             # 3 columns: an underline
+    ("> [!COPY]\n> a\n> - x\n> ---", True),    # a no-break space after a bullet is an item, not a blank
+    ("> [!COPY]\n> a\n> 1. x\n> ---", True),
+])
+def test_the_underline_and_list_rules_read_the_source_as_pandoc_does(quote, copy):
+    assert copyblock.is_copy_block(quote) is copy

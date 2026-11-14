@@ -57,7 +57,7 @@ L'agent sait quand un texte est fait pour être copié. Il l'écrit dans un bloc
 | 10 | Le test d'Échap échoue de temps en temps en CI : trouver la cause | Rien | Fait (fix 047a057, on main via 7dae7b2 (PR 241) |
 | 11 | fillPopover ramène le curseur dans le premier formulaire | 04 | Fait |
 | 12 | Revue Codex de la fusion cdb0e24 | Rien | Fait |
-| 13 | Bloc à copier : une ligne qui ouvre un bloc HTML avant `---` rend le bloc en citation simple | 05 | À faire |
+| 13 | Bloc à copier : une ligne qui ouvre un bloc HTML avant `---` rend le bloc en citation simple | Rien | Fait (PR 289, merge 5767d19) |
 | 14 | Un brouillon réduit dont on vide le champ reste dans le stockage | 04 | Fait (PR 245, merged as 81afdff) |
 | 15 | La liste « not sent » est calculée avant que la boîte ouverte y mette son texte | 04 | Fait (PR 245, merged as 81afdff) |
 | 16 | Un fil en lecture seule n'a pas de bouton Fermer | 04 | Fait (PR 245, merged as 81afdff) |
@@ -113,6 +113,7 @@ L'agent sait quand un texte est fait pour être copié. Il l'écrit dans un bloc
 | 66 | Titres : un balayage quadratique et un accent grave dans un commentaire fermé, restes de la revue Opus 1 de la PR 286 | Rien | À faire |
 | 67 | Une touche refusée dans un bloc `contenteditable` imbriqué n'a pas de marque, et les restes de la revue Opus 3 de la PR 287 | Rien | À faire |
 | 68 | Cellules de tableau : `<!-->` refusé, le merge sur un dernier rang sans `|` final, et trois cas que `parse` ou le découpeur de blocs lisent autrement que pandoc, restes des revues Opus de la PR 288 | Rien | À faire |
+| 69 | Bloc à copier : `<![CDATA[` insensible à la casse, colonnes de tabulation et commentaire de `is_copy_block`, restes de la revue Opus 1 de la PR 289 | Rien | À faire |
 
 ## Ce qui reste ouvert
 

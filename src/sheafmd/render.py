@@ -59,8 +59,8 @@ class UnclosedComment(RenderError):
             # `<!-->` and `<!--->`: a browser and pandoc end them at once, the strip does not know them.
             super().__init__(
                 f"line {line} holds {empty}, an empty HTML comment, and the share copy cannot "
-                "read it: it takes a comment to run to the next -->, which would drop text the "
-                "page shows. Remove it, or write it as a comment with a body, and share again.")
+                "read it (its strip only knows comments that end with a later -->), so it is refused "
+                "rather than copied. Remove it, or write it as a comment with a body, and share again.")
             return
         if unreadable:
             # The check could not read pandoc's tree, so it cannot say whether the stretch
@@ -1039,9 +1039,11 @@ def build(md: Path, *, theme: Theme, share: bool = True, title: str | None = Non
         if line:
             text = original.split("\n")[line - 1]
             head = rdc.COMMENT_RE.search(text)
+            spans = [x.span() for x in COMMENT_RE.finditer(text)]
             first = next((m for m in re.finditer(r"<!--", text)
-                          if not any(a <= m.start() < b for a, b in (x.span() for x in COMMENT_RE.finditer(text)))), None)
-            empty = re.match(r"<!---?>", text[first.start():]) if first else None
+                          if not any(a <= m.start() < b for a, b in spans)), None)
+            # A reviewer's note that nothing closes is named before an empty opener on its line.
+            empty = None if head else re.match(r"<!---?>", text[first.start():]) if first else None
             raise UnclosedComment(line, note=bool(head), empty=empty.group() if empty else "")
         log.append("  ! pandoc produced an HTML comment in the share copy; it was removed")
         frag = strip_comments(frag, log)

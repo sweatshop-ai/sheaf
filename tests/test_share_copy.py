@@ -730,6 +730,31 @@ def test_text_in_code_between_a_quoted_opener_and_a_later_arrow_is_lost_by_decis
     assert any("internal note removed" in line for line in log)
 
 
+@pytest.mark.parametrize("opener", ["<!-->", "<!--->"])
+@pytest.mark.parametrize("text", [
+    "# A {o} b <!-- note -->\n\nKEEP1 para.\n",            # a heading, then a comment
+    "A {o} b <!-- note --> c\n\nKEEP1 para.\n",            # the same in a paragraph
+    "# A {o} b\n\nKEEP1 para.\n",                          # no comment after it at all
+])
+def test_an_empty_comment_opener_refuses_the_share_copy_by_decision(tmp_path, opener, text):
+    # Decided and final (ticket 72): `render.COMMENT_RE` does not know `<!-->`, and teaching it
+    # would change what a link destination (`[l](http://x/<!-->)`) points to, where pandoc reads
+    # the same characters as part of the address: what they mean depends on where they stand. So
+    # the copy is refused, naming the line (with or without a comment after it), and nothing is
+    # lost in silence. SPEC 6.2 states the limit.
+    text = text.replace("{o}", opener)
+    assert opener in text
+    with pytest.raises(sheafmd.UnclosedComment) as e:
+        sheafmd.render(doc(tmp_path, text))
+    assert e.value.line == 1
+    assert "KEEP1" not in str(e.value)
+
+
+def test_the_same_heading_without_the_empty_opener_makes_a_copy(tmp_path):
+    out = sheafmd.render(doc(tmp_path, "# A b <!-- note -->\n\nKEEP1 para.\n"))
+    assert "KEEP1" in out and "note" not in out
+
+
 def test_a_tooltip_title_is_not_counted_so_a_comment_in_one_takes_its_words_by_decision(tmp_path):
     # Decided and final: a title is a tooltip, not text the page shows. A comment
     # inside one is removed with whatever it holds, and the copy is made.

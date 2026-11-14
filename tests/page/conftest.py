@@ -208,7 +208,8 @@ def until_live(page, pattern, log):
         try:
             with stalls_after(8, "a route's probe"):
                 caught = page.evaluate(probe) == 204
-        except (Exception, PageStalled):
+        except (Exception, PageStalled) as e:
+            log.append((time.time(), f"route {pattern} not probed: {str(e).splitlines()[0][:100]}"))
             return
         if caught:
             if tries > 1:
@@ -274,7 +275,7 @@ def hub_journal(monkeypatch):
             log.append((time.time(), f"{_name}.route({url}) asked"))
             out = _route(self, url, called, *a, **kw)
             log.append((time.time(), f"{_name}.route({url}) registered"))
-            if isinstance(url, str) and n > 0 and "times" not in kw:     # `times=` counts the probe as a use
+            if isinstance(url, str) and n > 0 and "times" not in kw and not a:     # `times=` counts the probe as a use
                 until_live(self if _name == "Page" else (self.pages[0] if self.pages else None), url, log)
             return out
 

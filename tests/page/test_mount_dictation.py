@@ -76,7 +76,9 @@ def _refuse_and_remount(front, site, status):
     front.page.evaluate("window.__page.remount()")
     until(lambda: front.js("return root.querySelector('main') && root.querySelector('main').__old === undefined;")
           and front.has(".rd-badge"), what="the remounted page")
-    front.click(".rd-badge")
+    front.page.wait_for_timeout(500)
+    if not front.has(FIELD):      # the remount keeps the thread open, so a click on the badge would close it
+        front.click(".rd-badge")
     front.page.wait_for_selector(FIELD)
     front.page.wait_for_timeout(300)
 

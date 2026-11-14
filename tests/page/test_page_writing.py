@@ -4722,7 +4722,8 @@ def test_typing_while_a_save_has_no_answer_is_said_once_and_the_block_shows_it_i
 
 def test_no_text_field_is_in_main_so_the_save_guard_never_sees_a_key_typed_in_a_form(tab):
     """chat-box 46: the guard refusing keys while a save is out is on `main`. The comment form is in the popover,
-    outside it, and the document is sanitized of text fields, so a refused key always has a block to mark."""
+    outside it, and the sanitizer removes every input that is not exactly a checkbox (tests/test_sanitize.py), so a
+    refused key always has a block to mark."""
     p = tab.page
     tab.open()
     assert p.evaluate("document.querySelectorAll('main textarea, main input:not([type=checkbox])').length") == 0

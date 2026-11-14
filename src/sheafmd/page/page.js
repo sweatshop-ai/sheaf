@@ -3742,6 +3742,8 @@ var create = function (ROOT, CFG, opts) {
       boxWaits.add(box);
       try { ok = await save(true, res); } finally { boxWaits.delete(box); }
       // Not on an owed save either: Share is sent to the hub, and the owed edits would be merged over it when they go.
+      // A save the hub did not take and that said nothing (quiet) is told here, or the press looks dropped.
+      if (!ok && res.owed) say('The hub is unreachable: press Share again once it is back.', true);
       if (!ok || stale || docGone || !main.contains(box)) return;
       x = toggleOf.get(box);
       if (!x) return;

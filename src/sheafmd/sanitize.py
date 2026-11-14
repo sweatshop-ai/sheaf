@@ -62,8 +62,9 @@ _ANIMATED_ATTR = re.compile(r"^(?:xlink:)?href$|^on", re.I)
 
 URL_ATTRS = frozenset({"href", "src", "action", "poster", "background", "xlink:href"})
 # Attributes that go whatever they hold. srcset (several URLs, each loaded) and ping (a
-# POST to each URL on a click) carry addresses that 9.5's list does not allow. contenteditable is the page's own to
-# set (setEditing): a surface the document makes editable is outside what the page guards.
+# POST to each URL on a click) carry addresses that 9.5's list does not allow.
+# contenteditable is the page's own to set (setEditing): a surface the document makes
+# editable is outside what the page guards.
 DROPPED_ATTRS = frozenset({"srcdoc", "formaction", "srcset", "ping", "contenteditable"})
 SAFE_SCHEMES = frozenset({"http", "https", "mailto", "file"})
 _SAFE_DATA = re.compile(r"^data:image/(?:png|jpeg|gif|webp)[;,]", re.I)
@@ -174,6 +175,15 @@ def _flatten_deep(soup, log: list[str]) -> None:
             node.replace_with(node.get_text())
             continue
         stack.extend((child, depth + 1) for child in node.contents)
+
+
+def _without_user_modify(value: str) -> str:
+    """A style attribute without the declarations that make text editable (`-webkit-user-modify`, `-moz-user-modify`,
+    `user-modify`): Chromium and WebKit let the reader type into such a span, and the page does not guard it. A declaration with
+    a backslash is dropped too, and the whole declaration is searched, not the text before its colon, so a comment before
+    the name does not hide it, whatever the comment holds."""
+    kept = [d for d in value.split(";") if not re.search(r"user-modify|\\", d, re.I)]
+    return ";".join(kept)
 
 
 def _mount_style(value: str) -> str:
@@ -308,6 +318,8 @@ def _pass(fragment: str, comments: bool, log: list[str], mount: bool = False) ->
             if a.startswith("on") or a in DROPPED_ATTRS:
                 log.append(f"  - {attr} removed from <{name}>")
                 del tag[attr]
+            elif a == "style" and not mount:
+                tag[attr] = _without_user_modify(str(tag[attr]))
             elif a in URL_ATTRS:
                 value = tag[attr]
                 if isinstance(value, list):

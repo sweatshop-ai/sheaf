@@ -1,10 +1,10 @@
 """
-sheafmd.hub.transcribe — the dictation relay (SPEC 8.5, 9.5): the hub asks t-compute whether it can transcribe,
-and sends it the audio a page recorded, so the key never reaches a page.
+sheafmd.hub.transcribe — the dictation relay (SPEC 8.5, 9.16): the hub sends the audio a page recorded to a
+provider of the standard speech-to-text API (`POST <url>/audio/transcriptions`), so the key never reaches a page.
 
     load()                 the `[transcribe]` table of config.toml, checked; None without one
     parse(table, where)    the same for a table already read (the tests build one)
-    Relay(cfg)             .available() (kept 30 s) and .transcribe(audio, ext)
+    Relay(cfg)             .available() (no request is made) and .transcribe(audio, ext)
 
 The key is read from `key_file` at each call and goes to the host of `url` only: no redirect is followed and
 no proxy of the environment is used. It is never written to a row or an answer.
@@ -25,34 +25,40 @@ from urllib.parse import urlparse
 
 from .. import config, paths
 
-KEYS = {"url": str, "key_file": str, "key_name": str, "per_minute": int, "per_hour": int}
-KEPT = 30            # seconds an availability answer is kept
-TIMEOUT = 30         # seconds t-compute has to transcribe
-CHECK_TIMEOUT = 3
+KEYS = {"url": str, "model": str, "key_file": str, "key_name": str, "per_minute": int, "per_hour": int}
+KEPT = 30            # seconds dictation stays off after no answer or a 503
+TIMEOUT = 30         # seconds the provider has to transcribe
+MODEL = re.compile(r"[A-Za-z0-9._:/-]{1,100}")
 MIME = {"webm": "audio/webm", "mp4": "audio/mp4", "ogg": "audio/ogg"}
+
+
+class Called(Exception):
+    """What the relay raises: `status` is the provider's answer (0 for none), absent when no call was made."""
+    status: int | None = None
 
 
 class TranscribeError(Exception):
     """A `[transcribe]` table that cannot be used. The message names the file."""
 
 
-class Busy(Exception):
-    """Another relay is running, or the budget is spent: a 429."""
+class Busy(Called):
+    """Another relay is running, the budget is spent, or the provider said 429: a 429."""
 
 
-class Unavailable(Exception):
-    """Dictation is off or t-compute failed to answer: a 503."""
+class Unavailable(Called):
+    """Dictation is off or the provider failed to answer: a 503."""
 
 
-class Failed(Exception):
-    """t-compute answered and the answer is no text: a 502."""
+class Failed(Called):
+    """The provider answered and the answer is no text: a 502."""
 
 
 @dataclass(frozen=True)
 class Config:
     url: str
+    model: str
     key_file: Path
-    key_name: str = "RAG_API_KEY"
+    key_name: str = "TRANSCRIBE_API_KEY"
     per_minute: int = 12
     per_hour: int = 120
 
@@ -72,23 +78,27 @@ def parse(t: dict, where) -> Config:
             raise TranscribeError(f"unknown key '{key}' in {here}")
         if not isinstance(value, KEYS[key]) or isinstance(value, bool):
             raise TranscribeError(f"'{key}' must be {'a number' if KEYS[key] is int else 'text'}, not {value!r}, in {here}")
-    for key in ("url", "key_file"):
+    for key in ("url", "model", "key_file"):
         if key not in t:
-            raise TranscribeError(f"'{key}' is missing from {here}")
+            hint = " (since 2026-11 `url` is the base ending in /v1, and `model` is required)" if key == "model" else ""
+            raise TranscribeError(f"'{key}' is missing from {here}{hint}")
     u = urlparse(t["url"])
     try:
-        explicit = u.scheme in ("http", "https") and bool(u.hostname) and u.username is None and u.port != 0
+        explicit = (u.scheme in ("http", "https") and bool(u.hostname) and u.username is None and u.port != 0
+                    and not u.query and not u.fragment)
     except ValueError:
         explicit = False
     if not explicit:
-        raise TranscribeError(f"'url' must be http:// or https:// with a host and no login, in {here}: {t['url']!r}")
+        raise TranscribeError(f"'url' must be http:// or https:// with a host, no login, no query and no fragment, in {here}: {t['url']!r}")
+    if not MODEL.fullmatch(t["model"]):
+        raise TranscribeError(f"'model' must be 1 to 100 letters, digits or . _ : / -, in {here}: {t['model']!r}")
     key_file = Path(t["key_file"]).expanduser()
     if not key_file.is_absolute():
         raise TranscribeError(f"'key_file' must be an absolute path, in {here}: {t['key_file']!r}")
-    name = t.get("key_name", "RAG_API_KEY")
+    name = t.get("key_name", "TRANSCRIBE_API_KEY")
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
         raise TranscribeError(f"'key_name' must be the name of a variable, in {here}: {name!r}")
-    cfg = Config(t["url"].rstrip("/"), key_file, name, t.get("per_minute", 12), t.get("per_hour", 120))
+    cfg = Config(t["url"].rstrip("/"), t["model"], key_file, name, t.get("per_minute", 12), t.get("per_hour", 120))
     if cfg.per_minute < 1 or cfg.per_hour < 1:
         raise TranscribeError(f"'per_minute' and 'per_hour' must be at least 1, in {here}")
     return cfg
@@ -102,7 +112,7 @@ def _resolve(host, port):
         return []
 
 
-def _call(method, url, headers, body=None, timeout=CHECK_TIMEOUT) -> tuple[int, bytes]:
+def _call(method, url, headers, body=None, timeout=TIMEOUT) -> tuple[int, bytes]:
     """(status, body); a connection that fails is a 0. A 3xx is an answer, not a road: http.client follows no
     redirect and reads no proxy variable. `timeout` bounds the whole call, name lookup and connection included, not
     each step: at that moment a timer shuts the socket down, so a service that answers a byte at a time ends there.
@@ -169,12 +179,19 @@ def _call(method, url, headers, body=None, timeout=CHECK_TIMEOUT) -> tuple[int, 
             sock.close()
 
 
+def _with(error: Called, status: int) -> Called:
+    error.status = status
+    return error
+
+
 class Relay:
     def __init__(self, cfg: Config, clock=time.monotonic, record=lambda kind, **detail: None):
         self.cfg, self.clock, self.record = cfg, clock, record
         self._state = threading.Lock()
         self._busy = threading.Lock()
-        self._known: tuple[bool, float] | None = None        # (available, when it was found)
+        self._off_until = 0.0                                # no answer or a 503: off until then
+        self._stay_off: tuple | None = None                  # a 401, 403 or 404: off while the key file is this one
+        self._said: set[int] = set()                         # the refusals already written down
         self._used: deque = deque()                          # when each relay started
         self._refused = False                                # the open key file has been said once
 
@@ -184,8 +201,8 @@ class Relay:
             self._refused = True
             self.record("transcribe-key-file", reason=why)
 
-    def _key(self) -> str | None:
-        """The key, or None: a file that is not a regular file of the hub's account with mode 0600, or that has no
+    def _key(self) -> tuple[str, tuple] | None:
+        """The key with the stamp of its file (mtime, ctime, size, inode), or None: a file that is not a regular file of the hub's account with mode 0600, or that has no
         such line, is not used. Opened without blocking (a FIFO would hang the open) and never through a symlink."""
         try:
             fd = os.open(self.cfg.key_file, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -200,41 +217,45 @@ class Relay:
                 os.close(fd)
                 self._refuse("the key file is not a regular file of the hub's account with mode 0600")
                 return None
+            stamp = (st.st_mtime_ns, st.st_ctime_ns, st.st_size, st.st_ino)
             f = os.fdopen(fd, "r", encoding="utf-8", errors="replace")
             wrapped = True
             with f:
                 for line in f.read().splitlines():
                     m = re.fullmatch(rf"\s*(?:export\s+)?{re.escape(self.cfg.key_name)}\s*=\s*(.*?)\s*", line)
                     if m:
-                        return m.group(1).strip("\"'") or None
+                        value = m.group(1).strip("\"'")
+                        return (value, stamp) if value else None
         except OSError as e:
             if not wrapped:
                 os.close(fd)
             self._refuse(f"the key file cannot be read ({e.strerror})")
         return None
 
-    def _check(self) -> bool:
-        key = self._key()
-        if key is None:
-            return False
-        status, body = _call("GET", f"{self.cfg.url}/status", {})
-        try:
-            ready = status == 200 and json.loads(body)["whisper"]["ready"] is True
-        except (ValueError, KeyError, TypeError):
-            return False
-        return ready and _call("GET", f"{self.cfg.url}/audio/gpu-status", {"X-API-Key": key})[0] == 200
-
     def available(self) -> bool:
-        """Whether dictation can be offered now; asked of t-compute at most once in 30 seconds."""
+        """Whether dictation can be offered now: the table is there and the key file is usable. No request is made.
+        Off for 30 seconds after no answer or a 503, and after a 401, 403 or 404 for as long as the key file is the
+        one that was refused (a new key at the same path is noticed; a changed table needs the hub's restart)."""
         with self._state:
-            now = self.clock()
-            if self._known is None or now - self._known[1] >= KEPT:
-                self._known = (self._check(), now)
-            return self._known[0]
+            read = self._key()
+            if read is None:
+                return False
+            if self._stay_off is not None:
+                if self._stay_off == read[1]:
+                    return False
+                self._stay_off = None
+            return self.clock() >= self._off_until
 
-    def _unavailable(self):
+    def _failed(self, status: int, stamp: tuple):
+        """Write down the status of a call that is a setup error, once per code and hub, and turn dictation off."""
         with self._state:
-            self._known = (False, self.clock())
+            if status in (401, 403, 404):
+                self._stay_off = stamp
+                if status not in self._said:
+                    self._said.add(status)
+                    self.record("transcribe-refused", status=status)
+            else:
+                self._off_until = self.clock() + KEPT
 
     def _spend(self):
         """One relay of the budget, or Busy."""
@@ -255,25 +276,29 @@ class Relay:
             raise Busy("a dictation is already being transcribed")
         try:
             self._spend()
-            key = self._key()
-            if key is None:
+            read = self._key()
+            if read is None:
                 raise Unavailable("dictation is not available")
+            key, stamp = read
             edge = secrets.token_hex(16)
-            body = (f'--{edge}\r\nContent-Disposition: form-data; name="file"; filename="dictee.{ext}"\r\n'
+            body = (f'--{edge}\r\nContent-Disposition: form-data; name="model"\r\n\r\n{self.cfg.model}\r\n'
+                    f'--{edge}\r\nContent-Disposition: form-data; name="file"; filename="dictee.{ext}"\r\n'
                     f"Content-Type: {MIME[ext]}\r\n\r\n").encode() + audio + f"\r\n--{edge}--\r\n".encode()
-            status, reply = _call("POST", f"{self.cfg.url}/audio/transcribe",
-                                  {"X-API-Key": key, "X-Priority": "high",
+            status, reply = _call("POST", f"{self.cfg.url}/audio/transcriptions",
+                                  {"Authorization": f"Bearer {key}",
                                    "Content-Type": f"multipart/form-data; boundary={edge}"}, body, TIMEOUT)
-            if status in (0, 401, 403, 503):                  # no answer, a refused key or a model that is down
-                self._unavailable()
-                raise Unavailable("dictation is not available")
+            if status in (0, 401, 403, 404, 503):             # no answer, a refused key, no such route or a service that is down
+                self._failed(status, stamp)
+                raise _with(Unavailable("dictation is not available"), status)
+            if status == 429:
+                raise _with(Busy("too many dictations; try again in a minute"), status)
             try:
                 got = json.loads(reply)
                 text, error = got["text"].strip(), got.get("error")
             except (ValueError, KeyError, TypeError, AttributeError):
-                raise Failed("the transcription did not work") from None
+                raise _with(Failed("the transcription did not work"), status) from None
             if status != 200 or error or not text:
-                raise Failed("the transcription did not work")
+                raise _with(Failed("the transcription did not work"), status)
             return text
         finally:
             self._busy.release()

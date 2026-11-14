@@ -1029,6 +1029,21 @@ def test_a_comment_put_back_in_a_heading_with_no_words_goes_on_a_line_of_its_own
     assert len(rdc.parse(out).comments) == 1 and out.startswith(heading)
 
 
+# ── table cells of the merge (ticket 57) ──
+
+@pytest.mark.parametrize("row, quote, expect", [
+    ("| one two | x |", "one", "| one two{} | x |"),
+    ("| x | one\\|two y |", "one", "| x | one\\|two y{} |"),
+    ("| `a\\|b` c | x |", "a", "| `a\\|b` c{} | x |"),
+])
+def test_a_comment_put_back_in_a_table_cell_goes_at_the_end_of_the_cell(row, quote, expect):
+    md = "| h | i |\n|---|---|\n%s\n" % row
+    raw = rdc.format(agent_note(), True)
+    out = rde._insert_comment(md, 0, raw, quote)
+    assert out == md.replace(row, expect.format(raw)), out
+    assert rdc.parse(out).malformed == [] and len(rdc.parse(out).comments) == 1
+
+
 # ── heading edge cases of the merge (tickets 56 and 58) ──
 
 def test_a_comment_of_several_lines_put_back_in_a_heading_goes_on_a_line_of_its_own():
@@ -1058,3 +1073,23 @@ def test_a_comment_of_several_lines_put_back_in_a_setext_heading_goes_on_a_line_
     out = rde._insert_comment("Alpha Beta\n==========\n\nBody.\n", 0, rdc.format(note, False), "Alpha")
     assert out.startswith("Alpha Beta\n==========\n\n<!-- sheaf-comment") and rdc.parse(out).malformed == []
     assert [b.kind for b in split_md_blocks(out)][0] == "heading"
+
+
+def test_a_heading_that_is_only_hashes_puts_a_put_back_comment_on_a_line_of_its_own():
+    # Ticket 65, point 5 (ticket 58, case 2): `### ###` is an empty heading, so a block after its
+    # hashes would make the line a paragraph.
+    md = "### ###\n\nBody.\n"
+    out = rde._insert_comment(md, 0, rdc.format(agent_note(), False), "Alpha")
+    assert out.startswith("### ###\n\n<!-- sheaf-comment") and rdc.parse(out).malformed == []
+    assert [b.kind for b in split_md_blocks(out)][0] == "heading"
+
+
+def test_a_comment_of_several_lines_put_back_in_a_table_cell_does_not_split_the_row():
+    # Ticket 65, point 4: a block of several lines inside a row ends the table.
+    md = "| A | B |\n|---|---|\n| Alpha | x |\n\nBody.\n"
+    note = agent_note()
+    note.body = "first line\nsecond line"
+    out = rde._insert_comment(md, 0, rdc.format(note, False), "Alpha")
+    assert out.startswith("| A | B |\n|---|---|\n| Alpha | x |\n\n<!-- sheaf-comment"), out
+    assert [b.kind for b in split_md_blocks(out)][0] == "table" and rdc.parse(out).malformed == []
+    assert len(rdc.parse(out).comments) == 1

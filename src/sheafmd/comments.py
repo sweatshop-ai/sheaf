@@ -266,9 +266,10 @@ def _parse_one(raw: str):
 
 def _mask_code(text: str) -> str:
     """`text` with its inline code spans blanked, the same length. Read left to right,
-    as CommonMark does: a comment that starts before a backtick owns it, so a backtick
-    in a comment's body does not open a span that runs on into the text after it."""
-    out, pos, span, head, no_head = [], 0, None, None, False
+    as CommonMark does: a comment or an HTML tag that starts before a backtick owns it, so a
+    backtick in a comment's body or a tag's attribute does not open a span that runs on into
+    the text after it."""
+    out, pos, span, head, no_head, tag, no_tag = [], 0, None, None, False, None, False
     while True:
         if span is None or span.start() < pos:
             span = CODE_SPAN_RE.search(text, pos)
@@ -280,6 +281,12 @@ def _mask_code(text: str) -> str:
         if not no_head and (head is None or head.start() < pos):
             head = COMMENT_RE.search(text, pos)
             no_head = head is None      # none now means none later: pos only moves on
+        if not no_tag and (tag is None or tag.start('tag') < pos):
+            tag = _HTML_TAG_RE.search(text, pos)
+            no_tag = tag is None
+        if tag and tag.start('tag') < span.start() and not (head and head.start() < tag.start('tag')):
+            pos = tag.end()
+            continue
         if head and head.start() < span.start():
             end = text.find("-->", head.end())
             if end < 0:
@@ -526,17 +533,34 @@ def anchor_point(block: str, start: int, end: int, quote: str) -> int:
 _ATX_TEXT = re.compile(r"^( {0,3}#{1,6}[ \t]+)(.*?)(?:[ \t]+#+)?[ \t]*$")
 
 
+# An inline HTML tag as CommonMark reads it: it binds more tightly than a code span, so a backtick
+# in an attribute value opens nothing. ASCII only, whitespace of a tag is space, tab, newline or return (pandoc
+# reads no form feed), and an odd run of backslashes before the `<` escapes it (group `tag`).
+_HTML_TAG_RE = re.compile(
+    r"(?<!\\)(?:\\\\)*(?P<tag></[A-Za-z][A-Za-z0-9-]*[ \t\r\n]*>|<[A-Za-z][A-Za-z0-9-]*"
+    r"(?:[ \t\r\n]+[A-Za-z_:][A-Za-z0-9_:.-]*(?:[ \t\r\n]*=[ \t\r\n]*"
+    r"(?:[^ \t\r\n\"'=<>`]+|'[^']*'|\"[^\"]*\"))?)*[ \t\r\n]*/?>)")
+
+
 def _unclosed_opener(text: str) -> int:
     """Where a `<!--` outside code that nothing closes starts in `text`, or -1. Any `<!--`
-    counts, not only a sheaf comment's: a block written after it would close it."""
-    masked, i = _mask_code(text), 0
+    counts, not only a sheaf comment's: a block written after it would close it. Read left to
+    right as CommonMark does: a code span, an HTML tag or a closed comment that starts first owns
+    what it holds, so a backtick in a tag or in an ordinary comment pairs with nothing."""
+    i = 0
     while True:
-        j = _opener(masked, i)
-        if j < 0:
+        o = _opener(text, i)
+        if o < 0:
             return -1
-        e = masked.find("-->", j + 4)
+        span, tag = CODE_SPAN_RE.search(text, i), _HTML_TAG_RE.search(text, i)
+        first = min((x for x in (span and (span.start(), span.end()), tag and (tag.start("tag"), tag.end())) if x),
+                    default=None)
+        if first and first[0] < o:
+            i = first[1]
+            continue
+        e = text.find("-->", o + 4)
         if e < 0:
-            return j
+            return o
         i = e + 3
 
 
@@ -556,7 +580,9 @@ def heading_anchor(block: str) -> int | None:
         floor = 0
     else:
         m = _ATX_TEXT.match(lines[0])
-        if not m or not m.group(2) or set(m.group(2)) == {"#"}:    # `### ###` is an empty heading
+        # The hashes after the opening ones are the closing ones when nothing else is there: `### ###`,
+        # `# #` and `## #` are empty, `## ## ##` is the word `##` (CommonMark and pandoc read it so).
+        if not m or not m.group(2) or set(lines[0][len(m.group(1)):].strip()) == {"#"}:
             return None
         at, floor = m.end(2), len(m.group(1).rstrip())
     open_at = _unclosed_opener(block[:at])
@@ -568,9 +594,46 @@ def heading_anchor(block: str) -> int | None:
     return at - 1 if run % 2 else at
 
 
+_CELL_PIPE_RE = re.compile(r"(?<!\\)(?:\\\\)*(\|)")
+
+
+def cell_end(block: str, point: int) -> int:
+    """Offset where a comment on a selection ending at `point` goes in a table: the end of the cell that
+    holds `point`, before its closing `|` and the spaces in front of it, so the cell's words stay whole
+    for every reader of the file. A `|` ends a cell unless an odd run of backslashes escapes it, in code
+    as well (GFM and pandoc read `a|b` in a code span as two cells); a row with no closing `|` ends the
+    cell at the end of its line. Before a backslash that ends the cell's text, which would escape the
+    block's `<`, and before a `<!--` in the cell that nothing closes, which a block after it would close,
+    hiding the words it was meant to hold. Where the cell's end is inside a code span that `parse` reads
+    across cells (pandoc splits the cells first), the block stays after the selection: written there it
+    would be code to `parse`, and the comment lost."""
+    line_start = block.rfind("\n", 0, point) + 1
+    eol = block.find("\n", point)
+    line_end = len(block) if eol < 0 else eol
+    # Read from the start of the line: whether a `|` is escaped depends on the backslashes before it.
+    pipes = [m.start(1) for m in _CELL_PIPE_RE.finditer(block, line_start, line_end)]
+    at = next((p for p in pipes if p >= point), line_end)
+    cell_start = max((p + 1 for p in pipes if p < point), default=line_start)
+    while at > point and block[at - 1] in " \t":
+        at -= 1
+    open_at = _unclosed_opener(block[cell_start:at])
+    if open_at >= 0:
+        at = cell_start + len(block[cell_start:cell_start + open_at].rstrip())
+        if not block[cell_start:at].strip():
+            raise AnchorError("this cell has no place for a comment, comment on another cell")
+    run = len(block[cell_start:at]) - len(block[cell_start:at].rstrip("\\"))
+    if run % 2:
+        at -= 1
+    if _mask_code(block[:at] + "\0" + block[at:])[at] == " ":
+        return point
+    return at
+
+
 def comment_point(kind: str, block: str, start: int, end: int, quote: str) -> int:
     """Offset in `block` (of the given kind) where a comment on the selection [start, end) goes."""
     point = anchor_point(block, start, end, quote)      # a heading checks the selection too, then ignores where it ends
+    if kind == "table":
+        return cell_end(block, point)
     if kind != "heading":
         return point
     at = heading_anchor(block)

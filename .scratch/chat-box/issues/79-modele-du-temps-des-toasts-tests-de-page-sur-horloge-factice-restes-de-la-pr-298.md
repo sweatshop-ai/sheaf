@@ -22,12 +22,13 @@ Deux assertions à revoir en particulier :
 
 **Claimed by:** Isolde
 
-**Status:** ready-for-agent
+**Status:** done (PR 317, merge 2911952)
 
 **Par où commencer :** `tests/page/test_page_writing.py:4709-4711`, puis `tests/page/test_page_drafts.py:176`, puis `test_page_outage.py`.
 
-- [ ] Chaque test de page qui attend un toast sur horloge factice le fait en faisant avancer l'horloge, pas par chance
-- [ ] Les deux assertions « pas de toast » échouent si le second toast est dit
-- [ ] `toasted()` revient à 8 s par défaut
+- [x] Chaque test de page qui attend un toast sur horloge factice le fait en faisant avancer l'horloge, pas par chance
+- [x] Les deux assertions « pas de toast » échouent si le second toast est dit
+- [x] `toasted()` revient à 8 s par défaut
+- [x] Le test send-again passe par l'avance de l'horloge, pas par l'attente (fait) ; qu'il échoue encore en CI faute de l'événement `changed` du hub (aucun toast après « did not go out ») est déplacé au ticket 100
 
 **Vu en CI, 2026-11-14 (PR 306, sur 08f0833, sans lien avec la PR : elle ne touche pas ce fichier) :** `tests/page/test_page_writing.py::test_a_send_again_that_fails_to_reach_the_hub_does_not_hide_that_the_send_before_it_was_taken`, ligne 2858 (`toasted(p, TAKEN)`, « What you sent reached the hub after all »), `AssertionError: timed out waiting for a toast saying ...` (`pagehelp.py:184`), tranche 1/3, rouge aux deux tentatives du job (13:32 et 13:33 UTC), vert au rejeu des jobs échoués. Run 43599394576, job 132460763370 : https://github.com/sweatshop-ai/sheaf/actions/runs/43599394576/job/132460763370. Même famille que ce ticket : le test appelle `given_up` (horloge qui court au pas réel, `reload_on_clock` sans pause), dit d'abord le toast rouge « did not go out » (7 s à l'écran), puis attend `TAKEN`, qui est derrière lui dans la file ; `toasted()` attend 20 s. Cause non vérifiée : à établir sur t-compute avec une file chargée, comme le demande ce ticket. Case à ajouter : ce test passe par l'avance de l'horloge, pas par l'attente.

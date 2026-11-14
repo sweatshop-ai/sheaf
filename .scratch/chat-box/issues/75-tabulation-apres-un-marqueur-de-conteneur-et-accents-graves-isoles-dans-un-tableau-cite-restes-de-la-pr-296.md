@@ -6,7 +6,7 @@
 
 **Blocked by:** none
 
-**Claimed by:**
+**Claimed by:** Isolde
 
 **Par où commencer :** `tests/test_anchoring.py`, après la section « ticket 68 » : un test rouge par point.
 

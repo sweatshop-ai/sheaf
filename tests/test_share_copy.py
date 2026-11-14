@@ -750,6 +750,18 @@ def test_an_empty_comment_opener_refuses_the_share_copy_by_decision(tmp_path, op
     assert "KEEP1" not in str(e.value)
 
 
+@pytest.mark.parametrize("opener", ["<!-->", "<!--->"])
+def test_the_refusal_of_an_empty_comment_opener_does_not_say_it_is_never_closed(tmp_path, opener):
+    # Ticket 76, point 2: a browser ends `<!-->` at once, so "never closed ... a browser would hide
+    # everything after it" is false. It is the share copy that cannot read it.
+    with pytest.raises(sheafmd.UnclosedComment) as e:
+        sheafmd.render(doc(tmp_path, "# A %s b\n\nKEEP1 para.\n" % opener))
+    msg = str(e.value)
+    assert e.value.line == 1 and opener in msg
+    assert "never closed" not in msg and "would hide everything" not in msg
+    assert "empty HTML comment" in msg and "Remove it" in msg
+
+
 def test_the_same_heading_without_the_empty_opener_makes_a_copy(tmp_path):
     out = sheafmd.render(doc(tmp_path, "# A b <!-- note -->\n\nKEEP1 para.\n"))
     assert "KEEP1" in out and "note" not in out

@@ -2145,3 +2145,22 @@ def test_a_tick_that_the_legacy_marks_made_in_place_is_still_made_in_place(src, 
     out = _toggle_boxes(block, _page_with_box_flipped(block, k))
     assert (out is not None) == (want is not None)
     assert want is None or out == want
+
+
+def test_a_long_run_of_quote_marks_is_read_in_linear_time():
+    # Re-read of the b1 fix, b2: the chain accepted `>` twice over (the leading quotes and the chain), so a line of
+    # n `>` cost n squared: 14.6 s at 5000 against 3 ms before ticket 128.
+    import time
+    from sheafmd.edit import task_marks
+    t = time.perf_counter()
+    assert task_marks("> " * 5000 + "x\n") == [] and task_marks("> " * 5000 + "- [ ] x\n") != []
+    assert time.perf_counter() - t < 1
+
+
+def test_a_list_tick_made_through_the_legacy_marks_is_offered_and_written():
+    # d3 of the re-read: ticked_html goes through the second reading too (an empty item beside a box behind a marker).
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes, ticked_html
+    block = split_md_blocks("* [X] c\n- [ ]\n1. - [ ] g\n")[0]
+    fragment = ticked_html(block, 0, tick=False)
+    assert fragment is not None and _toggle_boxes(block, fragment) == "* [ ] c\n- [ ]\n1. - [ ] g\n"

@@ -264,7 +264,7 @@ def test_a_key_file_that_fails_after_it_is_open_is_not_used_said_once_and_closed
             def __exit__(self, *exc):
                 self.f.close()
 
-            def read(self):
+            def read(self, n=-1):
                 raise OSError(5, "Input/output error")
 
         def fdopen(fd, *a, **k):
@@ -701,7 +701,74 @@ def test_a_damaged_byte_in_the_key_is_refused_the_same_way(browser, row_relay, t
     key_file.write_bytes(b"TRANSCRIBE_API_KEY=abc\xff\xfedef\n")          # not UTF-8: read as U+FFFD
     key_file.chmod(0o600)
     assert dictate(browser).status == 503 and tcompute.seen == []
-    assert [r["kind"] for r in diagnostics.read()].count("transcribe-key-file") == 1
+    rows = [r for r in diagnostics.read() if r["kind"] == "transcribe-key-file"]
+    assert len(rows) == 1 and "latin-1" in rows[0]["reason"]
+    shown = json.dumps(diagnostics.read(), ensure_ascii=False)
+    assert "abc" not in shown and "def" not in shown and "\ufffd" not in shown
+
+
+def test_the_leak_check_of_the_unsendable_key_test_is_red_when_the_key_is_written_to_a_row(browser, row_relay, key_file, monkeypatch):
+    """The assertion of the test above reads the log with ensure_ascii=False: with the default, json.dumps writes
+    every non-ASCII character as an escape, and a key that leaked into a row would not be found in it."""
+    odd = "k\u00e9y-\u65e5\u672c-0123"
+    monkeypatch.setattr(row_relay, "_refuse", lambda why: browser.hub.record("transcribe-key-file", reason=f"{why}: {odd}"))
+    key_file.write_text(f"TRANSCRIBE_API_KEY={odd}\n")
+    assert available(browser) is False
+    assert odd in json.dumps(diagnostics.read(), ensure_ascii=False)
+    assert odd not in json.dumps(diagnostics.read())         # the old form: blind to it
+
+
+def test_a_key_file_that_keeps_changing_is_not_used_this_time_and_read_again_the_next(browser, row_relay, tcompute, key_file, monkeypatch):
+    real, count = os.fstat, []
+
+    def fstat(fd):
+        st = real(fd)
+        if len(count) < 4:                                                  # the opening stat, then each of the three reads
+            count.append(1)
+            key_file.write_text(f"TRANSCRIBE_API_KEY={KEY}{'x' * len(count)}\n")
+        return st
+    monkeypatch.setattr(transcribe.os, "fstat", fstat)
+    assert row_relay._key() is None                                         # no raise, and no key from a file in flux
+    assert [r for r in diagnostics.read() if r["kind"] == "transcribe-key-file"] == []
+    monkeypatch.setattr(transcribe.os, "fstat", real)
+    assert row_relay._key()[0].startswith(KEY)                              # the next call reads it again
+
+
+def test_a_chmod_during_the_read_is_seen_in_the_pass_that_re_reads(browser, row_relay, key_file, monkeypatch):
+    real, done = os.fstat, []
+
+    def fstat(fd):
+        st = real(fd)
+        if not done:                                                        # the file opens up right after the first stat
+            done.append(1)
+            key_file.chmod(0o644)
+        return st
+    monkeypatch.setattr(transcribe.os, "fstat", fstat)
+    assert row_relay._key() is None                                         # the key of this pass is not used
+    rows = [r for r in diagnostics.read() if r["kind"] == "transcribe-key-file"]
+    assert len(rows) == 1 and "mode 0600" in rows[0]["reason"]
+
+
+def test_a_key_file_over_the_cap_is_refused_without_reading_it_whole(browser, row_relay, key_file, monkeypatch):
+    key_file.write_text(f"TRANSCRIBE_API_KEY={KEY}\n" + "#" * (transcribe.KEY_FILE_MAX + 1))
+    asked = []
+    real_fdopen = os.fdopen
+
+    def fdopen(fd, *a, **k):
+        f = real_fdopen(fd, *a, **k)
+        real_read = f.read
+        f.read = lambda n=-1: asked.append(n) or real_read(n)
+        return f
+    monkeypatch.setattr(transcribe.os, "fdopen", fdopen)
+    assert row_relay._key() is None
+    assert asked and all(0 < n <= transcribe.KEY_FILE_MAX + 1 for n in asked)
+    rows = [r for r in diagnostics.read() if r["kind"] == "transcribe-key-file"]
+    assert len(rows) == 1 and "too large" in rows[0]["reason"]
+
+
+def test_a_key_file_at_the_cap_is_still_taken(row_relay, key_file):
+    key_file.write_text(f"TRANSCRIBE_API_KEY={KEY}\n" + "#" * (transcribe.KEY_FILE_MAX - len(f"TRANSCRIBE_API_KEY={KEY}\n")))
+    assert row_relay._key()[0] == KEY
 
 
 def test_a_latin_1_key_is_still_taken(browser, relay, tcompute, key_file):

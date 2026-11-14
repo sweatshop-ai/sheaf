@@ -427,8 +427,11 @@ def test_an_ordinary_closed_comment_owns_its_backtick():
 
 @pytest.mark.parametrize("opener", ["<!-->", "<!--->"])
 def test_an_empty_comment_opener_is_a_whole_comment_not_an_unclosed_one(opener):
-    # Point 3: CommonMark, pandoc and the list (hub/the_list.py) read it as a whole comment.
+    # Point 3: CommonMark, pandoc and the list (hub/the_list.py) read it as a whole comment, so it
+    # owns its backtick and nothing is unclosed. (The share copy refuses a page with one in a
+    # heading, before and after this change: render.COMMENT_RE does not know it.)
     assert rdc._unclosed_opener(f"a {opener} b") == -1
+    assert rdc._mask_code(f"a {opener} `x` b <!-- c `y` -->") == f"a {opener}     b <!-- c `y` -->"
     md = f"# The {opener} end\n"
     assert rdc.heading_anchor(md) == len(f"# The {opener} end")
     assert "<!--" in pandoc(["-f", "gfm", "-t", "html"], md)    # pandoc reads a comment there too
@@ -454,3 +457,12 @@ def test_parse_reads_text_that_looks_like_a_tag_or_comment_as_pandoc_does(para):
     para = "x " + para         # at the start of a line `<!--` and a tag begin an HTML block, which is no inline text
     code_in_pandoc = "<code>" in pandoc(["-f", "gfm", "-t", "html"], para + "\n")
     assert (rdc._mask_code(para) != para) == code_in_pandoc
+
+
+# ── ticket 66, Opus review 1 ──
+
+def test_code_after_an_unclosed_ordinary_opener_is_not_a_broken_comment():
+    # b2: pandoc reads a bare `<!--` as text and the backticks after it as code.
+    md = "A bare <!-- opens a comment; a note starts with `<!-- sheaf-comment id=c1`.\n"
+    assert rdc.parse(md).malformed == []
+    assert rdc._mask_code("a <!-- b `x` c") == "a <!-- b     c"

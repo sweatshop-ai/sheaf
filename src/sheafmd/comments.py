@@ -269,11 +269,10 @@ _OPENER_RE = re.compile(r"(?<!\\)(?:\\\\)*(<!--)")
 
 def _scan(text: str):
     """What CommonMark reads in `text` at the level of inline code, HTML tags and HTML comments, left
-    to right, as (kind, start, end) with kind "code", "tag", "comment" or "open" (a `<!--` that nothing
-    closes: it runs to the end of `text`, where the scan stops). Whichever of the three starts first
+    to right, as (kind, start, end) with kind "code", "tag", "comment", "empty" (`<!-->` and `<!--->`, a whole comment to CommonMark) or "open" (a `<!--` that nothing
+    closes: it is text to pandoc and a comment to the rest of the block, so it is reported and the scan goes on). Whichever of the three starts first
     owns what it holds, so a backtick in a tag's attribute or in a comment's body opens no code span
-    that runs on into the text after it. `<!-->` and `<!--->` are whole comments, as in CommonMark.
-    Each search runs once and is reused while its match still lies ahead of the position: a search
+    that runs on into the text after it.     Each search runs once and is reused while its match still lies ahead of the position: a search
     from there finds the same match as one made from an earlier position, so a block of many tags or
     spans is read once, not once per item."""
     pos, found = 0, {}
@@ -297,11 +296,16 @@ def _scan(text: str):
             continue
         if text.startswith((">", "->"), a + 4):
             pos = a + 5 + (text[a + 4] == "-")
+            yield "empty", a, pos
+            continue
         else:
             e = text.find("-->", a + 4)
             if e < 0:
+                # Nothing closes it: pandoc reads it as text, so what follows is read on
+                # (a code span after it is still code).
+                pos = a + 4
                 yield "open", a, len(text)
-                return
+                continue
             pos = e + 3
         yield "comment", a, pos
 
@@ -309,6 +313,8 @@ def _scan(text: str):
 def _mask_code(text: str) -> str:
     """`text` with its inline code spans blanked, the same length (see `_scan` for what owns a
     backtick)."""
+    if "`" not in text:
+        return text
     parts, last = [], 0
     for kind, a, b in _scan(text):
         if kind == "code":
@@ -568,7 +574,8 @@ _HTML_TAG_RE = re.compile(
 
 def _unclosed_opener(text: str) -> int:
     """Where a `<!--` outside code that nothing closes starts in `text`, or -1. Any `<!--`
-    counts, not only a sheaf comment's: a block written after it would close it (see `_scan`)."""
+    counts, not only a sheaf comment's: a block written after it would close it (see `_scan`).
+    `<!-->` and `<!--->` are whole comments, as CommonMark and the list read them."""
     return next((a for kind, a, _ in _scan(text) if kind == "open"), -1)
 
 

@@ -379,14 +379,14 @@ def _mask_code(text: str, cells: bool = False) -> str:
 
 def _read_block(kind: str, text: str):
     """(masked, raw): `text` with its inline code blanked (`_mask_code`), and the heads of the comments that
-    pandoc shows as raw HTML, or None for "do not ask". A table that a quote or a list holds is read by
-    pandoc (`_read_tables`), which splits its cells before it reads a span, sets the span's range, drops the
+    pandoc shows as raw HTML (their places, their heads, the lines that carry a cell), or None for "do not ask".
+    A table that a quote or a list holds is read by pandoc (`_read_tables`), which splits its cells before it reads a span, sets the span's range, drops the
     cells beyond the table's columns and reads an indented line as code: where the block may hold one and
     holds a comment, a comment that pandoc does not show as raw HTML is not one."""
     if kind in ("quote", "list") and COMMENT_RE.search(text) and _may_hold_table(text):
         read = _read_tables(text)
         if read is not None:
-            return _blank(text, read[1]), read[2]
+            return _blank(text, read[1]), (*read[2], frozenset(read[0]))
     return _mask_code(text, kind == "table"), None
 
 
@@ -417,7 +417,10 @@ def parse(md: str) -> Parsed:
                 break
             e += 3
             raw = text[a:e]
-            if raw_heads is not None and a not in raw_heads[0] and _head_of(raw) not in raw_heads[1]:
+            # A comment on a line that carries a cell is shown by its place alone: its head names a comment that is
+            # a block of its own, and a copy that pandoc dropped from a cell is not that one.
+            if raw_heads is not None and a not in raw_heads[0] and (
+                    text.count("\n", 0, a) in raw_heads[2] or _head_of(raw) not in raw_heads[1]):
                 i = e
                 continue
             c, why = _parse_one(raw)
@@ -590,7 +593,7 @@ def _may_hold_table(block: str) -> bool:
                                 for ln in block.split("\n"))
 
 
-@functools.lru_cache(maxsize=1024)
+@functools.lru_cache(maxsize=16384)
 def _read_tables(block: str):
     """(rows, code, raw, heads) as pandoc reads `block`, or None when pandoc fails: `rows` the lines (from 0) that carry a
     cell of a table, `code` the (start, end) offsets of every inline code span, backticks included, `heads` the

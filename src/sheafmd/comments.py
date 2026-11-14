@@ -632,10 +632,13 @@ def in_table_row(block: str, point: int) -> bool:
     lines = block.split("\n")
     n = block.count("\n", 0, point)
     bare = []
-    for line in lines[:n + 1]:
+    for line in lines:
         while (m := _CONTAINER_RE.match(line)) and m.end():
             line = line[m.end():]
         bare.append(line)
+    if (n + 1 < len(bare) and _CELL_PIPE_RE.search(bare[n]) and _CELL_PIPE_RE.search(bare[n + 1])
+            and TBLSEP_RE.match(bare[n + 1])):
+        return True                 # the header row, above its delimiter row
     for i in range(n, -1, -1):
         if not _CELL_PIPE_RE.search(bare[i]):
             return False
@@ -673,6 +676,9 @@ def cell_end(block: str, point: int, cells: bool = True) -> int:
     if run % 2:
         at -= 1
     if _mask_code(block[:at] + "\0" + block[at:], cells)[at] == " ":
+        if not cells and _mask_code(block[:point] + "\0" + block[point:])[point] == " ":
+            raise AnchorError("this cell is inside a code span that runs across cells, "
+                              "comment on another cell")
         return point
     return at
 

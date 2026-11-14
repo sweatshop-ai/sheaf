@@ -547,3 +547,21 @@ def test_a_row_with_no_pipe_after_a_table_is_a_paragraph_as_pandoc_reads_it():
     assert [b.kind for b in split_md_blocks(md)] == ["table", "para"]
     page = pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], md)
     assert page.count("<tr>") == 2 and "<p>lazy row</p>" in page
+
+
+@pytest.mark.parametrize("md", [
+    "> | one a | b |\n> |---|---|\n> | x | y |\n",
+    "- x\n\n  | one a | b |\n  |---|---|\n  | p | y |\n",
+])
+def test_a_comment_on_the_header_of_a_table_in_a_quote_or_a_list_stays_on_the_row(md):
+    s, e = sel(md, "one")
+    out, cid = rdc.add_comment(md, 0, s, e, "one", "why\nmore", "Ada", "2026-11-14T10:00")
+    assert re.sub(r"<!--.*?-->", "<C>", out, count=1).count("one a<C> | b |") == 1, out
+    assert [c.id for c in rdc.parse(out).comments] == [cid] and out.count("\n") == md.count("\n")
+
+
+def test_a_cell_in_a_code_span_that_runs_across_cells_of_a_quoted_table_is_refused_not_lost():
+    md = "> | a | b |\n> |---|---|\n> | `x | one | z` | q |\n"
+    s, e = sel(md, "one")
+    with pytest.raises(rdc.AnchorError):
+        rdc.add_comment(md, 0, s, e, "one", "why", "Ada", "2026-11-14T10:00")

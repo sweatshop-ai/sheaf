@@ -8,7 +8,7 @@
 
 **Claimed by:** Wanda
 
-- [ ] Points 1 et 2 traités
-- [ ] CI verte
+- [x] Points 1 et 2 traités (PR 309, merge 027198f)
+- [x] CI verte (3/3 tranches, tête 97f02fe)
 
-**Status:** ready-for-agent
+**Status:** done

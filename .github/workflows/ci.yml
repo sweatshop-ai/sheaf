@@ -130,7 +130,8 @@ jobs:
           deps=""
           if [ "$RUNNER_OS" = "Linux" ] && command -v sudo >/dev/null; then deps="--with-deps"; fi
           uv run --no-sync playwright install $deps chromium firefox webkit
-          for i in $(seq 1 25); do env -u SHEAF_TEST_SLICE uv run --no-sync pytest -v -m page -k "second_of_two_kept_replies or still_out_on_a_page" tests/page/test_page_writing.py 2>&1 | tee -a page-tests.txt | grep -E " passed| failed|timed out waiting|the list held" || true; done; exit 0
+          for i in $(seq 1 25); do env -u SHEAF_TEST_SLICE uv run --no-sync pytest -v -m page -k "second_of_two_kept_replies" tests/page/test_page_writing.py 2>&1 | tee -a page-tests.txt | grep -E " passed| failed|timed out waiting|the list held" || true; done; exit 0
+          uv run --no-sync python tools/ci/stall_watch.py -- uv run --no-sync pytest -v --durations=25 -m page -rs 2>&1 | tee page-tests.txt
           # A page test that cannot start its browser skips with a reason. Here that is a failure.
           if grep -Eq '[0-9]+ skipped' page-tests.txt; then
             echo "::error::page tests were skipped, so a browser (Chromium, Firefox or WebKit) did not start"

@@ -343,7 +343,7 @@ def test_the_refusal_a_form_held_reload_says_again_is_the_latest_press_not_an_ea
 
 
 def test_an_earlier_refusal_still_up_is_not_said_again_by_the_reload_of_a_later_press_that_succeeded(tab):
-    # Ticket 101 (4): A is refused and still up when B is pressed and taken; B's `changed` reloads inside A's 7 s.
+    # Ticket 101 (4): A is refused and still up when B is pressed and taken; the reload then runs inside A's 7 s.
     # The reset in `send()` is what keeps A from coming back: without it the reload carries A.
     answers = [refused("Approve: refused A, reload the page")]
     p = held_by_a_form(tab, answers)
@@ -352,8 +352,8 @@ def test_an_earlier_refusal_still_up_is_not_said_again_by_the_reload_of_a_later_
     p.unroute("**/_/tick")
     p.route("**/_/tick", lambda r: r.fulfill(status=200, content_type="application/json", body='{"ok": true}'))
     bar(p).nth(1).click()
-    p.clock.run_for(5100)                               # B is sent and taken; A has been up for 5.1 s of its 7
-    p.click("#rd-popover button[data-f=ok]")
+    p.clock.run_for(5100)                               # B is sent and taken (its tick is faked, so no `changed`); A has been up for 5.1 s of its 7
+    p.click("#rd-popover button[data-f=ok]")                # the outside change's held reload runs, inside A's 7 s
     reloaded(p)
     assert "refused A" not in " ".join(toasts_to_the_end(p, on_clock=True))
 
@@ -388,6 +388,17 @@ def test_a_refusal_is_not_said_again_past_the_seven_seconds_it_was_said_in_howev
         f.write_text(f.read_text(encoding="utf-8") + "\nFrom outside, %d.\n" % n, encoding="utf-8")
         reloaded(p)
         assert "refused A" not in " ".join(toasts_to_the_end(p, on_clock=True))
+
+
+def test_a_refusal_an_older_page_left_as_plain_text_does_not_stop_the_boot(sheaf):
+    # Ticket 101, review a: before this ticket the key held the bare text. The page of a deploy reads it without
+    # throwing, drops it, and the rest of the boot (the toast the reload left) still runs.
+    p = sheaf.page
+    p.evaluate("sessionStorage.setItem('rd-press-said', 'Approve: refused, reload the page'); sessionStorage.setItem('rd-toast', 'Kept by the reload.')")
+    p.reload()
+    toasted(p, "Kept by the reload.")
+    assert p.evaluate("sessionStorage.getItem('rd-press-said')") is None
+    assert "refused, reload" not in " ".join(toasts_to_the_end(p))
 
 
 def test_a_press_while_the_page_settles_onto_a_change_is_refused_and_the_page_reloads(sheaf):

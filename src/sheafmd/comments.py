@@ -660,7 +660,9 @@ def heading_anchor(block: str) -> int | None:
     return at - 1 if run % 2 else at
 
 
-_CELL_PIPE_RE = re.compile(r"(?<!\\)(?:\\\\)*(\|)")
+# A cell border: a `|` with no backslash right before it. Unlike an escape in running text, pairs do not
+# count here: pandoc (gfm) keeps `a \\| b` in one cell, whatever number of backslashes stand before the pipe.
+_CELL_PIPE_RE = re.compile(r"(?<!\\)(\|)")
 
 
 _CONTAINER_RE = re.compile(r"[ \t]*(?:>|(?:[-+*]|\d{1,9}[.)])(?=[ \t]))[ \t]?")

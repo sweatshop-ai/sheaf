@@ -3768,6 +3768,7 @@ var create = function (ROOT, CFG, opts) {
       waiting = null;
       back();
       btn.disabled = true;
+      pressSaid = null;           // a newer press's answer is the one a reload says again, not an earlier press's
       if (a.toggle) btn.setAttribute('aria-pressed', a.pressed ? 'false' : 'true');
       // A save out now changes the hash: the tick names the text that save leaves. So does a comment or a Restore
       // (`ownWrites`), which the hub would otherwise write between the tick's read and its lock.
@@ -3806,7 +3807,7 @@ var create = function (ROOT, CFG, opts) {
         var said = say(e.message, true);
         // A reload waits for this answer: the refusal is said again on the page it brings, if it comes while the
         // toast is still waiting its turn or up (a form may hold the reload longer).
-        if (reloadAfterPress) pressSaid = { text: e.message, toast: said };
+        if (reloadAfterPress || reloadPending) pressSaid = { text: e.message, toast: said };
         done();
       }
     }
@@ -4470,8 +4471,9 @@ var create = function (ROOT, CFG, opts) {
       if (keep.editing) { setEditing(true); placeCaret(keep.caret); }
       if (keep.open && byId[keep.open]) setTimeout(function () { openComment(keep.open); }, 50);
     }
-    if (refusedPress && keep) say(refusedPress, true);
-    else if (msg) say(msg);
+    // What the old page said and the reload left, then the refusal, which a second reload says again in its turn.
+    if (msg) say(msg);
+    if (refusedPress && keep) pressSaid = { text: refusedPress, toast: say(refusedPress, true) };
     if (canSave) { showKept(); unsentLine(); }
     var unsaved = canEdit ? editDraftFound() : null;
     if (unsaved) offerDraft(unsaved);

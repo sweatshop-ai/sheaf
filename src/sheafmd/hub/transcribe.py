@@ -15,6 +15,7 @@ import os
 import re
 import secrets
 import socket
+import ssl
 import stat
 import threading
 import time
@@ -120,8 +121,10 @@ def _call(method, url, headers, body=None, timeout=TIMEOUT) -> tuple[int, bytes]
     thread outlives the call (nothing else can stop `getaddrinfo`), but it holds neither key nor body. When the
     call returns, the timer is done: `_call` waits for a cut already begun."""
     u = urlparse(url)
-    make = http.client.HTTPSConnection if u.scheme == "https" else http.client.HTTPConnection
-    conn = make(u.hostname, u.port, timeout=timeout)
+    if u.scheme == "https":                                   # the context is ours: the default of http.client is a global that any library can loosen
+        conn = http.client.HTTPSConnection(u.hostname, u.port, timeout=timeout, context=ssl.create_default_context())
+    else:
+        conn = http.client.HTTPConnection(u.hostname, u.port, timeout=timeout)
     expired, held = threading.Event(), []                     # `held`: a handle on the socket, taken before it connects
     deadline = time.monotonic() + timeout
 
@@ -202,8 +205,11 @@ class Relay:
             self.record("transcribe-key-file", reason=why)
 
     def _key(self) -> tuple[str, tuple] | None:
-        """The key with the stamp of its file (mtime, ctime, size, inode), or None: a file that is not a regular file of the hub's account with mode 0600, or that has no
-        such line, is not used. Opened without blocking (a FIFO would hang the open) and never through a symlink."""
+        """The key with the stamp of its file (mtime_ns, ctime_ns, size, inode), or None: a file that is not a regular
+        file of the hub's account with mode 0600, that has no such line, or whose key a header cannot carry (not
+        latin-1: said in the log without the key), is not used. The stamp is the one of the file the key was read
+        from: a file that changes during the read is read again, and one that keeps changing is not used this time.
+        Opened without blocking (a FIFO would hang the open) and never through a symlink."""
         try:
             fd = os.open(self.cfg.key_file, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         except OSError as e:
@@ -221,11 +227,28 @@ class Relay:
             f = os.fdopen(fd, "r", encoding="utf-8", errors="replace")
             wrapped = True
             with f:
-                for line in f.read().splitlines():
+                for _ in range(3):
+                    text = f.read()
+                    st = os.fstat(f.fileno())
+                    after = (st.st_mtime_ns, st.st_ctime_ns, st.st_size, st.st_ino)
+                    if after == stamp:
+                        break
+                    stamp = after                            # a writer finished during the read: the text may be either
+                    f.seek(0)
+                else:
+                    return None                              # still changing; the next call reads it again
+                for line in text.splitlines():
                     m = re.fullmatch(rf"\s*(?:export\s+)?{re.escape(self.cfg.key_name)}\s*=\s*(.*?)\s*", line)
                     if m:
                         value = m.group(1).strip("\"'")
-                        return (value, stamp) if value else None
+                        if not value:
+                            return None
+                        try:
+                            value.encode("latin-1")
+                        except UnicodeEncodeError:
+                            self._refuse("the key in the key file has a character an HTTP header cannot carry (it must be latin-1)")
+                            return None
+                        return value, stamp
         except OSError as e:
             if not wrapped:
                 os.close(fd)
@@ -235,7 +258,9 @@ class Relay:
     def available(self) -> bool:
         """Whether dictation can be offered now: the table is there and the key file is usable. No request is made.
         Off for 30 seconds after no answer or a 503, and after a 401, 403 or 404 for as long as the key file is the
-        one that was refused (a new key at the same path is noticed; a changed table needs the hub's restart)."""
+        one that was refused (a new key at the same path is noticed; a changed table needs the hub's restart). Any
+        change of the file's stamp counts, a chmod or a touch with the same key too: that lifts the stop for one
+        more request to the host of `url`, spent from the budget like any other."""
         with self._state:
             read = self._key()
             if read is None:
@@ -275,6 +300,8 @@ class Relay:
         if not self._busy.acquire(blocking=False):
             raise Busy("a dictation is already being transcribed")
         try:
+            if not self.available():                         # again, under the lock: a dictation ahead of this one may have been refused
+                raise Unavailable("dictation is not available")
             self._spend()
             read = self._key()
             if read is None:

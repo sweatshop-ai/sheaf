@@ -9,9 +9,11 @@ to a client. This module takes pandoc's output and removes what can run or phone
     elements removed with their content   script style iframe frame frameset object
                                           embed applet base meta link form button
                                           textarea select template noscript
-    input                                 removed unless type="checkbox" (task lists)
+    input                                 removed unless its type is exactly "checkbox", ASCII case
+                                          aside (task lists)
     attributes removed                    every on*, srcdoc, formaction, srcset, ping
-                                          (srcset and ping hold URLs outside the list below)
+                                          (srcset and ping hold URLs outside the list below),
+                                          contenteditable (the page sets it, never the document)
     href src action poster background     kept only for a relative URL, a fragment,
     xlink:href                            http:, https:, mailto:, file:, and
                                           data:image/(png|jpeg|gif|webp) on img src
@@ -60,8 +62,9 @@ _ANIMATED_ATTR = re.compile(r"^(?:xlink:)?href$|^on", re.I)
 
 URL_ATTRS = frozenset({"href", "src", "action", "poster", "background", "xlink:href"})
 # Attributes that go whatever they hold. srcset (several URLs, each loaded) and ping (a
-# POST to each URL on a click) carry addresses that 9.5's list does not allow.
-DROPPED_ATTRS = frozenset({"srcdoc", "formaction", "srcset", "ping"})
+# POST to each URL on a click) carry addresses that 9.5's list does not allow. contenteditable is the page's own to
+# set (setEditing): a surface the document makes editable is outside what the page guards.
+DROPPED_ATTRS = frozenset({"srcdoc", "formaction", "srcset", "ping", "contenteditable"})
 SAFE_SCHEMES = frozenset({"http", "https", "mailto", "file"})
 _SAFE_DATA = re.compile(r"^data:image/(?:png|jpeg|gif|webp)[;,]", re.I)
 _SCHEME = re.compile(r"^([^/?#]*):")

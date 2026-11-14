@@ -4,9 +4,9 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] A click on the label ticks; a second click unticks (a plain box, not an action)
-- [ ] A click on the rest of the line does not tick
-- [ ] A drag-selection that starts on the label opens the chat box and does not tick
-- [ ] Works on a phone (touch target at least 44 px high, as the action buttons)
+- [x] A click on the label ticks; a second click unticks (a plain box, not an action) (`test_a_click_on_the_label_ticks_and_a_second_click_unticks, green in CI on the PR head`)
+- [x] A click on the rest of the line does not tick (`test_a_click_on_the_rest_of_the_line_ticks_nothing, green in CI on the PR head`)
+- [x] A drag-selection that starts on the label opens the chat box and does not tick (`test_a_drag_selection_from_the_label_opens_the_chat_box_and_ticks_nothing, green in CI on the PR head`)
+- [x] Works on a phone (touch target at least 44 px high, as the action buttons) (`test_on_a_phone_the_label_is_44_px_high_to_touch (touch context, tap below the words), green in CI on the PR head`)

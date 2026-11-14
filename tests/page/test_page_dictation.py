@@ -435,6 +435,79 @@ def test_the_stop_event_of_a_discarded_recorder_that_comes_late_leaves_the_new_r
     until(lambda: len(hub.posts) == 1, what="the new sound sent")
 
 
+def test_the_stop_event_that_comes_late_after_a_failed_send_leaves_the_new_recording_of_the_same_form_alone(tab, site, hub):
+    p = open_thread(tab, site)
+    sent = []
+    p.wait_for_selector(MIC)
+    p.evaluate("window.__mic.lateStop = true")
+    p.click(MIC)
+    p.wait_for_function("window.__mic.made.length === 1 && window.__mic.made[0].state === 'recording'")
+    p.fill(FIELD, "Typed while recording.")
+    p.route("**/_/comment", lambda route: sent.append(route))
+    p.focus(FIELD)
+    p.keyboard.press("Control+Enter")                       # the sound is thrown away, its stop event is still on its way
+    until(lambda: sent or p.wait_for_timeout(20), what="the send to go out")
+    sent[0].fulfill(status=500, json={"ok": False, "error": "the hub broke off"})
+    p.wait_for_selector(FIELD)
+    until(lambda: p.input_value(FIELD) == "Typed while recording.", what="the form back with its text")
+    p.click(MIC)                                            # the same form, the same button: a new recording
+    p.wait_for_function("window.__mic.made.length === 2 && window.__mic.made[1].state === 'recording'")
+    p.evaluate("window.__mic.made[0].flush()")              # now the old stop arrives
+    p.wait_for_function("window.__mic.stops === 1")
+    p.wait_for_timeout(300)
+    assert p.evaluate("window.__mic.made[1].state") == "recording"
+    assert p.locator(MIC).get_attribute("aria-pressed") == "true", "the old recorder's stop undid the new button"
+    assert hub.posts == [], "a discarded sound was sent"
+    p.click(MIC)                                            # still the page's recording: this press stops it
+    p.wait_for_function("window.__mic.made[1].state === 'inactive'")
+    p.evaluate("window.__mic.made[1].flush()")
+    until(lambda: len(hub.posts) == 1, what="the new sound sent")
+
+
+STORE_FULL = """(full) => {
+  if (!window.__realSet) window.__realSet = Storage.prototype.setItem;
+  Storage.prototype.setItem = function (k, v) {
+    if (full && String(k).includes('sheaf-comment-draft')) throw new DOMException('full', 'QuotaExceededError');
+    return window.__realSet.call(this, k, v);
+  };
+}"""
+
+
+def test_the_stop_event_that_comes_late_leaves_the_idle_button_of_a_form_that_came_back_beside_another_threads_recording(tab, site, hub):
+    """A form whose send fails goes back to its own thread; when text is typed in the thread that is open and the store
+    cannot keep the failed one, it comes back beside that text (data-for). A recording in that other form is the page's
+    when the late stop of the first form's recorder arrives: the first button is idle, the second recording goes on."""
+    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "pears"), "pears", "Why pears?",
+                                                     "Bea", "2026-10-14T10:01")[0])
+    p = open_thread(tab, site)
+    sent = []
+    p.wait_for_selector(MIC)
+    p.evaluate("window.__mic.lateStop = true")
+    p.click(MIC)
+    p.wait_for_function("window.__mic.made.length === 1 && window.__mic.made[0].state === 'recording'")
+    p.fill(FIELD, "Words for the first thread.")
+    p.evaluate(STORE_FULL, True)                            # the text of a failed send cannot go to the not-sent list
+    p.route("**/_/comment", lambda route: sent.append(route))
+    p.focus(FIELD)
+    p.keyboard.press("Control+Enter")                       # the sound is thrown away, its stop event is still on its way
+    until(lambda: sent or p.wait_for_timeout(20), what="the send to go out")
+    p.locator(".rd-badge").nth(1).dispatch_event("click")   # another thread opens while the send is out
+    p.wait_for_function("document.querySelector('#rd-popover').innerText.includes('Why pears?')")
+    p.wait_for_selector(FIELD)
+    p.fill(FIELD, "Words for the second thread.")
+    sent[0].fulfill(status=500, json={"ok": False, "error": "the hub broke off"})
+    until(lambda: p.locator("#rd-popover .rd-form[data-for]").count() == 1, what="the first form back beside the second")
+    own, other = "#rd-popover .rd-form:not([data-for]) .rd-mic", "#rd-popover .rd-form[data-for] .rd-mic"
+    p.click(own)                                            # a recording in the second thread's form
+    p.wait_for_function("window.__mic.made.length === 2 && window.__mic.made[1].state === 'recording'")
+    p.evaluate("window.__mic.made[0].flush()")              # now the first recorder's stop arrives
+    p.wait_for_function("window.__mic.stops === 1")
+    p.wait_for_timeout(300)
+    assert p.locator(other).get_attribute("aria-pressed") == "false", "the button of the form that came back stayed on Stop"
+    assert p.evaluate("window.__mic.made[1].state") == "recording"
+    assert p.locator(own).get_attribute("aria-pressed") == "true"
+
+
 def self_stopped_then_dictate_again(tab, site, hub):
     """The first recording ends by itself (a microphone unplugged, a recorder error) 60 s in, its text comes in, and a
     second one starts. Returns the page, the second recorder being up."""

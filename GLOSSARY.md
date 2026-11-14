@@ -107,7 +107,7 @@ The action that answers which client an unsure thread is for: one box per candid
 _Avoid_: reassign, transfer
 
 **One-off action**:
-An action a member presses once and that stays pressed: every word but Share (SPEC 9.10), and the merge desk's Merge, Deploy and Install (action-buttons 04). On the list it is a red button; on a page it is a red button on its own line, where its box is (action-buttons 01; until then at the top of the page, #111). It reads Undo for 5 seconds before the hub writes the tick; once pressed it stays on the row, filled and locked, with who pressed it and when (#110); the hub refuses a save that unticks it (#108); a Move to is a one-off too, one button per candidate.
+An action a member presses once and that stays pressed: every word but Share (SPEC 9.10), and the merge desk's Merge, Deploy and Install (action-buttons 04). On the list it is a red button; on a page it is a red button where its line is, inside the text, with the rest of the line beside it as its text (action-buttons 01); a one-off whose box the page does not find is in the row above the document with Share. It reads Undo for 5 seconds before the hub writes the tick; once pressed it stays on the row, filled and locked, with who pressed it and when (#110); the hub refuses a save that unticks it (#108); a Move to is a one-off too, one button per candidate.
 _Avoid_: single-use, final
 
 **Pressed box**:

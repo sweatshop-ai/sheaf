@@ -1967,3 +1967,16 @@ def test_a_cr_among_the_indent_of_a_list_keeps_its_marks(src):
     from sheafmd.edit import ticked_html
     block = split_md_blocks(src)[0]
     assert ticked_html(block, 0) is not None
+
+
+@pytest.mark.parametrize("src, k", [
+    ('- x\n  ```\n  - [ ] A\n  ```\n- \r[ ] B\n', 0),
+    ('- x\n  ```\n \r - [ ] A\n  ```\n- \r[ ] B\n', 0),
+])
+def test_a_cr_never_makes_the_tick_land_on_a_mark_in_a_code_block(src, k):
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes, ticked_html
+    block = split_md_blocks(src)[0]
+    fragment = ticked_html(block, k)
+    out = _toggle_boxes(block, fragment) if fragment else None
+    assert out is None or out == src.replace("- \r[ ] B", "- \r[x] B")

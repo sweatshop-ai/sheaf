@@ -2482,6 +2482,7 @@ var create = function (ROOT, CFG, opts) {
   // a 403 ('denied': the account may not dictate), and under the member's id where the page holds one, so a sign-in as
   // someone else in the tab starts clean (10.4). A lost service ('gone': a 401, a 404, a network failure) is a moment or
   // an expired login, not a fact about the account: it lasts for the mount.
+  // (The front is on the proxy socket, which always names a member; a loopback hub holds one person, so one key is right there.)
   var DICT_OFF_KEY = KEYS + 'rd-dict-off:' + (CFG.proxy ? CFG.member : '');
   function dictationHeldOff() {         // read at each ask, so a refusal in another mounted page of the tab is seen too
     if (MOUNTED && dictOff !== Infinity) { try { if (sessionStorage.getItem(DICT_OFF_KEY) === '1') dictOff = Infinity; } catch (e) {} }

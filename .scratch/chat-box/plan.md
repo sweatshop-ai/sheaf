@@ -101,7 +101,7 @@ L'agent sait quand un texte est fait pour être copié. Il l'écrit dans un bloc
 | 54 | Le test d'un commentaire répondu pendant l'annulation attend un cochage qui n'arrive pas quand la machine est chargée | Rien | Fait (PR 269, merged cef6f06) |
 | 55 | Un commentaire sur des mots d'un titre écrit son bloc au milieu du titre, et les autres lecteurs du fichier ne retrouvent plus le titre | Rien | Fait (PR 271 merged by Rhea, main 8f285ad) |
 | 56 | Dans un titre où un mot se répète (`## A and A`), la page surligne la dernière occurrence avant l'ancre, pas celle qui a été choisie | Rien | Fait (PR 285, merge d9a969b) |
-| 57 | Un commentaire sur des mots d'une cellule de tableau écrit son bloc au milieu de la cellule | Rien | À faire |
+| 57 | Un commentaire sur des mots d'une cellule de tableau écrit son bloc au milieu de la cellule | Rien | Fait (PR 288, merged fd23dee) |
 | 58 | Titres à cas limites : un titre avec espace insécable après les `#` fait planter `add_comment`, et trois cas voisins | Rien | Fait (PR 285, merge d9a969b) |
 | 59 | La garde d'effacement des tickets 50 et 51 : cinq cas limites de lecture et d'écriture du stockage, et deux points de test | Rien | À faire |
 | 60 | Restes de la revue Opus de la PR 280 : l'instantané lu puis publié sans verrou, le journal écrit avant le fichier, le remplissage de `agent` | Rien | À faire |
@@ -112,6 +112,7 @@ L'agent sait quand un texte est fait pour être copié. Il l'écrit dans un bloc
 | 65 | Titres : une régression sur les titres faits de dièses, et finitions, suites de la revue Opus 1 de la PR 285 | Rien | En cours |
 | 66 | Titres : un balayage quadratique et un accent grave dans un commentaire fermé, restes de la revue Opus 1 de la PR 286 | Rien | À faire |
 | 67 | Une touche refusée dans un bloc `contenteditable` imbriqué n'a pas de marque, et les restes de la revue Opus 3 de la PR 287 | Rien | À faire |
+| 68 | Cellules de tableau : `<!-->` refusé, le merge sur un dernier rang sans `|` final, et trois cas que `parse` ou le découpeur de blocs lisent autrement que pandoc, restes des revues Opus de la PR 288 | Rien | À faire |
 
 ## Ce qui reste ouvert
 

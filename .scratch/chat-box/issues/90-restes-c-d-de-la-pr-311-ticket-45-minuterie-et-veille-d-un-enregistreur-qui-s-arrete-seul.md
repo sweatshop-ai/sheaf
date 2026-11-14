@@ -12,4 +12,4 @@
 
 **Claimed by:** Perla 2026-11-14 18:51
 
-**Status:** in-progress
+**Status:** done (PR 326, merge 20b24c7)

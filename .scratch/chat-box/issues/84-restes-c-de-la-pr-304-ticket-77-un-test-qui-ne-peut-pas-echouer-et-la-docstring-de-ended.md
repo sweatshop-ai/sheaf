@@ -9,7 +9,7 @@ Revue : `/home/tiroir/.claude/pm/chat-box-handoffs/pr-77-reviews/review-1.md`.
 
 **Blocked by:** none
 
-**Claimed by:**
+**Claimed by:** Lennart
 
 - [ ] c1 le test de `restart` peut échouer
 - [ ] c2 docstring de `ended()`

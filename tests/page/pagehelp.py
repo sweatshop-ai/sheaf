@@ -267,13 +267,14 @@ def toast(page):
 
 def toast_state(page):
     """(text, up): the text of the toast, and whether one is on the screen. Toasts queue (ticket 62): when one ends the
-    next is shown in the same task, so `up` is False only when none is waiting. ("", False) while the page reloads."""
+    next is shown in the same task, so `up` is False only when none is waiting. ("", None) while the page reloads: the
+    page that comes may say a toast of its own, so it is not "none waiting"."""
     try:
         return tuple(page.evaluate("(t => t ? [t.textContent, t.classList.contains('show')] : ['', false])"
                                    "(document.querySelector('#rd-toast'))"))
     except Exception as e:      # a PageStalled is not an Exception, so a driver that stopped answering still fails
         if any(said in str(e) for said in RELOADING):
-            return "", False
+            return "", None
         raise
 
 
@@ -324,7 +325,7 @@ def toasts_to_the_end(page, timeout=8.0, *, on_clock=False):
             seen.append(said)
         if up and on_clock:
             run_clock(page, TOAST_STEP)
-        return not up
+        return up is False          # None: the page reloads, and the one that comes may say more
     until(look, timeout, "the toasts to end")
     return seen
 

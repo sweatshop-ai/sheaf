@@ -3591,7 +3591,7 @@ def test_a_settle_that_failed_leaves_no_held_reload_to_a_later_upgrade(thread):
     p.evaluate(f"document.querySelector({P2!r}).append(' and plums')")      # on screen only, no autosave
     held[0].continue_()
     p.unroute("**/_/comment")
-    toasted(p, "could not be merged")
+    toasted(p, "could not be merged", timeout=20.0)      # behind the red toast of the settle's failed save (7 s)
     p.evaluate(f"document.querySelector({P2!r}).lastChild.remove()")       # the edit undone: nothing is dirty
     mark(p)
     thread.site.stop("upgrade")

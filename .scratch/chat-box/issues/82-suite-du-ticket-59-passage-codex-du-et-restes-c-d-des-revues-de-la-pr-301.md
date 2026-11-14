@@ -10,6 +10,8 @@
 
 7. **Passage Codex dû sur la PR 297 (ticket 73, fusionnée 8bcd20b) :** le tour 3 a été fait par Opus de secours (Codex sans jetons jusqu'à 20 h le 2026-11-14), GO sur ad71cf2 (`/home/tiroir/.claude/pm/chat-box-handoffs/pr-61-reviews/codex-3-opus-fallback.md`). `/codex-review` (exec, avec une consigne qui exige la ligne VERDICT) sur `git diff 4acd660..8bcd20b -- src/sheafmd/hub/transcribe.py` ; ses trouvailles deviennent des tickets, pas un retour en arrière.
 
+8. **Passage Codex dû sur la PR 302 (ticket 60, fusionnée 37c99b1), venu du ticket 81 :** les deux revues sont d'Opus (Codex sans jetons jusqu'à 20 h le 2026-11-14). `/codex-review --base` sur le diff de la PR 302 ; ses trouvailles deviennent des tickets, pas un retour en arrière.
+
 **Blocked by:** none
 
 **Claimed by:**

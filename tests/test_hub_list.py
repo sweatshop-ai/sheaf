@@ -1951,3 +1951,11 @@ def test_a_member_on_the_proxy_gets_the_mount_assets(box):
         assert "immutable" in r.headers.get("Cache-Control", ""), (path, r.headers)
         assert r.status == 200 and r.headers["Content-Type"].startswith(kind), (path, r.status)
     assert box.get("/_/health", member=NELL).status == 404          # the other open routes stay off the proxy
+
+
+def test_a_list_made_by_its_leading_crs_has_its_marks_found():
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import ticked_html
+    block = split_md_blocks('\r\r\r\r- [ ] Approve\n')[0]
+    frag = ticked_html(block, 0)
+    assert frag is not None and 'checked' in frag

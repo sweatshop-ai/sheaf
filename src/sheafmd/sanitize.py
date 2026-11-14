@@ -177,13 +177,41 @@ def _flatten_deep(soup, log: list[str]) -> None:
         stack.extend((child, depth + 1) for child in node.contents)
 
 
+_USER_MODIFY = re.compile(r"user-modify|\\", re.I)
+
+
+def _declarations(value: str) -> list[str]:
+    """A style attribute cut at the `;` that end a declaration. A `;` inside a CSS string (a quote ends at the same quote,
+    or at a newline, and a backslash takes the next character) or inside a comment does not end one."""
+    parts, start, i, n, quote = [], 0, 0, len(value), ""
+    while i < n:
+        c = value[i]
+        if c == "\\":
+            i += 2
+            continue
+        if quote:
+            if c == quote or c in "\n\r\f":
+                quote = ""
+        elif c in "\"'":
+            quote = c
+        elif value.startswith("/*", i):
+            end = value.find("*/", i + 2)
+            i = n if end < 0 else end + 1
+        elif c == ";":
+            parts.append(value[start:i])
+            start = i + 1
+        i += 1
+    parts.append(value[start:])
+    return parts
+
+
 def _without_user_modify(value: str) -> str:
     """A style attribute without the declarations that make text editable (`-webkit-user-modify`, `-moz-user-modify`,
     `user-modify`): Chromium and WebKit let the reader type into such a span, and the page does not guard it. A declaration with
-    a backslash is dropped too, and the whole declaration is searched, not the text before its colon, so a comment before
-    the name does not hide it, whatever the comment holds."""
-    kept = [d for d in value.split(";") if not re.search(r"user-modify|\\", d, re.I)]
-    return ";".join(kept)
+    a backslash is dropped too (an escape can spell the name; this also drops an ordinary `content:"\\201C"`), and the whole
+    declaration is searched, not the text before its colon, so a comment before the name does not hide it, whatever the comment
+    holds. Where this splits differently from a browser, the text is still searched whole: a piece that holds the name is dropped."""
+    return ";".join(d for d in _declarations(value) if not _USER_MODIFY.search(d))
 
 
 def _mount_style(value: str) -> str:
@@ -319,7 +347,14 @@ def _pass(fragment: str, comments: bool, log: list[str], mount: bool = False) ->
                 log.append(f"  - {attr} removed from <{name}>")
                 del tag[attr]
             elif a == "style" and not mount:
-                tag[attr] = _without_user_modify(str(tag[attr]))
+                value = str(tag[attr])
+                clean = _without_user_modify(value)
+                if clean != value:
+                    log.append(f"  - style trimmed on <{name}>")
+                    if clean.strip():
+                        tag[attr] = clean
+                    else:
+                        del tag[attr]
             elif a in URL_ATTRS:
                 value = tag[attr]
                 if isinstance(value, list):

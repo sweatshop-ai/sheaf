@@ -42,3 +42,14 @@ def test_what_the_sanitiser_keeps_of_the_span_cannot_be_typed_into(engine_page, 
     name, page = engine_page
     got = _types_into(page, sanitize(html))
     assert got == "x", f"{name} let text be typed into the sanitised span: {got!r}"
+
+
+@pytest.mark.parametrize("html", SPANS)
+def test_the_unsanitised_span_is_typed_into_in_chromium_and_webkit(engine_page, html):
+    """The control for the test above: without `sanitize()` the span takes the text in the engines that honour the property
+    (Firefox does not). If an engine stopped honouring it, the sanitised case would pass for nothing."""
+    name, page = engine_page
+    if name == "firefox":
+        return      # not honoured there, and CI fails on a skip
+    got = _types_into(page, html)
+    assert got != "x", f"{name} no longer lets the unsanitised span be typed into: the test above proves nothing"

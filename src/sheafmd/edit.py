@@ -733,9 +733,15 @@ def _unchanged(block, fragment: str) -> bool:
 # does not go through pandoc: it flips the `[ ]` / `[x]` of those items in the
 # source and leaves every other byte alone. Pandoc would rewrite the whole list
 # (bullets, wrapping, a capital X), so one tick would touch every line. Only a bullet item has a mark: pandoc 3.9
-# draws no box for `1. [ ] a` (a CR or none), so a mark there would be one the page never shows.
+# draws no box for `1. [ ] a` (a CR or none), so a mark there would be one the page never shows. The bullet may
+# stand behind other markers on its line (`- - [ ] a`, `1. - [ ] a`, `1. > - [ ] a`): pandoc draws its box.
 TASK_MARK_RE = re.compile(
-    r"^((?:[ \t]*>)*[ \t]*[-*+][ \t]+)\[([ xX])\](?=[ \t]|$)", re.M)
+    r"^((?:[ \t]*>)*[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+|>[ \t]*)*[-*+][ \t]+)\[([ xX])\](?=[ \t]|$)", re.M)
+# The marks of before ticket 128, which also took an ordered item. They stay as a second reading: where the counts
+# of the first one are not the boxes' (an empty `- [ ]` beside a box the first reading finds behind another marker),
+# these may be, and the write is checked all the same by the render of its result.
+LEGACY_MARK_RE = re.compile(
+    r"^((?:[ \t]*>)*[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+)\[([ xX])\](?=[ \t]|$)", re.M)
 
 
 class _Mark:
@@ -763,14 +769,22 @@ class _Mark:
         return self._end if group == 0 else self._box + 1   # the match ends after the `]`, the state character before it
 
 
-def task_marks(content: str) -> list:
+def task_marks(content: str, pattern=TASK_MARK_RE) -> list:
     """The task marks of `content`, read as pandoc reads it: without its CRs, which it deletes, so a CR anywhere in a
     line, between the brackets too, neither hides a mark nor makes one. Offsets are in `content` itself."""
     if "\r" not in content:
-        return list(TASK_MARK_RE.finditer(content))
+        return list(pattern.finditer(content))
     keep = [i for i, ch in enumerate(content) if ch != "\r"]
     return [_Mark(content.rfind("\n", 0, keep[m.start()]) + 1, keep[m.start(2)], m.group(2), keep[m.end() - 1] + 1)
-            for m in TASK_MARK_RE.finditer(content.replace("\r", ""))]
+            for m in pattern.finditer(content.replace("\r", ""))]
+
+
+def _mark_sets(content: str) -> list:
+    """The readings of the marks of `content` a tick may be written by: the marks, then the legacy ones when they
+    are not the same."""
+    first = task_marks(content)
+    legacy = task_marks(content, LEGACY_MARK_RE)
+    return [first] if [m.start(2) for m in legacy] == [m.start(2) for m in first] else [first, legacy]
 
 
 def _ticks(fragment: str):
@@ -785,9 +799,13 @@ def _ticks(fragment: str):
     return states, str(soup)
 
 
-def _toggle_boxes(block, fragment: str):
+def _toggle_boxes(block, fragment: str, marks=None):
     """The block with its task marks flipped, when the page changed nothing but
-    which boxes are ticked. None otherwise, and then the edit is converted as usual."""
+    which boxes are ticked. None otherwise, and then the edit is converted as usual.
+    `marks` is one reading of the marks; none given, each of `_mark_sets` is tried in turn."""
+    if marks is None:
+        return next((out for out in (_toggle_boxes(block, fragment, m) for m in _mark_sets(block.content))
+                     if out is not None), None)
     if "checkbox" not in fragment:
         return None
     both = _comparable(block, fragment)
@@ -805,7 +823,6 @@ def _toggle_boxes(block, fragment: str):
     # The marks found in the source must be the boxes the render drew, one for
     # one, or a tick could land on the wrong line (a `- [ ]` inside a code
     # block in the list, say). Any doubt and the edit takes the general path.
-    marks = task_marks(block.content)
     if [m.group(2) != " " for m in marks] != have:
         return None
     out = block.content
@@ -845,16 +862,19 @@ def ticked_html(block, k: int, tick: bool = True):
         lambda m: f'<span class="rd-anchor" data-rd-id="{m.group(1)}"></span>', copyblock.mark(html, page=True)),
         "html.parser")
     found = soup.select('input[type="checkbox"]')
-    marks = task_marks(block.content)
-    if not 0 <= k < min(len(found), len(marks)) or found[k].has_attr("checked") == tick:
+    sets = [m for m in _mark_sets(block.content) if 0 <= k < min(len(found), len(m))]
+    if not sets or found[k].has_attr("checked") == tick:
         return None
     if tick:
         found[k]["checked"] = ""
     else:
         del found[k]["checked"]
     fragment = str(soup)
-    want = block.content[:marks[k].start(2)] + ("x" if tick else " ") + block.content[marks[k].end(2):]
-    return fragment if _toggle_boxes(block, fragment) == want else None
+    for marks in sets:
+        want = block.content[:marks[k].start(2)] + ("x" if tick else " ") + block.content[marks[k].end(2):]
+        if _toggle_boxes(block, fragment, marks) == want:
+            return fragment
+    return None
 
 
 # ─────────────────────────────────────────────── comments through a save ──

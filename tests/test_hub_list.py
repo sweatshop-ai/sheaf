@@ -2106,3 +2106,42 @@ def test_a_tick_beside_an_ordered_item_flips_its_line_and_leaves_the_rest(src, k
     from sheafmd.edit import _toggle_boxes
     block = split_md_blocks(src)[0]
     assert _toggle_boxes(block, _page_with_box_flipped(block, k)) == want
+
+
+@pytest.mark.parametrize("src", ["- - [ ] o\n", "1. - [ ] g\n", "1. > - [ ] x\n", "- > - [x] x\n"])
+def test_a_bullet_task_behind_another_marker_has_its_mark(src):
+    # Ticket 128, b1 of its review: pandoc draws a box for the bullet behind another marker, and the mark must be
+    # there or the block's counts of marks and boxes differ and every tick of it rewrites the list.
+    from sheafmd import _pandoc
+    from sheafmd.edit import task_marks
+    assert _pandoc.run(["-f", "gfm", "-t", "html5"], src).stdout.count("checkbox") == 1
+    assert len(task_marks(src)) == 1 and src[task_marks(src)[0].start(2)] in " x"
+
+
+@pytest.mark.parametrize("src, k, want", [
+    ("- [ ]\n  text\n1. [ ]\n- - [ ] o\n", 0, "- [x]\n  text\n1. [ ]\n- - [ ] o\n"),
+    ("- [ ] a\n1. - [ ] g\n", 1, "- [ ] a\n1. - [x] g\n"),
+])
+def test_a_tick_in_a_block_with_a_box_behind_another_marker_is_written_in_place(src, k, want):
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes
+    block = split_md_blocks(src)[0]
+    assert _toggle_boxes(block, _page_with_box_flipped(block, k)) == want
+
+
+@pytest.mark.parametrize("src, k, want", [
+    # An empty item has a mark and no box, and a box behind another marker has a box and (since ticket 128) a mark:
+    # the first reading has three marks for two boxes. The legacy reading has two and the render of the result
+    # confirms it, as it did before ticket 128.
+    ("* [X] c\n- [ ]\n1. - [ ] g\n", 0, "* [ ] c\n- [ ]\n1. - [ ] g\n"),
+    ("- [ ]\n- - [ ] o\n  - [ ] i\n", 1, "- [ ]\n- - [ ] o\n  - [x] i\n"),
+    ("+ [ ] d\n- [ ]\n- - [ ] o\n", 0, "+ [x] d\n- [ ]\n- - [ ] o\n"),
+])
+def test_a_tick_that_the_legacy_marks_made_in_place_is_still_made_in_place(src, k, want):
+    # Ticket 128, b1 again (Rhea): a PR never makes a case worse than b90b6a0.
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes
+    block = split_md_blocks(src)[0]
+    out = _toggle_boxes(block, _page_with_box_flipped(block, k))
+    assert (out is not None) == (want is not None)
+    assert want is None or out == want

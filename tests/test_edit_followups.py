@@ -1027,3 +1027,34 @@ def test_a_comment_put_back_in_a_heading_with_no_words_goes_on_a_line_of_its_own
     out = rde._insert_comment(md, 0, raw, "Alpha")
     assert [b.kind for b in split_md_blocks(out)][0] == "heading" and rdc.parse(out).malformed == []
     assert len(rdc.parse(out).comments) == 1 and out.startswith(heading)
+
+
+# ── heading edge cases of the merge (tickets 56 and 58) ──
+
+def test_a_comment_of_several_lines_put_back_in_a_heading_goes_on_a_line_of_its_own():
+    # Ticket 58, case 4: a block of several lines at the end of the heading line would run into
+    # the next lines of the file and no longer be part of the heading.
+    note = agent_note()
+    note.body = "first line\nsecond line"
+    raw = rdc.format(note, False)
+    assert "\n" in raw
+    out = rde._insert_comment("## Alpha Beta\n\nBody.\n", 0, raw, "Alpha")
+    assert out.startswith("## Alpha Beta\n\n<!-- sheaf-comment") and rdc.parse(out).malformed == []
+    assert [b.kind for b in split_md_blocks(out)][0] == "heading"
+    assert len(rdc.parse(out).comments) == 1
+
+
+def test_a_repeated_word_of_a_heading_is_put_back_at_the_end_whichever_occurrence_it_was():
+    # Ticket 56: the quote records the words, not which one; the block is at the end of the
+    # heading, so the occurrence is the last one before it, on the page and here (SPEC 10.4).
+    md = "## A and A" + rdc.format(agent_note(quote="A"), True) + "\n\nBody.\n"
+    c = rdc.parse(md).comments[0]
+    assert rde._occurrence(rde.split_md_blocks(md)[0].content, c) == 1
+
+
+def test_a_comment_of_several_lines_put_back_in_a_setext_heading_goes_on_a_line_of_its_own():
+    note = agent_note()
+    note.body = "first line\nsecond line"
+    out = rde._insert_comment("Alpha Beta\n==========\n\nBody.\n", 0, rdc.format(note, False), "Alpha")
+    assert out.startswith("Alpha Beta\n==========\n\n<!-- sheaf-comment") and rdc.parse(out).malformed == []
+    assert [b.kind for b in split_md_blocks(out)][0] == "heading"

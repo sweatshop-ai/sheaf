@@ -196,3 +196,43 @@ def test_a_heading_quote_that_is_stale_is_still_refused():
     # The anchor of a heading ignores the selection, but the selection is still checked (SPEC 10.4).
     with pytest.raises(rdc.AnchorError, match="text changed"):
         rdc.add_comment("## Done when\n", 0, 0, 4, "Nope", "why", "Ada", "2026-11-13T10:00")
+
+
+# ── heading edge cases (ticket 58) ──
+
+@pytest.mark.parametrize("space", ["\u00a0", "\u3000"])
+def test_a_heading_with_a_no_break_or_full_width_space_after_the_hashes_takes_a_comment(space):
+    # blocks.ATX_RE reads any \s after the hashes as a heading, pandoc reads a paragraph: the
+    # heading anchor is None there and add_comment used to add it to the offset (TypeError).
+    md = "#%sFoo bar\n" % space
+    out, cid = comment_on(md, "Foo")
+    assert out.startswith("#%sFoo<!-- sheaf-comment id=%s" % (space, cid))
+    assert re.sub(r"<!--.*?-->", "", out) == md
+
+
+@pytest.mark.parametrize("md", ["### ###\n", "# #\n", "## ##  \n"])
+def test_a_heading_that_is_only_hashes_has_no_place_for_a_block(md):
+    assert rdc.heading_anchor(md) is None
+
+
+def test_a_heading_with_an_unclosed_opener_takes_the_block_before_it_and_keeps_every_word():
+    md = "# The <!-- marker\n"
+    out, cid = comment_on(md, "The")
+    assert out.startswith("# The<!-- sheaf-comment id=%s" % cid)
+    assert re.sub(r"<!--.*?-->", "", out, count=1) == md
+    page = pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], out)
+    assert "marker" in page and [c.id for c in rdc.parse(out).comments] == [cid]
+
+
+def test_an_opener_in_a_code_span_of_a_heading_is_not_an_opener():
+    md = "# Use `<!--` here\n"
+    out, _ = comment_on(md, "here")
+    assert out.startswith("# Use `<!--` here<!-- sheaf-comment")
+
+
+@pytest.mark.parametrize("md, quote", [("# <!-- marker\n", "marker"), ("## <!-- a b\n", "a")])
+def test_a_heading_whose_words_all_follow_an_unclosed_opener_refuses_the_comment(md, quote):
+    # A block after the selection would sit inside the opener and close it.
+    s, e = sel(md, quote)
+    with pytest.raises(rdc.AnchorError):
+        rdc.add_comment(md, 0, s, e, quote, "why", "Ada", "2026-11-13T10:00")

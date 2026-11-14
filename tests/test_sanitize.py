@@ -571,7 +571,8 @@ def test_no_split_of_a_style_lets_user_modify_or_a_backslash_through():
     """Bypass neighbours of the string- and comment-aware split: quotes, comments, escapes and newlines in every order
     around a declaration that makes text editable. The split may differ from a browser's; the output may not carry the name."""
     pieces = ['"', "'", "/*", "*/", ";", "\\", "\n", ":", " ", "(", ")", "[", "]", "{", "}", "color: red", "-webkit-user-modify: read-write", "user-modify",
-              "-moz-user-\\6d odify:read-write", "a", "url(", "URL( ", "url(/*", "url(it's", "@", "#", "\\75 ", "@url(", "#url(", "\\3a "]
+              "-moz-user-\\6d odify:read-write", "a", "url(", "URL( ", "url(/*", "url(it's", "@", "#", "\\75 ", "@url(", "#url(", "\\3a ",
+              "\\41\n", "\\\n", "\\\r\n", "\r", "\f", "url", "<!--"]
     rng = random.Random(96)
     for _ in range(3000):
         style = "".join(rng.choice(pieces) for _ in range(rng.randint(1, 12)))
@@ -661,11 +662,14 @@ def _css_reference_split(s: str) -> list[str]:
             return name_start(at(k + 1)) or at(k + 1) == "-" or valid_escape(k + 1)
         return name_start(c) or valid_escape(k)
 
+    def digit(c):
+        return c in tuple("0123456789")
+
     def start_number(k):
         c = at(k)
         if c in "+-":
-            return at(k + 1).isdigit() or (at(k + 1) == "." and at(k + 2).isdigit())
-        return c.isdigit() if c != "." else at(k + 1).isdigit()
+            return digit(at(k + 1)) or (at(k + 1) == "." and digit(at(k + 2)))
+        return digit(c) if c != "." else digit(at(k + 1))
 
     def escape(k):
         """(text, next index) of the escape that starts after the backslash at k - 1."""
@@ -731,9 +735,14 @@ def _css_reference_split(s: str) -> list[str]:
             i = n if end < 0 else end + 2
         elif c in "\"'":
             i += 1
-            while i < n and s[i] != c and s[i] not in "\n":
+            while i < n and s[i] != c and s[i] not in "\n\r\f":
                 if s[i] == "\\":
-                    i += 2 if i + 1 < n else 1
+                    if s.startswith("\r\n", i + 1):
+                        i += 3
+                    elif at(i + 1) in ("\n", "\r", "\f") and i + 1 < n:
+                        i += 2
+                    else:
+                        i = escape(i + 1)[1]
                 else:
                     i += 1
             if at(i) == c:
@@ -753,17 +762,17 @@ def _css_reference_split(s: str) -> list[str]:
             i += 1
         elif c == "@":
             i = name(i + 1)[1] if start_ident(i + 1) else i + 1
-        elif c in "+-." and start_number(i) or c.isdigit():
+        elif c in "+-." and start_number(i) or digit(c):
             j = i + 1 if c in "+-" else i
-            while at(j).isdigit():
+            while digit(at(j)):
                 j += 1
-            if at(j) == "." and at(j + 1).isdigit():
+            if at(j) == "." and digit(at(j + 1)):
                 j += 1
-                while at(j).isdigit():
+                while digit(at(j)):
                     j += 1
-            if at(j) in ("e", "E") and (at(j + 1).isdigit() or at(j + 1) in ("+", "-") and at(j + 2).isdigit()):
+            if at(j) in ("e", "E") and (digit(at(j + 1)) or at(j + 1) in ("+", "-") and digit(at(j + 2))):
                 j += 2
-                while at(j).isdigit():
+                while digit(at(j)):
                     j += 1
             i = name(j)[1] if start_ident(j) else j
         elif c == "-" and s.startswith("-->", i):
@@ -819,6 +828,17 @@ SPLIT_CASES = [
     ("a:-url(/*b)*/;c:d", ["a:-url(/*b)*/;c:d"]),
     ("a: url(/*b)*/;c:d", ["a: url(/*b)*/", "c:d"]),
     ("a:.url(/*b)*/;c:d", ["a:.url(/*b)*/", "c:d"]),
+    # ticket 116: a hex escape in a string takes one white space after it, a newline included
+    ('a:"\\41\n;b:c";d:e', ['a:"\\41\n;b:c"', "d:e"]),
+    ('a:"\\41\r\n;b:c";d:e', ['a:"\\41\r\n;b:c"', "d:e"]),
+    ('a:"\\\r\n;b:c";d:e', ['a:"\\\r\n;b:c"', "d:e"]),         # `\`+CRLF is one line continuation
+    ('a:"\\\r;b:c";d:e', ['a:"\\\r;b:c"', "d:e"]),
+    ('a:"\\\f;b:c";d:e', ['a:"\\\f;b:c"', "d:e"]),
+    ('a:"b\rc;d:e', ['a:"b\rc', "d:e"]),                       # a bare CR or FF ends a string, as a newline does
+    ('a:"b\fc;d:e', ['a:"b\fc', "d:e"]),
+    ("a:url ;b:c)d;e:f", ["a:url ", "b:c)d", "e:f"]),           # a `url` with no `(` is a name, not a url token
+    ("a:\\\nurl(/*);b:c", ["a:\\\nurl(/*)", "b:c"]),             # `\`+newline is no escape in a name: `url(` is a url token
+    ("a:<!--url(/*b)*/;c:d", ["a:<!--url(/*b)*/", "c:d"]),    # CDO, then a url token
 ]
 
 
@@ -839,7 +859,8 @@ def test_the_split_of_a_style_equals_the_reference_split():
     drifts from a browser's, which would keep too little or too much without ever hiding the name."""
     from sheafmd.sanitize import _declarations
     pieces = ['"', "'", "/*", "*/", ";", "\\", "\n", ":", " ", "(", ")", "[", "]", "{", "}", "@", "#", "-", ".", "1", "a", "u", "url(", "URL(",
-              "rl(", "\\75 ", "\\75", "\\3a ", "\\:", "url( ", "e", "color: red", "-webkit-user-modify: read-write", "€", "\r\n"]
+              "rl(", "\\75 ", "\\75", "\\3a ", "\\:", "url( ", "e", "color: red", "-webkit-user-modify: read-write", "€", "\r\n",
+              "\\41\n", "\\\n", "url", "\\41 ", "\r", "\f", "<!--"]
     rng = random.Random(110)
     for _ in range(20000):
         style = "".join(rng.choice(pieces) for _ in range(rng.randint(1, 12)))

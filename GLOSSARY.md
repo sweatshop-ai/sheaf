@@ -107,7 +107,7 @@ The action that answers which client an unsure thread is for: one box per candid
 _Avoid_: reassign, transfer
 
 **One-off action**:
-An action a member presses once and that stays pressed: every word but Share (SPEC 9.10), and the merge desk's Merge, Deploy and Install (action-buttons 04). On the list it is a red button; on a page it is a red button where its line is, inside the text, with the rest of the line beside it as its text (action-buttons 01); a one-off whose box the page does not find is in the row above the document with Share. It reads Undo for 5 seconds before the hub writes the tick; once pressed it stays on the row, filled and locked, with who pressed it and when (#110); the hub refuses a save that unticks it (#108); a Move to is a one-off too, one button per candidate.
+An action a member presses once and that stays pressed: every word but Share (SPEC 9.10), and the merge desk's Merge, Deploy and Install (action-buttons 04). On the list it is a red button; on a page it is a red button where its line is, inside the text, with the rest of the line beside it as its text (action-buttons 01); a one-off whose box the page does not find is in the row above the document. It reads Undo for 5 seconds before the hub writes the tick; once pressed it stays on the row, filled and locked, with who pressed it and when (#110); the hub refuses a save that unticks it (#108); a Move to is a one-off too, one button per candidate.
 _Avoid_: single-use, final
 
 **Pressed box**:
@@ -123,7 +123,7 @@ The words of a tick box's line that belong to the box: those before the first `:
 _Avoid_: caption, title
 
 **Toggle action**:
-An action a member presses and may release again; today only Share (SPEC 9.10, 9.11), which becomes a tick box (action-buttons 03): something switched on and off is a tick box, something launched once is a button (Thierry, 2026-11-13). On the list and at the top of its sheaf's page it is a blue button with `aria-pressed`, pressed and released there by the sheaf's owner (#110, #111).
+An action a member presses and may release again; today only Share (SPEC 9.10, 9.11), and a tick box on a page (action-buttons 03): something switched on and off is a tick box, something launched once is a button (Thierry, 2026-11-13). On the page its line is a checkbox, `- [ ] Shared with the team` (`- [ ] Share` is read as before), ticked and unticked at once by the box or its label, the whole line, by the sheaf's owner alone (9.11, 10.11); on the list it stays a blue button with `aria-pressed` (#110).
 _Avoid_: switch
 
 **Pointer** (of a sheaf):

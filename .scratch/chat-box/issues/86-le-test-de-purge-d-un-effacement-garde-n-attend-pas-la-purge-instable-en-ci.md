@@ -6,12 +6,12 @@
 
 **Claimed by:** Oskar
 
-**Status:** ready-for-agent
+**Status:** done (PR 316, merged as 5738035)
 
 **Établi (preuves) :** vu une fois, PR 306, sur 08f0833 (la PR ne touche pas ce fichier), tranche 2/3, rouge aux deux tentatives du job (13:27 et 13:32 UTC), vert au rejeu des jobs échoués. Run 43599394576, job 132460763250 : https://github.com/sweatshop-ai/sheaf/actions/runs/43599394576/job/132460763250. Dans la même exécution, la tranche 1/3 a échoué sur un autre test (ticket 79). Cause non établie.
 
 **Par où commencer :** lire les tickets 50, 51, 59 (F7) et 61 (méthode : reproduction sous charge sur un runner, branche jetable) ; lancer le test en boucle sur t-compute (jamais sur le portable), machine chargée ; chercher ce qui doit déclencher la purge (`window.__refusedSets`) avant l'attente de la ligne 1023 et ce qui peut la rater.
 
-- [ ] La cause est écrite avec la preuve (un échec reproduit à la demande, ou la sortie d'une CI qui l'a relevée)
-- [ ] Le correctif traite la cause, pas un délai ni une relance
-- [ ] CI verte sur trois passages de suite
+- [x] La cause est écrite avec la preuve (un échec reproduit à la demande, ou la sortie d'une CI qui l'a relevée)
+- [x] Le correctif traite la cause, pas un délai ni une relance
+- [x] CI verte sur trois passages de suite

@@ -2,6 +2,8 @@
 
 **What to build:** `tests/page/test_page_writing.py::test_open_the_thread_on_the_second_of_two_kept_replies_draws_that_reply` a échoué une fois sur la tête 49be5dc de la PR 280 (job 132246003022, run 43530290138 tentative 1, tranche 3/3) et est passé à la deuxième tentative sans changement de code. Assertion : `sorted(texts) == ["words from page A", "words from page B"]`, reçu `["words from page B"]` : la réponse gardée de la page A manque dans la liste « not sent » après `come_back(thread)`. Le test envoie deux réponses depuis deux pages, fait échouer la première (500) et la seconde (`fail_the_send`), puis revient ; la liste vient du stockage partagé des deux pages. Cause non prouvée ; soupçon à vérifier : la lecture de la liste « not sent » arrive avant que l'écriture de la page A dans le stockage soit finie (le test n'attend pas l'écriture de A, seulement `unsent_line`). Aucun lien établi avec la PR 283 ni avec la PR 280. Classe : b (test instable ; peut-être un vrai ordre d'écriture de la page).
 
+**Claimed by:** Naya
+
 **Blocked by:** none
 
 **Status:** ready-for-agent

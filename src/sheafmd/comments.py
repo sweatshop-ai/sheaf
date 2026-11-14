@@ -593,6 +593,12 @@ def projection(block: str) -> Projection:
 
 def anchor_point(block: str, start: int, end: int, quote: str) -> int:
     """Offset in `block` where a comment on the selection [start, end) goes."""
+    if "\r" in block:
+        # Pandoc deletes a CR and counts its columns without it, so the point is found in the block without its CRs
+        # and given back as an offset in the block itself, before the next character that stays.
+        keep = [i for i, ch in enumerate(block) if ch != "\r"]
+        at = anchor_point(block.replace("\r", ""), start, end, quote)
+        return keep[at] if at < len(keep) else len(block)
     proj = projection(block)
     if end <= start or proj.text[start:end] != squash(quote):
         raise AnchorError("the text changed since the page was rendered, select it again")
@@ -642,6 +648,16 @@ def _unclosed_opener(text: str) -> int:
 
 
 def heading_anchor(block: str) -> int | None:
+    """The offset of `_heading_anchor` read on the block without its CRs, which pandoc deletes (the splitter reads
+    them so, and a heading may begin after four of them), given back as an offset in the block itself."""
+    if "\r" not in block:
+        return _heading_anchor(block)
+    keep = [i for i, ch in enumerate(block) if ch != "\r"]
+    at = _heading_anchor(block.replace("\r", ""))
+    return None if at is None else (keep[at] if at < len(keep) else len(block))
+
+
+def _heading_anchor(block: str) -> int | None:
     """Offset in a heading block where a comment on any of its words goes: the end of the heading's
     text, so the words stay whole for every reader of the file (a block in the middle, as in
     "Done<!-- … --> when", makes the title another one). Before an ATX heading's closing hashes and

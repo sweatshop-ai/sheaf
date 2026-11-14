@@ -932,7 +932,9 @@ var create = function (ROOT, CFG, opts) {
       return;
     }
     try {
-      if (pressSaid && (pressSaid.toast.until === null || Date.now() < pressSaid.toast.until)) sessionStorage.setItem(KEYS + 'rd-press-said', pressSaid.text);
+      // It carries the refusal's own deadline (a toast still queued has 7 s from now), so reloads do not chain it on.
+      if (pressSaid && (pressSaid.toast.until === null || Date.now() < pressSaid.toast.until))
+        sessionStorage.setItem(KEYS + 'rd-press-said', JSON.stringify({ text: pressSaid.text, until: pressSaid.toast.until === null ? Date.now() + 7000 : pressSaid.toast.until }));
       sessionStorage.setItem(KEYS + 'rd-keep', JSON.stringify({ doc: CFG.doc, y: scrollNow(), open: openId || null,
                                                          panel: panel.classList.contains('open'),
                                                          known: counts(), editing: editing,
@@ -2473,7 +2475,8 @@ var create = function (ROOT, CFG, opts) {
   // A microphone in the box. The sound goes to the hub (POST /_/transcribe, which relays it) or, on a page mounted in
   // Open WebUI, to Open WebUI's own route with the session cookie; the text comes back into the field, to read and send.
   // One recording at a time, and the sound is never kept: not in the store, not in the file. `dict` is the recording in
-  // hand ({f, chunks, discard, ...}) until its answer is in; `dictOff` is the time until which the service is held gone.
+  // hand ({f, chunks, discard, ...}) until its answer is in or it is discarded (a discarded one may still be letting its
+  // microphone go, next to a new recording); `dictOff` is the time until which the service is held gone.
   var DICTATE_TYPES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
   var DICTATE_MAX = 120000, DICTATE_WATCH = 15000;   // a recording asks the hub every 15 s whether it is still there
   var MIC = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1a2.5 2.5 0 0 0-2.5 2.5v4a2.5 2.5 0 0 0 5 0v-4A2.5 2.5 0 0 0 8 1ZM3.5 7a.75.75 0 0 1 1.5 0 3 3 0 0 0 6 0A.75.75 0 0 1 12.5 7a4.5 4.5 0 0 1-3.75 4.44v1.81h1.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5h1.5v-1.81A4.5 4.5 0 0 1 3.5 7Z"/></svg>';
@@ -2580,6 +2583,7 @@ var create = function (ROOT, CFG, opts) {
           rec.addEventListener('dataavailable', function (e) { if (e.data && e.data.size) d.chunks.push(e.data); });
           rec.addEventListener('stop', function () {
             release();
+            clearTimeout(d.timer); clearInterval(d.watch);    // a recorder can stop by itself (a microphone unplugged): its timer must not cut a later recording
             var gone = function () { return d.discard || unmounted || !f.isConnected; };
             // A discarded sound leaves a form that may still be here (a send that fails gives it back): its button is idle again.
             var here = function () { if (!unmounted && f.isConnected) idle(); };
@@ -2600,7 +2604,7 @@ var create = function (ROOT, CFG, opts) {
           });
           try { rec.start(); } catch (e) { release(); free(); says('The recording could not start. Try again.'); return; }
           b.title = 'Stop'; b.setAttribute('aria-pressed', 'true');
-          d.timer = setTimeout(function () { stopDictation(false); }, DICTATE_MAX);
+          d.timer = setTimeout(function () { if (dict === d) stopDictation(false); }, DICTATE_MAX);
           if (!MOUNTED) d.watch = setInterval(function () {   // the service lost during the recording: the sound is dropped
             dictationAvailable().then(function (yes) {
               if (yes || dict !== d || !d.rec || d.rec.state !== 'recording') return;
@@ -3741,6 +3745,8 @@ var create = function (ROOT, CFG, opts) {
       var res = {}, ok;
       boxWaits.add(box);
       try { ok = await save(true, res); } finally { boxWaits.delete(box); }
+      // A save the hub did not take and that said nothing (quiet) is told here, or the press looks dropped.
+      if (!ok && res.owed) say('The hub is unreachable: press Share again once it is back.', true);
       // Not on an owed save either: Share is sent to the hub, and the owed edits would be merged over it when they go.
       if (!ok || stale || docGone || !main.contains(box)) return;
       x = toggleOf.get(box);
@@ -3768,6 +3774,7 @@ var create = function (ROOT, CFG, opts) {
       waiting = null;
       back();
       btn.disabled = true;
+      pressSaid = null;           // a newer press's answer is the one a reload says again, not an earlier press's
       if (a.toggle) btn.setAttribute('aria-pressed', a.pressed ? 'false' : 'true');
       // A save out now changes the hash: the tick names the text that save leaves. So does a comment or a Restore
       // (`ownWrites`), which the hub would otherwise write between the tick's read and its lock.
@@ -3806,7 +3813,7 @@ var create = function (ROOT, CFG, opts) {
         var said = say(e.message, true);
         // A reload waits for this answer: the refusal is said again on the page it brings, if it comes while the
         // toast is still waiting its turn or up (a form may hold the reload longer).
-        if (reloadAfterPress) pressSaid = { text: e.message, toast: said };
+        if (reloadAfterPress || reloadPending) pressSaid = { text: e.message, toast: said };
         done();
       }
     }
@@ -4440,10 +4447,13 @@ var create = function (ROOT, CFG, opts) {
   try {
     var keep = JSON.parse(sessionStorage.getItem(KEYS + 'rd-keep') || 'null');
     var msg = sessionStorage.getItem(KEYS + 'rd-toast');
-    var refusedPress = sessionStorage.getItem(KEYS + 'rd-press-said');   // a press's refusal a reload waited for (10.11)
+    var rawPress = sessionStorage.getItem(KEYS + 'rd-press-said');   // a press's refusal a reload waited for (10.11)
     sessionStorage.removeItem(KEYS + 'rd-keep');
     sessionStorage.removeItem(KEYS + 'rd-toast');
     sessionStorage.removeItem(KEYS + 'rd-press-said');
+    var refusedPress = null;      // an older page left the bare text here: that is no refusal to say again, and no reason to stop booting
+    try { refusedPress = JSON.parse(rawPress || 'null'); } catch (e) {}
+    if (!refusedPress || typeof refusedPress.text !== 'string' || typeof refusedPress.until !== 'number') refusedPress = null;
     // One hub serves every document from one origin, so what a reload kept
     // belongs to this page only if it names this document.
     if (keep && keep.doc !== CFG.doc) { keep = null; msg = null; }
@@ -4470,8 +4480,12 @@ var create = function (ROOT, CFG, opts) {
       if (keep.editing) { setEditing(true); placeCaret(keep.caret); }
       if (keep.open && byId[keep.open]) setTimeout(function () { openComment(keep.open); }, 50);
     }
-    if (refusedPress && keep) say(refusedPress, true);
-    else if (msg) say(msg);
+    // What the old page said and the reload left, then the refusal, which a second reload says again in its turn.
+    if (msg) say(msg);
+    if (refusedPress && keep && Date.now() < refusedPress.until) {
+      say(refusedPress.text, true);
+      pressSaid = { text: refusedPress.text, toast: { until: refusedPress.until } };      // the deadline it was said in, not a new one
+    }
     if (canSave) { showKept(); unsentLine(); }
     var unsaved = canEdit ? editDraftFound() : null;
     if (unsaved) offerDraft(unsaved);

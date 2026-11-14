@@ -39,10 +39,13 @@ def test_a_touch_selection_opens_the_box_with_the_cursor_in_the_field_and_no_bar
     assert phone.page.locator(BTN).count() == 0
 
 
-def test_touching_a_number_puts_the_cursor_in_the_field_too(phone, site):
+def test_touching_a_number_puts_the_cursor_in_the_field_too(touch_tab, site):
+    """The comment is written before the page opens: the `phone` fixture has the page open already, and a page open when its
+    file changes reloads itself, which a second `open()` then races (ticket 98, as ticket 78)."""
+    site.file.write_text(PLAN_MD, encoding="utf-8")
     update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
                                                      "Bea", "2026-10-14T10:00")[0])
-    p = phone.open().page
+    p = touch_tab.open().page
     p.touchscreen.tap(*centre(p, ".rd-badge"))
     p.wait_for_selector(FIELD)
     assert focused(p) == "TEXTAREA", "the cursor is not in the field"

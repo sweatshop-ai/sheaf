@@ -3,6 +3,7 @@ task boxes and comments kept.
 
 Every removal test also asserts what must SURVIVE next to it, so a sanitiser that
 empties the document cannot pass."""
+import html
 import random
 from html.parser import HTMLParser
 
@@ -140,6 +141,17 @@ def test_the_document_has_no_contenteditable_of_its_own(value, mount):
     for _, a in tags_of(out):
         assert "contenteditable" not in a
     assert "<span>b</span>" in out and "<em>c</em>" in out
+
+
+@pytest.mark.parametrize("mount", [False, True])
+@pytest.mark.parametrize("spelling", ["CONTENTEDITABLE", "ContentEditable", 'contenteditable="true" contenteditable="false"',
+                                      'contenteditable="false" contenteditable="true"'])
+def test_contenteditable_goes_in_any_letter_case_and_when_repeated(spelling, mount):
+    """The upper-case and repeated spellings pass on main without the contenteditable rule's help too: html.parser lowercases
+    attribute names and keeps one of two duplicates before the sanitiser sees them. They pin that behaviour; they do not test the rule."""
+    out = sanitize(f"<p>a<span {spelling}>b</span></p>", mount=mount)
+    assert "contenteditable" not in out.lower()
+    assert "<span>b</span>" in out
 
 
 # ── attributes ──────────────────────────────────────────────────────────────
@@ -446,3 +458,177 @@ def test_a_tree_nested_hundreds_of_levels_deep_is_cleaned_like_a_shallow_one():
     assert out.count("<blockquote>") == n and "<p>KEEP<img/></p>" in out
     assert "script" not in out and "onerror" not in out and "javascript:" not in out
     assert len(log) == 3
+
+
+@pytest.mark.parametrize("decl", ["-webkit-user-modify: read-write", "-WEBKIT-USER-MODIFY:read-write-plaintext-only",
+                                  "-moz-user-modify: read-write", "user-modify: read-write",
+                                  "-webkit-user-\\6d odify: read-write", "/*;*/-webkit-user-modify: read-write",
+                                  "/*:*/-webkit-user-modify: read-write", "/* a:b */ -webkit-user-modify:read-write",
+                                  "/*:*/-webkit-user-\\6d odify: read-write"])
+def test_a_style_attribute_cannot_make_text_editable(decl):
+    """CSS makes a span editable in Chromium and WebKit (tests/page/test_user_modify.py), and the page's
+    closest('[contenteditable="true"]') does not see it. The other declarations of the attribute stay."""
+    out = sanitize(f'<p>a<span style="color: red; {decl}; width: 3px">b</span></p>')
+    assert "modify" not in out.lower() and "\\" not in out
+    assert "color: red" in out and "width: 3px" in out
+
+
+@pytest.mark.parametrize("style, want", [
+    ('content: "a;\\201C"; color: red', " color: red"),
+    ("content: 'a;\\201C'; color: red", " color: red"),
+    ('content: "a;b"; color: red', 'content: "a;b"; color: red'),
+    ('content: "a;-webkit-user-modify: read-write"; color: red', " color: red"),
+    ('content: "a\\";-webkit-user-modify: read-write"; color: red', " color: red"),
+    ("/* ; \" */ color: red; -webkit-user-modify: read-write", "/* ; \" */ color: red"),
+    ('content: "a\n; -webkit-user-modify: read-write; color: red', 'content: "a\n; color: red'),
+    ('content: "a;\\201C; -webkit-user-modify: read-write; width: 3px', None),
+    ("background: url(data:image/png;base64,AAA); -webkit-user-modify: read-write", "background: url(data:image/png;base64,AAA)"),
+    ("background: url(data:image/png;base64,AAA); color: red", "background: url(data:image/png;base64,AAA); color: red"),
+    ("a: url(x;-webkit-user-modify: read-write); color: red", " color: red"),
+    ("a: [x;-webkit-user-modify: read-write]; color: red", " color: red"),
+    ("a: {x;-webkit-user-modify: read-write}; color: red", " color: red"),
+    ("a: f(g(x;y);z); -webkit-user-modify: read-write; color: red", "a: f(g(x;y);z); color: red"),
+    ("a: f(x; color: red; -webkit-user-modify: read-write", None),
+    ("a: b); -webkit-user-modify: read-write; color: red", "a: b); color: red"),
+    ('content: "("; -webkit-user-modify: read-write; color: red', 'content: "("; color: red'),
+    ("/*(*/ -webkit-user-modify: read-write; color: red", " color: red"),
+])
+def test_the_style_filter_splits_on_the_semicolons_the_browser_splits_on(style, want):
+    """A `;` inside a CSS string or a comment does not end a declaration: a declaration dropped whole leaves the next one
+    intact, never a truncated rest. A string a newline ends is over, as in a browser. `want` None: the whole text is one
+    declaration for the browser, and nothing is kept.
+    Whatever the split, nothing with user-modify or a backslash comes out."""
+    out = sanitize(f'<p><span style="{html.escape(style)}">b</span></p>')
+    assert "user-modify" not in out.lower() and "\\" not in out
+    span = next(a for t, a in tags_of(out) if t == "span")
+    assert span.get("style") == want
+
+
+def test_a_declaration_with_a_backslash_goes_and_its_neighbours_stay():
+    """The backslash rule is wider than it needs to be (an escape in `content` is harmless) and drops ordinary
+    declarations too; this pins that, so a narrowing is a decision and not an accident."""
+    out = sanitize('<span style=\'color: red; content:"\\201C"; width: 3px\'>b</span>')
+    assert "color: red" in out and "width: 3px" in out
+    assert "content" not in out and "\\" not in out
+
+
+def test_simple_mode_logs_a_trimmed_style_like_mount_mode():
+    log = []
+    sanitize('<span style="color: red; -webkit-user-modify: read-write">x</span>', log=log)
+    assert log == ["  - style trimmed on <span>"]
+    log = []
+    sanitize('<span style="color: red">x</span>', log=log)
+    assert log == []
+
+
+@pytest.mark.parametrize("style", [
+    "-webkit-user-modify:read-write",
+    "-webkit-user-modify:read-write;",
+    ";;-webkit-user-modify:read-write",
+    "/* c */; -webkit-user-modify:read-write",
+    "/* a */ ;; /* -webkit-user-modify:read-write */",
+    "/* a */ -webkit-user-modify:read-write; /* b */",
+    "-webkit-user-modify:read-write; /* unterminated",
+    "-WEBKIT-USER-MODIFY:read-write ;\t\n; ",
+    "-webkit-user-\\6d odify:read-write;;",
+    "-moz-user-modify:read-write; -webkit-user-modify:read-write",
+])
+def test_a_style_the_filter_empties_is_removed(style):
+    """No declaration left, only separators, comments and white space: the attribute goes, not a stub of it."""
+    log = []
+    out = sanitize(f'<span style="{html.escape(style)}">x</span>', log=log)
+    assert out == "<span>x</span>"
+    assert "  - style trimmed on <span>" in log
+
+
+@pytest.mark.parametrize("style, want", [
+    ("color: red; -webkit-user-modify:read-write; ;;", "color: red; ;;"),
+    ('content: ";"; -webkit-user-modify:read-write', 'content: ";"'),
+    ('content: "/*"; -webkit-user-modify:read-write', 'content: "/*"'),
+    ("-webkit-user-modify:read-write; width: 3px", " width: 3px"),
+    ("-webkit-user-modify:read-write; /* c */ width: 3px", " /* c */ width: 3px"),
+])
+def test_a_style_with_a_declaration_left_keeps_the_attribute(style, want):
+    out = sanitize(f'<span style="{html.escape(style)}">x</span>')
+    assert next(a for t, a in tags_of(out) if t == "span").get("style") == want
+
+
+def test_a_style_only_a_comment_or_separators_that_the_filter_did_not_touch_is_left_alone():
+    """Only what the filter trimmed is judged: a style it did not change comes out as it came in."""
+    out = sanitize('<span style=";; /* c */">x</span>')
+    assert next(a for t, a in tags_of(out) if t == "span").get("style") == ";; /* c */"
+
+
+def test_mount_mode_removes_a_style_the_allow_list_empties():
+    """Not part of the simple-mode filter: `_mount_attrs` did this before the filter was string-aware; kept as a guard."""
+    log = []
+    out = sanitize('<span style="-webkit-user-modify:read-write">x</span>', log=log, mount=True)
+    assert out == "<span>x</span>"
+    assert "  - style trimmed on <span>" in log
+
+
+def test_no_split_of_a_style_lets_user_modify_or_a_backslash_through():
+    """Bypass neighbours of the string- and comment-aware split: quotes, comments, escapes and newlines in every order
+    around a declaration that makes text editable. The split may differ from a browser's; the output may not carry the name."""
+    pieces = ['"', "'", "/*", "*/", ";", "\\", "\n", ":", " ", "(", ")", "[", "]", "{", "}", "color: red", "-webkit-user-modify: read-write", "user-modify",
+              "-moz-user-\\6d odify:read-write", "a", "url(", "URL( ", "url(/*", "url(it's"]
+    rng = random.Random(96)
+    for _ in range(3000):
+        style = "".join(rng.choice(pieces) for _ in range(rng.randint(1, 12)))
+        out = sanitize(f'<span style="{html.escape(style)}">x</span>')
+        assert "user-modify" not in out.lower() and "\\" not in out, style
+        assert sanitize(out) == out, style
+
+
+@pytest.mark.parametrize("style, want", [
+    ("color: red; -webkit-user-modify: read-write;", "color: red;"),
+    ("color: red;", "color: red;"),
+    ('content: "/*"; color: red; -webkit-user-modify: read-write', 'content: "/*"; color: red'),
+    ('content: "*/"; color: red; -webkit-user-modify: read-write', 'content: "*/"; color: red'),
+])
+def test_the_edges_of_the_split_a_trailing_semicolon_and_comment_marks_inside_a_string(style, want):
+    out = sanitize(f'<span style="{html.escape(style)}">x</span>')
+    assert next(a for t, a in tags_of(out) if t == "span").get("style") == want
+
+
+@pytest.mark.parametrize("style, want", [
+    ("background:url(/*a.png);-webkit-user-modify:x;color:red", "background:url(/*a.png);color:red"),
+    ("background:url(it's.png);-webkit-user-modify:x;color:red", "background:url(it's.png);color:red"),
+    ('background:url(a"b.png);-webkit-user-modify:x;color:red', 'background:url(a"b.png);color:red'),
+    ("background:URL(/*a.png);-webkit-user-modify:x;color:red", "background:URL(/*a.png);color:red"),
+    ("background:url( /*a.png );-webkit-user-modify:x;color:red", "background:url( /*a.png );color:red"),
+    ("background:url(\n/*a.png);-webkit-user-modify:x;color:red", "background:url(\n/*a.png);color:red"),
+    ("a:image-set(url(/*a.png) 1x);-webkit-user-modify:x;color:red", "a:image-set(url(/*a.png) 1x);color:red"),
+    ("a:url(/*a.png);b:url(it's.png);-webkit-user-modify:x;color:red", "a:url(/*a.png);b:url(it's.png);color:red"),
+    ("a:url(x;-webkit-user-modify:x);color:red", "color:red"),
+    ("-webkit-user-modify:x;a:url(/*b);color:red", "a:url(/*b);color:red"),
+    ("a:url(/*b", "a:url(/*b"),
+])
+def test_an_unquoted_url_is_one_token_up_to_its_closing_bracket(style, want):
+    """CSS reads `url(` followed by no quote as a single token that ends at the first `)`: a `/*` or a quote inside it
+    starts no comment and no string, so the declarations after it stay, as in a browser."""
+    out = sanitize(f'<p><span style="{html.escape(style)}">b</span></p>')
+    assert "user-modify" not in out.lower()
+    assert next(a for t, a in tags_of(out) if t == "span").get("style") == want
+
+
+@pytest.mark.parametrize("style, want", [
+    ("a:xurl(/*b*/);-webkit-user-modify:x;color:red", "a:xurl(/*b*/);color:red"),
+    ("a:xurl(/*b);-webkit-user-modify:x;color:red", None),
+    ("a:x-url(it's);-webkit-user-modify:x;color:red", None),
+    ('a:url("/*b");-webkit-user-modify:x;color:red', 'a:url("/*b");color:red'),
+    ("a:url( 'it;s');-webkit-user-modify:x;color:red", "a:url( 'it;s');color:red"),
+    ('a:url( "b)c.png");color:red;-webkit-user-modify:x', 'a:url( "b)c.png");color:red'),
+    ("a:url(\n'b)c.png');color:red;-webkit-user-modify:x", "a:url(\n'b)c.png');color:red"),
+    ('content:"url(/*";-webkit-user-modify:x;color:red', 'content:"url(/*";color:red'),
+    ("/*url(*/-webkit-user-modify:x;color:red", "color:red"),
+    ("a:url(b\\);c);color:red", "color:red"),
+    ("a:€url(/*b*/);-webkit-user-modify:x;color:red", "a:€url(/*b*/);color:red"),
+    ("a:€url(/*b);-webkit-user-modify:x;color:red", None),
+])
+def test_only_a_plain_unquoted_url_is_read_as_a_token(style, want):
+    """A function whose name only ends in `url`, a `url(` with a string, one inside a string or a comment keeps the
+    string and comment rules. `want` None: the text is one declaration for the browser, and no style is left."""
+    out = sanitize(f'<p><span style="{html.escape(style)}">b</span></p>')
+    assert "user-modify" not in out.lower()
+    assert next(a for t, a in tags_of(out) if t == "span").get("style") == want

@@ -206,12 +206,14 @@ def test_a_heading_quote_that_is_stale_is_still_refused():
 
 @pytest.mark.parametrize("space", ["\u00a0", "\u3000"])
 def test_a_heading_with_a_no_break_or_full_width_space_after_the_hashes_takes_a_comment(space):
-    # blocks.ATX_RE reads any \s after the hashes as a heading, pandoc reads a paragraph: the
-    # heading anchor is None there and add_comment used to add it to the offset (TypeError).
+    # blocks.ATX_RE used to read any \s after the hashes as a heading, pandoc reads a paragraph: the
+    # heading anchor was None there and add_comment used to add it to the offset (TypeError). Since ticket 95 the
+    # splitter agrees with pandoc and the line is a paragraph, so the comment is a paragraph's (several lines).
     md = "#%sFoo bar\n" % space
+    assert [b.kind for b in split_md_blocks(md)] == ["para"]
     out, cid = comment_on(md, "Foo")
     assert out.startswith("#%sFoo<!-- sheaf-comment id=%s" % (space, cid))
-    assert re.sub(r"<!--.*?-->", "", out) == md
+    assert re.sub(r"<!--.*?-->", "", out, flags=re.S) == md
 
 
 @pytest.mark.parametrize("md", ["### ###\n", "# #\n", "## ##  \n", "## #\n"])
@@ -699,3 +701,18 @@ def test_a_tab_after_a_container_marker_does_not_shift_the_comment(md, quote):
     assert page.count("<table>") == 1 and "&lt;!--" not in page
     assert re.search(r"<t[dh]>[^<]*%s[^<]*<!--" % quote, page), page
     assert [c.id for c in rdc.parse(out).comments] == [cid]
+
+
+@pytest.mark.parametrize("block, quote, expect", [
+    ("para\r Title\n", "Title", "para\r Title|\n"),
+    ("\r> quote Title\n", "Title", "\r> quote Title|\n"),
+    ("\r\r\r\r> quote Title\n", "Title", "\r\r\r\r> quote Title|\n"),
+    ("\r\r\r\r- item Title\n", "Title", "\r\r\r\r- item Title|\n"),
+    ("\r\r\r\rpara Title more\n", "Title", "\r\r\r\rpara Title| more\n"),
+    ("a\r\nb\r Title tail\n", "Title", "a\r\nb\r Title| tail\n"),
+])
+def test_a_cr_before_the_selection_does_not_pull_the_comment_into_the_word(block, quote, expect):
+    # Pandoc deletes a CR, and its columns count the line without it; the offset must be a place in the block as written.
+    s, e = sel(block, quote)
+    at = rdc.anchor_point(block, s, e, quote)
+    assert block[:at] + "|" + block[at:] == expect

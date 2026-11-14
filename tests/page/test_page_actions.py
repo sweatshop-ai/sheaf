@@ -267,6 +267,7 @@ def test_a_refusal_queued_behind_a_red_toast_is_said_again_when_a_form_held_the_
     body = "main"
     comment_on(tab, at(body, "Body"), at(body, "Body", None), "Why?")
     p.clock.install()
+    p.add_init_script(HEARD)
     p.reload()
     p.wait_for_selector("button.rd-act")
     stand_still(p)                                      # from now on the clock moves only when the test runs it
@@ -281,7 +282,7 @@ def test_a_refusal_queued_behind_a_red_toast_is_said_again_when_a_form_held_the_
     mark(p)
     bar(p).nth(0).click()                               # the press, in its Undo
     f.write_text(f.read_text(encoding="utf-8") + "\nFrom outside.\n", encoding="utf-8")
-    p.wait_for_timeout(500)                             # the page hears of the change (the clock is still)
+    until(lambda: heard(p, "changed"), what="the change, whose reload waits for the press")    # the clock is still
     p.clock.run_for(100)
     p.clock.run_for(5000)                               # the press is refused at 10.2 s: its toast waits behind the red one (to 12 s)
     p.clock.run_for(7500)                               # 17.7 s: more than 7 s after the refusal was said, and it is up till 19 s
@@ -290,6 +291,114 @@ def test_a_refusal_queued_behind_a_red_toast_is_said_again_when_a_form_held_the_
     until(lambda: "my reply" in f.read_text(encoding="utf-8"), what="the reply in the file")
     reloaded(p)
     toasted(p, "reload the page", on_clock=True)        # the page's own toast of the change first, then the refusal again
+
+
+def refused(text):
+    return '{"ok": false, "error": "%s"}' % text
+
+
+def held_by_a_form(tab, answers):
+    """A page on the clock of the test, with the form of a reply open, Approve pressed (in its Undo) and an outside
+    change heard: its reload waits for the press, then for the form. The clock stands still; the reply is sent by
+    `p.click("#rd-popover button[data-f=ok]")`. Call `p.route("**/_/tick", ...)` before running the clock."""
+    p, f = tab.page, tab.site.file
+    f.write_text(SHEAF, encoding="utf-8")
+    tab.open()
+    comment_on(tab, at("main", "Body"), at("main", "Body", None), "Why?")
+    p.clock.install()
+    p.add_init_script(HEARD)
+    p.reload()
+    p.wait_for_selector("button.rd-act")
+    stand_still(p)
+    p.click(".rd-badge")
+    p.wait_for_selector("#rd-popover textarea")
+    p.fill("#rd-popover textarea", "my reply")
+    mark(p)
+    p.route("**/_/tick", lambda r: r.fulfill(status=409, content_type="application/json", body=answers.pop(0)))
+    bar(p).nth(0).click()
+    f.write_text(f.read_text(encoding="utf-8") + "\nFrom outside.\n", encoding="utf-8")
+    until(lambda: heard(p, "changed"), what="the change, whose reload waits for the press")
+    return p
+
+
+def test_the_refusal_a_form_held_reload_says_again_is_the_latest_press_not_an_earlier_one(tab):
+    # Ticket 80: `pressSaid` was never reset, so refusal A was said again on the page the reload brought, and refusal B,
+    # made later while the form still held the reload, was lost with the page.
+    answers = [refused("Approve: refused A, reload the page"), refused("Done: refused B, reload the page")]
+    p = held_by_a_form(tab, answers)
+    p.clock.run_for(5100)
+    until(lambda: "refused A" in toast(p), what="the first refusal")
+    p.clock.run_for(7000)
+    bar(p).nth(1).click()
+    p.clock.run_for(5100)
+    until(lambda: "refused B" in toast(p), what="the second refusal")
+    assert p.evaluate("window.__same_load") is True, "the page reloaded under the form"
+    p.click("#rd-popover button[data-f=ok]")
+    reloaded(p)
+    for _ in range(4):
+        if "refused" in toast(p):
+            break
+        p.clock.run_for(3000)
+    assert "refused B" in toast(p), toast(p)
+
+
+def test_an_earlier_refusal_still_up_is_not_said_again_by_the_reload_of_a_later_press_that_succeeded(tab):
+    # Ticket 101 (4): A is refused and still up when B is pressed and taken; the reload then runs inside A's 7 s.
+    # The reset in `send()` is what keeps A from coming back: without it the reload carries A.
+    answers = [refused("Approve: refused A, reload the page")]
+    p = held_by_a_form(tab, answers)
+    p.clock.run_for(5100)
+    until(lambda: "refused A" in toast(p), what="the first refusal")
+    p.unroute("**/_/tick")
+    p.route("**/_/tick", lambda r: r.fulfill(status=200, content_type="application/json", body='{"ok": true}'))
+    bar(p).nth(1).click()
+    p.clock.run_for(5100)                               # B is sent and taken (its tick is faked, so no `changed`); A has been up for 5.1 s of its 7
+    p.click("#rd-popover button[data-f=ok]")                # the outside change's held reload runs, inside A's 7 s
+    reloaded(p)
+    assert "refused A" not in " ".join(toasts_to_the_end(p, on_clock=True))
+
+
+def test_a_refusal_said_again_on_the_new_page_is_said_again_on_a_second_reload_that_comes_quickly(tab):
+    # Ticket 80: the new page's `pressSaid` was null, so a second reload within the 7 s dropped the refusal.
+    f = tab.site.file
+    p = held_by_a_form(tab, [refused("Approve: refused A, reload the page")])
+    p.clock.run_for(5100)
+    until(lambda: "refused A" in toast(p), what="the refusal")
+    p.click("#rd-popover button[data-f=ok]")
+    reloaded(p)
+    toasted(p, "refused A", on_clock=True)
+    mark(p)
+    f.write_text(f.read_text(encoding="utf-8") + "\nFrom outside, again.\n", encoding="utf-8")
+    reloaded(p)
+    toasted(p, "refused A", on_clock=True)
+
+
+def test_a_refusal_is_not_said_again_past_the_seven_seconds_it_was_said_in_however_often_the_page_reloads(tab):
+    # Ticket 101 (2): the replayed toast keeps the refusal's own deadline, so reloads do not chain it on.
+    f = tab.site.file
+    p = held_by_a_form(tab, [refused("Approve: refused A, reload the page")])
+    p.clock.run_for(5100)
+    until(lambda: "refused A" in toast(p), what="the refusal")
+    p.click("#rd-popover button[data-f=ok]")
+    reloaded(p)
+    toasted(p, "refused A", on_clock=True)
+    p.clock.run_for(5000)                               # past the refusal's own 7 s, short of a fresh 7 s from the replay
+    for n in range(2):
+        mark(p)
+        f.write_text(f.read_text(encoding="utf-8") + "\nFrom outside, %d.\n" % n, encoding="utf-8")
+        reloaded(p)
+        assert "refused A" not in " ".join(toasts_to_the_end(p, on_clock=True))
+
+
+def test_a_refusal_an_older_page_left_as_plain_text_does_not_stop_the_boot(sheaf):
+    # Ticket 101, review a: before this ticket the key held the bare text. The page of a deploy reads it without
+    # throwing, drops it, and the rest of the boot (the toast the reload left) still runs.
+    p = sheaf.page
+    p.evaluate("sessionStorage.setItem('rd-press-said', 'Approve: refused, reload the page'); sessionStorage.setItem('rd-toast', 'Kept by the reload.')")
+    p.reload()
+    toasted(p, "Kept by the reload.")
+    assert p.evaluate("sessionStorage.getItem('rd-press-said')") is None
+    assert "refused, reload" not in " ".join(toasts_to_the_end(p))
 
 
 def test_a_press_while_the_page_settles_onto_a_change_is_refused_and_the_page_reloads(sheaf):
@@ -775,6 +884,36 @@ def test_an_item_typed_above_the_box_just_before_the_press_never_ticks_another_b
     p.wait_for_timeout(500)
     text = f.read_text(encoding="utf-8")
     assert "[x] Done" not in text and "[x] extra" not in text, text
+
+
+def test_share_pressed_with_the_hub_unreachable_and_an_owed_save_says_so_and_ticks_nothing(sheaf):
+    # action-buttons 05, Review 4 on 11ff860: pressShare returned on an owed save without a word, so the press looked
+    # dropped until the outage banner. It says so; the box stays; the edit is saved once the hub is back, unticked.
+    p, f = sheaf.page, sheaf.site.file
+    stand_still(p)
+    ticks = []
+    p.on("request", lambda r: ticks.append(r.url) if "/_/tick" in r.url else None)
+    p.route("**/_/save", lambda r: r.abort())
+    type_at_end(p, "main li:has-text('Approve')", "")
+    p.keyboard.press("Enter")
+    p.keyboard.type("extra")
+    until(lambda: "extra" in p.inner_text("main ul"), what="the new item on screen")
+    box = p.locator("main li:has-text('Share') input[type=checkbox]")
+    box.click()
+    toasted(p, "press Share again once it is back")
+    assert not ticks, ticks
+    assert not box.is_checked()
+    text = f.read_text(encoding="utf-8")
+    assert "extra" not in text and "- [x] Share" not in text, text
+    assert "extra" in p.inner_text("main ul")          # the edit stays on the page, unsaved
+    p.unroute("**/_/save")
+    def owed_edit_saved():
+        p.clock.run_for(1100)                           # the autosave's timer runs on the installed clock
+        return "extra" in f.read_text(encoding="utf-8")
+    until(owed_edit_saved, what="the owed edit, saved once the hub is back")
+    p.wait_for_timeout(300)
+    text = f.read_text(encoding="utf-8")
+    assert "- [x] Share" not in text and not ticks, (text, ticks)
 
 
 def test_an_upgrade_while_a_comment_waits_for_the_tick_does_not_ask_to_send_it(sheaf, site):

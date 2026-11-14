@@ -418,7 +418,7 @@ class LiveDocument:
             return [*self._rids, *self._save_rids]
 
     def _announce(self, snap, start, event="changed", **extra):
-        """Publish `event` with `snap` and `extra`, and return the snapshot as it was published:
+        """Publish `event` with `snap` and `extra`, and return the snapshot as it was read for it (its `telling` is read again as the event goes out, `_publish_telling`):
         `textSame` says whether the prose is the same as in `start`, the text the tabs hold, and
         `base` is the hash of `start`. A tab that does not hold `start` (it missed a save) cannot
         use `textSame` and tells by `base`. `snap` is not changed."""

@@ -545,6 +545,23 @@ def test_a_tell_refused_after_a_sweep_logs_nothing_of_the_sweep_and_the_next_pas
     assert len(hub_rows("tell-cancelled")) == 1
 
 
+def test_a_listing_that_only_finds_a_revoked_row_writes_its_end_so_the_next_pass_does_not_send_it_again(browser, talk):
+    agent_token()
+    bob = agent_token("bob-claude", client="Claude")
+    target(browser, "bob-claude")
+    sub = tab(browser.hub)
+    assert tell(browser).status == 200
+    documents(browser, bob)                                                 # bob's Tell is seen: nothing left for the listing to mark
+    target(browser)
+    assert tell(browser).status == 200
+    sub.drain()
+    Tokens().revoke("ada-chatgpt")
+    documents(browser, bob)
+    assert len(json.loads(Path(sheafmd.paths.state_dir(), "tells.json").read_text(encoding="utf-8"))) == 1
+    browser.hub.waiting_tells.sweep()
+    assert len(named(sub.drain(), "tell-cancelled")) == 1 and len(hub_rows("tell-cancelled")) == 1
+
+
 def test_a_cancel_first_leaves_nothing_to_list_and_nothing_seen(browser, talk):
     token = agent_token()
     target(browser)

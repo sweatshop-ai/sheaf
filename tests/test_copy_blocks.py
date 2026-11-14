@@ -220,3 +220,37 @@ def test_a_comment_on_a_marker_pandoc_does_not_hide_lands_on_it_not_two_lines_be
     i = proj.index("[!COPY]")
     at = rdc.anchor_point(block, i, i + 7, "[!COPY]")
     assert block[:at].endswith("[!COPY]")
+
+
+# A line that opens an HTML block ends the first paragraph under GFM (CommonMark start conditions 1-6), so the
+# `---` or `===` after it underlines nothing. Condition 7 (any other tag, `<span>`) cannot interrupt a paragraph.
+HTML_OPENERS = ["<div>", "<!-- x -->", "<pre>", "<script>", "<STYLE type=x>", "<?php", "<!DOCTYPE html>",
+                "<![CDATA[", "<p>", "</div>", "<details open>"]
+
+
+@pytest.mark.parametrize("underline", ["---", "==="])
+@pytest.mark.parametrize("opener", HTML_OPENERS)
+def test_a_line_opening_an_html_block_before_an_underline_leaves_a_copy_block(opener, underline):
+    quote = f"> [!COPY]\n> a\n> {opener}\n> {underline}\n"
+    assert copyblock.is_copy_block(quote.rstrip("\n"))
+    assert copyblock.hide(quote) != quote
+
+
+@pytest.mark.parametrize("opener", ["<div>", "<!-- x -->", "<pre>"])
+def test_such_a_block_shows_its_copy_button_and_a_save_keeps_the_marker(tmp_path, opener):
+    md = f"> [!COPY]\n> a\n> {opener}\n> ---\n"
+    out = page_of(tmp_path, md, share=False)
+    assert f'<blockquote class="{copyblock.PAGE_CLASS}">' in out
+    assert copyblock.MARKER not in "".join(quotes(out))
+    assert copyblock.MARKER in saved(md)
+
+
+@pytest.mark.parametrize("quote", [
+    "> [!COPY]\n> a\n> <span>\n> ---\n",             # condition 7 does not interrupt a paragraph
+    "> [!COPY]\n> a\n> <custom-tag>\n> ===\n",
+    "> [!COPY]\n> a\n> <divx>\n> ---\n",
+    "> [!COPY]\n> a\n> <a href=x>\n> ---\n",
+    "> [!COPY]\n> a\n> <br/>\n> ---\n",
+])
+def test_an_inline_tag_line_does_not_end_the_paragraph_so_the_underline_still_refuses_the_block(quote):
+    assert not copyblock.is_copy_block(quote.rstrip("\n"))

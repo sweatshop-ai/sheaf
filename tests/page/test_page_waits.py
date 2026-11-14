@@ -201,3 +201,94 @@ def test_the_toasts_to_the_end_are_not_at_an_end_while_the_page_reloads():
     """The page the reload brings may say a toast of its own: an assertion that one is not said must not read "none" off the gap."""
     with pytest.raises(AssertionError, match="timed out waiting for the toasts to end"):
         toasts_to_the_end(ReloadingPage("Execution context was destroyed, most likely because of a navigation"), timeout=0.3)
+
+
+# ── the route wrapper of conftest.py (tickets 100 and 119) ─────────────────────────────────────────────────
+
+class ReplacementPage:
+    """A page that answers the probe of `until_live` like a browser that has not started to intercept: `answers` in turn."""
+    url = "http://127.0.0.1:1/doc"
+
+    def __init__(self, answers):
+        self.answers, self.asked = list(answers), []
+
+    def evaluate(self, expression):
+        self.asked.append(expression)
+        return self.answers.pop(0)
+
+    def wait_for_timeout(self, ms):
+        pass
+
+
+def test_the_probe_of_a_route_is_sent_until_the_route_has_caught_it():
+    from conftest import until_live
+    page, log = ReplacementPage([0, 0, 204]), []
+    until_live(page, "**/_/comment", log)
+    assert len(page.asked) == 3 and all("x-route-probe" in a and "/_/comment" in a for a in page.asked)
+    assert "caught its probe at try 3" in log[-1][1]
+
+
+def test_a_route_of_another_url_is_not_probed():
+    from conftest import until_live
+    page = ReplacementPage([])
+    for pattern in ("**/_/save", re.compile(r"/_/tell$"), re.compile(r"/_/doc\?")):
+        until_live(page, pattern, [])
+    assert page.asked == []
+
+
+def test_a_route_made_with_a_regex_for_the_send_is_probed_too(tab, hub_journal):
+    """PR 346's review: `route(re.compile(r"/_/comment$"), ...)` (test_page_work.py) had the race of ticket 100 and no probe."""
+    p = tab.open().page
+    held = []
+    p.route(re.compile(r"/_/comment$"), lambda route: held.append(route))
+    assert any("live" in what and "comment" in what for _, what in hub_journal), hub_journal
+    p.evaluate("fetch('/_/comment', {method: 'POST', body: '{}'}).catch(() => {}); 0")
+    until(lambda: held or p.wait_for_timeout(20), what="the send to be held")
+    assert len(held) == 1 and held[0].request.method == "POST"
+    held[0].abort()
+
+
+def test_a_function_routed_twice_on_one_url_is_taken_off_both_by_unroute(tab):
+    p = tab.open().page
+    held = []
+
+    def hold(route):
+        held.append(route)
+    p.route("**/_/not-a-route-of-the-hub", hold)
+    p.route("**/_/not-a-route-of-the-hub", hold)
+    p.unroute("**/_/not-a-route-of-the-hub", hold)
+    assert p.evaluate("fetch('/_/not-a-route-of-the-hub').then(r => r.status, () => 0)") != 0
+    assert held == []
+
+
+def test_a_handler_that_cannot_be_hashed_can_be_routed_and_unrouted(tab):
+    class Holder:
+        def __init__(self):
+            self.held = []
+
+        def __eq__(self, other):
+            return self is other
+        __hash__ = None
+
+        def __call__(self, route):
+            self.held.append(route)
+    p = tab.open().page
+    h = Holder()
+    p.route("**/_/not-a-route-of-the-hub", h)
+    p.evaluate("fetch('/_/not-a-route-of-the-hub').catch(() => {}); 0")
+    until(lambda: h.held or p.wait_for_timeout(20), what="the request to be held")
+    h.held[0].abort()
+    p.unroute("**/_/not-a-route-of-the-hub", h)
+    assert p.evaluate("fetch('/_/not-a-route-of-the-hub').then(r => r.status, () => 0)") != 0
+    assert len(h.held) == 1
+
+
+def test_the_stream_journal_keeps_real_time_when_a_test_puts_a_fake_clock_under_the_page(tab):
+    """PR 346's review: the journal takes real time before the fake clock replaces `performance`, if its init script
+    runs first. Playwright does not document the order; the journal of a failing test is read by its times."""
+    from pagehelp import T0, reload_on_clock
+    p = tab.open().page
+    reload_on_clock(p, start=T0)
+    p.evaluate("fetch('/_/not-a-route-of-the-hub').catch(() => {}); 0")
+    times = p.evaluate("window.__sseJournal.map(e => e[0])")
+    assert times and all(abs(t / 1000 - time.time()) < 120 for t in times), (times, time.time())

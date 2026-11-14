@@ -794,15 +794,18 @@ def test_share_pressed_with_the_hub_unreachable_and_an_owed_save_says_so_and_tic
     box.click()
     toasted(p, "press Share again once it is back")
     assert not ticks, ticks
-    assert box.get_attribute("checked") is None
-    assert "extra" not in f.read_text(encoding="utf-8") and "- [x] Share" not in f.read_text(encoding="utf-8")
+    assert not box.is_checked()
+    text = f.read_text(encoding="utf-8")
+    assert "extra" not in text and "- [x] Share" not in text, text
+    assert "extra" in p.inner_text("main ul")          # the edit stays on the page, unsaved
     p.unroute("**/_/save")
-    def saved():
-        p.clock.run_for(1100)
+    def owed_edit_saved():
+        p.clock.run_for(1100)                           # the autosave's timer runs on the installed clock
         return "extra" in f.read_text(encoding="utf-8")
-    until(saved, what="the owed edit, saved once the hub is back")
+    until(owed_edit_saved, what="the owed edit, saved once the hub is back")
     p.wait_for_timeout(300)
-    assert "- [x] Share" not in f.read_text(encoding="utf-8") and not ticks, ticks
+    text = f.read_text(encoding="utf-8")
+    assert "- [x] Share" not in text and not ticks, (text, ticks)
 
 
 def test_an_upgrade_while_a_comment_waits_for_the_tick_does_not_ask_to_send_it(sheaf, site):

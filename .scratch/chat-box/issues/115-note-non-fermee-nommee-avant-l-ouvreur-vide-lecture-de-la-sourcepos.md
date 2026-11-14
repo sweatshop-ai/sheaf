@@ -12,7 +12,9 @@ Autres (c) : échec ou délai de pandoc dans la lecture de la sourcepos nomme la
 
 **Pas dans ce ticket (même chose que main, côté sûr) :** `[l](http://x/<!-->) -->` est copié avec le lien détruit (la page montre `[l](http://x/` en texte). SPEC 6.2 ne le couvre pas ; décider s'il faut le refuser.
 
-**Blocked by:** PR 342 fusionnée (SPEC 6.2) ; PR 348, 351, 352 (SPEC.md). Décision de Rhea 2026-11-14 : pas de troisième tentative ; fermer avec une limite dans la SPEC (seul le message du refus change, rien ne fuit).
+**Blocked by:** 116, 87, 118 (leurs PR touchent SPEC.md)
+
+**Décision (Rhea, 2026-11-14) :** pas de troisième tentative ; fermer avec une limite dans la SPEC une fois ces PR fusionnées (seul le message du refus change, rien ne fuit).
 
 **Claimed by:**
 

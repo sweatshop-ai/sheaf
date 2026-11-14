@@ -145,9 +145,12 @@ def test_a_double_click_on_the_label_does_not_tick_it_twice(sheaf):
 def test_a_comments_badge_on_the_label_opens_its_thread_and_ticks_nothing(sheaf):
     p, f = sheaf.page, sheaf.site.file
     comment_on(sheaf, at(ITEM, "Approved"), at(ITEM, "Approved", None), "about the label")
+    p.wait_for_selector("#rd-popover .rd-msg")
+    p.reload()                                  # the thread's box is open after the send: a click on the badge would close it
+    p.wait_for_selector("#rd-menu-btn", state="attached")
     before = f.read_text(encoding="utf-8")
     p.locator("main li:nth-of-type(1) .rd-badge").first.click()
-    until(lambda: p.query_selector("#rd-popover .rd-msg"), what="the thread's box")
+    p.wait_for_selector("#rd-popover .rd-msg")
     p.wait_for_timeout(600)
     assert f.read_text(encoding="utf-8") == before and "- [x]" not in before
     assert p.locator("main input[type=checkbox]").first.is_checked() is False

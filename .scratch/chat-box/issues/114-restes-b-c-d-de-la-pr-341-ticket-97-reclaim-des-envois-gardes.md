@@ -17,6 +17,6 @@ Classe c (défauts plus petits, avec contournement) :
 - c8 (r3 F3) : si les repères sont écrits puis l'écriture du stockage est refusée, les repères restent 10 s alors que le retrait n'a pas eu lieu : l'autre page abandonne sa revendication sur cette clé, une écriture périmée dans cette fenêtre n'est pas réparée.
 - c7 : horloges factices (`p.clock`) : un repère daté du futur n'est jamais purgé par une page à l'heure réelle.
 
-**Blocked by:** PR 341 fusionnée
+**Blocked by:** PR 341 fusionnée ; ticket 121 (ces restes ne valent que si la conception claim/repère revient)
 
 **Status:** ready-for-agent

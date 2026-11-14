@@ -227,7 +227,7 @@ class Relay:
                 self._refuse("the key file is not a regular file of the hub's account with mode 0600")
                 return None
             stamp = (st.st_mtime_ns, st.st_ctime_ns, st.st_size, st.st_ino)
-            f = os.fdopen(os.dup(fd), "r", encoding="utf-8", errors="replace")      # fdopen owns the copy, whether it closes it on failure or not
+            f = os.fdopen(fd, "r", encoding="utf-8", errors="replace", closefd=False)   # the library never owns the descriptor: it is closed here, once
             with f:
                 for _ in range(3):
                     text = f.read(KEY_FILE_MAX + 1)

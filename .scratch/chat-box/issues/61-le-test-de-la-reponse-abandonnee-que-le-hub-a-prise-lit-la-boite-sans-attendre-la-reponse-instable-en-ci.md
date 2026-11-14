@@ -6,7 +6,7 @@
 
 **Claimed by:** Amaia 2026-11-14
 
-**Status:** in-progress — PR 299 open, CI verte trois fois, revue Opus faite ; attend la fusion (Amaia 2026-11-14)
+**Status:** done (PR 299, merged as 7cc8b8d)
 
 **Établi (preuves) :** vu deux fois sur main, même ligne, même message, chaque fois sur la tranche 2/3 :
 - run 43525374227, job 132229691740, sur 4b62ad3 (fusion de la PR 278) ;

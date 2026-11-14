@@ -66,7 +66,7 @@ L'agent sait quand un texte est fait pour être copié. Il l'écrit dans un bloc
 | 19 | Le test « envoyer et Tell » lit le fichier avant d'y trouver la réponse, de temps en temps en CI | Rien | Fait (PR 244, merged as 3a04cb2) |
 | 20 | La réponse que le hub a prise n'apparaît pas dans la boîte quand la page abandonne l'envoi, de temps en temps en CI | Rien | Fait (PR 244, merged as 3a04cb2) |
 | 21 | draftsReplace lit une lecture refusée comme vide | 04 | Fait |
-| 22 | La page peut afficher une réponse déjà reçue jusqu'à 10 s en retard derrière une longue écriture | Rien | À faire |
+| 22 | La page peut afficher une réponse déjà reçue jusqu'à 10 s en retard derrière une longue écriture | Rien | Fait (décision : garder l'attente) |
 | 23 | Les événements « vu » et « annulé » d'un Tell ne nomment pas l'agent : un fil qui attend deux agents les confond | Rien | En cours |
 | 24 | Le test du « moins » lit la valeur d'un champ que la boîte vient de fermer, de temps en temps en CI | Rien | En cours |
 | 25 | Le test « réponse à un fil supprimé revenue dans la boîte d'un nouveau commentaire » dort 300 ms au lieu d'attendre | 04 | Fait (PR 254, merged 9b6a313) |
@@ -105,7 +105,7 @@ L'agent sait quand un texte est fait pour être copié. Il l'écrit dans un bloc
 | 58 | Titres à cas limites : un titre avec espace insécable après les `#` fait planter `add_comment`, et trois cas voisins | Rien | Fait (PR 285, merge d9a969b) |
 | 59 | La garde d'effacement des tickets 50 et 51 : cinq cas limites de lecture et d'écriture du stockage, et deux points de test | Rien | À faire |
 | 60 | Restes de la revue Opus de la PR 280 : l'instantané lu puis publié sans verrou, le journal écrit avant le fichier, le remplissage de `agent` | Rien | À faire |
-| 61 | Le test d'une réponse abandonnée que le hub a prise lit la boîte une seule fois, sans attendre que la réponse y soit : instable en CI, deux fois sur main | Rien | À faire |
+| 61 | Le test d'une réponse abandonnée que le hub a prise lit la boîte une seule fois, sans attendre que la réponse y soit : instable en CI, deux fois sur main | Rien | Fait (PR 299, merge 7cc8b8d) |
 | 62 | Un seul élément de toast : le toast du deuxième fil remplace celui du premier ; et deux tests de la PR 283 prouvent moins qu'ils ne disent | Rien | À faire |
 | 63 | Dictée (API standard) : finitions du relais de transcription, suites de la revue Opus 1 de la PR 284 | Rien | Fait (PR 290, merge 70bcd55) |
 | 64 | Le test « ouvrir le fil sur la deuxième de deux réponses gardées » échoue de temps en temps en CI | Rien | À faire |
@@ -122,6 +122,7 @@ L'agent sait quand un texte est fait pour être copié. Il l'écrit dans un bloc
 | 75 | Tabulation après un marqueur de conteneur dans `projection`, et accents graves isolés dans un tableau cité, restes de la PR 296 | Rien | À faire |
 | 76 | Restes de la PR 300 : `_comment_spans` quadratique, message du `<!-->`, `\\|` dans un tableau, un test par empan et un passage Codex dû | Rien | À faire |
 | 77 | Test instable de `test_hub_upgrade.py` (arrêt d'un hub en service, `assert 0 == 3`), vu sur la PR 300 | Rien | À faire |
+| 78 | Test de clavier instable : `page.goto` interrompu par une autre navigation vers la même adresse (`test_page_keyboard.py`), vu sur la PR 299 | Rien | À faire |
 
 ## Ce qui reste ouvert
 

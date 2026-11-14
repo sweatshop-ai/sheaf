@@ -708,3 +708,29 @@ def test_lone_backticks_in_a_quoted_or_listed_table_are_no_code_across_cells(md,
     assert re.sub(r"<!--.*?-->", "", out, count=1) == md
     assert [c.id for c in rdc.parse(out).comments] == [cid]
     assert pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], out).count("<table>") == 1
+
+
+C1 = '<!-- sheaf-comment id=c1 by="A" at=2026-01-01T00:00 status=open quote="first" why -->'
+
+
+@pytest.mark.parametrize("md", [
+    "- Columns:\n\n  | a | b |\n  |---|---|\n  | c | d |\n- Run `ls | wc` first%s then `make`.\n" % C1,
+    "> p\n> | a | b |\n> |---|---|\n> | x` | `y%s ` | z\n" % C1,
+    "> | a | b |\n> |---|\n> | x` | `y%s ` | z\n" % C1,
+])
+def test_parse_reads_a_row_as_a_row_only_where_pandoc_sees_a_table(md):
+    assert [c.id for c in rdc.parse(md).comments] == ["c1"]
+
+
+def test_parse_does_not_list_an_example_in_code_after_a_list_held_table():
+    md = ("- w\n\n  | a | b |\n  |---|---|\n  | c | d |\n- `x <!-- sheaf-comment id=c9 by=\"A\" "
+          "at=2026-01-01T00:00 status=open quote=\"x\" body --> | y`\n")
+    assert "<code>x &lt;!--" in pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], md)
+    assert rdc.parse(md).comments == []
+
+
+def test_parse_of_a_long_quoted_table_is_linear():
+    md = "> | a | b |\n> |---|---|\n" + "".join("> | `c%d` | d |\n" % i for i in range(1500))
+    t = time.perf_counter()
+    rdc.parse(md)
+    assert time.perf_counter() - t < 1.0

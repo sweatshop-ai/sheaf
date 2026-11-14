@@ -10,6 +10,8 @@
 
 **Fait :** PR 270 (partie page, 2 sur 3) fusionnée dans main (cd3e0da, 2026-11-13). Reste la troisième partie, la clé de dictée dédiée sur t-compute (externe). Le ticket reste ouvert.
 
+**Fait :** PR 284 fusionnée (c3a6ddf) : la dictée parle l'API standard ; reste le côté t-compute (route /v1/audio/transcriptions) et le déploiement par Thierry
+
 - [ ] Vérifié ce que tiroir-tt a d'activé pour la transcription, et sa version d'Open WebUI
 - [ ] Décision de Thierry : d'où vient la transcription sur un hub local, sans Open WebUI
 - [ ] Dans tiroir, dicter remplit le champ et le texte reste modifiable avant l'envoi

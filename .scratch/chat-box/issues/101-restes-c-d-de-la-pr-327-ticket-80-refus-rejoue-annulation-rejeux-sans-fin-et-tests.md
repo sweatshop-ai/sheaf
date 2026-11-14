@@ -10,9 +10,10 @@
 
 **Blocked by:** none
 
-**Claimed by:**
 
-**Status:** ready-for-agent
+**Claimed by:** Enzo 2026-11-14 21:05
+
+**Status:** in-progress
 
 **Par où commencer :** le point 4, le test rouge du reset ; sur t-compute, jamais sur le portable.
 

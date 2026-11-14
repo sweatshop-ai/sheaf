@@ -6,6 +6,7 @@
 
 **Blocked by:** none
 
-**Claimed by:**
 
-**Status:** ready-for-agent
+**Claimed by:** Ignacio 2026-11-14 19:45
+
+**Status:** in-progress

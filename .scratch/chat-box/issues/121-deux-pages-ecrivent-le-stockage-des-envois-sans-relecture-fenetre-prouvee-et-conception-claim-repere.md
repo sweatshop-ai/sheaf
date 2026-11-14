@@ -24,3 +24,19 @@
 **Claimed by:** Lucia
 
 **Status:** ready-for-agent
+
+## Design note (Lucia, 2026-11-14): one `localStorage` key per entry
+
+**Why the medium, not the events.** The race is a read-modify-write of one shared value. With one key per entry, a page writes only keys it created and removes only keys it read, so no page rewrites another page's entry; the lost write cannot happen, whatever order `storage` events arrive in. No claim, no repère, no timer.
+
+**Key scheme.** `COMMENT_DRAFT_KEY + ':e:' + id` (that is `sheaf-comment-draft:<port>:<doc>:e:<id>`); the value is the entry's JSON, as it is today. `id` = base-36 write time, a per-page counter, 4 random characters: sorts by time then by the page's own order, never repeats across pages. Reads list the keys with that prefix, parse each, and sort by id, which keeps the list order the old array had (an entry rewritten goes last). A key whose value does not parse is skipped and left alone. The old `:unreadable` key keeps its name and is not matched by the prefix.
+
+**Writes.** One primitive replaces `commentDraftsSave`: `draftsWrite(drop, add)`. `drop` are entries as read (each carries its key), `add` are new entries; every write has a fresh id, so nothing is ever overwritten. Callers: `draftsReplace`, `threadKeep` (drop what `goes` names, add the new entry), `taken` (drop the entry of that rid), the purge in `commentDraftsLoad` (drop what `pendingClears` names). `pendingClears` are applied again inside `draftsWrite`, so a clear that a failed purge held still goes with the next write.
+
+**Migration of the old list key.** Any write first moves a legacy `COMMENT_DRAFT_KEY` list into entry keys, then removes the list key. The id of a migrated entry is deterministic (`0` + list position + hash of its JSON), so two pages migrating at once write the same keys and nothing doubles. An entry with no `root` takes this page's root, as a write of the old list did. A list that is not JSON is set aside under `:unreadable` first, as today. Reads (non-strict) also see a legacy list's entries without migrating, so a read never writes. Known limit: a page of an older build still open rewrites the list key; the next write of a new page migrates it again (an entry removed meanwhile can come back once). Only tabs open across the upgrade.
+
+**How the "not sent" list and HELD read it.** Unchanged: every reader goes through `commentDraftsLoad`, which now returns the union of the entry keys and the legacy list, filtered by root and `pendingClears` as before; `inFlight` and the `out` mark are untouched. The `storage` listener redraws on any key with the entry prefix (or the legacy key, or `null`).
+
+**Storage full.** Add first, then drop: if the add is refused, the drops are removed and the add tried once more; if it is refused again the drops are written back, `storeOk` is false and the caller is told as it is today (nothing lost that the store held). A clear (no add) only removes and cannot be refused for space. Migration that cannot be written fails the write the same way (storeOk false, nothing dropped).
+
+**Tests.** The race test loses its `xfail`; the two Discard tests stay green; the ~30 places that read or write the old list in tests go through helpers in `pagehelp.py` (read all entries, write one). The spec pins (10.8) and SPEC 10.4/10.8 say "one key per entry".

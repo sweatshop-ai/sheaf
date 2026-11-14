@@ -4720,6 +4720,25 @@ def test_typing_while_a_save_has_no_answer_is_said_once_and_the_block_shows_it_i
     assert p.evaluate("document.activeElement.textContent").endswith("typed!")
 
 
+def test_typing_in_the_comment_form_while_a_save_has_no_answer_is_not_refused(tab):
+    """chat-box 46: the guard is on `main`, and no text field is in it (the form is in the popover, outside it)."""
+    p = tab.page
+    tab.open()
+    assert p.evaluate("document.querySelectorAll('main textarea, main input:not([type=checkbox])').length") == 0
+    held = []
+    p.route("**/_/save", lambda r: held.append(r))
+    type_at_end(p, P1, " typed")
+    p.keyboard.press("Control+s")
+    until(lambda: held or p.wait_for_timeout(20), what="the save, held")
+    open_comment_form(tab, P2, "pears")
+    p.keyboard.type("about the pears")
+    assert p.input_value("#rd-popover textarea") == "about the pears"      # taken, not refused
+    assert toast(p) == ""
+    assert p.evaluate("document.querySelectorAll('.rd-saving').length") == 0
+    held[0].continue_()
+    p.unroute("**/_/save")
+
+
 def test_the_mark_lands_on_the_block_typed_in_and_clears_with_the_save(tab):
     p = tab.page
     tab.open()

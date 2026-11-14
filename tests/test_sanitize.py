@@ -571,7 +571,7 @@ def test_no_split_of_a_style_lets_user_modify_or_a_backslash_through():
     """Bypass neighbours of the string- and comment-aware split: quotes, comments, escapes and newlines in every order
     around a declaration that makes text editable. The split may differ from a browser's; the output may not carry the name."""
     pieces = ['"', "'", "/*", "*/", ";", "\\", "\n", ":", " ", "(", ")", "[", "]", "{", "}", "color: red", "-webkit-user-modify: read-write", "user-modify",
-              "-moz-user-\\6d odify:read-write", "a"]
+              "-moz-user-\\6d odify:read-write", "a", "url(", "URL( ", "url(/*", "url(it's"]
     rng = random.Random(96)
     for _ in range(3000):
         style = "".join(rng.choice(pieces) for _ in range(rng.randint(1, 12)))
@@ -588,4 +588,43 @@ def test_no_split_of_a_style_lets_user_modify_or_a_backslash_through():
 ])
 def test_the_edges_of_the_split_a_trailing_semicolon_and_comment_marks_inside_a_string(style, want):
     out = sanitize(f'<span style="{html.escape(style)}">x</span>')
+    assert next(a for t, a in tags_of(out) if t == "span").get("style") == want
+
+
+@pytest.mark.parametrize("style, want", [
+    ("background:url(/*a.png);-webkit-user-modify:x;color:red", "background:url(/*a.png);color:red"),
+    ("background:url(it's.png);-webkit-user-modify:x;color:red", "background:url(it's.png);color:red"),
+    ('background:url(a"b.png);-webkit-user-modify:x;color:red', 'background:url(a"b.png);color:red'),
+    ("background:URL(/*a.png);-webkit-user-modify:x;color:red", "background:URL(/*a.png);color:red"),
+    ("background:url( /*a.png );-webkit-user-modify:x;color:red", "background:url( /*a.png );color:red"),
+    ("background:url(\n/*a.png);-webkit-user-modify:x;color:red", "background:url(\n/*a.png);color:red"),
+    ("a:image-set(url(/*a.png) 1x);-webkit-user-modify:x;color:red", "a:image-set(url(/*a.png) 1x);color:red"),
+    ("a:url(/*a.png);b:url(it's.png);-webkit-user-modify:x;color:red", "a:url(/*a.png);b:url(it's.png);color:red"),
+    ("a:url(x;-webkit-user-modify:x);color:red", "color:red"),
+    ("-webkit-user-modify:x;a:url(/*b);color:red", "a:url(/*b);color:red"),
+    ("a:url(/*b", "a:url(/*b"),
+])
+def test_an_unquoted_url_is_one_token_up_to_its_closing_bracket(style, want):
+    """CSS reads `url(` followed by no quote as a single token that ends at the first `)`: a `/*` or a quote inside it
+    starts no comment and no string, so the declarations after it stay, as in a browser."""
+    out = sanitize(f'<p><span style="{html.escape(style)}">b</span></p>')
+    assert "user-modify" not in out.lower()
+    assert next(a for t, a in tags_of(out) if t == "span").get("style") == want
+
+
+@pytest.mark.parametrize("style, want", [
+    ("a:xurl(/*b*/);-webkit-user-modify:x;color:red", "a:xurl(/*b*/);color:red"),
+    ("a:xurl(/*b);-webkit-user-modify:x;color:red", None),
+    ("a:x-url(it's);-webkit-user-modify:x;color:red", None),
+    ('a:url("/*b");-webkit-user-modify:x;color:red', 'a:url("/*b");color:red'),
+    ("a:url( 'it;s');-webkit-user-modify:x;color:red", "a:url( 'it;s');color:red"),
+    ('content:"url(/*";-webkit-user-modify:x;color:red', 'content:"url(/*";color:red'),
+    ("/*url(*/-webkit-user-modify:x;color:red", "color:red"),
+    ("a:url(b\\);c);color:red", "color:red"),
+])
+def test_only_a_plain_unquoted_url_is_read_as_a_token(style, want):
+    """A function whose name only ends in `url`, a `url(` with a string, one inside a string or a comment keeps the
+    string and comment rules. `want` None: the text is one declaration for the browser, and no style is left."""
+    out = sanitize(f'<p><span style="{html.escape(style)}">b</span></p>')
+    assert "user-modify" not in out.lower()
     assert next(a for t, a in tags_of(out) if t == "span").get("style") == want

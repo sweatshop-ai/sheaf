@@ -507,6 +507,19 @@ def test_a_block_of_escaped_backticks_that_open_nothing_is_read_in_linear_time()
     assert time.perf_counter() - t < 0.3
 
 
+# ── ticket 76: what is left of PR 300 ──
+
+@pytest.mark.parametrize("unit", ["`` <!--x--> ", "a <!--x--> "])
+def test_the_comment_spans_of_a_block_of_many_comments_are_read_in_linear_time(unit):
+    # Point 1: every comment cost a fresh search for the next code span and the next opener, 12 s at 52 KB.
+    n = 4000 if unit[0] == "`" else 3000
+    md = unit * n + "\n"
+    t = time.perf_counter()
+    spans = rdc._comment_spans(md)
+    assert time.perf_counter() - t < 0.3
+    assert len(spans) == (n // 2 if unit[0] == "`" else n)     # the backticks pair off, hiding every second comment
+
+
 # ── ticket 68: what is left of PR 288 ──
 
 @pytest.mark.parametrize("opener", ["<!-->", "<!--->"])

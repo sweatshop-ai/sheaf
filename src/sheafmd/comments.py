@@ -822,7 +822,7 @@ def _comment_spans(md: str) -> list:
         pos += len(b.text)
         if b.kind in CODE_KINDS:
             continue
-        i = 0
+        i, o, span = 0, None, None
         while True:
             if start is not None:
                 e = text.find("-->", i)
@@ -830,7 +830,13 @@ def _comment_spans(md: str) -> list:
                     break
                 spans.append((start, base + e + 3))
                 i, start = e + 3, None
-            o, span = _opener(text, i), CODE_SPAN_RE.search(text, i)
+            # Each search is reused while its hit still lies ahead of i, as `_scan` does: a search
+            # from i finds what one from an earlier position found, so a block of many comments is
+            # read once, not once per comment.
+            if o is None or (o >= 0 and o < i):
+                o = _opener(text, i)
+            if span is None or (span is not False and span.start(1) < i):
+                span = CODE_SPAN_RE.search(text, i) or False
             if span and (o < 0 or span.start(1) < o):
                 i = span.end()
             elif o >= 0:

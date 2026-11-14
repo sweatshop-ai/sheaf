@@ -482,6 +482,16 @@ def test_a_style_attribute_cannot_make_text_editable(decl):
     ("/* ; \" */ color: red; -webkit-user-modify: read-write", "/* ; \" */ color: red"),
     ('content: "a\n; -webkit-user-modify: read-write; color: red', 'content: "a\n; color: red'),
     ('content: "a;\\201C; -webkit-user-modify: read-write; width: 3px', None),
+    ("background: url(data:image/png;base64,AAA); -webkit-user-modify: read-write", "background: url(data:image/png;base64,AAA)"),
+    ("background: url(data:image/png;base64,AAA); color: red", "background: url(data:image/png;base64,AAA); color: red"),
+    ("a: url(x;-webkit-user-modify: read-write); color: red", " color: red"),
+    ("a: [x;-webkit-user-modify: read-write]; color: red", " color: red"),
+    ("a: {x;-webkit-user-modify: read-write}; color: red", " color: red"),
+    ("a: f(g(x;y);z); -webkit-user-modify: read-write; color: red", "a: f(g(x;y);z); color: red"),
+    ("a: f(x; color: red; -webkit-user-modify: read-write", None),
+    ("a: b); -webkit-user-modify: read-write; color: red", "a: b); color: red"),
+    ('content: "("; -webkit-user-modify: read-write; color: red', 'content: "("; color: red'),
+    ("/*(*/ -webkit-user-modify: read-write; color: red", " color: red"),
 ])
 def test_the_style_filter_splits_on_the_semicolons_the_browser_splits_on(style, want):
     """A `;` inside a CSS string or a comment does not end a declaration: a declaration dropped whole leaves the next one
@@ -511,10 +521,48 @@ def test_simple_mode_logs_a_trimmed_style_like_mount_mode():
     assert log == []
 
 
-@pytest.mark.parametrize("mount", [False, True])
-def test_a_style_the_filter_empties_is_removed(mount):
+@pytest.mark.parametrize("style", [
+    "-webkit-user-modify:read-write",
+    "-webkit-user-modify:read-write;",
+    ";;-webkit-user-modify:read-write",
+    "/* c */; -webkit-user-modify:read-write",
+    "/* a */ ;; /* -webkit-user-modify:read-write */",
+    "/* a */ -webkit-user-modify:read-write; /* b */",
+    "-webkit-user-modify:read-write; /* unterminated",
+    "-WEBKIT-USER-MODIFY:read-write ;\t\n; ",
+    "-webkit-user-\\6d odify:read-write;;",
+    "-moz-user-modify:read-write; -webkit-user-modify:read-write",
+])
+def test_a_style_the_filter_empties_is_removed(style):
+    """No declaration left, only separators, comments and white space: the attribute goes, not a stub of it."""
     log = []
-    out = sanitize('<span style="-webkit-user-modify:read-write">x</span>', log=log, mount=mount)
+    out = sanitize(f'<span style="{html.escape(style)}">x</span>', log=log)
+    assert out == "<span>x</span>"
+    assert "  - style trimmed on <span>" in log
+
+
+@pytest.mark.parametrize("style, want", [
+    ("color: red; -webkit-user-modify:read-write; ;;", "color: red; ;;"),
+    ('content: ";"; -webkit-user-modify:read-write', 'content: ";"'),
+    ('content: "/*"; -webkit-user-modify:read-write', 'content: "/*"'),
+    ("-webkit-user-modify:read-write; width: 3px", " width: 3px"),
+    ("-webkit-user-modify:read-write; /* c */ width: 3px", " /* c */ width: 3px"),
+])
+def test_a_style_with_a_declaration_left_keeps_the_attribute(style, want):
+    out = sanitize(f'<span style="{html.escape(style)}">x</span>')
+    assert next(a for t, a in tags_of(out) if t == "span").get("style") == want
+
+
+def test_a_style_only_a_comment_or_separators_that_the_filter_did_not_touch_is_left_alone():
+    """Only what the filter trimmed is judged: a style it did not change comes out as it came in."""
+    out = sanitize('<span style=";; /* c */">x</span>')
+    assert next(a for t, a in tags_of(out) if t == "span").get("style") == ";; /* c */"
+
+
+def test_mount_mode_removes_a_style_the_allow_list_empties():
+    """Not part of the simple-mode filter: `_mount_attrs` did this before the filter was string-aware; kept as a guard."""
+    log = []
+    out = sanitize('<span style="-webkit-user-modify:read-write">x</span>', log=log, mount=True)
     assert out == "<span>x</span>"
     assert "  - style trimmed on <span>" in log
 
@@ -522,7 +570,7 @@ def test_a_style_the_filter_empties_is_removed(mount):
 def test_no_split_of_a_style_lets_user_modify_or_a_backslash_through():
     """Bypass neighbours of the string- and comment-aware split: quotes, comments, escapes and newlines in every order
     around a declaration that makes text editable. The split may differ from a browser's; the output may not carry the name."""
-    pieces = ['"', "'", "/*", "*/", ";", "\\", "\n", ":", " ", "color: red", "-webkit-user-modify: read-write", "user-modify",
+    pieces = ['"', "'", "/*", "*/", ";", "\\", "\n", ":", " ", "(", ")", "[", "]", "{", "}", "color: red", "-webkit-user-modify: read-write", "user-modify",
               "-moz-user-\\6d odify:read-write", "a"]
     rng = random.Random(96)
     for _ in range(3000):

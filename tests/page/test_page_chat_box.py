@@ -446,7 +446,7 @@ def store_full(p, full=True):
     p.evaluate("""(full) => {
       if (!window.__realSet) window.__realSet = Storage.prototype.setItem;
       Storage.prototype.setItem = function (k, v) {
-        if (full && String(k).startsWith('sheaf-comment-draft')) throw new Error('quota');
+        if (full && String(k).startsWith('sheaf-comment-draft')) { window.__refusedSets = (window.__refusedSets || 0) + 1; throw new Error('quota'); }
         return window.__realSet.call(this, k, v);
       };
     }""", full)
@@ -457,10 +457,21 @@ def store_unreadable(p, blocked=True):
     p.evaluate("""(blocked) => {
       if (!window.__realGet) window.__realGet = Storage.prototype.getItem;
       Storage.prototype.getItem = function (k) {
-        if (blocked && String(k).startsWith('sheaf-comment-draft')) throw new Error('blocked');
+        if (blocked && String(k).startsWith('sheaf-comment-draft')) { window.__refused = (window.__refused || 0) + 1; throw new Error('blocked'); }
         return window.__realGet.call(this, k);
       };
     }""", blocked)
+
+
+def refused_reads(p):
+    """How many reads of the comment store the page made while it refused them (store_unreadable counts them)."""
+    return p.evaluate("window.__refused || 0")
+
+
+def store_as_held(p, site):
+    """What the comment store holds, read past a refusal: the test's own look, not the page's."""
+    return p.evaluate("""(k) => { const raw = (window.__realGet || Storage.prototype.getItem).call(localStorage, k);
+                                  return raw ? JSON.parse(raw) : []; }""", comment_draft_key(site))
 
 
 def store_unreadable_once(p):
@@ -869,6 +880,13 @@ def hold_time_passes(p):
     }""")
 
 
+def held_while_refusing(p, site):
+    """Waits, with no fixed time, until the page has met the refusing store (a read it made was refused) while the taken
+    reply is still in the store: the clear of it cannot have been written, so only the held path can remove it later."""
+    until(lambda: refused_reads(p) > 0, what="the page's clear to meet the refused read")
+    assert [d["body"] for d in store_as_held(p, site)] == ["Because."], "the entry was cleared while the store refused reads"
+
+
 def test_a_reply_the_hub_took_while_the_store_refused_reads_is_not_offered_as_not_sent_when_the_store_reads_again(tab, site):
     p = open_thread(tab, site)
 
@@ -881,11 +899,11 @@ def test_a_reply_the_hub_took_while_the_store_refused_reads_is_not_offered_as_no
     p.keyboard.press("Enter")
     until(lambda: "Because." in site.file.read_text(encoding="utf-8"), what="the reply in the file")
     until(lambda: p.locator(THREAD).count() == 2, what="the reply in the thread")
-    p.wait_for_timeout(500)      # the page's clear of the kept reply runs after the answer is taken in: while the store still refuses
+    held_while_refusing(p, site)
     p.unroute("**/_/comment")
     store_unreadable(p, False)
     hold_time_passes(p)
-    p.wait_for_timeout(300)
+    until(lambda: store_as_held(p, site) == [], what="the reply the hub took gone from the store")
     assert p.locator("#rd-unsent").count() == 0, "the reply the hub took is offered as not sent, to be sent twice"
 
 
@@ -902,11 +920,11 @@ def test_a_reply_the_hub_took_while_its_answer_was_lost_and_the_store_refused_re
     p.keyboard.press("Enter")
     until(lambda: "Because." in site.file.read_text(encoding="utf-8"), what="the reply in the file")
     until(lambda: p.locator(THREAD).count() == 2, what="the reply in the thread, read from the hub's event")
-    p.wait_for_timeout(500)      # the page's clear of what the event named runs after it is taken in: while the store still refuses
+    held_while_refusing(p, site)
     p.unroute("**/_/comment")
     store_unreadable(p, False)
     hold_time_passes(p)
-    p.wait_for_timeout(300)
+    until(lambda: store_as_held(p, site) == [], what="the reply the hub took gone from the store")
     assert p.locator("#rd-unsent").count() == 0, "the reply the hub took is offered as not sent, to be sent twice"
 
 
@@ -934,6 +952,77 @@ def test_a_new_message_emptied_while_the_store_refused_reads_stays_empty_after_a
     open_box(p)
     assert p.input_value(FIELD) == "", "the text the person emptied came back after a reload"
     assert p.locator("#rd-unsent").count() == 0, "the emptied message is offered as not sent after a reload"
+
+
+def redraw_in_a_read_throws(p):
+    """The first redraw of the not-sent line that runs inside a read of the store throws, as a failing redraw would;
+    __redrawInRead counts the redraws that ran inside a read."""
+    p.evaluate("""() => {
+      const real = window.clearTimeout;
+      window.__redrawInRead = 0;
+      window.clearTimeout = function (...a) {
+        const s = new Error().stack;
+        if (s.includes('unsentLine') && s.includes('commentDraftsLoad')) {
+          window.__redrawInRead++;
+          if (window.__redrawInRead === 1) throw new Error('redraw failed');
+        }
+        return real.apply(this, a);
+      };
+    }""")
+
+
+def test_a_redraw_of_the_not_sent_line_that_fails_after_a_purge_does_not_make_a_read_fail(tab, site):
+    p = open_thread(tab, site)
+    p.keyboard.press("Escape")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    p.fill(FIELD, "kept for later")
+    p.click("#rd-popover button[data-a=minimize]")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    until(lambda: p.input_value(FIELD) == "kept for later", what="the kept text back in the box")
+    store_unreadable(p)
+    p.fill(FIELD, "")
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close on an empty field")
+    redraw_in_a_read_throws(p)      # in place before the store reads again: the first read that works purges the held clear
+    store_unreadable(p, False)
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    p.fill(FIELD, "typed after")
+    p.click("#rd-popover button[data-a=minimize]")
+    until(lambda: [d["body"] for d in stored_drafts(p)] == ["typed after"], what="the text typed after the purge kept")
+    assert "could not be kept" not in toast(p), "a failing redraw passed for a store that refused the read"
+    assert p.evaluate("window.__redrawInRead") == 0, "the redraw ran inside the read, while its caller was still working"
+
+
+def test_a_held_clear_that_the_full_store_cannot_write_is_tried_by_the_reads_only_not_by_the_redraws_it_queues(tab, site):
+    p = open_thread(tab, site)
+    p.keyboard.press("Escape")
+    select(p, at(P2, "pears"), at(P2, "pears", None))      # a second entry, so the purge writes a list and does not remove the key
+    open_box(p)
+    p.fill(FIELD, "other")
+    p.click("#rd-popover button[data-a=minimize]")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    p.fill(FIELD, "kept for later")
+    p.click("#rd-popover button[data-a=minimize]")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    until(lambda: p.input_value(FIELD) == "kept for later", what="the kept text back in the box")
+    store_unreadable(p)
+    p.fill(FIELD, "")
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close on an empty field")
+    store_unreadable(p, False)
+    store_full(p)
+    p.evaluate("window.dispatchEvent(new StorageEvent('storage'))")      # one read that works: its purge cannot be written
+    until(lambda: p.evaluate("window.__refusedSets || 0") > 0, what="the purge to meet the full store")
+    p.evaluate("new Promise(r => setTimeout(r, 400))")      # an absence cannot be waited for by a signal: time for runaway redraws to show
+    assert p.evaluate("window.__refusedSets") < 20, "the redraws the purge queued purged again, each queueing more"
 
 
 READABLE_REPLY = ("Done. What changed:\n- the intro is shorter\n- `fetch_all` retries\n\n"

@@ -776,8 +776,11 @@ def test_restart_through_the_service_makes_room_for_a_hub_a_command_started(
     code = []
     waiter = threading.Thread(target=lambda: code.append(started.wait()))
     waiter.start()
-    r = subprocess.run([sys.executable, "-m", "sheafmd", "restart"], capture_output=True, text=True,
-                       timeout=120)
+    # The `linux` fixture patches `kind` in this process only: the command gets the same seam.
+    r = subprocess.run([sys.executable, "-c",
+                        "import sys; from sheafmd.hub import service; from sheafmd.cli import main; "
+                        "service.kind = lambda: 'systemd'; sys.exit(main(['restart']))"],
+                       capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "stopping the hub that is running" in r.stdout
     got = hubclient.client().challenge()

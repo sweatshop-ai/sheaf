@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from helpers import comment, writes_from_outside
-from pagehelp import (DOC, P1, draft_key, P2, T0, at, comment_draft_key, comment_on, gone, key, mark, open_box, open_form, typed, reload_on_clock, reloaded,
+from pagehelp import (DOC, P1, RELOADING, draft_key, P2, T0, at, comment_draft_key, comment_on, gone, key, mark, open_box, open_form, typed, reload_on_clock, reloaded,
                       select, select_by_touch, toast, toasted, type_at_end, until)
 from sheafmd import comments as rdc
 from sheafmd.hub import live as hub_live
@@ -2630,9 +2630,10 @@ SLOW = "words the hub is slow to write"
 TAKEN = "What you sent reached the hub after all"
 
 
-def given_up(tab, slow_hub, form):
+def given_up(tab, slow_hub, form, hello=False):
     """A reply, or a new comment on 'pears', written by the hub, which holds it past the page's 30 seconds:
-    the page has given up on it and the form is back with its text."""
+    the page has given up on it and the form is back with its text. With `hello`, the stream's first hello
+    reaches the page while the send is out, as it does on a loaded runner (ticket 20)."""
     p = tab.page
     reload_on_clock(p)
     if form == "reply":
@@ -2644,20 +2645,43 @@ def given_up(tab, slow_hub, form):
     slow_hub.hold()
     p.keyboard.press("Control+Enter")
     until(lambda: SLOW in tab.site.file.read_text(), what="the hub's write")
+    if hello:
+        tab.site.hub.entry(DOC).live._publish("hello", {})
+        p.wait_for_timeout(300)
     p.clock.fast_forward(30_500)
     toasted(p, LATE)
     assert p.input_value("#rd-popover textarea") == SLOW
 
 
-def test_a_reply_given_up_that_the_hub_took_after_all_goes_from_the_page_and_the_store(thread, slow_hub):
+def reply_is_in_its_thread(thread):
+    """The form is gone, the reply is in the thread once, the page's store has none of it and the thread's field is
+    back, all at one moment. False while the page reloads (its popover or its context is not there yet)."""
     p = thread.page
-    given_up(thread, slow_hub, "reply")
+    try:
+        shown = p.evaluate("(document.querySelector('#rd-popover') || {}).innerText || ''")
+        return not typed(p) and shown.count(SLOW) == 1 and SLOW not in comment_store(thread) and p.is_visible("#rd-popover textarea")
+    except Exception as e:
+        if any(said in str(e) for said in RELOADING):
+            return False
+        raise
+
+
+# The reply is drawn a moment after the toast, not with it. When the stream said hello while the send was out, the
+# page makes the check that send put off once it gives up, and the event of the write waits for that answer, which
+# waits for the hub's lock (released below). The answer names a hash the page does not hold, so the page reloads,
+# and the old page may draw the reply just before it does. A read made at the toast found the thread without the
+# reply (CI, twice on main), so the test waits for the whole state at one moment, through a reload. The TAKEN toast
+# is said in both orders but a reload wipes it, so it is waited for as "the toast, or the reload"; a hello of the
+# stream's own may come in the case without one (a loaded runner, ticket 20), which is why that case waits so too.
+@pytest.mark.parametrize("hello", [False, True], ids=["as it comes", "a stream that says hello while the send is out"])
+def test_a_reply_given_up_that_the_hub_took_after_all_goes_from_the_page_and_the_store(thread, slow_hub, hello):
+    p = thread.page
+    given_up(thread, slow_hub, "reply", hello=hello)
+    mark(p)
     slow_hub.release()
-    toasted(p, TAKEN)
-    until(lambda: not typed(p), what="the form to go")
-    assert p.inner_text("#rd-popover").count(SLOW) == 1
-    assert SLOW not in comment_store(thread)
-    assert p.is_visible("#rd-popover textarea"), "the thread's field did not come back"
+    if not hello:
+        until(lambda: TAKEN in toast(p) or gone(p), what="the toast, or the reload that wipes it")
+    until(lambda: reply_is_in_its_thread(thread), what="the reply in its thread, the form gone, the store clear")
 
 
 def test_a_new_comment_given_up_that_the_hub_took_after_all_is_not_kept_on_the_page_that_comes_back(thread, slow_hub):

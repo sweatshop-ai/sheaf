@@ -8,4 +8,4 @@
 **Blocked by:** none
 
 **Claimed by:** Nabil
-**Status:** ready-for-agent
+**Status:** done (merged as 07085fa; leftovers in ticket 122)

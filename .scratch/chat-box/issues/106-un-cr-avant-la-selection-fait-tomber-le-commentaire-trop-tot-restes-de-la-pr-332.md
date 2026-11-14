@@ -8,7 +8,7 @@
 
 **Claimed by:** Halima
 
-**Status:** ready-for-agent
+**Status:** done (PR 340, merge c5589ec; leftovers in ticket 113)
 
 - [ ] Le commentaire tombe après la sélection quand des CR la précèdent, mesuré contre pandoc 3.9
 - [ ] `TASK_MARK_RE` : corrigé ou écarté avec la preuve

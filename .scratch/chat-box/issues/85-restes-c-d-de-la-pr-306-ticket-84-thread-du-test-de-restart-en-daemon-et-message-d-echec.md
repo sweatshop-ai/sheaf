@@ -4,7 +4,7 @@
 1. (c) ~l.777 : le thread `waiter` n'est pas un daemon ; si le hub ne sort jamais et que le teardown expire aussi, le thread bloqué dans `waitpid` empêche pytest de se terminer. `daemon=True`.
 2. (d) ~l.785 : si `waiter.join(timeout=30)` expire, l'échec dit `assert [] == [0]`. Ajouter `assert not waiter.is_alive(), "the hub did not exit"` avant la vérification du code.
 
-**Blocked by:** PR 306 mergée
+**Blocked by:** none
 
 **Claimed by:**
 

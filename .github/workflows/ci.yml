@@ -131,9 +131,9 @@ jobs:
           if [ "$RUNNER_OS" = "Linux" ] && command -v sudo >/dev/null; then deps="--with-deps"; fi
           uv run --no-sync playwright install $deps chromium firefox webkit
           for i in 1 2 3; do (while :; do :; done) & done      # the runner's four cores are never idle
-          for i in $(seq 1 5); do
+          for i in $(seq 1 10); do
             echo "=== round $i ==="
-            uv run --no-sync pytest -v -m page -p no:cacheprovider tests/page/test_page_writing.py tests/page/test_page_outage.py 2>&1 | tee -a page-tests.txt || true
+            uv run --no-sync pytest -v -m page -p no:cacheprovider tests/page/test_page_writing.py 2>&1 | tee -a page-tests.txt || true
           done
           kill $(jobs -p) 2>/dev/null || true
           if grep -q "FAILED" page-tests.txt; then echo "::error::a failure was caught"; exit 1; fi

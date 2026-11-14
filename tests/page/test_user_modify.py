@@ -6,7 +6,10 @@ import pytest
 from sheafmd.sanitize import sanitize
 
 pytestmark = pytest.mark.page
-SPAN = '<p><span id="t" style="-webkit-user-modify: read-write">x</span></p>'
+SPANS = [
+    '<p><span id="t" style="/*:*/-webkit-user-modify: read-write">x</span></p>',
+    '<p><span id="t" style="-webkit-user-modify: read-write">x</span></p>',
+]
 
 
 @pytest.fixture(params=["chromium", "firefox", "webkit"])
@@ -33,8 +36,9 @@ def _types_into(page, html):
     return page.evaluate("document.getElementById('t').textContent")
 
 
-def test_what_the_sanitiser_keeps_of_the_span_cannot_be_typed_into(engine_page):
+@pytest.mark.parametrize("html", SPANS)
+def test_what_the_sanitiser_keeps_of_the_span_cannot_be_typed_into(engine_page, html):
     """The span as `sanitize()` returns it in simple mode: no engine may let the reader type into it."""
     name, page = engine_page
-    got = _types_into(page, sanitize(SPAN))
+    got = _types_into(page, sanitize(html))
     assert got == "x", f"{name} let text be typed into the sanitised span: {got!r}"

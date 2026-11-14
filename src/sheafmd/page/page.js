@@ -2422,7 +2422,7 @@ var create = function (ROOT, CFG, opts) {
   function notSent(e, what) {
     return e.unreachable && e.message === UNREACHABLE ? what + ' did not go out: the hub is unreachable.' : e.message;
   }
-  // One Cancel ends the Tell of each agent, each with an event of its own, and a toast replaces the one before it: the
+  // One Cancel ends the Tell of each agent, each with an event of its own, and toasts come one after the other: the
   // events of a moment are said once per thread, naming every agent of that thread that had already seen its Tell.
   var cancelNote = {};
   function cancelSaid(id, to, seen) {
@@ -3735,7 +3735,7 @@ var create = function (ROOT, CFG, opts) {
         lock(false);
         say(e.message, true);
         // A reload waits for this answer: the refusal is said again on the page it brings, if it comes while the
-        // toast would still be up (a form may hold it longer).
+        // toast would still be up, counted from the refusal (a form may hold the reload longer).
         if (reloadAfterPress) pressSaid = { text: e.message, until: Date.now() + 7000 };
         done();
       }
@@ -4151,7 +4151,7 @@ var create = function (ROOT, CFG, opts) {
         var late = !!d.rid && taken(d.rid);
         d.seenSince = seenSeq;                 // the page may hold it a while (heard): a `tell-seen` taken meanwhile is newer
         heardAfterCheck(function () { heard(d); });
-        if (late) say('What you sent reached the hub after all.');      // over the news of applyComments
+        if (late) say('What you sent reached the hub after all.');      // after the news of applyComments
       });
       live.addEventListener('tell-sent', function (ev) {
         say('Sent to ' + yourSession() + '. Its reply will appear in the thread.');

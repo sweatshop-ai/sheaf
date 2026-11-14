@@ -11,6 +11,7 @@ from test_save_roundtrip import blocks_of
 import sheafmd
 from sheafmd import comments as rdc
 from sheafmd import copyblock
+from sheafmd.blocks import split_md_blocks
 from sheafmd import edit as rde
 
 MAIL = "> [!COPY]\n> Hello **Anna**,\n> thanks for the call.\n>\n> Best, Thierry\n"
@@ -328,3 +329,31 @@ def test_a_quote_the_splitter_cuts_short_still_shows_what_pandoc_makes_of_the_wh
 def test_a_lone_cr_in_the_marker_line_is_deleted_as_pandoc_deletes_it(quote):
     assert copyblock.is_copy_block(quote) is True
     assert copyblock.hide(quote).startswith("> " + copyblock.STAND_IN)
+
+
+@pytest.mark.parametrize("quote", [
+    "   \r> [!COPY]\n> a\n",
+    "\r\r\r   > [!COPY]\n> a\n",
+    "  \r > [!COPY]\n> a\n",
+    "\r> [!COPY]\n> a\n",
+    " \r\r\r> [!COPY]\r\n> a\r\n",
+])
+def test_a_cr_before_the_quote_mark_is_no_indentation_as_pandoc_deletes_it(tmp_path, quote):
+    # Ticket 103: the splitter counted the CR as a column and read 4 of them as indented code, so no copy block
+    # was found and the page showed the marker as text where pandoc makes a quote. Measured on 168 of 3,586
+    # sources against pandoc 3.9.
+    assert [b.kind for b in split_md_blocks(quote)] == ["quote"]
+    assert copyblock.is_copy_block(split_md_blocks(quote)[0].content)
+    assert copyblock.STAND_IN in copyblock.hide(quote)
+    out = page_of(tmp_path, quote, share=False)
+    assert "rd-copy" in out and "[!COPY]" not in out
+
+
+def test_the_page_html_of_the_marker_line_goes_through_mark(tmp_path):
+    # Ticket 103 (d2): the test above checks the swap, this one the HTML after `mark`.
+    hidden = copyblock.hide("   > [!COPY]\r\n> a\n")
+    raw = pandoc(["-f", "gfm", "-t", "html"], hidden)
+    assert raw.count(copyblock.STAND_IN) == 1
+    page = copyblock.mark(raw, page=True)
+    assert page.startswith('<blockquote class="rd-copy">') and copyblock.STAND_IN not in page
+    assert copyblock.mark(raw, page=False).startswith("<blockquote>")

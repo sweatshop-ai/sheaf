@@ -3703,7 +3703,8 @@ var create = function (ROOT, CFG, opts) {
       var res = {}, ok;
       boxWaits.add(box);
       try { ok = await save(true, res); } finally { boxWaits.delete(box); }
-      if ((!ok && !res.owed) || stale || docGone || !main.contains(box)) return;
+      // Not on an owed save either: Share is sent to the hub, and the owed edits would be merged over it when they go.
+      if (!ok || stale || docGone || !main.contains(box)) return;
       x = toggleOf.get(box);
       if (!x) return;
     }

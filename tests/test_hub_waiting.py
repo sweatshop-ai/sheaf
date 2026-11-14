@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 import sheafmd
-from helpers import PLAN, claim_port, comment, hub_rows, ok
+from helpers import PLAN, claim_port, comment, hub_rows, ok, refused
 from sheafmd import comments as rdc
 from sheafmd.source import update_file
 from test_hub_tell import wait_until
@@ -416,17 +416,33 @@ def test_a_snapshot_asked_while_the_listing_writes_waits_for_it_and_never_says_q
     assert [w["state"] for w in snap[0]] == ["seen"] and named(sub.drain(), "tell-seen")
 
 
+class BlockedSignal:
+    """A lock that says when a thread asked for it and found it held."""
+    def __init__(self, lock, blocked):
+        self.lock, self.blocked = lock, blocked
+
+    def __enter__(self):
+        if not self.lock.acquire(blocking=False):
+            self.blocked.set()
+            self.lock.acquire()
+        return self
+
+    def __exit__(self, *exc):
+        self.lock.release()
+
+
 def test_a_changed_event_is_read_under_the_tells_lock_so_it_never_says_queued_after_tell_seen(browser, talk):
     token = agent_token()
     target(browser)
     assert tell(browser).status == 200
-    live, sub, real = browser.hub.entry(DOC).live, tab(browser.hub), None
-    real, answers = live._publish, []
+    live, sub = browser.hub.entry(DOC).live, tab(browser.hub)
+    real, answers, blocked = live._publish, [], threading.Event()
+    live.tells_lock = browser.hub.waiting_tells._lock = BlockedSignal(browser.hub.waiting_tells._lock, blocked)
 
     def publish(event, data):
         taker = threading.Thread(target=lambda: answers.append(documents(browser, token)))
         taker.start()
-        taker.join(0.5)                      # a listing that is not held back has written `seen` and sent `tell-seen` by now
+        blocked.wait(5)                      # held back: the taker waits on the lock; not held back: it went by and sent `tell-seen`
         real(event, data)
     live._publish = publish
     live.rebuild()
@@ -558,8 +574,55 @@ def test_a_listing_that_only_finds_a_revoked_row_writes_its_end_so_the_next_pass
     Tokens().revoke("ada-chatgpt")
     documents(browser, bob)
     assert len(json.loads(Path(sheafmd.paths.state_dir(), "tells.json").read_text(encoding="utf-8"))) == 1
+    documents(browser, bob)                                                 # a second listing does not send the end again
     browser.hub.waiting_tells.sweep()
     assert len(named(sub.drain(), "tell-cancelled")) == 1 and len(hub_rows("tell-cancelled")) == 1
+
+
+def test_a_held_step_that_raises_leaves_the_others_of_the_change_sent_and_the_error_reaches_the_caller(browser, talk, plan):
+    agent_token()
+    bob = agent_token("bob-claude", client="Claude")
+    target(browser, "bob-claude")
+    assert tell(browser).status == 200
+    target(browser)
+    comment(plan, quote="First paragraph", body="Why apples?")
+    assert tell(browser, id="c2").status == 200
+    sub = tab(browser.hub)
+    sub.drain()
+    Tokens().revoke("ada-chatgpt")
+    Tokens().revoke("bob-claude")
+    real, calls = browser.hub.record, []
+
+    def record(kind, *a, **kw):
+        calls.append(kind)
+        if len(calls) == 1:
+            raise RuntimeError("the log is gone")
+        return real(kind, *a, **kw)
+    browser.hub.record = record
+    with pytest.raises(RuntimeError, match="the log is gone"):
+        browser.hub.waiting_tells.sweep()
+    browser.hub.record = real
+    assert len(named(sub.drain(), "tell-cancelled")) == len(calls) == 2 and len(hub_rows("tell-cancelled")) == 1
+    assert json.loads(Path(sheafmd.paths.state_dir(), "tells.json").read_text(encoding="utf-8")) == []
+
+
+def test_a_listing_that_only_finds_a_revoked_row_fails_on_a_disk_that_refuses_writes_as_a_sweep_does(browser, talk, monkeypatch):
+    agent_token()
+    bob = agent_token("bob-claude", client="Claude")
+    target(browser, "bob-claude")
+    assert tell(browser).status == 200
+    documents(browser, bob)                                                 # seen: nothing left for the listing to mark
+    target(browser)
+    assert tell(browser).status == 200
+    Tokens().revoke("ada-chatgpt")
+
+    def refuse(*a, **k):
+        raise OSError(28, "No space left on device")
+    monkeypatch.setattr(waiting, "write_json", refuse)
+    refused(browser, "documents", token=bob)                                # SPEC 9.8: an end that is not written fails the listing, as a sweep's does
+    with pytest.raises(OSError):
+        browser.hub.waiting_tells.sweep()
+    assert hub_rows("tell-cancelled") == []
 
 
 def test_a_cancel_first_leaves_nothing_to_list_and_nothing_seen(browser, talk):

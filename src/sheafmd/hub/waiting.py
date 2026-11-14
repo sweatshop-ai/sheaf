@@ -103,8 +103,14 @@ class Waiting:
                         pass
             finally:
                 self._held = outer
-            for go in held:
-                go()
+            failed = None
+            for go in held:                        # the file holds the change: one step that raises does not cost the rest theirs
+                try:
+                    go()
+                except Exception as e:
+                    failed = failed or e
+            if failed is not None:
+                raise failed
             return result
 
     def _name_old_rows(self, rows: list) -> bool:

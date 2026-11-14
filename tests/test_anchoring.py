@@ -282,3 +282,20 @@ def test_a_backtick_in_a_raw_tag_does_not_hide_the_opener_after_it():
     assert out.startswith("# a <span title='`'>s</span><!-- sheaf-comment id=%s" % cid)
     assert re.sub(r"<!--.*?-->", "", out, count=1) == md
     assert [c.id for c in rdc.parse(out).comments] == [cid]
+
+
+@pytest.mark.parametrize("para", [
+    "\\<b title='`'> word `and` y",          # an escaped `<` opens no tag
+    "x <b tè='`'> word `and` y",        # an attribute name is ASCII
+    "x <b\u000btitle='`'> word `and` y",     # a vertical tab is no whitespace of a tag
+])
+def test_text_that_only_looks_like_a_tag_does_not_hide_a_comment_from_parse(para):
+    # Ticket 65 follow-up (Opus review 1, F1): the backtick in the "tag" opens a code span, as in
+    # pandoc, so the block lands inside it on write; parse must find what add_comment wrote, or a
+    # second comment reuses its id.
+    md = "Intro.\n\n%s\n" % para
+    s, e = sel(rdc.split_md_blocks(md)[1].content, "word")
+    out, cid = rdc.add_comment(md, 1, s, e, "word", "why", "Ada", "2026-11-14T10:00")
+    assert [c.id for c in rdc.parse(out).comments] == [cid]
+    _, cid2 = rdc.add_comment(out, 0, 0, 5, "Intro", "again", "Bob", "2026-11-14T10:01")
+    assert cid2 != cid

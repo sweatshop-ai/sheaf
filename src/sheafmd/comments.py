@@ -281,10 +281,10 @@ def _mask_code(text: str) -> str:
         if not no_head and (head is None or head.start() < pos):
             head = COMMENT_RE.search(text, pos)
             no_head = head is None      # none now means none later: pos only moves on
-        if not no_tag and (tag is None or tag.start() < pos):
+        if not no_tag and (tag is None or tag.start('tag') < pos):
             tag = _HTML_TAG_RE.search(text, pos)
             no_tag = tag is None
-        if tag and tag.start() < span.start() and not (head and head.start() < tag.start()):
+        if tag and tag.start('tag') < span.start() and not (head and head.start() < tag.start('tag')):
             pos = tag.end()
             continue
         if head and head.start() < span.start():
@@ -534,10 +534,12 @@ _ATX_TEXT = re.compile(r"^( {0,3}#{1,6}[ \t]+)(.*?)(?:[ \t]+#+)?[ \t]*$")
 
 
 # An inline HTML tag as CommonMark reads it: it binds more tightly than a code span, so a backtick
-# in an attribute value opens nothing.
+# in an attribute value opens nothing. ASCII only, whitespace of a tag is space, tab, newline, return
+# or form feed, and an odd run of backslashes before the `<` escapes it (group `tag`).
 _HTML_TAG_RE = re.compile(
-    r"</[A-Za-z][A-Za-z0-9-]*\s*>|<[A-Za-z][A-Za-z0-9-]*"
-    r"(?:\s+[A-Za-z_:][\w:.-]*(?:\s*=\s*(?:[^\s\"'=<>`]+|'[^']*'|\"[^\"]*\"))?)*\s*/?>")
+    r"(?<!\\)(?:\\\\)*(?P<tag></[A-Za-z][A-Za-z0-9-]*[ \t\r\n\f]*>|<[A-Za-z][A-Za-z0-9-]*"
+    r"(?:[ \t\r\n\f]+[A-Za-z_:][A-Za-z0-9_:.-]*(?:[ \t\r\n\f]*=[ \t\r\n\f]*"
+    r"(?:[^ \t\r\n\f\"'=<>`]+|'[^']*'|\"[^\"]*\"))?)*[ \t\r\n\f]*/?>)")
 
 
 def _unclosed_opener(text: str) -> int:
@@ -550,10 +552,11 @@ def _unclosed_opener(text: str) -> int:
         o = _opener(text, i)
         if o < 0:
             return -1
-        first = min((m for m in (CODE_SPAN_RE.search(text, i), _HTML_TAG_RE.search(text, i)) if m),
-                    key=lambda m: m.start(), default=None)
-        if first and first.start() < o:
-            i = first.end()
+        span, tag = CODE_SPAN_RE.search(text, i), _HTML_TAG_RE.search(text, i)
+        first = min((x for x in (span and (span.start(), span.end()), tag and (tag.start("tag"), tag.end())) if x),
+                    default=None)
+        if first and first[0] < o:
+            i = first[1]
             continue
         e = text.find("-->", o + 4)
         if e < 0:

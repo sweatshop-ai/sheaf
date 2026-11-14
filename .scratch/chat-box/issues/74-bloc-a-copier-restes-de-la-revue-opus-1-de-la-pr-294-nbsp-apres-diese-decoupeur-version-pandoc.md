@@ -17,7 +17,7 @@
 
 **Claimed by:** Diego
 
-**Status:** ready-for-agent
+**Status:** done (PR 315, merged as 81c39b8)
 
 **Résultat (Diego, PR 315):**
 - F3 corrigé : `#{1,6}(?:[ \t\r]|$)`. Le `\r` seul compte comme fin de ligne pour pandoc (revue : `#\r#` est un titre).

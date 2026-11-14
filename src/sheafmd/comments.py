@@ -266,9 +266,10 @@ def _parse_one(raw: str):
 
 def _mask_code(text: str) -> str:
     """`text` with its inline code spans blanked, the same length. Read left to right,
-    as CommonMark does: a comment that starts before a backtick owns it, so a backtick
-    in a comment's body does not open a span that runs on into the text after it."""
-    out, pos, span, head, no_head = [], 0, None, None, False
+    as CommonMark does: a comment or an HTML tag that starts before a backtick owns it, so a
+    backtick in a comment's body or a tag's attribute does not open a span that runs on into
+    the text after it."""
+    out, pos, span, head, no_head, tag, no_tag = [], 0, None, None, False, None, False
     while True:
         if span is None or span.start() < pos:
             span = CODE_SPAN_RE.search(text, pos)
@@ -280,6 +281,12 @@ def _mask_code(text: str) -> str:
         if not no_head and (head is None or head.start() < pos):
             head = COMMENT_RE.search(text, pos)
             no_head = head is None      # none now means none later: pos only moves on
+        if not no_tag and (tag is None or tag.start('tag') < pos):
+            tag = _HTML_TAG_RE.search(text, pos)
+            no_tag = tag is None
+        if tag and tag.start('tag') < span.start() and not (head and head.start() < tag.start('tag')):
+            pos = tag.end()
+            continue
         if head and head.start() < span.start():
             end = text.find("-->", head.end())
             if end < 0:
@@ -526,17 +533,34 @@ def anchor_point(block: str, start: int, end: int, quote: str) -> int:
 _ATX_TEXT = re.compile(r"^( {0,3}#{1,6}[ \t]+)(.*?)(?:[ \t]+#+)?[ \t]*$")
 
 
+# An inline HTML tag as CommonMark reads it: it binds more tightly than a code span, so a backtick
+# in an attribute value opens nothing. ASCII only, whitespace of a tag is space, tab, newline or return (pandoc
+# reads no form feed), and an odd run of backslashes before the `<` escapes it (group `tag`).
+_HTML_TAG_RE = re.compile(
+    r"(?<!\\)(?:\\\\)*(?P<tag></[A-Za-z][A-Za-z0-9-]*[ \t\r\n]*>|<[A-Za-z][A-Za-z0-9-]*"
+    r"(?:[ \t\r\n]+[A-Za-z_:][A-Za-z0-9_:.-]*(?:[ \t\r\n]*=[ \t\r\n]*"
+    r"(?:[^ \t\r\n\"'=<>`]+|'[^']*'|\"[^\"]*\"))?)*[ \t\r\n]*/?>)")
+
+
 def _unclosed_opener(text: str) -> int:
     """Where a `<!--` outside code that nothing closes starts in `text`, or -1. Any `<!--`
-    counts, not only a sheaf comment's: a block written after it would close it."""
-    masked, i = _mask_code(text), 0
+    counts, not only a sheaf comment's: a block written after it would close it. Read left to
+    right as CommonMark does: a code span, an HTML tag or a closed comment that starts first owns
+    what it holds, so a backtick in a tag or in an ordinary comment pairs with nothing."""
+    i = 0
     while True:
-        j = _opener(masked, i)
-        if j < 0:
+        o = _opener(text, i)
+        if o < 0:
             return -1
-        e = masked.find("-->", j + 4)
+        span, tag = CODE_SPAN_RE.search(text, i), _HTML_TAG_RE.search(text, i)
+        first = min((x for x in (span and (span.start(), span.end()), tag and (tag.start("tag"), tag.end())) if x),
+                    default=None)
+        if first and first[0] < o:
+            i = first[1]
+            continue
+        e = text.find("-->", o + 4)
         if e < 0:
-            return j
+            return o
         i = e + 3
 
 
@@ -556,7 +580,9 @@ def heading_anchor(block: str) -> int | None:
         floor = 0
     else:
         m = _ATX_TEXT.match(lines[0])
-        if not m or not m.group(2) or set(m.group(2)) == {"#"}:    # `### ###` is an empty heading
+        # The hashes after the opening ones are the closing ones when nothing else is there: `### ###`,
+        # `# #` and `## #` are empty, `## ## ##` is the word `##` (CommonMark and pandoc read it so).
+        if not m or not m.group(2) or set(lines[0][len(m.group(1)):].strip()) == {"#"}:
             return None
         at, floor = m.end(2), len(m.group(1).rstrip())
     open_at = _unclosed_opener(block[:at])

@@ -2680,7 +2680,8 @@ def test_a_reply_given_up_that_the_hub_took_after_all_goes_from_the_page_and_the
     mark(p)
     slow_hub.release()
     if not hello:
-        # Toasts queue (ticket 62) and the clock stands still: TAKEN waits behind the red LATE (7 s) until the clock runs.
+        # Toasts queue (ticket 62) and the clock runs at its real pace (`given_up` does not pause it, ticket 79): TAKEN waits
+        # behind the red LATE (7 s) until the clock has run past it.
         try:
             p.clock.run_for(7100)
         except Exception as e:                      # a reload may be under way

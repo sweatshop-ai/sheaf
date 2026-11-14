@@ -3,9 +3,7 @@ unfocused takes the cursor on one touch in its empty area (band, thread backgrou
 A control keeps its meaning (×, −, ⋯, a link), a bubble and its selected text are content, and a scroll is not a tap."""
 import pytest
 
-from pagehelp import at, select_by_touch, until
-from sheafmd import comments as rdc
-from sheafmd.source import update_file
+from pagehelp import at, phone_with, select_by_touch, until
 
 pytestmark = pytest.mark.page
 
@@ -24,12 +22,9 @@ def unfocus(p):
 
 
 @pytest.fixture
-def thread(touch_tab, site):
+def thread(touch_tab):
     """A phone with a thread's box open (a number touched) and the cursor taken out of its field."""
-    site.file.write_text(PLAN_MD, encoding="utf-8")
-    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples",
-                                                     "Why? See [the docs](https://example.invalid/docs) please.", "Ada", "2026-10-14T10:00")[0])
-    p = touch_tab.open().page
+    p = phone_with(touch_tab, PLAN_MD, "apples", "Why? See [the docs](https://example.invalid/docs) please.")
     b = p.locator(".rd-badge").bounding_box()
     p.touchscreen.tap(b["x"] + b["width"] / 2, b["y"] + b["height"] / 2)
     p.wait_for_selector(FIELD)

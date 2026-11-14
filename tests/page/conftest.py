@@ -187,6 +187,8 @@ def tab(context, site):
 # time) and the hub's (each publish, each frame written to a stream), side by side, so a lost event shows as one
 # side without the other.
 PROBE = "x-route-probe"
+PROBED = ("**/_/comment",)      # the routes that are probed: a probe is a request, which a test's own `request` listener sees too,
+                                # and no test listens for /_/comment (the others do: _/pin, _/save, _/tell, _/tick, _/cancel)
 
 
 def until_live(page, pattern, log):
@@ -194,8 +196,8 @@ def until_live(page, pattern, log):
     ms later (a send after Ctrl+Enter) went straight to the hub and the test's handler never saw it (ticket 100: three tests
     timed out "waiting for the send to go out", the hub's /_/comment in 2 ms after the page's fetch, no handler call). So the
     route counts as live once it has caught a request of its own: a GET with a probe header that the wrapper's handler answers
-    itself, with 204. Best effort: a pattern that is no URL tail of the page's origin, or a page that is reloading, is left."""
-    if page is None or not pattern.startswith("**/") or not page.url.startswith("http"):
+    itself, with 204. Best effort: only the PROBED routes, and a page that is reloading is left."""
+    if page is None or pattern not in PROBED or not page.url.startswith("http"):
         return
     origin = "/".join(page.url.split("/")[:3])
     probe = f"fetch({origin + pattern[2:]!r}, {{headers: {{{PROBE!r}: '1'}}}}).then(r => r.status, () => 0)"

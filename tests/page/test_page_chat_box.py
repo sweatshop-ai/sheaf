@@ -1058,6 +1058,25 @@ def test_a_held_clear_is_removed_from_a_full_store_by_the_read_that_works_and_wr
     assert (p.evaluate("window.__refusedSets") or 0) == 0, "the purge wrote an entry into the full store"
 
 
+def test_a_clear_is_made_in_a_full_store_that_still_holds_an_earlier_builds_list(tab, site):
+    """The list of an earlier build cannot be moved into entry keys while the store refuses writes: a clear still goes,
+    as it did when the list was rewritten shorter (review of PR 355, c2)."""
+    p = open_thread(tab, site)
+    p.keyboard.press("Escape")
+    set_kept(p, site, [{"quote": "apples", "body": "kept for later", "block": 0, "head": "x", "at": "2026-10-14T11:00:00.000Z"},
+                       {"quote": "pears", "body": "other", "block": 1, "head": "y", "at": "2026-10-14T11:01:00.000Z"}])
+    p.reload()
+    p.wait_for_selector("#rd-menu-btn", state="attached")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    until(lambda: p.input_value(FIELD) == "kept for later", what="the kept text in the box")
+    store_full(p)
+    p.fill(FIELD, "")
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close on an empty field")
+    until(lambda: [d["body"] for d in store_as_held(p, site)] == ["other"], what="the emptied message to leave the full store")
+
+
 READABLE_REPLY = ("Done. What changed:\n- the intro is shorter\n- `fetch_all` retries\n\n"
                   "```\nif a < b:\n    go()\n```\n"
                   "See https://example.com/a?b=1&c=2. Or [the doc](https://example.com/doc).\n"

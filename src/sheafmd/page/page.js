@@ -1665,7 +1665,12 @@ var create = function (ROOT, CFG, opts) {
   function draftsWrite(drop, add, later) {
     storeOk = true;
     try {
-      migrateDrafts();
+      try { migrateDrafts(); } catch (e) {
+        // A full store refuses the move. A clear is still made, as it was on the list: shorter, which the store accepts.
+        if (add.length) throw e;
+        var left = commentDraftsRaw(true).filter(function (d) { return d._k.indexOf(ENTRY_PREFIX + '0') === 0 && !drop.some(function (g) { return g._k === d._k; }); });
+        if (left.length) localStorage.setItem(COMMENT_DRAFT_KEY, JSON.stringify(left)); else localStorage.removeItem(COMMENT_DRAFT_KEY);
+      }
       // The clears a failed purge held go with this write too.
       var all = drop.slice(), have = {};
       all.forEach(function (d) { have[d._k] = true; });

@@ -654,13 +654,20 @@ var create = function (ROOT, CFG, opts) {
     incident('js-rejection', { message: String(e.reason && e.reason.message || e.reason) });
   });
 
-  var tmr;
+  // Toasts queue: each is shown in turn for its own time (7 s red, 2.6 s else), none dropped, none cut short by the next.
+  var toasts = [], toasting = false;
   function say(msg, err) {
     if (err) incident('toast', { message: msg });
-    toast.textContent = msg;
-    toast.className = 'show' + (err ? ' err' : '');
-    clearTimeout(tmr);
-    tmr = setTimeout(function () { toast.className = ''; }, err ? 7000 : 2600);
+    toasts.push({ msg: msg, err: err });
+    if (!toasting) nextToast();
+  }
+  function nextToast() {
+    var t = toasts.shift();
+    toasting = !!t;
+    if (!t) return;
+    toast.textContent = t.msg;
+    toast.className = 'show' + (t.err ? ' err' : '');
+    setTimeout(function () { toast.className = ''; nextToast(); }, t.err ? 7000 : 2600);
   }
   // ---- copy blocks (SPEC 6.8) -----------------------------------------------
   // A quote the renderer marked rd-copy gets a Copy button. It is the page's (data-rd-ui, never editable) and

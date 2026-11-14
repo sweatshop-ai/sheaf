@@ -62,8 +62,9 @@ _ANIMATED_ATTR = re.compile(r"^(?:xlink:)?href$|^on", re.I)
 
 URL_ATTRS = frozenset({"href", "src", "action", "poster", "background", "xlink:href"})
 # Attributes that go whatever they hold. srcset (several URLs, each loaded) and ping (a
-# POST to each URL on a click) carry addresses that 9.5's list does not allow. contenteditable is the page's own to
-# set (setEditing): a surface the document makes editable is outside what the page guards.
+# POST to each URL on a click) carry addresses that 9.5's list does not allow.
+# contenteditable is the page's own to set (setEditing): a surface the document makes
+# editable is outside what the page guards.
 DROPPED_ATTRS = frozenset({"srcdoc", "formaction", "srcset", "ping", "contenteditable"})
 SAFE_SCHEMES = frozenset({"http", "https", "mailto", "file"})
 _SAFE_DATA = re.compile(r"^data:image/(?:png|jpeg|gif|webp)[;,]", re.I)

@@ -142,6 +142,15 @@ def test_the_document_has_no_contenteditable_of_its_own(value, mount):
     assert "<span>b</span>" in out and "<em>c</em>" in out
 
 
+@pytest.mark.parametrize("mount", [False, True])
+@pytest.mark.parametrize("spelling", ["CONTENTEDITABLE", "ContentEditable", 'contenteditable="true" contenteditable="false"',
+                                      'contenteditable="false" contenteditable="true"'])
+def test_contenteditable_goes_in_any_letter_case_and_when_repeated(spelling, mount):
+    out = sanitize(f"<p>a<span {spelling}>b</span></p>", mount=mount)
+    assert "contenteditable" not in out.lower()
+    assert "<span>b</span>" in out
+
+
 # ── attributes ──────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("attr", ["onclick", "onerror", "onload", "onmouseover", "ONFOCUS",

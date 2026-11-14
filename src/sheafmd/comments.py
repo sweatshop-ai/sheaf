@@ -534,12 +534,12 @@ _ATX_TEXT = re.compile(r"^( {0,3}#{1,6}[ \t]+)(.*?)(?:[ \t]+#+)?[ \t]*$")
 
 
 # An inline HTML tag as CommonMark reads it: it binds more tightly than a code span, so a backtick
-# in an attribute value opens nothing. ASCII only, whitespace of a tag is space, tab, newline, return
-# or form feed, and an odd run of backslashes before the `<` escapes it (group `tag`).
+# in an attribute value opens nothing. ASCII only, whitespace of a tag is space, tab, newline or return (pandoc
+# reads no form feed), and an odd run of backslashes before the `<` escapes it (group `tag`).
 _HTML_TAG_RE = re.compile(
-    r"(?<!\\)(?:\\\\)*(?P<tag></[A-Za-z][A-Za-z0-9-]*[ \t\r\n\f]*>|<[A-Za-z][A-Za-z0-9-]*"
-    r"(?:[ \t\r\n\f]+[A-Za-z_:][A-Za-z0-9_:.-]*(?:[ \t\r\n\f]*=[ \t\r\n\f]*"
-    r"(?:[^ \t\r\n\f\"'=<>`]+|'[^']*'|\"[^\"]*\"))?)*[ \t\r\n\f]*/?>)")
+    r"(?<!\\)(?:\\\\)*(?P<tag></[A-Za-z][A-Za-z0-9-]*[ \t\r\n]*>|<[A-Za-z][A-Za-z0-9-]*"
+    r"(?:[ \t\r\n]+[A-Za-z_:][A-Za-z0-9_:.-]*(?:[ \t\r\n]*=[ \t\r\n]*"
+    r"(?:[^ \t\r\n\"'=<>`]+|'[^']*'|\"[^\"]*\"))?)*[ \t\r\n]*/?>)")
 
 
 def _unclosed_opener(text: str) -> int:

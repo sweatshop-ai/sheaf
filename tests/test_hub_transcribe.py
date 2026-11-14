@@ -273,7 +273,7 @@ def test_a_key_file_that_fails_after_it_is_open_is_not_used_said_once_and_closed
     assert available(browser) is False and tcompute.seen == []
     assert len([r for r in diagnostics.read() if r["kind"] == "transcribe-key-file"]) == 1
     if failing == "fstat":
-        assert closed == opened
+        assert sorted(closed) == sorted(opened)              # each opened number closed once; the refusal's own log file is among them
     else:
         with pytest.raises(OSError):
             os.fstat(opened[0])                              # the one descriptor was closed, once
@@ -703,7 +703,7 @@ def test_a_damaged_byte_in_the_key_is_refused_the_same_way(browser, row_relay, t
     assert dictate(browser).status == 503 and tcompute.seen == []
     rows = [r for r in diagnostics.read() if r["kind"] == "transcribe-key-file"]
     assert len(rows) == 1 and "latin-1" in rows[0]["reason"]
-    shown = json.dumps(diagnostics.read(), ensure_ascii=False)
+    shown = json.dumps(rows, ensure_ascii=False)                        # the key-file rows only: another row may say "default"
     assert "abc" not in shown and "def" not in shown and "\ufffd" not in shown
 
 
@@ -764,6 +764,27 @@ def test_a_key_file_over_the_cap_is_refused_without_reading_it_whole(browser, ro
     assert asked and all(0 < n <= transcribe.KEY_FILE_MAX + 1 for n in asked)
     rows = [r for r in diagnostics.read() if r["kind"] == "transcribe-key-file"]
     assert len(rows) == 1 and "too large" in rows[0]["reason"]
+
+
+def test_a_descriptor_that_fdopen_closed_before_it_failed_is_not_closed_again(browser, row_relay, key_file, monkeypatch):
+    """`os.fdopen` closes the descriptor it was given when it fails after building its file object. The hub must not
+    close that number a second time: another thread may have been given it by then."""
+    closed = []
+    real_close = os.close
+
+    def close(fd):
+        closed.append(fd)
+        real_close(fd)                                                      # a second close of one number raises EBADF here
+
+    def fdopen(fd, *a, **k):
+        close(fd)                                                           # what the library does before it raises
+        raise OSError(5, "Input/output error")
+    monkeypatch.setattr(transcribe.os, "close", close)
+    monkeypatch.setattr(transcribe.os, "fdopen", fdopen)
+    assert row_relay._key() is None
+    assert len(closed) >= 2                                                 # the number fdopen got and the hub's own: two numbers, each closed once (a repeat raises above)
+    rows = [r for r in diagnostics.read() if r["kind"] == "transcribe-key-file"]
+    assert len(rows) == 1 and "cannot be read" in rows[0]["reason"]
 
 
 def test_a_key_file_at_the_cap_is_still_taken(row_relay, key_file):

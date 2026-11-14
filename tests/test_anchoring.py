@@ -358,3 +358,35 @@ def test_a_comment_in_a_cell_of_the_header_row_goes_at_the_end_of_that_cell():
     s, e = sel(md, "alpha")
     out, cid = rdc.add_comment(md, 0, s, e, "alpha", "why", "Ada", "2026-11-14T10:00")
     assert out.startswith("| alpha beta<!-- sheaf-comment id=%s" % cid)
+
+
+def test_a_code_span_that_runs_across_cells_does_not_take_the_block_inside_it():
+    # Opus review 1, P1: pandoc splits the cells first, parse reads code spans over the whole table, so a
+    # block at the end of the cell would sit in a span parse sees and the comment would be lost.
+    md = "| a | b |\n|---|---|\n| one `x | y` z |\n"
+    s, e = sel(md, "one")
+    out, cid = rdc.add_comment(md, 0, s, e, "one", "why", "Ada", "2026-11-14T10:00")
+    assert [c.id for c in rdc.parse(out).comments] == [cid]
+    assert re.sub(r"<!--.*?-->", "", out, count=1) == md
+
+
+@pytest.mark.parametrize("cell, quote, expect", [
+    ("C:\\ dir\\", "dir", "| C:\\ dir<C>\\ | x |"),       # one backslash would escape the `<`
+    ("C:\\ dir\\\\", "dir", "| C:\\ dir\\\\<C> | x |"),    # two are a backslash
+])
+def test_a_cell_that_ends_in_a_backslash_keeps_the_block_from_being_escaped(cell, quote, expect):
+    md = "| a | b |\n|---|---|\n| %s | x |\n" % cell
+    s, e = sel(md, quote)
+    out, cid = rdc.add_comment(md, 0, s, e, quote, "why", "Ada", "2026-11-14T10:00")
+    assert re.sub(r"<!--.*?-->", "<C>", out, count=1).endswith(expect + "\n")
+    page = pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], out)
+    assert "&lt;!--" not in page and [c.id for c in rdc.parse(out).comments] == [cid]
+
+
+def test_a_cell_with_an_unclosed_opener_takes_the_block_before_it():
+    md = "| a | b |\n|---|---|\n| one | x <!-- open |\n"
+    s, e = sel(md, "x")
+    out, cid = rdc.add_comment(md, 0, s, e, "x", "why", "Ada", "2026-11-14T10:00")
+    assert out.startswith("| a | b |\n|---|---|\n| one | x<!-- sheaf-comment id=%s" % cid)
+    assert re.sub(r"<!--.*?-->", "", out, count=1) == md
+    assert [c.id for c in rdc.parse(out).comments] == [cid]

@@ -598,18 +598,34 @@ _CELL_PIPE_RE = re.compile(r"(?<!\\)(?:\\\\)*(\|)")
 
 
 def cell_end(block: str, point: int) -> int:
-    """Offset where the table cell that holds `point` ends: before its closing `|` and the spaces in
-    front of it, so the cell's words stay whole for every reader of the file. A `|` ends a cell unless
-    an odd run of backslashes escapes it, in code as well (GFM and pandoc read `a|b` in a code span as
-    two cells). A row with no closing `|` ends at the end of its line."""
+    """Offset where a comment on a selection ending at `point` goes in a table: the end of the cell that
+    holds `point`, before its closing `|` and the spaces in front of it, so the cell's words stay whole
+    for every reader of the file. A `|` ends a cell unless an odd run of backslashes escapes it, in code
+    as well (GFM and pandoc read `a|b` in a code span as two cells); a row with no closing `|` ends the
+    cell at the end of its line. Before a backslash that ends the cell's text, which would escape the
+    block's `<`, and before a `<!--` in the cell that nothing closes, which a block after it would close,
+    hiding the words it was meant to hold. Where the cell's end is inside a code span that `parse` reads
+    across cells (pandoc splits the cells first), the block stays after the selection: written there it
+    would be code to `parse`, and the comment lost."""
     line_start = block.rfind("\n", 0, point) + 1
     eol = block.find("\n", point)
     line_end = len(block) if eol < 0 else eol
     # Read from the start of the line: whether a `|` is escaped depends on the backslashes before it.
-    at = next((m.start(1) for m in _CELL_PIPE_RE.finditer(block, line_start, line_end) if m.start(1) >= point),
-              line_end)
+    pipes = [m.start(1) for m in _CELL_PIPE_RE.finditer(block, line_start, line_end)]
+    at = next((p for p in pipes if p >= point), line_end)
+    cell_start = max((p + 1 for p in pipes if p < point), default=line_start)
     while at > point and block[at - 1] in " \t":
         at -= 1
+    open_at = _unclosed_opener(block[cell_start:at])
+    if open_at >= 0:
+        at = cell_start + len(block[cell_start:cell_start + open_at].rstrip())
+        if not block[cell_start:at].strip():
+            raise AnchorError("this cell has no place for a comment, comment on another cell")
+    run = len(block[cell_start:at]) - len(block[cell_start:at].rstrip("\\"))
+    if run % 2:
+        at -= 1
+    if _mask_code(block[:at] + "\0" + block[at:])[at] == " ":
+        return point
     return at
 
 

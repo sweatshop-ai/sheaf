@@ -1652,6 +1652,9 @@ var create = function (ROOT, CFG, opts) {
     written.forEach(function (d) { after[entryKey(d)] = d; });
     Object.keys(after).forEach(function (k) { if (before[k] !== JSON.stringify(after[k])) claims[k] = { want: after[k], until: until }; });
     Object.keys(before).forEach(function (k) { if (!after[k]) claims[k] = { want: null, until: until }; });
+    // A claim this write does not touch and whose entry is gone from what it wrote: another page took it out, and this page's own clear
+    // found it taken already (the hub's `changed` event reaches both). It is no longer wanted, or the next event would put it back.
+    Object.keys(claims).forEach(function (k) { if (claims[k].want && !after[k]) claims[k].want = null; });
     lastRead = written;
     reclaims = 0;
   }

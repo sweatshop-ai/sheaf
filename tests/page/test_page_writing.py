@@ -4849,6 +4849,7 @@ FAIL_TOGETHER = """(at) => {
   window.fetch = function (url, init) {
     if (!String(url).includes('/_/comment')) return real.apply(this, arguments);
     return new Promise((done) => setTimeout(() => {
+      (window.__spins = window.__spins || []).push([Date.now(), at]);
       while (Date.now() < at) { }
       done(new Response(JSON.stringify({ok: false, error: 'the hub broke off'}), {status: 500, headers: {'Content-Type': 'application/json'}}));
     }, 0));
@@ -4860,15 +4861,22 @@ def test_two_sends_that_fail_at_the_same_instant_on_two_pages_are_both_kept(thre
     a, b = thread.page, second_page(thread, context)
     b.click(".rd-badge")
     b.wait_for_selector("#rd-popover textarea")
-    lost = []
+    lost, idle = [], []
     for i in range(40):
         at_ms = int(time.time() * 1000) + 700
         for p, who in ((a, "A"), (b, "B")):
             p.evaluate(FAIL_TOGETHER, at_ms)
             p.fill("#rd-popover textarea", f"words from page {who} round {i}")
+        if time.time() * 1000 > at_ms - 300:        # the setup ran into the instant: the round would not race
+            idle.append(i)
+            continue
         a.keyboard.press("Control+Enter")
         b.keyboard.press("Control+Enter")
         a.wait_for_timeout(1300)
+        # Both pages were spinning at once, so they ran on two threads: on one, the second spin starts when the first ends.
+        (sa, ea), (sb, eb) = (p.evaluate("window.__spins.pop()") for p in (a, b))
+        if not (sa < eb and sb < ea):
+            idle.append(i)
         kept = json.loads(comment_store(thread) or "[]")
         texts = {d["body"]: d for d in kept}
         mine = [texts.get(f"words from page {who} round {i}") for who in "AB"]
@@ -4876,3 +4884,4 @@ def test_two_sends_that_fail_at_the_same_instant_on_two_pages_are_both_kept(thre
         if None in mine or any(isinstance(d.get("out"), (int, float)) for d in mine):
             lost.append(i)
     assert not lost, f"the store lost, or kept as still out, an entry of a failed send in rounds {lost}"
+    assert len(idle) <= 8, f"rounds {idle} did not run the two sends at the same time: the test did not try the race"

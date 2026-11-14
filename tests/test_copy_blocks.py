@@ -288,8 +288,8 @@ def test_a_tab_counts_as_the_columns_it_spans_when_a_line_opens_a_block(line, op
     ("> [!COPY]\n> a\n>\t  ---", True),             # 4 columns: paragraph text
     ("   > [!COPY]\n> a\n   >\t ===", True),
     ("> [!COPY]\n> a\n> \t---", False),             # 3 columns: an underline
-    ("> [!COPY]\n> a\n> - x\n> ---", True),    # a no-break space after a bullet is an item, not a blank
-    ("> [!COPY]\n> a\n> 1. x\n> ---", True),
+    ("> [!COPY]\n> a\n> - \u00a0\n> ---", True),   # a no-break space after a bullet is an item, not a blank
+    ("> [!COPY]\n> a\n> 1. \u00a0\n> ---", True),
 ])
 def test_the_underline_and_list_rules_read_the_source_as_pandoc_does(quote, copy):
     assert copyblock.is_copy_block(quote) is copy

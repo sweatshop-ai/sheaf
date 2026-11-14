@@ -174,7 +174,7 @@ tools/ci/                      the service checks CI runs on a runner; they refu
 | Package | Why | Notes |
 |---|---|---|
 | Python ≥ 3.11 | `tomllib` | |
-| `pypandoc-binary` | pandoc as a wheel, the same binary for every user | Pin the newest `pypandoc-binary` wheel on the day the build starts, exactly (`==`), and assert the bundled pandoc's version in a test. The test suite passes against pandoc 3.7.0.2; prefer the wheel that bundles it if one exists. The edit round-trip depends on pandoc's exact output; a pandoc upgrade is a deliberate change that runs the whole test suite. Every call gets the binary from `pypandoc.get_pandoc_path()`. Nothing shells out to a bare `pandoc`. |
+| `pypandoc-binary` | pandoc as a wheel, the same binary for every user | Pin the newest `pypandoc-binary` wheel on the day the build starts, exactly (`==`), and assert the bundled pandoc's version in a test. The test suite passes against pandoc 3.9, the one `pypandoc-binary==1.17` bundles. The edit round-trip depends on pandoc's exact output; a pandoc upgrade is a deliberate change that runs the whole test suite. Every call gets the binary from `pypandoc.get_pandoc_path()`. Nothing shells out to a bare `pandoc`. |
 | `beautifulsoup4` | edit sanitising, the raw-HTML sanitiser | |
 | `pillow` | downscaling embedded images | |
 | `fonttools[woff]` | TTF → WOFF2 for themes that ship fonts | Imported only when a theme ships fonts |

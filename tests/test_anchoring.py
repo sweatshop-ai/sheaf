@@ -3,6 +3,8 @@
 Offsets count non-whitespace characters of the block's rendered text, so the page
 and the server agree whatever whitespace each render happens to put between tags.
 """
+import itertools
+import json
 import re
 import time
 
@@ -317,8 +319,8 @@ def test_a_tag_after_an_escaped_backslash_is_still_a_tag_and_hides_its_backtick(
 # ── table cells (ticket 57) ──
 
 def _cells(row):
-    """The cells of a row as the GFM reader splits it: at every `|` with no odd run of backslashes before it."""
-    return [c.strip() for c in re.split(r"(?<!\\)(?:\\\\)*\|", row.strip())[1:-1]]
+    """The cells of a row as the GFM reader splits it: at every `|` with no backslash right before it."""
+    return [c.strip() for c in re.split(r"(?<!\\)\|", row.strip())[1:-1]]
 
 
 TABLES = [
@@ -330,7 +332,7 @@ TABLES = [
     ("| a | b |\n|---|---|\n| one\\|two | x |\n", "one", "| a | b |\n|---|---|\n| one\\|two", " | x |\n"),
     ("| a | b |\n|---|---|\n| `x\\|y` z | q |\n", "z", "| a | b |\n|---|---|\n| `x\\|y` z", " | q |\n"),
     ("| a | b |\n|---|---|\n| `x\\|y` z | q |\n", "x", "| a | b |\n|---|---|\n| `x\\|y` z", " | q |\n"),
-    ("| a | b |\n|---|---|\n| one \\\\| two |\n", "one", "| a | b |\n|---|---|\n| one \\\\", "| two |\n"),
+    ("| a | b |\n|---|---|\n| one \\\\| two |\n", "one", "| a | b |\n|---|---|\n| one \\\\| two", " |\n"),   # `\\|` is no border (ticket 76)
     ("| a | b |\n|---|---|\n| one | two\n", "one", "| a | b |\n|---|---|\n| one", " | two\n"),
     ("| a | b |\n|---|---|\n| one | two\n", "two", "| a | b |\n|---|---|\n| one | two", "\n"),
 ]
@@ -505,6 +507,90 @@ def test_a_block_of_escaped_backticks_that_open_nothing_is_read_in_linear_time()
     rdc._mask_code(md)
     rdc.parse(md)
     assert time.perf_counter() - t < 0.3
+
+
+# ── ticket 76: what is left of PR 300 ──
+
+@pytest.mark.parametrize("unit", ["\\` <!--x--> ", "a <!--x--> "])
+def test_the_comment_spans_of_a_block_of_many_comments_are_read_in_linear_time(unit):
+    # Point 1: every comment cost a fresh search for the next code span and the next opener, 12 s at 52 KB.
+    n = 3000
+    md = unit * n + "\n"
+    t = time.perf_counter()
+    spans = rdc._comment_spans(md)
+    assert time.perf_counter() - t < 0.3
+    assert len(spans) == n
+
+
+def _pandoc_code(md):
+    """The text of every inline code span of each paragraph of `md`, as pandoc (gfm) reads it."""
+    def walk(node, out):
+        if isinstance(node, dict):
+            if node.get("t") == "Code":
+                out.append(node["c"][1])
+            for v in node.values():
+                walk(v, out)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v, out)
+    return [(lambda o: (walk(b, o), o)[1])([]) for b in json.loads(pandoc(["-f", "gfm", "-t", "json"], md))["blocks"]]
+
+
+# What is code, character by character: every string of up to five of these pieces, and pandoc says which.
+_PIECES = ["`", "\\", "a", "<b>", "<!--", "-->"]
+SPAN_STRINGS = ["".join(p) for n in range(1, 6) for p in itertools.product(_PIECES, repeat=n)]
+
+
+def test_mask_code_blanks_the_characters_pandoc_reads_as_code_in_a_fixed_set_of_strings():
+    # Point 4 (ticket 76): the cases above only ask whether a paragraph holds code; this asks which
+    # characters are code, over 9 330 strings (765 of them hold code) of backticks, backslashes, tags and comment parts.
+    # Compared per paragraph on the blanked characters: pandoc's code text, with the backticks
+    # around each span and the one space it strips from both ends put back.
+    paras = ["x " + s for s in SPAN_STRINGS]
+    theirs = _pandoc_code("\n\n".join(paras) + "\n")
+    assert len(theirs) == len(paras)
+    bad = []
+    for para, code in zip(paras, theirs):
+        masked = rdc._mask_code(para)
+        blanked = [para[a:b] for a, b in _runs_of_blanks(para, masked)]
+        got = [_inner(run) for run in blanked]
+        if got != code:
+            bad.append((para, got, code))
+    assert not bad, f"{len(bad)} strings differ, first: {bad[:3]}"
+
+
+def _runs_of_blanks(para, masked):
+    """(start, end) of each stretch `_mask_code` blanked: characters it turned into spaces."""
+    runs, i = [], 0
+    while i < len(para):
+        if masked[i] != para[i]:
+            j = i
+            while j < len(para) and masked[j] != para[j]:
+                j += 1
+            runs.append((i, j))
+            i = j
+        else:
+            i += 1
+    return runs
+
+
+def _inner(run):
+    """A blanked stretch (the whole span, its backtick runs included) as pandoc gives the code."""
+    k = len(run) - len(run.lstrip("`"))
+    inner = run[k:len(run) - k]
+    if len(inner) > 1 and inner[0] == " " == inner[-1] and inner.strip(" "):
+        inner = inner[1:-1]
+    return inner
+
+
+@pytest.mark.parametrize("slashes", range(0, 6))
+@pytest.mark.parametrize("cell", ["a {s}| b", "`a {s}| b`", "a `x` {s}| b"])
+def test_a_pipe_after_any_number_of_backslashes_is_no_cell_border_when_pandoc_reads_it_so(slashes, cell):
+    # Point 3: `\\|` is not a border to pandoc either: a pipe with a backslash right before it stays in its cell.
+    row = "| %s | c |" % cell.replace("{s}", "\\" * slashes)
+    out = pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], "| h | i |\n|---|---|\n" + row + "\n")
+    pandoc_splits = "<td>c</td>" not in out.split("<tbody>")[1]       # the third cell has no column and is dropped
+    assert (len(rdc._CELL_PIPE_RE.findall(row)) - 1 > 2) == pandoc_splits, row
 
 
 # ── ticket 68: what is left of PR 288 ──

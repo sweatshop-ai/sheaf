@@ -2478,6 +2478,20 @@ var create = function (ROOT, CFG, opts) {
   var DICTATE_MAX = 120000, DICTATE_WATCH = 15000;   // a recording asks the hub every 15 s whether it is still there
   var MIC = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1a2.5 2.5 0 0 0-2.5 2.5v4a2.5 2.5 0 0 0 5 0v-4A2.5 2.5 0 0 0 8 1ZM3.5 7a.75.75 0 0 1 1.5 0 3 3 0 0 0 6 0A.75.75 0 0 1 12.5 7a4.5 4.5 0 0 1-3.75 4.44v1.81h1.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5h1.5v-1.81A4.5 4.5 0 0 1 3.5 7Z"/></svg>';
   var dict = null, dictOff = 0;
+  // A mounted page is built again at each remount, so what outlasts it is kept in sessionStorage, not in this closure: only
+  // a 403 ('denied': the account may not dictate), and under the member's id where the page holds one, so a sign-in as
+  // someone else in the tab starts clean (10.4). A lost service ('gone': a 401, a 404, a network failure) is a moment or
+  // an expired login, not a fact about the account: it lasts for the mount.
+  // (The front is on the proxy socket, which always names a member; a loopback hub holds one person, so one key is right there.)
+  var DICT_OFF_KEY = KEYS + 'rd-dict-off:' + (CFG.proxy ? CFG.member : '');
+  function dictationHeldOff() {         // read at each ask, so a refusal in another mounted page of the tab is seen too
+    if (MOUNTED && dictOff !== Infinity) { try { if (sessionStorage.getItem(DICT_OFF_KEY) === '1') dictOff = Infinity; } catch (e) {} }
+    return Date.now() < dictOff;
+  }
+  function holdDictationOff(until, kept) {
+    dictOff = until;
+    if (MOUNTED && kept) { try { sessionStorage.setItem(DICT_OFF_KEY, '1'); } catch (e) {} }
+  }
   // Stops the recording and, with `discard`, throws the sound away (nothing is sent; a late answer is dropped). The
   // microphone is released either way, so the browser's light goes out.
   function stopDictation(discard) {
@@ -2489,7 +2503,7 @@ var create = function (ROOT, CFG, opts) {
     if (d.rec && d.rec.state !== 'inactive') d.rec.stop();
   }
   function dictationAvailable() {
-    if (Date.now() < dictOff) return Promise.resolve(false);
+    if (dictationHeldOff()) return Promise.resolve(false);
     if (MOUNTED) return Promise.resolve(true);        // Open WebUI answers or not; the first failure takes the button away
     if (CFG.proxy) return Promise.resolve(false);     // the hub in proxy mode relays nothing (SPEC 9.9)
     return fetch('/_/transcribe').then(function (r) { return r.ok ? r.json() : null; })
@@ -2539,8 +2553,8 @@ var create = function (ROOT, CFG, opts) {
       };
       var idle = function () { b.disabled = false; b.title = 'Dictate'; b.setAttribute('aria-label', 'Dictate'); b.setAttribute('aria-pressed', 'false'); };
       var lost = function (why) {
-        if (why === 'denied') { dictOff = Infinity; says('Dictation is not allowed for your account.'); b.remove(); }
-        else if (why === 'gone') { dictOff = MOUNTED ? Infinity : Date.now() + 60000; says('The transcription did not work. Try again.'); b.remove(); }
+        if (why === 'denied') { holdDictationOff(Infinity, true); says('Dictation is not allowed for your account.'); b.remove(); }
+        else if (why === 'gone') { holdDictationOff(MOUNTED ? Infinity : Date.now() + 60000); says('The transcription did not work. Try again.'); b.remove(); }
         else says('The transcription did not work. Try again.');
       };
       b.addEventListener('click', function () {

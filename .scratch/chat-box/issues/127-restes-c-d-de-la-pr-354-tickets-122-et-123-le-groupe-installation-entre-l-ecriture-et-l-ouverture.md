@@ -7,4 +7,6 @@
 
 **Blocked by:** PR 354
 
-**Status:** ready-for-agent
+**Claimed by:** Tomas 2026-11-14 23:49
+
+**Status:** in-progress

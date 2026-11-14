@@ -12,9 +12,10 @@
 
 **Blocked by:** none
 
-**Claimed by:**
 
-**Status:** ready-for-agent
+**Claimed by:** Isolde 2026-11-14 23:49
+
+**Status:** in-progress
 
 **Par où commencer :** le point 5 si un échec revient sur la CI avec le journal ; sinon le point 1.
 

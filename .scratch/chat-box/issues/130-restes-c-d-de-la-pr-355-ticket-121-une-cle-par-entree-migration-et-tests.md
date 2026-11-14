@@ -20,6 +20,6 @@
 - d8 : deux pages qui envoient le même texte sous le même `rid` au même instant laissent deux entrées ; un Discard ou `taken` par ce `rid` retire les deux.
 - d9 : l'ancienne liste réécrite plus courte (c2) revient à la course de la liste entre deux pages, seulement dans un stockage plein.
 
-**Blocked by:** PR 355
+**Blocked by:** 121 (PR 355 ouverte)
 
 **Status:** ready-for-agent

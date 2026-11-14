@@ -13,4 +13,11 @@
 
 **Status:** in-progress
 
-- [ ] Chaque point : corrigé (test rouge d'abord quand c'est du code) ou la limite écrite
+**Résultat, point par point :**
+1. Corrigé : `tests/page/test_route_probe.py`, sans la marque `page` (2 passed avec `-m "not page"`).
+2. Limite connue, écrite dans la docstring de `until_live` : une regex liée à l'origine du hub n'est pas sondée sur une page d'une autre origine ; aucun test ne le fait, la réparer demanderait de choisir l'origine de la sonde pour rien.
+3. Limite connue : le message du commit 7597de6 dit « red » pour tous les tests alors que trois seulement l'étaient (regex, deux fois routé, non hachable : vérifié un par un sur l'ancien conftest, avec `timeout`) ; le commit est poussé, pas réécrit. Les trois autres fixent un comportement existant.
+4. Reste au ticket 100 (pas poursuivi ici).
+Le blocage : « deux fois routé » restait suspendu sur l'ancien code (le fetch tenu par une route jamais répondue). Le handler abandonne maintenant la route et le fetch est borné par `stalls_after(10)` : une régression donne un échec, pas un gel.
+
+- [x] Chaque point : corrigé (test rouge d'abord quand c'est du code) ou la limite écrite

@@ -623,6 +623,8 @@ def test_an_unquoted_url_is_one_token_up_to_its_closing_bracket(style, want):
     ('content:"url(/*";-webkit-user-modify:x;color:red', 'content:"url(/*";color:red'),
     ("/*url(*/-webkit-user-modify:x;color:red", "color:red"),
     ("a:url(b\\);c);color:red", "color:red"),
+    ("a:€url(/*b*/);-webkit-user-modify:x;color:red", "a:€url(/*b*/);color:red"),
+    ("a:€url(/*b);-webkit-user-modify:x;color:red", None),
 ])
 def test_only_a_plain_unquoted_url_is_read_as_a_token(style, want):
     """A function whose name only ends in `url`, a `url(` with a string, one inside a string or a comment keeps the

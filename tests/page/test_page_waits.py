@@ -157,6 +157,12 @@ def test_the_toasts_to_the_end_of_a_page_whose_queue_has_ended_are_none_not_the_
     assert toasts_to_the_end(page, on_clock=True) == []
 
 
+def test_the_toasts_to_the_end_do_not_say_a_toast_that_is_up_with_no_text():
+    """A test may blank #rd-toast while it is still up (writing: 'Saving' said once): that is not a toast said."""
+    page = QueuedToasts(("", 2600))
+    assert toasts_to_the_end(page, on_clock=True) == []
+
+
 def test_the_toasts_to_the_end_of_a_page_with_none_up_are_none():
     assert toasts_to_the_end(QueuedToasts(), on_clock=True) == []
 

@@ -315,7 +315,11 @@ def test_sheaf_stop_of_a_service_hub_exits_stopped_and_the_supervisor_leaves_it_
     sup = Supervisor(hub, unit_env())
     procs.extend([hub, sup])
     wait_health(port)
-    assert cli.main(["stop"]) == 0
+    # In its own process: the hub is this test's child, and `sheaf stop` reaps the hub it stopped
+    # (`hubclient.ended`). Run here, that waitpid can take the exit status before `hub.wait` or the
+    # supervisor does, and `Popen` then reports 0 for a child it finds already reaped.
+    stopped = subprocess.run([sys.executable, "-m", "sheafmd", "stop"], capture_output=True, text=True)
+    assert stopped.returncode == 0, stopped.stdout + stopped.stderr
     assert hub.wait(timeout=30) == server.EXIT_STOPPED
     time.sleep(0.5)
     assert sup.codes == [server.EXIT_STOPPED] and sup.procs == [hub]

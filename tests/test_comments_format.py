@@ -421,3 +421,11 @@ def test_delete_that_would_splice_a_new_comment_opener_or_closer_out_of_its_neig
     closer = f"Word <!-- a note --{_head('c2')}\ninner\n-->> shown\n"
     with pytest.raises(rdc.AnchorError, match="change the comments around it"):
         rdc.delete(closer, "c2")
+
+
+@pytest.mark.parametrize("md", ["\r\r\r\r#\r\r hello\n", "\r\r\r#\r\r hello\n", "#\r\r hello\n", "\r\r# hello\n"])
+def test_a_comment_on_a_heading_with_crs_leaves_a_heading(md):
+    # Review of PR 332 (Codex): pandoc deletes the CRs, the splitter reads them so and makes a heading of four CRs
+    # and a hash; the anchor has to read the same, or the comment lands after the `#` and the line is a paragraph.
+    out, _ = rdc.add_comment(md, 0, 0, 5, "hello", "text", "Eve", AT)
+    assert pandoc(["-f", "gfm", "-t", "html"], out).startswith("<h1")

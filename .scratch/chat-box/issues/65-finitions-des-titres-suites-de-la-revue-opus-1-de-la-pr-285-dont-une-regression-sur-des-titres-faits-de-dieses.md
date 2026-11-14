@@ -10,9 +10,10 @@
 
 **Blocked by:** none
 
-**Claimed by:**
 
-**Status:** ready-for-agent
+**Claimed by:** Kofi 2026-11-14 01:26
+
+**Status:** in-progress
 
 **Par où commencer :** `tests/test_anchoring.py` : `## ## ##` accepte un commentaire (rouge avant) ; puis le point 4 dans `tests/test_edit_followups.py`.
 

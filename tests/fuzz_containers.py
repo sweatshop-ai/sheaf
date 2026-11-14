@@ -5,7 +5,7 @@ writes of `sheafmd.comments` say. Run as a script it compares two source trees:
 
 and prints, per generator, how many cases `head` gets wrong against pandoc, and "head wrong where base right",
 split in lost (pandoc shows the comment, the code does not find it) and phantom (the reverse). The counters that
-must be 0 are the last two. tests/test_fuzz_containers.py runs a few seeds of it.
+must be 0 are the last two. tests/test_table_in_container.py runs a few seeds of it.
 
 Pandoc is the oracle, the bundled one: a comment written in a cell is raw HTML when pandoc does not read it as
 code; `parse` must find it exactly then. A write (`add_comment`, then `reply`) is right when the comment it wrote

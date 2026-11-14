@@ -8,8 +8,7 @@
 - d4 (la fixture de test est sans lignes PEM depuis f07bf86) : rien à faire, à clore.
 - Notes de la relecture 2 : le docstring de `_key` (:205) dit « mtime, ctime » alors que le code stocke les champs `_ns` (d) ; le docstring de `available()` (:236-238) ne dit pas qu'un changement de métadonnées seul (chmod, touch) lève aussi l'arrêt pour une tentative de plus, une seule requête vers l'hôte `url`, comptée par `_spend()` (c).
 
-**Blocked by:**
-- External: PR 284 merged into main
+**Blocked by:** none
 
 **Claimed by:**
 

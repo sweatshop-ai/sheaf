@@ -875,4 +875,4 @@ def test_the_split_of_a_style_equals_the_reference_split():
 
 def test_a_lone_surrogate_escape_reads_as_the_replacement_character():
     from sheafmd.sanitize import _unescaped
-    assert _unescaped("\\d800") == "\ufffd" and _unescaped("\\dfff") == "\ufffd" and _unescaped("\\0") == "\ufffd"
+    assert _unescaped("\\d800") == "\ufffd" and _unescaped("\\dfff") == "\ufffd" and _unescaped("\\0") == "\ufffd" and _unescaped("\\\x00") == "\ufffd"

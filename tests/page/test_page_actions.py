@@ -5,7 +5,7 @@ import re
 
 import pytest
 
-from pagehelp import open_box, DOC, at, comment_on, draft_key, key, mark, reloaded, select, toast, toasted, type_at_end, until
+from pagehelp import open_box, DOC, at, comment_on, draft_key, key, mark, reloaded, select, toast, toasted, toasts_to_the_end, type_at_end, until
 
 pytestmark = pytest.mark.page
 
@@ -161,7 +161,7 @@ def test_undo_in_the_five_seconds_sends_nothing(sheaf):
 def test_a_click_on_an_action_box_in_the_document_ticks_nothing_and_says_where_its_button_is(sheaf):
     p, f = sheaf.page, sheaf.site.file
     p.locator("main input[type=checkbox]").first.dispatch_event("click")      # hidden behind its button
-    until(lambda: "with its button" in toast(p), what="the line that points to the button")
+    toasted(p, "with its button", on_clock=True)
     p.wait_for_timeout(300)
     assert f.read_text(encoding="utf-8") == SHEAF
     assert p.locator("main input[type=checkbox]").first.is_checked() is False
@@ -186,7 +186,7 @@ def test_a_refused_press_is_said_and_gives_the_button_back(sheaf):
                                                        body='{"ok": false, "error": "Approve: refused here."}'))
     bar(p).nth(0).click()
     p.clock.run_for(5100)
-    until(lambda: "refused here" in toast(p), what="the refusal")
+    toasted(p, "refused here", on_clock=True)
     assert bar(p).nth(0).inner_text() == "Approve" and bar(p).nth(0).is_enabled()
     assert "- [ ] Approve" in f.read_text(encoding="utf-8")
 
@@ -201,7 +201,7 @@ def test_a_change_from_outside_during_a_press_waits_for_its_answer_before_the_pa
     assert bar(p).nth(0).inner_text() == "Undo"
     p.clock.run_for(5100)
     # The press names the text the page held: the hub refuses it, and the page says so before it reloads.
-    until(lambda: "reload the page" in toast(p), what="the refusal")
+    toasted(p, "reload the page", on_clock=True)
     reloaded(p)
     assert "- [ ] Approve" in f.read_text(encoding="utf-8")
 
@@ -215,7 +215,7 @@ def test_a_press_whose_actions_a_save_changed_meanwhile_is_not_sent(sheaf):
     p.clock.run_for(3000)
     until(lambda: "- [ ] Approve\n- [ ] Done\n- [ ] Done" in f.read_text(encoding="utf-8"), what="the saved action")
     p.clock.run_for(2100)
-    until(lambda: "Press it again." in toast(p), what="the line that the press was not sent")
+    toasted(p, "Press it again.", on_clock=True)
     assert "[x]" not in f.read_text(encoding="utf-8")
     until(lambda: bar(p).all_inner_texts() == ["Approve", "Done", "Done"], what="the new buttons")
 
@@ -254,7 +254,7 @@ def test_a_replys_answer_that_reloads_the_page_waits_for_a_press_in_its_undo(tab
     p.clock.run_for(5100)
     # The press names the text before the outside change: refused, and said on the page the reload brings.
     reloaded(p)
-    until(lambda: "reload the page" in toast(p), what="the refusal after the reload")
+    toasted(p, "reload the page", on_clock=True)
 
 
 def test_a_refusal_queued_behind_a_red_toast_is_said_again_when_a_form_held_the_reload_past_7_seconds(tab):
@@ -289,8 +289,7 @@ def test_a_refusal_queued_behind_a_red_toast_is_said_again_when_a_form_held_the_
     p.click("#rd-popover button[data-f=ok]")            # the reply goes, and the held reload runs
     until(lambda: "my reply" in f.read_text(encoding="utf-8"), what="the reply in the file")
     reloaded(p)
-    p.clock.run_for(3000)                               # the page's own toast of the change first, then the refusal
-    until(lambda: "reload the page" in toast(p), what="the refusal, said again on the page the reload brings")
+    toasted(p, "reload the page", on_clock=True)        # the page's own toast of the change first, then the refusal again
 
 
 def test_a_press_while_the_page_settles_onto_a_change_is_refused_and_the_page_reloads(sheaf):
@@ -420,7 +419,7 @@ def test_a_box_of_an_action_typed_and_not_yet_saved_is_not_ticked_by_a_click(she
     p.keyboard.press("Enter")
     p.keyboard.type("Run it")
     p.locator("main li:has-text('Run it') input[type=checkbox]").dispatch_event("click")
-    until(lambda: "with its button" in toast(p), what="the line that points to the button")
+    toasted(p, "with its button", on_clock=True)
     until(lambda: "- [ ] Run it" in f.read_text(encoding="utf-8"), what="the saved action")
     until(lambda: bar(p).all_inner_texts() == ["Approve", "Done", "Run it"], what="its button")
     assert "[x]" not in f.read_text(encoding="utf-8")
@@ -493,7 +492,7 @@ def test_a_sign_out_while_a_press_is_out_does_not_reload_under_its_answer(sheaf,
     site.hub.entry(DOC).bus.publish("signed-out", {})
     until(lambda: "signed out" in p.inner_text("#rd-notice"), what="the signed-out notice")
     held[0].fulfill(status=401, content_type="application/json", body='{"ok": false, "error": "Not signed in."}')
-    until(lambda: "Not signed in." in toast(p), what="the refusal")
+    toasted(p, "Not signed in.", on_clock=True)
     p.wait_for_timeout(500)
     assert p.evaluate("window.__same_load") is True, "the page reloaded over the refusal"
     assert "- [ ] Approve" in f.read_text(encoding="utf-8")
@@ -525,7 +524,7 @@ def test_an_upgrade_while_a_press_is_out_says_its_refusal_again_on_the_page_it_b
     p.clock.run_for(100)                                # the wait for the page's writes ends after 50 ms
     reloaded(p)
     p.wait_for_selector("button.rd-act")
-    until(lambda: "the sheaf changed" in toast(p), what="the refusal, said again on the new page")
+    toasted(p, "the sheaf changed", on_clock=True)
 
 
 def test_a_reload_asked_only_by_an_upgrade_saves_what_was_typed_during_the_press(sheaf, site):
@@ -575,7 +574,7 @@ def test_a_saved_action_box_is_not_ticked_while_a_press_holds_the_reload_of_its_
     until(lambda: "- [ ] Run it" in f.read_text(encoding="utf-8"), what="the saved action")
     until(lambda: p.evaluate("document.querySelector('#rd-state').textContent") != "Saving…", what="its answer")
     p.locator("main li:has-text('Run it') input[type=checkbox]").dispatch_event("click")
-    until(lambda: "tick it once it has" in toast(p), what="the line that says the page reloads first")
+    toasted(p, "tick it once it has", on_clock=True)
     p.wait_for_timeout(500)
     assert "[x] Run it" not in f.read_text(encoding="utf-8")
     bar(p).nth(0).click()                               # Undo
@@ -883,8 +882,8 @@ def test_an_upgrade_held_by_a_comment_form_during_a_press_does_not_say_the_text_
     p.clock.run_for(100)                                # the held reload is lifted by a timer 0
     reloaded(p)
     p.wait_for_selector("button.rd-act")
-    toasted(p, "upgraded")
-    assert "text changed" not in toast(p)
+    toasted(p, "upgraded", on_clock=True)
+    assert not any("text changed" in said for said in toasts_to_the_end(p, on_clock=True))
 
 
 def test_a_restore_waiting_for_the_tick_is_answered_before_the_page_reloads(tab, context, site):

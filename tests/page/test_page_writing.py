@@ -4478,6 +4478,26 @@ def test_discard_clears_an_entry_that_has_no_request_id(thread):
     until(lambda: stored_bodies(thread) == [], what="the entry to go")
 
 
+def still_out(tab, body):
+    """Does the store hold `body` as a send that is out (an `out` time on its entry)?"""
+    raw = comment_store(tab)
+    return any(d["body"] == body and d.get("out") for d in json.loads(raw)) if raw else False
+
+
+# The entry of a send is written with `out` when it is sent and again without it once it fails, and the list of
+# unsent texts leaves out an entry that is out. A page left while its send is still out leaves the mark: its text
+# is not listed until the mark lapses. (The test below once failed now and then in CI for lack of this wait: it
+# left page A before A had written its failed send.)
+def test_a_send_still_out_on_a_page_that_was_left_is_not_listed_as_unsent(thread):
+    a = thread.page
+    send_held(thread, "reply", "words still out")
+    assert still_out(thread, "words still out")
+    come_back(thread)
+    a.wait_for_timeout(500)
+    assert a.locator(UNSENT).count() == 0, f"the list offers a send that is out: {comment_store(thread)}"
+    assert still_out(thread, "words still out")
+
+
 # Open the thread on a listed entry draws that entry's text, also when the thread holds another of its kind.
 def test_open_the_thread_on_the_second_of_two_kept_replies_draws_that_reply(thread, context):
     a, b = thread.page, second_page(thread, context)
@@ -4487,10 +4507,14 @@ def test_open_the_thread_on_the_second_of_two_kept_replies_draws_that_reply(thre
     fail_the_send(b, held_b)
     held_a[0].fulfill(status=500, json={"ok": False, "error": "the hub broke off"})
     a.unroute("**/_/comment")
+    try:
+        until(lambda: not still_out(thread, "words from page A"), what="page A's failed send to leave `out` in the store")
+    except AssertionError as e:
+        raise AssertionError(f"{e}; the store held {comment_store(thread)}") from None
     come_back(thread)
     unsent_line(a)
     texts = [t for _, _, t, _ in unsent_list(a)]
-    assert sorted(texts) == ["words from page A", "words from page B"]
+    assert sorted(texts) == ["words from page A", "words from page B"], f"the list held {texts}, the store {comment_store(thread)}"
     for n, text in enumerate(texts):
         if n:
             come_back(thread)

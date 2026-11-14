@@ -678,11 +678,20 @@ def _norm_html(fragment: str) -> str:
 
 
 @lru_cache(maxsize=8)
-def _render_source(content: str):
-    """Pandoc's HTML of a source, or None. Cached: a save asks it of the same block for `_unchanged`, for
-    `_toggle_boxes` and for `ticked_html`, and a render of a long list takes seconds."""
+def _rendered(content: str) -> str:
     r = _pandoc.run(["-f", "gfm", "-t", "html5", "--no-highlight"], copyblock.hide(content))
-    return r.stdout if r.returncode == 0 else None
+    if r.returncode != 0:
+        raise _Unread                   # an exception is not cached: a timeout once must not refuse the next saves
+    return r.stdout
+
+
+def _render_source(content: str):
+    """Pandoc's HTML of a source, or None. A success is cached: a save asks it of the same block for `_unchanged`,
+    for `_toggle_boxes` and for `ticked_html`, and a render of a long list takes seconds."""
+    try:
+        return _rendered(content)
+    except _Unread:
+        return None
 
 
 def _comparable(block, fragment: str):
@@ -732,10 +741,10 @@ class _Mark:
     """A task mark found by `task_marks`, answering the part of `re.Match` the callers use: `start()` is the offset of
     the mark's line and `end()` that of the end of the mark (after its `]`), as for a match; `start(2)` and `end(2)`
     those of its state character, `group(2)` the character. Any other group is an error, not a wrong offset."""
-    __slots__ = ("_line", "_box", "_state")
+    __slots__ = ("_line", "_box", "_state", "_end")
 
-    def __init__(self, line: int, box: int, state: str):
-        self._line, self._box, self._state = line, box, state
+    def __init__(self, line: int, box: int, state: str, end: int):
+        self._line, self._box, self._state, self._end = line, box, state, end
 
     def group(self, n: int) -> str:
         if n != 2:
@@ -750,7 +759,7 @@ class _Mark:
     def end(self, group: int = 0) -> int:
         if group not in (0, 2):
             raise IndexError(f"a task mark has only group 2, not {group}")
-        return self._box + (2 if group == 0 else 1)     # the match ends after the `]`, the state character before it
+        return self._end if group == 0 else self._box + 1   # the match ends after the `]`, the state character before it
 
 
 def task_marks(content: str) -> list:
@@ -759,7 +768,7 @@ def task_marks(content: str) -> list:
     if "\r" not in content:
         return list(TASK_MARK_RE.finditer(content))
     keep = [i for i, ch in enumerate(content) if ch != "\r"]
-    return [_Mark(content.rfind("\n", 0, keep[m.start()]) + 1, keep[m.start(2)], m.group(2))
+    return [_Mark(content.rfind("\n", 0, keep[m.start()]) + 1, keep[m.start(2)], m.group(2), keep[m.end() - 1] + 1)
             for m in TASK_MARK_RE.finditer(content.replace("\r", ""))]
 
 

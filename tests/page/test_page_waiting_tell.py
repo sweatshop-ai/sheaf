@@ -367,7 +367,8 @@ def test_the_toast_of_the_first_cancel_stays_up_until_the_second_has_its_turn(ta
     until(lambda: len(tab.page.evaluate("window.__toasts")) >= 1, what="the first toast")
     first = tab.page.evaluate("window.__toasts")[0]["text"]
     assert SAW in first
-    time.sleep(1.2)                                      # well inside the 2.6 s a toast stays
+    at = tab.page.evaluate("window.__toasts[0].at")
+    until(lambda: tab.page.evaluate(f"performance.now() - {at}") >= 1200, what="1.2 s into the first toast")   # inside its 2.6 s
     assert toast(tab.page) == first, "the second toast took the place of the first before its time"
     until(lambda: len([t for t in tab.page.evaluate("window.__toasts") if SAW in t["text"]]) == 2,
           timeout=12, what="the second toast, after the first")

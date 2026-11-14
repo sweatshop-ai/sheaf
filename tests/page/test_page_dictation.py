@@ -24,6 +24,7 @@ FAKE_MIC = """(() => {
   navigator.mediaDevices.getUserMedia = async (c) => {
     mic.asked++; mic.constraints = c;
     if (mic.denied) throw new DOMException('no', 'NotAllowedError');
+    if (mic.hold) { mic.hold = false; await new Promise((r) => { mic.answer = r; }); }   // the browser's prompt, still open
     const track = { stop() { mic.stops++; } };
     return { getTracks: () => [track] };
   };
@@ -343,3 +344,21 @@ def test_closing_the_box_while_the_sound_is_on_its_way_cancels_the_request_and_f
     p.wait_for_selector(MIC)
     p.click(MIC)
     p.wait_for_function("window.__mic.made.length === 2 && window.__mic.made[1].state === 'recording'")
+
+
+def test_closing_the_box_while_the_browser_asks_for_the_microphone_leaves_the_next_box_its_microphone(tab, site, hub):
+    p = open_thread(tab, site)
+    p.wait_for_selector(MIC)
+    p.evaluate("window.__mic.hold = true")
+    p.click(MIC)
+    p.wait_for_function("window.__mic.asked === 1")        # the prompt is open: no stream yet
+    p.keyboard.press("Escape")
+    p.click(".rd-badge")                                   # the box again, the prompt still open
+    p.wait_for_selector(MIC)
+    p.click(MIC)
+    p.wait_for_function("window.__mic.asked === 2")        # its microphone asks too, it is not stuck behind the first
+    p.wait_for_function("window.__mic.made.length === 1 && window.__mic.made[0].state === 'recording'")
+    p.evaluate("window.__mic.answer()")                    # the person answers the first prompt late
+    p.wait_for_function("window.__mic.stops === 1")        # its stream is let go
+    assert p.evaluate("window.__mic.made.length") == 1, "the late stream was recorded"
+    assert p.evaluate("window.__mic.made[0].state") == "recording", "the late stream stopped the new recording"

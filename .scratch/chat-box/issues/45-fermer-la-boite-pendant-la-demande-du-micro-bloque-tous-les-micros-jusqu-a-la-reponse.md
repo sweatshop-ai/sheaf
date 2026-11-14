@@ -11,4 +11,8 @@
 - [ ] La décision (a ou b) est écrite dans le ticket avant le code
 - [ ] Un test de page échoue tant que le micro d'une boîte rouverte ne répond pas pendant que l'invite de la précédente est ouverte
 
+**Décision (Rhea, 2026-11-14) : option (a).** `stopDictation(true)` met `dict = null` tout de suite. Le rappel de `getUserMedia` teste `dict !== d` en plus de `d.discard` et relâche le flux reçu ; tous les `dict = null` des rappels tardifs (refus de `getUserMedia`, arrêt de l'enregistreur, fin de la transcription) ne s'appliquent que si `dict === d`, pour ne pas effacer l'enregistrement d'une boîte rouverte.
+
+**Claimed by:** Lior 2026-11-14
+
 **Status:** ready-for-agent

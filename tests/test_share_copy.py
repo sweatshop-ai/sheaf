@@ -762,6 +762,28 @@ def test_the_refusal_of_an_empty_comment_opener_does_not_say_it_is_never_closed(
     assert "empty HTML comment" in msg and "Remove it" in msg
 
 
+def test_the_empty_opener_message_does_not_claim_a_dropped_text(tmp_path):
+    # Ticket 83, point 1: on this path no arrow follows the opener, so nothing would be dropped; the
+    # copy is refused by decision.
+    with pytest.raises(sheafmd.UnclosedComment) as e:
+        sheafmd.render(doc(tmp_path, "# A <!--> b\n\nKEEP1 para.\n"))
+    assert "next -->" not in str(e.value) and "drop text" not in str(e.value)
+
+
+@pytest.mark.parametrize("text", [
+    "# A <!--> b <!-- note -->\n\nKEEP1\n",
+    "# A <!--> b\n\nKEEP1 <!-- note -->\n",
+])
+def test_an_empty_opener_that_a_later_arrow_would_close_gets_the_swallows_message(tmp_path, text):
+    # Ticket 83, point 2 (SPEC 6.2): with a --> later in the document the refusal is the swallowing one.
+    # It pins the SPEC sentence; it also passes on main's render.py, as `_dropped_text_line` refused first.
+    with pytest.raises(sheafmd.UnclosedComment) as e:
+        sheafmd.render(doc(tmp_path, text))
+    assert e.value.line == 1
+    assert "that is not a comment to the reader" in str(e.value)
+    assert "empty HTML comment" not in str(e.value)
+
+
 def test_the_same_heading_without_the_empty_opener_makes_a_copy(tmp_path):
     out = sheafmd.render(doc(tmp_path, "# A b <!-- note -->\n\nKEEP1 para.\n"))
     assert "KEEP1" in out and "note" not in out

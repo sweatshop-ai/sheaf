@@ -4,6 +4,7 @@ Offsets count non-whitespace characters of the block's rendered text, so the pag
 and the server agree whatever whitespace each render happens to put between tags.
 """
 import re
+import time
 
 import pytest
 from helpers import pandoc
@@ -390,3 +391,66 @@ def test_a_cell_with_an_unclosed_opener_takes_the_block_before_it():
     assert out.startswith("| a | b |\n|---|---|\n| one | x<!-- sheaf-comment id=%s" % cid)
     assert re.sub(r"<!--.*?-->", "", out, count=1) == md
     assert [c.id for c in rdc.parse(out).comments] == [cid]
+
+
+# ── ticket 66: what is left of PR 286 ──
+
+def _slow(md, quote):
+    """Seconds `comment_on` takes for `quote` in `md`."""
+    t = time.perf_counter()
+    comment_on(md, quote)
+    return time.perf_counter() - t
+
+
+@pytest.mark.parametrize("heading", [
+    "Title\n=====\n",                                                # setext: the text is the lines above
+    "# Title\n",
+])
+def test_a_long_heading_full_of_tags_before_an_unclosed_opener_is_read_in_linear_time(heading):
+    # Point 1: 9 KB of tags then `<!--` took 1.6 s, 36 KB took 21.8 s (each pass searched on from
+    # the position again), and the hub is blocked while a comment is anchored.
+    tags = "<b>x</b> " * 1000
+    md = heading.replace("Title", "Title " + tags + "<!-- end", 1)
+    assert _slow(md, "Title") < 1.0
+    md4 = heading.replace("Title", "Title " + tags * 4 + "<!-- end", 1)
+    assert _slow(md4, "Title") < 2.0
+
+
+def test_an_ordinary_closed_comment_owns_its_backtick():
+    # Point 2: the backtick in `<!-- todo `x -->` opens no span that runs on to the one in `code`,
+    # so the comment written on "word" is found by parse.
+    md = "See <!-- todo `x --> the word and use `code` here.\n"
+    out, cid = comment_on(md, "word")
+    assert [c.id for c in rdc.parse(out).comments] == [cid]
+    assert rdc._mask_code(md).count("`") == 1          # only `code` is blanked, the comment's own backtick stays
+
+
+@pytest.mark.parametrize("opener", ["<!-->", "<!--->"])
+def test_an_empty_comment_opener_is_a_whole_comment_not_an_unclosed_one(opener):
+    # Point 3: CommonMark, pandoc and the list (hub/the_list.py) read it as a whole comment.
+    assert rdc._unclosed_opener(f"a {opener} b") == -1
+    md = f"# The {opener} end\n"
+    assert rdc.heading_anchor(md) == len(f"# The {opener} end")
+    assert "<!--" in pandoc(["-f", "gfm", "-t", "html"], md)    # pandoc reads a comment there too
+
+
+@pytest.mark.parametrize("para", [
+    "<b title='`'> word `and` y",           # a real tag owns its backtick
+    "</b > word `x` y",
+    "<b title='`' /> word `and` y",
+    "<b title=a`b> word `and` y",           # an unquoted value may not hold a backtick: no tag
+    "<b title=`a`> word `and` y",
+    "<b a='1'b='`'> word `and` y",          # no space between attributes: no tag
+    "<1b title='`'> word `and` y",          # a tag name starts with a letter
+    "<b title='`' title2> word `and` y",
+    "<b =x='`'> word `and` y",
+    "<!-- a `x --> word `and` y",           # a comment owns its backtick
+    "<!--> word `and` y",
+    "<!---> word `and` y",
+    "\\<!-- a `x --> word `and` y",         # an escaped opener opens nothing
+])
+def test_parse_reads_text_that_looks_like_a_tag_or_comment_as_pandoc_does(para):
+    # Point 5a: whether a backtick is code in pandoc is whether `_mask_code` blanks it.
+    para = "x " + para         # at the start of a line `<!--` and a tag begin an HTML block, which is no inline text
+    code_in_pandoc = "<code>" in pandoc(["-f", "gfm", "-t", "html"], para + "\n")
+    assert (rdc._mask_code(para) != para) == code_in_pandoc

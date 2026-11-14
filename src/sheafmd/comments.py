@@ -264,42 +264,56 @@ def _parse_one(raw: str):
     return c, ""
 
 
-def _mask_code(text: str) -> str:
-    """`text` with its inline code spans blanked, the same length. Read left to right,
-    as CommonMark does: a comment or an HTML tag that starts before a backtick owns it, so a
-    backtick in a comment's body or a tag's attribute does not open a span that runs on into
-    the text after it."""
-    out, pos, span, head, no_head, tag, no_tag = [], 0, None, None, False, None, False
+_OPENER_RE = re.compile(r"(?<!\\)(?:\\\\)*(<!--)")
+
+
+def _scan(text: str):
+    """What CommonMark reads in `text` at the level of inline code, HTML tags and HTML comments, left
+    to right, as (kind, start, end) with kind "code", "tag", "comment" or "open" (a `<!--` that nothing
+    closes: it runs to the end of `text`, where the scan stops). Whichever of the three starts first
+    owns what it holds, so a backtick in a tag's attribute or in a comment's body opens no code span
+    that runs on into the text after it. `<!-->` and `<!--->` are whole comments, as in CommonMark.
+    Each search runs once and is reused while its match still lies ahead of the position: a search
+    from there finds the same match as one made from an earlier position, so a block of many tags or
+    spans is read once, not once per item."""
+    pos, found = 0, {}
+    # kind -> (pattern, group): an item starts at the group, which a tag's backslash prefix and
+    # an opener's escape check put after the match's own start.
+    kinds = {"code": (CODE_SPAN_RE, 0), "tag": (_HTML_TAG_RE, "tag"), "comment": (_OPENER_RE, 1)}
     while True:
-        if span is None or span.start() < pos:
-            span = CODE_SPAN_RE.search(text, pos)
-        if not span:
-            break
-        # Both searches run once and are reused while their match still lies ahead of
-        # pos: a search from pos finds the same match as the one made from an earlier
-        # position, so a block of many spans is read once, not once per span.
-        if not no_head and (head is None or head.start() < pos):
-            head = COMMENT_RE.search(text, pos)
-            no_head = head is None      # none now means none later: pos only moves on
-        if not no_tag and (tag is None or tag.start('tag') < pos):
-            tag = _HTML_TAG_RE.search(text, pos)
-            no_tag = tag is None
-        if tag and tag.start('tag') < span.start() and not (head and head.start() < tag.start('tag')):
-            pos = tag.end()
+        for kind, (rx, group) in kinds.items():
+            m = found.get(kind, False)
+            if m is None:
+                continue                # none now means none later: pos only moves on
+            if m is False or m.start(group) < pos:
+                found[kind] = rx.search(text, pos)
+        ahead = [(m.start(kinds[k][1]), k, m) for k, m in found.items() if m]
+        if not ahead:
+            return
+        a, kind, m = min(ahead)
+        if kind != "comment":
+            pos = m.end()
+            yield kind, a, pos
             continue
-        if head and head.start() < span.start():
-            end = text.find("-->", head.end())
-            if end < 0:
-                break                   # never closed: the rest of the block is the comment
-            pos = end + 3
-            continue
-        out.append(span.span())
-        pos = span.end()
+        if text.startswith((">", "->"), a + 4):
+            pos = a + 5 + (text[a + 4] == "-")
+        else:
+            e = text.find("-->", a + 4)
+            if e < 0:
+                yield "open", a, len(text)
+                return
+            pos = e + 3
+        yield "comment", a, pos
+
+
+def _mask_code(text: str) -> str:
+    """`text` with its inline code spans blanked, the same length (see `_scan` for what owns a
+    backtick)."""
     parts, last = [], 0
-    for a, b in out:
-        parts.append(text[last:a])
-        parts.append(" " * (b - a))
-        last = b
+    for kind, a, b in _scan(text):
+        if kind == "code":
+            parts += [text[last:a], " " * (b - a)]
+            last = b
     parts.append(text[last:])
     return "".join(parts)
 
@@ -533,6 +547,16 @@ def anchor_point(block: str, start: int, end: int, quote: str) -> int:
 _ATX_TEXT = re.compile(r"^( {0,3}#{1,6}[ \t]+)(.*?)(?:[ \t]+#+)?[ \t]*$")
 
 
+def _atx_words(line: str):
+    """The match of `_ATX_TEXT` for an ATX heading line that has words, else None. Hashes after the
+    opening ones are the closing ones when nothing else is there: `### ###`, `# #` and `## #` have no
+    words, `## ## ##` has the word `##` (CommonMark and pandoc read it so)."""
+    m = _ATX_TEXT.match(line)
+    if m and m.group(2) and set(line[m.end(1):].strip()) != {"#"}:
+        return m
+    return None
+
+
 # An inline HTML tag as CommonMark reads it: it binds more tightly than a code span, so a backtick
 # in an attribute value opens nothing. ASCII only, whitespace of a tag is space, tab, newline or return (pandoc
 # reads no form feed), and an odd run of backslashes before the `<` escapes it (group `tag`).
@@ -544,24 +568,8 @@ _HTML_TAG_RE = re.compile(
 
 def _unclosed_opener(text: str) -> int:
     """Where a `<!--` outside code that nothing closes starts in `text`, or -1. Any `<!--`
-    counts, not only a sheaf comment's: a block written after it would close it. Read left to
-    right as CommonMark does: a code span, an HTML tag or a closed comment that starts first owns
-    what it holds, so a backtick in a tag or in an ordinary comment pairs with nothing."""
-    i = 0
-    while True:
-        o = _opener(text, i)
-        if o < 0:
-            return -1
-        span, tag = CODE_SPAN_RE.search(text, i), _HTML_TAG_RE.search(text, i)
-        first = min((x for x in (span and (span.start(), span.end()), tag and (tag.start("tag"), tag.end())) if x),
-                    default=None)
-        if first and first[0] < o:
-            i = first[1]
-            continue
-        e = text.find("-->", o + 4)
-        if e < 0:
-            return o
-        i = e + 3
+    counts, not only a sheaf comment's: a block written after it would close it (see `_scan`)."""
+    return next((a for kind, a, _ in _scan(text) if kind == "open"), -1)
 
 
 def heading_anchor(block: str) -> int | None:
@@ -579,10 +587,8 @@ def heading_anchor(block: str) -> int | None:
         at = len("\n".join(lines[:-1]).rstrip())
         floor = 0
     else:
-        m = _ATX_TEXT.match(lines[0])
-        # The hashes after the opening ones are the closing ones when nothing else is there: `### ###`,
-        # `# #` and `## #` are empty, `## ## ##` is the word `##` (CommonMark and pandoc read it so).
-        if not m or not m.group(2) or set(lines[0][len(m.group(1)):].strip()) == {"#"}:
+        m = _atx_words(lines[0])
+        if not m:
             return None
         at, floor = m.end(2), len(m.group(1).rstrip())
     open_at = _unclosed_opener(block[:at])

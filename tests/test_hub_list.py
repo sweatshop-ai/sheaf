@@ -1849,7 +1849,8 @@ def test_the_rows_title_holds_no_comment_of_the_h1(box, sheaves):
 @pytest.mark.parametrize("heading, title", [("x\\<!-- y -->z", "x\\<!-- y -->z"),          # an escaped `<` opens none
                                             ("x\\\\<!-- y -->z", "x\\\\z"),                  # an escaped backslash does
                                             ("a <!--> b --> c", "a b --> c"),               # `<!-->` is a whole comment
-                                            ("a <!---> b --> c", "a b --> c")])
+                                            ("a <!---> b --> c", "a b --> c"),
+                                            ("a <!-- x `y --> b `<!-- z` c", "a b `<!-- z` c")])  # a comment owns its backtick
 def test_only_what_commonmark_reads_as_a_comment_leaves_the_title(heading, title):
     assert the_list.read_sheaf("x/y/z.md", f"# {heading}\n").title == title
 

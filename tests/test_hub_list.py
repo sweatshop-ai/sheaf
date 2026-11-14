@@ -2045,13 +2045,38 @@ def test_a_tick_save_renders_the_source_once_and_the_result_once(monkeypatch):
     # (1.28 s -> 2.86 s for 200 items). The source render is shared; the result's own render stays, it is the check.
     from sheafmd import _pandoc
     from sheafmd.blocks import split_md_blocks
-    from sheafmd.edit import _render_source, _toggle_boxes, _unchanged, ticked_html
+    from sheafmd.edit import _rendered, _toggle_boxes, _unchanged, ticked_html
     block = split_md_blocks("".join(f"- [ ] item {i}\n" for i in range(5)))[0]
     fragment = ticked_html(block, 2)
-    _render_source.cache_clear()
+    _rendered.cache_clear()
     runs = []
     real = _pandoc.run
     monkeypatch.setattr(_pandoc, "run", lambda *a, **k: runs.append(1) or real(*a, **k))
     assert not _unchanged(block, fragment)
     assert _toggle_boxes(block, fragment) is not None
     assert len(runs) == 2
+
+
+def test_a_render_that_failed_is_not_kept_for_the_next_tick(monkeypatch):
+    # Opus review of PR 353, b1: a timeout once (pandoc's 124) must not send every later tick of that block through
+    # the general path, which rewrites the whole list.
+    import subprocess
+    from sheafmd import _pandoc
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _rendered, _toggle_boxes, ticked_html
+    block = split_md_blocks("* [ ] one\n* [ ] two\n* [ ] three\n")[0]
+    fragment = _page_with_box_flipped(block, 1)
+    _rendered.cache_clear()
+    real = _pandoc.run
+    monkeypatch.setattr(_pandoc, "run", lambda args, text: subprocess.CompletedProcess(args, 124, "", "timeout"))
+    assert ticked_html(block, 1) is None and _toggle_boxes(block, fragment) is None
+    monkeypatch.setattr(_pandoc, "run", real)
+    assert _toggle_boxes(block, fragment) == "* [ ] one\n* [x] two\n* [ ] three\n"
+    assert ticked_html(block, 1) is not None
+
+
+def test_a_task_mark_with_a_cr_inside_its_brackets_ends_after_the_bracket():
+    from sheafmd.edit import task_marks
+    src = "- [ \r] a\n"
+    m = task_marks(src)[0]
+    assert src[m.start():m.end()] == "- [ \r]"

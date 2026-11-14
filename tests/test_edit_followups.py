@@ -1117,3 +1117,10 @@ def test_a_comment_put_back_in_a_table_of_a_quote_stays_on_its_row_or_on_a_line_
     out = rde._insert_comment(md, 0, rdc.format(note, False), "Alpha")
     assert out.startswith(md.split("\n\nBody")[0] + "\n\n<!-- sheaf-comment"), out
     assert len(rdc.parse(out).comments) == 1 and rdc.parse(out).malformed == []
+
+
+def test_a_comment_put_back_in_the_last_row_of_a_quoted_table_with_an_unclosed_opener_goes_on_its_own_line():
+    md = "> | h | i |\n> |---|---|\n> | y | <!-- x w\n\nBody.\n"
+    out = rde._insert_comment(md, 0, rdc.format(agent_note(), True), "w")
+    assert out.startswith("> | h | i |\n> |---|---|\n> | y | <!-- x w\n\n<!-- sheaf-comment"), out
+    assert len(rdc.parse(out).comments) == 1

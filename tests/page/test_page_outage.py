@@ -128,7 +128,7 @@ def test_a_save_after_the_banner_says_the_hub_is_unreachable_and_the_draft_holds
     assert BANNER in notice(p)
     type_at_end(p, P2, " and plums")
     p.keyboard.press("Control+s")
-    toasted(p, "The hub is unreachable; nothing was saved. Your edits stay on screen.")
+    toasted(p, "The hub is unreachable; nothing was saved. Your edits stay on screen.", on_clock=True)
     d = until(lambda: stored(p, clocked.site), what="the draft in localStorage")
     assert "plums" in d["edits"][0]["html"] and re.fullmatch(r"[A-Za-z0-9_-]{16,64}", d["rid"])
 
@@ -153,7 +153,7 @@ def test_the_banner_goes_when_the_hub_is_back(clocked):
     assert BANNER in notice(p)
     clocked.site.start()
     until(lambda: notice(p) == "", what="the banner to go once the hub answers")
-    toasted(p, "Reconnected to the sheaf hub.")
+    toasted(p, "Reconnected to the sheaf hub.", on_clock=True)
 
 
 def test_a_hub_stopped_by_a_person_says_so_at_once(clocked):
@@ -221,7 +221,7 @@ def test_a_cancel_the_hub_does_not_answer_within_30_seconds_takes_the_busy_butto
     p.click("#rd-popover button[data-a=cancel-tell]")
     until(lambda: held or p.wait_for_timeout(20), what="the cancel to go out")
     p.clock.fast_forward(30_500)
-    toasted(p, "within 30 seconds")
+    toasted(p, "within 30 seconds", on_clock=True)
     until(lambda: p.locator("#rd-popover button[data-a=cancel-tell]").count() == 0, what="the busy button to go")
     assert p.locator("#rd-popover .rd-pending-tell").count() == 0
     p.unroute("**/_/cancel")
@@ -521,7 +521,7 @@ def test_a_page_whose_root_was_forgotten_and_its_name_taken_while_its_stream_was
     p.evaluate(f"document.querySelector({P2!r}).lastChild.remove();"     # the edit undone, so the reply may go
                " document.querySelector('#rd-toast').textContent = ''")
     p.click("#rd-popover button[data-f=ok]")
-    toasted(p, "Nothing was sent or saved")
+    toasted(p, "Nothing was sent or saved", timeout=20.0)       # behind the red toast of the Ctrl+S (7 s)
     assert posts == []
     does_not_reload_or_reconnect(replying, streams)
     assert p.input_value("#rd-popover textarea") == "my reply text"
@@ -683,7 +683,7 @@ def test_a_save_the_hub_does_not_answer_within_120_seconds_frees_the_page_and_th
     until(lambda: held or p.wait_for_timeout(20), what="the save to go out")
     p.clock.fast_forward(120_500)
     says = "The hub is unreachable; nothing was saved. Your edits stay on screen."
-    toasted(p, says)
+    toasted(p, says, on_clock=True)
     assert "plums" in p.inner_text(P2)
     # the autosave that waited behind the held save goes out now, or Ctrl+S sends it: either is the next save
     p.keyboard.press("Control+s")
@@ -731,7 +731,7 @@ def test_the_draft_of_a_save_given_up_holds_its_request_id_and_the_hub_is_asked_
     until(lambda: held or p.wait_for_timeout(20), what="the save to go out")
     assert stored(p, tab.site)["rid"] == bodies[0]["rid"]            # from the moment it goes out
     p.clock.fast_forward(120_500)
-    toasted(p, "The hub is unreachable; nothing was saved. Your edits stay on screen.")
+    toasted(p, "The hub is unreachable; nothing was saved. Your edits stay on screen.", on_clock=True)
     d = stored(p, tab.site)
     assert d["rid"] == bodies[0]["rid"] and d["hash"] == bodies[0]["hash"]
     context = p.context
@@ -767,7 +767,7 @@ def test_a_page_opened_on_a_draft_the_hub_already_took_drops_it_without_restorin
     p.keyboard.press("Control+s")
     until(lambda: "plums" in tab.site.file.read_text(encoding="utf-8"), what="the hub to write the save")
     p.clock.fast_forward(120_500)
-    toasted(p, "The hub is unreachable; nothing was saved. Your edits stay on screen.")
+    toasted(p, "The hub is unreachable; nothing was saved. Your edits stay on screen.", on_clock=True)
     assert stored(p, tab.site)["rid"] == bodies[0]["rid"]
     context = p.context
     p.close()

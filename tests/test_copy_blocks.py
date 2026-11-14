@@ -294,8 +294,13 @@ def test_a_tab_counts_as_the_columns_it_spans_when_a_line_opens_a_block(line, op
     ("> [!COPY]\n> a\n> #\u2003h\n> ---", False),
     ("> [!COPY]\n> a\n> #\th\n> ---", True),       # a tab does open a heading
     ("> [!COPY]\n> a\n> #\n> ---", True),           # and so does a bare `#`
-    ("> [!COPY]\n> a\n> #\r#\n> ---", True),       # a lone CR is a line end for pandoc: `#` alone, then text
+    ("> [!COPY]\n> a\n> #\r#\n> ---", True),       # pandoc deletes a lone CR: `#\r#` reads as `##`, an empty heading
     ("> [!COPY]\n> a\n> #\r h\n> ---", True),
+    ("> [!COPY]\n> a\n> \r# h\n> ---", True),     # a lone CR before the `#` is deleted: the heading opens, the paragraph ends
+    ("> [!COPY]\n> a\n> \r\r   # h\n> ---", True),
+    ("> [!COPY]\n> a\n \r  # h\n> ---", True),
+    ("> [!COPY]\n> a\n> #\rh\n> ---", False),     # `#h` is text, which the underline makes a heading with the marker
+    ("> [!COPY]\n> a\n> #\r\rh\n> ---", False),
 ])
 def test_the_underline_and_list_rules_read_the_source_as_pandoc_does(quote, copy):
     assert copyblock.is_copy_block(quote) is copy
@@ -311,3 +316,15 @@ def test_a_quote_the_splitter_cuts_short_still_shows_what_pandoc_makes_of_the_wh
     out = page_of(tmp_path, quote)
     assert f"<{heading}" in out and "[!COPY] a" in out and "rd-copy" not in out
     assert copyblock.STAND_IN.lower() not in out.lower()
+
+
+@pytest.mark.parametrize("quote", [
+    "> \r[!COPY]\n> a",
+    ">\r [!COPY]\n> a",
+    "> [!CO\rPY]\n> a",
+    "> [!COPY]\r \n> a",
+    "> [!COPY]\r\r\n> a",
+])
+def test_a_lone_cr_in_the_marker_line_is_deleted_as_pandoc_deletes_it(quote):
+    assert copyblock.is_copy_block(quote) is True
+    assert copyblock.hide(quote).startswith("> " + copyblock.STAND_IN)

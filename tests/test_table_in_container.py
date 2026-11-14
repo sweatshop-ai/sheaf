@@ -129,3 +129,34 @@ def test_a_comment_on_a_heading_in_a_quote_or_a_list_goes_at_the_end_of_its_word
 def test_the_offset_of_a_position_past_the_end_of_the_block_is_the_end_of_the_block():
     off = rdc._offset_fn("abc\ndef")
     assert off(2, 40) == 7 and off(1, 99) == 7
+
+
+# Round 1 of the review of PR 351: a comment is named by where pandoc puts it, not by its text, which pandoc changes
+# (a tab becomes spaces, `\|` becomes `|` in a cell).
+def test_a_tab_in_the_body_or_a_reply_of_a_comment_in_a_quoted_cell_does_not_hide_it():
+    md = "> | a | b |\n> |---|---|\n> | xx | yy |\n"
+    s, e = sel_of(md, "xx")
+    out, cid = rdc.add_comment(md, 0, s, e, "xx", "col1\tcol2", "Ada", "2026-11-14T10:00")
+    assert [c.id for c in rdc.parse(out).comments] == [cid]
+    again = rdc.reply(out, cid, "an\tanswer\nline2", "Bob", "2026-11-14T11:00")
+    found = rdc.parse(again).comments
+    assert [c.id for c in found] == [cid] and len(found[0].replies) == 1
+
+
+def test_an_escaped_pipe_in_a_comment_in_a_quoted_cell_does_not_hide_it():
+    md = ("> | a | b |\n> |---|---|\n> | xx<!-- sheaf-comment id=c1 by=A at=2026-01-01T00:00 status=open "
+          "quote=\"x\" a \\| b --> | yy |\n")
+    assert [c.id for c in rdc.parse(md).comments] == ["c1"]
+
+
+def test_a_heading_ending_in_an_image_takes_its_comment_on_its_line():
+    md = "> # head ![img](x.png)\n"
+    s, e = sel_of(md, "head")
+    out, cid = rdc.add_comment(md, 0, s, e, "head", "why\nmore", "Ada", "2026-11-14T10:00")
+    assert out.count("\n") == 1 and "&lt;!--" not in pandoc(["-f", "gfm", "-t", "html"], out)
+    assert [c.id for c in rdc.parse(out).comments] == [cid]
+
+
+def sel_of(md, quote):
+    from test_anchoring import sel
+    return sel(md, quote)

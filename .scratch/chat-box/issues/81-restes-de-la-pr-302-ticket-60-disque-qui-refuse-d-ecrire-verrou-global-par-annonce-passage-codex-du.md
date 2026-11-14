@@ -1,4 +1,4 @@
-# 79: Restes de la PR 302 (ticket 60) : disque qui refuse d'écrire, verrou global à chaque annonce, thunk qui lève, tests, passage Codex dû
+# 81: Restes de la PR 302 (ticket 60) : disque qui refuse d'écrire, verrou global à chaque annonce, thunk qui lève, tests, passage Codex dû
 
 **What to build:** Les restes (classe c et d) des deux revues Opus de la PR 302 (ticket 60, GO), `/home/tiroir/.claude/pm/chat-box-handoffs/pr-60-reviews/opus-round1.md` et `opus-round2-narrow.md`, et `handoff-Salma-2026-11-14.md`. Rien de ceci ne bloque ; chaque point est corrigé avec un test rouge ou écarté avec la raison.
 1. **(c, tour 2) Un disque qui refuse d'écrire fait maintenant échouer un listing qui ne trouve que des lignes révoquées** (`waiting.py`, `take`, `save = len(rows) != n`) : `documents` lève l'`OSError`, comme `sweep` et une marque `seen` le faisaient déjà ; avant la PR, le listing répondait sans écrire. Décider : garder (SPEC 9.8 le dit) ou tolérer comme l'écriture des seuls noms.

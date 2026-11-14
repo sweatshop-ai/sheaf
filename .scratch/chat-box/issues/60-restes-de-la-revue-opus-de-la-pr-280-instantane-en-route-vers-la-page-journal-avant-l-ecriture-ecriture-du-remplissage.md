@@ -11,7 +11,7 @@
 
 **Blocked by:** none
 
-**Status:** done (PR 302 fusionnée, main 37c99b1, 2026-11-14 ; restes au ticket 79)
+**Status:** done (PR 302 fusionnée, main 37c99b1, 2026-11-14 ; restes au ticket 81)
 
 **Établi (preuves) :** lecture seule de l'Opus, tour 1 (`/home/tiroir/.claude/pm/chat-box-handoffs/pr-40-reviews/opus-round1.md`), avec citations. Non reproduit.
 

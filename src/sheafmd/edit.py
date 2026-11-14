@@ -1670,8 +1670,9 @@ def _insert_comment(md_text: str, j: int, raw: str, quote: str, nth: int = 0) ->
             own_line = False
     except Exception:
         pass
-    if headless:
+    if headless or (b.kind == "heading" and "\n" in raw):
         # A heading with no words: a block right after its hashes would make the line a paragraph.
+        # A block of several lines at the end of a heading line runs into the lines after it.
         own_line = True
     if b.kind in LOCKED_KINDS:
         # Code, raw html, front matter: a comment inside is literal text, and a comment

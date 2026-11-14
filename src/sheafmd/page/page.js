@@ -114,6 +114,27 @@ var create = function (ROOT, CFG, opts) {
   // session is a member's fork, CFG.can holds "relay-tell" while that fork's relay is connected: Tell goes the
   // same way, to the relay (9.14).
   var AGENT, AGENT_UC, CAN, canTell, toBox;
+  // The byline names who prepared the document. On a page rendered from a session that is the session ("Document
+  // prepared by Yusuf"), not the hub's person, and its name brings the session to the front, or opens it again once
+  // it has ended (SPEC 4.3, 8.5). A page with no session, and the share copy, keep the line as rendered.
+  var byline = main && main.querySelector('p.doc-by'), bylineAsRendered = byline ? byline.innerHTML : '',
+      bylineHtml = bylineAsRendered;
+  function takeByline() {
+    if (!byline) return;
+    var a = CFG.agent, html = bylineAsRendered;
+    if (!CFG.proxy && a && a.kind === 'session') {
+      var name = esc(a.name || a.display), forWhom = byline.getAttribute('data-for');
+      html = 'Document prepared by ' +
+        (a.jump ? '<button type="button" class="doc-by-who" title="Open this session">' + name + '</button>' : name) +
+        (forWhom ? ' for ' + esc(forWhom) : '');
+    }
+    // Only when it changed: every answer of /_/doc comes here, and new nodes would end a selection made in the line.
+    if (html !== bylineHtml) byline.innerHTML = bylineHtml = html;
+  }
+  if (byline) listen(byline, 'click', function (e) {
+    var b = e.target.closest ? e.target.closest('button.doc-by-who') : null;
+    if (b) jumpToSession(b);
+  });
   function takeAgent() {
     CAN = CFG.can || [];
     toBox = CAN.indexOf('box-tell') >= 0 || CAN.indexOf('relay-tell') >= 0;
@@ -125,6 +146,7 @@ var create = function (ROOT, CFG, opts) {
     canTell = CAN.indexOf('relay-tell') >= 0 || CAN.indexOf(toBox ? 'box-tell' : 'deliver') >= 0 ||
               (!toBox && CAN.indexOf('reopen') >= 0) ||
               (!toBox && CAN.indexOf('queue') >= 0);        // an agent: the Tell waits for it (SPEC 9.8)
+    takeByline();
   }
   function liveSession() { return (CFG.work && CFG.work.sessions && CFG.work.sessions[0]) || {}; }
   // Where a member's Tell goes: James's window on the box, or the fork's session through its relay (9.14).
@@ -334,9 +356,11 @@ var create = function (ROOT, CFG, opts) {
             .replace(/\s+title="Not editable here: [^"]*"/g, '')
             .replace(/<button\b[^>]*\brd-copybtn\b[^>]*>[\s\S]*?<\/button>/g, '');
   }
+  // A part of the page's own among a block's nodes (data-rd-ui: the byline, which the page writes again with the session's
+  // name) is no text of the block: changing it is no edit, and the hub drops it from a save all the same.
   function ser(b) {
     return clean(b.nodes.map(function (n) {
-      return n.nodeType === 1 ? n.outerHTML : (n.nodeType === 3 ? n.nodeValue : '');
+      return n.nodeType === 1 ? (n.hasAttribute('data-rd-ui') ? '' : n.outerHTML) : (n.nodeType === 3 ? n.nodeValue : '');
     }).join('')).trim();
   }
   blocks.forEach(function (b) { b.pristine = ser(b); });
@@ -869,7 +893,7 @@ var create = function (ROOT, CFG, opts) {
     blocks.forEach(function (b) {
       var ok = editable.has(b.i);
       b.nodes.forEach(function (n) {
-        if (n.nodeType !== 1) return;
+        if (n.nodeType !== 1 || n.hasAttribute('data-rd-ui')) return;     // the byline is the page's, not the document's
         if (ok && on) n.setAttribute('contenteditable', 'true');
         else n.removeAttribute('contenteditable');
         n.classList.toggle('rd-locked', on && !ok);
@@ -1526,28 +1550,47 @@ var create = function (ROOT, CFG, opts) {
   // not listed, not sent, and kept when this page writes the store. One with no `root` (an older entry) is
   // this page's, and takes its root when the store is next written.
   // `pendingClears`: tests of this page's entries that the person emptied while the store refused the read, so the
-  // clear could not be written. They stay out of the page's reads (commentDraftsLoad), and go from the store with the
-  // next write that lands (commentDraftsSave). Kept in memory: a reload before that write offers the entry again.
+  // clear could not be written: a new message's field emptied (draftsReplace), a reply or an edit cleared (threadKeep),
+  // a send the hub took (taken). They stay out of the page's reads (commentDraftsLoad), and go from the store with the
+  // first read that works, which writes the store without them (commentDraftsSave). Kept in memory: a reload before
+  // that read, while the store still refuses it, offers the entry again.
   var pendingClears = [];
+  var readWorked = false, flushing = false;
   // `strict`: a store that refuses the read throws, instead of passing for an empty one (the writers read so, commentDraftsHeld and taken).
   // A value that is not JSON is set aside under `:unreadable` first, so the write that follows does not destroy it
   // (a later one replaces an earlier one set aside: the store holds one at a time).
   function commentDraftsRaw(strict) {
     var v, raw;
+    readWorked = false;
     try { raw = localStorage.getItem(COMMENT_DRAFT_KEY); } catch (e) { if (strict) throw e; return []; }
     try { v = JSON.parse(raw || '[]'); } catch (e) {
       if (strict) localStorage.setItem(COMMENT_DRAFT_KEY + ':unreadable', raw);
       return [];
     }
+    readWorked = true;
     return (Array.isArray(v) ? v : [v]).filter(function (d) {
       return d && typeof d.body === 'string' && (typeof d.quote === 'string' || typeof d.thread === 'string');
     });
   }
   function ofOtherRoot(d) { return !!CFG.root && d.root !== undefined && d.root !== CFG.root; }
   function commentDraftsLoad(strict) {
-    return commentDraftsRaw(strict).filter(function (d) {
-      return !ofOtherRoot(d) && !pendingClears.some(function (gone) { return gone(d); });
+    var raw = commentDraftsRaw(strict), cleared = false;
+    var held = raw.filter(function (d) {
+      if (ofOtherRoot(d)) return false;
+      if (!pendingClears.some(function (gone) { return gone(d); })) return true;
+      cleared = true;
+      return false;
     });
+    // The first read that works after a clear was held writes it: a reload or another page does not offer the entry again.
+    // Nothing to write when the store no longer holds what the clear names.
+    if (readWorked && pendingClears.length && !flushing) {
+      if (!cleared) pendingClears = [];
+      else {
+        flushing = true;
+        try { commentDraftsSave(held); } finally { flushing = false; }
+      }
+    }
+    return held;
   }
   // A writer reads the store strictly, so a read that fails now and then does not pass for an empty store and the
   // write that follows does not drop what the page held. Says whether it could read: when not, nothing is written
@@ -1601,9 +1644,11 @@ var create = function (ROOT, CFG, opts) {
   function threadKeep(c, kind, body, rid, line, out) {
     if (!c) return;
     var ends = body ? [rid, line] : [rid];
+    var goes = function (d) { return keptOf(d, c, kind) && (!sendOf(d) || ends.indexOf(sendOf(d)) >= 0); };
     var ds = commentDraftsHeld();
-    if (!ds) return;
-    ds = ds.filter(function (d) { return !keptOf(d, c, kind) || (sendOf(d) && ends.indexOf(sendOf(d)) < 0); });
+    // A clear the store could not be read for is held, not forgotten: the send it ends was taken or given up.
+    if (!ds) { if (!body) pendingClears.push(goes); return; }
+    ds = ds.filter(function (d) { return !goes(d); });
     if (body) ds.push({ thread: c.id, born: c.at, about: c.quote, kind: kind, body: body, rid: rid, of: rid ? undefined : line || undefined,
                         out: out, at: new Date().toISOString() });
     commentDraftsSave(ds);
@@ -1619,7 +1664,7 @@ var create = function (ROOT, CFG, opts) {
     var offeredTaken = !!offered && offered.rid === rid;
     if (offeredTaken) { decided(); dropOffer(); lateSends[rid] = true; }
     var ds, left;
-    try { ds = commentDraftsLoad(true); } catch (e) { ds = []; }       // a store that cannot be read now is left as it is
+    try { ds = commentDraftsLoad(true); } catch (e) { ds = []; pendingClears.push(function (d) { return d.rid === rid; }); }   // a store that cannot be read now is left as it is, the clear held
     left = ds.filter(function (d) { return d.rid !== rid; });
     if (left.length < ds.length) commentDraftsSave(left);
     // The notice of kept comments is drawn again from what is left (closePopover does it), unless it is being typed in.
@@ -2369,23 +2414,26 @@ var create = function (ROOT, CFG, opts) {
     return e.unreachable && e.message === UNREACHABLE ? what + ' did not go out: the hub is unreachable.' : e.message;
   }
   // One Cancel ends the Tell of each agent, each with an event of its own, and a toast replaces the one before it: the
-  // events of a moment are said once, naming every agent that had already seen its Tell.
-  var cancelNote = null;
-  function cancelSaid(to, seen) {
-    if (!cancelNote) {
-      cancelNote = { seen: [] };
+  // events of a moment are said once per thread, naming every agent of that thread that had already seen its Tell.
+  var cancelNote = {};
+  function cancelSaid(id, to, seen) {
+    if (!cancelNote[id]) {
+      var n = cancelNote[id] = { seen: [] };
       setTimeout(function () {
-        var n = cancelNote;
-        cancelNote = null;
+        delete cancelNote[id];
         say('Cancelled.' + (n.seen.length ? ' ' + n.seen.join(' and ') + ' had already seen it; look at the document before you Tell again.' : ''));
       }, 60);
     }
-    if (seen) cancelNote.seen.push(to);
+    if (seen) cancelNote[id].seen.push(to);
   }
   async function cancel(id) {
     var off = function () {
-      var mine = cancelled[id] = waits[id] || {};     // the events that follow still find what to say of each agent
-      setTimeout(function () { if (cancelled[id] === mine) delete cancelled[id]; }, 5000);   // not a later Cancel's
+      // The events that follow still find what to say of each agent. A Cancel that finds no place left (an earlier
+      // Cancel of this thread took them off, its answer still to come) leaves the earlier one's, and its timer.
+      if (waits[id]) {
+        var mine = cancelled[id] = waits[id];
+        setTimeout(function () { if (cancelled[id] === mine) delete cancelled[id]; }, 5000);   // not a later Cancel's
+      }
       delete telling[id]; delete waits[id]; touched(id);
     };
     var waited = waits[id];
@@ -4081,7 +4129,7 @@ var create = function (ROOT, CFG, opts) {
         delete telling[d.id];
         if (d.agent !== undefined) { waitOff(d.id, d.agent); endedAt[d.id + '\n' + d.agent] = ++seenSeq; }   // a Tell job's end names no agent: it ends no agent's Tell
         touched(d.id);
-        if (waited) cancelSaid(waited.to, d.seen);
+        if (waited) cancelSaid(d.id, waited.to, d.seen);
       });
       // A Tell that waits for an agent (SPEC 9.8, 10.5): queued, listed to the agent, ended by its action reply.
       live.addEventListener('tell-queued', function (ev) {

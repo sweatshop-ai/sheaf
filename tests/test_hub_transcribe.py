@@ -735,16 +735,19 @@ def test_a_key_file_that_keeps_changing_is_not_used_this_time_and_read_again_the
 
 
 def test_a_chmod_during_the_read_is_seen_in_the_pass_that_re_reads(browser, row_relay, key_file, monkeypatch):
-    real, done = os.fstat, []
+    real, calls = os.fstat, []
 
     def fstat(fd):
         st = real(fd)
-        if not done:                                                        # the file opens up right after the first stat
-            done.append(1)
+        calls.append(1)
+        if len(calls) == 1:                                                 # the file is rewritten right after the opening stat: the first pass re-reads
+            key_file.write_text(f"TRANSCRIBE_API_KEY={KEY}\n# rewritten\n")
+        elif len(calls) == 2:                                               # and opens up right after the first pass's stat: the second pass must see it
             key_file.chmod(0o644)
         return st
     monkeypatch.setattr(transcribe.os, "fstat", fstat)
     assert row_relay._key() is None                                         # the key of this pass is not used
+    assert len(calls) == 3                                                  # opening stat, first pass, second pass
     rows = [r for r in diagnostics.read() if r["kind"] == "transcribe-key-file"]
     assert len(rows) == 1 and "mode 0600" in rows[0]["reason"]
 
@@ -766,25 +769,31 @@ def test_a_key_file_over_the_cap_is_refused_without_reading_it_whole(browser, ro
     assert len(rows) == 1 and "too large" in rows[0]["reason"]
 
 
-def test_a_descriptor_that_fdopen_closed_before_it_failed_is_not_closed_again(browser, row_relay, key_file, monkeypatch):
-    """`os.fdopen` closes the descriptor it was given when it fails after building its file object. The hub must not
-    close that number a second time: another thread may have been given it by then."""
-    closed = []
-    real_close = os.close
-
-    def close(fd):
-        closed.append(fd)
-        real_close(fd)                                                      # a second close of one number raises EBADF here
-
+def test_a_failure_inside_fdopen_neither_leaks_nor_double_closes_a_descriptor(browser, row_relay, key_file, monkeypatch):
+    """The library is never given a descriptor to own: whether `os.fdopen` closes what it was given before it raises is
+    its business, and the hub's own number is closed once, so no number another thread was given is closed twice and
+    none is left open."""
     def fdopen(fd, *a, **k):
-        close(fd)                                                           # what the library does before it raises
-        raise OSError(5, "Input/output error")
-    monkeypatch.setattr(transcribe.os, "close", close)
+        raise OSError(5, "Input/output error")                              # fails before it owns anything, closing nothing
     monkeypatch.setattr(transcribe.os, "fdopen", fdopen)
+    before = set(os.listdir("/proc/self/fd"))
     assert row_relay._key() is None
-    assert len(closed) >= 2                                                 # the number fdopen got and the hub's own: two numbers, each closed once (a repeat raises above)
+    assert set(os.listdir("/proc/self/fd")) == before                       # nothing left open, the log's own file included
     rows = [r for r in diagnostics.read() if r["kind"] == "transcribe-key-file"]
     assert len(rows) == 1 and "cannot be read" in rows[0]["reason"]
+
+
+def test_fdopen_is_told_not_to_close_the_descriptor(row_relay, key_file, monkeypatch):
+    """What a real fdopen would do on failure after it built its file object is to close the number it owns: it must not
+    own the hub's."""
+    seen, real = [], os.fdopen
+
+    def fdopen(fd, *a, **k):
+        seen.append(k.get("closefd", True))
+        return real(fd, *a, **k)
+    monkeypatch.setattr(transcribe.os, "fdopen", fdopen)
+    assert row_relay._key()[0] == KEY
+    assert seen == [False]
 
 
 def test_a_key_file_at_the_cap_is_still_taken(row_relay, key_file):

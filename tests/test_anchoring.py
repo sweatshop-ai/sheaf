@@ -222,6 +222,18 @@ def test_a_heading_with_an_unclosed_opener_takes_the_block_before_it_and_keeps_e
     assert re.sub(r"<!--.*?-->", "", out, count=1) == md
     page = pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], out)
     assert "marker" in page and [c.id for c in rdc.parse(out).comments] == [cid]
+    # Every word of the heading is still on the page, in order, and the comment is read once.
+    text = re.sub(r"<[^>]+>", " ", page).split()
+    assert text[:1] == ["The"] and "marker" in text and text.count("marker") == 1
+
+
+@pytest.mark.parametrize("md, quote", [("# a <!-- x\n", "a"), ("## Ab cd <!-- x y\n", "Ab")])
+def test_an_atx_heading_with_a_word_before_an_unclosed_opener_takes_the_block_before_it(md, quote):
+    out, cid = comment_on(md, quote)
+    head = md.split(" <!--")[0]
+    assert out.startswith("%s<!-- sheaf-comment id=%s" % (head, cid))
+    assert re.sub(r"<!--.*?-->", "", out, count=1) == md
+    assert [c.id for c in rdc.parse(out).comments] == [cid]
 
 
 def test_a_comment_on_words_after_an_unclosed_opener_is_written_before_it():

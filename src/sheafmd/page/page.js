@@ -3420,6 +3420,20 @@ var create = function (ROOT, CFG, opts) {
   // `[ ]` / `[x]` of that one item in the .md (sheafmd.edit._toggle_boxes).
   // A click on the item's text is for the caret and for selecting, so the
   // <label> pandoc wraps around the item ticks the box only on the label's words (onLabelWords).
+  // Share's box is the control itself, pressed by its owner and refused to another member (SPEC 10.11), on a page whose
+  // block editing is off too, as the other words' buttons are: so it is not in the canEdit handler below.
+  if (canSave) {
+    main.addEventListener('click', function (e) {
+      var t = e.target, lab = t && t.closest && t.closest('label');
+      var box = t && t.tagName === 'INPUT' && t.type === 'checkbox' ? t : lab && main.contains(lab) && lab.querySelector('input[type="checkbox"]');
+      var share = box && toggleOf.get(box);
+      if (!share || (t !== box && t.closest('a'))) return;      // a link in the line opens
+      e.stopImmediatePropagation();                              // the canEdit handler below never sees it
+      e.preventDefault();                                       // the browser's own toggle is cancelled
+      if (t !== box && (t.closest('.rd-badge, [data-rd-ui]') || editing || e.detail > 1 || !onLabelWords(lab, e, true))) return;
+      pressShare(share);
+    });
+  }
   if (canEdit) {
     main.addEventListener('click', function (e) {
       var t = e.target;
@@ -3430,15 +3444,12 @@ var create = function (ROOT, CFG, opts) {
         if (!own || (t.closest && t.closest('a'))) return;       // a link in the line opens
         e.preventDefault();                                       // the browser's own toggle of the label is cancelled
         if (t.closest && t.closest('.rd-badge, [data-rd-ui]')) return;       // a comment's badge opens its thread, it does not tick
-        if (editing || e.detail > 1 || !onLabelWords(lab, e, toggleOf.has(own))) return;       // a double or triple click selects, it does not tick again
+        if (editing || e.detail > 1 || !onLabelWords(lab, e)) return;       // a double or triple click selects, it does not tick again
         t = own;
       }
       // The browser's own toggle is cancelled and replaced by ours: inside a
       // contenteditable it is not reliable, and the attribute must move with it.
       e.preventDefault();
-      // Share's box is the control itself: pressed by its owner, refused to another member (SPEC 10.11).
-      var share = toggleOf.get(t);
-      if (share) { pressShare(share); return; }
       // A box of the other words is pressed with its button (SPEC 10.11).
       if (isActBox(t)) { say(PRESS_IT); return; }
       var b = blockOf(t);

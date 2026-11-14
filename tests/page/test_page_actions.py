@@ -703,7 +703,7 @@ def test_a_box_whose_save_is_refused_does_not_tick_because_an_older_save_is_owed
 
 
 def test_an_item_added_above_the_pressed_box_during_the_undo_leaves_the_tick_on_that_box(sheaf):
-    # #148, 7, gate on 91b73f3: the box was found again by its number, which the new item had moved onto Done.
+    # #148, 7, gate on 91b73f3: the box was found again by its number, which the new item had moved onto itself.
     p, f = sheaf.page, sheaf.site.file
     stand_still(p)
     bar(p).nth(1).click()                               # Done
@@ -715,7 +715,7 @@ def test_an_item_added_above_the_pressed_box_during_the_undo_leaves_the_tick_on_
     p.clock.run_for(1100)
     until(lambda: "extra" in f.read_text(encoding="utf-8"), what="the edit, saved by the reload's settle")
     text = f.read_text(encoding="utf-8")
-    assert "- [x] Done" in text and "- [ ] Approve" in text, text
+    assert "- [x] Done" in text and "- [ ] Approve" in text and "[x] extra" not in text, text
 
 
 def test_an_item_typed_above_the_box_just_before_the_press_never_ticks_another_box(sheaf):
@@ -727,7 +727,7 @@ def test_an_item_typed_above_the_box_just_before_the_press_never_ticks_another_b
     p.keyboard.press("Enter")
     p.keyboard.type("extra")
     until(lambda: "extra" in p.inner_text("main ul"), what="the new item on screen")
-    bar(p).nth(0).click()                               # Approve, within the autosave's 2.5 s
+    bar(p).nth(1).click()                               # Done, within the autosave's 2.5 s
     p.clock.run_for(3000)                               # the autosave goes
     until(lambda: "extra" in f.read_text(encoding="utf-8"), what="the autosave")
     until(lambda: p.evaluate("document.querySelector('#rd-state').textContent") != "Saving…", what="its answer")
@@ -738,7 +738,7 @@ def test_an_item_typed_above_the_box_just_before_the_press_never_ticks_another_b
     until(lambda: "more" in f.read_text(encoding="utf-8"), what="the edit, saved by the reload's settle")
     p.wait_for_timeout(500)
     text = f.read_text(encoding="utf-8")
-    assert "- [ ] Done" in text and "[x] Done" not in text and "[x] extra" not in text, text
+    assert "[x] extra" not in text and "[x] Approve" not in text, text
 
 
 def test_an_upgrade_while_a_comment_waits_for_the_tick_does_not_ask_to_send_it(sheaf, site):

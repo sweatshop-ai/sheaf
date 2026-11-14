@@ -212,7 +212,8 @@ def share(text_: str, by: str, date: str) -> str:
 
 
 _BOX_RE = re.compile(r"(\s*[-*+] \[)([ xX])(\] (Shared with the team|Share|Stop James)(?:\s+@\S+)?\s*)")
-_LABELS = {"Shared with the team": "Share"}      # Share's tick box says it in its own words (9.11); the word is Share
+# Share's tick box says it in its own words (9.11); the word is Share. The_list.LABELS holds the same, and imports this module.
+_LABELS = {"Shared with the team": "Share"}
 
 
 def unshare(text_: str) -> str:

@@ -10,15 +10,24 @@
 - F7 (d) : les deux tests du ticket 50 gardent `wait_for_timeout(500)` et `wait_for_timeout(300)` : sous charge le stockage peut déjà être relisible et le chemin tenu n'est pas exercé (faux vert) ; remplacer par un signal positif, comme le troisième test (`until(... stored_drafts ...)`).
 Classe : c, d.
 
+**Décisions (Rhea, 2026-11-14) :**
+- F1 : corrigé. L'écriture de purge ne dessine plus la ligne dans la lecture (`commentDraftsSave(held, true)` la dessine dans un minuteur de 0 ms) : une levée n'est plus prise pour une lecture refusée et ne sort plus d'une lecture non stricte. Test rouge d'abord.
+- F2 : corrigé par le même geste (la ligne et la liste sont redessinées quand l'appelant a fini) ; peu coûteux, sans perte de donnée. Le test compte les redessins faits dans une lecture (zéro attendu).
+- F3 : limite écrite dans le SPEC (lecture puis écriture non atomiques entre onglets, même forme que tout écrivain).
+- F4 : limite écrite dans le SPEC (stockage plein) ; pas de correctif d'une ligne, pas de test.
+- F5 : limite déjà dite par la décision du ticket 51 ; le SPEC y renvoie.
+- F6 : gardé ; une purge écrit la liste filtrée, comme toute écriture ; écrit dans le SPEC.
+- F7 : corrigé. Les deux tests du ticket 50 attendent un signal positif (une lecture refusée est vue, l'entrée est encore dans le stockage, puis le stockage se vide) au lieu de `wait_for_timeout`.
+
 **Blocked by:** none
 
-**Claimed by:**
+**Claimed by:** Imani 2026-11-14
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 **Par où commencer :** F7 d'abord (tests sans attente fixe, sur t-compute, pas sur le portable), puis F1 : un test où `unsentLine` lève pendant la purge. Pour F2 à F5, décider avec le propriétaire du SPEC s'il s'agit d'une limite à écrire ou d'un correctif.
 
-- [ ] F1 : une levée de `unsentLine` dans la purge ne passe ni pour une lecture refusée ni ne sort d'une lecture non stricte — test, rouge avant
-- [ ] F2 à F5 : décision écrite par cas (corriger ou limite dans le SPEC)
-- [ ] F6 : décision écrite (garder ou ne pas supprimer les entrées mal formées dans une purge)
-- [ ] F7 : les deux tests du ticket 50 n'attendent plus un temps fixe : ils prouvent que le chemin tenu est exercé
+- [x] F1 : une levée de `unsentLine` dans la purge ne passe ni pour une lecture refusée ni ne sort d'une lecture non stricte — test, rouge avant
+- [x] F2 à F5 : décision écrite par cas (corriger ou limite dans le SPEC)
+- [x] F6 : décision écrite (garder ou ne pas supprimer les entrées mal formées dans une purge)
+- [x] F7 : les deux tests du ticket 50 n'attendent plus un temps fixe : ils prouvent que le chemin tenu est exercé

@@ -317,7 +317,9 @@ def compare_versions(a, b) -> int | None:
 def ended(pid: int) -> bool:
     """Whether the process `pid` has ended. A hub that this very process started is its child
     and stays a zombie until reaped, so reap it first; a hub started from a shell is nobody's
-    child, and `waitpid` says so."""
+    child, and `waitpid` says so. The reap takes the child's exit status: a caller that waits for
+    this pid itself (`Popen.wait`) afterwards finds it gone and gets 0 (ECHILD), not the code the
+    hub exited with. Such a caller runs the command in a process of its own."""
     signals.reap(pid)
     return not signals.exists(pid)
 

@@ -12,7 +12,9 @@ import shlex
 import shutil
 import signal
 import stat
+import subprocess
 import sys
+import threading
 import time
 
 import pytest
@@ -767,12 +769,21 @@ def test_restart_through_the_service_makes_room_for_a_hub_a_command_started(
     old = hubclient.client().challenge()
     assert old["service"] is False
     monkeypatch.setenv("FAKE_START_HUB", sys.executable)
-    r = sheaf("restart")
-    assert r.code == 0, r.err
-    assert "stopping the hub that is running" in r.out
+    # In its own process: the hub is this test's child, and `sheaf restart` run here reaps it
+    # (`hubclient.ended`), so `Popen` reports 0 whatever the hub exited with. A thread of the test waits
+    # for the child instead (a zombie is a process that still exists to the command, which would wait
+    # for it in vain), and its code is the hub's own.
+    code = []
+    waiter = threading.Thread(target=lambda: code.append(started.wait()))
+    waiter.start()
+    r = subprocess.run([sys.executable, "-m", "sheafmd", "restart"], capture_output=True, text=True,
+                       timeout=120)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "stopping the hub that is running" in r.stdout
     got = hubclient.client().challenge()
     assert got["service"] is True and got["boot"] != old["boot"]     # the service's hub holds the port
-    assert started.wait(timeout=30) == 0
+    waiter.join(timeout=30)
+    assert code == [0]                                          # the hub's own exit code
     assert hub_exits() == [(old["boot"], "upgrade")]           # tabs ride through, as on the direct path
     assert fake.calls()[-1] == "systemctl --user restart sheaf.service"
 

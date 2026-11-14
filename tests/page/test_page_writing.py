@@ -2653,32 +2653,35 @@ def given_up(tab, slow_hub, form, hello=False):
     assert p.input_value("#rd-popover textarea") == SLOW
 
 
-def reply_is_in_its_thread(p):
-    """The form is gone and the reply is in the thread, once. False while the page reloads (its popover is not there yet)."""
+def reply_is_in_its_thread(thread):
+    """The form is gone, the reply is in the thread once, the page's store has none of it and the thread's field is
+    back, all at one moment. False while the page reloads (its popover or its context is not there yet)."""
+    p = thread.page
     try:
         shown = p.evaluate("(document.querySelector('#rd-popover') || {}).innerText || ''")
-        return not typed(p) and shown.count(SLOW) == 1
+        return not typed(p) and shown.count(SLOW) == 1 and SLOW not in comment_store(thread) and p.is_visible("#rd-popover textarea")
     except Exception as e:
         if any(said in str(e) for said in RELOADING):
             return False
         raise
 
 
-# The reply is drawn a moment after the toast, not with it: by the event of the write, or, when the stream said
-# hello while the send was out, by the check the page makes when it gives up (it holds the event until that
-# answer), and that answer, which names a hash the page does not hold, reloads the page. A read made at the toast
-# found the thread without it (CI, twice on main), so the test waits for the reply, through a reload. The toast
-# is waited for only where no hello was: a page that reloads draws the reply with no toast.
+# The reply is drawn a moment after the toast, not with it. When the stream said hello while the send was out, the
+# page makes the check that send put off once it gives up, and the event of the write waits for that answer, which
+# waits for the hub's lock (released below). The answer names a hash the page does not hold, so the page reloads,
+# and the old page may draw the reply just before it does. A read made at the toast found the thread without the
+# reply (CI, twice on main), so the test waits for the whole state at one moment, through a reload. The TAKEN toast
+# is said in both orders but a reload wipes it, so it is waited for as "the toast, or the reload"; a hello of the
+# stream's own may come in the case without one (a loaded runner, ticket 20), which is why that case waits so too.
 @pytest.mark.parametrize("hello", [False, True], ids=["as it comes", "a stream that says hello while the send is out"])
 def test_a_reply_given_up_that_the_hub_took_after_all_goes_from_the_page_and_the_store(thread, slow_hub, hello):
     p = thread.page
     given_up(thread, slow_hub, "reply", hello=hello)
+    mark(p)
     slow_hub.release()
     if not hello:
-        toasted(p, TAKEN)
-    until(lambda: reply_is_in_its_thread(p), what="the reply in its thread, the form gone")
-    assert SLOW not in comment_store(thread)
-    assert p.is_visible("#rd-popover textarea"), "the thread's field did not come back"
+        until(lambda: TAKEN in toast(p) or gone(p), what="the toast, or the reload that wipes it")
+    until(lambda: reply_is_in_its_thread(thread), what="the reply in its thread, the form gone, the store clear")
 
 
 def test_a_new_comment_given_up_that_the_hub_took_after_all_is_not_kept_on_the_page_that_comes_back(thread, slow_hub):

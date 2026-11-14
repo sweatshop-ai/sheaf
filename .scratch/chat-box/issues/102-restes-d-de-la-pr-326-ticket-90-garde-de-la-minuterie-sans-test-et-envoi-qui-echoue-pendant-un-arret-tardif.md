@@ -6,7 +6,7 @@
 
 **Blocked by:** PR 326 (merged, 20b24c7)
 **Claimed by:** Nia
-**Status:** ready-for-agent → in progress
+**Status:** done (merged d990a53, PR 344)
 
 ## Outcome (Nia, PR 344)
 

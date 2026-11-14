@@ -4,9 +4,7 @@ Restated on 2026-11-09 (ticket 03, E): the bar a selection used to offer is gone
 (bar shaped like the field, selection left intact for the phone's Copy menu, touchstart cancelled, bar opens box) no longer apply."""
 import pytest
 
-from pagehelp import at, close_context, new_context, select, select_by_touch
-from sheafmd import comments as rdc
-from sheafmd.source import update_file
+from pagehelp import at, close_context, new_context, open_with_comment, select, select_by_touch
 
 pytestmark = pytest.mark.page
 
@@ -39,13 +37,8 @@ def test_a_touch_selection_opens_the_box_with_the_cursor_in_the_field_and_no_bar
     assert phone.page.locator(BTN).count() == 0
 
 
-def test_touching_a_number_puts_the_cursor_in_the_field_too(touch_tab, site):
-    """The comment is written before the page opens: the `phone` fixture has the page open already, and a page open when its
-    file changes reloads itself, which a second `open()` then races (ticket 98, as ticket 78)."""
-    site.file.write_text(PLAN_MD, encoding="utf-8")
-    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
-                                                     "Bea", "2026-10-14T10:00")[0])
-    p = touch_tab.open().page
+def test_touching_a_number_puts_the_cursor_in_the_field_too(touch_tab):
+    p = open_with_comment(touch_tab, PLAN_MD, "apples", "Why?", "Bea")
     p.touchscreen.tap(*centre(p, ".rd-badge"))
     p.wait_for_selector(FIELD)
     assert focused(p) == "TEXTAREA", "the cursor is not in the field"

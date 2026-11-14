@@ -493,7 +493,7 @@ def test_a_merged_save_that_answers_after_the_root_was_forgotten_leaves_no_toast
     assert site.hub.forget_root("work").name == "work"
     until(lambda: GONE in notice(p), what="the notice that the document is gone")
     held[0].fulfill(status=200, content_type="application/json",
-                    body=json.dumps({"hash": "x", "changed": [1], "merged": True, "conflicts": []}))
+                    body=json.dumps({"ok": True, "hash": "x", "changed": [1], "merged": True, "conflicts": []}))
     p.wait_for_timeout(500)
     assert p.evaluate("sessionStorage.getItem('rd-toast')") is None
 

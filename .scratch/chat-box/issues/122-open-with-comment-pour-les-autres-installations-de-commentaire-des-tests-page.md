@@ -12,3 +12,14 @@ Revue de la PR 349 : classes c1, c2, d1 seulement (une remarque d'ordre sans eff
 **Claimed by:** Mira
 
 **Status:** ready-for-agent
+
+## Decision (Mira, PR chat-box/122)
+
+`open_with_comment(tab, md, ...)` takes `md=None`: the file the site fixture wrote stays as it is. Per group:
+
+- **Converted (md=None):** the setups that write one comment on `tab.site.file` and open the tab at once: test_page_chat_box (`open_thread` and seven tests), test_page_dictation (`open_thread`), test_mount_dictation (the proxy-mode test), test_page_agent (the running-Tell test). Twelve setups, behaviour unchanged. In the long-comment test of test_page_chat_box the viewport is now set before the write instead of between the write and the open: nothing reads the file in between.
+- **Left as is, `front` fixture** (test_mount_dictation, two tests): `front` is the mounted front, not a `Tab`; the helper opens `tab.open().page` and writes through `tab.site`.
+- **Left as is, `doc` fixture** (test_page_mode_toggle): the page is already open when the comment is written and the test waits for the reload; the helper opens after the write, which would remove the thing under test.
+- **Left as is, setup between the write and the open** (test_page_waiting_tell `ask_agent`, test_page_work `as_member`, test_page_agent `with_lines`): the hub or the routes are changed after the comment is written and before `open()`; the helper opens inside itself, so these would need a `before_open` hook for three call sites.
+- **Left as is, more than one comment, a reply or a status** (test_page_agent replies and `waiting_tell`, test_page_chat_box `set_status` and reply setups, test_page_dictation line 479, test_page_writing, test_page_mobile_composer): the helper adds one comment and no more.
+

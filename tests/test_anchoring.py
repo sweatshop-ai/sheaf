@@ -310,3 +310,83 @@ def test_a_tag_after_an_escaped_backslash_is_still_a_tag_and_hides_its_backtick(
     out, cid = rdc.add_comment(md, 1, s, e, "word", "why", "Ada", "2026-11-14T10:00")
     assert [c.id for c in rdc.parse(out).comments] == [cid]
     assert "<code>" not in pandoc(["-f", "gfm", "-t", "html"], out.split("-->")[0].split("<!--")[0])
+
+
+# ── table cells (ticket 57) ──
+
+def _cells(row):
+    """The cells of a row as the GFM reader splits it: at every `|` with no odd run of backslashes before it."""
+    return [c.strip() for c in re.split(r"(?<!\\)(?:\\\\)*\|", row.strip())[1:-1]]
+
+
+TABLES = [
+    # (md, quote, text before the block, text of the row after it)
+    ("| a | b |\n|---|---|\n| one | two |\n", "n", "| a | b |\n|---|---|\n| one", " | two |\n"),
+    ("| a | b |\n|---|---|\n| one two | x |\n", "one", "| a | b |\n|---|---|\n| one two", " | x |\n"),
+    ("| a | b |\n|---|---|\n| x | one two |\n", "one", "| a | b |\n|---|---|\n| x | one two", " |\n"),
+    ("|a|b|\n|-|-|\n|one|two|\n", "n", "|a|b|\n|-|-|\n|one", "|two|\n"),
+    ("| a | b |\n|---|---|\n| one\\|two | x |\n", "one", "| a | b |\n|---|---|\n| one\\|two", " | x |\n"),
+    ("| a | b |\n|---|---|\n| `x\\|y` z | q |\n", "z", "| a | b |\n|---|---|\n| `x\\|y` z", " | q |\n"),
+    ("| a | b |\n|---|---|\n| `x\\|y` z | q |\n", "x", "| a | b |\n|---|---|\n| `x\\|y` z", " | q |\n"),
+    ("| a | b |\n|---|---|\n| one \\\\| two |\n", "one", "| a | b |\n|---|---|\n| one \\\\", "| two |\n"),
+    ("| a | b |\n|---|---|\n| one | two\n", "one", "| a | b |\n|---|---|\n| one", " | two\n"),
+    ("| a | b |\n|---|---|\n| one | two\n", "two", "| a | b |\n|---|---|\n| one | two", "\n"),
+]
+
+
+@pytest.mark.parametrize("md, quote, before, after", TABLES)
+def test_a_comment_on_words_of_a_table_cell_goes_at_the_end_of_the_cell(md, quote, before, after):
+    s, e = sel(md, quote)
+    out, cid = rdc.add_comment(md, 0, s, e, quote, "why", "Ada", "2026-11-14T10:00")
+    assert out.startswith(before + "<!-- sheaf-comment id=%s" % cid) and out.endswith("-->" + after)
+    assert re.sub(r"<!--.*?-->", "", out, count=1) == md
+    c = rdc.parse(out).comments[0]
+    assert c.quote == quote
+
+
+def test_a_cell_is_whole_for_a_reader_that_compares_cells():
+    md = "| a | b |\n|---|---|\n| one two | x |\n"
+    s, e = sel(md, "one")
+    out, _ = rdc.add_comment(md, 0, s, e, "one", "why", "Ada", "2026-11-14T10:00")
+    page = pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], out)
+    assert "<td>one two" in page.replace("\n", "") and "one<!--" not in page
+    assert page.count("<!--") == 1
+
+
+def test_a_comment_in_a_cell_of_the_header_row_goes_at_the_end_of_that_cell():
+    md = "| alpha beta | b |\n|---|---|\n| x | y |\n"
+    s, e = sel(md, "alpha")
+    out, cid = rdc.add_comment(md, 0, s, e, "alpha", "why", "Ada", "2026-11-14T10:00")
+    assert out.startswith("| alpha beta<!-- sheaf-comment id=%s" % cid)
+
+
+def test_a_code_span_that_runs_across_cells_does_not_take_the_block_inside_it():
+    # Opus review 1, P1: pandoc splits the cells first, parse reads code spans over the whole table, so a
+    # block at the end of the cell would sit in a span parse sees and the comment would be lost.
+    md = "| a | b |\n|---|---|\n| one `x | y` z |\n"
+    s, e = sel(md, "one")
+    out, cid = rdc.add_comment(md, 0, s, e, "one", "why", "Ada", "2026-11-14T10:00")
+    assert [c.id for c in rdc.parse(out).comments] == [cid]
+    assert re.sub(r"<!--.*?-->", "", out, count=1) == md
+
+
+@pytest.mark.parametrize("cell, quote, expect", [
+    ("C:\\ dir\\", "dir", "| C:\\ dir<C>\\ | x |"),       # one backslash would escape the `<`
+    ("C:\\ dir\\\\", "dir", "| C:\\ dir\\\\<C> | x |"),    # two are a backslash
+])
+def test_a_cell_that_ends_in_a_backslash_keeps_the_block_from_being_escaped(cell, quote, expect):
+    md = "| a | b |\n|---|---|\n| %s | x |\n" % cell
+    s, e = sel(md, quote)
+    out, cid = rdc.add_comment(md, 0, s, e, quote, "why", "Ada", "2026-11-14T10:00")
+    assert re.sub(r"<!--.*?-->", "<C>", out, count=1).endswith(expect + "\n")
+    page = pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], out)
+    assert "&lt;!--" not in page and [c.id for c in rdc.parse(out).comments] == [cid]
+
+
+def test_a_cell_with_an_unclosed_opener_takes_the_block_before_it():
+    md = "| a | b |\n|---|---|\n| one | x <!-- open |\n"
+    s, e = sel(md, "x")
+    out, cid = rdc.add_comment(md, 0, s, e, "x", "why", "Ada", "2026-11-14T10:00")
+    assert out.startswith("| a | b |\n|---|---|\n| one | x<!-- sheaf-comment id=%s" % cid)
+    assert re.sub(r"<!--.*?-->", "", out, count=1) == md
+    assert [c.id for c in rdc.parse(out).comments] == [cid]

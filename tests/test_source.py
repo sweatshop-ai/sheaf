@@ -126,6 +126,7 @@ def blocked_until_released(tmp_path, held_path):
     fcntl.flock(holder, fcntl.LOCK_UN)
     holder.close()
     t.join(timeout=10)
+    assert not t.is_alive(), "the update did not finish after the lock was released"
     assert done.is_set() and p.read_text(encoding="utf-8") == DOC + "x\n"
     return waited
 

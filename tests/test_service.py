@@ -786,7 +786,7 @@ def test_restart_through_the_service_makes_room_for_a_hub_a_command_started(
     got = hubclient.client().challenge()
     assert got["service"] is True and got["boot"] != old["boot"]     # the service's hub holds the port
     waiter.join(timeout=30)
-    assert not waiter.is_alive(), "the hub did not exit"
+    assert not waiter.is_alive(), f"the hub (pid {started.pid}) did not exit within 30 s of the restart"
     assert code == [0]                                          # the hub's own exit code
     assert hub_exits() == [(old["boot"], "upgrade")]           # tabs ride through, as on the direct path
     assert fake.calls()[-1] == "systemctl --user restart sheaf.service"

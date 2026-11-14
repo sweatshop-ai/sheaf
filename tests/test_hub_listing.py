@@ -505,6 +505,7 @@ def test_a_page_asked_for_while_the_hub_forgets_its_root_does_not_come_back(brow
     monkeypatch.setattr(hub.docs, "forget_prefix", meanwhile)
     assert hub.forget_root("notes").name == "notes"
     asked["thread"].join(10)
+    assert not asked["thread"].is_alive(), "the request for the document did not finish"
     assert asked["status"] == 404 and "notes/a.md" not in hub.entries
     new = md(tmp_path / "y" / "notes" / "a.md", PLAN + "\nThe new document.\n")
     assert hub.render(new, {}, None)["doc"] == "notes/a.md"
@@ -593,6 +594,7 @@ def test_a_write_under_way_while_its_root_is_forgotten_leaves_no_version_the_nex
     assert r.status == 200, r.json()
     adopted = r.json()["hash"]
     forget[0].join(10)
+    assert not forget[0].is_alive(), "the forget did not finish"
     assert done["root"].name == "notes" and "notes/a.md" not in hub.entries
     assert adopted == md_hash(old.read_text(encoding="utf-8"))
     assert hub.versions.get("notes/a.md", adopted) is None

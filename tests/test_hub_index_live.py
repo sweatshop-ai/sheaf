@@ -96,6 +96,7 @@ def test_two_streams_opening_together_start_the_board_once(world):
     hub.index.arm = arm
     first = world.get("/_/live")
     later[0].join(5)
+    assert not later[0].is_alive(), "the second stream did not finish"
     assert first.status == 200 and [a.status for a in answers] == [200]
     assert len(calls) == 1
     assert hub.index_bus.count() == 2
@@ -909,6 +910,7 @@ def test_a_members_stream_slow_to_judge_an_event_holds_no_look_no_sweep_and_no_o
         release.set()
         first.join(5)
         reader.join(5)
+    assert not first.is_alive() and not reader.is_alive(), "the judging request and the reader did not finish after the release"
     assert got == [("status", {"doc": "work/a.md", "root": "work"})]
     assert statuses(mine) == [{"doc": "work/b.md", "root": "work"}, {"doc": "work/c.md", "root": "work"}]
 
@@ -968,6 +970,7 @@ def test_a_members_stream_waiting_on_git_holds_no_look_no_sweep_no_page_and_no_o
     finally:
         release.set()
         reader.join(5)
+    assert not reader.is_alive(), "the reader did not finish after the release"
     assert got == [("status", {"doc": "work/a.md", "root": "work"})]
     assert statuses(mine) == [{"doc": "work/b.md", "root": "work"}, {"doc": "work/c.md", "root": "work"}]
 

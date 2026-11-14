@@ -273,6 +273,7 @@ def test_a_refusal_queued_behind_a_red_toast_is_said_again_when_a_form_held_the_
     p.clock.install()
     p.reload()
     p.wait_for_selector("button.rd-act")
+    stand_still(p)                                      # from now on the clock moves only when the test runs it
     p.route("**/_/tick", lambda r: r.abort())
     bar(p).nth(0).click()
     p.clock.run_for(5100)
@@ -281,16 +282,18 @@ def test_a_refusal_queued_behind_a_red_toast_is_said_again_when_a_form_held_the_
     p.click(".rd-badge")
     p.wait_for_selector("#rd-popover textarea")
     p.fill("#rd-popover textarea", "my reply")
-    f.write_text(f.read_text(encoding="utf-8") + "\nFrom outside.\n", encoding="utf-8")
-    p.wait_for_selector("#rd-popover .rd-hold")         # the form holds the reload
     mark(p)
-    bar(p).nth(0).click()
-    p.clock.run_for(5100)                               # the press is refused: its toast waits behind the red one
-    p.clock.run_for(7500)                               # more than 7 s after the refusal was said
+    bar(p).nth(0).click()                               # the press, in its Undo
+    f.write_text(f.read_text(encoding="utf-8") + "\nFrom outside.\n", encoding="utf-8")
+    p.wait_for_timeout(500)                             # the page hears of the change (the clock is still)
+    p.clock.run_for(100)
+    p.clock.run_for(5000)                               # the press is refused at 10.2 s: its toast waits behind the red one (to 12 s)
+    p.clock.run_for(7500)                               # 17.7 s: more than 7 s after the refusal was said, and it is up till 19 s
     assert p.evaluate("window.__same_load") is True, "the page reloaded under the form"
     p.click("#rd-popover button[data-f=ok]")            # the reply goes, and the held reload runs
     until(lambda: "my reply" in f.read_text(encoding="utf-8"), what="the reply in the file")
     reloaded(p)
+    p.clock.run_for(3000)                               # the page's own toast of the change first, then the refusal
     until(lambda: "reload the page" in toast(p), what="the refusal, said again on the page the reload brings")
 
 

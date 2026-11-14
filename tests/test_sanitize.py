@@ -571,7 +571,7 @@ def test_no_split_of_a_style_lets_user_modify_or_a_backslash_through():
     """Bypass neighbours of the string- and comment-aware split: quotes, comments, escapes and newlines in every order
     around a declaration that makes text editable. The split may differ from a browser's; the output may not carry the name."""
     pieces = ['"', "'", "/*", "*/", ";", "\\", "\n", ":", " ", "(", ")", "[", "]", "{", "}", "color: red", "-webkit-user-modify: read-write", "user-modify",
-              "-moz-user-\\6d odify:read-write", "a", "url(", "URL( ", "url(/*", "url(it's"]
+              "-moz-user-\\6d odify:read-write", "a", "url(", "URL( ", "url(/*", "url(it's", "@", "#", "\\75 ", "@url(", "#url(", "\\3a "]
     rng = random.Random(96)
     for _ in range(3000):
         style = "".join(rng.choice(pieces) for _ in range(rng.randint(1, 12)))
@@ -632,3 +632,215 @@ def test_only_a_plain_unquoted_url_is_read_as_a_token(style, want):
     out = sanitize(f'<p><span style="{html.escape(style)}">b</span></p>')
     assert "user-modify" not in out.lower()
     assert next(a for t, a in tags_of(out) if t == "span").get("style") == want
+
+
+# --- ticket 110: the split is checked against a reference that follows the CSS Syntax 3 tokenizer --------------------------------
+
+def _css_reference_split(s: str) -> list[str]:
+    """`s` cut at the `;` that end a declaration, by the CSS Syntax 3 tokenizer (3.3 to 4.3) and its block nesting: a written
+    out second implementation that shares no code with `_declarations`. A `(`, `[`, `{` and a function open a block that only
+    its own closer ends; a closer that does not match the innermost block is a token of its own; a block left open runs to the end."""
+    n, i, cuts, blocks = len(s), 0, [], []
+    ws, hexd = " \t\n\r\f", "0123456789abcdefABCDEF"
+
+    def at(k):
+        return s[k] if k < n else ""
+
+    def valid_escape(k):
+        return at(k) == "\\" and at(k + 1) != "\n"
+
+    def name_char(c):
+        return bool(c) and (c.isascii() and (c.isalnum() or c in "_-") or ord(c) >= 0x80)
+
+    def name_start(c):
+        return bool(c) and (c.isascii() and (c.isalpha() or c == "_") or ord(c) >= 0x80)
+
+    def start_ident(k):
+        c = at(k)
+        if c == "-":
+            return name_start(at(k + 1)) or at(k + 1) == "-" or valid_escape(k + 1)
+        return name_start(c) or valid_escape(k)
+
+    def start_number(k):
+        c = at(k)
+        if c in "+-":
+            return at(k + 1).isdigit() or (at(k + 1) == "." and at(k + 2).isdigit())
+        return c.isdigit() if c != "." else at(k + 1).isdigit()
+
+    def escape(k):
+        """(text, next index) of the escape that starts after the backslash at k - 1."""
+        c = at(k)
+        if not c:
+            return "\ufffd", k
+        if c in hexd:
+            j = k
+            while j < k + 6 and at(j) and at(j) in hexd:
+                j += 1
+            v = int(s[k:j], 16)
+            if at(j) == "\r" and at(j + 1) == "\n":
+                j += 2
+            elif at(j) and at(j) in ws:
+                j += 1
+            return ("\ufffd" if v == 0 or v > 0x10FFFF or 0xD800 <= v <= 0xDFFF else chr(v)), j
+        return c, k + 1
+
+    def name(k):
+        out = []
+        while True:
+            if name_char(at(k)):
+                out.append(at(k))
+                k += 1
+            elif valid_escape(k):
+                t, k = escape(k + 1)
+                out.append(t)
+            else:
+                return "".join(out), k
+
+    def bad_url(k):
+        while at(k) and at(k) != ")":
+            k = escape(k + 1)[1] if valid_escape(k) else k + 1
+        return k + 1 if at(k) == ")" else k
+
+    def url(k):
+        while at(k) and at(k) in ws:
+            k += 1
+        while True:
+            c = at(k)
+            if c in ("", ")"):
+                return k + 1 if c else k
+            if c in ws:
+                while at(k) and at(k) in ws:
+                    k += 1
+                return k + 1 if at(k) == ")" else (k if not at(k) else bad_url(k))
+            if c in "\"'(" or (c.isascii() and ord(c) < 0x20 and c not in "\t\n\r\f") or ord(c) == 0x7F:
+                return bad_url(k)
+            if c == "\\":
+                if not valid_escape(k):
+                    return bad_url(k)
+                k = escape(k + 1)[1]
+            else:
+                k += 1
+
+    while i < n:
+        c = s[i]
+        if c in ws:
+            while at(i) and at(i) in ws:
+                i += 1
+        elif s.startswith("/*", i):
+            end = s.find("*/", i + 2)
+            i = n if end < 0 else end + 2
+        elif c in "\"'":
+            i += 1
+            while i < n and s[i] != c and s[i] not in "\n":
+                if s[i] == "\\":
+                    i += 2 if i + 1 < n else 1
+                else:
+                    i += 1
+            if at(i) == c:
+                i += 1
+        elif c == "#":
+            i = name(i + 1)[1] if name_char(at(i + 1)) or valid_escape(i + 1) else i + 1
+        elif c in "([{":
+            blocks.append({"(": ")", "[": "]", "{": "}"}[c])
+            i += 1
+        elif c in ")]}":
+            if blocks and blocks[-1] == c:
+                blocks.pop()
+            i += 1
+        elif c == ";":
+            if not blocks:
+                cuts.append(i)
+            i += 1
+        elif c == "@":
+            i = name(i + 1)[1] if start_ident(i + 1) else i + 1
+        elif c in "+-." and start_number(i) or c.isdigit():
+            j = i + 1 if c in "+-" else i
+            while at(j).isdigit():
+                j += 1
+            if at(j) == "." and at(j + 1).isdigit():
+                j += 1
+                while at(j).isdigit():
+                    j += 1
+            if at(j) in ("e", "E") and (at(j + 1).isdigit() or at(j + 1) in ("+", "-") and at(j + 2).isdigit()):
+                j += 2
+                while at(j).isdigit():
+                    j += 1
+            i = name(j)[1] if start_ident(j) else j
+        elif c == "-" and s.startswith("-->", i):
+            i += 3
+        elif c == "<" and s.startswith("<!--", i):
+            i += 4
+        elif start_ident(i):
+            word, j = name(i)
+            if at(j) == "(":
+                j += 1
+                if word.lower() == "url":
+                    k = j
+                    while at(k) in ws and at(k) and at(k + 1) in ws and at(k + 1):
+                        k += 1
+                    if at(k) in ("\"", "'") or (at(k) in ws and at(k) and at(k + 1) in ("\"", "'")):
+                        blocks.append(")")
+                        i = j
+                    else:
+                        i = url(j)
+                else:
+                    blocks.append(")")
+                    i = j
+            else:
+                i = j
+        else:
+            i += 1
+    parts, start = [], 0
+    for k in cuts:
+        parts.append(s[start:k])
+        start = k + 1
+    parts.append(s[start:])
+    return parts
+
+
+SPLIT_CASES = [
+    # (style, the declarations a browser sees)
+    ("a:url(b;c);d:e", ["a:url(b;c)", "d:e"]),
+    ("a:url(/*b)*/;c:d", ["a:url(/*b)*/", "c:d"]),          # a url token ends at its first `)`: the comment never starts
+    ("a:@url(/*b)*/;c:d", ["a:@url(/*b)*/;c:d"]),               # C1: an at-keyword, then a `(` block: `/*b)*/` is a comment, the block is open
+    ("a:#url(/*b)*/;c:d", ["a:#url(/*b)*/;c:d"]),               # C1: a hash, the same
+    ("a:#url(it's;b);c:d", ["a:#url(it's;b);c:d"]),            # C1: the quote opens a string in the block
+    ("a:\\75 rl(/*b)*/;c:d", ["a:\\75 rl(/*b)*/", "c:d"]),  # C2: the escape spells `u`: `\75 rl(` is a url token
+    ("a:\\75 url(/*b)*/;c:d", ["a:\\75 url(/*b)*/;c:d"]),      # C2: the escape is part of the name `uurl`: a function, a comment
+    ("a:b\\:url(/*b)*/;c:d", ["a:b\\:url(/*b)*/;c:d"]),        # C2: the same, with an escaped colon
+    ("a:u\\72 l(/*b)*/;c:d", ["a:u\\72 l(/*b)*/", "c:d"]),  # an escape inside the name
+    ("a:(];b);c:d", ["a:(];b)", "c:d"]),                        # C3: `]` does not close a `(` block
+    ("a:[);b];c:d", ["a:[);b]", "c:d"]),
+    ("a:{(};b)};c:d", ["a:{(};b)}", "c:d"]),
+    ("a:(b;c)];d:e", ["a:(b;c)]", "d:e"]),                      # C3: a closer with no opener is ignored
+    ("a:url(b;c;d", ["a:url(b;c;d"]),
+    ("a:b(;c)d;e:f", ["a:b(;c)d", "e:f"]),
+    ("a:1url(/*b)*/;c:d", ["a:1url(/*b)*/;c:d"]),
+    ("a:-url(/*b)*/;c:d", ["a:-url(/*b)*/;c:d"]),
+    ("a: url(/*b)*/;c:d", ["a: url(/*b)*/", "c:d"]),
+    ("a:.url(/*b)*/;c:d", ["a:.url(/*b)*/", "c:d"]),
+]
+
+
+@pytest.mark.parametrize("style, want", SPLIT_CASES)
+def test_the_reference_splitter_reads_the_cases_as_a_browser_does(style, want):
+    """Guards the reference of the next test: a reference that is wrong would let a wrong split pass."""
+    assert _css_reference_split(style) == want
+
+
+@pytest.mark.parametrize("style, want", SPLIT_CASES)
+def test_a_style_is_cut_where_the_css_tokenizer_cuts_it(style, want):
+    from sheafmd.sanitize import _declarations
+    assert _declarations(style) == want
+
+
+def test_the_split_of_a_style_equals_the_reference_split():
+    """Whatever the split, the name is searched in each piece whole (the test above this one); this one sees a split that
+    drifts from a browser's, which would keep too little or too much without ever hiding the name."""
+    from sheafmd.sanitize import _declarations
+    pieces = ['"', "'", "/*", "*/", ";", "\\", "\n", ":", " ", "(", ")", "[", "]", "{", "}", "@", "#", "-", ".", "1", "a", "u", "url(", "URL(",
+              "rl(", "\\75 ", "\\75", "\\3a ", "\\:", "url( ", "e", "color: red", "-webkit-user-modify: read-write", "€", "\r\n"]
+    rng = random.Random(110)
+    for _ in range(20000):
+        style = "".join(rng.choice(pieces) for _ in range(rng.randint(1, 12)))
+        assert _declarations(style) == _css_reference_split(style), repr(style)

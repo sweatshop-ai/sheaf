@@ -14,7 +14,7 @@
 
 **Blocked by:** none
 
-**Claimed by:** (libre)
+**Claimed by:** Bodhi
 
 **Status:** ready-for-agent
 

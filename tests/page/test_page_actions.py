@@ -390,6 +390,24 @@ def test_a_refusal_is_not_said_again_past_the_seven_seconds_it_was_said_in_howev
         assert "refused A" not in " ".join(toasts_to_the_end(p, on_clock=True))
 
 
+def test_a_refusal_brought_back_by_a_reload_at_5_s_is_not_carried_by_a_second_reload_at_8_s(tab):
+    # Ticket 118 (SPEC 10.11): said at 0 s it is up to 7 s; the reload at 5 s brings it back, but with its own deadline,
+    # so the reload at 8 s (inside the 14.6 s the replay is shown to) keeps nothing.
+    f = tab.site.file
+    p = held_by_a_form(tab, [refused("Approve: refused A, reload the page")])
+    p.clock.run_for(5100)
+    until(lambda: "refused A" in toast(p), what="the refusal, at 0 s")
+    p.clock.run_for(4900)                               # 5 s: still inside its 7 s
+    p.click("#rd-popover button[data-f=ok]")
+    reloaded(p)
+    toasted(p, "refused A", on_clock=True)              # brought back by the reload at 5 s
+    p.clock.run_for(3000)                               # 8 s: past the refusal's 7 s, the replay still on screen
+    mark(p)
+    f.write_text(f.read_text(encoding="utf-8") + "\nFrom outside, at 8 s.\n", encoding="utf-8")
+    reloaded(p)
+    assert "refused A" not in " ".join(toasts_to_the_end(p, on_clock=True))
+
+
 def test_a_refusal_an_older_page_left_as_plain_text_does_not_stop_the_boot(sheaf):
     # Ticket 101, review a: before this ticket the key held the bare text. The page of a deploy reads it without
     # throwing, drops it, and the rest of the boot (the toast the reload left) still runs.

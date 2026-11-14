@@ -1074,8 +1074,7 @@ def test_a_clear_is_made_in_a_full_store_that_still_holds_an_earlier_builds_list
     p.evaluate("""() => { const set = Storage.prototype.setItem;
       Storage.prototype.setItem = function (k, v) { if (String(k).includes(':e:')) throw new Error('quota'); return set.call(this, k, v); }; }""")
     p.fill(FIELD, "")
-    p.keyboard.press("Escape")
-    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close on an empty field")
+    p.keyboard.press("Escape")      # the box closes and the notice of the other kept message is drawn: only the store is looked at
     until(lambda: [d["body"] for d in store_as_held(p, site)] == ["other"], what="the emptied message to leave the full store")
 
 

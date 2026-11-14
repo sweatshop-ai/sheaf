@@ -10,3 +10,9 @@
 **Claimed by:** Tomas 2026-11-14 23:49
 
 **Status:** in-progress
+
+## Decision (Tomas, branch chat-box/127)
+
+1. Done: `with_lines` (test_page_agent), `waiting_tell` (test_page_agent) and `as_member` (test_page_work) use `open_with_comment(tab, None, ...)`; their setup runs before the call. `ask_agent` stays. The test at test_page_agent:103 stays (comment plus two replies).
+2. Done: one line in ticket 122.
+3. Not done: no length rule, the 135-character import line stays.

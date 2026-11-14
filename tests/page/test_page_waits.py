@@ -156,4 +156,9 @@ def test_the_toasts_to_the_end_are_the_one_up_and_every_one_queued_behind_it_in_
 
 def test_the_toasts_to_the_end_of_a_page_with_none_up_are_none():
     assert toasts_to_the_end(QueuedToasts(), on_clock=True) == []
-    assert toasts_to_the_end(ReloadingPage("Execution context was destroyed, most likely because of a navigation")) == []
+
+
+def test_the_toasts_to_the_end_are_not_at_an_end_while_the_page_reloads():
+    """The page the reload brings may say a toast of its own: an assertion that one is not said must not read "none" off the gap."""
+    with pytest.raises(AssertionError, match="timed out waiting for the toasts to end"):
+        toasts_to_the_end(ReloadingPage("Execution context was destroyed, most likely because of a navigation"), timeout=0.3)

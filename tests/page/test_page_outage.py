@@ -521,7 +521,7 @@ def test_a_page_whose_root_was_forgotten_and_its_name_taken_while_its_stream_was
     p.evaluate(f"document.querySelector({P2!r}).lastChild.remove();"     # the edit undone, so the reply may go
                " document.querySelector('#rd-toast').textContent = ''")
     p.click("#rd-popover button[data-f=ok]")
-    toasted(p, "Nothing was sent or saved")
+    toasted(p, "Nothing was sent or saved", timeout=20.0)       # behind the red toast of the Ctrl+S (7 s)
     assert posts == []
     does_not_reload_or_reconnect(replying, streams)
     assert p.input_value("#rd-popover textarea") == "my reply text"

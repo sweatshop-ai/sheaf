@@ -3,6 +3,8 @@
 Offsets count non-whitespace characters of the block's rendered text, so the page
 and the server agree whatever whitespace each render happens to put between tags.
 """
+import itertools
+import json
 import re
 import time
 
@@ -10,6 +12,7 @@ import pytest
 from helpers import pandoc
 
 from sheafmd import comments as rdc
+from sheafmd.blocks import split_md_blocks
 
 
 def html(md):
@@ -316,8 +319,8 @@ def test_a_tag_after_an_escaped_backslash_is_still_a_tag_and_hides_its_backtick(
 # ── table cells (ticket 57) ──
 
 def _cells(row):
-    """The cells of a row as the GFM reader splits it: at every `|` with no odd run of backslashes before it."""
-    return [c.strip() for c in re.split(r"(?<!\\)(?:\\\\)*\|", row.strip())[1:-1]]
+    """The cells of a row as the GFM reader splits it: at every `|` with no backslash right before it."""
+    return [c.strip() for c in re.split(r"(?<!\\)\|", row.strip())[1:-1]]
 
 
 TABLES = [
@@ -329,7 +332,7 @@ TABLES = [
     ("| a | b |\n|---|---|\n| one\\|two | x |\n", "one", "| a | b |\n|---|---|\n| one\\|two", " | x |\n"),
     ("| a | b |\n|---|---|\n| `x\\|y` z | q |\n", "z", "| a | b |\n|---|---|\n| `x\\|y` z", " | q |\n"),
     ("| a | b |\n|---|---|\n| `x\\|y` z | q |\n", "x", "| a | b |\n|---|---|\n| `x\\|y` z", " | q |\n"),
-    ("| a | b |\n|---|---|\n| one \\\\| two |\n", "one", "| a | b |\n|---|---|\n| one \\\\", "| two |\n"),
+    ("| a | b |\n|---|---|\n| one \\\\| two |\n", "one", "| a | b |\n|---|---|\n| one \\\\| two", " |\n"),   # `\\|` is no border (ticket 76)
     ("| a | b |\n|---|---|\n| one | two\n", "one", "| a | b |\n|---|---|\n| one", " | two\n"),
     ("| a | b |\n|---|---|\n| one | two\n", "two", "| a | b |\n|---|---|\n| one | two", "\n"),
 ]
@@ -452,6 +455,9 @@ def test_an_empty_comment_opener_is_a_whole_comment_not_an_unclosed_one(opener):
     "<!--> word `and` y",
     "<!---> word `and` y",
     "\\<!-- a `x --> word `and` y",         # an escaped opener opens nothing
+    "a \\` b \\` c",                          # an escaped backtick opens no span (ticket 72)
+    "a \\\\` b ` word `and` y",              # an escaped backslash does not escape the backtick
+    "a \\`` b `x` y",                        # the escape takes one backtick; the next one opens a span
 ])
 def test_parse_reads_text_that_looks_like_a_tag_or_comment_as_pandoc_does(para):
     # Point 5a: whether a backtick is code in pandoc is whether `_mask_code` blanks it.
@@ -476,3 +482,200 @@ def test_a_block_of_many_unclosed_openers_is_read_in_linear_time():
     assert rdc._mask_code(md).count("`") == 0
     assert rdc._unclosed_opener(md) == 2
     assert time.perf_counter() - t < 0.3
+
+
+# ── ticket 72: what is left of PR 291 ──
+
+def test_a_comment_after_an_escaped_backtick_is_found():
+    # Point 1: `\\`` is a literal backtick to pandoc, so it opens no span that hides the comment.
+    md = "Type a \\` to quote. The word and `x` here.\n"
+    out, cid = comment_on(md, "word")
+    assert [c.id for c in rdc.parse(out).comments] == [cid]
+
+
+def test_a_heading_with_an_escaped_backtick_before_its_comment_is_found():
+    md = "# Use \\` then see `x`\n"
+    out, cid = comment_on(md, "then")
+    assert [c.id for c in rdc.parse(out).comments] == [cid]
+
+
+def test_a_block_of_escaped_backticks_that_open_nothing_is_read_in_linear_time():
+    # Opus review 1, a: each leftover backtick of an escaped run opens a span nothing closes, and a
+    # lazy search to the end of the block from every one of them took 1 s at 16 KB.
+    md = "a " + "\\`` " * 4000 + "x\n"
+    t = time.perf_counter()
+    rdc._mask_code(md)
+    rdc.parse(md)
+    assert time.perf_counter() - t < 0.3
+
+
+# ── ticket 76: what is left of PR 300 ──
+
+@pytest.mark.parametrize("unit", ["\\` <!--x--> ", "a <!--x--> "])
+def test_the_comment_spans_of_a_block_of_many_comments_are_read_in_linear_time(unit):
+    # Point 1: every comment cost a fresh search for the next code span and the next opener, 12 s at 52 KB.
+    n = 3000
+    md = unit * n + "\n"
+    t = time.perf_counter()
+    spans = rdc._comment_spans(md)
+    assert time.perf_counter() - t < 0.3
+    assert len(spans) == n
+
+
+def _pandoc_code(md):
+    """The text of every inline code span of each paragraph of `md`, as pandoc (gfm) reads it."""
+    def walk(node, out):
+        if isinstance(node, dict):
+            if node.get("t") == "Code":
+                out.append(node["c"][1])
+            for v in node.values():
+                walk(v, out)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v, out)
+    return [(lambda o: (walk(b, o), o)[1])([]) for b in json.loads(pandoc(["-f", "gfm", "-t", "json"], md))["blocks"]]
+
+
+# What is code, character by character: every string of up to five of these pieces, and pandoc says which.
+_PIECES = ["`", "\\", "a", "<b>", "<!--", "-->"]
+SPAN_STRINGS = ["".join(p) for n in range(1, 6) for p in itertools.product(_PIECES, repeat=n)]
+
+
+def test_mask_code_blanks_the_characters_pandoc_reads_as_code_in_a_fixed_set_of_strings():
+    # Point 4 (ticket 76): the cases above only ask whether a paragraph holds code; this asks which
+    # characters are code, over 9 330 strings (765 of them hold code) of backticks, backslashes, tags and comment parts.
+    # Compared per paragraph on the blanked characters: pandoc's code text, with the backticks
+    # around each span and the one space it strips from both ends put back.
+    paras = ["x " + s for s in SPAN_STRINGS]
+    theirs = _pandoc_code("\n\n".join(paras) + "\n")
+    assert len(theirs) == len(paras)
+    bad = []
+    for para, code in zip(paras, theirs):
+        masked = rdc._mask_code(para)
+        blanked = [para[a:b] for a, b in _runs_of_blanks(para, masked)]
+        got = [_inner(run) for run in blanked]
+        if got != code:
+            bad.append((para, got, code))
+    assert not bad, f"{len(bad)} strings differ, first: {bad[:3]}"
+
+
+def _runs_of_blanks(para, masked):
+    """(start, end) of each stretch `_mask_code` blanked: characters it turned into spaces."""
+    runs, i = [], 0
+    while i < len(para):
+        if masked[i] != para[i]:
+            j = i
+            while j < len(para) and masked[j] != para[j]:
+                j += 1
+            runs.append((i, j))
+            i = j
+        else:
+            i += 1
+    return runs
+
+
+def _inner(run):
+    """A blanked stretch (the whole span, its backtick runs included) as pandoc gives the code."""
+    k = len(run) - len(run.lstrip("`"))
+    inner = run[k:len(run) - k]
+    if len(inner) > 1 and inner[0] == " " == inner[-1] and inner.strip(" "):
+        inner = inner[1:-1]
+    return inner
+
+
+@pytest.mark.parametrize("slashes", range(0, 6))
+@pytest.mark.parametrize("cell", ["a {s}| b", "`a {s}| b`", "a `x` {s}| b"])
+def test_a_pipe_after_any_number_of_backslashes_is_no_cell_border_when_pandoc_reads_it_so(slashes, cell):
+    # Point 3: `\\|` is not a border to pandoc either: a pipe with a backslash right before it stays in its cell.
+    row = "| %s | c |" % cell.replace("{s}", "\\" * slashes)
+    out = pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], "| h | i |\n|---|---|\n" + row + "\n")
+    pandoc_splits = "<td>c</td>" not in out.split("<tbody>")[1]       # the third cell has no column and is dropped
+    assert (len(rdc._CELL_PIPE_RE.findall(row)) - 1 > 2) == pandoc_splits, row
+
+
+# ── ticket 68: what is left of PR 288 ──
+
+@pytest.mark.parametrize("opener", ["<!-->", "<!--->"])
+def test_a_cell_with_an_empty_comment_takes_a_comment_on_its_words(opener):
+    # Point 1: pandoc reads the opener as a whole, empty comment, so the cell has a place (ticket 66).
+    md = "| a | b |\n|---|---|\n| %s w | y |\n" % opener
+    s, e = sel(md, "w")
+    out, cid = rdc.add_comment(md, 0, s, e, "w", "why", "Ada", "2026-11-14T10:00")
+    assert out.startswith("| a | b |\n|---|---|\n| %s w<!-- sheaf-comment id=%s" % (opener, cid))
+    assert [c.id for c in rdc.parse(out).comments] == [cid]
+
+
+HEAD3 = "| h | i | j |\n|---|---|---|\n"
+
+
+@pytest.mark.parametrize("row, quote, before", [
+    ("| a ` b | one two | c ` |", "one", "| a ` b | one two"),            # backticks across cells are no code
+    ("| a \\` b z | c |\n| d \\` e | f |", "b", "| a \\` b z"),         # nor are escaped ones across rows
+])
+def test_a_backtick_in_another_cell_does_not_hide_a_comment_from_parse(row, quote, before):
+    # Point 3: pandoc splits the cells first, so a code span cannot run from one cell or row to another.
+    md = HEAD3 + row + "\n"
+    s, e = sel(md, quote)
+    out, cid = rdc.add_comment(md, 0, s, e, quote, "why", "Ada", "2026-11-14T10:00")
+    assert out.startswith(HEAD3 + before + "<!-- sheaf-comment id=%s" % cid)
+    assert [c.id for c in rdc.parse(out).comments] == [cid]
+    assert re.sub(r"<!--.*?-->", "", out, count=1) == md
+
+
+def test_a_code_span_inside_one_cell_still_hides_a_comment_written_in_it_from_nothing():
+    md = HEAD3 + "| `a | b` | c | d |\n"
+    assert rdc.parse(md.replace("| c |", "| c <!-- sheaf-comment id=c1 by=A at=2026-11-14T10:00 status=open quote=\"c\" -->|")).comments[0].id == "c1"
+    md = HEAD3 + "| x `<!-- sheaf-comment id=c1 by=A at=2026-11-14T10:00 status=open quote=\"c\" -->` | c | d |\n"
+    assert rdc.parse(md).comments == []                # inside one cell's code, an example
+
+
+@pytest.mark.parametrize("prefix, para", [("> ", ""), ("- ", ""), ("  ", "- x\n\n"), ("> > ", ""), ("1. ", "")])
+def test_a_table_in_a_quote_or_a_list_takes_a_one_line_comment_at_the_end_of_the_cell(prefix, para):
+    # Point 4: the block is a quote or a list, not a table; a comment of several lines would cut the row.
+    rows = ["| a | b |", "|---|---|", "| one two | y |"]
+    pad = " " * len(prefix) if prefix.strip() in ("-", "1.") else prefix
+    md = para + prefix + rows[0] + "\n" + "".join(pad + r + "\n" for r in rows[1:])
+    s, e = sel(md, "one", 0) if not para else sel(md, "one")
+    out, cid = rdc.add_comment(md, 0, s, e, "one", "why\nmore", "Ada", "2026-11-14T10:00")
+    assert re.sub(r"<!--.*?-->", "<C>", out, count=1).endswith("| one two<C> | y |\n"), out
+    assert out.count("\n") == md.count("\n")
+    page = pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], out)
+    assert page.count("<table>") == 1 and "&lt;!--" not in page and "<td>one two<!--" in page
+    assert [c.id for c in rdc.parse(out).comments] == [cid]
+    again = rdc.reply(out, cid, "and more\nlines", "Bob", "2026-11-14T11:00")
+    assert again.count("\n") == md.count("\n")         # a reply keeps the comment on the row's line
+    assert pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], again).count("<table>") == 1
+
+
+def test_a_paragraph_in_a_quote_that_holds_a_table_still_takes_a_comment_of_several_lines():
+    md = "> some words here\n>\n> | a | b |\n> |---|---|\n> | one | y |\n"
+    s, e = sel(md, "words")
+    out, cid = rdc.add_comment(md, 0, s, e, "words", "why\nmore", "Ada", "2026-11-14T10:00")
+    assert "words<!-- sheaf-comment id=%s" % cid in out and "\n-->" in out
+    assert pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], out).count("<table>") == 1
+
+
+def test_a_row_with_no_pipe_after_a_table_is_a_paragraph_as_pandoc_reads_it():
+    # Point 5: cmark-gfm would read the line as a row; pandoc, which renders the file, ends the table.
+    md = "| a | b |\n|---|---|\n| one | two |\nlazy row\n"
+    assert [b.kind for b in split_md_blocks(md)] == ["table", "para"]
+    page = pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], md)
+    assert page.count("<tr>") == 2 and "<p>lazy row</p>" in page
+
+
+@pytest.mark.parametrize("md", [
+    "> | one a | b |\n> |---|---|\n> | x | y |\n",
+    "- x\n\n  | one a | b |\n  |---|---|\n  | p | y |\n",
+])
+def test_a_comment_on_the_header_of_a_table_in_a_quote_or_a_list_stays_on_the_row(md):
+    s, e = sel(md, "one")
+    out, cid = rdc.add_comment(md, 0, s, e, "one", "why\nmore", "Ada", "2026-11-14T10:00")
+    assert re.sub(r"<!--.*?-->", "<C>", out, count=1).count("one a<C> | b |") == 1, out
+    assert [c.id for c in rdc.parse(out).comments] == [cid] and out.count("\n") == md.count("\n")
+
+
+def test_a_cell_in_a_code_span_that_runs_across_cells_of_a_quoted_table_is_refused_not_lost():
+    md = "> | a | b |\n> |---|---|\n> | `x | one | z` | q |\n"
+    s, e = sel(md, "one")
+    with pytest.raises(rdc.AnchorError):
+        rdc.add_comment(md, 0, s, e, "one", "why", "Ada", "2026-11-14T10:00")

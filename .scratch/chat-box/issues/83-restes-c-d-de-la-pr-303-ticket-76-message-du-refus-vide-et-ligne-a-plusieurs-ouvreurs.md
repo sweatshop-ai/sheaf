@@ -17,4 +17,4 @@
 
 **Claimed by:** Mauro 2026-11-14 18:51
 
-**Status:** in-progress
+**Status:** done (PR 325, merge 2374c25; point 3 lives on in ticket 99)

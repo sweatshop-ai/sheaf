@@ -11,11 +11,15 @@
 
 **Claimed by:**
 
-**Status:** ready-for-agent
+**Recouvrement avec le ticket 72 :** les accents graves appariés à travers des cellules et des rangs sont couverts par 68 (masquage du code par cellule dans `parse` et `cell_end`) ; un accent grave échappé à l'intérieur d'une seule cellule reste au ticket 72.
+
+**Fait :** PR 296, merge 0e723e9. Point 1 : test ajouté, vert depuis le ticket 66. Point 2 : corrigé, test rouge d'abord. Point 3 : corrigé (`_mask_code(text, cells=True)`). Point 4 : corrigé (`in_table_row` : un tableau dans une citation ou une liste prend un commentaire d'une ligne en fin de cellule, en-tête compris) ; dans ces blocs `parse` lit toujours le code sur tout le bloc, limite écrite dans le SPEC 10.4. Point 5 : écrit comme limite dans le SPEC 10.4 (le découpeur suit pandoc, qui ferme le tableau), avec un test contre pandoc. Restes : ticket 75.
+
+**Status:** done
 
 **Par où commencer :** `tests/test_anchoring.py`, après les tests « table cells (ticket 57) » : un test rouge par point, en commençant par le 2 (`rde._insert_comment` sur un tableau dont le dernier rang finit par `<!-- x w`).
 
-- [ ] Point 1 : un test de cellule `<!-->` vert après le ticket 66
-- [ ] Point 2 corrigé, test rouge d'abord
-- [ ] Points 3 à 5 corrigés ou la limite écrite dans le SPEC 10.4, avec la raison
-- [ ] CI verte
+- [x] Point 1 : un test de cellule `<!-->` vert après le ticket 66
+- [x] Point 2 corrigé, test rouge d'abord
+- [x] Points 3 à 5 corrigés ou la limite écrite dans le SPEC 10.4, avec la raison
+- [x] CI verte

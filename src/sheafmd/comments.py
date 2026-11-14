@@ -694,7 +694,7 @@ def in_table_row(block: str, point: int) -> bool:
 def cell_end(block: str, point: int, cells: bool = True) -> int:
     """Offset where a comment on a selection ending at `point` goes in a table: the end of the cell that
     holds `point`, before its closing `|` and the spaces in front of it, so the cell's words stay whole
-    for every reader of the file. A `|` ends a cell unless an odd run of backslashes escapes it, in code
+    for every reader of the file. A `|` ends a cell unless a backslash stands right before it (pandoc counts no pairs), in code
     as well (GFM and pandoc read `a|b` in a code span as two cells); a row with no closing `|` ends the
     cell at the end of its line. Before a backslash that ends the cell's text, which would escape the
     block's `<`, and before a `<!--` in the cell that nothing closes, which a block after it would close,

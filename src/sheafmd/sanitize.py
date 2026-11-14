@@ -179,9 +179,10 @@ def _flatten_deep(soup, log: list[str]) -> None:
 
 def _without_user_modify(value: str) -> str:
     """A style attribute without the declarations that make text editable (`-webkit-user-modify`, `-moz-user-modify`,
-    `user-modify`): Chromium and WebKit let the reader type into such a span, and the page does not guard it. A name with
-    a backslash escape is dropped too, and the match is a search, so a comment before the name does not hide it."""
-    kept = [d for d in value.split(";") if not re.search(r"user-modify|\\", d.partition(":")[0], re.I)]
+    `user-modify`): Chromium and WebKit let the reader type into such a span, and the page does not guard it. A declaration with
+    a backslash is dropped too, and the whole declaration is searched, not the text before its colon, so a comment before
+    the name does not hide it, whatever the comment holds."""
+    kept = [d for d in value.split(";") if not re.search(r"user-modify|\\", d, re.I)]
     return ";".join(kept)
 
 

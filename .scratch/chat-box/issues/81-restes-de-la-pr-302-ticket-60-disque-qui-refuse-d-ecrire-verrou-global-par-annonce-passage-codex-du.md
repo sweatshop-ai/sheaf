@@ -18,3 +18,14 @@
 
 - [ ] Chaque point est soit corrigé avec un test rouge, soit écarté avec la raison
 - [ ] Le passage Codex sur le diff de la PR 302 est fait, ses trouvailles classées
+
+## Gudrun, 2026-11-14 (PR 308, branch chat-box/81)
+
+1. **Gardé.** SPEC 9.8 dit qu'un disque qui refuse d'écrire fait échouer la passe ; `sweep` et une marque `seen` le faisaient déjà. Un test l'épingle pour un listing (`..._fails_on_a_disk_that_refuses_writes_as_a_sweep_does`).
+2. **Corrigé** : le test liste deux fois.
+3. **Corrigé, test d'abord** (rouge : 1 événement au lieu de 2) : `_change` exécute tous les thunks tenus, puis lève la première erreur.
+4. **Mesuré, rien changé.** `_change` tient le verrou 0,23 ms en médiane (max 0,38 ms, fsync compris, 300 passes) ; une annonce d'un autre document sous écritures continues : p95 1,2 ms, max 1,5 ms (seule : 0,04 ms). Pas de retard réel.
+5. **Corrigé** : le test attend que le taker soit bloqué sur le verrou (un verrou qui signale un acquire non bloquant refusé), plus de délai. Rouge sans le verrou, 3 fois sur 3.
+6. Rien à reprendre (F3, F6).
+
+**Passage Codex sur le diff de la PR 302 (merge 37c99b1) : case laissée ouverte.** Codex est à sa limite d'usage jusqu'à 20 h le 2026-11-14 ; le passage est reporté après 20 h.

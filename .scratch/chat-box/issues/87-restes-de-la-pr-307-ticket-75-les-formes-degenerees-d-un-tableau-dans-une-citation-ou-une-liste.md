@@ -25,7 +25,7 @@ Une façon de les reprendre : mesurer les colonnes à l'intérieur de la citatio
 
 **Blocked by:** none
 
-**Claimed by:**
+**Claimed by:** Samir
 
 - [ ] Les formes des points 1 à 13 traitées ou la limite gardée avec la raison
 - [ ] Le point 2 du ticket 75 refait à partir du sourcepos, SPEC 10.4 limite (1) retirée

@@ -733,9 +733,10 @@ def test_text_in_code_between_a_quoted_opener_and_a_later_arrow_is_lost_by_decis
 @pytest.mark.parametrize("opener", ["<!-->", "<!--->"])
 def test_an_empty_comment_opener_in_a_heading_with_a_comment_is_refused_by_decision(tmp_path, opener):
     # Decided and final (ticket 72): `render.COMMENT_RE` does not know `<!-->`, and teaching it
-    # would break the guard where pandoc reads the same characters as the end of an address
-    # (`<http://x/<!--> b`): what it means depends on where it stands. So the copy is refused,
-    # naming the line, and nothing is lost in silence. SPEC 6.2 states the limit.
+    # would change what a link destination (`[l](http://x/<!-->)`) points to, where pandoc reads
+    # the same characters as part of the address: what they mean depends on where they stand. So
+    # the copy is refused, naming the line (with or without a comment after it), and nothing is
+    # lost in silence. SPEC 6.2 states the limit.
     text = ("# A %s b <!-- sheaf-comment id=c1 by=\"A\" at=2026-11-14T10:00 status=open quote=\"A\"\n"
             "why\n-->\n\nKEEP1 para.\n") .replace("<!-->", opener)
     with pytest.raises(sheafmd.UnclosedComment) as e:

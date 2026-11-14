@@ -497,6 +497,16 @@ def test_a_heading_with_an_escaped_backtick_before_its_comment_is_found():
     assert [c.id for c in rdc.parse(out).comments] == [cid]
 
 
+def test_a_block_of_escaped_backticks_that_open_nothing_is_read_in_linear_time():
+    # Opus review 1, a: each leftover backtick of an escaped run opens a span nothing closes, and a
+    # lazy search to the end of the block from every one of them took 1 s at 16 KB.
+    md = "a " + "\\`` " * 4000 + "x\n"
+    t = time.perf_counter()
+    rdc._mask_code(md)
+    rdc.parse(md)
+    assert time.perf_counter() - t < 0.3
+
+
 # ── ticket 68: what is left of PR 288 ──
 
 @pytest.mark.parametrize("opener", ["<!-->", "<!--->"])

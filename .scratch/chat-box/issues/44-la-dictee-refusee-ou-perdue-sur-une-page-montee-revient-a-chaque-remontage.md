@@ -13,4 +13,8 @@
 - [ ] La décision (a, b ou c) est écrite dans le ticket avant le code
 - [ ] Si (a) ou (b) : un test monté échoue tant que le bouton revient après un remontage qui suit un refus
 
+**Décision (Rhea, boss de la piste chat-box, 2026-11-14) :** option (b). L'état « dictée coupée » est gardé dans `sessionStorage` sous le préfixe `KEYS` (`sheaf-mount:`), pour que SPEC 10.4 « pour la session » tienne d'un remontage à l'autre. Un `sessionStorage` qui lève une exception (mode privé) ne doit pas casser la page : l'état retombe sur « pour ce montage ».
+
+Claimed by: Elske
+
 **Status:** ready-for-agent

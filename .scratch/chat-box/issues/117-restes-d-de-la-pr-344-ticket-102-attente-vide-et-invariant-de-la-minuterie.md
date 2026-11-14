@@ -5,4 +5,6 @@
 2. `page.js` (minuterie de 120 s) : sans la garde, la règle « chaque sortie de d efface la minuterie d'abord » ne tient que par un commentaire. Décider : un test qui la fixe, ou rien.
 
 **Blocked by:** PR 344
+**Claimed by:** Xavier
+
 **Status:** ready-for-agent

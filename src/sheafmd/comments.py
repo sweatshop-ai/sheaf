@@ -353,12 +353,27 @@ def _scan(text: str):
         yield "comment", a, pos
 
 
-def _mask_code(text: str, cells: bool = False) -> str:
+def _mask_code(text: str, cells: bool | str = False) -> str:
     """`text` with its inline code spans blanked, the same length (see `_scan` for what owns a
     backtick). `cells`: the text is a table, whose cells pandoc splits at every unescaped `|`
-    before it reads a span, so none runs from one cell or row to the next."""
+    before it reads a span, so none runs from one cell or row to the next; `"rows"`: a quote or a
+    list, whose table rows are read so."""
     if "`" not in text:
         return text
+    if cells == "rows":
+        # A quote or a list: the lines of its tables are cells, the rest is read whole (pandoc ends a
+        # paragraph where a table starts, so a span never runs from one into the other).
+        out, run, in_row, at = [], [], False, 0
+        for line in text.split("\n"):
+            row = "|" in line and in_table_row(text, at)
+            if run and row != in_row:
+                out.append(_mask_code("\n".join(run), True if in_row else False))
+                run = []
+            in_row = row
+            run.append(line)
+            at += len(line) + 1
+        out.append(_mask_code("\n".join(run), True if in_row else False))
+        return "\n".join(out)
     if cells:
         pieces = []
         for line in text.split("\n"):
@@ -389,7 +404,7 @@ def parse(md: str) -> Parsed:
         # Inline code is literal text, so a comment written there is an example
         # (this spec has several). Search a copy with code spans blanked out, the
         # same length so every offset still points into the real text.
-        masked = _mask_code(text, b.kind == "table")
+        masked = _mask_code(text, True if b.kind == "table" else "rows" if b.kind in ("quote", "list") else False)
         i = 0
         while True:
             m = COMMENT_RE.search(masked, i)
@@ -516,7 +531,16 @@ def projection(block: str) -> Projection:
 
     def off(line, col):
         line = min(line, len(starts))
-        return min(starts[line - 1] + col - 1, len(block))
+        text = block[starts[line - 1]:starts[line] - 1 if line < len(starts) else len(block)]
+        if "\t" not in text:
+            return min(starts[line - 1] + col - 1, len(block))
+        # Pandoc's column counts a tab as the spaces up to the next stop of 4.
+        seen = 0
+        for i, ch in enumerate(text):
+            if seen >= col - 1:
+                return starts[line - 1] + i
+            seen += 4 - seen % 4 if ch == "\t" else 1
+        return starts[line - 1] + len(text) + max(0, col - 1 - seen)
 
     text, chars, stack = [], [], []
     # A task list item's box comes out as a ☐ or ☒ right after <li>, outside any
@@ -698,10 +722,9 @@ def cell_end(block: str, point: int, cells: bool = True) -> int:
     as well (GFM and pandoc read `a|b` in a code span as two cells); a row with no closing `|` ends the
     cell at the end of its line. Before a backslash that ends the cell's text, which would escape the
     block's `<`, and before a `<!--` in the cell that nothing closes, which a block after it would close,
-    hiding the words it was meant to hold. Where the cell's end is inside a code span that `parse` reads
-    across cells (pandoc splits the cells first), the block stays after the selection: written there it
-    would be code to `parse`, and the comment lost. `cells` is false in a quote or a list, which
-    `parse` reads whole: a span there may still run from one cell to the next."""
+    hiding the words it was meant to hold. Where the cell's end is inside a code span, the block stays
+    after the selection: written there it would be code to `parse`, and the comment lost. `cells` is
+    `"rows"` in a quote or a list (see `_mask_code`)."""
     line_start = block.rfind("\n", 0, point) + 1
     eol = block.find("\n", point)
     line_end = len(block) if eol < 0 else eol
@@ -720,9 +743,6 @@ def cell_end(block: str, point: int, cells: bool = True) -> int:
     if run % 2:
         at -= 1
     if _mask_code(block[:at] + "\0" + block[at:], cells)[at] == " ":
-        if not cells and _mask_code(block[:point] + "\0" + block[point:])[point] == " ":
-            raise AnchorError("this cell is inside a code span that runs across cells, "
-                              "comment on another cell")
         return point
     return at
 
@@ -733,7 +753,7 @@ def comment_point(kind: str, block: str, start: int, end: int, quote: str) -> in
     if kind == "table":
         return cell_end(block, point)
     if kind in ("quote", "list") and in_table_row(block, point):
-        return cell_end(block, point, cells=False)
+        return cell_end(block, point, cells="rows")
     if kind != "heading":
         return point
     at = heading_anchor(block)

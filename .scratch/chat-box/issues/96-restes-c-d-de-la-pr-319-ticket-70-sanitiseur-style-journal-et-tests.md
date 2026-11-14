@@ -7,6 +7,8 @@
 3. **C3.** Un style vidé par le filtre reste `style=""` ; le mode mount supprime l'attribut. Faire de même.
 4. **D1.** Les cas « majuscules » et « doublon » de `test_contenteditable_goes_in_any_letter_case_and_when_repeated` passent aussi sur main (html.parser met les noms en minuscules et garde un seul doublon) : ils fixent un comportement, pas ce correctif. À dire dans la docstring.
 5. **D2.** Le motif `user-modify|\\` est écrit en ligne ; les autres sont compilés au niveau du module.
+6. **C4 (re-lecture étroite, opus-2-narrow).** `tests/page/test_user_modify.py` n'a pas de témoin positif : un cas montrant que le span non assaini (`/*:*/…`) est bien éditable dans Chromium et WebKit. Sans lui, le test passerait pour rien si un moteur cessait d'honorer la propriété.
+7. **D3.** La règle « barre oblique inverse » retire aussi des déclarations ordinaires (`content:"\201C"`) ; aucun test ne le fixe.
 
 **Blocked by:** PR 319 fusionnée
 

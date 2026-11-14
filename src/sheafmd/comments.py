@@ -383,7 +383,8 @@ def _read_block(kind: str, text: str):
     A table that a quote or a list holds is read by pandoc (`_read_tables`), which splits its cells before it reads a span, sets the span's range, drops the
     cells beyond the table's columns and reads an indented line as code: where the block may hold one and
     holds a comment, a comment that pandoc does not show as raw HTML is not one."""
-    if kind in ("quote", "list") and COMMENT_RE.search(text) and _may_hold_table(text):
+    # A table of the document with an image is read by pandoc too: it drops a comment in the image's alt text.
+    if (kind in ("quote", "list") or kind == "table" and "![" in text) and COMMENT_RE.search(text) and _may_hold_table(text):
         read = _read_tables(text)
         if read is not None:
             return _blank(text, read[1]), (*read[2], frozenset(read[0]))

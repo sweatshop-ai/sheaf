@@ -123,12 +123,23 @@ def test_the_checkbox_test_ignores_case_only():
     assert "input" in names(sanitize('<input type="CheckBox">'))
 
 
+@pytest.mark.parametrize("mount", [False, True])
 @pytest.mark.parametrize("kind", [" checkbox", "checkbox ", " CheckBox ", "\tcheckbox", "checkbox\n", "\u00a0checkbox", "chec\u212abox"])
-def test_a_type_that_is_a_checkbox_only_after_trimming_is_no_checkbox(kind):
-    """A browser matches the type exactly, ASCII case aside: `" checkbox"` and `"checKbox"` (a Kelvin sign) are text fields."""
-    out = sanitize(f'<p>a<input type="{kind}">b</p>')
+def test_a_type_that_is_not_exactly_checkbox_is_no_checkbox(kind, mount):
+    """A browser matches the type exactly, ASCII case aside: `" checkbox"` (a space) is a text field, and so is `"checKbox"` with a Kelvin sign, which `str.lower()` would fold to an ASCII k."""
+    out = sanitize(f'<p>a<input type="{kind}">b</p>', mount=mount)
     assert "input" not in names(out)
     assert "<p>ab</p>" in out
+
+
+@pytest.mark.parametrize("mount", [False, True])
+@pytest.mark.parametrize("value", ["true", "plaintext-only", "", "TRUE", "false"])
+def test_the_document_has_no_contenteditable_of_its_own(value, mount):
+    """The page owns editability (setEditing): a surface the document makes editable is outside what the page guards."""
+    out = sanitize(f'<p class="k">a<span contenteditable="{value}">b</span><em contenteditable>c</em></p>', mount=mount)
+    for _, a in tags_of(out):
+        assert "contenteditable" not in a
+    assert "<span>b</span>" in out and "<em>c</em>" in out
 
 
 # ── attributes ──────────────────────────────────────────────────────────────
@@ -174,7 +185,7 @@ def test_an_attribute_that_only_looks_like_srcset_or_ping_stays():
 
 
 def test_the_list_of_dropped_attributes_is_what_the_docstring_says():
-    assert DROPPED_ATTRS == {"srcdoc", "formaction", "srcset", "ping"}
+    assert DROPPED_ATTRS == {"srcdoc", "formaction", "srcset", "ping", "contenteditable"}
 
 
 def test_an_attribute_that_only_looks_like_on_stays():

@@ -638,7 +638,7 @@ def test_only_a_plain_unquoted_url_is_read_as_a_token(style, want):
 # --- ticket 110: the split is checked against a reference that follows the CSS Syntax 3 tokenizer --------------------------------
 
 def _css_reference_split(s: str) -> list[str]:
-    """`s` cut at the `;` that end a declaration, by the CSS Syntax 3 tokenizer (3.3 to 4.3) and its block nesting: a written
+    """`s` cut at the `;` that end a declaration, by the CSS Syntax 3 tokenizer (4.3; the 3.3 preprocessing of CR, FF and NUL is done in strings only) and its block nesting: a written
     out second implementation that shares no code with `_declarations`. A `(`, `[`, `{` and a function open a block that only
     its own closer ends; a closer that does not match the innermost block is a token of its own; a block left open runs to the end."""
     n, i, cuts, blocks = len(s), 0, [], []

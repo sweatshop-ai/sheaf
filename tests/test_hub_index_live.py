@@ -96,6 +96,7 @@ def test_two_streams_opening_together_start_the_board_once(world):
     hub.index.arm = arm
     first = world.get("/_/live")
     later[0].join(5)
+    assert not later[0].is_alive(), "the second stream did not finish"
     assert first.status == 200 and [a.status for a in answers] == [200]
     assert len(calls) == 1
     assert hub.index_bus.count() == 2

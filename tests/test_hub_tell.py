@@ -1919,7 +1919,7 @@ def test_a_tell_that_a_cancel_overtakes_between_its_wait_and_its_delivery_delive
         if cancel == "under way":
             released.set()
             canceller.join(10)
-    assert not canceller.is_alive(), "the cancel did not finish after the release"
+    assert not canceller.is_alive(), "the cancel did not finish (started only when it is under way, else it ran inline)"
     assert refusal(r, route) == (CANCELLING if cancel == "under way" else WAIT_ENDED)
     assert r.status == (409 if route == "tell" else 200) and got["cancel"].json() == {"ok": True}
     finish(hub)

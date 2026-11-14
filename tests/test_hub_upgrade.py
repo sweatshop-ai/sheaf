@@ -67,11 +67,11 @@ class Supervisor:
             if p.poll() is None:
                 p.terminate()
         self._t.join(timeout=30)
-        assert not self._t.is_alive(), "the watch on the hub did not end after the stop"
         for p in self.procs:                 # one that the watch started just before `over` was set
             if p.poll() is None:
                 p.terminate()
             p.wait(timeout=30)
+        assert not self._t.is_alive(), "the watch on the hub did not end after the stop"
 
 
 @pytest.fixture

@@ -23,11 +23,11 @@ Classe : c, d.
 
 **Claimed by:** Imani 2026-11-14
 
-**Status:** in-progress
+**Status:** done — PR 301, fusionnée le 2026-11-14 (e5e71ab) ; suite : ticket 82
 
 **Par où commencer :** F7 d'abord (tests sans attente fixe, sur t-compute, pas sur le portable), puis F1 : un test où `unsentLine` lève pendant la purge. Pour F2 à F5, décider avec le propriétaire du SPEC s'il s'agit d'une limite à écrire ou d'un correctif.
 
-- [x] F1 : une levée de `unsentLine` dans la purge ne passe ni pour une lecture refusée ni ne sort d'une lecture non stricte — test, rouge avant
-- [x] F2 à F5 : décision écrite par cas (corriger ou limite dans le SPEC)
-- [x] F6 : décision écrite (garder ou ne pas supprimer les entrées mal formées dans une purge)
-- [x] F7 : les deux tests du ticket 50 n'attendent plus un temps fixe : ils prouvent que le chemin tenu est exercé
+- [x] F1 : une levée de `unsentLine` dans la purge ne passe ni pour une lecture refusée ni ne sort d'une lecture non stricte — test, rouge avant — preuve : PR 301 ; rouge en CI sur 8e469c3 (« the redraw ran inside the read »), vert sur 688e070 puis 5fa6787 (3/3)
+- [x] F2 à F5 : décision écrite par cas (corriger ou limite dans le SPEC) — preuve : les décisions sont écrites plus haut ; F2 corrigé (même test que F1), F3 à F5 dans le SPEC (paragraphe après « A store written by an older page »)
+- [x] F6 : décision écrite (garder ou ne pas supprimer les entrées mal formées dans une purge) — preuve : décision « garder » écrite plus haut et dans le SPEC
+- [x] F7 : les deux tests du ticket 50 n'attendent plus un temps fixe : ils prouvent que le chemin tenu est exercé — preuve : plus de `wait_for_timeout` dans les deux tests (PR 301), verts en CI sur 5fa6787 ; un test d'absence (stockage plein) garde une attente de 400 ms dans la page, voulue

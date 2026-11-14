@@ -530,3 +530,14 @@ def test_no_split_of_a_style_lets_user_modify_or_a_backslash_through():
         out = sanitize(f'<span style="{html.escape(style)}">x</span>')
         assert "user-modify" not in out.lower() and "\\" not in out, style
         assert sanitize(out) == out, style
+
+
+@pytest.mark.parametrize("style, want", [
+    ("color: red; -webkit-user-modify: read-write;", "color: red;"),
+    ("color: red;", "color: red;"),
+    ('content: "/*"; color: red; -webkit-user-modify: read-write', 'content: "/*"; color: red'),
+    ('content: "*/"; color: red; -webkit-user-modify: read-write', 'content: "*/"; color: red'),
+])
+def test_the_edges_of_the_split_a_trailing_semicolon_and_comment_marks_inside_a_string(style, want):
+    out = sanitize(f'<span style="{html.escape(style)}">x</span>')
+    assert next(a for t, a in tags_of(out) if t == "span").get("style") == want

@@ -23,7 +23,7 @@ _LINE = re.compile(r"(\s{0,3}>[ \t]?)" + re.escape(MARKER) + r"[ \t]*(?=\r?(?:\n
 _WORDS = re.compile(r"^[ \t>]*[^\s>]", re.M)
 # An underline in the first paragraph makes the marker line part of a heading, which `mark` cannot take it off.
 _UNDERLINE = re.compile(r"^ {0,3}(?:=+|-+)[ \t]*$")
-_QUOTE_PREFIX = re.compile(r"^\s{0,3}>[ \t]?")
+_QUOTE_MARK = re.compile(r" {0,3}>")
 # What ends a paragraph under GFM (CommonMark's interrupt rules): a fence, a heading, a quote, a thematic break
 # of `*` or `_` (a bare `---` stays an underline), a bullet or a list starting at 1 with words after it, and a
 # line that opens an HTML block (start conditions 1-6; condition 7, any other tag, cannot interrupt).
@@ -35,12 +35,32 @@ _HTML_TAGS = (
 )
 _HTML_OPENS = (
     r"<(?:pre|script|style|textarea)(?:[ \t>]|$)"      # 1
-    r"|<!--|<\?|<![A-Za-z]|<!\[CDATA\["                # 2-5
+    r"|<!--|<\?|<![A-Za-z]|(?-i:<!\[CDATA\[)"           # 2-5 (CDATA is case-sensitive)
     rf"|</?(?:{_HTML_TAGS})(?:[ \t]|/?>|$)"             # 6
 )
 _OPENS_BLOCK = re.compile(
-    r"^\s{0,3}(?:```|~~~|#{1,6}(?:\s|$)|>|(?:[*_][ \t]*){3,}$|[-*+][ \t]+\S|0*1[.)][ \t]+\S|" + _HTML_OPENS + ")",
+    r"^ {0,3}(?:```|~~~|#{1,6}(?:\s|$)|>|(?:[*_][ \t]*){3,}$|[-*+][ \t]+\S|0*1[.)][ \t]+\S|" + _HTML_OPENS + ")",
     re.I)
+
+
+def _unquote(line: str) -> str:
+    """`line` without its quote mark and the one column after it, what is left indented with spaces: a tab is
+    worth the columns up to the next multiple of 4, as in pandoc, so the 0-3 columns that `_OPENS_BLOCK` and
+    `_UNDERLINE` allow are counted in columns, not characters."""
+    m = _QUOTE_MARK.match(line)
+    col = pos = m.end() if m else 0
+    indent = 0
+    if m and pos < len(line) and line[pos] in " \t":
+        width = 1 if line[pos] == " " else 4 - col % 4
+        col += width
+        indent = width - 1              # what a tab leaves of its columns after the one the mark takes
+        pos += 1
+    while pos < len(line) and line[pos] in " \t":
+        w = 1 if line[pos] == " " else 4 - col % 4
+        col += w
+        indent += w
+        pos += 1
+    return " " * indent + line[pos:]
 
 
 def is_copy_block(content: str) -> bool:
@@ -52,9 +72,9 @@ def is_copy_block(content: str) -> bool:
         line = line.rstrip("\r")
         if not line.strip(" \t>"):
             break                       # the first paragraph ends at the first blank quote line
-        line = _QUOTE_PREFIX.sub("", line)
+        line = _unquote(line)
         if _OPENS_BLOCK.match(line):
-            break                       # and at the line that opens a fence, a list, a heading or a quote
+            break                       # and at the line that opens a fence, a list, a heading, a quote or an HTML block
         if _UNDERLINE.match(line):
             return False
     return True

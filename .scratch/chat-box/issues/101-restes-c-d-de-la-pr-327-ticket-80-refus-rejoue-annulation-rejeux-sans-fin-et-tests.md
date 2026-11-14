@@ -13,7 +13,7 @@
 
 **Claimed by:** Enzo 2026-11-14 21:05
 
-**Status:** in-progress
+**Status:** done (merged 3e6980b, PR 339; leftovers in ticket 112)
 
 **Par où commencer :** le point 4, le test rouge du reset ; sur t-compute, jamais sur le portable.
 

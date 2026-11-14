@@ -10,9 +10,10 @@
 
 **Blocked by:** PR 317
 
-**Claimed by:**
 
-**Status:** ready-for-agent
+**Claimed by:** Anselm 2026-11-14 19:33
+
+**Status:** in-progress
 
 **Par où commencer :** `tests/page/pagehelp.py`, `toasts_to_the_end`.
 

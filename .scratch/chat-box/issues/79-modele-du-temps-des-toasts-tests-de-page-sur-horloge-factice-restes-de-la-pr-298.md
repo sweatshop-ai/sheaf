@@ -20,7 +20,7 @@ Deux assertions à revoir en particulier :
 
 **Blocked by:** none
 
-**Claimed by:**
+**Claimed by:** Isolde
 
 **Status:** ready-for-agent
 

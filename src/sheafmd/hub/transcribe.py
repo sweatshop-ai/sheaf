@@ -221,17 +221,13 @@ class Relay:
         except OSError as e:
             self._refuse(f"the key file cannot be opened ({e.strerror})")
             return None
-        wrapped = False                                      # once fdopen has the descriptor, or the refusal below has closed it, closing it again is not our job
-        try:
+        try:                                                 # the descriptor is closed here, once, whatever happens below
             st = os.fstat(fd)
             if not self._mine(st):
-                wrapped = True                               # before the close: it may raise, and the descriptor is gone either way
-                os.close(fd)
                 self._refuse("the key file is not a regular file of the hub's account with mode 0600")
                 return None
             stamp = (st.st_mtime_ns, st.st_ctime_ns, st.st_size, st.st_ino)
-            f = os.fdopen(fd, "r", encoding="utf-8", errors="replace")
-            wrapped = True
+            f = os.fdopen(os.dup(fd), "r", encoding="utf-8", errors="replace")      # fdopen owns the copy, whether it closes it on failure or not
             with f:
                 for _ in range(3):
                     text = f.read(KEY_FILE_MAX + 1)
@@ -262,9 +258,12 @@ class Relay:
                             return None
                         return value, stamp
         except OSError as e:
-            if not wrapped:
-                os.close(fd)
             self._refuse(f"the key file cannot be read ({e.strerror})")
+        finally:
+            try:
+                os.close(fd)
+            except OSError:
+                pass                                         # a close that fails (a FUSE flush) has released the descriptor all the same
         return None
 
     def available(self) -> bool:

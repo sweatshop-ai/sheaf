@@ -14,4 +14,4 @@
 
 **Claimed by:** Katya 2026-11-14 19:20
 
-**Status:** in-progress
+**Status:** done (PR 329, merge 1e48ac9)

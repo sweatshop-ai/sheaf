@@ -136,7 +136,7 @@ class QueuedToasts:
 def test_a_toast_behind_a_red_one_comes_when_the_clock_is_run_on():
     page = QueuedToasts(("Did not go out.", 7000), ("New reply.", 2600), ("It reached the hub after all.", 2600))
     toasted(page, "reached the hub", on_clock=True)
-    assert toast_text(page) == "It reached the hub after all."
+    assert page.text == "It reached the hub after all."
 
 
 def test_a_toast_behind_another_does_not_come_while_the_clock_stands_still_and_the_failure_names_the_ones_that_did():
@@ -145,13 +145,16 @@ def test_a_toast_behind_another_does_not_come_while_the_clock_stands_still_and_t
         toasted(page, "reached the hub", timeout=0.3)
 
 
-def toast_text(page):
-    return page.text
-
-
 def test_the_toasts_to_the_end_are_the_one_up_and_every_one_queued_behind_it_in_order():
     page = QueuedToasts(("Saving", 2600), ("Not saved", 7000), ("Saved", 2600))
     assert toasts_to_the_end(page, on_clock=True) == ["Saving", "Not saved", "Saved"]
+
+
+def test_the_toasts_to_the_end_of_a_page_whose_queue_has_ended_are_none_not_the_last_one_said():
+    """#rd-toast keeps its text when the toast goes: a second look, the queue done, must not say it again."""
+    page = QueuedToasts(("The text changed while you wrote.", 2600))
+    assert toasts_to_the_end(page, on_clock=True) == ["The text changed while you wrote."]
+    assert toasts_to_the_end(page, on_clock=True) == []
 
 
 def test_the_toasts_to_the_end_of_a_page_with_none_up_are_none():

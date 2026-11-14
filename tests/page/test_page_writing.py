@@ -10,7 +10,8 @@ import pytest
 
 from helpers import comment, writes_from_outside
 from pagehelp import (DOC, P1, RELOADING, draft_key, P2, T0, at, comment_draft_key, comment_on, gone, key, mark, open_box, open_form, typed, reload_on_clock, reloaded,
-                      select, select_by_touch, toast, toast_state, toasted, toasts_to_the_end, type_at_end, until, run_clock, TOAST_STEP)
+                      select, select_by_touch, toast, toast_state, toasted, toasts_to_the_end, type_at_end, until)
+from pagehelp import TOAST_STEP, run_clock
 from sheafmd import comments as rdc
 from sheafmd.hub import live as hub_live
 from sheafmd.hub import state as hub_state
@@ -2682,8 +2683,13 @@ def test_a_reply_given_up_that_the_hub_took_after_all_goes_from_the_page_and_the
     if not hello:
         # Toasts queue (ticket 62): TAKEN waits behind the red LATE (7 s). `given_up` leaves the clock running at the real
         # pace (no pause), so the test runs it on while a toast is up, whatever the pace of the runner.
-        until(lambda: TAKEN in toast(p) or gone(p) or (toast_state(p)[1] and run_clock(p, TOAST_STEP)),
-              what="the toast, or the reload that wipes it")
+        def taken_or_gone():
+            if TAKEN in toast(p) or gone(p):
+                return True
+            if toast_state(p)[1]:
+                run_clock(p, TOAST_STEP)
+            return False
+        until(taken_or_gone, what="the toast, or the reload that wipes it")
     until(lambda: reply_is_in_its_thread(thread), what="the reply in its thread, the form gone, the store clear")
 
 

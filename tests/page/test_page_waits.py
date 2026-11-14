@@ -24,6 +24,21 @@ def test_a_wait_gets_the_request_a_page_makes_after_the_test_last_called_playwri
     held[0].abort()
 
 
+def test_a_route_for_a_send_holds_the_send_the_page_makes_as_soon_as_route_returns(tab):
+    """Ticket 100: on a loaded runner the browser was not yet intercepting when `route()` returned, so a send made a
+    few ms later went straight to the hub. conftest's `until_live` waits for a probe; it must not itself be held
+    as a send, nor leave the route short of the send."""
+    p = tab.open().page
+    for _ in range(20):
+        held = []
+        p.route("**/_/comment", lambda route: held.append(route))
+        p.evaluate("fetch('/_/comment', {method: 'POST', body: '{}'}).catch(() => {}); 0")
+        until(lambda: held or p.wait_for_timeout(20), what="the send to be held")
+        assert len(held) == 1 and held[0].request.method == "POST"
+        held[0].abort()
+        p.unroute("**/_/comment")
+
+
 def test_no_page_test_waits_by_sleeping_or_by_a_wait_of_its_own():
     """`pagehelp.until` is the one wait. A sleep in a test thread, or a second `until`, brings the old
     defect back; a `time.sleep` inside a patch of the hub (it runs on the hub's thread) does not."""

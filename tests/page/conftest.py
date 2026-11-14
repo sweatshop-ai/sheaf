@@ -207,13 +207,15 @@ def until_live(page, pattern, log):
         tries += 1
         try:
             with stalls_after(8, "a route's probe"):
-                if page.evaluate(probe) == 204:
-                    break
+                caught = page.evaluate(probe) == 204
         except (Exception, PageStalled):
             return
+        if caught:
+            if tries > 1:
+                log.append((time.time(), f"route {pattern} caught its probe at try {tries}"))
+            return
         page.wait_for_timeout(50)
-    if tries > 1:
-        log.append((time.time(), f"route {pattern} caught its probe at try {tries}"))
+    log.append((time.time(), f"route {pattern} did NOT catch its probe in {tries} tries over 5 s"))
 
 
 @pytest.fixture(autouse=True)
@@ -246,27 +248,39 @@ def hub_journal(monkeypatch):
         if cls is None:
             continue
 
-        def noting_route(self, url, handler, *a, _route=cls.route, _name=cls.__name__, **kw):
+        wrappers = {}       # (the object routed, url, the test's handler) -> the handler Playwright holds, for `unroute(url, handler)`
+
+        def noting_route(self, url, handler, *a, _route=cls.route, _name=cls.__name__, _wrappers=wrappers, **kw):
             def noted(route):
                 log.append((time.time(), f"{_name}.route handler called for {route.request.method} {route.request.url[-30:]}"))
-            if len(inspect.signature(handler).parameters) == 1:      # Playwright passes the request too, to a handler that takes two
+
+            def run(route, *args):
+                if route.request.headers.get(PROBE):
+                    return route.fulfill(status=204)
+                noted(route)
+                return handler(*args)
+            # Playwright passes the request too to a handler that takes two arguments, and none to one that takes none.
+            n = len(inspect.signature(handler).parameters)
+            if n == 0:
+                def called():
+                    return handler()
+            elif n == 1:
                 def called(route):
-                    if route.request.headers.get(PROBE):
-                        return route.fulfill(status=204)
-                    noted(route)
-                    return handler(route)
+                    return run(route, route)
             else:
                 def called(route, request):
-                    if route.request.headers.get(PROBE):
-                        return route.fulfill(status=204)
-                    noted(route)
-                    return handler(route, request)
+                    return run(route, route, request)
+            _wrappers[(id(self), url, handler)] = called
             log.append((time.time(), f"{_name}.route({url}) asked"))
             out = _route(self, url, called, *a, **kw)
             log.append((time.time(), f"{_name}.route({url}) registered"))
-            if isinstance(url, str):
+            if isinstance(url, str) and n > 0 and "times" not in kw:     # `times=` counts the probe as a use
                 until_live(self if _name == "Page" else (self.pages[0] if self.pages else None), url, log)
             return out
+
+        def unrouting(self, url, handler=None, *, _unroute=cls.unroute, _wrappers=wrappers):
+            return _unroute(self, url, _wrappers.pop((id(self), url, handler), handler))
+        monkeypatch.setattr(cls, "unroute", unrouting)
         monkeypatch.setattr(cls, "route", noting_route)
     monkeypatch.setattr(events.Bus, "publish", noting_publish)
     monkeypatch.setattr(server, "frame", noting_frame)

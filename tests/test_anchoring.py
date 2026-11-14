@@ -679,3 +679,23 @@ def test_a_cell_in_a_code_span_that_runs_across_cells_of_a_quoted_table_is_refus
     s, e = sel(md, "one")
     with pytest.raises(rdc.AnchorError):
         rdc.add_comment(md, 0, s, e, "one", "why", "Ada", "2026-11-14T10:00")
+
+
+# ── ticket 75: what is left of PR 296 ──
+
+@pytest.mark.parametrize("md, quote", [
+    (">\t| a | b |\n>\t|---|---|\n>\t| p q | y |\n", "b"),
+    (">\t| a | b |\n>\t|---|---|\n>\t| p q | y |\n", "q"),
+    (">\t| a | b |\n>\t|---|---|\n>\t| p q | y |\n", "y"),
+    ("-\t| a | b |\n\t|---|---|\n\t| p q | y |\n", "b"),
+    ("-\t| a | b |\n\t|---|---|\n\t| p q | y |\n", "q"),
+])
+def test_a_tab_after_a_container_marker_does_not_shift_the_comment(md, quote):
+    # pandoc's sourcepos column counts the tab as spaces up to the next stop; the point is a source offset.
+    s, e = sel(md, quote)
+    out, cid = rdc.add_comment(md, 0, s, e, quote, "why", "Ada", "2026-11-14T10:00")
+    assert re.sub(r"<!--.*?-->", "", out, count=1) == md
+    page = pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], out)
+    assert page.count("<table>") == 1 and "&lt;!--" not in page
+    assert re.search(r"<t[dh]>[^<]*%s[^<]*<!--" % quote, page), page
+    assert [c.id for c in rdc.parse(out).comments] == [cid]

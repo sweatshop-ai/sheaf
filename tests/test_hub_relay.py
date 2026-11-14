@@ -341,6 +341,7 @@ def test_two_forks_reported_at_once_leave_the_later_one_with_a_good_token(team, 
     monkeypatch.setattr(team.hub.relays, "issue", issue)
     forked(team)
     other["thread"].join(10)
+    assert not other["thread"].is_alive(), "B's report did not finish"
     got = other["got"]
     assert got.status == 200, got.text
     assert sessions_of(work)[0].startswith(f"{{id: {FORK2}, ")

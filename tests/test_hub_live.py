@@ -501,6 +501,7 @@ def test_another_thread_waits_while_a_render_runs(made):
     finish.set()
     t.join(5)
     reader.join(5)
+    assert not t.is_alive() and not reader.is_alive(), "the writer and the reader did not finish after the lock was released"
     assert seen[0][0] == rds.md_hash(md.read_text(encoding="utf-8"))
 
 
@@ -520,6 +521,7 @@ def test_events_leave_in_the_order_the_text_changed(made):
     doc.save(rds.md_hash(DOC), edit_other(DOC))
     doc.during = None
     racer["t"].join(5)
+    assert not racer["t"].is_alive(), "the racing write and refresh did not finish"
     final = rds.md_hash(md.read_text(encoding="utf-8"))
     assert order[-1] == final                                   # the newest text is published last
     assert len(order) == len(set(order))

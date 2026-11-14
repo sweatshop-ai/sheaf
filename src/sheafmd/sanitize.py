@@ -274,7 +274,7 @@ def _pass(fragment: str, comments: bool, log: list[str], mount: bool = False) ->
             log.append(f"  - <{name}> removed from the document")
             tag.decompose()
             continue
-        if name == "input" and str(tag.get("type", "")).strip().lower() != "checkbox":
+        if name == "input" and str(tag.get("type", "")).lower() != "checkbox":
             log.append("  - <input> removed from the document")
             tag.decompose()
             continue

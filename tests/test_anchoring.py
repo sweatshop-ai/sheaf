@@ -3,6 +3,8 @@
 Offsets count non-whitespace characters of the block's rendered text, so the page
 and the server agree whatever whitespace each render happens to put between tags.
 """
+import itertools
+import json
 import re
 import time
 
@@ -518,6 +520,67 @@ def test_the_comment_spans_of_a_block_of_many_comments_are_read_in_linear_time(u
     spans = rdc._comment_spans(md)
     assert time.perf_counter() - t < 0.3
     assert len(spans) == (n // 2 if unit[0] == "`" else n)     # the backticks pair off, hiding every second comment
+
+
+def _pandoc_code(md):
+    """The text of every inline code span of each paragraph of `md`, as pandoc (gfm) reads it."""
+    def walk(node, out):
+        if isinstance(node, dict):
+            if node.get("t") == "Code":
+                out.append(node["c"][1])
+            for v in node.values():
+                walk(v, out)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v, out)
+    return [(lambda o: (walk(b, o), o)[1])([]) for b in json.loads(pandoc(["-f", "gfm", "-t", "json"], md))["blocks"]]
+
+
+# What is code, character by character: every string of up to five of these pieces, and pandoc says which.
+_PIECES = ["`", "\\", "a", "<b>", "<!--", "-->"]
+SPAN_STRINGS = ["".join(p) for n in range(1, 6) for p in itertools.product(_PIECES, repeat=n)]
+
+
+def test_mask_code_blanks_the_characters_pandoc_reads_as_code_in_a_fixed_set_of_strings():
+    # Point 4 (ticket 76): the cases above only ask whether a paragraph holds code; this asks which
+    # characters are code, over 9 330 strings (765 of them hold code) of backticks, backslashes, tags and comment parts.
+    # Compared per paragraph on the blanked characters: pandoc's code text, with the backticks
+    # around each span and the one space it strips from both ends put back.
+    paras = ["x " + s for s in SPAN_STRINGS]
+    theirs = _pandoc_code("\n\n".join(paras) + "\n")
+    assert len(theirs) == len(paras)
+    bad = []
+    for para, code in zip(paras, theirs):
+        masked = rdc._mask_code(para)
+        blanked = [para[a:b] for a, b in _runs_of_blanks(para, masked)]
+        got = [_inner(run) for run in blanked]
+        if got != code:
+            bad.append((para, got, code))
+    assert not bad, f"{len(bad)} strings differ, first: {bad[:3]}"
+
+
+def _runs_of_blanks(para, masked):
+    """(start, end) of each stretch `_mask_code` blanked: characters it turned into spaces."""
+    runs, i = [], 0
+    while i < len(para):
+        if masked[i] != para[i]:
+            j = i
+            while j < len(para) and masked[j] != para[j]:
+                j += 1
+            runs.append((i, j))
+            i = j
+        else:
+            i += 1
+    return runs
+
+
+def _inner(run):
+    """A blanked stretch (the whole span, its backtick runs included) as pandoc gives the code."""
+    k = len(run) - len(run.lstrip("`"))
+    inner = run[k:len(run) - k]
+    if len(inner) > 1 and inner[0] == " " == inner[-1] and inner.strip(" "):
+        inner = inner[1:-1]
+    return inner
 
 
 @pytest.mark.parametrize("slashes", range(0, 6))

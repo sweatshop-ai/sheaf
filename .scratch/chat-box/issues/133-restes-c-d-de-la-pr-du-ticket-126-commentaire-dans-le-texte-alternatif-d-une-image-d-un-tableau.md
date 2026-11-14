@@ -11,4 +11,8 @@
 
 **Claimed by:** Dries 2026-11-15 00:12
 
-**Status:** in-progress
+**Status:** done (sur chat-box/126, 02ec620 : un tableau du document qui porte une image et un commentaire est lu par pandoc, test rouge d'abord ; l'écart n'existe plus)
+
+**Limites connues (revue du ticket 126, d, non corrigées) :**
+- Le cache de `_read_tables` (16384 entrées) est borné par le nombre d'entrées, pas par la mémoire : dans un hub qui tourne longtemps il peut tenir quelques dizaines de Mo avant d'évincer.
+- `write_outcome` du fuzzer ne vérifie que la présence du commentaire, pas que le rendu reste le même avant et après l'écriture ; une écriture qui détruit un tableau passe pour « ok ».

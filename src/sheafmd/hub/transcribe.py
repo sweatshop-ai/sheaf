@@ -216,22 +216,19 @@ class Relay:
         the owner are checked again after each read. The stamp is the one of the file the key was read
         from: a file that changes during the read is read again, and one that keeps changing is not used this time.
         Opened without blocking (a FIFO would hang the open) and never through a symlink."""
-        try:
-            fd = os.open(self.cfg.key_file, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-        except OSError as e:
-            self._refuse(f"the key file cannot be opened ({e.strerror})")
-            return None
-        wrapped = False                                      # once fdopen has the descriptor, or the refusal below has closed it, closing it again is not our job
-        try:
+        fd = None
+        try:                                                 # the descriptor is closed in the finally below, once, whatever happens after the open
+            try:
+                fd = os.open(self.cfg.key_file, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            except OSError as e:
+                self._refuse(f"the key file cannot be opened ({e.strerror})")
+                return None
             st = os.fstat(fd)
             if not self._mine(st):
-                wrapped = True                               # before the close: it may raise, and the descriptor is gone either way
-                os.close(fd)
                 self._refuse("the key file is not a regular file of the hub's account with mode 0600")
                 return None
             stamp = (st.st_mtime_ns, st.st_ctime_ns, st.st_size, st.st_ino)
-            f = os.fdopen(fd, "r", encoding="utf-8", errors="replace")
-            wrapped = True
+            f = os.fdopen(fd, "r", encoding="utf-8", errors="replace", closefd=False)   # the library never owns the descriptor: it is closed here, once
             with f:
                 for _ in range(3):
                     text = f.read(KEY_FILE_MAX + 1)
@@ -262,9 +259,13 @@ class Relay:
                             return None
                         return value, stamp
         except OSError as e:
-            if not wrapped:
-                os.close(fd)
             self._refuse(f"the key file cannot be read ({e.strerror})")
+        finally:
+            try:
+                if fd is not None:
+                    os.close(fd)
+            except OSError:
+                pass                                         # a close that fails (a FUSE flush) has released the descriptor all the same
         return None
 
     def available(self) -> bool:

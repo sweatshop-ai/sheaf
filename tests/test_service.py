@@ -774,7 +774,7 @@ def test_restart_through_the_service_makes_room_for_a_hub_a_command_started(
     # for the child instead (a zombie is a process that still exists to the command, which would wait
     # for it in vain), and its code is the hub's own.
     code = []
-    waiter = threading.Thread(target=lambda: code.append(started.wait()))
+    waiter = threading.Thread(target=lambda: code.append(started.wait()), daemon=True)
     waiter.start()
     # The `linux` fixture patches `kind` in this process only: the command gets the same seam.
     r = subprocess.run([sys.executable, "-c",
@@ -786,6 +786,7 @@ def test_restart_through_the_service_makes_room_for_a_hub_a_command_started(
     got = hubclient.client().challenge()
     assert got["service"] is True and got["boot"] != old["boot"]     # the service's hub holds the port
     waiter.join(timeout=30)
+    assert not waiter.is_alive(), "the hub did not exit"
     assert code == [0]                                          # the hub's own exit code
     assert hub_exits() == [(old["boot"], "upgrade")]           # tabs ride through, as on the direct path
     assert fake.calls()[-1] == "systemctl --user restart sheaf.service"

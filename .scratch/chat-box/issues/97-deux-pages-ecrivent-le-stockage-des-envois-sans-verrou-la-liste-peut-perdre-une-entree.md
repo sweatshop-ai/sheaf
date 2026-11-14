@@ -6,4 +6,4 @@
 
 **Claimed by:** Rashid
 
-**Status:** ready-for-agent
+**Status:** done (PR 341 merged as 1dfe55d, narrowed to the proof; the fix lives on in ticket 121)

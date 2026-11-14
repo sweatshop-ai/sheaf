@@ -186,6 +186,34 @@ def tab(context, site):
 # says what the stream did: the page's side (`STREAM_JOURNAL_JS` of pagehelp: opens, errors, each event, in real
 # time) and the hub's (each publish, each frame written to a stream), side by side, so a lost event shows as one
 # side without the other.
+PROBE = "x-route-probe"
+
+
+def until_live(page, pattern, log):
+    """`route()` returns when Playwright has told the browser to intercept, yet on a loaded runner a request the page sent a few
+    ms later (a send after Ctrl+Enter) went straight to the hub and the test's handler never saw it (ticket 100: three tests
+    timed out "waiting for the send to go out", the hub's /_/comment in 2 ms after the page's fetch, no handler call). So the
+    route counts as live once it has caught a request of its own: a GET with a probe header that the wrapper's handler answers
+    itself, with 204. Best effort: a pattern that is no URL tail of the page's origin, or a page that is reloading, is left."""
+    if page is None or not pattern.startswith("**/") or not page.url.startswith("http"):
+        return
+    origin = "/".join(page.url.split("/")[:3])
+    probe = f"fetch({origin + pattern[2:]!r}, {{headers: {{{PROBE!r}: '1'}}}}).then(r => r.status, () => 0)"
+    began = time.monotonic()
+    tries = 0
+    while time.monotonic() - began < 5:
+        tries += 1
+        try:
+            with stalls_after(8, "a route's probe"):
+                if page.evaluate(probe) == 204:
+                    break
+        except (Exception, PageStalled):
+            return
+        page.wait_for_timeout(50)
+    if tries > 1:
+        log.append((time.time(), f"route {pattern} caught its probe at try {tries}"))
+
+
 @pytest.fixture(autouse=True)
 def hub_journal(monkeypatch):
     """What the hub published and wrote to a stream, with the time (time.time()), for `pytest_runtest_makereport`."""
@@ -221,15 +249,21 @@ def hub_journal(monkeypatch):
                 log.append((time.time(), f"{_name}.route handler called for {route.request.method} {route.request.url[-30:]}"))
             if len(inspect.signature(handler).parameters) == 1:      # Playwright passes the request too, to a handler that takes two
                 def called(route):
+                    if route.request.headers.get(PROBE):
+                        return route.fulfill(status=204)
                     noted(route)
                     return handler(route)
             else:
                 def called(route, request):
+                    if route.request.headers.get(PROBE):
+                        return route.fulfill(status=204)
                     noted(route)
                     return handler(route, request)
             log.append((time.time(), f"{_name}.route({url}) asked"))
             out = _route(self, url, called, *a, **kw)
             log.append((time.time(), f"{_name}.route({url}) registered"))
+            if isinstance(url, str):
+                until_live(self if _name == "Page" else (self.pages[0] if self.pages else None), url, log)
             return out
         monkeypatch.setattr(cls, "route", noting_route)
     monkeypatch.setattr(events.Bus, "publish", noting_publish)

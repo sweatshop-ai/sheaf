@@ -1959,3 +1959,11 @@ def test_a_list_made_by_its_leading_crs_has_its_marks_found():
     block = split_md_blocks('\r\r\r\r- [ ] Approve\n')[0]
     frag = ticked_html(block, 0)
     assert frag is not None and 'checked' in frag
+
+
+@pytest.mark.parametrize("src", [' \r- [ ] Approve\n', '  \r- [ ] Approve\n', '\r \r- [ ] Approve\n'])
+def test_a_cr_among_the_indent_of_a_list_keeps_its_marks(src):
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import ticked_html
+    block = split_md_blocks(src)[0]
+    assert ticked_html(block, 0) is not None

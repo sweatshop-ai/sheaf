@@ -716,7 +716,7 @@ def _unchanged(block, fragment: str) -> bool:
 # source and leaves every other byte alone. Pandoc would rewrite the whole list
 # (bullets, wrapping, a capital X), so one tick would touch every line.
 TASK_MARK_RE = re.compile(
-    r"^((?:\r*[ \t]*>)*\r*[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+)\[([ xX])\](?=[ \t]|$)", re.M)
+    r"^((?:[ \t\r]*>)*[ \t\r]*(?:[-*+]|\d{1,9}[.)])[ \t]+)\[([ xX])\](?=[ \t]|$)", re.M)
 
 
 def _ticks(fragment: str):

@@ -148,6 +148,7 @@ class Hub:
         self._front: dict = {}                   # {file: (its stat, its front matter, its assignees)}, for 9.11
         self._private_seen: dict = {}            # {address: the member a private root held it for}, `place.private_member`
         self.the_list = None                     # the list (9.10): a the_list.TheList, set by the server
+        self.transcribe = None                   # the dictation relay (8.5): a transcribe.Relay, set by the server
         self.blamed: dict = {}                   # {(real path, md_hash): (pressers, monotonic time or None)}: once per text,
                                                  # for the list's rows and the pages' buttons alike (9.10, 10.11)
         self.docs = state.Docs()

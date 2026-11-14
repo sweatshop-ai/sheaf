@@ -1413,13 +1413,13 @@ def test_a_lock_another_git_took_after_the_add_is_left_where_it_is(box, sheaves,
     real = commits._git
     lock = sheaves / ".git" / "index.lock"
 
-    def slow(folder, *args, **kw):
+    def slow_fetch(folder, *args, **kw):
         if args[:2] == ("diff", "--cached"):
             lock.write_text("", encoding="utf-8")       # a person's `git commit`, its editor open
             raise subprocess.TimeoutExpired(args, 20)
         return real(folder, *args, **kw)
 
-    monkeypatch.setattr(commits, "_git", slow)
+    monkeypatch.setattr(commits, "_git", slow_fetch)
     edit(box, sheaves)
     assert rows("commit-failed")
     assert lock.exists()

@@ -3,6 +3,8 @@
 Offsets count non-whitespace characters of the block's rendered text, so the page
 and the server agree whatever whitespace each render happens to put between tags.
 """
+import re
+
 import pytest
 from helpers import pandoc
 
@@ -28,7 +30,6 @@ def sel(block, quote, occurrence=0):
     ("The gap is **52%** and it matters.\n", "The gap is 52%", "The gap is **52%**| and it matters.\n"),
     ("See [the report](http://x.y/z) now.\n", "the report", "See [the report](http://x.y/z)| now.\n"),
     ("Salt &amp; pepper.\n", "Salt &", "Salt &amp;| pepper.\n"),
-    ("## A heading here\n", "heading", "## A heading| here\n"),
     ("| A | B |\n|---|---|\n| cell **b** | x |\n", "cell b", "| A | B |\n|---|---|\n| cell **b**| | x |\n"),
     ("The gap is 52.\n", "ga", "The ga|p is 52.\n"),
     ("- one\n- two items\n", "two", "- one\n- two| items\n"),
@@ -138,3 +139,100 @@ def test_a_task_list_box_is_not_text():
 def test_a_box_typed_in_the_text_is_still_text():
     assert rdc.projection("Tick ☐ when done.\n").text == "Tick☐whendone."
     assert rdc.projection("- ☐ is a box\n").text == "☐isabox"
+
+
+# ── a comment on words of a heading goes at the end of the heading (ticket 55) ──
+
+HEADINGS = [
+    # (markdown, quote, the heading line with the block's place marked)
+    ("## Done when\n", "Done", "## Done when|\n"),
+    ("## Done when\n", "when", "## Done when|\n"),
+    ("## Done when   \n", "Done", "## Done when|   \n"),
+    ("## Done when ##\n", "Done", "## Done when| ##\n"),
+    ("## C#\n", "C", "## C#|\n"),
+    ("# **Done** when\n", "Done", "# **Done** when|\n"),
+    ("Done when\n=========\n", "Done", "Done when|\n=========\n"),
+    ("Done\nwhen we ship\n---\n", "Done", "Done\nwhen we ship|\n---\n"),
+    # A backslash that ends the text would escape the `<` of the block: the block goes before it.
+    ("## A\\\n", "A", "## A|\\\n"),
+    ("## A \\\n", "A", "## A |\\\n"),
+    ("## A\\ ##\n", "A", "## A|\\ ##\n"),
+    ("Line A\\\n=======\n", "A", "Line A|\\\n=======\n"),
+    ("## A\\\\\n", "A", "## A\\\\|\n"),           # two backslashes are one escaped backslash
+]
+
+
+def comment_on(md, quote):
+    s, e = sel(md, quote)
+    return rdc.add_comment(md, block=0, start=s, end=e, quote=quote, body="why", by="Ada", at="2026-11-13T10:00")
+
+
+@pytest.mark.parametrize("md, quote, expect", HEADINGS)
+def test_a_comment_on_words_of_a_heading_goes_at_the_end_of_the_heading(md, quote, expect):
+    out, cid = comment_on(md, quote)
+    raw = out[len(expect.split("|")[0]):out.index("-->") + 3]
+    assert raw.startswith("<!-- sheaf-comment id=" + cid) and 'quote="%s"' % quote in raw
+    assert out.replace(raw, "|", 1) == expect
+    assert rdc.parse(out).comments[0].quote == quote
+
+
+@pytest.mark.parametrize("md, quote", [(md, quote) for md, quote, _ in HEADINGS])
+def test_the_heading_is_whole_for_a_reader_that_drops_the_comment(md, quote):
+    out, _ = comment_on(md, quote)
+    assert re.sub(r"<!--.*?-->", "", out) == md
+    page = pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], out)
+    assert page.count("<!--") == 1
+    assert re.sub(r"<!--.*?-->", "", page) == pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], md)
+
+
+def test_a_comment_on_a_paragraph_still_goes_after_the_selection():
+    md = "The gap is 52 and more.\n"
+    s, e = sel(md, "gap")
+    out, _ = rdc.add_comment(md, 0, s, e, "gap", "why", "Ada", "2026-11-13T10:00")
+    assert out.startswith("The gap<!-- sheaf-comment")
+
+
+def test_a_heading_quote_that_is_stale_is_still_refused():
+    # The anchor of a heading ignores the selection, but the selection is still checked (SPEC 10.4).
+    with pytest.raises(rdc.AnchorError, match="text changed"):
+        rdc.add_comment("## Done when\n", 0, 0, 4, "Nope", "why", "Ada", "2026-11-13T10:00")
+
+
+# ── heading edge cases (ticket 58) ──
+
+@pytest.mark.parametrize("space", ["\u00a0", "\u3000"])
+def test_a_heading_with_a_no_break_or_full_width_space_after_the_hashes_takes_a_comment(space):
+    # blocks.ATX_RE reads any \s after the hashes as a heading, pandoc reads a paragraph: the
+    # heading anchor is None there and add_comment used to add it to the offset (TypeError).
+    md = "#%sFoo bar\n" % space
+    out, cid = comment_on(md, "Foo")
+    assert out.startswith("#%sFoo<!-- sheaf-comment id=%s" % (space, cid))
+    assert re.sub(r"<!--.*?-->", "", out) == md
+
+
+@pytest.mark.parametrize("md", ["### ###\n", "# #\n", "## ##  \n"])
+def test_a_heading_that_is_only_hashes_has_no_place_for_a_block(md):
+    assert rdc.heading_anchor(md) is None
+
+
+def test_a_heading_with_an_unclosed_opener_takes_the_block_before_it_and_keeps_every_word():
+    md = "# The <!-- marker\n"
+    out, cid = comment_on(md, "The")
+    assert out.startswith("# The<!-- sheaf-comment id=%s" % cid)
+    assert re.sub(r"<!--.*?-->", "", out, count=1) == md
+    page = pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], out)
+    assert "marker" in page and [c.id for c in rdc.parse(out).comments] == [cid]
+
+
+def test_an_opener_in_a_code_span_of_a_heading_is_not_an_opener():
+    md = "# Use `<!--` here\n"
+    out, _ = comment_on(md, "here")
+    assert out.startswith("# Use `<!--` here<!-- sheaf-comment")
+
+
+@pytest.mark.parametrize("md, quote", [("# <!-- marker\n", "marker"), ("## <!-- a b\n", "a")])
+def test_a_heading_whose_words_all_follow_an_unclosed_opener_refuses_the_comment(md, quote):
+    # A block after the selection would sit inside the opener and close it.
+    s, e = sel(md, quote)
+    with pytest.raises(rdc.AnchorError):
+        rdc.add_comment(md, 0, s, e, quote, "why", "Ada", "2026-11-13T10:00")

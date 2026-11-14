@@ -13,6 +13,17 @@ from pathlib import Path
 
 import pytest
 
+import sheafmd
+
+pytest_plugins = ["driver_stall"]     # the first page test to time out in the Playwright driver ends the run
+
+# Before anything else imports sheafmd's parts: another checkout's venv resolves it to that checkout, and the run
+# would be about code that is not here. tests/test_import_guard.py says why this refuses.
+_OWN_SOURCE = Path(__file__).resolve().parents[1] / "src"
+if not Path(sheafmd.__file__).resolve().is_relative_to(_OWN_SOURCE):
+    raise pytest.UsageError(f"this suite imports {sheafmd.__file__}, not the code under {_OWN_SOURCE}. "
+                            f"Run it with PYTHONPATH={_OWN_SOURCE}")
+
 from helpers import NOW, PLAN, Opener, browser_on, claim_port, proc_state, stop_hub
 # no_process_left_behind and the_test_that_is_running are the fixtures of tests/leakguard.py
 from leakguard import NODE_VAR, RUN_VAR, no_process_left_behind, stop_left, the_test_that_is_running  # noqa: F401
@@ -87,6 +98,52 @@ def the_main_thread_names_its_frame(request):
     timer.join()
 
 
+def pytest_configure(config):
+    """`-n` spreads tests with `--dist load` unless the run says otherwise; `loadgroup` keeps a file with
+    IN_ORDER = True on one worker (pytest_itemcollected) and spreads the rest as before. Not in `addopts`:
+    `--dist` belongs to the xdist plugin, and a run without it (`-p no:xdist`) would not start. A worker
+    reads its own `loadgroup` from the arguments it was started with, which do not have the change."""
+    if not config.pluginmanager.hasplugin("xdist"):
+        return
+    if hasattr(config, "workerinput"):
+        config.option.loadgroup = True
+    elif config.getoption("dist") == "load":
+        config.option.dist = "loadgroup"
+
+
+def pytest_itemcollected(item):
+    """Under xdist (`--dist loadgroup`, pytest_configure above) a file with IN_ORDER = True runs on one worker: its
+    tests share a module list, which a second worker does not have. xdist reads the group while it sorts the
+    items, so the mark goes on as each one is collected."""
+    if getattr(item.module, "IN_ORDER", False):
+        item.add_marker(pytest.mark.xdist_group(item.module.__name__))
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_collection_modifyitems(config, items):
+    """SHEAF_TEST_SLICE=i/n keeps the i-th of every n tests that are left after -m: ci.yml runs each
+    Python as three jobs, one slice each. A file with IN_ORDER = True, whose tests read what the test
+    before them left, counts as one test and stays whole in one slice. Every xdist worker collects the
+    same tests in the same order, so each keeps the same slice."""
+    slice_ = os.environ.get("SHEAF_TEST_SLICE")
+    if not slice_:
+        return
+    i, n = (int(x) for x in slice_.split("/"))
+    units, whole = [], {}
+    for it in items:
+        if getattr(it.module, "IN_ORDER", False):
+            if it.module not in whole:
+                whole[it.module] = []
+                units.append(whole[it.module])
+            whole[it.module].append(it)
+        else:
+            units.append([it])
+    keep = [it for k, u in enumerate(units) if k % n == i - 1 for it in u]
+    kept = set(keep)
+    config.hook.pytest_deselected(items=[it for it in items if it not in kept])
+    items[:] = keep
+
+
 @pytest.fixture(autouse=True)
 def sheaf_env(tmp_path, monkeypatch, request):
     """Every test gets its own state, config, cache and runtime folders, its own
@@ -115,6 +172,8 @@ def sheaf_env(tmp_path, monkeypatch, request):
     for var in ("XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", *SSH_VARS, *agent_vars, *prefixed):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr(tempfile, "tempdir", str(tmp))
+    # a pytest run that a test starts runs all of its own tests, not a slice of them
+    monkeypatch.delenv("SHEAF_TEST_SLICE", raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -310,6 +369,30 @@ def hub(work):
     from sheafmd import paths
     from sheafmd.hub.core import Hub
     return Hub(port=HUB_PORT, key=paths.ensure_key(), started_by="test")
+
+
+@pytest.fixture(autouse=True)
+def every_hub_settles_its_pusher(sheaf_env, monkeypatch):
+    """Every `Hub` this test builds, by whichever path (the `hub` fixture, `TwoRoots.hub()`, a fixture of a test
+    file, a direct `Hub(...)`), has its pusher settled when the test ends. A push the test left due ends here, in this
+    test's state: its pusher is a thread that outlives the test and writes its `push-failed` row into the state of
+    whichever test runs next (#32, #35). It asks for `sheaf_env` so that it is torn down before the environment is:
+    `diagnostics.record` reads the state folder from the environment at the call. A hub the test stopped itself
+    has no pusher left, and settles at once."""
+    from sheafmd.hub.core import Hub
+    built = []
+    real = Hub.__init__
+
+    def tracked(self, *args, **kwargs):
+        built.append(self)
+        real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Hub, "__init__", tracked)
+    yield
+    # every hub is settled, then the test fails once: one that is stuck must not leave the others' pushers running
+    stuck = [i for i, h in enumerate(built, 1)
+             if not (getattr(h, "commits", None) is None or h.commits.settle(30))]    # None: the constructor raised first
+    assert not stuck, f"the pusher of hub {stuck} of {len(built)} built in this test did not finish within 30 s of its end"
 
 
 @pytest.fixture

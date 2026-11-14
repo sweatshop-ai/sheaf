@@ -86,6 +86,11 @@
 #rd-popover .rd-text code{font:.86em ui-monospace,monospace;background:rgba(127,127,127,.15);
  padding:0 .25em;border-radius:2px}
 #rd-popover .rd-text a{color:inherit;text-decoration:underline}
+#rd-popover .rd-text pre{margin:.2em 0 .5em;padding:.4em .6em;background:rgba(127,127,127,.12);border-radius:4px;
+ overflow-x:auto;white-space:pre}
+#rd-popover .rd-text pre code{background:none;padding:0;font-size:.86em}
+#rd-popover .rd-text .rd-bq{margin:.2em 0 .5em;padding-left:.6em;border-left:3px solid rgba(127,127,127,.4);opacity:.85}
+#rd-popover .rd-text li+li{margin-top:.15em}
 #rd-popover .rd-quote{font-size:12px;opacity:.7;margin-bottom:8px;font-style:italic}
 #rd-popover .rd-tag{font:600 10px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.06em;
  background:#e5e7eb;color:#111;border-radius:2px;padding:1px 5px;margin-left:6px}
@@ -112,6 +117,12 @@
 #rd-popover .rd-send svg{width:20px;height:20px}
 #rd-popover .rd-form .rd-actions button.rd-x{width:30px;height:30px;padding:0;border-radius:50%;font-size:0;box-shadow:none;opacity:.6}
 #rd-popover .rd-form .rd-actions button.rd-x::before{content:"\00D7";font:400 20px/30px system-ui,sans-serif}
+/* The microphone: a round button beside the arrow; red while it records. Its line (a refusal, a failure) sits under the field. */
+#rd-popover .rd-form .rd-actions button.rd-mic{order:8;margin-left:auto;display:flex;align-items:center;justify-content:center;width:30px;height:30px;padding:0;border-radius:50%;font-size:0;background:transparent;color:var(--fg,#000);box-shadow:none;opacity:.7}
+#rd-popover .rd-form .rd-actions button.rd-mic+.rd-send{margin-left:0}
+#rd-popover .rd-mic svg{width:18px;height:18px}
+#rd-popover .rd-form .rd-actions button.rd-mic[aria-pressed="true"]{background:#c62828;color:#fff;opacity:1}
+#rd-popover .rd-mic-says{font:12px/1.4 ui-monospace,monospace;opacity:.8;margin:0 0 6px}
 /* The band of the box: the passage on the left, the little that is not talking to the agent on the right. */
 #rd-popover .rd-head{flex:0 0 auto;display:flex;align-items:center;gap:2px;margin-bottom:8px}
 #rd-popover .rd-head .rd-quote{flex:1 1 auto;min-width:0;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -155,6 +166,13 @@
 .rd-editing [contenteditable="true"]{outline:1px dashed rgba(120,120,120,.55);
  outline-offset:4px;border-radius:2px}
 .rd-editing [contenteditable="true"]:focus{outline:2px solid #2563eb;outline-offset:4px}
+.rd-editing [contenteditable="true"].rd-saving{cursor:not-allowed;outline-style:dotted;opacity:.7}
+/* The copy block's button sits inside the quote's corner, as the source-only tag does. */
+blockquote.rd-copy{position:relative;padding-right:5.5em}
+.rd-copybtn{position:absolute;top:6px;right:6px;font:600 11px ui-monospace,monospace;cursor:pointer;
+ background:var(--fg,#000);color:var(--bg,#fff);border:0;border-radius:2px;padding:4px 9px;user-select:none}
+.rd-copybtn:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
+@media print{.rd-copybtn{display:none}}
 .rd-editing .rd-locked{position:relative;opacity:.62}
 /* Inside the box, not above it: a <pre> scrolls, so it clips anything outside its edge. */
 .rd-editing .rd-locked::after{content:"source-only";position:absolute;top:4px;right:4px;
@@ -213,11 +231,6 @@
 /* What the agent cannot do: the button is there, disabled, and one line says why (SPEC 10.6). */
 /* Busy Tell: hovering shows Cancel over the label. Both stay laid out, so the
    button keeps its width and the pointer does not slide onto its neighbour. */
-#rd-popover .rd-actions button.rd-busy{display:inline-grid}
-#rd-popover .rd-actions button.rd-busy>span{grid-area:1/1;text-align:center}
-#rd-popover .rd-actions button.rd-busy .rd-off{visibility:hidden}
-#rd-popover .rd-actions button.rd-busy:hover .rd-on{visibility:hidden}
-#rd-popover .rd-actions button.rd-busy:hover .rd-off{visibility:visible}
 #rd-popover .rd-hold,#rd-popover .rd-also,#rd-popover .rd-kept-quote,#rd-popover .rd-sending{font:12px/1.4 ui-monospace,monospace;opacity:.8;margin:0 0 6px}
 /* A form's send is out: the line stands where the form and the thread's buttons were. */
 #rd-popover .rd-sending{margin:8px 0 0}
@@ -240,3 +253,5 @@
 #rd-actions .rd-act.pending,#rd-actions .rd-act.pressed,#rd-actions .rd-act[aria-pressed=true]{background:var(--rd-c);
  color:var(--bg,#fff)}
 #rd-actions .rd-act:disabled{cursor:default;opacity:.7}
+.doc-by .doc-by-who{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;
+ text-decoration:underline;text-underline-offset:2px}

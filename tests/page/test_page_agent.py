@@ -189,3 +189,31 @@ def test_the_answer_button_follows_the_jump_command_without_a_reload(tab, agent,
     tab.site.reopen()
     tab.page.wait_for_function("() => document.querySelectorAll('#rd-popover button.rd-answer').length === 0",
                                timeout=30000)
+
+
+def test_the_byline_names_the_session_and_its_name_opens_it(tab, agent, tmp_path):
+    out = tmp_path / "jumped.json"
+    probe = tmp_path / "probe.py"
+    probe.write_text(PROBE, encoding="utf-8")
+    write_config(f"[jump]\ncommand = {json.dumps([sys.executable, str(probe), str(out), '{session}', '{name}'])}\n")
+    write_record(tmp_path / "claude-config", name="Cosima", messagingSocketPath="", procStart=proc_start(PID))
+    tab.site.hub.render(tab.site.file, {"by": "tiroir"}, None)      # the hub's person, as `sheaf FILE.md` gives it
+    tab.open()
+    assert tab.page.inner_text("p.doc-by") == "Document prepared by Cosima"
+    tab.page.click("p.doc-by button.doc-by-who")
+    until(lambda: out.exists(), timeout=10, what="the jump command's output")
+    assert json.loads(out.read_text(encoding="utf-8")) == ["s-1", "Cosima"]
+
+
+def test_a_running_tell_says_once_who_works_on_it_and_its_button_only_cancels(tab, agent):
+    update_file(tab.site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
+                                                         "Ada", "2026-10-14T10:00")[0])
+    tab.open()
+    tab.page.click(".rd-badge")
+    tab.page.wait_for_selector("#rd-popover textarea")
+    tab.page.fill("#rd-popover textarea", "Please do.")
+    tab.page.click("#rd-popover .rd-form button.rd-tell")
+    tab.page.wait_for_selector("#rd-popover .rd-pending-tell")
+    box = tab.page.inner_text("#rd-popover")
+    assert box.count("is working") == 1, box
+    assert tab.page.inner_text("#rd-popover button[data-a=cancel-tell]") == "Cancel"

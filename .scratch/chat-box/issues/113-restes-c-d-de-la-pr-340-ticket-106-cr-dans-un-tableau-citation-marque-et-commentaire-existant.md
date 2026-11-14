@@ -16,7 +16,7 @@
 
 **Claimed by:** Bodhi
 
-**Status:** done: PR 347; leftovers in ticket 120
+**Status:** done: PR 347, merged as 1204080; leftovers in ticket 120
 
 - [ ] c2 (c1 est réglé dans la PR 340), c3, c4, c6 corrigés ou écartés avec la preuve
 - [ ] d5, d7 notés ou corrigés

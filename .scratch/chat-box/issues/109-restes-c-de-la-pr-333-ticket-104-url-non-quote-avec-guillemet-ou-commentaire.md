@@ -8,4 +8,4 @@
 
 **Claimed by:** Cormac
 
-**Status:** ready-for-agent
+**Status:** done (PR 337, merged as e29dd81; c and d in ticket 110)

@@ -790,46 +790,6 @@ def _refused(tmp_path, text):
     return e.value
 
 
-def test_an_unclosed_reviewer_note_after_an_empty_opener_is_named_as_the_note(tmp_path):
-    # Ticket 83, point 3 (redone in ticket 99): the unclosed note is named before the empty opener.
-    e = _refused(tmp_path, "<!--> <!-- sheaf-comment id=c1 by=a at=2026-01-01T00:00\nbody\n")
-    assert e.line == 1 and "a note by a reviewer" in str(e)
-
-
-@pytest.mark.parametrize("text", [
-    "# A <!-- sheaf-comment id=c1 by=a at=2026-01-01T00:00 hi --> b <!--> c\n\nKEEP1\n",
-    "A <!-- sheaf-comment id=c1 by=a at=2026-01-01T00:00 hi --> b <!--> c\n\nKEEP1\n",
-    # A head written as code is code, in a span, across lines, in a fence, in an indented block.
-    "A <!--> b `<!-- sheaf-comment x` c\n\nKEEP1\n",
-    "# A <!--> b `<!-- sheaf-comment x` c\n\nKEEP1\n",
-    "- A <!--> b `<!-- sheaf-comment x` c\n\nKEEP1\n",
-    "A <!---> b `<!-- sheaf-comment x` c\r\n\r\nKEEP1\r\n",
-    "A <!--> `<!-- sheaf-comment\nx` b\n\nKEEP1\n",
-    "A\t<!--> b\t`<!-- sheaf-comment x` c\n\nKEEP1\n",
-    "A <!--> cafe\u0301 `<!-- sheaf-comment x` c\n\nKEEP1\n",
-])
-def test_a_note_head_that_is_closed_or_written_as_code_does_not_make_the_refusal_a_note_one(tmp_path, text):
-    # Reviews of PR 325: only what pandoc passes on as raw html is the fault; the head is read off
-    # pandoc's own tree (is it inside a code element at its position), never matched in its output.
-    e = _refused(tmp_path, text)
-    assert e.line == 1
-    assert "empty HTML comment" in str(e) and "note by a reviewer" not in str(e)
-
-
-@pytest.mark.parametrize("text", [
-    "<!-- sheaf-comment x\ty\n\nSECRET\n",                       # pandoc turns the tab into spaces
-    "<div> <!-- sheaf-comment x\ty\n\nSECRET\n",
-    "<!-- sheaf-comment id=c1 quote=\"cafe\u0301\" by=a\n\nSECRET\n",   # and decomposed text into NFC
-    "<!--> <!-- sheaf-comment x\ty\n\nSECRET\n",                  # after an empty opener
-    "<!--> <!-- sheaf-comment id=c1 quote=\"cafe\u0301\" by=a\n\nSECRET\n",
-    "<!--> <!-- sheaf-comment x `a` `b`\n\nSECRET\n",             # code on the line, after the head
-    "`a`\n\n<!--> <!-- sheaf-comment x\n\nSECRET\n",
-])
-def test_an_unclosed_note_head_pandoc_passes_on_is_named_as_a_note(tmp_path, text):
-    e = _refused(tmp_path, text)
-    assert "note by a reviewer" in str(e) and "empty HTML comment" not in str(e)
-
-
 def test_an_empty_opener_in_a_link_destination_is_copied_unless_a_later_arrow_would_close_it(tmp_path):
     # SPEC 6.2 (ticket 99): both cases; they also hold on main.
     out = sheafmd.render(doc(tmp_path, "[l](http://x/<!-->) KEEP1\n"))

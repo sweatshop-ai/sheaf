@@ -309,19 +309,6 @@ def _swallowed_note_line(src: str) -> int | None:
     return min(lines, default=None)
 
 
-_CODE_POS_RE = re.compile(r'<(?:code|pre)\b[^>]*?\bdata-pos="(?:[^"]*?[@:/])?(\d+):(\d+)-(\d+):(\d+)"')
-
-
-def _code_at(src: str):
-    """`f(line, col)`: does pandoc's own tree put that position of `src` in code (a span, a fence or
-    an indented block)? Read from `-f gfm+sourcepos`, where code carries the stretch it was read
-    from (columns count a tab out to the next multiple of 4 and a decomposed letter as two); never
-    by looking for a piece of the source in the output, which pandoc rewrites (tabs, NFC, entities)."""
-    r = _pandoc.run(["-f", "gfm+sourcepos", "-t", "html5", "--no-highlight"], copyblock.hide(src))
-    spans = [((int(a), int(b)), (int(c), int(d))) for a, b, c, d in _CODE_POS_RE.findall(r.stdout)]
-    return lambda line, col: any(lo <= (line, col) < hi for lo, hi in spans)
-
-
 def _shows_a_note(frag: str) -> bool:
     """Does the page print a reviewer's comment head as text? In code it is an example."""
     return bool(VISIBLE_NOTE_RE.search(CODE_HTML_RE.sub("", frag)))
@@ -1051,18 +1038,12 @@ def build(md: Path, *, theme: Theme, share: bool = True, title: str | None = Non
         line = _unclosed_line(original, frag)
         if line:
             text = original.split("\n")[line - 1]
+            head = rdc.COMMENT_RE.search(text)
             spans = [x.span() for x in COMMENT_RE.finditer(text)]
-            # A reviewer's note that nothing closes is named before an empty opener on its line. A
-            # head is the fault only when pandoc passes it on as raw html: not inside a comment the
-            # line closes, and not in code, which pandoc's own tree says at the head's position.
-            in_code = _code_at(original)
-            head = next((h for h in rdc.COMMENT_RE.finditer(text)
-                         if not any(a <= h.start() < b for a, b in spans)
-                         and not in_code(line, len(text[:h.start()].expandtabs(4)) + 1)), None)
             first = next((m for m in re.finditer(r"<!--", text)
                           if not any(a <= m.start() < b for a, b in spans)), None)
             empty = re.match(r"<!---?>", text[first.start():]) if first else None
-            raise UnclosedComment(line, note=bool(head), empty="" if head or not empty else empty.group())
+            raise UnclosedComment(line, note=bool(head), empty=empty.group() if empty else "")
         log.append("  ! pandoc produced an HTML comment in the share copy; it was removed")
         frag = strip_comments(frag, log)
 

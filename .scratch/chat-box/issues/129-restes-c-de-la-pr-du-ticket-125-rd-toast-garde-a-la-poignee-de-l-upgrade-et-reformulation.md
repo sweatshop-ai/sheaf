@@ -7,7 +7,7 @@
 - (d) SPEC 10.11 : « says it on the page that stays » est faux pour l'appelant de l'upgrade ; « (8.2) » omet 8.12 (fin d'accès), qui passe par `meetDocGone`.
 - (d) `settle()` qui renonce après une fusion non sauvée est un troisième cas de rechargement qui n'a pas lieu ; le SPEC le dit à part, vérifier la formulation.
 
-**Blocked by:** PR du ticket 125 merged
+**Blocked by:** 125
 
 **Status:** open
 

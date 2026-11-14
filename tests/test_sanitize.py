@@ -3,6 +3,7 @@ task boxes and comments kept.
 
 Every removal test also asserts what must SURVIVE next to it, so a sanitiser that
 empties the document cannot pass."""
+import html
 import random
 from html.parser import HTMLParser
 
@@ -146,6 +147,8 @@ def test_the_document_has_no_contenteditable_of_its_own(value, mount):
 @pytest.mark.parametrize("spelling", ["CONTENTEDITABLE", "ContentEditable", 'contenteditable="true" contenteditable="false"',
                                       'contenteditable="false" contenteditable="true"'])
 def test_contenteditable_goes_in_any_letter_case_and_when_repeated(spelling, mount):
+    """The upper-case and repeated spellings pass on main without the contenteditable rule's help too: html.parser lowercases
+    attribute names and keeps one of two duplicates before the sanitiser sees them. They pin that behaviour; they do not test the rule."""
     out = sanitize(f"<p>a<span {spelling}>b</span></p>", mount=mount)
     assert "contenteditable" not in out.lower()
     assert "<span>b</span>" in out
@@ -468,3 +471,73 @@ def test_a_style_attribute_cannot_make_text_editable(decl):
     out = sanitize(f'<p>a<span style="color: red; {decl}; width: 3px">b</span></p>')
     assert "modify" not in out.lower() and "\\" not in out
     assert "color: red" in out and "width: 3px" in out
+
+
+@pytest.mark.parametrize("style, want", [
+    ('content: "a;\\201C"; color: red', " color: red"),
+    ("content: 'a;\\201C'; color: red", " color: red"),
+    ('content: "a;b"; color: red', 'content: "a;b"; color: red'),
+    ('content: "a;-webkit-user-modify: read-write"; color: red', " color: red"),
+    ('content: "a\\";-webkit-user-modify: read-write"; color: red', " color: red"),
+    ("/* ; \" */ color: red; -webkit-user-modify: read-write", "/* ; \" */ color: red"),
+    ('content: "a\n; -webkit-user-modify: read-write; color: red', 'content: "a\n; color: red'),
+    ('content: "a;\\201C; -webkit-user-modify: read-write; width: 3px', None),
+])
+def test_the_style_filter_splits_on_the_semicolons_the_browser_splits_on(style, want):
+    """A `;` inside a CSS string or a comment does not end a declaration: a declaration dropped whole leaves the next one
+    intact, never a truncated rest. A string a newline ends is over, as in a browser. `want` None: the whole text is one
+    declaration for the browser, and nothing is kept.
+    Whatever the split, nothing with user-modify or a backslash comes out."""
+    out = sanitize(f'<p><span style="{html.escape(style)}">b</span></p>')
+    assert "user-modify" not in out.lower() and "\\" not in out
+    span = next(a for t, a in tags_of(out) if t == "span")
+    assert span.get("style") == want
+
+
+def test_a_declaration_with_a_backslash_goes_and_its_neighbours_stay():
+    """The backslash rule is wider than it needs to be (an escape in `content` is harmless) and drops ordinary
+    declarations too; this pins that, so a narrowing is a decision and not an accident."""
+    out = sanitize('<span style=\'color: red; content:"\\201C"; width: 3px\'>b</span>')
+    assert "color: red" in out and "width: 3px" in out
+    assert "content" not in out and "\\" not in out
+
+
+def test_simple_mode_logs_a_trimmed_style_like_mount_mode():
+    log = []
+    sanitize('<span style="color: red; -webkit-user-modify: read-write">x</span>', log=log)
+    assert log == ["  - style trimmed on <span>"]
+    log = []
+    sanitize('<span style="color: red">x</span>', log=log)
+    assert log == []
+
+
+@pytest.mark.parametrize("mount", [False, True])
+def test_a_style_the_filter_empties_is_removed(mount):
+    log = []
+    out = sanitize('<span style="-webkit-user-modify:read-write">x</span>', log=log, mount=mount)
+    assert out == "<span>x</span>"
+    assert "  - style trimmed on <span>" in log
+
+
+def test_no_split_of_a_style_lets_user_modify_or_a_backslash_through():
+    """Bypass neighbours of the string- and comment-aware split: quotes, comments, escapes and newlines in every order
+    around a declaration that makes text editable. The split may differ from a browser's; the output may not carry the name."""
+    pieces = ['"', "'", "/*", "*/", ";", "\\", "\n", ":", " ", "color: red", "-webkit-user-modify: read-write", "user-modify",
+              "-moz-user-\\6d odify:read-write", "a"]
+    rng = random.Random(96)
+    for _ in range(3000):
+        style = "".join(rng.choice(pieces) for _ in range(rng.randint(1, 12)))
+        out = sanitize(f'<span style="{html.escape(style)}">x</span>')
+        assert "user-modify" not in out.lower() and "\\" not in out, style
+        assert sanitize(out) == out, style
+
+
+@pytest.mark.parametrize("style, want", [
+    ("color: red; -webkit-user-modify: read-write;", "color: red;"),
+    ("color: red;", "color: red;"),
+    ('content: "/*"; color: red; -webkit-user-modify: read-write', 'content: "/*"; color: red'),
+    ('content: "*/"; color: red; -webkit-user-modify: read-write', 'content: "*/"; color: red'),
+])
+def test_the_edges_of_the_split_a_trailing_semicolon_and_comment_marks_inside_a_string(style, want):
+    out = sanitize(f'<span style="{html.escape(style)}">x</span>')
+    assert next(a for t, a in tags_of(out) if t == "span").get("style") == want

@@ -736,7 +736,7 @@ def _unchanged(block, fragment: str) -> bool:
 # draws no box for `1. [ ] a` (a CR or none), so a mark there would be one the page never shows. The bullet may
 # stand behind other markers on its line (`- - [ ] a`, `1. - [ ] a`, `1. > - [ ] a`): pandoc draws its box.
 TASK_MARK_RE = re.compile(
-    r"^((?:[ \t]*>)*[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+|>[ \t]*)*[-*+][ \t]+)\[([ xX])\](?=[ \t]|$)", re.M)
+    r"^([ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+|>[ \t]*)*[-*+][ \t]+)\[([ xX])\](?=[ \t]|$)", re.M)
 # The marks of before ticket 128, which also took an ordered item. They stay as a second reading: where the counts
 # of the first one are not the boxes' (an empty `- [ ]` beside a box the first reading finds behind another marker),
 # these may be, and the write is checked all the same by the render of its result.
@@ -803,11 +803,11 @@ def _toggle_boxes(block, fragment: str, marks=None):
     """The block with its task marks flipped, when the page changed nothing but
     which boxes are ticked. None otherwise, and then the edit is converted as usual.
     `marks` is one reading of the marks; none given, each of `_mark_sets` is tried in turn."""
+    if "checkbox" not in fragment:
+        return None
     if marks is None:
         return next((out for out in (_toggle_boxes(block, fragment, m) for m in _mark_sets(block.content))
                      if out is not None), None)
-    if "checkbox" not in fragment:
-        return None
     both = _comparable(block, fragment)
     if both is None:
         return None

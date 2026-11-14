@@ -28,12 +28,29 @@ def sheaf(tab):
     tab.site.file.write_text(SHEAF, encoding="utf-8")
     tab.page.clock.install()
     tab.open()
-    tab.page.wait_for_selector("#rd-actions button")
+    tab.page.wait_for_selector("button.rd-act")
     return tab
 
 
+class Buttons:
+    """The page's action buttons in the order of the file: a one-off sits at its box in the document, a toggle in the
+    row above it, so the DOM order is not the file's; each button says its place (`data-i`)."""
+    def __init__(self, page):
+        self.page = page
+
+    def nth(self, k):
+        return self.page.locator(f'button.rd-act[data-i="{k}"]')
+
+    def count(self):
+        return self.page.locator("button.rd-act").count()
+
+    def all_inner_texts(self):
+        return self.page.evaluate("[...document.querySelectorAll('button.rd-act')]"
+                                  ".sort((a, b) => a.dataset.i - b.dataset.i).map(b => b.innerText)")
+
+
 def bar(page):
-    return page.locator("#rd-actions button")
+    return Buttons(page)
 
 
 HEARD = """(() => {
@@ -67,16 +84,55 @@ def stand_still(page):
     raise AssertionError("the page clock would not pause")
 
 
-def test_the_page_draws_its_actions_as_the_lists_buttons_at_the_top(sheaf):
+def test_the_page_draws_a_one_off_where_its_box_is_and_a_toggle_in_the_row_above_the_document(sheaf):
     p = sheaf.page
     assert bar(p).all_inner_texts() == ["Approve", "Done", "Share"]
-    assert [bar(p).nth(k).get_attribute("class") for k in range(3)] == ["rd-act one-off", "rd-act one-off",
-                                                                       "rd-act toggle"]
+    assert [bar(p).nth(k).get_attribute("class") for k in range(3)] == [
+        "rd-act one-off rd-inline", "rd-act one-off rd-inline", "rd-act toggle"]
     assert bar(p).nth(2).get_attribute("aria-pressed") == "false"
-    # Above the document, never in a block a save sends.
+    # The one-offs are in the document, each next to its own hidden box, and the row holds the toggle alone.
+    assert p.locator("main button.rd-inline").count() == 2
+    assert p.locator("main input[type=checkbox]:has(+ button.rd-inline)").evaluate_all(
+        "bs => bs.map(b => getComputedStyle(b).display)") == ["none", "none"]
+    assert p.locator("#rd-actions button").all_inner_texts() == ["Share"]
+    # The row is above the document, never in a block a save sends.
     assert p.evaluate("document.querySelector('main').contains(document.getElementById('rd-actions'))") is False
     assert p.evaluate("document.getElementById('rd-actions').compareDocumentPosition(document.querySelector('main'))"
                       " & Node.DOCUMENT_POSITION_FOLLOWING") != 0
+
+
+def test_a_page_with_no_toggle_has_no_row_above_the_document(tab):
+    tab.site.file.write_text("# Plan\n\n- [ ] Approve\n", encoding="utf-8")
+    tab.open()
+    tab.page.wait_for_selector("button.rd-act")
+    assert tab.page.locator("#rd-actions").count() == 0
+
+
+def test_two_lines_of_the_same_word_are_two_buttons_and_each_presses_its_own_box(tab):
+    f = tab.site.file
+    f.write_text("# Plan\n\n- [ ] Approve\n- [ ] Approve\n", encoding="utf-8")
+    tab.page.clock.install()
+    tab.open()
+    p = tab.page
+    p.wait_for_selector("button.rd-act")
+    assert bar(p).count() == 2
+    stand_still(p)
+    bar(p).nth(1).click()
+    p.clock.run_for(5100)
+    until(lambda: f.read_text(encoding="utf-8") == "# Plan\n\n- [ ] Approve\n- [x] Approve\n", what="the second tick")
+
+
+def test_a_selection_on_a_buttons_line_does_not_press_it_and_the_button_is_not_part_of_the_text(tab):
+    f = tab.site.file
+    f.write_text("# Plan\n\n- [ ] Move to klium-website (ref 18f3a9c2)\n", encoding="utf-8")
+    tab.open()
+    p = tab.page
+    p.wait_for_selector("button.rd-act")
+    select(p, at("main", "(ref"), at("main", "18f3a9c2", None))
+    open_box(p)
+    assert "- [ ] Move to" in f.read_text(encoding="utf-8")
+    # The line's own words are under the button, not said twice.
+    assert p.locator("main li").first.evaluate("li => li.innerText.replace(/\\s+/g, ' ').trim()").count("klium-website") == 1
 
 
 def test_a_press_shows_undo_for_five_seconds_then_ticks_the_file_and_the_page_shows_it_locked(sheaf):
@@ -89,8 +145,8 @@ def test_a_press_shows_undo_for_five_seconds_then_ticks_the_file_and_the_page_sh
     p.clock.run_for(200)
     until(lambda: "- [x] Approve" in f.read_text(encoding="utf-8"), what="the tick in the file")
     assert f.read_text(encoding="utf-8") == SHEAF.replace("- [ ] Approve", "- [x] Approve")
-    until(lambda: p.locator("#rd-actions button.one-off.pressed").count() == 1, what="the reload with Approve locked")
-    locked = p.locator("#rd-actions button.one-off.pressed")
+    until(lambda: p.locator("button.rd-act.one-off.pressed").count() == 1, what="the reload with Approve locked")
+    locked = p.locator("button.rd-act.one-off.pressed")
     assert locked.inner_text().startswith("Approve ✓") and locked.is_disabled()
 
 
@@ -107,8 +163,8 @@ def test_undo_in_the_five_seconds_sends_nothing(sheaf):
 
 def test_a_click_on_an_action_box_in_the_document_ticks_nothing_and_says_where_its_button_is(sheaf):
     p, f = sheaf.page, sheaf.site.file
-    p.locator("main input[type=checkbox]").first.click()
-    until(lambda: "at the top of the page" in toast(p), what="the line that points to the button")
+    p.locator("main input[type=checkbox]").first.dispatch_event("click")      # hidden behind its button
+    until(lambda: "with its button" in toast(p), what="the line that points to the button")
     p.wait_for_timeout(300)
     assert f.read_text(encoding="utf-8") == SHEAF
     assert p.locator("main input[type=checkbox]").first.is_checked() is False
@@ -172,11 +228,11 @@ def test_share_is_pressed_and_released_on_the_page(sheaf):
     bar(p).nth(2).click()
     p.clock.run_for(5100)
     until(lambda: "- [x] Share" in f.read_text(encoding="utf-8"), what="the Share tick")
-    until(lambda: p.locator("#rd-actions button.toggle[aria-pressed=true]").count() == 1, what="Share pressed")
-    p.locator("#rd-actions button.toggle").click()
+    until(lambda: p.locator("button.rd-act.toggle[aria-pressed=true]").count() == 1, what="Share pressed")
+    p.locator("button.rd-act.toggle").click()
     p.clock.run_for(5100)
     until(lambda: "- [ ] Share" in f.read_text(encoding="utf-8"), what="the release")
-    until(lambda: p.locator("#rd-actions button.toggle[aria-pressed=false]").count() == 1, what="Share released")
+    until(lambda: p.locator("button.rd-act.toggle[aria-pressed=false]").count() == 1, what="Share released")
 
 
 def test_a_replys_answer_that_reloads_the_page_waits_for_a_press_in_its_undo(tab):
@@ -187,7 +243,7 @@ def test_a_replys_answer_that_reloads_the_page_waits_for_a_press_in_its_undo(tab
     comment_on(tab, at(body, "Body"), at(body, "Body", None), "Why?")
     p.clock.install()
     p.reload()
-    p.wait_for_selector("#rd-actions button")
+    p.wait_for_selector("button.rd-act")
     p.click(".rd-badge")
     p.wait_for_selector("#rd-popover textarea")
     p.fill("#rd-popover textarea", "my reply")
@@ -220,7 +276,7 @@ def test_a_press_while_the_page_settles_onto_a_change_is_refused_and_the_page_re
     held[0].continue_()
     p.unroute("**/_/save")
     reloaded(p)
-    p.wait_for_selector("#rd-actions button")
+    p.wait_for_selector("button.rd-act")
     bar(p).nth(0).click()
     p.clock.run_for(5100)
     until(lambda: "- [x] Approve" in f.read_text(encoding="utf-8"), what="the press on the reloaded page")
@@ -234,12 +290,12 @@ def test_on_a_phone_the_buttons_wrap_44_px_high_and_the_page_never_scrolls_sidew
                                    encoding="utf-8")
     p.set_viewport_size({"width": 360, "height": 780})
     touch_tab.open()
-    p.wait_for_selector("#rd-actions button")
+    p.wait_for_selector("button.rd-act")
     boxes = [bar(p).nth(k).bounding_box() for k in range(bar(p).count())]
     assert len(boxes) == 5
     assert all(b["height"] >= 44 and b["width"] >= 44 for b in boxes), boxes
     assert all(b["x"] >= 0 and b["x"] + b["width"] <= 360 for b in boxes), boxes
-    assert len({b["y"] for b in boxes}) > 1, "five buttons on one line of 360 px"
+    assert len({b["y"] for b in boxes}) == 5, "each button is on a line of its own"
     assert p.evaluate("document.documentElement.scrollWidth") <= 360
 
 
@@ -251,7 +307,7 @@ def test_on_a_phone_a_move_to_whose_slug_has_no_hyphen_breaks_inside_its_button_
         encoding="utf-8")
     p.set_viewport_size({"width": 360, "height": 780})
     touch_tab.open()
-    p.wait_for_selector("#rd-actions button")
+    p.wait_for_selector("button.rd-act")
     move = bar(p).nth(3).bounding_box()
     assert move["x"] >= 0 and move["x"] + move["width"] <= 360, move
     assert p.evaluate("(e => e.scrollWidth <= e.clientWidth)(document.getElementById('rd-actions'))")
@@ -307,7 +363,7 @@ def test_every_reload_asked_during_a_press_counts_and_the_settle_still_saves_the
     p, f = sheaf.page, sheaf.site.file
     p.add_init_script(HEARD)
     p.reload()
-    p.wait_for_selector("#rd-actions button")
+    p.wait_for_selector("button.rd-act")
     mark(p)
     stand_still(p)
     bar(p).nth(0).click()
@@ -332,8 +388,8 @@ def test_a_box_of_an_action_typed_and_not_yet_saved_is_not_ticked_by_a_click(she
     type_at_end(p, "main li:has-text('Share')", "")
     p.keyboard.press("Enter")
     p.keyboard.type("Run it")
-    p.locator("main li:has-text('Run it') input[type=checkbox]").click()
-    until(lambda: "at the top of the page" in toast(p), what="the line that points to the button")
+    p.locator("main li:has-text('Run it') input[type=checkbox]").dispatch_event("click")
+    until(lambda: "with its button" in toast(p), what="the line that points to the button")
     until(lambda: "- [ ] Run it" in f.read_text(encoding="utf-8"), what="the saved action")
     until(lambda: bar(p).all_inner_texts() == ["Approve", "Done", "Share", "Run it"], what="its button")
     assert "[x]" not in f.read_text(encoding="utf-8")
@@ -368,7 +424,7 @@ def test_a_box_typed_in_a_block_whose_save_is_merged_is_not_ticked_before_the_re
     p.keyboard.press("Enter")
     p.keyboard.type("Run it")
     mark(p)
-    p.locator("main li:has-text('Run it') input[type=checkbox]").click()
+    p.locator("main li:has-text('Run it') input[type=checkbox]").dispatch_event("click")
     reloaded(p)
     until(lambda: bar(p).all_inner_texts() == ["Approve", "Done", "Share", "Run it"], what="its button")
     p.wait_for_timeout(500)
@@ -383,7 +439,7 @@ def test_a_plain_box_clicked_in_an_edited_block_while_the_hub_is_away_still_tick
     p, f = tab.page, site.file
     f.write_text(PLAIN, encoding="utf-8")
     tab.open()
-    p.wait_for_selector("#rd-actions button")
+    p.wait_for_selector("button.rd-act")
     type_at_end(p, "main li:has-text('plain task')", " now")
     site.kill()
     p.locator("main li:has-text('plain task') input[type=checkbox]").click()
@@ -422,7 +478,7 @@ def test_an_upgrade_while_a_press_is_out_says_its_refusal_again_on_the_page_it_b
     p = sheaf.page
     p.add_init_script(HEARD)
     p.reload()
-    p.wait_for_selector("#rd-actions button")
+    p.wait_for_selector("button.rd-act")
     held = []
     p.route("**/_/tick", lambda r: held.append(r))
     stand_still(p)
@@ -437,7 +493,7 @@ def test_an_upgrade_while_a_press_is_out_says_its_refusal_again_on_the_page_it_b
     p.wait_for_timeout(200)
     p.clock.run_for(100)                                # the wait for the page's writes ends after 50 ms
     reloaded(p)
-    p.wait_for_selector("#rd-actions button")
+    p.wait_for_selector("button.rd-act")
     until(lambda: "the sheaf changed" in toast(p), what="the refusal, said again on the new page")
 
 
@@ -446,7 +502,7 @@ def test_a_reload_asked_only_by_an_upgrade_saves_what_was_typed_during_the_press
     p, f = sheaf.page, sheaf.site.file
     p.add_init_script(HEARD)
     p.reload()
-    p.wait_for_selector("#rd-actions button")
+    p.wait_for_selector("button.rd-act")
     p.route("**/_/tick", lambda r: r.fulfill(status=409, content_type="application/json", body=REFUSED))
     p.route("**/_/doc?*", lambda r: r.abort())
     stand_still(p)
@@ -487,7 +543,7 @@ def test_a_saved_action_box_is_not_ticked_while_a_press_holds_the_reload_of_its_
     p.clock.run_for(3000)                               # the autosave goes, merged: its reload waits for the press
     until(lambda: "- [ ] Run it" in f.read_text(encoding="utf-8"), what="the saved action")
     until(lambda: p.evaluate("document.querySelector('#rd-state').textContent") != "Saving…", what="its answer")
-    p.locator("main li:has-text('Run it') input[type=checkbox]").click()
+    p.locator("main li:has-text('Run it') input[type=checkbox]").dispatch_event("click")
     until(lambda: "tick it once it has" in toast(p), what="the line that says the page reloads first")
     p.wait_for_timeout(500)
     assert "[x] Run it" not in f.read_text(encoding="utf-8")
@@ -511,7 +567,7 @@ def test_a_saved_action_box_is_not_ticked_after_a_save_answered_again(sheaf):
     p, f = sheaf.page, sheaf.site.file
     p.add_init_script(DEAF)
     p.reload()
-    p.wait_for_selector("#rd-actions button")
+    p.wait_for_selector("button.rd-act")
     p.evaluate("window.__deaf = true")
     merged_once(p, "again")
     type_at_end(p, "main li:has-text('Share')", "")
@@ -520,7 +576,7 @@ def test_a_saved_action_box_is_not_ticked_after_a_save_answered_again(sheaf):
     until(lambda: "- [ ] Run it" in f.read_text(encoding="utf-8"), what="the saved action")
     until(lambda: p.evaluate("document.querySelector('#rd-state').textContent") != "Saving…", what="its answer")
     mark(p)
-    p.locator("main li:has-text('Run it') input[type=checkbox]").click()
+    p.locator("main li:has-text('Run it') input[type=checkbox]").dispatch_event("click")
     reloaded(p)
     until(lambda: bar(p).all_inner_texts() == ["Approve", "Done", "Share", "Run it"], what="its button")
     p.wait_for_timeout(500)
@@ -575,7 +631,7 @@ def test_a_box_clicked_twice_while_the_tick_is_out_says_saving_and_ticks_once(ta
     f.write_text(PLAIN, encoding="utf-8")
     p.clock.install()
     tab.open()
-    p.wait_for_selector("#rd-actions button")
+    p.wait_for_selector("button.rd-act")
     held = []
     p.route("**/_/tick", lambda r: held.append(r))
     stand_still(p)
@@ -630,7 +686,7 @@ def test_a_box_whose_save_is_refused_does_not_tick_because_an_older_save_is_owed
     p, f = tab.page, site.file
     f.write_text(PLAIN, encoding="utf-8")
     tab.open()
-    p.wait_for_selector("#rd-actions button")
+    p.wait_for_selector("button.rd-act")
     calls = []
     def save(route):
         calls.append(1)
@@ -695,7 +751,7 @@ def test_an_upgrade_while_a_comment_waits_for_the_tick_does_not_ask_to_send_it(s
     p, f = sheaf.page, sheaf.site.file
     p.add_init_script(HEARD)
     p.reload()
-    p.wait_for_selector("#rd-actions button")
+    p.wait_for_selector("button.rd-act")
     held = []
     p.route("**/_/tick", lambda r: held.append(r))
     select(p, at("main", "Body"), at("main", "Body", None))
@@ -727,7 +783,7 @@ def test_a_press_whose_block_was_edited_and_not_saved_keeps_the_tick(tab, site):
     f.write_text(NOTES, encoding="utf-8")
     p.clock.install()
     tab.open()
-    p.wait_for_selector("#rd-actions button")
+    p.wait_for_selector("button.rd-act")
     stand_still(p)
     type_at_end(p, "main li:has-text('notes')", " now")
     until(lambda: "now" in p.inner_text("main li:has-text('notes')"), what="the edit on screen")
@@ -750,7 +806,7 @@ def test_an_upgrade_while_a_save_waits_for_the_tick_does_not_ask_to_save(sheaf, 
     p, f = sheaf.page, sheaf.site.file
     p.add_init_script(HEARD)
     p.reload()
-    p.wait_for_selector("#rd-actions button")
+    p.wait_for_selector("button.rd-act")
     held = []
     p.route("**/_/tick", lambda r: held.append(r))
     stand_still(p)
@@ -776,7 +832,7 @@ def test_an_upgrade_held_by_a_comment_form_during_a_press_does_not_say_the_text_
     p = sheaf.page
     p.add_init_script(HEARD)
     p.reload()
-    p.wait_for_selector("#rd-actions button")
+    p.wait_for_selector("button.rd-act")
     p.route("**/_/doc?*", lambda r: r.abort())
     stand_still(p)
     bar(p).nth(0).click()
@@ -793,7 +849,7 @@ def test_an_upgrade_held_by_a_comment_form_during_a_press_does_not_say_the_text_
     p.click("#rd-popover button[data-a=minimize]")     # a new comment has no Cancel: the box is put away
     p.clock.run_for(100)                                # the held reload is lifted by a timer 0
     reloaded(p)
-    p.wait_for_selector("#rd-actions button")
+    p.wait_for_selector("button.rd-act")
     toasted(p, "upgraded")
     assert "text changed" not in toast(p)
 
@@ -803,7 +859,7 @@ def test_a_restore_waiting_for_the_tick_is_answered_before_the_page_reloads(tab,
     f = site.file
     f.write_text(SHEAF, encoding="utf-8")
     tab.open()
-    tab.page.wait_for_selector("#rd-actions button")
+    tab.page.wait_for_selector("button.rd-act")
     site.kill()
     type_at_end(tab.page, "main p:has-text('Body')", " typed")
     until(lambda: tab.page.evaluate(f"localStorage.getItem({draft_key(site)!r})"), what="the draft")
@@ -814,7 +870,7 @@ def test_a_restore_waiting_for_the_tick_is_answered_before_the_page_reloads(tab,
     p.clock.install()
     p.goto(site.url)
     p.wait_for_selector("#rd-notice button[data-d=restore]")
-    p.wait_for_selector("#rd-actions button")
+    p.wait_for_selector("button.rd-act")
     held = []
     p.route("**/_/tick", lambda r: held.append(r))
     stand_still(p)
@@ -836,7 +892,7 @@ def test_a_restore_waiting_for_the_tick_is_answered_before_the_page_reloads(tab,
     p.unroute("**/_/save")
     until(lambda: " typed" in f.read_text(encoding="utf-8"), what="the restored edit")
     reloaded(p)
-    p.wait_for_selector("#rd-actions button")
+    p.wait_for_selector("button.rd-act")
     p.wait_for_timeout(500)
     assert p.query_selector("#rd-notice button[data-d=restore]") is None, "the draft is offered again"
     assert p.evaluate(f"localStorage.getItem({draft_key(site)!r})") is None
@@ -848,7 +904,7 @@ def test_a_comment_opened_while_a_reload_waits_for_the_restore_holds_that_reload
     f = site.file
     f.write_text(SHEAF, encoding="utf-8")
     tab.open()
-    tab.page.wait_for_selector("#rd-actions button")
+    tab.page.wait_for_selector("button.rd-act")
     site.kill()
     type_at_end(tab.page, "main p:has-text('Body')", " typed")
     until(lambda: tab.page.evaluate(f"localStorage.getItem({draft_key(site)!r})"), what="the draft")
@@ -859,7 +915,7 @@ def test_a_comment_opened_while_a_reload_waits_for_the_restore_holds_that_reload
     p.clock.install()
     p.goto(site.url)
     p.wait_for_selector("#rd-notice button[data-d=restore]")
-    p.wait_for_selector("#rd-actions button")
+    p.wait_for_selector("button.rd-act")
     held = []
     p.route("**/_/tick", lambda r: held.append(r))
     stand_still(p)
@@ -893,7 +949,7 @@ def test_an_upgrade_during_the_press_does_not_reload_before_a_restore_waiting_fo
     f = site.file
     f.write_text(SHEAF, encoding="utf-8")
     tab.open()
-    tab.page.wait_for_selector("#rd-actions button")
+    tab.page.wait_for_selector("button.rd-act")
     site.kill()
     type_at_end(tab.page, "main p:has-text('Body')", " typed")
     until(lambda: tab.page.evaluate(f"localStorage.getItem({draft_key(site)!r})"), what="the draft")
@@ -904,7 +960,7 @@ def test_an_upgrade_during_the_press_does_not_reload_before_a_restore_waiting_fo
     p.clock.install()
     p.goto(site.url)
     p.wait_for_selector("#rd-notice button[data-d=restore]")
-    p.wait_for_selector("#rd-actions button")
+    p.wait_for_selector("button.rd-act")
     p.route("**/_/doc?*", lambda r: r.abort())
     held = []
     p.route("**/_/tick", lambda r: held.append(r))

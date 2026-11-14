@@ -2680,6 +2680,12 @@ def test_a_reply_given_up_that_the_hub_took_after_all_goes_from_the_page_and_the
     mark(p)
     slow_hub.release()
     if not hello:
+        # Toasts queue (ticket 62) and the clock stands still: TAKEN waits behind the red LATE (7 s) until the clock runs.
+        try:
+            p.clock.run_for(7100)
+        except Exception as e:                      # a reload may be under way
+            if not any(said in str(e) for said in RELOADING):
+                raise
         until(lambda: TAKEN in toast(p) or gone(p), what="the toast, or the reload that wipes it")
     until(lambda: reply_is_in_its_thread(thread), what="the reply in its thread, the form gone, the store clear")
 

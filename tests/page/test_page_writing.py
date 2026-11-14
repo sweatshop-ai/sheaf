@@ -4840,3 +4840,39 @@ def test_typing_while_a_change_from_outside_settles_is_refused_and_said(tab):
     held[0].continue_()
     p.unroute("**/_/save")
     reloaded(p)
+
+
+# Two pages of one document write one key. Both sends fail at the same instant, each page's renderer in its own
+# process, so neither may have heard of the other's write when it writes: the list must still hold both.
+FAIL_TOGETHER = """(at) => {
+  const real = window.fetch;
+  window.fetch = function (url, init) {
+    if (!String(url).includes('/_/comment')) return real.apply(this, arguments);
+    return new Promise((done) => setTimeout(() => {
+      while (Date.now() < at) { }
+      done(new Response(JSON.stringify({ok: false, error: 'the hub broke off'}), {status: 500, headers: {'Content-Type': 'application/json'}}));
+    }, 0));
+  };
+}"""
+
+
+def test_two_sends_that_fail_at_the_same_instant_on_two_pages_are_both_kept(thread, context):
+    a, b = thread.page, second_page(thread, context)
+    b.click(".rd-badge")
+    b.wait_for_selector("#rd-popover textarea")
+    lost = []
+    for i in range(40):
+        at_ms = int(time.time() * 1000) + 700
+        for p, who in ((a, "A"), (b, "B")):
+            p.evaluate(FAIL_TOGETHER, at_ms)
+            p.fill("#rd-popover textarea", f"words from page {who} round {i}")
+        a.keyboard.press("Control+Enter")
+        b.keyboard.press("Control+Enter")
+        a.wait_for_timeout(1300)
+        kept = json.loads(comment_store(thread) or "[]")
+        texts = {d["body"]: d for d in kept}
+        mine = [texts.get(f"words from page {who} round {i}") for who in "AB"]
+        # An entry still marked out is one its page ended: it is left out of the not-sent list for 32 s.
+        if None in mine or any(isinstance(d.get("out"), (int, float)) for d in mine):
+            lost.append(i)
+    assert not lost, f"the store lost, or kept as still out, an entry of a failed send in rounds {lost}"

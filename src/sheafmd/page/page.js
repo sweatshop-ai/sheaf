@@ -1567,7 +1567,7 @@ var create = function (ROOT, CFG, opts) {
   // first read that works, which writes the store without them (commentDraftsSave). Kept in memory: a reload before
   // that read, while the store still refuses it, offers the entry again.
   var pendingClears = [];
-  var readWorked = false, flushing = false;
+  var readWorked = false, flushing = false, lastRead = [];
   // `strict`: a store that refuses the read throws, instead of passing for an empty one (the writers read so, commentDraftsHeld and taken).
   // A value that is not JSON is set aside under `:unreadable` first, so the write that follows does not destroy it
   // (a later one replaces an earlier one set aside: the store holds one at a time).
@@ -1602,6 +1602,7 @@ var create = function (ROOT, CFG, opts) {
         try { commentDraftsSave(held, true); } finally { flushing = false; }
       }
     }
+    lastRead = held;
     return held;
   }
   // A writer reads the store strictly, so a read that fails now and then does not pass for an empty store and the
@@ -1623,6 +1624,7 @@ var create = function (ROOT, CFG, opts) {
       }));
       if (all.length) localStorage.setItem(COMMENT_DRAFT_KEY, JSON.stringify(all)); else localStorage.removeItem(COMMENT_DRAFT_KEY);
       pendingClears = [];
+      claim(all.filter(function (d) { return !ofOtherRoot(d); }));
     } catch (e) { storeOk = false; }
     if (later) setTimeout(function () {
       // Under the guard, as the redraw inside the purge was: a purge the full store refuses would else queue another.
@@ -1630,6 +1632,48 @@ var create = function (ROOT, CFG, opts) {
       try { unsentLine(); } finally { flushing = false; }
     }, 0);
     else unsentLine();
+  }
+  // Two pages that write the store in the same instant each read it before the other's write reached them, and the
+  // later write puts back what the earlier one changed: a send that failed on one page stays marked out (left off
+  // the not-sent list for HELD), or one that was taken comes back. A page cannot tell its read is stale, and its own
+  // view can stay the stale one for a while (measured: well past 100 ms), so it does not read again at once: it
+  // keeps what it put in or took out of the store for CLAIMED, and checks it against every write another page
+  // makes in that time (the `storage` event, which comes once the page has that write). What is not as it left
+  // it is made so again, and nothing else is touched. An entry is told by its thread, kind and request id (a new
+  // message, by its passage). A Discard on another page within CLAIMED of the write it ends is put back too.
+  var CLAIMED = 2000, RECLAIMS = 8, claims = {}, reclaims = 0;
+  function entryKey(d) {
+    return [d.thread || '', d.kind || '', d.rid || d.of || '', typeof d.thread === 'string' ? '' : [d.quote, d.block, d.occ].join('|')].join('\u0001');
+  }
+  // What this write changed against the read it came from: the entries it put and the ones it took out.
+  function claim(written) {
+    var before = {}, after = {}, until = Date.now() + CLAIMED;
+    lastRead.forEach(function (d) { before[entryKey(d)] = JSON.stringify(d); });
+    written.forEach(function (d) { after[entryKey(d)] = d; });
+    Object.keys(after).forEach(function (k) { if (before[k] !== JSON.stringify(after[k])) claims[k] = { want: after[k], until: until }; });
+    Object.keys(before).forEach(function (k) { if (!after[k]) claims[k] = { want: null, until: until }; });
+    lastRead = written;
+    reclaims = 0;
+  }
+  function reclaim() {
+    var now = Date.now(), fixed = false;
+    Object.keys(claims).forEach(function (k) { if (claims[k].until < now) delete claims[k]; });
+    if (!Object.keys(claims).length || reclaims >= RECLAIMS) return;
+    try {
+      var raw = commentDraftsRaw(true), mine = raw.filter(function (d) { return !ofOtherRoot(d); });
+      Object.keys(claims).forEach(function (k) {
+        var i = -1, want = claims[k].want;
+        mine.forEach(function (d, j) { if (entryKey(d) === k) i = j; });
+        if (want === null && i >= 0) { mine.splice(i, 1); fixed = true; }
+        else if (want && i < 0) { mine.push(want); fixed = true; }
+        else if (want && JSON.stringify(mine[i]) !== JSON.stringify(want)) { mine[i] = want; fixed = true; }
+      });
+      if (!fixed) return;
+      var all = raw.filter(ofOtherRoot).concat(mine);
+      reclaims++;
+      if (all.length) localStorage.setItem(COMMENT_DRAFT_KEY, JSON.stringify(all)); else localStorage.removeItem(COMMENT_DRAFT_KEY);
+      lastRead = mine;
+    } catch (e) { /* a store that cannot be read now: the write stands as it was made */ }
   }
   // The entries `gone` names go, then `add` (if any) is added, in one write, stamped `at` now unless it brings its
   // own. For a form that knows which entry is its own: the same quote in another paragraph is another comment.
@@ -1831,7 +1875,7 @@ var create = function (ROOT, CFG, opts) {
   // kept comments' notice is left as it is: its text is being typed into, and it is drawn from the store again
   // after any close.
   listen(window, 'storage', function (e) {
-    if (e.key === null || e.key === COMMENT_DRAFT_KEY) unsentLine();      // null: the whole store was cleared
+    if (e.key === null || e.key === COMMENT_DRAFT_KEY) { reclaim(); unsentLine(); }      // null: the whole store was cleared
   });
   // The list the line opens: a popover above it, out of the text's way until asked for, that Escape, a click
   // outside or the line again close. Its forms are data-kept: their text is in the store, nothing to hold.

@@ -10,11 +10,17 @@
 
 **Par où commencer :** un test rouge par point (1 : `> [!COPY]\n> a\n> #\xa0h\n> ---` refuse le bloc, comme pandoc ; vérifier d'abord avec pandoc), puis la mesure du 2.
 
-- [ ] `#\xa0h` avant un soulignement refuse le bloc, comme pandoc
-- [ ] Les 830 écarts de `split_md_blocks` sont classés, corrigés ou écartés avec la preuve
-- [ ] Les mentions de pandoc 3.7.0.2 sont corrigées en 3.9 là où le rendu est visé
+- [x] `#\xa0h` avant un soulignement refuse le bloc, comme pandoc
+- [x] Les 830 écarts de `split_md_blocks` sont classés, corrigés ou écartés avec la preuve
+- [x] Les mentions de pandoc 3.7.0.2 sont corrigées en 3.9 là où le rendu est visé
 - [ ] PR séparée, CI verte
 
 **Claimed by:** Diego
 
 **Status:** ready-for-agent
+
+**Résultat (Diego, PR 315):**
+- F3 corrigé : `#{1,6}(?:[ \t\r]|$)`. Le `\r` seul compte comme fin de ligne pour pandoc (revue : `#\r#` est un titre).
+- F4 écarté avec preuve, `blocks.py` inchangé : grille de 15 470 entrées (7 débuts x 5 marques x 18 mélanges x 13 ouvreurs x `---`/`===`), 2 618 coupées tôt par `split_md_blocks`. Rendu `hide` + pandoc 3.9 + `mark` comparé à pandoc seul : 1 360 (pandoc garde le paragraphe) donnent le HTML de pandoc marqueur retiré ; 1 258 (pandoc fait un titre) donnent le HTML de pandoc, à l'id près, que le rendu remplace. Nuisibles : 0. Le chiffre 830 de la revue vient d'une autre grille.
+- F6 : SPEC.md ligne 177, 3.7.0.2 devient 3.9 (`pypandoc-binary==1.17`, `get_pandoc_version()` = 3.9).
+- Revue Opus 1 : NO-GO sur 55b100e (classe a, `\r`), corrigé en 8c1b152.

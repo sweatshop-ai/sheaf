@@ -784,11 +784,23 @@ def test_an_empty_opener_that_a_later_arrow_would_close_gets_the_swallows_messag
 
 
 def test_an_unclosed_reviewer_note_after_an_empty_opener_is_named_as_the_note(tmp_path):
-    # Ticket 83, point 3: the note is the more urgent fault and is what main said; the empty opener
-    # is still refused once the note is closed.
+    # Ticket 83, point 3: the note is the more urgent fault; the empty opener is still refused once
+    # the note is closed.
     with pytest.raises(sheafmd.UnclosedComment) as e:
         sheafmd.render(doc(tmp_path, "<!--> <!-- sheaf-comment id=c1 by=a at=2026-01-01T00:00\nbody\n"))
     assert e.value.line == 1 and "a note by a reviewer" in str(e.value)
+
+
+@pytest.mark.parametrize("text", [
+    "# A <!-- sheaf-comment id=c1 by=a at=2026-01-01T00:00 hi --> b <!--> c\n\nKEEP1\n",
+    "A <!-- sheaf-comment id=c1 by=a at=2026-01-01T00:00 hi --> b <!--> c\n\nKEEP1\n",
+])
+def test_a_closed_reviewer_note_before_an_empty_opener_does_not_make_the_refusal_a_note_one(tmp_path, text):
+    # Review of PR 325: the note is closed, so only the empty opener is at fault and the message says so.
+    with pytest.raises(sheafmd.UnclosedComment) as e:
+        sheafmd.render(doc(tmp_path, text))
+    assert e.value.line == 1
+    assert "empty HTML comment" in str(e.value) and "note by a reviewer" not in str(e.value)
 
 
 def test_the_same_heading_without_the_empty_opener_makes_a_copy(tmp_path):

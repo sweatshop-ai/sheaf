@@ -569,7 +569,8 @@ _HEAD_RE = re.compile(rf"<!--\s*{MARKER}\b.*?(?=-->|\n|$)")
 def _head_of(raw: str) -> str:
     """What names a comment in the HTML pandoc writes: its first line up to a `-->`."""
     m = _HEAD_RE.match(raw.replace("\r", ""))
-    return m.group(0) if m else raw
+    # Pandoc writes a tab of a raw HTML block as spaces up to the tab stop: runs of blanks are one.
+    return re.sub(r"[ \t]+", " ", m.group(0) if m else raw)
 
 
 # A line that may be a heading of a quote or a list: marks of containers, then a `#`.

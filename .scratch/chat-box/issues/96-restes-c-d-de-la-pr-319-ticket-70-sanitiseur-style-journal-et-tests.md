@@ -12,4 +12,6 @@
 
 **Blocked by:** none (PR 319 fusionnée, 2c2610b)
 
-**Status:** ready-for-agent
+**Claimed by:** Katya 2026-11-14 19:20
+
+**Status:** in-progress

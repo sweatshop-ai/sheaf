@@ -516,7 +516,16 @@ def projection(block: str) -> Projection:
 
     def off(line, col):
         line = min(line, len(starts))
-        return min(starts[line - 1] + col - 1, len(block))
+        text = block[starts[line - 1]:starts[line] - 1 if line < len(starts) else len(block)]
+        if "\t" not in text:
+            return min(starts[line - 1] + col - 1, len(block))
+        # Pandoc's column counts a tab as the spaces up to the next stop of 4.
+        seen = 0
+        for i, ch in enumerate(text):
+            if seen >= col - 1:
+                return starts[line - 1] + i
+            seen += 4 - seen % 4 if ch == "\t" else 1
+        return starts[line - 1] + len(text) + max(0, col - 1 - seen)
 
     text, chars, stack = [], [], []
     # A task list item's box comes out as a ☐ or ☒ right after <li>, outside any

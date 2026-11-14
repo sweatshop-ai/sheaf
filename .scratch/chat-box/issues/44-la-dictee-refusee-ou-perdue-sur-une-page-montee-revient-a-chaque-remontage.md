@@ -17,4 +17,6 @@
 
 Claimed by: Elske
 
+**Affinement (Rhea, 2026-11-14, après la revue de la PR 305) :** l'état gardé dans `sessionStorage` ne survit pas à un nouveau login ni à un changement d'utilisateur dans le même onglet. Seul le 403 (« denied ») est gardé, sous `sheaf-mount:rd-dict-off:<member>` (l'identifiant du membre quand la page en tient un) ; un service perdu (« gone » : 401, 404, réseau) ne vaut que pour le montage. SPEC 10.4 le dit. Corrigé dans la PR 305 (Elske) ; l'ancien ticket de suivi 44b est supprimé.
+
 **Status:** ready-for-agent

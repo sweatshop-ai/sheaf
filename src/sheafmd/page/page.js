@@ -3431,7 +3431,7 @@ var create = function (ROOT, CFG, opts) {
       e.stopImmediatePropagation();                              // the canEdit handler below never sees it
       e.preventDefault();                                       // the browser's own toggle is cancelled
       if (t !== box && (t.closest('.rd-badge, [data-rd-ui]') || editing || e.detail > 1 || !onLabelWords(lab, e, true))) return;
-      pressShare(share);
+      pressShare(share, box);
     });
   }
   if (canEdit) {
@@ -3692,8 +3692,21 @@ var create = function (ROOT, CFG, opts) {
     if (bar.firstChild) { actBar = bar; main.parentNode.insertBefore(bar, main); }
   }
   // A tick box's press is sent at once: its box shows the tick when the hub has taken it, and one more click releases it.
-  function pressShare(x) {
+  // A box in a block with edits not saved saves the block first, as a plain box does (tickBox), so the tick lands on
+  // the text the hub holds and the edits are not merged against it afterwards; the buttons the save's answer brings
+  // are the ones pressed.
+  async function pressShare(x, box) {
     if (!x.a.may) { say(x.a.pressed ? 'Only the owner of this sheaf can withdraw its Share.' : 'Only the owner of this sheaf can share it.'); return; }
+    if (boxWaits.has(box)) return;
+    var b = blockOf(box);
+    if (b && unticked(ser(b)) !== unticked(b.pristine)) {
+      var res = {}, ok;
+      boxWaits.add(box);
+      try { ok = await save(true, res); } finally { boxWaits.delete(box); }
+      if ((!ok && !res.owed) || stale || docGone || !main.contains(box)) return;
+      x = toggleOf.get(box);
+      if (!x) return;
+    }
     if (!x.btn.disabled) x.btn.click();
   }
   function pressable(btn, a, all, atOnce) {

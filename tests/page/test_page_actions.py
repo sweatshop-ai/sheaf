@@ -720,17 +720,23 @@ def test_an_item_added_above_the_pressed_box_during_the_undo_leaves_the_tick_on_
 def test_an_item_typed_above_the_box_just_before_the_press_never_ticks_another_box(sheaf):
     # #148, 7, gate on 3b10c3c: the box was found by its number in the text the buttons were drawn from, which an
     # item on screen and not yet saved had moved onto Done, a one-off the hub then kept ticked. Share's box is
-    # pressed at once (action-buttons 03): the tick goes out with the item on screen and not saved.
+    # pressed at once (action-buttons 03): the box saves its block first, then ticks.
     p, f = sheaf.page, sheaf.site.file
     stand_still(p)
     type_at_end(p, "main li:has-text('Approve')", "")
     p.keyboard.press("Enter")
     p.keyboard.type("extra")
     until(lambda: "extra" in p.inner_text("main ul"), what="the new item on screen")
+    ticks = []
+    p.on("request", lambda r: ticks.append(r.url) if "/_/tick" in r.url else None)
     p.locator("main li:has-text('Share') input[type=checkbox]").click()
-    p.clock.run_for(3000)                               # the page's timers run on the installed clock
-    until(lambda: "- [x] Share" in f.read_text(encoding="utf-8") and "extra" in f.read_text(encoding="utf-8"),
-          what="the tick, and the item saved by the reload's settle")
+    try:
+        def done():
+            p.clock.run_for(500)                        # the page's timers run on the installed clock
+            return "- [x] Share" in f.read_text(encoding="utf-8") and "extra" in f.read_text(encoding="utf-8")
+        until(done, what="the item saved first, then the tick")
+    except AssertionError:
+        raise AssertionError(f"ticks sent {ticks}; file {f.read_text(encoding='utf-8')!r}; toast {toast(p)!r}")
     p.wait_for_timeout(500)
     text = f.read_text(encoding="utf-8")
     assert "[x] Done" not in text and "[x] extra" not in text, text

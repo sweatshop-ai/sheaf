@@ -5,7 +5,7 @@ import re
 import pytest
 
 from helpers import comment
-from pagehelp import open_box, P1, P2, T0, at, comment_draft_key, draft_key, mark, reloaded, select, toast, toasted, type_at_end, until
+from pagehelp import open_box, P1, P2, T0, at, comment_draft_key, draft_key, mark, reloaded, select, toasted, toasts_to_the_end, type_at_end, until
 from sheafmd import comments as rdc
 
 pytestmark = pytest.mark.page
@@ -173,7 +173,7 @@ def test_a_draft_restored_while_a_reply_is_typed_reloads_only_once_the_reply_is_
     page.wait_for_selector(f"{P2}:has-text('and plums')")
     page.wait_for_selector("#rd-popover .rd-msg:has-text('my reply text')")
     toasted(page, "Your restored edits are in.")
-    assert "while you wrote" not in toast(page)
+    assert not any("while you wrote" in said for said in toasts_to_the_end(page))     # one still queued behind the toast is not on screen yet
     assert stored(page, tab.site) is None
 
 
@@ -354,8 +354,7 @@ def test_a_page_that_is_stale_with_edits_on_screen_still_asks_before_it_is_left(
     type_at_end(tab.page, P2, " and plums")
     f = tab.site.file
     f.write_text(f.read_text() + "\nA new paragraph from outside.\n", encoding="utf-8")
-    until(lambda: "could not be merged" in p.evaluate("document.querySelector('#rd-toast').textContent"),
-          what="the page to go stale")
+    toasted(p, "could not be merged", timeout=20.0)     # behind the red toast of the refused save (7 s)
     p.close(run_before_unload=True)
     p.wait_for_timeout(500)          # the dialog event is delivered while the API is called
     assert dialogs == ["beforeunload"]

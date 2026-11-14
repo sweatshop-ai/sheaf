@@ -732,9 +732,10 @@ def _unchanged(block, fragment: str) -> bool:
 # the block is saved like any edit. When ticks are the only difference, the save
 # does not go through pandoc: it flips the `[ ]` / `[x]` of those items in the
 # source and leaves every other byte alone. Pandoc would rewrite the whole list
-# (bullets, wrapping, a capital X), so one tick would touch every line.
+# (bullets, wrapping, a capital X), so one tick would touch every line. Only a bullet item has a mark: pandoc 3.9
+# draws no box for `1. [ ] a` (a CR or none), so a mark there would be one the page never shows.
 TASK_MARK_RE = re.compile(
-    r"^((?:[ \t]*>)*[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+)\[([ xX])\](?=[ \t]|$)", re.M)
+    r"^((?:[ \t]*>)*[ \t]*[-*+][ \t]+)\[([ xX])\](?=[ \t]|$)", re.M)
 
 
 class _Mark:
@@ -763,8 +764,8 @@ class _Mark:
 
 
 def task_marks(content: str) -> list:
-    """The task marks of `content`, read as pandoc reads it: without its CRs, which it deletes, so a CR anywhere
-    in a line neither hides a mark nor makes one pandoc does not draw. Offsets are in `content` itself."""
+    """The task marks of `content`, read as pandoc reads it: without its CRs, which it deletes, so a CR anywhere in a
+    line, between the brackets too, neither hides a mark nor makes one. Offsets are in `content` itself."""
     if "\r" not in content:
         return list(TASK_MARK_RE.finditer(content))
     keep = [i for i, ch in enumerate(content) if ch != "\r"]

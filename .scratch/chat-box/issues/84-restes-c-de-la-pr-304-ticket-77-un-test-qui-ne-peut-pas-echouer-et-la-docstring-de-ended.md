@@ -7,7 +7,7 @@
 
 Revue : `/home/tiroir/.claude/pm/chat-box-handoffs/pr-77-reviews/review-1.md`.
 
-**Blocked by:** PR 304 fusionnée
+**Blocked by:** none
 
 **Claimed by:**
 

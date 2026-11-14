@@ -14,8 +14,8 @@
 
 **Par où commencer :** le journal du run 43588278884, puis le test dans `tests/test_hub_upgrade.py`.
 
-- [x] Cause trouvée (journal et reproduction)
-- [x] Test corrigé, ou la raison de le laisser écrite
-- [x] CI verte trois fois de suite
+- [x] Cause trouvée (journal et reproduction). `cli.main(["stop"])` tournait dans le processus du test, dont le hub est l'enfant ; `sheaf stop` finit par `hubclient.ended()` -> `signals.reap()` -> `os.waitpid(WNOHANG)`, qui reape le hub et jette son code ; `Popen.wait` (thread du Supervisor) reçoit alors ChildProcessError et rend 0, pas `EXIT_STOPPED` (3). Reproduit sur t-compute : 1 échec sur 600 passages, même `assert 0 == 3`.
+- [x] Test corrigé : `sheaf stop` tourne dans un sous-processus (PR 304). 0 échec sur 600 passages sur t-compute. Revue Opus tour 1 (`/home/tiroir/.claude/pm/chat-box-handoffs/pr-77-reviews/review-1.md`) : pas de a, b1 corrigé, c et d au ticket 84.
+- [x] CI verte trois fois de suite : run 43597332024, tentatives 1, 2, 3, tête d2a876e, trois tranches vertes.
 
-**Status:** PR 304, CI green 3 times, awaiting merge
+**Status:** done (PR 304 fusionnée, main f4c75d3, 2026-11-14 ; restes au ticket 84)

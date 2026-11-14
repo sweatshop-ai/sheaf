@@ -7,7 +7,7 @@
 4. **(c, déjà sur main) Un tableau dans une liste ou une citation** est un bloc `list` ou `quote`, pas `table` : le commentaire va encore au milieu de la cellule, et `add_comment` écrit la forme sur plusieurs lignes, qui casse le rang, alors que `_insert_comment` écrit une ligne. À faire : reconnaître le tableau dans ces blocs, ou écrire la limite.
 5. **(c, déjà sur main) Un rang paresseux sans `|` après un tableau** est un `para` pour `split_md_blocks` et un rang pour GFM : le commentaire va au milieu du texte du rang. À faire : décider si le découpeur suit GFM, ou écrire la limite.
 
-**Blocked by:** 66 pour le point 1 seulement
+**Blocked by:** none (le point 1 est débloqué par 66, fusionné en 0b469e2)
 
 **Claimed by:**
 

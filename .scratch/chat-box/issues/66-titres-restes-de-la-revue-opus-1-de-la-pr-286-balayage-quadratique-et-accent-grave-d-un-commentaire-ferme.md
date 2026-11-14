@@ -10,13 +10,15 @@
 
 **Blocked by:** none
 
-**Claimed by:**
+**Claimed by:** Arvid
 
-**Status:** ready-for-agent
+**Status:** done — on main via 0b469e2 (PR 291), points 1 à 6 (le détail de ce qui a été fait, `handoff-Arvid-2026-11-14.md`)
 
 **Par où commencer :** `tests/test_anchoring.py` : un titre de 9 Ko, 1000 balises puis `<!--`, doit se faire en moins d'une seconde (rouge avant) ; puis le point 2.
 
-- [ ] Point 1 : `_unclosed_opener` linéaire, avec un test de durée rouge d'abord
-- [ ] Point 2 corrigé ou la limite écrite dans le SPEC 10.4, avec son test
-- [ ] Points 3 à 6 faits ou écartés avec la raison
-- [ ] CI verte
+- [x] Point 1 : `_unclosed_opener` linéaire, avec un test de durée rouge d'abord
+- [x] Point 2 corrigé ou la limite écrite dans le SPEC 10.4, avec son test
+- [x] Points 3 à 6 faits ou écartés avec la raison
+- [x] CI verte
+
+**Fait (Arvid, 2026-11-14, PR 291, merge 0b469e2) :** un seul balayeur `_scan` dans `comments.py` ; `_mask_code` et `_unclosed_opener` le lisent (point 4). Point 1 : linéaire, trois tests de durée rouges d'abord (9 Ko et 36 Ko de balises, 12000 ouvreurs non fermés). Point 2 : un commentaire ordinaire fermé possède son accent grave, corrigé et non écrit comme limite ; la liste (`_title`) en profite. Point 3 : `<!-->` et `<!--->` sont des commentaires entiers, alignés sur `hub/the_list.py`. Point 5 : 13 textes comparés à pandoc. Point 6 : `_atx_words`. Revues : opus-1 (b2 corrigé ; b1 vérifié, pas une régression : le partage refuse la même page sur main), opus-2-narrow, opus-3-narrow, toutes GO. Restes : ticket 72.

@@ -363,15 +363,15 @@ def _mask_code(text: str, cells: bool | str = False) -> str:
     if cells == "rows":
         # A quote or a list: the lines of its tables are cells, the rest is read whole (pandoc ends a
         # paragraph where a table starts, so a span never runs from one into the other).
-        out, run, in_row, at = [], [], False, 0
-        for line in text.split("\n"):
-            row = "|" in line and in_table_row(text, at)
+        rows = _table_row_lines(text)
+        out, run, in_row = [], [], False
+        for n, line in enumerate(text.split("\n")):
+            row = n in rows
             if run and row != in_row:
                 out.append(_mask_code("\n".join(run), True if in_row else False))
                 run = []
             in_row = row
             run.append(line)
-            at += len(line) + 1
         out.append(_mask_code("\n".join(run), True if in_row else False))
         return "\n".join(out)
     if cells:
@@ -692,27 +692,50 @@ _CELL_PIPE_RE = re.compile(r"(?<!\\)(\|)")
 _CONTAINER_RE = re.compile(r"[ \t]*(?:>|(?:[-+*]|\d{1,9}[.)])(?=[ \t]))[ \t]?")
 
 
+def _bare(line: str) -> tuple[str, bool]:
+    """`line` without its container markers, and whether one of them opens a list item."""
+    item = False
+    while (m := _CONTAINER_RE.match(line)) and m.end():
+        item = item or m.group().strip() != ">"
+        line = line[m.end():]
+    return line, item
+
+
+def _cells(bare: str) -> int:
+    inner = bare.strip()
+    inner = inner[1:] if inner.startswith("|") else inner
+    inner = inner[:-1] if inner.endswith("|") and not inner.endswith("\\|") else inner
+    return len(_CELL_PIPE_RE.split(inner)[::2])
+
+
+@functools.lru_cache(maxsize=64)
+def _table_row_lines(block: str) -> frozenset:
+    """The lines of `block` that are rows of a table a quote or a list holds, as pandoc reads it: a
+    header row and a delimiter row of the same number of cells, the header not directly under a
+    paragraph line, then lines with a `|` up to one without, or one that opens a new list item."""
+    bare = [_bare(line) for line in block.split("\n")]
+    rows, i = set(), 0
+    while i < len(bare) - 1:
+        head, (sep, sep_item) = bare[i][0], bare[i + 1]
+        if (_CELL_PIPE_RE.search(head) and not sep_item and TBLSEP_RE.match(sep)
+                and _CELL_PIPE_RE.search(sep) and _cells(head) == _cells(sep)
+                and (i == 0 or not bare[i - 1][0].strip() or bare[i][1] and not bare[i - 1][1])):
+            rows.update((i, i + 1))
+            i += 2
+            while i < len(bare) and _CELL_PIPE_RE.search(bare[i][0]) and not bare[i][1]:
+                rows.add(i)
+                i += 1
+        else:
+            i += 1
+    return frozenset(rows)
+
+
 def in_table_row(block: str, point: int) -> bool:
     """Whether `point` is on a row of a table that a quote or a list holds (`> | a | b |`, an item
-    with a paragraph before its table): a line with a `|`, under unbroken lines with one, down to
-    a delimiter row. The splitter reads such a block as a quote or a list, not a table, but a
-    comment in it must be written as one in a table: on one line, at the end of a cell."""
-    lines = block.split("\n")
-    n = block.count("\n", 0, point)
-    bare = []
-    for line in lines:
-        while (m := _CONTAINER_RE.match(line)) and m.end():
-            line = line[m.end():]
-        bare.append(line)
-    if (n + 1 < len(bare) and _CELL_PIPE_RE.search(bare[n]) and _CELL_PIPE_RE.search(bare[n + 1])
-            and TBLSEP_RE.match(bare[n + 1])):
-        return True                 # the header row, above its delimiter row
-    for i in range(n, -1, -1):
-        if not _CELL_PIPE_RE.search(bare[i]):
-            return False
-        if i and TBLSEP_RE.match(bare[i]) and _CELL_PIPE_RE.search(bare[i - 1]):
-            return True
-    return False
+    with a paragraph before its table), as pandoc reads it (`_table_row_lines`). The splitter reads
+    such a block as a quote or a list, not a table, but a comment in it must be written as one in a
+    table: on one line, at the end of a cell."""
+    return block.count("\n", 0, point) in _table_row_lines(block)
 
 
 def cell_end(block: str, point: int, cells: bool = True) -> int:

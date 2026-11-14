@@ -17,4 +17,6 @@
 
 **Claimed by:** Jamal
 
+**Résultat (Jamal, 2026-11-14) :** PR 342 livre les deux phrases de SPEC 6.2 (lien en destination, `# A <!--> -->` copié) avec leurs tests. La docstring de `cell_end` était déjà juste sur main. Le passage Codex des PR 300 et 303 est passé au ticket 107. Le point 3 (note avant l'ouvreur vide) a eu trois a à la revue (a1, a2, a3) et est repris au ticket 115 avec ce qu'on a appris.
+
 **Status:** ready-for-agent

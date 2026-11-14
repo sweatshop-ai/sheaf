@@ -206,12 +206,14 @@ def test_a_heading_quote_that_is_stale_is_still_refused():
 
 @pytest.mark.parametrize("space", ["\u00a0", "\u3000"])
 def test_a_heading_with_a_no_break_or_full_width_space_after_the_hashes_takes_a_comment(space):
-    # blocks.ATX_RE reads any \s after the hashes as a heading, pandoc reads a paragraph: the
-    # heading anchor is None there and add_comment used to add it to the offset (TypeError).
+    # blocks.ATX_RE used to read any \s after the hashes as a heading, pandoc reads a paragraph: the
+    # heading anchor was None there and add_comment used to add it to the offset (TypeError). Since ticket 95 the
+    # splitter agrees with pandoc and the line is a paragraph, so the comment is a paragraph's (several lines).
     md = "#%sFoo bar\n" % space
+    assert [b.kind for b in split_md_blocks(md)] == ["para"]
     out, cid = comment_on(md, "Foo")
     assert out.startswith("#%sFoo<!-- sheaf-comment id=%s" % (space, cid))
-    assert re.sub(r"<!--.*?-->", "", out) == md
+    assert re.sub(r"<!--.*?-->", "", out, flags=re.S) == md
 
 
 @pytest.mark.parametrize("md", ["### ###\n", "# #\n", "## ##  \n", "## #\n"])

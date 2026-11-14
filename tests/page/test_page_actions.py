@@ -267,6 +267,7 @@ def test_a_refusal_queued_behind_a_red_toast_is_said_again_when_a_form_held_the_
     body = "main"
     comment_on(tab, at(body, "Body"), at(body, "Body", None), "Why?")
     p.clock.install()
+    p.add_init_script(HEARD)
     p.reload()
     p.wait_for_selector("button.rd-act")
     stand_still(p)                                      # from now on the clock moves only when the test runs it
@@ -281,7 +282,7 @@ def test_a_refusal_queued_behind_a_red_toast_is_said_again_when_a_form_held_the_
     mark(p)
     bar(p).nth(0).click()                               # the press, in its Undo
     f.write_text(f.read_text(encoding="utf-8") + "\nFrom outside.\n", encoding="utf-8")
-    p.wait_for_timeout(500)                             # the page hears of the change (the clock is still)
+    until(lambda: heard(p, "changed"), what="the change, whose reload waits for the press")    # the clock is still
     p.clock.run_for(100)
     p.clock.run_for(5000)                               # the press is refused at 10.2 s: its toast waits behind the red one (to 12 s)
     p.clock.run_for(7500)                               # 17.7 s: more than 7 s after the refusal was said, and it is up till 19 s
@@ -290,6 +291,70 @@ def test_a_refusal_queued_behind_a_red_toast_is_said_again_when_a_form_held_the_
     until(lambda: "my reply" in f.read_text(encoding="utf-8"), what="the reply in the file")
     reloaded(p)
     toasted(p, "reload the page", on_clock=True)        # the page's own toast of the change first, then the refusal again
+
+
+def refused(text):
+    return '{"ok": false, "error": "%s"}' % text
+
+
+def held_by_a_form(tab, answers):
+    """A page on the clock of the test, with the form of a reply open, Approve pressed (in its Undo) and an outside
+    change heard: its reload waits for the press, then for the form. The clock stands still; the reply is sent by
+    `p.click("#rd-popover button[data-f=ok]")`. Call `p.route("**/_/tick", ...)` before running the clock."""
+    p, f = tab.page, tab.site.file
+    f.write_text(SHEAF, encoding="utf-8")
+    tab.open()
+    comment_on(tab, at("main", "Body"), at("main", "Body", None), "Why?")
+    p.clock.install()
+    p.add_init_script(HEARD)
+    p.reload()
+    p.wait_for_selector("button.rd-act")
+    stand_still(p)
+    p.click(".rd-badge")
+    p.wait_for_selector("#rd-popover textarea")
+    p.fill("#rd-popover textarea", "my reply")
+    mark(p)
+    p.route("**/_/tick", lambda r: r.fulfill(status=409, content_type="application/json", body=answers.pop(0)))
+    bar(p).nth(0).click()
+    f.write_text(f.read_text(encoding="utf-8") + "\nFrom outside.\n", encoding="utf-8")
+    until(lambda: heard(p, "changed"), what="the change, whose reload waits for the press")
+    return p
+
+
+def test_the_refusal_a_form_held_reload_says_again_is_the_latest_press_not_an_earlier_one(tab):
+    # Ticket 80: `pressSaid` was never reset, so refusal A was said again on the page the reload brought, and refusal B,
+    # made later while the form still held the reload, was lost with the page.
+    answers = [refused("Approve: refused A, reload the page"), refused("Done: refused B, reload the page")]
+    p = held_by_a_form(tab, answers)
+    p.clock.run_for(5100)
+    until(lambda: "refused A" in toast(p), what="the first refusal")
+    p.clock.run_for(7000)
+    bar(p).nth(1).click()
+    p.clock.run_for(5100)
+    until(lambda: "refused B" in toast(p), what="the second refusal")
+    assert p.evaluate("window.__same_load") is True, "the page reloaded under the form"
+    p.click("#rd-popover button[data-f=ok]")
+    reloaded(p)
+    for _ in range(4):
+        if "refused" in toast(p):
+            break
+        p.clock.run_for(3000)
+    assert "refused B" in toast(p), toast(p)
+
+
+def test_a_refusal_said_again_on_the_new_page_is_said_again_on_a_second_reload_that_comes_quickly(tab):
+    # Ticket 80: the new page's `pressSaid` was null, so a second reload within the 7 s dropped the refusal.
+    f = tab.site.file
+    p = held_by_a_form(tab, [refused("Approve: refused A, reload the page")])
+    p.clock.run_for(5100)
+    until(lambda: "refused A" in toast(p), what="the refusal")
+    p.click("#rd-popover button[data-f=ok]")
+    reloaded(p)
+    until(lambda: "refused A" in toast(p) or p.clock.run_for(100) and False, what="the refusal, on the new page")
+    mark(p)
+    f.write_text(f.read_text(encoding="utf-8") + "\nFrom outside, again.\n", encoding="utf-8")
+    reloaded(p)
+    until(lambda: "refused A" in toast(p) or p.clock.run_for(100) and False, what="the refusal, on the page after")
 
 
 def test_a_press_while_the_page_settles_onto_a_change_is_refused_and_the_page_reloads(sheaf):

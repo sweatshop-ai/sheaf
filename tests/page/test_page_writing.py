@@ -4835,9 +4835,9 @@ def test_typing_while_a_change_from_outside_settles_is_refused_and_said(tab):
     reloaded(p)
 
 
-# Two pages of one document write one key. Both sends fail at the same instant, each page's renderer in its own
-# process, so neither may have heard of the other's write when it writes: the list must still hold both.
-# It does not (SPEC 10.4, ticket 121): xfail(strict), so the day the fix lands this turns into a failure to be removed.
+# Two pages of one document write the store. Both sends fail at the same instant, each page's renderer in its own
+# process, so neither may have heard of the other's write when it writes: the store must still hold both (each entry
+# has a key of its own, SPEC 10.4).
 FAIL_TOGETHER = """(at) => {
   const real = window.fetch;
   window.fetch = function (url, init) {
@@ -4851,7 +4851,6 @@ FAIL_TOGETHER = """(at) => {
 }"""
 
 
-@pytest.mark.xfail(strict=True, reason="ticket 121: two pages write the held-sends store without a re-read; see SPEC 10.4")
 def test_two_sends_that_fail_at_the_same_instant_on_two_pages_are_both_kept(thread, context):
     a, b = thread.page, second_page(thread, context)
     b.click(".rd-badge")
@@ -4890,7 +4889,7 @@ def test_a_discard_on_another_page_just_after_a_send_failed_is_not_put_back_by_t
     b.click(".rd-badge")
     b.wait_for_selector("#rd-popover textarea")
     a.evaluate("""(key) => { window.__after = 0; const set = Storage.prototype.setItem;
-      Storage.prototype.setItem = function (k, v) { if (k === key) window.__after++; return set.apply(this, arguments); }; }""",
+      Storage.prototype.setItem = function (k, v) { if (String(k).startsWith(key)) window.__after++; return set.apply(this, arguments); }; }""",
                comment_draft_key(thread.site))
     held = send_held(thread, form, "words to be discarded")
     b.click("#rd-popover button[data-a=minimize]")

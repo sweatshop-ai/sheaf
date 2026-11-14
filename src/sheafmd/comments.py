@@ -275,7 +275,7 @@ def _scan(text: str):
     that runs on into the text after it.     Each search runs once and is reused while its match still lies ahead of the position: a search
     from there finds the same match as one made from an earlier position, so a block of many tags or
     spans is read once, not once per item."""
-    pos, found = 0, {}
+    pos, found, no_closer = 0, {}, False
     # kind -> (pattern, group): an item starts at the group, which a tag's backslash prefix and
     # an opener's escape check put after the match's own start.
     kinds = {"code": (CODE_SPAN_RE, 0), "tag": (_HTML_TAG_RE, "tag"), "comment": (_OPENER_RE, 1)}
@@ -299,7 +299,8 @@ def _scan(text: str):
             yield "empty", a, pos
             continue
         else:
-            e = text.find("-->", a + 4)
+            e = -1 if no_closer else text.find("-->", a + 4)
+            no_closer = e < 0       # no `-->` after one opener is none after a later one
             if e < 0:
                 # Nothing closes it: pandoc reads it as text, so what follows is read on
                 # (a code span after it is still code).

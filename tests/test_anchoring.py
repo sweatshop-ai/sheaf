@@ -395,10 +395,11 @@ def test_a_cell_with_an_unclosed_opener_takes_the_block_before_it():
 
 # ── ticket 66: what is left of PR 286 ──
 
-def _slow(md, quote):
-    """Seconds `comment_on` takes for `quote` in `md`."""
+def _slow(md):
+    """Seconds `heading_anchor` takes for `md` (the scan, not the pandoc projection that anchoring
+    also pays for, which a loaded laptop makes slow)."""
     t = time.perf_counter()
-    comment_on(md, quote)
+    rdc.heading_anchor(md)
     return time.perf_counter() - t
 
 
@@ -411,9 +412,9 @@ def test_a_long_heading_full_of_tags_before_an_unclosed_opener_is_read_in_linear
     # the position again), and the hub is blocked while a comment is anchored.
     tags = "<b>x</b> " * 1000
     md = heading.replace("Title", "Title " + tags + "<!-- end", 1)
-    assert _slow(md, "Title") < 1.0
+    assert _slow(md) < 0.3
     md4 = heading.replace("Title", "Title " + tags * 4 + "<!-- end", 1)
-    assert _slow(md4, "Title") < 2.0
+    assert _slow(md4) < 0.5
 
 
 def test_an_ordinary_closed_comment_owns_its_backtick():
@@ -466,3 +467,12 @@ def test_code_after_an_unclosed_ordinary_opener_is_not_a_broken_comment():
     md = "A bare <!-- opens a comment; a note starts with `<!-- sheaf-comment id=c1`.\n"
     assert rdc.parse(md).malformed == []
     assert rdc._mask_code("a <!-- b `x` c") == "a <!-- b     c"
+
+
+def test_a_block_of_many_unclosed_openers_is_read_in_linear_time():
+    # Opus narrow review: every later opener repeated the failed search for `-->`, 597 ms at 80 KB.
+    md = "a " + "<!-- x " * 12000 + " `z`\n"
+    t = time.perf_counter()
+    assert rdc._mask_code(md).count("`") == 0
+    assert rdc._unclosed_opener(md) == 2
+    assert time.perf_counter() - t < 0.3

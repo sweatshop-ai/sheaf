@@ -6,7 +6,7 @@
 
 **Status:** ready-for-agent
 
-- [ ] Two `- [ ] Approve` lines on one page are two buttons, each pressing its own box
-- [ ] Selecting words on a button's line still opens the chat box, and does not press
-- [ ] The row above the document is gone on pages that are not the list's sheaves
-- [ ] SPEC 10.11 and GLOSSARY say where the button is drawn
+- [x] Two `- [ ] Approve` lines on one page are two buttons, each pressing its own box — `test_two_lines_of_the_same_word_are_two_buttons_and_each_presses_its_own_box` (tests/page/test_page_actions.py), green in CI on the PR head
+- [x] Selecting words on a button's line still opens the chat box, and does not press — `test_a_selection_on_a_buttons_line_does_not_press_it_and_the_button_is_not_part_of_the_text`, green in CI; a press no longer closes an open comment form (`.rd-inline` in the popover's mousedown exclusion)
+- [x] The row above the document is gone on pages that are not the list's sheaves — `test_a_page_with_no_toggle_has_no_row_above_the_document`, green in CI (the row stays only for Share until ticket 03, and for a one-off whose box the page does not find)
+- [x] SPEC 10.11 and GLOSSARY say where the button is drawn — SPEC.md 10.11 first paragraph, GLOSSARY.md One-off action

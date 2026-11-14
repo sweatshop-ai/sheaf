@@ -39,7 +39,7 @@ _HTML_OPENS = (
     rf"|</?(?:{_HTML_TAGS})(?:[ \t]|/?>|$)"             # 6
 )
 _OPENS_BLOCK = re.compile(
-    r"^ {0,3}(?:```|~~~|#{1,6}(?:[ \t\r]|$)|>|(?:[*_][ \t]*){3,}$|[-*+][ \t]+[^ \t]|0*1[.)][ \t]+[^ \t]|" + _HTML_OPENS + ")",
+    r"^ {0,3}(?:```|~~~|#{1,6}(?:[ \t]|$)|>|(?:[*_][ \t]*){3,}$|[-*+][ \t]+[^ \t]|0*1[.)][ \t]+[^ \t]|" + _HTML_OPENS + ")",
     re.I)
 
 
@@ -66,10 +66,10 @@ def _unquote(line: str) -> str:
 def is_copy_block(content: str) -> bool:
     """Is this block of the source (a quote, without the blank lines after it) a copy block?"""
     first, _, rest = content.partition("\n")
-    if not (_LINE.fullmatch(first.rstrip("\r")) and _WORDS.search(rest)):
+    if not (_LINE.fullmatch(first.replace("\r", "")) and _WORDS.search(rest)):
         return False
     for line in rest.split("\n"):
-        raw = line = line.rstrip("\r")
+        raw = line = line.replace("\r", "")      # pandoc deletes a CR, lone or not; it does not end the line there
         if not line.strip(" \t>"):
             break                       # the first paragraph ends at the first blank quote line
         line = _unquote(line)
@@ -82,12 +82,13 @@ def is_copy_block(content: str) -> bool:
 
 def hide(src: str) -> str:
     """`src` with the marker line of each copy block swapped for STAND_IN, for pandoc."""
-    if MARKER not in src:
+    if MARKER not in src.replace("\r", ""):
         return src
     out = []
     for b in split_md_blocks(src):
         if b.kind == "quote" and is_copy_block(b.content):
-            out.append(_LINE.sub(lambda m: m.group(1) + STAND_IN, b.content, count=1) + b.gap)
+            first, nl, rest = b.content.partition("\n")
+            out.append(_LINE.sub(lambda m: m.group(1) + STAND_IN, first.replace("\r", ""), count=1) + nl + rest + b.gap)
         else:
             out.append(b.text)
     return "".join(out)

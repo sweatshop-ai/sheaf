@@ -6,11 +6,11 @@
 
 **Claimed by:** Isolde 2026-11-13 23:53
 
-**Status:** in-progress
+**Status:** in-review (branche chat-box/40-41, une PR avec le ticket 40)
 
 **Établi (preuves) :** lecture de `waiting.py` `_name`, `queue`, `_end`, `take` à la tête bbf4dbe de chat-box/23. Non reproduit.
 
 **Par où commencer :** décider quel nom fait foi (celui de la mise en attente, gardé dans la ligne, partout : événements et `waits()`), et le dire dans la SPEC 9.8 ; pour les anciennes lignes, un repli sur le nom courant du jeton ou, à défaut, le nom du jeton comme aujourd'hui.
 
-- [ ] Un test : une ligne sans `agent` dont le jeton est révoqué, et un renommage entre `tell-queued` et `tell-seen` ; l'événement nomme l'agent comme `tell-queued`
-- [ ] La SPEC 9.8 dit quel nom fait foi
+- [x] Un test : une ligne sans `agent` dont le jeton est révoqué, et un renommage entre `tell-queued` et `tell-seen` ; l'événement nomme l'agent comme `tell-queued` — `::test_the_events_of_a_tell_name_the_agent_as_tell_queued_did_after_a_rename` (renommage) et `::test_a_row_with_no_agent_gets_the_name_it_has_now_and_keeps_it_when_its_token_goes` (ligne ancienne : elle prend le nom courant de son jeton au premier passage du hub sur le fichier, l'écrit, et le garde à la révocation). Limite : une ligne ancienne dont le jeton est déjà parti avant ce premier passage garde le nom du jeton, le hub ne peut pas le reconstruire
+- [x] La SPEC 9.8 dit quel nom fait foi — paragraphe « Which name is the agent's » à la fin de l'étape 3

@@ -119,8 +119,16 @@ def test_every_other_input_goes(tag):
     assert "<p>ab</p>" in out
 
 
-def test_the_checkbox_test_ignores_case_and_spaces_only():
-    assert "input" in names(sanitize('<input type=" CheckBox ">'))
+def test_the_checkbox_test_ignores_case_only():
+    assert "input" in names(sanitize('<input type="CheckBox">'))
+
+
+@pytest.mark.parametrize("kind", [" checkbox", "checkbox ", " CheckBox ", "\tcheckbox", "checkbox\n", "\u00a0checkbox", "chec\u212abox"])
+def test_a_type_that_is_a_checkbox_only_after_trimming_is_no_checkbox(kind):
+    """A browser matches the type exactly, ASCII case aside: `" checkbox"` and `"checKbox"` (a Kelvin sign) are text fields."""
+    out = sanitize(f'<p>a<input type="{kind}">b</p>')
+    assert "input" not in names(out)
+    assert "<p>ab</p>" in out
 
 
 # ── attributes ──────────────────────────────────────────────────────────────

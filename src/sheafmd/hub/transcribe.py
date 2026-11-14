@@ -29,6 +29,7 @@ from .. import config, paths
 KEYS = {"url": str, "model": str, "key_file": str, "key_name": str, "per_minute": int, "per_hour": int}
 KEPT = 30            # seconds dictation stays off after no answer or a 503
 TIMEOUT = 30         # seconds the provider has to transcribe
+KEY_FILE_MAX = 65536    # characters read from the key file: a key file is a few lines
 MODEL = re.compile(r"[A-Za-z0-9._:/-]{1,100}")
 MIME = {"webm": "audio/webm", "mp4": "audio/mp4", "ogg": "audio/ogg"}
 
@@ -204,10 +205,15 @@ class Relay:
             self._refused = True
             self.record("transcribe-key-file", reason=why)
 
+    @staticmethod
+    def _mine(st) -> bool:
+        return stat.S_ISREG(st.st_mode) and st.st_uid == os.getuid() and not st.st_mode & 0o077
+
     def _key(self) -> tuple[str, tuple] | None:
         """The key with the stamp of its file (mtime_ns, ctime_ns, size, inode), or None: a file that is not a regular
         file of the hub's account with mode 0600, that has no such line, or whose key a header cannot carry (not
-        latin-1: said in the log without the key), is not used. The stamp is the one of the file the key was read
+        latin-1: said in the log without the key), or that is over KEY_FILE_MAX characters, is not used. The mode and
+        the owner are checked again after each read. The stamp is the one of the file the key was read
         from: a file that changes during the read is read again, and one that keeps changing is not used this time.
         Opened without blocking (a FIFO would hang the open) and never through a symlink."""
         try:
@@ -218,7 +224,7 @@ class Relay:
         wrapped = False                                      # once fdopen has the descriptor, or the refusal below has closed it, closing it again is not our job
         try:
             st = os.fstat(fd)
-            if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o077:
+            if not self._mine(st):
                 wrapped = True                               # before the close: it may raise, and the descriptor is gone either way
                 os.close(fd)
                 self._refuse("the key file is not a regular file of the hub's account with mode 0600")
@@ -228,8 +234,14 @@ class Relay:
             wrapped = True
             with f:
                 for _ in range(3):
-                    text = f.read()
+                    text = f.read(KEY_FILE_MAX + 1)
+                    if len(text) > KEY_FILE_MAX:
+                        self._refuse(f"the key file is too large (over {KEY_FILE_MAX} characters)")
+                        return None
                     st = os.fstat(f.fileno())
+                    if not self._mine(st):                   # a chmod during the read: the key of this pass is not used
+                        self._refuse("the key file is not a regular file of the hub's account with mode 0600")
+                        return None
                     after = (st.st_mtime_ns, st.st_ctime_ns, st.st_size, st.st_ino)
                     if after == stamp:
                         break

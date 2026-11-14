@@ -10,7 +10,7 @@
 
 **Claimed by:** Suraya
 
-**Status:** ready-for-agent
+**Status:** done (PR 332, merge fc1a6b0)
 
-- [ ] Test rouge puis vert pour le CR avant le `>`, mesuré contre pandoc 3.9
-- [ ] Les deux restes d réglés
+- [x] Test rouge puis vert pour le CR avant le `>`, mesuré contre pandoc 3.9
+- [x] Les deux restes d réglés

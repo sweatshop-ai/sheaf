@@ -6,7 +6,7 @@
 
 **Claimed by:** Suraya
 
-**Status:** ready-for-agent
+**Status:** done (PR 332, merge fc1a6b0)
 
-- [ ] Sonde contre pandoc 3.9 : la coupure change-t-elle le HTML ou le bouton quelque part ?
-- [ ] Corrigé (test rouge d'abord) ou écarté avec la preuve
+- [x] Sonde contre pandoc 3.9 : la coupure change-t-elle le HTML ou le bouton quelque part ?
+- [x] Corrigé (test rouge d'abord) ou écarté avec la preuve

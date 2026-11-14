@@ -63,3 +63,24 @@ def test_repeat_old(phone, n):
     assert got["pop"][3] <= 450 - ACCESSORY, got
     assert got["field"][1] >= got["pop"][1] and got["field"][3] <= got["pop"][3], got
     assert all(b[3] <= got["pop"][3] for b in got["buttons"]), got
+
+
+def test_mechanism(phone):
+    """The open page reloads itself when its file changes; a goto during that reload is the ticket's error."""
+    from sheafmd import comments as rdc
+    from sheafmd.source import update_file
+    page = phone.page
+    loads = []
+    page.on("request", lambda r: loads.append(r.url) if r.resource_type == "document" else None)
+    def slow(route):
+        page.wait_for_timeout(1500)
+        route.continue_()
+    page.route("**/work/plan.md", slow)
+    update_file(phone.site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "Second paragraph"), "Second paragraph",
+                                                           "Nearly good. " * 20, "Ada", "2026-10-25T21:01")[0])
+    deadline = 0
+    while not loads and deadline < 100:
+        page.wait_for_timeout(100); deadline += 1
+    print("SELFRELOAD documents requested by the page itself:", len(loads))
+    assert loads, "the page did not reload itself within 10 s"
+    page.goto(phone.site.url)

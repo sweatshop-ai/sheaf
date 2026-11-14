@@ -4885,3 +4885,27 @@ def test_two_sends_that_fail_at_the_same_instant_on_two_pages_are_both_kept(thre
             lost.append(i)
     assert not lost, f"the store lost, or kept as still out, an entry of a failed send in rounds {lost}"
     assert len(idle) <= 8, f"rounds {idle} did not run the two sends at the same time: the test did not try the race"
+
+
+# A Discard on one page of an entry another page wrote a moment ago is a removal on purpose: the page that wrote it
+# keeps its claim on the entry for a while (against a stale overwrite), and must not write it again.
+@pytest.mark.parametrize("form", ["reply", "edit"])
+def test_a_discard_on_another_page_just_after_a_send_failed_is_not_put_back_by_the_page_that_wrote_it(thread, context, form):
+    a, b = thread.page, second_page(thread, context)
+    b.click(".rd-badge")
+    b.wait_for_selector("#rd-popover textarea")
+    a.evaluate("""(key) => { window.__after = 0; const set = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (k, v) { if (k === key) window.__after++; return set.apply(this, arguments); }; }""",
+               comment_draft_key(thread.site))
+    held = send_held(thread, form, "words to be discarded")
+    b.click("#rd-popover button[data-a=minimize]")
+    began = time.time()
+    held[0].fulfill(status=500, json={"ok": False, "error": "the hub broke off"})
+    a.unroute("**/_/comment")
+    until(lambda: b.query_selector(UNSENT) and "not sent" in b.inner_text(UNSENT), what="the not-sent line on page B")
+    a.evaluate("window.__after = 0")
+    discard_unsent(b, "words to be discarded")
+    assert time.time() - began < 1.5, "the Discard came after the page's claim ended: the test tried nothing"
+    a.wait_for_timeout(3000)            # past the 2 s a page keeps its claim
+    assert a.evaluate("window.__after") == 0, "the page that wrote the entry wrote the discarded text again"
+    assert comment_store(thread) == ""

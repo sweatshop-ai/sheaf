@@ -10,11 +10,11 @@
 
 **Par où commencer :** écrire la décision dans le ticket avant le code, puis un test de page avec un `<span contenteditable="plaintext-only">` dans un paragraphe et une frappe pendant une sauvegarde retenue.
 
-- [ ] Un test de page tape dans un bloc éditable imbriqué pendant une sauvegarde sans réponse et échoue tant que le champ ne porte pas de marque
-- [ ] La marque part avec la sauvegarde et ne devient pas une modification
-- [ ] La décision (retirer `contenteditable` au sanitiseur, ou marquer tout `[contenteditable]`) est écrite dans le ticket avant le code
-- [ ] Un cas `mount=True` dans le test paramétré `test_a_type_that_is_a_checkbox_only_after_trimming_is_no_checkbox` (tests/test_sanitize.py:126, qui ne teste que le mode simple)
-- [ ] Le nom de ce test dit « trimming » alors que le cas du signe Kelvin est un pli de casse : le renommer
-- [ ] `sanitize.py:12` et `SPEC.md:884` disent encore « removed unless `type="checkbox"` » : dire que le type doit être exactement `checkbox`, à la casse ASCII près
+- [ ] Un test de page tape dans un bloc éditable imbriqué pendant une sauvegarde sans réponse et échoue tant que le champ ne porte pas de marque : sans objet, la décision retire `contenteditable` au sanitiseur, donc aucun bloc imbriqué éditable n'atteint la page ; le test du sanitiseur (`test_the_document_has_no_contenteditable_of_its_own`, rouge avant le correctif) le remplace
+- [ ] La marque part avec la sauvegarde et ne devient pas une modification : sans objet, pas de marque nouvelle ; la garde `beforeinput` n'a pas changé
+- [x] La décision (retirer `contenteditable` au sanitiseur, ou marquer tout `[contenteditable]`) est écrite dans le ticket avant le code
+- [x] Un cas `mount=True` dans le test paramétré `test_a_type_that_is_a_checkbox_only_after_trimming_is_no_checkbox` (tests/test_sanitize.py:126, qui ne teste que le mode simple)
+- [x] Le nom de ce test dit « trimming » alors que le cas du signe Kelvin est un pli de casse : le renommer
+- [x] `sanitize.py:12` et `SPEC.md:884` disent encore « removed unless `type="checkbox"` » : dire que le type doit être exactement `checkbox`, à la casse ASCII près
 
-**Status:** in-review (PR 292, head ff6eaf9, CI 3/3 green, Opus round 1 GO)
+**Status:** done (PR 292, merge cc24fe5 ; revue Opus 1 : GO ; restes c/d au ticket 70)

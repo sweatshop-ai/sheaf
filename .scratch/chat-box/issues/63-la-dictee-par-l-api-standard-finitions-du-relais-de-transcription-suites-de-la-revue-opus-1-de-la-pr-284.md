@@ -12,10 +12,10 @@
 
 **Claimed by:**
 
-**Status:** ready-for-agent
+**Status:** done (PR 290, merge 70bcd55); c1 to d6 of the Opus 1 review go to ticket 71
 
 **Par où commencer :** `tests/test_hub_transcribe.py` : un test par point (c3 : deux requêtes concurrentes, une seule clé refusée envoyée ; c4 : clé non latin-1 refusée avec motif, sans la clé dans le journal ; c5 : le contexte passé est un contexte vérifiant ; c2 : une écriture entre fstat et lecture ne laisse pas l'ancien cachet avec la nouvelle clé).
 
-- [ ] c2, c3, c4, c5 corrigés ou la limite écrite dans le SPEC 4.3 / 9.16, chacun avec son test
-- [ ] Les deux docstrings de la relecture 2 disent ce que fait le code
-- [ ] CI verte
+- [x] c2, c3, c4, c5 corrigés, chacun avec son test rouge d'abord (SPEC 9.16 mis à jour) ; d4 close, rien à faire
+- [x] Les deux docstrings de la relecture 2 disent ce que fait le code (revue Opus 1 de la PR 290 : GO)
+- [x] CI verte (3/3 sur la PR 290 ; une tranche de page a échoué hors de portée du diff, relancée une fois, verte ; main 3/3 après la fusion)

@@ -107,7 +107,7 @@ L'agent sait quand un texte est fait pour être copié. Il l'écrit dans un bloc
 | 60 | Restes de la revue Opus de la PR 280 : l'instantané lu puis publié sans verrou, le journal écrit avant le fichier, le remplissage de `agent` | Rien | À faire |
 | 61 | Le test d'une réponse abandonnée que le hub a prise lit la boîte une seule fois, sans attendre que la réponse y soit : instable en CI, deux fois sur main | Rien | À faire |
 | 62 | Un seul élément de toast : le toast du deuxième fil remplace celui du premier ; et deux tests de la PR 283 prouvent moins qu'ils ne disent | Rien | À faire |
-| 63 | Dictée (API standard) : finitions du relais de transcription, suites de la revue Opus 1 de la PR 284 | Rien | À faire |
+| 63 | Dictée (API standard) : finitions du relais de transcription, suites de la revue Opus 1 de la PR 284 | Rien | Fait (PR 290, merge 70bcd55) |
 | 64 | Le test « ouvrir le fil sur la deuxième de deux réponses gardées » échoue de temps en temps en CI | Rien | À faire |
 | 65 | Titres : une régression sur les titres faits de dièses, et finitions, suites de la revue Opus 1 de la PR 285 | Rien | En cours |
 | 66 | Titres : un balayage quadratique et un accent grave dans un commentaire fermé, restes de la revue Opus 1 de la PR 286 | Rien | À faire |
@@ -115,6 +115,7 @@ L'agent sait quand un texte est fait pour être copié. Il l'écrit dans un bloc
 | 68 | Cellules de tableau : `<!-->` refusé, le merge sur un dernier rang sans `|` final, et trois cas que `parse` ou le découpeur de blocs lisent autrement que pandoc, restes des revues Opus de la PR 288 | Rien | À faire |
 | 69 | Bloc à copier : `<![CDATA[` insensible à la casse, colonnes de tabulation et commentaire de `is_copy_block`, restes de la revue Opus 1 de la PR 289 | Rien | À faire |
 | 70 | Sanitiseur : `-webkit-user-modify` en mode simple, un cas de test et une ligne de commentaire, restes de la revue Opus 1 de la PR 292 | Rien | À faire |
+| 71 | Dictée : restes de la revue Opus 1 de la PR 290, une assertion vide corrigée à vérifier et six finitions | Rien | À faire |
 
 ## Ce qui reste ouvert
 

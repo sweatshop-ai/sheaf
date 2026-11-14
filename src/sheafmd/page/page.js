@@ -2497,7 +2497,10 @@ var create = function (ROOT, CFG, opts) {
   function stopDictation(discard) {
     var d = dict;
     if (!d) return;
-    if (discard) { d.discard = true; if (d.abort) d.abort.abort(); }     // a sound on its way is called back too
+    if (discard) {
+      d.discard = true; if (d.abort) d.abort.abort();     // a sound on its way is called back too
+      dict = null;      // at once: the browser's prompt may still be open, and the next box's microphone must not wait behind it
+    }
     clearTimeout(d.timer);
     clearInterval(d.watch);
     if (d.rec && d.rec.state !== 'inactive') d.rec.stop();
@@ -2561,9 +2564,10 @@ var create = function (ROOT, CFG, opts) {
         if (dict) { if (dict.f === f && dict.rec) stopDictation(false); return; }
         says('');
         var d = dict = { f: f, chunks: [], discard: false, rec: null };
+        var free = function () { if (dict === d) dict = null; };    // a late callback must not clear the recording of a box opened since
         navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
           var release = function () { stream.getTracks().forEach(function (t) { t.stop(); }); };
-          if (d.discard || unmounted || !f.isConnected) { release(); dict = null; return; }
+          if (d.discard || dict !== d || unmounted || !f.isConnected) { release(); free(); return; }
           var type, rec, ext;
           // A browser that takes the stream and then refuses the recorder (a type it cannot make, a start that throws)
           // must not keep the microphone: the light goes out, and the next press is a new try.
@@ -2572,29 +2576,29 @@ var create = function (ROOT, CFG, opts) {
             rec = d.rec = type ? new MediaRecorder(stream, { mimeType: type }) : new MediaRecorder(stream);
             type = rec.mimeType || type || 'audio/webm';
             ext = /mp4/.test(type) ? 'mp4' : /ogg/.test(type) ? 'ogg' : 'webm';
-          } catch (e) { release(); dict = null; says('The recording could not start. Try again.'); return; }
+          } catch (e) { release(); free(); says('The recording could not start. Try again.'); return; }
           rec.addEventListener('dataavailable', function (e) { if (e.data && e.data.size) d.chunks.push(e.data); });
           rec.addEventListener('stop', function () {
             release();
             var gone = function () { return d.discard || unmounted || !f.isConnected; };
             // A discarded sound leaves a form that may still be here (a send that fails gives it back): its button is idle again.
             var here = function () { if (!unmounted && f.isConnected) idle(); };
-            if (gone() || !d.chunks.length) { dict = null; here(); if (!gone()) says('Nothing was recorded. Try again.'); return; }
+            if (gone() || !d.chunks.length) { free(); here(); if (!gone()) says('Nothing was recorded. Try again.'); return; }
             b.disabled = true; b.title = 'Transcribing…'; b.setAttribute('aria-label', 'Transcribing…'); b.setAttribute('aria-pressed', 'false');
             d.abort = new AbortController();
             transcribeSound(new Blob(d.chunks, { type: type }), ext, d.abort.signal).then(function (text) {
-              dict = null;
+              free();
               here();
               if (gone()) return;
               insertDictated(ta, text);
             }, function (e) {
-              dict = null;
+              free();
               here();
               if (gone()) return;
               lost(e.why);
             });
           });
-          try { rec.start(); } catch (e) { release(); dict = null; says('The recording could not start. Try again.'); return; }
+          try { rec.start(); } catch (e) { release(); free(); says('The recording could not start. Try again.'); return; }
           b.title = 'Stop'; b.setAttribute('aria-pressed', 'true');
           d.timer = setTimeout(function () { stopDictation(false); }, DICTATE_MAX);
           if (!MOUNTED) d.watch = setInterval(function () {   // the service lost during the recording: the sound is dropped
@@ -2605,7 +2609,9 @@ var create = function (ROOT, CFG, opts) {
             });
           }, DICTATE_WATCH);
         }, function (e) {
-          dict = null;
+          var stale = d.discard || dict !== d;      // closed while the prompt was open: nobody is waiting for the answer
+          free();
+          if (stale) return;
           says(e && (e.name === 'NotAllowedError' || e.name === 'SecurityError') ? 'Microphone blocked: allow it for this site.' : 'No microphone found.');
         });
       });

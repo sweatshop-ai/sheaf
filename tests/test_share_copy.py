@@ -784,6 +784,25 @@ def test_an_empty_opener_that_a_later_arrow_would_close_gets_the_swallows_messag
     assert "empty HTML comment" not in str(e.value)
 
 
+def _refused(tmp_path, text):
+    with pytest.raises(sheafmd.UnclosedComment) as e:
+        sheafmd.render(doc(tmp_path, text))
+    return e.value
+
+
+def test_an_empty_opener_in_a_link_destination_is_copied_unless_a_later_arrow_would_close_it(tmp_path):
+    # SPEC 6.2 (ticket 99): both cases; they also hold on main.
+    out = sheafmd.render(doc(tmp_path, "[l](http://x/<!-->) KEEP1\n"))
+    assert "KEEP1" in out and "http://x/" in out
+    e = _refused(tmp_path, "[l](http://x/<!-->) KEEP1\n\nKEEP2 <!-- c -->\n")
+    assert e.line == 1 and "that is not a comment to the reader" in str(e)
+
+
+def test_an_empty_opener_whose_next_arrow_takes_no_shown_word_is_copied(tmp_path):
+    # SPEC 6.2 (ticket 99): "refused whether or not an arrow follows" was too wide.
+    assert "KEEP" in sheafmd.render(doc(tmp_path, "# A <!--> -->\n\nKEEP\n"))
+
+
 def test_the_same_heading_without_the_empty_opener_makes_a_copy(tmp_path):
     out = sheafmd.render(doc(tmp_path, "# A b <!-- note -->\n\nKEEP1 para.\n"))
     assert "KEEP1" in out and "note" not in out

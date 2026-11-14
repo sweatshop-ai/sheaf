@@ -35,6 +35,8 @@ Text is entity-encoded on the way in and decoded on the way out, so what a reade
 typed is what they get back, including "&", "<" and "-->".
 """
 
+import bisect
+import functools
 import html as _html
 import re
 from dataclasses import dataclass, field
@@ -54,12 +56,49 @@ WRITE_MARKER = "sheaf-comment"          # what new comments are written with
 MARKER_AT_HEAD_RE = re.compile(rf"({MARKER})(?=\s|$)")
 COMMENT_RE = re.compile(rf"<!--\s*{MARKER}\b")
 ROLES = ("answer", "action")
-# A CommonMark code span: a run of backticks, then the shortest text up to a run of
-# the same length that is not part of a longer one.
-# A backslash escapes the backtick it precedes, so a run after an odd number of them opens nothing
-# there; what is left of an escaped run (one backtick shorter) may still open a span. Group 1 is
-# the opening run.
-CODE_SPAN_RE = re.compile(r"(?<!\\)(?:\\\\)*(?:(?<!`)|\\`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)")
+# A CommonMark code span: a run of backticks, then the text up to the next run of the same
+# length (a run, not part of a longer one). A backslash escapes the backtick it precedes, so a
+# run after an odd number of them opens nothing there; what is left of an escaped run (one
+# backtick shorter) may still open a span. The opening run is found by a pattern and its closer
+# by a lookup among the block's runs, so an opener that nothing closes costs one lookup, not a
+# search to the end of the block.
+_CODE_OPEN_RE = re.compile(r"(?<!\\)(?:\\\\)*(?:(?<!`)|\\`)(`+)(?!`)")
+_RUN_RE = re.compile(r"(?<!`)`+(?!`)")
+
+
+class _CodeSpan:
+    """What `re.Match` gives for the one group the callers read: group 1 is the opening run."""
+    def __init__(self, a, b):
+        self.a, self.b = a, b
+
+    def start(self, group=0):
+        return self.a
+
+    def end(self, group=0):
+        return self.b
+
+
+@functools.lru_cache(maxsize=8)
+def _runs_by_length(text: str):
+    by_len = {}
+    for m in _RUN_RE.finditer(text):
+        by_len.setdefault(m.end() - m.start(), []).append(m.start())
+    return by_len
+
+
+class _CodeSpanFinder:
+    @staticmethod
+    def search(text: str, pos: int = 0):
+        by_len = _runs_by_length(text)
+        for m in _CODE_OPEN_RE.finditer(text, pos):
+            k = m.end(1) - m.start(1)
+            starts = by_len.get(k, ())
+            at = bisect.bisect_left(starts, m.end(1))
+            if at < len(starts):
+                return _CodeSpan(m.start(1), starts[at] + k)
+
+
+CODE_SPAN_RE = _CodeSpanFinder()
 STRAY_RE = re.compile(r"^[ \t]*-->", re.M)
 REPLY_RE = re.compile(r'^@("(?:[^"]*)"|\S+) (\d{4}-\d\d-\d\dT\d\d:\d\d)(?: (answer|action))?:\s?(.*)$',
                       re.S)

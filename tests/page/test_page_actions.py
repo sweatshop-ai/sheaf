@@ -728,6 +728,7 @@ def test_an_item_typed_above_the_box_just_before_the_press_never_ticks_another_b
     p.keyboard.type("extra")
     until(lambda: "extra" in p.inner_text("main ul"), what="the new item on screen")
     p.locator("main li:has-text('Share') input[type=checkbox]").click()
+    p.clock.run_for(3000)                               # the page's timers run on the installed clock
     until(lambda: "- [x] Share" in f.read_text(encoding="utf-8") and "extra" in f.read_text(encoding="utf-8"),
           what="the tick, and the item saved by the reload's settle")
     p.wait_for_timeout(500)

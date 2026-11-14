@@ -1038,8 +1038,10 @@ def build(md: Path, *, theme: Theme, share: bool = True, title: str | None = Non
         line = _unclosed_line(original, frag)
         if line:
             text = original.split("\n")[line - 1]
-            head = rdc.COMMENT_RE.search(text)
             spans = [x.span() for x in COMMENT_RE.finditer(text)]
+            # A note head inside a comment the line closes is not the fault.
+            head = next((h for h in rdc.COMMENT_RE.finditer(text)
+                         if not any(a <= h.start() < b for a, b in spans)), None)
             first = next((m for m in re.finditer(r"<!--", text)
                           if not any(a <= m.start() < b for a, b in spans)), None)
             # A reviewer's note that nothing closes is named before an empty opener on its line.

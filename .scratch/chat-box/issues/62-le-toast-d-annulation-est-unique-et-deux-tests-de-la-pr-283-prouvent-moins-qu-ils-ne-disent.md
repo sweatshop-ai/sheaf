@@ -7,12 +7,16 @@
 
 **Blocked by:** none
 
-**Claimed by:**
+**Claimed by:** Isolde (PR 298)
 
-**Status:** ready-for-agent
+**Status:** in-review (PR 298, branch chat-box/62)
 
 **Par où commencer :** F3 d'abord (attendre les deux réponses, sur t-compute, jamais sur le portable ; vérifier le rouge sans le correctif), puis F2 (deux agents, un par fil : `Tokens().add` deux fois, un Tell chacun, le toast de chaque fil ne nomme que le sien). F1 : décider avec le propriétaire du SPEC entre limite écrite et correctif (file de toasts, ou un toast qui liste les fils).
 
-- [ ] F1 : décision écrite (corriger ou limite dans le SPEC), pour les deux moitiés
-- [ ] F2 : le test a deux agents et affirme le nom de chaque fil
-- [ ] F3 : le test attend les deux réponses et reste rouge sans le correctif
+- [x] F1 : décision écrite (corriger ou limite dans le SPEC), pour les deux moitiés
+- [x] F2 : le test a deux agents et affirme le nom de chaque fil
+- [x] F3 : le test attend les deux réponses et reste rouge sans le correctif
+
+**Décision F1 (Rhea, 2026-11-14) : corriger.** `say()` met les toasts en file : chacun est montré à son tour, pour sa propre durée (2,6 s ; 7 s en rouge), jamais perdu ni coupé par le suivant, jamais empilés à l'écran. Les deux moitiés de F1 (deux fils ; le toast d'une annulation de session écrasé par une note de fil) en découlent. Fait dans la PR 298.
+
+**Limites laissées (revue Opus 1, classe c, voir la poignée) :** la file n'a ni plafond ni fusion ; pas de pause visible entre deux toasts ; une rechargement de page perd la file.

@@ -354,7 +354,9 @@ var create = function (ROOT, CFG, opts) {
             .replace(/\s*contenteditable="[^"]*"/g, '')
             .replace(/(\s+)class="([^"]*)"/g, dropMarkers)
             .replace(/\s+title="Not editable here: [^"]*"/g, '')
-            .replace(/<button\b[^>]*\brd-copybtn\b[^>]*>[\s\S]*?<\/button>/g, '');
+            .replace(/<button\b[^>]*\brd-copybtn\b[^>]*>[\s\S]*?<\/button>/g, '')
+            .replace(/<button\b[^>]*\brd-inline\b[^>]*>[\s\S]*?<\/button>/g, '')
+            .replace(/<span class="rd-actword">([^<]*)<\/span>/g, '$1');
   }
   // A part of the page's own among a block's nodes (data-rd-ui: the byline, which the page writes again with the session's
   // name) is no text of the block: changing it is no edit, and the hub drops it from a save all the same.
@@ -2769,7 +2771,7 @@ var create = function (ROOT, CFG, opts) {
     if (popId === id) closePopover(); else openComment(id);
   });
   listen(PAGE_EV, 'mousedown', function (e) {
-    if (pop && !standing() && !pop.contains(e.target) && !(e.target.closest && e.target.closest('.rd-badge, #rd-panel, #rd-unsent, #rd-actions, #rd-notice, #rd-menu-btn, #rd-menu, #rd-mode, #rd-work'))) leavePopover();
+    if (pop && !standing() && !pop.contains(e.target) && !(e.target.closest && e.target.closest('.rd-badge, #rd-panel, #rd-unsent, #rd-actions, .rd-inline, #rd-notice, #rd-menu-btn, #rd-menu, #rd-mode, #rd-work'))) leavePopover();
   });
 
   // ---- side panel -----------------------------------------------------------
@@ -3433,14 +3435,14 @@ var create = function (ROOT, CFG, opts) {
       // The browser's own toggle is cancelled and replaced by ours: inside a
       // contenteditable it is not reliable, and the attribute must move with it.
       e.preventDefault();
-      // A box of the eleven words is pressed with its button at the top of the page (SPEC 10.11).
+      // A box of the eleven words is pressed with its button (SPEC 10.11).
       if (isActBox(t)) { say(PRESS_IT); return; }
       var b = blockOf(t);
       if (stale || dead || !b || !editable.has(b.i)) return;
       tickBox(t, b);
     });
   }
-  var PRESS_IT = 'Press it with its button at the top of the page.';
+  var PRESS_IT = 'Press it with its button.';
   // A task line's label: the words before the first `:` or ` — `, else the first word. A click on them ticks the box
   // like a <label>, out of edit mode (in it the words are for the caret); the rest of the line is for the caret, a selection and its links. Told by where the click
   // landed against the label's words, so the document gets no element of its own. A touch gets 44 px of height.
@@ -3497,6 +3499,7 @@ var create = function (ROOT, CFG, opts) {
     if (!li) return null;
     var own = li.cloneNode(true);
     Array.prototype.forEach.call(own.querySelectorAll('ul, ol'), function (n) { n.remove(); });
+    Array.prototype.forEach.call(own.querySelectorAll('[data-rd-ui]'), function (n) { n.remove(); });
     return own.textContent.replace(/\s+/g, ' ').trim();
   }
   function mayBeAction(t) {
@@ -3527,7 +3530,7 @@ var create = function (ROOT, CFG, opts) {
   }
 
   // ---- the action buttons (SPEC 10.11) ------------------------------------------
-  // The boxes of the eleven words are the list's buttons at the top of the page (9.10): a one-off red, locked once
+  // The boxes of the eleven words are the list's buttons, each where its line is (9.10): a one-off red, locked once
   // pressed, with who and when; Share a toggle, its owner's alone. A press reads Undo for 5 seconds, then posts the
   // list's tick (`/_/tick`) with the hash of the text on screen; the hub's `changed` reloads the page onto the
   // ticked file, and a reload asked meanwhile waits for the press's answer. While a press waits or is sent, the other
@@ -3576,26 +3579,96 @@ var create = function (ROOT, CFG, opts) {
     });
     return out;
   }
+  // A one-off's button is drawn where its box is, in the document, the page's own (data-rd-ui, never editable) and
+  // left out of what a save sends by clean(), as the Copy button is; the box is hidden behind it. A toggle (Share), and
+  // a one-off whose box the page does not find, stay in the row above the document, which is drawn only for them.
+  // The line's own words are what the button says (a Move to's slug too), so they are hidden under it, in a span
+  // clean() unwraps: the rest of the line is the button's text. The text around the span is kept as it was, and a
+  // span already in place is kept on a redraw: an autosave's answer redraws, and must not move the caret or the
+  // comments' ranges.
+  function wordPattern(w) {
+    return w.replace(/[^\w ’']/g, '\\$&').replace(/['’]/g, "['’]").replace(/ +/g, '\\s+');
+  }
+  function hideWord(box, words, kept) {
+    var t = box.nextSibling, m = null, sp = t && t.nodeType === 3 && t.nextSibling;
+    if (!t || t.nodeType !== 3) return;
+    if (sp && sp.nodeName === 'SPAN' && sp.className === 'rd-actword' && !t.nodeValue.trim() &&
+        words.some(function (w) { return w && new RegExp('^' + wordPattern(w) + '$', 'i').test(sp.textContent); })) {
+      kept.add(sp);
+      return;
+    }
+    words.some(function (w) {
+      m = w && new RegExp('^(\\s*)(' + wordPattern(w) + ')', 'i').exec(t.nodeValue);
+      return m;
+    });
+    if (!m) return;
+    sp = document.createElement('span');
+    var rest = document.createTextNode(t.nodeValue.slice(m[0].length));
+    sp.className = 'rd-actword';
+    sp.textContent = m[2];
+    t.nodeValue = m[1];
+    t.parentNode.insertBefore(rest, t.nextSibling);
+    t.parentNode.insertBefore(sp, rest);
+    kept.add(sp);
+  }
+  // The spans no button of this draw hides under any more (its line changed, or lost its action) give their word back.
+  function showWords(kept) {
+    Array.prototype.forEach.call(main.querySelectorAll('span.rd-actword'), function (sp) {
+      if (kept.has(sp)) return;
+      var before = sp.previousSibling, after = sp.nextSibling, sel = getSelection(), at = sel.rangeCount ? sel : null;
+      var anchor = at && [at.anchorNode, at.anchorOffset], focus = at && [at.focusNode, at.focusOffset], into;
+      if (before && before.nodeType === 3) {
+        var cut = before.nodeValue.length, mid = sp.textContent.length;
+        before.nodeValue += sp.textContent + (after && after.nodeType === 3 ? after.nodeValue : '');
+        if (after && after.nodeType === 3) after.remove();
+        sp.remove();
+        into = function (n, o) { return n === sp || (n && n.parentNode === sp) ? [before, cut + o] : n === after ? [before, cut + mid + o] : [n, o]; };
+      } else {
+        var text = document.createTextNode(sp.textContent);
+        sp.replaceWith(text);
+        into = function (n, o) { return n === sp || (n && n.parentNode === sp) ? [text, o] : [n, o]; };
+      }
+      // The caret was in a node that is gone: it goes to the same place in the text that took its place.
+      if (at && ((anchor[0] === sp || (anchor[0] && anchor[0].parentNode === sp) || anchor[0] === after) ||
+                 (focus[0] === sp || (focus[0] && focus[0].parentNode === sp) || focus[0] === after))) {
+        var A = into(anchor[0], anchor[1]), F = into(focus[0], focus[1]);
+        sel.setBaseAndExtent(A[0], A[1], F[0], F[1]);
+      }
+    });
+  }
+  function inlineButton(btn, box, words, kept) {
+    btn.classList.add('rd-inline');
+    btn.setAttribute('contenteditable', 'false');
+    btn.setAttribute('data-rd-ui', '');
+    btn.addEventListener('mousedown', function (e) { e.preventDefault(); });   // the press must not move the caret
+    hideWord(box, words, kept);
+    box.parentNode.insertBefore(btn, box.nextSibling);
+  }
   function drawActions(acts, h) {
     if (pressOpen) { actsOwed = { acts: acts, hash: h }; return; }
     actsHash = h; actsShown = acts || []; actsUnsure = false;
     actBoxes = boxesOfActs(acts);
     if (actBar) actBar.remove();
     actBar = null;
-    if (!acts || !acts.length) return;
-    actBar = el('div', { id: 'rd-actions', role: 'group', 'aria-label': 'Actions' });
-    var all = acts.map(function (a) {
+    Array.prototype.forEach.call(main.querySelectorAll('.rd-act.rd-inline'), function (b) { b.remove(); });
+    var kept = new WeakSet();
+    if (!acts || !acts.length) { showWords(kept); return; }
+    var bar = el('div', { id: 'rd-actions', role: 'group', 'aria-label': 'Actions' });
+    var all = acts.map(function (a, i) {
       var btn = document.createElement('button');
       btn.type = 'button';
+      btn.setAttribute('data-i', i);                      // its place among the actions, in the order of the file
       btn.className = 'rd-act ' + (a.toggle ? 'toggle' : 'one-off') + (a.pressed && !a.toggle ? ' pressed' : '');
       btn.textContent = a.label + (a.pressed && !a.toggle ? ' ✓' + (a.by ? ' ' + a.by : '') : '');
       if (a.toggle) btn.setAttribute('aria-pressed', a.pressed ? 'true' : 'false');
       btn.disabled = !a.may;
-      actBar.appendChild(btn);
+      var box = !a.toggle && boxOfAct(a);
+      if (box) inlineButton(btn, box, [a.label.replace(/ @\S+$/, ''), a.word], kept); else bar.appendChild(btn);
       return { btn: btn, a: a };
     });
     all.forEach(function (x) { if (!x.btn.disabled) pressable(x.btn, x.a, all); });
-    main.parentNode.insertBefore(actBar, main);
+    showWords(kept);
+    if (bar.firstChild) { actBar = bar; main.parentNode.insertBefore(bar, main); }
   }
   function pressable(btn, a, all) {
     var word = btn.textContent, waiting = null, pressedBox = null;

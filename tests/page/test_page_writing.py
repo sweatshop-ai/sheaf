@@ -3448,6 +3448,8 @@ def test_a_kept_reply_or_edit_is_not_put_into_a_new_comment_that_got_the_id_of_a
     (old,) = rdc.parse(thread.site.file.read_text()).comments
     delete_the_thread(thread)
     p = thread.page
+    # The reload is safe only because the failed send's text is still in its form: text typed in a form holds the page's own reload
+    # (page.js, reloadWhenFree -> writingNow), so the deletion has not reloaded the page under this one.
     p.reload()
     p.wait_for_selector("#rd-menu-btn", state="attached")
     new = comment_on(thread, at(P2, "pears"), at(P2, "pears", None), "About the pears")
@@ -4840,3 +4842,74 @@ def test_typing_while_a_change_from_outside_settles_is_refused_and_said(tab):
     held[0].continue_()
     p.unroute("**/_/save")
     reloaded(p)
+
+
+# Two pages of one document write one key. Both sends fail at the same instant, each page's renderer in its own
+# process, so neither may have heard of the other's write when it writes: the list must still hold both.
+# It does not (SPEC 10.4, ticket 121): xfail(strict), so the day the fix lands this turns into a failure to be removed.
+FAIL_TOGETHER = """(at) => {
+  const real = window.fetch;
+  window.fetch = function (url, init) {
+    if (!String(url).includes('/_/comment')) return real.apply(this, arguments);
+    return new Promise((done) => setTimeout(() => {
+      (window.__spins = window.__spins || []).push([Date.now(), at]);
+      while (Date.now() < at) { }
+      done(new Response(JSON.stringify({ok: false, error: 'the hub broke off'}), {status: 500, headers: {'Content-Type': 'application/json'}}));
+    }, 0));
+  };
+}"""
+
+
+@pytest.mark.xfail(strict=True, reason="ticket 121: two pages write the held-sends store without a re-read; see SPEC 10.4")
+def test_two_sends_that_fail_at_the_same_instant_on_two_pages_are_both_kept(thread, context):
+    a, b = thread.page, second_page(thread, context)
+    b.click(".rd-badge")
+    b.wait_for_selector("#rd-popover textarea")
+    lost, idle = [], []
+    for i in range(40):
+        at_ms = int(time.time() * 1000) + 700
+        for p, who in ((a, "A"), (b, "B")):
+            p.evaluate(FAIL_TOGETHER, at_ms)
+            p.fill("#rd-popover textarea", f"words from page {who} round {i}")
+        if time.time() * 1000 > at_ms - 300:        # the setup ran into the instant: the round would not race
+            idle.append(i)
+            continue
+        a.keyboard.press("Control+Enter")
+        b.keyboard.press("Control+Enter")
+        a.wait_for_timeout(1300)
+        # Both pages were spinning at once, so they ran on two threads: on one, the second spin starts when the first ends.
+        (sa, ea), (sb, eb) = (p.evaluate("window.__spins.pop()") for p in (a, b))
+        if not (sa < eb and sb < ea):
+            idle.append(i)
+        kept = json.loads(comment_store(thread) or "[]")
+        texts = {d["body"]: d for d in kept}
+        mine = [texts.get(f"words from page {who} round {i}") for who in "AB"]
+        # An entry still marked out is one its page ended: it is left out of the not-sent list for 32 s.
+        if None in mine or any(isinstance(d.get("out"), (int, float)) for d in mine):
+            lost.append(i)
+    assert not lost, f"the store lost, or kept as still out, an entry of a failed send in rounds {lost}"
+    assert len(idle) <= 8, f"rounds {idle} did not run the two sends at the same time: the test did not try the race"
+
+
+# A Discard on one page of an entry another page wrote a moment ago is a removal on purpose: the page that wrote it
+# must stay gone: the page that wrote it does not write it again (main's behaviour, pinned for the fix of ticket 121).
+@pytest.mark.parametrize("form", ["reply", "edit"])
+def test_a_discard_on_another_page_just_after_a_send_failed_is_not_put_back_by_the_page_that_wrote_it(thread, context, form):
+    a, b = thread.page, second_page(thread, context)
+    b.click(".rd-badge")
+    b.wait_for_selector("#rd-popover textarea")
+    a.evaluate("""(key) => { window.__after = 0; const set = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (k, v) { if (k === key) window.__after++; return set.apply(this, arguments); }; }""",
+               comment_draft_key(thread.site))
+    held = send_held(thread, form, "words to be discarded")
+    b.click("#rd-popover button[data-a=minimize]")
+    began = time.time()
+    held[0].fulfill(status=500, json={"ok": False, "error": "the hub broke off"})
+    a.unroute("**/_/comment")
+    until(lambda: b.query_selector(UNSENT) and "not sent" in b.inner_text(UNSENT), what="the not-sent line on page B")
+    a.evaluate("window.__after = 0")
+    discard_unsent(b, "words to be discarded")
+    assert time.time() - began < 1.5, "the Discard came after 2 s: the test tried nothing"
+    a.wait_for_timeout(3000)            # long enough for a page to write it again
+    assert a.evaluate("window.__after") == 0, "the page that wrote the entry wrote the discarded text again"
+    assert comment_store(thread) == ""

@@ -59,3 +59,37 @@ def test_a_hub_page_in_proxy_mode_that_is_not_mounted_has_no_microphone(tab, sit
     tab.page.wait_for_timeout(300)
     assert tab.page.locator("#rd-popover " + MIC).count() == 0
     assert asked == [], "the page asked a relay that does not exist in proxy mode"
+
+
+def _refuse_and_remount(front, site, status):
+    front.page.route(ROUTE, lambda route: route.fulfill(status=status, content_type="application/json", body="{}"))
+    front.page.add_init_script(FAKE_MIC)
+    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
+                                                     "Bea", "2026-10-14T10:00")[0])
+    front.open()
+    front.click(".rd-badge")
+    front.click(MIC)
+    until(lambda: front.page.evaluate("window.__mic.made.length === 1 && window.__mic.made[0].state === 'recording'"), what="recording")
+    front.click(MIC)
+    until(lambda: not front.has(MIC), what="the button gone after the refusal")
+    front.page.evaluate("window.__page.remount()")
+    until(lambda: front.has(".rd-badge"), what="the remounted page")
+    front.click(".rd-badge")
+    front.page.wait_for_selector(FIELD)
+    front.page.wait_for_timeout(300)
+
+
+@pytest.mark.parametrize("status", [403, 404], ids=["denied", "gone"])
+def test_a_refused_dictation_stays_off_after_a_remount(front, site, status):  # noqa: F811
+    """SPEC 10.4: the first failure takes the button away 'for the session', not for the mount."""
+    _refuse_and_remount(front, site, status)
+    assert not front.has(MIC), "the remount brought the button back"
+
+
+def test_a_session_storage_that_throws_does_not_break_the_dictation(front, site):  # noqa: F811
+    front.page.add_init_script("""(() => { const set = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (k) { if (String(k).includes('rd-dict-off')) throw new DOMException('no', 'SecurityError');
+        return set.apply(this, arguments); }; })();""")
+    _refuse_and_remount(front, site, 403)
+    # Nothing could be kept, so the state is the mount's: the page works and the button may come back.
+    assert front.has(FIELD)

@@ -438,6 +438,13 @@ STREAM_JOURNAL_JS = """(() => {
   const now = performance.now.bind(performance), origin = performance.timeOrigin;
   const log = window.__sseJournal = [];
   const note = (what, data) => log.push([origin + now(), what, data === undefined ? '' : String(data).slice(0, 120)]);
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = (url, init) => {
+    const what = String(url) + ' ' + ((init && init.method) || 'GET');
+    note('fetch', what);
+    return nativeFetch(url, init).then(r => { note('fetched', what + ' ' + r.status); return r; },
+                                       e => { note('fetch failed', what + ' ' + e); throw e; });
+  };
   const Native = window.EventSource;
   if (!Native) return;
   window.EventSource = function (url, init) {

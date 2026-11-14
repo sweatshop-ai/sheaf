@@ -18,7 +18,7 @@ from pagehelp import DOC, PageStalled, close_context, launch_chromium, new_conte
 from sheafmd import paths
 from sheafmd.agents.base import Target
 from sheafmd.agents.claude_code import proc_start
-from sheafmd.hub import events, server
+from sheafmd.hub import events, handler, server
 from sheafmd.hub.core import Hub
 
 
@@ -198,6 +198,15 @@ def hub_journal(monkeypatch):
     def noting_frame(name, data):
         log.append((time.time(), f"write {name}"))
         return frame(name, data)
+    comment = handler.Handler._comment
+
+    def noting_comment(self, req):
+        log.append((time.time(), f"/_/comment in: op {req.body.get('op')} rid {req.body.get('rid')}"))
+        try:
+            return comment(self, req)
+        finally:
+            log.append((time.time(), f"/_/comment out: rid {req.body.get('rid')}"))
+    monkeypatch.setattr(handler.Handler, "_comment", noting_comment)
     monkeypatch.setattr(events.Bus, "publish", noting_publish)
     monkeypatch.setattr(server, "frame", noting_frame)
     return log

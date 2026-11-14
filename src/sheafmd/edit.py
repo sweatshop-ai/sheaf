@@ -1644,15 +1644,19 @@ def _quote_starts(text: str, q: str) -> list:
 def _insert_comment(md_text: str, j: int, raw: str, quote: str, nth: int = 0) -> str:
     """Put an existing comment's bytes into block j, after the `nth` occurrence of `quote`
     (the first unless said; a negative `nth` is none) if it is there, else at the end of
-    the block. When the block ends in code the end of the block is inside the code, and a
-    comment block ends on its `-->` line, so there the comment goes on a line of its own
-    after the block. Where that is still code (a fence the
+    the block; in a heading, always at the end of its text. When the block ends in code the end of
+    the block is inside the code, and a comment block ends on its `-->` line, so there the comment
+    goes on a line of its own after the block. Where that is still code (a fence the
     file never closed runs to the end of the file) the comment is text, and
     `sheaf comments` would not list it: it goes on a line of its own above the block."""
     blocks = split_md_blocks(md_text)
     b = blocks[j]
     start = sum(len(x.text) for x in blocks[:j])
     at_off, own_line = len(b.content.rstrip("\n")), False
+    headless = False
+    if b.kind == "heading":            # a heading keeps its words whole: the comment goes at its end (ticket 55)
+        headless = rdc.heading_anchor(b.content) is None
+        at_off = len(b.content.rstrip("\n")) if headless else rdc.heading_anchor(b.content)
     q = rdc.squash(quote)
     try:
         proj = rdc.projection(b.content)
@@ -1662,10 +1666,14 @@ def _insert_comment(md_text: str, j: int, raw: str, quote: str, nth: int = 0) ->
         k = starts[nth] if 0 <= nth < len(starts) else -1
         if k >= 0:
             # A quote anchor_point cannot place raises, and `except` keeps the end of the block.
-            at_off = rdc.anchor_point(b.content, k, k + len(q), quote)
+            at_off = rdc.comment_point(b.kind, b.content, k, k + len(q), quote)
             own_line = False
     except Exception:
         pass
+    if headless or (b.kind == "heading" and "\n" in raw):
+        # A heading with no words: a block right after its hashes would make the line a paragraph.
+        # A block of several lines at the end of a heading line runs into the lines after it.
+        own_line = True
     if b.kind in LOCKED_KINDS:
         # Code, raw html, front matter: a comment inside is literal text, and a comment
         # block ends on its `-->` line, so nothing may follow it there.

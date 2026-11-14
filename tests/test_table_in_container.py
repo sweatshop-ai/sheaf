@@ -196,6 +196,20 @@ def test_a_comment_in_the_alt_text_of_an_image_of_a_table_is_found_exactly_when_
     assert fz.parse_sees(rdc, md) is shown
 
 
+# Review round 2 of ticket 126 (b1, b2): a quote opened after a tab is indented code; a header that no longer goes to
+# the container reading is read by pandoc as a table of the document is
+@pytest.mark.parametrize("md, shown", [
+    ("  \t> a %s | b\n|---|---|\n| q | r |\n", False),
+    ("  \t-\xa0 a %s | b\n|---|---|\n| q | r |\n", False),
+    ("| a | b |\n|---|---|\n| q | s | t %s |\n", False),
+    ("-\xa0| a `x | %s y` |\n|---|---|\n| q | r |\n", False),
+])
+def test_a_top_level_table_with_a_comment_is_read_as_pandoc_reads_it(md, shown):
+    md = md % fz.C
+    assert fz.pandoc_sees(pandoc, md) is shown
+    assert fz.parse_sees(rdc, md) is shown
+
+
 # Review of ticket 126, finding 1: a no-break or full-width space after a marker is no item: the table stays a table
 @pytest.mark.parametrize("sp", ["\xa0", "\u3000"])
 @pytest.mark.parametrize("marker", ["-", "*", "+", "1."])

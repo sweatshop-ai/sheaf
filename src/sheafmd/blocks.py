@@ -85,8 +85,8 @@ class Block:
 
 
 # A line that opens an item or a quote, as CommonMark reads it: the space after a marker is a space or a tab, not the
-# no-break or full-width space that `\s` matches (pandoc still reads a table header there).
-_OPENS_CONTAINER_RE = re.compile(r"[ \t]*(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)| {0,3}>")
+# no-break or full-width space that `\s` matches (such a header is a table, read by pandoc as the top-level tables are).
+_OPENS_CONTAINER_RE = re.compile(r"[ \t]*(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)|[ \t]{0,3}>")
 
 
 def _looks_like_table(lines, i):

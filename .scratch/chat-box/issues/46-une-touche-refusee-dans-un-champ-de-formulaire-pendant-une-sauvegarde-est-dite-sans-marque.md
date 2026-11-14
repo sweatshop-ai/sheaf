@@ -11,4 +11,6 @@
 - [ ] Un test de page tape dans un champ de formulaire pendant une sauvegarde sans réponse et échoue tant que le champ ne porte pas de marque
 - [ ] La marque part avec la sauvegarde et ne devient pas une modification
 
-**Status:** ready-for-agent
+**Claimed by:** Isolde 2026-11-14 01:33
+
+**Status:** in-progress

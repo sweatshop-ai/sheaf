@@ -11,4 +11,4 @@
 
 Claimed by: Anouk
 
-**Status:** ready-for-agent
+**Status:** done (PR 333, merge 0349e1d; leftover c in ticket 109)

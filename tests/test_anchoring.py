@@ -8,6 +8,8 @@ import json
 import re
 import time
 
+TBLSEP = re.compile(r"^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$")
+
 import pytest
 from helpers import pandoc
 
@@ -734,3 +736,24 @@ def test_parse_of_a_long_quoted_table_is_linear():
     t = time.perf_counter()
     rdc.parse(md)
     assert time.perf_counter() - t < 1.0
+
+
+def _pandoc_cell_lines(md):
+    page = pandoc(["-f", "gfm+sourcepos", "-t", "html", "--wrap=none"], md)
+    return {int(m.group(1)) - 1 for t in re.findall(r"<table.*?</table>", page, re.S)
+            for c in re.findall(r"<t[dh]>.*?</t[dh]>", t, re.S) if (m := re.search(r'data-pos="(\d+):', c))}
+
+
+@pytest.mark.parametrize("md", [
+    "> > - item | z\n> > ---|---\n",                                   # a list item is no header under `> >`
+    "- x | y\n\n  - | a | b |\n  |---|---|\n  | c | d |\n",            # the delimiter is outside the inner item
+    "- > | a | b |\n  |---|---|\n  | x | y | z |\n",                     # quote header, list delimiter
+    "> - | x | y |\n>   - | a | b |\n>   |---|---|\n",
+    "1. | x | y |\n   | a |\n   - item | z\n   |---|---|\n     | m | n |\n",
+    "> | a | b |\n> |---|---|\n> | c | d |\n- not a row | z\n",
+    "- | a | b |\n  |---|---|\n  | c | d |\n  - next | z\n",
+    "> p\n> | a | b |\n> |---|---|\n",
+])
+def test_rows_of_a_table_in_a_quote_or_a_list_are_never_more_than_pandoc_sees(md):
+    rows = {i for i in rdc._table_row_lines(md) if i not in (1, 2) or not TBLSEP.match(md.split("\n")[i].lstrip("> -").strip() or "x")}
+    assert rows <= _pandoc_cell_lines(md), (rows, _pandoc_cell_lines(md))

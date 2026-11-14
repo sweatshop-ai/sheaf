@@ -692,13 +692,14 @@ _CELL_PIPE_RE = re.compile(r"(?<!\\)(\|)")
 _CONTAINER_RE = re.compile(r"[ \t]*(?:>|(?:[-+*]|\d{1,9}[.)])(?=[ \t]))[ \t]?")
 
 
-def _bare(line: str) -> tuple[str, bool]:
-    """`line` without its container markers, and whether one of them opens a list item."""
-    item = False
+def _bare(line: str) -> tuple[str, tuple, int]:
+    """`line` without its container markers, those markers, and the width they took."""
+    marks, col = [], 0
     while (m := _CONTAINER_RE.match(line)) and m.end():
-        item = item or m.group().strip() != ">"
+        marks.append(m.group().strip())
+        col += len(m.group().expandtabs())
         line = line[m.end():]
-    return line, item
+    return line, tuple(marks), col
 
 
 def _cells(bare: str) -> int:
@@ -716,13 +717,17 @@ def _table_row_lines(block: str) -> frozenset:
     bare = [_bare(line) for line in block.split("\n")]
     rows, i = set(), 0
     while i < len(bare) - 1:
-        head, (sep, sep_item) = bare[i][0], bare[i + 1]
-        if (_CELL_PIPE_RE.search(head) and not sep_item and TBLSEP_RE.match(sep)
-                and _CELL_PIPE_RE.search(sep) and _cells(head) == _cells(sep)
-                and (i == 0 or not bare[i - 1][0].strip() or bare[i][1] and not bare[i - 1][1])):
+        (head, hm, hc), (sep, sm, sc) = bare[i], bare[i + 1]
+        quoted = bool(hm) and all(m == ">" for m in hm)
+        if (_CELL_PIPE_RE.search(head) and TBLSEP_RE.match(sep) and _CELL_PIPE_RE.search(sep)
+                and _cells(head) == _cells(sep)
+                and (quoted and sm == hm or not quoted and len(hm) <= 1 and not sm and sc == hc)
+                and (i == 0 or not bare[i - 1][0].strip() or hm and not bare[i - 1][1])):
             rows.update((i, i + 1))
             i += 2
-            while i < len(bare) and _CELL_PIPE_RE.search(bare[i][0]) and not bare[i][1]:
+            while (i < len(bare) and _CELL_PIPE_RE.search(bare[i][0])
+                   and bare[i][1] == (hm if quoted else ())
+                   and (quoted or bare[i][2] == hc)):
                 rows.add(i)
                 i += 1
         else:

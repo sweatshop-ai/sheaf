@@ -932,7 +932,9 @@ var create = function (ROOT, CFG, opts) {
       return;
     }
     try {
-      if (pressSaid && (pressSaid.toast.until === null || Date.now() < pressSaid.toast.until)) sessionStorage.setItem(KEYS + 'rd-press-said', pressSaid.text);
+      // It carries the refusal's own deadline (a toast still queued has 7 s from now), so reloads do not chain it on.
+      if (pressSaid && (pressSaid.toast.until === null || Date.now() < pressSaid.toast.until))
+        sessionStorage.setItem(KEYS + 'rd-press-said', JSON.stringify({ text: pressSaid.text, until: pressSaid.toast.until === null ? Date.now() + 7000 : pressSaid.toast.until }));
       sessionStorage.setItem(KEYS + 'rd-keep', JSON.stringify({ doc: CFG.doc, y: scrollNow(), open: openId || null,
                                                          panel: panel.classList.contains('open'),
                                                          known: counts(), editing: editing,
@@ -4445,10 +4447,13 @@ var create = function (ROOT, CFG, opts) {
   try {
     var keep = JSON.parse(sessionStorage.getItem(KEYS + 'rd-keep') || 'null');
     var msg = sessionStorage.getItem(KEYS + 'rd-toast');
-    var refusedPress = sessionStorage.getItem(KEYS + 'rd-press-said');   // a press's refusal a reload waited for (10.11)
+    var rawPress = sessionStorage.getItem(KEYS + 'rd-press-said');   // a press's refusal a reload waited for (10.11)
     sessionStorage.removeItem(KEYS + 'rd-keep');
     sessionStorage.removeItem(KEYS + 'rd-toast');
     sessionStorage.removeItem(KEYS + 'rd-press-said');
+    var refusedPress = null;      // an older page left the bare text here: that is no refusal to say again, and no reason to stop booting
+    try { refusedPress = JSON.parse(rawPress || 'null'); } catch (e) {}
+    if (!refusedPress || typeof refusedPress.text !== 'string' || typeof refusedPress.until !== 'number') refusedPress = null;
     // One hub serves every document from one origin, so what a reload kept
     // belongs to this page only if it names this document.
     if (keep && keep.doc !== CFG.doc) { keep = null; msg = null; }
@@ -4477,7 +4482,10 @@ var create = function (ROOT, CFG, opts) {
     }
     // What the old page said and the reload left, then the refusal, which a second reload says again in its turn.
     if (msg) say(msg);
-    if (refusedPress && keep) pressSaid = { text: refusedPress, toast: say(refusedPress, true) };
+    if (refusedPress && keep && Date.now() < refusedPress.until) {
+      say(refusedPress.text, true);
+      pressSaid = { text: refusedPress.text, toast: { until: refusedPress.until } };      // the deadline it was said in, not a new one
+    }
     if (canSave) { showKept(); unsentLine(); }
     var unsaved = canEdit ? editDraftFound() : null;
     if (unsaved) offerDraft(unsaved);

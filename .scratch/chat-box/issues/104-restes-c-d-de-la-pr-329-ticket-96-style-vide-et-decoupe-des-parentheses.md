@@ -9,4 +9,6 @@
 
 **Blocked by:** PR 329 fusionnée
 
+Claimed by: Anouk
+
 **Status:** ready-for-agent

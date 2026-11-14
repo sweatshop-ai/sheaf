@@ -6,3 +6,6 @@
 - Reste d1 : le nom `phone_with` dit téléphone, mais l'aide sert pour n'importe quel onglet.
 
 **Blocked by:** none
+
+**Claimed by:** Nabil
+**Status:** ready-for-agent

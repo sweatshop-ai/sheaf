@@ -757,3 +757,24 @@ def _pandoc_cell_lines(md):
 def test_rows_of_a_table_in_a_quote_or_a_list_are_never_more_than_pandoc_sees(md):
     rows = {i for i in rdc._table_row_lines(md) if i not in (1, 2) or not TBLSEP.match(md.split("\n")[i].lstrip("> -").strip() or "x")}
     assert rows <= _pandoc_cell_lines(md), (rows, _pandoc_cell_lines(md))
+
+
+CODEX_A = ('> - a ` | b <!-- sheaf-comment id=c1 by="A" at=2026-01-01T00:00 status=open quote="b" why --> `\n'
+           '>   ---|---\n>   x | y\n')
+
+
+@pytest.mark.parametrize("md", [
+    CODEX_A,
+    "- > a ` | b %s `\n  > ---|---\n  > x | y\n" % C1,
+    "- - a ` | b %s `\n    ---|---\n    x | y\n" % C1,
+])
+def test_a_table_under_a_quote_and_a_list_item_keeps_its_comment(md):
+    assert _pandoc_cell_lines(md) >= {0, 2}
+    assert [c.id for c in rdc.parse(md).comments] == ["c1"]
+
+
+def test_a_line_of_many_container_markers_is_read_in_linear_time():
+    md = "> " * 60000 + "`x`\n"
+    t = time.perf_counter()
+    rdc.parse(md)
+    assert time.perf_counter() - t < 1.0

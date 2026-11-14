@@ -13,11 +13,13 @@
 
 **Claimed by:** Kofi 2026-11-14 01:26
 
-**Status:** in-progress
+**Status:** done — on main via 4db141e (PR 286), points 1, 3, 4, 5, 6 ; point 2 à moitié, le reste au ticket 66
 
 **Par où commencer :** `tests/test_anchoring.py` : `## ## ##` accepte un commentaire (rouge avant) ; puis le point 4 dans `tests/test_edit_followups.py`.
 
-- [ ] Point 1 corrigé, avec son test rouge d'abord
-- [ ] Points 2 à 4 corrigés ou la limite écrite dans le SPEC 10.4, chacun avec son test
-- [ ] Points 5 et 6 faits
-- [ ] CI verte
+- [x] Point 1 corrigé, avec son test rouge d'abord
+- [ ] Points 2 à 4 corrigés ou la limite écrite dans le SPEC 10.4, chacun avec son test (3 : limite écrite, test ; 4 : corrigé, test ; 2 : `_unclosed_opener` lit de gauche à droite et saute balises et commentaires fermés, `_mask_code` saute les balises, mais un commentaire ordinaire fermé ne possède toujours pas son accent grave dans `_mask_code` : ticket 66)
+- [x] Points 5 et 6 faits
+- [x] CI verte (tête 8c29c26, 3/3 tranches)
+
+**Preuve (2026-11-14, Kofi) :** PR 286, rouge d'abord : `## ## ##`, `#  #  #`, `# # #` (point 1), le test de l'accent grave dans une balise (point 2), le bloc de plusieurs lignes dans une cellule (point 4), 5 tests rouges avant le correctif. La revue Opus 1 (tête beb6110) : GO, aucun défaut a ni b. Elle a trouvé que `_HTML_TAG_RE` (Unicode, backslash) perdait un commentaire que `parse` trouvait avant : corrigé dans la PR (5e0817c, ae44151), relecture étroite Opus 2 : GO. Les restes sont au ticket 66.

@@ -3448,8 +3448,8 @@ def test_a_kept_reply_or_edit_is_not_put_into_a_new_comment_that_got_the_id_of_a
     (old,) = rdc.parse(thread.site.file.read_text()).comments
     delete_the_thread(thread)
     p = thread.page
-    # The reload is safe only because the kept form is still open: an open form holds the page's own reload (page.js, reloadWhenFree),
-    # so the deletion has not reloaded the page under this one.
+    # The reload is safe only because the failed send's text is still in its form: text typed in a form holds the page's own reload
+    # (page.js, reloadWhenFree -> writingNow), so the deletion has not reloaded the page under this one.
     p.reload()
     p.wait_for_selector("#rd-menu-btn", state="attached")
     new = comment_on(thread, at(P2, "pears"), at(P2, "pears", None), "About the pears")

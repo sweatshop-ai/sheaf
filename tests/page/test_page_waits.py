@@ -254,6 +254,7 @@ def test_a_function_routed_twice_on_one_url_is_taken_off_both_by_unroute(tab):
 
     def hold(route):
         held.append(route)
+        route.abort()       # a regression fails the assert below, not by a fetch that never answers
     p.route("**/_/not-a-route-of-the-hub", hold)
     p.route("**/_/not-a-route-of-the-hub", hold)
     p.unroute("**/_/not-a-route-of-the-hub", hold)
@@ -272,12 +273,12 @@ def test_a_handler_that_cannot_be_hashed_can_be_routed_and_unrouted(tab):
 
         def __call__(self, route):
             self.held.append(route)
+            route.abort()
     p = tab.open().page
     h = Holder()
     p.route("**/_/not-a-route-of-the-hub", h)
     p.evaluate("fetch('/_/not-a-route-of-the-hub').catch(() => {}); 0")
     until(lambda: h.held or p.wait_for_timeout(20), what="the request to be held")
-    h.held[0].abort()
     p.unroute("**/_/not-a-route-of-the-hub", h)
     assert p.evaluate("fetch('/_/not-a-route-of-the-hub').then(r => r.status, () => 0)") != 0
     assert len(h.held) == 1

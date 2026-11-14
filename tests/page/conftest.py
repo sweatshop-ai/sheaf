@@ -205,9 +205,9 @@ def until_live(page, pattern, log):
     ms later (a send after Ctrl+Enter) went straight to the hub and the test's handler never saw it (ticket 100: three tests
     timed out "waiting for the send to go out", the hub's /_/comment in 2 ms after the page's fetch, no handler call). So the
     route counts as live once it has caught a request of its own: a GET with a probe header that the wrapper's handler answers
-    itself, with 204. Best effort. Limits: only the PROBED routes (the glob and the regex of /_/comment), whatever their handler;
+    itself, with 204. Best effort. Limits: only the PROBED routes (the glob, and any regex that matches the probe's URL), whatever their handler;
     a route of a context is probed through its first page, which says nothing of a send from another page; the wrapper answers a
-    probe for any route that matches it, so a broader route registered later takes the probe of an earlier one; a page that is
+    probe for any route that matches it, so an earlier live broad route (`**/*`) answers the probe of a newer one at try 1, which proves nothing about the newer one; a regex tied to the hub's origin is not probed on a page of another origin; a page that is
     reloading is left."""
     if page is None or not page.url.startswith("http"):
         return

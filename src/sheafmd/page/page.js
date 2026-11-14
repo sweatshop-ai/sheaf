@@ -1589,7 +1589,7 @@ var create = function (ROOT, CFG, opts) {
       if (!cleared) pendingClears = [];
       else {
         flushing = true;
-        try { commentDraftsSave(held); } finally { flushing = false; }
+        try { commentDraftsSave(held, true); } finally { flushing = false; }
       }
     }
     return held;
@@ -1602,7 +1602,10 @@ var create = function (ROOT, CFG, opts) {
   }
   // Every write of the store goes through here, so the line of replies and edits not sent, which says what the
   // store holds, is drawn again here: a writer added later cannot leave it behind.
-  function commentDraftsSave(ds) {
+  // `later`: the purge a read writes (commentDraftsLoad). The line is drawn after the read's caller is done, not inside
+  // the read: a redraw can close or redraw the list its caller is working in, and one that throws would pass for a
+  // refused read in the strict callers and escape the others.
+  function commentDraftsSave(ds, later) {
     storeOk = true;
     try {
       var all = commentDraftsRaw(true).filter(ofOtherRoot).concat(ds.map(function (d) {
@@ -1611,7 +1614,7 @@ var create = function (ROOT, CFG, opts) {
       if (all.length) localStorage.setItem(COMMENT_DRAFT_KEY, JSON.stringify(all)); else localStorage.removeItem(COMMENT_DRAFT_KEY);
       pendingClears = [];
     } catch (e) { storeOk = false; }
-    unsentLine();
+    if (later) setTimeout(unsentLine, 0); else unsentLine();
   }
   // The entries `gone` names go, then `add` (if any) is added, in one write, stamped `at` now unless it brings its
   // own. For a form that knows which entry is its own: the same quote in another paragraph is another comment.

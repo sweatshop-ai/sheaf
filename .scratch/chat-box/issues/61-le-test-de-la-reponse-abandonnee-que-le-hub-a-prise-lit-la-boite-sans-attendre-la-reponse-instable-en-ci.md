@@ -6,7 +6,7 @@
 
 **Claimed by:** Amaia 2026-11-14
 
-**Status:** in-progress — PR 299 open (Amaia 2026-11-14)
+**Status:** in-progress — PR 299 open, CI verte trois fois, revue Opus faite ; attend la fusion (Amaia 2026-11-14)
 
 **Établi (preuves) :** vu deux fois sur main, même ligne, même message, chaque fois sur la tranche 2/3 :
 - run 43525374227, job 132229691740, sur 4b62ad3 (fusion de la PR 278) ;
@@ -23,6 +23,8 @@ La boîte montre « “apples” … Why apples? / Send reply » : le formulaire
 
 - [x] La cause est écrite avec la preuve (un échec reproduit à la demande, ou la sortie d'une CI qui l'a relevée)
 - [x] Le correctif traite la cause, pas un délai ni une relance
-- [ ] CI verte sur trois passages de suite
+- [x] CI verte sur trois passages de suite (run 43586766076 sur b340658 : tentatives 2, 3 et 4 vertes 3/3 ; la tentative 1 a échoué dans `tests/page/test_page_keyboard.py`, un autre test)
 
 **À surveiller (pas de ticket tant que ça ne se répète pas) :** le run 43527634386, job 132237232321 (tranche 1/3), a 344 tests de page verts et 1 sauté : `tests/page/test_mount_allowlist.py:233`, « chromium cannot start here: BrowserType.launch: Target page, context or browser has been closed ». Le CI traite tout test sauté comme un échec (« page tests were skipped, so a browser did not start »). Une première observation, sur le runner, sans lien avec une PR.
+
+**À surveiller (pas de ticket tant que ça ne se répète pas) :** run 43586766076 tentative 1, tranche 3/3, sur b340658 (PR 299) : `tests/page/test_page_keyboard.py::test_a_long_thread_leaves_the_field_in_reach_above_the_keyboard` échoue dans `phone.open()` (`tests/page/conftest.py:148`, `page.goto(site.url)`) : « Page.goto: Navigation to "http://127.0.0.1:23712/work/plan.md" is interrupted by another navigation to "http://127.0.0.1:23712/work/plan.md" ». Aucun lien avec la PR (fichier non touché) ; passé au rejeu de la tâche. Deuxième sighting = ticket.

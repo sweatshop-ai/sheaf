@@ -593,6 +593,12 @@ def projection(block: str) -> Projection:
 
 def anchor_point(block: str, start: int, end: int, quote: str) -> int:
     """Offset in `block` where a comment on the selection [start, end) goes."""
+    if "\r" in block:
+        # Pandoc deletes a CR and counts its columns without it, so the point is found in the block without its CRs
+        # and given back as an offset in the block itself, before the next character that stays.
+        keep = [i for i, ch in enumerate(block) if ch != "\r"]
+        at = anchor_point(block.replace("\r", ""), start, end, quote)
+        return keep[at] if at < len(keep) else len(block)
     proj = projection(block)
     if end <= start or proj.text[start:end] != squash(quote):
         raise AnchorError("the text changed since the page was rendered, select it again")

@@ -10,6 +10,7 @@
   3. cet `in frag` verbatim ratait une tête brute dont la ligne a une tabulation ou du texte décomposé (NFD), que pandoc réécrit (tab → espaces, NFC) ; corrigé en normalisant la queue (`expandtabs(4)`, NFC) ;
   4. (rare, jamais corrigé) tête coupée sur deux lignes dont la première moitié est du code et dont le reste (`<!-- sheaf-comment`) se retrouve ailleurs dans `frag` : le test regarde le document entier, pas la ligne.
   **Leçon :** reconnaître une tête doit lire la sortie de pandoc à la position de la ligne (sourcepos : `<code data-pos>` ou non), jamais une correspondance verbatim d'une chaîne de la source dans `frag`. Les tests écrits (rouges d'abord) sont dans l'historique de la branche chat-box/83 (commits a2e58cb, c1b32f9, 8034921) avant leur retrait en 3af54e9.
+- **(c)** Revue 4 (`pr-83-reviews/r4-narrowed.md`), rien de pire que main : SPEC 6.2 dit « refusé que `-->` suive ou non », or `# A <!--> -->` est copié (la flèche suivante ne prend aucun mot montré) ; dire « refusé quand le retrait perdrait un mot ». Et `# A <!--> b <!-- c` ne nomme que l'ouvreur vide, pas le `<!-- c` non fermé de la même ligne (même chose sur main).
 - **Passage Codex dû (point 5 du ticket 83) :** `/codex-review --base` sur le diff de la PR 300 (merge 1521562, tête 190bc94) et sur celui de la PR 303 (fusionnée ff5aaf7). Codex est sans jetons jusqu'à 20 h le 2026-11-14 ; ses trouvailles deviennent des tickets ou des corrections.
 
 **Blocked by:** PR 325 fusionnée (pour la SPEC) ; le passage Codex attend 20 h.

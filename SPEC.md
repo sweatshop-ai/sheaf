@@ -883,6 +883,7 @@ The page and index scripts are inline `<script nonce>` elements; the page script
 - Remove these elements with their content: `script`, `style`, `iframe`, `frame`, `frameset`, `object`, `embed`, `applet`, `base`, `meta`, `link`, `form`, `button`, `textarea`, `select`, `template`, `noscript`.
 - Remove `input` unless its `type` is exactly `checkbox`, ASCII case aside: no trimming, and no Unicode case folding (task lists).
 - Remove every attribute starting with `on`, and `srcdoc`, `formaction`, `srcset`, `ping`, `contenteditable` (the page sets editability itself; one the document brings is outside what it guards).
+- In a `style` attribute, remove the declarations `-webkit-user-modify`, `-moz-user-modify` and `user-modify`, and any declaration whose name holds a backslash: in Chromium and WebKit `-webkit-user-modify: read-write` makes a span editable by CSS, where the page's `closest('[contenteditable="true"]')` does not see it (Firefox ignores it; tried in CI, tests/page/test_user_modify.py). Mount mode needs no such rule: its allow-list of styles keeps no such property.
 - In `href`, `src`, `action`, `poster`, `background`, `xlink:href`: keep only relative URLs, fragments, `http:`, `https:`, `mailto:`, `file:`, and `data:image/(png|jpeg|gif|webp)` on `img src`. Remove the attribute otherwise.
 - Keep HTML comments (sentinels and sheaf comments depend on them) and harmless markup (`details`, `summary`, `sup`, `sub`, `br`, `kbd`, `mark`, tables, inline `svg` without scripts).
 

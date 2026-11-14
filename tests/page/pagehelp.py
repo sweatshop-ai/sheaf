@@ -265,10 +265,69 @@ def toast(page):
         raise
 
 
-def toasted(page, text, timeout=20.0):
+def toast_state(page):
+    """(text, up): the text of the toast, and whether one is on the screen. Toasts queue (ticket 62): when one ends the
+    next is shown in the same task, so `up` is False only when none is waiting. ("", None) while the page reloads: the
+    page that comes may say a toast of its own, so it is not "none waiting"."""
+    try:
+        return tuple(page.evaluate("(t => t ? [t.textContent, t.classList.contains('show')] : ['', false])"
+                                   "(document.querySelector('#rd-toast'))"))
+    except Exception as e:      # a PageStalled is not an Exception, so a driver that stopped answering still fails
+        if any(said in str(e) for said in RELOADING):
+            return "", None
+        raise
+
+
+def run_clock(page, ms):
+    """Run the page's clock `ms` on; nothing to run while the page reloads."""
+    try:
+        page.clock.run_for(ms)
+    except Exception as e:
+        if not any(said in str(e) for said in RELOADING):
+            raise
+
+
+TOAST_STEP = 250        # ms of the page's clock per look: shorter than any toast (2.6 s), so none goes by unseen
+
+
+def toasted(page, text, timeout=8.0, *, on_clock=False):
     """Wait for a toast that says `text`. (Not wait_for_function: the page's policy forbids eval.)
-    Toasts queue (ticket 62), so one behind a red toast (7 s) and another waits its turn."""
-    until(lambda: text in toast(page), timeout, f"a toast saying {text!r}")
+    A toast waits behind the one on the screen (2.6 s, 7 s red). On a clock the test drives (`on_clock`) the clock is run on
+    while another toast is up, so `text` comes when its turn does, however the runner is loaded; on the real clock
+    only a longer `timeout` waits for it."""
+    went_by = []
+
+    def look():
+        said, up = toast_state(page)
+        if said and said not in went_by:
+            went_by.append(said)
+        if text in said:
+            return True
+        if on_clock and up:
+            run_clock(page, TOAST_STEP)
+        return False
+    try:
+        until(look, timeout, f"a toast saying {text!r}")
+    except AssertionError as e:
+        raise AssertionError(f"{e}; the toasts that went by: {went_by}") from None
+
+
+def toasts_to_the_end(page, timeout=8.0, *, on_clock=False):
+    """The texts the toasts say from now until the last one has gone: the one on the screen, and every one queued behind it,
+    in order. An assertion that a toast is NOT said reads this, not `toast()`: a toast still in the queue is not on the
+    screen yet. On a clock the test drives (`on_clock`) the clock is run on until the queue is empty. (A toast that
+    follows another with the same text is one entry, and a toast said later than the queue's end is not here.)"""
+    seen = []
+
+    def look():
+        said, up = toast_state(page)
+        if said and (not seen or seen[-1] != said):
+            seen.append(said)
+        if up and on_clock:
+            run_clock(page, TOAST_STEP)
+        return up is False          # None: the page reloads, and the one that comes may say more
+    until(look, timeout, "the toasts to end")
+    return seen
 
 
 def draft_key(site):

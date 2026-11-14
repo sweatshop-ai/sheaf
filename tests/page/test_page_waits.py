@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from pagehelp import PageStalled, reloaded, toast, until
+from pagehelp import PageStalled, reloaded, toast, toasted, toasts_to_the_end, until
 
 pytestmark = pytest.mark.page
 
@@ -110,3 +110,55 @@ def test_reading_the_toast_still_raises_for_any_other_driver_error():
     """A driver that has gone away must stay visible: only the two errors of a reload are an answer."""
     with pytest.raises(PlaywrightError, match="Target closed"):
         toast(ReloadingPage("Target page, context or browser has been closed: Target closed"))
+
+
+class QueuedToasts:
+    """A page whose toasts queue as the page's do (ticket 62): the next one is shown as soon as the one up has had its
+    time, and time passes only when the test runs the clock. `toasts` is (text, ms) in the order they were said."""
+    def __init__(self, *toasts):
+        self.queue, self.text, self.left, self.clock = list(toasts), "", 0, self
+        self._next()
+
+    def _next(self):
+        if self.queue:
+            self.text, self.left = self.queue.pop(0)
+
+    def evaluate(self, expression):
+        return [self.text, self.left > 0]
+
+    def run_for(self, ms):
+        self.left -= ms
+        if self.left <= 0:
+            self.left = 0
+            self._next()
+
+
+def test_a_toast_behind_a_red_one_comes_when_the_clock_is_run_on():
+    page = QueuedToasts(("Did not go out.", 7000), ("New reply.", 2600), ("It reached the hub after all.", 2600))
+    toasted(page, "reached the hub", on_clock=True)
+    assert toast_text(page) == "It reached the hub after all."
+
+
+def test_a_toast_behind_another_does_not_come_while_the_clock_stands_still_and_the_failure_names_the_ones_that_did():
+    page = QueuedToasts(("Did not go out.", 7000), ("It reached the hub after all.", 2600))
+    with pytest.raises(AssertionError, match=r"timed out waiting for a toast saying 'reached the hub'; the toasts that went by: \['Did not go out.'\]"):
+        toasted(page, "reached the hub", timeout=0.3)
+
+
+def toast_text(page):
+    return page.text
+
+
+def test_the_toasts_to_the_end_are_the_one_up_and_every_one_queued_behind_it_in_order():
+    page = QueuedToasts(("Saving", 2600), ("Not saved", 7000), ("Saved", 2600))
+    assert toasts_to_the_end(page, on_clock=True) == ["Saving", "Not saved", "Saved"]
+
+
+def test_the_toasts_to_the_end_of_a_page_with_none_up_are_none():
+    assert toasts_to_the_end(QueuedToasts(), on_clock=True) == []
+
+
+def test_the_toasts_to_the_end_are_not_at_an_end_while_the_page_reloads():
+    """The page the reload brings may say a toast of its own: an assertion that one is not said must not read "none" off the gap."""
+    with pytest.raises(AssertionError, match="timed out waiting for the toasts to end"):
+        toasts_to_the_end(ReloadingPage("Execution context was destroyed, most likely because of a navigation"), timeout=0.3)

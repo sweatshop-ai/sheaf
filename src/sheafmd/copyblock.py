@@ -25,8 +25,22 @@ _WORDS = re.compile(r"^[ \t>]*[^\s>]", re.M)
 _UNDERLINE = re.compile(r"^ {0,3}(?:=+|-+)[ \t]*$")
 _QUOTE_PREFIX = re.compile(r"^\s{0,3}>[ \t]?")
 # What ends a paragraph under GFM (CommonMark's interrupt rules): a fence, a heading, a quote, a thematic break
-# of `*` or `_` (a bare `---` stays an underline), a bullet or a list starting at 1 with words after it.
-_OPENS_BLOCK = re.compile(r"^\s{0,3}(?:```|~~~|#{1,6}(?:\s|$)|>|(?:[*_][ \t]*){3,}$|[-*+][ \t]+\S|0*1[.)][ \t]+\S)")
+# of `*` or `_` (a bare `---` stays an underline), a bullet or a list starting at 1 with words after it, and a
+# line that opens an HTML block (start conditions 1-6; condition 7, any other tag, cannot interrupt).
+_HTML_TAGS = (
+    "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|"
+    "fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|"
+    "menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|"
+    "track|ul"
+)
+_HTML_OPENS = (
+    r"<(?:pre|script|style|textarea)(?:[ \t>]|$)"      # 1
+    r"|<!--|<\?|<![A-Za-z]|<!\[CDATA\["                # 2-5
+    rf"|</?(?:{_HTML_TAGS})(?:[ \t]|/?>|$)"             # 6
+)
+_OPENS_BLOCK = re.compile(
+    r"^\s{0,3}(?:```|~~~|#{1,6}(?:\s|$)|>|(?:[*_][ \t]*){3,}$|[-*+][ \t]+\S|0*1[.)][ \t]+\S|" + _HTML_OPENS + ")",
+    re.I)
 
 
 def is_copy_block(content: str) -> bool:

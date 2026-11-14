@@ -117,9 +117,11 @@ L'agent sait quand un texte est fait pour être copié. Il l'écrit dans un bloc
 | 70 | Sanitiseur : `-webkit-user-modify` en mode simple, un cas de test et une ligne de commentaire, restes de la revue Opus 1 de la PR 292 | Rien | À faire |
 | 71 | Dictée : restes de la revue Opus 1 de la PR 290, une assertion vide corrigée à vérifier et six finitions | Rien | Fait (PR 295, merge eb7b7ba) |
 | 73 | Dictée : trois formulations du SPEC 9.16, une assertion trop large et une théorie de double fermeture, restes de la revue Opus de la PR 295 | Rien | À faire |
-| 72 | Accent grave échappé ignoré par `CODE_SPAN_RE`, et un titre avec `<!-->` plus un commentaire refusé par la copie à partager, restes de la PR 291 | Rien | À faire |
+| 72 | Accent grave échappé ignoré par `CODE_SPAN_RE`, et un titre avec `<!-->` plus un commentaire refusé par la copie à partager, restes de la PR 291 | Rien | Fait (PR 300, merge 1521562) |
 | 74 | Bloc à copier : un espace insécable après `#`, le découpeur de citations et la version de pandoc citée, restes de la revue Opus 1 de la PR 294 | Rien | À faire |
 | 75 | Tabulation après un marqueur de conteneur dans `projection`, et accents graves isolés dans un tableau cité, restes de la PR 296 | Rien | À faire |
+| 76 | Restes de la PR 300 : `_comment_spans` quadratique, message du `<!-->`, `\\|` dans un tableau, un test par empan et un passage Codex dû | Rien | À faire |
+| 77 | Test instable de `test_hub_upgrade.py` (arrêt d'un hub en service, `assert 0 == 3`), vu sur la PR 300 | Rien | À faire |
 
 ## Ce qui reste ouvert
 

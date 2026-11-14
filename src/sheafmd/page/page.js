@@ -2473,7 +2473,8 @@ var create = function (ROOT, CFG, opts) {
   // A microphone in the box. The sound goes to the hub (POST /_/transcribe, which relays it) or, on a page mounted in
   // Open WebUI, to Open WebUI's own route with the session cookie; the text comes back into the field, to read and send.
   // One recording at a time, and the sound is never kept: not in the store, not in the file. `dict` is the recording in
-  // hand ({f, chunks, discard, ...}) until its answer is in; `dictOff` is the time until which the service is held gone.
+  // hand ({f, chunks, discard, ...}) until its answer is in or it is discarded (a discarded one may still be letting its
+  // microphone go, next to a new recording); `dictOff` is the time until which the service is held gone.
   var DICTATE_TYPES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
   var DICTATE_MAX = 120000, DICTATE_WATCH = 15000;   // a recording asks the hub every 15 s whether it is still there
   var MIC = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1a2.5 2.5 0 0 0-2.5 2.5v4a2.5 2.5 0 0 0 5 0v-4A2.5 2.5 0 0 0 8 1ZM3.5 7a.75.75 0 0 1 1.5 0 3 3 0 0 0 6 0A.75.75 0 0 1 12.5 7a4.5 4.5 0 0 1-3.75 4.44v1.81h1.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5h1.5v-1.81A4.5 4.5 0 0 1 3.5 7Z"/></svg>';
@@ -2580,6 +2581,7 @@ var create = function (ROOT, CFG, opts) {
           rec.addEventListener('dataavailable', function (e) { if (e.data && e.data.size) d.chunks.push(e.data); });
           rec.addEventListener('stop', function () {
             release();
+            clearTimeout(d.timer); clearInterval(d.watch);    // a recorder can stop by itself (a microphone unplugged): its timer must not cut a later recording
             var gone = function () { return d.discard || unmounted || !f.isConnected; };
             // A discarded sound leaves a form that may still be here (a send that fails gives it back): its button is idle again.
             var here = function () { if (!unmounted && f.isConnected) idle(); };
@@ -2600,7 +2602,7 @@ var create = function (ROOT, CFG, opts) {
           });
           try { rec.start(); } catch (e) { release(); free(); says('The recording could not start. Try again.'); return; }
           b.title = 'Stop'; b.setAttribute('aria-pressed', 'true');
-          d.timer = setTimeout(function () { stopDictation(false); }, DICTATE_MAX);
+          d.timer = setTimeout(function () { if (dict === d) stopDictation(false); }, DICTATE_MAX);
           if (!MOUNTED) d.watch = setInterval(function () {   // the service lost during the recording: the sound is dropped
             dictationAvailable().then(function (yes) {
               if (yes || dict !== d || !d.rec || d.rec.state !== 'recording') return;

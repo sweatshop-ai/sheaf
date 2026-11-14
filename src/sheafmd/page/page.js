@@ -654,13 +654,23 @@ var create = function (ROOT, CFG, opts) {
     incident('js-rejection', { message: String(e.reason && e.reason.message || e.reason) });
   });
 
-  var tmr;
+  // Toasts queue: each is shown in turn for its own time (7 s red, 2.6 s else), none dropped, none cut short by the next.
+  var toasts = [], toasting = false;
   function say(msg, err) {
     if (err) incident('toast', { message: msg });
-    toast.textContent = msg;
-    toast.className = 'show' + (err ? ' err' : '');
-    clearTimeout(tmr);
-    tmr = setTimeout(function () { toast.className = ''; }, err ? 7000 : 2600);
+    var t = { msg: msg, err: err, until: null };      // `until` is when it stops being up, set once it is shown
+    toasts.push(t);
+    if (!toasting) nextToast();
+    return t;
+  }
+  function nextToast() {
+    var t = toasts.shift();
+    toasting = !!t;
+    if (!t) return;
+    toast.textContent = t.msg;
+    toast.className = 'show' + (t.err ? ' err' : '');
+    t.until = Date.now() + (t.err ? 7000 : 2600);
+    setTimeout(function () { toast.className = ''; nextToast(); }, t.err ? 7000 : 2600);
   }
   // ---- copy blocks (SPEC 6.8) -----------------------------------------------
   // A quote the renderer marked rd-copy gets a Copy button. It is the page's (data-rd-ui, never editable) and
@@ -922,7 +932,7 @@ var create = function (ROOT, CFG, opts) {
       return;
     }
     try {
-      if (pressSaid && Date.now() < pressSaid.until) sessionStorage.setItem(KEYS + 'rd-press-said', pressSaid.text);
+      if (pressSaid && (pressSaid.toast.until === null || Date.now() < pressSaid.toast.until)) sessionStorage.setItem(KEYS + 'rd-press-said', pressSaid.text);
       sessionStorage.setItem(KEYS + 'rd-keep', JSON.stringify({ doc: CFG.doc, y: scrollNow(), open: openId || null,
                                                          panel: panel.classList.contains('open'),
                                                          known: counts(), editing: editing,
@@ -2415,7 +2425,7 @@ var create = function (ROOT, CFG, opts) {
   function notSent(e, what) {
     return e.unreachable && e.message === UNREACHABLE ? what + ' did not go out: the hub is unreachable.' : e.message;
   }
-  // One Cancel ends the Tell of each agent, each with an event of its own, and a toast replaces the one before it: the
+  // One Cancel ends the Tell of each agent, each with an event of its own, and toasts come one after the other: the
   // events of a moment are said once per thread, naming every agent of that thread that had already seen its Tell.
   var cancelNote = {};
   function cancelSaid(id, to, seen) {
@@ -3726,10 +3736,10 @@ var create = function (ROOT, CFG, opts) {
         if (a.toggle) btn.setAttribute('aria-pressed', a.pressed ? 'true' : 'false');
         btn.disabled = false;
         lock(false);
-        say(e.message, true);
+        var said = say(e.message, true);
         // A reload waits for this answer: the refusal is said again on the page it brings, if it comes while the
-        // toast would still be up (a form may hold it longer).
-        if (reloadAfterPress) pressSaid = { text: e.message, until: Date.now() + 7000 };
+        // toast is still waiting its turn or up (a form may hold the reload longer).
+        if (reloadAfterPress) pressSaid = { text: e.message, toast: said };
         done();
       }
     }
@@ -4144,7 +4154,7 @@ var create = function (ROOT, CFG, opts) {
         var late = !!d.rid && taken(d.rid);
         d.seenSince = seenSeq;                 // the page may hold it a while (heard): a `tell-seen` taken meanwhile is newer
         heardAfterCheck(function () { heard(d); });
-        if (late) say('What you sent reached the hub after all.');      // over the news of applyComments
+        if (late) say('What you sent reached the hub after all.');      // after the news of applyComments
       });
       live.addEventListener('tell-sent', function (ev) {
         say('Sent to ' + yourSession() + '. Its reply will appear in the thread.');

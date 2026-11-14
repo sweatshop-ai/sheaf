@@ -181,7 +181,7 @@ _EDITABLE_OR_ESCAPE = re.compile(r"user-modify|\\", re.I)
 
 
 _UNQUOTED_URL = re.compile(r"(?![ \t\n\r\f]*[\"'])[ \t\n\r\f]*(?:\\.|[^)\\])*(?:\)|\\?\Z)", re.S)
-_NAME_RUN = re.compile(r"(?:[\w\-]|[^\x00-\x7f]|\\(?:[0-9a-fA-F]{1,6}(?:\r\n|[ \t\n\r\f])?|[^\n]|\Z))+")
+_NAME_RUN = re.compile(r"(?:[\w\-\x00]|[^\x00-\x7f]|\\(?:[0-9a-fA-F]{1,6}(?:\r\n|[ \t\n\r\f])?|[^\n\r\f]|\Z))+")
 _ESCAPE = re.compile(r"\\(?:([0-9a-fA-F]{1,6})(?:\r\n|[ \t\n\r\f])?|(.))", re.S)
 _STRING_ESCAPE = re.compile(r"\\(?:[0-9a-fA-F]{1,6}(?:\r\n|[ \t\n\r\f])?|\r\n|.)", re.S)
 _CLOSER = {"(": ")", "[": "]", "{": "}"}
@@ -189,7 +189,7 @@ _CLOSER = {"(": ")", "[": "]", "{": "}"}
 
 def _unescaped(name: str) -> str:
     """A CSS name with its escapes read (`\\75 rl` is `url`), as CSS Syntax 3 does when it decides what a name is."""
-    return _ESCAPE.sub(lambda m: (chr(int(m[1], 16)) if m[1] and 0 < int(m[1], 16) <= 0x10FFFF else "\ufffd") if m[1] else (m[2] or "\ufffd"), name)
+    return _ESCAPE.sub(lambda m: (chr(int(m[1], 16)) if m[1] and 0 < int(m[1], 16) <= 0x10FFFF and not 0xD800 <= int(m[1], 16) <= 0xDFFF else "\ufffd") if m[1] else (m[2] or "\ufffd"), name)
 
 
 def _declarations(value: str) -> list[str]:

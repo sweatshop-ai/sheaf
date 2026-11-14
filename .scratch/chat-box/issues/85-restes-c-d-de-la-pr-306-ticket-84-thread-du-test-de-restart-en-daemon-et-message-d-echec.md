@@ -6,7 +6,7 @@
 
 **Blocked by:** none
 
-**Claimed by:**
+**Claimed by:** Wanda
 
 - [ ] Points 1 et 2 traités
 - [ ] CI verte

@@ -210,7 +210,7 @@ def test_a_heading_with_a_no_break_or_full_width_space_after_the_hashes_takes_a_
     assert re.sub(r"<!--.*?-->", "", out) == md
 
 
-@pytest.mark.parametrize("md", ["### ###\n", "# #\n", "## ##  \n"])
+@pytest.mark.parametrize("md", ["### ###\n", "# #\n", "## ##  \n", "## #\n"])
 def test_a_heading_that_is_only_hashes_has_no_place_for_a_block(md):
     assert rdc.heading_anchor(md) is None
 
@@ -222,6 +222,21 @@ def test_a_heading_with_an_unclosed_opener_takes_the_block_before_it_and_keeps_e
     assert re.sub(r"<!--.*?-->", "", out, count=1) == md
     page = pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], out)
     assert "marker" in page and [c.id for c in rdc.parse(out).comments] == [cid]
+
+
+def test_a_comment_on_words_after_an_unclosed_opener_is_written_before_it():
+    # Ticket 65, point 3: the documented limit (SPEC 10.4): the page highlights only text before
+    # the block, so these words get no highlight, and none of them is lost.
+    md = "# The <!-- marker\n"
+    out, cid = comment_on(md, "marker")
+    assert out.startswith("# The<!-- sheaf-comment id=%s" % cid)
+    assert out.endswith(" <!-- marker\n") and re.sub(r"<!--.*?-->", "", out, count=1) == md
+
+
+def test_a_setext_heading_with_an_unclosed_opener_takes_the_block_before_it():
+    md = "The <!-- marker\n==========\n"
+    out, cid = comment_on(md, "The")
+    assert out.startswith("The<!-- sheaf-comment id=%s" % cid)
 
 
 def test_an_opener_in_a_code_span_of_a_heading_is_not_an_opener():
@@ -236,3 +251,22 @@ def test_a_heading_whose_words_all_follow_an_unclosed_opener_refuses_the_comment
     s, e = sel(md, quote)
     with pytest.raises(rdc.AnchorError):
         rdc.add_comment(md, 0, s, e, quote, "why", "Ada", "2026-11-13T10:00")
+
+
+@pytest.mark.parametrize("md, word", [("## ## ##\n", "##"), ("#  #  #\n", "#"), ("# # #\n", "#")])
+def test_a_heading_whose_word_is_made_of_hashes_takes_a_comment(md, word):
+    # Ticket 65, point 1: the page shows the word (CommonMark reads the last run as the closing
+    # hashes and the first as the text), so it is not an empty heading.
+    out, cid = comment_on(md, word)
+    assert re.sub(r"<!--.*?-->", "", out, count=1) == md
+    assert [c.id for c in rdc.parse(out).comments] == [cid]
+
+
+def test_a_backtick_in_a_raw_tag_does_not_hide_the_opener_after_it():
+    # Ticket 65, point 2: read left to right, the backtick of the tag's attribute opens no code
+    # span that runs on to the one after the opener.
+    md = "# a <span title='`'>s</span> <!-- b `x`\n"
+    out, cid = comment_on(md, "a")
+    assert out.startswith("# a <span title='`'>s</span><!-- sheaf-comment id=%s" % cid)
+    assert re.sub(r"<!--.*?-->", "", out, count=1) == md
+    assert [c.id for c in rdc.parse(out).comments] == [cid]

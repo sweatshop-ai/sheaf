@@ -12,9 +12,11 @@
 
 **Par où commencer :** un test rouge par point (`<![cdata[` avant `---`, `>\t  <div>` avant `---`), puis le correctif ; pour 2, vérifier d'abord ce que fait pandoc sur chaque mélange de tabulations et d'espaces avant de choisir la règle.
 
-- [ ] `<![cdata[` avant un soulignement refuse le bloc, `<![CDATA[` l'accepte
-- [ ] `>\t  <div>` avant un soulignement refuse le bloc, comme pandoc ; les cas déjà couverts de `tests/test_copy_blocks.py` passent toujours
-- [ ] Le commentaire du `break` nomme les blocs HTML
-- [ ] PR séparée, CI verte
+- [x] `<![cdata[` avant un soulignement refuse le bloc, `<![CDATA[` l'accepte
+- [x] `>\t  <div>` avant un soulignement refuse le bloc, comme pandoc ; les cas déjà couverts de `tests/test_copy_blocks.py` passent toujours
+- [x] Le commentaire du `break` nomme les blocs HTML
+- [x] PR séparée, CI verte
 
-**Status:** ready-for-agent
+**Fait :** PR 294, merge 5cb0330. La règle des colonnes est un seul assistant, `_unquote`, pour les ouvreurs HTML, les clôtures, les titres ATX et le soulignement : la sonde pandoc (720 lignes) passe de 371 écarts à 0, celle de l'Opus (20 408 entrées, pandoc 3.9) ne trouve aucun cas pire que main. La revue (`/home/tiroir/.claude/pm/chat-box-handoffs/pr-69-reviews/opus-1.md`, GO) a aussi fait corriger F1 (une ligne paresseuse `===` n'est pas un soulignement) et F2 (espace insécable après une puce). Restes F3, F4 et F6 : ticket 74.
+
+**Status:** done

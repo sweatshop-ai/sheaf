@@ -457,7 +457,12 @@ def store_unreadable(p, blocked=True):
     p.evaluate("""(blocked) => {
       if (!window.__realGet) window.__realGet = Storage.prototype.getItem;
       Storage.prototype.getItem = function (k) {
-        if (blocked && String(k).startsWith('sheaf-comment-draft')) { window.__refused = (window.__refused || 0) + 1; throw new Error('blocked'); }
+        if (blocked && String(k).startsWith('sheaf-comment-draft')) {
+          window.__refused = (window.__refused || 0) + 1;
+          const stack = new Error().stack;
+          if (stack.includes('taken') || stack.includes('threadKeep')) window.__refusedClears = (window.__refusedClears || 0) + 1;
+          throw new Error('blocked');
+        }
         return window.__realGet.call(this, k);
       };
     }""", blocked)
@@ -466,6 +471,11 @@ def store_unreadable(p, blocked=True):
 def refused_reads(p):
     """How many reads of the comment store the page made while it refused them (store_unreadable counts them)."""
     return p.evaluate("window.__refused || 0")
+
+
+def refused_clears(p):
+    """How many of those reads were made to end a send (taken, threadKeep): the clear itself met the refusal."""
+    return p.evaluate("window.__refusedClears || 0")
 
 
 def store_as_held(p, site):
@@ -881,9 +891,10 @@ def hold_time_passes(p):
 
 
 def held_while_refusing(p, site):
-    """Waits, with no fixed time, until the page has met the refusing store (a read it made was refused) while the taken
-    reply is still in the store: the clear of it cannot have been written, so only the held path can remove it later."""
-    until(lambda: refused_reads(p) > 0, what="the page's clear to meet the refused read")
+    """Waits, with no fixed time, until the clear of the reply has met the refusing store (the read that ends the send was
+    refused: any other read the page makes while the store refuses does not count) while the taken reply is still in the
+    store: the clear of it cannot have been written, so only the held path can remove it later."""
+    until(lambda: refused_clears(p) > 0, what="the page's clear to meet the refused read")
     assert [d["body"] for d in store_as_held(p, site)] == ["Because."], "the entry was cleared while the store refused reads"
 
 
@@ -990,6 +1001,8 @@ def test_a_redraw_of_the_not_sent_line_that_fails_after_a_purge_does_not_make_a_
     store_unreadable(p, False)
     select(p, at(P1, "apples"), at(P1, "apples", None))
     open_box(p)
+    # The purge, not the typed write: the held entry left the store with the first read that works, before anything was typed.
+    until(lambda: stored_drafts(p) == [], what="the purge to take the held entry from the store before the typed write")
     p.fill(FIELD, "typed after")
     p.click("#rd-popover button[data-a=minimize]")
     until(lambda: [d["body"] for d in stored_drafts(p)] == ["typed after"], what="the text typed after the purge kept")
@@ -1017,8 +1030,16 @@ def test_a_held_clear_that_the_full_store_cannot_write_is_tried_by_the_reads_onl
     p.fill(FIELD, "")
     p.keyboard.press("Escape")
     until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close on an empty field")
-    store_full(p)      # in place before the store reads again: a read of the page's own between the two would purge the store, and none would be refused
-    store_unreadable(p, False)
+    # One step, so no read that works falls between the two: it would purge the store, and no write would be refused.
+    p.evaluate("""() => {
+      if (!window.__realGet) window.__realGet = Storage.prototype.getItem;
+      if (!window.__realSet) window.__realSet = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (k, v) {
+        if (String(k).startsWith('sheaf-comment-draft')) { window.__refusedSets = (window.__refusedSets || 0) + 1; throw new Error('quota'); }
+        return window.__realSet.call(this, k, v);
+      };
+      Storage.prototype.getItem = function (k) { return window.__realGet.call(this, k); };
+    }""")
     p.evaluate("window.dispatchEvent(new StorageEvent('storage'))")      # one read that works: its purge cannot be written
     until(lambda: p.evaluate("window.__refusedSets || 0") > 0, what="the purge to meet the full store")
     p.evaluate("new Promise(r => setTimeout(r, 400))")      # an absence cannot be waited for by a signal: time for runaway redraws to show

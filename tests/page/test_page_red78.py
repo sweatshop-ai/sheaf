@@ -84,3 +84,19 @@ def test_mechanism(phone):
     print("SELFRELOAD documents requested by the page itself:", len(loads))
     assert loads, "the page did not reload itself within 10 s"
     page.goto(phone.site.url)
+
+
+def test_mechanism_goto_first(phone):
+    """The goto is already in flight (held 3 s at the hub) when the page's own reload, fired by the file change, starts."""
+    from sheafmd import comments as rdc
+    from sheafmd.source import update_file
+    page = phone.page
+    held = []
+    def slow(route):
+        held.append(1)
+        page.wait_for_timeout(3000)
+        route.continue_()
+    update_file(phone.site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "Second paragraph"), "Second paragraph",
+                                                           "Nearly good. " * 20, "Ada", "2026-10-25T21:01")[0])
+    page.route("**/work/plan.md", slow)
+    page.goto(phone.site.url)

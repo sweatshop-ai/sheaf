@@ -1074,6 +1074,8 @@ def test_a_clear_is_made_in_a_full_store_that_still_holds_an_earlier_builds_list
     p.fill(FIELD, "")
     p.keyboard.press("Escape")
     until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close on an empty field")
+    p.wait_for_timeout(500)
+    print("HELD", store_as_held(p, site), p.evaluate("Object.keys(localStorage)"))
     until(lambda: [d["body"] for d in store_as_held(p, site)] == ["other"], what="the emptied message to leave the full store")
 
 

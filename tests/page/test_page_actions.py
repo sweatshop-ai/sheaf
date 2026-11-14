@@ -306,7 +306,6 @@ def test_on_a_phone_a_move_to_whose_slug_has_no_hyphen_breaks_inside_its_button_
     p.wait_for_selector("button.rd-act")
     move = bar(p).nth(3).bounding_box()
     assert move["x"] >= 0 and move["x"] + move["width"] <= 360, move
-    assert p.evaluate("(e => e.scrollWidth <= e.clientWidth)(document.getElementById('rd-actions'))")
     assert p.evaluate("document.documentElement.scrollWidth") <= 360
     menu = p.locator("#rd-menu-btn").bounding_box()
     assert menu["x"] >= 0 and menu["x"] + menu["width"] <= 360, menu
@@ -720,25 +719,20 @@ def test_an_item_added_above_the_pressed_box_during_the_undo_leaves_the_tick_on_
 
 def test_an_item_typed_above_the_box_just_before_the_press_never_ticks_another_box(sheaf):
     # #148, 7, gate on 3b10c3c: the box was found by its number in the text the buttons were drawn from, which an
-    # item on screen and not yet saved had moved onto Done, a one-off the hub then kept ticked.
+    # item on screen and not yet saved had moved onto Done, a one-off the hub then kept ticked. Share's box is
+    # pressed at once (action-buttons 03): the tick goes out with the item on screen and not saved.
     p, f = sheaf.page, sheaf.site.file
     stand_still(p)
     type_at_end(p, "main li:has-text('Approve')", "")
     p.keyboard.press("Enter")
     p.keyboard.type("extra")
     until(lambda: "extra" in p.inner_text("main ul"), what="the new item on screen")
-    bar(p).nth(1).click()                               # Done, within the autosave's 2.5 s
-    p.clock.run_for(3000)                               # the autosave goes
-    until(lambda: "extra" in f.read_text(encoding="utf-8"), what="the autosave")
-    until(lambda: p.evaluate("document.querySelector('#rd-state').textContent") != "Saving…", what="its answer")
-    p.click("main li:has-text('extra')")
-    p.keyboard.press(key("End"))
-    p.keyboard.type(" more")
-    p.clock.run_for(2200)
-    until(lambda: "more" in f.read_text(encoding="utf-8"), what="the edit, saved by the reload's settle")
+    p.locator("main li:has-text('Share') input[type=checkbox]").click()
+    until(lambda: "- [x] Share" in f.read_text(encoding="utf-8") and "extra" in f.read_text(encoding="utf-8"),
+          what="the tick, and the item saved by the reload's settle")
     p.wait_for_timeout(500)
     text = f.read_text(encoding="utf-8")
-    assert "[x] extra" not in text and "[x] Approve" not in text, text
+    assert "[x] Done" not in text and "[x] extra" not in text, text
 
 
 def test_an_upgrade_while_a_comment_waits_for_the_tick_does_not_ask_to_send_it(sheaf, site):

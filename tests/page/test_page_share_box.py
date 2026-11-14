@@ -37,7 +37,8 @@ def opened(tab):
     def open_with(text):
         tab.site.file.write_text(text, encoding="utf-8")
         tab.open()
-        tab.page.wait_for_selector("main input[type=checkbox]")
+        tab.page.wait_for_selector("button.rd-act")         # Approve's button; its own box is hidden behind it
+        share_box(tab.page).wait_for()
         return tab
     return open_with
 
@@ -99,7 +100,8 @@ def test_a_member_who_is_not_the_owner_is_told_so_and_nothing_is_written(tab, si
     site.hub.page = lambda e, nonce, member=None: real(e, nonce, member=bea)
     site.file.write_text(SHEAF, encoding="utf-8")
     tab.open()
-    tab.page.wait_for_selector("main input[type=checkbox]")
+    tab.page.wait_for_selector("button.rd-act")
+    share_box(tab.page).wait_for()
     mark(tab.page)
     share_box(tab.page).click()
     until(lambda: "Only the owner of this sheaf can share it." in toast(tab.page), what="the refusal")

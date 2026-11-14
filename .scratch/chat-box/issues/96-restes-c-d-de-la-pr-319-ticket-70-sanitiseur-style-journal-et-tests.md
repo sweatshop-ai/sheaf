@@ -10,6 +10,6 @@
 6. **C4 (re-lecture étroite, opus-2-narrow).** `tests/page/test_user_modify.py` n'a pas de témoin positif : un cas montrant que le span non assaini (`/*:*/…`) est bien éditable dans Chromium et WebKit. Sans lui, le test passerait pour rien si un moteur cessait d'honorer la propriété.
 7. **D3.** La règle « barre oblique inverse » retire aussi des déclarations ordinaires (`content:"\201C"`) ; aucun test ne le fixe.
 
-**Blocked by:** PR 319 fusionnée
+**Blocked by:** none (PR 319 fusionnée, 2c2610b)
 
 **Status:** ready-for-agent

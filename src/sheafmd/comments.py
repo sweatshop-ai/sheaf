@@ -353,27 +353,12 @@ def _scan(text: str):
         yield "comment", a, pos
 
 
-def _mask_code(text: str, cells: bool | str = False) -> str:
+def _mask_code(text: str, cells: bool = False) -> str:
     """`text` with its inline code spans blanked, the same length (see `_scan` for what owns a
     backtick). `cells`: the text is a table, whose cells pandoc splits at every unescaped `|`
-    before it reads a span, so none runs from one cell or row to the next; `"rows"`: a quote or a
-    list, whose table rows are read so."""
+    before it reads a span, so none runs from one cell or row to the next."""
     if "`" not in text:
         return text
-    if cells == "rows":
-        # A quote or a list: the lines of its tables are cells, the rest is read whole (pandoc ends a
-        # paragraph where a table starts, so a span never runs from one into the other).
-        rows = _table_row_lines(text)
-        out, run, in_row = [], [], False
-        for n, line in enumerate(text.split("\n")):
-            row = n in rows
-            if run and row != in_row:
-                out.append(_mask_code("\n".join(run), True if in_row else False))
-                run = []
-            in_row = row
-            run.append(line)
-        out.append(_mask_code("\n".join(run), True if in_row else False))
-        return "\n".join(out)
     if cells:
         pieces = []
         for line in text.split("\n"):
@@ -404,7 +389,7 @@ def parse(md: str) -> Parsed:
         # Inline code is literal text, so a comment written there is an example
         # (this spec has several). Search a copy with code spans blanked out, the
         # same length so every offset still points into the real text.
-        masked = _mask_code(text, True if b.kind == "table" else "rows" if b.kind in ("quote", "list") else False)
+        masked = _mask_code(text, b.kind == "table")
         i = 0
         while True:
             m = COMMENT_RE.search(masked, i)
@@ -692,109 +677,8 @@ _CELL_PIPE_RE = re.compile(r"(?<!\\)(\|)")
 _CONTAINER_RE = re.compile(r"[ \t]*(?:>|(?:[-+*]|\d{1,9}[.)])(?=[ \t]))[ \t]?")
 
 
-def _bare(line: str) -> tuple[str, tuple, int, int, int, int]:
-    """`line` without its container markers, and: those markers; the column where they end; the
-    width of the indentation after them (tabs to the next stop of 4, counted on the line); the
-    column where the last list marker ends, -1 when there is none; the quotes before that marker."""
-    marks, pos, col, lcol, lq = [], 0, 0, -1, 0
-    while (m := _CONTAINER_RE.match(line, pos)) and m.end() > pos:
-        mark = m.group().strip()
-        if mark != ">":
-            lq = marks.count(">")
-        marks.append(mark)
-        for ch in m.group():
-            col += 4 - col % 4 if ch == "\t" else 1
-        if mark != ">":
-            lcol = col
-        pos = m.end()
-    rest = line[pos:]
-    ind = 0
-    for ch in rest:
-        if ch not in " \t":
-            break
-        ind += 4 - (col + ind) % 4 if ch == "\t" else 1
-    return rest, tuple(marks), col, ind, lcol, lq
-
-
-def _cells(bare: str) -> int:
-    inner = bare.strip()
-    inner = inner[1:] if inner.startswith("|") else inner
-    inner = inner[:-1] if inner.endswith("|") and not inner.endswith("\\|") else inner
-    return len(_CELL_PIPE_RE.split(inner)[::2])
-
-
-_QUOTE_GROUP_RE = re.compile(r" {0,3}> ?")
-
-
-def _plain(block: str) -> bool:
-    """Whether `block` is a plain quote (every container marker a `>` with its space, none inside a
-    list item) or a plain list item (one marker at most per line, no quote, no tab in the margin).
-    Only these shapes are read for tables as pandoc reads them; any other (a quote in an item, an item
-    in a quote, a tab after a marker, a bare `>`) is read whole, as before ticket 75 (ticket 87)."""
-    quoted = listed = False
-    for line in block.split("\n"):
-        pos, n = 0, 0
-        while (m := _CONTAINER_RE.match(line, pos)) and m.end() > pos:
-            g = m.group()
-            if g.lstrip(" ").startswith(">"):
-                if not _QUOTE_GROUP_RE.fullmatch(g) or (g.endswith(">") and line[m.end():].strip()):
-                    return False
-                quoted = True
-            else:
-                listed = True
-            n += 1
-            pos = m.end()
-        if n > 1 and listed or "\t" in line[:pos + len(line[pos:]) - len(line[pos:].lstrip(" \t"))]:
-            return False
-        if listed and quoted:
-            return False
-    return True
-
-
-@functools.lru_cache(maxsize=64)
-def _table_row_lines(block: str) -> frozenset:
-    """The lines of `block` that are rows of a table a quote or a list holds, as pandoc reads it: a
-    header row and a delimiter row of the same number of cells, the header not directly under a
-    paragraph line, then lines with a `|` up to one without, or one that opens a new list item."""
-    if not _plain(block):
-        return frozenset()
-    bare = [_bare(line) for line in block.split("\n")]
-    # Per line, how far its text sits past the content column of the container it is in: 0 to 3 is
-    # a header or delimiter row (the rows after them may sit further in), 4 or more is indented
-    # code, and under 0 the line has left the list item. A quote opened after the item's marker
-    # (`- > a`) is a container of its own: past its marker only the indentation counts.
-    rel, cc, cq = [], None, 0
-    for _, marks, col, ind, lcol, lq in bare:
-        nq = marks.count(">")
-        if lcol >= 0:
-            last_is_item = marks[-1] != ">"
-            cc, cq = lcol + (ind if last_is_item and ind <= 3 else 0), lq
-            rel.append(col + ind - cc if last_is_item else ind)
-        elif cc is None or nq > cq:
-            rel.append(ind)
-        else:
-            rel.append(col + ind - cc if nq == cq else -1)
-    rows, i = set(), 0
-    while i < len(bare) - 1:
-        (head, hm, *_), (sep, sm, *_) = bare[i], bare[i + 1]
-        quotes = tuple(m for m in hm if m == ">")      # what every row of the table repeats
-        if (_CELL_PIPE_RE.search(head) and TBLSEP_RE.match(sep) and _CELL_PIPE_RE.search(sep)
-                and _cells(head) == _cells(sep)
-                and sm == quotes and 0 <= rel[i] <= 3 and 0 <= rel[i + 1] <= 3
-                and (i == 0 or not bare[i - 1][0].strip() or hm and not bare[i - 1][1])):
-            rows.update((i, i + 1))
-            i += 2
-            while (i < len(bare) and _CELL_PIPE_RE.search(bare[i][0])
-                   and bare[i][1] == quotes and rel[i] >= 0):
-                rows.add(i)
-                i += 1
-        else:
-            i += 1
-    return frozenset(rows)
-
-
-def _loose_table_row(block: str, point: int) -> bool:
-    """Before ticket 75 (and still for a shape that is not plain): whether `point` is on a row of a table that a quote or a list holds (`> | a | b |`, an item
+def in_table_row(block: str, point: int) -> bool:
+    """Whether `point` is on a row of a table that a quote or a list holds (`> | a | b |`, an item
     with a paragraph before its table): a line with a `|`, under unbroken lines with one, down to
     a delimiter row. The splitter reads such a block as a quote or a list, not a table, but a
     comment in it must be written as one in a table: on one line, at the end of a cell."""
@@ -816,16 +700,6 @@ def _loose_table_row(block: str, point: int) -> bool:
     return False
 
 
-def in_table_row(block: str, point: int) -> bool:
-    """Whether `point` is on a row of a table that a quote or a list holds (`> | a | b |`, an item
-    with a paragraph before its table). The splitter reads such a block as a quote or a list, not a
-    table, but a comment in it must be written as one in a table: on one line, at the end of a cell.
-    In a plain shape (`_plain`) the rows are those pandoc reads (`_table_row_lines`)."""
-    if _plain(block):
-        return block.count("\n", 0, point) in _table_row_lines(block)
-    return _loose_table_row(block, point)
-
-
 def cell_end(block: str, point: int, cells: bool = True) -> int:
     """Offset where a comment on a selection ending at `point` goes in a table: the end of the cell that
     holds `point`, before its closing `|` and the spaces in front of it, so the cell's words stay whole
@@ -835,9 +709,8 @@ def cell_end(block: str, point: int, cells: bool = True) -> int:
     block's `<`, and before a `<!--` in the cell that nothing closes, which a block after it would close,
     hiding the words it was meant to hold. Where the cell's end is inside a code span that `parse` reads
     across cells (pandoc splits the cells first), the block stays after the selection: written there it
-    would be code to `parse`, and the comment lost. `cells` is `"rows"` in a plain quote or list (see
-    `_plain`), false in any other shape, which `parse` reads whole: a span there may still run from one
-    cell to the next, and where even the selection's point is inside it the comment is refused."""
+    would be code to `parse`, and the comment lost. `cells` is false in a quote or a list, which
+    `parse` reads whole: a span there may still run from one cell to the next."""
     line_start = block.rfind("\n", 0, point) + 1
     eol = block.find("\n", point)
     line_end = len(block) if eol < 0 else eol
@@ -869,7 +742,7 @@ def comment_point(kind: str, block: str, start: int, end: int, quote: str) -> in
     if kind == "table":
         return cell_end(block, point)
     if kind in ("quote", "list") and in_table_row(block, point):
-        return cell_end(block, point, cells="rows" if _plain(block) else False)
+        return cell_end(block, point, cells=False)
     if kind != "heading":
         return point
     at = heading_anchor(block)

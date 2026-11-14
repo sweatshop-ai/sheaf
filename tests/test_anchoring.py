@@ -8,8 +8,6 @@ import json
 import re
 import time
 
-TBLSEP = re.compile(r"^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$")
-
 import pytest
 from helpers import pandoc
 
@@ -676,6 +674,13 @@ def test_a_comment_on_the_header_of_a_table_in_a_quote_or_a_list_stays_on_the_ro
     assert [c.id for c in rdc.parse(out).comments] == [cid] and out.count("\n") == md.count("\n")
 
 
+def test_a_cell_in_a_code_span_that_runs_across_cells_of_a_quoted_table_is_refused_not_lost():
+    md = "> | a | b |\n> |---|---|\n> | `x | one | z` | q |\n"
+    s, e = sel(md, "one")
+    with pytest.raises(rdc.AnchorError):
+        rdc.add_comment(md, 0, s, e, "one", "why", "Ada", "2026-11-14T10:00")
+
+
 # ── ticket 75: what is left of PR 296 ──
 
 @pytest.mark.parametrize("md, quote", [
@@ -692,123 +697,5 @@ def test_a_tab_after_a_container_marker_does_not_shift_the_comment(md, quote):
     assert re.sub(r"<!--.*?-->", "", out, count=1) == md
     page = pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], out)
     assert page.count("<table>") == 1 and "&lt;!--" not in page
-    assert re.search(r"<td>[^<]*%s[^<]*<!--" % quote, page) or re.search(r"<th>[^<]*%s[^<]*<!--" % quote, page), page
+    assert re.search(r"<t[dh]>[^<]*%s[^<]*<!--" % quote, page), page
     assert [c.id for c in rdc.parse(out).comments] == [cid]
-
-
-@pytest.mark.parametrize("md, quote", [
-    ("> | p ` q | r ` s |\n> |---|---|\n> | x | y |\n", "q"),
-    ("> | h | i |\n> |---|---|\n> | p ` q | r ` s |\n", "q"),
-    ("- x\n\n  | h | i |\n  |---|---|\n  | p ` q | r ` s |\n", "q"),
-    ("> | h | i |\n> |---|---|\n> | p ` q | r ` s |\n", "s"),
-])
-def test_lone_backticks_in_a_quoted_or_listed_table_are_no_code_across_cells(md, quote):
-    page = pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], md)
-    assert "<code>" not in page                        # pandoc splits the cells first
-    s, e = sel(md, quote)
-    out, cid = rdc.add_comment(md, 0, s, e, quote, "why", "Ada", "2026-11-14T10:00")
-    assert re.sub(r"<!--.*?-->", "", out, count=1) == md
-    assert [c.id for c in rdc.parse(out).comments] == [cid]
-    assert pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], out).count("<table>") == 1
-
-
-C1 = '<!-- sheaf-comment id=c1 by="A" at=2026-01-01T00:00 status=open quote="first" why -->'
-
-
-@pytest.mark.parametrize("md", [
-    "- Columns:\n\n  | a | b |\n  |---|---|\n  | c | d |\n- Run `ls | wc` first%s then `make`.\n" % C1,
-    "> p\n> | a | b |\n> |---|---|\n> | x` | `y%s ` | z\n" % C1,
-    "> | a | b |\n> |---|\n> | x` | `y%s ` | z\n" % C1,
-])
-def test_parse_reads_a_row_as_a_row_only_where_pandoc_sees_a_table(md):
-    assert [c.id for c in rdc.parse(md).comments] == ["c1"]
-
-
-def test_parse_does_not_list_an_example_in_code_after_a_list_held_table():
-    md = ("- w\n\n  | a | b |\n  |---|---|\n  | c | d |\n- `x <!-- sheaf-comment id=c9 by=\"A\" "
-          "at=2026-01-01T00:00 status=open quote=\"x\" body --> | y`\n")
-    assert "<code>x &lt;!--" in pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], md)
-    assert rdc.parse(md).comments == []
-
-
-def test_parse_of_a_long_quoted_table_is_linear():
-    md = "> | a | b |\n> |---|---|\n" + "".join("> | `c%d` | d |\n" % i for i in range(1500))
-    t = time.perf_counter()
-    rdc.parse(md)
-    assert time.perf_counter() - t < 1.0
-
-
-def _pandoc_cell_lines(md):
-    page = pandoc(["-f", "gfm+sourcepos", "-t", "html", "--wrap=none"], md)
-    return {int(m.group(1)) - 1 for t in re.findall(r"<table.*?</table>", page, re.S)
-            for c in re.findall(r"<t[dh]>.*?</t[dh]>", t, re.S) if (m := re.search(r'data-pos="(\d+):', c))}
-
-
-@pytest.mark.parametrize("md", [
-    "> > - item | z\n> > ---|---\n",                                   # a list item is no header under `> >`
-    "- x | y\n\n  - | a | b |\n  |---|---|\n  | c | d |\n",            # the delimiter is outside the inner item
-    "- > | a | b |\n  |---|---|\n  | x | y | z |\n",                     # quote header, list delimiter
-    "> - | x | y |\n>   - | a | b |\n>   |---|---|\n",
-    "1. | x | y |\n   | a |\n   - item | z\n   |---|---|\n     | m | n |\n",
-    "> | a | b |\n> |---|---|\n> | c | d |\n- not a row | z\n",
-    "- | a | b |\n  |---|---|\n  | c | d |\n  - next | z\n",
-    "> p\n> | a | b |\n> |---|---|\n",
-])
-def test_rows_of_a_table_in_a_quote_or_a_list_are_never_more_than_pandoc_sees(md):
-    rows = {i for i in rdc._table_row_lines(md) if i not in (1, 2) or not TBLSEP.match(md.split("\n")[i].lstrip("> -").strip() or "x")}
-    assert rows <= _pandoc_cell_lines(md), (rows, _pandoc_cell_lines(md))
-
-
-def test_a_line_of_many_container_markers_is_read_in_linear_time():
-    md = "> " * 60000 + "`x`\n"
-    t = time.perf_counter()
-    rdc.parse(md)
-    assert time.perf_counter() - t < 1.0
-
-
-@pytest.mark.parametrize("md", [
-    # b1: a row back at the quote's column ends the table of an item
-    "> - q\n>\n>   | a | b |\n>   |---|---|\n> | `x | `%s` | y` |\n" % C1,
-    "> - q\n>   - r\n>\n>     | a | b |\n>     |---|---|\n>   | `x | `%s` | y` |\n" % C1,
-    # b2: 4 columns past the container is code, not a table
-    ">     | a ` | b %s ` |\n>     |---|---|\n" % C1,
-    "- q\n\n      | a ` | b %s ` |\n      |---|---|\n" % C1,
-    "> - q\n>\n>       | a ` | b %s ` |\n>       |---|---|\n" % C1,
-    # c1: a continuation line sits 0 to 3 columns past the header's, tabs at their stops
-    "- q\n\n  | a | b |\n  |---|---|\n   | x ` | b %s ` |\n" % C1,
-    "- q\n\n  | a ` | b %s ` |\n   |---|---|\n" % C1,
-    "- q\n\n   | a ` | b %s ` |\n  |---|---|\n" % C1,
-    # still tables
-    "- q\n\n  | a | b |\n  |---|---|\n  | `x | `%s` | y` |\n" % C1,
-    "> | a | b |\n> |---|---|\n>  | `x | `%s` | y` |\n" % C1,
-])
-def test_parse_agrees_with_pandoc_on_a_comment_in_a_quoted_or_listed_table(md):
-    page = pandoc(["-f", "gfm", "-t", "html"], md)
-    seen = "&lt;!-- sheaf" not in page and "<!-- sheaf-comment" in page
-    assert [c.id for c in rdc.parse(md).comments] == (["c1"] if seen else [])
-
-
-@pytest.mark.parametrize("md", [
-    # round 4: shapes that are not plain are read whole, as on main
-    "1. > | a | b |\n  > |---|---|\n  > | `x | `%s` | y` |\n" % C1,
-    "1. > | a | b |\n   > |---|---|\n  > | `x | `%s` | y` |\n" % C1,
-    "> |a|b|\n>\t  |---|---|\n> | `x | `%s` | y` |\n" % C1,
-    ">- | a | b |\n>  |---|---|\n>  | `x | `%s` | y` |\n" % C1,
-    "> - q\n>\n>   | a | b |\n>   |---|---|\n> | `x | `%s` | y` |\n" % C1,
-])
-def test_a_table_in_a_shape_that_is_not_plain_is_read_whole_as_before(md):
-    page = pandoc(["-f", "gfm", "-t", "html"], md)
-    assert "<!-- sheaf-comment" in page and "&lt;!-- sheaf" not in page   # pandoc shows a comment
-    assert [c.id for c in rdc.parse(md).comments] == ["c1"]
-    assert rdc._table_row_lines(md) == frozenset()
-
-
-@pytest.mark.parametrize("md, rows", [
-    ("> | a | b |\n> |---|---|\n> | x | y |\n", {0, 1, 2}),
-    ("> > | a | b |\n> > |---|---|\n", {0, 1}),
-    ("- x\n\n  | a | b |\n  |---|---|\n  | x | y |\n", {2, 3, 4}),
-    ("- | a | b |\n  |---|---|\n", {0, 1}),
-    ("> p\n>\n> | a | b |\n> |---|---|\n", {2, 3}),
-])
-def test_a_table_in_a_plain_quote_or_a_plain_list_item_is_read_cell_by_cell(md, rows):
-    assert rdc._table_row_lines(md) == rows

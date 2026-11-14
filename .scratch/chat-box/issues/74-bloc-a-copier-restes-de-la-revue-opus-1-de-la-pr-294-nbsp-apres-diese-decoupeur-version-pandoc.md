@@ -15,4 +15,6 @@
 - [ ] Les mentions de pandoc 3.7.0.2 sont corrigées en 3.9 là où le rendu est visé
 - [ ] PR séparée, CI verte
 
+**Claimed by:** Diego
+
 **Status:** ready-for-agent

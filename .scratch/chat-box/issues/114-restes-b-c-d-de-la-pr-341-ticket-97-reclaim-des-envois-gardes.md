@@ -1,6 +1,6 @@
 # 114: Restes b, c, d de la PR 341 (ticket 97) : reclaim des envois gardés
 
-**What to build:** Restes de la revue Opus de la PR 341 (tours 1 et 2), `/home/tiroir/.claude/pm/chat-box-handoffs/pr-97-reviews/opus-round1.md` et `r2-narrow.md`. Code : `claim()`/`reclaim()`/`withdrawn()` dans `src/sheafmd/page/page.js`, près de `commentDraftsSave`. Aucun b ici : les b sont corrigés dans la PR.
+**What to build:** Ces restes ne valent que si la conception claim/repère du ticket 121 est reprise (la PR 341 a été réduite à la preuve, page.js égal à main). Restes de la revue Opus de la PR 341 (tours 1 et 2), `/home/tiroir/.claude/pm/chat-box-handoffs/pr-97-reviews/opus-round1.md` et `r2-narrow.md`. Code : `claim()`/`reclaim()`/`withdrawn()` dans `src/sheafmd/page/page.js`, près de `commentDraftsSave`. Aucun b ici : les b sont corrigés dans la PR.
 
 Classe d (tests manquants et notes) :
 - d1 : pas de test pour le Discard d'un message minimisé, un Cancel de formulaire, un envoi pris par le hub (le Discard d'une réponse ou d'une modification est testé depuis la PR 341).

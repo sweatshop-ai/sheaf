@@ -483,6 +483,7 @@ class Hub:
                                   else self._versions_of(root), address=address, hold=hold)
             e.live.session_to = lambda: self.session_name(address)
             e.live.agent_tells = lambda: self.waiting_tells.waits(address, None, sweep=False)   # the hub person's (9.8)
+            e.live.tells_lock = self.waiting_tells._lock
             e.live.refresh(force=True)           # the first render: e.html
             self.entries[address] = e
             return e

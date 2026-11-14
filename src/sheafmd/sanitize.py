@@ -180,11 +180,17 @@ def _flatten_deep(soup, log: list[str]) -> None:
 _EDITABLE_OR_ESCAPE = re.compile(r"user-modify|\\", re.I)
 
 
+_UNQUOTED_URL = re.compile(r"url\([ \t\n\r\f]*(?![\"'])(?:\\.|[^)\\])*(?:\)|\\?\Z)", re.I | re.S)
+_IDENT_CHAR = re.compile(r"[\w\-\\]|[^\x00-\x7f]")
+
+
 def _declarations(value: str) -> list[str]:
     """A style attribute cut at the `;` that end a declaration. A `;` inside a CSS string (a quote ends at the same quote,
     or at a newline, and a backslash takes the next character), inside a comment or inside a `()`, `[]` or `{}` block
-    (`url(data:image/png;base64,…)`) does not end one. A block left open runs to the end, as in a browser; a closer with
-    no opener is ignored."""
+    (`url(data:image/png;base64,…)`) does not end one. A `url(` that no quote follows is one token up to its first `)`
+    (a backslash takes the next character), so a `/*` or a quote inside it opens no comment and no string. A block left
+    open runs to the end, as in a browser; a closer with no opener is ignored. Only the pieces are cut here: the name is
+    searched in each piece whole, so a split that differs from a browser's can keep more or less, never hide the name."""
     parts, start, i, n, quote, depth = [], 0, 0, len(value), "", 0
     while i < n:
         c = value[i]
@@ -196,6 +202,9 @@ def _declarations(value: str) -> list[str]:
                 quote = ""
         elif c in "\"'":
             quote = c
+        elif c in "uU" and (m := _UNQUOTED_URL.match(value, i)) and not (i and _IDENT_CHAR.match(value[i - 1])):
+            i = m.end()
+            continue
         elif value.startswith("/*", i):
             end = value.find("*/", i + 2)
             i = n if end < 0 else end + 1

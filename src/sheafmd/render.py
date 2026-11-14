@@ -1038,21 +1038,11 @@ def build(md: Path, *, theme: Theme, share: bool = True, title: str | None = Non
         line = _unclosed_line(original, frag)
         if line:
             text = original.split("\n")[line - 1]
+            head = rdc.COMMENT_RE.search(text)
             spans = [x.span() for x in COMMENT_RE.finditer(text)]
-            # A note head is the fault only when pandoc passes it on as raw html: not inside a
-            # comment the line closes, and not written as code. Raw html comes through with its
-            # tabs turned into spaces and its letters composed, so the tail is read the same way.
-            def raw_tail(h):
-                col = len(text[:h.start()].expandtabs(4))
-                tail = (text[:h.start()].expandtabs(4) + text[h.start():].rstrip("\r")).expandtabs(4)[col:]
-                return unicodedata.normalize("NFC", tail)
-            head = next((h for h in rdc.COMMENT_RE.finditer(text)
-                         if not any(a <= h.start() < b for a, b in spans)
-                         and raw_tail(h) in frag), None)
             first = next((m for m in re.finditer(r"<!--", text)
                           if not any(a <= m.start() < b for a, b in spans)), None)
-            # A reviewer's note that nothing closes is named before an empty opener on its line.
-            empty = None if head else re.match(r"<!---?>", text[first.start():]) if first else None
+            empty = re.match(r"<!---?>", text[first.start():]) if first else None
             raise UnclosedComment(line, note=bool(head), empty=empty.group() if empty else "")
         log.append("  ! pandoc produced an HTML comment in the share copy; it was removed")
         frag = strip_comments(frag, log)

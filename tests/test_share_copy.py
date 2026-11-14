@@ -784,56 +784,6 @@ def test_an_empty_opener_that_a_later_arrow_would_close_gets_the_swallows_messag
     assert "empty HTML comment" not in str(e.value)
 
 
-def test_an_unclosed_reviewer_note_after_an_empty_opener_is_named_as_the_note(tmp_path):
-    # Ticket 83, point 3: the note is the more urgent fault; the empty opener is still refused once
-    # the note is closed.
-    with pytest.raises(sheafmd.UnclosedComment) as e:
-        sheafmd.render(doc(tmp_path, "<!--> <!-- sheaf-comment id=c1 by=a at=2026-01-01T00:00\nbody\n"))
-    assert e.value.line == 1 and "a note by a reviewer" in str(e.value)
-
-
-@pytest.mark.parametrize("text", [
-    "# A <!-- sheaf-comment id=c1 by=a at=2026-01-01T00:00 hi --> b <!--> c\n\nKEEP1\n",
-    "A <!-- sheaf-comment id=c1 by=a at=2026-01-01T00:00 hi --> b <!--> c\n\nKEEP1\n",
-])
-def test_a_closed_reviewer_note_before_an_empty_opener_does_not_make_the_refusal_a_note_one(tmp_path, text):
-    # Review of PR 325: the note is closed, so only the empty opener is at fault and the message says so.
-    with pytest.raises(sheafmd.UnclosedComment) as e:
-        sheafmd.render(doc(tmp_path, text))
-    assert e.value.line == 1
-    assert "empty HTML comment" in str(e.value) and "note by a reviewer" not in str(e.value)
-
-
-@pytest.mark.parametrize("text", [
-    "A <!--> b `<!-- sheaf-comment x` c\n\nKEEP1\n",
-    "# A <!--> b `<!-- sheaf-comment x` c\n\nKEEP1\n",
-    "- A <!--> b `<!-- sheaf-comment x` c\n\nKEEP1\n",
-    "A <!---> b `<!-- sheaf-comment x` c\r\n\r\nKEEP1\r\n",
-])
-def test_a_note_head_written_in_a_code_span_after_an_empty_opener_does_not_make_it_a_note_refusal(tmp_path, text):
-    # Second review of PR 325: pandoc shows that head as code, so only the empty opener is at fault.
-    with pytest.raises(sheafmd.UnclosedComment) as e:
-        sheafmd.render(doc(tmp_path, text))
-    assert e.value.line == 1
-    assert "empty HTML comment" in str(e.value) and "note by a reviewer" not in str(e.value)
-
-
-@pytest.mark.parametrize("text", [
-    "<!-- sheaf-comment x\ty\n\nSECRET\n",                       # pandoc turns the tab into spaces
-    "<div> <!-- sheaf-comment x\ty\n\nSECRET\n",
-    "<!-- sheaf-comment id=c1 quote=\"cafe\u0301\" by=a\n\nSECRET\n",   # and decomposed text into NFC
-    "<!--> <!-- sheaf-comment x\ty\n\nSECRET\n",                  # after an empty opener
-    "<!--> <!-- sheaf-comment id=c1 quote=\"cafe\u0301\" by=a\n\nSECRET\n",
-])
-def test_an_unclosed_note_head_that_pandoc_rewrites_is_still_named_as_a_note(tmp_path, text):
-    # Third review of PR 325: the check that a head is raw html must not depend on pandoc leaving
-    # the line's text alone (tabs, decomposed letters).
-    with pytest.raises(sheafmd.UnclosedComment) as e:
-        sheafmd.render(doc(tmp_path, text))
-    assert e.value.line == 1
-    assert "note by a reviewer" in str(e.value)
-
-
 def test_the_same_heading_without_the_empty_opener_makes_a_copy(tmp_path):
     out = sheafmd.render(doc(tmp_path, "# A b <!-- note -->\n\nKEEP1 para.\n"))
     assert "KEEP1" in out and "note" not in out

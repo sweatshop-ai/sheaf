@@ -1668,7 +1668,12 @@ var create = function (ROOT, CFG, opts) {
       try { migrateDrafts(); } catch (e) {
         // A full store refuses the move. A clear is still made, as it was on the list: shorter, which the store accepts.
         if (add.length) throw e;
-        var left = commentDraftsRaw(true).filter(function (d) { return d._k.indexOf(ENTRY_PREFIX + '0') === 0 && !drop.some(function (g) { return g._k === d._k; }); });
+        var old = legacyEntries(localStorage.getItem(COMMENT_DRAFT_KEY));
+        old.forEach(function (d) { localStorage.removeItem(d._k); });       // what a move that stopped half-way had made
+        var goes = function (d) {
+          return drop.some(function (g) { return g._k === d._k; }) || (!ofOtherRoot(d) && pendingClears.some(function (gone) { return gone(d); }));
+        };
+        var left = old.filter(function (d) { return !goes(d); });
         if (left.length) localStorage.setItem(COMMENT_DRAFT_KEY, JSON.stringify(left)); else localStorage.removeItem(COMMENT_DRAFT_KEY);
       }
       // The clears a failed purge held go with this write too.

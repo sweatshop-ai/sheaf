@@ -21,3 +21,5 @@
 Claimed by: Jamal
 
 **Status:** ready-for-agent
+
+**Résultat c1 (Jamal, 2026-11-14, PR 319) :** essayé dans la CI, qui installe Chromium, Firefox et WebKit (t-compute n'a pas été utilisé : la clé d'hôte ssh échoue depuis le portable). `tests/page/test_user_modify.py` clique dans le span puis tape « hello » : **Chromium et WebKit laissent taper** (`hellox`), **Firefox non** (`x`). Le mode simple retire donc `-webkit-user-modify`, `-moz-user-modify`, `user-modify` et toute déclaration dont le nom porte une barre oblique inverse ; SPEC 9.5 le dit. Test rouge avant le correctif (run 43619240498), vert après.

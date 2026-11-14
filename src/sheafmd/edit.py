@@ -1669,8 +1669,10 @@ def _insert_comment(md_text: str, j: int, raw: str, quote: str, nth: int = 0) ->
             at_off = rdc.comment_point(b.kind, b.content, k, k + len(q), quote)
             own_line = False
     except Exception:
-        pass
-    if headless or (b.kind in rdc.ONE_LINE_KINDS and "\n" in raw):
+        # A table's cell that has no place (an opener nothing closes) leaves the end of the last
+        # row, where the block would close the opener and hide the cell's words.
+        own_line = own_line or b.kind == "table"
+    if headless or ((b.kind in rdc.ONE_LINE_KINDS or rdc.in_table_row(b.content, at_off)) and "\n" in raw):
         # A heading with no words: a block right after its hashes would make the line a paragraph.
         # A block of several lines at the end of a heading line runs into the lines after it, and
         # in a table row it ends the table.

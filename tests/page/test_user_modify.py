@@ -3,6 +3,7 @@ The page finds an editable surface with `closest('[contenteditable="true"]')`, w
 span, as the sanitiser returns it, and types into it; the failure names the engines that let it be typed into."""
 import pytest
 
+from pagehelp import launch_engine
 from sheafmd.sanitize import sanitize
 
 pytestmark = pytest.mark.page
@@ -17,10 +18,7 @@ def engine_page(request, chromium):
     if request.param == "chromium":
         browser, own = chromium, False
     else:
-        try:
-            browser, own = getattr(chromium.pw, request.param).launch(), True
-        except Exception as e:      # noqa: BLE001 - not installed here (CI fails on a skip)
-            pytest.skip(f"{request.param} cannot start here: {str(e).splitlines()[0]}")
+        browser, own = launch_engine(getattr(chromium.pw, request.param), request.param), True
     ctx = browser.new_context()
     page = ctx.new_page()
     yield request.param, page

@@ -9,7 +9,7 @@ import re
 import pytest
 
 from helpers import BEA
-from pagehelp import open_box, DOC, P1, at, select, toast, until
+from pagehelp import open_box, open_with_comment, DOC, P1, at, select, toast, until
 from sheafmd import comments as rdc
 from sheafmd.hub import proxy
 from sheafmd.source import update_file
@@ -323,10 +323,8 @@ def test_a_comment_sent_to_james_goes_with_the_comment_and_says_so_without_a_spi
 
 
 def test_the_threads_own_tell_opens_the_reply_form_and_sends_through_the_comment(tab):
-    update_file(tab.site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
-                                                         "Ada", "2026-10-14T10:00")[0])
     as_member(tab, work(), can=BOX_CAN)
-    tab.open()
+    open_with_comment(tab, None, "apples", "Why?")
     bodies, others = sent_to_box(tab)
     tab.page.click(".rd-badge")
     tab.page.click("#rd-popover .rd-actions button.rd-tell")

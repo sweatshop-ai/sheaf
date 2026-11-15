@@ -8,7 +8,7 @@ import sys
 import pytest
 
 from agent_fakes import PID, write_record
-from pagehelp import open_box, DOC, P1, at, select, until
+from pagehelp import open_box, open_with_comment, DOC, P1, at, select, until
 from sheafmd import comments as rdc
 from sheafmd import paths
 from sheafmd.agents.claude_code import proc_start
@@ -56,10 +56,8 @@ def test_a_tell_that_cannot_work_is_no_button_and_the_box_says_why_with_the_hubs
 
 
 def test_a_thread_and_its_reply_form_say_why_their_tell_button_cannot_work(tab):
-    update_file(tab.site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
-                                                         "Ada", "2026-10-14T10:00")[0])
     with_lines(tab)
-    tab.open()
+    open_with_comment(tab, None, "apples", "Why?")
     tab.page.click(".rd-badge")
     tab.page.wait_for_selector("#rd-popover textarea")
     # The field is open from the start and it is the only place a Tell is offered: the thread's own buttons have none.
@@ -136,15 +134,13 @@ PROBE = ("import json, os, sys\n"
 
 def waiting_tell(tab, tmp_path, jump):
     """A thread whose Tell is out and whose session now waits on its person; the page open on it."""
-    update_file(tab.site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
-                                                         "Ada", "2026-10-14T10:00")[0])
     out = tmp_path / "jumped.json"
     if jump:
         probe = tmp_path / "probe.py"
         probe.write_text(PROBE, encoding="utf-8")
         cmd = json.dumps([sys.executable, str(probe), str(out), "{session}", "{name}"])
         write_config(f"[jump]\ncommand = {cmd}\n")
-    tab.open()
+    open_with_comment(tab, None, "apples", "Why?")
     tab.page.click(".rd-badge")
     tab.page.wait_for_selector("#rd-popover textarea")
     tab.page.fill("#rd-popover textarea", "Please do.")
@@ -206,9 +202,7 @@ def test_the_byline_names_the_session_and_its_name_opens_it(tab, agent, tmp_path
 
 
 def test_a_running_tell_says_once_who_works_on_it_and_its_button_only_cancels(tab, agent):
-    update_file(tab.site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
-                                                         "Ada", "2026-10-14T10:00")[0])
-    tab.open()
+    open_with_comment(tab, None, "apples", "Why?")
     tab.page.click(".rd-badge")
     tab.page.wait_for_selector("#rd-popover textarea")
     tab.page.fill("#rd-popover textarea", "Please do.")

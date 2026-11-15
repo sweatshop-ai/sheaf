@@ -1,7 +1,9 @@
 """The popover of a comment is a chat box: narrow, its messages in bubbles, a field to write in under them."""
+import json
+
 import pytest
 
-from pagehelp import DOC, P1, P2, at, box, comment_draft_key, mark, open_box, pasted, reloaded, select, toast, until
+from pagehelp import DOC, P1, P2, at, box, comment_draft_key, kept_json, mark, set_kept, open_box, open_with_comment, pasted, reloaded, select, toast, until
 from sheafmd import comments as rdc
 from sheafmd.hub.state import Tokens
 from sheafmd.source import update_file
@@ -15,9 +17,7 @@ THREAD_BOX = "#rd-popover"
 
 def open_thread(tab, site):
     """A comment of Bea's on the page, its thread open."""
-    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
-                                                     "Bea", "2026-10-14T10:00")[0])
-    tab.open()
+    open_with_comment(tab, None, "apples", "Why?", "Bea")
     tab.page.click(".rd-badge")
     tab.page.wait_for_selector(FIELD)
     return tab.page
@@ -60,10 +60,8 @@ def test_my_messages_stand_on_the_right_and_the_others_on_the_left(tab, site):
 
 
 def test_the_popover_is_narrow_and_tall_on_a_wide_screen(tab, site):
-    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "\n\n".join(["Why?"] * 200),
-                                                     "Bea", "2026-10-14T10:00")[0])
     tab.page.set_viewport_size({"width": 1600, "height": 1000})
-    tab.open()
+    open_with_comment(tab, None, "apples", "\n\n".join(["Why?"] * 200), "Bea")
     tab.page.click(".rd-badge")
     tab.page.wait_for_selector(FIELD)
     box = tab.page.locator("#rd-popover").bounding_box()
@@ -138,8 +136,7 @@ def test_there_is_no_minus_where_there_is_nothing_to_resolve(tab, site):
 
 
 def test_edit_and_delete_wait_in_a_small_menu(tab, site):
-    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "pears"), "pears", "Mine", "Ada", "2026-10-14T10:00")[0])
-    tab.open()
+    open_with_comment(tab, None, "pears", "Mine")
     tab.page.click(".rd-badge")
     p = tab.page
     p.wait_for_selector(FIELD)
@@ -149,9 +146,7 @@ def test_edit_and_delete_wait_in_a_small_menu(tab, site):
 
 
 def test_a_long_thread_opens_on_its_last_message_and_scrolls_up(tab, site):
-    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "\n\n".join(["Why?"] * 200),
-                                                     "Bea", "2026-10-14T10:00")[0])
-    tab.open()
+    open_with_comment(tab, None, "apples", "\n\n".join(["Why?"] * 200), "Bea")
     tab.page.click(".rd-badge")
     tab.page.wait_for_selector(FIELD)
     top, room, full = tab.page.locator("#rd-popover .rd-scroll").evaluate("s => [s.scrollTop, s.clientHeight, s.scrollHeight]")
@@ -160,9 +155,7 @@ def test_a_long_thread_opens_on_its_last_message_and_scrolls_up(tab, site):
 
 def long_thread(tab, site):
     """A comment of Bea's with 200 paragraphs, its thread open on the last of them."""
-    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "\n\n".join(["Why?"] * 200),
-                                                     "Bea", "2026-10-14T10:00")[0])
-    tab.open()
+    open_with_comment(tab, None, "apples", "\n\n".join(["Why?"] * 200), "Bea")
     tab.page.click(".rd-badge")
     tab.page.wait_for_selector(FIELD)
     return tab.page
@@ -407,13 +400,10 @@ def test_enter_during_an_ime_composition_does_not_send(tab, site):
 
 
 def test_a_reply_kept_by_the_older_page_is_listed_as_a_reply_and_comes_back_in_its_thread(tab, site):
-    import json
-    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
-                                                     "Bea", "2026-10-14T10:00")[0])
-    tab.open()
+    open_with_comment(tab, None, "apples", "Why?", "Bea")
     old = [{"thread": "c1", "kind": "reply", "body": "from the old page", "about": "apples", "born": "2026-10-14T10:00",
             "at": "2026-10-14T11:00:00.000Z"}]
-    tab.page.evaluate("([k, v]) => localStorage.setItem(k, v)", [comment_draft_key(site), json.dumps(old)])
+    set_kept(tab.page, site, old)
     tab.page.reload()
     until(lambda: tab.page.locator("#rd-unsent").count() == 1, what="the not-sent line")
     assert tab.page.inner_text("#rd-unsent") == "1 reply not sent · Show"
@@ -441,26 +431,69 @@ def test_a_click_on_a_page_control_is_not_a_click_beside_the_box(tab, site):
 
 # ---- text the store cannot keep: the box stays (SPEC 10.4, Isolde 2026-11-09) -------------------------------
 
+STORE_FULL = """(full) => {
+  if (!window.__realSet) window.__realSet = Storage.prototype.setItem;
+  Storage.prototype.setItem = function (k, v) {
+    if (full && String(k).startsWith('sheaf-comment-draft')) {
+      window.__refusedSets = (window.__refusedSets || 0) + 1;
+      if (new Error().stack.includes('commentDraftsLoad')) window.__refusedSetsInRead = (window.__refusedSetsInRead || 0) + 1;
+      throw new Error('quota');
+    }
+    return window.__realSet.call(this, k, v);
+  };
+}"""
+
+
 def store_full(p, full=True):
-    """The comment store refuses writes (quota full, storage blocked), or accepts them again."""
-    p.evaluate("""(full) => {
-      if (!window.__realSet) window.__realSet = Storage.prototype.setItem;
-      Storage.prototype.setItem = function (k, v) {
-        if (full && String(k).startsWith('sheaf-comment-draft')) throw new Error('quota');
-        return window.__realSet.call(this, k, v);
-      };
-    }""", full)
+    """The comment store refuses writes (quota full, storage blocked), or accepts them again. It refuses setItem only,
+    never removeItem: a test that needs a refused purge keeps a second entry, so the purge writes a list."""
+    p.evaluate(STORE_FULL, full)
+
+
+STORE_UNREADABLE = """(blocked) => {
+  if (!window.__realGet) window.__realGet = Storage.prototype.getItem;
+  Storage.prototype.getItem = function (k) {
+    if (blocked && String(k).startsWith('sheaf-comment-draft')) {
+      window.__refused = (window.__refused || 0) + 1;
+      const stack = new Error().stack;
+      if (stack.includes('taken') || stack.includes('threadKeep')) window.__refusedClears = (window.__refusedClears || 0) + 1;
+      throw new Error('blocked');
+    }
+    return window.__realGet.call(this, k);
+  };
+}"""
 
 
 def store_unreadable(p, blocked=True):
     """The comment store refuses reads, or answers them again."""
-    p.evaluate("""(blocked) => {
-      if (!window.__realGet) window.__realGet = Storage.prototype.getItem;
-      Storage.prototype.getItem = function (k) {
-        if (blocked && String(k).startsWith('sheaf-comment-draft')) throw new Error('blocked');
-        return window.__realGet.call(this, k);
-      };
-    }""", blocked)
+    p.evaluate(STORE_UNREADABLE, blocked)
+
+
+def reopen_reads(p, patch=None, patch_arg=None, then=""):
+    """The comment store answers reads again, in ONE evaluate with the patch of the page that has to be in place first
+    (`patch`, a JS function given `patch_arg`) and the statements that follow (`then`). Two calls leave a gap in which a
+    read of the page's own meets a working store, purges the held clear and writes it, so the test no longer shows the
+    path it names (ticket 86)."""
+    first = f"({patch})({json.dumps(patch_arg)});" if patch else ""
+    p.evaluate(f"() => {{ {first} ({STORE_UNREADABLE})(false); {then} }}")
+
+
+def refused_reads(p):
+    """How many reads of the comment store the page made while it refused them (store_unreadable counts them)."""
+    return p.evaluate("window.__refused || 0")
+
+
+def refused_clears(p):
+    """How many of those reads were made by the code that ends or rewrites a send's entry (taken, threadKeep): the page's own clear, not a redraw's read."""
+    return p.evaluate("window.__refusedClears || 0")
+
+
+def store_as_held(p, site):
+    """What the comment store holds, read past a refusal: the test's own look, not the page's."""
+    return p.evaluate("""(k) => { const get = (window.__realGet || Storage.prototype.getItem).bind(localStorage);
+                                  const got = Object.keys(localStorage).filter(x => x.startsWith(k + ':e:')).sort().map(x => JSON.parse(get(x)));
+                                  const raw = get(k);
+                                  return got.concat(raw ? JSON.parse(raw) : []); }""", comment_draft_key(site))
 
 
 def store_unreadable_once(p):
@@ -538,8 +571,7 @@ def test_the_box_closes_normally_once_the_store_works_again(tab, site):
 
 def test_choosing_edit_while_a_reply_is_typed_keeps_the_reply(tab, site):
     """Edit replaces the field by the edit form: the reply typed there must not be thrown away, and Cancel brings it back."""
-    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "pears"), "pears", "Mine", "Ada", "2026-10-14T10:00")[0])
-    tab.open()
+    open_with_comment(tab, None, "pears", "Mine")
     tab.page.click(".rd-badge")
     p = tab.page
     p.wait_for_selector(FIELD)
@@ -553,8 +585,7 @@ def test_choosing_edit_while_a_reply_is_typed_keeps_the_reply(tab, site):
 
 def my_thread(tab, site):
     """A comment of Ada's own on the page, its thread open: the menu offers Edit."""
-    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "pears"), "pears", "Mine", "Ada", "2026-10-14T10:00")[0])
-    tab.open()
+    open_with_comment(tab, None, "pears", "Mine")
     tab.page.click(".rd-badge")
     tab.page.wait_for_selector(FIELD)
     return tab.page
@@ -653,8 +684,7 @@ def test_choosing_edit_on_an_edit_form_the_message_moved_away_from_opens_it_afre
 
 
 def test_closing_an_edit_form_that_was_not_changed_leaves_nothing_unsent(tab, site):
-    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "pears"), "pears", "Mine", "Ada", "2026-10-14T10:00")[0])
-    tab.open()
+    open_with_comment(tab, None, "pears", "Mine")
     tab.page.click(".rd-badge")
     p = tab.page
     p.wait_for_selector(FIELD)
@@ -725,6 +755,26 @@ def test_a_minimized_message_whose_field_is_emptied_is_gone_from_the_store_when_
     assert p.input_value(FIELD) == "", "the erased text came back"
 
 
+def test_discard_in_the_not_sent_list_removes_one_minimized_message_and_leaves_the_other(tab, site):
+    tab.open()
+    p = tab.page
+    for passage, text in ((P1, "Why apples?"), (P2, "And pears?")):
+        word = "apples" if passage == P1 else "pears"
+        select(p, at(passage, word), at(passage, word, None))
+        p.fill(FIELD, text)
+        p.keyboard.press("Escape")
+    until(lambda: p.inner_text("#rd-unsent") == "2 messages not sent · Show", what="both messages in the line")
+    p.click("#rd-unsent")
+    until(lambda: p.locator("#rd-popover[data-unsent] .rd-form").count() == 2, what="the list")
+    mine = p.locator("#rd-popover[data-unsent] .rd-form").filter(has=p.locator("textarea")).nth(0)
+    first = mine.locator("textarea").input_value()
+    mine.locator("button[data-f=no]").click()
+    until(lambda: p.inner_text("#rd-unsent") == "1 message not sent · Show", what="one message left")
+    store = p.evaluate("JSON.stringify(Object.values(localStorage))")
+    assert first not in store, "the discarded message stayed in the store"
+    assert ({"Why apples?", "And pears?"} - {first}).pop() in store, "the other message went with it"
+
+
 def test_closing_an_empty_new_message_that_was_never_kept_changes_nothing(tab, site):
     tab.open()
     p = tab.page
@@ -783,16 +833,15 @@ def test_a_message_kept_by_a_close_that_was_then_aborted_is_removed_when_its_fie
 
 
 def test_a_store_that_refuses_to_be_read_keeps_what_it_holds_and_says_the_text_was_not_kept(tab, site):
-    import json
     p = open_thread(tab, site)
     kept = [{"quote": "pears", "body": "a draft of another passage", "at": "2026-10-14T11:00:00.000Z"}]
-    p.evaluate("([k, v]) => localStorage.setItem(k, v)", [comment_draft_key(site), json.dumps(kept)])
+    set_kept(p, site, kept)
     store_unreadable(p)
     p.fill(FIELD, "words I must not lose")
     p.mouse.click(5, 700)
     until(lambda: "could not be kept" in toast(p), what="the toast that says the text could not be kept")
     store_unreadable(p, False)
-    held = p.evaluate("(k) => localStorage.getItem(k)", comment_draft_key(site))
+    held = kept_json(p, site)
     assert held and "a draft of another passage" in held, "the read that failed emptied the store"
 
 
@@ -814,15 +863,14 @@ def test_an_emptied_new_message_closes_when_the_store_that_kept_its_text_stops_b
 
 
 def test_a_read_of_the_store_that_fails_once_does_not_empty_the_drafts_of_the_page_at_the_next_write(tab, site):
-    import json
     p = open_thread(tab, site)
     kept = [{"quote": "pears", "body": "a draft of another passage", "at": "2026-10-14T11:00:00.000Z"}]
-    p.evaluate("([k, v]) => localStorage.setItem(k, v)", [comment_draft_key(site), json.dumps(kept)])
+    set_kept(p, site, kept)
     p.fill(FIELD, "words I must not lose")
     store_unreadable_once(p)
     p.mouse.click(5, 700)
     until(lambda: "could not be kept" in toast(p), what="the toast that says the text could not be kept")
-    held = p.evaluate("(k) => localStorage.getItem(k)", comment_draft_key(site))
+    held = kept_json(p, site)
     assert held and "a draft of another passage" in held, "the read that failed once emptied the drafts of the page"
 
 
@@ -831,7 +879,7 @@ def test_a_value_that_is_not_json_in_the_store_is_set_aside_before_the_next_writ
     p.evaluate("([k, v]) => localStorage.setItem(k, v)", [comment_draft_key(site), "[{broken"])
     p.fill(FIELD, "words I must not lose")
     p.mouse.click(5, 700)
-    until(lambda: "words I must not lose" in (p.evaluate("(k) => localStorage.getItem(k)", comment_draft_key(site)) or ""),
+    until(lambda: "words I must not lose" in (kept_json(p, site) or ""),
           what="the text kept in the store")
     aside = p.evaluate("(k) => localStorage.getItem(k)", comment_draft_key(site) + ":unreadable")
     assert aside == "[{broken", "the value that could not be read was replaced and is kept nowhere"
@@ -859,14 +907,25 @@ def test_a_new_message_emptied_while_the_store_refuses_reads_does_not_come_back_
     assert p.locator("#rd-unsent").count() == 0, "the emptied message is offered as not sent"
 
 
+HOLD_TIME_PASSES = """
+  const now = Date.now.bind(Date);
+  Date.now = () => now() + 40000;
+  window.dispatchEvent(new StorageEvent('storage'));
+"""
+
+
 def hold_time_passes(p):
     """The page's clock jumps past the time a send is held (HELD), and the page is told the store changed, as the
     timer that lets a held entry lapse would."""
-    p.evaluate("""() => {
-      const now = Date.now.bind(Date);
-      Date.now = () => now() + 40000;
-      window.dispatchEvent(new StorageEvent('storage'));
-    }""")
+    p.evaluate(f"() => {{ {HOLD_TIME_PASSES} }}")
+
+
+def held_while_refusing(p, site):
+    """Waits, with no fixed time, until the clear of the reply has met the refusing store (a read of taken or threadKeep was
+    refused: any other read the page makes while the store refuses does not count) while the taken reply is still in the
+    store: the clear of it cannot have been written, so only the held path can remove it later."""
+    until(lambda: refused_clears(p) > 0, what="the page's clear to meet the refused read")
+    assert [d["body"] for d in store_as_held(p, site)] == ["Because."], "the entry was cleared while the store refused reads"
 
 
 def test_a_reply_the_hub_took_while_the_store_refused_reads_is_not_offered_as_not_sent_when_the_store_reads_again(tab, site):
@@ -881,11 +940,10 @@ def test_a_reply_the_hub_took_while_the_store_refused_reads_is_not_offered_as_no
     p.keyboard.press("Enter")
     until(lambda: "Because." in site.file.read_text(encoding="utf-8"), what="the reply in the file")
     until(lambda: p.locator(THREAD).count() == 2, what="the reply in the thread")
-    p.wait_for_timeout(500)      # the page's clear of the kept reply runs after the answer is taken in: while the store still refuses
+    held_while_refusing(p, site)
     p.unroute("**/_/comment")
-    store_unreadable(p, False)
-    hold_time_passes(p)
-    p.wait_for_timeout(300)
+    reopen_reads(p, then=HOLD_TIME_PASSES)      # one call: a read between them would purge the held clear before the clock jumps
+    until(lambda: store_as_held(p, site) == [], what="the reply the hub took gone from the store")
     assert p.locator("#rd-unsent").count() == 0, "the reply the hub took is offered as not sent, to be sent twice"
 
 
@@ -902,11 +960,10 @@ def test_a_reply_the_hub_took_while_its_answer_was_lost_and_the_store_refused_re
     p.keyboard.press("Enter")
     until(lambda: "Because." in site.file.read_text(encoding="utf-8"), what="the reply in the file")
     until(lambda: p.locator(THREAD).count() == 2, what="the reply in the thread, read from the hub's event")
-    p.wait_for_timeout(500)      # the page's clear of what the event named runs after it is taken in: while the store still refuses
+    held_while_refusing(p, site)
     p.unroute("**/_/comment")
-    store_unreadable(p, False)
-    hold_time_passes(p)
-    p.wait_for_timeout(300)
+    reopen_reads(p, then=HOLD_TIME_PASSES)      # one call: a read between them would purge the held clear before the clock jumps
+    until(lambda: store_as_held(p, site) == [], what="the reply the hub took gone from the store")
     assert p.locator("#rd-unsent").count() == 0, "the reply the hub took is offered as not sent, to be sent twice"
 
 
@@ -934,6 +991,97 @@ def test_a_new_message_emptied_while_the_store_refused_reads_stays_empty_after_a
     open_box(p)
     assert p.input_value(FIELD) == "", "the text the person emptied came back after a reload"
     assert p.locator("#rd-unsent").count() == 0, "the emptied message is offered as not sent after a reload"
+
+
+# The first redraw of the not-sent line that runs inside a read of the store throws, as a failing redraw would;
+# __redrawInRead counts the redraws that ran inside a read.
+REDRAW_IN_A_READ_THROWS = """() => {
+  const real = window.clearTimeout;
+  window.__redrawInRead = 0;
+  window.clearTimeout = function (...a) {
+    const s = new Error().stack;
+    if (s.includes('unsentLine') && s.includes('commentDraftsLoad')) {
+      window.__redrawInRead++;
+      if (window.__redrawInRead === 1) throw new Error('redraw failed');
+    }
+    return real.apply(this, a);
+  };
+}"""
+
+
+def test_a_redraw_of_the_not_sent_line_that_fails_after_a_purge_does_not_make_a_read_fail(tab, site):
+    p = open_thread(tab, site)
+    p.keyboard.press("Escape")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    p.fill(FIELD, "kept for later")
+    p.click("#rd-popover button[data-a=minimize]")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    until(lambda: p.input_value(FIELD) == "kept for later", what="the kept text back in the box")
+    store_unreadable(p)
+    p.fill(FIELD, "")
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close on an empty field")
+    reopen_reads(p, patch=REDRAW_IN_A_READ_THROWS)      # the patch is in place before the first read that works, which purges the held clear
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    # The purge, not the typed write: the held entry left the store with the first read that works, before anything was typed.
+    until(lambda: stored_drafts(p) == [], what="the purge to take the held entry from the store before the typed write")
+    p.fill(FIELD, "typed after")
+    p.click("#rd-popover button[data-a=minimize]")
+    until(lambda: [d["body"] for d in stored_drafts(p)] == ["typed after"], what="the text typed after the purge kept")
+    assert "could not be kept" not in toast(p), "a failing redraw passed for a store that refused the read"
+    assert p.evaluate("window.__redrawInRead") == 0, "the redraw ran inside the read, while its caller was still working"
+
+
+def test_a_held_clear_is_removed_from_a_full_store_by_the_read_that_works_and_writes_nothing(tab, site):
+    p = open_thread(tab, site)
+    p.keyboard.press("Escape")
+    select(p, at(P2, "pears"), at(P2, "pears", None))      # a second entry, so the store is not emptied
+    open_box(p)
+    p.fill(FIELD, "other")
+    p.click("#rd-popover button[data-a=minimize]")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    p.fill(FIELD, "kept for later")
+    p.click("#rd-popover button[data-a=minimize]")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    until(lambda: p.input_value(FIELD) == "kept for later", what="the kept text back in the box")
+    store_unreadable(p)
+    p.fill(FIELD, "")
+    p.keyboard.press("Escape")
+    until(lambda: p.locator("#rd-popover").count() == 0, what="the box to close on an empty field")
+    # a store that works and is full: one read that works. The held clear is a removal, which a full store does not refuse,
+    # and each entry has its own key, so the purge writes no other entry: nothing is refused, nothing is queued again.
+    reopen_reads(p, patch=STORE_FULL, patch_arg=True, then="window.dispatchEvent(new StorageEvent('storage'));")
+    until(lambda: [d["body"] for d in store_as_held(p, site)] == ["other"], what="the held clear to leave the full store")
+    p.evaluate("new Promise(r => setTimeout(r, 400))")      # an absence cannot be waited for by a signal: time for runaway redraws to show
+    assert (p.evaluate("window.__refusedSets") or 0) == 0, "the purge wrote an entry into the full store"
+
+
+def test_a_clear_is_made_in_a_full_store_that_still_holds_an_earlier_builds_list(tab, site):
+    """The list of an earlier build cannot be moved into entry keys while the store refuses writes: a clear still goes,
+    as it did when the list was rewritten shorter (review of PR 355, c2)."""
+    p = open_thread(tab, site)
+    p.keyboard.press("Escape")
+    set_kept(p, site, [{"quote": "apples", "body": "kept for later", "block": 0, "head": "x", "at": "2026-10-14T11:00:00.000Z"},
+                       {"quote": "pears", "body": "other", "block": 1, "head": "y", "at": "2026-10-14T11:01:00.000Z"}])
+    p.reload()
+    p.wait_for_selector("#rd-menu-btn", state="attached")
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    open_box(p)
+    until(lambda: p.input_value(FIELD) == "kept for later", what="the kept text in the box")
+    # full as a store is for a new key: it takes no entry key, and accepts the list it holds written shorter
+    p.evaluate("""() => { const set = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (k, v) { if (String(k).includes(':e:')) throw new Error('quota'); return set.call(this, k, v); }; }""")
+    p.fill(FIELD, "")
+    p.keyboard.press("Escape")      # the box closes and the notice of the other kept message is drawn: only the store is looked at
+    until(lambda: [d["body"] for d in store_as_held(p, site)] == ["other"], what="the emptied message to leave the full store")
 
 
 READABLE_REPLY = ("Done. What changed:\n- the intro is shorter\n- `fetch_all` retries\n\n"

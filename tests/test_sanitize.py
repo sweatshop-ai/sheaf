@@ -3,6 +3,7 @@ task boxes and comments kept.
 
 Every removal test also asserts what must SURVIVE next to it, so a sanitiser that
 empties the document cannot pass."""
+import html
 import random
 from html.parser import HTMLParser
 
@@ -119,8 +120,38 @@ def test_every_other_input_goes(tag):
     assert "<p>ab</p>" in out
 
 
-def test_the_checkbox_test_ignores_case_and_spaces_only():
-    assert "input" in names(sanitize('<input type=" CheckBox ">'))
+def test_the_checkbox_test_ignores_case_only():
+    assert "input" in names(sanitize('<input type="CheckBox">'))
+
+
+@pytest.mark.parametrize("mount", [False, True])
+@pytest.mark.parametrize("kind", [" checkbox", "checkbox ", " CheckBox ", "\tcheckbox", "checkbox\n", "\u00a0checkbox", "chec\u212abox"])
+def test_a_type_that_is_not_exactly_checkbox_is_no_checkbox(kind, mount):
+    """A browser matches the type exactly, ASCII case aside: `" checkbox"` (a space) is a text field, and so is `"checKbox"` with a Kelvin sign, which `str.lower()` would fold to an ASCII k."""
+    out = sanitize(f'<p>a<input type="{kind}">b</p>', mount=mount)
+    assert "input" not in names(out)
+    assert "<p>ab</p>" in out
+
+
+@pytest.mark.parametrize("mount", [False, True])
+@pytest.mark.parametrize("value", ["true", "plaintext-only", "", "TRUE", "false"])
+def test_the_document_has_no_contenteditable_of_its_own(value, mount):
+    """The page owns editability (setEditing): a surface the document makes editable is outside what the page guards."""
+    out = sanitize(f'<p class="k">a<span contenteditable="{value}">b</span><em contenteditable>c</em></p>', mount=mount)
+    for _, a in tags_of(out):
+        assert "contenteditable" not in a
+    assert "<span>b</span>" in out and "<em>c</em>" in out
+
+
+@pytest.mark.parametrize("mount", [False, True])
+@pytest.mark.parametrize("spelling", ["CONTENTEDITABLE", "ContentEditable", 'contenteditable="true" contenteditable="false"',
+                                      'contenteditable="false" contenteditable="true"'])
+def test_contenteditable_goes_in_any_letter_case_and_when_repeated(spelling, mount):
+    """The upper-case and repeated spellings pass on main without the contenteditable rule's help too: html.parser lowercases
+    attribute names and keeps one of two duplicates before the sanitiser sees them. They pin that behaviour; they do not test the rule."""
+    out = sanitize(f"<p>a<span {spelling}>b</span></p>", mount=mount)
+    assert "contenteditable" not in out.lower()
+    assert "<span>b</span>" in out
 
 
 # ── attributes ──────────────────────────────────────────────────────────────
@@ -166,7 +197,7 @@ def test_an_attribute_that_only_looks_like_srcset_or_ping_stays():
 
 
 def test_the_list_of_dropped_attributes_is_what_the_docstring_says():
-    assert DROPPED_ATTRS == {"srcdoc", "formaction", "srcset", "ping"}
+    assert DROPPED_ATTRS == {"srcdoc", "formaction", "srcset", "ping", "contenteditable"}
 
 
 def test_an_attribute_that_only_looks_like_on_stays():
@@ -427,3 +458,421 @@ def test_a_tree_nested_hundreds_of_levels_deep_is_cleaned_like_a_shallow_one():
     assert out.count("<blockquote>") == n and "<p>KEEP<img/></p>" in out
     assert "script" not in out and "onerror" not in out and "javascript:" not in out
     assert len(log) == 3
+
+
+@pytest.mark.parametrize("decl", ["-webkit-user-modify: read-write", "-WEBKIT-USER-MODIFY:read-write-plaintext-only",
+                                  "-moz-user-modify: read-write", "user-modify: read-write",
+                                  "-webkit-user-\\6d odify: read-write", "/*;*/-webkit-user-modify: read-write",
+                                  "/*:*/-webkit-user-modify: read-write", "/* a:b */ -webkit-user-modify:read-write",
+                                  "/*:*/-webkit-user-\\6d odify: read-write"])
+def test_a_style_attribute_cannot_make_text_editable(decl):
+    """CSS makes a span editable in Chromium and WebKit (tests/page/test_user_modify.py), and the page's
+    closest('[contenteditable="true"]') does not see it. The other declarations of the attribute stay."""
+    out = sanitize(f'<p>a<span style="color: red; {decl}; width: 3px">b</span></p>')
+    assert "modify" not in out.lower() and "\\" not in out
+    assert "color: red" in out and "width: 3px" in out
+
+
+@pytest.mark.parametrize("style, want", [
+    ('content: "a;\\201C"; color: red', " color: red"),
+    ("content: 'a;\\201C'; color: red", " color: red"),
+    ('content: "a;b"; color: red', 'content: "a;b"; color: red'),
+    ('content: "a;-webkit-user-modify: read-write"; color: red', " color: red"),
+    ('content: "a\\";-webkit-user-modify: read-write"; color: red', " color: red"),
+    ("/* ; \" */ color: red; -webkit-user-modify: read-write", "/* ; \" */ color: red"),
+    ('content: "a\n; -webkit-user-modify: read-write; color: red', 'content: "a\n; color: red'),
+    ('content: "a;\\201C; -webkit-user-modify: read-write; width: 3px', None),
+    ("background: url(data:image/png;base64,AAA); -webkit-user-modify: read-write", "background: url(data:image/png;base64,AAA)"),
+    ("background: url(data:image/png;base64,AAA); color: red", "background: url(data:image/png;base64,AAA); color: red"),
+    ("a: url(x;-webkit-user-modify: read-write); color: red", " color: red"),
+    ("a: [x;-webkit-user-modify: read-write]; color: red", " color: red"),
+    ("a: {x;-webkit-user-modify: read-write}; color: red", " color: red"),
+    ("a: f(g(x;y);z); -webkit-user-modify: read-write; color: red", "a: f(g(x;y);z); color: red"),
+    ("a: f(x; color: red; -webkit-user-modify: read-write", None),
+    ("a: b); -webkit-user-modify: read-write; color: red", "a: b); color: red"),
+    ('content: "("; -webkit-user-modify: read-write; color: red', 'content: "("; color: red'),
+    ("/*(*/ -webkit-user-modify: read-write; color: red", " color: red"),
+])
+def test_the_style_filter_splits_on_the_semicolons_the_browser_splits_on(style, want):
+    """A `;` inside a CSS string or a comment does not end a declaration: a declaration dropped whole leaves the next one
+    intact, never a truncated rest. A string a newline ends is over, as in a browser. `want` None: the whole text is one
+    declaration for the browser, and nothing is kept.
+    Whatever the split, nothing with user-modify or a backslash comes out."""
+    out = sanitize(f'<p><span style="{html.escape(style)}">b</span></p>')
+    assert "user-modify" not in out.lower() and "\\" not in out
+    span = next(a for t, a in tags_of(out) if t == "span")
+    assert span.get("style") == want
+
+
+def test_a_declaration_with_a_backslash_goes_and_its_neighbours_stay():
+    """The backslash rule is wider than it needs to be (an escape in `content` is harmless) and drops ordinary
+    declarations too; this pins that, so a narrowing is a decision and not an accident."""
+    out = sanitize('<span style=\'color: red; content:"\\201C"; width: 3px\'>b</span>')
+    assert "color: red" in out and "width: 3px" in out
+    assert "content" not in out and "\\" not in out
+
+
+def test_simple_mode_logs_a_trimmed_style_like_mount_mode():
+    log = []
+    sanitize('<span style="color: red; -webkit-user-modify: read-write">x</span>', log=log)
+    assert log == ["  - style trimmed on <span>"]
+    log = []
+    sanitize('<span style="color: red">x</span>', log=log)
+    assert log == []
+
+
+@pytest.mark.parametrize("style", [
+    "-webkit-user-modify:read-write",
+    "-webkit-user-modify:read-write;",
+    ";;-webkit-user-modify:read-write",
+    "/* c */; -webkit-user-modify:read-write",
+    "/* a */ ;; /* -webkit-user-modify:read-write */",
+    "/* a */ -webkit-user-modify:read-write; /* b */",
+    "-webkit-user-modify:read-write; /* unterminated",
+    "-WEBKIT-USER-MODIFY:read-write ;\t\n; ",
+    "-webkit-user-\\6d odify:read-write;;",
+    "-moz-user-modify:read-write; -webkit-user-modify:read-write",
+])
+def test_a_style_the_filter_empties_is_removed(style):
+    """No declaration left, only separators, comments and white space: the attribute goes, not a stub of it."""
+    log = []
+    out = sanitize(f'<span style="{html.escape(style)}">x</span>', log=log)
+    assert out == "<span>x</span>"
+    assert "  - style trimmed on <span>" in log
+
+
+@pytest.mark.parametrize("style, want", [
+    ("color: red; -webkit-user-modify:read-write; ;;", "color: red; ;;"),
+    ('content: ";"; -webkit-user-modify:read-write', 'content: ";"'),
+    ('content: "/*"; -webkit-user-modify:read-write', 'content: "/*"'),
+    ("-webkit-user-modify:read-write; width: 3px", " width: 3px"),
+    ("-webkit-user-modify:read-write; /* c */ width: 3px", " /* c */ width: 3px"),
+])
+def test_a_style_with_a_declaration_left_keeps_the_attribute(style, want):
+    out = sanitize(f'<span style="{html.escape(style)}">x</span>')
+    assert next(a for t, a in tags_of(out) if t == "span").get("style") == want
+
+
+def test_a_style_only_a_comment_or_separators_that_the_filter_did_not_touch_is_left_alone():
+    """Only what the filter trimmed is judged: a style it did not change comes out as it came in."""
+    out = sanitize('<span style=";; /* c */">x</span>')
+    assert next(a for t, a in tags_of(out) if t == "span").get("style") == ";; /* c */"
+
+
+def test_mount_mode_removes_a_style_the_allow_list_empties():
+    """Not part of the simple-mode filter: `_mount_attrs` did this before the filter was string-aware; kept as a guard."""
+    log = []
+    out = sanitize('<span style="-webkit-user-modify:read-write">x</span>', log=log, mount=True)
+    assert out == "<span>x</span>"
+    assert "  - style trimmed on <span>" in log
+
+
+def test_no_split_of_a_style_lets_user_modify_or_a_backslash_through():
+    """Bypass neighbours of the string- and comment-aware split: quotes, comments, escapes and newlines in every order
+    around a declaration that makes text editable. The split may differ from a browser's; the output may not carry the name."""
+    pieces = ['"', "'", "/*", "*/", ";", "\\", "\n", ":", " ", "(", ")", "[", "]", "{", "}", "color: red", "-webkit-user-modify: read-write", "user-modify",
+              "-moz-user-\\6d odify:read-write", "a", "url(", "URL( ", "url(/*", "url(it's", "@", "#", "\\75 ", "@url(", "#url(", "\\3a ",
+              "\\41\n", "\\\n", "\\\r\n", "\r", "\f", "url", "<!--", "\\\f", "\x00"]
+    rng = random.Random(96)
+    for _ in range(3000):
+        style = "".join(rng.choice(pieces) for _ in range(rng.randint(1, 12)))
+        out = sanitize(f'<span style="{html.escape(style)}">x</span>')
+        assert "user-modify" not in out.lower() and "\\" not in out, style
+        assert sanitize(out) == out, style
+
+
+@pytest.mark.parametrize("style, want", [
+    ("color: red; -webkit-user-modify: read-write;", "color: red;"),
+    ("color: red;", "color: red;"),
+    ('content: "/*"; color: red; -webkit-user-modify: read-write', 'content: "/*"; color: red'),
+    ('content: "*/"; color: red; -webkit-user-modify: read-write', 'content: "*/"; color: red'),
+])
+def test_the_edges_of_the_split_a_trailing_semicolon_and_comment_marks_inside_a_string(style, want):
+    out = sanitize(f'<span style="{html.escape(style)}">x</span>')
+    assert next(a for t, a in tags_of(out) if t == "span").get("style") == want
+
+
+@pytest.mark.parametrize("style, want", [
+    ("background:url(/*a.png);-webkit-user-modify:x;color:red", "background:url(/*a.png);color:red"),
+    ("background:url(it's.png);-webkit-user-modify:x;color:red", "background:url(it's.png);color:red"),
+    ('background:url(a"b.png);-webkit-user-modify:x;color:red', 'background:url(a"b.png);color:red'),
+    ("background:URL(/*a.png);-webkit-user-modify:x;color:red", "background:URL(/*a.png);color:red"),
+    ("background:url( /*a.png );-webkit-user-modify:x;color:red", "background:url( /*a.png );color:red"),
+    ("background:url(\n/*a.png);-webkit-user-modify:x;color:red", "background:url(\n/*a.png);color:red"),
+    ("a:image-set(url(/*a.png) 1x);-webkit-user-modify:x;color:red", "a:image-set(url(/*a.png) 1x);color:red"),
+    ("a:url(/*a.png);b:url(it's.png);-webkit-user-modify:x;color:red", "a:url(/*a.png);b:url(it's.png);color:red"),
+    ("a:url(x;-webkit-user-modify:x);color:red", "color:red"),
+    ("-webkit-user-modify:x;a:url(/*b);color:red", "a:url(/*b);color:red"),
+    ("a:url(/*b", "a:url(/*b"),
+])
+def test_an_unquoted_url_is_one_token_up_to_its_closing_bracket(style, want):
+    """CSS reads `url(` followed by no quote as a single token that ends at the first `)`: a `/*` or a quote inside it
+    starts no comment and no string, so the declarations after it stay, as in a browser."""
+    out = sanitize(f'<p><span style="{html.escape(style)}">b</span></p>')
+    assert "user-modify" not in out.lower()
+    assert next(a for t, a in tags_of(out) if t == "span").get("style") == want
+
+
+@pytest.mark.parametrize("style, want", [
+    ("a:xurl(/*b*/);-webkit-user-modify:x;color:red", "a:xurl(/*b*/);color:red"),
+    ("a:xurl(/*b);-webkit-user-modify:x;color:red", None),
+    ("a:x-url(it's);-webkit-user-modify:x;color:red", None),
+    ('a:url("/*b");-webkit-user-modify:x;color:red', 'a:url("/*b");color:red'),
+    ("a:url( 'it;s');-webkit-user-modify:x;color:red", "a:url( 'it;s');color:red"),
+    ('a:url( "b)c.png");color:red;-webkit-user-modify:x', 'a:url( "b)c.png");color:red'),
+    ("a:url(\n'b)c.png');color:red;-webkit-user-modify:x", "a:url(\n'b)c.png');color:red"),
+    ('content:"url(/*";-webkit-user-modify:x;color:red', 'content:"url(/*";color:red'),
+    ("/*url(*/-webkit-user-modify:x;color:red", "color:red"),
+    ("a:url(b\\);c);color:red", "color:red"),
+    ("a:€url(/*b*/);-webkit-user-modify:x;color:red", "a:€url(/*b*/);color:red"),
+    ("a:€url(/*b);-webkit-user-modify:x;color:red", None),
+])
+def test_only_a_plain_unquoted_url_is_read_as_a_token(style, want):
+    """A function whose name only ends in `url`, a `url(` with a string, one inside a string or a comment keeps the
+    string and comment rules. `want` None: the text is one declaration for the browser, and no style is left."""
+    out = sanitize(f'<p><span style="{html.escape(style)}">b</span></p>')
+    assert "user-modify" not in out.lower()
+    assert next(a for t, a in tags_of(out) if t == "span").get("style") == want
+
+
+# --- ticket 110: the split is checked against a reference that follows the CSS Syntax 3 tokenizer --------------------------------
+
+def _css_reference_split(s: str) -> list[str]:
+    """`s` cut at the `;` that end a declaration, by the CSS Syntax 3 tokenizer (4.3, with the 3.3 preprocessing read in place: CR and FF are newlines, NUL is a name character) and its block nesting: a written
+    out second implementation that shares no code with `_declarations`. A `(`, `[`, `{` and a function open a block that only
+    its own closer ends; a closer that does not match the innermost block is a token of its own; a block left open runs to the end."""
+    n, i, cuts, blocks = len(s), 0, [], []
+    ws, hexd = " \t\n\r\f", "0123456789abcdefABCDEF"
+
+    def at(k):
+        return s[k] if k < n else ""
+
+    def valid_escape(k):
+        return at(k) == "\\" and at(k + 1) not in ("\n", "\r", "\f")
+
+    def name_char(c):
+        return bool(c) and (c.isascii() and (c.isalnum() or c in "_-") or ord(c) >= 0x80 or c == "\x00")
+
+    def name_start(c):
+        return bool(c) and (c.isascii() and (c.isalpha() or c == "_") or ord(c) >= 0x80 or c == "\x00")
+
+    def start_ident(k):
+        c = at(k)
+        if c == "-":
+            return name_start(at(k + 1)) or at(k + 1) == "-" or valid_escape(k + 1)
+        return name_start(c) or valid_escape(k)
+
+    def digit(c):
+        return c in tuple("0123456789")
+
+    def start_number(k):
+        c = at(k)
+        if c in "+-":
+            return digit(at(k + 1)) or (at(k + 1) == "." and digit(at(k + 2)))
+        return digit(c) if c != "." else digit(at(k + 1))
+
+    def escape(k):
+        """(text, next index) of the escape that starts after the backslash at k - 1."""
+        c = at(k)
+        if not c:
+            return "\ufffd", k
+        if c in hexd:
+            j = k
+            while j < k + 6 and at(j) and at(j) in hexd:
+                j += 1
+            v = int(s[k:j], 16)
+            if at(j) == "\r" and at(j + 1) == "\n":
+                j += 2
+            elif at(j) and at(j) in ws:
+                j += 1
+            return ("\ufffd" if v == 0 or v > 0x10FFFF or 0xD800 <= v <= 0xDFFF else chr(v)), j
+        return c, k + 1
+
+    def name(k):
+        out = []
+        while True:
+            if name_char(at(k)):
+                out.append(at(k))
+                k += 1
+            elif valid_escape(k):
+                t, k = escape(k + 1)
+                out.append(t)
+            else:
+                return "".join(out), k
+
+    def bad_url(k):
+        while at(k) and at(k) != ")":
+            k = escape(k + 1)[1] if valid_escape(k) else k + 1
+        return k + 1 if at(k) == ")" else k
+
+    def url(k):
+        while at(k) and at(k) in ws:
+            k += 1
+        while True:
+            c = at(k)
+            if c in ("", ")"):
+                return k + 1 if c else k
+            if c in ws:
+                while at(k) and at(k) in ws:
+                    k += 1
+                return k + 1 if at(k) == ")" else (k if not at(k) else bad_url(k))
+            if c in "\"'(" or (c.isascii() and 0 < ord(c) < 0x20 and c not in "\t\n\r\f") or ord(c) == 0x7F:
+                return bad_url(k)
+            if c == "\\":
+                if not valid_escape(k):
+                    return bad_url(k)
+                k = escape(k + 1)[1]
+            else:
+                k += 1
+
+    while i < n:
+        c = s[i]
+        if c in ws:
+            while at(i) and at(i) in ws:
+                i += 1
+        elif s.startswith("/*", i):
+            end = s.find("*/", i + 2)
+            i = n if end < 0 else end + 2
+        elif c in "\"'":
+            i += 1
+            while i < n and s[i] != c and s[i] not in "\n\r\f":
+                if s[i] == "\\":
+                    if s.startswith("\r\n", i + 1):
+                        i += 3
+                    elif at(i + 1) in ("\n", "\r", "\f") and i + 1 < n:
+                        i += 2
+                    else:
+                        i = escape(i + 1)[1]
+                else:
+                    i += 1
+            if at(i) == c:
+                i += 1
+        elif c == "#":
+            i = name(i + 1)[1] if name_char(at(i + 1)) or valid_escape(i + 1) else i + 1
+        elif c in "([{":
+            blocks.append({"(": ")", "[": "]", "{": "}"}[c])
+            i += 1
+        elif c in ")]}":
+            if blocks and blocks[-1] == c:
+                blocks.pop()
+            i += 1
+        elif c == ";":
+            if not blocks:
+                cuts.append(i)
+            i += 1
+        elif c == "@":
+            i = name(i + 1)[1] if start_ident(i + 1) else i + 1
+        elif c in "+-." and start_number(i) or digit(c):
+            j = i + 1 if c in "+-" else i
+            while digit(at(j)):
+                j += 1
+            if at(j) == "." and digit(at(j + 1)):
+                j += 1
+                while digit(at(j)):
+                    j += 1
+            if at(j) in ("e", "E") and (digit(at(j + 1)) or at(j + 1) in ("+", "-") and digit(at(j + 2))):
+                j += 2
+                while digit(at(j)):
+                    j += 1
+            i = name(j)[1] if start_ident(j) else j
+        elif c == "-" and s.startswith("-->", i):
+            i += 3
+        elif c == "<" and s.startswith("<!--", i):
+            i += 4
+        elif start_ident(i):
+            word, j = name(i)
+            if at(j) == "(":
+                j += 1
+                if word.lower() == "url":
+                    k = j
+                    while at(k) in ws and at(k) and at(k + 1) in ws and at(k + 1):
+                        k += 1
+                    if at(k) in ("\"", "'") or (at(k) in ws and at(k) and at(k + 1) in ("\"", "'")):
+                        blocks.append(")")
+                        i = j
+                    else:
+                        i = url(j)
+                else:
+                    blocks.append(")")
+                    i = j
+            else:
+                i = j
+        else:
+            i += 1
+    parts, start = [], 0
+    for k in cuts:
+        parts.append(s[start:k])
+        start = k + 1
+    parts.append(s[start:])
+    return parts
+
+
+SPLIT_CASES = [
+    # (style, the declarations a browser sees)
+    ("a:url(b;c);d:e", ["a:url(b;c)", "d:e"]),
+    ("a:url(/*b)*/;c:d", ["a:url(/*b)*/", "c:d"]),          # a url token ends at its first `)`: the comment never starts
+    ("a:@url(/*b)*/;c:d", ["a:@url(/*b)*/;c:d"]),               # C1: an at-keyword, then a `(` block: `/*b)*/` is a comment, the block is open
+    ("a:#url(/*b)*/;c:d", ["a:#url(/*b)*/;c:d"]),               # C1: a hash, the same
+    ("a:#url(it's;b);c:d", ["a:#url(it's;b);c:d"]),            # C1: the quote opens a string in the block
+    ("a:\\75 rl(/*b)*/;c:d", ["a:\\75 rl(/*b)*/", "c:d"]),  # C2: the escape spells `u`: `\75 rl(` is a url token
+    ("a:\\75 url(/*b)*/;c:d", ["a:\\75 url(/*b)*/;c:d"]),      # C2: the escape is part of the name `uurl`: a function, a comment
+    ("a:b\\:url(/*b)*/;c:d", ["a:b\\:url(/*b)*/;c:d"]),        # C2: the same, with an escaped colon
+    ("a:u\\72 l(/*b)*/;c:d", ["a:u\\72 l(/*b)*/", "c:d"]),  # an escape inside the name
+    ("a:(];b);c:d", ["a:(];b)", "c:d"]),                        # C3: `]` does not close a `(` block
+    ("a:[);b];c:d", ["a:[);b]", "c:d"]),
+    ("a:{(};b)};c:d", ["a:{(};b)}", "c:d"]),
+    ("a:(b;c)];d:e", ["a:(b;c)]", "d:e"]),                      # C3: a closer with no opener is ignored
+    ("a:url(b;c;d", ["a:url(b;c;d"]),
+    ("a:b(;c)d;e:f", ["a:b(;c)d", "e:f"]),
+    ("a:1url(/*b)*/;c:d", ["a:1url(/*b)*/;c:d"]),
+    ("a:-url(/*b)*/;c:d", ["a:-url(/*b)*/;c:d"]),
+    ("a: url(/*b)*/;c:d", ["a: url(/*b)*/", "c:d"]),
+    ("a:.url(/*b)*/;c:d", ["a:.url(/*b)*/", "c:d"]),
+    # ticket 116: a hex escape in a string takes one white space after it, a newline included
+    ('a:"\\41\n;b:c";d:e', ['a:"\\41\n;b:c"', "d:e"]),
+    ('a:"\\41\r\n;b:c";d:e', ['a:"\\41\r\n;b:c"', "d:e"]),
+    ('a:"\\\r\n;b:c";d:e', ['a:"\\\r\n;b:c"', "d:e"]),         # `\`+CRLF is one line continuation
+    ('a:"\\\r;b:c";d:e', ['a:"\\\r;b:c"', "d:e"]),
+    ('a:"\\\f;b:c";d:e', ['a:"\\\f;b:c"', "d:e"]),
+    ('a:"b\rc;d:e', ['a:"b\rc', "d:e"]),                       # a bare CR or FF ends a string, as a newline does
+    ('a:"b\fc;d:e', ['a:"b\fc', "d:e"]),
+    ("a:url ;b:c)d;e:f", ["a:url ", "b:c)d", "e:f"]),           # a `url` with no `(` is a name, not a url token
+    ("a:\\\nurl(/*);b:c", ["a:\\\nurl(/*)", "b:c"]),             # `\`+newline is no escape in a name: `url(` is a url token
+    ("a:<!--url(/*b)*/;c:d", ["a:<!--url(/*b)*/", "c:d"]),    # CDO, then a url token
+    # ticket 124: CR and FF are newlines (CSS 3.3), so `\\` before one is no escape; NUL is U+FFFD, a name character
+    ("a:b\\\rurl(/*);c:d", ["a:b\\\rurl(/*)", "c:d"]),
+    ("a:b\\\furl(/*);c:d", ["a:b\\\furl(/*)", "c:d"]),
+    ("a:b\\\r\nurl(/*);c:d", ["a:b\\\r\nurl(/*)", "c:d"]),
+    ("a:b\x00url(/*);c:d", ["a:b\x00url(/*);c:d"]),            # a function called `b\ufffdurl`, not a url token: the comment opens
+    ("a:\x00url(/*);c:d", ["a:\x00url(/*);c:d"]),
+]
+
+
+@pytest.mark.parametrize("style, want", SPLIT_CASES)
+def test_the_reference_splitter_reads_the_cases_as_a_browser_does(style, want):
+    """Guards the reference of the next test: a reference that is wrong would let a wrong split pass."""
+    assert _css_reference_split(style) == want
+
+
+@pytest.mark.parametrize("style, want", SPLIT_CASES)
+def test_a_style_is_cut_where_the_css_tokenizer_cuts_it(style, want):
+    from sheafmd.sanitize import _declarations
+    assert _declarations(style) == want
+
+
+def test_the_split_of_a_style_equals_the_reference_split():
+    """Whatever the split, the name is searched in each piece whole (the test above this one); this one sees a split that
+    drifts from a browser's, which would keep too little or too much without ever hiding the name."""
+    from sheafmd.sanitize import _declarations
+    pieces = ['"', "'", "/*", "*/", ";", "\\", "\n", ":", " ", "(", ")", "[", "]", "{", "}", "@", "#", "-", ".", "1", "a", "u", "url(", "URL(",
+              "rl(", "\\75 ", "\\75", "\\3a ", "\\:", "url( ", "e", "color: red", "-webkit-user-modify: read-write", "€", "\r\n",
+              "\\41\n", "\\\n", "url", "\\41 ", "\r", "\f", "<!--", "\\\r", "\\\f", "\x00"]
+    rng = random.Random(110)
+    for _ in range(20000):
+        style = "".join(rng.choice(pieces) for _ in range(rng.randint(1, 12)))
+        assert _declarations(style) == _css_reference_split(style), repr(style)
+
+
+def test_a_lone_surrogate_escape_reads_as_the_replacement_character():
+    from sheafmd.sanitize import _unescaped
+    assert _unescaped("\\d800") == "\ufffd" and _unescaped("\\dfff") == "\ufffd" and _unescaped("\\0") == "\ufffd" and _unescaped("\\\x00") == "\ufffd"

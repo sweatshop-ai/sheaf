@@ -184,6 +184,7 @@ def test_two_creates_of_one_name_with_different_homes_make_one_file(team, work, 
     monkeypatch.setattr(mcp, "create_file", first_writes)
     answers.append(call(browser, "create", token=tokens["thierry"], doc=f"work/{SHARED}", text=PRIVATE))
     threads[0].join(10)
+    assert not threads[0].is_alive(), "the second create did not finish"
     assert sorted(is_error for is_error, _ in answers) == [False, True], answers
     assert (work / HOME).exists() and not (work / SHARED).exists()
 
@@ -209,6 +210,7 @@ def test_a_move_out_of_private_leaves_the_folder_a_create_just_made(team, work, 
     monkeypatch.setattr(mcp, "create_file", create_while_moving)
     is_error, got = call(browser, "create", token=tokens["thierry"], doc=f"work/{SHARED}", text=PRIVATE)
     threads[0].join(10)
+    assert not threads[0].is_alive(), "the poll did not finish"
     assert not is_error, got
     assert (work / HOME).exists() and (work / "thinkingtoo/tiroir/other.md").exists()
 
@@ -762,6 +764,7 @@ def test_a_comment_written_as_the_poll_moves_the_file_lands_in_the_one_file(team
                                    "start": start, "end": end, "quote": "A quote", "body": "Which clause?"},
                     member=THIERRY)
     threads[0].join(10)
+    assert not threads[0].is_alive(), "the poll did not finish"
     assert got.status == 200, got.text
     assert not (work / SHARED).exists() and "Which clause?" in (work / HOME).read_text(encoding="utf-8")
 
@@ -925,6 +928,7 @@ def test_a_door_update_and_a_poll_at_once_leave_one_file_with_the_update(team, w
     is_error, got = call(browser, "update", token=tokens["thierry"], doc=f"work/{SHARED}",
                          text=PRIVATE + "\nMore.\n", expected_hash=md_hash(PRIVATE))
     threads[0].join(10)
+    assert not threads[0].is_alive(), "the poll did not finish"
     assert not is_error and got["doc"] == f"work/{SHARED}", got
     assert (work / HOME).read_text(encoding="utf-8").endswith("More.\n") and not (work / SHARED).exists()
 
@@ -950,6 +954,7 @@ def test_a_door_reply_with_no_page_open_and_a_poll_at_once_lands_in_the_moved_fi
     is_error, got = call(browser, "reply", token=tokens["thierry"], doc=f"work/{SHARED}", id="c1",
                          text="The second page.")
     threads[0].join(10)
+    assert not threads[0].is_alive(), "the poll did not finish"
     assert not is_error, got
     assert "The second page." in (work / HOME).read_text(encoding="utf-8") and not (work / SHARED).exists()
 
@@ -1035,6 +1040,7 @@ def test_a_reader_during_a_share_save_never_gets_the_page_rendered_from_the_priv
     monkeypatch.setattr(e.live, "_after_write", read_between)
     assert tick(team, work, "Share", THIERRY).status == 200
     threads[0].join(10)
+    assert not threads[0].is_alive(), "the read did not finish"
     assert pages[0].status == 200
     assert "data:image/png;base64," not in pages[0].text and "missing image: seal.png" in pages[0].text
 
@@ -1055,6 +1061,7 @@ def test_a_door_read_during_a_move_finds_the_file(team, work, browser, tokens, m
     monkeypatch.setattr(team.hub.roots, "document", resolve_then_poll)
     is_error, got = call(browser, "read", token=tokens["thierry"], doc=f"work/{SHARED}")
     threads[0].join(10)
+    assert not threads[0].is_alive(), "the poll did not finish"
     assert not is_error, got
     assert got["text"].startswith("---") and (work / HOME).exists() and not (work / SHARED).exists()
 
@@ -1081,6 +1088,7 @@ def test_two_writers_of_one_name_each_commit_their_own_write(hub, browser, tmp_p
     got = box.post("/_/save", {"doc": f"sheaves/{SHARED}", "hash": md_hash(PRIVATE),
                                "edits": [{"i": i, "html": "<p>A quote, edited.</p>"}]}, member=THIERRY)
     threads[0].join(10)
+    assert not threads[0].is_alive(), "the second save did not finish"
     assert got.status == 200 and answers[0].status == 200, (got.text, answers[0].text)
     log = git(repo, "log", "--format=%an|%s").splitlines()
     assert log == [f"{hub.person}|edit: {HOME}", f"Thierry|edit: {HOME}", "the box|first"], log
@@ -1315,6 +1323,7 @@ def test_a_comment_committed_while_the_owner_withdraws_the_share_is_its_own_comm
                                       "block": blk, "start": start, "end": end, "quote": "A quote", "body": "Mine."})
     assert threads, got.text
     threads[0].join(20)
+    assert not threads[0].is_alive(), "the withdrawal did not finish"
     assert got.status == 200 and answers[0].status == 200, (got.text, answers[0].text)
     log = git(repo, "log", "--format=%an|%s").splitlines()
     assert log == [f"Thierry|move: {SHARED} -> {HOME}", f"{hub.person}|comment: {SHARED}", "the box|first"], log

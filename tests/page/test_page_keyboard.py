@@ -7,7 +7,7 @@ are drawn by the system; the test leaves ACCESSORY px for them), and whether iOS
 test shows the cause the page controls: a 14px font, and a page wider than the screen). Only a real iPhone shows it."""
 import pytest
 
-from pagehelp import at, select, select_by_touch
+from pagehelp import at, open_with_comment, select, select_by_touch
 
 pytestmark = pytest.mark.page
 
@@ -167,13 +167,7 @@ def test_the_thread_stays_readable_above_the_reply_field_in_a_short_frame(touch_
     in the text, not docked, and its height is capped. The field and the buttons took all of it and squeezed the
     comment to a sliver (its author line cut through by the field, its text out of sight). The thread keeps a
     comment's worth of room, and the popover scrolls instead."""
-    from sheafmd import comments as rdc
-    from sheafmd.source import update_file
-    site = touch_tab.site
-    site.file.write_text(MD, encoding="utf-8")
-    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "Second paragraph"), "Second paragraph",
-                                                     "Nearly good, only a pity about my name.", "Ada", "2026-10-25T21:01")[0])
-    page = touch_tab.open().page
+    page = open_with_comment(touch_tab, MD, "Second paragraph", "Nearly good, only a pity about my name.", when="2026-10-25T21:01")
     page.set_viewport_size({"width": 390, "height": 320})
     page.click(".rd-badge")
     page.wait_for_selector(POP + " textarea")
@@ -185,14 +179,11 @@ def test_the_thread_stays_readable_above_the_reply_field_in_a_short_frame(touch_
     assert got["scroll"][1] <= got["field"][0] + 0.5, got   # and the field starts below it
 
 
-def test_a_long_thread_leaves_the_field_in_reach_above_the_keyboard(phone):
+def test_a_long_thread_leaves_the_field_in_reach_above_the_keyboard(touch_tab):
     """The thread gives way to the form, down to its floor: with a long comment and the keyboard up, the field and
     its buttons are still inside the docked popover and above the keyboard."""
-    from sheafmd import comments as rdc
-    from sheafmd.source import update_file
-    update_file(phone.site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "Second paragraph"), "Second paragraph",
-                                                           "Nearly good, only a pity about my name. " * 20, "Ada", "2026-10-25T21:01")[0])
-    page = phone.open().page
+    touch_tab.page.add_init_script(FAKE_VV)
+    page = open_with_comment(touch_tab, MD, "Second paragraph", "Nearly good, only a pity about my name. " * 20, when="2026-10-25T21:01")
     page.click(".rd-badge")
     page.wait_for_selector(POP + " textarea")
     page.focus(POP + " textarea")
@@ -205,13 +196,7 @@ def test_a_long_thread_leaves_the_field_in_reach_above_the_keyboard(phone):
 
 def test_a_short_thread_is_not_stretched_to_the_floor(touch_tab):
     """The floor only stops the thread giving way further; a thread shorter than it keeps the height it has."""
-    from sheafmd import comments as rdc
-    from sheafmd.source import update_file
-    site = touch_tab.site
-    site.file.write_text(MD, encoding="utf-8")
-    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "Second paragraph"), "Second paragraph",
-                                                     "Short.", "Ada", "2026-10-25T21:01")[0])
-    page = touch_tab.open().page
+    page = open_with_comment(touch_tab, MD, "Second paragraph", "Short.", when="2026-10-25T21:01")
     page.click(".rd-badge")
     page.wait_for_selector(POP + " .rd-scroll")
     got = page.evaluate("(() => { const s = document.querySelector('#rd-popover .rd-scroll'); return [s.clientHeight, s.scrollHeight]; })()")
@@ -221,13 +206,7 @@ def test_a_short_thread_is_not_stretched_to_the_floor(touch_tab):
 def test_the_thread_floor_follows_the_width_the_thread_wraps_at(touch_tab):
     """A thread that is one line wide and three lines narrow: the floor is measured again when the frame is resized
     (a phone turned, an embedding frame resized), not kept from the first width."""
-    from sheafmd import comments as rdc
-    from sheafmd.source import update_file
-    site = touch_tab.site
-    site.file.write_text(MD, encoding="utf-8")
-    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "Second paragraph"), "Second paragraph",
-                                                     "Nearly good, only a pity about my name.", "Ada", "2026-10-25T21:01")[0])
-    page = touch_tab.open().page
+    page = open_with_comment(touch_tab, MD, "Second paragraph", "Nearly good, only a pity about my name.", when="2026-10-25T21:01")
     page.click(".rd-badge")
     page.wait_for_selector(POP + " .rd-scroll")
     page.set_viewport_size({"width": 230, "height": 844})
@@ -240,12 +219,7 @@ def test_the_thread_floor_follows_the_width_the_thread_wraps_at(touch_tab):
 
 def test_the_thread_floor_follows_a_resize_with_a_mouse_too(tab):
     """The same, on a page with no touch screen (an embedding frame narrowed on a desktop)."""
-    from sheafmd import comments as rdc
-    from sheafmd.source import update_file
-    tab.site.file.write_text(MD, encoding="utf-8")
-    update_file(tab.site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "Second paragraph"), "Second paragraph",
-                                                         "Nearly good, only a pity about my name.", "Ada", "2026-10-25T21:01")[0])
-    page = tab.open().page
+    page = open_with_comment(tab, MD, "Second paragraph", "Nearly good, only a pity about my name.", when="2026-10-25T21:01")
     page.click(".rd-badge")
     page.wait_for_selector(POP + " .rd-scroll")
     page.set_viewport_size({"width": 230, "height": 844})

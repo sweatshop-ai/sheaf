@@ -9,9 +9,11 @@ to a client. This module takes pandoc's output and removes what can run or phone
     elements removed with their content   script style iframe frame frameset object
                                           embed applet base meta link form button
                                           textarea select template noscript
-    input                                 removed unless type="checkbox" (task lists)
+    input                                 removed unless its type is exactly "checkbox", ASCII case
+                                          aside (task lists)
     attributes removed                    every on*, srcdoc, formaction, srcset, ping
-                                          (srcset and ping hold URLs outside the list below)
+                                          (srcset and ping hold URLs outside the list below),
+                                          contenteditable (the page sets it, never the document)
     href src action poster background     kept only for a relative URL, a fragment,
     xlink:href                            http:, https:, mailto:, file:, and
                                           data:image/(png|jpeg|gif|webp) on img src
@@ -61,7 +63,9 @@ _ANIMATED_ATTR = re.compile(r"^(?:xlink:)?href$|^on", re.I)
 URL_ATTRS = frozenset({"href", "src", "action", "poster", "background", "xlink:href"})
 # Attributes that go whatever they hold. srcset (several URLs, each loaded) and ping (a
 # POST to each URL on a click) carry addresses that 9.5's list does not allow.
-DROPPED_ATTRS = frozenset({"srcdoc", "formaction", "srcset", "ping"})
+# contenteditable is the page's own to set (setEditing): a surface the document makes
+# editable is outside what the page guards.
+DROPPED_ATTRS = frozenset({"srcdoc", "formaction", "srcset", "ping", "contenteditable"})
 SAFE_SCHEMES = frozenset({"http", "https", "mailto", "file"})
 _SAFE_DATA = re.compile(r"^data:image/(?:png|jpeg|gif|webp)[;,]", re.I)
 _SCHEME = re.compile(r"^([^/?#]*):")
@@ -173,6 +177,89 @@ def _flatten_deep(soup, log: list[str]) -> None:
         stack.extend((child, depth + 1) for child in node.contents)
 
 
+_EDITABLE_OR_ESCAPE = re.compile(r"user-modify|\\", re.I)
+
+
+_UNQUOTED_URL = re.compile(r"(?![ \t\n\r\f]*[\"'])[ \t\n\r\f]*(?:\\.|[^)\\])*(?:\)|\\?\Z)", re.S)
+_NAME_RUN = re.compile(r"(?:[\w\-\x00]|[^\x00-\x7f]|\\(?:[0-9a-fA-F]{1,6}(?:\r\n|[ \t\n\r\f])?|[^\n\r\f]|\Z))+")
+_ESCAPE = re.compile(r"\\(?:([0-9a-fA-F]{1,6})(?:\r\n|[ \t\n\r\f])?|(.))", re.S)
+_STRING_ESCAPE = re.compile(r"\\(?:[0-9a-fA-F]{1,6}(?:\r\n|[ \t\n\r\f])?|\r\n|.)", re.S)
+_CLOSER = {"(": ")", "[": "]", "{": "}"}
+
+
+def _unescaped(name: str) -> str:
+    """A CSS name with its escapes read (`\\75 rl` is `url`), as CSS Syntax 3 does when it decides what a name is."""
+    return _ESCAPE.sub(lambda m: (chr(int(m[1], 16)) if m[1] and 0 < int(m[1], 16) <= 0x10FFFF and not 0xD800 <= int(m[1], 16) <= 0xDFFF else "\ufffd") if m[1] else (m[2] if m[2] and m[2] != "\x00" else "\ufffd"), name)
+
+
+def _declarations(value: str) -> list[str]:
+    """A style attribute cut at the `;` that end a declaration, by the rules of the CSS Syntax 3 tokenizer. A `;` inside a CSS
+    string (a quote ends at the same quote, or at a newline, and a backslash takes an escape: a hex one with the white space after it, a newline included, or the next character, CRLF counting as one), inside a comment or inside
+    a `()`, `[]` or `{}` block (`url(data:image/png;base64,…)`) does not end one; a block ends only at its own closer, so
+    `(]` leaves a `(` open, and a closer that does not close the innermost open block is ignored. A name is read whole, escapes included (CR and FF are newlines, so a backslash before one is no escape, and NUL is a name character), so `\\75 url(` and
+    `a\\:url(` are functions called something else, `@url(` and `#url(` an at-keyword and a hash followed by a `(`, and only a
+    name that reads `url` (any letter case), that no `@` or `#` leads and that `(` follows, is a url. A `url(` that no quote
+    follows, white space aside, is one token up to its first `)` (a backslash takes the next character), so a `/*` or a quote
+    inside it opens no comment and no string. A block left open runs to the end, as in a browser. Only the pieces are cut here:
+    the name is searched in each piece whole, so a split that differs from a browser's can keep more or less, never hide the name."""
+    parts, start, i, n, quote, blocks = [], 0, 0, len(value), "", []
+    while i < n:
+        c = value[i]
+        if quote:
+            if c == "\\":
+                i = m.end() if (m := _STRING_ESCAPE.match(value, i)) else i + 1
+                continue
+            if c == quote or c in "\n\r\f":
+                quote = ""
+        elif c in "\"'":
+            quote = c
+        elif value.startswith("/*", i):
+            end = value.find("*/", i + 2)
+            i = n if end < 0 else end + 1
+        elif value.startswith("<!--", i):
+            i += 4
+            continue
+        elif c in "@#" and (m := _NAME_RUN.match(value, i + 1)):
+            i = m.end()
+            continue
+        elif m := _NAME_RUN.match(value, i):
+            i = m.end()
+            if i < n and value[i] == "(" and _unescaped(m[0]).lower() == "url" and (u := _UNQUOTED_URL.match(value, i + 1)):
+                i = u.end()
+            continue
+        elif c == "\\":
+            i += 2
+            continue
+        elif c in _CLOSER:
+            blocks.append(_CLOSER[c])
+        elif blocks and c == blocks[-1]:
+            blocks.pop()
+        elif c == ";" and not blocks:
+            parts.append(value[start:i])
+            start = i + 1
+        i += 1
+    parts.append(value[start:])
+    return parts
+
+
+def _without_user_modify(value: str) -> str:
+    """A style attribute without the declarations that make text editable (`-webkit-user-modify`, `-moz-user-modify`,
+    `user-modify`): Chromium and WebKit let the reader type into such a span, and the page does not guard it. A declaration with
+    a backslash is dropped too (an escape can spell the name; this also drops an ordinary `content:"\\201C"`), and the whole
+    declaration is searched, not the text before its colon, so a comment before the name does not hide it, whatever the comment
+    holds. Where this splits differently from a browser (see `_declarations`), the text is still searched whole: a piece that
+    holds the name is dropped."""
+    return ";".join(d for d in _declarations(value) if not _EDITABLE_OR_ESCAPE.search(d))
+
+
+_COMMENT = re.compile(r"/\*.*?(?:\*/|$)", re.S)
+
+
+def _has_declaration(value: str) -> bool:
+    """Whether a style attribute holds anything but separators, comments and white space."""
+    return any(_COMMENT.sub("", d).strip() for d in _declarations(value))
+
+
 def _mount_style(value: str) -> str:
     """The declarations of a style attribute that the allow-list names, written out normalised; "" when none is left.
     Each declaration stands or falls alone, and the value grammar has no quote, backslash, slash, bang or function
@@ -274,7 +361,10 @@ def _pass(fragment: str, comments: bool, log: list[str], mount: bool = False) ->
             log.append(f"  - <{name}> removed from the document")
             tag.decompose()
             continue
-        if name == "input" and str(tag.get("type", "")).strip().lower() != "checkbox":
+        # the browser matches `type` exactly, ASCII case aside: no trimming, and no str.lower() on its own, which turns
+        # U+212A (Kelvin sign) into an ASCII k
+        kind = str(tag.get("type", ""))
+        if name == "input" and not (kind.isascii() and kind.lower() == "checkbox"):
             log.append("  - <input> removed from the document")
             tag.decompose()
             continue
@@ -302,6 +392,15 @@ def _pass(fragment: str, comments: bool, log: list[str], mount: bool = False) ->
             if a.startswith("on") or a in DROPPED_ATTRS:
                 log.append(f"  - {attr} removed from <{name}>")
                 del tag[attr]
+            elif a == "style" and not mount:
+                value = str(tag[attr])
+                clean = _without_user_modify(value)
+                if clean != value:
+                    log.append(f"  - style trimmed on <{name}>")
+                    if _has_declaration(clean):
+                        tag[attr] = clean
+                    else:
+                        del tag[attr]
             elif a in URL_ATTRS:
                 value = tag[attr]
                 if isinstance(value, list):

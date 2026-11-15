@@ -538,6 +538,18 @@ def test_every_action_of_a_row_is_a_button_one_off_but_share_which_is_a_toggle(b
     assert share["aria-pressed"] == "false"
 
 
+def test_the_row_keeps_its_share_button_for_a_box_that_says_shared_with_the_team(box, sheaves):
+    path = sheaves / JOEY[5:]
+    path.write_text(path.read_text(encoding="utf-8").replace(
+        "- [ ] Approve\n", "- [ ] Approve\n- [ ] Shared with the team\n"), encoding="utf-8")
+    box.hub.the_list.poll()
+    res = box.get("/list", member=NELL)
+    assert [(b.action, b.word, b.kind) for b in buttons(res) if b.doc == JOEY] == [
+        ("0", "Approve", "one-off"), ("1", "Share", "toggle")]
+    share = BeautifulSoup(res.text, "html.parser").select_one(f'button[data-doc="{JOEY}"][data-word="Share"]')
+    assert share["aria-pressed"] == "false"
+
+
 def test_the_rows_second_button_ticks_the_second_action_and_no_other(box, sheaves):
     path = sheaves / JOEY[5:]
     path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [ ] Approve\n- [ ] Done\n"),
@@ -1849,7 +1861,8 @@ def test_the_rows_title_holds_no_comment_of_the_h1(box, sheaves):
 @pytest.mark.parametrize("heading, title", [("x\\<!-- y -->z", "x\\<!-- y -->z"),          # an escaped `<` opens none
                                             ("x\\\\<!-- y -->z", "x\\\\z"),                  # an escaped backslash does
                                             ("a <!--> b --> c", "a b --> c"),               # `<!-->` is a whole comment
-                                            ("a <!---> b --> c", "a b --> c")])
+                                            ("a <!---> b --> c", "a b --> c"),
+                                            ("a <!-- x `y --> b `<!-- z` c", "a b `<!-- z` c")])  # a comment owns its backtick
 def test_only_what_commonmark_reads_as_a_comment_leaves_the_title(heading, title):
     assert the_list.read_sheaf("x/y/z.md", f"# {heading}\n").title == title
 
@@ -1938,3 +1951,430 @@ def test_a_member_on_the_proxy_gets_the_mount_assets(box):
         assert "immutable" in r.headers.get("Cache-Control", ""), (path, r.headers)
         assert r.status == 200 and r.headers["Content-Type"].startswith(kind), (path, r.status)
     assert box.get("/_/health", member=NELL).status == 404          # the other open routes stay off the proxy
+
+
+def test_a_list_made_by_its_leading_crs_has_its_marks_found():
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import ticked_html
+    block = split_md_blocks('\r\r\r\r- [ ] Approve\n')[0]
+    frag = ticked_html(block, 0)
+    assert frag is not None and 'checked' in frag
+
+
+@pytest.mark.parametrize("src", [' \r- [ ] Approve\n', '  \r- [ ] Approve\n', '\r \r- [ ] Approve\n'])
+def test_a_cr_among_the_indent_of_a_list_keeps_its_marks(src):
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import ticked_html
+    block = split_md_blocks(src)[0]
+    assert ticked_html(block, 0) is not None
+
+
+def _page_with_box_flipped(block, k):
+    """The block as the page would send it after a click on its `k`th box: the render, that box flipped. Built
+    from the render alone, so it does not depend on `task_marks` or `ticked_html`."""
+    from bs4 import BeautifulSoup
+    from sheafmd import copyblock
+    from sheafmd.edit import _render_source
+    # The render is the cached one, as in production: it is the same text, and a cache hit changes nothing here.
+    soup = BeautifulSoup(copyblock.mark(_render_source(block.content), page=True), "html.parser")
+    box = soup.select('input[type="checkbox"]')[k]
+    if box.has_attr("checked"):
+        del box["checked"]
+    else:
+        box["checked"] = ""
+    return str(soup)
+
+
+@pytest.mark.parametrize("src, k", [
+    ('- x\n  ```\n  - [ ] A\n  ```\n- \r[ ] B\n', 0),
+    ('- x\n  ```\n \r - [ ] A\n  ```\n- \r[ ] B\n', 0),
+])
+def test_a_cr_never_makes_the_tick_land_on_a_mark_in_a_code_block(src, k):
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes
+    block = split_md_blocks(src)[0]
+    out = _toggle_boxes(block, _page_with_box_flipped(block, k))
+    assert out is None or out == src.replace("- \r[ ] B", "- \r[x] B")
+
+
+@pytest.mark.parametrize("src, ticked", [
+    # pandoc 3.9 draws no box for the empty item; `- - [ ] x` is the box. Before ticket 135 the save refused (the marks
+    # were not the boxes one for one); it is written now, on the box's own line and on no other.
+    ('- [ ]\n- - [ ] x\n', '- [ ]\n- - [x] x\n'),
+    ('- [ ]\r\n- - [ ] x\r\n', '- [ ]\r\n- - [x] x\r\n'),
+    ('- [ ]\n-\r - [ ] x\n', '- [ ]\n-\r - [x] x\n'),
+])
+def test_a_tick_beside_an_empty_task_item_is_written_on_the_boxs_own_line(src, ticked):
+    # The marks and the boxes drawn were the same in number and state, but not the same items: the tick
+    # of "x" was written on the empty item's line (measured on pandoc 3.9, no CR needed).
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes
+    block = split_md_blocks(src)[0]
+    assert _toggle_boxes(block, _page_with_box_flipped(block, 0)) == ticked
+
+
+@pytest.mark.parametrize("src, ticked", [
+    ('- [ ]\n-\r [ ] b\n', '- [ ]\n-\r [x] b\n'),          # c2 of ticket 113: the page ticks b, the save used to tick the other line
+    ('- [ ]\n- [ ]\r b\n', '- [ ]\n- [x]\r b\n'),
+    ('- [ ]\n- [ ] b\n', '- [ ]\n- [x] b\n'),
+])
+def test_an_empty_task_item_next_to_a_box_never_takes_its_tick(src, ticked):
+    # One box over two marks: the render says which mark the box is (ticket 135), so the tick is written on b's
+    # line, never on the empty item's (before, the count check refused it).
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes
+    block = split_md_blocks(src)[0]
+    assert _toggle_boxes(block, _page_with_box_flipped(block, 0)) == ticked
+
+
+def test_a_task_mark_read_through_crs_refuses_a_group_it_does_not_have():
+    from sheafmd.edit import task_marks
+    m = task_marks("\r- [ ] a\n")[0]
+    assert (m.start(), m.start(2), m.end(2), m.group(2)) == (0, 4, 5, " ")
+    assert m.end() == m.end(0) == 6                  # as `re.Match.end()`: after the `]`, not after the state character
+    for call in (lambda: m.group(1), lambda: m.start(1), lambda: m.end(1)):
+        with pytest.raises(IndexError):
+            call()
+
+
+def test_a_task_mark_read_through_crs_ends_where_a_match_does():
+    from sheafmd.edit import task_marks
+    for crs in ("", "\r", "\r\r"):
+        plain = task_marks("- [ ] a\n")[0]
+        read = task_marks(f"{crs}- [ ] a\n")[0] if crs else plain
+        assert read.end() == len(crs) + plain.end()
+
+
+def test_a_tick_save_renders_the_source_once_and_the_result_once(monkeypatch):
+    # d3 of ticket 120: `_unchanged` and `_toggle_boxes` each rendered the same source, so a tick ran pandoc 3 times
+    # (1.28 s -> 2.86 s for 200 items). The source render is shared; the result's own render stays, it is the check.
+    from sheafmd import _pandoc
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _rendered, _toggle_boxes, _unchanged, ticked_html
+    block = split_md_blocks("".join(f"- [ ] item {i}\n" for i in range(5)))[0]
+    fragment = ticked_html(block, 2)
+    _rendered.cache_clear()
+    runs = []
+    real = _pandoc.run
+    monkeypatch.setattr(_pandoc, "run", lambda *a, **k: runs.append(1) or real(*a, **k))
+    assert not _unchanged(block, fragment)
+    assert _toggle_boxes(block, fragment) is not None
+    assert len(runs) == 2
+
+
+def test_a_render_that_failed_is_not_kept_for_the_next_tick(monkeypatch):
+    # Opus review of PR 353, b1: a timeout once (pandoc's 124) must not send every later tick of that block through
+    # the general path, which rewrites the whole list.
+    import subprocess
+    from sheafmd import _pandoc
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _rendered, _toggle_boxes, ticked_html
+    block = split_md_blocks("* [ ] one\n* [ ] two\n* [ ] three\n")[0]
+    fragment = _page_with_box_flipped(block, 1)
+    _rendered.cache_clear()
+    real = _pandoc.run
+    monkeypatch.setattr(_pandoc, "run", lambda args, text: subprocess.CompletedProcess(args, 124, "", "timeout"))
+    assert ticked_html(block, 1) is None and _toggle_boxes(block, fragment) is None
+    monkeypatch.setattr(_pandoc, "run", real)
+    assert _toggle_boxes(block, fragment) == "* [ ] one\n* [x] two\n* [ ] three\n"
+    assert ticked_html(block, 1) is not None
+
+
+def test_a_task_mark_with_a_cr_inside_its_brackets_ends_after_the_bracket():
+    from sheafmd.edit import task_marks
+    src = "- [ \r] a\n"
+    m = task_marks(src)[0]
+    assert src[m.start():m.end()] == "- [ \r]"
+
+
+@pytest.mark.parametrize("src", ["1. [ ] a\n", "1) [x] a\n", "1. [ \r] a\n", "7.\r [ ] a\n"])
+def test_an_ordered_item_is_no_task_mark_because_pandoc_draws_it_no_box(src):
+    # c1 of ticket 128, measured on pandoc 3.9: `1. [ ] a` has no box, with a CR or without. The review put it on the
+    # CR in `1. [ \r] d`; the CR changes nothing, the marks only have to be the ones pandoc draws a box for.
+    from sheafmd import _pandoc
+    from sheafmd.edit import task_marks
+    assert "checkbox" not in _pandoc.run(["-f", "gfm", "-t", "html5"], src).stdout
+    assert task_marks(src) == []
+
+
+@pytest.mark.parametrize("src, k, want", [
+    ("- x\n  1. [ ] b\n- [ ] c\n", 0, "- x\n  1. [ ] b\n- [x] c\n"),
+    ("- x\r\n  1. [ ] b\r\n- [ ] c\r\n", 0, "- x\r\n  1. [ ] b\r\n- [x] c\r\n"),
+])
+def test_a_tick_beside_an_ordered_item_flips_its_line_and_leaves_the_rest(src, k, want):
+    # The ordered item drew no box, so the marks and the boxes had different counts and the tick went through pandoc,
+    # which rewrites the whole list.
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes
+    block = split_md_blocks(src)[0]
+    assert _toggle_boxes(block, _page_with_box_flipped(block, k)) == want
+
+
+@pytest.mark.parametrize("src", ["- - [ ] o\n", "1. - [ ] g\n", "1. > - [ ] x\n", "- > - [x] x\n"])
+def test_a_bullet_task_behind_another_marker_has_its_mark(src):
+    # Ticket 128, b1 of its review: pandoc draws a box for the bullet behind another marker, and the mark must be
+    # there or the block's counts of marks and boxes differ and every tick of it rewrites the list.
+    from sheafmd import _pandoc
+    from sheafmd.edit import task_marks
+    assert _pandoc.run(["-f", "gfm", "-t", "html5"], src).stdout.count("checkbox") == 1
+    assert len(task_marks(src)) == 1 and src[task_marks(src)[0].start(2)] in " x"
+
+
+@pytest.mark.parametrize("src, k, want", [
+    ("- [ ]\n  text\n1. [ ]\n- - [ ] o\n", 0, "- [x]\n  text\n1. [ ]\n- - [ ] o\n"),
+    ("- [ ] a\n1. - [ ] g\n", 1, "- [ ] a\n1. - [x] g\n"),
+])
+def test_a_tick_in_a_block_with_a_box_behind_another_marker_is_written_in_place(src, k, want):
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes
+    block = split_md_blocks(src)[0]
+    assert _toggle_boxes(block, _page_with_box_flipped(block, k)) == want
+
+
+@pytest.mark.parametrize("src, k, want", [
+    # An empty item has a mark and no box, and a box behind another marker has a box and (since ticket 128) a mark:
+    # the first reading has three marks for two boxes. The reading by box (ticket 132) has two, and the render of
+    # the result confirms it.
+    ("* [X] c\n- [ ]\n1. - [ ] g\n", 0, "* [ ] c\n- [ ]\n1. - [ ] g\n"),
+    ("- [ ]\n- - [ ] o\n  - [ ] i\n", 1, "- [ ]\n- - [ ] o\n  - [x] i\n"),
+    ("+ [ ] d\n- [ ]\n- - [ ] o\n", 0, "+ [x] d\n- [ ]\n- - [ ] o\n"),
+])
+def test_a_tick_that_the_second_reading_made_in_place_is_still_made_in_place(src, k, want):
+    # Ticket 128, b1 again (Rhea): a PR never makes a case worse than b90b6a0.
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes
+    block = split_md_blocks(src)[0]
+    out = _toggle_boxes(block, _page_with_box_flipped(block, k))
+    assert (out is not None) == (want is not None)
+    assert want is None or out == want
+
+
+def test_a_long_run_of_quote_marks_is_read_in_linear_time():
+    # Re-read of the b1 fix, b2: the chain accepted `>` twice over (the leading quotes and the chain), so a line of
+    # n `>` cost n squared: 14.6 s at 5000 against 3 ms before ticket 128.
+    import time
+    from sheafmd.edit import task_marks
+    t = time.perf_counter()
+    assert task_marks("> " * 5000 + "x\n") == [] and task_marks("> " * 5000 + "- [ ] x\n") != []
+    assert time.perf_counter() - t < 1
+
+
+def test_a_list_tick_made_through_the_second_reading_is_offered_and_written():
+    # d3 of the re-read: ticked_html goes through the reading by box too (an empty item beside a box behind a marker).
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes, ticked_html
+    block = split_md_blocks("* [X] c\n- [ ]\n1. - [ ] g\n")[0]
+    fragment = ticked_html(block, 0, tick=False)
+    assert fragment is not None and _toggle_boxes(block, fragment) == "* [ ] c\n- [ ]\n1. - [ ] g\n"
+
+
+def _list_tick(body: str, word: str = "Approve"):
+    """What the list's button does with the first `word` box of a sheaf: (the block's text after the tick as the save
+    writes it or None when the save would go through pandoc, the box the page is told, the edit or None)."""
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes
+    text = "# A sheaf\n\n" + body
+    sheaf = the_list.read_sheaf("x.md", text)
+    n = [a[0] for a in sheaf.actions].index(word)
+    at = the_list.box_place(text, sheaf.actions[n][2])
+    edit = the_list.tick_edit(text, n, word)
+    block = split_md_blocks(text)[edit["i"]] if edit else None
+    return (None if edit is None else _toggle_boxes(block, edit["html"])), at, edit
+
+
+@pytest.mark.parametrize("body, ticked", [
+    # F2 of the gate review of PR 360: Approve is the 2nd box drawn but the 3rd mark of the first reading
+    # (the empty `- [ ]` has a mark and no box); it was refused, and written in place before ticket 128.
+    ("- [ ]\n- - [ ] o\n- [ ] Approve\n", "- [ ]\n- - [ ] o\n- [x] Approve\n"),
+    ("- - [ ]\n- [ ] Approve\n", "- - [ ]\n- [x] Approve\n"),
+])
+def test_the_lists_button_ticks_in_place_where_an_empty_item_stands_before_it(body, ticked):
+    out, at, edit = _list_tick(body)
+    assert out == ticked
+
+
+def test_the_lists_button_never_ticks_another_box_than_its_own():
+    # F1 of the gate review of PR 360: the box number was the mark's, and a mark and a box are not the same count
+    # (an empty item draws no box). Approve was number 4 and the 5th box of the block was `+ [ ] d`.
+    body = "> 1. > - [ ] x\n- - [ ]\n  - [ ] Approve\n+ [ ] d\n"
+    out, at, edit = _list_tick(body)
+    assert out == "- - [ ]\n  - [x] Approve\n+ [ ] d\n"      # the quote is a block of its own
+
+
+@pytest.mark.parametrize("body, k", [
+    ("- [ ]\n- - [ ] o\n- [ ] Approve\n", 1),        # the box the page draws second
+    ("1. [ ] e\n- [ ] Approve\n", 0),                 # an ordered item draws no box
+    ("- - [ ]\n  - [ ] Approve\n", 0),                # an empty item draws none
+    ("- [ ] a\n- [ ] Approve\n", 1),
+])
+def test_the_box_the_page_is_told_is_the_one_the_page_draws(body, k):
+    # The page ticks `boxesOf(block)[k]` (page.js): `k` counts the boxes drawn, not the marks of the source.
+    out, at, edit = _list_tick(body)
+    assert at is not None and at[1] == k
+
+
+def test_the_page_asks_a_boxs_number_once_per_text(monkeypatch):
+    # Re-read of the fix of PR 360, b: box_place ran one pandoc render per button on every serve of the page.
+    from sheafmd import _pandoc
+    from sheafmd.edit import _rendered, box_number
+    src = "- [ ] zq-once-a\n- [ ] zq-once-b\n"
+    at = src.index("[ ]") + 1
+    box_number(src, at)
+    _rendered.cache_clear()             # the render's own cache of 8 would answer alone: the answer's is the test
+    runs = []
+    real = _pandoc.run
+    monkeypatch.setattr(_pandoc, "run", lambda *a, **k: runs.append(1) or real(*a, **k))
+    assert box_number(src, at) == 0 and runs == []
+
+
+@pytest.mark.parametrize("body, ticked", [
+    # Ticket 135 (d of the re-read of PR 360): the marks of the first reading are not the boxes one for one, and
+    # the list's button refused each of these, as main did. The mark of the action has a box: it is written in place.
+    ("- [ ] Approve\n- [ ]\n- [ ] Done\n", "- [x] Approve\n- [ ]\n- [ ] Done\n"),
+    ("- [ ]\n  - [ ] Approve\n", "- [ ]\n  - [x] Approve\n"),
+    ("- [ ]\r\n- [ ] Approve\r\n", "- [ ]\r\n- [x] Approve\r\n"),
+    ("- [ ] Approve\n- <input type=\"checkbox\"> x\n", "- [x] Approve\n- <input type=\"checkbox\"> x\n"),
+    ("- <input type=\"checkbox\"> x\n- [ ] Approve\n", "- <input type=\"checkbox\"> x\n- [x] Approve\n"),
+    # an empty item between marks, a box behind a chain, and an ordered item that draws no box, all in one list
+    ("- [ ]\n- - [ ] o\n1. [ ] e\n- [ ]\n- [ ] Approve\n", "- [ ]\n- - [ ] o\n1. [ ] e\n- [ ]\n- [x] Approve\n"),
+])
+def test_the_lists_button_ticks_in_place_where_marks_and_boxes_do_not_follow_one_for_one(body, ticked):
+    out, at, edit = _list_tick(body)
+    assert out == ticked
+
+
+@pytest.mark.parametrize("body, ticked", [
+    # Ticket 132 (c1 of the review of ticket 128): the page's own save of a tick, where the first reading's marks
+    # are not the boxes: the reading by box (the render says which mark is which box) writes it in place.
+    ("- [ ] a\n- [ ]\n- [ ] b\n", "- [x] a\n- [ ]\n- [ ] b\n"),
+    ("- [ ]\n  - [ ] a\n", "- [ ]\n  - [x] a\n"),
+])
+def test_the_pages_tick_is_written_in_place_where_an_empty_item_stands_among_the_marks(body, ticked):
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes, ticked_html
+    block = split_md_blocks(body)[0]
+    fragment = ticked_html(block, 0)
+    assert fragment is not None and _toggle_boxes(block, fragment) == ticked
+
+
+def test_a_box_with_no_mark_is_never_flipped_by_the_save():
+    # A raw `<input>` draws a box and has no mark: a page that ticked it has no mark to write, so the save is
+    # the general one (None), whatever the other marks of the block are.
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes, ticked_html
+    block = split_md_blocks('- [ ] a\n- <input type="checkbox"> x\n')[0]
+    assert ticked_html(block, 1) is None
+    assert _toggle_boxes(block, _page_with_box_flipped(block, 1)) is None
+    assert _toggle_boxes(block, _page_with_box_flipped(block, 0)) == '- [x] a\n- <input type="checkbox"> x\n'
+
+
+def test_ticked_html_of_a_box_the_block_does_not_draw_is_none():
+    # Re-read of ticket 132, c1: it raised IndexError (found[k]) where main answered None.
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import ticked_html
+    assert ticked_html(split_md_blocks("- [ ] a\n- [x] b\n")[0], 2) is None
+    assert ticked_html(split_md_blocks("just a paragraph\n")[0], 0) is None
+
+
+def _renders(monkeypatch):
+    from sheafmd import _pandoc
+    from sheafmd.edit import _rendered
+    _rendered.cache_clear()
+    runs = []
+    real = _pandoc.run
+    monkeypatch.setattr(_pandoc, "run", lambda *a, **k: runs.append(1) or real(*a, **k))
+    return runs
+
+
+def test_a_text_edit_of_a_long_task_list_costs_no_render_of_marks(monkeypatch):
+    # Re-read of ticket 132, b1: the reading by box ran one render per mark on every text edit (200 marks: 200
+    # renders, 11 s). The check that the page changed only ticks comes first now, and the reading lays the marks
+    # out in about log2 of them renders.
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes
+    block = split_md_blocks("- [ ]\n" + "".join(f"- [ ] item {i}\n" for i in range(200)))[0]
+    edited = _page_with_box_flipped(block, 0).replace("item 7<", "item seven<")
+    runs = _renders(monkeypatch)
+    assert _toggle_boxes(block, edited) is None
+    assert len(runs) <= 3
+
+
+def test_a_tick_in_a_long_task_list_with_an_empty_item_costs_a_fixed_number_of_renders(monkeypatch):
+    # Ticket 140, c2: the reading by box rendered the list once per bit of its marks (17 s at 4,100 items). The
+    # empty items are told from the text, so a tick costs the source's render and the check of the result, however
+    # long the list. d1: the count is the same at 200 and at 800 items.
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes
+    counts = []
+    for n in (200, 800):
+        src = "- [ ]\n" + "".join(f"- [ ] item {i}\n" if i % 50 else "- [ ]  \n" for i in range(n))
+        block = split_md_blocks(src)[0]
+        page = _page_with_box_flipped(block, 5)
+        runs = _renders(monkeypatch)
+        want = src.replace("- [ ] item 6\n", "- [x] item 6\n")   # two empty items before it
+        assert _toggle_boxes(block, page) == want
+        counts.append(len(runs))
+    assert counts[0] == counts[1] <= 3
+
+
+@pytest.mark.parametrize("eol", ["\n", "\r\n"])
+def test_ticked_html_in_a_long_list_with_empty_items_and_a_continued_item_costs_a_fixed_number_of_renders(monkeypatch, eol):
+    # Ticket 140, review c2/c3: the same cost through the list's button and with CRLF, and an empty mark with an
+    # indented line under it (pandoc draws that one as a box) is kept by the text reading.
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import ticked_html
+    counts = []
+    for n in (200, 800):
+        src = eol.join(["- [ ]", "- [ ] ", "  continued"] + [f"- [ ] item {i}" for i in range(n)]) + eol
+        block = split_md_blocks(src)[0]
+        runs = _renders(monkeypatch)
+        html = ticked_html(block, 6)                 # box 0 is the continued item, so box 6 is item 5
+        assert html is not None and html.count("checked") == 1
+        counts.append(len(runs))
+    assert counts[0] == counts[1] <= 3
+
+
+# Ticket 145, c1 of the review of PR 374: shapes the reading of the marks from the text alone guesses wrong. Each is
+# (source, the lines whose mark pandoc draws a box for, in box order). The first two guess wrong but harmlessly: the
+# reading of every mark already matches the boxes there, so it serves and `_boxed_marks` is not reached (review of
+# PR 378). The other six send the tick to `_boxed_marks`.
+_MISGUESSED_SHAPES = {
+    "nbsp after the mark": ("- [ ] \xa0\n- [ ] b\n- [ ] c\n", [0, 1, 2]),
+    "quoted continuation": ("> - [ ]\n>   more\n> - [ ] b\n> - [ ] c\n", [0, 2, 3]),
+    "empty parent with a sublist": ("- [ ]\n  - [ ] c\n- [ ] d\n", [1, 2]),
+    "heading under an empty mark": ("- [ ]\n  # h\n- [ ] b\n- [ ] c\n", [2, 3]),
+    "fence under an empty mark": ("- [ ]\n  ```\n  x\n  ```\n- [ ] b\n- [ ] c\n", [4, 5]),
+    "indented code under an empty mark": ("- [ ]\n      code\n\n- [ ] b\n- [ ] c\n", [3, 4]),
+    "html comment after the mark": ("- [ ] <!-- c -->\n- [ ] b\n- [ ] c\n", [1, 2]),
+    "lazy line of one space": ("- [ ]\n foo\n- [ ] b\n- [ ] c\n", [2, 3]),
+}
+
+
+@pytest.mark.parametrize("shape", _MISGUESSED_SHAPES)
+def test_a_tick_in_a_list_the_text_reading_guesses_wrong_still_lands_on_the_right_line(shape, monkeypatch):
+    # The guess is only a candidate: `_toggle_boxes` renders what it writes and refuses a reading that draws other
+    # boxes, then `_boxed_marks` serves. So a wrong guess costs renders and never a wrong write: every box ticks
+    # its own mark and nothing else changes.
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd import edit
+    from sheafmd.edit import _drawing_marks, _toggle_boxes, task_marks, ticked_html
+    src, real = _MISGUESSED_SHAPES[shape]
+    lines = src.split("\n")
+    marks = task_marks(src)
+    guess = [m.start() for m in _drawing_marks(src, marks)]
+    truth = [sum(len(x) + 1 for x in lines[:i]) for i in real]
+    assert guess != truth                        # the shape is one the guess misreads
+    block = split_md_blocks(src)[0]
+    reached = []
+    real_boxed = edit._boxed_marks
+    monkeypatch.setattr(edit, "_boxed_marks", lambda c: reached.append(1) or real_boxed(c))
+    for k, i in enumerate(real):
+        want = "\n".join(l.replace("[ ]", "[x]", 1) if j == i else l for j, l in enumerate(lines))
+        assert _toggle_boxes(block, _page_with_box_flipped(block, k)) == want, k
+        html = ticked_html(block, k)
+        assert html is not None
+        from bs4 import BeautifulSoup
+        boxes = BeautifulSoup(html, "html.parser").select('input[type="checkbox"]')
+        assert [b.has_attr("checked") for b in boxes] == [j == k for j in range(len(real))], k
+    if shape not in ("nbsp after the mark", "quoted continuation"):
+        assert reached                               # the slow fallback served, not a lucky first reading

@@ -354,7 +354,9 @@ var create = function (ROOT, CFG, opts) {
             .replace(/\s*contenteditable="[^"]*"/g, '')
             .replace(/(\s+)class="([^"]*)"/g, dropMarkers)
             .replace(/\s+title="Not editable here: [^"]*"/g, '')
-            .replace(/<button\b[^>]*\brd-copybtn\b[^>]*>[\s\S]*?<\/button>/g, '');
+            .replace(/<button\b[^>]*\brd-copybtn\b[^>]*>[\s\S]*?<\/button>/g, '')
+            .replace(/<button\b[^>]*\brd-inline\b[^>]*>[\s\S]*?<\/button>/g, '')
+            .replace(/<span class="rd-actword">([^<]*)<\/span>/g, '$1');
   }
   // A part of the page's own among a block's nodes (data-rd-ui: the byline, which the page writes again with the session's
   // name) is no text of the block: changing it is no edit, and the hub drops it from a save all the same.
@@ -652,13 +654,23 @@ var create = function (ROOT, CFG, opts) {
     incident('js-rejection', { message: String(e.reason && e.reason.message || e.reason) });
   });
 
-  var tmr;
-  function say(msg, err) {
-    if (err) incident('toast', { message: msg });
-    toast.textContent = msg;
-    toast.className = 'show' + (err ? ' err' : '');
-    clearTimeout(tmr);
-    tmr = setTimeout(function () { toast.className = ''; }, err ? 7000 : 2600);
+  // Toasts queue: each is shown in turn for its own time (7 s red, 2.6 s else), none dropped, none cut short by the next.
+  var toasts = [], toasting = false;
+  function say(msg, err, replayed) {
+    if (err && !replayed) incident('toast', { message: msg });      // a replayed refusal was written down when it was first said
+    var t = { msg: msg, err: err, until: null };      // `until` is when it stops being up, set once it is shown
+    toasts.push(t);
+    if (!toasting) nextToast();
+    return t;
+  }
+  function nextToast() {
+    var t = toasts.shift();
+    toasting = !!t;
+    if (!t) return;
+    toast.textContent = t.msg;
+    toast.className = 'show' + (t.err ? ' err' : '');
+    t.until = Date.now() + (t.err ? 7000 : 2600);
+    setTimeout(function () { toast.className = ''; nextToast(); }, t.err ? 7000 : 2600);
   }
   // ---- copy blocks (SPEC 6.8) -----------------------------------------------
   // A quote the renderer marked rd-copy gets a Copy button. It is the page's (data-rd-ui, never editable) and
@@ -920,7 +932,9 @@ var create = function (ROOT, CFG, opts) {
       return;
     }
     try {
-      if (pressSaid && Date.now() < pressSaid.until) sessionStorage.setItem(KEYS + 'rd-press-said', pressSaid.text);
+      // It carries the refusal's own deadline (a toast still queued has 7 s from now), so reloads do not chain it on.
+      if (pressSaid && (pressSaid.toast.until === null || Date.now() < pressSaid.toast.until))
+        sessionStorage.setItem(KEYS + 'rd-press-said', JSON.stringify({ text: pressSaid.text, until: pressSaid.toast.until === null ? Date.now() + 7000 : pressSaid.toast.until }));
       sessionStorage.setItem(KEYS + 'rd-keep', JSON.stringify({ doc: CFG.doc, y: scrollNow(), open: openId || null,
                                                          panel: panel.classList.contains('open'),
                                                          known: counts(), editing: editing,
@@ -1194,7 +1208,14 @@ var create = function (ROOT, CFG, opts) {
       }
       if (conflicts.length) note = conflictNote(conflicts);
       if (reload) {
-        try { sessionStorage.setItem(KEYS + 'rd-toast', quiet && !conflicts.length ? '' : note); } catch (e) {}
+        if (!docGone) {     // a save out when the document went: no reload will say it (#125)
+          try {
+            var said = sessionStorage.getItem(KEYS + 'rd-toast') || '';     // one no boot has said yet (a held reload, a handover) is added to, not lost (#139)
+            var now = quiet && !conflicts.length ? '' : note;
+            sessionStorage.setItem(KEYS + 'rd-toast', said && now && said !== now ? said + ' · ' + now : now || said);
+            keepNaming();     // a reload held or given up leaves it for a boot, which only this document says (#139)
+          } catch (e) {}
+        }
         done(); saving = null;
         reloadWhenFree(popId);
         refresh();
@@ -1247,6 +1268,7 @@ var create = function (ROOT, CFG, opts) {
         settling = false;
         heldReload = false;             // nothing reloads; a later reload is not the held one
         stale = true; refresh();
+        keepNaming();       // the toast of an earlier merge stays for the next boot, which only this document says (#139)
         say('The file changed on disk and this edit could not be merged. Copy it, then reload the page.', true);
         return;
       }
@@ -1552,42 +1574,98 @@ var create = function (ROOT, CFG, opts) {
   // `pendingClears`: tests of this page's entries that the person emptied while the store refused the read, so the
   // clear could not be written: a new message's field emptied (draftsReplace), a reply or an edit cleared (threadKeep),
   // a send the hub took (taken). They stay out of the page's reads (commentDraftsLoad), and go from the store with the
-  // first read that works, which writes the store without them (commentDraftsSave). Kept in memory: a reload before
+  // first read that works, which writes the store without them (draftsWrite). Kept in memory: a reload before
   // that read, while the store still refuses it, offers the entry again.
   var pendingClears = [];
   var readWorked = false, flushing = false;
+  // One key per entry, `COMMENT_DRAFT_KEY:e:<id>`: a page writes only keys it made and removes only keys it read, so two
+  // pages that write at the same instant cannot overwrite each other's entry (one list under one key could). The id sorts
+  // by write time, then by the page's own order, and no two writes share one. A store written by an earlier build holds
+  // one list under COMMENT_DRAFT_KEY: reads see its entries, and the first write moves them into keys (migrateDrafts).
+  // A document's path may hold ':e:', so the key of `a.md:e:x.md` starts with the prefix of `a.md`: a key is an entry of
+  // this document only when what follows the prefix has the shape of an id (entryKey).
+  var ENTRY_PREFIX = COMMENT_DRAFT_KEY + ':e:', writeN = 0;
+  var ENTRY_ID = /^(?:[0-9a-z]{9}-[0-9a-z]{3}-[0-9a-z]{4}|0[0-9a-z]{9}-[0-9a-z]{15}|0[0-9a-z]{4}-[0-9a-z]{1,7})$/;   // new | moved from the list | moved by the first build of this store
+  function entryKey(k) { return k.indexOf(ENTRY_PREFIX) === 0 && ENTRY_ID.test(k.slice(ENTRY_PREFIX.length)); }
+  function pad(n, w) { var t = n.toString(36); while (t.length < w) t = '0' + t; return t; }
+  function newEntryId() { return pad(Date.now(), 9) + '-' + pad(writeN++ % 46656, 3) + '-' + pad(Math.floor(Math.random() * 1679616), 4); }
+  // 64 bits, 14 digits: two entries of one list that differ must not share an id, since the id is all that tells them apart.
+  function hashOf(t) {
+    var h = 5381, g = 52711;
+    for (var i = 0; i < t.length; i++) { var c = t.charCodeAt(i); h = ((h * 33) ^ c) >>> 0; g = (Math.imul(g, 131) + c) >>> 0; }
+    return pad(h, 7) + pad(g, 7);
+  }
+  function validDraft(d) { return d && typeof d.body === 'string' && (typeof d.quote === 'string' || typeof d.thread === 'string'); }
+  // The entries `raw` (the text of the old list) holds. An id is made of the entry's own text: its time, which puts it in
+  // order, the place among the entries of that same time (the list is in the order of writes, and entries written in one
+  // millisecond share their time), and a hash. So it is the same on every page that reads it, and still the same when
+  // an older tab writes the list again with the entries moved up, unless it removed an entry of that very time before it.
+  function legacyEntries(raw) {
+    var v = JSON.parse(raw || '[]'), seen = {};
+    return (Array.isArray(v) ? v : [v]).filter(validDraft).map(function (d) {
+      var e = Object.assign({}, d), ms = Math.min(Math.max(Date.parse(d.at) || 0, 0), Math.pow(36, 9) - 1);
+      var rank = Math.min(seen[ms] = (seen[ms] === undefined ? 0 : seen[ms] + 1), 35);
+      Object.defineProperty(e, '_k', { value: ENTRY_PREFIX + '0' + pad(ms, 9) + '-' + rank.toString(36) + hashOf(JSON.stringify(d)) });
+      return e;
+    });
+  }
   // `strict`: a store that refuses the read throws, instead of passing for an empty one (the writers read so, commentDraftsHeld and taken).
-  // A value that is not JSON is set aside under `:unreadable` first, so the write that follows does not destroy it
-  // (a later one replaces an earlier one set aside: the store holds one at a time).
+  // A list that is not JSON is set aside under `:unreadable` first, so the write that follows does not destroy it
+  // (a later one replaces an earlier one set aside: the store holds one at a time). An entry key that is not JSON is
+  // not: it is skipped here and left in the store (SPEC 10.8).
   function commentDraftsRaw(strict) {
-    var v, raw;
+    var found = [], legacy = null;
     readWorked = false;
-    try { raw = localStorage.getItem(COMMENT_DRAFT_KEY); } catch (e) { if (strict) throw e; return []; }
-    try { v = JSON.parse(raw || '[]'); } catch (e) {
-      if (strict) localStorage.setItem(COMMENT_DRAFT_KEY + ':unreadable', raw);
-      return [];
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k === null || !entryKey(k)) continue;
+        try {
+          var d = JSON.parse(localStorage.getItem(k));
+          if (validDraft(d)) { Object.defineProperty(d, '_k', { value: k }); found.push(d); }
+        } catch (e) { /* an entry that is not JSON is left where it is: not read, not removed, not set aside (SPEC 10.8) */ }
+      }
+      legacy = localStorage.getItem(COMMENT_DRAFT_KEY);
+    } catch (e) { if (strict) throw e; return []; }
+    if (legacy !== null) {
+      try { found = found.concat(legacyEntries(legacy)); } catch (e) {
+        if (strict) localStorage.setItem(COMMENT_DRAFT_KEY + ':unreadable', legacy);
+      }
     }
     readWorked = true;
-    return (Array.isArray(v) ? v : [v]).filter(function (d) {
-      return d && typeof d.body === 'string' && (typeof d.quote === 'string' || typeof d.thread === 'string');
+    var seen = {};
+    return found.filter(function (d) { return !seen[d._k] && (seen[d._k] = true); })
+      .sort(function (x, y) { return x._k < y._k ? -1 : x._k > y._k ? 1 : 0; });
+  }
+  // The list under the old key goes into entry keys (the same keys on every page), then the old key goes.
+  function migrateDrafts() {
+    var legacy = localStorage.getItem(COMMENT_DRAFT_KEY);
+    if (legacy === null) return;
+    var es;
+    try { es = legacyEntries(legacy); } catch (e) { localStorage.setItem(COMMENT_DRAFT_KEY + ':unreadable', legacy); es = []; }
+    es.forEach(function (d) {
+      var e = Object.assign({}, d);
+      if (e.root === undefined && CFG.root) e.root = CFG.root;
+      localStorage.setItem(d._k, JSON.stringify(e));
     });
+    localStorage.removeItem(COMMENT_DRAFT_KEY);
   }
   function ofOtherRoot(d) { return !!CFG.root && d.root !== undefined && d.root !== CFG.root; }
   function commentDraftsLoad(strict) {
-    var raw = commentDraftsRaw(strict), cleared = false;
+    var raw = commentDraftsRaw(strict), dropped = [];
     var held = raw.filter(function (d) {
       if (ofOtherRoot(d)) return false;
       if (!pendingClears.some(function (gone) { return gone(d); })) return true;
-      cleared = true;
+      dropped.push(d);
       return false;
     });
     // The first read that works after a clear was held writes it: a reload or another page does not offer the entry again.
     // Nothing to write when the store no longer holds what the clear names.
     if (readWorked && pendingClears.length && !flushing) {
-      if (!cleared) pendingClears = [];
+      if (!dropped.length) pendingClears = [];
       else {
         flushing = true;
-        try { commentDraftsSave(held); } finally { flushing = false; }
+        try { draftsWrite(dropped, [], true); } finally { flushing = false; }
       }
     }
     return held;
@@ -1600,16 +1678,56 @@ var create = function (ROOT, CFG, opts) {
   }
   // Every write of the store goes through here, so the line of replies and edits not sent, which says what the
   // store holds, is drawn again here: a writer added later cannot leave it behind.
-  function commentDraftsSave(ds) {
+  // `drop`: entries as read, removed. `add`: new entries, each under a key of its own. The add comes first, so a store
+  // that refuses it keeps what it held; refused, the drops go and it is tried once more, and refused again the drops are
+  // written back.
+  // `later`: the purge a read writes (commentDraftsLoad). The line is drawn after the read's caller is done, not inside
+  // the read: a redraw can close or redraw the list its caller is working in, and one that throws would pass for a
+  // refused read in the strict callers and escape the others.
+  function draftsWrite(drop, add, later) {
     storeOk = true;
     try {
-      var all = commentDraftsRaw(true).filter(ofOtherRoot).concat(ds.map(function (d) {
-        return d.root === undefined && CFG.root ? Object.assign({ root: CFG.root }, d) : d;
-      }));
-      if (all.length) localStorage.setItem(COMMENT_DRAFT_KEY, JSON.stringify(all)); else localStorage.removeItem(COMMENT_DRAFT_KEY);
+      try { migrateDrafts(); } catch (e) {
+        // A full store refuses the move. A clear is still made, as it was on the list: shorter, which the store accepts.
+        if (add.length) throw e;
+        var old = legacyEntries(localStorage.getItem(COMMENT_DRAFT_KEY));
+        old.forEach(function (d) { localStorage.removeItem(d._k); });       // what a move that stopped half-way had made
+        var goes = function (d) {
+          return drop.some(function (g) { return g._k === d._k; }) || (!ofOtherRoot(d) && pendingClears.some(function (gone) { return gone(d); }));
+        };
+        var left = old.filter(function (d) { return !goes(d); });
+        if (left.length) localStorage.setItem(COMMENT_DRAFT_KEY, JSON.stringify(left)); else localStorage.removeItem(COMMENT_DRAFT_KEY);
+      }
+      // The clears a failed purge held go with this write too.
+      var all = drop.slice(), have = {};
+      all.forEach(function (d) { have[d._k] = true; });
+      commentDraftsRaw(true).forEach(function (d) {
+        if (!have[d._k] && !ofOtherRoot(d) && pendingClears.some(function (gone) { return gone(d); })) all.push(d);
+      });
+      var keys = add.map(function (d) {
+        var e = d.root === undefined && CFG.root ? Object.assign({ root: CFG.root }, d) : d;
+        return { k: ENTRY_PREFIX + newEntryId(), v: JSON.stringify(e) };
+      });
+      var put = function () { keys.forEach(function (e) { localStorage.setItem(e.k, e.v); }); };
+      var was = all.map(function (d) { return [d._k, localStorage.getItem(d._k)]; });
+      try { put(); } catch (e) {
+        keys.forEach(function (e) { localStorage.removeItem(e.k); });
+        all.forEach(function (d) { localStorage.removeItem(d._k); });
+        try { put(); } catch (e2) {
+          keys.forEach(function (e) { localStorage.removeItem(e.k); });
+          was.forEach(function (w) { if (w[1] !== null) localStorage.setItem(w[0], w[1]); });
+          throw e2;
+        }
+      }
+      all.forEach(function (d) { localStorage.removeItem(d._k); });
       pendingClears = [];
     } catch (e) { storeOk = false; }
-    unsentLine();
+    if (later) setTimeout(function () {
+      // Under the guard, as the redraw inside the purge was: a purge the full store refuses would else queue another.
+      flushing = true;
+      try { unsentLine(); } finally { flushing = false; }
+    }, 0);
+    else unsentLine();
   }
   // The entries `gone` names go, then `add` (if any) is added, in one write, stamped `at` now unless it brings its
   // own. For a form that knows which entry is its own: the same quote in another paragraph is another comment.
@@ -1617,10 +1735,8 @@ var create = function (ROOT, CFG, opts) {
     var ds = commentDraftsHeld();
     // A clear (no `add`) the store could not be read for is held, not forgotten.
     if (!ds) { if (!add) pendingClears.push(gone); return; }
-    ds = ds.filter(function (d) { return !gone(d); });
-    if (add) ds.push({ quote: add.quote, body: add.body, block: add.block, head: add.head, tail: add.tail, occ: add.occ, rid: add.rid,
-                       at: add.at || new Date().toISOString(), min: add.min });
-    commentDraftsSave(ds);
+    draftsWrite(ds.filter(gone), add ? [{ quote: add.quote, body: add.body, block: add.block, head: add.head, tail: add.tail, occ: add.occ, rid: add.rid,
+                                          at: add.at || new Date().toISOString(), min: add.min }] : []);
   }
   // Is `d` the kept `kind` entry of the thread `c`: its id, its `at` (born) and its quote (about) all agree.
   // An older entry has no `born` and no `about` (it was told by its id): that is all it can agree on.
@@ -1648,10 +1764,8 @@ var create = function (ROOT, CFG, opts) {
     var ds = commentDraftsHeld();
     // A clear the store could not be read for is held, not forgotten: the send it ends was taken or given up.
     if (!ds) { if (!body) pendingClears.push(goes); return; }
-    ds = ds.filter(function (d) { return !goes(d); });
-    if (body) ds.push({ thread: c.id, born: c.at, about: c.quote, kind: kind, body: body, rid: rid, of: rid ? undefined : line || undefined,
-                        out: out, at: new Date().toISOString() });
-    commentDraftsSave(ds);
+    draftsWrite(ds.filter(goes), body ? [{ thread: c.id, born: c.at, about: c.quote, kind: kind, body: body, rid: rid, of: rid ? undefined : line || undefined,
+                                           out: out, at: new Date().toISOString() }] : []);
   }
   // The request ids a `changed` event named: the hub has them, whatever the send's answer says.
   var sawTaken = {};
@@ -1663,10 +1777,10 @@ var create = function (ROOT, CFG, opts) {
     // The draft offered on load is the text of a save the hub took: it is in the file, and the offer goes.
     var offeredTaken = !!offered && offered.rid === rid;
     if (offeredTaken) { decided(); dropOffer(); lateSends[rid] = true; }
-    var ds, left;
+    var ds, ended;
     try { ds = commentDraftsLoad(true); } catch (e) { ds = []; pendingClears.push(function (d) { return d.rid === rid; }); }   // a store that cannot be read now is left as it is, the clear held
-    left = ds.filter(function (d) { return d.rid !== rid; });
-    if (left.length < ds.length) commentDraftsSave(left);
+    ended = ds.filter(function (d) { return d.rid === rid; });
+    if (ended.length) draftsWrite(ended, []);
     // The notice of kept comments is drawn again from what is left (closePopover does it), unless it is being typed in.
     var shown = ds.some(function (d) { return d.rid === rid && typeof d.quote === 'string'; });
     if (shown && pop && pop.hasAttribute('data-kept') && !pop.contains(ROOT.activeElement)) closePopover();
@@ -1772,7 +1886,7 @@ var create = function (ROOT, CFG, opts) {
   // the next, before its thread is opened: "1 reply not sent · Show". The line sits in the strip the page keeps
   // free below its text for that button (render.py's bottom padding), so it covers no badge; Show lists them
   // (showUnsent). One whose send is out is not counted: its answer tells. The line, and its list if it is open,
-  // follow the store: drawn again on every write of it here (commentDraftsSave) or on another page of the document
+  // follow the store: drawn again on every write of it here (draftsWrite) or on another page of the document
   // (the storage event below), and at the end of every send.
   var unsentBtn = null;
   function sendsKept() {
@@ -1811,7 +1925,7 @@ var create = function (ROOT, CFG, opts) {
   // kept comments' notice is left as it is: its text is being typed into, and it is drawn from the store again
   // after any close.
   listen(window, 'storage', function (e) {
-    if (e.key === null || e.key === COMMENT_DRAFT_KEY) unsentLine();      // null: the whole store was cleared
+    if (e.key === null || e.key === COMMENT_DRAFT_KEY || entryKey(e.key)) unsentLine();      // null: the whole store was cleared
   });
   // The list the line opens: a popover above it, out of the text's way until asked for, that Escape, a click
   // outside or the line again close. Its forms are data-kept: their text is in the store, nothing to hold.
@@ -2413,7 +2527,7 @@ var create = function (ROOT, CFG, opts) {
   function notSent(e, what) {
     return e.unreachable && e.message === UNREACHABLE ? what + ' did not go out: the hub is unreachable.' : e.message;
   }
-  // One Cancel ends the Tell of each agent, each with an event of its own, and a toast replaces the one before it: the
+  // One Cancel ends the Tell of each agent, each with an event of its own, and toasts come one after the other: the
   // events of a moment are said once per thread, naming every agent of that thread that had already seen its Tell.
   var cancelNote = {};
   function cancelSaid(id, to, seen) {
@@ -2453,23 +2567,41 @@ var create = function (ROOT, CFG, opts) {
   // A microphone in the box. The sound goes to the hub (POST /_/transcribe, which relays it) or, on a page mounted in
   // Open WebUI, to Open WebUI's own route with the session cookie; the text comes back into the field, to read and send.
   // One recording at a time, and the sound is never kept: not in the store, not in the file. `dict` is the recording in
-  // hand ({f, chunks, discard, ...}) until its answer is in; `dictOff` is the time until which the service is held gone.
+  // hand ({f, chunks, discard, ...}) until its answer is in or it is discarded (a discarded one may still be letting its
+  // microphone go, next to a new recording); `dictOff` is the time until which the service is held gone.
   var DICTATE_TYPES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
   var DICTATE_MAX = 120000, DICTATE_WATCH = 15000;   // a recording asks the hub every 15 s whether it is still there
   var MIC = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1a2.5 2.5 0 0 0-2.5 2.5v4a2.5 2.5 0 0 0 5 0v-4A2.5 2.5 0 0 0 8 1ZM3.5 7a.75.75 0 0 1 1.5 0 3 3 0 0 0 6 0A.75.75 0 0 1 12.5 7a4.5 4.5 0 0 1-3.75 4.44v1.81h1.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5h1.5v-1.81A4.5 4.5 0 0 1 3.5 7Z"/></svg>';
   var dict = null, dictOff = 0;
+  // A mounted page is built again at each remount, so what outlasts it is kept in sessionStorage, not in this closure: only
+  // a 403 ('denied': the account may not dictate), and under the member's id where the page holds one, so a sign-in as
+  // someone else in the tab starts clean (10.4). A lost service ('gone': a 401, a 404, a network failure) is a moment or
+  // an expired login, not a fact about the account: it lasts for the mount.
+  // (The front is on the proxy socket, which always names a member; a loopback hub holds one person, so one key is right there.)
+  var DICT_OFF_KEY = KEYS + 'rd-dict-off:' + (CFG.proxy ? CFG.member : '');
+  function dictationHeldOff() {         // read at each ask, so a refusal in another mounted page of the tab is seen too
+    if (MOUNTED && dictOff !== Infinity) { try { if (sessionStorage.getItem(DICT_OFF_KEY) === '1') dictOff = Infinity; } catch (e) {} }
+    return Date.now() < dictOff;
+  }
+  function holdDictationOff(until, kept) {
+    dictOff = until;
+    if (MOUNTED && kept) { try { sessionStorage.setItem(DICT_OFF_KEY, '1'); } catch (e) {} }
+  }
   // Stops the recording and, with `discard`, throws the sound away (nothing is sent; a late answer is dropped). The
   // microphone is released either way, so the browser's light goes out.
   function stopDictation(discard) {
     var d = dict;
     if (!d) return;
-    if (discard) { d.discard = true; if (d.abort) d.abort.abort(); }     // a sound on its way is called back too
+    if (discard) {
+      d.discard = true; if (d.abort) d.abort.abort();     // a sound on its way is called back too
+      dict = null;      // at once: the browser's prompt may still be open, and the next box's microphone must not wait behind it
+    }
     clearTimeout(d.timer);
     clearInterval(d.watch);
     if (d.rec && d.rec.state !== 'inactive') d.rec.stop();
   }
   function dictationAvailable() {
-    if (Date.now() < dictOff) return Promise.resolve(false);
+    if (dictationHeldOff()) return Promise.resolve(false);
     if (MOUNTED) return Promise.resolve(true);        // Open WebUI answers or not; the first failure takes the button away
     if (CFG.proxy) return Promise.resolve(false);     // the hub in proxy mode relays nothing (SPEC 9.9)
     return fetch('/_/transcribe').then(function (r) { return r.ok ? r.json() : null; })
@@ -2519,17 +2651,18 @@ var create = function (ROOT, CFG, opts) {
       };
       var idle = function () { b.disabled = false; b.title = 'Dictate'; b.setAttribute('aria-label', 'Dictate'); b.setAttribute('aria-pressed', 'false'); };
       var lost = function (why) {
-        if (why === 'denied') { dictOff = Infinity; says('Dictation is not allowed for your account.'); b.remove(); }
-        else if (why === 'gone') { dictOff = MOUNTED ? Infinity : Date.now() + 60000; says('The transcription did not work. Try again.'); b.remove(); }
+        if (why === 'denied') { holdDictationOff(Infinity, true); says('Dictation is not allowed for your account.'); b.remove(); }
+        else if (why === 'gone') { holdDictationOff(MOUNTED ? Infinity : Date.now() + 60000); says('The transcription did not work. Try again.'); b.remove(); }
         else says('The transcription did not work. Try again.');
       };
       b.addEventListener('click', function () {
         if (dict) { if (dict.f === f && dict.rec) stopDictation(false); return; }
         says('');
         var d = dict = { f: f, chunks: [], discard: false, rec: null };
+        var free = function () { if (dict === d) dict = null; };    // a late callback must not clear the recording of a box opened since
         navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
           var release = function () { stream.getTracks().forEach(function (t) { t.stop(); }); };
-          if (d.discard || unmounted || !f.isConnected) { release(); dict = null; return; }
+          if (d.discard || dict !== d || unmounted || !f.isConnected) { release(); free(); return; }
           var type, rec, ext;
           // A browser that takes the stream and then refuses the recorder (a type it cannot make, a start that throws)
           // must not keep the microphone: the light goes out, and the next press is a new try.
@@ -2538,31 +2671,32 @@ var create = function (ROOT, CFG, opts) {
             rec = d.rec = type ? new MediaRecorder(stream, { mimeType: type }) : new MediaRecorder(stream);
             type = rec.mimeType || type || 'audio/webm';
             ext = /mp4/.test(type) ? 'mp4' : /ogg/.test(type) ? 'ogg' : 'webm';
-          } catch (e) { release(); dict = null; says('The recording could not start. Try again.'); return; }
+          } catch (e) { release(); free(); says('The recording could not start. Try again.'); return; }
           rec.addEventListener('dataavailable', function (e) { if (e.data && e.data.size) d.chunks.push(e.data); });
           rec.addEventListener('stop', function () {
             release();
+            clearTimeout(d.timer); clearInterval(d.watch);    // a recorder can stop by itself (a microphone unplugged): its timer must not cut a later recording
             var gone = function () { return d.discard || unmounted || !f.isConnected; };
             // A discarded sound leaves a form that may still be here (a send that fails gives it back): its button is idle again.
-            var here = function () { if (!unmounted && f.isConnected) idle(); };
-            if (gone() || !d.chunks.length) { dict = null; here(); if (!gone()) says('Nothing was recorded. Try again.'); return; }
+            var here = function () { if (!unmounted && f.isConnected && (!dict || dict === d || dict.f !== f)) idle(); };   // not under a newer recording of this same form
+            if (gone() || !d.chunks.length) { free(); here(); if (!gone()) says('Nothing was recorded. Try again.'); return; }
             b.disabled = true; b.title = 'Transcribing…'; b.setAttribute('aria-label', 'Transcribing…'); b.setAttribute('aria-pressed', 'false');
             d.abort = new AbortController();
             transcribeSound(new Blob(d.chunks, { type: type }), ext, d.abort.signal).then(function (text) {
-              dict = null;
+              free();
               here();
               if (gone()) return;
               insertDictated(ta, text);
             }, function (e) {
-              dict = null;
+              free();
               here();
               if (gone()) return;
               lost(e.why);
             });
           });
-          try { rec.start(); } catch (e) { release(); dict = null; says('The recording could not start. Try again.'); return; }
+          try { rec.start(); } catch (e) { release(); free(); says('The recording could not start. Try again.'); return; }
           b.title = 'Stop'; b.setAttribute('aria-pressed', 'true');
-          d.timer = setTimeout(function () { stopDictation(false); }, DICTATE_MAX);
+          d.timer = setTimeout(function () { stopDictation(false); }, DICTATE_MAX);    // `dict` is d: every way out of d clears the timer first
           if (!MOUNTED) d.watch = setInterval(function () {   // the service lost during the recording: the sound is dropped
             dictationAvailable().then(function (yes) {
               if (yes || dict !== d || !d.rec || d.rec.state !== 'recording') return;
@@ -2571,7 +2705,9 @@ var create = function (ROOT, CFG, opts) {
             });
           }, DICTATE_WATCH);
         }, function (e) {
-          dict = null;
+          var stale = d.discard || dict !== d;      // closed while the prompt was open: nobody is waiting for the answer
+          free();
+          if (stale) return;
           says(e && (e.name === 'NotAllowedError' || e.name === 'SecurityError') ? 'Microphone blocked: allow it for this site.' : 'No microphone found.');
         });
       });
@@ -2769,7 +2905,7 @@ var create = function (ROOT, CFG, opts) {
     if (popId === id) closePopover(); else openComment(id);
   });
   listen(PAGE_EV, 'mousedown', function (e) {
-    if (pop && !standing() && !pop.contains(e.target) && !(e.target.closest && e.target.closest('.rd-badge, #rd-panel, #rd-unsent, #rd-actions, #rd-notice, #rd-menu-btn, #rd-menu, #rd-mode, #rd-work'))) leavePopover();
+    if (pop && !standing() && !pop.contains(e.target) && !(e.target.closest && e.target.closest('.rd-badge, #rd-panel, #rd-unsent, #rd-actions, .rd-inline, #rd-notice, #rd-menu-btn, #rd-menu, #rd-mode, #rd-work'))) leavePopover();
   });
 
   // ---- side panel -----------------------------------------------------------
@@ -3417,27 +3553,78 @@ var create = function (ROOT, CFG, opts) {
   // sends; the server sees a block that differs only in its ticks and flips the
   // `[ ]` / `[x]` of that one item in the .md (sheafmd.edit._toggle_boxes).
   // A click on the item's text is for the caret and for selecting, so the
-  // <label> pandoc wraps around the item must not tick the box.
+  // <label> pandoc wraps around the item ticks the box only on the label's words (onLabelWords).
+  // Share's box is the control itself, pressed by its owner and refused to another member (SPEC 10.11), on a page whose
+  // block editing is off too, as the other words' buttons are: so it is not in the canEdit handler below.
+  if (canSave) {
+    main.addEventListener('click', function (e) {
+      var t = e.target, lab = t && t.closest && t.closest('label');
+      var box = t && t.tagName === 'INPUT' && t.type === 'checkbox' ? t : lab && main.contains(lab) && lab.querySelector('input[type="checkbox"]');
+      var share = box && toggleOf.get(box);
+      if (!share || (t !== box && t.closest('a'))) return;      // a link in the line opens
+      e.stopImmediatePropagation();                              // the canEdit handler below never sees it
+      e.preventDefault();                                       // the browser's own toggle is cancelled
+      if (t !== box && (t.closest('.rd-badge, [data-rd-ui]') || editing || e.detail > 1 || !onLabelWords(lab, e, true))) return;
+      pressShare(share, box);
+    });
+  }
   if (canEdit) {
     main.addEventListener('click', function (e) {
       var t = e.target;
       var isBox = t && t.tagName === 'INPUT' && t.type === 'checkbox';
       if (!isBox) {
         var lab = t && t.closest && t.closest('label');
-        if (lab && main.contains(lab) && lab.querySelector('input[type="checkbox"]')) e.preventDefault();
-        return;
+        var own = lab && main.contains(lab) && lab.querySelector('input[type="checkbox"]');
+        if (!own || (t.closest && t.closest('a'))) return;       // a link in the line opens
+        e.preventDefault();                                       // the browser's own toggle of the label is cancelled
+        if (t.closest && t.closest('.rd-badge, [data-rd-ui]')) return;       // a comment's badge opens its thread, it does not tick
+        if (editing || e.detail > 1 || !onLabelWords(lab, e)) return;       // a double or triple click selects, it does not tick again
+        t = own;
       }
       // The browser's own toggle is cancelled and replaced by ours: inside a
       // contenteditable it is not reliable, and the attribute must move with it.
       e.preventDefault();
-      // A box of the eleven words is pressed with its button at the top of the page (SPEC 10.11).
+      // A box of the other words is pressed with its button (SPEC 10.11).
       if (isActBox(t)) { say(PRESS_IT); return; }
       var b = blockOf(t);
       if (stale || dead || !b || !editable.has(b.i)) return;
       tickBox(t, b);
     });
   }
-  var PRESS_IT = 'Press it with its button at the top of the page.';
+  var PRESS_IT = 'Press it with its button.';
+  // A task line's label: the words before the first `:` or ` — `, else the first word. A click on them ticks the box
+  // like a <label>, out of edit mode (in it the words are for the caret); the rest of the line is for the caret, a selection and its links. Told by where the click
+  // landed against the label's words, so the document gets no element of its own. A touch gets 44 px of height.
+  function labelEnd(text, whole) {
+    if (whole) return text.length;                  // Share's label is its whole line: "Shared with the team"
+    var m = /:|\s—\s/.exec(text);
+    if (m) return m.index;
+    var w = /^\s*\S+/.exec(text);
+    return w ? w[0].length : 0;
+  }
+  function onLabelWords(lab, e, whole) {
+    var sel = getSel();
+    if (sel && !sel.isCollapsed && lab.contains(sel.anchorNode)) return false;
+    // The label's words are its own text: what the renderer added (a comment's badge, data-rd-ui) is not among them.
+    var nodes = [], walker = document.createTreeWalker(lab, NodeFilter.SHOW_TEXT), node;
+    while ((node = walker.nextNode())) if (!(node.parentElement && node.parentElement.closest('[data-rd-ui]'))) nodes.push(node);
+    var left = labelEnd(nodes.map(function (n) { return n.data; }).join(''), whole), first = null, last = null, end = 0;
+    for (var k = 0; left > 0 && k < nodes.length; k++) {
+      if (!first) first = nodes[k];
+      last = nodes[k]; end = Math.min(left, nodes[k].data.length); left -= end;
+    }
+    if (!first) return false;
+    var r = document.createRange();
+    r.setStart(first, 0); r.setEnd(last, end);
+    var rects = r.getClientRects(), min = window.matchMedia('(pointer:coarse)').matches ? 44 : 0;
+    for (var i = 0; i < rects.length; i++) {
+      // The band reaches out of the label's first and last line only, never into its own other lines.
+      var q = rects[i], pad = Math.max(0, (min - q.height) / 2);
+      var above = i === 0 ? pad : 0, below = i === rects.length - 1 ? pad : 0;
+      if (e.clientX >= q.left && e.clientX <= q.right && e.clientY >= q.top - above && e.clientY <= q.bottom + below) return true;
+    }
+    return false;
+  }
   // A box in a block whose words were edited and not saved may be an action typed there, which has no button yet:
   // the block is saved first, and the answer's actions say whether the box is one (SPEC 10.11). A save that brings a
   // reload (merged or remapped) brings none: the box is left for the page that follows. Ticks alone make no action.
@@ -3453,8 +3640,9 @@ var create = function (ROOT, CFG, opts) {
   // Move to takes `<slug> (ref <thread>)`, Merge, Deploy and Install the rest of the line, the others nothing.
   var ACTION_ARG = { 'Move to': '\\s+[A-Za-z0-9._\\\\-]+\\s+\\(ref\\s+[^()\\s]+\\)(?:\\s+@[A-Za-z0-9._-]+)?',
                      'Merge': '\\s+\\S.*', 'Deploy': '\\s+\\S.*', 'Install': '\\s+\\S.*' };
+  // Share's tick box may say it in its own words (the_list.LABELS).
   var ACTION_LINE = new RegExp('^(?:' + ACTION_WORDS.map(function (w) {
-    return w.replace(/'/g, '[\'’]') + (ACTION_ARG[w] || '(?:\\s+@[A-Za-z0-9._-]+)?');
+    return w.replace(/'/g, '[\'’]').replace(/^Share$/, 'Share(?:d with the team)?') + (ACTION_ARG[w] || '(?:\\s+@[A-Za-z0-9._-]+)?');
   }).join('|') + ')$');
   // The text of a box's own item, its nested lists left out; null for a box in no item.
   function itemLine(t) {
@@ -3462,6 +3650,7 @@ var create = function (ROOT, CFG, opts) {
     if (!li) return null;
     var own = li.cloneNode(true);
     Array.prototype.forEach.call(own.querySelectorAll('ul, ol'), function (n) { n.remove(); });
+    Array.prototype.forEach.call(own.querySelectorAll('[data-rd-ui]'), function (n) { n.remove(); });
     return own.textContent.replace(/\s+/g, ' ').trim();
   }
   function mayBeAction(t) {
@@ -3492,7 +3681,7 @@ var create = function (ROOT, CFG, opts) {
   }
 
   // ---- the action buttons (SPEC 10.11) ------------------------------------------
-  // The boxes of the eleven words are the list's buttons at the top of the page (9.10): a one-off red, locked once
+  // The boxes of the eleven words are the list's buttons, each where its line is (9.10): a one-off red, locked once
   // pressed, with who and when; Share a toggle, its owner's alone. A press reads Undo for 5 seconds, then posts the
   // list's tick (`/_/tick`) with the hash of the text on screen; the hub's `changed` reloads the page onto the
   // ticked file, and a reload asked meanwhile waits for the press's answer. While a press waits or is sent, the other
@@ -3501,7 +3690,7 @@ var create = function (ROOT, CFG, opts) {
   // of the text it wrote (`actsOwed`, with its hash), drawn once no press is open; a press whose buttons that save
   // changed is not sent, since its number may now name another box. While the tick is out (`ticking`), a save
   // waits for its answer: it would move the text the tick names.
-  var UNDO_MS = 5000, actBoxes = new WeakSet(), actBar = null, pressOpen = false, reloadAfterPress = null;
+  var UNDO_MS = 5000, actBoxes = new WeakSet(), toggleOf = new WeakMap(), actBar = null, pressOpen = false, reloadAfterPress = null;
   var actsHash = CFG.hash, actsShown = [], actsOwed = null, pressSaid = null, ticking = null;
   // actsUnsure: the buttons drawn may not be the file's (tickBox). signOutLater: a sign-out met in a press's Undo,
   // gone on to once the press is undone (meetSignOut).
@@ -3541,28 +3730,123 @@ var create = function (ROOT, CFG, opts) {
     });
     return out;
   }
+  // A one-off's button is drawn where its box is, in the document, the page's own (data-rd-ui, never editable) and
+  // left out of what a save sends by clean(), as the Copy button is; the box is hidden behind it. A toggle (Share), and
+  // a one-off whose box the page does not find, stay in the row above the document, which is drawn only for them.
+  // The line's own words are what the button says (a Move to's slug too), so they are hidden under it, in a span
+  // clean() unwraps: the rest of the line is the button's text. The text around the span is kept as it was, and a
+  // span already in place is kept on a redraw: an autosave's answer redraws, and must not move the caret or the
+  // comments' ranges.
+  function wordPattern(w) {
+    return w.replace(/[^\w ’']/g, '\\$&').replace(/['’]/g, "['’]").replace(/ +/g, '\\s+');
+  }
+  function hideWord(box, words, kept) {
+    var t = box.nextSibling, m = null, sp = t && t.nodeType === 3 && t.nextSibling;
+    if (!t || t.nodeType !== 3) return;
+    if (sp && sp.nodeName === 'SPAN' && sp.className === 'rd-actword' && !t.nodeValue.trim() &&
+        words.some(function (w) { return w && new RegExp('^' + wordPattern(w) + '$', 'i').test(sp.textContent); })) {
+      kept.add(sp);
+      return;
+    }
+    words.some(function (w) {
+      m = w && new RegExp('^(\\s*)(' + wordPattern(w) + ')', 'i').exec(t.nodeValue);
+      return m;
+    });
+    if (!m) return;
+    sp = document.createElement('span');
+    var rest = document.createTextNode(t.nodeValue.slice(m[0].length));
+    sp.className = 'rd-actword';
+    sp.textContent = m[2];
+    t.nodeValue = m[1];
+    t.parentNode.insertBefore(rest, t.nextSibling);
+    t.parentNode.insertBefore(sp, rest);
+    kept.add(sp);
+  }
+  // The spans no button of this draw hides under any more (its line changed, or lost its action) give their word back.
+  function showWords(kept) {
+    Array.prototype.forEach.call(main.querySelectorAll('span.rd-actword'), function (sp) {
+      if (kept.has(sp)) return;
+      var before = sp.previousSibling, after = sp.nextSibling, sel = getSelection(), at = sel.rangeCount ? sel : null;
+      var anchor = at && [at.anchorNode, at.anchorOffset], focus = at && [at.focusNode, at.focusOffset], into;
+      if (before && before.nodeType === 3) {
+        var cut = before.nodeValue.length, mid = sp.textContent.length;
+        before.nodeValue += sp.textContent + (after && after.nodeType === 3 ? after.nodeValue : '');
+        if (after && after.nodeType === 3) after.remove();
+        sp.remove();
+        into = function (n, o) { return n === sp || (n && n.parentNode === sp) ? [before, cut + o] : n === after ? [before, cut + mid + o] : [n, o]; };
+      } else {
+        var text = document.createTextNode(sp.textContent);
+        sp.replaceWith(text);
+        into = function (n, o) { return n === sp || (n && n.parentNode === sp) ? [text, o] : [n, o]; };
+      }
+      // The caret was in a node that is gone: it goes to the same place in the text that took its place.
+      if (at && ((anchor[0] === sp || (anchor[0] && anchor[0].parentNode === sp) || anchor[0] === after) ||
+                 (focus[0] === sp || (focus[0] && focus[0].parentNode === sp) || focus[0] === after))) {
+        var A = into(anchor[0], anchor[1]), F = into(focus[0], focus[1]);
+        sel.setBaseAndExtent(A[0], A[1], F[0], F[1]);
+      }
+    });
+  }
+  function inlineButton(btn, box, words, kept) {
+    btn.classList.add('rd-inline');
+    btn.setAttribute('contenteditable', 'false');
+    btn.setAttribute('data-rd-ui', '');
+    btn.addEventListener('mousedown', function (e) { e.preventDefault(); });   // the press must not move the caret
+    hideWord(box, words, kept);
+    box.parentNode.insertBefore(btn, box.nextSibling);
+  }
   function drawActions(acts, h) {
     if (pressOpen) { actsOwed = { acts: acts, hash: h }; return; }
     actsHash = h; actsShown = acts || []; actsUnsure = false;
     actBoxes = boxesOfActs(acts);
+    toggleOf = new WeakMap();
     if (actBar) actBar.remove();
     actBar = null;
-    if (!acts || !acts.length) return;
-    actBar = el('div', { id: 'rd-actions', role: 'group', 'aria-label': 'Actions' });
-    var all = acts.map(function (a) {
+    Array.prototype.forEach.call(main.querySelectorAll('.rd-act.rd-inline'), function (b) { b.remove(); });
+    var kept = new WeakSet();
+    if (!acts || !acts.length) { showWords(kept); return; }
+    var bar = el('div', { id: 'rd-actions', role: 'group', 'aria-label': 'Actions' });
+    var all = acts.map(function (a, i) {
       var btn = document.createElement('button');
       btn.type = 'button';
+      btn.setAttribute('data-i', i);                      // its place among the actions, in the order of the file
       btn.className = 'rd-act ' + (a.toggle ? 'toggle' : 'one-off') + (a.pressed && !a.toggle ? ' pressed' : '');
       btn.textContent = a.label + (a.pressed && !a.toggle ? ' ✓' + (a.by ? ' ' + a.by : '') : '');
       if (a.toggle) btn.setAttribute('aria-pressed', a.pressed ? 'true' : 'false');
       btn.disabled = !a.may;
-      actBar.appendChild(btn);
+      var box = boxOfAct(a);
+      // Share is a tick box where its line is, with its own label; its button is kept off the page, as the one the box
+      // presses. A Share whose box the page does not find stays a button in the row.
+      if (a.toggle && box) toggleOf.set(box, { btn: btn, a: a });
+      else if (box) inlineButton(btn, box, [a.label.replace(/ @\S+$/, ''), a.word], kept); else bar.appendChild(btn);
       return { btn: btn, a: a };
     });
-    all.forEach(function (x) { if (!x.btn.disabled) pressable(x.btn, x.a, all); });
-    main.parentNode.insertBefore(actBar, main);
+    all.forEach(function (x) { if (!x.btn.disabled) pressable(x.btn, x.a, all, !!(x.a.toggle && boxOfAct(x.a))); });
+    showWords(kept);
+    if (bar.firstChild) { actBar = bar; main.parentNode.insertBefore(bar, main); }
   }
-  function pressable(btn, a, all) {
+  // A tick box's press is sent at once: its box shows the tick when the hub has taken it, and one more click releases it.
+  // A box in a block with edits not saved saves the block first, as a plain box does (tickBox), so the tick lands on
+  // the text the hub holds and the edits are not merged against it afterwards; the buttons the save's answer brings
+  // are the ones pressed.
+  async function pressShare(x, box) {
+    if (!x.a.may) { say(x.a.pressed ? 'Only the owner of this sheaf can withdraw its Share.' : 'Only the owner of this sheaf can share it.'); return; }
+    if (boxWaits.has(box)) return;
+    var b = blockOf(box);
+    if (b && unticked(ser(b)) !== unticked(b.pristine)) {
+      var res = {}, ok;
+      boxWaits.add(box);
+      try { ok = await save(true, res); } finally { boxWaits.delete(box); }
+      // A save the hub did not take and that said nothing (quiet) is told here, or the press looks dropped.
+      if (!ok && res.owed) say('The hub is unreachable: press Share again once it is back.', true);
+      // Not on an owed save either: Share is sent to the hub, and the owed edits would be merged over it when they go.
+      if (!ok || stale || docGone || !main.contains(box)) return;
+      x = toggleOf.get(box);
+      if (!x) return;
+    }
+    if (!x.btn.disabled) x.btn.click();
+  }
+  function pressable(btn, a, all, atOnce) {
     var word = btn.textContent, waiting = null, pressedBox = null;
     function lock(on) { all.forEach(function (o) { if (o.btn !== btn && o.a.may) o.btn.disabled = on; }); }
     function back() { btn.textContent = word; btn.classList.remove('pending'); btn.removeAttribute('aria-label'); }
@@ -3582,6 +3866,7 @@ var create = function (ROOT, CFG, opts) {
       waiting = null;
       back();
       btn.disabled = true;
+      pressSaid = null;           // a newer press's answer is the one a reload says again, not an earlier press's
       if (a.toggle) btn.setAttribute('aria-pressed', a.pressed ? 'false' : 'true');
       // A save out now changes the hash: the tick names the text that save leaves. So does a comment or a Restore
       // (`ownWrites`), which the hub would otherwise write between the tick's read and its lock.
@@ -3617,10 +3902,10 @@ var create = function (ROOT, CFG, opts) {
         if (a.toggle) btn.setAttribute('aria-pressed', a.pressed ? 'true' : 'false');
         btn.disabled = false;
         lock(false);
-        say(e.message, true);
+        var said = say(e.message, true);
         // A reload waits for this answer: the refusal is said again on the page it brings, if it comes while the
-        // toast would still be up (a form may hold it longer).
-        if (reloadAfterPress) pressSaid = { text: e.message, until: Date.now() + 7000 };
+        // toast is still waiting its turn or up (a form may hold the reload longer).
+        if (reloadAfterPress || reloadPending) pressSaid = { text: e.message, toast: said };
         done();
       }
     }
@@ -3643,6 +3928,7 @@ var create = function (ROOT, CFG, opts) {
       var pb = boxOfAct(a);
       pressedBox = pb && !actsUnsure && hash === actsHash && savedBox(pb, a.box[1]) ? pb : null;
       lock(true);
+      if (atOnce) { send(); return; }
       btn.textContent = 'Undo'; btn.classList.add('pending'); btn.setAttribute('aria-label', 'Undo ' + word);
       waiting = setTimeout(send, UNDO_MS);
     });
@@ -3846,6 +4132,7 @@ var create = function (ROOT, CFG, opts) {
     if (live) live.close();
     clearTimeout(closedTmr); closedTmr = null;
     failing = false; hubLine = false; dead = true; reloadPending = false; heldReload = false; holdWhy = null; holdOpen = null;
+    try { sessionStorage.removeItem(KEYS + 'rd-toast'); } catch (e) {}     // a merged save's toast, whose reload this ends (#125)
     stopRenewing();
     if (dirty().length) editDraftMirror();
     Array.prototype.forEach.call(ROOT.querySelectorAll('.rd-hold'), function (n) { if (n.textContent === HOLD) n.remove(); });
@@ -3913,6 +4200,9 @@ var create = function (ROOT, CFG, opts) {
   function endCheck() {
     checking = false;
     clearTimeout(checkTmr); checkTmr = null;
+    heardHeld();
+  }
+  function heardHeld() {
     var fs = afterCheck.splice(0);
     if (!docGone) fs.forEach(function (f) { f(); });
   }
@@ -3934,7 +4224,16 @@ var create = function (ROOT, CFG, opts) {
         if (otherRoot(j)) { meetDocGone(whyGone(j)); if (last()) endCheck(); return; }
         if (a.missing) { if (last()) { meetFileMissing(); endCheck(); } return; }       // an older answer is no news
         takeTarget(j);
-        if (j && j.hash && j.hash !== hash) reloadWhenFree(popId);
+        // The newest answer is the one that compares the hash: an older one leaves the held events and the reload
+        // to it. The events waiting are heard first, so the hash is compared with the page's own after them: the
+        // answer was read after a write whose `changed` came before it, and a reload for a write the page can take
+        // in place loses what the page said of it. An answer read before that write names the hash the page held
+        // before the event: that is no change either.
+        if (last()) {
+          var was = hash;
+          heardHeld();
+          if (j && j.hash && j.hash !== hash && j.hash !== was) reloadWhenFree(popId);
+        }
         meetTaken(j);
         takeJobs(j, jobs);
         if (last()) endCheck();
@@ -4035,7 +4334,7 @@ var create = function (ROOT, CFG, opts) {
         var late = !!d.rid && taken(d.rid);
         d.seenSince = seenSeq;                 // the page may hold it a while (heard): a `tell-seen` taken meanwhile is newer
         heardAfterCheck(function () { heard(d); });
-        if (late) say('What you sent reached the hub after all.');      // over the news of applyComments
+        if (late) say('What you sent reached the hub after all.');      // after the news of applyComments
       });
       live.addEventListener('tell-sent', function (ev) {
         say('Sent to ' + yourSession() + '. Its reply will appear in the thread.');
@@ -4251,17 +4550,24 @@ var create = function (ROOT, CFG, opts) {
   buildMenu();
   paint(null);
   try {
-    var keep = JSON.parse(sessionStorage.getItem(KEYS + 'rd-keep') || 'null');
+    // All three keys are read raw and removed before either is parsed: a value that is not JSON (an older page's, a
+    // foreign write) must not stop this boot, nor be there again for the next load of the tab.
+    var rawKeep = sessionStorage.getItem(KEYS + 'rd-keep');
     var msg = sessionStorage.getItem(KEYS + 'rd-toast');
-    var refusedPress = sessionStorage.getItem(KEYS + 'rd-press-said');   // a press's refusal a reload waited for (10.11)
+    var rawPress = sessionStorage.getItem(KEYS + 'rd-press-said');   // a press's refusal a reload waited for (10.11)
     sessionStorage.removeItem(KEYS + 'rd-keep');
     sessionStorage.removeItem(KEYS + 'rd-toast');
     sessionStorage.removeItem(KEYS + 'rd-press-said');
+    var keep = null;
+    try { keep = JSON.parse(rawKeep || 'null'); } catch (e) {}
+    var refusedPress = null;      // an older page left the bare text here: that is no refusal to say again, and no reason to stop booting
+    try { refusedPress = JSON.parse(rawPress || 'null'); } catch (e) {}
+    if (!refusedPress || typeof refusedPress.text !== 'string' || typeof refusedPress.until !== 'number') refusedPress = null;
     // One hub serves every document from one origin, so what a reload kept
     // belongs to this page only if it names this document.
     if (keep && keep.doc !== CFG.doc) { keep = null; msg = null; }
     if (keep) {
-      scrollBack(keep.y || 0);
+      if (typeof keep.y === 'number') scrollBack(keep.y);     // a keep that names the document only (#139) restores no scroll
       if (keep.known) {
         var n = news(keep.known, COMMENTS, keep.open ? [keep.open] : []);
         n.forEach(function (x) { flash(x.id); });
@@ -4283,8 +4589,12 @@ var create = function (ROOT, CFG, opts) {
       if (keep.editing) { setEditing(true); placeCaret(keep.caret); }
       if (keep.open && byId[keep.open]) setTimeout(function () { openComment(keep.open); }, 50);
     }
-    if (refusedPress && keep) say(refusedPress, true);
-    else if (msg) say(msg);
+    // What the old page said and the reload left, then the refusal, which a second reload says again in its turn.
+    if (msg) say(msg);
+    if (refusedPress && keep && Date.now() < refusedPress.until) {
+      say(refusedPress.text, true, true /* replayed */);
+      pressSaid = { text: refusedPress.text, toast: { until: refusedPress.until } };      // the deadline it was said in, not a new one
+    }
     if (canSave) { showKept(); unsentLine(); }
     var unsaved = canEdit ? editDraftFound() : null;
     if (unsaved) offerDraft(unsaved);
@@ -4303,13 +4613,34 @@ var create = function (ROOT, CFG, opts) {
     if (live) live.close();
     if (HL) ['rd-open', 'rd-resolved', 'rd-active', 'rd-widened'].forEach(function (k) { CSS.highlights.delete(k); });
   }
+  // A toast left for the next boot needs a keep that names this document, or a boot of another document in the tab says it
+  // (one hub, one origin). The keep a reload wrote for this document stays as it is: it holds what the boot restores.
+  function keepNaming() {
+    try {
+      var left = sessionStorage.getItem(KEYS + 'rd-toast');
+      if (!left) return;
+      var kept = null;
+      try { kept = JSON.parse(sessionStorage.getItem(KEYS + 'rd-keep') || 'null'); } catch (e) {}
+      if (!kept || kept.doc !== CFG.doc) sessionStorage.setItem(KEYS + 'rd-keep', JSON.stringify({ doc: CFG.doc }));
+    } catch (e) {}
+  }
   // failed(): mount.js could not fetch the page again for a remount (or the hub was upgraded and the loader takes over).
   // The page stays as it was and says so, and the next change settles again: `settling` was left set by a reload that,
-  // on a page of its own, never comes back.
-  function failed(msg) {
+  // on a page of its own, never comes back. `handover` is the upgrade: the loader's new script mounts into this pane and
+  // removes this page's toasts, so the toast of a merged save is left in the tab for the new boot to say (#129).
+  function failed(msg, handover) {
     if (unmounted) return;
     settling = false;
-    try { sessionStorage.removeItem(KEYS + 'rd-keep'); } catch (e) {}     // the keep of a reload that did not happen
+    var left = '';
+    try { left = sessionStorage.getItem(KEYS + 'rd-toast') || ''; } catch (e) {}
+    if (handover && left) {
+      keepNaming();
+    } else {
+      try { sessionStorage.removeItem(KEYS + 'rd-keep'); } catch (e) {}     // the keep of a reload that did not happen
+      try { sessionStorage.removeItem(KEYS + 'rd-toast'); } catch (e) {}
+      try { sessionStorage.removeItem(KEYS + 'rd-press-said'); } catch (e) {}     // a refusal the boot of a reload that did not happen was to say
+      if (left) say(left);          // what the save's reload was to say is said on the page that stays, not left for a page of another document (#125)
+    }
     say(msg, true);
   }
   return { unmount: unmount, dirty: unsavedNow, failed: failed };

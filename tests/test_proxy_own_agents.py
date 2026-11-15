@@ -119,6 +119,7 @@ def test_a_cancel_that_comes_while_the_agent_lists_ends_bea_once_and_leaves_cal_
     waiting._emit = emit
     first = documents(browser, bea)[0]
     order[0].join(5)
+    assert not order[0].is_alive(), "the cancel did not finish"
     assert first["tells"] and done == [200]                      # one state wins: listed, then cancelled
     assert documents(browser, bea)[0]["tells"] == [] and doc(pair, BEA)["telling"] == []
     assert doc(pair, CAL)["telling"] == [{"id": "c1", "to": "Claude (Cal)", "state": "queued"}]

@@ -11,6 +11,7 @@ from test_save_roundtrip import blocks_of
 import sheafmd
 from sheafmd import comments as rdc
 from sheafmd import copyblock
+from sheafmd.blocks import split_md_blocks
 from sheafmd import edit as rde
 
 MAIL = "> [!COPY]\n> Hello **Anna**,\n> thanks for the call.\n>\n> Best, Thierry\n"
@@ -220,3 +221,139 @@ def test_a_comment_on_a_marker_pandoc_does_not_hide_lands_on_it_not_two_lines_be
     i = proj.index("[!COPY]")
     at = rdc.anchor_point(block, i, i + 7, "[!COPY]")
     assert block[:at].endswith("[!COPY]")
+
+
+# A line that opens an HTML block ends the first paragraph under GFM (CommonMark start conditions 1-6), so the
+# `---` or `===` after it underlines nothing. Condition 7 (any other tag, `<span>`) cannot interrupt a paragraph.
+HTML_OPENERS = ["<div>", "<!-- x -->", "<pre>", "<script>", "<STYLE type=x>", "<?php", "<!DOCTYPE html>",
+                "<![CDATA[", "<p>", "</div>", "<details open>"]
+
+
+@pytest.mark.parametrize("underline", ["---", "==="])
+@pytest.mark.parametrize("opener", HTML_OPENERS)
+def test_a_line_opening_an_html_block_before_an_underline_leaves_a_copy_block(opener, underline):
+    quote = f"> [!COPY]\n> a\n> {opener}\n> {underline}\n"
+    assert copyblock.is_copy_block(quote.rstrip("\n"))
+    assert copyblock.hide(quote) != quote
+
+
+@pytest.mark.parametrize("opener", ["<div>", "<!-- x -->", "<pre>"])
+def test_such_a_block_shows_its_copy_button_and_a_save_keeps_the_marker(tmp_path, opener):
+    md = f"> [!COPY]\n> a\n> {opener}\n> ---\n"
+    out = page_of(tmp_path, md, share=False)
+    assert f'<blockquote class="{copyblock.PAGE_CLASS}">' in out
+    assert copyblock.MARKER not in "".join(quotes(out))
+    assert copyblock.MARKER in saved(md)
+
+
+@pytest.mark.parametrize("quote", [
+    "> [!COPY]\n> a\n> <span>\n> ---\n",             # condition 7 does not interrupt a paragraph
+    "> [!COPY]\n> a\n> <custom-tag>\n> ===\n",
+    "> [!COPY]\n> a\n> <divx>\n> ---\n",
+    "> [!COPY]\n> a\n> <a href=x>\n> ---\n",
+    "> [!COPY]\n> a\n> <br/>\n> ---\n",
+])
+def test_an_inline_tag_line_does_not_end_the_paragraph_so_the_underline_still_refuses_the_block(quote):
+    assert not copyblock.is_copy_block(quote.rstrip("\n"))
+
+
+# pandoc's rules, probed on 720 lines (five leading marks, sixteen mixes of tabs and spaces after the `>`, nine openers).
+@pytest.mark.parametrize("opener", ["<![cdata[", "<![Cdata[", "<![CDATA["])
+def test_only_upper_case_cdata_opens_an_html_block_before_an_underline(opener):
+    assert copyblock.is_copy_block(f"> [!COPY]\n> a\n> {opener}\n> ---") is (opener == "<![CDATA[")
+
+
+@pytest.mark.parametrize("line, opens", [
+    ("> \t<div>", True),                    # the tab leaves 3 columns after the one the `>` takes
+    (">\t <div>", True),
+    (">\t  <div>", False),                  # 4 columns: indented code, which cannot end a paragraph
+    (">\t\t<div>", False),
+    ("> \t <div>", True),                  # a space, a tab to column 4, a space: 3
+    (">  \t<div>", True),                   # the tab only reaches column 4: 1 column kept by the mark, 3 of indent
+    (">   \t<div>", False),
+    ("   >\t<div>", True),
+    ("  >\t <div>", True),
+    ("\t> <div>", False),                   # a tab before the `>` is no quote at all
+    (">\t  ```", False),
+    (">\t  # h", False),
+    (">\t <![CDATA[", True),
+])
+def test_a_tab_counts_as_the_columns_it_spans_when_a_line_opens_a_block(line, opens):
+    assert copyblock.is_copy_block(f"> [!COPY]\n> a\n{line}\n> ---") is opens
+
+
+@pytest.mark.parametrize("quote, copy", [
+    ("> [!COPY]\n> a\n===", True),                  # a lazy line is never an underline
+    ("> [!COPY]\n> a\n==", True),
+    ("> [!COPY]\n> a\n> ===", False),
+    ("> [!COPY]\n> a\n>\t  ---", True),             # 4 columns: paragraph text
+    ("   > [!COPY]\n> a\n   >\t ===", True),
+    ("> [!COPY]\n> a\n> \t---", False),             # 3 columns: an underline
+    ("> [!COPY]\n> a\n> - \u00a0\n> ---", True),   # a no-break space after a bullet is an item, not a blank
+    ("> [!COPY]\n> a\n> 1. \u00a0\n> ---", True),
+    ("> [!COPY]\n> a\n> #\u00a0h\n> ---", False),   # no heading without a space or tab after the `#`: pandoc underlines it
+    ("> [!COPY]\n> a\n> #\u2003h\n> ---", False),
+    ("> [!COPY]\n> a\n> #\th\n> ---", True),       # a tab does open a heading
+    ("> [!COPY]\n> a\n> #\n> ---", True),           # and so does a bare `#`
+    ("> [!COPY]\n> a\n> #\r#\n> ---", True),       # pandoc deletes a lone CR: `#\r#` reads as `##`, an empty heading
+    ("> [!COPY]\n> a\n> #\r h\n> ---", True),
+    ("> [!COPY]\n> a\n> \r# h\n> ---", True),     # a lone CR before the `#` is deleted: the heading opens, the paragraph ends
+    ("> [!COPY]\n> a\n> \r\r   # h\n> ---", True),
+    ("> [!COPY]\n> a\n \r  # h\n> ---", True),
+    ("> [!COPY]\n> a\n> #\rh\n> ---", False),     # `#h` is text, which the underline makes a heading with the marker
+    ("> [!COPY]\n> a\n> #\r\rh\n> ---", False),
+])
+def test_the_underline_and_list_rules_read_the_source_as_pandoc_does(quote, copy):
+    assert copyblock.is_copy_block(quote) is copy
+
+
+@pytest.mark.parametrize("quote, heading", [
+    ("> [!COPY]\n> a\n<![cdata[\n> ---\n", "h2"),      # the splitter ends the quote at the lazy line; pandoc reads it as text and underlines it
+    ("> [!COPY]\n> a\n\t<div>\n> ===\n", "h1"),
+])
+def test_a_quote_the_splitter_cuts_short_still_shows_what_pandoc_makes_of_the_whole(tmp_path, quote, heading):
+    # Measured on 2,618 inputs (ticket 74): every such cut gives pandoc's own HTML. pandoc's heading id carries the
+    # stand-in, but the page replaces ids with its own, so the page is what is checked here.
+    out = page_of(tmp_path, quote)
+    assert f"<{heading}" in out and "[!COPY] a" in out and "rd-copy" not in out
+    assert copyblock.STAND_IN.lower() not in out.lower()
+
+
+@pytest.mark.parametrize("quote", [
+    "> \r[!COPY]\n> a",
+    ">\r [!COPY]\n> a",
+    "> [!CO\rPY]\n> a",
+    "> [!COPY]\r \n> a",
+    "> [!COPY]\r\r\n> a",
+])
+def test_a_lone_cr_in_the_marker_line_is_deleted_as_pandoc_deletes_it(quote):
+    assert copyblock.is_copy_block(quote) is True
+    assert copyblock.hide(quote).startswith("> " + copyblock.STAND_IN)
+
+
+@pytest.mark.parametrize("quote", [
+    "   \r> [!COPY]\n> a\n",
+    "\r\r\r   > [!COPY]\n> a\n",
+    "  \r > [!COPY]\n> a\n",
+    "\r> [!COPY]\n> a\n",
+    " \r\r\r> [!COPY]\r\n> a\r\n",
+])
+def test_a_cr_before_the_quote_mark_is_no_indentation_as_pandoc_deletes_it(tmp_path, quote):
+    # Ticket 103: the splitter counted the CR as a column and read 4 of them as indented code, so no copy block
+    # was found and the page showed the marker as text where pandoc makes a quote. Measured on 168 of 3,586
+    # sources against pandoc 3.9.
+    assert [b.kind for b in split_md_blocks(quote)] == ["quote"]
+    assert copyblock.is_copy_block(split_md_blocks(quote)[0].content)
+    assert copyblock.STAND_IN in copyblock.hide(quote)
+    out = page_of(tmp_path, quote, share=False)
+    assert "rd-copy" in out and "[!COPY]" not in out
+
+
+def test_the_page_html_of_the_marker_line_goes_through_mark(tmp_path):
+    # Ticket 103 (d2): the test above checks the swap, this one the HTML after `mark`.
+    hidden = copyblock.hide("   > [!COPY]\r\n> a\n")
+    raw = pandoc(["-f", "gfm", "-t", "html"], hidden)
+    assert raw.count(copyblock.STAND_IN) == 1
+    page = copyblock.mark(raw, page=True)
+    assert page.startswith('<blockquote class="rd-copy">') and copyblock.STAND_IN not in page
+    assert copyblock.mark(raw, page=False).startswith("<blockquote>")

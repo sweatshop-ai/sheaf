@@ -1756,7 +1756,7 @@ class Handler:
         return _ok(available=asked is not None and asked.available())
 
     def _transcribe(self, req: Req) -> Response:
-        """Dictation: the recording a page made, sent to t-compute, the text back. The sound is not kept and the
+        """Dictation: the recording a page made, sent to the provider of `[transcribe]`, the text back. The sound is not kept and the
         text is not written down; a refusal says only what the page needs to tell a person."""
         name = req.headers.get("x-filename", "")
         ctype = req.headers.get("content-type", "").lower()
@@ -1765,17 +1765,19 @@ class Handler:
         _shape(req.raw, "the recording is empty")
         if len(req.raw) > MAX_AUDIO:
             raise Refuse(413, "the recording is too large")
-        asked, began, result = self.hub.transcribe, time.monotonic(), "ok"
+        asked, began, result, status = self.hub.transcribe, time.monotonic(), "ok", {}
         try:
             if asked is None:
                 raise transcribe.Unavailable("dictation is not available")
             text = asked.transcribe(req.raw, name[7:])
+            status = {"status": 200}
         except (transcribe.Busy, transcribe.Unavailable, transcribe.Failed) as e:
             result = type(e).__name__.lower()
+            status = {} if e.status is None else {"status": e.status}
             raise Refuse({transcribe.Busy: 429, transcribe.Unavailable: 503, transcribe.Failed: 502}[type(e)], str(e)) from None
         finally:
             self.hub.record("transcribe", None, bytes=len(req.raw), ms=round((time.monotonic() - began) * 1000),
-                            result=result, by=self.hub.person)
+                            result=result, by=self.hub.person, **status)
         return _ok(text=text)
 
     def _diag(self, req: Req) -> Response:

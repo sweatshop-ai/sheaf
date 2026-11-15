@@ -25,7 +25,7 @@ the fewer blocks that pass through it, the better.
 import re
 
 FENCE_RE   = re.compile(r"^(\s{0,3})(`{3,}|~{3,})(.*)$")
-ATX_RE     = re.compile(r"^\s{0,3}#{1,6}(\s|$)")
+ATX_RE     = re.compile(r"^\s{0,3}#{1,6}([ \t]|$)")
 LIST_RE    = re.compile(r"^(\s*)([-*+]|\d{1,9}[.)])(\s+|$)")
 QUOTE_RE   = re.compile(r"^\s{0,3}>")
 HTML_RE    = re.compile(r"^\s{0,3}(?:</?[A-Za-z][A-Za-z0-9-]*(?:[\s/>]|$)|<!--|<!|<\?)")
@@ -84,11 +84,18 @@ class Block:
         return f"<Block {self.kind} @{self.start} {head!r}>"
 
 
+# A line that opens an item or a quote, as CommonMark reads it: the space after a marker is a space or a tab, not the
+# no-break or full-width space that `\s` matches (such a header is a table, read by pandoc as the top-level tables are).
+_OPENS_CONTAINER_RE = re.compile(r"[ \t]*(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)|[ \t]{0,3}>")
+
+
 def _looks_like_table(lines, i):
     """A gfm table is a header row followed by a |---|---| separator."""
     if i + 1 >= len(lines):
         return False
     nxt = lines[i + 1]
+    if _OPENS_CONTAINER_RE.match(lines[i]):
+        return False        # an item or a quote whose first line has pipes: its table, if pandoc reads one, is inside it
     return ("|" in lines[i]) and ("-" in nxt) and TBLSEP_RE.match(nxt) is not None and "|" in nxt
 
 
@@ -204,7 +211,11 @@ def split_md_blocks(text):
     Guarantee, enforced by the test suite against every .md in the repo:
         "".join(b.text for b in split_md_blocks(t)) == t
     """
-    lines = _split_lines(text)
+    raw = _split_lines(text)
+    # pandoc deletes a CR wherever it stands and does not end a line there, so every test below reads the
+    # line without its CRs (a CR before a `>` or after a `#` is no indentation and no break); only the
+    # content a block keeps is the raw line, so that the blocks still tile the source byte for byte.
+    lines = [ln.replace("\r", "") for ln in raw]
     n = len(lines)
     blocks, i = [], 0
 
@@ -213,7 +224,7 @@ def split_md_blocks(text):
         j = end
         while j < n and not lines[j].strip():
             j += 1
-        blocks.append(Block(kind, "".join(lines[start:end]), "".join(lines[end:j]), start))
+        blocks.append(Block(kind, "".join(raw[start:end]), "".join(raw[end:j]), start))
         return j
 
     # leading blank lines belong to no block; keep them as an inert one
@@ -221,7 +232,7 @@ def split_md_blocks(text):
         j = i
         while j < n and not lines[j].strip():
             j += 1
-        blocks.append(Block("blank", "", "".join(lines[i:j]), i))
+        blocks.append(Block("blank", "", "".join(raw[i:j]), i))
         i = j
 
     # YAML front matter, only at the very top

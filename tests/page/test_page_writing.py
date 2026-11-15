@@ -9,8 +9,9 @@ from types import SimpleNamespace
 import pytest
 
 from helpers import comment, writes_from_outside
-from pagehelp import (DOC, P1, draft_key, P2, T0, at, comment_draft_key, comment_on, gone, key, mark, open_box, open_form, typed, reload_on_clock, reloaded,
-                      select, select_by_touch, toast, toasted, type_at_end, until)
+from pagehelp import (DOC, P1, RELOADING, draft_key, P2, T0, at, comment_draft_key, comment_on, kept_entries, kept_json, set_kept, gone, key, mark, open_box, open_form, typed, reload_on_clock, reloaded,
+                      select, select_by_touch, toast, toast_state, toasted, toasts_to_the_end, type_at_end, until)
+from pagehelp import TOAST_STEP, clock_at, run_clock, stalls_after
 from sheafmd import comments as rdc
 from sheafmd.hub import live as hub_live
 from sheafmd.hub import state as hub_state
@@ -140,14 +141,38 @@ def fail_the_send(p, held):
     p.unroute("**/_/comment")
 
 
+def send_not_out(p):
+    """What the page shows when a send did not leave: whether it reloaded under the form, the field, the popover, the toast.
+    It never hides the failure it explains: a page that is reloading or does not answer is said so."""
+    try:
+        with stalls_after(5, "the page state of a send that did not go out"):
+            return p.evaluate("""() => {
+                const t = document.querySelector('#rd-popover textarea'), pop = document.querySelector('#rd-popover'), toast = document.querySelector('#rd-toast');
+                return JSON.stringify({same_load: window.__same_load === true, field: t ? t.value : null, popover: pop ? pop.innerText : null,
+                                       toast: toast ? [toast.textContent, toast.classList.contains('show')] : null});
+            }""")
+    except Exception as e:      # a PageStalled is not an Exception: it still ends the test
+        return f"page state unreadable: {str(e).splitlines()[0]}"
+
+
+def wait_for_send(p, held):
+    """Wait for the held `/_/comment` route to take the request; a send that did not go out says what the page shows."""
+    try:
+        until(lambda: held or p.wait_for_timeout(20), what="the send to go out")
+    except AssertionError as e:
+        # Seen once in CI (ticket 93) with nothing in the log to say why the request never left.
+        raise AssertionError(f"{e}: {send_not_out(p)}") from None
+
+
 def send_held(tab, form, text):
     """Open the reply or edit form, type, send with `/_/comment` held; returns the held requests."""
     p, held = tab.page, []
     open_form(p, form)
     p.fill("#rd-popover textarea", text)
+    mark(p)
     p.route("**/_/comment", lambda route: held.append(route))
     p.keyboard.press("Control+Enter")
-    until(lambda: held or p.wait_for_timeout(20), what="the send to go out")
+    wait_for_send(p, held)
     return held
 
 
@@ -713,15 +738,13 @@ def test_a_new_comment_refused_because_its_paragraph_changed_keeps_its_text(tab)
     assert tab.page.input_value("#rd-popover textarea") == "about the pears"
     assert "pears" in tab.page.inner_text("#rd-popover .rd-quote")
     assert rdc.parse(f.read_text()).comments == []
-    key = comment_draft_key(tab.site)
-    assert "about the pears" in tab.page.evaluate(f"localStorage.getItem({key!r})")
+    assert "about the pears" in kept_json(tab.page, tab.site)
     select(tab.page, at(P2, "pears"), at(P2, "pears", None))
     open_box(tab.page)
     assert tab.page.input_value("#rd-popover textarea") == "about the pears"
     tab.page.click("#rd-popover button[data-f=ok]")
     until(lambda: rdc.parse(f.read_text()).comments, what="the comment in the file")
-    until(lambda: tab.page.evaluate(f"localStorage.getItem({key!r})") is None,
-          what="the kept comment to leave localStorage")
+    until(lambda: kept_json(tab.page, tab.site) is None, what="the kept comment to leave localStorage")
 
 
 @pytest.fixture
@@ -804,8 +827,7 @@ def test_a_kept_comment_is_not_put_in_the_form_of_another_passage(kept):
     assert kept.page.input_value("#rd-popover textarea") == ""
     kept.page.click("#rd-popover button[data-a=minimize]")
     # The text of the other passage stays kept, and is offered when its own passage is commented again.
-    key = comment_draft_key(kept.site)
-    assert "about the pears" in kept.page.evaluate(f"localStorage.getItem({key!r})")
+    assert "about the pears" in kept_json(kept.page, kept.site)
     open_comment_form(kept, P2, "pears")
     assert kept.page.input_value("#rd-popover textarea") == "about the pears"
 
@@ -817,11 +839,10 @@ def test_cancelling_a_new_comment_whose_send_failed_clears_what_it_kept(tab):
     tab.site.kill()
     tab.page.click("#rd-popover button[data-f=ok]")
     toasted(tab.page, "did not go out")
-    key = comment_draft_key(tab.site)
-    assert "never sent" in tab.page.evaluate(f"localStorage.getItem({key!r})")
+    assert "never sent" in kept_json(tab.page, tab.site)
     discard_unsent(tab.page)
-    until(lambda: tab.page.evaluate(f"localStorage.getItem({key!r})") is None, what="the discarded text to leave the store")
-    assert tab.page.evaluate(f"localStorage.getItem({key!r})") is None
+    until(lambda: kept_json(tab.page, tab.site) is None, what="the discarded text to leave the store")
+    assert kept_json(tab.page, tab.site) is None
 
 
 KEPT = "#rd-popover .rd-hold:has-text('Select the passage again; your comment is kept.')"
@@ -829,8 +850,7 @@ KEPT = "#rd-popover .rd-hold:has-text('Select the passage again; your comment is
 
 def comment_store(tab):
     """What localStorage holds of the new comments, replies and edits the hub has not taken yet ('' for nothing)."""
-    key = comment_draft_key(tab.site)
-    return tab.page.evaluate(f"localStorage.getItem({key!r})") or ""
+    return kept_json(tab.page, tab.site) or ""
 
 
 def test_a_comment_sent_on_another_passage_leaves_the_kept_comment_kept(kept):
@@ -1001,9 +1021,7 @@ def test_a_kept_comment_comes_back_in_the_form_of_another_selection_in_its_parag
 
 def test_a_comment_kept_in_the_one_slot_of_an_older_store_still_comes_back(tab):
     tab.open()
-    key = comment_draft_key(tab.site)
-    slot = json.dumps({"quote": "pears", "body": "about the pears", "at": "2026-10-13T10:00:00.000Z"})
-    tab.page.evaluate(f"localStorage.setItem({key!r}, {json.dumps(slot)})")
+    set_kept(tab.page, tab.site, [{"quote": "pears", "body": "about the pears", "at": "2026-10-13T10:00:00.000Z"}])
     tab.page.reload()
     tab.page.wait_for_selector(KEPT)
     assert tab.page.input_value("#rd-popover textarea") == "about the pears"
@@ -1680,7 +1698,7 @@ def test_a_block_typed_in_again_after_a_save_given_up_that_the_hub_wrote_meets_n
     p.keyboard.press("Control+s")
     until(lambda: " Two." in f.read_text(), what="the second save in the file")
     p.clock.fast_forward(120_500)
-    toasted(p, "The hub is unreachable; nothing was saved. Your edits stay on screen.")
+    toasted(p, "The hub is unreachable; nothing was saved. Your edits stay on screen.", on_clock=True)
     # the autosave that waited behind the held save goes now, and the page takes no typing while it is out
     until(lambda: len(bodies) >= 2 and p.text_content("#rd-state") == "Editing", what="the save to go again")
     p.focus(last)
@@ -1921,7 +1939,7 @@ def test_the_keys_that_wrapped_a_paragraph_in_raw_html_save_plain_paragraphs(fro
     p.keyboard.type(typed)
     if not typed and keys[-1] == "Enter":
         p.keyboard.press("Control+s")
-        toasted(p, "→ plan.md")
+        toasted(p, "→ plan.md", on_clock=True)
         assert f.read_text() == before
     else:
         reloads = save_with_ctrl_s(p, f)
@@ -2003,7 +2021,7 @@ def test_enter_at_the_start_of_a_heading_or_in_a_table_cell_keeps_the_block_what
     p.keyboard.type(typed)
     p.keyboard.press("Control+s")
     if md is None:
-        toasted(p, "→ plan.md")
+        toasted(p, "→ plan.md", on_clock=True)
         assert f.read_text() == HEADED, "Enter at the start of a heading, and nothing typed, changed the file"
         return
     until(lambda: f.read_text() != HEADED, what="the save in the file")
@@ -2090,9 +2108,10 @@ def new_comment_held(tab):
     p.clock.run_for(50)                     # the Comment button comes on a timer, and this clock stands still
     open_box(p)
     p.fill("#rd-popover textarea", "about the pears")
+    mark(p)
     p.route("**/_/comment", lambda route: held.append(route))
     p.keyboard.press("Control+Enter")
-    until(lambda: held or p.wait_for_timeout(20), what="the send to go out")
+    wait_for_send(p, held)
     return held
 
 
@@ -2144,7 +2163,7 @@ def test_words_typed_where_a_comments_anchor_goes_or_comes_are_still_unsaved_and
     if edited:
         until(lambda: f.read_text() != before, what="the typed words in the file")
     else:
-        toasted(p, "Nothing changed")
+        toasted(p, "Nothing changed", on_clock=True)
         assert f.read_text() == before
     words = re.sub(r"<!--[\s\S]*?-->", "", f.read_text())
     para_md = "Second paragraph, about pears." if how == "a new comment" else "First paragraph, about apples."
@@ -2565,7 +2584,7 @@ LATE = "The hub did not answer within 30 seconds"
 
 def test_a_new_comment_whose_send_never_answers_comes_back_after_30_seconds_and_frees_the_page(tab):
     p = tab.page
-    p.clock.install(time=T0)
+    p.clock.install(time=clock_at(T0))
     tab.open()
     comment_on(tab, at(P2, "pears"), at(P2, "pears", None), "Why pears?")
     p.reload()
@@ -2577,12 +2596,12 @@ def test_a_new_comment_whose_send_never_answers_comes_back_after_30_seconds_and_
     p.keyboard.press("Control+Enter")
     until(lambda: held or p.wait_for_timeout(20), what="the send to go out")
     p.locator(".rd-badge").dispatch_event("click")
-    toasted(p, BEING_SENT)
+    toasted(p, BEING_SENT, on_clock=True)
     p.clock.fast_forward(29_000)
     p.wait_for_timeout(200)
     assert LATE not in p.inner_text("#rd-toast"), "the page gave up before 30 seconds"
     p.clock.fast_forward(1_500)
-    toasted(p, LATE)
+    toasted(p, LATE, on_clock=True)
     assert p.input_value("#rd-popover textarea") == "about the apples"
     assert "about the apples" in comment_store(tab)
     p.unroute("**/_/comment")
@@ -2601,7 +2620,7 @@ def test_a_reply_whose_send_never_answers_comes_back_after_30_seconds_with_the_t
     p.wait_for_selector("#rd-popover textarea")
     held = send_held(thread, "reply", "a reply that is never answered")
     p.clock.fast_forward(30_500)
-    toasted(p, LATE)
+    toasted(p, LATE, on_clock=True)
     assert p.input_value("#rd-popover textarea") == "a reply that is never answered"
     p.unroute("**/_/comment")
     discard_unsent(p, "a reply that is never answered")        # a reply form has no Cancel: Discard in the not-sent list
@@ -2630,9 +2649,10 @@ SLOW = "words the hub is slow to write"
 TAKEN = "What you sent reached the hub after all"
 
 
-def given_up(tab, slow_hub, form):
+def given_up(tab, slow_hub, form, hello=False):
     """A reply, or a new comment on 'pears', written by the hub, which holds it past the page's 30 seconds:
-    the page has given up on it and the form is back with its text."""
+    the page has given up on it and the form is back with its text. With `hello`, the stream's first hello
+    reaches the page while the send is out, as it does on a loaded runner (ticket 20)."""
     p = tab.page
     reload_on_clock(p)
     if form == "reply":
@@ -2644,20 +2664,51 @@ def given_up(tab, slow_hub, form):
     slow_hub.hold()
     p.keyboard.press("Control+Enter")
     until(lambda: SLOW in tab.site.file.read_text(), what="the hub's write")
+    if hello:
+        tab.site.hub.entry(DOC).live._publish("hello", {})
+        p.wait_for_timeout(300)
     p.clock.fast_forward(30_500)
-    toasted(p, LATE)
+    toasted(p, LATE, on_clock=True)
     assert p.input_value("#rd-popover textarea") == SLOW
 
 
-def test_a_reply_given_up_that_the_hub_took_after_all_goes_from_the_page_and_the_store(thread, slow_hub):
+def reply_is_in_its_thread(thread):
+    """The form is gone, the reply is in the thread once, the page's store has none of it and the thread's field is
+    back, all at one moment. False while the page reloads (its popover or its context is not there yet)."""
     p = thread.page
-    given_up(thread, slow_hub, "reply")
+    try:
+        shown = p.evaluate("(document.querySelector('#rd-popover') || {}).innerText || ''")
+        return not typed(p) and shown.count(SLOW) == 1 and SLOW not in comment_store(thread) and p.is_visible("#rd-popover textarea")
+    except Exception as e:
+        if any(said in str(e) for said in RELOADING):
+            return False
+        raise
+
+
+# The reply is drawn a moment after the toast, not with it. When the stream said hello while the send was out, the
+# page makes the check that send put off once it gives up, and the event of the write waits for that answer, which
+# waits for the hub's lock (released below). The answer names a hash the page does not hold, so the page reloads,
+# and the old page may draw the reply just before it does. A read made at the toast found the thread without the
+# reply (CI, twice on main), so the test waits for the whole state at one moment, through a reload. The TAKEN toast
+# is said in both orders but a reload wipes it, so it is waited for as "the toast, or the reload"; a hello of the
+# stream's own may come in the case without one (a loaded runner, ticket 20), which is why that case waits so too.
+@pytest.mark.parametrize("hello", [False, True], ids=["as it comes", "a stream that says hello while the send is out"])
+def test_a_reply_given_up_that_the_hub_took_after_all_goes_from_the_page_and_the_store(thread, slow_hub, hello):
+    p = thread.page
+    given_up(thread, slow_hub, "reply", hello=hello)
+    mark(p)
     slow_hub.release()
-    toasted(p, TAKEN)
-    until(lambda: not typed(p), what="the form to go")
-    assert p.inner_text("#rd-popover").count(SLOW) == 1
-    assert SLOW not in comment_store(thread)
-    assert p.is_visible("#rd-popover textarea"), "the thread's field did not come back"
+    if not hello:
+        # Toasts queue (ticket 62): TAKEN waits behind the red LATE (7 s). `given_up` leaves the clock running at the real
+        # pace (no pause), so the test runs it on while a toast is up, whatever the pace of the runner.
+        def taken_or_gone():
+            if TAKEN in toast(p) or gone(p):
+                return True
+            if toast_state(p)[1]:
+                run_clock(p, TOAST_STEP)
+            return False
+        until(taken_or_gone, what="the toast, or the reload that wipes it")
+    until(lambda: reply_is_in_its_thread(thread), what="the reply in its thread, the form gone, the store clear")
 
 
 def test_a_new_comment_given_up_that_the_hub_took_after_all_is_not_kept_on_the_page_that_comes_back(thread, slow_hub):
@@ -2680,8 +2731,7 @@ MISSED_RID = "r0123456789missed"
 
 
 def keep_on_disk(tab, *entries):
-    key = comment_draft_key(tab.site)
-    tab.page.evaluate("([k, v]) => localStorage.setItem(k, v)", [key, json.dumps(entries)])
+    set_kept(tab.page, tab.site, list(entries))
 
 
 def test_a_reply_kept_after_the_hub_took_it_is_cleared_when_the_page_loads(thread):
@@ -2776,7 +2826,7 @@ def test_a_reply_given_up_while_text_is_typed_in_another_thread_still_says_it_ma
     p.wait_for_selector("#rd-popover textarea")
     p.fill("#rd-popover textarea", "words for the second thread")
     p.clock.fast_forward(30_500)
-    toasted(p, "is kept")
+    toasted(p, "is kept", on_clock=True)
     assert LATE in toast(p) and "Not sent" not in toast(p)
     assert held and p.input_value("#rd-popover textarea") == "words for the second thread"
     p.unroute("**/_/comment")
@@ -2791,7 +2841,7 @@ def test_a_text_sent_again_after_a_give_up_and_failing_for_another_reason_is_not
     p.wait_for_selector("#rd-popover textarea")
     held = send_held(two_threads, "reply", "words for the first thread")
     p.clock.fast_forward(30_500)
-    toasted(p, LATE)
+    toasted(p, LATE, on_clock=True)
     p.unroute("**/_/comment")
     again = []
     p.route("**/_/comment", lambda route: again.append(route))
@@ -2803,7 +2853,7 @@ def test_a_text_sent_again_after_a_give_up_and_failing_for_another_reason_is_not
     p.wait_for_selector("#rd-popover textarea")
     p.fill("#rd-popover textarea", "words for the second thread")
     again[0].abort()
-    toasted(p, "Not sent")
+    toasted(p, "Not sent", on_clock=True)
     assert LATE not in toast(p)
     assert held
     p.unroute("**/_/comment")
@@ -2821,11 +2871,11 @@ def test_a_send_again_that_fails_to_reach_the_hub_does_not_hide_that_the_send_be
     p.keyboard.press("Control+Enter")
     until(lambda: again or p.wait_for_timeout(20), what="the send again to go out")
     again[0].abort()
-    toasted(p, "did not go out")
+    toasted(p, "did not go out", on_clock=True)
     assert LATE not in toast(p)
     p.unroute("**/_/comment")
     slow_hub.release()
-    toasted(p, TAKEN)
+    toasted(p, TAKEN, on_clock=True)
     until(lambda: not typed(p), what="the form to go")
     assert SLOW not in comment_store(thread)
 
@@ -3415,6 +3465,8 @@ def test_a_kept_reply_or_edit_is_not_put_into_a_new_comment_that_got_the_id_of_a
     (old,) = rdc.parse(thread.site.file.read_text()).comments
     delete_the_thread(thread)
     p = thread.page
+    # The reload is safe only because the failed send's text is still in its form: text typed in a form holds the page's own reload
+    # (page.js, reloadWhenFree -> writingNow), so the deletion has not reloaded the page under this one.
     p.reload()
     p.wait_for_selector("#rd-menu-btn", state="attached")
     new = comment_on(thread, at(P2, "pears"), at(P2, "pears", None), "About the pears")
@@ -3445,11 +3497,10 @@ def test_a_kept_comment_is_not_put_into_the_form_of_the_paragraph_that_took_its_
 # An entry kept by the build that came before the opening words (it has a `block` and no `head`) is
 # still matched by its block, as it was: the upgrade must not turn a kept comment into one that stays unseen.
 def test_a_kept_comment_without_opening_words_still_comes_back_by_its_block(kept):
-    key = comment_draft_key(kept.site)
     ds = json.loads(comment_store(kept))
     for d in ds:
         del d["head"]
-    kept.page.evaluate("([k, v]) => localStorage.setItem(k, v)", [key, json.dumps(ds)])
+    set_kept(kept.page, kept.site, ds)
     open_comment_form(kept, P2, "ripe pears")
     assert kept.page.input_value("#rd-popover textarea") == "about the pears"
 
@@ -3564,7 +3615,7 @@ def test_a_settle_that_failed_leaves_no_held_reload_to_a_later_upgrade(thread):
     p.evaluate(f"document.querySelector({P2!r}).append(' and plums')")      # on screen only, no autosave
     held[0].continue_()
     p.unroute("**/_/comment")
-    toasted(p, "could not be merged")
+    toasted(p, "could not be merged", timeout=20.0)      # behind the red toast of the settle's failed save (7 s)
     p.evaluate(f"document.querySelector({P2!r}).lastChild.remove()")       # the edit undone: nothing is dirty
     mark(p)
     thread.site.stop("upgrade")
@@ -3579,33 +3630,33 @@ def test_a_kept_comment_carries_the_root_of_the_folder_that_kept_it(tab):
     tab.open()
     refuse_a_comment_on_pears(tab)
     root = json.loads(tab.page.evaluate("document.querySelector('script[type=\"application/json\"]').textContent"))["root"]
-    got = json.loads(tab.page.evaluate(f"localStorage.getItem({comment_draft_key(tab.site)!r})"))
+    got = kept_entries(tab.page, tab.site)
     assert [d["root"] for d in got] == [root]
 
 
 def test_a_kept_comment_of_another_folder_is_neither_shown_nor_dropped(tab):
     tab.open()
     theirs = {"root": "not-this-one", "quote": "pears", "body": "theirs", "block": 2, "head": "x", "at": "2026-10-21T10:00:00Z"}
-    tab.page.evaluate("([k, v]) => localStorage.setItem(k, v)", [comment_draft_key(tab.site), json.dumps([theirs])])
+    set_kept(tab.page, tab.site, [theirs])
     tab.page.reload()
     tab.page.wait_for_selector("#rd-menu-btn", state="attached")
     assert tab.page.query_selector("#rd-popover[data-kept]") is None
     refuse_a_comment_on_pears(tab)
     assert tab.page.input_value("#rd-popover textarea") == "about the pears"
-    got = json.loads(tab.page.evaluate(f"localStorage.getItem({comment_draft_key(tab.site)!r})"))
+    got = kept_entries(tab.page, tab.site)
     assert sorted(d["body"] for d in got) == ["about the pears", "theirs"]
     # Sending it clears only its own entry.
     select(tab.page, at(P2, "pears"), at(P2, "pears", None))
     open_box(tab.page)
     tab.page.click("#rd-popover button[data-f=ok]")
-    until(lambda: [d["body"] for d in json.loads(tab.page.evaluate(f"localStorage.getItem({comment_draft_key(tab.site)!r})"))] == ["theirs"],
+    until(lambda: [d["body"] for d in kept_entries(tab.page, tab.site)] == ["theirs"],
           what="only its own entry to leave the store")
 
 
 def test_a_kept_comment_of_an_earlier_build_with_no_root_is_this_pages_own(tab):
     tab.open()
     old = {"quote": "pears", "body": "about the pears", "block": 2, "head": "x", "at": "2026-10-01T10:00:00Z"}
-    tab.page.evaluate("([k, v]) => localStorage.setItem(k, v)", [comment_draft_key(tab.site), json.dumps([old])])
+    set_kept(tab.page, tab.site, [old])
     select(tab.page, at(P2, "pears"), at(P2, "pears", None))
     open_box(tab.page)
     assert tab.page.input_value("#rd-popover textarea") == "about the pears"
@@ -4256,7 +4307,7 @@ def test_a_reply_the_hub_took_and_told_of_before_the_page_gave_up_goes_from_the_
         thread.site.hub.entry(DOC).live._publish("hello", {})
         p.wait_for_timeout(300)
     p.clock.fast_forward(30_500)
-    toasted(p, TAKEN)
+    toasted(p, TAKEN, on_clock=True)
     p.clock.fast_forward(10_500)      # the page's own end of that wait (CHECK_WAIT), on the clock the test drives
     until(lambda: not typed(p), what="the form to go")
     try:
@@ -4448,6 +4499,38 @@ def test_discard_clears_an_entry_that_has_no_request_id(thread):
     until(lambda: stored_bodies(thread) == [], what="the entry to go")
 
 
+def still_out(tab, body):
+    """Does the store hold `body` as a send that is out (an `out` time on its entry)?"""
+    raw = comment_store(tab)
+    return any(d["body"] == body and d.get("out") for d in json.loads(raw)) if raw else False
+
+
+# The entry of a send is written with `out` when it is sent and again without it once it fails, and the list of
+# unsent texts leaves out an entry that is out. A page closed before it wrote the failure leaves the mark: its text
+# is listed when the mark lapses (inFlight, 32 s). The test below once failed now and then in CI for lack of a wait:
+# it left page A before A had written its failed send.
+def keep_out(thread, age_ms):
+    (c,) = rdc.parse(thread.site.file.read_text()).comments
+    keep_on_disk(thread, {"thread": c.id, "born": c.at, "about": c.quote, "kind": "reply", "body": "words left out",
+                          "rid": "r0123456789left", "at": "2026-10-22T10:00:00.000Z",
+                          "out": thread.page.evaluate("Date.now()") - age_ms})
+    thread.page.reload()
+    thread.page.wait_for_selector("#rd-menu-btn", state="attached")
+
+
+@pytest.mark.parametrize("age_ms, listed", [(1000, False), (40000, True)])
+def test_a_send_left_out_by_a_closed_page_is_listed_as_unsent_only_when_its_mark_is_old(thread, age_ms, listed):
+    keep_out(thread, age_ms)
+    thread.page.wait_for_timeout(500)
+    assert (thread.page.locator(UNSENT).count() == 1) == listed, f"the store held {comment_store(thread)}"
+
+
+def test_a_send_left_out_by_a_closed_page_is_listed_when_its_mark_lapses_with_no_other_write(thread):
+    keep_out(thread, 31000)       # HELD is 32 s: the mark lapses a second from now
+    assert thread.page.locator(UNSENT).count() == 0, f"the store held {comment_store(thread)}"
+    assert unsent_line(thread.page, timeout=4000) == "1 reply not sent · Show"
+
+
 # Open the thread on a listed entry draws that entry's text, also when the thread holds another of its kind.
 def test_open_the_thread_on_the_second_of_two_kept_replies_draws_that_reply(thread, context):
     a, b = thread.page, second_page(thread, context)
@@ -4457,10 +4540,15 @@ def test_open_the_thread_on_the_second_of_two_kept_replies_draws_that_reply(thre
     fail_the_send(b, held_b)
     held_a[0].fulfill(status=500, json={"ok": False, "error": "the hub broke off"})
     a.unroute("**/_/comment")
+    try:
+        until(lambda: not still_out(thread, "words from page A") and not still_out(thread, "words from page B"),
+              what="the failed sends of both pages to leave `out` in the store")
+    except AssertionError as e:
+        raise AssertionError(f"{e}; the store held {comment_store(thread)}") from None
     come_back(thread)
     unsent_line(a)
     texts = [t for _, _, t, _ in unsent_list(a)]
-    assert sorted(texts) == ["words from page A", "words from page B"]
+    assert sorted(texts) == ["words from page A", "words from page B"], f"the list held {texts}, the store {comment_store(thread)}"
     for n, text in enumerate(texts):
         if n:
             come_back(thread)
@@ -4708,7 +4796,7 @@ def test_typing_while_a_save_has_no_answer_is_said_once_and_the_block_shows_it_i
     assert "lost" not in p.evaluate("document.activeElement.textContent")
     p.evaluate("document.querySelector('#rd-toast').textContent = ''")
     p.keyboard.type("more")
-    assert toast(p) == ""                                    # said once for this save, not for every key
+    assert toasts_to_the_end(p) == []                        # said once for this save, not for every key: a second say() would queue behind "Saving"
     held[0].continue_()
     p.unroute("**/_/save")
     until(lambda: "typed" in f.read_text(encoding="utf-8"), what="the save to reach the file")
@@ -4718,6 +4806,19 @@ def test_typing_while_a_save_has_no_answer_is_said_once_and_the_block_shows_it_i
     toasted(p, "Nothing changed")                                                   # the mark left no class="" to save
     p.keyboard.type("!")
     assert p.evaluate("document.activeElement.textContent").endswith("typed!")
+
+
+def test_no_text_field_is_in_main_so_the_save_guard_never_sees_a_key_typed_in_a_form(tab):
+    """chat-box 46: the guard refusing keys while a save is out is on `main`. The comment form is in the popover,
+    outside it, and the sanitizer removes every input that is not exactly a checkbox (tests/test_sanitize.py), so a
+    refused key always has a block to mark."""
+    p = tab.page
+    tab.open()
+    assert p.evaluate("document.querySelectorAll('main textarea, main input:not([type=checkbox])').length") == 0
+    open_comment_form(tab, P2, "pears")
+    assert p.evaluate("!document.querySelector('main').contains(document.querySelector('#rd-popover textarea'))")
+    p.keyboard.type("about the pears")
+    assert p.input_value("#rd-popover textarea") == "about the pears"
 
 
 def test_the_mark_lands_on_the_block_typed_in_and_clears_with_the_save(tab):
@@ -4752,8 +4853,78 @@ def test_typing_while_a_change_from_outside_settles_is_refused_and_said(tab):
     f.write_text(f.read_text(encoding="utf-8") + "\nFrom outside.\n", encoding="utf-8")
     until(lambda: held or p.wait_for_timeout(20), what="the settle's save, held")
     p.keyboard.type("lost")
-    toasted(p, "Saving")
+    toasted(p, "Saving", on_clock=True)
     assert p.evaluate("document.querySelectorAll('.rd-saving').length") == 1
     held[0].continue_()
     p.unroute("**/_/save")
     reloaded(p)
+
+
+# Two pages of one document write the store. Both sends fail at the same instant, each page's renderer in its own
+# process, so neither may have heard of the other's write when it writes: the store must still hold both (each entry
+# has a key of its own, SPEC 10.4).
+FAIL_TOGETHER = """(at) => {
+  const real = window.fetch;
+  window.fetch = function (url, init) {
+    if (!String(url).includes('/_/comment')) return real.apply(this, arguments);
+    return new Promise((done) => setTimeout(() => {
+      (window.__spins = window.__spins || []).push([Date.now(), at]);
+      while (Date.now() < at) { }
+      done(new Response(JSON.stringify({ok: false, error: 'the hub broke off'}), {status: 500, headers: {'Content-Type': 'application/json'}}));
+    }, 0));
+  };
+}"""
+
+
+def test_two_sends_that_fail_at_the_same_instant_on_two_pages_are_both_kept(thread, context):
+    a, b = thread.page, second_page(thread, context)
+    b.click(".rd-badge")
+    b.wait_for_selector("#rd-popover textarea")
+    lost, idle = [], []
+    for i in range(40):
+        at_ms = int(time.time() * 1000) + 700
+        for p, who in ((a, "A"), (b, "B")):
+            p.evaluate(FAIL_TOGETHER, at_ms)
+            p.fill("#rd-popover textarea", f"words from page {who} round {i}")
+        if time.time() * 1000 > at_ms - 300:        # the setup ran into the instant: the round would not race
+            idle.append(i)
+            continue
+        a.keyboard.press("Control+Enter")
+        b.keyboard.press("Control+Enter")
+        a.wait_for_timeout(1300)
+        # Both pages were spinning at once, so they ran on two threads: on one, the second spin starts when the first ends.
+        (sa, ea), (sb, eb) = (p.evaluate("window.__spins.pop()") for p in (a, b))
+        if not (sa < eb and sb < ea):
+            idle.append(i)
+        kept = json.loads(comment_store(thread) or "[]")
+        # One entry for each send, and none still marked out: an entry still marked out is one its page ended, and is
+        # left out of the not-sent list for 32 s; a second one is a copy that the Discard of one send takes with it.
+        mine = [[d for d in kept if d["body"] == f"words from page {who} round {i}"] for who in "AB"]
+        if any(len(es) != 1 or isinstance(es[0].get("out"), (int, float)) for es in mine):
+            lost.append(i)
+    assert not lost, f"the store lost, doubled, or kept as still out, an entry of a failed send in rounds {lost}"
+    assert len(idle) <= 8, f"rounds {idle} did not run the two sends at the same time: the test did not try the race"
+
+
+# A Discard on one page of an entry another page wrote a moment ago is a removal on purpose: the page that wrote it
+# must stay gone: the page that wrote it does not write it again (main's behaviour, pinned for the fix of ticket 121).
+@pytest.mark.parametrize("form", ["reply", "edit"])
+def test_a_discard_on_another_page_just_after_a_send_failed_is_not_put_back_by_the_page_that_wrote_it(thread, context, form):
+    a, b = thread.page, second_page(thread, context)
+    b.click(".rd-badge")
+    b.wait_for_selector("#rd-popover textarea")
+    a.evaluate("""(key) => { window.__after = 0; const set = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (k, v) { if (String(k).startsWith(key)) window.__after++; return set.apply(this, arguments); }; }""",
+               comment_draft_key(thread.site))
+    held = send_held(thread, form, "words to be discarded")
+    b.click("#rd-popover button[data-a=minimize]")
+    began = time.time()
+    held[0].fulfill(status=500, json={"ok": False, "error": "the hub broke off"})
+    a.unroute("**/_/comment")
+    until(lambda: b.query_selector(UNSENT) and "not sent" in b.inner_text(UNSENT), what="the not-sent line on page B")
+    a.evaluate("window.__after = 0")
+    discard_unsent(b, "words to be discarded")
+    assert time.time() - began < 1.5, "the Discard came after 2 s: the test tried nothing"
+    a.wait_for_timeout(3000)            # long enough for a page to write it again
+    assert a.evaluate("window.__after") == 0, "the page that wrote the entry wrote the discarded text again"
+    assert comment_store(thread) == ""

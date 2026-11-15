@@ -1208,7 +1208,7 @@ var create = function (ROOT, CFG, opts) {
       }
       if (conflicts.length) note = conflictNote(conflicts);
       if (reload) {
-        try { sessionStorage.setItem(KEYS + 'rd-toast', quiet && !conflicts.length ? '' : note); } catch (e) {}
+        if (!docGone) { try { sessionStorage.setItem(KEYS + 'rd-toast', quiet && !conflicts.length ? '' : note); } catch (e) {} }     // a save out when the document went: no reload will say it (#125)
         done(); saving = null;
         reloadWhenFree(popId);
         refresh();
@@ -4122,6 +4122,7 @@ var create = function (ROOT, CFG, opts) {
     if (live) live.close();
     clearTimeout(closedTmr); closedTmr = null;
     failing = false; hubLine = false; dead = true; reloadPending = false; heldReload = false; holdWhy = null; holdOpen = null;
+    try { sessionStorage.removeItem(KEYS + 'rd-toast'); } catch (e) {}     // a merged save's toast, whose reload this ends (#125)
     stopRenewing();
     if (dirty().length) editDraftMirror();
     Array.prototype.forEach.call(ROOT.querySelectorAll('.rd-hold'), function (n) { if (n.textContent === HOLD) n.remove(); });
@@ -4596,7 +4597,11 @@ var create = function (ROOT, CFG, opts) {
   function failed(msg) {
     if (unmounted) return;
     settling = false;
+    var left = '';
+    try { left = sessionStorage.getItem(KEYS + 'rd-toast') || ''; } catch (e) {}
     try { sessionStorage.removeItem(KEYS + 'rd-keep'); } catch (e) {}     // the keep of a reload that did not happen
+    try { sessionStorage.removeItem(KEYS + 'rd-toast'); } catch (e) {}
+    if (left) say(left);          // what the save's reload was to say is said on the page that stays, not left for a page of another document (#125)
     say(msg, true);
   }
   return { unmount: unmount, dirty: unsavedNow, failed: failed };

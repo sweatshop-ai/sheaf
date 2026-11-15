@@ -11,7 +11,7 @@
 
 **Claimed by:** Dries 2026-11-15 00:12
 
-**Status:** done (sur chat-box/126, 02ec620 : un tableau du document qui porte une image et un commentaire est lu par pandoc, test rouge d'abord ; l'écart n'existe plus)
+**Status:** done (PR 363 fusionnée, main 1b1d199 ; sur chat-box/126, 02ec620 : un tableau du document qui porte une image et un commentaire est lu par pandoc, test rouge d'abord ; l'écart n'existe plus)
 
 **Limites connues (revue du ticket 126, d, non corrigées) :**
 - Le cache de `_read_tables` (16384 entrées) est borné par le nombre d'entrées, pas par la mémoire : dans un hub qui tourne longtemps il peut tenir quelques dizaines de Mo avant d'évincer.

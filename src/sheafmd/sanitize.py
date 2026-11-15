@@ -183,6 +183,7 @@ _EDITABLE_OR_ESCAPE = re.compile(r"user-modify|\\", re.I)
 _UNQUOTED_URL = re.compile(r"(?![ \t\n\r\f]*[\"'])[ \t\n\r\f]*(?:\\.|[^)\\])*(?:\)|\\?\Z)", re.S)
 _NAME_RUN = re.compile(r"(?:[\w\-]|[^\x00-\x7f]|\\(?:[0-9a-fA-F]{1,6}(?:\r\n|[ \t\n\r\f])?|[^\n]|\Z))+")
 _ESCAPE = re.compile(r"\\(?:([0-9a-fA-F]{1,6})(?:\r\n|[ \t\n\r\f])?|(.))", re.S)
+_STRING_ESCAPE = re.compile(r"\\(?:[0-9a-fA-F]{1,6}(?:\r\n|[ \t\n\r\f])?|\r\n|.)", re.S)
 _CLOSER = {"(": ")", "[": "]", "{": "}"}
 
 
@@ -193,9 +194,9 @@ def _unescaped(name: str) -> str:
 
 def _declarations(value: str) -> list[str]:
     """A style attribute cut at the `;` that end a declaration, by the rules of the CSS Syntax 3 tokenizer. A `;` inside a CSS
-    string (a quote ends at the same quote, or at a newline, and a backslash takes the next character), inside a comment or inside
+    string (a quote ends at the same quote, or at a newline, and a backslash takes an escape: a hex one with the white space after it, a newline included, or the next character, CRLF counting as one), inside a comment or inside
     a `()`, `[]` or `{}` block (`url(data:image/png;base64,…)`) does not end one; a block ends only at its own closer, so
-    `(]` leaves a `(` open, and a closer with no opener is ignored. A name is read whole, escapes included, so `\\75 url(` and
+    `(]` leaves a `(` open, and a closer that does not close the innermost open block is ignored. A name is read whole, escapes included, so `\\75 url(` and
     `a\\:url(` are functions called something else, `@url(` and `#url(` an at-keyword and a hash followed by a `(`, and only a
     name that reads `url` (any letter case), that no `@` or `#` leads and that `(` follows, is a url. A `url(` that no quote
     follows, white space aside, is one token up to its first `)` (a backslash takes the next character), so a `/*` or a quote
@@ -206,7 +207,7 @@ def _declarations(value: str) -> list[str]:
         c = value[i]
         if quote:
             if c == "\\":
-                i += 2
+                i = m.end() if (m := _STRING_ESCAPE.match(value, i)) else i + 1
                 continue
             if c == quote or c in "\n\r\f":
                 quote = ""
@@ -215,6 +216,9 @@ def _declarations(value: str) -> list[str]:
         elif value.startswith("/*", i):
             end = value.find("*/", i + 2)
             i = n if end < 0 else end + 1
+        elif value.startswith("<!--", i):
+            i += 4
+            continue
         elif c in "@#" and (m := _NAME_RUN.match(value, i + 1)):
             i = m.end()
             continue

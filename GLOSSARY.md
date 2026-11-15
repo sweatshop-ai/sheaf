@@ -119,8 +119,15 @@ _Avoid_: back, thread panel
 The tiroir every page of a root goes to, named in its root config; a root that names none sends its pages to the person's default tiroir. A root moved to another tiroir takes its pages with it, versions and comments, and their old addresses lead to the new ones. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 04; not built.)
 _Avoid_: binding, target
 
+**Client tiroir**:
+A tiroir that belongs to a client of the agency and holds only what is client-facing. Its users' brains, chats and private pages are theirs alone: no agent and no member of the agency reads them. The agency's members on it are members like any other, never its administrators. (Decided 2026-11-16, wayfinder `sheaf-in-open-webui` ticket 22; not built.)
+
+**Team comment**:
+A comment the agency's members leave on a client tiroir's rectoverso that the client never sees. It lives on the agency's tiroir, tied to the rectoverso's address, on a team verso beside the client's; it never reaches the client tiroir. (Named 2026-11-16 by Thierry, wayfinder `sheaf-in-open-webui` ticket 22; not built.)
+_Avoid_: internal comment, private comment, team note
+
 **Default tiroir** (of a person):
-The one tiroir a person's pages go to when their root names none: Thierry's is tiroir-tt, Marina's tiroir-0. Each tiroir has its own Sheaf per member; there is no Sheaf across tiroirs. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 04; not built.)
+The one tiroir a person's pages go to when their root names none: Thierry's is tiroir-tt, Marina's tiroir-0. Each tiroir has its own Sheaf per member; there is no Sheaf across tiroirs, except that the agency's tiroir shows the client tiroirs' rectoversos its members may open. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 04; the exception 2026-11-16, ticket 22; not built.)
 _Avoid_: home tiroir (a sheaf's home is a path)
 
 **Loose page**:

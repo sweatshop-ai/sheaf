@@ -36,3 +36,9 @@ Round 3 (Thierry):
 - Q6a: a ThinkingToo member on a client tiroir is a `user`, never `admin`; the Sheaf has no admin override; they see the client repo's root and what a client member Shared with them, nothing else; the hub-to-hub channel from tiroir-tt carries only what that member may open. The client's loose pages, chats and brain are never reachable.
 - Q6b: closing Open WebUI's admin access on the client tiroirs is a follow-up outside the map: `.scratch/follow-ups/client-tiroirs-open-webui-admin-reads-client-chats.md`.
 - Q6c: the spec states the client tiroir privacy rule: no agent and no ThinkingToo member reads a client user's brain, chats or private pages; the tools offer no way to, and stages never read user data. The agency operates the box as root, so the technical guarantee ends there, and the spec says so.
+
+Round 4 (Thierry):
+- Q7: a client tiroir is administered by a service account `ops@<client>.tiroir.me`, admin, password in the keyring, used only by stages.
+- Q8: Thierry names a member for a client; an agent creates the account through a stage; the list lives in the tiroir's record (`devices.yaml`). An account is not a message to the client.
+- Q9: the client's brain indexes only the pages opened to the client with plain Share, never drafts (owner-only or Shared with the team).
+- Q10: the internal comment is a **Team comment** (`GLOSSARY.md`).

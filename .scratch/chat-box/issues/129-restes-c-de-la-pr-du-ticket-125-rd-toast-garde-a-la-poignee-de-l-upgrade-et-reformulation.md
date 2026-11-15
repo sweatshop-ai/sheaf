@@ -7,9 +7,11 @@
 - (d) SPEC 10.11 : « says it on the page that stays » est faux pour l'appelant de l'upgrade ; « (8.2) » omet 8.12 (fin d'accès), qui passe par `meetDocGone`.
 - (d) `settle()` qui renonce après une fusion non sauvée est un troisième cas de rechargement qui n'a pas lieu ; le SPEC le dit à part, vérifier la formulation.
 
-**Blocked by:** 125
+**Blocked by:** none (125 merged, bf55b05)
 
-**Status:** open
+**Claimed by:** Freya 2026-11-15
+
+**Status:** in-progress
 
 **Par où commencer :** `src/sheafmd/page/mount.js` ~400, `page.js` `failed()` ; tests dans `tests/page/test_mount_page.py` ; sur t-compute, jamais sur le portable.
 

@@ -776,22 +776,36 @@ def task_marks(content: str, pattern=TASK_MARK_RE) -> list:
 
 def _boxed_marks(content: str) -> list | None:
     """The marks of `content` laid out by the box each one flips, as the page draws them: item `k` is the mark whose
-    state character is the one that flips box `k` (`box_number`), None for a box no mark stands for (a raw `<input>`).
-    The other readings count marks by regex and need them to be the boxes one for one; this one asks the render, so an
-    empty item (a mark, no box), an ordered item and a box behind a chain are each told apart. None when the source
-    does not render or two marks flip one box."""
-    boxed = {}
-    for m in task_marks(content):
-        at = m.start(2)
-        if (k := box_number(content, at)) is not None:
-            if k in boxed:
+    state character flips box `k`, None for a box no mark stands for (a raw `<input>`). The regex reading counts
+    marks and needs them to be the boxes one for one; this one asks the render, so an empty item (a mark, no box)
+    and a box behind a chain are each told apart. The marks are numbered from 1 and, for each bit of the numbers,
+    those with the bit set are flipped together and rendered: a box that moved has the bits of its mark's number,
+    so about log2 of the marks renders lay them all out, not one per mark. None when the source does not render,
+    when a box moves with no mark of that number, or when the states do not come back the same in number."""
+    marks = task_marks(content)
+    try:
+        html = _render_source(content)
+        if html is None:
+            return None
+        was = _ticks(copyblock.mark(html, page=True))[0]
+        code = [0] * len(was)
+        for bit in range(len(marks).bit_length()):
+            out, last = [], 0
+            for i, m in enumerate(marks):
+                out.append(content[last:m.start(2)])
+                out.append(("x" if m.group(2) == " " else " ") if (i + 1) >> bit & 1 else m.group(2))
+                last = m.end(2)
+            html = _render_source("".join(out) + content[last:])
+            now = None if html is None else _ticks(copyblock.mark(html, page=True))[0]
+            if now is None or len(now) != len(was):
                 return None
-            boxed[k] = m
-    html = _render_source(content)
-    if html is None:
+            for k, (a, b) in enumerate(zip(was, now)):
+                code[k] |= (a != b) << bit
+    except Exception:
         return None
-    n = len(_ticks(copyblock.mark(html, page=True))[0])
-    return None if any(k >= n for k in boxed) else [boxed.get(k) for k in range(n)]
+    if any(c > len(marks) for c in code) or len({c for c in code if c}) != len([c for c in code if c]):
+        return None
+    return [marks[c - 1] if c else None for c in code]
 
 
 def _readings(content: str):
@@ -816,6 +830,22 @@ def _ticks(fragment: str):
     return states, str(soup)
 
 
+def _only_ticks(block, fragment: str):
+    """(the states the page sent, its fragment unticked, the states of the source's render) when the fragment differs
+    from the source's render in the ticks of its boxes and in nothing else; None otherwise."""
+    both = _comparable(block, fragment)
+    if both is None:
+        return None
+    try:
+        want, frag = _ticks(both[0])
+        have, src = _ticks(both[1])
+        if not have or want == have or len(want) != len(have) or _norm_html(frag) != _norm_html(src):
+            return None
+    except Exception:
+        return None
+    return want, frag, have
+
+
 def _toggle_boxes(block, fragment: str, marks=None):
     """The block with its task marks flipped, when the page changed nothing but
     which boxes are ticked. None otherwise, and then the edit is converted as usual.
@@ -824,24 +854,19 @@ def _toggle_boxes(block, fragment: str, marks=None):
     if "checkbox" not in fragment:
         return None
     if marks is None:
+        # What does not depend on the reading is judged first: a reading by box costs renders, and a text edit of a
+        # block that holds boxes comes through here on every save.
+        if _only_ticks(block, fragment) is None:
+            return None
         return next((out for out in (_toggle_boxes(block, fragment, m) for m in _readings(block.content))
                      if out is not None), None)
-    both = _comparable(block, fragment)
-    if both is None:
+    if (ticks := _only_ticks(block, fragment)) is None:
         return None
-    try:
-        want, frag = _ticks(both[0])
-        have, src = _ticks(both[1])
-        if not have or want == have or len(want) != len(have):
-            return None
-        if _norm_html(frag) != _norm_html(src):
-            return None
-    except Exception:
-        return None
-    # The marks found in the source must be the boxes the render drew, one for
-    # one, or a tick could land on the wrong line (a `- [ ]` inside a code
-    # block in the list, say). Any doubt and the edit takes the general path.
-    if [h if m is None else m.group(2) != " " for m, h in zip(marks, have)] != have or len(marks) != len(have):
+    want, frag, have = ticks
+    # The marks found in the source must be the boxes the render drew, one for one (a box no mark stands for is
+    # None and is left as it is), or a tick could land on the wrong line (a `- [ ]` inside a code block in the list,
+    # say). Any doubt and the edit takes the general path.
+    if len(marks) != len(have) or [h if m is None else m.group(2) != " " for m, h in zip(marks, have)] != have:
         return None
     out = block.content
     for m, w, h in reversed(list(zip(marks, want, have))):
@@ -917,6 +942,8 @@ def ticked_html(block, k: int, tick: bool = True, at: int | None = None):
         lambda m: f'<span class="rd-anchor" data-rd-id="{m.group(1)}"></span>', copyblock.mark(html, page=True)),
         "html.parser")
     found = soup.select('input[type="checkbox"]')
+    if not 0 <= k < len(found):
+        return None
     sets = (m for m in _readings(block.content)
             if 0 <= k < min(len(found), len(m)) and m[k] is not None and (at is None or m[k].start(2) == at))
     if found[k].has_attr("checked") == tick:

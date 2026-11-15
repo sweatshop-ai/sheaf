@@ -4,9 +4,9 @@
 
 **Blocked by:** the next CI failure of this test, now reported by the diagnostic merged for this ticket
 
-**Claimed by:** Yara 2026-11-15
+**Claimed by:** (libre)
 
-**Status:** in-progress
+**Status:** ready-for-agent
 
 **Établi (preuves) :** vu une fois, PR 315 (ticket 74, ne touche que `copyblock.py` et ses tests), sur 8c1b152, tranche 3/3, tentative 1, 2026-11-14 16:41 UTC. Run 43616032386 : https://github.com/sweatshop-ai/sheaf/actions/runs/43616032386, job 132511239379 : https://github.com/sweatshop-ai/sheaf/actions/runs/43616032386/job/132511239379. Le job a échoué avec 1 échec, 353 passés (test de page, Chromium/Firefox/WebKit) ; le test a échoué deux fois dans la même exécution (rejeu interne du test, deux traces dans le log). Vert au rejeu du job (tentative 2, job 132514856389). Les tests unitaires du même job : 2844 passés.
 
@@ -19,3 +19,5 @@
 - [ ] CI verte sur trois passages de suite
 
 **Tentative de cause (Yara, 2026-11-15) : non établie.** Le log du job ne dit rien de la page. Non reproduit sur t-compute : 384 passages du test seul (24 boucles en parallèle, jusqu'à 40 brûleurs de CPU) et 18 passages du fichier entier sous xdist à charge ~100, tous verts pour ce test (d'autres tests du fichier ont échoué à cette charge, pas celui-ci). Lu dans `page.js` : `go` n'envoie rien si le champ est vide, si `needClean()` dit « Save your edits first » ou « The document changed », ou si le fil a disparu ; `post` attend `ticking` (un tick de bouton, hors du chemin de ce test). Aucune de ces pistes n'a de preuve. PR 365 (diagnostic seul, tests) : au prochain échec le message dit si la page a rechargé (`same_load`), la valeur du champ, le popover et le toast.
+
+**État après la PR du diagnostic (Yara, 2026-11-15) :** le diagnostic est fusionné (PR 365, merge 3bdeaf6) : `send_held` et `new_comment_held` passent par `wait_for_send`, qui dit en cas d'échec si la page a rechargé, la valeur du champ, le popover et le toast. Aucune des trois cases n'est cochée : la cause n'est pas établie (non reproduit, voir plus haut), donc pas de correctif ni de trois CI vertes sur un correctif. Le ticket attend le prochain échec de ce test, avec le message du diagnostic.

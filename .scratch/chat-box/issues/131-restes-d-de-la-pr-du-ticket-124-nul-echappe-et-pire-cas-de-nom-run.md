@@ -9,4 +9,4 @@
 
 **Blocked by:** PR du ticket 124 fusionnée
 
-**Status:** done (point 1 sur chat-box/124 254e737; point 2 : limite connue écrite ci-dessus)
+**Status:** done (PR 361, merge 0dcfd38; point 1 sur chat-box/124 254e737; point 2 : limite connue écrite ci-dessus)

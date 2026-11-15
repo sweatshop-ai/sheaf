@@ -84,11 +84,18 @@ class Block:
         return f"<Block {self.kind} @{self.start} {head!r}>"
 
 
+# A line that opens an item or a quote, as CommonMark reads it: the space after a marker is a space or a tab, not the
+# no-break or full-width space that `\s` matches (such a header is a table, read by pandoc as the top-level tables are).
+_OPENS_CONTAINER_RE = re.compile(r"[ \t]*(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)|[ \t]{0,3}>")
+
+
 def _looks_like_table(lines, i):
     """A gfm table is a header row followed by a |---|---| separator."""
     if i + 1 >= len(lines):
         return False
     nxt = lines[i + 1]
+    if _OPENS_CONTAINER_RE.match(lines[i]):
+        return False        # an item or a quote whose first line has pipes: its table, if pandoc reads one, is inside it
     return ("|" in lines[i]) and ("-" in nxt) and TBLSEP_RE.match(nxt) is not None and "|" in nxt
 
 

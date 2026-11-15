@@ -17,4 +17,4 @@
 
 **Status:** done (PR 374, merged as 4a6e237)
 
-- [ ] c1 et c2 faits ou écartés avec la preuve ; d1 à d3 faits
+- [x] c1 et c2 faits ou écartés avec la preuve ; d1 à d3 faits (PR 374, merge 4a6e237, CI : 3 tranches success sur 4a6e237. c1 : `_render_source(keep=False)` pour les rendus par bit de `_boxed_marks`, `edit.py`, jugé correct par la revue `pr-140-reviews/opus-1.md`, sans test dédié. c2 : `_drawing_marks`/`_goes_on` lisent les cases vides dans le texte ; `test_a_tick_in_a_long_task_list_with_an_empty_item_costs_a_fixed_number_of_renders` et `test_ticked_html_in_a_long_list_with_empty_items_and_a_continued_item_costs_a_fixed_number_of_renders` (`tests/test_hub_list.py`) : même nombre de rendus à 200 et à 800 éléments, au plus 3. d1 : borne resserrée de 16 à 3, avec ce même test. d2 : garde `0 <= k` retirée de `ticked_html`. d3 : docstrings de `box_number` et `_render_source` corrigées)

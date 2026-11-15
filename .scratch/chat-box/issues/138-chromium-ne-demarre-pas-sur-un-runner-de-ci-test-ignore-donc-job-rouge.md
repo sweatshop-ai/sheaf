@@ -11,12 +11,12 @@
 
 - External: un échec de lancement du navigateur en CI qui porte le rapport complet (après fusion de la PR 367, 5ce4e46)
 
-**Claimed by:** Isolde 2026-11-15 12:38
+**Claimed by:** (libre)
 
 **Findings (Isolde, 2026-11-15):** Runs of 2026-10-31 to 2026-11-15 read (1000-run API cap), 273 failed jobs' logs grepped. Four cases of the skip, all on GitHub-hosted `ubuntu-24.04` (sheaf's CI does not run on t-compute; runner names are `GitHub Actions 10000…`, not readable from here), all image 20261111.370.1: run 43312410524 (12 Nov 21:39, test_mount_allowlist:233), 43502218938 (13 Nov 20:30, allowlist:151), 43527634386 (13 Nov 23:30, allowlist:233), 43707514947 (15 Nov 11:09, test_mount_selection:187). In each, one launch of a browser launched per test fails inside a stream of launches that pass (allowlist: one every 0.4 s; the failing one is the 9th launch at 2 %), and the next launch passes. A fifth hit of the search (run 42794285101, 10 Nov) is another cause: the Chromium executable was missing from the cache. Not established: why the browser closed; the fixtures kept only the first line of the error, and the browser's log (after that line) was dropped. Image count (partial, API limit hit): 4 failures in 192 jobs on 370.1, 0 in 307 on 360.1. Too few to name the image.
 **Fix (PR 367, branch chat-box/138, Opus review GO):** `launch_engine` in tests/page/pagehelp.py: on CI a launch that fails fails the test with the whole error and the died_report; the next red run names the cause. Ticket stays open until that run.
 
-**Status:** in-progress
+**Status:** ready-for-agent
 
 - [ ] Le nombre de cas et les runners sont établis à partir des runs passés
 - [ ] La cause est établie dans les logs du runner, pas supposée

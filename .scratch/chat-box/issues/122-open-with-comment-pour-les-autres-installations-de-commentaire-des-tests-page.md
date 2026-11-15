@@ -11,7 +11,7 @@ Revue de la PR 349 : classes c1, c2, d1 seulement (une remarque d'ordre sans eff
 
 **Claimed by:** Mira
 
-**Status:** ready-for-agent
+**Status:** done (PR 354, merge 2a87788)
 
 ## Decision (Mira, PR chat-box/122)
 
@@ -24,3 +24,5 @@ Revue de la PR 349 : classes c1, c2, d1 seulement (une remarque d'ordre sans eff
 - **Left as is, more than one comment, a reply or a status** (test_page_agent replies, test_page_chat_box `set_status` and reply setups, test_page_dictation line 479, test_page_writing, test_page_mobile_composer): the helper adds one comment and no more.
 
 - **Left as is on purpose, not in any group** (test_page_chat_box `test_a_thread_on_a_page_that_cannot_save_...`, ~:713): it opens a `file://` copy through `context.new_page()`, not `tab.open()`, so the helper does not apply (PR 354 review c2, ticket 127).
+
+Close-out: the decision is made and applied (PR 354). The c and d notes of its review are in ticket 127.

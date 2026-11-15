@@ -676,11 +676,15 @@ def test_a_comment_on_the_header_of_a_table_in_a_quote_or_a_list_stays_on_the_ro
     assert [c.id for c in rdc.parse(out).comments] == [cid] and out.count("\n") == md.count("\n")
 
 
-def test_a_cell_in_a_code_span_that_runs_across_cells_of_a_quoted_table_is_refused_not_lost():
+def test_a_cell_between_two_backticks_of_a_quoted_table_takes_a_comment_pandoc_splits_the_cells_first():
+    # Ticket 87: the span `x | one | z` is no code, pandoc splits the cells before it reads a span, so the
+    # comment goes at the end of the cell as in a table at the top, and parse finds it (it was refused before).
     md = "> | a | b |\n> |---|---|\n> | `x | one | z` | q |\n"
     s, e = sel(md, "one")
-    with pytest.raises(rdc.AnchorError):
-        rdc.add_comment(md, 0, s, e, "one", "why", "Ada", "2026-11-14T10:00")
+    out, cid = rdc.add_comment(md, 0, s, e, "one", "why", "Ada", "2026-11-14T10:00")
+    assert "> | `x | one<!-- sheaf-comment id=%s" % cid in out
+    assert [c.id for c in rdc.parse(out).comments] == [cid]
+    assert "&lt;!--" not in pandoc(["-f", "gfm", "-t", "html", "--wrap=none"], out)
 
 
 # ── ticket 75: what is left of PR 296 ──

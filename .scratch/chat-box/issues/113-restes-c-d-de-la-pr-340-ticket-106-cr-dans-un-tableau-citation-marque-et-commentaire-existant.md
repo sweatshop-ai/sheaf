@@ -18,5 +18,5 @@
 
 **Status:** done: PR 347, merged as 1204080; leftovers in ticket 120
 
-- [ ] c2 (c1 est réglé dans la PR 340), c3, c4, c6 corrigés ou écartés avec la preuve
-- [ ] d5, d7 notés ou corrigés
+- [x] c2 (c1 est réglé dans la PR 340), c3, c4, c6 corrigés ou écartés avec la preuve (PR 347, merge 1204080, tests rouges d'abord, pandoc 3.9 : c2 corrigé à la racine par `_toggle_boxes` qui exige les cases envoyées par la page, `test_a_tick_never_lands_on_an_empty_task_item…` ; c3 `test_a_cr_in_a_table_row_leaves_the_comment_in_its_cell` ; c4 corrigé avec c3 par `cell_end` sans CR ; c6 `test_a_cr_inside_…_comment_opener_…_still_counts_its_id` ; c7 écarté avec preuve, reste dans le ticket 120)
+- [x] d5, d7 notés ou corrigés (PR 347 : d5 corrigé avec `cell_end` sans CR ; d7 `test_the_point_stays_before_a_run_of_crs_that_follows_it`)

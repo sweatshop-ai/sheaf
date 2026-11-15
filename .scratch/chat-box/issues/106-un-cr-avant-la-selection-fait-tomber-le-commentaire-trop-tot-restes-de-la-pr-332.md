@@ -10,5 +10,5 @@
 
 **Status:** done (PR 340, merge c5589ec; leftovers in ticket 113)
 
-- [ ] Le commentaire tombe après la sélection quand des CR la précèdent, mesuré contre pandoc 3.9
-- [ ] `TASK_MARK_RE` : corrigé ou écarté avec la preuve
+- [x] Le commentaire tombe après la sélection quand des CR la précèdent, mesuré contre pandoc 3.9 (PR 340, merge c5589ec : `anchor_point` travaille sur le bloc sans CR et reporte le point, `tests/test_anchoring.py::test_a_cr_before_the_selection_does_not_pull_the_comment_into_the_word`, rouge d'abord ; mesuré sur pandoc 3.7.0.2 en local, la CI épinglée a passé au merge)
+- [x] `TASK_MARK_RE` : corrigé ou écarté avec la preuve (PR 340 : corrigé, la regex accepte les CR de tête, `edit.py:718`, `tests/test_hub_list.py::test_a_list_made_by_its_leading_crs_has_its_marks_found`)

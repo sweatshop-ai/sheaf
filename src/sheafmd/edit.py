@@ -844,12 +844,34 @@ def _toggle_boxes(block, fragment: str, marks=None):
     return out
 
 
-def ticked_html(block, k: int, tick: bool = True):
+def box_number(content: str, at: int) -> int | None:
+    """The number, among the boxes the page draws for `content`, of the box whose state is the character at `at`
+    (the state character of a task mark): the one box that flips when that character does. None when none does
+    (an empty item has a mark and no box) or when the source does not render. The count of marks is not this
+    number: a mark may draw no box (an empty item) and a box may have no mark (a bullet behind a chain the
+    regex misses), so the render is asked."""
+    if not 0 <= at < len(content) or content[at] not in " xX":
+        return None
+    flipped = content[:at] + (" " if content[at] != " " else "x") + content[at + 1:]
+    try:
+        was, now = (_ticks(copyblock.mark(h, page=True))[0] if (h := _render_source(c)) is not None else None
+                    for c in (content, flipped))
+    except Exception:
+        return None
+    if was is None or now is None or len(was) != len(now):
+        return None
+    moved = [i for i, (a, b) in enumerate(zip(was, now)) if a != b]
+    return moved[0] if len(moved) == 1 else None
+
+
+def ticked_html(block, k: int, tick: bool = True, at: int | None = None):
     """The block as the page would send it with its `k`th task box ticked (unticked, with `tick` false), for a
     tick made away from the page (the list's row, SPEC 9.10): saved like the page's own, it takes the
     `_toggle_boxes` path and flips that one mark. None when the box is ticked already (unticked already), or when
     that path would not be the one taken (the marks are not the boxes drawn, a comment is in the way): a save would
-    then go through pandoc."""
+    then go through pandoc. `k` counts the boxes the page draws, as `box_number` does; `at`, when given, is the
+    offset of the state character of the mark the box stands for, and only a reading that has that mark as its `k`th
+    is tried, so a tick cannot be written on the mark of another box."""
     from bs4 import BeautifulSoup
 
     if not block.editable:
@@ -862,7 +884,8 @@ def ticked_html(block, k: int, tick: bool = True):
         lambda m: f'<span class="rd-anchor" data-rd-id="{m.group(1)}"></span>', copyblock.mark(html, page=True)),
         "html.parser")
     found = soup.select('input[type="checkbox"]')
-    sets = [m for m in _mark_sets(block.content) if 0 <= k < min(len(found), len(m))]
+    sets = [m for m in _mark_sets(block.content)
+            if 0 <= k < min(len(found), len(m)) and (at is None or m[k].start(2) == at)]
     if not sets or found[k].has_attr("checked") == tick:
         return None
     if tick:

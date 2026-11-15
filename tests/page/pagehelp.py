@@ -495,8 +495,18 @@ def launch_engine(browser_type, name, error=None, in_ci=None):
 # time (taken before a test's fake clock replaces the page's), each open, error and event into window.__sseJournal.
 STREAM_JOURNAL_JS = """(() => {
   const now = performance.now.bind(performance), origin = performance.timeOrigin;
-  const log = window.__sseJournal = [];
-  const note = (what, data) => log.push([origin + now(), what, data === undefined ? '' : String(data).slice(0, 120)]);
+  // Kept in sessionStorage: a reload of the page, which is what a lost event or a lost toast often is, would
+  // otherwise take the journal of the page that heard it (ticket 137).
+  const setItem = Storage.prototype.setItem;      // the native one: a test that watches the page's own setItem does not see the journal's
+  let log = [];
+  try { log = JSON.parse(sessionStorage.getItem('__sseJournal') || '[]'); } catch (e) {}
+  window.__sseJournal = log;
+  const note = (what, data) => {
+    log.push([origin + now(), what, data === undefined ? '' : String(data).slice(0, 120)]);
+    try { setItem.call(sessionStorage, '__sseJournal', JSON.stringify(log.slice(-400))); } catch (e) {}
+  };
+  note('document', 'starts');
+  window.addEventListener('pagehide', () => note('pagehide'));
   const nativeFetch = window.fetch.bind(window);
   window.fetch = (url, init) => {
     const what = String(url) + ' ' + ((init && init.method) || 'GET');

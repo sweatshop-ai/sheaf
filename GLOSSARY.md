@@ -107,6 +107,14 @@ _Avoid_: catalog, index, dashboard
 A member's browsable tree of folders holding every page they may open, with or without an issue, and no status. Not the List: the List says what waits, the Catalog says where a page is. (Named 2026-11-15, wayfinder `sheaf-in-open-webui`; not built.)
 _Avoid_: list, library, documents
 
+**Root's tiroir**:
+The tiroir every page of a root goes to, named in its root config; a root that names none sends its pages to the person's default tiroir. A root moved to another tiroir takes its pages with it, versions and comments, and their old addresses lead to the new ones. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 04; not built.)
+_Avoid_: binding, target
+
+**Default tiroir** (of a person):
+The one tiroir a person's pages go to when their root names none: Thierry's is tiroir-tt, Marina's tiroir-0. Each tiroir has its own Catalog; there is no Catalog across tiroirs. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 04; not built.)
+_Avoid_: home tiroir (a sheaf's home is a path)
+
 **Stop James**:
 The action any member ticks on a sheaf of the assistant James to end his work on its project (SPEC 9.11). It is the one place the core names a deployment's assistant: the hub writes a diagnostics row and, with `[list] stop_dir`, a file the deployment's supervisor reads; stopping is the deployment's, a Layer concern the core only signals.
 

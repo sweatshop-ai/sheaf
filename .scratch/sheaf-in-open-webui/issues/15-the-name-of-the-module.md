@@ -18,3 +18,5 @@ The sidebar entry, the Catalog and the spec need a name a member reads. Thierry 
 - Dead on competitor search: Proof (Every's proofeditor.ai, an editor for agents and humans with comments), Margin (beta tool commenting AI artifacts), Folio (five+ markdown/AI doc apps). Drawer = tiroir; Desk plants no image.
 - Finalists shown to Thierry: Recto (recommended: the side facing you, comments the verso; known in it/nl/fr/en), Carnet, Calque, Sous-main; fallback "tiroir Pages".
 - Open: Thierry's pick after letting them sit; then the translations of the label and whether "Catalog" stays a spec-only term.
+- Round 1 rejected by Thierry (all four). Round 2 brief: the name must show "yours, not the vendor's", "exchange between agent and person" and "showing" (Thierry's pick of territories).
+- Round 2 dead: Foyer (a client-portal and document-management tool launched 2026-03). Finalists shown: Salon (recommended: hits all three; nl "salon" = living room), Studiolo, Navette, Cachet (only an Estonian insurer, out of field).

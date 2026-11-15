@@ -8,7 +8,7 @@ import time
 import pytest
 
 import pagehelp
-from pagehelp import (close_context, died_report, how_it_ended, launched_binary, launch_chromium, new_context,
+from pagehelp import (close_context, died_report, how_it_ended, launched_binary, launch_chromium, launch_engine, new_context,
                       unavailable, until)
 
 pytestmark = pytest.mark.page
@@ -209,3 +209,19 @@ def test_a_route_that_never_comes_off_cannot_hold_the_teardown_of_its_context(mo
     close_context(c)
     assert c.closed, "the context was not closed after its routes would not come off"
     assert time.monotonic() - began < 10, "close_context outlasted its bound"
+
+
+def test_a_launch_on_ci_of_an_engine_the_test_starts_itself_fails_with_the_whole_message_and_the_report(tmp_path):
+    exe = dies_by(tmp_path, int(signal.SIGSEGV))
+    chromium = FakeBrowserType(str(exe))
+    with pytest.raises(pytest.fail.Exception) as e:
+        launch_engine(chromium, "chromium", Died, in_ci=True)
+    msg = str(e.value)
+    assert "log line" in msg and "signal 11" in msg and "dying words" in msg
+    with pytest.raises(pytest.fail.Exception, match="webkit did not start:\nBrowserType.launch.*\nlog line"):
+        launch_engine(FakeBrowserType(), "webkit", Died, in_ci=True)
+
+
+def test_a_launch_off_ci_of_an_engine_the_test_starts_itself_skips_with_the_first_line():
+    with pytest.raises(pytest.skip.Exception, match="firefox cannot start here: BrowserType.launch: Target page"):
+        launch_engine(FakeBrowserType(), "firefox", Died, in_ci=False)

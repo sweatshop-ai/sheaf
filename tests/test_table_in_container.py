@@ -41,6 +41,10 @@ FORMS = [
     # a code span over two lines in a quote or a list has two ranges: it is code
     ("> | a |\n> |---|\n>\n> `p x\n> y C1 q`\n", False),
     ("- | a |\n  |---|\n\n  `p x\n  y C1 q`\n", False),
+    # ticket 126: an item whose first line has pipes and is followed by a delimiter-looking line is a list, not a table
+    ("*    | h0 | h1 | h2 |\n      |:--|:--|:--|\n  \t| `x | y C1 |\n  | v\\| | w` | `z | |\n", False),
+    ("+   | h0 | h1 | h2 |\n  |:-:|---|--:|\n     | `x | `C1` | y` |\n10. next\n", True),
+    ("-     | h0 | h1 | h2 | h3 |\n   \t|:-:|---|:--|---|\n   | `x | `C1` | y` |\n       | w` | x | `y` | x |\n\nafter\n", True),
     # an indented line after a blank line in an item is code, not a row
     ("- q\n\n  | a | b |\n  |---|---|\n\n      | `x` | y C1 |\n", False),
 ]
@@ -94,8 +98,7 @@ def test_no_pandoc_run_is_made_for_a_block_that_cannot_hold_a_table_or_a_comment
 # The fuzzer of tests/fuzz_containers.py: random quotes and lists of every marker, tab and nesting, with a
 # table in them; pandoc is the oracle. A few seeds here, whole runs with `python tests/fuzz_containers.py SEED N
 # BASE_SRC`, which also counts "head wrong where base right" (0 and 0 on seeds 3 and 4, 80 and 100 cases per
-# generator). What stays wrong is a block that the splitter cuts at a delimiter row that pandoc does not read as
-# the table's (SPEC 10.4): under one case in ten, where main is wrong in one of five.
+# generator). Since ticket 126 no seed has shown a wrong case (SPEC 10.4).
 @pytest.mark.parametrize("seed", ["a", "b"])
 def test_the_fuzzer_finds_few_comments_lost_or_invented_in_a_quote_or_a_list(seed):
     res = fz.run(seed, 25, rdc, None, pandoc)
@@ -155,6 +158,106 @@ def test_a_heading_ending_in_an_image_takes_its_comment_on_its_line():
     out, cid = rdc.add_comment(md, 0, s, e, "head", "why\nmore", "Ada", "2026-11-14T10:00")
     assert out.count("\n") == 1 and "&lt;!--" not in pandoc(["-f", "gfm", "-t", "html"], out)
     assert [c.id for c in rdc.parse(out).comments] == [cid]
+
+
+# ticket 126 (leftovers of the review of PR 351)
+def test_a_line_that_opens_an_item_or_a_quote_is_not_the_header_of_a_table():
+    for md in ("*    | h0 | h1 |\n      |:--|:--|\n  | x | y |\n", "1. | h0 | h1 |\n   |:--|:--|\n   | x | y |\n",
+               "> | h0 | h1 |\n> |:--|:--|\n> | x | y |\n"):
+        assert [b.kind for b in rdc.split_md_blocks(md)] in (["list"], ["quote"]), md
+    assert [b.kind for b in rdc.split_md_blocks("| h0 | h1 |\n|:--|:--|\n| x | y |\n")] == ["table"]
+
+
+# R2-1: the copy of a comment that pandoc drops from a cell (beyond the table's columns) stands where the comment of the
+# same id that is a block of its own, later in the block, is the one pandoc shows.
+@pytest.mark.parametrize("md", [
+    "> | a |\n> |---|\n> | x | %s |\n>\n> %s\n",
+    "> | a |\n> |---|\n> | x `p | %s q` |\n>\n> %s\n",
+    "- | a |\n  |---|\n  | x | %s |\n\n  %s\n",
+])
+def test_a_dropped_copy_in_a_cell_does_not_take_the_id_of_the_comment_that_pandoc_shows(md):
+    md = md % (fz.C, fz.C)
+    assert fz.pandoc_sees(pandoc, md)
+    found = rdc.parse(md)
+    assert [(c.id, c.line) for c in found.comments] == [("c1", 5)]
+    assert found.malformed == []
+
+
+# R2-2 and ticket 133: pandoc drops a comment in the alt text of an image, in a quoted table as in a table of the document
+@pytest.mark.parametrize("md, shown", [
+    ("> | a | b |\n> |---|---|\n> | ![xx%s](u) | yy |\n", False),
+    ("| a | b |\n|---|---|\n| ![xx%s](u) | yy |\n", False),
+    ("| a | b |\n|---|---|\n| ![xx](u) %s | yy |\n", True),
+    ("| a | b |\n|---|---|\n| ![xx](u) | yy%s |\n", True),
+])
+def test_a_comment_in_the_alt_text_of_an_image_of_a_table_is_found_exactly_when_pandoc_shows_it(md, shown):
+    md = md % fz.C
+    assert fz.pandoc_sees(pandoc, md) is shown
+    assert fz.parse_sees(rdc, md) is shown
+
+
+# Review round 2 of ticket 126 (b1, b2): a quote opened after a tab is indented code; a header that no longer goes to
+# the container reading is read by pandoc as a table of the document is
+@pytest.mark.parametrize("md, shown", [
+    ("  \t> a %s | b\n|---|---|\n| q | r |\n", False),
+    ("  \t-\xa0 a %s | b\n|---|---|\n| q | r |\n", False),
+    ("| a | b |\n|---|---|\n| q | s | t %s |\n", False),
+    ("-\xa0| a `x | %s y` |\n|---|---|\n| q | r |\n", False),
+])
+def test_a_top_level_table_with_a_comment_is_read_as_pandoc_reads_it(md, shown):
+    md = md % fz.C
+    assert fz.pandoc_sees(pandoc, md) is shown
+    assert fz.parse_sees(rdc, md) is shown
+
+
+# Review round 3 of ticket 126 (b3): pandoc writes a tab in a comment that is a block of its own as spaces
+@pytest.mark.parametrize("doc", [
+    "%s | a\n|---|---|\n| q | r |\n",
+    "%s \\|\n|---|\nq\n",
+    "> %s\n",
+    "- %s\n",
+])
+def test_a_comment_with_a_tab_that_is_a_block_of_its_own_is_found(doc):
+    md = doc % fz.C.replace(" why", " t\tu")
+    assert fz.pandoc_sees(pandoc, md)
+    assert fz.parse_sees(rdc, md)
+
+
+# Review of ticket 126, finding 1: a no-break or full-width space after a marker is no item: the table stays a table
+@pytest.mark.parametrize("sp", ["\xa0", "\u3000"])
+@pytest.mark.parametrize("marker", ["-", "*", "+", "1."])
+def test_a_header_that_starts_with_a_marker_and_a_no_break_space_is_still_a_table(marker, sp):
+    md = "%s%s a | b \n|---|---|\n| x | y |\n" % (marker, sp)
+    assert [b.kind for b in rdc.split_md_blocks(md)] == ["table"]
+
+
+# F5: the cache of `_read_tables` holds a whole document of quotes and lists, so a second `parse` runs no pandoc
+def test_a_document_of_more_than_a_thousand_quotes_with_a_table_is_read_by_pandoc_once(monkeypatch):
+    calls = []
+    monkeypatch.setattr(rdc, "_sourcepos_html", lambda block: calls.append(block) or "")     # no pandoc: the count is the test
+    rdc._read_tables.cache_clear()
+    n = 1100
+    md = "\n".join("> | a | b |\n> |---|---|\n> | `x | %s | y` |\n" % fz.C.replace("c1", "c%d" % i)
+                   for i in range(n))
+    rdc.parse(md)
+    assert len(calls) == n
+    rdc.parse(md)
+    assert len(calls) == n
+
+
+# A reply whose body has a CRLF: measured on main and not reproduced (the reply is read back, one reply, in every shape
+# the review named); the test keeps it so.
+@pytest.mark.parametrize("doc", [
+    "text %s\n", "# h %s\n", "| a | b |\n|---|---|\n| x %s | y |\n", "> | a | b |\n> |---|---|\n> | x %s | y |\n",
+    "- | a | b |\n  |---|---|\n  | x %s | y |\n", "%s\n\ntext\n",
+])
+@pytest.mark.parametrize("crlf", [False, True])
+def test_a_reply_with_crlf_in_its_body_is_read_back(doc, crlf):
+    md = doc % fz.C
+    md = md.replace("\n", "\r\n") if crlf else md
+    out = rdc.reply(md, "c1", "a\r\nb", "Bob", "2026-11-14T11:00")
+    found = rdc.parse(out)
+    assert [(c.id, len(c.replies)) for c in found.comments] == [("c1", 1)] and found.malformed == []
 
 
 def sel_of(md, quote):

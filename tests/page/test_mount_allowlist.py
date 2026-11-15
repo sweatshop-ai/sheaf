@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 import sheafmd
+from pagehelp import launch_engine
 
 sync_api = pytest.importorskip("playwright.sync_api")
 
@@ -93,10 +94,7 @@ def pw(chromium):
 
 @pytest.fixture(params=ENGINES)
 def env(request, pw):
-    try:
-        browser = getattr(pw, request.param).launch()
-    except Exception as e:      # not installed, or its libraries are missing here
-        pytest.skip(f"{request.param} cannot start here: {str(e).splitlines()[0]}")
+    browser = launch_engine(getattr(pw, request.param), request.param)
     ctx = browser.new_context()
     page = ctx.new_page()
     seen = []

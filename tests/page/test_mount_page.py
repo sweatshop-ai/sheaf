@@ -11,8 +11,8 @@ import re
 
 import pytest
 from helpers import PLAN
-from pagehelp import (BLUE, DOC, HOST, PAGE_TIMEOUT_MS, RED, assert_readable, close_context, drop_host, new_context, pasted,
-                      until, wear_host)
+from pagehelp import (BLUE, DOC, HOST, PAGE_TIMEOUT_MS, RED, assert_readable, close_context, drop_host, launch_engine, new_context,
+                      pasted, until, wear_host)
 
 from sheafmd import comments as rdc
 
@@ -132,10 +132,7 @@ def any_front(request, site, chromium):
     if request.param == "chromium":
         browser, own = chromium, False
     else:
-        try:
-            browser, own = getattr(chromium.pw, request.param).launch(), True
-        except Exception as e:      # noqa: BLE001 - not installed, or its libraries are missing here (CI fails on a skip)
-            pytest.skip(f"{request.param} cannot start here: {str(e).splitlines()[0]}")
+        browser, own = launch_engine(getattr(chromium.pw, request.param), request.param), True
     c, f = _front(browser, site)
     yield f
     try:
@@ -546,6 +543,36 @@ def test_a_remount_that_fails_leaves_no_toast_for_a_later_mount_of_the_tab(front
     until(lambda: "401" in (front.js("const t = root.getElementById('rd-toast'); return t.className.includes('err') "
                                      "? t.textContent : '';") or ""), what="the failure said in the page")
     assert front.page.evaluate("sessionStorage.getItem('sheaf-mount:rd-toast')") is None
+
+
+def test_a_remount_that_fails_says_the_toast_a_merged_save_left_before_its_own_line(front):
+    """Pins #125's order (it passes without #129): `failed()` says what the save's reload was to say, then its own line."""
+    front.open()
+    front.page.route("**/_/mount?doc=*", lambda route: route.fulfill(
+        status=401, content_type="application/json", body='{"error": "sign in"}'))
+    front.js("window.__said = []; new MutationObserver(() => { const t = root.getElementById('rd-toast').textContent;"
+             "if (t && window.__said[window.__said.length - 1] !== t) window.__said.push(t); })"
+             ".observe(root.getElementById('rd-toast'), {childList: true, characterData: true, subtree: true});")
+    front.page.evaluate("sessionStorage.setItem('sheaf-mount:rd-toast', '1 block \u2192 plan.md')")
+    front.site.file.write_text(front.site.file.read_text().replace("about pears", "about plums"), encoding="utf-8")
+    until(lambda: any("401" in t for t in front.js("return window.__said;")), what="the failure said in the page")
+    said = front.js("return window.__said;")
+    assert "1 block \u2192 plan.md" in said[0], said
+    assert "401" in said[-1], said
+
+
+def test_an_upgrade_handover_leaves_the_toast_of_a_merged_save_for_the_new_boot(front):
+    """Ticket 129 (c): the loader mounts the new version into the same pane, which removes the old page's toasts, so a
+    toast `failed()` said there was never seen. The handover leaves `rd-toast` for the new boot, as before #125."""
+    front.open()
+    front.page.route("**/_/mount?doc=*", _another_version)
+    front.page.evaluate("sessionStorage.setItem('sheaf-mount:rd-toast', '1 block \u2192 plan.md')")
+    front.site.file.write_text(front.site.file.read_text().replace("about pears", "about plums"), encoding="utf-8")
+    until(lambda: front.page.evaluate("window.__upgrades || null"), what="the loader told")
+    until(lambda: "updated" in front.js("return root.getElementById('rd-toast').textContent;"), what="the handover said")
+    assert front.page.evaluate("sessionStorage.getItem('sheaf-mount:rd-toast')") == "1 block \u2192 plan.md"
+    # A keep that names the document only, so a boot of another document in the tab drops the toast (review b1).
+    assert front.page.evaluate("JSON.parse(sessionStorage.getItem('sheaf-mount:rd-keep'))") == {"doc": DOC}
 
 
 def test_of_two_mounts_on_one_pane_the_one_called_last_stands_whichever_answers_first(front):

@@ -40,7 +40,7 @@ from urllib.parse import quote
 from .. import beneath, config, paths
 from ..source import md_hash
 from ..blocks import _split_lines, split_md_blocks
-from ..edit import _mark_sets, box_number, ticked_html
+from ..edit import box_number, task_marks, ticked_html
 from .. import comments as rdc
 from . import commits, place, projects, state
 from . import proxy as proxy_mod
@@ -453,9 +453,9 @@ def _place(text: str, line: int, blocks=None) -> tuple | None:
     b = blocks[i]
     own = _split_lines(b.content)
     offset = sum(len(x) for x in own[:line - b.start])
-    for at in dict.fromkeys(m.start(2) for marks in _mark_sets(b.content) for m in marks if m.start() == offset):
-        if (k := box_number(b.content, at)) is not None:
-            return i, k, at
+    for m in task_marks(b.content):
+        if m.start() == offset and (k := box_number(b.content, m.start(2))) is not None:
+            return i, k, m.start(2)
     return None
 
 

@@ -498,6 +498,25 @@ def test_a_merged_save_that_answers_after_the_root_was_forgotten_leaves_no_toast
     assert p.evaluate("sessionStorage.getItem('rd-toast')") is None
 
 
+def test_a_merged_save_whose_reload_a_form_holds_leaves_its_toast_for_the_next_boot(replying, site):
+    # Ticket 129 (c): the case 10.11 says is kept: a reload held by a form is not run, and the toast of the merged save
+    # that asked for it stays in the tab for the next boot of the document, which says it.
+    p = replying.page
+    mark(p)
+    p.route("**/_/save", lambda route: route.fulfill(
+        status=200, content_type="application/json",
+        body=json.dumps({"ok": True, "hash": "x", "changed": [1], "merged": True, "conflicts": []})))
+    p.keyboard.press("Control+s")
+    until(lambda: p.evaluate("sessionStorage.getItem('rd-toast')"), what="the merged save's toast stored")
+    stored = p.evaluate("sessionStorage.getItem('rd-toast')")
+    p.wait_for_timeout(500)
+    assert p.evaluate("window.__same_load") is True, "the form did not hold the reload"
+    assert p.evaluate("sessionStorage.getItem('rd-toast')") == stored
+    p.unroute("**/_/save")
+    p.reload()
+    until(lambda: stored in p.inner_text("#rd-toast"), what="the next boot to say the toast")
+
+
 def test_a_page_whose_root_is_forgotten_says_so_keeps_what_was_typed_and_saves_nothing(replying, site):
     p = replying.page
     mark(p)

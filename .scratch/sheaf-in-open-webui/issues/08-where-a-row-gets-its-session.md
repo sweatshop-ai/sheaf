@@ -1,7 +1,7 @@
 # 08: Where a Catalog row gets its session
 
 **Type:** research
-**Status:** open
+**Status:** claimed by Ottilie (2026-11-15)
 **Blocked by:** none
 **Map:** ../map.md
 

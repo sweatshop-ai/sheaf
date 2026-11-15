@@ -17,3 +17,5 @@
 - [ ] La cause est écrite dans ce ticket avec la preuve
 - [ ] Le correctif traite cette cause, pas un délai ou une relance
 - [ ] CI verte sur trois passages de suite
+
+**Tentative de cause (Yara, 2026-11-15) : non établie.** Le log du job ne dit rien de la page. Non reproduit sur t-compute : 384 passages du test seul (24 boucles en parallèle, jusqu'à 40 brûleurs de CPU) et 18 passages du fichier entier sous xdist à charge ~100, tous verts pour ce test (d'autres tests du fichier ont échoué à cette charge, pas celui-ci). Lu dans `page.js` : `go` n'envoie rien si le champ est vide, si `needClean()` dit « Save your edits first » ou « The document changed », ou si le fil a disparu ; `post` attend `ticking` (un tick de bouton, hors du chemin de ce test). Aucune de ces pistes n'a de preuve. PR 365 (diagnostic seul, tests) : au prochain échec le message dit si la page a rechargé (`same_load`), la valeur du champ, le popover et le toast.

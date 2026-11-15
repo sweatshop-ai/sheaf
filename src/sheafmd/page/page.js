@@ -1213,6 +1213,7 @@ var create = function (ROOT, CFG, opts) {
             var said = sessionStorage.getItem(KEYS + 'rd-toast') || '';     // one no boot has said yet (a held reload, a handover) is added to, not lost (#139)
             var now = quiet && !conflicts.length ? '' : note;
             sessionStorage.setItem(KEYS + 'rd-toast', said && now && said !== now ? said + ' · ' + now : now || said);
+            keepNaming();     // a reload held or given up leaves it for a boot, which only this document says (#139)
           } catch (e) {}
         }
         done(); saving = null;
@@ -4540,7 +4541,7 @@ var create = function (ROOT, CFG, opts) {
     // belongs to this page only if it names this document.
     if (keep && keep.doc !== CFG.doc) { keep = null; msg = null; }
     if (keep) {
-      scrollBack(keep.y || 0);
+      if (typeof keep.y === 'number') scrollBack(keep.y);     // a keep that names the document only (#139) restores no scroll
       if (keep.known) {
         var n = news(keep.known, COMMENTS, keep.open ? [keep.open] : []);
         n.forEach(function (x) { flash(x.id); });
@@ -4611,6 +4612,7 @@ var create = function (ROOT, CFG, opts) {
     } else {
       try { sessionStorage.removeItem(KEYS + 'rd-keep'); } catch (e) {}     // the keep of a reload that did not happen
       try { sessionStorage.removeItem(KEYS + 'rd-toast'); } catch (e) {}
+      try { sessionStorage.removeItem(KEYS + 'rd-press-said'); } catch (e) {}     // a refusal the boot of a reload that did not happen was to say
       if (left) say(left);          // what the save's reload was to say is said on the page that stays, not left for a page of another document (#125)
     }
     say(msg, true);

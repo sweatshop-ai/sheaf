@@ -512,6 +512,7 @@ def test_a_merged_save_whose_reload_a_form_holds_leaves_its_toast_for_the_next_b
     p.wait_for_timeout(500)
     assert p.evaluate("window.__same_load") is True, "the form did not hold the reload"
     assert p.evaluate("sessionStorage.getItem('rd-toast')") == stored
+    assert p.evaluate("JSON.parse(sessionStorage.getItem('rd-keep')).doc") == DOC, "a boot of another document would say it"
     p.unroute("**/_/save")
     p.reload()
     until(lambda: stored in p.inner_text("#rd-toast"), what="the next boot to say the toast")

@@ -2315,3 +2315,20 @@ def test_a_tick_in_a_long_task_list_with_an_empty_item_costs_a_fixed_number_of_r
         assert _toggle_boxes(block, page) == want
         counts.append(len(runs))
     assert counts[0] == counts[1] <= 3
+
+
+@pytest.mark.parametrize("eol", ["\n", "\r\n"])
+def test_ticked_html_in_a_long_list_with_empty_items_and_a_continued_item_costs_a_fixed_number_of_renders(monkeypatch, eol):
+    # Ticket 140, review c2/c3: the same cost through the list's button and with CRLF, and an empty mark with an
+    # indented line under it (pandoc draws that one as a box) is kept by the text reading.
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import ticked_html
+    counts = []
+    for n in (200, 800):
+        src = eol.join(["- [ ]", "- [ ] ", "  continued"] + [f"- [ ] item {i}" for i in range(n)]) + eol
+        block = split_md_blocks(src)[0]
+        runs = _renders(monkeypatch)
+        html = ticked_html(block, 6)                 # box 0 is the continued item, so box 6 is item 5
+        assert html is not None and html.count("checked") == 1
+        counts.append(len(runs))
+    assert counts[0] == counts[1] <= 3

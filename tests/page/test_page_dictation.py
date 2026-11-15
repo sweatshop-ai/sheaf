@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-from pagehelp import P1, at, comment_on, until
+from pagehelp import P1, at, comment_on, open_with_comment, until
 from sheafmd import comments as rdc
 from sheafmd.source import update_file
 
@@ -73,9 +73,7 @@ def hub(context):
 
 
 def open_thread(tab, site):
-    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
-                                                     "Bea", "2026-10-14T10:00")[0])
-    tab.open()
+    open_with_comment(tab, None, "apples", "Why?", "Bea")
     tab.page.click(".rd-badge")
     tab.page.wait_for_selector(FIELD)
     return tab.page
@@ -425,7 +423,6 @@ def test_the_stop_event_of_a_discarded_recorder_that_comes_late_leaves_the_new_r
     p.wait_for_function("window.__mic.made.length === 2 && window.__mic.made[1].state === 'recording'")
     p.evaluate("window.__mic.made[0].flush()")              # now it arrives
     p.wait_for_function("window.__mic.stops === 1")         # the old stream is let go
-    p.wait_for_timeout(300)
     assert p.evaluate("window.__mic.made[1].state") == "recording"
     assert p.locator(MIC).get_attribute("aria-pressed") == "true", "the old recorder's stop undid the new button"
     assert hub.posts == [], "a discarded sound was sent"
@@ -454,7 +451,6 @@ def test_the_stop_event_that_comes_late_after_a_failed_send_leaves_the_new_recor
     p.wait_for_function("window.__mic.made.length === 2 && window.__mic.made[1].state === 'recording'")
     p.evaluate("window.__mic.made[0].flush()")              # now the old stop arrives
     p.wait_for_function("window.__mic.stops === 1")
-    p.wait_for_timeout(300)
     assert p.evaluate("window.__mic.made[1].state") == "recording"
     assert p.locator(MIC).get_attribute("aria-pressed") == "true", "the old recorder's stop undid the new button"
     assert hub.posts == [], "a discarded sound was sent"
@@ -502,7 +498,6 @@ def test_the_stop_event_that_comes_late_leaves_the_idle_button_of_a_form_that_ca
     p.wait_for_function("window.__mic.made.length === 2 && window.__mic.made[1].state === 'recording'")
     p.evaluate("window.__mic.made[0].flush()")              # now the first recorder's stop arrives
     p.wait_for_function("window.__mic.stops === 1")
-    p.wait_for_timeout(300)
     assert p.locator(other).get_attribute("aria-pressed") == "false", "the button of the form that came back stayed on Stop"
     assert p.evaluate("window.__mic.made[1].state") == "recording"
     assert p.locator(own).get_attribute("aria-pressed") == "true"

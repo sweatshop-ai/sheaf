@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from pagehelp import P1, at, comment_draft_key, kept_entries, select, set_kept, until
+from pagehelp import P2, at, comment_draft_key, kept_entries, select, set_kept, until
 
 pytestmark = pytest.mark.page
 
@@ -36,7 +36,7 @@ def put(page, key, value):
 
 def keep_a_new_message(page, text):
     """A write of the store by the page: a message typed and put away."""
-    select(page, at(P1, "apples"), at(P1, "apples", None))
+    select(page, at(P2, "pears"), at(P2, "pears", None))        # another passage: the kept messages are on "apples"
     page.fill(FIELD, text)
     page.keyboard.press("Escape")
     until(lambda: text in page.evaluate("JSON.stringify(Object.values(localStorage))"), what="the typed message in the store")
@@ -134,7 +134,7 @@ def test_a_store_with_room_for_one_entry_takes_the_entry_that_replaces_it(tab, s
       Storage.prototype.setItem = function (k, v) {
         if (String(k).startsWith(key + ':e:') && Object.keys(localStorage).filter(x => x.startsWith(key + ':e:')).length >= 1) throw new Error('quota');
         return set.call(this, k, v); }; }""", comment_draft_key(site))
-    select(p, at(P1, "apples"), at(P1, "apples", None))
+    select(p, at(P2, "pears"), at(P2, "pears", None))
     p.fill(FIELD, "first words")
     p.evaluate("document.querySelector('#rd-popover .rd-form').stash()")
     p.fill(FIELD, "first words, more")

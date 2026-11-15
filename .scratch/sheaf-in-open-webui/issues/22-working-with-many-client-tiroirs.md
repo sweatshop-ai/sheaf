@@ -1,7 +1,7 @@
 # 22: How a ThinkingToo member works with many client tiroirs: where the pages for a client live, and how the member reads them
 
 **Type:** grilling
-**Status:** open
+**Status:** claimed by Ottilie (2026-11-15)
 **Blocked by:** none
 **Map:** ../map.md
 

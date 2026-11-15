@@ -1577,7 +1577,7 @@ var create = function (ROOT, CFG, opts) {
   // A document's path may hold ':e:', so the key of `a.md:e:x.md` starts with the prefix of `a.md`: a key is an entry of
   // this document only when what follows the prefix has the shape of an id (entryKey).
   var ENTRY_PREFIX = COMMENT_DRAFT_KEY + ':e:', writeN = 0;
-  var ENTRY_ID = /^(?:[0-9a-z]{9}-[0-9a-z]{3}-[0-9a-z]{4}|0[0-9a-z]{9}-[0-9a-z]{14}|0[0-9a-z]{4}-[0-9a-z]{1,7})$/;   // new | moved from the list | moved by the first build of this store
+  var ENTRY_ID = /^(?:[0-9a-z]{9}-[0-9a-z]{3}-[0-9a-z]{4}|0[0-9a-z]{9}-[0-9a-z]{15}|0[0-9a-z]{4}-[0-9a-z]{1,7})$/;   // new | moved from the list | moved by the first build of this store
   function entryKey(k) { return k.indexOf(ENTRY_PREFIX) === 0 && ENTRY_ID.test(k.slice(ENTRY_PREFIX.length)); }
   function pad(n, w) { var t = n.toString(36); while (t.length < w) t = '0' + t; return t; }
   function newEntryId() { return pad(Date.now(), 9) + '-' + pad(writeN++ % 46656, 3) + '-' + pad(Math.floor(Math.random() * 1679616), 4); }
@@ -1588,14 +1588,16 @@ var create = function (ROOT, CFG, opts) {
     return pad(h, 7) + pad(g, 7);
   }
   function validDraft(d) { return d && typeof d.body === 'string' && (typeof d.quote === 'string' || typeof d.thread === 'string'); }
-  // The entries `raw` (the text of the old list) holds. An id is made of the entry's own text (its time, which puts it in
-  // order, and a hash), not of its place in the list: the same id on every page that reads it, and still the same when
-  // an older tab writes the list again with the entries moved up. Two entries with the same text are one.
+  // The entries `raw` (the text of the old list) holds. An id is made of the entry's own text: its time, which puts it in
+  // order, the place among the entries of that same time (the list is in the order of writes, and entries written in one
+  // millisecond share their time), and a hash. So it is the same on every page that reads it, and still the same when
+  // an older tab writes the list again with the entries moved up, unless an entry of that very time went before it.
   function legacyEntries(raw) {
-    var v = JSON.parse(raw || '[]');
+    var v = JSON.parse(raw || '[]'), seen = {};
     return (Array.isArray(v) ? v : [v]).filter(validDraft).map(function (d) {
       var e = Object.assign({}, d), ms = Math.min(Math.max(Date.parse(d.at) || 0, 0), Math.pow(36, 9) - 1);
-      Object.defineProperty(e, '_k', { value: ENTRY_PREFIX + '0' + pad(ms, 9) + '-' + hashOf(JSON.stringify(d)) });
+      var rank = Math.min(seen[ms] = (seen[ms] === undefined ? 0 : seen[ms] + 1), 35);
+      Object.defineProperty(e, '_k', { value: ENTRY_PREFIX + '0' + pad(ms, 9) + '-' + rank.toString(36) + hashOf(JSON.stringify(d)) });
       return e;
     });
   }

@@ -14,7 +14,7 @@ import time
 import pytest
 
 from helpers import PLAN, comment
-from pagehelp import (DOC, P1, P2, T0, at, comment_on, draft_key, comment_draft_key, gone, mark, reload_on_clock,
+from pagehelp import (DOC, P1, P2, T0, at, comment_on, draft_key, gone, set_kept, mark, reload_on_clock,
                       reloaded, toast, toasted, type_at_end, until)
 from sheafmd import comments as rdc
 
@@ -893,9 +893,9 @@ def test_a_reply_that_only_the_drafts_store_holds_is_in_the_gone_notice_and_leav
     p.add_init_script(WATCH)
     tab.open()
     until(lambda: stream(p)["opens"] >= 1, what="the stream to open")
-    p.evaluate("(([k, v]) => localStorage.setItem(k, JSON.stringify(v)))", [comment_draft_key(site), [
+    set_kept(p, site, [
         {"thread": "1", "born": "2026-10-22T10:00:00Z", "about": "apples", "kind": "reply",
-         "body": "a reply only the store holds", "rid": "r1", "at": "2026-10-22T10:01:00Z"}]])
+         "body": "a reply only the store holds", "rid": "r1", "at": "2026-10-22T10:01:00Z"}])
     assert not beforeunload_asks(p)            # its own page draws it again: nothing is lost by leaving
     mark(p)
     assert site.hub.forget_root("work").name == "work"
@@ -906,8 +906,8 @@ def test_a_reply_that_only_the_drafts_store_holds_is_in_the_gone_notice_and_leav
 
 def test_what_is_typed_and_is_also_in_the_store_is_offered_once(replying, site):
     p = replying.page
-    p.evaluate("(([k, v]) => localStorage.setItem(k, JSON.stringify(v)))", [comment_draft_key(site), [
-        {"thread": "1", "born": "x", "about": "apples", "kind": "reply", "body": "my reply text", "at": "x"}]])
+    set_kept(p, site, [
+        {"thread": "1", "born": "x", "about": "apples", "kind": "reply", "body": "my reply text", "at": "x"}])
     assert site.hub.forget_root("work").name == "work"
     until(lambda: GONE in notice(p), what="the notice that the document is gone")
     assert p.input_value("#rd-notice textarea").count("my reply text") == 1

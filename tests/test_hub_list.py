@@ -1969,16 +1969,30 @@ def test_a_cr_among_the_indent_of_a_list_keeps_its_marks(src):
     assert ticked_html(block, 0) is not None
 
 
+def _page_with_box_flipped(block, k):
+    """The block as the page would send it after a click on its `k`th box: the render, that box flipped. Built
+    from the render alone, so it does not depend on `task_marks` or `ticked_html`."""
+    from bs4 import BeautifulSoup
+    from sheafmd import copyblock
+    from sheafmd.edit import _render_source
+    soup = BeautifulSoup(copyblock.mark(_render_source(block.content), page=True), "html.parser")
+    box = soup.select('input[type="checkbox"]')[k]
+    if box.has_attr("checked"):
+        del box["checked"]
+    else:
+        box["checked"] = ""
+    return str(soup)
+
+
 @pytest.mark.parametrize("src, k", [
     ('- x\n  ```\n  - [ ] A\n  ```\n- \r[ ] B\n', 0),
     ('- x\n  ```\n \r - [ ] A\n  ```\n- \r[ ] B\n', 0),
 ])
 def test_a_cr_never_makes_the_tick_land_on_a_mark_in_a_code_block(src, k):
     from sheafmd.blocks import split_md_blocks
-    from sheafmd.edit import _toggle_boxes, ticked_html
+    from sheafmd.edit import _toggle_boxes
     block = split_md_blocks(src)[0]
-    fragment = ticked_html(block, k)
-    out = _toggle_boxes(block, fragment) if fragment else None
+    out = _toggle_boxes(block, _page_with_box_flipped(block, k))
     assert out is None or out == src.replace("- \r[ ] B", "- \r[x] B")
 
 
@@ -1991,11 +2005,9 @@ def test_a_tick_never_lands_on_an_empty_task_item_standing_for_a_box_it_cannot_f
     # The marks and the boxes drawn were the same in number and state, but not the same items: the tick
     # of "x" was written on the empty item's line (measured on pandoc 3.9, no CR needed).
     from sheafmd.blocks import split_md_blocks
-    from sheafmd.edit import _toggle_boxes, ticked_html
+    from sheafmd.edit import _toggle_boxes
     block = split_md_blocks(src)[0]
-    fragment = ticked_html(block, 0)
-    out = _toggle_boxes(block, fragment) if fragment else None
-    assert out is None
+    assert _toggle_boxes(block, _page_with_box_flipped(block, 0)) is None
 
 
 @pytest.mark.parametrize("src, k", [
@@ -2005,17 +2017,66 @@ def test_a_tick_never_lands_on_an_empty_task_item_standing_for_a_box_it_cannot_f
 ])
 def test_an_empty_task_item_next_to_a_box_never_takes_its_tick(src, k):
     from sheafmd.blocks import split_md_blocks
-    from sheafmd.edit import _toggle_boxes, ticked_html
+    from sheafmd.edit import _toggle_boxes
     block = split_md_blocks(src)[0]
-    fragment = ticked_html(block, k)
-    out = _toggle_boxes(block, fragment) if fragment else None
-    assert out is None or out.splitlines()[0].replace("\r", "") == "- [ ]"
+    assert _toggle_boxes(block, _page_with_box_flipped(block, k)) is None
 
 
 def test_a_task_mark_read_through_crs_refuses_a_group_it_does_not_have():
     from sheafmd.edit import task_marks
     m = task_marks("\r- [ ] a\n")[0]
     assert (m.start(), m.start(2), m.end(2), m.group(2)) == (0, 4, 5, " ")
-    for call in (lambda: m.group(1), lambda: m.start(1), lambda: m.end(1), lambda: m.end(0)):
+    assert m.end() == m.end(0) == 6                  # as `re.Match.end()`: after the `]`, not after the state character
+    for call in (lambda: m.group(1), lambda: m.start(1), lambda: m.end(1)):
         with pytest.raises(IndexError):
             call()
+
+
+def test_a_task_mark_read_through_crs_ends_where_a_match_does():
+    from sheafmd.edit import task_marks
+    for crs in ("", "\r", "\r\r"):
+        plain = task_marks("- [ ] a\n")[0]
+        read = task_marks(f"{crs}- [ ] a\n")[0] if crs else plain
+        assert read.end() == len(crs) + plain.end()
+
+
+def test_a_tick_save_renders_the_source_once_and_the_result_once(monkeypatch):
+    # d3 of ticket 120: `_unchanged` and `_toggle_boxes` each rendered the same source, so a tick ran pandoc 3 times
+    # (1.28 s -> 2.86 s for 200 items). The source render is shared; the result's own render stays, it is the check.
+    from sheafmd import _pandoc
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _rendered, _toggle_boxes, _unchanged, ticked_html
+    block = split_md_blocks("".join(f"- [ ] item {i}\n" for i in range(5)))[0]
+    fragment = ticked_html(block, 2)
+    _rendered.cache_clear()
+    runs = []
+    real = _pandoc.run
+    monkeypatch.setattr(_pandoc, "run", lambda *a, **k: runs.append(1) or real(*a, **k))
+    assert not _unchanged(block, fragment)
+    assert _toggle_boxes(block, fragment) is not None
+    assert len(runs) == 2
+
+
+def test_a_render_that_failed_is_not_kept_for_the_next_tick(monkeypatch):
+    # Opus review of PR 353, b1: a timeout once (pandoc's 124) must not send every later tick of that block through
+    # the general path, which rewrites the whole list.
+    import subprocess
+    from sheafmd import _pandoc
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _rendered, _toggle_boxes, ticked_html
+    block = split_md_blocks("* [ ] one\n* [ ] two\n* [ ] three\n")[0]
+    fragment = _page_with_box_flipped(block, 1)
+    _rendered.cache_clear()
+    real = _pandoc.run
+    monkeypatch.setattr(_pandoc, "run", lambda args, text: subprocess.CompletedProcess(args, 124, "", "timeout"))
+    assert ticked_html(block, 1) is None and _toggle_boxes(block, fragment) is None
+    monkeypatch.setattr(_pandoc, "run", real)
+    assert _toggle_boxes(block, fragment) == "* [ ] one\n* [x] two\n* [ ] three\n"
+    assert ticked_html(block, 1) is not None
+
+
+def test_a_task_mark_with_a_cr_inside_its_brackets_ends_after_the_bracket():
+    from sheafmd.edit import task_marks
+    src = "- [ \r] a\n"
+    m = task_marks(src)[0]
+    assert src[m.start():m.end()] == "- [ \r]"

@@ -221,12 +221,14 @@ def open_form(page, form):
     page.wait_for_selector("#rd-popover textarea")
 
 
-def phone_with(tab, md, quote, text, author="Ada", when="2026-10-14T10:00"):
-    """The page of a phone tab, opened on `md` with one comment on `quote` already in the file. The comment is written before
-    the page opens: a page open when its file changes reloads itself, which a second `open()` then races (tickets 78, 98)."""
+def open_with_comment(tab, md, quote, text, author="Ada", when="2026-10-14T10:00"):
+    """The page of any tab (phone or laptop), opened on `md` with one comment on `quote` already in the file. The comment
+    is written before the page opens: a page open when its file changes reloads itself, which a second `open()` then races (tickets 78, 98).
+    `md=None` keeps the file the site fixture wrote."""
     from sheafmd import comments as rdc
     from sheafmd.source import update_file
-    tab.site.file.write_text(md, encoding="utf-8")
+    if md is not None:
+        tab.site.file.write_text(md, encoding="utf-8")
     update_file(tab.site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, quote), quote, text, author, when)[0])
     return tab.open().page
 

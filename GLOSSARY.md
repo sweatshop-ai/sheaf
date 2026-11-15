@@ -119,6 +119,10 @@ _Avoid_: home tiroir (a sheaf's home is a path)
 A page in no git repo: a session's scratchpad, a temporary folder, or anything a chat client such as Claude.ai or ChatGPT makes. Its original lives on the tiroir; a page in a git repo has git as its original. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 05; not built.)
 _Avoid_: scratch page, orphan page
 
+**Write log**:
+The hub's own record of the writes to its pages, one line per write whatever the path: who wrote, from which place (laptop, chat client, tiroir, page), and the agent session when it is known. It is where a Catalog row gets its last write and its last agent session. Not the Diagnostics log, which records what went wrong. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 09; not built.)
+_Avoid_: journal, history, audit log
+
 **Stop James**:
 The action any member ticks on a sheaf of the assistant James to end his work on its project (SPEC 9.11). It is the one place the core names a deployment's assistant: the hub writes a diagnostics row and, with `[list] stop_dir`, a file the deployment's supervisor reads; stopping is the deployment's, a Layer concern the core only signals.
 

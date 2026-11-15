@@ -778,9 +778,11 @@ def task_marks(content: str, pattern=TASK_MARK_RE) -> list:
 def _drawing_marks(content: str, marks: list) -> list:
     """The marks of `marks` that pandoc probably draws a box for, read from the text alone: those with something
     after them on their line, or with an indented line under them that goes on with the item. A mark with nothing
-    after it and no such line is an empty item, drawn as a bare `\u2610` or as the literal `[ ]`, never as a box. A
-    guess: a reading is only a candidate, and `_toggle_boxes` renders what it writes and refuses what draws other
-    boxes."""
+    after it and no such line is an empty item, drawn as a bare `\u2610` or as the literal `[ ]`, not as a box. A
+    guess, wrong for a few shapes (a NBSP after the mark, a quoted continuation, an empty parent over a sublist, a
+    heading, fence, indented code or lazy line under the mark, raw HTML after it): a reading is only a candidate,
+    and `_toggle_boxes` renders what it writes and refuses what draws other boxes, so a wrong guess falls back to
+    `_boxed_marks` and costs renders (log n), never a wrong write."""
     keep = []
     for m in marks:
         end = m.end()

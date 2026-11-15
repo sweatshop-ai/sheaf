@@ -2332,3 +2332,38 @@ def test_ticked_html_in_a_long_list_with_empty_items_and_a_continued_item_costs_
         assert html is not None and html.count("checked") == 1
         counts.append(len(runs))
     assert counts[0] == counts[1] <= 3
+
+
+# Ticket 145, c1 of the review of PR 374: shapes the reading of the marks from the text alone guesses wrong. Each is
+# (source, the lines whose mark pandoc draws a box for, in box order).
+_MISGUESSED_SHAPES = {
+    "nbsp after the mark": ("- [ ] \xa0\n- [ ] b\n- [ ] c\n", [0, 1, 2]),
+    "quoted continuation": ("> - [ ]\n>   more\n> - [ ] b\n> - [ ] c\n", [0, 2, 3]),
+    "empty parent with a sublist": ("- [ ]\n  - [ ] c\n- [ ] d\n", [1, 2]),
+    "heading under an empty mark": ("- [ ]\n  # h\n- [ ] b\n- [ ] c\n", [2, 3]),
+    "fence under an empty mark": ("- [ ]\n  ```\n  x\n  ```\n- [ ] b\n- [ ] c\n", [4, 5]),
+    "indented code under an empty mark": ("- [ ]\n      code\n\n- [ ] b\n- [ ] c\n", [3, 4]),
+    "html comment after the mark": ("- [ ] <!-- c -->\n- [ ] b\n- [ ] c\n", [1, 2]),
+    "lazy line of one space": ("- [ ]\n foo\n- [ ] b\n- [ ] c\n", [2, 3]),
+}
+
+
+@pytest.mark.parametrize("shape", _MISGUESSED_SHAPES)
+def test_a_tick_in_a_list_the_text_reading_guesses_wrong_still_lands_on_the_right_line(shape):
+    # The guess is only a candidate: `_toggle_boxes` renders what it writes and refuses a reading that draws other
+    # boxes, then `_boxed_marks` serves. So a wrong guess costs renders and never a wrong write: every box ticks
+    # its own mark and nothing else changes.
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _drawing_marks, _toggle_boxes, task_marks, ticked_html
+    src, real = _MISGUESSED_SHAPES[shape]
+    lines = src.split("\n")
+    marks = task_marks(src)
+    guess = [m.start() for m in _drawing_marks(src, marks)]
+    truth = [sum(len(x) + 1 for x in lines[:i]) for i in real]
+    assert guess != truth                        # the shape is one the guess misreads
+    block = split_md_blocks(src)[0]
+    for k, i in enumerate(real):
+        want = "\n".join(l.replace("[ ]", "[x]", 1) if j == i else l for j, l in enumerate(lines))
+        assert _toggle_boxes(block, _page_with_box_flipped(block, k)) == want, k
+        html = ticked_html(block, k)
+        assert html is not None and html.count("checked") == 1, k

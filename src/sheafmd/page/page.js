@@ -1582,34 +1582,48 @@ var create = function (ROOT, CFG, opts) {
   // pages that write at the same instant cannot overwrite each other's entry (one list under one key could). The id sorts
   // by write time, then by the page's own order, and no two writes share one. A store written by an earlier build holds
   // one list under COMMENT_DRAFT_KEY: reads see its entries, and the first write moves them into keys (migrateDrafts).
+  // A document's path may hold ':e:', so the key of `a.md:e:x.md` starts with the prefix of `a.md`: a key is an entry of
+  // this document only when what follows the prefix has the shape of an id (entryKey).
   var ENTRY_PREFIX = COMMENT_DRAFT_KEY + ':e:', writeN = 0;
+  var ENTRY_ID = /^(?:[0-9a-z]{9}-[0-9a-z]{3}-[0-9a-z]{4}|0[0-9a-z]{9}-[0-9a-z]{15}|0[0-9a-z]{4}-[0-9a-z]{1,7})$/;   // new | moved from the list | moved by the first build of this store
+  function entryKey(k) { return k.indexOf(ENTRY_PREFIX) === 0 && ENTRY_ID.test(k.slice(ENTRY_PREFIX.length)); }
   function pad(n, w) { var t = n.toString(36); while (t.length < w) t = '0' + t; return t; }
   function newEntryId() { return pad(Date.now(), 9) + '-' + pad(writeN++ % 46656, 3) + '-' + pad(Math.floor(Math.random() * 1679616), 4); }
-  function hashOf(t) { var h = 5381; for (var i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0; return h.toString(36); }
+  // 64 bits, 14 digits: two entries of one list that differ must not share an id, since the id is all that tells them apart.
+  function hashOf(t) {
+    var h = 5381, g = 52711;
+    for (var i = 0; i < t.length; i++) { var c = t.charCodeAt(i); h = ((h * 33) ^ c) >>> 0; g = (Math.imul(g, 131) + c) >>> 0; }
+    return pad(h, 7) + pad(g, 7);
+  }
   function validDraft(d) { return d && typeof d.body === 'string' && (typeof d.quote === 'string' || typeof d.thread === 'string'); }
-  // The entry that `raw` (the text of the old list) holds at `i`: the same id on every page that reads it.
+  // The entries `raw` (the text of the old list) holds. An id is made of the entry's own text: its time, which puts it in
+  // order, the place among the entries of that same time (the list is in the order of writes, and entries written in one
+  // millisecond share their time), and a hash. So it is the same on every page that reads it, and still the same when
+  // an older tab writes the list again with the entries moved up, unless it removed an entry of that very time before it.
   function legacyEntries(raw) {
-    var v = JSON.parse(raw || '[]');
-    return (Array.isArray(v) ? v : [v]).filter(validDraft).map(function (d, i) {
-      var e = Object.assign({}, d);
-      Object.defineProperty(e, '_k', { value: ENTRY_PREFIX + '0' + pad(i, 4) + '-' + hashOf(JSON.stringify(d)) });
+    var v = JSON.parse(raw || '[]'), seen = {};
+    return (Array.isArray(v) ? v : [v]).filter(validDraft).map(function (d) {
+      var e = Object.assign({}, d), ms = Math.min(Math.max(Date.parse(d.at) || 0, 0), Math.pow(36, 9) - 1);
+      var rank = Math.min(seen[ms] = (seen[ms] === undefined ? 0 : seen[ms] + 1), 35);
+      Object.defineProperty(e, '_k', { value: ENTRY_PREFIX + '0' + pad(ms, 9) + '-' + rank.toString(36) + hashOf(JSON.stringify(d)) });
       return e;
     });
   }
   // `strict`: a store that refuses the read throws, instead of passing for an empty one (the writers read so, commentDraftsHeld and taken).
-  // A value that is not JSON is set aside under `:unreadable` first, so the write that follows does not destroy it
-  // (a later one replaces an earlier one set aside: the store holds one at a time).
+  // A list that is not JSON is set aside under `:unreadable` first, so the write that follows does not destroy it
+  // (a later one replaces an earlier one set aside: the store holds one at a time). An entry key that is not JSON is
+  // not: it is skipped here and left in the store (SPEC 10.8).
   function commentDraftsRaw(strict) {
     var found = [], legacy = null;
     readWorked = false;
     try {
       for (var i = 0; i < localStorage.length; i++) {
         var k = localStorage.key(i);
-        if (k === null || k.indexOf(ENTRY_PREFIX) !== 0) continue;
+        if (k === null || !entryKey(k)) continue;
         try {
           var d = JSON.parse(localStorage.getItem(k));
           if (validDraft(d)) { Object.defineProperty(d, '_k', { value: k }); found.push(d); }
-        } catch (e) { /* an entry that is not JSON is left where it is */ }
+        } catch (e) { /* an entry that is not JSON is left where it is: not read, not removed, not set aside (SPEC 10.8) */ }
       }
       legacy = localStorage.getItem(COMMENT_DRAFT_KEY);
     } catch (e) { if (strict) throw e; return []; }
@@ -1911,7 +1925,7 @@ var create = function (ROOT, CFG, opts) {
   // kept comments' notice is left as it is: its text is being typed into, and it is drawn from the store again
   // after any close.
   listen(window, 'storage', function (e) {
-    if (e.key === null || e.key === COMMENT_DRAFT_KEY || e.key.indexOf(ENTRY_PREFIX) === 0) unsentLine();      // null: the whole store was cleared
+    if (e.key === null || e.key === COMMENT_DRAFT_KEY || entryKey(e.key)) unsentLine();      // null: the whole store was cleared
   });
   // The list the line opens: a popover above it, out of the text's way until asked for, that Escape, a click
   // outside or the line again close. Its forms are data-kept: their text is in the store, nothing to hold.
@@ -4186,6 +4200,9 @@ var create = function (ROOT, CFG, opts) {
   function endCheck() {
     checking = false;
     clearTimeout(checkTmr); checkTmr = null;
+    heardHeld();
+  }
+  function heardHeld() {
     var fs = afterCheck.splice(0);
     if (!docGone) fs.forEach(function (f) { f(); });
   }
@@ -4207,7 +4224,16 @@ var create = function (ROOT, CFG, opts) {
         if (otherRoot(j)) { meetDocGone(whyGone(j)); if (last()) endCheck(); return; }
         if (a.missing) { if (last()) { meetFileMissing(); endCheck(); } return; }       // an older answer is no news
         takeTarget(j);
-        if (j && j.hash && j.hash !== hash) reloadWhenFree(popId);
+        // The newest answer is the one that compares the hash: an older one leaves the held events and the reload
+        // to it. The events waiting are heard first, so the hash is compared with the page's own after them: the
+        // answer was read after a write whose `changed` came before it, and a reload for a write the page can take
+        // in place loses what the page said of it. An answer read before that write names the hash the page held
+        // before the event: that is no change either.
+        if (last()) {
+          var was = hash;
+          heardHeld();
+          if (j && j.hash && j.hash !== hash && j.hash !== was) reloadWhenFree(popId);
+        }
         meetTaken(j);
         takeJobs(j, jobs);
         if (last()) endCheck();

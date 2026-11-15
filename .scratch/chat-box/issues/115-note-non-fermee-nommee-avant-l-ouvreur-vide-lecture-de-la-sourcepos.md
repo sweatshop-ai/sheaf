@@ -16,6 +16,7 @@ Autres (c) : échec ou délai de pandoc dans la lecture de la sourcepos nomme la
 
 **Décision (Rhea, 2026-11-14) :** pas de troisième tentative ; fermer avec une limite dans la SPEC une fois ces PR fusionnées (seul le message du refus change, rien ne fuit).
 
-**Claimed by:**
 
-**Status:** ready-for-agent
+**Claimed by:** Karim 2026-11-15 13:08
+
+**Status:** in-progress

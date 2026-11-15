@@ -13,11 +13,23 @@
 
 (Chemins `pr-*-reviews/` sous `/home/tiroir/.claude/pm/chat-box-handoffs/`.)
 
-**Blocked by:** Codex usage limit until 2026-11-15 01:00
+**Blocked by:** Codex usage limit until 2026-11-20 14:10 (retried 2026-11-15: exit 7 on PRs 333, 297, 302; the 01:00 date was wrong)
 
-**Claimed by:** Yuki
+**Claimed by:** (libre)
 
-**Status:** in-progress
+**Status:** ready-for-agent
 
 - [ ] Cinq rapports Codex enregistrés
 - [ ] Chaque trouvaille classée a/b/c/d ; a et b corrigées avec un test rouge, c et d en tickets
+
+**Classification (Yuki, 2026-11-15, Thierry's review-by-risk rule of 2026-11-13: Codex only for gate, security, deploy or data PRs, once):**
+
+| PR | Codex? | Why |
+|---|---|---|
+| 333 | yes | Sanitizer (`sanitize.py`): security. |
+| 297 | yes | Hub `transcribe.py`: the audio relay and its auth. |
+| 302 | yes | Hub Tells: lock order between `waiting.py` and `live.py`, and the `tells.json` write path (data, deadlock risk). |
+| 305 | no | `page.js` dictation-off flag in sessionStorage: UI state. The 403 is enforced by the hub, so the page's memory of it is a convenience. |
+| 301 | no | `page.js` redraw of the unsent line moved to a `setTimeout`: display timing. Opus reviewed it twice, and 355 rewrites the store it touches. |
+
+Briefs and worktrees were ready (exec mode, brief asks for a final `VERDICT: GO` or `VERDICT: NO-GO` line). Nothing was saved: no report exists yet.

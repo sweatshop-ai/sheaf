@@ -2214,10 +2214,11 @@ def test_the_box_the_page_is_told_is_the_one_the_page_draws(body, k):
 def test_the_page_asks_a_boxs_number_once_per_text(monkeypatch):
     # Re-read of the fix of PR 360, b: box_place ran one pandoc render per button on every serve of the page.
     from sheafmd import _pandoc
-    from sheafmd.edit import box_number
+    from sheafmd.edit import _rendered, box_number
     src = "- [ ] zq-once-a\n- [ ] zq-once-b\n"
     at = src.index("[ ]") + 1
     box_number(src, at)
+    _rendered.cache_clear()             # the render's own cache of 8 would answer alone: the answer's is the test
     runs = []
     real = _pandoc.run
     monkeypatch.setattr(_pandoc, "run", lambda *a, **k: runs.append(1) or real(*a, **k))

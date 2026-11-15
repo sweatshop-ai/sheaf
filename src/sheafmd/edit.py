@@ -845,6 +845,7 @@ def _toggle_boxes(block, fragment: str, marks=None):
 
 
 _BOX_NUMBERS: dict = {}
+_MISS = object()
 _BOX_NUMBERS_MAX = 4096
 
 
@@ -857,8 +858,9 @@ def box_number(content: str, at: int) -> int | None:
     button on every serve and `_rendered` holds 8 renders; a render that failed is not kept."""
     if not 0 <= at < len(content) or content[at] not in " xX":
         return None
-    if (key := (content, at)) in _BOX_NUMBERS:
-        return _BOX_NUMBERS[key]
+    key = (content, at)
+    if (kept := _BOX_NUMBERS.get(key, _MISS)) is not _MISS:      # one read: another thread may clear between two
+        return kept
     flipped = content[:at] + (" " if content[at] != " " else "x") + content[at + 1:]
     try:
         was, now = (_ticks(copyblock.mark(h, page=True))[0] if (h := _render_source(c)) is not None else None

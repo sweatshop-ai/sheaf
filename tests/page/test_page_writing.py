@@ -4872,12 +4872,12 @@ def test_two_sends_that_fail_at_the_same_instant_on_two_pages_are_both_kept(thre
         if not (sa < eb and sb < ea):
             idle.append(i)
         kept = json.loads(comment_store(thread) or "[]")
-        texts = {d["body"]: d for d in kept}
-        mine = [texts.get(f"words from page {who} round {i}") for who in "AB"]
-        # An entry still marked out is one its page ended: it is left out of the not-sent list for 32 s.
-        if None in mine or any(isinstance(d.get("out"), (int, float)) for d in mine):
+        # One entry for each send, and none still marked out: an entry still marked out is one its page ended, and is
+        # left out of the not-sent list for 32 s; a second one is a copy that the Discard of one send takes with it.
+        mine = [[d for d in kept if d["body"] == f"words from page {who} round {i}"] for who in "AB"]
+        if any(len(es) != 1 or isinstance(es[0].get("out"), (int, float)) for es in mine):
             lost.append(i)
-    assert not lost, f"the store lost, or kept as still out, an entry of a failed send in rounds {lost}"
+    assert not lost, f"the store lost, doubled, or kept as still out, an entry of a failed send in rounds {lost}"
     assert len(idle) <= 8, f"rounds {idle} did not run the two sends at the same time: the test did not try the race"
 
 

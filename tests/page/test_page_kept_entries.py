@@ -1,0 +1,156 @@
+"""The store of the kept comments, one localStorage key per entry (SPEC 10.8): what its keys may be taken for, and what
+the move of an earlier build's list into keys does when pages and older tabs meet it (ticket 130, the c and d
+leftovers of the review of ticket 121)."""
+import json
+
+import pytest
+
+from pagehelp import P1, at, comment_draft_key, kept_entries, select, set_kept, until
+
+pytestmark = pytest.mark.page
+
+FIELD = "#rd-popover textarea"
+UNSENT = "#rd-unsent"
+LIST = "#rd-popover[data-unsent]"
+
+
+def message(body, born="2026-10-14T11:00:00.000Z"):
+    """A new message kept for later, as an earlier build wrote it."""
+    return {"quote": "apples", "body": body, "block": 0, "head": "x", "at": born}
+
+
+def loaded(page):
+    page.reload()
+    page.wait_for_selector("#rd-menu-btn", state="attached")
+
+
+def unsent(page):
+    """The text of the not-sent line, '' when there is none (a beat is given to a line still to be drawn)."""
+    page.wait_for_timeout(400)
+    return page.inner_text(UNSENT) if page.locator(UNSENT).count() else ""
+
+
+def put(page, key, value):
+    page.evaluate("([k, v]) => localStorage.setItem(k, v)", [key, value])
+
+
+def keep_a_new_message(page, text):
+    """A write of the store by the page: a message typed and put away."""
+    select(page, at(P1, "apples"), at(P1, "apples", None))
+    page.fill(FIELD, text)
+    page.keyboard.press("Escape")
+    until(lambda: text in page.evaluate("JSON.stringify(Object.values(localStorage))"), what="the typed message in the store")
+
+
+def discard(page, text):
+    """Open the not-sent list and press Discard on the entry holding `text`."""
+    page.click(UNSENT)
+    page.wait_for_selector(LIST, timeout=3000)
+    forms = page.locator(f"{LIST} .rd-form")
+    mine = [i for i in range(forms.count()) if forms.nth(i).locator("textarea").input_value() == text]
+    assert len(mine) == 1, f"{len(mine)} kept texts match {text!r}"
+    forms.nth(mine[0]).locator("button[data-f=no]").click()
+
+
+# c4: the key is `<doc>:e:<id>` and a document may be named `a.md:e:x.md`.
+def test_a_document_named_with_e_colon_does_not_lend_its_entries_to_the_document_before_it(tab, site):
+    tab.open()
+    p, key = tab.page, comment_draft_key(site)
+    put(p, key + ":e:0mwgzsy17-000-0000", json.dumps(message("mine")))
+    put(p, key + ":e:x.md:e:0mwgzsy17-000-0001", json.dumps(message("the words of another document")))
+    loaded(p)
+    assert unsent(p) == "1 message not sent · Show", "another document's entry is listed as this one's"
+    p.click(UNSENT)
+    p.wait_for_selector(LIST, timeout=3000)
+    assert [f.locator("textarea").input_value() for f in p.locator(f"{LIST} .rd-form").all()] == ["mine"]
+
+
+# c3, c6: the id an entry takes when the list moves into keys is the same wherever the entry stands in the list.
+def test_an_entry_the_page_moved_is_not_listed_twice_when_an_older_tab_writes_the_list_again(tab, site):
+    tab.open()
+    p = tab.page
+    first, second = message("first words"), message("second words", "2026-10-14T11:01:00.000Z")
+    set_kept(p, site, [first, second])
+    loaded(p)
+    assert unsent(p) == "2 messages not sent · Show"
+    discard(p, "first words")                      # a write: the list moves into keys, the first is removed
+    until(lambda: p.evaluate("localStorage.getItem(%s)" % json.dumps(comment_draft_key(site))) is None, what="the list to be moved")
+    # An older tab, which saw the first entry removed, writes the list with the second one at the place the first had.
+    put(p, comment_draft_key(site), json.dumps([second]))
+    loaded(p)
+    assert unsent(p) == "1 message not sent · Show", "the entry the page moved is listed again from the list"
+
+
+# d2: a list is not the only form an earlier build wrote: the one-slot form is an object under the key.
+def test_a_comment_kept_in_the_one_slot_of_an_older_store_is_listed_and_moved_by_the_next_write(tab, site):
+    tab.open()
+    p, key = tab.page, comment_draft_key(site)
+    put(p, key, json.dumps(message("from the one slot")))
+    loaded(p)
+    assert unsent(p) == "1 message not sent · Show"
+    keep_a_new_message(p, "typed after")
+    assert p.evaluate("localStorage.getItem(%s)" % json.dumps(key)) is None, "the one slot was left where it was"
+    assert sorted(d["body"] for d in kept_entries(p, site)) == ["from the one slot", "typed after"]
+
+
+# d3: the list and entry keys together (an older tab writes the list after a page moved it).
+def test_a_list_beside_entry_keys_that_hold_the_same_entries_lists_each_once(tab, site):
+    tab.open()
+    p = tab.page
+    both = [message("first words"), message("second words", "2026-10-14T11:01:00.000Z")]
+    set_kept(p, site, both)
+    loaded(p)
+    keep_a_new_message(p, "third words")
+    until(lambda: p.evaluate("localStorage.getItem(%s)" % json.dumps(comment_draft_key(site))) is None, what="the list to be moved")
+    put(p, comment_draft_key(site), json.dumps(both))
+    loaded(p)
+    assert unsent(p) == "3 messages not sent · Show"
+    keep_a_new_message(p, "fourth words")
+    assert sorted(d["body"] for d in kept_entries(p, site)) == ["first words", "fourth words", "second words", "third words"]
+
+
+# d3: two pages that write while the list is still in the store of both.
+def test_two_pages_that_move_the_same_list_leave_each_entry_once(tab, site, context):
+    tab.open()
+    a = tab.page
+    set_kept(a, site, [message("first words"), message("second words", "2026-10-14T11:01:00.000Z")])
+    loaded(a)
+    b = context.new_page()
+    b.goto(site.url)
+    b.wait_for_selector("#rd-menu-btn", state="attached")
+    keep_a_new_message(a, "from page a")
+    keep_a_new_message(b, "from page b")
+    until(lambda: len(kept_entries(a, site)) == 4, what="the four entries")
+    assert sorted(d["body"] for d in kept_entries(a, site)) == ["first words", "from page a", "from page b", "second words"]
+    assert a.evaluate("localStorage.getItem(%s)" % json.dumps(comment_draft_key(site))) is None
+
+
+# d3: a store that holds one entry only. The write that replaces an entry is refused at first and made once the entry it
+# replaces is gone (every other full-store test refuses every write).
+def test_a_store_with_room_for_one_entry_takes_the_entry_that_replaces_it(tab, site):
+    tab.open()
+    p = tab.page
+    p.evaluate("""(key) => { const set = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (k, v) {
+        if (String(k).startsWith(key + ':e:') && Object.keys(localStorage).filter(x => x.startsWith(key + ':e:')).length >= 1) throw new Error('quota');
+        return set.call(this, k, v); }; }""", comment_draft_key(site))
+    select(p, at(P1, "apples"), at(P1, "apples", None))
+    p.fill(FIELD, "first words")
+    p.evaluate("document.querySelector('#rd-popover .rd-form').stash()")
+    p.fill(FIELD, "first words, more")
+    p.evaluate("document.querySelector('#rd-popover .rd-form').stash()")
+    p.wait_for_timeout(400)
+    assert [d["body"] for d in kept_entries(p, site)] == ["first words, more"]
+    assert "could not be kept" not in p.inner_text("#rd-toast")
+
+
+# d4 (a limit written in SPEC 10.8): an entry key whose text is not JSON is left where it is.
+def test_an_entry_key_that_is_not_json_is_left_alone_and_does_not_stop_the_others(tab, site):
+    tab.open()
+    p, key = tab.page, comment_draft_key(site)
+    put(p, key + ":e:0mwgzsy17-000-0000", "{not json")
+    put(p, key + ":e:0mwgzsy17-000-0001", json.dumps(message("kept words")))
+    loaded(p)
+    assert unsent(p) == "1 message not sent · Show"
+    keep_a_new_message(p, "typed after")
+    assert p.evaluate("localStorage.getItem(%s)" % json.dumps(key + ":e:0mwgzsy17-000-0000")) == "{not json"

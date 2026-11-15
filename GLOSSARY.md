@@ -36,7 +36,7 @@ A quote whose first line is `[!COPY]`: the page shows it with a Copy button, the
 _Avoid_: callout, snippet
 
 **Share**:
-The action a sheaf's owner ticks to open it to every member whose roots hold it (SPEC 9.11). It renders nothing and makes no Share copy. Only the owner unticks it, which makes the sheaf their own alone again. In the list's root a Share moves the sheaf's file out of its owner's private folder, and unticking it moves the file back; the sheaf's name, its address, stays.
+The action a sheaf's owner ticks to open it to every member whose roots hold it (SPEC 9.11); for a loose page, to every member of the tiroir. Its named form, Share with <members>, opens it to those members only. It never reaches anyone outside the tiroir. It renders nothing and makes no Share copy. Only the owner unticks it, which makes the sheaf their own alone again. In the list's root a Share moves the sheaf's file out of its owner's private folder, and unticking it moves the file back; the sheaf's name, its address, stays.
 _Avoid_: publish, unlock
 
 **Home** (of a sheaf):

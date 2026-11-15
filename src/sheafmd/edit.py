@@ -18,6 +18,7 @@ import re
 from collections import Counter
 from functools import lru_cache
 from html import escape as html_escape, unescape as html_unescape
+from types import SimpleNamespace
 from typing import NamedTuple
 
 from . import _pandoc
@@ -676,15 +677,32 @@ def _norm_html(fragment: str) -> str:
     return re.sub(r"\s+", " ", str(soup)).strip()
 
 
+@lru_cache(maxsize=8)
+def _rendered(content: str) -> str:
+    r = _pandoc.run(["-f", "gfm", "-t", "html5", "--no-highlight"], copyblock.hide(content))
+    if r.returncode != 0:
+        raise _Unread                   # an exception is not cached: a timeout once must not refuse the next saves
+    return r.stdout
+
+
+def _render_source(content: str):
+    """Pandoc's HTML of a source, or None. A success is cached: a save asks it of the same block for `_unchanged`,
+    for `_toggle_boxes` and for `ticked_html`, and a render of a long list takes seconds."""
+    try:
+        return _rendered(content)
+    except _Unread:
+        return None
+
+
 def _comparable(block, fragment: str):
     """(page fragment, source render) reduced to the same terms, or None."""
-    r = _pandoc.run(["-f", "gfm", "-t", "html5", "--no-highlight"], copyblock.hide(block.content))
-    if r.returncode != 0:
+    html = _render_source(block.content)
+    if html is None:
         return None
     # The page shows each comment as an anchor span; the source render has the
     # comment itself. Reduce both to the same marker, or every commented block
     # would look edited and go through pandoc on every save.
-    src = COMMENT_HTML_RE.sub(lambda m: f"<!--RDA:{m.group(1)}-->", copyblock.mark(r.stdout, page=True))
+    src = COMMENT_HTML_RE.sub(lambda m: f"<!--RDA:{m.group(1)}-->", copyblock.mark(html, page=True))
     frag = ANCHOR_RE.sub(lambda m: f"<!--RDA:{m.group(1)}-->", fragment)
     try:
         return _sanitize(frag), src
@@ -721,12 +739,12 @@ TASK_MARK_RE = re.compile(
 
 class _Mark:
     """A task mark found by `task_marks`, answering the part of `re.Match` the callers use: `start()` is the offset of
-    the mark's line, `start(2)` and `end(2)` those of its state character, `group(2)` the character. Any other
-    group is an error, not a wrong offset."""
-    __slots__ = ("_line", "_box", "_state")
+    the mark's line and `end()` that of the end of the mark (after its `]`), as for a match; `start(2)` and `end(2)`
+    those of its state character, `group(2)` the character. Any other group is an error, not a wrong offset."""
+    __slots__ = ("_line", "_box", "_state", "_end")
 
-    def __init__(self, line: int, box: int, state: str):
-        self._line, self._box, self._state = line, box, state
+    def __init__(self, line: int, box: int, state: str, end: int):
+        self._line, self._box, self._state, self._end = line, box, state, end
 
     def group(self, n: int) -> str:
         if n != 2:
@@ -738,10 +756,10 @@ class _Mark:
             raise IndexError(f"a task mark has only group 2, not {group}")
         return self._line if group == 0 else self._box
 
-    def end(self, group: int = 2) -> int:
-        if group != 2:
+    def end(self, group: int = 0) -> int:
+        if group not in (0, 2):
             raise IndexError(f"a task mark has only group 2, not {group}")
-        return self._box + 1
+        return self._end if group == 0 else self._box + 1   # the match ends after the `]`, the state character before it
 
 
 def task_marks(content: str) -> list:
@@ -750,7 +768,7 @@ def task_marks(content: str) -> list:
     if "\r" not in content:
         return list(TASK_MARK_RE.finditer(content))
     keep = [i for i, ch in enumerate(content) if ch != "\r"]
-    return [_Mark(content.rfind("\n", 0, keep[m.start()]) + 1, keep[m.start(2)], m.group(2))
+    return [_Mark(content.rfind("\n", 0, keep[m.start()]) + 1, keep[m.start(2)], m.group(2), keep[m.end() - 1] + 1)
             for m in TASK_MARK_RE.finditer(content.replace("\r", ""))]
 
 
@@ -796,10 +814,7 @@ def _toggle_boxes(block, fragment: str):
     # Equal counts and states do not make the marks the boxes: pandoc draws no box for an empty item (`- [ ]`) and
     # does draw one the marks miss (`- - [ ] x`), so a tick could still land on the wrong line. The result is
     # therefore rendered, and must draw exactly the boxes the page sent, ticked as the page sent them.
-    class _Out:
-        content = out
-
-    again = _comparable(_Out, fragment)
+    again = _comparable(SimpleNamespace(content=out), fragment)
     if again is None:
         return None
     try:
@@ -821,12 +836,12 @@ def ticked_html(block, k: int, tick: bool = True):
 
     if not block.editable:
         return None
-    r = _pandoc.run(["-f", "gfm", "-t", "html5", "--no-highlight"], copyblock.hide(block.content))
-    if r.returncode != 0:
+    html = _render_source(block.content)
+    if html is None:
         return None
     # The page shows each comment as its anchor; the anchor is what keeps the comment through a save.
     soup = BeautifulSoup(COMMENT_HTML_RE.sub(
-        lambda m: f'<span class="rd-anchor" data-rd-id="{m.group(1)}"></span>', copyblock.mark(r.stdout, page=True)),
+        lambda m: f'<span class="rd-anchor" data-rd-id="{m.group(1)}"></span>', copyblock.mark(html, page=True)),
         "html.parser")
     found = soup.select('input[type="checkbox"]')
     marks = task_marks(block.content)

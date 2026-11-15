@@ -14,7 +14,7 @@
 
 **Claimed by:** Dries 2026-11-14 23:49
 
-**Status:** in-progress (done à la clôture après la fusion ; branche chat-box/126, 3c71397, trois revues Opus de rattrapage + une re-lecture, `pr-126-reviews/opus-1..4.md`)
+**Status:** done (PR 363 fusionnée, main 1b1d199 ; branche chat-box/126, tête de travail 3c71397, tête finale d74c7ce, trois revues Opus de rattrapage + une re-lecture, `pr-126-reviews/opus-1..4.md`)
 
 **Résultat, point par point :**
 1. **Limite du découpeur : corrigée.** Une ligne qui ouvre un item ou une citation n'est jamais l'en-tête d'un bloc `table` (`_looks_like_table`, regex CommonMark exacte) ; fuzzer : 12 faux sur 720 avant, 0 après.

@@ -8,8 +8,8 @@
 - (d) Une seconde fusion sur l'ancienne page après la poignée écrase le premier toast (`page.js` ~1211).
 - (d) Pas de test pour un boot d'un autre document après la poignée (le filtre du boot est du code existant).
 
-**Blocked by:** PR 129 fusionnée
+**Blocked by:** none (PR 368 merged, 95d46ea)
 
 **Claimed by:** Freya 2026-11-15 13:29
 
-**Status:** in-progress
+**Status:** done (PR 372 merged as 4fff6ce)

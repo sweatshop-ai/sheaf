@@ -14,7 +14,7 @@ import time
 import pytest
 
 from helpers import PLAN, comment
-from pagehelp import (DOC, P1, P2, T0, at, comment_on, draft_key, comment_draft_key, gone, mark, reload_on_clock,
+from pagehelp import (DOC, P1, P2, T0, at, comment_on, draft_key, gone, set_kept, mark, reload_on_clock,
                       reloaded, toast, toasted, type_at_end, until)
 from sheafmd import comments as rdc
 
@@ -470,6 +470,34 @@ def does_not_reload_or_reconnect(tab, streams):
     assert len(tab.streams) == streams, "the page opened its stream again"
 
 
+def test_a_page_whose_root_is_forgotten_leaves_no_toast_for_the_next_page_of_the_tab(replying, site):
+    # Ticket 125 (c3 of #118): a save that merged wrote `rd-toast` before its reload, and the reload never came. With no
+    # keep to name the document, the next mount in this tab (or in its copy) would say that text.
+    p = replying.page
+    p.evaluate("sessionStorage.setItem('rd-toast', '1 block \u2192 plan.md')")
+    assert site.hub.forget_root("work").name == "work"
+    until(lambda: GONE in notice(p), what="the notice that the document is gone")
+    assert p.evaluate("sessionStorage.getItem('rd-toast')") is None
+
+
+def test_a_merged_save_that_answers_after_the_root_was_forgotten_leaves_no_toast(tab, site):
+    # Ticket 125, review b2: a save out when the document went answers `merged`; its toast was written after the page had
+    # removed it, and the reload it was written for never comes (reloadWhenFree returns on docGone).
+    p = tab.page
+    tab.open()
+    held = []
+    p.route("**/_/save", lambda route: held.append(route))
+    type_at_end(p, P2, " typed")
+    p.keyboard.press("Control+s")
+    until(lambda: held or p.wait_for_timeout(20), what="the save to go out")
+    assert site.hub.forget_root("work").name == "work"
+    until(lambda: GONE in notice(p), what="the notice that the document is gone")
+    held[0].fulfill(status=200, content_type="application/json",
+                    body=json.dumps({"ok": True, "hash": "x", "changed": [1], "merged": True, "conflicts": []}))
+    p.wait_for_timeout(500)
+    assert p.evaluate("sessionStorage.getItem('rd-toast')") is None
+
+
 def test_a_page_whose_root_is_forgotten_says_so_keeps_what_was_typed_and_saves_nothing(replying, site):
     p = replying.page
     mark(p)
@@ -865,9 +893,9 @@ def test_a_reply_that_only_the_drafts_store_holds_is_in_the_gone_notice_and_leav
     p.add_init_script(WATCH)
     tab.open()
     until(lambda: stream(p)["opens"] >= 1, what="the stream to open")
-    p.evaluate("(([k, v]) => localStorage.setItem(k, JSON.stringify(v)))", [comment_draft_key(site), [
+    set_kept(p, site, [
         {"thread": "1", "born": "2026-10-22T10:00:00Z", "about": "apples", "kind": "reply",
-         "body": "a reply only the store holds", "rid": "r1", "at": "2026-10-22T10:01:00Z"}]])
+         "body": "a reply only the store holds", "rid": "r1", "at": "2026-10-22T10:01:00Z"}])
     assert not beforeunload_asks(p)            # its own page draws it again: nothing is lost by leaving
     mark(p)
     assert site.hub.forget_root("work").name == "work"
@@ -878,8 +906,8 @@ def test_a_reply_that_only_the_drafts_store_holds_is_in_the_gone_notice_and_leav
 
 def test_what_is_typed_and_is_also_in_the_store_is_offered_once(replying, site):
     p = replying.page
-    p.evaluate("(([k, v]) => localStorage.setItem(k, JSON.stringify(v)))", [comment_draft_key(site), [
-        {"thread": "1", "born": "x", "about": "apples", "kind": "reply", "body": "my reply text", "at": "x"}]])
+    set_kept(p, site, [
+        {"thread": "1", "born": "x", "about": "apples", "kind": "reply", "body": "my reply text", "at": "x"}])
     assert site.hub.forget_root("work").name == "work"
     until(lambda: GONE in notice(p), what="the notice that the document is gone")
     assert p.input_value("#rd-notice textarea").count("my reply text") == 1

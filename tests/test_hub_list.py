@@ -2335,7 +2335,9 @@ def test_ticked_html_in_a_long_list_with_empty_items_and_a_continued_item_costs_
 
 
 # Ticket 145, c1 of the review of PR 374: shapes the reading of the marks from the text alone guesses wrong. Each is
-# (source, the lines whose mark pandoc draws a box for, in box order).
+# (source, the lines whose mark pandoc draws a box for, in box order). The first two guess wrong but harmlessly: the
+# reading of every mark already matches the boxes there, so it serves and `_boxed_marks` is not reached (review of
+# PR 378). The other six send the tick to `_boxed_marks`.
 _MISGUESSED_SHAPES = {
     "nbsp after the mark": ("- [ ] \xa0\n- [ ] b\n- [ ] c\n", [0, 1, 2]),
     "quoted continuation": ("> - [ ]\n>   more\n> - [ ] b\n> - [ ] c\n", [0, 2, 3]),
@@ -2349,11 +2351,12 @@ _MISGUESSED_SHAPES = {
 
 
 @pytest.mark.parametrize("shape", _MISGUESSED_SHAPES)
-def test_a_tick_in_a_list_the_text_reading_guesses_wrong_still_lands_on_the_right_line(shape):
+def test_a_tick_in_a_list_the_text_reading_guesses_wrong_still_lands_on_the_right_line(shape, monkeypatch):
     # The guess is only a candidate: `_toggle_boxes` renders what it writes and refuses a reading that draws other
     # boxes, then `_boxed_marks` serves. So a wrong guess costs renders and never a wrong write: every box ticks
     # its own mark and nothing else changes.
     from sheafmd.blocks import split_md_blocks
+    from sheafmd import edit
     from sheafmd.edit import _drawing_marks, _toggle_boxes, task_marks, ticked_html
     src, real = _MISGUESSED_SHAPES[shape]
     lines = src.split("\n")
@@ -2362,8 +2365,16 @@ def test_a_tick_in_a_list_the_text_reading_guesses_wrong_still_lands_on_the_righ
     truth = [sum(len(x) + 1 for x in lines[:i]) for i in real]
     assert guess != truth                        # the shape is one the guess misreads
     block = split_md_blocks(src)[0]
+    reached = []
+    real_boxed = edit._boxed_marks
+    monkeypatch.setattr(edit, "_boxed_marks", lambda c: reached.append(1) or real_boxed(c))
     for k, i in enumerate(real):
         want = "\n".join(l.replace("[ ]", "[x]", 1) if j == i else l for j, l in enumerate(lines))
         assert _toggle_boxes(block, _page_with_box_flipped(block, k)) == want, k
         html = ticked_html(block, k)
-        assert html is not None and html.count("checked") == 1, k
+        assert html is not None
+        from bs4 import BeautifulSoup
+        boxes = BeautifulSoup(html, "html.parser").select('input[type="checkbox"]')
+        assert [b.has_attr("checked") for b in boxes] == [j == k for j in range(len(real))], k
+    if shape not in ("nbsp after the mark", "quoted continuation"):
+        assert reached                               # the slow fallback served, not a lucky first reading

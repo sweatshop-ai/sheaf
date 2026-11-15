@@ -781,8 +781,9 @@ def _drawing_marks(content: str, marks: list) -> list:
     after it and no such line is an empty item, drawn as a bare `\u2610` or as the literal `[ ]`, not as a box. A
     guess, wrong for a few shapes (a NBSP after the mark, a quoted continuation, an empty parent over a sublist, a
     heading, fence, indented code or lazy line under the mark, raw HTML after it): a reading is only a candidate,
-    and `_toggle_boxes` renders what it writes and refuses what draws other boxes, so a wrong guess falls back to
-    `_boxed_marks` and costs renders (log n), never a wrong write."""
+    and `_toggle_boxes` renders what it writes and refuses what draws other boxes, so when the readings before it
+    fail, `_boxed_marks` serves at the cost of about log n renders (17 s at 4,100 items, ticket 140), never a wrong
+    write."""
     keep = []
     for m in marks:
         end = m.end()

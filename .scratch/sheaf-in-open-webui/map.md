@@ -42,11 +42,7 @@ A spec, ready to hand to whoever builds it, of sheaf as a standard module of eve
 
 ## Not yet specified
 
-- Other members (Sven, Hans on tiroir-tt) and sharing a page between users: SPEC 9.11 visibility exists, its place in the Catalog does not.
-- How a Tell from a page on the tiroir reaches the laptop session that rendered it: the laptop hub delivers it locally today, ticket 10 dropped a laptop-wide relay, and SPEC 9.14's relay serves forks only.
-- Installing the module on a new tiroir: what the tiroir product ships by default, including the tiroir's own GitHub App (ticket 14).
-- Making folders and moving pages from the Catalog (ruled out of v1 by ticket 06): for loose pages only, or also a rename commit in a repo, and what happens to links and to the paths agents know.
-- Moving pages between tiroirs: a single page moved against its root's tiroir, and how an old address forwards to another tiroir (ticket 04 decided the Drive logic, not the mechanics).
+Nothing: the last fog became the tickets on sharing, the Tell to a laptop session (research, then grilling), installing on a new tiroir, folders and moves, and moving a page to another tiroir.
 
 ## Out of scope
 

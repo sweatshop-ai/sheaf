@@ -4,6 +4,8 @@
 
 **Blocked by:** none
 
+**Claimed by:** Joaquin 2026-11-15
+
 **Status:** open
 
 **Par où commencer :** décider : le rejeu ne poste pas d'incident (un paramètre de `say`, ou un rejeu sans `err` pour le journal), ou la limite est écrite dans le SPEC 10.11 (« chaque rejeu est un incident »). Test rouge d'abord, sur t-compute, jamais sur le portable : un refus dit, un rechargement dans les 7 s, une seule ligne `toast` dans `/_/diag`.

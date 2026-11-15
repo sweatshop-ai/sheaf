@@ -4,9 +4,9 @@
 
 **Blocked by:** none
 
-**Claimed by:** (libre)
+**Claimed by:** Yara 2026-11-15
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 **Établi (preuves) :** vu une fois, PR 315 (ticket 74, ne touche que `copyblock.py` et ses tests), sur 8c1b152, tranche 3/3, tentative 1, 2026-11-14 16:41 UTC. Run 43616032386 : https://github.com/sweatshop-ai/sheaf/actions/runs/43616032386, job 132511239379 : https://github.com/sweatshop-ai/sheaf/actions/runs/43616032386/job/132511239379. Le job a échoué avec 1 échec, 353 passés (test de page, Chromium/Firefox/WebKit) ; le test a échoué deux fois dans la même exécution (rejeu interne du test, deux traces dans le log). Vert au rejeu du job (tentative 2, job 132514856389). Les tests unitaires du même job : 2844 passés.
 

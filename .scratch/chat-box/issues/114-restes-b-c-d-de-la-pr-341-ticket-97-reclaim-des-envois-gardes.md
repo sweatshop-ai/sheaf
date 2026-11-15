@@ -19,7 +19,6 @@ Classe c (défauts plus petits, avec contournement) :
 
 **Blocked by:** none (121 took another design; see the table)
 
-**Claimed by:** Isolde 2026-11-15 13:28
 
 ## Check against origin/main 3bdeaf6 (Isolde, 2026-11-15)
 
@@ -41,4 +40,4 @@ Classe c (défauts plus petits, avec contournement) :
 | d1 send taken by the hub | covered | test_page_chat_box.py `test_a_reply_the_hub_took_while_the_store_refused_reads_...` (two tests) and the d4 test above |
 | d1 Discard of a minimized message | **open, one test**: page.js:1939 (`d.min` branch of `keptSendButtons`) had no test | PR 370 adds it (no code change) |
 
-**Status:** in-progress, waits on PR 370 (CI) and its merge; then done.
+**Status:** done. The one open item (d1, Discard of a minimized message) was tested in PR 370, merged as 78c0a66; the other items are struck or covered, see the table.

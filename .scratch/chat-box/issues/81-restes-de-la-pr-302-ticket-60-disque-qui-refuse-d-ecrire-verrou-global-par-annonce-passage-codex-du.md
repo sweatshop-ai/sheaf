@@ -17,7 +17,7 @@
 **Status:** done (la PR 308 est fusionnée 7c69ad8 ; le passage Codex sur la PR 302 continue dans le ticket 82, point 8)
 
 - [x] Chaque point est soit corrigé avec un test rouge, soit écarté avec la raison (PR 308, fusionnée 7c69ad8 ; preuves ci-dessous ; restes c/d : ticket 88)
-- [ ] Le passage Codex sur le diff de la PR 302 est fait, ses trouvailles classées (déplacé au point 8 du ticket 82, après 20 h)
+- [x] ~~Le passage Codex sur le diff de la PR 302 est fait, ses trouvailles classées~~ (moved to ticket 107 : la PR 302 y est une ligne du tableau, classée « Codex : oui » ; Codex sans jetons jusqu'au 2026-11-20)
 
 ## Gudrun, 2026-11-14 (PR 308, branch chat-box/81)
 

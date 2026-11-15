@@ -21,4 +21,4 @@
 **Status:** done (PR 336, merge 02acc04)
 
 - [x] Points 2 à 6 : 2 écarté (le chemin existe, la reconstruction a lieu dans le tick d'ouverture, rien à perdre ; aucun test rouge atteignable par la page), 3, 4 et 6 dans la PR 336, 5 déjà fait sur main (ticket 86). Points 1, 7, 8, 9 : ticket 107
-- [ ] Le passage Codex sur le diff de la PR 301 est fait, ses trouvailles classées
+- [x] ~~Le passage Codex sur le diff de la PR 301 est fait, ses trouvailles classées~~ (struck: pas de Codex pour la PR 301, `page.js` : minuterie d'affichage ; décision par risque dans la classification du ticket 107, Yuki 2026-11-15 ; deux revues Opus, `pr-59-reviews/round-1.md` et `round-2.md`)

@@ -1208,7 +1208,13 @@ var create = function (ROOT, CFG, opts) {
       }
       if (conflicts.length) note = conflictNote(conflicts);
       if (reload) {
-        if (!docGone) { try { sessionStorage.setItem(KEYS + 'rd-toast', quiet && !conflicts.length ? '' : note); } catch (e) {} }     // a save out when the document went: no reload will say it (#125)
+        if (!docGone) {     // a save out when the document went: no reload will say it (#125)
+          try {
+            var said = sessionStorage.getItem(KEYS + 'rd-toast') || '';     // one no boot has said yet (a held reload, a handover) is added to, not lost (#139)
+            var now = quiet && !conflicts.length ? '' : note;
+            sessionStorage.setItem(KEYS + 'rd-toast', said && now && said !== now ? said + ' · ' + now : now || said);
+          } catch (e) {}
+        }
         done(); saving = null;
         reloadWhenFree(popId);
         refresh();
@@ -1261,6 +1267,7 @@ var create = function (ROOT, CFG, opts) {
         settling = false;
         heldReload = false;             // nothing reloads; a later reload is not the held one
         stale = true; refresh();
+        keepNaming();       // the toast of an earlier merge stays for the next boot, which only this document says (#139)
         say('The file changed on disk and this edit could not be merged. Copy it, then reload the page.', true);
         return;
       }
@@ -4579,6 +4586,17 @@ var create = function (ROOT, CFG, opts) {
     if (live) live.close();
     if (HL) ['rd-open', 'rd-resolved', 'rd-active', 'rd-widened'].forEach(function (k) { CSS.highlights.delete(k); });
   }
+  // A toast left for the next boot needs a keep that names this document, or a boot of another document in the tab says it
+  // (one hub, one origin). The keep a reload wrote for this document stays as it is: it holds what the boot restores.
+  function keepNaming() {
+    try {
+      var left = sessionStorage.getItem(KEYS + 'rd-toast');
+      if (!left) return;
+      var kept = null;
+      try { kept = JSON.parse(sessionStorage.getItem(KEYS + 'rd-keep') || 'null'); } catch (e) {}
+      if (!kept || kept.doc !== CFG.doc) sessionStorage.setItem(KEYS + 'rd-keep', JSON.stringify({ doc: CFG.doc }));
+    } catch (e) {}
+  }
   // failed(): mount.js could not fetch the page again for a remount (or the hub was upgraded and the loader takes over).
   // The page stays as it was and says so, and the next change settles again: `settling` was left set by a reload that,
   // on a page of its own, never comes back. `handover` is the upgrade: the loader's new script mounts into this pane and
@@ -4589,8 +4607,7 @@ var create = function (ROOT, CFG, opts) {
     var left = '';
     try { left = sessionStorage.getItem(KEYS + 'rd-toast') || ''; } catch (e) {}
     if (handover && left) {
-      // A keep that names this document only, so a boot of another document in the tab drops the toast (one hub, one origin).
-      try { sessionStorage.setItem(KEYS + 'rd-keep', JSON.stringify({ doc: CFG.doc })); } catch (e) {}
+      keepNaming();
     } else {
       try { sessionStorage.removeItem(KEYS + 'rd-keep'); } catch (e) {}     // the keep of a reload that did not happen
       try { sessionStorage.removeItem(KEYS + 'rd-toast'); } catch (e) {}

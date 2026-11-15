@@ -15,8 +15,10 @@
 
 **Claimed by:** Isolde 2026-11-14 23:49
 
-**Status:** in-progress
+**Status:** done: merged as 8654d8c (PR 362)
 
 **Par où commencer :** le point 5 si un échec revient sur la CI avec le journal ; sinon le point 1.
 
-- [ ] Chaque point : corrigé (test rouge d'abord quand c'est du code) ou la limite écrite dans le commentaire de `until_live`
+- [x] Chaque point : corrigé (test rouge d'abord quand c'est du code) ou la limite écrite dans le commentaire de `until_live`
+
+**Résultat (PR 362, 8654d8c) :** points 1, 2, 3, 4 et 7 faits (route à regex sondée, limites dans la docstring de `until_live`, ordre horloge/journal vérifié dans Chromium, tests de la sonde sur une page de remplacement, `unroute` de toutes les inscriptions et handler non hachable). Point 5 (les deux échecs sans cause) → ticket 137. Point 6 était déjà fait dans la PR 346. Restes : ticket 134 (fait aussi).

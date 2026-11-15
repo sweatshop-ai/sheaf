@@ -1975,6 +1975,7 @@ def _page_with_box_flipped(block, k):
     from bs4 import BeautifulSoup
     from sheafmd import copyblock
     from sheafmd.edit import _render_source
+    # The render is the cached one, as in production: it is the same text, and a cache hit changes nothing here.
     soup = BeautifulSoup(copyblock.mark(_render_source(block.content), page=True), "html.parser")
     box = soup.select('input[type="checkbox"]')[k]
     if box.has_attr("checked"):
@@ -2016,6 +2017,8 @@ def test_a_tick_never_lands_on_an_empty_task_item_standing_for_a_box_it_cannot_f
     ('- [ ]\n- [ ] b\n', 0),
 ])
 def test_an_empty_task_item_next_to_a_box_never_takes_its_tick(src, k):
+    # One box over two marks: the count check refuses these, the re-render check is not reached (as before PR 347).
+    # The cases that only the re-render check refuses are the `- - [ ] x` ones above.
     from sheafmd.blocks import split_md_blocks
     from sheafmd.edit import _toggle_boxes
     block = split_md_blocks(src)[0]
@@ -2080,3 +2083,143 @@ def test_a_task_mark_with_a_cr_inside_its_brackets_ends_after_the_bracket():
     src = "- [ \r] a\n"
     m = task_marks(src)[0]
     assert src[m.start():m.end()] == "- [ \r]"
+
+
+@pytest.mark.parametrize("src", ["1. [ ] a\n", "1) [x] a\n", "1. [ \r] a\n", "7.\r [ ] a\n"])
+def test_an_ordered_item_is_no_task_mark_because_pandoc_draws_it_no_box(src):
+    # c1 of ticket 128, measured on pandoc 3.9: `1. [ ] a` has no box, with a CR or without. The review put it on the
+    # CR in `1. [ \r] d`; the CR changes nothing, the marks only have to be the ones pandoc draws a box for.
+    from sheafmd import _pandoc
+    from sheafmd.edit import task_marks
+    assert "checkbox" not in _pandoc.run(["-f", "gfm", "-t", "html5"], src).stdout
+    assert task_marks(src) == []
+
+
+@pytest.mark.parametrize("src, k, want", [
+    ("- x\n  1. [ ] b\n- [ ] c\n", 0, "- x\n  1. [ ] b\n- [x] c\n"),
+    ("- x\r\n  1. [ ] b\r\n- [ ] c\r\n", 0, "- x\r\n  1. [ ] b\r\n- [x] c\r\n"),
+])
+def test_a_tick_beside_an_ordered_item_flips_its_line_and_leaves_the_rest(src, k, want):
+    # The ordered item drew no box, so the marks and the boxes had different counts and the tick went through pandoc,
+    # which rewrites the whole list.
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes
+    block = split_md_blocks(src)[0]
+    assert _toggle_boxes(block, _page_with_box_flipped(block, k)) == want
+
+
+@pytest.mark.parametrize("src", ["- - [ ] o\n", "1. - [ ] g\n", "1. > - [ ] x\n", "- > - [x] x\n"])
+def test_a_bullet_task_behind_another_marker_has_its_mark(src):
+    # Ticket 128, b1 of its review: pandoc draws a box for the bullet behind another marker, and the mark must be
+    # there or the block's counts of marks and boxes differ and every tick of it rewrites the list.
+    from sheafmd import _pandoc
+    from sheafmd.edit import task_marks
+    assert _pandoc.run(["-f", "gfm", "-t", "html5"], src).stdout.count("checkbox") == 1
+    assert len(task_marks(src)) == 1 and src[task_marks(src)[0].start(2)] in " x"
+
+
+@pytest.mark.parametrize("src, k, want", [
+    ("- [ ]\n  text\n1. [ ]\n- - [ ] o\n", 0, "- [x]\n  text\n1. [ ]\n- - [ ] o\n"),
+    ("- [ ] a\n1. - [ ] g\n", 1, "- [ ] a\n1. - [x] g\n"),
+])
+def test_a_tick_in_a_block_with_a_box_behind_another_marker_is_written_in_place(src, k, want):
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes
+    block = split_md_blocks(src)[0]
+    assert _toggle_boxes(block, _page_with_box_flipped(block, k)) == want
+
+
+@pytest.mark.parametrize("src, k, want", [
+    # An empty item has a mark and no box, and a box behind another marker has a box and (since ticket 128) a mark:
+    # the first reading has three marks for two boxes. The legacy reading has two and the render of the result
+    # confirms it, as it did before ticket 128.
+    ("* [X] c\n- [ ]\n1. - [ ] g\n", 0, "* [ ] c\n- [ ]\n1. - [ ] g\n"),
+    ("- [ ]\n- - [ ] o\n  - [ ] i\n", 1, "- [ ]\n- - [ ] o\n  - [x] i\n"),
+    ("+ [ ] d\n- [ ]\n- - [ ] o\n", 0, "+ [x] d\n- [ ]\n- - [ ] o\n"),
+])
+def test_a_tick_that_the_legacy_marks_made_in_place_is_still_made_in_place(src, k, want):
+    # Ticket 128, b1 again (Rhea): a PR never makes a case worse than b90b6a0.
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes
+    block = split_md_blocks(src)[0]
+    out = _toggle_boxes(block, _page_with_box_flipped(block, k))
+    assert (out is not None) == (want is not None)
+    assert want is None or out == want
+
+
+def test_a_long_run_of_quote_marks_is_read_in_linear_time():
+    # Re-read of the b1 fix, b2: the chain accepted `>` twice over (the leading quotes and the chain), so a line of
+    # n `>` cost n squared: 14.6 s at 5000 against 3 ms before ticket 128.
+    import time
+    from sheafmd.edit import task_marks
+    t = time.perf_counter()
+    assert task_marks("> " * 5000 + "x\n") == [] and task_marks("> " * 5000 + "- [ ] x\n") != []
+    assert time.perf_counter() - t < 1
+
+
+def test_a_list_tick_made_through_the_legacy_marks_is_offered_and_written():
+    # d3 of the re-read: ticked_html goes through the second reading too (an empty item beside a box behind a marker).
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes, ticked_html
+    block = split_md_blocks("* [X] c\n- [ ]\n1. - [ ] g\n")[0]
+    fragment = ticked_html(block, 0, tick=False)
+    assert fragment is not None and _toggle_boxes(block, fragment) == "* [ ] c\n- [ ]\n1. - [ ] g\n"
+
+
+def _list_tick(body: str, word: str = "Approve"):
+    """What the list's button does with the first `word` box of a sheaf: (the block's text after the tick as the save
+    writes it or None when the save would go through pandoc, the box the page is told, the edit or None)."""
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes
+    text = "# A sheaf\n\n" + body
+    sheaf = the_list.read_sheaf("x.md", text)
+    n = [a[0] for a in sheaf.actions].index(word)
+    at = the_list.box_place(text, sheaf.actions[n][2])
+    edit = the_list.tick_edit(text, n, word)
+    block = split_md_blocks(text)[edit["i"]] if edit else None
+    return (None if edit is None else _toggle_boxes(block, edit["html"])), at, edit
+
+
+@pytest.mark.parametrize("body, ticked", [
+    # F2 of the gate review of PR 360: Approve is the 2nd box drawn but the 3rd mark of the first reading
+    # (the empty `- [ ]` has a mark and no box); it was refused, and written in place before ticket 128.
+    ("- [ ]\n- - [ ] o\n- [ ] Approve\n", "- [ ]\n- - [ ] o\n- [x] Approve\n"),
+    ("- - [ ]\n- [ ] Approve\n", "- - [ ]\n- [x] Approve\n"),
+])
+def test_the_lists_button_ticks_in_place_where_an_empty_item_stands_before_it(body, ticked):
+    out, at, edit = _list_tick(body)
+    assert out == ticked
+
+
+def test_the_lists_button_never_ticks_another_box_than_its_own():
+    # F1 of the gate review of PR 360: the box number was the mark's, and a mark and a box are not the same count
+    # (an empty item draws no box). Approve was number 4 and the 5th box of the block was `+ [ ] d`.
+    body = "> 1. > - [ ] x\n- - [ ]\n  - [ ] Approve\n+ [ ] d\n"
+    out, at, edit = _list_tick(body)
+    assert out == "- - [ ]\n  - [x] Approve\n+ [ ] d\n"      # the quote is a block of its own
+
+
+@pytest.mark.parametrize("body, k", [
+    ("- [ ]\n- - [ ] o\n- [ ] Approve\n", 1),        # the box the page draws second
+    ("1. [ ] e\n- [ ] Approve\n", 0),                 # an ordered item draws no box
+    ("- - [ ]\n  - [ ] Approve\n", 0),                # an empty item draws none
+    ("- [ ] a\n- [ ] Approve\n", 1),
+])
+def test_the_box_the_page_is_told_is_the_one_the_page_draws(body, k):
+    # The page ticks `boxesOf(block)[k]` (page.js): `k` counts the boxes drawn, not the marks of the source.
+    out, at, edit = _list_tick(body)
+    assert at is not None and at[1] == k
+
+
+def test_the_page_asks_a_boxs_number_once_per_text(monkeypatch):
+    # Re-read of the fix of PR 360, b: box_place ran one pandoc render per button on every serve of the page.
+    from sheafmd import _pandoc
+    from sheafmd.edit import _rendered, box_number
+    src = "- [ ] zq-once-a\n- [ ] zq-once-b\n"
+    at = src.index("[ ]") + 1
+    box_number(src, at)
+    _rendered.cache_clear()             # the render's own cache of 8 would answer alone: the answer's is the test
+    runs = []
+    real = _pandoc.run
+    monkeypatch.setattr(_pandoc, "run", lambda *a, **k: runs.append(1) or real(*a, **k))
+    assert box_number(src, at) == 0 and runs == []

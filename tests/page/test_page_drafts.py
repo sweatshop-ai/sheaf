@@ -5,7 +5,7 @@ import re
 import pytest
 
 from helpers import comment
-from pagehelp import open_box, P1, P2, T0, at, comment_draft_key, draft_key, mark, reloaded, select, toasted, toasts_to_the_end, type_at_end, until
+from pagehelp import clock_at, open_box, P1, P2, T0, at, draft_key, mark, set_kept, reloaded, select, toasted, toasts_to_the_end, type_at_end, until
 from sheafmd import comments as rdc
 
 pytestmark = pytest.mark.page
@@ -124,7 +124,7 @@ def test_a_restore_the_hub_took_is_not_written_back_when_its_answer_times_out_be
     comment(f, quote="apples", body="Why apples?")
     lose_an_edit(tab)
     page = context.new_page()
-    page.clock.install(time=T0)
+    page.clock.install(time=clock_at(T0))
     page.goto(tab.site.url)
     page.wait_for_selector("#rd-notice button[data-d=restore]")
     page.click(".rd-badge")
@@ -251,7 +251,7 @@ def test_the_text_of_a_refused_draft_stays_in_its_panel_when_the_first_read_of_t
 @pytest.mark.parametrize("written", [False, True], ids=["never-written", "written-late"])
 def test_a_restore_the_hub_does_not_answer_within_120_seconds_names_itself_when_pressed_again(lost_edit, context, written):
     page = context.new_page()
-    page.clock.install(time=T0)
+    page.clock.install(time=clock_at(T0))
     page.goto(lost_edit.site.url)
     page.wait_for_selector("#rd-notice button[data-d=restore]")
     held, bodies = [], []
@@ -311,9 +311,7 @@ def test_restore_with_a_kept_comment_on_screen_reloads_and_the_kept_comment_come
     page = context.new_page()
     page.goto(lost_edit.site.url)
     page.wait_for_selector("#rd-notice button[data-d=restore]")
-    slot = json.dumps([{"quote": "pears", "body": "about the pears", "at": "2026-10-13T10:00:00.000Z"}])
-    ckey = comment_draft_key(lost_edit.site)
-    page.evaluate(f"localStorage.setItem({ckey!r}, {json.dumps(slot)})")
+    set_kept(page, lost_edit.site, [{"quote": "pears", "body": "about the pears", "at": "2026-10-13T10:00:00.000Z"}])
     page.reload()
     page.wait_for_selector("#rd-notice button[data-d=restore]")
     page.wait_for_selector("#rd-popover .rd-hold:has-text('your comment is kept')")

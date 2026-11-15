@@ -1,5 +1,8 @@
 """What the page tests do with a page: select text the way a person's mouse does, and wait; and what a run says when its browser will not start."""
 import contextlib
+import datetime
+import json
+import os
 import signal
 import subprocess
 import sys
@@ -354,6 +357,32 @@ def comment_draft_key(site):
     return f"sheaf-comment-draft:{site.port}:{DOC}"
 
 
+def kept_json(page, site):
+    """What the comment store holds, as the one JSON list the page used to keep under the key (None when it holds
+    nothing): its entries are one key each, `<key>:e:<id>`, and an older list under the key itself counts too."""
+    return page.evaluate("""(key) => {
+      const got = Object.keys(localStorage).filter(k => k.startsWith(key + ':e:')).sort()
+        .map(k => JSON.parse(localStorage.getItem(k)));
+      const old = localStorage.getItem(key);
+      return got.length || old ? JSON.stringify(got.concat(old ? JSON.parse(old) : [])) : null;
+    }""", comment_draft_key(site))
+
+
+def kept_entries(page, site):
+    """The entries of the comment store, in the order of the store: the entry keys by id, then those of an earlier build's
+    list. (The page lists the list's entries first; no test reads this order for a store that holds both.)"""
+    return json.loads(kept_json(page, site) or "[]")
+
+
+def set_kept(page, site, entries):
+    """Put exactly `entries` in the comment store, as a list under the key (an earlier build's, which the page moves into
+    entry keys at its next write and reads as it is until then)."""
+    page.evaluate("""([key, v]) => {
+      Object.keys(localStorage).filter(k => k.startsWith(key + ':e:')).forEach(k => localStorage.removeItem(k));
+      localStorage.setItem(key, v);
+    }""", [comment_draft_key(site), json.dumps(entries)])
+
+
 # What Playwright's Chromium does on macOS with these keys is what macOS does (its macEditingCommands): End and
 # Home scroll the document, Control+End moves nothing, Control+v is page down. These are the keys a person there
 # presses for the move the test means.
@@ -374,14 +403,21 @@ def type_at_end(page, css, text):
     page.keyboard.type(text)
 
 
+def clock_at(ms):
+    """A point for page.clock from epoch milliseconds. Not the bare number: Playwright for Python reads a number as
+    seconds, so T0 (ms) put the page's Date.now() in the year 57000, and the ids the page makes from it were longer than
+    any real one (ticket 130)."""
+    return datetime.datetime.fromtimestamp(ms / 1000, tz=datetime.timezone.utc)
+
+
 def reload_on_clock(page, start=T0, *, pause=False):
     """Put a clock the test drives under the open page, from `start` (ms), and reload it; with
     `pause` the clock stands still 5 s later."""
-    page.clock.install(time=start)
+    page.clock.install(time=clock_at(start))
     page.reload()
     page.wait_for_selector("#rd-menu-btn", state="attached")
     if pause:
-        page.clock.pause_at(start + 5_000)
+        page.clock.pause_at(clock_at(start + 5_000))
 
 
 # ── a browser that will not start ────────────────────────────────────────────────────────────────────────
@@ -446,6 +482,65 @@ def launch_chromium(chromium, error, in_ci):
         unavailable(f"Chromium did not start:\n{e}\n{died_report(launched_binary(chromium.executable_path))}", in_ci)
 
 
+def launch_engine(browser_type, name, error=None, in_ci=None):
+    """A browser a test launches for itself (`pw.<engine>.launch()`): the browser, a skip off CI when the engine is not
+    here, or a failure on CI that carries the whole error (Playwright puts the browser's log after the first line)
+    and, for Chromium, how a second run of the binary ends. A skip on CI only turns the job red with one line
+    (ticket 138: four runs, 12-15 November)."""
+    if error is None:
+        from playwright.sync_api import Error as error
+    if in_ci is None:
+        in_ci = os.environ.get("CI", "").lower() in ("1", "true")
+    try:
+        return browser_type.launch()
+    except error as e:
+        if not in_ci:
+            pytest.skip(f"{name} cannot start here: {str(e).splitlines()[0]}")
+        report = died_report(launched_binary(browser_type.executable_path)) if name == "chromium" else ""
+        pytest.fail(f"{name} did not start:\n{e}\n{report}".rstrip())
+
+
+# The page's side of the stream journal (conftest.py `stream_journal`): it wraps EventSource and notes, in real
+# time (taken before a test's fake clock replaces the page's), each open, error and event into window.__sseJournal.
+STREAM_JOURNAL_JS = """(() => {
+  const now = performance.now.bind(performance), origin = performance.timeOrigin;
+  // Kept in sessionStorage: a reload of the page, which is what a lost event or a lost toast often is, would
+  // otherwise take the journal of the page that heard it (ticket 137).
+  const setItem = Storage.prototype.setItem;      // the native one: a test that watches the page's own setItem does not see the journal's
+  let log = [];
+  try { log = JSON.parse(sessionStorage.getItem('__sseJournal') || '[]'); } catch (e) {}
+  window.__sseJournal = log;
+  const note = (what, data) => {
+    log.push([origin + now(), what, data === undefined ? '' : String(data).slice(0, 120)]);
+    try { setItem.call(sessionStorage, '__sseJournal', JSON.stringify(log.slice(-400))); } catch (e) {}
+  };
+  note('document', 'starts');
+  window.addEventListener('pagehide', () => note('pagehide'));
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = (url, init) => {
+    const what = String(url) + ' ' + ((init && init.method) || 'GET');
+    note('fetch', what);
+    return nativeFetch(url, init).then(r => { note('fetched', what + ' ' + r.status); return r; },
+                                       e => { note('fetch failed', what + ' ' + e); throw e; });
+  };
+  const Native = window.EventSource;
+  if (!Native) return;
+  // A subclass, not a function that returns a native one: a test's own script may `class extends window.EventSource`.
+  window.EventSource = class extends Native {
+    constructor(url, init) {
+      super(url, init);
+      note('new', url);
+      super.addEventListener('open', () => note('open', url));
+      super.addEventListener('error', () => note('error', 'readyState ' + this.readyState));
+    }
+    addEventListener(name, fn, o) {
+      if (name !== 'open' && name !== 'error') super.addEventListener(name, ev => note('event ' + name, ev.data), o);
+      return super.addEventListener(name, fn, o);
+    }
+  };
+})()"""
+
+
 def new_context(browser, error=None, **options):
     """A context of the browser (its clicks, fills and waits for a selector give up after PAGE_TIMEOUT_MS),
     or a failure that says whether the browser is still there. `error` is
@@ -455,6 +550,7 @@ def new_context(browser, error=None, **options):
     try:
         context = browser.new_context(**options)
         context.set_default_timeout(PAGE_TIMEOUT_MS)
+        context.add_init_script(STREAM_JOURNAL_JS)
         return context
     except error as e:
         pytest.fail(f"Chromium went away under a new context (connected={browser.is_connected()}):\n{e}")

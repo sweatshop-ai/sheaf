@@ -44,10 +44,13 @@ A spec, ready to hand to whoever builds it, of sheaf as a standard module of eve
 - [How a Tell pressed on a page on the tiroir reaches the laptop session that is its target](issues/18-how-a-tell-reaches-a-laptop-session.md): a sheaf mod in the session long-polls the door (25 s) once the session has sent a page to the tiroir, and submits the Tell when idle; only the declaring member's token gets it; no expiry; `sheaf relay` retires.
 - [What a new tiroir ships of the module, and what someone must do by hand](issues/19-installing-the-module-on-a-new-tiroir.md): standard on every tiroir with Open WebUI (a runbook step, the sheaf module stage in proxy mode, a `modules:` version in `devices.yaml`); members, loose roots, sidebar entries and archive rule come by themselves; Thierry creates each tiroir's GitHub App; a member connects a laptop with one `sheaf connect` line; one pinned version per box, tiroir-tt first, stage run by an agent; and the naming: product tiroir Sheaf, a page is a rectoverso, the Catalog is the Sheaf.
 - [Making folders and moving pages from the Catalog](issues/20-making-folders-and-moving-pages-from-the-catalog.md): only loose pages Move from the Sheaf, within their root (repo pages move by git); the old address forwards for ever, versions, comments, marks and Share go along, nothing is rewritten; owner only, also through a door `move`; a folder exists only while a page is in it; the List's "Move to" becomes "Belongs to" (ticket 168, outside this map).
+- [Moving a single page to another tiroir, and how its old address forwards there](issues/21-moving-a-page-to-another-tiroir.md): a loose page moves alone, a repo page only with its whole root; the owner moves it and stays owner (Share again there, the Share does not travel; versions, comments, Write log, mark do); the old address redirects for ever, the door answers "moved" with what to do per client; hub to hub over Tailscale, owner matched by email, Forward written on confirmation; same channel for a whole root; Tells follow when the laptop has that tiroir's token. Surfaced the ticket on many client tiroirs.
 
 ## Not yet specified
 
 Nothing: the last fog became the tickets on sharing, the Tell to a laptop session (research, then grilling), installing on a new tiroir, folders and moves, and moving a page to another tiroir.
+
+Open: [How a ThinkingToo member works with many client tiroirs](issues/22-working-with-many-client-tiroirs.md), raised by Thierry during ticket 21; it may reopen points 1 and 5 of the ticket on several tiroirs and the agent's Share of the ticket on sharing.
 
 ## Out of scope
 

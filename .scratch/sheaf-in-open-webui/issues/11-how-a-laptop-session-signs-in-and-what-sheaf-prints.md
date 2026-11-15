@@ -1,7 +1,7 @@
 # 11: How a laptop agent session signs in to the library door, and what `sheaf FILE.md` does then
 
 **Type:** grilling
-**Status:** open
+**Status:** claimed by Ottilie (2026-11-15)
 **Blocked by:** none
 **Map:** ../map.md
 

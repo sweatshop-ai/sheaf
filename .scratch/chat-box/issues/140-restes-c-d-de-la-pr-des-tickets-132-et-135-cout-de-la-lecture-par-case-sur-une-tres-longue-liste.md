@@ -15,6 +15,6 @@
 
 **Claimed by:** Rumi 2026-11-15 14:55
 
-**Status:** in-review (PR 374, head 9a4c216, CI green, Opus GO; c1 of the review left open, see handoff-Rumi-140.md)
+**Status:** done (PR 374, merged as 4a6e237)
 
 - [ ] c1 et c2 faits ou écartés avec la preuve ; d1 à d3 faits

@@ -16,7 +16,7 @@ Nested tasks:
     - [x] Cable chart
 - [x] Open the doors
 
-An ordered task list:
+An ordered list that starts with brackets (pandoc draws no box for it):
 
 1. [x] Collect the bikes
 2. [ ] Tag each bike

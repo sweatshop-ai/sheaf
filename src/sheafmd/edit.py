@@ -737,11 +737,6 @@ def _unchanged(block, fragment: str) -> bool:
 # stand behind other markers on its line (`- - [ ] a`, `1. - [ ] a`, `1. > - [ ] a`): pandoc draws its box.
 TASK_MARK_RE = re.compile(
     r"^([ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+|>[ \t]*)*[-*+][ \t]+)\[([ xX])\](?=[ \t]|$)", re.M)
-# The marks of before ticket 128, which also took an ordered item. They stay as a second reading: where the counts
-# of the first one are not the boxes' (an empty `- [ ]` beside a box the first reading finds behind another marker),
-# these may be, and the write is checked all the same by the render of its result.
-LEGACY_MARK_RE = re.compile(
-    r"^((?:[ \t]*>)*[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+)\[([ xX])\](?=[ \t]|$)", re.M)
 
 
 class _Mark:
@@ -779,12 +774,34 @@ def task_marks(content: str, pattern=TASK_MARK_RE) -> list:
             for m in pattern.finditer(content.replace("\r", ""))]
 
 
-def _mark_sets(content: str) -> list:
-    """The readings of the marks of `content` a tick may be written by: the marks, then the legacy ones when they
-    are not the same."""
+def _boxed_marks(content: str) -> list | None:
+    """The marks of `content` laid out by the box each one flips, as the page draws them: item `k` is the mark whose
+    state character is the one that flips box `k` (`box_number`), None for a box no mark stands for (a raw `<input>`).
+    The other readings count marks by regex and need them to be the boxes one for one; this one asks the render, so an
+    empty item (a mark, no box), an ordered item and a box behind a chain are each told apart. None when the source
+    does not render or two marks flip one box."""
+    boxed = {}
+    for m in task_marks(content):
+        at = m.start(2)
+        if (k := box_number(content, at)) is not None:
+            if k in boxed:
+                return None
+            boxed[k] = m
+    html = _render_source(content)
+    if html is None:
+        return None
+    n = len(_ticks(copyblock.mark(html, page=True))[0])
+    return None if any(k >= n for k in boxed) else [boxed.get(k) for k in range(n)]
+
+
+def _readings(content: str):
+    """The readings of the marks of `content` a tick may be written by, one after the other, each asked for only when
+    the one before did not serve: `task_marks`, then `_boxed_marks` when it is not the same."""
     first = task_marks(content)
-    legacy = task_marks(content, LEGACY_MARK_RE)
-    return [first] if [m.start(2) for m in legacy] == [m.start(2) for m in first] else [first, legacy]
+    yield first
+    if first and (boxed := _boxed_marks(content)) is not None \
+            and [m and m.start(2) for m in boxed] != [m.start(2) for m in first]:
+        yield boxed
 
 
 def _ticks(fragment: str):
@@ -802,11 +819,12 @@ def _ticks(fragment: str):
 def _toggle_boxes(block, fragment: str, marks=None):
     """The block with its task marks flipped, when the page changed nothing but
     which boxes are ticked. None otherwise, and then the edit is converted as usual.
-    `marks` is one reading of the marks; none given, each of `_mark_sets` is tried in turn."""
+    `marks` is one reading of the marks; none given, each of `_readings` is tried in turn. A reading may have None
+    for a box no mark stands for: the page may not tick it, only leave it as it was."""
     if "checkbox" not in fragment:
         return None
     if marks is None:
-        return next((out for out in (_toggle_boxes(block, fragment, m) for m in _mark_sets(block.content))
+        return next((out for out in (_toggle_boxes(block, fragment, m) for m in _readings(block.content))
                      if out is not None), None)
     both = _comparable(block, fragment)
     if both is None:
@@ -823,11 +841,13 @@ def _toggle_boxes(block, fragment: str, marks=None):
     # The marks found in the source must be the boxes the render drew, one for
     # one, or a tick could land on the wrong line (a `- [ ]` inside a code
     # block in the list, say). Any doubt and the edit takes the general path.
-    if [m.group(2) != " " for m in marks] != have:
+    if [h if m is None else m.group(2) != " " for m, h in zip(marks, have)] != have or len(marks) != len(have):
         return None
     out = block.content
     for m, w, h in reversed(list(zip(marks, want, have))):
         if w != h:
+            if m is None:
+                return None
             out = out[:m.start(2)] + ("x" if w else " ") + out[m.end(2):]
     # Equal counts and states do not make the marks the boxes: pandoc draws no box for an empty item (`- [ ]`) and
     # does draw one the marks miss (`- - [ ] x`), so a tick could still land on the wrong line. The result is
@@ -897,9 +917,9 @@ def ticked_html(block, k: int, tick: bool = True, at: int | None = None):
         lambda m: f'<span class="rd-anchor" data-rd-id="{m.group(1)}"></span>', copyblock.mark(html, page=True)),
         "html.parser")
     found = soup.select('input[type="checkbox"]')
-    sets = [m for m in _mark_sets(block.content)
-            if 0 <= k < min(len(found), len(m)) and (at is None or m[k].start(2) == at)]
-    if not sets or found[k].has_attr("checked") == tick:
+    sets = (m for m in _readings(block.content)
+            if 0 <= k < min(len(found), len(m)) and m[k] is not None and (at is None or m[k].start(2) == at))
+    if found[k].has_attr("checked") == tick:
         return None
     if tick:
         found[k]["checked"] = ""

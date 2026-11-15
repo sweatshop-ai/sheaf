@@ -147,11 +147,11 @@ The action that answers what an unsure thread belongs to: one box per candidate,
 _Avoid_: Move to, reassign, client, transfer
 
 **Move** (of a rectoverso):
-The owner putting a loose rectoverso in another folder of its root, from the Sheaf or by their agent; renaming a folder moves each rectoverso in it. A repo rectoverso is moved by git, not from the Sheaf. The old address forwards to the new one. A folder exists only while a rectoverso is in it. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 20; not built.)
+The owner putting a loose rectoverso in another folder of its root, from the Sheaf or by their agent; renaming a folder moves each rectoverso in it. A loose rectoverso can also move to another tiroir where its owner has an account; it stays the owner's and arrives as theirs alone, its Share left behind. A repo rectoverso is moved by git, not from the Sheaf, and goes to another tiroir only with its whole root. The old address forwards to the new one. A folder exists only while a rectoverso is in it. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` tickets 20 and 21; not built.)
 _Avoid_: Move to, refile, rename
 
 **Forward** (of an address):
-The hub's record that an old address of a rectoverso now leads to its new one, after a Move, a git rename or a root moved to another tiroir. It never expires; links that name the old address are not rewritten. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 20; not built.)
+The hub's record that an old address of a rectoverso now leads to its new one, after a Move, a git rename or a move to another tiroir. It never expires; links that name the old address are not rewritten. Across tiroirs it leads only someone who can sign in to the new one; an agent at the old address is told where the rectoverso went and what to do. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` tickets 20 and 21; not built.)
 _Avoid_: redirect, alias
 
 **One-off action**:

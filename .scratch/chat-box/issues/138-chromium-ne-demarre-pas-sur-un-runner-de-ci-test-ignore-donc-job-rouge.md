@@ -9,7 +9,9 @@
 
 **Blocked by:** none
 
-**Status:** open
+**Claimed by:** Isolde 2026-11-15 12:38
+
+**Status:** in-progress
 
 - [ ] Le nombre de cas et les runners sont établis à partir des runs passés
 - [ ] La cause est établie dans les logs du runner, pas supposée

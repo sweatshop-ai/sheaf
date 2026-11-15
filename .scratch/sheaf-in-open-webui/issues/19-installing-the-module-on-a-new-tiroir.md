@@ -1,7 +1,7 @@
 # 19: What a new tiroir ships of the module, and what someone must do by hand
 
 **Type:** grilling
-**Status:** open
+**Status:** claimed by Ottilie (2026-11-15)
 **Blocked by:** none
 **Map:** ../map.md
 

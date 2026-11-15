@@ -1,7 +1,7 @@
 # 20: Making folders and moving pages from the Catalog after the first version
 
 **Type:** grilling
-**Status:** open
+**Status:** claimed by Ottilie (2026-11-15)
 **Blocked by:** none
 **Map:** ../map.md
 

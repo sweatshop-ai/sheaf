@@ -572,7 +572,19 @@ def test_an_upgrade_handover_leaves_the_toast_of_a_merged_save_for_the_new_boot(
     until(lambda: "updated" in front.js("return root.getElementById('rd-toast').textContent;"), what="the handover said")
     assert front.page.evaluate("sessionStorage.getItem('sheaf-mount:rd-toast')") == "1 block \u2192 plan.md"
     # A keep that names the document only, so a boot of another document in the tab drops the toast (review b1).
-    assert front.page.evaluate("JSON.parse(sessionStorage.getItem('sheaf-mount:rd-keep'))") == {"doc": DOC}
+    assert front.page.evaluate("JSON.parse(sessionStorage.getItem('sheaf-mount:rd-keep')).doc") == DOC
+
+
+def test_an_upgrade_handover_keeps_the_keep_the_reload_wrote_when_it_names_this_document(front):
+    """Ticket 139 (c2): the handover replaced the whole keep with `{doc}`, and the new boot lost the scroll and the state."""
+    front.open()
+    front.page.route("**/_/mount?doc=*", _another_version)
+    front.page.evaluate("sessionStorage.setItem('sheaf-mount:rd-toast', '1 block \u2192 plan.md')")
+    front.site.file.write_text(front.site.file.read_text().replace("about pears", "about plums"), encoding="utf-8")
+    until(lambda: front.page.evaluate("window.__upgrades || null"), what="the loader told")
+    until(lambda: "updated" in front.js("return root.getElementById('rd-toast').textContent;"), what="the handover said")
+    keep = front.page.evaluate("JSON.parse(sessionStorage.getItem('sheaf-mount:rd-keep'))")
+    assert keep["doc"] == DOC and "y" in keep, keep         # the reload's own keep, not `{doc}` alone
 
 
 def test_of_two_mounts_on_one_pane_the_one_called_last_stands_whichever_answers_first(front):

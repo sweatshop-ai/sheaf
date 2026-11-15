@@ -512,9 +512,50 @@ def test_a_merged_save_whose_reload_a_form_holds_leaves_its_toast_for_the_next_b
     p.wait_for_timeout(500)
     assert p.evaluate("window.__same_load") is True, "the form did not hold the reload"
     assert p.evaluate("sessionStorage.getItem('rd-toast')") == stored
+    assert p.evaluate("JSON.parse(sessionStorage.getItem('rd-keep')).doc") == DOC, "a boot of another document would say it"
     p.unroute("**/_/save")
     p.reload()
     until(lambda: stored in p.inner_text("#rd-toast"), what="the next boot to say the toast")
+
+
+def test_a_second_merged_save_adds_its_toast_to_the_one_not_said_yet(replying, site):
+    # Ticket 139 (d): a toast no boot has said yet (a reload held, an upgrade handed over) was overwritten by the next merge.
+    p = replying.page
+    mark(p)
+    p.evaluate("sessionStorage.setItem('rd-toast', 'first note')")
+    p.route("**/_/save", lambda route: route.fulfill(
+        status=200, content_type="application/json",
+        body=json.dumps({"ok": True, "hash": "x", "changed": [1], "merged": True, "conflicts": []})))
+    p.keyboard.press("Control+s")
+    until(lambda: "first note" in (p.evaluate("sessionStorage.getItem('rd-toast')") or "") and
+          "plan.md" in (p.evaluate("sessionStorage.getItem('rd-toast')") or ""), what="both notes stored")
+
+
+def test_a_settle_that_gives_up_leaves_its_toast_with_a_keep_naming_the_document(tab, site):
+    # Ticket 139 (c1): "this edit could not be merged" leaves the toast of an earlier merge; with no keep, a boot of any
+    # document in the tab would say it.
+    p = tab.page
+    tab.open()
+    p.keyboard.press("e")
+    p.route("**/_/save", lambda route: route.fulfill(status=500, json={"ok": False, "error": "the hub broke off"}))
+    p.evaluate("sessionStorage.setItem('rd-toast', '1 block \u2192 plan.md')")
+    p.evaluate(f"document.querySelector({P2!r}).append(' and plums')")      # on screen only, no autosave
+    site.file.write_text(site.file.read_text() + "\nA new paragraph from outside.\n", encoding="utf-8")
+    until(lambda: "could not be merged" in p.inner_text("#rd-toast"), timeout=20.0, what="the give-up said")
+    assert p.evaluate("sessionStorage.getItem('rd-toast')") == "1 block \u2192 plan.md"
+    assert p.evaluate("JSON.parse(sessionStorage.getItem('rd-keep'))") == {"doc": DOC}
+
+
+def test_a_boot_of_another_document_does_not_say_the_toast_a_keep_of_that_other_names(tab):
+    # Ticket 139 (d): pins the boot's filter that the handover and the settle's give-up rely on.
+    p = tab.page
+    tab.open()
+    p.evaluate("sessionStorage.setItem('rd-toast', 'not for this page');"
+               "sessionStorage.setItem('rd-keep', JSON.stringify({doc: 'elsewhere/other.md'}))")
+    p.reload()
+    p.wait_for_selector("#rd-menu-btn", state="attached")
+    p.wait_for_timeout(800)
+    assert "not for this page" not in p.inner_text("#rd-toast")
 
 
 def test_a_page_whose_root_is_forgotten_says_so_keeps_what_was_typed_and_saves_nothing(replying, site):

@@ -11,10 +11,10 @@
 - d2 : la garde `0 <= k` dans le filtre `sets` de `ticked_html` est redondante depuis la garde de bornes ; un `k` négatif rend maintenant None (avant, `found[-1]` marchait).
 - d3 : docstring de `box_number` (« a chain the regex misses ») et de `_render_source` (la raison du cache de 8) périmées.
 
-**Blocked by:** PR des tickets 132 et 135 fusionnée
+**Blocked by:** none (PR 371 fusionnée, cadd9d6)
 
-**Claimed by:** (libre)
+**Claimed by:** Rumi 2026-11-15 14:55
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] c1 et c2 faits ou écartés avec la preuve ; d1 à d3 faits

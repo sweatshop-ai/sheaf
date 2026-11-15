@@ -6,7 +6,7 @@
 
 **Claimed by:** Isolde 2026-11-13 23:53
 
-**Status:** in-review (branche chat-box/40-41, une PR avec le ticket 41)
+**Status:** done (PR 280, merge 062f3a5)
 
 **Établi (preuves) :** relu par la revue Opus du tour 1 du ticket 23 (`pr-23-reviews/opus-round1.md`) : les deux moitiés sont encore vraies sur chat-box/23 (bbf4dbe). Aucun test ne pose la fenêtre.
 

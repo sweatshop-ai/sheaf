@@ -1,0 +1,30 @@
+# 137: Le send-again échoue en CI : la vérification qui recharge avant le `changed` en attente (restes du ticket 100)
+
+**What to build:** Le ticket 100 a établi une seule des trois causes (la course de la route, corrigée par la sonde, PR 346). Restent deux échecs de CI dont la cause n'est pas connue. Le journal du flux (« the event stream, page and hub », dans le log d'un job rouge) est en place depuis la PR 346 ; aucun log de CI avec ce journal n'a été lu sur l'un de ces deux échecs.
+
+- `test_a_send_again_that_fails_to_reach_the_hub_does_not_hide_that_the_send_before_it_was_taken` : run 43616701956, tentative 3 (tête f76b1f5). Le toast « did not go out » est venu, donc la route était vive ; ni « New reply on c1 by Ada » ni TAKEN ensuite. Le plus fréquent (quatre PR dans une soirée, selon Rhea).
+- `test_a_change_heard_between_a_replys_answer_and_its_end_reloads_when_the_send_ends_and_says_it_waited` : run 43621112432, tentative 2, job 132530249342, « timed out waiting for a toast saying 'text changed while you wrote' » ; l'étape « the hub to take the reply » était passée.
+- `test_a_box_typed_in_a_block_whose_save_is_merged_is_not_ticked_before_the_reload` : run 43639875963 (PR 344), « page did not answer », puis blocage à la fermeture du contexte. Même fichier de journal manquant ; un autre test.
+- Écarté : ce n'est pas la course de la route (les jobs 132567777529 et 132567777419 de la PR 328 l'étaient) ; ce n'est pas le flux dans les journaux lus : `changed` est arrivé à la page en moins de 2 ms après l'écriture du hub.
+
+**À faire :** sur un échec réel, lire d'abord la section « the event stream, page and hub » : le hub a-t-il publié `changed`, la page l'a-t-elle reçu, un toast a-t-il été mis en file ? Établir la cause avant tout correctif, retry ou délai. Le correctif va dans la page ou le hub si c'est un défaut du produit, dans les aides de test si c'est le test.
+
+**Blocked by:** none
+
+**Journal lu (Yara, 2026-11-15) : le send-again est revenu avec le journal.** Run 43709623494, tentative 1, job 132798137212, tête c6faee7 (PR 365, qui ne touche pas ce test) : `test_a_send_again_that_fails_to_reach_the_hub_does_not_hide_that_the_send_before_it_was_taken`, `test_page_writing.py:2885`, « timed out waiting for a toast saying 'What you sent reached the hub after all'; the toasts that went by: ['Your reply did not go out: the hub is unreachable.'] ». Vert à la tentative 2. Section « the event stream, page and hub » du log, heures UTC :
+- 11:43:57.668 le hub reçoit `/_/comment` `op reply` rid fdd5…462f (le premier envoi, tenu par `slow_hub`) ; 57.679-.694 la route du test est posée et appelée (le send-again).
+- 11:43:59.076-.077 le hub publie `changed` (rid fdd5…462f, `telling: []`) « to 1 stream(s) » et l'écrit ; `/_/comment out` à .077.
+- 11:43:59.189 `page0 new /_/live` : la page ouvre un NOUVEAU flux 112 ms après l'écriture de `changed` ; `page0 fetch /_/doc` à .189 et .235 ; `page0 event hello` à .235.
+- Aucune ligne `page0 event changed` n'apparaît dans le journal : la page n'a pas lu le `changed` du hub sur l'ancien flux, et la fin du journal est .237 alors que le test échoue 8 s plus tard. Le log porte aussi un `BrokenPipeError` du hub (`server.py:139`, `wfile.write`), juste avant le journal.
+Établi : le hub a publié `changed` pour ce rid, la page n'en a pas journalisé la réception, et elle a rouvert un flux `/_/live` juste après. Non établi : pourquoi l'ancien flux n'a pas livré (flux déjà fermé côté page ? `changed` écrit sur une socket morte, cf. le BrokenPipe ?) ni si la réouverture vient d'un rechargement ou de la reprise du flux. Prochaine lecture : le code de la page qui ouvre `/_/live` (reprise après coupure) et ce que le hub compte comme « 1 stream » à cet instant ; la cause reste à établir avant tout correctif.
+
+**Cause établie pour le send-again (Wilma, 2026-11-15), avec preuve.** Le « `changed` absent » du journal est un artefact : le journal vit dans `window.__sseJournal` et un rechargement l'efface ; le `new /_/live` 112 ms après l'écriture est la page d'APRÈS le rechargement, pas une reprise de flux (le BrokenPipe du hub n'y est pour rien : `server.py:139` écrit un corps de réponse ordinaire). Même motif dans le second échec réel (job 132811329948, main 3bdeaf6) : écriture 12:36:43.196, nouveau flux 43.308, journal sans `event changed`. Reproduit sur t-compute (journal gardé en sessionStorage, 8 à 12 brûleurs de CPU, charge 7 à 26) : échecs aux lancements 13, 1 et 9 ; le journal montre `event changed` reçu, puis `pagehide` 90 ms plus tard. Une trace de `settle` : l'appelant est `checkText` (la vérification qu'un `hello` lance), pas `heard`. Sa réponse `/_/doc`, lue APRÈS l'écriture du hub, porte le nouveau hash ; la page tient encore l'ancien ; `reloadWhenFree` passe avant que l'événement `changed` en attente (`heardAfterCheck`) soit entendu, lui qui aurait pris la réponse en place. Le rechargement emporte le toast « reached the hub after all ». Dans le cas rouge, deux vérifications étaient en cours : la réponse de l'ancienne ne libérait pas les événements. Défaut du produit. Correctif et test en rouge d'abord : PR 373 (branche chat-box/137). Charge : sans correctif le test échoue en moins de 14 lancements sous 8 à 12 brûleurs ; avec correctif 83/83 verts sous 8 brûleurs (600 s), 401 tests de test_page_outage, test_page_writing, test_page_waits verts.
+
+**Scindé (Rhea, 2026-11-15) :** ce ticket se ferme avec la PR 373 (le send-again). « text changed while you wrote » (run 43621112432) et la case fusionnée (run 43639875963), dont la cause n'est pas montrée, passent au ticket 141. Le journal du flux survit maintenant à un rechargement (sessionStorage, dans la PR 373).
+
+**Claimed by:** Wilma 2026-11-15 13:29 (terminé)
+
+**Status:** done (PR 373 fusionnée, fc479f6)
+
+- [x] La cause du send-again est établie sur un échec réel avec le journal, pas supposée
+- [x] Le correctif (PR 373, fc479f6) est fusionné ; CI verte sur la PR (3 tranches), 83/83 sous charge sur t-compute

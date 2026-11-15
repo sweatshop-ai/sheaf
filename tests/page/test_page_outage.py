@@ -14,8 +14,8 @@ import time
 import pytest
 
 from helpers import PLAN, comment
-from pagehelp import (DOC, clock_at, P1, P2, T0, at, comment_on, draft_key, gone, set_kept, mark, reload_on_clock,
-                      reloaded, toast, toasted, type_at_end, until)
+from pagehelp import (DOC, clock_at, P1, P2, T0, at, comment_on, draft_key, gone, set_kept, mark, open_with_comment,
+                      reload_on_clock, reloaded, toast, toasted, type_at_end, until)
 from sheafmd import comments as rdc
 
 pytestmark = pytest.mark.page
@@ -989,6 +989,52 @@ def test_a_change_heard_while_the_check_after_a_reconnect_is_out_does_not_reload
     assert GONE in notice(p)
     p.wait_for_timeout(1500)
     assert p.evaluate("window.__same_load") is True
+
+
+def heard_changed(page):
+    return page.evaluate("window.__sseJournal.some(e => e[1] === 'event changed')")
+
+
+def test_a_reply_heard_while_the_check_is_out_is_taken_in_place_when_the_answer_names_its_hash(tab, site):
+    """A hello starts a check of the document (checkText). Its answer is read after another writer's reply was
+    written, so it names the new hash; the reply's `changed` came before it and waits for it (heardAfterCheck).
+    The answer must not read that hash as a change of the text from outside: the event takes the reply in place
+    (ticket 137: the page reloaded, and the toast that a send had been taken after all went with it)."""
+    from sheafmd.source import update_file
+    p = open_with_comment(tab, None, "apples", "Why?")
+    mark(p)
+    asked = []
+    p.route("**/_/doc?*", lambda route: asked.append(route))      # the answer to the check is held
+    site.hub.entry(DOC).live._publish("hello", {})
+    until(lambda: asked or p.wait_for_timeout(50), timeout=15, what="the page to ask what the document is")
+    update_file(site.file, lambda t: rdc.reply(t, "c1", "Because.", "Bea", "2026-10-14T11:00"))
+    site.hub.catch_up(site.hub.entry(DOC))             # the hub takes the reply in: a `changed`
+    until(lambda: heard_changed(p) or p.wait_for_timeout(50), what="the page to hear the change")
+    for r in asked:
+        r.continue_()
+    p.wait_for_timeout(1500)
+    assert not gone(p), "the page reloaded for a change of the comments only"
+    p.wait_for_timeout(1500)
+    assert p.evaluate("window.__same_load") is True
+
+
+def test_a_reply_heard_before_an_answer_that_was_read_before_it_does_not_reload_the_page(tab, site):
+    """The other order: the hub read the check's answer before the write, the write's `changed` reached the page
+    first. The answer names the hash the page held before the event, which is no change from outside."""
+    from sheafmd.source import update_file
+    p = open_with_comment(tab, None, "apples", "Why?")
+    mark(p)
+    read = []
+    p.route("**/_/doc?*", lambda route: read.append((route, route.fetch())))      # read now, delivered later
+    site.hub.entry(DOC).live._publish("hello", {})
+    until(lambda: read or p.wait_for_timeout(50), timeout=15, what="the hub to answer the check")
+    update_file(site.file, lambda t: rdc.reply(t, "c1", "Because.", "Bea", "2026-10-14T11:00"))
+    site.hub.catch_up(site.hub.entry(DOC))
+    until(lambda: heard_changed(p) or p.wait_for_timeout(50), what="the page to hear the change")
+    for route, answer in read:
+        route.fulfill(response=answer)
+    p.wait_for_timeout(1500)
+    assert not gone(p), "the page reloaded for an answer older than the change it had heard"
 
 
 # Holds the page's asks of `/_/doc` once a stream has opened after `window.__holdFrom` opens: an `open` comes before

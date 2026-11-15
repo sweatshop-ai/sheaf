@@ -22,4 +22,6 @@
 
 **Blocked by:** 121 (PR 355 ouverte)
 
-**Status:** ready-for-agent
+**Claimed by:** Ingrid 2026-11-15 12:41
+
+**Status:** in-progress

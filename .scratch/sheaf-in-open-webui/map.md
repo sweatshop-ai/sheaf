@@ -24,6 +24,7 @@ A spec, ready to hand to whoever builds it, of sheaf as a standard module of eve
 - The laptop hub stays as it is; removing it is out of scope (charting).
 - Sheaf is per Open WebUI user on each tiroir, like artifacts; Thierry's home is tiroir-tt, Marina's tiroir-0 (charting).
 - [What sheaf and Open WebUI run today on tiroir-tt and tiroir-0](issues/01-what-runs-today-on-the-tiroirs.md): tiroir-tt already has proxy mode, all four users as members, a private root for Thierry and a sidebar mount (no Catalog entry); tiroir-0 has Open WebUI and no sheaf module; both serve HTTP/2.
+- [Artifacts as the model for a user's own pages](issues/03-artifacts-as-the-model.md): copy private-by-default, stable address, versions with stale writes refused, per-user nested folders shared as a unit; not comments outside the file, chat-bound content or frozen-copy sharing. Open WebUI Notes gained versions and comments since October (still no folders, not markdown-native).
 
 ## Not yet specified
 

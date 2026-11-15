@@ -1,4 +1,4 @@
-# 137: Deux échecs de page sans cause : le send-again et « text changed while you wrote » (restes du ticket 100)
+# 137: Le send-again échoue en CI : la vérification qui recharge avant le `changed` en attente (restes du ticket 100)
 
 **What to build:** Le ticket 100 a établi une seule des trois causes (la course de la route, corrigée par la sonde, PR 346). Restent deux échecs de CI dont la cause n'est pas connue. Le journal du flux (« the event stream, page and hub », dans le log d'un job rouge) est en place depuis la PR 346 ; aucun log de CI avec ce journal n'a été lu sur l'un de ces deux échecs.
 
@@ -20,11 +20,11 @@
 
 **Cause établie pour le send-again (Wilma, 2026-11-15), avec preuve.** Le « `changed` absent » du journal est un artefact : le journal vit dans `window.__sseJournal` et un rechargement l'efface ; le `new /_/live` 112 ms après l'écriture est la page d'APRÈS le rechargement, pas une reprise de flux (le BrokenPipe du hub n'y est pour rien : `server.py:139` écrit un corps de réponse ordinaire). Même motif dans le second échec réel (job 132811329948, main 3bdeaf6) : écriture 12:36:43.196, nouveau flux 43.308, journal sans `event changed`. Reproduit sur t-compute (journal gardé en sessionStorage, 8 à 12 brûleurs de CPU, charge 7 à 26) : échecs aux lancements 13, 1 et 9 ; le journal montre `event changed` reçu, puis `pagehide` 90 ms plus tard. Une trace de `settle` : l'appelant est `checkText` (la vérification qu'un `hello` lance), pas `heard`. Sa réponse `/_/doc`, lue APRÈS l'écriture du hub, porte le nouveau hash ; la page tient encore l'ancien ; `reloadWhenFree` passe avant que l'événement `changed` en attente (`heardAfterCheck`) soit entendu, lui qui aurait pris la réponse en place. Le rechargement emporte le toast « reached the hub after all ». Dans le cas rouge, deux vérifications étaient en cours : la réponse de l'ancienne ne libérait pas les événements. Défaut du produit. Correctif et test en rouge d'abord : PR 373 (branche chat-box/137). Charge : sans correctif le test échoue en moins de 14 lancements sous 8 à 12 brûleurs ; avec correctif 83/83 verts sous 8 brûleurs (600 s), 401 tests de test_page_outage, test_page_writing, test_page_waits verts.
 
-**Reste ouvert dans ce ticket :** « text changed while you wrote » (run 43621112432) et la case fusionnée (run 43639875963) ne sont pas montrés comme étant cette cause ; leur journal est maintenant à relire avec ce défaut en tête (un `/_/doc` rechargeant avant un `changed` en attente), mais rien n'est prouvé. Le journal de test qui survit au rechargement (sessionStorage) n'est pas dans la PR 373 : à faire dans un ticket de test-aides si voulu.
+**Scindé (Rhea, 2026-11-15) :** ce ticket se ferme avec la PR 373 (le send-again). « text changed while you wrote » (run 43621112432) et la case fusionnée (run 43639875963), dont la cause n'est pas montrée, passent au ticket 141. Le journal du flux survit maintenant à un rechargement (sessionStorage, dans la PR 373).
 
 **Claimed by:** Wilma 2026-11-15 13:29
 
 **Status:** in-progress
 
-- [ ] La cause de chacun des trois échecs est établie sur un échec réel avec le journal, pas supposée
-- [ ] Le correctif est posé et les trois tests passent sur plusieurs lancements de CI
+- [x] La cause du send-again est établie sur un échec réel avec le journal, pas supposée
+- [ ] Le correctif (PR 373) est fusionné et le send-again passe sur plusieurs lancements de CI

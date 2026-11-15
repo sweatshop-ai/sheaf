@@ -1,7 +1,7 @@
 # 06: What a folder of the Catalog is
 
 **Type:** grilling
-**Status:** open
+**Status:** claimed by Ottilie (2026-11-15)
 **Blocked by:** 05
 **Map:** ../map.md
 

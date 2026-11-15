@@ -37,12 +37,6 @@ A spec, ready to hand to whoever builds it, of sheaf as a standard module of eve
 
 ## Not yet specified
 
-- How long a page lives: Thierry sees most pages as temporary, tied to one session. Archive, expire, or keep forever in the Catalog?
-- The name. Thierry dislikes "Sheaf"; "Documents" clashes with all documents in a tiroir; "Notes" is taken by Open WebUI. Candidates from October: proof/épreuve, bon à tirer, desk, drawer.
-- What `sheaf FILE.md` does and prints for an agent once the page lives on a tiroir (URL, sign-in, which tiroir).
-- Working offline or when the tiroir is down.
-- How a laptop agent session reaches and signs in to the member's library door (the same OAuth as Claude.ai, or an agent token), now that the door is the write path for loose pages, and how the laptop's `sheaf FILE.md` reports its session to the tiroir for repo pages (ticket 09).
-- Which repos get a clone on the tiroir, how one is added, and how a large repo (the monorepo) is cloned for its pages only.
 - Other members (Sven, Hans on tiroir-tt) and sharing a page between users: SPEC 9.11 visibility exists, its place in the Catalog does not.
 - Installing the module on a new tiroir: what the tiroir product ships by default.
 - Making folders and moving pages from the Catalog (ruled out of v1 by ticket 06): for loose pages only, or also a rename commit in a repo, and what happens to links and to the paths agents know.

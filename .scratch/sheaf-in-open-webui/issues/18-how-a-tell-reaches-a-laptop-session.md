@@ -1,7 +1,7 @@
 # 18: How a Tell pressed on a page on the tiroir reaches the laptop session that is its target
 
 **Type:** grilling
-**Status:** open
+**Status:** claimed by Ottilie (2026-11-15)
 **Blocked by:** 17
 **Map:** ../map.md
 

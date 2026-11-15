@@ -119,6 +119,10 @@ _Avoid_: home tiroir (a sheaf's home is a path)
 A page in no git repo: a session's scratchpad, a temporary folder, or anything a chat client such as Claude.ai or ChatGPT makes. Its original lives on the tiroir; a page in a git repo has git as its original. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 05; not built.)
 _Avoid_: scratch page, orphan page
 
+**Repo clone** (on a tiroir):
+The tiroir's own copy of a git repo that a member's page came from, made the first time a page of that repo is rendered for that tiroir. One per repo per tiroir, whoever's pages it holds; it holds the folders with pages only. A page in it is still its member's alone until Shared. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 14; not built.)
+_Avoid_: mirror, checkout
+
 **Archived page**:
 A loose page out of the Catalog's default view, after a time with no write and no comment, or by the member's hand. It still opens at its address and comes back when written or commented. Not deleted: only the member deletes a page. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 13; not built.)
 _Avoid_: expired, stale

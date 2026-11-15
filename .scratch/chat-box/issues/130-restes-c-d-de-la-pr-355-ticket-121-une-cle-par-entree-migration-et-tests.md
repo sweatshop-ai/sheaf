@@ -24,4 +24,8 @@
 
 **Claimed by:** Ingrid 2026-11-15 12:41
 
-**Status:** in-progress
+**Status:** done (PR 369 merged, 2f83861)
+
+## Done
+
+PR 369 merged as 2f83861 (Ingrid, 2026-11-15). Fixed: c4 (an entry key is this document's only when what follows `<doc>:e:` has the shape of an id), c3 and the duplicate half of c6 (the id of an entry moved out of the earlier build's list is made of its `at`, its place among entries of the same `at`, and a 64-bit hash, not its place in the list). Limits written in SPEC 10.8 with their reasons: c1 and the resurrection half of c6, c5, d4, d5, d7, d8, d9. Tests: `tests/page/test_page_kept_entries.py` (new), d1 in test_page_writing.py, d6 docstring. Also: the page tests' fake clock was read by Playwright for Python as seconds (`clock_at(ms)` in pagehelp.py). Open: no test for a half-way move combined with a held clear (F2/F3 of 355's round 2). 355 and 130 are released together (id skew).

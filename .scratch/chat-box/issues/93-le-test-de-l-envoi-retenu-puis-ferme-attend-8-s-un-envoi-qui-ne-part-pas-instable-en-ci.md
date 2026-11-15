@@ -2,7 +2,8 @@
 
 **What to build:** Trouver la cause d'un échec CI intermittent et corriger le test (ou la page, si la cause est là). Test : `tests/page/test_page_writing.py::test_escape_or_a_click_outside_during_a_reply_or_edits_send_closes_the_popover_and_the_hub_takes_it[reply-Escape]`. L'échec est dans `send_held` (test_page_writing.py:150), avant tout Échap : `until(lambda: held or p.wait_for_timeout(20), what="the send to go out")` lève `AssertionError: timed out waiting for the send to go out` (`tests/page/pagehelp.py:184`, délai 8 s). Après `Control+Enter`, la requête `/_/comment` n'a pas atteint la route en 8 s.
 
-**Blocked by:** the next CI failure of this test, now reported by the diagnostic merged for this ticket
+**Blocked by:**
+- External: the next CI failure of this test, now reported by the diagnostic merged for this ticket (PR 365, 3bdeaf6)
 
 **Claimed by:** (libre)
 

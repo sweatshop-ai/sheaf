@@ -104,7 +104,7 @@ A member's page of the sheaves that wait on someone and the ones in progress, gr
 _Avoid_: catalog, index, dashboard
 
 **Catalog**:
-A member's browsable tree of folders holding every page they may open, with or without an issue, and no status. Not the List: the List says what waits, the Catalog says where a page is. (Named 2026-11-15, wayfinder `sheaf-in-open-webui`; not built.)
+A member's browsable tree of folders holding every page they may open, with or without an issue, and no status. A folder is where the page lives: its root, then the root's sub-folders; pages another member Shared sit apart, under their owner. Not the List: the List says what waits, the Catalog says where a page is. (Named 2026-11-15, wayfinder `sheaf-in-open-webui`, folders ticket 06; not built.)
 _Avoid_: list, library, documents
 
 **Root's tiroir**:

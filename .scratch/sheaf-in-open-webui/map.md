@@ -29,6 +29,7 @@ A spec, ready to hand to whoever builds it, of sheaf as a standard module of eve
 - [How an agent session on a laptop gets a page onto a tiroir](issues/02-how-a-laptop-agent-reaches-the-tiroir.md): a git root works today (≤ ~60 s lag, line conflicts stop the hub as `push-diverged`, no Tells); the MCP door has create/update with stale writes refused but is loopback-only and the deployed library door lacks create/update; brain-sync-style rsync overwrites page edits; the relay carries Tells only; a remote seat works but moves the agent onto the tiroir.
 
 - [Where the original of a page lives: the laptop or the tiroir](issues/05-where-the-original-lives.md): a repo page's original is git (the tiroir's clone commits page saves on the working branch, never a deploying one); a loose page's original is on the tiroir; no agent writes without reading the latest version; Claude.ai, ChatGPT and the Open WebUI assistant write through the same library door, which needs `create`/`update`.
+- [What a folder of the Catalog is](issues/06-what-a-catalog-folder-is.md): the path on disk (root, then its sub-folders); the Catalog is the 8.6 index page as a per-member tree, dot-folders hidden; loose pages in a `loose-<short>` root, folder named by the agent else the month; no moves in v1; its own sidebar entry beside "Actions"; a "Shared with me" folder per owner.
 
 ## Not yet specified
 
@@ -40,6 +41,7 @@ A spec, ready to hand to whoever builds it, of sheaf as a standard module of eve
 - Which repos get a clone on the tiroir, how one is added, and how a large repo (the monorepo) is cloned for its pages only.
 - Other members (Sven, Hans on tiroir-tt) and sharing a page between users: SPEC 9.11 visibility exists, its place in the Catalog does not.
 - Installing the module on a new tiroir: what the tiroir product ships by default.
+- Making folders and moving pages from the Catalog (ruled out of v1 by ticket 06): for loose pages only, or also a rename commit in a repo, and what happens to links and to the paths agents know.
 - Moving pages between tiroirs: a single page moved against its root's tiroir, and how an old address forwards to another tiroir (ticket 04 decided the Drive logic, not the mechanics).
 
 ## Out of scope

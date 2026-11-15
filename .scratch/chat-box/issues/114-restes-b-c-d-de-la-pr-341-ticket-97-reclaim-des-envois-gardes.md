@@ -19,4 +19,6 @@ Classe c (défauts plus petits, avec contournement) :
 
 **Blocked by:** 121 (ces restes ne valent que si la conception claim/repère revient ; la PR du ticket 97 est fusionnée)
 
-**Status:** ready-for-agent
+**Claimed by:** Isolde 2026-11-15 13:28
+
+**Status:** in-progress

@@ -390,6 +390,28 @@ def test_a_refusal_is_not_said_again_past_the_seven_seconds_it_was_said_in_howev
         assert "refused A" not in " ".join(toasts_to_the_end(p, on_clock=True))
 
 
+def test_a_refusal_brought_back_by_a_reload_at_5_s_is_not_carried_by_a_second_reload_at_8_s(tab):
+    # Ticket 118 (SPEC 10.11): said at 0 s it is up to 7 s; the reload at 5 s brings it back, but with its own deadline,
+    # so the reload at 8 s, while the replay is on screen (up to 14.6 s), keeps nothing. The clock is read, not counted:
+    # the toasts the page waits for run it on, and the reloads are at 5 s and 8 s from the refusal, not from later.
+    f = tab.site.file
+    p = held_by_a_form(tab, [refused("Approve: refused A, reload the page")])
+    p.clock.run_for(5100)
+    until(lambda: "refused A" in toast(p), what="the refusal, at 0 s")
+    said_at = p.evaluate("Date.now()")
+    p.clock.run_for(5000 - (p.evaluate("Date.now()") - said_at))
+    p.click("#rd-popover button[data-f=ok]")           # the reload at 5 s
+    reloaded(p)
+    p.wait_for_selector("button.rd-act")                # the boot has said what it says
+    p.clock.run_for(8000 - (p.evaluate("Date.now()") - said_at))
+    assert "refused A" in toast(p)                      # the replay is on screen at 8 s: the limit is the reload's, not the toast's
+    mark(p)
+    f.write_text(f.read_text(encoding="utf-8") + "\nFrom outside, at 8 s.\n", encoding="utf-8")
+    reloaded(p)
+    p.wait_for_selector("button.rd-act")
+    assert "refused A" not in " ".join(toasts_to_the_end(p, on_clock=True))
+
+
 def test_a_refusal_an_older_page_left_as_plain_text_does_not_stop_the_boot(sheaf):
     # Ticket 101, review a: before this ticket the key held the bare text. The page of a deploy reads it without
     # throwing, drops it, and the rest of the boot (the toast the reload left) still runs.

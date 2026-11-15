@@ -142,9 +142,17 @@ _Avoid_: journal, history, audit log
 **Stop James**:
 The action any member ticks on a sheaf of the assistant James to end his work on its project (SPEC 9.11). It is the one place the core names a deployment's assistant: the hub writes a diagnostics row and, with `[list] stop_dir`, a file the deployment's supervisor reads; stopping is the deployment's, a Layer concern the core only signals.
 
-**Move to**:
-The action that answers which client an unsure thread is for: one box per candidate, `- [ ] Move to <slug> (ref <thread>)`, the one word with a slug and a thread (SPEC 9.10; Merge, Deploy and Install take the rest of the line). The boxes are the options of one answer: on the list each is a one-off button named by its slug, and once one is ticked the others are no actions and the hub refuses a second tick (#109); the deployment's mail module moves the thread.
-_Avoid_: reassign, transfer
+**Belongs to**:
+The action that answers what an unsure thread belongs to: one box per candidate, `- [ ] Belongs to <slug> (ref <thread>)`, the one word with a slug and a thread (SPEC 9.10; Merge, Deploy and Install take the rest of the line). The slug names whatever the thread belongs to, a client, a project or a team. The boxes are the options of one answer: on the list each is a one-off button named by its slug, and once one is ticked the others are no actions and the hub refuses a second tick (#109); the deployment's mail module moves the thread. (Renamed from Move to by Thierry, 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 20; the code still says Move to until ticket 168.)
+_Avoid_: Move to, reassign, client, transfer
+
+**Move** (of a rectoverso):
+The owner putting a loose rectoverso in another folder of its root, from the Sheaf or by their agent; renaming a folder moves each rectoverso in it. A repo rectoverso is moved by git, not from the Sheaf. The old address forwards to the new one. A folder exists only while a rectoverso is in it. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 20; not built.)
+_Avoid_: Move to, refile, rename
+
+**Forward** (of an address):
+The hub's record that an old address of a rectoverso now leads to its new one, after a Move, a git rename or a root moved to another tiroir. It never expires; links that name the old address are not rewritten. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 20; not built.)
+_Avoid_: redirect, alias
 
 **One-off action**:
 An action a member presses once and that stays pressed: every word but Share (SPEC 9.10), and the merge desk's Merge, Deploy and Install (action-buttons 04). On the list it is a red button; on a page it is a red button where its line is, inside the text, with the rest of the line beside it as its text (action-buttons 01); a one-off whose box the page does not find is in the row above the document. It reads Undo for 5 seconds before the hub writes the tick; once pressed it stays on the row, filled and locked, with who pressed it and when (#110); the hub refuses a save that unticks it (#108); a Move to is a one-off too, one button per candidate.

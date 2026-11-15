@@ -2164,3 +2164,48 @@ def test_a_list_tick_made_through_the_legacy_marks_is_offered_and_written():
     block = split_md_blocks("* [X] c\n- [ ]\n1. - [ ] g\n")[0]
     fragment = ticked_html(block, 0, tick=False)
     assert fragment is not None and _toggle_boxes(block, fragment) == "* [ ] c\n- [ ]\n1. - [ ] g\n"
+
+
+def _list_tick(body: str, word: str = "Approve"):
+    """What the list's button does with the first `word` box of a sheaf: (the block's text after the tick as the save
+    writes it or None when the save would go through pandoc, the box the page is told, the edit or None)."""
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes
+    text = "# A sheaf\n\n" + body
+    sheaf = the_list.read_sheaf("x.md", text)
+    n = [a[0] for a in sheaf.actions].index(word)
+    at = the_list.box_place(text, sheaf.actions[n][2])
+    edit = the_list.tick_edit(text, n, word)
+    block = split_md_blocks(text)[edit["i"]] if edit else None
+    return (None if edit is None else _toggle_boxes(block, edit["html"])), at, edit
+
+
+@pytest.mark.parametrize("body, ticked", [
+    # F2 of the gate review of PR 360: Approve is the 2nd box drawn but the 3rd mark of the first reading
+    # (the empty `- [ ]` has a mark and no box); it was refused, and written in place before ticket 128.
+    ("- [ ]\n- - [ ] o\n- [ ] Approve\n", "- [ ]\n- - [ ] o\n- [x] Approve\n"),
+    ("- - [ ]\n- [ ] Approve\n", "- - [ ]\n- [x] Approve\n"),
+])
+def test_the_lists_button_ticks_in_place_where_an_empty_item_stands_before_it(body, ticked):
+    out, at, edit = _list_tick(body)
+    assert out == ticked
+
+
+def test_the_lists_button_never_ticks_another_box_than_its_own():
+    # F1 of the gate review of PR 360: the box number was the mark's, and a mark and a box are not the same count
+    # (an empty item draws no box). Approve was number 4 and the 5th box of the block was `+ [ ] d`.
+    body = "> 1. > - [ ] x\n- - [ ]\n  - [ ] Approve\n+ [ ] d\n"
+    out, at, edit = _list_tick(body)
+    assert out == "- - [ ]\n  - [x] Approve\n+ [ ] d\n"      # the quote is a block of its own
+
+
+@pytest.mark.parametrize("body, k", [
+    ("- [ ]\n- - [ ] o\n- [ ] Approve\n", 1),        # the box the page draws second
+    ("1. [ ] e\n- [ ] Approve\n", 0),                 # an ordered item draws no box
+    ("- - [ ]\n  - [ ] Approve\n", 0),                # an empty item draws none
+    ("- [ ] a\n- [ ] Approve\n", 1),
+])
+def test_the_box_the_page_is_told_is_the_one_the_page_draws(body, k):
+    # The page ticks `boxesOf(block)[k]` (page.js): `k` counts the boxes drawn, not the marks of the source.
+    out, at, edit = _list_tick(body)
+    assert at is not None and at[1] == k

@@ -1997,32 +1997,34 @@ def test_a_cr_never_makes_the_tick_land_on_a_mark_in_a_code_block(src, k):
     assert out is None or out == src.replace("- \r[ ] B", "- \r[x] B")
 
 
-@pytest.mark.parametrize("src", [
-    '- [ ]\n- - [ ] x\n',               # pandoc 3.9 draws no box for the empty item; `- - [ ] x` is a box the marks miss
-    '- [ ]\r\n- - [ ] x\r\n',
-    '- [ ]\n-\r - [ ] x\n',
+@pytest.mark.parametrize("src, ticked", [
+    # pandoc 3.9 draws no box for the empty item; `- - [ ] x` is the box. Before ticket 135 the save refused (the marks
+    # were not the boxes one for one); it is written now, on the box's own line and on no other.
+    ('- [ ]\n- - [ ] x\n', '- [ ]\n- - [x] x\n'),
+    ('- [ ]\r\n- - [ ] x\r\n', '- [ ]\r\n- - [x] x\r\n'),
+    ('- [ ]\n-\r - [ ] x\n', '- [ ]\n-\r - [x] x\n'),
 ])
-def test_a_tick_never_lands_on_an_empty_task_item_standing_for_a_box_it_cannot_find(src):
+def test_a_tick_never_lands_on_an_empty_task_item_standing_for_a_box_it_cannot_find(src, ticked):
     # The marks and the boxes drawn were the same in number and state, but not the same items: the tick
     # of "x" was written on the empty item's line (measured on pandoc 3.9, no CR needed).
     from sheafmd.blocks import split_md_blocks
     from sheafmd.edit import _toggle_boxes
     block = split_md_blocks(src)[0]
-    assert _toggle_boxes(block, _page_with_box_flipped(block, 0)) is None
+    assert _toggle_boxes(block, _page_with_box_flipped(block, 0)) == ticked
 
 
-@pytest.mark.parametrize("src, k", [
-    ('- [ ]\n-\r [ ] b\n', 0),          # c2 of ticket 113: the page ticks b, the save used to tick the other line
-    ('- [ ]\n- [ ]\r b\n', 0),
-    ('- [ ]\n- [ ] b\n', 0),
+@pytest.mark.parametrize("src, ticked", [
+    ('- [ ]\n-\r [ ] b\n', '- [ ]\n-\r [x] b\n'),          # c2 of ticket 113: the page ticks b, the save used to tick the other line
+    ('- [ ]\n- [ ]\r b\n', '- [ ]\n- [x]\r b\n'),
+    ('- [ ]\n- [ ] b\n', '- [ ]\n- [x] b\n'),
 ])
-def test_an_empty_task_item_next_to_a_box_never_takes_its_tick(src, k):
-    # One box over two marks: the count check refuses these, the re-render check is not reached (as before PR 347).
-    # The cases that only the re-render check refuses are the `- - [ ] x` ones above.
+def test_an_empty_task_item_next_to_a_box_never_takes_its_tick(src, ticked):
+    # One box over two marks: the render says which mark the box is (ticket 135), so the tick is written on b's
+    # line, never on the empty item's (before, the count check refused it).
     from sheafmd.blocks import split_md_blocks
     from sheafmd.edit import _toggle_boxes
     block = split_md_blocks(src)[0]
-    assert _toggle_boxes(block, _page_with_box_flipped(block, k)) is None
+    assert _toggle_boxes(block, _page_with_box_flipped(block, 0)) == ticked
 
 
 def test_a_task_mark_read_through_crs_refuses_a_group_it_does_not_have():
@@ -2131,13 +2133,13 @@ def test_a_tick_in_a_block_with_a_box_behind_another_marker_is_written_in_place(
 
 @pytest.mark.parametrize("src, k, want", [
     # An empty item has a mark and no box, and a box behind another marker has a box and (since ticket 128) a mark:
-    # the first reading has three marks for two boxes. The legacy reading has two and the render of the result
-    # confirms it, as it did before ticket 128.
+    # the first reading has three marks for two boxes. The reading by box (ticket 132) has two, and the render of
+    # the result confirms it.
     ("* [X] c\n- [ ]\n1. - [ ] g\n", 0, "* [ ] c\n- [ ]\n1. - [ ] g\n"),
     ("- [ ]\n- - [ ] o\n  - [ ] i\n", 1, "- [ ]\n- - [ ] o\n  - [x] i\n"),
     ("+ [ ] d\n- [ ]\n- - [ ] o\n", 0, "+ [x] d\n- [ ]\n- - [ ] o\n"),
 ])
-def test_a_tick_that_the_legacy_marks_made_in_place_is_still_made_in_place(src, k, want):
+def test_a_tick_that_the_second_reading_made_in_place_is_still_made_in_place(src, k, want):
     # Ticket 128, b1 again (Rhea): a PR never makes a case worse than b90b6a0.
     from sheafmd.blocks import split_md_blocks
     from sheafmd.edit import _toggle_boxes
@@ -2157,8 +2159,8 @@ def test_a_long_run_of_quote_marks_is_read_in_linear_time():
     assert time.perf_counter() - t < 1
 
 
-def test_a_list_tick_made_through_the_legacy_marks_is_offered_and_written():
-    # d3 of the re-read: ticked_html goes through the second reading too (an empty item beside a box behind a marker).
+def test_a_list_tick_made_through_the_second_reading_is_offered_and_written():
+    # d3 of the re-read: ticked_html goes through the reading by box too (an empty item beside a box behind a marker).
     from sheafmd.blocks import split_md_blocks
     from sheafmd.edit import _toggle_boxes, ticked_html
     block = split_md_blocks("* [X] c\n- [ ]\n1. - [ ] g\n")[0]
@@ -2223,3 +2225,42 @@ def test_the_page_asks_a_boxs_number_once_per_text(monkeypatch):
     real = _pandoc.run
     monkeypatch.setattr(_pandoc, "run", lambda *a, **k: runs.append(1) or real(*a, **k))
     assert box_number(src, at) == 0 and runs == []
+
+
+@pytest.mark.parametrize("body, ticked", [
+    # Ticket 135 (d of the re-read of PR 360): the marks of the first reading are not the boxes one for one, and
+    # the list's button refused each of these, as main did. The mark of the action has a box: it is written in place.
+    ("- [ ] Approve\n- [ ]\n- [ ] Done\n", "- [x] Approve\n- [ ]\n- [ ] Done\n"),
+    ("- [ ]\n  - [ ] Approve\n", "- [ ]\n  - [x] Approve\n"),
+    ("- [ ]\r\n- [ ] Approve\r\n", "- [ ]\r\n- [x] Approve\r\n"),
+    ("- [ ] Approve\n- <input type=\"checkbox\"> x\n", "- [x] Approve\n- <input type=\"checkbox\"> x\n"),
+    ("- <input type=\"checkbox\"> x\n- [ ] Approve\n", "- <input type=\"checkbox\"> x\n- [x] Approve\n"),
+    # an empty item between marks, a box behind a chain, and an ordered item that draws no box, all in one list
+    ("- [ ]\n- - [ ] o\n1. [ ] e\n- [ ]\n- [ ] Approve\n", "- [ ]\n- - [ ] o\n1. [ ] e\n- [ ]\n- [x] Approve\n"),
+])
+def test_the_lists_button_ticks_in_place_where_marks_and_boxes_do_not_follow_one_for_one(body, ticked):
+    out, at, edit = _list_tick(body)
+    assert out == ticked
+
+
+@pytest.mark.parametrize("body, ticked", [
+    # Ticket 132 (c1 of the review of ticket 128): the page's own save of a tick, where the first reading's marks
+    # are not the boxes: the empty item is known by the render, so the write no longer waits for a second reading.
+    ("- [ ] a\n- [ ]\n- [ ] b\n", "- [x] a\n- [ ]\n- [ ] b\n"),
+    ("- [ ]\n  - [ ] a\n", "- [ ]\n  - [x] a\n"),
+])
+def test_the_pages_tick_is_written_in_place_where_an_empty_item_stands_among_the_marks(body, ticked):
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes, ticked_html
+    block = split_md_blocks(body)[0]
+    fragment = ticked_html(block, 0)
+    assert fragment is not None and _toggle_boxes(block, fragment) == ticked
+
+
+def test_a_box_with_no_mark_is_never_flipped_by_the_save():
+    # A raw `<input>` draws a box and has no mark: a page that ticked it has no mark to write, so the save is
+    # the general one (None), whatever the other marks of the block are.
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes, ticked_html
+    block = split_md_blocks('- [ ] a\n- <input type="checkbox"> x\n')[0]
+    assert ticked_html(block, 1) is None

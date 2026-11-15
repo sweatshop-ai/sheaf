@@ -19,4 +19,4 @@ Autres (c) : échec ou délai de pandoc dans la lecture de la sourcepos nomme la
 
 **Claimed by:** Mauro 2026-11-15 12:11
 
-**Status:** in-progress
+**Status:** done (PR 366, merged d95f0b5)

@@ -1,7 +1,7 @@
 # 05: Where the original of a page lives: the laptop or the tiroir
 
 **Type:** grilling
-**Status:** open
+**Status:** claimed by Ottilie (2026-11-15)
 **Blocked by:** 01, 02
 **Map:** ../map.md
 

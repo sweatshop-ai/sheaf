@@ -1,7 +1,7 @@
 # 02: How an agent session on a laptop gets a page onto a tiroir
 
 **Type:** research
-**Status:** open
+**Status:** claimed (Frida research subagent, 2026-11-15)
 **Blocked by:** none
 **Map:** ../map.md
 

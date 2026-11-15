@@ -578,6 +578,19 @@ def test_an_upgrade_handover_leaves_the_toast_of_a_merged_save_for_the_new_boot(
     assert front.page.evaluate("JSON.parse(sessionStorage.getItem('sheaf-mount:rd-keep'))") == {"doc": DOC}
 
 
+def test_an_upgrade_handover_keeps_the_keep_the_reload_wrote_when_it_names_this_document(front):
+    """Ticket 139 (c2): the handover replaced the whole keep with `{doc}`, and the new boot lost the scroll and the state."""
+    front.open()
+    front.page.route("**/_/mount?doc=*", _another_version)
+    seed = {"doc": DOC, "y": 40, "editing": False}
+    front.page.evaluate("sessionStorage.setItem('sheaf-mount:rd-toast', '1 block \u2192 plan.md');"
+                        "sessionStorage.setItem('sheaf-mount:rd-keep', %s)" % json.dumps(json.dumps(seed)))
+    front.site.file.write_text(front.site.file.read_text().replace("about pears", "about plums"), encoding="utf-8")
+    until(lambda: front.page.evaluate("window.__upgrades || null"), what="the loader told")
+    until(lambda: "updated" in front.js("return root.getElementById('rd-toast').textContent;"), what="the handover said")
+    assert front.page.evaluate("JSON.parse(sessionStorage.getItem('sheaf-mount:rd-keep'))") == seed
+
+
 def test_of_two_mounts_on_one_pane_the_one_called_last_stands_whichever_answers_first(front):
     """The loader moves on before the first answer is in: the older mount must not take the pane over the newer one
     (gate P2 of 2e9856f: the answer that came last won, and dropping the older handle left the pane empty)."""

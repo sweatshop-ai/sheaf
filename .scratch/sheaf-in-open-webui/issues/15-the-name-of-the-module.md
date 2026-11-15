@@ -1,7 +1,7 @@
 # 15: The module's name in Open WebUI
 
 **Type:** grilling
-**Status:** open
+**Status:** claimed by Ottilie (2026-11-15)
 **Blocked by:** none
 **Map:** ../map.md
 

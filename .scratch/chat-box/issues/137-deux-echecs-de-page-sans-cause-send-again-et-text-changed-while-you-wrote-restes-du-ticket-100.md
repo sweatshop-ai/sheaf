@@ -9,7 +9,8 @@
 
 **À faire :** sur un échec réel, lire d'abord la section « the event stream, page and hub » : le hub a-t-il publié `changed`, la page l'a-t-elle reçu, un toast a-t-il été mis en file ? Établir la cause avant tout correctif, retry ou délai. Le correctif va dans la page ou le hub si c'est un défaut du produit, dans les aides de test si c'est le test.
 
-**Blocked by:** un échec de CI avec le journal (rien à lire tant qu'il ne revient pas)
+**Blocked by:**
+- External: un échec de CI de ces tests qui revient avec le journal (rien à lire tant qu'il ne revient pas)
 
 **Status:** open
 

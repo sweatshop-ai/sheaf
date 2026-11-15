@@ -548,6 +548,35 @@ def test_a_remount_that_fails_leaves_no_toast_for_a_later_mount_of_the_tab(front
     assert front.page.evaluate("sessionStorage.getItem('sheaf-mount:rd-toast')") is None
 
 
+def test_a_remount_that_fails_says_the_toast_a_merged_save_left_before_its_own_line(front):
+    """Ticket 129 (c): `failed()` says what the save's reload was to say, then its own line, each one in full."""
+    front.open()
+    front.page.route("**/_/mount?doc=*", lambda route: route.fulfill(
+        status=401, content_type="application/json", body='{"error": "sign in"}'))
+    front.js("window.__said = []; new MutationObserver(() => { const t = root.getElementById('rd-toast').textContent;"
+             "if (t && window.__said[window.__said.length - 1] !== t) window.__said.push(t); })"
+             ".observe(root.getElementById('rd-toast'), {childList: true, characterData: true, subtree: true});")
+    front.page.evaluate("sessionStorage.setItem('sheaf-mount:rd-toast', '1 block \u2192 plan.md')")
+    front.site.file.write_text(front.site.file.read_text().replace("about pears", "about plums"), encoding="utf-8")
+    until(lambda: any("401" in t for t in front.js("return window.__said;")), what="the failure said in the page")
+    said = front.js("return window.__said;")
+    assert "1 block \u2192 plan.md" in said[0], said
+    assert "401" in said[-1], said
+
+
+def test_an_upgrade_handover_leaves_the_toast_of_a_merged_save_for_the_new_boot(front):
+    """Ticket 129 (c): the loader mounts the new version into the same pane, which removes the old page's toasts, so a
+    toast `failed()` said there was never seen. The handover leaves `rd-toast` for the new boot, as before #125."""
+    front.open()
+    front.page.route("**/_/mount?doc=*", _another_version)
+    front.page.evaluate("sessionStorage.setItem('sheaf-mount:rd-toast', '1 block \u2192 plan.md')")
+    front.site.file.write_text(front.site.file.read_text().replace("about pears", "about plums"), encoding="utf-8")
+    until(lambda: front.page.evaluate("window.__upgrades || null"), what="the loader told")
+    until(lambda: "updated" in front.js("return root.getElementById('rd-toast').textContent;"), what="the handover said")
+    assert front.page.evaluate("sessionStorage.getItem('sheaf-mount:rd-toast')") == "1 block \u2192 plan.md"
+    assert front.page.evaluate("Object.keys(sessionStorage).filter((k) => k.endsWith('rd-keep'))") == []
+
+
 def test_of_two_mounts_on_one_pane_the_one_called_last_stands_whichever_answers_first(front):
     """The loader moves on before the first answer is in: the older mount must not take the pane over the newer one
     (gate P2 of 2e9856f: the answer that came last won, and dropping the older handle left the pane empty)."""

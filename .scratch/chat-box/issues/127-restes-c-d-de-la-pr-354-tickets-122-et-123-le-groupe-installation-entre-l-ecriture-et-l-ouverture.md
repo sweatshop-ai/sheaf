@@ -9,7 +9,7 @@
 
 **Claimed by:** Nuno 2026-11-15 (taken over from Tomas)
 
-**Status:** in-progress
+**Status:** done (PR 376, merged as b6e3390)
 
 ## Decision (Tomas, branch chat-box/127)
 

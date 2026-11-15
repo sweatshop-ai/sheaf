@@ -15,9 +15,9 @@
 
 **Blocked by:** Codex usage limit until 2026-11-15 01:00
 
-**Claimed by:** (libre)
+**Claimed by:** Yuki
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] Cinq rapports Codex enregistrés
 - [ ] Chaque trouvaille classée a/b/c/d ; a et b corrigées avec un test rouge, c et d en tickets

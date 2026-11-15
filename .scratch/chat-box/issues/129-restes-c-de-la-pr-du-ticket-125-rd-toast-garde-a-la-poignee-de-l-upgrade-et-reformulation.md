@@ -11,8 +11,8 @@
 
 **Claimed by:** Freya 2026-11-15
 
-**Status:** in-progress
+**Status:** done (PR 368 merged as 95d46ea)
 
 **Par où commencer :** `src/sheafmd/page/mount.js` ~400, `page.js` `failed()` ; tests dans `tests/page/test_mount_page.py` ; sur t-compute, jamais sur le portable.
 
-- [ ] Le toast d'une fusion n'est pas perdu quand l'upgrade prend la main, ou le SPEC dit pourquoi
+- [x] Le toast d'une fusion n'est pas perdu quand l'upgrade prend la main, ou le SPEC dit pourquoi

@@ -194,3 +194,31 @@ def test_entries_of_an_earlier_builds_list_with_the_same_time_keep_the_order_of_
     until(lambda: p.evaluate("localStorage.getItem(%s)" % json.dumps(comment_draft_key(site))) is None, what="the list to be moved")
     loaded(p)
     assert in_order(p, words) == words
+
+
+# A move of the list that stops half-way (the store has room for one key) while a clear is held (the store refused the read
+# when the entry was discarded): the clear is played by the first read that works, and the list is written back without
+# the entry it names, with no key of the move left and none of the entries listed twice.
+def test_a_held_clear_is_played_when_the_move_of_the_list_stops_half_way(tab, site):
+    tab.open()
+    p, key = tab.page, comment_draft_key(site)
+    entries = [message(t, f"2026-10-14T11:0{i}:00.000Z") for i, t in enumerate(["first words", "second words", "third words"])]
+    set_kept(p, site, entries)
+    loaded(p)
+    p.click(UNSENT)
+    p.wait_for_selector(LIST, timeout=3000)
+    p.evaluate("""(key) => { const get = Storage.prototype.getItem;
+      window.__refuse = true;
+      Storage.prototype.getItem = function (k) { if (window.__refuse && String(k).startsWith(key)) throw new Error('refused'); return get.call(this, k); }; }""", key)
+    discard(p, "second words")                     # the read is refused: the clear is held, nothing is written
+    assert [e["body"] for e in json.loads(p.evaluate("(k) => JSON.stringify(JSON.parse(Storage.prototype.getItem.call(localStorage, k)))", key))] \
+        == ["first words", "second words", "third words"]
+    p.evaluate("""(key) => { window.__refuse = false; const set = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (k, v) {
+        if (String(k).startsWith(key + ':e:') && Object.keys(localStorage).filter(x => x.startsWith(key + ':e:')).length >= 1) throw new Error('quota');
+        return set.call(this, k, v); }; }""", key)
+    p.click(UNSENT)                                # a read that works: the held clear is played, and the move stops after one key
+    until(lambda: sorted(e["body"] for e in kept_entries(p, site)) == ["first words", "third words"], what="the held clear to be played")
+    assert p.evaluate("Object.keys(localStorage).filter(k => k.startsWith(%s)).length" % json.dumps(key + ":e:")) == 0, "a key of the stopped move is left"
+    loaded(p)
+    assert listed(p) == ["first words", "third words"]

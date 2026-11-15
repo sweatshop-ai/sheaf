@@ -10,6 +10,6 @@
 
 **Claimed by:** Dalia
 
-**Status:** ready-for-agent
+**Status:** done (PR 360, merged 536f709)
 
-- [ ] points 1 et 2 corrigés ou écartés avec la preuve ; 3 et 4 faits
+- [x] points 1 et 2 corrigés ou écartés avec la preuve ; 3 et 4 faits

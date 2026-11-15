@@ -12,6 +12,6 @@
 
 **Claimed by:** Dalia
 
-**Status:** ready-for-agent
+**Status:** done (PR 353, merged 4002440)
 
-- [ ] c1, d1, d2, d4, d5 corrigés ; c7 et d3 corrigés ou écartés avec la preuve
+- [x] c1, d1, d2, d4, d5 corrigés ; c7 et d3 corrigés ou écartés avec la preuve

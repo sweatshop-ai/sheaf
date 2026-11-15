@@ -1,7 +1,7 @@
 # 07: The Catalog inside Open WebUI, as a rough prototype
 
 **Type:** prototype
-**Status:** open
+**Status:** claimed by Ottilie (2026-11-15)
 **Blocked by:** 06
 **Map:** ../map.md
 

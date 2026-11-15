@@ -12,8 +12,8 @@
 
 **Par où commencer :** `tests/test_share_copy.py`, `test_the_refusal_of_an_empty_comment_opener_does_not_say_it_is_never_closed`.
 
-- [ ] Points 1 à 5 traités
-- [ ] CI verte
+- [x] ~~Points 1 à 5 traités~~ (struck: 1, 2 et 4 faits, PR 325 merge 2374c25 : message sans la clause fausse `src/sheafmd/render.py:75-82`, SPEC 6.2, empans calculés une fois ; le point 3 est déplacé au ticket 99 puis 115, le point 5 (passage Codex des PR 300 et 303) au ticket 99 puis 107 : moved to tickets 99, 115 and 107)
+- [x] CI verte — merge 2374c25 : check-runs total_count 3, `ubuntu-24.04 py3.13 slice 1/3`, `2/3`, `3/3` success
 
 **Claimed by:** Mauro 2026-11-14 18:51
 

@@ -17,6 +17,6 @@
 
 **Par où commencer :** `tests/page/pagehelp.py`, `toasts_to_the_end`.
 
-- [ ] `toasts_to_the_end` ne rend que les toasts qui ont été à l'écran depuis l'appel
-- [ ] Le pas de l'horloge est mesuré, et gardé ou changé avec la mesure
-- [ ] Les trois détails de style sont repris
+- [x] `toasts_to_the_end` ne rend que les toasts qui ont été à l'écran depuis l'appel — PR 330 (dc62826) : `tests/page/pagehelp.py:340` ne note le texte que si `up` ; tests `tests/page/test_page_waits.py:183` et `:190`
+- [x] Le pas de l'horloge est mesuré, et gardé ou changé avec la mesure — mesuré sur t-compute (7,5 s à 250 ms, 7,0 s à 1000 et 2000 ms : pas de gain), gardé à 250, mesure écrite dans le commentaire de `tests/page/pagehelp.py:304-306`
+- [x] Les trois détails de style sont repris — `tests/page/test_page_writing.py:2704` (`def taken_or_gone`), `:14` (import sur sa propre ligne), `tests/page/test_page_waits.py:169` (`page.text`, `toast_text` supprimée)

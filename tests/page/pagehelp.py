@@ -367,7 +367,8 @@ def kept_json(page, site):
 
 
 def kept_entries(page, site):
-    """The entries of the comment store, oldest first."""
+    """The entries of the comment store, in the order of the store: the entry keys by id, then those of an earlier build's
+    list. (The page lists the list's entries first; no test reads this order for a store that holds both.)"""
     return json.loads(kept_json(page, site) or "[]")
 
 

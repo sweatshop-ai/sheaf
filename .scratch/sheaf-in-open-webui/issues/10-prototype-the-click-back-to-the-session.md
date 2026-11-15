@@ -1,7 +1,7 @@
 # 10: How the click on a session's name gets back to the laptop
 
 **Type:** prototype
-**Status:** open
+**Status:** claimed by Ottilie (2026-11-15)
 **Blocked by:** none
 **Map:** ../map.md
 

@@ -196,7 +196,7 @@ def test_entries_of_an_earlier_builds_list_with_the_same_time_keep_the_order_of_
     assert in_order(p, words) == words
 
 
-# A move of the list that stops half-way (the store has room for one key) while a clear is held (the store refused the read
+# Ticket 144 (355, round 2, F2/F3): a move of the list that stops half-way (the store has room for one key) while a clear is held (the store refused the read
 # when the entry was discarded): the clear is played by the first read that works, and the list is written back without
 # the entry it names, with no key of the move left and none of the entries listed twice.
 def test_a_held_clear_is_played_when_the_move_of_the_list_stops_half_way(tab, site):
@@ -217,10 +217,11 @@ def test_a_held_clear_is_played_when_the_move_of_the_list_stops_half_way(tab, si
         == ["first words", "second words", "third words"]
     p.evaluate("""(key) => { window.__refuse = false; const set = Storage.prototype.setItem;
       Storage.prototype.setItem = function (k, v) {
-        if (String(k).startsWith(key + ':e:') && Object.keys(localStorage).filter(x => x.startsWith(key + ':e:')).length >= 1) throw new Error('quota');
+        if (String(k).startsWith(key + ':e:')) { if (window.__moved >= 1) throw new Error('quota'); window.__moved = (window.__moved || 0) + 1; }
         return set.call(this, k, v); }; }""", key)
+    assert p.locator(UNSENT).count() == 1, "the line was not drawn again: the click below is not the read the test means"
     p.click(UNSENT)                                # a read that works: the held clear is played, and the move stops after one key
     until(lambda: sorted(e["body"] for e in kept_entries(p, site)) == ["first words", "third words"], what="the held clear to be played")
-    assert p.evaluate("Object.keys(localStorage).filter(k => k.startsWith(%s)).length" % json.dumps(key + ":e:")) == 0, "a key of the stopped move is left"
+    assert p.evaluate("window.__moved") == 1, "the move did not stop half-way"
     loaded(p)
     assert listed(p) == ["first words", "third words"]

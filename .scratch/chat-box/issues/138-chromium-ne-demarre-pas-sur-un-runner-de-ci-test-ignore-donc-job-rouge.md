@@ -9,7 +9,7 @@
 
 **Blocked by:**
 
-- External: un échec de lancement du navigateur en CI qui porte le rapport complet (après fusion de la PR 367)
+- External: un échec de lancement du navigateur en CI qui porte le rapport complet (après fusion de la PR 367, 5ce4e46)
 
 **Claimed by:** Isolde 2026-11-15 12:38
 

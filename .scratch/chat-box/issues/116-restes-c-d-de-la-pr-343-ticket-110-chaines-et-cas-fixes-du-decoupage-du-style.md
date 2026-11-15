@@ -9,6 +9,12 @@
 
 **Blocked by:** PR 343 fusionnée
 
+- [x] Point 1 : chaînes avec échappement hexa + espace blanche (saut de ligne, CRLF), `\`+CRLF et CR/FF fin de chaîne : corrigés dans le code et la référence, tests rouges d'abord (PR 348)
+- [x] Point 2 : les deux mutants meurent (`SPLIT_CASES` et pièces du fuzz), vérifié à la main et par la revue Opus (4 mutants + 5 autres)
+- [x] Point 3 : SPEC 9.5, phrase du fermant et « le découpage suit le tokenizer » réécrites
+- [x] Point 4 : `<!--` sauté comme un jeton, `isdigit` ASCII dans la référence ; NUL/CR/FF hors chaîne et `_unescaped` : ticket 124 (PR du ticket 124)
+- [x] Revue Opus GO (pr-116-reviews/opus-1.md), CI verte (PR 348)
+
 **Claimed by:** Marisol
 
-**Status:** ready-for-agent
+**Status:** done (PR 348, merge 077a2c9)

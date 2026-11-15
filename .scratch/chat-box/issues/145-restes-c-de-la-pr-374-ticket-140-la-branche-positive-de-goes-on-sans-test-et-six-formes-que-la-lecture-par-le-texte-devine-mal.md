@@ -14,10 +14,13 @@
 
 **Claimed by:** Bruno
 
-**Status:** in-progress (Bruno)
+**Status:** done (PR 378, merged as 8ccd2dc)
 
 **Par où commencer :** `tests/test_hub_list.py`, à côté de `test_a_tick_in_a_long_task_list_with_an_empty_item_costs_a_fixed_number_of_renders`. Sur t-compute : forcer `_goes_on` à `False` et voir quels tests virent au rouge.
 
-- [ ] c2 : un test passe par la branche positive de `_goes_on` et devient rouge quand elle est forcée à `False` (ou la preuve que `test_ticked_html_in_a_long_list_with_empty_items_and_a_continued_item_costs_a_fixed_number_of_renders` l'est déjà)
-- [ ] c1 : un test par forme nommée prouve que le repli lent rend juste ; la lecture devinée n'est changée que si l'un d'eux est rouge
-- [ ] c3 vérifié, docstring de `_drawing_marks` corrigée
+- [x] c2 : un test passe par la branche positive de `_goes_on` et devient rouge quand elle est forcée à `False` (ou la preuve que `test_ticked_html_in_a_long_list_with_empty_items_and_a_continued_item_costs_a_fixed_number_of_renders` l'est déjà)
+  - Preuve : `_goes_on` forcé à `False` sur t-compute, ce test devient rouge en LF et en CRLF (`assert 10 == 12`). Aucun test ajouté.
+- [x] c1 : un test par forme nommée prouve que le repli lent rend juste ; la lecture devinée n'est changée que si l'un d'eux est rouge
+  - Preuve : `test_a_tick_in_a_list_the_text_reading_guesses_wrong_still_lands_on_the_right_line`, 8 formes, tous verts (le repli est juste), `_drawing_marks` inchangée ; `tests/test_hub_list.py` : 253 passed sur t-compute. Les formes NBSP et citation sont servies par la première lecture, sans passer par `_boxed_marks` (dit dans le test).
+- [x] c3 vérifié, docstring de `_drawing_marks` corrigée
+  - Preuve : c3 est dans le test du point 1 (appel à `ticked_html`, CRLF) ; la docstring liste les formes, le repli et son coût (17 s à 4 100 éléments).

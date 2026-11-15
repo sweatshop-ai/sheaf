@@ -478,12 +478,13 @@ STREAM_JOURNAL_JS = """(() => {
   const now = performance.now.bind(performance), origin = performance.timeOrigin;
   // Kept in sessionStorage: a reload of the page, which is what a lost event or a lost toast often is, would
   // otherwise take the journal of the page that heard it (ticket 137).
+  const setItem = Storage.prototype.setItem;      // the native one: a test that watches the page's own setItem does not see the journal's
   let log = [];
   try { log = JSON.parse(sessionStorage.getItem('__sseJournal') || '[]'); } catch (e) {}
   window.__sseJournal = log;
   const note = (what, data) => {
     log.push([origin + now(), what, data === undefined ? '' : String(data).slice(0, 120)]);
-    try { sessionStorage.setItem('__sseJournal', JSON.stringify(log.slice(-400))); } catch (e) {}
+    try { setItem.call(sessionStorage, '__sseJournal', JSON.stringify(log.slice(-400))); } catch (e) {}
   };
   note('document', 'starts');
   window.addEventListener('pagehide', () => note('pagehide'));

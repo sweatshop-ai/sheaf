@@ -4202,11 +4202,16 @@ var create = function (ROOT, CFG, opts) {
         if (otherRoot(j)) { meetDocGone(whyGone(j)); if (last()) endCheck(); return; }
         if (a.missing) { if (last()) { meetFileMissing(); endCheck(); } return; }       // an older answer is no news
         takeTarget(j);
-        // The answer was read after a write whose `changed` came before it and waits: that event moves `hash`, in
-        // place when only comments moved. It is heard first, so the answer's hash is compared with the page's
-        // own after it, not before: a reload for a write the page can take in place loses what the page said of it.
-        heardHeld();
-        if (j && j.hash && j.hash !== hash) reloadWhenFree(popId);
+        // The newest answer is the one that compares the hash: an older one leaves the held events and the reload
+        // to it. The events waiting are heard first, so the hash is compared with the page's own after them: the
+        // answer was read after a write whose `changed` came before it, and a reload for a write the page can take
+        // in place loses what the page said of it. An answer read before that write names the hash the page held
+        // before the event: that is no change either.
+        if (last()) {
+          var was = hash;
+          heardHeld();
+          if (j && j.hash && j.hash !== hash && j.hash !== was) reloadWhenFree(popId);
+        }
         meetTaken(j);
         takeJobs(j, jobs);
         if (last()) endCheck();

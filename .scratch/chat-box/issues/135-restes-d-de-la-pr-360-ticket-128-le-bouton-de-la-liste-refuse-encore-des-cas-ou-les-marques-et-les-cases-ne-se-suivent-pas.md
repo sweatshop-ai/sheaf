@@ -6,6 +6,6 @@
 
 **Claimed by:** Yuki 2026-11-15 12:49
 
-**Status:** in-progress
+**Status:** done, PR 371 merged (cadd9d6)
 
-- [ ] les quatre cas ci-dessus écrivent en place, ou chacun est écarté avec la preuve
+- [x] les quatre cas ci-dessus écrivent en place, ou chacun est écarté avec la preuve

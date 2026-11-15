@@ -769,3 +769,12 @@ def test_the_point_stays_before_a_run_of_crs_that_follows_it(block, quote, expec
     s, e = sel(block, quote)
     at = rdc.anchor_point(block, s, e, quote)
     assert block[:at] + "|" + block[at:] == expect
+
+
+def test_unstrip_says_what_is_wrong_when_the_point_is_past_the_block():
+    # c1 of ticket 120: a bare IndexError from `keep[at - 1]`. No caller gets there; a future one fails clearly.
+    from sheafmd.comments import _kept, _unstrip
+    block = "a\rb"
+    assert _unstrip(_kept(block), 2, block) == 3          # the end of the block is a point
+    with pytest.raises(ValueError, match="offset 3 is past the end"):
+        _unstrip(_kept(block), 3, block)

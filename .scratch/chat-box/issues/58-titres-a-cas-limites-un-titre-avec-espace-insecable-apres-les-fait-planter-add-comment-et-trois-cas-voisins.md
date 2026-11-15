@@ -15,6 +15,6 @@ Classe : c.
 **Status:** done (PR 285, merge d9a969b)
 
 - [x] Un titre `#<espace insécable>Foo` : commentaire ajouté sans erreur, bloc à un endroit qui garde les mots — preuve : test de `add_comment`, rouge avant
-- [ ] `### ###` : `heading_anchor` rend None (prouvé), le bloc va sur sa propre ligne (chemin du merge non prouvé pour ce titre : test dans le ticket 65)
+- [x] `### ###` : `heading_anchor` rend None (prouvé), le bloc va sur sa propre ligne (chemin du merge prouvé dans le ticket 65, point 5 : `test_a_heading_that_is_only_hashes_puts_a_put_back_comment_on_a_line_of_its_own`, `tests/test_edit_followups.py`, PR 286, merge 4db141e, sur main)
 - [x] Un titre avec `<!--` non fermé : décision écrite (refuser, ou bloc avant l'ouvreur) et test
 - [x] Cas 4 : décision écrite (bloc multi-lignes sur sa propre ligne après le titre, SPEC 10.4)

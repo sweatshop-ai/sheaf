@@ -18,7 +18,7 @@
 **Par où commencer :** `tests/test_anchoring.py` : `## ## ##` accepte un commentaire (rouge avant) ; puis le point 4 dans `tests/test_edit_followups.py`.
 
 - [x] Point 1 corrigé, avec son test rouge d'abord
-- [ ] Points 2 à 4 corrigés ou la limite écrite dans le SPEC 10.4, chacun avec son test (3 : limite écrite, test ; 4 : corrigé, test ; 2 : `_unclosed_opener` lit de gauche à droite et saute balises et commentaires fermés, `_mask_code` saute les balises, mais un commentaire ordinaire fermé ne possède toujours pas son accent grave dans `_mask_code` : ticket 66)
+- [x] Points 2 à 4 corrigés ou la limite écrite dans le SPEC 10.4, chacun avec son test (3 : limite écrite, test ; 4 : corrigé, test ; 2 : `_unclosed_opener` lit de gauche à droite et saute balises et commentaires fermés, `_mask_code` saute les balises, mais un commentaire ordinaire fermé ne possède toujours pas son accent grave dans `_mask_code` : ticket 66, corrigé là : PR 291, merge 0b469e2, un seul balayeur `_scan`, sur main ; point 3 : limite écrite dans le SPEC 10.4, PR 286, merge 4db141e)
 - [x] Points 5 et 6 faits
 - [x] CI verte (tête 8c29c26, 3/3 tranches)
 

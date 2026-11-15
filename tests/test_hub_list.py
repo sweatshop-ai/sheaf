@@ -2209,3 +2209,16 @@ def test_the_box_the_page_is_told_is_the_one_the_page_draws(body, k):
     # The page ticks `boxesOf(block)[k]` (page.js): `k` counts the boxes drawn, not the marks of the source.
     out, at, edit = _list_tick(body)
     assert at is not None and at[1] == k
+
+
+def test_the_page_asks_a_boxs_number_once_per_text(monkeypatch):
+    # Re-read of the fix of PR 360, b: box_place ran one pandoc render per button on every serve of the page.
+    from sheafmd import _pandoc
+    from sheafmd.edit import box_number
+    src = "- [ ] zq-once-a\n- [ ] zq-once-b\n"
+    at = src.index("[ ]") + 1
+    box_number(src, at)
+    runs = []
+    real = _pandoc.run
+    monkeypatch.setattr(_pandoc, "run", lambda *a, **k: runs.append(1) or real(*a, **k))
+    assert box_number(src, at) == 0 and runs == []

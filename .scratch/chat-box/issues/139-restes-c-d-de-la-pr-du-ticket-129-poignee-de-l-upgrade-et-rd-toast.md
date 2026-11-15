@@ -10,4 +10,6 @@
 
 **Blocked by:** PR 129 fusionnée
 
-**Status:** ready-for-agent
+**Claimed by:** Freya 2026-11-15 13:29
+
+**Status:** in-progress

@@ -35,12 +35,14 @@ Text is entity-encoded on the way in and decoded on the way out, so what a reade
 typed is what they get back, including "&", "<" and "-->".
 """
 
+import bisect
+import functools
 import html as _html
 import re
 from dataclasses import dataclass, field
 
 from . import copyblock
-from .blocks import SETEXT_RE, split_md_blocks
+from .blocks import SETEXT_RE, TBLSEP_RE, split_md_blocks
 
 CODE_KINDS = {"fence", "indented_code", "frontmatter"}
 ONE_LINE_KINDS = {"heading", "table"}
@@ -54,9 +56,49 @@ WRITE_MARKER = "sheaf-comment"          # what new comments are written with
 MARKER_AT_HEAD_RE = re.compile(rf"({MARKER})(?=\s|$)")
 COMMENT_RE = re.compile(rf"<!--\s*{MARKER}\b")
 ROLES = ("answer", "action")
-# A CommonMark code span: a run of backticks, then the shortest text up to a run of
-# the same length that is not part of a longer one.
-CODE_SPAN_RE = re.compile(r"(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)")
+# A CommonMark code span: a run of backticks, then the text up to the next run of the same
+# length (a run, not part of a longer one). A backslash escapes the backtick it precedes, so a
+# run after an odd number of them opens nothing there; what is left of an escaped run (one
+# backtick shorter) may still open a span. The opening run is found by a pattern and its closer
+# by a lookup among the block's runs, so an opener that nothing closes costs one lookup, not a
+# search to the end of the block.
+_CODE_OPEN_RE = re.compile(r"(?<!\\)(?:\\\\)*(?:(?<!`)|\\`)(`+)(?!`)")
+_RUN_RE = re.compile(r"(?<!`)`+(?!`)")
+
+
+class _CodeSpan:
+    """What `re.Match` gives for the one group the callers read: group 1 is the opening run."""
+    def __init__(self, a, b):
+        self.a, self.b = a, b
+
+    def start(self, group=0):
+        return self.a
+
+    def end(self, group=0):
+        return self.b
+
+
+@functools.lru_cache(maxsize=8)
+def _runs_by_length(text: str):
+    by_len = {}
+    for m in _RUN_RE.finditer(text):
+        by_len.setdefault(m.end() - m.start(), []).append(m.start())
+    return by_len
+
+
+class _CodeSpanFinder:
+    @staticmethod
+    def search(text: str, pos: int = 0):
+        by_len = _runs_by_length(text)
+        for m in _CODE_OPEN_RE.finditer(text, pos):
+            k = m.end(1) - m.start(1)
+            starts = by_len.get(k, ())
+            at = bisect.bisect_left(starts, m.end(1))
+            if at < len(starts):
+                return _CodeSpan(m.start(1), starts[at] + k)
+
+
+CODE_SPAN_RE = _CodeSpanFinder()
 STRAY_RE = re.compile(r"^[ \t]*-->", re.M)
 REPLY_RE = re.compile(r'^@("(?:[^"]*)"|\S+) (\d{4}-\d\d-\d\dT\d\d:\d\d)(?: (answer|action))?:\s?(.*)$',
                       re.S)
@@ -264,37 +306,90 @@ def _parse_one(raw: str):
     return c, ""
 
 
-def _mask_code(text: str) -> str:
-    """`text` with its inline code spans blanked, the same length. Read left to right,
-    as CommonMark does: a comment that starts before a backtick owns it, so a backtick
-    in a comment's body does not open a span that runs on into the text after it."""
-    out, pos, span, head, no_head = [], 0, None, None, False
+_OPENER_RE = re.compile(r"(?<!\\)(?:\\\\)*(<!--)")
+
+
+def _scan(text: str):
+    """What CommonMark reads in `text` at the level of inline code, HTML tags and HTML comments, left
+    to right, as (kind, start, end) with kind "code", "tag", "comment", "empty" (`<!-->` and `<!--->`, a whole comment to CommonMark) or "open" (a `<!--` that nothing
+    closes: it is text to pandoc and a comment to the rest of the block, so it is reported and the scan goes on). Whichever of the three starts first
+    owns what it holds, so a backtick in a tag's attribute or in a comment's body opens no code span
+    that runs on into the text after it.     Each search runs once and is reused while its match still lies ahead of the position: a search
+    from there finds the same match as one made from an earlier position, so a block of many tags or
+    spans is read once, not once per item."""
+    pos, found, no_closer = 0, {}, False
+    # kind -> (pattern, group): an item starts at the group, which a tag's backslash prefix and
+    # an opener's escape check put after the match's own start.
+    kinds = {"code": (CODE_SPAN_RE, 1), "tag": (_HTML_TAG_RE, "tag"), "comment": (_OPENER_RE, 1)}
     while True:
-        if span is None or span.start() < pos:
-            span = CODE_SPAN_RE.search(text, pos)
-        if not span:
-            break
-        # Both searches run once and are reused while their match still lies ahead of
-        # pos: a search from pos finds the same match as the one made from an earlier
-        # position, so a block of many spans is read once, not once per span.
-        if not no_head and (head is None or head.start() < pos):
-            head = COMMENT_RE.search(text, pos)
-            no_head = head is None      # none now means none later: pos only moves on
-        if head and head.start() < span.start():
-            end = text.find("-->", head.end())
-            if end < 0:
-                break                   # never closed: the rest of the block is the comment
-            pos = end + 3
+        for kind, (rx, group) in kinds.items():
+            m = found.get(kind, False)
+            if m is None:
+                continue                # none now means none later: pos only moves on
+            if m is False or m.start(group) < pos:
+                found[kind] = rx.search(text, pos)
+        ahead = [(m.start(kinds[k][1]), k, m) for k, m in found.items() if m]
+        if not ahead:
+            return
+        a, kind, m = min(ahead)
+        if kind != "comment":
+            pos = m.end()
+            yield kind, a, pos
             continue
-        out.append(span.span())
-        pos = span.end()
+        if text.startswith((">", "->"), a + 4):
+            pos = a + 5 + (text[a + 4] == "-")
+            yield "empty", a, pos
+            continue
+        else:
+            e = -1 if no_closer else text.find("-->", a + 4)
+            no_closer = e < 0       # no `-->` after one opener is none after a later one
+            if e < 0:
+                # Nothing closes it: pandoc reads it as text, so what follows is read on
+                # (a code span after it is still code).
+                pos = a + 4
+                yield "open", a, len(text)
+                continue
+            pos = e + 3
+        yield "comment", a, pos
+
+
+def _mask_code(text: str, cells: bool = False) -> str:
+    """`text` with its inline code spans blanked, the same length (see `_scan` for what owns a
+    backtick). `cells`: the text is a table, whose cells pandoc splits at every unescaped `|`
+    before it reads a span, so none runs from one cell or row to the next."""
+    if "`" not in text:
+        return text
+    if cells:
+        pieces = []
+        for line in text.split("\n"):
+            pos, parts = 0, []
+            for m in _CELL_PIPE_RE.finditer(line):
+                parts += [_mask_code(line[pos:m.start(1)]), "|"]
+                pos = m.end(1)
+            pieces.append("".join(parts) + _mask_code(line[pos:]))
+        return "\n".join(pieces)
     parts, last = [], 0
-    for a, b in out:
-        parts.append(text[last:a])
-        parts.append(" " * (b - a))
-        last = b
+    for kind, a, b in _scan(text):
+        if kind == "code":
+            parts += [text[last:a], " " * (b - a)]
+            last = b
     parts.append(text[last:])
     return "".join(parts)
+
+
+def _read_block(kind: str, text: str):
+    """(masked, raw): `text` with its inline code blanked (`_mask_code`), and the heads of the comments that
+    pandoc shows as raw HTML (their places, their heads, the lines that carry a cell), or None for "do not ask".
+    A table that a quote or a list holds is read by pandoc (`_read_tables`), which splits its cells before it reads a span, sets the span's range, drops the
+    cells beyond the table's columns and reads an indented line as code: where the block may hold one and
+    holds a comment, a comment that pandoc does not show as raw HTML is not one."""
+    # A table of the document is read by pandoc too (ticket 133): it drops a comment in the alt text of an image and one
+    # beyond the table's columns, and reads no table where the header and the delimiter row differ in their cells.
+    if kind in ("quote", "list", "table") and COMMENT_RE.search(text) and _may_hold_table(text):
+        read = _read_tables(text)
+        if read is not None:
+            return _blank(text, read[1]), (*read[2], frozenset(read[0]))
+    return _mask_code(text, kind == "table"), None
 
 
 def parse(md: str) -> Parsed:
@@ -309,7 +404,7 @@ def parse(md: str) -> Parsed:
         # Inline code is literal text, so a comment written there is an example
         # (this spec has several). Search a copy with code spans blanked out, the
         # same length so every offset still points into the real text.
-        masked = _mask_code(text)
+        masked, raw_heads = _read_block(b.kind, text)
         i = 0
         while True:
             m = COMMENT_RE.search(masked, i)
@@ -324,6 +419,12 @@ def parse(md: str) -> Parsed:
                 break
             e += 3
             raw = text[a:e]
+            # A comment on a line that carries a cell is shown by its place alone: its head names a comment that is
+            # a block of its own, and a copy that pandoc dropped from a cell is not that one.
+            if raw_heads is not None and a not in raw_heads[0] and (
+                    text.count("\n", 0, a) in raw_heads[2] or _head_of(raw) not in raw_heads[1]):
+                i = e
+                continue
             c, why = _parse_one(raw)
             if c is None:
                 malformed.append(Malformed(line, why, start + a, start + e, raw))
@@ -350,14 +451,21 @@ def parse(md: str) -> Parsed:
     return Parsed(comments, malformed)
 
 
-def next_id(parsed: Parsed) -> str:
+def next_id_in(md: str) -> str:
+    """The first free `cN` in the document. Pandoc deletes a CR inside the opener of a comment (`<!\r--`, `id\r=c1`) and
+    shows the comment, so its id counts, though `parse` does not see it as written: the document is read both ways."""
+    return next_id(parse(md), *([parse(md.replace("\r", ""))] if "\r" in md else []))
+
+
+def next_id(parsed: Parsed, *more: Parsed) -> str:
+    """The first free `cN`. `more` are other readings of the same document (without its CRs, say), whose ids count too."""
     n = 0
-    for c in parsed.comments:
+    for c in [c for p in (parsed, *more) for c in p.comments]:
         m = re.fullmatch(r"c(\d+)", c.id)
         if m:
             n = max(n, int(m.group(1)))
-    for mm in parsed.malformed:
-        m = re.search(r"\bid=c(\d+)", mm.text)
+    for mm in [mm for p in (parsed, *more) for mm in p.malformed]:
+        m = re.search(r"\bid=c(\d+)", mm.text.replace("\r", ""))
         if m:
             n = max(n, int(m.group(1)))
     return f"c{n + 1}"
@@ -427,16 +535,161 @@ def _sourcepos_html(block: str) -> str:
     return r.stdout
 
 
-def projection(block: str) -> Projection:
-    from html.parser import HTMLParser
-
+def _offset_fn(block: str):
+    """The function that turns a pandoc sourcepos (line, column), both from 1, into an offset in `block`."""
     starts = [0]
     for ln in block.split("\n")[:-1]:
         starts.append(starts[-1] + len(ln) + 1)
 
     def off(line, col):
         line = min(line, len(starts))
-        return min(starts[line - 1] + col - 1, len(block))
+        text = block[starts[line - 1]:starts[line] - 1 if line < len(starts) else len(block)]
+        if "\t" not in text:
+            return min(starts[line - 1] + col - 1, len(block))
+        # Pandoc's column counts a tab as the spaces up to the next stop of 4.
+        seen = 0
+        for i, ch in enumerate(text):
+            if seen >= col - 1:
+                return starts[line - 1] + i
+            seen += 4 - seen % 4 if ch == "\t" else 1
+        return min(starts[line - 1] + len(text) + max(0, col - 1 - seen), len(block))
+    return off
+
+
+# A table inside a quote or a list is read by pandoc, not by this module: where the rows are and which
+# characters are inline code are what its sourcepos says (`data-pos` on each span of a cell and on each `<code>`),
+# so no container marker is read by hand. A table needs a delimiter row, so a block with no line of only
+# `|`, `-`, `:`, blanks and the marks of a quote or a list is not sent: one run per block that may hold a table.
+_DELIMITER_LINE_RE = re.compile(r"^[ \t\r>\-+*.)0-9:|]*$")
+
+
+_HEAD_RE = re.compile(rf"<!--\s*{MARKER}\b.*?(?=-->|\n|$)")
+
+
+def _head_of(raw: str) -> str:
+    """What names a comment in the HTML pandoc writes: its first line up to a `-->`."""
+    m = _HEAD_RE.match(raw.replace("\r", ""))
+    # Pandoc writes a tab of a raw HTML block as spaces up to the tab stop: runs of blanks are one.
+    return re.sub(r"[ \t]+", " ", m.group(0) if m else raw)
+
+
+# A line that may be a heading of a quote or a list: marks of containers, then a `#`.
+_HEADING_LINE_RE = re.compile(r"^[ \t>\-+*.)0-9]*#", re.M)
+
+
+def _container_heading(block: str, point: int):
+    """(start, end) offsets of the ATX heading of a quote or a list that holds `point`, as pandoc reads it
+    (`_read_tables`): from its hashes to the end of its words, or None."""
+    if not _HEADING_LINE_RE.search(block):
+        return None
+    read = _read_tables(block)
+    hit = next((h for h in read[3] if h[0] <= point <= h[1]), None) if read else None
+    if hit is None:
+        return None
+    line_start = block.rfind("\n", 0, hit[0]) + 1
+    m = re.search(r"#{1,6}[ \t]*$", block[line_start:hit[0]])
+    return (line_start + m.start(), hit[1]) if m else None
+
+
+def _may_hold_table(block: str) -> bool:
+    return "|" in block and any("|" in ln and "-" in ln and _DELIMITER_LINE_RE.match(ln)
+                                for ln in block.split("\n"))
+
+
+@functools.lru_cache(maxsize=16384)
+def _read_tables(block: str):
+    """(rows, code, raw, heads) as pandoc reads `block`, or None when pandoc fails: `rows` the lines (from 0) that carry a
+    cell of a table, `code` the (start, end) offsets of every inline code span, backticks included, `heads` the
+    (start, end) offsets of every heading, from the first to the last range pandoc gives it, `raw` the
+    starts of the comments that pandoc writes as raw HTML in a span (or, for one that is a block of its own, their heads, `_head_of`): one that it reads as code, drops with
+    a cell beyond the table's columns or shows as text is not in it. Pandoc
+    deletes a CR and counts columns without it, so it reads the block without its CRs and the offsets are
+    given back for the block as it is."""
+    from html.parser import HTMLParser
+
+    keep = [i for i, ch in enumerate(block) if ch != "\r"]
+    plain = block.replace("\r", "") if len(keep) < len(block) else block
+    try:
+        html = _sourcepos_html(plain)
+    except AnchorError:
+        return None
+    off = _offset_fn(plain)
+    back = (lambda o: keep[o] if o < len(keep) else len(block)) if plain is not block else (lambda o: o)
+    rows, code, heads = set(), [], []
+    starts, heads_raw = set(), set()
+
+    class P(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.stack = []
+            self.starts = []       # per open tag, where its range starts, or None
+            self.head = None
+
+        def handle_starttag(self, tag, attrs):
+            pos = next((v for k, v in attrs if k == "data-pos"), "")
+            ranges = [tuple(map(int, m.groups())) for m in POS_RE.finditer(pos)]
+            if tag in VOID_TAGS:
+                if ranges and self.head is not None:         # an image ends a heading's words as well
+                    self.head.append((back(off(ranges[0][0], ranges[0][1])), back(off(ranges[-1][2], ranges[-1][3]))))
+                return
+            self.stack.append(tag)
+            if tag == "code" and "pre" not in self.stack and ranges:
+                # A span over several lines has one range per line: the span runs from the first to the last,
+                # line breaks and container marks between them included.
+                code.append((back(off(ranges[0][0], ranges[0][1])), back(off(ranges[-1][2], ranges[-1][3]))))
+            self.starts.append(back(off(ranges[0][0], ranges[0][1])) if ranges else None)
+            if tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
+                self.head = []
+            elif ranges and self.head is not None:
+                # A heading in a list carries the range of the list, not its own: it is read by its words.
+                self.head.append((back(off(ranges[0][0], ranges[0][1])), back(off(ranges[-1][2], ranges[-1][3]))))
+            if ranges and tag in ("span", "code") and ("td" in self.stack or "th" in self.stack):
+                rows.update(a - 1 for a, _, _, _ in ranges)
+
+        def handle_endtag(self, tag):
+            if tag in VOID_TAGS:
+                return
+            if tag in ("h1", "h2", "h3", "h4", "h5", "h6") and self.head is not None:
+                if self.head:
+                    heads.append((min(a for a, _ in self.head), max(b for _, b in self.head)))
+                self.head = None
+            while self.stack:
+                self.starts.pop()
+                if self.stack.pop() == tag:
+                    break
+
+        def handle_comment(self, data):
+            # Pandoc writes a comment inside a paragraph, a heading or a cell in a span that carries its range:
+            # the place names it (the text of its head is changed, a tab to spaces and `\\|` to `|`). One that
+            # is a block of its own has no span and is named by its head.
+            start = next((a for a in reversed(self.starts) if a is not None), None)
+            at = start if start is not None and self.stack and self.stack[-1] == "span" else None
+            if at is not None:
+                starts.add(at)
+            else:
+                heads_raw.add(_head_of("<!--%s-->" % data))
+
+    p = P()
+    p.feed(html)
+    p.close()
+    return rows, tuple(code), (frozenset(starts), frozenset(heads_raw)), tuple(heads)
+
+
+def _blank(text: str, ranges) -> str:
+    """`text` with the given (start, end) ranges blanked, the same length."""
+    parts, last = [], 0
+    for a, b in sorted(ranges):
+        if a >= last:
+            parts += [text[last:a], " " * (b - a)]
+            last = b
+    parts.append(text[last:])
+    return "".join(parts)
+
+
+def projection(block: str) -> Projection:
+    from html.parser import HTMLParser
+
+    off = _offset_fn(block)
 
     text, chars, stack = [], [], []
     # A task list item's box comes out as a ☐ or ☒ right after <li>, outside any
@@ -455,10 +708,11 @@ def projection(block: str) -> Projection:
                 # the range of the block around it. The first is the one wanted
                 # (before 3.8 there is only one); dict(attrs) would keep the last.
                 pos = next((v for k, v in attrs if k == "data-pos"), None)
-                m = POS_RE.search(pos or "")
-                if m:
-                    a, b, c, d = map(int, m.groups())
-                    span = _Span(off(a, b), off(c, d))
+                # A span over several lines (in a quote or a list) has one range per line: it runs from the
+                # first range's start to the last range's end.
+                ranges = [tuple(map(int, m.groups())) for m in POS_RE.finditer(pos or "")]
+                if ranges:
+                    span = _Span(off(*ranges[0][:2]), off(*ranges[-1][2:]))
             stack.append((tag, span))
 
         def handle_endtag(self, tag):
@@ -502,8 +756,27 @@ def projection(block: str) -> Projection:
     return Projection("".join(text), chars)
 
 
+def _kept(block: str) -> list[int]:
+    """The offsets of `block` that pandoc keeps: every one but a CR, which it deletes before it reads anything."""
+    return [i for i, ch in enumerate(block) if ch != "\r"]
+
+
+def _unstrip(keep: list[int], at: int, block: str) -> int:
+    """The offset in `block` of offset `at` in the block without its CRs: right after the character before it, so
+    a run of CRs that follows stays after the point (`Title|\r\n`), and the block's first character for 0."""
+    if at > len(keep):
+        raise ValueError(f"offset {at} is past the end of a block of {len(keep)} characters without its CRs")
+    if at:
+        return keep[at - 1] + 1
+    return keep[0] if keep else len(block)
+
+
 def anchor_point(block: str, start: int, end: int, quote: str) -> int:
     """Offset in `block` where a comment on the selection [start, end) goes."""
+    if "\r" in block:
+        # Pandoc deletes a CR and counts its columns without it, so the point is found in the block without its CRs
+        # and given back as an offset in the block itself.
+        return _unstrip(_kept(block), anchor_point(block.replace("\r", ""), start, end, quote), block)
     proj = projection(block)
     if end <= start or proj.text[start:end] != squash(quote):
         raise AnchorError("the text changed since the page was rendered, select it again")
@@ -526,21 +799,42 @@ def anchor_point(block: str, start: int, end: int, quote: str) -> int:
 _ATX_TEXT = re.compile(r"^( {0,3}#{1,6}[ \t]+)(.*?)(?:[ \t]+#+)?[ \t]*$")
 
 
+def _atx_words(line: str):
+    """The match of `_ATX_TEXT` for an ATX heading line that has words, else None. Hashes after the
+    opening ones are the closing ones when nothing else is there: `### ###`, `# #` and `## #` have no
+    words, `## ## ##` has the word `##` (CommonMark and pandoc read it so)."""
+    m = _ATX_TEXT.match(line)
+    if m and m.group(2) and set(line[m.end(1):].strip()) != {"#"}:
+        return m
+    return None
+
+
+# An inline HTML tag as CommonMark reads it: it binds more tightly than a code span, so a backtick
+# in an attribute value opens nothing. ASCII only, whitespace of a tag is space, tab, newline or return (pandoc
+# reads no form feed), and an odd run of backslashes before the `<` escapes it (group `tag`).
+_HTML_TAG_RE = re.compile(
+    r"(?<!\\)(?:\\\\)*(?P<tag></[A-Za-z][A-Za-z0-9-]*[ \t\r\n]*>|<[A-Za-z][A-Za-z0-9-]*"
+    r"(?:[ \t\r\n]+[A-Za-z_:][A-Za-z0-9_:.-]*(?:[ \t\r\n]*=[ \t\r\n]*"
+    r"(?:[^ \t\r\n\"'=<>`]+|'[^']*'|\"[^\"]*\"))?)*[ \t\r\n]*/?>)")
+
+
 def _unclosed_opener(text: str) -> int:
     """Where a `<!--` outside code that nothing closes starts in `text`, or -1. Any `<!--`
-    counts, not only a sheaf comment's: a block written after it would close it."""
-    masked, i = _mask_code(text), 0
-    while True:
-        j = _opener(masked, i)
-        if j < 0:
-            return -1
-        e = masked.find("-->", j + 4)
-        if e < 0:
-            return j
-        i = e + 3
+    counts, not only a sheaf comment's: a block written after it would close it (see `_scan`).
+    `<!-->` and `<!--->` are whole comments, as CommonMark and the list read them."""
+    return next((a for kind, a, _ in _scan(text) if kind == "open"), -1)
 
 
 def heading_anchor(block: str) -> int | None:
+    """The offset of `_heading_anchor` read on the block without its CRs, which pandoc deletes (the splitter reads
+    them so, and a heading may begin after four of them), given back as an offset in the block itself."""
+    if "\r" not in block:
+        return _heading_anchor(block)
+    at = _heading_anchor(block.replace("\r", ""))
+    return None if at is None else _unstrip(_kept(block), at, block)
+
+
+def _heading_anchor(block: str) -> int | None:
     """Offset in a heading block where a comment on any of its words goes: the end of the heading's
     text, so the words stay whole for every reader of the file (a block in the middle, as in
     "Done<!-- … --> when", makes the title another one). Before an ATX heading's closing hashes and
@@ -555,8 +849,8 @@ def heading_anchor(block: str) -> int | None:
         at = len("\n".join(lines[:-1]).rstrip())
         floor = 0
     else:
-        m = _ATX_TEXT.match(lines[0])
-        if not m or not m.group(2) or set(m.group(2)) == {"#"}:    # `### ###` is an empty heading
+        m = _atx_words(lines[0])
+        if not m:
             return None
         at, floor = m.end(2), len(m.group(1).rstrip())
     open_at = _unclosed_opener(block[:at])
@@ -568,9 +862,118 @@ def heading_anchor(block: str) -> int | None:
     return at - 1 if run % 2 else at
 
 
+# A cell border: a `|` with no backslash right before it. Unlike an escape in running text, pairs do not
+# count here: pandoc (gfm) keeps `a \\| b` in one cell, whatever number of backslashes stand before the pipe.
+_CELL_PIPE_RE = re.compile(r"(?<!\\)(\|)")
+
+
+_CONTAINER_RE = re.compile(r"[ \t]*(?:>|(?:[-+*]|\d{1,9}[.)])(?=[ \t]))[ \t]?")
+
+
+def in_table_row(block: str, point: int) -> bool:
+    """Whether `point` is on a row of a table that a quote or a list holds (`> | a | b |`, an item
+    with a paragraph before its table): a line that pandoc reads a cell on (`_read_tables`), or one
+    that the splitter would read as a row (`_in_table_row_by_markers`): the splitter cuts a block at a
+    delimiter row that pandoc does not read, and a comment of several lines written there is cut with it.
+    The splitter reads such a block as a quote or a list, not a table, but a comment in it must be written
+    as one in a table: on one line, at the end of a cell."""
+    if _container_heading(block, point):
+        return True
+    if not _may_hold_table(block):
+        return False
+    read = _read_tables(block)
+    if read is not None and block.count("\n", 0, point) in read[0]:
+        return True
+    return _in_table_row_by_markers(block, point)
+
+
+def _in_table_row_by_markers(block: str, point: int) -> bool:
+    """The rows as the splitter reads them: the container markers read by hand, as far as they go. Read without the
+    CRs pandoc deletes (a CR before a `>` or in a delimiter row does not make the table another block)."""
+    if "\r" in block:
+        return _in_table_row_by_markers(block.replace("\r", ""), sum(1 for i in _kept(block) if i < point))
+    lines = block.split("\n")
+    n = block.count("\n", 0, point)
+    bare = []
+    for line in lines:
+        while (m := _CONTAINER_RE.match(line)) and m.end():
+            line = line[m.end():]
+        bare.append(line)
+    if (n + 1 < len(bare) and _CELL_PIPE_RE.search(bare[n]) and _CELL_PIPE_RE.search(bare[n + 1])
+            and TBLSEP_RE.match(bare[n + 1])):
+        return True                 # the header row, above its delimiter row
+    for i in range(n, -1, -1):
+        if not _CELL_PIPE_RE.search(bare[i]):
+            return False
+        if i and TBLSEP_RE.match(bare[i]) and _CELL_PIPE_RE.search(bare[i - 1]):
+            return True
+    return False
+
+
+def cell_end(block: str, point: int, cells: bool = True, code=None) -> int:
+    """Offset where a comment on a selection ending at `point` goes in a table: the end of the cell that
+    holds `point`, before its closing `|` and the spaces in front of it, so the cell's words stay whole
+    for every reader of the file. A `|` ends a cell unless a backslash stands right before it (pandoc counts no pairs), in code
+    as well (GFM and pandoc read `a|b` in a code span as two cells); a row with no closing `|` ends the
+    cell at the end of its line. Before a backslash that ends the cell's text, which would escape the
+    block's `<`, and before a `<!--` in the cell that nothing closes, which a block after it would close,
+    hiding the words it was meant to hold. Where the cell's end is inside a code span that `parse` reads
+    across cells (pandoc splits the cells first), the block stays after the selection: written there it
+    would be code to `parse`, and the comment lost. `code` is the inline code ranges that pandoc reads
+    in a quote or a list (`_read_tables`), which `parse` masks the same way. Read without the CRs pandoc
+    deletes, so a backslash or spaces before a CR and the pipe still stand before the pipe."""
+    if "\r" in block:
+        keep = _kept(block)
+        if code is not None:
+            code = tuple((sum(1 for i in keep if i < x), sum(1 for i in keep if i < y)) for x, y in code)
+        return _unstrip(keep, cell_end(block.replace("\r", ""), sum(1 for i in keep if i < point), cells, code), block)
+    line_start = block.rfind("\n", 0, point) + 1
+    eol = block.find("\n", point)
+    line_end = len(block) if eol < 0 else eol
+    # Read from the start of the line: whether a `|` is escaped depends on the backslashes before it.
+    pipes = [m.start(1) for m in _CELL_PIPE_RE.finditer(block, line_start, line_end)]
+    at = next((p for p in pipes if p >= point), line_end)
+    cell_start = max((p + 1 for p in pipes if p < point), default=line_start)
+    while at > point and block[at - 1] in " \t":
+        at -= 1
+    open_at = _unclosed_opener(block[cell_start:at])
+    if open_at >= 0:
+        at = cell_start + len(block[cell_start:cell_start + open_at].rstrip())
+        if not block[cell_start:at].strip():
+            raise AnchorError("this cell has no place for a comment, comment on another cell")
+    run = len(block[cell_start:at]) - len(block[cell_start:at].rstrip("\\"))
+    if run % 2:
+        at -= 1
+    if code is not None:
+        if any(a < at < b for a, b in code):
+            if any(a < point < b for a, b in code):
+                raise AnchorError("this cell is inside a code span, comment on another cell")
+            return point
+        return at
+    if _mask_code(block[:at] + "\0" + block[at:], cells)[at] == " ":
+        if not cells and _mask_code(block[:point] + "\0" + block[point:])[point] == " ":
+            raise AnchorError("this cell is inside a code span that runs across cells, "
+                              "comment on another cell")
+        return point
+    return at
+
+
 def comment_point(kind: str, block: str, start: int, end: int, quote: str) -> int:
     """Offset in `block` (of the given kind) where a comment on the selection [start, end) goes."""
     point = anchor_point(block, start, end, quote)      # a heading checks the selection too, then ignores where it ends
+    if kind == "table":
+        return cell_end(block, point)
+    if kind in ("quote", "list") and (head := _container_heading(block, point)):
+        # A heading in a quote or a list: the comment goes at the end of its words, on its line (ticket 55).
+        eol = block.find("\n", head[0])
+        line = block[head[0]:len(block) if eol < 0 else eol]
+        at = heading_anchor(line) if _atx_words(line.replace("\r", "")) else None
+        if at is None:
+            raise AnchorError("this heading has no place for a comment, comment on a paragraph")
+        return head[0] + at
+    if kind in ("quote", "list") and in_table_row(block, point):
+        read = _read_tables(block)
+        return cell_end(block, point, cells=False, code=read[1] if read else None)
     if kind != "heading":
         return point
     at = heading_anchor(block)
@@ -606,9 +1009,9 @@ def add_comment(md: str, block: int, start: int, end: int, quote: str, body: str
     b = blocks[block]
     _check_kind(b)
     at_off = comment_point(b.kind, b.content, start, end, quote)
-    c = Comment(id=next_id(parse(md)), by=by, at=at, status="open",
+    c = Comment(id=next_id_in(md), by=by, at=at, status="open",
                 quote=" ".join(quote.split()), body=body.strip("\n"))
-    raw = format(c, one_line=b.kind in ONE_LINE_KINDS)
+    raw = format(c, one_line=b.kind in ONE_LINE_KINDS or in_table_row(b.content, at_off))
     pos = _block_offsets(blocks)[block] + at_off
     return md[:pos] + raw + md[pos:], c.id
 
@@ -661,7 +1064,7 @@ def _comment_spans(md: str) -> list:
         pos += len(b.text)
         if b.kind in CODE_KINDS:
             continue
-        i = 0
+        i, o, span = 0, None, None
         while True:
             if start is not None:
                 e = text.find("-->", i)
@@ -669,8 +1072,14 @@ def _comment_spans(md: str) -> list:
                     break
                 spans.append((start, base + e + 3))
                 i, start = e + 3, None
-            o, span = _opener(text, i), CODE_SPAN_RE.search(text, i)
-            if span and (o < 0 or span.start() < o):
+            # Each search is reused while its hit still lies ahead of i, as `_scan` does: a search
+            # from i finds what one from an earlier position found, so a block of many comments is
+            # read once, not once per comment.
+            if o is None or (o >= 0 and o < i):
+                o = _opener(text, i)
+            if span is None or (span is not False and span.start(1) < i):
+                span = CODE_SPAN_RE.search(text, i) or False
+            if span and (o < 0 or span.start(1) < o):
                 i = span.end()
             elif o >= 0:
                 i, start = o + 4, base + o
@@ -713,8 +1122,10 @@ def _rewrite(md: str, cid: str, change) -> str:
     c = _find(md, cid)
     _refuse_nested(md, c)
     change(c)
-    kind = split_md_blocks(md)[c.block].kind
-    raw = format(c, one_line=kind in ONE_LINE_KINDS and not c.standalone)
+    blocks = split_md_blocks(md)
+    b = blocks[c.block]
+    row = in_table_row(b.content, c.start - _block_offsets(blocks)[c.block])
+    raw = format(c, one_line=(b.kind in ONE_LINE_KINDS or row) and not c.standalone)
     return md[:c.start] + raw + md[c.end:]
 
 

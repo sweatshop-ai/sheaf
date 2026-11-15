@@ -6,7 +6,7 @@ keyboard is a `visualViewport` that the test controls (as in test_page_keyboard.
 import pytest
 
 from conftest import Tab
-from pagehelp import new_context
+from pagehelp import launch_engine, new_context
 from sheafmd import comments as rdc
 from sheafmd.source import update_file
 
@@ -33,10 +33,7 @@ def phone(request, site, chromium):
     if request.param == "chromium":
         browser, own = chromium, False
     else:
-        try:
-            browser, own = chromium.pw.webkit.launch(), True
-        except Exception as e:      # noqa: BLE001 - not installed, or its libraries are missing here (CI fails on a skip)
-            pytest.skip(f"webkit cannot start here: {str(e).splitlines()[0]}")
+        browser, own = launch_engine(chromium.pw.webkit, "webkit"), True
     c = new_context(browser, viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True, user_agent=UA)
     c.add_cookies([site.cookie()])
     site.file.write_text(MD, encoding="utf-8")

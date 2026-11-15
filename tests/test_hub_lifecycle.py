@@ -421,6 +421,7 @@ def test_no_child_the_hub_starts_inherits_the_blocked_signals():
     w = threading.Thread(target=a_worker_that_outlives_the_hub)
     w.start()
     w.join(30)
+    assert not t.is_alive() and not w.is_alive(), "the hub's thread and the worker that outlives it did not finish"
     assert seen["run"] & both == 0 and seen["job"] & both == 0 and seen["late"] & both == 0
     assert {signal.SIGTERM, signal.SIGINT} <= seen["after"]
 

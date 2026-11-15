@@ -14,8 +14,8 @@ import time
 import pytest
 
 from helpers import PLAN, comment
-from pagehelp import (DOC, P1, P2, T0, at, comment_on, draft_key, comment_draft_key, gone, mark, reload_on_clock,
-                      reloaded, toast, toasted, type_at_end, until)
+from pagehelp import (DOC, clock_at, P1, P2, T0, at, comment_on, draft_key, gone, set_kept, mark, open_with_comment,
+                      reload_on_clock, reloaded, toast, toasted, type_at_end, until)
 from sheafmd import comments as rdc
 
 pytestmark = pytest.mark.page
@@ -60,9 +60,9 @@ def show_tab(page, visible):
 def open_on_clock(tab, start=T0):
     """The page opened on a clock the test drives, from `start` (ms), with its stream watched."""
     tab.page.add_init_script(WATCH)
-    tab.page.clock.install(time=start)
+    tab.page.clock.install(time=clock_at(start))
     tab.open()
-    tab.page.clock.pause_at(start + 5_000)
+    tab.page.clock.pause_at(clock_at(start + 5_000))
     until(lambda: stream(tab.page)["opens"] >= 1, what="the stream to open")
     return tab
 
@@ -128,7 +128,7 @@ def test_a_save_after_the_banner_says_the_hub_is_unreachable_and_the_draft_holds
     assert BANNER in notice(p)
     type_at_end(p, P2, " and plums")
     p.keyboard.press("Control+s")
-    toasted(p, "The hub is unreachable; nothing was saved. Your edits stay on screen.")
+    toasted(p, "The hub is unreachable; nothing was saved. Your edits stay on screen.", on_clock=True)
     d = until(lambda: stored(p, clocked.site), what="the draft in localStorage")
     assert "plums" in d["edits"][0]["html"] and re.fullmatch(r"[A-Za-z0-9_-]{16,64}", d["rid"])
 
@@ -153,7 +153,7 @@ def test_the_banner_goes_when_the_hub_is_back(clocked):
     assert BANNER in notice(p)
     clocked.site.start()
     until(lambda: notice(p) == "", what="the banner to go once the hub answers")
-    toasted(p, "Reconnected to the sheaf hub.")
+    toasted(p, "Reconnected to the sheaf hub.", on_clock=True)
 
 
 def test_a_hub_stopped_by_a_person_says_so_at_once(clocked):
@@ -221,7 +221,7 @@ def test_a_cancel_the_hub_does_not_answer_within_30_seconds_takes_the_busy_butto
     p.click("#rd-popover button[data-a=cancel-tell]")
     until(lambda: held or p.wait_for_timeout(20), what="the cancel to go out")
     p.clock.fast_forward(30_500)
-    toasted(p, "within 30 seconds")
+    toasted(p, "within 30 seconds", on_clock=True)
     until(lambda: p.locator("#rd-popover button[data-a=cancel-tell]").count() == 0, what="the busy button to go")
     assert p.locator("#rd-popover .rd-pending-tell").count() == 0
     p.unroute("**/_/cancel")
@@ -470,6 +470,94 @@ def does_not_reload_or_reconnect(tab, streams):
     assert len(tab.streams) == streams, "the page opened its stream again"
 
 
+def test_a_page_whose_root_is_forgotten_leaves_no_toast_for_the_next_page_of_the_tab(replying, site):
+    # Ticket 125 (c3 of #118): a save that merged wrote `rd-toast` before its reload, and the reload never came. With no
+    # keep to name the document, the next mount in this tab (or in its copy) would say that text.
+    p = replying.page
+    p.evaluate("sessionStorage.setItem('rd-toast', '1 block \u2192 plan.md')")
+    assert site.hub.forget_root("work").name == "work"
+    until(lambda: GONE in notice(p), what="the notice that the document is gone")
+    assert p.evaluate("sessionStorage.getItem('rd-toast')") is None
+
+
+def test_a_merged_save_that_answers_after_the_root_was_forgotten_leaves_no_toast(tab, site):
+    # Ticket 125, review b2: a save out when the document went answers `merged`; its toast was written after the page had
+    # removed it, and the reload it was written for never comes (reloadWhenFree returns on docGone).
+    p = tab.page
+    tab.open()
+    held = []
+    p.route("**/_/save", lambda route: held.append(route))
+    type_at_end(p, P2, " typed")
+    p.keyboard.press("Control+s")
+    until(lambda: held or p.wait_for_timeout(20), what="the save to go out")
+    assert site.hub.forget_root("work").name == "work"
+    until(lambda: GONE in notice(p), what="the notice that the document is gone")
+    held[0].fulfill(status=200, content_type="application/json",
+                    body=json.dumps({"ok": True, "hash": "x", "changed": [1], "merged": True, "conflicts": []}))
+    p.wait_for_timeout(500)
+    assert p.evaluate("sessionStorage.getItem('rd-toast')") is None
+
+
+def test_a_merged_save_whose_reload_a_form_holds_leaves_its_toast_for_the_next_boot(replying, site):
+    # Ticket 129 (c): the case 10.11 says is kept: a reload held by a form is not run, and the toast of the merged save
+    # that asked for it stays in the tab for the next boot of the document, which says it.
+    p = replying.page
+    mark(p)
+    p.route("**/_/save", lambda route: route.fulfill(
+        status=200, content_type="application/json",
+        body=json.dumps({"ok": True, "hash": "x", "changed": [1], "merged": True, "conflicts": []})))
+    p.keyboard.press("Control+s")
+    until(lambda: p.evaluate("sessionStorage.getItem('rd-toast')"), what="the merged save's toast stored")
+    stored = p.evaluate("sessionStorage.getItem('rd-toast')")
+    p.wait_for_timeout(500)
+    assert p.evaluate("window.__same_load") is True, "the form did not hold the reload"
+    assert p.evaluate("sessionStorage.getItem('rd-toast')") == stored
+    assert p.evaluate("JSON.parse(sessionStorage.getItem('rd-keep')).doc") == DOC, "a boot of another document would say it"
+    p.unroute("**/_/save")
+    p.reload()
+    until(lambda: stored in p.inner_text("#rd-toast"), what="the next boot to say the toast")
+
+
+def test_a_second_merged_save_adds_its_toast_to_the_one_not_said_yet(replying, site):
+    # Ticket 139 (d): a toast no boot has said yet (a reload held, an upgrade handed over) was overwritten by the next merge.
+    p = replying.page
+    mark(p)
+    p.evaluate("sessionStorage.setItem('rd-toast', 'first note')")
+    p.route("**/_/save", lambda route: route.fulfill(
+        status=200, content_type="application/json",
+        body=json.dumps({"ok": True, "hash": "x", "changed": [1], "merged": True, "conflicts": []})))
+    p.keyboard.press("Control+s")
+    until(lambda: "first note" in (p.evaluate("sessionStorage.getItem('rd-toast')") or "") and
+          "plan.md" in (p.evaluate("sessionStorage.getItem('rd-toast')") or ""), what="both notes stored")
+
+
+def test_a_settle_that_gives_up_leaves_its_toast_with_a_keep_naming_the_document(tab, site):
+    # Ticket 139 (c1): "this edit could not be merged" leaves the toast of an earlier merge; with no keep, a boot of any
+    # document in the tab would say it.
+    p = tab.page
+    tab.open()
+    p.keyboard.press("e")
+    p.route("**/_/save", lambda route: route.fulfill(status=500, json={"ok": False, "error": "the hub broke off"}))
+    p.evaluate("sessionStorage.setItem('rd-toast', '1 block \u2192 plan.md')")
+    p.evaluate(f"document.querySelector({P2!r}).append(' and plums')")      # on screen only, no autosave
+    site.file.write_text(site.file.read_text() + "\nA new paragraph from outside.\n", encoding="utf-8")
+    until(lambda: "could not be merged" in p.inner_text("#rd-toast"), timeout=20.0, what="the give-up said")
+    assert p.evaluate("sessionStorage.getItem('rd-toast')") == "1 block \u2192 plan.md"
+    assert p.evaluate("JSON.parse(sessionStorage.getItem('rd-keep'))") == {"doc": DOC}
+
+
+def test_a_boot_of_another_document_does_not_say_the_toast_a_keep_of_that_other_names(tab):
+    # Ticket 139 (d): pins the boot's filter that the handover and the settle's give-up rely on.
+    p = tab.page
+    tab.open()
+    p.evaluate("sessionStorage.setItem('rd-toast', 'not for this page');"
+               "sessionStorage.setItem('rd-keep', JSON.stringify({doc: 'elsewhere/other.md'}))")
+    p.reload()
+    p.wait_for_selector("#rd-menu-btn", state="attached")
+    p.wait_for_timeout(800)
+    assert "not for this page" not in p.inner_text("#rd-toast")
+
+
 def test_a_page_whose_root_is_forgotten_says_so_keeps_what_was_typed_and_saves_nothing(replying, site):
     p = replying.page
     mark(p)
@@ -521,7 +609,7 @@ def test_a_page_whose_root_was_forgotten_and_its_name_taken_while_its_stream_was
     p.evaluate(f"document.querySelector({P2!r}).lastChild.remove();"     # the edit undone, so the reply may go
                " document.querySelector('#rd-toast').textContent = ''")
     p.click("#rd-popover button[data-f=ok]")
-    toasted(p, "Nothing was sent or saved")
+    toasted(p, "Nothing was sent or saved", timeout=20.0)       # behind the red toast of the Ctrl+S (7 s)
     assert posts == []
     does_not_reload_or_reconnect(replying, streams)
     assert p.input_value("#rd-popover textarea") == "my reply text"
@@ -683,7 +771,7 @@ def test_a_save_the_hub_does_not_answer_within_120_seconds_frees_the_page_and_th
     until(lambda: held or p.wait_for_timeout(20), what="the save to go out")
     p.clock.fast_forward(120_500)
     says = "The hub is unreachable; nothing was saved. Your edits stay on screen."
-    toasted(p, says)
+    toasted(p, says, on_clock=True)
     assert "plums" in p.inner_text(P2)
     # the autosave that waited behind the held save goes out now, or Ctrl+S sends it: either is the next save
     p.keyboard.press("Control+s")
@@ -731,7 +819,7 @@ def test_the_draft_of_a_save_given_up_holds_its_request_id_and_the_hub_is_asked_
     until(lambda: held or p.wait_for_timeout(20), what="the save to go out")
     assert stored(p, tab.site)["rid"] == bodies[0]["rid"]            # from the moment it goes out
     p.clock.fast_forward(120_500)
-    toasted(p, "The hub is unreachable; nothing was saved. Your edits stay on screen.")
+    toasted(p, "The hub is unreachable; nothing was saved. Your edits stay on screen.", on_clock=True)
     d = stored(p, tab.site)
     assert d["rid"] == bodies[0]["rid"] and d["hash"] == bodies[0]["hash"]
     context = p.context
@@ -767,7 +855,7 @@ def test_a_page_opened_on_a_draft_the_hub_already_took_drops_it_without_restorin
     p.keyboard.press("Control+s")
     until(lambda: "plums" in tab.site.file.read_text(encoding="utf-8"), what="the hub to write the save")
     p.clock.fast_forward(120_500)
-    toasted(p, "The hub is unreachable; nothing was saved. Your edits stay on screen.")
+    toasted(p, "The hub is unreachable; nothing was saved. Your edits stay on screen.", on_clock=True)
     assert stored(p, tab.site)["rid"] == bodies[0]["rid"]
     context = p.context
     p.close()
@@ -865,9 +953,9 @@ def test_a_reply_that_only_the_drafts_store_holds_is_in_the_gone_notice_and_leav
     p.add_init_script(WATCH)
     tab.open()
     until(lambda: stream(p)["opens"] >= 1, what="the stream to open")
-    p.evaluate("(([k, v]) => localStorage.setItem(k, JSON.stringify(v)))", [comment_draft_key(site), [
+    set_kept(p, site, [
         {"thread": "1", "born": "2026-10-22T10:00:00Z", "about": "apples", "kind": "reply",
-         "body": "a reply only the store holds", "rid": "r1", "at": "2026-10-22T10:01:00Z"}]])
+         "body": "a reply only the store holds", "rid": "r1", "at": "2026-10-22T10:01:00Z"}])
     assert not beforeunload_asks(p)            # its own page draws it again: nothing is lost by leaving
     mark(p)
     assert site.hub.forget_root("work").name == "work"
@@ -878,8 +966,8 @@ def test_a_reply_that_only_the_drafts_store_holds_is_in_the_gone_notice_and_leav
 
 def test_what_is_typed_and_is_also_in_the_store_is_offered_once(replying, site):
     p = replying.page
-    p.evaluate("(([k, v]) => localStorage.setItem(k, JSON.stringify(v)))", [comment_draft_key(site), [
-        {"thread": "1", "born": "x", "about": "apples", "kind": "reply", "body": "my reply text", "at": "x"}]])
+    set_kept(p, site, [
+        {"thread": "1", "born": "x", "about": "apples", "kind": "reply", "body": "my reply text", "at": "x"}])
     assert site.hub.forget_root("work").name == "work"
     until(lambda: GONE in notice(p), what="the notice that the document is gone")
     assert p.input_value("#rd-notice textarea").count("my reply text") == 1
@@ -944,6 +1032,52 @@ def test_a_change_heard_while_the_check_after_a_reconnect_is_out_does_not_reload
     assert p.evaluate("window.__same_load") is True
 
 
+def heard_changed(page):
+    return page.evaluate("window.__sseJournal.some(e => e[1] === 'event changed')")
+
+
+def test_a_reply_heard_while_the_check_is_out_is_taken_in_place_when_the_answer_names_its_hash(tab, site):
+    """A hello starts a check of the document (checkText). Its answer is read after another writer's reply was
+    written, so it names the new hash; the reply's `changed` came before it and waits for it (heardAfterCheck).
+    The answer must not read that hash as a change of the text from outside: the event takes the reply in place
+    (ticket 137: the page reloaded, and the toast that a send had been taken after all went with it)."""
+    from sheafmd.source import update_file
+    p = open_with_comment(tab, None, "apples", "Why?")
+    mark(p)
+    asked = []
+    p.route("**/_/doc?*", lambda route: asked.append(route))      # the answer to the check is held
+    site.hub.entry(DOC).live._publish("hello", {})
+    until(lambda: asked or p.wait_for_timeout(50), timeout=15, what="the page to ask what the document is")
+    update_file(site.file, lambda t: rdc.reply(t, "c1", "Because.", "Bea", "2026-10-14T11:00"))
+    site.hub.catch_up(site.hub.entry(DOC))             # the hub takes the reply in: a `changed`
+    until(lambda: heard_changed(p) or p.wait_for_timeout(50), what="the page to hear the change")
+    for r in asked:
+        r.continue_()
+    p.wait_for_timeout(1500)
+    assert not gone(p), "the page reloaded for a change of the comments only"
+    p.wait_for_timeout(1500)
+    assert p.evaluate("window.__same_load") is True
+
+
+def test_a_reply_heard_before_an_answer_that_was_read_before_it_does_not_reload_the_page(tab, site):
+    """The other order: the hub read the check's answer before the write, the write's `changed` reached the page
+    first. The answer names the hash the page held before the event, which is no change from outside."""
+    from sheafmd.source import update_file
+    p = open_with_comment(tab, None, "apples", "Why?")
+    mark(p)
+    read = []
+    p.route("**/_/doc?*", lambda route: read.append((route, route.fetch())))      # read now, delivered later
+    site.hub.entry(DOC).live._publish("hello", {})
+    until(lambda: read or p.wait_for_timeout(50), timeout=15, what="the hub to answer the check")
+    update_file(site.file, lambda t: rdc.reply(t, "c1", "Because.", "Bea", "2026-10-14T11:00"))
+    site.hub.catch_up(site.hub.entry(DOC))
+    until(lambda: heard_changed(p) or p.wait_for_timeout(50), what="the page to hear the change")
+    for route, answer in read:
+        route.fulfill(response=answer)
+    p.wait_for_timeout(1500)
+    assert not gone(p), "the page reloaded for an answer older than the change it had heard"
+
+
 # Holds the page's asks of `/_/doc` once a stream has opened after `window.__holdFrom` opens: an `open` comes before
 # its `hello`, so the check the `hello` starts is held and the retry's own asks (made while no stream is open) are not.
 HOLD_DOC_AFTER_OPEN = """(() => {
@@ -967,7 +1101,7 @@ def missing_past_the_grace(tab, init=None):
     p.add_init_script(WATCH)
     if init:
         p.add_init_script(init)
-    p.clock.install(time=T0)
+    p.clock.install(time=clock_at(T0))
     tab.open()
     until(lambda: stream(p)["opens"] >= 1, what="the stream to open")
     text = site.file.read_text(encoding="utf-8")
@@ -977,7 +1111,7 @@ def missing_past_the_grace(tab, init=None):
     site.file.unlink()
     site.reopen()
     until(lambda: answers.count(404) >= 1 or p.wait_for_timeout(50), timeout=15, what="the page to be told 404")
-    p.clock.pause_at(T0 + 60_000)
+    p.clock.pause_at(clock_at(T0 + 60_000))
     assert p.evaluate("document.querySelector('#rd-state').textContent") == "File missing"    # at once, not at 15 s
     p.clock.run_for(20_000)
     run_until(p, lambda: "file is not on the hub" in notice(p), "the notice that the file is missing")

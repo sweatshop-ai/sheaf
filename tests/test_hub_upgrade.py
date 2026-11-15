@@ -71,6 +71,7 @@ class Supervisor:
             if p.poll() is None:
                 p.terminate()
             p.wait(timeout=30)
+        assert not self._t.is_alive(), "the watch on the hub did not end after the stop"
 
 
 @pytest.fixture
@@ -315,7 +316,12 @@ def test_sheaf_stop_of_a_service_hub_exits_stopped_and_the_supervisor_leaves_it_
     sup = Supervisor(hub, unit_env())
     procs.extend([hub, sup])
     wait_health(port)
-    assert cli.main(["stop"]) == 0
+    # In its own process: the hub is this test's child, and `sheaf stop` reaps the hub it stopped
+    # (`hubclient.ended`). Run here, that waitpid can take the exit status before `hub.wait` or the
+    # supervisor does, and `Popen` then reports 0 for a child it finds already reaped.
+    stopped = subprocess.run([sys.executable, "-m", "sheafmd", "stop"], capture_output=True, text=True,
+                             timeout=120)
+    assert stopped.returncode == 0, stopped.stdout + stopped.stderr
     assert hub.wait(timeout=30) == server.EXIT_STOPPED
     time.sleep(0.5)
     assert sup.codes == [server.EXIT_STOPPED] and sup.procs == [hub]
@@ -355,6 +361,7 @@ def test_a_stop_that_comes_while_an_upgrade_stop_is_being_taken_is_not_overwritt
     hub.busy = busy
     assert hub.request_stop("upgrade", force=False) is True
     other.join(5)
+    assert not other.is_alive(), "the second stop did not finish"
     assert hub.stop_requested == "stop" and seen == ["upgrade", "stop"]
     assert server.exit_code(hub) == server.EXIT_STOPPED
 
@@ -372,6 +379,7 @@ def test_a_second_signal_that_interrupts_the_first_inside_the_admit_lock_does_no
     t = threading.Thread(target=second_signal_inside_the_first, daemon=True)
     t.start()
     t.join(3)
+    assert not t.is_alive(), "the second signal inside the first did not finish"
     assert done == [True] and hub.stop_requested == "upgrade"
 
 

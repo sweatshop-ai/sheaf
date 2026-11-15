@@ -19,41 +19,76 @@ BUTTON_CLASS = "rd-copybtn"
 STAND_IN = "RDCP7ZQ"      # one word for pandoc, as long as the marker so the columns of its line stay put; a document that holds this word in a copy block collides with it
 
 # The first line of a top-level quote, and then at least one line with words.
-_LINE = re.compile(r"(\s{0,3}>[ \t]?)" + re.escape(MARKER) + r"[ \t]*(?=\r?(?:\n|$))")
+_LINE = re.compile(r"(\s{0,3}>[ \t]?)" + re.escape(MARKER) + r"[ \t]*(?=\n|$)")
 _WORDS = re.compile(r"^[ \t>]*[^\s>]", re.M)
 # An underline in the first paragraph makes the marker line part of a heading, which `mark` cannot take it off.
 _UNDERLINE = re.compile(r"^ {0,3}(?:=+|-+)[ \t]*$")
-_QUOTE_PREFIX = re.compile(r"^\s{0,3}>[ \t]?")
+_QUOTE_MARK = re.compile(r" {0,3}>")
 # What ends a paragraph under GFM (CommonMark's interrupt rules): a fence, a heading, a quote, a thematic break
-# of `*` or `_` (a bare `---` stays an underline), a bullet or a list starting at 1 with words after it.
-_OPENS_BLOCK = re.compile(r"^\s{0,3}(?:```|~~~|#{1,6}(?:\s|$)|>|(?:[*_][ \t]*){3,}$|[-*+][ \t]+\S|0*1[.)][ \t]+\S)")
+# of `*` or `_` (a bare `---` stays an underline), a bullet or a list starting at 1 with words after it, and a
+# line that opens an HTML block (start conditions 1-6; condition 7, any other tag, cannot interrupt).
+_HTML_TAGS = (
+    "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|"
+    "fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|"
+    "menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|"
+    "track|ul"
+)
+_HTML_OPENS = (
+    r"<(?:pre|script|style|textarea)(?:[ \t>]|$)"      # 1
+    r"|<!--|<\?|<![A-Za-z]|(?-i:<!\[CDATA\[)"           # 2-5 (CDATA is case-sensitive)
+    rf"|</?(?:{_HTML_TAGS})(?:[ \t]|/?>|$)"             # 6
+)
+_OPENS_BLOCK = re.compile(
+    r"^ {0,3}(?:```|~~~|#{1,6}(?:[ \t]|$)|>|(?:[*_][ \t]*){3,}$|[-*+][ \t]+[^ \t]|0*1[.)][ \t]+[^ \t]|" + _HTML_OPENS + ")",
+    re.I)
+
+
+def _unquote(line: str) -> str:
+    """`line` without its quote mark and the one column after it, what is left indented with spaces: a tab is
+    worth the columns up to the next multiple of 4, as in pandoc, so the 0-3 columns that `_OPENS_BLOCK` and
+    `_UNDERLINE` allow are counted in columns, not characters."""
+    m = _QUOTE_MARK.match(line)
+    col = pos = m.end() if m else 0
+    indent = 0
+    if m and pos < len(line) and line[pos] in " \t":
+        width = 1 if line[pos] == " " else 4 - col % 4
+        col += width
+        indent = width - 1              # what a tab leaves of its columns after the one the mark takes
+        pos += 1
+    while pos < len(line) and line[pos] in " \t":
+        w = 1 if line[pos] == " " else 4 - col % 4
+        col += w
+        indent += w
+        pos += 1
+    return " " * indent + line[pos:]
 
 
 def is_copy_block(content: str) -> bool:
     """Is this block of the source (a quote, without the blank lines after it) a copy block?"""
     first, _, rest = content.partition("\n")
-    if not (_LINE.fullmatch(first.rstrip("\r")) and _WORDS.search(rest)):
+    if not (_LINE.fullmatch(first.replace("\r", "")) and _WORDS.search(rest)):
         return False
     for line in rest.split("\n"):
-        line = line.rstrip("\r")
+        raw = line = line.replace("\r", "")      # pandoc deletes a CR, lone or not; it does not end the line there
         if not line.strip(" \t>"):
             break                       # the first paragraph ends at the first blank quote line
-        line = _QUOTE_PREFIX.sub("", line)
+        line = _unquote(line)
         if _OPENS_BLOCK.match(line):
-            break                       # and at the line that opens a fence, a list, a heading or a quote
-        if _UNDERLINE.match(line):
+            break                       # and at the line that opens a fence, a list, a heading, a quote or an HTML block
+        if _QUOTE_MARK.match(raw) and _UNDERLINE.match(line):
             return False
     return True
 
 
 def hide(src: str) -> str:
     """`src` with the marker line of each copy block swapped for STAND_IN, for pandoc."""
-    if MARKER not in src:
+    if MARKER not in src.replace("\r", ""):
         return src
     out = []
     for b in split_md_blocks(src):
         if b.kind == "quote" and is_copy_block(b.content):
-            out.append(_LINE.sub(lambda m: m.group(1) + STAND_IN, b.content, count=1) + b.gap)
+            first, nl, rest = b.content.partition("\n")
+            out.append(_LINE.sub(lambda m: m.group(1) + STAND_IN, first.replace("\r", ""), count=1) + nl + rest + b.gap)
         else:
             out.append(b.text)
     return "".join(out)

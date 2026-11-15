@@ -40,7 +40,7 @@ from urllib.parse import quote
 from .. import beneath, config, paths
 from ..source import md_hash
 from ..blocks import _split_lines, split_md_blocks
-from ..edit import TASK_MARK_RE, ticked_html
+from ..edit import box_number, task_marks, ticked_html
 from .. import comments as rdc
 from . import commits, place, projects, state
 from . import proxy as proxy_mod
@@ -65,6 +65,9 @@ WORDS = ("Approve", "Run it", "Don't run", "Undo skip", "Done", "Share", "Stop J
 MOVE = "Move to"                # a word that takes an argument: `<slug> (ref <thread>)`
 FREE = ("Merge", "Deploy", "Install")   # the words whose argument is the rest of the line, which the hub does not read
 TOGGLES = frozenset({"Share"})  # the words a member may press and release; every other word is pressed once
+# A box line may say its word in its own words: `- [ ] Shared with the team` is Share's tick box (9.11, 10.11). The hub
+# reads and gives the word, never the line's text, and never writes the label into a file that holds `- [ ] Share`.
+LABELS = {"Shared with the team": "Share"}
 SHOWS = {"projects": "My projects", "mine": "Only mine", "all": "All of the team"}
 BATCH = 50                      # issues per GraphQL request
 ITEMS = 100                     # Project items of an issue per page: the most GitHub gives
@@ -77,7 +80,7 @@ MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", 
 _BOX_RE = re.compile(r"[A-Za-z0-9.-]{1,63}")
 _REPO_RE = re.compile(r"[A-Za-z0-9-]+/[A-Za-z0-9._-]+")
 _ISSUE_RE = re.compile(r"([A-Za-z0-9-]+)/([A-Za-z0-9._-]+)#([0-9]+)")
-_ACTION_RE = re.compile(r"\s*[-*+] \[(?P<mark>[ xX])\] (?:(?P<word>" + "|".join(re.escape(w).replace("'", "['’]") for w in WORDS if w != MOVE and w not in FREE)
+_ACTION_RE = re.compile(r"\s*[-*+] \[(?P<mark>[ xX])\] (?:(?P<word>" + "|".join(re.escape(w).replace("'", "['’]") for w in (*LABELS, *WORDS) if w != MOVE and w not in FREE)
                         + r")|(?P<free>" + "|".join(FREE) + r")\s+\S.*|(?P<move>" + re.escape(MOVE) + r")\s+(?P<slug>[A-Za-z0-9._\\-]+)\s+\(ref\s+[^()\s]+\))"
                         + r"(?:\s+@(?P<short>[A-Za-z0-9._-]+))?\s*")
 
@@ -370,7 +373,8 @@ def _title(heading: str) -> str:
 
 def _word(m: re.Match) -> str:
     """The word of the action `_ACTION_RE` matched, its apostrophe straight."""
-    return (m["word"] or m["free"] or m["move"]).replace("’", "'")
+    word = (m["word"] or m["free"] or m["move"]).replace("’", "'")
+    return LABELS.get(word, word)
 
 
 def _slug(m: re.Match) -> str:
@@ -426,26 +430,33 @@ def tick_edit(text: str, n: int, word: str, release: bool = False):
     if not 0 <= n < len(boxes) or boxes[n][0] != word or (release and word not in TOGGLES):
         return None
     blocks = split_md_blocks(text)
-    at = box_place(text, boxes[n][2], blocks)
+    at = _place(text, boxes[n][2], blocks)
     if at is None:
         return None
-    fragment = ticked_html(blocks[at[0]], at[1], tick=not release)
+    fragment = ticked_html(blocks[at[0]], at[1], tick=not release, at=at[2])
     return None if fragment is None else {"i": at[0], "html": fragment}
 
 
 def box_place(text: str, line: int, blocks=None) -> tuple | None:
-    """(the block, the box's number among the task boxes of that block) of the box on the 0-based `line` of
-    `text`: where the page draws it. None when the mark found is not on that line."""
+    """(the block, the box's number among the task boxes the page draws for that block) of the box on the 0-based
+    `line` of `text`. None when the line has no mark that draws a box."""
+    at = _place(text, line, blocks)
+    return None if at is None else at[:2]
+
+
+def _place(text: str, line: int, blocks=None) -> tuple | None:
+    """`box_place` and the offset, in the block, of the state character of the box's mark: (block, box, offset).
+    The box is the one the render says flips with that character (`box_number`), not the mark's rank among the
+    marks: the two counts differ where an item is empty or a box stands behind a chain of markers."""
     blocks = split_md_blocks(text) if blocks is None else blocks
     i = max(x for x, b in enumerate(blocks) if b.start <= line)
     b = blocks[i]
     own = _split_lines(b.content)
     offset = sum(len(x) for x in own[:line - b.start])
-    marks = list(TASK_MARK_RE.finditer(b.content))
-    k = sum(1 for m in marks if m.start() < offset)
-    if k >= len(marks) or marks[k].start() != offset:
-        return None                 # the mark found is not on the action's own line
-    return i, k
+    for m in task_marks(b.content):
+        if m.start() == offset and (k := box_number(b.content, m.start(2))) is not None:
+            return i, k, m.start(2)
+    return None
 
 
 def buttons(s: Sheaf, who: dict, hub, member, is_owner: bool) -> list:

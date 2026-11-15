@@ -223,10 +223,12 @@ def open_form(page, form):
 
 def open_with_comment(tab, md, quote, text, author="Ada", when="2026-10-14T10:00"):
     """The page of any tab (phone or laptop), opened on `md` with one comment on `quote` already in the file. The comment
-    is written before the page opens: a page open when its file changes reloads itself, which a second `open()` then races (tickets 78, 98)."""
+    is written before the page opens: a page open when its file changes reloads itself, which a second `open()` then races (tickets 78, 98).
+    `md=None` keeps the file the site fixture wrote."""
     from sheafmd import comments as rdc
     from sheafmd.source import update_file
-    tab.site.file.write_text(md, encoding="utf-8")
+    if md is not None:
+        tab.site.file.write_text(md, encoding="utf-8")
     update_file(tab.site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, quote), quote, text, author, when)[0])
     return tab.open().page
 
@@ -444,6 +446,37 @@ def launch_chromium(chromium, error, in_ci):
         unavailable(f"Chromium did not start:\n{e}\n{died_report(launched_binary(chromium.executable_path))}", in_ci)
 
 
+# The page's side of the stream journal (conftest.py `stream_journal`): it wraps EventSource and notes, in real
+# time (taken before a test's fake clock replaces the page's), each open, error and event into window.__sseJournal.
+STREAM_JOURNAL_JS = """(() => {
+  const now = performance.now.bind(performance), origin = performance.timeOrigin;
+  const log = window.__sseJournal = [];
+  const note = (what, data) => log.push([origin + now(), what, data === undefined ? '' : String(data).slice(0, 120)]);
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = (url, init) => {
+    const what = String(url) + ' ' + ((init && init.method) || 'GET');
+    note('fetch', what);
+    return nativeFetch(url, init).then(r => { note('fetched', what + ' ' + r.status); return r; },
+                                       e => { note('fetch failed', what + ' ' + e); throw e; });
+  };
+  const Native = window.EventSource;
+  if (!Native) return;
+  // A subclass, not a function that returns a native one: a test's own script may `class extends window.EventSource`.
+  window.EventSource = class extends Native {
+    constructor(url, init) {
+      super(url, init);
+      note('new', url);
+      super.addEventListener('open', () => note('open', url));
+      super.addEventListener('error', () => note('error', 'readyState ' + this.readyState));
+    }
+    addEventListener(name, fn, o) {
+      if (name !== 'open' && name !== 'error') super.addEventListener(name, ev => note('event ' + name, ev.data), o);
+      return super.addEventListener(name, fn, o);
+    }
+  };
+})()"""
+
+
 def new_context(browser, error=None, **options):
     """A context of the browser (its clicks, fills and waits for a selector give up after PAGE_TIMEOUT_MS),
     or a failure that says whether the browser is still there. `error` is
@@ -453,6 +486,7 @@ def new_context(browser, error=None, **options):
     try:
         context = browser.new_context(**options)
         context.set_default_timeout(PAGE_TIMEOUT_MS)
+        context.add_init_script(STREAM_JOURNAL_JS)
         return context
     except error as e:
         pytest.fail(f"Chromium went away under a new context (connected={browser.is_connected()}):\n{e}")

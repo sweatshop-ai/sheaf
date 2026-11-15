@@ -4581,15 +4581,21 @@ var create = function (ROOT, CFG, opts) {
   }
   // failed(): mount.js could not fetch the page again for a remount (or the hub was upgraded and the loader takes over).
   // The page stays as it was and says so, and the next change settles again: `settling` was left set by a reload that,
-  // on a page of its own, never comes back.
-  function failed(msg) {
+  // on a page of its own, never comes back. `handover` is the upgrade: the loader's new script mounts into this pane and
+  // removes this page's toasts, so the toast of a merged save is left in the tab for the new boot to say (#129).
+  function failed(msg, handover) {
     if (unmounted) return;
     settling = false;
     var left = '';
     try { left = sessionStorage.getItem(KEYS + 'rd-toast') || ''; } catch (e) {}
-    try { sessionStorage.removeItem(KEYS + 'rd-keep'); } catch (e) {}     // the keep of a reload that did not happen
-    try { sessionStorage.removeItem(KEYS + 'rd-toast'); } catch (e) {}
-    if (left) say(left);          // what the save's reload was to say is said on the page that stays, not left for a page of another document (#125)
+    if (handover && left) {
+      // A keep that names this document only, so a boot of another document in the tab drops the toast (one hub, one origin).
+      try { sessionStorage.setItem(KEYS + 'rd-keep', JSON.stringify({ doc: CFG.doc })); } catch (e) {}
+    } else {
+      try { sessionStorage.removeItem(KEYS + 'rd-keep'); } catch (e) {}     // the keep of a reload that did not happen
+      try { sessionStorage.removeItem(KEYS + 'rd-toast'); } catch (e) {}
+      if (left) say(left);          // what the save's reload was to say is said on the page that stays, not left for a page of another document (#125)
+    }
     say(msg, true);
   }
   return { unmount: unmount, dirty: unsavedNow, failed: failed };

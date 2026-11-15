@@ -210,7 +210,9 @@ def test_a_held_clear_is_played_when_the_move_of_the_list_stops_half_way(tab, si
     p.evaluate("""(key) => { const get = Storage.prototype.getItem;
       window.__refuse = true;
       Storage.prototype.getItem = function (k) { if (window.__refuse && String(k).startsWith(key)) throw new Error('refused'); return get.call(this, k); }; }""", key)
-    discard(p, "second words")                     # the read is refused: the clear is held, nothing is written
+    forms = p.locator(f"{LIST} .rd-form")
+    forms.nth([f.locator("textarea").input_value() for f in forms.all()].index("second words")).locator("button[data-f=no]").click()
+    # the read is refused: the clear is held, nothing is written
     assert [e["body"] for e in json.loads(p.evaluate("(k) => JSON.stringify(JSON.parse(Storage.prototype.getItem.call(localStorage, k)))", key))] \
         == ["first words", "second words", "third words"]
     p.evaluate("""(key) => { window.__refuse = false; const set = Storage.prototype.setItem;

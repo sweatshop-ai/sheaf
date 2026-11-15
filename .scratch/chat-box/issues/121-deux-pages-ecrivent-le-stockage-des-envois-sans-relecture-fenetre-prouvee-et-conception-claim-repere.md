@@ -23,7 +23,7 @@
 
 **Claimed by:** Lucia
 
-**Status:** ready-for-agent
+**Status:** done (PR 355, merged 0592028)
 
 ## Design note (Lucia, 2026-11-14): one `localStorage` key per entry
 
@@ -40,3 +40,14 @@
 **Storage full.** Add first, then drop: if the add is refused, the drops are removed and the add tried once more; if it is refused again the drops are written back, `storeOk` is false and the caller is told as it is today (nothing lost that the store held). A clear (no add) only removes and cannot be refused for space. Migration that cannot be written fails the write the same way (storeOk false, nothing dropped).
 
 **Tests.** The race test loses its `xfail`; the two Discard tests stay green; the ~30 places that read or write the old list in tests go through helpers in `pagehelp.py` (read all entries, write one). The spec pins (10.8) and SPEC 10.4/10.8 say "one key per entry".
+
+## Close-out (Yuki, 2026-11-15)
+
+PR 355 merged as 0592028 (head 91e8911, CI 3 of 3 green; gate: Opus fallback, GO in round 1). The race is closed by construction with one key per entry; `test_two_sends_that_fail_at_the_same_instant_on_two_pages_are_both_kept` is no longer xfail. The ticket has no checkbox list; its goal is met as follows:
+
+- The lost entry: fixed (one `localStorage` key per entry, `draftsWrite(drop, add)`; no claim, no repère, no timer).
+- The two Discard tests: green, now counting writes under the key prefix.
+- SPEC 10.4/10.8 and the spec pins say "one key per entry".
+- Leftovers of the review rounds (c and d): ticket 130.
+- Ticket 114 (c1 to c8, d1 to d4 of the claim/repère design): the design is not taken up, and this ticket says to take nothing from them if one key per entry replaces it. It does, so 114 stands struck unless its own text says otherwise.
+- Known limit, in the PR body: an old-build tab left open across the upgrade.

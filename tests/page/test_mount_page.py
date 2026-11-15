@@ -549,7 +549,7 @@ def test_a_remount_that_fails_leaves_no_toast_for_a_later_mount_of_the_tab(front
 
 
 def test_a_remount_that_fails_says_the_toast_a_merged_save_left_before_its_own_line(front):
-    """Ticket 129 (c): `failed()` says what the save's reload was to say, then its own line, each one in full."""
+    """Pins #125's order (it passes without #129): `failed()` says what the save's reload was to say, then its own line."""
     front.open()
     front.page.route("**/_/mount?doc=*", lambda route: route.fulfill(
         status=401, content_type="application/json", body='{"error": "sign in"}'))
@@ -574,7 +574,8 @@ def test_an_upgrade_handover_leaves_the_toast_of_a_merged_save_for_the_new_boot(
     until(lambda: front.page.evaluate("window.__upgrades || null"), what="the loader told")
     until(lambda: "updated" in front.js("return root.getElementById('rd-toast').textContent;"), what="the handover said")
     assert front.page.evaluate("sessionStorage.getItem('sheaf-mount:rd-toast')") == "1 block \u2192 plan.md"
-    assert front.page.evaluate("Object.keys(sessionStorage).filter((k) => k.endsWith('rd-keep'))") == []
+    # A keep that names the document only, so a boot of another document in the tab drops the toast (review b1).
+    assert front.page.evaluate("JSON.parse(sessionStorage.getItem('sheaf-mount:rd-keep'))") == {"doc": DOC}
 
 
 def test_of_two_mounts_on_one_pane_the_one_called_last_stands_whichever_answers_first(front):

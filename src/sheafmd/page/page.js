@@ -1208,7 +1208,7 @@ var create = function (ROOT, CFG, opts) {
       }
       if (conflicts.length) note = conflictNote(conflicts);
       if (reload) {
-        try { sessionStorage.setItem(KEYS + 'rd-toast', quiet && !conflicts.length ? '' : note); } catch (e) {}
+        if (!docGone) { try { sessionStorage.setItem(KEYS + 'rd-toast', quiet && !conflicts.length ? '' : note); } catch (e) {} }     // a save out when the document went: no reload will say it (#125)
         done(); saving = null;
         reloadWhenFree(popId);
         refresh();
@@ -1566,42 +1566,84 @@ var create = function (ROOT, CFG, opts) {
   // `pendingClears`: tests of this page's entries that the person emptied while the store refused the read, so the
   // clear could not be written: a new message's field emptied (draftsReplace), a reply or an edit cleared (threadKeep),
   // a send the hub took (taken). They stay out of the page's reads (commentDraftsLoad), and go from the store with the
-  // first read that works, which writes the store without them (commentDraftsSave). Kept in memory: a reload before
+  // first read that works, which writes the store without them (draftsWrite). Kept in memory: a reload before
   // that read, while the store still refuses it, offers the entry again.
   var pendingClears = [];
   var readWorked = false, flushing = false;
+  // One key per entry, `COMMENT_DRAFT_KEY:e:<id>`: a page writes only keys it made and removes only keys it read, so two
+  // pages that write at the same instant cannot overwrite each other's entry (one list under one key could). The id sorts
+  // by write time, then by the page's own order, and no two writes share one. A store written by an earlier build holds
+  // one list under COMMENT_DRAFT_KEY: reads see its entries, and the first write moves them into keys (migrateDrafts).
+  var ENTRY_PREFIX = COMMENT_DRAFT_KEY + ':e:', writeN = 0;
+  function pad(n, w) { var t = n.toString(36); while (t.length < w) t = '0' + t; return t; }
+  function newEntryId() { return pad(Date.now(), 9) + '-' + pad(writeN++ % 46656, 3) + '-' + pad(Math.floor(Math.random() * 1679616), 4); }
+  function hashOf(t) { var h = 5381; for (var i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0; return h.toString(36); }
+  function validDraft(d) { return d && typeof d.body === 'string' && (typeof d.quote === 'string' || typeof d.thread === 'string'); }
+  // The entry that `raw` (the text of the old list) holds at `i`: the same id on every page that reads it.
+  function legacyEntries(raw) {
+    var v = JSON.parse(raw || '[]');
+    return (Array.isArray(v) ? v : [v]).filter(validDraft).map(function (d, i) {
+      var e = Object.assign({}, d);
+      Object.defineProperty(e, '_k', { value: ENTRY_PREFIX + '0' + pad(i, 4) + '-' + hashOf(JSON.stringify(d)) });
+      return e;
+    });
+  }
   // `strict`: a store that refuses the read throws, instead of passing for an empty one (the writers read so, commentDraftsHeld and taken).
   // A value that is not JSON is set aside under `:unreadable` first, so the write that follows does not destroy it
   // (a later one replaces an earlier one set aside: the store holds one at a time).
   function commentDraftsRaw(strict) {
-    var v, raw;
+    var found = [], legacy = null;
     readWorked = false;
-    try { raw = localStorage.getItem(COMMENT_DRAFT_KEY); } catch (e) { if (strict) throw e; return []; }
-    try { v = JSON.parse(raw || '[]'); } catch (e) {
-      if (strict) localStorage.setItem(COMMENT_DRAFT_KEY + ':unreadable', raw);
-      return [];
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k === null || k.indexOf(ENTRY_PREFIX) !== 0) continue;
+        try {
+          var d = JSON.parse(localStorage.getItem(k));
+          if (validDraft(d)) { Object.defineProperty(d, '_k', { value: k }); found.push(d); }
+        } catch (e) { /* an entry that is not JSON is left where it is */ }
+      }
+      legacy = localStorage.getItem(COMMENT_DRAFT_KEY);
+    } catch (e) { if (strict) throw e; return []; }
+    if (legacy !== null) {
+      try { found = found.concat(legacyEntries(legacy)); } catch (e) {
+        if (strict) localStorage.setItem(COMMENT_DRAFT_KEY + ':unreadable', legacy);
+      }
     }
     readWorked = true;
-    return (Array.isArray(v) ? v : [v]).filter(function (d) {
-      return d && typeof d.body === 'string' && (typeof d.quote === 'string' || typeof d.thread === 'string');
+    var seen = {};
+    return found.filter(function (d) { return !seen[d._k] && (seen[d._k] = true); })
+      .sort(function (x, y) { return x._k < y._k ? -1 : x._k > y._k ? 1 : 0; });
+  }
+  // The list under the old key goes into entry keys (the same keys on every page), then the old key goes.
+  function migrateDrafts() {
+    var legacy = localStorage.getItem(COMMENT_DRAFT_KEY);
+    if (legacy === null) return;
+    var es;
+    try { es = legacyEntries(legacy); } catch (e) { localStorage.setItem(COMMENT_DRAFT_KEY + ':unreadable', legacy); es = []; }
+    es.forEach(function (d) {
+      var e = Object.assign({}, d);
+      if (e.root === undefined && CFG.root) e.root = CFG.root;
+      localStorage.setItem(d._k, JSON.stringify(e));
     });
+    localStorage.removeItem(COMMENT_DRAFT_KEY);
   }
   function ofOtherRoot(d) { return !!CFG.root && d.root !== undefined && d.root !== CFG.root; }
   function commentDraftsLoad(strict) {
-    var raw = commentDraftsRaw(strict), cleared = false;
+    var raw = commentDraftsRaw(strict), dropped = [];
     var held = raw.filter(function (d) {
       if (ofOtherRoot(d)) return false;
       if (!pendingClears.some(function (gone) { return gone(d); })) return true;
-      cleared = true;
+      dropped.push(d);
       return false;
     });
     // The first read that works after a clear was held writes it: a reload or another page does not offer the entry again.
     // Nothing to write when the store no longer holds what the clear names.
     if (readWorked && pendingClears.length && !flushing) {
-      if (!cleared) pendingClears = [];
+      if (!dropped.length) pendingClears = [];
       else {
         flushing = true;
-        try { commentDraftsSave(held, true); } finally { flushing = false; }
+        try { draftsWrite(dropped, [], true); } finally { flushing = false; }
       }
     }
     return held;
@@ -1614,16 +1656,48 @@ var create = function (ROOT, CFG, opts) {
   }
   // Every write of the store goes through here, so the line of replies and edits not sent, which says what the
   // store holds, is drawn again here: a writer added later cannot leave it behind.
+  // `drop`: entries as read, removed. `add`: new entries, each under a key of its own. The add comes first, so a store
+  // that refuses it keeps what it held; refused, the drops go and it is tried once more, and refused again the drops are
+  // written back.
   // `later`: the purge a read writes (commentDraftsLoad). The line is drawn after the read's caller is done, not inside
   // the read: a redraw can close or redraw the list its caller is working in, and one that throws would pass for a
   // refused read in the strict callers and escape the others.
-  function commentDraftsSave(ds, later) {
+  function draftsWrite(drop, add, later) {
     storeOk = true;
     try {
-      var all = commentDraftsRaw(true).filter(ofOtherRoot).concat(ds.map(function (d) {
-        return d.root === undefined && CFG.root ? Object.assign({ root: CFG.root }, d) : d;
-      }));
-      if (all.length) localStorage.setItem(COMMENT_DRAFT_KEY, JSON.stringify(all)); else localStorage.removeItem(COMMENT_DRAFT_KEY);
+      try { migrateDrafts(); } catch (e) {
+        // A full store refuses the move. A clear is still made, as it was on the list: shorter, which the store accepts.
+        if (add.length) throw e;
+        var old = legacyEntries(localStorage.getItem(COMMENT_DRAFT_KEY));
+        old.forEach(function (d) { localStorage.removeItem(d._k); });       // what a move that stopped half-way had made
+        var goes = function (d) {
+          return drop.some(function (g) { return g._k === d._k; }) || (!ofOtherRoot(d) && pendingClears.some(function (gone) { return gone(d); }));
+        };
+        var left = old.filter(function (d) { return !goes(d); });
+        if (left.length) localStorage.setItem(COMMENT_DRAFT_KEY, JSON.stringify(left)); else localStorage.removeItem(COMMENT_DRAFT_KEY);
+      }
+      // The clears a failed purge held go with this write too.
+      var all = drop.slice(), have = {};
+      all.forEach(function (d) { have[d._k] = true; });
+      commentDraftsRaw(true).forEach(function (d) {
+        if (!have[d._k] && !ofOtherRoot(d) && pendingClears.some(function (gone) { return gone(d); })) all.push(d);
+      });
+      var keys = add.map(function (d) {
+        var e = d.root === undefined && CFG.root ? Object.assign({ root: CFG.root }, d) : d;
+        return { k: ENTRY_PREFIX + newEntryId(), v: JSON.stringify(e) };
+      });
+      var put = function () { keys.forEach(function (e) { localStorage.setItem(e.k, e.v); }); };
+      var was = all.map(function (d) { return [d._k, localStorage.getItem(d._k)]; });
+      try { put(); } catch (e) {
+        keys.forEach(function (e) { localStorage.removeItem(e.k); });
+        all.forEach(function (d) { localStorage.removeItem(d._k); });
+        try { put(); } catch (e2) {
+          keys.forEach(function (e) { localStorage.removeItem(e.k); });
+          was.forEach(function (w) { if (w[1] !== null) localStorage.setItem(w[0], w[1]); });
+          throw e2;
+        }
+      }
+      all.forEach(function (d) { localStorage.removeItem(d._k); });
       pendingClears = [];
     } catch (e) { storeOk = false; }
     if (later) setTimeout(function () {
@@ -1639,10 +1713,8 @@ var create = function (ROOT, CFG, opts) {
     var ds = commentDraftsHeld();
     // A clear (no `add`) the store could not be read for is held, not forgotten.
     if (!ds) { if (!add) pendingClears.push(gone); return; }
-    ds = ds.filter(function (d) { return !gone(d); });
-    if (add) ds.push({ quote: add.quote, body: add.body, block: add.block, head: add.head, tail: add.tail, occ: add.occ, rid: add.rid,
-                       at: add.at || new Date().toISOString(), min: add.min });
-    commentDraftsSave(ds);
+    draftsWrite(ds.filter(gone), add ? [{ quote: add.quote, body: add.body, block: add.block, head: add.head, tail: add.tail, occ: add.occ, rid: add.rid,
+                                          at: add.at || new Date().toISOString(), min: add.min }] : []);
   }
   // Is `d` the kept `kind` entry of the thread `c`: its id, its `at` (born) and its quote (about) all agree.
   // An older entry has no `born` and no `about` (it was told by its id): that is all it can agree on.
@@ -1670,10 +1742,8 @@ var create = function (ROOT, CFG, opts) {
     var ds = commentDraftsHeld();
     // A clear the store could not be read for is held, not forgotten: the send it ends was taken or given up.
     if (!ds) { if (!body) pendingClears.push(goes); return; }
-    ds = ds.filter(function (d) { return !goes(d); });
-    if (body) ds.push({ thread: c.id, born: c.at, about: c.quote, kind: kind, body: body, rid: rid, of: rid ? undefined : line || undefined,
-                        out: out, at: new Date().toISOString() });
-    commentDraftsSave(ds);
+    draftsWrite(ds.filter(goes), body ? [{ thread: c.id, born: c.at, about: c.quote, kind: kind, body: body, rid: rid, of: rid ? undefined : line || undefined,
+                                           out: out, at: new Date().toISOString() }] : []);
   }
   // The request ids a `changed` event named: the hub has them, whatever the send's answer says.
   var sawTaken = {};
@@ -1685,10 +1755,10 @@ var create = function (ROOT, CFG, opts) {
     // The draft offered on load is the text of a save the hub took: it is in the file, and the offer goes.
     var offeredTaken = !!offered && offered.rid === rid;
     if (offeredTaken) { decided(); dropOffer(); lateSends[rid] = true; }
-    var ds, left;
+    var ds, ended;
     try { ds = commentDraftsLoad(true); } catch (e) { ds = []; pendingClears.push(function (d) { return d.rid === rid; }); }   // a store that cannot be read now is left as it is, the clear held
-    left = ds.filter(function (d) { return d.rid !== rid; });
-    if (left.length < ds.length) commentDraftsSave(left);
+    ended = ds.filter(function (d) { return d.rid === rid; });
+    if (ended.length) draftsWrite(ended, []);
     // The notice of kept comments is drawn again from what is left (closePopover does it), unless it is being typed in.
     var shown = ds.some(function (d) { return d.rid === rid && typeof d.quote === 'string'; });
     if (shown && pop && pop.hasAttribute('data-kept') && !pop.contains(ROOT.activeElement)) closePopover();
@@ -1794,7 +1864,7 @@ var create = function (ROOT, CFG, opts) {
   // the next, before its thread is opened: "1 reply not sent · Show". The line sits in the strip the page keeps
   // free below its text for that button (render.py's bottom padding), so it covers no badge; Show lists them
   // (showUnsent). One whose send is out is not counted: its answer tells. The line, and its list if it is open,
-  // follow the store: drawn again on every write of it here (commentDraftsSave) or on another page of the document
+  // follow the store: drawn again on every write of it here (draftsWrite) or on another page of the document
   // (the storage event below), and at the end of every send.
   var unsentBtn = null;
   function sendsKept() {
@@ -1833,7 +1903,7 @@ var create = function (ROOT, CFG, opts) {
   // kept comments' notice is left as it is: its text is being typed into, and it is drawn from the store again
   // after any close.
   listen(window, 'storage', function (e) {
-    if (e.key === null || e.key === COMMENT_DRAFT_KEY) unsentLine();      // null: the whole store was cleared
+    if (e.key === null || e.key === COMMENT_DRAFT_KEY || e.key.indexOf(ENTRY_PREFIX) === 0) unsentLine();      // null: the whole store was cleared
   });
   // The list the line opens: a popover above it, out of the text's way until asked for, that Escape, a click
   // outside or the line again close. Its forms are data-kept: their text is in the store, nothing to hold.
@@ -4040,6 +4110,7 @@ var create = function (ROOT, CFG, opts) {
     if (live) live.close();
     clearTimeout(closedTmr); closedTmr = null;
     failing = false; hubLine = false; dead = true; reloadPending = false; heldReload = false; holdWhy = null; holdOpen = null;
+    try { sessionStorage.removeItem(KEYS + 'rd-toast'); } catch (e) {}     // a merged save's toast, whose reload this ends (#125)
     stopRenewing();
     if (dirty().length) editDraftMirror();
     Array.prototype.forEach.call(ROOT.querySelectorAll('.rd-hold'), function (n) { if (n.textContent === HOLD) n.remove(); });
@@ -4514,7 +4585,11 @@ var create = function (ROOT, CFG, opts) {
   function failed(msg) {
     if (unmounted) return;
     settling = false;
+    var left = '';
+    try { left = sessionStorage.getItem(KEYS + 'rd-toast') || ''; } catch (e) {}
     try { sessionStorage.removeItem(KEYS + 'rd-keep'); } catch (e) {}     // the keep of a reload that did not happen
+    try { sessionStorage.removeItem(KEYS + 'rd-toast'); } catch (e) {}
+    if (left) say(left);          // what the save's reload was to say is said on the page that stays, not left for a page of another document (#125)
     say(msg, true);
   }
   return { unmount: unmount, dirty: unsavedNow, failed: failed };

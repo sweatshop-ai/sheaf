@@ -11,8 +11,8 @@ import re
 
 import pytest
 from helpers import PLAN
-from pagehelp import (BLUE, DOC, HOST, PAGE_TIMEOUT_MS, RED, assert_readable, close_context, drop_host, new_context, pasted,
-                      until, wear_host)
+from pagehelp import (BLUE, DOC, HOST, PAGE_TIMEOUT_MS, RED, assert_readable, close_context, drop_host, launch_engine, new_context,
+                      pasted, until, wear_host)
 
 from sheafmd import comments as rdc
 
@@ -132,10 +132,7 @@ def any_front(request, site, chromium):
     if request.param == "chromium":
         browser, own = chromium, False
     else:
-        try:
-            browser, own = getattr(chromium.pw, request.param).launch(), True
-        except Exception as e:      # noqa: BLE001 - not installed, or its libraries are missing here (CI fails on a skip)
-            pytest.skip(f"{request.param} cannot start here: {str(e).splitlines()[0]}")
+        browser, own = launch_engine(getattr(chromium.pw, request.param), request.param), True
     c, f = _front(browser, site)
     yield f
     try:

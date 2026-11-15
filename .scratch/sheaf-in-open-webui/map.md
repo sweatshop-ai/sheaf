@@ -30,6 +30,7 @@ A spec, ready to hand to whoever builds it, of sheaf as a standard module of eve
 
 - [Where the original of a page lives: the laptop or the tiroir](issues/05-where-the-original-lives.md): a repo page's original is git (the tiroir's clone commits page saves on the working branch, never a deploying one); a loose page's original is on the tiroir; no agent writes without reading the latest version; Claude.ai, ChatGPT and the Open WebUI assistant write through the same library door, which needs `create`/`update`.
 - [What a folder of the Catalog is](issues/06-what-a-catalog-folder-is.md): the path on disk (root, then its sub-folders); the Catalog is the 8.6 index page as a per-member tree, dot-folders hidden; loose pages in a `loose-<short>` root, folder named by the agent else the month; no moves in v1; its own sidebar entry beside "Actions"; a "Shared with me" folder per owner.
+- [The Catalog inside Open WebUI, as a rough prototype](issues/07-prototype-the-catalog.md): variant A, Finder: the Catalog in the main pane, a collapsible folder tree left, a table of pages right (title, folder, session, when, comments), a page opens in the pane with "← Catalog".
 
 ## Not yet specified
 

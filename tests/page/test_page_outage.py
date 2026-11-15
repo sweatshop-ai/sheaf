@@ -14,7 +14,7 @@ import time
 import pytest
 
 from helpers import PLAN, comment
-from pagehelp import (DOC, P1, P2, T0, at, comment_on, draft_key, gone, set_kept, mark, reload_on_clock,
+from pagehelp import (DOC, P1, P2, T0, at, comment_on, open_with_comment, draft_key, gone, set_kept, mark, reload_on_clock,
                       reloaded, toast, toasted, type_at_end, until)
 from sheafmd import comments as rdc
 
@@ -968,6 +968,29 @@ def test_a_change_heard_while_the_check_after_a_reconnect_is_out_does_not_reload
     until(lambda: gone(p) or GONE in notice(p) or p.wait_for_timeout(50), timeout=15, what="the page to answer")
     assert not gone(p), "the page reloaded into the other folder's document"
     assert GONE in notice(p)
+    p.wait_for_timeout(1500)
+    assert p.evaluate("window.__same_load") is True
+
+
+def test_a_reply_heard_while_the_check_is_out_is_taken_in_place_when_the_answer_names_its_hash(tab, site):
+    """A hello starts a check of the document (checkText). Its answer is read after another writer's reply was
+    written, so it names the new hash; the reply's `changed` came before it and waits for it (heardAfterCheck).
+    The answer must not read that hash as a change of the text from outside: the event takes the reply in place
+    (ticket 137: the page reloaded, and the toast that a send had been taken after all went with it)."""
+    from sheafmd.source import update_file
+    p = open_with_comment(tab, None, "apples", "Why?")
+    mark(p)
+    asked = []
+    p.route("**/_/doc?*", lambda route: asked.append(route))      # the answer to the check is held
+    site.hub.entry(DOC).live._publish("hello", {})
+    until(lambda: asked or p.wait_for_timeout(50), timeout=15, what="the page to ask what the document is")
+    update_file(site.file, lambda t: rdc.reply(t, "c1", "Because.", "Bea", "2026-10-14T11:00"))
+    site.hub.catch_up(site.hub.entry(DOC))             # the hub takes the reply in: a `changed`
+    p.wait_for_timeout(1000)                                      # has gone out and been heard
+    for r in asked:
+        r.continue_()
+    p.wait_for_timeout(1500)
+    assert not gone(p), "the page reloaded for a change of the comments only"
     p.wait_for_timeout(1500)
     assert p.evaluate("window.__same_load") is True
 

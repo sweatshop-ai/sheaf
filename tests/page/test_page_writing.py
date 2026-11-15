@@ -11,7 +11,7 @@ import pytest
 from helpers import comment, writes_from_outside
 from pagehelp import (DOC, P1, RELOADING, draft_key, P2, T0, at, comment_draft_key, comment_on, kept_entries, kept_json, set_kept, gone, key, mark, open_box, open_form, typed, reload_on_clock, reloaded,
                       select, select_by_touch, toast, toast_state, toasted, toasts_to_the_end, type_at_end, until)
-from pagehelp import TOAST_STEP, clock_at, run_clock
+from pagehelp import TOAST_STEP, clock_at, run_clock, stalls_after
 from sheafmd import comments as rdc
 from sheafmd.hub import live as hub_live
 from sheafmd.hub import state as hub_state
@@ -141,14 +141,38 @@ def fail_the_send(p, held):
     p.unroute("**/_/comment")
 
 
+def send_not_out(p):
+    """What the page shows when a send did not leave: whether it reloaded under the form, the field, the popover, the toast.
+    It never hides the failure it explains: a page that is reloading or does not answer is said so."""
+    try:
+        with stalls_after(5, "the page state of a send that did not go out"):
+            return p.evaluate("""() => {
+                const t = document.querySelector('#rd-popover textarea'), pop = document.querySelector('#rd-popover'), toast = document.querySelector('#rd-toast');
+                return JSON.stringify({same_load: window.__same_load === true, field: t ? t.value : null, popover: pop ? pop.innerText : null,
+                                       toast: toast ? [toast.textContent, toast.classList.contains('show')] : null});
+            }""")
+    except Exception as e:      # a PageStalled is not an Exception: it still ends the test
+        return f"page state unreadable: {str(e).splitlines()[0]}"
+
+
+def wait_for_send(p, held):
+    """Wait for the held `/_/comment` route to take the request; a send that did not go out says what the page shows."""
+    try:
+        until(lambda: held or p.wait_for_timeout(20), what="the send to go out")
+    except AssertionError as e:
+        # Seen once in CI (ticket 93) with nothing in the log to say why the request never left.
+        raise AssertionError(f"{e}: {send_not_out(p)}") from None
+
+
 def send_held(tab, form, text):
     """Open the reply or edit form, type, send with `/_/comment` held; returns the held requests."""
     p, held = tab.page, []
     open_form(p, form)
     p.fill("#rd-popover textarea", text)
+    mark(p)
     p.route("**/_/comment", lambda route: held.append(route))
     p.keyboard.press("Control+Enter")
-    until(lambda: held or p.wait_for_timeout(20), what="the send to go out")
+    wait_for_send(p, held)
     return held
 
 
@@ -2084,9 +2108,10 @@ def new_comment_held(tab):
     p.clock.run_for(50)                     # the Comment button comes on a timer, and this clock stands still
     open_box(p)
     p.fill("#rd-popover textarea", "about the pears")
+    mark(p)
     p.route("**/_/comment", lambda route: held.append(route))
     p.keyboard.press("Control+Enter")
-    until(lambda: held or p.wait_for_timeout(20), what="the send to go out")
+    wait_for_send(p, held)
     return held
 
 

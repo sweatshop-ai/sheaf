@@ -535,6 +535,19 @@ def test_a_remount_that_fails_says_so_in_the_page_and_the_next_one_still_works(f
     until(lambda: "about figs" in front.js("return root.querySelector('main').textContent;"), what="the next remount")
 
 
+def test_a_remount_that_fails_leaves_no_toast_for_a_later_mount_of_the_tab(front):
+    """Ticket 125 (c3 of #118): `failed()` took the keep of a reload that did not happen and left its toast, which a
+    later mount in this tab (or its copy) then said, with no keep to say whose it was."""
+    front.open()
+    front.page.route("**/_/mount?doc=*", lambda route: route.fulfill(
+        status=401, content_type="application/json", body='{"error": "sign in"}'))
+    front.page.evaluate("sessionStorage.setItem('sheaf-mount:rd-toast', '1 block \u2192 plan.md')")
+    front.site.file.write_text(front.site.file.read_text().replace("about pears", "about plums"), encoding="utf-8")
+    until(lambda: "401" in (front.js("const t = root.getElementById('rd-toast'); return t.className.includes('err') "
+                                     "? t.textContent : '';") or ""), what="the failure said in the page")
+    assert front.page.evaluate("sessionStorage.getItem('sheaf-mount:rd-toast')") is None
+
+
 def test_of_two_mounts_on_one_pane_the_one_called_last_stands_whichever_answers_first(front):
     """The loader moves on before the first answer is in: the older mount must not take the pane over the newer one
     (gate P2 of 2e9856f: the answer that came last won, and dropping the older handle left the pane empty)."""

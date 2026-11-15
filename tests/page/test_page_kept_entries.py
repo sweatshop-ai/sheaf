@@ -219,8 +219,8 @@ def test_a_held_clear_is_played_when_the_move_of_the_list_stops_half_way(tab, si
       Storage.prototype.setItem = function (k, v) {
         if (String(k).startsWith(key + ':e:')) { if (window.__moved >= 1) throw new Error('quota'); window.__moved = (window.__moved || 0) + 1; }
         return set.call(this, k, v); }; }""", key)
-    assert p.locator(UNSENT).count() == 1, "the line was not drawn again: the click below is not the read the test means"
-    p.click(UNSENT)                                # a read that works: the held clear is played, and the move stops after one key
+    # the read that works is the one the storage event makes (no line is on screen to click: the refused read removed it)
+    p.evaluate("window.dispatchEvent(new StorageEvent('storage', { key: null }))")
     until(lambda: sorted(e["body"] for e in kept_entries(p, site)) == ["first words", "third words"], what="the held clear to be played")
     assert p.evaluate("window.__moved") == 1, "the move did not stop half-way"
     loaded(p)

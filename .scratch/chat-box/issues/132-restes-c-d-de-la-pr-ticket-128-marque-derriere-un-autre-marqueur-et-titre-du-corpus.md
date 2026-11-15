@@ -6,8 +6,8 @@
 
 **Blocked by:** PR du ticket 128 fusionnée
 
-**Claimed by:** (libre)
+**Claimed by:** Yuki 2026-11-15 12:49
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] point 1 fait ou écarté avec la preuve ; point 2 fait

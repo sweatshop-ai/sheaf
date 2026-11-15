@@ -128,6 +128,10 @@ def test_two_pages_that_move_the_same_list_leave_each_entry_once(tab, site, cont
     b = context.new_page()
     b.goto(site.url)
     b.wait_for_selector("#rd-menu-btn", state="attached")
+    # Page b's view of the list is out of date (another page's write reaches it late): it still sees the list that a moves.
+    b.evaluate("""([key, list]) => { const get = Storage.prototype.getItem;
+      Storage.prototype.getItem = function (k) { return k === key ? list : get.call(this, k); }; }""",
+               [comment_draft_key(site), a.evaluate("(k) => localStorage.getItem(k)", comment_draft_key(site))])
     keep_a_new_message(a, "from page a")
     select(b, at(P1, "apples"), at(P1, "apples", None))
     b.fill(FIELD, "from page b")

@@ -18,12 +18,14 @@
 
 **Claimed by:** Isolde 2026-11-14 18:59
 
-**Status:** in-progress
+**Status:** done: merged as 3c4bc18 (PR 346), closed on Rhea's word
 
 **PR 346 (2026-11-14) :** une des trois défaillances est établie : `page.route()` rend la main avant que Chromium n'intercepte, un envoi fait quelques ms plus tard part droit vers le hub (test_page_writing « timed out waiting for the send to go out »). Corrigé côté test (sonde) et journal du flux ajouté (une page rouge imprime « the event stream, page and hub »). Reste ouvert : le send-again (la route était vive, TAKEN ne vient pas) et « text changed while you wrote » ; il faut un échec réel avec le journal. Restes de revue : ticket 119. Handoff : /home/tiroir/.claude/pm/chat-box-handoffs/handoff-Isolde-100.md
 
 **Par où commencer :** `src/sheafmd/page/page.js` autour de `live.addEventListener('changed', …)` (≈ ligne 4180) et `meetTaken` (≈ ligne 1701).
 
-- [ ] La page note, dans un journal lu par le test à l'échec, l'ouverture, les erreurs et chaque message du flux (heure de la page), et le hub note l'heure de chaque publication ; sur un échec de CI, on lit les deux côte à côte
+- [x] La page note, dans un journal lu par le test à l'échec, l'ouverture, les erreurs et chaque message du flux (heure de la page), et le hub note l'heure de chaque publication ; sur un échec de CI, on lit les deux côte à côte
 - [ ] La cause est établie sur un échec réel (flux coupé, événement perdu côté hub, ou reçu et non traité côté page), pas supposée
 - [ ] Le correctif est dans la page ou le hub si c'est un défaut du produit, dans les aides de test si c'est le test ; les trois tests passent sur plusieurs lancements de CI
+
+**Fermeture (Isolde, 2026-11-15) :** la case 1 est faite. Les cases 2 et 3 ne le sont qu'en partie, et la PR 346 le dit : la course de la route (`page.route()` rend la main avant que Chromium intercepte) est établie sur des échecs réels avec le journal et corrigée par la sonde (3 échecs sur 15 tours avant, 0 sur 45 après ; la course elle-même n'a jamais été vue attrapée). Deux échecs du ticket (send-again ; « text changed while you wrote ») et le test de la PR 344 n'ont aucune cause : aucun log de CI avec le journal n'en a été lu. Le journal est en place ; si l'un revient, lire la section « the event stream, page and hub » du log et ouvrir un nouveau ticket.

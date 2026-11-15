@@ -8,7 +8,7 @@ import sys
 import pytest
 
 from agent_fakes import PID, write_record
-from pagehelp import open_box, DOC, P1, at, select, until
+from pagehelp import open_box, open_with_comment, DOC, P1, at, select, until
 from sheafmd import comments as rdc
 from sheafmd import paths
 from sheafmd.agents.claude_code import proc_start
@@ -206,9 +206,7 @@ def test_the_byline_names_the_session_and_its_name_opens_it(tab, agent, tmp_path
 
 
 def test_a_running_tell_says_once_who_works_on_it_and_its_button_only_cancels(tab, agent):
-    update_file(tab.site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
-                                                         "Ada", "2026-10-14T10:00")[0])
-    tab.open()
+    open_with_comment(tab, None, "apples", "Why?")
     tab.page.click(".rd-badge")
     tab.page.wait_for_selector("#rd-popover textarea")
     tab.page.fill("#rd-popover textarea", "Please do.")

@@ -3,7 +3,7 @@ Open WebUI route with the session cookie, and to nothing else; and a hub page in
 microphone (SPEC 9.9). Fakes as in test_page_dictation.py: no real microphone, no real service."""
 import pytest
 
-from pagehelp import until
+from pagehelp import open_with_comment, until
 from sheafmd import comments as rdc
 from sheafmd.source import update_file
 from test_mount_page import front  # noqa: F401 - the fixture
@@ -51,9 +51,7 @@ def test_a_hub_page_in_proxy_mode_that_is_not_mounted_has_no_microphone(tab, sit
     tab.page.context.add_init_script(FAKE_MIC)
     tab.page.context.route("**/_/transcribe", lambda route: (asked.append(route.request.method), route.fulfill(
         status=200, content_type="application/json", body='{"available":true}')))
-    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
-                                                     "Bea", "2026-10-14T10:00")[0])
-    tab.open()
+    open_with_comment(tab, None, "apples", "Why?", "Bea")
     tab.page.click(".rd-badge")
     tab.page.wait_for_selector(FIELD)
     tab.page.wait_for_timeout(300)

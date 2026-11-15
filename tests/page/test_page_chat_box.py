@@ -1,7 +1,9 @@
 """The popover of a comment is a chat box: narrow, its messages in bubbles, a field to write in under them."""
+import json
+
 import pytest
 
-from pagehelp import DOC, P1, P2, at, box, comment_draft_key, mark, open_box, pasted, reloaded, select, toast, until
+from pagehelp import DOC, P1, P2, at, box, comment_draft_key, mark, open_box, open_with_comment, pasted, reloaded, select, toast, until
 from sheafmd import comments as rdc
 from sheafmd.hub.state import Tokens
 from sheafmd.source import update_file
@@ -15,9 +17,7 @@ THREAD_BOX = "#rd-popover"
 
 def open_thread(tab, site):
     """A comment of Bea's on the page, its thread open."""
-    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
-                                                     "Bea", "2026-10-14T10:00")[0])
-    tab.open()
+    open_with_comment(tab, None, "apples", "Why?", "Bea")
     tab.page.click(".rd-badge")
     tab.page.wait_for_selector(FIELD)
     return tab.page
@@ -60,10 +60,8 @@ def test_my_messages_stand_on_the_right_and_the_others_on_the_left(tab, site):
 
 
 def test_the_popover_is_narrow_and_tall_on_a_wide_screen(tab, site):
-    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "\n\n".join(["Why?"] * 200),
-                                                     "Bea", "2026-10-14T10:00")[0])
     tab.page.set_viewport_size({"width": 1600, "height": 1000})
-    tab.open()
+    open_with_comment(tab, None, "apples", "\n\n".join(["Why?"] * 200), "Bea")
     tab.page.click(".rd-badge")
     tab.page.wait_for_selector(FIELD)
     box = tab.page.locator("#rd-popover").bounding_box()
@@ -138,8 +136,7 @@ def test_there_is_no_minus_where_there_is_nothing_to_resolve(tab, site):
 
 
 def test_edit_and_delete_wait_in_a_small_menu(tab, site):
-    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "pears"), "pears", "Mine", "Ada", "2026-10-14T10:00")[0])
-    tab.open()
+    open_with_comment(tab, None, "pears", "Mine")
     tab.page.click(".rd-badge")
     p = tab.page
     p.wait_for_selector(FIELD)
@@ -149,9 +146,7 @@ def test_edit_and_delete_wait_in_a_small_menu(tab, site):
 
 
 def test_a_long_thread_opens_on_its_last_message_and_scrolls_up(tab, site):
-    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "\n\n".join(["Why?"] * 200),
-                                                     "Bea", "2026-10-14T10:00")[0])
-    tab.open()
+    open_with_comment(tab, None, "apples", "\n\n".join(["Why?"] * 200), "Bea")
     tab.page.click(".rd-badge")
     tab.page.wait_for_selector(FIELD)
     top, room, full = tab.page.locator("#rd-popover .rd-scroll").evaluate("s => [s.scrollTop, s.clientHeight, s.scrollHeight]")
@@ -160,9 +155,7 @@ def test_a_long_thread_opens_on_its_last_message_and_scrolls_up(tab, site):
 
 def long_thread(tab, site):
     """A comment of Bea's with 200 paragraphs, its thread open on the last of them."""
-    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "\n\n".join(["Why?"] * 200),
-                                                     "Bea", "2026-10-14T10:00")[0])
-    tab.open()
+    open_with_comment(tab, None, "apples", "\n\n".join(["Why?"] * 200), "Bea")
     tab.page.click(".rd-badge")
     tab.page.wait_for_selector(FIELD)
     return tab.page
@@ -407,10 +400,7 @@ def test_enter_during_an_ime_composition_does_not_send(tab, site):
 
 
 def test_a_reply_kept_by_the_older_page_is_listed_as_a_reply_and_comes_back_in_its_thread(tab, site):
-    import json
-    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
-                                                     "Bea", "2026-10-14T10:00")[0])
-    tab.open()
+    open_with_comment(tab, None, "apples", "Why?", "Bea")
     old = [{"thread": "c1", "kind": "reply", "body": "from the old page", "about": "apples", "born": "2026-10-14T10:00",
             "at": "2026-10-14T11:00:00.000Z"}]
     tab.page.evaluate("([k, v]) => localStorage.setItem(k, v)", [comment_draft_key(site), json.dumps(old)])
@@ -484,7 +474,6 @@ def reopen_reads(p, patch=None, patch_arg=None, then=""):
     (`patch`, a JS function given `patch_arg`) and the statements that follow (`then`). Two calls leave a gap in which a
     read of the page's own meets a working store, purges the held clear and writes it, so the test no longer shows the
     path it names (ticket 86)."""
-    import json
     first = f"({patch})({json.dumps(patch_arg)});" if patch else ""
     p.evaluate(f"() => {{ {first} ({STORE_UNREADABLE})(false); {then} }}")
 
@@ -580,8 +569,7 @@ def test_the_box_closes_normally_once_the_store_works_again(tab, site):
 
 def test_choosing_edit_while_a_reply_is_typed_keeps_the_reply(tab, site):
     """Edit replaces the field by the edit form: the reply typed there must not be thrown away, and Cancel brings it back."""
-    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "pears"), "pears", "Mine", "Ada", "2026-10-14T10:00")[0])
-    tab.open()
+    open_with_comment(tab, None, "pears", "Mine")
     tab.page.click(".rd-badge")
     p = tab.page
     p.wait_for_selector(FIELD)
@@ -595,8 +583,7 @@ def test_choosing_edit_while_a_reply_is_typed_keeps_the_reply(tab, site):
 
 def my_thread(tab, site):
     """A comment of Ada's own on the page, its thread open: the menu offers Edit."""
-    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "pears"), "pears", "Mine", "Ada", "2026-10-14T10:00")[0])
-    tab.open()
+    open_with_comment(tab, None, "pears", "Mine")
     tab.page.click(".rd-badge")
     tab.page.wait_for_selector(FIELD)
     return tab.page
@@ -695,8 +682,7 @@ def test_choosing_edit_on_an_edit_form_the_message_moved_away_from_opens_it_afre
 
 
 def test_closing_an_edit_form_that_was_not_changed_leaves_nothing_unsent(tab, site):
-    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "pears"), "pears", "Mine", "Ada", "2026-10-14T10:00")[0])
-    tab.open()
+    open_with_comment(tab, None, "pears", "Mine")
     tab.page.click(".rd-badge")
     p = tab.page
     p.wait_for_selector(FIELD)
@@ -825,7 +811,6 @@ def test_a_message_kept_by_a_close_that_was_then_aborted_is_removed_when_its_fie
 
 
 def test_a_store_that_refuses_to_be_read_keeps_what_it_holds_and_says_the_text_was_not_kept(tab, site):
-    import json
     p = open_thread(tab, site)
     kept = [{"quote": "pears", "body": "a draft of another passage", "at": "2026-10-14T11:00:00.000Z"}]
     p.evaluate("([k, v]) => localStorage.setItem(k, v)", [comment_draft_key(site), json.dumps(kept)])
@@ -856,7 +841,6 @@ def test_an_emptied_new_message_closes_when_the_store_that_kept_its_text_stops_b
 
 
 def test_a_read_of_the_store_that_fails_once_does_not_empty_the_drafts_of_the_page_at_the_next_write(tab, site):
-    import json
     p = open_thread(tab, site)
     kept = [{"quote": "pears", "body": "a draft of another passage", "at": "2026-10-14T11:00:00.000Z"}]
     p.evaluate("([k, v]) => localStorage.setItem(k, v)", [comment_draft_key(site), json.dumps(kept)])

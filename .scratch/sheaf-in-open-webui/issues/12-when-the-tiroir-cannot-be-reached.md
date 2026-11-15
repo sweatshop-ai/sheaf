@@ -1,7 +1,7 @@
 # 12: What a laptop session does when the tiroir cannot be reached
 
 **Type:** grilling
-**Status:** open
+**Status:** claimed by Ottilie (2026-11-15)
 **Blocked by:** 11
 **Map:** ../map.md
 

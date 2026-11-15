@@ -11,6 +11,8 @@ The sidebar entry, the Catalog and the spec need a name a member reads. Thierry 
 
 ## Answer
 
+**Amended 2026-11-15 (ticket 19, Thierry): the name is tiroir Rectoverso, one word, not Recto: a word that short is lost in dictation. Read "Rectoverso" wherever this ticket says "Recto" as the product; the verso keeps its meaning.**
+
 Resolved 2026-11-15 by Ottilie with Thierry, three naming rounds (method: `glacierphonk/naming`, read from a scratch clone).
 
 1. **The product a member sees is tiroir Recto.** It competes with Claude's Artifacts, so it is a product name inside the tiroir family, not a menu label and not a stand-alone brand (no own domain). The three ideas it carries are split over the system: *tiroir* says the pages are yours whatever model wrote them; *Recto*, the side of a sheet that faces you, is what the agent shows; the *verso* is where you answer. The line: "Your agent writes the recto. You write the verso. The drawer is yours."

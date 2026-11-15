@@ -107,9 +107,9 @@ _Avoid_: catalog, index, dashboard
 A member's browsable tree of folders holding every page they may open, with or without an issue, and no status. A folder is where the page lives: its root, then the root's sub-folders; pages another member Shared sit apart, under their owner. Not the List: the List says what waits, the Catalog says where a page is. (Named 2026-11-15, wayfinder `sheaf-in-open-webui`, folders ticket 06; not built.)
 _Avoid_: list, library, documents
 
-**Recto**:
-The name a member reads for their pages inside a tiroir: the sidebar entry and the title of the Catalog's view, the same word in every language. The product, not one page: a single page stays a page. The engine and the laptop command keep the name sheaf. (Named 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 15; not built.)
-_Avoid_: Sheaf (to a member), Documents, Notes, a recto (for one page)
+**Rectoverso**:
+The name a member reads for their pages inside a tiroir: the sidebar entry and the title of the Catalog's view, the same word in every language. The product, not one page: a single page stays a page. The engine and the laptop command keep the name sheaf. One word, so dictation does not lose it as it would a short "Recto". (Named 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 15, as Recto; made Rectoverso by Thierry the same day during ticket 19; not built.)
+_Avoid_: Recto, Sheaf (to a member), Documents, Notes, a recto (for one page)
 
 **Verso**:
 The side of a page that holds its Comments, as a member reads it: the agent writes the page, the member answers on its verso. A word for the place, not for one comment. (Named 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 15; not built.)

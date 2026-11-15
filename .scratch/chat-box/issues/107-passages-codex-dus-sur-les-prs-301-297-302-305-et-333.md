@@ -13,7 +13,7 @@
 
 (Chemins `pr-*-reviews/` sous `/home/tiroir/.claude/pm/chat-box-handoffs/`.)
 
-**Blocked by:** Codex usage limit until 2026-11-20 14:10 (retried 2026-11-15: exit 7 on PRs 333, 297, 302; the 01:00 date was wrong)
+**Blocked by:** Codex usage limit until 2026-11-20 14:10 (retried 2026-11-15: exit 7 on the three PRs that need Codex, listed in the table; the earlier 01:00 date was wrong)
 
 **Claimed by:** (libre)
 

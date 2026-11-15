@@ -22,9 +22,9 @@
 
 **Scindé (Rhea, 2026-11-15) :** ce ticket se ferme avec la PR 373 (le send-again). « text changed while you wrote » (run 43621112432) et la case fusionnée (run 43639875963), dont la cause n'est pas montrée, passent au ticket 141. Le journal du flux survit maintenant à un rechargement (sessionStorage, dans la PR 373).
 
-**Claimed by:** Wilma 2026-11-15 13:29
+**Claimed by:** Wilma 2026-11-15 13:29 (terminé)
 
-**Status:** in-progress
+**Status:** done (PR 373 fusionnée, fc479f6)
 
 - [x] La cause du send-again est établie sur un échec réel avec le journal, pas supposée
-- [ ] Le correctif (PR 373) est fusionné et le send-again passe sur plusieurs lancements de CI
+- [x] Le correctif (PR 373, fc479f6) est fusionné ; CI verte sur la PR (3 tranches), 83/83 sous charge sur t-compute

@@ -10,7 +10,7 @@
 
 - [x] Un test fait lever `OSError` à `os.close` dans la branche « pas un fichier régulier » et échoue sans le correctif (descripteur fermé deux fois)
 - [x] Le descripteur est fermé une seule fois sur chaque chemin ; l'échec de lecture donne `available: false` et une ligne de diagnostic `transcribe-key-file`, jamais un 500
-- [ ] Aucune clé dans le test, le dépôt ni les journaux
+- [x] Aucune clé dans le test, le dépôt ni les journaux (tenu : `tests/test_hub_transcribe.py:19` la clé du test est un faux `fake-key-for-tests-0123` ; `src/sheafmd/hub/transcribe.py` `_refuse` (l. 202) ne journalise que `transcribe-key-file` avec une raison sans la clé, et `tests/test_hub_transcribe.py:468, 571, 697` affirment que la clé n'est pas dans les lignes du journal ; une recherche de motifs de clé (`sk-…`, `gsk_…`, `Bearer …`) dans `src` et `tests` de origin/main ne trouve que le faux `sk-0123456789abcdef` de `tests/test_proxy_contract.py:216`)
 
 **Claimed by:** Greta 2026-11-13 00:16
 

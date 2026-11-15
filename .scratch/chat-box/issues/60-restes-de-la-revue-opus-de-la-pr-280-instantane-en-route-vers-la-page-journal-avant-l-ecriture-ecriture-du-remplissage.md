@@ -11,8 +11,8 @@
 
 **Blocked by:** none
 
-**Status:** open
+**Status:** done (PR 302 fusionnée, main 37c99b1, 2026-11-14 ; restes au ticket 81)
 
 **Établi (preuves) :** lecture seule de l'Opus, tour 1 (`/home/tiroir/.claude/pm/chat-box-handoffs/pr-40-reviews/opus-round1.md`), avec citations. Non reproduit.
 
-- [ ] Chaque point est soit corrigé avec un test rouge, soit écarté avec la raison
+- [x] Chaque point est soit corrigé avec un test rouge, soit écarté avec la raison. Corrigés avec un test rouge : F1 (événements `changed`, test `a_changed_event_is_read_under_the_tells_lock`), F3, F4, F5 (au-delà du docstring : les lignes du journal sont tenues avec les événements), F6, F7 (agent vide). Écartés : le volet `/_/doc` de F1 (une réponse, pas le flux ; SPEC 9.8 le dit), le jeton sans client de F7 (la ligne se termine dans la même passe). Trouvé en revue et corrigé test d'abord : `take` qui ne trouve que des lignes révoquées envoyait et journalisait sans écrire.

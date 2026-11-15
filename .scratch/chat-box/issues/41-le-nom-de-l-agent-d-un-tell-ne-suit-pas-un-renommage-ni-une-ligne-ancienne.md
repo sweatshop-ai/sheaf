@@ -6,7 +6,7 @@
 
 **Claimed by:** Isolde 2026-11-13 23:53
 
-**Status:** in-review (branche chat-box/40-41, une PR avec le ticket 40)
+**Status:** done (PR 280, merge 062f3a5)
 
 **Établi (preuves) :** lecture de `waiting.py` `_name`, `queue`, `_end`, `take` à la tête bbf4dbe de chat-box/23. Non reproduit.
 

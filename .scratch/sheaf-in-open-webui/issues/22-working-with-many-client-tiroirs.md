@@ -1,7 +1,7 @@
 # 22: How a ThinkingToo member works with many client tiroirs: where the pages for a client live, and how the member reads them
 
 **Type:** grilling
-**Status:** claimed by Ottilie (2026-11-15)
+**Status:** resolved (2026-11-16)
 **Blocked by:** none
 **Map:** ../map.md
 
@@ -15,6 +15,25 @@ This reopens two points of ticket 04 and one of ticket 16:
 - ticket 16: the owner's agent may Share on `create`; on a client tiroir that Share reaches the client, which by Thierry's rules is his own hand.
 
 Ways in, from ticket 21: (a) one sign-in per client tiroir, a Sheaf each; (b) the client repo's pages live on two tiroirs at once, tiroir-tt for the team and the client's for the client, git keeping them in step since comments are in the file (ticket 03), each tiroir's clone committing page saves (ticket 14); (c) tiroir-tt's Sheaf shows the client tiroirs' pages read through, hub to hub (the channel of ticket 21). Also open: who has accounts on a client tiroir (the ThinkingToo team?), where client-facing pages are written from (the `thinkingtoo` repo vs the client repo), and what a client's member sees of the team's comments.
+
+
+## Answer
+
+Resolved 2026-11-16 by Ottilie grilling with Thierry (four rounds; Q6 reopened by Thierry on the client's brain). The round notes below keep the questions as asked.
+
+Facts found first (read-only, 2026-11-16): the client tiroirs are chienvert, respace and avetta. Thierry is admin in Open WebUI on chienvert and respace, Sven and Hans have no account on any, avetta was not reachable. No sheaf module runs on any. Open WebUI's admin access to users' chats is on by default on chienvert and respace (follow-up below).
+
+1. **A client's pages are written in a repo per client** (`klium`), holding only what is client-facing. Its `.sheaf.toml` names the client tiroir. The client tiroir's GitHub App (ticket 14) is installed on that repo only, never on `thinkingtoo`. Internal work stays in `thinkingtoo` on tiroir-tt. Ticket 04 point 1 stands: a root goes to one tiroir.
+2. **On a client tiroir the agent never opens a page to the client.** A tiroir's record marks it as a client's (`client: true` in `devices.yaml`). There the owner's agent may `Share with <ThinkingToo members>` on `create`, never plain Share. Plain Share, which opens the page to the client's members, is the member's own hand from the Sheaf. Narrows ticket 16's agent Share.
+3. **The team discusses a client page in Team comments, which the client never sees.** A Team comment lives on tiroir-tt, tied to the client page's address, on a team verso beside the client's. It never reaches the client tiroir, the client repo or the client's brain. Adds to ticket 03: comments stay in the file, Team comments are the one exception, and they are not in the client's file at all.
+4. **The team reads every client from tiroir-tt's Sheaf.** A "Clients" folder holds one sub-folder per client tiroir, read through over the hub-to-hub channel of ticket 21. tiroir-tt keeps no copy. An opened client page shows the client's comments, written to the client tiroir under the member's name, and the Team comments, kept on tiroir-tt. One sign-in. Reopens ticket 04 point 5 for client tiroirs only.
+5. **Tells follow ticket 18.** A Tell a ThinkingToo member presses goes to that member's own agent. A client member's Tell goes to the client's own assistant.
+6. **Client tiroir privacy rule (goes into the spec).** Every client user's brain, chats and private pages are theirs alone: no agent and no ThinkingToo member reads them, the tools offer no way to, and stages never read user data. A ThinkingToo member on a client tiroir is an Open WebUI `user`, never `admin`. The Sheaf has no admin override: the member sees the client repo's root and what a client member Shared with them, and the hub-to-hub channel carries only that. The agency operates the box as root, so the technical guarantee ends there, and the spec says so.
+7. **A service account administers each client tiroir**: `ops@<client>.tiroir.me`, admin, password in the keyring, used only by stages, with Open WebUI's three `ENABLE_ADMIN_*` off.
+8. **Accounts on a client tiroir**: Thierry names a member for a client, an agent creates the account through a stage, and the list lives in the tiroir's record. An account is not a message to the client.
+9. **The client's brain indexes only pages opened to the client** by plain Share. Drafts, owner-only or Shared with the team, reach the box with the git push but are never indexed.
+
+New in `GLOSSARY.md`: **Client tiroir**, **Team comment**; **Default tiroir** carries the exception of 4. Follow-up outside the map: `.scratch/follow-ups/client-tiroirs-open-webui-admin-reads-client-chats.md` (close Open WebUI's admin access on the client tiroirs, demote ThinkingToo accounts, the runbook default).
 
 ## Grilling notes (Ottilie, in progress)
 

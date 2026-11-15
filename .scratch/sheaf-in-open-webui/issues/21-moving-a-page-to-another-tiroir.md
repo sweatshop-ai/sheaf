@@ -1,7 +1,7 @@
 # 21: Moving a single page to another tiroir, and how its old address forwards there
 
 **Type:** grilling
-**Status:** open
+**Status:** claimed by Ottilie (2026-11-15)
 **Blocked by:** 20
 **Map:** ../map.md
 

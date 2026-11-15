@@ -1,5 +1,6 @@
 """What the page tests do with a page: select text the way a person's mouse does, and wait; and what a run says when its browser will not start."""
 import contextlib
+import datetime
 import json
 import os
 import signal
@@ -368,7 +369,8 @@ def kept_json(page, site):
 
 
 def kept_entries(page, site):
-    """The entries of the comment store, oldest first."""
+    """The entries of the comment store, in the order of the store: the entry keys by id, then those of an earlier build's
+    list. (The page lists the list's entries first; no test reads this order for a store that holds both.)"""
     return json.loads(kept_json(page, site) or "[]")
 
 
@@ -401,14 +403,21 @@ def type_at_end(page, css, text):
     page.keyboard.type(text)
 
 
+def clock_at(ms):
+    """A point for page.clock from epoch milliseconds. Not the bare number: Playwright for Python reads a number as
+    seconds, so T0 (ms) put the page's Date.now() in the year 57000, and the ids the page makes from it were longer than
+    any real one (ticket 130)."""
+    return datetime.datetime.fromtimestamp(ms / 1000, tz=datetime.timezone.utc)
+
+
 def reload_on_clock(page, start=T0, *, pause=False):
     """Put a clock the test drives under the open page, from `start` (ms), and reload it; with
     `pause` the clock stands still 5 s later."""
-    page.clock.install(time=start)
+    page.clock.install(time=clock_at(start))
     page.reload()
     page.wait_for_selector("#rd-menu-btn", state="attached")
     if pause:
-        page.clock.pause_at(start + 5_000)
+        page.clock.pause_at(clock_at(start + 5_000))
 
 
 # ── a browser that will not start ────────────────────────────────────────────────────────────────────────
@@ -495,8 +504,18 @@ def launch_engine(browser_type, name, error=None, in_ci=None):
 # time (taken before a test's fake clock replaces the page's), each open, error and event into window.__sseJournal.
 STREAM_JOURNAL_JS = """(() => {
   const now = performance.now.bind(performance), origin = performance.timeOrigin;
-  const log = window.__sseJournal = [];
-  const note = (what, data) => log.push([origin + now(), what, data === undefined ? '' : String(data).slice(0, 120)]);
+  // Kept in sessionStorage: a reload of the page, which is what a lost event or a lost toast often is, would
+  // otherwise take the journal of the page that heard it (ticket 137).
+  const setItem = Storage.prototype.setItem;      // the native one: a test that watches the page's own setItem does not see the journal's
+  let log = [];
+  try { log = JSON.parse(sessionStorage.getItem('__sseJournal') || '[]'); } catch (e) {}
+  window.__sseJournal = log;
+  const note = (what, data) => {
+    log.push([origin + now(), what, data === undefined ? '' : String(data).slice(0, 120)]);
+    try { setItem.call(sessionStorage, '__sseJournal', JSON.stringify(log.slice(-400))); } catch (e) {}
+  };
+  note('document', 'starts');
+  window.addEventListener('pagehide', () => note('pagehide'));
   const nativeFetch = window.fetch.bind(window);
   window.fetch = (url, init) => {
     const what = String(url) + ' ' + ((init && init.method) || 'GET');

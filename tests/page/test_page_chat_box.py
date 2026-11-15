@@ -755,6 +755,26 @@ def test_a_minimized_message_whose_field_is_emptied_is_gone_from_the_store_when_
     assert p.input_value(FIELD) == "", "the erased text came back"
 
 
+def test_discard_in_the_not_sent_list_removes_one_minimized_message_and_leaves_the_other(tab, site):
+    tab.open()
+    p = tab.page
+    for passage, text in ((P1, "Why apples?"), (P2, "And pears?")):
+        word = "apples" if passage == P1 else "pears"
+        select(p, at(passage, word), at(passage, word, None))
+        p.fill(FIELD, text)
+        p.keyboard.press("Escape")
+    until(lambda: p.inner_text("#rd-unsent") == "2 messages not sent · Show", what="both messages in the line")
+    p.click("#rd-unsent")
+    until(lambda: p.locator("#rd-popover[data-unsent] .rd-form").count() == 2, what="the list")
+    mine = p.locator("#rd-popover[data-unsent] .rd-form").filter(has=p.locator("textarea")).nth(0)
+    first = mine.locator("textarea").input_value()
+    mine.locator("button[data-f=no]").click()
+    until(lambda: p.inner_text("#rd-unsent") == "1 message not sent · Show", what="one message left")
+    store = p.evaluate("JSON.stringify(Object.values(localStorage))")
+    assert first not in store, "the discarded message stayed in the store"
+    assert ({"Why apples?", "And pears?"} - {first}).pop() in store, "the other message went with it"
+
+
 def test_closing_an_empty_new_message_that_was_never_kept_changes_nothing(tab, site):
     tab.open()
     p = tab.page

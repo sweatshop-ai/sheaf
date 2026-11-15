@@ -798,6 +798,20 @@ def test_an_empty_opener_in_a_link_destination_is_copied_unless_a_later_arrow_wo
     assert e.line == 1 and "that is not a comment to the reader" in str(e)
 
 
+@pytest.mark.parametrize("text", [
+    "<!--> <!-- sheaf-comment x\n\nSECRET\n",
+    "- a\n\n  ```\n  z\n  ```\n\n  <!--> <!-- sheaf-comment x\n\nSECRET\n",
+    "> A <!--> b `<!-- sheaf-comment\n> x` c\n\nSECRET\n",
+])
+def test_an_unclosed_note_head_on_an_empty_opener_line_is_refused_with_the_openers_message(tmp_path, text):
+    # SPEC 6.2 limit (ticket 115, decided: no third attempt). The refusal may name the empty opener
+    # and not the note; only the message differs. This pins main's behaviour on these shapes: the
+    # opener's message, the line, and no word of the note anywhere in it.
+    e = _refused(tmp_path, text)
+    assert "empty HTML comment" in str(e) and "SECRET" not in str(e)
+    assert text.split("\n")[e.line - 1].find("<!-->") >= 0
+
+
 def test_an_empty_opener_whose_next_arrow_takes_no_shown_word_is_copied(tmp_path):
     # SPEC 6.2 (ticket 99): "refused whether or not an arrow follows" was too wide.
     assert "KEEP" in sheafmd.render(doc(tmp_path, "# A <!--> -->\n\nKEEP\n"))

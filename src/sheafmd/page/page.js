@@ -1591,7 +1591,7 @@ var create = function (ROOT, CFG, opts) {
   // The entries `raw` (the text of the old list) holds. An id is made of the entry's own text: its time, which puts it in
   // order, the place among the entries of that same time (the list is in the order of writes, and entries written in one
   // millisecond share their time), and a hash. So it is the same on every page that reads it, and still the same when
-  // an older tab writes the list again with the entries moved up, unless an entry of that very time went before it.
+  // an older tab writes the list again with the entries moved up, unless it removed an entry of that very time before it.
   function legacyEntries(raw) {
     var v = JSON.parse(raw || '[]'), seen = {};
     return (Array.isArray(v) ? v : [v]).filter(validDraft).map(function (d) {

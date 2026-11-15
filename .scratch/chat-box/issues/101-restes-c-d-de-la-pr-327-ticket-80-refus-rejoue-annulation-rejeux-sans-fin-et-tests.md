@@ -17,4 +17,10 @@
 
 **Par où commencer :** le point 4, le test rouge du reset ; sur t-compute, jamais sur le portable.
 
-- [ ] Chaque point : corrigé (test rouge d'abord) ou la limite écrite dans le SPEC
+- [x] Chaque point : corrigé (test rouge d'abord) ou la limite écrite dans le SPEC (vérifié sur origin/main, commit ad83e80 de la PR 339, merge 3e6980b ; reste d'un point : ticket 143) :
+  - [x] 1 : fait. `page.js:3847` remet `pressSaid` à zéro dans `send()` ; le SPEC 10.11 (l. 1381) écrit « a press that goes past its Undo forgets an earlier one's refusal (a press undone does not…) ». Test : `tests/page/test_page_actions.py:345`.
+  - [x] 2 : fait pour la limite : `page.js:4562` garde l'échéance d'origine (`until: refusedPress.until`), le SPEC dit « the deadline is the one it was first said under, so reloads do not chain it on ». Test : `test_page_actions.py:376`. Reste : chaque rejeu poste encore un incident `toast` à `/_/diag` (`page.js:660`, `say(…, true)` du rejeu à 4559) : ~~le rejeu ne poste pas d'incident~~ (struck: moved to ticket 143).
+  - [x] 3 : limite écrite dans le SPEC 10.11 (l. 1381) : « the page's own "The actions changed while <label> waited" is not kept » ; `page.js:3858` ne pose pas `pressSaid`, comme écrit.
+  - [x] 4 : fait. Test rouge du reset : `test_page_actions.py:345` `test_an_earlier_refusal_still_up_is_not_said_again_by_the_reload_of_a_later_press_that_succeeded` (« without [the reset] the reload carries A », A encore affiché à 5,1 s de ses 7) ; `:324` pour B.
+  - [x] 5 : fait. Plus de `run_for(100)` par essai ni de `or … and False` dans ces tests : boucles à `run_for(3000)` (`test_page_actions.py:324`, 345 et suivants).
+  - [x] 6 : fait. SPEC.md 10.11 (l. 1381) lit « (7 seconds; a refusal still queued behind other toasts counts as up, …) », la virgule en trop est partie (commit ad83e80).

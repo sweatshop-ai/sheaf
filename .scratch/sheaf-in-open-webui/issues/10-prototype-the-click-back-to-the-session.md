@@ -19,3 +19,9 @@ Tried so far (Chrome 156, the professional profile):
 - **Way a** works from a tailnet `http://100.x` page with no prompt: preflight, then POST, then AgentView. From the real origin `https://thinkingtoo.tiroir.me` (public IP 204.168.163.67), Chrome holds the request before any preflight leaves: `local-network-access` permission state `prompt`. The member must allow "access devices on your local network" once per tiroir origin, per browser profile. It also only works on the laptop where the session runs.
 - **AgentView today** answers a preflight with `501 Unsupported method ('OPTIONS')` and refuses any foreign Origin (403, `_origin_ok`), so way a needs AgentView changes (an allow-listed tiroir origin, an OPTIONS answer with CORS and the local-network header). Way b needs none: the relay calls AgentView locally, as the hub does today.
 - Aside, not this ticket's: AgentView answers "no terminal hosts this session" for Ottilie, a session in a WezTerm tab, so its jump fails the same way on the laptop hub today.
+
+Tried with Thierry (2026-11-15, 21:45):
+
+- **Way a from the real origin works once allowed.** In the professional Chrome on `https://thinkingtoo.tiroir.me/list`, Chrome showed its local-network prompt and Thierry allowed it (state `granted`). Clicking "Kenji" then sent preflight and POST to the shim. AgentView answered `{"ok": true, "ran": ["wezterm cli … activate-pane --pane-id 12", "wmctrl -ia …"]}` and Kenji's pane came to the front.
+- **The phone is already solved elsewhere** (Thierry): in FleetView on the phone, a click on a session under Remote Control opens it in the Claude app (`agentview/fleet.py` `jump_of`, `remote`; `index.html` `wayOf`: on a touch screen with no hover, the `https://` Remote Control link wins over the pane). Raising a laptop terminal from a phone is no use, so way b's only advantage is moot.
+- The stand-in, shim and relay were stopped and t-compute's folder removed afterwards.

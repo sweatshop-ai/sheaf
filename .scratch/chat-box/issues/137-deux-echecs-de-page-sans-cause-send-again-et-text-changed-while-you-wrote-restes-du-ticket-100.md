@@ -18,7 +18,9 @@
 - Aucune ligne `page0 event changed` n'apparaît dans le journal : la page n'a pas lu le `changed` du hub sur l'ancien flux, et la fin du journal est .237 alors que le test échoue 8 s plus tard. Le log porte aussi un `BrokenPipeError` du hub (`server.py:139`, `wfile.write`), juste avant le journal.
 Établi : le hub a publié `changed` pour ce rid, la page n'en a pas journalisé la réception, et elle a rouvert un flux `/_/live` juste après. Non établi : pourquoi l'ancien flux n'a pas livré (flux déjà fermé côté page ? `changed` écrit sur une socket morte, cf. le BrokenPipe ?) ni si la réouverture vient d'un rechargement ou de la reprise du flux. Prochaine lecture : le code de la page qui ouvre `/_/live` (reprise après coupure) et ce que le hub compte comme « 1 stream » à cet instant ; la cause reste à établir avant tout correctif.
 
-**Status:** open
+**Claimed by:** Yara 2026-11-15 13:29
+
+**Status:** in-progress
 
 - [ ] La cause de chacun des trois échecs est établie sur un échec réel avec le journal, pas supposée
 - [ ] Le correctif est posé et les trois tests passent sur plusieurs lancements de CI

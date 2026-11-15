@@ -1577,7 +1577,7 @@ var create = function (ROOT, CFG, opts) {
   // A document's path may hold ':e:', so the key of `a.md:e:x.md` starts with the prefix of `a.md`: a key is an entry of
   // this document only when what follows the prefix has the shape of an id (entryKey).
   var ENTRY_PREFIX = COMMENT_DRAFT_KEY + ':e:', writeN = 0;
-  var ENTRY_ID = /^(?:[0-9a-z]{9,}-[0-9a-z]{3}-[0-9a-z]{4}|0[0-9a-z]{9}-[0-9a-z]{14}|0[0-9a-z]{4}-[0-9a-z]{1,7})$/;   // new (the time is 9 digits or more: a test clock runs past the year 5188) | moved from the list | moved by the first build of this store
+  var ENTRY_ID = /^(?:[0-9a-z]{9}-[0-9a-z]{3}-[0-9a-z]{4}|0[0-9a-z]{9}-[0-9a-z]{14}|0[0-9a-z]{4}-[0-9a-z]{1,7})$/;   // new | moved from the list | moved by the first build of this store
   function entryKey(k) { return k.indexOf(ENTRY_PREFIX) === 0 && ENTRY_ID.test(k.slice(ENTRY_PREFIX.length)); }
   function pad(n, w) { var t = n.toString(36); while (t.length < w) t = '0' + t; return t; }
   function newEntryId() { return pad(Date.now(), 9) + '-' + pad(writeN++ % 46656, 3) + '-' + pad(Math.floor(Math.random() * 1679616), 4); }

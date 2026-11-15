@@ -17,8 +17,28 @@ Classe c (défauts plus petits, avec contournement) :
 - c8 (r3 F3) : si les repères sont écrits puis l'écriture du stockage est refusée, les repères restent 10 s alors que le retrait n'a pas eu lieu : l'autre page abandonne sa revendication sur cette clé, une écriture périmée dans cette fenêtre n'est pas réparée.
 - c7 : horloges factices (`p.clock`) : un repère daté du futur n'est jamais purgé par une page à l'heure réelle.
 
-**Blocked by:** 121 (ces restes ne valent que si la conception claim/repère revient ; la PR du ticket 97 est fusionnée)
+**Blocked by:** none (121 took another design; see the table)
 
 **Claimed by:** Isolde 2026-11-15 13:28
 
-**Status:** in-progress
+## Check against origin/main 3bdeaf6 (Isolde, 2026-11-15)
+
+`claim()`, `reclaim()`, `withdrawn()`, `lastRead` and the repères do not exist on main (`git grep` in `src/sheafmd/page/page.js`: none). Ticket 121 (PR 355) holds clears in `pendingClears` (page.js:1571) and writes one key per entry (`ENTRY_PREFIX`, page.js:1575, `draftsWrite` page.js:1666).
+
+| Item | Verdict | Where on main |
+|---|---|---|
+| ~~c1~~ two pages rewriting in turn | struck: design withdrawn, see PR 355 | no reclaim loop; pages write their own keys, a clear is held once (page.js:1642) |
+| ~~c2~~ purge claims against a stale `lastRead` | struck: design withdrawn, see PR 355 | `pendingClears` are tests applied to a strict read (page.js:1674, 1683); no `lastRead` |
+| ~~c3~~ entry without `root` claimed on first write | struck: design withdrawn, see PR 355 | the root is given only to the entries a write adds or moves (page.js:1667, 1688); nothing is claimed |
+| ~~c4~~ two kept comments share a key | struck: design withdrawn, see PR 355 | the key is `e:<id>`, unique per write (newEntryId, page.js:1578) |
+| ~~c5~~ `reclaim` hides a refused `setItem` | struck: design withdrawn, see PR 355 | `draftsWrite` sets `storeOk = false` on a refused write (page.js:1702) and redraws the line |
+| ~~c7~~ fake clock and future repères | struck: design withdrawn, see PR 355 | no repères |
+| ~~c8~~ repères left after a refused write | struck: design withdrawn, see PR 355 | no repères; a refused write puts back what it read (page.js:1693-1698) |
+| ~~d2~~ comment wording and `lastRead` | struck: design withdrawn, see PR 355 | the code is gone |
+| ~~d3~~ no multi-page test with `p.clock` | struck: nothing to test | no repères to age |
+| d4 hub-taken send on two pages | covered | test_page_writing.py `test_a_send_taken_or_cancelled_on_one_page_leaves_the_kept_reply_of_a_send_still_out_on_another` (taken and cancelled, reply and edit) |
+| d1 Cancel of a form | covered | `test_cancel_of_a_form_that_was_never_sent_leaves_the_kept_text_of_a_send_out_on_another_page`, `test_cancelling_a_reply_or_edit_whose_send_failed_clears_what_it_kept` |
+| d1 send taken by the hub | covered | test_page_chat_box.py `test_a_reply_the_hub_took_while_the_store_refused_reads_...` (two tests) and the d4 test above |
+| d1 Discard of a minimized message | **open, one test**: page.js:1939 (`d.min` branch of `keptSendButtons`) had no test | PR 370 adds it (no code change) |
+
+**Status:** in-progress, waits on PR 370 (CI) and its merge; then done.

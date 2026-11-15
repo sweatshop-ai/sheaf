@@ -1,7 +1,7 @@
 # 13: How long a page lives in the Catalog
 
 **Type:** grilling
-**Status:** open
+**Status:** claimed by Ottilie (2026-11-15)
 **Blocked by:** none
 **Map:** ../map.md
 

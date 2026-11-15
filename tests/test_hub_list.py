@@ -2299,12 +2299,36 @@ def test_a_text_edit_of_a_long_task_list_costs_no_render_of_marks(monkeypatch):
     assert len(runs) <= 3
 
 
-def test_a_tick_in_a_long_task_list_with_an_empty_item_costs_log_n_renders(monkeypatch):
+def test_a_tick_in_a_long_task_list_with_an_empty_item_costs_a_fixed_number_of_renders(monkeypatch):
+    # Ticket 140, c2: the reading by box rendered the list once per bit of its marks (17 s at 4,100 items). The
+    # empty items are told from the text, so a tick costs the source's render and the check of the result, however
+    # long the list. d1: the count is the same at 200 and at 800 items.
     from sheafmd.blocks import split_md_blocks
     from sheafmd.edit import _toggle_boxes
-    src = "- [ ]\n" + "".join(f"- [ ] item {i}\n" for i in range(200))
-    block = split_md_blocks(src)[0]
-    page = _page_with_box_flipped(block, 5)
-    runs = _renders(monkeypatch)
-    assert _toggle_boxes(block, page) == src.replace("- [ ] item 5\n", "- [x] item 5\n")
-    assert len(runs) <= 16          # 201 marks: 8 bit renders and a few of the check, not one per mark
+    counts = []
+    for n in (200, 800):
+        src = "- [ ]\n" + "".join(f"- [ ] item {i}\n" if i % 50 else "- [ ]  \n" for i in range(n))
+        block = split_md_blocks(src)[0]
+        page = _page_with_box_flipped(block, 5)
+        runs = _renders(monkeypatch)
+        want = src.replace("- [ ] item 6\n", "- [x] item 6\n")   # two empty items before it
+        assert _toggle_boxes(block, page) == want
+        counts.append(len(runs))
+    assert counts[0] == counts[1] <= 3
+
+
+@pytest.mark.parametrize("eol", ["\n", "\r\n"])
+def test_ticked_html_in_a_long_list_with_empty_items_and_a_continued_item_costs_a_fixed_number_of_renders(monkeypatch, eol):
+    # Ticket 140, review c2/c3: the same cost through the list's button and with CRLF, and an empty mark with an
+    # indented line under it (pandoc draws that one as a box) is kept by the text reading.
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import ticked_html
+    counts = []
+    for n in (200, 800):
+        src = eol.join(["- [ ]", "- [ ] ", "  continued"] + [f"- [ ] item {i}" for i in range(n)]) + eol
+        block = split_md_blocks(src)[0]
+        runs = _renders(monkeypatch)
+        html = ticked_html(block, 6)                 # box 0 is the continued item, so box 6 is item 5
+        assert html is not None and html.count("checked") == 1
+        counts.append(len(runs))
+    assert counts[0] == counts[1] <= 3

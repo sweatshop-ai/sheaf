@@ -11,7 +11,7 @@ import pytest
 from helpers import comment, writes_from_outside
 from pagehelp import (DOC, P1, RELOADING, draft_key, P2, T0, at, comment_draft_key, comment_on, kept_entries, kept_json, set_kept, gone, key, mark, open_box, open_form, typed, reload_on_clock, reloaded,
                       select, select_by_touch, toast, toast_state, toasted, toasts_to_the_end, type_at_end, until)
-from pagehelp import TOAST_STEP, run_clock, stalls_after
+from pagehelp import TOAST_STEP, clock_at, run_clock, stalls_after
 from sheafmd import comments as rdc
 from sheafmd.hub import live as hub_live
 from sheafmd.hub import state as hub_state
@@ -2584,7 +2584,7 @@ LATE = "The hub did not answer within 30 seconds"
 
 def test_a_new_comment_whose_send_never_answers_comes_back_after_30_seconds_and_frees_the_page(tab):
     p = tab.page
-    p.clock.install(time=T0)
+    p.clock.install(time=clock_at(T0))
     tab.open()
     comment_on(tab, at(P2, "pears"), at(P2, "pears", None), "Why pears?")
     p.reload()
@@ -4897,12 +4897,12 @@ def test_two_sends_that_fail_at_the_same_instant_on_two_pages_are_both_kept(thre
         if not (sa < eb and sb < ea):
             idle.append(i)
         kept = json.loads(comment_store(thread) or "[]")
-        texts = {d["body"]: d for d in kept}
-        mine = [texts.get(f"words from page {who} round {i}") for who in "AB"]
-        # An entry still marked out is one its page ended: it is left out of the not-sent list for 32 s.
-        if None in mine or any(isinstance(d.get("out"), (int, float)) for d in mine):
+        # One entry for each send, and none still marked out: an entry still marked out is one its page ended, and is
+        # left out of the not-sent list for 32 s; a second one is a copy that the Discard of one send takes with it.
+        mine = [[d for d in kept if d["body"] == f"words from page {who} round {i}"] for who in "AB"]
+        if any(len(es) != 1 or isinstance(es[0].get("out"), (int, float)) for es in mine):
             lost.append(i)
-    assert not lost, f"the store lost, or kept as still out, an entry of a failed send in rounds {lost}"
+    assert not lost, f"the store lost, doubled, or kept as still out, an entry of a failed send in rounds {lost}"
     assert len(idle) <= 8, f"rounds {idle} did not run the two sends at the same time: the test did not try the race"
 
 

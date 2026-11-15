@@ -115,6 +115,10 @@ _Avoid_: binding, target
 The one tiroir a person's pages go to when their root names none: Thierry's is tiroir-tt, Marina's tiroir-0. Each tiroir has its own Catalog; there is no Catalog across tiroirs. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 04; not built.)
 _Avoid_: home tiroir (a sheaf's home is a path)
 
+**Loose page**:
+A page in no git repo: a session's scratchpad, a temporary folder, or anything a chat client such as Claude.ai or ChatGPT makes. Its original lives on the tiroir; a page in a git repo has git as its original. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 05; not built.)
+_Avoid_: scratch page, orphan page
+
 **Stop James**:
 The action any member ticks on a sheaf of the assistant James to end his work on its project (SPEC 9.11). It is the one place the core names a deployment's assistant: the hub writes a diagnostics row and, with `[list] stop_dir`, a file the deployment's supervisor reads; stopping is the deployment's, a Layer concern the core only signals.
 

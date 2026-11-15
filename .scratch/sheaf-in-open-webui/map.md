@@ -5,7 +5,7 @@
 
 ## Destination
 
-A spec, ready to hand to whoever builds it, of sheaf as a standard module of every tiroir: each Open WebUI user has their own sheaves there, the way they have their own artifacts, browsed in a Catalog of folders. Thierry's are on tiroir-tt; Marina's would be on tiroir-0. The spec says where a page lives, how an agent session on a laptop gets it there, and what the Catalog looks like.
+A spec, ready to hand to whoever builds it, of sheaf as a standard module of every tiroir: each Open WebUI user has their own sheaves there, the way they have their own artifacts, browsed in a Catalog of folders. Thierry's are on tiroir-tt; Marina's would be on tiroir-0. The spec says where a page lives, how an agent gets it there (a session on a laptop, or a chat client such as Claude.ai, ChatGPT or the assistant inside Open WebUI, through the member's library door), and what the Catalog looks like.
 
 ## Notes
 
@@ -28,12 +28,16 @@ A spec, ready to hand to whoever builds it, of sheaf as a standard module of eve
 - [A person who works on several tiroirs: where do their pages go](issues/04-one-person-several-tiroirs.md): the root decides, through an optional tiroir in `.sheaf.toml`; otherwise the person's default tiroir (Thierry tiroir-tt, his non-TT pages in his private root there; Marina tiroir-0); same visibility rule everywhere; one Catalog per tiroir; a root moved to another tiroir takes its pages along, old addresses forward (Drive logic).
 - [How an agent session on a laptop gets a page onto a tiroir](issues/02-how-a-laptop-agent-reaches-the-tiroir.md): a git root works today (≤ ~60 s lag, line conflicts stop the hub as `push-diverged`, no Tells); the MCP door has create/update with stale writes refused but is loopback-only and the deployed library door lacks create/update; brain-sync-style rsync overwrites page edits; the relay carries Tells only; a remote seat works but moves the agent onto the tiroir.
 
+- [Where the original of a page lives: the laptop or the tiroir](issues/05-where-the-original-lives.md): a repo page's original is git (the tiroir's clone commits page saves on the working branch, never a deploying one); a loose page's original is on the tiroir; no agent writes without reading the latest version; Claude.ai, ChatGPT and the Open WebUI assistant write through the same library door, which needs `create`/`update`.
+
 ## Not yet specified
 
 - How long a page lives: Thierry sees most pages as temporary, tied to one session. Archive, expire, or keep forever in the Catalog?
 - The name. Thierry dislikes "Sheaf"; "Documents" clashes with all documents in a tiroir; "Notes" is taken by Open WebUI. Candidates from October: proof/épreuve, bon à tirer, desk, drawer.
 - What `sheaf FILE.md` does and prints for an agent once the page lives on a tiroir (URL, sign-in, which tiroir).
 - Working offline or when the tiroir is down.
+- How a laptop agent session reaches and signs in to the member's library door (the same OAuth as Claude.ai, or an agent token), now that the door is the write path for loose pages.
+- Which repos get a clone on the tiroir, how one is added, and how a large repo (the monorepo) is cloned for its pages only.
 - Other members (Sven, Hans on tiroir-tt) and sharing a page between users: SPEC 9.11 visibility exists, its place in the Catalog does not.
 - Installing the module on a new tiroir: what the tiroir product ships by default.
 - Moving pages between tiroirs: a single page moved against its root's tiroir, and how an old address forwards to another tiroir (ticket 04 decided the Drive logic, not the mechanics).

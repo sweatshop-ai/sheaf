@@ -11,7 +11,7 @@ The sidebar entry, the Catalog and the spec need a name a member reads. Thierry 
 
 ## Answer
 
-**Amended 2026-11-15 (ticket 19, Thierry): the name is tiroir Rectoverso, one word, not Recto: a word that short is lost in dictation. Read "Rectoverso" wherever this ticket says "Recto" as the product; the verso keeps its meaning.**
+**Superseded 2026-11-15 by ticket 19 (Thierry): the product is tiroir Sheaf; one page is a rectoverso (agent's recto, member's verso); the member's tree, the Catalog below, is the Sheaf. The verso keeps its meaning. Read this answer as the history of the choice.**
 
 Resolved 2026-11-15 by Ottilie with Thierry, three naming rounds (method: `glacierphonk/naming`, read from a scratch clone).
 

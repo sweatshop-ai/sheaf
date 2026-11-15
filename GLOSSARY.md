@@ -103,16 +103,16 @@ _Avoid_: permission, privacy, ACL
 A member's page of the sheaves that wait on someone and the ones in progress, grouped by client and project, their status taken from their issues (SPEC 9.10). It shows only sheaves with work on them.
 _Avoid_: catalog, index, dashboard
 
-**Catalog**:
-A member's browsable tree of folders holding every page they may open, with or without an issue, and no status. A folder is where the page lives: its root, then the root's sub-folders; pages another member Shared sit apart, under their owner. Not the List: the List says what waits, the Catalog says where a page is. (Named 2026-11-15, wayfinder `sheaf-in-open-webui`, folders ticket 06; not built.)
-_Avoid_: list, library, documents
+**Sheaf** (of a member):
+A member's browsable tree of folders holding every rectoverso they may open, with or without an issue, and no status; also the product a member reads, tiroir Sheaf, and its sidebar entry. A folder is where the rectoverso lives: its root, then the root's sub-folders; those another member Shared sit apart, under their owner. Not the List: the List says what waits, the Sheaf says where a rectoverso is. The engine and the laptop command carry the same name. (Named the Catalog 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 06; renamed the Sheaf by Thierry during ticket 19; not built.) Until the build renames them, the older entries here and SPEC 9.10/9.11 still say "a sheaf" for one rectoverso.
+_Avoid_: Catalog, list, library, documents
 
 **Rectoverso**:
-The name a member reads for their pages inside a tiroir: the sidebar entry and the title of the Catalog's view, the same word in every language. The product, not one page: a single page stays a page. The engine and the laptop command keep the name sheaf. One word, so dictation does not lose it as it would a short "Recto". (Named 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 15, as Recto; made Rectoverso by Thierry the same day during ticket 19; not built.)
-_Avoid_: Recto, Sheaf (to a member), Documents, Notes, a recto (for one page)
+One page as a member reads it: a sheet with two sides, the recto the agent writes and the verso where the member answers. What `sheaf FILE.md` sends and what a row of the Sheaf opens. One word, the same in every language, so dictation keeps it. (Named 2026-11-15 by Thierry during wayfinder `sheaf-in-open-webui` ticket 19, replacing ticket 15's product name Recto; not built.)
+_Avoid_: Recto, a sheaf (for one page, in new text), document, note
 
 **Verso**:
-The side of a page that holds its Comments, as a member reads it: the agent writes the page, the member answers on its verso. A word for the place, not for one comment. (Named 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 15; not built.)
+The side of a page that holds its Comments, as a member reads it: the agent writes the recto of a rectoverso, the member answers on its verso. A word for the place, not for one comment. (Named 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 15; not built.)
 _Avoid_: back, thread panel
 
 **Root's tiroir**:
@@ -120,7 +120,7 @@ The tiroir every page of a root goes to, named in its root config; a root that n
 _Avoid_: binding, target
 
 **Default tiroir** (of a person):
-The one tiroir a person's pages go to when their root names none: Thierry's is tiroir-tt, Marina's tiroir-0. Each tiroir has its own Catalog; there is no Catalog across tiroirs. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 04; not built.)
+The one tiroir a person's pages go to when their root names none: Thierry's is tiroir-tt, Marina's tiroir-0. Each tiroir has its own Sheaf per member; there is no Sheaf across tiroirs. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 04; not built.)
 _Avoid_: home tiroir (a sheaf's home is a path)
 
 **Loose page**:
@@ -132,11 +132,11 @@ The tiroir's own copy of a git repo that a member's page came from, made the fir
 _Avoid_: mirror, checkout
 
 **Archived page**:
-A loose page out of the Catalog's default view, after a time with no write and no comment, or by the member's hand. It still opens at its address and comes back when written or commented. Not deleted: only the member deletes a page. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 13; not built.)
+A loose page out of the Sheaf's default view, after a time with no write and no comment, or by the member's hand. It still opens at its address and comes back when written or commented. Not deleted: only the member deletes a page. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 13; not built.)
 _Avoid_: expired, stale
 
 **Write log**:
-The hub's own record of the writes to its pages, one line per write whatever the path: who wrote, from which place (laptop, chat client, tiroir, page), and the agent session when it is known. It is where a Catalog row gets its last write and its last agent session. Not the Diagnostics log, which records what went wrong. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 09; not built.)
+The hub's own record of the writes to its pages, one line per write whatever the path: who wrote, from which place (laptop, chat client, tiroir, page), and the agent session when it is known. It is where a row of the Sheaf gets its last write and its last agent session. Not the Diagnostics log, which records what went wrong. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 09; not built.)
 _Avoid_: journal, history, audit log
 
 **Stop James**:

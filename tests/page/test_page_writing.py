@@ -141,14 +141,27 @@ def fail_the_send(p, held):
     p.unroute("**/_/comment")
 
 
+def send_not_out(p):
+    """What the page shows when a send did not leave: whether it reloaded under the form, the field, the popover, the toast."""
+    return p.evaluate("""() => {
+        const t = document.querySelector('#rd-popover textarea'), pop = document.querySelector('#rd-popover'), toast = document.querySelector('.rd-toast');
+        return JSON.stringify({same_load: window.__same_load === true, field: t ? t.value : null, popover: pop ? pop.innerText : null, toast: toast ? toast.innerText : null});
+    }""")
+
+
 def send_held(tab, form, text):
     """Open the reply or edit form, type, send with `/_/comment` held; returns the held requests."""
     p, held = tab.page, []
     open_form(p, form)
     p.fill("#rd-popover textarea", text)
+    p.evaluate("window.__same_load = true")
     p.route("**/_/comment", lambda route: held.append(route))
     p.keyboard.press("Control+Enter")
-    until(lambda: held or p.wait_for_timeout(20), what="the send to go out")
+    try:
+        until(lambda: held or p.wait_for_timeout(20), what="the send to go out")
+    except AssertionError as e:
+        # Seen once in CI (ticket 93) with nothing in the log to say why the request never left: say what the page shows.
+        raise AssertionError(f"{e}: {send_not_out(p)}") from None
     return held
 
 
@@ -2091,9 +2104,14 @@ def new_comment_held(tab):
     p.clock.run_for(50)                     # the Comment button comes on a timer, and this clock stands still
     open_box(p)
     p.fill("#rd-popover textarea", "about the pears")
+    p.evaluate("window.__same_load = true")
     p.route("**/_/comment", lambda route: held.append(route))
     p.keyboard.press("Control+Enter")
-    until(lambda: held or p.wait_for_timeout(20), what="the send to go out")
+    try:
+        until(lambda: held or p.wait_for_timeout(20), what="the send to go out")
+    except AssertionError as e:
+        # Seen once in CI (ticket 93) with nothing in the log to say why the request never left: say what the page shows.
+        raise AssertionError(f"{e}: {send_not_out(p)}") from None
     return held
 
 

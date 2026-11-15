@@ -390,6 +390,21 @@ def test_a_refusal_is_not_said_again_past_the_seven_seconds_it_was_said_in_howev
         assert "refused A" not in " ".join(toasts_to_the_end(p, on_clock=True))
 
 
+def test_a_refusal_said_again_by_a_reload_posts_no_second_incident(tab):
+    # Ticket 143 (101, point 2): every `say(text, true)` posts a `toast` incident to /_/diag, and the replay of a refusal
+    # on the page a reload brings was one: a second row for a refusal already written down. The first is still one.
+    p = held_by_a_form(tab, [refused("Approve: refused A, reload the page")])
+    rows = []
+    p.on("request", lambda r: rows.append(r.post_data) if r.url.endswith("/_/diag") and '"kind":"toast"' in (r.post_data or "") else None)
+    p.clock.run_for(5100)
+    until(lambda: "refused A" in toast(p), what="the refusal")
+    assert len(rows) == 1 and "refused A" in rows[0], rows       # the first is posted: say() posts before it shows
+    p.click("#rd-popover button[data-f=ok]")
+    reloaded(p)
+    toasted(p, "refused A", on_clock=True)                       # the replay is said; its incident, if any, was posted first
+    assert len(rows) == 1, rows
+
+
 def test_a_refusal_brought_back_by_a_reload_at_5_s_is_not_carried_by_a_second_reload_at_8_s(tab):
     # Ticket 118 (SPEC 10.11): said at 0 s it is up to 7 s; the reload at 5 s brings it back, but with its own deadline,
     # so the reload at 8 s, while the replay is on screen (up to 14.6 s), keeps nothing. The clock is read, not counted:

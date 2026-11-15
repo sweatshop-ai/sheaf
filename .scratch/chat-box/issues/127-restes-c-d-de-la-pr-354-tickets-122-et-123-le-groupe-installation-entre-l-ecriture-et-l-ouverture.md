@@ -7,7 +7,7 @@
 
 **Blocked by:** PR 354
 
-**Claimed by:** Tomas 2026-11-14 23:49
+**Claimed by:** Nuno 2026-11-15 (taken over from Tomas)
 
 **Status:** in-progress
 

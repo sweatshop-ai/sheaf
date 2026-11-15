@@ -31,3 +31,8 @@ Round 2 (Thierry):
 - Q6 reopened by Thierry: a client may have a brain on their tiroir; every user's brain is private and the agency must never read it.
 
 Fact found while checking Q6 (2026-11-16): on tiroir-chienvert and tiroir-respace Open WebUI runs with no `ENABLE_ADMIN_*` env set, so its defaults hold: `ENABLE_ADMIN_CHAT_ACCESS`, `ENABLE_ADMIN_EXPORT` and `ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS` are all True (`env.py:371`, `config.py:2082-2084` in the container). Thierry is admin on both, so the admin UI today opens the client users' chats.
+
+Round 3 (Thierry):
+- Q6a: a ThinkingToo member on a client tiroir is a `user`, never `admin`; the Sheaf has no admin override; they see the client repo's root and what a client member Shared with them, nothing else; the hub-to-hub channel from tiroir-tt carries only what that member may open. The client's loose pages, chats and brain are never reachable.
+- Q6b: closing Open WebUI's admin access on the client tiroirs is a follow-up outside the map: `.scratch/follow-ups/client-tiroirs-open-webui-admin-reads-client-chats.md`.
+- Q6c: the spec states the client tiroir privacy rule: no agent and no ThinkingToo member reads a client user's brain, chats or private pages; the tools offer no way to, and stages never read user data. The agency operates the box as root, so the technical guarantee ends there, and the spec says so.

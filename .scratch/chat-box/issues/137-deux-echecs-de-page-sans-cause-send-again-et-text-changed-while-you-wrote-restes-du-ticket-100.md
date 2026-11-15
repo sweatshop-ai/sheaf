@@ -9,8 +9,14 @@
 
 **À faire :** sur un échec réel, lire d'abord la section « the event stream, page and hub » : le hub a-t-il publié `changed`, la page l'a-t-elle reçu, un toast a-t-il été mis en file ? Établir la cause avant tout correctif, retry ou délai. Le correctif va dans la page ou le hub si c'est un défaut du produit, dans les aides de test si c'est le test.
 
-**Blocked by:**
-- External: un échec de CI de ces tests qui revient avec le journal (rien à lire tant qu'il ne revient pas)
+**Blocked by:** none
+
+**Journal lu (Yara, 2026-11-15) : le send-again est revenu avec le journal.** Run 43709623494, tentative 1, job 132798137212, tête c6faee7 (PR 365, qui ne touche pas ce test) : `test_a_send_again_that_fails_to_reach_the_hub_does_not_hide_that_the_send_before_it_was_taken`, `test_page_writing.py:2885`, « timed out waiting for a toast saying 'What you sent reached the hub after all'; the toasts that went by: ['Your reply did not go out: the hub is unreachable.'] ». Vert à la tentative 2. Section « the event stream, page and hub » du log, heures UTC :
+- 11:43:57.668 le hub reçoit `/_/comment` `op reply` rid fdd5…462f (le premier envoi, tenu par `slow_hub`) ; 57.679-.694 la route du test est posée et appelée (le send-again).
+- 11:43:59.076-.077 le hub publie `changed` (rid fdd5…462f, `telling: []`) « to 1 stream(s) » et l'écrit ; `/_/comment out` à .077.
+- 11:43:59.189 `page0 new /_/live` : la page ouvre un NOUVEAU flux 112 ms après l'écriture de `changed` ; `page0 fetch /_/doc` à .189 et .235 ; `page0 event hello` à .235.
+- Aucune ligne `page0 event changed` n'apparaît dans le journal : la page n'a pas lu le `changed` du hub sur l'ancien flux, et la fin du journal est .237 alors que le test échoue 8 s plus tard. Le log porte aussi un `BrokenPipeError` du hub (`server.py:139`, `wfile.write`), juste avant le journal.
+Établi : le hub a publié `changed` pour ce rid, la page n'en a pas journalisé la réception, et elle a rouvert un flux `/_/live` juste après. Non établi : pourquoi l'ancien flux n'a pas livré (flux déjà fermé côté page ? `changed` écrit sur une socket morte, cf. le BrokenPipe ?) ni si la réouverture vient d'un rechargement ou de la reprise du flux. Prochaine lecture : le code de la page qui ouvre `/_/live` (reprise après coupure) et ce que le hub compte comme « 1 stream » à cet instant ; la cause reste à établir avant tout correctif.
 
 **Status:** open
 

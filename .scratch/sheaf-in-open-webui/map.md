@@ -32,6 +32,7 @@ A spec, ready to hand to whoever builds it, of sheaf as a standard module of eve
 - [What a folder of the Catalog is](issues/06-what-a-catalog-folder-is.md): the path on disk (root, then its sub-folders); the Catalog is the 8.6 index page as a per-member tree, dot-folders hidden; loose pages in a `loose-<short>` root, folder named by the agent else the month; no moves in v1; its own sidebar entry beside "Actions"; a "Shared with me" folder per owner.
 - [The Catalog inside Open WebUI, as a rough prototype](issues/07-prototype-the-catalog.md): variant A, Finder: the Catalog in the main pane, a collapsible folder tree left, a table of pages right (title, folder, session, when, comments), a page opens in the pane with "← Catalog".
 - [Where a Catalog row gets its session](issues/08-where-a-row-gets-its-session.md): today no write path records a session per write; the door knows token, client and member, a page save the member (in a commit only where `commit = true`), a git pull and a file written on the tiroir leave nothing in the hub; a host exists only in list-root `sessions:` front matter.
+- [How a write names its session and place](issues/09-how-a-write-names-its-session.md): a row shows the last write and, beside it, the last agent session as a link back to it (laptop: as `/_/jump` today; Open WebUI assistant: its chat; Claude.ai, ChatGPT: label only); the hub keeps a Write log; laptop sessions declare id and machine in door headers, unverified; repo pages get their session from the laptop render, plus commit trailers where present; a tiroir disk write from its next render, else "tiroir · ?".
 
 ## Not yet specified
 
@@ -39,7 +40,7 @@ A spec, ready to hand to whoever builds it, of sheaf as a standard module of eve
 - The name. Thierry dislikes "Sheaf"; "Documents" clashes with all documents in a tiroir; "Notes" is taken by Open WebUI. Candidates from October: proof/épreuve, bon à tirer, desk, drawer.
 - What `sheaf FILE.md` does and prints for an agent once the page lives on a tiroir (URL, sign-in, which tiroir).
 - Working offline or when the tiroir is down.
-- How a laptop agent session reaches and signs in to the member's library door (the same OAuth as Claude.ai, or an agent token), now that the door is the write path for loose pages.
+- How a laptop agent session reaches and signs in to the member's library door (the same OAuth as Claude.ai, or an agent token), now that the door is the write path for loose pages, and how the laptop's `sheaf FILE.md` reports its session to the tiroir for repo pages (ticket 09).
 - Which repos get a clone on the tiroir, how one is added, and how a large repo (the monorepo) is cloned for its pages only.
 - Other members (Sven, Hans on tiroir-tt) and sharing a page between users: SPEC 9.11 visibility exists, its place in the Catalog does not.
 - Installing the module on a new tiroir: what the tiroir product ships by default.

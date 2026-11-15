@@ -41,6 +41,7 @@ A spec, ready to hand to whoever builds it, of sheaf as a standard module of eve
 - [The module's name in Open WebUI](issues/15-the-name-of-the-module.md): the product is tiroir Recto (tiroir = yours, the recto = what the agent shows, the verso = the side of a page holding its comments), the same word in every language; a page stays a page; "Catalog" stays a spec term; the engine, the laptop command and the repo keep `sheaf`.
 - [Sharing a page with another member of the tiroir, and what each member sees](issues/16-sharing-a-page-with-another-member.md): plain Share opens a loose page to the whole tiroir, `Share with <names>` to those only; recipients do all but Share; never outside the tiroir (Share copy instead); the owner's agent Shares only on `create`; a recipient's Tell goes to their own agent; no notifications.
 - [Research: the ways a server can push a message into a running Claude Code session on a laptop](issues/17-research-pushing-a-tell-into-a-laptop-session.md): best fit a sheaf mod polling the hub and submitting the Tell when idle; second, cross-machine `SendMessage` over Remote Control; MCP server push and channels do not fit.
+- [How a Tell pressed on a page on the tiroir reaches the laptop session that is its target](issues/18-how-a-tell-reaches-a-laptop-session.md): a sheaf mod in the session long-polls the door (25 s) once the session has sent a page to the tiroir, and submits the Tell when idle; only the declaring member's token gets it; no expiry; `sheaf relay` retires.
 
 ## Not yet specified
 

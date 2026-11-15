@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from pagehelp import PageStalled, reloaded, toast, toasted, toasts_to_the_end, until
+from pagehelp import PageStalled, reloaded, stalls_after, toast, toasted, toasts_to_the_end, until
 
 pytestmark = pytest.mark.page
 
@@ -22,6 +22,36 @@ def test_a_wait_gets_the_request_a_page_makes_after_the_test_last_called_playwri
     p.evaluate("setTimeout(() => fetch('/_/not-a-route-of-the-hub').catch(() => {}), 100)")
     until(lambda: held, what="the request the page made on its own")
     held[0].abort()
+
+
+def test_a_route_for_a_send_holds_the_send_the_page_makes_as_soon_as_route_returns(tab):
+    """Ticket 100: on a loaded runner the browser was not yet intercepting when `route()` returned, so a send made a
+    few ms later went straight to the hub. conftest's `until_live` waits for a probe; it must not itself be held
+    as a send, nor leave the route short of the send."""
+    p = tab.open().page
+    for _ in range(20):
+        held = []
+        p.route("**/_/comment", lambda route: held.append(route))
+        p.evaluate("fetch('/_/comment', {method: 'POST', body: '{}'}).catch(() => {}); 0")
+        until(lambda: held or p.wait_for_timeout(20), what="the send to be held")
+        assert len(held) == 1 and held[0].request.method == "POST"
+        held[0].abort()
+        p.unroute("**/_/comment")
+
+
+def test_the_stream_journal_leaves_eventsource_open_to_a_subclass_a_test_installs(tab):
+    """The journal wraps window.EventSource; test_page_actions.py's DEAF script does `class extends window.EventSource`
+    and overrides addEventListener. A wrapper that returns a native object lost the override (ticket 100, PR 346's CI)."""
+    p = tab.open().page
+    assert p.evaluate("""(() => {
+      class Deaf extends window.EventSource {
+        addEventListener(k, f, o) { Deaf.seen = true; return super.addEventListener(k, f, o); }
+      }
+      const d = new Deaf('/_/live?doc=work%2Fplan.md');
+      d.addEventListener('changed', () => {});
+      d.close();
+      return [d instanceof Deaf, !!Deaf.seen];
+    })()""") == [True, True]
 
 
 def test_no_page_test_waits_by_sleeping_or_by_a_wait_of_its_own():
@@ -171,3 +201,66 @@ def test_the_toasts_to_the_end_are_not_at_an_end_while_the_page_reloads():
     """The page the reload brings may say a toast of its own: an assertion that one is not said must not read "none" off the gap."""
     with pytest.raises(AssertionError, match="timed out waiting for the toasts to end"):
         toasts_to_the_end(ReloadingPage("Execution context was destroyed, most likely because of a navigation"), timeout=0.3)
+
+
+# ── the route wrapper of conftest.py (tickets 100 and 119) ─────────────────────────────────────────────────
+
+def test_a_route_made_with_a_regex_for_the_send_is_probed_too(tab, hub_journal):
+    """PR 346's review: `route(re.compile(r"/_/comment$"), ...)` (test_page_work.py) had the race of ticket 100 and no probe."""
+    p = tab.open().page
+    held = []
+    p.route(re.compile(r"/_/comment$"), lambda route: held.append(route))
+    assert any("live" in what and "comment" in what for _, what in hub_journal), hub_journal
+    p.evaluate("fetch('/_/comment', {method: 'POST', body: '{}'}).catch(() => {}); 0")
+    until(lambda: held or p.wait_for_timeout(20), what="the send to be held")
+    assert len(held) == 1 and held[0].request.method == "POST"
+    held[0].abort()
+
+
+def test_a_function_routed_twice_on_one_url_is_taken_off_both_by_unroute(tab):
+    p = tab.open().page
+    held = []
+
+    def hold(route):
+        held.append(route)
+        route.abort()       # a regression fails the assert below, not by a fetch that never answers
+    p.route("**/_/not-a-route-of-the-hub", hold)
+    p.route("**/_/not-a-route-of-the-hub", hold)
+    p.unroute("**/_/not-a-route-of-the-hub", hold)
+    with stalls_after(10, "a fetch no route of the test holds"):
+        assert p.evaluate("fetch('/_/not-a-route-of-the-hub').then(r => r.status, () => 0)") != 0
+    assert held == []
+
+
+def test_a_handler_that_cannot_be_hashed_can_be_routed_and_unrouted(tab):
+    class Holder:
+        def __init__(self):
+            self.held = []
+
+        def __eq__(self, other):
+            return self is other
+        __hash__ = None
+
+        def __call__(self, route):
+            self.held.append(route)
+            route.abort()
+    p = tab.open().page
+    h = Holder()
+    p.route("**/_/not-a-route-of-the-hub", h)
+    p.evaluate("fetch('/_/not-a-route-of-the-hub').catch(() => {}); 0")
+    until(lambda: h.held or p.wait_for_timeout(20), what="the request to be held")
+    p.unroute("**/_/not-a-route-of-the-hub", h)
+    with stalls_after(10, "a fetch no route of the test holds"):
+        assert p.evaluate("fetch('/_/not-a-route-of-the-hub').then(r => r.status, () => 0)") != 0
+    assert len(h.held) == 1
+
+
+def test_the_stream_journal_keeps_real_time_when_a_test_puts_a_fake_clock_under_the_page(tab):
+    """PR 346's review: the journal takes real time before the fake clock replaces `performance`, if its init script
+    runs first. Playwright does not document the order; the journal of a failing test is read by its times."""
+    from pagehelp import T0, reload_on_clock
+    p = tab.open().page
+    reload_on_clock(p, start=T0)
+    p.evaluate("fetch('/_/not-a-route-of-the-hub').catch(() => {}); 0")
+    times = p.evaluate("window.__sseJournal.map(e => e[0])")
+    assert times and all(abs(t / 1000 - time.time()) < 120 for t in times), (times, time.time())

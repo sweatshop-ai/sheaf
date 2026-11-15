@@ -14,8 +14,8 @@ import time
 import pytest
 
 from helpers import PLAN, comment
-from pagehelp import (DOC, P1, P2, T0, at, comment_on, draft_key, comment_draft_key, gone, mark, reload_on_clock,
-                      reloaded, toast, toasted, type_at_end, until)
+from pagehelp import (DOC, clock_at, P1, P2, T0, at, comment_on, draft_key, gone, set_kept, mark, open_with_comment,
+                      reload_on_clock, reloaded, toast, toasted, type_at_end, until)
 from sheafmd import comments as rdc
 
 pytestmark = pytest.mark.page
@@ -60,9 +60,9 @@ def show_tab(page, visible):
 def open_on_clock(tab, start=T0):
     """The page opened on a clock the test drives, from `start` (ms), with its stream watched."""
     tab.page.add_init_script(WATCH)
-    tab.page.clock.install(time=start)
+    tab.page.clock.install(time=clock_at(start))
     tab.open()
-    tab.page.clock.pause_at(start + 5_000)
+    tab.page.clock.pause_at(clock_at(start + 5_000))
     until(lambda: stream(tab.page)["opens"] >= 1, what="the stream to open")
     return tab
 
@@ -470,6 +470,53 @@ def does_not_reload_or_reconnect(tab, streams):
     assert len(tab.streams) == streams, "the page opened its stream again"
 
 
+def test_a_page_whose_root_is_forgotten_leaves_no_toast_for_the_next_page_of_the_tab(replying, site):
+    # Ticket 125 (c3 of #118): a save that merged wrote `rd-toast` before its reload, and the reload never came. With no
+    # keep to name the document, the next mount in this tab (or in its copy) would say that text.
+    p = replying.page
+    p.evaluate("sessionStorage.setItem('rd-toast', '1 block \u2192 plan.md')")
+    assert site.hub.forget_root("work").name == "work"
+    until(lambda: GONE in notice(p), what="the notice that the document is gone")
+    assert p.evaluate("sessionStorage.getItem('rd-toast')") is None
+
+
+def test_a_merged_save_that_answers_after_the_root_was_forgotten_leaves_no_toast(tab, site):
+    # Ticket 125, review b2: a save out when the document went answers `merged`; its toast was written after the page had
+    # removed it, and the reload it was written for never comes (reloadWhenFree returns on docGone).
+    p = tab.page
+    tab.open()
+    held = []
+    p.route("**/_/save", lambda route: held.append(route))
+    type_at_end(p, P2, " typed")
+    p.keyboard.press("Control+s")
+    until(lambda: held or p.wait_for_timeout(20), what="the save to go out")
+    assert site.hub.forget_root("work").name == "work"
+    until(lambda: GONE in notice(p), what="the notice that the document is gone")
+    held[0].fulfill(status=200, content_type="application/json",
+                    body=json.dumps({"ok": True, "hash": "x", "changed": [1], "merged": True, "conflicts": []}))
+    p.wait_for_timeout(500)
+    assert p.evaluate("sessionStorage.getItem('rd-toast')") is None
+
+
+def test_a_merged_save_whose_reload_a_form_holds_leaves_its_toast_for_the_next_boot(replying, site):
+    # Ticket 129 (c): the case 10.11 says is kept: a reload held by a form is not run, and the toast of the merged save
+    # that asked for it stays in the tab for the next boot of the document, which says it.
+    p = replying.page
+    mark(p)
+    p.route("**/_/save", lambda route: route.fulfill(
+        status=200, content_type="application/json",
+        body=json.dumps({"ok": True, "hash": "x", "changed": [1], "merged": True, "conflicts": []})))
+    p.keyboard.press("Control+s")
+    until(lambda: p.evaluate("sessionStorage.getItem('rd-toast')"), what="the merged save's toast stored")
+    stored = p.evaluate("sessionStorage.getItem('rd-toast')")
+    p.wait_for_timeout(500)
+    assert p.evaluate("window.__same_load") is True, "the form did not hold the reload"
+    assert p.evaluate("sessionStorage.getItem('rd-toast')") == stored
+    p.unroute("**/_/save")
+    p.reload()
+    until(lambda: stored in p.inner_text("#rd-toast"), what="the next boot to say the toast")
+
+
 def test_a_page_whose_root_is_forgotten_says_so_keeps_what_was_typed_and_saves_nothing(replying, site):
     p = replying.page
     mark(p)
@@ -865,9 +912,9 @@ def test_a_reply_that_only_the_drafts_store_holds_is_in_the_gone_notice_and_leav
     p.add_init_script(WATCH)
     tab.open()
     until(lambda: stream(p)["opens"] >= 1, what="the stream to open")
-    p.evaluate("(([k, v]) => localStorage.setItem(k, JSON.stringify(v)))", [comment_draft_key(site), [
+    set_kept(p, site, [
         {"thread": "1", "born": "2026-10-22T10:00:00Z", "about": "apples", "kind": "reply",
-         "body": "a reply only the store holds", "rid": "r1", "at": "2026-10-22T10:01:00Z"}]])
+         "body": "a reply only the store holds", "rid": "r1", "at": "2026-10-22T10:01:00Z"}])
     assert not beforeunload_asks(p)            # its own page draws it again: nothing is lost by leaving
     mark(p)
     assert site.hub.forget_root("work").name == "work"
@@ -878,8 +925,8 @@ def test_a_reply_that_only_the_drafts_store_holds_is_in_the_gone_notice_and_leav
 
 def test_what_is_typed_and_is_also_in_the_store_is_offered_once(replying, site):
     p = replying.page
-    p.evaluate("(([k, v]) => localStorage.setItem(k, JSON.stringify(v)))", [comment_draft_key(site), [
-        {"thread": "1", "born": "x", "about": "apples", "kind": "reply", "body": "my reply text", "at": "x"}]])
+    set_kept(p, site, [
+        {"thread": "1", "born": "x", "about": "apples", "kind": "reply", "body": "my reply text", "at": "x"}])
     assert site.hub.forget_root("work").name == "work"
     until(lambda: GONE in notice(p), what="the notice that the document is gone")
     assert p.input_value("#rd-notice textarea").count("my reply text") == 1
@@ -944,6 +991,52 @@ def test_a_change_heard_while_the_check_after_a_reconnect_is_out_does_not_reload
     assert p.evaluate("window.__same_load") is True
 
 
+def heard_changed(page):
+    return page.evaluate("window.__sseJournal.some(e => e[1] === 'event changed')")
+
+
+def test_a_reply_heard_while_the_check_is_out_is_taken_in_place_when_the_answer_names_its_hash(tab, site):
+    """A hello starts a check of the document (checkText). Its answer is read after another writer's reply was
+    written, so it names the new hash; the reply's `changed` came before it and waits for it (heardAfterCheck).
+    The answer must not read that hash as a change of the text from outside: the event takes the reply in place
+    (ticket 137: the page reloaded, and the toast that a send had been taken after all went with it)."""
+    from sheafmd.source import update_file
+    p = open_with_comment(tab, None, "apples", "Why?")
+    mark(p)
+    asked = []
+    p.route("**/_/doc?*", lambda route: asked.append(route))      # the answer to the check is held
+    site.hub.entry(DOC).live._publish("hello", {})
+    until(lambda: asked or p.wait_for_timeout(50), timeout=15, what="the page to ask what the document is")
+    update_file(site.file, lambda t: rdc.reply(t, "c1", "Because.", "Bea", "2026-10-14T11:00"))
+    site.hub.catch_up(site.hub.entry(DOC))             # the hub takes the reply in: a `changed`
+    until(lambda: heard_changed(p) or p.wait_for_timeout(50), what="the page to hear the change")
+    for r in asked:
+        r.continue_()
+    p.wait_for_timeout(1500)
+    assert not gone(p), "the page reloaded for a change of the comments only"
+    p.wait_for_timeout(1500)
+    assert p.evaluate("window.__same_load") is True
+
+
+def test_a_reply_heard_before_an_answer_that_was_read_before_it_does_not_reload_the_page(tab, site):
+    """The other order: the hub read the check's answer before the write, the write's `changed` reached the page
+    first. The answer names the hash the page held before the event, which is no change from outside."""
+    from sheafmd.source import update_file
+    p = open_with_comment(tab, None, "apples", "Why?")
+    mark(p)
+    read = []
+    p.route("**/_/doc?*", lambda route: read.append((route, route.fetch())))      # read now, delivered later
+    site.hub.entry(DOC).live._publish("hello", {})
+    until(lambda: read or p.wait_for_timeout(50), timeout=15, what="the hub to answer the check")
+    update_file(site.file, lambda t: rdc.reply(t, "c1", "Because.", "Bea", "2026-10-14T11:00"))
+    site.hub.catch_up(site.hub.entry(DOC))
+    until(lambda: heard_changed(p) or p.wait_for_timeout(50), what="the page to hear the change")
+    for route, answer in read:
+        route.fulfill(response=answer)
+    p.wait_for_timeout(1500)
+    assert not gone(p), "the page reloaded for an answer older than the change it had heard"
+
+
 # Holds the page's asks of `/_/doc` once a stream has opened after `window.__holdFrom` opens: an `open` comes before
 # its `hello`, so the check the `hello` starts is held and the retry's own asks (made while no stream is open) are not.
 HOLD_DOC_AFTER_OPEN = """(() => {
@@ -967,7 +1060,7 @@ def missing_past_the_grace(tab, init=None):
     p.add_init_script(WATCH)
     if init:
         p.add_init_script(init)
-    p.clock.install(time=T0)
+    p.clock.install(time=clock_at(T0))
     tab.open()
     until(lambda: stream(p)["opens"] >= 1, what="the stream to open")
     text = site.file.read_text(encoding="utf-8")
@@ -977,7 +1070,7 @@ def missing_past_the_grace(tab, init=None):
     site.file.unlink()
     site.reopen()
     until(lambda: answers.count(404) >= 1 or p.wait_for_timeout(50), timeout=15, what="the page to be told 404")
-    p.clock.pause_at(T0 + 60_000)
+    p.clock.pause_at(clock_at(T0 + 60_000))
     assert p.evaluate("document.querySelector('#rd-state').textContent") == "File missing"    # at once, not at 15 s
     p.clock.run_for(20_000)
     run_until(p, lambda: "file is not on the hub" in notice(p), "the notice that the file is missing")

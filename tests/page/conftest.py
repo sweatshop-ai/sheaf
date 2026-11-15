@@ -6,18 +6,21 @@ Playwright's; a run without it, or without the package, skips these tests with t
 (the `CI` variable, which GitHub sets to true), where it fails.
 Every test here carries the `page` mark, so `-m "not page"` leaves them out.
 """
+import inspect
 import os
+import re
 import socket
+import time
 
 import pytest
 
 from agent_fakes import PID, FakeClaude, Peer, write_record
 from helpers import PLAN
-from pagehelp import DOC, close_context, launch_chromium, new_context, unavailable, use_pump
+from pagehelp import DOC, PageStalled, close_context, launch_chromium, new_context, stalls_after, unavailable, use_pump
 from sheafmd import paths
 from sheafmd.agents.base import Target
 from sheafmd.agents.claude_code import proc_start
-from sheafmd.hub import server
+from sheafmd.hub import events, handler, server
 from sheafmd.hub.core import Hub
 
 
@@ -177,3 +180,160 @@ def tab(context, site):
     t = Tab(context.new_page(), site)
     yield t
     assert t.errors == [], "the page raised script errors"
+
+
+# ── the journal of the event stream (ticket 100) ───────────────────────────────────────────────────────────
+# A hub event that does not reach the page was seen only on a loaded CI runner, never by hand. A failing test
+# says what the stream did: the page's side (`STREAM_JOURNAL_JS` of pagehelp: opens, errors, each event, in real
+# time) and the hub's (each publish, each frame written to a stream), side by side, so a lost event shows as one
+# side without the other.
+PROBE = "x-route-probe"
+PROBED = ("**/_/comment",)      # the routes that are probed (and any regex that matches the probe's URL): a probe is a request, which a test's own `request` listener sees too,
+                                # and no test listens for /_/comment (the others do: _/pin, _/save, _/tell, _/tick, _/cancel)
+PROBE_PATH = "/_/comment"
+
+
+def probed(pattern, origin):
+    """Whether a route of this pattern is probed: the glob of PROBED, or a regex that the probe's own URL matches."""
+    if isinstance(pattern, re.Pattern):
+        return bool(pattern.search(origin + PROBE_PATH))
+    return isinstance(pattern, str) and pattern in PROBED
+
+
+def until_live(page, pattern, log):
+    """`route()` returns when Playwright has told the browser to intercept, yet on a loaded runner a request the page sent a few
+    ms later (a send after Ctrl+Enter) went straight to the hub and the test's handler never saw it (ticket 100: three tests
+    timed out "waiting for the send to go out", the hub's /_/comment in 2 ms after the page's fetch, no handler call). So the
+    route counts as live once it has caught a request of its own: a GET with a probe header that the wrapper's handler answers
+    itself, with 204. Best effort. Limits: only the PROBED routes (the glob, and any regex that matches the probe's URL), whatever their handler;
+    a route of a context is probed through its first page, which says nothing of a send from another page; the wrapper answers a
+    probe for any route that matches it, so an earlier live broad route (`**/*`) answers the probe of a newer one at try 1, which proves nothing about the newer one; a regex tied to the hub's origin is not probed on a page of another origin; a page that is
+    reloading is left."""
+    if page is None or not page.url.startswith("http"):
+        return
+    origin = "/".join(page.url.split("/")[:3])
+    if not probed(pattern, origin):
+        return
+    name = pattern.pattern if isinstance(pattern, re.Pattern) else pattern
+    probe = f"fetch({origin + PROBE_PATH!r}, {{headers: {{{PROBE!r}: '1'}}}}).then(r => r.status, () => 0)"
+    began = time.monotonic()
+    tries = 0
+    while time.monotonic() - began < 5:
+        tries += 1
+        try:
+            with stalls_after(8, "a route's probe"):
+                caught = page.evaluate(probe) == 204
+        except (Exception, PageStalled) as e:
+            log.append((time.time(), f"route {name} not probed: {str(e).splitlines()[0][:100]}"))
+            return
+        if caught:
+            log.append((time.time(), f"route {name} live: caught its probe at try {tries}"))
+            return
+        page.wait_for_timeout(50)
+    log.append((time.time(), f"route {name} did NOT catch its probe in {tries} tries over 5 s"))
+
+
+@pytest.fixture(autouse=True)
+def hub_journal(monkeypatch):
+    """What the hub published and wrote to a stream, with the time (time.time()), for `pytest_runtest_makereport`."""
+    log = []
+    publish, frame = events.Bus.publish, server.frame
+
+    def noting_publish(self, name, data):
+        log.append((time.time(), f"publish {name} to {self.count()} stream(s) {str(data)[:100]}"))
+        return publish(self, name, data)
+
+    def noting_frame(name, data):
+        log.append((time.time(), f"write {name}"))
+        return frame(name, data)
+    comment = handler.Handler._comment
+
+    def noting_comment(self, req):
+        log.append((time.time(), f"/_/comment in: op {req.body.get('op')} rid {req.body.get('rid')}"))
+        try:
+            return comment(self, req)
+        finally:
+            log.append((time.time(), f"/_/comment out: rid {req.body.get('rid')}"))
+    monkeypatch.setattr(handler.Handler, "_comment", noting_comment)
+    try:
+        from playwright.sync_api import BrowserContext, Page
+    except ImportError:
+        Page = BrowserContext = None
+    for cls in (Page, BrowserContext):
+        if cls is None:
+            continue
+
+        wrappers = {}       # (the object routed, url, id of the test's handler) -> the handlers Playwright holds, for `unroute(url, handler)`
+
+        def noting_route(self, url, handler, *a, _route=cls.route, _name=cls.__name__, _wrappers=wrappers, **kw):
+            def noted(route):
+                log.append((time.time(), f"{_name}.route handler called for {route.request.method} {route.request.url[-30:]}"))
+
+            def run(route, *args):
+                if route.request.headers.get(PROBE):
+                    return route.fulfill(status=204)
+                noted(route)
+                return handler(*args)
+            # Playwright passes the request too to a handler that takes two arguments, and none to one that takes none.
+            n = len(inspect.signature(handler).parameters)
+            if n == 0:
+                def called():
+                    return handler()
+            elif n == 1:
+                def called(route):
+                    return run(route, route)
+            else:
+                def called(route, request):
+                    return run(route, route, request)
+            _wrappers.setdefault((id(self), url, id(handler)), []).append(called)     # id: a handler need not be hashable
+            log.append((time.time(), f"{_name}.route({url}) asked"))
+            out = _route(self, url, called, *a, **kw)
+            log.append((time.time(), f"{_name}.route({url}) registered"))
+            if isinstance(url, (str, re.Pattern)) and n > 0 and "times" not in kw and not a:     # `times=` counts the probe as a use
+                until_live(self if _name == "Page" else (self.pages[0] if self.pages else None), url, log)
+            return out
+
+        def unrouting(self, url, handler=None, *, _unroute=cls.unroute, _wrappers=wrappers):
+            if handler is None:
+                for key in [k for k in _wrappers if k[:2] == (id(self), url)]:
+                    del _wrappers[key]
+                return _unroute(self, url)
+            held = _wrappers.pop((id(self), url, id(handler)), None)
+            if held is None:
+                return _unroute(self, url, handler)
+            for called in held:          # Playwright takes off every route of the pair; each registration here has a handler of its own
+                out = _unroute(self, url, called)
+            return out
+        monkeypatch.setattr(cls, "unroute", unrouting)
+        monkeypatch.setattr(cls, "route", noting_route)
+    monkeypatch.setattr(events.Bus, "publish", noting_publish)
+    monkeypatch.setattr(server, "frame", noting_frame)
+    return log
+
+
+def stream_journal(pages, hub):
+    """The two journals as one text, oldest first, each line a time of day and the side it comes from."""
+    lines = [(t, "hub  ", what) for t, what in hub]
+    for i, page in enumerate(pages):
+        try:
+            with stalls_after(5, "the page's journal"):
+                got = page.evaluate("window.__sseJournal || []")
+        except (Exception, PageStalled) as e:
+            lines.append((time.time(), f"page{i}", f"journal unreadable: {str(e)[:80]}"))
+            continue
+        lines += [(t / 1000, f"page{i}", f"{what} {data}") for t, what, data in got]
+    return "\n".join(f"{time.strftime('%H:%M:%S', time.localtime(t))}.{int(t * 1000) % 1000:03d} {side} {what}"
+                     for t, side, what in sorted(lines))
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    out = yield
+    rep = out.get_result()
+    if rep.when != "call" or not rep.failed:
+        return
+    ctx = item.funcargs.get("context")
+    if ctx is None and "touch_tab" in item.funcargs:
+        ctx = item.funcargs["touch_tab"].page.context
+    if ctx is not None and "hub_journal" in item.fixturenames:
+        rep.sections.append(("the event stream, page and hub", stream_journal(ctx.pages, item.funcargs["hub_journal"])))

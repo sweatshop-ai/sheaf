@@ -397,7 +397,7 @@
         got = got || fresh;
         // Every remount of the old page is said, not the first only: its settle had set `settling` and written the keep,
         // and a page left so refuses typing in silence while the loader's new script is slow or failed.
-        if (page && page.failed) page.failed('sheaf was updated on the hub: the new version is loading.');
+        if (page && page.failed) page.failed('sheaf was updated on the hub: the new version is loading.', true);
         // The loader loads `/_/mount.js?v=<this>` once per value: the new script's own name, one per build, so a second
         // upgrade under one version (a rollback and a re-apply, #179) is loaded too, and kept by the name of its body.
         if (!told) { told = true; opts.upgrade(scriptName(fresh)); }

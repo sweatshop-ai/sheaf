@@ -18,6 +18,7 @@ import re
 from collections import Counter
 from functools import lru_cache
 from html import escape as html_escape, unescape as html_unescape
+from types import SimpleNamespace
 from typing import NamedTuple
 
 from . import _pandoc
@@ -676,15 +677,33 @@ def _norm_html(fragment: str) -> str:
     return re.sub(r"\s+", " ", str(soup)).strip()
 
 
+@lru_cache(maxsize=8)
+def _rendered(content: str) -> str:
+    r = _pandoc.run(["-f", "gfm", "-t", "html5", "--no-highlight"], copyblock.hide(content))
+    if r.returncode != 0:
+        raise _Unread                   # an exception is not cached: a timeout once must not refuse the next saves
+    return r.stdout
+
+
+def _render_source(content: str, keep: bool = True):
+    """Pandoc's HTML of a source, or None. A success is cached: a save asks it of the same block for `_unchanged`,
+    for `_toggle_boxes` and for `ticked_html`, and a render of a long list takes seconds. The cache holds 8 renders,
+    so a source rendered once to be compared and thrown away (`keep` false) must not push those out."""
+    try:
+        return (_rendered if keep else _rendered.__wrapped__)(content)
+    except _Unread:
+        return None
+
+
 def _comparable(block, fragment: str):
     """(page fragment, source render) reduced to the same terms, or None."""
-    r = _pandoc.run(["-f", "gfm", "-t", "html5", "--no-highlight"], copyblock.hide(block.content))
-    if r.returncode != 0:
+    html = _render_source(block.content)
+    if html is None:
         return None
     # The page shows each comment as an anchor span; the source render has the
     # comment itself. Reduce both to the same marker, or every commented block
     # would look edited and go through pandoc on every save.
-    src = COMMENT_HTML_RE.sub(lambda m: f"<!--RDA:{m.group(1)}-->", copyblock.mark(r.stdout, page=True))
+    src = COMMENT_HTML_RE.sub(lambda m: f"<!--RDA:{m.group(1)}-->", copyblock.mark(html, page=True))
     frag = ANCHOR_RE.sub(lambda m: f"<!--RDA:{m.group(1)}-->", fragment)
     try:
         return _sanitize(frag), src
@@ -714,19 +733,21 @@ def _unchanged(block, fragment: str) -> bool:
 # the block is saved like any edit. When ticks are the only difference, the save
 # does not go through pandoc: it flips the `[ ]` / `[x]` of those items in the
 # source and leaves every other byte alone. Pandoc would rewrite the whole list
-# (bullets, wrapping, a capital X), so one tick would touch every line.
+# (bullets, wrapping, a capital X), so one tick would touch every line. Only a bullet item has a mark: pandoc 3.9
+# draws no box for `1. [ ] a` (a CR or none), so a mark there would be one the page never shows. The bullet may
+# stand behind other markers on its line (`- - [ ] a`, `1. - [ ] a`, `1. > - [ ] a`): pandoc draws its box.
 TASK_MARK_RE = re.compile(
-    r"^((?:[ \t]*>)*[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+)\[([ xX])\](?=[ \t]|$)", re.M)
+    r"^([ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+|>[ \t]*)*[-*+][ \t]+)\[([ xX])\](?=[ \t]|$)", re.M)
 
 
 class _Mark:
     """A task mark found by `task_marks`, answering the part of `re.Match` the callers use: `start()` is the offset of
-    the mark's line, `start(2)` and `end(2)` those of its state character, `group(2)` the character. Any other
-    group is an error, not a wrong offset."""
-    __slots__ = ("_line", "_box", "_state")
+    the mark's line and `end()` that of the end of the mark (after its `]`), as for a match; `start(2)` and `end(2)`
+    those of its state character, `group(2)` the character. Any other group is an error, not a wrong offset."""
+    __slots__ = ("_line", "_box", "_state", "_end")
 
-    def __init__(self, line: int, box: int, state: str):
-        self._line, self._box, self._state = line, box, state
+    def __init__(self, line: int, box: int, state: str, end: int):
+        self._line, self._box, self._state, self._end = line, box, state, end
 
     def group(self, n: int) -> str:
         if n != 2:
@@ -738,20 +759,95 @@ class _Mark:
             raise IndexError(f"a task mark has only group 2, not {group}")
         return self._line if group == 0 else self._box
 
-    def end(self, group: int = 2) -> int:
-        if group != 2:
+    def end(self, group: int = 0) -> int:
+        if group not in (0, 2):
             raise IndexError(f"a task mark has only group 2, not {group}")
-        return self._box + 1
+        return self._end if group == 0 else self._box + 1   # the match ends after the `]`, the state character before it
 
 
-def task_marks(content: str) -> list:
-    """The task marks of `content`, read as pandoc reads it: without its CRs, which it deletes, so a CR anywhere
-    in a line neither hides a mark nor makes one pandoc does not draw. Offsets are in `content` itself."""
+def task_marks(content: str, pattern=TASK_MARK_RE) -> list:
+    """The task marks of `content`, read as pandoc reads it: without its CRs, which it deletes, so a CR anywhere in a
+    line, between the brackets too, neither hides a mark nor makes one. Offsets are in `content` itself."""
     if "\r" not in content:
-        return list(TASK_MARK_RE.finditer(content))
+        return list(pattern.finditer(content))
     keep = [i for i, ch in enumerate(content) if ch != "\r"]
-    return [_Mark(content.rfind("\n", 0, keep[m.start()]) + 1, keep[m.start(2)], m.group(2))
-            for m in TASK_MARK_RE.finditer(content.replace("\r", ""))]
+    return [_Mark(content.rfind("\n", 0, keep[m.start()]) + 1, keep[m.start(2)], m.group(2), keep[m.end() - 1] + 1)
+            for m in pattern.finditer(content.replace("\r", ""))]
+
+
+def _drawing_marks(content: str, marks: list) -> list:
+    """The marks of `marks` that pandoc probably draws a box for, read from the text alone: those with something
+    after them on their line, or with an indented line under them that goes on with the item. A mark with nothing
+    after it and no such line is an empty item, drawn as a bare `\u2610` or as the literal `[ ]`, never as a box. A
+    guess: a reading is only a candidate, and `_toggle_boxes` renders what it writes and refuses what draws other
+    boxes."""
+    keep = []
+    for m in marks:
+        end = m.end()
+        eol = content.find("\n", end)
+        if content[end:eol if eol >= 0 else len(content)].strip() or eol >= 0 and _goes_on(content, eol + 1, m.start()):
+            keep.append(m)
+    return keep
+
+
+def _goes_on(content: str, at: int, line: int) -> bool:
+    """Is the line starting at `at` a non-blank line indented deeper than the one starting at `line`?"""
+    eol = content.find("\n", at)
+    nxt = content[at:eol if eol >= 0 else len(content)]
+    if not nxt.strip():
+        return False
+    indent = lambda row: len(row) - len(row.lstrip(" \t"))
+    end = content.find("\n", line)
+    this = content[line:end if end >= 0 else len(content)]
+    return indent(nxt) > indent(this)
+
+
+def _boxed_marks(content: str) -> list | None:
+    """The marks of `content` laid out by the box each one flips, as the page draws them: item `k` is the mark whose
+    state character flips box `k`, None for a box no mark stands for (a raw `<input>`). The regex reading counts
+    marks and needs them to be the boxes one for one; this one asks the render, so an empty item (a mark, no box)
+    and a box behind a chain are each told apart. The marks are numbered from 1 and, for each bit of the numbers,
+    those with the bit set are flipped together and rendered: a box that moved has the bits of its mark's number,
+    so about log2 of the marks renders lay them all out, not one per mark. None when the source does not render,
+    when a box moves with no mark of that number, or when the states do not come back the same in number."""
+    marks = task_marks(content)
+    try:
+        html = _render_source(content)
+        if html is None:
+            return None
+        was = _ticks(copyblock.mark(html, page=True))[0]
+        code = [0] * len(was)
+        for bit in range(len(marks).bit_length()):
+            out, last = [], 0
+            for i, m in enumerate(marks):
+                out.append(content[last:m.start(2)])
+                out.append(("x" if m.group(2) == " " else " ") if (i + 1) >> bit & 1 else m.group(2))
+                last = m.end(2)
+            html = _render_source("".join(out) + content[last:], keep=False)
+            now = None if html is None else _ticks(copyblock.mark(html, page=True))[0]
+            if now is None or len(now) != len(was):
+                return None
+            for k, (a, b) in enumerate(zip(was, now)):
+                code[k] |= (a != b) << bit
+    except Exception:
+        return None
+    if any(c > len(marks) for c in code) or len({c for c in code if c}) != len([c for c in code if c]):
+        return None
+    return [marks[c - 1] if c else None for c in code]
+
+
+def _readings(content: str):
+    """The readings of the marks of `content` a tick may be written by, one after the other, each asked for only when
+    the one before did not serve: `task_marks`, then the marks `_drawing_marks` guesses from the text, then
+    `_boxed_marks` (renders) when it is none of those."""
+    first = task_marks(content)
+    yield first
+    seen = [[m.start(2) for m in first]]
+    if first and (drawn := _drawing_marks(content, first)) and [m.start(2) for m in drawn] not in seen:
+        seen.append([m.start(2) for m in drawn])
+        yield drawn
+    if first and (boxed := _boxed_marks(content)) is not None and [m and m.start(2) for m in boxed] not in seen:
+        yield boxed
 
 
 def _ticks(fragment: str):
@@ -766,40 +862,54 @@ def _ticks(fragment: str):
     return states, str(soup)
 
 
-def _toggle_boxes(block, fragment: str):
-    """The block with its task marks flipped, when the page changed nothing but
-    which boxes are ticked. None otherwise, and then the edit is converted as usual."""
-    if "checkbox" not in fragment:
-        return None
+def _only_ticks(block, fragment: str):
+    """(the states the page sent, its fragment unticked, the states of the source's render) when the fragment differs
+    from the source's render in the ticks of its boxes and in nothing else; None otherwise."""
     both = _comparable(block, fragment)
     if both is None:
         return None
     try:
         want, frag = _ticks(both[0])
         have, src = _ticks(both[1])
-        if not have or want == have or len(want) != len(have):
-            return None
-        if _norm_html(frag) != _norm_html(src):
+        if not have or want == have or len(want) != len(have) or _norm_html(frag) != _norm_html(src):
             return None
     except Exception:
         return None
-    # The marks found in the source must be the boxes the render drew, one for
-    # one, or a tick could land on the wrong line (a `- [ ]` inside a code
-    # block in the list, say). Any doubt and the edit takes the general path.
-    marks = task_marks(block.content)
-    if [m.group(2) != " " for m in marks] != have:
+    return want, frag, have
+
+
+def _toggle_boxes(block, fragment: str, marks=None):
+    """The block with its task marks flipped, when the page changed nothing but
+    which boxes are ticked. None otherwise, and then the edit is converted as usual.
+    `marks` is one reading of the marks; none given, each of `_readings` is tried in turn. A reading may have None
+    for a box no mark stands for: the page may not tick it, only leave it as it was."""
+    if "checkbox" not in fragment:
+        return None
+    if marks is None:
+        # What does not depend on the reading is judged first: a reading by box costs renders, and a text edit of a
+        # block that holds boxes comes through here on every save.
+        if _only_ticks(block, fragment) is None:
+            return None
+        return next((out for out in (_toggle_boxes(block, fragment, m) for m in _readings(block.content))
+                     if out is not None), None)
+    if (ticks := _only_ticks(block, fragment)) is None:
+        return None
+    want, frag, have = ticks
+    # The marks found in the source must be the boxes the render drew, one for one (a box no mark stands for is
+    # None and is left as it is), or a tick could land on the wrong line (a `- [ ]` inside a code block in the list,
+    # say). Any doubt and the edit takes the general path.
+    if len(marks) != len(have) or [h if m is None else m.group(2) != " " for m, h in zip(marks, have)] != have:
         return None
     out = block.content
     for m, w, h in reversed(list(zip(marks, want, have))):
         if w != h:
+            if m is None:
+                return None
             out = out[:m.start(2)] + ("x" if w else " ") + out[m.end(2):]
     # Equal counts and states do not make the marks the boxes: pandoc draws no box for an empty item (`- [ ]`) and
     # does draw one the marks miss (`- - [ ] x`), so a tick could still land on the wrong line. The result is
     # therefore rendered, and must draw exactly the boxes the page sent, ticked as the page sent them.
-    class _Out:
-        content = out
-
-    again = _comparable(_Out, fragment)
+    again = _comparable(SimpleNamespace(content=out), fragment)
     if again is None:
         return None
     try:
@@ -811,34 +921,75 @@ def _toggle_boxes(block, fragment: str):
     return out
 
 
-def ticked_html(block, k: int, tick: bool = True):
+_BOX_NUMBERS: dict = {}
+_MISS = object()
+_BOX_NUMBERS_MAX = 4096
+
+
+def box_number(content: str, at: int) -> int | None:
+    """The number, among the boxes the page draws for `content`, of the box whose state is the character at `at`
+    (the state character of a task mark): the one box that flips when that character does. None when none does
+    (an empty item has a mark and no box) or when the source does not render. The count of marks is not this
+    number: a mark may draw no box (an empty item) and a box may have no mark (a raw `<input>`), so the render
+    is asked. An answer is kept by (content, at), for the page asks it of every
+    button on every serve and the render of a long list takes seconds; a render that failed is not kept."""
+    if not 0 <= at < len(content) or content[at] not in " xX":
+        return None
+    key = (content, at)
+    if (kept := _BOX_NUMBERS.get(key, _MISS)) is not _MISS:      # one read: another thread may clear between two
+        return kept
+    flipped = content[:at] + (" " if content[at] != " " else "x") + content[at + 1:]
+    try:
+        was, now = (_ticks(copyblock.mark(h, page=True))[0] if (h := _render_source(c)) is not None else None
+                    for c in (content, flipped))
+    except Exception:
+        return None
+    if was is None or now is None:
+        return None
+    moved = [i for i, (a, b) in enumerate(zip(was, now)) if a != b] if len(was) == len(now) else []
+    got = moved[0] if len(moved) == 1 else None
+    if len(_BOX_NUMBERS) >= _BOX_NUMBERS_MAX:
+        _BOX_NUMBERS.clear()
+    _BOX_NUMBERS[key] = got
+    return got
+
+
+def ticked_html(block, k: int, tick: bool = True, at: int | None = None):
     """The block as the page would send it with its `k`th task box ticked (unticked, with `tick` false), for a
     tick made away from the page (the list's row, SPEC 9.10): saved like the page's own, it takes the
     `_toggle_boxes` path and flips that one mark. None when the box is ticked already (unticked already), or when
     that path would not be the one taken (the marks are not the boxes drawn, a comment is in the way): a save would
-    then go through pandoc."""
+    then go through pandoc. `k` counts the boxes the page draws, as `box_number` does; `at`, when given, is the
+    offset of the state character of the mark the box stands for, and only a reading that has that mark as its `k`th
+    is tried, so a tick cannot be written on the mark of another box."""
     from bs4 import BeautifulSoup
 
     if not block.editable:
         return None
-    r = _pandoc.run(["-f", "gfm", "-t", "html5", "--no-highlight"], copyblock.hide(block.content))
-    if r.returncode != 0:
+    html = _render_source(block.content)
+    if html is None:
         return None
     # The page shows each comment as its anchor; the anchor is what keeps the comment through a save.
     soup = BeautifulSoup(COMMENT_HTML_RE.sub(
-        lambda m: f'<span class="rd-anchor" data-rd-id="{m.group(1)}"></span>', copyblock.mark(r.stdout, page=True)),
+        lambda m: f'<span class="rd-anchor" data-rd-id="{m.group(1)}"></span>', copyblock.mark(html, page=True)),
         "html.parser")
     found = soup.select('input[type="checkbox"]')
-    marks = task_marks(block.content)
-    if not 0 <= k < min(len(found), len(marks)) or found[k].has_attr("checked") == tick:
+    if not 0 <= k < len(found):
+        return None
+    sets = (m for m in _readings(block.content)
+            if k < min(len(found), len(m)) and m[k] is not None and (at is None or m[k].start(2) == at))
+    if found[k].has_attr("checked") == tick:
         return None
     if tick:
         found[k]["checked"] = ""
     else:
         del found[k]["checked"]
     fragment = str(soup)
-    want = block.content[:marks[k].start(2)] + ("x" if tick else " ") + block.content[marks[k].end(2):]
-    return fragment if _toggle_boxes(block, fragment) == want else None
+    for marks in sets:
+        want = block.content[:marks[k].start(2)] + ("x" if tick else " ") + block.content[marks[k].end(2):]
+        if _toggle_boxes(block, fragment, marks) == want:
+            return fragment
+    return None
 
 
 # ─────────────────────────────────────────────── comments through a save ──

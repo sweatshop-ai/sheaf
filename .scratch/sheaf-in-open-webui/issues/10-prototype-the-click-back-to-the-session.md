@@ -1,7 +1,7 @@
 # 10: How the click on a session's name gets back to the laptop
 
 **Type:** prototype
-**Status:** claimed by Ottilie (2026-11-15)
+**Status:** resolved (2026-11-15)
 **Blocked by:** none
 **Map:** ../map.md
 
@@ -25,3 +25,11 @@ Tried with Thierry (2026-11-15, 21:45):
 - **Way a from the real origin works once allowed.** In the professional Chrome on `https://thinkingtoo.tiroir.me/list`, Chrome showed its local-network prompt and Thierry allowed it (state `granted`). Clicking "Kenji" then sent preflight and POST to the shim. AgentView answered `{"ok": true, "ran": ["wezterm cli … activate-pane --pane-id 12", "wmctrl -ia …"]}` and Kenji's pane came to the front.
 - **The phone is already solved elsewhere** (Thierry): in FleetView on the phone, a click on a session under Remote Control opens it in the Claude app (`agentview/fleet.py` `jump_of`, `remote`; `index.html` `wayOf`: on a touch screen with no hover, the `https://` Remote Control link wins over the pane). Raising a laptop terminal from a phone is no use, so way b's only advantage is moot.
 - The stand-in, shim and relay were stopped and t-compute's folder removed afterwards.
+
+## Answer
+
+Resolved 2026-11-15 by Thierry after trying the prototype: **on the laptop, way a; on another device, the session's Remote Control link; no relay.**
+
+- **On the laptop where the session runs**, the session's name on a page or Catalog row served by the tiroir calls the local AgentView from the browser (`POST http://127.0.0.1:8765/api/jump`, as the hub's `[jump]` does today). Chrome asks the member once per tiroir origin and browser profile to allow local-network access. AgentView must accept the tiroir's origin from an explicit list: answer `OPTIONS` with CORS (`Access-Control-Allow-Origin` of that origin, `X-Fleet` and `Content-Type` allowed) and `Access-Control-Allow-Private-Network: true`, and let that Origin pass `_origin_ok` on `/api/jump` (and `/api/reopen` for an ended session).
+- **On a phone or any other device**, the name is the session's Remote Control link (`https://claude.ai/…`, which the Claude app takes over), as FleetView does on a touch screen. The laptop session declares that link to the tiroir together with its id and machine (ticket 09's `X-Sheaf-Session` / `X-Sheaf-Host` headers and the render report). A session without Remote Control shows who and where only.
+- **Way b, the laptop-wide relay, is dropped.** Raising a laptop terminal from a phone is no use, and it would add a resident process with a token. SPEC 9.14's per-fork relay for Tells is unchanged.

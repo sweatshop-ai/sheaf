@@ -12,9 +12,9 @@
 
 **Blocked by:** none
 
-**Claimed by:** (libre)
+**Claimed by:** Bruno
 
-**Status:** ready-for-agent
+**Status:** in-progress (Bruno)
 
 **Par où commencer :** `tests/test_hub_list.py`, à côté de `test_a_tick_in_a_long_task_list_with_an_empty_item_costs_a_fixed_number_of_renders`. Sur t-compute : forcer `_goes_on` à `False` et voir quels tests virent au rouge.
 

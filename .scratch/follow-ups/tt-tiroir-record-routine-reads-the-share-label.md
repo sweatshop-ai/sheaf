@@ -4,6 +4,6 @@
 
 **Blocked by:** None.
 
-**Status:** open
+**Status:** done
 
-- [ ] The record routine's `WORDS` and `_BOX_RE` take `Shared with the team` as Share, with a test, shipped to the boxes as a stage
+- [x] The record routine's `WORDS` and `_BOX_RE` take `Shared with the team` as Share, with a test, shipped to the boxes as a stage. Evidence: `thinkingtoo/tt-tiroir` PR #962 merged as 3051bcd2 (main CI rerun run 43631669057 passed 2026-11-14 23:51Z); stage `record-share-label-2026-11-14` applied on tiroir-tt 2026-11-14T23:53:26Z (`apply finished`), its verify passed; the live `record.py` sha256 is now 8bd768446a7000d5ccfb559c66d34b52f87b6bcfc820503d2579426c4125e7df

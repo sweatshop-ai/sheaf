@@ -4,16 +4,16 @@
 
 **Blocked by:**
 - 04
-- External: Rocco lit la config de transcription de tiroir-tt après P7, puis Thierry choisit la source
+- Plus de blocage externe pour le code. Rocco a lu tiroir-tt (2026-11-12) et Thierry a choisi la source le 2026-11-15 : t-compute. Reste une seule chose, de la main de Thierry : appuyer une fois sur le micro de la boîte montée sur tiroir-tt (dernière case).
 
-**Status:** ready-for-agent
+**Status:** in-progress (Berit, 2026-11-15)
 
 **Fait :** PR 270 (partie page, 2 sur 3) fusionnée dans main (cd3e0da, 2026-11-13). Reste la troisième partie, la clé de dictée dédiée sur t-compute (externe). Le ticket reste ouvert.
 
 **Fait :** PR 284 fusionnée (c3a6ddf) : la dictée parle l'API standard ; reste le côté t-compute (route /v1/audio/transcriptions) et le déploiement par Thierry
 
-- [ ] Vérifié ce que tiroir-tt a d'activé pour la transcription, et sa version d'Open WebUI
-- [ ] Décision de Thierry : d'où vient la transcription sur un hub local, sans Open WebUI
-- [ ] Dans tiroir, dicter remplit le champ et le texte reste modifiable avant l'envoi
-- [ ] La politique de sécurité de la page montée laisse passer le micro
-- [ ] Sans transcription disponible, pas de bouton micro mort
+- [x] Vérifié ce que tiroir-tt a d'activé pour la transcription, et sa version d'Open WebUI. Vu, lecture seule sur tiroir-tt, 2026-11-15 : Open WebUI 0.11.4 (`/app/package.json`) ; config persistante `audio.stt.engine` = `openai`, `audio.stt.model` = `whisper-1`, `audio.stt.openai.api_base_url` = `http://100.117.2.45:8080/v1` (t-compute) ; aucune clé lue ni imprimée. Avant : faster-whisper local `base` (Rocco, stt-read.md, 2026-11-12).
+- [x] Décision de Thierry, 2026-11-15 : la transcription vient de t-compute (sur un hub local sans Open WebUI, `[transcribe]` pointe sur la route `POST /v1/audio/transcriptions` de t-compute, tiroir/tiroir#341, déployée le 2026-11-15). Preuve de la route : le journal de t-compute, 16:33:31 heure locale, `openai_audio: no language given, detection restricted to fr,nl,it,en`, appel de tiroir-tt, 200, pour une phrase en néerlandais dictée dans Open WebUI (relevé de Rhea ; la ligne du journal revue par Berit).
+- [ ] Dans tiroir, dicter remplit le champ et le texte reste modifiable avant l'envoi. Vu : le code déployé sur tiroir-tt (wheel 81c39b8, 2026-11-14, descendant de c3a6ddf) contient l'appel `/api/v1/audio/transcriptions` de la boîte ; les tests `tests/page/test_mount_dictation.py` (fausse route d'hôte, cookie, pas de jeton, `dictee.webm`, texte dans le champ) et `test_page_dictation.py` (texte modifiable, rien envoyé à l'agent) passent en CI. Pas vu : un appui réel sur le micro de la boîte montée sur tiroir-tt (la dictée de Thierry du 2026-11-15 était celle d'Open WebUI). Reste à faire, de la main de Thierry : ouvrir un fil dans tiroir-tt, appuyer sur le micro de la boîte, parler, vérifier le texte dans le champ.
+- [x] La politique de sécurité de la page montée laisse passer le micro. Vu, 2026-11-15 : `https://thinkingtoo.tiroir.me/` envoie `Content-Security-Policy: object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'` (aucun `media-src`, `connect-src` ni `script-src` qui gêne) et aucun `Permissions-Policy` ; le Caddyfile de tiroir-tt n'ajoute que HSTS ; la page montée vit dans un shadow root, sans iframe, donc sans attribut `allow`. Côté hub, `Permissions-Policy: microphone=(self)` est testé (`tests/test_hub_transcribe.py:869`).
+- [x] Sans transcription disponible, pas de bouton micro mort. Hub : le bouton n'est posé que si `GET /_/transcribe` dit `available` (`test_no_button_when_the_hub_cannot_transcribe_or_refuses_to_say`), jamais en mode proxy hors montage (`test_a_hub_page_in_proxy_mode_that_is_not_mounted_has_no_microphone`). Page montée : Open WebUI ne dit pas d'avance s'il peut transcrire (choix du plan, SPEC 10.4) ; un 403, 404, 401 ou une panne retire le bouton (`test_a_refusal_of_the_account_stays_off_after_a_remount`, `test_a_lost_service_is_held_off_for_the_mount_only`).

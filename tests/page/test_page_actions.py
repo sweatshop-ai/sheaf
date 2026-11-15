@@ -391,17 +391,18 @@ def test_a_refusal_is_not_said_again_past_the_seven_seconds_it_was_said_in_howev
 
 
 def test_a_refusal_said_again_by_a_reload_posts_no_second_incident(tab):
-    # Ticket 143 (101, point 2): every `say(text, true)` posts a `toast` incident to /_/diag, and the replay of a refusal
+    # Ticket 143 (SPEC 10.11; left by ticket 101, point 2): every `say(text, true)` posts a `toast` incident to /_/diag, and the replay of a refusal
     # on the page a reload brings was one: a second row for a refusal already written down. The first is still one.
     p = held_by_a_form(tab, [refused("Approve: refused A, reload the page")])
     rows = []
-    p.on("request", lambda r: rows.append(r.post_data) if r.url.endswith("/_/diag") and '"kind":"toast"' in (r.post_data or "") else None)
+    p.on("request", lambda r: rows.append(r.post_data_json) if r.url.endswith("/_/diag") and r.post_data_json["kind"] == "toast" else None)
     p.clock.run_for(5100)
     until(lambda: "refused A" in toast(p), what="the refusal")
-    assert len(rows) == 1 and "refused A" in rows[0], rows       # the first is posted: say() posts before it shows
+    assert len(rows) == 1 and "refused A" in rows[0]["message"], rows       # the first is posted: say() posts before it shows
     p.click("#rd-popover button[data-f=ok]")
     reloaded(p)
     toasted(p, "refused A", on_clock=True)                       # the replay is said; its incident, if any, was posted first
+    p.evaluate("0")                                              # events reach the test in order: the request, if there was one, has come
     assert len(rows) == 1, rows
 
 

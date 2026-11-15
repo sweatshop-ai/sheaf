@@ -31,6 +31,15 @@ def listed(page):
     return sorted(f.locator("textarea").input_value() for f in page.locator(f"{LIST} .rd-form").all())
 
 
+def in_order(page, among):
+    """The texts of `among` as the not-sent list shows them, top to bottom (the list is closed again after)."""
+    page.click(UNSENT)
+    page.wait_for_selector(LIST, timeout=3000)
+    got = [f.locator("textarea").input_value() for f in page.locator(f"{LIST} .rd-form").all()]
+    page.click(UNSENT)
+    return [t for t in got if t in among]
+
+
 def loaded(page):
     page.reload()
     page.wait_for_selector("#rd-menu-btn", state="attached")
@@ -170,3 +179,18 @@ def test_an_entry_key_that_is_not_json_is_left_alone_and_does_not_stop_the_other
     assert unsent(p) == "1 message not sent · Show"
     keep_a_new_message(p, "typed after")
     assert p.evaluate("localStorage.getItem(%s)" % json.dumps(key + ":e:0mwgzsy17-000-0000")) == "{not json"
+
+
+# An earlier build's list is in the order of its writes, and entries written in one millisecond share their `at`: the
+# page lists them in the order of the list, not in the order of a hash of their text.
+def test_entries_of_an_earlier_builds_list_with_the_same_time_keep_the_order_of_the_list(tab, site):
+    tab.open()
+    p = tab.page
+    words = [f"words number {n}" for n in range(6)]
+    set_kept(p, site, [reply(w) for w in words])               # one `at` for all six
+    loaded(p)
+    assert in_order(p, words) == words
+    keep_a_new_message(p, "a write that moves the list into keys")
+    until(lambda: p.evaluate("localStorage.getItem(%s)" % json.dumps(comment_draft_key(site))) is None, what="the list to be moved")
+    loaded(p)
+    assert in_order(p, words) == words

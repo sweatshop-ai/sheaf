@@ -24,3 +24,10 @@ Round 1 (Thierry):
 - Q1: a repo per client (e.g. `klium`) holding only client-facing pages, its `.sheaf.toml` naming the client's tiroir; the client tiroir's GitHub App sees that repo only. Ticket 04 point 1 stands.
 - Q2: on a tiroir marked as a client's, the agent never plain-Shares; it may only `Share with <ThinkingToo members>`; the Share that opens a page to the client is the member's hand.
 - Q3: an internal comment is needed: the team comments on a client page without the client ever seeing it (reopens ticket 03's comments-in-the-file for this case).
+
+Round 2 (Thierry):
+- Q4: the internal comment lives on tiroir-tt, a team verso tied to the client page's address; it never reaches the client tiroir, the client repo or the client's memorizer. Name still open ("team comment" for now).
+- Q5: the team reads client pages from tiroir-tt's Sheaf, a "Clients" folder read through hub to hub (ticket 21's channel), client comments and team comments together. Reopens ticket 04 point 5 for client tiroirs only.
+- Q6 reopened by Thierry: a client may have a brain on their tiroir; every user's brain is private and the agency must never read it.
+
+Fact found while checking Q6 (2026-11-16): on tiroir-chienvert and tiroir-respace Open WebUI runs with no `ENABLE_ADMIN_*` env set, so its defaults hold: `ENABLE_ADMIN_CHAT_ACCESS`, `ENABLE_ADMIN_EXPORT` and `ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS` are all True (`env.py:371`, `config.py:2082-2084` in the container). Thierry is admin on both, so the admin UI today opens the client users' chats.

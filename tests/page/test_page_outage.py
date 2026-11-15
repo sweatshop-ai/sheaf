@@ -14,7 +14,7 @@ import time
 import pytest
 
 from helpers import PLAN, comment
-from pagehelp import (DOC, P1, P2, T0, at, comment_on, draft_key, gone, set_kept, mark, reload_on_clock,
+from pagehelp import (DOC, clock_at, P1, P2, T0, at, comment_on, draft_key, gone, set_kept, mark, reload_on_clock,
                       reloaded, toast, toasted, type_at_end, until)
 from sheafmd import comments as rdc
 
@@ -60,9 +60,9 @@ def show_tab(page, visible):
 def open_on_clock(tab, start=T0):
     """The page opened on a clock the test drives, from `start` (ms), with its stream watched."""
     tab.page.add_init_script(WATCH)
-    tab.page.clock.install(time=start)
+    tab.page.clock.install(time=clock_at(start))
     tab.open()
-    tab.page.clock.pause_at(start + 5_000)
+    tab.page.clock.pause_at(clock_at(start + 5_000))
     until(lambda: stream(tab.page)["opens"] >= 1, what="the stream to open")
     return tab
 
@@ -995,7 +995,7 @@ def missing_past_the_grace(tab, init=None):
     p.add_init_script(WATCH)
     if init:
         p.add_init_script(init)
-    p.clock.install(time=T0)
+    p.clock.install(time=clock_at(T0))
     tab.open()
     until(lambda: stream(p)["opens"] >= 1, what="the stream to open")
     text = site.file.read_text(encoding="utf-8")
@@ -1005,7 +1005,7 @@ def missing_past_the_grace(tab, init=None):
     site.file.unlink()
     site.reopen()
     until(lambda: answers.count(404) >= 1 or p.wait_for_timeout(50), timeout=15, what="the page to be told 404")
-    p.clock.pause_at(T0 + 60_000)
+    p.clock.pause_at(clock_at(T0 + 60_000))
     assert p.evaluate("document.querySelector('#rd-state').textContent") == "File missing"    # at once, not at 15 s
     p.clock.run_for(20_000)
     run_until(p, lambda: "file is not on the hub" in notice(p), "the notice that the file is missing")

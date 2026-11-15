@@ -1,5 +1,6 @@
 """What the page tests do with a page: select text the way a person's mouse does, and wait; and what a run says when its browser will not start."""
 import contextlib
+import datetime
 import json
 import signal
 import subprocess
@@ -401,14 +402,21 @@ def type_at_end(page, css, text):
     page.keyboard.type(text)
 
 
+def clock_at(ms):
+    """A point for page.clock from epoch milliseconds. Not the bare number: Playwright for Python reads a number as
+    seconds, so T0 (ms) put the page's Date.now() in the year 57000, and the ids the page makes from it were longer than
+    any real one (ticket 130)."""
+    return datetime.datetime.fromtimestamp(ms / 1000, tz=datetime.timezone.utc)
+
+
 def reload_on_clock(page, start=T0, *, pause=False):
     """Put a clock the test drives under the open page, from `start` (ms), and reload it; with
     `pause` the clock stands still 5 s later."""
-    page.clock.install(time=start)
+    page.clock.install(time=clock_at(start))
     page.reload()
     page.wait_for_selector("#rd-menu-btn", state="attached")
     if pause:
-        page.clock.pause_at(start + 5_000)
+        page.clock.pause_at(clock_at(start + 5_000))
 
 
 # ── a browser that will not start ────────────────────────────────────────────────────────────────────────

@@ -11,7 +11,7 @@ import pytest
 from helpers import comment, writes_from_outside
 from pagehelp import (DOC, P1, RELOADING, draft_key, P2, T0, at, comment_draft_key, comment_on, kept_entries, kept_json, set_kept, gone, key, mark, open_box, open_form, typed, reload_on_clock, reloaded,
                       select, select_by_touch, toast, toast_state, toasted, toasts_to_the_end, type_at_end, until)
-from pagehelp import TOAST_STEP, run_clock
+from pagehelp import TOAST_STEP, clock_at, run_clock
 from sheafmd import comments as rdc
 from sheafmd.hub import live as hub_live
 from sheafmd.hub import state as hub_state
@@ -2559,7 +2559,7 @@ LATE = "The hub did not answer within 30 seconds"
 
 def test_a_new_comment_whose_send_never_answers_comes_back_after_30_seconds_and_frees_the_page(tab):
     p = tab.page
-    p.clock.install(time=T0)
+    p.clock.install(time=clock_at(T0))
     tab.open()
     comment_on(tab, at(P2, "pears"), at(P2, "pears", None), "Why pears?")
     p.reload()

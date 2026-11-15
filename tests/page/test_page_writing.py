@@ -11,7 +11,7 @@ import pytest
 from helpers import comment, writes_from_outside
 from pagehelp import (DOC, P1, RELOADING, draft_key, P2, T0, at, comment_draft_key, comment_on, gone, key, mark, open_box, open_form, typed, reload_on_clock, reloaded,
                       select, select_by_touch, toast, toast_state, toasted, toasts_to_the_end, type_at_end, until)
-from pagehelp import TOAST_STEP, run_clock
+from pagehelp import TOAST_STEP, run_clock, stalls_after
 from sheafmd import comments as rdc
 from sheafmd.hub import live as hub_live
 from sheafmd.hub import state as hub_state
@@ -142,11 +142,17 @@ def fail_the_send(p, held):
 
 
 def send_not_out(p):
-    """What the page shows when a send did not leave: whether it reloaded under the form, the field, the popover, the toast."""
-    return p.evaluate("""() => {
-        const t = document.querySelector('#rd-popover textarea'), pop = document.querySelector('#rd-popover'), toast = document.querySelector('.rd-toast');
-        return JSON.stringify({same_load: window.__same_load === true, field: t ? t.value : null, popover: pop ? pop.innerText : null, toast: toast ? toast.innerText : null});
-    }""")
+    """What the page shows when a send did not leave: whether it reloaded under the form, the field, the popover, the toast.
+    It never hides the failure it explains: a page that is reloading or does not answer is said so."""
+    try:
+        with stalls_after(5, "the page state of a send that did not go out"):
+            return p.evaluate("""() => {
+                const t = document.querySelector('#rd-popover textarea'), pop = document.querySelector('#rd-popover'), toast = document.querySelector('#rd-toast');
+                return JSON.stringify({same_load: window.__same_load === true, field: t ? t.value : null, popover: pop ? pop.innerText : null,
+                                       toast: toast ? [toast.textContent, toast.classList.contains('show')] : null});
+            }""")
+    except Exception as e:      # a PageStalled is not an Exception: it still ends the test
+        return f"page state unreadable: {str(e).splitlines()[0]}"
 
 
 def send_held(tab, form, text):
@@ -154,7 +160,7 @@ def send_held(tab, form, text):
     p, held = tab.page, []
     open_form(p, form)
     p.fill("#rd-popover textarea", text)
-    p.evaluate("window.__same_load = true")
+    mark(p)
     p.route("**/_/comment", lambda route: held.append(route))
     p.keyboard.press("Control+Enter")
     try:

@@ -2,6 +2,7 @@
 import contextlib
 import datetime
 import json
+import os
 import signal
 import subprocess
 import sys
@@ -479,6 +480,24 @@ def launch_chromium(chromium, error, in_ci):
             pytest.skip(f"no Chromium for Playwright (run `playwright install chromium`): "
                         f"{str(e).splitlines()[0]}")
         unavailable(f"Chromium did not start:\n{e}\n{died_report(launched_binary(chromium.executable_path))}", in_ci)
+
+
+def launch_engine(browser_type, name, error=None, in_ci=None):
+    """A browser a test launches for itself (`pw.<engine>.launch()`): the browser, a skip off CI when the engine is not
+    here, or a failure on CI that carries the whole error (Playwright puts the browser's log after the first line)
+    and, for Chromium, how a second run of the binary ends. A skip on CI only turns the job red with one line
+    (ticket 138: four runs, 12-15 November)."""
+    if error is None:
+        from playwright.sync_api import Error as error
+    if in_ci is None:
+        in_ci = os.environ.get("CI", "").lower() in ("1", "true")
+    try:
+        return browser_type.launch()
+    except error as e:
+        if not in_ci:
+            pytest.skip(f"{name} cannot start here: {str(e).splitlines()[0]}")
+        report = died_report(launched_binary(browser_type.executable_path)) if name == "chromium" else ""
+        pytest.fail(f"{name} did not start:\n{e}\n{report}".rstrip())
 
 
 # The page's side of the stream journal (conftest.py `stream_journal`): it wraps EventSource and notes, in real

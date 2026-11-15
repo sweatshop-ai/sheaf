@@ -10,6 +10,8 @@ import json
 
 import pytest
 
+from pagehelp import launch_engine
+
 sync_api = pytest.importorskip("playwright.sync_api")
 
 PAGE = """<!doctype html><html><body>
@@ -59,10 +61,7 @@ def pw(chromium):
 
 @pytest.fixture(params=ENGINES)
 def page(request, pw):
-    try:
-        browser = getattr(pw, request.param).launch()
-    except Exception as e:      # not installed, or its libraries are missing here
-        pytest.skip(f"{request.param} cannot start here: {str(e).splitlines()[0]}")
+    browser = launch_engine(getattr(pw, request.param), request.param)
     ctx = browser.new_context(viewport={"width": 900, "height": 700})
     pg = ctx.new_page()
     pg.set_content(PAGE)

@@ -656,8 +656,8 @@ var create = function (ROOT, CFG, opts) {
 
   // Toasts queue: each is shown in turn for its own time (7 s red, 2.6 s else), none dropped, none cut short by the next.
   var toasts = [], toasting = false;
-  function say(msg, err) {
-    if (err) incident('toast', { message: msg });
+  function say(msg, err, again) {
+    if (err && !again) incident('toast', { message: msg });      // a refusal said again is the one already written down
     var t = { msg: msg, err: err, until: null };      // `until` is when it stops being up, set once it is shown
     toasts.push(t);
     if (!toasting) nextToast();
@@ -4558,7 +4558,7 @@ var create = function (ROOT, CFG, opts) {
     // What the old page said and the reload left, then the refusal, which a second reload says again in its turn.
     if (msg) say(msg);
     if (refusedPress && keep && Date.now() < refusedPress.until) {
-      say(refusedPress.text, true);
+      say(refusedPress.text, true, true);
       pressSaid = { text: refusedPress.text, toast: { until: refusedPress.until } };      // the deadline it was said in, not a new one
     }
     if (canSave) { showKept(); unsentLine(); }

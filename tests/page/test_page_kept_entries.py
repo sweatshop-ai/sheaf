@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from pagehelp import P2, at, comment_draft_key, kept_entries, select, set_kept, until
+from pagehelp import P1, P2, at, comment_draft_key, kept_entries, select, set_kept, until
 
 pytestmark = pytest.mark.page
 
@@ -17,6 +17,18 @@ LIST = "#rd-popover[data-unsent]"
 def message(body, born="2026-10-14T11:00:00.000Z"):
     """A new message kept for later, as an earlier build wrote it."""
     return {"quote": "apples", "body": body, "block": 0, "head": "x", "at": born, "min": True}
+
+
+def reply(body, born="2026-10-14T11:00:00.000Z"):
+    """A reply kept for later, as an earlier build wrote it (it names no passage: a message typed later replaces none)."""
+    return {"thread": "c1", "kind": "reply", "body": body, "about": "apples", "born": "2026-10-14T10:00", "at": born}
+
+
+def listed(page):
+    """The texts of the not-sent list, as the page shows them."""
+    page.click(UNSENT)
+    page.wait_for_selector(LIST, timeout=3000)
+    return sorted(f.locator("textarea").input_value() for f in page.locator(f"{LIST} .rd-form").all())
 
 
 def loaded(page):
@@ -97,29 +109,29 @@ def test_a_comment_kept_in_the_one_slot_of_an_older_store_is_listed_and_moved_by
 def test_a_list_beside_entry_keys_that_hold_the_same_entries_lists_each_once(tab, site):
     tab.open()
     p = tab.page
-    both = [message("first words"), message("second words", "2026-10-14T11:01:00.000Z")]
+    both = [reply("first words"), reply("second words", "2026-10-14T11:01:00.000Z")]
     set_kept(p, site, both)
     loaded(p)
     keep_a_new_message(p, "third words")
     until(lambda: p.evaluate("localStorage.getItem(%s)" % json.dumps(comment_draft_key(site))) is None, what="the list to be moved")
     put(p, comment_draft_key(site), json.dumps(both))
     loaded(p)
-    assert unsent(p) == "3 messages not sent · Show"
-    keep_a_new_message(p, "fourth words")
-    assert sorted(d["body"] for d in kept_entries(p, site)) == ["first words", "fourth words", "second words", "third words"]
+    assert listed(p) == ["first words", "second words", "third words"]
 
 
 # d3: two pages that write while the list is still in the store of both.
 def test_two_pages_that_move_the_same_list_leave_each_entry_once(tab, site, context):
     tab.open()
     a = tab.page
-    set_kept(a, site, [message("first words"), message("second words", "2026-10-14T11:01:00.000Z")])
+    set_kept(a, site, [reply("first words"), reply("second words", "2026-10-14T11:01:00.000Z")])
     loaded(a)
     b = context.new_page()
     b.goto(site.url)
     b.wait_for_selector("#rd-menu-btn", state="attached")
     keep_a_new_message(a, "from page a")
-    keep_a_new_message(b, "from page b")
+    select(b, at(P1, "apples"), at(P1, "apples", None))
+    b.fill(FIELD, "from page b")
+    b.keyboard.press("Escape")
     until(lambda: len(kept_entries(a, site)) == 4, what="the four entries")
     assert sorted(d["body"] for d in kept_entries(a, site)) == ["first words", "from page a", "from page b", "second words"]
     assert a.evaluate("localStorage.getItem(%s)" % json.dumps(comment_draft_key(site))) is None

@@ -40,7 +40,7 @@ from urllib.parse import quote
 from .. import beneath, config, paths
 from ..source import md_hash
 from ..blocks import _split_lines, split_md_blocks
-from ..edit import task_marks, ticked_html
+from ..edit import _mark_sets, box_number, ticked_html
 from .. import comments as rdc
 from . import commits, place, projects, state
 from . import proxy as proxy_mod
@@ -430,26 +430,33 @@ def tick_edit(text: str, n: int, word: str, release: bool = False):
     if not 0 <= n < len(boxes) or boxes[n][0] != word or (release and word not in TOGGLES):
         return None
     blocks = split_md_blocks(text)
-    at = box_place(text, boxes[n][2], blocks)
+    at = _place(text, boxes[n][2], blocks)
     if at is None:
         return None
-    fragment = ticked_html(blocks[at[0]], at[1], tick=not release)
+    fragment = ticked_html(blocks[at[0]], at[1], tick=not release, at=at[2])
     return None if fragment is None else {"i": at[0], "html": fragment}
 
 
 def box_place(text: str, line: int, blocks=None) -> tuple | None:
-    """(the block, the box's number among the task boxes of that block) of the box on the 0-based `line` of
-    `text`: where the page draws it. None when the mark found is not on that line."""
+    """(the block, the box's number among the task boxes the page draws for that block) of the box on the 0-based
+    `line` of `text`. None when the line has no mark that draws a box."""
+    at = _place(text, line, blocks)
+    return None if at is None else at[:2]
+
+
+def _place(text: str, line: int, blocks=None) -> tuple | None:
+    """`box_place` and the offset, in the block, of the state character of the box's mark: (block, box, offset).
+    The box is the one the render says flips with that character (`box_number`), not the mark's rank among the
+    marks: the two counts differ where an item is empty or a box stands behind a chain of markers."""
     blocks = split_md_blocks(text) if blocks is None else blocks
     i = max(x for x, b in enumerate(blocks) if b.start <= line)
     b = blocks[i]
     own = _split_lines(b.content)
     offset = sum(len(x) for x in own[:line - b.start])
-    marks = task_marks(b.content)
-    k = sum(1 for m in marks if m.start() < offset)
-    if k >= len(marks) or marks[k].start() != offset:
-        return None                 # the mark found is not on the action's own line
-    return i, k
+    for at in dict.fromkeys(m.start(2) for marks in _mark_sets(b.content) for m in marks if m.start() == offset):
+        if (k := box_number(b.content, at)) is not None:
+            return i, k, at
+    return None
 
 
 def buttons(s: Sheaf, who: dict, hub, member, is_owner: bool) -> list:

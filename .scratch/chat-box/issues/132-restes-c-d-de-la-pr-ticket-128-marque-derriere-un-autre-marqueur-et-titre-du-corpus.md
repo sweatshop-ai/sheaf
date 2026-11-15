@@ -8,6 +8,6 @@
 
 **Claimed by:** Yuki 2026-11-15 12:49
 
-**Status:** in-progress
+**Status:** done, PR 371 merged (cadd9d6)
 
-- [ ] point 1 fait ou écarté avec la preuve ; point 2 fait
+- [x] point 1 fait ou écarté avec la preuve ; point 2 fait

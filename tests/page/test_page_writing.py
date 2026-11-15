@@ -155,6 +155,15 @@ def send_not_out(p):
         return f"page state unreadable: {str(e).splitlines()[0]}"
 
 
+def wait_for_send(p, held):
+    """Wait for the held `/_/comment` route to take the request; a send that did not go out says what the page shows."""
+    try:
+        until(lambda: held or p.wait_for_timeout(20), what="the send to go out")
+    except AssertionError as e:
+        # Seen once in CI (ticket 93) with nothing in the log to say why the request never left.
+        raise AssertionError(f"{e}: {send_not_out(p)}") from None
+
+
 def send_held(tab, form, text):
     """Open the reply or edit form, type, send with `/_/comment` held; returns the held requests."""
     p, held = tab.page, []
@@ -163,11 +172,7 @@ def send_held(tab, form, text):
     mark(p)
     p.route("**/_/comment", lambda route: held.append(route))
     p.keyboard.press("Control+Enter")
-    try:
-        until(lambda: held or p.wait_for_timeout(20), what="the send to go out")
-    except AssertionError as e:
-        # Seen once in CI (ticket 93) with nothing in the log to say why the request never left: say what the page shows.
-        raise AssertionError(f"{e}: {send_not_out(p)}") from None
+    wait_for_send(p, held)
     return held
 
 
@@ -2103,14 +2108,10 @@ def new_comment_held(tab):
     p.clock.run_for(50)                     # the Comment button comes on a timer, and this clock stands still
     open_box(p)
     p.fill("#rd-popover textarea", "about the pears")
-    p.evaluate("window.__same_load = true")
+    mark(p)
     p.route("**/_/comment", lambda route: held.append(route))
     p.keyboard.press("Control+Enter")
-    try:
-        until(lambda: held or p.wait_for_timeout(20), what="the send to go out")
-    except AssertionError as e:
-        # Seen once in CI (ticket 93) with nothing in the log to say why the request never left: say what the page shows.
-        raise AssertionError(f"{e}: {send_not_out(p)}") from None
+    wait_for_send(p, held)
     return held
 
 

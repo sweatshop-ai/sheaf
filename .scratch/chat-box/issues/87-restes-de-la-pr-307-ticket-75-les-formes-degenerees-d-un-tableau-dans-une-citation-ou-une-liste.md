@@ -27,8 +27,8 @@ Une façon de les reprendre : mesurer les colonnes à l'intérieur de la citatio
 
 **Claimed by:** Samir
 
-- [ ] Les formes des points 1 à 13 traitées ou la limite gardée avec la raison
-- [ ] Le point 2 du ticket 75 refait à partir du sourcepos, SPEC 10.4 limite (1) retirée
-- [ ] CI verte
+- [x] Les formes des points 1 à 13 traitées (un test par forme, `tests/test_table_in_container.py`); la limite qui reste, un bloc que le découpeur coupe à une ligne qui ressemble à un délimiteur, est gardée dans le SPEC 10.4 avec sa raison, et ses restes sont au ticket 126
+- [x] Le point 2 du ticket 75 refait à partir du sourcepos, SPEC 10.4 limite (1) retirée
+- [x] CI verte (3/3 sur 9265e0e)
 
-**Status:** ready-for-agent
+**Status:** done (PR 351, merged as c1beb74)

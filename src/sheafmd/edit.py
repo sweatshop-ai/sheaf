@@ -844,24 +844,35 @@ def _toggle_boxes(block, fragment: str, marks=None):
     return out
 
 
+_BOX_NUMBERS: dict = {}
+_BOX_NUMBERS_MAX = 4096
+
+
 def box_number(content: str, at: int) -> int | None:
     """The number, among the boxes the page draws for `content`, of the box whose state is the character at `at`
     (the state character of a task mark): the one box that flips when that character does. None when none does
     (an empty item has a mark and no box) or when the source does not render. The count of marks is not this
     number: a mark may draw no box (an empty item) and a box may have no mark (a bullet behind a chain the
-    regex misses), so the render is asked."""
+    regex misses), so the render is asked. An answer is kept by (content, at), for the page asks it of every
+    button on every serve and `_rendered` holds 8 renders; a render that failed is not kept."""
     if not 0 <= at < len(content) or content[at] not in " xX":
         return None
+    if (key := (content, at)) in _BOX_NUMBERS:
+        return _BOX_NUMBERS[key]
     flipped = content[:at] + (" " if content[at] != " " else "x") + content[at + 1:]
     try:
         was, now = (_ticks(copyblock.mark(h, page=True))[0] if (h := _render_source(c)) is not None else None
                     for c in (content, flipped))
     except Exception:
         return None
-    if was is None or now is None or len(was) != len(now):
+    if was is None or now is None:
         return None
-    moved = [i for i, (a, b) in enumerate(zip(was, now)) if a != b]
-    return moved[0] if len(moved) == 1 else None
+    moved = [i for i, (a, b) in enumerate(zip(was, now)) if a != b] if len(was) == len(now) else []
+    got = moved[0] if len(moved) == 1 else None
+    if len(_BOX_NUMBERS) >= _BOX_NUMBERS_MAX:
+        _BOX_NUMBERS.clear()
+    _BOX_NUMBERS[key] = got
+    return got
 
 
 def ticked_html(block, k: int, tick: bool = True, at: int | None = None):

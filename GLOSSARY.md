@@ -99,6 +99,14 @@ _Avoid_: author, creator, root owner
 Whether a sheaf is open to every member whose roots hold it, or its owner's alone, as the hub reads it from the front matter (SPEC 9.11).
 _Avoid_: permission, privacy, ACL
 
+**List**:
+A member's page of the sheaves that wait on someone and the ones in progress, grouped by client and project, their status taken from their issues (SPEC 9.10). It shows only sheaves with work on them.
+_Avoid_: catalog, index, dashboard
+
+**Catalog**:
+A member's browsable tree of folders holding every page they may open, with or without an issue, and no status. Not the List: the List says what waits, the Catalog says where a page is. (Named 2026-11-15, wayfinder `sheaf-in-open-webui`; not built.)
+_Avoid_: list, library, documents
+
 **Stop James**:
 The action any member ticks on a sheaf of the assistant James to end his work on its project (SPEC 9.11). It is the one place the core names a deployment's assistant: the hub writes a diagnostics row and, with `[list] stop_dir`, a file the deployment's supervisor reads; stopping is the deployment's, a Layer concern the core only signals.
 

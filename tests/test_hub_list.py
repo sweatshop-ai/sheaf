@@ -2299,12 +2299,19 @@ def test_a_text_edit_of_a_long_task_list_costs_no_render_of_marks(monkeypatch):
     assert len(runs) <= 3
 
 
-def test_a_tick_in_a_long_task_list_with_an_empty_item_costs_log_n_renders(monkeypatch):
+def test_a_tick_in_a_long_task_list_with_an_empty_item_costs_a_fixed_number_of_renders(monkeypatch):
+    # Ticket 140, c2: the reading by box rendered the list once per bit of its marks (17 s at 4,100 items). The
+    # empty items are told from the text, so a tick costs the source's render and the check of the result, however
+    # long the list. d1: the count is the same at 200 and at 800 items.
     from sheafmd.blocks import split_md_blocks
     from sheafmd.edit import _toggle_boxes
-    src = "- [ ]\n" + "".join(f"- [ ] item {i}\n" for i in range(200))
-    block = split_md_blocks(src)[0]
-    page = _page_with_box_flipped(block, 5)
-    runs = _renders(monkeypatch)
-    assert _toggle_boxes(block, page) == src.replace("- [ ] item 5\n", "- [x] item 5\n")
-    assert len(runs) <= 16          # 201 marks: 8 bit renders and a few of the check, not one per mark
+    counts = []
+    for n in (200, 800):
+        src = "- [ ]\n" + "".join(f"- [ ] item {i}\n" if i % 50 else "- [ ]  \n" for i in range(n))
+        block = split_md_blocks(src)[0]
+        page = _page_with_box_flipped(block, 5)
+        runs = _renders(monkeypatch)
+        want = src.replace("- [ ] item 6\n", "- [x] item 6\n")   # two empty items before it
+        assert _toggle_boxes(block, page) == want
+        counts.append(len(runs))
+    assert counts[0] == counts[1] <= 3

@@ -16,7 +16,7 @@ LIST = "#rd-popover[data-unsent]"
 
 def message(body, born="2026-10-14T11:00:00.000Z"):
     """A new message kept for later, as an earlier build wrote it."""
-    return {"quote": "apples", "body": body, "block": 0, "head": "x", "at": born}
+    return {"quote": "apples", "body": body, "block": 0, "head": "x", "at": born, "min": True}
 
 
 def loaded(page):

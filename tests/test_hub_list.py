@@ -2004,7 +2004,7 @@ def test_a_cr_never_makes_the_tick_land_on_a_mark_in_a_code_block(src, k):
     ('- [ ]\r\n- - [ ] x\r\n', '- [ ]\r\n- - [x] x\r\n'),
     ('- [ ]\n-\r - [ ] x\n', '- [ ]\n-\r - [x] x\n'),
 ])
-def test_a_tick_never_lands_on_an_empty_task_item_standing_for_a_box_it_cannot_find(src, ticked):
+def test_a_tick_beside_an_empty_task_item_is_written_on_the_boxs_own_line(src, ticked):
     # The marks and the boxes drawn were the same in number and state, but not the same items: the tick
     # of "x" was written on the empty item's line (measured on pandoc 3.9, no CR needed).
     from sheafmd.blocks import split_md_blocks
@@ -2245,7 +2245,7 @@ def test_the_lists_button_ticks_in_place_where_marks_and_boxes_do_not_follow_one
 
 @pytest.mark.parametrize("body, ticked", [
     # Ticket 132 (c1 of the review of ticket 128): the page's own save of a tick, where the first reading's marks
-    # are not the boxes: the empty item is known by the render, so the write no longer waits for a second reading.
+    # are not the boxes: the reading by box (the render says which mark is which box) writes it in place.
     ("- [ ] a\n- [ ]\n- [ ] b\n", "- [x] a\n- [ ]\n- [ ] b\n"),
     ("- [ ]\n  - [ ] a\n", "- [ ]\n  - [x] a\n"),
 ])
@@ -2264,3 +2264,47 @@ def test_a_box_with_no_mark_is_never_flipped_by_the_save():
     from sheafmd.edit import _toggle_boxes, ticked_html
     block = split_md_blocks('- [ ] a\n- <input type="checkbox"> x\n')[0]
     assert ticked_html(block, 1) is None
+    assert _toggle_boxes(block, _page_with_box_flipped(block, 1)) is None
+    assert _toggle_boxes(block, _page_with_box_flipped(block, 0)) == '- [x] a\n- <input type="checkbox"> x\n'
+
+
+def test_ticked_html_of_a_box_the_block_does_not_draw_is_none():
+    # Re-read of ticket 132, c1: it raised IndexError (found[k]) where main answered None.
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import ticked_html
+    assert ticked_html(split_md_blocks("- [ ] a\n- [x] b\n")[0], 2) is None
+    assert ticked_html(split_md_blocks("just a paragraph\n")[0], 0) is None
+
+
+def _renders(monkeypatch):
+    from sheafmd import _pandoc
+    from sheafmd.edit import _rendered
+    _rendered.cache_clear()
+    runs = []
+    real = _pandoc.run
+    monkeypatch.setattr(_pandoc, "run", lambda *a, **k: runs.append(1) or real(*a, **k))
+    return runs
+
+
+def test_a_text_edit_of_a_long_task_list_costs_no_render_of_marks(monkeypatch):
+    # Re-read of ticket 132, b1: the reading by box ran one render per mark on every text edit (200 marks: 200
+    # renders, 11 s). The check that the page changed only ticks comes first now, and the reading lays the marks
+    # out in about log2 of them renders.
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes
+    block = split_md_blocks("- [ ]\n" + "".join(f"- [ ] item {i}\n" for i in range(200)))[0]
+    edited = _page_with_box_flipped(block, 0).replace("item 7<", "item seven<")
+    runs = _renders(monkeypatch)
+    assert _toggle_boxes(block, edited) is None
+    assert len(runs) <= 3
+
+
+def test_a_tick_in_a_long_task_list_with_an_empty_item_costs_log_n_renders(monkeypatch):
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _toggle_boxes
+    src = "- [ ]\n" + "".join(f"- [ ] item {i}\n" for i in range(200))
+    block = split_md_blocks(src)[0]
+    page = _page_with_box_flipped(block, 5)
+    runs = _renders(monkeypatch)
+    assert _toggle_boxes(block, page) == src.replace("- [ ] item 5\n", "- [x] item 5\n")
+    assert len(runs) <= 16          # 201 marks: 8 bit renders and a few of the check, not one per mark

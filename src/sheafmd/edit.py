@@ -685,11 +685,12 @@ def _rendered(content: str) -> str:
     return r.stdout
 
 
-def _render_source(content: str):
+def _render_source(content: str, keep: bool = True):
     """Pandoc's HTML of a source, or None. A success is cached: a save asks it of the same block for `_unchanged`,
-    for `_toggle_boxes` and for `ticked_html`, and a render of a long list takes seconds."""
+    for `_toggle_boxes` and for `ticked_html`, and a render of a long list takes seconds. The cache holds 8 renders,
+    so a source rendered once to be compared and thrown away (`keep` false) must not push those out."""
     try:
-        return _rendered(content)
+        return (_rendered if keep else _rendered.__wrapped__)(content)
     except _Unread:
         return None
 
@@ -774,6 +775,33 @@ def task_marks(content: str, pattern=TASK_MARK_RE) -> list:
             for m in pattern.finditer(content.replace("\r", ""))]
 
 
+def _drawing_marks(content: str, marks: list) -> list:
+    """The marks of `marks` that pandoc probably draws a box for, read from the text alone: those with something
+    after them on their line, or with an indented line under them that goes on with the item. A mark with nothing
+    after it and no such line is an empty item, drawn as a bare `\u2610` or as the literal `[ ]`, never as a box. A
+    guess: a reading is only a candidate, and `_toggle_boxes` renders what it writes and refuses what draws other
+    boxes."""
+    keep = []
+    for m in marks:
+        end = m.end()
+        eol = content.find("\n", end)
+        if content[end:eol if eol >= 0 else len(content)].strip() or eol >= 0 and _goes_on(content, eol + 1, m.start()):
+            keep.append(m)
+    return keep
+
+
+def _goes_on(content: str, at: int, line: int) -> bool:
+    """Is the line starting at `at` a non-blank line indented deeper than the one starting at `line`?"""
+    eol = content.find("\n", at)
+    nxt = content[at:eol if eol >= 0 else len(content)]
+    if not nxt.strip():
+        return False
+    indent = lambda row: len(row) - len(row.lstrip(" \t"))
+    end = content.find("\n", line)
+    this = content[line:end if end >= 0 else len(content)]
+    return indent(nxt) > indent(this)
+
+
 def _boxed_marks(content: str) -> list | None:
     """The marks of `content` laid out by the box each one flips, as the page draws them: item `k` is the mark whose
     state character flips box `k`, None for a box no mark stands for (a raw `<input>`). The regex reading counts
@@ -795,7 +823,7 @@ def _boxed_marks(content: str) -> list | None:
                 out.append(content[last:m.start(2)])
                 out.append(("x" if m.group(2) == " " else " ") if (i + 1) >> bit & 1 else m.group(2))
                 last = m.end(2)
-            html = _render_source("".join(out) + content[last:])
+            html = _render_source("".join(out) + content[last:], keep=False)
             now = None if html is None else _ticks(copyblock.mark(html, page=True))[0]
             if now is None or len(now) != len(was):
                 return None
@@ -810,11 +838,15 @@ def _boxed_marks(content: str) -> list | None:
 
 def _readings(content: str):
     """The readings of the marks of `content` a tick may be written by, one after the other, each asked for only when
-    the one before did not serve: `task_marks`, then `_boxed_marks` when it is not the same."""
+    the one before did not serve: `task_marks`, then the marks `_drawing_marks` guesses from the text, then
+    `_boxed_marks` (renders) when it is none of those."""
     first = task_marks(content)
     yield first
-    if first and (boxed := _boxed_marks(content)) is not None \
-            and [m and m.start(2) for m in boxed] != [m.start(2) for m in first]:
+    seen = [[m.start(2) for m in first]]
+    if first and (drawn := _drawing_marks(content, first)) and [m.start(2) for m in drawn] not in seen:
+        seen.append([m.start(2) for m in drawn])
+        yield drawn
+    if first and (boxed := _boxed_marks(content)) is not None and [m and m.start(2) for m in boxed] not in seen:
         yield boxed
 
 
@@ -898,9 +930,9 @@ def box_number(content: str, at: int) -> int | None:
     """The number, among the boxes the page draws for `content`, of the box whose state is the character at `at`
     (the state character of a task mark): the one box that flips when that character does. None when none does
     (an empty item has a mark and no box) or when the source does not render. The count of marks is not this
-    number: a mark may draw no box (an empty item) and a box may have no mark (a bullet behind a chain the
-    regex misses), so the render is asked. An answer is kept by (content, at), for the page asks it of every
-    button on every serve and `_rendered` holds 8 renders; a render that failed is not kept."""
+    number: a mark may draw no box (an empty item) and a box may have no mark (a raw `<input>`), so the render
+    is asked. An answer is kept by (content, at), for the page asks it of every
+    button on every serve and the render of a long list takes seconds; a render that failed is not kept."""
     if not 0 <= at < len(content) or content[at] not in " xX":
         return None
     key = (content, at)
@@ -945,7 +977,7 @@ def ticked_html(block, k: int, tick: bool = True, at: int | None = None):
     if not 0 <= k < len(found):
         return None
     sets = (m for m in _readings(block.content)
-            if 0 <= k < min(len(found), len(m)) and m[k] is not None and (at is None or m[k].start(2) == at))
+            if k < min(len(found), len(m)) and m[k] is not None and (at is None or m[k].start(2) == at))
     if found[k].has_attr("checked") == tick:
         return None
     if tick:

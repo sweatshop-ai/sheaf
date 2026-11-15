@@ -758,6 +758,8 @@ def _kept(block: str) -> list[int]:
 def _unstrip(keep: list[int], at: int, block: str) -> int:
     """The offset in `block` of offset `at` in the block without its CRs: right after the character before it, so
     a run of CRs that follows stays after the point (`Title|\r\n`), and the block's first character for 0."""
+    if at > len(keep):
+        raise ValueError(f"offset {at} is past the end of a block of {len(keep)} characters without its CRs")
     if at:
         return keep[at - 1] + 1
     return keep[0] if keep else len(block)

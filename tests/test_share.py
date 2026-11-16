@@ -576,3 +576,48 @@ def test_a_withdrawn_share_closes_the_opaque_name_too(team):
     assert page(team, BOB, name).status == 404
     bad, _ = call(team, "bob", "read", doc=name)
     assert bad
+
+
+# ── the review's findings (PR 394, round 3) ──────────────────────────────────
+
+PRIVATE_SOURCE = "---\nsources: [library:doc-123]\n---\n# Agent page\n\n- [x] Share with bob\n"
+
+
+def test_a_door_create_with_a_private_source_leaves_its_share_line_unticked_and_says_so(team):
+    out = made(team, "alice", PRIVATE_SOURCE)
+    assert "- [ ] Share with bob" in read(team, out["doc"]) and "- [x]" not in read(team, out["doc"])
+    assert "not Shared" in out["note"]
+    assert page(team, BOB, out["doc"]).status == 404
+
+
+def test_a_ticked_share_line_that_a_private_source_cannot_open_does_not_open_a_repo_page(team):
+    # the line stays ticked on disk when it is written by hand: Hub.named still honours the private source
+    out = made(team, "alice", PRIVATE_SOURCE)
+    team.hub.file(out["doc"]).write_text(PRIVATE_SOURCE, encoding="utf-8")
+    assert page(team, BOB, out["doc"]).status == 404
+
+
+def test_a_recipients_index_stream_is_told_the_opaque_name_in_a_status_event(team):
+    from sheafmd.hub.index import Status
+    doc = deep(team)
+    accept = team.handler._index_events(team.hub.proxy.members[BOB])
+    got = accept("status", Status({"doc": doc, "root": "r"}, files=True))
+    assert got == {"doc": told(team, BOB, doc), "root": "r"} and "private-matters" not in json.dumps(got)
+
+
+def test_an_error_about_a_shared_page_names_it_by_its_opaque_name(team, monkeypatch):
+    doc = deep(team)
+    name = told(team, BOB, doc)
+    bad, why = call(team, "bob", "update", doc=name, text="# Deep plan\n", expected_hash="0" * 16)
+    assert bad and "private-matters" not in why
+
+
+def test_a_recipients_update_is_told_by_the_opaque_name_and_written_to_the_log_by_the_real_one(team):
+    doc = deep(team)
+    name = told(team, BOB, doc)
+    text = read(team, doc)
+    bad, out = call(team, "bob", "update", doc=name, text=text + "\nBob adds a line.\n", expected_hash=md_hash(text))
+    assert not bad, out
+    got = json.loads(out)
+    assert got["doc"] == name and "private-matters" not in out
+    assert team.get(f"/_/writes?doc={doc}", member=ALICE).json()["lines"][-1]["writer"] == "Claude Code (Bob)"

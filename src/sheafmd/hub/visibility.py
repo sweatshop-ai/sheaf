@@ -318,6 +318,19 @@ def unticked_share_line(text_: str) -> int | None:
     return None
 
 
+def without_ticked_share(text_: str) -> str:
+    """`text_` with every ticked Share box (`Share`, `Share with <names>`) of the list blocks the page draws unticked."""
+    lines = text_.split("\n")
+    for b in split_md_blocks(text_):
+        if b.kind == "list":
+            for k, line in enumerate(_lines(b.content)):
+                m = _BOX_RE.fullmatch(line)
+                if m and _word(m.group(4)) == "Share" and m.group(2) in "xX":
+                    at = b.start + k
+                    lines[at] = lines[at][:m.start(2)] + " " + lines[at][m.end(2):]
+    return "\n".join(lines)
+
+
 def _share_box(text_: str) -> str | None:
     """"x" when `text_` holds a ticked Share box, " " when it holds only unticked ones, None when it holds none."""
     marks = set()

@@ -1300,3 +1300,21 @@ def test_share_with_bob_on_a_project_sheaf_opens_it_to_bob(team, work):
     assert team.get(f"/work/{DOC}", member=BOB).status == 200
     (work / DOC).write_text((work / DOC).read_text(encoding="utf-8").replace("Share with bob", "Share with carol"), encoding="utf-8")
     assert team.get(f"/work/{DOC}", member=BOB).status == 404
+
+
+def test_a_ticked_share_with_does_not_open_a_page_that_holds_a_private_source_unless_its_owner_shared_it(team, work):
+    put(team, work, DOC, PRIVATE.replace("- [ ] Share", "- [x] Share with bob"))      # written by hand: no `shared` mark
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
+    assert tick_names  # the owner's own tick writes the mark (above)
+
+
+def test_a_door_update_that_adds_a_private_source_closes_a_named_share(team, work):
+    put(team, work, DOC, PRIVATE.replace("- [ ] Share", "- [ ] Share with bob"))
+    assert tick_names(team, work, DOC, ALICE).status == 200
+    assert team.get(f"/work/{DOC}", member=BOB).status == 200
+    text = (work / DOC).read_text(encoding="utf-8")
+    fm = front_matter(text)
+    assert fm["visibility"] == "owner" and fm["shared"].startswith("alice ")
+    (work / DOC).write_text(text.replace("sources: [library:doc-123]", "sources: [library:doc-123, mail:t-1]").replace("shared: ", "x-was: "),
+                            encoding="utf-8")
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404

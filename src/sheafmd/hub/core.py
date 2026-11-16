@@ -1102,7 +1102,17 @@ class Hub:
         only, read from the file each time like a loose page's Share. A plain Share is the page's `visibility`."""
         if self.proxy is None or self.loose_owner(address) is not None:
             return False
-        shared = self.audience(address)
+        try:
+            top, rel = self.where(address)
+            with beneath.open_beneath(top, rel) as op:
+                text = op.text()
+        except (OSError, UnicodeDecodeError, roots_mod.NotFound):
+            return False
+        shared, fm = visibility.audience(text), visibility.front_matter(text)
+        # A page that draws on a private source is opened only by its owner's own Share, which writes `shared`; an
+        # agent's write cannot (#40).
+        if any(visibility.private(x) for x in visibility.sources(fm)) and not visibility.text(fm, "shared"):
+            return False
         return isinstance(shared, frozenset) and visibility.reaches(shared, member) and self.granted(member, address)
 
     def granted(self, member, address: str, by_name: bool = False) -> bool:

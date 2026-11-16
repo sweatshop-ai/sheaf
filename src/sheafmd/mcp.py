@@ -329,10 +329,10 @@ class Door:
             out = self._logged(name, args, caller) if name in WRITE_TOOLS else self._run(name, args, caller)
             if caller.session is not None and self.called is not None:
                 self._tell_called(name, args, caller)
-            return self._ok(id_, {"content": [{"type": "text", "text": json.dumps(out, ensure_ascii=False)}],
+            return self._ok(id_, {"content": [{"type": "text", "text": json.dumps(self._told_out(out, caller), ensure_ascii=False)}],
                                   "isError": False})
         except ToolError as e:
-            return self._ok(id_, {"content": [{"type": "text", "text": str(e)}], "isError": True})
+            return self._ok(id_, {"content": [{"type": "text", "text": self._told_text(str(e), args, caller)}], "isError": True})
         except Exception:
             doc = args.get("doc") if isinstance(args.get("doc"), str) else None
             self.hub.record_exception("mcp-failed", doc, tool=name)
@@ -412,6 +412,23 @@ class Door:
     def _judged(self, caller: Caller) -> bool:
         """Whether visibility (9.11) holds `caller`: a token, in proxy mode."""
         return caller.token is not None and getattr(self.hub, "proxy", None) is not None
+
+    def _told_out(self, out, caller: Caller):
+        """What a tool answers, with the page it names told to the caller as `_told` says: the tools work on the page's own
+        address, which a member told of a Shared page by another never reads (9.11)."""
+        if isinstance(out, dict) and isinstance(out.get("doc"), str) and isinstance(out.get("url"), str):
+            return {**out, **self._told(out["doc"], caller)}
+        return out
+
+    def _told_text(self, text: str, args: dict, caller: Caller) -> str:
+        """An error text of a call on a page, with the page's own address, which names the owner's folders, told as the
+        caller is told of it."""
+        doc = args.get("doc")
+        if not isinstance(doc, str) or (member := self._member(caller)) is None:
+            return text
+        real = self.hub.unalias(doc)
+        told = self.hub.alias(member, real)
+        return text.replace(real, told) if told != real else text
 
     def _told(self, address: str, caller: Caller) -> dict:
         """`doc` and `url` of the page at `address` as `caller` is told of it: a page Shared with its member by another is told
@@ -680,7 +697,7 @@ class Door:
         address = self._address(args["doc"], caller)
         status = args.get("status", "open")
         got = self._comments(address, caller, args["doc"])
-        return {**self._told(address, caller),
+        return {"doc": address, "url": self.hub.url(address),
                 "comments": [{k: v for k, v in c.as_dict().items() if k != "block"}
                              for c in got.comments if status == "all" or c.status == status],
                 "malformed": [{"line": m.line, "reason": m.reason} for m in got.malformed]}
@@ -720,7 +737,7 @@ class Door:
                 raise ToolError(f"{address} has a `<!--` that nothing closes, at line "
                                 f"{_unclosed_line(text, out)}: the page shows nothing after it, "
                                 "so its text without comments is not given.")
-        return {**self._told(address, caller), "hash": md_hash(text), "text": out}
+        return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text), "text": out}
 
     # ── create and update: a row in the diagnostics log for every call (SPEC 9.7, 15) ─
     def _run(self, name: str, args: dict, caller: Caller):
@@ -921,7 +938,11 @@ class Door:
             self._agent_wrote(address, caller)          # before the tabs and indexes hear of it
             self.hub.wrote(address)
             self.hub.committed(address, by=caller.display, what="create")
-        return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text)}
+        out = {"doc": address, "url": self.hub.url(address), "hash": md_hash(text)}
+        if visibility.audience(_as_read(args["text"])) is not None and visibility.audience(text) is None:
+            out["note"] = ("The page holds private work, so it is not Shared: its Share line was written unticked. "
+                           "Its owner shares it from the page or the Sheaf.")
+        return out
 
     def _make(self, root, top: Path, rel: str, name: str | None, address: str, text: str, caller: Caller):
         """The file of a create, at its home when the hub places it (9.11): the text written. The rectoverso's address is
@@ -998,7 +1019,7 @@ class Door:
             finally:
                 if moved:                           # moved, then failed before its commit: the move is committed
                     self.hub.committed(address, by=caller.display, what="update", gone=moved.pop())
-        return {**self._told(address, caller), "hash": md_hash(text), "changed": before != text}
+        return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text), "changed": before != text}
 
     def _updated(self, address: str, args: dict, text: str, expected: str, caller: Caller, moved: list):
         """The write of an update, and the rectoverso's file moved to its home (9.11): (the text before, the text
@@ -1077,8 +1098,10 @@ class Door:
                 raise ToolError("Who a page is Shared with is its owner's alone: an update from a token of another member "
                                 "cannot narrow or withdraw it. Send the text with its Share lines as `read` gave them.", "share")
             return text
-        if now is None or visibility.effective(visibility.front_matter(text)) == "owner":
-            return text         # a private source keeps the page its owner's whatever its text ticks (#40)
+        if now is None:
+            return text
+        if visibility.effective(visibility.front_matter(text)) == "owner":
+            return visibility.without_ticked_share(text)    # a private source keeps the page its owner's whatever its text ticks (#40): the line is not left ticked
         return visibility.set_keys(text, {"visibility": "project",
                                           "shared": f"agent:{caller.display} {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}"})
 

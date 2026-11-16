@@ -66,7 +66,14 @@ def is_agent(raw) -> bool:
     return isinstance(raw, dict) and raw.get("kind") == "agent"
 
 
-def _keep(row: TokenRow) -> dict:
+def is_laptop(raw) -> bool:
+    """A member's own laptop session (SPEC 9.8): the token that declared it, and the session id it declared."""
+    return isinstance(raw, dict) and raw.get("kind") == "laptop" and isinstance(raw.get("session"), str)
+
+
+def _keep(row: TokenRow, session: str | None = None) -> dict:
+    if session:
+        return {"kind": "laptop", "token": row.name, "id": row.id, "session": session}
     return {"kind": "agent", "token": row.name, "id": row.id}
 
 
@@ -79,7 +86,7 @@ def agents(hub, member=None) -> list[TokenRow]:
 def live(hub, raw, member=None) -> TokenRow | None:
     """The token a stored agent target names, or None when it was revoked (a new token of its name has another
     id) or, for a member, is no longer one of theirs."""
-    if not is_agent(raw):
+    if not (is_agent(raw) or (is_laptop(raw) and member is not None)):
         return None
     return next((r for r in agents(hub, member) if r.is_pair(raw.get("token"), raw.get("id"))), None)
 
@@ -92,7 +99,7 @@ def stored(hub, address: str, member=None) -> dict | None:
         raw = entry.get("target")
         return raw if isinstance(raw, dict) and raw else None
     raw = (entry.get("targets") or {}).get(member.id) if isinstance(entry.get("targets"), dict) else None
-    if is_agent(raw) and raw.get("token") in member.tokens:
+    if (is_agent(raw) or is_laptop(raw)) and raw.get("token") in member.tokens:
         return raw
     return None
 
@@ -110,7 +117,11 @@ def agent_view(hub, raw: dict, member=None) -> AgentView:
     """The AgentView of a stored agent target. A revoked token has no signature to build: its shape names the token."""
     row = live(hub, raw, member)
     name = row.signed(hub.person, hub.proxy) if row is not None else str(raw.get("token", ""))
+    if is_laptop(raw):
+        name = f"{name} · {raw['session'][:8]}"
     shape = {"kind": "agent", "token": raw.get("token"), "display": name, "label": name}
+    if is_laptop(raw):
+        shape["laptop"] = True
     if row is None:
         shape["revoked"] = True                     # the page takes no token of this name for the current target
     return AgentView(shape, None if row is not None else REVOKED.format(agent=name), row is not None)
@@ -135,7 +146,7 @@ def choices(hub, address: str, member=None) -> list[dict]:
     return out
 
 
-def note_write(hub, address: str, row: TokenRow | None, member=None) -> None:
+def note_write(hub, address: str, row: TokenRow | None, member=None, session: str | None = None) -> None:
     """A door write (reply, resolve, create, update) made with `row`: an agent's token makes that agent the
     target, the member's when the token acts for one. A token that is no agent's makes none. The session the
     hub person's target was stays beside it."""
@@ -145,7 +156,7 @@ def note_write(hub, address: str, row: TokenRow | None, member=None) -> None:
     told = hub.tell_live(address)                   # beside the docs lock, not inside it
 
     def settle(entry: dict) -> dict:
-        _set(entry, _keep(row), member, told)
+        _set(entry, _keep(row, session if member is not None else None), member, told)
         return entry
     hub.docs.change(address, settle)
 

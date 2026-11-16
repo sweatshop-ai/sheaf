@@ -264,7 +264,7 @@ def test_a_landing_that_fails_with_any_exception_puts_the_lifted_forward_back(me
     assert members.hub.forwards.remote(GONE) is not None
 
 
-def test_a_page_moving_back_drops_every_forward_the_move_made_for_it_not_only_the_one_at_its_address(members):
+def test_a_page_moving_back_lifts_every_forward_the_move_made_for_it_and_points_its_earlier_addresses_at_it(members):
     forwarded(members)
     older = "loose-bea/older/gone.md"
     members.hub.forwards.add(older, GONE, "Bea")                     # the page was at `older` first, and moved to GONE here
@@ -273,6 +273,7 @@ def test_a_page_moving_back_drops_every_forward_the_move_made_for_it_not_only_th
     res = back(members, peer_token(origin=ELSEWHERE))
     assert res.status == 200, res.text
     assert members.hub.forwards.remote(GONE) is None and members.hub.forwards.remote(older) is None
+    assert members.hub.forwards.follow(older) == GONE          # its old links lead to where the page is again
 
 
 def test_a_landing_that_waited_for_the_lock_past_the_senders_deadline_lands_nothing(members, monkeypatch):
@@ -295,3 +296,20 @@ def test_a_landing_that_waited_for_the_lock_past_the_senders_deadline_lands_noth
     time.sleep(0.05)
     root = members.hub.loose.known(members.hub.proxy.members[BEA])
     assert root is None or not [p for p in root.rglob("notes.md")]
+
+
+def test_a_landing_that_fails_takes_back_only_the_write_log_lines_it_made_not_the_ones_kept_at_the_address(members, monkeypatch):
+    from sheafmd.hub.writelog import WriteLog
+    forwarded(members)
+    members.hub.writes.add(GONE, "Bea", "laptop", "door")           # what `moved_remote` kept of the page that left
+    kept = members.hub.writes.lines(GONE)
+    assert kept
+
+    def broken(self, *a, **k):
+        raise OSError("disk full")
+    monkeypatch.setattr(WriteLog, "carry", broken)
+    try:
+        back(members, peer_token(origin=ELSEWHERE))
+    except OSError:
+        pass
+    assert members.hub.writes.lines(GONE) == kept

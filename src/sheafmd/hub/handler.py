@@ -876,7 +876,7 @@ class Handler:
         """A member's `telling` (9.9): their own Tells that wait for an agent (9.8) and their own drops for
         James's window (9.12), and nothing of the hub account's session or of another member's."""
         return (self.hub.waiting_tells.waits(address, member, sweep=sweep)
-                + self.hub.session_tells.waits(address, member, sweep=sweep)
+                + self.hub.session_tells.waits(address, member)
                 + self.hub.box_waits.telling(address, member.id, comments=comments, text=text))
 
     def _mount(self, req: Req) -> Response:

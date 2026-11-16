@@ -54,9 +54,9 @@ def test_a_session_that_wrote_becomes_the_members_target_and_a_tell_waits_for_it
     target = doc(laptops, BEA)["target"]
     assert target["laptop"] is True and target["display"].endswith("· 6f1c2f0e")
     assert tell(laptops).status == 200
-    assert doc(laptops, BEA)["telling"] == [{"id": "c1", "to": "Claude Code (Bea) · 6f1c2f0e", "state": "waiting"}]
+    assert doc(laptops, BEA)["telling"] == [{"id": "c1", "to": "Claude Code (Bea) · 6f1c2f0e", "state": "waiting", "laptop": True}]
     assert poll(laptops)[0] is False
-    assert doc(laptops, BEA)["telling"][0]["state"] == "seen"
+    assert doc(laptops, BEA)["telling"][0]["state"] == "seen" and doc(laptops, BEA)["telling"][0]["laptop"] is True
 
 
 def test_the_declaring_token_gets_the_tell_once_and_it_is_marked_seen(laptops):
@@ -66,7 +66,7 @@ def test_the_declaring_token_gets_the_tell_once_and_it_is_marked_seen(laptops):
     bad, got = poll(laptops)
     assert not bad and [t["thread"] for t in got["tells"]] == ["c1"]
     assert "Tell from sheaf" in got["tells"][0]["message"] and got["tells"][0]["doc"] == DOC
-    assert [n for n, _ in tab.drain() if n.startswith("tell-")] == ["tell-queued", "tell-seen"]
+    assert [(n, d.get("state")) for n, d in tab.drain() if n.startswith("tell-")] == [("tell-queued", "waiting"), ("tell-seen", None)]
     again = poll(laptops)[1]["tells"]
     assert [t["thread"] for t in again] == ["c1"]            # seen is not taken away: until it answers, it is listed
 
@@ -172,8 +172,20 @@ def test_the_poll_needs_a_members_agent_token_and_one_session_id(laptops, browse
     assert bad and "different sessions" in said
 
 
-def test_a_revoked_token_takes_its_waiting_tells_with_it(laptops):
+def test_a_revoked_token_leaves_its_waiting_tell_waiting_for_the_member_to_cancel_or_retarget(laptops):
+    agent = laptops.tokens["bea-agent"] = agent_token("bea-agent", "ChatGPT")
+    laptops.hub.proxy = both(laptops.hub.proxy.members[BEA].roots[0], bea=["bea-one", "bea-two", "bea-agent"], cal=["cal-one"])
     declare(laptops)
     tell(laptops)
     Tokens().revoke("bea-one")
+    mine = doc(laptops, BEA)["telling"]
+    assert mine == [{"id": "c1", "to": "Claude Code (Bea) · 6f1c2f0e", "state": "waiting", "laptop": True}]   # a Tell never expires
+    assert poll(laptops, "bea-two")[1] == {"tells": []}                   # the other laptop does not inherit it
+    assert post(laptops, BEA, "/_/retarget", target="agent:bea-agent").status == 200
+    assert doc(laptops, BEA)["telling"] == [{"id": "c1", "to": "ChatGPT (Bea)", "state": "queued"}]
+    declare(laptops, "bea-two", "second")
+    tell(laptops)
+    Tokens().revoke("bea-two")
+    assert len(doc(laptops, BEA)["telling"]) == 2
+    assert post(laptops, BEA, "/_/cancel").status == 200
     assert doc(laptops, BEA)["telling"] == []

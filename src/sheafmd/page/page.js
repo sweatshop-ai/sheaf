@@ -378,7 +378,7 @@ var create = function (ROOT, CFG, opts) {
   // only an outage raises and only the hub's return clears.
   var editing = false, hash = CFG.hash, stale = false, dead = false;
   var telling = {}, tellQ = '';
-  // The Tells that wait for an agent (SPEC 9.8, 10.5): thread id -> agent name -> {to, state: queued | seen}. A thread
+  // The Tells that wait for an agent (SPEC 9.8, 10.5): thread id -> agent name -> {to, state: queued | waiting | seen, laptop}. A thread
   // can wait for two agents, and each has its own place. They run nothing, so `telling` does not hold them: the thread
   // shows no spinner and no orange dot, and the line has no clock.
   var waits = {};
@@ -408,7 +408,7 @@ var create = function (ROOT, CFG, opts) {
       var old = was[w.id] && was[w.id][w.to];
       if (since !== undefined && w.state === 'queued' && old && old.state === 'seen' && seenAt[w.id + '\n' + w.to] > since)
         waitAt(w.id, w.to, old);
-      else if (w.state === 'queued' || w.state === 'seen') waitAt(w.id, w.to, { to: w.to, state: w.state });
+      else if (w.laptop || w.state === 'queued' || w.state === 'seen') waitAt(w.id, w.to, { to: w.to, state: w.state, laptop: !!w.laptop });
       else if (w.state === 'working' || w.state === 'waiting') telling[w.id] = true;
     });
     if (since !== undefined) Object.keys(was).forEach(function (id) {        // a Tell queued after the snapshot was written
@@ -2337,10 +2337,23 @@ var create = function (ROOT, CFG, opts) {
   // A Tell that waits for an agent: said in the thread, with no spinner and no clock, across a reload and a restart.
   function waitLine(id) {
     return waitList(id).map(function (w) {
-      return '<div class="rd-msg rd-sent rd-waits">' + (w.state === 'seen'
+      return '<div class="rd-msg rd-sent rd-waits' + (w.laptop ? ' rd-waits-laptop' : '') + '" data-state="' + esc(w.state) + '">' + (w.state === 'seen'
         ? esc(w.to) + ' has seen it; its action appears in this thread.'
+        : w.laptop ? (w.state === 'queued'
+            ? 'Queued for ' + esc(w.to) + ': it is listening and takes it at its next call.'
+            : 'Waiting for ' + esc(w.to) + ': it is not listening now. The Tell stays until it comes back; you can cancel it or retarget it to one of your own agents.')
         : 'Waiting for ' + esc(w.to) + ': it sees this the next time you talk to it.') + '</div>';
     }).join('');
+  }
+  // The member's own agents a waiting Tell can go to instead (SPEC 9.8): the targets of the page that are an agent's.
+  function retargets() {
+    return (CFG.targets || []).filter(function (t) { return /^agent:/.test(t.target) && t.target !== targetNow(); });
+  }
+  function retargetButtons(id) {
+    var onLaptop = waitList(id).some(function (w) { return w.laptop && w.state !== 'seen'; });
+    return onLaptop ? retargets().map(function (t) {
+      return '<button class="rd-alt rd-tell" data-a="retarget" data-target="' + esc(t.target) + '" title="Send the Tell to this agent instead">Retarget to ' + esc(t.label) + '</button>';
+    }).join('') : '';
   }
   function fillPopover(id) {
     var c = byId[id], sc = pop.querySelector('.rd-scroll');
@@ -2368,7 +2381,7 @@ var create = function (ROOT, CFG, opts) {
       acts.hidden = sentOf(id);      // a reply or an edit of this thread is out: its buttons wait for the answer
       // The thread's own line already says who works on it or waits for it: the button only cancels.
       acts.innerHTML = telling[id] || waits[id]
-        ? '<button class="rd-alt rd-tell" data-a="cancel-tell" title="Cancel the Tell">Cancel</button>' : '';
+        ? '<button class="rd-alt rd-tell" data-a="cancel-tell" title="Cancel the Tell">Cancel</button>' + retargetButtons(id) : '';
       if (head) head.hidden = sentOf(id);
       pop.appendChild(acts);
       var act = function (e) {
@@ -2376,6 +2389,7 @@ var create = function (ROOT, CFG, opts) {
         var a = t && t.getAttribute('data-a');
         if (!a) return;
         if (a === 'cancel-tell') { cancel(id); return; }
+        if (a === 'retarget') { retarget(id, t.getAttribute('data-target')); return; }
         if (a === 'minimize') { closePopover(); return; }
         if (a === 'status') {
           var opened = c.status !== 'open';
@@ -2561,6 +2575,16 @@ var create = function (ROOT, CFG, opts) {
       // the hub's next snapshot (applyComments).
       if (e.late) off();
       say(notSent(e, 'Cancel'), true);
+    }
+  }
+  // A Tell that waits for a laptop session goes to one of the member's own agents instead (SPEC 9.8). The hub ends the
+  // waiting one and queues the new one; the events that follow draw the thread.
+  async function retarget(id, target) {
+    try {
+      await post('/_/retarget', { id: id, target: target });
+      say('Sent to ' + target.replace(/^agent:/, '') + ' instead.');
+    } catch (e) {
+      say(notSent(e, 'Retarget'), true);
     }
   }
   // ---- dictation (SPEC 10.4, ticket 06) ----------------------------------------
@@ -4393,12 +4417,12 @@ var create = function (ROOT, CFG, opts) {
         delete telling[d.id];
         if (d.agent !== undefined) { waitOff(d.id, d.agent); endedAt[d.id + '\n' + d.agent] = ++seenSeq; }   // a Tell job's end names no agent: it ends no agent's Tell
         touched(d.id);
-        if (waited) cancelSaid(d.id, waited.to, d.seen);
+        if (waited && d.reason !== 'retargeted') cancelSaid(d.id, waited.to, d.seen);     // a Retarget says its own sentence
       });
       // A Tell that waits for an agent (SPEC 9.8, 10.5): queued, listed to the agent, ended by its action reply.
       live.addEventListener('tell-queued', function (ev) {
         var d = JSON.parse(ev.data || '{}');
-        waitAt(d.id, d.agent, { to: d.agent, state: 'queued' });
+        waitAt(d.id, d.agent, { to: d.agent, state: d.state || 'queued', laptop: !!d.laptop });
         queuedAt[d.id + '\n' + d.agent] = ++seenSeq;
         touched(d.id);
       });

@@ -435,13 +435,19 @@ def test_a_clone_already_held_still_takes_the_report_when_the_app_has_since_lost
     assert hub_repos.hub.repos.attribution(REPO, "docs/plan.md")["session"] == SESSION
 
 
-def test_a_clone_that_fails_leaves_no_half_made_folder_and_the_next_report_tries_again(hub_repos, origin, tmp_path):
+def test_a_clone_that_fails_leaves_no_half_made_folder_and_the_report_that_hears_of_it_clones_again(
+        hub_repos, origin, tmp_path):
     hub_repos.hub.repos.remote_url = lambda repo: str(tmp_path / "does-not-exist.git")
-    bad, got = report(hub_repos)
-    assert bad and "failed" in got
+    bad, got = report_once(hub_repos)
+    assert not bad and got["clone"] == "cloning"
+    assert hub_repos.hub.repos.settle()
     assert not list(clones(hub_repos).glob("*/*"))
     hub_repos.hub.repos.remote_url = lambda repo: str(origin)
-    bad, got = report(hub_repos)
+    bad, got = report_once(hub_repos)               # one report: it is refused, and it starts the new clone
+    assert bad and "failed" in got
+    assert hub_repos.hub.repos.settle()
+    the_clone(hub_repos)
+    bad, got = report_once(hub_repos)
     assert not bad and got["clone"] == "ok"
 
 
@@ -796,3 +802,56 @@ def test_the_owner_of_a_page_is_read_at_the_reported_commit_not_at_the_default_b
     main = sh(origin, "rev-parse", "main")                       # a later report at main, whose page names no owner
     report(hub_repos, who="bea-claude", commit=main)
     assert hub_repos.hub.repos.owner_of(REPO, "docs/plan.md") == "bea"
+
+
+# ── round eight: a door that does not answer a report ────────────────────────
+
+def _door_that(monkeypatch, tiroir, answer):
+    """The CLI's network is the in-memory tiroir, except that `answer(message)` may replace what the door says: None
+    keeps the tiroir's own answer."""
+    real = tiroir.calls[0]
+
+    def post(url, bearer, message, headers):
+        return answer(message) or real(url, bearer, message, headers)
+
+    monkeypatch.setattr(send, "post", post)
+
+
+def _no_tool(message):
+    if message.get("method") == "tools/call":
+        return 200, {"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32602, "message": "unknown tool"}}, {}
+
+
+def _no_initialize(message):
+    if message.get("method") == "initialize":
+        return 404, None, {}
+
+
+def _garbage(message):
+    if message.get("method") == "tools/call":
+        return 200, {"jsonrpc": "2.0", "id": message["id"], "result": {"content": [{"type": "text", "text": "<html>"}]}}, {}
+
+
+def _empty(message):
+    if message.get("method") == "tools/call":
+        return 200, {"jsonrpc": "2.0", "id": message["id"], "result": {}}, {}
+
+
+@pytest.mark.parametrize("answer", [_no_tool, _no_initialize, _garbage, _empty],
+                         ids=["no render_report tool", "initialize fails", "garbage", "no content"])
+def test_a_door_that_does_not_answer_a_report_renders_the_page_on_the_laptop(
+        answer, tiroir, hub_repos, laptop, local, monkeypatch, capsys):
+    _door_that(monkeypatch, tiroir, answer)
+    page = laptop / "docs" / "plan.md"
+    code, out, err = run(capsys, page)
+    assert code == 0, err
+    assert local == [str(page)] and out == ""
+    assert "on this laptop" in err and "Traceback" not in err
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_a_refused_token_on_a_report_still_fails_loudly(status, tiroir, hub_repos, laptop, local, monkeypatch, capsys):
+    _door_that(monkeypatch, tiroir, lambda message: (status, None, {}))
+    code, out, err = run(capsys, laptop / "docs" / "plan.md")
+    assert code == 1 and local == []
+    assert "refused the token" in err

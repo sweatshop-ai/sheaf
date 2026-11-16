@@ -55,6 +55,10 @@ class SendError(Exception):
     """A send that stops: the message is one sentence a person reads, and says what was left unchanged."""
 
 
+class TokenRefused(SendError):
+    """The door refused the token (401, 403): the one answer that never falls back to rendering here."""
+
+
 class Unreachable(SendError):
     """The tiroir did not answer, or answered 5xx: the caller serves the page from the laptop hub and says so."""
 
@@ -151,7 +155,7 @@ class Door:
     def _post_checked(self, message: dict) -> tuple[int, dict | None, dict]:
         status, got, back = post(self.origin + connect.DOOR_PATH, self.token, message, self.headers)
         if status in (401, 403):
-            raise SendError(f"{self.origin} refused the token (it was revoked, or it is not a token of that address): "
+            raise TokenRefused(f"{self.origin} refused the token (it was revoked, or it is not a token of that address): "
                             "make a new one with Connect a laptop and run sheaf connect. Nothing was sent.")
         if status >= 500:
             raise Unreachable(f"{self.origin} answered with status {status}.")
@@ -370,6 +374,11 @@ def report_page(md: Path, top: Path, origin: str, token: str, args, out, err, en
         bad, got = door.tool("render_report", {"repo": repo, "path": path, "commit": commit})
     except Unreachable as e:
         err(f"sheaf: {e} The render report was dropped, not queued; rendering {md} on this laptop.")
+        return None
+    except TokenRefused:
+        raise
+    except SendError as e:          # a door with no render_report, a failed initialize, an answer that is no report
+        err(f"sheaf: {e} The render report was dropped; rendering {md} on this laptop.")
         return None
     if bad:
         err(f"sheaf: the render report of {path} was refused: {got} Rendering {md} on this laptop.")

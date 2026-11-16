@@ -1509,12 +1509,12 @@ class Handler:
         return _json(200, {"laptops": [{"name": r.laptop, "created": r.created, "last_used": r.last_used} for r in rows]})
 
     def _whoami(self, req: Req) -> Response:
-        """The member a token acts for, for a door in front of the hub that has to route the token's calls (9.7). A
+        """The member a token acts for (their id, and their name for the CLI's second line), for a door in front of the hub that has to route the token's calls (9.7). A
         token bound to no member is told it is no route: it has no member to name."""
         member = self.hub.proxy.member_of_row(req.token) if self.hub.proxy is not None else None
         if member is None:
             raise Refuse(404, "no such route")
-        return _json(200, {"member": member.id})
+        return _json(200, {"member": member.id, "name": member.name})
 
     def _laptop_make(self, req: Req) -> Response:
         """"Connect a laptop": a token for the named laptop and the signed-in member, shown once with the line that

@@ -146,7 +146,7 @@ def test_whoami_names_the_member_of_a_token_and_nothing_else(mine, browser):
     """What a door in front of the hub asks to route a laptop's bearer: the member it was made for."""
     token = connect(mine)["token"]
     got = browser.request("GET", "/_/whoami", cookie=False, headers={"Authorization": f"Bearer {token}"})
-    assert got.status == 200 and got.json() == {"member": BEA}
+    assert got.status == 200 and got.json() == {"member": BEA, "name": "Bea"}
     mine.post("/_/laptops/revoke", {"name": "Work MacBook"})
     assert browser.request("GET", "/_/whoami", cookie=False, headers={"Authorization": f"Bearer {token}"}).status == 401
 

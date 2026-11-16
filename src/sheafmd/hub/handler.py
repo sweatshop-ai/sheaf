@@ -319,13 +319,30 @@ class Handler:
             res = self._route_proxy(req, body) if via == "proxy" else self._route(req, body)
         except Refuse as r:
             res = self._refusal(req, r)
+        except (FileNotFoundError, NotFound) as e:
+            if req is not None and (doc := self._doc_hint(req)) and self._page_gone(doc):
+                res = self._refusal(req, Refuse(404, "no such document"))      # a writer that waited for a Delete's lock finds no page
+            else:
+                res = self._failed(req, e, method)
         except Exception as e:
-            if req is not None:
-                self.hub.record_exception("request-failed", self._doc_hint(req),
-                                          endpoint=req.path, method=method, **self._who(req))
-            res = _json(500, {"ok": False, "error": f"the hub failed on this request "
-                              f"({type(e).__name__}); the details are in `sheaf diag`"})
+            res = self._failed(req, e, method)
         return self._finish(req, res)
+
+    def _page_gone(self, doc: str) -> bool:
+        """Whether the page `doc` names is not a file any more."""
+        try:
+            return not self.hub.file(doc).exists()
+        except (NotFound, OSError):
+            return True
+        except Exception:
+            return False
+
+    def _failed(self, req, e, method) -> Response:
+        if req is not None:
+            self.hub.record_exception("request-failed", self._doc_hint(req),
+                                      endpoint=req.path, method=method, **self._who(req))
+        return _json(500, {"ok": False, "error": f"the hub failed on this request "
+                           f"({type(e).__name__}); the details are in `sheaf diag`"})
 
     def _refusal(self, req, r: Refuse) -> Response:
         res = self._refusal_answer(req, r)
@@ -892,8 +909,6 @@ class Handler:
                     got = e.live.save(h, edits, rid=rid, guard=guard, move=move)
                 except (EditError, StaleError) as ex:
                     raise Refuse(409, str(ex)) from None
-                except FileNotFoundError:           # the page was deleted into the trash while this save waited for its lock
-                    raise Refuse(404, "no such document") from None
                 except UnicodeEncodeError:
                     raise Refuse(400, "the text holds a character that cannot be written to the .md "
                                       "(half of a pair, such as half an emoji)") from None

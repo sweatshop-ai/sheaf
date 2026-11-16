@@ -873,15 +873,11 @@ class Hub:
     @contextmanager
     def page_lock(self, address: str):
         """The writer lock of the page at `address` (`LiveDocument.exclusive`), for a move of its file: held when the hub has
-        the page, taken after the name's lock as a save takes it. A page the hub has no entry for has no writer in
-        flight, and the lock is none."""
+        the page, after the name's lock as a save takes it. Never builds an entry (that reads and renders the page, which a
+        page that cannot be read or rendered must not stop a Delete for). A writer of a page with no entry holds the file's
+        lock, which the move takes too."""
         e = self.entries.get(address)
-        if e is None:
-            try:
-                e = self.entry(address)
-            except (roots_mod.NotFound, OSError):
-                e = None
-        with e.live.exclusive() if e is not None and getattr(e, "live", None) is not None else nullcontext():
+        with e.live.exclusive() if e is not None and e.live is not None else nullcontext():
             yield
 
     def forget_document(self, address: str):

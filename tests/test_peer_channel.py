@@ -1,0 +1,217 @@
+"""The hub-to-hub channel (ticket 20): `/_/tiroir/*` on the proxy socket, reached by a peer tiroir with a peer
+token and by nobody else; the peer token and its scopes; `sheaf peer add | use`. In memory through the handler
+(`front`), a temp home and a fake keyring: no real token is in a fixture, a log or an output."""
+import json
+import re
+from dataclasses import replace
+
+import pytest
+from helpers import BEA, CAL
+
+from sheafmd import connect, paths
+from sheafmd.hub.state import Tokens
+
+PEER = "https://other.example.com"
+TAILNET = {"X-Forwarded-For": "100.101.102.103"}
+TOKEN = re.compile(r"sheaf_mcp_[A-Za-z0-9_-]{43}")
+
+
+class FakeKeyring:
+    def __init__(self):
+        self.items = {}
+
+    def get(self, service, user):
+        return self.items.get((service, user))
+
+    def set(self, service, user, secret):
+        self.items[(service, user)] = secret
+
+
+@pytest.fixture
+def keyring(monkeypatch):
+    k = FakeKeyring()
+    monkeypatch.setattr(connect, "system_store", lambda: k)
+    return k
+
+
+@pytest.fixture
+def members(front):
+    """Bea, with her e-mail; Cal, with none."""
+    front.hub.proxy.members[BEA] = replace(front.hub.proxy.members[BEA], email="bea@example.com")
+    return front
+
+
+def peer_token(scopes=None, origin=PEER):
+    """A peer token as `sheaf peer add` makes it, made through the store."""
+    return Tokens().add_peer(f"peer-{len(Tokens().list())}", origin, scopes)
+
+
+def channel(front, verb, body=None, token=None, headers=None, **kw):
+    h = {**TAILNET, **({"Authorization": f"Bearer {token}"} if token else {}), **(headers or {})}
+    return front.post(f"/_/tiroir/{verb}", body or {}, member=kw.pop("member", None), headers=h, **kw)
+
+
+# ── the narrow rule: this prefix, from the tailnet, with a peer token; nothing else ──────────────
+
+def test_a_peer_with_its_token_from_the_tailnet_reaches_the_channel_without_a_member(members):
+    token = peer_token()
+    res = channel(members, "resolve", {"owner_email": "bea@example.com"}, token)
+    assert res.status == 200 and res.json() == {"ok": True}
+
+
+@pytest.mark.parametrize("headers", [{"X-Forwarded-For": "203.0.113.9"}, {"X-Forwarded-For": "100.1.1.1, 203.0.113.9"},
+                                      {"X-Forwarded-For": "not an address"}, {"X-Forwarded-For": ""}, {}],
+                         ids=["public", "tailnet-looking-first", "garbage", "empty", "none"])
+def test_a_source_that_is_not_on_the_tailnet_gets_the_answer_of_an_unknown_route(members, headers):
+    token = peer_token()
+    res = members.post("/_/tiroir/resolve", {"owner_email": "bea@example.com"}, member=None,
+                       headers={"Authorization": f"Bearer {token}", **headers})
+    unknown = members.post("/_/tiroir/nothing", {}, member=None, headers={**TAILNET})
+    assert res.status == unknown.status == 404 and res.body == unknown.body
+
+
+def test_the_tailnet_ranges_of_both_families_are_let_in(members):
+    token = peer_token()
+    for source in ("100.64.0.1", "100.127.255.254", "fd7a:115c:a1e0::1"):
+        res = channel(members, "resolve", {"owner_email": "bea@example.com"}, token, {"X-Forwarded-For": source})
+        assert res.status == 200, source
+    for source in ("100.63.255.255", "100.128.0.1", "fd7a:115c:a1e1::1"):
+        res = channel(members, "resolve", {"owner_email": "bea@example.com"}, token, {"X-Forwarded-For": source})
+        assert res.status == 404, source
+
+
+def test_without_a_token_with_a_wrong_one_or_a_revoked_one_the_answer_is_an_unknown_route(members):
+    token = peer_token()
+    unknown = channel(members, "nothing", {})
+    assert channel(members, "resolve", {}).body == unknown.body
+    assert channel(members, "resolve", {}, "sheaf_mcp_" + "x" * 43).body == unknown.body
+    Tokens().revoke(Tokens().list()[0].name)
+    assert channel(members, "resolve", {"owner_email": "bea@example.com"}, token).body == unknown.body
+
+
+def test_a_member_header_does_not_open_the_channel_and_does_not_replace_the_token(members):
+    token = peer_token()
+    unknown = channel(members, "nothing", {})
+    assert channel(members, "resolve", {}, member=BEA).body == unknown.body
+    res = channel(members, "resolve", {"owner_email": "bea@example.com"}, token, member=CAL)
+    assert res.status == 200                       # the token decides; a member header on this route changes nothing
+
+
+def test_a_door_token_is_no_peer_token_and_a_peer_token_is_no_door_token(members, browser):
+    door = Tokens().add("agent", client="Claude Code", write=True)
+    unknown = channel(members, "nothing", {})
+    assert channel(members, "resolve", {}, door).body == unknown.body
+    peer = peer_token()
+    res = browser.post("/_/mcp", {}, cookie=False, headers={"Authorization": f"Bearer {peer}"})
+    assert res.status in (401, 403)
+
+
+def test_every_other_path_without_a_member_header_stays_behind_the_sign_in(members):
+    token = peer_token()
+    for path in ("/", "/_/doc?doc=work/plan.md", "/_/tirior/resolve", "/_/tiroir", "/work/plan.md"):
+        res = members.request("GET", path, member=None, headers={**TAILNET, "Authorization": f"Bearer {token}"})
+        assert res.status == 401, path
+
+
+def test_only_a_post_reaches_a_verb(members):
+    token = peer_token()
+    res = members.request("GET", "/_/tiroir/resolve", member=None, headers={**TAILNET, "Authorization": f"Bearer {token}"})
+    unknown = channel(members, "nothing", {})
+    assert res.status == 404 and res.body == unknown.body
+
+
+def test_the_loopback_port_has_no_channel(browser):
+    res = browser.post("/_/tiroir/resolve", {}, cookie=False, headers={**TAILNET, "Authorization": f"Bearer {peer_token()}"})
+    assert res.status in (401, 404)
+
+
+# ── the scopes ───────────────────────────────────────────────────────────────
+
+def test_a_peer_token_with_no_scopes_field_transfers(members):
+    peer_token()
+    rows = json.loads(Tokens.path().read_text())
+    token = Tokens().add_peer("old", PEER)
+    rows = json.loads(Tokens.path().read_text())
+    for row in rows:
+        row.pop("scopes", None)
+    Tokens.path().write_text(json.dumps(rows))
+    row = Tokens().verify_peer(token)
+    assert row is not None and row.allows("transfer") and not row.allows("read")
+    assert channel(members, "resolve", {"owner_email": "bea@example.com"}, token).status == 200
+
+
+def test_a_token_whose_scopes_lack_transfer_does_not_resolve_or_transfer(members):
+    token = peer_token(["read"])
+    unknown = channel(members, "nothing", {})
+    for verb in ("resolve", "transfer"):
+        assert channel(members, verb, {"owner_email": "bea@example.com"}, token).body == unknown.body
+
+
+def test_the_store_keeps_the_scopes_and_never_the_token(members):
+    token = peer_token(["transfer", "read"])
+    [row] = [r for r in json.loads(Tokens.path().read_text())]
+    assert row["peer"] == PEER and row["scopes"] == ["transfer", "read"] and "display" not in row
+    assert token not in Tokens.path().read_text()
+
+
+def test_a_scope_that_does_not_exist_is_refused():
+    with pytest.raises(Exception, match="scope"):
+        Tokens().add_peer("p", PEER, ["write"])
+
+
+# ── sheaf peer add | use ─────────────────────────────────────────────────────
+
+def test_peer_add_prints_the_token_once_and_stores_transfer_only(sheaf):
+    r = sheaf("peer", "add", PEER)
+    assert r.code == 0 and r.err == ""
+    [token] = TOKEN.findall(r.out)
+    assert r.out.count(token) == 1
+    row = Tokens().verify_peer(token)
+    assert row.peer == PEER and row.allows("transfer") and not row.allows("read")
+    assert "transfer" in r.out
+    for f in paths.state_dir().rglob("*"):
+        if f.is_file():
+            assert token.encode() not in f.read_bytes(), f
+
+
+def test_peer_add_with_scope_read_grants_read_and_the_default_does_not(sheaf):
+    token = TOKEN.search(sheaf("peer", "add", PEER, "--scope", "read").out).group(0)
+    assert Tokens().verify_peer(token).allows("read")
+    assert not Tokens().verify_peer(token).allows("transfer")       # a scope asked for is the list: no transfer unless named
+    both = TOKEN.search(sheaf("peer", "add", "https://third.example.com", "--scope", "transfer", "--scope", "read").out).group(0)
+    assert Tokens().verify_peer(both).allows("read") and Tokens().verify_peer(both).allows("transfer")
+
+
+def test_peer_add_refuses_an_origin_that_is_not_one_and_a_scope_that_is_not_one(sheaf):
+    assert sheaf("peer", "add", "http://other.example.com").code != 0
+    assert sheaf("peer", "add", "https://other.example.com/path").code != 0
+    assert sheaf("peer", "add", PEER, "--scope", "admin").code != 0
+    assert Tokens().list() == []
+
+
+def test_a_peer_token_is_listed_by_origin_and_scopes_and_never_shown(sheaf):
+    token = TOKEN.search(sheaf("peer", "add", PEER).out).group(0)
+    out = sheaf("token", "list").out
+    assert PEER in out and "transfer" in out and token not in out
+
+
+def test_peer_use_keeps_the_token_in_the_keyring_and_prints_nothing_of_it(sheaf, keyring):
+    token = "sheaf_mcp_" + "a" * 43
+    r = sheaf("peer", "use", PEER, token)
+    assert r.code == 0 and token not in r.out + r.err
+    assert keyring.get("sheaf-peer", PEER) == token
+    assert keyring.get("sheaf", PEER) is None                       # a laptop's credential for the tiroir is another thing
+
+
+def test_peer_use_refuses_something_that_is_not_a_token_or_an_origin(sheaf, keyring):
+    assert sheaf("peer", "use", PEER, "hunter2").code != 0
+    assert sheaf("peer", "use", "other.example.com", "sheaf_mcp_" + "a" * 43).code != 0
+    assert keyring.items == {}
+
+
+def test_peer_use_without_a_keyring_says_so(sheaf, monkeypatch):
+    def none():
+        raise connect.ConnectError("no login keyring on this computer")
+    monkeypatch.setattr(connect, "system_store", none)
+    r = sheaf("peer", "use", PEER, "sheaf_mcp_" + "a" * 43)
+    assert r.code != 0 and "keyring" in r.err and "sheaf_mcp_" not in r.err

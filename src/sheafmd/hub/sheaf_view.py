@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from ..source import md_hash
+from . import archive as archive_mod
 from . import index as index_mod
 from . import place
 from . import roots as roots_mod
@@ -145,7 +146,7 @@ def mine(hub, member, root_name: str) -> bool:
     return root is not None and hub.loose.owner_of(root) == member.id
 
 
-def data(hub, member, titles: Titles) -> dict:
+def data(hub, member, titles: Titles, view: str = "") -> dict:
     """`{tree, rows, more}` for `member`: every document of each of their roots that they may open, newest change first. A row
     is `{doc, url, title, root, folder, share, mtime, when, open, write, write_tip, session, session_tip, session_link}`:
     the folder is the path on disk; `share` the hash of a page of the member's own loose root that no Share line opens (the
@@ -155,6 +156,13 @@ def data(hub, member, titles: Titles) -> dict:
     found = hub.index.data(member=member)
     now = hub.clock()
     rows = []
+    marked: dict = {}           # a loose root's name -> its marks, read once; None when they cannot be read
+
+    def marks_of(name):
+        if name not in marked:
+            root = hub.roots.get(name)
+            marked[name] = hub.archive.facts(root) if root is not None and hub.loose.owner_of(root) is not None else None
+        return marked[name]
     for root in found["roots"]:
         for d in root["docs"]:
             address = d["doc"]
@@ -171,6 +179,8 @@ def data(hub, member, titles: Titles) -> dict:
             if "shared_from" in root:       # another member's page, found under the owner's name and nowhere else
                 folder, given = f"{SHARED}/{root['shared_from']}", {"shared_from": root["shared_from"],
                                                                       "new": hub.member_opened.get(member.id, address) != int(d["mtime"] * 1e9)}
+            m = marks_of(at.root)
+            archived, kept_ = (m is not None and archive_mod.is_archived(m.archived, at.rel, d["mtime"])), m is not None and at.rel in m.kept
             told = hub.alias(member, address)     # the owner's folders are not the recipient's to read (9.11)
             if given:                             # nor is the owner's machine, session or Remote Control link
                 write_tip, session_tip_, link = "", "", None
@@ -179,10 +189,26 @@ def data(hub, member, titles: Titles) -> dict:
             rows.append({"doc": told, "url": d["url"] if told == address else roots_mod.url_path(told), "title": title, "root": SHARED if given else at.root,
                          "folder": folder, "shared_by": agent, **given,
                          "share": unshared if mine(hub, member, at.root) and not given else "", "mtime": d["mtime"], "when": index_mod.when(d["mtime"], now),
-                         "open": d["open"], "write": say_write(last, session),
+                         "open": d["open"], "archived": archived, "kept": kept_, "write": say_write(last, session),
                          "write_tip": write_tip,
                          "session": session.writer if session else "",
                          "session_tip": session_tip_,
                          "session_link": link})
     rows.sort(key=lambda r: (-r["mtime"], r["doc"]))
-    return {"tree": tree(rows), "rows": rows, "more": found["more"]}
+    counts = {"archived": sum(r["archived"] for r in rows)}
+    rows = [r for r in rows if r["archived"] == (view == "archived")]      # a page is in the default view or in "Archived"
+    return {"tree": tree(rows), "rows": rows, "more": found["more"], "view": view or "default", **counts_and_trash(hub, member, counts, view)}
+
+
+def counts_and_trash(hub, member, counts: dict, view: str) -> dict:
+    """`counts` of what the other views hold, and in the trash view the member's own trashed pages (8.6)."""
+    out = {"counts": counts}
+    root = hub.loose.known(member)
+    root = hub.roots.for_document(root / "x.md") if root is not None else None
+    trashed = hub.archive.trashed(root) if root is not None else []
+    counts["trash"] = len(trashed)
+    if view == "trash":
+        out["rows"] = []
+        out["tree"] = []
+        out["trash"] = trashed
+    return out

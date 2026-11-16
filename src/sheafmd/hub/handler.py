@@ -37,7 +37,7 @@ from ..mcp import Caller, Door
 from ..render import RenderError
 from ..source import StaleError, md_hash
 from . import archive as archive_mod
-from . import auth, boxwait, codes, events, laptops, loose, moves, peer, place, proxy, sheaf_view, targets, the_list, transcribe, visibility, work
+from . import auth, boxwait, channel, codes, events, incoming, laptops, loose, moves, peer, place, proxy, sheaf_view, targets, the_list, transcribe, visibility, work
 from . import waiting as waiting_mod
 from .tell import NO_AGENT, JobRefused
 from .index import Status
@@ -321,13 +321,30 @@ class Handler:
             res = self._route_proxy(req, body) if via == "proxy" else self._route(req, body)
         except Refuse as r:
             res = self._refusal(req, r)
+        except (FileNotFoundError, NotFound) as e:
+            if req is not None and (doc := self._doc_hint(req)) and self._page_gone(doc):
+                res = self._refusal(req, Refuse(404, "no such document"))      # a writer that waited for a Delete's lock finds no page
+            else:
+                res = self._failed(req, e, method)
         except Exception as e:
-            if req is not None:
-                self.hub.record_exception("request-failed", self._doc_hint(req),
-                                          endpoint=req.path, method=method, **self._who(req))
-            res = _json(500, {"ok": False, "error": f"the hub failed on this request "
-                              f"({type(e).__name__}); the details are in `sheaf diag`"})
+            res = self._failed(req, e, method)
         return self._finish(req, res)
+
+    def _page_gone(self, doc: str) -> bool:
+        """Whether the page `doc` names is not a file any more."""
+        try:
+            return not self.hub.file(doc).exists()
+        except (NotFound, OSError):
+            return True
+        except Exception:
+            return False
+
+    def _failed(self, req, e, method) -> Response:
+        if req is not None:
+            self.hub.record_exception("request-failed", self._doc_hint(req),
+                                      endpoint=req.path, method=method, **self._who(req))
+        return _json(500, {"ok": False, "error": f"the hub failed on this request "
+                           f"({type(e).__name__}); the details are in `sheaf diag`"})
 
     def _refusal(self, req, r: Refuse) -> Response:
         res = self._refusal_answer(req, r)
@@ -489,6 +506,9 @@ class Handler:
             raise Refuse(403, "this hub answers on its proxy socket only to its front's host")
         if not req.path.startswith("/"):
             raise Refuse(400, "bad request target")
+        # The hub-to-hub channel, the one prefix with no member: a peer tiroir's token and nothing else decides (ticket 20).
+        if req.path.startswith("/_/tiroir/"):
+            return self._route_channel(req, raw)
         # A sign-in code the verifier let in, judged before the route, the method and the body (9.13).
         if req.headers.get("x-sheaf-code"):            # an empty one is none, as an empty member header
             return self._route_code(req, raw)
@@ -518,6 +538,33 @@ class Handler:
             self._read_body(req, self._body(req, raw))
         self._unalias(req)
         return fn(req)
+
+    def _route_channel(self, req: Req, raw: bytes) -> Response:
+        """`/_/tiroir/<verb>` (ticket 20): a peer tiroir's POST, let in by its peer token from the tailnet. Every refusal is the answer of
+        a route this hub does not have, so the caller cannot tell a wrong source from a wrong token; the row says which. The
+        member header and a sign-in code are not read: a person's credential opens nothing here."""
+        req.member_id, req.route = "", "tiroir"
+        row, why = channel.peer_for(self.hub, req)
+        if row is None:
+            raise Refuse(404, "no such route", row="peer-refused", fields={"reason": why})
+        req.token = row
+        verb = req.path.removeprefix("/_/tiroir/")
+        self._read_body(req, self._body(req, raw, channel.MAX_TRANSFER if verb == "transfer" else channel.MAX_ASK))
+        return getattr(self, f"_peer_{verb}")(req)
+
+    def _peer_resolve(self, req: Req) -> Response:
+        """Whether this tiroir has a member for the e-mail: asked before a page is bundled; `transfer` asks again."""
+        owner, why = incoming.owner_for(self.hub, req.body.get("owner_email"))
+        return _json(200, {"ok": True}) if owner is not None else _json(409, {"ok": False, "why": why})
+
+    def _peer_transfer(self, req: Req) -> Response:
+        """Land a page moved here (ticket 20): `incoming.land`. Whatever fails after the page was made takes it back and is a 500
+        the sender reads as a failed transfer, so it keeps its page."""
+        try:
+            status, answer = incoming.land(self.hub, self.door, req.body)
+        except ValueError as e:
+            raise Refuse(400, str(e)) from None
+        return _json(status, answer)
 
     def _unalias(self, req: Req) -> None:
         """A page Shared with the member is told to them under an opaque name (`Hub.alias`, 9.11): the one they send back, in
@@ -570,7 +617,7 @@ class Handler:
 
     def _token(self, req: Req) -> bool:
         """Whether the request carries an MCP token that is good now; its owner is on `req.token`."""
-        row = self.hub.tokens.verify(auth.bearer(req.headers.get("authorization")))
+        row = self.hub.tokens.verify(auth.bearer(req.headers.get("authorization")))      # never a peer's token: that opens the channel only
         if row is not None and row.member is not None:
             # a laptop's token acts for its member: one the table no longer names is refused, never read as unbound
             cfg = self.hub.proxy
@@ -1097,7 +1144,10 @@ class Handler:
         except Exception:
             raise Refuse(404, "no such document") from None
         root = self.hub.roots.get(at.root)
-        if m is None or root is None or self.hub.loose.owner_of(root) != m.id or not self.hub.visible(m, doc):
+        # The owner's own page is theirs to archive, keep or delete whatever its front matter says and even when it cannot be
+        # read as text (`visible` says no to that): a page nobody can open is the one a member wants gone.
+        if m is None or root is None or self.hub.loose.owner_of(root) != m.id \
+                or not (self.hub.holds_loose(m, doc) or self.hub.visible(m, doc)):
             raise Refuse(404, "no such document")
         try:
             mtime = self.hub.file(doc).stat().st_mtime
@@ -1134,7 +1184,8 @@ class Handler:
         with place.held(self.hub, doc):
             try:
                 root, rel, _ = self._own_loose(req, doc)
-                self.hub.archive.trash(root, rel)
+                with self.hub.page_lock(doc):       # a save in the middle of its write finishes first, one after it finds the page gone
+                    self.hub.archive.trash(root, rel)
             except (loose.Refused, OSError) as e:
                 raise Refuse(409, str(e) if isinstance(e, loose.Refused) else "the page could not be moved to the trash") from None
         self.hub.forget_document(doc)
@@ -1154,7 +1205,7 @@ class Handler:
         stamp, _, wanted = ident.partition("/")
         doc = str(Address(root.name, wanted))
         try:
-            with place.held(self.hub, doc):
+            with place.held(self.hub, doc), self.hub.page_lock(doc):
                 rel = self.hub.archive.restore_trash(root, ident)
         except archive_mod.Taken:
             raise Refuse(409, "a page of that name is there already: it is not overwritten") from None

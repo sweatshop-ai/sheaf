@@ -532,7 +532,10 @@ def _sourcepos_html(block: str) -> str:
     r = _pandoc.run(["-f", "gfm+sourcepos", "-t", "html", "--wrap=none"], block)
     if r.returncode != 0:
         raise AnchorError(f"pandoc: {r.stderr.strip()[:200]}")
-    return r.stdout
+    # Pandoc passes an empty comment opener through as it is, and Python's parser reads it by version: the comment
+    # after `<!-->` in a cell was lost on 3.11 and kept on 3.13.18 (nightly of 2026-11-16).
+    from .sanitize import _end_empty_comments
+    return _end_empty_comments(r.stdout)
 
 
 def _offset_fn(block: str):

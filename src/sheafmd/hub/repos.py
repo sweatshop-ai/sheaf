@@ -17,7 +17,7 @@ queued report (widens the sparse set, looks for the commit, records the owner). 
 answers from what the clone already holds (`commit_known` from the fetched branches) and queues the same work. A commit
 the clone lacks costs one fetch of about 10 seconds in that thread, at most once in `FETCH_EVERY` seconds per repo, so a
 stream of made-up commit ids does nothing more. A clone that failed is told to the next report once (as a refusal), and
-that report starts the clone again.
+that same report queues the clone again, so the refusal and the new attempt come together.
 
 The credential is a seam, `provider`, with two methods: `token(repo)` is an installation token for the repo or None when
 the App cannot reach it, and `install_url(repo)` is the link that adds the repo to the installation. The token reaches
@@ -269,6 +269,7 @@ class Repos:
         with self._guard:
             failed = self._failed.pop(repo, None)
         if failed:
+            self._enqueue(repo, (member, path, commit, declared or {}))     # this report starts the clone again
             raise Refused(failed)
         dest = self.clone_dir(repo)
         held = (dest / ".git").exists()

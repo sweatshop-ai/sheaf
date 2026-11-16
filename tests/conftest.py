@@ -120,7 +120,7 @@ def pytest_itemcollected(item):
 
 
 LOCK_ORDER_SUITES = {"test_move_forward", "test_hub_tell", "test_hub_waiting", "test_session_tells", "test_mcp_pages",
-                     "test_hub_live", "test_hub_handler", "test_loose_root", "test_hub_place", "test_hub_roots"}
+                     "test_hub_live", "test_hub_handler", "test_loose_root", "test_hub_place", "test_hub_roots", "test_delete_restore_moves"}
 
 
 @pytest.fixture

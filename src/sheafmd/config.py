@@ -27,7 +27,8 @@ USER_KEYS = {"port": int, "name": str, "browser": bool, "proxy": dict, "jump": d
              "reopen": dict, "list": dict, "transcribe": dict, "tiroir": str}   # proxy: hub.proxy reads it (9.9); list: hub.the_list (9.10); transcribe: hub.transcribe
 JUMP_KEYS = {"command": list}
 ROOT_KEYS = {"theme": str, "for": str, "links": bool, "link_tlds": list, "credit": bool,
-             "versions": str, "commit": bool, "push": bool, "tiroir": str, "branch": str}
+             "versions": str, "commit": bool, "push": bool, "tiroir": str, "branch": str,
+             "archive_after": object}      # object: a bad number warns and the default holds, it does not stop the hub
 
 _ENDING = re.compile(r"[a-z0-9]+")
 
@@ -185,6 +186,7 @@ class RootConfig:
     push: bool = False             # and the hub pushes it (8.11)
     tiroir: str | None = None      # where a loose page of this root is sent: https://host (SPEC 13)
     branch: str | None = None      # the branch the tiroir saves a repo's pages on when the repo has no `dev` (SPEC 14)
+    archive_after: int = 30        # days without a write or a comment before a loose page is archived (8.6)
 
 
 def load_root_config(root: Path, warn=None) -> RootConfig:
@@ -203,7 +205,11 @@ def load_root_config(root: Path, warn=None) -> RootConfig:
     versions = data.get("versions", "state")
     if versions not in ("state", "root"):
         warn(f"  ! versions in {path}: {versions!r} is neither \"state\" nor \"root\"; the state folder is used")
-    return RootConfig(theme=data.get("theme") or None, for_=data.get("for") or None,
+    after = data.get("archive_after", 30)
+    if isinstance(after, bool) or not isinstance(after, int) or after < 1:
+        warn(f"  ! archive_after in {path}: {after!r} is not a whole number of days, at least 1; 30 is used")
+        after = 30
+    return RootConfig(theme=data.get("theme") or None, archive_after=after, for_=data.get("for") or None,
                       links=data.get("links", True), link_tlds=tuple(tlds),
                       credit=data.get("credit", False), versions_inside=versions == "root",
                       commit=data.get("commit", False), push=data.get("push", False),

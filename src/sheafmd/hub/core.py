@@ -27,6 +27,7 @@ from ..agents import registry
 from ..agents.base import Adapter, Target
 from ..render import RenderError, render_file
 from ..source import STAMP_FORMAT, file_lock, lock_key, md_hash
+from . import archive as archive_mod
 from . import assets as assets_mod
 from . import boxwait
 from . import loose as loose_mod
@@ -205,6 +206,7 @@ class Hub:
         self._register_private_roots()
         self.loose = loose_mod.Loose(self)       # a member's loose root, by their id (the door's `create` with no root)
         self.loose.attach()
+        self.archive = archive_mod.Archive(self)      # archived, kept and trashed loose pages (8.6)
         for r in self.roots.all():
             self._note_identity(r)      # the roots of an earlier run, registered before the private folders were known
         self.commits.seed(self.roots.all())      # the rewrite guard's first pull is guarded, not free
@@ -900,6 +902,14 @@ class Hub:
             return {"doc": address, "url": self.url(address), "tabs": e.bus.count(),
                     "log": list(e.log), "warnings": warnings}
 
+    def forget_document(self, address: str):
+        """A page left its address (deleted into the trash): the entry goes and the pages open on it are told `gone`. Its
+        versions stay, and come back with it when it does (8.6)."""
+        with self._lock:
+            e = self.entries.pop(address, None)
+        if e is not None:
+            e.bus.publish("gone", {"doc": address})
+
     def forget_root(self, name: str):
         """`sheaf roots forget`: take the root out, and its documents' entries with it (their
         render settings and read state, and the pages the hub holds). The documents themselves
@@ -1354,6 +1364,10 @@ class Hub:
             self.index.tick(self.clock())
         except Exception:               # a traceback, not `error=`: see `record_exception`
             self.record_exception("status-failed")
+        try:
+            self.archive.tick(self.clock())
+        except Exception:
+            self.record_exception("archive-failed")
 
     def _tell_grants(self):
         """Tell the open tabs of a root whose `projects.toml` changed, once the change held for two passes,

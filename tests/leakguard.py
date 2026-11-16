@@ -122,6 +122,15 @@ def left_running(run: str, test: str | None = None) -> list[Left]:
     return found
 
 
+def carries_this_run(pid: int) -> bool:
+    """The process carries the id of the running suite: a process a test started, a detached one too."""
+    run = os.environ.get(RUN_VAR)
+    if not run or not _has_proc():
+        return False
+    env = _environment(str(pid))
+    return bool(env) and f"{RUN_VAR}={run}".encode() in env
+
+
 def _send(pid: int, sig: int):
     try:
         signals.send(pid, sig)

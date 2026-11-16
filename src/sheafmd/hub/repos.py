@@ -61,20 +61,39 @@ def parse_git_version(said: str) -> tuple[int, int] | None:
     return (int(m[1]), int(m[2])) if m else None
 
 
+RETRY_READ_EVERY = 60.0     # seconds between reads of the git version while it cannot be read
+
+
 def _cache_good(read):
-    """Keep what `read()` gave once it is not None; a None (a failed read) is asked again at the next call."""
-    kept = []
+    """Keep what `read()` gave once it is not None. A None (a failed read) is asked again, but not sooner than
+    RETRY_READ_EVERY seconds after the last try, so a git that hangs costs one read in that time and not one per request;
+    the read that finally works is said on stderr when an earlier one had failed."""
+    kept, state = [], {"failed_at": None}
+    lock = threading.Lock()
 
     @functools.wraps(read)
     def cached():
-        if not kept:
+        with lock:
+            if kept:
+                return kept[0]
+            failed_at = state["failed_at"]
+            if failed_at is not None and time.monotonic() - failed_at < RETRY_READ_EVERY:
+                return None
             value = read()
             if value is None:
+                state["failed_at"] = time.monotonic()
                 return None
             kept.append(value)
-        return kept[0]
+            if failed_at is not None:
+                print(f"sheaf hub: git {value[0]}.{value[1]} read: commit look {'on' if value >= NO_LAZY_FETCH_FROM else 'off'}",
+                      file=sys.stderr, flush=True)
+            return value
 
-    cached.cache_clear = kept.clear
+    def cache_clear():
+        kept.clear()
+        state["failed_at"] = None
+
+    cached.cache_clear = cache_clear
     return cached
 
 

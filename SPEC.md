@@ -1483,7 +1483,7 @@ Message (`prompts.tell`):
 > {RULE}
 >
 > When you are done, answer in the thread so the page shows it, with the role action:
-> - with the rectoverso MCP tool: reply(doc="{root}/{path}", id="{id}", text="<what you did>", role="action")
+> - with the sheaf MCP tool: reply(doc="{root}/{path}", id="{id}", text="<what you did>", role="action")
 > - or in a shell: sheaf reply {abs path} {id} "<what you did>" --role action
 
 Message to an agent (`prompts.tell_agent`), listed by `documents` (9.8, 12):
@@ -1497,7 +1497,7 @@ Message to an agent (`prompts.tell_agent`), listed by `documents` (9.8, 12):
 >
 > {RULE}
 >
-> When you are done, answer in the thread with the rectoverso tool, so the page shows it: reply(doc="{root}/{path}", id="{id}", text="<what you did>", role="action"). If you cannot do it, reply without the role and say why.
+> When you are done, answer in the thread with the sheaf tool, so the page shows it: reply(doc="{root}/{path}", id="{id}", text="<what you did>", role="action"). If you cannot do it, reply without the role and say why.
 >
 > The page shows your reply as markdown, to a person: short paragraphs with a blank line between them, a list for several items, `code` and ``` blocks for code, links written in full.
 
@@ -1557,7 +1557,7 @@ Cancel message (`prompts.cancel`):
   <text>
 
   When you are done, answer in the thread so the page shows it, with the role action:
-  - with the rectoverso MCP tool: reply(doc="<rectoverso>", id="<thread>", text="<what you did>", role="action")
+  - with the sheaf MCP tool: reply(doc="<rectoverso>", id="<thread>", text="<what you did>", role="action")
 
   The page shows your reply as markdown, to a person: short paragraphs with a blank line between them, a list for several items, `code` and ``` blocks for code, links written in full.
   ```

@@ -11,6 +11,7 @@ from . import roots as roots_mod
 from . import the_list
 
 SESSION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")      # what AgentView takes as a session id (SPEC 8.6)
+AGENTS = {"Claude Code": "claude", "Codex": "codex"}                # the client of `<client> (<member>)` and AgentView's provider
 CHAT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 TITLES_KEPT = 5000                 # titles kept; a full cache starts over, each file is read again once
 
@@ -63,9 +64,12 @@ def way_back(line, member) -> dict | None:
         return None
     if line.place == "chat client":
         return {"kind": "chat", "href": f"/c/{line.chat}"} if CHAT_ID.fullmatch(line.chat) else None
-    if line.place == "laptop" and SESSION_ID.fullmatch(line.session) and line.writer.endswith(f"({member.name})"):
-        provider = "codex" if line.writer.startswith("Codex (") else "claude"           # AgentView's `provider:id` key
-        return {"kind": "laptop", "provider": provider, "session": line.session, "remote": line.link}
+    if line.place == "laptop" and line.session:
+        if not SESSION_ID.fullmatch(line.session):
+            return None
+        client, _, own = line.writer.partition(" (")
+        if own == f"{member.name})" and client in AGENTS:
+            return {"kind": "laptop", "provider": AGENTS[client], "session": line.session, "remote": line.link}
     return {"kind": "remote", "href": line.link} if line.link else None
 
 
@@ -125,7 +129,7 @@ def data(hub, member, titles: Titles) -> dict:
                          "open": d["open"], "write": say_write(last, session),
                          "write_tip": last.host if last else "",
                          "session": session.writer if session else "",
-                         "session_tip": (session.session + (f" on {session.host}" if session.host else "")) if session else "",
+                         "session_tip": " on ".join(t for t in (session.session, session.host) if t) if session else "",
                          "session_link": way_back(session, member)})
     rows.sort(key=lambda r: (-r["mtime"], r["doc"]))
     return {"tree": tree(rows), "rows": rows, "more": found["more"]}

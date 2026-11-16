@@ -239,6 +239,17 @@ def test_a_page_with_no_session_has_no_link(two):
     assert link_of(two) is None
 
 
+def test_the_writer_must_be_exactly_a_known_client_of_this_member(two):
+    for writer in ("Claude Code (Cal (Bea))", "Other (Bea)"):
+        two.hub.writes.add("work/plan.md", writer, "laptop", "update", session=SESSION)
+        assert link_of(two) is None, writer
+
+
+def test_a_bad_id_gives_no_link_even_with_a_remote_control_link(two):
+    two.hub.writes.add("work/plan.md", "Claude Code (Bea)", "laptop", "update", session="../x", link=RC)
+    assert link_of(two) is None
+
+
 @pytest.mark.parametrize("bad", ["../x", "a b", "a/b", "x" * 65, "-lead", "claude:abc", "a\nb"])
 def test_a_session_id_that_is_not_a_plain_id_is_not_carried(two, bad):
     two.hub.writes.add("work/plan.md", "Claude Code (Bea)", "laptop", "update", session=bad)

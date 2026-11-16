@@ -1,6 +1,6 @@
 """Visibility (SPEC 9.11): a rectoverso that draws on a private source is its owner's alone until the owner ticks
-Share. Through the handler in proxy mode, with two members of one root: Thierry, who owns the rectoversos
-below, and Hans, who is a member of the project but owns none of them."""
+Share. Through the handler in proxy mode, with two members of one root: Alice, who owns the rectoversos
+below, and Bob, who is a member of the project but owns none of them."""
 import os
 import pwd
 import time
@@ -15,15 +15,15 @@ from sheafmd.hub.visibility import front_matter
 from sheafmd.mcp import MAX_TEXT
 from sheafmd.source import md_hash
 
-THIERRY = "503b2f77-83de-452c-817a-a357faf85929"
-HANS = "2b9d7e1c-4a51-4c0e-9d1f-6f0c3a7e8b42"
+ALICE = "503b2f77-83de-452c-817a-a357faf85929"
+BOB = "2b9d7e1c-4a51-4c0e-9d1f-6f0c3a7e8b42"
 
 PRIVATE = """---
 client: thinkingtoo
 project: tiroir
 issue: thinkingtoo/tt-tiroir#9
 assistant: James
-owner: thierry
+owner: alice
 sources: [library:doc-123]
 ---
 # What the contract says
@@ -34,12 +34,12 @@ A quote from the contract.
 """
 
 
-def members(work, hans_also=None, **tokens):
+def members(work, bob_also=None, **tokens):
     """The `[proxy]` table of the two members, each with the door tokens `tokens` binds to their `short`.
-    Both have the root `work`; Hans has `hans_also` too, when given."""
-    team = {THIERRY: {"name": "Thierry", "short": "thierry", "github": "tiroir", "roots": [str(work)]},
-            HANS: {"name": "Hans", "short": "hans", "github": "hanshermans",
-                   "roots": [str(work)] + ([str(hans_also)] if hans_also else [])}}
+    Both have the root `work`; Bob has `bob_also` too, when given."""
+    team = {ALICE: {"name": "Alice", "short": "alice", "github": "tiroir", "roots": [str(work)]},
+            BOB: {"name": "Bob", "short": "bob", "github": "bobsmith",
+                   "roots": [str(work)] + ([str(bob_also)] if bob_also else [])}}
     for m in team.values():
         if m["short"] in tokens:
             m["tokens"] = tokens[m["short"]]
@@ -64,11 +64,11 @@ def put(team, work, rel, text):
 DOC = "thinkingtoo/tiroir/2026-10-28-contract.md"
 
 
-def test_a_sheaf_from_a_private_source_answers_404_to_hans_and_200_to_its_owner(team, work):
+def test_a_sheaf_from_a_private_source_answers_404_to_bob_and_200_to_its_owner(team, work):
     put(team, work, DOC, PRIVATE)
-    assert team.get(f"/work/{DOC}", member=THIERRY).status == 200
-    got = team.get(f"/work/{DOC}", member=HANS)
-    missing = team.get("/work/thinkingtoo/tiroir/nothing.md", member=HANS)
+    assert team.get(f"/work/{DOC}", member=ALICE).status == 200
+    got = team.get(f"/work/{DOC}", member=BOB)
+    missing = team.get("/work/thinkingtoo/tiroir/nothing.md", member=BOB)
     assert got.status == missing.status == 404 and got.body == missing.body
 
 
@@ -83,56 +83,56 @@ def tick(team, work, rel, word, member, **extra):
 
 def test_a_sheaf_without_private_sources_is_visible_to_the_project_at_once(team, work):
     put(team, work, DOC, PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:thinkingtoo/tt-tiroir#9]"))
-    assert team.get(f"/work/{DOC}", member=HANS).status == 200
+    assert team.get(f"/work/{DOC}", member=BOB).status == 200
 
 
 def test_a_written_visibility_project_does_not_open_a_sheaf_with_a_private_source(team, work):
-    put(team, work, DOC, PRIVATE.replace("owner: thierry", "owner: thierry\nvisibility: project"))
-    assert team.get(f"/work/{DOC}", member=HANS).status == 404
+    put(team, work, DOC, PRIVATE.replace("owner: alice", "owner: alice\nvisibility: project"))
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
 
 
 def test_a_source_list_written_as_lines_is_read_too(team, work):
     put(team, work, DOC, PRIVATE.replace("sources: [library:doc-123]", "sources:\n  - web:https://x.example\n  - mail:abc"))
-    assert team.get(f"/work/{DOC}", member=HANS).status == 404
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
 
 
-def test_hans_does_not_see_an_owner_only_sheaf_in_the_index(team, work):
+def test_bob_does_not_see_an_owner_only_sheaf_in_the_index(team, work):
     put(team, work, DOC, PRIVATE)
 
     def docs(m):
         return [d["doc"] for r in team.get("/_/index.json", member=m).json()["roots"] for d in r["docs"]]
-    assert f"work/{DOC}" in docs(THIERRY)
-    assert f"work/{DOC}" not in docs(HANS)
+    assert f"work/{DOC}" in docs(ALICE)
+    assert f"work/{DOC}" not in docs(BOB)
 
 
 def test_the_owners_share_opens_the_sheaf_to_the_project(team, work):
     put(team, work, DOC, PRIVATE)
-    assert tick(team, work, DOC, "Share", THIERRY).status == 200
+    assert tick(team, work, DOC, "Share", ALICE).status == 200
     fm = front_matter((work / DOC).read_text(encoding="utf-8"))
-    assert fm["visibility"] == "project" and fm["shared"].startswith("thierry ")
+    assert fm["visibility"] == "project" and fm["shared"].startswith("alice ")
     assert "- [x] Share" in (work / DOC).read_text(encoding="utf-8")
-    assert team.get(f"/work/{DOC}", member=HANS).status == 200
+    assert team.get(f"/work/{DOC}", member=BOB).status == 200
 
 
 def test_share_ticked_by_a_member_who_is_not_the_owner_is_refused_and_writes_nothing(team, work):
-    shared = PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:x/y#1]")   # Hans can open it
+    shared = PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:x/y#1]")   # Bob can open it
     put(team, work, DOC, shared.replace("- [ ] Share", "- [ ] Share\n- [ ] Done"))
     before = (work / DOC).read_text(encoding="utf-8")
-    got = tick(team, work, DOC, "Share", HANS)
+    got = tick(team, work, DOC, "Share", BOB)
     assert got.status == 409 and "owner" in got.json()["error"]
     assert (work / DOC).read_text(encoding="utf-8") == before
 
 
 def test_the_share_mark_names_the_signed_in_owner_whatever_the_request_says(team, work):
     put(team, work, DOC, PRIVATE)
-    tick(team, work, DOC, "Share", THIERRY, by="hans", author="hans", who="hans", short="hans")
-    assert front_matter((work / DOC).read_text(encoding="utf-8"))["shared"].startswith("thierry ")
+    tick(team, work, DOC, "Share", ALICE, by="bob", author="bob", who="bob", short="bob")
+    assert front_matter((work / DOC).read_text(encoding="utf-8"))["shared"].startswith("alice ")
 
 
 def test_the_lists_tick_of_share_by_a_member_who_is_not_the_owner_is_refused(team, work):
     put(team, work, DOC, PRIVATE.replace("sources: [library:doc-123]", "sources: []"))
     got = team.post("/_/tick", {"doc": f"work/{DOC}", "action": 0, "word": "Share",
-                                 "hash": md_hash((work / DOC).read_text(encoding="utf-8"))}, member=HANS)
+                                 "hash": md_hash((work / DOC).read_text(encoding="utf-8"))}, member=BOB)
     assert got.status == 409
     assert "- [ ] Share" in (work / DOC).read_text(encoding="utf-8")
 
@@ -148,8 +148,8 @@ def test_a_door_create_from_mistral_with_a_library_source_lands_owner_only(team,
     on_disk = (work / DOC).read_text(encoding="utf-8")
     assert front_matter(on_disk)["visibility"] == "owner"
     assert got["hash"] == md_hash(on_disk)
-    assert team.get(f"/work/{DOC}", member=HANS).status == 404
-    assert team.get(f"/work/{DOC}", member=THIERRY).status == 200
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
+    assert team.get(f"/work/{DOC}", member=ALICE).status == 200
 
 
 MAIL = "list/a/inbox/x.md"
@@ -157,18 +157,18 @@ MAIL_TEXT = "---\nsources: [mail]\n---\n# A mail\n\nWhat it says.\n"
 
 
 def test_a_door_create_by_a_bound_token_gives_its_member_an_owner_only_sheaf_with_no_owner(team, browser, work):
-    """#30: the mail module's token, bound to Thierry, writes a rectoverso from a private source with no `owner`."""
-    team.hub.proxy = members(work, thierry=["mail"])
+    """#30: the mail module's token, bound to Alice, writes a rectoverso from a private source with no `owner`."""
+    team.hub.proxy = members(work, alice=["mail"])
     (work / "list/a/inbox").mkdir(parents=True)
     token = Tokens().add("mail", write=True)
     is_error, got = call(browser, "create", token=token, doc=f"work/{MAIL}", text=MAIL_TEXT)
     assert not is_error, got
     on_disk = (work / MAIL).read_text(encoding="utf-8")
-    assert front_matter(on_disk)["owner"] == "thierry" and got["hash"] == md_hash(on_disk)
+    assert front_matter(on_disk)["owner"] == "alice" and got["hash"] == md_hash(on_disk)
     is_error, got = call(browser, "read", token=token, doc=f"work/{MAIL}")
     assert not is_error and got["text"] == on_disk
-    assert team.get(f"/work/{MAIL}", member=THIERRY).status == 200
-    assert team.get(f"/work/{MAIL}", member=HANS).status == 404
+    assert team.get(f"/work/{MAIL}", member=ALICE).status == 200
+    assert team.get(f"/work/{MAIL}", member=BOB).status == 404
 
 
 def test_a_door_create_by_an_unbound_token_of_an_owner_only_sheaf_with_no_owner_is_refused(team, browser, work):
@@ -182,23 +182,23 @@ def test_a_door_create_by_an_unbound_token_of_an_owner_only_sheaf_with_no_owner_
 
 
 def test_a_door_create_that_names_its_owner_keeps_that_owner(team, browser, work):
-    team.hub.proxy = members(work, thierry=["mail"])
+    team.hub.proxy = members(work, alice=["mail"])
     (work / "list/a/inbox").mkdir(parents=True)
-    text = MAIL_TEXT.replace("sources:", "owner: hans\nsources:")
+    text = MAIL_TEXT.replace("sources:", "owner: bob\nsources:")
     for token, doc in ((Tokens().add("mail", write=True), MAIL), (Tokens().add("mistral", write=True), "list/a/y.md")):
         is_error, got = call(browser, "create", token=token, doc=f"work/{doc}", text=text)
         assert not is_error, got
-        assert front_matter((work / doc).read_text(encoding="utf-8"))["owner"] == "hans"
-        assert team.get(f"/work/{doc}", member=HANS).status == 200
+        assert front_matter((work / doc).read_text(encoding="utf-8"))["owner"] == "bob"
+        assert team.get(f"/work/{doc}", member=BOB).status == 200
 
 
 def test_a_door_update_that_closes_a_sheaf_with_no_owner_gives_it_the_tokens_member(team, browser, work):
     put(team, work, MAIL, "---\nsources: [issue:x/y#1]\n---\n# A mail\n")
     is_error, got = door_update(team, browser, work, MAIL, lambda t: t.replace("issue:x/y#1", "mail:t-1"))
     assert not is_error, got
-    assert front_matter((work / MAIL).read_text(encoding="utf-8"))["owner"] == "thierry"
-    assert team.get(f"/work/{MAIL}", member=THIERRY).status == 200
-    assert team.get(f"/work/{MAIL}", member=HANS).status == 404
+    assert front_matter((work / MAIL).read_text(encoding="utf-8"))["owner"] == "alice"
+    assert team.get(f"/work/{MAIL}", member=ALICE).status == 200
+    assert team.get(f"/work/{MAIL}", member=BOB).status == 404
 
 
 def test_a_door_update_by_an_unbound_token_that_would_close_a_sheaf_with_no_owner_is_refused(team, browser, work):
@@ -216,46 +216,46 @@ def test_a_door_create_by_a_bound_token_of_a_sheaf_its_issues_assignee_owns_name
                                                                                             monkeypatch):
     """The assignee stays the owner: the token's member as `owner` would have the rectoverso once the list stops
     knowing the issue, and no `owner` would leave it to nobody (#33)."""
-    team.hub.proxy = members(work, thierry=["mail"])
-    monkeypatch.setattr(team.hub, "assignees", lambda address, fm: ["hanshermans"])
+    team.hub.proxy = members(work, alice=["mail"])
+    monkeypatch.setattr(team.hub, "assignees", lambda address, fm: ["bobsmith"])
     (work / "list/a/inbox").mkdir(parents=True)
     is_error, got = call(browser, "create", token=Tokens().add("mail", write=True), doc=f"work/{MAIL}",
                          text=MAIL_TEXT.replace("sources:", "issue: x/y#1\nsources:"))
     assert not is_error, got
-    assert front_matter((work / MAIL).read_text(encoding="utf-8"))["owner"] == "hans"
-    assert team.get(f"/work/{MAIL}", member=HANS).status == 200
+    assert front_matter((work / MAIL).read_text(encoding="utf-8"))["owner"] == "bob"
+    assert team.get(f"/work/{MAIL}", member=BOB).status == 200
 
 
 def test_a_door_write_cannot_share_a_sheaf_itself(team, browser, work):
     put(team, work, DOC, PRIVATE)
     is_error, got = door_update(team, browser, work, DOC, lambda t: t.replace(
-        "owner: thierry", "owner: thierry\nvisibility: project\nshared: thierry 2026-10-28"))
+        "owner: alice", "owner: alice\nvisibility: project\nshared: alice 2026-10-28"))
     assert not is_error, got
     fm = front_matter((work / DOC).read_text(encoding="utf-8"))
     assert fm["visibility"] == "owner" and "shared" not in fm
-    assert team.get(f"/work/{DOC}", member=HANS).status == 404
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
 
 
 def test_a_door_update_keeps_the_owners_share(team, browser, work):
     put(team, work, DOC, PRIVATE)
-    tick(team, work, DOC, "Share", THIERRY)
+    tick(team, work, DOC, "Share", ALICE)
     token = Tokens().add("james", write=True)
     is_error, got = call(browser, "read", token=token, doc=f"work/{DOC}")
     is_error, got = call(browser, "update", token=token, doc=f"work/{DOC}", text=got["text"] + "\nMore.\n",
                          expected_hash=got["hash"])
     assert not is_error, got
-    assert team.get(f"/work/{DOC}", member=HANS).status == 200
+    assert team.get(f"/work/{DOC}", member=BOB).status == 200
 
 
 def test_a_door_update_that_adds_a_private_source_closes_a_shared_sheaf(team, browser, work):
     put(team, work, DOC, PRIVATE)
-    tick(team, work, DOC, "Share", THIERRY)
+    tick(team, work, DOC, "Share", ALICE)
     token = Tokens().add("james", write=True)
     is_error, got = call(browser, "read", token=token, doc=f"work/{DOC}")
     more = got["text"].replace("sources: [library:doc-123]", "sources: [library:doc-123, mail:t-77]")
     is_error, got = call(browser, "update", token=token, doc=f"work/{DOC}", text=more, expected_hash=got["hash"])
     assert not is_error, got
-    assert team.get(f"/work/{DOC}", member=HANS).status == 404
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
 
 
 STOPPABLE = PRIVATE.replace("sources: [library:doc-123]", "sources: []").replace("- [ ] Share", "- [ ] Stop James")
@@ -271,26 +271,26 @@ def stop_dir(tmp_path, team, monkeypatch):
     return d
 
 
-def test_stop_james_ticked_by_hans_drops_the_project_for_james_and_writes_a_row(team, work, stop_dir):
+def test_stop_james_ticked_by_bob_drops_the_project_for_james_and_writes_a_row(team, work, stop_dir):
     put(team, work, DOC, STOPPABLE)
-    assert tick(team, work, DOC, "Stop James", HANS).status == 200
+    assert tick(team, work, DOC, "Stop James", BOB).status == 200
     files = [f for f in stop_dir.iterdir()]
     assert len(files) == 1 and not files[0].name.startswith(".")
     assert files[0].read_text(encoding="utf-8") == "thinkingtoo/tiroir\n"
     row, = hub_rows("stop-james")
-    assert (row["project"], row["assistant"], row["by"], row["drop"]) == ("thinkingtoo/tiroir", "James", "hans", "written")
+    assert (row["project"], row["assistant"], row["by"], row["drop"]) == ("thinkingtoo/tiroir", "James", "bob", "written")
 
 
 def test_stop_james_on_a_sheaf_of_another_assistant_drops_nothing(team, work, stop_dir):
     put(team, work, DOC, STOPPABLE.replace("assistant: James", "assistant: Mistral"))
-    assert tick(team, work, DOC, "Stop James", HANS).status == 200
+    assert tick(team, work, DOC, "Stop James", BOB).status == 200
     assert list(stop_dir.iterdir()) == []
     assert hub_rows("stop-james")[0]["drop"] == "not a rectoverso of James"
 
 
 def test_stop_james_without_a_stop_dir_still_writes_the_row(team, work):
     put(team, work, DOC, STOPPABLE)
-    assert tick(team, work, DOC, "Stop James", HANS).status == 200
+    assert tick(team, work, DOC, "Stop James", BOB).status == 200
     assert hub_rows("stop-james")[0]["drop"] == "no stop_dir in [list]"
 
 
@@ -304,7 +304,7 @@ def test_a_stop_dir_inside_the_lists_root_stops_the_start(tmp_path):
     ("visibility: owner   # only Nell", "visibility", "owner"),
     ("issue: a/b#7  # x", "issue", "a/b#7"),
     ("issue: a/b#7", "issue", "a/b#7"),
-    ('owner: "thierry"  # quoted', "owner", "thierry"),
+    ('owner: "alice"  # quoted', "owner", "alice"),
     ('title: "a # b"', "title", "a # b"),
     ("sources: [library:1, issue:a/b#2]  # two", "sources", ("library:1", "issue:a/b#2")),
     ("visibility:   # none yet", "visibility", ""),
@@ -313,17 +313,17 @@ def test_a_comment_after_a_value_is_not_part_of_it(line, key, value):
     assert front_matter(f"---\n{line}\n---\n# T\n")[key] == value
 
 
-def test_an_owner_only_sheaf_with_a_comment_on_its_visibility_line_answers_404_to_hans(team, work):
-    put(team, work, DOC, PRIVATE.replace("sources: [library:doc-123]", "visibility: owner   # Thierry's alone"))
-    assert team.get(f"/work/{DOC}", member=HANS).status == 404
-    assert team.get(f"/work/{DOC}", member=THIERRY).status == 200
+def test_an_owner_only_sheaf_with_a_comment_on_its_visibility_line_answers_404_to_bob(team, work):
+    put(team, work, DOC, PRIVATE.replace("sources: [library:doc-123]", "visibility: owner   # Alice's alone"))
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
+    assert team.get(f"/work/{DOC}", member=ALICE).status == 200
 
 
 def test_the_stop_file_is_readable_by_the_folders_group_whatever_the_hubs_umask(team, work, stop_dir):
     put(team, work, DOC, STOPPABLE)
     old = os.umask(0o077)
     try:
-        assert tick(team, work, DOC, "Stop James", HANS).status == 200
+        assert tick(team, work, DOC, "Stop James", BOB).status == 200
     finally:
         os.umask(old)
     f, = stop_dir.iterdir()
@@ -331,9 +331,9 @@ def test_the_stop_file_is_readable_by_the_folders_group_whatever_the_hubs_umask(
 
 
 def door_update(team, browser, work, rel, change):
-    """James's door update of `rel` for Thierry: the text it reads, changed by `change`. Its token is bound to
-    Thierry, who owns the rectoversos here, so it is shown them (9.11)."""
-    team.hub.proxy = members(work, thierry=["james"])
+    """James's door update of `rel` for Alice: the text it reads, changed by `change`. Its token is bound to
+    Alice, who owns the rectoversos here, so it is shown them (9.11)."""
+    team.hub.proxy = members(work, alice=["james"])
     token = Tokens().add("james", write=True)
     is_error, got = call(browser, "read", token=token, doc=f"work/{rel}")
     assert not is_error, got
@@ -344,16 +344,16 @@ def test_a_door_update_that_drops_the_front_matter_leaves_an_owner_only_sheaf_it
     put(team, work, DOC, PRIVATE)
     is_error, got = door_update(team, browser, work, DOC, lambda t: t.split("---\n", 2)[2])
     assert not is_error, got
-    assert team.get(f"/work/{DOC}", member=HANS).status == 404
-    assert team.get(f"/work/{DOC}", member=THIERRY).status == 200
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
+    assert team.get(f"/work/{DOC}", member=ALICE).status == 200
 
 
 def test_a_door_update_cannot_hand_an_owner_only_sheaf_to_another_member(team, browser, work):
     put(team, work, DOC, PRIVATE)
-    is_error, got = door_update(team, browser, work, DOC, lambda t: t.replace("owner: thierry", "owner: hans"))
+    is_error, got = door_update(team, browser, work, DOC, lambda t: t.replace("owner: alice", "owner: bob"))
     assert not is_error, got
-    assert team.get(f"/work/{DOC}", member=HANS).status == 404
-    assert team.get(f"/work/{DOC}", member=THIERRY).status == 200
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
+    assert team.get(f"/work/{DOC}", member=ALICE).status == 200
 
 
 def test_a_page_save_cannot_change_the_front_matter_whoever_sends_it(team, work):
@@ -361,16 +361,16 @@ def test_a_page_save_cannot_change_the_front_matter_whoever_sends_it(team, work)
     put(team, work, DOC, open_)
     text = (work / DOC).read_text(encoding="utf-8")
     got = team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text),
-                                "edits": [{"i": 0, "html": "<p>visibility: owner<br>owner: hans</p>"}]}, member=HANS)
+                                "edits": [{"i": 0, "html": "<p>visibility: owner<br>owner: bob</p>"}]}, member=BOB)
     assert got.status == 200 and got.json()["skipped"]
     assert (work / DOC).read_text(encoding="utf-8") == text
-    assert team.get(f"/work/{DOC}", member=THIERRY).status == 200
+    assert team.get(f"/work/{DOC}", member=ALICE).status == 200
 
 
-def test_an_open_stream_of_hans_hears_nothing_once_a_door_write_closes_the_sheaf(team, browser, work):
+def test_an_open_stream_of_bob_hears_nothing_once_a_door_write_closes_the_sheaf(team, browser, work):
     open_ = PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:x/y#1]")
     put(team, work, DOC, open_)
-    sub = team.get(f"/_/live?doc=work/{DOC}", member=HANS).stream
+    sub = team.get(f"/_/live?doc=work/{DOC}", member=BOB).stream
     sub.drain()
     is_error, got = door_update(team, browser, work, DOC, lambda t: t.replace("sources: [issue:x/y#1]", "sources: [mail:t-1]")
                                 + "\nA line from the mail.\n")
@@ -387,7 +387,7 @@ def test_stop_james_that_cannot_drop_says_why_in_its_row(team, work, stop_dir, w
     else:
         rel = "contract.md"
     put(team, work, rel, STOPPABLE)
-    assert tick(team, work, rel, "Stop James", HANS).status == 200
+    assert tick(team, work, rel, "Stop James", BOB).status == 200
     assert why in hub_rows("stop-james")[0]["drop"]
 
 
@@ -396,7 +396,7 @@ def test_stop_james_whose_drop_fails_says_failed_and_leaves_no_dot_file(team, wo
     put(team, work, DOC, STOPPABLE)
     stop_dir.chmod(0o500)
     try:
-        assert tick(team, work, DOC, "Stop James", HANS).status == 200
+        assert tick(team, work, DOC, "Stop James", BOB).status == 200
     finally:
         stop_dir.chmod(0o700)
     assert hub_rows("stop-james")[0]["drop"].startswith("failed: ")
@@ -405,14 +405,14 @@ def test_stop_james_whose_drop_fails_says_failed_and_leaves_no_dot_file(team, wo
 
 def test_a_source_list_written_without_indent_is_read_too(team, work):
     put(team, work, DOC, PRIVATE.replace("sources: [library:doc-123]", "sources:\n- library:x"))
-    assert team.get(f"/work/{DOC}", member=HANS).status == 404
-    assert team.get(f"/work/{DOC}", member=THIERRY).status == 200
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
+    assert team.get(f"/work/{DOC}", member=ALICE).status == 200
 
 
 def test_a_sheaf_whose_front_matter_follows_a_byte_order_mark_is_read_too(team, work):
     put(team, work, DOC, "﻿" + PRIVATE)
-    assert team.get(f"/work/{DOC}", member=HANS).status == 404
-    assert team.get(f"/work/{DOC}", member=THIERRY).status == 200
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
+    assert team.get(f"/work/{DOC}", member=ALICE).status == 200
 
 
 @pytest.mark.parametrize("change", [
@@ -423,54 +423,54 @@ def test_a_sheaf_whose_front_matter_follows_a_byte_order_mark_is_read_too(team, 
 ], ids=["quoted key", "key twice", "space before colon", "folded value"])
 def test_a_front_matter_line_the_hub_cannot_read_keeps_the_sheaf_its_owners(team, work, change):
     put(team, work, DOC, change(PRIVATE))
-    assert team.get(f"/work/{DOC}", member=HANS).status == 404
-    assert team.get(f"/work/{DOC}", member=THIERRY).status == 200
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
+    assert team.get(f"/work/{DOC}", member=ALICE).status == 200
 
 
 def test_the_owners_share_written_with_a_plus_bullet_opens_the_sheaf_too(team, work):
     put(team, work, DOC, PRIVATE.replace("- [ ] Share", "+ [ ] Share"))
-    assert tick(team, work, DOC, "Share", THIERRY).status == 200
-    assert team.get(f"/work/{DOC}", member=HANS).status == 200
+    assert tick(team, work, DOC, "Share", ALICE).status == 200
+    assert team.get(f"/work/{DOC}", member=BOB).status == 200
 
 
 def test_share_with_a_plus_bullet_ticked_by_a_member_who_is_not_the_owner_is_refused(team, work):
     shared = PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:x/y#1]")
     put(team, work, DOC, shared.replace("- [ ] Share", "+ [ ] Share"))
     before = (work / DOC).read_text(encoding="utf-8")
-    assert tick(team, work, DOC, "Share", HANS).status == 409
+    assert tick(team, work, DOC, "Share", BOB).status == 409
     assert (work / DOC).read_text(encoding="utf-8") == before
 
 
 def test_the_owners_share_nested_in_a_list_opens_the_sheaf_too(team, work):
     put(team, work, DOC, PRIVATE.replace("- [ ] Share", "- Before you share\n  - [ ] Share"))
-    assert tick(team, work, DOC, "Share", THIERRY).status == 200
-    assert team.get(f"/work/{DOC}", member=HANS).status == 200
+    assert tick(team, work, DOC, "Share", ALICE).status == 200
+    assert team.get(f"/work/{DOC}", member=BOB).status == 200
 
 
 def test_a_door_update_cannot_give_an_owner_to_an_owner_only_sheaf_that_had_none(team, browser, work):
-    put(team, work, DOC, PRIVATE.replace("owner: thierry\n", ""))
+    put(team, work, DOC, PRIVATE.replace("owner: alice\n", ""))
     # A rectoverso with no owner is no token's to see (9.11), so only the key reaches it.
     is_error, got = call(browser, "read", as_name="James", doc=f"work/{DOC}")
     is_error, got = call(browser, "update", as_name="James", doc=f"work/{DOC}", expected_hash=got["hash"],
-                         text=got["text"].replace("assistant: James", "assistant: James\nowner: hans"))
+                         text=got["text"].replace("assistant: James", "assistant: James\nowner: bob"))
     assert not is_error, got
-    assert team.get(f"/work/{DOC}", member=HANS).status == 404
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
 
 
-def test_a_save_of_hans_that_lands_after_the_sheaf_closed_writes_nothing(team, work, monkeypatch):
+def test_a_save_of_bob_that_lands_after_the_sheaf_closed_writes_nothing(team, work, monkeypatch):
     open_ = PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:x/y#1]").replace("- [ ] Share", "- [ ] Done")
     put(team, work, DOC, open_)
     closed = open_.replace("sources: [issue:x/y#1]", "sources: [mail:t-77]")
-    assert team.get(f"/work/{DOC}", member=HANS).status == 200      # the page Hans saves from
+    assert team.get(f"/work/{DOC}", member=BOB).status == 200      # the page Bob saves from
     gate = team.hub.visible
 
     def a_door_write_closes_it_after_the_gate(member, address):
         ok = gate(member, address)
-        if member.id == HANS:
+        if member.id == BOB:
             (work / DOC).write_text(closed, encoding="utf-8")
         return ok
     monkeypatch.setattr(team.hub, "visible", a_door_write_closes_it_after_the_gate)
-    got = tick(team, work, DOC, "Done", HANS)
+    got = tick(team, work, DOC, "Done", BOB)
     assert got.status == 404, got.body
     assert (work / DOC).read_text(encoding="utf-8") == closed
 
@@ -482,7 +482,7 @@ def test_a_sheaf_closed_with_the_same_size_and_time_is_closed_at_once(team, work
     assert len(open_) == len(closed)
     put(team, work, DOC, open_)
     f = work / DOC
-    assert team.get(f"/work/{DOC}", member=HANS).status == 200
+    assert team.get(f"/work/{DOC}", member=BOB).status == 200
     st = f.stat()
     if how == "replaced":
         tmp = f.with_name("next.tmp")
@@ -492,7 +492,7 @@ def test_a_sheaf_closed_with_the_same_size_and_time_is_closed_at_once(team, work
     else:
         f.write_text(closed, encoding="utf-8")
         os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns))
-    assert team.get(f"/work/{DOC}", member=HANS).status == 404
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
 
 
 def test_two_stop_james_in_one_second_leave_two_drops_and_two_rows(team, work, stop_dir, monkeypatch):
@@ -500,8 +500,8 @@ def test_two_stop_james_in_one_second_leave_two_drops_and_two_rows(team, work, s
     put(team, work, DOC, STOPPABLE.replace("- [ ] Stop James", "- [ ] Stop James\n- [ ] Stop James"))
     second = time.gmtime()
     monkeypatch.setattr(time, "gmtime", lambda *_: second)
-    assert tick(team, work, DOC, "Stop James", HANS).status == 200
-    assert tick(team, work, DOC, "Stop James", THIERRY).status == 200
+    assert tick(team, work, DOC, "Stop James", BOB).status == 200
+    assert tick(team, work, DOC, "Stop James", ALICE).status == 200
     first, again = sorted(stop_dir.iterdir())
     assert again.name == first.name + "-1"
     assert first.read_text(encoding="utf-8") == again.read_text(encoding="utf-8") == "thinkingtoo/tiroir\n"
@@ -512,19 +512,19 @@ def test_two_stop_james_in_one_second_leave_two_drops_and_two_rows(team, work, s
 # ── Review round 2 (PR 10), and Tariq's digest round on tt-tiroir PR 32 ─────────────────────────────
 
 @pytest.mark.parametrize("how", ["not UTF-8", "unreadable"])
-def test_an_owner_only_sheaf_its_page_cached_answers_404_to_hans_once_its_file_cannot_be_read(team, work, how):
+def test_an_owner_only_sheaf_its_page_cached_answers_404_to_bob_once_its_file_cannot_be_read(team, work, how):
     if how == "unreadable" and os.geteuid() == 0:
         pytest.skip("root reads a file of mode 000")
     put(team, work, DOC, PRIVATE)
-    assert team.get(f"/work/{DOC}", member=THIERRY).status == 200       # the hub now holds its page
+    assert team.get(f"/work/{DOC}", member=ALICE).status == 200       # the hub now holds its page
     f = work / DOC
     if how == "not UTF-8":
         f.write_bytes(f.read_bytes() + b"\nlatin1 caf\xe9\n")
     else:
         os.chmod(f, 0)
     try:
-        assert team.get(f"/work/{DOC}", member=HANS).status == 404
-        assert team.get(f"/_/doc?doc=work/{DOC}", member=HANS).status == 404
+        assert team.get(f"/work/{DOC}", member=BOB).status == 404
+        assert team.get(f"/_/doc?doc=work/{DOC}", member=BOB).status == 404
     finally:
         os.chmod(f, 0o644)
 
@@ -540,33 +540,33 @@ def test_a_door_update_keeps_the_issue_on_disk_which_names_the_owner(team, brows
 
 
 def test_a_front_matter_after_a_byte_order_mark_is_no_block_a_member_can_edit(team, work):
-    shared = "﻿" + PRIVATE.replace("owner: thierry", "owner: thierry\nshared: thierry 2026-10-28T09:00:00Z")
+    shared = "﻿" + PRIVATE.replace("owner: alice", "owner: alice\nshared: alice 2026-10-28T09:00:00Z")
     put(team, work, DOC, shared)
-    assert team.get(f"/work/{DOC}", member=HANS).status == 200
+    assert team.get(f"/work/{DOC}", member=BOB).status == 200
     text = (work / DOC).read_text(encoding="utf-8")
     team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text), "edits": [{"i": 0, "html": "<p>gone</p>"}]},
-              member=HANS)
+              member=BOB)
     fm = front_matter((work / DOC).read_text(encoding="utf-8"))
-    assert fm["owner"] == "thierry" and fm["shared"] and fm["sources"] == ("library:doc-123",)
+    assert fm["owner"] == "alice" and fm["shared"] and fm["sources"] == ("library:doc-123",)
 
 
-def test_a_comment_of_hans_that_lands_after_the_sheaf_closed_writes_nothing(team, work, monkeypatch):
+def test_a_comment_of_bob_that_lands_after_the_sheaf_closed_writes_nothing(team, work, monkeypatch):
     from sheafmd.blocks import split_md_blocks
     open_ = PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:x/y#1]")
     put(team, work, DOC, open_)
     closed = open_.replace("sources: [issue:x/y#1]", "sources: [mail:t-77]")
-    assert team.get(f"/work/{DOC}", member=HANS).status == 200
+    assert team.get(f"/work/{DOC}", member=BOB).status == 200
     gate = team.hub.visible
 
     def a_door_write_closes_it_after_the_gate(member, address):
         ok = gate(member, address)
-        if member.id == HANS:
+        if member.id == BOB:
             (work / DOC).write_text(closed, encoding="utf-8")
         return ok
     monkeypatch.setattr(team.hub, "visible", a_door_write_closes_it_after_the_gate)
     i = next(i for i, b in enumerate(split_md_blocks(open_)) if b.content.startswith("A quote"))
     got = team.post("/_/comment", {"doc": f"work/{DOC}", "op": "add", "hash": md_hash(open_), "block": i, "start": 0,
-                                   "end": 7, "quote": "A quote", "body": "Is this right?"}, member=HANS)
+                                   "end": 7, "quote": "A quote", "body": "Is this right?"}, member=BOB)
     assert got.status == 404, got.body
     assert (work / DOC).read_text(encoding="utf-8") == closed
 
@@ -574,9 +574,9 @@ def test_a_comment_of_hans_that_lands_after_the_sheaf_closed_writes_nothing(team
 @pytest.mark.parametrize("front,body", [("\n", "\r\n"), ("\r\n", "\n")], ids=["LF over CRLF", "CRLF over LF"])
 def test_share_rewrites_the_front_matter_lines_only_never_the_bodys_line_endings(front, body):
     from sheafmd.hub import visibility
-    text = front.join(["---", "owner: thierry", "sources: [library:1]", "---", ""]) + \
+    text = front.join(["---", "owner: alice", "sources: [library:1]", "---", ""]) + \
         body.join(["line one", "```", "code", "```", ""])
-    out = visibility.share(text, "thierry", "T")
+    out = visibility.share(text, "alice", "T")
     assert out.endswith(body.join(["line one", "```", "code", "```", ""]))
     assert visibility.effective(visibility.front_matter(out)) == "project"
 
@@ -606,10 +606,10 @@ def test_the_owners_tick_of_a_decoy_box_beside_a_ballot_share_does_not_share_the
     k = html.rfind('<input type="checkbox"', 0, html.index("Mark this"))
     html = html[:k] + '<input type="checkbox" checked=""' + html[k + len('<input type="checkbox"'):]
     got = team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text), "edits": [{"i": i, "html": html}]},
-                    member=THIERRY)
+                    member=ALICE)
     assert got.status == 200, got.body
     assert "[x] Mark this digest as read" in (work / DOC).read_text(encoding="utf-8")   # the save went through
-    assert team.get(f"/work/{DOC}", member=HANS).status == 404
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
 
 
 def _block_html(text, word):
@@ -631,15 +631,15 @@ def test_the_owner_deleting_the_open_share_box_above_a_ticked_ballot_does_not_sh
     i, html = _block_html(text, "Share")
     html = re.sub(r"<ul[^>]*>.*?</ul>\s*", "", html, count=1, flags=re.S)       # the open box's list, gone
     got = team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text), "edits": [{"i": i, "html": html}]},
-                    member=THIERRY)
+                    member=ALICE)
     assert got.status == 200, got.body
     after = (work / DOC).read_text(encoding="utf-8")
     assert "- [x] Share" in after and "shared" not in front_matter(after)
-    assert team.get(f"/work/{DOC}", member=HANS).status == 404
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
 
 
 @pytest.mark.parametrize("body", ["- one\n* [ ] Share\n- three", "+ [ ] Share", "- [ ] Share   ", "- [ ] Share\t",
-                                  "- [ ] Share @thierry", "- top\n  - [ ] Share\n  - other",
+                                  "- [ ] Share @alice", "- top\n  - [ ] Share\n  - other",
                                   "- one\n\n- [ ] Share\n\n- three", "- [ ] Share\n- item <!-- x -->"])
 def test_the_owners_tick_in_the_page_shares_whatever_the_lists_shape(team, work, body):
     put(team, work, DOC, PRIVATE.replace("- [ ] Share", body))
@@ -647,16 +647,16 @@ def test_the_owners_tick_in_the_page_shares_whatever_the_lists_shape(team, work,
     i, html = _block_html(text, "Share")
     html = html.replace('<input type="checkbox"', '<input type="checkbox" checked=""', 1)
     got = team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text), "edits": [{"i": i, "html": html}]},
-                    member=THIERRY)
+                    member=ALICE)
     assert got.status == 200, got.body
-    assert team.get(f"/work/{DOC}", member=HANS).status == 200
+    assert team.get(f"/work/{DOC}", member=BOB).status == 200
 
 
 def test_the_lists_tick_of_a_star_bullet_share_shares(team, work):
     put(team, work, DOC, PRIVATE.replace("- [ ] Share", "* [ ] Share"))
     assert team.post("/_/tick", {"doc": f"work/{DOC}", "action": 0, "word": "Share",
-                                 "hash": md_hash((work / DOC).read_text(encoding="utf-8"))}, member=THIERRY).status == 200
-    assert team.get(f"/work/{DOC}", member=HANS).status == 200
+                                 "hash": md_hash((work / DOC).read_text(encoding="utf-8"))}, member=ALICE).status == 200
+    assert team.get(f"/work/{DOC}", member=BOB).status == 200
 
 
 def test_a_share_ticked_in_the_same_save_as_another_edit_of_its_list_shares_nothing(team, work):
@@ -666,9 +666,9 @@ def test_a_share_ticked_in_the_same_save_as_another_edit_of_its_list_shares_noth
     i, html = _block_html(text, "Share")
     html = html.replace('<input type="checkbox"', '<input type="checkbox" checked=""', 1).replace("teh", "the")
     got = team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text), "edits": [{"i": i, "html": html}]},
-                    member=THIERRY)
+                    member=ALICE)
     assert got.status == 200, got.body
-    assert team.get(f"/work/{DOC}", member=HANS).status == 404
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
 
 
 def test_the_owners_tick_saved_against_an_older_version_still_shares(team, work):
@@ -676,17 +676,17 @@ def test_the_owners_tick_saved_against_an_older_version_still_shares(team, work)
     put(team, work, DOC, PRIVATE)
     text = (work / DOC).read_text(encoding="utf-8")
     i, html = _block_html(text, "Share")
-    assert team.get(f"/work/{DOC}", member=THIERRY).status == 200           # the page holds this version
+    assert team.get(f"/work/{DOC}", member=ALICE).status == 200           # the page holds this version
     (work / DOC).write_text(text.replace("A quote from the contract.", "A quote from the contract, revised."),
                             encoding="utf-8")
     html = html.replace('<input type="checkbox"', '<input type="checkbox" checked=""', 1)
     got = team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text), "edits": [{"i": i, "html": html}]},
-                    member=THIERRY)
+                    member=ALICE)
     assert got.status == 200, got.body
     assert got.json().get("merged") is True
     after = (work / DOC).read_text(encoding="utf-8")
     assert "revised" in after and "- [x] Share" in after
-    assert team.get(f"/work/{DOC}", member=HANS).status == 200
+    assert team.get(f"/work/{DOC}", member=BOB).status == 200
 
 
 @pytest.mark.parametrize("was", ["- &#9746; Share", "- [x] Share"])
@@ -695,19 +695,19 @@ def test_a_merged_save_does_not_tick_a_box_an_assistant_reopened_since_the_page_
     block the page held; a box James reopened counted as ticked by the owner's tick of Done."""
     base = PRIVATE.replace("- [ ] Share", f"{was}\n- [ ] Done")
     put(team, work, DOC, base)
-    assert team.get(f"/work/{DOC}", member=THIERRY).status == 200           # the page holds this version
+    assert team.get(f"/work/{DOC}", member=ALICE).status == 200           # the page holds this version
     i, html = _block_html(base, "Done")
     html = html.replace('<input type="checkbox" />Done', '<input type="checkbox" checked="" />Done')
     cur = PRIVATE.replace("- [ ] Share", "- [ ] Share\n* [ ] Done")
-    team.hub.proxy = members(work, thierry=["james"])       # James works for Thierry, the owner
+    team.hub.proxy = members(work, alice=["james"])       # James works for Alice, the owner
     is_error, got = call(browser, "update", token=Tokens().add("james", write=True), doc=f"work/{DOC}",
                          text=cur, expected_hash=md_hash(base))
     assert not is_error, got
     got = team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(base), "edits": [{"i": i, "html": html}]},
-                    member=THIERRY)
+                    member=ALICE)
     assert got.status == 200, got.body
     assert "shared" not in front_matter((work / DOC).read_text(encoding="utf-8"))
-    assert team.get(f"/work/{DOC}", member=HANS).status == 404
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
 
 
 def test_a_tick_that_a_later_edit_of_the_same_block_rewrites_shares_nothing(team, work):
@@ -717,9 +717,9 @@ def test_a_tick_that_a_later_edit_of_the_same_block_rewrites_shares_nothing(team
     on = html.replace('<input type="checkbox"', '<input type="checkbox" checked=""', 1)
     got = team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text),
                                 "edits": [{"i": i, "html": on}, {"i": i, "html": html.replace("Share", "Share later")}]},
-                    member=THIERRY)
+                    member=ALICE)
     assert got.status == 200, got.body
-    assert team.get(f"/work/{DOC}", member=HANS).status == 404
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
 
 
 @pytest.mark.parametrize("judged", [True, False], ids=["judged before", "never judged"])
@@ -729,19 +729,19 @@ def test_an_owner_only_sheaf_deleted_while_streams_are_open_is_told_to_its_owner
     monkeypatch.setattr(team.hub.index, "_start_sweep", lambda run: run())     # a sweep inside the tick
     f = work / DOC
     put(team, work, DOC, PRIVATE)
-    hans, thierry = (team.get("/_/live", member=m).stream for m in (HANS, THIERRY))
+    bob, alice = (team.get("/_/live", member=m).stream for m in (BOB, ALICE))
     if judged:
-        for m in (HANS, THIERRY):
+        for m in (BOB, ALICE):
             team.get("/_/index.json", member=m)
     now[0] += SWEEP_SECONDS
     team.hub.tick()
-    hans.drain(), thierry.drain()
+    bob.drain(), alice.drain()
     f.unlink()
     now[0] += SWEEP_SECONDS
     team.hub.tick()
-    assert [d for name, d in hans.drain() if name == "status"] == []
+    assert [d for name, d in bob.drain() if name == "status"] == []
     if judged:
-        assert [d["doc"] for name, d in thierry.drain() if name == "status"] == [f"work/{DOC}"]
+        assert [d["doc"] for name, d in alice.drain() if name == "status"] == [f"work/{DOC}"]
 
 
 OPEN = PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:thinkingtoo/tt-tiroir#9]")
@@ -749,18 +749,18 @@ OPEN = PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:thinkingto
 
 @pytest.mark.parametrize("line", ["date-created: 2026-10-28", "link-citations: true", "header-includes:\n  - x",
                                   "my key: a value", "document title: Ownership report", "a.b: shared visibility",
-                                  "my key:\n  nested: value", "my key:\n- x\n- owner: hans"])
+                                  "my key:\n  nested: value", "my key:\n- x\n- owner: bob"])
 def test_a_front_matter_key_the_hub_does_not_enforce_leaves_an_open_sheaf_open(team, work, line):
-    put(team, work, DOC, OPEN.replace("owner: thierry\n", f"owner: thierry\n{line}\n"))
-    assert team.get(f"/work/{DOC}", member=HANS).status == 200
+    put(team, work, DOC, OPEN.replace("owner: alice\n", f"owner: alice\n{line}\n"))
+    assert team.get(f"/work/{DOC}", member=BOB).status == 200
 
 
-@pytest.mark.parametrize("line", ['"visibility": owner', "'owner': hans", '"\\x6fwner": hans', "? visibility\n: owner",
+@pytest.mark.parametrize("line", ['"visibility": owner', "'owner': bob", '"\\x6fwner": bob', "? visibility\n: owner",
                                   "visibility : owner", "lang: en\n{kind: x,\n  visibility: owner}", "&a key: x",
                                   "lang: en\n[a, b]: x\n  visibility: owner"])
 def test_a_line_that_may_spell_a_key_the_hub_enforces_still_closes_the_sheaf(team, work, line):
-    put(team, work, DOC, OPEN.replace("owner: thierry\n", f"owner: thierry\n{line}\n"))
-    assert team.get(f"/work/{DOC}", member=HANS).status == 404
+    put(team, work, DOC, OPEN.replace("owner: alice\n", f"owner: alice\n{line}\n"))
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
 
 
 def test_a_write_token_cannot_read_an_owner_only_sheaf(team, browser, work):
@@ -771,7 +771,7 @@ def test_a_write_token_cannot_read_an_owner_only_sheaf(team, browser, work):
     assert is_error and got == missing.replace("nothing.md", DOC.rsplit("/", 1)[1])
 
 
-THREAD = ('A quote from the contract.<!-- sheaf-comment id=c1 by="Thierry" at=2026-10-28T09:00 status=open '
+THREAD = ('A quote from the contract.<!-- sheaf-comment id=c1 by="Alice" at=2026-10-28T09:00 status=open '
           'quote="contract"\nThe fee?\n-->')
 
 
@@ -820,17 +820,17 @@ def test_a_tokens_update_with_a_wrong_hash_does_not_tell_an_owner_only_sheaf_fro
 
 
 def test_a_token_bound_to_the_owner_reads_the_owners_sheaf(team, browser, work):
-    team.hub.proxy = members(work, thierry=["james-thierry"])
+    team.hub.proxy = members(work, alice=["james-alice"])
     put(team, work, DOC, PRIVATE)
-    is_error, got = call(browser, "read", token=Tokens().add("james-thierry", write=True), doc=f"work/{DOC}")
+    is_error, got = call(browser, "read", token=Tokens().add("james-alice", write=True), doc=f"work/{DOC}")
     assert not is_error and "A quote from the contract." in got["text"]
 
 
 def test_a_token_bound_to_another_member_does_not_see_the_owners_sheaf(team, browser, work):
-    team.hub.proxy = members(work, thierry=["james-thierry"], hans=["james-hans"])
+    team.hub.proxy = members(work, alice=["james-alice"], bob=["james-bob"])
     put(team, work, DOC, PRIVATE.replace("A quote from the contract.", THREAD))
     put(team, work, "thinkingtoo/tiroir/open.md", "# Open\n\n" + THREAD + "\n")
-    token = Tokens().add("james-hans", write=True)
+    token = Tokens().add("james-bob", write=True)
     is_error, got = call(browser, "read", token=token, doc=f"work/{DOC}")
     assert is_error and got.startswith(f"There is no document work/{DOC} ")
     listed = [d["doc"] for d in call(browser, "documents", token=token)[1] if "doc" in d]
@@ -838,9 +838,9 @@ def test_a_token_bound_to_another_member_does_not_see_the_owners_sheaf(team, bro
 
 
 def test_a_token_bound_to_the_owner_lists_and_answers_the_owners_sheaf(team, browser, work):
-    team.hub.proxy = members(work, thierry=["james-thierry"])
+    team.hub.proxy = members(work, alice=["james-alice"])
     put(team, work, DOC, PRIVATE.replace("A quote from the contract.", THREAD))
-    token = Tokens().add("james-thierry")
+    token = Tokens().add("james-alice")
     assert f"work/{DOC}" in [d["doc"] for d in call(browser, "documents", token=token)[1] if "doc" in d]
     is_error, got = call(browser, "reply", token=token, doc=f"work/{DOC}", id="c1", text="The fee is fixed.")
     assert not is_error and got["replies"][-1]["text"] == "The fee is fixed."
@@ -866,7 +866,7 @@ def test_a_reply_that_lands_after_the_sheaf_closed_writes_nothing(team, browser,
     shared = PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:x/y#1]")
     put(team, work, DOC, shared.replace("A quote from the contract.", THREAD))
     if open_tab:
-        assert team.get(f"/work/{DOC}", member=THIERRY).status == 200
+        assert team.get(f"/work/{DOC}", member=ALICE).status == 200
     door = browser.handler.door
     checked = door._comment
 
@@ -904,24 +904,24 @@ def test_an_update_that_lands_after_the_sheaf_closed_writes_nothing(team, browse
 
 
 @pytest.fixture
-def hans_root(team, work):
-    """A root of Hans's alone, with an open page in it (no front matter, so open to the project)."""
-    root = work.parent / "hansroot"
+def bob_root(team, work):
+    """A root of Bob's alone, with an open page in it (no front matter, so open to the project)."""
+    root = work.parent / "bobroot"
     root.mkdir()
     f = root / "notes.md"
-    f.write_text("# Hans's notes\n\n" + THREAD + "\n", encoding="utf-8")
+    f.write_text("# Bob's notes\n\n" + THREAD + "\n", encoding="utf-8")
     name = team.hub.roots.for_document(f).name
     return root, f"{name}/notes.md"
 
 
-def test_a_door_create_whose_owner_cannot_reach_its_root_is_refused(team, browser, work, hans_root):
+def test_a_door_create_whose_owner_cannot_reach_its_root_is_refused(team, browser, work, bob_root):
     """An owner who is a member but not of the rectoverso's root could not open it either (9.9): an orphan all the
     same (#30)."""
-    root, notes = hans_root
-    team.hub.proxy = members(work, hans_also=root, hans=["mail-hans"])
+    root, notes = bob_root
+    team.hub.proxy = members(work, bob_also=root, bob=["mail-bob"])
     name = notes.split("/", 1)[0]
-    is_error, got = call(browser, "create", token=Tokens().add("mail-hans", write=True), doc=f"{name}/x.md",
-                         text=MAIL_TEXT.replace("sources:", "owner: thierry\nsources:"))
+    is_error, got = call(browser, "create", token=Tokens().add("mail-bob", write=True), doc=f"{name}/x.md",
+                         text=MAIL_TEXT.replace("sources:", "owner: alice\nsources:"))
     assert is_error and "owner" in got, got
     assert not (root / "x.md").exists()
 
@@ -943,10 +943,10 @@ def test_a_create_over_a_hidden_sheaf_near_the_limit_answers_only_that_its_name_
     """The owner line `_owned` adds depends on the list's row for the address; over a rectoverso the token may not
     see, a text near the limit must not tell by its size answer which issue that rectoverso names (#30)."""
     put(team, work, DOC, PRIVATE)
-    team.hub.proxy = members(work, hans=["mail-hans"])
+    team.hub.proxy = members(work, bob=["mail-bob"])
     monkeypatch.setattr(team.hub, "assignees",
                         lambda address, fm: ["tiroir"] if fm.get("issue") == "thinkingtoo/tt-tiroir#9" else None)
-    token = Tokens().add("mail-hans", write=True)
+    token = Tokens().add("mail-bob", write=True)
     answers = set()
     for guess in ("thinkingtoo/tt-tiroir#9", "thinkingtoo/tt-tiroir#8"):
         head = f"---\nvisibility: owner\nsources: [mail]\nissue: {guess}\n---\n"
@@ -968,7 +968,7 @@ def test_a_create_refused_for_no_owner_through_a_link_tells_nothing_of_what_is_b
 
 
 def test_a_bound_tokens_create_that_its_owner_line_takes_past_the_limit_is_refused(team, browser, work):
-    team.hub.proxy = members(work, thierry=["mail"])
+    team.hub.proxy = members(work, alice=["mail"])
     (work / "list/a/inbox").mkdir(parents=True)
     text = MAIL_TEXT + "x" * (MAX_TEXT - len(MAIL_TEXT.encode("utf-8")) - 1) + "\n"
     is_error, got = call(browser, "create", token=Tokens().add("mail", write=True), doc=f"work/{MAIL}", text=text)
@@ -984,11 +984,11 @@ def test_whose_a_document_is_is_judged_with_one_lookup_of_its_root_for_every_mem
     assert team.hub.members_owning(everyone, f"work/{DOC}") == everyone and len(lookups) == 1
 
 
-def test_a_token_bound_to_a_member_reaches_only_that_members_roots(team, browser, work, hans_root):
-    root, doc = hans_root
-    team.hub.proxy = members(work, hans_also=root, thierry=["james-thierry"])
+def test_a_token_bound_to_a_member_reaches_only_that_members_roots(team, browser, work, bob_root):
+    root, doc = bob_root
+    team.hub.proxy = members(work, bob_also=root, alice=["james-alice"])
     put(team, work, "thinkingtoo/tiroir/open.md", "# Open\n\n" + THREAD + "\n")
-    token = Tokens().add("james-thierry", write=True)
+    token = Tokens().add("james-alice", write=True)
     assert not call(browser, "read", token=token, doc="work/thinkingtoo/tiroir/open.md")[0]   # inside its roots
     is_error, got = call(browser, "read", token=token, doc=doc)
     assert is_error and got.startswith(f"There is no document {doc} ")
@@ -1001,11 +1001,11 @@ def test_a_token_bound_to_a_member_reaches_only_that_members_roots(team, browser
     assert is_error and "is not inside a root of this hub" in got and not (root / "copy.md").exists()
 
 
-def test_an_unbound_token_still_reaches_every_root(team, browser, work, hans_root):
-    root, doc = hans_root
-    team.hub.proxy = members(work, hans_also=root, thierry=["james-thierry"])
+def test_an_unbound_token_still_reaches_every_root(team, browser, work, bob_root):
+    root, doc = bob_root
+    team.hub.proxy = members(work, bob_also=root, alice=["james-alice"])
     is_error, got = call(browser, "read", token=Tokens().add("codex", write=True), doc=doc)
-    assert not is_error and "Hans's notes" in got["text"]
+    assert not is_error and "Bob's notes" in got["text"]
 
 
 def test_documents_stops_listing_a_sheaf_that_closed_with_the_same_size_and_time(team, browser, work):
@@ -1025,10 +1025,10 @@ def test_documents_stops_listing_a_sheaf_that_closed_with_the_same_size_and_time
 @pytest.mark.parametrize("tool, doc, args", [
     ("create", "{root}/x.txt", {"text": "# X\n"}),
     ("read", "{path}/nope.md", {})], ids=["create", "read by path"])
-def test_a_bound_token_cannot_tell_another_members_root_from_none(team, browser, work, hans_root, tool, doc, args):
-    root, address = hans_root
-    team.hub.proxy = members(work, hans_also=root, thierry=["james-thierry"])
-    token = Tokens().add("james-thierry", write=True)
+def test_a_bound_token_cannot_tell_another_members_root_from_none(team, browser, work, bob_root, tool, doc, args):
+    root, address = bob_root
+    team.hub.proxy = members(work, bob_also=root, alice=["james-alice"])
+    token = Tokens().add("james-alice", write=True)
     name = address.split("/")[0]
     nowhere = work.parent / "nowhere"
     _, theirs = call(browser, tool, token=token, doc=doc.format(root=name, path=root), **args)
@@ -1036,11 +1036,11 @@ def test_a_bound_token_cannot_tell_another_members_root_from_none(team, browser,
     assert theirs == none.replace("nosuchroot", name).replace(str(nowhere), str(root))
 
 
-def test_a_bound_token_cannot_tell_another_members_root_from_none_through_a_link(team, browser, work, hans_root):
-    """`create` by an absolute path through a link: one into Hans's root answers as one into no root (#68)."""
-    root, _ = hans_root
-    team.hub.proxy = members(work, hans_also=root, thierry=["james-thierry"])
-    token = Tokens().add("james-thierry", write=True)
+def test_a_bound_token_cannot_tell_another_members_root_from_none_through_a_link(team, browser, work, bob_root):
+    """`create` by an absolute path through a link: one into Bob's root answers as one into no root (#68)."""
+    root, _ = bob_root
+    team.hub.proxy = members(work, bob_also=root, alice=["james-alice"])
+    token = Tokens().add("james-alice", write=True)
     links, nowhere = work.parent / "links", work.parent / "nowhere"
     links.mkdir()
     nowhere.mkdir()
@@ -1056,7 +1056,7 @@ def test_a_bound_token_cannot_tell_another_members_root_from_none_through_a_link
 def test_documents_for_a_bound_token_asks_git_once_per_folder_not_once_per_file(team, browser, work, monkeypatch):
     # Whether a file is the member's asks git of its folder: a large root must not start a git per file.
     import subprocess
-    team.hub.proxy = members(work, hans=["james-hans"])
+    team.hub.proxy = members(work, bob=["james-bob"])
     for i in range(6):
         put(team, work, f"thinkingtoo/tiroir/{i}.md", "# Open\n\n" + THREAD + "\n")
     run, asked = subprocess.run, []
@@ -1066,7 +1066,7 @@ def test_documents_for_a_bound_token_asks_git_once_per_folder_not_once_per_file(
             asked.append(cmd)
         return run(cmd, *a, **k)
     monkeypatch.setattr(subprocess, "run", counting)
-    listed = [d["doc"] for d in call(browser, "documents", token=Tokens().add("james-hans"))[1] if "doc" in d]
+    listed = [d["doc"] for d in call(browser, "documents", token=Tokens().add("james-bob"))[1] if "doc" in d]
     assert len(listed) == 6
     folders = [cmd[2] for cmd in asked]
     assert len(folders) == len(set(folders)), folders      # no folder asked twice, whatever its files
@@ -1091,9 +1091,9 @@ def spoil(f, how):
 def test_a_token_that_saw_a_sheaf_is_told_when_its_file_cannot_be_read(team, browser, work, how, tool, args):
     if how == "unreadable" and os.geteuid() == 0:
         pytest.skip("root reads a file of mode 000")
-    team.hub.proxy = members(work, thierry=["james-thierry"])
+    team.hub.proxy = members(work, alice=["james-alice"])
     put(team, work, DOC, PRIVATE.replace("A quote from the contract.", THREAD))
-    token = Tokens().add("james-thierry", write=True)
+    token = Tokens().add("james-alice", write=True)
     assert not call(browser, "read", token=token, doc=f"work/{DOC}")[0]
     f = work / DOC
     spoil(f, how)
@@ -1105,19 +1105,19 @@ def test_a_token_that_saw_a_sheaf_is_told_when_its_file_cannot_be_read(team, bro
 
 def test_an_unbound_token_is_told_when_the_file_of_an_open_sheaf_it_saw_cannot_be_read(team, browser, work):
     put(team, work, DOC, OPEN)
-    assert team.get(f"/work/{DOC}", member=HANS).status == 200      # what the hub last read of it: open
+    assert team.get(f"/work/{DOC}", member=BOB).status == 200      # what the hub last read of it: open
     spoil(work / DOC, "not UTF-8")
     got = call(browser, "read", token=Tokens().add("codex", write=True), doc=f"work/{DOC}")
     assert got == (True, UNREADABLE.format(f"work/{DOC}"))
 
 
-@pytest.mark.parametrize("token_of", ["hans", "nobody"])
+@pytest.mark.parametrize("token_of", ["bob", "nobody"])
 def test_a_token_that_may_not_see_a_sheaf_is_told_nothing_of_its_unreadable_file(team, browser, work, token_of):
-    team.hub.proxy = members(work, thierry=["james-thierry"], hans=["james-hans"])
+    team.hub.proxy = members(work, alice=["james-alice"], bob=["james-bob"])
     put(team, work, DOC, PRIVATE)
-    assert not call(browser, "read", token=Tokens().add("james-thierry", write=True), doc=f"work/{DOC}")[0]   # the hub read it
+    assert not call(browser, "read", token=Tokens().add("james-alice", write=True), doc=f"work/{DOC}")[0]   # the hub read it
     spoil(work / DOC, "not UTF-8")
-    token = Tokens().add("james-hans" if token_of == "hans" else "codex", write=True)
+    token = Tokens().add("james-bob" if token_of == "bob" else "codex", write=True)
     is_error, got = call(browser, "read", token=token, doc=f"work/{DOC}")
     _, missing = call(browser, "read", token=token, doc="work/thinkingtoo/tiroir/nothing.md")
     assert is_error and got == missing.replace("nothing.md", DOC.rsplit("/", 1)[1])
@@ -1125,10 +1125,10 @@ def test_a_token_that_may_not_see_a_sheaf_is_told_nothing_of_its_unreadable_file
 
 def test_an_unreadable_file_the_hub_never_read_is_told_as_none_even_to_its_owners_token(team, browser, work):
     # Without a good read since the hub started, nothing says the token may see it.
-    team.hub.proxy = members(work, thierry=["james-thierry"])
+    team.hub.proxy = members(work, alice=["james-alice"])
     put(team, work, DOC, PRIVATE)
     spoil(work / DOC, "not UTF-8")
-    token = Tokens().add("james-thierry", write=True)
+    token = Tokens().add("james-alice", write=True)
     is_error, got = call(browser, "read", token=token, doc=f"work/{DOC}")
     _, missing = call(browser, "read", token=token, doc="work/thinkingtoo/tiroir/nothing.md")
     assert is_error and got == missing.replace("nothing.md", DOC.rsplit("/", 1)[1])
@@ -1137,9 +1137,9 @@ def test_an_unreadable_file_the_hub_never_read_is_told_as_none_even_to_its_owner
 
 @pytest.mark.parametrize("tool, args", [("resolve", {"id": "c1"}), ("update", {"text": "x\n", "expected_hash": "0" * 16})])
 def test_the_other_tools_tell_a_token_that_saw_a_sheaf_its_file_cannot_be_read(team, browser, work, tool, args):
-    team.hub.proxy = members(work, thierry=["james-thierry"])
+    team.hub.proxy = members(work, alice=["james-alice"])
     put(team, work, DOC, PRIVATE.replace("A quote from the contract.", THREAD))
-    token = Tokens().add("james-thierry", write=True)
+    token = Tokens().add("james-alice", write=True)
     assert not call(browser, "read", token=token, doc=f"work/{DOC}")[0]
     spoil(work / DOC, "not UTF-8")
     assert call(browser, tool, token=token, doc=f"work/{DOC}", **args) == (True, UNREADABLE.format(f"work/{DOC}"))
@@ -1147,11 +1147,11 @@ def test_the_other_tools_tell_a_token_that_saw_a_sheaf_its_file_cannot_be_read(t
 
 def test_a_token_whose_project_no_longer_names_its_member_is_told_nothing_of_the_unreadable_file(team, browser,
                                                                                                     work):
-    team.hub.proxy = members(work, hans=["james-hans"])
+    team.hub.proxy = members(work, bob=["james-bob"])
     put(team, work, DOC, OPEN)
-    token = Tokens().add("james-hans", write=True)
+    token = Tokens().add("james-bob", write=True)
     assert not call(browser, "read", token=token, doc=f"work/{DOC}")[0]
-    (work / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["Thierry"]\n', encoding="utf-8")
+    (work / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["Alice"]\n', encoding="utf-8")
     spoil(work / DOC, "not UTF-8")
     is_error, got = call(browser, "read", token=token, doc=f"work/{DOC}")
     _, missing = call(browser, "read", token=token, doc="work/thinkingtoo/tiroir/nothing.md")
@@ -1174,11 +1174,11 @@ def test_an_unreadable_file_that_replaced_the_one_a_token_saw_is_told_as_none(te
 OPEN = PRIVATE.replace("sources: [library:doc-123]\n", "")
 
 
-def hans_door(team, browser, work, rel):
-    """The door update of `rel` by Hans's assistant, over a rectoverso Thierry owns that is open to the project:
+def bob_door(team, browser, work, rel):
+    """The door update of `rel` by Bob's assistant, over a rectoverso Alice owns that is open to the project:
     a function of the change to the text."""
-    team.hub.proxy = members(work, hans=["hansdoor"])
-    token = Tokens().add("hansdoor", write=True)
+    team.hub.proxy = members(work, bob=["bobdoor"])
+    token = Tokens().add("bobdoor", write=True)
 
     def update(change):
         is_error, got = call(browser, "read", token=token, doc=f"work/{rel}")
@@ -1197,20 +1197,20 @@ def test_a_door_update_of_an_open_sheaf_keeps_its_owner_and_issue_whatever_the_t
     is_error, got = door_update(team, browser, work, DOC, change)
     assert not is_error, got
     fm = front_matter((work / DOC).read_text(encoding="utf-8"))
-    assert (fm.get("owner"), fm.get("issue")) == ("thierry", "thinkingtoo/tt-tiroir#9")
+    assert (fm.get("owner"), fm.get("issue")) == ("alice", "thinkingtoo/tt-tiroir#9")
 
 
 def test_a_door_write_that_drops_the_front_matter_cannot_give_an_open_sheaf_to_another_members_assistant(team, browser, work):
     put(team, work, DOC, OPEN)
-    update = hans_door(team, browser, work, DOC)
+    update = bob_door(team, browser, work, DOC)
     is_error, got = update(lambda t: t.split("---\n", 2)[2])
     assert not is_error, got
     is_error, got = update(lambda t: "---\nsources: [mail:x]\n---\n" + t)
     assert not is_error, got
     fm = front_matter((work / DOC).read_text(encoding="utf-8"))
-    assert fm.get("owner") == "thierry" and fm.get("issue") == "thinkingtoo/tt-tiroir#9"
-    assert team.get(f"/work/{DOC}", member=HANS).status == 404
-    assert team.get(f"/work/{DOC}", member=THIERRY).status == 200
+    assert fm.get("owner") == "alice" and fm.get("issue") == "thinkingtoo/tt-tiroir#9"
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
+    assert team.get(f"/work/{DOC}", member=ALICE).status == 200
 
 
 # ── the tick box's own words, "Shared with the team" (action-buttons 03) ──────────────────────────────────────
@@ -1220,18 +1220,18 @@ LABELLED = PRIVATE.replace("- [ ] Share", "- [ ] Shared with the team")
 
 def test_the_owners_tick_of_the_labelled_box_shares_the_sheaf_as_share_does(team, work):
     put(team, work, DOC, LABELLED)
-    assert tick(team, work, DOC, "Share", THIERRY).status == 200
+    assert tick(team, work, DOC, "Share", ALICE).status == 200
     text = (work / DOC).read_text(encoding="utf-8")
     fm = front_matter(text)
-    assert fm["visibility"] == "project" and fm["shared"].startswith("thierry ")
+    assert fm["visibility"] == "project" and fm["shared"].startswith("alice ")
     assert "- [x] Shared with the team" in text
-    assert team.get(f"/work/{DOC}", member=HANS).status == 200
+    assert team.get(f"/work/{DOC}", member=BOB).status == 200
 
 
 def test_the_labelled_box_ticked_by_a_member_who_is_not_the_owner_is_refused_and_writes_nothing(team, work):
     put(team, work, DOC, LABELLED.replace("sources: [library:doc-123]", "sources: [issue:x/y#1]"))
     before = (work / DOC).read_text(encoding="utf-8")
-    got = tick(team, work, DOC, "Share", HANS)
+    got = tick(team, work, DOC, "Share", BOB)
     assert got.status == 409 and "owner" in got.json()["error"]
     assert (work / DOC).read_text(encoding="utf-8") == before
 
@@ -1244,27 +1244,27 @@ def test_the_list_reads_the_labelled_box_as_the_share_action_and_gives_the_word_
 
 def test_the_owners_release_of_the_labelled_box_makes_the_sheaf_their_own_alone_again(team, work):
     put(team, work, DOC, LABELLED)
-    assert tick(team, work, DOC, "Share", THIERRY).status == 200
+    assert tick(team, work, DOC, "Share", ALICE).status == 200
     text = (work / DOC).read_text(encoding="utf-8")
     edit = the_list.tick_edit(text, 0, "Share", release=True)
-    got = team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text), "edits": [edit]}, member=HANS)
+    got = team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text), "edits": [edit]}, member=BOB)
     assert got.status == 409 and "owner" in got.json()["error"]
     assert (work / DOC).read_text(encoding="utf-8") == text
-    got = team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text), "edits": [edit]}, member=THIERRY)
+    got = team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text), "edits": [edit]}, member=ALICE)
     assert got.status == 200
     text = (work / DOC).read_text(encoding="utf-8")
     assert "- [ ] Shared with the team" in text and front_matter(text)["visibility"] == "owner"
-    assert team.get(f"/work/{DOC}", member=HANS).status == 404
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
 
 
 def test_the_hub_never_writes_the_new_label_into_a_file_that_holds_the_old_line(team, work):
     """An existing file keeps `- [ ] Share` through every write the hub makes (share, release): the tt-tiroir
     record routine reads only the old word, so the new label must come from a file's author, never from the hub."""
     put(team, work, DOC, PRIVATE)
-    assert tick(team, work, DOC, "Share", THIERRY).status == 200
+    assert tick(team, work, DOC, "Share", ALICE).status == 200
     text = (work / DOC).read_text(encoding="utf-8")
     assert "- [x] Share\n" in text and "Shared with the team" not in text
     edit = the_list.tick_edit(text, 0, "Share", release=True)
-    assert team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text), "edits": [edit]}, member=THIERRY).status == 200
+    assert team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text), "edits": [edit]}, member=ALICE).status == 200
     text = (work / DOC).read_text(encoding="utf-8")
     assert "- [ ] Share\n" in text and "Shared with the team" not in text

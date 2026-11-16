@@ -131,7 +131,7 @@ def test_a_tell_of_another_shape_is_skipped():
 
 def test_revoke_ends_the_tokens_of_a_sheaf(capsys):
     from sheafmd.hub.relay import Relays
-    token, _ = Relays().issue("hans", DOC, SID)
+    token, _ = Relays().issue("bob", DOC, SID)
     assert rc.cmd_relay(["revoke", DOC]) == 0
     assert capsys.readouterr().out == f"revoked 1 relay token of {DOC}\n"
     from sheafmd.hub.relay import digest

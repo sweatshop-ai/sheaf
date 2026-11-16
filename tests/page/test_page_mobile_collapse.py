@@ -1,4 +1,4 @@
-"""On Thierry's iPhone (trial of 2026-11-10) a focus() made in the pointerup of a long-press release raised the keyboard and the field
+"""On Alice's iPhone (trial of 2026-11-10) a focus() made in the pointerup of a long-press release raised the keyboard and the field
 stayed the active element, but iOS fired one more selectionchange 1 to 7 ms later and the page's words were selected again: the
 cursor was not in the box. A box opened by a touch takes that selection away and puts the caret at the end of its field. Emulation
 cannot make the selection come back by itself, so the tests fire it."""

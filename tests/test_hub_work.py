@@ -1,7 +1,7 @@
 """Work on this (SPEC 9.12): a member downloads the transcript of a rectoverso's box-hosted session, reports the
 fork they made of it on their machine, and on a rectoverso whose live session runs on the box sends Tell
 to James's window by a file the hub drops. Through the handler in proxy mode, with the list's root as the
-members' root: Thierry owns the rectoversos, Hans is a member of the project, Bea is a member of another root."""
+members' root: Alice owns the rectoversos, Bob is a member of the project, Bea is a member of another root."""
 import json
 import os
 import pwd
@@ -16,8 +16,8 @@ from helpers import FRONT, Front, hub_rows
 from sheafmd.hub import proxy, the_list
 from sheafmd.hub import work as work_mod
 
-THIERRY = "503b2f77-83de-452c-817a-a357faf85929"
-HANS = "2b9d7e1c-4a51-4c0e-9d1f-6f0c3a7e8b42"
+ALICE = "503b2f77-83de-452c-817a-a357faf85929"
+BOB = "2b9d7e1c-4a51-4c0e-9d1f-6f0c3a7e8b42"
 BEA = "9c1d2e3f-0000-4a51-8c0e-1f2a3b4c5d6e"
 LIVE = "6f1c0e9a-2b3d-4c5e-8f70-1a2b3c4d5e6f"
 OLDER = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
@@ -31,11 +31,11 @@ client: thinkingtoo
 project: tiroir
 issue: thinkingtoo/tt-tiroir#8
 assistant: James
-owner: thierry
+owner: alice
 sources: [issue:thinkingtoo/tt-tiroir#8]
 sessions:
   - {{id: {LIVE}, host: tiroir-tt, member: james, date: 2026-10-28T05:12:03Z}}
-  - {{id: {LAPTOP}, host: thierry-laptop, member: thierry, date: 2026-10-27T09:00:00Z}}
+  - {{id: {LAPTOP}, host: alice-laptop, member: alice, date: 2026-10-27T09:00:00Z}}
   - {{id: {OLDER}, host: tiroir-tt, member: james, date: 2026-10-26T08:00:00Z}}
 ---
 # What the contract says
@@ -49,13 +49,13 @@ TRANSCRIPT = (b'{"type":"user","cwd":"%s","sessionId":"%s","message":"hello"}\n'
 OLDER_TRANSCRIPT = b'{"older":true,"cwd":"%s","sessionId":"%s"}\n' % (CWD.encode(), OLDER.encode())
 
 
-def the_team(work, tmp_path, thierrys_tokens=()):
-    """The `[proxy]` table of the three members; `thierrys_tokens` are the door tokens bound to Thierry."""
+def the_team(work, tmp_path, alices_tokens=()):
+    """The `[proxy]` table of the three members; `alices_tokens` are the door tokens bound to Alice."""
     return proxy.parse({"origin": FRONT, "socket": "/run/sheaf-proxy/hub.sock",
                         "proxy_user": pwd.getpwuid(os.getuid()).pw_name,
-                        "members": {THIERRY: {"name": "Thierry", "short": "thierry", "roots": [str(work)],
-                                              "shell": True, "tokens": list(thierrys_tokens)},
-                                    HANS: {"name": "Hans", "short": "hans", "roots": [str(work)]},
+                        "members": {ALICE: {"name": "Alice", "short": "alice", "roots": [str(work)],
+                                              "shell": True, "tokens": list(alices_tokens)},
+                                    BOB: {"name": "Bob", "short": "bob", "roots": [str(work)]},
                                     BEA: {"name": "Bea", "roots": [str(tmp_path / "other")]}}},
                        "the test")
 
@@ -64,7 +64,7 @@ def the_team(work, tmp_path, thierrys_tokens=()):
 def team(hub, browser, work, plan, tmp_path):
     hub.proxy = the_team(work, tmp_path)
     (tmp_path / "other").mkdir()
-    (work / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["thierry", "hans"]\n'
+    (work / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["alice", "bob"]\n'
                                         'status = "live"\n', encoding="utf-8")
     return Front(hub, browser.handler)
 
@@ -95,7 +95,7 @@ def put(team, work, rel, text):
     return f"work/{rel}"
 
 
-def download(team, doc=ADDRESS, id=None, member=HANS):
+def download(team, doc=ADDRESS, id=None, member=BOB):
     q = f"/_/session?doc={doc}" + (f"&id={id}" if id is not None else "")
     return team.get(q, member=member)
 
@@ -114,16 +114,16 @@ def test_a_member_downloads_the_transcript_of_the_sheafs_newest_box_session(team
 
 def test_a_member_of_another_root_gets_the_404_of_a_missing_document(team, box):
     got = download(team, member=BEA)
-    missing = download(team, doc="work/thinkingtoo/tiroir/nothing.md", member=HANS)
+    missing = download(team, doc="work/thinkingtoo/tiroir/nothing.md", member=BOB)
     assert got.status == missing.status == 404 and got.body == missing.body
     assert hub_rows("transcript-downloaded") == []
 
 
 def test_on_an_owner_only_sheaf_only_its_owner_downloads(team, box, work):
     put(team, work, DOC, SHEAF.replace("sources: [issue:thinkingtoo/tt-tiroir#8]", "sources: [library:doc-1]"))
-    got = download(team, member=HANS)
+    got = download(team, member=BOB)
     assert got.status == 404 and got.json()["error"] == "no such document"
-    assert download(team, member=THIERRY).body == TRANSCRIPT
+    assert download(team, member=ALICE).body == TRANSCRIPT
 
 
 def test_the_loopback_port_has_no_session_route(team, box, browser):
@@ -187,7 +187,7 @@ def test_on_a_sheaf_live_on_a_laptop_no_box_session_is_served_without_its_id(tea
     # tt-tiroir#165: without an id the transcript is the live session's, and a laptop's is never served; the box's
     # older copy is not handed out in its place (`tiroir work` would fork it).
     put(team, work, DOC, SHEAF.replace("host: tiroir-tt, member: james, date: 2026-10-28T05:12:03Z",
-                                       "host: thierry-laptop, member: thierry, date: 2026-10-28T05:12:03Z"))
+                                       "host: alice-laptop, member: alice, date: 2026-10-28T05:12:03Z"))
     assert download(team).status == 404
     assert hub_rows("transcript-downloaded") == []
     got = download(team, id=OLDER)
@@ -283,19 +283,19 @@ def test_a_session_item_that_does_not_parse_is_skipped(team, box, work):
 def test_a_download_writes_its_row(team, box):
     download(team)
     row, = hub_rows("transcript-downloaded")
-    assert (row["doc"], row["transcript"], row["by"], row["issue"]) == (ADDRESS, LIVE, "hans", "thinkingtoo/tt-tiroir#8")
+    assert (row["doc"], row["transcript"], row["by"], row["issue"]) == (ADDRESS, LIVE, "bob", "thinkingtoo/tt-tiroir#8")
 
 
 # ── config ───────────────────────────────────────────────────────────────────
 
 def members(**extra):
     return {"origin": FRONT, "socket": "/run/sheaf-proxy/hub.sock", "proxy_user": pwd.getpwuid(os.getuid()).pw_name,
-            "members": {HANS: {"name": "Hans", "roots": ["/srv/work"], **extra}}}
+            "members": {BOB: {"name": "Bob", "roots": ["/srv/work"], **extra}}}
 
 
 def test_shell_is_false_unless_the_member_block_says_true():
-    assert proxy.parse(members(), "t").members[HANS].shell is False
-    assert proxy.parse(members(shell=True), "t").members[HANS].shell is True
+    assert proxy.parse(members(), "t").members[BOB].shell is False
+    assert proxy.parse(members(shell=True), "t").members[BOB].shell is True
     with pytest.raises(proxy.ProxyError, match="'shell' must be true or false"):
         proxy.parse(members(shell="yes"), "t")
 
@@ -328,22 +328,22 @@ def test_an_attach_of_two_lines_stops_the_start(tmp_path):
 
 def test_a_root_holder_the_project_does_not_name_gets_the_404_of_a_missing_document(team, box, work):
     """tt-tiroir #116: the download and the fork report are judged as the page is, by `projects.toml` too (8.12):
-    Hans holds the root but the project names Thierry alone, so the shared rectoverso is not there for him."""
-    missing = download(team, doc="work/thinkingtoo/tiroir/nothing.md", member=HANS)
-    assert download(team, member=HANS).status == 200                # named, he downloads; the hub has read the file
-    (work / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["thierry"]\nstatus = "live"\n',
+    Bob holds the root but the project names Alice alone, so the shared rectoverso is not there for him."""
+    missing = download(team, doc="work/thinkingtoo/tiroir/nothing.md", member=BOB)
+    assert download(team, member=BOB).status == 200                # named, he downloads; the hub has read the file
+    (work / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["alice"]\nstatus = "live"\n',
                                         encoding="utf-8")
     downloaded = len(hub_rows("transcript-downloaded"))
     before = (work / DOC).read_text(encoding="utf-8")
-    got = download(team, member=HANS)
+    got = download(team, member=BOB)
     assert got.status == missing.status == 404 and got.body == missing.body
     forked = team.post("/_/sessions", {"doc": ADDRESS, "id": "7e8f9a0b-1c2d-4e3f-8a4b-5c6d7e8f9a0b",
-                                        "machine": "hans-mac"}, member=HANS)
+                                        "machine": "bob-mac"}, member=BOB)
     assert forked.status == 404 and forked.json()["error"] == "no such document"
     assert (work / DOC).read_text(encoding="utf-8") == before
     assert len(hub_rows("transcript-downloaded")) == downloaded and hub_rows("session-forked") == []
-    assert team.get(f"/{ADDRESS}", member=HANS).status == 404
-    assert download(team, member=THIERRY).body == TRANSCRIPT
+    assert team.get(f"/{ADDRESS}", member=BOB).status == 404
+    assert download(team, member=ALICE).body == TRANSCRIPT
 
 
 # ── the fork report ──────────────────────────────────────────────────────────
@@ -358,31 +358,31 @@ def sessions_of(work):
 
 def test_a_fork_is_the_first_session_named_by_the_signed_in_member(team, box, work):
     before = (work / DOC).read_text(encoding="utf-8")
-    got = team.post("/_/sessions", {"doc": ADDRESS, "id": FORK, "machine": "hans-mac.local"}, member=HANS)
+    got = team.post("/_/sessions", {"doc": ADDRESS, "id": FORK, "machine": "bob-mac.local"}, member=BOB)
     assert got.status == 200, got.text
     after = (work / DOC).read_text(encoding="utf-8")
     first = sessions_of(work)[0]
-    assert first.startswith(f"{{id: {FORK}, host: hans-mac.local, member: hans, date: 20")
+    assert first.startswith(f"{{id: {FORK}, host: bob-mac.local, member: bob, date: 20")
     assert after.replace(f"  - {first}\n", "", 1) == before
     from sheafmd.source import md_hash
     assert got.json() == {"ok": True, "hash": md_hash(after), "relay": got.json()["relay"]}
 
 
-def fork(team, id=FORK, as_=HANS, **extra):
-    return team.post("/_/sessions", {"doc": ADDRESS, "id": id, "machine": "hans-mac", **extra}, member=as_)
+def fork(team, id=FORK, as_=BOB, **extra):
+    return team.post("/_/sessions", {"doc": ADDRESS, "id": id, "machine": "bob-mac", **extra}, member=as_)
 
 
 def test_an_id_already_listed_moves_to_the_top_and_is_listed_once(team, box, work):
     assert fork(team, id=OLDER).status == 200
     got = sessions_of(work)
     assert [s.split(",")[0] for s in got] == [f"{{id: {OLDER}", f"{{id: {LIVE}", f"{{id: {LAPTOP}"]
-    assert got[0].startswith(f"{{id: {OLDER}, host: hans-mac, member: hans, ")
+    assert got[0].startswith(f"{{id: {OLDER}, host: bob-mac, member: bob, ")
 
 
 def test_a_sheaf_with_no_sessions_yet_gets_the_key(team, box, work):
     put(team, work, DOC, SHEAF.split("sessions:\n")[0] + "---\n# Bare\n")
     assert fork(team).status == 200
-    assert sessions_of(work)[0].startswith(f"{{id: {FORK}, host: hans-mac, member: hans, ")
+    assert sessions_of(work)[0].startswith(f"{{id: {FORK}, host: bob-mac, member: bob, ")
     assert (work / DOC).read_text(encoding="utf-8").endswith("---\n# Bare\n")
 
 
@@ -409,7 +409,7 @@ def test_an_empty_flow_list_becomes_the_list_of_the_fork(team, box, work):
     put(team, work, DOC, SHEAF.split("sessions:\n")[0] + "sessions: []\n---\n# T\n")
     assert fork(team).status == 200
     text = (work / DOC).read_text(encoding="utf-8")
-    assert text.count("sessions:") == 1 and sessions_of(work)[0].startswith(f"{{id: {FORK}, host: hans-mac, ")
+    assert text.count("sessions:") == 1 and sessions_of(work)[0].startswith(f"{{id: {FORK}, host: bob-mac, ")
 
 
 def test_sessions_written_on_one_line_are_not_rewritten(team, box, work):
@@ -421,11 +421,11 @@ def test_sessions_written_on_one_line_are_not_rewritten(team, box, work):
 
 
 def test_the_fork_is_the_signed_in_members_whatever_the_body_names(team, box, work):
-    assert fork(team, member="thierry", by="thierry", name="Thierry", email="t@example.com").status == 200
-    assert ", member: hans, " in sessions_of(work)[0]
+    assert fork(team, member="alice", by="alice", name="Alice", email="t@example.com").status == 200
+    assert ", member: bob, " in sessions_of(work)[0]
     row, = hub_rows("session-forked")
     assert (row["doc"], row["transcript"], row["by"], row["machine"], row["issue"]) == \
-        (ADDRESS, FORK, "hans", "hans-mac", "thinkingtoo/tt-tiroir#8")
+        (ADDRESS, FORK, "bob", "bob-mac", "thinkingtoo/tt-tiroir#8")
 
 
 @pytest.mark.parametrize("body, words", [
@@ -435,20 +435,20 @@ def test_the_fork_is_the_signed_in_members_whatever_the_body_names(team, box, wo
 ])
 def test_a_fork_report_of_another_shape_is_refused_and_writes_nothing(team, box, work, body, words):
     before = (work / DOC).read_text(encoding="utf-8")
-    got = team.post("/_/sessions", {"doc": ADDRESS, "id": FORK, "machine": "hans-mac", **body}, member=HANS)
+    got = team.post("/_/sessions", {"doc": ADDRESS, "id": FORK, "machine": "bob-mac", **body}, member=BOB)
     assert got.status == 400 and words in got.json()["error"]
     assert (work / DOC).read_text(encoding="utf-8") == before
 
 
 def test_a_fork_report_from_another_origin_is_refused(team, box, work):
     before = (work / DOC).read_text(encoding="utf-8")
-    got = team.post("/_/sessions", {"doc": ADDRESS, "id": FORK, "machine": "m"}, member=HANS,
+    got = team.post("/_/sessions", {"doc": ADDRESS, "id": FORK, "machine": "m"}, member=BOB,
                     origin="https://evil.example")
     assert got.status == 403
     assert (work / DOC).read_text(encoding="utf-8") == before
 
 
-def test_a_fork_report_on_a_sheaf_hans_may_not_open_is_404(team, box, work):
+def test_a_fork_report_on_a_sheaf_bob_may_not_open_is_404(team, box, work):
     put(team, work, DOC, SHEAF.replace("sources: [issue:thinkingtoo/tt-tiroir#8]", "sources: [library:doc-1]"))
     before = (work / DOC).read_text(encoding="utf-8")
     assert fork(team).status == 404
@@ -457,7 +457,7 @@ def test_a_fork_report_on_a_sheaf_hans_may_not_open_is_404(team, box, work):
 
 
 def test_an_open_tab_hears_the_fork(team, box, work):
-    sub = team.get(f"/_/live?doc={ADDRESS}", member=THIERRY).stream
+    sub = team.get(f"/_/live?doc={ADDRESS}", member=ALICE).stream
     sub.drain()
     h = fork(team).json()["hash"]
     events = [(name, data) for name, data in sub.drain() if name == "changed"]
@@ -471,21 +471,21 @@ def git(at, *args):
 
 @pytest.fixture
 def committing(hub, browser, tmp_path):
-    """The list's root a git repo that commits, as on the box; Hans's member block names no e-mail."""
+    """The list's root a git repo that commits, as on the box; Bob's member block names no e-mail."""
     repo = tmp_path / "rectoversos"
     repo.mkdir()
     git(repo, "init", "-q", "-b", "main")
     git(repo, "config", "user.name", "the box")
     git(repo, "config", "user.email", "box@example.com")
     (repo / ".sheaf.toml").write_text('commit = true\n', encoding="utf-8")
-    (repo / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["hans"]\nstatus = "live"\n', encoding="utf-8")
+    (repo / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["bob"]\nstatus = "live"\n', encoding="utf-8")
     (repo / DOC).parent.mkdir(parents=True)
     (repo / DOC).write_text(SHEAF, encoding="utf-8")
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "first")
     hub.proxy = proxy.parse({"origin": FRONT, "socket": "/run/sheaf-proxy/hub.sock",
                              "proxy_user": pwd.getpwuid(os.getuid()).pw_name,
-                             "members": {HANS: {"name": "Hans", "short": "hans", "roots": [str(repo)]}}}, "the test")
+                             "members": {BOB: {"name": "Bob", "short": "bob", "roots": [str(repo)]}}}, "the test")
     hub.roots.for_document(repo / DOC)
     hub.the_list = the_list.TheList(hub, the_list.parse(
         {"root": str(repo), "repo": "thinkingtoo/tt-tiroir", "project": 1, "token_file": str(tmp_path / "t"),
@@ -495,14 +495,14 @@ def committing(hub, browser, tmp_path):
 
 def test_the_fork_is_committed_as_the_signed_in_member(committing):
     repo, team = committing
-    got = team.post("/_/sessions", {"doc": f"rectoversos/{DOC}", "id": FORK, "machine": "hans-mac",
-                                    "member": "thierry", "by": "Thierry", "name": "Thierry",
-                                    "email": "thierry@example.com"}, member=HANS)
+    got = team.post("/_/sessions", {"doc": f"rectoversos/{DOC}", "id": FORK, "machine": "bob-mac",
+                                    "member": "alice", "by": "Alice", "name": "Alice",
+                                    "email": "alice@example.com"}, member=BOB)
     assert got.status == 200, got.text
     team.hub.commits.settle()
     assert git(repo, "log", "-1", "--format=%an <%ae>|%s").strip() == \
-        f"Hans <{proxy.default_email(HANS, FRONT)}>|fork: {DOC}"
-    assert ", member: hans, " in git(repo, "show", f"HEAD:{DOC}")
+        f"Bob <{proxy.default_email(BOB, FRONT)}>|fork: {DOC}"
+    assert ", member: bob, " in git(repo, "show", f"HEAD:{DOC}")
 
 
 def test_a_write_that_landed_before_the_fork_is_kept(team, box, work):
@@ -516,7 +516,7 @@ def test_a_write_that_landed_before_the_fork_is_kept(team, box, work):
 
 # ── Tell to James's window ───────────────────────────────────────────
 
-def comment(team, work, kind, as_=HANS, body="Can you send the draft to Joey?", **extra):
+def comment(team, work, kind, as_=BOB, body="Can you send the draft to Joey?", **extra):
     from sheafmd.blocks import split_md_blocks
     from sheafmd.source import md_hash
     text = (work / DOC).read_text(encoding="utf-8")
@@ -538,12 +538,12 @@ def test_tell_on_a_box_sheaf_writes_the_comment_and_drops_it_for_james(team, box
     assert f.name.startswith("thinkingtoo--tiroir-20") and f.name.endswith("Z")
     d = json.loads(f.read_bytes())
     tell_keys = {"id": d.get("id"), "message": d.get("message")}
-    assert d == {"project": "thinkingtoo/tiroir", "member": "hans", "sheaf": ADDRESS,
+    assert d == {"project": "thinkingtoo/tiroir", "member": "bob", "sheaf": ADDRESS,
                  "text": "Can you send the draft to Joey?", "kind": "tell", "thread": got.json()["id"],
                  "address": ADDRESS, "abs_path": str(work / DOC), **tell_keys}
     assert list(f.read_bytes().decode()) == list(json.dumps(json.loads(f.read_bytes())))
     row, = hub_rows("tell-dropped")
-    assert (row["what"], row["project"], row["by"], row["drop"]) == ("tell", "thinkingtoo/tiroir", "hans", "written")
+    assert (row["what"], row["project"], row["by"], row["drop"]) == ("tell", "thinkingtoo/tiroir", "bob", "written")
     assert team.hub.runner.active("tell", ADDRESS) == []
 
 
@@ -588,7 +588,7 @@ def test_a_second_drop_in_the_same_second_takes_the_next_name(team, box, work, m
 
 def test_on_a_sheaf_whose_live_session_is_on_a_laptop_tell_stays_refused(team, box, work):
     put(team, work, DOC, SHEAF.replace("host: tiroir-tt, member: james, date: 2026-10-28T05:12:03Z",
-                                       "host: thierry-laptop, member: thierry, date: 2026-10-28T05:12:03Z"))
+                                       "host: alice-laptop, member: alice, date: 2026-10-28T05:12:03Z"))
     before = (work / DOC).read_text(encoding="utf-8")
     got = comment(team, work, "tell")
     assert got.status == 400 and got.json()["error"] == proxy.PROXY_LINE
@@ -621,10 +621,10 @@ def test_a_request_sent_again_drops_once(team, box, work):
 def test_a_reply_with_tell_drops_the_reply(team, box, work):
     cid = comment(team, work, "tell").json()["id"]
     got = team.post("/_/comment", {"doc": ADDRESS, "op": "reply", "id": cid, "body": "And the invoice.",
-                                   "tell": True}, member=THIERRY)
+                                   "tell": True}, member=ALICE)
     assert got.status == 200, got.text
     texts = [(json.loads(f.read_bytes())["text"], json.loads(f.read_bytes())["member"]) for f in drops(box)]
-    assert ("And the invoice.", "thierry") in texts
+    assert ("And the invoice.", "alice") in texts
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root writes into a folder of mode 0500")
@@ -641,7 +641,7 @@ def test_a_drop_that_fails_keeps_the_comment_says_so_and_leaves_no_dot_file(team
 
 # ── the drop's wait (#115) ───────────────────────────────────────────────────
 
-def sent(team, member=HANS):
+def sent(team, member=BOB):
     got = team.get(f"/_/doc?doc={ADDRESS}", member=member)
     assert got.status == 200, got.text
     return got.json()["sent"]
@@ -649,8 +649,8 @@ def sent(team, member=HANS):
 
 def test_a_drop_for_james_is_sent_on_every_members_page_until_a_reply_lands_in_its_thread(team, box, work):
     cid = comment(team, work, "tell").json()["id"]
-    assert sent(team) == sent(team, THIERRY) == [{"id": cid, "kind": "tell", "state": "sent"}]
-    got = team.post("/_/comment", {"doc": ADDRESS, "op": "reply", "id": cid, "body": "Sent it."}, member=THIERRY)
+    assert sent(team) == sent(team, ALICE) == [{"id": cid, "kind": "tell", "state": "sent"}]
+    got = team.post("/_/comment", {"doc": ADDRESS, "op": "reply", "id": cid, "body": "Sent it."}, member=ALICE)
     assert got.status == 200, got.text
     assert sent(team) == []
 
@@ -668,7 +668,7 @@ def test_a_drop_that_fails_is_not_sent(team, box, work):
 def test_a_drop_with_no_reply_after_the_tell_wait_fails_on_the_members_page(team, box, work):
     now = [1_000_000.0]
     team.hub.clock = lambda: now[0]
-    tab = team.get(f"/_/live?doc={ADDRESS}", member=HANS).stream
+    tab = team.get(f"/_/live?doc={ADDRESS}", member=BOB).stream
     cid = comment(team, work, "tell").json()["id"]
     now[0] += team.hub.tell_wait - 1
     team.hub.tick()
@@ -687,9 +687,9 @@ def test_a_drop_answered_before_the_tell_wait_is_never_given_up_on_though_no_pag
     # The reply ends the wait when it lands, not when a page next asks /_/doc (#115).
     now = [1_000_000.0]
     team.hub.clock = lambda: now[0]
-    tab = team.get(f"/_/live?doc={ADDRESS}", member=HANS).stream
+    tab = team.get(f"/_/live?doc={ADDRESS}", member=BOB).stream
     cid = comment(team, work, "tell").json()["id"]
-    got = team.post("/_/comment", {"doc": ADDRESS, "op": "reply", "id": cid, "body": "Sent it."}, member=THIERRY)
+    got = team.post("/_/comment", {"doc": ADDRESS, "op": "reply", "id": cid, "body": "Sent it."}, member=ALICE)
     assert got.status == 200, got.text
     now[0] += team.hub.tell_wait + 1
     team.hub.tick()
@@ -714,15 +714,15 @@ def test_a_drop_answered_in_the_file_from_outside_is_never_given_up_on(team, box
 
 # ── the member's `telling` holds their own drops (SPEC 9.9, 9.12) ──────────
 
-def telling(team, member=HANS):
+def telling(team, member=BOB):
     return team.get(f"/_/doc?doc={ADDRESS}", member=member).json()["telling"]
 
 
 def test_a_members_telling_holds_their_own_drop_for_james_and_no_other_members(team, box, work):
     cid = comment(team, work, "tell").json()["id"]
     assert telling(team) == [{"id": cid, "to": "James", "state": "sent"}]
-    assert telling(team, THIERRY) == []                                   # `sent` stays every member's (9.12)
-    assert sent(team, THIERRY) == [{"id": cid, "kind": "tell", "state": "sent"}]
+    assert telling(team, ALICE) == []                                   # `sent` stays every member's (9.12)
+    assert sent(team, ALICE) == [{"id": cid, "kind": "tell", "state": "sent"}]
 
 
 def test_the_drops_telling_follows_the_supervisors_word_and_ends_with_the_reply(team, box, work):
@@ -730,20 +730,20 @@ def test_the_drops_telling_follows_the_supervisors_word_and_ends_with_the_reply(
     status(box, "delivered")
     team.hub.tick()
     assert telling(team) == [{"id": cid, "to": "James", "state": "delivered"}]
-    team.post("/_/comment", {"doc": ADDRESS, "op": "reply", "id": cid, "body": "Sent it."}, member=THIERRY)
+    team.post("/_/comment", {"doc": ADDRESS, "op": "reply", "id": cid, "body": "Sent it."}, member=ALICE)
     assert telling(team) == []
 
 
 def test_the_answer_of_a_comment_and_a_later_changed_event_carry_the_drop_in_telling_to_its_member_only(team, box, work):
-    mine, theirs = (team.get(f"/_/live?doc={ADDRESS}", member=m).stream for m in (HANS, THIERRY))
+    mine, theirs = (team.get(f"/_/live?doc={ADDRESS}", member=m).stream for m in (BOB, ALICE))
     got = comment(team, work, "tell")
     cid = got.json()["id"]
     assert got.json()["telling"] == [{"id": cid, "to": "James", "state": "sent"}]
     mine.drain(), theirs.drain()
-    comment(team, work, "note", as_=THIERRY, body="Another thread.")                      # a change of the rectoverso
+    comment(team, work, "note", as_=ALICE, body="Another thread.")                      # a change of the rectoverso
     last = lambda sub: [d for n, d in sub.drain() if n == "changed"][-1]["telling"]
     assert last(mine) == [{"id": cid, "to": "James", "state": "sent"}] and last(theirs) == []
-    team.post("/_/comment", {"doc": ADDRESS, "op": "reply", "id": cid, "body": "Done."}, member=THIERRY)
+    team.post("/_/comment", {"doc": ADDRESS, "op": "reply", "id": cid, "body": "Done."}, member=ALICE)
     assert last(mine) == [] and telling(team) == []
 
 
@@ -758,7 +758,7 @@ def status(box, state, **extra):
 
 
 def test_the_supervisors_picked_up_then_delivered_is_told_to_the_page_once_each(team, box, work):
-    tab = team.get(f"/_/live?doc={ADDRESS}", member=HANS).stream
+    tab = team.get(f"/_/live?doc={ADDRESS}", member=BOB).stream
     cid = comment(team, work, "tell").json()["id"]
     assert sent(team) == [{"id": cid, "kind": "tell", "state": "sent"}]
     status(box, "picked-up")
@@ -774,7 +774,7 @@ def test_the_supervisors_picked_up_then_delivered_is_told_to_the_page_once_each(
 
 
 def test_a_failed_drop_ends_with_the_supervisors_error_cut_to_one_line_of_200(team, box, work):
-    tab = team.get(f"/_/live?doc={ADDRESS}", member=HANS).stream
+    tab = team.get(f"/_/live?doc={ADDRESS}", member=BOB).stream
     cid = comment(team, work, "tell").json()["id"]
     status(box, "failed", error="the window would not open\n" + "x" * 300)
     team.hub.tick()
@@ -821,7 +821,7 @@ def test_a_reply_ends_a_delivered_drop_whatever_the_status_says_next(team, box, 
     status(box, "delivered")
     team.hub.tick()
     assert team.post("/_/comment", {"doc": ADDRESS, "op": "reply", "id": cid, "body": "Done."},
-                     member=THIERRY).status == 200
+                     member=ALICE).status == 200
     status(box, "failed", error="late")
     team.hub.tick()
     assert sent(team) == [] and [r["state"] for r in hub_rows("drop-status")] == ["delivered"]
@@ -845,7 +845,7 @@ def test_a_status_the_hub_cannot_read_is_ignored_once(team, box, work):
 def test_a_reply_before_the_supervisor_says_delivered_ends_the_drop_first(team, box, work):
     cid = comment(team, work, "tell").json()["id"]
     assert team.post("/_/comment", {"doc": ADDRESS, "op": "reply", "id": cid, "body": "Done already."},
-                     member=THIERRY).status == 200
+                     member=ALICE).status == 200
     status(box, "delivered")
     team.hub.tick()
     assert sent(team) == [] and hub_rows("drop-status") == []
@@ -871,7 +871,7 @@ def test_a_status_nested_too_deep_for_the_parser_is_ignored(team, box, work, mon
 
 # ── a member's index dot (#139) ──────────────────────────────────────────────
 
-def dot(team, member=HANS):
+def dot(team, member=BOB):
     """The dot of the rectoverso on `member`'s index."""
     got = team.get("/_/index.json", member=member)
     assert got.status == 200, got.text
@@ -880,7 +880,7 @@ def dot(team, member=HANS):
 
 def test_a_delivered_drop_turns_the_members_dot_orange_and_tells_their_index_alone(team, box, work):
     # The member's dot is the supervisor's word, never the hub account's session (9.9, #139).
-    mine = team.get("/_/live", member=HANS).stream
+    mine = team.get("/_/live", member=BOB).stream
     hubs = team.hub.index_bus.subscribe(None, team.hub.index.accepting(None))
     cid = comment(team, work, "tell").json()["id"]
     assert dot(team) != "orange"
@@ -895,30 +895,30 @@ def test_a_delivered_drop_turns_the_members_dot_orange_and_tells_their_index_alo
 
 def test_a_delivered_drop_turns_the_orange_of_the_member_who_sent_it_and_no_other_members(team, box, work):
     # 9.9: a member's orange is James working on a drop of theirs, never on another member's.
-    cid = comment(team, work, "tell", as_=THIERRY).json()["id"]
-    assert team.post("/_/seen", {"doc": ADDRESS, "id": cid, "count": 1}, member=HANS).status == 200   # no red to outrank it
+    cid = comment(team, work, "tell", as_=ALICE).json()["id"]
+    assert team.post("/_/seen", {"doc": ADDRESS, "id": cid, "count": 1}, member=BOB).status == 200   # no red to outrank it
     status(box, "delivered")
     team.hub.tick()
-    assert dot(team, THIERRY) == "orange" and dot(team, HANS) == "blue"
+    assert dot(team, ALICE) == "orange" and dot(team, BOB) == "blue"
 
 
 def test_a_members_drop_that_fails_tells_their_index_while_another_members_drop_still_works(team, box, work):
-    # The orange of each is their own (9.9): the end of Hans's must reach his index stream although Thierry's goes on.
-    h = comment(team, work, "tell", as_=HANS).json()["id"]
-    t = comment(team, work, "tell", as_=THIERRY, body="And the second draft?").json()["id"]
-    for who, cid in ((HANS, t), (THIERRY, h)):
+    # The orange of each is their own (9.9): the end of Bob's must reach his index stream although Alice's goes on.
+    h = comment(team, work, "tell", as_=BOB).json()["id"]
+    t = comment(team, work, "tell", as_=ALICE, body="And the second draft?").json()["id"]
+    for who, cid in ((BOB, t), (ALICE, h)):
         assert team.post("/_/seen", {"doc": ADDRESS, "id": cid, "count": 1}, member=who).status == 200
     first, second = [f for f in drops(box) if not f.name.endswith(".status")]
     for f, state in ((first, "delivered"), (second, "delivered")):
         (box["tell"] / f"{f.name}.status").write_text(json.dumps({"state": state}), encoding="utf-8")
     team.hub.tick()
-    assert dot(team, HANS) == dot(team, THIERRY) == "orange"
-    mine = team.get("/_/live", member=HANS).stream
+    assert dot(team, BOB) == dot(team, ALICE) == "orange"
+    mine = team.get("/_/live", member=BOB).stream
     mine.drain()
     (box["tell"] / f"{first.name}.status").write_text(json.dumps({"state": "failed", "error": "no"}), encoding="utf-8")
     team.hub.tick()
     assert ("status", {"doc": ADDRESS, "root": "work"}) in mine.drain()
-    assert dot(team, HANS) == "blue" and dot(team, THIERRY) == "orange"
+    assert dot(team, BOB) == "blue" and dot(team, ALICE) == "orange"
 
 
 def test_a_delivered_drop_answered_while_a_page_asks_still_clears_the_members_orange(team, box, work):
@@ -929,7 +929,7 @@ def test_a_delivered_drop_answered_while_a_page_asks_still_clears_the_members_or
     team.hub.tick()
     raw = team.hub.index_bus.subscribe()
     assert team.post("/_/comment", {"doc": ADDRESS, "op": "reply", "id": cid, "body": "Done."},
-                     member=HANS).status == 200
+                     member=BOB).status == 200
     assert sent(team) == []
     team.hub.tick()
     assert dot(team) == "blue"
@@ -938,7 +938,7 @@ def test_a_delivered_drop_answered_while_a_page_asks_still_clears_the_members_or
 
 # ── the meta block (10.1) ────────────────────────────────────────────────────
 
-def meta(team, member=HANS, doc=DOC):
+def meta(team, member=BOB, doc=DOC):
     from helpers import page_meta
     got = team.get(f"/work/{doc}", member=member)
     assert got.status == 200, got.text
@@ -949,7 +949,7 @@ def test_the_meta_block_of_a_box_sheaf_carries_the_fork_command_the_sessions_and
     m = meta(team)
     assert m["work"] == {"fork": f"uvx --from {work_mod.FORK_CLIENT} tiroir work {FRONT}/{ADDRESS}", "live": "box", "sessions": [
         {"id": LIVE, "host": "tiroir-tt", "member": "james", "date": "2026-10-28T05:12:03Z"},
-        {"id": LAPTOP, "host": "thierry-laptop", "member": "thierry", "date": "2026-10-27T09:00:00Z"},
+        {"id": LAPTOP, "host": "alice-laptop", "member": "alice", "date": "2026-10-27T09:00:00Z"},
         {"id": OLDER, "host": "tiroir-tt", "member": "james", "date": "2026-10-26T08:00:00Z"}]}
     assert m["can"] == ["box-tell"]
 
@@ -961,7 +961,7 @@ def test_the_fork_client_is_pinned_to_one_exact_version():
 
 
 def test_a_member_with_a_shell_gets_the_attach_command_for_the_projects_window(team, box):
-    assert meta(team, THIERRY)["work"]["attach"] == \
+    assert meta(team, ALICE)["work"]["attach"] == \
         r"ssh tiroir-tt -t tmux attach -t james \; select-window -t =thinkingtoo_tiroir"
 
 
@@ -973,7 +973,7 @@ def test_the_attach_command_takes_the_projects_window_and_never_one_its_name_is_
     cfg = team.hub.the_list.cfg
     team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{
         **cfg.__dict__, "attach": f"tmux -L {server} select-window -t ={{window}}"}))
-    attach = meta(team, THIERRY)["work"]["attach"]
+    attach = meta(team, ALICE)["work"]["attach"]
 
     def tmux(*args):
         return subprocess.run(["tmux", "-L", server, *args], capture_output=True, text=True, timeout=10)
@@ -995,7 +995,7 @@ def test_the_attach_command_takes_the_projects_window_and_never_one_its_name_is_
 
 def test_a_sheaf_live_on_a_laptop_says_so_and_can_nothing(team, box, work):
     put(team, work, DOC, SHEAF.replace("host: tiroir-tt, member: james, date: 2026-10-28T05:12:03Z",
-                                       "host: thierry-laptop, member: thierry, date: 2026-10-28T05:12:03Z"))
+                                       "host: alice-laptop, member: alice, date: 2026-10-28T05:12:03Z"))
     m = meta(team)
     assert m["work"]["live"] == "laptop" and m["can"] == []
 
@@ -1004,7 +1004,7 @@ def test_without_a_tell_dir_a_box_sheaf_can_nothing_and_without_attach_none_is_o
     cfg = team.hub.the_list.cfg
     team.hub.the_list = the_list.TheList(team.hub, the_list.ListConfig(**{**cfg.__dict__, "tell_dir": None,
                                                                         "attach": ""}))
-    m = meta(team, THIERRY)
+    m = meta(team, ALICE)
     assert m["work"]["live"] == "box" and m["can"] == [] and "attach" not in m["work"]
 
 
@@ -1014,7 +1014,7 @@ def test_a_sheaf_with_no_session_has_work_with_no_live_one_and_nothing_to_fork(t
 
 
 def test_a_sheaf_with_only_laptop_sessions_has_nothing_to_fork(team, box, work):
-    put(team, work, DOC, SHEAF.replace("host: tiroir-tt", "host: thierry-laptop"))
+    put(team, work, DOC, SHEAF.replace("host: tiroir-tt", "host: alice-laptop"))
     w = meta(team)["work"]
     assert "fork" not in w and w["live"] == "laptop"
 
@@ -1023,7 +1023,7 @@ def test_a_sheaf_live_on_a_laptop_with_an_older_box_session_offers_no_fork_of_th
     # tt-tiroir#165: the live session is the laptop's, which the hub never serves; a fork of the box's older copy
     # would start a second line of work beside it, and lose what was done on the laptop since.
     put(team, work, DOC, SHEAF.replace("host: tiroir-tt, member: james, date: 2026-10-28T05:12:03Z",
-                                       "host: thierry-laptop, member: thierry, date: 2026-10-28T05:12:03Z"))
+                                       "host: alice-laptop, member: alice, date: 2026-10-28T05:12:03Z"))
     w = meta(team)["work"]
     assert "fork" not in w and w["live"] == "laptop"
 
@@ -1034,7 +1034,7 @@ def test_a_page_that_is_not_a_sheaf_of_the_list_has_no_work(team, box, work):
     assert "work" not in meta(team, doc="plan.md")
 
 
-@pytest.mark.parametrize("owner, member, attach", [("thierry", THIERRY, True), ("hans", HANS, False)])
+@pytest.mark.parametrize("owner, member, attach", [("alice", ALICE, True), ("bob", BOB, False)])
 def test_an_owner_only_sheaf_in_its_owners_private_folder_has_work_at_its_name(team, box, work, owner, member,
                                                                               attach):
     # 9.11: the file lives at <client>/<project>/private/<short>/, but the rectoverso's address stays its name, so its
@@ -1042,13 +1042,13 @@ def test_an_owner_only_sheaf_in_its_owners_private_folder_has_work_at_its_name(t
     (work / DOC).unlink()
     client, project, name = DOC.split("/")
     put(team, work, f"{client}/{project}/private/{owner}/{name}",
-        SHEAF.replace("owner: thierry", f"owner: {owner}").replace("sources: [issue:thinkingtoo/tt-tiroir#8]",
+        SHEAF.replace("owner: alice", f"owner: {owner}").replace("sources: [issue:thinkingtoo/tt-tiroir#8]",
                                                                    "sources: [library:doc-1]"))
     w = meta(team, member)["work"]
     assert w["fork"] == f"uvx --from {work_mod.FORK_CLIENT} tiroir work {FRONT}/{ADDRESS}" and w["live"] == "box"
     assert ("attach" in w) is attach
     assert download(team, member=member).body == TRANSCRIPT
-    other = HANS if member == THIERRY else THIERRY
+    other = BOB if member == ALICE else ALICE
     assert team.get(f"/{ADDRESS}", member=other).status == download(team, member=other).status == 404
     # The fork report writes the private file and makes no shared copy, which the project would read.
     assert fork(team, as_=member).status == 200
@@ -1057,7 +1057,7 @@ def test_an_owner_only_sheaf_in_its_owners_private_folder_has_work_at_its_name(t
 
 # ── the /_/doc answer (10.5): the same work and can as the meta block ────────
 
-def doc_answer(team, member=HANS, doc=ADDRESS):
+def doc_answer(team, member=BOB, doc=ADDRESS):
     got = team.get(f"/_/doc?doc={doc}", member=member)
     assert got.status == 200, got.text
     return got.json()
@@ -1071,7 +1071,7 @@ def test_the_doc_answer_of_a_box_sheaf_keeps_box_tell_and_the_work(team, box):
 
 def test_the_doc_answer_follows_a_fork_to_a_laptop(team, box, work):
     put(team, work, DOC, SHEAF.replace("host: tiroir-tt, member: james, date: 2026-10-28T05:12:03Z",
-                                       "host: thierry-laptop, member: thierry, date: 2026-10-28T05:12:03Z"))
+                                       "host: alice-laptop, member: alice, date: 2026-10-28T05:12:03Z"))
     j = doc_answer(team)
     assert j["capabilities"] == [] and j["work"]["live"] == "laptop"
 
@@ -1149,7 +1149,7 @@ def test_a_members_save_cannot_write_a_front_matter_onto_a_sheaf(team, box, work
     html = (f"<p>---</p><p>sessions:</p><ul><li>{{id: {OLDER}, host: tiroir-tt, member: james, "
             f"date: 2026-10-28T05:12:03Z}}</li></ul><p>---</p>")
     got = team.post("/_/save", {"doc": bare, "hash": md_hash(before), "edits": [{"i": 0, "html": html}]},
-                    member=HANS)
+                    member=BOB)
     assert got.status == 409
     assert (work / "thinkingtoo/tiroir/bare.md").read_text(encoding="utf-8") == before
     assert download(team, doc=bare, id=OLDER).status == 404
@@ -1163,7 +1163,7 @@ def test_a_fork_on_a_file_with_a_bom_keeps_the_bom_first():
 
 def test_a_window_name_tmux_or_a_shell_would_read_otherwise_gets_no_attach(team, box, work):
     put(team, work, "thinkingtoo/site.v2/2026-10-28-a.md", SHEAF)      # tmux reads `.` as a pane
-    assert "attach" not in meta(team, THIERRY, doc="thinkingtoo/site.v2/2026-10-28-a.md")["work"]
+    assert "attach" not in meta(team, ALICE, doc="thinkingtoo/site.v2/2026-10-28-a.md")["work"]
 
 
 # ── `sessions` is the hub's (9.12): no door write and no save sets it ─────────
@@ -1337,7 +1337,7 @@ def test_the_recorded_session_is_committed_as_james_s_door_token(committing, bro
 
 # ── review round 3 (Codex) ───────────────────────────────────────────────────
 ON_A_LAPTOP = SHEAF.replace("host: tiroir-tt, member: james, date: 2026-10-28T05:12:03Z",
-                            "host: thierry-laptop, member: thierry, date: 2026-10-28T05:12:03Z")
+                            "host: alice-laptop, member: alice, date: 2026-10-28T05:12:03Z")
 
 
 def test_a_fork_that_lands_after_the_gate_keeps_the_tell_from_james(team, box, work, monkeypatch):
@@ -1369,7 +1369,7 @@ def test_a_fork_that_lands_while_the_hub_looks_for_james_session_stays_live(team
         return found(cfg, project, id, member)
     monkeypatch.setattr(work_mod, "james_has", a_fork_lands_meanwhile)
     assert not james_door(browser, james_writes, "reply", session=NEW, doc=ADDRESS, id=cid, text="Sent.")[0]
-    assert "thierry-laptop" in sessions_of(work)[0] and not [s for s in sessions_of(work) if NEW in s]
+    assert "alice-laptop" in sessions_of(work)[0] and not [s for s in sessions_of(work) if NEW in s]
     assert hub_rows("session-recorded") == []
 
 
@@ -1409,7 +1409,7 @@ OWNER_THEN_SESSIONS = "owner:\nsessions:\nowner: []\n" + HIDDEN     # the issue'
 
 def test_a_door_create_whose_owner_rewrite_would_join_an_item_to_sessions_is_refused(team, box, browser, work,
                                                                                     james_token, tmp_path):
-    team.hub.proxy = the_team(work, tmp_path, thierrys_tokens=["james"])     # so `_owned` gives it `owner: thierry`
+    team.hub.proxy = the_team(work, tmp_path, alices_tokens=["james"])     # so `_owned` gives it `owner: alice`
     (box["sessions"] / FOLDER / f"{FORK}.jsonl").write_bytes(b'{"another":"project"}\n')
     new = "work/thinkingtoo/tiroir/new.md"
     text = "---\nclient: thinkingtoo\nproject: tiroir\nsources: [mail:t-1]\n" + OWNER_THEN_SESSIONS + "---\n# New\n"
@@ -1420,7 +1420,7 @@ def test_a_door_create_whose_owner_rewrite_would_join_an_item_to_sessions_is_ref
 
 def test_a_door_update_whose_owner_rewrite_would_join_an_item_to_sessions_is_refused(team, box, browser, work,
                                                                                     james_token, tmp_path):
-    team.hub.proxy = the_team(work, tmp_path, thierrys_tokens=["james"])
+    team.hub.proxy = the_team(work, tmp_path, alices_tokens=["james"])
     (box["sessions"] / FOLDER / f"{FORK}.jsonl").write_bytes(b'{"another":"project"}\n')
     new = "work/thinkingtoo/tiroir/new.md"
     head = "---\nclient: thinkingtoo\nproject: tiroir\n"
@@ -1439,7 +1439,7 @@ def test_a_fork_onto_an_empty_list_does_not_wake_a_line_under_it():
     from sheafmd.hub import work as work_mod
     with pytest.raises(work_mod.NotRewritten):
         work_mod.with_session("---\nclient: a\nsessions: []\n" + HIDDEN + "---\n# T\n",
-                              f"{{id: {NEW}, host: hans-mac, member: hans, date: 2026-10-28T06:00:00Z}}", NEW)
+                              f"{{id: {NEW}, host: bob-mac, member: bob, date: 2026-10-28T06:00:00Z}}", NEW)
 
 
 def test_a_project_folder_that_is_a_link_out_of_sessions_dir_is_not_looked_in(team, at_work, work, tmp_path):
@@ -1454,14 +1454,14 @@ def test_a_project_folder_that_is_a_link_out_of_sessions_dir_is_not_looked_in(te
 def test_a_share_whose_rewrite_would_join_a_hidden_item_to_sessions_writes_nothing(team, box, work):
     from sheafmd.source import md_hash
     (box["sessions"] / FOLDER / f"{FORK}.jsonl").write_bytes(b'{"another":"project"}\n')
-    text = ("---\nclient: thinkingtoo\nproject: tiroir\nowner: thierry\nsources: [library:doc-1]\nshared: old\n"
+    text = ("---\nclient: thinkingtoo\nproject: tiroir\nowner: alice\nsources: [library:doc-1]\nshared: old\n"
             "sessions:\nshared: other\n" + HIDDEN + "---\n# T\n\n- [ ] Share\n")
     put(team, work, DOC, text)
     n = [a[0] for a in the_list.read_rectoverso(DOC, text).actions].index("Share")
     got = team.post("/_/save", {"doc": ADDRESS, "hash": md_hash(text), "edits": [the_list.tick_edit(text, n, "Share")]},
-                    member=THIERRY)
+                    member=ALICE)
     assert got.status != 200 and (work / DOC).read_text(encoding="utf-8") == text
-    assert download(team, id=FORK, member=THIERRY).status == 404
+    assert download(team, id=FORK, member=ALICE).status == 404
 
 
 def test_the_hub_persons_share_on_the_loopback_port_is_written(team, box, browser, work):
@@ -1622,7 +1622,7 @@ def stoppable(team, box, work, tmp_path):
     return {**box, "stop": stop}
 
 
-def stop_james(team, work, member=HANS):
+def stop_james(team, work, member=BOB):
     from sheafmd.source import md_hash
     text = (work / DOC).read_text(encoding="utf-8")
     n = [a[0] for a in the_list.read_rectoverso(DOC, text).actions].index("Stop James")
@@ -1631,7 +1631,7 @@ def stop_james(team, work, member=HANS):
 
 
 def replies(team, cid):
-    doc = team.get(f"/_/doc?doc={ADDRESS}", member=HANS).json()
+    doc = team.get(f"/_/doc?doc={ADDRESS}", member=BOB).json()
     thread, = [c for c in doc["comments"] if c["id"] == cid]
     return thread["replies"]
 
@@ -1641,7 +1641,7 @@ def test_stop_james_removes_the_project_s_waiting_tells_and_says_so_in_each_thre
     second = comment(team, work, "tell", body="Which draft?").json()["id"]
     # named with the project's prefix, but another project's: only `project` tells them apart
     other = stoppable["tell"] / "thinkingtoo--tiroir-x-20261029T200000Z"
-    other.write_text(json.dumps({"project": "thinkingtoo/tiroir-x", "member": "hans",
+    other.write_text(json.dumps({"project": "thinkingtoo/tiroir-x", "member": "bob",
                                  "sheaf": "work/thinkingtoo/tiroir-x/x.md", "text": "not this one", "kind": "tell",
                                  "thread": "c9"}), encoding="utf-8")
     assert len(drops(stoppable)) == 3
@@ -1649,10 +1649,10 @@ def test_stop_james_removes_the_project_s_waiting_tells_and_says_so_in_each_thre
     assert drops(stoppable) == [other]
     for cid in (first, second):
         said, = [r for r in replies(team, cid) if "Stopped before delivery" in r["text"]]
-        assert said["by"] == "Hans"
+        assert said["by"] == "Bob"
     rows = hub_rows("tell-stopped")
     assert sorted(r["thread"] for r in rows) == sorted([first, second])
-    assert all(r["project"] == "thinkingtoo/tiroir" and r["by"] == "hans" for r in rows)
+    assert all(r["project"] == "thinkingtoo/tiroir" and r["by"] == "bob" for r in rows)
     assert "Send the draft" not in json.dumps(rows)
     assert [f.read_text(encoding="utf-8") for f in stoppable["stop"].iterdir()] == ["thinkingtoo/tiroir\n"]
 
@@ -1716,7 +1716,7 @@ def test_a_drop_file_written_with_kind_tell_is_still_read_and_recorded_as_a_tell
     # A file dropped before `BoxWaits` lost its kind, still in the box's folder when the hub restarts: written by
     # hand here, as the old hub wrote it, and read by Stop James for what it says.
     stoppable["tell"].joinpath("thinkingtoo--tiroir-20261029T200000Z").write_text(json.dumps(
-        {"project": "thinkingtoo/tiroir", "member": "hans", "sheaf": ADDRESS, "text": "Send the draft.",
+        {"project": "thinkingtoo/tiroir", "member": "bob", "sheaf": ADDRESS, "text": "Send the draft.",
          "kind": "tell", "thread": "c1"}), encoding="utf-8")
     assert len(drops(stoppable)) == 1
     assert stop_james(team, work).status == 200
@@ -1728,7 +1728,7 @@ def test_a_drop_file_written_with_kind_tell_is_still_read_and_recorded_as_a_tell
 def test_a_waiting_tell_naming_a_sheaf_of_another_project_is_removed_with_no_reply_there(team, work, stoppable):
     elsewhere = put(team, work, "acme/site/x.md", SHEAF.replace("project: tiroir", "project: site"))
     stoppable["tell"].joinpath("thinkingtoo--tiroir-20261029T200000Z").write_text(json.dumps(
-        {"project": "thinkingtoo/tiroir", "member": "hans", "sheaf": elsewhere, "text": "x", "kind": "tell",
+        {"project": "thinkingtoo/tiroir", "member": "bob", "sheaf": elsewhere, "text": "x", "kind": "tell",
          "thread": "c1"}), encoding="utf-8")
     before = (work / "acme/site/x.md").read_text(encoding="utf-8")
     assert stop_james(team, work).status == 200

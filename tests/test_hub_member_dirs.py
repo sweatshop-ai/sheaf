@@ -1,14 +1,14 @@
 """`[list]`'s `member_dirs`: the James that works for a member has folders of his own, and every other member, an
 unknown one and a Tell with no member reach the `[list]` folders. The map holds the exceptions and the default is
 the shared James, so a missing or wrong entry never lands a Tell, a Stop or a transcript at another member's James.
-Through the handler in proxy mode on the fixtures of test_hub_work: Thierry has a James of his own, Hans has none."""
+Through the handler in proxy mode on the fixtures of test_hub_work: Alice has a James of his own, Bob has none."""
 import json
 import re
 from pathlib import Path
 
 import pytest
 from helpers import hub_rows
-from test_hub_work import (ADDRESS, BEA, CWD, DOC, FOLDER, HANS, LIVE, SHEAF, THIERRY, box, comment,  # noqa: F401
+from test_hub_work import (ADDRESS, BEA, CWD, DOC, FOLDER, BOB, LIVE, SHEAF, ALICE, box, comment,  # noqa: F401
                            download, drops, meta, put, replies, stop_james, team)
 
 from sheafmd.hub import the_list
@@ -32,7 +32,7 @@ def cfg_of(team, **changes):
 
 @pytest.fixture
 def mapped(team, box, work, tmp_path):
-    """Thierry's James has folders of his own; the `[list]` folders of `box` are the shared James's."""
+    """Alice's James has folders of his own; the `[list]` folders of `box` are the shared James's."""
     own = {"tell": tmp_path / "own-tell", "stop": tmp_path / "own-stop", "sessions": tmp_path / "own-sessions"}
     for folder in own.values():
         folder.mkdir()
@@ -40,7 +40,7 @@ def mapped(team, box, work, tmp_path):
     (own["sessions"] / OWN_FOLDER / f"{OWN_LIVE}.jsonl").write_bytes(OWN_TRANSCRIPT)
     shared_stop = tmp_path / "shared-stop"
     shared_stop.mkdir()
-    cfg_of(team, stop_dir=shared_stop, member_dirs={THIERRY: Dirs(own["tell"], own["stop"], own["sessions"],
+    cfg_of(team, stop_dir=shared_stop, member_dirs={ALICE: Dirs(own["tell"], own["stop"], own["sessions"],
                                                                  Path(OWN_WORK))})
     put(team, work, DOC, OWN_SHEAF + "\n- [ ] Stop James\n")
     return {**box, "own": own, "shared_stop": shared_stop}
@@ -53,20 +53,20 @@ def files(folder):
 # ── a Tell ───────────────────────────────────────────────────────────────────
 
 def test_a_tell_by_the_member_the_map_names_goes_to_his_dir_only(team, work, mapped):
-    assert comment(team, work, "tell", as_=THIERRY).status == 200
+    assert comment(team, work, "tell", as_=ALICE).status == 200
     assert len(files(mapped["own"]["tell"])) == 1 and files(mapped["tell"]) == []
 
 
 def test_member_not_in_map_goes_to_shared_dir(team, work, mapped):
-    assert comment(team, work, "tell", as_=HANS).status == 200
+    assert comment(team, work, "tell", as_=BOB).status == 200
     assert len(drops(mapped)) == 1 and files(mapped["own"]["tell"]) == []
-    assert json.loads(drops(mapped)[0].read_bytes())["member"] == "hans"
+    assert json.loads(drops(mapped)[0].read_bytes())["member"] == "bob"
 
 
 def test_a_member_with_no_short_name_and_one_of_another_root_go_to_shared_dir(team, work, mapped):
     cfg = team.hub.the_list.cfg
     assert cfg.dirs_for(team.hub.proxy.members[BEA]).tell_dir == mapped["tell"]
-    assert cfg.dirs_for(team.hub.proxy.members[HANS]).tell_dir == mapped["tell"]
+    assert cfg.dirs_for(team.hub.proxy.members[BOB]).tell_dir == mapped["tell"]
 
 
 def test_missing_member_goes_to_shared_dir(team, mapped):
@@ -75,40 +75,40 @@ def test_missing_member_goes_to_shared_dir(team, mapped):
     assert cfg.dirs_for(None).tell_dir == mapped["tell"]
     # something that is not a member at all, a name that is only like an id of the map
     assert cfg.dirs_for(object()).tell_dir == mapped["tell"]
-    assert cfg.dirs_for(type("M", (), {"id": THIERRY.upper()})()).tell_dir == mapped["tell"]
+    assert cfg.dirs_for(type("M", (), {"id": ALICE.upper()})()).tell_dir == mapped["tell"]
 
 
 def test_no_map_means_all_shared(team, box, work):
     assert team.hub.the_list.cfg.member_dirs == {}
-    for who in (THIERRY, HANS):
+    for who in (ALICE, BOB):
         assert comment(team, work, "tell", as_=who).status == 200
     assert len(drops(box)) == 2
 
 
 def test_a_key_the_member_leaves_out_is_the_list_s(team, mapped):
-    cfg = cfg_of(team, member_dirs={THIERRY: Dirs(tell_dir=mapped["own"]["tell"], stop_dir=mapped["own"]["stop"])})
-    mine = cfg.dirs_for(team.hub.proxy.members[THIERRY])
+    cfg = cfg_of(team, member_dirs={ALICE: Dirs(tell_dir=mapped["own"]["tell"], stop_dir=mapped["own"]["stop"])})
+    mine = cfg.dirs_for(team.hub.proxy.members[ALICE])
     assert (mine.tell_dir, mine.stop_dir) == (mapped["own"]["tell"], mapped["own"]["stop"])
     assert (mine.sessions_dir, mine.work_dir) == (cfg.sessions_dir, cfg.work_dir)
 
 
 def test_without_a_default_tell_dir_a_member_not_in_the_map_can_not_tell(team, work, mapped):
     cfg_of(team, tell_dir=None)
-    got = comment(team, work, "tell", as_=HANS)
+    got = comment(team, work, "tell", as_=BOB)
     assert got.status == 400 and "work on this page to Tell it" in got.json()["error"]
     assert files(mapped["own"]["tell"]) == []
-    assert comment(team, work, "tell", as_=THIERRY).status == 200
+    assert comment(team, work, "tell", as_=ALICE).status == 200
     assert len(files(mapped["own"]["tell"])) == 1
 
 
 def test_the_page_offers_a_tell_by_the_dirs_of_the_member_it_is_for(team, work, mapped):
     cfg_of(team, tell_dir=None)
-    assert meta(team, member=HANS)["can"] == []
-    assert meta(team, member=THIERRY)["can"] == ["box-tell"]
+    assert meta(team, member=BOB)["can"] == []
+    assert meta(team, member=ALICE)["can"] == ["box-tell"]
 
 
 def test_a_drop_s_status_is_read_in_the_dir_it_was_written_in(team, work, mapped):
-    cid = comment(team, work, "tell", as_=THIERRY).json()["id"]
+    cid = comment(team, work, "tell", as_=ALICE).json()["id"]
     name = files(mapped["own"]["tell"])[0].name
     (mapped["own"]["tell"] / f"{name}.status").write_text('{"state": "picked-up"}', encoding="utf-8")
     (mapped["tell"] / f"{name}.status").write_text('{"state": "failed", "error": "the shared one"}', encoding="utf-8")
@@ -119,9 +119,9 @@ def test_a_drop_s_status_is_read_in_the_dir_it_was_written_in(team, work, mapped
 # ── a Stop ───────────────────────────────────────────────────────────────────
 
 def test_a_stop_by_a_member_not_in_the_map_goes_to_shared_dir_and_clears_only_its_tells(team, work, mapped):
-    own = comment(team, work, "tell", as_=THIERRY, body="Mine.").json()["id"]
-    shared = comment(team, work, "tell", as_=HANS, body="Theirs.").json()["id"]
-    assert stop_james(team, work, member=HANS).status == 200
+    own = comment(team, work, "tell", as_=ALICE, body="Mine.").json()["id"]
+    shared = comment(team, work, "tell", as_=BOB, body="Theirs.").json()["id"]
+    assert stop_james(team, work, member=BOB).status == 200
     assert [f.read_text(encoding="utf-8") for f in files(mapped["shared_stop"])] == ["thinkingtoo/tiroir\n"]
     assert files(mapped["own"]["stop"]) == []
     assert len(files(mapped["own"]["tell"])) == 1 and files(mapped["tell"]) == []
@@ -130,8 +130,8 @@ def test_a_stop_by_a_member_not_in_the_map_goes_to_shared_dir_and_clears_only_it
 
 
 def test_a_stop_by_the_member_the_map_names_goes_to_his_dir_only(team, work, mapped):
-    comment(team, work, "tell", as_=HANS)
-    assert stop_james(team, work, member=THIERRY).status == 200
+    comment(team, work, "tell", as_=BOB)
+    assert stop_james(team, work, member=ALICE).status == 200
     assert [f.read_text(encoding="utf-8") for f in files(mapped["own"]["stop"])] == ["thinkingtoo/tiroir\n"]
     assert files(mapped["shared_stop"]) == []
     assert len(drops(mapped)) == 1                          # the shared James's Tell stays
@@ -140,35 +140,35 @@ def test_a_stop_by_the_member_the_map_names_goes_to_his_dir_only(team, work, map
 # ── a transcript ─────────────────────────────────────────────────────────────
 
 def test_a_member_not_in_the_map_is_served_the_list_s_copy_only(team, mapped):
-    assert download(team, id=LIVE, member=HANS).status == 200
-    got = download(team, id=OWN_LIVE, member=HANS)
+    assert download(team, id=LIVE, member=BOB).status == 200
+    got = download(team, id=OWN_LIVE, member=BOB)
     assert got.status == 404 and got.body != OWN_TRANSCRIPT
 
 
 def test_the_member_the_map_names_is_served_his_copy_and_then_the_list_s(team, mapped):
-    assert download(team, id=OWN_LIVE, member=THIERRY).body == OWN_TRANSCRIPT
-    assert download(team, id=LIVE, member=THIERRY).status == 200
+    assert download(team, id=OWN_LIVE, member=ALICE).body == OWN_TRANSCRIPT
+    assert download(team, id=LIVE, member=ALICE).status == 200
 
 
 def test_the_live_session_is_served_from_the_copy_of_the_member_asking(team, mapped):
-    got = download(team, member=THIERRY)
+    got = download(team, member=ALICE)
     assert got.status == 200 and got.headers["X-Sheaf-Session"] == OWN_LIVE
-    # Hans reads the newest session of the shared copy, never the own one that the front matter lists first
-    assert download(team, member=HANS).status == 404
+    # Bob reads the newest session of the shared copy, never the own one that the front matter lists first
+    assert download(team, member=BOB).status == 404
 
 
 def test_a_member_with_no_copy_of_his_own_has_none_without_a_list_copy(team, mapped):
     cfg = cfg_of(team, sessions_dir=None)
-    assert cfg.copies(team.hub.proxy.members[HANS]) == ()
-    assert download(team, id=OWN_LIVE, member=HANS).status == 404
+    assert cfg.copies(team.hub.proxy.members[BOB]) == ()
+    assert download(team, id=OWN_LIVE, member=BOB).status == 404
 
 
 def test_a_session_is_recorded_only_from_the_copy_of_the_james_that_wrote_it(team, mapped):
     from sheafmd.hub import work as work_mod
     cfg = team.hub.the_list.cfg
-    thierry, hans = team.hub.proxy.members[THIERRY], team.hub.proxy.members[HANS]
-    assert work_mod.james_has(cfg, "thinkingtoo/tiroir", OWN_LIVE, thierry) is True
-    assert work_mod.james_has(cfg, "thinkingtoo/tiroir", OWN_LIVE, hans) in (None, False)
+    alice, bob = team.hub.proxy.members[ALICE], team.hub.proxy.members[BOB]
+    assert work_mod.james_has(cfg, "thinkingtoo/tiroir", OWN_LIVE, alice) is True
+    assert work_mod.james_has(cfg, "thinkingtoo/tiroir", OWN_LIVE, bob) in (None, False)
     assert work_mod.james_has(cfg, "thinkingtoo/tiroir", OWN_LIVE) in (None, False)
 
 
@@ -181,9 +181,9 @@ def parse(work, tmp_path, **extra):
 
 
 def test_member_dirs_read(work, tmp_path):
-    cfg = parse(work, tmp_path, member_dirs={THIERRY: {"tell_dir": "/run/own/tell/", "stop_dir": "/run/own/stop", "sessions_dir": "/var/own",
+    cfg = parse(work, tmp_path, member_dirs={ALICE: {"tell_dir": "/run/own/tell/", "stop_dir": "/run/own/stop", "sessions_dir": "/var/own",
                                                        "work_dir": "/home/own/work"}})
-    assert cfg.member_dirs == {THIERRY: Dirs(Path("/run/own/tell"), Path("/run/own/stop"), Path("/var/own"), Path("/home/own/work"))}
+    assert cfg.member_dirs == {ALICE: Dirs(Path("/run/own/tell"), Path("/run/own/stop"), Path("/var/own"), Path("/home/own/work"))}
     assert cfg.tell_dir == Path("/run/shared/tell")
 
 

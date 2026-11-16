@@ -14,7 +14,7 @@ from sheafmd import copyblock
 from sheafmd.blocks import split_md_blocks
 from sheafmd import edit as rde
 
-MAIL = "> [!COPY]\n> Hello **Anna**,\n> thanks for the call.\n>\n> Best, Thierry\n"
+MAIL = "> [!COPY]\n> Hello **Anna**,\n> thanks for the call.\n>\n> Best, Alice\n"
 DOC = "# Plan\n\nBefore.\n\n" + MAIL + "\nAfter.\n"
 
 
@@ -32,7 +32,7 @@ def test_the_page_marks_the_quote_and_does_not_show_the_marker(tmp_path):
     [q] = quotes(page_of(tmp_path, DOC, share=False))
     assert q.startswith('<blockquote class="rd-copy">')
     assert "COPY" not in q and "[!" not in q
-    assert "Hello <strong>Anna</strong>" in q and "Best, Thierry" in q
+    assert "Hello <strong>Anna</strong>" in q and "Best, Alice" in q
 
 
 def test_the_share_copy_shows_a_plain_quote_without_marker_class_or_script(tmp_path):
@@ -112,7 +112,7 @@ def test_the_page_button_never_reaches_the_markdown():
 # ── comments ────────────────────────────────────────────────────────────────
 
 def test_a_selection_in_a_copy_block_anchors_where_the_page_saw_it():
-    # The page shows "Hello Anna,thanks for the call.Best, Thierry": the marker is not on it.
+    # The page shows "Hello Anna,thanks for the call.Best, Alice": the marker is not on it.
     proj = rdc.projection(MAIL).text
     assert proj.startswith("HelloAnna,")
     i = proj.index("thanks")

@@ -193,7 +193,7 @@ def test_the_hub_refuses_to_start_when_an_agent_signs_a_name_another_token_signs
     with pytest.raises(proxy.ProxyError, match="signs too"):
         proxy.check_agent_names([(True, "ChatGPT (Bea)", "a"), (True, "chatgpt (Bea)", "b")])
     with pytest.raises(proxy.ProxyError, match="signs too"):
-        proxy.check_agent_names([(False, "ChatGPT (Hans)", "a"), (True, "ChatGPT (Hans)", "b")])    # a typed display, after a rebinding
+        proxy.check_agent_names([(False, "ChatGPT (Bob)", "a"), (True, "ChatGPT (Bob)", "b")])    # a typed display, after a rebinding
     proxy.check_agent_names([(True, "ChatGPT (Bea)", "a"), (True, "ChatGPT (Bob)", "b")])
     proxy.check_agent_names([(False, "Codex", "a"), (False, "codex", "b")])                       # old tokens may share a display
 

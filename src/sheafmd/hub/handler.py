@@ -549,6 +549,14 @@ class Handler:
             raise Refuse(400, str(e)) from None
         return _json(status, answer)
 
+    def _peer_read(self, req: Req) -> Response:
+        """A page route of a client's member run here, the client tiroir (ticket 23): `readthrough.answer` says who and what."""
+        return _json(*readthrough.answer(self, req.body))
+
+    def _peer_comment(self, req: Req) -> Response:
+        """A comment of an agency member written here under their name (ticket 23)."""
+        return _json(*readthrough.comment_answer(self, req.body))
+
     def _unalias(self, req: Req) -> None:
         """A page Shared with the member is told to them under an opaque name (`Hub.alias`, 9.11): the one they send back, in
         the path, the query or the body, is read as the page's own address before any route looks at it."""

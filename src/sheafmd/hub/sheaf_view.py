@@ -79,7 +79,7 @@ def session_tip(line) -> str:
 
 
 def byline(hub, address: str, member) -> dict | None:
-    """The last agent session of a page as its byline says it (SPEC 11): `{name, tip, link}`, the name and tooltip of a row
+    """The last agent session of a page as its byline says it (SPEC 6.2, item 11): `{name, tip, link}`, the name and tooltip of a row
     and the same `way_back`, for the member asking; None when no write named a session or a chat."""
     line = hub.writes.last_way_back(address)
     if line is None:

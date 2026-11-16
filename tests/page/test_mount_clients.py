@@ -52,3 +52,24 @@ def test_a_client_that_does_not_answer_is_one_line_and_no_row(mounted, answers):
     from pagehelp import until
     until(lambda: "not reachable" in mounted.js("return root.querySelector('.sheaf-said').textContent;"), what="the line")
     assert mounted.js("return root.querySelectorAll('.sheaf-row[data-client]').length;") == 0
+
+
+def test_two_quick_opens_of_a_client_node_leave_its_rows_once(mounted, answers):
+    import threading
+    gate, calls = threading.Event(), []
+
+    def slow(client, verb, body):
+        calls.append(1)
+        gate.wait(5)
+        return 200, {"rows": [CLIENT_ROW], "tree": [], "more": {}}
+    answers["call"] = slow
+    mounted.click('.sheaf-folder[data-client="acme"]')
+    mounted.click('.sheaf-folder[data-path="Clients"]')
+    mounted.click('.sheaf-folder[data-client="acme"]')
+    from pagehelp import until
+    until(lambda: len(calls) >= 2, what="both reads in flight")
+    gate.set()
+    until(lambda: mounted.js("return root.querySelectorAll('.sheaf-row[data-client=\"acme\"]').length;") >= 1, what="the row")
+    import time
+    time.sleep(1)                                   # the second answer, if the page took it, has landed by now
+    assert mounted.js("return root.querySelectorAll('.sheaf-row[data-client=\"acme\"]').length;") == 1

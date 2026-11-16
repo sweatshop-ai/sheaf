@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
-import { addDoor, fresh, nextGap, doorOfTool, originOf, shouldPoll, takeNext, tellText, MIN_GAP_MS, MAX_BACKOFF_MS } from './core'
+import { addDoor, fresh, nextGap, doorOfTool, originOf, shouldPoll, takeNext, tellText, MIN_GAP_MS, MAX_BACKOFF_MS, POLL_TIMEOUT_MS, CLI_WORST_CASE_MS, echoedSession } from './core'
 
+const SESSION_ID = '6f1c2f0e-3a55-4a0e-9d52-0c1f6a1b7d11'
 const CHAT = { flag: '--origin', value: 'https://chat.example.com' } as const
 
 test('no polling before the first send, and never two polls of one door at once', async () => {
@@ -62,4 +63,19 @@ test('a write through the door\'s MCP server declares the session; a read or ano
     expect(doorOfTool(`mcp__sheaf-chat_example_com__${w}`)).toEqual({ flag: '--server', value: 'sheaf-chat_example_com' })
   for (const t of ['mcp__sheaf-chat_example_com__read', 'mcp__sheaf-chat_example_com__tells', 'mcp__other__reply', 'Bash', 'reply'])
     expect(doorOfTool(t)).toBeNull()
+})
+
+test('the mod outwaits the CLI: its timeout is over the CLI\'s worst case (connect 5 s, notice 5 s, long poll 35 s)', async () => {
+  expect(CLI_WORST_CASE_MS).toBe(45_000)
+  expect(POLL_TIMEOUT_MS).toBeGreaterThan(CLI_WORST_CASE_MS)
+})
+
+test('the session id a door write echoes: from the tool\'s text or its content, else none', async () => {
+  const body = JSON.stringify({ id: 'c1', status: 'open', session: SESSION_ID })
+  expect(echoedSession({ text: body })).toBe(SESSION_ID)
+  expect(echoedSession({ result: { content: [{ type: 'text', text: body }] } })).toBe(SESSION_ID)
+  expect(echoedSession({ text: JSON.stringify({ id: 'c1' }) })).toBe('')
+  expect(echoedSession({ text: 'not json' })).toBe('')
+  expect(echoedSession({ text: JSON.stringify({ session: 5 }) })).toBe('')
+  expect(echoedSession(undefined)).toBe('')
 })

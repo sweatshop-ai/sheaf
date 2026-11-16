@@ -8,12 +8,16 @@ const TELL = { id: 't1', doc: 'loose-bea/notes.md', thread: 'c1', message: 'Plea
  *  `door.answers` (a queue; the last one repeats, as a door re-lists a Tell until it is answered). */
 function world($: any, on: any) {
   const clock = mock.clock(on)
-  const door = { runs: [] as string[][], timeouts: [] as number[], failSubmits: 0, onPoll: null as null | ((argv: string[]) => void), answers: [{ exitCode: 0, stdout: '[]', stderr: '' }] as any[], session: SESSION, helper: true,
+  const door = { runs: [] as string[][], timeouts: [] as number[], failSubmits: 0, onPoll: null as null | ((argv: string[]) => void), answers: [{ exitCode: 0, stdout: '[]', stderr: '' }] as any[], session: SESSION, echo: undefined as string | undefined, helper: true,
                  printed: `${ORIGIN}/loose-bea/notes.md\non chat.example.com as Bea` }
   const submitted: string[] = []
   on('session.start', (_: any, e: any) => ({ cwd: e.cwd }))
   on('session.id', () => ({ value: door.session }))
-  on('tool.call', () => ({ result: { stdout: door.printed, stderr: '' } }))
+  on('tool.call', (_: any, e: any) => String(e.tool).startsWith('mcp__')
+    ? { result: { content: [] }, text: JSON.stringify({ id: 'c1', status: 'open', session: door.echo ?? door.session }) }     // the door's answer to a write names the id it recorded
+    : { result: { stdout: door.printed, stderr: '' } })
+  const lines: string[] = []
+  on('ui.log', (_: any, e: any) => { lines.push(e.text); return { value: undefined } })
   const kept = new Map<string, unknown>()     // `$.store`, which outlives a session
   on('store.get', (_: any, e: any) => ({ value: kept.get(e.key) }))
   on('store.set', (_: any, e: any) => { kept.set(e.key, e.value); return { value: undefined } })
@@ -34,7 +38,7 @@ function world($: any, on: any) {
   })
   const send = () => $.tool.call({ tool: 'Bash', command: 'sheaf notes.md' })
   const mcp = (tool: string) => $.tool.call({ tool, id: 'c1', text: 'Looking.' } as any)
-  return { clock, door, submitted, send, mcp }
+  return { clock, door, submitted, send, mcp, lines }
 }
 
 const start = ($: any) => $.turn.start({ text: '', turnId: 'a' })
@@ -320,4 +324,42 @@ test('a re-armed session is not held back by a Tell submitted for the session be
   await w.send()
   await w.clock.advance(7_000)                     // well inside the 60 s window of the first submit
   expect(w.submitted.length).toBe(2)
+})
+
+test('a door write arms only when the id the door recorded is the session\'s own; after a /clear it says so once and arms nothing', async ($, on) => {
+  const w = world($, on)
+  w.door.echo = 'old-session'          // the helper still sends the old id until the MCP reconnects
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.mcp('mcp__sheaf-chat_example_com__reply')
+  await w.mcp('mcp__sheaf-chat_example_com__reply')
+  await w.clock.advance(60_000)
+  expect(polls(w.door).length).toBe(0)
+  expect(w.lines.length).toBe(1)
+  expect(w.lines[0]).toContain('/clear')
+  w.door.echo = undefined              // the MCP reconnected: the door records the new id
+  await w.mcp('mcp__sheaf-chat_example_com__reply')
+  await w.clock.advance(1_000)
+  expect(polls(w.door)[0]).toContain(SESSION)
+})
+
+test('a door write that echoes no id (an older door) arms nothing', async ($, on) => {
+  const w = world($, on)
+  w.door.echo = ''
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.mcp('mcp__sheaf-chat_example_com__reply')
+  await w.clock.advance(60_000)
+  expect(polls(w.door).length).toBe(0)
+})
+
+test('a new id that declares itself before the tick has left the old one is armed, not lost', async ($, on) => {
+  const w = world($, on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.mcp('mcp__sheaf-chat_example_com__reply')
+  await w.clock.advance(1_000)
+  w.door.session = 'cleared-session'
+  await w.mcp('mcp__sheaf-third_example_com__reply')      // the same moment: no tick ran leave() yet
+  await w.clock.advance(1_000)
+  const mine = polls(w.door).filter((r: string[]) => r.includes('cleared-session'))
+  expect(mine.length).toBeGreaterThan(0)
+  expect(mine.every((r: string[]) => r.includes('sheaf-third_example_com'))).toBe(true)
 })

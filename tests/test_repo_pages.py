@@ -78,7 +78,10 @@ def hub_repos(agents, origin, app, tmp_path):  # noqa: F811
     agents.hub.repos = Repos(tmp_path / "clones", app, remote_url=lambda repo: str(origin))
     agents.hub.repos.FETCH_EVERY = 0.0              # the rate limit has its own test
     agents.app, agents.origin = app, origin
-    return agents
+    yield agents
+    # A thread of the tiroir left running (a report answered `cloning` and not waited for) would clone and look into the next
+    # test of this process, whose spy on `Repos._git` counts every look it makes.
+    assert agents.hub.repos.settle(), "the tiroir's thread did not finish"
 
 
 def laptop_clone(tmp_path, origin, name="laptop"):
@@ -1038,7 +1041,7 @@ def look_calls(monkeypatch, repos):
     real = repos_mod.Repos._git
 
     def spy(self, at, *args, **k):
-        if k.get("look"):
+        if k.get("look") and self is repos:     # the patch is on the class: another Repos' thread looks in this process too
             seen.append(args)
         return real(self, at, *args, **k)
 

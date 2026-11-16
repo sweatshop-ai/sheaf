@@ -121,7 +121,7 @@ class _Http(BaseHTTPRequestHandler):
             return self._read_body(n) if 0 < n <= MAX_BODY else b""
 
         res = self.handler.handle(self.command, self.path, dict(self.headers.items()), body,
-                                  conn=self._conn(), via=self.via)
+                                  conn=self._conn(), via=self.via, gone=self._gone)
         unread = (n != 0 and not asked) or chunked
         if unread or n < 0 or n > MAX_BODY:
             self.close_connection = True
@@ -142,6 +142,16 @@ class _Http(BaseHTTPRequestHandler):
 
     def _is_stop(self) -> bool:
         return self.command == "POST" and self.path.split("?", 1)[0] == "/_/stop"
+
+    def _gone(self) -> bool:
+        """Whether the caller closed its end of this connection: nothing more is read of a request, so what is readable now
+        is either its close or a next request sent ahead of the answer."""
+        try:
+            if not select.select([self.connection], [], [], 0)[0]:
+                return False
+            return self.connection.recv(1, socket.MSG_PEEK) == b""
+        except (OSError, ValueError):
+            return True
 
     def _conn(self):
         """The connection, as the handler judges who is at its other end."""

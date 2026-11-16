@@ -1020,3 +1020,97 @@ def test_a_report_for_a_commit_the_clone_lacks_never_reaches_the_remote_on_the_r
     answer = repos.report("bea", REPO, "docs/plan.md", "a" * 40)
     assert answer["commit_known"] is False
     assert not log.exists(), "the look at the clone fetched from the remote"
+
+
+# ── a git that ignores GIT_NO_LAZY_FETCH (before 2.44) gets no look at the clone ─
+
+def look_calls(monkeypatch):
+    """Record every look (`look=True`) the Repos makes; the list."""
+    seen = []
+    real = repos_mod.Repos._git
+
+    def spy(self, at, *args, **k):
+        if k.get("look"):
+            seen.append(args)
+        return real(self, at, *args, **k)
+
+    monkeypatch.setattr(repos_mod.Repos, "_git", spy)
+    return seen
+
+
+@pytest.mark.parametrize("said, parsed", [
+    ("git version 2.43.0\n", (2, 43)), ("git version 2.53.0", (2, 53)), ("git version 2.39.5 (Apple Git-154)", (2, 39)),
+    ("git version 2.44.0.windows.1", (2, 44)), ("git version 10.1.2", (10, 1)), ("", None), ("not git at all", None)])
+def test_the_git_version_is_read_from_what_git_says(said, parsed):
+    assert repos_mod.parse_git_version(said) == parsed
+
+
+def test_the_git_version_is_read_once(monkeypatch):
+    calls = []
+
+    def run_git(*a, **k):
+        calls.append(a)
+        return subprocess.CompletedProcess(a, 0, "git version 2.43.0\n", "")
+
+    monkeypatch.setattr(repos_mod.subprocess, "run", run_git)
+    repos_mod._git_version.cache_clear()
+    try:
+        assert [repos_mod._git_version() for _ in range(3)] == [(2, 43)] * 3
+        assert len(calls) == 1
+    finally:
+        repos_mod._git_version.cache_clear()
+
+
+def test_a_git_that_cannot_be_run_reads_as_no_version(monkeypatch):
+    def broken(*a, **k):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(repos_mod.subprocess, "run", broken)
+    repos_mod._git_version.cache_clear()
+    try:
+        assert repos_mod._git_version() is None
+    finally:
+        repos_mod._git_version.cache_clear()
+
+
+def ask(repos, monkeypatch, commit):
+    """A report on the request path for `commit`; the repo's thread is not what is looked at here."""
+    monkeypatch.setattr(repos, "_enqueue", lambda *a, **k: None)
+    return repos.report("bea", REPO, "docs/plan.md", commit)
+
+
+@pytest.mark.parametrize("version", [(2, 43), (2, 0), (1, 99), None])
+def test_below_2_44_or_unknown_the_request_path_makes_no_look_and_nothing_fetches(hub_repos, tmp_path, monkeypatch, version):
+    report(hub_repos)
+    log = count_fetches(the_clone(hub_repos), tmp_path)
+    repos = hub_repos.hub.repos
+    head = sh(the_clone(hub_repos), "rev-parse", "origin/HEAD").strip()    # a commit the clone does hold
+    monkeypatch.setattr(repos_mod, "_git_version", lambda: version)
+    seen = look_calls(monkeypatch)
+    answer = ask(repos, monkeypatch, head)
+    assert answer["clone"] == "ok" and answer["commit_known"] is False     # as a look that found nothing
+    assert seen == []
+    assert not log.exists()
+
+
+@pytest.mark.parametrize("version", [(2, 44), (2, 53), (3, 0)])
+def test_from_2_44_the_request_path_looks_at_the_clone_as_before(hub_repos, monkeypatch, version):
+    report(hub_repos)
+    repos = hub_repos.hub.repos
+    head = sh(the_clone(hub_repos), "rev-parse", "origin/HEAD").strip()
+    monkeypatch.setattr(repos_mod, "_git_version", lambda: version)
+    seen = look_calls(monkeypatch)
+    assert ask(repos, monkeypatch, head)["commit_known"] is True
+    assert seen == [("branch", "-r", "--contains", head)]
+    assert ask(repos, monkeypatch, "a" * 40)["commit_known"] is False
+
+
+def test_on_an_old_git_the_repos_own_thread_still_looks_and_records_the_page(hub_repos, monkeypatch):
+    """The thread may fetch, so the guard is not its business: a page of a commit the clone holds still gets its record."""
+    report(hub_repos)
+    repos = hub_repos.hub.repos
+    commit = sh(the_clone(hub_repos), "rev-parse", "origin/HEAD").strip()
+    monkeypatch.setattr(repos_mod, "_git_version", lambda: (2, 43))
+    seen = look_calls(monkeypatch)
+    assert repos._knows(the_clone(hub_repos), REPO, commit, None) is True
+    assert seen == [("branch", "-r", "--contains", commit)]

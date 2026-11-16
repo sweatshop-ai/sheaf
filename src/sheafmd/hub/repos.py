@@ -27,6 +27,7 @@ comes from (GitHub's address; a test gives a local bare repo).
 Layout under `base`: `clones/<owner>/<name>/` the clones, `reports.json` the records, written whole and atomically.
 """
 import base64
+import functools
 import json
 import os
 import re
@@ -50,6 +51,23 @@ GITHUB_HOSTS = ("github.com", "ssh.github.com", "www.github.com")
 
 NO_CLONES = "none"
 OK, PRIVATE_ROOT, NO_APP, NOT_CLONED, CLONING = "ok", "private-root", "no-app", "not-cloned", "cloning"
+NO_LAZY_FETCH_FROM = (2, 44)    # the git that honours GIT_NO_LAZY_FETCH; an older one ignores it without an error
+
+
+def parse_git_version(said: str) -> tuple[int, int] | None:
+    """(major, minor) from the output of `git --version`, or None when it is not one."""
+    m = re.match(r"git version (\d+)\.(\d+)", said)
+    return (int(m[1]), int(m[2])) if m else None
+
+
+@functools.cache
+def _git_version() -> tuple[int, int] | None:
+    """The git the hub runs, read once; None when it cannot be run or read."""
+    try:
+        r = subprocess.run(["git", "--version"], capture_output=True, text=True, timeout=10, env={**os.environ, "LC_ALL": "C"})
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return parse_git_version(r.stdout) if r.returncode == 0 else None
 
 
 class Refused(ValueError):
@@ -219,6 +237,14 @@ class Repos:
             return False
         return self._git(dest, "sparse-checkout", "add", "--", folder, token=token).returncode == 0
 
+    @staticmethod
+    def _look_is_safe() -> bool:
+        """Whether a look at the clone on the request path cannot fetch: a git before 2.44 (or one that cannot be read)
+        ignores GIT_NO_LAZY_FETCH, so there the look is not made and the answer is that of a look that found nothing.
+        The repo's own thread, which may fetch, keeps its looks."""
+        version = _git_version()
+        return version is not None and version >= NO_LAZY_FETCH_FROM
+
     def _on_branch(self, dest: Path, commit: str, seconds: float = LOOK_SECONDS) -> bool:
         """Whether a remote-tracking branch the clone holds contains `commit`: a look at the clone, no network."""
         r = self._git(dest, "branch", "-r", "--contains", commit, seconds=seconds, look=True)
@@ -285,7 +311,7 @@ class Repos:
         self._enqueue(repo, item)
         if not held:
             return {"repo": repo, "path": path, "clone": CLONING, "commit_known": None}
-        return {"repo": repo, "path": path, "clone": OK, "commit_known": self._on_branch(dest, commit)}
+        return {"repo": repo, "path": path, "clone": OK, "commit_known": self._look_is_safe() and self._on_branch(dest, commit)}
 
     def _enqueue(self, repo: str, item: tuple):
         with self._guard:

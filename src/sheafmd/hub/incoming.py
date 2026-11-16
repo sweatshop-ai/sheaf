@@ -229,13 +229,14 @@ def _root_shape(b) -> str | None:
     return None
 
 
-def check_root(hub, b) -> tuple:
+def check_root(hub, b, peer: str | None = None) -> tuple:
     """First stage of landing a root moved here: which of its pages this tiroir can take. The clone is made by the same report
     a laptop's would be (same App, same private-root rule, so the peer token never widens what this tiroir may clone); each
     page's owner is the member its e-mail names; the page's blob must be what this tiroir's own clone holds at the save
     branch. `(202, {state: cloning})` while the clone is made or the tip not here yet; `(409, {why})` for the whole root;
     else `(200, {pages: {path: {ready: True} | {ok: False, why}}})`. A repo whose root moved away from here is refused whole
-    (`moved`). This writes nothing of its own: the report is the laptop's, so it dates the clone as used and records the first
+    (`moved`), unless `peer` (the origin the channel's token names, passed by the caller) is the tiroir it moved to: that root is coming back,
+    and is unmoved once nothing in this check refuses it. This writes nothing of its own: the report is the laptop's, so it dates the clone as used and records the first
     owner's page, as a laptop's would; the page's own state is landing's."""
     if (bad := _root_shape(b)) is not None:
         raise ValueError(bad)
@@ -253,6 +254,12 @@ def check_root(hub, b) -> tuple:
             first = (owner, p["path"])
     if first is not None:
         privates = [(m.short or m.id, m.private_root) for m in hub.proxy.members.values() if m.private_root]
+        if peer and root_moves.origin(peer) == repos.moved_to(b["repo"]):
+            # the root comes back from the tiroir it moved to, the peer the channel's token names (never the body's `from`):
+            # it is unmoved only once nothing in this check would refuse it
+            if (why := repos.refusal(first[0].short or first[0].id, b["repo"], privates)) is not None:
+                return 409, {"why": why.replace("-", "_"), **({"install": repos.install_url(b["repo"])} if why == repos_mod.NO_APP else {})}
+            repos.unmove(b["repo"])
         try:
             said = repos.report(first[0].short or first[0].id, b["repo"], first[1], b["tip"], privates, {})
         except repos_mod.Refused:

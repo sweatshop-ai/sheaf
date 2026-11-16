@@ -1210,7 +1210,7 @@ var create = function (ROOT, CFG, opts) {
         unanswered = req;
         editDraftMirror();
         var was = hash;
-        j = await post('/_/save', { hash: req.hash, edits: sentEdits(sent), rid: req.rid });
+        j = await post('/_/save', { hash: req.hash, edits: sentEdits(sent), rid: req.rid, branch: CFG.branch });
         unanswered = null;
         // A merged or remapped save brings a reload (reloadWhenFree, now or once a form is done with); until
         // then the page shows the old text and its block numbers, so it keeps the hash of that text and what is
@@ -4503,6 +4503,8 @@ var create = function (ROOT, CFG, opts) {
           return x.b.i === edits[n].i && x.html === edits[n].html;
         }) ? unanswered : null;
         var body = { root: CFG.root, hash: mirrors ? mirrors.hash : hash, at: new Date().toISOString(), edits: edits };
+        // The branch of the text it is a draft of: a Restore after a reload sends this one, never the reloaded page's.
+        if (CFG.branch) body.branch = CFG.branch;
         if (mirrors) body.rid = mirrors.rid;
         var text = JSON.stringify(body);
         localStorage.setItem(EDIT_DRAFT_KEY, text);
@@ -4558,7 +4560,9 @@ var create = function (ROOT, CFG, opts) {
         // A Restore the hub did not answer can be pressed again, or a page opened later can offer the draft
         // again: the same edits go under the same id, which the draft keeps (an older entry's has none).
         if (!d.rid) keepRestoreId(d);
-        await post('/_/save', { hash: d.hash, edits: d.edits, rid: d.rid });
+        // On a page of a clone, a draft with no branch is not sent: it cannot say which text its hash is of.
+        if (CFG.branch && !d.branch) throw new Error('These edits do not say which branch they were made on, so they are not restored. Copy them from here.');
+        await post('/_/save', { hash: d.hash, edits: d.edits, rid: d.rid, branch: d.branch });
         decided();
         // The edits are in the file now; the reload that shows them waits for a comment
         // being written, like every other (D23), and says so above its form.

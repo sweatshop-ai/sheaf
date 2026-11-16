@@ -537,3 +537,67 @@ def test_restore_inside_the_upgrade_notice_keeps_the_upgrade_line_while_the_relo
     page.wait_for_timeout(300)
     assert "The sheaf hub was upgraded" in page.inner_text("#rd-notice")
     assert page.locator("#rd-notice button[data-d]").count() == 0
+
+
+# A page of a repo's clone carries `branch` in its meta (SPEC 14): the save names the branch the page was read on and the
+# hub refuses it once the clone is on another. A draft is the edits of a read page, so it keeps that branch too, and a
+# Restore sends the draft's, never the reloaded page's.
+
+META_OF_A_PAGE = re.compile(r'(<script id="rd-edit-meta" type="application/json">)(.*?)(</script>)', re.S)
+
+
+def read_on_branch(page, site, branch):
+    """The page of the site is sent as a clone page read on `branch` is."""
+    def answer(route):
+        html = route.fetch().text()
+        m = META_OF_A_PAGE.search(html)
+        meta = json.loads(m.group(2))
+        meta["branch"] = branch
+        route.fulfill(status=200, content_type="text/html; charset=utf-8",
+                      body=html[:m.start(2)] + json.dumps(meta).replace("<", "\\u003c") + html[m.end(2):])
+    page.route(site.url, answer)
+
+
+def saves_of(page):
+    sent = []
+    page.on("request", lambda r: sent.append(json.loads(r.post_data)) if r.url.endswith("/_/save") else None)
+    return sent
+
+
+def test_a_draft_of_a_clone_page_carries_the_branch_the_page_was_read_on(tab):
+    read_on_branch(tab.page, tab.site, "staging")
+    tab.open()
+    tab.site.kill()
+    type_at_end(tab.page, P2, " and plums")
+    d = until(lambda: stored(tab.page, tab.site), what="the draft in localStorage")
+    assert d["branch"] == "staging"
+
+
+def test_a_restore_sends_the_branch_of_the_draft_and_not_the_one_of_the_reloaded_page(lost_edit, context):
+    page = context.new_page()
+    page.goto(lost_edit.site.base + "/_/health")
+    draft = json.loads(page.evaluate(f"localStorage.getItem({draft_key(lost_edit.site)!r})"))
+    draft["branch"] = "staging"
+    set_item(page, draft_key(lost_edit.site), json.dumps(draft))
+    read_on_branch(page, lost_edit.site, "dev")
+    sent = saves_of(page)
+    page.goto(lost_edit.site.url)
+    page.click("#rd-notice button[data-d=restore]")
+    until(lambda: sent, what="the Restore's save")
+    assert sent[0]["branch"] == "staging"
+
+
+def test_a_draft_with_no_branch_is_not_restored_on_a_clone_page_and_its_text_is_kept(lost_edit, context):
+    page = context.new_page()
+    page.goto(lost_edit.site.base + "/_/health")
+    draft = json.loads(page.evaluate(f"localStorage.getItem({draft_key(lost_edit.site)!r})"))
+    assert "branch" not in draft
+    read_on_branch(page, lost_edit.site, "dev")
+    sent = saves_of(page)
+    page.goto(lost_edit.site.url)
+    page.click("#rd-notice button[data-d=restore]")
+    page.wait_for_selector("#rd-panel.open pre.rd-draft")
+    assert "plums" in page.inner_text("#rd-panel pre.rd-draft")
+    assert "branch" in page.inner_text("#rd-panel").lower()
+    assert sent == []
+    assert stored(page, lost_edit.site) is not None

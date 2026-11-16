@@ -29,6 +29,25 @@ class FakeRepos:
     def clone_dir(self, repo):
         return self.dest
 
+    moved, unmoved = None, []
+
+    def moved_to(self, repo):
+        return self.moved
+
+    def install_url(self, repo):
+        return self.answer.get("install", "")
+
+    def refusal(self, member, repo, privates=()):
+        a = self.answer
+        if isinstance(a, Exception):
+            return None
+        return a["clone"] if a["clone"] in (repos_mod.NO_APP, repos_mod.PRIVATE_ROOT, repos_mod.NOT_CLONED) else None
+
+    def unmove(self, repo):
+        self.unmoved.append(repo)
+        self.moved = None
+        return True
+
 
 def git(at, *args):
     return subprocess.run(["git", "-C", str(at), *args], check=True, capture_output=True, text=True).stdout.strip()
@@ -152,3 +171,61 @@ def test_a_hub_with_no_origin_of_its_own_refuses_the_root_whole(clone):
     h = hub(clone)
     del h.proxy
     assert incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None))) == (409, {"why": "no_origin"})
+
+
+# ── the way back (ticket 21 part 2) ──────────────────────────────────────────
+
+THERE = "https://there.example"
+
+
+def moved_hub(clone, state=repos_mod.OK, to=THERE):
+    h = hub(clone, state)
+    h.repos.moved, h.repos.unmoved = to, []
+    return h
+
+
+def test_a_root_that_moved_to_the_verified_peer_is_unmoved_before_the_report(clone):
+    h = moved_hub(clone)
+    status, answer = incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None)), peer=THERE)
+    assert (status, answer) == (200, {"pages": {"a.md": {"ready": True}}})
+    assert h.repos.unmoved == ["o/r"]
+
+
+def test_the_peers_origin_is_compared_as_the_hub_spells_it(clone):
+    h = moved_hub(clone)
+    incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None)), peer="HTTPS://There.example/")
+    assert h.repos.unmoved == ["o/r"]
+
+
+@pytest.mark.parametrize("peer", ["https://third.example", None, ""])
+def test_a_peer_the_root_did_not_move_to_unmoves_nothing_whatever_the_body_says(clone, peer):
+    h = moved_hub(clone, repos_mod.MOVED)
+    assert incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None)), peer=peer) == (409, {"why": "moved"})
+    assert h.repos.unmoved == []                  # the body's from.origin is THERE: it is never trusted
+
+
+def test_a_root_that_did_not_move_is_not_unmoved(clone):
+    h = hub(clone)
+    h.repos.unmoved = []
+    incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None)), peer=THERE)
+    assert h.repos.unmoved == []
+
+
+@pytest.mark.parametrize("state", [repos_mod.NO_APP, repos_mod.PRIVATE_ROOT, repos_mod.NOT_CLONED])
+def test_a_refusal_of_the_whole_root_leaves_it_moved(clone, state):
+    h = moved_hub(clone, state)
+    status, _ = incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None)), peer=THERE)
+    assert status == 409 and h.repos.unmoved == [] and h.repos.moved == THERE
+
+
+def test_a_report_the_repos_refuse_after_the_unmove_is_answered_refused_and_the_root_is_back(clone):
+    h = moved_hub(clone)
+    h.repos.answer = repos_mod.Refused("clone failed")
+    assert incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None)), peer=THERE) == (409, {"why": "refused"})
+    assert h.repos.unmoved == ["o/r"]           # a clone that failed before is settled by this report, as for any root: it is tried again
+
+
+def test_no_page_with_a_known_owner_unmoves_nothing(clone):
+    h = moved_hub(clone)
+    incoming.check_root(h, body(clone, ("a.md", "nobody@example.com", None)), peer=THERE)
+    assert h.repos.unmoved == []

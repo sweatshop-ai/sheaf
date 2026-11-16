@@ -56,20 +56,28 @@ def batches(rows, limit: int = BATCH_LIMIT) -> list:
 REASON = re.compile(r"[a-z_]{1,64}")
 
 
+HASH = re.compile(r"[0-9A-Za-z]{1,128}")
+
+
+def _hash(said) -> str:
+    """The hash a peer confirmed a page with, when it is a short token; else empty: what a peer says is not stored as it came."""
+    return said if isinstance(said, str) and HASH.fullmatch(said) else ""
+
+
 def _reason(said) -> str:
     """The reason a peer gave for holding a page, when it is a short word of ours; anything else is `failed`: what a peer
     says never reaches the move file or the diagnostics as it came."""
     return said if isinstance(said, str) and REASON.fullmatch(said) else "failed"
 
 
-def send_root(post, moves, repo: str, to: str, head: dict, rows, limit: int = BATCH_LIMIT, diag=None) -> list:
+def send_root(post, moves, repo: str, to: str, head: dict, rows, limit: int = BATCH_LIMIT, diag=None) -> dict:
     """Send the pages of a root that is moving to `to`, one `root` call per batch. `post(to, verb, body)` answers
-    `(status, body)` or raises `OSError`. Each page the receiver confirms is marked sent (the caller then writes its Forward);
-    every other page is held with a reason, written to the move and, when it changed, to the diagnostics. Returns the paths
-    confirmed this time."""
+    `(status, body)` or raises `OSError`. Each page the receiver confirms is marked sent with its hash (the caller then writes
+    its Forward);     every other page is held with a reason, written to the move and, when it changed, to the diagnostics. Returns `{path: the
+    receiver's hash}` for the pages confirmed this time."""
     todo = [r for r in rows if r["path"] not in (moves.get(repo) or {}).get("sent", [])]
     held = {p: "too_big" for p in too_big(todo, limit)}
-    done = []
+    done = {}
     pending = batches([r for r in todo if r["path"] not in held], limit)
     for n, batch in enumerate(pending):
         try:
@@ -80,9 +88,11 @@ def send_root(post, moves, repo: str, to: str, head: dict, rows, limit: int = BA
         if status == 200 and isinstance(answer.get("pages"), dict):
             for p in paths:
                 got = answer["pages"].get(p)
-                if isinstance(got, dict) and got.get("ok") is True:
-                    moves.sent(repo, p)
-                    done.append(p)
+                if isinstance(got, dict) and got.get("ok") is True and (hash := _hash(got.get("hash"))):
+                    done[p] = hash
+                    moves.sent(repo, p, hash)
+                elif isinstance(got, dict) and got.get("ok") is True:
+                    held[p] = "failed"          # confirmed with no usable hash: its Forward could not be checked, so it goes again
                 else:
                     held[p] = _reason(got.get("why")) if isinstance(got, dict) else "failed"
             continue

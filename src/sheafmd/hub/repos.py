@@ -640,11 +640,8 @@ class Repos:
         A repo that became a private root after it was cloned keeps its clone and its records, takes no more.
         Nothing here clones or fetches: that is the repo's thread's (see the top of the file)."""
         repo, path, commit = _clean_repo(repo), _clean_path(path), _clean_commit(commit)
-        roots = [who for who, root in private_roots if self._is_private_root(repo, root)]
-        if member in roots:
-            return {"repo": repo, "path": path, "clone": PRIVATE_ROOT, "commit_known": None}
-        if roots:
-            return {"repo": repo, "path": path, "clone": NOT_CLONED, "commit_known": None}
+        if (private := self._private(member, repo, private_roots)) is not None:
+            return {"repo": repo, "path": path, "clone": private, "commit_known": None}
         if (to := self.moved_to(repo)) is not None:
             return {"repo": repo, "path": path, "clone": MOVED, "moved_to": to, "commit_known": None}
         with self._guard:
@@ -665,6 +662,26 @@ class Repos:
         if not held:
             return {"repo": repo, "path": path, "clone": CLONING, "commit_known": None}
         return {"repo": repo, "path": path, "clone": OK, "commit_known": self._look_is_safe() and self._on_branch(dest, commit)}
+
+    def _private(self, member: str, repo: str, private_roots) -> str | None:
+        """`private-root` for the member whose private root `repo` is, `not-cloned` when it is another member's, else None."""
+        roots = [who for who, root in private_roots if self._is_private_root(repo, root)]
+        return PRIVATE_ROOT if member in roots else NOT_CLONED if roots else None
+
+    def install_url(self, repo: str) -> str:
+        """The link that adds `repo` to the App."""
+        return self.provider.install_url(_clean_repo(repo))
+
+    def refusal(self, member: str, repo, private_roots=()) -> str | None:
+        """What `report` would refuse for `repo`, with nothing written: `private-root`, `not-cloned` or `no-app`; None when it
+        would not refuse. A clone that failed before is not looked at: the report that follows raises it, once, and starts the
+        clone again. Nothing here records, dates, queues or pops anything."""
+        repo = _clean_repo(repo)
+        if (private := self._private(member, repo, private_roots)) is not None:
+            return private
+        if not (self.clone_dir(repo) / ".git").exists() and repo not in self._queues and self.provider.token(repo) is None:
+            return NO_APP
+        return None
 
     def _enqueue(self, repo: str, item: tuple):
         with self._guard:

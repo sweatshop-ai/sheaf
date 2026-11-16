@@ -7,6 +7,87 @@
 // sheafMount in a body of its own, under a "← Sheaf" button and the path as a breadcrumb; the button gives the table back
 // as it was (the folder, the filter and the collapsed folders stay).
 (function () {
+// An address is kept only when it is a path on this origin: one slash, then no second slash or backslash, and no
+// control or space anywhere (the URL parser drops a tab or a newline, so "/\t/host" would be "//host").
+function href(a, value) {
+  if (typeof value === 'string' && /^\/(?![\/\\])/.test(value) && !/[\u0000- \u007f\\]/.test(value)) a.setAttribute('href', value);
+}
+// A web address of a Remote Control link, or "": http or https and nothing else, with no space or control character.
+function web(value) {
+  if (typeof value !== 'string' || /[\u0000-\u0020\u007f]/.test(value)) return '';
+  try { var u = new URL(value); return u.protocol === 'https:' || u.protocol === 'http:' ? u.href : ''; } catch (e) { return ''; }
+}
+// The name of the last agent session on a row (SPEC 8.6): what the hub's `session_link` says, as data kept on the
+// element and read by sheaf.js when it is clicked; nothing here builds an address out of the page's text.
+function sessionNode(doc, text, link) {
+  var l = link || {};
+  var a;
+  function node(tag, t) { var e = doc.createElement(tag); e.className = 'sheaf-session-link'; e.textContent = String(t); return e; }
+  if (l.kind === 'chat') {
+    a = node('a', text);
+    href(a, l.href);
+    if (!a.hasAttribute('href')) return doc.createTextNode(String(text));
+  } else if (l.kind === 'remote') {
+    var to = web(l.href);
+    if (!to) return doc.createTextNode(String(text));
+    a = node('a', text);
+    a.setAttribute('href', to);
+  } else if (l.kind === 'laptop' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(l.session || '') && (l.provider === 'claude' || l.provider === 'codex')) {
+    var remote = web(l.remote);
+    a = node(remote ? 'a' : 'button', text);
+    if (remote) a.setAttribute('href', remote); else a.type = 'button';
+    a.dataset.provider = l.provider;
+    a.dataset.session = l.session;
+    a.dataset.laptop = '1';
+  } else {
+    return doc.createTextNode(String(text));
+  }
+  if (a.tagName === 'A') { a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener noreferrer'); }
+  return a;
+}
+
+// AgentView on the member's own laptop (SPEC 8.6): the click brings the session's terminal to the front, or opens it
+// again when it has ended; only the provider and id the hub recorded go in the body. A refusal or no answer is "not
+// here". Shared by the rows and by the byline of an opened page (page.js), which asks the same way.
+var LAPTOP = 'http://127.0.0.1:8765';
+var ABSENT_FOR = 30000, absentAt = 0;
+// AgentView has not answered for a while: the Remote Control link is then followed by the browser itself, as the
+// link it is, in the click that made it (a tab opened after an async request may be blocked as a popup).
+function absent() { return absentAt !== 0 && Date.now() - absentAt < ABSENT_FOR; }
+function ask(path, body) {
+  return fetch(LAPTOP + path, { method: 'POST', credentials: 'omit', headers: { 'X-Fleet': '1', 'Content-Type': 'application/json' },
+    body: JSON.stringify(body) });
+}
+function done(r) { return r.json().then(function (b) { return r.ok && !(b && b.ok === false); }, function () { return r.ok; }); }
+function bringBack(a) {
+  var provider = a.dataset.provider, id = a.dataset.session;
+  return ask('/api/jump', { key: provider + ':' + id }).then(function (r) {
+    if (r.status === 404 && provider === 'claude') return ask('/api/reopen', { id: id }).then(done);
+    return done(r);
+  });
+}
+// The click on a laptop name; `where` is {say(text), live(), plain(a)}: the surface's line, whether it is still there, and
+// what a name with no way left becomes.
+function follow(a, e, where) {
+  var remote = a.getAttribute('href');
+  if (remote && absent()) return;               // no preventDefault: the real link opens in this click
+  e.preventDefault();
+  e.stopPropagation();
+  bringBack(a).then(function (ok) {
+    // AgentView answered: it is there, whatever it found, so the link stays and no other way is tried.
+    absentAt = 0;
+    if (!ok && where.live()) where.say('AgentView found no session to bring back.');
+  }, function () {
+    absentAt = Date.now();
+    if (remote) {
+      window.open(remote, '_blank', 'noopener,noreferrer');
+      if (where.live()) where.say('AgentView does not answer on this computer: this name now opens its Remote Control link directly.');
+      return;
+    }
+    where.plain(a);
+    if (where.live()) where.say('That session could not be brought back: AgentView does not answer on this computer.');
+  });
+}
 function render(data, target) {
   var doc = target && target.ownerDocument ? target.ownerDocument : document;
   function el(tag, cls, text) {
@@ -14,43 +95,6 @@ function render(data, target) {
     if (cls) e.className = cls;
     if (text != null) e.textContent = String(text);
     return e;
-  }
-  // An address is kept only when it is a path on this origin: one slash, then no second slash or backslash, and no
-  // control or space anywhere (the URL parser drops a tab or a newline, so "/\t/host" would be "//host").
-  function href(a, value) {
-    if (typeof value === 'string' && /^\/(?![\/\\])/.test(value) && !/[\u0000- \u007f\\]/.test(value)) a.setAttribute('href', value);
-  }
-  // A web address of a Remote Control link, or "": http or https and nothing else, with no space or control character.
-  function web(value) {
-    if (typeof value !== 'string' || /[\u0000-\u0020\u007f]/.test(value)) return '';
-    try { var u = new URL(value); return u.protocol === 'https:' || u.protocol === 'http:' ? u.href : ''; } catch (e) { return ''; }
-  }
-  // The name of the last agent session on a row (SPEC 8.6): what the hub's `session_link` says, as data kept on the
-  // element and read by sheaf.js when it is clicked; nothing here builds an address out of the page's text.
-  function session(text, link) {
-    var l = link || {};
-    var a;
-    if (l.kind === 'chat') {
-      a = el('a', 'sheaf-session-link', text);
-      href(a, l.href);
-      if (!a.hasAttribute('href')) return doc.createTextNode(String(text));
-    } else if (l.kind === 'remote') {
-      var to = web(l.href);
-      if (!to) return doc.createTextNode(String(text));
-      a = el('a', 'sheaf-session-link', text);
-      a.setAttribute('href', to);
-    } else if (l.kind === 'laptop' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(l.session || '') && (l.provider === 'claude' || l.provider === 'codex')) {
-      var remote = web(l.remote);
-      a = el(remote ? 'a' : 'button', 'sheaf-session-link', text);
-      if (remote) a.setAttribute('href', remote); else a.type = 'button';
-      a.dataset.provider = l.provider;
-      a.dataset.session = l.session;
-      a.dataset.laptop = '1';
-    } else {
-      return doc.createTextNode(String(text));
-    }
-    if (a.tagName === 'A') { a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener noreferrer'); }
-    return a;
   }
   var out = doc.createDocumentFragment();
   var view = el('div', 'sheaf-view');
@@ -100,7 +144,7 @@ function render(data, target) {
     var w = el('td', 'sheaf-write', r.write);
     if (r.write_tip) w.title = r.write_tip;
     var s = el('td', 'sheaf-session');
-    if (r.session) s.append(session(r.session, r.session_link));
+    if (r.session) s.append(sessionNode(doc, r.session, r.session_link));
     if (r.session_tip) s.title = r.session_tip;
     var when = el('td', 'sheaf-when'), time = el('time', null, r.when);
     time.setAttribute('data-mtime', String(r.mtime));
@@ -176,40 +220,15 @@ function create(ROOT, opts) {
     var fresh = b.cloneNode(false);
     b.replaceWith(fresh);
   }
-  // AgentView on the member's own laptop (SPEC 8.6): the click brings the session's terminal to the front, or opens it
-  // again when it has ended; only the provider and id the hub recorded go in the body. A refusal or no answer is "not
-  // here": the Remote Control link opens when the session declared one, and else the name is plain text from then on.
-  var LAPTOP = 'http://127.0.0.1:8765';
-  function ask(path, body) {
-    return fetch(LAPTOP + path, { method: 'POST', credentials: 'omit', headers: { 'X-Fleet': '1', 'Content-Type': 'application/json' },
-      body: JSON.stringify(body) });
-  }
-  function done(r) { return r.json().then(function (b) { return r.ok && !(b && b.ok === false); }, function () { return r.ok; }); }
-  function bringBack(a) {
-    var provider = a.dataset.provider, id = a.dataset.session;
-    return ask('/api/jump', { key: provider + ':' + id }).then(function (r) {
-      if (r.status === 404 && provider === 'claude') return ask('/api/reopen', { id: id }).then(done);
-      return done(r);
-    });
-  }
-  function plain(a) {
-    var t = ROOT.ownerDocument.createTextNode(a.textContent);
-    a.replaceWith(t);
-  }
-  function laptopClick(a, e) {
-    e.preventDefault();
-    e.stopPropagation();
-    var remote = a.getAttribute('href');
-    bringBack(a).then(function (ok) {
-      // AgentView answered: it is there, whatever it found, so the link stays and no other way is tried.
-      if (!ok && !gone) say('AgentView found no session to bring back.');
-    }, function () {
-      // Nothing answered, so no other row of this laptop can be reached from here: those without a link become text.
-      if (remote) { window.open(remote, '_blank', 'noopener,noreferrer'); return; }
-      Array.prototype.slice.call(ROOT.querySelectorAll('button.sheaf-session-link[data-laptop]')).forEach(plain);
-      if (!gone) say('That session could not be brought back: AgentView does not answer on this computer.');
-    });
-  }
+  // Nothing answered, so no other row of this laptop can be reached from here: those without a link become text.
+  var where = {
+    say: function (t) { say(t); }, live: function () { return !gone; },
+    plain: function () {
+      Array.prototype.slice.call(ROOT.querySelectorAll('button.sheaf-session-link[data-laptop]')).forEach(function (b) {
+        b.replaceWith(ROOT.ownerDocument.createTextNode(b.textContent));
+      });
+    },
+  };
   function say(text) { said.textContent = text; said.hidden = !text; }
   function open(tr) {
     var kit = window.sheafMount;
@@ -236,7 +255,7 @@ function create(ROOT, opts) {
     if (folder) { choose(folder.dataset.path); return; }
     if (t.closest('.sheaf-back')) { close(); return; }
     var back = t.closest('.sheaf-session-link[data-laptop]');
-    if (back && !(e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) { laptopClick(back, e); return; }
+    if (back && !(e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) { follow(back, e, where); return; }
     var a = t.closest('.sheaf-title a');
     if (a && !(e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) {
       e.preventDefault();
@@ -255,4 +274,6 @@ function create(ROOT, opts) {
 }
 
 window.sheafView = Object.freeze({ create: create, render: render });
+// What the byline of an opened page (page.js) takes from here: the same name, the same click.
+window.sheafSession = Object.freeze({ node: sessionNode, follow: follow });
 })();

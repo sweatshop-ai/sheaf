@@ -354,6 +354,10 @@ def _row_addable(row: dict) -> bool:
     return isinstance(display, str) and display != "" and clean_display(display) == display
 
 
+def _text(v) -> str | None:
+    return v if isinstance(v, str) and v else None
+
+
 @dataclass(frozen=True)
 class TokenRow:
     """One token as the hub and the CLI see it: who it is, never its hash. `created` and
@@ -366,6 +370,8 @@ class TokenRow:
     invalid: bool = False           # set by `of` only: `verify` refuses this row for its name, display or client
     client: str | None = None       # an agent's token (SPEC 9.7): the AI client it speaks for, and no display
     id: str | None = None           # random, written by `add`: tells a revoked token from a new one of its name; none on older rows
+    member: str | None = None       # a laptop's token (SPEC 9.7): the front's id of the member it acts for, kept in the row, not in the config
+    laptop: str | None = None       # the name its member gave the laptop it was made for
 
     @classmethod
     def of(cls, entry) -> "TokenRow | None":
@@ -378,7 +384,8 @@ class TokenRow:
         return cls(entry["name"], entry.get("display"), entry.get("write") is True,
                    entry.get("created"), entry.get("last_used"), not _row_addable(entry),
                    client if isinstance(client, str) else None,
-                   entry["id"] if isinstance(entry.get("id"), str) else None)
+                   entry["id"] if isinstance(entry.get("id"), str) else None,
+                   _text(entry.get("member")), _text(entry.get("laptop")))
 
     def is_pair(self, name, tid) -> bool:
         """Whether a stored `token` name and `id` (a Tell's `token`, `tid`; a target's `token`, `id`) name this token:
@@ -391,7 +398,7 @@ class TokenRow:
         `person`. Any other token keeps its display."""
         if self.client is None:
             return self.display or ""
-        member = cfg.member_of_token(self.name) if cfg is not None else None
+        member = cfg.member_of_row(self) if cfg is not None else None
         return agent_name(self.client, member.name if member is not None else person)
 
     @property
@@ -452,7 +459,7 @@ class Tokens:
         return time.strftime(STAMP_FORMAT, time.localtime(self._clock()))
 
     def add(self, name: str, display: str | None = None, write: bool = False,
-            client: str | None = None,
+            client: str | None = None, member: str | None = None, laptop: str | None = None,
             clash: "Callable[[list[TokenRow]], str | None] | None" = None) -> NewToken:
         """Make a token and keep its hash. The token is returned here and nowhere else, with the
         display name its replies are signed with; an agent's (`client`) keeps the cleaned client and
@@ -480,7 +487,8 @@ class Tokens:
             token = new_token()
             who = {"client": client} if client is not None else {"display": shown}
             token_id = secrets.token_hex(8)         # not a secret: it is never compared as one
-            rows.append({"name": name, "id": token_id, **who, "sha256": token_hash(token),
+            bound = {"member": member, "laptop": laptop} if member is not None else {}
+            rows.append({"name": name, "id": token_id, **who, **bound, "sha256": token_hash(token),
                          "created": self._stamp(), "last_used": None, "write": write is True})
             self._write(rows)
         return NewToken(token, shown if client is None else "", client, token_id)
@@ -522,7 +530,8 @@ class Tokens:
         if self._stale(row.get("last_used")) and not self._touch(row["sha256"]):
             return None
         return TokenRow(row["name"], row.get("display"), row.get("write") is True, client=row.get("client"),
-                        id=row["id"] if isinstance(row.get("id"), str) else None)
+                        id=row["id"] if isinstance(row.get("id"), str) else None,
+                        member=_text(row.get("member")), laptop=_text(row.get("laptop")))
 
     def _stale(self, last_used) -> bool:
         try:

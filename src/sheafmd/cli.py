@@ -1111,11 +1111,32 @@ def cmd_version(argv: list[str]) -> int:
     return EXIT_OK
 
 
+def cmd_connect(argv: list[str]) -> int:
+    from . import connect
+    p = _parser("connect", "connect URL TOKEN",
+                "Connect this laptop to a shared Sheaf: the token goes into your login keyring, its door into "
+                "Claude Code's MCP entries, and it becomes this laptop's default when it has none. "
+                "Copy the whole line from Connect a laptop in the Sheaf.")
+    p.add_argument("url", metavar="URL", help="the address of the shared Sheaf, https://host")
+    p.add_argument("token", metavar="TOKEN", help="the laptop's token, shown once by Connect a laptop")
+    args = p.parse_args(argv)
+    try:
+        connect.connect(args.url, args.token, _out)
+    except connect.UsageError as e:
+        _err(f"sheaf: {e}")
+        return EXIT_USAGE
+    except connect.ConnectError as e:
+        _err(f"sheaf: {e}")
+        return EXIT_FAILED
+    return EXIT_OK
+
+
 COMMANDS.update({"open": cmd_open, "start": cmd_start, "stop": cmd_stop, "status": cmd_status,
                  "hub": cmd_hub, "comments": cmd_comments, "comment": cmd_comment,
                  "reply": cmd_reply, "resolve": cmd_resolve, "reopen": cmd_reopen,
                  "diag": cmd_diag, "version": cmd_version, "list": cmd_list, "roots": cmd_roots,
-                 "token": cmd_token, "code": cmd_code, "mcp": cmd_mcp, "projects": cmd_projects})
+                 "token": cmd_token, "code": cmd_code, "mcp": cmd_mcp, "projects": cmd_projects,
+                 "connect": cmd_connect})
 COMMAND_HELP.update({
     "open": ("open FILE.md|URL [--no-browser] [render options]",
              "open the page of a document; starts the hub if none runs"),
@@ -1136,6 +1157,8 @@ COMMAND_HELP.update({
     "diag": ("diag [--since DAYS] [--json]", "summarise the diagnostics log"),
     "diag note": ("diag note TEXT [FILE]", "record what only a session can see"),
     "mcp": ("mcp [--agent NAME]", "run the stdio MCP door for an agent (comments, replies, pages)"),
+    "connect": ("connect URL TOKEN",
+                "connect this laptop to a shared Sheaf: token in the keyring, door in Claude Code, default address"),
     "token add": ("token add NAME [--client CLIENT | --as DISPLAY] [--write]",
                   "make an MCP token for an agent that reaches the hub over HTTP; shown once"),
     "token list": ("token list", "MCP tokens: name, display name, created, last used"),

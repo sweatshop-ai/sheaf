@@ -29,7 +29,7 @@ FIRST_ROOT = """(() => { const attach = Element.prototype.attachShadow;
 def pages(front, work):
     subprocess.run(["git", "init", "-q", str(work)], check=True)       # a git root lists a dot-folder's pages (8.6)
     for rel, title in (("plan.md", "The plan"), ("ideas/first.md", "First idea"), ("ideas/deep/second.md", "Second idea"),
-                       (".scratch/n.md", "Scratch note")):
+                       (".tooling/n.md", "Scratch note")):
         f = work / rel
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text(PLAN.replace("# Plan", f"# {title}", 1), encoding="utf-8")
@@ -88,7 +88,7 @@ def test_the_tree_has_all_pages_on_top_then_the_root_and_its_folders_and_no_dot_
 
 
 def test_the_table_shows_every_page_newest_first_with_no_list_status(mounted):
-    assert sorted(mounted.visible_rows()) == ["work/.scratch/n.md", "work/ideas/deep/second.md", "work/ideas/first.md", "work/plan.md"]
+    assert sorted(mounted.visible_rows()) == ["work/.tooling/n.md", "work/ideas/deep/second.md", "work/ideas/first.md", "work/plan.md"]
     heads = mounted.js("return Array.from(root.querySelectorAll('th')).map((h) => h.textContent);")
     assert heads == ["Title", "Folder", "Last write", "Last agent session", "When", "Open"]
 

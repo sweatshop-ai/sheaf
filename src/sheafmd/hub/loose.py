@@ -174,14 +174,15 @@ def marks_moved(root_path: Path, old: str, new: str) -> None:
     a page that moved: a Move is no activity for the archive, so the seen time stays, an archived page stays archived and
     a page moved back is not archived by a stale mark. All three are read under one hold before any is written (a file
     that cannot be read refuses the lot, and nothing is changed), and each file is written in one replace, so a page is
-    never there unmarked. A mark at `new` that the page at `old` has no counterpart of goes. Refused (`Refused`) when a
+    never there unmarked. A mark at `new` (keep, archived or seen) that the page at `old` has no counterpart of goes. Refused (`Refused`) when a
     mark cannot be read or written."""
     with state.file_locked("loose-keep.lock"):
         held = marks(root_path)
         tables = {name: times(root_path, name) for name in TIMES}
-        if old in held:
-            state.write_text_private(Path(root_path) / KEEP, json.dumps(sorted({*(r for r in held if r != old), new}), indent=1,
-                                                                        ensure_ascii=False) + "\n", inside=True)
+        if old in held or new in held:
+            kept = {*(r for r in held if r not in (old, new)), *([new] if old in held else [])}
+            state.write_text_private(Path(root_path) / KEEP, json.dumps(sorted(kept), indent=1, ensure_ascii=False) + "\n",
+                                     inside=True)
         for name, table in tables.items():
             out = {k: v for k, v in table.items() if k not in (old, new)}
             if old in table:

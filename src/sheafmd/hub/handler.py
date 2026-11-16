@@ -1188,6 +1188,9 @@ class Handler:
                 root, rel, _ = self._own_loose(req, doc)
                 with self.hub.page_lock(doc):       # a save in the middle of its write finishes first, one after it finds the page gone
                     self.hub.archive.trash(root, rel)
+                # A Forward that led to this address is no one's now (SPEC 9.11 words nothing for a delete): else the old address
+                # of the page would lead to whatever comes to this one. Under the moves' lock, as a move adds a Forward.
+                self.hub.forwards.drop_leading_to(doc)
             except (loose.Refused, OSError) as e:
                 raise Refuse(409, str(e) if isinstance(e, loose.Refused) else "the page could not be moved to the trash") from None
         self.hub.forget_document(doc)

@@ -1,4 +1,4 @@
-"""The whole life of a private sheaf (SPEC 9.11): made, edited, ticked, commented on, shown with a picture and given a
+"""The whole life of a private rectoverso (SPEC 9.11): made, edited, ticked, commented on, shown with a picture and given a
 version, it leaves the list repo as it was (no file, no commit, nothing to push, no word of its text), and its own repo
 holds all of it. The member's own steps are the positive control: each of them is answered and written."""
 import subprocess
@@ -83,7 +83,7 @@ def test_private_lifecycle_leaves_list_repo_untouched(two):
     w.hub.tick()                                            # the sweep of each repo's versions
     assert w.hub.commits.settle()
 
-    # the list repo shows nothing new: no file, no commit, nothing waiting to be pushed, no word of the sheaf's text
+    # the list repo shows nothing new: no file, no commit, nothing waiting to be pushed, no word of the rectoverso's text
     assert (untouched(two), git(two.list_repo, "rev-parse", "HEAD"), git(two.base / "list.git", "rev-parse", "main"), refs(), tree()) == before
     guard = git(two.list_repo, "for-each-ref", "--format=%(objectname)", "refs/sheaf/last-seen/").split()
     assert set(guard) == {before[1].strip()}                  # the rewrite guard's ref sits where the list repo's head was

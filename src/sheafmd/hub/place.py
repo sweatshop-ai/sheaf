@@ -1,19 +1,19 @@
 """
-sheafmd.hub.place — where the file of a sheaf of the list's root is (SPEC 9.11 "Where a sheaf lives").
+sheafmd.hub.place — where the file of a rectoverso of the list's root is (SPEC 9.11 "Where a rectoverso lives").
 
     logical(rel)                     `<client>/<project>/<name>.md` of a file at its home or at a private home
-    names_private(rel)               whether a path names a folder where only the hub places sheaves
-    applies(hub, root_name)          whether the hub places the sheaves of that root
-    physical(hub, root, rel)         the path of the file a sheaf's name holds now (for `Roots`, at each lookup)
+    names_private(rel)               whether a path names a folder where only the hub places rectoversos
+    applies(hub, root_name)          whether the hub places the rectoversos of that root
+    physical(hub, root, rel)         the path of the file a rectoverso's name holds now (for `Roots`, at each lookup)
     file_rel(hub, root, rel)         the same without a check: the path to read or write, or `rel`; `Undecided` (rule B)
     named(hub, root, top, rel)       the name a listed file is shown by, None for a file no name shows
     home_in(hub, root, name, text)   (the root, the path in it) where that text lives, None when it has none
-    where_is(hub, address)           (the root, the path in it) of the one file a sheaf's name holds, else None
+    where_is(hub, address)           (the root, the path in it) of the one file a rectoverso's name holds, else None
     place(hub, address, ...)         the file moved to its home: the path it left, or None
-    owner_short(hub, root, address, fm)   the `short` that names the sheaf's private folder
+    owner_short(hub, root, address, fm)   the `short` that names the rectoverso's private folder
     make_folders(top, rel)           the folder of `rel`, made on the way, walked without following a link
     taken(hub, root, name), holders(hub, root, name)  whether a logical name is held, and by which (root, path)
-    held(hub, address)               the lock of the sheaf's name, for every read and write of its file
+    held(hub, address)               the lock of the rectoverso's name, for every read and write of its file
     owns(hub, address)               whether this thread holds that lock (a commit asserts it)
     ahead(hub, address, old, new)    a writer's move of the file to the home of the text it is about to write;
                                      `Refused` when it cannot go there, and nothing is written
@@ -26,7 +26,7 @@ Rule A (SPEC 9.11), the invariant: the set of private real paths is the real pat
 recorded before any validation, whether the root registers or is refused, and never shrunk at runtime
 (`hub._private_paths`). Every door verb that resolves an address passes one test, `in_private`, which refuses a
 caller that is not the root's member when the real path of what it names is inside that set; `private_member`
-adds only the sheaves a private root holds under the list's name, and a deleted file's owner (`_private_seen`).
+adds only the rectoversos a private root holds under the list's name, and a deleted file's owner (`_private_seen`).
 Nothing else decides privacy: not the registry, not a name, not the front matter.
 For a caller who may not see a private root, every door answer about a name inside it is identical to the answer for
 the same name held in a shared root, or for a free name after deletion.
@@ -34,18 +34,18 @@ Privacy is judged on the object opened, through the same descriptors that read o
 (`sheafmd.beneath`, `opened_private`); a root's own folder too (`judge_for`: create, move, quarantine, tidying). No registered root encloses, equals or lies inside a private root, checked at
 start and on every registration, so a link that stays beneath a shared root never reaches a private one.
 
-In proxy mode, in the list's root (9.10) only, a sheaf at project depth has one name, its address
+In proxy mode, in the list's root (9.10) only, a rectoverso at project depth has one name, its address
 `<client>/<project>/<name>.md`, and one home for its file: open to the project, that path; its owner's alone,
 `<client>/<project>/private/<short>/<name>.md`, where `short` is its owner's (the member its `owner` names when that
 member owns it, else the first owner, in the config's order, that has one). The Memorizer's GitHub connector gives each
 path glob one owner: the shared stanza reads `<client>/*/*.md`, an owner's `*/*/private/<short>/**/*.md`, so a file's
-place says whose it is. The hub keys everything of a sheaf (its entry, versions, read state, render settings) by the
+place says whose it is. The hub keys everything of a rectoverso (its entry, versions, read state, render settings) by the
 name, and finds the file only when it reads or writes it; a move is a rename of the file and one commit of both
 paths (8.11), and nothing else moves. Every read and every write of a name holds its lock (`held`); a move is move,
 write, render, commit, under it, and a write and its commit are one step under it. A name is held only by a regular
 file reached from the root through real folders: a link, or a file under a linked folder, holds none, so one file
 never has two names and two name locks. A path under `private/` is no address: it names no document. The repo of
-such a root must not ignore `private/`: the listing (8.6) would no longer show a sheaf the hub moved there, so a move
+such a root must not ignore `private/`: the listing (8.6) would no longer show a rectoverso the hub moved there, so a move
 into a folder the repo ignores is refused, and the root is told of once.
 """
 import os
@@ -63,20 +63,20 @@ from . import visibility
 from .roots import Address, NotFound
 
 PRIVATE = "private"
-# The folder of a project's private folders where an owner-only sheaf the hub cannot place goes (#61): no `short` can
+# The folder of a project's private folders where an owner-only rectoverso the hub cannot place goes (#61): no `short` can
 # name it (`~` is none of a short's characters), so no owner's Library glob reads it, nor the project's
 # `<client>/<project>/*.md`; it is no hidden folder, which the listing would leave out (8.6).
 QUARANTINE = "~unplaced"
 NO_SHORT = "it is its owner's alone and no owner of it has a short to name its private folder"
 IGNORED = "the repo ignores the private folder"
-PRIVATE_ROOT = "its home is a private root, and a sheaf cannot be moved between roots yet"
-PRIVATE_PATH = "a sheaf of a private root is made by its name under the list's root, not by the path of the private folder"
-SHARE = "a sheaf of a private root cannot be shared yet"
+PRIVATE_ROOT = "its home is a private root, and a rectoverso cannot be moved between roots yet"
+PRIVATE_PATH = "a rectoverso of a private root is made by its name under the list's root, not by the path of the private folder"
+SHARE = "a rectoverso of a private root cannot be shared yet"
 UNDECIDED = "its file cannot be told from another of the same name, or a private root cannot be looked at"
 
 
 class Undecided(NotFound):
-    """The file of a sheaf cannot be decided now (SPEC 9.11, rule B): a private root holds its name and another root
+    """The file of a rectoverso cannot be decided now (SPEC 9.11, rule B): a private root holds its name and another root
     does too, or a private root cannot be looked at, or the document was made for a root that no longer holds the
     file. A NotFound, so every reader that treats a missing file treats this so; the write goes nowhere."""
 
@@ -109,7 +109,7 @@ def _private_home(rel: str) -> bool:
 
 
 def quarantine(name: str) -> str:
-    """The path in the root of the quarantine of the sheaf named `name`: `<client>/<project>/private/~unplaced/<file>`."""
+    """The path in the root of the quarantine of the rectoverso named `name`: `<client>/<project>/private/~unplaced/<file>`."""
     client, project, file = name.split("/")
     return f"{client}/{project}/{PRIVATE}/{QUARANTINE}/{file}"
 
@@ -129,7 +129,7 @@ def ignores(top: Path, target: str) -> bool:
 def tell_ignored(hub, root, folders):
     """A `private-ignored` row (15) and a line on stderr, once per root per hub run, when the repo of `root`, which
     the hub places, ignores the private home of a member whose roots hold it in one of the project `folders`
-    (`<client>/<project>`): the listing leaves out what git ignores (8.6), so a sheaf moved there would leave the
+    (`<client>/<project>`): the listing leaves out what git ignores (8.6), so a rectoverso moved there would leave the
     list, the index and the door. Nothing moves there (`_move`)."""
     if root.id in hub.told_ignored:
         return
@@ -141,7 +141,7 @@ def tell_ignored(hub, root, folders):
     hub.told_ignored.add(root.id)
     folder = got[0].rsplit("/", 1)[0]
     hub.record("private-ignored", None, root=root.name, folder=folder)
-    print(f"sheaf: {root.name}/{folder} is ignored by the repo: sheaves are not moved into private folders there",
+    print(f"sheaf: {root.name}/{folder} is ignored by the repo: rectoversos are not moved into private folders there",
           file=sys.stderr, flush=True)
 
 
@@ -161,7 +161,7 @@ def logical(rel: str) -> str | None:
 
 
 def alias(hub, root, rel: str) -> str | None:
-    """The address `rel` of the private root `root` is named by: the list's root and the same path, for a sheaf at
+    """The address `rel` of the private root `root` is named by: the list's root and the same path, for a rectoverso at
     project depth; None for any other path or a root that is none of the hub's private roots (rule E)."""
     the_list = getattr(hub, "the_list", None)
     if the_list is None or root.id not in getattr(hub, "private_roots", {}) or logical(rel) != rel:
@@ -171,13 +171,13 @@ def alias(hub, root, rel: str) -> str | None:
 
 def names_private(rel: str) -> bool:
     """Whether `rel` names a project called `private`, or a `private` folder directly under a project: where
-    only the hub places sheaves, so a door create there is refused (9.11, 12)."""
+    only the hub places rectoversos, so a door create there is refused (9.11, 12)."""
     parts = rel.split("/")
     return (len(parts) >= 3 and parts[1] == PRIVATE) or (len(parts) >= 4 and parts[2] == PRIVATE)
 
 
 def applies(hub, root_name: str) -> bool:
-    """Whether the hub places the sheaves of the root `root_name`: proxy mode, and the list's root."""
+    """Whether the hub places the rectoversos of the root `root_name`: proxy mode, and the list's root."""
     the_list = getattr(hub, "the_list", None)
     return getattr(hub, "proxy", None) is not None and the_list is not None and the_list.serves(root_name)
 
@@ -259,7 +259,7 @@ def private_listed(hub, member, board: bool = False) -> list:
 
 
 def held_privately(hub, address: str) -> bool:
-    """Whether the sheaf's name `address` is held by a file of a private root now, judged on the name and not on what a
+    """Whether the rectoverso's name `address` is held by a file of a private root now, judged on the name and not on what a
     sweep has met: what the hub's person is shown no row and told no change of (rule D)."""
     got = where_is(hub, address)
     return got is not None and got[0].id in (getattr(hub, "private_roots", None) or {})
@@ -272,7 +272,7 @@ def _twice(hub, address: str, n: int):
 def physical(hub, root, rel: str) -> tuple:
     """(the root, the path in it) of the file the document `rel` names (`Roots` asks it at each lookup): `root` and
     `rel` itself where
-    the hub does not place sheaves; for a sheaf's name, the one file that holds it, at its home or at any private
+    the hub does not place rectoversos; for a rectoverso's name, the one file that holds it, at its home or at any private
     home. Raises NotFound for any path under a project's `private` folder (or in a project called `private`), at
     any depth, which is no address; for a path that is a link or passes through one, at any depth, made or not;
     for a name that two files hold (made by hand: nothing repairs it), which a `place-refused` row names; and for
@@ -297,7 +297,7 @@ def physical(hub, root, rel: str) -> tuple:
 
 
 def file_rel(hub, root, rel: str) -> str:
-    """The path in `root`, the list's, to read or write for the sheaf named `rel`, which the hub places: the one file
+    """The path in `root`, the list's, to read or write for the rectoverso named `rel`, which the hub places: the one file
     that holds the name, else `rel` (a name with no file, or with two there). Raises `Undecided` where a private root
     could hold the file instead (`file_at`), and for a name that one holds: the path of another root is no answer."""
     name = logical(rel)
@@ -312,7 +312,7 @@ def file_rel(hub, root, rel: str) -> str:
 
 
 def named(hub, root, top: Path, rel: str) -> str | None:
-    """The path in the root that the listed file `rel` is shown by, in a root the hub places: its sheaf's name for
+    """The path in the root that the listed file `rel` is shown by, in a root the hub places: its rectoverso's name for
     the one file that holds it; None for a file of a name that two files hold, which a `place-refused` row names,
     for the second entry of a file a move has at both paths, for an entry that holds no name (a link: `_holds`),
     for any other path that is a link or passes through one, which no address reaches (`physical`), and for any
@@ -328,9 +328,9 @@ def named(hub, root, top: Path, rel: str) -> str | None:
 
 
 def named_in(hub, root, private, rel: str) -> str | None:
-    """The sheaf's name that the listed file `rel` of the private root `private` is shown by: `rel` itself, when it is
+    """The rectoverso's name that the listed file `rel` of the private root `private` is shown by: `rel` itself, when it is
     the one file in the list's root `root` or any private root that holds the name; None for a name held twice (a
-    `place-refused` row names it) and for any path that is not a sheaf's name."""
+    `place-refused` row names it) and for any path that is not a rectoverso's name."""
     if logical(rel) != rel:
         return None
     (at, got), n = _one(hub, root, rel)
@@ -342,18 +342,18 @@ def named_in(hub, root, private, rel: str) -> str | None:
 
 def tell_link(hub, root, top: Path, rel: str):
     """A `link-ignored` row (15) with the root and the path, and a line on stderr, once per path per hub run, for an
-    entry the listing gave that is a link or under a linked folder (9.11), at a sheaf's path or any other:
+    entry the listing gave that is a link or under a linked folder (9.11), at a rectoverso's path or any other:
     the poll says it, never a lookup, so a link someone makes is seen and the hub serves nothing through it."""
     if (_holds(top, rel) if logical(rel) else _real(top, rel)) or (root.id, rel) in hub.told_link:
         return
     hub.told_link.add((root.id, rel))
     hub.record("link-ignored", None, root=root.name, path=rel)
-    print(f"sheaf: {root.name}/{rel} is a link, or under a linked folder: it holds no sheaf's name and is not served",
+    print(f"sheaf: {root.name}/{rel} is a link, or under a linked folder: it holds no rectoverso's name and is not served",
           file=sys.stderr, flush=True)
 
 
 def owner_short(hub, root, address: str, fm: dict) -> str | None:
-    """The `short` that names the private folder of the sheaf at `address` whose front matter is `fm`: of the
+    """The `short` that names the private folder of the rectoverso at `address` whose front matter is `fm`: of the
     member its `owner` names, when that member is one of its owners; else of the first owner, in the config's
     order, that has one. Only members whose roots hold `root` count (9.9). None when no owner has one."""
     owners = [m for m in _owners(hub, root, address, fm) if _segment(m.short)]
@@ -363,7 +363,7 @@ def owner_short(hub, root, address: str, fm: dict) -> str | None:
 
 
 def home_in(hub, root, name: str, text: str):
-    """(the root, the path in it) where the file of the sheaf named `name` lives once it holds `text`: `root` and
+    """(the root, the path in it) where the file of the rectoverso named `name` lives once it holds `text`: `root` and
     `name` when it is open to the project; the one owner's private root and `name` when it is its owner's alone, it
     has exactly one owner, and that owner has a private root; else `root` and
     `<client>/<project>/private/<short>/<file>`. None for one that is its owner's alone with no owner that has a
@@ -383,7 +383,7 @@ def home_in(hub, root, name: str, text: str):
 
 
 def _owners(hub, root, address: str, fm: dict) -> list:
-    """The members, of those whose roots hold `root`, that own the sheaf at `address` whose front matter is `fm`."""
+    """The members, of those whose roots hold `root`, that own the rectoverso at `address` whose front matter is `fm`."""
     members = [m for m in hub.proxy.members.values() if hub.owns(m, root)]
     return visibility.owner_of(fm, members, hub.assignees(address, fm))
 
@@ -447,7 +447,7 @@ class _Idents:
 
 
 def _refused(hub, address: str, why: str, quarantined_: bool = False, tried: bool = False):
-    """A `place-refused` row, once per address per hub run: a sheaf that cannot move is met at every poll. A sheaf
+    """A `place-refused` row, once per address per hub run: a rectoverso that cannot move is met at every poll. A rectoverso
     in quarantine (#61) has its own row, `quarantined: true`, once too; one left at the project's path because its
     quarantine could not be made (`tried`) says `quarantined: false`: the project's Library glob still files it."""
     if (address, quarantined_) not in hub.told_place:
@@ -507,18 +507,18 @@ _THREAD = threading.local()
 
 
 def owns(hub, address: str) -> bool:
-    """Whether this thread holds the lock of the sheaf's name `address`; True where the hub does not place it. A
-    commit asserts it (`Hub.committed`): nothing commits a sheaf's file without holding its name (9.11)."""
+    """Whether this thread holds the lock of the rectoverso's name `address`; True where the hub does not place it. A
+    commit asserts it (`Hub.committed`): nothing commits a rectoverso's file without holding its name (9.11)."""
     got = _where(hub, address)
     return got is None or (str(got[1]), got[2]) in _owned()
 
 
 @contextmanager
 def held(hub, address: str):
-    """Hold the lock of the sheaf's name `address` (9.11): no create of the name, no write of its file and no move
+    """Hold the lock of the rectoverso's name `address` (9.11): no create of the name, no write of its file and no move
     of it comes in while it is held, so a writer that finds the file under it writes where the file is, one that
     judges the name's homes finds them as it judged, and a reader reads the file it found, in the folder its text
-    says. Nothing to hold where the hub does not place the sheaf. Gives whether it holds a lock. Re-entrant:
+    says. Nothing to hold where the hub does not place the rectoverso. Gives whether it holds a lock. Re-entrant:
     `place` and a document's write take it again. Taken first: before the hub's lock (`Hub.entry`), the document's
     own lock (live.py), a file lock and the repo's commit lock (commits.py). Held for disk work only: nothing under
     it waits on the network."""
@@ -531,7 +531,7 @@ def held(hub, address: str):
 
 
 def _where(hub, address: str):
-    """(its root, the real path of the root, its name) of a sheaf's name that the hub places, else None."""
+    """(its root, the real path of the root, its name) of a rectoverso's name that the hub places, else None."""
     at = Address.parse(address)
     if not at.plain or logical(at.rel) != at.rel or not applies(hub, at.root):
         return None
@@ -542,7 +542,7 @@ def _where(hub, address: str):
 
 
 def where_is(hub, address: str):
-    """(the root, the path in it) of the one file that holds the sheaf's name `address`, in the list's root or a
+    """(the root, the path in it) of the one file that holds the rectoverso's name `address`, in the list's root or a
     private root; None for a name the hub does not place, held by no file, or by more than one."""
     got = _where(hub, address)
     if got is None:
@@ -604,11 +604,11 @@ def opened_private(hub, opened):
 
 
 def private_member(hub, address: str, fm: dict | None = None, opened=UNJUDGED):
-    """Rule A: the id of the one member the sheaf named `address` is private to, or None when the hub holds it for
-    the project as usual. A sheaf held by a private root is that root's member's whatever its text, its assignees or
+    """Rule A: the id of the one member the rectoverso named `address` is private to, or None when the hub holds it for
+    the project as usual. A rectoverso held by a private root is that root's member's whatever its text, its assignees or
     `projects.toml` say, and when the name is held by a private root and another file too, still theirs. With `fm`, the
-    front matter of the file: a sheaf its owner's alone that names one owner who has a private root, held by the list's
-    root only, is nobody's (""): a private root is where its owner's sheaves live, so a copy pushed into the shared
+    front matter of the file: a rectoverso its owner's alone that names one owner who has a private root, held by the list's
+    root only, is nobody's (""): a private root is where its owner's rectoversos live, so a copy pushed into the shared
     repo is shown to no one. A file that went away is still the member's it was (`hub._private_seen`), so its going
     is told to no one else. `opened`: what `opened_private` gave for the file the caller opened (a member id or None):
     then the file's place is that, and no path is resolved again."""
@@ -639,7 +639,7 @@ def private_member(hub, address: str, fm: dict | None = None, opened=UNJUDGED):
     if owner is None and fm is not None and visibility.effective(fm) != "project":
         owners = _owners(hub, root, address, fm)
         owner = "" if len(owners) == 1 and owners[0].id in _private_roots(hub) else None
-    if owner is not None or fm is not None:     # a look without the front matter never forgets a sheaf that was nobody's
+    if owner is not None or fm is not None:     # a look without the front matter never forgets a rectoverso that was nobody's
         hub._private_seen[address] = owner
     return owner
 
@@ -667,7 +667,7 @@ def undecided(hub, name: str) -> bool:
 
 
 def file_at(hub, address: str, bound: str = ""):
-    """(the root, the path in it) of the file to read or write for the sheaf named `address`, or None for a name the
+    """(the root, the path in it) of the file to read or write for the rectoverso named `address`, or None for a name the
     hub does not place. The one file that holds the name, in the list's root or a private root; a name no file
     holds is the list's root and the name. Raises `Undecided` (a NotFound), so the write goes nowhere and never to
     the list's root under the name, when a name is held by a private root and any other, or the file is not in
@@ -690,7 +690,7 @@ def file_at(hub, address: str, bound: str = ""):
 
 
 def ahead(hub, address: str, old: str, new: str) -> str | None:
-    """A writer that is about to write `new` over `old`, the text of the file of the sheaf named `address`, holding
+    """A writer that is about to write `new` over `old`, the text of the file of the rectoverso named `address`, holding
     the name's lock and the file's lock, moves the file to the home of `new` first (9.11), so the new text is
     written, and rendered, in the folder it says: a reader never meets a visibility with the folder of the other.
     Returns the path in the root the file left, None when it stays (home already, a name the hub does not place);
@@ -726,11 +726,11 @@ def ahead(hub, address: str, old: str, new: str) -> str | None:
 
 
 def place(hub, address: str, member=None, by: str | None = None, commit: bool = True) -> str | None:
-    """Move the file of the sheaf named `address` to its home, under the lock of its name and its file lock, and
+    """Move the file of the rectoverso named `address` to its home, under the lock of its name and its file lock, and
     return the path in the root it left; None when it did not move: home already, a name the hub does not place,
     a file that is a link (which stays where it is written), or a move refused (a `place-refused` row says why: no
     owner with a short, the name held by two files, the home taken). The file is linked into place, never over
-    anything, and only then unlinked where it was. Nothing else moves: the hub keys the sheaf by its name. With
+    anything, and only then unlinked where it was. Nothing else moves: the hub keys the rectoverso by its name. With
     `commit`, the root commits `move: <old> -> <new>` as `member`, `by` (a door caller's display name) or else the
     hub (the poll). A writer that moves the file it just wrote passes `commit=False` and commits the write and the
     move as one (`Hub.committed` with `gone`)."""
@@ -751,7 +751,7 @@ def place(hub, address: str, member=None, by: str | None = None, commit: bool = 
         gone = None
         if n and at.id == root.id:
             # The file's lock before the folders', as a writer that moves holds them (`ahead`): one order (9.11),
-            # so a path that turns into a link to another sheaf's file meanwhile waits for that writer, and is
+            # so a path that turns into a link to another rectoverso's file meanwhile waits for that writer, and is
             # then looked at again.
             with file_lock(top / rel), folders_lock(top, name):
                 if _one(hub, root, name) == ((root, rel), 1):
@@ -799,7 +799,7 @@ def _move(hub, root, top: Path, rel: str, name: str, address: str, text: str | N
         try:
             st = os.stat(sname, dir_fd=sfd, follow_symlinks=False)
             if not stat.S_ISREG(st.st_mode):
-                return None         # a link stays where it is written: the sheaf it names is placed itself
+                return None         # a link stays where it is written: the rectoverso it names is placed itself
             if text is None:
                 fd = os.open(sname, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=sfd)
                 with os.fdopen(fd, "rb") as f:
@@ -838,7 +838,7 @@ def _move(hub, root, top: Path, rel: str, name: str, address: str, text: str | N
 
 
 def _an_owners(hub, root, address: str, rel: str, text: str) -> bool:
-    """Whether `rel`, a file in a `private/<short>/`, is in the folder of one of the owners of the sheaf at `address`
+    """Whether `rel`, a file in a `private/<short>/`, is in the folder of one of the owners of the rectoverso at `address`
     whose text is `text`: that owner's Library glob files it for someone it is for."""
     fm = visibility.front_matter(text)
     members = [m for m in hub.proxy.members.values() if hub.owns(m, root)]
@@ -846,7 +846,7 @@ def _an_owners(hub, root, address: str, rel: str, text: str) -> bool:
 
 
 def _to_quarantine(top: Path, sfd: int, sname: str, rel: str, name: str, judge=None) -> str | None:
-    """Link the file `sname` in the folder `sfd`, the sheaf named `name` at `rel` (the project's path, or an owner's
+    """Link the file `sname` in the folder `sfd`, the rectoverso named `name` at `rel` (the project's path, or an owner's
     private folder that is not its home), into its quarantine, never over anything, then unlink it: `rel`, the path
     it left, or None when it stays (a quarantine the repo ignores, taken, or a folder that cannot be made). The
     caller holds the name's lock, the file's and the folders'. `judge`: see `judge_for`."""

@@ -1,6 +1,6 @@
 """A root that commits (SPEC 4.4 `commit`, `push`, `versions`; 8.11): every write on the page is one git
 commit authored by whoever made it, pushed to the root's remote, with the document's versions kept inside
-the root (`.sheaf/versions/`) and committed with it; the hub never serves `.sheaf/`; a sheaf folder that
+the root (`.sheaf/versions/`) and committed with it; the hub never serves `.sheaf/`; a rectoverso folder that
 `projects.toml` does not name is a warning. Through the handler in proxy mode, with a git repo as the root
 and a bare repo as its remote."""
 import os
@@ -19,7 +19,7 @@ from sheafmd.blocks import split_md_blocks
 from sheafmd.hub import proxy, the_list
 from sheafmd.source import md_hash
 
-DOC = "sheaves/acme/blog/2026-10-28-plan.md"
+DOC = "rectoversos/acme/blog/2026-10-28-plan.md"
 
 
 def git(at, *args):
@@ -35,10 +35,10 @@ def remote(tmp_path):
 
 
 @pytest.fixture
-def sheaves(tmp_path, remote):
-    """A clone of `remote` that commits and pushes, with one sheaf, `acme/blog/2026-10-28-plan.md`,
+def rectoversos(tmp_path, remote):
+    """A clone of `remote` that commits and pushes, with one rectoverso, `acme/blog/2026-10-28-plan.md`,
     and its project in `projects.toml`. Committed and pushed as the box's first commit would be."""
-    repo = tmp_path / "sheaves"
+    repo = tmp_path / "rectoversos"
     subprocess.run(["git", "clone", "-q", str(remote), str(repo)], check=True, capture_output=True)
     git(repo, "config", "user.name", "the box")
     git(repo, "config", "user.email", "box@example.com")
@@ -55,21 +55,21 @@ def sheaves(tmp_path, remote):
 
 
 @pytest.fixture
-def box(hub, browser, sheaves, other):
-    """The hub in proxy mode with the sheaves repo as Bea's root; Bea's e-mail is in her member block,
+def box(hub, browser, rectoversos, other):
+    """The hub in proxy mode with the rectoversos repo as Bea's root; Bea's e-mail is in her member block,
     Cal has none."""
     import pwd
     hub.proxy = proxy.parse({"origin": FRONT, "socket": "/run/sheaf-proxy/hub.sock",
                              "proxy_user": pwd.getpwuid(os.getuid()).pw_name,
                              "members": {BEA: {"name": "Bea", "email": "bea@example.com", "short": "bea",
-                                               "roots": [str(sheaves)]},
-                                         CAL: {"name": "Cal", "short": "cal", "roots": [str(sheaves)]}}}, "the test")
-    hub.roots.for_document(sheaves / "acme" / "blog" / "2026-10-28-plan.md")
+                                               "roots": [str(rectoversos)]},
+                                         CAL: {"name": "Cal", "short": "cal", "roots": [str(rectoversos)]}}}, "the test")
+    hub.roots.for_document(rectoversos / "acme" / "blog" / "2026-10-28-plan.md")
     return Front(hub, browser.handler)
 
 
-def edit(box, sheaves, member=BEA, words="Second, edited on the page."):
-    f = sheaves / "acme" / "blog" / "2026-10-28-plan.md"
+def edit(box, rectoversos, member=BEA, words="Second, edited on the page."):
+    f = rectoversos / "acme" / "blog" / "2026-10-28-plan.md"
     text = f.read_text(encoding="utf-8")
     i = next(i for i, b in enumerate(split_md_blocks(text)) if b.content.startswith("Second"))
     r = box.post("/_/save", {"doc": DOC, "hash": md_hash(text), "edits": [{"i": i, "html": f"<p>{words}</p>"}]},
@@ -90,8 +90,8 @@ def pushed(box, remote):
     return out
 
 
-def test_a_members_save_is_one_commit_on_the_remote_under_their_name(box, sheaves, remote):
-    edit(box, sheaves)
+def test_a_members_save_is_one_commit_on_the_remote_under_their_name(box, rectoversos, remote):
+    edit(box, rectoversos)
     commits = pushed(box, remote)
     assert len(commits) == 2
     (who, files) = commits[0]
@@ -101,8 +101,8 @@ def test_a_members_save_is_one_commit_on_the_remote_under_their_name(box, sheave
     assert "Second, edited on the page." in git(remote, "show", "main:acme/blog/2026-10-28-plan.md")
 
 
-def test_a_comment_is_a_commit_too_and_a_member_without_an_email_gets_one_at_the_fronts_host(box, sheaves, remote):
-    f = sheaves / "acme" / "blog" / "2026-10-28-plan.md"
+def test_a_comment_is_a_commit_too_and_a_member_without_an_email_gets_one_at_the_fronts_host(box, rectoversos, remote):
+    f = rectoversos / "acme" / "blog" / "2026-10-28-plan.md"
     text = f.read_text(encoding="utf-8")
     i = next(i for i, b in enumerate(split_md_blocks(text)) if b.content.startswith("First"))
     r = box.post("/_/comment", {"doc": DOC, "op": "add", "hash": md_hash(text), "block": i, "start": 0,
@@ -113,18 +113,18 @@ def test_a_comment_is_a_commit_too_and_a_member_without_an_email_gets_one_at_the
     assert "acme/blog/2026-10-28-plan.md" in files
 
 
-def versions_files(sheaves):
-    return sorted(p.relative_to(sheaves).as_posix() for p in (sheaves / ".sheaf").rglob("*.md"))
+def versions_files(rectoversos):
+    return sorted(p.relative_to(rectoversos).as_posix() for p in (rectoversos / ".sheaf").rglob("*.md"))
 
 
-def test_the_versions_folder_is_never_served(box, browser, sheaves):
-    edit(box, sheaves)
-    kept = versions_files(sheaves)
+def test_the_versions_folder_is_never_served(box, browser, rectoversos):
+    edit(box, rectoversos)
+    kept = versions_files(rectoversos)
     assert kept, "the save kept a version inside the root"
     for rel in kept:
-        assert box.get(f"/sheaves/{rel}").status == 404, rel
-        assert box.get(f"/_/doc?doc=sheaves/{rel}").status == 404, rel
-        assert browser.get(f"/sheaves/{rel}").status == 404, rel
+        assert box.get(f"/rectoversos/{rel}").status == 404, rel
+        assert box.get(f"/_/doc?doc=rectoversos/{rel}").status == 404, rel
+        assert browser.get(f"/rectoversos/{rel}").status == 404, rel
     docs = [d["doc"] for r in box.get("/_/index.json").json()["roots"] for d in r["docs"]]
     assert docs == [DOC]
 
@@ -139,42 +139,42 @@ def rows(kind):
     return [r for r in map(json.loads, lines) if r["kind"] == kind]
 
 
-def test_a_sheaf_folder_projects_toml_does_not_name_is_a_warning_once(box, sheaves, capsys):
-    stray = sheaves / "globex" / "launch" / "2026-10-28-brief.md"
+def test_a_sheaf_folder_projects_toml_does_not_name_is_a_warning_once(box, rectoversos, capsys):
+    stray = rectoversos / "globex" / "launch" / "2026-10-28-brief.md"
     stray.parent.mkdir(parents=True)
     stray.write_text(PLAN, encoding="utf-8")
-    (sheaves / "README.md").write_text("# The sheaves\n", encoding="utf-8")      # the top: no project
+    (rectoversos / "README.md").write_text("# The rectoversos\n", encoding="utf-8")      # the top: no project
     assert box.get("/_/index.json").status == 200
     assert box.get("/_/index.json").status == 200
     got = rows("project-unlisted")
-    assert [(r["root"], r["folder"]) for r in got] == [("sheaves", "globex/launch")]
+    assert [(r["root"], r["folder"]) for r in got] == [("rectoversos", "globex/launch")]
     err = capsys.readouterr().err
     assert err.count("globex/launch") == 1 and "projects.toml" in err
 
 
-def test_a_projects_toml_that_cannot_be_read_is_a_warning_and_closes_every_project(box, sheaves):
+def test_a_projects_toml_that_cannot_be_read_is_a_warning_and_closes_every_project(box, rectoversos):
     """It grants (8.12, #44): one the hub cannot read opens no project to a member, and says why once."""
-    (sheaves / "projects.toml").write_text('[projects."acme/blog"]\nmembers = ["bea"]\nstatus = "maybe"\n', encoding="utf-8")
+    (rectoversos / "projects.toml").write_text('[projects."acme/blog"]\nmembers = ["bea"]\nstatus = "maybe"\n', encoding="utf-8")
     docs = [d["doc"] for r in box.get("/_/index.json").json()["roots"] for d in r["docs"]]
     assert docs == []
     (row,) = rows("projects-invalid")
-    assert row["root"] == "sheaves" and "status" in row["error"]
+    assert row["root"] == "rectoversos" and "status" in row["error"]
 
 
-def test_a_push_that_fails_is_a_row_the_save_stands_and_the_next_push_carries_it(box, sheaves, remote, tmp_path):
+def test_a_push_that_fails_is_a_row_the_save_stands_and_the_next_push_carries_it(box, rectoversos, remote, tmp_path):
     away = tmp_path / "away.git"
     remote.rename(away)
-    edit(box, sheaves)
+    edit(box, rectoversos)
     assert box.hub.commits.settle()
     (row,) = rows("push-failed")
     assert row["doc"] == DOC and row["error"]
     away.rename(remote)
-    edit(box, sheaves, words="Second, edited again.")
+    edit(box, rectoversos, words="Second, edited again.")
     assert [who.split("|")[0] for who, _ in pushed(box, remote)] == ["Bea <bea@example.com>"] * 2 + ["the box <box@example.com>"]
 
 
-def test_the_hubs_person_saving_through_the_loopback_port_commits_as_the_repo_names_them(box, browser, sheaves, remote):
-    f = sheaves / "acme" / "blog" / "2026-10-28-plan.md"
+def test_the_hubs_person_saving_through_the_loopback_port_commits_as_the_repo_names_them(box, browser, rectoversos, remote):
+    f = rectoversos / "acme" / "blog" / "2026-10-28-plan.md"
     text = f.read_text(encoding="utf-8")
     i = next(i for i, b in enumerate(split_md_blocks(text)) if b.content.startswith("Second"))
     assert browser.post("/_/save", {"doc": DOC, "hash": md_hash(text),
@@ -183,7 +183,7 @@ def test_the_hubs_person_saving_through_the_loopback_port_commits_as_the_repo_na
     assert who.startswith(f"{box.hub.person} <box@example.com>|")
 
 
-def test_a_door_update_commits_under_the_callers_name(box, browser, sheaves, remote):
+def test_a_door_update_commits_under_the_callers_name(box, browser, rectoversos, remote):
     from helpers import call
     is_error, got = call(browser, "read", doc=DOC)
     assert not is_error
@@ -194,23 +194,23 @@ def test_a_door_update_commits_under_the_callers_name(box, browser, sheaves, rem
     assert who.startswith("Claude <box@example.com>|") and "acme/blog/2026-10-28-plan.md" in files
 
 
-def test_a_root_that_does_not_commit_makes_no_commit(box, sheaves, remote):
-    (sheaves / ".sheaf.toml").write_text('versions = "root"\n', encoding="utf-8")
-    edit(box, sheaves)
+def test_a_root_that_does_not_commit_makes_no_commit(box, rectoversos, remote):
+    (rectoversos / ".sheaf.toml").write_text('versions = "root"\n', encoding="utf-8")
+    edit(box, rectoversos)
     assert len(pushed(box, remote)) == 1
-    assert "2026-10-28-plan.md" in git(sheaves, "status", "--porcelain")
+    assert "2026-10-28-plan.md" in git(rectoversos, "status", "--porcelain")
 
 
-def test_forgetting_the_root_leaves_its_versions_in_it(box, sheaves):
-    edit(box, sheaves)
-    kept = versions_files(sheaves)
+def test_forgetting_the_root_leaves_its_versions_in_it(box, rectoversos):
+    edit(box, rectoversos)
+    kept = versions_files(rectoversos)
     assert kept
-    box.hub.forget_root("sheaves")
-    assert versions_files(sheaves) == kept
+    box.hub.forget_root("rectoversos")
+    assert versions_files(rectoversos) == kept
 
 
-def test_a_save_that_changes_nothing_commits_nothing_not_even_what_another_hand_left(box, sheaves, remote):
-    f = sheaves / "acme" / "blog" / "2026-10-28-plan.md"
+def test_a_save_that_changes_nothing_commits_nothing_not_even_what_another_hand_left(box, rectoversos, remote):
+    f = rectoversos / "acme" / "blog" / "2026-10-28-plan.md"
     f.write_text(f.read_text(encoding="utf-8") + "\nTyped in an editor, not saved by Bea.\n", encoding="utf-8")
     text = f.read_text(encoding="utf-8")
     r = box.post("/_/save", {"doc": DOC, "hash": md_hash(text), "edits": []}, member=BEA)
@@ -218,13 +218,13 @@ def test_a_save_that_changes_nothing_commits_nothing_not_even_what_another_hand_
     assert len(pushed(box, remote)) == 1
 
 
-def test_a_save_through_a_link_commits_the_document_it_wrote(box, sheaves, remote):
-    (sheaves / "acme" / "blog" / "plan.md").symlink_to("2026-10-28-plan.md")
-    git(sheaves, "add", "-A")
-    git(sheaves, "commit", "-q", "-m", "a link")
-    text = (sheaves / "acme" / "blog" / "2026-10-28-plan.md").read_text(encoding="utf-8")
+def test_a_save_through_a_link_commits_the_document_it_wrote(box, rectoversos, remote):
+    (rectoversos / "acme" / "blog" / "plan.md").symlink_to("2026-10-28-plan.md")
+    git(rectoversos, "add", "-A")
+    git(rectoversos, "commit", "-q", "-m", "a link")
+    text = (rectoversos / "acme" / "blog" / "2026-10-28-plan.md").read_text(encoding="utf-8")
     i = next(i for i, b in enumerate(split_md_blocks(text)) if b.content.startswith("Second"))
-    r = box.post("/_/save", {"doc": "sheaves/acme/blog/plan.md", "hash": md_hash(text),
+    r = box.post("/_/save", {"doc": "rectoversos/acme/blog/plan.md", "hash": md_hash(text),
                              "edits": [{"i": i, "html": "<p>Second, through the link.</p>"}]}, member=BEA)
     assert r.status == 200, r.text
     (who, files), *_ = pushed(box, remote)
@@ -232,17 +232,17 @@ def test_a_save_through_a_link_commits_the_document_it_wrote(box, sheaves, remot
     assert "through the link" in git(remote, "show", "main:acme/blog/2026-10-28-plan.md")
 
 
-def test_a_sheaf_toml_that_cannot_be_read_when_the_commit_comes_is_a_row_not_an_error(box, sheaves):
+def test_a_sheaf_toml_that_cannot_be_read_when_the_commit_comes_is_a_row_not_an_error(box, rectoversos):
     # The render reads it first and fails the request on its own (8.3); a write whose render went
     # through and whose `.sheaf.toml` broke in between still answers.
-    (sheaves / ".sheaf.toml").write_text("commit = [\n", encoding="utf-8")
+    (rectoversos / ".sheaf.toml").write_text("commit = [\n", encoding="utf-8")
     box.hub.committed(DOC, by="Claude", what="update")
     (row,) = rows("commit-failed")
     assert row["doc"] == DOC and row["error"]
 
 
-def test_a_stopping_hub_waits_for_the_push_of_the_last_write(box, sheaves, remote):
-    edit(box, sheaves)
+def test_a_stopping_hub_waits_for_the_push_of_the_last_write(box, rectoversos, remote):
+    edit(box, rectoversos)
     box.hub.stop_jobs()
     assert "Second, edited on the page." in git(remote, "show", "main:acme/blog/2026-10-28-plan.md")
 
@@ -256,9 +256,9 @@ HANG = f"61.{random.randrange(10 ** 6):06d}"
 SETSID = shlex.join([sys.executable, "-c", "import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])"])
 
 
-def hanging(sheaves):
+def hanging(rectoversos):
     """The remote's upload-pack waits first: the pull's fetch hangs as on a remote that drops packets."""
-    git(sheaves, "config", "remote.origin.uploadpack", f"sleep {HANG}; git-upload-pack")
+    git(rectoversos, "config", "remote.origin.uploadpack", f"sleep {HANG}; git-upload-pack")
 
 
 def sleepers() -> list:
@@ -285,14 +285,14 @@ def until(look, seconds=20):
     return look()
 
 
-def test_a_stop_ends_a_fetch_that_hangs_within_its_bound_and_calls_it_stopped_not_failed(box, sheaves, remote, monkeypatch):
+def test_a_stop_ends_a_fetch_that_hangs_within_its_bound_and_calls_it_stopped_not_failed(box, rectoversos, remote, monkeypatch):
     """#95: an upgrade stop left `push-failed "git exited -15"`, a git the stop itself ended. The hub ends its
     git within a bound it sets, the git's own children with it, and says so as `push-stopped`; the commit stays
     for the next hub's push."""
     from sheafmd.hub import commits
     monkeypatch.setattr(commits, "STOP_SECONDS", 1)
-    hanging(sheaves)
-    edit(box, sheaves)
+    hanging(rectoversos)
+    edit(box, rectoversos)
     assert until(sleepers), "the fetch never started"
     t = time.monotonic()
     box.hub.stop_jobs()
@@ -301,16 +301,16 @@ def test_a_stop_ends_a_fetch_that_hangs_within_its_bound_and_calls_it_stopped_no
     assert rows("push-failed") == []
     (row,) = rows("push-stopped")
     assert row["doc"] == DOC
-    assert git(sheaves, "rev-parse", "HEAD") != git(remote, "rev-parse", "main")
+    assert git(rectoversos, "rev-parse", "HEAD") != git(remote, "rev-parse", "main")
 
 
-def test_the_hubs_git_runs_in_a_session_of_its_own(box, sheaves, monkeypatch):
+def test_the_hubs_git_runs_in_a_session_of_its_own(box, rectoversos, monkeypatch):
     """A Ctrl-C at the terminal of a hub run in the foreground goes to its whole group: git is not in it, the hub
     ends it (#95)."""
     from sheafmd.hub import commits
     monkeypatch.setattr(commits, "STOP_SECONDS", 0)
-    hanging(sheaves)
-    edit(box, sheaves)
+    hanging(rectoversos)
+    edit(box, rectoversos)
     (pid,) = until(sleepers)
     assert os.getsid(pid) != os.getsid(0)
     box.hub.stop_jobs()
@@ -347,7 +347,7 @@ def test_a_git_that_failed_before_the_stop_signalled_it_is_a_failure_and_one_its
         signals.send(pid, 15)
 
 
-def test_a_poll_that_meets_a_stopped_hub_with_nothing_owed_writes_no_row(box, sheaves, monkeypatch):
+def test_a_poll_that_meets_a_stopped_hub_with_nothing_owed_writes_no_row(box, rectoversos, monkeypatch):
     from sheafmd.hub import commits
     monkeypatch.setattr(commits, "STOP_SECONDS", 0)
     box.hub.stop_jobs()
@@ -356,173 +356,173 @@ def test_a_poll_that_meets_a_stopped_hub_with_nothing_owed_writes_no_row(box, sh
     assert rows("push-stopped") == [] and rows("push-failed") == []
 
 
-def test_a_push_that_ends_within_the_stops_bound_goes_out(box, sheaves, remote, monkeypatch):
+def test_a_push_that_ends_within_the_stops_bound_goes_out(box, rectoversos, remote, monkeypatch):
     from sheafmd.hub import commits
     monkeypatch.setattr(commits, "STOP_SECONDS", 15)
-    git(sheaves, "config", "remote.origin.receivepack", "sleep 1; git-receive-pack")
-    edit(box, sheaves)
+    git(rectoversos, "config", "remote.origin.receivepack", "sleep 1; git-receive-pack")
+    edit(box, rectoversos)
     box.hub.stop_jobs()
-    assert git(sheaves, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
+    assert git(rectoversos, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
     assert rows("push-stopped") == [] and rows("push-failed") == []
 
 
-def test_a_push_due_once_the_hub_ended_its_git_starts_no_git(box, sheaves, remote, monkeypatch):
+def test_a_push_due_once_the_hub_ended_its_git_starts_no_git(box, rectoversos, remote, monkeypatch):
     """After the stop ended the running git, a push still due is never started: it would run past the bound."""
     from sheafmd.hub import commits
     monkeypatch.setattr(commits, "STOP_SECONDS", 0)
     seen = fetches(monkeypatch)
     box.hub.stop_jobs()
-    edit(box, sheaves)
+    edit(box, rectoversos)
     assert box.hub.commits.settle(5)
     assert seen == [] and rows("push-failed") == []
     (row,) = rows("push-stopped")
     assert row["doc"] == DOC
 
 
-def test_a_link_planted_in_the_versions_store_is_never_written_through(box, sheaves, tmp_path):
+def test_a_link_planted_in_the_versions_store_is_never_written_through(box, rectoversos, tmp_path):
     from sheafmd.hub import state
     victim = tmp_path / "victim.txt"
     victim.write_text("untouched\n", encoding="utf-8")
-    folder = sheaves / ".sheaf" / "versions" / state.doc_key("acme/blog/2026-10-28-plan.md")
+    folder = rectoversos / ".sheaf" / "versions" / state.doc_key("acme/blog/2026-10-28-plan.md")
     folder.mkdir(parents=True)
     (folder / ".address.tmp").symlink_to(victim)
     box.get(f"/{DOC}")
-    edit(box, sheaves)
+    edit(box, rectoversos)
     assert victim.read_text(encoding="utf-8") == "untouched\n"
 
 
-def test_a_sheaf_folder_that_is_a_link_out_of_the_root_gets_no_versions(box, sheaves, tmp_path):
+def test_a_sheaf_folder_that_is_a_link_out_of_the_root_gets_no_versions(box, rectoversos, tmp_path):
     away = tmp_path / "away"
     away.mkdir()
-    (sheaves / ".sheaf").symlink_to(away)
+    (rectoversos / ".sheaf").symlink_to(away)
     box.get(f"/{DOC}")
     try:
-        edit(box, sheaves)
+        edit(box, rectoversos)
     except AssertionError:
         pass
     assert list(away.iterdir()) == []
 
 
-def test_a_slow_push_does_not_hold_up_the_next_save(box, sheaves, remote):
+def test_a_slow_push_does_not_hold_up_the_next_save(box, rectoversos, remote):
     import time
-    git(sheaves, "config", "remote.origin.receivepack", "sleep 3; git-receive-pack")
-    edit(box, sheaves)
+    git(rectoversos, "config", "remote.origin.receivepack", "sleep 3; git-receive-pack")
+    edit(box, rectoversos)
     time.sleep(0.5)                                      # the push is under way
     t = time.monotonic()
-    edit(box, sheaves, words="Second, edited while it pushed.")
+    edit(box, rectoversos, words="Second, edited while it pushed.")
     assert time.monotonic() - t < 2
     assert box.hub.commits.settle()
 
 
-def test_a_commit_that_fails_leaves_nothing_staged(box, sheaves):
-    head = git(sheaves, "rev-parse", "HEAD").strip()
-    (sheaves / ".git" / "MERGE_HEAD").write_text(head + "\n", encoding="utf-8")   # a merge under way
-    edit(box, sheaves)
+def test_a_commit_that_fails_leaves_nothing_staged(box, rectoversos):
+    head = git(rectoversos, "rev-parse", "HEAD").strip()
+    (rectoversos / ".git" / "MERGE_HEAD").write_text(head + "\n", encoding="utf-8")   # a merge under way
+    edit(box, rectoversos)
     (row,) = rows("commit-failed")
     assert row["doc"] == DOC
-    assert git(sheaves, "diff", "--cached", "--name-only") == ""
+    assert git(rectoversos, "diff", "--cached", "--name-only") == ""
 
 
-def test_a_link_into_the_versions_store_is_not_listed(box, sheaves):
-    edit(box, sheaves)
-    target = next((sheaves / ".sheaf" / "versions").rglob("*.md"))
-    (sheaves / "acme" / "blog" / "alias.md").symlink_to(target)
+def test_a_link_into_the_versions_store_is_not_listed(box, rectoversos):
+    edit(box, rectoversos)
+    target = next((rectoversos / ".sheaf" / "versions").rglob("*.md"))
+    (rectoversos / "acme" / "blog" / "alias.md").symlink_to(target)
     docs = [d["doc"] for r in box.get("/_/index.json").json()["roots"] for d in r["docs"]]
     assert docs == [DOC]
 
 
-def test_a_projects_toml_that_cannot_be_read_warns_once_however_it_changes(box, sheaves):
-    (sheaves / "projects.toml").write_text('[projects."acme/blog"]\nstatus = "maybe"\n', encoding="utf-8")
+def test_a_projects_toml_that_cannot_be_read_warns_once_however_it_changes(box, rectoversos):
+    (rectoversos / "projects.toml").write_text('[projects."acme/blog"]\nstatus = "maybe"\n', encoding="utf-8")
     box.get("/_/index.json")
-    (sheaves / "projects.toml").write_text('[projects."acme/blog"\n', encoding="utf-8")
+    (rectoversos / "projects.toml").write_text('[projects."acme/blog"\n', encoding="utf-8")
     box.get("/_/index.json")
     assert len(rows("projects-invalid")) == 1
 
 
-def test_a_versions_store_the_repo_ignores_stays_out_and_the_document_is_committed(box, sheaves, remote):
-    (sheaves / ".git" / "info" / "exclude").write_text(".sheaf/\n", encoding="utf-8")
-    edit(box, sheaves)
+def test_a_versions_store_the_repo_ignores_stays_out_and_the_document_is_committed(box, rectoversos, remote):
+    (rectoversos / ".git" / "info" / "exclude").write_text(".sheaf/\n", encoding="utf-8")
+    edit(box, rectoversos)
     (who, files), _ = pushed(box, remote)
     assert who.startswith("Bea <bea@example.com>|")
     assert files == ["acme/blog/2026-10-28-plan.md"]
 
 
-def test_a_file_the_repo_ignores_inside_the_versions_folder_is_never_committed(box, sheaves, remote):
+def test_a_file_the_repo_ignores_inside_the_versions_folder_is_never_committed(box, rectoversos, remote):
     from sheafmd.hub import state
-    folder = sheaves / ".sheaf" / "versions" / state.doc_key("acme/blog/2026-10-28-plan.md")
+    folder = rectoversos / ".sheaf" / "versions" / state.doc_key("acme/blog/2026-10-28-plan.md")
     folder.mkdir(parents=True)
     (folder / "notes.key").write_text("not a version\n", encoding="utf-8")
-    (sheaves / ".git" / "info" / "exclude").write_text("*.key\n", encoding="utf-8")
-    edit(box, sheaves)
+    (rectoversos / ".git" / "info" / "exclude").write_text("*.key\n", encoding="utf-8")
+    edit(box, rectoversos)
     (who, files), _ = pushed(box, remote)
     assert who.startswith("Bea <bea@example.com>|") and not any(f.endswith(".key") for f in files)
 
 
-def test_a_commit_that_fails_puts_back_what_was_staged_before(box, sheaves):
-    f = sheaves / "acme" / "blog" / "2026-10-28-plan.md"
+def test_a_commit_that_fails_puts_back_what_was_staged_before(box, rectoversos):
+    f = rectoversos / "acme" / "blog" / "2026-10-28-plan.md"
     original = f.read_text(encoding="utf-8")
     f.write_text(original + "\nStaged by hand, never in the work tree again.\n", encoding="utf-8")
-    git(sheaves, "add", "acme/blog/2026-10-28-plan.md")
+    git(rectoversos, "add", "acme/blog/2026-10-28-plan.md")
     f.write_text(original, encoding="utf-8")
-    head = git(sheaves, "rev-parse", "HEAD").strip()
-    (sheaves / ".git" / "MERGE_HEAD").write_text(head + "\n", encoding="utf-8")
-    edit(box, sheaves)
+    head = git(rectoversos, "rev-parse", "HEAD").strip()
+    (rectoversos / ".git" / "MERGE_HEAD").write_text(head + "\n", encoding="utf-8")
+    edit(box, rectoversos)
     assert rows("commit-failed")
-    assert "Staged by hand" in git(sheaves, "show", ":acme/blog/2026-10-28-plan.md")
-    assert git(sheaves, "diff", "--cached", "--name-only") == "acme/blog/2026-10-28-plan.md\n"
+    assert "Staged by hand" in git(rectoversos, "show", ":acme/blog/2026-10-28-plan.md")
+    assert git(rectoversos, "diff", "--cached", "--name-only") == "acme/blog/2026-10-28-plan.md\n"
 
 
 @pytest.mark.parametrize("versions", ["ignored", "in state"])
-def test_a_write_that_brings_the_document_back_to_head_keeps_what_was_staged(box, sheaves, remote, versions):
+def test_a_write_that_brings_the_document_back_to_head_keeps_what_was_staged(box, rectoversos, remote, versions):
     # Versions out of the commit make no diff of their own: the write alone decides there is nothing to commit.
     if versions == "ignored":
-        (sheaves / ".git" / "info" / "exclude").write_text(".sheaf/\n", encoding="utf-8")
+        (rectoversos / ".git" / "info" / "exclude").write_text(".sheaf/\n", encoding="utf-8")
     else:
-        (sheaves / ".sheaf.toml").write_text('commit = true\npush = true\n', encoding="utf-8")
-    f = sheaves / "acme" / "blog" / "2026-10-28-plan.md"
+        (rectoversos / ".sheaf.toml").write_text('commit = true\npush = true\n', encoding="utf-8")
+    f = rectoversos / "acme" / "blog" / "2026-10-28-plan.md"
     original = f.read_text(encoding="utf-8")
     f.write_text(original + "\nStaged by hand, never in the work tree again.\n", encoding="utf-8")
-    git(sheaves, "add", "acme/blog/2026-10-28-plan.md")
+    git(rectoversos, "add", "acme/blog/2026-10-28-plan.md")
     f.write_text(original.replace("Second paragraph, about pears.", "Second, changed by hand."), encoding="utf-8")
-    edit(box, sheaves, words="Second paragraph, about pears.")
+    edit(box, rectoversos, words="Second paragraph, about pears.")
     assert f.read_text(encoding="utf-8") == original
     assert len(pushed(box, remote)) == 1
     assert rows("commit-failed") == []
-    assert "Staged by hand" in git(sheaves, "show", ":acme/blog/2026-10-28-plan.md")
+    assert "Staged by hand" in git(rectoversos, "show", ":acme/blog/2026-10-28-plan.md")
 
 
-def test_a_write_with_nothing_to_commit_keeps_the_flags_of_the_index(box, sheaves, remote):
-    (sheaves / ".git" / "info" / "exclude").write_text(".sheaf/\n", encoding="utf-8")
-    git(sheaves, "update-index", "--assume-unchanged", "acme/blog/2026-10-28-plan.md")
-    edit(box, sheaves)
+def test_a_write_with_nothing_to_commit_keeps_the_flags_of_the_index(box, rectoversos, remote):
+    (rectoversos / ".git" / "info" / "exclude").write_text(".sheaf/\n", encoding="utf-8")
+    git(rectoversos, "update-index", "--assume-unchanged", "acme/blog/2026-10-28-plan.md")
+    edit(box, rectoversos)
     assert len(pushed(box, remote)) == 1                 # the first commit alone: git add passed the file by
-    assert git(sheaves, "ls-files", "-v", "--", "acme/blog/2026-10-28-plan.md").startswith("h ")
+    assert git(rectoversos, "ls-files", "-v", "--", "acme/blog/2026-10-28-plan.md").startswith("h ")
 
 
 @pytest.mark.parametrize("flag, letter", [("--assume-unchanged", "h "), ("--skip-worktree", "S ")])
-def test_a_commit_that_fails_keeps_the_flags_of_the_version_entries_it_did_not_touch(box, sheaves, flag, letter):
+def test_a_commit_that_fails_keeps_the_flags_of_the_version_entries_it_did_not_touch(box, rectoversos, flag, letter):
     # #49: putting the index back rewrote every entry of the versions folder, which drops their flags.
-    edit(box, sheaves)
+    edit(box, rectoversos)
     assert box.hub.commits.settle()
-    (kept, *_) = git(sheaves, "ls-files", "--", ".sheaf/versions").split()
-    git(sheaves, "update-index", flag, kept)
-    head = git(sheaves, "rev-parse", "HEAD").strip()
-    (sheaves / ".git" / "MERGE_HEAD").write_text(head + "\n", encoding="utf-8")   # a merge under way
-    edit(box, sheaves, words="Second, edited again.")
+    (kept, *_) = git(rectoversos, "ls-files", "--", ".sheaf/versions").split()
+    git(rectoversos, "update-index", flag, kept)
+    head = git(rectoversos, "rev-parse", "HEAD").strip()
+    (rectoversos / ".git" / "MERGE_HEAD").write_text(head + "\n", encoding="utf-8")   # a merge under way
+    edit(box, rectoversos, words="Second, edited again.")
     assert rows("commit-failed")
-    assert git(sheaves, "ls-files", "-v", "--", kept).startswith(letter)
-    assert git(sheaves, "diff", "--cached", "--name-only") == ""
+    assert git(rectoversos, "ls-files", "-v", "--", kept).startswith(letter)
+    assert git(rectoversos, "diff", "--cached", "--name-only") == ""
 
 
-def test_a_document_the_repo_ignores_is_never_committed_nor_its_versions(box, sheaves, remote):
-    (sheaves / ".git" / "info" / "exclude").write_text("acme/blog/2026-10-28-plan.md\n", encoding="utf-8")
-    git(sheaves, "rm", "-q", "--cached", "acme/blog/2026-10-28-plan.md")
-    git(sheaves, "commit", "-q", "-m", "a private draft from now on")
-    git(sheaves, "push", "-q", "origin", "HEAD:main")
-    edit(box, sheaves)
+def test_a_document_the_repo_ignores_is_never_committed_nor_its_versions(box, rectoversos, remote):
+    (rectoversos / ".git" / "info" / "exclude").write_text("acme/blog/2026-10-28-plan.md\n", encoding="utf-8")
+    git(rectoversos, "rm", "-q", "--cached", "acme/blog/2026-10-28-plan.md")
+    git(rectoversos, "commit", "-q", "-m", "a private draft from now on")
+    git(rectoversos, "push", "-q", "origin", "HEAD:main")
+    edit(box, rectoversos)
     assert len(pushed(box, remote)) == 2
     assert rows("commit-failed") == []
-    assert git(sheaves, "status", "--porcelain", "--", ".sheaf").strip().startswith("??")
+    assert git(rectoversos, "status", "--porcelain", "--", ".sheaf").strip().startswith("??")
 
 
 def test_a_first_commit_that_fails_leaves_nothing_staged(browser, tmp_path):
@@ -543,22 +543,22 @@ def test_a_first_commit_that_fails_leaves_nothing_staged(browser, tmp_path):
     assert git(fresh, "diff", "--cached", "--name-only") == ""
 
 
-def test_a_conflict_in_the_index_is_left_as_it_is(box, sheaves):
-    f = sheaves / "acme" / "blog" / "2026-10-28-plan.md"
+def test_a_conflict_in_the_index_is_left_as_it_is(box, rectoversos):
+    f = rectoversos / "acme" / "blog" / "2026-10-28-plan.md"
     original = f.read_text(encoding="utf-8")
-    git(sheaves, "checkout", "-q", "-b", "other")
+    git(rectoversos, "checkout", "-q", "-b", "other")
     f.write_text(original.replace("Last paragraph.", "Last paragraph, theirs."), encoding="utf-8")
-    git(sheaves, "commit", "-q", "-am", "theirs")
-    git(sheaves, "checkout", "-q", "-")
+    git(rectoversos, "commit", "-q", "-am", "theirs")
+    git(rectoversos, "checkout", "-q", "-")
     f.write_text(original.replace("Last paragraph.", "Last paragraph, ours."), encoding="utf-8")
-    git(sheaves, "commit", "-q", "-am", "ours")
-    assert subprocess.run(["git", "-C", str(sheaves), "merge", "-q", "other"], capture_output=True).returncode
-    unmerged = git(sheaves, "ls-files", "-u")
+    git(rectoversos, "commit", "-q", "-am", "ours")
+    assert subprocess.run(["git", "-C", str(rectoversos), "merge", "-q", "other"], capture_output=True).returncode
+    unmerged = git(rectoversos, "ls-files", "-u")
     assert unmerged.count("\n") == 3
-    edit(box, sheaves)
+    edit(box, rectoversos)
     (row,) = rows("commit-failed")
     assert row["doc"] == DOC and "conflict" in row["error"]
-    assert git(sheaves, "ls-files", "-u") == unmerged
+    assert git(rectoversos, "ls-files", "-u") == unmerged
 
 
 PRIVATE = """---
@@ -575,19 +575,19 @@ A quote from the contract.
 """
 
 
-def test_a_share_is_one_commit_by_the_signed_in_owner_whatever_name_the_request_carries(box, sheaves, remote):
+def test_a_share_is_one_commit_by_the_signed_in_owner_whatever_name_the_request_carries(box, rectoversos, remote):
     import dataclasses
     box.hub.proxy.members[BEA] = dataclasses.replace(box.hub.proxy.members[BEA], short="bea")
     rel = "acme/blog/2026-10-28-contract.md"
-    (sheaves / rel).write_text(PRIVATE, encoding="utf-8")
-    git(sheaves, "add", rel)
-    git(sheaves, "commit", "-q", "-m", "the contract")
-    git(sheaves, "push", "-q", "origin", "HEAD:main")
+    (rectoversos / rel).write_text(PRIVATE, encoding="utf-8")
+    git(rectoversos, "add", rel)
+    git(rectoversos, "commit", "-q", "-m", "the contract")
+    git(rectoversos, "push", "-q", "origin", "HEAD:main")
 
     def share(member):
-        text = (sheaves / rel).read_text(encoding="utf-8")
+        text = (rectoversos / rel).read_text(encoding="utf-8")
         edit = the_list.tick_edit(text, 0, "Share")
-        return box.post("/_/save", {"doc": f"sheaves/{rel}", "hash": md_hash(text), "edits": [edit],
+        return box.post("/_/save", {"doc": f"rectoversos/{rel}", "hash": md_hash(text), "edits": [edit],
                                     "by": "Bea", "author": "Bea <bea@example.com>", "short": "bea"}, member=member)
 
     assert share(CAL).status == 404                         # not his to open, let alone to share
@@ -622,80 +622,80 @@ ONLY_BEA = '[projects."acme/blog"]\nmembers = ["bea"]\nstatus = "live"\n'
 
 
 def test_a_projects_toml_change_merged_on_the_remote_reaches_the_hub_at_its_next_push_and_the_grant_follows(
-        box, sheaves, remote, tmp_path):
+        box, rectoversos, remote, tmp_path):
     assert box.get(f"/{DOC}", member=CAL).status == 200
     merged_on_github(tmp_path, remote, {"projects.toml": ONLY_BEA}, "Cal leaves acme/blog")
-    edit(box, sheaves)
+    edit(box, rectoversos)
     subjects = [who.split("|")[1] for who, _ in pushed(box, remote)]
     assert subjects == ["edit: acme/blog/2026-10-28-plan.md", "Cal leaves acme/blog", "first"]
-    assert (sheaves / "projects.toml").read_text(encoding="utf-8") == ONLY_BEA
-    assert git(sheaves, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
-    assert git(sheaves, "status", "--porcelain", "--untracked-files=no") == ""
+    assert (rectoversos / "projects.toml").read_text(encoding="utf-8") == ONLY_BEA
+    assert git(rectoversos, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
+    assert git(rectoversos, "status", "--porcelain", "--untracked-files=no") == ""
     assert box.get(f"/{DOC}", member=CAL).status == 404
     assert rows("push-diverged") == [] and rows("push-failed") == []
 
 
-def test_the_hubs_commits_keep_their_author_and_subject_on_top_of_the_remotes(box, sheaves, remote, tmp_path):
-    edit(box, sheaves)
+def test_the_hubs_commits_keep_their_author_and_subject_on_top_of_the_remotes(box, rectoversos, remote, tmp_path):
+    edit(box, rectoversos)
     pushed(box, remote)
-    merged_on_github(tmp_path, remote, {"README.md": "# The sheaves\n"}, "a README")
-    edit(box, sheaves, member=CAL, words="Second, by Cal.")
+    merged_on_github(tmp_path, remote, {"README.md": "# The rectoversos\n"}, "a README")
+    edit(box, rectoversos, member=CAL, words="Second, by Cal.")
     commits = pushed(box, remote)
-    cal = git(sheaves, "log", "-1", "--format=%an <%ae>", "HEAD").strip()
+    cal = git(rectoversos, "log", "-1", "--format=%an <%ae>", "HEAD").strip()
     assert cal.startswith("Cal <")
     assert [who for who, _ in commits] == [f"{cal}|edit: acme/blog/2026-10-28-plan.md", "Ada <ada@example.com>|a README",
                                            "Bea <bea@example.com>|edit: acme/blog/2026-10-28-plan.md",
                                            "the box <box@example.com>|first"]
-    assert (sheaves / "README.md").read_text(encoding="utf-8") == "# The sheaves\n"
+    assert (rectoversos / "README.md").read_text(encoding="utf-8") == "# The rectoversos\n"
     assert "Second, by Cal." in git(remote, "show", "main:acme/blog/2026-10-28-plan.md")
 
 
 def test_a_conflict_with_the_remote_leaves_the_checkout_as_it_was_pushes_nothing_and_is_a_row(
-        box, sheaves, remote, tmp_path):
-    f = sheaves / "acme" / "blog" / "2026-10-28-plan.md"
+        box, rectoversos, remote, tmp_path):
+    f = rectoversos / "acme" / "blog" / "2026-10-28-plan.md"
     theirs = f.read_text(encoding="utf-8").replace("Second", "Second, rewritten on GitHub")
     remote_head = merged_on_github(tmp_path, remote, {"acme/blog/2026-10-28-plan.md": theirs}, "a rewrite")
-    edit(box, sheaves)
+    edit(box, rectoversos)
     assert box.hub.commits.settle()
-    head = git(sheaves, "rev-parse", "HEAD").strip()
-    assert git(sheaves, "log", "-1", "--format=%s", head).strip() == "edit: acme/blog/2026-10-28-plan.md"
+    head = git(rectoversos, "rev-parse", "HEAD").strip()
+    assert git(rectoversos, "log", "-1", "--format=%s", head).strip() == "edit: acme/blog/2026-10-28-plan.md"
     assert "Second, edited on the page." in f.read_text(encoding="utf-8")
-    assert git(sheaves, "status", "--porcelain", "--untracked-files=no") == ""
-    assert not (sheaves / ".git" / "rebase-merge").exists() and not (sheaves / ".git" / "MERGE_HEAD").exists()
+    assert git(rectoversos, "status", "--porcelain", "--untracked-files=no") == ""
+    assert not (rectoversos / ".git" / "rebase-merge").exists() and not (rectoversos / ".git" / "MERGE_HEAD").exists()
     assert git(remote, "rev-parse", "main").strip() == remote_head
     (row,) = rows("push-diverged")
     assert row["doc"] == DOC and row["paths"] == ["acme/blog/2026-10-28-plan.md"]
     # A person settles it once, on GitHub here; the next push goes through.
     merged_on_github(tmp_path, remote, {"acme/blog/2026-10-28-plan.md": PLAN}, "back as it was")
-    edit(box, sheaves, words="Second, edited again.")
+    edit(box, rectoversos, words="Second, edited again.")
     assert box.hub.commits.settle()
-    assert git(sheaves, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
+    assert git(rectoversos, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
     assert "Second, edited again." in git(remote, "show", "main:acme/blog/2026-10-28-plan.md")
     assert len(rows("push-diverged")) == 1
 
 
-def test_a_change_of_the_person_on_a_file_the_remote_changed_stops_the_pull_and_stays(box, sheaves, remote, tmp_path):
+def test_a_change_of_the_person_on_a_file_the_remote_changed_stops_the_pull_and_stays(box, rectoversos, remote, tmp_path):
     merged_on_github(tmp_path, remote, {"projects.toml": ONLY_BEA}, "Cal leaves acme/blog")
     mine = '[projects."acme/blog"]\nmembers = ["bea", "cal", "dan"]\nstatus = "live"\n'
-    (sheaves / "projects.toml").write_text(mine, encoding="utf-8")       # by hand on the box, not committed
-    edit(box, sheaves)
+    (rectoversos / "projects.toml").write_text(mine, encoding="utf-8")       # by hand on the box, not committed
+    edit(box, rectoversos)
     assert box.hub.commits.settle()
-    assert (sheaves / "projects.toml").read_text(encoding="utf-8") == mine
+    assert (rectoversos / "projects.toml").read_text(encoding="utf-8") == mine
     (row,) = rows("push-diverged")
     assert row["doc"] == DOC and row["error"]
     assert git(remote, "log", "-1", "--format=%s", "main").strip() == "Cal leaves acme/blog"
 
 
-def test_a_root_that_does_not_push_does_not_fetch(box, sheaves, remote, tmp_path):
-    (sheaves / ".sheaf.toml").write_text('versions = "root"\ncommit = true\n', encoding="utf-8")
+def test_a_root_that_does_not_push_does_not_fetch(box, rectoversos, remote, tmp_path):
+    (rectoversos / ".sheaf.toml").write_text('versions = "root"\ncommit = true\n', encoding="utf-8")
     merged_on_github(tmp_path, remote, {"projects.toml": ONLY_BEA}, "Cal leaves acme/blog")
-    edit(box, sheaves)
+    edit(box, rectoversos)
     assert box.hub.commits.settle()
-    assert git(sheaves, "log", "-1", "--format=%s", "HEAD~1").strip() == "first"
-    assert "cal" in (sheaves / "projects.toml").read_text(encoding="utf-8")
+    assert git(rectoversos, "log", "-1", "--format=%s", "HEAD~1").strip() == "first"
+    assert "cal" in (rectoversos / "projects.toml").read_text(encoding="utf-8")
 
 
-def test_the_pull_holds_the_file_lock_of_what_it_changes(box, sheaves, remote, tmp_path, monkeypatch):
+def test_the_pull_holds_the_file_lock_of_what_it_changes(box, rectoversos, remote, tmp_path, monkeypatch):
     """A page's write never lands between the pull's look at a file and its writing of it (9.11's locks)."""
     from sheafmd.hub import commits
     seen = []
@@ -704,7 +704,7 @@ def test_the_pull_holds_the_file_lock_of_what_it_changes(box, sheaves, remote, t
     def spy(folder, *args, **kw):
         if args[:1] == ("read-tree",):
             from sheafmd import source
-            lock = source.file_lock(sheaves / "projects.toml")
+            lock = source.file_lock(rectoversos / "projects.toml")
             import fcntl
             f = open(lock.paths[0], "a+")
             try:
@@ -718,50 +718,50 @@ def test_the_pull_holds_the_file_lock_of_what_it_changes(box, sheaves, remote, t
 
     monkeypatch.setattr(commits, "_git", spy)
     merged_on_github(tmp_path, remote, {"projects.toml": ONLY_BEA}, "Cal leaves acme/blog")
-    edit(box, sheaves)
+    edit(box, rectoversos)
     assert box.hub.commits.settle()
     assert seen == ["held"]
 
 
-def test_a_link_and_its_file_both_changed_on_the_remote_take_one_lock_and_the_push_goes(box, sheaves, remote, tmp_path):
+def test_a_link_and_its_file_both_changed_on_the_remote_take_one_lock_and_the_push_goes(box, rectoversos, remote, tmp_path):
     """Two paths of one file are one file lock: the pull never waits on itself."""
-    (sheaves / "notes").mkdir()
-    (sheaves / "notes" / "b.md").write_text("# B\n", encoding="utf-8")
-    (sheaves / "notes" / "a.md").symlink_to("b.md")
-    git(sheaves, "add", "-A")
-    git(sheaves, "commit", "-q", "-m", "a link")
-    git(sheaves, "push", "-q", "origin", "HEAD:main")
+    (rectoversos / "notes").mkdir()
+    (rectoversos / "notes" / "b.md").write_text("# B\n", encoding="utf-8")
+    (rectoversos / "notes" / "a.md").symlink_to("b.md")
+    git(rectoversos, "add", "-A")
+    git(rectoversos, "commit", "-q", "-m", "a link")
+    git(rectoversos, "push", "-q", "origin", "HEAD:main")
     away = tmp_path / "github"
     merged_on_github(tmp_path, remote, {"notes/b.md": "# B, on GitHub\n"}, "b")
     git(away, "rm", "-q", "notes/a.md")
     git(away, "commit", "-q", "-m", "no link")
     git(away, "push", "-q", "origin", "HEAD:main")
-    edit(box, sheaves)
+    edit(box, rectoversos)
     assert box.hub.commits.settle(timeout=10)
-    assert git(sheaves, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
-    assert (sheaves / "notes" / "b.md").read_text(encoding="utf-8") == "# B, on GitHub\n"
+    assert git(rectoversos, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
+    assert (rectoversos / "notes" / "b.md").read_text(encoding="utf-8") == "# B, on GitHub\n"
 
 
-def test_a_file_name_that_is_not_utf8_on_the_remote_is_taken_in(box, sheaves, remote, tmp_path):
-    merged_on_github(tmp_path, remote, {"README.md": "# The sheaves\n"}, "a README")
+def test_a_file_name_that_is_not_utf8_on_the_remote_is_taken_in(box, rectoversos, remote, tmp_path):
+    merged_on_github(tmp_path, remote, {"README.md": "# The rectoversos\n"}, "a README")
     away = tmp_path / "github"
     undecodable_names_or_skip(away)
     (away / os.fsdecode(b"caf\xe9.txt")).write_text("x\n", encoding="utf-8")
     git(away, "add", "-A")
     git(away, "commit", "-q", "-m", "a latin-1 name")
     git(away, "push", "-q", "origin", "HEAD:main")
-    edit(box, sheaves)
+    edit(box, rectoversos)
     assert box.hub.commits.settle(timeout=10)
-    assert git(sheaves, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
-    assert (sheaves / os.fsdecode(b"caf\xe9.txt")).exists()
+    assert git(rectoversos, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
+    assert (rectoversos / os.fsdecode(b"caf\xe9.txt")).exists()
 
 
-def test_a_hub_commit_the_remote_already_holds_is_not_pushed_again_empty(box, sheaves, remote, tmp_path):
-    (sheaves / "README.md").write_text("# The sheaves\n", encoding="utf-8")
-    git(sheaves, "add", "README.md")
-    git(sheaves, "commit", "-q", "-m", "a README, on the box")         # not pushed
-    merged_on_github(tmp_path, remote, {"README.md": "# The sheaves\n"}, "a README, on GitHub")
-    edit(box, sheaves)
+def test_a_hub_commit_the_remote_already_holds_is_not_pushed_again_empty(box, rectoversos, remote, tmp_path):
+    (rectoversos / "README.md").write_text("# The rectoversos\n", encoding="utf-8")
+    git(rectoversos, "add", "README.md")
+    git(rectoversos, "commit", "-q", "-m", "a README, on the box")         # not pushed
+    merged_on_github(tmp_path, remote, {"README.md": "# The rectoversos\n"}, "a README, on GitHub")
+    edit(box, rectoversos)
     subjects = [who.split("|")[1] for who, _ in pushed(box, remote)]
     assert subjects == ["edit: acme/blog/2026-10-28-plan.md", "a README, on GitHub", "first"]
 
@@ -777,7 +777,7 @@ def test_two_roots_of_one_repo_share_its_commit_lock_and_a_commit_of_one_never_l
 
     from sheafmd.hub import commits
     from sheafmd.hub.roots import Root
-    repo = tmp_path / "sheaves"
+    repo = tmp_path / "rectoversos"
     subprocess.run(["git", "clone", "-q", str(remote), str(repo)], check=True, capture_output=True)
     git(repo, "config", "user.name", "the box")
     git(repo, "config", "user.email", "box@example.com")
@@ -815,7 +815,7 @@ def test_two_roots_of_one_repo_share_its_commit_lock_and_a_commit_of_one_never_l
         return real(folder, *args, **kw)
 
     monkeypatch.setattr(commits, "_git", spy)
-    merged_on_github(tmp_path, remote, {"README.md": "# The sheaves\n"}, "a README")
+    merged_on_github(tmp_path, remote, {"README.md": "# The rectoversos\n"}, "a README")
     (repo / "acme" / "plan.md").write_text("# acme, on the page\n", encoding="utf-8")
     hub_commits.saved(a, "plan.md", commits.Author("Bea", "bea@example.com"), "edit")
     assert hub_commits.settle()
@@ -851,46 +851,46 @@ def fetches(monkeypatch):
 
 
 def test_a_projects_toml_merged_on_the_remote_lands_at_the_next_poll_with_no_save_and_the_grant_follows(
-        box, sheaves, remote, tmp_path):
+        box, rectoversos, remote, tmp_path):
     assert box.get(f"/{DOC}", member=CAL).status == 200
     head = merged_on_github(tmp_path, remote, {"projects.toml": ONLY_BEA}, "Cal leaves acme/blog")
     poll(box)
-    assert (sheaves / "projects.toml").read_text(encoding="utf-8") == ONLY_BEA
+    assert (rectoversos / "projects.toml").read_text(encoding="utf-8") == ONLY_BEA
     # The page Cal opened made a version: the poll commits it on top of the remote's (#92), and pushes it.
-    assert git(sheaves, "log", "-2", "--format=%H %s") == f"{git(sheaves, 'rev-parse', 'HEAD').strip()} " \
+    assert git(rectoversos, "log", "-2", "--format=%H %s") == f"{git(rectoversos, 'rev-parse', 'HEAD').strip()} " \
         f"versions: acme/blog/2026-10-28-plan.md\n{head} Cal leaves acme/blog\n"
-    assert git(sheaves, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
-    assert git(sheaves, "status", "--porcelain", "--untracked-files=no") == ""
+    assert git(rectoversos, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
+    assert git(rectoversos, "status", "--porcelain", "--untracked-files=no") == ""
     assert box.get(f"/{DOC}", member=CAL).status == 404
     assert rows("push-diverged") == [] and rows("push-failed") == []
 
 
-def test_two_polls_within_a_minute_fetch_once(box, sheaves, remote, monkeypatch):
+def test_two_polls_within_a_minute_fetch_once(box, rectoversos, remote, monkeypatch):
     seen = fetches(monkeypatch)
     poll(box)
     poll(box)
     assert len(seen) == 1
 
 
-def test_a_poll_fetches_again_once_the_interval_passed(box, sheaves, remote, tmp_path, monkeypatch):
+def test_a_poll_fetches_again_once_the_interval_passed(box, rectoversos, remote, tmp_path, monkeypatch):
     from sheafmd.hub import commits
     seen = fetches(monkeypatch)
     poll(box)
     monkeypatch.setattr(commits, "FETCH_SECONDS", 0)
-    merged_on_github(tmp_path, remote, {"README.md": "# The sheaves\n"}, "a README")
+    merged_on_github(tmp_path, remote, {"README.md": "# The rectoversos\n"}, "a README")
     poll(box)
     assert len(seen) == 2
-    assert (sheaves / "README.md").read_text(encoding="utf-8") == "# The sheaves\n"
+    assert (rectoversos / "README.md").read_text(encoding="utf-8") == "# The rectoversos\n"
 
 
-def test_a_root_that_does_not_push_is_never_fetched_by_the_poll(box, sheaves, remote, tmp_path, monkeypatch):
-    (sheaves / ".sheaf.toml").write_text('versions = "root"\ncommit = true\n', encoding="utf-8")
+def test_a_root_that_does_not_push_is_never_fetched_by_the_poll(box, rectoversos, remote, tmp_path, monkeypatch):
+    (rectoversos / ".sheaf.toml").write_text('versions = "root"\ncommit = true\n', encoding="utf-8")
     seen = fetches(monkeypatch)
     poll(box)
     assert seen == []
 
 
-def test_a_fetch_the_poll_cannot_make_is_one_row_however_many_polls_meet_it(box, sheaves, remote, tmp_path, monkeypatch):
+def test_a_fetch_the_poll_cannot_make_is_one_row_however_many_polls_meet_it(box, rectoversos, remote, tmp_path, monkeypatch):
     from sheafmd.hub import commits
     monkeypatch.setattr(commits, "FETCH_SECONDS", 0)
     remote.rename(tmp_path / "away.git")
@@ -898,22 +898,22 @@ def test_a_fetch_the_poll_cannot_make_is_one_row_however_many_polls_meet_it(box,
     poll(box)
     poll(box)
     (row,) = rows("push-failed")
-    assert row["doc"] == "sheaves" and row["error"]
+    assert row["doc"] == "rectoversos" and row["error"]
 
 
-def test_a_hub_commit_whose_push_failed_goes_out_at_the_next_poll(box, sheaves, remote, tmp_path, monkeypatch):
+def test_a_hub_commit_whose_push_failed_goes_out_at_the_next_poll(box, rectoversos, remote, tmp_path, monkeypatch):
     from sheafmd.hub import commits
     away = tmp_path / "away.git"
     remote.rename(away)
-    edit(box, sheaves)
+    edit(box, rectoversos)
     assert box.hub.commits.settle()
     away.rename(remote)
     monkeypatch.setattr(commits, "FETCH_SECONDS", 0)
     poll(box)
-    assert git(sheaves, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
+    assert git(rectoversos, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
 
 
-def test_an_idle_poll_pushes_nothing(box, sheaves, remote, monkeypatch):
+def test_an_idle_poll_pushes_nothing(box, rectoversos, remote, monkeypatch):
     from sheafmd.hub import commits
     pushes, real = [], commits._git
 
@@ -927,15 +927,15 @@ def test_an_idle_poll_pushes_nothing(box, sheaves, remote, monkeypatch):
     assert len(seen) == 1 and pushes == []
 
 
-def test_a_poll_never_pushes_a_commit_or_a_branch_made_by_hand(box, sheaves, remote, monkeypatch):
+def test_a_poll_never_pushes_a_commit_or_a_branch_made_by_hand(box, rectoversos, remote, monkeypatch):
     """The poll takes in the remote; what it pushes is a write's push that failed, never a person's own commit."""
     from sheafmd.hub import commits
-    (sheaves / "README.md").write_text("# by hand\n", encoding="utf-8")
-    git(sheaves, "add", "README.md")
-    git(sheaves, "commit", "-q", "-m", "by hand")
+    (rectoversos / "README.md").write_text("# by hand\n", encoding="utf-8")
+    git(rectoversos, "add", "README.md")
+    git(rectoversos, "commit", "-q", "-m", "by hand")
     first = git(remote, "rev-parse", "main")
     poll(box)
-    git(sheaves, "checkout", "-q", "-b", "experiment")
+    git(rectoversos, "checkout", "-q", "-b", "experiment")
     monkeypatch.setattr(commits, "FETCH_SECONDS", 0)
     poll(box)
     assert git(remote, "rev-parse", "main") == first
@@ -952,7 +952,7 @@ def test_the_polls_row_for_one_cause_is_one_however_its_numbers_move():
 
 
 def test_a_pull_of_one_root_waits_on_the_name_of_a_sheaf_another_root_of_the_repo_moves(hub, tmp_path, monkeypatch):
-    """A pull of root A that changes both files of a move in root B, where the hub places B's sheaves, waits on the
+    """A pull of root A that changes both files of a move in root B, where the hub places B's rectoversos, waits on the
     sheaf's name before any file lock, as B's writer does (#76): the writer that holds the name and the move's first
     file takes its second, and neither waits on the other for ever."""
     import fcntl
@@ -961,7 +961,7 @@ def test_a_pull_of_one_root_waits_on_the_name_of_a_sheaf_another_root_of_the_rep
 
     from sheafmd import source
     from sheafmd.hub import place
-    repo = tmp_path / "sheaves"
+    repo = tmp_path / "rectoversos"
     subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
     (repo / "globex").mkdir()
     b = hub.roots._add(repo, git=True)
@@ -1021,7 +1021,7 @@ def one_repo(tmp_path, remote, acme="commit = true\npush = true\n", globex="comm
     """A clone of `remote` holding two roots, `acme/` and `globex/`, each with its own `.sheaf.toml` (`None`: none)
     and a `plan.md`, committed and pushed. Gives (the repo, root acme, root globex)."""
     from sheafmd.hub.roots import Root
-    repo = tmp_path / "sheaves"
+    repo = tmp_path / "rectoversos"
     subprocess.run(["git", "clone", "-q", str(remote), str(repo)], check=True, capture_output=True)
     git(repo, "config", "user.name", "the box")
     git(repo, "config", "user.email", "box@example.com")
@@ -1210,17 +1210,17 @@ def test_a_push_queued_while_the_roots_agreed_is_judged_again_when_its_turn_come
 
 
 # ── versions written without a write (#92) ─────────────────────────────────────
-def untracked_versions(sheaves):
-    return git(sheaves, "status", "--porcelain", "--untracked-files=all", "--", ".sheaf/versions")
+def untracked_versions(rectoversos):
+    return git(rectoversos, "status", "--porcelain", "--untracked-files=all", "--", ".sheaf/versions")
 
 
-def test_a_version_the_remote_gained_while_the_hub_held_it_untracked_is_taken_in(box, sheaves, remote, tmp_path):
+def test_a_version_the_remote_gained_while_the_hub_held_it_untracked_is_taken_in(box, rectoversos, remote, tmp_path):
     """A page opened makes a version with no write behind it. Another clone's hub keeps the same text under the
     same name and commits it: git refuses to write over an untracked file even when it is the same, so the pull
     must find none."""
     assert box.get(f"/{DOC}", member=BEA).status == 200
-    kept = {p.relative_to(sheaves).as_posix(): p.read_text(encoding="utf-8")
-            for p in (sheaves / ".sheaf" / "versions").rglob("*") if p.is_file()}
+    kept = {p.relative_to(rectoversos).as_posix(): p.read_text(encoding="utf-8")
+            for p in (rectoversos / ".sheaf" / "versions").rglob("*") if p.is_file()}
     assert kept, "opening the page kept a version inside the root"
     away = tmp_path / "github"
     subprocess.run(["git", "clone", "-q", str(remote), str(away)], check=True, capture_output=True)
@@ -1232,65 +1232,65 @@ def test_a_version_the_remote_gained_while_the_hub_held_it_untracked_is_taken_in
     poll(box)
     assert rows("push-diverged") == [] and rows("push-failed") == []
     assert git(remote, "merge-base", "--is-ancestor", head, "main") == ""
-    assert git(sheaves, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
-    assert untracked_versions(sheaves) == ""
+    assert git(rectoversos, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
+    assert untracked_versions(rectoversos) == ""
 
 
-def opened(box, sheaves):
+def opened(box, rectoversos):
     assert box.get(f"/{DOC}", member=BEA).status == 200
 
 
-def changed_from_outside(box, sheaves):
-    opened(box, sheaves)
-    f = sheaves / "acme" / "blog" / "2026-10-28-plan.md"
+def changed_from_outside(box, rectoversos):
+    opened(box, rectoversos)
+    f = rectoversos / "acme" / "blog" / "2026-10-28-plan.md"
     f.write_text(f.read_text(encoding="utf-8") + "\nAn agent's line.\n", encoding="utf-8")
-    opened(box, sheaves)
+    opened(box, rectoversos)
 
 
-def pinned(box, sheaves):
-    opened(box, sheaves)
-    text = (sheaves / "acme" / "blog" / "2026-10-28-plan.md").read_text(encoding="utf-8")
+def pinned(box, rectoversos):
+    opened(box, rectoversos)
+    text = (rectoversos / "acme" / "blog" / "2026-10-28-plan.md").read_text(encoding="utf-8")
     r = box.post("/_/pin", {"doc": DOC, "hash": md_hash(text)}, member=BEA)
     assert r.status == 200, r.text
 
 
 @pytest.mark.parametrize("push", [True, False], ids=["pushes", "does not push"])
 @pytest.mark.parametrize("made", [opened, changed_from_outside, pinned], ids=lambda f: f.__name__)
-def test_a_version_made_with_no_write_is_committed_by_the_next_poll(box, sheaves, remote, made, push):
+def test_a_version_made_with_no_write_is_committed_by_the_next_poll(box, rectoversos, remote, made, push):
     if not push:
-        (sheaves / ".sheaf.toml").write_text('versions = "root"\ncommit = true\n', encoding="utf-8")
-    made(box, sheaves)
-    assert untracked_versions(sheaves) != ""
+        (rectoversos / ".sheaf.toml").write_text('versions = "root"\ncommit = true\n', encoding="utf-8")
+    made(box, rectoversos)
+    assert untracked_versions(rectoversos) != ""
     poll(box)
-    assert untracked_versions(sheaves) == ""
-    assert git(sheaves, "log", "-1", "--format=%an|%s") == "sheaf|versions: acme/blog/2026-10-28-plan.md\n"
-    assert git(remote, "rev-parse", "main") == git(sheaves, "rev-parse", "HEAD") if push else \
+    assert untracked_versions(rectoversos) == ""
+    assert git(rectoversos, "log", "-1", "--format=%an|%s") == "sheaf|versions: acme/blog/2026-10-28-plan.md\n"
+    assert git(remote, "rev-parse", "main") == git(rectoversos, "rev-parse", "HEAD") if push else \
         git(remote, "rev-list", "--count", "main") == "1\n"
     assert rows("commit-failed") == []
 
 
-def test_the_versions_of_a_document_the_repo_ignores_stay_out_when_the_poll_commits(box, sheaves, remote):
-    (sheaves / ".git" / "info" / "exclude").write_text("acme/blog/2026-10-28-plan.md\n", encoding="utf-8")
-    git(sheaves, "rm", "-q", "--cached", "acme/blog/2026-10-28-plan.md")
-    git(sheaves, "commit", "-q", "-m", "a private draft from now on")
-    opened(box, sheaves)
+def test_the_versions_of_a_document_the_repo_ignores_stay_out_when_the_poll_commits(box, rectoversos, remote):
+    (rectoversos / ".git" / "info" / "exclude").write_text("acme/blog/2026-10-28-plan.md\n", encoding="utf-8")
+    git(rectoversos, "rm", "-q", "--cached", "acme/blog/2026-10-28-plan.md")
+    git(rectoversos, "commit", "-q", "-m", "a private draft from now on")
+    opened(box, rectoversos)
     poll(box)
-    assert git(sheaves, "log", "-1", "--format=%s") == "a private draft from now on\n"
-    assert untracked_versions(sheaves).startswith("??")
+    assert git(rectoversos, "log", "-1", "--format=%s") == "a private draft from now on\n"
+    assert untracked_versions(rectoversos).startswith("??")
 
 
-def test_a_version_half_written_is_never_committed_by_the_poll(box, sheaves, remote):
+def test_a_version_half_written_is_never_committed_by_the_poll(box, rectoversos, remote):
     from sheafmd.hub import state
-    opened(box, sheaves)
-    folder = sheaves / ".sheaf" / "versions" / state.doc_key("acme/blog/2026-10-28-plan.md")
+    opened(box, rectoversos)
+    folder = rectoversos / ".sheaf" / "versions" / state.doc_key("acme/blog/2026-10-28-plan.md")
     (folder / f".{'0' * 16}.md.tmp").write_text("half a ver", encoding="utf-8")
     poll(box)
-    assert git(sheaves, "log", "-1", "--format=%s") == "versions: acme/blog/2026-10-28-plan.md\n"
-    assert not any(f.endswith(".tmp") for f in git(sheaves, "show", "--name-only", "--format=", "HEAD").split())
-    assert untracked_versions(sheaves).splitlines() == [f"?? .sheaf/versions/{folder.name}/.{'0' * 16}.md.tmp"]
+    assert git(rectoversos, "log", "-1", "--format=%s") == "versions: acme/blog/2026-10-28-plan.md\n"
+    assert not any(f.endswith(".tmp") for f in git(rectoversos, "show", "--name-only", "--format=", "HEAD").split())
+    assert untracked_versions(rectoversos).splitlines() == [f"?? .sheaf/versions/{folder.name}/.{'0' * 16}.md.tmp"]
 
 
-def test_a_version_the_pull_commits_is_pushed(box, sheaves, remote, tmp_path, monkeypatch):
+def test_a_version_the_pull_commits_is_pushed(box, rectoversos, remote, tmp_path, monkeypatch):
     """A page opened while the poll fetches: the pull commits its version just before the work tree moves, and
     that commit goes out with the pull, not with the next write."""
     from sheafmd.hub import commits
@@ -1300,18 +1300,18 @@ def test_a_version_the_pull_commits_is_pushed(box, sheaves, remote, tmp_path, mo
         r = real(folder, *args, **kw)
         if args[:1] == ("fetch",) and not once:
             once.append(1)
-            opened(box, sheaves)
+            opened(box, rectoversos)
         return r
 
-    merged_on_github(tmp_path, remote, {"README.md": "# The sheaves\n"}, "a README")
+    merged_on_github(tmp_path, remote, {"README.md": "# The rectoversos\n"}, "a README")
     monkeypatch.setattr(commits, "_git", spy)
     poll(box)
-    assert once and untracked_versions(sheaves) == ""
+    assert once and untracked_versions(rectoversos) == ""
     assert git(remote, "log", "-1", "--format=%s", "main") == "versions: acme/blog/2026-10-28-plan.md\n"
-    assert git(sheaves, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
+    assert git(rectoversos, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
 
 
-def test_a_sweep_that_fails_is_a_row_and_the_pull_still_comes(box, sheaves, remote, tmp_path, monkeypatch):
+def test_a_sweep_that_fails_is_a_row_and_the_pull_still_comes(box, rectoversos, remote, tmp_path, monkeypatch):
     from sheafmd.hub import commits
     real = commits._git
 
@@ -1320,25 +1320,25 @@ def test_a_sweep_that_fails_is_a_row_and_the_pull_still_comes(box, sheaves, remo
             raise subprocess.TimeoutExpired(args, 20)
         return real(folder, *args, **kw)
 
-    opened(box, sheaves)
-    head = merged_on_github(tmp_path, remote, {"README.md": "# The sheaves\n"}, "a README")
+    opened(box, rectoversos)
+    head = merged_on_github(tmp_path, remote, {"README.md": "# The rectoversos\n"}, "a README")
     monkeypatch.setattr(commits, "_git", spy)
     poll(box)
     monkeypatch.setattr(commits, "FETCH_SECONDS", 0)
     poll(box)                                           # a pull that went through forgets nothing of the sweep's row
-    assert (sheaves / "README.md").read_text(encoding="utf-8") == "# The sheaves\n"
-    assert git(sheaves, "rev-parse", "HEAD").strip() == head
-    assert rows("push-failed") == [] and [r["doc"] for r in rows("commit-failed")] == ["sheaves"]
+    assert (rectoversos / "README.md").read_text(encoding="utf-8") == "# The rectoversos\n"
+    assert git(rectoversos, "rev-parse", "HEAD").strip() == head
+    assert rows("push-failed") == [] and [r["doc"] for r in rows("commit-failed")] == ["rectoversos"]
 
 
-def test_an_address_that_is_a_link_never_reaches_a_commit(box, sheaves, remote, tmp_path):
+def test_an_address_that_is_a_link_never_reaches_a_commit(box, rectoversos, remote, tmp_path):
     from sheafmd.hub import state
     secret = tmp_path / "token.env"
     secret.write_text("TOKEN=s3cr3t\n", encoding="utf-8")
-    folder = sheaves / ".sheaf" / "versions" / state.doc_key("acme/blog/2026-10-28-plan.md")
+    folder = rectoversos / ".sheaf" / "versions" / state.doc_key("acme/blog/2026-10-28-plan.md")
     folder.mkdir(parents=True)
     (folder / "address").symlink_to(secret)
-    opened(box, sheaves)                                # the version written: the link is written over
+    opened(box, rectoversos)                                # the version written: the link is written over
     assert not (folder / "address").is_symlink() and secret.read_text(encoding="utf-8") == "TOKEN=s3cr3t\n"
     (folder / "address").unlink()
     (folder / "address").symlink_to(secret)             # and planted again after it, before the sweep
@@ -1347,31 +1347,31 @@ def test_an_address_that_is_a_link_never_reaches_a_commit(box, sheaves, remote, 
     assert git(remote, "log", "-1", "--format=%s", "main") == f"versions: {folder.name}\n"
 
 
-def test_a_forged_address_names_no_commit(box, sheaves, remote):
+def test_a_forged_address_names_no_commit(box, rectoversos, remote):
     """An `address` that is not the folder's key (written by hand, or merged on the remote) is not believed."""
     from sheafmd.hub import state
-    opened(box, sheaves)
-    folder = sheaves / ".sheaf" / "versions" / state.doc_key("acme/blog/2026-10-28-plan.md")
+    opened(box, rectoversos)
+    folder = rectoversos / ".sheaf" / "versions" / state.doc_key("acme/blog/2026-10-28-plan.md")
     (folder / "address").write_text("TOKEN=s3cr3t", encoding="utf-8")
     poll(box)
     assert git(remote, "log", "-1", "--format=%s", "main") == f"versions: {folder.name}\n"
 
 
-def test_a_forged_address_is_written_over_at_the_next_version(box, sheaves, remote):
+def test_a_forged_address_is_written_over_at_the_next_version(box, rectoversos, remote):
     from sheafmd.hub import state
-    opened(box, sheaves)
-    folder = sheaves / ".sheaf" / "versions" / state.doc_key("acme/blog/2026-10-28-plan.md")
+    opened(box, rectoversos)
+    folder = rectoversos / ".sheaf" / "versions" / state.doc_key("acme/blog/2026-10-28-plan.md")
     (folder / "address").write_text("TOKEN=s3cr3t", encoding="utf-8")
-    changed_from_outside(box, sheaves)
+    changed_from_outside(box, rectoversos)
     poll(box)
     assert (folder / "address").read_text(encoding="utf-8") == "acme/blog/2026-10-28-plan.md"
     assert git(remote, "log", "-1", "--format=%s", "main") == "versions: acme/blog/2026-10-28-plan.md\n"
 
 
-def test_an_address_that_is_a_fifo_never_holds_the_pusher(box, sheaves, remote):
+def test_an_address_that_is_a_fifo_never_holds_the_pusher(box, rectoversos, remote):
     from sheafmd.hub import state
-    opened(box, sheaves)
-    folder = sheaves / ".sheaf" / "versions" / state.doc_key("acme/blog/2026-10-28-plan.md")
+    opened(box, rectoversos)
+    folder = rectoversos / ".sheaf" / "versions" / state.doc_key("acme/blog/2026-10-28-plan.md")
     (folder / "address").unlink()
     os.mkfifo(folder / "address")
     box.hub.tick()
@@ -1380,13 +1380,13 @@ def test_an_address_that_is_a_fifo_never_holds_the_pusher(box, sheaves, remote):
 
 
 @pytest.mark.parametrize("step", ["add", "commit"])
-def test_a_git_that_times_out_puts_back_what_was_staged_and_leaves_no_lock(box, sheaves, monkeypatch, step):
+def test_a_git_that_times_out_puts_back_what_was_staged_and_leaves_no_lock(box, rectoversos, monkeypatch, step):
     """#38: a git the hub killed on its bound leaves its `index.lock`, and the index as it had made it."""
     from sheafmd.hub import commits
-    f = sheaves / "acme" / "blog" / "2026-10-28-plan.md"
+    f = rectoversos / "acme" / "blog" / "2026-10-28-plan.md"
     original = f.read_text(encoding="utf-8")
     f.write_text(original + "\nStaged by hand, never in the work tree again.\n", encoding="utf-8")
-    git(sheaves, "add", "acme/blog/2026-10-28-plan.md")
+    git(rectoversos, "add", "acme/blog/2026-10-28-plan.md")
     f.write_text(original, encoding="utf-8")
     real = commits._git
 
@@ -1394,24 +1394,24 @@ def test_a_git_that_times_out_puts_back_what_was_staged_and_leaves_no_lock(box, 
         if step in args and "--" in args:
             if step == "add":
                 real(folder, *args, **kw)                  # killed after it staged the write
-            (sheaves / ".git" / "index.lock").write_text("", encoding="utf-8")   # what a SIGKILL leaves
+            (rectoversos / ".git" / "index.lock").write_text("", encoding="utf-8")   # what a SIGKILL leaves
             raise subprocess.TimeoutExpired(args, 20)
         return real(folder, *args, **kw)
 
     monkeypatch.setattr(commits, "_git", killed)
-    edit(box, sheaves)
+    edit(box, rectoversos)
     (row,) = rows("commit-failed")
     assert row["doc"] == DOC
-    assert not (sheaves / ".git" / "index.lock").exists()
-    assert "Staged by hand" in git(sheaves, "show", ":acme/blog/2026-10-28-plan.md")
-    assert git(sheaves, "diff", "--cached", "--name-only") == "acme/blog/2026-10-28-plan.md\n"
+    assert not (rectoversos / ".git" / "index.lock").exists()
+    assert "Staged by hand" in git(rectoversos, "show", ":acme/blog/2026-10-28-plan.md")
+    assert git(rectoversos, "diff", "--cached", "--name-only") == "acme/blog/2026-10-28-plan.md\n"
 
 
-def test_a_lock_another_git_took_after_the_add_is_left_where_it_is(box, sheaves, monkeypatch):
+def test_a_lock_another_git_took_after_the_add_is_left_where_it_is(box, rectoversos, monkeypatch):
     """#38: only the add and the commit take the index lock; a later git that times out never made one."""
     from sheafmd.hub import commits
     real = commits._git
-    lock = sheaves / ".git" / "index.lock"
+    lock = rectoversos / ".git" / "index.lock"
 
     def slow_fetch(folder, *args, **kw):
         if args[:2] == ("diff", "--cached"):
@@ -1420,12 +1420,12 @@ def test_a_lock_another_git_took_after_the_add_is_left_where_it_is(box, sheaves,
         return real(folder, *args, **kw)
 
     monkeypatch.setattr(commits, "_git", slow_fetch)
-    edit(box, sheaves)
+    edit(box, rectoversos)
     assert rows("commit-failed")
     assert lock.exists()
 
 
-def test_a_git_commit_killed_once_the_commit_is_made_counts_as_made(box, sheaves, remote, monkeypatch):
+def test_a_git_commit_killed_once_the_commit_is_made_counts_as_made(box, rectoversos, remote, monkeypatch):
     """#38: the branch moved before the kill, so the index is not put back under it and no row says it failed."""
     from sheafmd.hub import commits
     real = commits._git
@@ -1433,33 +1433,33 @@ def test_a_git_commit_killed_once_the_commit_is_made_counts_as_made(box, sheaves
     def killed(folder, *args, **kw):
         r = real(folder, *args, **kw)
         if "commit" in args and "--" in args:
-            (sheaves / ".git" / "index.lock").write_text("", encoding="utf-8")
+            (rectoversos / ".git" / "index.lock").write_text("", encoding="utf-8")
             raise subprocess.TimeoutExpired(args, 20)
         return r
 
     monkeypatch.setattr(commits, "_git", killed)
-    edit(box, sheaves)
+    edit(box, rectoversos)
     assert rows("commit-failed") == []
-    assert not (sheaves / ".git" / "index.lock").exists()
-    assert git(sheaves, "log", "-1", "--format=%s") == f"edit: acme/blog/2026-10-28-plan.md\n"
-    assert git(sheaves, "diff", "--cached", "--name-only") == ""
+    assert not (rectoversos / ".git" / "index.lock").exists()
+    assert git(rectoversos, "log", "-1", "--format=%s") == f"edit: acme/blog/2026-10-28-plan.md\n"
+    assert git(rectoversos, "diff", "--cached", "--name-only") == ""
 
 
-def test_a_repo_with_an_email_but_no_name_commits_as_sheaf(box, sheaves, remote):
+def test_a_repo_with_an_email_but_no_name_commits_as_sheaf(box, rectoversos, remote):
     """#38: the hub's committer stood in only for a missing `user.email`; with no `user.name` either git refused."""
-    git(sheaves, "config", "--unset", "user.name")
-    git(sheaves, "config", "user.useConfigOnly", "true")
-    edit(box, sheaves)
+    git(rectoversos, "config", "--unset", "user.name")
+    git(rectoversos, "config", "user.useConfigOnly", "true")
+    edit(box, rectoversos)
     assert rows("commit-failed") == []
     (who, _), _ = pushed(box, remote)
     assert who.startswith("Bea <bea@example.com>|")
     assert git(remote, "log", "-1", "--format=%cn <%ce>", "main") == "sheaf <sheaf@localhost>\n"
 
 
-def test_a_comment_request_that_changes_nothing_commits_nothing(box, sheaves):
+def test_a_comment_request_that_changes_nothing_commits_nothing(box, rectoversos):
     """A status set to the status it has leaves the file as it was: the person's own uncommitted edit of the
     document stays theirs to commit, never taken into a commit under the requester's name."""
-    f = sheaves / "acme" / "blog" / "2026-10-28-plan.md"
+    f = rectoversos / "acme" / "blog" / "2026-10-28-plan.md"
     text = f.read_text(encoding="utf-8")
     i = next(i for i, b in enumerate(split_md_blocks(text)) if b.content.startswith("First"))
     r = box.post("/_/comment", {"doc": DOC, "op": "add", "hash": md_hash(text), "block": i, "start": 0,
@@ -1468,24 +1468,24 @@ def test_a_comment_request_that_changes_nothing_commits_nothing(box, sheaves):
     box.hub.commits.settle()
     cid = r.json()["id"]
     f.write_text(f.read_text(encoding="utf-8") + "\nBea's own edit, not yet committed.\n", encoding="utf-8")
-    head = git(sheaves, "rev-parse", "HEAD")
+    head = git(rectoversos, "rev-parse", "HEAD")
     r = box.post("/_/comment", {"doc": DOC, "op": "status", "id": cid, "status": "open",
                                 "hash": md_hash(text)}, member=CAL)
     assert r.status == 200, r.text
     box.hub.commits.settle()
-    assert git(sheaves, "rev-parse", "HEAD") == head
-    assert "Bea's own edit" in git(sheaves, "diff", "--", "acme/blog/2026-10-28-plan.md")
+    assert git(rectoversos, "rev-parse", "HEAD") == head
+    assert "Bea's own edit" in git(rectoversos, "diff", "--", "acme/blog/2026-10-28-plan.md")
 
 
 
 def test_a_door_resolve_that_lost_the_race_to_a_resolve_commits_nothing_not_even_what_another_hand_left(
-        box, browser, sheaves, monkeypatch):
+        box, browser, rectoversos, monkeypatch):
     """The door checks the thread is open before it writes; a page resolved it in between, so its write changes
     nothing (8.11)."""
     import types
     from helpers import call
     from sheafmd import mcp
-    f = sheaves / "acme" / "blog" / "2026-10-28-plan.md"
+    f = rectoversos / "acme" / "blog" / "2026-10-28-plan.md"
     text = f.read_text(encoding="utf-8")
     i = next(i for i, b in enumerate(split_md_blocks(text)) if b.content.startswith("First"))
     cid = box.post("/_/comment", {"doc": DOC, "op": "add", "hash": md_hash(text), "block": i, "start": 0,
@@ -1494,17 +1494,17 @@ def test_a_door_resolve_that_lost_the_race_to_a_resolve_commits_nothing_not_even
                                    "hash": md_hash(text)}, member=CAL).status == 200
     box.hub.commits.settle()
     f.write_text(f.read_text(encoding="utf-8") + "\nTyped in an editor, not saved by Bea.\n", encoding="utf-8")
-    head = git(sheaves, "rev-parse", "HEAD")
+    head = git(rectoversos, "rev-parse", "HEAD")
     monkeypatch.setattr(mcp.Door, "_comment", lambda self, *a, **k: types.SimpleNamespace(status="open"))
     is_error, got = call(browser, "resolve", as_name="Claude", doc=DOC, id=cid)
     assert not is_error, got
     box.hub.commits.settle()
-    assert git(sheaves, "rev-parse", "HEAD") == head
-    assert "Typed in an editor" in git(sheaves, "diff", "--", "acme/blog/2026-10-28-plan.md")
+    assert git(rectoversos, "rev-parse", "HEAD") == head
+    assert "Typed in an editor" in git(rectoversos, "diff", "--", "acme/blog/2026-10-28-plan.md")
 
 
-def _first_comment(box, sheaves):
-    f = sheaves / "acme" / "blog" / "2026-10-28-plan.md"
+def _first_comment(box, rectoversos):
+    f = rectoversos / "acme" / "blog" / "2026-10-28-plan.md"
     text = f.read_text(encoding="utf-8")
     i = next(i for i, b in enumerate(split_md_blocks(text)) if b.content.startswith("First"))
     cid = box.post("/_/comment", {"doc": DOC, "op": "add", "hash": md_hash(text), "block": i, "start": 0,
@@ -1513,31 +1513,31 @@ def _first_comment(box, sheaves):
     return text, cid
 
 
-def test_a_comment_request_that_changes_something_commits_it(box, sheaves):
+def test_a_comment_request_that_changes_something_commits_it(box, rectoversos):
     """The twin of the no-op test: a status that really changes, and an edit of the body, each take a commit.
     A `wrote` that was always false would pass the no-op tests and fail here."""
-    text, cid = _first_comment(box, sheaves)
+    text, cid = _first_comment(box, rectoversos)
     for payload in ({"op": "status", "id": cid, "status": "resolved"},
                     {"op": "edit", "id": cid, "body": "Is this really right?"}):
-        head = git(sheaves, "rev-parse", "HEAD")
+        head = git(rectoversos, "rev-parse", "HEAD")
         r = box.post("/_/comment", {"doc": DOC, "hash": md_hash(text), **payload}, member=CAL)
         assert r.status == 200, r.text
         box.hub.commits.settle()
-        assert git(sheaves, "rev-parse", "HEAD") != head, payload
+        assert git(rectoversos, "rev-parse", "HEAD") != head, payload
 
 
 @pytest.mark.parametrize("open_in_hub", [True, False], ids=["page open", "no live entry"])
-def test_a_door_reply_and_a_door_resolve_that_change_something_commit_them(box, browser, sheaves, open_in_hub):
+def test_a_door_reply_and_a_door_resolve_that_change_something_commit_them(box, browser, rectoversos, open_in_hub):
     from helpers import call
-    _, cid = _first_comment(box, sheaves)
+    _, cid = _first_comment(box, rectoversos)
     if not open_in_hub:
         box.hub.entries.clear()         # the door then writes the file itself, with no live document
     for tool, args in (("reply", {"text": "Yes, it is."}), ("resolve", {})):
-        head = git(sheaves, "rev-parse", "HEAD")
+        head = git(rectoversos, "rev-parse", "HEAD")
         is_error, got = call(browser, tool, as_name="Claude", doc=DOC, id=cid, **args)
         assert not is_error, got
         box.hub.commits.settle()
-        assert git(sheaves, "rev-parse", "HEAD") != head, tool
+        assert git(rectoversos, "rev-parse", "HEAD") != head, tool
 
 
 # ── a remote branch that was rewritten (the rewrite guard) ───────────────────
@@ -1566,58 +1566,58 @@ def force_pushed(tmp_path, remote, name="rewriter"):
 
 
 @pytest.fixture
-def guarded(box, sheaves, remote):
+def guarded(box, rectoversos, remote):
     """`box` with the guard on, as a hub with a private root has it, after one save that went out: the hub has seen
     the remote's tip."""
     box.hub.commits._refuse = lambda: True
-    edit(box, sheaves)
+    edit(box, rectoversos)
     assert len(pushed(box, remote)) == 2
-    assert last_seen(sheaves) == git(remote, "rev-parse", "main").strip()
+    assert last_seen(rectoversos) == git(remote, "rev-parse", "main").strip()
     return box
 
 
-def poll_now(box, sheaves):
-    root = next(r for r in box.hub.roots.all() if r.path == sheaves)
-    box.hub.commits._push_later(git(sheaves, "rev-parse", "--absolute-git-dir").strip(), root, root.name, wrote=False)
+def poll_now(box, rectoversos):
+    root = next(r for r in box.hub.roots.all() if r.path == rectoversos)
+    box.hub.commits._push_later(git(rectoversos, "rev-parse", "--absolute-git-dir").strip(), root, root.name, wrote=False)
     assert box.hub.commits.settle()
 
 
-def test_rewrite_that_shares_a_base_is_refused(guarded, sheaves, remote, tmp_path):
+def test_rewrite_that_shares_a_base_is_refused(guarded, rectoversos, remote, tmp_path):
     tip = force_pushed(tmp_path, remote)
-    edit(guarded, sheaves, words="Second, after the rewrite.")
+    edit(guarded, rectoversos, words="Second, after the rewrite.")
     assert guarded.hub.commits.settle()
     assert git(remote, "rev-parse", "main").strip() == tip                 # nothing replayed on it, nothing pushed
-    assert "Second, after the rewrite." in (sheaves / "acme/blog/2026-10-28-plan.md").read_text(encoding="utf-8")
-    assert not (sheaves / "rewritten.txt").exists()                         # and nothing taken in
+    assert "Second, after the rewrite." in (rectoversos / "acme/blog/2026-10-28-plan.md").read_text(encoding="utf-8")
+    assert not (rectoversos / "rewritten.txt").exists()                         # and nothing taken in
     (row,) = rows("push-diverged")
     assert row["error"] == SAW and row["doc"] == DOC
 
 
-def test_a_rewrite_is_replayed_when_the_guard_is_off(box, sheaves, remote, tmp_path):
-    edit(box, sheaves)
+def test_a_rewrite_is_replayed_when_the_guard_is_off(box, rectoversos, remote, tmp_path):
+    edit(box, rectoversos)
     assert len(pushed(box, remote)) == 2
     tip = force_pushed(tmp_path, remote)
-    edit(box, sheaves, words="Second, after the rewrite.")
+    edit(box, rectoversos, words="Second, after the rewrite.")
     assert box.hub.commits.settle()
     assert git(remote, "rev-parse", "main").strip() != tip and rows("push-diverged") == []
-    assert last_seen(sheaves) == ""
+    assert last_seen(rectoversos) == ""
 
 
-def test_rewrite_refused_on_second_poll(guarded, sheaves, remote, tmp_path):
-    before = last_seen(sheaves)
+def test_rewrite_refused_on_second_poll(guarded, rectoversos, remote, tmp_path):
+    before = last_seen(rectoversos)
     tip = force_pushed(tmp_path, remote)
     for _ in range(2):
-        poll_now(guarded, sheaves)
+        poll_now(guarded, rectoversos)
         assert git(remote, "rev-parse", "main").strip() == tip
-        assert not (sheaves / "rewritten.txt").exists()
-    edit(guarded, sheaves, words="Second, a third try.")
+        assert not (rectoversos / "rewritten.txt").exists()
+    edit(guarded, rectoversos, words="Second, a third try.")
     assert guarded.hub.commits.settle()
     assert git(remote, "rev-parse", "main").strip() == tip
     assert rows("push-diverged") and all(r["error"] == SAW for r in rows("push-diverged"))
-    assert last_seen(sheaves) == before
+    assert last_seen(rectoversos) == before
 
 
-def test_rewrite_refusal_is_per_repo(guarded, sheaves, remote, tmp_path):
+def test_rewrite_refusal_is_per_repo(guarded, rectoversos, remote, tmp_path):
     other_remote = tmp_path / "other.git"
     subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(other_remote)], check=True)
     other = tmp_path / "other"
@@ -1636,76 +1636,76 @@ def test_rewrite_refusal_is_per_repo(guarded, sheaves, remote, tmp_path):
     (other / "a.md").write_text("two\n", encoding="utf-8")
     git(other, "commit", "-q", "-am", "other second")
     guarded.hub.commits._push_later(git(other, "rev-parse", "--absolute-git-dir").strip(), root, root.name)
-    poll_now(guarded, sheaves)
+    poll_now(guarded, rectoversos)
     assert git(other_remote, "log", "-1", "--format=%s", "main").strip() == "other second"
     assert git(remote, "rev-parse", "main").strip() == tip
 
 
-def test_manual_fetch_does_not_disarm_guard(guarded, sheaves, remote, tmp_path):
+def test_manual_fetch_does_not_disarm_guard(guarded, rectoversos, remote, tmp_path):
     tip = force_pushed(tmp_path, remote)
-    git(sheaves, "fetch", "-q", "origin")                                   # a person's fetch: origin/main is the tip
-    assert git(sheaves, "rev-parse", "origin/main").strip() == tip
-    poll_now(guarded, sheaves)
-    edit(guarded, sheaves, words="Second, after a fetch.")
+    git(rectoversos, "fetch", "-q", "origin")                                   # a person's fetch: origin/main is the tip
+    assert git(rectoversos, "rev-parse", "origin/main").strip() == tip
+    poll_now(guarded, rectoversos)
+    edit(guarded, rectoversos, words="Second, after a fetch.")
     assert guarded.hub.commits.settle()
-    assert git(remote, "rev-parse", "main").strip() == tip and not (sheaves / "rewritten.txt").exists()
+    assert git(remote, "rev-parse", "main").strip() == tip and not (rectoversos / "rewritten.txt").exists()
     assert rows("push-diverged")[0]["error"] == SAW
 
 
-def test_guard_seeded_at_start(box, sheaves, remote, tmp_path):
+def test_guard_seeded_at_start(box, rectoversos, remote, tmp_path):
     box.hub.commits._refuse = lambda: True
-    merged_on_github(tmp_path, remote, {"README.md": "# The sheaves\n"}, "a README")
-    git(sheaves, "fetch", "-q", "origin")
-    assert last_seen(sheaves) == ""                                         # no pull has passed yet
+    merged_on_github(tmp_path, remote, {"README.md": "# The rectoversos\n"}, "a README")
+    git(rectoversos, "fetch", "-q", "origin")
+    assert last_seen(rectoversos) == ""                                         # no pull has passed yet
     box.hub.commits.seed(box.hub.roots.all())
-    assert last_seen(sheaves) == git(remote, "rev-parse", "main").strip()
+    assert last_seen(rectoversos) == git(remote, "rev-parse", "main").strip()
     tip = force_pushed(tmp_path, remote)
-    edit(box, sheaves)
+    edit(box, rectoversos)
     assert box.hub.commits.settle()
     assert git(remote, "rev-parse", "main").strip() == tip
     assert rows("push-diverged")[0]["error"] == SAW
 
 
-def test_deleted_remote_branch_guarded(guarded, sheaves, remote):
+def test_deleted_remote_branch_guarded(guarded, rectoversos, remote):
     git(remote, "update-ref", "-d", "refs/heads/main")
-    edit(guarded, sheaves, words="Second, with no branch to push to.")
+    edit(guarded, rectoversos, words="Second, with no branch to push to.")
     assert guarded.hub.commits.settle()
     assert subprocess.run(["git", "-C", str(remote), "rev-parse", "-q", "--verify", "refs/heads/main"],
                           capture_output=True).returncode != 0            # not pushed back
     assert rows("push-diverged")[0]["error"] == SAW
 
 
-def test_fast_forward_unaffected(guarded, sheaves, remote, tmp_path):
-    merged_on_github(tmp_path, remote, {"README.md": "# The sheaves\n"}, "a README")
-    edit(guarded, sheaves, words="Second, over a README.")                   # the remote moved on, the hub too
+def test_fast_forward_unaffected(guarded, rectoversos, remote, tmp_path):
+    merged_on_github(tmp_path, remote, {"README.md": "# The rectoversos\n"}, "a README")
+    edit(guarded, rectoversos, words="Second, over a README.")                   # the remote moved on, the hub too
     assert len(pushed(guarded, remote)) == 4
-    assert (sheaves / "README.md").exists() and rows("push-diverged") == []
-    assert last_seen(sheaves) == git(remote, "rev-parse", "main").strip() == git(sheaves, "rev-parse", "HEAD").strip()
-    merged_on_github(tmp_path, remote, {"README.md": "# Sheaves\n"}, "a README, again")
-    poll_now(guarded, sheaves)                                              # and a remote ahead alone
-    assert (sheaves / "README.md").read_text(encoding="utf-8") == "# Sheaves\n" and rows("push-diverged") == []
-    assert last_seen(sheaves) == git(remote, "rev-parse", "main").strip()
+    assert (rectoversos / "README.md").exists() and rows("push-diverged") == []
+    assert last_seen(rectoversos) == git(remote, "rev-parse", "main").strip() == git(rectoversos, "rev-parse", "HEAD").strip()
+    merged_on_github(tmp_path, remote, {"README.md": "# Rectoversos\n"}, "a README, again")
+    poll_now(guarded, rectoversos)                                              # and a remote ahead alone
+    assert (rectoversos / "README.md").read_text(encoding="utf-8") == "# Rectoversos\n" and rows("push-diverged") == []
+    assert last_seen(rectoversos) == git(remote, "rev-parse", "main").strip()
 
 
-def test_a_branch_switched_after_the_push_gets_the_ref_of_the_branch_pushed(guarded, sheaves, remote, monkeypatch):
+def test_a_branch_switched_after_the_push_gets_the_ref_of_the_branch_pushed(guarded, rectoversos, remote, monkeypatch):
     from sheafmd.hub import commits
-    git(sheaves, "branch", "draft")
+    git(rectoversos, "branch", "draft")
     real = commits._git
 
     def then_switch(folder, *args, **kw):
         r = real(folder, *args, **kw)
         if args[:1] == ("push",):
-            git(sheaves, "checkout", "-q", "draft")             # after the push, before the ref is written
+            git(rectoversos, "checkout", "-q", "draft")             # after the push, before the ref is written
         return r
     monkeypatch.setattr(commits, "_git", then_switch)
-    edit(guarded, sheaves, words="Second, on the way to a branch switch.")
+    edit(guarded, rectoversos, words="Second, on the way to a branch switch.")
     assert guarded.hub.commits.settle()
-    assert last_seen(sheaves) == git(remote, "rev-parse", "main").strip()
-    assert subprocess.run(["git", "-C", str(sheaves), "rev-parse", "-q", "--verify", "refs/sheaf/last-seen/draft"],
+    assert last_seen(rectoversos) == git(remote, "rev-parse", "main").strip()
+    assert subprocess.run(["git", "-C", str(rectoversos), "rev-parse", "-q", "--verify", "refs/sheaf/last-seen/draft"],
                           capture_output=True).returncode != 0
 
 
-def test_a_remote_rewound_between_the_fetch_and_the_push_is_not_pushed_over(guarded, sheaves, remote, monkeypatch):
+def test_a_remote_rewound_between_the_fetch_and_the_push_is_not_pushed_over(guarded, rectoversos, remote, monkeypatch):
     """Rewound to an ancestor of what the hub sends: a plain push would be a fast-forward and put it all back."""
     pulled = guarded.hub.commits._pull
     rewound = []
@@ -1717,77 +1717,77 @@ def test_a_remote_rewound_between_the_fetch_and_the_push_is_not_pushed_over(guar
             rewound.append(git(remote, "rev-parse", "main").strip())
         return go
     monkeypatch.setattr(guarded.hub.commits, "_pull", then_rewind)
-    edit(guarded, sheaves, words="Second, over a rewind.")
+    edit(guarded, rectoversos, words="Second, over a rewind.")
     assert guarded.hub.commits.settle()
     assert git(remote, "rev-parse", "main").strip() == rewound[0]
     assert rows("push-failed")
 
 
-def test_what_is_pushed_is_the_commit_read_not_where_head_has_moved_to(guarded, sheaves, remote, monkeypatch):
+def test_what_is_pushed_is_the_commit_read_not_where_head_has_moved_to(guarded, rectoversos, remote, monkeypatch):
     from sheafmd.hub import commits
-    first = git(sheaves, "rev-list", "--max-parents=0", "HEAD").strip()
-    git(sheaves, "branch", "draft", first)
+    first = git(rectoversos, "rev-list", "--max-parents=0", "HEAD").strip()
+    git(rectoversos, "branch", "draft", first)
     real = commits._git
     moved = []
 
     def then_switch(folder, *args, **kw):
         if args[:1] == ("push",) and not moved:
-            moved.append(git(sheaves, "rev-parse", "HEAD").strip())
-            git(sheaves, "checkout", "-q", "draft")             # between the read of HEAD and the push
+            moved.append(git(rectoversos, "rev-parse", "HEAD").strip())
+            git(rectoversos, "checkout", "-q", "draft")             # between the read of HEAD and the push
         return real(folder, *args, **kw)
     monkeypatch.setattr(commits, "_git", then_switch)
-    edit(guarded, sheaves, words="Second, with a switch before the push.")
+    edit(guarded, rectoversos, words="Second, with a switch before the push.")
     assert guarded.hub.commits.settle()
     assert git(remote, "rev-parse", "main").strip() == moved[0]            # main got main's commit, not draft's
 
 
-def test_a_ref_behind_an_unchanged_remote_catches_up_at_the_next_poll(guarded, sheaves, remote):
-    git(sheaves, "update-ref", "refs/sheaf/last-seen/main", "main~1")
-    poll_now(guarded, sheaves)
-    assert last_seen(sheaves) == git(remote, "rev-parse", "main").strip()
+def test_a_ref_behind_an_unchanged_remote_catches_up_at_the_next_poll(guarded, rectoversos, remote):
+    git(rectoversos, "update-ref", "refs/sheaf/last-seen/main", "main~1")
+    poll_now(guarded, rectoversos)
+    assert last_seen(rectoversos) == git(remote, "rev-parse", "main").strip()
 
 
-def test_a_root_registered_after_the_start_is_guarded_from_what_the_clone_had_fetched(box, sheaves, remote, tmp_path):
+def test_a_root_registered_after_the_start_is_guarded_from_what_the_clone_had_fetched(box, rectoversos, remote, tmp_path):
     box.hub.commits._refuse = lambda: True
-    merged_on_github(tmp_path, remote, {"README.md": "# The sheaves\n"}, "a README")
-    git(sheaves, "fetch", "-q", "origin")
+    merged_on_github(tmp_path, remote, {"README.md": "# The rectoversos\n"}, "a README")
+    git(rectoversos, "fetch", "-q", "origin")
     tip = force_pushed(tmp_path, remote)
-    assert last_seen(sheaves) == ""
-    edit(box, sheaves)
+    assert last_seen(rectoversos) == ""
+    edit(box, rectoversos)
     assert box.hub.commits.settle()
     assert git(remote, "rev-parse", "main").strip() == tip
     assert rows("push-diverged")[0]["error"] == SAW
 
 
-def test_a_repo_met_after_the_start_is_refused_on_its_second_poll_too(box, sheaves, remote, tmp_path):
+def test_a_repo_met_after_the_start_is_refused_on_its_second_poll_too(box, rectoversos, remote, tmp_path):
     box.hub.commits._refuse = lambda: True
-    merged_on_github(tmp_path, remote, {"README.md": "# The sheaves\n"}, "a README")
-    git(sheaves, "fetch", "-q", "origin")
+    merged_on_github(tmp_path, remote, {"README.md": "# The rectoversos\n"}, "a README")
+    git(rectoversos, "fetch", "-q", "origin")
     tip = force_pushed(tmp_path, remote)
     for _ in range(2):
-        poll_now(box, sheaves)
-        assert not (sheaves / "rewritten.txt").exists()
-    edit(box, sheaves)
+        poll_now(box, rectoversos)
+        assert not (rectoversos / "rewritten.txt").exists()
+    edit(box, rectoversos)
     assert box.hub.commits.settle()
     assert git(remote, "rev-parse", "main").strip() == tip
-    assert last_seen(sheaves) not in ("", tip)                       # kept where it was seeded
+    assert last_seen(rectoversos) not in ("", tip)                       # kept where it was seeded
 
 
-def test_a_reset_between_the_pull_and_the_push_is_not_forced_over_the_remote(guarded, sheaves, remote, tmp_path,
+def test_a_reset_between_the_pull_and_the_push_is_not_forced_over_the_remote(guarded, rectoversos, remote, tmp_path,
                                                                             monkeypatch):
-    first = git(sheaves, "rev-list", "--max-parents=0", "HEAD").strip()
-    merged_on_github(tmp_path, remote, {"README.md": "# The sheaves\n"}, "a README")
+    first = git(rectoversos, "rev-list", "--max-parents=0", "HEAD").strip()
+    merged_on_github(tmp_path, remote, {"README.md": "# The rectoversos\n"}, "a README")
     pulled = guarded.hub.commits._pull
 
     def then_reset(root, *args, **kw):
         go = pulled(root, *args, **kw)
-        git(sheaves, "reset", "-q", "--hard", first)
-        (sheaves / "own.txt").write_text("a person's own\n", encoding="utf-8")
-        git(sheaves, "add", "-A")
-        git(sheaves, "commit", "-q", "-m", "a person's own")
+        git(rectoversos, "reset", "-q", "--hard", first)
+        (rectoversos / "own.txt").write_text("a person's own\n", encoding="utf-8")
+        git(rectoversos, "add", "-A")
+        git(rectoversos, "commit", "-q", "-m", "a person's own")
         return go
     monkeypatch.setattr(guarded.hub.commits, "_pull", then_reset)
-    edit(guarded, sheaves, words="Second, over a reset.")
+    edit(guarded, rectoversos, words="Second, over a reset.")
     assert guarded.hub.commits.settle()
     assert git(remote, "log", "-1", "--format=%s", "main").strip() == "a README"       # not forced over
     assert rows("push-failed")

@@ -1053,9 +1053,9 @@ def cmd_code(argv: list[str]) -> int:
                 "prints only the code's id and expiry: the code is never in a terminal or on a command line.")
     sub = p.add_subparsers(dest="action", required=True, metavar="issue")
     issue = sub.add_parser("issue", usage="sheaf code issue --member ID --doc ADDRESS --out FILE",
-                           help="make a code for a member on one sheaf, into a new 0600 file")
+                           help="make a code for a member on one rectoverso, into a new 0600 file")
     issue.add_argument("--member", required=True, metavar="ID", help="the front's id of the member")
-    issue.add_argument("--doc", required=True, metavar="ADDRESS", help="the sheaf's address on the hub")
+    issue.add_argument("--doc", required=True, metavar="ADDRESS", help="the rectoverso's address on the hub")
     issue.add_argument("--out", required=True, metavar="FILE", help="a new file: one that is there is refused")
     args = p.parse_args(argv)
     out = Path(args.out)

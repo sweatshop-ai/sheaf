@@ -1,7 +1,7 @@
 """Spike for the mountable page (#116 step 2): does text selection hold inside a CLOSED shadow root, in Chromium, Firefox and WebKit?
 
 page.js anchors a comment on the member's selection (the quoted text, the block, the offsets), shows a popover beside it, and edits blocks in
-place (contenteditable). Once the sheaf is mounted in the front's document instead of an iframe, it lives in a shadow root. `window.getSelection()`
+place (contenteditable). Once the rectoverso is mounted in the front's document instead of an iframe, it lives in a shadow root. `window.getSelection()`
 retargets a selection inside a shadow tree to the host, so the page must read it with `Selection.getComposedRanges({shadowRoots: [root]})`.
 This file asserts, in each engine, everything page.js asks of a selection. A browser not installed is skipped, never passed:
     uv run playwright install firefox webkit        (WebKit and Firefox need PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu24.04-x64 on 26.04)

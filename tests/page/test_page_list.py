@@ -5,7 +5,7 @@ import json
 
 import pytest
 from pagehelp import close_context, new_context, until
-from test_hub_list import JOEY, NELL, ago, box, github, sheaves  # noqa: F401  (the hub with its list, as there)
+from test_hub_list import JOEY, NELL, ago, box, github, rectoversos  # noqa: F401  (the hub with its list, as there)
 
 pytestmark = pytest.mark.page
 
@@ -48,9 +48,9 @@ LONG_CLIENT, LONG_PROJECT = "globex_international_relaunch", "black_friday_2026_
 
 
 @pytest.fixture
-def phone(chromium, box, sheaves):  # noqa: F811
+def phone(chromium, box, rectoversos):  # noqa: F811
     """The list on a 360 px phone, Joey's row holding four buttons, one a Move to whose long slug has no hyphen."""
-    path = sheaves / JOEY[5:]
+    path = rectoversos / JOEY[5:]
     path.write_text(path.read_text(encoding="utf-8").replace(
         "- [ ] Approve\n", "- [ ] Approve\n- [ ] Done\n- [ ] Share\n"
         f"- [ ] Move to {SLUG} (ref 18f3a9c2)\n"),
@@ -72,7 +72,7 @@ def ga4(page):
     return page.locator(f'button.list-act[data-doc="{GA4}"]')
 
 
-def test_a_press_shows_undo_for_five_seconds_then_ticks_and_the_list_reloads_without_the_row(listed, sheaves):  # noqa: F811
+def test_a_press_shows_undo_for_five_seconds_then_ticks_and_the_list_reloads_without_the_row(listed, rectoversos):  # noqa: F811
     page, ticks = listed
     joey(page).click()
     assert joey(page).inner_text() == "Undo"
@@ -81,13 +81,13 @@ def test_a_press_shows_undo_for_five_seconds_then_ticks_and_the_list_reloads_wit
     page.clock.run_for(200)
     until(lambda: ticks, what="the tick")
     assert [(b["action"], b["word"], s) for b, s in ticks] == [(0, "Approve", 200)]
-    assert "- [x] Approve" in (sheaves / JOEY[5:]).read_text(encoding="utf-8")
+    assert "- [x] Approve" in (rectoversos / JOEY[5:]).read_text(encoding="utf-8")
     until(lambda: joey(page).count() == 0, what="the reload without the row's button")
 
 
-def test_undo_in_the_five_seconds_sends_nothing_and_gives_the_button_back(listed, sheaves):  # noqa: F811
+def test_undo_in_the_five_seconds_sends_nothing_and_gives_the_button_back(listed, rectoversos):  # noqa: F811
     page, ticks = listed
-    before = (sheaves / JOEY[5:]).read_text(encoding="utf-8")
+    before = (rectoversos / JOEY[5:]).read_text(encoding="utf-8")
     joey(page).click()
     page.clock.run_for(3000)
     joey(page).click()
@@ -95,12 +95,12 @@ def test_undo_in_the_five_seconds_sends_nothing_and_gives_the_button_back(listed
     page.clock.run_for(10_000)
     page.wait_for_timeout(200)
     assert ticks == []
-    assert (sheaves / JOEY[5:]).read_text(encoding="utf-8") == before
+    assert (rectoversos / JOEY[5:]).read_text(encoding="utf-8") == before
 
 
-def test_a_refused_press_is_said_above_the_rows_and_the_button_comes_back(listed, sheaves):  # noqa: F811
+def test_a_refused_press_is_said_above_the_rows_and_the_button_comes_back(listed, rectoversos):  # noqa: F811
     page, ticks = listed
-    path = sheaves / JOEY[5:]
+    path = rectoversos / JOEY[5:]
     path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Approve", "- [x] Approve"), encoding="utf-8")
     joey(page).click()
     page.clock.run_for(5100)
@@ -113,7 +113,7 @@ def test_a_refused_press_is_said_above_the_rows_and_the_button_comes_back(listed
     assert page.locator(".list-error").get_attribute("role") == "alert"
 
 
-def test_a_press_on_another_row_in_the_five_seconds_is_sent_too_and_the_list_reloads_after_both(listed, sheaves):  # noqa: F811
+def test_a_press_on_another_row_in_the_five_seconds_is_sent_too_and_the_list_reloads_after_both(listed, rectoversos):  # noqa: F811
     page, ticks = listed
     joey(page).click()
     page.clock.run_for(2000)
@@ -128,9 +128,9 @@ def test_a_press_on_another_row_in_the_five_seconds_is_sent_too_and_the_list_rel
     until(lambda: joey(page).count() == 0 and ga4(page).count() == 0, what="the reload without both rows' buttons")
 
 
-def test_while_a_press_of_a_row_waits_its_other_buttons_cannot_be_pressed(listed, box, sheaves):  # noqa: F811
+def test_while_a_press_of_a_row_waits_its_other_buttons_cannot_be_pressed(listed, box, rectoversos):  # noqa: F811
     page, ticks = listed
-    path = sheaves / JOEY[5:]
+    path = rectoversos / JOEY[5:]
     path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [ ] Approve\n- [ ] Done\n"),
                     encoding="utf-8")
     box.hub.the_list.poll()
@@ -150,9 +150,9 @@ def test_while_a_press_of_a_row_waits_its_other_buttons_cannot_be_pressed(listed
     until(lambda: joey(page).count() == 0, what="the reload without the row's buttons")
 
 
-def test_a_refusal_beside_a_press_that_went_through_is_still_said_after_the_reload(listed, sheaves):  # noqa: F811
+def test_a_refusal_beside_a_press_that_went_through_is_still_said_after_the_reload(listed, rectoversos):  # noqa: F811
     page, ticks = listed
-    path = sheaves / GA4[5:]
+    path = rectoversos / GA4[5:]
     joey(page).click()
     ga4(page).click()
     path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Done", "- [x] Done"), encoding="utf-8")
@@ -178,9 +178,9 @@ def test_a_refusal_beside_a_press_that_went_through_is_still_said_after_the_relo
     assert page.locator(".list-error").is_hidden()          # not said again after a later press's reload
 
 
-def test_a_pressed_one_off_stays_locked_when_a_press_beside_it_is_undone(listed, box, sheaves):  # noqa: F811
+def test_a_pressed_one_off_stays_locked_when_a_press_beside_it_is_undone(listed, box, rectoversos):  # noqa: F811
     page, ticks = listed
-    path = sheaves / JOEY[5:]
+    path = rectoversos / JOEY[5:]
     path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [x] Approve\n- [ ] Done\n"),
                     encoding="utf-8")
     box.hub.the_list.poll()
@@ -196,9 +196,9 @@ def test_a_pressed_one_off_stays_locked_when_a_press_beside_it_is_undone(listed,
     assert ticks == []
 
 
-def test_the_owner_releases_a_pressed_share_after_its_five_seconds(listed, box, sheaves):  # noqa: F811
+def test_the_owner_releases_a_pressed_share_after_its_five_seconds(listed, box, rectoversos):  # noqa: F811
     page, ticks = listed
-    path = sheaves / JOEY[5:]
+    path = rectoversos / JOEY[5:]
     path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [ ] Approve\n- [x] Share\n"),
                     encoding="utf-8")
     box.hub.the_list.poll()
@@ -240,16 +240,16 @@ def test_on_a_phone_a_refusal_naming_a_slug_with_no_hyphen_breaks_and_the_list_n
 
 
 @pytest.fixture
-def long_words(chromium, box, sheaves, github):  # noqa: F811
+def long_words(chromium, box, rectoversos, github):  # noqa: F811
     """The list on a 360 px phone, Joey's title one long word and a group whose client/project has no hyphen."""
-    path = sheaves / JOEY[5:]
+    path = rectoversos / JOEY[5:]
     path.write_text(path.read_text(encoding="utf-8").replace(
         "# Reply to Joey about column L", "# Reply_to_Joey_about_column_L_of_the_black_friday_sheet"), encoding="utf-8")
-    rel = sheaves / LONG_CLIENT / LONG_PROJECT / "2026-10-29-tagging.md"
+    rel = rectoversos / LONG_CLIENT / LONG_PROJECT / "2026-10-29-tagging.md"
     rel.parent.mkdir(parents=True)
     rel.write_text(f"---\nclient: {LONG_CLIENT}\nproject: {LONG_PROJECT}\nissue: acme/record#8\nkind: question\n---\n"
                    "# Tagging\n", encoding="utf-8")
-    with (sheaves / "projects.toml").open("a", encoding="utf-8") as f:
+    with (rectoversos / "projects.toml").open("a", encoding="utf-8") as f:
         f.write(f'\n[projects."{LONG_CLIENT}/{LONG_PROJECT}"]\nmembers = ["nell"]\nstatus = "live"\n')
     github.issues[8] = {"status": "Waiting on member", "assignees": ["nell-l"], "updated": ago(3600)}
     box.hub.the_list.poll()
@@ -257,7 +257,7 @@ def long_words(chromium, box, sheaves, github):  # noqa: F811
 
 
 def test_on_a_phone_a_title_or_a_heading_of_one_long_word_breaks_and_the_list_never_scrolls_sideways(long_words):
-    # The row's title is the sheaf's H1 and the group's heading its client/project, both the list's own text (#130).
+    # The row's title is the rectoverso's H1 and the group's heading its client/project, both the list's own text (#130).
     page, _ = long_words
     assert page.locator("h3", has_text=LONG_PROJECT).count() == 1
     assert page.locator(".list-title", has_text="Reply_to_Joey").count() == 1

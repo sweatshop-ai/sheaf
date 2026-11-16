@@ -1,7 +1,7 @@
-"""The list (SPEC 9.10): a member's sheaves that wait on someone and the ones in progress, per
+"""The list (SPEC 9.10): a member's rectoversos that wait on someone and the ones in progress, per
 `<client>/<project>`, at `/<root>` of the root `[list]` names. Status and owner come from the record (an
-issues repo and its GitHub Project), the rest from each sheaf's front matter. Through the handler in proxy
-mode, with three hand-made sheaves, a documentation sheaf and a fake GitHub that answers GraphQL from the
+issues repo and its GitHub Project), the rest from each rectoverso's front matter. Through the handler in proxy
+mode, with three hand-made rectoversos, a documentation rectoverso and a fake GitHub that answers GraphQL from the
 issues a test gives it."""
 import contextlib
 import json
@@ -164,7 +164,7 @@ def github():
 
 
 @pytest.fixture
-def sheaves(tmp_path):
+def rectoversos(tmp_path):
     root = tmp_path / "list"
     for rel, text in SHEAVES.items():
         (root / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -176,8 +176,8 @@ def sheaves(tmp_path):
 
 
 @pytest.fixture
-def box(hub, browser, sheaves, github, tmp_path):
-    """The hub in proxy mode with the sheaves as Nell's and Dora's root, and its `[list]` on that root,
+def box(hub, browser, rectoversos, github, tmp_path):
+    """The hub in proxy mode with the rectoversos as Nell's and Dora's root, and its `[list]` on that root,
     the fake GitHub and a token file; polled once."""
     token = tmp_path / "installation-token"
     token.write_text(TOKEN + "\n", encoding="utf-8")
@@ -185,11 +185,11 @@ def box(hub, browser, sheaves, github, tmp_path):
     hub.proxy = proxy.parse({"origin": FRONT, "socket": "/run/sheaf-proxy/hub.sock",
                              "proxy_user": pwd.getpwuid(os.getuid()).pw_name,
                              "members": {NELL: {"name": "Nell", "short": "nell", "github": "nell-l",
-                                                   "roots": [str(sheaves)]},
+                                                   "roots": [str(rectoversos)]},
                                          DORA: {"name": "Dora", "short": "dora", "github": "dora-k",
-                                                "roots": [str(sheaves)]}}}, "the test")
+                                                "roots": [str(rectoversos)]}}}, "the test")
     hub.the_list = the_list.TheList(hub, the_list.parse({
-        "root": str(sheaves), "repo": "acme/record", "project": 1,
+        "root": str(rectoversos), "repo": "acme/record", "project": 1,
         "token_file": str(token), "api": github.url, "in_progress": "In progress at TT"}, "the test"))
     hub.the_list.poll()
     return Front(hub, browser.handler)
@@ -259,10 +259,10 @@ def test_all_of_the_team_leaves_out_the_projects_a_member_is_not_in(box):
         ("Reply to Joey about column L Approve James", "mail · you · #5 · 2 h")]
 
 
-def test_my_projects_reads_projects_toml_as_it_is_now_not_as_the_last_poll_read_it(box, sheaves):
+def test_my_projects_reads_projects_toml_as_it_is_now_not_as_the_last_poll_read_it(box, rectoversos):
     """My projects judges by the file the hub grants by (8.12, #53): a member just added to a project has its rows
     there at their next request, as All of the team has, and one just taken off has them no more."""
-    toml = sheaves / "projects.toml"
+    toml = rectoversos / "projects.toml"
     toml.write_text(toml.read_text(encoding="utf-8").replace('members = ["nell"]', 'members = ["nell", "dora"]'),
                     encoding="utf-8")
     assert "globex/black-friday" in read(box.get("/list", member=DORA))["Waiting on you 2"]
@@ -271,8 +271,8 @@ def test_my_projects_reads_projects_toml_as_it_is_now_not_as_the_last_poll_read_
     assert "globex/black-friday" not in read(box.get("/list", member=NELL))["Waiting on you 1"]
 
 
-def test_all_of_the_team_leaves_out_a_sheaf_with_a_private_source_for_all_but_its_owner(box, sheaves):
-    joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
+def test_all_of_the_team_leaves_out_a_sheaf_with_a_private_source_for_all_but_its_owner(box, rectoversos):
+    joey = rectoversos / "globex/black-friday/2026-10-28-reply-to-joey.md"
     joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n", "sources: [library:4711]\n"),
                     encoding="utf-8")
     box.hub.the_list.poll()
@@ -331,8 +331,8 @@ def test_the_owner_is_the_login_of_an_assignee_who_is_no_member_and_nobody_witho
         ("James needs the GA4 property id Done @dora James", "question · nobody · #7 · 3 h")]
 
 
-def test_my_projects_reads_the_members_of_projects_toml_without_case(box, sheaves):
-    (sheaves / "projects.toml").write_text(
+def test_my_projects_reads_the_members_of_projects_toml_without_case(box, rectoversos):
+    (rectoversos / "projects.toml").write_text(
         '[projects."globex/black-friday"]\nmembers = ["Nell"]\nstatus = "live"\n', encoding="utf-8")
     box.hub.the_list.poll()
     assert list(read(box.get("/list", member=NELL))["Waiting on you 1"]) == ["globex/black-friday"]
@@ -372,10 +372,10 @@ def test_the_record_is_read_as_the_app_and_a_poll_that_cannot_read_it_keeps_the_
     assert "answered 401" in hub_rows("list-poll-failed")[-1]["error"]
 
 
-def test_a_sheaf_added_since_joins_the_list_only_at_a_poll_that_reads_the_record(box, sheaves, github, tmp_path):
+def test_a_sheaf_added_since_joins_the_list_only_at_a_poll_that_reads_the_record(box, rectoversos, github, tmp_path):
     before = read(box.get("/list", member=NELL))
-    # A new sheaf whose issue the last poll read: the record it would be listed by is not read this poll.
-    (sheaves / "initech/website/2026-10-29-new.md").write_text(
+    # A new rectoverso whose issue the last poll read: the record it would be listed by is not read this poll.
+    (rectoversos / "initech/website/2026-10-29-new.md").write_text(
         "---\nissue: acme/record#7\n---\n# A new one\n\n- [ ] Done\n", encoding="utf-8")
     (tmp_path / "installation-token").write_text("", encoding="utf-8")
     box.hub.the_list.poll()
@@ -386,16 +386,16 @@ def test_a_sheaf_added_since_joins_the_list_only_at_a_poll_that_reads_the_record
     assert "A new one" in json.dumps(read(box.get("/list", member=NELL)))
 
 
-def test_a_poll_that_cannot_read_the_record_still_places_its_sheaves_on_the_last_records_read(box, sheaves, tmp_path):
-    """A failed read keeps the list as it was, but a sheaf made owner-only since goes to its owner's private folder, the
+def test_a_poll_that_cannot_read_the_record_still_places_its_sheaves_on_the_last_records_read(box, rectoversos, tmp_path):
+    """A failed read keeps the list as it was, but a rectoverso made owner-only since goes to its owner's private folder, the
     owner judged on the records the last good poll read (#45, agreed with #43's placement): here #5's assignee, Nell."""
-    joey = sheaves / JOEY[5:]
+    joey = rectoversos / JOEY[5:]
     (tmp_path / "installation-token").write_text("", encoding="utf-8")
     joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n", "sources: [library:4711]\n"),
                     encoding="utf-8")
     box.hub.the_list.poll()
     assert "holds no token" in hub_rows("list-poll-failed")[-1]["error"]
-    assert (sheaves / "globex/black-friday/private/nell/2026-10-28-reply-to-joey.md").exists() and not joey.exists()
+    assert (rectoversos / "globex/black-friday/private/nell/2026-10-28-reply-to-joey.md").exists() and not joey.exists()
 
 
 def test_an_issue_in_more_projects_than_one_page_still_has_the_status_of_its_item_in_the_lists_project(box, github):
@@ -471,12 +471,12 @@ def test_a_box_folder_inside_a_members_root_stops_the_start(proxy_folder, key):
 
 
 def test_the_hub_polls_the_record_from_its_start_and_serves_the_list_on_its_proxy_socket(
-        proxy_folder, sheaves, github, tmp_path):
+        proxy_folder, rectoversos, github, tmp_path):
     from test_proxy_start import HOST, ask, run_hub, stop, wait_up
     token = tmp_path / "installation-token"
     token.write_text(TOKEN + "\n", encoding="utf-8")
     sock = f"{proxy_folder}/hub.sock"
-    configure_list(sock, sheaves, f'root = "{sheaves}"\nrepo = "acme/record"\nproject = 1\n'
+    configure_list(sock, rectoversos, f'root = "{rectoversos}"\nrepo = "acme/record"\nproject = 1\n'
                                   f'token_file = "{token}"\napi = "{github.url}"\npoll = 1\n'
                                   'in_progress = "In progress at TT"\n')
     p = run_hub()
@@ -526,8 +526,8 @@ def test_a_row_carries_a_button_for_its_action_that_names_its_sheaf_and_the_memb
          "0", "Done", "one-off", "Done @dora")]
 
 
-def test_every_action_of_a_row_is_a_button_one_off_but_share_which_is_a_toggle(box, sheaves):
-    path = sheaves / JOEY[5:]
+def test_every_action_of_a_row_is_a_button_one_off_but_share_which_is_a_toggle(box, rectoversos):
+    path = rectoversos / JOEY[5:]
     path.write_text(path.read_text(encoding="utf-8").replace(
         "- [ ] Approve\n", "- [ ] Approve\n- [x] Read the brief\n- [ ] Done\n- [ ] Share\n"), encoding="utf-8")
     box.hub.the_list.poll()
@@ -538,8 +538,8 @@ def test_every_action_of_a_row_is_a_button_one_off_but_share_which_is_a_toggle(b
     assert share["aria-pressed"] == "false"
 
 
-def test_the_row_keeps_its_share_button_for_a_box_that_says_shared_with_the_team(box, sheaves):
-    path = sheaves / JOEY[5:]
+def test_the_row_keeps_its_share_button_for_a_box_that_says_shared_with_the_team(box, rectoversos):
+    path = rectoversos / JOEY[5:]
     path.write_text(path.read_text(encoding="utf-8").replace(
         "- [ ] Approve\n", "- [ ] Approve\n- [ ] Shared with the team\n"), encoding="utf-8")
     box.hub.the_list.poll()
@@ -550,8 +550,8 @@ def test_the_row_keeps_its_share_button_for_a_box_that_says_shared_with_the_team
     assert share["aria-pressed"] == "false"
 
 
-def test_the_rows_second_button_ticks_the_second_action_and_no_other(box, sheaves):
-    path = sheaves / JOEY[5:]
+def test_the_rows_second_button_ticks_the_second_action_and_no_other(box, rectoversos):
+    path = rectoversos / JOEY[5:]
     path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [ ] Approve\n- [ ] Done\n"),
                     encoding="utf-8")
     box.hub.the_list.poll()
@@ -561,11 +561,11 @@ def test_the_rows_second_button_ticks_the_second_action_and_no_other(box, sheave
     assert path.read_text(encoding="utf-8") == before.replace("- [ ] Done", "- [x] Done")
 
 
-def test_a_tick_on_the_row_is_answered_in_the_sheaf_and_the_row_leaves_waiting_on_you(box, sheaves, github):
-    before = (sheaves / JOEY[5:]).read_text(encoding="utf-8")
+def test_a_tick_on_the_row_is_answered_in_the_sheaf_and_the_row_leaves_waiting_on_you(box, rectoversos, github):
+    before = (rectoversos / JOEY[5:]).read_text(encoding="utf-8")
     r = box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Approve"}), member=NELL)
     assert r.status == 200, r.text
-    assert (sheaves / JOEY[5:]).read_text(encoding="utf-8") == before.replace("- [ ] Approve", "- [x] Approve")
+    assert (rectoversos / JOEY[5:]).read_text(encoding="utf-8") == before.replace("- [ ] Approve", "- [x] Approve")
     page = read(box.get("/list", member=NELL))
     assert list(page["Waiting on you 1"]) == ["initech/website"]
     box.hub.the_list.poll()                     # the record has not moved yet: still not waiting on anyone
@@ -576,20 +576,20 @@ def test_a_tick_on_the_row_is_answered_in_the_sheaf_and_the_row_leaves_waiting_o
     assert page["In progress 2"]["globex/black-friday"] == [("Reply to Joey about column L Approve ✓ James", "mail · you · #5 · 1 min")]
 
 
-def test_a_tick_of_an_action_the_sheaf_no_longer_holds_is_refused_and_writes_nothing(box, sheaves):
-    before = (sheaves / JOEY[5:]).read_text(encoding="utf-8")
+def test_a_tick_of_an_action_the_sheaf_no_longer_holds_is_refused_and_writes_nothing(box, rectoversos):
+    before = (rectoversos / JOEY[5:]).read_text(encoding="utf-8")
     for body in ({"doc": JOEY, "action": 0, "word": "Done"}, {"doc": JOEY, "action": 1, "word": "Approve"}):
         r = box.post("/_/tick", now(box, body), member=NELL)
         assert r.status == 409, r.text
         assert "reload the list" in r.json()["error"]
     assert box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Approve"}), member=NELL).status == 200
     assert box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Approve"}), member=NELL).status == 409
-    assert (sheaves / JOEY[5:]).read_text(encoding="utf-8") == before.replace("- [ ] Approve", "- [x] Approve")
+    assert (rectoversos / JOEY[5:]).read_text(encoding="utf-8") == before.replace("- [ ] Approve", "- [x] Approve")
 
 
 def now(box, body):
-    """`body` with the hash of its sheaf's text as it is now: the tick of a list read just now. The file is the one
-    that holds the sheaf's name, wherever it is placed (9.11)."""
+    """`body` with the hash of its rectoverso's text as it is now: the tick of a list read just now. The file is the one
+    that holds the rectoverso's name, wherever it is placed (9.11)."""
     top = box.hub.the_list.root().path
     rel = place.file_rel(box.hub, box.hub.the_list.root(), body["doc"].split("/", 1)[1])
     return {**body, "hash": md_hash((top / rel).read_text(encoding="utf-8"))}
@@ -604,9 +604,9 @@ def row_press(res, doc, word=None):
     return {**press, "release": True} if b.has_attr("data-release") else press
 
 
-def test_a_tick_from_a_stale_row_does_not_tick_the_next_action_with_the_same_word(box, sheaves):
+def test_a_tick_from_a_stale_row_does_not_tick_the_next_action_with_the_same_word(box, rectoversos):
     tick = row_press(box.get("/list", member=NELL), JOEY)
-    joey = sheaves / JOEY[5:]
+    joey = rectoversos / JOEY[5:]
     # Since the list was read, the first Approve was ticked in the page and a second one added below it.
     joey.write_text(joey.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [x] Approve\n- [ ] Approve\n"),
                     encoding="utf-8")
@@ -617,13 +617,13 @@ def test_a_tick_from_a_stale_row_does_not_tick_the_next_action_with_the_same_wor
     assert joey.read_text(encoding="utf-8") == before
 
 
-def test_the_rows_tick_of_a_sheaf_the_poll_placed_in_a_private_folder_lands_in_that_file(box, sheaves):
+def test_the_rows_tick_of_a_sheaf_the_poll_placed_in_a_private_folder_lands_in_that_file(box, rectoversos):
     """Opus gate on #45, P3: the row's hash is of the text the poll read, wherever the file sits (9.11)."""
-    joey = sheaves / JOEY[5:]
+    joey = rectoversos / JOEY[5:]
     joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n", "sources: [library:4711]\n"),
                     encoding="utf-8")
     box.hub.the_list.poll()
-    home = sheaves / "globex/black-friday/private/nell/2026-10-28-reply-to-joey.md"
+    home = rectoversos / "globex/black-friday/private/nell/2026-10-28-reply-to-joey.md"
     assert home.exists() and not joey.exists()
     before = home.read_text(encoding="utf-8")
     r = box.post("/_/tick", row_press(box.get("/list", member=NELL), JOEY), member=NELL)
@@ -631,10 +631,10 @@ def test_the_rows_tick_of_a_sheaf_the_poll_placed_in_a_private_folder_lands_in_t
     assert home.read_text(encoding="utf-8") == before.replace("- [ ] Approve", "- [x] Approve")
 
 
-def test_a_tick_ticks_the_action_the_row_showed_though_the_hubs_copy_of_a_page_no_tab_holds_is_older(box, sheaves):
-    """Opus gate on #45, P1: a sheaf opened once and closed keeps its entry, which the watcher no longer refreshes. A
+def test_a_tick_ticks_the_action_the_row_showed_though_the_hubs_copy_of_a_page_no_tab_holds_is_older(box, rectoversos):
+    """Opus gate on #45, P1: a rectoverso opened once and closed keeps its entry, which the watcher no longer refreshes. A
     question written above its Approve since is the row's action 0: the tick lands there, not on the old Approve."""
-    joey = sheaves / JOEY[5:]
+    joey = rectoversos / JOEY[5:]
     joey.write_text(joey.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [ ] Approve @nell\n"),
                     encoding="utf-8")
     assert box.get("/" + JOEY, member=NELL).status == 200          # opened once; no tab listens now
@@ -648,10 +648,10 @@ def test_a_tick_ticks_the_action_the_row_showed_though_the_hubs_copy_of_a_page_n
     assert joey.read_text(encoding="utf-8") == before.replace("- [ ] Approve\n", "- [x] Approve\n", 1)
 
 
-def test_a_tick_after_a_write_the_hubs_stat_check_cannot_see_still_lands(box, sheaves):
+def test_a_tick_after_a_write_the_hubs_stat_check_cannot_see_still_lands(box, rectoversos):
     """Opus delta check on #45, P3: a write of the same size in the same clock tick leaves (mtime, size) as it was, so
     catch_up keeps the old copy; the tick reads the file once more rather than refusing every retry."""
-    joey = sheaves / JOEY[5:]
+    joey = rectoversos / JOEY[5:]
     assert box.get("/" + JOEY, member=NELL).status == 200          # the hub's copy, then no tab
     st = joey.stat()
     joey.write_text(joey.read_text(encoding="utf-8").replace("The draft.", "Our draft."), encoding="utf-8")
@@ -682,8 +682,8 @@ def test_a_member_cannot_tick_a_sheaf_outside_their_roots(box, tmp_path):
     assert box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Approve"}), member=DORA).status == 404
 
 
-def test_the_tick_inside_a_list_of_other_boxes_flips_that_one_line(box, sheaves):
-    path = sheaves / "initech/website/2026-10-27-ga4-property.md"
+def test_the_tick_inside_a_list_of_other_boxes_flips_that_one_line(box, rectoversos):
+    path = rectoversos / "initech/website/2026-10-27-ga4-property.md"
     path.write_text(path.read_text(encoding="utf-8").replace(
         "- [ ] Done @dora\n", "- [x] Read the brief\n- [ ] Done @dora\n- [ ] Share\n"), encoding="utf-8")
     before = path.read_text(encoding="utf-8")
@@ -700,9 +700,9 @@ def test_the_list_page_script_posts_the_tick_with_the_pages_nonce(box):
     assert "/_/tick" in script.string
 
 
-def test_a_tick_beside_a_comment_in_the_same_list_keeps_the_comment(box, sheaves):
+def test_a_tick_beside_a_comment_in_the_same_list_keeps_the_comment(box, rectoversos):
     from helpers import thread
-    path = sheaves / JOEY[5:]
+    path = rectoversos / JOEY[5:]
     path.write_text(path.read_text(encoding="utf-8").replace(
         "- [ ] Approve\n", f"- [x] Read the thread{thread('c1', 'Dora')}\n- [ ] Approve\n"), encoding="utf-8")
     before = path.read_text(encoding="utf-8")
@@ -711,7 +711,7 @@ def test_a_tick_beside_a_comment_in_the_same_list_keeps_the_comment(box, sheaves
 
 
 def test_an_action_above_a_rule_after_the_front_matter_is_still_read():
-    s = the_list.read_sheaf("a/b/c.md", SHEAVES["globex/black-friday/2026-10-28-reply-to-joey.md"] + "\n---\n\nMore.\n")
+    s = the_list.read_rectoverso("a/b/c.md", SHEAVES["globex/black-friday/2026-10-28-reply-to-joey.md"] + "\n---\n\nMore.\n")
     assert [(w, short) for w, short, _, _ in s.actions] == [("Approve", "")]
     assert s.title == "Reply to Joey about column L"
 
@@ -730,8 +730,8 @@ def test_a_list_table_without_a_proxy_table_stops_the_start(proxy_folder):
 
 
 @pytest.mark.parametrize("sep", [" ", "\x0c", "\x85", "\x0b"])
-def test_a_line_separator_markdown_does_not_break_on_leaves_the_tick_on_its_own_box(box, sheaves, sep):
-    path = sheaves / JOEY[5:]
+def test_a_line_separator_markdown_does_not_break_on_leaves_the_tick_on_its_own_box(box, rectoversos, sep):
+    path = rectoversos / JOEY[5:]
     path.write_text(path.read_text(encoding="utf-8").replace(
         "- [ ] Approve\n", f"Two lines{sep}in one paragraph.\n\n- [ ] Approve\n- [ ] Done\n"), encoding="utf-8")
     before = path.read_text(encoding="utf-8")
@@ -739,13 +739,13 @@ def test_a_line_separator_markdown_does_not_break_on_leaves_the_tick_on_its_own_
     assert path.read_text(encoding="utf-8") == before.replace("- [ ] Approve", "- [x] Approve")
 
 
-def test_a_list_root_inside_a_git_work_tree_is_refused_at_each_poll_and_lists_nothing(box, sheaves, tmp_path):
+def test_a_list_root_inside_a_git_work_tree_is_refused_at_each_poll_and_lists_nothing(box, rectoversos, tmp_path):
     import shutil
     import subprocess
     repo = tmp_path / "repo"
     repo.mkdir()
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
-    shutil.copytree(sheaves, repo / "list")
+    shutil.copytree(rectoversos, repo / "list")
     cfg = box.hub.proxy
     box.hub.proxy = proxy.parse({"origin": FRONT, "socket": str(cfg.socket), "proxy_user": cfg.proxy_user,
                                  "members": {NELL: {"name": "Nell", "short": "nell", "github": "nell-l",
@@ -773,17 +773,17 @@ def test_a_ticked_sheaf_moved_out_of_waiting_and_back_without_a_new_change_is_wa
 @pytest.mark.parametrize("fence", ["````\n```\n- [ ] Approve\n```\n````\n", "~~~~\n~~~\n- [ ] Approve\n~~~~ more\n~~~~~\n",
                                    "```\n~~~\n- [ ] Approve\n```\n"])
 def test_an_action_inside_a_fence_that_holds_a_shorter_or_other_fence_is_no_action(fence):
-    s = the_list.read_sheaf("a/b/c.md", f"# A sheaf\n\n{fence}\n- [ ] Done\n")
+    s = the_list.read_rectoverso("a/b/c.md", f"# A rectoverso\n\n{fence}\n- [ ] Done\n")
     assert [(w, short) for w, short, _, _ in s.actions] == [("Done", "")]
 
 
 def test_an_action_inside_an_html_comment_is_no_action():
-    s = the_list.read_sheaf("a/b/c.md", "# A sheaf\n\n<!--\n- [ ] Approve\n-->\n\n- [ ] Done\n")
+    s = the_list.read_rectoverso("a/b/c.md", "# A rectoverso\n\n<!--\n- [ ] Approve\n-->\n\n- [ ] Done\n")
     assert [(w, line) for w, _, line, _ in s.actions] == [("Done", 6)]
 
 
 def test_an_indented_code_line_holding_a_fence_opens_no_fence():
-    s = the_list.read_sheaf("a/b/c.md", "# A sheaf\n\n    ```\n\n- [ ] Approve\n")
+    s = the_list.read_rectoverso("a/b/c.md", "# A rectoverso\n\n    ```\n\n- [ ] Approve\n")
     assert [(w, line) for w, _, line, _ in s.actions] == [("Approve", 4)]
 
 
@@ -794,9 +794,9 @@ def test_a_box_the_render_draws_past_the_blocks_marks_cannot_be_ticked():
     assert ticked_html(block, 1) is None        # the raw box in the line: no mark of the source is it
 
 
-def test_a_sheaf_of_a_root_nested_in_the_list_root_is_on_no_list(box, sheaves):
+def test_a_sheaf_of_a_root_nested_in_the_list_root_is_on_no_list(box, rectoversos):
     import subprocess
-    nested = sheaves / "acme" / "site"
+    nested = rectoversos / "acme" / "site"
     nested.mkdir(parents=True)
     subprocess.run(["git", "init", "-q", str(nested)], check=True)
     (nested / "2026-10-28-nested.md").write_text(
@@ -809,25 +809,25 @@ def test_a_sheaf_of_a_root_nested_in_the_list_root_is_on_no_list(box, sheaves):
 def test_a_front_matter_closed_only_by_a_line_break_markdown_does_not_count_is_none():
     for text in ("---\rissue: acme/record#7\r---\r# Odd\r- [ ] Approve\r",       # read_text() turns \r into \n
                  "---\nissue: acme/record#7\nk: v\u2028---\n# Odd\n- [ ] Approve\n"):
-        assert the_list.read_sheaf("a/b/c.md", text).issue is None
+        assert the_list.read_rectoverso("a/b/c.md", text).issue is None
 
 
-def test_a_sheaf_whose_front_matter_closes_only_on_another_line_break_leaves_the_rest_of_the_list(box, sheaves):
+def test_a_sheaf_whose_front_matter_closes_only_on_another_line_break_leaves_the_rest_of_the_list(box, rectoversos):
     text = "---\nissue: acme/record#7\nk: v\u2028---\n# Odd\n- [ ] Approve\n"
-    (sheaves / "initech/website/2026-10-28-odd.md").write_text(text, encoding="utf-8")
+    (rectoversos / "initech/website/2026-10-28-odd.md").write_text(text, encoding="utf-8")
     box.hub.the_list.poll()
     page = read(box.get("/list", member=NELL))
     assert "Waiting on you 2" in page and "Odd" not in json.dumps(page)
-    path = sheaves / "initech/website/2026-10-28-odd.md"
+    path = rectoversos / "initech/website/2026-10-28-odd.md"
     before = path.read_text(encoding="utf-8")
     r = box.post("/_/tick", now(box, {"doc": "list/initech/website/2026-10-28-odd.md", "action": 0, "word": "Approve"}),
                  member=NELL)
-    assert r.status in (200, 409), r.text       # no sheaf, still a document: its one box, or nothing
+    assert r.status in (200, 409), r.text       # no rectoverso, still a document: its one box, or nothing
     assert path.read_text(encoding="utf-8") in (before, before.replace("- [ ] Approve", "- [x] Approve"))
 
 
-def test_all_of_the_team_leaves_out_a_sheaf_closed_since_the_last_poll(box, sheaves):
-    joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
+def test_all_of_the_team_leaves_out_a_sheaf_closed_since_the_last_poll(box, rectoversos):
+    joey = rectoversos / "globex/black-friday/2026-10-28-reply-to-joey.md"
     joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n", "sources: [library:4711]\n"),
                     encoding="utf-8")
     assert all("globex/black-friday" not in groups for groups in read(box.get("/list?show=all", member=DORA)).values())
@@ -837,23 +837,23 @@ JOEY_NAME = "globex/black-friday/2026-10-28-reply-to-joey.md"
 JOEY_HOME = "globex/black-friday/private/nell/2026-10-28-reply-to-joey.md"
 
 
-def closed_joey(sheaves, sources="sources: [library:4711]\n"):
+def closed_joey(rectoversos, sources="sources: [library:4711]\n"):
     """Joey's sheaf made its owner's alone (`sources` in the place of `visibility: project`), its file at its home
     (9.11): the private folder of its issue's assignee, Nell, where the poll would move it. Its address stays
     `JOEY_NAME`."""
-    joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
-    home = sheaves / JOEY_HOME
+    joey = rectoversos / "globex/black-friday/2026-10-28-reply-to-joey.md"
+    home = rectoversos / JOEY_HOME
     home.parent.mkdir(parents=True)
     home.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n", sources), encoding="utf-8")
     joey.unlink()
     return home
 
 
-def test_a_link_at_a_sheafs_path_is_no_document_even_to_the_owner_of_the_sheaf_it_names(box, sheaves):
+def test_a_link_at_a_sheafs_path_is_no_document_even_to_the_owner_of_the_sheaf_it_names(box, rectoversos):
     """A link holds no name (9.11): a second name of one file would be a second name lock over its one file lock.
-    The sheaf is its owner's by its own name; the link answers as a document that does not exist, to everyone."""
-    joey = closed_joey(sheaves, "sources: [library:4711]\nowner: dora\n")
-    (sheaves / "globex/black-friday/joey.md").symlink_to(f"private/nell/{joey.name}")
+    The rectoverso is its owner's by its own name; the link answers as a document that does not exist, to everyone."""
+    joey = closed_joey(rectoversos, "sources: [library:4711]\nowner: dora\n")
+    (rectoversos / "globex/black-friday/joey.md").symlink_to(f"private/nell/{joey.name}")
     box.hub.the_list.poll()
     root = box.hub.roots.lookup(joey).name
     assert box.get(f"/{root}/{JOEY_NAME}", member=DORA).status == 404
@@ -862,11 +862,11 @@ def test_a_link_at_a_sheafs_path_is_no_document_even_to_the_owner_of_the_sheaf_i
     assert box.get(f"/{root}/globex/black-friday/joey.md", member=NELL).status == 404
 
 
-def test_a_link_the_poll_does_not_read_is_no_document_even_to_the_owner_of_the_sheaf_it_names(box, sheaves):
+def test_a_link_the_poll_does_not_read_is_no_document_even_to_the_owner_of_the_sheaf_it_names(box, rectoversos):
     """No address of the list's root reaches a file through a link, at any depth (9.11, Opus round 8)."""
-    joey = closed_joey(sheaves, "sources: [library:4711]\nowner: dora\n")
-    (sheaves / ".kept").mkdir()
-    (sheaves / ".kept/joey.md").symlink_to(joey)
+    joey = closed_joey(rectoversos, "sources: [library:4711]\nowner: dora\n")
+    (rectoversos / ".kept").mkdir()
+    (rectoversos / ".kept/joey.md").symlink_to(joey)
     box.hub.the_list.poll()
     root = box.hub.roots.lookup(joey).name
     assert box.get(f"/{root}/.kept/joey.md", member=DORA).status == 404
@@ -874,8 +874,8 @@ def test_a_link_the_poll_does_not_read_is_no_document_even_to_the_owner_of_the_s
 
 
 @pytest.mark.parametrize("issue", ["issue:\n", "issue: acme/record#7\n"], ids=["removed", "changed"])
-def test_a_sheaf_whose_issue_changed_since_the_poll_is_not_its_old_assignees(box, sheaves, issue):
-    joey = closed_joey(sheaves)
+def test_a_sheaf_whose_issue_changed_since_the_poll_is_not_its_old_assignees(box, rectoversos, issue):
+    joey = closed_joey(rectoversos)
     box.hub.the_list.poll()
     root = box.hub.roots.lookup(joey).name
     address = f"/{root}/{JOEY_NAME}"
@@ -887,8 +887,8 @@ def test_a_sheaf_whose_issue_changed_since_the_poll_is_not_its_old_assignees(box
 
 
 @pytest.mark.parametrize("issue", ["issue:\n", "issue: acme/record#7\n"], ids=["removed", "changed"])
-def test_a_tick_after_the_issue_changed_does_not_give_the_old_assignees_back(box, sheaves, issue):
-    joey = closed_joey(sheaves)
+def test_a_tick_after_the_issue_changed_does_not_give_the_old_assignees_back(box, rectoversos, issue):
+    joey = closed_joey(rectoversos)
     box.hub.the_list.poll()
     root = box.hub.roots.lookup(joey).name
     address = f"/{root}/{JOEY_NAME}"
@@ -907,10 +907,10 @@ def titles(page):
 
 
 @pytest.mark.parametrize("issue", ["issue:\n", "issue: acme/record#7\n"], ids=["removed", "changed"])
-def test_a_tick_after_the_issue_changed_takes_the_row_off_the_list_until_the_next_poll(box, sheaves, github, issue):
+def test_a_tick_after_the_issue_changed_takes_the_row_off_the_list_until_the_next_poll(box, rectoversos, github, issue):
     github.issues[5].update(status="In progress at TT")         # drawn, not left out as answered
     box.hub.the_list.poll()
-    joey = sheaves / JOEY[5:]
+    joey = rectoversos / JOEY[5:]
     joey.write_text(joey.read_text(encoding="utf-8").replace("issue: acme/record#5\n", issue), encoding="utf-8")
     r = box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Approve"}), member=NELL)
     assert r.status == 200, r.text
@@ -921,9 +921,9 @@ def test_a_tick_after_the_issue_changed_takes_the_row_off_the_list_until_the_nex
     assert listed == (issue != "issue:\n")                      # back under #7; with no issue, on no list (9.10)
 
 
-def test_an_issue_without_assignees_has_the_owner_its_sheaf_names(box, sheaves, github):
+def test_an_issue_without_assignees_has_the_owner_its_sheaf_names(box, rectoversos, github):
     github.issues[6]["assignees"] = []
-    prep = sheaves / "initech/website/2026-10-26-prep-thursday.md"
+    prep = rectoversos / "initech/website/2026-10-26-prep-thursday.md"
     prep.write_text(prep.read_text(encoding="utf-8").replace("kind: prep\n", "kind: prep\nowner: nell\n"),
                     encoding="utf-8")
     box.hub.the_list.poll()
@@ -933,9 +933,9 @@ def test_an_issue_without_assignees_has_the_owner_its_sheaf_names(box, sheaves, 
         "initech/website": [("Prep for the call of Thursday James", "prep · @nell · #6 · 40 min")]}
 
 
-def test_the_lists_owner_is_the_one_the_file_names_now_not_at_the_poll(box, sheaves, github):
+def test_the_lists_owner_is_the_one_the_file_names_now_not_at_the_poll(box, rectoversos, github):
     github.issues[6]["assignees"] = []
-    prep = sheaves / "initech/website/2026-10-26-prep-thursday.md"
+    prep = rectoversos / "initech/website/2026-10-26-prep-thursday.md"
     prep.write_text(prep.read_text(encoding="utf-8").replace("kind: prep\n", "kind: prep\nowner: nell\n"),
                     encoding="utf-8")
     box.hub.the_list.poll()
@@ -952,9 +952,9 @@ def test_the_owner_shown_is_the_issues_first_assignee_even_when_no_member(box, g
         "initech/website": [("Prep for the call of Thursday James", "prep · zed-x · #6 · 40 min")]}
 
 
-def test_an_owner_only_sheaf_deleted_after_a_poll_is_told_to_its_assignee_alone(box, sheaves, monkeypatch):
+def test_an_owner_only_sheaf_deleted_after_a_poll_is_told_to_its_assignee_alone(box, rectoversos, monkeypatch):
     from sheafmd.hub.index import SWEEP_SECONDS
-    joey = closed_joey(sheaves, "sources: [library:4711]\nowner: dora\n")
+    joey = closed_joey(rectoversos, "sources: [library:4711]\nowner: dora\n")
     box.hub.the_list.poll()
     now = [NOW]
     box.hub.clock = lambda: now[0]
@@ -966,16 +966,16 @@ def test_an_owner_only_sheaf_deleted_after_a_poll_is_told_to_its_assignee_alone(
     box.hub.tick()
     nell.drain(), dora.drain()
     joey.unlink()
-    box.hub.the_list.poll()                             # the poll sees no sheaf there before the sweep does
+    box.hub.the_list.poll()                             # the poll sees no rectoverso there before the sweep does
     now[0] += SWEEP_SECONDS
     box.hub.tick()
-    doc = f"{box.hub.roots.lookup(sheaves / 'projects.toml').name}/{JOEY_NAME}"
+    doc = f"{box.hub.roots.lookup(rectoversos / 'projects.toml').name}/{JOEY_NAME}"
     assert [d["doc"] for name, d in nell.drain() if name == "status"] == [doc]
     assert [d for name, d in dora.drain() if name == "status"] == []
 
 
-def test_an_issue_written_in_another_case_is_still_the_issue_the_list_polled(box, sheaves):
-    joey = closed_joey(sheaves, "sources: [library:4711]\nowner: dora\n")
+def test_an_issue_written_in_another_case_is_still_the_issue_the_list_polled(box, rectoversos):
+    joey = closed_joey(rectoversos, "sources: [library:4711]\nowner: dora\n")
     box.hub.the_list.poll()
     joey.write_text(joey.read_text(encoding="utf-8").replace("issue: acme/record#5", "issue: Acme/Record#5"),
                     encoding="utf-8")
@@ -985,32 +985,32 @@ def test_an_issue_written_in_another_case_is_still_the_issue_the_list_polled(box
     assert box.get(address, member=DORA).status == 404
 
 
-def bind_tokens(box, sheaves):
+def bind_tokens(box, rectoversos):
     """Nell's and Dora's door tokens, `nell-door` and `dora-door`, bound to them (9.11), both members of both
-    projects (8.12): what these tests judge is a sheaf's own visibility, not the grant."""
-    text = (sheaves / "projects.toml").read_text(encoding="utf-8")
-    (sheaves / "projects.toml").write_text(text.replace('members = ["nell"]', 'members = ["nell", "dora"]'),
+    projects (8.12): what these tests judge is a rectoverso's own visibility, not the grant."""
+    text = (rectoversos / "projects.toml").read_text(encoding="utf-8")
+    (rectoversos / "projects.toml").write_text(text.replace('members = ["nell"]', 'members = ["nell", "dora"]'),
                                            encoding="utf-8")
     box.hub.proxy = proxy.parse({"origin": FRONT, "socket": "/run/sheaf-proxy/hub.sock",
                                  "proxy_user": pwd.getpwuid(os.getuid()).pw_name,
                                  "members": {NELL: {"name": "Nell", "short": "nell", "github": "nell-l",
-                                                    "roots": [str(sheaves)], "tokens": ["nell-door"]},
+                                                    "roots": [str(rectoversos)], "tokens": ["nell-door"]},
                                              DORA: {"name": "Dora", "short": "dora", "github": "dora-k",
-                                                    "roots": [str(sheaves)], "tokens": ["dora-door"]}}}, "the test")
+                                                    "roots": [str(rectoversos)], "tokens": ["dora-door"]}}}, "the test")
     return {name: Tokens().add(name, write=True) for name in ("nell-door", "dora-door")}
 
 
-def hidden_joey(sheaves):
+def hidden_joey(rectoversos):
     """Joey's sheaf, its owner's alone and with no `owner`: its issue's assignee, Nell, owns it."""
-    return closed_joey(sheaves)
+    return closed_joey(rectoversos)
 
 
 def test_a_door_update_of_a_sheaf_its_assignee_alone_owns_keeps_it_theirs_once_the_issue_is_not_polled(
-        box, browser, sheaves, github):
+        box, browser, rectoversos, github):
     """#33: the record names the owner only while the list polls the issue; the `owner` the write gives
     it is the one after."""
-    tokens = bind_tokens(box, sheaves)
-    joey = hidden_joey(sheaves)
+    tokens = bind_tokens(box, rectoversos)
+    joey = hidden_joey(rectoversos)
     box.hub.the_list.poll()
     root = box.hub.roots.lookup(joey).name
     doc = f"{root}/{JOEY_NAME}"
@@ -1027,11 +1027,11 @@ def test_a_door_update_of_a_sheaf_its_assignee_alone_owns_keeps_it_theirs_once_t
 
 @pytest.mark.parametrize("issue", ["acme/record#5", "acme/record#7"], ids=["its-issue", "another"])
 def test_a_door_create_where_a_hidden_sheaf_was_deleted_answers_the_same_whatever_issue_it_names(
-        box, browser, sheaves, issue):
+        box, browser, rectoversos, issue):
     """#34: until the next poll the list still has the deleted sheaf's row; neither the create's answer nor
-    a read after it tells which issue that sheaf named."""
-    tokens = bind_tokens(box, sheaves)
-    joey = hidden_joey(sheaves)
+    a read after it tells which issue that rectoverso named."""
+    tokens = bind_tokens(box, rectoversos)
+    joey = hidden_joey(rectoversos)
     box.hub.the_list.poll()
     root = box.hub.roots.lookup(joey).name
     doc = f"{root}/globex/black-friday/2026-10-28-reply-to-joey.md"
@@ -1040,7 +1040,7 @@ def test_a_door_create_where_a_hidden_sheaf_was_deleted_answers_the_same_whateve
     is_error, got = call(browser, "create", token=tokens["dora-door"], doc=doc, text=text)
     assert not is_error, got
     assert got["doc"] == doc                                    # its name; its file is in Dora's folder (9.11)
-    dora = sheaves / f"globex/black-friday/private/dora/{joey.name}"
+    dora = rectoversos / f"globex/black-friday/private/dora/{joey.name}"
     assert front_matter(dora.read_text(encoding="utf-8"))["owner"] == "dora"
     is_error, got = call(browser, "read", token=tokens["dora-door"], doc=doc)
     assert not is_error, got
@@ -1048,9 +1048,9 @@ def test_a_door_create_where_a_hidden_sheaf_was_deleted_answers_the_same_whateve
 
 @pytest.mark.parametrize("issue", ["acme/record#5", "acme/record#7"], ids=["its-issue", "another"])
 def test_an_unbound_create_where_a_hidden_sheaf_was_deleted_is_refused_whatever_issue_it_names(
-        box, browser, sheaves, issue):
+        box, browser, rectoversos, issue):
     """#34: a token bound to nobody gives no owner, so the stale row of the deleted sheaf is no owner either."""
-    joey = hidden_joey(sheaves)
+    joey = hidden_joey(rectoversos)
     box.hub.the_list.poll()
     root = box.hub.roots.lookup(joey).name
     joey.unlink()
@@ -1062,11 +1062,11 @@ def test_an_unbound_create_where_a_hidden_sheaf_was_deleted_is_refused_whatever_
 
 
 def test_a_poll_that_read_a_hidden_sheaf_before_it_went_does_not_bring_its_row_back(
-        box, browser, sheaves, monkeypatch):
-    """#34, Codex: the sheaf goes and a door create takes its address while a poll that read it asks GitHub;
-    the snapshot that poll publishes judges the new sheaf without the row."""
-    tokens = bind_tokens(box, sheaves)
-    joey = hidden_joey(sheaves)
+        box, browser, rectoversos, monkeypatch):
+    """#34, Codex: the rectoverso goes and a door create takes its address while a poll that read it asks GitHub;
+    the snapshot that poll publishes judges the new rectoverso without the row."""
+    tokens = bind_tokens(box, rectoversos)
+    joey = hidden_joey(rectoversos)
     box.hub.the_list.poll()
     root = box.hub.roots.lookup(joey).name
     doc = f"{root}/globex/black-friday/2026-10-28-reply-to-joey.md"
@@ -1083,22 +1083,22 @@ def test_a_poll_that_read_a_hidden_sheaf_before_it_went_does_not_bring_its_row_b
     monkeypatch.setattr(the_list, "fetch", fetch)
     is_error, got = call(browser, "read", token=tokens["dora-door"], doc=doc)
     assert not is_error, got
-    box.hub.the_list.poll()                             # a poll that read the new sheaf: its issue's assignee owns it
+    box.hub.the_list.poll()                             # a poll that read the new rectoverso: its issue's assignee owns it
     is_error, got = call(browser, "read", token=tokens["dora-door"], doc=doc)
     assert is_error, got
 
 
 @pytest.mark.parametrize("through", ["its-address", "a-link"])
 def test_a_sheaf_made_where_a_hidden_one_went_is_listed_by_what_it_says_not_what_that_one_said(
-        box, browser, sheaves, through):
+        box, browser, rectoversos, through):
     """Codex, Opus: a row the poll read from a hidden sheaf goes with its file, a link's row to it too; the
     sheaf made at its address, open to the project, is listed by its own text from the next poll."""
-    tokens = bind_tokens(box, sheaves)
-    joey = hidden_joey(sheaves)
+    tokens = bind_tokens(box, rectoversos)
+    joey = hidden_joey(rectoversos)
     joey.write_text(joey.read_text(encoding="utf-8").replace("# Reply to Joey about column L", "# Secret title"),
                     encoding="utf-8")
     if through == "a-link":
-        (sheaves / "globex/black-friday/joey.md").symlink_to(f"private/nell/{joey.name}")
+        (rectoversos / "globex/black-friday/joey.md").symlink_to(f"private/nell/{joey.name}")
     box.hub.the_list.poll()
     root = box.hub.roots.lookup(joey).name
     joey.unlink()
@@ -1115,11 +1115,11 @@ def test_a_sheaf_made_where_a_hidden_one_went_is_listed_by_what_it_says_not_what
 
 @pytest.mark.parametrize("issue", ["acme/record#5", "acme/record#7"], ids=["its-issue", "another"])
 def test_an_open_create_where_a_hidden_sheaf_went_then_closed_answers_the_same_whatever_issue_it_names(
-        box, browser, sheaves, issue):
-    """Opus: a create open to the project drops the row of the sheaf that went too, so an update that closes it
+        box, browser, rectoversos, issue):
+    """Opus: a create open to the project drops the row of the rectoverso that went too, so an update that closes it
     is owned by the token's member, whatever issue it names, and the list shows it to nobody before a poll."""
-    tokens = bind_tokens(box, sheaves)
-    joey = hidden_joey(sheaves)
+    tokens = bind_tokens(box, rectoversos)
+    joey = hidden_joey(rectoversos)
     box.hub.the_list.poll()
     root = box.hub.roots.lookup(joey).name
     doc = f"{root}/globex/black-friday/2026-10-28-reply-to-joey.md"
@@ -1128,29 +1128,29 @@ def test_an_open_create_where_a_hidden_sheaf_went_then_closed_answers_the_same_w
                          text=f"---\nissue: {issue}\nvisibility: project\n---\n# A guess\n\n- [ ] Approve\n")
     assert not is_error, got
     assert "A guess" not in str(read(box.get("/list?show=all", member=DORA)))
-    now = (sheaves / "globex/black-friday" / joey.name).read_text(encoding="utf-8")
+    now = (rectoversos / "globex/black-friday" / joey.name).read_text(encoding="utf-8")
     is_error, got = call(browser, "update", token=tokens["dora-door"], doc=doc, expected_hash=md_hash(now),
                          text=now.replace("visibility: project\n", "sources: [library:1]\n"))
     assert not is_error, got
     assert got["doc"] == doc                                    # its name; its file moved to Dora's folder (9.11)
-    dora = sheaves / f"globex/black-friday/private/dora/{joey.name}"
+    dora = rectoversos / f"globex/black-friday/private/dora/{joey.name}"
     assert front_matter(dora.read_text(encoding="utf-8"))["owner"] == "dora"
 
 
-def joey_with_a_figure(sheaves):
+def joey_with_a_figure(rectoversos):
     """Joey's sheaf, which names an image of its project, `globex/black-friday/fig.png`."""
     from PIL import Image
-    Image.new("RGB", (4, 4), (200, 30, 30)).save(sheaves / "globex/black-friday/fig.png")
-    joey = sheaves / JOEY[5:]
+    Image.new("RGB", (4, 4), (200, 30, 30)).save(rectoversos / "globex/black-friday/fig.png")
+    joey = rectoversos / JOEY[5:]
     joey.write_text(joey.read_text(encoding="utf-8").replace("The draft.", "The draft. ![the figure](fig.png)"),
                     encoding="utf-8")
     return joey
 
 
-def test_a_sheaf_whose_issue_is_assigned_outside_its_project_embeds_none_of_its_images(box, sheaves, github):
-    """On the list's root a sheaf's owner is its issue's assignee (9.11), and an owner the project's `members` do
+def test_a_sheaf_whose_issue_is_assigned_outside_its_project_embeds_none_of_its_images(box, rectoversos, github):
+    """On the list's root a rectoverso's owner is its issue's assignee (9.11), and an owner the project's `members` do
     not hold leaves out the project's images (#81, #91): the record moves them, the file does not."""
-    joey = joey_with_a_figure(sheaves)
+    joey = joey_with_a_figure(rectoversos)
     before = joey.read_text(encoding="utf-8")
     assert "data:image/png" in box.get(f"/{JOEY}", member=NELL).text      # #5 is Nell's, in the project
     github.issues[5]["assignees"] = ["dora-k"]                          # Dora is in initech/website only
@@ -1165,20 +1165,20 @@ def test_a_sheaf_whose_issue_is_assigned_outside_its_project_embeds_none_of_its_
     assert joey.read_text(encoding="utf-8") == before
 
 
-def test_renders_that_ask_the_list_for_owners_and_a_poll_that_drops_a_row_all_finish(box, sheaves, github):
+def test_renders_that_ask_the_list_for_owners_and_a_poll_that_drops_a_row_all_finish(box, rectoversos, github):
     """`_build` judges the images by the owners, so a render asks `the_list.assignees` under the document's lock,
     which takes the name's lock and `_off_lock` (#81, #91). Renders of a list sheaf beside a poll and asks that
     drop the row of a file gone since all finish, with no deadlock and no exception."""
-    joey_with_a_figure(sheaves)
+    joey_with_a_figure(rectoversos)
     assert box.get(f"/{JOEY}", member=NELL).status == 200
     e = box.hub.entries[JOEY]
     gone_rel = "initech/website/2026-10-27-ga4-property.md"
-    gone = sheaves / gone_rel
+    gone = rectoversos / gone_rel
     kept = gone.read_text(encoding="utf-8")
     errors, stop, steps = [], threading.Event(), [0]
 
     def rows():
-        return {r.sheaf.rel for r in box.hub.the_list._snap.rows}
+        return {r.rectoverso.rel for r in box.hub.the_list._snap.rows}
 
     def render():
         try:
@@ -1225,44 +1225,44 @@ def test_renders_that_ask_the_list_for_owners_and_a_poll_that_drops_a_row_all_fi
 
 @pytest.mark.parametrize("issue", ["issue:\n", "issue: acme/record#7\n"], ids=["removed", "changed"])
 def test_a_poll_that_read_a_sheaf_before_a_tick_took_its_row_off_does_not_put_it_back(
-        box, sheaves, github, monkeypatch, issue):
+        box, rectoversos, github, monkeypatch, issue):
     """#27 (2): the file loses its issue and a member ticks while a poll that read it asks GitHub; the snapshot
-    that poll publishes holds no row of the issue the sheaf no longer names, until the next poll."""
+    that poll publishes holds no row of the issue the rectoverso no longer names, until the next poll."""
     github.issues[5].update(status="In progress at TT")         # drawn, not left out as answered
     box.hub.the_list.poll()
-    joey = sheaves / JOEY[5:]
+    joey = rectoversos / JOEY[5:]
     fetch = the_list.fetch
 
     def meanwhile(cfg, wanted):
         joey.write_text(joey.read_text(encoding="utf-8").replace("issue: acme/record#5\n", issue), encoding="utf-8")
         r = box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Approve"}), member=NELL)
         assert r.status == 200, r.text
-        assert JOEY[5:] not in {r.sheaf.rel for r in box.hub.the_list._snap.rows}    # the tick took it off
+        assert JOEY[5:] not in {r.rectoverso.rel for r in box.hub.the_list._snap.rows}    # the tick took it off
         return fetch(cfg, wanted)
     monkeypatch.setattr(the_list, "fetch", meanwhile)
     box.hub.the_list.poll()
     monkeypatch.setattr(the_list, "fetch", fetch)
     for m in (NELL, DORA):
         assert "Reply to Joey about column L Approve ✓ James" not in titles(read(box.get("/list?show=all", member=m)))
-    assert JOEY[5:] not in {r.sheaf.rel for r in box.hub.the_list._snap.rows}
+    assert JOEY[5:] not in {r.rectoverso.rel for r in box.hub.the_list._snap.rows}
     box.hub.the_list.poll()
     listed = "Reply to Joey about column L Approve ✓ James" in titles(read(box.get("/list?show=all", member=DORA)))
     assert listed == (issue != "issue:\n")                      # back under #7; with no issue, on no list (9.10)
 
 
-def _move_twice_during_a_poll(box, sheaves, github, monkeypatch, issue):
+def _move_twice_during_a_poll(box, rectoversos, github, monkeypatch, issue):
     """#102: the last poll read JOEY at its project path (P1); a 9.11 move takes it to its owner's folder (P2) and the
     poll that is in flight reads it there; during that poll's fetch a second move takes it back (P3) and a member ticks
     after the file's issue changed to `issue`."""
     github.issues[5].update(status="In progress at TT")         # drawn, not left out as answered
-    joey = sheaves / JOEY[5:]
+    joey = rectoversos / JOEY[5:]
     the_list_ = box.hub.the_list
-    old_row = next(r for r in the_list_._snap.rows if r.sheaf.rel == JOEY[5:])
-    assert old_row.file == os.path.realpath(sheaves / JOEY[5:])                # P1
+    old_row = next(r for r in the_list_._snap.rows if r.rectoverso.rel == JOEY[5:])
+    assert old_row.file == os.path.realpath(rectoversos / JOEY[5:])                # P1
     joey.write_text(joey.read_text(encoding="utf-8").replace("visibility: project\n", "sources: [library:4711]\n"),
                     encoding="utf-8")
     place.place(box.hub, JOEY)                                  # P2: private/nell/
-    p2 = sheaves / "globex/black-friday/private/nell/2026-10-28-reply-to-joey.md"
+    p2 = rectoversos / "globex/black-friday/private/nell/2026-10-28-reply-to-joey.md"
     assert p2.exists() and not joey.exists()
     fetch = the_list.fetch
     seen = {}
@@ -1274,7 +1274,7 @@ def _move_twice_during_a_poll(box, sheaves, github, monkeypatch, issue):
         assert joey.exists() and not p2.exists()
         r = box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Approve"}), member=NELL)
         assert r.status == 200, r.text
-        seen["rows"] = {r.sheaf.rel for r in the_list_._snap.rows}
+        seen["rows"] = {r.rectoverso.rel for r in the_list_._snap.rows}
         return fetch(cfg, wanted)
     monkeypatch.setattr(the_list, "fetch", meanwhile)
     the_list_.poll()
@@ -1285,22 +1285,22 @@ def _move_twice_during_a_poll(box, sheaves, github, monkeypatch, issue):
 
 @pytest.mark.parametrize("issue", ["issue:\n", "issue: acme/record#7\n"], ids=["removed", "changed"])
 def test_a_poll_that_read_a_sheaf_moved_twice_during_its_fetch_does_not_put_its_row_back(
-        box, sheaves, github, monkeypatch, issue):
-    """#102 (1): the take-off names the sheaf by its name too, so the row read at P2, a path neither the last poll
+        box, rectoversos, github, monkeypatch, issue):
+    """#102 (1): the take-off names the rectoverso by its name too, so the row read at P2, a path neither the last poll
     nor the tick's file now names, stays off until the next poll."""
-    the_list_ = _move_twice_during_a_poll(box, sheaves, github, monkeypatch, issue)
-    assert JOEY[5:] not in {r.sheaf.rel for r in the_list_._snap.rows}
+    the_list_ = _move_twice_during_a_poll(box, rectoversos, github, monkeypatch, issue)
+    assert JOEY[5:] not in {r.rectoverso.rel for r in the_list_._snap.rows}
     the_list_.poll()
-    listed = JOEY[5:] in {r.sheaf.rel for r in the_list_._snap.rows}
+    listed = JOEY[5:] in {r.rectoverso.rel for r in the_list_._snap.rows}
     assert listed == (issue != "issue:\n")                      # back under #7; with no issue, on no list (9.10)
 
 
 def test_a_row_the_poll_read_after_the_issue_changed_is_kept_though_the_tick_took_the_old_one_off(
-        box, sheaves, github, monkeypatch):
+        box, rectoversos, github, monkeypatch):
     """#102 (2): only a row that still names the issue the tick saw replaced is left out; one read under the new issue
     is already right."""
     github.issues[5].update(status="In progress at TT")
-    joey = sheaves / JOEY[5:]
+    joey = rectoversos / JOEY[5:]
     joey.write_text(joey.read_text(encoding="utf-8").replace("issue: acme/record#5\n", "issue: acme/record#7\n"),
                     encoding="utf-8")                           # changed before the in-flight poll reads it
     fetch = the_list.fetch
@@ -1308,20 +1308,20 @@ def test_a_row_the_poll_read_after_the_issue_changed_is_kept_though_the_tick_too
     def meanwhile(cfg, wanted):
         r = box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Approve"}), member=NELL)
         assert r.status == 200, r.text
-        assert JOEY[5:] not in {r.sheaf.rel for r in box.hub.the_list._snap.rows}     # the old row went at once
+        assert JOEY[5:] not in {r.rectoverso.rel for r in box.hub.the_list._snap.rows}     # the old row went at once
         return fetch(cfg, wanted)
     monkeypatch.setattr(the_list, "fetch", meanwhile)
     box.hub.the_list.poll()
     monkeypatch.setattr(the_list, "fetch", fetch)
-    rows = {r.sheaf.rel: r.sheaf.issue for r in box.hub.the_list._snap.rows}
+    rows = {r.rectoverso.rel: r.rectoverso.issue for r in box.hub.the_list._snap.rows}
     assert rows.get(JOEY[5:]) == ("acme", "record", 7), rows
 
 
 def test_a_row_that_still_names_the_replaced_issue_stays_off_though_it_was_read_after_the_tick_began(
-        box, sheaves, github, monkeypatch):
+        box, rectoversos, github, monkeypatch):
     """#102 (2), the other side: the in-flight poll read the file before the issue changed, so it lists #5."""
     github.issues[5].update(status="In progress at TT")
-    joey = sheaves / JOEY[5:]
+    joey = rectoversos / JOEY[5:]
     fetch = the_list.fetch
 
     def meanwhile(cfg, wanted):
@@ -1333,17 +1333,17 @@ def test_a_row_that_still_names_the_replaced_issue_stays_off_though_it_was_read_
     monkeypatch.setattr(the_list, "fetch", meanwhile)
     box.hub.the_list.poll()
     monkeypatch.setattr(the_list, "fetch", fetch)
-    assert JOEY[5:] not in {r.sheaf.rel for r in box.hub.the_list._snap.rows}
+    assert JOEY[5:] not in {r.rectoverso.rel for r in box.hub.the_list._snap.rows}
     box.hub.the_list.poll()
-    assert JOEY[5:] in {r.sheaf.rel for r in box.hub.the_list._snap.rows}
+    assert JOEY[5:] in {r.rectoverso.rel for r in box.hub.the_list._snap.rows}
 
 
 def test_a_row_naming_a_third_issue_stays_off_when_the_file_changed_again_after_the_poll_read_it(
-        box, sheaves, github, monkeypatch):
+        box, rectoversos, github, monkeypatch):
     """#102 review: the poll read #6 (5 became 6 before it), then the file became #7 and a tick found 5 against 7:
     the poll's row names neither the old issue nor the one the file names now, so it is stale."""
     github.issues[5].update(status="In progress at TT")
-    joey = sheaves / JOEY[5:]
+    joey = rectoversos / JOEY[5:]
     joey.write_text(joey.read_text(encoding="utf-8").replace("issue: acme/record#5\n", "issue: acme/record#6\n"),
                     encoding="utf-8")
     fetch = the_list.fetch
@@ -1357,12 +1357,12 @@ def test_a_row_naming_a_third_issue_stays_off_when_the_file_changed_again_after_
     monkeypatch.setattr(the_list, "fetch", meanwhile)
     box.hub.the_list.poll()
     monkeypatch.setattr(the_list, "fetch", fetch)
-    assert JOEY[5:] not in {r.sheaf.rel for r in box.hub.the_list._snap.rows}
+    assert JOEY[5:] not in {r.rectoverso.rel for r in box.hub.the_list._snap.rows}
     box.hub.the_list.poll()
-    assert {r.sheaf.rel: r.sheaf.issue for r in box.hub.the_list._snap.rows}[JOEY[5:]] == ("acme", "record", 7)
+    assert {r.rectoverso.rel: r.rectoverso.issue for r in box.hub.the_list._snap.rows}[JOEY[5:]] == ("acme", "record", 7)
 
 
-def test_a_tick_reads_the_file_under_the_names_lock_taken_before_the_lists_own(box, sheaves, monkeypatch):
+def test_a_tick_reads_the_file_under_the_names_lock_taken_before_the_lists_own(box, rectoversos, monkeypatch):
     """#102 note: a move may be mid-way when `ticked` reads; the name's lock (9.11) keeps it from resolving a missing
     path, and is taken first, as `assignees` takes it."""
     held = []
@@ -1404,18 +1404,18 @@ The sender writes from dexis.be, which Dexis and Klium share. Which client is th
 
 
 def test_a_move_to_box_with_its_slug_and_ref_is_an_action_with_the_word_move_to():
-    s = the_list.read_sheaf("a/b/c.md", "# A sheaf\n\n- [ ] Move to klium (ref 18f3a9c2)\n")
+    s = the_list.read_rectoverso("a/b/c.md", "# A rectoverso\n\n- [ ] Move to klium (ref 18f3a9c2)\n")
     assert s.actions == (("Move to", "", 2, "klium"),)
 
 
 def test_a_client_section_of_three_boxes_gives_three_actions_in_its_order():
-    s = the_list.read_sheaf("a/b/c.md", "# A sheaf\n" + CLIENT)
+    s = the_list.read_rectoverso("a/b/c.md", "# A rectoverso\n" + CLIENT)
     assert [(w, line, arg) for w, _, line, arg in s.actions] == [
         ("Move to", 6, "dexis"), ("Move to", 7, "klium"), ("Move to", 8, "thinkingtoo")]
 
 
 def test_a_move_to_the_hub_gave_back_escaped_reads_its_slug_unescaped():
-    s = the_list.read_sheaf("a/b/c.md", "# A sheaf\n\n- [ ] Move to newtrition\\-coach (ref 18f\\_3a)\n")
+    s = the_list.read_rectoverso("a/b/c.md", "# A rectoverso\n\n- [ ] Move to newtrition\\-coach (ref 18f\\_3a)\n")
     assert [(w, arg) for w, _, _, arg in s.actions] == [("Move to", "newtrition-coach")]
 
 
@@ -1423,12 +1423,12 @@ def test_a_move_to_the_hub_gave_back_escaped_reads_its_slug_unescaped():
                                   "- [ ] Move to klium (ref 18f3a9c2) now", "- [ ] Move klium (ref 18f3a9c2)",
                                   "- [ ] Archive", "- [ ] Undo skip (ref 18f3a9c2)", "- [ ] Approve klium"])
 def test_a_line_with_an_unknown_word_or_a_move_to_without_its_argument_is_still_no_action(line):
-    assert the_list.read_sheaf("a/b/c.md", f"# A sheaf\n\n{line}\n").actions == ()
+    assert the_list.read_rectoverso("a/b/c.md", f"# A rectoverso\n\n{line}\n").actions == ()
 
 
 def test_tick_edit_ticks_the_move_to_box_of_its_index():
     from sheafmd.blocks import split_md_blocks
-    text = "# A sheaf\n" + CLIENT
+    text = "# A rectoverso\n" + CLIENT
     edit = the_list.tick_edit(text, 1, "Move to")
     block = split_md_blocks(text)[edit["i"]]
     assert block.kind == "list"
@@ -1439,15 +1439,15 @@ def test_tick_edit_ticks_the_move_to_box_of_its_index():
     assert the_list.tick_edit(text, 1, "Approve") is None
 
 
-def unsure(sheaves):
+def unsure(rectoversos):
     """Joey's sheaf with the Client section of an unsure thread in place of its Approve."""
-    path = sheaves / JOEY[5:]
+    path = rectoversos / JOEY[5:]
     path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Approve\n", CLIENT.lstrip("\n")), encoding="utf-8")
     return path
 
 
-def test_a_tick_of_the_second_move_to_ticks_that_box_and_no_other(box, sheaves):
-    path = unsure(sheaves)
+def test_a_tick_of_the_second_move_to_ticks_that_box_and_no_other(box, rectoversos):
+    path = unsure(rectoversos)
     box.hub.the_list.poll()
     before = path.read_text(encoding="utf-8")
     r = box.post("/_/tick", now(box, {"doc": JOEY, "action": 1, "word": "Move to"}), member=NELL)
@@ -1455,8 +1455,8 @@ def test_a_tick_of_the_second_move_to_ticks_that_box_and_no_other(box, sheaves):
     assert path.read_text(encoding="utf-8") == before.replace("- [ ] Move to klium", "- [x] Move to klium")
 
 
-def test_a_row_of_move_to_boxes_draws_one_one_off_button_per_candidate_named_by_its_slug(box, sheaves):
-    unsure(sheaves)
+def test_a_row_of_move_to_boxes_draws_one_one_off_button_per_candidate_named_by_its_slug(box, rectoversos):
+    unsure(rectoversos)
     box.hub.the_list.poll()
     res = box.get("/list", member=NELL)
     assert read(res)["Waiting on you 2"]["globex/black-friday"] == [
@@ -1469,13 +1469,13 @@ def test_a_row_of_move_to_boxes_draws_one_one_off_button_per_candidate_named_by_
 
 @pytest.mark.parametrize("mark", ["x", "X"])
 def test_once_a_move_to_is_ticked_the_other_candidates_are_no_actions_and_other_words_stay(mark):
-    s = the_list.read_sheaf("a/b/c.md", "# A sheaf\n" + CLIENT.replace("- [ ] Move to klium", f"- [{mark}] Move to klium")
+    s = the_list.read_rectoverso("a/b/c.md", "# A rectoverso\n" + CLIENT.replace("- [ ] Move to klium", f"- [{mark}] Move to klium")
                             + "\n- [ ] Done\n")
     assert [(w, arg) for w, _, _, arg in s.actions] == [("Done", "")]
 
 
-def test_a_row_whose_move_to_is_ticked_draws_no_move_to_button_to_press(box, sheaves):
-    path = unsure(sheaves)
+def test_a_row_whose_move_to_is_ticked_draws_no_move_to_button_to_press(box, rectoversos):
+    path = unsure(rectoversos)
     path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Move to klium", "- [x] Move to klium"),
                     encoding="utf-8")
     box.hub.the_list.poll()
@@ -1485,9 +1485,9 @@ def test_a_row_whose_move_to_is_ticked_draws_no_move_to_button_to_press(box, she
             for b in soup.select('button.list-act[data-word="Move to"]')] == [("Move to klium ✓", True)]
 
 
-def test_a_tick_of_another_candidate_once_one_is_ticked_is_refused_and_one_tick_stays(box, sheaves):
+def test_a_tick_of_another_candidate_once_one_is_ticked_is_refused_and_one_tick_stays(box, rectoversos):
     """Even on the text as it is now: the other candidates are no actions, so no tick can reach them."""
-    path = unsure(sheaves)
+    path = unsure(rectoversos)
     box.hub.the_list.poll()
     assert box.post("/_/tick", now(box, {"doc": JOEY, "action": 1, "word": "Move to"}), member=NELL).status == 200
     after = path.read_text(encoding="utf-8")
@@ -1506,7 +1506,7 @@ def test_a_tick_of_another_candidate_once_one_is_ticked_is_refused_and_one_tick_
      "- [x] Move to klium (ref t1)\n- [x] Move to acme (ref t1)\n", "klium"),           # two in one save
 ])
 def test_a_write_that_ticks_another_move_to_names_the_one_ticked(old, new, slug):
-    assert the_list.ticks_another_move(f"# A sheaf\n\n{old}", f"# A sheaf\n\n{new}") == slug
+    assert the_list.ticks_another_move(f"# A rectoverso\n\n{old}", f"# A rectoverso\n\n{new}") == slug
 
 
 @pytest.mark.parametrize("old, new", [
@@ -1521,35 +1521,35 @@ def test_a_write_that_ticks_another_move_to_names_the_one_ticked(old, new, slug)
      "```\n- [x] Move to klium (ref t1)\n```\n- [x] Move to acme (ref t1)\n"),         # in a fence: no box
 ])
 def test_a_write_that_ticks_no_other_move_to_names_none(old, new):
-    assert the_list.ticks_another_move(f"# A sheaf\n\n{old}", f"# A sheaf\n\n{new}") is None
+    assert the_list.ticks_another_move(f"# A rectoverso\n\n{old}", f"# A rectoverso\n\n{new}") is None
 
 
-def pointer(sheaves):
+def pointer(rectoversos):
     """Joey's sheaf as the pointer a move leaves: its front matter with `moved_to:`, and one line."""
-    path = sheaves / JOEY[5:]
+    path = rectoversos / JOEY[5:]
     text = path.read_text(encoding="utf-8")
     head = text[:text.index("---\n", 4)]
     path.write_text(head + "moved_to: klium/inbox/2026-10-28-reply-to-joey.md\n---\n"
                     "Moved to `klium/inbox/2026-10-28-reply-to-joey.md` on 2026-10-30.\n", encoding="utf-8")
 
 
-def test_a_sheaf_whose_front_matter_has_moved_to_is_not_a_row(box, sheaves):
-    pointer(sheaves)
+def test_a_sheaf_whose_front_matter_has_moved_to_is_not_a_row(box, rectoversos):
+    pointer(rectoversos)
     box.hub.the_list.poll()
     page = read(box.get("/list", member=NELL))
     assert "globex/black-friday" not in page["Waiting on you 1"]
-    assert JOEY[5:] not in {r.sheaf.rel for r in box.hub.the_list._snap.rows}
+    assert JOEY[5:] not in {r.rectoverso.rel for r in box.hub.the_list._snap.rows}
 
 
-def test_a_sheaf_that_became_a_pointer_since_the_poll_leaves_the_page_at_once(box, sheaves):
+def test_a_sheaf_that_became_a_pointer_since_the_poll_leaves_the_page_at_once(box, rectoversos):
     assert "globex/black-friday" in read(box.get("/list", member=NELL))["Waiting on you 2"]
-    pointer(sheaves)
+    pointer(rectoversos)
     page = read(box.get("/list", member=NELL))
     assert not any("joey" in t.lower() for t in titles(page)), page
 
 
-def test_a_row_whose_move_to_boxes_come_before_another_action_carries_the_button_of_each(box, sheaves):
-    path = unsure(sheaves)
+def test_a_row_whose_move_to_boxes_come_before_another_action_carries_the_button_of_each(box, rectoversos):
+    path = unsure(rectoversos)
     path.write_text(path.read_text(encoding="utf-8").replace("The draft.\n", "The draft.\n\n- [ ] Approve\n"),
                     encoding="utf-8")
     box.hub.the_list.poll()
@@ -1573,7 +1573,7 @@ def test_a_row_whose_move_to_boxes_come_before_another_action_carries_the_button
     ("- [x] Approve\n\nText.\n\n- [ ] Approve\n", "- [ ] Approve\n\nText.\n", "Approve"),   # another box taken out
 ])
 def test_a_write_that_unticks_a_one_off_names_its_word(old, new, word):
-    assert the_list.unticks_one_off(f"# A sheaf\n\n{old}", f"# A sheaf\n\n{new}") == word
+    assert the_list.unticks_one_off(f"# A rectoverso\n\n{old}", f"# A rectoverso\n\n{new}") == word
 
 
 @pytest.mark.parametrize("old, new", [
@@ -1586,7 +1586,7 @@ def test_a_write_that_unticks_a_one_off_names_its_word(old, new, word):
     ("- [x] Approve the plan\n", "- [ ] Approve the plan\n"),           # no action's word alone
 ])
 def test_a_write_that_unticks_no_one_off_names_none(old, new):
-    assert the_list.unticks_one_off(f"# A sheaf\n\n{old}", f"# A sheaf\n\n{new}") is None
+    assert the_list.unticks_one_off(f"# A rectoverso\n\n{old}", f"# A rectoverso\n\n{new}") is None
 
 
 # ── Merge, Deploy and Install take the rest of the line (action-buttons 04) ──────────────────────────────
@@ -1596,24 +1596,24 @@ MERGE = "- [ ] Merge sweatshop-ai/sheaf#272: Tickets: buttons on their own line\
 
 @pytest.mark.parametrize("word", ["Merge", "Deploy", "Install"])
 def test_merge_deploy_and_install_are_actions_that_take_the_rest_of_the_line(word):
-    sheaf = the_list.read_sheaf("x.md", f"# A sheaf\n\n- [ ] {word} a/b#1: text @nell, more\n- [x] {word} a/b#2: done\n")
+    sheaf = the_list.read_rectoverso("x.md", f"# A rectoverso\n\n- [ ] {word} a/b#1: text @nell, more\n- [x] {word} a/b#2: done\n")
     assert [(a[0], a[1]) for a in sheaf.actions] == [(word, "")]
     assert [p[0] for p in sheaf.pressed] == [word]
 
 
 @pytest.mark.parametrize("line", ["- [ ] Merge\n", "- [ ] Deploy   \n", "- [ ] Rebase a/b#1\n", "- [ ] merge a/b#1\n"])
 def test_a_bare_or_unlisted_word_is_no_action(line):
-    assert the_list.read_sheaf("x.md", f"# A sheaf\n\n{line}").actions == ()
+    assert the_list.read_rectoverso("x.md", f"# A rectoverso\n\n{line}").actions == ()
 
 
 def test_a_write_that_unticks_a_pressed_merge_names_its_word():
-    old = "# A sheaf\n\n" + MERGE.replace("[ ]", "[x]") + "- [ ] Merge a/b#9: other\n"
+    old = "# A rectoverso\n\n" + MERGE.replace("[ ]", "[x]") + "- [ ] Merge a/b#9: other\n"
     assert the_list.unticks_one_off(old, old.replace("[x]", "[ ]")) == "Merge"
 
 
 def test_a_pressed_merge_writes_only_its_tick_and_the_hub_refuses_to_untick_it_but_an_outside_write_is_taken(
-        committing, box, sheaves, github):
-    path = sheaves / JOEY[5:]
+        committing, box, rectoversos, github):
+    path = rectoversos / JOEY[5:]
     path.write_text(path.read_text(encoding="utf-8") + "\n" + MERGE, encoding="utf-8")
     box.hub.the_list.poll()
     before = path.read_text(encoding="utf-8")
@@ -1638,21 +1638,21 @@ def git(at, *args):
 
 
 @pytest.fixture
-def committing(sheaves, monkeypatch):
-    """The sheaves as a git repo whose root commits (8.11), every sheaf in its first commit, by "the box"; every
+def committing(rectoversos, monkeypatch):
+    """The rectoversos as a git repo whose root commits (8.11), every rectoverso in its first commit, by "the box"; every
     commit from here on is dated 27 Oct 2025 at noon UTC, the same day in every time zone of the hub. Dora is a member
     of Joey's project too. Asked before `box`, so the hub registers the root as a git work tree."""
-    (sheaves / "projects.toml").write_text(
+    (rectoversos / "projects.toml").write_text(
         '[projects."globex/black-friday"]\nmembers = ["nell", "dora"]\nstatus = "live"\n\n'
         '[projects."initech/website"]\nmembers = ["nell", "dora"]\nstatus = "live"\n', encoding="utf-8")
-    subprocess.run(["git", "init", "-q", str(sheaves)], check=True)
-    git(sheaves, "config", "user.name", "the box")
-    git(sheaves, "config", "user.email", "box@example.com")
-    (sheaves / ".sheaf.toml").write_text("commit = true\n", encoding="utf-8")
-    git(sheaves, "add", "-A")
-    git(sheaves, "commit", "-q", "-m", "first")
+    subprocess.run(["git", "init", "-q", str(rectoversos)], check=True)
+    git(rectoversos, "config", "user.name", "the box")
+    git(rectoversos, "config", "user.email", "box@example.com")
+    (rectoversos / ".sheaf.toml").write_text("commit = true\n", encoding="utf-8")
+    git(rectoversos, "add", "-A")
+    git(rectoversos, "commit", "-q", "-m", "first")
     monkeypatch.setenv("GIT_AUTHOR_DATE", "2025-10-27T12:00:00Z")
-    return sheaves
+    return rectoversos
 
 
 def row_buttons(res, doc):
@@ -1663,16 +1663,16 @@ def row_buttons(res, doc):
 
 
 def in_progress(box, github, number):
-    """The record routine moved the issue on: its sheaf shows again, under In progress."""
+    """The record routine moved the issue on: its rectoverso shows again, under In progress."""
     github.issues[number].update(status="In progress at TT", updated=ago(60))
     box.hub.the_list.poll()
 
 
-def test_a_one_off_pressed_on_the_row_shows_locked_with_who_pressed_it_and_when(committing, box, sheaves, github):
-    path = sheaves / JOEY[5:]
+def test_a_one_off_pressed_on_the_row_shows_locked_with_who_pressed_it_and_when(committing, box, rectoversos, github):
+    path = rectoversos / JOEY[5:]
     path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [ ] Approve\n- [ ] Done\n"),
                     encoding="utf-8")
-    git(sheaves, "commit", "-q", "-am", "Done too")
+    git(rectoversos, "commit", "-q", "-am", "Done too")
     box.hub.the_list.poll()
     r = box.post("/_/tick", row_press(box.get("/list", member=NELL), JOEY, "Approve"), member=NELL)
     assert r.status == 200, r.text
@@ -1684,22 +1684,22 @@ def test_a_one_off_pressed_on_the_row_shows_locked_with_who_pressed_it_and_when(
 
 
 def page_buttons(res):
-    """The buttons at the top of a sheaf's page (10.11, #111), from its meta block: (label, `by`, n, may, box)."""
+    """The buttons at the top of a rectoverso's page (10.11, #111), from its meta block: (label, `by`, n, may, box)."""
     return [(a["label"], a["by"], a["n"], a["may"], a["box"]) for a in page_meta(res.text)["actions"]]
 
 
 def test_the_page_of_a_sheaf_names_the_rows_buttons_with_who_pressed_a_one_off_and_where_each_box_is(
-        committing, box, sheaves, github):
-    path = sheaves / JOEY[5:]
+        committing, box, rectoversos, github):
+    path = rectoversos / JOEY[5:]
     path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [ ] Approve\n- [ ] Done\n- [ ] Share\n"),
                     encoding="utf-8")
-    git(sheaves, "commit", "-q", "-am", "Done and Share too")
+    git(rectoversos, "commit", "-q", "-am", "Done and Share too")
     box.hub.the_list.poll()
     r = box.post("/_/tick", row_press(box.get("/list", member=NELL), JOEY, "Approve"), member=NELL)
     assert r.status == 200, r.text
     text = path.read_text(encoding="utf-8")
     i = next(k for k, b in enumerate(split_md_blocks(text)) if "- [x] Approve" in b.content)
-    # Nell owns the sheaf (her issue): she may press its Share; Dora reads it and cannot.
+    # Nell owns the rectoverso (her issue): she may press its Share; Dora reads it and cannot.
     assert page_buttons(box.get(f"/{JOEY}", member=NELL)) == [
         ("Approve", "you, 27 Oct", None, False, [i, 0]), ("Done", "", 0, True, [i, 1]),
         ("Share", "", 1, True, [i, 2])]
@@ -1708,17 +1708,17 @@ def test_the_page_of_a_sheaf_names_the_rows_buttons_with_who_pressed_a_one_off_a
         ("Share", "", 1, False, [i, 2])]
 
 
-def test_a_press_from_the_page_that_went_stale_says_to_reload_the_page(box, sheaves):
+def test_a_press_from_the_page_that_went_stale_says_to_reload_the_page(box, rectoversos):
     tick = {**row_press(box.get("/list", member=NELL), JOEY), "where": "page"}
-    path = sheaves / JOEY[5:]
+    path = rectoversos / JOEY[5:]
     path.write_text(path.read_text(encoding="utf-8").replace("The draft.", "The draft, changed."), encoding="utf-8")
     r = box.post("/_/tick", tick, member=NELL)
     assert r.status == 409 and r.json()["error"].endswith("(Approve): reload the page"), r.text
     assert box.post("/_/tick", {**tick, "where": "box"}, member=NELL).status == 400
 
 
-def test_a_box_no_commit_holds_shows_pressed_without_who_or_when_and_a_ticked_move_to_is_one(box, sheaves):
-    path = sheaves / JOEY[5:]
+def test_a_box_no_commit_holds_shows_pressed_without_who_or_when_and_a_ticked_move_to_is_one(box, rectoversos):
+    path = rectoversos / JOEY[5:]
     path.write_text(path.read_text(encoding="utf-8").replace(
         "- [ ] Approve\n", "- [x] Approve\n- [ ] Done\n- [x] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n"),
         encoding="utf-8")
@@ -1727,11 +1727,11 @@ def test_a_box_no_commit_holds_shows_pressed_without_who_or_when_and_a_ticked_mo
         ("Approve ✓", None, True, None), ("Done", "0", False, None), ("Move to klium ✓", None, True, None)]
 
 
-def test_a_box_ticked_by_someone_who_is_no_member_shows_their_name(committing, box, sheaves):
-    path = sheaves / JOEY[5:]
+def test_a_box_ticked_by_someone_who_is_no_member_shows_their_name(committing, box, rectoversos):
+    path = rectoversos / JOEY[5:]
     path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [x] Approve @dora\n"),
                     encoding="utf-8")
-    git(sheaves, "-c", "user.name=Ada Byron", "-c", "user.email=ada@example.com", "commit", "-q", "-am", "by hand")
+    git(rectoversos, "-c", "user.name=Ada Byron", "-c", "user.email=ada@example.com", "commit", "-q", "-am", "by hand")
     box.hub.the_list.poll()
     assert row_buttons(box.get("/list", member=NELL), JOEY) == [("Approve @dora ✓ Ada Byron, 27 Oct", None, True, None)]
     # The page reads the file again when it changed since the poll: a tick not committed yet says no one.
@@ -1740,28 +1740,28 @@ def test_a_box_ticked_by_someone_who_is_no_member_shows_their_name(committing, b
         ("Approve @dora ✓ Ada Byron, 27 Oct", None, True, None), ("Done ✓", None, True, None)]
 
 
-def shared_joey(sheaves):
+def shared_joey(rectoversos):
     """Joey's sheaf with Approve and a pressed Share, committed."""
-    path = sheaves / JOEY[5:]
+    path = rectoversos / JOEY[5:]
     path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [ ] Approve\n- [x] Share\n"),
                     encoding="utf-8")
-    git(sheaves, "commit", "-q", "-am", "shared")
+    git(rectoversos, "commit", "-q", "-am", "shared")
     return path
 
 
-def test_a_pressed_share_shows_pressed_and_only_its_owner_may_press_it(committing, box, sheaves):
-    shared_joey(sheaves)
+def test_a_pressed_share_shows_pressed_and_only_its_owner_may_press_it(committing, box, rectoversos):
+    shared_joey(rectoversos)
     box.hub.the_list.poll()
     assert row_buttons(box.get("/list", member=NELL), JOEY) == [("Approve", "0", False, None), ("Share", "0", False, "true")]
     assert row_buttons(box.get("/list", member=DORA), JOEY) == [("Approve", "0", False, None), ("Share", "0", True, "true")]
-    path = sheaves / JOEY[5:]
+    path = rectoversos / JOEY[5:]
     path.write_text(path.read_text(encoding="utf-8").replace("- [x] Share", "- [ ] Share"), encoding="utf-8")
     assert row_buttons(box.get("/list", member=NELL), JOEY)[1] == ("Share", "1", False, "false")
     assert row_buttons(box.get("/list", member=DORA), JOEY)[1] == ("Share", "1", True, "false")
 
 
-def test_the_owner_releases_a_pressed_share_from_the_row(committing, box, sheaves):
-    shared_joey(sheaves)
+def test_the_owner_releases_a_pressed_share_from_the_row(committing, box, rectoversos):
+    shared_joey(rectoversos)
     box.hub.the_list.poll()
     press = row_press(box.get("/list", member=NELL), JOEY, "Share")
     assert press["release"] is True
@@ -1770,12 +1770,12 @@ def test_the_owner_releases_a_pressed_share_from_the_row(committing, box, sheave
     top = box.hub.the_list.root().path
     text = (top / place.file_rel(box.hub, box.hub.the_list.root(), JOEY[5:])).read_text(encoding="utf-8")
     assert "- [ ] Share\n" in text and front_matter(text)["visibility"] == "owner"
-    assert git(sheaves, "log", "-1", "--format=%an|%s").startswith("Nell|")
+    assert git(rectoversos, "log", "-1", "--format=%an|%s").startswith("Nell|")
     assert row_buttons(box.get("/list", member=NELL), JOEY)[1] == ("Share", "1", False, "false")
 
 
-def test_a_release_by_another_member_or_of_a_one_off_is_refused_and_writes_nothing(committing, box, sheaves):
-    path = shared_joey(sheaves)
+def test_a_release_by_another_member_or_of_a_one_off_is_refused_and_writes_nothing(committing, box, rectoversos):
+    path = shared_joey(rectoversos)
     path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Approve", "- [x] Approve"), encoding="utf-8")
     box.hub.the_list.poll()
     before = path.read_text(encoding="utf-8")
@@ -1791,8 +1791,8 @@ def test_a_release_by_another_member_or_of_a_one_off_is_refused_and_writes_nothi
 
 
 def test_a_one_off_ticked_in_the_page_shows_who_ticked_it_there_through_a_later_edit_of_another_block(
-        committing, box, sheaves, github):
-    path = sheaves / JOEY[5:]
+        committing, box, rectoversos, github):
+    path = rectoversos / JOEY[5:]
     text = path.read_text(encoding="utf-8")
     edit = the_list.tick_edit(text, 0, "Approve")
     r = box.post("/_/save", {"doc": JOEY, "hash": md_hash(text), "edits": [edit]}, member=NELL)   # an `edit:` commit
@@ -1802,7 +1802,7 @@ def test_a_one_off_ticked_in_the_page_shows_who_ticked_it_there_through_a_later_
     r = box.post("/_/save", {"doc": JOEY, "hash": md_hash(text), "edits": [{"i": i, "html": "<p>The draft, again.</p>"}]},
                  member=DORA)
     assert r.status == 200, r.text
-    assert git(sheaves, "log", "-2", "--format=%an|%s").splitlines() == [
+    assert git(rectoversos, "log", "-2", "--format=%an|%s").splitlines() == [
         f"Dora|edit: {JOEY[5:]}", f"Nell|edit: {JOEY[5:]}"]
     in_progress(box, github, 5)
     assert row_buttons(box.get("/list", member=DORA), JOEY) == [("Approve ✓ @nell, 27 Oct", None, True, None)]
@@ -1818,7 +1818,7 @@ def h1_comment(status="open"):
 @pytest.mark.parametrize("status", ["open", "resolved"])
 def test_a_comment_anchored_in_the_h1_is_left_out_of_the_title(status):
     text = f"---\nissue: o/r#1\n---\n\n# Test sheaf{h1_comment(status)} tail\n\n- [ ] Done\n"
-    assert the_list.read_sheaf("x/y/z.md", text).title == "Test sheaf tail"
+    assert the_list.read_rectoverso("x/y/z.md", text).title == "Test sheaf tail"
 
 
 def test_a_comment_that_sheaf_comment_anchors_in_the_h1_is_left_out_of_the_title():
@@ -1828,27 +1828,27 @@ def test_a_comment_that_sheaf_comment_anchors_in_the_h1_is_left_out_of_the_title
     text, _ = rdc.add_comment(text, heading, start, start + 5, "sheaf",
                               'Why "this" name?\n\nA <b>second</b> line & -- more', 'A "B"', "2026-10-29T15:43")
     assert "sheaf-comment" in text.split("\n")[4]
-    assert the_list.read_sheaf("x/y/z.md", text).title == "Test sheaf tail"
+    assert the_list.read_rectoverso("x/y/z.md", text).title == "Test sheaf tail"
 
 
 def test_a_comment_mark_in_a_code_span_of_the_h1_stays_in_the_title():
     text = "# Use `<!--` and `-->` here\n"
-    assert the_list.read_sheaf("x/y/z.md", text).title == "Use `<!--` and `-->` here"
+    assert the_list.read_rectoverso("x/y/z.md", text).title == "Use `<!--` and `-->` here"
 
 
 def test_an_h1_that_is_only_a_comment_gives_the_file_name_as_for_none():
     text = f"---\nissue: o/r#1\n---\n\n# {h1_comment()}\n\n- [ ] Done\n"
-    assert the_list.read_sheaf("x/y/2026-10-29-z.md", text).title == "2026-10-29-z"
+    assert the_list.read_rectoverso("x/y/2026-10-29-z.md", text).title == "2026-10-29-z"
 
 
 def test_an_h1_that_is_only_a_comment_gives_the_file_name_not_a_later_h1s_text():
     # As the page's title: the first `# ` heading is the title, and one left empty gives the file name.
     text = f"# {h1_comment()}\n\n# Second\n"
-    assert the_list.read_sheaf("x/y/2026-10-29-z.md", text).title == "2026-10-29-z"
+    assert the_list.read_rectoverso("x/y/2026-10-29-z.md", text).title == "2026-10-29-z"
 
 
-def test_the_rows_title_holds_no_comment_of_the_h1(box, sheaves):
-    joey = sheaves / "globex/black-friday/2026-10-28-reply-to-joey.md"
+def test_the_rows_title_holds_no_comment_of_the_h1(box, rectoversos):
+    joey = rectoversos / "globex/black-friday/2026-10-28-reply-to-joey.md"
     joey.write_text(joey.read_text(encoding="utf-8").replace(
         "# Reply to Joey about column L", f"# Reply to Joey{h1_comment()} about column L"), encoding="utf-8")
     box.hub.the_list.poll()
@@ -1864,7 +1864,7 @@ def test_the_rows_title_holds_no_comment_of_the_h1(box, sheaves):
                                             ("a <!---> b --> c", "a b --> c"),
                                             ("a <!-- x `y --> b `<!-- z` c", "a b `<!-- z` c")])  # a comment owns its backtick
 def test_only_what_commonmark_reads_as_a_comment_leaves_the_title(heading, title):
-    assert the_list.read_sheaf("x/y/z.md", f"# {heading}\n").title == title
+    assert the_list.read_rectoverso("x/y/z.md", f"# {heading}\n").title == title
 
 
 # ── the list mounted in the front's document (#116 step 2, slice iv) ──────────────
@@ -1924,8 +1924,8 @@ def test_the_mounted_list_is_a_members_alone_and_only_of_the_lists_root(box, bro
     assert box.get("/_/mount?list=list", member=DORA).status == 404
 
 
-def test_a_title_with_markup_reaches_the_mount_as_its_text(box, sheaves):
-    joey = sheaves / JOEY[5:]
+def test_a_title_with_markup_reaches_the_mount_as_its_text(box, rectoversos):
+    joey = rectoversos / JOEY[5:]
     joey.write_text(joey.read_text(encoding="utf-8").replace(
         "# Reply to Joey about column L", "# Reply <img src=/x onerror=alert(1)> & co"), encoding="utf-8")
     box.hub.the_list.poll()
@@ -2169,12 +2169,12 @@ def test_a_list_tick_made_through_the_second_reading_is_offered_and_written():
 
 
 def _list_tick(body: str, word: str = "Approve"):
-    """What the list's button does with the first `word` box of a sheaf: (the block's text after the tick as the save
+    """What the list's button does with the first `word` box of a rectoverso: (the block's text after the tick as the save
     writes it or None when the save would go through pandoc, the box the page is told, the edit or None)."""
     from sheafmd.blocks import split_md_blocks
     from sheafmd.edit import _toggle_boxes
-    text = "# A sheaf\n\n" + body
-    sheaf = the_list.read_sheaf("x.md", text)
+    text = "# A rectoverso\n\n" + body
+    sheaf = the_list.read_rectoverso("x.md", text)
     n = [a[0] for a in sheaf.actions].index(word)
     at = the_list.box_place(text, sheaf.actions[n][2])
     edit = the_list.tick_edit(text, n, word)

@@ -301,7 +301,7 @@ def _private_root(m: dict, roots: list, list_table: dict | None, mhere: str) -> 
     if not any(_real(r) == value for r in roots):
         raise ProxyError(f"'private_root' {value} must also be one of the member's 'roots', in {mhere}")
     if list_table is None:
-        raise ProxyError(f"'private_root' needs a [list] table: the list is where a private sheaf is named, in {mhere}")
+        raise ProxyError(f"'private_root' needs a [list] table: the list is where a private rectoverso is named, in {mhere}")
     list_root = list_table.get("root")
     listed = isinstance(list_root, str) and list_root.startswith("/")
     if listed and (how := _relation(value, list_root)) is not None:

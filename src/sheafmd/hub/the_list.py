@@ -1,5 +1,5 @@
 """
-sheafmd.hub.the_list — the list (SPEC 9.10): per `<client>/<project>`, the sheaves that wait on a member
+sheafmd.hub.the_list — the list (SPEC 9.10): per `<client>/<project>`, the rectoversos that wait on a member
 and the ones in progress, at `/<root>` of the root that config.toml's `[list]` names, for a member of
 proxy mode (9.9).
 
@@ -8,13 +8,13 @@ proxy mode (9.9).
     TheList(hub, cfg)       the rows, rebuilt by `poll()`; `start()` polls on a thread of its own
     TheList.page(...)       the list as a member reads it, filtered
 
-A sheaf carries no status. Its status and owner are its issue's, in the record: an issues repo and its
+A rectoverso carries no status. Its status and owner are its issue's, in the record: an issues repo and its
 GitHub Project. `waiting` is the Project's option named by `waiting`, `open` the one named by
-`in_progress`; any other option, no item in the Project or a closed issue keeps the sheaf off the list.
-The owner is the issue's assignee, told by the member whose `github` it is. The rest is the sheaf's front
-matter: `issue` (`owner/repo#n`; empty for a documentation sheaf, which is never listed), `assistant`,
+`in_progress`; any other option, no item in the Project or a closed issue keeps the rectoverso off the list.
+The owner is the issue's assignee, told by the member whose `github` it is. The rest is the rectoverso's front
+matter: `issue` (`owner/repo#n`; empty for a documentation rectoverso, which is never listed), `assistant`,
 `kind`, `visibility`; its title is its first `# ` heading and its actions are its unticked boxes that
-carry one of the eleven words (`- [ ] Approve`, `- [ ] Done @nell`, `- [ ] Move to klium (ref <thread>)`). A sheaf
+carry one of the eleven words (`- [ ] Approve`, `- [ ] Done @nell`, `- [ ] Move to klium (ref <thread>)`). A rectoverso
 whose front matter has `moved_to:` is the pointer a move left, never a row.
 
 The record is read as the GitHub App the deployment installs: the hub reads an installation token from
@@ -73,7 +73,7 @@ BATCH = 50                      # issues per GraphQL request
 ITEMS = 100                     # Project items of an issue per page: the most GitHub gives
 PAGES = 10                      # requests a batch's Project items may take: the poll holds _poll_lock while it pages
 HTTP_SECONDS = 20
-BLAME_CACHE = 512               # texts of sheaves whose pressers the page keeps
+BLAME_CACHE = 512               # texts of rectoversos whose pressers the page keeps
 UNCOMMITTED_SECONDS = 10        # how long the page keeps the pressers of a text with a box no commit holds yet
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
@@ -110,7 +110,7 @@ class ListConfig:
     waiting: str = DEFAULTS["waiting"]          # the Project's Status option of `waiting`
     in_progress: str = DEFAULTS["in_progress"]  # and of `open`
     stop_dir: Path | None = None                # where a Stop James tick drops its file (9.11)
-    tell_dir: Path | None = None                # where Tell on a box-hosted sheaf drop theirs (9.12)
+    tell_dir: Path | None = None                # where Tell on a box-hosted rectoverso drop theirs (9.12)
     sessions_dir: Path | None = None            # the copy of James's transcripts, <folder>/<id>.jsonl (9.12)
     box: str = ""                               # the host name of a box-hosted session (9.12)
     attach: str = ""                            # the attach command, `{window}` for <client>_<project> (9.12)
@@ -293,10 +293,10 @@ def _member_dirs(table: dict, root: str, here: str) -> dict:
     return out
 
 
-# ── a sheaf, as its file says ───────────────────────────────────────────────
+# ── a rectoverso, as its file says ───────────────────────────────────────────────
 
 @dataclass(frozen=True)
-class Sheaf:
+class Rectoverso:
     rel: str                    # the path in the root
     title: str
     issue: tuple | None         # (owner, repo, number)
@@ -327,7 +327,7 @@ def _same_issue(a: tuple | None, b: tuple | None) -> bool:
 
 _HEADING_COMMENT_RE = re.compile(r"<!--(?:-?>|[\s\S]*?-->)")      # an HTML comment as CommonMark reads it
 
-def read_sheaf(rel: str, text: str) -> Sheaf:
+def read_rectoverso(rel: str, text: str) -> Rectoverso:
     fm = front_matter(text)
     issue = issue_of(fm_text(fm, "issue"))
     # The title and the actions are read from the blocks the page draws, so an action in a fence, an
@@ -350,7 +350,7 @@ def read_sheaf(rel: str, text: str) -> Sheaf:
     if moved:
         # A thread moves to one client (#109): once a Move to is ticked, its other candidates are no actions.
         actions = [a for a in actions if a[0] != MOVE]
-    return Sheaf(rel, title or rel.rsplit("/", 1)[-1][:-3], issue, fm_text(fm, "assistant"),
+    return Rectoverso(rel, title or rel.rsplit("/", 1)[-1][:-3], issue, fm_text(fm, "assistant"),
                  fm_text(fm, "kind"), visibility.effective(fm), tuple(actions), visibility.sources(fm),
                  fm_text(fm, "owner"), fm_text(fm, "shared"), md_hash(text), "moved_to" in fm, tuple(pressed))
 
@@ -397,7 +397,7 @@ def unticks_one_off(old: str, new: str) -> str | None:
 
 def ticks_another_move(old: str, new: str) -> str | None:
     """The slug of the Move to ticked in `old` (else the first one ticked in `new`) when writing `new` over `old`
-    ticks a Move to box beside it, by whatever edit (9.10, #109): a thread moves to one client, so a sheaf answers
+    ticks a Move to box beside it, by whatever edit (9.10, #109): a thread moves to one client, so a rectoverso answers
     Move to once. A second tick, a swap and two ticks in one save are each one; None when there is none."""
     was = collections.Counter(_slug(m) for m in _boxes(old) if m["move"] and m["mark"] != " ")
     now = [_slug(m) for m in _boxes(new) if m["move"] and m["mark"] != " "]
@@ -422,11 +422,11 @@ def _boxes(text: str):
 
 
 def tick_edit(text: str, n: int, word: str, release: bool = False):
-    """The page's edit `{i, html}` that ticks the `n`th action of the sheaf `text`, if that action's word is
-    `word`; None when the sheaf holds no such action now, or when its box cannot be ticked this way. With `release`,
+    """The page's edit `{i, html}` that ticks the `n`th action of the rectoverso `text`, if that action's word is
+    `word`; None when the rectoverso holds no such action now, or when its box cannot be ticked this way. With `release`,
     the edit that unticks its `n`th pressed box instead, a toggle's (#110)."""
-    sheaf = read_sheaf("x.md", text)
-    boxes = sheaf.pressed if release else sheaf.actions
+    rectoverso = read_rectoverso("x.md", text)
+    boxes = rectoverso.pressed if release else rectoverso.actions
     if not 0 <= n < len(boxes) or boxes[n][0] != word or (release and word not in TOGGLES):
         return None
     blocks = split_md_blocks(text)
@@ -459,8 +459,8 @@ def _place(text: str, line: int, blocks=None) -> tuple | None:
     return None
 
 
-def buttons(s: Sheaf, who: dict, hub, member, is_owner: bool) -> list:
-    """The buttons of the sheaf `s` as `member` (None: the hub's own person) reads them, on the list's row and at
+def buttons(s: Rectoverso, who: dict, hub, member, is_owner: bool) -> list:
+    """The buttons of the rectoverso `s` as `member` (None: the hub's own person) reads them, on the list's row and at
     the top of its page alike (#110, #111): every box of the eleven words in the order of the file, each
     {word, label, line, toggle, pressed, may, n, release, by}. An action is a button to press (`n` its number among
     the actions); a pressed one-off a locked one that says who pressed it and when (`by`, from `who`, the
@@ -482,7 +482,7 @@ def buttons(s: Sheaf, who: dict, hub, member, is_owner: bool) -> list:
 
 
 def pressers(cache: dict, f: Path, text: str, lines) -> dict:
-    """`commits.blame` of `lines` of `text`, the sheaf whose real file is `f`; kept in `cache` per text once every box
+    """`commits.blame` of `lines` of `text`, the rectoverso whose real file is `f`; kept in `cache` per text once every box
     has its commit, and blamed again a little later while a box has none yet."""
     if not lines:
         return {}
@@ -561,7 +561,7 @@ def fetch(cfg: ListConfig, issues: list) -> dict:
         more = {key: cursor for key, issue in found.items() if (cursor := _next_page(cfg, issue["projectItems"]))}
         for _ in range(PAGES - 1):
             if not more:
-                break               # an issue still unread after them has no status: its sheaf is off the list
+                break               # an issue still unread after them has no status: its rectoverso is off the list
             keys = list(more)
             data = _ask(cfg, token, _query(keys, [more[k] for k in keys]))
             more, asked = {}, more
@@ -635,11 +635,11 @@ def _record(cfg: ListConfig, issue: dict) -> Record:
 
 @dataclass
 class Row:
-    sheaf: Sheaf
+    rectoverso: Rectoverso
     record: Record
     group: str                  # `<client>/<project>`
-    read: tuple | None = None   # `_stat_key` of the file the sheaf was read from
-    file: str = ""              # the real path of that file: a sheaf's name finds it wherever it is (9.11)
+    read: tuple | None = None   # `_stat_key` of the file the rectoverso was read from
+    file: str = ""              # the real path of that file: a rectoverso's name finds it wherever it is (9.11)
 
 
 @dataclass
@@ -679,18 +679,18 @@ class TheList:
         return [by_id[i] for i in self.hub.private_roots if i in by_id]
 
     def poll(self):
-        """Read every sheaf of the root, and of each private root, and the record of their issues, and keep the rows."""
+        """Read every rectoverso of the root, and of each private root, and the record of their issues, and keep the rows."""
         with self._poll_lock:
             with self._off_lock:
                 started = next(self._ask)
             root = self.root()
             if root.path != Path(os.path.realpath(self.cfg.root)):
-                # Inside a git work tree the root is the tree's top: its sheaves are not the list's.
+                # Inside a git work tree the root is the tree's top: its rectoversos are not the list's.
                 self.hub.record("list-poll-failed", None, root=root.name,
                                 error=f"{self.cfg.root} is not the top folder of its root ({root.path})")
                 self._records, self._answered, self._snap = {}, {}, Snapshot()
                 return
-            sheaves, read, files, held = [], {}, {}, set()     # held: the names of the private roots' files
+            rectoversos, read, files, held = [], {}, {}, set()     # held: the names of the private roots' files
             placed, top = place.applies(self.hub, root.name), Path(os.path.realpath(root.path))
             walk = [(root, f) for f in roots_mod.list_documents(root).docs]
             for p in self.private():
@@ -699,10 +699,10 @@ class TheList:
                 if found.rel.count("/") < 2:
                     if placed and src is root:
                         place.tell_link(self.hub, root, top, found.rel)     # a link there is none either (9.11)
-                    continue                # above `<client>/<project>`: no sheaf
+                    continue                # above `<client>/<project>`: no rectoverso
                 if self.hub.roots.lookup(src.path / found.rel) != src:
                     continue                # a nested root's (8.2): 9.9 keeps it from the list's members
-                # A sheaf is known by its name (9.11), wherever its file is; a name two files hold is none, and so is
+                # A rectoverso is known by its name (9.11), wherever its file is; a name two files hold is none, and so is
                 # a link. Found and read under its name's lock, as every read: no move comes between. A file of a
                 # private root is named by its path, which is no other root's: the list lists it for its member only.
                 logical = place.logical(found.rel) if placed else None
@@ -726,19 +726,19 @@ class TheList:
                 read[rel] = key
                 files[rel] = os.path.realpath(src.path / found.rel)
                 try:
-                    s = read_sheaf(rel, text)
-                except Exception:           # one sheaf the reader trips on leaves the rest of the list
+                    s = read_rectoverso(rel, text)
+                except Exception:           # one rectoverso the reader trips on leaves the rest of the list
                     self.hub.record_exception("list-poll-failed", None)
                     continue
                 if s.issue is not None and not s.moved:
-                    sheaves.append(s)
+                    rectoversos.append(s)
             try:
                 entries = projects.read(root.path, self.hub) or {}
             except projects.Invalid:
                 entries = {}
             if placed:
                 place.tell_ignored(self.hub, root, set(entries) | {"/".join(r.split("/")[:2]) for r in read if r not in held})
-            wanted = sorted({s.issue for s in sheaves})
+            wanted = sorted({s.issue for s in rectoversos})
             try:
                 self._records = fetch(self.cfg, wanted) if wanted else {}   # an issue it does not hold is off
                 got = True
@@ -747,30 +747,30 @@ class TheList:
                 got = False         # no record read: the list stays as the last poll that read one left it
             if got:
                 rows = [Row(s, self._records[s.issue], "/".join(s.rel.split("/")[:2]), read.get(s.rel), files[s.rel])
-                        for s in sheaves if s.issue in self._records]
-                # A ticked sheaf waits on nobody until the record routine has moved its issue: a new change of the
+                        for s in rectoversos if s.issue in self._records]
+                # A ticked rectoverso waits on nobody until the record routine has moved its issue: a new change of the
                 # issue, or a Status other than waiting (moving a Project's Status leaves the issue's change as it was).
-                moved = {r.sheaf.rel for r in rows
-                         if r.record.status != "waiting" or self._answered.get(r.sheaf.rel, r.record.updated) != r.record.updated}
-                for rel in moved | (set(self._answered) - {r.sheaf.rel for r in rows}):
+                moved = {r.rectoverso.rel for r in rows
+                         if r.record.status != "waiting" or self._answered.get(r.rectoverso.rel, r.record.updated) != r.record.updated}
+                for rel in moved | (set(self._answered) - {r.rectoverso.rel for r in rows}):
                     self._answered.pop(rel, None)
                 with self._off_lock:
                     # A row taken off after this poll began may have been read before what took it off: its file went
                     # (#34), or a tick found it names another issue (#27). It waits for the next poll, which reads what
-                    # is there now. A tick's take-off names the sheaf by its name as well as by its files, since a move
+                    # is there now. A tick's take-off names the rectoverso by its name as well as by its files, since a move
                     # may have put the file where neither the last poll nor the tick found it (#102), and keeps a row that
                     # names the issue the file names now: it was read after the change, so it is right.
                     rows = [r for r in rows if not self._left_off(r, started)]
                     self._off = {k: v for k, v in self._off.items() if v[0] > started}
                     self._snap = Snapshot(rows, self.hub.clock())
-            # Every sheaf whose file is not at its home goes there (9.11), judged with the last records read (a failed
+            # Every rectoverso whose file is not at its home goes there (9.11), judged with the last records read (a failed
             # read places on the ones before it, as every other judgement of the hub reads them): the
             # first poll moves what was written before the rule, a later one what an owner change made another's.
             for rel in read if placed else ():
                 if rel not in held and place.logical(rel) == rel:
                     try:
                         place.place(self.hub, f"{root.name}/{rel}")
-                    except Exception:       # one sheaf that cannot move leaves the others
+                    except Exception:       # one rectoverso that cannot move leaves the others
                         self.hub.record_exception("place-failed", f"{root.name}/{rel}")
 
     def start(self):
@@ -788,8 +788,8 @@ class TheList:
         self._stop.set()
 
     def ticked(self, address: str):
-        """A member ticked an action of the sheaf at `address`: its row leaves "Waiting on you" now, and
-        shows its other actions, rather than at the next poll that sees the record move. A sheaf whose file
+        """A member ticked an action of the rectoverso at `address`: its row leaves "Waiting on you" now, and
+        shows its other actions, rather than at the next poll that sees the record move. A rectoverso whose file
         now names another issue, or none, leaves the list until the next poll, even one that began before the tick
         (#27): its row's record is not that issue's, so its assignees are nobody's (9.11)."""
         a = roots_mod.Address.parse(address)
@@ -800,19 +800,19 @@ class TheList:
         # file is read, so its path resolves.
         with place.held(self.hub, address), self._off_lock:     # as `assignees` takes a row off, so neither write undoes the other
             for row in self._snap.rows:
-                if row.sheaf.rel == a.rel:
+                if row.rectoverso.rel == a.rel:
                     try:
-                        sheaf = read_sheaf(a.rel, self._read(root, a.rel)[0])
+                        rectoverso = read_rectoverso(a.rel, self._read(root, a.rel)[0])
                     except (OSError, UnicodeDecodeError, roots_mod.NotFound):
-                        sheaf = row.sheaf
-                    if not _same_issue(sheaf.issue, row.sheaf.issue):
+                        rectoverso = row.rectoverso
+                    if not _same_issue(rectoverso.issue, row.rectoverso.issue):
                         try:
                             real = os.path.realpath(self._file(root, a.rel))
                         except roots_mod.NotFound:          # a name two roots hold: the row's own file goes
                             real = row.file
-                        self._take_off({row.file, real}, {a.rel}, sheaf.issue)
+                        self._take_off({row.file, real}, {a.rel}, rectoverso.issue)
                         return
-                    row.sheaf = sheaf
+                    row.rectoverso = rectoverso
                     self._answered[a.rel] = row.record.updated
 
     def _take_off(self, files: set, names: set = frozenset(), keep: tuple | None = None):
@@ -825,23 +825,23 @@ class TheList:
             held = self._off.get(key)
             # A file that went (#34) stays off for every row, whatever a later tick says of the issue.
             self._off[key] = (n, None if held is not None and held[1] is None else keep)
-        self._snap.rows = [r for r in self._snap.rows if r.file not in files and r.sheaf.rel not in names]
+        self._snap.rows = [r for r in self._snap.rows if r.file not in files and r.rectoverso.rel not in names]
 
     def _left_off(self, row: Row, started: int) -> bool:
         """Whether a row read by the poll numbered `started` was taken off after it began, and is not the row of the
         issue the tick found the file naming. Under `_off_lock`."""
-        for key in (("file", row.file), ("name", row.sheaf.rel)):
+        for key in (("file", row.file), ("name", row.rectoverso.rel)):
             n, keep = self._off.get(key, (0, None))
-            if n > started and not (keep is not None and _same_issue(row.sheaf.issue, keep)):
+            if n > started and not (keep is not None and _same_issue(row.rectoverso.issue, keep)):
                 return True
         return False
 
     def _file(self, root, rel: str) -> Path:
-        """The file of the sheaf at `rel` in `root`, the list's, wherever it is (9.11): placed in proxy mode."""
+        """The file of the rectoverso at `rel` in `root`, the list's, wherever it is (9.11): placed in proxy mode."""
         return self.hub.file(f"{root.name}/{rel}", placed=self.hub.proxy is not None)
 
     def _read(self, root, rel: str) -> tuple:
-        """(text, stat key, the member whose private root holds the file) of the sheaf at `rel` in `root`, as `_file` finds
+        """(text, stat key, the member whose private root holds the file) of the rectoverso at `rel` in `root`, as `_file` finds
         it, from one open beneath its root (`sheafmd.beneath`): all of it is of that descriptor."""
         top, found = self.hub.where(f"{root.name}/{rel}")
         with beneath.open_beneath(top, found) as op:
@@ -849,8 +849,8 @@ class TheList:
 
     # ── the page ────────────────────────────────────────────────────────────
     def assignees(self, address: str, issue: str):
-        """The record's assignees of the issue of the sheaf at `address`, from the last poll, when `issue`, what
-        its file names now, is still the issue of its row; None when the list does not know the sheaf (no row:
+        """The record's assignees of the issue of the rectoverso at `address`, from the last poll, when `issue`, what
+        its file names now, is still the issue of its row; None when the list does not know the rectoverso (no row:
         another root, no issue, not polled yet, an issue changed since the poll, or a file gone since). The row
         of a file gone since is dropped then, and kept out of the snapshot of a poll that began before, until
         the next poll."""
@@ -858,20 +858,20 @@ class TheList:
         root = self.root()
         if root is None or a.root != root.name:
             return None
-        # Under the name's lock (9.11), taken before `_off_lock`: a move's unlink never makes a sheaf look gone.
+        # Under the name's lock (9.11), taken before `_off_lock`: a move's unlink never makes a rectoverso look gone.
         with place.held(self.hub, address), self._off_lock:
             # Seen gone and numbered in one step, so a poll that begins after this has the larger number.
             if not os.path.lexists(self._file(root, a.rel)):
-                # Kept, the row would judge a sheaf a door create makes at its address before the next poll, and
+                # Kept, the row would judge a rectoverso a door create makes at its address before the next poll, and
                 # tell which issue the one that went named (#34).
                 # By the real path of the file each row was read from, so the row of a link to it goes too, wherever
-                # the sheaf's file was (9.11).
+                # the rectoverso's file was (9.11).
                 self._take_off({os.path.realpath(self._file(root, a.rel))}
-                               | {r.file for r in self._snap.rows if r.sheaf.rel == a.rel})
+                               | {r.file for r in self._snap.rows if r.rectoverso.rel == a.rel})
                 return None
         for row in self._snap.rows:
-            if row.sheaf.rel == a.rel:
-                return tuple(row.record.assignees) if _same_issue(row.sheaf.issue, issue_of(issue)) else None
+            if row.rectoverso.rel == a.rel:
+                return tuple(row.record.assignees) if _same_issue(row.rectoverso.issue, issue_of(issue)) else None
         return None
 
     def serves(self, name: str) -> bool:
@@ -892,9 +892,9 @@ class TheList:
         for row in snap.rows:
             if row.record.status not in sections:
                 continue
-            if row.record.status == "waiting" and self._answered.get(row.sheaf.rel) == row.record.updated:
+            if row.record.status == "waiting" and self._answered.get(row.rectoverso.rel) == row.record.updated:
                 continue
-            address = f"{root.name}/{row.sheaf.rel}"
+            address = f"{root.name}/{row.rectoverso.rel}"
             if not self.hub.visible(member, address):               # the file now, not the poll
                 continue
             row = self._now(root, row, member, address)             # and what it says now
@@ -902,12 +902,12 @@ class TheList:
                 continue
             owners = self.hub.owners(address, members)              # and its owners, as visible has them
             is_owner = any(o.id == member.id for o in owners)
-            addressed = any(short and short.lower() == member.short.lower() for _, short, _, _ in row.sheaf.actions)
+            addressed = any(short and short.lower() == member.short.lower() for _, short, _, _ in row.rectoverso.actions)
             if show == "mine" and not (is_owner or addressed):
                 continue
             # My projects: the file as the hub grants by it now (8.12), not as the last poll read it (#53).
             if show == "projects" and not (isinstance(entries, dict)
-                                           and projects.grants(entries, row.sheaf.rel, member.short)):
+                                           and projects.grants(entries, row.rectoverso.rel, member.short)):
                 continue
             sections[row.record.status].append((row, owners, is_owner))
         return {"show": show,
@@ -931,24 +931,24 @@ class TheList:
                 f'<script nonce="{nonce}">{SCRIPT}</script></body></html>')
 
     def _now(self, root, row: Row, member, address: str):
-        """`row` with the sheaf its file holds now when that file is not the one the poll read (another file
-        made at its address, or one a link now points to, or a change), so the page never shows what a sheaf
+        """`row` with the rectoverso its file holds now when that file is not the one the poll read (another file
+        made at its address, or one a link now points to, or a change), so the page never shows what a rectoverso
         that went said; None when it now names another issue, cannot be read, or is no longer `member`'s to
         see: it may have changed since `visible` judged it. Found and read under the name's lock (9.11)."""
         try:
             with place.held(self.hub, address):
-                text, key, private = self._read(root, row.sheaf.rel)
+                text, key, private = self._read(root, row.rectoverso.rel)
                 if key == row.read:
                     return row
-            sheaf = read_sheaf(row.sheaf.rel, text)
+            rectoverso = read_rectoverso(row.rectoverso.rel, text)
         except Exception:                   # unreadable, or one the reader trips on, as the poll leaves it out
             return None
-        if not _same_issue(sheaf.issue, row.sheaf.issue) or sheaf.moved:
+        if not _same_issue(rectoverso.issue, row.rectoverso.issue) or rectoverso.moved:
             return None
         fm = visibility.front_matter(text)
         if not self.hub.may_open(member, address, fm, private):
             return None
-        return Row(sheaf, row.record, row.group, key, row.file)
+        return Row(rectoverso, row.record, row.group, key, row.file)
 
     def _section(self, key: str, title: str, rows: list, member, root: str) -> dict:
         groups: dict = {}
@@ -960,7 +960,7 @@ class TheList:
                                      for r, o, mine in sorted(groups[group], key=lambda r: -r[0].record.updated)]}
                            for group in sorted(groups)]}
 
-    def _pressers(self, root, s: Sheaf) -> dict:
+    def _pressers(self, root, s: Rectoverso) -> dict:
         """`pressers` of the pressed boxes of `s`, from the file that holds its name now when that file is still the
         text the row was drawn from (else none)."""
         lines = [line for _, _, line, _ in s.pressed]
@@ -976,7 +976,7 @@ class TheList:
         return pressers(self.hub.blamed, f, text, lines)
 
     def _row(self, row: Row, owners: list, is_owner: bool, member, root: str) -> dict:
-        s, rec = row.sheaf, row.record
+        s, rec = row.rectoverso, row.record
         doc, acts = f"{root}/{s.rel}", []
         # A toggle's number is its place among the actions, or among the pressed boxes when it is pressed (#110).
         # A pressed one-off is drawn locked, with who pressed it, and names no action and no text.

@@ -583,7 +583,7 @@ def test_claude_a_skill_file_made_by_someone_else_while_the_door_is_registered_i
 @pytest.mark.parametrize("text", [
     f"---\nname: sheaf\ndescription: mine\n---\n\n{MARKER}\n\nmy notes\n",       # a blank line first
     f"---\nname: sheaf\ndescription: mine\n---\n# sheaf\n{MARKER}\nmy notes\n",   # a heading first
-    f"# my own sheaf notes\n{MARKER}\n",                                           # no front matter
+    f"# my own rectoverso notes\n{MARKER}\n",                                           # no front matter
     f"---\nname: sheaf\n{MARKER}\n",                                              # front matter never closed
 ], ids=["blank line before", "heading before", "second line", "front matter not closed"])
 def test_claude_a_marker_that_is_not_where_init_writes_it_does_not_make_the_file_its_own(
@@ -1214,13 +1214,13 @@ def test_cursor_with_the_python_fallback_command_puts_the_module_in_the_argument
     assert entry == {"command": "/usr/bin/python3", "args": ["-m", "sheafmd", "mcp", "--agent", "cursor"]}
 
 
-# ── an entry init wrote itself, for a sheaf that has moved ────────────────────
+# ── an entry init wrote itself, for a rectoverso that has moved ────────────────────
 #
 # An entry is init's own when it is `<absolute path of a sheaf script> mcp --agent NAME` or
 # `<absolute path of a python> -m sheafmd mcp --agent NAME`, with the NAME of that agent and nothing
-# else set on it. When the sheaf that runs now is at another path (a second install first on PATH, a
+# else set on it. When the rectoverso that runs now is at another path (a second install first on PATH, a
 # tool moved from pipx to uv, a moved venv), Gemini and Cursor, whose entry init reads whole from a
-# file, are pointed at the sheaf that runs. Claude and Codex are not: what their `mcp get` prints
+# file, are pointed at the rectoverso that runs. Claude and Codex are not: what their `mcp get` prints
 # leaves out settings a person can have added (claude's timeout and alwaysLoad, codex's tool lists and
 # approval modes), and the add or the remove would drop them, so init says what to run.
 
@@ -1301,9 +1301,9 @@ def test_cursor_the_rest_of_the_file_survives_the_update(agents, capsys):
 
 @pytest.mark.parametrize("what, make", [
     ("another command", lambda a: old_entry(a, "/opt/tools/other-tool")),
-    ("a sheaf with other arguments", lambda a: {"command": OLD, "args": ["serve", "--agent", DOOR[a]]}),
-    ("a sheaf for another agent", lambda a: {"command": OLD, "args": ["mcp", "--agent", "someone-else"]}),
-    ("a sheaf with something after the arguments", lambda a: {
+    ("a rectoverso with other arguments", lambda a: {"command": OLD, "args": ["serve", "--agent", DOOR[a]]}),
+    ("a rectoverso for another agent", lambda a: {"command": OLD, "args": ["mcp", "--agent", "someone-else"]}),
+    ("a rectoverso with something after the arguments", lambda a: {
         "command": OLD, "args": ["mcp", "--agent", DOOR[a], "--extra"]}),
     ("a python that runs another module", lambda a: old_entry(a, "/usr/bin/python3", ("-m", "other"))),
     ("a script called sheaf-old", lambda a: old_entry(a, "/home/u/bin/sheaf-old")),

@@ -7,7 +7,7 @@ environment (UV_TOOL_DIR, UV_TOOL_BIN_DIR), HOME and the XDG folders (the runtim
 Linux), SHEAF_HOME, and a hub port of its own. Only uv's download cache and managed Pythons are
 shared, so nothing is fetched twice. On macOS the runtime folder is the exception: sheaf ignores
 XDG_RUNTIME_DIR there and uses /tmp/sheaf-<uid>, so a hand run on a Mac shares that folder with the
-person's own sheaf (ci.yml's macOS job, a manual dispatch, runs on a fresh runner, where that does no
+person's own rectoverso (ci.yml's macOS job, a manual dispatch, runs on a fresh runner, where that does no
 harm). The run says so when it starts.
 Nothing is published and no tag is made. Used by hand and by ci.yml:
 
@@ -53,7 +53,7 @@ def runtime_note(platform: str) -> str | None:
     """What the run cannot isolate, or None when it isolates everything."""
     if platform == "darwin":
         return (f"the runtime folder is shared: macOS ignores XDG_RUNTIME_DIR, so sheaf uses "
-                f"/tmp/sheaf-{os.getuid()}, the one of your own sheaf")
+                f"/tmp/sheaf-{os.getuid()}, the one of your own rectoverso")
     return None
 
 

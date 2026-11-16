@@ -1,9 +1,9 @@
 """
-sheafmd.hub.visibility — who may open a sheaf (SPEC 9.11): its owner alone, or every member of its root.
+sheafmd.hub.visibility — who may open a rectoverso (SPEC 9.11): its owner alone, or every member of its root.
 
     front_matter(text)              the top-level keys of the front matter: text, or a tuple for a list
     effective(fm)                   "owner" or "project", what the hub enforces
-    owner_of(fm, members, assignees) the members who own the sheaf
+    owner_of(fm, members, assignees) the members who own the rectoverso
     visible_to(fm, member, assignees=None, granted=True)
     share(text, by, date)           the text the owner's Share writes
     unshare(text)                   the text the owner's untick of Share writes
@@ -11,13 +11,13 @@ sheafmd.hub.visibility — who may open a sheaf (SPEC 9.11): its owner alone, or
     withdraws_share(old, new)       whether a write unticks Share, by whatever edit
     for_door(text, old)             the text a door write puts on disk
 
-A sheaf is `owner` when its `visibility` says so, or when one of its `sources` is private and the owner has
+A rectoverso is `owner` when its `visibility` says so, or when one of its `sources` is private and the owner has
 not shared it. A source is `<kind>:<ref>`; only the kinds of PROJECT_WIDE are known to be readable by every
 member of the project, so every other kind, a bare word (`library`) and a kind the hub has never heard of is
-private. A written `visibility: project` does not open a sheaf with a private source: only the `shared:` line
+private. A written `visibility: project` does not open a rectoverso with a private source: only the `shared:` line
 that the hub writes when the owner ticks Share does, and a door write cannot write that line.
 
-The owner is the assignee of the sheaf's issue in the record, when the list knows it and it has one, told by
+The owner is the assignee of the rectoverso's issue in the record, when the list knows it and it has one, told by
 the member whose `github` it is; else the member whose `short` is the front matter's `owner`.
 """
 import re
@@ -83,7 +83,7 @@ def front_matter(text: str) -> dict:
     `[a, b]` or as `- a` lines under an empty key, indented or not, is a tuple of its items; a nested table
     is not read. The reader fails closed: a line it cannot read that may hold one of KEYS (a line that is no
     plain `key: value`, or one whose key is one of them; an indented line under one of
-    KEYS; one of KEYS written twice) sets `UNREAD`, and `effective` reads such a sheaf as `owner`. A plain
+    KEYS; one of KEYS written twice) sets `UNREAD`, and `effective` reads such a rectoverso as `owner`. A plain
     `key: value` the reader does not read that names none of them (`my key: a value`) is another key's."""
     lines = _lines(text)
     end = _end(lines)
@@ -132,7 +132,7 @@ def text(fm: dict, key: str) -> str:
 
 
 def sources(fm: dict) -> tuple:
-    """The sheaf's sources, one item or a list, as a tuple."""
+    """The rectoverso's sources, one item or a list, as a tuple."""
     v = fm.get("sources", ())
     return (v,) if isinstance(v, str) and v else v if isinstance(v, tuple) else ()
 
@@ -166,8 +166,8 @@ def owner_of(fm: dict, members, assignees=None) -> list:
 
 def visible_to(fm: dict, member, assignees=None, granted: bool = True) -> bool:
     """Whether `member` may open the sheaf `fm`. `assignees` is the record's for its issue, None when the
-    list does not know it. `granted`: whether `projects.toml` lets the member into the sheaf's project (8.12);
-    an owner opens their own sheaf whatever it says."""
+    list does not know it. `granted`: whether `projects.toml` lets the member into the rectoverso's project (8.12);
+    an owner opens their own rectoverso whatever it says."""
     if any(m.id == member.id for m in owner_of(fm, [member], assignees)):
         return True
     return granted and effective(fm) == "project"
@@ -227,7 +227,7 @@ def newly_ticked(toggled) -> set:
     `apply_edits`): a line that reads `- [ ] <word>` in the old and is that line with only its box ticked
     in the new. Nothing else counts, not a block pandoc rewrote, so a line that takes the place of another
     (a ballot box, an `<input>`, an escaped `\\- [x]`, a box beside one the owner deleted) ticks nothing,
-    and text an assistant writes cannot Share a sheaf through the owner's save."""
+    and text an assistant writes cannot Share a rectoverso through the owner's save."""
     return _flipped(toggled, " ", "xX")
 
 
@@ -266,7 +266,7 @@ def _flipped(toggled, was_marks: str, now_marks: str) -> set:
 def for_door(text_: str, old: str | None) -> str:
     """What a door write of `text_` puts on disk over `old` (None for a create). The caller is an assistant,
     never the owner: its `visibility` and `shared` are not read, and on an update the `owner` and the `issue`
-    (whose assignee is the owner) stay the ones on disk. The sheaf is `owner` when it has a private source, and stays `owner` when it was, front matter
+    (whose assignee is the owner) stay the ones on disk. The rectoverso is `owner` when it has a private source, and stays `owner` when it was, front matter
     dropped or not; a Share already made stays while the write adds no private source the owner did not
     share."""
     fm = front_matter(text_)
@@ -281,7 +281,7 @@ def for_door(text_: str, old: str | None) -> str:
     values = {"visibility": want, "shared": kept if want == "project" else None}
     if old is not None:
         # an update neither gives nor changes the owner, nor the issue whose assignee is the owner; the door
-        # gives a sheaf that no member owns its token's member (mcp `_owned`, #30)
+        # gives a rectoverso that no member owns its token's member (mcp `_owned`, #30)
         values["owner"] = owner or None
         values["issue"] = issue or None
     if want == "project" and not ({"visibility", "sources", "shared"} & fm.keys()) \

@@ -1046,6 +1046,19 @@ def look_calls(monkeypatch, repos):
     return seen
 
 
+def test_look_calls_counts_the_looks_of_the_repos_it_is_given_and_no_other(hub_repos, tmp_path, monkeypatch):
+    """`Repos._git` is patched on the class, so a thread of another Repos (one a test before this left running, its clone
+    and then its look still under way) makes looks of its own while a test counts: the request path's one look was seen twice
+    (the commits of two origins made in the same second are one hash)."""
+    repos = hub_repos.hub.repos
+    other = Repos(tmp_path / "other-clones", FakeApp(), remote_url=lambda repo: str(hub_repos.origin))
+    seen = look_calls(monkeypatch, repos)
+    other._on_branch(tmp_path, "a" * 40)
+    assert seen == []
+    repos._on_branch(tmp_path, "b" * 40)
+    assert seen == [("branch", "-r", "--contains", "b" * 40)]
+
+
 @pytest.mark.parametrize("said, parsed", [
     ("git version 2.43.0\n", (2, 43)), ("git version 2.53.0", (2, 53)), ("git version 2.39.5 (Apple Git-154)", (2, 39)),
     ("git version 2.44.0.windows.1", (2, 44)), ("git version 10.1.2", (10, 1)), ("", None), ("not git at all", None)])

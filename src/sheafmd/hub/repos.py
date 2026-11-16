@@ -151,8 +151,10 @@ class Repos:
         return {"session": None, "host": None, "link": None, "label": f"git · {author}" if author else "git"}
 
     # ── git ──────────────────────────────────────────────────────────────────
-    def _git(self, at, *args, token: str | None = None, seconds: float = GIT_SECONDS):
+    def _git(self, at, *args, token: str | None = None, seconds: float = GIT_SECONDS, look: bool = False):
         env = {**os.environ, "LC_ALL": "C", "GIT_TERMINAL_PROMPT": "0"}
+        if look:
+            env["GIT_NO_LAZY_FETCH"] = "1"      # a blobless clone fetches a missing object from its remote unasked (git 2.44)
         if token:
             basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
             env.update({"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.extraHeader",
@@ -219,7 +221,7 @@ class Repos:
 
     def _on_branch(self, dest: Path, commit: str, seconds: float = LOOK_SECONDS) -> bool:
         """Whether a remote-tracking branch the clone holds contains `commit`: a look at the clone, no network."""
-        r = self._git(dest, "branch", "-r", "--contains", commit, seconds=seconds)
+        r = self._git(dest, "branch", "-r", "--contains", commit, seconds=seconds, look=True)
         return r.returncode == 0 and bool(r.stdout.strip())
 
     def _knows(self, dest: Path, repo: str, commit: str, token: str | None) -> bool:

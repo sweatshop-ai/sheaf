@@ -998,3 +998,25 @@ def test_a_folder_with_a_non_ascii_name_is_added_to_the_sparse_set_once(hub_repo
     seen.clear()
     report(hub_repos, path=rel, commit=commit)
     assert [a for a in seen if a[:2] == ("sparse-checkout", "add")] == []
+
+
+# ── a look at the clone never reaches the remote ─────────────────────────────
+
+def count_fetches(clone, tmp_path):
+    """Make the clone's remote log every time git talks to it; the log file."""
+    log = tmp_path / "remote-calls.log"
+    wrapper = tmp_path / "upload-pack-logged"
+    wrapper.write_text(f'#!/bin/sh\necho call >> "{log}"\nexec git-upload-pack "$@"\n')
+    wrapper.chmod(0o755)
+    sh(clone, "config", "remote.origin.uploadpack", str(wrapper))
+    return log
+
+
+def test_a_report_for_a_commit_the_clone_lacks_never_reaches_the_remote_on_the_request_path(hub_repos, tmp_path, monkeypatch):
+    report(hub_repos)
+    log = count_fetches(the_clone(hub_repos), tmp_path)
+    repos = hub_repos.hub.repos
+    monkeypatch.setattr(repos, "_enqueue", lambda *a, **k: None)    # the repo's thread is not what is looked at here
+    answer = repos.report("bea", REPO, "docs/plan.md", "a" * 40)
+    assert answer["commit_known"] is False
+    assert not log.exists(), "the look at the clone fetched from the remote"

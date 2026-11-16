@@ -183,6 +183,16 @@ def _set(entry: dict, agent: dict | None, member, told: bool = False) -> None:
     entry["target"] = agent
 
 
+def restore(hub, address: str, member, raw: dict | None) -> None:
+    """Put `raw`, the stored target `stored` gave before a `pick`, back: a change that did not go through leaves no trace."""
+    told = hub.tell_live(address)
+
+    def settle(entry: dict) -> dict:
+        _set(entry, raw, member, told)
+        return entry
+    hub.docs.change(address, settle)
+
+
 def pick(hub, address: str, member, choice) -> None:
     """Change the target to `choice`: "session", "agent:<token name>" or "none" (9.8). Raises Refused for a
     target the reader may not pick."""

@@ -1794,20 +1794,25 @@ class Handler:
         Tell is cancelled, the target becomes that agent and the Tell is queued for it. The reader's own, and no one else's."""
         if req.member is None:
             raise Refuse(400, "Only a member's Tell waits for a laptop session.")
-        e = self._entry(req, req.body.get("doc"))
         cid, target = self._comment_id(req), req.body.get("target")
-        if not any(t["id"] == cid for t in self.hub.session_tells.waits(e.address, req.member)):
-            raise Refuse(409, "No Tell of yours waits for a session on this comment.")
-        try:
-            kind, _ = targets.parse(target)
-            if kind != "agent":
-                raise targets.Refused("Pick one of your own agents.")
-            targets.pick(self.hub, e.address, req.member, target)
-        except targets.Refused as r:
-            raise Refuse(400, str(r)) from None
-        try:                                    # queued first: a refused one leaves the Tell where it waits
+        with self._reading(req.body.get("doc")):        # judged and stored in one step, as `_target` does (9.11)
+            e = self._entry(req, req.body.get("doc"))
+            if not any(t["id"] == cid for t in self.hub.session_tells.waits(e.address, req.member)):
+                raise Refuse(409, "No Tell of yours waits for a session on this comment.")
+            if self._work_route(e.address, e.live.current()[1], req.member) is not None:    # the box and a relay come first
+                raise Refuse(400, proxy.PROXY_LINE)
+            was = targets.stored(self.hub, e.address, req.member)
+            try:
+                kind, _ = targets.parse(target)
+                if kind != "agent":
+                    raise targets.Refused("Pick one of your own agents.")
+                targets.pick(self.hub, e.address, req.member, target)
+            except targets.Refused as r:
+                raise Refuse(400, str(r)) from None
+        try:                                    # queued first: a refused one leaves the Tell where it waits, and the target as it was
             self.hub.tell.start_member_tell(e.address, cid, req.member, held=self._page_hash(req))
         except JobRefused as r:
+            targets.restore(self.hub, e.address, req.member, was)
             raise Refuse(r.status, r.message) from None
         self.hub.session_tells.end(e.address, cid, "cancelled", member=req.member, only_member=True, reason="retargeted")
         return _ok()

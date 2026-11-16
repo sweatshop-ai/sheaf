@@ -702,10 +702,15 @@ class Door:
         def message(t):
             address = t["doc"]
             try:
-                text = self._open_in(address, whole=True)[4]
+                opened = self._open_in(address, whole=True)
+                text = opened[4]
                 got = rdc.parse(text) if text is not None else None
             except (NotFound, OSError, UnicodeDecodeError):
                 return False
+            member = self._member(caller)
+            if (member.id if member is not None else None) != t.get("member") or (
+                    text is not None and not self._sees(visibility.front_matter(text), address, caller, opened=opened[3])):
+                return False                    # the member no longer sees the page, or this token acts for another: it stays, unsaid
             c = got.by_id(t["thread"]) if got is not None else None
             if got is None or waiting_mod._stale(t, c):
                 return None

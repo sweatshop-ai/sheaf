@@ -53,7 +53,8 @@ class SessionTells:
 
     # ── what the page and the log are told ───────────────────────────────────
     def _name(self, t: dict) -> str:
-        return str(t.get("agent") or t.get("token", ""))
+        """The name a Tell goes by on the page, in its rows and its events alike: the agent and the session."""
+        return f"{t.get('agent') or t.get('token', '')} · {str(t.get('session', ''))[:8]}"
 
     def _send(self, address: str, name: str, data: dict, member=None):
         e = self.hub.entries.get(address)
@@ -108,7 +109,7 @@ class SessionTells:
                 t["member"] = member.id
             rows.append(t)
             state = "queued" if self.listening(t) else "waiting"
-            held.append(lambda: self._send(address, "tell-queued", {"id": cid, "agent": name, "state": state, "laptop": True},
+            held.append(lambda: self._send(address, "tell-queued", {"id": cid, "agent": self._name(t), "state": state, "laptop": True},
                                            t.get("member")))
             held.append(lambda: self.hub.record("tell-queued", address, thread=cid, token=row.name, tid=row.id,
                                                 session=session, by=by))
@@ -202,6 +203,6 @@ class SessionTells:
         mine = member.id if member else None
         with self._lock:
             rows = [r for r in read_json(_file(), [], aside=False) if isinstance(r, dict)]
-        return [{"id": t["thread"], "to": f"{self._name(t)} · {t['session'][:8]}",
+        return [{"id": t["thread"], "to": self._name(t),
                  "state": "seen" if t["seen"] else ("queued" if self.listening(t) else "waiting"), "laptop": True}
                 for t in rows if t.get("doc") == address and t.get("member") == mine]

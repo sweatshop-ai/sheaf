@@ -189,7 +189,7 @@ def data(hub, member, titles: Titles, view: str = "") -> dict:
             rows.append({"doc": told, "url": d["url"] if told == address else roots_mod.url_path(told), "title": title, "root": SHARED if given else at.root,
                          "folder": folder, "shared_by": agent, **given,
                          "share": unshared if mine(hub, member, at.root) and not given else "", "mtime": d["mtime"], "when": index_mod.when(d["mtime"], now),
-                         "open": d["open"], "archived": archived, "kept": kept_, "write": say_write(last, session),
+                         "open": d["open"], "own": mine(hub, member, at.root) and not given, "archived": archived, "kept": kept_, "write": say_write(last, session),
                          "write_tip": write_tip,
                          "session": session.writer if session else "",
                          "session_tip": session_tip_,

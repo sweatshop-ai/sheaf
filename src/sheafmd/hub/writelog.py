@@ -14,7 +14,6 @@ from pathlib import Path
 
 from .. import paths
 
-PLACES = ("laptop", "chat client", "tiroir", "page")
 KEEP = 200                  # lines kept in memory per address
 MAX_BYTES = 10 * 1024 * 1024
 NAME, ROTATED = "write-log.jsonl", "write-log.1.jsonl"

@@ -126,8 +126,18 @@ class Door:
     def __init__(self, origin: str, token: str, headers: dict):
         self.origin, self.token, self.headers, self.n = origin, token, dict(headers), 0
         self.started = False
+        self.wrote = False   # a create or update has been sent: from then on the tiroir may hold the text
 
     def _post(self, message: dict) -> tuple[int, dict | None, dict]:
+        try:
+            return self._post_checked(message)
+        except Unreachable as e:
+            if not self.wrote:
+                raise
+            raise SendError(f"{e} The write may have reached {self.origin}: run sheaf again to see where the page "
+                            "stands. Nothing was changed on this laptop.") from None
+
+    def _post_checked(self, message: dict) -> tuple[int, dict | None, dict]:
         status, got, back = post(self.origin + connect.DOOR_PATH, self.token, message, self.headers)
         if status in (401, 403):
             raise SendError(f"{self.origin} refused the token (it was revoked, or it is not a token of that address): "
@@ -152,6 +162,7 @@ class Door:
         if not self.started:
             self._start()
         self.n += 1
+        self.wrote = self.wrote or name in ("create", "update")
         status, got, _ = self._post({"jsonrpc": "2.0", "id": self.n, "method": "tools/call",
                                      "params": {"name": name, "arguments": arguments}})
         result = got.get("result") if isinstance(got, dict) else None

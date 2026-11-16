@@ -598,3 +598,35 @@ def test_a_write_to_a_clone_that_moved_to_another_tiroir_does_not_wake_it(hub_re
     hub_repos.post("/_/save", {"doc": ADDRESS, "hash": md_hash(text), "branch": "dev",       # whatever the answer: it stays asleep
                                "edits": [{"i": 1, "html": "<p>A plan, saved on the page.</p>"}]}, member=BEA)
     assert hub_repos.hub.repos.sleeping(REPO) and hub_repos.hub.repos.moved_to(REPO) == "https://there.example"
+
+
+@DEV
+def test_a_door_update_by_a_member_who_does_not_own_the_page_wakes_nothing(hub_repos):
+    text = asleep(hub_repos)
+    bad, said = door_call(hub_repos, "cal-claude", "update", doc=ADDRESS, expected_hash=md_hash(text), text=text + "\nx\n")
+    assert bad, said
+    assert hub_repos.hub.repos.sleeping(REPO)
+    assert not hub_repos.hub.file(ADDRESS).exists()
+
+
+@DEV
+def test_a_door_update_to_a_forwarded_address_wakes_the_clone_of_the_page_it_leads_to(hub_repos):
+    text = asleep(hub_repos)
+    old = f"{root_name(REPO)}/docs/old-name.md"
+    hub_repos.hub.forwards.add(old, ADDRESS, "test")
+    bad, said = door_call(hub_repos, "bea-claude", "update", doc=old, expected_hash=md_hash(text), text=text + "\nA line.\n")
+    assert not bad, said
+    assert not hub_repos.hub.repos.sleeping(REPO)
+    assert hub_repos.hub.file(ADDRESS).read_text(encoding="utf-8").endswith("A line.\n")
+
+
+@DEV
+def test_a_clone_awake_by_its_flag_but_with_its_folders_out_is_widened_by_a_write(hub_repos):
+    """A write that came while the clone went to sleep (or a widen that failed) leaves the flag awake and `restore` pending:
+    the next write must still bring the folders back."""
+    text = asleep(hub_repos)
+    hub_repos.hub.repos._use(REPO)                  # awake by its flag; the folders are still out, `restore` is kept
+    assert not hub_repos.hub.repos.sleeping(REPO) and not hub_repos.hub.file(ADDRESS).exists()
+    bad, said = door_call(hub_repos, "bea-claude", "update", doc=ADDRESS, expected_hash=md_hash(text), text=text + "\nA line.\n")
+    assert not bad, said
+    assert hub_repos.hub.file(ADDRESS).read_text(encoding="utf-8").endswith("A line.\n")

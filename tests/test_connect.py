@@ -274,3 +274,33 @@ def test_a_redirect_from_the_door_is_not_followed_so_the_token_stays_where_it_wa
     handler = connect._Refuse3xx()
     req = connect.urllib.request.Request("https://chat.example.com/mcp", headers={"Authorization": "Bearer x"})
     assert handler.redirect_request(req, None, 307, "Temporary Redirect", {}, "http://evil.example/") is None
+
+
+@pytest.mark.parametrize("url", ["https://a.com:99999", "https://a.com:abc", "https://a.com:-1"])
+def test_a_bad_port_is_a_usage_error_not_a_traceback(url):
+    with pytest.raises(connect.UsageError):
+        connect.origin_of(url)
+
+
+def test_an_ipv6_address_keeps_its_brackets_in_the_origin_and_not_in_the_entry_name():
+    origin = connect.origin_of("https://[::1]:8443")
+    assert origin == "https://[::1]:8443" and "[" not in connect.entry_name(origin)
+
+
+@pytest.mark.parametrize("empty", ['tiroir = ""', "tiroir = ''", 'tiroir = ""  # none yet'])
+def test_an_empty_default_in_the_config_is_filled_not_repeated(tiroir, keyring, capsys, empty):
+    paths.config_file().parent.mkdir(parents=True, exist_ok=True)
+    paths.config_file().write_text(f'name = "Ada"\n{empty}\n\n[jump]\ncommand = ["x"]\n')
+    code, _, err = run(capsys, FRONT, laptop(tiroir))
+    assert code == 0, err
+    data = config.read_toml(paths.config_file(), config.USER_KEYS)       # a duplicate key would not parse
+    assert data["tiroir"] == FRONT and data["name"] == "Ada" and data["jump"] == {"command": ["x"]}
+
+
+@pytest.mark.parametrize("bad", ["name = ", 'port = "x"'])
+def test_a_config_that_cannot_be_read_stops_the_command_before_anything_is_written(tiroir, keyring, capsys, bad):
+    paths.config_file().parent.mkdir(parents=True, exist_ok=True)
+    paths.config_file().write_text(bad + "\n")
+    code, _, err = run(capsys, FRONT, laptop(tiroir))
+    assert code == 1 and "config.toml" in err and "Nothing was written" in err
+    assert keyring.items == {} and not claude_json().exists()

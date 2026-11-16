@@ -86,12 +86,18 @@ def origin_of(url: str) -> str:
           and parts.path in ("", "/") and not parts.query and not parts.fragment)
     if not ok:
         raise UsageError(f"{url!r} is not the address of a shared Sheaf: write it as https://host, with no path")
+    try:
+        port = parts.port
+    except ValueError:
+        raise UsageError(f"{url!r} has a port that is not a number from 0 to 65535") from None
     host = parts.hostname.lower()
-    return f"https://{host}" + (f":{parts.port}" if parts.port else "")
+    if ":" in host:                  # an IPv6 address: urlsplit drops its brackets, an address needs them
+        host = f"[{host}]"
+    return f"https://{host}" + (f":{port}" if port else "")
 
 
 def entry_name(origin: str) -> str:
-    return "sheaf-" + urllib.parse.urlsplit(origin).netloc.replace(":", "-")
+    return "sheaf-" + re.sub(r"[\[\]]", "", urllib.parse.urlsplit(origin).netloc).replace(":", "-")
 
 
 class _Refuse3xx(urllib.request.HTTPRedirectHandler):
@@ -180,9 +186,22 @@ def make_default(origin: str) -> bool:
     table = re.search(r"^\s*\[", text, re.M)
     at = table.start() if table else len(text)
     head = text[:at]
+    empty = re.search(r"^[ \t]*tiroir[ \t]*=[ \t]*(\"\"|\'\')[ \t]*(#[^\n]*)?\n?", head, re.M)
+    if empty:                        # a default that was left empty: fill its line, a second key would not parse
+        write_text_atomic(path, head[:empty.start()] + line + head[empty.end():] + text[at:])
+        return True
     glue = "" if not head or head.endswith("\n") else "\n"
     write_text_atomic(path, head + glue + line + ("\n" if table and head.strip() else "") + text[at:])
     return True
+
+
+def check_config() -> None:
+    """The laptop's config.toml reads, before the token is stored: a file `make_default` cannot read would stop the
+    command after the token was already written."""
+    try:
+        config.read_toml(paths.config_file(), config.USER_KEYS, warn=lambda line: None)
+    except config.ConfigError as e:
+        raise ConnectError(f"{e}. Mend that file and run the command again. Nothing was written.") from None
 
 
 def connect(url: str, token: str, out=print) -> None:
@@ -191,6 +210,7 @@ def connect(url: str, token: str, out=print) -> None:
     if not _TOKEN.fullmatch(token or ""):
         raise UsageError("that is not a Sheaf token: copy the whole `sheaf connect` line from Connect a laptop")
     check_door(origin, token)
+    check_config()
     store = system_store()
     store.set(SERVICE, origin, token)
     entry = add_mcp_entry(origin, token)

@@ -218,3 +218,25 @@ def test_the_box_s_james_is_a_tiroir_write_and_his_session_header_is_the_session
     assert written_from(Caller("Bea", token, declared={"host": "h"}))[0] == "laptop"
     assert written_from(Caller("Bea", token))[0] == "chat client"
     assert written_from(Caller("Bea"))[0] == "laptop"                                  # the stdio door
+
+
+def test_a_pull_whose_author_lookup_fails_still_goes_through_with_an_unknown_author(agents, rectoversos, remote, tmp_path,
+                                                                                   monkeypatch):
+    import subprocess
+
+    from sheafmd.hub import commits
+    agents.hub.entry(DOC)
+    text = plan_text(agents).replace("First paragraph, about apples.", "First, merged on the remote.")
+    merged_on_github(tmp_path, remote, {"acme/blog/2026-10-28-plan.md": text}, "merged")
+    real = commits._git
+
+    def slow_log(folder, *args, **kw):
+        if "log" in args and "--format=%an" in args:
+            raise subprocess.TimeoutExpired("git", 20)
+        return real(folder, *args, **kw)
+
+    monkeypatch.setattr(commits, "_git", slow_log)
+    agents.hub.tick()
+    assert agents.hub.commits.settle()
+    assert "merged on the remote" in plan_text(agents)                 # the pull went through
+    assert [(l["writer"], l["via"]) for l in lines(agents)["lines"]] == [("git · ?", "pull")]

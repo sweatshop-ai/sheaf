@@ -245,10 +245,18 @@ def _locking(folder: Path, *args, author=None):
         raise
 
 
+def _author(folder: Path, commit: str, rel: str) -> str:
+    """Who last changed `rel` as of `commit`: `?` when git cannot say, since a missing name must never stop a pull."""
+    try:
+        return _git(folder, "log", "-1", "--format=%an", commit, "--", rel).stdout.strip() or "?"
+    except (subprocess.SubprocessError, OSError):
+        return "?"
+
+
 def _hash_of(path: Path) -> str | None:
     """The hash of the text of `path`, None for a file that is not there or not text."""
     try:
-        return md_hash(path.read_text(encoding="utf-8"))
+        return md_hash(path.read_bytes().decode("utf-8"))      # the bytes, as a page reads them: no newline translation
     except (OSError, ValueError):
         return None
 
@@ -618,8 +626,7 @@ class Commits:
         # the look at it and its new text, and no commit of any root of the repo between the hub's HEAD read and moved.
         # Who last wrote each .md file, read before the work tree moves; the Write log's window opens now and closes however
         # the pull ends, so the page that takes the pull in is never taken for a disk write, nor a later write for the pull.
-        authors = [(top / p, _git(folder, "log", "-1", "--format=%an", theirs, "--", p).stdout.strip() or "?")
-                   for p in changed if p.endswith(".md")]
+        authors = [(top / p, _author(folder, theirs, p)) for p in changed if p.endswith(".md")]
         self._tell(self._pulling, address, folder, authors)
         go, left = False, {}
         try:

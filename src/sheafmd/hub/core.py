@@ -1256,7 +1256,8 @@ class Hub:
     def _page_of(self, path: Path) -> str | None:
         """The name the hub opens the rectoverso at `path` under: where it places rectoversos (9.11), the name under its
         project for a file of `<project>/private/<short>/`, and the list's for a file of a private root, as `_writers_out`
-        names them; else the address of its root. None for a file no root of the hub holds."""
+        names them; else the address of its root. A page is whatever the hub serves, never a file of `.sheaf/` or `.git`.
+        None for a file no root of the hub holds, or that it does not serve."""
         listed = next((r for r in self.roots.all() if place.applies(self, r.name)), None)
         for r in self.roots.all():
             if place.applies(self, r.name):
@@ -1267,8 +1268,11 @@ class Hub:
                 continue
             rel = os.path.relpath(path, os.path.realpath(r.path))
             if not rel.startswith(".."):
-                name = place.logical(rel.replace(os.sep, "/"))
-                return f"{at.name}/{name}" if name else None       # a README, a versions file: no page of the hub
+                rel = rel.replace(os.sep, "/")
+                name = place.logical(rel)
+                if name is None and at is r and roots_mod._servable(rel) and not place.names_private(rel):
+                    name = rel                                      # served all the same, as a README is (place.physical)
+                return f"{at.name}/{name}" if name else None
         try:
             address = self.roots.address(path)
         except roots_mod.NotFound:
@@ -1293,7 +1297,7 @@ class Hub:
                 continue
             if address in self.entries and ok:
                 try:
-                    text = md_hash(path.read_text(encoding="utf-8")) if left is None else left.get(path)
+                    text = md_hash(path.read_bytes().decode("utf-8")) if left is None else left.get(path)
                 except (OSError, ValueError):
                     text = None
             else:

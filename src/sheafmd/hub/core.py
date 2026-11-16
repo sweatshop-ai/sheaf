@@ -29,6 +29,7 @@ from ..render import RenderError, render_file
 from ..source import STAMP_FORMAT, file_lock, lock_key, md_hash
 from . import assets as assets_mod
 from . import boxwait
+from . import loose as loose_mod
 from . import place
 from . import projects
 from . import proxy as proxy_mod
@@ -197,6 +198,8 @@ class Hub:
         self.roots.hidden = self._is_private_root
         self.roots.registered = self._note_identity       # rule E: no address of its own, registered or refused
         self._register_private_roots()
+        self.loose = loose_mod.Loose(self)       # a member's loose root, by their id (the door's `create` with no root)
+        self.loose.attach()
         for r in self.roots.all():
             self._note_identity(r)      # the roots of an earlier run, registered before the private folders were known
         self.commits.seed(self.roots.all())      # the rewrite guard's first pull is guarded, not free

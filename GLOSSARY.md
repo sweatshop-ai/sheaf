@@ -134,6 +134,10 @@ _Avoid_: home tiroir (a rectoverso's home is a path)
 A page in no git repo: a session's scratchpad, a temporary folder, or anything a chat client such as Claude.ai or ChatGPT makes. Its original lives on the tiroir; a page in a git repo has git as its original. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 05; not built.)
 _Avoid_: scratch page, orphan page
 
+**Loose root** (of a member):
+The one folder, `loose-<short>`, where a member's Loose pages are written, made on the member's first door `create` with no root. It is kept against the member's id, so a rename or a short name another member held never gives or takes it. A page marked Keep (stored in the root's `.sheaf/`, not in the text) is never archived. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 03; the root, `folder` and `keep` on `create` are built, archiving is not.)
+_Avoid_: scratch folder, loose folder
+
 **Repo clone** (on a tiroir):
 The tiroir's own copy of a git repo that a member's page came from, made the first time a page of that repo is rendered for that tiroir. One per repo per tiroir, whoever's pages it holds; it holds the folders with pages only. A page in it is still its member's alone until Shared. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 14; not built.)
 _Avoid_: mirror, checkout

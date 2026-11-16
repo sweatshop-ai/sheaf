@@ -500,3 +500,102 @@ def test_a_folder_the_move_made_before_a_private_refusal_is_taken_back(team, mon
     got = move(team, ALICE, old, "x/y")
     assert 400 <= got.status < 500
     assert team.hub.file(old).exists() and not (team.hub.file(old).parent / "x").exists()
+
+
+# ── the fix round over 9c98fc9: the two races ────────────────────────────────
+
+def test_a_save_that_began_before_a_move_is_at_the_new_address_after_it(team, monkeypatch):
+    """The file moves under the page's file lock, as every write of it is made: a save already inside it is waited for, and
+    the move links the file it wrote. The interleave is fixed by the moves' own `file_lock` (the hook): the save is held
+    inside its `change` until the move has come to the lock, or has gone by it."""
+    import threading
+    from sheafmd import source
+    from sheafmd.hub import moves
+    old = made(team, "alice", PLAN)["doc"]
+    top, rel = team.hub.roots.get("loose-alice").path, old.split("/", 1)[1]
+    in_save, release, at_lock = threading.Event(), threading.Event(), threading.Event()
+    saved, result = [], []
+
+    def change(text, opened):
+        in_save.set()
+        assert release.wait(20)
+        return text + "\nSaved.\n"
+
+    def save():
+        try:
+            saved.append(source.update_beneath(top, rel, change))
+        except Exception as e:
+            saved.append(e)
+
+    class Probe(source.file_lock):
+        def __enter__(self):
+            at_lock.set()
+            return super().__enter__()
+    monkeypatch.setattr(moves, "file_lock", Probe, raising=False)
+    saver = threading.Thread(target=save)
+    saver.start()
+    assert in_save.wait(20)
+    mover = threading.Thread(target=lambda: result.append(move(team, ALICE, old, "b")))
+    mover.start()
+    while mover.is_alive() and not at_lock.wait(0.01):     # at the lock, or through the move already
+        pass
+    release.set()
+    saver.join(20)
+    mover.join(20)
+    new = "loose-alice/b/plan.md"
+    assert isinstance(saved[0], tuple), saved
+    assert result[0].status == 200 and read(team, new).endswith("\nSaved.\n")
+    assert not team.hub.file(old).exists()
+
+
+def test_a_tell_that_starts_between_the_check_and_the_rename_is_refused_or_the_move_is(team, monkeypatch):
+    """A Tell's start and the move's check of it take the same lock, the hub's admission lock: the move sees the Tell and
+    answers 409, or the Tell, finding the page gone from the old address, is refused. The hook is `tell_live` itself: the
+    Tell's start is begun the moment the move has looked, and the move goes on only when that start is through or waits."""
+    import threading
+    from sheafmd.hub import tell as tell_mod
+    hub = team.hub
+    old = made(team, "alice", PLAN)["doc"]
+    entry = hub.entry(old)
+    attempted, started, hold = threading.Event(), threading.Event(), threading.Event()
+    outcome = []
+
+    class Probe:
+        def __init__(self, real):
+            self.real = real
+
+        def __enter__(self):
+            if threading.current_thread().name == "tell-start":
+                attempted.set()
+            return self.real.__enter__()
+
+        def __exit__(self, *a):
+            return self.real.__exit__(*a)
+
+    def start():
+        try:
+            with hub.tell._admitting():
+                outcome.append(hub.tell._start(entry, "tell", "c1", lambda job: hold.wait(20), None))
+        except tell_mod.JobRefused as e:
+            outcome.append(e)
+        finally:
+            started.set()
+    starter = threading.Thread(target=start, name="tell-start")
+    real_live, begun = hub.tell_live, []
+
+    def tell_live(address):
+        seen = real_live(address)
+        if address == old and not begun:
+            begun.append(1)
+            starter.start()
+            assert attempted.wait(20)          # the Tell's start has come to the admission lock
+            started.wait(0.3)                  # through it at once (no lock held), or waiting for the move that holds it
+        return seen
+    monkeypatch.setattr(hub, "admit", Probe(hub.admit))
+    monkeypatch.setattr(hub, "tell_live", tell_live)
+    got = move(team, ALICE, old, "b")
+    assert started.wait(20)
+    started_on_old = bool(outcome) and not isinstance(outcome[0], Exception)
+    hold.set()
+    starter.join(20)
+    assert not (got.status == 200 and started_on_old), (got.status, outcome)

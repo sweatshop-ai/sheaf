@@ -619,3 +619,66 @@ def test_a_clone_awake_by_its_flag_but_with_its_folders_out_is_widened_by_a_writ
     bad, said = door_call(hub_repos, "bea-claude", "update", doc=ADDRESS, expected_hash=md_hash(text), text=text + "\nA line.\n")
     assert not bad, said
     assert hub_repos.hub.file(ADDRESS).read_text(encoding="utf-8").endswith("A line.\n")
+
+
+@DEV
+def test_a_door_update_naming_a_sleeping_clones_page_by_its_url_wakes_it(hub_repos):
+    text = asleep(hub_repos)
+    bad, said = door_call(hub_repos, "bea-claude", "update", doc=hub_repos.hub.url(ADDRESS), expected_hash=md_hash(text),
+                          text=text + "\nA line.\n")
+    assert not bad, said
+    assert hub_repos.hub.file(ADDRESS).read_text(encoding="utf-8").endswith("A line.\n")
+
+
+@DEV
+def test_a_clone_going_to_sleep_records_what_to_restore_under_the_lock_of_the_shrink(hub_repos, monkeypatch):
+    """The record of `restore` is made while the clone's lock is held, so a write that takes the lock sees the folders gone
+    and the record together."""
+    repos, held, seen = hub_repos.hub.repos, [0], []
+    real, real_write = repos.holding, repos_mod.write_text_atomic
+
+    class Counting:
+        def __init__(self, inner):
+            self.inner = inner
+
+        def __enter__(self):
+            held[0] += 1
+            return self.inner.__enter__()
+
+        def __exit__(self, *a):
+            held[0] -= 1
+            return self.inner.__exit__(*a)
+
+    repos.holding = lambda dest: Counting(real(dest))
+    monkeypatch.setattr(repos_mod, "write_text_atomic",
+                        lambda path, text, *a, **k: (seen.append(held[0]) if '"restore"' in text else None, real_write(path, text, *a, **k))[1])
+    asleep(hub_repos)
+    assert seen and all(n > 0 for n in seen), seen
+
+
+@DEV
+def test_the_owner_a_page_names_wakes_the_clone_whatever_the_case_and_the_reporter_does_not_when_another_is_named(hub_repos):
+    text = asleep(hub_repos)
+    repos = hub_repos.hub.repos
+    data = repos._read()
+    row = data[REPO]["docs/plan.md"]
+    key = row["owner"]
+    data[REPO]["docs/plan.md"] = {**row, "owner": "someone-else", "named": key.upper()}
+    repos._write(data)
+    bad, said = door_call(hub_repos, "bea-claude", "update", doc=ADDRESS, expected_hash=md_hash(text), text=text + "\nA line.\n")
+    assert not bad, said
+    assert not repos.sleeping(REPO)
+
+
+@DEV
+def test_a_clone_that_is_written_to_is_not_put_to_sleep_thirty_days_after_its_last_report(hub_repos):
+    repos, now = hub_repos.hub.repos, [1_000_000.0]
+    repos.clock = lambda: now[0]
+    text = served(hub_repos)
+    now[0] += 29 * 86400
+    r = hub_repos.post("/_/save", {"doc": ADDRESS, "hash": md_hash(text), "branch": "dev",
+                                   "edits": [{"i": 1, "html": "<p>A plan, saved on the page.</p>"}]}, member=BEA)
+    assert r.status == 200, r.text
+    now[0] += 29 * 86400
+    assert repos.sleep_idle() == []
+    assert not repos.sleeping(REPO)

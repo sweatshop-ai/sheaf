@@ -33,7 +33,6 @@ from . import loose as loose_mod
 from . import place
 from . import projects
 from . import proxy as proxy_mod
-from . import relay as relay_mod
 from . import roots as roots_mod
 from . import sheaf_view
 from . import state
@@ -163,7 +162,6 @@ class Hub:
         self.tokens = state.Tokens()
         self.waiting_tells = waiting_mod.Waiting(self)    # the Tells that wait for an agent (9.8)
         self.session_tells = session_tells_mod.SessionTells(self)    # the Tells that wait for a laptop session (9.8)
-        self.relays = relay_mod.Relays()     # the forks' relay tokens, queued Tells and streams (9.14)
         self.box_waits = boxwait.BoxWaits(lambda: self.clock())    # the drops for James's window (9.12, #115)
         self.entries: dict[str, Entry] = {}
         self.index_bus = Bus()                   # the index streams (SPEC 8.8)
@@ -657,10 +655,10 @@ class Hub:
 
     def member_target(self, address: str, member, can: list) -> MemberTarget:
         """The target of a member's page (SPEC 9.8, 10.1): their own, an agent of theirs, never the hub account's
-        session. On a rectoverso whose Tells go to James's window or a fork's relay (9.12) the target is not theirs to
+        session. On a rectoverso whose Tells go to James's window (9.12) the target is not theirs to
         choose: none is shown and `picks` is empty."""
         lines = proxy_mod.member_lines()
-        if {"box-tell", "relay-tell"} & set(can):
+        if "box-tell" in can:
             return MemberTarget(None, can, lines, [])
         pickable = targets_mod.choices(self, address, member)
         raw = targets_mod.stored(self, address, member)
@@ -725,8 +723,6 @@ class Hub:
         on their machine, the one that attaches to James's window when they have a shell on the box, the
         sessions and where the live one runs. None for a page that is not a rectoverso of the list's root."""
         out = {"sessions": st.sessions, "live": st.live}
-        if st.live == "laptop":
-            out["relay"] = st.relay         # whether Tell reaches the fork now (9.14, 10.1)
         # The fork fetches the live session's transcript from /_/session: one on a laptop, none, or no
         # copy to serve it from (sessions_dir and work_dir, #146), nothing to fork.
         if st.forkable and work_mod.serves(st.cfg, st.member):
@@ -1132,29 +1128,6 @@ class Hub:
         if e is not None:
             e.bus.publish(name, data)
 
-    def relay_failed(self, address: str, t, kind: str, error: str, **fields):
-        """A relayed Tell that will not be delivered (9.14): its row, and the page's `tellError` by its event."""
-        self.record(kind, address, tell=t.id, thread=t.thread, error=error, **fields)
-        e = self.entries.get(address)
-        if e is not None:
-            e.bus.publish("tell-relay-failed", {"id": t.thread, "error": error})
-
-    def expire_relayed(self):
-        """Drop every relayed Tell queued an hour ago or more (9.14): each tick, and each relay request, relayed
-        Tell and page's /_/doc, so one is dropped within a second of its hour whether or not anything calls in."""
-        for address, t in self.relays.expire():
-            self.relay_failed(address, t, "tell-expired", relay_mod.EXPIRED)
-
-    def relay_changed(self, address: str, session: str):
-        """A relay of the rectoverso's live session `session` connected, or its grace ran out: the open pages read
-        `/_/doc` again (9.14). A fork that is no longer the live one changes nothing on the page."""
-        e = self.entries.get(address)
-        if e is None:
-            return
-        items = work_mod.sessions(visibility.front_matter(e.live.current()[1]))
-        if items and items[0]["id"] == session:
-            e.bus.publish("relay", {})
-
     def tick(self):
         """One pass of the watcher, run every second. For each document with an open tab or a
         Tell wait: give up on waits nobody answers, and when the file's (mtime, size) moved,
@@ -1181,12 +1154,6 @@ class Hub:
             self._watch_drops()                   # after the tabs' refresh: a reply that just landed is in
         except Exception:
             self.record_exception("drops-failed")
-        try:
-            self.expire_relayed()                 # by the clock, with no relay or page calling in (9.14)
-            for address, session in self.relays.lapsed():
-                self.relay_changed(address, session)
-        except Exception:
-            self.record_exception("relays-failed")
         try:
             self.commits.poll(self.roots.all())   # what the remote got, with no save (8.11, #75)
         except Exception:

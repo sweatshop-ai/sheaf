@@ -183,3 +183,155 @@ def test_a_member_with_no_email_or_the_made_up_one_has_none_to_send_and_the_line
     assert none is None and "e-mail" in why
     made_up = replace(cfg.members[CAL], email=proxy.default_email(CAL, cfg.origin))
     assert outgoing.owner_email(cfg, made_up)[0] is None
+
+
+def test_an_archived_page_lands_archived_and_a_page_that_was_not_lands_in_the_default_view(members):
+    from sheafmd.hub import archive
+    token = peer_token()
+    out, path = landed(members, transfer(members, token, archived=True))
+    root = members.hub.roots.get(out["address"].split("/")[0])
+    rel = out["address"].split("/", 1)[1]
+    assert archive.is_archived(loose.times(root.path, loose.ARCHIVED), rel, path.stat().st_mtime)
+    out, path = landed(members, transfer(members, token, id="8" * 36, name="other.md", archived=False))
+    assert not archive.is_archived(loose.times(root.path, loose.ARCHIVED), "projects/blog/other.md", path.stat().st_mtime)
+
+
+def test_an_archived_that_is_not_true_or_false_is_not_a_bundle(members):
+    res = transfer(members, peer_token(), archived="yes")
+    assert res.status == 400
+
+
+def test_a_landing_that_outlasts_the_deadline_lands_nothing_and_answers_too_slow(members, monkeypatch):
+    import time
+    monkeypatch.setattr(chan, "SECONDS", 0.05)
+    real = members.hub.versions.put
+
+    def slow(*a, **k):
+        time.sleep(0.15)
+        return real(*a, **k)
+    monkeypatch.setattr(members.hub.versions, "put", slow)
+    token = peer_token()
+    res = transfer(members, token)
+    assert res.status == 409 and res.json()["why"] == "too_slow" and res.json()["say"]
+    root = members.hub.loose.known(members.hub.proxy.members[BEA])
+    assert root is None or not [p for p in root.rglob("notes.md")]
+    monkeypatch.setattr(members.hub.versions, "put", real)
+    assert transfer(members, token).status == 200            # nothing was remembered of the failed one: the same id lands
+
+
+# ── a page moving back, and the landing that fails ───────────────────────────
+
+ELSEWHERE = "https://elsewhere.example.com"
+GONE = "loose-bea/projects/blog/gone.md"
+
+
+def forwarded(members, origin=ELSEWHERE):
+    """A page of Bea's has left for `origin`: a Forward at `GONE`, and her loose root exists (an earlier page landed in it)."""
+    landed(members, transfer(members, peer_token(origin=origin)))
+    members.hub.forwards.add_remote(GONE, origin, "loose-bea2/projects/blog/gone.md", "Bea", "h1")
+
+
+def back(members, token, **over):
+    return transfer(members, token, id="7c9e6679-7425-40de-944b-e07fc1f90ae8", name="gone.md",
+                    **{"from": {"origin": ELSEWHERE, "by": "Bea", "at": "2026-11-16T10:00:00"}, **over})
+
+
+def test_a_page_moving_back_lifts_the_forward_when_the_peer_token_names_the_tiroir_it_left_for(members):
+    forwarded(members)
+    res = back(members, peer_token(origin=ELSEWHERE))
+    assert res.status == 200, res.text
+    assert members.hub.forwards.remote(GONE) is None
+
+
+def test_a_bundle_that_claims_the_origin_the_page_left_for_lifts_no_forward_when_the_token_is_another_tiroirs(members):
+    forwarded(members)
+    res = back(members, peer_token())            # the token is PEER's; only the body says ELSEWHERE
+    assert res.status == 409
+    assert members.hub.forwards.remote(GONE) is not None
+
+
+def test_a_landing_that_fails_with_any_exception_puts_the_lifted_forward_back(members, monkeypatch):
+    from sheafmd import mcp
+    forwarded(members)
+
+    def broken(self, args, caller):
+        raise OSError("disk full")
+    monkeypatch.setattr(mcp.Door, "_create", broken)
+    try:
+        back(members, peer_token(origin=ELSEWHERE))
+    except OSError:
+        pass
+    assert members.hub.forwards.remote(GONE) is not None
+
+
+def test_a_page_moving_back_lifts_every_forward_the_move_made_for_it_and_points_its_earlier_addresses_at_it(members):
+    forwarded(members)
+    older = "loose-bea/older/gone.md"
+    members.hub.forwards.add(older, GONE, "Bea")                     # the page was at `older` first, and moved to GONE here
+    members.hub.forwards.add_remote(GONE, ELSEWHERE, "loose-bea2/projects/blog/gone.md", "Bea", "h1")    # then left: `older` leads there too
+    assert members.hub.forwards.remote(older) is not None
+    res = back(members, peer_token(origin=ELSEWHERE))
+    assert res.status == 200, res.text
+    assert members.hub.forwards.remote(GONE) is None and members.hub.forwards.remote(older) is None
+    assert members.hub.forwards.follow(older) == GONE          # its old links lead to where the page is again
+
+
+def test_a_landing_that_waited_for_the_lock_past_the_senders_deadline_lands_nothing(members, monkeypatch):
+    import threading
+    import time
+
+    from sheafmd.hub import state
+    monkeypatch.setattr(chan, "SECONDS", 0.2)
+    held, release = threading.Event(), threading.Event()
+
+    def other_landing():
+        with state.file_locked("transfers.lock"):
+            held.set()
+            release.wait(5)
+    threading.Thread(target=other_landing, daemon=True).start()
+    assert held.wait(5)
+    threading.Timer(0.5, release.set).start()
+    res = transfer(members, peer_token())
+    assert res.status == 409 and res.json()["why"] == "too_slow"
+    time.sleep(0.05)
+    root = members.hub.loose.known(members.hub.proxy.members[BEA])
+    assert root is None or not [p for p in root.rglob("notes.md")]
+
+
+def test_a_landing_that_fails_takes_back_only_the_write_log_lines_it_made_not_the_ones_kept_at_the_address(members, monkeypatch):
+    from sheafmd.hub.writelog import WriteLog
+    forwarded(members)
+    members.hub.writes.add(GONE, "Bea", "laptop", "door")           # what `moved_remote` kept of the page that left
+    kept = members.hub.writes.lines(GONE)
+    assert kept
+
+    def broken(self, *a, **k):
+        raise OSError("disk full")
+    monkeypatch.setattr(WriteLog, "carry", broken)
+    try:
+        back(members, peer_token(origin=ELSEWHERE))
+    except OSError:
+        pass
+    assert members.hub.writes.lines(GONE) == kept
+
+
+def test_a_page_that_moves_back_carries_no_write_log_line_the_address_already_keeps(members):
+    from sheafmd.hub.writelog import WriteLog
+    forwarded(members)
+    members.hub.writes.add(GONE, "Bea", "laptop", "door", session="s-1")       # kept at the address when the page left
+    sent = [{k: v for k, v in vars(line).items() if k != "address"} for line in members.hub.writes.lines(GONE)]
+    res = back(members, peer_token(origin=ELSEWHERE), writes=sent)             # the other tiroir sends the same lines back
+    assert res.status == 200, res.text
+    own = [(line.time, line.writer, line.place, line.via, line.session, line.host, line.link, line.chat)
+           for line in members.hub.writes.lines(GONE) if line.via != "transfer"]
+    assert len(own) == len(set(own)) == len(sent)
+    assert isinstance(members.hub.writes, WriteLog)
+
+
+def test_two_identical_lines_in_one_bundle_are_both_kept(members):
+    forwarded(members)
+    line = {"time": "2026-11-10T09:00:00", "writer": "Claude Code (Bea)", "place": "laptop", "via": "door",
+            "session": "s-1", "host": "", "link": "", "chat": ""}
+    res = back(members, peer_token(origin=ELSEWHERE), writes=[line, dict(line)])      # two writes in the same second
+    assert res.status == 200, res.text
+    assert len([w for w in members.hub.writes.lines(GONE) if w.via == "door"]) == 2

@@ -262,12 +262,14 @@ class Versions:
                 out.append(text)
         return out
 
-    def forget(self, address: str):
+    def forget(self, address: str, inside: bool = False):
         """Drop every version of one document. A root that is forgotten takes its documents'
         versions with it: the name may go to another folder, and a page still open on the old
         document must not be merged into the new one. A store inside a root keeps them: they are
-        files of the root, as its documents are (7.4)."""
-        if self._root is None:
+        files of the root, as its documents are (7.4), unless the page itself has left the root
+        (`inside`: it moved to another tiroir, and keeps no versions under the old address).
+        """
+        if self._root is None or inside:
             shutil.rmtree(self._folder(address), ignore_errors=True)
 
     def rename(self, old: str, new: str):
@@ -751,6 +753,11 @@ class SharedIds(_Store):
             data[k] = address
             return k, True
         return self._change(change)
+
+    def known(self, address: str) -> str | None:
+        """The opaque name already made for `address`, else None: never makes one."""
+        with self._lock:
+            return next((k for k, v in self._data.items() if v == address), None)
 
     def address(self, key: str) -> str | None:
         with self._lock:

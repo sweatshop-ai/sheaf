@@ -81,9 +81,10 @@ def _shape(b) -> str | None:
     return None
 
 
-def land(hub, door, b) -> tuple:
+def land(hub, door, b, peer: str | None = None) -> tuple:
     """Land bundle `b` for the member its `owner_email` names. (200, {ok, address, hash, origin}) or (409, {ok: False, why, say});
-    a bundle that is not one is a Refuse of the handler's (`ValueError` here, with the reason), never a half-landed page."""
+    a bundle that is not one is a Refuse of the handler's (`ValueError` here, with the reason), never a half-landed page.
+    `peer` is the origin the channel's token names, passed by the caller: a page moves back only from the tiroir the token is of."""
     if (bad := _shape(b)) is not None:
         raise ValueError(bad)
     owner, why = owner_for(hub, b.get("owner_email"))
@@ -94,7 +95,7 @@ def land(hub, door, b) -> tuple:
         if isinstance(known, dict):
             return 200, {"ok": True, **known}
         try:
-            return _landed(hub, door, b, owner, time.monotonic() + channel.SECONDS)
+            return _landed(hub, door, b, owner, time.monotonic() + channel.SECONDS, peer)
         except _TooSlow:
             return _refused("too_slow")
 
@@ -103,7 +104,7 @@ class _TooSlow(Exception):
     """The landing ran past the time the sender waits for its answer: what it made is taken back, and nothing is remembered."""
 
 
-def _landed(hub, door, b, owner, deadline) -> tuple:
+def _landed(hub, door, b, owner, deadline, peer: str | None = None) -> tuple:
     """The landing of `land`, with `transfers.lock` held. The deadline is the sender's: past it the sender has given up and
     keeps its page, so a page landed after it would be a second one. It is checked between the steps, never inside one."""
     caller = mcp.Caller(owner.name, TokenRow("peer-transfer", owner.name, True, member=owner.id))
@@ -113,15 +114,17 @@ def _landed(hub, door, b, owner, deadline) -> tuple:
     args = {"doc": b["name"], "folder": b.get("folder"), "text": text, **({"keep": True} if b.get("keep") else {})}
     # A page that comes back to the address it once left for the tiroir it comes from takes the Forward there away; any other Forward at
     # the address stays, and refuses the landing as it refuses a create.
-    back = _forward_back(hub, owner, b)
+    back = _forward_back(hub, owner, b, peer)
     if back is not None:
         hub.forwards.drop(back[0])
     try:
         made = door._create(args, caller)
-    except mcp.ToolError as e:
+    except BaseException as e:
         if back is not None:
             hub.forwards.put_back(*back)
-        return _refused("name_taken") if e.why == "exists" else _refused("not_landed", str(e))
+        if isinstance(e, mcp.ToolError):
+            return _refused("name_taken") if e.why == "exists" else _refused("not_landed", str(e))
+        raise
     address = made["doc"]
     try:
         for v in b.get("versions", []):
@@ -163,13 +166,13 @@ def _unkeep(root_path, address: str) -> None:
             state.write_text_private(root_path / loose.KEEP, json.dumps(sorted(x for x in held if x != rel)) + "\n", inside=True)
 
 
-def _forward_back(hub, owner, b) -> tuple | None:
+def _forward_back(hub, owner, b, peer: str | None) -> tuple | None:
     """(address, the Forward) when the bundle's page would land at an address that a Forward of this tiroir leads away from, to the
-    tiroir the bundle comes from: the page is moving back."""
-    came = (b.get("from") or {}).get("origin") if isinstance(b.get("from"), dict) else None
+    tiroir that sent it: the page is moving back. The sender is the origin of the peer token that authenticated the call, never the
+    bundle's own `from.origin`, which any paired tiroir may write as it likes."""
     held = hub.loose.known(owner)
     root = hub.roots.lookup(held / "x.md") if held is not None else None
-    if root is None or not isinstance(came, str):
+    if root is None or not peer:
         return None
     try:
         folder = loose.folder_path(b.get("folder"))
@@ -177,7 +180,7 @@ def _forward_back(hub, owner, b) -> tuple | None:
         return None
     address = f"{root.name}/{folder + '/' if folder else ''}{b['name']}"
     far = hub.forwards.remote(address)
-    return (address, far) if far is not None and far["origin"] == came else None
+    return (address, far) if far is not None and root_moves.origin(far["origin"]) == root_moves.origin(peer) else None
 
 
 def _in_time(deadline: float) -> None:

@@ -46,15 +46,16 @@ class Forwards(_Store):
             return None, True
         self._change(change)
 
-    def add_remote(self, old: str, origin: str, to: str, by: str, hash_: str) -> None:
-        """`old` now leads to `to` on the tiroir at `origin`, where the page landed with text `hash_`. Whatever led to `old`
-        here leads there too (one hop, never a chain)."""
+    def add_remote(self, old: str, origin: str, to: str, by: str, hash_: str, was: str = "") -> None:
+        """`old` now leads to `to` on the tiroir at `origin`, where the page landed with text `hash_`; `was` is the hash of the text
+        that left, which a laptop compares with the one it last read. Whatever led to `old` here leads there too (one hop, never a
+        chain)."""
         def change(data):
             at = time.strftime(STAMP_FORMAT)
             for k, e in data.items():
                 if isinstance(e, dict) and "origin" not in e and e.get("to") == old:
-                    data[k] = {"origin": origin, "to": to, "by": e.get("by", by), "at": e.get("at", at), "hash": hash_}
-            data[old] = {"origin": origin, "to": to, "by": by, "at": at, "hash": hash_}
+                    data[k] = {"origin": origin, "to": to, "by": e.get("by", by), "at": e.get("at", at), "hash": hash_, "was": was}
+            data[old] = {"origin": origin, "to": to, "by": by, "at": at, "hash": hash_, "was": was}
             return None, True
         self._change(change)
 

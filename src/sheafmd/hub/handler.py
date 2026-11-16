@@ -562,7 +562,7 @@ class Handler:
         """Land a page moved here (ticket 20): `incoming.land`. Whatever fails after the page was made takes it back and is a 500
         the sender reads as a failed transfer, so it keeps its page."""
         try:
-            status, answer = incoming.land(self.hub, self.door, req.body)
+            status, answer = incoming.land(self.hub, self.door, req.body, peer=req.token.peer)
         except ValueError as e:
             raise Refuse(400, str(e)) from None
         return _json(status, answer)
@@ -804,7 +804,8 @@ class Handler:
                 if isinstance(data, dict) and isinstance(data.get("origin"), str):     # to another tiroir (ticket 20): only its owner is led
                     if hub.loose_owner(data["doc"]) == member.id:
                         return {"doc": data["doc"], "to": data["to"], "origin": data["origin"]}
-                    return events.Renamed("gone", {"doc": hub.alias(member, data["doc"])})
+                    opaque = data.get("opaque")     # made before the page left, as the recipient's tab holds it: none is made now
+                    return events.Renamed("gone", {"doc": f"{data['doc'].split('/', 1)[0]}/{opaque}.md"}) if isinstance(opaque, str) else None
                 if isinstance(to, str) and hub.loose_owner(to) == member.id and hub.visible(member, to):
                     return {"doc": data["doc"], "to": to}
                 if isinstance(to, str) and hub.visible(member, to):     # a recipient is never led: the page is gone from here, told as it is told them

@@ -1088,6 +1088,7 @@ def ask(repos, monkeypatch, commit):
 @pytest.mark.parametrize("version", [(2, 43), (2, 0), (1, 99), None])
 def test_below_2_44_or_unknown_the_request_path_makes_no_look_and_nothing_fetches(hub_repos, tmp_path, monkeypatch, version):
     report(hub_repos)
+    assert hub_repos.hub.repos.settle()         # the thread of the second report has served the clone: no look of its own is counted below
     log = count_fetches(the_clone(hub_repos), tmp_path)
     repos = hub_repos.hub.repos
     head = sh(the_clone(hub_repos), "rev-parse", "origin/HEAD").strip()    # a commit the clone does hold
@@ -1102,6 +1103,7 @@ def test_below_2_44_or_unknown_the_request_path_makes_no_look_and_nothing_fetche
 @pytest.mark.parametrize("version", [(2, 44), (2, 53), (3, 0)])
 def test_from_2_44_the_request_path_looks_at_the_clone_as_before(hub_repos, monkeypatch, version):
     report(hub_repos)
+    assert hub_repos.hub.repos.settle()         # the thread of the second report has served the clone: no look of its own is counted below
     repos = hub_repos.hub.repos
     head = sh(the_clone(hub_repos), "rev-parse", "origin/HEAD").strip()
     monkeypatch.setattr(repos_mod, "_git_version", lambda: version)
@@ -1114,6 +1116,7 @@ def test_from_2_44_the_request_path_looks_at_the_clone_as_before(hub_repos, monk
 def test_on_an_old_git_the_repos_own_thread_still_looks_and_records_the_page(hub_repos, monkeypatch):
     """The thread may fetch, so the guard is not its business: a page of a commit the clone holds still gets its record."""
     report(hub_repos)
+    assert hub_repos.hub.repos.settle()         # the thread of the second report has served the clone: no look of its own is counted below
     repos = hub_repos.hub.repos
     commit = sh(the_clone(hub_repos), "rev-parse", "origin/HEAD").strip()
     monkeypatch.setattr(repos_mod, "_git_version", lambda: (2, 43))

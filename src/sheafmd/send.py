@@ -41,6 +41,7 @@ from .source import md_hash
 
 EXIT_OK, EXIT_FAILED = 0, 1
 TIMEOUT = 15.0
+LONG_POLL_TIMEOUT = 35.0   # a `tells` call the door holds for up to 25 s
 CONNECT_TIMEOUT = 5.0   # the messages before a tool call (`initialize` and its notice): a tiroir that does not answer them is not there
 STATE_FILE = "sends.json"
 PROTOCOL = "2025-06-18"
@@ -78,7 +79,9 @@ def post(url: str, token: str, message: dict, headers: dict) -> tuple[int, dict 
     req = urllib.request.Request(url, json.dumps(message).encode(), {
         "Authorization": f"Bearer {token}", "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream", **headers}, method="POST")
-    return _request(req, TIMEOUT if message.get("method") == "tools/call" else CONNECT_TIMEOUT)
+    if message.get("method") != "tools/call":
+        return _request(req, CONNECT_TIMEOUT)
+    return _request(req, LONG_POLL_TIMEOUT if (message.get("params") or {}).get("name") == "tells" else TIMEOUT)
 
 
 def get(url: str, token: str) -> tuple[int, dict | None, dict]:

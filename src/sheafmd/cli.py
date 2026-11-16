@@ -26,7 +26,7 @@ import webbrowser
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from . import __version__, agent_setup, comments, config, deliver, diagnostics, lifecycle, mcp, paths, pdf, relay_client, seat, send, theme
+from . import __version__, agent_setup, comments, config, deliver, diagnostics, lifecycle, mcp, paths, pdf, relay_client, seat, send, tells_poll, theme
 from .agents.detect import detect
 from .agents.registry import detect_target
 from .atomic import write_text_atomic
@@ -1202,8 +1202,10 @@ COMMANDS.update(deliver.COMMANDS)
 COMMAND_HELP.update(deliver.COMMAND_HELP)
 COMMANDS.update(relay_client.COMMANDS)
 COMMAND_HELP.update(relay_client.COMMAND_HELP)
-COMMANDS.update({"pull": lambda argv: send.cmd_pull(argv, _out, _err)})
+COMMANDS.update({"pull": lambda argv: send.cmd_pull(argv, _out, _err),
+                 "tells-poll": lambda argv: tells_poll.cmd_tells_poll(argv, _out, _err)})
 COMMAND_HELP.update(send.COMMAND_HELP)
+COMMAND_HELP.update(tells_poll.COMMAND_HELP)
 
 
 # SPEC 14.2: on native Windows only what needs no hub and no service manager runs.

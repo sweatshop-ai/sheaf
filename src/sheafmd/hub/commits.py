@@ -292,7 +292,7 @@ def _again(folder: Path, commit: str, onto: str):
 
 
 class Commits:
-    def __init__(self, record, guard=None, roots=None, refuse_rewrite=False, pulling=None, pulled=None):
+    def __init__(self, record, guard=None, roots=None, refuse_rewrite=False, pulling=None, pulled=None, renamed=None):
         """`record(kind, doc, **detail)` writes a diagnostics row (15). `guard(root, files)` gives a context that
         holds what a writer of each of `files` (absolute paths) holds before the repo's lock (9.11): a pull takes
         it before it changes them. `roots()` gives the registered roots: the repo of one pushes only when its other
@@ -301,10 +301,13 @@ class Commits:
         saw there (a force-push), kept in the repo's own ref `refs/sheaf/last-seen/<branch>`; off, no ref is read
         or written and a pull is as it was. `pulling(folder, [(path, author)])` hears of the files a pull is about to
         change and who last wrote each, before the work tree moves; `pulled(folder, files, ok)` hears it end, `ok` false
-        when the pull was refused or failed: the Write log's line of it."""
+        when the pull was refused or failed: the Write log's line of it. `renamed(folder, [(old, new)])` hears of the pages
+        a pull that went through renamed (absolute paths, git's own rename detection), after the repo's lock is let go: it
+        takes the moves' lock, which comes before the repo's (9.11)."""
         self._record = record
         self._pulling = pulling or (lambda folder, files: None)
         self._pulled = pulled or (lambda folder, files, ok, left=None: None)
+        self._renamed = renamed or (lambda folder, pairs: None)
         self._guard = guard or (lambda root, files: nullcontext())
         self._roots = roots or (lambda: ())
         self._refuse = refuse_rewrite if callable(refuse_rewrite) else (lambda: refuse_rewrite)
@@ -628,6 +631,9 @@ class Commits:
         # taken for a disk write, nor a later write for the pull.
         pages = [top / p for p in changed if p.endswith(".md")]
         self._tell(self._pulling, address, folder, [(path, "?") for path in pages])
+        # The save side and this list read `--no-renames`: a rename is then a delete and an add, and both paths are locked and
+        # told to the Write log. Renames are looked at apart, for the Forward a moved page leaves (9.11), once the pull went through.
+        renames = self._renames(folder, base, theirs, top)
         go, left = False, {}
         try:
             with self._guard(root, [top / p for p in changed]), self._repo_lock(folder):
@@ -636,12 +642,27 @@ class Commits:
                 if go:
                     self._last_seen(folder, name, theirs)
                 left = {path: _hash_of(path) for path in pages}   # the text the pull left, before a writer's lock is let go
+            if go and renames:
+                self._tell(self._renamed, address, folder, renames)
         finally:
             # Who last wrote each page, asked of the commit pulled, which the locks do not guard: a slow git holds up no writer.
             ok = go is not False
             authors = [(path, _author(top, theirs, path.relative_to(top).as_posix()) if ok else "?") for path in pages]
             self._tell(self._pulled, address, folder, authors, ok, left)
         return go
+
+    @staticmethod
+    def _renames(folder: Path, base: str, theirs: str, top: Path) -> list:
+        """The pages the remote renamed between `base` and `theirs`, `[(old, new)]` as absolute paths: git's own detection
+        (`-M`), `.md` files only. A file copied or changed beyond what git calls a rename is no rename."""
+        out = _git(folder, "diff", "--name-status", "-M", "--diff-filter=R", "-z", base, theirs).stdout.split("\0")
+        found, i = [], 0
+        while i + 2 < len(out) and out[i].startswith("R"):
+            old, new = out[i + 1], out[i + 2]
+            if old.endswith(".md") and new.endswith(".md"):
+                found.append((top / old, top / new))
+            i += 3
+        return found
 
     def _tell(self, call, address, *args):
         """The Write log's hearing of a pull: its failure is a diagnostics row, never the pull's."""

@@ -1819,7 +1819,7 @@ def renamed_on_github(tmp_path, remote, old: str, new: str):
     git(away, "push", "-q", "origin", "HEAD:main")
 
 
-def test_a_rename_that_arrives_on_a_pull_writes_a_forward_and_carries_the_versions(box, rectoversos, remote, tmp_path):
+def test_a_rename_that_arrives_on_a_pull_writes_a_forward_and_carries_the_versions(box, rectoversos, remote, tmp_path, lock_order):
     """Ticket 17: a repo page moves only by git; when a pull shows the rename, the hub writes a Forward from the old
     address to the new one, and the versions kept under the old address are the new page's."""
     edit(box, rectoversos)

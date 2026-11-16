@@ -32,6 +32,7 @@ from . import assets as assets_mod
 from . import boxwait
 from . import forwards as forwards_mod
 from . import loose as loose_mod
+from . import moves as moves_mod
 from . import place
 from . import projects
 from . import proxy as proxy_mod
@@ -144,7 +145,7 @@ class Hub:
         self.versions = state.Versions()
         self.writes = WriteLog()                 # one line per write to a page, whatever the path (the Write log)
         self.commits = Commits(self.record, self._writers_out, self.roots.all,
-                               lambda: bool(self._private_paths), pulling=self.pulling, pulled=self.pulled)   # the roots that commit (8.11); the rewrite guard while a private root is configured
+                               lambda: bool(self._private_paths), pulling=self.pulling, pulled=self.pulled, renamed=self.renamed)   # the roots that commit (8.11); the rewrite guard while a private root is configured
         self._told_projects: set = set()         # what check_projects warned of this run (8.12)
         self._projects: dict = {}                # root id -> (stat key, entries | Invalid | None) of its projects.toml
         self._grants_seen: dict = {}             # root id -> the projects_of answer the open tabs were last told (8.12)
@@ -1487,6 +1488,21 @@ class Hub:
             self.writes.end_pull(address, text)
             if ok:
                 self.writes.add(address, f"git · {author}", "tiroir", "pull")
+
+    def renamed(self, folder: Path, pairs: list[tuple[Path, Path]]):
+        """A pull of the repo at `folder` brought in the rename of each `(old path, new path)`, and the files are moved (9.11): a
+        repo page moves only by git, and the hub writes the Forward and carries what it keeps of the page, as for a Move. Under
+        the moves' lock, which comes before the repo's: the pull lets the repo's lock go first. A rename of a file the hub does
+        not serve, or to an address where a page already stood, is none."""
+        with moves_mod.exclusive():
+            for old, new in pairs:
+                a, b = self._page_of(old), self._page_of(new)
+                if a is None or b is None or a == b or not new.exists() or old.exists():
+                    continue
+                try:
+                    self.moved_page(a, b, "git")
+                except Exception:
+                    self.record_exception("move-store-failed", b)
 
     def wrote(self, address: str, moved: bool = False):
         """The door made or changed this document's file (SPEC 12): tell its open tabs now, as the

@@ -33,7 +33,7 @@ from .hub.auth import clean_display
 from .hub.client import HubUnavailable
 from .hub.roots import Address, NotFound, address_of_url, in_git_dir
 from .agents import prompts
-from .hub import loose, place, targets, visibility
+from .hub import loose, moves, place, targets, visibility
 from .hub import repos as repos_mod
 from .hub import waiting as waiting_mod
 from .hub.state import TokenRow
@@ -135,6 +135,19 @@ TOOLS = {
             "expected_hash": {"type": "string", "description": "The hash `read` or `create` "
                                                                "gave for the text you changed."}},
         "required": ["doc", "text", "expected_hash"]},
+    "move": {
+        "description": "Put a loose page of yours in another folder of your loose root, named by its path "
+                       "(`clients/blog`, made when it is not there; a folder with no page in it is gone). Its file name "
+                       "stays. The old address forwards to the new one for ever, and the page's versions, comments, "
+                       "marks and Share go with it; links to the old address are not rewritten. Only the owner moves a "
+                       "page, and only within its root: a repo page moves by git. Answers the new `doc`, its `url` and "
+                       "`hash`, and `moved_from`.",
+        "properties": {
+            "doc": _DOC,
+            "folder": {"type": "string", "description": "The folder of your loose root the page goes in "
+                                                        "(`clients/blog`): a path with no empty, `.`, `..` or hidden "
+                                                        "part."}},
+        "required": ["doc", "folder"]},
     "tells": {
         "description": "A laptop session asks for its Tells: those the person pressed on pages served here, for the "
                        "session id this token declared. Holds up to `wait` seconds (at most 25) when none waits and "
@@ -154,9 +167,9 @@ TOOLS = {
             "commit": {"type": "string", "description": "The commit id the page was rendered at."}},
         "required": ["repo", "path", "commit"]},
 }
-PAGE_TOOLS = ("read", "create", "update")    # the key, or a token made with --write (SPEC 9.7); a render report sends no text and needs only a member's token
-WRITE_TOOLS = ("create", "update")           # each call leaves a row in the diagnostics log (SPEC 15) and a line in the Write log (9.12)
-SESSION_WRITES = ("create", "update", "reply", "resolve")    # a write that names James's session to the hub (9.12)
+PAGE_TOOLS = ("read", "create", "update", "move")    # the key, or a token made with --write (SPEC 9.7); a render report sends no text and needs only a member's token
+WRITE_TOOLS = ("create", "update", "move")         # each call leaves a row in the diagnostics log (SPEC 15) and a line in the Write log (9.12)
+SESSION_WRITES = ("create", "update", "move", "reply", "resolve")    # a write that names James's session to the hub (9.12)
 MAX_TEXT = 1024 * 1024           # bytes of UTF-8 a create or an update may write (SPEC 12)
 NO_RIGHT = ("This token reads and answers comments; it does not read, make or change pages. A "
             "token that does is made with `sheaf token add NAME --write`.")
@@ -294,7 +307,7 @@ class Door:
         self._open_threads: dict = {}
         self._tools = {"documents": self._documents, "threads": self._threads,
                        "reply": self._reply, "resolve": self._resolve, "read": self._read,
-                       "create": self._create, "update": self._update, "tells": self._session_tells,
+                       "create": self._create, "update": self._update, "move": self._move, "tells": self._session_tells,
                        "render_report": self._render_report}
 
     # ── JSON-RPC ─────────────────────────────────────────────────────────────
@@ -410,10 +423,12 @@ class Door:
         except Exception:
             self.hub.record_exception("tell-end-failed", address)
 
-    def _address(self, doc: str, caller: Caller) -> str:
+    def _address(self, doc: str, caller: Caller, followed: list | None = None) -> str:
         """`<root>/<path>` of the document `doc` names: that address itself, the URL of its page,
         or the absolute path of the .md. A caller who may add roots (the key) has the root of a
-        path registered; a token (9.7) is held to the roots the hub already has."""
+        path registered; a token (9.7) is held to the roots the hub already has. An address a page moved from is followed
+        to where it is now (9.11), for the page's owner and for a caller bound to no member; the address it was is put in
+        `followed`."""
         doc = _named(doc)
         if "://" in doc:
             address = self._address_of_url(doc)
@@ -422,6 +437,7 @@ class Door:
         else:
             address = doc
         address = self.hub.unalias(address)         # the opaque name of a page Shared with the member (9.11)
+        address = self._forwarded(address, caller, followed)
         with place.held(self.hub, address):         # a read, under the name's lock (9.11)
             try:
                 self.hub.roots.document(address)
@@ -441,6 +457,25 @@ class Door:
                 if judged is None or not self._sees(judged[0], address, caller):
                     raise _absent(doc)
         return address
+
+    def _forwarded(self, address: str, caller: Caller, followed: list | None) -> str:
+        """`address`, or the address its Forward leads to when no page stands at it and the caller may be led there: the
+        owner of the page the Forward leads to, or a caller that is bound to no member. Any other caller finds the address
+        as it is, so it answers as an address never used."""
+        try:
+            self.hub.roots.document(address)
+            return address
+        except NotFound:
+            pass
+        to = self.hub.forwards.follow(address)
+        if to is None:
+            return address
+        member = self._member(caller)
+        if member is not None and self.hub.loose_owner(to) != member.id:
+            return address
+        if followed is not None:
+            followed.append(address)
+        return to
 
     def _judged(self, caller: Caller) -> bool:
         """Whether visibility (9.11) holds `caller`: a token, in proxy mode."""
@@ -807,7 +842,8 @@ class Door:
         return {"id": cid, "status": "resolved"}
 
     def _read(self, args: dict, caller: Caller):
-        address = self._address(args["doc"], caller)
+        followed: list = []
+        address = self._address(args["doc"], caller, followed)
         try:
             with place.held(self.hub, address), self._open(address) as op:     # no move between finding the file and reading it (9.11)
                 text, private = op.text(), place.opened_private(self.hub, op)
@@ -820,7 +856,8 @@ class Door:
                 raise ToolError(f"{address} has a `<!--` that nothing closes, at line "
                                 f"{_unclosed_line(text, out)}: the page shows nothing after it, "
                                 "so its text without comments is not given.")
-        return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text), "text": out}
+        return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text), "text": out,
+                **({"moved_from": followed[0]} if followed else {})}
 
     def _render_report(self, args: dict, caller: Caller) -> dict:
         """A render report (SPEC 13): the tiroir hears that the caller's member works on a repo page, and clones the
@@ -855,9 +892,9 @@ class Door:
             raise
         if name in WRITE_TOOLS and out.get("changed", True):
             self._logged_write(name, out["doc"], caller)
+        sent = {"bytes": len(_as_read(args["text"]).encode("utf-8"))} if "text" in args else {}
         self.hub.record(f"door-{name}", out["doc"], outcome="written" if out.get("changed", True)
-                        else "unchanged", hash=out["hash"], bytes=len(_as_read(args["text"]).encode("utf-8")),
-                        **who)
+                        else "unchanged", hash=out["hash"], **sent, **who)
         return out
 
     def _logged_write(self, name: str, address: str, caller: Caller):
@@ -972,11 +1009,24 @@ class Door:
         given = args
         args, fresh = self._loose(args, caller)
         try:
-            return self._created(given, args, caller)
+            # A loose root's names have no lock of their own (`place.held` holds nothing there): a create of one takes the
+            # moves' lock, so it is not made between a move's checks and its rename, nor reads a Forward half written.
+            with moves.exclusive() if self._in_loose_root(args, caller) else contextlib.nullcontext():
+                return self._created(given, args, caller)
         except BaseException:
             if fresh is not None:       # a refused create leaves no loose root it made behind
                 self.hub.loose.drop(*fresh)
             raise
+
+    def _in_loose_root(self, args: dict, caller: Caller) -> bool:
+        """Whether the page `create` is to make ends in a loose root, whoever's, however its address is spelled: a bare name
+        the door put there, `<loose-root>/<path>`, or the real path of the folder. A create `_created` refuses for its path
+        takes no lock: it makes nothing."""
+        try:
+            root, _ = self._new_address(args["doc"], caller)
+        except ToolError:
+            return False
+        return self.hub.loose.owner_of(root) is not None
 
     def _created(self, given: dict, args: dict, caller: Caller):
         root, rel = self._new_address(args["doc"], caller)
@@ -986,6 +1036,9 @@ class Door:
             # A root of another member's. Root ownership alone, not rule A: `_new_address` already refused a real path
             # inside a private root, and a list name a private root holds falls to `place.taken` below, as a shared one.
             raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path")
+        if self.hub.forwards.follow(address) is not None:
+            raise ToolError(f"{_named(args['doc'])} cannot be made: a page moved away from that address, and its "
+                            "Forward stays. Pick another name or folder.", "moved")
         placed = place.applies(self.hub, root.name)
         if placed and place.names_private(rel):
             raise ToolError(f"{_named(args['doc'])} cannot be made: the hub places owner-only rectoversos itself: name "
@@ -1099,7 +1152,8 @@ class Door:
         return text
 
     def _update(self, args: dict, caller: Caller):
-        address = self._address(args["doc"], caller)
+        followed: list = []
+        address = self._address(args["doc"], caller, followed)
         text, expected = _as_read(args["text"]), args["expected_hash"]
         if not HASH_RE.fullmatch(expected):
             raise ToolError("expected_hash is not a hash that `read` or `create` gave (16 hex digits).",
@@ -1117,7 +1171,21 @@ class Door:
             finally:
                 if moved:                           # moved, then failed before its commit: the move is committed
                     self.hub.committed(address, by=caller.display, what="update", gone=moved.pop())
-        return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text), "changed": before != text}
+        return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text), "changed": before != text,
+                **({"moved_from": followed[0]} if followed else {})}
+
+    def _move(self, args: dict, caller: Caller):
+        address = self._address(args["doc"], caller)
+        if (member := self._member(caller)) is None:
+            raise ToolError("a loose page belongs to a member: this caller acts for none.", "no member")
+        try:
+            new = moves.move_page(self.hub, member, address, args["folder"])
+        except moves.Refused as r:
+            if r.status == 404:
+                raise _absent(args["doc"]) from None
+            raise ToolError(r.message, "owner" if r.status == 403 else "move") from None
+        text = self.hub.file(new).read_text(encoding="utf-8", errors="replace")
+        return {"doc": new, "url": self.hub.url(new), "hash": md_hash(text), "moved_from": address}
 
     def _updated(self, address: str, args: dict, text: str, expected: str, caller: Caller, moved: list):
         """The write of an update, and the rectoverso's file moved to its home (9.11): (the text before, the text

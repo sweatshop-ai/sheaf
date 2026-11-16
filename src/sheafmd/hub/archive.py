@@ -20,7 +20,7 @@ from . import roots as roots_mod
 DAY = 86400
 SWEEP_EVERY = 600           # seconds between two sweeps on the hub's tick
 TRASH_DAYS = 30
-ARCHIVED, SEEN = "archived.json", "seen.json"
+ARCHIVED, SEEN = loose.ARCHIVED, loose.SEEN
 TRASH = Path(".sheaf") / "trash"
 
 
@@ -234,6 +234,14 @@ class Archive:
                                 "days_left": max(0, TRASH_DAYS - int((now - int(e.name)) // DAY))})
         return sorted(out, key=lambda r: (-r["deleted_at"], r["rel"]))
 
+    @staticmethod
+    def _drop(dest: Path) -> None:
+        """Take off the link a restore made at `dest`, so a refused restore leaves the page where it was, in the trash."""
+        try:
+            os.unlink(dest)
+        except OSError as e:
+            raise loose.Refused(f"the page is at its address and still in the trash ({e.strerror}): delete one of them") from None
+
     def restore_trash(self, root, ident: str) -> str:
         """Put a trashed page back at its old address; refused (`Taken`) when a page is there, also when one comes in while this runs, and never overwritten."""
         stamp, _, rel = ident.partition("/")
@@ -252,13 +260,24 @@ class Archive:
             for part in reversed(Path(rel).parents):
                 if str(part) != ".":
                     os.makedirs(Path(root.path) / part, mode=0o700, exist_ok=True)
+            before = os.lstat(src)
             try:
-                os.link(src, dest)
+                os.link(src, dest, follow_symlinks=False)       # the entry itself, never what a link put there since the look leads to
             except FileExistsError:
                 raise Taken(rel) from None
             except OSError as e:
                 raise loose.Refused(f"the page could not be put back ({e.strerror})") from None
-            os.unlink(src)
+            try:
+                made = os.lstat(dest)
+                if not stat.S_ISREG(made.st_mode) or (made.st_dev, made.st_ino) != (before.st_dev, before.st_ino):
+                    raise loose.Refused("the page in the trash changed while it was put back: refused, nothing was restored")
+                os.unlink(src)
+            except loose.Refused:
+                self._drop(dest)
+                raise
+            except OSError as e:
+                self._drop(dest)
+                raise loose.Refused(f"the page could not be taken out of the trash ({e.strerror}): nothing was restored") from None
         loose.stamp(root.path, SEEN, {rel: self.hub.clock()})
         with contextlib.suppress(OSError):
             for p in Path(rel).parents:

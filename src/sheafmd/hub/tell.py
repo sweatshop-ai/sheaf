@@ -22,7 +22,7 @@ from .. import config, diagnostics, signals
 from ..agents import prompts
 from ..agents.base import Adapter, DeliveryCancelled, DeliveryError, Target
 from . import roots as roots_mod
-from . import proxy, targets
+from . import moves, proxy, targets
 from .targets import who
 from . import waiting as waiting_mod
 from .auth import clean_display
@@ -37,6 +37,7 @@ ENDED = "The {product} session that rendered this page has ended. Render it agai
 NO_SOCKET = ("Tell needs the session's message socket, which was not found. Render the page "
              "again from the session.")
 UPGRADING = "The hub is restarting for an upgrade. Try again in a moment."
+MOVING = "This page is being moved. Try again in a moment."
 CANCELLING = "The Tell of this comment is still being cancelled. Try again when that is done."
 WAIT_ENDED = ("This Tell ended before it went out: it was cancelled, answered or failed. "
               "Tell again if you still want it.")
@@ -298,13 +299,17 @@ class Tell:
 
     # ── helpers ──────────────────────────────────────────────────────────────
     @contextmanager
-    def _admitting(self):
+    def _admitting(self, address: str):
         """A job starts, or a Tell's wait begins, only inside this: under the hub's admission
         lock, which an upgrade stop also takes, so neither slips between the other's check and
-        its act (SPEC 8.4). Refused once an upgrade stop has been taken."""
+        its act (SPEC 8.4). Refused once an upgrade stop has been taken, and on a page a move is renaming: the move
+        marks the address under this lock (`moves._marked`) and takes no admission lock again while it renames, so the
+        lock is never waited for behind a file or a name (lockorder.py)."""
         with self.hub.admit:
             if self.hub.upgrading:
                 raise JobRefused(409, UPGRADING)
+            if address in self.hub.moving:
+                raise JobRefused(409, MOVING)
             yield
 
     def _cancelling(self, address: str, cid: str) -> bool:
@@ -405,7 +410,7 @@ class Tell:
         # Before the wait is touched: a second Tell must leave the first one's as it is.
         if self.hub.runner.running("tell", address, cid):
             raise JobRefused(409, self._already_telling(v.target, v.adapter))
-        with self._admitting():
+        with self._admitting(address):
             self._not_cancelling(address, cid)
             if not waiting and not e.live.await_reply(cid):
                 raise JobRefused(404, f"no comment {cid} in this document")
@@ -439,7 +444,7 @@ class Tell:
             self._tell_failed(e, cid, f"the hub failed to deliver the message "
                               f"({type(ex).__name__}); the details are in `sheaf diag`")
         try:
-            with self._admitting():
+            with self._admitting(address):
                 self._not_cancelling(address, cid)
                 if not e.live.is_waiting(cid):       # it ended (cancel, answer, failure): no job to end
                     raise JobRefused(409, WAIT_ENDED, leaves_wait=True)
@@ -465,20 +470,31 @@ class Tell:
     def queue_agent(self, address: str, cid: str, member=None):
         """The Tell of thread `cid` waits for the agent that is the reader's target (SPEC 9.8). Raises JobRefused.
         The target is read inside the refusal's own look, so a target changed or revoked since is the one judged."""
-        raw = targets.stored(self.hub, address, member)
-        row = targets.live(self.hub, raw, member)
-        if row is None:     # the page's own line (10.6): a revoked token is named, as the page names it
-            line = (targets.agent_view(self.hub, raw, member).line if targets.is_agent(raw) or targets.is_laptop(raw)
-                    else proxy.PROXY_LINE if member is not None else NO_AGENT)
-            raise JobRefused(409, line)
-        thread = self._thread(self._entry(address), cid)
-        try:
-            if targets.is_laptop(raw):               # a session on the member's laptop: it asks for the Tell at the door (9.8)
-                self.hub.session_tells.queue(address, cid, row, raw["session"], member.name, member, thread)
-            else:
-                self.hub.waiting_tells.queue(address, cid, row, member.name if member else self.hub.person, member, thread)
-        except waiting_mod.Refused as r:
-            raise JobRefused(r.status, r.message) from None
+        # No lock is held while the entry is found (its first read and render may happen there): the Forward is resolved
+        # first, the thread read, and only then the moves' lock and the admission lock are taken, to look at the address
+        # again. A move holds the moves' lock from its checks to the rows' rename, so a Tell either queues before it (and
+        # is carried) or finds the Forward and goes round again at the new address.
+        for _ in range(3):
+            address = self.hub.forwards.follow(address) or address
+            thread = self._thread(self._entry(address), cid)
+            with moves.exclusive(), self.hub.admit:
+                if (self.hub.forwards.follow(address) or address) != address:
+                    continue                    # moved since the thread was read
+                raw = targets.stored(self.hub, address, member)
+                row = targets.live(self.hub, raw, member)
+                if row is None:     # the page's own line (10.6): a revoked token is named, as the page names it
+                    line = (targets.agent_view(self.hub, raw, member).line if targets.is_agent(raw) or targets.is_laptop(raw)
+                            else proxy.PROXY_LINE if member is not None else NO_AGENT)
+                    raise JobRefused(409, line)
+                try:
+                    if targets.is_laptop(raw):           # a session on the member's laptop: it asks for the Tell at the door (9.8)
+                        self.hub.session_tells.queue(address, cid, row, raw["session"], member.name, member, thread)
+                    else:
+                        self.hub.waiting_tells.queue(address, cid, row, member.name if member else self.hub.person, member, thread)
+                except waiting_mod.Refused as r:
+                    raise JobRefused(r.status, r.message) from None
+                return
+        raise JobRefused(409, MOVING)
 
     @staticmethod
     def _already_telling(t: Target, ad: Adapter) -> str:

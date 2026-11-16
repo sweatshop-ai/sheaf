@@ -334,3 +334,23 @@ def test_the_row_share_button_shares_an_own_loose_page_and_is_gone_afterwards(mo
     mounted.click(".sheaf-share")
     until(lambda: mounted.js("return !root.querySelector('.sheaf-share') && !!root.querySelector('.sheaf-shared');"), what="Shared")
     assert "- [x] Share" in mine.read_text(encoding="utf-8")
+
+
+def test_the_row_move_button_puts_an_own_loose_page_in_a_typed_folder_and_the_old_address_forwards(mounted, pages):
+    member = pages.hub.proxy.members[BEA]
+    root, _ = pages.hub.loose.root_for(member)
+    mine = root.path / "2026-11" / "mine.md"
+    mine.parent.mkdir(parents=True)
+    mine.write_text("# Mine\n\nText.\n", encoding="utf-8")
+    mounted.page.reload()
+    until(lambda: mounted.page.evaluate("!!window.__root"), what="the page after the reload")
+    until(lambda: mounted.js("return !!root.querySelector('.sheaf-row');"), what="the rows in the root")
+    until(lambda: mounted.js("return root.querySelectorAll('.sheaf-move').length;") == 1, what="one Move button, on the own page")
+    mounted.click(".sheaf-move")
+    until(lambda: mounted.js("return !!root.querySelector('.sheaf-move-form input');"), what="the folder field")
+    mounted.js("const f = root.querySelector('.sheaf-move-form'); f.querySelector('input').value = 'tidy/up'; f.requestSubmit();")
+    until(lambda: (root.path / "tidy" / "up" / "mine.md").exists(), what="the page in its new folder")
+    assert not mine.exists() and not (root.path / "2026-11").exists()
+    until(lambda: mounted.js("return root.querySelector('.sheaf-row[data-title=\"mine\"]').dataset.doc.endsWith('/tidy/up/mine.md');"),
+          what="the row follows the page")
+    assert pages.get(f"/{root.name}/2026-11/mine.md").status == 302

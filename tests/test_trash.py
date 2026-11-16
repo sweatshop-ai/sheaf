@@ -359,29 +359,27 @@ def test_a_sweep_between_the_stamps_of_a_delete_leaves_the_page_not_archived_aft
     assert docs(agents) == [doc] and docs(agents, view="archived") == []
 
 
-def test_a_door_create_racing_a_restore_from_trash_keeps_the_doors_page_and_the_restore_is_refused(agents, clock, monkeypatch):
+def test_a_page_that_a_writer_without_the_hubs_locks_puts_there_just_before_a_restore_is_kept_and_the_restore_is_refused(agents, clock, monkeypatch):
+    """The restore's move is a link, never a rename: a page that another process puts at the address between the check and the
+    move is not replaced. (A door create is no such writer any more: in a loose root it takes the moves' lock, which a restore
+    holds, so it comes before the restore or after it, never between.)"""
     doc = made(agents, "bea-claude")
     assert delete(agents, doc).status == 200
     [row] = trash_rows(agents)
-    results, fired = [], []
-
-    def create():
-        results.append(call(agents, "bea-claude", "create", doc="notes.md", text="# New\n\nThe door's page.\n",
-                            folder=doc.split("/")[1]))
+    fired = []
 
     def hooked(real):
         def wrapped(src, dst, *a, **kw):
-            if "/.sheaf/trash/" in str(src) and not fired:      # the move of the restore: the door's create lands just before it
+            if "/.sheaf/trash/" in str(src) and not fired:      # the move of the restore: the other writer's page lands just before it
                 fired.append(1)
-                t = threading.Thread(target=create)
-                t.start()
-                t.join(5)
+                with open(agents.hub.file(doc), "x", encoding="utf-8") as f:
+                    f.write("# New\n\nThe door's page.\n")
             return real(src, dst, *a, **kw)
         return wrapped
     monkeypatch.setattr(os, "rename", hooked(os.rename))
     monkeypatch.setattr(os, "link", hooked(os.link))
     got = agents.post("/_/restore-trash", {"id": row["id"]}, member=BEA)
-    assert results and results[0][0] is False, results      # the door created its page
+    assert fired
     assert got.status == 409 and "already" in got.text      # the restore is refused: the address is taken
     assert "The door's page" in agents.hub.file(doc).read_text(encoding="utf-8")
     assert len(trash_rows(agents)) == 1                     # and the deleted page is still in the trash

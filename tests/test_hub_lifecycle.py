@@ -231,7 +231,7 @@ def test_a_sigterm_that_arrives_while_the_port_is_being_bound_is_still_a_clean_s
 LINUX_SIGINFO = sender.BLOCKS
 # The sender the watcher tests make up. A real pid names a real process on a machine that runs other tests (on CI, a Chrome
 # of a page test held 4242 and the row gained its `sender_cmdline`); no Linux gives one above 2 ** 22.
-SENDER_PID = 4242
+SENDER_PID = 2 ** 22 + 1
 SENDER = ("import os, signal, sys, time\n"
           "from sheafmd import signals\n"
           "signals.send(int(sys.argv[1]), getattr(signal, sys.argv[2]))\n"

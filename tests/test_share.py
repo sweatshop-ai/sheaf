@@ -10,6 +10,7 @@ import pwd
 import pytest
 from helpers import FRONT, Front, door, rpc
 
+import sheafmd.comments as rdc
 from sheafmd.edit import ticked_html
 from sheafmd.blocks import split_md_blocks
 from sheafmd.hub import proxy, the_list
@@ -55,6 +56,11 @@ def made(team, who, text, doc="plan.md"):
     bad, out = call(team, who, "create", doc=doc, text=text)
     assert not bad, out
     return json.loads(out)
+
+
+def told(team, member, doc):
+    """The name under which the hub tells `member` of the page `doc` (9.11)."""
+    return team.hub.alias(team.hub.proxy.members[member], doc)
 
 
 def page(team, member, doc):
@@ -144,7 +150,7 @@ def test_the_recipient_finds_it_in_shared_with_me_under_the_owner(team):
     assert [n["name"] for n in got["tree"]] == ["Shared with me"]
     assert [n["name"] for n in got["tree"][0]["children"]] == ["alice"]
     row = got["rows"][0]
-    assert row["doc"] == doc and row["folder"] == "Shared with me/alice" and row["title"] == "Alice's plan"
+    assert row["doc"] == told(team, BOB, doc) != doc and row["folder"] == "Shared with me/alice" and row["title"] == "Alice's plan"
     assert row["root"] == "Shared with me"
 
 
@@ -171,7 +177,7 @@ def test_the_owners_other_pages_stay_hidden_from_the_recipient(team):
     mine = made(team, "alice", PRIVATE, doc="mine.md")["doc"]
     doc = made(team, "alice", NAMED)["doc"]
     tick(team, ALICE, doc, "Share with")
-    assert doc_of(team, BOB) == [doc]
+    assert doc_of(team, BOB) == [told(team, BOB, doc)]
     assert page(team, BOB, mine).status == 404
 
 
@@ -247,7 +253,7 @@ def test_a_recipients_agent_sees_the_shared_page_through_the_door(team):
     bad, out = call(team, "bob", "read", doc=doc)
     assert not bad and "Alice's plan" in out
     bad, listing = call(team, "bob", "documents", open_only=False)
-    assert doc in listing
+    assert told(team, BOB, doc) in listing and doc not in listing
     bad, why = call(team, "carol", "read", doc=doc)
     assert bad
     bad, listing = call(team, "carol", "documents", open_only=False)
@@ -440,3 +446,133 @@ def test_a_tick_the_hub_refuses_after_the_row_button_wrote_the_line_takes_the_li
     monkeypatch.setattr(handler.Handler, "_save", refuse)
     assert share(team, ALICE, doc).status == 409
     assert read(team, doc) == PRIVATE
+
+
+# ── the review's findings (PR 394, round 2) ──────────────────────────────────
+
+def _bob_streams(team, doc):
+    sub = team.get(f"/_/live?doc={doc}", member=BOB).stream
+    sub.drain()
+    return sub
+
+
+def _comment(team, doc):
+    text = read(team, doc)
+    quote = "Agent page" if "Agent page" in text else "A plan"
+    blk, start, end = rdc.find_quote(text, quote)
+    got = team.post("/_/comment", {"doc": doc, "op": "add", "hash": md_hash(text), "block": blk, "start": start,
+                                   "end": end, "quote": quote, "body": "A note for Bob's tab."}, member=ALICE)
+    assert got.status == 200, got.text
+
+
+def test_an_open_stream_of_bob_hears_nothing_once_the_names_are_edited_off_the_line(team):
+    doc = made(team, "alice", NAMED)["doc"]
+    tick(team, ALICE, doc, "Share with")
+    sub = _bob_streams(team, doc)
+    team.hub.file(doc).write_text(read(team, doc).replace("Share with bob", "Share with carol"), encoding="utf-8")
+    team.hub.entry(doc).live.refresh(force=True)
+    _comment(team, doc)
+    assert sub.drain() == []
+
+
+def test_an_open_stream_of_bob_hears_nothing_once_the_owners_save_unticks_the_share(team):
+    doc = made(team, "alice", NAMED)["doc"]
+    tick(team, ALICE, doc, "Share with")
+    sub = _bob_streams(team, doc)
+    assert tick(team, ALICE, doc, "Share with", release=True).status == 200
+    sub.drain()
+    _comment(team, doc)
+    team.hub.entry(doc).live.refresh(force=True)
+    assert sub.drain() == []
+
+
+def test_an_open_stream_of_bob_hears_nothing_once_the_owners_agent_withdraws_the_share(team):
+    out = made(team, "alice", "# Agent page\n\n- [x] Share with bob\n")
+    sub = _bob_streams(team, out["doc"])
+    bad, why = call(team, "alice", "update", doc=out["doc"], text="# Agent page\n\n- [ ] Share with bob\n", expected_hash=out["hash"])
+    assert not bad, why
+    assert page(team, BOB, out["doc"]).status == 404
+    sub.drain()
+    _comment(team, out["doc"])
+    team.hub.entry(out["doc"]).live.refresh(force=True)
+    assert sub.drain() == []
+
+
+def test_a_share_line_the_hub_cannot_find_after_writing_it_is_taken_off_again(team, monkeypatch):
+    doc = made(team, "alice", PRIVATE)["doc"]
+    monkeypatch.setattr(the_list, "share_edit", lambda text: None)
+    assert share(team, ALICE, doc).status == 400
+    assert read(team, doc) == PRIVATE
+
+
+def documents(team, who, **args):
+    return call(team, who, "documents", **args)
+
+
+def test_a_root_of_another_member_that_shares_nothing_is_answered_as_a_root_that_does_not_exist(team):
+    made(team, "alice", PRIVATE)
+    bad, gone = documents(team, "bob", root="loose-alice")
+    bad_, none = documents(team, "bob", root="loose-nobody")
+    assert bad and bad_ and gone.replace("loose-alice", "X") == none.replace("loose-nobody", "X")
+
+
+def test_a_closed_root_of_another_member_is_not_listed_as_shut_to_anyone_it_shares_nothing_with(team, monkeypatch):
+    made(team, "alice", PRIVATE)
+    from sheafmd.hub import roots
+    monkeypatch.setattr(roots.Root, "closed", lambda self: "cannot be read" if self.name == "loose-alice" else None)
+    bad, out = documents(team, "bob")
+    assert not bad and "loose-alice" not in out
+    bad, out = documents(team, "alice")
+    assert not bad and "loose-alice" in out
+
+
+def test_a_root_that_shares_a_page_with_bob_is_still_his_to_list(team):
+    doc = made(team, "alice", "# Agent page\n\n- [x] Share with bob\n")["doc"]
+    bad, out = documents(team, "bob", root="loose-alice", open_only=False)
+    assert not bad and json.loads(out)[0]["doc"] != doc
+
+
+DEEP = "# Deep plan\n\n- [ ] Share with bob\n\nA plan.\n"
+
+
+def deep(team):
+    bad, out = call(team, "alice", "create", doc="plan.md", folder="private-matters/deep", text=DEEP)
+    assert not bad, out
+    doc = json.loads(out)["doc"]
+    assert "private-matters" in doc
+    assert tick(team, ALICE, doc, "Share with").status == 200
+    return doc
+
+
+def test_the_recipient_is_told_no_folder_name_nor_path_of_the_owner_anywhere(team):
+    real = deep(team)
+    sheaf = json.dumps(shared_rows(team, BOB))
+    bad, rows = documents(team, "bob", root="loose-alice", open_only=False)
+    row = json.loads(rows)[0]
+    bad, got = call(team, "bob", "read", doc=row["doc"])
+    for seen in (sheaf, rows, got):
+        assert "private-matters" not in seen and "deep" not in seen.replace("Deep plan", "") and "plan.md" not in seen
+    assert "path" not in row and row["doc"].startswith("loose-alice/s-") and row["url"].endswith(row["doc"].split("/", 1)[1])
+    assert json.loads(got)["doc"] == row["doc"]
+    assert real not in rows
+
+
+def test_the_opaque_name_opens_the_page_for_the_recipient_and_for_no_one_else(team):
+    real = deep(team)
+    name = json.loads(documents(team, "bob", root="loose-alice", open_only=False)[1])[0]["doc"]
+    mine = page(team, BOB, name)
+    assert mine.status == 200 and "private-matters" not in mine.text
+    assert page(team, CAROL, name).status == 404 and page(team, CAROL, name).body == page(team, CAROL, "loose-alice/s-0000000000000000.md").body
+    assert team.get(f"/_/doc?doc={name}", member=BOB).status == 200
+    bad, text = call(team, "bob", "read", doc=name)
+    assert not bad and json.loads(text)["text"] == read(team, real)
+    assert page(team, ALICE, name).status == 200            # the owner reaches it by either
+
+
+def test_a_withdrawn_share_closes_the_opaque_name_too(team):
+    deep_doc = deep(team)
+    name = json.loads(documents(team, "bob", root="loose-alice", open_only=False)[1])[0]["doc"]
+    assert tick(team, ALICE, deep_doc, "Share with", release=True).status == 200
+    assert page(team, BOB, name).status == 404
+    bad, _ = call(team, "bob", "read", doc=name)
+    assert bad

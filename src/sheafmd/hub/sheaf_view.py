@@ -169,7 +169,8 @@ def data(hub, member, titles: Titles) -> dict:
             if "shared_from" in root:       # another member's page, found under the owner's name and nowhere else
                 folder, given = f"{SHARED}/{root['shared_from']}", {"shared_from": root["shared_from"],
                                                                       "new": hub.member_opened.get(member.id, address) != int(d["mtime"] * 1e9)}
-            rows.append({"doc": address, "url": d["url"], "title": title, "root": SHARED if given else at.root,
+            told = hub.alias(member, address)     # the owner's folders are not the recipient's to read (9.11)
+            rows.append({"doc": told, "url": d["url"] if told == address else hub.url(told), "title": title, "root": SHARED if given else at.root,
                          "folder": folder, "shared_by": agent, **given,
                          "share": unshared if mine(hub, member, at.root) and not given else "", "mtime": d["mtime"], "when": index_mod.when(d["mtime"], now),
                          "open": d["open"], "write": say_write(last, session),

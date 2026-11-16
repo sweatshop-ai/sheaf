@@ -388,6 +388,7 @@ class Door:
             address = self._address_of_path(doc, caller)
         else:
             address = doc
+        address = self.hub.unalias(address)         # the opaque name of a page Shared with the member (9.11)
         with place.held(self.hub, address):         # a read, under the name's lock (9.11)
             try:
                 self.hub.roots.document(address)
@@ -411,6 +412,12 @@ class Door:
     def _judged(self, caller: Caller) -> bool:
         """Whether visibility (9.11) holds `caller`: a token, in proxy mode."""
         return caller.token is not None and getattr(self.hub, "proxy", None) is not None
+
+    def _told(self, address: str, caller: Caller) -> dict:
+        """`doc` and `url` of the page at `address` as `caller` is told of it: a page Shared with its member by another is told
+        under an opaque name, never the owner's folders (9.11)."""
+        told = self.hub.alias(self._member(caller), address)
+        return {"doc": told, "url": self.hub.url(told)}
 
     def _member(self, caller: Caller):
         """The member `caller` acts for (9.11): in proxy mode, the one whose `tokens` name its token; None for
@@ -599,16 +606,19 @@ class Door:
         pending = hub.waiting_tells.pending(agent) if agent is not None else set()    # the Tells that wait for it (9.8)
         in_git = {}                             # (root, real folder) -> whether 8.2 keeps its files from the root
         owned = {}                              # (root, real folder) -> whether its files are the member's (9.11)
+        reached = set()                         # the other members' loose roots that hold a page Shared with the member
         for root in wanted:
-            # A root the hub cannot look into may hold what waits: said by name and why, never its folder (8.6).
+            giving = member is not None and not hub.owns(member, root)     # another's loose root: judged page by page
+            # A root the hub cannot look into may hold what waits: said by name and why, never its folder (8.6). Of
+            # another member's loose root, said to no one: what it holds is the owner's until Shared (9.11).
             if (why := root.closed()) is not None:
-                shut.append({"root": root.name, "closed": why})
+                if not giving:
+                    shut.append({"root": root.name, "closed": why})
                 continue
             if root.missing():
                 continue
             placed = place.applies(hub, root.name)
             top = Path(os.path.realpath(root.path)) if placed else None
-            giving = member is not None and not hub.owns(member, root)     # another's loose root: judged page by page
             # The files of a member's private root are listed to that member alone, under the list root's names (rule D).
             privates = [p for p in place.private_listed(hub, member) if p.closed() is None and not p.missing()] if placed else []
             for src, found in [(root, f) for f in markdown_files(root)] + [(p, f) for p in privates for f in markdown_files(p)]:
@@ -639,15 +649,21 @@ class Door:
                     owned[folder] = hub.member_owns(member, address)
                 if not self._sees(fm, address, caller, owned.get(folder), private):
                     continue                                   # nor a rectoverso the caller may not see (9.11)
+                if giving:
+                    reached.add(root.name)
                 tells = self._tells(address, text, agent) if text is not None else []
                 if args.get("open_only", True) and not threads and not tells:
                     continue
                 seen = hub.seen.get(address)
                 unread = sum(1 for cid, n, last in threads if last != hub.person and n > seen.get(cid, 0))
                 dot = self._dot(address, unread, len(threads))
+                told = hub.alias(member, address) != address        # a page Shared with the member: no path on disk (9.9)
                 rows.append((-1 if tells else DOT_ORDER[dot], -mtime, address,
-                             {"doc": address, "url": hub.url(address), "path": str(path),
+                             {**self._told(address, caller), **({} if told else {"path": str(path)}),
                               "open": len(threads), "unread": unread, "dot": dot, "tells": tells}))
+        if "root" in args and member is not None and not hub.owns(member, wanted[0]) and wanted[0].name not in reached:
+            # Another member's loose root with nothing Shared with the caller is answered as a root that does not exist.
+            raise ToolError(f"There is no root named {args['root']}.")
         return [row[3] for row in sorted(rows, key=lambda r: r[:3])] + shut
 
     def _tells(self, address: str, text: str, agent: TokenRow) -> list:
@@ -664,7 +680,7 @@ class Door:
         address = self._address(args["doc"], caller)
         status = args.get("status", "open")
         got = self._comments(address, caller, args["doc"])
-        return {"doc": address, "url": self.hub.url(address),
+        return {**self._told(address, caller),
                 "comments": [{k: v for k, v in c.as_dict().items() if k != "block"}
                              for c in got.comments if status == "all" or c.status == status],
                 "malformed": [{"line": m.line, "reason": m.reason} for m in got.malformed]}
@@ -704,7 +720,7 @@ class Door:
                 raise ToolError(f"{address} has a `<!--` that nothing closes, at line "
                                 f"{_unclosed_line(text, out)}: the page shows nothing after it, "
                                 "so its text without comments is not given.")
-        return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text), "text": out}
+        return {**self._told(address, caller), "hash": md_hash(text), "text": out}
 
     # ── create and update: a row in the diagnostics log for every call (SPEC 9.7, 15) ─
     def _run(self, name: str, args: dict, caller: Caller):
@@ -982,7 +998,7 @@ class Door:
             finally:
                 if moved:                           # moved, then failed before its commit: the move is committed
                     self.hub.committed(address, by=caller.display, what="update", gone=moved.pop())
-        return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text), "changed": before != text}
+        return {**self._told(address, caller), "hash": md_hash(text), "changed": before != text}
 
     def _updated(self, address: str, args: dict, text: str, expected: str, caller: Caller, moved: list):
         """The write of an update, and the rectoverso's file moved to its home (9.11): (the text before, the text

@@ -635,6 +635,36 @@ class MemberOpened(_Store):
         return self._change(change)
 
 
+class SharedIds(_Store):
+    """`shared-ids.json`: `{"<id>": "<root>/<path>"}`, the opaque names under which a page of another member's loose root
+    is told to the members it is Shared with (9.11): the owner's folder names and the path on disk are theirs alone.
+    An id is random, made once for a page and kept, so a link the recipient holds keeps working."""
+    name = "shared-ids.json"
+
+    def of(self, address: str) -> str:
+        def change(data):
+            for k, v in data.items():
+                if v == address:
+                    return k, False
+            k = "s-" + secrets.token_hex(8)
+            data[k] = address
+            return k, True
+        return self._change(change)
+
+    def address(self, key: str) -> str | None:
+        with self._lock:
+            v = self._data.get(key)
+            return v if isinstance(v, str) else None
+
+    def forget_prefix(self, prefix: str) -> None:
+        def change(data):
+            gone = [k for k, v in data.items() if isinstance(v, str) and v.startswith(prefix)]
+            for k in gone:
+                del data[k]
+            return None, bool(gone)
+        self._change(change)
+
+
 class MemberSeen(_Store):
     """`seen-members.json`: `{"<member id>": {"<root>/<path>": {"c3": 2}}}`, what each member of
     proxy mode has seen, kept apart from the hub's person's (SPEC 4.2, 9.9). Keyed by the front's

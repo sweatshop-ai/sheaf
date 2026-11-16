@@ -1,7 +1,7 @@
-"""Keep and Archive against a Move (SPEC 8.6, 9.11, "One lock order"): `Handler._acting` reads the page's path in its root
+"""Keep, Archive and Restore against a Move (SPEC 8.6, 9.11, "One lock order"): `Handler._acting` reads the page's path in its root
 (`_own_loose`) and then writes the mark. A Move that runs between the two carries the marks of the old path to the new one
 (`loose.marks_moved`) before the write, and the write then lands at the old path, a mark of a page that is not there. The
-two acts take the moves' lock from the read to the write, so a Move comes before the read or after the write, never between.
+three acts take the moves' lock from the read to the write, so a Move comes before the read or after the write, never between.
 Through the handler as the proxy sets it. Not run on a laptop: they start a hub, so CI is their run."""
 import json
 import threading
@@ -25,10 +25,11 @@ def mark_paths(root, name):
     return set(data)
 
 
-@pytest.mark.parametrize("act,mark_file,body", [("keep", "keep.json", {"on": True}), ("archive", "archived.json", {})])
+@pytest.mark.parametrize("act,mark_file,body", [("keep", "keep.json", {"on": True}), ("archive", "archived.json", {}), ("restore", "seen.json", {})])
 def test_a_move_between_the_read_of_the_path_and_the_write_of_the_mark_leaves_no_mark_at_the_old_path(team, monkeypatch, act, mark_file, body):
-    """The Keep or Archive has read the path and stops before it writes; a Move of the page comes in. Whichever of the two
-    ends first, the mark is at the new path or the act found no page (404), and no mark is left at the old path."""
+    """The Keep, Archive or Restore has read the path and stops before it writes; a Move of the page comes in. The act holds the
+    moves' lock from its read, so it ends first (200) and the Move carries its mark: the mark is at the new path and none is left
+    at the old one. An act that comes after a Move finds no page (404); that order is not this test's."""
     old = in_folder(team, "a")
     read, go, out = threading.Event(), threading.Event(), {}
     real = handler_mod.Handler._own_loose
@@ -50,9 +51,8 @@ def test_a_move_between_the_read_of_the_path_and_the_write_of_the_mark_leaves_no
     actor.join(20)
     mover.join(20)
     assert out["move"].status == 200, out["move"].text
-    assert out["act"].status in (200, 404), out["act"].text
+    assert out["act"].status == 200, out["act"].text
     root = team.hub.roots.get("loose-alice")
     marked = mark_paths(root, mark_file)
     assert OLD not in marked, f"a {act} mark is left at the old path {OLD}"
-    if out["act"].status == 200:
-        assert marked == {NEW}, marked
+    assert marked == {NEW}, marked

@@ -397,3 +397,24 @@ def test_local_on_a_repo_page_sends_no_report(tiroir, laptop, local, capsys):
 def test_a_repo_page_takes_no_folder_or_keep_and_nothing_is_sent(tiroir, laptop, local, capsys):
     code, out, err = run(capsys, laptop / "docs" / "plan.md", "--keep")
     assert code == 2 and tiroir.seen == [] and local == []
+
+
+# ── review fixes ─────────────────────────────────────────────────────────────
+
+def test_a_clone_already_held_still_takes_the_report_when_the_app_has_since_lost_the_repo(hub_repos):
+    report(hub_repos, who="bea-claude")
+    hub_repos.app.installed.clear()
+    bad, got = report(hub_repos, who="bea-claude", session=SESSION)
+    assert not bad, got
+    assert got["clone"] == "present"
+    assert hub_repos.hub.repos.attribution(REPO, "docs/plan.md")["session"] == SESSION
+
+
+def test_a_clone_that_fails_leaves_no_half_made_folder_and_the_next_report_tries_again(hub_repos, origin, tmp_path):
+    hub_repos.hub.repos.remote_url = lambda repo: str(tmp_path / "does-not-exist.git")
+    bad, got = report(hub_repos)
+    assert bad and "failed" in got
+    assert not list(clones(hub_repos).glob("*/*"))
+    hub_repos.hub.repos.remote_url = lambda repo: str(origin)
+    bad, got = report(hub_repos)
+    assert not bad and got["clone"] == "made"

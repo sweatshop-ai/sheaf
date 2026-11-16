@@ -32,6 +32,7 @@ from . import config, connect, paths
 from .agents.claude_code import config_dir_of
 from .agents.detect import detect, session_id
 from .atomic import write_text_atomic
+from .hub import repos as repos_mod
 from .hub.roots import url_path
 from .hub.writelog import declared_link
 from .source import md_hash
@@ -351,11 +352,11 @@ def report_page(md: Path, top: Path, origin: str, token: str, args, out, err, en
     if bad:
         raise SendError(f"{got} Nothing was sent.")
     clone = got.get("clone")
-    if clone == "no-app":
+    if clone == repos_mod.NO_APP:
         err(f"sheaf: the tiroir's GitHub App cannot reach {repo}, so it cannot clone it and {md} renders on this laptop "
             f"only. Add {repo} to the installation: {got.get('install', '(the tiroir gave no link)')}")
         return None
-    if clone == "none":
+    if clone == repos_mod.NO_CLONES:
         err(f"sheaf: {origin} makes no repo clones, so {md} renders on this laptop.")
         return None
     if got.get("commit_known") is False:
@@ -364,7 +365,7 @@ def report_page(md: Path, top: Path, origin: str, token: str, args, out, err, en
     host = origin.split("://", 1)[1]
     out(f"{repo} {path} @ {commit[:8]}")
     out(f"on {host} {'as ' + member + ' · ' if member else 'as '}{_agent_label(environ)}")
-    if clone == "private-root":
+    if clone == repos_mod.PRIVATE_ROOT:
         out(f"{repo} is your private root on {host}: nothing was cloned.")
     return EXIT_OK
 

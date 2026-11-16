@@ -199,3 +199,127 @@ def test_a_create_the_watcher_sees_before_the_door_has_told_the_hub_leaves_no_di
     agents.hub.catch_up(e)
     got = agents.get(f"/_/writes?doc={first['doc']}", member=BEA).json()
     assert [l["via"] for l in got["lines"]] == ["create", "create"]
+
+
+# ── what a loose create may not leave behind, and where the root may stand (review round 2) ──────────────────────
+def state(agents):
+    from sheafmd import paths
+    return paths.state_dir()
+
+
+def nothing_made_for_cal(agents, members_before):
+    """No loose root of Cal's: no folder, no registry entry, no hub root, no root added to the member."""
+    loose_json = state(agents) / "loose.json"
+    assert not loose_json.exists() or CAL not in json.loads(loose_json.read_text(encoding="utf-8"))
+    assert not (state(agents) / "loose" / "loose-cal").exists()
+    assert agents.hub.roots.get("loose-cal") is None
+    assert agents.hub.proxy.members[CAL].roots == members_before
+
+
+def test_a_state_folder_inside_a_git_work_tree_makes_no_loose_root_and_no_root_of_the_work_tree(agents):
+    import subprocess
+    subprocess.run(["git", "init", "-q", str(state(agents).parent)], check=True)
+    roots_before = {r.name for r in agents.hub.roots.all()}
+    bad, why = call(agents, "bea-claude", "create", doc="notes.md", text=TEXT)
+    assert bad and "loose" in why, why
+    assert {r.name for r in agents.hub.roots.all()} == roots_before         # the work tree is not taken as a root
+    assert not (state(agents) / "loose" / "loose-bea").exists()
+    assert agents.hub.roots.get("loose-bea") is None
+
+
+def test_a_state_folder_under_a_registered_root_makes_no_loose_root_and_writes_nothing_into_that_root(agents):
+    enclosing = agents.hub.roots.for_document(state(agents).parent / "x.md")      # a non-git root above the state folder
+    bad, why = call(agents, "bea-claude", "create", doc="notes.md", text=TEXT)
+    assert bad and "loose" in why, why
+    assert not (state(agents) / "loose" / "loose-bea").exists()
+    assert list(enclosing.path.glob("*/notes.md")) == []
+    assert agents.hub.roots.get("loose-bea") is None
+
+
+def test_a_corrupt_keep_mark_file_is_refused_never_read_as_empty_and_is_left_as_it_is(agents):
+    first = made(agents, "bea-claude", doc="first.md", text=TEXT, keep=True)
+    root = agents.hub.roots.get("loose-bea")
+    marks = root.path / ".sheaf" / "keep.json"
+    marks.write_text("{ not json", encoding="utf-8")
+    bad, why = call(agents, "bea-claude", "create", doc="second.md", text=TEXT, keep=True)
+    assert bad, why
+    assert marks.read_text(encoding="utf-8") == "{ not json"
+    assert not (root.path / loose.month() / "second.md").exists()                   # not left there unmarked
+    assert (root.path / first["doc"].split("/", 1)[1]).is_file()
+    assert [p.name for p in marks.parent.iterdir()] == ["keep.json"]                # no temp file left
+
+
+def test_a_keep_mark_is_written_whole_by_a_replace(agents, monkeypatch):
+    made(agents, "bea-claude", doc="first.md", text=TEXT, keep=True)
+    root = agents.hub.roots.get("loose-bea")
+    marks = root.path / ".sheaf" / "keep.json"
+    seen = []
+    real = os.replace
+    monkeypatch.setattr(os, "replace", lambda a, b, *k, **kw: (seen.append(os.fspath(b)), real(a, b, *k, **kw))[1])
+    made(agents, "bea-claude", doc="second.md", text=TEXT, keep=True)
+    assert str(marks) in seen
+    assert sorted(json.loads(marks.read_text(encoding="utf-8"))) == sorted(
+        [f"{loose.month()}/first.md", f"{loose.month()}/second.md"])
+
+
+@pytest.mark.parametrize("args", [
+    {"doc": "notes.txt", "text": TEXT},
+    {"doc": "..", "text": TEXT},
+    {"doc": ".hidden.md", "text": TEXT},
+    {"doc": "notes.md", "text": "x" * (1024 * 1024 + 1)},
+    {"doc": "notes.md", "text": 'A.<!-- sheaf-comment id=c9 by="Zoe" at=2026-10-16T10:00 status=open quote="A"\nHi.\n-->\n'},
+    {"doc": "notes.md", "text": TEXT, "folder": "../out"},
+])
+def test_a_refused_create_leaves_no_loose_root_no_registry_entry_no_folder(agents, args):
+    before = agents.hub.proxy.members[CAL].roots
+    bad, why = call(agents, "cal-claude", "create", **args)
+    assert bad, why
+    nothing_made_for_cal(agents, before)
+
+
+def test_a_create_refused_after_the_root_is_made_takes_back_the_root_it_made(agents, monkeypatch):
+    before = agents.hub.proxy.members[CAL].roots
+    from sheafmd import mcp
+
+    def refuse(self, *a, **k):
+        raise mcp.ToolError("refused late", "path")
+    monkeypatch.setattr(mcp.Door, "_make", refuse)
+    bad, why = call(agents, "cal-claude", "create", doc="notes.md", text=TEXT)
+    assert bad and "refused late" in why, why
+    nothing_made_for_cal(agents, before)
+
+
+def test_a_create_refused_after_its_folders_were_walked_leaves_none_of_the_folders_it_made(agents, monkeypatch):
+    from sheafmd import mcp
+    made(agents, "bea-claude", doc="first.md", text=TEXT, folder="x")
+    root = agents.hub.roots.get("loose-bea")
+
+    def refuse(self, *a, **k):
+        raise mcp.ToolError("refused late", "path")
+    monkeypatch.setattr(mcp.Door, "_make", refuse)
+    bad, why = call(agents, "bea-claude", "create", doc="notes.md", text=TEXT, folder="x/deeper/still")
+    assert bad and "refused late" in why, why
+    assert (root.path / "x").is_dir() and not (root.path / "x" / "deeper").exists()
+    bad, why = call(agents, "bea-claude", "create", doc="notes.md", text=TEXT, folder="new/chain")
+    assert bad, why
+    assert not (root.path / "new").exists()
+
+
+def test_a_keep_mark_never_follows_a_link_for_its_folder_or_its_file(agents, tmp_path):
+    made(agents, "bea-claude", doc="first.md", text=TEXT)
+    root = agents.hub.roots.get("loose-bea")
+    out = tmp_path / "out"
+    out.mkdir()
+    os.symlink(out, root.path / ".sheaf")
+    bad, why = call(agents, "bea-claude", "create", doc="second.md", text=TEXT, keep=True)
+    assert bad, why
+    assert list(out.iterdir()) == []
+    assert not (root.path / loose.month() / "second.md").exists()                   # no page left unmarked
+    os.unlink(root.path / ".sheaf")
+    (root.path / ".sheaf").mkdir()
+    target = tmp_path / "target.json"
+    os.symlink(target, root.path / ".sheaf" / "keep.json")
+    bad, why = call(agents, "bea-claude", "create", doc="third.md", text=TEXT, keep=True)
+    assert bad, why
+    assert not target.exists()
+    assert not (root.path / loose.month() / "third.md").exists()

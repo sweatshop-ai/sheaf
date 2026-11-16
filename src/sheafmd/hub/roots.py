@@ -369,6 +369,16 @@ class Roots:
                 return deepest, None
         return next((r for r in registered if r.path == folder), None), None
 
+    def stands_alone(self, folder: Path) -> bool:
+        """Whether a document in `folder` would be the root of `folder` itself (SPEC 8.2): no git work tree above it
+        that is not `folder`, no registered root that is not a git repo above it. Registers nothing, so a caller that
+        wants no root but its own folder can ask before it makes one. `folder` need not be there."""
+        folder = Path(os.path.realpath(folder))
+        with self._lock:
+            registered = list(self._roots.values())
+        root, top = self._find(folder, registered)
+        return (top is None or top == folder) and (root is None or root.path == folder)
+
     def lookup(self, md: Path) -> Root | None:
         """The root `for_document` would give `md` when it is one the hub already has; None
         otherwise. Registers nothing: what a caller who may not add a root asks (SPEC 9.7). The roots

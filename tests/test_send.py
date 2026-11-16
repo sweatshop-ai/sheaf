@@ -251,7 +251,7 @@ def test_pull_never_overwrites_an_edit_made_here_and_leaves_the_tiroirs_text_bes
     assert code == 1
     assert scratch.read_text(encoding="utf-8") == mine
     assert scratch.with_name("notes.tiroir.md").read_text(encoding="utf-8") == theirs
-    assert "merge" in err
+    assert "merge" in err and "nothing was sent" not in err
 
 
 def test_pull_of_a_page_never_sent_from_here_says_so(tiroir, scratch, capsys):

@@ -5,11 +5,14 @@ import json
 import subprocess
 import threading
 from pathlib import Path
+from typing import NamedTuple
 
-from .. import config
+from .. import config, diagnostics
 from ..atomic import write_text_atomic
+from . import proxy
 
 FILE = "root_moves.json"
+RETRY_EVERY = 600           # seconds between two tries of a move from the hub's poll; a pull always tries
 
 
 def origin(named: str) -> str:
@@ -108,3 +111,87 @@ class Moves:
             row["held"] = dict(why)
             self._write(data)
             return True
+
+
+class Clock:
+    """When each move was last tried: due at every pull, and from the poll at most every `RETRY_EVERY` seconds."""
+
+    def __init__(self):
+        self._at: dict[str, float] = {}
+
+    def due(self, repo: str, now: float, pulled: bool = False) -> bool:
+        last = self._at.get(repo)
+        return pulled or last is None or now - last >= RETRY_EVERY
+
+    def tried(self, repo: str, now: float):
+        self._at[repo] = now
+
+
+class Diag:
+    """One diagnostics row per state change of a move (`root-move-started`, `-held`, `-done`, `-unpaired`): the repo, the
+    tiroir it goes to, page paths with a reason or a count. Never page text, never a token."""
+
+    def __init__(self):
+        self._unpaired: set = set()
+
+    @staticmethod
+    def _row(kind: str, **detail):
+        diagnostics.record("hub", f"root-move-{kind}", None, **detail)
+
+    def started(self, repo: str, to: str):
+        self._row("started", repo=repo, to=to)
+
+    def held(self, repo: str, to: str, pages: dict):
+        self._row("held", repo=repo, to=to, pages=dict(pages))
+
+    def done(self, repo: str, to: str, count: int):
+        self._row("done", repo=repo, to=to, count=count)
+
+    def unpaired(self, repo: str, to: str):
+        """A `.sheaf.toml` names a tiroir this hub holds no peer credential for: written once per repo and origin."""
+        if (repo, to) not in self._unpaired:
+            self._unpaired.add((repo, to))
+            self._row("unpaired", repo=repo, to=to)
+
+
+class Inventory(NamedTuple):
+    send: dict          # path -> owner: the pages that go and are forwarded
+    ownerless: set      # pages with hub state and no owner: they open to nobody, so they have no Forward and are not sent
+
+
+def inventory(owner_of, record, versions, logged) -> Inventory:
+    """The pages of a clone a move carries: each with a record, versions or Write log lines. A page with no owner is
+    kept out (it opens to nobody, so a Forward for it would be an oracle); git carries it."""
+    send, ownerless = {}, set()
+    for path in sorted({*record, *versions, *logged}):
+        owner = owner_of(path)
+        if owner:
+            send[path] = owner
+        else:
+            ownerless.add(path)
+    return Inventory(send, ownerless)
+
+
+def owner_email(member) -> str | None:
+    """The e-mail the sender gives for a page's owner: the member's own, never the one made up for one with none."""
+    return member.email or None
+
+
+def match_owner(members, email, origins=()) -> tuple:
+    """The member of this tiroir who owns a landed page, by e-mail ignoring case: `(id, None)`, or `(None, why)`: `refused`
+    (no e-mail, or one made up for a member with none, on either side's origin in `origins`), `no_owner`, `ambiguous_owner`."""
+    members = list(members)
+    if not email:
+        return None, "refused"
+    want = email.strip().lower()
+    if not want or any(want == proxy.default_email(m.id, o).lower() for m in members for o in origins):
+        return None, "refused"
+    found = [m.id for m in members if m.email and m.email.strip().lower() == want]
+    if not found:
+        return None, "no_owner"
+    return (found[0], None) if len(found) == 1 else (None, "ambiguous_owner")
+
+
+def tip_holds(clone: Path, branch: str, page: str, blob: str) -> bool:
+    """The save branch's tip holds `page` with this blob: the page is that text on this side too."""
+    return _git(clone, "rev-parse", f"origin/{branch}:{page}") == blob

@@ -99,13 +99,13 @@ def test_a_move_survives_a_restart(tmp_path):
     moves = root_moves.Moves(tmp_path)
     moves.start("o/r", THERE, "id1")
     again = root_moves.Moves(tmp_path)
-    assert again.get("o/r") == {"to": THERE, "id": "id1", "sent": [], "held": {}}
+    assert again.get("o/r") == {"to": THERE, "id": "id1", "sent": [], "held": {}, "hashes": {}, "forwarded": []}
 
 
 def test_starting_a_move_again_to_the_same_tiroir_keeps_its_id_and_progress(tmp_path):
     moves = root_moves.Moves(tmp_path)
     moves.start("o/r", THERE, "id1")
-    moves.sent("o/r", "a.md")
+    moves.sent("o/r", "a.md", "h1")
     moves.start("o/r", THERE, "id2")
     assert moves.get("o/r")["id"] == "id1" and moves.get("o/r")["sent"] == ["a.md"]
 
@@ -120,7 +120,7 @@ def test_a_toml_changed_to_another_tiroir_before_the_first_confirm_replaces_the_
 def test_a_move_with_a_confirmed_page_runs_to_the_end_when_the_toml_changes_again(tmp_path):
     moves = root_moves.Moves(tmp_path)
     moves.start("o/r", THERE, "id1")
-    moves.sent("o/r", "a.md")
+    moves.sent("o/r", "a.md", "h1")
     moves.start("o/r", "https://third.example", "id2")
     assert moves.get("o/r")["to"] == THERE
 
@@ -141,7 +141,7 @@ def test_a_file_that_cannot_be_read_is_an_empty_list_of_moves(tmp_path):
 def test_the_file_holds_no_text(tmp_path):
     moves = root_moves.Moves(tmp_path)
     moves.start("o/r", THERE, "id1")
-    assert set(json.loads((tmp_path / "root_moves.json").read_text())["o/r"]) == {"to", "id", "sent", "held"}
+    assert set(json.loads((tmp_path / "root_moves.json").read_text())["o/r"]) == {"to", "id", "sent", "hashes", "forwarded", "held"}
 
 
 # ── the retry clock ──────────────────────────────────────────────────────────
@@ -256,3 +256,90 @@ def test_a_keyring_that_cannot_be_read_pairs_nothing():
         def get(self, *_):
             raise root_moves.connect.ConnectError("no keyring")
     assert not root_moves.paired(THERE, Broken())
+
+
+# ── forwarded, cancel, done (ticket 21 part 2) ───────────────────────────────
+
+def test_a_confirmed_page_keeps_the_receivers_hash_and_waits_for_its_forward(tmp_path):
+    moves = root_moves.Moves(tmp_path)
+    moves.start("o/r", THERE, "id1")
+    moves.sent("o/r", "a.md", "h1")
+    moves.sent("o/r", "b.md", "h2")
+    assert moves.get("o/r")["hashes"] == {"a.md": "h1", "b.md": "h2"}
+    assert moves.pending_forward("o/r") == {"a.md": "h1", "b.md": "h2"}
+
+
+def test_a_forwarded_page_is_no_longer_pending_and_a_restart_keeps_it(tmp_path):
+    moves = root_moves.Moves(tmp_path)
+    moves.start("o/r", THERE, "id1")
+    moves.sent("o/r", "a.md", "h1")
+    moves.sent("o/r", "b.md", "h2")
+    moves.forwarded("o/r", "a.md")
+    assert root_moves.Moves(tmp_path).pending_forward("o/r") == {"b.md": "h2"}
+
+
+def test_a_crash_between_the_confirm_and_the_forward_leaves_the_page_pending(tmp_path):
+    moves = root_moves.Moves(tmp_path)
+    moves.start("o/r", THERE, "id1")
+    moves.sent("o/r", "a.md", "h1")
+    assert root_moves.Moves(tmp_path).pending_forward("o/r") == {"a.md": "h1"}
+
+
+def test_a_page_with_a_forward_is_forwarded_once(tmp_path):
+    moves = root_moves.Moves(tmp_path)
+    moves.start("o/r", THERE, "id1")
+    moves.sent("o/r", "a.md", "h1")
+    moves.forwarded("o/r", "a.md")
+    moves.forwarded("o/r", "a.md")
+    assert moves.get("o/r")["forwarded"] == ["a.md"]
+
+
+def test_pending_forward_of_no_move_is_empty(tmp_path):
+    assert root_moves.Moves(tmp_path).pending_forward("o/r") == {}
+
+
+def test_a_move_that_confirmed_nothing_is_cancelled(tmp_path):
+    moves = root_moves.Moves(tmp_path)
+    moves.start("o/r", THERE, "id1")
+    assert moves.cancel("o/r") is True
+    assert moves.get("o/r") is None
+
+
+def test_a_move_with_a_confirmed_page_is_not_cancelled(tmp_path):
+    moves = root_moves.Moves(tmp_path)
+    moves.start("o/r", THERE, "id1")
+    moves.sent("o/r", "a.md", "h1")
+    assert moves.cancel("o/r") is False
+    assert moves.get("o/r")["to"] == THERE
+
+
+def test_a_finished_move_is_dropped_so_a_later_move_to_the_same_tiroir_starts_afresh(tmp_path):
+    moves = root_moves.Moves(tmp_path)
+    moves.start("o/r", THERE, "id1")
+    moves.sent("o/r", "a.md", "h1")
+    moves.forwarded("o/r", "a.md")
+    assert moves.done("o/r") is True
+    assert moves.get("o/r") is None
+    assert moves.start("o/r", THERE, "id2")["id"] == "id2"
+
+
+def test_a_move_with_a_page_not_yet_forwarded_is_not_done(tmp_path):
+    moves = root_moves.Moves(tmp_path)
+    moves.start("o/r", THERE, "id1")
+    moves.sent("o/r", "a.md", "h1")
+    assert moves.done("o/r") is False
+    assert moves.get("o/r") is not None
+
+
+def test_cancel_and_done_of_no_move_change_nothing(tmp_path):
+    moves = root_moves.Moves(tmp_path)
+    assert moves.cancel("o/r") is False and moves.done("o/r") is False
+
+
+def test_a_sent_page_with_no_hash_goes_back_to_unsent_at_the_next_start(tmp_path):
+    (tmp_path / "root_moves.json").write_text('{"o/r": {"to": "%s", "id": "id1", "sent": ["a.md", "b.md"], "held": {}}}' % THERE)
+    moves = root_moves.Moves(tmp_path)
+    moves.start("o/r", THERE, "id2")
+    moves.sent("o/r", "c.md", "h3")
+    moves.start("o/r", THERE, "id3")
+    assert moves.get("o/r")["sent"] == ["c.md"] and moves.pending_forward("o/r") == {"c.md": "h3"}

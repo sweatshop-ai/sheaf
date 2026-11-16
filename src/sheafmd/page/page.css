@@ -270,3 +270,5 @@ button.rd-inline{margin:0 .5em 0 0;vertical-align:baseline;user-select:none}
 span.rd-actword{display:none}
 /* While editing the word is shown: a line of the word alone has nothing else to put the caret in. */
 .rd-editing span.rd-actword{display:inline}
+
+.rd-readonly { margin: 0 0 1em; padding: .5em .75em; border-left: 3px solid #b8860b; background: rgba(184, 134, 11, .08); font: .9em/1.4 system-ui, sans-serif; }

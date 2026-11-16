@@ -68,8 +68,9 @@ def test_the_limit_is_the_channels_own():
 def test_each_confirmed_page_is_marked_sent_and_the_call_is_the_root_verb(move):
     receiver = Receiver(ok("a.md", "b.md"))
     done = outgoing.send_root(receiver, move, "o/r", THERE, HEAD, [row("a.md"), row("b.md")])
-    assert sorted(done) == ["a.md", "b.md"]
+    assert done == {"a.md": "h", "b.md": "h"}
     assert move.get("o/r")["sent"] == ["a.md", "b.md"]
+    assert move.get("o/r")["hashes"] == {"a.md": "h", "b.md": "h"}
     (to, verb, body), = receiver.calls
     assert (to, verb) == (THERE, "root")
     assert {k: body[k] for k in HEAD} == HEAD and [p["path"] for p in body["pages"]] == ["a.md", "b.md"]
@@ -78,13 +79,13 @@ def test_each_confirmed_page_is_marked_sent_and_the_call_is_the_root_verb(move):
 def test_a_page_the_receiver_refuses_is_held_with_its_reason_and_the_others_still_go(move):
     answer = 200, {"pages": {"a.md": {"ok": True, "hash": "h"}, "b.md": {"ok": False, "why": "no_owner"}}}
     done = outgoing.send_root(Receiver(answer), move, "o/r", THERE, HEAD, [row("a.md"), row("b.md")])
-    assert done == ["a.md"]
+    assert done == {"a.md": "h"}
     assert move.get("o/r")["held"] == {"b.md": "no_owner"}
 
 
 def test_a_clone_being_made_holds_every_page_as_cloning(move):
     done = outgoing.send_root(Receiver((202, {"state": "cloning"})), move, "o/r", THERE, HEAD, [row("a.md")])
-    assert done == [] and move.get("o/r")["held"] == {"a.md": "cloning"}
+    assert done == {} and move.get("o/r")["held"] == {"a.md": "cloning"}
 
 
 @pytest.mark.parametrize("why", ["no_app", "not_cloned", "private_root"])
@@ -113,11 +114,11 @@ def test_a_failure_in_the_first_batch_leaves_the_later_ones_unsent_and_held(move
 
 def test_a_page_the_answer_does_not_mention_is_held_not_forwarded(move):
     done = outgoing.send_root(Receiver(ok("a.md")), move, "o/r", THERE, HEAD, [row("a.md"), row("b.md")])
-    assert done == ["a.md"] and move.get("o/r")["held"] == {"b.md": "failed"}
+    assert done == {"a.md": "h"} and move.get("o/r")["held"] == {"b.md": "failed"}
 
 
 def test_a_page_already_sent_is_not_sent_again(move):
-    move.sent("o/r", "a.md")
+    move.sent("o/r", "a.md", "h1")
     receiver = Receiver(ok("b.md"))
     outgoing.send_root(receiver, move, "o/r", THERE, HEAD, [row("a.md"), row("b.md")])
     assert [p["path"] for p in receiver.calls[0][2]["pages"]] == ["b.md"]
@@ -148,3 +149,18 @@ def test_a_reason_the_peer_makes_up_is_held_as_failed_not_stored(move, why):
     assert move.get("o/r")["held"] == {"a.md": "failed"}
     outgoing.send_root(receiver, move, "o/r", THERE, HEAD, [row("a.md")])
     assert move.get("o/r")["held"] == {"a.md": "failed"}
+
+
+@pytest.mark.parametrize("said", [5, ["x"], "x" * 129, "has space", "a\nb", None])
+def test_a_confirmed_page_with_a_hash_the_peer_made_up_is_held_not_sent(move, said):
+    done = outgoing.send_root(Receiver((200, {"pages": {"a.md": {"ok": True, "hash": said}}})), move, "o/r", THERE, HEAD, [row("a.md")])
+    assert done == {}
+    assert move.get("o/r")["sent"] == [] and move.get("o/r")["hashes"] == {}
+    assert move.get("o/r")["held"] == {"a.md": "failed"}
+
+
+def test_a_page_held_for_its_hash_goes_again_at_the_next_try(move):
+    outgoing.send_root(Receiver((200, {"pages": {"a.md": {"ok": True}}})), move, "o/r", THERE, HEAD, [row("a.md")])
+    again = Receiver(ok("a.md"))
+    assert outgoing.send_root(again, move, "o/r", THERE, HEAD, [row("a.md")]) == {"a.md": "h"}
+    assert len(again.calls) == 1

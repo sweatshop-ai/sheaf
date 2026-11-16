@@ -41,12 +41,12 @@ def base_source(into: Path) -> Path:
     return into / "src"
 
 
-def run_session(src: Path, work: Path) -> Path:
+def run_session(src: Path, work: Path, **env_more) -> Path:
     """The session on the code in `src`; the work folder it left, whose `list` is the repo to compare."""
     work.mkdir()
     env = {k: v for k, v in os.environ.items() if not k.startswith(("PYTHON", "SHEAF", "GIT_"))}
     got = subprocess.run([sys.executable, "-P", str(HERE / "twin_session.py"), str(work)], capture_output=True,
-                         text=True, timeout=300, env={**env, "PYTHONPATH": str(src)})
+                         text=True, timeout=300, env={**env, "PYTHONPATH": str(src), **env_more})
     assert got.returncode == 0, got.stdout + got.stderr
     assert (work / "imported-from.txt").read_text(encoding="utf-8") == str((src / "sheafmd").resolve())    # that copy ran
     return work / "list"
@@ -84,3 +84,12 @@ def test_twin_no_private_root_byte_for_byte(tmp_path):
                                                  "door update closing", "door update editing"]
     assert len(names(2, "a")) == 2 and len(names(2, "b")) == 1 and len(names(3, "a")) == 1    # the session did close it
     assert without_empty_tells(json.loads((after.parent / "snapshot.json").read_text(encoding="utf-8"))) == shown   # what each member sees
+
+
+def test_the_log_of_the_session_does_not_depend_on_when_the_pushers_thread_sweeps(tmp_path):
+    """A write starts the pusher's thread, whose sweep commits the versions a page kept since. A sweep before the next write
+    commits them alone (`versions: <page>`); one after leaves them to that write's commit. Run on this tree twice, the second
+    time with every sweep half a second late, the log of the list repo is the same."""
+    prompt = run_session(TREE / "src", tmp_path / "prompt")
+    late = run_session(TREE / "src", tmp_path / "late", TWIN_SWEEP_DELAY="0.5")
+    assert log_of(late) == log_of(prompt)

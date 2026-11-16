@@ -38,7 +38,7 @@ function world($: any, on: any) {
   })
   const send = () => $.tool.call({ tool: 'Bash', command: 'sheaf notes.md' })
   const mcp = (tool: string) => $.tool.call({ tool, id: 'c1', text: 'Looking.' } as any)
-  return { clock, door, submitted, send, mcp, lines }
+  return { clock, door, submitted, send, mcp, lines, kept }
 }
 
 const start = ($: any) => $.turn.start({ text: '', turnId: 'a' })
@@ -245,6 +245,52 @@ test('a session resumed after it sent a page is polled without a new send', asyn
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await w.clock.advance(2_000)
   expect(polls(w.door).length).toBeGreaterThan(before)
+})
+
+test('a resumed session does not submit again a Tell it submitted before and has not answered: the door still lists it', async ($, on) => {
+  const w = world($, on)
+  // What an earlier run of the mod stored for this session: it armed for one tiroir and submitted t1.
+  w.kept.set(`doors:${SESSION}`, [{ flag: '--origin', value: ORIGIN }])
+  w.kept.set(`delivered:${SESSION}`, ['t1'])
+  w.door.answers = [{ exitCode: 0, stdout: JSON.stringify([TELL]), stderr: '' }]
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.clock.advance(20_000)
+  expect(polls(w.door).length).toBeGreaterThan(0)
+  expect(w.submitted.length).toBe(0)
+})
+
+test('a Tell the mod submits is kept for the session, so a resume knows it', async ($, on) => {
+  const w = world($, on)
+  w.door.answers = [{ exitCode: 0, stdout: JSON.stringify([TELL]), stderr: '' }]
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.send()
+  await w.clock.advance(1_000)
+  expect(w.submitted.length).toBe(1)
+  expect(w.kept.get(`delivered:${SESSION}`)).toEqual(['t1'])
+})
+
+test('a Tell whose submit failed is not kept: a resume offers it again', async ($, on) => {
+  const w = world($, on)
+  w.door.failSubmits = 100
+  w.door.answers = [{ exitCode: 0, stdout: JSON.stringify([TELL]), stderr: '' }]
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.send()
+  await w.clock.advance(20_000)
+  expect(w.submitted.length).toBe(0)
+  expect(w.kept.get(`delivered:${SESSION}`) ?? []).not.toContain('t1')
+})
+
+test('the Tells kept for a session are bounded: the oldest are forgotten', async ($, on) => {
+  const w = world($, on)
+  w.kept.set(`doors:${SESSION}`, [{ flag: '--origin', value: ORIGIN }])
+  w.kept.set(`delivered:${SESSION}`, Array.from({ length: 60 }, (_, i) => `old${i}`))
+  w.door.answers = [{ exitCode: 0, stdout: JSON.stringify([TELL]), stderr: '' }]
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.clock.advance(20_000)
+  const kept = w.kept.get(`delivered:${SESSION}`) as string[]
+  expect(kept.length).toBe(50)
+  expect(kept.at(-1)).toBe('t1')
+  expect(kept[0]).toBe('old11')
 })
 
 test('the poll is given longer than the CLI\'s own 35 s call', async ($, on) => {

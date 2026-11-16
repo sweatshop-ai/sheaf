@@ -6,7 +6,7 @@
 
 **Claimed by:** Manon 2026-11-07 07:17
 
-**Status:** in-progress (code merged as acme/library-door#234; the open boxes wait on the deploy on agency-tiroir, our stage library-door-sheaf in tt-tiroir, and on Alice)
+**Status:** in-progress (code merged as acme/library-door#234; the open boxes wait on the deploy on agency-tiroir, our stage library-door-sheaf in agency-tiroir, and on Alice)
 
 **Reviews (Manon, 2026-11-07):** Matt's code-review and security-review on 7631732 (no hard violations, no exploitable finding); Opus fallback rounds 1 and 2 (Codex is out until 2026-11-11), both GO, round 2 on head 1558b67; two class-b fixes made, class c and d are Follow-ups on the PR. Comments: acme/library-door#234 issuecomment-6703546404 and issuecomment-6703570458. Real-hub tests (19) pass locally on 1558b67; they skip on CI until sheaf#212 is merged and CI installs sheaf.
 

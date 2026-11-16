@@ -1,4 +1,4 @@
-"""The sign-in code (SPEC 9.13, tt-tiroir#60): a member asks for a code in a rectoverso's Work on this, and the laptop
+"""The sign-in code (SPEC 9.13, agency-tiroir#60): a member asks for a code in a rectoverso's Work on this, and the laptop
 client spends it on the two routes of 9.12, the transcript and the fork, for that one rectoverso, once each, in order,
 within 10 minutes. The verifier hands the hub the code's sha256 as `X-Sheaf-Code` and no member header; the hub
 alone knows whose it is. Through the handler in proxy mode, on the fixtures of test_hub_work.py."""

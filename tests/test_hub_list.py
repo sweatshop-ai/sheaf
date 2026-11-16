@@ -25,7 +25,7 @@ from sheafmd.hub.state import Tokens
 from sheafmd.hub.visibility import front_matter
 from sheafmd.source import md_hash
 
-NELL = "503b2f77-83de-452c-817a-a357faf85929"       # the front's ids of two members
+NELL = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"       # the front's ids of two members
 DORA = "2b9d7e1c-4a51-4c0e-9d1f-6f0c3a7e8b42"
 TOKEN = "ghs_fake_" "installation_token"
 NOW = 1_761_640_000                                    # 2025-10-28 08:26:40 UTC
@@ -1397,7 +1397,7 @@ def test_a_take_off_of_a_file_that_went_is_not_narrowed_by_a_later_tick_of_the_s
         assert the_list_._off[("name", "a/b/c.md")][1] == ("acme", "record", 5)
 
 
-# ── Move to: the eighth word, and the pointer a move leaves (tt-tiroir#211) ──
+# ── Move to: the eighth word, and the pointer a move leaves (agency-tiroir#211) ──
 
 CLIENT = """
 ## Client

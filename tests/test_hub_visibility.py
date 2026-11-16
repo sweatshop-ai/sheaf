@@ -15,7 +15,7 @@ from sheafmd.hub.visibility import front_matter
 from sheafmd.mcp import MAX_TEXT
 from sheafmd.source import md_hash
 
-ALICE = "503b2f77-83de-452c-817a-a357faf85929"
+ALICE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 BOB = "2b9d7e1c-4a51-4c0e-9d1f-6f0c3a7e8b42"
 
 PRIVATE = """---
@@ -509,7 +509,7 @@ def test_two_stop_james_in_one_second_leave_two_drops_and_two_rows(team, work, s
     assert [r["drop"] for r in hub_rows("stop-james")] == ["written", "written"]
 
 
-# ── Review round 2 (PR 10), and Tariq's digest round on tt-tiroir PR 32 ─────────────────────────────
+# ── Review round 2 (PR 10), and Tariq's digest round on agency-tiroir PR 32 ─────────────────────────────
 
 @pytest.mark.parametrize("how", ["not UTF-8", "unreadable"])
 def test_an_owner_only_sheaf_its_page_cached_answers_404_to_bob_once_its_file_cannot_be_read(team, work, how):
@@ -1258,7 +1258,7 @@ def test_the_owners_release_of_the_labelled_box_makes_the_sheaf_their_own_alone_
 
 
 def test_the_hub_never_writes_the_new_label_into_a_file_that_holds_the_old_line(team, work):
-    """An existing file keeps `- [ ] Share` through every write the hub makes (share, release): the tt-tiroir
+    """An existing file keeps `- [ ] Share` through every write the hub makes (share, release): the agency-tiroir
     record routine reads only the old word, so the new label must come from a file's author, never from the hub."""
     put(team, work, DOC, PRIVATE)
     assert tick(team, work, DOC, "Share", ALICE).status == 200

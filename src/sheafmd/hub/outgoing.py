@@ -88,9 +88,11 @@ def send_root(post, moves, repo: str, to: str, head: dict, rows, limit: int = BA
         if status == 200 and isinstance(answer.get("pages"), dict):
             for p in paths:
                 got = answer["pages"].get(p)
-                if isinstance(got, dict) and got.get("ok") is True:
-                    done[p] = _hash(got.get("hash"))
-                    moves.sent(repo, p, done[p])
+                if isinstance(got, dict) and got.get("ok") is True and (hash := _hash(got.get("hash"))):
+                    done[p] = hash
+                    moves.sent(repo, p, hash)
+                elif isinstance(got, dict) and got.get("ok") is True:
+                    held[p] = "failed"          # confirmed with no usable hash: its Forward could not be checked, so it goes again
                 else:
                     held[p] = _reason(got.get("why")) if isinstance(got, dict) else "failed"
             continue

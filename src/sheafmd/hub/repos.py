@@ -61,6 +61,7 @@ GITHUB_HOSTS = ("github.com", "ssh.github.com", "www.github.com")
 
 NO_CLONES = "none"
 OK, PRIVATE_ROOT, NO_APP, NOT_CLONED, CLONING = "ok", "private-root", "no-app", "not-cloned", "cloning"
+REFUSED = "refused"         # `refusal` only: a clone failed since the last report, which a report would raise as `Refused`
 MOVED = "moved"             # the clone's root went to another tiroir: its answer carries the new origin (`moved_to`)
 NO_LAZY_FETCH_FROM = (2, 44)    # the git that honours GIT_NO_LAZY_FETCH; an older one ignores it without an error
 
@@ -492,11 +493,8 @@ class Repos:
         A repo that became a private root after it was cloned keeps its clone and its records, takes no more.
         Nothing here clones or fetches: that is the repo's thread's (see the top of the file)."""
         repo, path, commit = _clean_repo(repo), _clean_path(path), _clean_commit(commit)
-        roots = [who for who, root in private_roots if self._is_private_root(repo, root)]
-        if member in roots:
-            return {"repo": repo, "path": path, "clone": PRIVATE_ROOT, "commit_known": None}
-        if roots:
-            return {"repo": repo, "path": path, "clone": NOT_CLONED, "commit_known": None}
+        if (private := self._private(member, repo, private_roots)) is not None:
+            return {"repo": repo, "path": path, "clone": private, "commit_known": None}
         if (to := self.moved_to(repo)) is not None:
             return {"repo": repo, "path": path, "clone": MOVED, "moved_to": to, "commit_known": None}
         with self._guard:
@@ -517,6 +515,29 @@ class Repos:
         if not held:
             return {"repo": repo, "path": path, "clone": CLONING, "commit_known": None}
         return {"repo": repo, "path": path, "clone": OK, "commit_known": self._look_is_safe() and self._on_branch(dest, commit)}
+
+    def _private(self, member: str, repo: str, private_roots) -> str | None:
+        """`private-root` for the member whose private root `repo` is, `not-cloned` when it is another member's, else None."""
+        roots = [who for who, root in private_roots if self._is_private_root(repo, root)]
+        return PRIVATE_ROOT if member in roots else NOT_CLONED if roots else None
+
+    def install_url(self, repo: str) -> str:
+        """The link that adds `repo` to the App."""
+        return self.provider.install_url(_clean_repo(repo))
+
+    def refusal(self, member: str, repo, private_roots=()) -> str | None:
+        """What `report` would refuse for `repo`, with nothing written: `private-root`, `not-cloned`, `refused` (a clone failed
+        since the last report) or `no-app`; None when it would not refuse. A repo that moved is not looked at for the last two:
+        its clone is held. Nothing here records, dates, queues or pops anything."""
+        repo = _clean_repo(repo)
+        if (private := self._private(member, repo, private_roots)) is not None:
+            return private
+        with self._guard:
+            if self._failed.get(repo):
+                return REFUSED
+        if not (self.clone_dir(repo) / ".git").exists() and repo not in self._queues and self.provider.token(repo) is None:
+            return NO_APP
+        return None
 
     def _enqueue(self, repo: str, item: tuple):
         with self._guard:

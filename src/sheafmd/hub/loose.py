@@ -58,63 +58,102 @@ def kept(root_path: Path, rel: str) -> bool:
     return rel in marks(root_path)
 
 
-def marks(root_path: Path) -> list:
-    """The pages the root marks never to be archived. No file is no marks; a file that is a link, is not a list of
-    names, or cannot be read is refused (`Refused`), never read as no marks: the next `keep` would write it over."""
-    folder, mark = Path(root_path) / KEEP.parent, Path(root_path) / KEEP
+def _load(root_path: Path, name: str, what: str):
+    """The JSON of the mark file `.sheaf/<name>` of the root, or None when there is none. A folder or file that is a link or
+    not a plain one, or a file that cannot be read as JSON, is refused (`Refused`), never read as no marks: the next write
+    would put it over."""
+    folder, mark = Path(root_path) / ".sheaf", Path(root_path) / ".sheaf" / name
     try:
         st = os.lstat(folder)
     except FileNotFoundError:
-        return []
+        return None
     except OSError as e:
-        raise Refused(f"the keep marks of the loose root cannot be read ({e.strerror})") from None
+        raise Refused(f"the {what} of the loose root cannot be read ({e.strerror})") from None
     if not stat.S_ISDIR(st.st_mode):
-        raise Refused("the keep marks of the loose root are in a folder that is a link or a file: refused")
+        raise Refused(f"the {what} of the loose root are in a folder that is a link or a file: refused")
     try:
         fd = os.open(mark, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0))
     except FileNotFoundError:
-        return []
+        return None
     except OSError as e:
-        raise Refused(f"the keep marks of the loose root cannot be read ({e.strerror})") from None
+        raise Refused(f"the {what} of the loose root cannot be read ({e.strerror})") from None
     try:
         with os.fdopen(fd, "rb") as f:
             if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
-                raise Refused("the keep marks of the loose root are not a file: refused")
-            data = json.loads(f.read().decode("utf-8"))
+                raise Refused(f"the {what} of the loose root are not a file: refused")
+            return json.loads(f.read().decode("utf-8"))
     except (OSError, ValueError):
-        raise Refused("the keep marks of the loose root cannot be read as a list of pages: refused, and left as they "
-                      "are") from None
+        raise Refused(f"the {what} of the loose root cannot be read: refused, and left as they are") from None
+
+
+def marks(root_path: Path) -> list:
+    """The pages the root marks never to be archived. No file is no marks; a file that is not a list of names is refused
+    (`Refused`)."""
+    data = _load(root_path, KEEP.name, "keep marks")
+    if data is None:
+        return []
     if not isinstance(data, list) or not all(isinstance(x, str) for x in data):
         raise Refused("the keep marks of the loose root are not a list of pages: refused, and left as they are")
     return data
 
 
-def keep(root_path: Path, rel: str) -> None:
-    """Mark the page at `rel` never to be archived: the file is written whole beside itself and put in place by a
-    replace, in a folder reached without a link. Refused (`Refused`) when it cannot be."""
-    mark = Path(root_path) / KEEP
+def times(root_path: Path, name: str) -> dict:
+    """`{page: time}` of the mark file `.sheaf/<name>` (archived, seen): no file is none; a file that is not that is refused."""
+    data = _load(root_path, name, f"{name[:-5]} marks")
+    if data is None:
+        return {}
+    if not isinstance(data, dict) or not all(isinstance(k, str) and isinstance(v, (int, float)) and not isinstance(v, bool)
+                                             for k, v in data.items()):
+        raise Refused(f"the {name[:-5]} marks of the loose root are not a table of times: refused, and left as they are")
+    return data
+
+
+def _put(root_path: Path, name: str, data, what: str) -> None:
+    """Write the mark file whole beside itself and put it in place by a replace, in a folder reached without a link.
+    Refused (`Refused`) when it cannot be. The caller holds the lock."""
+    mark = Path(root_path) / ".sheaf" / name
+    made = False
+    try:
+        try:
+            os.mkdir(mark.parent, 0o700)
+            made = True
+        except FileExistsError:
+            pass
+        if not stat.S_ISDIR(os.lstat(mark.parent).st_mode):
+            raise Refused(f"the {what} of the loose root are in a folder that is a link or a file: refused")
+        if os.path.lexists(mark) and not stat.S_ISREG(os.lstat(mark).st_mode):
+            raise Refused(f"the {what} of the loose root are a link or not a file: refused")
+        state.write_text_private(mark, json.dumps(data, indent=1, ensure_ascii=False, sort_keys=True) + "\n", inside=True)
+    except (OSError, paths.PathError) as e:
+        if made:
+            with contextlib.suppress(OSError):
+                os.rmdir(mark.parent)           # the folder this call made goes with it, so the root stays empty
+        raise Refused(f"the {what.removesuffix('s')} could not be written ({getattr(e, 'strerror', None) or e})") from None
+
+
+def keep(root_path: Path, rel: str, on: bool = True) -> None:
+    """Mark the page at `rel` never to be archived (`on`), or take the mark off. Written whole by a replace; refused
+    (`Refused`) when it cannot be."""
     with state.file_locked("loose-keep.lock"):      # two creates at once each keep their own mark
         held = marks(root_path)
-        if rel in held:
+        if (rel in held) == on:
             return
-        made = False
-        try:
-            try:
-                os.mkdir(mark.parent, 0o700)
-                made = True
-            except FileExistsError:
-                pass
-            if not stat.S_ISDIR(os.lstat(mark.parent).st_mode):
-                raise Refused("the keep marks of the loose root are in a folder that is a link or a file: refused")
-            if os.path.lexists(mark) and not stat.S_ISREG(os.lstat(mark).st_mode):
-                raise Refused("the keep marks of the loose root are a link or not a file: refused")
-            state.write_text_private(mark, json.dumps(sorted([*held, rel]), indent=1, ensure_ascii=False) + "\n",
-                                     inside=True)
-        except (OSError, paths.PathError) as e:
-            if made:
-                with contextlib.suppress(OSError):
-                    os.rmdir(mark.parent)           # the folder this call made goes with it, so the root stays empty
-            raise Refused(f"the keep mark could not be written ({getattr(e, 'strerror', None) or e})") from None
+        _put(root_path, KEEP.name, sorted([*held, rel] if on else [h for h in held if h != rel]), "keep marks")
+
+
+def stamp(root_path: Path, name: str, changes: dict, only_new: bool = False) -> None:
+    """Set (or, for a None, take off) the times of pages in the mark file `.sheaf/<name>`; with `only_new` a page that has one
+    keeps it. Nothing is written when nothing changes."""
+    with state.file_locked("loose-keep.lock"):
+        held = times(root_path, name)
+        out = dict(held)
+        for rel, at in changes.items():
+            if at is None:
+                out.pop(rel, None)
+            elif not (only_new and rel in out):
+                out[rel] = at
+        if out != held:
+            _put(root_path, name, out, f"{name[:-5]} marks")
 
 
 def keep_moved(root_path: Path, old: str, new: str) -> None:

@@ -223,3 +223,49 @@ def test_a_token_that_no_longer_acts_for_the_tells_member_is_listed_nothing(lapt
     laptops.hub.proxy = both(laptops.hub.proxy.members[BEA].roots[0], bea=["bea-two"], cal=["cal-one", "bea-one"])
     assert poll(laptops)[1] == {"tells": []}
     assert doc(laptops, BEA)["telling"][0]["state"] != "seen"
+
+
+@pytest.mark.parametrize("how", ["resolve", "reply-and-resolve"])
+def test_a_resolve_from_the_page_ends_the_laptop_tell_as_the_door_does(laptops, how):
+    declare(laptops)
+    tell(laptops)
+    assert [t["laptop"] for t in doc(laptops, BEA)["telling"]] == [True]
+    body = {"op": "status", "status": "resolved"} if how == "resolve" else {"op": "reply", "body": "Thanks.", "resolve": True}
+    assert post(laptops, BEA, "/_/comment", **body).status == 200
+    assert [t for t in doc(laptops, BEA)["telling"] if t.get("laptop")] == []
+    assert poll(laptops)[1] == {"tells": []}
+
+
+def test_the_words_of_a_tell_are_read_under_the_pages_name_and_outside_the_session_lock(laptops, monkeypatch):
+    from sheafmd import mcp
+    from sheafmd.hub import place
+    declare(laptops)
+    tell(laptops)
+    seen = []
+    real = mcp.Door._open_in
+
+    def spy(self, address, whole=False):
+        seen.append((place.owns(laptops.hub, address), laptops.hub.session_tells._lock._is_owned()))
+        return real(self, address, whole)
+    monkeypatch.setattr(mcp.Door, "_open_in", spy)
+    assert [t["thread"] for t in poll(laptops)[1]["tells"]] == ["c1"]
+    assert seen and all(held and not locked for held, locked in seen)
+
+
+def test_a_session_id_over_the_limit_never_becomes_a_target_so_no_poll_of_it_is_refused_for_ever(laptops):
+    from sheafmd.hub import session_tells
+    long = "s" * (session_tells.MAX_SESSION + 1)
+    declare(laptops, session=long)
+    assert doc(laptops, BEA)["target"].get("laptop") is not True
+    declare(laptops, session="s" * session_tells.MAX_SESSION)
+    assert doc(laptops, BEA)["target"]["laptop"] is True
+
+
+def test_a_session_that_stopped_polling_is_forgotten_after_it_stopped_counting_as_listening(laptops):
+    from sheafmd.hub import session_tells
+    tells = laptops.hub.session_tells
+    tells._heard[("bea-one", "old-id", "gone")] = tells._now() - session_tells.LISTENING - 1
+    declare(laptops)
+    poll(laptops)
+    assert ("bea-one", "old-id", "gone") not in tells._heard
+    assert any(k[2] == SESSION for k in tells._heard)

@@ -23,6 +23,7 @@ from pathlib import Path
 from .. import paths
 from .state import STAMP_FORMAT, file_locked, read_json, write_json
 from .waiting import Owned, Refused, belongs
+from .writelog import MAX_SESSION, valid_session
 
 MAX_WAIT = 25.0           # seconds a long-poll holds (the mods' call limit is 30)
 LISTENING = 60.0          # seconds after its last poll a session still counts as listening
@@ -30,7 +31,6 @@ POLLS_PER_TOKEN = 2       # long-polls one token may hold at once (a session, an
 BUSY = "This token already holds {n} Tell polls. Wait for one to return, and ask again no sooner than {s:g} seconds."
 RETRY_AFTER = 5.0
 NOT_ONE = "A session id is one line of at most {n} characters."
-MAX_SESSION = 100
 
 
 def _file() -> Path:
@@ -121,7 +121,7 @@ class SessionTells:
         """The Tells waiting for this token's `session`, as they are listed to it: each marked seen at its first listing.
         With none, holds up to `wait` seconds (at most MAX_WAIT) for one. `message(t)` builds a Tell's words, None for
         a thread that is no longer open (the Tell then ends as cancelled), False for a page it cannot read now (it stays). Raises Refused 429 past POLLS_PER_TOKEN."""
-        if not session or len(session) > MAX_SESSION or "\n" in session:
+        if not valid_session(session):
             raise Refused(400, NOT_ONE.format(n=MAX_SESSION))
         key = (row.name, row.id)
         with self._lock:
@@ -132,7 +132,10 @@ class SessionTells:
             end = self._now() + min(max(wait, 0.0), MAX_WAIT)
             while True:
                 with self._lock:
-                    self._heard[(*key, session)] = self._now()
+                    now = self._now()
+                    for k in [k for k, at in self._heard.items() if now - at >= LISTENING]:
+                        del self._heard[k]              # no longer counts as listening: nothing to remember
+                    self._heard[(*key, session)] = now
                 got = self._listed(row, session, message)
                 left = end - self._now()
                 if got or left <= 0:
@@ -146,13 +149,19 @@ class SessionTells:
                     del self._polling[key]
 
     def _listed(self, row, session: str, message) -> list:
+        # The words are read outside the session lock (a page is read under its name's lock, which is taken first, 9.11),
+        # then the file is changed under the lock for the Tells that are still there.
+        with self._lock:
+            mine = [t for t in read_json(_file(), [], aside=False) if isinstance(t, dict) and _bound(t, row, session)]
+        said = {t["id"]: message(t) for t in mine}
+
         def change(rows, held):
             out, save = [], False
-            for t in [t for t in rows if _bound(t, row, session)]:
-                said = message(t)
-                if said is False:
+            for t in [t for t in rows if _bound(t, row, session) and t["id"] in said]:
+                words = said[t["id"]]
+                if words is False:
                     continue
-                if said is None:
+                if words is None:
                     self._end(rows, [t], "cancelled", held, reason="closed")
                     save = True
                     continue
@@ -163,7 +172,7 @@ class SessionTells:
                     held.append(lambda t=t: self.hub.record("tell-seen", t["doc"], thread=t["thread"], token=t["token"],
                                                             tid=t["tid"], session=session))
                     save = True
-                out.append({"id": t["id"], "doc": t["doc"], "thread": t["thread"], "message": said, "by": t["by"],
+                out.append({"id": t["id"], "doc": t["doc"], "thread": t["thread"], "message": words, "by": t["by"],
                             "at": t["at"]})
             return out, save
         return self._change(change)

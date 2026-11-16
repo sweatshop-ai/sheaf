@@ -3,9 +3,13 @@
 to fetch it. Run against the hub in memory standing in for the tiroir, in a temp home with a fake keyring: no test reads
 or writes the real keyring, `~/.claude.json` or config (premortem R7), and no token is in a fixture, a log or an output
 line."""
+import http.client
+import http.server
 import json
 import os
 import subprocess
+import threading
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -19,6 +23,7 @@ from sheafmd.cli import main
 from sheafmd.hub import loose
 from sheafmd.source import md_hash
 
+ORIGINAL_POST, ORIGINAL_GET = send.post, send.get
 SECOND = "https://second.example.com"
 TEXT = "# Notes\n\nA first page.\n"
 SESSION = "6f1c2f0e-3a55-4a0e-9d52-0c1f6a1b7d11"
@@ -73,6 +78,7 @@ def tiroir(agents, keyring, monkeypatch):  # noqa: F811
         res = agents.door.request("GET", "/_/whoami", cookie=False, headers={"Authorization": f"Bearer {bearer}"})
         return res.status, (res.json() if res.status == 200 else None), {}
 
+    agents.calls = (post, get)
     monkeypatch.setattr(send, "post", post)
     monkeypatch.setattr(send, "get", get)
     return agents
@@ -388,3 +394,173 @@ def test_a_second_loose_file_with_the_same_name_is_refused_and_the_first_page_ke
     assert code == 1 and out == ""
     assert "exists already" in err and scratch.name in err and "Rename" in err
     assert on_the_tiroir(tiroir, f"loose-bea/{loose.month()}/{scratch.name}") == TEXT
+
+
+# ── a tiroir that cannot be reached, or refuses the token (SPEC 13) ──────────
+
+class StandIn:
+    """A tiroir on a local socket, reached by the CLI's own network code (only the address it dials is changed). `mode`
+    is what it does to every request: `hang` (accepts, never answers), `500`, `403` or `401`; `refuse` is a closed port."""
+
+    def __init__(self, mode):
+        self.mode, self.requests, self.release = mode, [], threading.Event()
+        stand = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                stand.requests.append(self.path)
+                self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                if stand.mode == "hang":
+                    stand.release.wait(30)
+                    return
+                self.send_response(int(stand.mode))
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            do_GET = do_POST
+
+            def log_message(self, *a):
+                pass
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server.daemon_threads = True
+        self.port = self.server.server_address[1]
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.release.set()
+        self.server.shutdown()
+        self.server.server_close()
+
+
+@pytest.fixture
+def stand_in(tiroir, real_network, monkeypatch):
+    """`stand(mode)` points the CLI's dial at a `StandIn`; the bearer and the address stay the tiroir's own."""
+    made = []
+
+    def stand(mode):
+        s = StandIn(mode)
+        made.append(s)
+
+        class Dial(urllib.request.HTTPSHandler):
+            def https_open(self, req):
+                return self.do_open(lambda host, timeout=None, **kw: http.client.HTTPConnection("127.0.0.1", s.port, timeout=timeout), req)
+
+        monkeypatch.setattr(connect, "_NO_REDIRECT", urllib.request.build_opener(connect._Refuse3xx, Dial))
+        return s
+
+    yield stand
+    for s in made:
+        s.close()
+
+
+def children() -> list[str]:
+    """The live child processes of this process, from /proc."""
+    me = os.getpid()
+    found = []
+    for p in Path("/proc").iterdir():
+        if p.name.isdigit():
+            try:
+                stat = (p / "stat").read_text().rsplit(")", 1)[1].split()
+            except (OSError, IndexError):
+                continue
+            if int(stat[1]) == me and stat[0] != "Z":
+                found.append(p.name)
+    return found
+
+
+def tiroir_calls(tiroir):
+    """The in-memory tiroir's `post` and `get` again, as the `tiroir` fixture first made them (kept before the swap)."""
+    return tiroir.calls
+
+
+@pytest.fixture
+def real_network(monkeypatch):
+    """The CLI's own `post` and `get`, which the `tiroir` fixture replaced, and a short connect timeout."""
+    monkeypatch.setattr(send, "post", ORIGINAL_POST)
+    monkeypatch.setattr(send, "get", ORIGINAL_GET)
+    monkeypatch.setattr(send, "CONNECT_TIMEOUT", 0.4)
+
+
+LOUD = "not on {host}: run sheaf {file} again when it is back"
+
+
+@pytest.mark.parametrize("mode", ["hang", "500", "503"])
+def test_a_tiroir_that_hangs_or_fails_leaves_the_page_on_the_laptop_hub_with_the_loud_line(mode, stand_in, scratch, local, capsys):
+    stand_in(mode)
+    before = children()
+    code, out, err = run(capsys, scratch)
+    assert code == 0 and local == [str(scratch)], (code, err)
+    assert LOUD.format(host="chat.example.com", file=scratch) in err
+    assert children() == before
+
+
+def test_a_closed_port_falls_back_the_same_way(stand_in, scratch, local, capsys):
+    stand_in("500").close()
+    code, out, err = run(capsys, scratch)
+    assert code == 0 and local == [str(scratch)]
+    assert "not on chat.example.com" in err
+
+
+def test_a_tiroir_that_hangs_is_given_up_on_within_the_connect_timeout(stand_in, scratch, local, capsys):
+    import time
+    stand_in("hang")
+    began = time.monotonic()
+    run(capsys, scratch)
+    assert time.monotonic() - began < 3
+
+
+def test_the_fallback_queues_nothing_and_writes_nothing_beside_the_file(stand_in, scratch, local, capsys):
+    stand_in("500")
+    before = sorted(p.name for p in scratch.parent.iterdir())
+    run(capsys, scratch)
+    assert sorted(p.name for p in scratch.parent.iterdir()) == before
+    assert not (paths.state_dir() / "sends.json").exists()
+
+
+@pytest.mark.parametrize("status", ["401", "403"])
+def test_a_refused_token_fails_loudly_with_no_fallback(status, stand_in, scratch, local, capsys):
+    stand_in(status)
+    code, out, err = run(capsys, scratch)
+    assert code == 1 and local == [] and out == ""
+    assert "refused" in err and "sheaf connect" in err and "not on" not in err
+
+
+def test_running_again_after_recovery_creates_the_page_that_never_arrived(tiroir, stand_in, scratch, local, capsys):
+    stand_in("500")
+    run(capsys, scratch)
+    # the tiroir is back: the CLI's network is the in-memory tiroir again
+    send.post, send.get = tiroir_calls(tiroir)
+    code, out, err = run(capsys, scratch)
+    assert code == 0, err
+    tools = [m["params"]["name"] for _, _, m in tiroir.seen if m and m["method"] == "tools/call"]
+    assert tools == ["create"]
+
+
+def test_running_again_after_recovery_updates_with_the_last_hash_when_the_page_had_arrived(tiroir, stand_in, scratch, local, monkeypatch, capsys):
+    kept = send.post, send.get = tiroir.calls  # the tiroir answers the first run
+    run(capsys, scratch)
+    scratch.write_text(TEXT + "\nMore.\n", encoding="utf-8")
+    stand_in("500")
+    run(capsys, scratch)
+    send.post, send.get = kept
+    tiroir.seen.clear()
+    code, out, err = run(capsys, scratch)
+    assert code == 0, err
+    tools = [m["params"]["name"] for _, _, m in tiroir.seen if m and m["method"] == "tools/call"]
+    assert tools == ["update"]
+    assert on_the_tiroir(tiroir, f"loose-bea/{loose.month()}/notes.md") == TEXT + "\nMore.\n"
+
+
+def test_a_page_changed_on_the_tiroir_while_it_was_away_is_refused_as_before(tiroir, stand_in, scratch, local, capsys):
+    kept = send.post, send.get = tiroir.calls  # the tiroir answers the first run
+    run(capsys, scratch)
+    address = f"loose-bea/{loose.month()}/notes.md"
+    scratch.write_text(TEXT + "\nMine.\n", encoding="utf-8")
+    stand_in("500")
+    run(capsys, scratch)
+    send.post, send.get = kept
+    changed_there(tiroir, address, TEXT + "\nTheirs.\n")
+    code, out, err = run(capsys, scratch)
+    assert code == 1 and "changed on the shared Sheaf" in err
+    assert on_the_tiroir(tiroir, address) == TEXT + "\nTheirs.\n"

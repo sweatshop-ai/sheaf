@@ -9,6 +9,7 @@ import json
 import os
 import subprocess
 import threading
+import time
 import urllib.request
 from pathlib import Path
 
@@ -400,7 +401,7 @@ def test_a_second_loose_file_with_the_same_name_is_refused_and_the_first_page_ke
 
 class StandIn:
     """A tiroir on a local socket, reached by the CLI's own network code (only the address it dials is changed). `mode`
-    is what it does to every request: `hang` (accepts, never answers), `500`, `403` or `401`; `refuse` is a closed port."""
+    is what it does to every request: `hang` (accepts, never answers), `500`, `403` or `401`; a closed port is a server that has been closed."""
 
     def __init__(self, mode):
         self.mode, self.requests, self.release = mode, [], threading.Event()
@@ -469,17 +470,16 @@ def children() -> list[str]:
     return found
 
 
-def tiroir_calls(tiroir):
-    """The in-memory tiroir's `post` and `get` again, as the `tiroir` fixture first made them (kept before the swap)."""
-    return tiroir.calls
-
-
 @pytest.fixture
 def real_network(monkeypatch):
     """The CLI's own `post` and `get`, which the `tiroir` fixture replaced, and a short connect timeout."""
     monkeypatch.setattr(send, "post", ORIGINAL_POST)
     monkeypatch.setattr(send, "get", ORIGINAL_GET)
     monkeypatch.setattr(send, "CONNECT_TIMEOUT", 0.4)
+
+    def refuse(*a, **kw):
+        raise AssertionError("a test dialled the network without a stand-in: call stand(mode)")
+    monkeypatch.setattr(connect._NO_REDIRECT, "open", refuse)
 
 
 LOUD = "not on {host}: run sheaf {file} again when it is back"
@@ -503,7 +503,6 @@ def test_a_closed_port_falls_back_the_same_way(stand_in, scratch, local, capsys)
 
 
 def test_a_tiroir_that_hangs_is_given_up_on_within_the_connect_timeout(stand_in, scratch, local, capsys):
-    import time
     stand_in("hang")
     began = time.monotonic()
     run(capsys, scratch)
@@ -530,7 +529,7 @@ def test_running_again_after_recovery_creates_the_page_that_never_arrived(tiroir
     stand_in("500")
     run(capsys, scratch)
     # the tiroir is back: the CLI's network is the in-memory tiroir again
-    send.post, send.get = tiroir_calls(tiroir)
+    send.post, send.get = tiroir.calls
     code, out, err = run(capsys, scratch)
     assert code == 0, err
     tools = [m["params"]["name"] for _, _, m in tiroir.seen if m and m["method"] == "tools/call"]
@@ -564,3 +563,16 @@ def test_a_page_changed_on_the_tiroir_while_it_was_away_is_refused_as_before(tir
     code, out, err = run(capsys, scratch)
     assert code == 1 and "changed on the shared Sheaf" in err
     assert on_the_tiroir(tiroir, address) == TEXT + "\nTheirs.\n"
+
+
+def test_a_failure_after_the_write_was_sent_is_no_fallback_and_says_it_may_have_arrived(tiroir, scratch, local, capsys, monkeypatch):
+    first = tiroir.calls[0]
+
+    def dies_on_the_write(url, bearer, message, headers):
+        if message.get("method") == "tools/call" and message["params"]["name"] == "create":
+            raise send.Unreachable("cannot reach chat.example.com: reset")
+        return first(url, bearer, message, headers)
+
+    monkeypatch.setattr(send, "post", dies_on_the_write)
+    code, out, err = run(capsys, scratch)
+    assert code == 1 and local == [] and "may have reached" in err and "not on" not in err

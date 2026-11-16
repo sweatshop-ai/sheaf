@@ -396,7 +396,8 @@ def _what_to_report(md: Path, top: Path, err) -> tuple[str, str, str]:
 
 def report_page(md: Path, top: Path, origin: str, token: str, args, out, err, environ) -> int | None:
     """Tell the tiroir the page `md` of the repo at `top` is being worked on: a render report, never its text and
-    never a push. None when the report cannot be made or the tiroir cannot take it and the page renders here."""
+    never a push. None whenever the page renders here: the report could not be made, the tiroir could not take it, or it
+    took it and the page still renders on this laptop (printing the report lines first) until it serves the clone."""
     if args.folder is not None or args.keep:
         err("sheaf: --folder and --keep go with a loose page; a page in a git repo stays in its repo")
         return 2
@@ -446,7 +447,7 @@ def report_page(md: Path, top: Path, origin: str, token: str, args, out, err, en
     host = origin.split("://", 1)[1]
     out(f"{repo} {path} @ {commit[:8]}")
     out(f"on {host} {'as ' + member + ' · ' if member else 'as '}{_agent_label(environ)}")
-    return EXIT_OK
+    return None         # the tiroir does not serve the clone yet: the page renders here as before, and prints its address
 
 
 def send_page(md: Path, args, out, err, environ=None) -> int | None:

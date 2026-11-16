@@ -32,6 +32,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -362,10 +363,13 @@ class Repos:
                 self._write(data)
 
     def _make_clone(self, repo: str, token: str, folder: str, dest: Path) -> str | None:
-        """Clone into a folder of its own and move it into place when whole, so a report never meets half a clone."""
-        partial = dest.with_name(dest.name + ".partial")
-        shutil.rmtree(partial, ignore_errors=True)
+        """Clone into a folder of its own and move it into place when whole, so a report never meets half a clone. The
+        folder is made in `clones/.partial/`: a GitHub owner cannot start with a dot, so no repo's clone is ever there,
+        and it is on the clones' filesystem, so the move is one rename. Only the folder made here is ever removed."""
+        parked = self.base / "clones" / ".partial"
+        parked.mkdir(parents=True, exist_ok=True)
         dest.parent.mkdir(parents=True, exist_ok=True)
+        partial = Path(tempfile.mkdtemp(prefix=repo.replace("/", "--") + "-", dir=parked))
         if (failed := self._clone(repo, token, folder, partial)) is not None:
             shutil.rmtree(partial, ignore_errors=True)
             return failed

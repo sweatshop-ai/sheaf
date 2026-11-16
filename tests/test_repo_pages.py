@@ -341,7 +341,8 @@ def test_sheaf_on_a_repo_page_sends_a_report_and_never_its_text(tiroir, hub_repo
     report(hub_repos, commit=sh(laptop, "rev-parse", "HEAD"))       # the tiroir has cloned the repo and fetched the commit
     code, out, err = run(capsys, page)
     assert code == 0, err
-    assert local == []
+    assert local == [str(page)]         # the report lines, then the render on the laptop hub, as before #400
+    assert "docs/plan.md @" in out
     assert "render_report" in seen_calls(tiroir)
     sent = [m for _, _, m in tiroir.seen if m and m.get("params", {}).get("name") == "render_report"][0]
     arguments = sent["params"]["arguments"]
@@ -906,7 +907,7 @@ def test_every_known_answer_still_gets_its_own_line(answer, tiroir, hub_repos, l
     code, out, err = run(capsys, laptop / "docs" / "plan.md")
     assert code in (0, 1) and "Traceback" not in err
     if '"commit_known": true' in answer:
-        assert code == 0 and local == [] and "plan.md" in out
+        assert code == 0 and local == [str(laptop / "docs" / "plan.md")] and "plan.md" in out
     else:
         assert local and err
 
@@ -916,3 +917,46 @@ def test_a_loose_page_whose_create_is_answered_with_a_malformed_item_fails_with_
     _door_that(monkeypatch, tiroir, _says(["x"]))
     code, out, err = run(capsys, scratch)
     assert code == 1 and "Traceback" not in err and "answered" in err
+
+
+# ── round ten: the folder a clone is made in, and the page of an `ok` ────────
+
+def _tree(folder: Path) -> dict:
+    return {str(p.relative_to(folder)): p.read_bytes() for p in sorted(folder.rglob("*")) if p.is_file()}
+
+
+def test_a_clone_of_a_repo_leaves_the_clone_of_a_repo_named_like_its_temporary_folder_alone(hub_repos, tmp_path):
+    other = clones(hub_repos) / "acme-org" / "site.partial"      # a valid GitHub repo: acme-org/site.partial
+    (other / ".git").mkdir(parents=True)
+    (other / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+    (other / "docs").mkdir()
+    (other / "docs" / "kept.md").write_text("# Kept\n")
+    before = _tree(other)
+    bad, got = report(hub_repos)
+    assert not bad and got["clone"] == "ok", got
+    assert other.is_dir() and _tree(other) == before
+
+
+def test_a_report_for_a_repo_is_never_answered_from_the_clone_made_for_another(hub_repos, monkeypatch):
+    """`acme-org/site` is mid-clone: its folder-in-the-making must not read as the clone of `acme-org/site.partial`,
+    which the App does not reach: that report still goes through the token check."""
+    inside, release = threading.Event(), threading.Event()
+
+    def slow_clone(self, repo, token, folder, dest):
+        (dest / ".git").mkdir(parents=True, exist_ok=True)
+        inside.set()
+        assert release.wait(20)
+        shutil.rmtree(dest, ignore_errors=True)
+        return "the clone of the test was stopped"
+
+    monkeypatch.setattr(Repos, "_clone", slow_clone)
+    bad, got = report_once(hub_repos)
+    assert not bad and got["clone"] == "cloning"
+    assert inside.wait(20)
+    try:
+        bad, got = report_once(hub_repos, repo=REPO + ".partial")
+        assert not bad and got["clone"] == "no-app", got
+        assert REPO + ".partial" in hub_repos.app.asked
+    finally:
+        release.set()
+        hub_repos.hub.repos.settle()

@@ -201,10 +201,8 @@ function create(ROOT, opts) {
     e.stopPropagation();
     var remote = a.getAttribute('href');
     bringBack(a).then(function (ok) {
-      if (ok || gone) return;
-      if (remote) { window.open(remote, '_blank', 'noopener,noreferrer'); return; }
-      plain(a);
-      say('That session could not be brought back: AgentView does not answer on this computer.');
+      // AgentView answered: it is there, whatever it found, so the link stays and no other way is tried.
+      if (!ok && !gone) say('AgentView found no session to bring back.');
     }, function () {
       // Nothing answered, so no other row of this laptop can be reached from here: those without a link become text.
       if (remote) { window.open(remote, '_blank', 'noopener,noreferrer'); return; }

@@ -788,15 +788,16 @@ class Door:
             raise ToolError(f"{doc} {NOT_IN_A_ROOT}", "path")     # a private root is its member's alone (9.11): no probe, no write
         return root, rel
 
-    def _loose(self, args: dict, caller: Caller) -> dict:
+    def _loose(self, args: dict, caller: Caller):
         """The arguments of a create with no root, as the create of `<root>/<path>` they come to: the page's name in
-        the member's loose root, in the folder named, else the month. Anything else goes on as it was given."""
+        the member's loose root, in the folder named, else the month. Anything else goes on as it was given.
+        (the arguments, and (member, root) of a root this call made, to take back if the create is refused)"""
         doc, folder = args["doc"], args.get("folder")
         bare = "/" not in doc and "\\" not in doc and "://" not in doc and not os.path.isabs(doc)
         if not bare and folder is None:
             if args.get("keep") is not None:
                 raise ToolError("keep is for a loose page, made with a bare file name.", "path")
-            return args
+            return args, None
         if not bare:
             raise ToolError("folder is for a loose page: the document is then a bare file name, with no "
                             "root and no slash.", "path")
@@ -806,11 +807,42 @@ class Door:
             rel = f"{loose.folder_path(folder)}/{doc}"
         except ValueError as e:
             raise ToolError(f"{e}.", "path") from None
-        root = self.hub.loose.root_for(member)
-        return {**args, "doc": str(Address(root.name, rel))}
+        # What a create refuses by its name and its text alone, before a root or a folder is made for it.
+        if not doc.endswith(".md") or doc.startswith(".") or "\0" in doc:
+            raise ToolError(f"{doc} cannot be made: a page is a .md file, and no part of its path is empty, `..` or "
+                            "a hidden name.", "path")
+        text = _as_read(args["text"])
+        self._check_size(text)
+        _check_comments("", text)
+        if args.get("keep"):
+            self._keepable(member)
+        try:
+            root, fresh = self.hub.loose.root_for(member)
+        except loose.Refused as e:
+            raise ToolError(f"{e}.", "loose root") from None
+        return {**args, "doc": str(Address(root.name, rel))}, (member, root) if fresh else None
+
+    def _keepable(self, member):
+        """Refuse (ToolError) a `keep` the member's loose root cannot mark, before the page is made."""
+        held = self.hub.loose.known(member)
+        if held is None:
+            return
+        try:
+            loose.marks(held)
+        except loose.Refused as e:
+            raise ToolError(f"{e}.", "keep") from None
 
     def _create(self, args: dict, caller: Caller):
-        given, args = args, self._loose(args, caller)
+        given = args
+        args, fresh = self._loose(args, caller)
+        try:
+            return self._created(given, args, caller)
+        except BaseException:
+            if fresh is not None:       # a refused create leaves no loose root it made behind
+                self.hub.loose.drop(*fresh)
+            raise
+
+    def _created(self, given: dict, args: dict, caller: Caller):
         root, rel = self._new_address(args["doc"], caller)
         address, text = str(Address(root.name, rel)), _as_read(args["text"])
         if (member := self._member(caller)) is not None and not (
@@ -838,16 +870,30 @@ class Door:
         # move, that comes meanwhile waits, and then finds the name taken.
         with place.held(self.hub, address):
             try:
+                made = []
                 if args is not given:       # a loose page's folders are made, each opened without following a link
+                    made = _missing_folders(top, rel)
                     try:
                         os.close(place.make_folders(top, rel, place.judge_for(self.hub, root))[0])
                     except Private:
+                        _unmake(top, made)
                         raise
                     except OSError as e:
+                        _unmake(top, made)
                         raise _not_made(address, e) from None
-                text = self._make(root, top, rel, name, address, text, caller)
+                try:
+                    text = self._make(root, top, rel, name, address, text, caller)
+                except BaseException:
+                    _unmake(top, made)      # the folders this create made go with it
+                    raise
                 if args.get("keep"):        # under the name's lock with the write: the page is never there unmarked
-                    loose.keep(root.path, rel)
+                    try:
+                        loose.keep(root.path, rel)
+                    except loose.Refused as e:
+                        with contextlib.suppress(OSError):
+                            os.unlink(top / rel)        # made a moment ago under this name's lock: take it back
+                        _unmake(top, made)
+                        raise ToolError(f"{address} was not made: {e}.", "keep") from None
             except Private:         # the root's folder, as opened, is a private root's: answered as a path in no root
                 raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path") from None
             self._agent_wrote(address, caller)          # before the tabs and indexes hear of it
@@ -1041,6 +1087,24 @@ def _sessions_changed(old: str | None) -> ToolError:
     """The answer to a door write whose text, as written, changes `sessions` (9.12); `old` is None for a create."""
     return ToolError("The text changes `sessions`, which only the hub writes; send it as `read` gave it"
                      + (" (a new page lists none)." if old is None else "."), "sessions")
+
+
+def _missing_folders(top: Path, rel: str) -> list:
+    """The folders on the way to `rel` under `top` that are not there yet, outermost first: what a create that walks
+    them is the one to make, and to take back if it is refused. A link or a file on the way is none of these."""
+    out, at = [], Path(top)
+    for part in rel.split("/")[:-1]:
+        at = at / part
+        if not os.path.lexists(at):
+            out.append(at)
+    return out
+
+
+def _unmake(top: Path, made: list):
+    """Take back the folders `_missing_folders` named, innermost first, each only if it is empty."""
+    for folder in reversed(made):
+        with contextlib.suppress(OSError):
+            os.rmdir(folder)
 
 
 def _not_made(address: str, e: OSError) -> ToolError:

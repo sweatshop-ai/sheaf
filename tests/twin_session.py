@@ -54,6 +54,10 @@ cfg = proxy.parse({"origin": "https://front.example.com", "socket": "/run/sheaf-
                                "id-b": {"name": "Member B", "short": "b", "email": "b@example.com", "tokens": ["tok-b"], **member}}},
                   "the twin")
 hub = Hub(port=39001, key=paths.ensure_key(), started_by="test", clock=lambda: NOW, proxy=cfg)
+if float(os.environ.get("TWIN_SWEEP_DELAY", "0")):      # the pusher's thread sweeps late: the order of its commit and the session's is the test's to pin
+    import time
+    _sweep = hub.commits._sweep
+    hub.commits._sweep = lambda *a, **k: (time.sleep(float(os.environ["TWIN_SWEEP_DELAY"])), _sweep(*a, **k))[1]
 hub.the_list = the_list.TheList(hub, the_list.ListConfig(repo, "acme/record", 1, work / "token"))
 root = hub.the_list.root()
 door, caller = Door(hub), Caller("Claude")

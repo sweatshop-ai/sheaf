@@ -738,3 +738,92 @@ def test_a_tell_a_recipients_agent_is_given_names_the_page_by_its_opaque_name_ne
     for text in [listed] + [t["message"] for t in tells]:
         assert not any(s in text for s in secret), text
     assert opaque in tells[0]["message"]
+
+
+# ── the class, not the instance (PR 394, round 8): no route tells a recipient the owner's folders ───────────
+
+SEGMENTS = ("private-matters", "/deep", "deep/")        # the folders of the owner's page, after the root's name (9.11)
+
+
+def _says(res):
+    """Everything a handler answer hands the caller: status line aside, its headers, its body, and the events a stream
+    opens with."""
+    out = [json.dumps(res.headers, default=str), res.text]
+    if res.stream is not None:
+        out.append(json.dumps(res.stream.drain(), default=str))
+    return "\n".join(out)
+
+
+def _leaks(text):
+    return [s for s in SEGMENTS if s in text]
+
+
+def _seed_shared_deep_page(team):
+    """The owner's page under nested folders, Shared with Bob, with a comment, a write of the owner's agent, a reply
+    of Bob's and a Tell that waits for Bob's agent: every place the hub keeps the page's address."""
+    real = deep(team)
+    opaque = told(team, BOB, real)
+    _comment(team, real)
+    bad, why = call(team, "alice", "update", doc=real, text=read(team, real) + "\nMore.\n",
+                    expected_hash=md_hash(read(team, real)))
+    assert not bad, why
+    assert team.post("/_/target", {"doc": opaque, "target": "agent:bob-claude"}, member=BOB).status == 200
+    got = team.post("/_/comment", {"doc": opaque, "op": "reply", "id": "c1", "body": "Please do.", "tell": True}, member=BOB)
+    assert got.status == 200 and "tellError" not in got.json(), got.text
+    return real, opaque
+
+
+def _member_routes(team):
+    """Every route of the handler a member may call, from its own table: a route added later is swept as well."""
+    handler = team.handler
+    found = [(m, path) for path, methods in handler.routes.items() for m, entry in methods.items()
+             if handler._for_members(entry) and path != "/_/mcp"]
+    assert len(found) > 10, found                        # the table was read, not an empty one
+    return sorted(found)
+
+
+def test_no_route_of_the_handler_tells_a_recipient_the_owners_folders(team):
+    real, opaque = _seed_shared_deep_page(team)
+    told_to_bob = {}
+    fields = {"doc": opaque, "id": "c1", "hash": md_hash(read(team, real)), "target": "none", "op": "status",
+              "status": "open", "body": "again", "text": "x", "with": "bob", "names": "bob", "address": opaque,
+              "root": "loose-alice", "sheaf": "1", "path": opaque, "q": "plan", "query": "plan"}
+    swept = []
+    for method, path in _member_routes(team):
+        if method == "GET":
+            got = team.get(path + "?" + "&".join(f"{k}={v}" for k, v in fields.items()), member=BOB)
+        else:
+            got = team.post(path, dict(fields), member=BOB)
+        swept.append((method, path))
+        told_to_bob[f"{method} {path}"] = _says(got)
+    for page_path in ("/", f"/{opaque}", "/loose-alice/", "/loose-alice", "/_/mount?sheaf=1", f"/_/live?doc={opaque}",
+                      f"/{real}", f"/{opaque}?versions=1", f"/{opaque}?history=1"):
+        told_to_bob[f"GET {page_path}"] = _says(team.get(page_path, member=BOB))
+    assert swept, "no route swept"
+    assert opaque in told_to_bob["GET /_/index.json"] and opaque in told_to_bob["GET /_/writes"], "the sweep reached no page"
+    bad = {k: _leaks(v) for k, v in told_to_bob.items() if _leaks(v)}
+    assert not bad, "\n".join(f"{k}: {v}" for k, v in bad.items())
+
+
+def test_no_tool_of_the_door_tells_a_recipient_the_owners_folders(team):
+    from sheafmd import mcp
+    real, opaque = _seed_shared_deep_page(team)
+    args = {"doc": opaque, "id": "c1", "text": "Seen.", "role": "answer", "root": "loose-alice", "open_only": False,
+            "status": "all", "expected_hash": md_hash(read(team, real)), "folder": "", "resolve": False}
+    told_to_bob = {}
+    for name, tool in mcp.TOOLS.items():
+        wanted = set(tool.get("inputSchema", {}).get("properties", args)) if isinstance(tool, dict) else set(args)
+        given = {k: v for k, v in args.items() if k in wanted}
+        if name == "create":
+            given.update(doc="mine.md", text="# Mine\n")
+        res = door(team.door, rpc("tools/call", {"name": name, "arguments": given}),
+                   token=team.tokens["bob-claude"], as_name=None)
+        told_to_bob[name] = res.text
+    for name in ("documents", "documents-all"):
+        given = {"root": "loose-alice", "open_only": False} if name == "documents" else {"open_only": False}
+        told_to_bob[name] = door(team.door, rpc("tools/call", {"name": "documents", "arguments": given}),
+                                 token=team.tokens["bob-claude"], as_name=None).text
+    assert set(mcp.TOOLS) <= set(told_to_bob), "a tool of the door was not called"
+    assert opaque in told_to_bob["documents"] and opaque in told_to_bob["read"], "the sweep reached no page"
+    bad = {k: _leaks(v) for k, v in told_to_bob.items() if _leaks(v)}
+    assert not bad, "\n".join(f"{k}: {v}" for k, v in bad.items())

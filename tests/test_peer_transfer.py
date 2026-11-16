@@ -217,3 +217,48 @@ def test_a_landing_that_outlasts_the_deadline_lands_nothing_and_answers_too_slow
     assert root is None or not [p for p in root.rglob("notes.md")]
     monkeypatch.setattr(members.hub.versions, "put", real)
     assert transfer(members, token).status == 200            # nothing was remembered of the failed one: the same id lands
+
+
+# ── a page moving back, and the landing that fails ───────────────────────────
+
+ELSEWHERE = "https://elsewhere.example.com"
+GONE = "loose-bea/projects/blog/gone.md"
+
+
+def forwarded(members, origin=ELSEWHERE):
+    """A page of Bea's has left for `origin`: a Forward at `GONE`, and her loose root exists (an earlier page landed in it)."""
+    landed(members, transfer(members, peer_token(origin=origin)))
+    members.hub.forwards.add_remote(GONE, origin, "loose-bea2/projects/blog/gone.md", "Bea", "h1")
+
+
+def back(members, token, **over):
+    return transfer(members, token, id="7c9e6679-7425-40de-944b-e07fc1f90ae8", name="gone.md",
+                    **{"from": {"origin": ELSEWHERE, "by": "Bea", "at": "2026-11-16T10:00:00"}, **over})
+
+
+def test_a_page_moving_back_lifts_the_forward_when_the_peer_token_names_the_tiroir_it_left_for(members):
+    forwarded(members)
+    res = back(members, peer_token(origin=ELSEWHERE))
+    assert res.status == 200, res.text
+    assert members.hub.forwards.remote(GONE) is None
+
+
+def test_a_bundle_that_claims_the_origin_the_page_left_for_lifts_no_forward_when_the_token_is_another_tiroirs(members):
+    forwarded(members)
+    res = back(members, peer_token())            # the token is PEER's; only the body says ELSEWHERE
+    assert res.status == 409
+    assert members.hub.forwards.remote(GONE) is not None
+
+
+def test_a_landing_that_fails_with_any_exception_puts_the_lifted_forward_back(members, monkeypatch):
+    from sheafmd import mcp
+    forwarded(members)
+
+    def broken(self, args, caller):
+        raise OSError("disk full")
+    monkeypatch.setattr(mcp.Door, "_create", broken)
+    try:
+        back(members, peer_token(origin=ELSEWHERE))
+    except OSError:
+        pass
+    assert members.hub.forwards.remote(GONE) is not None

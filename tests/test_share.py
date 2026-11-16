@@ -320,3 +320,85 @@ def test_audience_reads_the_ticked_share_lines_only():
     assert audience("# x\n\n```\n- [x] Share\n```\n") is None
     assert audience("# x\n\n- [ ] Share with bob\n") is None
     assert audience("# x\n\nShare with bob\n") is None
+
+
+# ── the row's Share button: POST /_/share writes the line ────────────────────
+
+def share(team, member, doc, **extra):
+    return team.post("/_/share", {"doc": doc, "hash": md_hash(read(team, doc)), **extra}, member=member)
+
+
+def test_the_row_button_appends_a_share_line_and_opens_the_page_to_every_member(team):
+    doc = made(team, "alice", PRIVATE)["doc"]
+    got = share(team, ALICE, doc)
+    assert got.status == 200, got.text
+    assert "- [x] Share\n" in read(team, doc)
+    assert audience(read(team, doc)) is True
+    assert page(team, BOB, doc).status == 200 and page(team, CAROL, doc).status == 200
+
+
+def test_the_row_button_with_names_opens_the_page_to_those_members_only(team):
+    doc = made(team, "alice", PRIVATE)["doc"]
+    assert share(team, ALICE, doc, **{"with": ["bob"]}).status == 200
+    assert "- [x] Share with bob" in read(team, doc)
+    assert page(team, BOB, doc).status == 200 and page(team, CAROL, doc).status == 404
+
+
+def test_the_row_button_keeps_the_title_first_and_the_rest_of_the_page(team):
+    doc = made(team, "alice", PRIVATE)["doc"]
+    share(team, ALICE, doc)
+    text = read(team, doc)
+    assert text.index("# Alice's notes") < text.index("Share") < text.index("Nothing for anyone else.")
+
+
+def test_the_row_button_ticks_an_unticked_share_line_instead_of_adding_a_second(team):
+    doc = made(team, "alice", SHARED)["doc"]
+    assert share(team, ALICE, doc).status == 200
+    assert read(team, doc).count("Share") == 1 and "- [x] Share" in read(team, doc)
+
+
+def test_the_row_button_refuses_a_stale_hash_and_writes_nothing(team):
+    doc = made(team, "alice", PRIVATE)["doc"]
+    before = read(team, doc)
+    got = team.post("/_/share", {"doc": doc, "hash": md_hash("# Something else\n")}, member=ALICE)
+    assert got.status == 409 and read(team, doc) == before
+    assert page(team, BOB, doc).status == 404
+
+
+def test_the_row_button_is_the_owners_alone(team):
+    doc = made(team, "alice", NAMED)["doc"]
+    tick(team, ALICE, doc, "Share with")
+    before = read(team, doc)
+    got = share(team, BOB, doc)
+    assert got.status == 409 and "owner" in got.text and read(team, doc) == before
+
+
+def test_the_row_button_refuses_a_page_that_is_already_shared(team):
+    doc = made(team, "alice", SHARED)["doc"]
+    share(team, ALICE, doc)
+    before = read(team, doc)
+    got = share(team, ALICE, doc)
+    assert got.status == 409 and read(team, doc) == before
+
+
+def test_the_row_button_refuses_a_name_that_is_not_a_short_name(team):
+    doc = made(team, "alice", PRIVATE)["doc"]
+    for bad in (["bob, carol\n- [x] Share"], "bob", [""], [3]):
+        assert share(team, ALICE, doc, **{"with": bad}).status == 400
+    assert read(team, doc) == PRIVATE
+
+
+def test_the_row_button_writes_a_line_of_the_write_log(team):
+    doc = made(team, "alice", PRIVATE)["doc"]
+    share(team, ALICE, doc)
+    lines = team.get(f"/_/writes?doc={doc}", member=ALICE).json()["lines"]
+    assert [l["via"] for l in lines][-2:] == ["share", "save"] and {l["writer"] for l in lines[-2:]} == {"Alice"}
+
+
+def test_a_row_carries_the_hash_to_share_against_only_for_an_own_page_no_share_line_opens(team):
+    mine = made(team, "alice", PRIVATE, doc="mine.md")["doc"]
+    open_ = made(team, "alice", SHARED, doc="open.md")["doc"]
+    tick(team, ALICE, open_, "Share")
+    rows = {r["doc"]: r for r in shared_rows(team, ALICE)["rows"]}
+    assert rows[mine]["share"] == md_hash(read(team, mine)) and rows[open_]["share"] == ""
+    assert [r["share"] for r in shared_rows(team, BOB)["rows"]] == [""]          # a page given to Bob is not his to Share

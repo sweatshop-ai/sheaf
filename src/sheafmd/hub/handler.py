@@ -23,7 +23,7 @@ import tempfile
 import threading
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote
 
@@ -267,6 +267,7 @@ class Handler:
             ("POST", "/_/save", "save", COOKIE, self._save),
             ("POST", "/_/pin", "pin", COOKIE, self._pin),
             ("POST", "/_/tick", "tick", COOKIE, self._tick),
+            ("POST", "/_/share", "share", COOKIE, self._share),
             ("GET", "/_/session", "session", MEMBER, self._session),
             ("POST", "/_/sessions", "sessions", MEMBER, self._sessions),
             ("GET", "/_/laptops", "laptops", MEMBER, self._laptops),
@@ -1055,6 +1056,46 @@ class Handler:
         if self.hub.the_list is not None and not release:     # a release answers nothing: the row stays where it is
             self.hub.the_list.ticked(e.address)
         return _ok(hash=got["hash"])
+
+    def _share(self, req: Req) -> Response:
+        """The row's Share button (9.11): the page's owner writes the page's Share line, `Share` or `Share with <names>`,
+        and ticks it in the same request, as a tick of the page does. The line is appended in one write against the hash the
+        row read, then ticked through `_save`, so the guard, the move to the page's home, the commit and the Write log are
+        the page's own. A page with an unticked Share line has it ticked, and no second line is added."""
+        b = req.body
+        e = self._entry(req, b.get("doc"))
+        read, names = b.get("hash"), b.get("with", [])
+        _shape(isinstance(read, str) and read != "", "hash must be the hash of the version the row read")
+        _shape(names == [] or visibility.valid_names(names), "with must be a list of short names")
+        self.hub.catch_up(e)
+        with place.held(self.hub, e.address):
+            def change(text):
+                if md_hash(text) != read:
+                    raise Refuse(409, "the page changed since the row read it: reload the Sheaf")
+                fm = visibility.front_matter(text)
+                m = req.member
+                if not self.hub.may_open(m, e.address, fm):
+                    raise Refuse(404, "no such document")
+                if m is not None and not self.hub.is_owner(m, e.address, fm):
+                    raise Refuse(409, "Only the owner of this rectoverso can share it.")
+                if visibility.audience(text) is not None:
+                    raise Refuse(409, "the page is already shared")
+                if visibility.unticked_share_line(text) is not None:
+                    if names:
+                        raise Refuse(409, "the page already has a Share line: tick it, or edit its names")
+                    return text                 # its own box is ticked below
+                return visibility.with_share_line(text, names)
+            try:
+                after = e.live.rewrite(change)
+            except UnicodeEncodeError:
+                raise Refuse(400, "the text holds a character that cannot be written to the .md") from None
+            if after != read:               # an unticked line of the page's own wrote nothing here
+                self.hub.index.touch(e.address)
+                self.hub.committed(e.address, req.member, "edit")
+                self._page_wrote(req, e, "share")
+        edit = the_list.share_edit(e.live.current()[1])
+        _shape(edit is not None, "the Share line was not written")
+        return self._save(replace(req, body={"doc": b.get("doc"), "hash": after, "edits": [edit]}))
 
     def _mover(self, e, ticked):
         """(the `move` of a save, the list it puts the path the file left in): a write that shares the rectoverso or

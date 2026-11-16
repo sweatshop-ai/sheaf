@@ -276,11 +276,46 @@ def newly_ticked(toggled) -> set:
     return _flipped(toggled, " ", "xX")
 
 
+def valid_names(names) -> bool:
+    """Whether `names` is a non-empty list of short names, as `Share with <names>` may carry."""
+    return isinstance(names, list) and bool(names) and all(isinstance(n, str) and _NAMES_RE.fullmatch(n) for n in names)
+
+
+def with_share_line(text_: str, names=()) -> str:
+    """`text_` with an unticked `- [ ] Share` (`Share with <names>`) line of its own: under the page's first `# ` heading
+    when that opens the body, else first in the body, after any front matter."""
+    nl = "\r\n" if "\r\n" in text_ else "\n"
+    line = "- [ ] " + ("Share with " + ", ".join(names) if names else "Share")
+    lines = text_.split("\n")
+    end = _end(_lines(text_))
+    at = end + 1 if end >= 0 else 0
+    while at < len(lines) and not lines[at].strip():
+        at += 1
+    if at < len(lines) and lines[at].startswith("# "):
+        at += 1
+        lines[at:at] = ["", line + ("\r" if nl == "\r\n" else "")]
+        if at + 2 < len(lines) and lines[at + 2].strip():
+            lines.insert(at + 2, "")
+    else:
+        lines[at:at] = [line + ("\r" if nl == "\r\n" else ""), ""]
+    return "\n".join(lines)
+
+
 def withdraws_share(old: str, new: str) -> bool:
     """Whether writing `new` over `old` unticks Share, by whatever edit (9.11, #40): `old` holds a ticked Share box
     and `new` holds Share boxes, none of them ticked. Boxes are read in the list blocks the page draws, so a box in
     a fence or a comment is none."""
     return _share_box(old) == "x" and _share_box(new) == " "
+
+
+def unticked_share_line(text_: str) -> int | None:
+    """The 0-based line of the first unticked Share box (`Share`, `Share with <names>`) in a list block the page draws, else None."""
+    for b in split_md_blocks(text_):
+        if b.kind == "list":
+            for k, line in enumerate(_lines(b.content)):
+                if (m := _BOX_RE.fullmatch(line)) and _word(m.group(4)) == "Share" and m.group(2) == " ":
+                    return b.start + k
+    return None
 
 
 def _share_box(text_: str) -> str | None:

@@ -251,6 +251,26 @@ def test_a_tell_on_the_old_address_of_a_page_that_went_to_another_tiroir_is_not_
     assert looked == [OLD]
 
 
+def test_a_move_takes_the_hubs_lock_under_neither_the_pages_lock_nor_its_file_lock(lock_order, two):
+    with two.active():
+        two.hub.entry(OLD)
+    moved(two)         # the lock-order checker raises at an acquisition against `lockorder.ORDER`, and again at the end of the test
+
+
+def test_the_index_is_told_the_page_left_after_its_file_is_gone(two):
+    with two.active():
+        two.hub.entry(OLD)
+        seen = []
+        real = two.hub.index.touch
+
+        def touch(address):
+            seen.append((address, two.hub.file(OLD).exists()))
+            return real(address)
+        two.hub.index.touch = touch
+    moved(two)
+    assert (OLD, False) in seen and (OLD, True) not in seen
+
+
 # ── a move that does not complete leaves everything as it was ────────────────
 
 def test_a_link_that_is_down_leaves_the_page_and_every_store_as_they_were(two):

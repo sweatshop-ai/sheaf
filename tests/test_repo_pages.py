@@ -149,13 +149,19 @@ def test_a_page_from_a_new_folder_widens_the_sparse_set_and_a_second_from_the_sa
     assert sh(clone, "sparse-checkout", "list").split() == ["docs", "notes"]
 
 
+@pytest.fixture
+def modern_git(monkeypatch):
+    """The commit look is on whatever git runs the test: a git before 2.44 would answer these as a look that found nothing."""
+    monkeypatch.setattr(repos_mod, "_git_version", lambda: (2, 44))
+
+
 def test_there_is_one_clone_per_repo_whoever_reports(hub_repos):
     report(hub_repos, who="bea-claude")
     report(hub_repos, who="cal-claude", path="notes/idea.md")
     the_clone(hub_repos)                    # exactly one
 
 
-def test_a_commit_pushed_after_the_clone_is_fetched_when_a_report_names_it(hub_repos, tmp_path, origin):
+def test_a_commit_pushed_after_the_clone_is_fetched_when_a_report_names_it(modern_git, hub_repos, tmp_path, origin):
     report(hub_repos)
     pusher = laptop_clone(tmp_path, origin, "pusher")
     (pusher / "docs" / "plan.md").write_text("# Plan\n\nChanged.\n", encoding="utf-8")
@@ -579,7 +585,7 @@ def test_a_private_root_that_cannot_be_looked_at_blocks_the_clone_rather_than_le
 
 # ── a commit on a branch other than the default one ──────────────────────────
 
-def test_a_commit_pushed_on_a_feature_branch_is_known_to_the_tiroir_as_the_cli_takes_it(hub_repos, tmp_path, origin):
+def test_a_commit_pushed_on_a_feature_branch_is_known_to_the_tiroir_as_the_cli_takes_it(modern_git, hub_repos, tmp_path, origin):
     report(hub_repos)
     pusher = laptop_clone(tmp_path, origin, "pusher")
     sh(pusher, "checkout", "-q", "-b", "feature")
@@ -591,7 +597,7 @@ def test_a_commit_pushed_on_a_feature_branch_is_known_to_the_tiroir_as_the_cli_t
     assert got["commit_known"] is True
 
 
-def test_a_commit_on_a_feature_branch_is_known_to_the_first_report_of_a_repo_too(hub_repos, tmp_path, origin):
+def test_a_commit_on_a_feature_branch_is_known_to_the_first_report_of_a_repo_too(modern_git, hub_repos, tmp_path, origin):
     pusher = laptop_clone(tmp_path, origin, "pusher")
     sh(pusher, "checkout", "-q", "-b", "feature")
     (pusher / "docs" / "plan.md").write_text("# Plan\n\nOn a branch.\n", encoding="utf-8")
@@ -791,7 +797,7 @@ def test_a_repo_that_became_a_private_root_after_it_was_cloned_takes_no_more_rec
     assert clone.exists()
 
 
-def test_the_owner_of_a_page_is_read_at_the_reported_commit_not_at_the_default_branch(hub_repos, tmp_path, origin):
+def test_the_owner_of_a_page_is_read_at_the_reported_commit_not_at_the_default_branch(modern_git, hub_repos, tmp_path, origin):
     pusher = laptop_clone(tmp_path, origin, "pusher")
     sh(pusher, "checkout", "-q", "-b", "feature")
     (pusher / "docs" / "plan.md").write_text("---\nowner: cal\n---\n# Plan\n", encoding="utf-8")
@@ -1114,3 +1120,44 @@ def test_on_an_old_git_the_repos_own_thread_still_looks_and_records_the_page(hub
     seen = look_calls(monkeypatch)
     assert repos._knows(the_clone(hub_repos), REPO, commit, None) is True
     assert seen == [("branch", "-r", "--contains", commit)]
+
+
+# ── the version read: a failed read is tried again; the hub says once at start when the look is off ─
+
+def fake_git(monkeypatch, outcomes):
+    """Make `git --version` give each of `outcomes` in turn (a string said, or an exception raised); the calls list."""
+    calls = []
+
+    def run_git(*a, **k):
+        calls.append(a)
+        o = outcomes[min(len(calls) - 1, len(outcomes) - 1)]
+        if isinstance(o, Exception):
+            raise o
+        return subprocess.CompletedProcess(a, 0, o, "")
+
+    monkeypatch.setattr(repos_mod.subprocess, "run", run_git)
+    repos_mod._git_version.cache_clear()
+    return calls
+
+
+def test_a_failed_read_of_the_git_version_is_tried_again_and_only_a_good_one_is_kept(monkeypatch):
+    try:
+        calls = fake_git(monkeypatch, [subprocess.TimeoutExpired("git", 10), "garbage", "git version 2.53.0\n"])
+        assert [repos_mod._git_version() for _ in range(5)] == [None, None, (2, 53), (2, 53), (2, 53)]
+        assert len(calls) == 3
+    finally:
+        repos_mod._git_version.cache_clear()
+
+
+@pytest.mark.parametrize("version, said", [((2, 43), "git below 2.44: commit look off"),
+                                           (None, "git version unreadable: commit look off")])
+def test_the_hub_says_once_at_start_when_the_commit_look_is_off(tmp_path, monkeypatch, capsys, version, said):
+    monkeypatch.setattr(repos_mod, "_git_version", lambda: version)
+    repos_mod.Repos(tmp_path, provider=None)
+    assert capsys.readouterr().err.strip().splitlines() == [f"sheaf hub: {said}"]
+
+
+def test_the_hub_says_nothing_at_start_when_git_is_new_enough(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(repos_mod, "_git_version", lambda: (2, 44))
+    repos_mod.Repos(tmp_path, provider=None)
+    assert capsys.readouterr().err == ""

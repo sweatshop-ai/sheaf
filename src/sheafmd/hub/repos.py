@@ -33,6 +33,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -60,9 +61,26 @@ def parse_git_version(said: str) -> tuple[int, int] | None:
     return (int(m[1]), int(m[2])) if m else None
 
 
-@functools.cache
+def _cache_good(read):
+    """Keep what `read()` gave once it is not None; a None (a failed read) is asked again at the next call."""
+    kept = []
+
+    @functools.wraps(read)
+    def cached():
+        if not kept:
+            value = read()
+            if value is None:
+                return None
+            kept.append(value)
+        return kept[0]
+
+    cached.cache_clear = kept.clear
+    return cached
+
+
+@_cache_good
 def _git_version() -> tuple[int, int] | None:
-    """The git the hub runs, read once; None when it cannot be run or read."""
+    """The git the hub runs, read once when it reads; None when it cannot be run or read (and then read again)."""
     try:
         r = subprocess.run(["git", "--version"], capture_output=True, text=True, timeout=10, env={**os.environ, "LC_ALL": "C"})
     except (OSError, subprocess.SubprocessError):
@@ -122,6 +140,10 @@ class Repos:
         self._hosts: dict[str, str | None] = {}  # ssh host -> the name ssh -G gives it
         self.FETCH_EVERY = 30.0
         self.ssh_hostname = ssh_hostname
+        version = _git_version()
+        if version is None or version < NO_LAZY_FETCH_FROM:     # said once, at the hub's start
+            print("sheaf hub: " + ("git version unreadable" if version is None else "git below 2.44") + ": commit look off",
+                  file=sys.stderr, flush=True)
 
     # ── the records ──────────────────────────────────────────────────────────
     @property

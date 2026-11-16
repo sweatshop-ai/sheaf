@@ -70,6 +70,5 @@ def test_two_quick_opens_of_a_client_node_leave_its_rows_once(mounted, answers):
     until(lambda: len(calls) >= 2, what="both reads in flight")
     gate.set()
     until(lambda: mounted.js("return root.querySelectorAll('.sheaf-row[data-client=\"acme\"]').length;") >= 1, what="the row")
-    import time
-    time.sleep(1)                                   # the second answer, if the page took it, has landed by now
+    mounted.page.evaluate("() => new Promise((done) => setTimeout(done, 1000))")      # in the page: the second answer, if it took it, has landed
     assert mounted.js("return root.querySelectorAll('.sheaf-row[data-client=\"acme\"]').length;") == 1

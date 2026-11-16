@@ -5,6 +5,7 @@ export const MIN_GAP_MS = 5_000     // between two polls that returned at once (
 export const MAX_BACKOFF_MS = 5 * 60_000
 export const CLI_WORST_CASE_MS = (5 + 5 + 35) * 1000          // `sheaf tells-poll` at its slowest (send.py): initialize 5 s, its notice 5 s, the long poll 35 s
 export const POLL_TIMEOUT_MS = CLI_WORST_CASE_MS + 5_000      // over that, so the mod never kills a poll the CLI still waits on
+export const DELIVERED_KEEP = 50                             // Tells remembered per session for a resume: the door drops a Tell once the session answers it
 export const SUBMIT_WINDOW_MS = 60_000                       // a submit that never starts a turn frees the next Tell after this
 
 export type Tell = { id: string; doc: string; thread: string; message: string; by: string; at: string }
@@ -74,6 +75,11 @@ export function shouldPoll(d: DoorState, now: number): boolean {
 export function nextGap(d: DoorState): number {
   if (d.failures === 0) return MIN_GAP_MS
   return Math.min(MAX_BACKOFF_MS, MIN_GAP_MS * 2 ** d.failures)
+}
+
+/** The Tells to remember for a resume, oldest dropped past DELIVERED_KEEP (a Set keeps the order they went in). */
+export function deliveredToKeep(p: Poller): string[] {
+  return [...p.delivered].slice(-DELIVERED_KEEP)
 }
 
 /** Keep the Tells of a poll that are neither held nor submitted already. */

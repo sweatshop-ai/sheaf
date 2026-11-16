@@ -27,6 +27,7 @@ from .atomic import write_text_atomic
 from .hub.auth import TOKEN_PREFIX
 
 SERVICE = "sheaf"
+PEER_SERVICE = "sheaf-peer"     # the token this tiroir sends to a peer tiroir's channel (ticket 20): another entry than a laptop's
 DOOR_PATH = "/mcp"                  # the tiroir's library door, under its front address
 HEADERS_HELPER = "sheaf headers"    # the entry's headersHelper: names the session on a door write, holds no token (tells_poll.cmd_headers)
 TIMEOUT = 8.0
@@ -72,6 +73,20 @@ class SystemStore:
 
 def system_store():
     return SystemStore()
+
+
+def peer_token_for(url: str, store=None) -> str | None:
+    """The token this tiroir holds for the peer tiroir at `url` (`sheaf peer use`), or None."""
+    return (store or system_store()).get(PEER_SERVICE, origin_of(url))
+
+
+def use_peer(url: str, token: str, store=None) -> str:
+    """Keep `token` as the one this tiroir sends to the peer at `url`: in the login keyring, nowhere else. Returns the origin."""
+    origin = origin_of(url)
+    if not _TOKEN.fullmatch(token or ""):
+        raise UsageError("that is not a Sheaf token: copy the whole token that `sheaf peer add` printed on the other shared Sheaf")
+    (store or system_store()).set(PEER_SERVICE, origin, token)
+    return origin
 
 
 def token_for(url: str, store=None) -> str | None:

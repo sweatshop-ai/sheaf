@@ -36,15 +36,15 @@ A quote whose first line is `[!COPY]`: the page shows it with a Copy button, the
 _Avoid_: callout, snippet
 
 **Share**:
-The action a sheaf's owner ticks to open it to every member whose roots hold it (SPEC 9.11); for a loose page, to every member of the tiroir. Its named form, Share with <members>, opens it to those members only. It never reaches anyone outside the tiroir. It renders nothing and makes no Share copy. Only the owner unticks it, which makes the sheaf their own alone again. In the list's root a Share moves the sheaf's file out of its owner's private folder, and unticking it moves the file back; the sheaf's name, its address, stays.
+The action a rectoverso's owner ticks to open it to every member whose roots hold it (SPEC 9.11); for a loose page, to every member of the tiroir. Its named form, Share with <members>, opens it to those members only. It never reaches anyone outside the tiroir. It renders nothing and makes no Share copy. Only the owner unticks it, which makes the rectoverso their own alone again. In the list's root a Share moves the rectoverso's file out of its owner's private folder, and unticking it moves the file back; the rectoverso's name, its address, stays.
 _Avoid_: publish, unlock
 
-**Home** (of a sheaf):
-The one path the file of a sheaf of the list's root lives at, by its visibility: `<client>/<project>/<name>.md` when it is open to the project, `<client>/<project>/private/<short>/<name>.md` when it is its owner's alone (SPEC 9.11). The hub moves the file home; the sheaf itself is its logical name.
+**Home** (of a rectoverso):
+The one path the file of a rectoverso of the list's root lives at, by its visibility: `<client>/<project>/<name>.md` when it is open to the project, `<client>/<project>/private/<short>/<name>.md` when it is its owner's alone (SPEC 9.11). The hub moves the file home; the rectoverso itself is its logical name.
 _Avoid_: location, private copy
 
-**Logical name** (of a sheaf):
-`<client>/<project>/<name>.md`, the address of a sheaf of the list's root wherever its file lives (SPEC 9.11). The hub keys the sheaf's entry, versions, read state and render settings by it, and finds the file under it only to read or write it. The file's private path is no address.
+**Logical name** (of a rectoverso):
+`<client>/<project>/<name>.md`, the address of a rectoverso of the list's root wherever its file lives (SPEC 9.11). The hub keys the rectoverso's entry, versions, read state and render settings by it, and finds the file under it only to read or write it. The file's private path is no address.
 _Avoid_: private address, physical address
 
 **Link rule**:
@@ -91,25 +91,25 @@ The small service the reverse proxy asks, in proxy mode, whether a request carri
 A user of the front whom the hub's config lets in through proxy mode, with the roots they see and the name they sign with. A member has no account on the machine.
 _Avoid_: account, login
 
-**Owner** (of a sheaf):
-The member a sheaf belongs to: the assignee of its issue in the list's record, else the member its front matter's `owner` names (SPEC 9.11). Only the owner reads a sheaf that is its owner's alone, and only the owner ticks Share. A member's roots are not "owned": a root is one a member may open (9.9), whatever the code's `owns` says.
+**Owner** (of a rectoverso):
+The member a rectoverso belongs to: the assignee of its issue in the list's record, else the member its front matter's `owner` names (SPEC 9.11). Only the owner reads a rectoverso that is its owner's alone, and only the owner ticks Share. A member's roots are not "owned": a root is one a member may open (9.9), whatever the code's `owns` says.
 _Avoid_: author, creator, root owner
 
 **Visibility**:
-Whether a sheaf is open to every member whose roots hold it, or its owner's alone, as the hub reads it from the front matter (SPEC 9.11).
+Whether a rectoverso is open to every member whose roots hold it, or its owner's alone, as the hub reads it from the front matter (SPEC 9.11).
 _Avoid_: permission, privacy, ACL
 
 **List**:
-A member's page of the sheaves that wait on someone and the ones in progress, grouped by client and project, their status taken from their issues (SPEC 9.10). It shows only sheaves with work on them.
+A member's page of the rectoversos that wait on someone and the ones in progress, grouped by client and project, their status taken from their issues (SPEC 9.10). It shows only rectoversos with work on them.
 _Avoid_: catalog, index, dashboard
 
 **Sheaf** (of a member):
-A member's browsable tree of folders holding every rectoverso they may open, with or without an issue, and no status; also the product a member reads, tiroir Sheaf, and its sidebar entry. A folder is where the rectoverso lives: its root, then the root's sub-folders; those another member Shared sit apart, under their owner. Not the List: the List says what waits, the Sheaf says where a rectoverso is. The engine and the laptop command carry the same name. (Named the Catalog 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 06; renamed the Sheaf by Thierry during ticket 19; not built.) Until the build renames them, the older entries here and SPEC 9.10/9.11 still say "a sheaf" for one rectoverso.
+A member's browsable tree of folders holding every rectoverso they may open, with or without an issue, and no status; also the product a member reads, tiroir Sheaf, and its sidebar entry. A folder is where the rectoverso lives: its root, then the root's sub-folders; those another member Shared sit apart, under their owner. Not the List: the List says what waits, the Sheaf says where a rectoverso is. The engine and the laptop command carry the same name. (Named the Catalog 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 06; renamed the Sheaf by Thierry during ticket 19; not built.)
 _Avoid_: Catalog, list, library, documents
 
 **Rectoverso**:
 One page as a member reads it: a sheet with two sides, the recto the agent writes and the verso where the member answers. What `sheaf FILE.md` sends and what a row of the Sheaf opens. One word, the same in every language, so dictation keeps it. (Named 2026-11-15 by Thierry during wayfinder `sheaf-in-open-webui` ticket 19, replacing ticket 15's product name Recto; not built.)
-_Avoid_: Recto, a sheaf (for one page, in new text), document, note
+_Avoid_: Recto, a sheaf (for one page), document, note
 
 **Verso**:
 The side of a page that holds its Comments, as a member reads it: the agent writes the recto of a rectoverso, the member answers on its verso. A word for the place, not for one comment. (Named 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 15; not built.)
@@ -128,7 +128,7 @@ _Avoid_: internal comment, private comment, team note
 
 **Default tiroir** (of a person):
 The one tiroir a person's pages go to when their root names none: Thierry's is tiroir-tt, Marina's tiroir-0. Each tiroir has its own Sheaf per member; there is no Sheaf across tiroirs, except that the agency's tiroir shows the client tiroirs' rectoversos its members may open. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 04; the exception 2026-11-16, ticket 22; not built.)
-_Avoid_: home tiroir (a sheaf's home is a path)
+_Avoid_: home tiroir (a rectoverso's home is a path)
 
 **Loose page**:
 A page in no git repo: a session's scratchpad, a temporary folder, or anything a chat client such as Claude.ai or ChatGPT makes. Its original lives on the tiroir; a page in a git repo has git as its original. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 05; not built.)
@@ -147,7 +147,7 @@ The hub's own record of the writes to its pages, one line per write whatever the
 _Avoid_: journal, history, audit log
 
 **Stop James**:
-The action any member ticks on a sheaf of the assistant James to end his work on its project (SPEC 9.11). It is the one place the core names a deployment's assistant: the hub writes a diagnostics row and, with `[list] stop_dir`, a file the deployment's supervisor reads; stopping is the deployment's, a Layer concern the core only signals.
+The action any member ticks on a rectoverso of the assistant James to end his work on its project (SPEC 9.11). It is the one place the core names a deployment's assistant: the hub writes a diagnostics row and, with `[list] stop_dir`, a file the deployment's supervisor reads; stopping is the deployment's, a Layer concern the core only signals.
 
 **Belongs to**:
 The action that answers what an unsure thread belongs to: one box per candidate, `- [ ] Belongs to <slug> (ref <thread>)`, the one word with a slug and a thread (SPEC 9.10; Merge, Deploy and Install take the rest of the line). The slug names whatever the thread belongs to, a client, a project or a team. The boxes are the options of one answer: on the list each is a one-off button named by its slug, and once one is ticked the others are no actions and the hub refuses a second tick (#109); the deployment's mail module moves the thread. (Renamed from Move to by Thierry, 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 20; the code still says Move to until ticket 168.)
@@ -166,7 +166,7 @@ An action a member presses once and that stays pressed: every word but Share (SP
 _Avoid_: single-use, final
 
 **Pressed box**:
-A ticked box of an action's word, `- [x] Approve` (SPEC 9.10). On the list and on the sheaf's page a pressed one-off is a locked button that says who pressed it and when, from the commit that last changed its line (#110); a pressed toggle is one its owner may release.
+A ticked box of an action's word, `- [x] Approve` (SPEC 9.10). On the list and on the rectoverso's page a pressed one-off is a locked button that says who pressed it and when, from the commit that last changed its line (#110); a pressed toggle is one its owner may release.
 _Avoid_: done box, checked action
 
 **Tick box**:
@@ -178,23 +178,23 @@ The words of a tick box's line that belong to the box: those before the first `:
 _Avoid_: caption, title
 
 **Toggle action**:
-An action a member presses and may release again; today only Share (SPEC 9.10, 9.11), and a tick box on a page (action-buttons 03): something switched on and off is a tick box, something launched once is a button (Thierry, 2026-11-13). On the page its line is a checkbox, `- [ ] Shared with the team` (`- [ ] Share` is read as before), ticked and unticked at once by the box or its label, the whole line, by the sheaf's owner alone (9.11, 10.11); on the list it stays a blue button with `aria-pressed` (#110).
+An action a member presses and may release again; today only Share (SPEC 9.10, 9.11), and a tick box on a page (action-buttons 03): something switched on and off is a tick box, something launched once is a button (Thierry, 2026-11-13). On the page its line is a checkbox, `- [ ] Shared with the team` (`- [ ] Share` is read as before), ticked and unticked at once by the box or its label, the whole line, by the rectoverso's owner alone (9.11, 10.11); on the list it stays a blue button with `aria-pressed` (#110).
 _Avoid_: switch
 
-**Pointer** (of a sheaf):
-What a sheaf becomes once its thread moved to another client: its front matter, with `moved_to:` naming the new path, and one line. It keeps its `issue` and its versions, and is never a row on the list (SPEC 9.10).
+**Pointer** (of a rectoverso):
+What a rectoverso becomes once its thread moved to another client: its front matter, with `moved_to:` naming the new path, and one line. It keeps its `issue` and its versions, and is never a row on the list (SPEC 9.10).
 _Avoid_: redirect, stub, tombstone
 
 **Work on this**:
-What a member does with a sheaf's agent session from its page (SPEC 9.12): attach to James's window on the box, if they have a shell there, or fork the live session to their own machine with `tiroir work`. The page offers it from the meta block's `work`.
+What a member does with a rectoverso's agent session from its page (SPEC 9.12): attach to James's window on the box, if they have a shell there, or fork the live session to their own machine with `tiroir work`. The page offers it from the meta block's `work`.
 _Avoid_: resume, take over, hand over
 
 **Fork** (of a session):
-A new session on a member's machine, started from the transcript of a sheaf's box-hosted session, which the hub serves and never changes (SPEC 9.12). Reported to the hub, it becomes the first of the sheaf's `sessions`, under the signed-in member's name; the session it came from goes on as it was.
+A new session on a member's machine, started from the transcript of a rectoverso's box-hosted session, which the hub serves and never changes (SPEC 9.12). Reported to the hub, it becomes the first of the rectoverso's `sessions`, under the signed-in member's name; the session it came from goes on as it was.
 _Avoid_: copy, clone, move
 
 **Box-hosted session**:
-A sheaf's session whose `host` in its `sessions` front matter is `[list] box`: James's, on the deployment's box (SPEC 9.12). The hub serves the transcript of no other session, and only when one is the live session, the first item, do Tells go to James's window by a file in `[list] tell_dir`.
+A rectoverso's session whose `host` in its `sessions` front matter is `[list] box`: James's, on the deployment's box (SPEC 9.12). The hub serves the transcript of no other session, and only when one is the live session, the first item, do Tells go to James's window by a file in `[list] tell_dir`.
 _Avoid_: remote session, server session
 
 **Agent adapter**:

@@ -33,7 +33,6 @@ from . import loose as loose_mod
 from . import place
 from . import projects
 from . import proxy as proxy_mod
-from . import relay as relay_mod
 from . import roots as roots_mod
 from . import sheaf_view
 from . import state
@@ -56,6 +55,7 @@ from .live import LiveDocument
 SETTING_KEYS = ("title", "toc", "max_image_width", "by", "for", "theme", "credit")
 
 _META_RE = re.compile(r'(<script id="rd-edit-meta" type="application/json">)(.*?)(</script>)', re.S)
+_ALIAS_RE = re.compile(r"s-[0-9a-f]{16}\.md")        # the opaque name `Hub.alias` gives a Shared page (9.11)
 
 
 @dataclass(frozen=True)
@@ -159,11 +159,12 @@ class Hub:
         self.docs = state.Docs()
         self.seen = state.Seen()
         self.member_seen = state.MemberSeen()
+        self.shared_ids = state.SharedIds()           # the opaque names of the pages Shared with a member
+        self.member_opened = state.MemberOpened()     # the change of each Shared page that a member last had open
         self.index = Index(self)
         self.tokens = state.Tokens()
         self.waiting_tells = waiting_mod.Waiting(self)    # the Tells that wait for an agent (9.8)
         self.session_tells = session_tells_mod.SessionTells(self)    # the Tells that wait for a laptop session (9.8)
-        self.relays = relay_mod.Relays()     # the forks' relay tokens, queued Tells and streams (9.14)
         self.box_waits = boxwait.BoxWaits(lambda: self.clock())    # the drops for James's window (9.12, #115)
         self.entries: dict[str, Entry] = {}
         self.index_bus = Bus()                   # the index streams (SPEC 8.8)
@@ -646,6 +647,7 @@ class Hub:
             meta["agent"], meta["can"], meta["lines"] = v.agent(), v.can(), v.lines
             meta["targets"] = targets_mod.choices(self, e.address)
         else:
+            meta["doc"] = self.alias(member, e.address)
             meta.update(me=member.name, seen=self.member_seen.get(member.id, e.address), proxy=True,
                         member=member.id)
             work, can = self.member_work(e, member)
@@ -658,10 +660,10 @@ class Hub:
 
     def member_target(self, address: str, member, can: list) -> MemberTarget:
         """The target of a member's page (SPEC 9.8, 10.1): their own, an agent of theirs, never the hub account's
-        session. On a rectoverso whose Tells go to James's window or a fork's relay (9.12) the target is not theirs to
+        session. On a rectoverso whose Tells go to James's window (9.12) the target is not theirs to
         choose: none is shown and `picks` is empty."""
         lines = proxy_mod.member_lines()
-        if {"box-tell", "relay-tell"} & set(can):
+        if "box-tell" in can:
             return MemberTarget(None, can, lines, [])
         pickable = targets_mod.choices(self, address, member)
         raw = targets_mod.stored(self, address, member)
@@ -697,7 +699,7 @@ class Hub:
         if not (s.actions or s.pressed):
             return []
         fm = visibility.front_matter(text)
-        owner = member is None or bool(visibility.owner_of(fm, [member], self.assignees(e.address, fm)))
+        owner = member is None or self.is_owner(member, e.address, fm)
         lines = [line for _, _, line, _ in s.pressed]
         root = self.roots.get(roots_mod.Address.parse(e.address).root)
         who = {}
@@ -726,8 +728,6 @@ class Hub:
         on their machine, the one that attaches to James's window when they have a shell on the box, the
         sessions and where the live one runs. None for a page that is not a rectoverso of the list's root."""
         out = {"sessions": st.sessions, "live": st.live}
-        if st.live == "laptop":
-            out["relay"] = st.relay         # whether Tell reaches the fork now (9.14, 10.1)
         # The fork fetches the live session's transcript from /_/session: one on a laptop, none, or no
         # copy to serve it from (sessions_dir and work_dir, #146), nothing to fork.
         if st.forkable and work_mod.serves(st.cfg, st.member):
@@ -876,6 +876,8 @@ class Hub:
         with self._lock:
             root = roots_mod.forget(self.roots, self.docs, self.seen, self.versions, name,
                                     members=self.member_seen)
+            self.member_opened.forget_prefix(roots_mod.Address.prefix(name))
+            self.shared_ids.forget_prefix(roots_mod.Address.prefix(name))
             # After the registry lets go (a Tell queued from now on is refused, `Waiting.queue`) and before the
             # entries go, so the pages open on them hear `tell-cancelled` ahead of `gone`. A failure here must not
             # keep the root from being forgotten.
@@ -932,10 +934,85 @@ class Hub:
         root = self.roots.get(at.root)
         if root is None or not at.plain:
             return []
-        mine = [m for m in members if self.owns(m, root)]
+        mine = [m for m in members if self.owns(m, root) or self.shared_with(m, root, address)]
         if mine and (private := place.private_member(self, address)) is not None:
             mine = [m for m in mine if m.id == private]       # rule A: a private root's file is its member's alone
         return mine if mine and self.roots.lookup(root.path / at.rel) == root else []
+
+    def shared_with(self, member, root, address: str) -> bool:
+        """Whether the loose page at `address` in `root`, another member's, is Shared with `member` (9.11): the ticked
+        Share line of the page as it is now, read from the file each time, so a withdrawn Share closes it at the next
+        request. A root that is no member's loose root shares nothing."""
+        if self.proxy is None:
+            return False
+        owner = self.loose.owner_of(root)
+        if owner is None or owner == member.id or owner not in self.proxy.members:
+            return False
+        return visibility.reaches(self.audience(address), member)
+
+    def opened_by(self, member, address: str) -> None:
+        """A member opened the page at `address`: the change they had in front of them is kept, so the Sheaf says "new"
+        for a Shared page only while it changed since (8.6). Only a page of another member's loose root is kept."""
+        root = self.roots.get(roots_mod.Address.parse(address).root)
+        if root is None or self.giver(member, root) is None:
+            return
+        try:
+            top, rel = self.where(address)
+            with beneath.open_beneath(top, rel, meta=True) as op:
+                self.member_opened.mark(member.id, address, int(os.fstat(op.fd).st_mtime * 1e9))
+        except (OSError, roots_mod.NotFound):
+            pass
+
+    def giver(self, member, root):
+        """The member whose loose root `root` is, when it is another member's and `member` is not in it: the one who may
+        Share pages from it with `member`. None for every other root."""
+        owner = self.loose.owner_of(root) if self.proxy is not None else None
+        giver = self.proxy.members.get(owner) if owner is not None else None
+        return giver if giver is not None and giver.id != member.id else None
+
+    def alias(self, member, address: str) -> str:
+        """The address under which `member` is told of the page at `address`: for a page of another member's loose root, an
+        opaque one in that root's name, so the owner's folder names are never theirs to read (9.11); every other page by
+        its own address. Only the member's own roots and the hub's person name a page by its path."""
+        if member is None or self.proxy is None:
+            return address
+        at = roots_mod.Address.parse(address)
+        root = self.roots.get(at.root)
+        if root is None or self.giver(member, root) is None:
+            return address
+        return f"{at.root}/{self.shared_ids.of(address)}.md"
+
+    def unalias(self, address: str) -> str:
+        """The address an opaque name `alias` made stands for, else `address` itself. It says nothing of who may open it."""
+        at = roots_mod.Address.parse(address)
+        if not at.plain or not _ALIAS_RE.fullmatch(at.rel):
+            return address
+        real = self.shared_ids.address(at.rel[:-3])
+        return real if real is not None and roots_mod.Address.parse(real).root == at.root else address
+
+    def audience(self, address: str):
+        """`visibility.audience` of the page at `address`, None when it cannot be read."""
+        try:
+            top, rel = self.where(address)
+            with beneath.open_beneath(top, rel) as op:
+                return visibility.audience(op.text())
+        except (OSError, UnicodeDecodeError, roots_mod.NotFound):
+            return None
+
+    def is_owner(self, member, address: str, fm: dict) -> bool:
+        """Whether `member` owns the rectoverso at `address` whose front matter is `fm`: by the front matter (9.11), or
+        as the member whose loose root holds the page. A page of a loose root is its root's member's alone: its front matter's
+        `owner` and its issue's assignees name no other owner there."""
+        if (loose := self.loose_owner(address)) is not None:
+            return loose == member.id
+        return bool(visibility.owner_of(fm, [member], self.assignees(address, fm)))
+
+    def judged_for(self, member, address: str, fm: dict, assignees):
+        """`(fm, assignees)` as `member` is judged on them: for a page of another member's loose root the `owner` line and the
+        issue's assignees are not read, so what is written into such a page makes no one its owner (9.11)."""
+        if (loose := self.loose_owner(address)) is not None and loose != member.id:
+            return {k: v for k, v in fm.items() if k != "owner"}, None
+        return fm, assignees
 
     def judged(self, address: str):
         """(front matter, assignees) of the rectoverso at `address`, what its visibility is judged on: the front
@@ -998,9 +1075,12 @@ class Hub:
         private = place.private_member(self, address, None if judged is None else judged[0])
         if private is not None and private != member.id:        # rule A, before anything the file or the issue says
             return False
+        if self.holds_loose(member, address):                  # a loose page is its member's whatever its front matter says
+            return True
         if judged is None:
             return never_read and self.granted(member, address)
-        return visibility.visible_to(judged[0], member, judged[1], self.granted(member, address))
+        fm, assignees = self.judged_for(member, address, *judged)
+        return visibility.visible_to(fm, member, assignees, self.granted(member, address)) or self.named(member, address)
 
     def may_open(self, member, address: str, fm: dict, opened=place.UNJUDGED) -> bool:
         """Whether `member` may open the rectoverso at `address` whose front matter is `fm`, a text read under its lock
@@ -1008,7 +1088,41 @@ class Hub:
         private = place.private_member(self, address, fm, opened)
         if private is not None and private != member.id:        # rule A
             return False
-        return visibility.visible_to(fm, member, self.assignees(address, fm), self.granted(member, address))
+        if self.holds_loose(member, address) or self.named(member, address):
+            return True
+        fm, assignees = self.judged_for(member, address, fm, self.assignees(address, fm))
+        return visibility.visible_to(fm, member, assignees, self.granted(member, address))
+
+    def holds_loose(self, member, address: str) -> bool:
+        """Whether the page at `address` is in the loose root of `member`: theirs whatever its front matter says, so the
+        owner who withdrew a Share (`visibility: owner`, no `owner`) still opens their own page."""
+        return self.loose_owner(address) == member.id
+
+    def loose_owner(self, address: str) -> str | None:
+        """The id of the member whose loose root holds the page at `address`, None for a page of any other root."""
+        if self.proxy is None:
+            return None
+        root = self.roots.get(roots_mod.Address.parse(address).root)
+        return None if root is None else self.loose.owner_of(root)
+
+    def named(self, member, address: str) -> bool:
+        """Whether a ticked `Share with <names>` on the page at `address`, in a root that is no member's loose root,
+        names `member` (9.11): such a page stays its owner's alone in its front matter and opens to the named members
+        only, read from the file each time like a loose page's Share. A plain Share is the page's `visibility`."""
+        if self.proxy is None or self.loose_owner(address) is not None:
+            return False
+        try:
+            top, rel = self.where(address)
+            with beneath.open_beneath(top, rel) as op:
+                text = op.text()
+        except (OSError, UnicodeDecodeError, roots_mod.NotFound):
+            return False
+        shared, fm = visibility.audience(text), visibility.front_matter(text)
+        # A page that draws on a private source is opened only by its owner's own Share, which writes `shared`; an
+        # agent's write cannot (#40).
+        if any(visibility.private(x) for x in visibility.sources(fm)) and not visibility.text(fm, "shared"):
+            return False
+        return isinstance(shared, frozenset) and visibility.reaches(shared, member) and self.granted(member, address)
 
     def granted(self, member, address: str, by_name: bool = False) -> bool:
         """Whether the `projects.toml` of the root of `address` lets `member` into its project (8.12): always in
@@ -1133,29 +1247,6 @@ class Hub:
         if e is not None:
             e.bus.publish(name, data)
 
-    def relay_failed(self, address: str, t, kind: str, error: str, **fields):
-        """A relayed Tell that will not be delivered (9.14): its row, and the page's `tellError` by its event."""
-        self.record(kind, address, tell=t.id, thread=t.thread, error=error, **fields)
-        e = self.entries.get(address)
-        if e is not None:
-            e.bus.publish("tell-relay-failed", {"id": t.thread, "error": error})
-
-    def expire_relayed(self):
-        """Drop every relayed Tell queued an hour ago or more (9.14): each tick, and each relay request, relayed
-        Tell and page's /_/doc, so one is dropped within a second of its hour whether or not anything calls in."""
-        for address, t in self.relays.expire():
-            self.relay_failed(address, t, "tell-expired", relay_mod.EXPIRED)
-
-    def relay_changed(self, address: str, session: str):
-        """A relay of the rectoverso's live session `session` connected, or its grace ran out: the open pages read
-        `/_/doc` again (9.14). A fork that is no longer the live one changes nothing on the page."""
-        e = self.entries.get(address)
-        if e is None:
-            return
-        items = work_mod.sessions(visibility.front_matter(e.live.current()[1]))
-        if items and items[0]["id"] == session:
-            e.bus.publish("relay", {})
-
     def tick(self):
         """One pass of the watcher, run every second. For each document with an open tab or a
         Tell wait: give up on waits nobody answers, and when the file's (mtime, size) moved,
@@ -1182,12 +1273,6 @@ class Hub:
             self._watch_drops()                   # after the tabs' refresh: a reply that just landed is in
         except Exception:
             self.record_exception("drops-failed")
-        try:
-            self.expire_relayed()                 # by the clock, with no relay or page calling in (9.14)
-            for address, session in self.relays.lapsed():
-                self.relay_changed(address, session)
-        except Exception:
-            self.record_exception("relays-failed")
         try:
             self.commits.poll(self.roots.all())   # what the remote got, with no save (8.11, #75)
         except Exception:

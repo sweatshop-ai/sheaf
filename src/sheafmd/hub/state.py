@@ -602,6 +602,69 @@ class Seen(_Store):
         self._change(change)
 
 
+class MemberOpened(_Store):
+    """`opened-members.json`: `{"<member id>": {"<root>/<path>": <mtime_ns>}}`, the change of a page that each member of
+    proxy mode had in front of them when they last opened it. A page of another member's Shared with them is new to
+    them while it changed since (the Sheaf's "new" dot, 8.6). Keyed by the front's id, as `MemberSeen` is."""
+    name = "opened-members.json"
+
+    def get(self, member: str, address: str) -> int:
+        with self._lock:
+            e = self._data.get(member)
+            n = e.get(address) if isinstance(e, dict) else None
+            return n if isinstance(n, int) else 0
+
+    def mark(self, member: str, address: str, mtime_ns: int):
+        def change(data):
+            docs = data.setdefault(member, {})
+            if docs.get(address) == mtime_ns:
+                return None, False
+            docs[address] = mtime_ns
+            return None, True
+        self._change(change)
+
+    def forget_prefix(self, prefix: str) -> list[str]:
+        def change(data):
+            gone = set()
+            for docs in data.values():
+                if isinstance(docs, dict):
+                    for k in [k for k in docs if k.startswith(prefix)]:
+                        del docs[k]
+                        gone.add(k)
+            return sorted(gone), bool(gone)
+        return self._change(change)
+
+
+class SharedIds(_Store):
+    """`shared-ids.json`: `{"<id>": "<root>/<path>"}`, the opaque names under which a page of another member's loose root
+    is told to the members it is Shared with (9.11): the owner's folder names and the path on disk are theirs alone.
+    An id is random, made once for a page and kept, so a link the recipient holds keeps working."""
+    name = "shared-ids.json"
+
+    def of(self, address: str) -> str:
+        def change(data):
+            for k, v in data.items():
+                if v == address:
+                    return k, False
+            k = "s-" + secrets.token_hex(8)
+            data[k] = address
+            return k, True
+        return self._change(change)
+
+    def address(self, key: str) -> str | None:
+        with self._lock:
+            v = self._data.get(key)
+            return v if isinstance(v, str) else None
+
+    def forget_prefix(self, prefix: str) -> None:
+        def change(data):
+            gone = [k for k, v in data.items() if isinstance(v, str) and v.startswith(prefix)]
+            for k in gone:
+                del data[k]
+            return None, bool(gone)
+        self._change(change)
+
+
 class MemberSeen(_Store):
     """`seen-members.json`: `{"<member id>": {"<root>/<path>": {"c3": 2}}}`, what each member of
     proxy mode has seen, kept apart from the hub's person's (SPEC 4.2, 9.9). Keyed by the front's

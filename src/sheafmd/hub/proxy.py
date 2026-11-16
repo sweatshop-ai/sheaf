@@ -41,12 +41,10 @@ TABLE_KEYS = {"origin": str, "socket": str, "proxy_user": str, "members": dict}
 MEMBER_KEYS = {"name": str, "roots": list}
 STREAM_SECONDS = 300            # a stream of the proxy socket is closed after this (9.9 "The credential")
 # The only events a member's document stream is sent: the document's changes, the hub's stop, and `gone` when its root is forgotten, which names only the address the stream
-# was opened on, a member's Tell that its fork's relay will not deliver (9.14), and what became of a drop for
-# James's window: its supervisor's word on it (9.15), and its failure or no answer within the Tell wait (9.12), and
-# `relay` when a fork's relay connects or is gone (9.14). Never a job of the hub account's agent session, nor
+# was opened on, and what became of a drop for James's window: its supervisor's word on it (9.15), and its failure or no
+# answer within the Tell wait (9.12). Never a job of the hub account's agent session, nor
 # `signed-out` (9.9).
-DOCUMENT_EVENTS = ("hello", "changed", "hub-stopping", "gone", "tell-relay-failed", "box-failed",
-                   "box-status", "relay")
+DOCUMENT_EVENTS = ("hello", "changed", "hub-stopping", "gone", "box-failed", "box-status")
 PROXY_LINE = "Let one of your agents work on this page to Tell it."     # 10.6
 NO_DOCUMENTS = "This account has no documents on this hub."
 FOLDER_MODE = 0o2750            # the socket's folder: the hub's account, the proxy's group, setgid
@@ -80,6 +78,7 @@ class Member:
     shell: bool = False         # they have a shell on the box: the page offers them the attach command (9.12)
     tokens: tuple = ()          # the names of the door tokens that act for them (9.7, 9.11)
     private_root: str = ""      # a git root of theirs alone, one of their `roots`; "" for none (private roots)
+    agency: bool = False        # an agency member of a client tiroir: the only members an agent may Share with there (9.11)
 
 
 @dataclass(frozen=True)
@@ -91,6 +90,7 @@ class ProxyConfig:
     uid: int                    # proxy_user's: the one uid the proxy socket serves
     gid: int                    # proxy_user's group: the group of the socket's folder
     members: dict               # id -> Member
+    client: bool = False        # a client tiroir: an agent never Shares to the client's members (9.11)
 
     def member_of_token(self, name: str):
         """The member the door token `name` acts for, by their `tokens`; None for a token bound to nobody."""
@@ -160,7 +160,8 @@ _HOST_RE = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9
 _EMAIL_RE = re.compile(r"[^\s<>@,;\"']+@[^\s<>@,;\"']+")
 _SHORT_RE = re.compile(r"[A-Za-z0-9._-]{1,40}")
 _LOGIN_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
-OPTIONAL_MEMBER_KEYS = ("email", "short", "github", "shell", "tokens", "private_root")
+OPTIONAL_MEMBER_KEYS = ("email", "short", "github", "shell", "tokens", "private_root", "agency")
+OPTIONAL_TABLE_KEYS = ("client",)
 _OPTIONAL_WORDS = {"short": "1 to 40 letters, digits, dots, dashes or underscores (nell)",
                    "github": "a GitHub login (tiroir)"}
 SOCKET_MAX = 107                # bytes of a Unix socket's path (sun_path less its NUL)
@@ -359,10 +360,13 @@ def parse(t: dict, where, list_table: dict | None = None) -> ProxyConfig:
     """The table `t` (read from `where`), checked as 9.9 says. `list_table` is the config's `[list]` table, None
     without one: a member's `private_root` needs it. Raises ProxyError."""
     here = f"[proxy] of {where}"
-    if not t.get("members") and all(k in TABLE_KEYS for k in t):
-        _keys({**t, "members": {}}, TABLE_KEYS, here)          # a missing key is said first
+    if not t.get("members") and all(k in TABLE_KEYS or k in OPTIONAL_TABLE_KEYS for k in t):
+        _keys({**{k: v for k, v in t.items() if k not in OPTIONAL_TABLE_KEYS}, "members": {}}, TABLE_KEYS, here)          # a missing key is said first
         raise ProxyError(f"{here} has no member: add a [proxy.members.\"<id>\"] with name and roots")
-    _keys(t, TABLE_KEYS, here)
+    _keys({k: v for k, v in t.items() if k not in OPTIONAL_TABLE_KEYS}, TABLE_KEYS, here)
+    client = t.get("client", False)
+    if not isinstance(client, bool):
+        raise ProxyError(f"'client' must be true or false, not {client!r}, in {here}")
     origin, host = _origin(t["origin"], here)
     sock = t["socket"]
     if not sock.startswith("/"):
@@ -388,6 +392,8 @@ def parse(t: dict, where, list_table: dict | None = None) -> ProxyConfig:
                 raise ProxyError(f"'{key}' must be {_OPTIONAL_WORDS[key]}, not {v!r}, in {mhere}")
         if not isinstance(m.get("shell", False), bool):
             raise ProxyError(f"'shell' must be true or false, not {m['shell']!r}, in {mhere}")
+        if not isinstance(m.get("agency", False), bool):
+            raise ProxyError(f"'agency' must be true or false, not {m['agency']!r}, in {mhere}")
         tokens = m.get("tokens", [])
         if not isinstance(tokens, list) or not all(isinstance(t, str) and _SHORT_RE.fullmatch(t) for t in tokens):
             raise ProxyError(f"'tokens' must be a list of token names, each 1 to 40 letters, digits, dots, "
@@ -404,7 +410,8 @@ def parse(t: dict, where, list_table: dict | None = None) -> ProxyConfig:
                 raise ProxyError(f"every folder of 'roots' must be an absolute path, not {r!r}, in {mhere}")
             roots.append(r.rstrip("/") or "/")
         members[mid] = Member(mid, name, tuple(roots), email or "", m.get("short", ""), m.get("github", ""),
-                              m.get("shell", False), tuple(tokens), _private_root(m, roots, list_table, mhere))
+                              m.get("shell", False), tuple(tokens), _private_root(m, roots, list_table, mhere),
+                              m.get("agency", False))
         for name_ in tokens:
             if any(name_ in o.tokens for o in members.values() if o.id != mid):
                 raise ProxyError(f"token {name_!r} of {mhere} acts for another member already")
@@ -413,7 +420,9 @@ def parse(t: dict, where, list_table: dict | None = None) -> ProxyConfig:
             if mine and any(getattr(o, key).casefold() == mine for o in members.values() if o.id != mid):
                 raise ProxyError(f"'{key}' {getattr(members[mid], key)!r} of {mhere} is another member's")
     _check_private_roots(members, where)
-    return ProxyConfig(origin, host, Path(sock), t["proxy_user"], acct.pw_uid, acct.pw_gid, members)
+    if client and not any(m.agency and m.short for m in members.values()):
+        raise ProxyError(f"{here} is a client tiroir with no agency member that has a 'short': an agent could Share with nobody")
+    return ProxyConfig(origin, host, Path(sock), t["proxy_user"], acct.pw_uid, acct.pw_gid, members, client)
 
 
 def _check_private_roots(members: dict, where) -> None:

@@ -8,6 +8,8 @@ import time
 import pytest
 from helpers import FRONT, Front, call, hub_rows
 
+from sheafmd.blocks import split_md_blocks
+from sheafmd.edit import ticked_html
 from sheafmd.hub import proxy, the_list
 from sheafmd.hub.index import SWEEP_SECONDS
 from sheafmd.hub.state import Tokens
@@ -1268,3 +1270,169 @@ def test_the_hub_never_writes_the_new_label_into_a_file_that_holds_the_old_line(
     assert team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text), "edits": [edit]}, member=ALICE).status == 200
     text = (work / DOC).read_text(encoding="utf-8")
     assert "- [ ] Share\n" in text and "Shared with the team" not in text
+
+
+def tick_names(team, work, rel, member):
+    """The page's save that ticks the `Share with <names>` line, which the list does not read as an action."""
+    text = (work / rel).read_text(encoding="utf-8")
+    n = next(k for k, ln in enumerate(text.split("\n")) if ln.startswith("- [ ] Share with"))
+    at = the_list._place(text, n, split_md_blocks(text))
+    edit = {"i": at[0], "html": ticked_html(split_md_blocks(text)[at[0]], at[1], at=at[2])}
+    return team.post("/_/save", {"doc": f"work/{rel}", "hash": md_hash(text), "edits": [edit]}, member=member)
+
+
+# ── Share with <names> on a repo page opens it to the named members only (PR 394, round 2) ──
+
+def test_share_with_a_name_on_a_project_sheaf_opens_it_to_that_member_and_not_to_the_project(team, work):
+    put(team, work, DOC, PRIVATE.replace("- [ ] Share", "- [ ] Share with carol"))
+    assert tick_names(team, work, DOC, ALICE).status == 200
+    assert "- [x] Share with carol" in (work / DOC).read_text(encoding="utf-8")
+    got = team.get(f"/work/{DOC}", member=BOB)
+    assert got.status == 404 and got.body == team.get("/work/acme/site/nothing.md", member=BOB).body
+    docs = [d["doc"] for r in team.get("/_/index.json", member=BOB).json()["roots"] for d in r["docs"]]
+    assert f"work/{DOC}" not in docs
+    assert team.get(f"/work/{DOC}", member=ALICE).status == 200
+
+
+def test_share_with_bob_on_a_project_sheaf_opens_it_to_bob(team, work):
+    put(team, work, DOC, PRIVATE.replace("- [ ] Share", "- [ ] Share with bob"))
+    assert tick_names(team, work, DOC, ALICE).status == 200
+    assert team.get(f"/work/{DOC}", member=BOB).status == 200
+    (work / DOC).write_text((work / DOC).read_text(encoding="utf-8").replace("Share with bob", "Share with carol"), encoding="utf-8")
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
+
+
+def test_a_ticked_share_with_does_not_open_a_page_that_holds_a_private_source_unless_its_owner_shared_it(team, work):
+    put(team, work, DOC, PRIVATE.replace("- [ ] Share", "- [x] Share with bob"))      # written by hand: no `shared` mark
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
+    # the owner's own tick writes the mark, and opens it
+    (work / DOC).write_text(PRIVATE.replace("- [ ] Share", "- [ ] Share with bob"), encoding="utf-8")
+    assert tick_names(team, work, DOC, ALICE).status == 200
+    assert front_matter((work / DOC).read_text(encoding="utf-8"))["shared"].startswith("alice ")
+    assert team.get(f"/work/{DOC}", member=BOB).status == 200
+
+
+def test_a_door_update_that_adds_a_private_source_closes_a_named_share(team, browser, work):
+    put(team, work, DOC, PRIVATE.replace("- [ ] Share", "- [ ] Share with bob"))
+    assert tick_names(team, work, DOC, ALICE).status == 200
+    assert team.get(f"/work/{DOC}", member=BOB).status == 200
+    text = (work / DOC).read_text(encoding="utf-8")
+    fm = front_matter(text)
+    assert fm["visibility"] == "owner" and fm["shared"].startswith("alice ")
+    is_error, got = door_update(team, browser, work, DOC,
+                                lambda t: t.replace("sources: [library:doc-123]", "sources: [library:doc-123, mail:t-1]"))
+    assert not is_error, got
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
+
+
+def test_a_door_update_keeps_the_mark_of_a_named_share_on_a_page_with_a_private_source(team, browser, work):
+    put(team, work, DOC, PRIVATE.replace("- [ ] Share", "- [ ] Share with bob"))
+    assert tick_names(team, work, DOC, ALICE).status == 200
+    assert team.get(f"/work/{DOC}", member=BOB).status == 200
+    is_error, got = door_update(team, browser, work, DOC, lambda t: t + "\nMore.\n")
+    assert not is_error, got
+    text = (work / DOC).read_text(encoding="utf-8")
+    assert "More." in text and front_matter(text)["shared"].startswith("alice ")
+    assert team.get(f"/work/{DOC}", member=BOB).status == 200
+
+
+# ── Narrowing the audience closes the page at once to every member no longer named (PR 394, round 13) ──
+
+CAROL = "9a1f3c52-6d0e-4b7a-8c25-1e4f7b3d9a60"
+OPEN_SOURCE = PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:acme/agency-tiroir#9]")
+
+
+def three(team, work, **tokens):
+    """The `[proxy]` table of Alice, Bob and Carol, members of one project root."""
+    table = {ALICE: {"name": "Alice", "short": "alice", "github": "tiroir", "roots": [str(work)]},
+             BOB: {"name": "Bob", "short": "bob", "github": "bobsmith", "roots": [str(work)]},
+             CAROL: {"name": "Carol", "short": "carol", "github": "carolx", "roots": [str(work)]}}
+    for m in table.values():
+        if m["short"] in tokens:
+            m["tokens"] = tokens[m["short"]]
+    team.hub.proxy = proxy.parse({"origin": FRONT, "socket": "/run/sheaf-proxy/hub.sock",
+                                  "proxy_user": pwd.getpwuid(os.getuid()).pw_name, "members": table}, "the test")
+
+
+def untick(team, work, rel, line, member):
+    """The page's save that unticks the box of the line that reads `line`."""
+    text = (work / rel).read_text(encoding="utf-8")
+    n = next(k for k, ln in enumerate(text.split("\n")) if ln.endswith(line))
+    at = the_list._place(text, n, split_md_blocks(text))
+    edit = {"i": at[0], "html": ticked_html(split_md_blocks(text)[at[0]], at[1], tick=False, at=at[2])}
+    return team.post("/_/save", {"doc": f"work/{rel}", "hash": md_hash(text), "edits": [edit]}, member=member)
+
+
+def reads(team, rel):
+    return {name: team.get(f"/work/{rel}", member=m).status for name, m in (("alice", ALICE), ("bob", BOB), ("carol", CAROL))}
+
+
+def test_unticking_the_plain_share_while_a_named_share_stays_closes_the_page_to_the_member_not_named(team, work):
+    three(team, work)
+    put(team, work, DOC, OPEN_SOURCE.replace("- [ ] Share\n", "- [ ] Share\n- [ ] Share with bob\n"))
+    assert tick(team, work, DOC, "Share", ALICE).status == 200
+    assert tick_names(team, work, DOC, ALICE).status == 200
+    assert reads(team, DOC) == {"alice": 200, "bob": 200, "carol": 200}
+    assert untick(team, work, DOC, "- [x] Share", ALICE).status == 200
+    assert reads(team, DOC) == {"alice": 200, "bob": 200, "carol": 404}
+    fm = front_matter((work / DOC).read_text(encoding="utf-8"))
+    assert fm["visibility"] == "owner" and "shared" not in fm       # a page with no private source holds no mark, and narrowing makes none
+
+
+def test_naming_fewer_members_closes_the_page_to_the_one_no_longer_named(team, work):
+    three(team, work)
+    shared = OPEN_SOURCE.replace("owner: alice", "owner: alice\nvisibility: project\nshared: alice 2026-11-01T00:00:00Z")
+    put(team, work, DOC, shared.replace("- [ ] Share\n", "- [x] Share with bob\n- [x] Share with carol\n"))
+    assert reads(team, DOC) == {"alice": 200, "bob": 200, "carol": 200}
+    assert untick(team, work, DOC, "- [x] Share with carol", ALICE).status == 200
+    assert reads(team, DOC) == {"alice": 200, "bob": 200, "carol": 404}
+
+
+def test_a_door_update_that_unticks_the_plain_share_while_a_named_share_stays_closes_the_page_to_the_member_not_named(team, browser, work):
+    three(team, work, alice=["james"])
+    shared = OPEN_SOURCE.replace("owner: alice", "owner: alice\nvisibility: project\nshared: alice 2026-11-01T00:00:00Z")
+    put(team, work, DOC, shared.replace("- [ ] Share\n", "- [x] Share\n- [x] Share with bob\n"))
+    assert reads(team, DOC) == {"alice": 200, "bob": 200, "carol": 200}
+    token = Tokens().add("james", write=True)
+    is_error, got = call(browser, "read", token=token, doc=f"work/{DOC}")
+    assert not is_error, got
+    is_error, got = call(browser, "update", token=token, doc=f"work/{DOC}", expected_hash=got["hash"],
+                         text=got["text"].replace("- [x] Share\n", "- [ ] Share\n"))
+    assert not is_error, got
+    assert reads(team, DOC) == {"alice": 200, "bob": 200, "carol": 404}
+
+
+# ── Narrowing never makes a `shared` mark (PR 394, round 14) ──
+
+def test_a_door_update_that_narrows_the_share_and_adds_a_private_source_leaves_the_page_closed_to_the_member_named(team, browser, work):
+    three(team, work, alice=["james"])
+    shared = OPEN_SOURCE.replace("owner: alice", "owner: alice\nvisibility: project\nshared: alice 2026-11-01T00:00:00Z")
+    put(team, work, DOC, shared.replace("- [ ] Share\n", "- [x] Share\n"))
+    token = Tokens().add("james", write=True)
+    is_error, got = call(browser, "read", token=token, doc=f"work/{DOC}")
+    assert not is_error, got
+    text = got["text"].replace("issue:acme/agency-tiroir#9", "library:doc-123").replace("- [x] Share\n", "- [x] Share with bob\n")
+    is_error, got = call(browser, "update", token=token, doc=f"work/{DOC}", expected_hash=got["hash"], text=text)
+    assert not is_error, got
+    assert "shared" not in front_matter((work / DOC).read_text(encoding="utf-8"))
+    assert not team.hub.named(team.hub.proxy.members[BOB], f"work/{DOC}")
+    assert reads(team, DOC) == {"alice": 200, "bob": 404, "carol": 404}
+
+
+def test_a_save_that_narrows_the_share_keeps_the_mark_the_page_holds(team, work):
+    three(team, work)
+    shared = OPEN_SOURCE.replace("owner: alice", "owner: alice\nvisibility: project\nshared: alice 2026-11-01T00:00:00Z")
+    put(team, work, DOC, shared.replace("- [ ] Share\n", "- [x] Share\n- [x] Share with bob\n"))
+    assert untick(team, work, DOC, "- [x] Share", ALICE).status == 200
+    fm = front_matter((work / DOC).read_text(encoding="utf-8"))
+    assert fm["visibility"] == "owner" and fm["shared"] == "alice 2026-11-01T00:00:00Z"
+    assert reads(team, DOC) == {"alice": 200, "bob": 200, "carol": 404}
+
+
+def test_a_save_that_narrows_the_share_of_a_page_with_a_private_source_and_no_mark_makes_none(team, work):
+    three(team, work)
+    shared = PRIVATE.replace("owner: alice", "owner: alice\nvisibility: project")        # a private source, no mark
+    put(team, work, DOC, shared.replace("- [ ] Share\n", "- [x] Share\n- [x] Share with bob\n"))
+    assert untick(team, work, DOC, "- [x] Share", ALICE).status == 200
+    assert "shared" not in front_matter((work / DOC).read_text(encoding="utf-8"))
+    assert reads(team, DOC) == {"alice": 200, "bob": 404, "carol": 404}

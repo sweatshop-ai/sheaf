@@ -20,6 +20,8 @@ import json
 import os
 import re
 import subprocess
+import time
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -350,12 +352,14 @@ class Door:
             return _error(id_, INVALID_PARAMS, "The arguments are not an object.")
         try:
             out = self._logged(name, args, caller) if name in WRITE_TOOLS else self._run(name, args, caller)
+            if name in SESSION_WRITES and isinstance(out, dict) and (declared := caller.declared.get("session")):
+                out = {**out, "session": declared}      # the id the door recorded: the mod arms only for its own (9.14)
             if caller.session is not None and self.called is not None:
                 self._tell_called(name, args, caller)
-            return self._ok(id_, {"content": [{"type": "text", "text": json.dumps(out, ensure_ascii=False)}],
+            return self._ok(id_, {"content": [{"type": "text", "text": json.dumps(self._told_out(out, caller), ensure_ascii=False)}],
                                   "isError": False})
         except ToolError as e:
-            return self._ok(id_, {"content": [{"type": "text", "text": str(e)}], "isError": True})
+            return self._ok(id_, {"content": [{"type": "text", "text": self._told_text(str(e), args, caller)}], "isError": True})
         except Exception:
             doc = args.get("doc") if isinstance(args.get("doc"), str) else None
             self.hub.record_exception("mcp-failed", doc, tool=name)
@@ -417,6 +421,7 @@ class Door:
             address = self._address_of_path(doc, caller)
         else:
             address = doc
+        address = self.hub.unalias(address)         # the opaque name of a page Shared with the member (9.11)
         with place.held(self.hub, address):         # a read, under the name's lock (9.11)
             try:
                 self.hub.roots.document(address)
@@ -440,6 +445,31 @@ class Door:
     def _judged(self, caller: Caller) -> bool:
         """Whether visibility (9.11) holds `caller`: a token, in proxy mode."""
         return caller.token is not None and getattr(self.hub, "proxy", None) is not None
+
+    def _told_out(self, out, caller: Caller):
+        """What a tool answers, with the page it names told to the caller as `_told` says: the tools work on the page's own
+        address, which a member told of a Shared page by another never reads (9.11)."""
+        if isinstance(out, dict) and isinstance(out.get("doc"), str) and isinstance(out.get("url"), str):
+            return {**out, **self._told(out["doc"], caller)}
+        return out
+
+    def _told_text(self, text: str, args: dict, caller: Caller) -> str:
+        """An error text of a call on a page, with the page's own address, which names the owner's folders, told as the
+        caller is told of it."""
+        doc = args.get("doc")
+        if not isinstance(doc, str) or (member := self._member(caller)) is None:
+            return text
+        real = self.hub.unalias(doc)
+        root = self.hub.roots.get(Address.parse(real).root)
+        # Only a page Shared with the caller has an opaque name: a made-up name in another's root is none, and writes none.
+        told = self.hub.alias(member, real) if root is not None and self.hub.shared_with(member, root, real) else doc
+        return text.replace(real, told) if told != real else text
+
+    def _told(self, address: str, caller: Caller) -> dict:
+        """`doc` and `url` of the page at `address` as `caller` is told of it: a page Shared with its member by another is told
+        under an opaque name, never the owner's folders (9.11)."""
+        told = self.hub.alias(self._member(caller), address)
+        return {"doc": told, "url": self.hub.url(told)}
 
     def _member(self, caller: Caller):
         """The member `caller` acts for (9.11): in proxy mode, the one whose `tokens` name its token; None for
@@ -617,20 +647,25 @@ class Door:
         member = self._member(caller)
         if "root" in args:
             root = hub.roots.get(args["root"])
-            if root is None or (member is not None and not hub.owns(member, root)):
+            if root is None or (member is not None and not hub.owns(member, root) and hub.giver(member, root) is None):
                 raise ToolError(f"There is no root named {args['root']}.")
             wanted = [root]
         else:
-            wanted = [r for r in hub.roots.listed() if member is None or hub.owns(member, r)]
+            wanted = [r for r in hub.roots.listed()
+                      if member is None or hub.owns(member, r) or hub.giver(member, r) is not None]
         rows, shut = [], []
         agent = caller.token if caller.token is not None and caller.token.client is not None else None
         pending = hub.waiting_tells.pending(agent) if agent is not None else set()    # the Tells that wait for it (9.8)
         in_git = {}                             # (root, real folder) -> whether 8.2 keeps its files from the root
         owned = {}                              # (root, real folder) -> whether its files are the member's (9.11)
+        reached = set()                         # the other members' loose roots that hold a page Shared with the member
         for root in wanted:
-            # A root the hub cannot look into may hold what waits: said by name and why, never its folder (8.6).
+            giving = member is not None and not hub.owns(member, root)     # another's loose root: judged page by page
+            # A root the hub cannot look into may hold what waits: said by name and why, never its folder (8.6). Of
+            # another member's loose root, said to no one: what it holds is the owner's until Shared (9.11).
             if (why := root.closed()) is not None:
-                shut.append({"root": root.name, "closed": why})
+                if not giving:
+                    shut.append({"root": root.name, "closed": why})
                 continue
             if root.missing():
                 continue
@@ -662,30 +697,38 @@ class Door:
                         continue
                 # Whether the member owns a file asks git of its folder (8.2), and every file of a folder has the
                 # same answer: asked once a folder, not once a file.
-                if member is not None and folder not in owned:
+                if member is not None and (giving or folder not in owned):
                     owned[folder] = hub.member_owns(member, address)
                 if not self._sees(fm, address, caller, owned.get(folder), private):
                     continue                                   # nor a rectoverso the caller may not see (9.11)
-                tells = self._tells(address, text, agent) if text is not None else []
+                if giving:
+                    reached.add(root.name)
+                tells = self._tells(address, text, agent, member) if text is not None else []
                 if args.get("open_only", True) and not threads and not tells:
                     continue
                 seen = hub.seen.get(address)
                 unread = sum(1 for cid, n, last in threads if last != hub.person and n > seen.get(cid, 0))
                 dot = self._dot(address, unread, len(threads))
+                told = hub.alias(member, address) != address        # a page Shared with the member: no path on disk (9.9)
                 rows.append((-1 if tells else DOT_ORDER[dot], -mtime, address,
-                             {"doc": address, "url": hub.url(address), "path": str(path),
+                             {**self._told(address, caller), **({} if told else {"path": str(path)}),
                               "open": len(threads), "unread": unread, "dot": dot, "tells": tells}))
+        if "root" in args and member is not None and not hub.owns(member, wanted[0]) and wanted[0].name not in reached:
+            # Another member's loose root with nothing Shared with the caller is answered as a root that does not exist.
+            raise ToolError(f"There is no root named {args['root']}.")
         return [row[3] for row in sorted(rows, key=lambda r: r[:3])] + shut
 
-    def _tells(self, address: str, text: str, agent: TokenRow) -> list:
+    def _tells(self, address: str, text: str, agent: TokenRow, member=None) -> list:
         """The Tells that wait for `agent` on this document, as they are listed to it (SPEC 9.8): the first listing
-        marks each seen. Of `text`, read from the descriptor that was judged (9.11)."""
+        marks each seen. Of `text`, read from the descriptor that was judged (9.11). Their words name the page as
+        `member` is told of it, the opaque name of a Shared page, never the owner's folders."""
         try:
             got = rdc.parse(text)
         except (OSError, UnicodeDecodeError):
             return []
         links = self.hub.tell.links(address)
-        return self.hub.waiting_tells.take(address, agent, got, lambda c, t: prompts.tell_agent(address, t["by"], c, links))
+        told = self.hub.alias(member, address)
+        return self.hub.waiting_tells.take(address, agent, got, lambda c, t: prompts.tell_agent(told, t["by"], c, links))
 
     def _session_tells(self, args: dict, caller: Caller):
         """The long-poll of a laptop session (SPEC 9.8): only the Tells queued for the session id this agent token
@@ -993,7 +1036,11 @@ class Door:
             self._agent_wrote(address, caller)          # before the tabs and indexes hear of it
             self.hub.wrote(address)
             self.hub.committed(address, by=caller.display, what="create")
-        return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text)}
+        out = {"doc": address, "url": self.hub.url(address), "hash": md_hash(text)}
+        if visibility.audience(_as_read(args["text"])) is not None and visibility.audience(text) is None:
+            out["note"] = ("The page holds private work, so it is not Shared: its Share line was written unticked. "
+                           "Its owner shares it from the page or the Sheaf.")
+        return out
 
     def _make(self, root, top: Path, rel: str, name: str | None, address: str, text: str, caller: Caller):
         """The file of a create, at its home when the hub places it (9.11): the text written. The rectoverso's address is
@@ -1125,11 +1172,52 @@ class Door:
         the front matter with `set_keys`, which can join a line the reader gave another key to `sessions`, so
         `sessions` is judged again on what it gives (#36)."""
         seen = self._visible(text, old)
-        out = self._owned(seen, address, caller)
+        out = self._shared(self._owned(seen, address, caller), old, caller, address)
         sessions = visibility.front_matter(seen).get("sessions", "")    # the old value: `_visible` saw to that
         if out != seen and visibility.front_matter(out).get("sessions", "") != sessions:
             raise _sessions_changed(old)
         return out
+
+    def _shared(self, text: str, old: str | None, caller: Caller, address: str) -> str:
+        """`text` once the rule of Share holds for a door write (9.11). The agent may Share only on `create` of a new
+        page: a ticked Share line there opens the page, and its `shared` line says which agent did, for the row.
+        An `update` never opens a page to anyone it was not open to, whoever the token's member is, so text an agent
+        read cannot open a page that holds private work; closing a Share, or naming fewer members, opens nothing.
+        On a client tiroir the agent may Share only with its agency members, never plain (9.11), and an update adds no
+        Share line and changes none: the lines it may send back are among the ones it was sent."""
+        if getattr(self.hub, "proxy", None) is None:
+            return text
+        now = visibility.audience(text)
+        cfg = self.hub.proxy
+        if cfg.client:
+            if old is None and not visibility.only_names_in(now, {m.short.casefold() for m in cfg.members.values()
+                                                                  if m.agency and m.short}):
+                raise ToolError("On this tiroir an agent may only Share with agency members, by name: `Share with <name>`. "
+                                "A plain Share, or a name that is not an agency member's, is the member's own act, "
+                                "from the page or the Sheaf.", "share")
+            if old is not None and Counter(visibility.share_lines(text)) - Counter(visibility.share_lines(old)):
+                # every line sent back is one `read` gave, as the parser reads it: removing or reordering opens nothing
+                raise ToolError("An update cannot add or change a Share line on this tiroir. Send the text with its Share "
+                                "lines as `read` gave them.", "share")
+        if old is not None:
+            if visibility.widens(visibility.audience(old), now):
+                raise ToolError("An update cannot Share a page, nor open it to more members: only its owner does, from "
+                                "the page or the Sheaf. Send the text with its Share lines as `read` gave them.", "share")
+            m = self._member(caller)
+            if m is not None and visibility.share_lines(old) != visibility.share_lines(text) \
+                    and not self.hub.is_owner(m, address, visibility.front_matter(old)):
+                raise ToolError("Who a page is Shared with is its owner's alone: an update from a token of another member "
+                                "cannot narrow or withdraw it. Send the text with its Share lines as `read` gave them.", "share")
+            if visibility.narrows(visibility.audience(old), now) and self.hub.loose_owner(address) is None:
+                # Naming fewer members closes the page at once to every member no longer named: names-only form (9.11).
+                return visibility.names_only(text)
+            return text
+        if now is None:
+            return text
+        if visibility.effective(visibility.front_matter(text)) == "owner":
+            return visibility.without_ticked_share(text)    # a private source keeps the page its owner's whatever its text ticks (#40): the line is not left ticked
+        return visibility.set_keys(text, {"visibility": "project",
+                                          "shared": f"agent:{caller.display} {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}"})
 
     def _visible(self, text: str, old: str | None) -> str:
         """In proxy mode, the text a door write puts on disk by the rule of visibility (9.11): the caller is
@@ -1158,6 +1246,10 @@ class Door:
             return text
         fm = visibility.front_matter(text)
         if visibility.effective(fm) == "project":
+            return text
+        if (loose := self.hub.loose_owner(address)) is not None:
+            # A loose page is owned by the member whose loose root holds it (9.11), with no `owner` line: no other member's
+            # write names an owner there, and the text stays as it is.
             return text
         # an owner whose roots do not hold the rectoverso cannot open it either (9.9)
         everyone = self.hub.members_owning(self.hub.proxy.members.values(), address)

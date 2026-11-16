@@ -26,8 +26,8 @@ if not Path(sheafmd.__file__).resolve().is_relative_to(_OWN_SOURCE):
 
 from helpers import NOW, PLAN, Opener, browser_on, claim_port, proc_state, stop_hub
 # no_process_left_behind and the_test_that_is_running are the fixtures of tests/leakguard.py
-from leakguard import (NODE_VAR, RUN_VAR, carries_this_run, no_process_left_behind, stop_left,  # noqa: F401
-                       the_test_that_is_running)
+from leakguard import (NODE_VAR, RUN_VAR, carries_this_run, is_ending, no_process_left_behind,  # noqa: F401
+                       stop_left, the_test_that_is_running)
 from sheafmd import config, paths
 from sheafmd.agents.detect import TABLE
 from sheafmd.cli import main
@@ -312,7 +312,7 @@ def spawned(request, own_patches):
         The hub of whoever runs the suite is none of these, whatever file or port named it."""
         if (sig == 0 or type(pid) is not int or pid <= 1 or pid == os.getpid()
                 or pid in made.pids or pid in made.own or is_child(pid) or carries_this_run(pid)
-                or proc_state(pid) != "alive"):          # one that has ended (or is a zombie): nothing there to hurt
+                or proc_state(pid) != "alive" or is_ending(pid)):   # one that has ended, or ends: nothing there to hurt
             if type(pid) is int and pid > 1 and sig != 0:
                 made.own.add(pid)
             return made.kill(pid, sig)

@@ -607,3 +607,37 @@ def test_a_sleeping_clones_read_only_line_names_the_sleeping_state_and_the_wake_
     assert "asleep" in line and REPO in line, line
     assert not report(hub_repos, path="docs/plan.md")[0]
     assert hub_repos.hub.read_only_line(ADDRESS) == ""
+
+
+# ── round 7: the moved line, and the branch of the render ────────────────────
+
+@DEV
+def test_a_moved_clones_read_only_line_says_the_repo_moved_and_does_not_promise_a_wake(hub_repos):
+    served(hub_repos)
+    there = "https://there.example"
+    assert hub_repos.hub.repos.sleep_moved(REPO, there)
+    assert hub_repos.hub.repos.sleeping(REPO)
+    line = hub_repos.hub.read_only_line(ADDRESS)
+    assert "moved" in line and there in line, line
+    assert "wakes" not in line and "asleep" not in line, line
+
+
+@NAMED
+def test_a_page_served_from_its_render_keeps_the_branch_it_was_rendered_on_after_a_switch(hub_repos, tmp_path):
+    """The branch is recorded where the render's hash is, not read at the request: the render held by the entry is staging's,
+    the clone then moves to dev before the page is sent from it, and the page still says staging (its save is refused)."""
+    served(hub_repos)
+    clone = the_clone(hub_repos)
+    e = hub_repos.hub.entry(ADDRESS)
+    assert '"branch": "staging"' in hub_repos.hub.page(e, "n")
+    old_hash = md_hash(hub_repos.hub.file(ADDRESS).read_text(encoding="utf-8"))
+    dev_changes_the_plan(hub_repos, tmp_path)
+    sh(clone, "fetch", "-q", "origin")
+    assert hub_repos.hub.repos.decide(REPO, "ghs_faketoken")[0] == "dev"      # as a report decides it, then moves the clone
+    assert hub_repos.hub.repos.switch(REPO, "dev", "ghs_faketoken") == ""
+    got = hub_repos.hub.page(e, "n")            # the entry's render is not made again: it is the one of staging's text
+    assert f'"hash": "{old_hash}"' in got
+    assert '"branch": "staging"' in got and '"branch": "dev"' not in got, got
+    r = hub_repos.post("/_/save", {"doc": ADDRESS, "hash": old_hash, "branch": "staging",
+                                   "edits": [{"i": 1, "html": "<p>A plan, saved on the page.</p>"}]}, member=BEA)
+    assert r.status == 403, r.text

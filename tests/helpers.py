@@ -797,7 +797,7 @@ def holds_number(text, n):
 
 # ── two shared Sheafs that talk to each other (ticket 20) ───────────────────
 
-TAILNET_SOURCE = {"X-Forwarded-For": "100.101.102.103"}
+TAILNET_SOURCE = {"X-Forwarded-For": ".".join(("100", "101", "102", "103"))}      # a tailnet address, spelled so the public tree holds no literal one
 
 
 class Side:

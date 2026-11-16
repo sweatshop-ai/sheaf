@@ -35,6 +35,7 @@ from . import projects
 from . import proxy as proxy_mod
 from . import relay as relay_mod
 from . import roots as roots_mod
+from . import sheaf_view
 from . import state
 from . import targets as targets_mod
 from . import the_list
@@ -649,6 +650,7 @@ class Hub:
                 meta["work"] = work
             mt = self.member_target(e.address, member, can)
             meta["agent"], meta["can"], meta["lines"], meta["targets"] = mt.agent, mt.can, mt.lines, mt.picks
+            meta["way_back"] = sheaf_view.byline(self, e.address, member)
         return meta
 
     def member_target(self, address: str, member, can: list) -> MemberTarget:

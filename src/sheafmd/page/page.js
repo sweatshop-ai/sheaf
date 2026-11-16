@@ -118,11 +118,12 @@ var create = function (ROOT, CFG, opts) {
   // prepared by Yusuf"), not the hub's person, and its name brings the session to the front, or opens it again once
   // it has ended (SPEC 4.3, 8.5). A page with no session, and the share copy, keep the line as rendered.
   var byline = main && main.querySelector('p.doc-by'), bylineAsRendered = byline ? byline.innerHTML : '',
-      bylineHtml = bylineAsRendered;
+      bylineHtml = bylineAsRendered, bylineKey = '';
   function takeByline() {
     if (!byline) return;
     var a = CFG.agent, html = bylineAsRendered;
-    if (!CFG.proxy && a && a.kind === 'session') {
+    if (CFG.proxy) { takeWayBack(); return; }
+    if (a && a.kind === 'session') {
       var name = esc(a.name || a.display), forWhom = byline.getAttribute('data-for');
       html = 'Document prepared by ' +
         (a.jump ? '<button type="button" class="doc-by-who" title="Open this session">' + name + '</button>' : name) +
@@ -131,9 +132,32 @@ var create = function (ROOT, CFG, opts) {
     // Only when it changed: every answer of /_/doc comes here, and new nodes would end a selection made in the line.
     if (html !== bylineHtml) byline.innerHTML = bylineHtml = html;
   }
+  // A member's page (SPEC 6.2, item 11): the byline names the last agent session that wrote here, as the row of the Sheaf does, and
+  // its name is the same link or button (sheaf.js, `sheafSession`). The hub's `way_back` is the whole of it: the name, the
+  // tooltip and what the name links to; none of it is made from the page's own text. A page with no such session, or loaded
+  // without sheaf.js, keeps the line as rendered or shows the name as text.
+  function takeWayBack() {
+    var w = CFG.way_back, key = w ? JSON.stringify([w, byline.getAttribute('data-for')]) : '';
+    if (key === bylineKey) return;
+    bylineKey = key;
+    if (!w) { byline.innerHTML = bylineAsRendered; return; }
+    var d = byline.ownerDocument, kit = window.sheafSession, forWhom = byline.getAttribute('data-for');
+    var who = kit ? kit.node(d, w.name, w.link) : d.createTextNode(String(w.name));
+    if (w.tip) { var span = d.createElement('span'); span.title = w.tip; span.appendChild(who); who = span; }
+    byline.textContent = 'Document prepared by ';
+    byline.appendChild(who);
+    if (forWhom) byline.appendChild(d.createTextNode(' for ' + forWhom));
+  }
+  // The same click as a row's (sheaf.js): AgentView on the member's laptop, else the Remote Control link, else text.
+  var wayBackWhere = {
+    say: function (t) { say(t, true); }, live: function () { return !unmounted; },
+    plain: function (b) { b.replaceWith(byline.ownerDocument.createTextNode(b.textContent)); },
+  };
   if (byline) listen(byline, 'click', function (e) {
     var b = e.target.closest ? e.target.closest('button.doc-by-who') : null;
-    if (b) jumpToSession(b);
+    if (b) { jumpToSession(b); return; }
+    var w = e.target.closest ? e.target.closest('.sheaf-session-link[data-laptop]') : null;
+    if (w && window.sheafSession && !(e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) window.sheafSession.follow(w, e, wayBackWhere);
   });
   function takeAgent() {
     CAN = CFG.can || [];
@@ -162,6 +186,7 @@ var create = function (ROOT, CFG, opts) {
     var before = JSON.stringify([CFG.agent, CFG.can, CFG.lines, CFG.work, CFG.targets]);
     CFG.agent = j.target || null;
     if ('targets' in j) CFG.targets = j.targets || [];
+    if ('way_back' in j) CFG.way_back = j.way_back;
     CFG.can = j.capabilities || [];
     CFG.lines = j.lines || {};
     if ('work' in j) CFG.work = j.work;       // a fork moves the live session off the box (9.12)

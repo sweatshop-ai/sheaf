@@ -327,6 +327,7 @@ def test_the_row_share_button_shares_an_own_loose_page_and_is_gone_afterwards(mo
     mine.parent.mkdir(parents=True)
     mine.write_text("# Mine\n\nText.\n", encoding="utf-8")
     mounted.page.reload()
+    until(lambda: mounted.page.evaluate("!!window.__root"), what="the page after the reload")
     until(lambda: mounted.js("return !!root.querySelector('.sheaf-row');"), what="the rows in the root")
     until(lambda: mounted.js("return root.querySelectorAll('.sheaf-share').length;") == 1, what="one Share button")
     assert mounted.js("return root.querySelector('.sheaf-share').closest('.sheaf-row').dataset.title;") == "mine"

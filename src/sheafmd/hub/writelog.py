@@ -60,7 +60,8 @@ class WriteLog:
         self._now = now or (lambda: strftime(STAMP_FORMAT))
         self._lock = threading.Lock()
         self._lines: dict[str, deque] = {}
-        self._pulled: set[str] = set()
+        self._pulling: set[str] = set()
+        self._left: dict[str, str] = {}
         self._load()
 
     def _load(self):
@@ -118,15 +119,22 @@ class WriteLog:
         """The last line that named an agent session."""
         return next((l for l in reversed(self.lines(address)) if l.session), None)
 
-    # A pull writes the files the hub then sees change: while its window is open, what a page sees of them is the pull's.
+    # A pull writes files the hub then sees change. While it is under way, what a page sees of them is the pull's; when it
+    # ends, the file it left is known by its hash, and the next change a page sees is the pull's only if it is that text.
+    # A record no change ever matches is dropped by the next change that does not: nothing waits to swallow a later line.
     def expect_pull(self, address: str):
         with self._lock:
-            self._pulled.add(address)
+            self._pulling.add(address)
 
-    def pulling(self, address: str) -> bool:
+    def end_pull(self, address: str, left: str | None):
         with self._lock:
-            return address in self._pulled
+            self._pulling.discard(address)
+            if left:
+                self._left[address] = left
+            else:
+                self._left.pop(address, None)
 
-    def end_pull(self, address: str):
+    def is_pull(self, address: str, hash_: str) -> bool:
+        """Whether a change a page just saw, to the text of `hash_`, is a pull's."""
         with self._lock:
-            self._pulled.discard(address)
+            return address in self._pulling or self._left.pop(address, None) == hash_

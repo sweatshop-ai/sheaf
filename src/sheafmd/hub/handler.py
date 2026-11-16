@@ -1166,8 +1166,8 @@ class Handler:
                 raise EditError(f"This thread moves to one client: Move to {slug} is ticked.")
             words = visibility.newly_ticked(toggled)
             if m is not None and visibility.audience(text) != visibility.audience(new) \
-                    and not self.hub.is_owner(m, e.address, fm):
-                # Who a page is Shared with is its owner's alone, by whatever edit moves the line or its names (9.11).
+                    and not visibility.withdraws_share(text, new) and not self.hub.is_owner(m, e.address, fm):
+                # Who a page is Shared with is its owner's alone, by whatever edit moves the line or its names (9.11); an untick has its own refusal below.
                 raise EditError("Only the owner of this rectoverso can change who it is shared with.")
             if visibility.withdraws_share(text, new):
                 # Withdrawing a Share is its owner's alone, as giving it is (#40), by whatever edit unticks the box:

@@ -89,3 +89,34 @@ def cmd_tells_poll(argv: list[str], out=None, err=None) -> int:
         return EXIT_FAILED
     out(json.dumps(tells))
     return EXIT_OK
+
+
+# ── `sheaf headers`: the headersHelper of the door's MCP entry ───────────────
+
+COMMAND_HELP["headers"] = ("headers [--check NAME]",
+                           "the headers a door write declares itself with (Claude Code's headersHelper); --check: does the MCP entry NAME carry it")
+
+
+def _has_helper(name: str) -> bool:
+    """Whether the MCP entry `name` (as the entry or as a tool name writes it) is the door `sheaf connect` makes for its
+    address and carries the headersHelper."""
+    try:
+        origin = _origin_of_server(name)
+        servers = json.loads(connect.claude_json().read_text(encoding="utf-8"))["mcpServers"]
+        entry = servers[connect.entry_name(origin)]
+        return isinstance(entry.get("headersHelper"), str) and bool(entry["headersHelper"].strip())
+    except (connect.UsageError, OSError, ValueError, KeyError, TypeError, AttributeError):
+        return False
+
+
+def cmd_headers(argv: list[str], out=None, err=None) -> int:
+    out = out or (lambda line="": print(line))
+    p = argparse.ArgumentParser(prog="sheaf headers", usage="sheaf headers [--check NAME]",
+                                description="Print the headers a door write declares itself with, as one JSON object: the "
+                                            "session, the machine and the Remote Control link. Never a token.")
+    p.add_argument("--check", metavar="NAME", help="print nothing; exit 0 when the MCP entry NAME carries this helper, else 1")
+    args = p.parse_args(argv)
+    if args.check is not None:
+        return EXIT_OK if _has_helper(args.check) else EXIT_FAILED
+    out(json.dumps(send.declared()))
+    return EXIT_OK

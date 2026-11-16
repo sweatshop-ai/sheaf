@@ -1,24 +1,37 @@
 import { expect, test } from 'claude-code/testing'
-import { fresh, nextGap, doorOfTool, originOf, shouldPoll, takeNext, tellText, MIN_GAP_MS, MAX_BACKOFF_MS } from './core'
+import { addDoor, fresh, nextGap, doorOfTool, originOf, shouldPoll, takeNext, tellText, MIN_GAP_MS, MAX_BACKOFF_MS } from './core'
 
-test('no polling before the first send, and never two at once', async () => {
+const CHAT = { flag: '--origin', value: 'https://chat.example.com' } as const
+
+test('no polling before the first send, and never two polls of one door at once', async () => {
   const p = fresh()
-  expect(shouldPoll(p, 1_000, 0)).toBe(false)
-  p.origin = { flag: '--origin', value: 'https://chat.example.com' }
-  expect(shouldPoll(p, 1_000, 0)).toBe(true)
-  p.busy = true
-  expect(shouldPoll(p, 1_000, 0)).toBe(false)
+  expect(p.doors.length).toBe(0)
+  const d = addDoor(p, CHAT)!
+  expect(shouldPoll(d, 1_000)).toBe(true)
+  d.busy = true
+  expect(shouldPoll(d, 1_000)).toBe(false)
 })
 
-test('a failure backs the poll off, doubling to five minutes, and a success resets it', async () => {
+test('a failure backs the door off, doubling to five minutes, and the wait is kept per door', async () => {
   const p = fresh()
-  expect(nextGap(p)).toBe(MIN_GAP_MS)
-  p.failures = 1
-  expect(nextGap(p)).toBe(2 * MIN_GAP_MS)
-  p.failures = 30
-  expect(nextGap(p)).toBe(MAX_BACKOFF_MS)
-  p.origin = { flag: '--origin', value: 'https://chat.example.com' }
-  expect(shouldPoll(p, 1_000, 5_000)).toBe(false)
+  const d = addDoor(p, CHAT)!
+  expect(nextGap(d)).toBe(MIN_GAP_MS)
+  d.failures = 1
+  expect(nextGap(d)).toBe(2 * MIN_GAP_MS)
+  d.failures = 30
+  expect(nextGap(d)).toBe(MAX_BACKOFF_MS)
+  d.notBefore = 5_000
+  expect(shouldPoll(d, 1_000)).toBe(false)
+  const other = addDoor(p, { flag: '--origin', value: 'https://second.example.com' })!
+  expect(shouldPoll(other, 1_000)).toBe(true)
+})
+
+test('a tiroir is added once; a second tiroir is added beside it', async () => {
+  const p = fresh()
+  expect(addDoor(p, CHAT)).not.toBeNull()
+  expect(addDoor(p, { ...CHAT })).toBeNull()
+  expect(addDoor(p, { flag: '--server', value: 'sheaf-second_example_com' })).not.toBeNull()
+  expect(p.doors.length).toBe(2)
 })
 
 test('a Tell is submitted when idle, never mid-turn, and after an Esc it waits', async () => {

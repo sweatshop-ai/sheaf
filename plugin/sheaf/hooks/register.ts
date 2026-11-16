@@ -2,12 +2,14 @@
 //
 // Arming rule: a Tell is addressed to the session id that declared itself on a door write (SPEC 9.8), so this module
 // arms the moment this session declares itself, by any route: a Bash `sheaf FILE.md` that printed a tiroir address, or a
-// create, update, reply or resolve of the door's MCP server (the one the headersHelper sends X-Sheaf-Session on). A fork
-// has an id of its own and arms itself that way; it is never armed because its parent was, and it never polls with the
-// parent's id. The poller is armed for one id: when the session id is another one it stops, and an answer that arrives
-// for an id that is no longer the session's is dropped, so its Tells wait at the door for that id.
+// create, update, reply or resolve of the door's MCP server whose entry carries the headersHelper (`sheaf headers`, which
+// sends X-Sheaf-Session; without it the door never learns the id, so that write arms nothing). A fork has an id of its
+// own and arms itself that way; it is never armed because its parent was, and it never polls with the parent's id. Every
+// tiroir the session declared itself to is polled, for that one id, each with its own backoff. The poller is armed for
+// one id: when the session id is another one it stops and forgets its tiroirs, backoff and Tell in flight, and an answer
+// that arrives for an id that is no longer the session's is dropped, so its Tells wait at the door for that id.
 import type { Register } from 'claude-code'
-import { accept, type Door, doorOfTool, followSession, fresh, nextGap, originOf, type Poller, POLL_TIMEOUT_MS, putBack, shouldPoll, takeNext, tellText, type Tell, WAIT_SECONDS } from './core'
+import { accept, addDoor, type Door, type DoorState, doorOfTool, fresh, nextGap, originOf, type Poller, POLL_TIMEOUT_MS, putBack, shouldPoll, takeNext, tellText, type Tell, WAIT_SECONDS } from './core'
 
 /** One long-poll of the door for this session, through the laptop's own `sheaf tells-poll`, so the token stays in the
  *  keyring and never reaches this module. It prints a JSON array of Tells. */
@@ -25,7 +27,6 @@ type Mod = {
   p: Poller
   running: number            // main-loop turns under way
   interrupted: boolean       // the member pressed Esc: nothing goes in until they type again
-  notBefore: number          // no poll before this time
   timer: { cancel: () => void } | null
 }
 
@@ -34,15 +35,16 @@ type Mod = {
 function leave(m: Mod) {
   m.timer?.cancel()
   m.timer = null
-  m.p.origin = null
+  m.p.doors = []
   m.p.armedFor = ''
   m.p.held = []
+  m.p.submittingUntil = 0      // a re-armed session has no Tell in flight; each door's backoff went with its state
 }
 
 /** One Tell per turn: while its turn runs, `running` holds the next one back. */
 async function deliver($: any, m: Mod) {
   const p = m.p
-  if (!p.origin) return
+  if (!p.doors.length) return
   if ((await $.session.id()) !== p.armedFor) return leave(m)
   const t = takeNext(p, m.running === 0, m.interrupted, await $.clock.now())
   if (!t) return
@@ -51,55 +53,79 @@ async function deliver($: any, m: Mod) {
   $.prompt.submit({ text: tellText(t) }).then((r: any) => { if (r?.drop !== undefined) putBack(p, t) }, () => putBack(p, t))
 }
 
-/** One tick: poll when due, then deliver what is held. Each poll is for the session id it was made under, and an
- *  answer that arrives when the session is another is dropped: the Tell stays at the door for the id it was queued for. */
-async function tick($: any, m: Mod, door: Door) {
+/** One poll of one door, for the session id it is made under. An answer that arrives when the session is another is
+ *  dropped: the Tell stays at the door for the id it was queued for. */
+async function pollDoor($: any, m: Mod, d: DoorState) {
   const p = m.p
-  if (!shouldPoll(p, await $.clock.now(), m.notBefore)) return deliver($, m)
   const id = await $.session.id()
   if (id !== p.armedFor) return leave(m)
-  p.busy = true
+  d.busy = true
   try {
-    const tells = await poll($, door, id)
-    if ((await $.session.id()) === id) accept(p, tells)
-    p.failures = 0
+    const tells = await poll($, d.door, id)
+    if ((await $.session.id()) === id && p.doors.includes(d)) accept(p, tells)
+    d.failures = 0
   } catch {
-    p.failures += 1
+    d.failures += 1
   } finally {
-    p.busy = false
-    m.notBefore = (await $.clock.now()) + nextGap(p)
+    d.busy = false
+    d.notBefore = (await $.clock.now()) + nextGap(d)
   }
+}
+
+/** One tick: poll each door that is due, then deliver what is held. */
+async function tick($: any, m: Mod) {
+  const now = await $.clock.now()
+  const due = m.p.doors.filter(d => shouldPoll(d, now))
+  if (!due.length) return deliver($, m)
+  await Promise.all(due.map(d => pollDoor($, m, d)))
   await deliver($, m)
 }
 
-/** Start polling `door`, for the session that has just declared itself and for no other id. */
+/** Start polling for the session that has just declared itself and for no other id: the first tiroir starts the timer,
+ *  a later one is polled by the same timer. */
 async function arm($: any, m: Mod, door: Door) {
-  m.p.origin = door
-  m.p.armedFor = await $.session.id()
-  m.p.session = m.p.armedFor
-  m.timer = $.clock.every(1000, () => tick($, m, door))
+  if (!addDoor(m.p, door)) return false
+  if (!m.timer) {
+    m.p.armedFor = await $.session.id()
+    m.p.session = m.p.armedFor
+    m.timer = $.clock.every(1000, () => tick($, m))
+  }
+  return true
 }
 
 /** Where a session that sent a page polls, kept by session id: a `claude --resume` of it arms the mod again. */
-const doorKey = (session: string) => `door:${session}`
+const doorsKey = (session: string) => `doors:${session}`
 
-/** A session declares itself, by any route, the first time it writes through the door: a `sheaf FILE.md` that printed a
- *  tiroir address, or a create, update, reply or resolve of the door's MCP server. Tells are addressed to the session id
- *  that declared itself, so a fork (an id of its own) arms itself that way and never inherits its parent's door or id:
- *  the poller polls for the one id it armed under. Quiet until then. */
+const isDoor = (d: any): d is Door => d && (d.flag === '--origin' || d.flag === '--server') && typeof d.value === 'string'
+
+/** A door MCP write declares the session only when that server's entry sends the headersHelper's headers: without them
+ *  the door never learns the id, and the mod would poll for a session no Tell was queued for. `sheaf headers --check`
+ *  reads the entry (the mod never reads `.claude.json`). */
+async function sendsSession($: any, door: Door): Promise<boolean> {
+  const r = await $.process.run(['sheaf', 'headers', '--check', door.value], { timeoutMs: 10_000 }).catch(() => null)
+  return r?.exitCode === 0
+}
+
+/** A session declares itself, by any route, each time it writes through a tiroir's door: a `sheaf FILE.md` that printed
+ *  that tiroir's address, or a create, update, reply or resolve of the door's MCP server (when its entry has the
+ *  headersHelper). Tells are addressed to the session id that declared itself, so a fork (an id of its own) arms itself
+ *  that way and never inherits its parent's door or id; every tiroir it declared to is polled, for that one id. Quiet
+ *  until then. */
 async function declare($: any, m: Mod, door: Door | null) {
-  if (!door || m.p.origin) return
-  await arm($, m, door)
-  await $.store.set(doorKey(m.p.armedFor), door)
+  if (!door) return
+  if (m.p.doors.some(d => d.door.flag === door.flag && d.door.value === door.value)) return
+  if (m.p.doors.length && (await $.session.id()) !== m.p.armedFor) return
+  if (!(await arm($, m, door))) return
+  await $.store.set(doorsKey(m.p.armedFor), m.p.doors.map(d => d.door))
 }
 
 export const register: Register = (on) => {
-  const m: Mod = { p: fresh(), running: 0, interrupted: false, notBefore: 0, timer: null }
+  const m: Mod = { p: fresh(), running: 0, interrupted: false, timer: null }
 
   on('tool.call', async ($, e, next) => {
     const door = doorOfTool(String((e as any).tool))
     const done: any = await next(e)
-    if (door && done?.isError !== true) await declare($, m, door)
+    if (door && done?.isError !== true && (await sendsSession($, door))) await declare($, m, door)
     return done
   })
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
@@ -112,8 +138,8 @@ export const register: Register = (on) => {
 
   // A session that declared itself and is resumed (`claude --resume`) keeps its id, so the door still queues for it.
   on('session.start', async ($, e, next) => {
-    const door: any = await $.store.get(doorKey(await $.session.id()))
-    if (door && (door.flag === '--origin' || door.flag === '--server') && typeof door.value === 'string' && !m.p.origin) await arm($, m, door)
+    const doors: any = await $.store.get(doorsKey(await $.session.id()))
+    if (Array.isArray(doors) && !m.p.doors.length) for (const door of doors) if (isDoor(door)) await arm($, m, door)
     return next(e)
   })
 

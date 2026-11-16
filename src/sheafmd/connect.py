@@ -28,6 +28,7 @@ from .hub.auth import TOKEN_PREFIX
 
 SERVICE = "sheaf"
 DOOR_PATH = "/mcp"                  # the tiroir's library door, under its front address
+HEADERS_HELPER = "sheaf headers"    # the entry's headersHelper: names the session on a door write, holds no token (tells_poll.cmd_headers)
 TIMEOUT = 8.0
 _TOKEN = re.compile(re.escape(TOKEN_PREFIX) + r"[A-Za-z0-9_-]{43}")
 
@@ -173,7 +174,8 @@ def add_mcp_entry(origin: str, token: str) -> Path:
     if not isinstance(data, dict) or not isinstance(data.get("mcpServers", {}), dict):
         raise ConnectError(f"{path} is not a Claude Code settings file: nothing was written there.")
     data.setdefault("mcpServers", {})[entry_name(origin)] = {
-        "type": "http", "url": origin + DOOR_PATH, "headers": {"Authorization": f"Bearer {token}"}}
+        "type": "http", "url": origin + DOOR_PATH, "headers": {"Authorization": f"Bearer {token}"},
+        "headersHelper": HEADERS_HELPER}
     write_text_atomic(path, json.dumps(data, indent=2) + "\n", mode=0o600)   # it holds a token: owner only
     return path
 

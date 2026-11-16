@@ -8,7 +8,7 @@ and chat id. What a writer declares is kept as declared and never verified; it n
 import json
 import os
 import threading
-from collections import deque
+from collections import Counter, deque
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
@@ -117,6 +117,8 @@ class WriteLog:
         keeps one (cleaned); then one line of this tiroir's own that says it came by transfer, from `came_from`. Never raises, as
         `add` does not. Returns how many of the carried lines were kept."""
         n = 0
+        with self._lock:
+            held = Counter(self._lines.get(address, ()))      # what the address kept before this call: a carried line matches one of these, once
         for got in lines:
             if not isinstance(got, dict):
                 continue
@@ -126,7 +128,8 @@ class WriteLog:
                         link=declared_link(got.get("link")), chat=clean(got.get("chat")))
             with self._lock:
                 kept = self._lines.setdefault(address, deque(maxlen=self._keep))
-                if line in kept:        # a page that came back brings the lines this address kept when it left: each line is kept once
+                if held[line] > 0:      # a page that came back brings the lines this address kept when it left: each is kept once
+                    held[line] -= 1
                     continue
                 kept.append(line)
                 self._append(line)

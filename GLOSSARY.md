@@ -104,11 +104,11 @@ A member's page of the rectoversos that wait on someone and the ones in progress
 _Avoid_: catalog, index, dashboard
 
 **Sheaf** (of a member):
-A member's browsable tree of folders holding every rectoverso they may open, with or without an issue, and no status; also the product a member reads, tiroir Sheaf, and its sidebar entry. A folder is where the rectoverso lives: its root, then the root's sub-folders; those another member Shared sit apart, under their owner. Not the List: the List says what waits, the Sheaf says where a rectoverso is. The engine and the laptop command carry the same name. (Named the Catalog 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 06; renamed the Sheaf by Thierry during ticket 19; not built.)
+A member's browsable tree of folders holding every rectoverso they may open, with or without an issue, and no status; also the product a member reads, tiroir Sheaf, and its sidebar entry. A folder is where the rectoverso lives: its root, then the root's sub-folders; those another member Shared sit apart, under their owner. Not the List: the List says what waits, the Sheaf says where a rectoverso is. The engine and the laptop command carry the same name. (Named the Catalog 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 06; renamed the Sheaf by the maintainer during ticket 19; not built.)
 _Avoid_: Catalog, list, library, documents
 
 **Rectoverso**:
-One page as a member reads it: a sheet with two sides, the recto the agent writes and the verso where the member answers. What `sheaf FILE.md` sends and what a row of the Sheaf opens. One word, the same in every language, so dictation keeps it. (Named 2026-11-15 by Thierry during wayfinder `sheaf-in-open-webui` ticket 19, replacing ticket 15's product name Recto; not built.)
+One page as a member reads it: a sheet with two sides, the recto the agent writes and the verso where the member answers. What `sheaf FILE.md` sends and what a row of the Sheaf opens. One word, the same in every language, so dictation keeps it. (Named 2026-11-15 by the maintainer during wayfinder `sheaf-in-open-webui` ticket 19, replacing ticket 15's product name Recto; not built.)
 _Avoid_: Recto, a sheaf (for one page), document, note
 
 **Verso**:
@@ -123,11 +123,11 @@ _Avoid_: binding, target
 A tiroir that belongs to a client of the agency and holds only what is client-facing. Its users' brains, chats and private pages are theirs alone: no agent and no member of the agency reads them. The agency's members on it are members like any other, never its administrators. (Decided 2026-11-16, wayfinder `sheaf-in-open-webui` ticket 22; not built.)
 
 **Team comment**:
-A comment the agency's members leave on a client tiroir's rectoverso that the client never sees. It lives on the agency's tiroir, tied to the rectoverso's address, on a team verso beside the client's; it never reaches the client tiroir. (Named 2026-11-16 by Thierry, wayfinder `sheaf-in-open-webui` ticket 22; not built.)
+A comment the agency's members leave on a client tiroir's rectoverso that the client never sees. It lives on the agency's tiroir, tied to the rectoverso's address, on a team verso beside the client's; it never reaches the client tiroir. (Named 2026-11-16 by the maintainer, wayfinder `sheaf-in-open-webui` ticket 22; not built.)
 _Avoid_: internal comment, private comment, team note
 
 **Default tiroir** (of a person):
-The one tiroir a person's pages go to when their root names none: Thierry's is tiroir-tt, Marina's tiroir-0. Each tiroir has its own Sheaf per member; there is no Sheaf across tiroirs, except that the agency's tiroir shows the client tiroirs' rectoversos its members may open. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 04; the exception 2026-11-16, ticket 22; not built.)
+The one tiroir a person's pages go to when their root names none: Alice's is the agency tiroir, Dave's a client tiroir. Each tiroir has its own Sheaf per member; there is no Sheaf across tiroirs, except that the agency's tiroir shows the client tiroirs' rectoversos its members may open. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 04; the exception 2026-11-16, ticket 22; not built.)
 _Avoid_: home tiroir (a rectoverso's home is a path)
 
 **Loose page**:
@@ -158,7 +158,7 @@ _Avoid_: journal, history, audit log
 The action any member ticks on a rectoverso of the assistant James to end his work on its project (SPEC 9.11). It is the one place the core names a deployment's assistant: the hub writes a diagnostics row and, with `[list] stop_dir`, a file the deployment's supervisor reads; stopping is the deployment's, a Layer concern the core only signals.
 
 **Belongs to**:
-The action that answers what an unsure thread belongs to: one box per candidate, `- [ ] Belongs to <slug> (ref <thread>)`, the one word with a slug and a thread (SPEC 9.10; Merge, Deploy and Install take the rest of the line). The slug names whatever the thread belongs to, a client, a project or a team. The boxes are the options of one answer: on the list each is a one-off button named by its slug, and once one is ticked the others are no actions and the hub refuses a second tick (#109); the deployment's mail module moves the thread. (Renamed from Move to by Thierry, 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 20; the code still says Move to until ticket 168.)
+The action that answers what an unsure thread belongs to: one box per candidate, `- [ ] Belongs to <slug> (ref <thread>)`, the one word with a slug and a thread (SPEC 9.10; Merge, Deploy and Install take the rest of the line). The slug names whatever the thread belongs to, a client, a project or a team. The boxes are the options of one answer: on the list each is a one-off button named by its slug, and once one is ticked the others are no actions and the hub refuses a second tick (#109); the deployment's mail module moves the thread. (Renamed from Move to by the maintainer, 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 20; the code still says Move to until ticket 168.)
 _Avoid_: Move to, reassign, client, transfer
 
 **Move** (of a rectoverso):
@@ -186,7 +186,7 @@ The words of a tick box's line that belong to the box: those before the first `:
 _Avoid_: caption, title
 
 **Toggle action**:
-An action a member presses and may release again; today only Share (SPEC 9.10, 9.11), and a tick box on a page (action-buttons 03): something switched on and off is a tick box, something launched once is a button (Thierry, 2026-11-13). On the page its line is a checkbox, `- [ ] Shared with the team` (`- [ ] Share` is read as before), ticked and unticked at once by the box or its label, the whole line, by the rectoverso's owner alone (9.11, 10.11); on the list it stays a blue button with `aria-pressed` (#110).
+An action a member presses and may release again; today only Share (SPEC 9.10, 9.11), and a tick box on a page (action-buttons 03): something switched on and off is a tick box, something launched once is a button (the maintainer, 2026-11-13). On the page its line is a checkbox, `- [ ] Shared with the team` (`- [ ] Share` is read as before), ticked and unticked at once by the box or its label, the whole line, by the rectoverso's owner alone (9.11, 10.11); on the list it stays a blue button with `aria-pressed` (#110).
 _Avoid_: switch
 
 **Pointer** (of a rectoverso):
@@ -213,7 +213,7 @@ How an agent reaches the hub: read a document's threads and its text, reply, res
 _Avoid_: MCP server, plugin
 
 **Agent**:
-One AI client acting for one member: `ChatGPT (Hans)`, `Claude (Hans)`, `tiroir (Hans)`. It reaches the hub through the MCP door with its own MCP token, sees only that member's roots, signs its replies `Client (Member)`, and can be the target of a Tell. `tiroir` names the assistant inside Open WebUI only; ChatGPT reaching the hub through the tiroir connector is still `ChatGPT`.
+One AI client acting for one member: `ChatGPT (Bob)`, `Claude (Bob)`, `tiroir (Bob)`. It reaches the hub through the MCP door with its own MCP token, sees only that member's roots, signs its replies `Client (Member)`, and can be the target of a Tell. `tiroir` names the assistant inside Open WebUI only; ChatGPT reaching the hub through the tiroir connector is still `ChatGPT`.
 _Avoid_: bot, assistant, integration
 
 **MCP token**:

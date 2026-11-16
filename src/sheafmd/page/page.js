@@ -110,9 +110,7 @@ var create = function (ROOT, CFG, opts) {
   var DRAFTS_OF = CFG.proxy ? 'm:' + CFG.member : location.port;
   // On a member's page of a rectoverso whose live session runs on the box, CFG.can holds "box-tell":
   // Tell goes with the comment to /_/comment, the hub drops it for James's window, and James answers in
-  // the thread through the door. The page starts no wait of its own for it (SPEC 9.12). On a rectoverso whose live
-  // session is a member's fork, CFG.can holds "relay-tell" while that fork's relay is connected: Tell goes the
-  // same way, to the relay (9.14).
+  // the thread through the door. The page starts no wait of its own for it (SPEC 9.12).
   var AGENT, AGENT_UC, CAN, canTell, toBox;
   // The byline names who prepared the document. On a page rendered from a session that is the session ("Document
   // prepared by Yusuf"), not the hub's person, and its name brings the session to the front, or opens it again once
@@ -161,22 +159,20 @@ var create = function (ROOT, CFG, opts) {
   });
   function takeAgent() {
     CAN = CFG.can || [];
-    toBox = CAN.indexOf('box-tell') >= 0 || CAN.indexOf('relay-tell') >= 0;
+    toBox = CAN.indexOf('box-tell') >= 0;
     // The session's own name when it has one ("Linnea"), else the agent's display name (SPEC 10.5); on a
     // box rectoverso the member the live session runs as (James), and James on his sheaf with no session yet.
     AGENT = toBox ? upper(liveSession().member) || 'James'
           : (CFG.agent && (CFG.agent.name || CFG.agent.display)) || 'the agent';
     AGENT_UC = AGENT.charAt(0).toUpperCase() + AGENT.slice(1);
-    canTell = CAN.indexOf('relay-tell') >= 0 || CAN.indexOf(toBox ? 'box-tell' : 'deliver') >= 0 ||
+    canTell = CAN.indexOf(toBox ? 'box-tell' : 'deliver') >= 0 ||
               (!toBox && CAN.indexOf('reopen') >= 0) ||
               (!toBox && CAN.indexOf('queue') >= 0);        // an agent: the Tell waits for it (SPEC 9.8)
     takeByline();
   }
   function liveSession() { return (CFG.work && CFG.work.sessions && CFG.work.sessions[0]) || {}; }
-  // Where a member's Tell goes: James's window on the box, or the fork's session through its relay (9.14).
-  function whereTo() {
-    return CAN.indexOf('relay-tell') >= 0 ? AGENT + '’s session on ' + liveSession().host : AGENT + '’s window on the box';
-  }
+  // Where a member's Tell goes: James's window on the box.
+  function whereTo() { return AGENT + '’s window on the box'; }
   function upper(s) { s = String(s || ''); return s.charAt(0).toUpperCase() + s.slice(1); }
   takeAgent();
   // What the hub's answer to /_/doc says of the agent: a rename, or a session that ended, reaches
@@ -403,7 +399,7 @@ var create = function (ROOT, CFG, opts) {
   // only an outage raises and only the hub's return clears.
   var editing = false, hash = CFG.hash, stale = false, dead = false;
   var telling = {}, tellQ = '';
-  // The Tells that wait for an agent (SPEC 9.8, 10.5): thread id -> agent name -> {to, state: queued | seen}. A thread
+  // The Tells that wait for an agent (SPEC 9.8, 10.5): thread id -> agent name -> {to, state: queued | waiting | seen, laptop}. A thread
   // can wait for two agents, and each has its own place. They run nothing, so `telling` does not hold them: the thread
   // shows no spinner and no orange dot, and the line has no clock.
   var waits = {};
@@ -433,7 +429,7 @@ var create = function (ROOT, CFG, opts) {
       var old = was[w.id] && was[w.id][w.to];
       if (since !== undefined && w.state === 'queued' && old && old.state === 'seen' && seenAt[w.id + '\n' + w.to] > since)
         waitAt(w.id, w.to, old);
-      else if (w.state === 'queued' || w.state === 'seen') waitAt(w.id, w.to, { to: w.to, state: w.state });
+      else if (w.laptop || w.state === 'queued' || w.state === 'seen') waitAt(w.id, w.to, { to: w.to, state: w.state, laptop: !!w.laptop });
       else if (w.state === 'working' || w.state === 'waiting') telling[w.id] = true;
     });
     if (since !== undefined) Object.keys(was).forEach(function (id) {        // a Tell queued after the snapshot was written
@@ -854,10 +850,6 @@ var create = function (ROOT, CFG, opts) {
     var live = liveSession(), none = w.live === 'laptop'
       ? 'The live session runs on ' + upper(live.member) + '’s machine, ' + live.host + ': open it there. This hub keeps no copy of it to fork.'
       : 'Nothing to fork from this hub: it keeps no copy of the box’s transcripts.';
-    // Whether a Tell reaches that fork now: its relay connected or not (9.14).
-    if (w.live === 'laptop' && 'relay' in w) h += '<p class="rd-relay">' + esc(w.relay
-      ? 'Tell goes to ' + upper(live.member) + '’s session on ' + live.host + '.'
-      : upper(live.member) + '’s session on ' + live.host + ' is not connected: Tell works again when it is.') + '</p>';
     h += '<h4>Sessions</h4>' + (ss.length ? ss.map(function (x) {
       return '<div class="rd-sess">' + esc(upper(x.member)) + ' on ' + esc(x.host) + ' · ' + esc(utcDate(x.date)) + '</div>';
     }).join('') : '<p class="rd-none">No session yet.</p>') +
@@ -2347,7 +2339,6 @@ var create = function (ROOT, CFG, opts) {
     if (toBox) {
       var c = (j.comments || []).filter(function (x) { return x.id === id; })[0] || byId[id];
       sentBox[id] = { n: ((c && c.replies) || []).length, to: AGENT };
-      if (CAN.indexOf('relay-tell') >= 0) sentBox[id].at = whereTo();
     } else if (j && j.telling) {
       takeTelling(j.telling, false, j.seenSince);
     } else telling[id] = true;
@@ -2362,10 +2353,23 @@ var create = function (ROOT, CFG, opts) {
   // A Tell that waits for an agent: said in the thread, with no spinner and no clock, across a reload and a restart.
   function waitLine(id) {
     return waitList(id).map(function (w) {
-      return '<div class="rd-msg rd-sent rd-waits">' + (w.state === 'seen'
+      return '<div class="rd-msg rd-sent rd-waits' + (w.laptop ? ' rd-waits-laptop' : '') + '" data-state="' + esc(w.state) + '">' + (w.state === 'seen'
         ? esc(w.to) + ' has seen it; its action appears in this thread.'
+        : w.laptop ? (w.state === 'queued'
+            ? 'Queued for ' + esc(w.to) + ': it is listening and takes it at its next call.'
+            : 'Waiting for ' + esc(w.to) + ': it is not listening now. The Tell stays until it comes back; you can cancel it or retarget it to one of your own agents.')
         : 'Waiting for ' + esc(w.to) + ': it sees this the next time you talk to it.') + '</div>';
     }).join('');
+  }
+  // The member's own agents a waiting Tell can go to instead (SPEC 9.8): the targets of the page that are an agent's.
+  function retargets() {
+    return (CFG.targets || []).filter(function (t) { return /^agent:/.test(t.target) && t.target !== targetNow(); });
+  }
+  function retargetButtons(id) {
+    var laptopWait = waitList(id).some(function (w) { return w.laptop && w.state !== 'seen'; });
+    return laptopWait ? retargets().map(function (t) {
+      return '<button class="rd-alt rd-tell" data-a="retarget" data-target="' + esc(t.target) + '" title="Send the Tell to this agent instead">Retarget to ' + esc(t.label) + '</button>';
+    }).join('') : '';
   }
   function fillPopover(id) {
     var c = byId[id], sc = pop.querySelector('.rd-scroll');
@@ -2393,7 +2397,7 @@ var create = function (ROOT, CFG, opts) {
       acts.hidden = sentOf(id);      // a reply or an edit of this thread is out: its buttons wait for the answer
       // The thread's own line already says who works on it or waits for it: the button only cancels.
       acts.innerHTML = telling[id] || waits[id]
-        ? '<button class="rd-alt rd-tell" data-a="cancel-tell" title="Cancel the Tell">Cancel</button>' : '';
+        ? '<button class="rd-alt rd-tell" data-a="cancel-tell" title="Cancel the Tell">Cancel</button>' + retargetButtons(id) : '';
       if (head) head.hidden = sentOf(id);
       pop.appendChild(acts);
       var act = function (e) {
@@ -2401,6 +2405,7 @@ var create = function (ROOT, CFG, opts) {
         var a = t && t.getAttribute('data-a');
         if (!a) return;
         if (a === 'cancel-tell') { cancel(id); return; }
+        if (a === 'retarget') { retarget(id, t.getAttribute('data-target')); return; }
         if (a === 'minimize') { closePopover(); return; }
         if (a === 'status') {
           var opened = c.status !== 'open';
@@ -2586,6 +2591,16 @@ var create = function (ROOT, CFG, opts) {
       // the hub's next snapshot (applyComments).
       if (e.late) off();
       say(notSent(e, 'Cancel'), true);
+    }
+  }
+  // A Tell that waits for a laptop session goes to one of the member's own agents instead (SPEC 9.8). The hub ends the
+  // waiting one and queues the new one; the events that follow draw the thread.
+  async function retarget(id, target) {
+    try {
+      await post('/_/retarget', { id: id, target: target });
+      say('Sent to ' + target.replace(/^agent:/, '') + ' instead.');
+    } catch (e) {
+      say(notSent(e, 'Retarget'), true);
     }
   }
   // ---- dictation (SPEC 10.4, ticket 06) ----------------------------------------
@@ -4383,18 +4398,6 @@ var create = function (ROOT, CFG, opts) {
         touched(d.id);
         say('Tell ' + AGENT + ' failed: ' + (d.error || 'unknown error'), true);
       });
-      // A member's Tell that the fork's relay will not deliver: it expired, or the session did not take it (9.14).
-      live.addEventListener('tell-relay-failed', function (ev) {
-        var d = JSON.parse(ev.data || '{}');
-        touched(d.id);
-        say('Tell ' + AGENT + ' failed: ' + (d.error || 'unknown error'), true);
-      });
-      // A fork's relay connected, or is gone: Tell on the page follows it at once, not at the next /_/doc (#135).
-      live.addEventListener('relay', function () {
-        readDoc().then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
-          if (j && j.ok !== false) takeTarget(j);
-        }).catch(function () {});
-      });
       // A drop for James's window that the hub gave up on: no reply within the Tell wait (#115).
       live.addEventListener('box-failed', function (ev) {
         var d = JSON.parse(ev.data || '{}');
@@ -4418,12 +4421,12 @@ var create = function (ROOT, CFG, opts) {
         delete telling[d.id];
         if (d.agent !== undefined) { waitOff(d.id, d.agent); endedAt[d.id + '\n' + d.agent] = ++seenSeq; }   // a Tell job's end names no agent: it ends no agent's Tell
         touched(d.id);
-        if (waited) cancelSaid(d.id, waited.to, d.seen);
+        if (waited && d.reason !== 'retargeted') cancelSaid(d.id, waited.to, d.seen);     // a Retarget says its own sentence
       });
       // A Tell that waits for an agent (SPEC 9.8, 10.5): queued, listed to the agent, ended by its action reply.
       live.addEventListener('tell-queued', function (ev) {
         var d = JSON.parse(ev.data || '{}');
-        waitAt(d.id, d.agent, { to: d.agent, state: 'queued' });
+        waitAt(d.id, d.agent, { to: d.agent, state: d.state || 'queued', laptop: !!d.laptop });
         queuedAt[d.id + '\n' + d.agent] = ++seenSeq;
         touched(d.id);
       });

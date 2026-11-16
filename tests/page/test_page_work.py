@@ -17,10 +17,10 @@ from sheafmd.source import update_file
 pytestmark = pytest.mark.page
 
 META = re.compile(r'(<script id="rd-edit-meta" type="application/json">)(.*?)(</script>)', re.S)
-ORIGIN = "https://tt.tiroir.me"
+ORIGIN = "https://agency.example.com"
 FORK = f"uvx --from tiroir==0.2.0 tiroir work {ORIGIN}/list/acme/site/plan.md"
-ATTACH = "ssh tiroir-tt -t tmux -S /run/james/tmux.sock attach -t james \\; select-window -t =acme_site"
-BOX = {"id": "6f1c0e9a-2b3d-4c5e-8f70-1a2b3c4d5e6f", "host": "tiroir-tt", "member": "james",
+ATTACH = "ssh agency-tiroir -t tmux -S /run/james/tmux.sock attach -t james \\; select-window -t =acme_site"
+BOX = {"id": "6f1c0e9a-2b3d-4c5e-8f70-1a2b3c4d5e6f", "host": "agency-tiroir", "member": "james",
        "date": "2026-10-28T05:12:03Z"}
 LAPTOP = {"id": "0b9d1e7c-4a2f-4e8b-9c3d-5f6a7b8c9d0e", "host": "alice-laptop", "member": "alice",
           "date": "2026-10-28T09:40:00Z"}
@@ -126,7 +126,7 @@ def test_work_on_this_opens_the_two_ways_and_the_sessions(tab):
            "Needs uv there." in w.inner_text()
     # Newest first, as the front matter lists them, and five at most.
     assert w.locator(".rd-sess").all_inner_texts() == [
-        "James on tiroir-tt · 2026-10-28 05:12 UTC",
+        "James on agency-tiroir · 2026-10-28 05:12 UTC",
         "Alice on alice-laptop · 2026-10-24 08:00 UTC",
         "Alice on alice-laptop · 2026-10-23 08:00 UTC",
         "Alice on alice-laptop · 2026-10-22 08:00 UTC",
@@ -140,7 +140,7 @@ UV_WINDOWS = 'powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/in
 
 
 def test_the_fork_folds_how_to_install_uv_on_a_bare_laptop(tab, context, site):
-    # tt-tiroir#170: a member's laptop may have nothing on it; uv's installer is one line per system, folded.
+    # agency-tiroir#170: a member's laptop may have nothing on it; uv's installer is one line per system, folded.
     context.grant_permissions(["clipboard-read", "clipboard-write"], origin=site.base)
     as_member(tab, work())
     tab.open()
@@ -182,7 +182,7 @@ def test_a_sheaf_with_no_session_on_the_box_offers_no_fork(tab):
 
 
 def test_a_sheaf_live_on_a_laptop_names_its_machine_in_place_of_the_fork(tab):
-    # tt-tiroir#165: the hub offers no fork of a box session while the live one runs on a laptop.
+    # agency-tiroir#165: the hub offers no fork of a box session while the live one runs on a laptop.
     as_member(tab, work(sessions=[LAPTOP, BOX], attach=None, live="laptop", fork=None))
     tab.open()
     open_work(tab.page)
@@ -554,63 +554,3 @@ def test_too_many_codes_says_so_in_the_popover(tab):
     until(lambda: "Too many sign-in codes: wait a few minutes." in tab.page.inner_text("#rd-work"),
           what="the 429 line")
     assert tab.page.locator("#rd-work .rd-code button").is_enabled()
-
-
-# ── a fork's relay (9.14) ─────────────────────────────────────────────────────
-
-def relayed(connected):
-    return {**work(sessions=[LAPTOP, BOX], attach=None, live="laptop", fork=None), "relay": connected}
-
-
-def test_a_fork_with_its_relay_connected_offers_tell_to_its_session(tab):
-    as_member(tab, relayed(True), can=["relay-tell"])
-    tab.open()
-    bodies, others = sent_to_box(tab)
-    comment_form(tab)
-    assert tell_offered(tab.page, "#rd-popover .rd-form") is True
-    tab.page.fill("#rd-popover textarea", "Send the draft to Joey")
-    tab.page.click("#rd-popover .rd-form button.rd-tell")
-    sent = "Sent to Alice’s session on alice-laptop; the answer appears in this thread."
-    until(lambda: sent in tab.page.inner_text("#rd-popover"), what="the sent line in the thread")
-    assert [(b["op"], b.get("ask"), b["tell"]) for b in bodies] == [("add", None, True)]
-    assert others == []
-    open_work(tab.page)
-    assert tab.page.inner_text("#rd-work .rd-relay") == "Tell goes to Alice’s session on alice-laptop."
-
-
-def test_a_fork_whose_relay_is_not_connected_says_so_in_work_on_this(tab):
-    as_member(tab, relayed(False))
-    tab.open()
-    open_work(tab.page)
-    assert tab.page.inner_text("#rd-work .rd-relay") == \
-        "Alice’s session on alice-laptop is not connected: Tell works again when it is."
-
-
-def test_a_relay_that_connects_turns_tell_on_without_a_reload(tab):
-    # The hub's `relay` event (#135): the page reads /_/doc again at once, not at its next check.
-    w, can = relayed(False), []
-    as_member(tab, w, doc_work=w, doc_can=can)
-    tab.open()
-    until(lambda: tab.docs, what="the page's first /_/doc answer")
-    comment_form(tab)
-    assert tell_offered(tab.page, "#rd-popover .rd-form") is False
-    w["relay"], can[:] = True, ["relay-tell"]
-    seen = len(tab.docs)
-    tab.site.hub.entry(DOC).bus.publish("relay", {})
-    until(lambda: len(tab.docs) > seen, what="the /_/doc the relay event asks for")
-    tab.page.keyboard.press("Escape")
-    comment_form(tab)
-    assert tell_offered(tab.page, "#rd-popover .rd-form") is True
-
-
-def test_a_relay_gone_past_its_grace_turns_tell_off_without_a_reload(tab):
-    w, can = relayed(True), ["relay-tell"]
-    as_member(tab, w, can=["relay-tell"], doc_work=w, doc_can=can)
-    tab.open()
-    until(lambda: tab.docs, what="the page's first /_/doc answer")
-    w["relay"], can[:] = False, []
-    seen = len(tab.docs)
-    tab.site.hub.entry(DOC).bus.publish("relay", {})
-    until(lambda: len(tab.docs) > seen, what="the /_/doc the relay event asks for")
-    comment_form(tab)
-    assert tell_offered(tab.page, "#rd-popover .rd-form") is False

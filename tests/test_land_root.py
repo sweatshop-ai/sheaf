@@ -29,10 +29,19 @@ class FakeRepos:
     def clone_dir(self, repo):
         return self.dest
 
-    moved, unmoved = None, []
+    moved, unmoved, slept = None, [], []
 
     def moved_to(self, repo):
         return self.moved
+
+    def page_text(self, repo, path, commit):
+        r = subprocess.run(["git", "-C", str(self.dest), "show", f"{commit}:{path}"], capture_output=True, text=True)
+        return r.stdout if r.returncode == 0 else None
+
+    def sleep_moved(self, repo, to):
+        self.slept.append((repo, to))
+        self.moved = to
+        return True
 
     def install_url(self, repo):
         return self.answer.get("install", "")
@@ -62,7 +71,8 @@ def clone(tmp_path):
     subprocess.run(["git", "clone", "-q", str(bare), str(c)], check=True, capture_output=True)
     git(c, "checkout", "-q", "-b", "dev")
     (c / "a.md").write_text("# A\n")
-    git(c, "add", "a.md")
+    (c / ".sheaf.toml").write_text(f'tiroir = "{HERE}"\n')
+    git(c, "add", "a.md", ".sheaf.toml")
     git(c, "-c", "user.name=a", "-c", "user.email=a@example.com", "commit", "-qm", "a")
     git(c, "push", "-q", "-u", "origin", "dev")
     return c
@@ -229,3 +239,38 @@ def test_no_page_with_a_known_owner_unmoves_nothing(clone):
     h = moved_hub(clone)
     incoming.check_root(h, body(clone, ("a.md", "nobody@example.com", None)), peer=THERE)
     assert h.repos.unmoved == []
+
+
+# ── the toml at the tip names this tiroir (ticket 21 part 2) ─────────────────
+
+def set_toml(clone, text):
+    (clone / ".sheaf.toml").write_text(text)
+    git(clone, "add", ".sheaf.toml")
+    git(clone, "-c", "user.name=a", "-c", "user.email=a@example.com", "commit", "-qm", "toml")
+    git(clone, "push", "-q", "origin", "dev")
+
+
+@pytest.mark.parametrize("text", ['tiroir = "https://other.example"\n', "", 'theme = "x"\n', "not = [valid"])
+def test_a_root_whose_toml_at_the_tip_does_not_name_this_tiroir_is_refused_whole(clone, text):
+    set_toml(clone, text)
+    h = hub(clone)
+    assert incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None))) == (409, {"why": "not_named"})
+
+
+def test_the_toml_naming_this_tiroir_in_another_spelling_is_accepted(clone):
+    set_toml(clone, 'tiroir = "HTTPS://Here.example/"\n')
+    status, _ = incoming.check_root(hub(clone), body(clone, ("a.md", "alice@example.com", None)))
+    assert status == 200
+
+
+def test_a_root_unmoved_by_this_call_goes_back_to_sleep_when_its_toml_does_not_name_this_tiroir(clone):
+    set_toml(clone, 'tiroir = "https://other.example"\n')
+    h = moved_hub(clone)
+    assert incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None)), peer=THERE) == (409, {"why": "not_named"})
+    assert h.repos.unmoved == ["o/r"] and h.repos.slept == [("o/r", THERE)] and h.repos.moved == THERE
+
+
+def test_a_root_with_no_clone_of_the_tip_yet_is_not_judged_by_its_toml(clone):
+    h = hub(clone)
+    h.repos.answer["commit_known"] = False
+    assert incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None))) == (202, {"state": "cloning"})

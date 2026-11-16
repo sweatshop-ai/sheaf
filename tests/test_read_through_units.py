@@ -131,6 +131,7 @@ def test_an_unreachable_client_is_said_and_nothing_older_is_served():
         c.read("acme", member("a", "alice@example.com"), "sheaf")
 
 
-def test_a_client_that_refuses_is_the_answer_of_a_member_with_nothing_to_see():
+def test_a_client_that_refuses_is_a_client_that_does_not_answer():
     c = clients(lambda *a, **k: (404, {}))
-    assert c.read("acme", member("a", "alice@example.com"), "sheaf") == rt.NOTHING
+    with pytest.raises(rt.NotReachable):
+        c.read("acme", member("a", "alice@example.com"), "sheaf")

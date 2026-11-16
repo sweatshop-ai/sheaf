@@ -32,10 +32,6 @@ class NoEmail(Exception):
     """The signed-in member has no e-mail on this tiroir, so no client tiroir can know who is asking."""
 
 
-class Missing(Exception):
-    """The client tiroir has no such page for this member: told as a page that is not there."""
-
-
 AGENCY_KEPT = ("cache-control", "x-content-type-options", "referrer-policy")    # what the agency lets a client's answer say about itself
 
 
@@ -117,31 +113,42 @@ class Clients:
     def read(self, client: str, member, op: str, **fields) -> dict:
         """What `client`'s hub says to `op` for `member`. `as` is the member's own e-mail and nothing a caller wrote; a field named
         `as` or `role` in `fields` is dropped. No answer is `NotReachable` and nothing is kept for the next time."""
-        return self._ask(client, member, "read", {"op": op, **fields}, op == "sheaf")
+        return self._ask(client, member, "read", {"op": op, **fields})
 
     def may_open(self, client: str, member, rest: str) -> bool:
         """Whether `member` may open the page at `rest` on `client`'s hub, as that hub says it. A client that does not answer, or
         refuses, is no."""
         try:
             return self.read(client, member, "open", doc=rest).get("open") is True
-        except (NotReachable, NoEmail, Missing):
+        except (NotReachable, NoEmail):
             return False
 
     def relay(self, client: str, member, op: str, doc: str, **fields) -> dict:
         """The envelope `{status, type, body, nonce}` of `client`'s hub for a page route (`page`, `mount`, `doc`, `writes`) run as
         `member`: `doc` is the address on that hub, `mount` the prefix its page is told under."""
-        return self._envelope(self._ask(client, member, "read", {"op": op, "doc": doc, **fields}, False))
+        return self._envelope(self._ask(client, member, "read", {"op": op, "doc": doc, **fields}))
 
     def comment(self, client: str, member, doc: str, request: dict) -> dict:
         """The envelope of `client`'s hub for a comment write (`request` is the page's own body) run as `member`: it signs it."""
-        return self._envelope(self._ask(client, member, "comment", {"doc": doc, "request": request}, False))
+        return self._envelope(self._ask(client, member, "comment", {"doc": doc, "request": request}))
+
+    @staticmethod
+    def redirect(client: str, headers) -> str:
+        """Where a client's 302 sends the browser, under `Clients/<client>`: only a path on that client's hub that is a page there (a
+        Forward of the client's own, 9.11). A missing, external or doubled address, a path of the hub's own routes or of a `Clients`
+        folder (a second hop) is a client that did not answer as one."""
+        where = headers.get("Location") if isinstance(headers, dict) else None
+        if (not isinstance(where, str) or not re.fullmatch(r"/[^\s\\?#]*", where) or where.startswith(("//", "/_/"))
+                or is_clients(where[1:]) or not where[1:] or not _PLAIN_VALUE.fullmatch(where)):
+            raise NotReachable("the client tiroir sent the page somewhere that is not one of its pages")
+        return f"/{ROOT}/{client}{where}"
 
     @staticmethod
     def _envelope(answer: dict) -> dict:
         """`answer` as the envelope it must be (`status` a whole number from 200 to 599 that carries a body, `body` text that encodes, `headers` a table when there are any), or the
         client tiroir did not answer as one."""
         status, body = answer.get("status"), answer.get("body")
-        if (not isinstance(status, int) or isinstance(status, bool) or not 200 <= status <= 599 or status in (204, 304)
+        if (not isinstance(status, int) or isinstance(status, bool) or not 200 <= status <= 599 or status in (204, 304) or 300 <= status <= 399 and status != 302
                 or not isinstance(body, str) or not isinstance(answer.get("headers", {}), dict) or answer.get("type") not in ("html", "json")):
             raise NotReachable("the client tiroir did not answer as one")
         try:
@@ -150,7 +157,7 @@ class Clients:
             raise NotReachable("the client tiroir did not answer as one") from None
         return answer
 
-    def _ask(self, client, member, verb, fields, soft) -> dict:
+    def _ask(self, client, member, verb, fields) -> dict:
         email = member.email
         if not email:
             raise NoEmail("this tiroir does not know your e-mail address, so a client tiroir cannot tell who is asking")
@@ -163,9 +170,9 @@ class Clients:
             if not isinstance(answer, dict):
                 raise NotReachable(f"the client tiroir {client} did not answer as a channel does")
             return answer
-        if soft:                 # a refusal is the answer of a member with nothing to see: no oracle for "has an account"
-            return {k: type(v)() for k, v in NOTHING.items()}
-        raise Missing("no such page")
+        # Not a 200: the channel refused (a wrong token or source, no `read` scope) or the client failed. Never an empty folder: that
+        # is what a member with nothing to see is told, and the client already answers that with a 200 (so no oracle for "has an account").
+        raise NotReachable(f"the client tiroir {client} did not answer")
 
 
 def member_for(hub, email):
@@ -227,14 +234,14 @@ def run(handler, member, method: str, route: str, path: str, query: dict, body: 
         return dict(SEEN) if r.status == 404 else {"status": r.status, "type": "json", "body": json.dumps({"error": r.message}), "nonce": None}
     kind = "html" if resp.headers.get("Content-Type", "").startswith("text/html") else "json"
     return {"status": resp.status, "type": kind, "body": resp.body.decode("utf-8", "replace"), "nonce": resp.nonce,
-            "headers": {k: v for k, v in resp.headers.items() if k in KEPT}}
+            "headers": {k: v for k, v in resp.headers.items() if k in KEPT or (resp.status == 302 and k == "Location")}}
 
 
 def relayed(handler, body) -> tuple:
     """(200, envelope) of the `read` ops that run a page route (`ROUTES`)."""
     member, op, doc = served(handler.hub, body.get("as")), body.get("op"), body.get("doc")
-    if member is None or not isinstance(doc, str) or not isinstance(body.get("mount", ""), str):
-        return 200, dict(SEEN)
+    if member is None or not isinstance(doc, str) or not isinstance(body.get("mount", ""), str) or is_clients(doc):
+        return 200, dict(SEEN)             # a `Clients` address is this hub's own read-through, never passed on to its clients (9.9)
     method, route = ROUTES[op]
     if route == "_page":
         return 200, run(handler, member, method, route, roots_mod.url_path(doc), {}, {}, body.get("mount", ""))
@@ -244,7 +251,7 @@ def relayed(handler, body) -> tuple:
 def comment_answer(handler, body) -> tuple:
     """(200, envelope) of the `comment` verb: the member's comment written on this hub, signed with their name here."""
     member, request = served(handler.hub, body.get("as")), body.get("request")
-    if member is None or not isinstance(request, dict) or not isinstance(body.get("doc"), str):
+    if member is None or not isinstance(request, dict) or not isinstance(body.get("doc"), str) or is_clients(body["doc"]):
         return 200, dict(SEEN)
     if request.get("tell"):               # the channel opens reading and commenting, nothing that asks an agent here
         return 200, {"status": 400, "type": "json", "body": json.dumps({"error": "Tell is not offered on a comment from another tiroir"}),

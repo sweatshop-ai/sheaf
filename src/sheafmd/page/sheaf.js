@@ -462,6 +462,7 @@ function create(ROOT, opts) {
   ROOT.addEventListener('click', onClick, true);
   filter.addEventListener('input', show);
   show();
+  if (data.clients_line) say(data.clients_line);       // no Clients folder for a member with no e-mail: the line says why
   return {
     unmount: function () { gone = true; if (handle) handle.unmount(); handle = null; ROOT.removeEventListener('click', onClick, true); },
     dirty: function () { return !!handle && handle.dirty(); },

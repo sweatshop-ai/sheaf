@@ -140,11 +140,17 @@ def tree(rows: list[dict]) -> list[dict]:
     return done(nodes)
 
 
-def with_clients(out: dict, names: list) -> dict:
+NO_EMAIL = "There is no Clients folder for you: this tiroir does not know your e-mail address, so a client tiroir cannot tell who is asking."
+
+
+def with_clients(out: dict, names: list, email: str = "x") -> dict:
     """`out` (the member's own Sheaf) with the agency's `Clients` node: one child per client tiroir from the config, drawn whether or not
-    its rows were asked for yet, since the rows are read through when the node is opened and never kept (9.9)."""
+    its rows were asked for yet, since the rows are read through when the node is opened and never kept (9.9). A member with no
+    e-mail has no node, only `clients_line`, the sentence that says why."""
     if not names:
         return out
+    if not email:
+        return {**out, "clients_line": NO_EMAIL}
     node = {"name": "Clients", "path": "Clients", "clients": True,
             "children": [{"name": n, "path": f"Clients/{n}", "client": n, "children": []} for n in names]}
     return {**out, "clients": names, "tree": [*out["tree"], node]}

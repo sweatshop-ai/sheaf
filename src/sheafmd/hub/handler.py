@@ -960,7 +960,7 @@ class Handler:
             raise Refuse(404, "no such page")
         sheaf = sheaf_view.data(self.hub, req.member, self._titles, req.query.get("view", ""))
         if self.hub.clients is not None:
-            sheaf = sheaf_view.with_clients(sheaf, self.hub.clients.names())
+            sheaf = sheaf_view.with_clients(sheaf, self.hub.clients.names(), req.member.email)
         return _json(200, {"kind": "sheaf", "title": "Sheaf", "version": self.hub.version, **self.hub.mount_fields(), "sheaf": sheaf},
                      {"X-Content-Type-Options": "nosniff"})
 
@@ -1011,14 +1011,29 @@ class Handler:
         except readthrough.NotReachable:
             self._knock(req, client, op, "unreachable")
             raise Refuse(502, "This client tiroir is not reachable now.") from None
-        except readthrough.Missing:
-            raise Refuse(404, "no such document") from None
         self._knock(req, client, op, str(env.get("status")))
         status, body, kept = env["status"], env["body"], readthrough.kept_headers(env.get("headers"))
+        if status == 302:                    # the client's own Forward: the browser asks this hub for the new address
+            try:
+                return Response(302, {"Location": readthrough.Clients.redirect(client, env.get("headers")), "Cache-Control": "no-store"})
+            except readthrough.NotReachable:
+                self._knock(req, client, op, "unreachable")
+                raise Refuse(502, "This client tiroir is not reachable now.") from None
+        if op == "mount" and status == 200:   # the front compares these with its own: the client's build is not this hub's
+            body = self._own_build(body)
         if env.get("type") == "html":
             own = auth.new_nonce()           # the client's nonce is never this origin's: only its own page script runs here
             return _html(status, readthrough.adopt(body, env.get("nonce"), own), own, kept)
         return Response(status, {"Content-Type": "application/json", **kept}, body.encode("utf-8"))
+
+    def _own_build(self, body: str) -> str:
+        try:
+            got = json.loads(body)
+        except ValueError:
+            got = None
+        if not isinstance(got, dict):
+            raise Refuse(502, "This client tiroir is not reachable now.")
+        return json.dumps({**got, "version": self.hub.version, **self.hub.mount_fields()})
 
     def _knock(self, req: Req, client: str, op: str, status: str) -> None:
         """One diagnostics line per call to a client tiroir: the client, the op, the member's id and the status. Never an address, a

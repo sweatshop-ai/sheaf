@@ -655,7 +655,10 @@ class Commits:
     def _renames(folder: Path, base: str, theirs: str, top: Path) -> list:
         """The pages the remote renamed between `base` and `theirs`, `[(old, new)]` as absolute paths: git's own detection
         (`-M`), `.md` files only. A file copied or changed beyond what git calls a rename is no rename."""
-        out = _git(folder, "diff", "--name-status", "-M", "--diff-filter=R", "-z", base, theirs).stdout.split("\0")
+        try:
+            out = _git(folder, "diff", "--name-status", "-M", "--diff-filter=R", "-z", base, theirs).stdout.split("\0")
+        except (subprocess.SubprocessError, OSError):
+            return []                                  # no Forward is worth a pull that never starts: the Write log's window would stay open
         found, i = [], 0
         while i + 2 < len(out) and out[i].startswith("R"):
             old, new = out[i + 1], out[i + 2]

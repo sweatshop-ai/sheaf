@@ -192,6 +192,65 @@ def test_the_versions_of_a_root_that_keeps_them_inside_do_not_stay_under_the_old
         assert inside.texts(OLD) == []
 
 
+def test_the_drop_waits_for_the_file_lock_a_save_takes_and_finds_what_the_save_wrote(two):
+    import threading
+    import time
+
+    from sheafmd.source import file_lock
+    held, release = threading.Event(), threading.Event()
+    with two.active():
+        path = two.hub.file(OLD)
+        text = path.read_text(encoding="utf-8")
+
+    def writer():
+        with file_lock(path):
+            held.set()
+            release.wait(5)
+            path.write_text(text + "\nWritten under the file lock.\n", encoding="utf-8")
+
+    def edit(verb, res):
+        two.link.between = None
+        threading.Thread(target=writer, daemon=True).start()
+        assert held.wait(5)
+        threading.Timer(0.3, release.set).start()
+    two.link.between = edit
+    got = move(two)
+    time.sleep(0.1)
+    assert got.status == 409 and "changed" in got.json()["say"]
+    with two.active():
+        assert "Written under the file lock." in two.hub.file(OLD).read_text(encoding="utf-8")
+        assert two.hub.forwards.follow(OLD) is None
+
+
+def test_a_page_already_marked_moving_is_refused_as_busy_and_its_mark_is_left_to_the_move_that_made_it(two):
+    with two.active():
+        two.hub.moving.add(OLD)
+    got = move(two)
+    assert got.status == 409 and "being moved" in got.json()["say"]
+    with two.active():
+        assert OLD in two.hub.moving
+        assert two.hub.file(OLD).exists() and two.hub.forwards.follow(OLD) is None
+    assert two.link.calls == []
+
+
+def test_a_tell_on_the_old_address_of_a_page_that_went_to_another_tiroir_is_not_followed_to_an_address_there(two):
+    moved(two)
+    looked = []
+
+    class Stop(Exception):
+        pass
+
+    def entry(address):
+        looked.append(address)
+        raise Stop
+    with two.active():
+        two.hub.tell._entry = entry
+        member = two.hub.proxy.members[ALICE_A]
+        with pytest.raises(Stop):
+            two.hub.tell.queue_agent(OLD, "c1", member)
+    assert looked == [OLD]
+
+
 # ── a move that does not complete leaves everything as it was ────────────────
 
 def test_a_link_that_is_down_leaves_the_page_and_every_store_as_they_were(two):

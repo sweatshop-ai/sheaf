@@ -25,7 +25,7 @@ La boîte reprend donc leur composition : grand cadre arrondi, texte en haut, ro
 | Défilement | Le fil s'ouvre sur le dernier message et défile vers le haut |
 | Curseur | Déjà dans le champ à l'ouverture, sur desktop et sur téléphone |
 | Sélection sur desktop | En mode Comment, la boîte s'ouvre directement |
-| Sélection sur téléphone | Appui long = un mot, appui long + glisser = une phrase (choix de Thierry, 2026-11-10) ; au relâchement du doigt la boîte s'ouvre, le curseur dans le champ, dans cet événement ; pas de poignées à déplacer après coup, ni de menu Copier natif ; le délai de 600 ms n'ouvre rien tant qu'un doigt est posé ; un toucher à côté d'une sélection n'ouvre rien ; la barre ne reste que pour une sélection refusée ; en repli, un toucher dans la zone vide de la boîte met le curseur dans le champ |
+| Sélection sur téléphone | Appui long = un mot, appui long + glisser = une phrase (choix de Alice, 2026-11-10) ; au relâchement du doigt la boîte s'ouvre, le curseur dans le champ, dans cet événement ; pas de poignées à déplacer après coup, ni de menu Copier natif ; le délai de 600 ms n'ouvre rien tant qu'un doigt est posé ; un toucher à côté d'une sélection n'ouvre rien ; la barre ne reste que pour une sélection refusée ; en repli, un toucher dans la zone vide de la boîte met le curseur dans le champ |
 | Copier | Avec le champ vide, Ctrl+C copie le passage sélectionné ; sur téléphone la boîte s'ouvre à la place du menu Copier, la citation de la boîte reste |
 | Modes | Un seul bouton à bascule toujours visible : « Edit (E) » en mode Comment, « Save (Ctrl+S) » en mode Edit (« Edit » et « Save » au toucher), même taille, bord de la couleur de la boule d'état (gris, vert, rouge) ; Save enregistre puis revient en mode Comment, et reste en Edit si l'enregistrement échoue ; en Edit, une sélection reste une sélection |
 
@@ -70,10 +70,10 @@ L'agent sait quand un texte est fait pour être copié. Il l'écrit dans un bloc
 | 23 | Les événements « vu » et « annulé » d'un Tell ne nomment pas l'agent : un fil qui attend deux agents les confond | Rien | En cours |
 | 24 | Le test du « moins » lit la valeur d'un champ que la boîte vient de fermer, de temps en temps en CI | Rien | En cours |
 | 25 | Le test « réponse à un fil supprimé revenue dans la boîte d'un nouveau commentaire » dort 300 ms au lieu d'attendre | 04 | Fait (PR 254, merged 9b6a313) |
-| 26 | Après l'envoi d'un message, le fil remonte tout en haut au lieu de rester en bas | 04 | Fait (PR 249 fusionnée par Thierry, main 633d8ea, 2026-11-12) |
+| 26 | Après l'envoi d'un message, le fil remonte tout en haut au lieu de rester en bas | 04 | Fait (PR 249 fusionnée par Alice, main 633d8ea, 2026-11-12) |
 | 27 | une lecture du stockage qui échoue une fois puis réussit vide encore les brouillons de la page | Rien | Fait (PR 262, merged 0ebf621) |
 | 28 | une valeur JSON corrompue dans la clé des brouillons est lue comme vide puis écrasée | Rien | Fait (PR 262, merged 0ebf621) |
-| 29 | une boîte de nouveau commentaire au champ vidé ne se ferme plus quand le stockage refuse la lecture | Rien | Fait (PR 250 merged by Thierry, main 05a995b) |
+| 29 | une boîte de nouveau commentaire au champ vidé ne se ferme plus quand le stockage refuse la lecture | Rien | Fait (PR 250 merged by the maintainer, main 05a995b) |
 | 30 | un brouillon que l'utilisateur a vidé pendant une lecture refusée revient quand la lecture réussit | Rien | Fait (PR 263, merged 1c4f333) |
 | 31 | Le test « une réponse d'action met fin à l'attente » lit la ligne d'attente pendant une navigation de la page, de temps en temps en CI | 04 | Fait (PR 255, merged 41678e3) |
 | 32 | Le hub écrit deux lignes `push-failed` pour une sauvegarde dont le dépôt distant est absent, de temps en temps en CI | Rien | Fait |
@@ -82,7 +82,7 @@ L'agent sait quand un texte est fait pour être copié. Il l'écrit dans un bloc
 | 35 | Les hubs construits hors de la fixture `hub` ne règlent pas leur pusher à la fin du test, et une ligne `push-failed` peut tomber dans le test suivant | 32 | Fait (PR 256, merged 302211e) |
 | 36 | La limite de 30 s du relais de dictée ne couvre ni la résolution du nom ni l'établissement de la connexion | Rien | Fait (PR 272, merged b45caf3) |
 | 37 | Le `Timer` de `_call` (dictée) peut encore être dans `cut()` quand `_call` rend la main | Rien | Fait (PR 272, merged b45caf3) |
-| 38 | `tests/test_isolation.py::test_the_hub_that_test_started_was_stopped_when_it_ended` échoue de temps en temps en CI | Rien | Fait (PR 253 merged by Thierry, main 3b7a6cc; main CI run 43281135217 3/3 green; PR runs 43247947522 attempts 1 and 2 (6bad373), 43278368964 (35fb054) |
+| 38 | `tests/test_isolation.py::test_the_hub_that_test_started_was_stopped_when_it_ended` échoue de temps en temps en CI | Rien | Fait (PR 253 merged by the maintainer, main 3b7a6cc; main CI run 43281135217 3/3 green; PR runs 43247947522 attempts 1 and 2 (6bad373), 43278368964 (35fb054) |
 | 39 | Le groupe xdist des fichiers `IN_ORDER` repose sur deux internes de xdist, et `pytest-xdist>=3.6` n'a pas de borne haute | Rien | Fait (PR 258, merged 0455284) |
 | 40 | `waiting.take` publie `tell-seen` avant d'écrire `tells.json`, et l'instantané des attentes lit le fichier sans le verrou | Rien | Fait (PR 280, merge 062f3a5) |
 | 41 | Le nom de l'agent dans les événements d'un Tell ne concorde pas avec `tell-queued` après un renommage, ni pour une ligne écrite avant le ticket 23 | Rien | Fait (PR 280, merge 062f3a5) |
@@ -93,7 +93,7 @@ L'agent sait quand un texte est fait pour être copié. Il l'écrit dans un bloc
 | 46 | Une touche refusée pendant une sauvegarde dans un `textarea` ou un `input` de `main` est dite par le toast mais ne laisse aucune marque | Rien | Fait (PR 287, merge 050b878) |
 | 47 | Quand le pilote Playwright de la session se fige, chaque test de page suivant attend ses 300 s, et le job va jusqu'à ses 60 min sans rien nommer | Rien | Fait |
 | 48 | Un deuxième Annuler pendant que la requête du premier est en route remplace les places gardées du premier par `{}` : l'événement tardif du premier ne dit plus « had already seen it » | Rien | Fait (PR 283, merged as 2a89ed3) |
-| 49 | Le test « un document déjà ouvert dans un onglet n'est pas rouvert » échoue en CI sans dire pourquoi le premier `sheaf open` n'a pas ouvert de navigateur | Rien | Fait (PR 264 merged by Thierry, main 4e35ed7) |
+| 49 | Le test « un document déjà ouvert dans un onglet n'est pas rouvert » échoue en CI sans dire pourquoi le premier `sheaf open` n'a pas ouvert de navigateur | Rien | Fait (PR 264 merged by the maintainer, main 4e35ed7) |
 | 50 | `threadKeep` et `taken()` perdent un effacement quand la lecture du stockage est refusée : une réponse que le hub a prise peut redevenir « not sent » et inviter un doublon | Rien | Fait (PR 281 merged as 76284b4) |
 | 51 | L'effacement gardé en mémoire par le ticket 30 ne quitte le stockage qu'avec la prochaine écriture : un rechargement avant elle, ou un autre onglet, offre de nouveau l'entrée vidée | Rien | Fait (PR 281 merged as 76284b4) |
 | 52 | Le test de la case tapée dans un bloc dont la sauvegarde est fusionnée échoue après 53 s, puis le pilote Playwright ne répond plus | Rien | Bloqué (PR 267 + next sighting) |
@@ -127,4 +127,4 @@ L'agent sait quand un texte est fait pour être copié. Il l'écrit dans un bloc
 ## Ce qui reste ouvert
 
 - **Transcription sur un hub local :** sans Open WebUI, il faudra décider d'où elle vient. La question se posera au ticket 06.
-- **Arrivée sur tiroir-tt :** elle passe par une montée de version du hub, faite par le track action-list après la fusion du ticket 04.
+- **Arrivée sur agency-tiroir :** elle passe par une montée de version du hub, faite par le track action-list après la fusion du ticket 04.

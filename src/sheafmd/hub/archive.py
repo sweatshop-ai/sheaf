@@ -235,21 +235,30 @@ class Archive:
         return sorted(out, key=lambda r: (-r["deleted_at"], r["rel"]))
 
     def restore_trash(self, root, ident: str) -> str:
-        """Put a trashed page back at its old address; refused (`Taken`) when a page is there, never overwritten."""
+        """Put a trashed page back at its old address; refused (`Taken`) when a page is there, also when one comes in while this runs, and never overwritten."""
         stamp, _, rel = ident.partition("/")
         if not stamp.isdigit() or not rel or any(p in ("", ".", "..") for p in rel.split("/")):
             raise KeyError(ident)
         src = Path(root.path) / TRASH / stamp / rel
         if not os.path.lexists(src) or not stat.S_ISREG(os.lstat(src).st_mode):
             raise KeyError(ident)
-        with state.file_locked("loose-keep.lock"):
-            dest = Path(root.path) / rel
+        dest = Path(root.path) / rel
+        # The file lock of the address first (the hub's lock order: a file lock, then the state stores'). A door create takes no
+        # lock, only a link that fails when the name is taken: so the move here is a link too, never a rename, which would
+        # replace a page that came in between the check and the move.
+        with file_lock(dest), state.file_locked("loose-keep.lock"):
             if os.path.lexists(dest):
                 raise Taken(rel)
             for part in reversed(Path(rel).parents):
                 if str(part) != ".":
                     os.makedirs(Path(root.path) / part, mode=0o700, exist_ok=True)
-            os.rename(src, dest)            # rename, not replace: a page that came in between is not overwritten
+            try:
+                os.link(src, dest)
+            except FileExistsError:
+                raise Taken(rel) from None
+            except OSError as e:
+                raise loose.Refused(f"the page could not be put back ({e.strerror})") from None
+            os.unlink(src)
         loose.stamp(root.path, SEEN, {rel: self.hub.clock()})
         with contextlib.suppress(OSError):
             for p in Path(rel).parents:

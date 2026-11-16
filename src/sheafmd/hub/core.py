@@ -548,6 +548,10 @@ class Hub:
         meta = {"doc": e.address, "root": e.root_id, "boot": self.boot, "version": self.version,
                 "service": self.service, "me": self.person,
                 "agent": None, "can": [], "lines": {}, "seen": {}}
+        if repo := self.clone_of(e.address):
+            # The branch this page is read on, recorded with the render its `hash` comes from: its save carries it back
+            # and a switch since is refused (SPEC 14). `_fresh_meta` keeps it, whatever HEAD is when the page is sent.
+            meta["branch"] = self._repos.head_of(repo)
         log = []
         scope = self._image_scope(root, e.address)
         # The link rule is a warning for whoever renders the document, said once: the hub's
@@ -679,8 +683,8 @@ class Hub:
         meta["actions"] = self.actions(e, member, text) if h == meta.get("hash") else []
         if line := self.read_only_line(e.address):
             meta["readonly"], meta["why_readonly"] = True, line
-        elif repo := self.clone_of(e.address):
-            meta["branch"] = self._repos.head_of(repo)      # the branch this page is read on: its save carries it back (SPEC 14)
+        if "branch" in meta and meta.get("readonly"):
+            del meta["branch"]                  # a read-only page saves nowhere: it carries no branch to save on
         if member is None:
             meta["seen"] = self.seen.get(e.address)
             v = self.tell.view(e.address)

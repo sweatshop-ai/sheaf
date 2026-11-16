@@ -26,10 +26,11 @@ def all_routes(handler):
             for m, (name, who, _fn) in methods.items()]
 
 
-def test_only_the_door_accepts_a_token_and_reads_its_own_body(browser):
+def test_only_the_door_and_whoami_accept_a_token_and_only_the_door_reads_its_own_body(browser):
     door_routes = [(m, p) for m, p, _, who in all_routes(browser.handler)
                    if who is not OPEN and (who.token or who.raw_body)]
-    assert sorted(door_routes) == [("POST", "/_/mcp"), ("POST", "/_/transcribe")]     # the door, and the recording the relay takes (8.5)
+    # the door, the recording the relay takes (8.5), and the one question a door in front of the hub asks of a token (9.7)
+    assert sorted(door_routes) == [("GET", "/_/whoami"), ("POST", "/_/mcp"), ("POST", "/_/transcribe")]
     assert not browser.handler.routes["/_/transcribe"]["POST"][1].token
     who = browser.handler.routes["/_/mcp"]["POST"][1]
     assert who is DOOR and who.token and who.raw_body

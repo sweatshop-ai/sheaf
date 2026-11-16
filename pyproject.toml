@@ -17,6 +17,7 @@ dependencies = [
     "beautifulsoup4>=4.12",
     "pillow>=10",
     "fonttools[woff]>=4.50",
+    "keyring>=25",              # `sheaf connect` keeps a laptop's token in the login keyring
 ]
 
 [project.scripts]

@@ -373,8 +373,9 @@ class Door:
         if caller.token is None or caller.token.client is None:
             return
         try:
+            place, declared = written_from(caller)
             targets.note_write(self.hub, address, caller.token, self._member(caller),
-                               session=written_from(caller)[1].get("session") if written_from(caller)[0] == "laptop" else None)
+                               session=declared.get("session") if place == "laptop" else None)
         except Exception:
             self.hub.record_exception("target-failed", address)
 

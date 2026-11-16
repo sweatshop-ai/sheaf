@@ -1761,11 +1761,11 @@ class Handler:
             targets.pick(self.hub, e.address, req.member, target)
         except targets.Refused as r:
             raise Refuse(400, str(r)) from None
-        self.hub.session_tells.end(e.address, cid, "cancelled", member=req.member, only_member=True, reason="retargeted")
-        try:
+        try:                                    # queued first: a refused one leaves the Tell where it waits
             self.hub.tell.start_member_tell(e.address, cid, req.member, held=self._page_hash(req))
         except JobRefused as r:
             raise Refuse(r.status, r.message) from None
+        self.hub.session_tells.end(e.address, cid, "cancelled", member=req.member, only_member=True, reason="retargeted")
         return _ok()
 
     def _seen(self, req: Req) -> Response:

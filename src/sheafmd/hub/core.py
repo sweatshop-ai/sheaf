@@ -199,7 +199,7 @@ class Hub:
         # Real path of every CONFIGURED private root -> id of the member whose it is: recorded before any validation,
         # whether the root registers or is refused, and never shrunk (`place.in_private`, SPEC 9.11 rule A).
         self._private_paths: dict[str, str] = {}
-        self.repos = None           # the clones of the repos whose pages are reported (13): `hub.repos.Repos` where the tiroir makes them
+        self._repos = None          # the clones of the repos whose pages are reported (13): `hub.repos.Repos` where the tiroir makes them
         self._private_ids: dict[tuple, str] = {}    # (st_dev, st_ino) of each, so a spelling in another case is the same folder
         self._private_by_identity: set[str] = set()     # ids of roots whose folder is a private one, spelled otherwise
         self._private_good: set[str] = set()       # those that registered: placement only, never privacy
@@ -341,6 +341,37 @@ class Hub:
             for _, f in sorted({lock_key(f): f for f in files}.items()):
                 held.enter_context(file_lock(f))
             yield
+
+    @property
+    def repos(self):
+        return self._repos
+
+    @repos.setter
+    def repos(self, repos):
+        """The clone store: it registers the clones it serves in this hub's registry, moves a clone's HEAD as a pull moves its
+        files (`Commits.moved`), and a clone already registered (a restart) gets its token for git again (SPEC 14)."""
+        self._repos = repos
+        if repos is not None:
+            repos.roots = self.roots
+            repos.mover = self.commits.moved
+            repos.holding = self.commits._repo_lock
+            for root in self.roots.all():
+                if root.clone:
+                    repos.credential(root.clone)
+
+    def clone_of(self, address: str) -> str:
+        """The repo whose clone serves `address`, or "" for any other page."""
+        root = self.roots.get(roots_mod.Address.parse(address).root)
+        return root.clone if root is not None and self._repos is not None else ""
+
+    def read_only_line(self, address: str) -> str:
+        """Why the page at `address` may not be written, in one sentence naming the `.sheaf.toml` line that would change
+        it; "" for a page that may be written. A page of a repo's clone is read-only while the clone has no save branch
+        (no `dev`, and no branch the repo's `.sheaf.toml` names) or its HEAD is not on it (SPEC 14)."""
+        repo = self.clone_of(address)
+        if not repo:
+            return ""
+        return self._repos.read_only_line(repo)
 
     def committed(self, address: str, member=None, what: str = "edit", by: str | None = None,
                   gone: str | None = None, author: Author | None = None):
@@ -646,6 +677,8 @@ class Hub:
         # so none are drawn on the old text meanwhile (10.11).
         h, text = e.live.current()
         meta["actions"] = self.actions(e, member, text) if h == meta.get("hash") else []
+        if line := self.read_only_line(e.address):
+            meta["readonly"], meta["why_readonly"] = True, line
         if member is None:
             meta["seen"] = self.seen.get(e.address)
             v = self.tell.view(e.address)
@@ -994,7 +1027,9 @@ class Hub:
         root = self.roots.get(at.root)
         if root is None or not at.plain:
             return []
-        mine = [m for m in members if self.owns(m, root) or self.shared_with(m, root, address)]
+        # A clone the tiroir serves is a shared root: any member reaches it, and each page is theirs by `judged` (SPEC 14).
+        shared = bool(root.clone) and self._repos is not None
+        mine = [m for m in members if shared or self.owns(m, root) or self.shared_with(m, root, address)]
         if mine and (private := place.private_member(self, address)) is not None:
             mine = [m for m in mine if m.id == private]       # rule A: a private root's file is its member's alone
         return mine if mine and self.roots.lookup(root.path / at.rel) == root else []
@@ -1067,6 +1102,7 @@ class Hub:
         `owner` and its issue's assignees name no other owner there."""
         if (loose := self.loose_owner(address)) is not None:
             return loose == member.id
+        fm = self.clone_fm(address, fm)
         return bool(visibility.owner_of(fm, [member], self.assignees(address, fm)))
 
     def judged_for(self, member, address: str, fm: dict, assignees):
@@ -1075,6 +1111,22 @@ class Hub:
         if (loose := self.loose_owner(address)) is not None and loose != member.id:
             return {k: v for k, v in fm.items() if k != "owner"}, None
         return fm, assignees
+
+    def clone_fm(self, address: str, fm: dict) -> dict:
+        """`fm` as a page of a clone is judged on it, by every door alike: a clone is a shared root, so a page that names
+        no owner has the one its first render report recorded, never written into the file, and is its owner's alone
+        unless its front matter says otherwise; a page with neither a record nor an owner opens to nobody (SPEC 14).
+        `fm` itself for a page of any other root."""
+        at = roots_mod.Address.parse(address)
+        root = self.roots.get(at.root)
+        if root is None or not root.clone or self._repos is None:
+            return fm
+        fm = dict(fm)
+        if not fm.get("owner") and (owner := self._repos.owner_of(root.clone, at.rel)) is not None:
+            fm["owner"] = owner
+        if not fm.get("visibility"):
+            fm["visibility"] = "owner"
+        return fm
 
     def judged(self, address: str):
         """(front matter, assignees) of the rectoverso at `address`, what its visibility is judged on: the front
@@ -1104,6 +1156,7 @@ class Hub:
             self._front[kept] = (key, fm, assignees)
             if self.private_roots:
                 place.private_member(self, address, fm, place.opened_private(self, op))   # remembered whoever read the file first (rule A)
+        fm = self.clone_fm(address, fm)
         return fm, assignees
 
     def last_judged(self, address: str):
@@ -1147,6 +1200,7 @@ class Hub:
     def may_open(self, member, address: str, fm: dict, opened=place.UNJUDGED) -> bool:
         """Whether `member` may open the rectoverso at `address` whose front matter is `fm`, a text read under its lock
         (9.11): as `visible` judges the file on disk, with `projects.toml`'s grant (8.12)."""
+        fm = self.clone_fm(address, fm)
         private = place.private_member(self, address, fm, opened)
         if private is not None and private != member.id:        # rule A
             return False
@@ -1174,7 +1228,7 @@ class Hub:
         if self.proxy is None:
             return False
         def opens(member, text):
-            return visibility.effective(visibility.front_matter(text)) == "project" or self.opened_by_line(member, address, text)
+            return visibility.effective(self.clone_fm(address, visibility.front_matter(text))) == "project" or self.opened_by_line(member, address, text)
         return any(opens(m, new) and not opens(m, old) for m in self.proxy.members.values())
 
     def opened_by_line(self, member, address: str, text: str | None = None) -> bool:

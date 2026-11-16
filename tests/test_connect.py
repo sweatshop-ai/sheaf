@@ -260,3 +260,17 @@ def test_a_computer_with_no_keyring_is_told_so():
             connect.SystemStore()
     finally:
         keyring.set_keyring(before)
+
+
+def test_the_token_file_is_owner_only_even_when_it_was_looser(tiroir, keyring, capsys):
+    Path.home().mkdir(parents=True, exist_ok=True)
+    claude_json().write_text("{}")
+    claude_json().chmod(0o644)
+    assert run(capsys, FRONT, laptop(tiroir))[0] == 0
+    assert claude_json().stat().st_mode & 0o777 == 0o600
+
+
+def test_a_redirect_from_the_door_is_not_followed_so_the_token_stays_where_it_was_sent():
+    handler = connect._Refuse3xx()
+    req = connect.urllib.request.Request("https://chat.example.com/mcp", headers={"Authorization": "Bearer x"})
+    assert handler.redirect_request(req, None, 307, "Temporary Redirect", {}, "http://evil.example/") is None

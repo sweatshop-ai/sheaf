@@ -141,7 +141,7 @@ def test_a_file_that_cannot_be_read_is_an_empty_list_of_moves(tmp_path):
 def test_the_file_holds_no_text(tmp_path):
     moves = root_moves.Moves(tmp_path)
     moves.start("o/r", THERE, "id1")
-    assert set(json.loads((tmp_path / "root_moves.json").read_text())["o/r"]) == {"to", "id", "sent", "held"}
+    assert set(json.loads((tmp_path / "root_moves.json").read_text())["o/r"]) == {"to", "id", "sent", "hashes", "forwarded", "held"}
 
 
 # ── the retry clock ──────────────────────────────────────────────────────────

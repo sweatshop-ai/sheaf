@@ -149,3 +149,9 @@ def test_a_reason_the_peer_makes_up_is_held_as_failed_not_stored(move, why):
     assert move.get("o/r")["held"] == {"a.md": "failed"}
     outgoing.send_root(receiver, move, "o/r", THERE, HEAD, [row("a.md")])
     assert move.get("o/r")["held"] == {"a.md": "failed"}
+
+
+@pytest.mark.parametrize("said", [5, ["x"], "x" * 129, "has space", "a\nb", None])
+def test_a_hash_the_peer_makes_up_is_not_stored(move, said):
+    done = outgoing.send_root(Receiver((200, {"pages": {"a.md": {"ok": True, "hash": said}}})), move, "o/r", THERE, HEAD, [row("a.md")])
+    assert done == {"a.md": ""} and move.get("o/r")["hashes"] == {"a.md": ""}

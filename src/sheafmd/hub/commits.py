@@ -44,7 +44,7 @@ from pathlib import Path
 from .. import config, signals
 from ..source import md_hash
 from . import state
-from .repos import CREDENTIALS, token_env
+from .repos import CREDENTIALS, CREDENTIALS_LOCK, token_env
 
 GIT_SECONDS = 20                # a commit's git commands
 BLAME_SECONDS = 2               # a blame the list's page waits for (9.10)
@@ -68,7 +68,9 @@ class Author:
 def _credential(folder: Path):
     """The token function of the clone that holds `folder` (the clone's folder or one beneath it), None for any other."""
     here = os.path.realpath(folder)
-    for clone, token in CREDENTIALS.items():
+    with CREDENTIALS_LOCK:          # a copy: a serving thread adds a clone meanwhile
+        held = list(CREDENTIALS.items())
+    for clone, token in held:
         if here == clone or here.startswith(clone + os.sep):
             return token
     return None

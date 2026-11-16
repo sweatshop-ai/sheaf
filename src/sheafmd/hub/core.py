@@ -354,6 +354,7 @@ class Hub:
         if repos is not None:
             repos.roots = self.roots
             repos.mover = self.commits.moved
+            repos.holding = self.commits._repo_lock
             for root in self.roots.all():
                 if root.clone:
                     repos.credential(root.clone)

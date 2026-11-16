@@ -253,3 +253,26 @@ def test_a_post_from_another_origin_gets_the_hubs_403_and_writes_nothing(edge, p
     assert plan.read_text(encoding="utf-8") == before
     assert [h["x-sheaf-member"] for _, _, h in edge.seen] == [BEA]
     assert hub_rows()[-1]["member"] == BEA
+
+
+def test_a_folder_holding_only_anothers_private_page_is_absent_from_the_sheaf_through_the_proxy_and_the_verifier(edge, work):
+    """The Sheaf view's gap: the handler tests set the member at the handler's edge; here the verifier says who the
+    session is, the proxy sets the header, and the hub's socket answers `/_/mount?sheaf=1` for each."""
+    import dataclasses
+    from test_hub_visibility import HANS, PRIVATE, THIERRY, members
+    hub = edge.hub
+    hub.proxy = dataclasses.replace(hub.proxy, members=members(work).members)
+    edge.front.users = {THIERRY: "user", HANS: "user"}
+    edge.front.sessions = {jwt("thierry"): THIERRY, jwt("hans"): HANS}
+    for rel, text in (("thinkingtoo/hidden/2026-10-28-contract.md", PRIVATE), ("thinkingtoo/tiroir/open.md", "# Open\n")):
+        f = work / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(text, encoding="utf-8")
+        hub.roots.for_document(f)
+    asked = {who: edge.request("GET", "/_/mount?sheaf=1", session=jwt(who)) for who in ("thierry", "hans")}
+    assert [a.status for a in asked.values()] == [200, 200]
+    hans, thierry = asked["hans"].json()["sheaf"], asked["thierry"].json()["sheaf"]
+    assert "work/thinkingtoo/hidden" in str(thierry["tree"])
+    assert "hidden" not in str(hans) and "contract" not in str(hans)
+    assert [r["doc"] for r in hans["rows"] if "thinkingtoo" in r["doc"]] == ["work/thinkingtoo/tiroir/open.md"]
+    assert edge.request("GET", "/_/mount?sheaf=1").status == 401         # no session: the hub sees nothing

@@ -4,6 +4,7 @@ with a line. Everything runs against local bare repos and a fake App, as test_re
 import base64
 import dataclasses
 import json
+import os
 import subprocess
 import threading
 
@@ -475,3 +476,60 @@ def test_a_member_with_no_short_name_who_reported_a_page_can_open_it(hub_repos):
     served(hub_repos)
     assert hub_repos.get(f"/{ADDRESS}", member=BEA).status == 200
     assert hub_repos.get(f"/{ADDRESS}", member=CAL).status in (403, 404)
+
+
+# ── round 4: create, the sparse set, the credentials ─────────────────────────
+
+@NEITHER
+def test_a_create_in_a_read_only_clone_is_refused_for_a_token_bound_to_nobody_and_for_a_member(hub_repos):
+    served(hub_repos)
+    hub_repos.tokens["loose"] = Tokens().add("loose", write=True)
+    clone = the_clone(hub_repos)
+    before = (sh(hub_repos.origin, "rev-list", "--count", "main"), sh(clone, "rev-list", "--count", "HEAD"))
+    for who in ("loose", "bea-claude"):
+        bad, said = door_call(hub_repos, who, "create", doc=f"{root_name(REPO)}/docs/new.md", text="# New\n")
+        assert bad, (who, said)
+        assert not (clone / "docs" / "new.md").exists(), who
+    hub_repos.hub.commits.settle()
+    assert (sh(hub_repos.origin, "rev-list", "--count", "main"), sh(clone, "rev-list", "--count", "HEAD")) == before
+
+
+@DEV
+def test_every_sparse_checkout_change_runs_under_the_clones_commit_lock(hub_repos, tmp_path):
+    """The clone's files move only under the commit lock `Commits.moved` and `_pull` take (SPEC 14): a widen, a sleep and
+    a wake each hold it for the `git sparse-checkout` they run."""
+    repos, now = hub_repos.hub.repos, [1_000_000.0]
+    repos.clock = lambda: now[0]                                    # the clone is dated by this clock
+    served(hub_repos)
+    clone = the_clone(hub_repos)
+    lock, real, unlocked = hub_repos.hub.commits._repo_lock(clone), repos._git, []
+
+    def git(at, *args, **kw):
+        if "sparse-checkout" in args and args[-1] != "list" and os.path.realpath(at) == os.path.realpath(clone):
+            if lock.acquire(blocking=False):        # nobody holds it: the change runs outside the lock
+                lock.release()
+                unlocked.append(args)
+        return real(at, *args, **kw)
+    repos._git = git
+    assert not report(hub_repos, path="notes/idea.md")[0]           # a folder the set lacks: widened
+    now[0] += 31 * 86400
+    assert repos.sleep_idle() == [REPO]                             # shrunk
+    assert not report(hub_repos, path="docs/plan.md")[0]            # the folders come back: woken
+    assert sh(clone, "sparse-checkout", "list").split() == ["docs", "notes"]
+    assert unlocked == []
+
+
+def test_the_credential_of_a_clone_is_read_from_a_copy_of_the_shared_dict(tmp_path, monkeypatch):
+    """A clone's first serve adds a key to `CREDENTIALS` from its own thread while a commit or pull thread looks one up."""
+    shared = {}
+
+    class Key(str):
+        def __eq__(self, other):
+            shared.setdefault("/added/by/a/serving/thread", lambda: "t")      # the dict changes under the loop
+            return str.__eq__(self, other)
+        __hash__ = str.__hash__
+
+    shared[Key("/a/clone")] = lambda: "one"
+    shared[Key("/b/clone")] = lambda: "two"
+    monkeypatch.setattr(commits_mod, "CREDENTIALS", shared)
+    assert commits_mod._credential(tmp_path / "not-a-clone") is None

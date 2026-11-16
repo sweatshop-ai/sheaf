@@ -1,4 +1,4 @@
-"""Rule F (SPEC 9.11): a door create makes an owner-only sheaf at its owner's private root, and only for a caller bound to
+"""Rule F (SPEC 9.11): a door create makes an owner-only rectoverso at its owner's private root, and only for a caller bound to
 that root's member; a create or a move into a private root by anyone else is refused with the ordinary "cannot be made"
 line and writes nothing. Each refusal has the member's own create as its positive control, on the same route."""
 import shutil
@@ -82,7 +82,7 @@ def test_create_into_private_root_refused_for_unbound_token(two):
 
 
 def test_owned_assignees_cannot_create_in_private_root(two):
-    w = World(two, assignees=["login-a"])           # the issue is assigned to member A: `_owned` would give A the sheaf
+    w = World(two, assignees=["login-a"])           # the issue is assigned to member A: `_owned` would give A the rectoverso
     refused(*w.create("tok-b", NO_OWNER))           # B names no owner; the assignee A would become it
     w.nothing_written()
     is_error, got = w.create("tok-a", NO_OWNER)     # positive control: A, the assignee, is bound to that root
@@ -92,7 +92,7 @@ def test_owned_assignees_cannot_create_in_private_root(two):
 
 def test_update_owner_flip_refused(two):
     w = World(two)
-    assert not w.create("tok-b", OPEN)[0]           # an open sheaf of the list repo
+    assert not w.create("tok-b", OPEN)[0]           # an open rectoverso of the list repo
     path = two.list_repo / NAME
     before = path.read_text(encoding="utf-8")
     count = w.commits(two.list_repo)

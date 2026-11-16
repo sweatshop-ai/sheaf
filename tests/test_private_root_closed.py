@@ -1,6 +1,6 @@
-"""Rule B (SPEC 9.11): the file of a sheaf is never looked up in the list's root alone once a private root could hold
+"""Rule B (SPEC 9.11): the file of a rectoverso is never looked up in the list's root alone once a private root could hold
 its name. A name with a holder in a private root and any other holder, a private root that cannot be looked at, a
-bound document whose root is gone: each raises and writes nowhere. A sheaf of a private root is not shared or
+bound document whose root is gone: each raises and writes nowhere. A rectoverso of a private root is not shared or
 unshared by a write."""
 import os
 
@@ -199,7 +199,7 @@ def test_duplicate_name_does_not_break_visible(two):
     a, b = (hub.proxy.members[k] for k in ("member-a-id", "member-b-id"))
     for member in (a, b):
         assert hub.visible(member, address(hub)) is False                      # answers, raises nothing
-    assert hub.visible(b, address(hub, OTHER)) is True                         # another member's other sheaf is shown
+    assert hub.visible(b, address(hub, OTHER)) is True                         # another member's other rectoverso is shown
     assert hub.visible(a, address(hub, OTHER)) is True
 
 
@@ -210,7 +210,7 @@ def test_share_refused_private_root(two):
     seen = untouched(two)
     before = (two.private_repo / NAME).read_text(encoding="utf-8")
     with place.held(hub, a):
-        with pytest.raises(place.Refused, match="a sheaf of a private root cannot be shared yet"):
+        with pytest.raises(place.Refused, match="a rectoverso of a private root cannot be shared yet"):
             place.ahead(hub, a, PRIVATE_TEXT, SHARED)                          # Share
         assert place.ahead(hub, a, PRIVATE_TEXT, PRIVATE_TEXT + "more\n") is None      # control: no move, no raise
     assert (two.private_repo / NAME).read_text(encoding="utf-8") == before

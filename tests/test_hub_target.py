@@ -490,7 +490,7 @@ def test_each_member_has_their_own_target_on_the_same_document(front, browser, t
     assert stored(browser)["targets"].keys() == {BEA}
 
 
-# ── POST /_/target takes the sheaf's name, as /_/export does (9.11) ──────────
+# ── POST /_/target takes the rectoverso's name, as /_/export does (9.11) ──────────
 
 def test_a_create_and_an_update_still_stand_when_the_target_cannot_follow(browser, talk, monkeypatch):
     token = Tokens().add("ada-chatgpt", client="ChatGPT", write=True)
@@ -505,7 +505,7 @@ def test_a_create_and_an_update_still_stand_when_the_target_cannot_follow(browse
 
 
 def test_the_target_is_judged_and_stored_under_the_sheafs_name(front, browser, talk, work, monkeypatch):
-    """A sheaf closed to the member between the check and the store takes no target: the check and the store are
+    """A rectoverso closed to the member between the check and the store takes no target: the check and the store are
     one step under the name's lock, as /_/export reads (9.11)."""
     import contextlib
     from sheafmd.hub import place, targets

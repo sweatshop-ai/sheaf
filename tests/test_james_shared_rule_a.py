@@ -162,7 +162,7 @@ def test_james_shared_token_cannot_create_in_private_root(world):
 
 def test_james_shared_token_cannot_move_a_shared_sheaf_into_private_root(world):
     w = world
-    assert not w.call("create", SHARED, doc=w.address, text=OPEN)[0]                        # an open sheaf of the list
+    assert not w.call("create", SHARED, doc=w.address, text=OPEN)[0]                        # an open rectoverso of the list
     path = w.two.list_repo / NAME
     before = path.read_text(encoding="utf-8")
     heads = (w.commits(w.two.list_repo), w.commits(w.two.private_repo))

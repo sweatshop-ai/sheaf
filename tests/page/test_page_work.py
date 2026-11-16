@@ -1,4 +1,4 @@
-"""Work on this (SPEC 10.2, 10.6): on a member's page of a sheaf, the ☰ menu offers the ways to work on the
+"""Work on this (SPEC 10.2, 10.6): on a member's page of a rectoverso, the ☰ menu offers the ways to work on the
 session behind it (attach on the box, fork to your machine) and lists its sessions; and Tell reaches
 James's window on the box when the live session is there, or are off when it runs on someone's laptop.
 The page is served by the loopback port with a member's meta block that holds `work` (and `can`) as the
@@ -194,7 +194,7 @@ def test_a_sheaf_live_on_a_laptop_names_its_machine_in_place_of_the_fork(tab):
 
 
 def test_a_box_sheaf_the_hub_cannot_fork_never_says_there_is_none_to_fork(tab):
-    # Without [list] sessions_dir and work_dir the hub leaves `fork` out of a sheaf whose sessions ran on the box (9.12).
+    # Without [list] sessions_dir and work_dir the hub leaves `fork` out of a rectoverso whose sessions ran on the box (9.12).
     as_member(tab, work(attach=None, fork=None))
     tab.open()
     open_work(tab.page)
@@ -250,7 +250,7 @@ def test_a_click_outside_closes_the_popover(tab):
     assert not tab.page.locator("#rd-work").is_visible()
 
 
-# ---- Tell on a box-hosted sheaf (10.6, 9.12) ---------------------------------------------------------
+# ---- Tell on a box-hosted rectoverso (10.6, 9.12) ---------------------------------------------------------
 
 BOX_CAN = ("box-tell",)
 START, END = at(P1, "apples"), at(P1, "apples", None)
@@ -284,7 +284,7 @@ def comment_form(tab):
 
 def sent_to_box(tab):
     """The bodies of the page's /_/comment requests, which go on to the hub without tell (the loopback
-    hub has no James); and the paths of any /_/tell request, which a box sheaf never sends."""
+    hub has no James); and the paths of any /_/tell request, which a box rectoverso never sends."""
     bodies, others = [], []
 
     def comment(route):
@@ -520,7 +520,7 @@ def test_the_button_posts_the_doc_and_shows_the_code_once_with_its_terms(tab):
     tab.page.click("#rd-work .rd-code button")
     until(lambda: tab.page.locator("#rd-work .rd-code .rd-cmd code").count() == 1, what="the code shown")
     assert tab.page.locator("#rd-work .rd-code .rd-cmd code").inner_text() == CODE
-    assert "Good for 10 minutes, for this sheaf only." in tab.page.inner_text("#rd-work")
+    assert "Good for 10 minutes, for this rectoverso only." in tab.page.inner_text("#rd-work")
     assert len(sent) == 1 and sent[0].method == "POST"
     doc = tab.page.evaluate("JSON.parse(document.getElementById('rd-edit-meta').textContent).doc")
     assert json.loads(sent[0].post_data) == {"doc": doc}

@@ -1225,7 +1225,7 @@ def render_file(path, *, share: bool = True, theme=None, title: str | None = Non
     if not isinstance(theme, Theme):
         theme = load_theme(theme or rc.theme or "plain", root, lambda s: log.append(s))
     if by is None:
-        # The assistant of the front matter prepared the sheaf, as the list row says (#167); the
+        # The assistant of the front matter prepared the rectoverso, as the list row says (#167); the
         # source is read here once and handed on, so the byline and the page come from one text.
         if src is None:
             src = path.read_text(encoding="utf-8")

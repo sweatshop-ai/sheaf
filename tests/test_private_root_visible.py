@@ -68,18 +68,18 @@ class World:
 
 @pytest.fixture
 def world(two):
-    return World(two, ["login-a", "login-b"])      # the issue is also assigned to member B: the assignees would own the sheaf
+    return World(two, ["login-a", "login-b"])      # the issue is also assigned to member B: the assignees would own the rectoverso
 
 
 def listed(w: World, member) -> list:
-    """The documents the index shows `member` under the sheaf's name, wherever the hub lists its file."""
+    """The documents the index shows `member` under the rectoverso's name, wherever the hub lists its file."""
     got = w.front.get("/_/index.json", member=member)
     assert got.status == 200
     return [d["doc"] for r in got.json()["roots"] for d in r["docs"] if d["doc"].endswith(NAME)]
 
 
 def routes(w: World, text: str):
-    """(name, method, path, body) of each route of the members' socket that names the sheaf (Ask, Tell, Jump and Cancel
+    """(name, method, path, body) of each route of the members' socket that names the rectoverso (Ask, Tell, Jump and Cancel
     are routes of the loopback port only, and a member is told there is no such route)."""
     a, h = w.address, md_hash(text)
     i = next(i for i, b in enumerate(split_md_blocks(text)) if b.content.startswith("Secret"))
@@ -241,7 +241,7 @@ def test_transcript_private_sheaf(world):
 
 
 def moved_to_private(w: World, text: str):
-    """The sheaf open on a page bound to the list's repo, then its file gone from there and held by the private repo."""
+    """The rectoverso open on a page bound to the list's repo, then its file gone from there and held by the private repo."""
     w.put(PROJECT_WIDE, w.two.list_repo)
     w.hub.entry(w.address)
     (w.two.list_repo / NAME).unlink()
@@ -760,7 +760,7 @@ def test_a_local_image_is_read_beneath_its_root_and_never_from_a_private_one(wor
 
 
 def test_private_sheaf_image_shows(world):
-    """The images of a private sheaf are judged against the root its file is in (rule H): its own member's page
+    """The images of a private rectoverso are judged against the root its file is in (rule H): its own member's page
     embeds the picture beside it, and the picture is a private one that no other root's sheaf could embed."""
     w = world
     w.put(PRIVATE + "\n![pic](pic.png)\n")
@@ -769,7 +769,7 @@ def test_private_sheaf_image_shows(world):
     html = w.front.get(f"/_/mount?doc={w.address}", member=A).json()["html"]
     assert "data:image/png;base64," in html
     assert w.front.get(f"/_/mount?doc={w.address}", member=B).status == 404                  # the positive control's other side
-    # a sheaf of the list's root cannot embed a picture of the private root
+    # a rectoverso of the list's root cannot embed a picture of the private root
     (w.two.list_repo / "acme/blog/other.md").write_text("# other\n\n![pic](pic.png)\n", encoding="utf-8")
     (w.two.list_repo / "acme/blog/pic.png").symlink_to(w.two.private_repo / "acme/blog/pic.png")      # even through a link
     other = w.front.get(f"/_/mount?doc={w.root.name}/acme/blog/other.md", member=A).json()["html"]
@@ -777,7 +777,7 @@ def test_private_sheaf_image_shows(world):
 
 
 def test_index_and_documents_show_private_names(world):
-    """Rule D: a member's private sheaves are listed under their list names to that member alone: the index data, the
+    """Rule D: a member's private rectoversos are listed under their list names to that member alone: the index data, the
     door's `documents`, and the board the streams are told from, which tells the hub's person nothing of them."""
     w = world
     w.put(PRIVATE)
@@ -793,7 +793,7 @@ def test_index_and_documents_show_private_names(world):
 
 
 def test_a_private_name_rendered_by_the_persons_hand_is_no_row_and_no_event_of_theirs(world):
-    """`sheaf render` of the list root's path of a private sheaf gives the list name; the hub's person is shown no row
+    """`sheaf render` of the list root's path of a private rectoverso gives the list name; the hub's person is shown no row
     of it and told no change, whether or not a sweep has met the name, and its member is shown both."""
     w = world
     index = w.hub.index
@@ -855,7 +855,7 @@ def test_the_blame_of_a_list_row_is_not_asked_of_a_private_file(world, monkeypat
 
 
 def test_a_write_that_moves_the_file_writes_only_the_file_it_opened(world, mode, monkeypatch):
-    """A door update that makes a sheaf owner-only moves its file to its home first. A link swapped in for the moved
+    """A door update that makes a rectoverso owner-only moves its file to its home first. A link swapped in for the moved
     file before the write must not carry the text into another member's private root: the file at its home is opened
     again beneath the root and written only if it is the one opened first."""
     from sheafmd import beneath
@@ -889,7 +889,7 @@ def test_a_private_root_made_new_at_its_path_is_private_still_to_a_listing_and_a
     import shutil
     w = world
     w.put(PRIVATE)
-    w.put(PROJECT_WIDE)                                  # the private root also holds a sheaf that says visibility: project
+    w.put(PROJECT_WIDE)                                  # the private root also holds a rectoverso that says visibility: project
     comment(w.two.private_repo / NAME, quote="Secret words.")
     pname = w.hub.roots.lookup(w.two.private_repo / NAME).name
     p = w.two.private_repo
@@ -1232,7 +1232,7 @@ def test_a_private_file_made_by_hand_after_the_row_was_opened_counts_nothing_of_
 
 
 def test_a_name_that_moved_from_the_list_root_to_a_private_one_is_told_gone_as_a_deletion_is(world):
-    """The person was shown the name as a sheaf of the list root. A sweep between the file going from there and its coming
+    """The person was shown the name as a rectoverso of the list root. A sweep between the file going from there and its coming
     to the private root tells them what a delete tells them, and nothing after; a sweep after both tells them nothing
     new. Neither says that the name is now private."""
     w = world

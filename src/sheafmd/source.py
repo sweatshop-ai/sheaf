@@ -178,7 +178,7 @@ def _write_atomic(p: Path, text: str):
     the sibling before the replace, so the file never shows up with another one.
 
     Whatever sits at the sibling's name is removed first and the sibling is created with
-    O_EXCL|O_NOFOLLOW: every sheaf writer holds the flock, so the name is nobody else's of
+    O_EXCL|O_NOFOLLOW: every rectoverso writer holds the flock, so the name is nobody else's of
     sheaf, and a link planted there (by someone who can write the folder) is neither
     followed nor kept: the open fails if one appears between the unlink and the open.
 
@@ -223,7 +223,7 @@ def update_file(md_path, change, expected_hash=None, move=None):
     cannot truncate the document.
 
     `move(text, new)`, called under the lock before a write that changes the text, may move the
-    file (a sheaf going to the home of its new text, SPEC 9.11) and give the path it is at now:
+    file (a rectoverso going to the home of its new text, SPEC 9.11) and give the path it is at now:
     the new text is written there, under that path's lock too."""
     p = Path(md_path)
     with file_lock(p):

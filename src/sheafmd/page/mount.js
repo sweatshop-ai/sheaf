@@ -29,7 +29,7 @@
   const scriptName = (answer) =>
     answer.assets && typeof answer.assets['mount.js'] === 'string' ? answer.assets['mount.js'] : answer.version;
   // Each pane's closed root, kept here: attachShadow works once per element, so a pane mounted again (a failed first
-  // try, the list after a sheaf) reuses its root, and `live` is the mount standing in it. `seq` counts the mount()
+  // try, the list after a rectoverso) reuses its root, and `live` is the mount standing in it. `seq` counts the mount()
   // calls on the pane: the one called last takes it, whichever answer comes in first.
   const PANES = new WeakMap();
   const MAX_DEPTH = 60;
@@ -248,7 +248,7 @@
         nodes++;
         continue;
       }
-      if (n.nodeType === Node.COMMENT_NODE) {      // block sentinels and the sheaf's comments are comments; DOM text, never parsed again
+      if (n.nodeType === Node.COMMENT_NODE) {      // block sentinels and the rectoverso's comments are comments; DOM text, never parsed again
         if (n.data.length <= 100000) { frame.to.appendChild(doc.createComment(n.data)); nodes++; }
         continue;
       }

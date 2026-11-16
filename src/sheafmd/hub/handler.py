@@ -172,11 +172,11 @@ MEMBER = Who(frozenset({"member"}), "no such route")
 MINT = Who(frozenset({"member", "key"}), "this needs the hub key")
 # What a sign-in code opens (9.13): the transcript and the fork, nothing else.
 CODE_ROUTES = {("GET", "/_/session"): "session", ("POST", "/_/sessions"): "sessions"}
-LISTED = "That session is already listed on this sheaf"
+LISTED = "That session is already listed on this rectoverso"
 # What a relay token opens (9.14): its fork's stream of Tells and their acks, nothing else.
 RELAY_ROUTES = {("GET", "/_/relay"): "relay", ("POST", "/_/relay"): "relay-ack"}
 RELAY_OUTCOMES = ("delivered", "failed")
-RELAY_MOVED = "The session on the member's machine is no longer this sheaf's live session; the comment is written."
+RELAY_MOVED = "The session on the member's machine is no longer this rectoverso's live session; the comment is written."
 
 
 def _json(status: int, obj: dict, headers: dict | None = None) -> Response:
@@ -540,8 +540,8 @@ class Handler:
 
     def _route_relay(self, req: Req, raw: bytes) -> Response:
         """A request the verifier let in with a relay token (9.14): `X-Sheaf-Relay` is the token's sha256, with no
-        member header. The token says who asks, and opens its fork's stream and acks on its one sheaf, while that
-        fork is the sheaf's live session and its member is in `[proxy.members]`."""
+        member header. The token says who asks, and opens its fork's stream and acks on its one rectoverso, while that
+        fork is the rectoverso's live session and its member is in `[proxy.members]`."""
         cfg = self.hub.proxy
         req.route = RELAY_ROUTES.get((req.method, req.path), req.path)
         if req.member_id or req.headers.get("x-sheaf-code"):
@@ -569,7 +569,7 @@ class Handler:
 
     @staticmethod
     def _relay_live(row: dict, st) -> bool:
-        """Whether the fork of the relay row `row` is the live session of the sheaf whose state is `st`."""
+        """Whether the fork of the relay row `row` is the live session of the rectoverso whose state is `st`."""
         return st is not None and st.live == "laptop" and st.sessions[0]["id"] == row["session"]
 
     def _relay_refused(self, req: Req, row, reason: str, status: int = 401, message: str = relay.NO_GOOD) -> Refuse:
@@ -601,7 +601,7 @@ class Handler:
                 try:
                     e = hub.entry(row["doc"])
                     text = e.live.current()[1]
-                    # A member whose access to the sheaf was taken away gets no more of its threads (#135).
+                    # A member whose access to the rectoverso was taken away gets no more of its threads (#135).
                     good = self._relay_live(row, work.state(hub, row["doc"], text)) and hub.may_open(
                         hub.proxy.members[row["member"]], row["doc"], visibility.front_matter(text))
                 except NotFound:
@@ -633,7 +633,7 @@ class Handler:
         return _ok()
 
     def _relay_moved(self, address: str):
-        """The sheaf's live session changed: its relay streams end and the Tells queued for the old one are dropped."""
+        """The rectoverso's live session changed: its relay streams end and the Tells queued for the old one are dropped."""
         self.relays.end(address)
         for _, t in self.relays.drop(address):
             self.hub.relay_failed(address, t, "tell-relay-failed", RELAY_MOVED)
@@ -693,7 +693,7 @@ class Handler:
         return doc
 
     def _reading(self, doc):
-        """The lock of the sheaf's name `doc` (9.11), held by a read from the check of its visibility to the page
+        """The lock of the rectoverso's name `doc` (9.11), held by a read from the check of its visibility to the page
         or text sent: no write or move of its file comes between."""
         return place.held(self.hub, doc) if isinstance(doc, str) else contextlib.nullcontext()
 
@@ -783,9 +783,9 @@ class Handler:
         hub, member = self.hub, req.member
         e = self._entry(req, req.query.get("doc"))
         def for_member(name, data):
-            # Asked at each event: a write that makes the sheaf its owner's alone silences a stream
+            # Asked at each event: a write that makes the rectoverso its owner's alone silences a stream
             # opened before it (9.11). A change of `projects.toml` that shuts the member out is told `gone`, with
-            # why (8.12): that alone, never a file of the sheaf that cannot be read for a moment.
+            # why (8.12): that alone, never a file of the rectoverso that cannot be read for a moment.
             if hub.visible(member, e.address):
                 if name in waiting_mod.EVENTS:      # a Tell that waits for an agent: the member's own, and no other's (9.9)
                     return dict(data) if getattr(data, "member", None) == member.id else None
@@ -837,7 +837,7 @@ class Handler:
         snap["rids"] = e.live.taken_rids()
         if req.member is not None:
             # Their own seen state, and nothing of the hub account's agent session (9.9).
-            # A sheaf's Work on this and its Tell for James's window are refreshed as the meta's (9.12).
+            # A rectoverso's Work on this and its Tell for James's window are refreshed as the meta's (9.12).
             self.hub.expire_relayed()
             work, can = self.hub.member_work(e, req.member)
             extra = {} if work is None else {"work": work}
@@ -859,13 +859,13 @@ class Handler:
                 + self.hub.box_waits.telling(address, member.id, comments=comments, text=text))
 
     def _mount(self, req: Req) -> Response:
-        """The sheaf as JSON for the front's loader to mount (#116): the body through the sanitiser's mount mode and the
+        """The rectoverso as JSON for the front's loader to mount (#116): the body through the sanitiser's mount mode and the
         meta block the page route sends. The same gate as the page: a member sees what they could open. With `list=`
         instead of `doc=`, the list."""
         if "list" in req.query:
             return self._mount_list(req)
         doc = req.query.get("doc")
-        _shape(isinstance(doc, str) and doc.endswith(".md"), "doc must be the address of a sheaf")
+        _shape(isinstance(doc, str) and doc.endswith(".md"), "doc must be the address of a rectoverso")
         with self._reading(doc):
             e = self._entry(req, doc)
             self.hub.catch_up(e)
@@ -917,7 +917,7 @@ class Handler:
                    and isinstance(x.get("saved", ""), str), "each edit is {i, html} or {i, html, saved}")
         rid = b.get("rid")
         _shape(rid is None or (isinstance(rid, str) and _RID_RE.fullmatch(rid)), "rid is not a request id")
-        # The name's lock (9.11) from the guard's judging of the sheaf's home to the commit: move, write, render,
+        # The name's lock (9.11) from the guard's judging of the rectoverso's home to the commit: move, write, render,
         # commit, one operation.
         with place.held(self.hub, e.address):
             guard, ticked = self._ticks(req, e)
@@ -956,16 +956,16 @@ class Handler:
         return _ok(**got)
 
     def _tick(self, req: Req) -> Response:
-        """The list's row, or the sheaf's own page (10.11, `where`), ticks the sheaf's action (9.10): saved as the
+        """The list's row, or the rectoverso's own page (10.11, `where`), ticks the rectoverso's action (9.10): saved as the
         page saves a tick, so the file, the commit and the open tabs see what a tick in the page makes them see."""
         b = req.body
         e = self._entry(req, b.get("doc"))
         n, word, read, release = b.get("action"), b.get("word"), b.get("hash"), b.get("release", False)
         where = b.get("where", "list")
         _shape(where in ("list", "page"), "where must be list or page")
-        _shape(type(n) is int and n >= 0, "action must be the number of the sheaf's action, from 0")
+        _shape(type(n) is int and n >= 0, "action must be the number of the rectoverso's action, from 0")
         _shape(isinstance(word, str) and word != "", "word must be the action's word")
-        _shape(isinstance(read, str) and read != "", "hash must be the hash of the sheaf the list read")
+        _shape(isinstance(read, str) and read != "", "hash must be the hash of the rectoverso the list read")
         _shape(type(release) is bool, "release must be true or false")
         if release and word not in the_list.TOGGLES:
             # Only a toggle is released (#110): a one-off stays pressed (#108).
@@ -980,10 +980,10 @@ class Handler:
                 e.live.refresh()
             h, text = e.live.current()
         if h != read:
-            raise Refuse(409, f"the sheaf changed since the {where} read it ({word}): reload the {where}")
+            raise Refuse(409, f"the rectoverso changed since the {where} read it ({word}): reload the {where}")
         edit = the_list.tick_edit(text, n, word, release)
         if edit is None:
-            raise Refuse(409, f"the sheaf no longer holds that action ({word}): reload the {where}")
+            raise Refuse(409, f"the rectoverso no longer holds that action ({word}): reload the {where}")
         with place.held(self.hub, e.address):
             guard, ticked = self._ticks(req, e)
 
@@ -991,7 +991,7 @@ class Handler:
                 # The row names its action by place and word: on another text than the list read, another
                 # action may sit there with the same word. Judged on the file under its lock.
                 if md_hash(text) != read:
-                    raise EditError(f"the sheaf changed since the {where} read it ({word}): reload the {where}")
+                    raise EditError(f"the rectoverso changed since the {where} read it ({word}): reload the {where}")
                 return guard(text, new, toggled)
             move, moved = self._mover(e, ticked)
             with self._moved_committed(e, req.member, "tick", moved):
@@ -1000,7 +1000,7 @@ class Handler:
                 except (EditError, StaleError) as ex:
                     raise Refuse(409, str(ex)) from None
                 if not got["changed"]:
-                    raise Refuse(409, f"the sheaf no longer holds that action ({word}): reload the {where}")
+                    raise Refuse(409, f"the rectoverso no longer holds that action ({word}): reload the {where}")
                 self.hub.index.touch(e.address)
                 gone = moved[0] if moved else self._placed(e, ticked)
                 moved.clear()
@@ -1012,7 +1012,7 @@ class Handler:
         return _ok(hash=got["hash"])
 
     def _mover(self, e, ticked):
-        """(the `move` of a save, the list it puts the path the file left in): a write that shares the sheaf or
+        """(the `move` of a save, the list it puts the path the file left in): a write that shares the rectoverso or
         withdraws its Share moves the file to the home of its new text before it writes it (9.11), so the text is
         written and rendered in its new folder. `ticked` is filled by the save's guard before the move is asked."""
         moved = []
@@ -1023,8 +1023,8 @@ class Handler:
             try:
                 gone = place.ahead(self.hub, e.address, text, new)
             except place.Refused as ex:
-                # The write would leave the sheaf where it may not stay (9.11): nothing is written.
-                raise EditError(f"This sheaf cannot go to its home: {ex.why}. Nothing was written.") from None
+                # The write would leave the rectoverso where it may not stay (9.11): nothing is written.
+                raise EditError(f"This rectoverso cannot go to its home: {ex.why}. Nothing was written.") from None
             if gone is None:
                 return None
             moved.append(gone)
@@ -1044,31 +1044,31 @@ class Handler:
                 self.hub.committed(e.address, member, what, gone=moved.pop())
 
     def _placed(self, e, ticked) -> str | None:
-        """After a write that shared the sheaf or withdrew its Share, under the lock of its name, its file goes to
+        """After a write that shared the rectoverso or withdrew its Share, under the lock of its name, its file goes to
         its home (9.11) if the write did not take it there (a text that changed meanwhile): the path in the root
-        it left, None when it stayed. The caller commits the write and the move as one; the sheaf's address
+        it left, None when it stayed. The caller commits the write and the move as one; the rectoverso's address
         stays."""
         if not ({"Share", "Unshare"} & ticked):
             return None
         return place.place(self.hub, e.address, commit=False)
 
     def _ticks(self, req: Req, e):
-        """The guard of a save (live.save) for the actions the hub judges: a one-off is never unticked and a sheaf
+        """The guard of a save (live.save) for the actions the hub judges: a one-off is never unticked and a rectoverso
         answers Move to once (9.10), and the two it acts on (9.11); and the set it fills with the words the save
         ticked. Share is its owner's alone: ticked by anyone else, nothing is written; ticked by the owner, the same
-        write opens the sheaf to the project. Who ticked is the signed-in member, never a name the request carries."""
+        write opens the rectoverso to the project. Who ticked is the signed-in member, never a name the request carries."""
         ticked = set()
 
         def guard(text, new, toggled):
             m = req.member
             if m is not None:
-                # The gate (_owned) read the file before the lock: a write that closed the sheaf since is
+                # The gate (_owned) read the file before the lock: a write that closed the rectoverso since is
                 # seen here, on the text the save would write over.
                 fm = visibility.front_matter(text)
                 if not self.hub.may_open(m, e.address, fm):
                     raise Refuse(404, "no such document")
                 # The page cannot edit a front matter (5): paragraphs of `---` would write one, and its
-                # `sessions` would serve any transcript (9.12), its `visibility` open the sheaf.
+                # `sessions` would serve any transcript (9.12), its `visibility` open the rectoverso.
                 if visibility.front_matter(new) != fm:
                     raise EditError("A save cannot change the front matter: change it in the file.")
             if (word := the_list.unticks_one_off(text, new)) is not None:
@@ -1076,23 +1076,23 @@ class Handler:
                 # routine has acted on its tick, and an untick would move nothing back.
                 raise EditError(f"{word} is pressed once: its tick cannot be taken back.")
             if (slug := the_list.ticks_another_move(text, new)) is not None:
-                # A thread moves to one client (9.10, #109): a sheaf answers Move to once, by whatever edit.
+                # A thread moves to one client (9.10, #109): a rectoverso answers Move to once, by whatever edit.
                 raise EditError(f"This thread moves to one client: Move to {slug} is ticked.")
             words = visibility.newly_ticked(toggled)
             if visibility.withdraws_share(text, new):
                 # Withdrawing a Share is its owner's alone, as giving it is (#40), by whatever edit unticks the box:
-                # anyone else's writes nothing; the owner's closes the sheaf again in the same write. The hub's own
+                # anyone else's writes nothing; the owner's closes the rectoverso again in the same write. The hub's own
                 # person (no member: the loopback port or the key) reads every file, and withdraws it as an owner.
                 fm = visibility.front_matter(text)
                 if m is not None and not visibility.owner_of(fm, [m], self.hub.assignees(e.address, fm)):
-                    raise EditError("Only the owner of this sheaf can withdraw its Share.")
+                    raise EditError("Only the owner of this rectoverso can withdraw its Share.")
                 new = visibility.unshare(new)
                 if visibility.front_matter(new).get("sessions", "") != fm.get("sessions", ""):
                     raise EditError("A save cannot change the front matter: change it in the file.")
                 words.add("Unshare")
             if "Share" in words:
                 if m is not None and not visibility.owner_of(fm, [m], self.hub.assignees(e.address, fm)):
-                    raise EditError("Only the owner of this sheaf can share it.")
+                    raise EditError("Only the owner of this rectoverso can share it.")
                 if visibility.effective(visibility.front_matter(new)) == "owner":
                     by = (m.short or m.name) if m is not None else self.hub.person
                     new = visibility.share(new, by, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
@@ -1105,7 +1105,7 @@ class Handler:
         return guard, ticked
 
     def _stop_james(self, req: Req, e):
-        """A member ticked Stop James (9.11): a `stop-james` row, and for a sheaf of James a file in the
+        """A member ticked Stop James (9.11): a `stop-james` row, and for a rectoverso of James a file in the
         `[list]`'s `stop_dir` that the box's supervisor of James reads to end his window for the project.
         The hub kills nothing itself."""
         rel = Address.parse(e.address).rel
@@ -1118,9 +1118,9 @@ class Handler:
         m = req.member
         the = self.hub.the_list
         if assistant.casefold() != "james":
-            drop = "not a sheaf of James"
+            drop = "not a rectoverso of James"
         elif not project:
-            drop = "the sheaf is in no <client>/<project> folder"
+            drop = "the rectoverso is in no <client>/<project> folder"
         else:
             if the is not None and the.serves(Address.parse(e.address).root):
                 self._stop_tells(project, m)
@@ -1165,51 +1165,51 @@ class Handler:
                 continue                                # the supervisor took it meanwhile: it reached James
             except OSError:
                 continue
-            sheaf, thread = tell.get("sheaf"), tell.get("thread")
-            if not (isinstance(sheaf, str) and isinstance(thread, str)):
+            rectoverso, thread = tell.get("sheaf"), tell.get("thread")
+            if not (isinstance(rectoverso, str) and isinstance(thread, str)):
                 said = "no thread in the drop"
-            elif not self._of_project(sheaf, project):
-                said = "the drop names a sheaf of another root or project"
+            elif not self._of_project(rectoverso, project):
+                said = "the drop names a rectoverso of another root or project"
             else:
-                said = self._say_stopped(sheaf, thread, member)
-            self.hub.record("tell-stopped", sheaf if isinstance(sheaf, str) else None, project=project,
+                said = self._say_stopped(rectoverso, thread, member)
+            self.hub.record("tell-stopped", rectoverso if isinstance(rectoverso, str) else None, project=project,
                             thread=thread if isinstance(thread, str) else None, what=tell.get("kind"), by=by,
                             said=said)
 
-    def _of_project(self, sheaf: str, project: str) -> bool:
-        """Whether `sheaf` is a sheaf of `project` on the list's root, where a drop's sheaf always is (9.12)."""
-        at = Address.parse(sheaf)
+    def _of_project(self, rectoverso: str, project: str) -> bool:
+        """Whether `rectoverso` is a rectoverso of `project` on the list's root, where a drop's rectoverso always is (9.12)."""
+        at = Address.parse(rectoverso)
         return self.hub.the_list.serves(at.root) and at.rel.startswith(project + "/") and at.rel.count("/") == 2
 
-    def _say_stopped(self, sheaf: str, thread: str, member) -> str:
-        """The STOPPED reply in `thread` of `sheaf`: "written", or why not."""
+    def _say_stopped(self, rectoverso: str, thread: str, member) -> str:
+        """The STOPPED reply in `thread` of `rectoverso`: "written", or why not."""
         name = (member.name if member is not None else self.hub.person) or "sheaf"
         try:
-            e = self.hub.entry(sheaf)
+            e = self.hub.entry(rectoverso)
             if member is not None and not self.hub.may_open(member, e.address,
                                                              visibility.front_matter(e.live.current()[1])):
-                return "the member who stopped cannot open the sheaf"
+                return "the member who stopped cannot open the rectoverso"
             with place.held(self.hub, e.address):       # the write and its commit, one step (9.11)
                 e.live.comment("reply", {"id": thread, "body": self.STOPPED}, None, by=name, announce=True)
                 self.hub.index.touch(e.address)
                 self.hub.committed(e.address, member, "comment")
         except NotFound:
-            return "the sheaf is gone"
+            return "the rectoverso is gone"
         except (rdc.AnchorError, rdc.NoComment, KeyError, ValueError) as ex:
             return f"not written: {ex}"
         except Exception:                               # the Stop is dropped whatever becomes of the reply
-            self.hub.record_exception("tell-stopped-reply-failed", sheaf)
+            self.hub.record_exception("tell-stopped-reply-failed", rectoverso)
             return "not written: the hub failed on it (sheaf diag)"
         return "written"
 
     # ── Work on this (9.12) ──────────────────────────────────────────────────
     def _sheaf(self, req: Req, doc):
-        """The address `doc` names, its file's front matter and its work.State, once it is a sheaf the member may
+        """The address `doc` names, its file's front matter and its work.State, once it is a rectoverso the member may
         open (9.11) of the list's root, at `<client>/<project>/<file>.md`. Else the 404 of a document that is not
         there."""
         with self._reading(doc):
             address = self._owned(req, doc)
-            if not work.is_sheaf(self.hub, address):
+            if not work.is_rectoverso(self.hub, address):
                 raise Refuse(404, "no such document")
             try:
                 top, rel = self.hub.where(address)
@@ -1222,12 +1222,12 @@ class Handler:
                 raise Refuse(404, "no such document") from None
         return address, visibility.front_matter(text), work.state(self.hub, address, text, req.member)
 
-    def _code_sheaf(self, req: Req, doc):
-        """`_sheaf` for a request of a sign-in code (9.13): the code's own sheaf, open to its member, else the 404
+    def _code_rectoverso(self, req: Req, doc):
+        """`_sheaf` for a request of a sign-in code (9.13): the code's own rectoverso, open to its member, else the 404
         that names neither, since the laptop cannot tell the two apart and neither can a guesser."""
         try:
             if doc != req.code.doc:
-                raise Refuse(404, "another sheaf")
+                raise Refuse(404, "another rectoverso")
             return self._sheaf(req, doc)
         except Refuse as r:
             if r.status != 404:
@@ -1235,13 +1235,13 @@ class Handler:
             raise self._code_refused(req, req.code, "doc", 404, codes.NOT_OPEN) from None
 
     def _code_moved(self, req: Req):
-        """The code's session is no longer the sheaf's forkable one: the code is spent (9.13)."""
+        """The code's session is no longer the rectoverso's forkable one: the code is spent (9.13)."""
         self.codes.spend(req.code)
         return self._code_refused(req, req.code, "moved", 404, codes.NOT_OPEN)
 
     def _code(self, req: Req) -> Response:
-        """A sign-in code for `tiroir work` on one sheaf (9.13): for the member who asks in its Work on this, or,
-        with the key, for the member the body names (`sheaf code issue`). Made only while the sheaf has a session to
+        """A sign-in code for `tiroir work` on one rectoverso (9.13): for the member who asks in its Work on this, or,
+        with the key, for the member the body names (`sheaf code issue`). Made only while the rectoverso has a session to
         fork; shown once, and never again."""
         b = req.body
         if req.kind == "key":
@@ -1254,7 +1254,7 @@ class Handler:
         address, _, st = self._sheaf(req, b.get("doc"))
         sid = work.code_session(st)
         if sid is None:
-            raise Refuse(404, "this sheaf has no live session on the box to fork")
+            raise Refuse(404, "this rectoverso has no live session on the box to fork")
         try:
             code, c = self.codes.issue(req.member.id, address, sid)
         except codes.TooMany as ex:
@@ -1264,7 +1264,7 @@ class Handler:
         return _ok(code=code, expires=c.expires_text, id=c.id)
 
     def _session(self, req: Req) -> Response:
-        """The transcript of one of the sheaf's box-hosted sessions, the live one without `id`, from the copy of
+        """The transcript of one of the rectoverso's box-hosted sessions, the live one without `id`, from the copy of
         James's transcripts (9.12). It names only a file the front matter lists, of the box, in the project's folder
         of `sessions_dir` (#146).
         A sign-in code (9.13) takes no `id`: it serves the session it was made for, once, while that is the
@@ -1274,12 +1274,12 @@ class Handler:
             _shape("id" not in req.query, "a sign-in code serves the session it was made for: send no id")
             if code.served:
                 raise self._code_refused(req, code, "used")
-            address, fm, st = self._code_sheaf(req, req.query.get("doc"))
+            address, fm, st = self._code_rectoverso(req, req.query.get("doc"))
             if work.code_session(st, code.session) is None:
                 raise self._code_moved(req)
             body = work.open_transcript(st.cfg, "/".join(Address.parse(address).rel.split("/")[:2]), code.session, req.member)
             if body is None:
-                raise Refuse(404, "this sheaf has no such session on the box")
+                raise Refuse(404, "this rectoverso has no such session on the box")
             if not self.codes.serve(code):                  # one of two racing GETs: the flag is set before a byte
                 raise self._code_refused(req, code, "used")
             self.hub.record("code-used", address, code=code.id, route="session", **self._who(req))
@@ -1290,10 +1290,10 @@ class Handler:
         if sid is None:
             sid = st.forkable           # a live session on a laptop: none, never an older box copy to fork
         if sid not in st.box or not work.serves(st.cfg, req.member):
-            raise Refuse(404, "this sheaf has no such session on the box")
+            raise Refuse(404, "this rectoverso has no such session on the box")
         body = work.open_transcript(st.cfg, "/".join(Address.parse(address).rel.split("/")[:2]), sid, req.member)
         if body is None:
-            raise Refuse(404, "this sheaf has no such session on the box")
+            raise Refuse(404, "this rectoverso has no such session on the box")
         return self._transcript(req, address, fm, sid, body)
 
     def _transcript(self, req: Req, address: str, fm, sid: str, body: bytes, **via) -> Response:
@@ -1324,7 +1324,7 @@ class Handler:
         return prompts.tell(e.address, str(e.path), req.member.name, c, self.hub.tell.links(e.address))
 
     def _work_route(self, address: str, text: str, member=None) -> str | None:
-        """Where a member's Tell goes on the sheaf whose text is `text` (9.12, 9.14): "box" to James's
+        """Where a member's Tell goes on the rectoverso whose text is `text` (9.12, 9.14): "box" to James's
         window, "relay" to the fork's relay (a Tell only), None nowhere."""
         st = work.state(self.hub, address, text, member)
         can = st.can if st is not None else []
@@ -1354,8 +1354,8 @@ class Handler:
         return None
 
     def _james_called(self, caller, address):
-        """A door call of James's session (9.12): a write to a sheaf of James makes the session it names the sheaf's
-        live one, once the copy holds it; one the copy does not hold yet waits, the newest per sheaf, and is looked
+        """A door call of James's session (9.12): a write to a rectoverso of James makes the session it names the rectoverso's
+        live one, once the copy holds it; one the copy does not hold yet waits, the newest per rectoverso, and is looked
         for again at his next call. The session is never the request's to choose: only an id whose transcript is
         James's in that project's folder is taken."""
         sid = caller.session
@@ -1376,7 +1376,7 @@ class Handler:
         for at, (wanted, since_, seq_) in waiting:
             try:
                 self._record_james(at, wanted, caller, since_, seq_, members[at])
-            except Exception:                           # one sheaf's failure never stops the others nor this write
+            except Exception:                           # one rectoverso's failure never stops the others nor this write
                 self._drop_waiting(at, seq_)
                 self.hub.record_exception("session-hook-failed", at)
         if address is not None:
@@ -1402,10 +1402,10 @@ class Handler:
             return True
 
     def _record_james(self, address: str, sid: str, caller, since: float, seq: int, member=None):
-        """James's session `sid`, named by his write `seq` to `address`, becomes the sheaf's live session, the first of
-        `sessions`, when it is a sheaf of James on the list's root, `[list]` names a box, and the copy holds `sid` as a
+        """James's session `sid`, named by his write `seq` to `address`, becomes the rectoverso's live session, the first of
+        `sessions`, when it is a rectoverso of James on the list's root, `[list]` names a box, and the copy holds `sid` as a
         session of its project. The hub is the only writer of `sessions` (9.12). Nothing when it is the live one
-        already, a member's fork is, or James wrote to the sheaf again since."""
+        already, a member's fork is, or James wrote to the rectoverso again since."""
         the = self.hub.the_list
         try:
             e = self.hub.entry(address)
@@ -1434,7 +1434,7 @@ class Handler:
 
         def change(text):
             # Under the lock again: a fork reported meanwhile keeps the session it made live, and a newer write of
-            # James's to the sheaf keeps the session it names.
+            # James's to the rectoverso keeps the session it names.
             if not self._latest(address, seq) or not self._james_may_take(text, sid):
                 return text
             moved.append(sid)
@@ -1455,13 +1455,13 @@ class Handler:
             self.hub.record("session-recorded", address, transcript=sid, by="james")
 
     def _james_may_take(self, text: str, sid: str) -> bool:
-        """Whether James's session `sid` becomes the live one of the sheaf whose text is `text`: the live one is
+        """Whether James's session `sid` becomes the live one of the rectoverso whose text is `text`: the live one is
         James's on the box, another than `sid`, or there is none yet. Never over a member's fork on a laptop."""
         items = work.sessions(visibility.front_matter(text))
         return not items or (items[0]["host"] == self.hub.the_list.cfg.box and items[0]["id"] != sid)
 
     def _sessions(self, req: Req) -> Response:
-        """A member forked one of the sheaf's sessions on their machine (9.12): the fork becomes the sheaf's live
+        """A member forked one of the rectoverso's sessions on their machine (9.12): the fork becomes the rectoverso's live
         session, the first item of `sessions`, under the signed-in member's name whatever the body says."""
         b = req.body
         code = req.code
@@ -1469,7 +1469,7 @@ class Handler:
             # A code reports the fork of the transcript it downloaded: never before, and once (9.13).
             if code.served is False:
                 raise self._code_refused(req, code, "order")
-            address, fm, _ = self._code_sheaf(req, b.get("doc"))
+            address, fm, _ = self._code_rectoverso(req, b.get("doc"))
         else:
             address, fm, _ = self._sheaf(req, b.get("doc"))
         sid, machine = b.get("id"), b.get("machine")
@@ -1482,7 +1482,7 @@ class Handler:
         by = work.member_word(req.member)
         line = work.item(sid, machine, by, time.strftime(work.ISO, time.gmtime()))
         def change(text):
-            # The gate (_sheaf) read the file before the lock: a write that closed the sheaf since is seen here.
+            # The gate (_sheaf) read the file before the lock: a write that closed the rectoverso since is seen here.
             fm = visibility.front_matter(text)
             if not self.hub.may_open(req.member, e.address, fm):
                 raise Refuse(404, "no such document")
@@ -1544,14 +1544,14 @@ class Handler:
                 _shape(type(b.get(k)) is int, f"{k} must be a whole number")
         member = req.member
         starts = op in ("add", "reply")
-        # Tell runs the hub account's own session, which a member is not (9.9); on a sheaf whose live
+        # Tell runs the hub account's own session, which a member is not (9.9); on a rectoverso whose live
         # session is James's on the box it goes to his window instead, by a file the hub drops (9.12), and on
-        # a sheaf whose live session is a member's fork it goes to that fork's relay while it is connected (9.14).
+        # a rectoverso whose live session is a member's fork it goes to that fork's relay while it is connected (9.14).
         route = None
         if member is not None and starts and b.get("tell"):
             route = self._work_route(e.address, e.live.current()[1], req.member)     # James's window or a fork comes first (9.8)
         # An agent that is the reader's target (SPEC 9.8) is not reached: the Tell waits for it, after the write,
-        # on every sheaf where the box and a fork's relay do not take it.
+        # on every rectoverso where the box and a fork's relay do not take it.
         to_agent = (starts and bool(b.get("tell")) and route is None
                     and targets.live(self.hub, targets.stored(self.hub, e.address, member), member) is not None)
         if member is not None and b.get("tell") and not to_agent:
@@ -1568,7 +1568,7 @@ class Handler:
         judged = []
         if member is not None:
             def still_visible(text, opened=None):
-                # The gate (_entry) read the file before the lock: a write that closed the sheaf since is seen here,
+                # The gate (_entry) read the file before the lock: a write that closed the rectoverso since is seen here,
                 # and a live session that moved since keeps Tell from the window or relay it no longer is.
                 fm = visibility.front_matter(text)
                 seen = place.UNJUDGED if opened is None else place.opened_private(self.hub, opened)
@@ -1617,7 +1617,7 @@ class Handler:
             if drop != "written":
                 snap["tellError"] = "The hub could not send this to James's window; the comment is written."
             else:
-                # Open on the sheaf's pages until a reply lands in the thread, or past the Tell wait (#115).
+                # Open on the rectoverso's pages until a reply lands in the thread, or past the Tell wait (#115).
                 self.hub.box_waits.add(e.address, snap["id"], e.live.current()[1], name,
                                        self.hub.the_list.cfg.dirs_for(req.member).tell_dir, req.member.id)
         # The job looks the document up again when it starts: it names its thread in the text the
@@ -1676,7 +1676,7 @@ class Handler:
         """Change the target of a Tell (SPEC 9.8): `session`, `agent:<token name>` or `none`. A member picks
         only one of their own agents; the hub account's session is not theirs to take. The answer is the target
         and what the reader may pick, as /_/doc gives them."""
-        with self._reading(req.body.get("doc")):        # the sheaf is judged and the target stored in one step (9.11)
+        with self._reading(req.body.get("doc")):        # the rectoverso is judged and the target stored in one step (9.11)
             e = self._entry(req, req.body.get("doc"))
             try:
                 targets.pick(self.hub, e.address, req.member, req.body.get("target"))

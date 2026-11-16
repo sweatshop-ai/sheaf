@@ -1,7 +1,7 @@
-"""Work on this (SPEC 9.12): a member downloads the transcript of a sheaf's box-hosted session, reports the
-fork they made of it on their machine, and on a sheaf whose live session runs on the box sends Tell
+"""Work on this (SPEC 9.12): a member downloads the transcript of a rectoverso's box-hosted session, reports the
+fork they made of it on their machine, and on a rectoverso whose live session runs on the box sends Tell
 to James's window by a file the hub drops. Through the handler in proxy mode, with the list's root as the
-members' root: Thierry owns the sheaves, Hans is a member of the project, Bea is a member of another root."""
+members' root: Thierry owns the rectoversos, Hans is a member of the project, Bea is a member of another root."""
 import json
 import os
 import pwd
@@ -204,7 +204,7 @@ STRAY = "33333333-4444-4555-8666-777777777777"
 
 
 def listed(team, work, sid):
-    """The sheaf with `sid` as an older box session of its own, as a push to the root's remote could list it."""
+    """The rectoverso with `sid` as an older box session of its own, as a push to the root's remote could list it."""
     put(team, work, DOC, SHEAF.replace(f"  - {{id: {OLDER}", f"  - {{id: {sid}, host: tiroir-tt, member: james, "
                                        f"date: 2026-10-27T08:00:00Z}}\n  - {{id: {OLDER}", 1))
 
@@ -328,7 +328,7 @@ def test_an_attach_of_two_lines_stops_the_start(tmp_path):
 
 def test_a_root_holder_the_project_does_not_name_gets_the_404_of_a_missing_document(team, box, work):
     """tt-tiroir #116: the download and the fork report are judged as the page is, by `projects.toml` too (8.12):
-    Hans holds the root but the project names Thierry alone, so the shared sheaf is not there for him."""
+    Hans holds the root but the project names Thierry alone, so the shared rectoverso is not there for him."""
     missing = download(team, doc="work/thinkingtoo/tiroir/nothing.md", member=HANS)
     assert download(team, member=HANS).status == 200                # named, he downloads; the hub has read the file
     (work / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["thierry"]\nstatus = "live"\n',
@@ -472,7 +472,7 @@ def git(at, *args):
 @pytest.fixture
 def committing(hub, browser, tmp_path):
     """The list's root a git repo that commits, as on the box; Hans's member block names no e-mail."""
-    repo = tmp_path / "sheaves"
+    repo = tmp_path / "rectoversos"
     repo.mkdir()
     git(repo, "init", "-q", "-b", "main")
     git(repo, "config", "user.name", "the box")
@@ -495,7 +495,7 @@ def committing(hub, browser, tmp_path):
 
 def test_the_fork_is_committed_as_the_signed_in_member(committing):
     repo, team = committing
-    got = team.post("/_/sessions", {"doc": f"sheaves/{DOC}", "id": FORK, "machine": "hans-mac",
+    got = team.post("/_/sessions", {"doc": f"rectoversos/{DOC}", "id": FORK, "machine": "hans-mac",
                                     "member": "thierry", "by": "Thierry", "name": "Thierry",
                                     "email": "thierry@example.com"}, member=HANS)
     assert got.status == 200, got.text
@@ -740,7 +740,7 @@ def test_the_answer_of_a_comment_and_a_later_changed_event_carry_the_drop_in_tel
     cid = got.json()["id"]
     assert got.json()["telling"] == [{"id": cid, "to": "James", "state": "sent"}]
     mine.drain(), theirs.drain()
-    comment(team, work, "note", as_=THIERRY, body="Another thread.")                      # a change of the sheaf
+    comment(team, work, "note", as_=THIERRY, body="Another thread.")                      # a change of the rectoverso
     last = lambda sub: [d for n, d in sub.drain() if n == "changed"][-1]["telling"]
     assert last(mine) == [{"id": cid, "to": "James", "state": "sent"}] and last(theirs) == []
     team.post("/_/comment", {"doc": ADDRESS, "op": "reply", "id": cid, "body": "Done."}, member=THIERRY)
@@ -872,7 +872,7 @@ def test_a_status_nested_too_deep_for_the_parser_is_ignored(team, box, work, mon
 # ── a member's index dot (#139) ──────────────────────────────────────────────
 
 def dot(team, member=HANS):
-    """The dot of the sheaf on `member`'s index."""
+    """The dot of the rectoverso on `member`'s index."""
     got = team.get("/_/index.json", member=member)
     assert got.status == 200, got.text
     return next(d["dot"] for r in got.json()["roots"] for d in r["docs"] if d["doc"] == ADDRESS)
@@ -1037,7 +1037,7 @@ def test_a_page_that_is_not_a_sheaf_of_the_list_has_no_work(team, box, work):
 @pytest.mark.parametrize("owner, member, attach", [("thierry", THIERRY, True), ("hans", HANS, False)])
 def test_an_owner_only_sheaf_in_its_owners_private_folder_has_work_at_its_name(team, box, work, owner, member,
                                                                               attach):
-    # 9.11: the file lives at <client>/<project>/private/<short>/, but the sheaf's address stays its name, so its
+    # 9.11: the file lives at <client>/<project>/private/<short>/, but the rectoverso's address stays its name, so its
     # owner gets Work on this as on a project sheaf: the fork, and the attach only with a shell.
     (work / DOC).unlink()
     client, project, name = DOC.split("/")
@@ -1142,7 +1142,7 @@ def test_the_loopback_port_answers_404_not_405_for_a_member_route(team, box, bro
 
 def test_a_members_save_cannot_write_a_front_matter_onto_a_sheaf(team, box, work):
     # The page cannot edit a front matter (5): a save of `---` paragraphs would list any transcript id as the
-    # sheaf's box session, of another project or of a sheaf the member cannot open.
+    # sheaf's box session, of another project or of a rectoverso the member cannot open.
     from sheafmd.source import md_hash
     bare = put(team, work, "thinkingtoo/tiroir/bare.md", "Hello world\n\nSecond para\n")
     before = (work / "thinkingtoo/tiroir/bare.md").read_text(encoding="utf-8")
@@ -1325,8 +1325,8 @@ def test_the_recorded_session_is_committed_as_james_s_door_token(committing, bro
         **cfg.__dict__, "sessions_dir": sessions, "tell_dir": tell, "work_dir": the_list.Path("/home/james/work"),
         "james_tokens": ("james",)}))
     james_wrote({"sessions": sessions}, NEW)
-    read = json.loads(james_door(browser, james_token, "read", doc=f"sheaves/{DOC}")[1])
-    got = james_door(browser, james_token, "update", session=NEW, doc=f"sheaves/{DOC}",
+    read = json.loads(james_door(browser, james_token, "read", doc=f"rectoversos/{DOC}")[1])
+    got = james_door(browser, james_token, "update", session=NEW, doc=f"rectoversos/{DOC}",
                      text=read["text"] + "\nMore.\n", expected_hash=read["hash"])
     assert not got[0], got[1]
     team.hub.commits.settle()
@@ -1457,7 +1457,7 @@ def test_a_share_whose_rewrite_would_join_a_hidden_item_to_sessions_writes_nothi
     text = ("---\nclient: thinkingtoo\nproject: tiroir\nowner: thierry\nsources: [library:doc-1]\nshared: old\n"
             "sessions:\nshared: other\n" + HIDDEN + "---\n# T\n\n- [ ] Share\n")
     put(team, work, DOC, text)
-    n = [a[0] for a in the_list.read_sheaf(DOC, text).actions].index("Share")
+    n = [a[0] for a in the_list.read_rectoverso(DOC, text).actions].index("Share")
     got = team.post("/_/save", {"doc": ADDRESS, "hash": md_hash(text), "edits": [the_list.tick_edit(text, n, "Share")]},
                     member=THIERRY)
     assert got.status != 200 and (work / DOC).read_text(encoding="utf-8") == text
@@ -1469,7 +1469,7 @@ def test_the_hub_persons_share_on_the_loopback_port_is_written(team, box, browse
     from sheafmd.source import md_hash
     text = SHEAF.replace("sources: [issue:thinkingtoo/tt-tiroir#8]", "sources: [library:doc-1]") + "\n- [ ] Share\n"
     put(team, work, DOC, text)
-    n = [a[0] for a in the_list.read_sheaf(DOC, text).actions].index("Share")
+    n = [a[0] for a in the_list.read_rectoverso(DOC, text).actions].index("Share")
     got = browser.post("/_/save", {"doc": ADDRESS, "hash": md_hash(text), "edits": [the_list.tick_edit(text, n, "Share")]})
     assert got.status == 200, got.text
     assert "visibility: project" in (work / DOC).read_text(encoding="utf-8")
@@ -1613,7 +1613,7 @@ def test_a_drop_names_the_thread_it_came_from(team, box, work):
 
 @pytest.fixture
 def stoppable(team, box, work, tmp_path):
-    """The box's list with a `stop_dir`, and the sheaf holding a Stop James action."""
+    """The box's list with a `stop_dir`, and the rectoverso holding a Stop James action."""
     stop = tmp_path / "stop"
     stop.mkdir()
     cfg = team.hub.the_list.cfg
@@ -1625,7 +1625,7 @@ def stoppable(team, box, work, tmp_path):
 def stop_james(team, work, member=HANS):
     from sheafmd.source import md_hash
     text = (work / DOC).read_text(encoding="utf-8")
-    n = [a[0] for a in the_list.read_sheaf(DOC, text).actions].index("Stop James")
+    n = [a[0] for a in the_list.read_rectoverso(DOC, text).actions].index("Stop James")
     return team.post("/_/save", {"doc": ADDRESS, "hash": md_hash(text),
                                  "edits": [the_list.tick_edit(text, n, "Stop James")]}, member=member)
 
@@ -1735,7 +1735,7 @@ def test_a_waiting_tell_naming_a_sheaf_of_another_project_is_removed_with_no_rep
     assert drops(stoppable) == []
     assert (work / "acme/site/x.md").read_text(encoding="utf-8") == before
     row, = hub_rows("tell-stopped")
-    assert row["said"] == "the drop names a sheaf of another root or project"
+    assert row["said"] == "the drop names a rectoverso of another root or project"
 
 
 # ── the gate's round 2 on PR 59: the newest session James names wins ─────────────────────────

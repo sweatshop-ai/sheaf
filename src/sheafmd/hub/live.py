@@ -50,7 +50,7 @@ class LiveDocument:
         `address` (`<root>/<path>`) together keep every text this document hands a page on disk too
         (SPEC 7.4), so a save made against a page rendered before a restart still merges.
 
-        `md` is the file, or a callable that finds it at each read and write: a sheaf of the list's
+        `md` is the file, or a callable that finds it at each read and write: a rectoverso of the list's
         root is the document of its name wherever its file is (9.11). `hold()` is a context held
         around each write and each render, taken before this document's lock: the lock of the
         sheaf's name, under which no move comes, so the file found under it is the one written or

@@ -8,7 +8,7 @@ Run on the member's machine beside the fork. It holds `GET /_/relay` open throug
 hands each Tell to the session as the hub's own Tell would be (11.4): a peer message in the envelope, by the
 session's adapter, with the Tell's id as `msg_id`, so a Tell sent again after a reconnect is the same message.
 Then it acks it. The token is read from a 0600 file of this user's, never from argv, and is never printed.
-`revoke`, run as the hub's account on the hub's machine, ends every relay token of a sheaf.
+`revoke`, run as the hub's account on the hub's machine, ends every relay token of a rectoverso.
 Registered in COMMANDS and COMMAND_HELP, which the foot of cli.py merges into its own.
 """
 import argparse
@@ -50,7 +50,7 @@ class Refused(Exception):
 
 
 class Gone(Exception):
-    """The hub says the token is no good, or the fork is no longer the sheaf's live session."""
+    """The hub says the token is no good, or the fork is no longer the rectoverso's live session."""
 
 
 def _err(line: str = ""):
@@ -203,7 +203,7 @@ class Relay:
         with res:
             for name, data in events(res):
                 if name == "gone":
-                    raise Gone("the fork is no longer this sheaf's live session")
+                    raise Gone("the fork is no longer this rectoverso's live session")
                 if name != "tell":
                     continue
                 try:
@@ -258,9 +258,9 @@ def cmd_relay(argv: list[str]) -> int:
         prog="sheaf relay", allow_abbrev=False,
         usage="sheaf relay --hub ORIGIN --doc ADDRESS --session ID --token-file FILE [--config-dir DIR]\n"
               "       sheaf relay revoke ADDRESS",
-        description="Take the Tells of one sheaf for your fork of its session, and hand each to that session.")
+        description="Take the Tells of one rectoverso for your fork of its session, and hand each to that session.")
     p.add_argument("--hub", required=True, metavar="ORIGIN", help="the front's origin, https://...")
-    p.add_argument("--doc", required=True, metavar="ADDRESS", help="the sheaf's address")
+    p.add_argument("--doc", required=True, metavar="ADDRESS", help="the rectoverso's address")
     p.add_argument("--session", required=True, metavar="ID", help="the fork's session id")
     p.add_argument("--token-file", required=True, metavar="FILE", help="the relay token, in a 0600 file of yours")
     p.add_argument("--config-dir", metavar="DIR",
@@ -296,7 +296,7 @@ def cmd_relay(argv: list[str]) -> int:
 
 def _revoke(argv: list[str]) -> int:
     p = argparse.ArgumentParser(prog="sheaf relay revoke", usage="sheaf relay revoke ADDRESS",
-                                description="End every relay token of a sheaf (run as the hub's account).")
+                                description="End every relay token of a rectoverso (run as the hub's account).")
     p.add_argument("address")
     args = p.parse_args(argv)
     from .hub.relay import Relays
@@ -308,5 +308,5 @@ def _revoke(argv: list[str]) -> int:
 COMMANDS.update({"relay": cmd_relay})
 COMMAND_HELP.update({
     "relay": ("relay --hub ORIGIN --doc ADDRESS --session ID --token-file FILE | relay revoke ADDRESS",
-              "take a sheaf's Tells for your fork of its session; revoke: end a sheaf's relay tokens"),
+              "take a rectoverso's Tells for your fork of its session; revoke: end a rectoverso's relay tokens"),
 })

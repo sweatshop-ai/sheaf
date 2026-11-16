@@ -1,6 +1,6 @@
 """
 sheafmd.hub.codes — the sign-in codes of `tiroir work` (SPEC 9.13): short-lived, used once, good for one member,
-one sheaf and its one transcript, kept in the hub's memory only.
+one rectoverso and its one transcript, kept in the hub's memory only.
 
     Codes()                         the hub's codes; a restart drops them all
     .issue(member, doc, session)    (the code, its Code), or TooMany past the member's 20 an hour
@@ -26,7 +26,7 @@ HASH_RE = re.compile(r"[0-9a-f]{64}")
 TTL = 600                       # seconds from issue, never extended by use (decision 2)
 PER_HOUR = 20                   # codes a member may ask for in a rolling hour: bounds the hub's memory
 NO_GOOD = "This sign-in code is no good: get a new one from Work on this."
-NOT_OPEN = "This sheaf is not open to you with this code: get a code from this sheaf's Work on this."
+NOT_OPEN = "This rectoverso is not open to you with this code: get a code from this rectoverso's Work on this."
 TOO_MANY = "Too many sign-in codes: wait a few minutes."
 _clock = time.time
 
@@ -39,8 +39,8 @@ class TooMany(Exception):
 class Code:
     id: str                     # 8 hex characters, for the rows
     member: str                 # the front's id of the member who asked
-    doc: str                    # the sheaf's address
-    session: str                # the session it serves: the sheaf's forkable one when it was made
+    doc: str                    # the rectoverso's address
+    session: str                # the session it serves: the rectoverso's forkable one when it was made
     expires: float
     served: bool = False        # its GET answered
     spent: bool = False         # its POST answered, or its session moved on

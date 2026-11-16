@@ -1,4 +1,4 @@
-"""The list over two roots (SPEC 9.10, 9.11): a sheaf of a member's private root is a row of that member alone, and a tick
+"""The list over two roots (SPEC 9.10, 9.11): a rectoverso of a member's private root is a row of that member alone, and a tick
 on it commits in the private repo and never in the list's. Each refusal has the member's own call as its positive control,
 on the same route."""
 import subprocess

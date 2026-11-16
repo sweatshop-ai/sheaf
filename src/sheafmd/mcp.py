@@ -372,7 +372,7 @@ class Door:
             except NotFound:
                 raise _absent(doc) from None
             if self._judged(caller):
-                # Before any other check of the call, so no answer tells a sheaf the caller may not see from none;
+                # Before any other check of the call, so no answer tells a rectoverso the caller may not see from none;
                 # each tool judges again on the text it reads.
                 try:
                     judged = self.hub.judged(address)
@@ -406,9 +406,9 @@ class Door:
 
     def _sees(self, fm: dict, address: str, caller: Caller, owns: bool | None = None,
               opened=place.UNJUDGED) -> bool:
-        """Whether `caller` may see the sheaf at `address` whose front matter is `fm` (9.11). In proxy mode a
+        """Whether `caller` may see the rectoverso at `address` whose front matter is `fm` (9.11). In proxy mode a
         token acts for the member whose `tokens` name it and sees what that member sees, in that member's
-        roots only; a token bound to nobody sees every root (9.7) and no sheaf that is its owner's alone. The
+        roots only; a token bound to nobody sees every root (9.7) and no rectoverso that is its owner's alone. The
         key is the hub's own account, which reads every file. `owns`, when given, is `member_owns` for the
         token's member, already asked."""
         if not self._judged(caller):
@@ -491,8 +491,8 @@ class Door:
         of it. Through the document's Live Document when the hub has one,
         so open tabs hear of it at once and a Tell wait sees an action reply; straight into the
         file when the hub holds no page for it. Either way the caller's sight of it (9.11) is judged
-        again on the file under its lock, so a sheaf that closed since the check takes nothing. Both
-        under the lock of the sheaf's name (9.11), the file found again under it, so no move comes
+        again on the file under its lock, so a rectoverso that closed since the check takes nothing. Both
+        under the lock of the rectoverso's name (9.11), the file found again under it, so no move comes
         between finding the file and writing it."""
         noted = False
 
@@ -531,7 +531,7 @@ class Door:
 
     # ── the tools ────────────────────────────────────────────────────────────
     def _open_in(self, address: str, whole: bool = False) -> tuple:
-        """(open threads, front matter, mtime_ns, the member whose private root holds it, the text) of the file the sheaf
+        """(open threads, front matter, mtime_ns, the member whose private root holds it, the text) of the file the rectoverso
         at `address` names, from one open beneath its root: all of it is of that descriptor (9.11). The text is None
         unless `whole`, which reads it from that descriptor even when the threads are kept."""
         top, rel = self.hub.where(address)
@@ -588,7 +588,7 @@ class Door:
             # The files of a member's private root are listed to that member alone, under the list root's names (rule D).
             privates = [p for p in place.private_listed(hub, member) if p.closed() is None and not p.missing()] if placed else []
             for src, found in [(root, f) for f in markdown_files(root)] + [(p, f) for p in privates for f in markdown_files(p)]:
-                # A sheaf of the list's root is listed by its name (9.11), wherever its file is; a private path is
+                # A rectoverso of the list's root is listed by its name (9.11), wherever its file is; a private path is
                 # none. Each file is read under its name's lock, as every read.
                 logical = place.logical(found) if placed else None
                 with place.held(hub, f"{root.name}/{logical}") if logical else contextlib.nullcontext():
@@ -614,7 +614,7 @@ class Door:
                 if member is not None and folder not in owned:
                     owned[folder] = hub.member_owns(member, address)
                 if not self._sees(fm, address, caller, owned.get(folder), private):
-                    continue                                   # nor a sheaf the caller may not see (9.11)
+                    continue                                   # nor a rectoverso the caller may not see (9.11)
                 tells = self._tells(address, text, agent) if text is not None else []
                 if args.get("open_only", True) and not threads and not tells:
                     continue
@@ -732,7 +732,7 @@ class Door:
                 if root is not None and self._hidden_root(root, caller):
                     root = None     # a root of another member's is none (9.11), before the link's message
                 if root is not None and self.hub.roots.hidden(root):
-                    # A private root has no address (rule E), and a sheaf is not made in it by its path: to anyone
+                    # A private root has no address (rule E), and a rectoverso is not made in it by its path: to anyone
                     # but its member and the key a path in no root, to them the refusal of a private create (9.11).
                     if self._judged(caller) and place.in_private(self.hub, os.path.realpath(Path(doc))) not in (
                             None, getattr(self._member(caller), "id", None)):
@@ -771,7 +771,7 @@ class Door:
             raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path")
         placed = place.applies(self.hub, root.name)
         if placed and place.names_private(rel):
-            raise ToolError(f"{_named(args['doc'])} cannot be made: the hub places owner-only sheaves itself: name "
+            raise ToolError(f"{_named(args['doc'])} cannot be made: the hub places owner-only rectoversos itself: name "
                             "`<client>/<project>/<name>.md`.", "path")
         try:
             if placed and place.undecided(self.hub, rel):      # a private root that cannot be looked at may hold the name
@@ -798,28 +798,28 @@ class Door:
         return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text)}
 
     def _make(self, root, top: Path, rel: str, name: str | None, address: str, text: str, caller: Caller):
-        """The file of a create, at its home when the hub places it (9.11): the text written. The sheaf's address is
+        """The file of a create, at its home when the hub places it (9.11): the text written. The rectoverso's address is
         its name wherever its file is."""
         judge = place.judge_for(self.hub, root)
         try:
-            # The owner is judged by the list's row for the address, which a sheaf already there may have: what
+            # The owner is judged by the list's row for the address, which a rectoverso already there may have: what
             # the path alone answers, walked as the write walks it, comes before every answer that judgement
             # shapes (the refusal, the size with the owner line), so none tells what is there, nor what a link
             # on the way points to.
             check_create(top, rel, judge)
-            # A sheaf's name is taken by its file at home and at every private home (9.11), whoever's it is.
+            # A rectoverso's name is taken by its file at home and at every private home (9.11), whoever's it is.
             if name is not None and place.taken(self.hub, root, name):
                 raise FileExistsError(errno.EEXIST, "File exists", rel)
         except Private:
             raise
         except OSError as e:
             raise _not_made(address, e) from None
-        # Every create, open or not, tells the list its address has no file now: the row of a sheaf that went
+        # Every create, open or not, tells the list its address has no file now: the row of a rectoverso that went
         # there would judge the new one (its owner on a later update, its row on the page) until the next poll (#34).
         self.hub.assignees(address, {})
         text = self._door_text(text, None, address, caller)
         self._check_size(text)      # again: the owner `_owned` gave it is part of the page
-        # Made at its home (9.11), so no file, and no commit, ever holds a sheaf that is its owner's alone at the
+        # Made at its home (9.11), so no file, and no commit, ever holds a rectoverso that is its owner's alone at the
         # project's path: one with no home is not made.
         private_home = False
         if name is not None and (found := place.home_in(self.hub, root, name, text)) != (root, rel):
@@ -873,13 +873,13 @@ class Door:
         return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text), "changed": before != text}
 
     def _updated(self, address: str, args: dict, text: str, expected: str, caller: Caller, moved: list):
-        """The write of an update, and the sheaf's file moved to its home (9.11): (the text before, the text
+        """The write of an update, and the rectoverso's file moved to its home (9.11): (the text before, the text
         written, the path in the root the file left or None). A move `ahead` makes is put in `moved` as it is made,
         so the caller commits it whatever comes after."""
         written = [text]
 
         def change(now_text, opened):
-            # Each check on the file as it is, under its lock; a sheaf the caller may not see first, so a
+            # Each check on the file as it is, under its lock; a rectoverso the caller may not see first, so a
             # wrong hash does not tell it from no document (9.11). Judged on the file this open holds.
             self._seen(now_text, address, caller, args["doc"], place.opened_private(self.hub, opened))
             if md_hash(now_text) != expected:
@@ -891,7 +891,7 @@ class Door:
             return written[0]
 
         def move(now_text, new):
-            # A text that opens or closes the sheaf moves its file to its home before it is written there (9.11); one
+            # A text that opens or closes the rectoverso moves its file to its home before it is written there (9.11); one
             # that cannot go there is not written.
             try:
                 gone = place.ahead(self.hub, address, now_text, new)
@@ -927,7 +927,7 @@ class Door:
 
     def _visible(self, text: str, old: str | None) -> str:
         """In proxy mode, the text a door write puts on disk by the rule of visibility (9.11): the caller is
-        an assistant, so its `visibility` and `shared` are not read, and a private source makes the sheaf
+        an assistant, so its `visibility` and `shared` are not read, and a private source makes the rectoverso
         its owner's alone. With no member to hide a page from, the text as sent."""
         if getattr(self.hub, "proxy", None) is None:
             return text
@@ -942,7 +942,7 @@ class Door:
         return out
 
     def _owned(self, text: str, address: str, caller: Caller) -> str:
-        """`text`, a door write's text after `_visible`, when the sheaf it makes at `address` has an owner. A
+        """`text`, a door write's text after `_visible`, when the rectoverso it makes at `address` has an owner. A
         sheaf that is its owner's alone and that no member owns is open to nobody, the token that wrote it
         included, and no door write can mend it (9.11). So when no member owns it and it names no `owner`, a
         token bound to a member gives it that member's `short`; else the write is refused. One its issue's
@@ -953,7 +953,7 @@ class Door:
         fm = visibility.front_matter(text)
         if visibility.effective(fm) == "project":
             return text
-        # an owner whose roots do not hold the sheaf cannot open it either (9.9)
+        # an owner whose roots do not hold the rectoverso cannot open it either (9.9)
         everyone = self.hub.members_owning(self.hub.proxy.members.values(), address)
         member = self._member(caller)
         owners = visibility.owner_of(fm, everyone, self.hub.assignees(address, fm))

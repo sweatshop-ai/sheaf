@@ -105,7 +105,7 @@ def runs_from_a_cache(command: list[str]) -> str | None:
 
 
 def cache_refusal(tool: str, path: str) -> str:
-    """The start of the refusal of a sheaf that runs from `tool`'s temporary copy at `path`."""
+    """The start of the refusal of a rectoverso that runs from `tool`'s temporary copy at `path`."""
     return f"this sheaf runs from a temporary copy in {tool}'s cache ({path}), {_CACHE_GOES[tool]}."
 
 
@@ -235,9 +235,9 @@ def _environment() -> tuple[str, dict]:
 
 def install(say, make_room=lambda: None, *, install_line):
     """Write the definition and start the service. `make_room` runs just before the service is
-    started: it stops a hub that a command started, which holds the port the service needs. A sheaf
+    started: it stops a hub that a command started, which holds the port the service needs. A rectoverso
     that runs from a temporary copy (`uvx`, `pipx run`) installs nothing: the service would run a
-    path that goes. `install_line()` is the command that installs this sheaf for good, for that
+    path that goes. `install_line()` is the command that installs this rectoverso for good, for that
     refusal, with the note that follows it when the source URL had a query or a fragment."""
     k = kind()
     if k is None:

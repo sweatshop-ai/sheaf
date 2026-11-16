@@ -1,4 +1,4 @@
-"""Rule E (SPEC 9.11): the private root has no address of its own. A sheaf of it is named `<list root>/<client>/
+"""Rule E (SPEC 9.11): the private root has no address of its own. A rectoverso of it is named `<list root>/<client>/
 <project>/<name>.md` and by nothing else: not by the root's own name on any route, not by the root's real path at the
 door, not by `sheaf open`. Each refusal has the owner's call as its positive control, on the same route."""
 import pytest
@@ -41,13 +41,13 @@ def test_private_root_has_no_address(world):
     is_error, said = call(w.door, "read", doc=direct)
     _, none = call(w.door, "read", doc="nowhere/acme/blog/post.md")
     assert is_error and said.replace(direct, "X") == none.replace("nowhere/acme/blog/post.md", "X")
-    url = f"http://127.0.0.1:{w.hub.port}/{direct}"                         # nor does its page's URL name the sheaf
+    url = f"http://127.0.0.1:{w.hub.port}/{direct}"                         # nor does its page's URL name the rectoverso
     assert call(w.door, "read", token=w.tokens["tok-a"], doc=url)[0]
     assert not call(w.door, "read", token=w.tokens["tok-a"], doc=url.replace(direct, w.address))[0]
     is_error, said = call(w.door, "documents", root=p)
     assert is_error and said == call(w.door, "documents", root="nowhere")[1].replace("nowhere", p)
     assert str(w.two.private_repo) not in str(call(w.door, "documents", open_only=False))
-    # positive control: its member opens the same sheaf by its list name, on the same routes
+    # positive control: its member opens the same rectoverso by its list name, on the same routes
     assert w.front.get(f"/{w.address}", member=A).status == 200
     assert w.front.get(f"/_/doc?doc={w.address}", member=A).status == 200
     assert "Secret words." in w.front.get(f"/_/mount?doc={w.address}", member=A).json()["html"]

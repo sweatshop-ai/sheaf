@@ -1,4 +1,4 @@
-"""The action buttons at the top of a sheaf's page (SPEC 10.11, #111): the page draws the boxes of the eight words
+"""The action buttons at the top of a rectoverso's page (SPEC 10.11, #111): the page draws the boxes of the eight words
 as the list's buttons, a one-off red with the 5 second Undo and locked once pressed; Share is a tick box (test_page_share_box.py). A press posts
 the list's tick (`POST /_/tick`, 9.10): the markdown on disk is what a tick writes, `- [x] <word>`."""
 import re
@@ -657,7 +657,7 @@ def test_a_sign_out_while_a_press_is_out_does_not_reload_under_its_answer(sheaf,
 
 # The P3s #144's gates left (#148).
 
-REFUSED = '{"ok": false, "error": "the sheaf changed since the page read it (Approve): reload the page"}'
+REFUSED = '{"ok": false, "error": "the rectoverso changed since the page read it (Approve): reload the page"}'
 
 
 def test_an_upgrade_while_a_press_is_out_says_its_refusal_again_on_the_page_it_brings(sheaf, site):
@@ -681,7 +681,7 @@ def test_an_upgrade_while_a_press_is_out_says_its_refusal_again_on_the_page_it_b
     p.clock.run_for(100)                                # the wait for the page's writes ends after 50 ms
     reloaded(p)
     p.wait_for_selector("button.rd-act")
-    toasted(p, "the sheaf changed", on_clock=True)
+    toasted(p, "the rectoverso changed", on_clock=True)
 
 
 def test_a_reload_asked_only_by_an_upgrade_saves_what_was_typed_during_the_press(sheaf, site):

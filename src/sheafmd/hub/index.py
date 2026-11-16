@@ -190,7 +190,7 @@ class Index:
         # What the open indexes were last told, per document: (dot, open, unread, mtime). Only
         # kept up while an index stream is open; the first one that opens starts it afresh.
         self._board: dict[str, tuple] = {}
-        self._private_docs: set[str] = set()       # the names the board has met as a member's private sheaf (`data(board=True)`)
+        self._private_docs: set[str] = set()       # the names the board has met as a member's private rectoverso (`data(board=True)`)
         self._swept = 0.0
         # A sweep runs on a thread of its own, one at a time: listing a root can take git up to
         # 20 s, and the watcher's pass must go on meanwhile (8.9). Every look at a document outside
@@ -300,10 +300,10 @@ class Index:
         root, row = got if got else (roots_mod.Address.parse(address).root, None)
         return Status({"doc": address, "root": root, "dot": row and row["dot"],
                        "open": row["open"] if row else 0, "changed": row and row["mtime"]}, files, at, sig,
-                      members_only=self._met_private(address))      # a private sheaf is no event of the hub's person
+                      members_only=self._met_private(address))      # a private rectoverso is no event of the hub's person
 
     def _met_private(self, address: str) -> bool:
-        """Whether the name `address` is, or was, a member's private sheaf: judged on the name now, and kept, so the
+        """Whether the name `address` is, or was, a member's private rectoverso: judged on the name now, and kept, so the
         end of it (the file gone, the name held twice) is no more the hub's person's than the rest."""
         if address not in self._private_docs and place.held_privately(self.hub, address):
             self._private_docs.add(address)
@@ -492,7 +492,7 @@ class Index:
     @contextlib.contextmanager
     def _opened(self, address: str):
         """`(path, the file opened beneath its root)` of the document the hub would serve at `address`, or None when
-        `resolve` refuses it or the file cannot be opened. A sheaf's name in the list's root is its file's, wherever
+        `resolve` refuses it or the file cannot be opened. A rectoverso's name in the list's root is its file's, wherever
         that is (9.11). The one open of a row: what is judged private and what is counted are that descriptor's."""
         with contextlib.ExitStack() as stack:
             try:
@@ -521,7 +521,7 @@ class Index:
             return
         at = roots_mod.Address.parse(address)
         root, got = hub.roots.get(at.root), None
-        with place.held(hub, address):              # every read of a sheaf's file holds its name's lock (9.11)
+        with place.held(hub, address):              # every read of a rectoverso's file holds its name's lock (9.11)
             with self._opened(address) as found:
                 if root is not None and found:
                     path, op = found
@@ -569,7 +569,7 @@ class Index:
         when the listing leaves it out (a gitignored file the person named). `rendered` lists
         only those, with no listing of any folder: what `sheaf list` asks for. For a `member` of
         proxy mode, only their roots, and in them only their documents: a root nested inside one
-        of theirs is another root (9.9), and a sheaf that is another member's alone is none (9.11). `board` adds every
+        of theirs is another root (9.9), and a rectoverso that is another member's alone is none (9.11). `board` adds every
         member's private files, for the board that the streams are told from (`_rows`): never for a person's page."""
         hub = self.hub
         waiting, running = self._live_state()
@@ -599,7 +599,7 @@ class Index:
             placed = not rendered and place.applies(hub, root.name)
             top = Path(os.path.realpath(root.path))
             for f in listing.docs:
-                # A sheaf of the list's root is listed by its name (9.11); a private path is none. Each file is
+                # A rectoverso of the list's root is listed by its name (9.11); a private path is none. Each file is
                 # read under its name's lock, as every read.
                 logical = place.logical(f.rel) if placed else None
                 with place.held(hub, f"{root.name}/{logical}") if logical else contextlib.nullcontext():
@@ -630,7 +630,7 @@ class Index:
                             if row := self._row(address, path, f.stat, waiting, running, member, private_ok=True):
                                 rows.append(row)
             for address in sorted(a for a in named - have if a.startswith(roots_mod.Address.prefix(root.name))):
-                with place.held(hub, address), self._opened(address) as found:   # every read of a sheaf's file holds its name's lock (9.11)
+                with place.held(hub, address), self._opened(address) as found:   # every read of a rectoverso's file holds its name's lock (9.11)
                     if not found:
                         continue
                     path, op = found

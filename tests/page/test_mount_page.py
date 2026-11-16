@@ -55,7 +55,7 @@ KEEP_ROOT = """(() => { const attach = Element.prototype.attachShadow;
 
 
 class Front:
-    """A tab on the front with the sheaf mounted in its pane."""
+    """A tab on the front with the rectoverso mounted in its pane."""
 
     def __init__(self, page, site):
         self.page, self.site, self.errors = page, site, []
@@ -255,7 +255,7 @@ document.getElementById('h').attachShadow({mode: 'closed'}).innerHTML = '<p>Ripe
 
 def copies_from_a_closed_root(context):
     """Whether this browser's Ctrl+C puts a selection inside a closed shadow root on the clipboard at all, on a
-    page with none of the sheaf's code. Playwright's WebKit build copies nothing (checked 2026-11-09)."""
+    page with none of the rectoverso's code. Playwright's WebKit build copies nothing (checked 2026-11-09)."""
     p = context.new_page()
     try:
         p.set_content(SHADOW_PROBE)
@@ -268,7 +268,7 @@ def copies_from_a_closed_root(context):
 
 def test_a_real_ctrl_c_on_a_bubble_of_the_mounted_thread_copies_that_text_not_the_cited_passage(any_front):
     if not copies_from_a_closed_root(any_front.page.context):
-        pytest.xfail("this browser copies nothing from a selection in a closed shadow root, with or without the sheaf")      # not a skip: CI fails a run that skips
+        pytest.xfail("this browser copies nothing from a selection in a closed shadow root, with or without the rectoverso")      # not a skip: CI fails a run that skips
     f = any_front.open()
     f.drag(f.point("main", "about", end=False), f.point("main", "apples", end=True))
     until(lambda: f.has("#rd-popover textarea"), what="the box, opened by the selection")
@@ -390,7 +390,7 @@ def test_a_mount_that_failed_can_be_tried_again_on_the_same_pane(front):
 
 
 def test_a_pane_mounts_again_after_an_unmount_and_over_a_page_still_standing(front):
-    """The loader moves from a sheaf to the list and back in the same pane."""
+    """The loader moves from a rectoverso to the list and back in the same pane."""
     front.open()
     front.page.evaluate("window.__page.unmount()")
     _mount_again(front, "{doc: %s}" % json.dumps(DOC))
@@ -525,7 +525,7 @@ def test_a_remount_that_fails_says_so_in_the_page_and_the_next_one_still_works(f
     front.site.file.write_text(front.site.file.read_text().replace("about pears", "about plums"), encoding="utf-8")
     until(lambda: "401" in (front.js("const t = root.getElementById('rd-toast'); return t.className.includes('err') "
                                      "? t.textContent : '';") or ""), what="the failure said in the page")
-    # The keep the reload wrote is not left for a later mount of this sheaf in the tab to restore.
+    # The keep the reload wrote is not left for a later mount of this rectoverso in the tab to restore.
     assert front.page.evaluate("Object.keys(sessionStorage).filter((k) => k.endsWith('rd-keep'))") == []
     refuse.clear()
     front.site.file.write_text(front.site.file.read_text().replace("about plums", "about figs"), encoding="utf-8")
@@ -674,7 +674,7 @@ def test_a_link_to_a_page_of_the_hub_goes_to_the_loader_and_a_modified_click_doe
     assert front.page.evaluate("window.__moves") == ["/list?show=mine"]
 
 
-# A sheaf's own action buttons (page.css, #rd-actions): a one-off, a toggle, and each pressed, put at the top of `arg`
+# A rectoverso's own action buttons (page.css, #rd-actions): a one-off, a toggle, and each pressed, put at the top of `arg`
 # (the mounted page's wrapper) or of the body; their colours and the background they stand on.
 ACTS = """const top = arg ? root.querySelector(arg) : document.body;
   let bar = root.getElementById('rd-actions');

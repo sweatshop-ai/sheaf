@@ -229,7 +229,7 @@ class Roots:
         self._roots: dict[str, Root] = {}
         self._added: dict[str, str] = {}
         # `(root, rel) -> (root, rel)`: the root and the path in it of the file an address names, where it is not the
-        # address's own root and path, or NotFound (a sheaf's name in the list's root, 9.11; the file may be in a
+        # address's own root and path, or NotFound (a rectoverso's name in the list's root, 9.11; the file may be in a
         # private root). Set by the hub; None names every file by its own path.
         self.placer = None
         self.private_paths: Callable[[], Iterable[str]] = tuple     # the real paths of the private roots (set by the hub)

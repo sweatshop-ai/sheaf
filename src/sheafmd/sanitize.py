@@ -29,7 +29,7 @@ processing instructions and declarations (a browser ends them at the first ">"),
 comment a browser could end before this parser does (a "--!>", or a start with ">").
 A second pass over the result makes sure that what came out is a fixed point.
 
-MOUNT MODE (`sanitize(..., mount=True)`, #116 step 2). The sheaf page used to run in a frame under a CSP of its own;
+MOUNT MODE (`sanitize(..., mount=True)`, #116 step 2). The rectoverso page used to run in a frame under a CSP of its own;
 mounted in the front's document it has none, so this module also closes what that CSP closed. Beyond the above:
 audio, video, picture and their sources are removed, an <img> is kept only for a relative path or data:image/(png|jpeg|gif|webp)
 (any other address is a tracking pixel; the alt text stays), svg <use>, <image>, <foreignObject>, animation and links, and all

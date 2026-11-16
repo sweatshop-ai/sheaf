@@ -117,10 +117,11 @@ class SessionTells:
         return self._change(change)
 
     # ── listed: the long-poll ────────────────────────────────────────────────
-    def take(self, row, session: str, wait: float, message) -> list:
+    def take(self, row, session: str, wait: float, message, gone=None) -> list:
         """The Tells waiting for this token's `session`, as they are listed to it: each marked seen at its first listing.
         With none, holds up to `wait` seconds (at most MAX_WAIT) for one. `message(t)` builds a Tell's words, None for
-        a thread that is no longer open (the Tell then ends as cancelled), False for a page it cannot read now (it stays). Raises Refused 429 past POLLS_PER_TOKEN."""
+        a thread that is no longer open (the Tell then ends as cancelled), False for a page it cannot read now (it stays). `gone()` says the caller closed the connection: the poll then returns at once and
+        frees its slot, so a reconnect is not refused for the rest of the wait. Raises Refused 429 past POLLS_PER_TOKEN."""
         if not valid_session(session):
             raise Refused(400, NOT_ONE.format(n=MAX_SESSION))
         key = (row.name, row.id)
@@ -138,10 +139,10 @@ class SessionTells:
                     self._heard[(*key, session)] = now
                 got = self._listed(row, session, message)
                 left = end - self._now()
-                if got or left <= 0:
+                if got or left <= 0 or (gone is not None and gone()):
                     return got
                 with self._wake:                            # asleep until a Tell is queued (`_change` wakes it) or the time is up
-                    self._wake.wait(min(left, 1.0))
+                    self._wake.wait(min(left, 0.25 if gone is not None else 1.0))
         finally:
             with self._lock:
                 self._polling[key] -= 1

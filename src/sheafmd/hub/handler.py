@@ -134,6 +134,7 @@ class Req:
     member: object = None            # the proxy.Member the proxy socket let in
     member_id: str = ""              # the member header, once the connection is the proxy's: every row names it
     code: object = None              # the codes.Code that let the request in, instead of the member header (9.13)
+    gone: object = None              # `gone()`: whether the caller closed the connection (a poll that waits asks it); None in a test
     relay: dict | None = None        # the relays.json row of the relay token that let the request in (9.14)
 
 
@@ -297,7 +298,7 @@ class Handler:
             self.routes.setdefault(path, {})[method] = (name, who, fn)
 
     # ── the front door ───────────────────────────────────────────────────────
-    def handle(self, method: str, target: str, headers: dict, body=b"", conn=None, via="port") -> Response:
+    def handle(self, method: str, target: str, headers: dict, body=b"", conn=None, via="port", gone=None) -> Response:
         """`body` is the bytes, or a function that reads them off the wire: it is called only for
         a POST that has passed the Host, credential and Origin checks. `conn` is the connection
         the request came in on (a `peer.Conn`): the sign-in link looks up who owns it (9.3). `via`
@@ -307,7 +308,7 @@ class Handler:
             headers = {str(k).lower(): str(v) for k, v in headers.items()}
             path, _, qs = target.partition("?")
             req = Req(method, path, {k: v[0] for k, v in parse_qs(qs, keep_blank_values=True).items()},
-                      headers, headers.get("host", ""), conn=conn, via=via)
+                      headers, headers.get("host", ""), conn=conn, via=via, gone=gone)
             res = self._route_proxy(req, body) if via == "proxy" else self._route(req, body)
         except Refuse as r:
             res = self._refusal(req, r)
@@ -1913,9 +1914,9 @@ class Handler:
             james = req.token.name in names
             caller = Caller(req.token.signed(self.hub.person, self.hub.proxy), req.token,
                             session=req.headers.get("x-james-session", "") if james else None,
-                            own_session=bool(own) and req.token.name == own, declared=self._declared(req))
+                            own_session=bool(own) and req.token.name == own, declared=self._declared(req), gone=req.gone)
         else:
-            caller = Caller(req.display, declared=self._declared(req))
+            caller = Caller(req.display, declared=self._declared(req), gone=req.gone)
         status, answer = self.door.handle(req.raw, caller)
         return _json(status, answer) if answer is not None else Response(status)
 

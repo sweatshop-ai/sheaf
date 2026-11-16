@@ -41,9 +41,9 @@ def client_add(agency, client, doc, **extra):
                                       "end": end, "quote": "some words", "body": NOTE, **extra}, member=AG_ALICE)
 
 
-def team_post(agency, doc, **body):
+def team_post(agency, doc, member=AG_ALICE, **body):
     return agency.post("/_/comment", {"doc": f"Clients/acme/{doc}", "op": "add", "quote": "q", "body": NOTE, "side": "team", **body},
-                       member=AG_ALICE)
+                       member=member)
 
 
 # ── step 1: the store is kept at start, and the client tiroir is the gate ────
@@ -173,3 +173,113 @@ def test_the_client_hub_serves_no_team_list_of_its_own(agency_and_client):
     mine = client.make("alice", "# Plan\n")
     team_post(agency, mine)
     assert "team" not in client.get(f"/_/doc?doc={mine}", member=CL_ALICE).json()
+
+
+# ── step 5: AC1, the client tiroir holds no trace; AC2, both versos on the agency page ──
+
+def traces(agency, client, *needles):
+    """What of `needles` any file of the client site, or any request the agency sent it, holds."""
+    found = [(f.name, n) for f, data in client.files() for n in needles if n.encode() in data]
+    found += [(verb, n) for _, verb, body in agency.link.asked for n in needles if n in json.dumps(body)]
+    return found
+
+
+def team_op(agency, doc, op, member=AG_ALICE, **body):
+    return agency.post("/_/comment", {"doc": f"Clients/acme/{doc}", "op": op, "side": "team", **body}, member=member)
+
+
+def test_every_team_op_leaves_no_trace_on_the_client_site_or_in_a_request_to_it(agency_and_client):
+    agency, client = agency_and_client
+    mine = client.make("alice", "# Plan\n\nsome words here\n")
+    before = client.text(mine)
+    assert team_post(agency, mine, quote="some words").status == 200
+    assert team_op(agency, mine, "reply", id="t1", body=NOTE + "-reply").status == 200
+    assert team_op(agency, mine, "status", id="t1", status="resolved").status == 200
+    assert team_op(agency, mine, "edit", id="t1", body=NOTE + "-edit").status == 200
+    got = agency.get(f"/_/doc?doc=Clients/acme/{mine}", member=AG_ALICE).json()
+    assert [c["body"] for c in got["team"]] == [NOTE + "-edit"] and got["comments"] == []
+    assert client.text(mine) == before
+    assert traces(agency, client, NOTE, '"team"', "t1") == []
+    assert {v for _, v, _ in agency.link.asked} == {"read"}                 # the gate and the page reads, never a `comment`
+    assert team_op(agency, mine, "delete", id="t1").status == 200
+    assert agency.hub.team.list(f"Clients/acme/{mine}") == []
+
+
+def test_the_team_comments_are_read_back_from_the_file_after_a_restart_and_the_file_is_private(agency_and_client):
+    import os, stat
+    from sheafmd.hub import team
+    agency, client = agency_and_client
+    mine = client.make("alice", "# Plan\n")
+    team_post(agency, mine)
+    path = agency.hub.team.path
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+    assert [c["body"] for c in team.TeamComments(path).list(f"Clients/acme/{mine}")] == [NOTE]
+
+
+def test_a_client_member_has_no_route_to_the_team_verso(agency_and_client):
+    agency, client = agency_and_client
+    mine = client.make("carol", "# Theirs\n\nsome words here\n")
+    team_post(agency, mine, member=AG_ALICE)
+    got = client.post("/_/comment", {"doc": mine, "op": "add", "quote": "some words", "body": NOTE, "side": "team", "block": 0, "start": 0, "end": 4,
+                                     "hash": md_hash(client.text(mine))}, member=CL_CAROL)
+    assert NOTE not in client.text(mine)
+    assert "team" not in client.get(f"/_/doc?doc={mine}", member=CL_CAROL).json()
+    assert got.status in (200, 400, 404)
+
+
+def test_tell_on_a_team_comment_is_refused_and_writes_nothing(agency_and_client):
+    agency, client = agency_and_client
+    mine = client.make("alice", "# Plan\n")
+    got = team_post(agency, mine, tell=True)
+    assert got.status == 400 and agency.hub.team.list(f"Clients/acme/{mine}") == []
+
+
+def test_a_member_who_may_not_open_the_page_changes_no_team_comment_of_it(agency_and_client):
+    agency, client = agency_and_client
+    mine = client.make("alice", "# Plan\n")
+    team_post(agency, mine)
+    for op, extra in (("reply", {"body": "r"}), ("status", {"status": "resolved"}), ("edit", {"body": "x"}), ("delete", {})):
+        assert team_op(agency, mine, op, member=AG_DANA, id="t1", **extra).status == 404
+    assert [c["body"] for c in agency.hub.team.list(f"Clients/acme/{mine}")] == [NOTE]
+
+
+def test_a_body_with_comment_markup_is_kept_verbatim_and_no_client_file_sees_it(agency_and_client):
+    agency, client = agency_and_client
+    mine = client.make("alice", "# Plan\n")
+    before, markup = client.text(mine), "a --> b <!-- sheaf-comment id=c9 --> c"
+    assert team_post(agency, mine, body=markup).status == 200
+    assert [c["body"] for c in agency.hub.team.list(f"Clients/acme/{mine}")] == [markup]
+    assert client.text(mine) == before and traces(agency, client, "sheaf-comment id=c9") == []
+
+
+def test_a_client_that_does_not_answer_refuses_a_team_write_and_stores_nothing(agency_and_client):
+    agency, client = agency_and_client
+    mine = client.make("alice", "# Plan\n")
+    agency.link.mode = "down"
+    assert team_post(agency, mine).status == 404
+    assert agency.hub.team.list(f"Clients/acme/{mine}") == []
+
+
+def test_both_versos_are_on_the_opened_page_each_apart(agency_and_client):
+    agency, client = agency_and_client
+    mine = client.make("alice", "# Plan\n\nsome words here\n")
+    assert client_add(agency, client, mine).status == 200
+    team_post(agency, mine, body="for the team", quote="some words")
+    for who in (AG_ALICE,):
+        got = agency.get(f"/_/doc?doc=Clients/acme/{mine}", member=who).json()
+        assert [c["body"] for c in got["comments"]] == [NOTE] and [c["body"] for c in got["team"]] == ["for the team"]
+    seen = client.get(f"/_/doc?doc={mine}", member=CL_ALICE).json()
+    assert [c["body"] for c in seen["comments"]] == [NOTE]
+
+
+def test_a_reply_goes_to_the_side_of_its_thread(agency_and_client):
+    agency, client = agency_and_client
+    mine = client.make("alice", "# Plan\n\nsome words here\n")
+    client_add(agency, client, mine)
+    team_post(agency, mine, quote="some words")
+    cid = agency.get(f"/_/doc?doc=Clients/acme/{mine}", member=AG_ALICE).json()["comments"][0]["id"]
+    assert agency.post("/_/comment", {"doc": f"Clients/acme/{mine}", "op": "reply", "id": cid, "body": "to the client"}, member=AG_ALICE,
+                       ).status == 200
+    assert "to the client" in client.text(mine) and "to the client" not in json.dumps(agency.hub.team.list(f"Clients/acme/{mine}"))
+    assert team_op(agency, mine, "reply", id="t1", body="to the team").status == 200
+    assert "to the team" not in client.text(mine)

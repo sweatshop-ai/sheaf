@@ -8,7 +8,9 @@ import json
 import pytest
 from two_hubs import Link, Site
 
+from sheafmd import comments as rdc
 from sheafmd.hub import readthrough
+from sheafmd.source import md_hash
 
 CLIENT_ORIGIN = "https://acme.example.com"
 AG_ALICE, AG_DANA = ("a1000000-0000-4000-8000-00000000000%d" % n for n in (1, 3))
@@ -28,6 +30,14 @@ def agency_and_client(tmp_path):
         agency.hub.clients = readthrough.Clients(agency.hub.proxy.clients, agency.link)
         agency.hub.keep_team()               # what Hub.__init__ does when [proxy.clients] is set
     return agency, client
+
+
+def client_add(agency, client, doc, **extra):
+    """A comment add on a client page, anchored as the page anchors one (the client hub needs the block and the hash)."""
+    text = client.text(doc)
+    blk, start, end = rdc.find_quote(text, "some words")
+    return agency.post("/_/comment", {"doc": f"Clients/acme/{doc}", "op": "add", "hash": md_hash(text), "block": blk, "start": start,
+                                      "end": end, "quote": "some words", "body": NOTE, **extra}, member=AG_ALICE)
 
 
 def team_post(agency, doc, **body):
@@ -81,8 +91,7 @@ def test_a_team_side_comment_stays_on_the_agency_hub_and_no_call_reaches_the_cli
 def test_a_client_side_comment_is_written_on_the_client_hub_under_the_members_name(agency_and_client):
     agency, client = agency_and_client
     mine = client.make("alice", "# Plan\n\nsome words here\n")
-    got = agency.post("/_/comment", {"doc": f"Clients/acme/{mine}", "op": "add", "quote": "some words", "body": NOTE, "side": "client"},
-                      member=AG_ALICE)
+    got = client_add(agency, client, mine, side="client")
     assert got.status == 200, got.text
     assert NOTE in client.text(mine) and agency.hub.team.list(f"Clients/acme/{mine}") == []
 
@@ -90,7 +99,7 @@ def test_a_client_side_comment_is_written_on_the_client_hub_under_the_members_na
 def test_no_side_is_the_client_side_as_before(agency_and_client):
     agency, client = agency_and_client
     mine = client.make("alice", "# Plan\n\nsome words here\n")
-    got = agency.post("/_/comment", {"doc": f"Clients/acme/{mine}", "op": "add", "quote": "some words", "body": NOTE}, member=AG_ALICE)
+    got = client_add(agency, client, mine)
     assert got.status == 200 and NOTE in client.text(mine)
 
 
@@ -98,8 +107,7 @@ def test_no_side_is_the_client_side_as_before(agency_and_client):
 def test_a_side_that_is_not_team_or_client_is_refused_and_writes_nothing(agency_and_client, side):
     agency, client = agency_and_client
     mine = client.make("alice", "# Plan\n\nsome words here\n")
-    got = agency.post("/_/comment", {"doc": f"Clients/acme/{mine}", "op": "add", "quote": "some words", "body": NOTE, "side": side},
-                      member=AG_ALICE)
+    got = client_add(agency, client, mine, side=side)
     assert got.status == 400
     assert NOTE not in client.text(mine) and agency.hub.team.list(f"Clients/acme/{mine}") == []
 

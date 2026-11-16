@@ -91,7 +91,7 @@ def test_each_request_line_gets_one_answer_line_with_its_id(to_hub):
     code, got, raw, _ = run_stdio(to_hub, lines(rpc("ping", id=1), rpc("ping", id="b"),
                                                 rpc("tools/list", id=3)))
     assert code == 0 and [g["id"] for g in got] == [1, "b", 3]
-    assert got[0]["result"] == {} and len(got[2]["result"]["tools"]) == 9
+    assert got[0]["result"] == {} and len(got[2]["result"]["tools"]) == 10
     assert raw.count(b"\n") == 3 and raw.endswith(b"\n")
 
 

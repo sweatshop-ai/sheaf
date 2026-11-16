@@ -130,3 +130,13 @@ def test_a_laptop_that_would_sign_as_another_token_already_does_is_refused_not_l
     got = mine.post("/_/laptops", {"name": "Work MacBook"})
     assert got.status == 409 and "Claude Code (Bea)" in got.text
     assert mine.get("/_/laptops").json()["laptops"] == []
+
+
+def test_the_token_is_nowhere_in_the_state_folder_the_log_or_the_list(mine):
+    from sheafmd import paths
+    token = connect(mine)["token"]
+    mine.get("/_/laptops")
+    mine.post("/_/laptops/revoke", {"name": "Work MacBook"})
+    for f in paths.state_dir().rglob("*"):
+        if f.is_file():
+            assert token.encode() not in f.read_bytes(), f

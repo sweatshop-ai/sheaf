@@ -8,6 +8,8 @@ import time
 import pytest
 from helpers import FRONT, Front, call, hub_rows
 
+from sheafmd.blocks import split_md_blocks
+from sheafmd.edit import ticked_html
 from sheafmd.hub import proxy, the_list
 from sheafmd.hub.index import SWEEP_SECONDS
 from sheafmd.hub.state import Tokens
@@ -1268,3 +1270,33 @@ def test_the_hub_never_writes_the_new_label_into_a_file_that_holds_the_old_line(
     assert team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text), "edits": [edit]}, member=ALICE).status == 200
     text = (work / DOC).read_text(encoding="utf-8")
     assert "- [ ] Share\n" in text and "Shared with the team" not in text
+
+
+def tick_names(team, work, rel, member):
+    """The page's save that ticks the `Share with <names>` line, which the list does not read as an action."""
+    text = (work / rel).read_text(encoding="utf-8")
+    n = next(k for k, ln in enumerate(text.split("\n")) if ln.startswith("- [ ] Share with"))
+    at = the_list._place(text, n, split_md_blocks(text))
+    edit = {"i": at[0], "html": ticked_html(split_md_blocks(text)[at[0]], at[1], at=at[2])}
+    return team.post("/_/save", {"doc": f"work/{rel}", "hash": md_hash(text), "edits": [edit]}, member=member)
+
+
+# ── Share with <names> on a repo page opens it to the named members only (PR 394, round 2) ──
+
+def test_share_with_a_name_on_a_project_sheaf_opens_it_to_that_member_and_not_to_the_project(team, work):
+    put(team, work, DOC, PRIVATE.replace("- [ ] Share", "- [ ] Share with carol"))
+    assert tick_names(team, work, DOC, ALICE).status == 200
+    assert "- [x] Share with carol" in (work / DOC).read_text(encoding="utf-8")
+    got = team.get(f"/work/{DOC}", member=BOB)
+    assert got.status == 404 and got.body == team.get("/work/thinkingtoo/tiroir/nothing.md", member=BOB).body
+    docs = [d["doc"] for r in team.get("/_/index.json", member=BOB).json()["roots"] for d in r["docs"]]
+    assert f"work/{DOC}" not in docs
+    assert team.get(f"/work/{DOC}", member=ALICE).status == 200
+
+
+def test_share_with_bob_on_a_project_sheaf_opens_it_to_bob(team, work):
+    put(team, work, DOC, PRIVATE.replace("- [ ] Share", "- [ ] Share with bob"))
+    assert tick_names(team, work, DOC, ALICE).status == 200
+    assert team.get(f"/work/{DOC}", member=BOB).status == 200
+    (work / DOC).write_text((work / DOC).read_text(encoding="utf-8").replace("Share with bob", "Share with carol"), encoding="utf-8")
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404

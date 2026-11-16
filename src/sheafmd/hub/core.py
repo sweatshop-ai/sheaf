@@ -55,6 +55,7 @@ from .live import LiveDocument
 SETTING_KEYS = ("title", "toc", "max_image_width", "by", "for", "theme", "credit")
 
 _META_RE = re.compile(r'(<script id="rd-edit-meta" type="application/json">)(.*?)(</script>)', re.S)
+_ALIAS_RE = re.compile(r"s-[0-9a-f]{16}\.md")        # the opaque name `Hub.alias` gives a Shared page (9.11)
 
 
 @dataclass(frozen=True)
@@ -158,6 +159,7 @@ class Hub:
         self.docs = state.Docs()
         self.seen = state.Seen()
         self.member_seen = state.MemberSeen()
+        self.shared_ids = state.SharedIds()           # the opaque names of the pages Shared with a member
         self.member_opened = state.MemberOpened()     # the change of each Shared page that a member last had open
         self.index = Index(self)
         self.tokens = state.Tokens()
@@ -644,6 +646,7 @@ class Hub:
             meta["agent"], meta["can"], meta["lines"] = v.agent(), v.can(), v.lines
             meta["targets"] = targets_mod.choices(self, e.address)
         else:
+            meta["doc"] = self.alias(member, e.address)
             meta.update(me=member.name, seen=self.member_seen.get(member.id, e.address), proxy=True,
                         member=member.id)
             work, can = self.member_work(e, member)
@@ -875,6 +878,7 @@ class Hub:
             root = roots_mod.forget(self.roots, self.docs, self.seen, self.versions, name,
                                     members=self.member_seen)
             self.member_opened.forget_prefix(roots_mod.Address.prefix(name))
+            self.shared_ids.forget_prefix(roots_mod.Address.prefix(name))
             # After the registry lets go (a Tell queued from now on is refused, `Waiting.queue`) and before the
             # entries go, so the pages open on them hear `tell-cancelled` ahead of `gone`. A failure here must not
             # keep the root from being forgotten.
@@ -966,6 +970,26 @@ class Hub:
         giver = self.proxy.members.get(owner) if owner is not None else None
         return giver if giver is not None and giver.id != member.id else None
 
+    def alias(self, member, address: str) -> str:
+        """The address under which `member` is told of the page at `address`: for a page of another member's loose root, an
+        opaque one in that root's name, so the owner's folder names are never theirs to read (9.11); every other page by
+        its own address. Only the member's own roots and the hub's person name a page by its path."""
+        if member is None or self.proxy is None:
+            return address
+        at = roots_mod.Address.parse(address)
+        root = self.roots.get(at.root)
+        if root is None or self.giver(member, root) is None:
+            return address
+        return f"{at.root}/{self.shared_ids.of(address)}.md"
+
+    def unalias(self, address: str) -> str:
+        """The address an opaque name `alias` made stands for, else `address` itself. It says nothing of who may open it."""
+        at = roots_mod.Address.parse(address)
+        if not at.plain or not _ALIAS_RE.fullmatch(at.rel):
+            return address
+        real = self.shared_ids.address(at.rel[:-3])
+        return real if real is not None and roots_mod.Address.parse(real).root == at.root else address
+
     def audience(self, address: str):
         """`visibility.audience` of the page at `address`, None when it cannot be read."""
         try:
@@ -1044,9 +1068,12 @@ class Hub:
         private = place.private_member(self, address, None if judged is None else judged[0])
         if private is not None and private != member.id:        # rule A, before anything the file or the issue says
             return False
+        if self.holds_loose(member, address):                  # a loose page is its member's whatever its front matter says
+            return True
         if judged is None:
             return never_read and self.granted(member, address)
-        return visibility.visible_to(judged[0], member, judged[1], self.granted(member, address))
+        return visibility.visible_to(judged[0], member, judged[1], self.granted(member, address)) \
+            or self.named(member, address)
 
     def may_open(self, member, address: str, fm: dict, opened=place.UNJUDGED) -> bool:
         """Whether `member` may open the rectoverso at `address` whose front matter is `fm`, a text read under its lock
@@ -1054,7 +1081,29 @@ class Hub:
         private = place.private_member(self, address, fm, opened)
         if private is not None and private != member.id:        # rule A
             return False
-        return visibility.visible_to(fm, member, self.assignees(address, fm), self.granted(member, address))
+        return self.holds_loose(member, address) or self.named(member, address) or \
+            visibility.visible_to(fm, member, self.assignees(address, fm), self.granted(member, address))
+
+    def holds_loose(self, member, address: str) -> bool:
+        """Whether the page at `address` is in the loose root of `member`: theirs whatever its front matter says, so the
+        owner who withdrew a Share (`visibility: owner`, no `owner`) still opens their own page."""
+        return self.loose_owner(address) == member.id
+
+    def loose_owner(self, address: str) -> str | None:
+        """The id of the member whose loose root holds the page at `address`, None for a page of any other root."""
+        if self.proxy is None:
+            return None
+        root = self.roots.get(roots_mod.Address.parse(address).root)
+        return None if root is None else self.loose.owner_of(root)
+
+    def named(self, member, address: str) -> bool:
+        """Whether a ticked `Share with <names>` on the page at `address`, in a root that is no member's loose root,
+        names `member` (9.11): such a page stays its owner's alone in its front matter and opens to the named members
+        only, read from the file each time like a loose page's Share. A plain Share is the page's `visibility`."""
+        if self.proxy is None or self.loose_owner(address) is not None:
+            return False
+        shared = self.audience(address)
+        return isinstance(shared, frozenset) and visibility.reaches(shared, member) and self.granted(member, address)
 
     def granted(self, member, address: str, by_name: bool = False) -> bool:
         """Whether the `projects.toml` of the root of `address` lets `member` into its project (8.12): always in

@@ -41,7 +41,7 @@ from . import waiting as waiting_mod
 from .tell import NO_AGENT, JobRefused
 from .index import Status
 from .live import UNKNOWN, NotAuthor
-from .roots import Address, NotFound, address_of_url, root_of_url
+from .roots import Address, NotFound, address_of_url, root_of_url, url_path
 from .state import TokenRow
 
 MAX_BODY = 8 * 1024 * 1024
@@ -509,7 +509,18 @@ class Handler:
             raise Refuse(403, "this request did not come from the front's own page")
         if req.method == "POST":
             self._read_body(req, self._body(req, raw))
+        self._unalias(req)
         return fn(req)
+
+    def _unalias(self, req: Req) -> None:
+        """A page Shared with the member is told to them under an opaque name (`Hub.alias`, 9.11): the one they send back, in
+        the path, the query or the body, is read as the page's own address before any route looks at it."""
+        hub = self.hub
+        if not req.path.startswith("/_/") and (address := address_of_url(req.path)) is not None:
+            req.path = url_path(hub.unalias(address))
+        for fields in (req.query, req.body if isinstance(req.body, dict) else {}):
+            if isinstance(fields.get("doc"), str):
+                fields["doc"] = hub.unalias(fields["doc"])
 
     def _route_code(self, req: Req, raw: bytes) -> Response:
         """A request the verifier let in with a sign-in code (9.13): `X-Sheaf-Code` is the code's sha256, and Caddy
@@ -805,7 +816,9 @@ class Handler:
             # Asked at each event: a write that makes the rectoverso its owner's alone silences a stream
             # opened before it (9.11). A change of `projects.toml` that shuts the member out is told `gone`, with
             # why (8.12): that alone, never a file of the rectoverso that cannot be read for a moment.
-            if hub.visible(member, e.address):
+            # `member_owns` as well, but for `gone`: a Share edited down or withdrawn (9.11) closes the page for the member it
+            # no longer names, and a root that is forgotten (no root to own it) is still told.
+            if hub.visible(member, e.address) and (name == "gone" or hub.member_owns(member, e.address)):
                 if name in waiting_mod.EVENTS:      # a Tell that waits for an agent: the member's own, and no other's (9.9)
                     return dict(data) if getattr(data, "member", None) == member.id else None
                 data = _document_events(name, data)
@@ -813,7 +826,7 @@ class Handler:
                     data = {**data, "telling": self._member_telling(e.address, member, sweep=False, comments=data.get("comments"))}
                 return data
             if name == "grants" and not hub.granted(member, e.address):
-                return events.Renamed("gone", {"doc": e.address, "why": "access"})
+                return events.Renamed("gone", {"doc": hub.alias(member, e.address), "why": "access"})
             return None
         def for_person(name, data):
             # The hub person's page is not told of a member's Tell, nor of the agent it waits for (9.8, 9.9).
@@ -1098,9 +1111,9 @@ class Handler:
                 self.hub.index.touch(e.address)
                 self.hub.committed(e.address, req.member, "edit")
                 self._page_wrote(req, e, "share")
-        edit = the_list.share_edit(e.live.current()[1])
-        _shape(edit is not None, "the Share line was not written")
         try:
+            edit = the_list.share_edit(e.live.current()[1])
+            _shape(edit is not None, "the Share line was not written")
             return self._save(replace(req, body={"doc": b.get("doc"), "hash": after, "edits": [edit]}))
         except Refuse:
             if original:
@@ -1212,7 +1225,10 @@ class Handler:
             if "Share" in words:
                 if m is not None and not self.hub.is_owner(m, e.address, fm):
                     raise EditError("Only the owner of this rectoverso can share it.")
-                if visibility.effective(visibility.front_matter(new)) == "owner":
+                # `Share with <names>` on a page of a shared root opens it to those members only: the front matter stays
+                # as it is and `Hub.named` judges who reads (9.11); only a plain Share writes `visibility: project`.
+                names = isinstance(visibility.audience(new), frozenset) and self.hub.loose_owner(e.address) is None
+                if visibility.effective(visibility.front_matter(new)) == "owner" and not names:
                     by = (m.short or m.name) if m is not None else self.hub.person
                     new = visibility.share(new, by, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
                     # Share rewrites the front matter: a line it takes out must not join a skipped one to `sessions`.

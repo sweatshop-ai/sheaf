@@ -219,43 +219,7 @@ def test_a_page_with_no_owner_is_not_sent_and_gets_no_forward():
 
 
 # ── the landing helpers ──────────────────────────────────────────────────────
-
-def member(id, email):
-    return root_moves.proxy.Member(id=id, name=id, roots=(), email=email)
-
-
-def test_the_owner_is_the_one_member_whose_email_matches_ignoring_case():
-    members = [member("alice", "Alice@Example.com"), member("bob", "bob@example.com")]
-    assert root_moves.match_owner(members, "alice@example.COM") == ("alice", None)
-
-
-@pytest.mark.parametrize("email", ["", None])
-def test_an_empty_email_matches_nobody_even_a_member_with_no_email(email):
-    assert root_moves.match_owner([member("alice", "")], email) == (None, "refused")
-
-
-def test_a_member_with_no_email_is_never_matched():
-    assert root_moves.match_owner([member("alice", "")], "alice@here.example") == (None, "no_owner")
-
-
-def test_a_made_up_email_is_refused():
-    made_up = root_moves.proxy.default_email("alice", HERE)
-    assert root_moves.match_owner([member("alice", made_up)], made_up, origins=(HERE, THERE)) == (None, "refused")
-
-
-def test_no_member_with_that_email_is_no_owner():
-    assert root_moves.match_owner([member("bob", "bob@example.com")], "alice@example.com") == (None, "no_owner")
-
-
-def test_two_members_with_that_email_are_ambiguous():
-    members = [member("alice", "a@example.com"), member("alice2", "A@example.com")]
-    assert root_moves.match_owner(members, "a@example.com") == (None, "ambiguous_owner")
-
-
-def test_an_email_is_sent_only_for_a_member_with_one():
-    assert root_moves.owner_email(member("alice", "a@example.com")) == "a@example.com"
-    assert root_moves.owner_email(member("alice", "")) is None
-
+# The owner match by e-mail is ticket 20's `incoming.owner_for` and `outgoing.owner_email`, tested in test_peer_transfer.py.
 
 def test_the_blob_check_passes_when_the_tip_holds_the_page_with_that_blob(pair):
     blob = git(pair, "hash-object", "a.md")
@@ -265,3 +229,30 @@ def test_the_blob_check_passes_when_the_tip_holds_the_page_with_that_blob(pair):
 def test_the_blob_check_fails_for_another_blob_or_a_page_the_tip_lacks(pair):
     assert not root_moves.tip_holds(pair, "dev", "a.md", "0" * 40)
     assert not root_moves.tip_holds(pair, "dev", "gone.md", git(pair, "hash-object", "a.md"))
+
+
+# ── the unpaired rule ────────────────────────────────────────────────────────
+
+class Keys(dict):
+    def get(self, service, origin):
+        return super().get((service, origin))
+
+
+def test_a_tiroir_this_hub_holds_a_peer_token_for_is_paired():
+    keys = Keys({(root_moves.connect.PEER_SERVICE, THERE): "tok"})
+    assert root_moves.paired(THERE, keys)
+
+
+def test_a_tiroir_with_no_peer_token_is_not_paired():
+    assert not root_moves.paired(THERE, Keys())
+
+
+def test_a_door_token_for_that_tiroir_is_not_a_peer_token():
+    assert not root_moves.paired(THERE, Keys({(root_moves.connect.SERVICE, THERE): "tok"}))
+
+
+def test_a_keyring_that_cannot_be_read_pairs_nothing():
+    class Broken:
+        def get(self, *_):
+            raise root_moves.connect.ConnectError("no keyring")
+    assert not root_moves.paired(THERE, Broken())

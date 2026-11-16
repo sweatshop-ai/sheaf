@@ -1008,7 +1008,7 @@ class Handler:
         if h != read:
             # A write of the same size in the same clock tick leaves the (mtime, size) catch_up compares: the file once.
             with contextlib.suppress(Exception):
-                e.live.refresh()
+                self.hub._refreshed(e)          # as a page view takes in a write: the Write log hears of it
             h, text = e.live.current()
         if h != read:
             raise Refuse(409, f"the rectoverso changed since the {where} read it ({word}): reload the {where}")

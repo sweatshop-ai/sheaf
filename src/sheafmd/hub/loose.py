@@ -2,6 +2,7 @@
 member, named `loose-<short>`, made on the member's first `create`. It is kept against the member's id, never the name:
 `loose.json` holds `{member id: folder}`, so a renamed member keeps their root, and a short name another member once
 had never opens it. A page's `keep` mark is a line of `.sheaf/keep.json` in the root, never in the text."""
+import contextlib
 import dataclasses
 import json
 import os
@@ -96,9 +97,11 @@ def keep(root_path: Path, rel: str) -> None:
         held = marks(root_path)
         if rel in held:
             return
+        made = False
         try:
             try:
                 os.mkdir(mark.parent, 0o700)
+                made = True
             except FileExistsError:
                 pass
             if not stat.S_ISDIR(os.lstat(mark.parent).st_mode):
@@ -108,6 +111,9 @@ def keep(root_path: Path, rel: str) -> None:
             state.write_text_private(mark, json.dumps(sorted([*held, rel]), indent=1, ensure_ascii=False) + "\n",
                                      inside=True)
         except (OSError, paths.PathError) as e:
+            if made:
+                with contextlib.suppress(OSError):
+                    os.rmdir(mark.parent)           # the folder this call made goes with it, so the root stays empty
             raise Refused(f"the keep mark could not be written ({getattr(e, 'strerror', None) or e})") from None
 
 
@@ -183,7 +189,7 @@ class Loose:
         in `loose.json`, its folder, and the root it added to the member. A root that holds anything stays."""
         with self._lock, state.file_locked("loose.lock"):
             folder = self._read().get(member.id)
-            if folder is None or Path(folder) != root.path or os.listdir(folder):
+            if folder is None or os.path.realpath(folder) != os.path.realpath(root.path) or os.listdir(folder):
                 return
             self.hub.forget_root(root.name)
             os.rmdir(folder)

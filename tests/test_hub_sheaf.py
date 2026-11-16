@@ -1,6 +1,8 @@
 """The Sheaf view (SPEC 8.6, 9.9): a member's tree of folders and the table of their rectoversos, as the front's loader
 mounts it from `/_/mount?sheaf=1`. Through the handler in proxy mode, in memory, several members per hub. The page of it
 is in tests/page/test_mount_sheaf.py."""
+import subprocess
+
 import pytest
 from helpers import BEA, CAL, PLAN, Front
 
@@ -27,15 +29,26 @@ def docs(got):
     return [r["doc"] for r in got["sheaf"]["rows"]]
 
 
-@pytest.fixture
-def two(front, work, other):
-    """Bea's `work` holds a plan and a page in a sub-folder; Cal's `other` holds his own notes."""
+def fill(front, work, other):
     for root, rel in ((work, "plan.md"), (work, "ideas/first.md"), (other, "notes.md"), (other, "secret/mine.md")):
         f = root / rel
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text(f"# {rel}\n\ntext\n", encoding="utf-8")
         front.hub.roots.for_document(f)
     return front
+
+
+@pytest.fixture
+def two(front, work, other):
+    """Bea's `work` holds a plan and a page in a sub-folder; Cal's `other` holds his own notes."""
+    return fill(front, work, other)
+
+
+@pytest.fixture
+def two_git(front, work, other):
+    """The same, with Bea's `work` a git work tree when it is registered: a git root lists a dot-folder's pages (8.6)."""
+    subprocess.run(["git", "init", "-q", str(work)], check=True)
+    return fill(front, work, other)
 
 
 # ── what each member sees ────────────────────────────────────────────────────
@@ -92,31 +105,37 @@ def test_open_comments_are_counted(two, work):
 
 # ── dot-folders ──────────────────────────────────────────────────────────────
 
-def test_a_dot_folder_is_no_node_of_the_tree_but_its_page_opens_at_its_address(two, work):
+def test_a_dot_folder_is_no_node_of_the_tree_but_its_page_is_listed_and_opens_at_its_address(two_git, work):
+    two = two_git
     f = work / ".scratch" / "n.md"
     f.parent.mkdir()
     f.write_text("# Scratch\n", encoding="utf-8")
-    assert names(sheaf(two)["sheaf"]["tree"]) == [("work", [("ideas", [])])]
+    got = sheaf(two)
+    assert names(got["sheaf"]["tree"]) == [("work", [("ideas", [])])]
+    assert "work/.scratch/n.md" in docs(got)
     assert two.get("/work/.scratch/n.md").status == 200
 
 
-def test_a_folder_inside_a_dot_folder_is_no_node_either(two, work):
+def test_a_folder_inside_a_dot_folder_is_no_node_either(two_git, work):
+    two = two_git
     f = work / ".claude" / "deep" / "n.md"
     f.parent.mkdir(parents=True)
     f.write_text("# Deep\n", encoding="utf-8")
-    assert names(sheaf(two)["sheaf"]["tree"]) == [("work", [("ideas", [])])]
+    got = sheaf(two)
+    assert names(got["sheaf"]["tree"]) == [("work", [("ideas", [])])]
+    assert "work/.claude/deep/n.md" in docs(got)
 
 
 # ── a folder with no page the member may see ─────────────────────────────────
 
 def test_a_folder_that_holds_only_another_members_private_page_is_absent(team, work):
-    put_team(team, work, "thinkingtoo/tiroir/2026-10-28-contract.md", PRIVATE)
-    put_team(team, work, "thinkingtoo/tiroir/open.md", "# Open\n")
-    put_team(team, work, "thinkingtoo/hidden/2026-10-28-contract.md", PRIVATE)
+    put_team(team, work, "acme/site/2026-10-28-contract.md", PRIVATE)
+    put_team(team, work, "acme/site/open.md", "# Open\n")
+    put_team(team, work, "acme/hidden/2026-10-28-contract.md", PRIVATE)
     owner, hans = sheaf(team, THIERRY), sheaf(team, HANS)
-    assert "work/thinkingtoo/hidden" in paths(owner["sheaf"]["tree"])
-    assert paths(hans["sheaf"]["tree"]) == ["work", "work/thinkingtoo", "work/thinkingtoo/tiroir"]
-    assert sorted(docs(hans)) == ["work/plan.md", "work/thinkingtoo/tiroir/open.md"]
+    assert "work/acme/hidden" in paths(owner["sheaf"]["tree"])
+    assert paths(hans["sheaf"]["tree"]) == ["work", "work/acme", "work/acme/site"]
+    assert sorted(docs(hans)) == ["work/acme/site/open.md", "work/plan.md"]
     assert "contract" not in str(hans)                        # nothing of the private page, nor of its folder's name
 
 
@@ -124,18 +143,18 @@ def test_a_folder_that_holds_only_another_members_private_page_is_absent(team, w
 
 def test_a_row_says_who_and_where_and_the_session_before_a_later_save(two):
     address = "work/plan.md"
-    two.hub.writes.add(address, "Dimitri", "laptop", "update", session=SESSION, host="mac-mini")
-    two.hub.writes.add(address, "Hans", "page", "save")
+    two.hub.writes.add(address, "Ada", "laptop", "update", session=SESSION, host="mac-mini")
+    two.hub.writes.add(address, "Bea", "page", "save")
     row = {r["doc"]: r for r in sheaf(two)["sheaf"]["rows"]}[address]
-    assert row["write"] == "Hans · page, before Dimitri"
-    assert row["session"] == "Dimitri" and SESSION in row["session_tip"]
+    assert row["write"] == "Bea · page, before Ada"
+    assert row["session"] == "Ada" and SESSION in row["session_tip"]
 
 
 def test_the_machine_is_in_the_tooltip_only_when_declared(two):
-    two.hub.writes.add("work/plan.md", "Dimitri", "laptop", "update", session=SESSION, host="mac-mini")
-    two.hub.writes.add("work/ideas/first.md", "Hans", "page", "save")
+    two.hub.writes.add("work/plan.md", "Ada", "laptop", "update", session=SESSION, host="mac-mini")
+    two.hub.writes.add("work/ideas/first.md", "Bea", "page", "save")
     rows = {r["doc"]: r for r in sheaf(two)["sheaf"]["rows"]}
-    assert rows["work/plan.md"]["write"] == "Dimitri · laptop" and "mac-mini" in rows["work/plan.md"]["write_tip"]
+    assert rows["work/plan.md"]["write"] == "Ada · laptop" and "mac-mini" in rows["work/plan.md"]["write_tip"]
     assert rows["work/ideas/first.md"]["write_tip"] == ""
     assert "mac-mini" not in rows["work/plan.md"]["write"]
 
@@ -159,9 +178,9 @@ def test_a_pull_and_a_disk_write_read_as_the_spec_names_them(two):
 
 
 def test_a_write_that_is_the_session_itself_has_no_before(two):
-    two.hub.writes.add("work/plan.md", "Dimitri", "laptop", "update", session=SESSION)
+    two.hub.writes.add("work/plan.md", "Ada", "laptop", "update", session=SESSION)
     row = {r["doc"]: r for r in sheaf(two)["sheaf"]["rows"]}["work/plan.md"]
-    assert row["write"] == "Dimitri · laptop" and row["session"] == "Dimitri"
+    assert row["write"] == "Ada · laptop" and row["session"] == "Ada"
 
 
 # ── who may ask ──────────────────────────────────────────────────────────────

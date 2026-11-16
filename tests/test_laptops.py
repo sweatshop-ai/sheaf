@@ -140,3 +140,19 @@ def test_the_token_is_nowhere_in_the_state_folder_the_log_or_the_list(mine):
     for f in paths.state_dir().rglob("*"):
         if f.is_file():
             assert token.encode() not in f.read_bytes(), f
+
+
+def test_whoami_names_the_member_of_a_token_and_nothing_else(mine, browser):
+    """What a door in front of the hub asks to route a laptop's bearer: the member it was made for."""
+    token = connect(mine)["token"]
+    got = browser.request("GET", "/_/whoami", cookie=False, headers={"Authorization": f"Bearer {token}"})
+    assert got.status == 200 and got.json() == {"member": BEA}
+    mine.post("/_/laptops/revoke", {"name": "Work MacBook"})
+    assert browser.request("GET", "/_/whoami", cookie=False, headers={"Authorization": f"Bearer {token}"}).status == 401
+
+
+def test_whoami_is_not_for_the_key_a_cookie_or_a_token_bound_to_no_member(mine, browser):
+    assert browser.request("GET", "/_/whoami", cookie=False, key=True).status == 403
+    assert browser.request("GET", "/_/whoami").status == 403
+    free = mine.hub.tokens.add("free", client="Claude Code", write=True)
+    assert browser.request("GET", "/_/whoami", cookie=False, headers={"Authorization": f"Bearer {free}"}).status == 404

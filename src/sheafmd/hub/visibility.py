@@ -211,7 +211,7 @@ def share(text_: str, by: str, date: str) -> str:
     return set_keys(text_, {"visibility": "project", "shared": f"{by} {date}"})
 
 
-_BOX_RE = re.compile(r"(\s*[-*+] \[)([ xX])(\] (Shared with the team|Share with \S[^\n]*?|Share|Stop James)(?:\s+@\S+)?\s*)")
+_BOX_RE = re.compile(r"(\s*[-*+] \[)([ xX])(\] (Shared with the team|Share with [A-Za-z0-9_][A-Za-z0-9_.-]*(?:\s*,\s*[A-Za-z0-9_][A-Za-z0-9_.-]*)*|Share|Stop James)(?:\s+@\S+)?\s*)")
 # Share's tick box says it in its own words (9.11); the word is Share. The_list.LABELS holds the same, and imports this module.
 # `Share with <short>, <short>` is Share too, naming who it opens to.
 _LABELS = {"Shared with the team": "Share"}

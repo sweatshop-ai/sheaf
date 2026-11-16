@@ -26,7 +26,7 @@ from .. import __version__, beneath, config, diagnostics, paths
 from ..agents import registry
 from ..agents.base import Adapter, Target
 from ..render import RenderError, render_file
-from ..source import STAMP_FORMAT, file_lock, lock_key
+from ..source import STAMP_FORMAT, file_lock, lock_key, md_hash
 from . import assets as assets_mod
 from . import boxwait
 from . import place
@@ -46,6 +46,7 @@ from .commits import Author, Commits
 from .events import Bus
 from .index import Index
 from .jobs import Jobs
+from .writelog import WriteLog
 from .live import LiveDocument
 
 # What a render may set (SPEC 8.3). Every other key of docs.json is the hub's own.
@@ -136,8 +137,9 @@ class Hub:
         self.roots = roots_mod.Roots()
         self.roots.placer = lambda root, rel: place.physical(self, root, rel)
         self.versions = state.Versions()
+        self.writes = WriteLog()                 # one line per write to a page, whatever the path (the Write log)
         self.commits = Commits(self.record, self._writers_out, self.roots.all,
-                               lambda: bool(self._private_paths))   # the roots that commit (8.11); the rewrite guard while a private root is configured
+                               lambda: bool(self._private_paths), pulling=self.pulling, pulled=self.pulled)   # the roots that commit (8.11); the rewrite guard while a private root is configured
         self._told_projects: set = set()         # what check_projects warned of this run (8.12)
         self._projects: dict = {}                # root id -> (stat key, entries | Invalid | None) of its projects.toml
         self._grants_seen: dict = {}             # root id -> the projects_of answer the open tabs were last told (8.12)
@@ -847,6 +849,8 @@ class Hub:
             old, new = self.docs.change(address, settle)
             existed = address in self.entries
             e = self.entry(address)
+            if existed:
+                self._refreshed(e)          # a file written on disk since, seen at this render
             if existed and (any(old.get(k) != new[k] for k in SETTING_KEYS)
                             or old.get("target") != new.get("target")):
                 e.live.rebuild()
@@ -1161,7 +1165,7 @@ class Hub:
                 key = (st.st_mtime_ns, st.st_size)
                 if key == e.last_stat:
                     continue
-                e.live.refresh()
+                self._refreshed(e)
                 e.last_stat = key        # after: a rebuild that failed is tried again next tick
             except Exception as ex:
                 self._rebuild_failed(e, ex)
@@ -1234,12 +1238,75 @@ class Hub:
             st = e.stat()
             key = (st.st_mtime_ns, st.st_size)
             if key != e.last_stat:
-                e.live.refresh()
+                self._refreshed(e)
                 e.last_stat = key
             if self._images_moved(e):           # projects.toml or the owners moved: its images are judged otherwise
                 e.live.rebuild()
         except Exception as ex:
             self._rebuild_failed(e, ex)
+
+    def _refreshed(self, e: Entry):
+        """Take in a write from outside, and write it in the Write log: a text that moved behind the hub's back is a file
+        written on disk, whoever wrote it (`?`), unless a pull of its repo is bringing it in (that has its own line)."""
+        got = e.live.refresh()
+        if got is not None:
+            hash_ = e.live.current()[0]
+            if not self.writes.is_pull(e.address, hash_) and not self.writes.is_own(e.address, hash_):
+                self.writes.add(e.address, "?", "tiroir", "disk")
+        return got
+
+    def _page_of(self, path: Path) -> str | None:
+        """The name the hub opens the rectoverso at `path` under: where it places rectoversos (9.11), the name under its
+        project for a file of `<project>/private/<short>/`, and the list's for a file of a private root, as `_writers_out`
+        names them; else the address of its root. A page is whatever the hub serves, never a file of `.sheaf/` or `.git`.
+        None for a file no root of the hub holds, or that it does not serve."""
+        listed = next((r for r in self.roots.all() if place.applies(self, r.name)), None)
+        for r in self.roots.all():
+            if place.applies(self, r.name):
+                at = r
+            elif r.id in self.private_roots and listed is not None:
+                at = listed
+            else:
+                continue
+            rel = os.path.relpath(path, os.path.realpath(r.path))
+            if not rel.startswith(".."):
+                rel = rel.replace(os.sep, "/")
+                name = place.logical(rel)
+                if name is None and at is r and roots_mod._servable(rel) and not place.names_private(rel):
+                    name = rel                                      # served all the same, as a README is (place.physical)
+                return f"{at.name}/{name}" if name else None
+        try:
+            address = self.roots.address(path)
+        except roots_mod.NotFound:
+            return None
+        return None if roots_mod._sheafs_own(address.partition("/")[2]) else address
+
+    def pulling(self, folder: Path, files: list[tuple[Path, str]]):
+        """A pull of the repo at `folder` is about to change `files`, (absolute path, last author): the page open on one
+        sees it change: until `pulled`, what it sees of the file is the pull's, not a disk write."""
+        for path, _ in files:
+            address = self._page_of(path)
+            if address in self.entries:
+                self.writes.expect_pull(address)
+
+    def pulled(self, folder: Path, files: list[tuple[Path, str]], ok: bool, left: dict | None = None):
+        """The pull of `files` ended: each open page is known by the text the pull left (`left`: path to hash, read under the
+        pull's locks; read now when not given), so the page's next sight of it is the pull's; when the pull went through, a
+        line each, `git · <author>`, for each that is a page of a root the hub serves."""
+        for path, author in files:
+            address = self._page_of(path)
+            if address is None:
+                continue
+            if address in self.entries and ok:
+                try:
+                    text = md_hash(path.read_bytes().decode("utf-8")) if left is None else left.get(path)
+                except (OSError, ValueError):
+                    text = None
+            else:
+                text = None
+            self.writes.end_pull(address, text)
+            if ok:
+                self.writes.add(address, f"git · {author}", "tiroir", "pull")
 
     def wrote(self, address: str, moved: bool = False):
         """The door made or changed this document's file (SPEC 12): tell its open tabs now, as the
@@ -1258,6 +1325,7 @@ class Hub:
                 e.last_stat = (st.st_mtime_ns, st.st_size)
             except Exception as ex:
                 self._rebuild_failed(e, ex)
+        self.writes.told(address)
         try:
             self.index.touch(address)
         except Exception:

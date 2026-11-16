@@ -3335,7 +3335,7 @@ def test_a_deletion_heard_while_a_reply_is_still_out_leaves_its_form_with_the_li
     p.unroute("**/_/comment")
     until(lambda: p.locator("#rd-popover textarea").count() == 1, what="the form to come back")
     assert p.input_value("#rd-popover textarea") == "words for a gone thread"
-    assert "deleted" in p.inner_text("#rd-popover .rd-form")
+    until(lambda: "deleted" in p.inner_text("#rd-popover .rd-form"), what="the form to say the thread is gone")   # the form is back before its line
     assert p.locator("#rd-popover button[data-f]:not([data-f=no]):enabled").count() == 0, "it can still be sent"
     after = p.locator("#rd-popover").bounding_box()
     assert abs(after["x"] - before["x"]) < 2 and abs(after["y"] - before["y"]) < 2, (before, after)

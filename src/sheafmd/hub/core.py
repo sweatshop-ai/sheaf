@@ -1499,10 +1499,25 @@ class Hub:
                 a, b = self._page_of(old), self._page_of(new)
                 if a is None or b is None or a == b or not new.exists() or old.exists():
                     continue
+                # A rename cannot be refused as a Move is: the address is marked, so no Tell starts on it meanwhile, and a Tell
+                # already running is a row (its answer meets a page that is gone from where it began). A Forward at the new
+                # address, which `Forwards.add` drops, the page being there, is a row too.
+                with self.admit:
+                    live = self.tell_live(a)
+                    self.moving.add(a)
                 try:
-                    self.moved_page(a, b, "git")
+                    if live:
+                        self.record("rename-under-tell", a, to=b)
+                    was = self.forwards.follow(b)
+                    if was is not None and was != a:
+                        self.record("forward-replaced", b, was=was)
+                    with place.held(self, a), place.held(self, b):
+                        self.moved_page(a, b, "git")
                 except Exception:
                     self.record_exception("move-store-failed", b)
+                finally:
+                    with self.admit:
+                        self.moving.discard(a)
 
     def wrote(self, address: str, moved: bool = False):
         """The door made or changed this document's file (SPEC 12): tell its open tabs now, as the

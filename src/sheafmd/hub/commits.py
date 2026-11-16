@@ -302,7 +302,7 @@ class Commits:
         or written and a pull is as it was. `pulling(folder, [(path, author)])` hears of the files a pull is about to
         change and who last wrote each, before the work tree moves; `pulled(folder, files, ok)` hears it end, `ok` false
         when the pull was refused or failed: the Write log's line of it. `renamed(folder, [(old, new)])` hears of the pages
-        a pull that went through renamed (absolute paths, git's own rename detection), after the repo's lock is let go: it
+        a pull that went through renamed (absolute paths, git's own rename detection), after the repo's lock is let go and `pulled` was told: it
         takes the moves' lock, which comes before the repo's (9.11)."""
         self._record = record
         self._pulling = pulling or (lambda folder, files: None)
@@ -642,13 +642,13 @@ class Commits:
                 if go:
                     self._last_seen(folder, name, theirs)
                 left = {path: _hash_of(path) for path in pages}   # the text the pull left, before a writer's lock is let go
-            if go and renames:
-                self._tell(self._renamed, address, folder, renames)
         finally:
             # Who last wrote each page, asked of the commit pulled, which the locks do not guard: a slow git holds up no writer.
             ok = go is not False
             authors = [(path, _author(top, theirs, path.relative_to(top).as_posix()) if ok else "?") for path in pages]
             self._tell(self._pulled, address, folder, authors, ok, left)
+        if go and renames:                             # after `pulled`, so its lines for the old paths are carried with the page
+            self._tell(self._renamed, address, folder, renames)
         return go
 
     @staticmethod

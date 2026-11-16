@@ -21,6 +21,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 from pathlib import Path
 
@@ -32,7 +33,7 @@ COMMIT_RE = re.compile(r"[0-9a-f]{7,40}")
 GIT_SECONDS = 300.0
 
 NO_CLONES = "none"
-MADE, PRESENT, PRIVATE_ROOT, NO_APP = "made", "present", "private-root", "no-app"
+OK, PRIVATE_ROOT, NO_APP = "ok", "private-root", "no-app"
 
 
 class Refused(ValueError):
@@ -132,26 +133,20 @@ class Repos:
         except (OSError, subprocess.SubprocessError) as e:
             return subprocess.CompletedProcess(args, 124, "", str(e))
 
-    def _is_private_root(self, repo: str, private_roots) -> bool:
-        """Whether `repo` is the repo of a private root of this tiroir: any remote of the root, fetch or push, names it.
+    def _is_private_root(self, repo: str, folder: str) -> bool:
+        """Whether `repo` is the repo of the private root `folder`: any remote of the root, fetch or push, names it.
         A root that cannot be looked at (missing, unreadable, git gives no answer) counts as one: a clone cannot be
         taken back."""
-        wanted = proxy.normal_place(self.remote_url(repo))
-        for folder in private_roots:
-            try:
-                places = proxy.repo_places(folder)
-            except proxy.ProxyError:
-                return True
-            if places is None and not os.path.isdir(folder):
-                return True
-            if places and wanted in places:
-                return True
-        return False
+        try:
+            places = proxy.repo_places(folder)
+        except proxy.ProxyError:
+            return True
+        if places is None:
+            return not os.path.isdir(folder)
+        return proxy.normal_place(self.remote_url(repo)) in places
 
-    def _clone(self, repo: str, token: str, folder: str) -> str | None:
-        """Clone `repo` blobless and sparse with `folder` in its set; an error sentence, or None when it is made."""
-        dest = self.clone_dir(repo)
-        dest.parent.mkdir(parents=True, exist_ok=True)
+    def _clone(self, repo: str, token: str, folder: str, dest: Path) -> str | None:
+        """Clone `repo` into `dest` blobless and sparse with `folder` in its set; an error sentence, or None when made."""
         r = self._git(None, "clone", "-q", "--filter=blob:none", "--sparse", "--no-tags", "--", self.remote_url(repo),
                       str(dest), token=token)
         if r.returncode != 0:
@@ -190,35 +185,50 @@ class Repos:
     # ── the report ───────────────────────────────────────────────────────────
     def report(self, member: str, repo, path, commit, private_roots=(), declared=None) -> dict:
         """The tiroir hears that `member` works on the page `path` of `repo` at `commit`. Raises `Refused` for a name
-        that is none; otherwise the answer: `clone` (`made`, `present`, `private-root`, `no-app`), `widened` (the folder
-        added to the sparse set or None), `commit_known`, and for `no-app` the link that adds the repo."""
+        that is none; otherwise the answer: `clone` (`ok`, `private-root`, `no-app`), `commit_known`, and for `no-app`
+        the link that adds the repo. `private_roots` are (member, folder) pairs. A repo that is the caller's own private
+        root is told so; one that is another member's is answered exactly as a repo the tiroir has not seen, by a
+        clone made in a scratch folder and thrown away, so the answer never tells a member whose work lives where
+        (SPEC 9.11). Nothing in the answer depends on what the tiroir already holds."""
         repo, path, commit = _clean_repo(repo), _clean_path(path), _clean_commit(commit)
         declared = declared or {}
         folder = path.rpartition("/")[0]
         with self._lock:
-            if self._is_private_root(repo, private_roots):
-                return {"repo": repo, "path": path, "clone": PRIVATE_ROOT, "widened": None, "commit_known": None}
-            dest = self.clone_dir(repo)
-            made = not (dest / ".git").exists()
+            roots = [(who, root) for who, root in private_roots if self._is_private_root(repo, root)]
+            if any(who == member for who, _ in roots):
+                return {"repo": repo, "path": path, "clone": PRIVATE_ROOT, "commit_known": None}
             token = self.provider.token(repo)       # the provider renews it: asked each time git reaches the remote
-            if token is None and made:
-                return {"repo": repo, "path": path, "clone": NO_APP, "widened": None, "commit_known": None,
-                        "install": self.provider.install_url(repo)}
-            widened = None
-            if made:
-                if (failed := self._clone(repo, token, folder)) is not None:
-                    raise Refused(failed)
-            else:
-                widened = folder if token is not None and self._widen(dest, folder, token) else None
-            known = self._knows(dest, commit, token)
-            if not known or not self._holds(dest, commit, path):
-                return {"repo": repo, "path": path, "clone": MADE if made else PRESENT, "widened": widened,
-                        "commit_known": known, "owner": None}
-            data = self._read()
-            row = data.setdefault(repo, {}).get(path)
-            owner = row["owner"] if isinstance(row, dict) else member
-            data[repo][path] = {"owner": owner, "commit": commit,
-                                **{k: v for k, v in declared.items() if k in ("session", "host", "link") and v}}
-            self._write(data)
-            return {"repo": repo, "path": path, "clone": MADE if made else PRESENT, "widened": widened,
-                    "commit_known": known, "owner": owner}
+            if roots:                                # another member's private root: kept nowhere, recorded nowhere
+                scratch = Path(tempfile.mkdtemp(prefix="probe-", dir=self._scratch_base()))
+                try:
+                    return self._answer(scratch / "clone", member, repo, path, commit, folder, token, None, True)
+                finally:
+                    shutil.rmtree(scratch, ignore_errors=True)
+            return self._answer(self.clone_dir(repo), member, repo, path, commit, folder, token, declared, False)
+
+    def _scratch_base(self) -> Path:
+        base = self.base / "scratch"
+        base.mkdir(parents=True, exist_ok=True)
+        return base
+
+    def _answer(self, dest: Path, member, repo, path, commit, folder, token, declared, scratch: bool) -> dict:
+        made = not (dest / ".git").exists()
+        if token is None and made:
+            return {"repo": repo, "path": path, "clone": NO_APP, "commit_known": None,
+                    "install": self.provider.install_url(repo)}
+        if made:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if (failed := self._clone(repo, token, folder, dest)) is not None:
+                raise Refused(failed)
+        elif token is not None:
+            self._widen(dest, folder, token)
+        known = self._knows(dest, commit, token)
+        if scratch or not known or not self._holds(dest, commit, path):
+            return {"repo": repo, "path": path, "clone": OK, "commit_known": known}
+        data = self._read()
+        row = data.setdefault(repo, {}).get(path)
+        owner = row["owner"] if isinstance(row, dict) else member
+        data[repo][path] = {"owner": owner, "commit": commit,
+                            **{k: v for k, v in declared.items() if k in ("session", "host", "link") and v}}
+        self._write(data)
+        return {"repo": repo, "path": path, "clone": OK, "commit_known": known}

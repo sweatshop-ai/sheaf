@@ -382,14 +382,18 @@ def report_page(md: Path, top: Path, origin: str, token: str, args, out, err, en
     if clone == repos_mod.NO_CLONES:
         err(f"sheaf: {origin} makes no repo clones, so {md} renders on this laptop.")
         return None
+    if clone == repos_mod.PRIVATE_ROOT:
+        err(f"sheaf: {repo} is your private root on {origin.split('://', 1)[-1]}, so the tiroir clones nothing and {md} "
+            "renders on this laptop.")
+        return None
     if got.get("commit_known") is False:
-        err(f"sheaf: the tiroir could not find commit {commit[:8]} on {repo}: is it pushed to GitHub?")
+        err(f"sheaf: the tiroir could not find commit {commit[:8]} on {repo}: is it pushed to GitHub? Rendering {md} "
+            "on this laptop.")
+        return None
     member = member_name(origin, token)
     host = origin.split("://", 1)[1]
     out(f"{repo} {path} @ {commit[:8]}")
     out(f"on {host} {'as ' + member + ' · ' if member else 'as '}{_agent_label(environ)}")
-    if clone == repos_mod.PRIVATE_ROOT:
-        out(f"{repo} is your private root on {host}: nothing was cloned.")
     return EXIT_OK
 
 

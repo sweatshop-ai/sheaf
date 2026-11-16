@@ -96,10 +96,10 @@ def test_an_error_answer_on_a_client_page_leaves_no_address_in_the_log(agency_an
     name = doc.split("/")[-1]
     assert agency.get("/Clients/acme/alice-work/none.md", member=AG_ALICE).status == 404                 # the client says no
     assert agency.get(f"/_/doc?doc=Clients/acme/{doc}x", member=AG_ALICE).status == 404
-    assert agency.post("/_/comment", {"doc": f"Clients/acme/{doc}x", "op": "add", "quote": "q", "body": "b"}, member=AG_ALICE).status == 404
+    assert agency.post("/_/comment", {"doc": f"Clients/acme/{doc}x", "op": "add", "quote": "q", "body": "b", "side": "client"}, member=AG_ALICE).status == 404
     agency.link.mode = "down"
     assert agency.get(f"/Clients/acme/{doc}", member=AG_ALICE).status == 502
-    assert agency.post("/_/comment", {"doc": f"Clients/acme/{doc}", "op": "add", "quote": "q", "body": "b"}, member=AG_ALICE).status == 502
+    assert agency.post("/_/comment", {"doc": f"Clients/acme/{doc}", "op": "add", "quote": "q", "body": "b", "side": "client"}, member=AG_ALICE).status == 502
     log = agency_log(agency)
     assert log and "read-through" in log
     for told in ("Clients/acme", "none.md", name, "alice-work", MARKER):

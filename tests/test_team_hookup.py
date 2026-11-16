@@ -97,11 +97,14 @@ def test_a_client_side_comment_is_written_on_the_client_hub_under_the_members_na
     assert NOTE in client.text(mine) and agency.hub.team.list(f"Clients/acme/{mine}") == []
 
 
-def test_no_side_is_the_client_side_as_before(agency_and_client):
+def test_an_add_with_no_side_is_refused_and_nothing_reaches_the_client(agency_and_client):
     agency, client = agency_and_client
     mine = client.make("alice", "# Plan\n\nsome words here\n")
+    before, asked = client.text(mine), len(agency.link.asked)
     got = client_add(agency, client, mine)
-    assert got.status == 200 and NOTE in client.text(mine)
+    assert got.status == 400 and "team or client" in got.text
+    assert client.text(mine) == before and agency.hub.team.list(f"Clients/acme/{mine}") == []
+    assert len(agency.link.asked) == asked
 
 
 @pytest.mark.parametrize("side", ["both", "", "Team", 3, None])
@@ -142,7 +145,7 @@ def test_the_doc_state_of_a_client_page_carries_the_team_list_beside_the_clients
     agency, client = agency_and_client
     mine = client.make("alice", "# Plan\n\nsome words here\n")
     assert _team_state(agency, mine, "doc").json()["team"] == []
-    assert client_add(agency, client, mine).status == 200
+    assert client_add(agency, client, mine, side="client").status == 200
     team_post(agency, mine)
     got = _team_state(agency, mine, "doc").json()
     assert [c["body"] for c in got["team"]] == [NOTE] and [c["body"] for c in got["comments"]] == [NOTE]
@@ -263,7 +266,7 @@ def test_a_client_that_does_not_answer_refuses_a_team_write_and_stores_nothing(a
 def test_both_versos_are_on_the_opened_page_each_apart(agency_and_client):
     agency, client = agency_and_client
     mine = client.make("alice", "# Plan\n\nsome words here\n")
-    assert client_add(agency, client, mine).status == 200
+    assert client_add(agency, client, mine, side="client").status == 200
     team_post(agency, mine, body="for the team", quote="some words")
     for who in (AG_ALICE,):
         got = agency.get(f"/_/doc?doc=Clients/acme/{mine}", member=who).json()
@@ -275,7 +278,7 @@ def test_both_versos_are_on_the_opened_page_each_apart(agency_and_client):
 def test_a_reply_goes_to_the_side_of_its_thread(agency_and_client):
     agency, client = agency_and_client
     mine = client.make("alice", "# Plan\n\nsome words here\n")
-    client_add(agency, client, mine)
+    client_add(agency, client, mine, side="client")
     team_post(agency, mine, quote="some words")
     cid = agency.get(f"/_/doc?doc=Clients/acme/{mine}", member=AG_ALICE).json()["comments"][0]["id"]
     assert agency.post("/_/comment", {"doc": f"Clients/acme/{mine}", "op": "reply", "id": cid, "body": "to the client"}, member=AG_ALICE,

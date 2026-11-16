@@ -439,6 +439,15 @@ var create = function (ROOT, CFG, opts) {
     });
   }
 
+  if (CFG.why_readonly && main) {
+    // A page of a repo clone that may not be saved: the line says which .sheaf.toml line would change that (SPEC 14).
+    var why = document.createElement('p');
+    why.className = 'rd-readonly';
+    why.setAttribute('role', 'note');
+    why.textContent = CFG.why_readonly;
+    main.insertBefore(why, main.firstChild);
+  }
+
   if (!canSave && !COMMENTS.length && !(CFG.malformed || []).length) {
     // No server and nothing to show: a copy of the file, forwarded or opened
     // directly. No chrome at all, exactly as before comments existed.

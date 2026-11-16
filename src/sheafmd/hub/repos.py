@@ -24,6 +24,12 @@ the App cannot reach it, and `install_url(repo)` is the link that adds the repo 
 git in the environment (`GIT_CONFIG_*`), never in an argument, a file or an answer. `remote_url(repo)` is where the clone
 comes from (GitHub's address; a test gives a local bare repo).
 
+Saves (SPEC 14): once a clone is whole the hub serves it as a root named `owner--name`, and its HEAD is the branch saves
+go on: `dev` where the remote has it, else the branch the `branch` key of the remote's default branch's `.sheaf.toml`
+names (and the remote has), else none, and the page is read-only with a line saying which `.sheaf.toml` line would
+change that. The hub never guesses whether a branch deploys and never makes a branch. The clone's files move only
+through `Commits._pull`; a report's fetch only looks.
+
 A clone nobody has reported a page of for `SLEEP_DAYS` days sleeps (`sleep_idle`, run on the hub's tick): nothing fetches
 it, and its sparse set is shrunk to nothing, the folders it held kept to widen again. A page of it still reads at its last
 text from the commit (`page_text`), whatever the work tree holds. A report for the repo wakes it. Nothing here deletes a
@@ -33,6 +39,7 @@ Layout under `base`: `clones/<owner>/<name>/` the clones, `reports.json` the rec
 used and whether it sleeps, written whole and atomically.
 """
 import base64
+import contextlib
 import functools
 import json
 import os
@@ -45,7 +52,7 @@ import threading
 import time
 from pathlib import Path
 
-from .. import diagnostics
+from .. import config, diagnostics
 from ..atomic import write_text_atomic
 from . import proxy, visibility
 
@@ -142,6 +149,30 @@ def _clean_commit(commit) -> str:
     return commit
 
 
+# Folder (real path) of a clone the tiroir serves -> a function that gives the installation token for its remote, None
+# when the App cannot reach it. A git the hub runs in that folder gets the token in its environment (SPEC 14), never in
+# an argument, a file or an answer; asked at each git, so a renewed token is the one used.
+CREDENTIALS: dict[str, "callable"] = {}
+CREDENTIALS_LOCK = threading.Lock()     # a clone's first serve adds a key from its own thread while a commit or pull looks one up
+
+
+def credential(folder: Path, token) -> None:
+    with CREDENTIALS_LOCK:
+        CREDENTIALS[os.path.realpath(folder)] = token
+
+
+def token_env(token: str) -> dict:
+    """The environment that gives git the installation token for its HTTPS remote: never an argument, a file or an answer."""
+    basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    return {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.extraHeader",
+            "GIT_CONFIG_VALUE_0": f"Authorization: Basic {basic}"}
+
+
+def root_name(repo: str) -> str:
+    """The name of the root that serves the clone of `repo`: from the repo, never from its arrival order (SPEC 14)."""
+    return repo.replace("/", "--").lower()
+
+
 def ssh_hostname(host: str, config: str | None = None) -> str | None:
     """The host name `ssh` would connect to for `host` (an alias of ~/.ssh/config resolves to its HostName), from
     `ssh -G`; None when ssh gives no answer."""
@@ -171,6 +202,15 @@ class Repos:
         self.SLEEP_WAIT = SLEEP_WAIT
         self.clock = time.time                  # the sleep of a clone counts in this clock's days; a test sets it
         self.ssh_hostname = ssh_hostname
+        self.roots = None                       # the hub's registry: a whole clone is registered there (`serve`)
+        # Runs `move()` as a pull moves a clone's files: `mover(root, address, target, move)` is the hub's `Commits.moved`,
+        # which gives it the pages' writer locks, the repo's lock and the Write log's window (the one path files move by).
+        self.mover = lambda root, address, target, move: move()
+        # The commit lock of the clone at `dest` (`Commits._repo_lock`), as a context manager: a change of the sparse set moves
+        # the clone's files, so it runs under the lock a save and a pull take.
+        self.holding = lambda dest: contextlib.nullcontext()
+        self._saves: dict[str, tuple] = {}      # repo -> (the branch saves go on or None, the line when none), as last decided
+        self._why: dict[str, str] = {}          # repo -> why its HEAD is not on the save branch, after a switch that did not happen
         version = _git_version()
         if version is None or version < NO_LAZY_FETCH_FROM:     # said once, at the hub's start
             print("sheaf hub: " + ("git version unreadable" if version is None else "git below 2.44") + ": commit look off",
@@ -301,8 +341,10 @@ class Repos:
         then it settles whatever reports came meanwhile (its `_wake` widens the set again, a moved clone's does not), like
         any thread of the repo."""
         try:
-            listed = self._git(dest, "-c", "core.quotePath=false", "sparse-checkout", "list")
-            if listed.returncode == 0 and self._git(dest, "sparse-checkout", "set", "--cone").returncode == 0:
+            with self.holding(dest):
+                listed = self._git(dest, "-c", "core.quotePath=false", "sparse-checkout", "list")
+                shrunk = listed.returncode == 0 and self._git(dest, "sparse-checkout", "set", "--cone").returncode == 0
+            if shrunk:
                 idle = False
                 with self._records:
                     data = self._usage()
@@ -326,7 +368,9 @@ class Repos:
         folders = row.get("restore") if isinstance(row, dict) else None
         if not folders or row.get("moved"):
             return
-        if self._git(dest, "sparse-checkout", "set", "--cone", "--", *folders, token=token).returncode == 0:
+        with self.holding(dest):
+            woken = self._git(dest, "sparse-checkout", "set", "--cone", "--", *folders, token=token).returncode == 0
+        if woken:
             with self._records:
                 data = self._usage()
                 data[repo] = {k: v for k, v in data.get(repo, {}).items() if k != "restore"}
@@ -373,9 +417,7 @@ class Repos:
         if look:
             env["GIT_NO_LAZY_FETCH"] = "1"      # a blobless clone fetches a missing object from its remote unasked (git 2.44)
         if token:
-            basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
-            env.update({"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.extraHeader",
-                        "GIT_CONFIG_VALUE_0": f"Authorization: Basic {basic}"})
+            env.update(token_env(token))
         argv = ["git", "-c", "core.hooksPath=/dev/null", "--literal-pathspecs"]
         if at is not None:
             argv += ["-C", str(at)]
@@ -431,10 +473,11 @@ class Repos:
         """Add `folder` to the sparse set when it is not in it; whether it was added."""
         if not folder:
             return False
-        listed = self._git(dest, "-c", "core.quotePath=false", "sparse-checkout", "list")
-        if listed.returncode == 0 and any(folder == h or folder.startswith(h + "/") for h in listed.stdout.split("\n") if h):
-            return False
-        return self._git(dest, "sparse-checkout", "add", "--", folder, token=token).returncode == 0
+        with self.holding(dest):
+            listed = self._git(dest, "-c", "core.quotePath=false", "sparse-checkout", "list")
+            if listed.returncode == 0 and any(folder == h or folder.startswith(h + "/") for h in listed.stdout.split("\n") if h):
+                return False
+            return self._git(dest, "sparse-checkout", "add", "--", folder, token=token).returncode == 0
 
     @staticmethod
     def _look_is_safe() -> bool:
@@ -451,7 +494,8 @@ class Repos:
 
     def _knows(self, dest: Path, repo: str, commit: str, token: str | None) -> bool:
         """Whether a branch of the remote holds `commit`. A commit the clone lacks costs one fetch of `FETCH_SECONDS`,
-        at most once in `FETCH_EVERY` seconds per repo, then the clone's files follow the branch."""
+        at most once in `FETCH_EVERY` seconds per repo. The fetch only looks: the clone's files move through
+        `Commits._pull`, under the pages' locks."""
         if self._on_branch(dest, commit, 30):
             return True
         if self.sleeping(repo):
@@ -464,8 +508,112 @@ class Repos:
             self._fetched[repo] = now
         if self._git(dest, "fetch", "-q", "--no-tags", "origin", token=token, seconds=FETCH_SECONDS).returncode != 0:
             return False
-        self._git(dest, "merge", "-q", "--ff-only", "@{upstream}", token=token, seconds=60)     # the files come with it
         return self._on_branch(dest, commit, 30)
+
+    # ── the save branch ──────────────────────────────────────────────────────
+    def _has_branch(self, dest: Path, name: str) -> bool:
+        return self._git(dest, "rev-parse", "-q", "--verify", f"refs/remotes/origin/{name}^{{commit}}",
+                         look=True).returncode == 0
+
+    def decide(self, repo: str, token: str | None = None) -> tuple:
+        """(the branch saves go on, or None; the line that says why not, or "") from the clone as it is now, and
+        remembered. `dev` where the remote has it, else the `branch` of the `.sheaf.toml` the remote's default branch
+        holds when the remote has that branch; nothing else is ever a save branch."""
+        dest = self.clone_dir(repo)
+        if self._has_branch(dest, "dev"):
+            got = ("dev", "")
+        else:
+            default = self._git(dest, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD", look=True)
+            default = default.stdout.strip().removeprefix("origin/") if default.returncode == 0 else ""
+            shown = self._git(dest, "show", "origin/HEAD:.sheaf.toml", token=token, seconds=60, look=token is None)
+            named = config.branch_named(shown.stdout) if shown.returncode == 0 else None
+            on = f" on {default}" if default else ""
+            if named is None:
+                got = (None, f'To edit this page here, add branch = "<a branch that does not deploy>" to .sheaf.toml{on} of {repo}.')
+            elif not self._has_branch(dest, named):
+                got = (None, f".sheaf.toml names the branch {named}, which {repo} does not have.")
+            else:
+                got = (named, "")
+        with self._guard:
+            self._saves[repo] = got
+        return got
+
+    def saves_on(self, repo: str) -> tuple:
+        """What `decide` last found for `repo`; decided from the clone itself (no network) for a repo it has not been
+        asked of since the hub started."""
+        with self._guard:
+            known = self._saves.get(repo)
+        if known is not None:
+            return known
+        return self.decide(repo) if (self.clone_dir(repo) / ".git").exists() else (None, "")
+
+    def head_of(self, repo: str) -> str | None:
+        """The branch the clone's HEAD is on, read from the clone's own file; None when it is on no branch."""
+        try:
+            head = (self.clone_dir(repo) / ".git" / "HEAD").read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+        return head.removeprefix("ref: refs/heads/") if head.startswith("ref: refs/heads/") else None
+
+    def read_only_line(self, repo: str) -> str:
+        """Why the pages of the clone of `repo` may not be written, "" when they may. A page is writable only when the
+        clone's HEAD is on the branch saves go on: what a save commits and pushes is HEAD's branch, whatever was decided."""
+        branch, line = self.saves_on(repo)
+        if branch is None:
+            return line
+        on = self.head_of(repo)
+        if on == branch:
+            return ""
+        return self._why.get(repo) or (f"The clone of {repo} is on {on or 'no branch'}, not on {branch}, where its pages "
+                                        f"are saved; it moves at the next render report.")
+
+    def switch(self, repo: str, branch: str, token: str | None) -> str:
+        """Put the clone's HEAD on `branch` (the remote's), when it is not: only when no commit of the clone is
+        unpushed and its work tree has no change of its own. "" when HEAD is on `branch` after, else why it is not (the
+        line the page shows). The move is a pull's: under the pages' writer locks and the repo's lock, in the Write log's
+        window (`mover`), so no save comes between the check and the checkout and none is carried onto the new branch."""
+        dest = self.clone_dir(repo)
+        if self.head_of(repo) == branch:
+            return ""
+        now = self.head_of(repo) or "no branch"
+
+        def move() -> str:
+            kept = self._git(dest, "rev-list", "--count", "HEAD", "--not", "--remotes", look=True)
+            dirty = self._git(dest, "status", "--porcelain", "--untracked-files=no", look=True)
+            if kept.returncode != 0 or dirty.returncode != 0:
+                return f"The clone of {repo} could not be looked at, so it stays on {now} until the next render report."
+            if kept.stdout.strip() != "0":
+                return f"The clone of {repo} has a save that is not pushed yet, so it stays on {now} until it is."
+            if dirty.stdout.strip():
+                return f"The clone of {repo} has a change of its own, so it stays on {now} until that is gone."
+            r = self._git(dest, "checkout", "-q", "-B", branch, f"origin/{branch}", token=token, seconds=120)
+            return "" if r.returncode == 0 else (f"The clone of {repo} could not be moved to {branch}, so it stays on "
+                                                  f"{now}; it is tried again at the next render report.")
+        root = self.roots.get(root_name(repo)) if self.roots is not None else None
+        why = self.mover(root, root_name(repo), f"origin/{branch}", move) if root is not None else move()
+        with self._guard:
+            if why:
+                self._why[repo] = why
+            else:
+                self._why.pop(repo, None)
+        return why
+
+    def credential(self, repo: str):
+        """Git run in the clone of `repo` by the hub's commits carries the App's token for it (`CREDENTIALS`)."""
+        credential(self.clone_dir(repo), lambda: self.provider.token(repo))
+
+    def serve(self, repo: str, token: str | None):
+        """The clone is whole: decide its save branch, register it as a root once, then put HEAD on the branch. The page
+        is read-only until HEAD is there (`read_only_line`), so what is served meanwhile cannot be saved onto another branch."""
+        branch, _ = self.decide(repo, token)
+        self.credential(repo)
+        if self.roots is not None:
+            try:
+                self.roots._add(self.clone_dir(repo).resolve(), True, name=root_name(repo), clone=repo)
+            except ValueError:      # a name another root holds, or a private root: the clone is made and not served
+                return
+        if branch is not None:
+            self.switch(repo, branch, token)
 
     def _holds(self, dest: Path, commit: str, path: str) -> bool:
         """Whether the page is in the tree of `commit`: no record is made for a page that is not there."""
@@ -492,11 +640,8 @@ class Repos:
         A repo that became a private root after it was cloned keeps its clone and its records, takes no more.
         Nothing here clones or fetches: that is the repo's thread's (see the top of the file)."""
         repo, path, commit = _clean_repo(repo), _clean_path(path), _clean_commit(commit)
-        roots = [who for who, root in private_roots if self._is_private_root(repo, root)]
-        if member in roots:
-            return {"repo": repo, "path": path, "clone": PRIVATE_ROOT, "commit_known": None}
-        if roots:
-            return {"repo": repo, "path": path, "clone": NOT_CLONED, "commit_known": None}
+        if (private := self._private(member, repo, private_roots)) is not None:
+            return {"repo": repo, "path": path, "clone": private, "commit_known": None}
         if (to := self.moved_to(repo)) is not None:
             return {"repo": repo, "path": path, "clone": MOVED, "moved_to": to, "commit_known": None}
         with self._guard:
@@ -517,6 +662,26 @@ class Repos:
         if not held:
             return {"repo": repo, "path": path, "clone": CLONING, "commit_known": None}
         return {"repo": repo, "path": path, "clone": OK, "commit_known": self._look_is_safe() and self._on_branch(dest, commit)}
+
+    def _private(self, member: str, repo: str, private_roots) -> str | None:
+        """`private-root` for the member whose private root `repo` is, `not-cloned` when it is another member's, else None."""
+        roots = [who for who, root in private_roots if self._is_private_root(repo, root)]
+        return PRIVATE_ROOT if member in roots else NOT_CLONED if roots else None
+
+    def install_url(self, repo: str) -> str:
+        """The link that adds `repo` to the App."""
+        return self.provider.install_url(_clean_repo(repo))
+
+    def refusal(self, member: str, repo, private_roots=()) -> str | None:
+        """What `report` would refuse for `repo`, with nothing written: `private-root`, `not-cloned` or `no-app`; None when it
+        would not refuse. A clone that failed before is not looked at: the report that follows raises it, once, and starts the
+        clone again. Nothing here records, dates, queues or pops anything."""
+        repo = _clean_repo(repo)
+        if (private := self._private(member, repo, private_roots)) is not None:
+            return private
+        if not (self.clone_dir(repo) / ".git").exists() and repo not in self._queues and self.provider.token(repo) is None:
+            return NO_APP
+        return None
 
     def _enqueue(self, repo: str, item: tuple):
         with self._guard:
@@ -595,6 +760,8 @@ class Repos:
                 data[repo][path] = {"owner": owner, "commit": commit, **({"named": named} if named else {}),
                                     **{k: v for k, v in declared.items() if k in ("session", "host", "link") and v}}
                 self._write(data)
+        if token is not None:
+            self.serve(repo, token)
 
     def _make_clone(self, repo: str, token: str, folder: str, dest: Path) -> str | None:
         """Clone into a folder of its own and move it into place when whole, so a report never meets half a clone. The
@@ -609,3 +776,30 @@ class Repos:
             return failed
         os.replace(partial, dest)
         return None
+
+
+class CommandProvider:
+    """The App's token from a command the box gives (SPEC 14): `token_command` run with the repo (`owner/name`) as its last
+    word prints an installation token, or nothing when the App cannot reach the repo. With no command it is none: every
+    repo is `no-app` and nothing is cloned, so a tiroir that has not been given its App clones nothing."""
+
+    def __init__(self, token_command=(), install_url: str = ""):
+        self.command, self.url = list(token_command), install_url
+
+    def token(self, repo: str) -> str | None:
+        if not self.command:
+            return None
+        try:
+            r = subprocess.run([*self.command, repo], capture_output=True, text=True, timeout=30,
+                               stdin=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return r.stdout.strip() or None if r.returncode == 0 else None
+
+    def install_url(self, repo: str) -> str:
+        return self.url
+
+
+def from_config(t: dict) -> Repos:
+    """The `Repos` a `[proxy.repos]` table (`dir`, and `token_command`, `install_url`) describes."""
+    return Repos(Path(t["dir"]), CommandProvider(t.get("token_command", ()), t.get("install_url", "")))

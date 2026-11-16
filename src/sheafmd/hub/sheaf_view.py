@@ -9,20 +9,27 @@ from . import index as index_mod
 from . import place
 from . import roots as roots_mod
 from . import the_list
+from . import visibility
 
 SESSION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")      # what AgentView takes as a session id (SPEC 8.6)
 AGENTS = {"Claude Code": "claude", "Codex": "codex"}                # the client of `<client> (<member>)` and AgentView's provider
 CHAT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 TITLES_KEPT = 5000                 # titles kept; a full cache starts over, each file is read again once
+SHARED = "Shared with me"          # the top-level folder of the pages other members Shared with this one, a folder per owner
 
 
 class Titles:
-    """The first `# ` heading of a file, read again only when the file changed."""
+    """The first `# ` heading of a file, and the agent that Shared it on its create (9.11), read again only when the file
+    changed."""
 
     def __init__(self):
         self._kept: dict = {}
 
     def of(self, path: Path, rel: str) -> str:
+        return self.read(path, rel)[0]
+
+    def read(self, path: Path, rel: str) -> tuple:
+        """(the title, the agent that Shared the page or "")."""
         try:
             st = path.stat()
             key = (str(path), st.st_mtime_ns, st.st_size)
@@ -30,10 +37,17 @@ class Titles:
                 text = path.read_text(encoding="utf-8", errors="replace")
                 if len(self._kept) >= TITLES_KEPT:
                     self._kept.clear()
-                self._kept[key] = the_list.read_rectoverso(rel, text).title
+                self._kept[key] = (the_list.read_rectoverso(rel, text).title, shared_by(text))
             return self._kept[key]
         except OSError:
-            return rel.rsplit("/", 1)[-1][:-3]
+            return rel.rsplit("/", 1)[-1][:-3], ""
+
+
+def shared_by(text: str) -> str:
+    """The agent that opened the page when it made it: its `shared` line reads `agent:<name> <time>` (the hub writes
+    it on a door `create` that carries a ticked Share line), else ""."""
+    mark = visibility.text(visibility.front_matter(text), "shared")
+    return mark[len("agent:"):].rpartition(" ")[0] if mark.startswith("agent:") else ""
 
 
 def say_write(line, session) -> str:
@@ -107,6 +121,9 @@ def tree(rows: list[dict]) -> list[dict]:
         return into.setdefault(name, {"name": name, "path": path, "children": {}})
 
     for r in rows:
+        if "shared_from" in r:      # the owner's own folders are theirs: the page is one level under its owner's name
+            node(node(nodes, SHARED, SHARED)["children"], r["shared_from"], f"{SHARED}/{r['shared_from']}")
+            continue
         at = roots_mod.Address.parse(r["doc"])
         top = node(nodes, at.root, at.root)
         here = top
@@ -135,11 +152,15 @@ def data(hub, member, titles: Titles) -> dict:
                     path = Path(os.path.realpath(hub.file(address)))
                 except roots_mod.NotFound:
                     continue
-                title = titles.of(path, at.rel)
+                title, agent = titles.read(path, at.rel)
             last, session = hub.writes.last(address), hub.writes.last_way_back(address)
             folder = "/".join([at.root, *at.rel.split("/")[:-1]])
-            rows.append({"doc": address, "url": d["url"], "title": title, "root": at.root,
-                         "folder": folder, "mtime": d["mtime"], "when": index_mod.when(d["mtime"], now),
+            given = {}
+            if "shared_from" in root:       # another member's page, found under the owner's name and nowhere else
+                folder, given = f"{SHARED}/{root['shared_from']}", {"shared_from": root["shared_from"],
+                                                                      "new": hub.member_opened.get(member.id, address) != int(d["mtime"] * 1e9)}
+            rows.append({"doc": address, "url": d["url"], "title": title, "root": SHARED if given else at.root,
+                         "folder": folder, "shared_by": agent, **given, "mtime": d["mtime"], "when": index_mod.when(d["mtime"], now),
                          "open": d["open"], "write": say_write(last, session),
                          "write_tip": last.host if last else "",
                          "session": session.writer if session else "",

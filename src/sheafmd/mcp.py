@@ -20,6 +20,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -587,11 +588,12 @@ class Door:
         member = self._member(caller)
         if "root" in args:
             root = hub.roots.get(args["root"])
-            if root is None or (member is not None and not hub.owns(member, root)):
+            if root is None or (member is not None and not hub.owns(member, root) and hub.giver(member, root) is None):
                 raise ToolError(f"There is no root named {args['root']}.")
             wanted = [root]
         else:
-            wanted = [r for r in hub.roots.listed() if member is None or hub.owns(member, r)]
+            wanted = [r for r in hub.roots.listed()
+                      if member is None or hub.owns(member, r) or hub.giver(member, r) is not None]
         rows, shut = [], []
         agent = caller.token if caller.token is not None and caller.token.client is not None else None
         pending = hub.waiting_tells.pending(agent) if agent is not None else set()    # the Tells that wait for it (9.8)
@@ -606,6 +608,7 @@ class Door:
                 continue
             placed = place.applies(hub, root.name)
             top = Path(os.path.realpath(root.path)) if placed else None
+            giving = member is not None and not hub.owns(member, root)     # another's loose root: judged page by page
             # The files of a member's private root are listed to that member alone, under the list root's names (rule D).
             privates = [p for p in place.private_listed(hub, member) if p.closed() is None and not p.missing()] if placed else []
             for src, found in [(root, f) for f in markdown_files(root)] + [(p, f) for p in privates for f in markdown_files(p)]:
@@ -632,7 +635,7 @@ class Door:
                         continue
                 # Whether the member owns a file asks git of its folder (8.2), and every file of a folder has the
                 # same answer: asked once a folder, not once a file.
-                if member is not None and folder not in owned:
+                if member is not None and (giving or folder not in owned):
                     owned[folder] = hub.member_owns(member, address)
                 if not self._sees(fm, address, caller, owned.get(folder), private):
                     continue                                   # nor a rectoverso the caller may not see (9.11)
@@ -1034,11 +1037,29 @@ class Door:
         the front matter with `set_keys`, which can join a line the reader gave another key to `sessions`, so
         `sessions` is judged again on what it gives (#36)."""
         seen = self._visible(text, old)
-        out = self._owned(seen, address, caller)
+        out = self._shared(self._owned(seen, address, caller), old, caller)
         sessions = visibility.front_matter(seen).get("sessions", "")    # the old value: `_visible` saw to that
         if out != seen and visibility.front_matter(out).get("sessions", "") != sessions:
             raise _sessions_changed(old)
         return out
+
+    def _shared(self, text: str, old: str | None, caller: Caller) -> str:
+        """`text` once the rule of Share holds for a door write (9.11). The agent may Share only on `create` of a new
+        page: a ticked Share line there opens the page, and its `shared` line says which agent did, for the row.
+        An `update` never opens a page to anyone it was not open to, whoever the token's member is, so text an agent
+        read cannot open a page that holds private work; closing a Share, or naming fewer members, opens nothing."""
+        if getattr(self.hub, "proxy", None) is None:
+            return text
+        now = visibility.audience(text)
+        if old is not None:
+            if visibility.widens(visibility.audience(old), now):
+                raise ToolError("An update cannot Share a page, nor open it to more members: only its owner does, from "
+                                "the page or the Sheaf. Send the text with its Share lines as `read` gave them.", "share")
+            return text
+        if now is None:
+            return text
+        return visibility.set_keys(text, {"visibility": "project",
+                                          "shared": f"agent:{caller.display} {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}"})
 
     def _visible(self, text: str, old: str | None) -> str:
         """In proxy mode, the text a door write puts on disk by the rule of visibility (9.11): the caller is

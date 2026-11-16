@@ -141,6 +141,12 @@ function render(data, target) {
     var t = el('td', 'sheaf-title'), a = el('a', null, r.title);
     href(a, r.url);
     t.append(a);
+    if (r.new) {                                // a page Shared with the member that changed since they opened it
+      var dot = el('span', 'sheaf-new', 'new');
+      dot.title = 'New or changed since you last opened it';
+      t.append(' ', dot);
+    }
+    if (r.shared_by) t.append(' ', el('span', 'sheaf-shared-by', 'shared by ' + r.shared_by));
     var w = el('td', 'sheaf-write', r.write);
     if (r.write_tip) w.title = r.write_tip;
     var s = el('td', 'sheaf-session');

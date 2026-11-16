@@ -1,0 +1,322 @@
+"""Share and Share with on a loose page (SPEC 9.11), and "Shared with me" in the Sheaf view (8.6). Three members of one
+tiroir, Alice, Bob and Carol, each with a door token, through the handler as the proxy sets it after the verifier's 2xx
+(`Front`: `X-Sheaf-Member` from the verifier, never from the browser) and through the door. Visibility is the risk: a
+Share reaches the named member only, a withdrawn Share removes access at once, and a member never sees another's
+private page, nor the name of its folder."""
+import json
+import os
+import pwd
+
+import pytest
+from helpers import FRONT, Front, door, rpc
+
+from sheafmd.edit import ticked_html
+from sheafmd.blocks import split_md_blocks
+from sheafmd.hub import proxy, the_list
+from sheafmd.hub.state import Tokens
+from sheafmd.hub.visibility import audience
+from sheafmd.source import md_hash
+
+ALICE = "503b2f77-83de-452c-817a-a357faf85929"
+BOB = "2b9d7e1c-4a51-4c0e-9d1f-6f0c3a7e8b42"
+CAROL = "9a1f3c52-6d0e-4b7a-8c25-1e4f7b3d9a60"
+OUTSIDER = "d41d8cd9-8f00-4b20-8e98-0998ecf8427e"            # a user the front knows, who is no member of this tiroir
+
+PRIVATE = "# Alice's notes\n\nNothing for anyone else.\n"
+SHARED = "# Alice's plan\n\n- [ ] Share\n\nA plan.\n"
+NAMED = "# Alice's plan\n\n- [ ] Share with bob\n\nA plan.\n"
+
+
+@pytest.fixture
+def team(hub, browser, tmp_path):
+    for n in ("alice", "bob", "carol"):
+        (tmp_path / f"{n}-work").mkdir()
+    tokens = {f"{n}-claude": Tokens().add(f"{n}-claude", client="Claude Code", write=True)
+              for n in ("alice", "bob", "carol")}
+    hub.proxy = proxy.parse({"origin": FRONT, "socket": "/run/sheaf-proxy/hub.sock",
+                             "proxy_user": pwd.getpwuid(os.getuid()).pw_name,
+                             "members": {ALICE: {"name": "Alice", "short": "alice", "roots": [str(tmp_path / "alice-work")], "tokens": ["alice-claude"]},
+                                         BOB: {"name": "Bob", "short": "bob", "roots": [str(tmp_path / "bob-work")], "tokens": ["bob-claude"]},
+                                         CAROL: {"name": "Carol", "short": "carol", "roots": [str(tmp_path / "carol-work")], "tokens": ["carol-claude"]}}},
+                            "the test")
+    front = Front(hub, browser.handler)
+    front.tokens, front.door = tokens, browser
+    return front
+
+
+def call(team, who, tool, **args):
+    res = door(team.door, rpc("tools/call", {"name": tool, "arguments": args}), token=team.tokens[f"{who}-claude"], as_name=None)
+    assert res.status == 200, res.text
+    out = res.json()["result"]
+    return out["isError"], out["content"][0]["text"]
+
+
+def made(team, who, text, doc="plan.md"):
+    bad, out = call(team, who, "create", doc=doc, text=text)
+    assert not bad, out
+    return json.loads(out)
+
+
+def page(team, member, doc):
+    return team.get(f"/{doc}", member=member)
+
+
+def read(team, doc):
+    return team.hub.file(doc).read_text(encoding="utf-8")
+
+
+def line_edit(text, prefix, tick=True):
+    """The page's edit that ticks (unticks) the box of the line that starts with `prefix`."""
+    lines = text.split("\n")
+    labels = [ln.lstrip("-*+ ").lstrip("[xX ]").lstrip() for ln in lines]
+    n = next((i for i, ln in enumerate(labels) if ln == prefix), None)
+    if n is None:
+        n = next(i for i, ln in enumerate(labels) if ln.startswith(prefix + " "))
+    at = the_list._place(text, n, split_md_blocks(text))
+    return {"i": at[0], "html": ticked_html(split_md_blocks(text)[at[0]], at[1], tick=tick, at=at[2])}
+
+
+def tick(team, member, doc, prefix, release=False):
+    text = read(team, doc)
+    return team.post("/_/save", {"doc": doc, "hash": md_hash(text), "edits": [line_edit(text, prefix, not release)]},
+                     member=member)
+
+
+def shared_rows(team, member):
+    got = team.get("/_/mount?sheaf=1", member=member)
+    assert got.status == 200, got.text
+    return got.json()["sheaf"]
+
+
+def doc_of(team, member):
+    return [r["doc"] for r in shared_rows(team, member)["rows"]]
+
+
+# ── nothing is Shared until the owner says so ────────────────────────────────
+
+def test_a_loose_page_is_its_owners_alone(team):
+    doc = made(team, "alice", PRIVATE)["doc"]
+    assert page(team, ALICE, doc).status == 200
+    gone = page(team, BOB, "loose-alice/nothing.md")
+    got = page(team, BOB, doc)
+    assert got.status == 404 and got.body == gone.body
+    assert doc_of(team, BOB) == [] and shared_rows(team, BOB)["tree"] == []
+
+
+def test_a_sign_in_the_tiroir_does_not_know_reaches_nothing(team):
+    doc = made(team, "alice", SHARED)["doc"]
+    assert tick(team, ALICE, doc, "Share").status == 200
+    assert page(team, OUTSIDER, doc).status in (401, 403, 404)
+    assert page(team, None, doc).status in (401, 403, 404)
+
+
+# ── Share and Share with ─────────────────────────────────────────────────────
+
+def test_share_opens_a_loose_page_to_every_member_of_the_tiroir(team):
+    doc = made(team, "alice", SHARED)["doc"]
+    assert tick(team, ALICE, doc, "Share").status == 200
+    assert "- [x] Share" in read(team, doc)
+    assert page(team, BOB, doc).status == 200 and page(team, CAROL, doc).status == 200
+
+
+def test_share_with_opens_it_to_the_named_members_only(team):
+    doc = made(team, "alice", NAMED)["doc"]
+    assert page(team, BOB, doc).status == 404
+    assert tick(team, ALICE, doc, "Share with").status == 200
+    assert page(team, BOB, doc).status == 200
+    assert page(team, CAROL, doc).status == 404
+
+
+def test_a_member_who_is_not_named_sees_neither_the_page_nor_the_folder_name(team):
+    doc = made(team, "alice", NAMED.replace("Alice's plan", "Quiet plan"))["doc"]
+    tick(team, ALICE, doc, "Share with")
+    got = shared_rows(team, CAROL)
+    assert got["rows"] == [] and got["tree"] == []
+    assert "alice" not in json.dumps(got) and "Quiet plan" not in json.dumps(got)
+    assert doc not in team.get("/_/index.json", member=CAROL).text
+    assert "alice" not in team.get("/_/index.json", member=CAROL).text
+
+
+def test_the_recipient_finds_it_in_shared_with_me_under_the_owner(team):
+    doc = made(team, "alice", NAMED)["doc"]
+    tick(team, ALICE, doc, "Share with")
+    got = shared_rows(team, BOB)
+    assert [n["name"] for n in got["tree"]] == ["Shared with me"]
+    assert [n["name"] for n in got["tree"][0]["children"]] == ["alice"]
+    row = got["rows"][0]
+    assert row["doc"] == doc and row["folder"] == "Shared with me/alice" and row["title"] == "Alice's plan"
+    assert row["root"] == "Shared with me"
+
+
+def test_a_shared_page_is_new_until_the_recipient_opens_it_and_new_again_when_it_changes(team):
+    doc = made(team, "alice", NAMED)["doc"]
+    tick(team, ALICE, doc, "Share with")
+    assert shared_rows(team, BOB)["rows"][0]["new"] is True
+    assert team.get(f"/_/doc?doc={doc}", member=BOB).status == 200
+    assert shared_rows(team, BOB)["rows"][0]["new"] is False
+    os.utime(team.hub.file(doc), (1, 1_900_000_000))
+    assert shared_rows(team, BOB)["rows"][0]["new"] is True
+
+
+def test_the_owners_folder_names_are_not_in_what_the_recipient_sees(team):
+    bad, out = call(team, "alice", "create", doc="plan.md", text=NAMED, folder="private-matters/deep")
+    doc = json.loads(out)["doc"]
+    tick(team, ALICE, doc, "Share with")
+    tree = shared_rows(team, BOB)["tree"]
+    assert "private-matters" not in json.dumps(tree) and "deep" not in json.dumps(tree)
+    assert [r["folder"] for r in shared_rows(team, BOB)["rows"]] == ["Shared with me/alice"]
+
+
+def test_the_owners_other_pages_stay_hidden_from_the_recipient(team):
+    mine = made(team, "alice", PRIVATE, doc="mine.md")["doc"]
+    doc = made(team, "alice", NAMED)["doc"]
+    tick(team, ALICE, doc, "Share with")
+    assert doc_of(team, BOB) == [doc]
+    assert page(team, BOB, mine).status == 404
+
+
+def test_withdrawing_the_share_removes_access_at_once(team):
+    doc = made(team, "alice", NAMED)["doc"]
+    tick(team, ALICE, doc, "Share with")
+    assert page(team, BOB, doc).status == 200
+    assert tick(team, ALICE, doc, "Share with", release=True).status == 200
+    assert page(team, BOB, doc).status == 404 and doc_of(team, BOB) == []
+
+
+def test_editing_the_names_off_the_line_removes_access_at_once(team):
+    doc = made(team, "alice", NAMED)["doc"]
+    tick(team, ALICE, doc, "Share with")
+    team.hub.file(doc).write_text(read(team, doc).replace("Share with bob", "Share with carol"), encoding="utf-8")
+    assert page(team, BOB, doc).status == 404 and page(team, CAROL, doc).status == 200
+
+
+# ── what a recipient may do, and may not ─────────────────────────────────────
+
+def test_a_recipient_comments_and_saves_on_a_shared_page(team):
+    doc = made(team, "alice", NAMED + "\nA paragraph.\n")["doc"]
+    tick(team, ALICE, doc, "Share with")
+    text = read(team, doc)
+    blocks = split_md_blocks(text)
+    i = next(n for n, b in enumerate(blocks) if b.content.strip() == "A paragraph.")
+    got = team.post("/_/save", {"doc": doc, "hash": md_hash(text), "edits": [{"i": i, "html": "<p>A paragraph, edited.</p>"}]},
+                    member=BOB)
+    assert got.status == 200 and "A paragraph, edited." in read(team, doc)
+
+
+def test_a_recipient_cannot_withdraw_the_share(team):
+    doc = made(team, "alice", NAMED)["doc"]
+    tick(team, ALICE, doc, "Share with")
+    got = tick(team, BOB, doc, "Share with", release=True)
+    assert got.status == 409 and "owner" in got.text
+    assert "- [x] Share with bob" in read(team, doc)
+
+
+def test_a_recipient_cannot_widen_the_share_by_editing_the_names(team):
+    doc = made(team, "alice", NAMED)["doc"]
+    tick(team, ALICE, doc, "Share with")
+    text = read(team, doc)
+    i = next(n for n, b in enumerate(split_md_blocks(text)) if "Share with" in b.content)
+    got = team.post("/_/save", {"doc": doc, "hash": md_hash(text),
+                                "edits": [{"i": i, "html": '<ul class="task-list"><li><input type="checkbox" checked disabled>'
+                                                           ' Share with bob, carol</li></ul>'}]}, member=BOB)
+    assert got.status == 409, got.text
+    assert audience(read(team, doc)) == frozenset({"bob"})
+    assert page(team, CAROL, doc).status == 404
+
+
+def test_a_recipient_cannot_tick_share_on_a_page_they_were_given(team):
+    doc = made(team, "alice", NAMED + "\n- [ ] Share\n")["doc"]
+    tick(team, ALICE, doc, "Share with")
+    got = tick(team, BOB, doc, "Share")
+    assert got.status == 409 and page(team, CAROL, doc).status == 404
+
+
+def test_a_recipient_cannot_write_a_new_page_into_the_owners_root(team):
+    doc = made(team, "alice", NAMED)["doc"]
+    tick(team, ALICE, doc, "Share with")
+    bad, why = call(team, "bob", "create", doc="loose-alice/2026-11/bobs.md", text="# Bob\n")
+    assert bad, why
+    assert not os.path.exists(team.hub.file(doc).parent / "bobs.md")
+
+
+def test_a_recipients_agent_sees_the_shared_page_through_the_door(team):
+    doc = made(team, "alice", NAMED)["doc"]
+    bad, why = call(team, "bob", "read", doc=doc)
+    assert bad, "not shared yet"
+    tick(team, ALICE, doc, "Share with")
+    bad, out = call(team, "bob", "read", doc=doc)
+    assert not bad and "Alice's plan" in out
+    bad, listing = call(team, "bob", "documents", open_only=False)
+    assert doc in listing
+    bad, why = call(team, "carol", "read", doc=doc)
+    assert bad
+    bad, listing = call(team, "carol", "documents", open_only=False)
+    assert doc not in listing and "alice" not in listing
+
+
+# ── the agent's Share: only on create ────────────────────────────────────────
+
+def test_an_agent_create_with_a_ticked_share_line_shares_and_the_row_says_by_whom(team):
+    doc = made(team, "alice", "# Agent page\n\n- [x] Share with bob\n")["doc"]
+    assert page(team, BOB, doc).status == 200 and page(team, CAROL, doc).status == 404
+    row = shared_rows(team, BOB)["rows"][0]
+    assert row["shared_by"] == "Claude Code (Alice)"
+
+
+def test_an_agent_update_that_adds_a_share_line_is_refused(team):
+    out = made(team, "alice", PRIVATE)
+    bad, why = call(team, "alice", "update", doc=out["doc"], text=PRIVATE + "\n- [x] Share with bob\n", expected_hash=out["hash"])
+    assert bad, why
+    assert read(team, out["doc"]) == PRIVATE and page(team, BOB, out["doc"]).status == 404
+
+
+def test_an_agent_update_that_widens_the_names_is_refused(team):
+    out = made(team, "alice", "# Agent page\n\n- [x] Share with bob\n")
+    bad, why = call(team, "alice", "update", doc=out["doc"], text="# Agent page\n\n- [x] Share\n", expected_hash=out["hash"])
+    assert bad, why
+    assert page(team, CAROL, out["doc"]).status == 404
+
+
+def test_a_recipients_agent_cannot_change_the_share_line(team):
+    doc = made(team, "alice", "# Agent page\n\n- [x] Share with bob\n")
+    bad, why = call(team, "bob", "update", doc=doc["doc"], text="# Agent page\n\n- [x] Share with bob, carol\n",
+                    expected_hash=doc["hash"])
+    assert bad, why
+    assert page(team, CAROL, doc["doc"]).status == 404
+
+
+def test_an_agent_update_that_leaves_the_share_line_alone_is_written(team):
+    out = made(team, "alice", "# Agent page\n\n- [x] Share with bob\n")
+    bad, why = call(team, "alice", "update", doc=out["doc"], text="# Agent page\n\n- [x] Share with bob\n\nMore.\n",
+                    expected_hash=out["hash"])
+    assert not bad, why
+    assert "More." in read(team, out["doc"])
+
+
+def test_an_agent_update_that_names_fewer_members_is_written(team):
+    out = made(team, "alice", "# Agent page\n\n- [x] Share with bob, carol\n")
+    bad, why = call(team, "alice", "update", doc=out["doc"], text="# Agent page\n\n- [x] Share with bob\n",
+                    expected_hash=out["hash"])
+    assert not bad, why
+    assert page(team, CAROL, out["doc"]).status == 404 and page(team, BOB, out["doc"]).status == 200
+
+
+def test_widens_says_when_a_page_is_opened_to_more_members():
+    from sheafmd.hub.visibility import widens
+    names = frozenset
+    assert widens(None, True) and widens(None, names({"bob"})) and widens(names({"bob"}), True)
+    assert widens(names({"bob"}), names({"bob", "carol"}))
+    assert not widens(True, True) and not widens(True, names({"bob"})) and not widens(None, None)
+    assert not widens(names({"bob", "carol"}), names({"bob"})) and not widens(True, None)
+
+
+# ── the Share line itself ────────────────────────────────────────────────────
+
+def test_audience_reads_the_ticked_share_lines_only():
+    assert audience("# x\n\n- [ ] Share\n") is None
+    assert audience("# x\n\n- [x] Share\n") is True
+    assert audience("# x\n\n- [x] Share with Bob, carol\n") == frozenset({"bob", "carol"})
+    assert audience("# x\n\n- [x] Share with bob\n- [x] Share\n") is True
+    assert audience("# x\n\n```\n- [x] Share\n```\n") is None
+    assert audience("# x\n\n- [ ] Share with bob\n") is None
+    assert audience("# x\n\nShare with bob\n") is None

@@ -869,6 +869,7 @@ class Handler:
             # Their own seen state, and nothing of the hub account's agent session (9.9).
             # A rectoverso's Work on this and its Tell for James's window are refreshed as the meta's (9.12).
             self.hub.expire_relayed()
+            self.hub.opened_by(req.member, e.address)
             work, can = self.hub.member_work(e, req.member)
             extra = {} if work is None else {"work": work}
             mt = self.hub.member_target(e.address, req.member, can)
@@ -1123,19 +1124,23 @@ class Handler:
                 # A thread moves to one client (9.10, #109): a rectoverso answers Move to once, by whatever edit.
                 raise EditError(f"This thread moves to one client: Move to {slug} is ticked.")
             words = visibility.newly_ticked(toggled)
+            if m is not None and visibility.audience(text) != visibility.audience(new) \
+                    and not self.hub.is_owner(m, e.address, fm):
+                # Who a page is Shared with is its owner's alone, by whatever edit moves the line or its names (9.11).
+                raise EditError("Only the owner of this rectoverso can change who it is shared with.")
             if visibility.withdraws_share(text, new):
                 # Withdrawing a Share is its owner's alone, as giving it is (#40), by whatever edit unticks the box:
                 # anyone else's writes nothing; the owner's closes the rectoverso again in the same write. The hub's own
                 # person (no member: the loopback port or the key) reads every file, and withdraws it as an owner.
                 fm = visibility.front_matter(text)
-                if m is not None and not visibility.owner_of(fm, [m], self.hub.assignees(e.address, fm)):
+                if m is not None and not self.hub.is_owner(m, e.address, fm):
                     raise EditError("Only the owner of this rectoverso can withdraw its Share.")
                 new = visibility.unshare(new)
                 if visibility.front_matter(new).get("sessions", "") != fm.get("sessions", ""):
                     raise EditError("A save cannot change the front matter: change it in the file.")
                 words.add("Unshare")
             if "Share" in words:
-                if m is not None and not visibility.owner_of(fm, [m], self.hub.assignees(e.address, fm)):
+                if m is not None and not self.hub.is_owner(m, e.address, fm):
                     raise EditError("Only the owner of this rectoverso can share it.")
                 if visibility.effective(visibility.front_matter(new)) == "owner":
                     by = (m.short or m.name) if m is not None else self.hub.person

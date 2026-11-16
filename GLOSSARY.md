@@ -246,3 +246,7 @@ _Avoid_: history, backup, snapshots
 **Dictation**:
 Text spoken into the microphone button of a chat box and transcribed: it is put in the field at the cursor and stays editable. It is never sent to the agent by itself, and the sound is not kept.
 _Avoid_: voice message, speech-to-text send
+
+**Shared with me**:
+The top-level folder of a member's Sheaf that holds the loose pages other members Shared with them, one sub-folder per owner. It tells nothing of the owner's own folders. A row in it is `new` until the member opens the page, and again when the page changed since. See SPEC 9.11, "Share on a loose page".
+_Avoid_: inbox, received

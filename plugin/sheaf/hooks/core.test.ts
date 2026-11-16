@@ -1,10 +1,10 @@
 import { expect, test } from 'claude-code/testing'
-import { fresh, nextGap, originOf, shouldPoll, takeNext, tellText, MIN_GAP_MS, MAX_BACKOFF_MS } from './core'
+import { fresh, nextGap, doorOfTool, originOf, shouldPoll, takeNext, tellText, MIN_GAP_MS, MAX_BACKOFF_MS } from './core'
 
 test('no polling before the first send, and never two at once', async () => {
   const p = fresh()
   expect(shouldPoll(p, 1_000, 0)).toBe(false)
-  p.origin = 'https://chat.example.com'
+  p.origin = { flag: '--origin', value: 'https://chat.example.com' }
   expect(shouldPoll(p, 1_000, 0)).toBe(true)
   p.busy = true
   expect(shouldPoll(p, 1_000, 0)).toBe(false)
@@ -17,7 +17,7 @@ test('a failure backs the poll off, doubling to five minutes, and a success rese
   expect(nextGap(p)).toBe(2 * MIN_GAP_MS)
   p.failures = 30
   expect(nextGap(p)).toBe(MAX_BACKOFF_MS)
-  p.origin = 'https://chat.example.com'
+  p.origin = { flag: '--origin', value: 'https://chat.example.com' }
   expect(shouldPoll(p, 1_000, 5_000)).toBe(false)
 })
 
@@ -39,7 +39,14 @@ test('the session reads where a Tell came from', async () => {
 })
 
 test('only a tiroir address printed by a send arms the mod', async () => {
-  expect(originOf('https://chat.example.com/loose-bea/2026-11/notes.md\non chat.example.com as Bea')).toBe('https://chat.example.com')
+  expect(originOf('https://chat.example.com/loose-bea/2026-11/notes.md\non chat.example.com as Bea')).toEqual({ flag: '--origin', value: 'https://chat.example.com' })
   expect(originOf('  ~ http://127.0.0.1:27419/root/notes.md')).toBeNull()
   expect(originOf('')).toBeNull()
+})
+
+test('a write through the door\'s MCP server declares the session; a read or another server does not', async () => {
+  for (const w of ['create', 'update', 'reply', 'resolve'])
+    expect(doorOfTool(`mcp__sheaf-chat_example_com__${w}`)).toEqual({ flag: '--server', value: 'sheaf-chat_example_com' })
+  for (const t of ['mcp__sheaf-chat_example_com__read', 'mcp__sheaf-chat_example_com__tells', 'mcp__other__reply', 'Bash', 'reply'])
+    expect(doorOfTool(t)).toBeNull()
 })

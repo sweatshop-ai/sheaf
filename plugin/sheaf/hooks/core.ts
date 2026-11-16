@@ -8,8 +8,12 @@ export const SUBMIT_WINDOW_MS = 60_000                       // a submit that ne
 
 export type Tell = { id: string; doc: string; thread: string; message: string; by: string; at: string }
 
+/** How `sheaf tells-poll` is told which tiroir: the address a send printed, or the name of the door's MCP server. */
+export type Door = { flag: '--origin' | '--server'; value: string }
+
 export type Poller = {
-  origin: string | null      // the tiroir the session last sent a page to; null until the first send
+  origin: Door | null        // the tiroir this session has declared itself to; null until it has
+  armedFor: string           // the session id that declared itself: the only id this poller ever polls for
   session: string            // the session id the held and delivered Tells belong to
   failures: number           // consecutive polls that failed
   held: Tell[]               // taken from the door, not yet submitted (an Esc, or a turn running)
@@ -18,13 +22,20 @@ export type Poller = {
   submittingUntil: number    // a Tell was handed to `$.prompt.submit` and its turn has not started: no second one before it does, or this time
 }
 
-export const fresh = (): Poller => ({ origin: null, session: '', failures: 0, held: [], delivered: new Set(), busy: false, submittingUntil: 0 })
+export const fresh = (): Poller => ({ origin: null, armedFor: '', session: '', failures: 0, held: [], delivered: new Set(), busy: false, submittingUntil: 0 })
 
-/** The address a successful `sheaf FILE.md` printed on its first line, or null: only a tiroir page arms the mod. */
-export function originOf(output: string): string | null {
+/** The address a successful `sheaf FILE.md` printed on its first line, or null: a tiroir page declares the session. */
+export function originOf(output: string): Door | null {
   const first = output.split('\n', 1)[0]?.trim() ?? ''
   const m = /^(https:\/\/[^/\s]+)\/\S+/.exec(first)
-  return m ? m[1] : null
+  return m ? { flag: '--origin', value: m[1] } : null
+}
+
+/** The door a write through its MCP server names: `mcp__sheaf-HOST__reply` (and create, update, resolve) declares the
+ *  session as a send does; a read, `tells`, or another server's tool does not. */
+export function doorOfTool(tool: string): Door | null {
+  const m = /^mcp__(sheaf-[A-Za-z0-9_-]+)__(?:create|update|reply|resolve)$/.exec(tool)
+  return m ? { flag: '--server', value: m[1] } : null
 }
 
 /** Whether to start a poll now. Never before the first send, never two at once, never while waiting out a failure. */

@@ -693,3 +693,28 @@ def test_an_error_about_a_made_up_name_in_the_owners_root_writes_no_opaque_name(
         assert bad
     assert dict(team.hub.shared_ids._data) == before
     assert "made-up" not in json.dumps(team.hub.shared_ids._data)
+
+
+# ── the review's findings (PR 394, round 5) ──────────────────────────────────
+
+def test_a_recipient_is_told_the_opaque_name_in_the_index_json_and_the_index_page(team):
+    real = deep(team)
+    name = told(team, BOB, real)
+    for path in ("/_/index.json", "/"):
+        got = team.get(path, member=BOB)
+        assert got.status == 200, (path, got.status)
+        assert "private-matters" not in got.text and real not in got.text and name in got.text, path
+
+
+def test_the_owners_root_page_is_no_page_of_a_recipient(team):
+    real = deep(team)
+    got, none = team.get("/loose-alice/", member=BOB), team.get("/loose-nobody/", member=BOB)
+    assert got.status == 404 and "private-matters" not in got.text and real not in got.text
+    assert got.body == none.body
+
+
+def test_the_owner_still_sees_the_real_name_in_the_index_json_the_index_page_and_the_root_page(team):
+    real = deep(team)
+    for path in ("/_/index.json", "/", "/loose-alice/"):
+        got = team.get(path, member=ALICE)
+        assert got.status == 200 and real in got.text, path

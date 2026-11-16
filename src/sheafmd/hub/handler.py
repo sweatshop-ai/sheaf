@@ -959,7 +959,7 @@ class Handler:
     def _index_json(self, req: Req) -> Response:
         rendered = req.query.get("rendered", "0")
         _shape(rendered in ("0", "1"), "rendered must be 0 or 1")
-        return _ok(**self.hub.index.data(rendered=rendered == "1", member=req.member))
+        return _ok(**self.hub.index.told(req.member, rendered=rendered == "1"))
 
     def _jobs(self, req: Req) -> Response:
         return _ok(**self.hub.jobs())

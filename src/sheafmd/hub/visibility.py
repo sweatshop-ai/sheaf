@@ -384,7 +384,9 @@ def for_door(text_: str, old: str | None) -> str:
     mine = {s for s in sources(fm) if private(s)}
     kept = text(was, "shared") if text(was, "shared") and mine <= set(sources(was)) else None
     want = "owner" if closed or (mine and not kept) else "project"
-    values = {"visibility": want, "shared": kept if want == "project" else None}
+    # The mark stays on a closed page too: a `Share with <names>` tick on a page with a private source is `owner` with
+    # the owner's mark, and `Hub.named` reads it to open the page to the names; `kept` is None once the write adds a private source.
+    values = {"visibility": want, "shared": kept}
     if old is not None:
         # an update neither gives nor changes the owner, nor the issue whose assignee is the owner; the door
         # gives a rectoverso that no member owns its token's member (mcp `_owned`, #30)

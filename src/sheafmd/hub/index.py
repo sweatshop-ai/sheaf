@@ -286,8 +286,22 @@ class Index:
                 "unread": unread, "mtime": st.st_mtime, "tabs": e.bus.count() if e else 0,
                 "opened": bool(e and e.opened), "rendered": bool(e and e.rendered)}
 
+    def told(self, member, **kw) -> dict:
+        """`data` as `member` is told of it (9.11): the rows of another member's loose root, which Shares them a page, carry
+        the page's opaque name in `doc` and `url`, never the owner's folders. For the pages the member reads and the JSON
+        they fetch; `data` itself keeps the real addresses the hub's own consumers (the Sheaf, the streams) work on."""
+        out = self.data(member=member, **kw)
+        if member is None:
+            return out
+        for root in out["roots"]:
+            if "shared_from" in root:
+                for d in root["docs"]:
+                    told = self.hub.alias(member, d["doc"])
+                    d["doc"], d["url"] = told, roots_mod.url_path(told)
+        return out
+
     def page(self, nonce: str, only: str | None = None, member=None) -> str:
-        return render_page(self.data(only, member=member), version=self.hub.version, port=self.hub.port,
+        return render_page(self.told(member, only=only), version=self.hub.version, port=self.hub.port,
                            only=only, nonce=nonce, now=self.hub.clock(),
                            origin=self.hub.proxy.origin if member else None)
 

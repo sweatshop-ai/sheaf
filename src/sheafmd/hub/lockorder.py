@@ -7,10 +7,10 @@ acquisition against this list, in the move, Tell, save, door create, queue_agent
     admit     `Hub.admit`: every Tell start and the upgrade stop; held for a look and a mark, never for a wait on a file,
               a render or the hub's lock
     name      `place.held`: a rectoverso's name (`place._name_lock`); two names only under the moves' lock, in ascending order, or a link's name before its target's
-    folders   `place.folders_lock`: a project's private folders
     hub       `Hub._lock`
     doc       `LiveDocument._lock`
     file      `source.file_lock`: the flock of one .md (`update_file`, `update_beneath`, a move's link)
+    folders   `place.folders_lock`: a project's private folders; after a file's lock (`place` takes the file's, then this)
     commit    a repo's commit lock (`Commits._repo_lock`), also under a pull's guard of names and files
     store     the thread lock of a state store (`Forwards`, `Waiting`, ...): innermost, held for a read or a write of its file
 

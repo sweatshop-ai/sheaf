@@ -1,7 +1,7 @@
 """A test-only checker of the hub's lock order (SPEC 9.11, "One lock order"; `sheafmd.hub.lockorder.ORDER`).
 
-`install()` wraps each lock of the hub in a recording one: the moves' lock, the admission lock, a name's lock and a
-project's folders' lock, the hub's lock, a document's lock, a file lock (flock), a repo's commit lock, the stop lock, and
+`install()` wraps each lock of the hub in a recording one: the moves' lock, the admission lock, a name's lock, the
+hub's lock, a document's lock, a file lock (flock), a project's folders' lock, a repo's commit lock, the stop lock, and
 the state stores' thread locks. Each thread keeps the stack of what it holds; an acquisition of a lock whose place in
 the order is before one the thread holds is a violation. It is recorded (a worker thread's exception may be swallowed)
 and raised at the acquire, so the test that did it fails, and `check()` fails the test once more at its end.

@@ -19,7 +19,7 @@ from . import roots as roots_mod
 DAY = 86400
 SWEEP_EVERY = 600           # seconds between two sweeps on the hub's tick
 TRASH_DAYS = 30
-ARCHIVED, SEEN = "archived.json", "seen.json"
+ARCHIVED, SEEN = loose.ARCHIVED, loose.SEEN
 TRASH = Path(".sheaf") / "trash"
 
 

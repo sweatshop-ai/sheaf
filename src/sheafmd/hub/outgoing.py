@@ -10,6 +10,7 @@ hooked up once ticket 17's Forward is in main.
 """
 import contextlib
 import dataclasses
+import http.client
 import json
 import os
 import re
@@ -56,6 +57,8 @@ def post(origin: str, verb: str, body: dict, token: str, seconds: float | None =
             status, raw = res.status, res.read()
     except urllib.error.HTTPError as e:
         status, raw = e.code, e.read()
+    except http.client.HTTPException as e:      # a reply cut short or not HTTP: no answer, as a cut connection is none
+        raise OSError(f"the other shared Sheaf's reply was not a whole one ({type(e).__name__})") from None
     try:
         return status, json.loads(raw.decode("utf-8")) if raw else None
     except ValueError:

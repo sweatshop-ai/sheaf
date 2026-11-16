@@ -125,7 +125,10 @@ class WriteLog:
                         session=clean(got.get("session"), MAX_SESSION), host=clean(got.get("host")),
                         link=declared_link(got.get("link")), chat=clean(got.get("chat")))
             with self._lock:
-                self._lines.setdefault(address, deque(maxlen=self._keep)).append(line)
+                kept = self._lines.setdefault(address, deque(maxlen=self._keep))
+                if line in kept:        # a page that came back brings the lines this address kept when it left: each line is kept once
+                    continue
+                kept.append(line)
                 self._append(line)
             n += 1
         self.add(address, by, "tiroir", "transfer", host=came_from)

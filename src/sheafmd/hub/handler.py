@@ -1223,7 +1223,7 @@ class Handler:
         return address, visibility.front_matter(text), work.state(self.hub, address, text, req.member)
 
     def _code_rectoverso(self, req: Req, doc):
-        """`_sheaf` for a request of a sign-in code (9.13): the code's own rectoverso, open to its member, else the 404
+        """`_rectoverso` for a request of a sign-in code (9.13): the code's own rectoverso, open to its member, else the 404
         that names neither, since the laptop cannot tell the two apart and neither can a guesser."""
         try:
             if doc != req.code.doc:

@@ -552,7 +552,7 @@ def run_as(monkeypatch, path):
 
 @pytest.fixture
 def no_record(monkeypatch):
-    """No `direct_url.json` for this rectoverso: the line to run is `uv tool install sheafmd`."""
+    """No `direct_url.json` for this sheaf: the line to run is `uv tool install sheafmd`."""
     monkeypatch.setattr(agent_setup, "installed_from", lambda: None)
 
 

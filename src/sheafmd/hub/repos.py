@@ -212,7 +212,7 @@ class Repos:
         """Add `folder` to the sparse set when it is not in it; whether it was added."""
         if not folder:
             return False
-        listed = self._git(dest, "sparse-checkout", "list")
+        listed = self._git(dest, "-c", "core.quotePath=false", "sparse-checkout", "list")
         if listed.returncode == 0 and any(folder == h or folder.startswith(h + "/") for h in listed.stdout.split("\n") if h):
             return False
         return self._git(dest, "sparse-checkout", "add", "--", folder, token=token).returncode == 0
@@ -240,8 +240,8 @@ class Repos:
 
     def _holds(self, dest: Path, commit: str, path: str) -> bool:
         """Whether the page is in the tree of `commit`: no record is made for a page that is not there."""
-        r = self._git(dest, "ls-tree", "--name-only", commit, "--", path, seconds=30)
-        return r.returncode == 0 and r.stdout.strip() == path
+        r = self._git(dest, "ls-tree", "-z", "--name-only", commit, "--", path, seconds=30)      # -z: git quotes a non-ASCII path otherwise
+        return r.returncode == 0 and r.stdout == path + "\0"
 
     def _named_owner(self, dest: Path, commit: str, path: str, token: str | None) -> tuple[bool, str | None]:
         """(whether git could read the page at `commit`, the `owner` of its front matter there); git fetches the blob

@@ -960,3 +960,41 @@ def test_a_report_for_a_repo_is_never_answered_from_the_clone_made_for_another(h
     finally:
         release.set()
         hub_repos.hub.repos.settle()
+
+
+# ── paths git would print quoted (non-ASCII) ─────────────────────────────────
+
+def push_page(tmp_path, origin, rel, text="# Idée\n\nAn idea.\n"):
+    """Push one page at `rel` to the 'GitHub' repo; the new commit."""
+    pusher = laptop_clone(tmp_path, origin, "pusher-" + str(abs(hash(rel))))
+    (pusher / rel).parent.mkdir(parents=True, exist_ok=True)
+    (pusher / rel).write_text(text, encoding="utf-8")
+    sh(pusher, "add", "-A")
+    sh(pusher, "commit", "-q", "-m", "a page with an accent")
+    sh(pusher, "push", "-q", "origin", "HEAD:main")
+    return sh(origin, "rev-parse", "main")
+
+
+def test_a_page_with_a_non_ascii_path_gets_its_owner_recorded_at_its_first_report(hub_repos, tmp_path, origin):
+    rel = "idées/café.md"
+    commit = push_page(tmp_path, origin, rel)
+    report(hub_repos, path=rel, commit=commit)
+    assert hub_repos.hub.repos.owner_of(REPO, rel) == "bea"
+
+
+def test_a_folder_with_a_non_ascii_name_is_added_to_the_sparse_set_once(hub_repos, tmp_path, origin, monkeypatch):
+    rel = "idées/café.md"
+    commit = push_page(tmp_path, origin, rel)
+    seen = []
+    real = repos_mod.Repos._git
+
+    def spy(self, at, *args, **k):
+        seen.append(args)
+        return real(self, at, *args, **k)
+
+    monkeypatch.setattr(repos_mod.Repos, "_git", spy)
+    report(hub_repos)                                   # the clone
+    report(hub_repos, path=rel, commit=commit)          # the widening
+    seen.clear()
+    report(hub_repos, path=rel, commit=commit)
+    assert [a for a in seen if a[:2] == ("sparse-checkout", "add")] == []

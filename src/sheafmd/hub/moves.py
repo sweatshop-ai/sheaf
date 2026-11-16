@@ -11,6 +11,7 @@ import threading
 from pathlib import Path
 
 from . import loose, place
+from ..source import file_lock
 from .roots import Address, NotFound
 
 _LOCK = threading.RLock()       # one move at a time in a hub: the checks and the rename are one step
@@ -66,7 +67,9 @@ def _clear(hub, address: str, came_from: str | None):
 
 
 def _quiet(hub, address: str):
-    """A Tell that runs on the page, or waits for its reply, holds the page's address: it is moved when that ends."""
+    """A Tell that runs on the page, or waits for its reply, holds the page's address: it is moved when that ends. The
+    answer holds only under the hub's admission lock, the one a Tell's start takes (`Tell._admitting`): taken from the look
+    to the rename, a Tell either began before it and is seen, or begins after the rename and finds the page gone."""
     if hub.tell_live(address):
         raise Refused(409, "A Tell is running on this page: move it when that ends.")
 
@@ -81,9 +84,11 @@ def move_page(hub, member, address: str, folder: str) -> str:
             raise Refused(409, "The page is in that folder already.")
         new = str(Address(root.name, new_rel))
         _clear(hub, new, address)
-        _quiet(hub, address)
+        _quiet(hub, address)        # said early, nothing taken yet; asked again under the admission lock before the rename
         with place.held(hub, address), place.held(hub, new):
-            _put(hub, root, rel, new_rel, address, new)
+            with hub.admit:
+                _quiet(hub, address)
+                _put(hub, root, rel, new_rel, address, new)
             hub.moved_page(address, new, member.name)
     return new
 
@@ -97,6 +102,12 @@ def _put(hub, root, rel: str, new_rel: str, address: str, new: str):
         raise Refused(404, "no such document") from None
     top = Path(os.path.realpath(root.path))
     src, dst = top / rel, top / new_rel
+    with file_lock(src):        # the page's file lock, as every write of it takes: a save under way is waited for
+        _link(hub, root, top, rel, new_rel, src, dst)
+    tidy(top, rel)
+
+
+def _link(hub, root, top: Path, rel: str, new_rel: str, src: Path, dst: Path):
     try:
         if not stat.S_ISREG(os.lstat(src).st_mode):
             raise Refused(409, "The page is not a plain file.")
@@ -115,7 +126,6 @@ def _put(hub, root, rel: str, new_rel: str, address: str, new: str):
         unmake(made)
         raise Refused(409, f"The page could not be moved ({e.strerror}).") from None
     os.unlink(src)
-    tidy(top, rel)
 
 
 def missing_folders(top: Path, rel: str) -> list:
@@ -178,7 +188,9 @@ def move_folder(hub, member, folder: str, to: str) -> list:
         try:
             for rel, new_rel, old, new in plan:
                 with place.held(hub, old), place.held(hub, new):
-                    _put(hub, root, rel, new_rel, old, new)
+                    with hub.admit:
+                        _quiet(hub, old)
+                        _put(hub, root, rel, new_rel, old, new)
                     hub.moved_page(old, new, member.name)
                 done.append((rel, new_rel, old, new))
         except BaseException:

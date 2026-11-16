@@ -1376,7 +1376,7 @@ def test_unticking_the_plain_share_while_a_named_share_stays_closes_the_page_to_
     assert untick(team, work, DOC, "- [x] Share", ALICE).status == 200
     assert reads(team, DOC) == {"alice": 200, "bob": 200, "carol": 404}
     fm = front_matter((work / DOC).read_text(encoding="utf-8"))
-    assert fm["visibility"] == "owner" and fm["shared"].startswith("alice ")
+    assert fm["visibility"] == "owner" and "shared" not in fm       # a page with no private source holds no mark, and narrowing makes none
 
 
 def test_naming_fewer_members_closes_the_page_to_the_one_no_longer_named(team, work):
@@ -1400,3 +1400,39 @@ def test_a_door_update_that_unticks_the_plain_share_while_a_named_share_stays_cl
                          text=got["text"].replace("- [x] Share\n", "- [ ] Share\n"))
     assert not is_error, got
     assert reads(team, DOC) == {"alice": 200, "bob": 200, "carol": 404}
+
+
+# ── Narrowing never makes a `shared` mark (PR 394, round 14) ──
+
+def test_a_door_update_that_narrows_the_share_and_adds_a_private_source_leaves_the_page_closed_to_the_member_named(team, browser, work):
+    three(team, work, alice=["james"])
+    shared = OPEN_SOURCE.replace("owner: alice", "owner: alice\nvisibility: project\nshared: alice 2026-11-01T00:00:00Z")
+    put(team, work, DOC, shared.replace("- [ ] Share\n", "- [x] Share\n"))
+    token = Tokens().add("james", write=True)
+    is_error, got = call(browser, "read", token=token, doc=f"work/{DOC}")
+    assert not is_error, got
+    text = got["text"].replace("issue:acme/agency-tiroir#9", "library:doc-123").replace("- [x] Share\n", "- [x] Share with bob\n")
+    is_error, got = call(browser, "update", token=token, doc=f"work/{DOC}", expected_hash=got["hash"], text=text)
+    assert not is_error, got
+    assert "shared" not in front_matter((work / DOC).read_text(encoding="utf-8"))
+    assert not team.hub.named(team.hub.proxy.members[BOB], f"work/{DOC}")
+    assert reads(team, DOC) == {"alice": 200, "bob": 404, "carol": 404}
+
+
+def test_a_save_that_narrows_the_share_keeps_the_mark_the_page_holds(team, work):
+    three(team, work)
+    shared = OPEN_SOURCE.replace("owner: alice", "owner: alice\nvisibility: project\nshared: alice 2026-11-01T00:00:00Z")
+    put(team, work, DOC, shared.replace("- [ ] Share\n", "- [x] Share\n- [x] Share with bob\n"))
+    assert untick(team, work, DOC, "- [x] Share", ALICE).status == 200
+    fm = front_matter((work / DOC).read_text(encoding="utf-8"))
+    assert fm["visibility"] == "owner" and fm["shared"] == "alice 2026-11-01T00:00:00Z"
+    assert reads(team, DOC) == {"alice": 200, "bob": 200, "carol": 404}
+
+
+def test_a_save_that_narrows_the_share_of_a_page_with_a_private_source_and_no_mark_makes_none(team, work):
+    three(team, work)
+    shared = PRIVATE.replace("owner: alice", "owner: alice\nvisibility: project")        # a private source, no mark
+    put(team, work, DOC, shared.replace("- [ ] Share\n", "- [x] Share\n- [x] Share with bob\n"))
+    assert untick(team, work, DOC, "- [x] Share", ALICE).status == 200
+    assert "shared" not in front_matter((work / DOC).read_text(encoding="utf-8"))
+    assert reads(team, DOC) == {"alice": 200, "bob": 404, "carol": 404}

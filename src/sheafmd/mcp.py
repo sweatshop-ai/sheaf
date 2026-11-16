@@ -1170,8 +1170,7 @@ class Door:
                                 "cannot narrow or withdraw it. Send the text with its Share lines as `read` gave them.", "share")
             if visibility.narrows(visibility.audience(old), now) and self.hub.loose_owner(address) is None:
                 # Naming fewer members closes the page at once to every member no longer named: names-only form (9.11).
-                by = (m.short or m.name) if m is not None else self.hub.person
-                return visibility.names_only(text, by, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+                return visibility.names_only(text)
             return text
         if now is None:
             return text

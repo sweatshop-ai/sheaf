@@ -261,10 +261,11 @@ def narrows(old, new) -> bool:
     return old is True or new < old
 
 
-def names_only(text_: str, by: str, date: str) -> str:
-    """The sheaf `text_` once its audience is names: `visibility: owner` and the `shared` mark (kept when it holds one),
-    the form `Hub.named` reads, so a member no longer named loses the page at once."""
-    return set_keys(text_, {"visibility": "owner", "shared": text(front_matter(text_), "shared") or f"{by} {date}"})
+def names_only(text_: str) -> str:
+    """The sheaf `text_` once its audience is names: `visibility: owner` and the `shared` mark only when the text still holds
+    one (narrowing never makes a mark: a page that draws on a private source stays closed to the named until its owner
+    marks it), the form `Hub.named` reads, so a member no longer named loses the page at once."""
+    return set_keys(text_, {"visibility": "owner", "shared": text(front_matter(text_), "shared") or None})
 
 
 def share_lines(text_: str) -> list:

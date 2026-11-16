@@ -44,6 +44,7 @@ from pathlib import Path
 from .. import config, signals
 from ..source import md_hash
 from . import state
+from .repos import CREDENTIALS, token_env
 
 GIT_SECONDS = 20                # a commit's git commands
 BLAME_SECONDS = 2               # a blame the list's page waits for (9.10)
@@ -64,8 +65,10 @@ class Author:
     email: str
 
 
-def _env(author: Author | None = None) -> dict:
+def _env(author: Author | None = None, folder: Path | None = None) -> dict:
     env = {**os.environ, "LC_ALL": "C", "GIT_TERMINAL_PROMPT": "0"}
+    if folder is not None and (token := CREDENTIALS.get(os.path.realpath(folder))) is not None and (t := token()):
+        env.update(token_env(t))
     if author is not None:
         env["GIT_AUTHOR_NAME"], env["GIT_AUTHOR_EMAIL"] = author.name, author.email
     return env
@@ -146,9 +149,9 @@ def _git(root: Path, *args, author=None, seconds=GIT_SECONDS, given=None, childr
     # No hook of the repo runs for the hub: hooks are code of whoever wrote `.git/hooks`.
     argv = ["git", "-C", str(root), "-c", "core.hooksPath=/dev/null", "--literal-pathspecs", *args]
     if children is not None:
-        return children.run(argv, seconds, _env(author))
+        return children.run(argv, seconds, _env(author, root))
     return subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="surrogateescape",
-                          timeout=seconds, env=_env(author), input=given, start_new_session=True)
+                          timeout=seconds, env=_env(author, root), input=given, start_new_session=True)
 
 
 def blame(file: Path, text: str, lines, seconds: float = BLAME_SECONDS) -> dict:
@@ -291,6 +294,14 @@ def _again(folder: Path, commit: str, onto: str):
     return made.stdout.decode().strip(), []
 
 
+def root_config(root) -> "config.RootConfig":
+    """The settings a root's writes are committed by: its `.sheaf.toml`'s, except for a clone the tiroir serves, which
+    always commits and pushes whatever the repo's file says (SPEC 8.11): that file describes a root on a laptop."""
+    if getattr(root, "clone", ""):
+        return config.RootConfig(commit=True, push=True)
+    return config.load_root_config(root.path, warn=lambda line: None)
+
+
 class Commits:
     def __init__(self, record, guard=None, roots=None, refuse_rewrite=False, pulling=None, pulled=None):
         """`record(kind, doc, **detail)` writes a diagnostics row (15). `guard(root, files)` gives a context that
@@ -343,7 +354,7 @@ class Commits:
             if not r.git or (r is not root and _repo(r.path) != repo):
                 continue
             try:
-                rc = config.load_root_config(r.path, warn=lambda line: None)
+                rc = root_config(r)
             except (config.ConfigError, OSError):
                 split[False].append(r.name)
                 continue
@@ -373,7 +384,7 @@ class Commits:
         key = key or rel
         address = f"{root.name}/{key}"
         try:
-            rc = config.load_root_config(root.path, warn=lambda line: None)
+            rc = root_config(root)
         except config.ConfigError as e:
             self._record("commit-failed", address, error=str(e)[:300])
             return
@@ -479,7 +490,7 @@ class Commits:
             if not root.git:
                 continue
             try:
-                rc = config.load_root_config(root.path, warn=lambda line: None)
+                rc = root_config(root)
                 if not (rc.commit and (rc.push or rc.versions_inside)):
                     continue
                 repo = _repo(root.path)
@@ -708,7 +719,7 @@ class Commits:
             if not r.git or (r is not root and _repo(r.path) != repo):
                 continue
             try:
-                rc = config.load_root_config(r.path, warn=lambda line: None)
+                rc = root_config(r)
             except (config.ConfigError, OSError):
                 continue
             if not (rc.commit and rc.versions_inside):

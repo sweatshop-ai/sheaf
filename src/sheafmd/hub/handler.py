@@ -865,9 +865,16 @@ class Handler:
         return _ok(**self.hub.jobs())
 
     # ── save and comment ─────────────────────────────────────────────────────
+    def _writable(self, address: str):
+        """Refuse a write to a page the tiroir may not save (a repo's clone with no save branch, SPEC 14): nothing is
+        written, comments included; the line says which `.sheaf.toml` line would change that."""
+        if line := self.hub.read_only_line(address):
+            raise Refuse(403, line)
+
     def _save(self, req: Req) -> Response:
         b = req.body
         e = self._entry(req, b.get("doc"))
+        self._writable(e.address)
         h, edits = b.get("hash"), b.get("edits")
         _shape(isinstance(h, str) and h != "", "hash must be the hash of the version the edits were made against")
         _shape(isinstance(edits, list), "edits must be a list")
@@ -920,6 +927,7 @@ class Handler:
         page saves a tick, so the file, the commit and the open tabs see what a tick in the page makes them see."""
         b = req.body
         e = self._entry(req, b.get("doc"))
+        self._writable(e.address)
         n, word, read, release = b.get("action"), b.get("word"), b.get("hash"), b.get("release", False)
         where = b.get("where", "list")
         _shape(where in ("list", "page"), "where must be list or page")
@@ -1537,6 +1545,7 @@ class Handler:
             address, fm, _ = self._code_rectoverso(req, b.get("doc"))
         else:
             address, fm, _ = self._sheaf(req, b.get("doc"))
+        self._writable(address)
         sid, machine = b.get("id"), b.get("machine")
         _shape(isinstance(sid, str) and work.UUID_RE.fullmatch(sid), "id must be a session id (a lowercase UUID)")
         _shape(isinstance(machine, str) and work.MACHINE_RE.fullmatch(machine),
@@ -1590,6 +1599,7 @@ class Handler:
     def _comment(self, req: Req) -> Response:
         b = req.body
         e = self._entry(req, b.get("doc"))
+        self._writable(e.address)
         op = b.get("op")
         _shape(op in OPS, f"op must be one of {', '.join(OPS)}")
         _shape(not (op in ("add", "reply") and "ask" in b), ASK_RETIRED)

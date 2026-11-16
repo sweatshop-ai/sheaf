@@ -4384,7 +4384,7 @@ var create = function (ROOT, CFG, opts) {
       }
       reloadKeep(popId, 'upgrade');
     };
-    // A client tiroir's page, opened through this hub (an address under `Clients/`, SPEC 9.9), has no stream: the hub keeps nothing of it
+    // A client page, opened through this hub (an address under `Clients/`, SPEC 9.9), has no stream: the hub keeps nothing of it
     // and says no to `/_/live` for it. The page asks `/_/doc` every 30 s instead, and no stream failing is no "Hub unreachable".
     var THROUGH = /^Clients(\/|$)/.test(CFG.doc || ''), POLL_MS = 30000;
     var connect = function () {

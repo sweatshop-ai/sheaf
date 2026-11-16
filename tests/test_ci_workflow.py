@@ -99,11 +99,11 @@ def test_the_matrix_is_ubuntu_on_every_trigger_and_macos_only_when_a_manual_run_
 
 
 def test_each_python_runs_as_three_jobs_each_with_a_third_of_the_tests(text):
-    # The page tests wait on the browser one at a time; three jobs take a third each (tests/conftest.py).
+    # The page tests wait on the browser one at a time; six jobs take a sixth each (tests/conftest.py).
     job = section(section(text, "jobs"), "test", 2)
-    assert re.search(r"^        slice: \[1, 2, 3\]\s*$", job, flags=re.M)
-    assert re.search(r"^      SHEAF_TEST_SLICE: \$\{\{ matrix\.slice \}\}/3\s*$", section(job, "env", 4), flags=re.M)
-    assert "    name: ${{ matrix.os }} py${{ matrix.python }} slice ${{ matrix.slice }}/3" in text
+    assert re.search(r"^        slice: \[1, 2, 3, 4, 5, 6\]\s*$", job, flags=re.M)
+    assert re.search(r"^      SHEAF_TEST_SLICE: \$\{\{ matrix\.slice \}\}/6\s*$", section(job, "env", 4), flags=re.M)
+    assert "    name: ${{ matrix.os }} py${{ matrix.python }} slice ${{ matrix.slice }}/6" in text
 
 
 def test_a_manual_run_picks_macos_and_the_python_version_and_macos_starts_off(text):

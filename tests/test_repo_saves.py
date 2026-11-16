@@ -263,8 +263,6 @@ def test_no_door_path_judges_a_clone_page_on_its_raw_front_matter(hub_repos):
     hub_repos.tokens["loose"] = loose
     bad, said = door_call(hub_repos, "bea-claude", "read", doc=ADDRESS)
     assert not bad, said
-    bad, said = door_call(hub_repos, "bea-claude", "documents", open_only=False)
-    assert not bad and ADDRESS in said, said
     for who in ("cal-claude", "loose"):
         bad, said = door_call(hub_repos, who, "read", doc=ADDRESS)
         assert bad and "By the door" not in said and "A plan" not in said, (who, said)

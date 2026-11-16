@@ -26,13 +26,15 @@ if not Path(sheafmd.__file__).resolve().is_relative_to(_OWN_SOURCE):
 
 from helpers import NOW, PLAN, Opener, browser_on, claim_port, proc_state, stop_hub
 # no_process_left_behind and the_test_that_is_running are the fixtures of tests/leakguard.py
-from leakguard import NODE_VAR, RUN_VAR, no_process_left_behind, stop_left, the_test_that_is_running  # noqa: F401
-from sheafmd import config
+from leakguard import (NODE_VAR, RUN_VAR, carries_this_run, is_ending, no_process_left_behind,  # noqa: F401
+                       stop_left, the_test_that_is_running)
+from sheafmd import config, paths
 from sheafmd.agents.detect import TABLE
 from sheafmd.cli import main
 from sheafmd.hub import recover
 from sheafmd.hub.client import _AGENT_ENV_PREFIXES as AGENT_ENV_PREFIXES
-from sheafmd.hub.server import read_pid_file
+from sheafmd.hub.server import pid_file
+from sheafmd.hub.state import read_json
 from sheafmd.seat import SSH_VARS
 
 
@@ -119,12 +121,29 @@ def pytest_itemcollected(item):
         item.add_marker(pytest.mark.xdist_group(item.module.__name__))
 
 
+LOCK_ORDER_SUITES = {"test_move_forward", "test_hub_tell", "test_hub_waiting", "test_session_tells", "test_mcp_pages",
+                     "test_hub_live", "test_hub_handler", "test_loose_root", "test_hub_place", "test_hub_roots", "test_delete_restore_moves"}
+
+
+@pytest.fixture
+def lock_order(monkeypatch):
+    """The hub's locks recorded and held to `sheafmd.hub.lockorder.ORDER` (tests/lockorder.py)."""
+    import lockorder
+    lockorder.install(monkeypatch)
+    yield
+    lockorder.check()
+
+
 @pytest.hookimpl(trylast=True)
 def pytest_collection_modifyitems(config, items):
     """SHEAF_TEST_SLICE=i/n keeps the i-th of every n tests that are left after -m: ci.yml runs each
     Python as three jobs, one slice each. A file with IN_ORDER = True, whose tests read what the test
     before them left, counts as one test and stays whole in one slice. Every xdist worker collects the
-    same tests in the same order, so each keeps the same slice."""
+    same tests in the same order, so each keeps the same slice. The suites of LOCK_ORDER_SUITES also run with
+    the `lock_order` fixture."""
+    for it in items:
+        if it.module.__name__.split(".")[-1] in LOCK_ORDER_SUITES:
+            it.fixturenames.insert(0, "lock_order")
     slice_ = os.environ.get("SHEAF_TEST_SLICE")
     if not slice_:
         return
@@ -145,7 +164,19 @@ def pytest_collection_modifyitems(config, items):
 
 
 @pytest.fixture(autouse=True)
-def sheaf_env(tmp_path, monkeypatch, request):
+def own_patches():
+    """The patches of the autouse fixtures below (the home, the state folders, the port, the sockets, the
+    tracked `Popen`, the guard on signals) are made through a `MonkeyPatch` of their own and undone after
+    everything else of the test. A test that calls `monkeypatch.undo()` undoes its own patches and no
+    more: through the shared fixture it also gave the test the runner's real HOME and state folder, and
+    `reap` read the real hub's pid file and stopped it (sheaf diag recorded a hub that a local run stopped every few minutes)."""
+    patches = pytest.MonkeyPatch()
+    yield patches
+    patches.undo()
+
+
+@pytest.fixture(autouse=True)
+def sheaf_env(tmp_path, own_patches, request):
     """Every test gets its own state, config, cache and runtime folders, its own
     home and its own temp dir (the legacy lock folder lives in the temp dir), so no
     test reads or writes the real ones, or another test's locks. Subprocesses
@@ -157,12 +188,12 @@ def sheaf_env(tmp_path, monkeypatch, request):
     request.addfinalizer(lambda: shutil.rmtree(run, ignore_errors=True))
     tmp = tmp_path / "tmp"
     tmp.mkdir()
-    monkeypatch.setenv("SHEAF_HOME", str(tmp_path / "sheaf-home"))
-    monkeypatch.setenv("XDG_RUNTIME_DIR", str(run))
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("TMPDIR", str(tmp))
+    own_patches.setenv("SHEAF_HOME", str(tmp_path / "sheaf-home"))
+    own_patches.setenv("XDG_RUNTIME_DIR", str(run))
+    own_patches.setenv("HOME", str(tmp_path / "home"))
+    own_patches.setenv("TMPDIR", str(tmp))
     # The byline and the comment author: never the login name of whoever runs the suite.
-    monkeypatch.setenv("SHEAF_NAME", "Ada")
+    own_patches.setenv("SHEAF_NAME", "Ada")
     # No agent is detected unless a test says so, whichever agent runs the suite.
     agent_vars = [var for agent in TABLE for var, _ in agent.present_when]
     # Every variable of the agent that runs the suite goes, not only the ones that make it
@@ -170,33 +201,38 @@ def sheaf_env(tmp_path, monkeypatch, request):
     prefixed = [k for k in os.environ if k.startswith(AGENT_ENV_PREFIXES)]
     # A suite run over ssh is not a remote seat: `sheaf open` opens the (stand-in) browser.
     for var in ("XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", *SSH_VARS, *agent_vars, *prefixed):
-        monkeypatch.delenv(var, raising=False)
-    monkeypatch.setattr(tempfile, "tempdir", str(tmp))
+        own_patches.delenv(var, raising=False)
+    own_patches.setattr(tempfile, "tempdir", str(tmp))
     # a pytest run that a test starts runs all of its own tests, not a slice of them
-    monkeypatch.delenv("SHEAF_TEST_SLICE", raising=False)
+    own_patches.delenv("SHEAF_TEST_SLICE", raising=False)
+    yield
+    # Whatever the test did, its state is still its own: the folders every command of it resolves to are
+    # inside its tmp dir, never the runner's.
+    for folder in (paths.state_dir(), paths.config_file(), paths.cache_dir()):
+        assert tmp_path in folder.parents, f"{folder} is outside this test's own folders ({tmp_path})"
 
 
 @pytest.fixture(autouse=True)
-def no_real_sockets_folder(tmp_path, monkeypatch):
+def no_real_sockets_folder(tmp_path, own_patches):
     """Where Claude Code's own sockets live, `/run/user/<uid>/cc-socks`, is the test's own empty
     folder: detection looks for a socket there by pid and must never look at the real ones."""
-    monkeypatch.setattr("sheafmd.agents.claude_code.SOCKS_ROOT", tmp_path / "cc-run")
+    own_patches.setattr("sheafmd.agents.claude_code.SOCKS_ROOT", tmp_path / "cc-run")
 
 
 @pytest.fixture(autouse=True)
-def port(sheaf_env, monkeypatch):
+def port(sheaf_env, own_patches):
     """A free port of this test's own, held until the test ends (helpers.claim_port): a hub that a
     command starts never lands on 27419, which is the port of the hub of whoever runs the suite, and
     no other process is handed this one in the gap before the hub binds it."""
     p, release = claim_port()
-    monkeypatch.setenv("SHEAF_PORT", str(p))
+    own_patches.setenv("SHEAF_PORT", str(p))
     assert p != config.DEFAULT_PORT and config.port() == p        # what every command of the test resolves to
     yield p
     release()
 
 
 @pytest.fixture(autouse=True)
-def nothing_reaches_the_default_port(monkeypatch):
+def nothing_reaches_the_default_port(own_patches):
     """A test never connects to 27419 or binds it, whatever it did to SHEAF_PORT: that is the port of
     the hub of whoever runs the suite (a hub of the suite once held it). A process of the
     test is held to the same by `spawned`."""
@@ -208,7 +244,7 @@ def nothing_reaches_the_default_port(monkeypatch):
             return real(self, address, *rest)
         return guarded
     for name in ("connect", "connect_ex", "bind"):
-        monkeypatch.setattr(socket.socket, name, watched(getattr(socket.socket, name)))
+        own_patches.setattr(socket.socket, name, watched(getattr(socket.socket, name)))
 
 
 def _words(args) -> list[str]:
@@ -225,16 +261,26 @@ def _runs_sheaf(args) -> bool:
     return any("sheafmd" in w for w in words) or os.path.basename(words[0]) == "sheaf"
 
 
+def is_child(pid: int) -> bool:
+    """`pid` is a child of this process (a fork of a test, a `Popen` made by a path that `spawned` does not see)."""
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            return int(f.read().rsplit(")", 1)[1].split()[1]) == os.getpid()
+    except (OSError, ValueError, IndexError):
+        return False
+
+
 class Spawned:
     """What a test started with `subprocess`: every pid, in the order of the starts, and the ones that
     run a hub (`-m sheafmd hub`)."""
 
     def __init__(self):
         self.pids, self.hubs = [], []
+        self.own = set()          # a pid the test's own state names (its hub's pid file): its hub too
 
 
 @pytest.fixture(autouse=True)
-def spawned(request, monkeypatch):
+def spawned(request, own_patches):
     """Every process this test starts with `subprocess` (a command's detached hub, a test's own
     `Popen`, `subprocess.run`), by whichever path. Each carries the run and this test in its environment
     whatever `env` the test gave it, which is how `reap` and the guard find it (tests/leakguard.py), and
@@ -272,20 +318,43 @@ def spawned(request, monkeypatch):
             if _is_hub_command(args):
                 made.hubs.append(self.pid)
 
-    monkeypatch.setattr(subprocess, "Popen", Tracked)
+    own_patches.setattr(subprocess, "Popen", Tracked)
+
+    made.kill = os.kill                       # a test may put a recorder here, and never send
+
+    def guarded_kill(pid, sig):
+        """A test signals a process it started, and no other: one it spawned (any `Popen`), one that is a
+        child of the run, or one that carries this run's mark (a hub a command detached), and then every
+        later signal to that same pid (SIGCONT, SIGKILL: one that is ending has no environment to read).
+        The hub of whoever runs the suite is none of these, whatever file or port named it."""
+        if (sig == 0 or type(pid) is not int or pid <= 1 or pid == os.getpid()
+                or pid in made.pids or pid in made.own or is_child(pid) or carries_this_run(pid)
+                or proc_state(pid) != "alive" or is_ending(pid)):   # one that has ended, or ends: nothing there to hurt
+            if type(pid) is int and pid > 1 and sig != 0:
+                made.own.add(pid)
+            return made.kill(pid, sig)
+        raise AssertionError(f"a test signalled pid {pid} ({sig}), a process it did not start; "
+                             "only a pid of a Popen of the test, or one that carries this run's mark, is signalled")
+    own_patches.setattr(os, "kill", guarded_kill)
     return made
 
 
 @pytest.fixture(autouse=True)
-def reap(request, port, spawned):
-    """Whatever a test left running is stopped when it ends: the hub in its pid file, the hubs it
+def reap(request, port, spawned, tmp_path):
+    """Whatever a test left running is stopped when it ends: the hub in its pid file (the file of this
+    test's own state, found when the test began: what the test did to its environment since, `monkeypatch.undo()`
+    included, does not point it at the runner's hub), the hubs it
     started itself, and then every other process that carries this test's mark (tests/leakguard.py), which
     is how a hub that a shell script started (the fake service manager), one that was still starting
     and had no pid file yet, and a child behind a `sh -c` are found. A run that fails or is stopped
     runs this too."""
+    own_pid_file = pid_file()                           # at setup, under this test's SHEAF_HOME
+    assert tmp_path in own_pid_file.parents, f"{own_pid_file} is not under this test's own folders"
     yield
-    info = read_pid_file()
-    if info:
+    info = read_json(own_pid_file, {})
+    if info.get("pid"):
+        if type(info["pid"]) is int:                    # a test may write anything into the file
+            spawned.own.add(info["pid"])
         stop_hub(info["pid"])
     for pid in spawned.hubs:
         stop_hub(pid)
@@ -366,13 +435,12 @@ HUB_PORT = 27419
 
 @pytest.fixture
 def hub(work):
-    from sheafmd import paths
     from sheafmd.hub.core import Hub
     return Hub(port=HUB_PORT, key=paths.ensure_key(), started_by="test")
 
 
 @pytest.fixture(autouse=True)
-def every_hub_settles_its_pusher(sheaf_env, monkeypatch):
+def every_hub_settles_its_pusher(sheaf_env, own_patches):
     """Every `Hub` this test builds, by whichever path (the `hub` fixture, `TwoRoots.hub()`, a fixture of a test
     file, a direct `Hub(...)`), has its pusher settled when the test ends. A push the test left due ends here, in this
     test's state: its pusher is a thread that outlives the test and writes its `push-failed` row into the state of
@@ -387,7 +455,7 @@ def every_hub_settles_its_pusher(sheaf_env, monkeypatch):
         built.append(self)
         real(self, *args, **kwargs)
 
-    monkeypatch.setattr(Hub, "__init__", tracked)
+    own_patches.setattr(Hub, "__init__", tracked)
     yield
     # every hub is settled, then the test fails once: one that is stuck must not leave the others' pushers running
     stuck = [i for i, h in enumerate(built, 1)
@@ -497,3 +565,4 @@ def proxy_served(front, plan, proxy_folder):
     srv.start()
     yield hub
     srv.close()
+

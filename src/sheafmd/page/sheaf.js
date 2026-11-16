@@ -119,6 +119,12 @@ function buildRow(doc, el, r) {
   sb.title = 'Share this page with every member of the tiroir';
   t.append(' ', sb);
   }
+  if (r.can_move) {                           // the member's own loose page: Move… puts it in another folder of their root
+  var mb = el('button', 'sheaf-move', 'Move…');
+  mb.type = 'button';
+  mb.title = 'Put this page in another folder of your loose root';
+  t.append(' ', mb);
+  }
   var w = el('td', 'sheaf-write', r.write);
   if (r.write_tip) w.title = r.write_tip;
   var s = el('td', 'sheaf-session');
@@ -351,6 +357,55 @@ function create(ROOT, opts) {
     });
   }
 
+  // The row's Move… (SPEC 9.11): a folder of the member's loose root, typed as a path; a folder that is not there is made.
+  // The old address forwards to the new one, so the row follows the page in place.
+  function move(button) {
+    var tr = button.closest('.sheaf-row'), cell = button.parentNode;
+    var open = cell.querySelector('.sheaf-move-form');
+    if (open) { open.querySelector('input').focus(); return; }
+    var form = ROOT.ownerDocument.createElement('form');
+    form.className = 'sheaf-move-form';
+    var input = ROOT.ownerDocument.createElement('input');
+    input.type = 'text';
+    input.setAttribute('aria-label', 'Folder of your loose root');
+    input.placeholder = 'clients/blog';
+    input.value = tr.dataset.folder.split('/').slice(1).join('/');
+    var go = ROOT.ownerDocument.createElement('button'), no = ROOT.ownerDocument.createElement('button');
+    go.type = 'submit'; go.textContent = 'Move';
+    no.type = 'button'; no.textContent = 'Cancel';
+    form.append(input, ' ', go, ' ', no);
+    cell.append(form);
+    input.focus();
+    no.addEventListener('click', function () { form.remove(); });
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      go.disabled = true;
+      say('');
+      fetch('/_/move', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ doc: tr.dataset.doc, folder: input.value.trim() }) }).then(function (r) {
+        return r.json().then(function (b) { return { ok: r.ok && !(b && b.ok === false), error: b && b.error, doc: b && b.doc, url: b && b.url }; }, function () { return { ok: r.ok }; });
+      }).then(function (got) {
+        if (gone) return;
+        if (got.ok && got.doc) {
+          var at = got.doc.split('/');
+          tr.dataset.doc = got.doc;
+          tr.dataset.folder = at.slice(0, -1).join('/');
+          tr.querySelector('.sheaf-where').textContent = tr.dataset.folder;
+          href(tr.querySelector('.sheaf-title a'), got.url);
+          form.remove();
+          say('Moved to ' + at.slice(1).join('/') + '. The old address forwards to it; reload the Sheaf to see the folders change.');
+          return;
+        }
+        go.disabled = false;
+        say(got.error || 'The page could not be moved.');
+      }, function () {
+        if (gone) return;
+        go.disabled = false;
+        say('The page could not be moved: the hub does not answer.');
+      });
+    });
+  }
+
   // Archive now, Restore, Keep, Delete of a row and Restore of a trashed page (SPEC 8.6): the owner's own acts, each a POST of the
   // page's name; the view is drawn again after it. Delete asks a second click, in the button itself, never a dialog.
   function act(button) {
@@ -382,6 +437,8 @@ function create(ROOT, opts) {
   function onClick(e) {
     var t = e.target;
     if (!t || !t.closest) return;
+    var moving = t.closest('.sheaf-move');
+    if (moving) { e.preventDefault(); e.stopPropagation(); move(moving); return; }
     var acting = t.closest('.sheaf-act');
     if (acting && !acting.disabled) { e.preventDefault(); e.stopPropagation(); act(acting); return; }
     var switching = t.closest('.sheaf-viewswitch');

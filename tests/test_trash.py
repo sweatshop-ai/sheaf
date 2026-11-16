@@ -3,15 +3,18 @@ into the root's `.sheaf/trash/` for thirty days, and no agent or door path can d
 and the door, in memory, with the hub's clock under test control."""
 import contextlib
 import os
+import threading
 
 import pytest
 from helpers import BEA, CAL, comment, door, rpc
 from test_archive import DAY, Clock, call, clock, docs, made, root_of, rows, sweep  # noqa: F401  (fixtures)
 from test_hub_commits import DOC, box, git, merged_on_github, rectoversos, remote  # noqa: F401  (fixtures)
-from test_share import tick
+from test_share import line_edit, tick
 from test_write_log import agents  # noqa: F401  (fixture)
 
-from sheafmd.hub import loose, place
+from sheafmd.blocks import split_md_blocks
+from sheafmd.hub import archive, loose, place
+from sheafmd.source import md_hash
 
 
 def trash_rows(agents, member=BEA):
@@ -202,4 +205,181 @@ def test_restore_from_trash_and_delete_hold_the_place_lock_and_tell_the_index(ag
     held.clear()
     monkeypatch.setattr(agents.hub.archive, "restore_trash", lambda root, ident: (inside.append(list(held)), real_restore(root, ident))[1])
     assert agents.post("/_/restore-trash", {"id": row["id"]}, member=BEA).status == 200
-    assert inside == [[doc]] and touched[-1] == doc
+    assert inside and set(inside[0]) == {doc} and touched[-1] == doc
+
+
+PAGE = "# Tasks\n\nFirst paragraph here.\n\n- [ ] one\n- [ ] two\n"
+
+
+def behind_a_delete(agents, monkeypatch, *racers):
+    """Run each of `racers` (a function) in a thread started while Delete holds the page, after the page's locks are taken and
+    before it moves: each must still be waiting 0.3 s later, and is joined once Delete is done. Their results, in order."""
+    results, threads = [None] * len(racers), []
+    real_replace = os.replace
+
+    def replace(src, dst, *a, **kw):
+        if "/.sheaf/trash/" in str(dst) and not threads:
+            for i, racer in enumerate(racers):
+                t = threading.Thread(target=lambda i=i, racer=racer: results.__setitem__(i, racer()))
+                t.start()
+                threads.append(t)
+            for t in threads:
+                t.join(0.3)
+            assert all(t.is_alive() for t in threads), "a writer came in while Delete moved the page"
+        return real_replace(src, dst, *a, **kw)
+    monkeypatch.setattr(os, "replace", replace)
+    return results, threads
+
+
+def test_a_save_racing_a_delete_lands_before_it_or_is_refused(agents, clock, monkeypatch):
+    doc = made(agents, "bea-claude", text=PAGE)
+    text = agents.hub.file(doc).read_text(encoding="utf-8")
+    results, threads = behind_a_delete(agents, monkeypatch, lambda: agents.post(
+        "/_/save", {"doc": doc, "hash": md_hash(text), "edits": [line_edit(text, "one")]}, member=BEA).status)
+    assert delete(agents, doc).status == 200
+    for t in threads:
+        t.join(5)
+        assert not t.is_alive()
+    assert not agents.hub.file(doc).exists()                # the save did not write the page back to its address
+    assert [r["rel"] for r in trash_rows(agents)] == [doc.split("/", 1)[1]]
+    assert results == [404]                                 # refused, the page is gone
+
+
+def test_a_comment_and_a_tick_waiting_behind_a_delete_both_answer_404(agents, clock, monkeypatch):
+    doc = made(agents, "bea-claude", text=PAGE)
+    text = agents.hub.file(doc).read_text(encoding="utf-8")
+    i = next(i for i, b in enumerate(split_md_blocks(text)) if b.content.startswith("First"))
+    results, threads = behind_a_delete(
+        agents, monkeypatch,
+        lambda: agents.post("/_/comment", {"doc": doc, "op": "add", "hash": md_hash(text), "block": i, "start": 0,
+                                           "end": 5, "quote": "First", "body": "Is this right?"}, member=BEA).status,
+        lambda: agents.post("/_/save", {"doc": doc, "hash": md_hash(text), "edits": [line_edit(text, "two")]},
+                            member=BEA).status)
+    assert delete(agents, doc).status == 200
+    for t in threads:
+        t.join(5)
+        assert not t.is_alive()
+    assert results == [404, 404]
+
+
+def test_a_door_write_on_a_page_with_no_hub_entry_racing_a_delete_cannot_recreate_the_page(agents, clock, monkeypatch):
+    doc = made(agents, "bea-claude", text=PAGE)
+    text = agents.hub.file(doc).read_text(encoding="utf-8")
+    agents.hub.entries.pop(doc, None)
+    results, threads = behind_a_delete(agents, monkeypatch, lambda: call(
+        agents, "bea-claude", "update", doc=doc, text=text + "\nA late line.\n", expected_hash=md_hash(text)))
+    assert delete(agents, doc).status == 200
+    for t in threads:
+        t.join(5)
+        assert not t.is_alive()
+    assert not agents.hub.file(doc).exists()
+    assert results[0][0] is True                            # the door's write is refused: the page is gone
+
+
+def test_a_page_that_is_not_text_can_still_be_deleted(agents, clock):
+    doc = made(agents, "bea-claude")
+    agents.hub.entries.pop(doc, None)
+    agents.hub.file(doc).write_bytes(b"\xff\xfe# not utf-8\n")
+    assert delete(agents, doc).status == 200
+    assert not agents.hub.file(doc).exists()
+    assert len(trash_rows(agents)) == 1
+
+
+def hooked_stamps(monkeypatch, after_archived):
+    """Call `after_archived()` once, right after the ARCHIVED marks of a page are changed by a restore or a delete: between
+    that write and the next one when they are separate holds, inside the one hold when they are one."""
+    fired, inside = [], []
+
+    def wrap(real, direct):
+        def wrapped(root_path, name, changes, only_new=False):
+            inside.append(1)
+            try:
+                out = real(root_path, name, changes, only_new)
+            finally:
+                inside.pop()
+            if name == archive.ARCHIVED and not fired and (direct or not inside):
+                fired.append(1)
+                after_archived()
+            return out
+        return wrapped
+    monkeypatch.setattr(loose, "stamp", wrap(loose.stamp, True))
+    monkeypatch.setattr(loose, "stamp_held", wrap(loose.stamp_held, False))
+    return fired
+
+
+def archived_page(agents, clock):
+    doc = made(agents, "bea-claude")
+    sweep(agents)
+    clock.now += 31 * DAY
+    sweep(agents)
+    assert docs(agents, view="archived") == [doc]
+    return doc
+
+
+def test_a_sweep_between_the_stamps_of_a_restore_leaves_the_page_restored(agents, clock, monkeypatch):
+    doc = archived_page(agents, clock)
+    racer = []
+
+    def sweeping():
+        t = threading.Thread(target=agents.hub.archive.sweep)
+        t.start()
+        t.join(0.3)
+        racer.append(t)
+    assert hooked_stamps(monkeypatch, sweeping) == []
+    assert agents.post("/_/restore", {"doc": doc}, member=BEA).status == 200
+    racer[0].join(5)
+    assert docs(agents) == [doc] and docs(agents, view="archived") == []
+
+
+def test_a_sweep_between_the_stamps_of_a_delete_leaves_the_page_not_archived_after_restore_trash(agents, clock, monkeypatch):
+    doc = archived_page(agents, clock)
+    listed, go, racer = threading.Event(), threading.Event(), []
+    real_pages = agents.hub.archive._pages
+
+    def pages(member, root):
+        out = real_pages(member, root)
+        if not listed.is_set():
+            listed.set()
+            go.wait(5)                  # this sweep read its pages before the Delete, and goes on after it
+        return out
+    monkeypatch.setattr(agents.hub.archive, "_pages", pages)
+    sweeper = threading.Thread(target=agents.hub.archive.sweep)
+    sweeper.start()
+    assert listed.wait(5)
+
+    def release():
+        go.set()
+        sweeper.join(0.3)
+        racer.append(sweeper)
+    hooked_stamps(monkeypatch, release)
+    assert delete(agents, doc).status == 200
+    sweeper.join(5)
+    [row] = trash_rows(agents)
+    assert agents.post("/_/restore-trash", {"id": row["id"]}, member=BEA).status == 200
+    assert docs(agents) == [doc] and docs(agents, view="archived") == []
+
+
+def test_a_page_that_a_writer_without_the_hubs_locks_puts_there_just_before_a_restore_is_kept_and_the_restore_is_refused(agents, clock, monkeypatch):
+    """The restore's move is a link, never a rename: a page that another process puts at the address between the check and the
+    move is not replaced. (A door create is no such writer any more: in a loose root it takes the moves' lock, which a restore
+    holds, so it comes before the restore or after it, never between.)"""
+    doc = made(agents, "bea-claude")
+    assert delete(agents, doc).status == 200
+    [row] = trash_rows(agents)
+    fired = []
+
+    def hooked(real):
+        def wrapped(src, dst, *a, **kw):
+            if "/.sheaf/trash/" in str(src) and not fired:      # the move of the restore: the other writer's page lands just before it
+                fired.append(1)
+                with open(agents.hub.file(doc), "x", encoding="utf-8") as f:
+                    f.write("# New\n\nThe door's page.\n")
+            return real(src, dst, *a, **kw)
+        return wrapped
+    monkeypatch.setattr(os, "rename", hooked(os.rename))
+    monkeypatch.setattr(os, "link", hooked(os.link))
+    got = agents.post("/_/restore-trash", {"id": row["id"]}, member=BEA)
+    assert fired
+    assert got.status == 409 and "already" in got.text      # the restore is refused: the address is taken
+    assert "The door's page" in agents.hub.file(doc).read_text(encoding="utf-8")
+    assert len(trash_rows(agents)) == 1                     # and the deleted page is still in the trash

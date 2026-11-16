@@ -187,3 +187,10 @@ def test_a_write_that_is_the_session_itself_has_no_before(two):
 
 def test_the_hubs_own_person_has_no_sheaf_on_the_loopback_port(two, browser):
     assert browser.get("/_/mount?sheaf=1").status == 404
+
+
+def test_what_the_listing_cap_left_out_of_a_root_is_said(two, monkeypatch):
+    from sheafmd.hub import roots
+    monkeypatch.setattr(roots, "LIST_CAP", 1)
+    got = sheaf(two)["sheaf"]
+    assert got["more"] == two.get("/_/index.json").json()["more"] and got["more"]

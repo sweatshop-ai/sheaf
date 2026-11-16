@@ -22,7 +22,7 @@ from .. import config, diagnostics, signals
 from ..agents import prompts
 from ..agents.base import Adapter, DeliveryCancelled, DeliveryError, Target
 from . import roots as roots_mod
-from . import proxy, targets
+from . import moves, proxy, targets
 from .targets import who
 from . import waiting as waiting_mod
 from .auth import clean_display
@@ -465,20 +465,24 @@ class Tell:
     def queue_agent(self, address: str, cid: str, member=None):
         """The Tell of thread `cid` waits for the agent that is the reader's target (SPEC 9.8). Raises JobRefused.
         The target is read inside the refusal's own look, so a target changed or revoked since is the one judged."""
-        raw = targets.stored(self.hub, address, member)
-        row = targets.live(self.hub, raw, member)
-        if row is None:     # the page's own line (10.6): a revoked token is named, as the page names it
-            line = (targets.agent_view(self.hub, raw, member).line if targets.is_agent(raw) or targets.is_laptop(raw)
-                    else proxy.PROXY_LINE if member is not None else NO_AGENT)
-            raise JobRefused(409, line)
-        thread = self._thread(self._entry(address), cid)
-        try:
-            if targets.is_laptop(raw):               # a session on the member's laptop: it asks for the Tell at the door (9.8)
-                self.hub.session_tells.queue(address, cid, row, raw["session"], member.name, member, thread)
-            else:
-                self.hub.waiting_tells.queue(address, cid, row, member.name if member else self.hub.person, member, thread)
-        except waiting_mod.Refused as r:
-            raise JobRefused(r.status, r.message) from None
+        # The address is the page's now, and stays so until the row is queued: a move holds both locks from its look to the
+        # rename of the rows, so a Tell either queues first (and is carried) or finds the Forward and queues at the new one.
+        with moves.exclusive(), self.hub.admit:
+            address = self.hub.forwards.follow(address) or address
+            raw = targets.stored(self.hub, address, member)
+            row = targets.live(self.hub, raw, member)
+            if row is None:     # the page's own line (10.6): a revoked token is named, as the page names it
+                line = (targets.agent_view(self.hub, raw, member).line if targets.is_agent(raw) or targets.is_laptop(raw)
+                        else proxy.PROXY_LINE if member is not None else NO_AGENT)
+                raise JobRefused(409, line)
+            thread = self._thread(self._entry(address), cid)
+            try:
+                if targets.is_laptop(raw):           # a session on the member's laptop: it asks for the Tell at the door (9.8)
+                    self.hub.session_tells.queue(address, cid, row, raw["session"], member.name, member, thread)
+                else:
+                    self.hub.waiting_tells.queue(address, cid, row, member.name if member else self.hub.person, member, thread)
+            except waiting_mod.Refused as r:
+                raise JobRefused(r.status, r.message) from None
 
     @staticmethod
     def _already_telling(t: Target, ad: Adapter) -> str:

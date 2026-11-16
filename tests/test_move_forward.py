@@ -33,6 +33,7 @@ def comment(team, doc):
     got = team.post("/_/comment", {"doc": doc, "op": "add", "hash": md_hash(text), "block": blk, "start": start,
                                    "end": end, "quote": "A plan", "body": "A note."}, member=ALICE)
     assert got.status == 200, got.text
+    return got.json().get("id")
 
 
 def at(folder, name="plan.md"):
@@ -599,3 +600,107 @@ def test_a_tell_that_starts_between_the_check_and_the_rename_is_refused_or_the_m
     hold.set()
     starter.join(20)
     assert not (got.status == 200 and started_on_old), (got.status, outcome)
+
+
+# ── the fix round over 0e268f1 ───────────────────────────────────────────────
+
+def test_a_door_create_that_names_a_full_loose_root_address_takes_the_moves_lock(team, monkeypatch):
+    """The lock is taken for a create that ends in a loose root, however the address was spelled: not only when the door
+    rewrote a bare name. The hook is `moves.exclusive`, the lock's entry; a registered root's create stays free of it."""
+    import contextlib
+    from sheafmd.hub import moves
+    entered = []
+    real = moves.exclusive
+
+    @contextlib.contextmanager
+    def probe():
+        entered.append(1)
+        with real():
+            yield
+    monkeypatch.setattr(moves, "exclusive", probe)
+    made(team, "alice", PLAN)                        # a bare name: the loose root is made
+    in_folder(team, "sub", name="first.md")
+    del entered[:]
+    bad, out = call(team, "alice", "create", doc="loose-alice/sub/full.md", text=PLAN)
+    assert not bad, out
+    assert entered == [1]
+
+
+def test_a_save_in_flight_on_one_page_does_not_block_an_admission_while_another_page_moves(team, monkeypatch):
+    """A move waits for the page's file lock, which a save holds through its whole step; the hub's admission lock, which
+    every Tell start and an upgrade stop take, is not held meanwhile: one order everywhere, file lock first. The hook is
+    the move's own `file_lock`: when it has come to the lock, an admission is asked for, and is given at once."""
+    import threading
+    from sheafmd import source
+    from sheafmd.hub import moves
+    a = made(team, "alice", PLAN)["doc"]
+    top, rel = team.hub.roots.get("loose-alice").path, a.split("/", 1)[1]
+    in_save, release, at_lock = threading.Event(), threading.Event(), threading.Event()
+
+    def change(text, opened):
+        in_save.set()
+        assert release.wait(20)
+        return text + "\nSaved.\n"
+    saver = threading.Thread(target=lambda: source.update_beneath(top, rel, change))
+
+    class Probe(source.file_lock):
+        def __enter__(self):
+            at_lock.set()
+            return super().__enter__()
+    monkeypatch.setattr(moves, "file_lock", Probe, raising=False)
+    saver.start()
+    assert in_save.wait(20)
+    result = []
+    mover = threading.Thread(target=lambda: result.append(move(team, ALICE, a, "b")))
+    mover.start()
+    try:
+        assert at_lock.wait(20)
+        taken = team.hub.admit.acquire(timeout=3)         # page B's admission, with the move waiting on page A's lock
+        if taken:
+            team.hub.admit.release()
+        assert taken, "the move holds the admission lock while it waits for the page's file lock"
+    finally:
+        release.set()
+        saver.join(20)
+        mover.join(20)
+    assert result[0].status == 200
+
+
+def test_a_tell_queued_while_the_page_moves_ends_on_the_new_address(team, monkeypatch):
+    """A Tell queued for an agent resolves its address under the admission lock and the moves' lock: a move that comes
+    between the entry found at the old address and the queue is either done first (the Tell goes to the new address) or
+    waits for the queue (the rename carries the row). The hook is the queue itself: the move is started the moment the Tell
+    comes to queue, and given a short while to get through."""
+    import threading
+    old = made(team, "alice", PLAN)["doc"]
+    cid = comment(team, old)
+    assert cid
+    assert team.post("/_/target", {"doc": old, "target": "agent:alice-claude"}, member=ALICE).status == 200
+    alice = team.hub.proxy.members[ALICE]
+    waiting = team.hub.waiting_tells
+    real, begun, moved_done = waiting.queue, [], threading.Event()
+    mover = threading.Thread(target=lambda: (move(team, ALICE, old, "b"), moved_done.set()))
+
+    def queue(address, *a, **k):
+        if not begun:
+            begun.append(1)
+            mover.start()
+            moved_done.wait(1)                 # through at once when nothing holds it, else it waits for the Tell's queue
+        return real(address, *a, **k)
+    monkeypatch.setattr(waiting, "queue", queue)
+    team.hub.tell.queue_agent(old, cid, alice)
+    mover.join(20)
+    new = "loose-alice/b/plan.md"
+    assert team.hub.forwards.follow(old) == new
+    from sheafmd.hub import waiting as waiting_mod
+    rows = waiting_mod.read_json(waiting_mod._file(), [], aside=False)
+    assert [r["doc"] for r in rows] == [new], rows
+
+
+def test_forgetting_a_root_offline_takes_its_forwards_with_it_and_a_new_root_of_the_name_has_none(team):
+    from sheafmd.hub import roots as roots_mod
+    old = made(team, "alice", PLAN)["doc"]
+    new = moved(team, ALICE, old, "b")
+    assert team.hub.forwards.follow(old) == new
+    roots_mod.forget_offline("loose-alice")
+    assert forwards.Forwards().follow(old) is None

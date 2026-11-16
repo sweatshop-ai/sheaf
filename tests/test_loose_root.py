@@ -323,3 +323,64 @@ def test_a_keep_mark_never_follows_a_link_for_its_folder_or_its_file(agents, tmp
     assert bad, why
     assert not target.exists()
     assert not (root.path / loose.month() / "third.md").exists()
+
+
+# ── what a create takes back (ticket 28) ──────────────────────────────────────────────────────────────────────────
+def test_a_create_that_fails_after_the_hub_expected_it_leaves_no_expectation_behind(agents, monkeypatch):
+    from sheafmd import mcp
+
+    def full(*a, **k):
+        raise OSError("disk full")
+    monkeypatch.setattr(mcp, "create_file", full)
+    bad, why = call(agents, "bea-claude", "create", doc="notes.md", text=TEXT)
+    assert bad, why
+    assert agents.hub.writes._own == {}
+
+
+def test_a_keep_refused_after_the_page_was_made_leaves_no_expectation_behind(agents, monkeypatch):
+    def refuse(*a, **k):
+        raise loose.Refused("no marks today")
+    monkeypatch.setattr(loose, "keep", refuse)
+    bad, why = call(agents, "bea-claude", "create", doc="notes.md", text=TEXT, keep=True)
+    assert bad, why
+    assert agents.hub.writes._own == {}
+
+
+def test_a_loose_root_is_taken_back_when_the_state_folder_is_reached_through_a_link(agents, tmp_path):
+    member = agents.hub.proxy.members[CAL]
+    root, fresh = agents.hub.loose.root_for(member)
+    assert fresh
+    link = tmp_path / "via-link"
+    link.symlink_to(state(agents))
+    loose_json = state(agents) / "loose.json"
+    held = json.loads(loose_json.read_text(encoding="utf-8"))
+    held[CAL] = str(link / "loose" / root.path.name)                # the same folder, named through a link
+    loose_json.write_text(json.dumps(held), encoding="utf-8")
+    agents.hub.loose.drop(member, root)
+    assert not root.path.exists()
+    assert CAL not in json.loads(loose_json.read_text(encoding="utf-8"))
+
+
+def test_keep_false_on_an_ordinary_create_is_no_keep_and_no_refusal(agents):
+    out = made(agents, "bea-claude", doc="rectoversos/acme/blog/2026-11-16-new.md", text=TEXT, keep=False)
+    assert agents.hub.file(out["doc"]).is_file()
+
+
+def test_keep_true_on_an_ordinary_create_is_still_refused(agents):
+    bad, why = call(agents, "bea-claude", "create", doc="rectoversos/acme/blog/2026-11-16-new.md", text=TEXT, keep=True)
+    assert bad and "keep" in why, why
+
+
+def test_a_keep_that_fails_after_the_sheaf_folder_was_made_on_a_fresh_root_takes_the_root_back(agents, monkeypatch):
+    before = agents.hub.proxy.members[CAL].roots
+
+    real = loose.state.write_text_private
+
+    def full(path, *a, **k):
+        if os.path.basename(path) != "keep.json":
+            return real(path, *a, **k)
+        raise OSError(28, "No space left on device")
+    monkeypatch.setattr(loose.state, "write_text_private", full)
+    bad, why = call(agents, "cal-claude", "create", doc="notes.md", text=TEXT, keep=True)
+    assert bad and "keep" in why, why
+    nothing_made_for_cal(agents, before)

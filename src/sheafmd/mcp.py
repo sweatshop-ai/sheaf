@@ -795,7 +795,9 @@ class Door:
         doc, folder = args["doc"], args.get("folder")
         bare = "/" not in doc and "\\" not in doc and "://" not in doc and not os.path.isabs(doc)
         if not bare and folder is None:
-            if args.get("keep") is not None:
+            if args.get("keep") is not None and not isinstance(args["keep"], bool):
+                raise ToolError("keep must be true or false.", "keep")
+            if args.get("keep"):
                 raise ToolError("keep is for a loose page, made with a bare file name.", "path")
             return args, None
         if not bare:
@@ -892,6 +894,7 @@ class Door:
                     except loose.Refused as e:
                         with contextlib.suppress(OSError):
                             os.unlink(top / rel)        # made a moment ago under this name's lock: take it back
+                        self.hub.writes.told(address)
                         _unmake(top, made)
                         raise ToolError(f"{address} was not made: {e}.", "keep") from None
             except Private:         # the root's folder, as opened, is a private root's: answered as a path in no root
@@ -950,9 +953,10 @@ class Door:
                     create_file(top, rel, text, judge)
             else:
                 create_file(top, rel, text, judge)
-        except Private:
-            raise
-        except OSError as e:
+        except BaseException as e:
+            self.hub.writes.told(address)       # a page that was not made leaves nothing to expect
+            if isinstance(e, Private) or not isinstance(e, OSError):
+                raise
             raise _not_made(address, e) from None
         return text
 
@@ -1010,7 +1014,12 @@ class Door:
             return self.hub.file(address, placed=True)
         try:
             top, rel = self.hub.roots.locate(address)
-            before, _ = update_beneath(top.path, rel, change, move=move)
+            try:
+                before, _ = update_beneath(top.path, rel, change, move=move)
+            except BaseException:
+                if address in self.hub.writes._own:     # a write that failed after it was expected leaves nothing to expect
+                    self.hub.writes.told(address)
+                raise
         except (OSError, UnicodeDecodeError, NotFound):
             raise ToolError(f"{address} could not be written.", "not written") from None
         text = written[0]

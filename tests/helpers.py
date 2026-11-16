@@ -1,5 +1,6 @@
 """Shared by the tests: pandoc is always the bundled one, never whatever is on PATH; the
 brand words no output may hold; small file helpers; `python -m sheafmd` as a real process."""
+import contextlib
 import errno
 import fcntl
 import http.client
@@ -783,3 +784,148 @@ def holds_number(text, n):
     """Whether `n` stands alone in `text`: not inside a longer number (`2600`), a word or hex id
     (`c8cd260c`), or a decimal or unit (`260.5`, `260px`)."""
     return bool(re.search(rf"(?<![\w.]){n}(?![\w.])", text))
+
+
+# ── two shared Sheafs that talk to each other (ticket 20) ───────────────────
+
+TAILNET_SOURCE = {"X-Forwarded-For": "100.101.102.103"}
+
+
+class Side:
+    """One of two hubs in one process, with a state folder of its own: `active()` is the one `SHEAF_HOME` the stores and the
+    diagnostics log read at each call, so a request on a side is answered, and what it kept is read, in that side's folder."""
+
+    def __init__(self, home: Path, hub, handler):
+        self.home, self.hub, self.browser = home, hub, Browser(hub, handler)
+        self.front = Front(hub, handler)
+        self.origin = hub.proxy.origin
+        self.tokens = {}
+
+    @contextlib.contextmanager
+    def active(self):
+        was = os.environ.get("SHEAF_HOME")
+        os.environ["SHEAF_HOME"] = str(self.home)
+        try:
+            yield self
+        finally:
+            if was is None:
+                os.environ.pop("SHEAF_HOME", None)
+            else:
+                os.environ["SHEAF_HOME"] = was
+
+    def request(self, method, path, **kw):
+        with self.active():
+            return self.front.request(method, path, **kw)
+
+    def get(self, path, **kw):
+        return self.request("GET", path, **kw)
+
+    def post(self, path, body=None, **kw):
+        return self.request("POST", path, body=body if body is not None else {}, **kw)
+
+    def ask(self, who, tool, headers=None, **args):
+        """(is it an error, the parsed result or the sentence) of one door tool call with `who`'s token."""
+        with self.active():
+            res = door(self.browser, rpc("tools/call", {"name": tool, "arguments": args}), token=self.tokens[who],
+                       headers=dict(headers or {}), as_name=None)
+            assert res.status == 200, res.text
+            out = res.json()["result"]
+            text = out["content"][0]["text"]
+            return out["isError"], (text if out["isError"] else json.loads(text))
+
+    def tree(self) -> dict:
+        """Everything this side keeps, as bytes by path: its state folder (but for the diagnostics log and the retry note) and
+        every file of its members' folders. Two trees that are equal are a hub nothing happened to."""
+        out = {}
+        with self.active():
+            tops = [self.home / "state", *[Path(f) for m in self.hub.proxy.members.values() for f in m.roots],
+                    *[Path(f) for f in self.hub.loose._read().values()]]
+        for top in tops:
+            for p in sorted(top.rglob("*")) if top.exists() else ():
+                if p.is_file() and p.name not in ("diagnostics.jsonl", "outgoing.json") and not p.name.endswith(".lock"):
+                    out[str(p)] = p.read_bytes()
+        return out
+
+
+class Link:
+    """The wire between the two sides: what `outgoing.post` and `send.post` do, in memory. A call goes to the side whose origin
+    it names, as a request from the tailnet. `down` answers nothing at all; `lose_answer` lets the other side do its work and
+    then answers nothing; `between` runs after the other side has answered and before the caller is told."""
+
+    def __init__(self, *sides):
+        self.sides = {s.origin: s for s in sides}
+        self.down = self.lose_answer = False
+        self.between = None
+        self.calls = []                  # (origin, verb) of each channel call
+        self.door_headers = []           # (origin, headers) of each door call
+
+    def post(self, origin, verb, body, token, seconds=None):
+        self.calls.append((origin, verb))
+        if self.down or origin not in self.sides:
+            raise OSError("no route to the other shared Sheaf")
+        res = self.sides[origin].post(f"/_/tiroir/{verb}", body, member=None,
+                                      headers={**TAILNET_SOURCE, "Authorization": f"Bearer {token}"})
+        if self.between:
+            self.between(verb, res)
+        if self.lose_answer:
+            raise OSError("the answer was lost")
+        return res.status, (res.json() if res.body else None)
+
+    def door_post(self, url, bearer, message, headers):
+        origin = url.removesuffix("/mcp")
+        if self.down or origin not in self.sides:
+            from sheafmd import send
+            raise send.Unreachable(f"cannot reach {origin}. Nothing was sent.")
+        self.door_headers.append((origin, dict(headers)))
+        side = self.sides[origin]
+        with side.active():
+            res = door(side.browser, message, token=bearer, headers=dict(headers), as_name=None)
+        return res.status, (res.json() if res.status == 200 else None), {}
+
+    def door_get(self, url, bearer):
+        origin, path = url.split("/_/", 1)[0], "/_/" + url.split("/_/", 1)[1]
+        side = self.sides[origin]
+        with side.active():
+            res = side.browser.request("GET", path, cookie=False, headers={"Authorization": f"Bearer {bearer}"})
+        return res.status, (res.json() if res.status == 200 else None), {}
+
+
+def build_side(tmp_path, name, origin, members) -> Side:
+    """A hub in proxy mode with its own folder. `members` is `{id: (name, short, email)}`; each gets a folder and a door token
+    named `<short>`."""
+    from sheafmd.hub import proxy
+    from sheafmd.hub.core import Hub
+    from sheafmd.hub.handler import Handler
+    from sheafmd.hub.state import Tokens
+    home = tmp_path / f"home-{name}"
+    home.mkdir()
+    table = {}
+    for mid, (who, short, email) in members.items():
+        (tmp_path / f"{name}-{short}-work").mkdir()
+        table[mid] = {"name": who, "short": short, "email": email, "roots": [str(tmp_path / f"{name}-{short}-work")],
+                      "tokens": [short]}
+    prev = os.environ.get("SHEAF_HOME")
+    os.environ["SHEAF_HOME"] = str(home)
+    try:
+        hub = Hub(port=27419, key=paths.ensure_key(), started_by="test")
+        hub.proxy = proxy.parse({"origin": origin, "socket": "/run/sheaf-proxy/hub.sock",
+                                 "proxy_user": pwd.getpwuid(os.getuid()).pw_name, "members": table}, "the test")
+        side = Side(home, hub, Handler(hub, peer_check=lambda conn: None))
+        side.tokens = {short: str(Tokens().add(short, client="Claude Code", write=True)) for _, short, _ in members.values()}
+    finally:
+        if prev is None:
+            os.environ.pop("SHEAF_HOME", None)
+        else:
+            os.environ["SHEAF_HOME"] = prev
+    return side
+
+
+def pair_peers(a: Side, b: Side, keyring) -> None:
+    """Each side holds a peer token for the other: the row that lets the other call its channel, and the keyring entry (the
+    login keyring, here one fake for both) of the token it sends."""
+    from sheafmd import connect
+    from sheafmd.hub.state import Tokens
+    for here, there in ((a, b), (b, a)):
+        with there.active():
+            token = Tokens().add_peer(f"from-{here.origin.split('//')[1].split('.')[0]}", here.origin)
+        connect.use_peer(there.origin, str(token), store=keyring)

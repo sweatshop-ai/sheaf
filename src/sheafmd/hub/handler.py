@@ -1156,12 +1156,15 @@ class Handler:
         return root, at.rel, mtime
 
     def _acting(self, req: Req, act):
-        root, rel, mtime = self._own_loose(req, req.body.get("doc"))
-        try:
-            with place.held(self.hub, req.body["doc"]):
-                act(root, rel, mtime)
-        except loose.Refused as e:
-            raise Refuse(409, str(e)) from None
+        # The moves' lock first (the hub's lock order), from the read of the path to the write of the mark: a move comes before
+        # the read or after the write, so its `marks_moved` carries this mark and none is left at the old path.
+        with moves._LOCK:
+            root, rel, mtime = self._own_loose(req, req.body.get("doc"))
+            try:
+                with place.held(self.hub, req.body["doc"]):
+                    act(root, rel, mtime)
+            except loose.Refused as e:
+                raise Refuse(409, str(e)) from None
         self.hub.index.touch(req.body["doc"])
         return _ok()
 

@@ -305,3 +305,13 @@ def test_the_server_tells_a_poll_that_its_caller_closed_the_connection():
         assert server._Http._gone(me) is True
     finally:
         a.close()
+
+
+def test_a_write_answers_with_the_session_id_the_door_recorded_for_it(laptops):
+    """The mod arms only when this id is the session's own (SPEC 9.14): after a /clear the helper may still send the old id."""
+    bad, got = say(laptops, "bea-one", "reply", SESSION, doc=DOC, id="c1", text="Looking.")
+    assert not bad and got["session"] == SESSION
+    bad, got = say(laptops, "bea-one", "resolve", "old-id-2", doc=DOC, id="c1")
+    assert not bad and got["session"] == "old-id-2"
+    bad, got = say(laptops, "bea-one", "reply", None, doc=DOC, id="c1", text="No header.")
+    assert not bad and "session" not in got

@@ -179,6 +179,11 @@ class Loose:
                 raise Refused("a loose page cannot be made here: the loose folder is not a root of its own")
             return root, fresh
 
+    def owner_of(self, root) -> str | None:
+        """The id of the member whose loose root `root` is, None for any other root."""
+        real = os.path.realpath(root.path)
+        return next((mid for mid, folder in self._read().items() if os.path.realpath(folder) == real), None)
+
     def known(self, member) -> Path | None:
         """The loose folder of `member`, when it has one."""
         folder = self._read().get(member.id)

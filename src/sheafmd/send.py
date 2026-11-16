@@ -45,6 +45,7 @@ from .source import md_hash
 
 EXIT_OK, EXIT_FAILED = 0, 1
 TIMEOUT = 15.0
+LONG_POLL_TIMEOUT = 35.0   # a `tells` call the door holds for up to 25 s
 CONNECT_TIMEOUT = 5.0   # the messages before a tool call (`initialize` and its notice): a tiroir that does not answer them is not there
 STATE_FILE = "sends.json"
 PROTOCOL = "2025-06-18"
@@ -89,7 +90,9 @@ def post(url: str, token: str, message: dict, headers: dict) -> tuple[int, dict 
     req = urllib.request.Request(url, json.dumps(message).encode(), {
         "Authorization": f"Bearer {token}", "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream", **headers}, method="POST")
-    return _request(req, TIMEOUT if message.get("method") == "tools/call" else CONNECT_TIMEOUT)
+    if message.get("method") != "tools/call":
+        return _request(req, CONNECT_TIMEOUT)
+    return _request(req, LONG_POLL_TIMEOUT if (message.get("params") or {}).get("name") == "tells" else TIMEOUT)
 
 
 def get(url: str, token: str) -> tuple[int, dict | None, dict]:
@@ -121,10 +124,60 @@ def remote_link(environ, session: str) -> str:
     return ""
 
 
-def declared(environ=None) -> dict:
-    """The request headers a send declares itself with: session, machine, Remote Control link; only those it has."""
+MAX_ANCESTORS = 64      # a walk this deep has gone past any process tree
+PS_TIMEOUT = 2.0
+
+
+def ps_parent(pid: int) -> int:
+    """The parent of `pid` from `ps -o ppid= -p PID` (no shell), for a system with no /proc; raises OSError when ps fails."""
+    try:
+        done = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True, text=True, timeout=PS_TIMEOUT)
+        if done.returncode != 0:
+            raise OSError(f"ps exited {done.returncode}")
+        return int(done.stdout.strip())
+    except (subprocess.SubprocessError, ValueError) as e:
+        raise OSError(str(e)) from None
+
+
+def ancestor_pids(pid: int | None = None, proc: Path = Path("/proc"), ps=ps_parent) -> list[int]:
+    """`pid` and its parents up to init: each parent from `proc`/PID/stat, else from `ps`; the walk stops at a process
+    neither can read, at a loop, and after MAX_ANCESTORS."""
+    pid = os.getpid() if pid is None else pid
+    chain: list[int] = []
+    while pid > 0 and pid not in chain and len(chain) < MAX_ANCESTORS:
+        chain.append(pid)
+        try:
+            stat = (proc / str(pid) / "stat").read_text(encoding="utf-8", errors="replace")
+            pid = int(stat.rpartition(")")[2].split()[1])      # after the name, which may hold spaces and brackets: state, ppid
+        except (OSError, ValueError, IndexError):
+            try:
+                pid = ps(pid)
+            except OSError:
+                break
+    return chain
+
+
+def registry_session(environ=None) -> str | None:
+    """The session id of the Claude Code that runs this process, from its own record `<config>/sessions/<pid>.json` of the
+    nearest ancestor that has one; None when no ancestor has. A headersHelper gets no `CLAUDE_CODE_SESSION_ID` (live check,
+    2026-11-16), and the variable it may inherit is some parent shell's, so the helper never reads it."""
     environ = os.environ if environ is None else environ
-    session = session_id(environ)
+    sessions = config_dir_of(environ) / "sessions"
+    for pid in ancestor_pids():
+        try:
+            rec = json.loads((sessions / f"{pid}.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(rec, dict) and isinstance(rec.get("sessionId"), str) and rec["sessionId"].strip():
+            return rec["sessionId"].strip()
+    return None
+
+
+def declared(environ=None, session=...) -> dict:
+    """The request headers a send declares itself with: session, machine, Remote Control link; only those it has.
+    `session` replaces the agent's variable (the headersHelper's, from the registry)."""
+    environ = os.environ if environ is None else environ
+    session = session_id(environ) if session is ... else session
     out = {"X-Sheaf-Host": machine()}
     if session:
         out["X-Sheaf-Session"] = session

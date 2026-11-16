@@ -14,10 +14,10 @@ from test_hub_work import (  # noqa: F401
     BEA,
     DOC,
     FORK,
-    HANS,
+    BOB,
     LIVE,
     SHEAF,
-    THIERRY,
+    ALICE,
     box,
     comment,
     drops,
@@ -41,8 +41,8 @@ def hashed(token):
     return hashlib.sha256(token.encode("ascii")).hexdigest()
 
 
-def forked(team, doc=ADDRESS, id=FORK, as_=HANS):
-    got = team.post("/_/sessions", {"doc": doc, "id": id, "machine": "hans-mac"}, member=as_)
+def forked(team, doc=ADDRESS, id=FORK, as_=BOB):
+    got = team.post("/_/sessions", {"doc": doc, "id": id, "machine": "bob-mac"}, member=as_)
     assert got.status == 200, got.text
     return got.json()["relay"]
 
@@ -77,13 +77,13 @@ def test_a_fork_report_answers_a_relay_token_kept_only_as_its_hash(team, box, wo
     raw = f.read_text(encoding="utf-8")
     assert token not in raw and hashed(token) in raw
     row, = json.loads(raw)
-    assert (row["member"], row["doc"], row["session"]) == (HANS, ADDRESS, FORK)
+    assert (row["member"], row["doc"], row["session"]) == (BOB, ADDRESS, FORK)
 
 
 def test_the_token_is_in_no_row_and_not_on_the_page(team, box, work):
     token = forked(team)
     sub = listen(team, token).stream
-    page = team.get(f"/_/doc?doc={ADDRESS}", member=HANS).text + team.get("/" + DOC, member=HANS).text
+    page = team.get(f"/_/doc?doc={ADDRESS}", member=BOB).text + team.get("/" + DOC, member=BOB).text
     sub.close()
     text = json.dumps(hub_rows()) + page
     assert token not in text and hashed(token) not in text
@@ -97,7 +97,7 @@ def test_a_fork_reported_with_a_sign_in_code_gets_a_relay_token_too(team, box, w
     assert got.status == 200, got.text
     token = got.json()["relay"]
     row, = json.loads(relay_mod.Relays.path().read_text(encoding="utf-8"))
-    assert row["sha256"] == hashed(token) and (row["member"], row["session"]) == (HANS, FORK)
+    assert row["sha256"] == hashed(token) and (row["member"], row["session"]) == (BOB, FORK)
     assert listen(team, token).status == 200
 
 
@@ -107,7 +107,7 @@ def test_a_token_opens_its_stream_with_hello_and_writes_relay_connected(team, bo
     assert got.status == 200 and got.headers["Content-Type"] == "text/event-stream"
     assert got.stream.drain()[0] == ("hello", {"doc": ADDRESS, "session": FORK})
     row, = hub_rows("relay-connected")
-    assert (row["doc"], row["transcript"], row["member"]) == (ADDRESS, FORK, HANS) and "relay" in row
+    assert (row["doc"], row["transcript"], row["member"]) == (ADDRESS, FORK, BOB) and "relay" in row
     got.stream.close()
     assert len(hub_rows("relay-closed")) == 1
 
@@ -137,7 +137,7 @@ def test_a_made_up_token_is_refused_with_one_sentence(team, box, work):
 
 def test_a_token_and_a_member_header_together_are_refused(team, box, work):
     token = forked(team)
-    got = team.get(f"/_/relay?doc={ADDRESS}", member=HANS, headers={"X-Sheaf-Relay": hashed(token)})
+    got = team.get(f"/_/relay?doc={ADDRESS}", member=BOB, headers={"X-Sheaf-Relay": hashed(token)})
     assert got.status == 401
     assert hub_rows("relay-refused")[-1]["reason"] == "two-credentials"
 
@@ -145,7 +145,7 @@ def test_a_token_and_a_member_header_together_are_refused(team, box, work):
 def test_a_token_is_refused_once_its_member_leaves_proxy_members(team, box, work):
     token = forked(team)
     members = dict(team.hub.proxy.members)
-    del members[HANS]
+    del members[BOB]
     object.__setattr__(team.hub.proxy, "members", members)
     got = listen(team, token)
     assert got.status == 401 and got.json()["error"] == NO_GOOD
@@ -165,7 +165,7 @@ def test_a_revoke_from_another_process_takes_relay_tell_off_at_once(team, box, w
     token = forked(team)
     sub = listen(team, token).stream
     assert relay_mod.Relays().revoke(ADDRESS) == 1      # `sheaf relay revoke`: its own Relays, not the hub's
-    assert team.get(f"/_/doc?doc={ADDRESS}", member=HANS).json()["capabilities"] == []
+    assert team.get(f"/_/doc?doc={ADDRESS}", member=BOB).json()["capabilities"] == []
     assert comment(team, work, "tell").status == 400
     assert team.hub.relays.open(ADDRESS, FORK) == []
     sub.close()
@@ -183,7 +183,7 @@ def test_a_newer_fork_ends_the_older_token(team, box, work):
 def test_a_token_whose_session_is_no_longer_live_is_refused(team, box, work):
     token = forked(team)
     text = (work / DOC).read_text(encoding="utf-8")
-    (work / DOC).write_text(text.replace(f"{{id: {FORK}, host: hans-mac", f"{{id: {FORK}, host: tiroir-tt"), "utf-8")
+    (work / DOC).write_text(text.replace(f"{{id: {FORK}, host: bob-mac", f"{{id: {FORK}, host: tiroir-tt"), "utf-8")
     got = listen(team, token)
     assert got.status == 401
     assert hub_rows("relay-refused")[-1]["reason"] == "moved"
@@ -206,14 +206,14 @@ def test_can_offers_relay_tell_while_the_relay_of_that_session_is_connected(team
     now = [1_000_000.0]
     monkeypatch.setattr(relay_mod, "_clock", lambda: now[0])
     token = forked(team)
-    assert team.get(f"/_/doc?doc={ADDRESS}", member=HANS).json()["capabilities"] == []
+    assert team.get(f"/_/doc?doc={ADDRESS}", member=BOB).json()["capabilities"] == []
     sub = listen(team, token).stream
-    j = team.get(f"/_/doc?doc={ADDRESS}", member=HANS).json()
+    j = team.get(f"/_/doc?doc={ADDRESS}", member=BOB).json()
     assert j["capabilities"] == ["relay-tell"]
     assert j["work"]["relay"] is True
     sub.close()
     now[0] += relay_mod.GRACE           # a relay that has not reconnected within the grace (#135)
-    j = team.get(f"/_/doc?doc={ADDRESS}", member=HANS).json()
+    j = team.get(f"/_/doc?doc={ADDRESS}", member=BOB).json()
     assert j["capabilities"] == [] and j["work"]["relay"] is False
 
 
@@ -221,16 +221,16 @@ def test_a_tell_on_a_fork_goes_to_its_relay_with_the_full_message(team, box, wor
     token = forked(team)
     sub = listen(team, token).stream
     sub.drain()
-    got = comment(team, work, "tell", as_=THIERRY)
+    got = comment(team, work, "tell", as_=ALICE)
     assert got.status == 200, got.text
     assert drops(box) == []
     t, = tells(sub)
     assert work_mod.UUID_RE.fullmatch(t["id"])
     assert t["message"].startswith(f"Tell from sheaf, on the page of {ADDRESS} (")
-    assert f"Thierry pressed Tell on comment {got.json()['id']}" in t["message"]
+    assert f"Alice pressed Tell on comment {got.json()['id']}" in t["message"]
     assert "Can you send the draft to Joey?" in t["message"]
     row, = hub_rows("tell-relayed")
-    assert (row["tell"], row["thread"], row["by"]) == (t["id"], got.json()["id"], "thierry")
+    assert (row["tell"], row["thread"], row["by"]) == (t["id"], got.json()["id"], "alice")
 
 
 def test_ask_on_a_fork_is_refused_as_retired_with_a_relay_connected(team, box, work):
@@ -258,7 +258,7 @@ def test_a_tell_is_sent_again_on_reconnect_with_the_same_id_until_acked(team, bo
 def test_a_failed_ack_writes_its_row_and_tells_the_page(team, box, work):
     token = forked(team)
     sub = listen(team, token).stream
-    tab = team.get(f"/_/live?doc={ADDRESS}", member=HANS).stream
+    tab = team.get(f"/_/live?doc={ADDRESS}", member=BOB).stream
     comment(team, work, "tell")
     t, = tells(sub)
     tab.drain()
@@ -291,7 +291,7 @@ def test_a_queued_tell_expires_after_an_hour(team, box, work, monkeypatch):
     monkeypatch.setattr(relay_mod, "_clock", lambda: now[0])
     token = forked(team)
     listen(team, token)
-    tab = team.get(f"/_/live?doc={ADDRESS}", member=HANS).stream
+    tab = team.get(f"/_/live?doc={ADDRESS}", member=BOB).stream
     got = comment(team, work, "tell")
     tab.drain()
     now[0] += relay_mod.TTL - 1
@@ -316,7 +316,7 @@ def test_a_tell_whose_fork_moved_under_the_lock_is_refused_and_queues_nothing(te
         calls.append(1)
         if len(calls) > 1:          # the gate saw the relay; the recheck under the lock sees a newer fork
             text = (work / DOC).read_text(encoding="utf-8")
-            (work / DOC).write_text(text.replace(f"{{id: {FORK}, host: hans-mac", f"{{id: {FORK}, host: tiroir-tt"),
+            (work / DOC).write_text(text.replace(f"{{id: {FORK}, host: bob-mac", f"{{id: {FORK}, host: tiroir-tt"),
                                     "utf-8")
             return False
         return real(doc, session)
@@ -332,8 +332,8 @@ def test_two_forks_reported_at_once_leave_the_later_one_with_a_good_token(team, 
     def issue(member, doc, session):
         if session == FORK and not other:
             def report_b():
-                other["got"] = team.post("/_/sessions", {"doc": ADDRESS, "id": FORK2, "machine": "hans-mac"},
-                                         member=HANS)
+                other["got"] = team.post("/_/sessions", {"doc": ADDRESS, "id": FORK2, "machine": "bob-mac"},
+                                         member=BOB)
             other["thread"] = threading.Thread(target=report_b)
             other["thread"].start()
             other["thread"].join(1.0)       # B's report runs to its end here unless A's lock holds it back
@@ -368,11 +368,11 @@ def test_a_live_session_changed_by_hand_drops_the_queued_tells_with_a_row(team, 
     """#134: the live session changed in the file, not by a fork report: the Tells queued for the old one are
     dropped as for a fork, with their row and the page's event, when the next Tell is queued for the new one."""
     listen(team, forked(team))
-    tab = team.get(f"/_/live?doc={ADDRESS}", member=HANS).stream
+    tab = team.get(f"/_/live?doc={ADDRESS}", member=BOB).stream
     first = comment(team, work, "tell").json()["id"]
     put(team, work, DOC, (work / DOC).read_text(encoding="utf-8").replace(f"{{id: {FORK},", f"{{id: {FORK2},"))
     team.hub.entry(ADDRESS).live.refresh()
-    token2, _ = team.hub.relays.issue(HANS, ADDRESS, FORK2)
+    token2, _ = team.hub.relays.issue(BOB, ADDRESS, FORK2)
     listen(team, token2)
     tab.drain()
     got = comment(team, work, "tell")
@@ -404,14 +404,14 @@ def test_past_the_grace_a_closed_relay_is_no_longer_connected(team, box, work, m
     listen(team, forked(team)).stream.close()
     now[0] += relay_mod.GRACE
     assert comment(team, work, "tell").status == 400
-    assert team.get(f"/_/doc?doc={ADDRESS}", member=HANS).json()["capabilities"] == []
+    assert team.get(f"/_/doc?doc={ADDRESS}", member=BOB).json()["capabilities"] == []
 
 
 def test_the_page_is_told_when_a_relay_connects_and_when_it_is_gone(team, box, work, monkeypatch):
     now = [1_000_000.0]
     monkeypatch.setattr(relay_mod, "_clock", lambda: now[0])
     token = forked(team)
-    tab = team.get(f"/_/live?doc={ADDRESS}", member=HANS).stream
+    tab = team.get(f"/_/live?doc={ADDRESS}", member=BOB).stream
     tab.drain()
     sub = listen(team, token).stream
     assert [n for n, _ in tab.drain()].count("relay") == 1
@@ -438,10 +438,10 @@ def test_a_queued_tell_expires_by_the_clock_with_nothing_calling_in(team, box, w
 def test_a_member_whose_access_is_taken_away_gets_gone_instead_of_the_tell(team, box, work):
     sub = listen(team, forked(team)).stream
     sub.drain()
-    (work / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["thierry"]\n'
+    (work / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["alice"]\n'
                                         'status = "live"\n', encoding="utf-8")
     relayed = team.hub.relays.put(ADDRESS, FORK, relay_mod.Tell(
-        "11111111-2222-4333-8444-555555555555", "c9", "the thread's words", "thierry"))
+        "11111111-2222-4333-8444-555555555555", "c9", "the thread's words", "alice"))
     assert relayed == []
     assert [n for n, _ in sub.drain()] == ["gone"]
 
@@ -449,9 +449,9 @@ def test_a_member_whose_access_is_taken_away_gets_gone_instead_of_the_tell(team,
 def test_a_relay_in_its_grace_whose_member_lost_access_takes_no_tell(team, box, work):
     """#135: the grace keeps a reconnecting relay, not one whose member can no longer open the rectoverso."""
     listen(team, forked(team)).stream.close()
-    (work / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["thierry"]\n'
+    (work / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["alice"]\n'
                                         'status = "live"\n', encoding="utf-8")
-    assert comment(team, work, "tell", as_=THIERRY).status == 400
+    assert comment(team, work, "tell", as_=ALICE).status == 400
     assert team.hub.relays.open(ADDRESS, FORK) == []
 
 

@@ -6,7 +6,7 @@ import subprocess
 import pytest
 from helpers import BEA, CAL, PLAN, Front
 
-from test_hub_visibility import HANS, THIERRY, PRIVATE, put as put_team, team  # noqa: F401  (fixtures)
+from test_hub_visibility import BOB, ALICE, PRIVATE, put as put_team, team  # noqa: F401  (fixtures)
 
 SESSION = "6f1c2f0e-3a55-4a0e-9d52-0c1f6a1b7d11"
 
@@ -132,11 +132,11 @@ def test_a_folder_that_holds_only_another_members_private_page_is_absent(team, w
     put_team(team, work, "acme/site/2026-10-28-contract.md", PRIVATE)
     put_team(team, work, "acme/site/open.md", "# Open\n")
     put_team(team, work, "acme/hidden/2026-10-28-contract.md", PRIVATE)
-    owner, hans = sheaf(team, THIERRY), sheaf(team, HANS)
+    owner, bob = sheaf(team, ALICE), sheaf(team, BOB)
     assert "work/acme/hidden" in paths(owner["sheaf"]["tree"])
-    assert paths(hans["sheaf"]["tree"]) == ["work", "work/acme", "work/acme/site"]
-    assert sorted(docs(hans)) == ["work/acme/site/open.md", "work/plan.md"]
-    assert "contract" not in str(hans)                        # nothing of the private page, nor of its folder's name
+    assert paths(bob["sheaf"]["tree"]) == ["work", "work/acme", "work/acme/site"]
+    assert sorted(docs(bob)) == ["work/acme/site/open.md", "work/plan.md"]
+    assert "contract" not in str(bob)                        # nothing of the private page, nor of its folder's name
 
 
 # ── the Write log on a row ───────────────────────────────────────────────────

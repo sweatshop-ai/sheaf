@@ -528,15 +528,15 @@ def test_a_document_above_every_project_leaves_out_a_projects_image(front, plan,
     assert "data:image/png" not in html and "data:image/png" not in share
 
 
-@pytest.mark.parametrize("rel", ["acme/blog/pic.md", "acme/blog/private/hans/pic.md"])
+@pytest.mark.parametrize("rel", ["acme/blog/pic.md", "acme/blog/private/bob/pic.md"])
 def test_an_image_in_a_private_folder_is_embedded_only_in_a_sheaf_of_that_folder(front, plan, granted, work, rel):
     """`private/<short>/` holds what is its owner's alone (9.11): its image is no part of a page of the project, nor
     of another owner's sheaf."""
-    png(work / "acme" / "blog" / "private" / "thierry" / "seal.png")
+    png(work / "acme" / "blog" / "private" / "alice" / "seal.png")
     up = "../../" if "private" in rel else ""
-    html, _, _ = project_page(front, work, rel, f"{up}private/thierry/seal.png")
+    html, _, _ = project_page(front, work, rel, f"{up}private/alice/seal.png")
     assert "data:image/png" not in html
-    html, _, _ = project_page(front, work, "acme/blog/private/thierry/own.md", "seal.png")
+    html, _, _ = project_page(front, work, "acme/blog/private/alice/own.md", "seal.png")
     assert "data:image/png" in html
 
 

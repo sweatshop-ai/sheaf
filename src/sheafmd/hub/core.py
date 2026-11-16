@@ -34,6 +34,7 @@ from . import loose as loose_mod
 from . import place
 from . import projects
 from . import proxy as proxy_mod
+from . import readthrough
 from . import roots as roots_mod
 from . import sheaf_view
 from . import state
@@ -133,6 +134,8 @@ class Hub:
         self.port, self.version, self.service = port, version, service
         self.assets = assets_mod.load(version)   # /_/mount.js and .css as this hub serves them to its end (#179)
         self.proxy = proxy                       # the checked `[proxy]` table (9.9), None in loopback mode
+        # the agency tiroir's client tiroirs, read through (9.9); None for a tiroir with none. TODO(20): the call is the channel's.
+        self.clients = readthrough.Clients(proxy.clients, self.peer_call) if proxy is not None and proxy.clients else None
         self.started_by, self.clock = started_by, clock
         self.auth = Auth(key, port)
         self.boot = str(uuid.uuid4())
@@ -684,6 +687,11 @@ class Hub:
         got["version"] = self.version
         got.update(self.mount_fields())
         return got
+
+    def peer_call(self, client: str, verb: str, body: dict) -> tuple:
+        """The hub-to-hub channel to the client tiroir `client`: `(status, answer)`, OSError when it does not answer.
+        TODO(20): the channel's HTTP client takes this place when ticket 20 lands; until then no client answers."""
+        raise OSError("the hub-to-hub channel is not connected")
 
     def mount_fields(self) -> dict:
         """What every mount answer carries for mount.js (#179): `script`, the name of the scripts this hub serves, which

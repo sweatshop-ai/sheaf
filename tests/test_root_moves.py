@@ -105,7 +105,7 @@ def test_a_move_survives_a_restart(tmp_path):
 def test_starting_a_move_again_to_the_same_tiroir_keeps_its_id_and_progress(tmp_path):
     moves = root_moves.Moves(tmp_path)
     moves.start("o/r", THERE, "id1")
-    moves.sent("o/r", "a.md")
+    moves.sent("o/r", "a.md", "h1")
     moves.start("o/r", THERE, "id2")
     assert moves.get("o/r")["id"] == "id1" and moves.get("o/r")["sent"] == ["a.md"]
 
@@ -120,7 +120,7 @@ def test_a_toml_changed_to_another_tiroir_before_the_first_confirm_replaces_the_
 def test_a_move_with_a_confirmed_page_runs_to_the_end_when_the_toml_changes_again(tmp_path):
     moves = root_moves.Moves(tmp_path)
     moves.start("o/r", THERE, "id1")
-    moves.sent("o/r", "a.md")
+    moves.sent("o/r", "a.md", "h1")
     moves.start("o/r", "https://third.example", "id2")
     assert moves.get("o/r")["to"] == THERE
 

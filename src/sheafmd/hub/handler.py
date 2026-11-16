@@ -165,6 +165,7 @@ KEY = Who(frozenset({"key"}), "this needs the hub key")
 # value, so `proxy=False` is what keeps `_for_members` from admitting it as it would a plain `COOKIE`.
 DICTATION = Who(frozenset({"cookie"}), _BROWSER, proxy=False)
 AUDIO = Who(frozenset({"cookie"}), _BROWSER, raw_body=True, proxy=False)     # the same, for the recording itself
+TOKEN_ONLY = Who(frozenset({"token"}), "this needs an MCP token")
 DOOR = Who(frozenset({"key", "token"}), "this needs the hub key or an MCP token", raw_body=True)
 # A member's alone, on the proxy socket (9.12): the loopback port answers 404, as for a route it has not.
 MEMBER = Who(frozenset({"member"}), "no such route")
@@ -269,6 +270,7 @@ class Handler:
             ("GET", "/_/session", "session", MEMBER, self._session),
             ("POST", "/_/sessions", "sessions", MEMBER, self._sessions),
             ("GET", "/_/laptops", "laptops", MEMBER, self._laptops),
+            ("GET", "/_/whoami", "whoami", TOKEN_ONLY, self._whoami),
             ("POST", "/_/laptops", "laptop-make", MEMBER, self._laptop_make),
             ("POST", "/_/laptops/revoke", "laptop-revoke", MEMBER, self._laptop_revoke),
             ("POST", "/_/code", "code", MINT, self._code),
@@ -1499,6 +1501,14 @@ class Handler:
         """The member's laptops, by name: never a token (9.7)."""
         rows = laptops.of(self.hub, req.member.id)
         return _json(200, {"laptops": [{"name": r.laptop, "created": r.created, "last_used": r.last_used} for r in rows]})
+
+    def _whoami(self, req: Req) -> Response:
+        """The member a token acts for, for a door in front of the hub that has to route the token's calls (9.7). A
+        token bound to no member is told it is no route: it has no member to name."""
+        member = self.hub.proxy.member_of_row(req.token) if self.hub.proxy is not None else None
+        if member is None:
+            raise Refuse(404, "no such route")
+        return _json(200, {"member": member.id})
 
     def _laptop_make(self, req: Req) -> Response:
         """"Connect a laptop": a token for the named laptop and the signed-in member, shown once with the line that

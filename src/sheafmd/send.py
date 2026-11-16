@@ -17,6 +17,7 @@ With `--local`, with no credential, or for a page in a git repo, nothing is sent
 caller renders on the laptop hub as before. The network is two functions, `post` and `get`, which a test replaces; the
 keyring is `connect.system_store()`, which a test replaces too.
 """
+import argparse
 import json
 import os
 import socket
@@ -33,12 +34,11 @@ from .hub.roots import url_path
 from .hub.writelog import declared_link
 from .source import md_hash
 
-EXIT_OK, EXIT_FAILED, EXIT_USAGE = 0, 1, 2
+EXIT_OK, EXIT_FAILED = 0, 1
 TIMEOUT = 15.0
 STATE_FILE = "sends.json"
 PROTOCOL = "2025-06-18"
 
-COMMANDS: dict = {}
 COMMAND_HELP: dict = {}
 
 
@@ -225,12 +225,13 @@ def _beside(md: Path) -> Path:
     return md.with_name(md.stem + ".tiroir" + md.suffix)
 
 
-def _leave_theirs(md: Path, row: dict, now: dict, door_says: str | None = None) -> SendError:
+def _leave_theirs(md: Path, row: dict, now: dict, sending: bool = True) -> SendError:
     """The tiroir's text, written beside the file and recorded as read; the error that tells the agent what to do."""
     beside = _beside(md)
     write_text_atomic(beside, now["text"])
     keep_row(md, {**row, "hash": now["hash"]})
-    return SendError(f"{row['doc']} has changed on the shared Sheaf since you last read it, so nothing was sent. Its text is in "
+    nothing = "so nothing was sent" if sending else "and the file has changes of yours"
+    return SendError(f"{row['doc']} has changed on the shared Sheaf since you last read it, {nothing}. Its text is in "
                      f"{beside}: merge it into {md} and run sheaf {md} again.")
 
 
@@ -301,7 +302,6 @@ def send_page(md: Path, args, out, err, environ=None) -> int | None:
 
 
 def cmd_pull(argv: list[str], out=None, err=None) -> int:
-    import argparse
     out = out or (lambda line="": print(line))
     err = err or (lambda line="": print(line, file=sys.stderr))
     p = argparse.ArgumentParser(prog="sheaf pull", usage="sheaf pull FILE.md",
@@ -320,12 +320,12 @@ def cmd_pull(argv: list[str], out=None, err=None) -> int:
         door = Door(row["tiroir"], token, declared())
         bad, now = door.tool("read", {"doc": row["doc"]})
         if bad:
-            raise SendError(f"{now}")
+            raise SendError(now)
         if md_hash(local) != row["local"]:
             if now["hash"] == row["hash"]:
                 out(f"{md} has changes of yours and the shared Sheaf has nothing newer: nothing to pull.")
                 return EXIT_OK
-            raise _leave_theirs(md, row, now)
+            raise _leave_theirs(md, row, now, sending=False)
         if now["hash"] == row["hash"]:
             out(f"{md} is the shared Sheaf's latest text already.")
             return EXIT_OK
@@ -338,5 +338,4 @@ def cmd_pull(argv: list[str], out=None, err=None) -> int:
         return EXIT_FAILED
 
 
-COMMANDS.update({"pull": cmd_pull})
 COMMAND_HELP.update({"pull": ("pull FILE.md", "write the shared Sheaf's latest text of a page you sent into the file")})

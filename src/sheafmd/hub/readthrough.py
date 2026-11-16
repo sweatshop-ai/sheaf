@@ -105,6 +105,8 @@ class Clients:
         except OSError as e:
             raise NotReachable(f"the client tiroir {client} is not reachable") from e
         if status == 200:
+            from .. import paths
+            (paths.state_dir() / "kept.json").write_text(json.dumps(answer))
             return answer
         if soft:                 # a refusal is the answer of a member with nothing to see: no oracle for "has an account"
             return {k: type(v)() for k, v in NOTHING.items()}

@@ -31,7 +31,7 @@ from sheafmd.hub import relay as relay_mod
 from sheafmd.hub import work as work_mod
 from sheafmd.hub.handler import RELAY_MOVED
 
-OTHER_DOC = "thinkingtoo/tiroir/2026-10-29-other.md"
+OTHER_DOC = "acme/tiroir/2026-10-29-other.md"
 OTHER = f"work/{OTHER_DOC}"
 FORK2 = "8f9a0b1c-2d3e-4f5a-9b6c-7d8e9f0a1b2c"
 NO_GOOD = "This relay token is no good: fork the session again."
@@ -183,7 +183,7 @@ def test_a_newer_fork_ends_the_older_token(team, box, work):
 def test_a_token_whose_session_is_no_longer_live_is_refused(team, box, work):
     token = forked(team)
     text = (work / DOC).read_text(encoding="utf-8")
-    (work / DOC).write_text(text.replace(f"{{id: {FORK}, host: bob-mac", f"{{id: {FORK}, host: tiroir-tt"), "utf-8")
+    (work / DOC).write_text(text.replace(f"{{id: {FORK}, host: bob-mac", f"{{id: {FORK}, host: agency-tiroir"), "utf-8")
     got = listen(team, token)
     assert got.status == 401
     assert hub_rows("relay-refused")[-1]["reason"] == "moved"
@@ -316,7 +316,7 @@ def test_a_tell_whose_fork_moved_under_the_lock_is_refused_and_queues_nothing(te
         calls.append(1)
         if len(calls) > 1:          # the gate saw the relay; the recheck under the lock sees a newer fork
             text = (work / DOC).read_text(encoding="utf-8")
-            (work / DOC).write_text(text.replace(f"{{id: {FORK}, host: bob-mac", f"{{id: {FORK}, host: tiroir-tt"),
+            (work / DOC).write_text(text.replace(f"{{id: {FORK}, host: bob-mac", f"{{id: {FORK}, host: agency-tiroir"),
                                     "utf-8")
             return False
         return real(doc, session)
@@ -438,7 +438,7 @@ def test_a_queued_tell_expires_by_the_clock_with_nothing_calling_in(team, box, w
 def test_a_member_whose_access_is_taken_away_gets_gone_instead_of_the_tell(team, box, work):
     sub = listen(team, forked(team)).stream
     sub.drain()
-    (work / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["alice"]\n'
+    (work / "projects.toml").write_text('[projects."acme/tiroir"]\nmembers = ["alice"]\n'
                                         'status = "live"\n', encoding="utf-8")
     relayed = team.hub.relays.put(ADDRESS, FORK, relay_mod.Tell(
         "11111111-2222-4333-8444-555555555555", "c9", "the thread's words", "alice"))
@@ -449,7 +449,7 @@ def test_a_member_whose_access_is_taken_away_gets_gone_instead_of_the_tell(team,
 def test_a_relay_in_its_grace_whose_member_lost_access_takes_no_tell(team, box, work):
     """#135: the grace keeps a reconnecting relay, not one whose member can no longer open the rectoverso."""
     listen(team, forked(team)).stream.close()
-    (work / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["alice"]\n'
+    (work / "projects.toml").write_text('[projects."acme/tiroir"]\nmembers = ["alice"]\n'
                                         'status = "live"\n', encoding="utf-8")
     assert comment(team, work, "tell", as_=ALICE).status == 400
     assert team.hub.relays.open(ADDRESS, FORK) == []

@@ -19,9 +19,9 @@ ALICE = "503b2f77-83de-452c-817a-a357faf85929"
 BOB = "2b9d7e1c-4a51-4c0e-9d1f-6f0c3a7e8b42"
 
 PRIVATE = """---
-client: thinkingtoo
+client: acme
 project: tiroir
-issue: thinkingtoo/tt-tiroir#9
+issue: acme/agency-tiroir#9
 assistant: James
 owner: alice
 sources: [library:doc-123]
@@ -61,14 +61,14 @@ def put(team, work, rel, text):
     return f"work/{rel}"
 
 
-DOC = "thinkingtoo/tiroir/2026-10-28-contract.md"
+DOC = "acme/tiroir/2026-10-28-contract.md"
 
 
 def test_a_sheaf_from_a_private_source_answers_404_to_bob_and_200_to_its_owner(team, work):
     put(team, work, DOC, PRIVATE)
     assert team.get(f"/work/{DOC}", member=ALICE).status == 200
     got = team.get(f"/work/{DOC}", member=BOB)
-    missing = team.get("/work/thinkingtoo/tiroir/nothing.md", member=BOB)
+    missing = team.get("/work/acme/tiroir/nothing.md", member=BOB)
     assert got.status == missing.status == 404 and got.body == missing.body
 
 
@@ -82,7 +82,7 @@ def tick(team, work, rel, word, member, **extra):
 
 
 def test_a_sheaf_without_private_sources_is_visible_to_the_project_at_once(team, work):
-    put(team, work, DOC, PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:thinkingtoo/tt-tiroir#9]"))
+    put(team, work, DOC, PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:acme/agency-tiroir#9]"))
     assert team.get(f"/work/{DOC}", member=BOB).status == 200
 
 
@@ -142,7 +142,7 @@ DIGEST = PRIVATE.replace("assistant: James", "assistant: Mistral").replace(
 
 
 def test_a_door_create_from_mistral_with_a_library_source_lands_owner_only(team, browser, work):
-    (work / "thinkingtoo/tiroir").mkdir(parents=True)
+    (work / "acme/tiroir").mkdir(parents=True)
     is_error, got = call(browser, "create", token=Tokens().add("mistral", write=True), doc=f"work/{DOC}", text=DIGEST)
     assert not is_error, got
     on_disk = (work / DOC).read_text(encoding="utf-8")
@@ -265,7 +265,7 @@ STOPPABLE = PRIVATE.replace("sources: [library:doc-123]", "sources: []").replace
 def stop_dir(tmp_path, team, monkeypatch):
     d = tmp_path / "stop"
     d.mkdir()
-    cfg = the_list.parse({"root": str(tmp_path / "list"), "repo": "thinkingtoo/tt-tiroir", "project": 1,
+    cfg = the_list.parse({"root": str(tmp_path / "list"), "repo": "acme/agency-tiroir", "project": 1,
                           "token_file": str(tmp_path / "token"), "stop_dir": str(d)}, "the test")
     team.hub.the_list = the_list.TheList(team.hub, cfg)
     return d
@@ -276,9 +276,9 @@ def test_stop_james_ticked_by_bob_drops_the_project_for_james_and_writes_a_row(t
     assert tick(team, work, DOC, "Stop James", BOB).status == 200
     files = [f for f in stop_dir.iterdir()]
     assert len(files) == 1 and not files[0].name.startswith(".")
-    assert files[0].read_text(encoding="utf-8") == "thinkingtoo/tiroir\n"
+    assert files[0].read_text(encoding="utf-8") == "acme/tiroir\n"
     row, = hub_rows("stop-james")
-    assert (row["project"], row["assistant"], row["by"], row["drop"]) == ("thinkingtoo/tiroir", "James", "bob", "written")
+    assert (row["project"], row["assistant"], row["by"], row["drop"]) == ("acme/tiroir", "James", "bob", "written")
 
 
 def test_stop_james_on_a_sheaf_of_another_assistant_drops_nothing(team, work, stop_dir):
@@ -504,7 +504,7 @@ def test_two_stop_james_in_one_second_leave_two_drops_and_two_rows(team, work, s
     assert tick(team, work, DOC, "Stop James", ALICE).status == 200
     first, again = sorted(stop_dir.iterdir())
     assert again.name == first.name + "-1"
-    assert first.read_text(encoding="utf-8") == again.read_text(encoding="utf-8") == "thinkingtoo/tiroir\n"
+    assert first.read_text(encoding="utf-8") == again.read_text(encoding="utf-8") == "acme/tiroir\n"
     assert {f.stat().st_mode & 0o777 for f in (first, again)} == {0o640}
     assert [r["drop"] for r in hub_rows("stop-james")] == ["written", "written"]
 
@@ -530,13 +530,13 @@ def test_an_owner_only_sheaf_its_page_cached_answers_404_to_bob_once_its_file_ca
 
 
 @pytest.mark.parametrize("change", [
-    lambda t: t.replace("issue: thinkingtoo/tt-tiroir#9", "issue: thinkingtoo/tt-tiroir#99"),
-    lambda t: t.replace("issue: thinkingtoo/tt-tiroir#9\n", "")], ids=["another issue", "no issue"])
+    lambda t: t.replace("issue: acme/agency-tiroir#9", "issue: acme/agency-tiroir#99"),
+    lambda t: t.replace("issue: acme/agency-tiroir#9\n", "")], ids=["another issue", "no issue"])
 def test_a_door_update_keeps_the_issue_on_disk_which_names_the_owner(team, browser, work, change):
     put(team, work, DOC, PRIVATE)
     is_error, got = door_update(team, browser, work, DOC, change)
     assert not is_error, got
-    assert front_matter((work / DOC).read_text(encoding="utf-8"))["issue"] == "thinkingtoo/tt-tiroir#9"
+    assert front_matter((work / DOC).read_text(encoding="utf-8"))["issue"] == "acme/agency-tiroir#9"
 
 
 def test_a_front_matter_after_a_byte_order_mark_is_no_block_a_member_can_edit(team, work):
@@ -744,7 +744,7 @@ def test_an_owner_only_sheaf_deleted_while_streams_are_open_is_told_to_its_owner
         assert [d["doc"] for name, d in alice.drain() if name == "status"] == [f"work/{DOC}"]
 
 
-OPEN = PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:thinkingtoo/tt-tiroir#9]")
+OPEN = PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:acme/agency-tiroir#9]")
 
 
 @pytest.mark.parametrize("line", ["date-created: 2026-10-28", "link-citations: true", "header-includes:\n  - x",
@@ -767,7 +767,7 @@ def test_a_write_token_cannot_read_an_owner_only_sheaf(team, browser, work):
     put(team, work, DOC, PRIVATE)
     token = Tokens().add("mistral", write=True)
     is_error, got = call(browser, "read", token=token, doc=f"work/{DOC}")
-    _, missing = call(browser, "read", token=token, doc="work/thinkingtoo/tiroir/nothing.md")
+    _, missing = call(browser, "read", token=token, doc="work/acme/tiroir/nothing.md")
     assert is_error and got == missing.replace("nothing.md", DOC.rsplit("/", 1)[1])
 
 
@@ -793,12 +793,12 @@ def test_a_token_cannot_answer_or_resolve_a_thread_of_an_owner_only_sheaf(team, 
 
 def test_documents_does_not_list_an_owner_only_sheaf_to_a_token(team, browser, work):
     put(team, work, DOC, PRIVATE.replace("A quote from the contract.", THREAD))
-    put(team, work, "thinkingtoo/tiroir/open.md", "# Open\n\n" + THREAD + "\n")
+    put(team, work, "acme/tiroir/open.md", "# Open\n\n" + THREAD + "\n")
     token = Tokens().add("mistral", write=True)
     for open_only in (True, False):
         is_error, got = call(browser, "documents", token=token, open_only=open_only)
         listed = [d["doc"] for d in got if "doc" in d]
-        assert not is_error and "work/thinkingtoo/tiroir/open.md" in listed and f"work/{DOC}" not in listed
+        assert not is_error and "work/acme/tiroir/open.md" in listed and f"work/{DOC}" not in listed
 
 
 def test_a_token_cannot_update_an_owner_only_sheaf_even_with_its_hash(team, browser, work):
@@ -829,12 +829,12 @@ def test_a_token_bound_to_the_owner_reads_the_owners_sheaf(team, browser, work):
 def test_a_token_bound_to_another_member_does_not_see_the_owners_sheaf(team, browser, work):
     team.hub.proxy = members(work, alice=["james-alice"], bob=["james-bob"])
     put(team, work, DOC, PRIVATE.replace("A quote from the contract.", THREAD))
-    put(team, work, "thinkingtoo/tiroir/open.md", "# Open\n\n" + THREAD + "\n")
+    put(team, work, "acme/tiroir/open.md", "# Open\n\n" + THREAD + "\n")
     token = Tokens().add("james-bob", write=True)
     is_error, got = call(browser, "read", token=token, doc=f"work/{DOC}")
     assert is_error and got.startswith(f"There is no document work/{DOC} ")
     listed = [d["doc"] for d in call(browser, "documents", token=token)[1] if "doc" in d]
-    assert listed == ["work/thinkingtoo/tiroir/open.md"]
+    assert listed == ["work/acme/tiroir/open.md"]
 
 
 def test_a_token_bound_to_the_owner_lists_and_answers_the_owners_sheaf(team, browser, work):
@@ -855,7 +855,7 @@ def test_a_wrong_argument_does_not_tell_a_hidden_sheaf_from_none(team, browser, 
     put(team, work, DOC, PRIVATE.replace("A quote from the contract.", THREAD))
     token = Tokens().add("james", write=True)
     _, hidden = call(browser, tool, token=token, doc=f"work/{DOC}", **args)
-    _, missing = call(browser, tool, token=token, doc="work/thinkingtoo/tiroir/nothing.md", **args)
+    _, missing = call(browser, tool, token=token, doc="work/acme/tiroir/nothing.md", **args)
     assert hidden == missing.replace("nothing.md", DOC.rsplit("/", 1)[1])
 
 
@@ -934,7 +934,7 @@ def test_a_refused_create_over_a_hidden_sheaf_answers_only_that_its_name_is_take
     monkeypatch.setattr(team.hub, "assignees", lambda address, fm: ["tiroir"] if "issue" in fm else None)
     token = Tokens().add("mistral", write=True)
     answers = {call(browser, "create", token=token, doc=f"work/{DOC}", text=text)[1]
-               for text in (MAIL_TEXT, MAIL_TEXT.replace("sources:", "issue: thinkingtoo/tt-tiroir#9\nsources:"))}
+               for text in (MAIL_TEXT, MAIL_TEXT.replace("sources:", "issue: acme/agency-tiroir#9\nsources:"))}
     assert answers == {f"work/{DOC} exists already; `create` makes a new page, and `update` changes one."}
 
 
@@ -945,10 +945,10 @@ def test_a_create_over_a_hidden_sheaf_near_the_limit_answers_only_that_its_name_
     put(team, work, DOC, PRIVATE)
     team.hub.proxy = members(work, bob=["mail-bob"])
     monkeypatch.setattr(team.hub, "assignees",
-                        lambda address, fm: ["tiroir"] if fm.get("issue") == "thinkingtoo/tt-tiroir#9" else None)
+                        lambda address, fm: ["tiroir"] if fm.get("issue") == "acme/agency-tiroir#9" else None)
     token = Tokens().add("mail-bob", write=True)
     answers = set()
-    for guess in ("thinkingtoo/tt-tiroir#9", "thinkingtoo/tt-tiroir#8"):
+    for guess in ("acme/agency-tiroir#9", "acme/agency-tiroir#8"):
         head = f"---\nvisibility: owner\nsources: [mail]\nissue: {guess}\n---\n"
         answers.add(call(browser, "create", token=token, doc=f"work/{DOC}",
                          text=head + "x" * (MAX_TEXT - len(head) - 6) + "\n")[1])
@@ -987,9 +987,9 @@ def test_whose_a_document_is_is_judged_with_one_lookup_of_its_root_for_every_mem
 def test_a_token_bound_to_a_member_reaches_only_that_members_roots(team, browser, work, bob_root):
     root, doc = bob_root
     team.hub.proxy = members(work, bob_also=root, alice=["james-alice"])
-    put(team, work, "thinkingtoo/tiroir/open.md", "# Open\n\n" + THREAD + "\n")
+    put(team, work, "acme/tiroir/open.md", "# Open\n\n" + THREAD + "\n")
     token = Tokens().add("james-alice", write=True)
-    assert not call(browser, "read", token=token, doc="work/thinkingtoo/tiroir/open.md")[0]   # inside its roots
+    assert not call(browser, "read", token=token, doc="work/acme/tiroir/open.md")[0]   # inside its roots
     is_error, got = call(browser, "read", token=token, doc=doc)
     assert is_error and got.startswith(f"There is no document {doc} ")
     is_error, got = call(browser, "threads", token=token, doc=str(root / "notes.md"))
@@ -1058,7 +1058,7 @@ def test_documents_for_a_bound_token_asks_git_once_per_folder_not_once_per_file(
     import subprocess
     team.hub.proxy = members(work, bob=["james-bob"])
     for i in range(6):
-        put(team, work, f"thinkingtoo/tiroir/{i}.md", "# Open\n\n" + THREAD + "\n")
+        put(team, work, f"acme/tiroir/{i}.md", "# Open\n\n" + THREAD + "\n")
     run, asked = subprocess.run, []
 
     def counting(cmd, *a, **k):
@@ -1119,7 +1119,7 @@ def test_a_token_that_may_not_see_a_sheaf_is_told_nothing_of_its_unreadable_file
     spoil(work / DOC, "not UTF-8")
     token = Tokens().add("james-bob" if token_of == "bob" else "codex", write=True)
     is_error, got = call(browser, "read", token=token, doc=f"work/{DOC}")
-    _, missing = call(browser, "read", token=token, doc="work/thinkingtoo/tiroir/nothing.md")
+    _, missing = call(browser, "read", token=token, doc="work/acme/tiroir/nothing.md")
     assert is_error and got == missing.replace("nothing.md", DOC.rsplit("/", 1)[1])
 
 
@@ -1130,9 +1130,9 @@ def test_an_unreadable_file_the_hub_never_read_is_told_as_none_even_to_its_owner
     spoil(work / DOC, "not UTF-8")
     token = Tokens().add("james-alice", write=True)
     is_error, got = call(browser, "read", token=token, doc=f"work/{DOC}")
-    _, missing = call(browser, "read", token=token, doc="work/thinkingtoo/tiroir/nothing.md")
+    _, missing = call(browser, "read", token=token, doc="work/acme/tiroir/nothing.md")
     assert is_error and got == missing.replace("nothing.md", DOC.rsplit("/", 1)[1])
-    assert missing.startswith("There is no document work/thinkingtoo/tiroir/nothing.md ")
+    assert missing.startswith("There is no document work/acme/tiroir/nothing.md ")
 
 
 @pytest.mark.parametrize("tool, args", [("resolve", {"id": "c1"}), ("update", {"text": "x\n", "expected_hash": "0" * 16})])
@@ -1151,10 +1151,10 @@ def test_a_token_whose_project_no_longer_names_its_member_is_told_nothing_of_the
     put(team, work, DOC, OPEN)
     token = Tokens().add("james-bob", write=True)
     assert not call(browser, "read", token=token, doc=f"work/{DOC}")[0]
-    (work / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["Alice"]\n', encoding="utf-8")
+    (work / "projects.toml").write_text('[projects."acme/tiroir"]\nmembers = ["Alice"]\n', encoding="utf-8")
     spoil(work / DOC, "not UTF-8")
     is_error, got = call(browser, "read", token=token, doc=f"work/{DOC}")
-    _, missing = call(browser, "read", token=token, doc="work/thinkingtoo/tiroir/nothing.md")
+    _, missing = call(browser, "read", token=token, doc="work/acme/tiroir/nothing.md")
     assert is_error and got == missing.replace("nothing.md", DOC.rsplit("/", 1)[1])
 
 
@@ -1167,7 +1167,7 @@ def test_an_unreadable_file_that_replaced_the_one_a_token_saw_is_told_as_none(te
     os.rename(f, work / "kept.md")              # kept, so the new file cannot take its inode
     f.write_bytes(PRIVATE.encode("utf-8") + b"\nlatin1 caf\xe9\n")
     is_error, got = call(browser, "read", token=token, doc=f"work/{DOC}")
-    _, missing = call(browser, "read", token=token, doc="work/thinkingtoo/tiroir/nothing.md")
+    _, missing = call(browser, "read", token=token, doc="work/acme/tiroir/nothing.md")
     assert is_error and got == missing.replace("nothing.md", DOC.rsplit("/", 1)[1])
 
 
@@ -1191,13 +1191,13 @@ def bob_door(team, browser, work, rel):
 @pytest.mark.parametrize("change", [
     lambda t: t.split("---\n", 2)[2],
     lambda t: "---\n---\n" + t.split("---\n", 2)[2],
-    lambda t: "---\nclient: thinkingtoo\n" + t.split("---\n", 2)[2]], ids=["no front matter", "empty", "no closing line"])
+    lambda t: "---\nclient: acme\n" + t.split("---\n", 2)[2]], ids=["no front matter", "empty", "no closing line"])
 def test_a_door_update_of_an_open_sheaf_keeps_its_owner_and_issue_whatever_the_text_says(team, browser, work, change):
     put(team, work, DOC, OPEN)
     is_error, got = door_update(team, browser, work, DOC, change)
     assert not is_error, got
     fm = front_matter((work / DOC).read_text(encoding="utf-8"))
-    assert (fm.get("owner"), fm.get("issue")) == ("alice", "thinkingtoo/tt-tiroir#9")
+    assert (fm.get("owner"), fm.get("issue")) == ("alice", "acme/agency-tiroir#9")
 
 
 def test_a_door_write_that_drops_the_front_matter_cannot_give_an_open_sheaf_to_another_members_assistant(team, browser, work):
@@ -1208,7 +1208,7 @@ def test_a_door_write_that_drops_the_front_matter_cannot_give_an_open_sheaf_to_a
     is_error, got = update(lambda t: "---\nsources: [mail:x]\n---\n" + t)
     assert not is_error, got
     fm = front_matter((work / DOC).read_text(encoding="utf-8"))
-    assert fm.get("owner") == "alice" and fm.get("issue") == "thinkingtoo/tt-tiroir#9"
+    assert fm.get("owner") == "alice" and fm.get("issue") == "acme/agency-tiroir#9"
     assert team.get(f"/work/{DOC}", member=BOB).status == 404
     assert team.get(f"/work/{DOC}", member=ALICE).status == 200
 

@@ -19,8 +19,8 @@ pytestmark = pytest.mark.page
 META = re.compile(r'(<script id="rd-edit-meta" type="application/json">)(.*?)(</script>)', re.S)
 ORIGIN = "https://tt.tiroir.me"
 FORK = f"uvx --from tiroir==0.2.0 tiroir work {ORIGIN}/list/acme/site/plan.md"
-ATTACH = "ssh tiroir-tt -t tmux -S /run/james/tmux.sock attach -t james \\; select-window -t =acme_site"
-BOX = {"id": "6f1c0e9a-2b3d-4c5e-8f70-1a2b3c4d5e6f", "host": "tiroir-tt", "member": "james",
+ATTACH = "ssh agency-tiroir -t tmux -S /run/james/tmux.sock attach -t james \\; select-window -t =acme_site"
+BOX = {"id": "6f1c0e9a-2b3d-4c5e-8f70-1a2b3c4d5e6f", "host": "agency-tiroir", "member": "james",
        "date": "2026-10-28T05:12:03Z"}
 LAPTOP = {"id": "0b9d1e7c-4a2f-4e8b-9c3d-5f6a7b8c9d0e", "host": "alice-laptop", "member": "alice",
           "date": "2026-10-28T09:40:00Z"}
@@ -126,7 +126,7 @@ def test_work_on_this_opens_the_two_ways_and_the_sessions(tab):
            "Needs uv there." in w.inner_text()
     # Newest first, as the front matter lists them, and five at most.
     assert w.locator(".rd-sess").all_inner_texts() == [
-        "James on tiroir-tt · 2026-10-28 05:12 UTC",
+        "James on agency-tiroir · 2026-10-28 05:12 UTC",
         "Alice on alice-laptop · 2026-10-24 08:00 UTC",
         "Alice on alice-laptop · 2026-10-23 08:00 UTC",
         "Alice on alice-laptop · 2026-10-22 08:00 UTC",

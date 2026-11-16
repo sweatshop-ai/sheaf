@@ -107,13 +107,13 @@ def test_open_comments_are_counted(two, work):
 
 def test_a_dot_folder_is_no_node_of_the_tree_but_its_page_is_listed_and_opens_at_its_address(two_git, work):
     two = two_git
-    f = work / ".scratch" / "n.md"
+    f = work / ".tooling" / "n.md"
     f.parent.mkdir()
     f.write_text("# Scratch\n", encoding="utf-8")
     got = sheaf(two)
     assert names(got["sheaf"]["tree"]) == [("work", [("ideas", [])])]
-    assert "work/.scratch/n.md" in docs(got)
-    assert two.get("/work/.scratch/n.md").status == 200
+    assert "work/.tooling/n.md" in docs(got)
+    assert two.get("/work/.tooling/n.md").status == 200
 
 
 def test_a_folder_inside_a_dot_folder_is_no_node_either(two_git, work):

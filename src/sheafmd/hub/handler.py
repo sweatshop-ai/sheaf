@@ -39,6 +39,7 @@ from ..source import StaleError, md_hash
 from . import archive as archive_mod
 from . import auth, boxwait, channel, codes, events, incoming, laptops, loose, moves, peer, place, proxy, readthrough, sheaf_view, targets, team as team_mod, the_list, transcribe, visibility, work
 from . import waiting as waiting_mod
+from .core import _META_RE
 from .tell import NO_AGENT, JobRefused
 from .index import Status
 from ..source import STAMP_FORMAT
@@ -993,7 +994,7 @@ class Handler:
         if found is None:
             raise Refuse(404, "no such document")
         client, rest = found
-        return self._relayed(req, client, op, lambda: clients.relay(client, req.member, op, rest, mount=f"Clients/{client}"))
+        return self._relayed(req, client, op, lambda: clients.relay(client, req.member, op, rest, mount=f"Clients/{client}"), address)
 
     @staticmethod
     def _side(b: dict) -> str:
@@ -1019,7 +1020,21 @@ class Handler:
         request = {k: v for k, v in req.body.items() if k not in ("doc", "as", "role", "side")}
         return self._relayed(req, client, "comment", lambda: clients.comment(client, req.member, rest, request))
 
-    def _relayed(self, req: Req, client: str, op: str, ask) -> Response:
+    def _with_team(self, op: str, body: str, doc: str) -> str:
+        """The page's Team comments (9.11) told beside the client's own `comments`: in the doc state, in the mount's config and in the
+        meta block of the page, never merged into the client's list. The client hub's 200 is the gate: the member may open it."""
+        team = self.hub.team.list(doc)
+        if op == "page":
+            return _META_RE.sub(lambda m: m.group(1) + json.dumps({**json.loads(m.group(2)), "team": team}).replace("<", "\\u003c")
+                                     + m.group(3), body)
+        try:
+            got = json.loads(body)
+        except ValueError:
+            return body
+        (got["config"] if op == "mount" else got)["team"] = team
+        return json.dumps(got)
+
+    def _relayed(self, req: Req, client: str, op: str, ask, doc: str | None = None) -> Response:
         try:
             env = ask()
         except readthrough.NoEmail as e:
@@ -1037,6 +1052,8 @@ class Handler:
                 raise Refuse(502, "This client tiroir is not reachable now.") from None
         if op == "mount" and status == 200:   # the front compares these with its own: the client's build is not this hub's
             body = self._own_build(body)
+        if status == 200 and doc is not None and self.hub.team is not None:
+            body = self._with_team(op, body, doc)
         if env.get("type") == "html":
             own = auth.new_nonce()           # the client's nonce is never this origin's: only its own page script runs here
             return _html(status, readthrough.adopt(body, env.get("nonce"), own), own, kept)

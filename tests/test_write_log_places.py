@@ -58,3 +58,35 @@ def test_the_box_s_james_at_the_door_writes_from_tiroir_with_his_session(world):
     line = world.hub.writes.last(world.address)
     assert (line.place, line.session, line.via) == ("tiroir", SID, "update")
     assert world.hub.writes.last_session(world.address) == line
+
+
+def test_a_pull_logs_the_pages_the_hub_opens_and_no_versions_file_nor_readme(world):
+    top = world.two.list_repo
+    others = [top / ".sheaf/versions/acme/blog" / NAME.rsplit("/", 1)[1].replace(".md", "") / "ab12.md",
+              top / "README.md"]
+    for path in others:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# Not a page\n", encoding="utf-8")
+        assert world.hub._page_of(path) is None
+        pulled(world, path)
+    assert world.hub.writes._lines == {} and world.hub.writes._left == {}
+
+
+def test_a_pull_remembers_the_text_it_left_only_for_a_page_that_is_open(world):
+    world.put(OPEN)
+    path = world.two.private_repo / NAME
+    pulled(world, path)                             # the page is not open: its line, nothing to wait for
+    assert [l.via for l in world.hub.writes.lines(world.address)] == ["pull"]
+    assert world.hub.writes._left == {}
+
+
+def test_a_write_between_the_pull_and_its_telling_keeps_its_disk_line(world):
+    world.put(OPEN)
+    path = world.two.private_repo / NAME
+    world.hub.entry(world.address)
+    files = [(path, "Ada")]
+    hashes = {path: md_hash(OPEN)}                  # what the pull left, read under its locks
+    world.hub.pulling(path.parent, files)
+    path.write_text(OPEN + "\nAn editor, in the gap.\n", encoding="utf-8")
+    world.hub.pulled(path.parent, files, True, hashes)
+    assert not world.hub.writes.is_pull(world.address, md_hash(path.read_text(encoding="utf-8")))

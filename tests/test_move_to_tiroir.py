@@ -271,6 +271,33 @@ def test_the_index_is_told_the_page_left_after_its_file_is_gone(two):
     assert (OLD, False) in seen and (OLD, True) not in seen
 
 
+def test_a_page_moved_out_and_back_shows_each_write_log_line_once(two):
+    moved(two)
+    back = two.b.post("/_/move-tiroir", {"doc": NEW, "tiroir": A_ORIGIN}, member=ALICE_B)
+    assert back.status == 200, back.text
+    with two.active():
+        seen = [(l.time, l.writer, l.place, l.via, l.session, l.host, l.link, l.chat) for l in two.hub.writes.lines(OLD)]
+    assert seen and len(seen) == len(set(seen))
+
+
+def test_a_reply_that_is_cut_short_is_no_answer_at_all(monkeypatch):
+    import socket
+    import threading
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+
+    def serve():
+        conn, _ = srv.accept()
+        conn.recv(65536)
+        conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nContent-Type: application/json\r\n\r\n{\"ok\"")
+        conn.close()
+    threading.Thread(target=serve, daemon=True).start()
+    with pytest.raises(OSError):
+        outgoing.post(f"http://127.0.0.1:{srv.getsockname()[1]}", "transfer", {}, "tok", 5)
+    srv.close()
+
+
 # ── a move that does not complete leaves everything as it was ────────────────
 
 def test_a_link_that_is_down_leaves_the_page_and_every_store_as_they_were(two):

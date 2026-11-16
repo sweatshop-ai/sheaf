@@ -4,6 +4,7 @@ link as a send does. `sheaf headers --check NAME` says whether an MCP entry carr
 and a temp Claude config folder; the keyring is out of reach (premortem R7), because the helper has no business with a
 token and its output holds none."""
 import json
+import os
 
 import pytest
 
@@ -28,10 +29,11 @@ def registry(tmp_path, monkeypatch):
     cfg = tmp_path / "claude"
     (cfg / "sessions").mkdir(parents=True)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(cfg))
-    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", SESSION)
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)   # Claude Code does not pass it to a headersHelper (live check, 2026-11-16)
+    monkeypatch.setattr(send, "ancestor_pids", lambda: [900, 500, 1])   # the helper, a shell, claude (pid 500), init
 
-    def record(**more):
-        (cfg / "sessions" / "1.json").write_text(json.dumps({"pid": 1, "sessionId": SESSION, **more}), encoding="utf-8")
+    def record(pid=500, **more):
+        (cfg / "sessions" / f"{pid}.json").write_text(json.dumps({"pid": pid, "sessionId": SESSION, **more}), encoding="utf-8")
     return record
 
 
@@ -55,8 +57,37 @@ def test_it_prints_no_link_when_the_session_has_none_or_it_is_no_web_address(reg
     assert "X-Sheaf-Link" not in json.loads(run(capsys)[1])
 
 
-def test_with_no_session_it_still_prints_the_machine_and_exits_0(monkeypatch, capsys):
-    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+def test_the_session_is_the_record_of_the_nearest_ancestor_never_the_inherited_variable(registry, monkeypatch, capsys):
+    registry()
+    other = "11111111-2222-4333-8444-555555555555"
+    (send.config_dir_of(os.environ) / "sessions" / "1.json").write_text(json.dumps({"pid": 1, "sessionId": other}), encoding="utf-8")
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", other)         # the parent shell's own id, inherited: not Claude's
+    assert json.loads(run(capsys)[1])["X-Sheaf-Session"] == SESSION      # pid 500 comes before pid 1
+
+
+def test_with_no_record_among_the_ancestors_it_sends_no_session_header(registry, monkeypatch, capsys):
+    registry(pid=777)                                          # a record, but not of an ancestor
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", SESSION)      # even with the variable set
+    assert json.loads(run(capsys)[1]) == {"X-Sheaf-Host": "laptop-bea"}
+
+
+def test_a_record_that_is_unreadable_or_has_no_session_id_is_no_record(registry, capsys):
+    cfg = send.config_dir_of(os.environ)
+    (cfg / "sessions" / "500.json").write_text("{not json")
+    assert "X-Sheaf-Session" not in json.loads(run(capsys)[1])
+    (cfg / "sessions" / "500.json").write_text(json.dumps({"pid": 500, "sessionId": ""}))
+    assert "X-Sheaf-Session" not in json.loads(run(capsys)[1])
+
+
+def test_ancestor_pids_walks_proc_stat_to_init(tmp_path):
+    for pid, ppid in ((30, 20), (20, 10), (10, 1), (1, 0)):
+        d = tmp_path / str(pid)
+        d.mkdir()
+        (d / "stat").write_text(f"{pid} (a b) c) S {ppid} 0 0\n")      # a name with spaces and a bracket
+    assert send.ancestor_pids(30, proc=tmp_path) == [30, 20, 10, 1]
+
+
+def test_with_no_session_it_still_prints_the_machine_and_exits_0(registry, capsys):
     code, out, _ = run(capsys)
     assert code == 0 and json.loads(out) == {"X-Sheaf-Host": "laptop-bea"}
 

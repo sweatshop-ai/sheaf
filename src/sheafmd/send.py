@@ -113,10 +113,41 @@ def remote_link(environ, session: str) -> str:
     return ""
 
 
-def declared(environ=None) -> dict:
-    """The request headers a send declares itself with: session, machine, Remote Control link; only those it has."""
+def ancestor_pids(pid: int | None = None, proc: Path = Path("/proc")) -> list[int]:
+    """`pid` and its parents up to init, read from `proc`/PID/stat; stops at a process it cannot read."""
+    pid = os.getpid() if pid is None else pid
+    chain: list[int] = []
+    while pid > 0 and pid not in chain:
+        chain.append(pid)
+        try:
+            stat = (proc / str(pid) / "stat").read_text(encoding="utf-8", errors="replace")
+            pid = int(stat.rpartition(")")[2].split()[1])      # after the name, which may hold spaces and brackets: state, ppid
+        except (OSError, ValueError, IndexError):
+            break
+    return chain
+
+
+def registry_session(environ=None) -> str | None:
+    """The session id of the Claude Code that runs this process, from its own record `<config>/sessions/<pid>.json` of the
+    nearest ancestor that has one; None when no ancestor has. A headersHelper gets no `CLAUDE_CODE_SESSION_ID` (live check,
+    2026-11-16), and the variable it may inherit is some parent shell's, so the helper never reads it."""
     environ = os.environ if environ is None else environ
-    session = session_id(environ)
+    sessions = config_dir_of(environ) / "sessions"
+    for pid in ancestor_pids():
+        try:
+            rec = json.loads((sessions / f"{pid}.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(rec, dict) and isinstance(rec.get("sessionId"), str) and rec["sessionId"].strip():
+            return rec["sessionId"].strip()
+    return None
+
+
+def declared(environ=None, session=...) -> dict:
+    """The request headers a send declares itself with: session, machine, Remote Control link; only those it has.
+    `session` replaces the agent's variable (the headersHelper's, from the registry)."""
+    environ = os.environ if environ is None else environ
+    session = session_id(environ) if session is ... else session
     out = {"X-Sheaf-Host": machine()}
     if session:
         out["X-Sheaf-Session"] = session

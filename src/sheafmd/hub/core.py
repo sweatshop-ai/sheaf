@@ -1249,8 +1249,10 @@ class Hub:
         """Take in a write from outside, and write it in the Write log: a text that moved behind the hub's back is a file
         written on disk, whoever wrote it (`?`), unless a pull of its repo is bringing it in (that has its own line)."""
         got = e.live.refresh()
-        if got is not None and not self.writes.is_pull(e.address, e.live.current()[0]):
-            self.writes.add(e.address, "?", "tiroir", "disk")
+        if got is not None:
+            hash_ = e.live.current()[0]
+            if not self.writes.is_pull(e.address, hash_) and not self.writes.is_own(e.address, hash_):
+                self.writes.add(e.address, "?", "tiroir", "disk")
         return got
 
     def _page_of(self, path: Path) -> str | None:
@@ -1323,6 +1325,7 @@ class Hub:
                 e.last_stat = (st.st_mtime_ns, st.st_size)
             except Exception as ex:
                 self._rebuild_failed(e, ex)
+        self.writes.told(address)
         try:
             self.index.touch(address)
         except Exception:

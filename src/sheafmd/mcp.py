@@ -908,6 +908,7 @@ class Door:
             _check_comments(now_text, text)
             written[0] = self._door_text(text, now_text, address, caller)
             self._check_size(written[0])
+            self.hub.writes.expect_own(address, md_hash(written[0]))       # a look at the file before `wrote()` is not a disk write
             return written[0]
 
         def move(now_text, new):

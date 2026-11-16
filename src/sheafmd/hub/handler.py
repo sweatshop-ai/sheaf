@@ -995,6 +995,19 @@ class Handler:
         client, rest = found
         return self._relayed(req, client, op, lambda: clients.relay(client, req.member, op, rest, mount=f"Clients/{client}"))
 
+    @staticmethod
+    def _side(b: dict) -> str:
+        """Whose verso a comment on a client page is for (9.11): `team` stays on this hub, `client` goes to the client's hub. A write
+        on a comment names its side by its id (`tN` is a Team comment); an add with no side is the client's, as before."""
+        side = b.get("side", None) if "side" in b else None
+        _shape("side" not in b or side in ("team", "client"), "side must be team or client")
+        if b.get("op") == "add":
+            return side or "client"
+        cid = b.get("id")
+        mine = "team" if isinstance(cid, str) and team_mod.ID_RE.fullmatch(cid) else "client"
+        _shape(side in (None, mine), f"that comment is a {mine} comment: side must be {mine}")
+        return mine
+
     def _relay_comment(self, req: Req) -> Response:
         clients, found = self.hub.clients, None
         if clients is not None and req.member is not None:
@@ -1003,7 +1016,7 @@ class Handler:
             raise Refuse(404, "no such document")
         _shape(not req.body.get("tell"), "Tell is not offered on a client page")
         client, rest = found
-        request = {k: v for k, v in req.body.items() if k not in ("doc", "as", "role")}
+        request = {k: v for k, v in req.body.items() if k not in ("doc", "as", "role", "side")}
         return self._relayed(req, client, "comment", lambda: clients.comment(client, req.member, rest, request))
 
     def _relayed(self, req: Req, client: str, op: str, ask) -> Response:
@@ -1911,7 +1924,7 @@ class Handler:
     def _comment(self, req: Req) -> Response:
         b = req.body
         if readthrough.is_clients(b.get("doc")):
-            return self._relay_comment(req)
+            return self._team_write(req) if self._side(b) == "team" else self._relay_comment(req)
         e = self._entry(req, b.get("doc"))
         op = b.get("op")
         _shape(op in OPS, f"op must be one of {', '.join(OPS)}")

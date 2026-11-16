@@ -16,11 +16,11 @@ from sheafmd.hub.the_list import Dirs
 
 OWN_LIVE = "5a5a5a5a-1b2c-4d3e-8f40-a1b2c3d4e5f6"
 OWN_WORK = "/home/james/own-work"
-OWN_CWD = f"{OWN_WORK}/thinkingtoo/tiroir"
-OWN_FOLDER = "-home-james-own-work-thinkingtoo-tiroir"
+OWN_CWD = f"{OWN_WORK}/acme/tiroir"
+OWN_FOLDER = "-home-james-own-work-acme-tiroir"
 OWN_TRANSCRIPT = (b'{"type":"user","cwd":"%s","sessionId":"%s","message":"own"}\n'
                   % (OWN_CWD.encode(), OWN_LIVE.encode()))
-OWN_SHEAF = SHEAF.replace("sessions:\n", f"sessions:\n  - {{id: {OWN_LIVE}, host: tiroir-tt, member: james, "
+OWN_SHEAF = SHEAF.replace("sessions:\n", f"sessions:\n  - {{id: {OWN_LIVE}, host: agency-tiroir, member: james, "
                                          "date: 2026-10-29T05:12:03Z}\n")
 
 
@@ -122,7 +122,7 @@ def test_a_stop_by_a_member_not_in_the_map_goes_to_shared_dir_and_clears_only_it
     own = comment(team, work, "tell", as_=ALICE, body="Mine.").json()["id"]
     shared = comment(team, work, "tell", as_=BOB, body="Theirs.").json()["id"]
     assert stop_james(team, work, member=BOB).status == 200
-    assert [f.read_text(encoding="utf-8") for f in files(mapped["shared_stop"])] == ["thinkingtoo/tiroir\n"]
+    assert [f.read_text(encoding="utf-8") for f in files(mapped["shared_stop"])] == ["acme/tiroir\n"]
     assert files(mapped["own"]["stop"]) == []
     assert len(files(mapped["own"]["tell"])) == 1 and files(mapped["tell"]) == []
     assert [r["thread"] for r in hub_rows("tell-stopped")] == [shared]
@@ -132,7 +132,7 @@ def test_a_stop_by_a_member_not_in_the_map_goes_to_shared_dir_and_clears_only_it
 def test_a_stop_by_the_member_the_map_names_goes_to_his_dir_only(team, work, mapped):
     comment(team, work, "tell", as_=BOB)
     assert stop_james(team, work, member=ALICE).status == 200
-    assert [f.read_text(encoding="utf-8") for f in files(mapped["own"]["stop"])] == ["thinkingtoo/tiroir\n"]
+    assert [f.read_text(encoding="utf-8") for f in files(mapped["own"]["stop"])] == ["acme/tiroir\n"]
     assert files(mapped["shared_stop"]) == []
     assert len(drops(mapped)) == 1                          # the shared James's Tell stays
 
@@ -167,15 +167,15 @@ def test_a_session_is_recorded_only_from_the_copy_of_the_james_that_wrote_it(tea
     from sheafmd.hub import work as work_mod
     cfg = team.hub.the_list.cfg
     alice, bob = team.hub.proxy.members[ALICE], team.hub.proxy.members[BOB]
-    assert work_mod.james_has(cfg, "thinkingtoo/tiroir", OWN_LIVE, alice) is True
-    assert work_mod.james_has(cfg, "thinkingtoo/tiroir", OWN_LIVE, bob) in (None, False)
-    assert work_mod.james_has(cfg, "thinkingtoo/tiroir", OWN_LIVE) in (None, False)
+    assert work_mod.james_has(cfg, "acme/tiroir", OWN_LIVE, alice) is True
+    assert work_mod.james_has(cfg, "acme/tiroir", OWN_LIVE, bob) in (None, False)
+    assert work_mod.james_has(cfg, "acme/tiroir", OWN_LIVE) in (None, False)
 
 
 # ── the config ───────────────────────────────────────────────────────────────
 
 def parse(work, tmp_path, **extra):
-    t = {"root": str(work), "repo": "thinkingtoo/tt-tiroir", "project": 1, "token_file": str(tmp_path / "token"),
+    t = {"root": str(work), "repo": "acme/agency-tiroir", "project": 1, "token_file": str(tmp_path / "token"),
          "tell_dir": "/run/shared/tell", **extra}
     return the_list.parse(t, "the test")
 

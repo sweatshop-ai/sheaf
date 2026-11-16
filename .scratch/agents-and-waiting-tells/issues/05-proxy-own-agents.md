@@ -1,6 +1,6 @@
 # 05: On the proxy socket a member Tells their own agents
 
-**What to build:** A member signed in through the front (Open WebUI) can Tell their own agents from the page, and sees nothing of the hub account's session or of another member's agents (SPEC 9.9). This is what lets Hans send a comment to `ChatGPT (Hans)` from the ThinkingToo hub.
+**What to build:** A member signed in through the front (Open WebUI) can Tell their own agents from the page, and sees nothing of the hub account's session or of another member's agents (SPEC 9.9). This is what lets Bob send a comment to `ChatGPT (Bob)` from the Acme hub.
 
 **Blocked by:** 04 (A Tell to an agent waits on the document)
 

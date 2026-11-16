@@ -26,7 +26,7 @@ import webbrowser
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from . import __version__, agent_setup, comments, config, deliver, diagnostics, lifecycle, mcp, paths, pdf, relay_client, seat, theme
+from . import __version__, agent_setup, comments, config, deliver, diagnostics, lifecycle, mcp, paths, pdf, seat, send, tells_poll, theme
 from .agents.detect import detect
 from .agents.registry import detect_target
 from .atomic import write_text_atomic
@@ -52,7 +52,16 @@ usage:
   sheaf FILE.md [render options]
                  open the page of a document in your browser (starts the hub if none runs)
   sheaf FILE.md --share [--out PATH] [--pdf [PATH]] [--open] [render options]
+  sheaf FILE.md [--folder NAME] [--keep] [--local]
+                 on a laptop connected to a shared Sheaf (sheaf connect), a page outside git is sent there
+  sheaf pull FILE.md
+                 write the shared Sheaf's latest text of a page you sent into the file
 
+  A file or folder named like a command (headers, pull, ...) is the command; to open that file, write ./name.
+
+  --local        render on this laptop's hub instead of sending the page to a shared Sheaf
+  --folder NAME  the folder of your Sheaf for a page sent for the first time (default: the month)
+  --keep         never archive a page sent for the first time
   --share        write the share copy, <stem>-share.html next to the .md: one
                  self-contained file, every comment removed, no script. Needs no hub.
   --out PATH     write it there instead
@@ -139,6 +148,12 @@ def file_parser() -> argparse.ArgumentParser:
     p.add_argument("--agent", metavar="NAME|none",
                    help="accepted for the options sheaf FILE takes; a share copy has no session to attach to")
     p.add_argument("--session", metavar="ID", help="accepted like --agent; it has no effect here")
+    p.add_argument("--local", action="store_true",
+                   help="render on this laptop's hub even when the laptop is connected to a shared Sheaf")
+    p.add_argument("--folder", metavar="NAME", help="a page sent to a shared Sheaf goes in this folder of your "
+                   "Sheaf (default: the month)")
+    p.add_argument("--keep", action="store_true",
+                   help="a page sent to a shared Sheaf is never archived")
     add_render_options(p)
     return p
 
@@ -246,9 +261,18 @@ def cmd_file(argv: list[str]) -> int:
     p = file_parser()
     args = p.parse_args(argv)
     if args.share:
+        if args.local or args.folder is not None or args.keep:
+            p.error("--local, --folder and --keep go with sending a page to a shared Sheaf, not with --share")
         return cmd_share(args)
     if args.out or args.pdf or args.open_it:
         p.error("--out, --pdf and --open go with --share")
+    if args.local:
+        if args.folder is not None or args.keep:
+            p.error("--folder and --keep go to a shared Sheaf: with --local there is none")
+    else:
+        sent = send.send_page(Path(args.file), args, _out, _err)
+        if sent is not None:
+            return sent
     return _open(args)
 
 
@@ -911,7 +935,8 @@ def _agent_names_possible(row, person: str, cfg, declared: bool) -> list[str]:
 
 def _signed_by_others(rows, cfg, person: str) -> list[str]:
     """The name each token of `rows` signs with, whose replies a new one's must not pass for."""
-    return [r.signed(person, cfg) for r in rows if not r.invalid]
+    from .hub import proxy
+    return [name for _, name, _ in proxy.signed_names(cfg, person, [r for r in rows if not r.invalid])]
 
 
 def _agent_clash(client: str, built: str, cfg, person: str, others: list[str]) -> str | None:
@@ -1177,8 +1202,11 @@ COMMANDS.update(agent_setup.COMMANDS)
 COMMAND_HELP.update(agent_setup.COMMAND_HELP)
 COMMANDS.update(deliver.COMMANDS)
 COMMAND_HELP.update(deliver.COMMAND_HELP)
-COMMANDS.update(relay_client.COMMANDS)
-COMMAND_HELP.update(relay_client.COMMAND_HELP)
+COMMANDS.update({"pull": lambda argv: send.cmd_pull(argv, _out, _err),
+                 "tells-poll": lambda argv: tells_poll.cmd_tells_poll(argv, _out, _err),
+                 "headers": lambda argv: tells_poll.cmd_headers(argv, _out, _err)})
+COMMAND_HELP.update(send.COMMAND_HELP)
+COMMAND_HELP.update(tells_poll.COMMAND_HELP)
 
 
 # SPEC 14.2: on native Windows only what needs no hub and no service manager runs.
@@ -1208,7 +1236,7 @@ def main(argv: list[str] | None = None) -> int:
         _out(top_help())
         return EXIT_OK
     try:
-        is_file = first.endswith(".md") or Path(first).exists()
+        is_file = first.endswith(".md") or (first not in COMMANDS and Path(first).exists())      # a command name wins over a file of that name: ./name opens the file
         if (is_file or first in COMMANDS) and windows_stops(first, is_file, argv):
             _err(WINDOWS_SAYING)
             return EXIT_FAILED

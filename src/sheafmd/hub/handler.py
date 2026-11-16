@@ -36,7 +36,7 @@ from ..edit import EditError
 from ..mcp import Caller, Door
 from ..render import RenderError
 from ..source import StaleError, md_hash
-from . import auth, boxwait, codes, events, laptops, peer, place, proxy, relay, sheaf_view, targets, the_list, transcribe, visibility, work
+from . import auth, boxwait, codes, events, laptops, peer, place, proxy, sheaf_view, targets, the_list, transcribe, visibility, work
 from . import waiting as waiting_mod
 from .tell import NO_AGENT, JobRefused
 from .index import Status
@@ -134,7 +134,7 @@ class Req:
     member: object = None            # the proxy.Member the proxy socket let in
     member_id: str = ""              # the member header, once the connection is the proxy's: every row names it
     code: object = None              # the codes.Code that let the request in, instead of the member header (9.13)
-    relay: dict | None = None        # the relays.json row of the relay token that let the request in (9.14)
+    gone: object = None              # `gone()`: whether the caller closed the connection (a poll that waits asks it); None in a test
 
 
 @dataclass(frozen=True)
@@ -174,10 +174,6 @@ MINT = Who(frozenset({"member", "key"}), "this needs the hub key")
 # What a sign-in code opens (9.13): the transcript and the fork, nothing else.
 CODE_ROUTES = {("GET", "/_/session"): "session", ("POST", "/_/sessions"): "sessions"}
 LISTED = "That session is already listed on this rectoverso"
-# What a relay token opens (9.14): its fork's stream of Tells and their acks, nothing else.
-RELAY_ROUTES = {("GET", "/_/relay"): "relay", ("POST", "/_/relay"): "relay-ack"}
-RELAY_OUTCOMES = ("delivered", "failed")
-RELAY_MOVED = "The session on the member's machine is no longer this rectoverso's live session; the comment is written."
 
 
 def _json(status: int, obj: dict, headers: dict | None = None) -> Response:
@@ -256,7 +252,6 @@ class Handler:
         self._session_seqs: dict = {}       # address -> the seq of James's latest write to it: the newest one wins
         self._pending_lock = threading.Lock()
         self.codes = codes.Codes()          # the sign-in codes, in memory only: a restart drops them (9.13)
-        self.relays = hub.relays            # the relay tokens on disk, and the Tells and streams of the forks (9.14)
         # path -> method -> (route name, who may call it, function)
         self.routes: dict = {}
         for method, path, name, who, fn in (
@@ -285,6 +280,7 @@ class Handler:
             ("POST", "/_/tell", "tell", COOKIE, self._tell),
             ("POST", "/_/target", "target", COOKIE, self._target),
             ("POST", "/_/cancel", "cancel", COOKIE, self._cancel),
+            ("POST", "/_/retarget", "retarget", COOKIE, self._retarget),
             ("POST", "/_/jump", "jump", COOKIE, self._jump),
             ("POST", "/_/seen", "seen", COOKIE, self._seen),
             ("POST", "/_/export", "export", COOKIE, self._export),
@@ -303,7 +299,7 @@ class Handler:
             self.routes.setdefault(path, {})[method] = (name, who, fn)
 
     # ── the front door ───────────────────────────────────────────────────────
-    def handle(self, method: str, target: str, headers: dict, body=b"", conn=None, via="port") -> Response:
+    def handle(self, method: str, target: str, headers: dict, body=b"", conn=None, via="port", gone=None) -> Response:
         """`body` is the bytes, or a function that reads them off the wire: it is called only for
         a POST that has passed the Host, credential and Origin checks. `conn` is the connection
         the request came in on (a `peer.Conn`): the sign-in link looks up who owns it (9.3). `via`
@@ -313,7 +309,7 @@ class Handler:
             headers = {str(k).lower(): str(v) for k, v in headers.items()}
             path, _, qs = target.partition("?")
             req = Req(method, path, {k: v[0] for k, v in parse_qs(qs, keep_blank_values=True).items()},
-                      headers, headers.get("host", ""), conn=conn, via=via)
+                      headers, headers.get("host", ""), conn=conn, via=via, gone=gone)
             res = self._route_proxy(req, body) if via == "proxy" else self._route(req, body)
         except Refuse as r:
             res = self._refusal(req, r)
@@ -485,9 +481,6 @@ class Handler:
             raise Refuse(403, "this hub answers on its proxy socket only to its front's host")
         if not req.path.startswith("/"):
             raise Refuse(400, "bad request target")
-        # A relay token the verifier let in, judged as a code is, before anything else (9.14).
-        if req.headers.get("x-sheaf-relay"):
-            return self._route_relay(req, raw)
         # A sign-in code the verifier let in, judged before the route, the method and the body (9.13).
         if req.headers.get("x-sheaf-code"):            # an empty one is none, as an empty member header
             return self._route_code(req, raw)
@@ -566,106 +559,6 @@ class Handler:
                 return Refuse(status, message, row=False)
             fields["count"] = n
         return Refuse(status, message, row="code-refused", fields=fields)
-
-    def _route_relay(self, req: Req, raw: bytes) -> Response:
-        """A request the verifier let in with a relay token (9.14): `X-Sheaf-Relay` is the token's sha256, with no
-        member header. The token says who asks, and opens its fork's stream and acks on its one rectoverso, while that
-        fork is the rectoverso's live session and its member is in `[proxy.members]`."""
-        cfg = self.hub.proxy
-        req.route = RELAY_ROUTES.get((req.method, req.path), req.path)
-        if req.member_id or req.headers.get("x-sheaf-code"):
-            raise self._relay_refused(req, None, "two-credentials")
-        row = self.relays.find(req.headers["x-sheaf-relay"])
-        if row is None:
-            raise self._relay_refused(req, None, "unknown")
-        if row["member"] not in cfg.members:
-            raise self._relay_refused(req, row, "member")
-        req.relay, req.member, req.member_id = row, cfg.members[row["member"]], row["member"]
-        if (req.method, req.path) not in RELAY_ROUTES:
-            raise self._relay_refused(req, row, "route", 404, "no such route")
-        if req.method == "POST":
-            if req.headers.get("origin", "").lower() != cfg.origin:
-                raise Refuse(403, "this request did not come from the front's own page")
-            self._read_body(req, self._body(req, raw))
-        doc = req.query.get("doc") if req.method == "GET" else req.body.get("doc")
-        if doc != row["doc"]:
-            raise self._relay_refused(req, row, "doc", 404, "no such document")
-        _, _, st = self._sheaf(req, doc)
-        if not self._relay_live(row, st):
-            raise self._relay_refused(req, row, "moved")
-        self.hub.expire_relayed()
-        return self._relay_stream(req) if req.method == "GET" else self._relay_ack(req)
-
-    @staticmethod
-    def _relay_live(row: dict, st) -> bool:
-        """Whether the fork of the relay row `row` is the live session of the rectoverso whose state is `st`."""
-        return st is not None and st.live == "laptop" and st.sessions[0]["id"] == row["session"]
-
-    def _relay_refused(self, req: Req, row, reason: str, status: int = 401, message: str = relay.NO_GOOD) -> Refuse:
-        """The refusal of a relay token and its `relay-refused` row (15): the relay id when the hub knows the token,
-        never the token or its hash. Made-up tokens are counted, one row a minute, as codes are."""
-        fields = {"reason": reason, "route": req.route}
-        if row is not None:
-            fields["relay"] = row["id"]
-        if reason == "unknown":
-            n = self.relays.unknown()
-            if not n:
-                return Refuse(status, message, row=False)
-            fields["count"] = n
-        return Refuse(status, message, row="relay-refused", fields=fields)
-
-    def _relay_stream(self, req: Req) -> Response:
-        """`GET /_/relay`: `hello`, every Tell queued for the fork and not acked, then each new one, and `gone` once
-        the token or its fork is no longer good. Each event asks again, so a token revoked by `sheaf relay revoke`
-        in another process, or a member taken out, ends the stream at its next event."""
-        row, hub = req.relay, self.hub
-        hashed = req.headers["x-sheaf-relay"]
-
-        def still_good(name, data):
-            if name == "gone":
-                return data
-            now = self.relays.find(hashed)
-            good = now is not None and now["id"] == row["id"] and row["member"] in hub.proxy.members
-            if good:
-                try:
-                    e = hub.entry(row["doc"])
-                    text = e.live.current()[1]
-                    # A member whose access to the rectoverso was taken away gets no more of its threads (#135).
-                    good = self._relay_live(row, work.state(hub, row["doc"], text)) and hub.may_open(
-                        hub.proxy.members[row["member"]], row["doc"], visibility.front_matter(text))
-                except NotFound:
-                    good = False
-            return data if good else events.Renamed("gone", {"doc": row["doc"]})
-        sub = self.relays.connect(row["doc"], row["session"], still_good)
-        if sub.fresh:                   # the page offers Tell from now (9.14); a reconnect changes nothing
-            hub.relay_changed(row["doc"], row["session"])
-        who = {"relay": row["id"], "transcript": row["session"], **self._who(req)}
-        sub.on_close = lambda: hub.record("relay-closed", row["doc"], **who)
-        hub.record("relay-connected", row["doc"], **who)
-        return _stream(sub)
-
-    def _relay_ack(self, req: Req) -> Response:
-        """`POST /_/relay {doc, id, outcome, error?}`: the relay delivered one Tell, or could not."""
-        b, row = req.body, req.relay
-        tid, outcome, error = b.get("id"), b.get("outcome"), b.get("error")
-        _shape(isinstance(tid, str) and work.UUID_RE.fullmatch(tid), "id must be the Tell's id")
-        _shape(outcome in RELAY_OUTCOMES, f"outcome must be one of {', '.join(RELAY_OUTCOMES)}")
-        _shape(error is None or (isinstance(error, str) and len(error) <= 500), "error must be text of 500 characters at most")
-        t = self.relays.ack(row["doc"], tid)
-        if t is None:
-            raise Refuse(404, "no such Tell is waiting for this session")
-        if outcome == "delivered":
-            self.hub.record("tell-delivered", row["doc"], tell=t.id, thread=t.thread, relay=row["id"], **self._who(req))
-        else:
-            line = " ".join((error or "the relay could not deliver it").split())
-            self.hub.relay_failed(row["doc"], t, "tell-relay-failed", line, relay=row["id"], **self._who(req))
-        return _ok()
-
-    def _relay_moved(self, address: str):
-        """The rectoverso's live session changed: its relay streams end and the Tells queued for the old one are dropped."""
-        self.relays.end(address)
-        for _, t in self.relays.drop(address):
-            self.hub.relay_failed(address, t, "tell-relay-failed", RELAY_MOVED)
 
     def _token(self, req: Req) -> bool:
         """Whether the request carries an MCP token that is good now; its owner is on `req.token`."""
@@ -891,7 +784,6 @@ class Handler:
         if req.member is not None:
             # Their own seen state, and nothing of the hub account's agent session (9.9).
             # A rectoverso's Work on this and its Tell for James's window are refreshed as the meta's (9.12).
-            self.hub.expire_relayed()
             self.hub.opened_by(req.member, e.address)
             work, can = self.hub.member_work(e, req.member)
             extra = {} if work is None else {"work": work}
@@ -911,6 +803,7 @@ class Handler:
         """A member's `telling` (9.9): their own Tells that wait for an agent (9.8) and their own drops for
         James's window (9.12), and nothing of the hub account's session or of another member's."""
         return (self.hub.waiting_tells.waits(address, member, sweep=sweep)
+                + self.hub.session_tells.waits(address, member)
                 + self.hub.box_waits.telling(address, member.id, comments=comments, text=text))
 
     def _mount(self, req: Req) -> Response:
@@ -1275,7 +1168,7 @@ class Handler:
         else:
             if the is not None and the.serves(Address.parse(e.address).root):
                 self._stop_tells(project, m)
-            # The box's supervisor reads the line as `<client>/<project>` (tt-tiroir routines/james, stops).
+            # The box's supervisor reads the line as `<client>/<project>` (agency-tiroir routines/james, stops).
             # The Stop goes to the James of the member who ticked it, as their Tells do (`member_dirs`).
             drop = work.drop(the.cfg.dirs_for(m).stop_dir if the is not None else None, project,
                              (project + "\n").encode("utf-8"), "no stop_dir in [list]")
@@ -1288,7 +1181,7 @@ class Handler:
         """Every Tell for `project` still waiting in `tell_dir` for James's window, removed before the Stop
         is dropped, and a reply in each one's thread, signed by the member who stopped him, saying it never reached
         him (9.12): a Stop ends the work, and none of it goes on unseen. A `tell-stopped` row for each, without
-        its text. The box's supervisor clears what is left of the project's the same way (tt-tiroir #136)."""
+        its text. The box's supervisor clears what is left of the project's the same way (agency-tiroir #136)."""
         folder = self.hub.the_list.cfg.dirs_for(member).tell_dir
         by = work.member_word(member) if member is not None else self.hub.person
         if folder is None:
@@ -1475,34 +1368,11 @@ class Handler:
         return prompts.tell(e.address, str(e.path), req.member.name, c, self.hub.tell.links(e.address))
 
     def _work_route(self, address: str, text: str, member=None) -> str | None:
-        """Where a member's Tell goes on the rectoverso whose text is `text` (9.12, 9.14): "box" to James's
-        window, "relay" to the fork's relay (a Tell only), None nowhere."""
+        """Where a member's Tell goes on the rectoverso whose text is `text` (9.12): "box" to James's
+        window, None nowhere."""
         st = work.state(self.hub, address, text, member)
         can = st.can if st is not None else []
-        if "box-tell" in can:
-            return "box"
-        return "relay" if "relay-tell" in can else None
-
-    def _relay_tell(self, req: Req, e, thread: str, session: str) -> str | None:
-        """Queue a member's Tell for the relay of the fork `session`, the live session the comment was judged on,
-        and write `tell-relayed`; the page's `tellError`, or None. Under the name's lock, where a fork is written
-        and its token issued (#134): a fork that landed since the comment was written does not receive it."""
-        t = relay.Tell(str(uuid.uuid4()), thread, self._tell_message(req, e, thread), work.member_word(req.member))
-        self.hub.expire_relayed()
-        with place.held(self.hub, e.address):
-            st = work.state(self.hub, e.address, e.live.current()[1])
-            if st is None or st.live != "laptop" or st.sessions[0]["id"] != session:
-                return RELAY_MOVED
-            try:
-                old = self.relays.put(e.address, session, t)
-            except relay.Full as ex:
-                return str(ex)
-        # A live session changed by hand, with no fork report to drop them: its Tells are dropped here (#134).
-        for _, gone in old:
-            self.hub.relay_failed(e.address, gone, "tell-relay-failed", RELAY_MOVED)
-        self.hub.record("tell-relayed", e.address, tell=t.id, thread=thread, by=t.by,
-                        transcript=session, **self._who(req))
-        return None
+        return "box" if "box-tell" in can else None
 
     def _james_called(self, caller, address):
         """A door call of James's session (9.12): a write to a rectoverso of James makes the session it names the rectoverso's
@@ -1600,7 +1470,6 @@ class Handler:
             if moved:
                 self.hub.index.touch(address)
                 self.hub.committed(address, by=caller.display, what="session")
-                self._relay_moved(address)          # under the name's lock, as a fork's (#134)
         self._drop_waiting(address, seq)
         if moved:
             self.hub.record("session-recorded", address, transcript=sid, by="james")
@@ -1617,12 +1486,12 @@ class Handler:
         return _json(200, {"laptops": [{"name": r.laptop, "created": r.created, "last_used": r.last_used} for r in rows]})
 
     def _whoami(self, req: Req) -> Response:
-        """The member a token acts for, for a door in front of the hub that has to route the token's calls (9.7). A
+        """The member a token acts for (their id, and their name for the CLI's second line), for a door in front of the hub that has to route the token's calls (9.7). A
         token bound to no member is told it is no route: it has no member to name."""
         member = self.hub.proxy.member_of_row(req.token) if self.hub.proxy is not None else None
         if member is None:
             raise Refuse(404, "no such route")
-        return _json(200, {"member": member.id})
+        return _json(200, {"member": member.id, "name": member.name})
 
     def _laptop_make(self, req: Req) -> Response:
         """"Connect a laptop": a token for the named laptop and the signed-in member, shown once with the line that
@@ -1687,16 +1556,12 @@ class Handler:
                 raise Refuse(409, str(ex)) from None
             self.hub.index.touch(e.address)
             self.hub.committed(e.address, req.member, "fork")
-            # The fork is the live session now: the relay of the one before ends, and this one gets its own (9.14).
-            # Under the name's lock, so two forks reported at once issue in the order they were written (#134).
-            self._relay_moved(address)
-            token, rid = self.relays.issue(req.member_id, address, sid)
         via = {"via": "code", "code": code.id} if code is not None else {}
         if code is not None:
             self.hub.record("code-used", address, code=code.id, route="sessions", **self._who(req))
         self.hub.record("session-forked", address, transcript=sid, by=by, machine=machine,
-                        issue=visibility.text(fm, "issue"), relay=rid, **via, **self._who(req))
-        return _ok(hash=h, relay=token)
+                        issue=visibility.text(fm, "issue"), **via, **self._who(req))
+        return _ok(hash=h)
 
     def _pin(self, req: Req) -> Response:
         """The page keeps the version it holds past a change of the file, while a form holds the reload
@@ -1728,17 +1593,16 @@ class Handler:
         member = req.member
         starts = op in ("add", "reply")
         # Tell runs the hub account's own session, which a member is not (9.9); on a rectoverso whose live
-        # session is James's on the box it goes to his window instead, by a file the hub drops (9.12), and on
-        # a rectoverso whose live session is a member's fork it goes to that fork's relay while it is connected (9.14).
+        # session is James's on the box it goes to his window instead, by a file the hub drops (9.12).
         route = None
         if member is not None and starts and b.get("tell"):
-            route = self._work_route(e.address, e.live.current()[1], req.member)     # James's window or a fork comes first (9.8)
+            route = self._work_route(e.address, e.live.current()[1], req.member)     # James's window comes first (9.8)
         # An agent that is the reader's target (SPEC 9.8) is not reached: the Tell waits for it, after the write,
-        # on every rectoverso where the box and a fork's relay do not take it.
+        # on every rectoverso where the box does not take it.
         to_agent = (starts and bool(b.get("tell")) and route is None
                     and targets.live(self.hub, targets.stored(self.hub, e.address, member), member) is not None)
         if member is not None and b.get("tell") and not to_agent:
-            _shape(route is not None, proxy.PROXY_LINE)     # a member's Tell goes to the box, a relay or an agent, or is refused
+            _shape(route is not None, proxy.PROXY_LINE)     # a member's Tell goes to the box or an agent, or is refused
         tell = starts and bool(b.get("tell")) and route is None and not to_agent
         # A Tell that cannot go out still writes the comment, and then starts no wait. A reply
         # sent with Tell to a thread that is being told is such a Tell: the wait the first one
@@ -1748,19 +1612,16 @@ class Handler:
             tell_line = self.hub.tell.telling_line(e.address, b.get("id", ""))
         can_tell = tell and tell_line is None
         signed = {"by": member.name, "author": member.name} if member else {}
-        judged = []
         if member is not None:
             def still_visible(text, opened=None):
                 # The gate (_entry) read the file before the lock: a write that closed the rectoverso since is seen here,
-                # and a live session that moved since keeps Tell from the window or relay it no longer is.
+                # and a live session that moved since keeps Tell from the window it no longer is.
                 fm = visibility.front_matter(text)
                 seen = place.UNJUDGED if opened is None else place.opened_private(self.hub, opened)
                 if not self.hub.may_open(member, e.address, fm, seen):
                     raise Refuse(404, "no such document")
                 if (route or to_agent) and self._work_route(e.address, text, req.member) != route:
                     raise Refuse(400, proxy.PROXY_LINE)
-                if route == "relay":        # the fork the Tell goes to: no newer one (#134)
-                    judged[:] = [work.sessions(fm)[0]["id"]]
             signed["guard"] = still_visible
         with place.held(self.hub, e.address):           # the write and its commit, one step (9.11)
             try:
@@ -1782,6 +1643,7 @@ class Handler:
         if not snap.get("again") and (op == "delete" or (op == "status" and b.get("status") == "resolved")
                                       or (op == "reply" and b.get("resolve"))):
             self.hub.waiting_tells.end(e.address, b["id"], "cancelled", reason="closed")   # nothing left to answer (9.8)
+            self.hub.session_tells.end(e.address, b["id"], "cancelled", reason="closed")
         if snap.get("again"):
             # Taken before under this request id: what the first request started (a Tell's wait)
             # is running or done, and the page hears of it by its events.
@@ -1792,9 +1654,6 @@ class Handler:
                 self.hub.tell.queue_agent(e.address, snap["id"], member)
             except JobRefused as r:
                 snap["tellError"] = r.message
-        elif route == "relay":
-            if (line := self._relay_tell(req, e, snap["id"], judged[0] if judged else "")) is not None:
-                snap["tellError"] = line
         elif route == "box":
             drop, name = self._drop_for_james(req, e, b["body"], snap["id"])
             if drop != "written":
@@ -1846,7 +1705,7 @@ class Handler:
         try:
             if req.member is not None:      # the hub account's session is off for them: only an agent of theirs (9.9)
                 if (targets.live(self.hub, targets.stored(self.hub, e.address, req.member), req.member) is None
-                        or self._work_route(e.address, e.live.current()[1], req.member) is not None):    # the box and a relay come first
+                        or self._work_route(e.address, e.live.current()[1], req.member) is not None):    # the box comes first
                     raise Refuse(400, proxy.PROXY_LINE)
                 self.hub.tell.start_member_tell(e.address, cid, req.member, held=self._page_hash(req))
                 return _ok()
@@ -1889,8 +1748,37 @@ class Handler:
         # A Tell that waits for an agent ends here, the reader's own and no other's (9.8). A member has no
         # session to stop: theirs is only a waiting Tell.
         self.hub.waiting_tells.end(doc, cid, "cancelled", member=req.member, only_member=True)
+        self.hub.session_tells.end(doc, cid, "cancelled", member=req.member, only_member=True)
         if req.member is None:
             self.hub.tell.cancel(doc, cid)
+        return _ok()
+
+    def _retarget(self, req: Req) -> Response:
+        """A member's Tell that waits for a laptop session goes to one of their own agents instead (SPEC 9.8): the waiting
+        Tell is cancelled, the target becomes that agent and the Tell is queued for it. The reader's own, and no one else's."""
+        if req.member is None:
+            raise Refuse(400, "Only a member's Tell waits for a laptop session.")
+        cid, target = self._comment_id(req), req.body.get("target")
+        with self._reading(req.body.get("doc")):        # judged and stored in one step, as `_target` does (9.11)
+            e = self._entry(req, req.body.get("doc"))
+            if not any(t["id"] == cid for t in self.hub.session_tells.waits(e.address, req.member)):
+                raise Refuse(409, "No Tell of yours waits for a session on this comment.")
+            if self._work_route(e.address, e.live.current()[1], req.member) is not None:    # the box comes first
+                raise Refuse(400, proxy.PROXY_LINE)
+            was = targets.stored(self.hub, e.address, req.member)
+            try:
+                kind, _ = targets.parse(target)
+                if kind != "agent":
+                    raise targets.Refused("Pick one of your own agents.")
+                targets.pick(self.hub, e.address, req.member, target)
+            except targets.Refused as r:
+                raise Refuse(400, str(r)) from None
+        try:                                    # queued first: a refused one leaves the Tell where it waits, and the target as it was
+            self.hub.tell.start_member_tell(e.address, cid, req.member, held=self._page_hash(req))
+        except JobRefused as r:
+            targets.restore(self.hub, e.address, req.member, was)
+            raise Refuse(r.status, r.message) from None
+        self.hub.session_tells.end(e.address, cid, "cancelled", member=req.member, only_member=True, reason="retargeted")
         return _ok()
 
     def _seen(self, req: Req) -> Response:
@@ -1988,9 +1876,9 @@ class Handler:
             james = req.token.name in names
             caller = Caller(req.token.signed(self.hub.person, self.hub.proxy), req.token,
                             session=req.headers.get("x-james-session", "") if james else None,
-                            own_session=bool(own) and req.token.name == own, declared=self._declared(req))
+                            own_session=bool(own) and req.token.name == own, declared=self._declared(req), gone=req.gone)
         else:
-            caller = Caller(req.display, declared=self._declared(req))
+            caller = Caller(req.display, declared=self._declared(req), gone=req.gone)
         status, answer = self.door.handle(req.raw, caller)
         return _json(status, answer) if answer is not None else Response(status)
 

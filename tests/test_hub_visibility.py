@@ -1288,7 +1288,7 @@ def test_share_with_a_name_on_a_project_sheaf_opens_it_to_that_member_and_not_to
     assert tick_names(team, work, DOC, ALICE).status == 200
     assert "- [x] Share with carol" in (work / DOC).read_text(encoding="utf-8")
     got = team.get(f"/work/{DOC}", member=BOB)
-    assert got.status == 404 and got.body == team.get("/work/thinkingtoo/tiroir/nothing.md", member=BOB).body
+    assert got.status == 404 and got.body == team.get("/work/acme/site/nothing.md", member=BOB).body
     docs = [d["doc"] for r in team.get("/_/index.json", member=BOB).json()["roots"] for d in r["docs"]]
     assert f"work/{DOC}" not in docs
     assert team.get(f"/work/{DOC}", member=ALICE).status == 200

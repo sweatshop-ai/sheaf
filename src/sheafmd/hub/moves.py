@@ -86,16 +86,19 @@ def move_page(hub, member, address: str, folder: str) -> str:
         _clear(hub, new, address)
         _quiet(hub, address)        # said early, nothing taken yet; asked again under the admission lock before the rename
         with place.held(hub, address), place.held(hub, new):
-            with hub.admit:
-                _quiet(hub, address)
-                _put(hub, root, rel, new_rel, address, new)
+            _put(hub, root, rel, new_rel, address, new, True)
             hub.moved_page(address, new, member.name)
     return new
 
 
-def _put(hub, root, rel: str, new_rel: str, address: str, new: str):
+def _put(hub, root, rel: str, new_rel: str, address: str, new: str, quiet: bool = False):
     """The file at `rel` is the file at `new_rel`: made new beneath the root, each folder opened without a link, then the
-    old name taken off, so the page is never missing or twice there; the folders it leaves empty go."""
+    old name taken off, so the page is never missing or twice there; the folders it leaves empty go. `quiet`: no Tell is
+    on the page, asked once more together with the rename (`_quiet`), both under the admission lock.
+
+    One lock order everywhere: the page's file lock first, then the admission lock. A save holds the file lock through its
+    whole step, and the admission lock is every Tell's start and an upgrade stop: held while waiting for a save, it would
+    keep the hub from admitting a Tell on any other page."""
     try:
         hub.roots.resolve(address)
     except NotFound:
@@ -103,7 +106,10 @@ def _put(hub, root, rel: str, new_rel: str, address: str, new: str):
     top = Path(os.path.realpath(root.path))
     src, dst = top / rel, top / new_rel
     with file_lock(src):        # the page's file lock, as every write of it takes: a save under way is waited for
-        _link(hub, root, top, rel, new_rel, src, dst)
+        with hub.admit:
+            if quiet:
+                _quiet(hub, address)
+            _link(hub, root, top, rel, new_rel, src, dst)
     tidy(top, rel)
 
 
@@ -188,9 +194,7 @@ def move_folder(hub, member, folder: str, to: str) -> list:
         try:
             for rel, new_rel, old, new in plan:
                 with place.held(hub, old), place.held(hub, new):
-                    with hub.admit:
-                        _quiet(hub, old)
-                        _put(hub, root, rel, new_rel, old, new)
+                    _put(hub, root, rel, new_rel, old, new, True)
                     hub.moved_page(old, new, member.name)
                 done.append((rel, new_rel, old, new))
         except BaseException:

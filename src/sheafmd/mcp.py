@@ -985,12 +985,22 @@ class Door:
         try:
             # A loose root's names have no lock of their own (`place.held` holds nothing there): a create of one takes the
             # moves' lock, so it is not made between a move's checks and its rename, nor reads a Forward half written.
-            with moves.exclusive() if args is not given else contextlib.nullcontext():
+            with moves.exclusive() if self._in_loose_root(args, caller) else contextlib.nullcontext():
                 return self._created(given, args, caller)
         except BaseException:
             if fresh is not None:       # a refused create leaves no loose root it made behind
                 self.hub.loose.drop(*fresh)
             raise
+
+    def _in_loose_root(self, args: dict, caller: Caller) -> bool:
+        """Whether the page `create` is to make ends in a loose root, whoever's, however its address is spelled: a bare name
+        the door put there, `<loose-root>/<path>`, or the real path of the folder. A create `_created` refuses for its path
+        takes no lock: it makes nothing."""
+        try:
+            root, _ = self._new_address(args["doc"], caller)
+        except ToolError:
+            return False
+        return self.hub.loose.owner_of(root) is not None
 
     def _created(self, given: dict, args: dict, caller: Caller):
         root, rel = self._new_address(args["doc"], caller)

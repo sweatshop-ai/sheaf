@@ -27,7 +27,7 @@ USER_KEYS = {"port": int, "name": str, "browser": bool, "proxy": dict, "jump": d
              "reopen": dict, "list": dict, "transcribe": dict, "tiroir": str}   # proxy: hub.proxy reads it (9.9); list: hub.the_list (9.10); transcribe: hub.transcribe
 JUMP_KEYS = {"command": list}
 ROOT_KEYS = {"theme": str, "for": str, "links": bool, "link_tlds": list, "credit": bool,
-             "versions": str, "commit": bool, "push": bool}
+             "versions": str, "commit": bool, "push": bool, "tiroir": str}
 
 _ENDING = re.compile(r"[a-z0-9]+")
 
@@ -77,6 +77,7 @@ class UserConfig:
     port: int | None = None
     name: str | None = None
     browser: bool | None = None
+    tiroir: str | None = None     # the laptop's default tiroir: https://host (SPEC 13)
 
 
 def load_user_config(warn=None) -> UserConfig:
@@ -85,7 +86,7 @@ def load_user_config(warn=None) -> UserConfig:
     port = data.get("port")
     if port is not None and not 0 < port < 65536:
         raise ConfigError(f"{path}: 'port' must be between 1 and 65535, not {port}")
-    return UserConfig(port=port, name=data.get("name") or None, browser=data.get("browser"))
+    return UserConfig(port=port, name=data.get("name") or None, browser=data.get("browser"), tiroir=data.get("tiroir") or None)
 
 
 def port(warn=None) -> int:
@@ -182,6 +183,7 @@ class RootConfig:
     versions_inside: bool = False  # `versions = "root"`: the versions store at `.sheaf/versions/` (7.4)
     commit: bool = False           # every write on the page is a git commit of who made it (8.11)
     push: bool = False             # and the hub pushes it (8.11)
+    tiroir: str | None = None      # where a loose page of this root is sent: https://host (SPEC 13)
 
 
 def load_root_config(root: Path, warn=None) -> RootConfig:
@@ -203,7 +205,8 @@ def load_root_config(root: Path, warn=None) -> RootConfig:
     return RootConfig(theme=data.get("theme") or None, for_=data.get("for") or None,
                       links=data.get("links", True), link_tlds=tuple(tlds),
                       credit=data.get("credit", False), versions_inside=versions == "root",
-                      commit=data.get("commit", False), push=data.get("push", False))
+                      commit=data.get("commit", False), push=data.get("push", False),
+                      tiroir=data.get("tiroir") or None)
 
 
 class GitPlace(NamedTuple):

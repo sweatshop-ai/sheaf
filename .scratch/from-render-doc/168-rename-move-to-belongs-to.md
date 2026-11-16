@@ -2,7 +2,7 @@
 
 **Status:** open
 
-**From:** wayfinder `sheaf-in-open-webui` ticket 20 (Thierry, 2026-11-15)
+**From:** wayfinder `sheaf-in-open-webui` ticket 20 (Alice, 2026-11-15)
 
 ## Why
 

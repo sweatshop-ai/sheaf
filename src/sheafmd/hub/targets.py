@@ -115,13 +115,22 @@ def _session_of(entry: dict) -> dict | None:
     return None
 
 
+def label_of(hub, row: TokenRow) -> str:
+    """What a reader sees for an agent: its signed name, and for a laptop (which signs like its member's others)
+    the laptop's name after it."""
+    name = row.signed(hub.person, hub.proxy)
+    return f"{name} · {row.laptop}" if row.laptop is not None else name
+
+
 def agent_view(hub, raw: dict, member=None) -> AgentView:
     """The AgentView of a stored agent target. A revoked token has no signature to build: its shape names the token."""
     row = live(hub, raw, member)
     name = row.signed(hub.person, hub.proxy) if row is not None else str(raw.get("token", ""))
+    label = label_of(hub, row) if row is not None else name
     if is_laptop(raw):
         name = f"{name} · {raw['session'][:8]}"
-    shape = {"kind": "agent", "token": raw.get("token"), "display": name, "label": name}
+        label = f"{label} · {raw['session'][:8]}"
+    shape = {"kind": "agent", "token": raw.get("token"), "display": name, "label": label}
     if is_laptop(raw):
         shape["laptop"] = True
     if row is None:
@@ -144,7 +153,7 @@ def choices(hub, address: str, member=None) -> list[dict]:
                 ad = hub.adapter(t.agent)
                 out.append({"target": "session", "label": f"{who(t, ad)} · {ad.product}"})
     for row in agents(hub, member):
-        out.append({"target": wire(row.name), "label": row.signed(hub.person, hub.proxy)})
+        out.append({"target": wire(row.name), "label": label_of(hub, row)})
     return out
 
 

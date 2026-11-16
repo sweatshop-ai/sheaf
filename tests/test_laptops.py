@@ -146,7 +146,7 @@ def test_whoami_names_the_member_of_a_token_and_nothing_else(mine, browser):
     """What a door in front of the hub asks to route a laptop's bearer: the member it was made for."""
     token = connect(mine)["token"]
     got = browser.request("GET", "/_/whoami", cookie=False, headers={"Authorization": f"Bearer {token}"})
-    assert got.status == 200 and got.json() == {"member": BEA}
+    assert got.status == 200 and got.json() == {"member": BEA, "name": "Bea"}
     mine.post("/_/laptops/revoke", {"name": "Work MacBook"})
     assert browser.request("GET", "/_/whoami", cookie=False, headers={"Authorization": f"Bearer {token}"}).status == 401
 
@@ -174,3 +174,21 @@ def test_laptops_of_members_the_table_no_longer_names_do_not_stop_the_hub_from_s
     del mine.hub.proxy.members[CAL]
     proxy.check_start_names(mine.hub.proxy, "hub", rows)       # both laptops sign the hub's person: left out, no clash
     proxy.check_start_names(None, "hub", rows)                 # proxy mode off: the same
+
+
+def test_a_members_laptops_are_told_apart_in_the_tell_choices(mine):
+    from sheafmd.hub import targets
+    connect(mine, "Work MacBook")
+    connect(mine, "Home desktop")
+    member = mine.hub.proxy.members[BEA]
+    labels = [c["label"] for c in targets.choices(mine.hub, "x", member)]
+    assert sorted(labels) == ["Claude Code (Bea) · Home desktop", "Claude Code (Bea) · Work MacBook"]
+
+
+def test_a_laptop_of_a_member_the_table_no_longer_names_is_not_counted_among_the_names_others_sign(mine):
+    from sheafmd import cli
+    connect(mine, "Work MacBook")
+    rows = mine.hub.tokens.list()
+    assert cli._signed_by_others(rows, mine.hub.proxy, "hub") == ["Claude Code (Bea)"]
+    del mine.hub.proxy.members[BEA]
+    assert cli._signed_by_others(rows, mine.hub.proxy, "hub") == []

@@ -1171,7 +1171,7 @@ class Handler:
         else:
             if the is not None and the.serves(Address.parse(e.address).root):
                 self._stop_tells(project, m)
-            # The box's supervisor reads the line as `<client>/<project>` (tt-tiroir routines/james, stops).
+            # The box's supervisor reads the line as `<client>/<project>` (agency-tiroir routines/james, stops).
             # The Stop goes to the James of the member who ticked it, as their Tells do (`member_dirs`).
             drop = work.drop(the.cfg.dirs_for(m).stop_dir if the is not None else None, project,
                              (project + "\n").encode("utf-8"), "no stop_dir in [list]")
@@ -1184,7 +1184,7 @@ class Handler:
         """Every Tell for `project` still waiting in `tell_dir` for James's window, removed before the Stop
         is dropped, and a reply in each one's thread, signed by the member who stopped him, saying it never reached
         him (9.12): a Stop ends the work, and none of it goes on unseen. A `tell-stopped` row for each, without
-        its text. The box's supervisor clears what is left of the project's the same way (tt-tiroir #136)."""
+        its text. The box's supervisor clears what is left of the project's the same way (agency-tiroir #136)."""
         folder = self.hub.the_list.cfg.dirs_for(member).tell_dir
         by = work.member_word(member) if member is not None else self.hub.person
         if folder is None:
@@ -1513,12 +1513,12 @@ class Handler:
         return _json(200, {"laptops": [{"name": r.laptop, "created": r.created, "last_used": r.last_used} for r in rows]})
 
     def _whoami(self, req: Req) -> Response:
-        """The member a token acts for, for a door in front of the hub that has to route the token's calls (9.7). A
+        """The member a token acts for (their id, and their name for the CLI's second line), for a door in front of the hub that has to route the token's calls (9.7). A
         token bound to no member is told it is no route: it has no member to name."""
         member = self.hub.proxy.member_of_row(req.token) if self.hub.proxy is not None else None
         if member is None:
             raise Refuse(404, "no such route")
-        return _json(200, {"member": member.id})
+        return _json(200, {"member": member.id, "name": member.name})
 
     def _laptop_make(self, req: Req) -> Response:
         """"Connect a laptop": a token for the named laptop and the signed-in member, shown once with the line that

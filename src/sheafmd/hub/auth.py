@@ -122,7 +122,7 @@ def client_ok(client) -> bool:
 
 
 def agent_name(client: str, member: str) -> str:
-    """What an agent's replies are signed with: `ChatGPT (Hans)`, built here and never typed (SPEC D27)."""
+    """What an agent's replies are signed with: `ChatGPT (a member)`, built here and never typed (SPEC D27)."""
     return f"{client} ({member})"
 
 

@@ -32,6 +32,7 @@ from .hub.client import HubUnavailable
 from .hub.roots import Address, NotFound, address_of_url, in_git_dir
 from .agents import prompts
 from .hub import loose, place, targets, visibility
+from .hub import waiting as waiting_mod
 from .hub.state import TokenRow
 from .render import COMMENT_RE as HTML_COMMENT_RE, strip_comments
 from .beneath import Private
@@ -131,6 +132,15 @@ TOOLS = {
             "expected_hash": {"type": "string", "description": "The hash `read` or `create` "
                                                                "gave for the text you changed."}},
         "required": ["doc", "text", "expected_hash"]},
+    "tells": {
+        "description": "A laptop session asks for its Tells: those the person pressed on pages served here, for the "
+                       "session id this token declared. Holds up to `wait` seconds (at most 25) when none waits and "
+                       "answers `tells` (each with its doc, comment id and message); an empty list means ask again, "
+                       "at once. A refusal says how long to wait before asking again.",
+        "properties": {
+            "session": {"type": "string", "description": "The session id; the X-Sheaf-Session header when left out."},
+            "wait": {"type": "integer", "description": "Seconds to hold when nothing waits, 0 to 25 (default 25)."}},
+        "required": []},
 }
 PAGE_TOOLS = ("read", "create", "update")    # the key, or a token made with --write (SPEC 9.7)
 WRITE_TOOLS = ("create", "update")           # each call leaves a row in the diagnostics log (SPEC 15) and a line in the Write log (9.12)
@@ -151,6 +161,7 @@ class Caller:
     token: TokenRow | None = None
     session: str | None = None      # James's session, from X-James-Session: set only for a token of `[list]`'s james_tokens (9.12)
     own_session: bool = False       # False on a james_tokens entry but the own one: its header is read, never resolved to an own session
+    gone: object = None             # `gone()`: whether the caller closed the connection, for a call that waits (the Tells poll)
     declared: dict = field(default_factory=dict)    # what the caller declared in headers: session, host, link, chat (the Write log)
 
     @property
@@ -215,6 +226,8 @@ def _check(name: str, args: dict) -> dict:
             raise ToolError(f"{k} must be text.")
         if spec["type"] == "boolean" and not isinstance(v, bool):
             raise ToolError(f"{k} must be true or false.")
+        if spec["type"] == "integer" and (type(v) is not int or not 0 <= v <= 25):
+            raise ToolError(f"{k} must be a whole number of seconds, 0 to 25.")
         if "enum" in spec and v not in spec["enum"]:
             raise ToolError(f"{k} must be one of {', '.join(spec['enum'])}.")
     return args
@@ -269,7 +282,7 @@ class Door:
         self._open_threads: dict = {}
         self._tools = {"documents": self._documents, "threads": self._threads,
                        "reply": self._reply, "resolve": self._resolve, "read": self._read,
-                       "create": self._create, "update": self._update}
+                       "create": self._create, "update": self._update, "tells": self._session_tells}
 
     # ── JSON-RPC ─────────────────────────────────────────────────────────────
     def handle(self, raw: bytes, caller: Caller) -> tuple[int, dict | None]:
@@ -361,7 +374,9 @@ class Door:
         if caller.token is None or caller.token.client is None:
             return
         try:
-            targets.note_write(self.hub, address, caller.token, self._member(caller))
+            place, declared = written_from(caller)
+            targets.note_write(self.hub, address, caller.token, self._member(caller),
+                               session=declared.get("session") if place == "laptop" else None)
         except Exception:
             self.hub.record_exception("target-failed", address)
 
@@ -371,8 +386,12 @@ class Door:
         try:
             if role == "action" and caller.token is not None and caller.token.client is not None:
                 self.hub.waiting_tells.end(address, cid, "done", row=caller.token)
+                session = caller.declared.get("session")
+                if session:                      # the session's own reply, by the token that declared it (9.8)
+                    self.hub.session_tells.end(address, cid, "done", row=caller.token, session=session)
             if resolved:
                 self.hub.waiting_tells.end(address, cid, "cancelled", reason="resolved")
+                self.hub.session_tells.end(address, cid, "cancelled", reason="resolved")
         except Exception:
             self.hub.record_exception("tell-end-failed", address)
 
@@ -656,6 +675,52 @@ class Door:
             return []
         links = self.hub.tell.links(address)
         return self.hub.waiting_tells.take(address, agent, got, lambda c, t: prompts.tell_agent(address, t["by"], c, links))
+
+    def _session_tells(self, args: dict, caller: Caller):
+        """The long-poll of a laptop session (SPEC 9.8): only the Tells queued for the session id this agent token
+        declared, never for another token's session of the same id. The id is the header's, or the argument's when no
+        header was sent; two that differ are refused."""
+        if caller.token is None or caller.token.client is None or self._member(caller) is None:
+            raise ToolError("Only a member's laptop token asks for the Tells of a session.")
+        session, given = caller.declared.get("session") or "", args.get("session") or ""
+        if given and session and given != session:
+            raise ToolError("The session argument and the X-Sheaf-Session header name different sessions.")
+        session = session or given
+        if not session:
+            raise ToolError("Name the session: the X-Sheaf-Session header, or the session argument.")
+        tells = self.hub.session_tells
+        try:
+            got = tells.take(caller.token, session, float(args.get("wait", 25)), self._session_message(caller),
+                             gone=caller.gone)
+        except waiting_mod.Refused as r:
+            raise ToolError(r.message, "busy" if r.status == 429 else "refused") from None
+        return {"tells": got}
+
+    def _session_message(self, caller: Caller):
+        """`message(t)` for `SessionTells.take`: the words of a Tell, None when its thread is no longer open (it
+        ends), False when the page cannot be read now (the Tell stays queued)."""
+        hub, links = self.hub, {}
+
+        def message(t):
+            address = t["doc"]
+            try:
+                with place.held(hub, address):          # a read, under the name's lock (9.11)
+                    opened = self._open_in(address, whole=True)
+                text = opened[4]
+                got = rdc.parse(text) if text is not None else None
+            except (NotFound, OSError, UnicodeDecodeError):
+                return False
+            member = self._member(caller)
+            if (member.id if member is not None else None) != t.get("member") or (
+                    text is not None and not self._sees(visibility.front_matter(text), address, caller, opened=opened[3])):
+                return False                    # the member no longer sees the page, or this token acts for another: it stays, unsaid
+            c = got.by_id(t["thread"]) if got is not None else None
+            if got is None or waiting_mod._stale(t, c):
+                return None
+            if address not in links:
+                links[address] = hub.tell.links(address)
+            return prompts.tell_agent(address, t["by"], c, links[address])
+        return message
 
     def _threads(self, args: dict, caller: Caller):
         address = self._address(args["doc"], caller)

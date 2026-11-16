@@ -160,10 +160,10 @@ def edge(proxy_served, monkeypatch):
     seen = []
     handle = handler.Handler.handle
 
-    def spy(self, method, target, headers, body=b"", conn=None, via="port"):
+    def spy(self, method, target, headers, body=b"", conn=None, via="port", gone=None):
         if via == "proxy":
             seen.append((method, target, {str(k).lower(): str(v) for k, v in headers.items()}))
-        return handle(self, method, target, headers, body, conn=conn, via=via)
+        return handle(self, method, target, headers, body, conn=conn, via=via, gone=gone)
 
     monkeypatch.setattr(handler.Handler, "handle", spy)
     front = StubFront()

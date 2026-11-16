@@ -51,6 +51,16 @@ class Forwards(_Store):
             return None, True
         self._change(change)
 
+    def drop_leading_to(self, address: str) -> None:
+        """The page at `address` is gone (deleted): each Forward that led to it goes, so what takes the address next is never
+        what the old address of that page leads to."""
+        def change(data):
+            gone = [k for k, e in data.items() if isinstance(e, dict) and e.get("to") == address]
+            for k in gone:
+                del data[k]
+            return None, bool(gone)
+        self._change(change)
+
     def forget_prefix(self, prefix: str) -> None:
         """A root was forgotten (`<root>/`): drop each Forward from an address under it and each that leads into it."""
         def change(data):

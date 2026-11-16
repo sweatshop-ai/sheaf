@@ -145,15 +145,21 @@ def stamp(root_path: Path, name: str, changes: dict, only_new: bool = False) -> 
     """Set (or, for a None, take off) the times of pages in the mark file `.sheaf/<name>`; with `only_new` a page that has one
     keeps it. Nothing is written when nothing changes."""
     with state.file_locked("loose-keep.lock"):
-        held = times(root_path, name)
-        out = dict(held)
-        for rel, at in changes.items():
-            if at is None:
-                out.pop(rel, None)
-            elif not (only_new and rel in out):
-                out[rel] = at
-        if out != held:
-            _put(root_path, name, out, f"{name[:-5]} marks")
+        stamp_held(root_path, name, changes, only_new)
+
+
+def stamp_held(root_path: Path, name: str, changes: dict, only_new: bool = False) -> None:
+    """`stamp` for a caller that holds `loose-keep.lock` already (the flock is not re-entrant): it reads the marks and
+    writes them in the one hold, as the sweep does."""
+    held = times(root_path, name)
+    out = dict(held)
+    for rel, at in changes.items():
+        if at is None:
+            out.pop(rel, None)
+        elif not (only_new and rel in out):
+            out[rel] = at
+    if out != held:
+        _put(root_path, name, out, f"{name[:-5]} marks")
 
 
 class Loose:

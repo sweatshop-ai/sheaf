@@ -17,7 +17,7 @@ import threading
 import time
 import traceback
 import uuid
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -869,6 +869,20 @@ class Hub:
             self.index.touch(address)
             return {"doc": address, "url": self.url(address), "tabs": e.bus.count(),
                     "log": list(e.log), "warnings": warnings}
+
+    @contextmanager
+    def page_lock(self, address: str):
+        """The writer lock of the page at `address` (`LiveDocument.exclusive`), for a move of its file: held when the hub has
+        the page, taken after the name's lock as a save takes it. A page the hub has no entry for has no writer in
+        flight, and the lock is none."""
+        e = self.entries.get(address)
+        if e is None:
+            try:
+                e = self.entry(address)
+            except (roots_mod.NotFound, OSError):
+                e = None
+        with e.live.exclusive() if e is not None and getattr(e, "live", None) is not None else nullcontext():
+            yield
 
     def forget_document(self, address: str):
         """A page left its address (deleted into the trash): the entry goes and the pages open on it are told `gone`. Its

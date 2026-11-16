@@ -892,6 +892,8 @@ class Handler:
                     got = e.live.save(h, edits, rid=rid, guard=guard, move=move)
                 except (EditError, StaleError) as ex:
                     raise Refuse(409, str(ex)) from None
+                except FileNotFoundError:           # the page was deleted into the trash while this save waited for its lock
+                    raise Refuse(404, "no such document") from None
                 except UnicodeEncodeError:
                     raise Refuse(400, "the text holds a character that cannot be written to the .md "
                                       "(half of a pair, such as half an emoji)") from None
@@ -1078,7 +1080,8 @@ class Handler:
         with place.held(self.hub, doc):
             try:
                 root, rel, _ = self._own_loose(req, doc)
-                self.hub.archive.trash(root, rel)
+                with self.hub.page_lock(doc):       # a save in the middle of its write finishes first, one after it finds the page gone
+                    self.hub.archive.trash(root, rel)
             except (loose.Refused, OSError) as e:
                 raise Refuse(409, str(e) if isinstance(e, loose.Refused) else "the page could not be moved to the trash") from None
         self.hub.forget_document(doc)
@@ -1098,7 +1101,7 @@ class Handler:
         stamp, _, wanted = ident.partition("/")
         doc = str(Address(root.name, wanted))
         try:
-            with place.held(self.hub, doc):
+            with place.held(self.hub, doc), self.hub.page_lock(doc):
                 rel = self.hub.archive.restore_trash(root, ident)
         except archive_mod.Taken:
             raise Refuse(409, "a page of that name is there already: it is not overwritten") from None

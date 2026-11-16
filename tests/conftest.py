@@ -119,12 +119,29 @@ def pytest_itemcollected(item):
         item.add_marker(pytest.mark.xdist_group(item.module.__name__))
 
 
+LOCK_ORDER_SUITES = {"test_move_forward", "test_hub_tell", "test_hub_waiting", "test_session_tells", "test_mcp_pages",
+                     "test_hub_live", "test_hub_handler", "test_loose_root", "test_hub_place", "test_hub_roots"}
+
+
+@pytest.fixture
+def lock_order(monkeypatch):
+    """The hub's locks recorded and held to `sheafmd.hub.lockorder.ORDER` (tests/lockorder.py)."""
+    import lockorder
+    lockorder.install(monkeypatch)
+    yield
+    lockorder.check()
+
+
 @pytest.hookimpl(trylast=True)
 def pytest_collection_modifyitems(config, items):
     """SHEAF_TEST_SLICE=i/n keeps the i-th of every n tests that are left after -m: ci.yml runs each
     Python as three jobs, one slice each. A file with IN_ORDER = True, whose tests read what the test
     before them left, counts as one test and stays whole in one slice. Every xdist worker collects the
-    same tests in the same order, so each keeps the same slice."""
+    same tests in the same order, so each keeps the same slice. The suites of LOCK_ORDER_SUITES also run with
+    the `lock_order` fixture."""
+    for it in items:
+        if it.module.__name__.split(".")[-1] in LOCK_ORDER_SUITES:
+            it.fixturenames.insert(0, "lock_order")
     slice_ = os.environ.get("SHEAF_TEST_SLICE")
     if not slice_:
         return
@@ -497,3 +514,4 @@ def proxy_served(front, plan, proxy_folder):
     srv.start()
     yield hub
     srv.close()
+

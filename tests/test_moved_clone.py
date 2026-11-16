@@ -144,3 +144,32 @@ def test_the_moved_line_names_the_new_tiroir_and_the_toml_line(monkeypatch, tmp_
     assert send.report_page(page, top, "https://here.example", "tok", args, out.append, err.append, {}) is None
     assert out == [] and len(err) == 1
     assert "there.example" in err[0] and f'tiroir = "{THERE}"' in err[0] and REPO in err[0] and "laptop" in err[0]
+
+
+# ── refusal: what a report would refuse, with no write (ticket 21 part 2) ────
+
+NEVER = "/nonexistent/private-root"
+
+
+def test_a_repo_the_app_is_not_installed_on_is_refused_as_no_app_and_nothing_is_written(tmp_path, origin):  # noqa: F811
+    r = Repos(tmp_path / "clones", FakeApp(installed=()), remote_url=lambda repo: str(origin))
+    assert r.refusal("bea", REPO) == repos_mod.NO_APP
+    assert not r._usage_file.exists() and not r._records_file.exists()
+
+
+def test_a_private_root_is_refused_to_its_own_member_and_not_cloned_to_another(repos):
+    assert repos.refusal("bea", REPO, [("bea", NEVER)]) == repos_mod.PRIVATE_ROOT
+    assert repos.refusal("cal", REPO, [("bea", NEVER)]) == repos_mod.NOT_CLONED
+
+
+def test_a_repo_that_would_be_reported_normally_has_no_refusal(repos):
+    assert repos.refusal("bea", REPO) is None
+
+
+def test_a_refusal_changes_no_byte_of_a_moved_clones_state(repos):
+    made(repos)
+    repos.sleep_moved(REPO, THERE)
+    before = (repos._usage_file.read_bytes(), repos._records_file.read_bytes())
+    repos.refusal("bea", REPO, [("bea", NEVER)])
+    repos.refusal("bea", REPO)
+    assert (repos._usage_file.read_bytes(), repos._records_file.read_bytes()) == before

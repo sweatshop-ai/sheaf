@@ -2375,8 +2375,8 @@ var create = function (ROOT, CFG, opts) {
     return (CFG.targets || []).filter(function (t) { return /^agent:/.test(t.target) && t.target !== targetNow(); });
   }
   function retargetButtons(id) {
-    var onLaptop = waitList(id).some(function (w) { return w.laptop && w.state !== 'seen'; });
-    return onLaptop ? retargets().map(function (t) {
+    var laptopWait = waitList(id).some(function (w) { return w.laptop && w.state !== 'seen'; });
+    return laptopWait ? retargets().map(function (t) {
       return '<button class="rd-alt rd-tell" data-a="retarget" data-target="' + esc(t.target) + '" title="Send the Tell to this agent instead">Retarget to ' + esc(t.label) + '</button>';
     }).join('') : '';
   }

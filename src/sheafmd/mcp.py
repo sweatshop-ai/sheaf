@@ -670,7 +670,7 @@ class Door:
                     continue                                   # nor a rectoverso the caller may not see (9.11)
                 if giving:
                     reached.add(root.name)
-                tells = self._tells(address, text, agent) if text is not None else []
+                tells = self._tells(address, text, agent, member) if text is not None else []
                 if args.get("open_only", True) and not threads and not tells:
                     continue
                 seen = hub.seen.get(address)
@@ -685,15 +685,17 @@ class Door:
             raise ToolError(f"There is no root named {args['root']}.")
         return [row[3] for row in sorted(rows, key=lambda r: r[:3])] + shut
 
-    def _tells(self, address: str, text: str, agent: TokenRow) -> list:
+    def _tells(self, address: str, text: str, agent: TokenRow, member=None) -> list:
         """The Tells that wait for `agent` on this document, as they are listed to it (SPEC 9.8): the first listing
-        marks each seen. Of `text`, read from the descriptor that was judged (9.11)."""
+        marks each seen. Of `text`, read from the descriptor that was judged (9.11). Their words name the page as
+        `member` is told of it, the opaque name of a Shared page, never the owner's folders."""
         try:
             got = rdc.parse(text)
         except (OSError, UnicodeDecodeError):
             return []
         links = self.hub.tell.links(address)
-        return self.hub.waiting_tells.take(address, agent, got, lambda c, t: prompts.tell_agent(address, t["by"], c, links))
+        told = self.hub.alias(member, address)
+        return self.hub.waiting_tells.take(address, agent, got, lambda c, t: prompts.tell_agent(told, t["by"], c, links))
 
     def _threads(self, args: dict, caller: Caller):
         address = self._address(args["doc"], caller)

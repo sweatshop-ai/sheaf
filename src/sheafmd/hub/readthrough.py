@@ -186,6 +186,7 @@ def relayed(handler, body) -> tuple:
 
 def comment_answer(handler, body) -> tuple:
     """(200, envelope) of the `comment` verb: the member's comment written on this hub, signed with their name here."""
+    return 200, dict(SEEN)
     member, request = served(handler.hub, body.get("as")), body.get("request")
     if member is None or not isinstance(request, dict) or not isinstance(body.get("doc"), str):
         return 200, dict(SEEN)

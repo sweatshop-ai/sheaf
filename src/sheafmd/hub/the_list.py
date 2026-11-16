@@ -437,6 +437,20 @@ def tick_edit(text: str, n: int, word: str, release: bool = False):
     return None if fragment is None else {"i": at[0], "html": fragment}
 
 
+def share_edit(text: str):
+    """The page's edit `{i, html}` that ticks the first unticked Share box of `text` (`Share` or `Share with <names>`), the
+    one the row's Share button writes; None when the text holds none, or its box cannot be ticked this way."""
+    line = visibility.unticked_share_line(text)
+    if line is None:
+        return None
+    blocks = split_md_blocks(text)
+    at = _place(text, line, blocks)
+    if at is None:
+        return None
+    fragment = ticked_html(blocks[at[0]], at[1], tick=True, at=at[2])
+    return None if fragment is None else {"i": at[0], "html": fragment}
+
+
 def box_place(text: str, line: int, blocks=None) -> tuple | None:
     """(the block, the box's number among the task boxes the page draws for that block) of the box on the 0-based
     `line` of `text`. None when the line has no mark that draws a box."""

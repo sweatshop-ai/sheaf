@@ -98,7 +98,8 @@ def mounted(chromium, pages, agentview):
         path = route.request.url[len(ORIGIN):]
         if path == FRONT:
             return route.fulfill(status=200, content_type="text/html", body=FRONT_HTML)
-        res = pages.get(path, member=BEA)
+        req = route.request
+        res = pages.post(path, json.loads(req.post_data or "{}"), member=BEA) if req.method == "POST" else pages.get(path, member=BEA)
         route.fulfill(status=res.status, headers=dict(res.headers), body=res.body)
 
     context = new_context(chromium)
@@ -317,3 +318,17 @@ def test_with_agentview_absent_and_no_remote_control_the_byline_name_is_plain_te
     until(lambda: byline(mounted)["tag"] is None, what="plain text")
     assert byline(mounted)["text"].startswith("Document prepared by Claude Code (Bea)")
     assert opened(mounted) == []
+
+def test_the_row_share_button_shares_an_own_loose_page_and_is_gone_afterwards(mounted, pages):
+    member = pages.hub.proxy.members[BEA]
+    root, _ = pages.hub.loose.root_for(member)
+    mine = root.path / "2026-11" / "mine.md"
+    mine.parent.mkdir(parents=True)
+    mine.write_text("# Mine\n\nText.\n", encoding="utf-8")
+    mounted.page.reload()
+    until(lambda: mounted.js("return !!root.querySelector('.sheaf-row');"), what="the rows in the root")
+    until(lambda: mounted.js("return root.querySelectorAll('.sheaf-share').length;") == 1, what="one Share button")
+    assert mounted.js("return root.querySelector('.sheaf-share').closest('.sheaf-row').dataset.title;") == "mine"
+    mounted.click(".sheaf-share")
+    until(lambda: mounted.js("return !root.querySelector('.sheaf-share') && !!root.querySelector('.sheaf-shared');"), what="Shared")
+    assert "- [x] Share" in mine.read_text(encoding="utf-8")

@@ -5,6 +5,7 @@ import os
 import re
 from pathlib import Path
 
+from ..source import md_hash
 from . import index as index_mod
 from . import place
 from . import roots as roots_mod
@@ -19,8 +20,8 @@ SHARED = "Shared with me"          # the top-level folder of the pages other mem
 
 
 class Titles:
-    """The first `# ` heading of a file, and the agent that Shared it on its create (9.11), read again only when the file
-    changed."""
+    """The first `# ` heading of a file, the agent that Shared it on its create (9.11), and its hash while no Share line of it
+    is ticked (what the row's Share button writes against), read again only when the file changed."""
 
     def __init__(self):
         self._kept: dict = {}
@@ -29,7 +30,7 @@ class Titles:
         return self.read(path, rel)[0]
 
     def read(self, path: Path, rel: str) -> tuple:
-        """(the title, the agent that Shared the page or "")."""
+        """(the title, the agent that Shared the page or "", the hash of a page no Share line opens or "")."""
         try:
             st = path.stat()
             key = (str(path), st.st_mtime_ns, st.st_size)
@@ -37,10 +38,11 @@ class Titles:
                 text = path.read_text(encoding="utf-8", errors="replace")
                 if len(self._kept) >= TITLES_KEPT:
                     self._kept.clear()
-                self._kept[key] = (the_list.read_rectoverso(rel, text).title, shared_by(text))
+                self._kept[key] = (the_list.read_rectoverso(rel, text).title, shared_by(text),
+                                    md_hash(text) if visibility.audience(text) is None else "")
             return self._kept[key]
         except OSError:
-            return rel.rsplit("/", 1)[-1][:-3], ""
+            return rel.rsplit("/", 1)[-1][:-3], "", ""
 
 
 def shared_by(text: str) -> str:
@@ -135,10 +137,16 @@ def tree(rows: list[dict]) -> list[dict]:
     return done(nodes)
 
 
+def mine(hub, member, root_name: str) -> bool:
+    """Whether the root named `root_name` is `member`'s own loose root: the pages of one are the ones a row may Share (9.11)."""
+    root = hub.roots.get(root_name)
+    return root is not None and hub.loose.owner_of(root) == member.id
+
+
 def data(hub, member, titles: Titles) -> dict:
     """`{tree, rows, more}` for `member`: every document of each of their roots that they may open, newest change first. A row
-    is `{doc, url, title, root, folder, mtime, when, open, write, write_tip, session, session_tip, session_link}`: the folder is the
-    path on disk, `write` the last write and `session` the writer of the last line that named an agent session. The
+    is `{doc, url, title, root, folder, share, mtime, when, open, write, write_tip, session, session_tip, session_link}`: the folder is the
+    path on disk, `share` the hash of a page of the member's own loose root that no Share line opens (the row's Share button writes against it), else "", `write` the last write and `session` the writer of the last line that named an agent session. The
     tooltips hold the machine and the session's id, and only what the writer declared. No List status is in it. `more` is `{root: n}`, what the listing's cap (8.6) left out of each root."""
     found = hub.index.data(member=member)
     now = hub.clock()
@@ -152,7 +160,7 @@ def data(hub, member, titles: Titles) -> dict:
                     path = Path(os.path.realpath(hub.file(address)))
                 except roots_mod.NotFound:
                     continue
-                title, agent = titles.read(path, at.rel)
+                title, agent, unshared = titles.read(path, at.rel)
             last, session = hub.writes.last(address), hub.writes.last_way_back(address)
             folder = "/".join([at.root, *at.rel.split("/")[:-1]])
             given = {}
@@ -160,7 +168,8 @@ def data(hub, member, titles: Titles) -> dict:
                 folder, given = f"{SHARED}/{root['shared_from']}", {"shared_from": root["shared_from"],
                                                                       "new": hub.member_opened.get(member.id, address) != int(d["mtime"] * 1e9)}
             rows.append({"doc": address, "url": d["url"], "title": title, "root": SHARED if given else at.root,
-                         "folder": folder, "shared_by": agent, **given, "mtime": d["mtime"], "when": index_mod.when(d["mtime"], now),
+                         "folder": folder, "shared_by": agent, **given,
+                         "share": unshared if mine(hub, member, at.root) and not given else "", "mtime": d["mtime"], "when": index_mod.when(d["mtime"], now),
                          "open": d["open"], "write": say_write(last, session),
                          "write_tip": last.host if last else "",
                          "session": session.writer if session else "",

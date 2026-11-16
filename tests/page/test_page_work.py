@@ -140,7 +140,7 @@ UV_WINDOWS = 'powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/in
 
 
 def test_the_fork_folds_how_to_install_uv_on_a_bare_laptop(tab, context, site):
-    # tt-tiroir#170: a member's laptop may have nothing on it; uv's installer is one line per system, folded.
+    # agency-tiroir#170: a member's laptop may have nothing on it; uv's installer is one line per system, folded.
     context.grant_permissions(["clipboard-read", "clipboard-write"], origin=site.base)
     as_member(tab, work())
     tab.open()
@@ -182,7 +182,7 @@ def test_a_sheaf_with_no_session_on_the_box_offers_no_fork(tab):
 
 
 def test_a_sheaf_live_on_a_laptop_names_its_machine_in_place_of_the_fork(tab):
-    # tt-tiroir#165: the hub offers no fork of a box session while the live one runs on a laptop.
+    # agency-tiroir#165: the hub offers no fork of a box session while the live one runs on a laptop.
     as_member(tab, work(sessions=[LAPTOP, BOX], attach=None, live="laptop", fork=None))
     tab.open()
     open_work(tab.page)

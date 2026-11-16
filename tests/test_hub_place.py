@@ -23,7 +23,7 @@ from sheafmd.hub.state import INSIDE, Tokens, doc_key
 from sheafmd.hub.visibility import front_matter
 from sheafmd.source import md_hash
 
-ALICE = "503b2f77-83de-452c-817a-a357faf85929"
+ALICE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 BOB = "2b9d7e1c-4a51-4c0e-9d1f-6f0c3a7e8b42"
 NAME = "2026-10-28-contract.md"
 SHARED = f"acme/tiroir/{NAME}"

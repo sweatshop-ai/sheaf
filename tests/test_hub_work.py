@@ -16,7 +16,7 @@ from helpers import FRONT, Front, hub_rows
 from sheafmd.hub import proxy, the_list
 from sheafmd.hub import work as work_mod
 
-ALICE = "503b2f77-83de-452c-817a-a357faf85929"
+ALICE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 BOB = "2b9d7e1c-4a51-4c0e-9d1f-6f0c3a7e8b42"
 BEA = "9c1d2e3f-0000-4a51-8c0e-1f2a3b4c5d6e"
 LIVE = "6f1c0e9a-2b3d-4c5e-8f70-1a2b3c4d5e6f"
@@ -184,7 +184,7 @@ def test_a_laptop_hosted_session_is_never_served(team, box):
 
 
 def test_on_a_sheaf_live_on_a_laptop_no_box_session_is_served_without_its_id(team, box, work):
-    # tt-tiroir#165: without an id the transcript is the live session's, and a laptop's is never served; the box's
+    # agency-tiroir#165: without an id the transcript is the live session's, and a laptop's is never served; the box's
     # older copy is not handed out in its place (`tiroir work` would fork it).
     put(team, work, DOC, SHEAF.replace("host: agency-tiroir, member: james, date: 2026-10-28T05:12:03Z",
                                        "host: alice-laptop, member: alice, date: 2026-10-28T05:12:03Z"))
@@ -327,7 +327,7 @@ def test_an_attach_of_two_lines_stops_the_start(tmp_path):
 
 
 def test_a_root_holder_the_project_does_not_name_gets_the_404_of_a_missing_document(team, box, work):
-    """tt-tiroir #116: the download and the fork report are judged as the page is, by `projects.toml` too (8.12):
+    """agency-tiroir #116: the download and the fork report are judged as the page is, by `projects.toml` too (8.12):
     Bob holds the root but the project names Alice alone, so the shared rectoverso is not there for him."""
     missing = download(team, doc="work/acme/tiroir/nothing.md", member=BOB)
     assert download(team, member=BOB).status == 200                # named, he downloads; the hub has read the file
@@ -955,7 +955,7 @@ def test_the_meta_block_of_a_box_sheaf_carries_the_fork_command_the_sessions_and
 
 
 def test_the_fork_client_is_pinned_to_one_exact_version():
-    # tt-tiroir#170: the copied command runs code that holds the member's sign-in; a range (>=, ~=) or a bare
+    # agency-tiroir#170: the copied command runs code that holds the member's sign-in; a range (>=, ~=) or a bare
     # name would run whatever is uploaded next.
     assert re.fullmatch(r"tiroir==[0-9]+\.[0-9]+\.[0-9]+", work_mod.FORK_CLIENT)
 
@@ -967,7 +967,7 @@ def test_a_member_with_a_shell_gets_the_attach_command_for_the_projects_window(t
 
 @pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux not installed")
 def test_the_attach_command_takes_the_projects_window_and_never_one_its_name_is_a_prefix_of(team, box):
-    # James names a project's window <client>_<project> (tt-tiroir f606f9a), and tmux takes a bare name as a
+    # James names a project's window <client>_<project> (agency-tiroir f606f9a), and tmux takes a bare name as a
     # prefix: `-t acme_tiroir` would select acme_tiroir2, another project's window.
     server = f"sheaf-test-{os.getpid()}-{uuid.uuid4().hex[:8]}"
     cfg = team.hub.the_list.cfg
@@ -1020,7 +1020,7 @@ def test_a_sheaf_with_only_laptop_sessions_has_nothing_to_fork(team, box, work):
 
 
 def test_a_sheaf_live_on_a_laptop_with_an_older_box_session_offers_no_fork_of_that_copy(team, box, work):
-    # tt-tiroir#165: the live session is the laptop's, which the hub never serves; a fork of the box's older copy
+    # agency-tiroir#165: the live session is the laptop's, which the hub never serves; a fork of the box's older copy
     # would start a second line of work beside it, and lose what was done on the laptop since.
     put(team, work, DOC, SHEAF.replace("host: agency-tiroir, member: james, date: 2026-10-28T05:12:03Z",
                                        "host: alice-laptop, member: alice, date: 2026-10-28T05:12:03Z"))
@@ -1542,7 +1542,7 @@ def test_james_s_door_reply_records_the_session_it_names_as_the_live_one(team, b
 
 
 def test_a_tell_drop_no_longer_records_a_session(team, at_work, work):
-    # the hub guessed at the drop, before James acted (tt-tiroir #136): only his own write names it now
+    # the hub guessed at the drop, before James acted (agency-tiroir #136): only his own write names it now
     james_wrote(at_work, NEW)
     assert comment(team, work, "tell").status == 200
     assert LIVE in sessions_of(work)[0] and not [s for s in sessions_of(work) if NEW in s]
@@ -1796,7 +1796,7 @@ def test_a_sessions_list_the_hub_cannot_rewrite_says_so_once_not_at_every_later_
     assert row["transcript"] == NEW and "one item per line" in row["reason"]
 
 
-# --- path traversal in the project and session ids (tt-tiroir #8, #9) -------------------------------------
+# --- path traversal in the project and session ids (agency-tiroir #8, #9) -------------------------------------
 
 def list_cfg(sessions_dir, work_dir):
     return the_list.ListConfig(root=the_list.Path("/"), repo="a/b", project=1, token_file=the_list.Path("/t"),

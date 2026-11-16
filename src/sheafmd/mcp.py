@@ -788,7 +788,7 @@ class Door:
         member = self._member(caller)
         if member is None:
             raise ToolError("A render report is made with the token of a member: this one acts for nobody.", "no member")
-        privates = [m.private_root for m in self.hub.proxy.members.values() if m.private_root]
+        privates = [(m.short or m.id, m.private_root) for m in self.hub.proxy.members.values() if m.private_root]
         try:
             return repos.report(member.short or member.id, args["repo"], args["path"], args["commit"], privates, caller.declared)
         except repos_mod.Refused as e:

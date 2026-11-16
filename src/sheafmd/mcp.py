@@ -32,6 +32,7 @@ from .hub.client import HubUnavailable
 from .hub.roots import Address, NotFound, address_of_url, in_git_dir
 from .agents import prompts
 from .hub import loose, place, targets, visibility
+from .hub import repos as repos_mod
 from .hub.state import TokenRow
 from .render import COMMENT_RE as HTML_COMMENT_RE, strip_comments
 from .beneath import Private
@@ -131,8 +132,17 @@ TOOLS = {
             "expected_hash": {"type": "string", "description": "The hash `read` or `create` "
                                                                "gave for the text you changed."}},
         "required": ["doc", "text", "expected_hash"]},
+    "render_report": {
+        "description": "Tell the tiroir that you work on a page of a git repo: the repo as `owner/name`, the page's "
+                       "path in it and the commit you rendered. It sends no text. The tiroir clones the repo the "
+                       "first time (blobless, sparse), holds the page's owner, and answers what it did.",
+        "properties": {
+            "repo": {"type": "string", "description": "The repo, `owner/name` on GitHub."},
+            "path": {"type": "string", "description": "The page's path in the repo, ending in .md."},
+            "commit": {"type": "string", "description": "The commit id the page was rendered at."}},
+        "required": ["repo", "path", "commit"]},
 }
-PAGE_TOOLS = ("read", "create", "update")    # the key, or a token made with --write (SPEC 9.7)
+PAGE_TOOLS = ("read", "create", "update", "render_report")    # the key, or a token made with --write (SPEC 9.7)
 WRITE_TOOLS = ("create", "update")           # each call leaves a row in the diagnostics log (SPEC 15) and a line in the Write log (9.12)
 SESSION_WRITES = ("create", "update", "reply", "resolve")    # a write that names James's session to the hub (9.12)
 MAX_TEXT = 1024 * 1024           # bytes of UTF-8 a create or an update may write (SPEC 12)
@@ -269,7 +279,7 @@ class Door:
         self._open_threads: dict = {}
         self._tools = {"documents": self._documents, "threads": self._threads,
                        "reply": self._reply, "resolve": self._resolve, "read": self._read,
-                       "create": self._create, "update": self._update}
+                       "create": self._create, "update": self._update, "render_report": self._render_report}
 
     # ── JSON-RPC ─────────────────────────────────────────────────────────────
     def handle(self, raw: bytes, caller: Caller) -> tuple[int, dict | None]:
@@ -702,6 +712,21 @@ class Door:
                                 f"{_unclosed_line(text, out)}: the page shows nothing after it, "
                                 "so its text without comments is not given.")
         return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text), "text": out}
+
+    def _render_report(self, args: dict, caller: Caller) -> dict:
+        """A render report (SPEC 13): the tiroir hears that the caller's member works on a repo page, and clones the
+        repo the first time. No page is read or written; the answer says what the tiroir did."""
+        repos = getattr(self.hub, "repos", None)
+        if repos is None:
+            return {"repo": args["repo"], "path": args["path"], "clone": repos_mod.NO_CLONES}
+        member = self._member(caller)
+        if member is None:
+            raise ToolError("A render report is made with the token of a member: this one acts for nobody.", "no member")
+        privates = [m.private_root for m in self.hub.proxy.members.values() if m.private_root]
+        try:
+            return repos.report(member.id, args["repo"], args["path"], args["commit"], privates, caller.declared)
+        except repos_mod.Refused as e:
+            raise ToolError(str(e), "refused") from None
 
     # ── create and update: a row in the diagnostics log for every call (SPEC 9.7, 15) ─
     def _run(self, name: str, args: dict, caller: Caller):

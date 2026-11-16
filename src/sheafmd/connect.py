@@ -186,7 +186,7 @@ def make_default(origin: str) -> bool:
     table = re.search(r"^\s*\[", text, re.M)
     at = table.start() if table else len(text)
     head = text[:at]
-    empty = re.search(r"^[ \t]*tiroir[ \t]*=[ \t]*(\"\"|\'\')[ \t]*(#[^\n]*)?\n?", head, re.M)
+    empty = re.search(r"^[ \t]*tiroir[ \t]*=[ \t]*(\"\"\"\"\"\"|\'\'\'\'\'\'|\"\"|\'\')[ \t]*(#[^\n]*)?$\n?", head, re.M)
     if empty:                        # a default that was left empty: fill its line, a second key would not parse
         write_text_atomic(path, head[:empty.start()] + line + head[empty.end():] + text[at:])
         return True

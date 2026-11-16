@@ -933,7 +933,8 @@ def _agent_names_possible(row, person: str, cfg, declared: bool) -> list[str]:
 
 def _signed_by_others(rows, cfg, person: str) -> list[str]:
     """The name each token of `rows` signs with, whose replies a new one's must not pass for."""
-    return [r.signed(person, cfg) for r in rows if not r.invalid]
+    from .hub import proxy
+    return [name for _, name, _ in proxy.signed_names(cfg, person, [r for r in rows if not r.invalid])]
 
 
 def _agent_clash(client: str, built: str, cfg, person: str, others: list[str]) -> str | None:

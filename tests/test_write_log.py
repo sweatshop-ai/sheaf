@@ -54,7 +54,7 @@ def plan_text(agents):
 def update(agents, who, headers=None, words="Edited by the door."):
     text = plan_text(agents)
     return write(agents, who, headers=headers, doc=DOC, expected_hash=md_hash(text),
-                 text=text.replace("Second paragraph, about pears.", words))
+                 text=text + f"\n{words}\n")
 
 
 def lines(agents, member=BEA, doc=DOC):
@@ -154,7 +154,7 @@ def test_a_write_of_our_own_is_not_taken_for_a_disk_write(agents, rectoversos):
 
 def test_a_member_reads_the_lines_of_their_own_pages_only(agents, rectoversos):
     update(agents, "bea-claude")
-    assert agents.get("/_/writes?doc=rectoversos/nope.md", member=BEA).status == 404
+    assert agents.get("/_/writes?doc=elsewhere/acme/blog/plan.md", member=BEA).status == 404   # not on one of their roots
     assert agents.get("/_/writes", member=BEA).status == 400
 
 

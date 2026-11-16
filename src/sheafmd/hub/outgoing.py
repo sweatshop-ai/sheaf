@@ -2,9 +2,11 @@
 
     owner_email(cfg, member)    (the e-mail the receiving tiroir will match, "") or (None, the sentence why not)
 
-The move itself (the bundle, the call, confirm-then-Forward) is hooked up once ticket 17's Forward is in main.
+`send_root` sends a root's pages and keeps what the receiver confirmed; the Forward per confirmed page and the real call are
+hooked up once ticket 17's Forward is in main.
 """
 import json
+import re
 
 from . import channel, proxy
 
@@ -51,6 +53,15 @@ def batches(rows, limit: int = BATCH_LIMIT) -> list:
     return out
 
 
+REASON = re.compile(r"[a-z_]{1,64}")
+
+
+def _reason(said) -> str:
+    """The reason a peer gave for holding a page, when it is a short word of ours; anything else is `failed`: what a peer
+    says never reaches the move file or the diagnostics as it came."""
+    return said if isinstance(said, str) and REASON.fullmatch(said) else "failed"
+
+
 def send_root(post, moves, repo: str, to: str, head: dict, rows, limit: int = BATCH_LIMIT, diag=None) -> list:
     """Send the pages of a root that is moving to `to`, one `root` call per batch. `post(to, verb, body)` answers
     `(status, body)` or raises `OSError`. Each page the receiver confirms is marked sent (the caller then writes its Forward);
@@ -73,10 +84,10 @@ def send_root(post, moves, repo: str, to: str, head: dict, rows, limit: int = BA
                     moves.sent(repo, p)
                     done.append(p)
                 else:
-                    held[p] = got.get("why", "failed") if isinstance(got, dict) else "failed"
+                    held[p] = _reason(got.get("why")) if isinstance(got, dict) else "failed"
             continue
         why = "unreachable" if status == 0 else "cloning" if status == 202 else \
-            (answer.get("why") if status == 409 and isinstance(answer.get("why"), str) else "failed")
+            (_reason(answer.get("why")) if status == 409 else "failed")
         for later in pending[n:]:
             held.update({r["path"]: why for r in later})
         break

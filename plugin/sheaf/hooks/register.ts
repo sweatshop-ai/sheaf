@@ -10,7 +10,7 @@
 // one id: when the session id is another one it stops and forgets its tiroirs, backoff and Tell in flight, and an answer
 // that arrives for an id that is no longer the session's is dropped, so its Tells wait at the door for that id.
 import type { Register } from 'claude-code'
-import { accept, addDoor, type Door, doorKey, type DoorState, doorOfTool, echoedSession, fresh, nextGap, originOf, type Poller, POLL_TIMEOUT_MS, pruneStored, putBack, remember, restore, shouldPoll, storedEntries, takeNext, tellText, type Tell, WAIT_SECONDS } from './core'
+import { accept, addDoor, type Door, doorKey, type DoorState, doorOfTool, echoedSession, fresh, nextGap, originOf, type Poller, POLL_TIMEOUT_MS, putBack, remember, restore, shouldPoll, storedEntries, takeNext, tellText, type Tell, WAIT_SECONDS } from './core'
 
 /** One long-poll of the door for this session, through the laptop's own `sheaf tells-poll`, so the token stays in the
  *  keyring and never reaches this module. It prints a JSON array of Tells. */
@@ -42,33 +42,21 @@ function leave(m: Mod) {
   m.p.doors = []
   m.p.armedFor = ''
   m.p.held = []
+  m.p.starting = null
   m.p.stored.clear()      // what is kept belongs to the id that left; a resume of it reads it back
   m.p.submittingUntil = 0      // a re-armed session has no Tell in flight; each door's backoff went with its state
 }
 
-/** What is kept for a session that is resumed (`claude --resume`): the Tells whose submit succeeded and that the door
- *  still lists. The door lists a Tell until the session answers it, and a resumed session has the submitted Tell in its
- *  transcript already. A write that fails costs a resume one repeated Tell, never a lost one. */
+/** What is kept for a session that is resumed (`claude --resume`): the Tells whose own turn started, so their prompt is in
+ *  the transcript, for seven days. The door lists a Tell until the session answers it, and a resumed session has the Tell
+ *  in its transcript already. It errs toward a repeat: a Tell whose turn did not start is submitted again, and so is one
+ *  whose write failed, never lost. */
 const deliveredKey = (session: string) => `delivered:${session}`
 
-function keepDelivered($: any, m: Mod, session: string): Promise<void> {
+function keepDelivered($: any, m: Mod, session: string, now: number): Promise<void> {
   if (m.p.armedFor !== session) return m.writes      // the poller left the session meanwhile
-  const snapshot = storedEntries(m.p)      // taken now; written after the writes called before it, so the newest snapshot is the last one stored
+  const snapshot = storedEntries(m.p, now)      // taken now; written after the writes called before it, so the newest snapshot is the last one stored
   m.writes = m.writes.then(() => $.store.set(deliveredKey(session), snapshot)).catch(() => {})
-  return m.writes
-}
-
-/** A submit was rejected or dropped: its Tell leaves what is kept for the session and tiroir it started under, whether or
- *  not the poller is still armed for that session (a /clear or an end may have come first). */
-function forgetKept($: any, m: Mod, session: string, id: string): Promise<void> {
-  if (m.p.armedFor === session) {
-    m.p.stored.delete(id)
-    return keepDelivered($, m, session)
-  }
-  m.writes = m.writes.then(async () => {
-    const kept: any = await $.store.get(deliveredKey(session))
-    if (Array.isArray(kept)) await $.store.set(deliveredKey(session), kept.filter((e: any) => e?.id !== id))
-  }).catch(() => {})
   return m.writes
 }
 
@@ -80,14 +68,11 @@ async function deliver($: any, m: Mod) {
   const t = takeNext(p, m.running === 0, m.interrupted, await $.clock.now())
   if (!t) return
   // A submit that fails keeps the Tell: the door lists it until the session answers it, and it is offered again.
-  // It is recorded for a resume when its submit starts, since the submit may resolve only when its turn ends and a resume
-  // during that turn must not submit it again; a rejected submit takes it back. The one gap: the process dying between
-  // the record and the call.
+  // It is recorded for a resume when its own turn starts (turn.start), never before the submit: a process that exits
+  // with the Tell queued has not got it in a transcript. A resume between the submit and that turn submits it once more:
+  // a repeated Tell is accepted, a lost one is not.
   // Not awaited: a submit may resolve only when its turn ends, and this runs inside `turn.complete`.
-  const session = p.armedFor
-  if (t.door) remember(p, t.id, t.door)
-  void keepDelivered($, m, session)
-  const undo = () => { putBack(p, t); void forgetKept($, m, session, t.id) }
+  const undo = () => putBack(p, t)
   $.prompt.submit({ text: tellText(t) }).then((r: any) => { if (r?.drop !== undefined) undo() }, undo)
 }
 
@@ -103,7 +88,6 @@ async function pollDoor($: any, m: Mod, d: DoorState) {
     if ((await $.session.id()) === id && p.doors.includes(d)) {
       const key = doorKey(d.door)
       accept(p, tells, key)
-      if (pruneStored(p, key, tells)) await keepDelivered($, m, id)
     }
     d.failures = 0
   } catch {
@@ -195,7 +179,7 @@ export const register: Register = (on) => {
     const id = await $.session.id()
     const doors: any = await $.store.get(doorsKey(id))
     const sent: any = await $.store.get(deliveredKey(id))
-    restore(m.p, sent)
+    restore(m.p, sent, await $.clock.now())
     if (Array.isArray(doors) && !m.p.doors.length) for (const door of doors) if (isDoor(door)) await arm($, m, door)
     return next(e)
   })
@@ -204,6 +188,13 @@ export const register: Register = (on) => {
     if (!(e as any).agentId) {
       m.running += 1
       m.p.submittingUntil = 0      // the Tell's turn has started: `running` holds the next one back from here
+      const t = m.p.starting
+      const text = (e as any).text
+      if (t?.door && !(typeof text === 'string' && text !== '' && !text.includes(t.message))) {      // not the member's own typing
+        m.p.starting = null
+        remember(m.p, t.id, t.door, await $.clock.now())
+        void keepDelivered($, m, m.p.armedFor, await $.clock.now())
+      }
     }
     return next(e)
   })

@@ -34,7 +34,7 @@ def marks(m, name):
 
 
 def own_rows(m):
-    return sorted(d.rsplit("/", 1)[1] for d in m.visible_rows() if "/2026-11/" in d)
+    return sorted(d.rsplit("/", 1)[1][:-3] for d in m.visible_rows() if "/2026-11/" in d)
 
 
 def row(name):
@@ -78,7 +78,7 @@ def test_archive_now_takes_the_row_out_of_pages_and_into_archived_and_restore_br
     assert got == ["restore", "keep", "delete"]                  # Restore stands in the place of Archive now
     act(own, "alpha", "restore")
     until(lambda: own_rows(own) == [] and label(own, "archived") == "Archived", what="Archived empty again")
-    assert marks(own, "archived.json") == {}
+    assert not marks(own, "archived.json")
     view(own, "")
     until(lambda: on(own) == [""] and own_rows(own) == ["alpha", "beta"], what="both pages back in Pages")
 
@@ -92,7 +92,7 @@ def test_keep_marks_the_page_and_the_same_button_takes_it_off(own):
     act(own, "alpha", "keep")
     until(lambda: own.js("return root.querySelector(arg + ' .sheaf-act[data-act=\"keep\"]').textContent;", row("alpha")) == "Keep",
           what="the button says Keep again")
-    assert marks(own, "keep.json") == {}
+    assert not marks(own, "keep.json")
 
 
 def test_archive_now_on_a_kept_page_says_why_and_archives_nothing(own):
@@ -103,7 +103,7 @@ def test_archive_now_on_a_kept_page_says_why_and_archives_nothing(own):
     act(own, "alpha", "archive")
     until(lambda: own.js("return !root.querySelector('.sheaf-said').hidden;"), what="the line the hub gave")
     assert "kept" in own.js("return root.querySelector('.sheaf-said').textContent;")
-    assert own_rows(own) == ["alpha", "beta"] and marks(own, "archived.json") == {}
+    assert own_rows(own) == ["alpha", "beta"] and not marks(own, "archived.json")
 
 
 def test_delete_asks_a_second_click_in_the_button_and_then_moves_the_page_to_the_trash(own):

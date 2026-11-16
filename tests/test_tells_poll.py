@@ -9,7 +9,7 @@ from helpers import FRONT
 from test_session_tells import SESSION, declare, laptops, poll, tell  # noqa: F401  (laptops is a fixture)
 from test_hub_waiting import talk  # noqa: F401  (fixture)
 
-from sheafmd import connect, send, tells_poll
+from sheafmd import connect, send
 from sheafmd.cli import main
 
 TELL = {"id": "t1", "doc": "loose-bea/notes.md", "thread": "c1", "message": "Please look at this.", "by": "Cal", "at": "now"}
@@ -152,7 +152,7 @@ def test_the_poll_waits_longer_than_a_tool_call_does(monkeypatch):
 # ── against the hub as the tiroir (R21) ─────────────────────────────────────
 
 @pytest.fixture
-def at_hub(laptops, monkeypatch):
+def at_hub(laptops, monkeypatch):  # noqa: F811
     """`send.post` goes into the hub's door with the bearer it was given: the CLI's own request, the hub's own answer."""
     from helpers import door, rpc  # noqa: F401
 
@@ -171,7 +171,7 @@ def got(capsys, *argv):
     return code, (json.loads(out) if out else None), err
 
 
-def test_the_session_that_declared_gets_its_tell_through_the_cli(laptops, at_hub, capsys):
+def test_the_session_that_declared_gets_its_tell_through_the_cli(laptops, at_hub, capsys):  # noqa: F811
     declare(laptops)
     tell(laptops)
     at_hub("bea-one")
@@ -179,21 +179,21 @@ def test_the_session_that_declared_gets_its_tell_through_the_cli(laptops, at_hub
     assert code == 0 and [t["thread"] for t in tells] == ["c1"] and tells[0]["by"]
 
 
-def test_a_second_laptop_of_the_same_member_with_the_same_session_id_gets_nothing(laptops, at_hub, capsys):
+def test_a_second_laptop_of_the_same_member_with_the_same_session_id_gets_nothing(laptops, at_hub, capsys):  # noqa: F811
     declare(laptops)
     tell(laptops)
     at_hub("bea-two")
     assert got(capsys, "--session", SESSION, "--wait", "0")[:2] == (0, [])
 
 
-def test_another_members_laptop_replaying_the_session_id_gets_nothing(laptops, at_hub, capsys):
+def test_another_members_laptop_replaying_the_session_id_gets_nothing(laptops, at_hub, capsys):  # noqa: F811
     declare(laptops)
     tell(laptops)
     at_hub("cal-one")
     assert got(capsys, "--session", SESSION, "--wait", "0")[:2] == (0, [])
 
 
-def test_the_right_laptop_with_another_session_id_gets_nothing(laptops, at_hub, capsys):
+def test_the_right_laptop_with_another_session_id_gets_nothing(laptops, at_hub, capsys):  # noqa: F811
     declare(laptops)
     tell(laptops)
     at_hub("bea-one")

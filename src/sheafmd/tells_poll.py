@@ -18,7 +18,7 @@ EXIT_OK, EXIT_FAILED = 0, 1
 MAX_WAIT = 25    # the door's own limit
 
 COMMAND_HELP = {"tells-poll": ("tells-poll --origin URL --session ID [--wait SECONDS]",
-                               "ask a tiroir's door for a laptop session's Tells and print them as JSON (used by the Claude Code mod)")}
+                               "ask the shared Sheaf's door for a laptop session's Tells and print them as JSON (the Claude Code mod runs it)")}
 
 
 def _wait(text: str) -> int:
@@ -35,7 +35,7 @@ def cmd_tells_poll(argv: list[str], out=None, err=None) -> int:
     out = out or (lambda line="": print(line))
     err = err or (lambda line="": print(line, file=sys.stderr))
     p = argparse.ArgumentParser(prog="sheaf tells-poll", usage="sheaf tells-poll --origin URL --session ID [--wait SECONDS]",
-                                description="Ask a tiroir's door for the Tells of a laptop session; print them as a JSON array.")
+                                description="Ask the shared Sheaf's door for the Tells of a laptop session; print them as a JSON array.")
     p.add_argument("--origin", required=True, metavar="URL")
     p.add_argument("--session", required=True, metavar="ID")
     p.add_argument("--wait", type=_wait, default=MAX_WAIT, metavar="SECONDS")

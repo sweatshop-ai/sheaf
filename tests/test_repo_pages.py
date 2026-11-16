@@ -5,6 +5,7 @@ App behind `Repos`'s one seam, the token provider: no real token, no real GitHub
 import base64
 import dataclasses
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from test_hub_commits import box, git, merged_on_github, rectoversos, remote  # 
 from test_write_log import agents, declared  # noqa: F401  (fixtures and helpers)
 
 from sheafmd import paths, send
+from sheafmd.hub import proxy as proxy_mod
 from sheafmd.hub import repos as repos_mod
 from sheafmd.hub.repos import Repos
 
@@ -471,11 +473,23 @@ def test_a_report_the_door_refuses_still_renders_the_page_on_the_laptop_hub(tiro
     assert "render report" in err
 
 
-def test_a_folder_that_looks_like_a_git_option_is_never_read_as_one(hub_repos):
-    report(hub_repos)
+@pytest.mark.parametrize("first", [True, False], ids=["the clone's sparse set", "the widening"])
+def test_a_folder_that_looks_like_a_git_option_is_never_read_as_one(hub_repos, monkeypatch, first):
+    seen = []
+    real = repos_mod.Repos._git
+
+    def spy(self, at, *args, **k):
+        seen.append(args)
+        return real(self, at, *args, **k)
+
+    monkeypatch.setattr(repos_mod.Repos, "_git", spy)
+    if not first:
+        report(hub_repos)
+    seen.clear()
     bad, got = report(hub_repos, path="--stdin/x.md")
     assert not bad, got
-    assert got["widened"] in (None, "--stdin")      # git was told it is a folder, not an option
+    folders = [a for a in seen if a[:1] == ("sparse-checkout",) and a[1] in ("set", "add")]
+    assert folders and all(a[-2:] == ("--", "--stdin") for a in folders), folders
     assert sh(the_clone(hub_repos), "status", "--porcelain") == ""
 
 
@@ -491,17 +505,69 @@ def test_a_page_that_is_not_in_the_commit_and_a_commit_that_is_unknown_leave_no_
     assert hub_repos.hub.repos.owner_of(REPO, "notes/idea.md") == "bea"
 
 
-def test_a_private_root_that_cannot_be_looked_at_blocks_the_clone_rather_than_letting_it_through(
-        hub_repos, tmp_path, origin, monkeypatch):
-    private_root_of(hub_repos, BEA, tmp_path, origin)
-    real = repos_mod.Repos._git
-
-    def hang(self, at, *args, **k):
-        if args[:2] == ("remote", "get-url"):
-            return subprocess.CompletedProcess(args, 124, "", "timed out")
-        return real(self, at, *args, **k)
-
-    monkeypatch.setattr(repos_mod.Repos, "_git", hang)
+def test_a_private_root_whose_github_remote_is_not_named_origin_is_still_private(hub_repos, tmp_path, origin):
+    own = private_root_of(hub_repos, BEA, tmp_path, origin)
+    sh(own, "remote", "rename", "origin", "github")
     bad, got = report(hub_repos, who="cal-claude")
     assert not bad, got
     assert got["clone"] == "private-root" and not list(clones(hub_repos).glob("*/*"))
+
+
+def test_a_private_root_that_pushes_to_the_repo_but_fetches_from_elsewhere_is_still_private(
+        hub_repos, tmp_path, origin):
+    own = private_root_of(hub_repos, BEA, tmp_path, origin)
+    sh(own, "remote", "set-url", "origin", str(tmp_path / "somewhere-else.git"))
+    sh(own, "remote", "set-url", "--push", "origin", str(origin))
+    bad, got = report(hub_repos, who="cal-claude")
+    assert not bad, got
+    assert got["clone"] == "private-root" and not list(clones(hub_repos).glob("*/*"))
+
+
+def test_a_private_root_that_is_another_repo_does_not_block_the_clone(hub_repos, tmp_path, origin):
+    own = private_root_of(hub_repos, BEA, tmp_path, origin)
+    sh(own, "remote", "set-url", "origin", str(tmp_path / "somewhere-else.git"))
+    bad, got = report(hub_repos, who="cal-claude")
+    assert not bad, got
+    assert got["clone"] == "made"
+
+
+@pytest.mark.parametrize("breakage", ["missing", "unreadable-git-dir", "git-gives-no-answer"])
+def test_a_private_root_that_cannot_be_looked_at_blocks_the_clone_rather_than_letting_it_through(
+        hub_repos, tmp_path, origin, monkeypatch, breakage):
+    own = private_root_of(hub_repos, BEA, tmp_path, origin)
+    if breakage == "missing":
+        shutil.rmtree(own)
+    elif breakage == "unreadable-git-dir":
+        shutil.rmtree(own / ".git")
+        (own / ".git").write_text("not a git dir\n", encoding="utf-8")
+    else:
+        monkeypatch.setattr(proxy_mod, "_git", lambda folder, *args: None)
+    bad, got = report(hub_repos, who="cal-claude")
+    assert not bad, got
+    assert got["clone"] == "private-root" and not list(clones(hub_repos).glob("*/*"))
+
+
+# ── a commit on a branch other than the default one ──────────────────────────
+
+def test_a_commit_pushed_on_a_feature_branch_is_known_to_the_tiroir_as_the_cli_takes_it(hub_repos, tmp_path, origin):
+    report(hub_repos)
+    pusher = laptop_clone(tmp_path, origin, "pusher")
+    sh(pusher, "checkout", "-q", "-b", "feature")
+    (pusher / "docs" / "plan.md").write_text("# Plan\n\nOn a branch.\n", encoding="utf-8")
+    sh(pusher, "commit", "-qam", "branch work")
+    sh(pusher, "push", "-q", "origin", "feature")
+    bad, got = report(hub_repos, commit=sh(pusher, "rev-parse", "HEAD"))
+    assert not bad, got
+    assert got["commit_known"] is True
+
+
+def test_a_commit_on_a_feature_branch_is_known_to_the_first_report_of_a_repo_too(hub_repos, tmp_path, origin):
+    pusher = laptop_clone(tmp_path, origin, "pusher")
+    sh(pusher, "checkout", "-q", "-b", "feature")
+    (pusher / "docs" / "plan.md").write_text("# Plan\n\nOn a branch.\n", encoding="utf-8")
+    sh(pusher, "commit", "-qam", "branch work")
+    sh(pusher, "push", "-q", "origin", "feature")
+    bad, got = report(hub_repos, commit=sh(pusher, "rev-parse", "HEAD"))
+    assert not bad, got
+    assert got["clone"] == "made" and got["commit_known"] is True
+    assert hub_repos.hub.repos.owner_of(REPO, "docs/plan.md") == "bea"

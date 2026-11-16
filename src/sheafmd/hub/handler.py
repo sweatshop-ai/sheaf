@@ -323,8 +323,8 @@ class Handler:
             res = self._refusal(req, r)
         except Exception as e:
             if req is not None:
-                self.hub.record_exception("request-failed", self._doc_hint(req),
-                                          endpoint=req.path, method=method, **self._who(req))
+                self.hub.record_exception("request-failed", self._doc_hint(req) if not self._on_clients(req) else None,
+                                          **({} if self._on_clients(req) else {"endpoint": req.path}), method=method, **self._who(req))
             res = _json(500, {"ok": False, "error": f"the hub failed on this request "
                               f"({type(e).__name__}); the details are in `sheaf diag`"})
         return self._finish(req, res)
@@ -375,9 +375,17 @@ class Handler:
                     error = json.loads(res.body).get("error", "")
                 except ValueError:
                     pass
-            self.hub.record(res.row or f"{req.route}-{res.status}", self._doc_hint(req), endpoint=req.path,
-                            error=error or None, **self._who(req), **res.fields)
+            seen = self._on_clients(req)          # what a client page is called is the client's: no address on this disk (9.9)
+            self.hub.record(res.row or f"{req.route}-{res.status}", None if seen else self._doc_hint(req),
+                            **({} if seen else {"endpoint": req.path}), error=error or None, **self._who(req), **res.fields)
         return res
+
+    @staticmethod
+    def _on_clients(req) -> bool:
+        """Whether the request names a page under `Clients/` (9.9), by its path or by the `doc` it carries."""
+        body = req.body if isinstance(req.body, dict) else {}
+        d = req.query.get("doc") or body.get("doc")
+        return readthrough.is_clients(d) or readthrough.is_clients(address_of_url(req.path))
 
     @staticmethod
     def _who(req) -> dict:
@@ -909,16 +917,15 @@ class Handler:
         hub tells what this member may open there, and a client that does not answer is told as one line, never as rows from
         an earlier read."""
         clients, name = self.hub.clients, req.query.get("client")
-        if req.member is None or clients is None or not isinstance(name, str) or clients.split(f"Clients/{name}/x") is None:
+        if req.member is None or clients is None or not isinstance(name, str) or not clients.has(name):
             raise Refuse(404, "no such page")
         try:
-            found = clients.read(name, req.member, "sheaf")
+            rows = readthrough.fold_rows(name, clients.read(name, req.member, "sheaf").get("rows", []))
         except readthrough.NoEmail as e:
             return _json(200, {"client": name, "rows": [], "tree": [], "line": str(e)})
         except readthrough.NotReachable:
             self._knock(req, name, "sheaf", "unreachable")
             return _json(200, {"client": name, "rows": [], "tree": [], "line": "This client tiroir is not reachable now."})
-        rows = readthrough.fold_rows(name, found.get("rows", []))
         self._knock(req, name, "sheaf", "ok")
         return _json(200, {"client": name, "rows": rows, "tree": sheaf_view.tree(rows), "line": ""}, {"X-Content-Type-Options": "nosniff"})
 
@@ -955,10 +962,11 @@ class Handler:
         except readthrough.Missing:
             raise Refuse(404, "no such document") from None
         self._knock(req, client, op, str(env.get("status")))
-        status, body = env.get("status", 404), env.get("body", "")
+        status, body, kept = env["status"], env["body"], readthrough.kept_headers(env.get("headers"))
         if env.get("type") == "html":
-            return _html(status, body, env.get("nonce"), env.get("headers"))
-        return Response(status, {"Content-Type": "application/json", **(env.get("headers") or {})}, body.encode("utf-8"))
+            own = auth.new_nonce()           # the client's nonce is never this origin's: only its own page script runs here
+            return _html(status, readthrough.adopt(body, env.get("nonce"), own), own, kept)
+        return Response(status, {"Content-Type": "application/json", **kept}, body.encode("utf-8"))
 
     def _knock(self, req: Req, client: str, op: str, status: str) -> None:
         """One diagnostics line per call to a client tiroir: the client, the op, the member's id and the status. Never an address, a

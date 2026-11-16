@@ -118,5 +118,5 @@ def cmd_headers(argv: list[str], out=None, err=None) -> int:
     args = p.parse_args(argv)
     if args.check is not None:
         return EXIT_OK if _has_helper(args.check) else EXIT_FAILED
-    out(json.dumps(send.declared()))
+    out(json.dumps(send.declared(session=send.registry_session())))
     return EXIT_OK

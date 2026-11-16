@@ -843,7 +843,7 @@ class Side:
             return out["isError"], (text if out["isError"] else json.loads(text))
 
     def tree(self) -> dict:
-        """Everything this side keeps, as bytes by path: its state folder (but for the diagnostics log and the retry note) and
+        """Everything this side keeps, as bytes by path: its state folder (but for the diagnostics log, the retry note and the tokens, whose last-used time a call stamps) and
         every file of its members' folders. Two trees that are equal are a hub nothing happened to."""
         out = {}
         with self.active():
@@ -851,7 +851,7 @@ class Side:
                     *[Path(f) for f in self.hub.loose._read().values()]]
         for top in tops:
             for p in sorted(top.rglob("*")) if top.exists() else ():
-                if p.is_file() and p.name not in ("diagnostics.jsonl", "outgoing.json") and not p.name.endswith(".lock"):
+                if p.is_file() and p.name not in ("diagnostics.jsonl", "outgoing.json", "tokens.json") and not p.name.endswith(".lock"):
                     out[str(p)] = p.read_bytes()
         return out
 

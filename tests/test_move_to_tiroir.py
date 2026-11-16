@@ -114,9 +114,8 @@ def test_the_share_does_not_go_and_the_copy_there_is_private_to_its_owner(two):
     with two.active():
         path = two.hub.file(OLD)
         text = path.read_text(encoding="utf-8")
-    bad, got = two.ask("alice", "update", doc=OLD, text=text.replace("# Plan\n", "# Plan\n\n- [x] Share with bob\n", 1),
-                       expected_hash=md_hash(text))
-    assert not bad, got
+    shared = two.post("/_/share", {"doc": OLD, "hash": md_hash(text), "with": ["bob"]}, member=ALICE_A)     # an update through the door cannot Share
+    assert shared.status == 200, shared.text
     moved(two)
     landed = two.b.hub.file(NEW).read_text(encoding="utf-8")
     assert "shared:" not in landed and "[x] Share" not in landed

@@ -278,8 +278,8 @@ class Handler:
             ("POST", "/_/laptops/revoke", "laptop-revoke", MEMBER, self._laptop_revoke),
             ("POST", "/_/code", "code", MINT, self._code),
             ("POST", "/_/comment", "comment", COOKIE, self._comment),
-            ("GET", "/_/team", "team", COOKIE, self._team),
-            ("POST", "/_/team", "team-write", COOKIE, self._team_write),
+            ("GET", "/_/team", "team", EITHER, self._team),
+            ("POST", "/_/team", "team-write", EITHER, self._team_write),
             ("POST", "/_/tell", "tell", COOKIE, self._tell),
             ("POST", "/_/target", "target", COOKIE, self._target),
             ("POST", "/_/cancel", "cancel", COOKIE, self._cancel),
@@ -1721,7 +1721,7 @@ class Handler:
         """The client page `doc` names, when this hub keeps Team comments and the member may open it: otherwise the answer
         of a page that is not there, so what a member may not open is not told apart from what is missing."""
         hub, member = self.hub, req.member
-        if (hub.team is None or member is None or not isinstance(doc, str) or not doc.startswith("Clients/")
+        if (hub.team is None or member is None or not doc.startswith("Clients/")
                 or not hub.team_gate(member, doc)):
             raise Refuse(404, "no such document")
         return doc

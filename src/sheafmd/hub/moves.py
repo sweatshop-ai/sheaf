@@ -58,6 +58,12 @@ def _clear(hub, address: str, came_from: str | None):
         raise Refused(409, "A page moved away from that address, and its Forward stays: pick another folder or name.")
 
 
+def _quiet(hub, address: str):
+    """A Tell that runs on the page, or waits for its reply, holds the page's address: it is moved when that ends."""
+    if hub.tell_live(address):
+        raise Refused(409, "A Tell is running on this page: move it when that ends.")
+
+
 def move_page(hub, member, address: str, folder: str) -> str:
     """The page at `address`, put in `folder` of its root under the same file name: its new address. Raises `Refused`."""
     folder = _folder(folder)
@@ -68,6 +74,7 @@ def move_page(hub, member, address: str, folder: str) -> str:
             raise Refused(409, "The page is in that folder already.")
         new = str(Address(root.name, new_rel))
         _clear(hub, new, address)
+        _quiet(hub, address)
         with place.held(hub, address), place.held(hub, new):
             _put(hub, root, rel, new_rel, address, new)
             hub.moved_page(address, new, member.name)
@@ -158,6 +165,7 @@ def move_folder(hub, member, folder: str, to: str) -> list:
             if os.path.lexists(top / new_rel):
                 raise Refused(409, f"A page named {new_rel.rsplit('/', 1)[-1]} is in {to} already: nothing was moved.")
             _clear(hub, new, old)
+            _quiet(hub, old)
             plan.append((rel, new_rel, old, new))
         done = []
         for rel, new_rel, old, new in plan:

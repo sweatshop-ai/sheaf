@@ -10,7 +10,7 @@
 // one id: when the session id is another one it stops and forgets its tiroirs, backoff and Tell in flight, and an answer
 // that arrives for an id that is no longer the session's is dropped, so its Tells wait at the door for that id.
 import type { Register } from 'claude-code'
-import { accept, addDoor, deliveredToKeep, type Door, type DoorState, doorOfTool, echoedSession, fresh, nextGap, originOf, type Poller, POLL_TIMEOUT_MS, putBack, shouldPoll, takeNext, tellText, type Tell, WAIT_SECONDS } from './core'
+import { accept, addDoor, type Door, doorKey, type DoorState, doorOfTool, echoedSession, fresh, nextGap, originOf, type Poller, POLL_TIMEOUT_MS, pruneStored, putBack, shouldPoll, storedByDoor, takeNext, tellText, type Tell, WAIT_SECONDS } from './core'
 
 /** One long-poll of the door for this session, through the laptop's own `sheaf tells-poll`, so the token stays in the
  *  keyring and never reaches this module. It prints a JSON array of Tells. */
@@ -41,18 +41,18 @@ function leave(m: Mod) {
   m.p.doors = []
   m.p.armedFor = ''
   m.p.held = []
+  m.p.stored.clear()      // what is kept belongs to the id that left; a resume of it reads it back
   m.p.submittingUntil = 0      // a re-armed session has no Tell in flight; each door's backoff went with its state
 }
 
-/** Tells submitted in a session stay known to it after a `claude --resume`: the door lists a Tell until the session
- *  answers it, and a resumed session has the submitted Tell in its transcript already. */
+/** What is kept for a session that is resumed (`claude --resume`): the Tells whose submit succeeded and that the door
+ *  still lists. The door lists a Tell until the session answers it, and a resumed session has the submitted Tell in its
+ *  transcript already. A write that fails costs a resume one repeated Tell, never a lost one. */
 const deliveredKey = (session: string) => `delivered:${session}`
 
-async function keepDelivered($: any, m: Mod) {
-  if (!m.p.armedFor) return      // the poller left the session meanwhile
-  const keep = deliveredToKeep(m.p)
-  m.p.delivered = new Set(keep)
-  await $.store.set(deliveredKey(m.p.armedFor), keep).catch(() => {})      // best effort: a store that fails costs a resume one repeated Tell, never a Tell
+async function keepDelivered($: any, m: Mod, session: string) {
+  if (m.p.armedFor !== session) return      // the poller left the session meanwhile
+  await $.store.set(deliveredKey(session), storedByDoor(m.p)).catch(() => {})
 }
 
 /** One Tell per turn: while its turn runs, `running` holds the next one back. */
@@ -62,11 +62,16 @@ async function deliver($: any, m: Mod) {
   if ((await $.session.id()) !== p.armedFor) return leave(m)
   const t = takeNext(p, m.running === 0, m.interrupted, await $.clock.now())
   if (!t) return
-  await keepDelivered($, m)
   // A submit that fails keeps the Tell: the door lists it until the session answers it, and it is offered again.
+  // It is recorded for a resume only once its submit has succeeded.
   // Not awaited: a submit may resolve only when its turn ends, and this runs inside `turn.complete`.
-  $.prompt.submit({ text: tellText(t) }).then((r: any) => { if (r?.drop !== undefined) putBack(p, t) }, () => putBack(p, t))
-    .then(() => keepDelivered($, m))
+  const session = p.armedFor
+  $.prompt.submit({ text: tellText(t) }).then(async (r: any) => {
+    if (r?.drop !== undefined) return putBack(p, t)
+    if (p.armedFor !== session || !t.door) return
+    p.stored.set(t.id, t.door)
+    await keepDelivered($, m, session)
+  }, () => putBack(p, t))
 }
 
 /** One poll of one door, for the session id it is made under. An answer that arrives when the session is another is
@@ -78,7 +83,11 @@ async function pollDoor($: any, m: Mod, d: DoorState) {
   d.busy = true
   try {
     const tells = await poll($, d.door, id)
-    if ((await $.session.id()) === id && p.doors.includes(d)) accept(p, tells)
+    if ((await $.session.id()) === id && p.doors.includes(d)) {
+      const key = doorKey(d.door)
+      accept(p, tells, key)
+      if (pruneStored(p, key, tells)) await keepDelivered($, m, id)
+    }
     d.failures = 0
   } catch {
     d.failures += 1
@@ -169,7 +178,9 @@ export const register: Register = (on) => {
     const id = await $.session.id()
     const doors: any = await $.store.get(doorsKey(id))
     const sent: any = await $.store.get(deliveredKey(id))
-    if (Array.isArray(sent)) for (const t of sent) if (typeof t === 'string') m.p.delivered.add(t)
+    if (sent && typeof sent === 'object' && !Array.isArray(sent)) {
+      for (const [key, ids] of Object.entries(sent)) if (Array.isArray(ids)) for (const t of ids) if (typeof t === 'string') { m.p.delivered.add(t); m.p.stored.set(t, key) }
+    }
     if (Array.isArray(doors) && !m.p.doors.length) for (const door of doors) if (isDoor(door)) await arm($, m, door)
     return next(e)
   })

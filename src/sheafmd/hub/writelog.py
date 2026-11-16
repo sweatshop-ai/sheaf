@@ -62,6 +62,7 @@ class WriteLog:
         self._lines: dict[str, deque] = {}
         self._pulling: set[str] = set()
         self._left: dict[str, str] = {}
+        self._own: dict[str, str] = {}
         self._load()
 
     def _load(self):
@@ -138,3 +139,20 @@ class WriteLog:
         """Whether a change a page just saw, to the text of `hash_`, is a pull's."""
         with self._lock:
             return address in self._pulling or self._left.pop(address, None) == hash_
+
+    # A write of the door puts its text on disk before the hub is told of it; a look at the file between the two sees a
+    # change that is the door's own. Its hash is kept from before the write: the first look that finds it is the door's, a
+    # look that finds another text drops it, so it never swallows a later write.
+    def expect_own(self, address: str, hash_: str):
+        with self._lock:
+            self._own[address] = hash_
+
+    def is_own(self, address: str, hash_: str) -> bool:
+        """Whether a change a page just saw, to the text of `hash_`, is a door write's own."""
+        with self._lock:
+            return self._own.pop(address, None) == hash_
+
+    def told(self, address: str):
+        """The hub has been told of the door's write: nothing of it is left to expect."""
+        with self._lock:
+            self._own.pop(address, None)

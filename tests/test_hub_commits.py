@@ -1070,6 +1070,19 @@ def test_a_poll_fetches_a_repo_once_however_many_of_its_roots_push(tmp_path, rem
     assert made == []
 
 
+def test_a_pull_names_the_author_of_a_file_of_a_root_that_is_a_folder_of_its_repo(tmp_path, remote):
+    """The changed paths git gives are relative to the top of the repo, so the author is looked up from there."""
+    from sheafmd.hub import commits
+    repo, a, b = one_repo(tmp_path, remote)
+    merged_on_github(tmp_path, remote, {"acme/plan.md": "# acme, on GitHub\n"}, "on GitHub")
+    told = []
+    hub_commits = commits.Commits(lambda kind, doc, **detail: None,
+                                  pulled=lambda folder, files, ok, left=None: told.append((files, ok)))
+    hub_commits.poll([a, b])
+    assert hub_commits.settle()
+    assert told == [([(repo / "acme" / "plan.md", "Ada")], True)]
+
+
 def test_one_cause_in_a_repo_of_two_roots_is_one_push_diverged_row(tmp_path, remote, monkeypatch):
     """A remote that changed what the box committed meets the poll of each root of the repo: one cause, one row."""
     from sheafmd.hub import commits

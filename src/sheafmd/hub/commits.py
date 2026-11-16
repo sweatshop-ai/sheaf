@@ -624,10 +624,10 @@ class Commits:
                    if p]
         # The writers' locks first, the repo's last (9.11): no write of a file the remote changed comes between
         # the look at it and its new text, and no commit of any root of the repo between the hub's HEAD read and moved.
-        # Who last wrote each .md file, read before the work tree moves; the Write log's window opens now and closes however
-        # the pull ends, so the page that takes the pull in is never taken for a disk write, nor a later write for the pull.
-        authors = [(top / p, _author(folder, theirs, p)) for p in changed if p.endswith(".md")]
-        self._tell(self._pulling, address, folder, authors)
+        # The Write log's window opens now and closes however the pull ends, so the page that takes the pull in is never
+        # taken for a disk write, nor a later write for the pull.
+        pages = [top / p for p in changed if p.endswith(".md")]
+        self._tell(self._pulling, address, folder, [(path, "?") for path in pages])
         go, left = False, {}
         try:
             with self._guard(root, [top / p for p in changed]), self._repo_lock(folder):
@@ -635,9 +635,12 @@ class Commits:
                 go = self._catch_up(folder, theirs, address, record)
                 if go:
                     self._last_seen(folder, name, theirs)
-                left = {path: _hash_of(path) for path, _ in authors}   # the text the pull left, before a writer's lock is let go
+                left = {path: _hash_of(path) for path in pages}   # the text the pull left, before a writer's lock is let go
         finally:
-            self._tell(self._pulled, address, folder, authors, go is not False, left)
+            # Who last wrote each page, asked of the commit pulled, which the locks do not guard: a slow git holds up no writer.
+            ok = go is not False
+            authors = [(path, _author(top, theirs, path.relative_to(top).as_posix()) if ok else "?") for path in pages]
+            self._tell(self._pulled, address, folder, authors, ok, left)
         return go
 
     def _tell(self, call, address, *args):

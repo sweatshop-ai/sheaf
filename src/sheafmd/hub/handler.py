@@ -687,13 +687,14 @@ class Handler:
         req.body = body
 
     # ── helpers for the routes ───────────────────────────────────────────────
-    def _owned(self, req: Req, doc):
+    def _owned(self, req: Req, doc, never_read: bool = True):
         """The address `doc` names, once the request may name it: text, and for a member one of their
         own roots and none whose visibility is its owner's alone when they are not the owner (9.11). Reads
-        no more than the front matter, so it holds for a document that is gone."""
+        no more than the front matter, so it holds for a document that is gone. `never_read` is what a gone file the
+        hub never read is judged as (`Hub.visible`)."""
         _shape(isinstance(doc, str), "doc is missing")
         if req.member is not None and not (self.hub.member_owns(req.member, doc)
-                                           and self.hub.visible(req.member, doc)):
+                                           and self.hub.visible(req.member, doc, never_read)):
             raise Refuse(404, "no such document")
         return doc
 
@@ -831,7 +832,7 @@ class Handler:
     def _writes(self, req: Req) -> Response:
         """The Write log of one rectoverso: its lines, the last write and the last line that named an agent session. A
         member reads the lines of a document they may name, no other (9.9)."""
-        doc = self._owned(req, req.query.get("doc"))
+        doc = self._owned(req, req.query.get("doc"), never_read=False)     # the lines outlive a restart, whom the page was visible to does not
         log = self.hub.writes
         return _ok(lines=[asdict(l) for l in log.lines(doc)], last=_line(log.last(doc)),
                    last_session=_line(log.last_session(doc)))

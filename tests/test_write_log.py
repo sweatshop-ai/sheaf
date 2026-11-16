@@ -240,3 +240,35 @@ def test_a_pull_whose_author_lookup_fails_still_goes_through_with_an_unknown_aut
     assert agents.hub.commits.settle()
     assert "merged on the remote" in plan_text(agents)                 # the pull went through
     assert [(l["writer"], l["via"]) for l in lines(agents)["lines"]] == [("git · ?", "pull")]
+
+
+def test_a_door_write_the_watcher_sees_before_the_door_has_told_the_hub_leaves_no_disk_line(agents, monkeypatch):
+    e = agents.hub.entry(DOC)
+    real = agents.hub.wrote
+
+    def watcher_first(address, moved=False):
+        agents.hub.catch_up(e)                      # the watcher looks at the file between the write and `wrote()`
+        real(address, moved)
+
+    monkeypatch.setattr(agents.hub, "wrote", watcher_first)
+    update(agents, "bea-claude")
+    agents.hub.catch_up(e)
+    assert [l["via"] for l in lines(agents)["lines"]] == ["update"]
+
+
+def test_a_door_write_does_not_swallow_a_later_editor_write(agents):
+    e = agents.hub.entry(DOC)
+    update(agents, "bea-claude")
+    f = agents.hub.file(DOC)
+    f.write_text(f.read_text(encoding="utf-8") + "\nWritten by an editor.\n", encoding="utf-8")
+    agents.hub.catch_up(e)
+    assert [l["via"] for l in lines(agents)["lines"]] == ["update", "disk"]
+
+
+def test_the_lines_of_a_page_that_is_gone_are_not_read_by_a_hub_that_never_saw_it(agents):
+    update(agents, "bea-claude")
+    assert agents.get(f"/_/writes?doc={DOC}", member=BEA).status == 200
+    agents.hub.file(DOC).unlink()
+    assert agents.get(f"/_/writes?doc={DOC}", member=BEA).status == 200      # known: judged as the hub last saw it
+    agents.hub._front.clear()                                                 # as a restarted hub: it knows nothing of it
+    assert agents.get(f"/_/writes?doc={DOC}", member=BEA).status == 404

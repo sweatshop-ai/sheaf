@@ -40,6 +40,7 @@ from . import state
 from . import targets as targets_mod
 from . import the_list
 from . import waiting as waiting_mod
+from . import session_tells as session_tells_mod
 from . import visibility
 from . import work as work_mod
 from .tell import Tell, who as session_who
@@ -161,6 +162,7 @@ class Hub:
         self.index = Index(self)
         self.tokens = state.Tokens()
         self.waiting_tells = waiting_mod.Waiting(self)    # the Tells that wait for an agent (9.8)
+        self.session_tells = session_tells_mod.SessionTells(self)    # the Tells that wait for a laptop session (9.8)
         self.relays = relay_mod.Relays()     # the forks' relay tokens, queued Tells and streams (9.14)
         self.box_waits = boxwait.BoxWaits(lambda: self.clock())    # the drops for James's window (9.12, #115)
         self.entries: dict[str, Entry] = {}
@@ -879,6 +881,7 @@ class Hub:
             # keep the root from being forgotten.
             try:
                 self.waiting_tells.end_root(name, "the folder was forgotten")
+                self.session_tells.end_root(name, "the folder was forgotten")
             except Exception:
                 self.record_exception("tell-end-failed")
             for address in [a for a in self.entries if a.startswith(roots_mod.Address.prefix(name))]:

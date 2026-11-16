@@ -85,14 +85,14 @@ def test_the_asked_for_event_stream_is_ignored(browser):
 
 def test_tools_list_names_the_eight_tools_each_with_a_schema(browser):
     tools = {t["name"]: t for t in result(door(browser, rpc("tools/list")))["tools"]}
-    assert sorted(tools) == ["create", "documents", "read", "render_report", "reply", "resolve", "threads", "update"]
+    assert sorted(tools) == ["create", "documents", "read", "render_report", "reply", "resolve", "tells", "threads", "update"]
     for t in tools.values():
         assert t["description"] and t["inputSchema"]["type"] == "object"
         assert t["inputSchema"]["additionalProperties"] is False
     req = {n: sorted(t["inputSchema"].get("required", [])) for n, t in tools.items()}
     assert req == {"documents": [], "threads": ["doc"], "reply": ["doc", "id", "text"],
                    "resolve": ["doc", "id"], "read": ["doc"], "create": ["doc", "text"],
-                   "update": ["doc", "expected_hash", "text"], "render_report": ["commit", "path", "repo"]}
+                   "update": ["doc", "expected_hash", "text"], "render_report": ["commit", "path", "repo"], "tells": []}
     props = tools["reply"]["inputSchema"]["properties"]
     assert props["role"]["enum"] == ["answer", "action"] and props["resolve"]["type"] == "boolean"
     assert tools["threads"]["inputSchema"]["properties"]["status"]["enum"] == ["open", "resolved", "all"]
@@ -104,7 +104,7 @@ def test_the_three_tools_that_only_read_say_so_and_the_five_that_write_say_nothi
     assert {n: t.get("annotations") for n, t in tools.items()} == {
         "documents": {"readOnlyHint": True}, "threads": {"readOnlyHint": True},
         "read": {"readOnlyHint": True}, "reply": None, "resolve": None, "create": None, "update": None,
-        "render_report": None}
+        "render_report": None, "tells": None}
 
 
 def test_a_tool_the_door_does_not_have_is_an_invalid_params_error(browser):

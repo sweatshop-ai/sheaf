@@ -298,6 +298,24 @@ def test_a_reply_that_is_cut_short_is_no_answer_at_all(monkeypatch):
     srv.close()
 
 
+def test_an_error_reply_that_is_cut_short_is_no_answer_at_all(monkeypatch):
+    import socket
+    import threading
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+
+    def serve():
+        conn, _ = srv.accept()
+        conn.recv(65536)
+        conn.sendall(b"HTTP/1.1 500 Oops\r\nContent-Length: 100\r\nContent-Type: application/json\r\n\r\n{\"ok\"")
+        conn.close()
+    threading.Thread(target=serve, daemon=True).start()
+    with pytest.raises(OSError):
+        outgoing.post(f"http://127.0.0.1:{srv.getsockname()[1]}", "transfer", {}, "tok", 5)
+    srv.close()
+
+
 # ── a move that does not complete leaves everything as it was ────────────────
 
 def test_a_link_that_is_down_leaves_the_page_and_every_store_as_they_were(two):

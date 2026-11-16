@@ -55,10 +55,13 @@ def post(origin: str, verb: str, body: dict, token: str, seconds: float | None =
     try:
         with urllib.request.urlopen(req, timeout=seconds or channel.SECONDS) as res:
             status, raw = res.status, res.read()
-    except urllib.error.HTTPError as e:
-        status, raw = e.code, e.read()
-    except http.client.HTTPException as e:      # a reply cut short or not HTTP: no answer, as a cut connection is none
-        raise OSError(f"the other shared Sheaf's reply was not a whole one ({type(e).__name__})") from None
+    except (urllib.error.HTTPError, http.client.HTTPException) as e:
+        if not isinstance(e, urllib.error.HTTPError):       # a reply cut short or not HTTP: no answer, as a cut connection is none
+            raise OSError(f"the other shared Sheaf's reply was not a whole one ({type(e).__name__})") from None
+        try:
+            status, raw = e.code, e.read()
+        except http.client.HTTPException as cut:             # an error reply whose body was cut short is no answer either
+            raise OSError(f"the other shared Sheaf's reply was not a whole one ({type(cut).__name__})") from None
     try:
         return status, json.loads(raw.decode("utf-8")) if raw else None
     except ValueError:

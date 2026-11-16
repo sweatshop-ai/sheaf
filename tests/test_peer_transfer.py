@@ -326,3 +326,12 @@ def test_a_page_that_moves_back_carries_no_write_log_line_the_address_already_ke
            for line in members.hub.writes.lines(GONE) if line.via != "transfer"]
     assert len(own) == len(set(own)) == len(sent)
     assert isinstance(members.hub.writes, WriteLog)
+
+
+def test_two_identical_lines_in_one_bundle_are_both_kept(members):
+    forwarded(members)
+    line = {"time": "2026-11-10T09:00:00", "writer": "Claude Code (Bea)", "place": "laptop", "via": "door",
+            "session": "s-1", "host": "", "link": "", "chat": ""}
+    res = back(members, peer_token(origin=ELSEWHERE), writes=[line, dict(line)])      # two writes in the same second
+    assert res.status == 200, res.text
+    assert len([w for w in members.hub.writes.lines(GONE) if w.via == "door"]) == 2

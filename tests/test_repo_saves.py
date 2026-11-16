@@ -259,7 +259,7 @@ def test_no_door_path_judges_a_clone_page_on_its_raw_front_matter(hub_repos):
     agent and a token bound to nobody neither read, list nor update it (SPEC 14)."""
     text = served(hub_repos)
     assert "visibility" not in text
-    loose = Tokens().add("loose", write=True).token
+    loose = Tokens().add("loose", write=True)
     hub_repos.tokens["loose"] = loose
     bad, said = door_call(hub_repos, "bea-claude", "read", doc=ADDRESS)
     assert not bad, said

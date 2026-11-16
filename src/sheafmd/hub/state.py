@@ -364,16 +364,32 @@ class NewToken(str):
         return self
 
 
+PEER_SCOPES = ("transfer", "read")      # what a peer tiroir's token may ask of this one (ticket 20, 23)
+
+
 def _row_addable(row: dict) -> bool:
     """Whether `Tokens.add` could have written this row's name and display: a name that fullmatches
     `_TOKEN_NAME_RE`, and either a display that is a string `clean_display` leaves as it is and not empty,
-    or (an agent's) a `client` that `client_ok` accepts and no display."""
+    or (an agent's) a `client` that `client_ok` accepts and no display. A peer's row (`add_peer`) has neither:
+    an origin, and scopes that are all of `PEER_SCOPES`."""
     name, display = row.get("name"), row.get("display")
     if not (isinstance(name, str) and _TOKEN_NAME_RE.fullmatch(name) is not None):
         return False
+    if "peer" in row:
+        return (isinstance(row["peer"], str) and row["peer"] != "" and "display" not in row and "client" not in row
+                and _scopes_ok(row.get("scopes", ["transfer"])))
     if "client" in row:
         return "display" not in row and client_ok(row["client"])
     return isinstance(display, str) and display != "" and clean_display(display) == display
+
+
+def _scopes_ok(scopes) -> bool:
+    return isinstance(scopes, list) and all(isinstance(x, str) and x in PEER_SCOPES for x in scopes)
+
+
+def _scopes_of(entry: dict) -> tuple | None:
+    scopes = entry.get("scopes")
+    return tuple(x for x in scopes if isinstance(x, str)) if isinstance(scopes, list) else None
 
 
 def _text(v) -> str | None:
@@ -394,6 +410,14 @@ class TokenRow:
     id: str | None = None           # random, written by `add`: tells a revoked token from a new one of its name; none on older rows
     member: str | None = None       # a laptop's token (SPEC 9.7): the front's id of the member it acts for, kept in the row, not in the config
     laptop: str | None = None       # the name its member gave the laptop it was made for
+    peer: str | None = None         # a peer tiroir's token (ticket 20): the origin it was made for; it opens the channel and nothing else
+    scopes: tuple | None = None     # a peer's: what it may ask (`PEER_SCOPES`); None, a row with no field, is `transfer` only
+
+    def allows(self, scope: str) -> bool:
+        """Whether this is a peer's token that holds `scope`: a row with no `scopes` field transfers and does no more."""
+        if self.peer is None:
+            return False
+        return scope in (self.scopes if self.scopes is not None else ("transfer",))
 
     @classmethod
     def of(cls, entry) -> "TokenRow | None":
@@ -407,7 +431,8 @@ class TokenRow:
                    entry.get("created"), entry.get("last_used"), not _row_addable(entry),
                    client if isinstance(client, str) else None,
                    entry["id"] if isinstance(entry.get("id"), str) else None,
-                   _text(entry.get("member")), _text(entry.get("laptop")))
+                   _text(entry.get("member")), _text(entry.get("laptop")),
+                   _text(entry.get("peer")), _scopes_of(entry))
 
     def is_pair(self, name, tid) -> bool:
         """Whether a stored `token` name and `id` (a Tell's `token`, `tid`; a target's `token`, `id`) name this token:
@@ -515,6 +540,25 @@ class Tokens:
             self._write(rows)
         return NewToken(token, shown if client is None else "", client, token_id)
 
+    def add_peer(self, name: str, origin: str, scopes=None) -> NewToken:
+        """A peer tiroir's token (ticket 20): what the tiroir at `origin` sends to open the hub-to-hub channel of this one,
+        and nothing else, never the door. `scopes` is a list of `PEER_SCOPES`; None is `transfer` only, and is written
+        out, so no row reads as one with the field missing. The token is returned here and nowhere else."""
+        if not isinstance(name, str) or not _TOKEN_NAME_RE.fullmatch(name):
+            raise TokenError("a token name is 1 to 40 letters, digits, dots, dashes or underscores")
+        scopes = ["transfer"] if scopes is None else list(dict.fromkeys(scopes))
+        if not scopes or not _scopes_ok(scopes):
+            raise TokenError(f"a peer token's scope is one of {', '.join(PEER_SCOPES)}")
+        with self._locked():
+            rows = self._rows()
+            if any(r.get("name") == name for r in self._entries(rows)):
+                raise TokenError(f"a token named {name} already exists")
+            token = new_token()
+            rows.append({"name": name, "id": secrets.token_hex(8), "peer": origin, "scopes": scopes,
+                         "sha256": token_hash(token), "created": self._stamp(), "last_used": None, "write": False})
+            self._write(rows)
+        return NewToken(token, "", None, rows[-1]["id"])
+
     def list(self) -> list[TokenRow]:
         """Every token: its name, display name, created, last used and whether it may write. Never
         its hash."""
@@ -536,7 +580,11 @@ class Tokens:
         return [r for r in cls._entries(rows)
                 if isinstance(r.get("sha256"), str) and hmac.compare_digest(r["sha256"].encode("utf-8"), digest)]
 
-    def verify(self, token) -> TokenRow | None:
+    def verify_peer(self, token) -> TokenRow | None:
+        """The row of a peer tiroir's token, as `verify` judges it; None for any other kind of token."""
+        return self.verify(token, peer=True)
+
+    def verify(self, token, peer: bool = False) -> TokenRow | None:
         """The row of the token's owner (`name`, `display`, `write`), or None for a token that was never made
         or was revoked, or whose row `add` could not have written (a name that fails `_TOKEN_NAME_RE`, a display
         that is not a string, is empty or changes when cleaned), or whose hash more than one row holds.
@@ -546,14 +594,15 @@ class Tokens:
         found = self._holders(self._rows(), token_hash(token).encode("ascii"))
         # a row `add` could not have made (a hand-edited one) cannot be signed or audited, and a hash held
         # twice does not say whose token it is
-        if len(found) != 1 or not _row_addable(found[0]):
-            return None
+        if len(found) != 1 or not _row_addable(found[0]) or ("peer" in found[0]) is not peer:
+            return None             # a peer's token is the channel's alone, and a door's token never opens the channel
         row = found[0]
         if self._stale(row.get("last_used")) and not self._touch(row["sha256"]):
             return None
         return TokenRow(row["name"], row.get("display"), row.get("write") is True, client=row.get("client"),
                         id=row["id"] if isinstance(row.get("id"), str) else None,
-                        member=_text(row.get("member")), laptop=_text(row.get("laptop")))
+                        member=_text(row.get("member")), laptop=_text(row.get("laptop")),
+                        peer=_text(row.get("peer")), scopes=_scopes_of(row))
 
     def _stale(self, last_used) -> bool:
         try:

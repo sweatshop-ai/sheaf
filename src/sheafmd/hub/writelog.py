@@ -112,6 +112,25 @@ class WriteLog:
             self._append(line)
         return line
 
+    def carry(self, address: str, lines: list, came_from: str, by: str) -> int:
+        """The Write log lines of a page moved here (ticket 20), as they were, under its new `address`, each kept as the log
+        keeps one (cleaned); then one line of this tiroir's own that says it came by transfer, from `came_from`. Never raises, as
+        `add` does not. Returns how many of the carried lines were kept."""
+        n = 0
+        for got in lines:
+            if not isinstance(got, dict):
+                continue
+            line = Line(address=address, time=clean(got.get("time"), 40), writer=clean(got.get("writer")),
+                        place=clean(got.get("place"), 40), via=clean(got.get("via"), 40),
+                        session=clean(got.get("session"), MAX_SESSION), host=clean(got.get("host")),
+                        link=declared_link(got.get("link")), chat=clean(got.get("chat")))
+            with self._lock:
+                self._lines.setdefault(address, deque(maxlen=self._keep)).append(line)
+                self._append(line)
+            n += 1
+        self.add(address, by, "tiroir", "transfer", host=came_from)
+        return n
+
     @staticmethod
     def _append(line: Line):
         try:
@@ -178,6 +197,12 @@ class WriteLog:
         """Whether a change a page just saw, to the text of `hash_`, is a door write's own."""
         with self._lock:
             return self._own.pop(address, None) == hash_
+
+    def drop(self, address: str):
+        """Forget the in-memory lines of `address`: a page that was moved here and taken back. The file keeps what was written."""
+        with self._lock:
+            self._lines.pop(address, None)
+            self._own.pop(address, None)
 
     def told(self, address: str):
         """The hub has been told of the door's write: nothing of it is left to expect."""

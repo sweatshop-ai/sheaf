@@ -19,6 +19,7 @@ import argparse
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import time
@@ -35,7 +36,7 @@ from .hub import roots as hubroots
 from .hub import server as hubserver
 from .hub.auth import agent_name, clean_display, name_key
 from .hub.roots import url_path
-from .hub.state import TokenError, Tokens
+from .hub.state import PEER_SCOPES, TokenError, Tokens
 from .render import RenderError, UnclosedComment, render_file
 from .source import StaleError, Source, now, update_file
 
@@ -1049,8 +1050,9 @@ def cmd_token(argv: list[str]) -> int:
         except proxy.ProxyError as e:
             cfg, broken = None, e
         person = config.user_name()
-        shown = [(f"{r.client} -> (signed name unknown: the [proxy] table is broken)" if broken is not None
-                  else f"{r.client} -> {r.signed(person, cfg)}") if r.client is not None and not r.invalid else r.display_text
+        shown = [f"peer {r.peer}, scopes: {', '.join(r.scopes if r.scopes is not None else ('transfer',))}" if r.peer is not None and not r.invalid
+                 else (f"{r.client} -> (signed name unknown: the [proxy] table is broken)" if broken is not None
+                       else f"{r.client} -> {r.signed(person, cfg)}") if r.client is not None and not r.invalid else r.display_text
                  for r in rows]
         if broken is not None and any(r.client is not None and not r.invalid for r in rows):
             _err(f"sheaf: the [proxy] table in config.toml is broken, so the names an agent's token signs cannot be "
@@ -1068,6 +1070,45 @@ def cmd_token(argv: list[str]) -> int:
             _err(f"sheaf: no token named {args.name} in {tokens_file}")
             return EXIT_FAILED
         _out(f"  - token {args.name} revoked, in {tokens_file}")
+    return EXIT_OK
+
+
+def cmd_peer(argv: list[str]) -> int:
+    from . import connect
+    p = _parser("peer", "peer add ORIGIN [--scope SCOPE]... | use ORIGIN TOKEN",
+                "The channel between two shared Sheafs. `add` is run on the one that RECEIVES: it makes the token the "
+                "peer at ORIGIN sends, shown once. `use` is run on the one that SENDS: it keeps that token in the login "
+                "keyring. Pairing goes one way: a shared Sheaf that holds a token for another may send to it, not the reverse.")
+    sub = p.add_subparsers(dest="action", required=True, metavar="add|use")
+    add = sub.add_parser("add", usage="sheaf peer add ORIGIN [--scope transfer|read]...",
+                         help="make a peer token for the shared Sheaf at ORIGIN and print it once")
+    add.add_argument("origin", metavar="ORIGIN", help="the other shared Sheaf's address, https://host")
+    add.add_argument("--scope", action="append", choices=PEER_SCOPES, metavar="SCOPE",
+                     help="what the peer may ask: transfer (move a page here: the default) or read; give it again for both")
+    use = sub.add_parser("use", usage="sheaf peer use ORIGIN TOKEN", help="keep the token the peer at ORIGIN made for this one")
+    use.add_argument("origin", metavar="ORIGIN", help="the shared Sheaf that made the token, https://host")
+    use.add_argument("token", metavar="TOKEN", help="the token `sheaf peer add` printed there")
+    args = p.parse_args(argv)
+    try:
+        if args.action == "use":
+            origin = connect.use_peer(args.origin, args.token)
+            _out(f"  The token for {origin} is in your login keyring. It is not shown again.")
+            return EXIT_OK
+        origin = connect.origin_of(args.origin)
+        scopes = args.scope or ["transfer"]
+        host = re.sub(r"[^A-Za-z0-9._-]", "-", origin.removeprefix("https://"))[:35]
+        name = f"peer-{host}"
+        token = Tokens().add_peer(name, origin, scopes)
+    except connect.UsageError as e:
+        _err(f"sheaf: {e}")
+        return EXIT_USAGE
+    except (connect.ConnectError, TokenError) as e:
+        _err(f"sheaf: {e}")
+        return EXIT_FAILED
+    _out(f"  + peer token {name}, for {origin}, scopes: {', '.join(scopes)}")
+    _out(f"    {token}")
+    _out(f"  Written to {Tokens.path()}")
+    _out(f"  Shown once. Give it to the other shared Sheaf: `sheaf peer use <this Sheaf's address> <token>` there.")
     return EXIT_OK
 
 
@@ -1160,7 +1201,7 @@ COMMANDS.update({"open": cmd_open, "start": cmd_start, "stop": cmd_stop, "status
                  "hub": cmd_hub, "comments": cmd_comments, "comment": cmd_comment,
                  "reply": cmd_reply, "resolve": cmd_resolve, "reopen": cmd_reopen,
                  "diag": cmd_diag, "version": cmd_version, "list": cmd_list, "roots": cmd_roots,
-                 "token": cmd_token, "code": cmd_code, "mcp": cmd_mcp, "projects": cmd_projects,
+                 "token": cmd_token, "peer": cmd_peer, "code": cmd_code, "mcp": cmd_mcp, "projects": cmd_projects,
                  "connect": cmd_connect})
 COMMAND_HELP.update({
     "open": ("open FILE.md|URL [--no-browser] [render options]",
@@ -1184,6 +1225,8 @@ COMMAND_HELP.update({
     "mcp": ("mcp [--agent NAME]", "run the stdio MCP door for an agent (comments, replies, pages)"),
     "connect": ("connect URL TOKEN",
                 "connect this laptop to a shared Sheaf: token in the keyring, door in Claude Code, default address"),
+    "peer add": ("peer add ORIGIN [--scope SCOPE]...", "make the token another shared Sheaf sends to this one's channel; shown once"),
+    "peer use": ("peer use ORIGIN TOKEN", "keep, in the login keyring, the token another shared Sheaf made for this one"),
     "token add": ("token add NAME [--client CLIENT | --as DISPLAY] [--write]",
                   "make an MCP token for an agent that reaches the hub over HTTP; shown once"),
     "token list": ("token list", "MCP tokens: name, display name, created, last used"),

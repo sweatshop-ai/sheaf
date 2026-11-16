@@ -119,6 +119,7 @@ def _landed(hub, door, b, owner, deadline, peer: str | None = None) -> tuple:
     # the address stays, and refuses the landing as it refuses a create.
     back = _forward_back(hub, owner, b, peer)
     lifted = hub.forwards.lift_remote(back) if back is not None else {}
+    kept = hub.writes.lines(back) if back is not None else []      # what `moved_remote` kept at that address: a failed landing leaves it
     try:
         made = door._create(args, caller)
     except BaseException as e:
@@ -147,13 +148,16 @@ def _landed(hub, door, b, owner, deadline, peer: str | None = None) -> tuple:
         with contextlib.suppress(Exception):
             hub.versions.forget(address)
         with contextlib.suppress(Exception):
-            hub.writes.drop(address)
+            hub.writes.restore(address, kept if address == back else [])
         if (loose_root := hub.loose.known(owner)) is not None:
             with contextlib.suppress(loose.Refused, OSError):
                 _unkeep(loose_root, address)
                 _unarchive(loose_root, address)
         hub.forwards.put_back(lifted)
         raise
+    for earlier, was in lifted.items():     # the addresses the page had before it left lead to where it is again
+        if earlier != address:
+            hub.forwards.add(earlier, address, was.get("by", owner.name))
     return 200, {"ok": True, **answer}
 
 

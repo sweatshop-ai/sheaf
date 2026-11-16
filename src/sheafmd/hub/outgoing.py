@@ -167,7 +167,7 @@ def _transfer(hub, member, root, rel: str, address: str, origin: str, email: str
         except OSError:
             hub.record_exception("move-store-failed", address)
         _note(address, None)
-    finish()        # the entry's document takes the page's writer lock again: after the locks above are let go
+    finish()        # the hub's lock, the tabs and the index: after the page's locks are let go and its file is gone
     return {"doc": answer["address"], "origin": origin, "hash": answer["hash"]}
 
 

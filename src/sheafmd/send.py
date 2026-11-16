@@ -253,14 +253,16 @@ class Door:
 @dataclasses.dataclass(frozen=True)
 class Report:
     """The tiroir's answer to a render report once every hop of it is checked: what `report_page` reads, never the raw
-    answer. `commit_known` is a bool for `ok` and None otherwise; `install` is the App's link for `no-app`."""
+    answer. `commit_known` is a bool for `ok` and None otherwise; `install` is the App's link for `no-app`; `moved_to` is
+    the origin a `moved` root went to."""
     clone: str
     commit_known: bool | None = None
     install: str | None = None
+    moved_to: str | None = None
 
 
 _ANSWERS = (repos_mod.OK, repos_mod.NO_APP, repos_mod.NO_CLONES, repos_mod.PRIVATE_ROOT, repos_mod.CLONING,
-            repos_mod.NOT_CLONED)
+            repos_mod.NOT_CLONED, repos_mod.MOVED)
 
 
 def parse_report(origin: str, got: object) -> Report:
@@ -279,7 +281,10 @@ def parse_report(origin: str, got: object) -> Report:
         raise bad("an ok without a commit_known yes or no")
     if install is not None and not isinstance(install, str):
         raise bad("an install link that is no text")
-    return Report(clone, known if clone == repos_mod.OK else None, install)
+    moved_to = got.get("moved_to")
+    if clone == repos_mod.MOVED and not (isinstance(moved_to, str) and moved_to):
+        raise bad("a moved without the origin it moved to")
+    return Report(clone, known if clone == repos_mod.OK else None, install, moved_to if clone == repos_mod.MOVED else None)
 
 
 def member_name(origin: str, token: str) -> str | None:
@@ -488,6 +493,10 @@ def report_page(md: Path, top: Path, origin: str, token: str, args, out, err, en
         return None
     if clone == repos_mod.CLONING:
         err(f"sheaf: the tiroir is cloning {repo}; the next render goes there. {md} renders on this laptop this time.")
+        return None
+    if clone == repos_mod.MOVED:
+        err(f"sheaf: {repo} moved to {report.moved_to.split('://', 1)[-1]}: pull the commit that set tiroir = "
+            f"\"{report.moved_to}\" in its .sheaf.toml, then run sheaf again. {md} renders on this laptop.")
         return None
     if clone == repos_mod.NOT_CLONED:
         err(f"sheaf: {origin.split('://', 1)[-1]} has not cloned {repo}, so {md} renders on this laptop.")

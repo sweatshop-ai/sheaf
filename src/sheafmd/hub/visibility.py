@@ -253,6 +253,12 @@ def widens(old, new) -> bool:
     return new is True or not new <= old
 
 
+def only_names_in(shared, allowed) -> bool:
+    """Whether the `audience` `shared` opens a page to nobody outside the `short` names `allowed` (lower-cased): a plain
+    Share opens it to every member, so it is never within a list of names."""
+    return shared is None or (shared is not True and shared <= allowed)
+
+
 def narrows(old, new) -> bool:
     """Whether the `audience` `new` opens a page to fewer members than `old` did, and still opens it to some: a plain Share
     over names, or names over fewer names. Closing every Share is `withdraws_share`'s."""

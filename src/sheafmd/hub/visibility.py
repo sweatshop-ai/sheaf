@@ -211,9 +211,82 @@ def share(text_: str, by: str, date: str) -> str:
     return set_keys(text_, {"visibility": "project", "shared": f"{by} {date}"})
 
 
-_BOX_RE = re.compile(r"(\s*[-*+] \[)([ xX])(\] (Shared with the team|Share|Stop James)(?:\s+@\S+)?\s*)")
+_BOX_RE = re.compile(r"(\s*[-*+] \[)([ xX])(\] (Shared with the team|Share with [A-Za-z0-9_][A-Za-z0-9_.-]*(?:\s*,\s*[A-Za-z0-9_][A-Za-z0-9_.-]*)*|Share|Stop James)(?:\s+@\S+)?\s*)")
 # Share's tick box says it in its own words (9.11); the word is Share. The_list.LABELS holds the same, and imports this module.
+# `Share with <short>, <short>` is Share too, naming who it opens to.
 _LABELS = {"Shared with the team": "Share"}
+_NAMES_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")
+
+
+def _word(label: str) -> str:
+    """The word of an action's label: `Share` for `Shared with the team` and for `Share with <names>`."""
+    return "Share" if label.startswith("Share with ") else _LABELS.get(label, label)
+
+
+def audience(text_: str):
+    """Who a page's ticked Share opens it to (9.11): None when no Share line is ticked, True for a plain `Share`
+    (every member of the tiroir), else the frozenset of the `short` names, lower-cased, that a ticked `Share with`
+    names. A plain Share wins over names. Lines are read in the list blocks the page draws, so one in a fence or a
+    comment is none."""
+    named, everyone = set(), False
+    for b in split_md_blocks(text_):
+        if b.kind != "list":
+            continue
+        for line in _lines(b.content):
+            m = _BOX_RE.fullmatch(line)
+            if not m or m.group(2) not in "xX" or _word(m.group(4)) != "Share":
+                continue
+            if m.group(4).startswith("Share with "):
+                named |= {n.casefold() for n in _NAMES_RE.findall(m.group(4)[len("Share with "):])}
+            else:
+                everyone = True
+    return True if everyone else (frozenset(named) if named else None)
+
+
+def widens(old, new) -> bool:
+    """Whether the `audience` `new` opens a page to anyone that `old` did not: a Share ticked where none was, a plain Share
+    over names, a name added. Closing a Share, or naming fewer, widens nothing."""
+    if new is None or old is True:
+        return False
+    if old is None:
+        return True
+    return new is True or not new <= old
+
+
+def narrows(old, new) -> bool:
+    """Whether the `audience` `new` opens a page to fewer members than `old` did, and still opens it to some: a plain Share
+    over names, or names over fewer names. Closing every Share is `withdraws_share`'s."""
+    if old is None or new is None or not isinstance(new, frozenset):
+        return False
+    return old is True or new < old
+
+
+def names_only(text_: str) -> str:
+    """The sheaf `text_` once its audience is names: `visibility: owner` and the `shared` mark only when the text still holds
+    one (narrowing never makes a mark: a page that draws on a private source stays closed to the named until its owner
+    marks it), the form `Hub.named` reads, so a member no longer named loses the page at once."""
+    return set_keys(text_, {"visibility": "owner", "shared": text(front_matter(text_), "shared") or None})
+
+
+def share_lines(text_: str) -> list:
+    """Every Share box of the list blocks the page draws, as (ticked, label) in page order: what a non-owner may not change,
+    whatever the `audience` it computes (a ticked `Share with carol` behind a plain Share leaves it `True`)."""
+    out = []
+    for b in split_md_blocks(text_):
+        if b.kind == "list":
+            for line in _lines(b.content):
+                m = _BOX_RE.fullmatch(line)
+                if m and _word(m.group(4)) == "Share":
+                    out.append((m.group(2) in "xX", " ".join(m.group(4).split())))
+    return out
+
+
+def reaches(shared, member) -> bool:
+    """Whether the `audience` `shared` of a page opens it to `member`: every member for True, else the one whose
+    `short` it names."""
+    if shared is True:
+        return True
+    return bool(shared) and bool(member.short) and member.short.casefold() in shared
 
 
 def unshare(text_: str) -> str:
@@ -231,11 +304,59 @@ def newly_ticked(toggled) -> set:
     return _flipped(toggled, " ", "xX")
 
 
+def valid_names(names) -> bool:
+    """Whether `names` is a non-empty list of short names, as `Share with <names>` may carry."""
+    return isinstance(names, list) and bool(names) and all(isinstance(n, str) and _NAMES_RE.fullmatch(n) for n in names)
+
+
+def with_share_line(text_: str, names=()) -> str:
+    """`text_` with an unticked `- [ ] Share` (`Share with <names>`) line of its own: under the page's first `# ` heading
+    when that opens the body, else first in the body, after any front matter."""
+    cr = "\r" if "\r\n" in text_ else ""         # a CRLF page keeps its own line end on every line added
+    line = "- [ ] " + ("Share with " + ", ".join(names) if names else "Share")
+    lines = text_.split("\n")
+    end = _end(_lines(text_))
+    at = end + 1 if end >= 0 else 0
+    while at < len(lines) and not lines[at].strip():
+        at += 1
+    if at < len(lines) and lines[at].startswith("# "):
+        at += 1
+        lines[at:at] = [cr, line + cr]
+        if at + 2 < len(lines) and lines[at + 2].strip():
+            lines.insert(at + 2, cr)
+    else:
+        lines[at:at] = [line + cr, cr]
+    return "\n".join(lines)
+
+
 def withdraws_share(old: str, new: str) -> bool:
     """Whether writing `new` over `old` unticks Share, by whatever edit (9.11, #40): `old` holds a ticked Share box
     and `new` holds Share boxes, none of them ticked. Boxes are read in the list blocks the page draws, so a box in
     a fence or a comment is none."""
     return _share_box(old) == "x" and _share_box(new) == " "
+
+
+def unticked_share_line(text_: str) -> int | None:
+    """The 0-based line of the first unticked Share box (`Share`, `Share with <names>`) in a list block the page draws, else None."""
+    for b in split_md_blocks(text_):
+        if b.kind == "list":
+            for k, line in enumerate(_lines(b.content)):
+                if (m := _BOX_RE.fullmatch(line)) and _word(m.group(4)) == "Share" and m.group(2) == " ":
+                    return b.start + k
+    return None
+
+
+def without_ticked_share(text_: str) -> str:
+    """`text_` with every ticked Share box (`Share`, `Share with <names>`) of the list blocks the page draws unticked."""
+    lines = text_.split("\n")
+    for b in split_md_blocks(text_):
+        if b.kind == "list":
+            for k, line in enumerate(_lines(b.content)):
+                m = _BOX_RE.fullmatch(line)
+                if m and _word(m.group(4)) == "Share" and m.group(2) in "xX":
+                    at = b.start + k
+                    lines[at] = lines[at][:m.start(2)] + " " + lines[at][m.end(2):]
+    return "\n".join(lines)
 
 
 def _share_box(text_: str) -> str | None:
@@ -244,7 +365,7 @@ def _share_box(text_: str) -> str | None:
     for b in split_md_blocks(text_):
         if b.kind == "list":
             for line in _lines(b.content):
-                if (m := _BOX_RE.fullmatch(line)) and _LABELS.get(m.group(4), m.group(4)) == "Share":
+                if (m := _BOX_RE.fullmatch(line)) and _word(m.group(4)) == "Share":
                     marks.add(m.group(2).lower())
     return "x" if "x" in marks else (" " if marks else None)
 
@@ -259,7 +380,7 @@ def _flipped(toggled, was_marks: str, now_marks: str) -> set:
             m, n = _BOX_RE.fullmatch(was), _BOX_RE.fullmatch(now)
             if m and n and m.group(2) in was_marks and n.group(2) in now_marks \
                     and (m.group(1), m.group(3)) == (n.group(1), n.group(3)):
-                words.add(_LABELS.get(m.group(4), m.group(4)))
+                words.add(_word(m.group(4)))
     return words
 
 
@@ -278,7 +399,9 @@ def for_door(text_: str, old: str | None) -> str:
     mine = {s for s in sources(fm) if private(s)}
     kept = text(was, "shared") if text(was, "shared") and mine <= set(sources(was)) else None
     want = "owner" if closed or (mine and not kept) else "project"
-    values = {"visibility": want, "shared": kept if want == "project" else None}
+    # The mark stays on a closed page too: a `Share with <names>` tick on a page with a private source is `owner` with
+    # the owner's mark, and `Hub.named` reads it to open the page to the names; `kept` is None once the write adds a private source.
+    values = {"visibility": want, "shared": kept}
     if old is not None:
         # an update neither gives nor changes the owner, nor the issue whose assignee is the owner; the door
         # gives a rectoverso that no member owns its token's member (mcp `_owned`, #30)

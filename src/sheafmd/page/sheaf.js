@@ -141,6 +141,19 @@ function render(data, target) {
     var t = el('td', 'sheaf-title'), a = el('a', null, r.title);
     href(a, r.url);
     t.append(a);
+    if (r.new) {                                // a page Shared with the member that changed since they opened it
+      var dot = el('span', 'sheaf-new', 'new');
+      dot.title = 'New or changed since you last opened it';
+      t.append(' ', dot);
+    }
+    if (r.shared_by) t.append(' ', el('span', 'sheaf-shared-by', 'shared by ' + r.shared_by));
+    if (r.share) {                              // the member's own loose page that no Share line opens: the button writes the line
+      var sb = el('button', 'sheaf-share', 'Share');
+      sb.type = 'button';
+      sb.dataset.hash = r.share;
+      sb.title = 'Share this page with every member of the tiroir';
+      t.append(' ', sb);
+    }
     var w = el('td', 'sheaf-write', r.write);
     if (r.write_tip) w.title = r.write_tip;
     var s = el('td', 'sheaf-session');
@@ -246,9 +259,37 @@ function create(ROOT, opts) {
     }, function (e) { if (mine === opened) { close(); say('The page could not be opened: ' + e.message); } });
   }
 
+  // The row's Share button (SPEC 9.11): the hub writes the page's Share line against the hash the row read, and ticks it.
+  function share(button) {
+    var tr = button.closest('.sheaf-row');
+    button.disabled = true;
+    say('');
+    fetch('/_/share', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ doc: tr.dataset.doc, hash: button.dataset.hash }) }).then(function (r) {
+      return r.json().then(function (b) { return { ok: r.ok && !(b && b.ok === false), error: b && b.error }; }, function () { return { ok: r.ok }; });
+    }).then(function (got) {
+      if (gone) return;
+      if (got.ok) {
+        var shared = button.ownerDocument.createElement('span');
+        shared.className = 'sheaf-shared';
+        shared.textContent = 'Shared';
+        button.replaceWith(shared);
+        return;
+      }
+      button.disabled = false;
+      say(got.error || 'The page could not be shared.');
+    }, function () {
+      if (gone) return;
+      button.disabled = false;
+      say('The page could not be shared: the hub does not answer.');
+    });
+  }
+
   function onClick(e) {
     var t = e.target;
     if (!t || !t.closest) return;
+    var sharing = t.closest('.sheaf-share');
+    if (sharing && !sharing.disabled) { e.preventDefault(); e.stopPropagation(); share(sharing); return; }
     var toggle = t.closest('.sheaf-toggle');
     if (toggle && !toggle.disabled) { fold(toggle); return; }
     var folder = t.closest('.sheaf-folder');

@@ -287,7 +287,7 @@ def test_an_ipv6_address_keeps_its_brackets_in_the_origin_and_not_in_the_entry_n
     assert origin == "https://[::1]:8443" and "[" not in connect.entry_name(origin)
 
 
-@pytest.mark.parametrize("empty", ['tiroir = ""', "tiroir = ''", 'tiroir = ""  # none yet', 'tiroir = """"""'])
+@pytest.mark.parametrize("empty", ['"tiroir" = ""', "'tiroir' = ''", 'tiroir = ""\r', 'tiroir = ""', "tiroir = ''", 'tiroir = ""  # none yet', 'tiroir = """"""'])
 def test_an_empty_default_in_the_config_is_filled_not_repeated(tiroir, keyring, capsys, empty):
     paths.config_file().parent.mkdir(parents=True, exist_ok=True)
     paths.config_file().write_text(f'name = "Ada"\n{empty}\n\n[jump]\ncommand = ["x"]\n')
@@ -295,6 +295,21 @@ def test_an_empty_default_in_the_config_is_filled_not_repeated(tiroir, keyring, 
     assert code == 0, err
     data = config.read_toml(paths.config_file(), config.USER_KEYS)       # a duplicate key would not parse
     assert data["tiroir"] == FRONT and data["name"] == "Ada" and data["jump"] == {"command": ["x"]}
+
+
+def test_port_zero_is_a_usage_error_not_the_default_port():
+    with pytest.raises(connect.UsageError):
+        connect.origin_of("https://a.com:0")
+
+
+def test_an_empty_default_written_in_a_form_sheaf_does_not_know_stops_the_command_before_anything_is_written(
+        tiroir, keyring, capsys):
+    paths.config_file().parent.mkdir(parents=True, exist_ok=True)
+    paths.config_file().write_text('tiroir = """\n"""\n')
+    code, _, err = run(capsys, FRONT, laptop(tiroir))
+    assert code == 1 and "Nothing was written" in err
+    assert keyring.items == {} and not claude_json().exists()
+    assert paths.config_file().read_text() == 'tiroir = """\n"""\n'
 
 
 @pytest.mark.parametrize("bad", ["name = ", 'port = "x"'])

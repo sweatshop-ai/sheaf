@@ -16,6 +16,7 @@ test replaces.
 import json
 import os
 import re
+import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -90,6 +91,8 @@ def origin_of(url: str) -> str:
         port = parts.port
     except ValueError:
         raise UsageError(f"{url!r} has a port that is not a number from 0 to 65535") from None
+    if port == 0:
+        raise UsageError(f"{url!r} has port 0, which no Sheaf listens on")
     host = parts.hostname.lower()
     if ":" in host:                  # an IPv6 address: urlsplit drops its brackets, an address needs them
         host = f"[{host}]"
@@ -175,31 +178,49 @@ def add_mcp_entry(origin: str, token: str) -> Path:
     return path
 
 
-def make_default(origin: str) -> bool:
-    """Write `tiroir = "<origin>"` into config.toml when the laptop has no default tiroir; whether it did. The rest of
-    the file is kept byte for byte; the line goes before the first table, where a top-level key belongs."""
+def _with_default(origin: str) -> str | None:
+    """config.toml's text with `tiroir = "<origin>"` in it, or None when the laptop already has a default. The rest of
+    the file is kept byte for byte; the line goes before the first table, where a top-level key belongs. A key left
+    empty is filled where it stands. ConnectError when the result would not read with the default in it (a form of
+    empty key this does not know): nothing is then written."""
     path = paths.config_file()
     if config.read_toml(path, config.USER_KEYS, warn=lambda line: None).get("tiroir"):
-        return False
+        return None
     text = path.read_text(encoding="utf-8") if path.exists() else ""
     line = f"tiroir = {json.dumps(origin)}\n"
     table = re.search(r"^\s*\[", text, re.M)
     at = table.start() if table else len(text)
     head = text[:at]
-    empty = re.search(r"^[ \t]*tiroir[ \t]*=[ \t]*(\"\"\"\"\"\"|\'\'\'\'\'\'|\"\"|\'\')[ \t]*(#[^\n]*)?$\n?", head, re.M)
+    empty = re.search(r"^[ \t]*[\"\']?tiroir[\"\']?[ \t]*=[ \t]*(\"\"\"\"\"\"|\'\'\'\'\'\'|\"\"|\'\')[ \t\r]*(#[^\n]*)?$\n?", head, re.M)
     if empty:                        # a default that was left empty: fill its line, a second key would not parse
-        write_text_atomic(path, head[:empty.start()] + line + head[empty.end():] + text[at:])
-        return True
-    glue = "" if not head or head.endswith("\n") else "\n"
-    write_text_atomic(path, head + glue + line + ("\n" if table and head.strip() else "") + text[at:])
+        out = head[:empty.start()] + line + head[empty.end():] + text[at:]
+    else:
+        glue = "" if not head or head.endswith("\n") else "\n"
+        out = head + glue + line + ("\n" if table and head.strip() else "") + text[at:]
+    try:
+        ok = tomllib.loads(out).get("tiroir") == origin
+    except tomllib.TOMLDecodeError:
+        ok = False
+    if not ok:
+        raise ConnectError(f"{path} has a `tiroir` entry that sheaf cannot fill in: set it to {origin!r} by hand "
+                           "or remove it, and run the command again. Nothing was written.")
+    return out
+
+
+def make_default(origin: str) -> bool:
+    """Write `tiroir = "<origin>"` into config.toml when the laptop has no default tiroir; whether it did."""
+    out = _with_default(origin)
+    if out is None:
+        return False
+    write_text_atomic(paths.config_file(), out)
     return True
 
 
-def check_config() -> None:
-    """The laptop's config.toml reads, before the token is stored: a file `make_default` cannot read would stop the
-    command after the token was already written."""
+def check_config(origin: str) -> None:
+    """The laptop's config.toml reads and can take the default, before the token is stored: a file `make_default`
+    cannot write would stop the command after the token was already written."""
     try:
-        config.read_toml(paths.config_file(), config.USER_KEYS, warn=lambda line: None)
+        _with_default(origin)
     except config.ConfigError as e:
         raise ConnectError(f"{e}. Mend that file and run the command again. Nothing was written.") from None
 
@@ -210,7 +231,7 @@ def connect(url: str, token: str, out=print) -> None:
     if not _TOKEN.fullmatch(token or ""):
         raise UsageError("that is not a Sheaf token: copy the whole `sheaf connect` line from Connect a laptop")
     check_door(origin, token)
-    check_config()
+    check_config(origin)
     store = system_store()
     store.set(SERVICE, origin, token)
     entry = add_mcp_entry(origin, token)

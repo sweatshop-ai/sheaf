@@ -208,3 +208,30 @@ def test_no_forward_leads_to_the_page_that_takes_the_address_of_a_deleted_one(te
     assert team.hub.file(b).exists()
     assert team.hub.forwards.follow(a) is None
     assert page(team, ALICE, a).status == 404
+
+
+# ── a forwards.json that cannot be written after the page is in the trash (round 7, minor) ───────────
+
+def test_a_forwards_file_that_cannot_be_written_after_the_page_is_in_the_trash_is_logged_and_the_delete_still_answers_200(team, monkeypatch):
+    from sheafmd.hub import state
+    a = in_folder(team, "a")
+    b = moved(team, ALICE, a, "b")
+    assert team.hub.forwards.follow(a) == b
+    told, touched, logged = [], [], []
+    real_write = state.write_json
+
+    def write_json(path, obj):
+        if path.name == "forwards.json":
+            raise PermissionError(13, "Permission denied")
+        return real_write(path, obj)
+    with monkeypatch.context() as m:
+        m.setattr(state, "write_json", write_json)
+        m.setattr(team.hub, "forget_document", told.append)
+        m.setattr(team.hub.index, "touch", touched.append)
+        m.setattr(team.hub, "record_exception", lambda kind, *a, **k: logged.append(kind))
+        got = delete(team, b)
+    assert got.status == 200, (got.status, got.text)
+    assert not team.hub.file(b).exists()
+    assert [r["id"].partition("/")[2] for r in team.hub.archive.trashed(root_of(team))] == [b.partition("/")[2]]
+    assert told == [b] and touched == [b]                       # the tabs open on it are told, the index is told
+    assert logged and logged[0] == "delete-forward-failed"

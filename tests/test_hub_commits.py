@@ -1920,3 +1920,20 @@ def test_the_write_log_of_a_renamed_page_is_at_its_new_address_alone(box, rectov
     rename_pull(box, rectoversos, remote, tmp_path)
     assert box.hub.writes.lines(DOC) == []
     assert [w.via for w in box.hub.writes.lines(NEW)][-1] == "pull"
+
+
+def test_a_read_of_the_renames_that_times_out_is_no_renames_and_the_pull_goes_through(box, rectoversos, remote, tmp_path, monkeypatch):
+    """The Write log's window of a pull closes however the pull ends: the look for renames is no reason to leave it open."""
+    from sheafmd.hub import commits
+    real = commits._git
+
+    def slow(folder, *args, **kw):
+        if "--diff-filter=R" in args:
+            raise subprocess.TimeoutExpired(args, 1)
+        return real(folder, *args, **kw)
+
+    monkeypatch.setattr(commits, "_git", slow)
+    rename_pull(box, rectoversos, remote, tmp_path)
+    assert (rectoversos / "acme" / "blog" / "2026-10-30-plan.md").exists()
+    assert box.hub.forwards.snapshot() == {}
+    assert not box.hub.writes._pulling

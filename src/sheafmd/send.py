@@ -20,7 +20,9 @@ keyring is `connect.system_store()`, which a test replaces too.
 import argparse
 import json
 import os
+import re
 import socket
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -46,6 +48,11 @@ class SendError(Exception):
     """A send that stops: the message is one sentence a person reads, and says what was left unchanged."""
 
 
+class Unreachable(SendError):
+    """The tiroir did not answer (no connection, a timeout, a 5xx): a loose page stops on it (the laptop hub's fallback is
+    its own step), a render report is dropped."""
+
+
 # ── the network: the two places a test stands in for the tiroir ─────────────
 
 def _request(req) -> tuple[int, dict | None, dict]:
@@ -53,10 +60,13 @@ def _request(req) -> tuple[int, dict | None, dict]:
         with connect._NO_REDIRECT.open(req, timeout=TIMEOUT) as r:
             raw, status, headers = r.read(8 << 20), r.status, {k.lower(): v for k, v in r.headers.items()}
     except urllib.error.HTTPError as e:
+        if e.code >= 500:
+            raise Unreachable(f"{req.full_url.split('/', 3)[2]} answered with an error ({e.code}). "
+                              "Nothing was sent.") from None
         return e.code, None, {}
     except (urllib.error.URLError, OSError) as e:
-        raise SendError(f"cannot reach {req.full_url.split('/', 3)[2]}: {getattr(e, 'reason', e)}. "
-                        "Nothing was sent.") from None
+        raise Unreachable(f"cannot reach {req.full_url.split('/', 3)[2]}: {getattr(e, 'reason', e)}. "
+                          "Nothing was sent.") from None
     return status, connect._json_of(raw.decode("utf-8", "replace")) if raw.strip() else None, headers
 
 
@@ -201,11 +211,10 @@ def keep_row(md: Path, row: dict):
 # ── which tiroir, and with which credential ──────────────────────────────────
 
 def tiroir_of(md: Path, warn) -> str | None:
-    """The tiroir a loose page goes to: its root's `.sheaf.toml`, else the laptop's default; None when there is none or
-    the page is in a git repo (a repo page travels by git)."""
+    """The tiroir a page goes to: its root's `.sheaf.toml`, else the laptop's default; None when there is none or the
+    page is inside a git directory."""
     folder = md.resolve().parent
-    place = config.git_place(folder)
-    if place.top is not None or place.in_git_dir:
+    if config.git_place(folder).in_git_dir:
         return None
     named = config.load_root_config(folder, warn).tiroir or config.load_user_config(warn).tiroir
     return connect.origin_of(named) if named else None
@@ -281,8 +290,88 @@ def _update(door: Door, md: Path, text: str, row: dict) -> dict:
     raise SendError(f"{got} Nothing was sent.")
 
 
+# ── a page in a git repo: the render report ──────────────────────────────────
+
+GITHUB_RE = re.compile(r"(?:https?://(?:[^/@]+@)?github\.com/|git@github\.com:|ssh://git@github\.com/)"
+                       r"([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?")
+
+
+def _git(top: Path, *args) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(["git", "-C", str(top), "--literal-pathspecs", *args], capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=30)
+    except (OSError, subprocess.SubprocessError) as e:
+        return subprocess.CompletedProcess(args, 1, "", str(e))
+
+
+class Local(Exception):
+    """A repo page that cannot be reported: one sentence of why, and the page renders on the laptop hub."""
+
+
+def _what_to_report(md: Path, top: Path, err) -> tuple[str, str, str]:
+    """(repo `owner/name`, path in the repo, commit) of the page: the commit is the last that changed it, and it must
+    be on the remote. Raises Local when there is nothing to report."""
+    remote = _git(top, "config", "--get", "remote.origin.url")
+    if remote.returncode != 0 or not remote.stdout.strip():
+        raise Local(f"{md} is in a git repo with no remote, so the tiroir cannot clone it: rendering it on this laptop.")
+    found = GITHUB_RE.fullmatch(remote.stdout.strip())
+    if not found:
+        raise Local(f"{md} is in a repo whose remote is not on GitHub, so the tiroir cannot clone it: rendering it "
+                    "on this laptop.")
+    path = md.resolve().relative_to(top).as_posix()
+    last = _git(top, "log", "-1", "--format=%H", "--", path).stdout.strip()
+    if not last:
+        raise Local(f"{path} is not committed yet: commit and push it, then run sheaf again. Rendering it on this laptop.")
+    if _git(top, "status", "--porcelain", "--", path).stdout.strip():
+        err(f"sheaf: {path} has uncommitted changes: the tiroir shows the text of {last[:8]}, the last commit that "
+            "changed it.")
+    if not _git(top, "branch", "-r", "--contains", last).stdout.strip():
+        raise Local(f"commit {last[:8]} of {path} is not on the remote yet: run git push, then sheaf again. Nothing "
+                    "was sent; rendering it on this laptop.")
+    return found.group(1), path, last
+
+
+def report_page(md: Path, top: Path, origin: str, token: str, args, out, err, environ) -> int | None:
+    """Tell the tiroir the page `md` of the repo at `top` is being worked on: a render report, never its text and
+    never a push. None when the report cannot be made or the tiroir cannot take it and the page renders here."""
+    if args.folder is not None or args.keep:
+        err("sheaf: --folder and --keep go with a loose page; a page in a git repo stays in its repo")
+        return 2
+    try:
+        repo, path, commit = _what_to_report(md, top, err)
+    except Local as e:
+        err(f"sheaf: {e}")
+        return None
+    door = Door(origin, token, declared(environ))
+    try:
+        bad, got = door.tool("render_report", {"repo": repo, "path": path, "commit": commit})
+    except Unreachable as e:
+        err(f"sheaf: {e} The render report was dropped, not queued; rendering {md} on this laptop.")
+        return None
+    if bad:
+        raise SendError(f"{got} Nothing was sent.")
+    clone = got.get("clone")
+    if clone == "no-app":
+        err(f"sheaf: the tiroir's GitHub App cannot reach {repo}, so it cannot clone it and {md} renders on this laptop "
+            f"only. Add {repo} to the installation: {got.get('install', '(the tiroir gave no link)')}")
+        return None
+    if clone == "none":
+        err(f"sheaf: {origin} makes no repo clones, so {md} renders on this laptop.")
+        return None
+    if got.get("commit_known") is False:
+        err(f"sheaf: the tiroir could not find commit {commit[:8]} on {repo}: is it pushed to GitHub?")
+    member = member_name(origin, token)
+    host = origin.split("://", 1)[1]
+    out(f"{repo} {path} @ {commit[:8]}")
+    out(f"on {host} {'as ' + member + ' · ' if member else 'as '}{_agent_label(environ)}")
+    if clone == "private-root":
+        out(f"{repo} is your private root on {host}: nothing was cloned.")
+    return EXIT_OK
+
+
 def send_page(md: Path, args, out, err, environ=None) -> int | None:
-    """Send the loose page `md` and print where it is; None when nothing is to be sent and the caller renders here."""
+    """Send the page `md` and print where it is; None when nothing is to be sent and the caller renders here. A loose
+    page goes through the door's `create` and `update`; a page in a git repo is a render report."""
     environ = os.environ if environ is None else environ
     if md.suffix != ".md" or not md.is_file():
         return None
@@ -291,6 +380,8 @@ def send_page(md: Path, args, out, err, environ=None) -> int | None:
         token = credential(origin) if origin else None
         if token is None:
             return None
+        if (top := config.git_place(md.resolve().parent).top) is not None:
+            return report_page(md, top, origin, token, args, out, err, environ)
         text = _read_local(md)
         door = Door(origin, token, declared(environ))
         row = row_of(md, origin)

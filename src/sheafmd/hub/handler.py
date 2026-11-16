@@ -452,7 +452,7 @@ class Handler:
                 except Exception:
                     self.hub.record_exception("status-failed", doc)
                     return None
-                return {"doc": doc, "root": data.get("root")} if theirs else None
+                return {"doc": self.hub.alias(member, doc), "root": data.get("root")} if theirs else None
             return data
         return accept
 
@@ -1228,7 +1228,12 @@ class Handler:
                 # `Share with <names>` on a page of a shared root opens it to those members only: the front matter stays
                 # as it is and `Hub.named` judges who reads (9.11); only a plain Share writes `visibility: project`.
                 names = isinstance(visibility.audience(new), frozenset) and self.hub.loose_owner(e.address) is None
-                if visibility.effective(visibility.front_matter(new)) == "owner" and not names:
+                if visibility.effective(visibility.front_matter(new)) == "owner" and names:
+                    by = (m.short or m.name) if m is not None else self.hub.person
+                    new = visibility.set_keys(new, {"visibility": "owner", "shared": f"{by} {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}"})
+                    if visibility.front_matter(new).get("sessions", "") != visibility.front_matter(text).get("sessions", ""):
+                        raise EditError("A save cannot change the front matter: change it in the file.")
+                elif visibility.effective(visibility.front_matter(new)) == "owner":
                     by = (m.short or m.name) if m is not None else self.hub.person
                     new = visibility.share(new, by, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
                     # Share rewrites the front matter: a line it takes out must not join a skipped one to `sessions`.

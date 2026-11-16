@@ -2,8 +2,6 @@
 still read at their last text from the commit; a new report wakes it and widens the set again. Nothing in a repo is
 archived, deleted or marked, and only the member deletes a clone. Against local bare repos and a fake App, as
 tests/test_repo_pages.py does."""
-import shutil
-from pathlib import Path
 
 import pytest
 from test_hub_commits import box, git, merged_on_github, rectoversos, remote  # noqa: F401  (fixtures)

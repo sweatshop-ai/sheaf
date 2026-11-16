@@ -1,7 +1,6 @@
 """Delete and the trash of a member's loose pages (SPEC 8.6): Delete is the owner's own act from the Sheaf, moves the page
 into the root's `.sheaf/trash/` for thirty days, and no agent or door path can delete. Through the handler in proxy mode
 and the door, in memory, with the hub's clock under test control."""
-import json
 import os
 
 import pytest

@@ -14,7 +14,6 @@ from test_write_log import agents  # noqa: F401  (fixture)
 
 from sheafmd import config
 from sheafmd.hub import archive, loose
-from sheafmd.source import md_hash
 
 DAY = 86400
 TEXT = "# Notes\n\nA first page.\n\nSecond paragraph.\n"
@@ -319,3 +318,22 @@ def test_the_sweep_with_no_seen_file_writes_it_before_it_archives_anything(agent
     sweep(agents)
     assert seen.exists() and docs(agents) == [doc]
     assert not (root_of(agents, doc).path / ".sheaf" / "archived.json").exists()
+
+
+# ── what the Sheaf's data tells the page ─────────────────────────────────────
+
+def test_a_row_of_the_owners_own_loose_page_says_so_and_the_counts_say_what_the_other_views_hold(agents, clock):
+    doc = made(agents, "bea-claude")
+    other = made(agents, "bea-claude", doc="other.md")
+    assert agents.post("/_/archive", {"doc": other}, member=BEA).status == 200
+    got = agents.get("/_/mount?sheaf=1", member=BEA).json()["sheaf"]
+    mine = {r["doc"]: r for r in got["rows"]}
+    assert mine[doc]["own"] is True and mine[doc]["archived"] is False and mine[doc]["kept"] is False
+    assert got["counts"] == {"archived": 1, "trash": 0} and got["view"] == "default"
+    assert agents.get("/_/mount?sheaf=1&view=archived", member=BEA).json()["sheaf"]["view"] == "archived"
+
+
+def test_a_registered_root_page_is_no_ones_to_archive_or_keep_from_the_row(agents, clock):
+    got = agents.get("/_/mount?sheaf=1", member=BEA).json()["sheaf"]
+    assert [r["own"] for r in got["rows"] if r["doc"].startswith("rectoversos/")] == [False]
+    assert agents.post("/_/archive", {"doc": "rectoversos/acme/blog/2026-10-28-plan.md"}, member=BEA).status == 404

@@ -1157,7 +1157,8 @@ class Handler:
 
     def _acting(self, req: Req, act):
         # The moves' lock first (the hub's lock order), from the read of the path to the write of the mark: a move comes before
-        # the read or after the write, so its `marks_moved` carries this mark and none is left at the old path.
+        # the read or after the write, so its `marks_moved` carries this mark and none is left at the old path. Then the page's
+        # name lock (`place.held`), and the act's own locks inside it. The path is not read again under the name lock.
         with moves._LOCK:
             root, rel, mtime = self._own_loose(req, req.body.get("doc"))
             try:

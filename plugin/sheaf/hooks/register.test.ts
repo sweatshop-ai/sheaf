@@ -8,7 +8,7 @@ const TELL = { id: 't1', doc: 'loose-bea/notes.md', thread: 'c1', message: 'Plea
  *  `door.answers` (a queue; the last one repeats, as a door re-lists a Tell until it is answered). */
 function world($: any, on: any) {
   const clock = mock.clock(on)
-  const door = { runs: [] as string[][], timeouts: [] as number[], failSubmits: 0, answers: [{ exitCode: 0, stdout: '[]', stderr: '' }] as any[], session: SESSION,
+  const door = { runs: [] as string[][], timeouts: [] as number[], failSubmits: 0, onPoll: null as null | ((argv: string[]) => void), answers: [{ exitCode: 0, stdout: '[]', stderr: '' }] as any[], session: SESSION,
                  printed: `${ORIGIN}/loose-bea/notes.md\non chat.example.com as Bea` }
   const submitted: string[] = []
   on('session.start', (_: any, e: any) => ({ cwd: e.cwd }))
@@ -23,6 +23,7 @@ function world($: any, on: any) {
   on('process.run', (_: any, e: any) => {
     door.runs.push([...e.argv])
     door.timeouts.push(e.init?.timeoutMs)
+    door.onPoll?.([...e.argv])
     return { value: door.answers.length > 1 ? door.answers.shift() : door.answers[0] }
   })
   on('prompt.submit', (_: any, e: any) => {
@@ -31,7 +32,8 @@ function world($: any, on: any) {
     return { text: e.text }
   })
   const send = () => $.tool.call({ tool: 'Bash', command: 'sheaf notes.md' })
-  return { clock, door, submitted, send }
+  const mcp = (tool: string) => $.tool.call({ tool, id: 'c1', text: 'Looking.' } as any)
+  return { clock, door, submitted, send, mcp }
 }
 
 const start = ($: any) => $.turn.start({ text: '', turnId: 'a' })
@@ -116,18 +118,63 @@ test('a failing poll backs off: the next one is not before 10 s, then 20 s', asy
   expect(polls(w.door).length).toBe(3)
 })
 
-test('a new session id (after /clear) polls under it and drops what was held for the old one', async ($, on) => {
+test('a session id the session did not declare under is never polled: a fork gets nothing of its parent', async ($, on) => {
   const w = world($, on)
   w.door.answers = [{ exitCode: 0, stdout: JSON.stringify([TELL]), stderr: '' }]
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await w.send()
   await start($)
   await w.clock.advance(10_000)
-  w.door.session = 'new-session'
-  w.door.answers = [{ exitCode: 0, stdout: '[]', stderr: '' }]
+  w.door.session = 'fork-session'
   await end($, 'answer')
-  await w.clock.advance(20_000)
-  expect(polls(w.door).at(-1)![5]).toBe('new-session')
+  await w.clock.advance(60_000)
+  expect(polls(w.door).some((r: string[]) => r[5] === 'fork-session')).toBe(false)
+  expect(w.submitted.length).toBe(0)
+})
+
+test('a fork that only makes a door MCP write is armed, polls with its own id and gets its own Tell', async ($, on) => {
+  const w = world($, on)
+  w.door.session = 'fork-session'
+  w.door.answers = [{ exitCode: 0, stdout: JSON.stringify([TELL]), stderr: '' }]
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.clock.advance(30_000)
+  expect(polls(w.door).length).toBe(0)
+  await w.mcp('mcp__sheaf-chat_example_com__reply')
+  await w.clock.advance(1_000)
+  expect(polls(w.door)[0]).toEqual(['sheaf', 'tells-poll', '--server', 'sheaf-chat_example_com', '--session', 'fork-session', '--wait', '25'])
+  await w.clock.advance(6_000)
+  expect(w.submitted.length).toBe(1)
+})
+
+test('a read of the door, and a tool of another server, arm nothing', async ($, on) => {
+  const w = world($, on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.mcp('mcp__sheaf-chat_example_com__read')
+  await w.mcp('mcp__sheaf-chat_example_com__tells')
+  await w.mcp('mcp__other__reply')
+  await w.clock.advance(60_000)
+  expect(polls(w.door).length).toBe(0)
+})
+
+test('the parent keeps its own Tell when a fork has declared itself apart: each id is polled for itself only', async ($, on) => {
+  const w = world($, on)
+  w.door.answers = [{ exitCode: 0, stdout: JSON.stringify([TELL]), stderr: '' }]
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.send()
+  await w.clock.advance(6_000)
+  expect(polls(w.door).every((r: string[]) => r[5] === SESSION)).toBe(true)
+  expect(w.submitted.length).toBe(1)
+  expect(w.submitted[0]).toContain('Please look at this.')
+})
+
+test('an answer that arrives after the session id changed is dropped: nothing is delivered and the Tell stays at the door', async ($, on) => {
+  const w = world($, on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.send()
+  w.door.answers = [{ exitCode: 0, stdout: JSON.stringify([TELL]), stderr: '' }]
+  w.door.onPoll = argv => { if (argv[5] === SESSION) w.door.session = 'new-session' }     // a /clear while the poll waits
+  await w.clock.advance(1_000)
+  await w.clock.advance(60_000)
   expect(w.submitted.length).toBe(0)
 })
 

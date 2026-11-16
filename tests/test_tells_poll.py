@@ -3,6 +3,7 @@
 keyring, so the token never enters the mod. Run in a temp home with a fake keyring and a fake door (premortem R7: no
 test reads the real keyring or `~/.claude.json`); the hub-backed tests at the end stand the door up as the tiroir."""
 import json
+import re
 
 import pytest
 from helpers import FRONT
@@ -40,8 +41,8 @@ def keyring(monkeypatch):
 class FakeDoor:
     """Answers `send.post` as a tiroir's door: `tells` gives `tells` (or an error), everything else is the handshake."""
 
-    def __init__(self, monkeypatch, tells=(), error=None, status=200):
-        self.seen, self.tells, self.error, self.status = [], list(tells), error, status
+    def __init__(self, monkeypatch, tells=(), error=None, status=200, body=None):
+        self.seen, self.tells, self.error, self.status, self.body = [], list(tells), error, status, body
         monkeypatch.setattr(send, "post", self.post)
 
     def post(self, url, bearer, message, headers):
@@ -52,7 +53,7 @@ class FakeDoor:
             return 200, {"jsonrpc": "2.0", "id": message["id"], "result": {"protocolVersion": send.PROTOCOL}}, {}
         if message.get("method") != "tools/call":
             return 202, None, {}
-        text = self.error if self.error else json.dumps({"tells": self.tells})
+        text = self.error if self.error else self.body if self.body is not None else json.dumps({"tells": self.tells})
         return 200, {"jsonrpc": "2.0", "id": message["id"],
                      "result": {"content": [{"type": "text", "text": text}], "isError": bool(self.error)}}, {}
 
@@ -123,6 +124,46 @@ def test_a_refused_token_and_a_busy_door_exit_non_zero_with_the_sentence_on_stde
     FakeDoor(monkeypatch, error="This token already holds 2 polls: wait 5 seconds.")
     code, out, err = run(capsys, "--origin", FRONT, "--session", SESSION)
     assert code == 1 and out == "" and "wait 5 seconds" in err
+
+
+@pytest.mark.parametrize("body", ['{"other": 1}', '[]', '{"tells": "none"}', '{"tells": [3]}', 'null', 'not json'])
+def test_an_answer_of_the_wrong_shape_exits_1_with_one_line_and_no_traceback(keyring, monkeypatch, capsys, body):
+    FakeDoor(monkeypatch, body=body)
+    code, out, err = run(capsys, "--origin", FRONT, "--session", SESSION)
+    assert code == 1 and out == ""
+    assert err.startswith("sheaf: ") and len(err.strip().splitlines()) == 1 and "Traceback" not in err
+
+
+def test_a_server_name_of_the_mcp_entries_finds_its_origin_and_polls_it(keyring, monkeypatch, capsys, tmp_path):
+    door = FakeDoor(monkeypatch, tells=[TELL])
+    name = connect.entry_name(FRONT)
+    cj = tmp_path / ".claude.json"
+    cj.write_text(json.dumps({"mcpServers": {name: {"type": "http", "url": FRONT + connect.DOOR_PATH,
+                                                     "headers": {"Authorization": "Bearer other-token"}}}}))
+    monkeypatch.setattr(connect, "claude_json", lambda: cj)
+    for given in (name, re.sub(r"[^A-Za-z0-9_-]", "_", name)):     # the entry's key, and as a tool name writes it
+        code, out, err = run(capsys, "--server", given, "--session", SESSION)
+        assert code == 0 and json.loads(out) == [TELL]
+    assert door.seen[0][0].startswith(FRONT) and all(b == "secret-token-of-bea" for _, b, _, _ in door.seen)
+
+
+def test_a_server_that_is_not_a_sheaf_door_entry_is_refused_without_a_request(keyring, monkeypatch, capsys, tmp_path):
+    door = FakeDoor(monkeypatch)
+    cj = tmp_path / ".claude.json"
+    cj.write_text(json.dumps({"mcpServers": {"mine": {"type": "http", "url": "https://elsewhere.example/mcp"},
+                                             connect.entry_name(FRONT): {"type": "http", "url": "https://elsewhere.example/mcp"}}}))
+    monkeypatch.setattr(connect, "claude_json", lambda: cj)
+    for name in ("mine", connect.entry_name(FRONT), "sheaf-nothing"):
+        code, out, err = run(capsys, "--server", name, "--session", SESSION)
+        assert code == 1 and out == "" and err.startswith("sheaf: ")
+    assert door.seen == []
+
+
+def test_origin_and_server_are_given_one_at_a_time(keyring, monkeypatch, capsys):
+    FakeDoor(monkeypatch)
+    for argv in (["--session", SESSION], ["--origin", FRONT, "--server", "sheaf-x", "--session", SESSION]):
+        code, out, _ = run(capsys, *argv)
+        assert code == 2 and out == ""
 
 
 def test_a_tiroir_that_is_down_exits_non_zero(keyring, monkeypatch, capsys):

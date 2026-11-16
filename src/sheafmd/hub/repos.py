@@ -61,6 +61,7 @@ GITHUB_HOSTS = ("github.com", "ssh.github.com", "www.github.com")
 
 NO_CLONES = "none"
 OK, PRIVATE_ROOT, NO_APP, NOT_CLONED, CLONING = "ok", "private-root", "no-app", "not-cloned", "cloning"
+MOVED = "moved"             # the clone's root went to another tiroir: its answer carries the new origin (`moved_to`)
 NO_LAZY_FETCH_FROM = (2, 44)    # the git that honours GIT_NO_LAZY_FETCH; an older one ignores it without an error
 
 
@@ -217,6 +218,52 @@ class Repos:
             row = self._usage().get(repo)
         return isinstance(row, dict) and row.get("sleeping") is True
 
+    def moved_to(self, repo: str) -> str | None:
+        """The origin the root of `repo` moved to, or None when it did not move."""
+        with self._records:
+            row = self._usage().get(repo)
+        to = row.get("moved") if isinstance(row, dict) else None
+        return to if isinstance(to, str) and to else None
+
+    def sleep_moved(self, repo: str, to: str) -> bool:
+        """The root of `repo` moved to the tiroir `to`: its clone sleeps now, whatever its last use, and a report for it is
+        answered `moved` without waking it. A clone already asleep keeps what it will restore. False for a repo with no
+        clone, and for one a report is being settled on (the caller asks again); True once it sleeps as moved."""
+        dest = self.clone_dir(repo)
+        if not (dest / ".git").exists():
+            return False
+        with self._records:
+            data = self._usage()
+            row = data.get(repo) if isinstance(data.get(repo), dict) else {}
+            if row.get("sleeping") is True:
+                if row.get("moved") != to:
+                    data[repo] = {**row, "moved": to}
+                    write_text_atomic(self._usage_file, json.dumps(data, indent=1, sort_keys=True) + "\n")
+                return True
+        with self._guard:
+            if repo in self._queues:
+                return False                    # a report is being settled: the caller asks again
+            self._queues[repo] = []
+            t = threading.Thread(target=self._sleep_one, args=(repo, dest, [], to), name=f"repos-{repo}", daemon=True)
+            self._threads.add(t)
+        t.start()
+        t.join(self.SLEEP_WAIT)
+        if t.is_alive():
+            diagnostics.record("hub", "clone-sleep-slow", repo=repo)
+        return self.moved_to(repo) == to
+
+    def unmove(self, repo: str) -> bool:
+        """The root of `repo` came back: a report for it is answered as for any clone, and the first one wakes it (its folders
+        come back in its thread). False for a repo that did not move."""
+        with self._records:
+            data = self._usage()
+            row = data.get(repo)
+            if not isinstance(row, dict) or "moved" not in row:
+                return False
+            data[repo] = {k: v for k, v in row.items() if k != "moved"}
+            write_text_atomic(self._usage_file, json.dumps(data, indent=1, sort_keys=True) + "\n")
+        return True
+
     def sleep_idle(self) -> list:
         """Put to sleep each clone not used for `SLEEP_DAYS` days: its sparse set is shrunk to nothing and kept to be widened
         again. A clone with no record is first dated now. The repos put to sleep. The git calls run in the repo's own thread,
@@ -249,9 +296,10 @@ class Repos:
                 diagnostics.record("hub", "clone-sleep-slow", repo=repo)
         return list(slept)
 
-    def _sleep_one(self, repo: str, dest: Path, slept: list):
-        """The repo's thread, for one clone going to sleep; then it settles whatever reports came meanwhile (its `_wake`
-        widens the set again), like any thread of the repo."""
+    def _sleep_one(self, repo: str, dest: Path, slept: list, moved: str | None = None):
+        """The repo's thread, for one clone going to sleep (for good, as moved to the tiroir `moved`, when that is given);
+        then it settles whatever reports came meanwhile (its `_wake` widens the set again, a moved clone's does not), like
+        any thread of the repo."""
         try:
             listed = self._git(dest, "-c", "core.quotePath=false", "sparse-checkout", "list")
             if listed.returncode == 0 and self._git(dest, "sparse-checkout", "set", "--cone").returncode == 0:
@@ -260,9 +308,11 @@ class Repos:
                     data = self._usage()
                     row = data.get(repo) if isinstance(data.get(repo), dict) else {}
                     # A report since the check (`_use`) has dated the clone anew: it stays awake, and its folders come back.
-                    idle = self.clock() - row.get("last_used", 0) > SLEEP_DAYS * 86400
+                    idle = moved is not None or self.clock() - row.get("last_used", 0) > SLEEP_DAYS * 86400
                     data[repo] = {**row, "sleeping": idle or row.get("sleeping") is True,
                                   "restore": [f for f in listed.stdout.split("\n") if f]}
+                    if moved is not None:
+                        data[repo]["moved"] = moved
                     write_text_atomic(self._usage_file, json.dumps(data, indent=1, sort_keys=True) + "\n")
                 if idle:
                     slept.append(repo)
@@ -274,7 +324,7 @@ class Repos:
         with self._records:
             row = self._usage().get(repo)
         folders = row.get("restore") if isinstance(row, dict) else None
-        if not folders:
+        if not folders or row.get("moved"):
             return
         if self._git(dest, "sparse-checkout", "set", "--cone", "--", *folders, token=token).returncode == 0:
             with self._records:
@@ -435,8 +485,9 @@ class Repos:
     def report(self, member: str, repo, path, commit, private_roots=(), declared=None) -> dict:
         """The tiroir hears that `member` works on the page `path` of `repo` at `commit`. Raises `Refused` for a name
         that is none, and for a clone that failed since the last report; otherwise the answer: `clone` (`ok`,
-        `cloning`, `private-root`, `not-cloned`, `no-app`), `commit_known`, and for `no-app` the link that adds the
-        repo. `private_roots` are (member, folder) pairs. A repo that is the caller's own private root is told so;
+        `cloning`, `private-root`, `not-cloned`, `no-app`, `moved`), `commit_known`, for `no-app` the link that adds the
+        repo, and for `moved` the origin the root went to (`moved_to`): that answer comes first, wakes nothing and records
+        nothing. `private_roots` are (member, folder) pairs. A repo that is the caller's own private root is told so;
         one that is another member's is `not-cloned` and nothing else: no clone, no record, no owner named (SPEC 9.11).
         A repo that became a private root after it was cloned keeps its clone and its records, takes no more.
         Nothing here clones or fetches: that is the repo's thread's (see the top of the file)."""
@@ -446,6 +497,8 @@ class Repos:
             return {"repo": repo, "path": path, "clone": PRIVATE_ROOT, "commit_known": None}
         if roots:
             return {"repo": repo, "path": path, "clone": NOT_CLONED, "commit_known": None}
+        if (to := self.moved_to(repo)) is not None:
+            return {"repo": repo, "path": path, "clone": MOVED, "moved_to": to, "commit_known": None}
         with self._guard:
             failed = self._failed.pop(repo, None)
         if failed:

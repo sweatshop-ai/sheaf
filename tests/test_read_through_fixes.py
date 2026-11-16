@@ -210,3 +210,108 @@ def test_a_client_row_never_offers_move_here():
     row = {"doc": "work/a.md", "url": "/work/a.md", "folder": "work", "root": "work", "title": "A", "can_move": True, "own": True}
     [out] = readthrough.fold_rows("acme", [row])
     assert out["can_move"] is False and out["own"] is False
+
+
+# ── round 3 (second review): what the agency does with a client page's mount, redirect and status ─
+
+def asked_clients_of(site):
+    """The `[proxy.clients]` of `site` answers every call with a line that is counted."""
+    calls = []
+    site.hub.clients = readthrough.Clients({"beta": "https://beta.example.com"}, lambda *a: calls.append(a) or (200, {}))
+    return calls
+
+
+def test_a_client_on_another_build_mounts_with_the_agencys_own_version_script_and_assets(agency_and_client):
+    agency, client = agency_and_client
+    other = {"kind": "doc", "title": "T", "html": "<main>x</main>", "config": {}, "css": "", "version": "client-build",
+             "script": "client-mount.js", "assets": {"mount.js": "client-tag"}}
+    speaks(agency, json_env(body=json.dumps(other)))
+    got = agency.get("/_/mount?doc=Clients/acme/work/x.md", member=AG_ALICE).json()
+    assert got["version"] == agency.hub.version and got["version"] != "client-build"
+    assert {k: got[k] for k in ("script", "assets")} == agency.hub.mount_fields()
+    assert got["html"] == "<main>x</main>"                                     # the page itself is the client's
+
+
+def redirect(location, **kw):
+    return {"status": 302, "type": "json", "nonce": None, "body": "", "headers": {} if location is None else {"Location": location}, **kw}
+
+
+def test_a_client_redirect_to_a_page_of_that_client_is_sent_on_under_the_clients_prefix(agency_and_client):
+    agency, client = agency_and_client
+    speaks(agency, redirect("/alice-work/new.md"))
+    got = agency.get("/Clients/acme/alice-work/old.md", member=AG_ALICE)
+    assert got.status == 302 and got.headers["Location"] == "/Clients/acme/alice-work/new.md"
+
+
+@pytest.mark.parametrize("location", [None, "", "https://evil.example.com/x", "//evil.example.com/x", "/Clients/beta/x.md", "/_/doc?doc=x",
+                                      "work/new.md", "/work/a\r\nSet-Cookie: x=1", "/work\\..\\x", "javascript:alert(1)"])
+def test_a_client_redirect_that_is_not_a_page_of_that_client_is_a_client_that_does_not_answer(agency_and_client, location):
+    agency, client = agency_and_client
+    speaks(agency, redirect(location))
+    got = agency.get("/Clients/acme/work/old.md", member=AG_ALICE)
+    assert got.status == 502 and "Location" not in got.headers
+
+
+@pytest.mark.parametrize("status", [301, 303, 307, 308])
+def test_only_a_302_is_a_redirect_the_agency_sends_on(agency_and_client, status):
+    agency, client = agency_and_client
+    speaks(agency, redirect("/work/new.md", status=status))
+    assert agency.get("/Clients/acme/work/old.md", member=AG_ALICE).status == 502
+
+
+def test_a_moved_client_page_opens_through_the_agency_by_the_clients_own_forward(agency_and_client):
+    agency, client = agency_and_client
+    new = client.make("alice", f"# Plan\n\n{MARKER}\n")
+    old = new.rsplit("/", 1)[0] + "/old.md"
+    with client.inside():
+        client.hub.forwards.add(old, new, "alice")
+    got = agency.get(f"/Clients/acme/{old}", member=AG_ALICE)
+    assert got.status == 302 and got.headers["Location"] == f"/Clients/acme/{new}"
+
+
+@pytest.mark.parametrize("op", ["page", "doc", "mount", "writes"])
+def test_a_client_that_also_has_clients_never_passes_a_clients_address_on(agency_and_client, op):
+    agency, client = agency_and_client
+    calls = asked_clients_of(client)
+    status, got = agency.link("acme", "read", {"as": "alice@example.com", "op": op, "doc": "Clients/beta/x.md"})
+    assert status == 200 and got["status"] == 404 and calls == []
+
+
+def test_a_client_that_also_has_clients_never_passes_a_comment_on(agency_and_client):
+    agency, client = agency_and_client
+    calls = asked_clients_of(client)
+    status, got = agency.link("acme", "comment", {"as": "alice@example.com", "doc": "Clients/beta/x.md",
+                                                  "request": {"op": "add", "quote": "q", "body": "b"}})
+    assert status == 200 and got["status"] == 404 and calls == []
+
+
+def test_two_tiroirs_that_list_each_other_make_one_call_not_a_chain(agency_and_client):
+    agency, client = agency_and_client
+    client.hub.clients = readthrough.Clients({"agency": "https://tt.example.com"}, lambda c, v, b: agency.link("acme", v, b))
+    agency_calls = len(agency.link.asked)
+    assert agency.get("/Clients/acme/Clients/agency/x.md", member=AG_ALICE).status == 404
+    assert len(agency.link.asked) == agency_calls + 1
+
+
+@pytest.mark.parametrize("status", [404, 401, 403, 500, 502])
+def test_a_channel_that_does_not_answer_200_is_a_client_that_is_not_reachable(agency_and_client, status):
+    agency, client = agency_and_client
+    agency.hub.clients = readthrough.Clients(agency.hub.proxy.clients, lambda c, v, b: (status, {}))
+    got = agency.get("/_/clients/sheaf?client=acme", member=AG_ALICE).json()
+    assert got["rows"] == [] and "not reachable" in got["line"]
+    assert agency.get("/Clients/acme/work/x.md", member=AG_ALICE).status == 502
+
+
+def test_a_token_without_the_read_scope_is_a_client_that_is_not_reachable(agency_and_client):
+    agency, client = agency_and_client
+    from two_hubs import Link
+    agency.hub.clients = readthrough.Clients(agency.hub.proxy.clients, Link(client, client.peer_token("https://tt.example.com", ["transfer"], name="no-read")))
+    got = agency.get("/_/clients/sheaf?client=acme", member=AG_ALICE).json()
+    assert got["rows"] == [] and "not reachable" in got["line"]
+
+
+def test_a_500_from_the_client_is_not_a_page_that_is_not_there(agency_and_client):
+    agency, client = agency_and_client
+    agency.hub.clients = readthrough.Clients(agency.hub.proxy.clients, lambda c, v, b: (500, {}))
+    got = agency.get("/Clients/acme/work/x.md", member=AG_ALICE)
+    assert got.status == 502 and "not reachable" in got.text

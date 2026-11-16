@@ -198,6 +198,16 @@ class WriteLog:
         with self._lock:
             return self._own.pop(address, None) == hash_
 
+    def restore(self, address: str, kept: list) -> None:
+        """The lines of `address` are `kept`, as `lines` gave them: a landing that wrote some and did not land takes back those, and
+        no more (in memory; the file keeps what was written)."""
+        with self._lock:
+            if kept:
+                self._lines[address] = deque(kept, maxlen=self._keep)
+            else:
+                self._lines.pop(address, None)
+            self._own.pop(address, None)
+
     def drop(self, address: str):
         """Forget the in-memory lines of `address`: a page that was moved here and taken back. The file keeps what was written."""
         with self._lock:

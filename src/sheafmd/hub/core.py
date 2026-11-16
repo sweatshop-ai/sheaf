@@ -1001,8 +1001,9 @@ class Hub:
         answers from this moment, then the Tells on the page end as cancelled, what the hub keeps of it is dropped, the page's file
         goes, and the tabs open on it are told where it went. The Write log keeps the page's lines: they are all that is left of
         what was written here. Each step is on its own, as `moved_page`'s are: one that fails is a row in the diagnostics log.
-        The caller holds the page's writer lock, which the entry's document takes again to forget its versions: the entry leaves
-        the hub here and what is left of it is the returned `finish`, which the caller runs once it has let the lock go."""
+        The caller holds the page's writer lock and its file lock, so nothing here takes the hub's lock (it comes before them in
+        `lockorder.ORDER`), and the entry's document, which takes the writer lock again to forget its versions, is not touched: the
+        entry, the tabs and the index are the returned `finish`, which the caller runs once the file is gone and the locks are let go."""
         at = roots_mod.Address.parse(old)
         root = self.roots.get(at.root)
         opaque = self.shared_ids.known(old)      # the name a recipient's tab holds: told them as it was, once the store forgets it
@@ -1028,21 +1029,20 @@ class Hub:
                 step()
             except Exception:
                 self.record_exception("move-store-failed", old)
-        with self._lock:
-            e = self.entries.pop(old, None)
-        try:
-            self.index.touch(old)
-        except Exception:
-            self.record_exception("status-failed")
 
         def finish():
-            if e is None:
-                return
+            with self._lock:
+                e = self.entries.pop(old, None)
+            if e is not None:
+                try:
+                    e.live.forget()
+                except Exception:
+                    self.record_exception("move-store-failed", old)
+                e.bus.publish("moved", {"doc": old, "to": to, "origin": origin, **({"opaque": opaque} if opaque else {})})
             try:
-                e.live.forget()
+                self.index.touch(old)       # the file is gone by now: the row goes
             except Exception:
-                self.record_exception("move-store-failed", old)
-            e.bus.publish("moved", {"doc": old, "to": to, "origin": origin, **({"opaque": opaque} if opaque else {})})
+                self.record_exception("status-failed")
         return finish
 
     def open_index_stream(self, describe, accept=None):

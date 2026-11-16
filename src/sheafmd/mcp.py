@@ -161,6 +161,7 @@ class Caller:
     token: TokenRow | None = None
     session: str | None = None      # James's session, from X-James-Session: set only for a token of `[list]`'s james_tokens (9.12)
     own_session: bool = False       # False on a james_tokens entry but the own one: its header is read, never resolved to an own session
+    gone: object = None             # `gone()`: whether the caller closed the connection, for a call that waits (the Tells poll)
     declared: dict = field(default_factory=dict)    # what the caller declared in headers: session, host, link, chat (the Write log)
 
     @property
@@ -689,7 +690,8 @@ class Door:
             raise ToolError("Name the session: the X-Sheaf-Session header, or the session argument.")
         tells = self.hub.session_tells
         try:
-            got = tells.take(caller.token, session, float(args.get("wait", 25)), self._session_message(caller))
+            got = tells.take(caller.token, session, float(args.get("wait", 25)), self._session_message(caller),
+                             gone=caller.gone)
         except waiting_mod.Refused as r:
             raise ToolError(r.message, "busy" if r.status == 429 else "refused") from None
         return {"tells": got}

@@ -269,3 +269,39 @@ def test_a_session_that_stopped_polling_is_forgotten_after_it_stopped_counting_a
     poll(laptops)
     assert ("bea-one", "old-id", "gone") not in tells._heard
     assert any(k[2] == SESSION for k in tells._heard)
+
+
+def test_a_poll_whose_caller_has_gone_returns_at_once_and_frees_its_slot_for_a_fast_reconnect(laptops):
+    from sheafmd.hub import waiting
+    tells = laptops.hub.session_tells
+    row = laptops.hub.tokens.list()[0]
+    gone = threading.Event()
+    done = []
+
+    def held():
+        done.append(tells.take(row, SESSION, 25, lambda t: False, gone=gone.is_set))
+    pollers = [threading.Thread(target=held) for _ in range(2)]
+    for p in pollers:
+        p.start()
+    time.sleep(0.3)
+    with pytest.raises(waiting.Refused):                     # two are held: a third is refused
+        tells.take(row, SESSION, 0, lambda t: False)
+    began = time.monotonic()
+    gone.set()
+    for p in pollers:
+        p.join(5)
+    assert time.monotonic() - began < 3 and done == [[], []]
+    assert tells.take(row, SESSION, 0, lambda t: False) == []           # the reconnect is not refused
+
+
+def test_the_server_tells_a_poll_that_its_caller_closed_the_connection():
+    import socket
+    from sheafmd.hub import server
+    a, b = socket.socketpair()
+    me = type("H", (), {"connection": a})()
+    try:
+        assert server._Http._gone(me) is False
+        b.close()
+        assert server._Http._gone(me) is True
+    finally:
+        a.close()

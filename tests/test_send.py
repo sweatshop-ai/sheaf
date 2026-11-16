@@ -1,0 +1,378 @@
+"""`sheaf FILE.md` on a connected laptop sends a loose page to the member's tiroir (SPEC 13): `create` the first time,
+`update` with the last hash after, `FILE.tiroir.md` and a non-zero exit when the tiroir's text moved on, `sheaf pull`
+to fetch it. Run against the hub in memory standing in for the tiroir, in a temp home with a fake keyring: no test reads
+or writes the real keyring, `~/.claude.json` or config (premortem R7), and no token is in a fixture, a log or an output
+line."""
+import json
+import os
+import subprocess
+from pathlib import Path
+
+import pytest
+from helpers import FRONT, door
+from helpers import call as door_call
+from test_hub_commits import box, git, merged_on_github, rectoversos, remote  # noqa: F401  (fixtures)
+from test_write_log import agents  # noqa: F401  (fixture)
+
+from sheafmd import cli, connect, paths, send
+from sheafmd.cli import main
+from sheafmd.hub import loose
+from sheafmd.source import md_hash
+
+SECOND = "https://second.example.com"
+TEXT = "# Notes\n\nA first page.\n"
+SESSION = "6f1c2f0e-3a55-4a0e-9d52-0c1f6a1b7d11"
+
+
+class FakeKeyring:
+    def __init__(self):
+        self.items = {}
+
+    def get(self, service, user):
+        return self.items.get((service, user))
+
+    def set(self, service, user, secret):
+        self.items[(service, user)] = secret
+
+
+@pytest.fixture(autouse=True)
+def no_real_keyring(monkeypatch):
+    def refuse():
+        raise AssertionError("a test asked for the real keyring (R7): inject a FakeKeyring")
+    monkeypatch.setattr(connect, "system_store", refuse)
+
+
+@pytest.fixture
+def keyring(monkeypatch):
+    k = FakeKeyring()
+    monkeypatch.setattr(connect, "system_store", lambda: k)
+    return k
+
+
+@pytest.fixture
+def tiroir(agents, keyring, monkeypatch):  # noqa: F811
+    """The hub as the tiroir, reached by `send`'s two network calls: its door and `whoami`. Bea's laptop holds her
+    token for FRONT, and FRONT is the laptop's default tiroir. `tiroir.seen` is every request the CLI made."""
+    token = agents.tokens["bea-claude"]
+    keyring.set("sheaf", FRONT, token)
+    config = paths.config_file()
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(f'tiroir = "{FRONT}"\n', encoding="utf-8")
+    agents.seen = []
+    agents.token = token
+
+    def post(url, bearer, message, headers):
+        agents.seen.append((url, headers, message))
+        assert url == FRONT + "/mcp"
+        res = door(agents.door, message, token=bearer, headers=dict(headers), as_name=None)
+        return res.status, (res.json() if res.status == 200 else None), {}
+
+    def get(url, bearer):
+        agents.seen.append((url, {}, None))
+        assert url == FRONT + "/_/whoami"
+        res = agents.door.request("GET", "/_/whoami", cookie=False, headers={"Authorization": f"Bearer {bearer}"})
+        return res.status, (res.json() if res.status == 200 else None), {}
+
+    monkeypatch.setattr(send, "post", post)
+    monkeypatch.setattr(send, "get", get)
+    return agents
+
+
+@pytest.fixture
+def scratch(tmp_path):
+    """A folder outside git with a page in it: a loose page."""
+    d = tmp_path / "scratch"
+    d.mkdir()
+    (d / "notes.md").write_text(TEXT, encoding="utf-8")
+    return d / "notes.md"
+
+
+@pytest.fixture
+def local(monkeypatch):
+    """The laptop hub's render, which `sheaf FILE.md` makes when nothing goes to a tiroir: noted, never started."""
+    rendered = []
+    monkeypatch.setattr(cli, "_open", lambda args: rendered.append(args.file) or 0)
+    return rendered
+
+
+def run(capsys, *argv):
+    code = main([str(a) for a in argv])
+    out = capsys.readouterr()
+    return code, out.out, out.err
+
+
+def on_the_tiroir(tiroir, address):
+    return tiroir.hub.file(address).read_text(encoding="utf-8")
+
+
+def changed_there(tiroir, address, text):
+    """The member (or another session) changes the page on the tiroir: a door update with the hash it holds."""
+    old = on_the_tiroir(tiroir, address)
+    bad, got = door_call(tiroir.door, "update", token=tiroir.token, doc=address, text=text, expected_hash=md_hash(old))
+    assert not bad, got
+
+
+def state():
+    return json.loads((paths.state_dir() / "sends.json").read_text(encoding="utf-8"))
+
+
+# ── the first send and the next ──────────────────────────────────────────────
+
+def test_the_first_send_creates_the_page_and_prints_the_address_the_tiroir_and_the_folder_in_that_order(tiroir, scratch, capsys):
+    code, out, err = run(capsys, scratch)
+    assert code == 0, err
+    lines = out.splitlines()
+    address = f"loose-bea/{loose.month()}/notes.md"
+    assert lines[0].startswith(f"{FRONT}/") and lines[0].endswith("notes.md"), lines
+    assert lines[1] == "on chat.example.com as Bea · no agent", lines
+    assert lines[2] == f"loose-bea/{loose.month()}", lines
+    assert len(lines) == 3, lines
+    assert on_the_tiroir(tiroir, address) == TEXT
+
+
+def test_the_second_send_updates_the_same_page_with_the_hash_the_first_gave(tiroir, scratch, capsys):
+    run(capsys, scratch)
+    scratch.write_text(TEXT + "\nA second paragraph.\n", encoding="utf-8")
+    code, out, err = run(capsys, scratch)
+    assert code == 0, err
+    address = f"loose-bea/{loose.month()}/notes.md"
+    assert on_the_tiroir(tiroir, address) == TEXT + "\nA second paragraph.\n"
+    tools = [m["params"]["name"] for _, _, m in tiroir.seen if m and m["method"] == "tools/call"]
+    assert tools == ["create", "update"]
+    assert out.splitlines()[0].endswith("notes.md") and len(out.splitlines()) == 3
+
+
+def test_a_send_of_a_page_that_has_not_changed_still_prints_the_three_lines(tiroir, scratch, capsys):
+    run(capsys, scratch)
+    code, out, err = run(capsys, scratch)
+    assert code == 0, err
+    assert len(out.splitlines()) == 3
+
+
+def test_folder_and_keep_go_to_the_create(tiroir, scratch, capsys):
+    code, out, err = run(capsys, scratch, "--folder", "clients/acme", "--keep")
+    assert code == 0, err
+    assert out.splitlines()[2] == "loose-bea/clients/acme"
+    root = tiroir.hub.roots.get("loose-bea")
+    assert loose.kept(root.path, "clients/acme/notes.md")
+
+
+def test_the_tiroir_of_a_root_beats_the_laptops_default(tiroir, scratch, local, capsys):
+    """The root's `.sheaf.toml` names a tiroir this laptop holds no credential for: the page renders here."""
+    (scratch.parent / ".sheaf.toml").write_text(f'tiroir = "{SECOND}"\n', encoding="utf-8")
+    code, out, err = run(capsys, scratch)
+    assert code == 0, err
+    assert local == [str(scratch)] and tiroir.seen == []
+
+
+def test_the_tiroir_of_a_root_is_where_the_page_goes_when_the_laptop_holds_its_credential(tiroir, scratch, keyring, capsys):
+    paths.config_file().write_text(f'tiroir = "{SECOND}"\n', encoding="utf-8")
+    (scratch.parent / ".sheaf.toml").write_text(f'tiroir = "{FRONT}"\n', encoding="utf-8")
+    code, out, err = run(capsys, scratch)
+    assert code == 0, err
+    assert out.splitlines()[1].startswith("on chat.example.com")
+
+
+# ── the tiroir's text moved on ───────────────────────────────────────────────
+
+def test_a_page_changed_on_the_tiroir_meanwhile_leaves_the_tiroirs_text_beside_the_file_and_fails(tiroir, scratch, capsys):
+    run(capsys, scratch)
+    address = f"loose-bea/{loose.month()}/notes.md"
+    theirs = TEXT + "\nAdded on the tiroir.\n"
+    changed_there(tiroir, address, theirs)
+    mine = TEXT + "\nAdded on the laptop.\n"
+    scratch.write_text(mine, encoding="utf-8")
+    code, out, err = run(capsys, scratch)
+    assert code == 1 and out == ""
+    beside = scratch.with_name("notes.tiroir.md")
+    assert beside.read_text(encoding="utf-8") == theirs
+    assert scratch.read_text(encoding="utf-8") == mine
+    assert on_the_tiroir(tiroir, address) == theirs
+    assert "notes.tiroir.md" in err and "merge" in err and "run" in err and "again" in err
+
+
+def test_the_run_after_the_merge_succeeds(tiroir, scratch, capsys):
+    run(capsys, scratch)
+    address = f"loose-bea/{loose.month()}/notes.md"
+    changed_there(tiroir, address, TEXT + "\nAdded on the tiroir.\n")
+    scratch.write_text(TEXT + "\nAdded on the laptop.\n", encoding="utf-8")
+    assert run(capsys, scratch)[0] == 1
+    merged = TEXT + "\nAdded on the tiroir.\n\nAdded on the laptop.\n"
+    scratch.write_text(merged, encoding="utf-8")
+    code, out, err = run(capsys, scratch)
+    assert code == 0, err
+    assert on_the_tiroir(tiroir, address) == merged
+    assert len(out.splitlines()) == 3
+
+
+def test_a_refused_update_that_is_not_a_stale_hash_says_what_the_door_said_and_writes_no_beside_file(tiroir, scratch, capsys):
+    """A text the door refuses for its size: the tiroir's hash is still the latest, so there is no text to leave beside."""
+    run(capsys, scratch)
+    scratch.write_text(TEXT + "x" * (1024 * 1024), encoding="utf-8")
+    code, out, err = run(capsys, scratch)
+    assert code == 1 and out == ""
+    assert not scratch.with_name("notes.tiroir.md").exists()
+    assert err.strip()
+
+
+def test_a_second_refusal_before_the_merge_keeps_the_tiroirs_latest_text(tiroir, scratch, capsys):
+    run(capsys, scratch)
+    address = f"loose-bea/{loose.month()}/notes.md"
+    changed_there(tiroir, address, TEXT + "\nOne.\n")
+    scratch.write_text(TEXT + "\nMine.\n", encoding="utf-8")
+    run(capsys, scratch)
+    changed_there(tiroir, address, TEXT + "\nOne.\n\nTwo.\n")
+    assert run(capsys, scratch)[0] == 1
+    assert scratch.with_name("notes.tiroir.md").read_text(encoding="utf-8") == TEXT + "\nOne.\n\nTwo.\n"
+
+
+# ── sheaf pull ───────────────────────────────────────────────────────────────
+
+def test_pull_writes_the_tiroirs_latest_text_into_the_file(tiroir, scratch, capsys):
+    run(capsys, scratch)
+    address = f"loose-bea/{loose.month()}/notes.md"
+    theirs = TEXT + "\nAdded on the tiroir.\n"
+    changed_there(tiroir, address, theirs)
+    code, out, err = run(capsys, "pull", scratch)
+    assert code == 0, err
+    assert scratch.read_text(encoding="utf-8") == theirs
+    scratch.write_text(theirs + "\nAnd then here.\n", encoding="utf-8")       # the pull recorded the hash it read
+    assert run(capsys, scratch)[0] == 0
+
+
+def test_pull_never_overwrites_an_edit_made_here_and_leaves_the_tiroirs_text_beside_it(tiroir, scratch, capsys):
+    run(capsys, scratch)
+    address = f"loose-bea/{loose.month()}/notes.md"
+    theirs = TEXT + "\nAdded on the tiroir.\n"
+    changed_there(tiroir, address, theirs)
+    mine = TEXT + "\nAdded here.\n"
+    scratch.write_text(mine, encoding="utf-8")
+    code, out, err = run(capsys, "pull", scratch)
+    assert code == 1
+    assert scratch.read_text(encoding="utf-8") == mine
+    assert scratch.with_name("notes.tiroir.md").read_text(encoding="utf-8") == theirs
+    assert "merge" in err
+
+
+def test_pull_of_a_page_never_sent_from_here_says_so(tiroir, scratch, capsys):
+    code, out, err = run(capsys, "pull", scratch)
+    assert code == 1 and "sheaf" in err and "never" in err
+    assert tiroir.seen == []
+
+
+# ── --local, no credential, repo pages ───────────────────────────────────────
+
+def test_local_renders_on_the_laptop_hub_and_asks_the_tiroir_nothing(tiroir, scratch, local, capsys):
+    code, out, err = run(capsys, scratch, "--local")
+    assert code == 0, err
+    assert local == [str(scratch)] and tiroir.seen == []
+
+
+def test_no_credential_renders_on_the_laptop_hub(tiroir, scratch, local, keyring, capsys):
+    keyring.items.clear()
+    code, out, err = run(capsys, scratch)
+    assert code == 0, err
+    assert local == [str(scratch)] and tiroir.seen == []
+
+
+def test_no_default_tiroir_renders_on_the_laptop_hub(tiroir, scratch, local, capsys):
+    paths.config_file().unlink()
+    assert run(capsys, scratch)[0] == 0
+    assert local == [str(scratch)] and tiroir.seen == []
+
+
+def test_a_laptop_with_no_keyring_renders_on_the_laptop_hub(tiroir, scratch, local, monkeypatch, capsys):
+    def none():
+        raise connect.ConnectError("no login keyring on this computer")
+    monkeypatch.setattr(connect, "system_store", none)
+    assert run(capsys, scratch)[0] == 0
+    assert local == [str(scratch)] and tiroir.seen == []
+
+
+def test_a_page_in_a_git_repo_is_not_uploaded(tiroir, tmp_path, local, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    page = repo / "plan.md"
+    page.write_text(TEXT, encoding="utf-8")
+    assert run(capsys, page)[0] == 0
+    assert local == [str(page)] and tiroir.seen == []
+
+
+def test_folder_and_keep_with_local_are_a_usage_error(tiroir, scratch, local, capsys):
+    code, out, err = run(capsys, scratch, "--local", "--keep")
+    assert code == 2 and local == [] and tiroir.seen == []
+
+
+# ── a tiroir that refuses ────────────────────────────────────────────────────
+
+def test_a_revoked_token_fails_loudly_and_renders_nothing_on_the_laptop(tiroir, scratch, local, keyring, capsys):
+    keyring.set("sheaf", FRONT, "sheaf_mcp_" + "A" * 43)
+    code, out, err = run(capsys, scratch)
+    assert code == 1 and local == [] and out == ""
+    assert "refused" in err and "sheaf connect" in err
+
+
+# ── where the state lives, and what is never written ─────────────────────────
+
+def test_the_state_is_in_the_clis_state_folder_and_nothing_is_written_beside_the_file(tiroir, scratch, capsys):
+    before = sorted(p.name for p in scratch.parent.iterdir())
+    run(capsys, scratch)
+    assert sorted(p.name for p in scratch.parent.iterdir()) == before
+    row = state()[str(scratch.resolve())]
+    assert row["tiroir"] == FRONT
+    assert row["doc"] == f"loose-bea/{loose.month()}/notes.md"
+    assert row["hash"] == md_hash(TEXT)
+    assert oct((paths.state_dir() / "sends.json").stat().st_mode & 0o777) == "0o600"
+
+
+def test_the_token_is_in_no_file_of_the_state_folder_no_output_and_no_diagnostics_row(tiroir, scratch, capsys):
+    code, out, err = run(capsys, scratch)
+    scratch.write_text(TEXT + "\nMore.\n", encoding="utf-8")
+    code2, out2, err2 = run(capsys, scratch)
+    for text in (out, err, out2, err2):
+        assert tiroir.token not in text
+    for f in [*paths.state_dir().rglob("*"), *Path.home().rglob("*")]:
+        if f.is_file():
+            assert tiroir.token.encode() not in f.read_bytes(), f
+
+
+# ── what every send declares ─────────────────────────────────────────────────
+
+def test_every_send_declares_the_session_the_machine_and_the_remote_control_link(tiroir, scratch, monkeypatch, capsys):
+    cfg = Path(os.environ["HOME"]) / "claude"
+    (cfg / "sessions").mkdir(parents=True)
+    (cfg / "sessions" / "1.json").write_text(json.dumps(
+        {"pid": 1, "sessionId": SESSION, "remoteControlUrl": "https://claude.ai/code/session_01ABC"}), encoding="utf-8")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(cfg))
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", SESSION)
+    monkeypatch.setattr(send, "machine", lambda: "laptop-bea")
+    run(capsys, scratch)
+    scratch.write_text(TEXT + "\nMore.\n", encoding="utf-8")
+    assert run(capsys, scratch)[0] == 0
+    writes = [h for _, h, m in tiroir.seen if m and m["method"] == "tools/call"]
+    assert len(writes) == 2
+    for h in writes:
+        assert h["X-Sheaf-Session"] == SESSION and h["X-Sheaf-Host"] == "laptop-bea"
+        assert h["X-Sheaf-Link"] == "https://claude.ai/code/session_01ABC"
+    address = f"loose-bea/{loose.month()}/notes.md"
+    got = tiroir.get(f"/_/writes?doc={address}")
+    assert SESSION in json.dumps(got.json()) and "laptop-bea" in json.dumps(got.json())
+
+
+def test_a_session_with_no_remote_control_declares_no_link_and_one_that_is_no_web_address_is_not_sent(tiroir, scratch, monkeypatch, capsys):
+    cfg = Path(os.environ["HOME"]) / "claude"
+    (cfg / "sessions").mkdir(parents=True)
+    (cfg / "sessions" / "1.json").write_text(json.dumps(
+        {"pid": 1, "sessionId": SESSION, "remoteControlUrl": "javascript:alert(1)"}), encoding="utf-8")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(cfg))
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", SESSION)
+    run(capsys, scratch)
+    (_, h, _), = [s for s in tiroir.seen if s[2] and s[2]["method"] == "tools/call"]
+    assert "X-Sheaf-Link" not in h and h["X-Sheaf-Session"] == SESSION
+
+
+def test_the_output_names_the_agent_that_ran_the_command(tiroir, scratch, monkeypatch, capsys):
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", SESSION)
+    code, out, err = run(capsys, scratch)
+    assert out.splitlines()[1] == "on chat.example.com as Bea · Claude Code"

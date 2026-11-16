@@ -145,9 +145,11 @@ def mine(hub, member, root_name: str) -> bool:
 
 def data(hub, member, titles: Titles) -> dict:
     """`{tree, rows, more}` for `member`: every document of each of their roots that they may open, newest change first. A row
-    is `{doc, url, title, root, folder, share, mtime, when, open, write, write_tip, session, session_tip, session_link}`: the folder is the
-    path on disk, `share` the hash of a page of the member's own loose root that no Share line opens (the row's Share button writes against it), else "", `write` the last write and `session` the writer of the last line that named an agent session. The
-    tooltips hold the machine and the session's id, and only what the writer declared. No List status is in it. `more` is `{root: n}`, what the listing's cap (8.6) left out of each root."""
+    is `{doc, url, title, root, folder, share, mtime, when, open, write, write_tip, session, session_tip, session_link}`:
+    the folder is the path on disk; `share` the hash of a page of the member's own loose root that no Share line opens (the
+    row's Share button writes against it), else ""; `write` the last write and `session` the writer of the last line that named
+    an agent session. The tooltips hold the machine and the session's id, and only what the writer declared. No List status is
+    in it. `more` is `{root: n}`, what the listing's cap (8.6) left out of each root."""
     found = hub.index.data(member=member)
     now = hub.clock()
     rows = []

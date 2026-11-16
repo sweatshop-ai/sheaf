@@ -56,8 +56,8 @@ def held(clone: Path, branch: str, pages) -> dict:
 
 
 class Moves:
-    """`root_moves.json` in `base`: per repo `{to, id, sent: [paths forwarded], held: {path: reason}}`, written whole and
-    atomically. A file that cannot be read is an empty one."""
+    """`root_moves.json` in `base`: per repo `{to, id, sent: [paths the receiver confirmed], hashes: {path: the receiver's
+    hash}, forwarded: [paths that have their Forward], held: {path: reason}}`, written whole and atomically. A file that cannot be read is an empty one."""
 
     def __init__(self, base: Path):
         self.path = Path(base) / FILE
@@ -86,19 +86,60 @@ class Moves:
             row = data.get(repo)
             if isinstance(row, dict) and (row.get("to") == to or row.get("sent")):
                 return row
-            data[repo] = {"to": to, "id": id, "sent": [], "held": {}}
+            data[repo] = {"to": to, "id": id, "sent": [], "hashes": {}, "forwarded": [], "held": {}}
             self._write(data)
             return data[repo]
 
-    def sent(self, repo: str, page: str):
-        """`page` is confirmed by the receiver."""
+    def sent(self, repo: str, page: str, hash: str = ""):
+        """`page` is confirmed by the receiver, which holds it with `hash`; its Forward is still to be written."""
         with self._lock:
             data = self._read()
             row = data.get(repo)
             if isinstance(row, dict) and page not in row["sent"]:
                 row["sent"] = sorted({*row["sent"], page})
+                row["hashes"] = {**row.get("hashes", {}), page: hash}
                 row["held"].pop(page, None)
                 self._write(data)
+
+    def forwarded(self, repo: str, page: str):
+        """`page` has its Forward: a crash between the confirm and the Forward leaves it out of this, and it is tried again."""
+        with self._lock:
+            data = self._read()
+            row = data.get(repo)
+            if isinstance(row, dict) and page in row["sent"] and page not in row.get("forwarded", []):
+                row["forwarded"] = sorted({*row.get("forwarded", []), page})
+                self._write(data)
+
+    def pending_forward(self, repo: str) -> dict:
+        """The pages the receiver confirmed that have no Forward yet, `{path: the receiver's hash}`."""
+        row = self.get(repo)
+        if row is None:
+            return {}
+        return {p: row.get("hashes", {}).get(p, "") for p in row["sent"] if p not in row.get("forwarded", [])}
+
+    def cancel(self, repo: str) -> bool:
+        """A move that has confirmed no page is dropped (its `.sheaf.toml` was put back before the first confirm); False when
+        there is none, or when a page is confirmed (the move runs to the end)."""
+        with self._lock:
+            data = self._read()
+            row = data.get(repo)
+            if not isinstance(row, dict) or row["sent"]:
+                return False
+            del data[repo]
+            self._write(data)
+            return True
+
+    def done(self, repo: str) -> bool:
+        """A move whose confirmed pages all have their Forward is finished and dropped, so a later move to the same tiroir
+        starts afresh; False when there is none or a page still waits for its Forward."""
+        with self._lock:
+            data = self._read()
+            row = data.get(repo)
+            if not isinstance(row, dict) or not row["sent"] or set(row["sent"]) - set(row.get("forwarded", [])):
+                return False
+            del data[repo]
+            self._write(data)
+            return True
 
     def hold(self, repo: str, why: dict) -> bool:
         """What holds the pages now; True when it differs from what was held (a row is written only then)."""

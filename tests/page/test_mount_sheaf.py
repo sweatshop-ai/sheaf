@@ -12,6 +12,11 @@ from pagehelp import close_context, new_context, until
 pytestmark = pytest.mark.page
 
 ORIGIN = "http://sheaf.test"
+SID_RC, SID_BARE = "6f1c2f0e-3a55-4a0e-9d52-0c1f6a1b7d11", "a2d8e4b1-5c70-4f53-8f02-2a9e6d3c7b90"
+RC = "https://rc.example.com/code/session_abc123"
+CHAT = "3f2a9c1e-77aa-4b1d-9a10-5d0e8b6c2f44"
+AGENTVIEW = "http://127.0.0.1:8765"
+OPENED = "window.__opened = []; window.open = (...a) => { window.__opened.push(a); return null; };"
 FRONT = "/_front-for-test"
 FRONT_HTML = f"""<!doctype html><html><head><meta charset="utf-8"></head>
 <body style="margin:0"><div id="pane" style="height:640px"></div>
@@ -34,7 +39,38 @@ def pages(front, work):
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text(PLAN.replace("# Plan", f"# {title}", 1), encoding="utf-8")
         front.hub.roots.for_document(f)
+    log = front.hub.writes
+    log.add("work/plan.md", "Claude Code (Bea)", "laptop", "update", session=SID_RC, link=RC)
+    log.add("work/ideas/first.md", "Claude Code (Bea)", "laptop", "update", session=SID_BARE)
+    log.add("work/ideas/deep/second.md", "Claude.ai (Bea)", "chat client", "update")
+    log.add("work/.tooling/n.md", "Assistant (Bea)", "chat client", "update", chat=CHAT)
     return front
+
+
+class AgentView:
+    """The AgentView of the member's laptop, as far as the page sees it: `up` answers, `gone` is not there at all
+    (the connection is refused), `ended` finds no live session and reopens it."""
+
+    def __init__(self):
+        self.mode, self.calls = "up", []
+
+    def answer(self, route):
+        req = route.request
+        cors = {"Access-Control-Allow-Origin": ORIGIN, "Access-Control-Allow-Private-Network": "true",
+                "Access-Control-Allow-Headers": "Content-Type, X-Fleet", "Access-Control-Allow-Methods": "POST, OPTIONS"}
+        if self.mode == "gone":
+            return route.abort("connectionrefused")
+        if req.method == "OPTIONS":
+            return route.fulfill(status=204, headers=cors)
+        self.calls.append((req.url.rsplit("/", 1)[1], json.loads(req.post_data), req.headers.get("x-fleet")))
+        if self.mode == "ended" and req.url.endswith("/api/jump"):
+            return route.fulfill(status=404, headers=cors, content_type="text/plain", body="no such live session")
+        route.fulfill(status=200, headers=cors, content_type="application/json", body='{"ok": true}')
+
+
+@pytest.fixture
+def agentview():
+    return AgentView()
 
 
 class Mounted:
@@ -54,7 +90,7 @@ class Mounted:
 
 
 @pytest.fixture
-def mounted(chromium, pages):
+def mounted(chromium, pages, agentview):
     errors = []
 
     def answer(route):
@@ -66,7 +102,9 @@ def mounted(chromium, pages):
 
     context = new_context(chromium)
     context.route(f"{ORIGIN}/**", answer)
+    context.route(f"{AGENTVIEW}/**", agentview.answer)
     page = context.new_page()
+    page.add_init_script(OPENED)
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.add_init_script(FIRST_ROOT)
     page.goto(ORIGIN + FRONT)
@@ -130,3 +168,62 @@ def test_a_click_on_a_row_opens_the_rectoverso_under_a_back_button_and_back_give
     assert mounted.js("return root.querySelector('.sheaf-doc').hidden;") is True
     assert sorted(mounted.visible_rows()) == ["work/ideas/deep/second.md", "work/ideas/first.md"]
     assert mounted.js("return root.querySelector('.sheaf-folder.on').dataset.path;") == "work/ideas"
+
+
+# ── the last agent session on a row is the way back to it (ticket 10) ───────
+
+def cell(m, doc):
+    return m.js("const c = root.querySelector('.sheaf-row[data-doc=\"' + arg + '\"] .sheaf-session');"
+                " const l = c.querySelector('a, button');"
+                " return {text: c.textContent, tag: l && l.tagName, href: l && l.getAttribute('href'), target: l && l.getAttribute('target'),"
+                " rel: l && l.getAttribute('rel')};", doc)
+
+
+def opened(m):
+    return m.page.evaluate("window.__opened.map((a) => a[0])")
+
+
+def test_a_click_on_the_laptop_asks_agentview_to_jump_to_that_session_and_goes_nowhere_else(mounted, agentview):
+    mounted.click('.sheaf-row[data-doc="work/plan.md"] .sheaf-session a')
+    until(lambda: agentview.calls, what="the jump")
+    assert agentview.calls == [("jump", {"key": f"claude:{SID_RC}"}, "1")]
+    assert opened(mounted) == []
+
+
+def test_a_session_that_has_ended_is_reopened_on_the_laptop(mounted, agentview):
+    agentview.mode = "ended"
+    mounted.click('.sheaf-row[data-doc="work/plan.md"] .sheaf-session a')
+    until(lambda: len(agentview.calls) == 2, what="the jump, then the reopen")
+    assert agentview.calls == [("jump", {"key": f"claude:{SID_RC}"}, "1"), ("reopen", {"id": SID_RC}, "1")]
+    assert opened(mounted) == []
+
+
+def test_with_agentview_absent_the_remote_control_link_is_used(mounted, agentview):
+    agentview.mode = "gone"
+    mounted.click('.sheaf-row[data-doc="work/plan.md"] .sheaf-session a')
+    until(lambda: opened(mounted), what="the Remote Control link")
+    assert opened(mounted) == [RC]
+
+
+def test_with_agentview_absent_and_no_remote_control_the_name_is_plain_text_afterwards(mounted, agentview):
+    agentview.mode = "gone"
+    assert cell(mounted, "work/ideas/first.md")["tag"] == "BUTTON"
+    mounted.click('.sheaf-row[data-doc="work/ideas/first.md"] .sheaf-session button')
+    until(lambda: cell(mounted, "work/ideas/first.md")["tag"] is None, what="plain text")
+    assert cell(mounted, "work/ideas/first.md")["text"] == "Claude Code (Bea)"
+    assert opened(mounted) == []
+    assert mounted.js("return !root.querySelector('.sheaf-said').hidden;") is True
+
+
+def test_an_open_webui_chat_and_a_claude_ai_write_each_read_as_the_spec_says(mounted):
+    chat = cell(mounted, "work/.tooling/n.md")
+    assert (chat["tag"], chat["href"], chat["target"], chat["rel"]) == ("A", f"/c/{CHAT}", "_blank", "noopener noreferrer")
+    claude_ai = cell(mounted, "work/ideas/deep/second.md")
+    assert claude_ai["text"] == "" and claude_ai["tag"] is None
+    assert mounted.js("return root.querySelector('.sheaf-row[data-doc=\"work/ideas/deep/second.md\"] .sheaf-write').textContent;") == "Claude.ai (Bea)"
+
+
+def test_the_row_holds_no_script_and_no_address_but_the_hubs_own(mounted):
+    assert mounted.js("return root.querySelectorAll('script, [onclick], [href^=\"javascript:\"]').length;") == 0
+    hrefs = mounted.js("return Array.from(root.querySelectorAll('.sheaf-session [href]')).map((a) => a.getAttribute('href'));")
+    assert sorted(hrefs) == sorted([f"/c/{CHAT}", RC])

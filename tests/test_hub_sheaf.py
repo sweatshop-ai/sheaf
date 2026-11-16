@@ -1,6 +1,7 @@
 """The Sheaf view (SPEC 8.6, 9.9): a member's tree of folders and the table of their rectoversos, as the front's loader
 mounts it from `/_/mount?sheaf=1`. Through the handler in proxy mode, in memory, several members per hub. The page of it
 is in tests/page/test_mount_sheaf.py."""
+import json
 import subprocess
 
 import pytest
@@ -181,6 +182,94 @@ def test_a_write_that_is_the_session_itself_has_no_before(two):
     two.hub.writes.add("work/plan.md", "Ada", "laptop", "update", session=SESSION)
     row = {r["doc"]: r for r in sheaf(two)["sheaf"]["rows"]}["work/plan.md"]
     assert row["write"] == "Ada · laptop" and row["session"] == "Ada"
+
+
+# ── the way back to the last agent session (10) ─────────────────────────────
+
+RC = "https://rc.example.com/code/session_abc123"
+CHAT = "3f2a9c1e-77aa-4b1d-9a10-5d0e8b6c2f44"
+
+
+def link_of(front, address="work/plan.md"):
+    return {r["doc"]: r for r in sheaf(front)["sheaf"]["rows"]}[address]["session_link"]
+
+
+def test_an_own_laptop_session_is_the_id_the_log_recorded_and_its_remote_control_link(two):
+    two.hub.writes.add("work/plan.md", "Claude Code (Bea)", "laptop", "update", session=SESSION, host="mac-mini", link=RC)
+    assert link_of(two) == {"kind": "laptop", "provider": "claude", "session": SESSION, "remote": RC}
+
+
+def test_a_codex_session_is_asked_of_the_laptop_as_codex(two):
+    two.hub.writes.add("work/plan.md", "Codex (Bea)", "laptop", "update", session=SESSION)
+    assert link_of(two) == {"kind": "laptop", "provider": "codex", "session": SESSION, "remote": ""}
+
+
+def test_an_own_laptop_session_without_remote_control_has_the_id_alone(two):
+    two.hub.writes.add("work/plan.md", "Claude Code (Bea)", "laptop", "update", session=SESSION)
+    assert link_of(two) == {"kind": "laptop", "provider": "claude", "session": SESSION, "remote": ""}
+
+
+def test_another_members_laptop_session_is_never_asked_of_this_members_laptop(two):
+    two.hub.writes.add("work/plan.md", "Claude Code (Cal)", "laptop", "update", session=SESSION, link=RC)
+    assert link_of(two) == {"kind": "remote", "href": RC}
+    two.hub.writes.add("work/ideas/first.md", "Claude Code (Cal)", "laptop", "update", session=SESSION)
+    assert link_of(two, "work/ideas/first.md") is None
+
+
+def test_a_session_of_the_box_has_its_remote_control_link_or_none(two):
+    two.hub.writes.add("work/plan.md", "Claude Code (Bea)", "tiroir", "update", session=SESSION, link=RC)
+    assert link_of(two) == {"kind": "remote", "href": RC}
+    two.hub.writes.add("work/ideas/first.md", "Claude Code (Bea)", "tiroir", "update", session=SESSION)
+    assert link_of(two, "work/ideas/first.md") is None
+
+
+def test_an_open_webui_write_links_to_its_chat_on_the_same_origin(two):
+    two.hub.writes.add("work/plan.md", "Assistant (Bea)", "chat client", "update", chat=CHAT)
+    row = {r["doc"]: r for r in sheaf(two)["sheaf"]["rows"]}["work/plan.md"]
+    assert row["session_link"] == {"kind": "chat", "href": f"/c/{CHAT}"}
+    assert row["session"] == "Assistant (Bea)"
+
+
+def test_a_chat_client_without_a_chat_id_shows_its_label_and_no_link(two):
+    two.hub.writes.add("work/plan.md", "Claude.ai (Bea)", "chat client", "update")
+    assert link_of(two) is None
+
+
+def test_a_page_with_no_session_has_no_link(two):
+    assert link_of(two) is None
+
+
+def test_the_writer_must_be_exactly_a_known_client_of_this_member(two):
+    for writer in ("Claude Code (Cal (Bea))", "Other (Bea)"):
+        two.hub.writes.add("work/plan.md", writer, "laptop", "update", session=SESSION)
+        assert link_of(two) is None, writer
+
+
+def test_a_bad_id_gives_no_link_even_with_a_remote_control_link(two):
+    two.hub.writes.add("work/plan.md", "Claude Code (Bea)", "laptop", "update", session="../x", link=RC)
+    assert link_of(two) is None
+
+
+@pytest.mark.parametrize("bad", ["../x", "a b", "a/b", "x" * 65, "-lead", "claude:abc", "a\nb"])
+def test_a_session_id_that_is_not_a_plain_id_is_not_carried(two, bad):
+    two.hub.writes.add("work/plan.md", "Claude Code (Bea)", "laptop", "update", session=bad)
+    assert link_of(two) is None
+
+
+@pytest.mark.parametrize("bad", ["../x", "a b", "a?b=1", "a#b", "x" * 101, "-lead", "a/../b"])
+def test_a_chat_id_that_is_not_a_plain_id_is_not_carried(two, bad):
+    two.hub.writes.add("work/plan.md", "Assistant (Bea)", "chat client", "update", chat=bad)
+    assert link_of(two) is None
+
+
+def test_a_link_that_is_not_a_web_address_never_reaches_the_row(two):
+    two.hub.writes.add("work/plan.md", "Claude Code (Bea)", "tiroir", "update", session=SESSION, link="javascript:alert(1)")
+    assert link_of(two) is None
+
+
+def test_the_id_is_in_no_answer_to_a_member_who_may_not_see_the_page(two):
+    two.hub.writes.add("work/plan.md", "Claude Code (Bea)", "laptop", "update", session=SESSION)
+    assert SESSION in json.dumps(sheaf(two, BEA)) and SESSION not in json.dumps(sheaf(two, CAL))
 
 
 # ── who may ask ──────────────────────────────────────────────────────────────

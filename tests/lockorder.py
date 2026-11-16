@@ -9,6 +9,7 @@ and raised at the acquire, so the test that did it fails, and `check()` fails th
 Not wrapped: the flocks of `state.file_locked` (named files of the state folder, always innermost) and the
 `Condition` of the session Tells' store, whose lock the condition holds."""
 import contextlib
+import os
 import threading
 import traceback
 
@@ -28,6 +29,12 @@ def _stack() -> list:
     return _HELD.stack
 
 
+def _is_link(key) -> bool:
+    """Whether a name lock's key, `(real path of the root, name)`, names a link on disk: a link's name is taken before its
+    target's (a page of a link is judged by its target's owner) and never the reverse, the poll taking no lock of a link."""
+    return isinstance(key, tuple) and os.path.islink(os.path.join(*key))
+
+
 def _before(held: list, kind: str, key, label: str):
     new = lockorder.ORDER.index(kind)
     for h_kind, h_key, h_label in held:
@@ -37,7 +44,7 @@ def _before(held: list, kind: str, key, label: str):
         bad = old > new
         if old == new and kind == "name":
             # more than one name at once: only under the moves' lock, else in ascending order
-            bad = not any(k == "moves" for k, _, _ in held) and key < h_key
+            bad = not any(k == "moves" for k, _, _ in held) and key < h_key and not _is_link(h_key)
         if bad:
             where = "".join(traceback.format_stack(limit=18)[:-4])
             msg = (f"lock order: {label} ({kind}) taken while holding {h_label} ({h_kind}); "

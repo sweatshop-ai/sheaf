@@ -6,7 +6,7 @@ acquisition against this list, in the move, Tell, save, door create, queue_agent
     moves     `moves._LOCK`: one move at a time; also a door `create` in a loose root and `Tell.queue_agent`'s look at an address
     admit     `Hub.admit`: every Tell start and the upgrade stop; held for a look and a mark, never for a wait on a file,
               a render or the hub's lock
-    name      `place.held`: a rectoverso's name (`place._name_lock`); two names only under the moves' lock or in ascending order
+    name      `place.held`: a rectoverso's name (`place._name_lock`); two names only under the moves' lock, in ascending order, or a link's name before its target's
     folders   `place.folders_lock`: a project's private folders
     hub       `Hub._lock`
     doc       `LiveDocument._lock`

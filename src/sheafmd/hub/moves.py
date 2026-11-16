@@ -74,6 +74,22 @@ def _quiet(hub, address: str):
         raise Refused(409, "A Tell is running on this page: move it when that ends.")
 
 
+@contextlib.contextmanager
+def _marked(hub, address: str):
+    """`address` is being moved: no Tell is on it (`_quiet`) and none starts (`Tell._admitting` refuses a marked
+    address), both decided under the admission lock, which is let go before the rename. So the rename waits on the
+    page's name and file locks with no admission lock held, and a save in flight never keeps a Tell start on another
+    page waiting. The mark stays until the hub has moved what it keeps of the page."""
+    with hub.admit:
+        _quiet(hub, address)
+        hub.moving.add(address)
+    try:
+        yield
+    finally:
+        with hub.admit:
+            hub.moving.discard(address)
+
+
 def move_page(hub, member, address: str, folder: str) -> str:
     """The page at `address`, put in `folder` of its root under the same file name: its new address. Raises `Refused`."""
     folder = _folder(folder)
@@ -84,32 +100,27 @@ def move_page(hub, member, address: str, folder: str) -> str:
             raise Refused(409, "The page is in that folder already.")
         new = str(Address(root.name, new_rel))
         _clear(hub, new, address)
-        _quiet(hub, address)        # said early, nothing taken yet; asked again under the admission lock before the rename
-        with place.held(hub, address), place.held(hub, new):
-            _put(hub, root, rel, new_rel, address, new, True)
+        _quiet(hub, address)        # said early, nothing taken yet; asked again with the mark (`_marked`) before the rename
+        with _marked(hub, address), place.held(hub, address), place.held(hub, new):
+            _put(hub, root, rel, new_rel, address, new)
             hub.moved_page(address, new, member.name)
     return new
 
 
-def _put(hub, root, rel: str, new_rel: str, address: str, new: str, quiet: bool = False):
+def _put(hub, root, rel: str, new_rel: str, address: str, new: str):
     """The file at `rel` is the file at `new_rel`: made new beneath the root, each folder opened without a link, then the
-    old name taken off, so the page is never missing or twice there; the folders it leaves empty go. `quiet`: no Tell is
-    on the page, asked once more together with the rename (`_quiet`), both under the admission lock.
-
-    One lock order everywhere: the page's file lock first, then the admission lock. A save holds the file lock through its
-    whole step, and the admission lock is every Tell's start and an upgrade stop: held while waiting for a save, it would
-    keep the hub from admitting a Tell on any other page."""
+    old name taken off, so the page is never missing or twice there; the folders it leaves empty go. Called with the
+    name locks held, and the address marked (`_marked`) unless it is an undo; takes the page's file lock only, which a
+    save holds through its whole step, so a save under way is waited for and its text is at the new address. The
+    admission lock is never taken here (lockorder.py)."""
     try:
         hub.roots.resolve(address)
     except NotFound:
         raise Refused(404, "no such document") from None
     top = Path(os.path.realpath(root.path))
     src, dst = top / rel, top / new_rel
-    with file_lock(src):        # the page's file lock, as every write of it takes: a save under way is waited for
-        with hub.admit:
-            if quiet:
-                _quiet(hub, address)
-            _link(hub, root, top, rel, new_rel, src, dst)
+    with file_lock(src):
+        _link(hub, root, top, rel, new_rel, src, dst)
     tidy(top, rel)
 
 
@@ -193,8 +204,8 @@ def move_folder(hub, member, folder: str, to: str) -> list:
         done, before = [], hub.forwards.snapshot()
         try:
             for rel, new_rel, old, new in plan:
-                with place.held(hub, old), place.held(hub, new):
-                    _put(hub, root, rel, new_rel, old, new, True)
+                with _marked(hub, old), place.held(hub, old), place.held(hub, new):
+                    _put(hub, root, rel, new_rel, old, new)
                     hub.moved_page(old, new, member.name)
                 done.append((rel, new_rel, old, new))
         except BaseException:

@@ -184,6 +184,7 @@ class Hub:
         # Re-entrant, like `_stop_lock`: a second SIGTERM can interrupt the signal handler of the
         # first, in the same thread, while the first holds either, and must not wait for it.
         self.admit = threading.RLock()
+        self.moving: set = set()                 # addresses a move is renaming: no Tell starts on one (moves.py), read and written under `admit`
         self._stop_lock = threading.RLock()
         self.upgrading = False
         self.told_restart = False                # an upgrade stop that came as a signal, after `expect_restart`

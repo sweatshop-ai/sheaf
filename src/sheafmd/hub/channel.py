@@ -13,7 +13,7 @@ import ipaddress
 
 from . import auth
 
-MAX_TRANSFER = 8 * 1024 * 1024  # a bundle: a page, its versions, its Write log lines. A page is at most 1 MiB, versions 60
+MAX_TRANSFER = 8 * 1024 * 1024  # a bundle: a page, its versions, its Write log lines. A bigger one is refused (413), not cut; the move says so in a sentence
 MAX_ASK = 64 * 1024             # a `resolve`
 SECONDS = 60                    # what a sender waits for an answer to a transfer
 TAILNET = (ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd7a:115c:a1e0::/48"))

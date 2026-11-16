@@ -8,17 +8,19 @@ and a failure takes back what was made. `transfers.json` keeps the answer to eac
 lost is answered again and never lands twice.
 """
 import contextlib
+import json
 import os
+from pathlib import Path
 
 from .. import mcp, paths
 from . import loose, proxy, state, visibility
 from .state import TokenRow
 
 SAYS = {
-    "no_email": "this tiroir does not know the e-mail address of the person who owns the page, or the page's owner has none "
-                "here: a member's e-mail must be set in this tiroir's configuration before pages can be moved to them",
-    "no_owner": "no one on this tiroir has the owner's e-mail address",
-    "ambiguous_owner": "more than one person on this tiroir has the owner's e-mail address",
+    "no_email": "this shared Sheaf does not know the e-mail address of the person who owns the page, or that person has none "
+                "here: a member's e-mail must be set in its configuration before pages can be moved to them",
+    "no_owner": "no one on this shared Sheaf has the owner's e-mail address",
+    "ambiguous_owner": "more than one person on this shared Sheaf has the owner's e-mail address",
     "name_taken": "a page of that name is there already, in that folder: it may be an older copy of this one",
     "not_landed": "the page was not accepted",
 }
@@ -42,7 +44,7 @@ def owner_for(hub, email) -> tuple:
     return (found[0], "") if len(found) == 1 else (None, "ambiguous_owner")
 
 
-def _answers() -> "state.Path":
+def _answers() -> Path:
     return paths.state_dir() / "transfers.json"
 
 
@@ -82,10 +84,15 @@ def land(hub, door, b) -> tuple:
     owner, why = owner_for(hub, b.get("owner_email"))
     if owner is None:
         return _refused(why)
-    with state.file_locked("transfers.lock"):
+    with state.file_locked("transfers.lock"):     # held to the end: two sends of one id land one page, the second told the first's answer
         known = state.read_json(_answers(), {}).get(b["id"])
         if isinstance(known, dict):
             return 200, {"ok": True, **known}
+        return _landed(hub, door, b, owner)
+
+
+def _landed(hub, door, b, owner) -> tuple:
+    """The landing of `land`, with `transfers.lock` held."""
     caller = mcp.Caller(owner.name, TokenRow("peer-transfer", owner.name, True, member=owner.id))
     # The Share does not travel: its audience is text, and the people it names are not this tiroir's. The page lands the
     # owner's alone, every Share box unticked and no `shared` line, whatever the sender's text said.
@@ -98,21 +105,20 @@ def land(hub, door, b) -> tuple:
     address = made["doc"]
     try:
         for v in b.get("versions", []):
-            hub.versions.put(address, v["text"])
+            hub.versions.put(address, visibility.unshare(visibility.without_ticked_share(v["text"])))     # a version restored brings back no audience
         by = (b.get("from") or {}).get("by") if isinstance(b.get("from"), dict) else None
         came_from = (b.get("from") or {}).get("origin") if isinstance(b.get("from"), dict) else None
         hub.writes.carry(address, b.get("writes", []), came_from if isinstance(came_from, str) else "",
                          by if isinstance(by, str) else owner.name)
         answer = {"address": address, "hash": made["hash"], "origin": hub.proxy.origin}
-        with state.file_locked("transfers.lock"):
-            rows = state.read_json(_answers(), {})
-            state.write_json(_answers(), {**rows, b["id"]: answer})
+        state.write_json(_answers(), {**state.read_json(_answers(), {}), b["id"]: answer})
     except BaseException:
         with contextlib.suppress(OSError):
             os.unlink(hub.file(address))
         with contextlib.suppress(Exception):
             hub.versions.forget(address)
-            hub.writes.told(address)
+        with contextlib.suppress(Exception):
+            hub.writes.drop(address)
         if (loose_root := hub.loose.known(owner)) is not None:
             with contextlib.suppress(loose.Refused, OSError):
                 _unkeep(loose_root, address)
@@ -123,7 +129,7 @@ def land(hub, door, b) -> tuple:
 def _unkeep(root_path, address: str) -> None:
     """Take back the keep mark a landing made for `address`, when it made one."""
     rel = address.split("/", 1)[1]
-    held = loose.marks(root_path)
-    if rel in held:
-        mark = root_path / loose.KEEP
-        state.write_text_private(mark, __import__("json").dumps(sorted(x for x in held if x != rel)) + "\n", inside=True)
+    with state.file_locked("loose-keep.lock"):
+        held = loose.marks(root_path)
+        if rel in held:
+            state.write_text_private(root_path / loose.KEEP, json.dumps(sorted(x for x in held if x != rel)) + "\n", inside=True)

@@ -84,6 +84,16 @@ def test_the_share_does_not_go_the_landed_page_is_private_to_the_owner(members):
     assert members.hub.member_owns(cfg.members[BEA], out["address"]) and not members.hub.member_owns(cfg.members[CAL], out["address"])
 
 
+def test_the_versions_carry_no_share_either(members):
+    shared = "---\nowner: bea\nvisibility: project\nshared: Cal 2026-11-01\n---\n# Notes\n\n- [x] Share with Cal\n"
+    out, _ = landed(members, transfer(members, peer_token(), versions=[{"text": shared}]))
+    kept = [members.hub.versions.get(out["address"], md_hash(t)) for t in (shared,)]
+    assert kept == [None]
+    from sheafmd.hub import visibility
+    clean = visibility.unshare(visibility.without_ticked_share(shared))
+    assert members.hub.versions.get(out["address"], md_hash(clean)) == clean
+
+
 def test_the_owner_is_matched_by_email_ignoring_case_never_by_name(members):
     token = peer_token()
     assert transfer(members, token, owner_email="BEA@example.COM").status == 200
@@ -159,6 +169,7 @@ def test_a_failed_landing_leaves_nothing_behind(members, monkeypatch):
     assert res.status == 500
     root = members.hub.loose.known(members.hub.proxy.members[BEA])
     assert not [p for p in root.rglob("*.md")]
+    assert members.hub.writes.lines("loose-bea/projects/blog/notes.md") == []
     assert transfer(members, token).status == 200      # the id of a failed landing is free again
 
 

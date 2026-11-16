@@ -180,6 +180,12 @@ class WriteLog:
         with self._lock:
             return self._own.pop(address, None) == hash_
 
+    def drop(self, address: str):
+        """Forget the in-memory lines of `address`: a page that was moved here and taken back. The file keeps what was written."""
+        with self._lock:
+            self._lines.pop(address, None)
+            self._own.pop(address, None)
+
     def told(self, address: str):
         """The hub has been told of the door's write: nothing of it is left to expect."""
         with self._lock:

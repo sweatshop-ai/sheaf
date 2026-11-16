@@ -291,6 +291,19 @@ def _repo_facts(folder: str) -> tuple[set, set, set] | None:
     return common, first, urls
 
 
+def repo_places(folder: str) -> set[str] | None:
+    """Every place the repo of the work tree `folder` fetches from or pushes to, as `normal_place` spells them; None
+    when `folder` is no repo (absent, or git says so and no `.git` is there); a ProxyError when git gives no answer.
+    The one reading of a repo's remotes that the proxy and the repo clones share."""
+    facts = _repo_facts(folder)
+    return None if facts is None else facts[2]
+
+
+def normal_place(url: str) -> str:
+    """One spelling of a remote's address (`_normal_url`), for an address that is not relative to a folder."""
+    return _normal_url(url, "/")
+
+
 def _same_repo(a: str, b: str) -> bool:
     """Whether the work trees `a` and `b` share a repo: the same common git dir (a linked worktree has a git dir of
     its own but shares objects, refs and remote with its main tree), a root commit in common (a copy of the repo

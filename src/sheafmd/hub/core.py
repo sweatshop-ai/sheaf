@@ -1195,7 +1195,6 @@ class Hub:
             self.record_exception("grants-failed")
         try:
             self.waiting_tells.watch()            # a revoke or a close from outside ends a waiting Tell (9.8)
-            self.session_tells.sweep()
         except Exception:
             self.record_exception("tell-end-failed")
         try:

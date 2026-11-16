@@ -11,8 +11,7 @@ A row names the token, the session and the thread, never the Tell's text: the me
     queue(address, cid, row, session, by, member, thread)   put a Tell in the file; raises Refused
     take(row, session, wait, message)       long-poll: the Tells for this token and session, the first listing marks them seen
     end(address, cid, how, ...)             a Tell ends: done, cancelled
-    waits(address, member)                  what the page is told: [{id, to, state}], state queued, waiting or seen
-    sweep()                                 the Tells of a token no longer there end as cancelled
+    waits(address, member)                  what the page is told: [{id, to, state, laptop}], state queued, waiting or seen
 """
 from __future__ import annotations
 
@@ -92,22 +91,10 @@ class SessionTells:
     def _live(self) -> list:
         return [r for r in self.hub.tokens.list() if r.client is not None and not r.invalid]
 
-    def _revoked(self, rows: list, held: list):
-        live = self._live()
-        self._end(rows, [t for t in rows if not any(belongs(t, r) for r in live)], "cancelled", held, reason="revoked")
-
-    def sweep(self):
-        def change(rows, held):
-            n = len(rows)
-            self._revoked(rows, held)
-            return None, len(rows) != n
-        self._change(change)
-
     # ── queued ───────────────────────────────────────────────────────────────
     def queue(self, address: str, cid: str, row, session: str, by: str, member, thread) -> dict:
         """The Tell waits for `session` of `row`'s laptop. A second one for the thread and the session is refused 409."""
         def change(rows, held):
-            self._revoked(rows, held)
             if not any(r.is_pair(row.name, row.id) for r in self.hub.tokens.list()):
                 raise Refused(409, "This laptop can no longer reach this hub: its token was revoked. Pick another target.")
             name = row.signed(self.hub.person, self.hub.proxy)
@@ -120,7 +107,9 @@ class SessionTells:
             if member is not None:
                 t["member"] = member.id
             rows.append(t)
-            held.append(lambda: self._send(address, "tell-queued", {"id": cid, "agent": name}, t.get("member")))
+            state = "queued" if self.listening(t) else "waiting"
+            held.append(lambda: self._send(address, "tell-queued", {"id": cid, "agent": name, "state": state, "laptop": True},
+                                           t.get("member")))
             held.append(lambda: self.hub.record("tell-queued", address, thread=cid, token=row.name, tid=row.id,
                                                 session=session, by=by))
             return t, True
@@ -157,9 +146,7 @@ class SessionTells:
 
     def _listed(self, row, session: str, message) -> list:
         def change(rows, held):
-            n = len(rows)
-            self._revoked(rows, held)
-            out, save = [], len(rows) != n
+            out, save = [], False
             for t in [t for t in rows if _bound(t, row, session)]:
                 said = message(t)
                 if said is False:
@@ -209,14 +196,12 @@ class SessionTells:
             at = self._heard.get((t["token"], t["tid"], t["session"]))
         return at is not None and self._now() - at < LISTENING
 
-    def waits(self, address: str, member=None, sweep: bool = True) -> list:
-        """`[{id, to, state}]` of the reader's own Tells to a session on this document. `queued` while the session listens,
+    def waits(self, address: str, member=None) -> list:
+        """`[{id, to, state, laptop}]` of the reader's own Tells to a session on this document. `queued` while the session listens,
         `waiting` while it does not ("waiting for <session>": it ended, or the laptop is off), `seen` once it took it."""
-        if sweep:
-            self.sweep()
         mine = member.id if member else None
         with self._lock:
             rows = [r for r in read_json(_file(), [], aside=False) if isinstance(r, dict)]
         return [{"id": t["thread"], "to": f"{self._name(t)} · {t['session'][:8]}",
-                 "state": "seen" if t["seen"] else ("queued" if self.listening(t) else "waiting")}
+                 "state": "seen" if t["seen"] else ("queued" if self.listening(t) else "waiting"), "laptop": True}
                 for t in rows if t.get("doc") == address and t.get("member") == mine]

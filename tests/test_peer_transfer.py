@@ -313,3 +313,16 @@ def test_a_landing_that_fails_takes_back_only_the_write_log_lines_it_made_not_th
     except OSError:
         pass
     assert members.hub.writes.lines(GONE) == kept
+
+
+def test_a_page_that_moves_back_carries_no_write_log_line_the_address_already_keeps(members):
+    from sheafmd.hub.writelog import WriteLog
+    forwarded(members)
+    members.hub.writes.add(GONE, "Bea", "laptop", "door", session="s-1")       # kept at the address when the page left
+    sent = [{k: v for k, v in vars(line).items() if k != "address"} for line in members.hub.writes.lines(GONE)]
+    res = back(members, peer_token(origin=ELSEWHERE), writes=sent)             # the other tiroir sends the same lines back
+    assert res.status == 200, res.text
+    own = [(line.time, line.writer, line.place, line.via, line.session, line.host, line.link, line.chat)
+           for line in members.hub.writes.lines(GONE) if line.via != "transfer"]
+    assert len(own) == len(set(own)) == len(sent)
+    assert isinstance(members.hub.writes, WriteLog)

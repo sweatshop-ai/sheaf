@@ -253,6 +253,19 @@ def widens(old, new) -> bool:
     return new is True or not new <= old
 
 
+def share_lines(text_: str) -> list:
+    """Every Share box of the list blocks the page draws, as (ticked, label) in page order: what a non-owner may not change,
+    whatever the `audience` it computes (a ticked `Share with carol` behind a plain Share leaves it `True`)."""
+    out = []
+    for b in split_md_blocks(text_):
+        if b.kind == "list":
+            for line in _lines(b.content):
+                m = _BOX_RE.fullmatch(line)
+                if m and _word(m.group(4)) == "Share":
+                    out.append((m.group(2) in "xX", " ".join(m.group(4).split())))
+    return out
+
+
 def reaches(shared, member) -> bool:
     """Whether the `audience` `shared` of a page opens it to `member`: every member for True, else the one whose
     `short` it names."""

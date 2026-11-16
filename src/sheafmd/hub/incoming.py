@@ -13,7 +13,8 @@ import os
 from pathlib import Path
 
 from .. import mcp, paths
-from . import loose, proxy, state, visibility
+from . import loose, proxy, root_moves, state, visibility
+from . import repos as repos_mod
 from .state import TokenRow
 
 SAYS = {
@@ -133,3 +134,66 @@ def _unkeep(root_path, address: str) -> None:
         held = loose.marks(root_path)
         if rel in held:
             state.write_text_private(root_path / loose.KEEP, json.dumps(sorted(x for x in held if x != rel)) + "\n", inside=True)
+
+
+# ── a whole root (ticket 21) ─────────────────────────────────────────────────
+
+MAX_PAGES = 5000
+
+
+def _root_shape(b) -> str | None:
+    """Why `b` is not a root's move, or None."""
+    if not isinstance(b, dict):
+        return "the root's move is not an object"
+    for key in ("id", "repo", "branch", "tip"):
+        if not (isinstance(b.get(key), str) and 0 < len(b[key]) <= 200):
+            return f"the root's move has no {key}"
+    pages = b.get("pages")
+    if not (isinstance(pages, list) and len(pages) <= MAX_PAGES):
+        return "the root's move has no list of pages"
+    for p in pages:
+        if not (isinstance(p, dict) and isinstance(p.get("path"), str) and p["path"] and "\0" not in p["path"]
+                and "\\" not in p["path"] and not p["path"].startswith("/") and ".." not in p["path"].split("/")):
+            return "a page of the root's move has no path"
+        if not (isinstance(p.get("owner_email"), str) and isinstance(p.get("blob"), str) and p["blob"]):
+            return "a page of the root's move has no owner e-mail or no blob"
+    return None
+
+
+def check_root(hub, b) -> tuple:
+    """First stage of landing a root moved here: which of its pages this tiroir can take. The clone is made by the same report
+    a laptop's would be (same App, same private-root rule, so the peer token never widens what this tiroir may clone); each
+    page's owner is the member its e-mail names; the page's blob must be what this tiroir's own clone holds at the save
+    branch. `(202, {state: cloning})` while the clone is made or the tip not here yet; `(409, {why})` for the whole root;
+    else `(200, {pages: {path: {ready: True} | {ok: False, why}}})`. Nothing is written."""
+    if (bad := _root_shape(b)) is not None:
+        raise ValueError(bad)
+    repos = getattr(hub, "repos", None)
+    if repos is None:
+        return 409, {"why": "no_clones"}
+    judged, first = {}, None
+    for p in b["pages"]:
+        owner, why = owner_for(hub, p["owner_email"])
+        if owner is None:
+            judged[p["path"]] = {"ok": False, "why": why}
+        elif first is None:
+            first = (owner, p["path"])
+    if first is not None:
+        privates = [(m.short or m.id, m.private_root) for m in hub.proxy.members.values() if m.private_root]
+        try:
+            said = repos.report(first[0].short or first[0].id, b["repo"], first[1], b["tip"], privates, {})
+        except repos_mod.Refused:
+            return 409, {"why": "refused"}
+        clone = said.get("clone")
+        if clone == repos_mod.NO_APP:
+            return 409, {"why": "no_app", **({"install": said["install"]} if said.get("install") else {})}
+        if clone in (repos_mod.PRIVATE_ROOT, repos_mod.NOT_CLONED):
+            return 409, {"why": clone.replace("-", "_")}
+        if clone != repos_mod.OK or not said.get("commit_known"):
+            return 202, {"state": "cloning"}
+        dest = repos.clone_dir(b["repo"])
+        for p in b["pages"]:
+            if p["path"] not in judged:
+                judged[p["path"]] = {"ready": True} if root_moves.tip_holds(dest, b["branch"], p["path"], p["blob"]) \
+                    else {"ok": False, "why": "text_differs"}
+    return 200, {"pages": judged}

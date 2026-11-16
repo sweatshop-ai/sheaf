@@ -440,7 +440,7 @@ var create = function (ROOT, CFG, opts) {
   }
 
   if (CFG.why_readonly && main) {
-    // A page of a repo's clone the tiroir may not save: the line says which .sheaf.toml line would change that (SPEC 14).
+    // A page of a repo clone that may not be saved: the line says which .sheaf.toml line would change that (SPEC 14).
     var why = document.createElement('p');
     why.className = 'rd-readonly';
     why.setAttribute('role', 'note');

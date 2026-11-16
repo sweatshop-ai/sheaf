@@ -319,6 +319,7 @@ def test_with_agentview_absent_and_no_remote_control_the_byline_name_is_plain_te
     assert byline(mounted)["text"].startswith("Document prepared by Claude Code (Bea)")
     assert opened(mounted) == []
 
+
 def test_the_row_share_button_shares_an_own_loose_page_and_is_gone_afterwards(mounted, pages):
     member = pages.hub.proxy.members[BEA]
     root, _ = pages.hub.loose.root_for(member)

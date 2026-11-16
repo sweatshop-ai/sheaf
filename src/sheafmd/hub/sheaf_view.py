@@ -140,6 +140,16 @@ def tree(rows: list[dict]) -> list[dict]:
     return done(nodes)
 
 
+def with_clients(out: dict, names: list) -> dict:
+    """`out` (the member's own Sheaf) with the agency's `Clients` node: one child per client tiroir from the config, drawn whether or not
+    its rows were asked for yet, since the rows are read through when the node is opened and never kept (9.9)."""
+    if not names:
+        return out
+    node = {"name": "Clients", "path": "Clients", "clients": True,
+            "children": [{"name": n, "path": f"Clients/{n}", "client": n, "children": []} for n in names]}
+    return {**out, "clients": names, "tree": [*out["tree"], node]}
+
+
 def mine(hub, member, root_name: str) -> bool:
     """Whether the root named `root_name` is `member`'s own loose root: the pages of one are the ones a row may Share (9.11)."""
     root = hub.roots.get(root_name)

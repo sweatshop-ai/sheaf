@@ -37,7 +37,7 @@ from ..mcp import Caller, Door
 from ..render import RenderError
 from ..source import StaleError, md_hash
 from . import archive as archive_mod
-from . import auth, boxwait, codes, events, laptops, loose, peer, place, proxy, sheaf_view, targets, the_list, transcribe, visibility, work
+from . import auth, boxwait, codes, events, laptops, loose, peer, place, proxy, readthrough, sheaf_view, targets, the_list, transcribe, visibility, work
 from . import waiting as waiting_mod
 from .tell import NO_AGENT, JobRefused
 from .index import Status
@@ -262,6 +262,7 @@ class Handler:
             ("GET", "/_/doc", "doc", EITHER, self._doc),
             ("GET", "/_/writes", "writes", EITHER, self._writes),
             ("GET", "/_/mount", "mount", EITHER, self._mount),
+            ("GET", "/_/clients/sheaf", "clients-sheaf", MEMBER, self._clients_sheaf),
             ("GET", "/_/mount.js", "mount-js", OPEN, lambda req: self._mount_asset(req, "mount.js", "text/javascript; charset=utf-8")),
             ("GET", "/_/mount.css", "mount-css", OPEN, lambda req: self._mount_asset(req, "mount.css", "text/css; charset=utf-8")),
             ("GET", "/_/index.json", "index", EITHER, self._index_json),
@@ -848,9 +849,34 @@ class Handler:
         and name as text, never markup. A member's alone, as the index is; the hub's own person has the index page."""
         if req.member is None:
             raise Refuse(404, "no such page")
-        return _json(200, {"kind": "sheaf", "title": "Sheaf", "version": self.hub.version, **self.hub.mount_fields(),
-                           "sheaf": sheaf_view.data(self.hub, req.member, self._titles, req.query.get("view", ""))},
+        sheaf = sheaf_view.data(self.hub, req.member, self._titles, req.query.get("view", ""))
+        if self.hub.clients is not None:
+            sheaf = sheaf_view.with_clients(sheaf, self.hub.clients.names())
+        return _json(200, {"kind": "sheaf", "title": "Sheaf", "version": self.hub.version, **self.hub.mount_fields(), "sheaf": sheaf},
                      {"X-Content-Type-Options": "nosniff"})
+
+    def _clients_sheaf(self, req: Req) -> Response:
+        """The rows of one client tiroir under "Clients" (9.9), read through when the node is opened and kept nowhere: the client
+        hub tells what this member may open there, and a client that does not answer is told as one line, never as rows from
+        an earlier read."""
+        clients, name = self.hub.clients, req.query.get("client")
+        if req.member is None or clients is None or not isinstance(name, str) or clients.split(f"Clients/{name}/x") is None:
+            raise Refuse(404, "no such page")
+        try:
+            found = clients.read(name, req.member, "sheaf")
+        except readthrough.NoEmail as e:
+            return _json(200, {"client": name, "rows": [], "tree": [], "line": str(e)})
+        except readthrough.NotReachable:
+            self._knock(req, name, "sheaf", "unreachable")
+            return _json(200, {"client": name, "rows": [], "tree": [], "line": "This client tiroir is not reachable now."})
+        rows = readthrough.fold_rows(name, found.get("rows", []))
+        self._knock(req, name, "sheaf", "ok")
+        return _json(200, {"client": name, "rows": rows, "tree": sheaf_view.tree(rows), "line": ""}, {"X-Content-Type-Options": "nosniff"})
+
+    def _knock(self, req: Req, client: str, op: str, status: str) -> None:
+        """One diagnostics line per call to a client tiroir: the client, the op, the member's id and the status. Never an address, a
+        title or a body: what a client page is called is the client's, and stays off the agency's disk (9.9)."""
+        diagnostics.record("hub", "read-through", client=client, op=op, member=req.member.id, status=status)
 
     def _mount_asset(self, req: Req, name: str, kind: str) -> Response:
         """The loader's script and the page's style, the hub's own files as it read them at start (assets.py). A request

@@ -129,6 +129,10 @@ _Avoid_: binding, target
 **Client tiroir**:
 A tiroir that belongs to a client of the agency and holds only what is client-facing. Its users' brains, chats and private pages are theirs alone: no agent and no member of the agency reads them. The agency's members on it are members like any other, never its administrators. (Decided 2026-11-16, wayfinder `sheaf-in-open-webui` ticket 22; not built.)
 
+**Read-through**:
+How the agency's tiroir shows a client tiroir's pages: its "Clients" folder asks the client tiroir, over the hub-to-hub channel, for what the signed-in agency member may open there, and shows the answer without keeping any of it. The client tiroir does all the judging, as that member. (Decided 2026-11-16, wayfinder `sheaf-in-open-webui` ticket 23.)
+_Avoid_: mirror, sync, copy
+
 **Team comment**:
 A comment the agency's members leave on a client tiroir's rectoverso that the client never sees. It lives on the agency's tiroir, tied to the rectoverso's address, on a team verso beside the client's; it never reaches the client tiroir. (Named 2026-11-16 by the maintainer, wayfinder `sheaf-in-open-webui` ticket 22; not built.)
 _Avoid_: internal comment, private comment, team note

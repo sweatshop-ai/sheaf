@@ -251,19 +251,25 @@ function create(ROOT, opts) {
   }
   // A client tiroir's rows are asked of the hub when its node is opened and replace the last ones: the hub keeps none, so
   // neither does the page. A row of one has no Share, Keep, Archive or Delete (the hub tells it `own: false`).
+  var asked = {};                 // per client: the read that counts, so an earlier one that comes back late adds nothing
   function load(name) {
     var tbody = ROOT.querySelector('.sheaf-table tbody'), d = ROOT.ownerDocument;
     function el(tag, cls, text) { var e = d.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = String(text); return e; }
-    allRows().forEach(function (tr) { if (tr.dataset.client === name) tr.remove(); });
+    var mine = asked[name] = (asked[name] || 0) + 1;
     say('');
     fetch('/_/clients/sheaf?client=' + encodeURIComponent(name), { credentials: 'same-origin', headers: { Accept: 'application/json' } }).then(function (r) {
       return r.ok ? r.json() : { rows: [], line: 'This client tiroir could not be read.' };
     }).then(function (b) {
-      if (gone) return;
+      if (gone || mine !== asked[name]) return;
+      allRows().forEach(function (tr) { if (tr.dataset.client === name) tr.remove(); });
       (b.rows || []).forEach(function (r) { var tr = buildRow(d, el, r); tr.dataset.client = name; tbody.append(tr); });
       if (b.line) say(b.line);
       show();
-    }, function () { if (!gone) say('This client tiroir could not be read.'); });
+    }, function () {
+      if (gone || mine !== asked[name]) return;
+      allRows().forEach(function (tr) { if (tr.dataset.client === name) tr.remove(); });
+      say('This client tiroir could not be read.');
+    });
   }
   function choose(path, client) {
     selected = path;

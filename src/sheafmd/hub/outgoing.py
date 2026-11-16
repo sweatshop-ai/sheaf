@@ -5,6 +5,7 @@
 
 The move itself (the bundle, the call, confirm-then-Forward) is hooked up once ticket 17's Forward is in main.
 """
+import http.client
 import json
 import urllib.error
 import urllib.request
@@ -38,10 +39,13 @@ def call(origin: str, verb: str, body: dict) -> tuple:
     req = urllib.request.Request(f"{origin}/_/tiroir/{verb}", json.dumps(body).encode(), {
         "Authorization": f"Bearer {token}", "Content-Type": "application/json"}, method="POST")
     try:
-        with connect._NO_REDIRECT.open(req, timeout=SECONDS) as r:
-            status, raw = r.status, r.read(channel.MAX_TRANSFER)
-    except urllib.error.HTTPError as e:
-        status, raw = e.code, e.read(channel.MAX_TRANSFER)
+        try:
+            with connect._NO_REDIRECT.open(req, timeout=SECONDS) as r:
+                status, raw = r.status, r.read(channel.MAX_TRANSFER)
+        except urllib.error.HTTPError as e:
+            status, raw = e.code, e.read(channel.MAX_TRANSFER)
+    except http.client.HTTPException as e:          # a reply cut short is not an OSError, and is a tiroir that does not answer
+        raise OSError(f"{origin} did not finish its answer") from e
     try:
         answer = json.loads(raw.decode("utf-8", "replace"))
     except ValueError:

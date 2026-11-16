@@ -15,6 +15,7 @@ The channel itself (the token, the route, the HTTP client) is ticket 20's; `Clie
 (status, answer)`, which raises OSError when the client tiroir does not answer.
 """
 import json
+import re
 
 from . import roots as roots_mod
 from . import sheaf_view
@@ -35,6 +36,36 @@ class Missing(Exception):
     """The client tiroir has no such page for this member: told as a page that is not there."""
 
 
+AGENCY_KEPT = ("cache-control", "x-content-type-options", "referrer-policy")    # what the agency lets a client's answer say about itself
+
+
+def kept_headers(headers) -> dict:
+    """The few headers of a client tiroir's answer this hub repeats, by a closed list: the type, the CSP, cookies and redirects are
+    this origin's own to say."""
+    return {k: v for k, v in (headers or {}).items() if isinstance(k, str) and isinstance(v, str) and k.lower() in AGENCY_KEPT}
+
+
+_SCRIPT_RE = re.compile(r"<script\b([^>]*)>(.*?)</script\s*>", re.S | re.I)
+_NONCE_ATTR = re.compile(r'\s+nonce="([^"]*)"')
+
+
+def adopt(html: str, client_nonce, nonce: str) -> str:
+    """A client page as this origin serves it: a script holds only when it is this version's own page script (the one the hub
+    renders every page with) or the page's data block, and the first runs under `nonce`, the one this hub drew. Every other
+    script of the client's HTML is dropped, whatever nonce it names, so the client tiroir runs no code of its own here."""
+    from ..render import _page_asset
+    own = _page_asset("page.js")
+
+    def one(m):
+        attrs, body = m.group(1), m.group(2)
+        if attrs.strip() == 'id="rd-edit-meta" type="application/json"':
+            return m.group(0)
+        if client_nonce and _NONCE_ATTR.fullmatch(attrs) and _NONCE_ATTR.fullmatch(attrs).group(1) == client_nonce and body == own:
+            return f'<script nonce="{nonce}">{own}</script>'
+        return ""
+    return _SCRIPT_RE.sub(one, html)
+
+
 def is_clients(address) -> bool:
     return isinstance(address, str) and (address == ROOT or address.startswith(ROOT + "/"))
 
@@ -43,8 +74,12 @@ def fold_rows(client: str, rows: list) -> list:
     """The rows `client`'s hub told, drawn under `Clients/<client>`: the address, URL, folder and root carry the prefix. Whose
     rows they are is the client hub's to say, so none of the owner's actions (Share, Keep, Archive, a session's way back)
     survives: the agency member is not the owner of a client page."""
+    if not isinstance(rows, list):
+        raise NotReachable("the client tiroir answered with rows that are not a list")
     out = []
     for r in rows:
+        if not (isinstance(r, dict) and all(isinstance(r.get(k), str) for k in ("doc", "folder", "root"))):
+            raise NotReachable("the client tiroir answered with a row that is not one")
         r = {k: v for k, v in r.items() if k != "shared_from"}
         folder = "/".join(p for p in r["folder"].split("/") if p not in ("", ".", ".."))
         doc = "/".join(p for p in r["doc"].split("/") if p not in ("", ".", ".."))
@@ -65,6 +100,10 @@ class Clients:
 
     def names(self) -> list:
         return sorted(self._table, key=str.casefold)
+
+    def has(self, name) -> bool:
+        """Whether `name` is, exactly, the name of a configured client tiroir."""
+        return isinstance(name, str) and name in self._table
 
     def split(self, address):
         """(client, address on that hub) of `Clients/<client>/<address>`; None for anything that names no page of a configured client."""
@@ -89,11 +128,20 @@ class Clients:
     def relay(self, client: str, member, op: str, doc: str, **fields) -> dict:
         """The envelope `{status, type, body, nonce}` of `client`'s hub for a page route (`page`, `mount`, `doc`, `writes`) run as
         `member`: `doc` is the address on that hub, `mount` the prefix its page is told under."""
-        return self._ask(client, member, "read", {"op": op, "doc": doc, **fields}, False)
+        return self._envelope(self._ask(client, member, "read", {"op": op, "doc": doc, **fields}, False))
 
     def comment(self, client: str, member, doc: str, request: dict) -> dict:
         """The envelope of `client`'s hub for a comment write (`request` is the page's own body) run as `member`: it signs it."""
-        return self._ask(client, member, "comment", {"doc": doc, "request": request}, False)
+        return self._envelope(self._ask(client, member, "comment", {"doc": doc, "request": request}, False))
+
+    @staticmethod
+    def _envelope(answer: dict) -> dict:
+        """`answer` as the envelope it must be (`status` a whole number, `body` text, `headers` a table when there are any), or the
+        client tiroir did not answer as one."""
+        if (not isinstance(answer.get("status"), int) or isinstance(answer.get("status"), bool) or not isinstance(answer.get("body"), str)
+                or not isinstance(answer.get("headers", {}), dict) or answer.get("type") not in ("html", "json")):
+            raise NotReachable("the client tiroir did not answer as one")
+        return answer
 
     def _ask(self, client, member, verb, fields, soft) -> dict:
         email = member.email
@@ -105,6 +153,8 @@ class Clients:
         except OSError as e:
             raise NotReachable(f"the client tiroir {client} is not reachable") from e
         if status == 200:
+            if not isinstance(answer, dict):
+                raise NotReachable(f"the client tiroir {client} did not answer as a channel does")
             return answer
         if soft:                 # a refusal is the answer of a member with nothing to see: no oracle for "has an account"
             return {k: type(v)() for k, v in NOTHING.items()}
@@ -189,4 +239,7 @@ def comment_answer(handler, body) -> tuple:
     member, request = served(handler.hub, body.get("as")), body.get("request")
     if member is None or not isinstance(request, dict) or not isinstance(body.get("doc"), str):
         return 200, dict(SEEN)
+    if request.get("tell"):               # the channel opens reading and commenting, nothing that asks an agent here
+        return 200, {"status": 400, "type": "json", "body": json.dumps({"error": "Tell is not offered on a comment from another tiroir"}),
+                     "nonce": None}
     return 200, run(handler, member, "POST", "_comment", "/_/comment", {}, {**request, "doc": body["doc"]})

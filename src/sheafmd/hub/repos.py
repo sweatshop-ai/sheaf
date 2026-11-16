@@ -39,6 +39,7 @@ Layout under `base`: `clones/<owner>/<name>/` the clones, `reports.json` the rec
 used and whether it sleeps, written whole and atomically.
 """
 import base64
+import contextlib
 import functools
 import json
 import os
@@ -151,10 +152,12 @@ def _clean_commit(commit) -> str:
 # when the App cannot reach it. A git the hub runs in that folder gets the token in its environment (SPEC 14), never in
 # an argument, a file or an answer; asked at each git, so a renewed token is the one used.
 CREDENTIALS: dict[str, "callable"] = {}
+CREDENTIALS_LOCK = threading.Lock()     # a clone's first serve adds a key from its own thread while a commit or pull looks one up
 
 
 def credential(folder: Path, token) -> None:
-    CREDENTIALS[os.path.realpath(folder)] = token
+    with CREDENTIALS_LOCK:
+        CREDENTIALS[os.path.realpath(folder)] = token
 
 
 def token_env(token: str) -> dict:
@@ -202,6 +205,9 @@ class Repos:
         # Runs `move()` as a pull moves a clone's files: `mover(root, address, target, move)` is the hub's `Commits.moved`,
         # which gives it the pages' writer locks, the repo's lock and the Write log's window (the one path files move by).
         self.mover = lambda root, address, target, move: move()
+        # The commit lock of the clone at `dest` (`Commits._repo_lock`), as a context manager: a change of the sparse set moves
+        # the clone's files, so it runs under the lock a save and a pull take.
+        self.holding = lambda dest: contextlib.nullcontext()
         self._saves: dict[str, tuple] = {}      # repo -> (the branch saves go on or None, the line when none), as last decided
         self._why: dict[str, str] = {}          # repo -> why its HEAD is not on the save branch, after a switch that did not happen
         version = _git_version()
@@ -287,8 +293,10 @@ class Repos:
         """The repo's thread, for one clone going to sleep; then it settles whatever reports came meanwhile (its `_wake`
         widens the set again), like any thread of the repo."""
         try:
-            listed = self._git(dest, "-c", "core.quotePath=false", "sparse-checkout", "list")
-            if listed.returncode == 0 and self._git(dest, "sparse-checkout", "set", "--cone").returncode == 0:
+            with self.holding(dest):
+                listed = self._git(dest, "-c", "core.quotePath=false", "sparse-checkout", "list")
+                shrunk = listed.returncode == 0 and self._git(dest, "sparse-checkout", "set", "--cone").returncode == 0
+            if shrunk:
                 idle = False
                 with self._records:
                     data = self._usage()
@@ -310,7 +318,9 @@ class Repos:
         folders = row.get("restore") if isinstance(row, dict) else None
         if not folders:
             return
-        if self._git(dest, "sparse-checkout", "set", "--cone", "--", *folders, token=token).returncode == 0:
+        with self.holding(dest):
+            woken = self._git(dest, "sparse-checkout", "set", "--cone", "--", *folders, token=token).returncode == 0
+        if woken:
             with self._records:
                 data = self._usage()
                 data[repo] = {k: v for k, v in data.get(repo, {}).items() if k != "restore"}
@@ -413,10 +423,11 @@ class Repos:
         """Add `folder` to the sparse set when it is not in it; whether it was added."""
         if not folder:
             return False
-        listed = self._git(dest, "-c", "core.quotePath=false", "sparse-checkout", "list")
-        if listed.returncode == 0 and any(folder == h or folder.startswith(h + "/") for h in listed.stdout.split("\n") if h):
-            return False
-        return self._git(dest, "sparse-checkout", "add", "--", folder, token=token).returncode == 0
+        with self.holding(dest):
+            listed = self._git(dest, "-c", "core.quotePath=false", "sparse-checkout", "list")
+            if listed.returncode == 0 and any(folder == h or folder.startswith(h + "/") for h in listed.stdout.split("\n") if h):
+                return False
+            return self._git(dest, "sparse-checkout", "add", "--", folder, token=token).returncode == 0
 
     @staticmethod
     def _look_is_safe() -> bool:

@@ -200,6 +200,14 @@ class SessionTells:
             return None, bool(hit)
         self._change(change)
 
+    def end_page(self, address: str, reason: str):
+        """Every Tell on the page at `address` ends as cancelled: the page is gone from here (it went to another tiroir)."""
+        def change(rows, held):
+            gone = [t for t in rows if t["doc"] == address]
+            self._end(rows, gone, "cancelled", held, reason=reason)
+            return gone, bool(gone)
+        self._change(change)
+
     def end_root(self, name: str, reason: str):
         from .roots import Address
         prefix = Address.prefix(name)

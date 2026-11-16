@@ -354,3 +354,22 @@ def test_the_row_move_button_puts_an_own_loose_page_in_a_typed_folder_and_the_ol
     until(lambda: mounted.js("return root.querySelector('.sheaf-row[data-title=\"mine\"]').dataset.doc.endsWith('/tidy/up/mine.md');"),
           what="the row follows the page")
     assert pages.get(f"/{root.name}/2026-11/mine.md").status == 302
+
+
+def test_the_row_move_to_another_tiroir_button_asks_for_the_address_and_says_why_when_it_cannot_move(mounted, pages):
+    member = pages.hub.proxy.members[BEA]
+    root, _ = pages.hub.loose.root_for(member)
+    mine = root.path / "2026-11" / "mine.md"
+    mine.parent.mkdir(parents=True)
+    mine.write_text("# Mine\n\nText.\n", encoding="utf-8")
+    mounted.page.reload()
+    until(lambda: mounted.page.evaluate("!!window.__root"), what="the page after the reload")
+    until(lambda: mounted.js("return !!root.querySelector('.sheaf-row');"), what="the rows in the root")
+    until(lambda: mounted.js("return root.querySelectorAll('.sheaf-move-tiroir').length;") == 1, what="one button, on the own page")
+    mounted.click(".sheaf-move-tiroir")
+    until(lambda: mounted.js("return !!root.querySelector('.sheaf-move-tiroir-form input');"), what="the address field")
+    mounted.js("const f = root.querySelector('.sheaf-move-tiroir-form'); f.querySelector('input').value = 'https://other.example.com'; "
+               "f.requestSubmit();")
+    until(lambda: mounted.js("const s = root.querySelector('.sheaf-said'); return !!s && !s.hidden && s.textContent.length > 0;"),
+          what="the sentence that says why the page did not move")
+    assert mine.exists() and pages.get(f"/{root.name}/2026-11/mine.md").status == 200

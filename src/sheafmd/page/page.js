@@ -4382,7 +4382,8 @@ var create = function (ROOT, CFG, opts) {
       live.addEventListener('moved', function (ev) {
         var d = data(ev);
         if (typeof d.to !== 'string') return;
-        showHubLine('This page was moved to <code>' + esc(d.to) + '</code>. Open it there; ' +
+        var where = typeof d.origin === 'string' ? d.origin + '/' + d.to : d.to;      // another shared Sheaf: its full address
+        showHubLine('This page was moved to <code>' + esc(where) + '</code>. Open it there; ' +
                     'your edits are safe on screen.');
       });
       live.addEventListener('changed', function (ev) {

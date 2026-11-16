@@ -5,10 +5,10 @@ export const MIN_GAP_MS = 5_000     // between two polls that returned at once (
 export const MAX_BACKOFF_MS = 5 * 60_000
 export const CLI_WORST_CASE_MS = (5 + 5 + 35) * 1000          // `sheaf tells-poll` at its slowest (send.py): initialize 5 s, its notice 5 s, the long poll 35 s
 export const POLL_TIMEOUT_MS = CLI_WORST_CASE_MS + 5_000      // over that, so the mod never kills a poll the CLI still waits on
-export const DELIVERED_KEEP = 50                             // Tells remembered per session for a resume: the door drops a Tell once the session answers it
+export const KEPT_MAX = 1000                                 // a safety bound on the Tells kept for a resume, far above any real queue: a Tell leaves the kept set when the door stops listing it
 export const SUBMIT_WINDOW_MS = 60_000                       // a submit that never starts a turn frees the next Tell after this
 
-export type Tell = { id: string; doc: string; thread: string; message: string; by: string; at: string }
+export type Tell = { id: string; doc: string; thread: string; message: string; by: string; at: string; door?: string }      // `door`: set by `accept`, the tiroir that listed it
 
 /** How `sheaf tells-poll` is told which tiroir: the address a send printed, or the name of the door's MCP server. */
 export type Door = { flag: '--origin' | '--server'; value: string }
@@ -27,10 +27,11 @@ export type Poller = {
   session: string            // the session id the held and delivered Tells belong to
   held: Tell[]               // taken from any door, not yet submitted (an Esc, or a turn running)
   delivered: Set<string>     // Tells already submitted: the door lists a Tell until the session answers it
+  stored: Map<string, string> // Tells whose submit succeeded, id to the tiroir that listed it: what is kept for a `claude --resume`
   submittingUntil: number    // a Tell was handed to `$.prompt.submit` and its turn has not started: no second one before it does, or this time
 }
 
-export const fresh = (): Poller => ({ doors: [], armedFor: '', session: '', held: [], delivered: new Set(), submittingUntil: 0 })
+export const fresh = (): Poller => ({ doors: [], armedFor: '', session: '', held: [], delivered: new Set(), stored: new Map(), submittingUntil: 0 })
 
 /** Add a tiroir to poll; null when this session polls it already. */
 export function addDoor(p: Poller, door: Door): DoorState | null {
@@ -77,16 +78,30 @@ export function nextGap(d: DoorState): number {
   return Math.min(MAX_BACKOFF_MS, MIN_GAP_MS * 2 ** d.failures)
 }
 
-/** The Tells to remember for a resume, oldest dropped past DELIVERED_KEEP (a Set keeps the order they went in). */
-export function deliveredToKeep(p: Poller): string[] {
-  return [...p.delivered].slice(-DELIVERED_KEEP)
+/** How a tiroir is named in what is kept. */
+export const doorKey = (door: Door) => `${door.flag} ${door.value}`
+
+/** Keep the Tells of a poll of one tiroir that are neither held nor submitted already. */
+export function accept(p: Poller, tells: Tell[], door: string) {
+  for (const t of tells) {
+    if (!p.delivered.has(t.id) && !p.held.some(h => h.id === t.id)) p.held.push({ ...t, door })
+  }
 }
 
-/** Keep the Tells of a poll that are neither held nor submitted already. */
-export function accept(p: Poller, tells: Tell[]) {
-  for (const t of tells) {
-    if (!p.delivered.has(t.id) && !p.held.some(h => h.id === t.id)) p.held.push(t)
-  }
+/** A poll of one tiroir listed these Tells: a kept Tell of that tiroir that is not among them was answered, so it is
+ *  forgotten. True when something was. */
+export function pruneStored(p: Poller, door: string, listed: Tell[]): boolean {
+  const ids = new Set(listed.map(t => t.id))
+  let changed = false
+  for (const [id, d] of p.stored) if (d === door && !ids.has(id)) { p.stored.delete(id); changed = true }
+  return changed
+}
+
+/** What is kept for a resume: the ids by tiroir, the newest KEPT_MAX at most. */
+export function storedByDoor(p: Poller): Record<string, string[]> {
+  const out: Record<string, string[]> = {}
+  for (const [id, d] of [...p.stored].slice(-KEPT_MAX)) (out[d] ??= []).push(id)
+  return out
 }
 
 /** The text a Tell becomes in the session: says where it came from, and that it is another party's text, not the member's. */

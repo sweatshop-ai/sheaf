@@ -36,7 +36,7 @@ from ..edit import EditError
 from ..mcp import Caller, Door
 from ..render import RenderError
 from ..source import StaleError, md_hash
-from . import auth, boxwait, codes, events, peer, place, proxy, relay, targets, the_list, transcribe, visibility, work
+from . import auth, boxwait, codes, events, peer, place, proxy, relay, sheaf_view, targets, the_list, transcribe, visibility, work
 from . import waiting as waiting_mod
 from .tell import NO_AGENT, JobRefused
 from .index import Status
@@ -242,6 +242,7 @@ class Handler:
         self.hub = hub
         self.peer_check = peer_check
         self.door = Door(hub)
+        self._titles = sheaf_view.Titles()
         self.door.called = self._james_called
         self._pending_members: dict = {}    # address -> the member whose James wrote the waiting session: his copy is looked in
         self._pending_sessions: dict = {}   # address -> (James's session it waits for, since, its write's seq) (9.12)
@@ -882,6 +883,8 @@ class Handler:
         instead of `doc=`, the list."""
         if "list" in req.query:
             return self._mount_list(req)
+        if "sheaf" in req.query:
+            return self._mount_sheaf(req)
         doc = req.query.get("doc")
         _shape(isinstance(doc, str) and doc.endswith(".md"), "doc must be the address of a rectoverso")
         with self._reading(doc):
@@ -903,6 +906,15 @@ class Handler:
         return _json(200, {"kind": "list", "title": "Actions", "version": self.hub.version,
                            **self.hub.mount_fields(),
                            "list": the.data(req.member, req.query.get("show", ""))},
+                     {"X-Content-Type-Options": "nosniff"})
+
+    def _mount_sheaf(self, req: Req) -> Response:
+        """The Sheaf (8.6) as data for the front to mount: a member's tree of folders and table of rectoversos, every title
+        and name as text, never markup. A member's alone, as the index is; the hub's own person has the index page."""
+        if req.member is None:
+            raise Refuse(404, "no such page")
+        return _json(200, {"kind": "sheaf", "title": "Sheaf", "version": self.hub.version, **self.hub.mount_fields(),
+                           "sheaf": sheaf_view.data(self.hub, req.member, self._titles)},
                      {"X-Content-Type-Options": "nosniff"})
 
     def _mount_asset(self, req: Req, name: str, kind: str) -> Response:

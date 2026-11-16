@@ -34,6 +34,9 @@ class FakeRepos:
     def moved_to(self, repo):
         return self.moved
 
+    def install_url(self, repo):
+        return self.answer.get("install", "")
+
     def refusal(self, member, repo, privates=()):
         a = self.answer
         if isinstance(a, Exception):

@@ -255,7 +255,7 @@ button.rd-act{overflow-wrap:anywhere}
 button.rd-act.pending,button.rd-act.pressed,button.rd-act[aria-pressed=true]{background:var(--rd-c);
  color:var(--bg,#fff)}
 button.rd-act:disabled{cursor:default;opacity:.7}
-.doc-by .doc-by-who{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;
+.doc-by .doc-by-who,.doc-by .sheaf-session-link{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;
  text-decoration:underline;text-underline-offset:2px}
 
 /* A one-off's button sits where its box is (SPEC 10.11): the box is behind it, and the rest of the line is its text. */

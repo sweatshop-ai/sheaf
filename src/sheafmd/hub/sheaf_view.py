@@ -73,6 +73,20 @@ def way_back(line, member) -> dict | None:
     return {"kind": "remote", "href": line.link} if line.link else None
 
 
+def session_tip(line) -> str:
+    """The session's id and its machine, as far as the write declared them."""
+    return " on ".join(t for t in (line.session, line.host) if t)
+
+
+def byline(hub, address: str, member) -> dict | None:
+    """The last agent session of a page as its byline says it (SPEC 11): `{name, tip, link}`, the name and tooltip of a row
+    and the same `way_back`, for the member asking; None when no write named a session or a chat."""
+    line = hub.writes.last_way_back(address)
+    if line is None:
+        return None
+    return {"name": line.writer, "tip": session_tip(line), "link": way_back(line, member)}
+
+
 def visible_folders(rel: str) -> list[str]:
     """The folders of a path inside a root that the tree draws: the ones above the first whose name starts with a dot."""
     out = []
@@ -129,7 +143,7 @@ def data(hub, member, titles: Titles) -> dict:
                          "open": d["open"], "write": say_write(last, session),
                          "write_tip": last.host if last else "",
                          "session": session.writer if session else "",
-                         "session_tip": " on ".join(t for t in (session.session, session.host) if t) if session else "",
+                         "session_tip": session_tip(session) if session else "",
                          "session_link": way_back(session, member)})
     rows.sort(key=lambda r: (-r["mtime"], r["doc"]))
     return {"tree": tree(rows), "rows": rows, "more": found["more"]}

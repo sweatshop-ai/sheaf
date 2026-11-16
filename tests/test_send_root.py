@@ -152,6 +152,15 @@ def test_a_reason_the_peer_makes_up_is_held_as_failed_not_stored(move, why):
 
 
 @pytest.mark.parametrize("said", [5, ["x"], "x" * 129, "has space", "a\nb", None])
-def test_a_hash_the_peer_makes_up_is_not_stored(move, said):
+def test_a_confirmed_page_with_a_hash_the_peer_made_up_is_held_not_sent(move, said):
     done = outgoing.send_root(Receiver((200, {"pages": {"a.md": {"ok": True, "hash": said}}})), move, "o/r", THERE, HEAD, [row("a.md")])
-    assert done == {"a.md": ""} and move.get("o/r")["hashes"] == {"a.md": ""}
+    assert done == {}
+    assert move.get("o/r")["sent"] == [] and move.get("o/r")["hashes"] == {}
+    assert move.get("o/r")["held"] == {"a.md": "failed"}
+
+
+def test_a_page_held_for_its_hash_goes_again_at_the_next_try(move):
+    outgoing.send_root(Receiver((200, {"pages": {"a.md": {"ok": True}}})), move, "o/r", THERE, HEAD, [row("a.md")])
+    again = Receiver(ok("a.md"))
+    assert outgoing.send_root(again, move, "o/r", THERE, HEAD, [row("a.md")]) == {"a.md": "h"}
+    assert len(again.calls) == 1

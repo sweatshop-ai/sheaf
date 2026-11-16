@@ -23,7 +23,7 @@ import tempfile
 import threading
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote
 
@@ -41,7 +41,7 @@ from . import waiting as waiting_mod
 from .tell import NO_AGENT, JobRefused
 from .index import Status
 from .live import UNKNOWN, NotAuthor
-from .roots import Address, NotFound, address_of_url, root_of_url
+from .roots import Address, NotFound, address_of_url, root_of_url, url_path
 from .state import TokenRow
 
 MAX_BODY = 8 * 1024 * 1024
@@ -181,8 +181,14 @@ def _json(status: int, obj: dict, headers: dict | None = None) -> Response:
                     json.dumps(obj).encode("utf-8"))
 
 
-def _line(line) -> dict | None:
-    return asdict(line) if line is not None else None
+def _line(line, told=None) -> dict | None:
+    """A Write log line as a dict, its `address` as `told` names it when the caller is told of the page under another name."""
+    if line is None:
+        return None
+    out = asdict(line)
+    if told is None:
+        return out
+    return {**out, "address": told, "session": "", "host": "", "link": "", "chat": ""} if told != line.address else out
 
 
 def _ok(**fields) -> Response:
@@ -262,6 +268,7 @@ class Handler:
             ("POST", "/_/save", "save", COOKIE, self._save),
             ("POST", "/_/pin", "pin", COOKIE, self._pin),
             ("POST", "/_/tick", "tick", COOKIE, self._tick),
+            ("POST", "/_/share", "share", COOKIE, self._share),
             ("GET", "/_/session", "session", MEMBER, self._session),
             ("POST", "/_/sessions", "sessions", MEMBER, self._sessions),
             ("GET", "/_/laptops", "laptops", MEMBER, self._laptops),
@@ -447,7 +454,7 @@ class Handler:
                 except Exception:
                     self.hub.record_exception("status-failed", doc)
                     return None
-                return {"doc": doc, "root": data.get("root")} if theirs else None
+                return {"doc": self.hub.alias(member, doc), "root": data.get("root")} if theirs else None
             return data
         return accept
 
@@ -501,7 +508,18 @@ class Handler:
             raise Refuse(403, "this request did not come from the front's own page")
         if req.method == "POST":
             self._read_body(req, self._body(req, raw))
+        self._unalias(req)
         return fn(req)
+
+    def _unalias(self, req: Req) -> None:
+        """A page Shared with the member is told to them under an opaque name (`Hub.alias`, 9.11): the one they send back, in
+        the path, the query or the body, is read as the page's own address before any route looks at it."""
+        hub = self.hub
+        if not req.path.startswith("/_/") and (address := address_of_url(req.path)) is not None:
+            req.path = url_path(hub.unalias(address))
+        for fields in (req.query, req.body if isinstance(req.body, dict) else {}):
+            if isinstance(fields.get("doc"), str):
+                fields["doc"] = hub.unalias(fields["doc"])
 
     def _route_code(self, req: Req, raw: bytes) -> Response:
         """A request the verifier let in with a sign-in code (9.13): `X-Sheaf-Code` is the code's sha256, and Caddy
@@ -697,15 +715,19 @@ class Handler:
             # Asked at each event: a write that makes the rectoverso its owner's alone silences a stream
             # opened before it (9.11). A change of `projects.toml` that shuts the member out is told `gone`, with
             # why (8.12): that alone, never a file of the rectoverso that cannot be read for a moment.
-            if hub.visible(member, e.address):
+            # `member_owns` as well, but for `gone`: a Share edited down or withdrawn (9.11) closes the page for the member it
+            # no longer names, and a root that is forgotten (no root to own it) is still told.
+            if hub.visible(member, e.address) and (name == "gone" or hub.member_owns(member, e.address)):
                 if name in waiting_mod.EVENTS:      # a Tell that waits for an agent: the member's own, and no other's (9.9)
                     return dict(data) if getattr(data, "member", None) == member.id else None
                 data = _document_events(name, data)
+                if name == "gone" and isinstance(data, dict) and isinstance(data.get("doc"), str):
+                    data = {**data, "doc": hub.alias(member, data["doc"])}      # told as the page is told (9.11), never the owner's folders
                 if name == "changed" and isinstance(data, dict) and "telling" in data:     # their own, not the hub person's (9.9)
                     data = {**data, "telling": self._member_telling(e.address, member, sweep=False, comments=data.get("comments"))}
                 return data
             if name == "grants" and not hub.granted(member, e.address):
-                return events.Renamed("gone", {"doc": e.address, "why": "access"})
+                return events.Renamed("gone", {"doc": hub.alias(member, e.address), "why": "access"})
             return None
         def for_person(name, data):
             # The hub person's page is not told of a member's Tell, nor of the agent it waits for (9.8, 9.9).
@@ -716,7 +738,7 @@ class Handler:
         if member is None and hub.auth is not req.auth:       # a rotation overtook this request, after it told the open streams
             sub.put("signed-out", {})
         if hub.entries.get(e.address) is not e:               # a forget overtook this request, after it told the open streams
-            sub.put("gone", {"doc": e.address})
+            sub.put("gone", {"doc": hub.alias(member, e.address)})
         e.opened = True
         return _stream(sub)
 
@@ -739,8 +761,9 @@ class Handler:
         member reads the lines of a document they may name, no other (9.9)."""
         doc = self._owned(req, req.query.get("doc"), never_read=False)     # the lines outlive a restart, whom the page was visible to does not
         log = self.hub.writes
-        return _ok(lines=[asdict(l) for l in log.lines(doc)], last=_line(log.last(doc)),
-                   last_session=_line(log.last_session(doc)))
+        told = self.hub.alias(req.member, doc)         # a Shared page is told under its opaque name (9.11), never the owner's folders
+        return _ok(lines=[_line(l, told) for l in log.lines(doc)], last=_line(log.last(doc), told),
+                   last_session=_line(log.last_session(doc), told))
 
     def _doc(self, req: Req) -> Response:
         with self._reading(req.query.get("doc")):
@@ -761,6 +784,7 @@ class Handler:
         if req.member is not None:
             # Their own seen state, and nothing of the hub account's agent session (9.9).
             # A rectoverso's Work on this and its Tell for James's window are refreshed as the meta's (9.12).
+            self.hub.opened_by(req.member, e.address)
             work, can = self.hub.member_work(e, req.member)
             extra = {} if work is None else {"work": work}
             mt = self.hub.member_target(e.address, req.member, can)
@@ -835,7 +859,7 @@ class Handler:
     def _index_json(self, req: Req) -> Response:
         rendered = req.query.get("rendered", "0")
         _shape(rendered in ("0", "1"), "rendered must be 0 or 1")
-        return _ok(**self.hub.index.data(rendered=rendered == "1", member=req.member))
+        return _ok(**self.hub.index.told(req.member, rendered=rendered == "1"))
 
     def _jobs(self, req: Req) -> Response:
         return _ok(**self.hub.jobs())
@@ -948,6 +972,77 @@ class Handler:
             self.hub.the_list.ticked(e.address)
         return _ok(hash=got["hash"])
 
+    def _share(self, req: Req) -> Response:
+        """The row's Share button (9.11): the page's owner writes the page's Share line, `Share` or `Share with <names>`,
+        and ticks it in the same request, as a tick of the page does. The line is appended in one write against the hash the
+        row read, then ticked through `_save`, so the guard, the move to the page's home, the commit and the Write log are
+        the page's own. A page with an unticked Share line has it ticked, and no second line is added."""
+        b = req.body
+        e = self._entry(req, b.get("doc"))
+        read, names = b.get("hash"), b.get("with", [])
+        _shape(isinstance(read, str) and read != "", "hash must be the hash of the version the row read")
+        _shape(names == [] or visibility.valid_names(names), "with must be a list of short names")
+        self.hub.catch_up(e)
+        with place.held(self.hub, e.address):
+            original = []
+
+            def change(text):
+                # Who may open the page is judged before anything is said about its text, so a hash that does not
+                # match never tells a member that cannot open the page that it is there.
+                fm = visibility.front_matter(text)
+                m = req.member
+                if m is None:
+                    raise Refuse(403, "Only a signed-in member can share a page.")
+                if not self.hub.may_open(m, e.address, fm):
+                    raise Refuse(404, "no such document")
+                if not self.hub.is_owner(m, e.address, fm):
+                    raise Refuse(409, "Only the owner of this rectoverso can share it.")
+                if md_hash(text) != read:
+                    raise Refuse(409, "the page changed since the row read it: reload the Sheaf")
+                if visibility.audience(text) is not None:
+                    raise Refuse(409, "the page is already shared")
+                if visibility.unticked_share_line(text) is not None:
+                    if names:
+                        raise Refuse(409, "the page already has a Share line: tick it, or edit its names")
+                    return text                 # its own box is ticked below
+                original.append(text)
+                return visibility.with_share_line(text, names)
+            try:
+                after = e.live.rewrite(change)
+            except UnicodeEncodeError:
+                raise Refuse(400, "the text holds a character that cannot be written to the .md") from None
+            if after != read:               # an unticked line of the page's own wrote nothing here
+                self.hub.index.touch(e.address)
+                self.hub.committed(e.address, req.member, "edit")
+                self._page_wrote(req, e, "share")
+        try:
+            edit = the_list.share_edit(e.live.current()[1])
+            _shape(edit is not None, "the Share line was not written")
+            return self._save(replace(req, body={"doc": b.get("doc"), "hash": after, "edits": [edit]}))
+        except Refuse:
+            if original:
+                self._unwrite_share_line(req, e, original[0], after)
+            raise
+
+    def _unwrite_share_line(self, req: Req, e, text: str, written: str) -> None:
+        """The tick of a Share line this request appended was refused (another writer came between the two writes): the
+        line goes again, so a page is never left with an unticked Share line the person did not write. Only when the
+        file still holds what this request wrote; a file that moved on is the other writer's, and stays."""
+        undone = []
+
+        def undo(now):
+            if md_hash(now) != written:
+                return now
+            undone.append(True)
+            return text
+        with place.held(self.hub, e.address):
+            e.live.rewrite(undo)
+        if not undone:
+            return
+        self.hub.index.touch(e.address)
+        self.hub.committed(e.address, req.member, "edit")
+        self._page_wrote(req, e, "share")
+
     def _mover(self, e, ticked):
         """(the `move` of a save, the list it puts the path the file left in): a write that shares the rectoverso or
         withdraws its Share moves the file to the home of its new text before it writes it (9.11), so the text is
@@ -1016,21 +1111,42 @@ class Handler:
                 # A thread moves to one client (9.10, #109): a rectoverso answers Move to once, by whatever edit.
                 raise EditError(f"This thread moves to one client: Move to {slug} is ticked.")
             words = visibility.newly_ticked(toggled)
+            if m is not None and visibility.share_lines(text) != visibility.share_lines(new) \
+                    and not visibility.withdraws_share(text, new) and not self.hub.is_owner(m, e.address, fm):
+                # Who a page is Shared with is its owner's alone, by whatever edit adds, moves, ticks or removes any Share line or
+                # its names, whatever audience they compute (a `Share with carol` behind a plain Share leaves it `True`) (9.11);
+                # an untick of the one ticked box has its own refusal below.
+                raise EditError("Only the owner of this rectoverso can change who it is shared with.")
             if visibility.withdraws_share(text, new):
                 # Withdrawing a Share is its owner's alone, as giving it is (#40), by whatever edit unticks the box:
                 # anyone else's writes nothing; the owner's closes the rectoverso again in the same write. The hub's own
                 # person (no member: the loopback port or the key) reads every file, and withdraws it as an owner.
                 fm = visibility.front_matter(text)
-                if m is not None and not visibility.owner_of(fm, [m], self.hub.assignees(e.address, fm)):
+                if m is not None and not self.hub.is_owner(m, e.address, fm):
                     raise EditError("Only the owner of this rectoverso can withdraw its Share.")
                 new = visibility.unshare(new)
                 if visibility.front_matter(new).get("sessions", "") != fm.get("sessions", ""):
                     raise EditError("A save cannot change the front matter: change it in the file.")
                 words.add("Unshare")
+            elif visibility.narrows(visibility.audience(text), visibility.audience(new)) and self.hub.loose_owner(e.address) is None:
+                # Naming fewer members closes the page at once to every member no longer named (9.11): the front matter
+                # goes to the names-only form, which `Hub.named` reads, and a `visibility: project` no longer lets them in.
+                # A loose page needs none: its audience is read from the file each time.
+                new = visibility.names_only(new)
+                if visibility.front_matter(new).get("sessions", "") != visibility.front_matter(text).get("sessions", ""):
+                    raise EditError("A save cannot change the front matter: change it in the file.")
             if "Share" in words:
-                if m is not None and not visibility.owner_of(fm, [m], self.hub.assignees(e.address, fm)):
+                if m is not None and not self.hub.is_owner(m, e.address, fm):
                     raise EditError("Only the owner of this rectoverso can share it.")
-                if visibility.effective(visibility.front_matter(new)) == "owner":
+                # `Share with <names>` on a page of a shared root opens it to those members only: the front matter stays
+                # as it is and `Hub.named` judges who reads (9.11); only a plain Share writes `visibility: project`.
+                names = isinstance(visibility.audience(new), frozenset) and self.hub.loose_owner(e.address) is None
+                if visibility.effective(visibility.front_matter(new)) == "owner" and names:
+                    by = (m.short or m.name) if m is not None else self.hub.person
+                    new = visibility.set_keys(new, {"visibility": "owner", "shared": f"{by} {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}"})
+                    if visibility.front_matter(new).get("sessions", "") != visibility.front_matter(text).get("sessions", ""):
+                        raise EditError("A save cannot change the front matter: change it in the file.")
+                elif visibility.effective(visibility.front_matter(new)) == "owner":
                     by = (m.short or m.name) if m is not None else self.hub.person
                     new = visibility.share(new, by, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
                     # Share rewrites the front matter: a line it takes out must not join a skipped one to `sessions`.

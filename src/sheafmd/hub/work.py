@@ -65,7 +65,6 @@ class State:
     live: str                   # "box" when the first runs on `[list]`'s box, "laptop" on another host, "" none
     cfg: object                 # the list's the_list.ListConfig
     james: bool = False         # the rectoverso's `assistant` is James
-    relay: bool = False         # a relay of the live session, a member's fork, is connected with a good token (9.14)
     member: object = None       # the member whose James the page offers: theirs in `member_dirs`, else the `[list]` one
 
     @property
@@ -84,12 +83,11 @@ class State:
     def can(self) -> list:
         """The page's `can` (10.1): Tell goes to James's window while the live session is on the box,
         or on a rectoverso of James with no session yet (the hub records his when it finds it), and `[list]`
-        names the box and the folder to drop them in; Tell goes to a fork's connected relay."""
+        names the box and the folder to drop them in."""
         to_james = self.live == "box" or (self.live == "" and self.james)
         if to_james and self.cfg.box and self.cfg.dirs_for(self.member).tell_dir is not None:
             return ["box-tell"]
-        # Tell goes to a member's fork through its relay while that relay is connected (9.14).
-        return ["relay-tell"] if self.live == "laptop" and self.relay else []
+        return []
 
 
 def serves(cfg, member=None) -> bool:
@@ -126,12 +124,7 @@ def state(hub, address: str, text: str, asked_by=None) -> State | None:
     if items:
         live = "box" if cfg.box and items[0]["host"] == cfg.box else "laptop"
     assistant = fm.get("assistant", "")
-    relays = getattr(hub, "relays", None)
-    member = relays.connected(address, items[0]["id"]) if live == "laptop" and relays is not None else None
-    members = getattr(hub.proxy, "members", {})
-    # A relay whose member may no longer open the rectoverso is not connected, in its grace too (9.14, #135).
-    relay = bool(member) and member in members and hub.may_open(members[member], address, fm)
-    return State(items, live, cfg, isinstance(assistant, str) and assistant.casefold() == "james", relay, asked_by)
+    return State(items, live, cfg, isinstance(assistant, str) and assistant.casefold() == "james", asked_by)
 
 
 def member_word(member) -> str:

@@ -365,7 +365,7 @@ def test_a_fork_is_the_first_session_named_by_the_signed_in_member(team, box, wo
     assert first.startswith(f"{{id: {FORK}, host: bob-mac.local, member: bob, date: 20")
     assert after.replace(f"  - {first}\n", "", 1) == before
     from sheafmd.source import md_hash
-    assert got.json() == {"ok": True, "hash": md_hash(after), "relay": got.json()["relay"]}
+    assert got.json() == {"ok": True, "hash": md_hash(after)}
 
 
 def fork(team, id=FORK, as_=BOB, **extra):

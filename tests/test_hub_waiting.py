@@ -223,8 +223,7 @@ def test_ending_a_thread_tells_each_owners_page_its_own_seen_not_the_other_owner
 
 # ── row 25: the route is judged again at the write, for every route ──────────
 
-@pytest.mark.parametrize("first, then", [(None, "box"), (None, "relay"), ("box", None), ("box", "relay"),
-                                          ("relay", None), ("relay", "box")])
+@pytest.mark.parametrize("first, then", [(None, "box"), ("box", None)])
 def test_a_route_that_changes_between_the_check_and_the_write_queues_nothing_for_the_agent(
         front, browser, talk, work, other, monkeypatch, first, then):
     from sheafmd.hub import proxy
@@ -314,7 +313,7 @@ def test_each_page_is_told_of_its_own_tells_only(front, browser, talk, work, oth
     assert heard(mine) == [("tell-cancelled", {"id": "c1", "seen": True, "agent": "ChatGPT (Bea)"})] and heard(own) == []
 
 
-def test_the_box_or_a_relay_comes_before_a_members_agent(front, browser, talk, work, other, monkeypatch):
+def test_the_box_comes_before_a_members_agent(front, browser, talk, work, other, monkeypatch):
     from sheafmd.hub.handler import Handler
     agent_token("bea-chatgpt")
     front.hub.proxy = members(work, other, bea=["bea-chatgpt"], cal=[])

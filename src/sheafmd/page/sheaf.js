@@ -147,6 +147,15 @@ function render(data, target) {
       t.append(' ', dot);
     }
     if (r.shared_by) t.append(' ', el('span', 'sheaf-shared-by', 'shared by ' + r.shared_by));
+    if (r.own) {                                // the owner's own acts on a loose page (SPEC 8.6): Keep, Archive now or Restore, Delete
+      [r.archived ? ['restore', 'Restore'] : ['archive', 'Archive now'], ['keep', r.kept ? 'Kept' : 'Keep'], ['delete', 'Delete']].forEach(function (a) {
+        var ab = el('button', 'sheaf-act' + (a[0] === 'keep' && r.kept ? ' on' : ''), a[1]);
+        ab.type = 'button';
+        ab.dataset.act = a[0];
+        if (a[0] === 'keep') ab.dataset.on = r.kept ? '0' : '1';
+        t.append(' ', ab);
+      });
+    }
     if (r.share) {                              // the member's own loose page that no Share line opens: the button writes the line
       var sb = el('button', 'sheaf-share', 'Share');
       sb.type = 'button';
@@ -168,6 +177,36 @@ function render(data, target) {
   table.append(head, body);
   var empty = el('p', 'sheaf-empty', 'No pages here.');
   empty.hidden = true;
+  var switcher = el('nav', 'sheaf-views');
+  switcher.setAttribute('aria-label', 'Views');
+  var counts = data.counts || {};
+  [['', 'Pages'], ['archived', 'Archived' + (counts.archived ? ' (' + counts.archived + ')' : '')],
+   ['trash', 'Trash' + (counts.trash ? ' (' + counts.trash + ')' : '')]].forEach(function (v) {
+    var b = el('button', 'sheaf-viewswitch' + ((data.view === 'default' ? '' : data.view) === v[0] ? ' on' : ''), v[1]);
+    b.type = 'button';
+    b.dataset.view = v[0];
+    switcher.append(b);
+  });
+  main.append(switcher);
+  if (data.view === 'trash') {                   // the member's own deleted pages, thirty days, Restore each
+    var tt = el('table', 'sheaf-trash'), th = el('tbody');
+    (data.trash || []).forEach(function (t) {
+      var tr = el('tr', 'sheaf-trashed');
+      var rb = el('button', 'sheaf-act', 'Restore');
+      rb.type = 'button';
+      rb.dataset.act = 'restore-trash';
+      rb.dataset.id = t.id;
+      tr.append(el('td', null, t.rel), el('td', null, t.days_left + ' days left'), el('td', null));
+      tr.lastChild.append(rb);
+      th.append(tr);
+    });
+    tt.append(th);
+    main.append(tt);
+    if (!(data.trash || []).length) main.append(el('p', 'sheaf-trash-empty', 'The trash is empty.'));
+    filter.hidden = true;
+    table.hidden = true;
+    empty.textContent = '';
+  }
   main.append(filter, table, empty);
   Object.keys(data.more || {}).forEach(function (root) {
     main.append(el('p', 'sheaf-more', 'and ' + data.more[root] + ' more in ' + root));
@@ -285,9 +324,41 @@ function create(ROOT, opts) {
     });
   }
 
+  // Archive now, Restore, Keep, Delete of a row and Restore of a trashed page (SPEC 8.6): the owner's own acts, each a POST of the
+  // page's name; the view is drawn again after it. Delete asks a second click, in the button itself, never a dialog.
+  function act(button) {
+    var what = button.dataset.act, tr = button.closest('.sheaf-row');
+    if (what === 'delete' && !button.dataset.sure) {
+      button.dataset.sure = '1';
+      button.textContent = 'Really delete?';
+      return;
+    }
+    var body = what === 'restore-trash' ? { id: button.dataset.id } : { doc: tr.dataset.doc };
+    if (what === 'keep') body.on = button.dataset.on === '1';
+    button.disabled = true;
+    say('');
+    fetch('/_/' + what, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(body) }).then(function (r) {
+      return r.json().then(function (b) { return { ok: r.ok && !(b && b.ok === false), error: b && b.error }; }, function () { return { ok: r.ok }; });
+    }).then(function (got) {
+      if (gone) return;
+      if (got.ok) { if (opts.remount) opts.remount(); return; }
+      button.disabled = false;
+      say(got.error || 'That could not be done.');
+    }, function () {
+      if (gone) return;
+      button.disabled = false;
+      say('That could not be done: the hub does not answer.');
+    });
+  }
+
   function onClick(e) {
     var t = e.target;
     if (!t || !t.closest) return;
+    var acting = t.closest('.sheaf-act');
+    if (acting && !acting.disabled) { e.preventDefault(); e.stopPropagation(); act(acting); return; }
+    var switching = t.closest('.sheaf-viewswitch');
+    if (switching) { e.preventDefault(); e.stopPropagation(); if (opts.setView) opts.setView(switching.dataset.view); return; }
     var sharing = t.closest('.sheaf-share');
     if (sharing && !sharing.disabled) { e.preventDefault(); e.stopPropagation(); share(sharing); return; }
     var toggle = t.closest('.sheaf-toggle');

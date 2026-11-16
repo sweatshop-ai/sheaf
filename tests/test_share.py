@@ -402,3 +402,41 @@ def test_a_row_carries_the_hash_to_share_against_only_for_an_own_page_no_share_l
     rows = {r["doc"]: r for r in shared_rows(team, ALICE)["rows"]}
     assert rows[mine]["share"] == md_hash(read(team, mine)) and rows[open_]["share"] == ""
     assert [r["share"] for r in shared_rows(team, BOB)["rows"]] == [""]          # a page given to Bob is not his to Share
+
+
+# ── the review's findings (PR 394, round 1) ──────────────────────────────────
+
+def test_an_agent_create_that_holds_private_work_does_not_open_with_a_ticked_share_line(team):
+    text = "---\nsources: [library:doc-123]\n---\n# Agent page\n\n- [x] Share with bob\n"
+    doc = made(team, "alice", text)["doc"]
+    assert page(team, BOB, doc).status == 404 and page(team, CAROL, doc).status == 404
+
+
+def test_a_recipients_agent_cannot_narrow_or_withdraw_the_share(team):
+    out = made(team, "alice", "# Agent page\n\n- [x] Share with bob, carol\n")
+    for text in ("# Agent page\n\n- [x] Share with bob\n", "# Agent page\n\n- [ ] Share with bob, carol\n", "# Agent page\n"):
+        bad, why = call(team, "bob", "update", doc=out["doc"], text=text, expected_hash=out["hash"])
+        assert bad, why
+    assert page(team, CAROL, out["doc"]).status == 200
+
+
+def test_a_task_that_says_share_with_a_phrase_is_not_a_share_box():
+    assert audience("# T\n\n- [x] Share with the client\n") is None
+    assert audience("# T\n\n- [x] Share with bob, carol\n") == frozenset({"bob", "carol"})
+
+
+def test_the_row_button_does_not_tell_a_member_who_cannot_open_the_page_that_it_changed(team):
+    doc = made(team, "alice", PRIVATE)["doc"]
+    got = share(team, CAROL, doc)
+    assert got.status == 404 and "changed" not in got.text
+
+
+def test_a_tick_the_hub_refuses_after_the_row_button_wrote_the_line_takes_the_line_off_again(team, monkeypatch):
+    doc = made(team, "alice", PRIVATE)["doc"]
+    from sheafmd.hub import handler
+    from sheafmd.hub.handler import Refuse
+    def refuse(self, req):
+        raise Refuse(409, "the page changed")
+    monkeypatch.setattr(handler.Handler, "_save", refuse)
+    assert share(team, ALICE, doc).status == 409
+    assert read(team, doc) == PRIVATE

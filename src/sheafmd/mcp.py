@@ -1037,13 +1037,13 @@ class Door:
         the front matter with `set_keys`, which can join a line the reader gave another key to `sessions`, so
         `sessions` is judged again on what it gives (#36)."""
         seen = self._visible(text, old)
-        out = self._shared(self._owned(seen, address, caller), old, caller)
+        out = self._shared(self._owned(seen, address, caller), old, caller, address)
         sessions = visibility.front_matter(seen).get("sessions", "")    # the old value: `_visible` saw to that
         if out != seen and visibility.front_matter(out).get("sessions", "") != sessions:
             raise _sessions_changed(old)
         return out
 
-    def _shared(self, text: str, old: str | None, caller: Caller) -> str:
+    def _shared(self, text: str, old: str | None, caller: Caller, address: str) -> str:
         """`text` once the rule of Share holds for a door write (9.11). The agent may Share only on `create` of a new
         page: a ticked Share line there opens the page, and its `shared` line says which agent did, for the row.
         An `update` never opens a page to anyone it was not open to, whoever the token's member is, so text an agent
@@ -1055,9 +1055,14 @@ class Door:
             if visibility.widens(visibility.audience(old), now):
                 raise ToolError("An update cannot Share a page, nor open it to more members: only its owner does, from "
                                 "the page or the Sheaf. Send the text with its Share lines as `read` gave them.", "share")
+            m = self._member(caller)
+            if m is not None and visibility.audience(old) != now \
+                    and not self.hub.is_owner(m, address, visibility.front_matter(old)):
+                raise ToolError("Who a page is Shared with is its owner's alone: an update from a token of another member "
+                                "cannot narrow or withdraw it. Send the text with its Share lines as `read` gave them.", "share")
             return text
-        if now is None:
-            return text
+        if now is None or visibility.effective(visibility.front_matter(text)) == "owner":
+            return text         # a private source keeps the page its owner's whatever its text ticks (#40)
         return visibility.set_keys(text, {"visibility": "project",
                                           "shared": f"agent:{caller.display} {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}"})
 

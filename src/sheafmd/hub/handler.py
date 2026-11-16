@@ -1069,21 +1069,26 @@ class Handler:
         _shape(names == [] or visibility.valid_names(names), "with must be a list of short names")
         self.hub.catch_up(e)
         with place.held(self.hub, e.address):
+            original = []
+
             def change(text):
-                if md_hash(text) != read:
-                    raise Refuse(409, "the page changed since the row read it: reload the Sheaf")
+                # Who may open the page is judged before anything is said about its text, so a hash that does not
+                # match never tells a member that cannot open the page that it is there.
                 fm = visibility.front_matter(text)
                 m = req.member
                 if not self.hub.may_open(m, e.address, fm):
                     raise Refuse(404, "no such document")
                 if m is not None and not self.hub.is_owner(m, e.address, fm):
                     raise Refuse(409, "Only the owner of this rectoverso can share it.")
+                if md_hash(text) != read:
+                    raise Refuse(409, "the page changed since the row read it: reload the Sheaf")
                 if visibility.audience(text) is not None:
                     raise Refuse(409, "the page is already shared")
                 if visibility.unticked_share_line(text) is not None:
                     if names:
                         raise Refuse(409, "the page already has a Share line: tick it, or edit its names")
                     return text                 # its own box is ticked below
+                original.append(text)
                 return visibility.with_share_line(text, names)
             try:
                 after = e.live.rewrite(change)
@@ -1095,7 +1100,31 @@ class Handler:
                 self._page_wrote(req, e, "share")
         edit = the_list.share_edit(e.live.current()[1])
         _shape(edit is not None, "the Share line was not written")
-        return self._save(replace(req, body={"doc": b.get("doc"), "hash": after, "edits": [edit]}))
+        try:
+            return self._save(replace(req, body={"doc": b.get("doc"), "hash": after, "edits": [edit]}))
+        except Refuse:
+            if original:
+                self._unwrite_share_line(req, e, original[0], after)
+            raise
+
+    def _unwrite_share_line(self, req: Req, e, text: str, written: str) -> None:
+        """The tick of a Share line this request appended was refused (another writer came between the two writes): the
+        line goes again, so a page is never left with an unticked Share line the person did not write. Only when the
+        file still holds what this request wrote; a file that moved on is the other writer's, and stays."""
+        undone = []
+
+        def undo(now):
+            if md_hash(now) != written:
+                return now
+            undone.append(True)
+            return text
+        with place.held(self.hub, e.address):
+            e.live.rewrite(undo)
+        if not undone:
+            return
+        self.hub.index.touch(e.address)
+        self.hub.committed(e.address, req.member, "edit")
+        self._page_wrote(req, e, "share")
 
     def _mover(self, e, ticked):
         """(the `move` of a save, the list it puts the path the file left in): a write that shares the rectoverso or

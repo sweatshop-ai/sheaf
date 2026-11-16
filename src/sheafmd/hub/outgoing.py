@@ -16,6 +16,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from pathlib import Path
 
 from .. import connect, paths
 from ..source import STAMP_FORMAT, md_hash
@@ -154,7 +155,7 @@ def move_to_tiroir(hub, member, address: str, origin: str) -> dict:
         hub.moved_remote(address, origin, answer["address"], member.name, answer["hash"])
         try:
             os.unlink(hub.file(address))
-            moves.tidy(os.path.realpath(root.path), rel)
+            moves.tidy(Path(os.path.realpath(root.path)), rel)
         except OSError:
             hub.record_exception("move-store-failed", address)
         _note(address, None)

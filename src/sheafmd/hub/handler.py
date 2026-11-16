@@ -1086,7 +1086,10 @@ class Handler:
         """The row's "Move to another tiroir…" (ticket 20): the owner of a loose page sends it to the tiroir at `tiroir`, where they
         have an account. A page that is not theirs is answered as a page that is not there, before anything is sent."""
         b = req.body
-        doc = self._owned(req, b.get("doc"))
+        try:
+            doc = self._owned(req, b.get("doc"))
+        except Refuse as r:
+            raise Refuse(r.status, r.message, answer={"say": r.message}) from None
         _shape(isinstance(b.get("tiroir"), str) and b["tiroir"] != "", "tiroir is missing")
         try:
             got = outgoing.move_to_tiroir(self.hub, req.member, doc, b["tiroir"])

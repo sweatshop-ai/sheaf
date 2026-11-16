@@ -61,6 +61,28 @@ class TokenRefused(SendError):
     """The door refused the token (401, 403): the one answer that never falls back to rendering here."""
 
 
+class Moved(SendError):
+    """The page was moved to another shared Sheaf by its owner (ticket 20): the door of the old one wrote nothing and says where
+    it went. `hash` is the text that landed there."""
+
+    def __init__(self, sentence: str, origin: str, address: str, hash_: str):
+        super().__init__(sentence)
+        self.origin, self.address, self.hash = origin, address, hash_
+
+
+def _moved_part(text: str) -> Moved | None:
+    """The `moved:` line the door puts last in its answer for a page that went to another tiroir, as a `Moved`."""
+    head, _, last = text.rstrip().rpartition("\nmoved: ")
+    try:
+        got = json.loads(last)
+        origin, address = got["tiroir"], got["address"]
+    except (ValueError, KeyError, TypeError):
+        return None
+    if not (head and isinstance(origin, str) and isinstance(address, str)):
+        return None
+    return Moved(head, origin, address, got["hash"] if isinstance(got.get("hash"), str) else "")
+
+
 class Unreachable(SendError):
     """The tiroir did not answer, or answered 5xx: the caller serves the page from the laptop hub and says so."""
 
@@ -243,6 +265,8 @@ class Door:
         if not isinstance(text, str):
             raise SendError(f"the door of {self.origin} answered {name} with a result that holds no text.")
         if result.get("isError"):
+            if (moved := _moved_part(text)) is not None:
+                raise moved
             return True, text
         try:
             return False, json.loads(text)
@@ -411,6 +435,21 @@ def _update(door: Door, md: Path, text: str, row: dict) -> dict:
     raise SendError(f"{got} Nothing was sent.")
 
 
+def _follow(md: Path, row: dict, moved: Moved, environ, say) -> tuple:
+    """(the door of the tiroir the page went to, the page's row there, the token): the state row of `md` is rewritten to the new
+    tiroir, the new address and the text that landed, so the update that follows goes the stale way when the page changed there.
+    A laptop with no credential for that tiroir is told the one line to run, and nothing is changed."""
+    token = credential(moved.origin)
+    if token is None:
+        raise SendError(f"{moved} This laptop holds no credential for {moved.origin}: run `sheaf connect {moved.origin}` and "
+                        f"run sheaf again. Nothing was sent and {md} is unchanged.")
+    new = {**row, "tiroir": moved.origin, "doc": moved.address, "hash": moved.hash or row["hash"],
+           "moved_from": row.get("moved_from", row["tiroir"])}
+    keep_row(md, new)
+    say(f"{row['doc']} was moved to {moved.origin.split('://', 1)[1]}: sent there")
+    return Door(moved.origin, token, declared(environ)), new, token
+
+
 # ── a page in a git repo: the render report ──────────────────────────────────
 
 GITHUB_RE = re.compile(r"(?:https?://(?:[^/@]+@)?github\.com/|git@github\.com:|ssh://git@github\.com/)"
@@ -526,9 +565,20 @@ def send_page(md: Path, args, out, err, environ=None) -> int | None:
         if (top := config.git_place(md.resolve().parent).top) is not None:
             return report_page(md, top, origin, token, args, out, err, environ)
         text = _read_local(md)
-        door = Door(origin, token, declared(environ))
         row = row_of(md, origin)
-        got = _update(door, md, text, row) if row else _create(door, md, text, args, origin)
+        if row is None and (kept := row_of(md)) is not None and kept.get("moved_from") == origin:
+            row = kept                  # the page went to another shared Sheaf: the file keeps following it there
+            origin = row["tiroir"]
+            if (token := credential(origin)) is None:
+                raise SendError(f"this laptop holds no credential for {origin}, where {row['doc']} was moved: run "
+                                f"`sheaf connect {origin}` and run sheaf again. Nothing was sent.")
+        door = Door(origin, token, declared(environ))
+        try:
+            got = _update(door, md, text, row) if row else _create(door, md, text, args, origin)
+        except Moved as moved:
+            door, row, token = _follow(md, row, moved, environ, out)
+            origin = moved.origin
+            got = _update(door, md, text, row)
         member = member_name(origin, token)
     except Unreachable as e:
         err(f"sheaf: {e}")
@@ -559,7 +609,11 @@ def cmd_pull(argv: list[str], out=None, err=None) -> int:
             raise SendError(f"this laptop holds no credential for {row['tiroir']}: run sheaf connect.")
         local = _read_local(md)
         door = Door(row["tiroir"], token, declared())
-        bad, now = door.tool("read", {"doc": row["doc"]})
+        try:
+            bad, now = door.tool("read", {"doc": row["doc"]})
+        except Moved as moved:
+            door, row, token = _follow(md, row, moved, os.environ, out)
+            bad, now = door.tool("read", {"doc": row["doc"]})
         if bad:
             raise SendError(now)
         if md_hash(local) != row["local"]:

@@ -253,6 +253,20 @@ def widens(old, new) -> bool:
     return new is True or not new <= old
 
 
+def narrows(old, new) -> bool:
+    """Whether the `audience` `new` opens a page to fewer members than `old` did, and still opens it to some: a plain Share
+    over names, or names over fewer names. Closing every Share is `withdraws_share`'s."""
+    if old is None or new is None or not isinstance(new, frozenset):
+        return False
+    return old is True or new < old
+
+
+def names_only(text_: str, by: str, date: str) -> str:
+    """The sheaf `text_` once its audience is names: `visibility: owner` and the `shared` mark (kept when it holds one),
+    the form `Hub.named` reads, so a member no longer named loses the page at once."""
+    return set_keys(text_, {"visibility": "owner", "shared": text(front_matter(text_), "shared") or f"{by} {date}"})
+
+
 def share_lines(text_: str) -> list:
     """Every Share box of the list blocks the page draws, as (ticked, label) in page order: what a non-owner may not change,
     whatever the `audience` it computes (a ticked `Share with carol` behind a plain Share leaves it `True`)."""

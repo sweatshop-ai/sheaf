@@ -991,9 +991,11 @@ class Handler:
                 # match never tells a member that cannot open the page that it is there.
                 fm = visibility.front_matter(text)
                 m = req.member
+                if m is None:
+                    raise Refuse(403, "Only a signed-in member can share a page.")
                 if not self.hub.may_open(m, e.address, fm):
                     raise Refuse(404, "no such document")
-                if m is not None and not self.hub.is_owner(m, e.address, fm):
+                if not self.hub.is_owner(m, e.address, fm):
                     raise Refuse(409, "Only the owner of this rectoverso can share it.")
                 if md_hash(text) != read:
                     raise Refuse(409, "the page changed since the row read it: reload the Sheaf")
@@ -1126,6 +1128,14 @@ class Handler:
                 if visibility.front_matter(new).get("sessions", "") != fm.get("sessions", ""):
                     raise EditError("A save cannot change the front matter: change it in the file.")
                 words.add("Unshare")
+            elif visibility.narrows(visibility.audience(text), visibility.audience(new)) and self.hub.loose_owner(e.address) is None:
+                # Naming fewer members closes the page at once to every member no longer named (9.11): the front matter
+                # goes to the names-only form, which `Hub.named` reads, and a `visibility: project` no longer lets them in.
+                # A loose page needs none: its audience is read from the file each time.
+                by = (m.short or m.name) if m is not None else self.hub.person
+                new = visibility.names_only(new, by, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+                if visibility.front_matter(new).get("sessions", "") != visibility.front_matter(text).get("sessions", ""):
+                    raise EditError("A save cannot change the front matter: change it in the file.")
             if "Share" in words:
                 if m is not None and not self.hub.is_owner(m, e.address, fm):
                     raise EditError("Only the owner of this rectoverso can share it.")

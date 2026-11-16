@@ -923,3 +923,9 @@ def test_a_crlf_page_shared_through_the_button_has_no_bare_line_feed(team):
     assert team.post("/_/share", {"doc": doc, "hash": row["share"]}, member=ALICE).status == 200
     raw = team.hub.file(doc).read_bytes()
     assert raw.count(b"\n") == raw.count(b"\r\n") and b"Share" in raw
+
+
+def test_the_row_button_answers_403_to_a_request_with_no_member(team):
+    doc = made(team, "alice", PRIVATE)["doc"]
+    got = team.door.post("/_/share", {"doc": doc, "hash": md_hash(read(team, doc))})
+    assert got.status == 403, got.text

@@ -160,3 +160,15 @@ def test_a_failed_landing_leaves_nothing_behind(members, monkeypatch):
     root = members.hub.loose.known(members.hub.proxy.members[BEA])
     assert not [p for p in root.rglob("*.md")]
     assert transfer(members, token).status == 200      # the id of a failed landing is free again
+
+
+# ── the sending side's refusal (the move itself is hooked up once ticket 17 is in) ──
+
+def test_a_member_with_no_email_or_the_made_up_one_has_none_to_send_and_the_line_says_why(members):
+    from sheafmd.hub import outgoing, proxy
+    cfg = members.hub.proxy
+    assert outgoing.owner_email(cfg, cfg.members[BEA]) == ("Bea@Example.com", "")
+    none, why = outgoing.owner_email(cfg, cfg.members[CAL])
+    assert none is None and "e-mail" in why
+    made_up = replace(cfg.members[CAL], email=proxy.default_email(CAL, cfg.origin))
+    assert outgoing.owner_email(cfg, made_up)[0] is None

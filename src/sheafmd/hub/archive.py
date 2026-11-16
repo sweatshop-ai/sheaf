@@ -86,8 +86,12 @@ class Archive:
         if now < self._next:
             return
         self._next = now + SWEEP_EVERY
-        self.sweep()
-        self.purge()
+        try:
+            self.sweep()                        # a root whose marks cannot be read stops this, not the trash or the clones
+        finally:
+            self.purge()
+            if getattr(self.hub, "repos", None) is not None:
+                self.hub.repos.sleep_idle()     # a clone nobody used for thirty days sleeps (13)
 
     def sweep(self) -> None:
         """Mark the pages that are due, in each loose root. A root whose marks cannot be read is refused (`loose.Refused`)

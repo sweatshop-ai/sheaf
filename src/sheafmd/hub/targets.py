@@ -73,7 +73,7 @@ def _keep(row: TokenRow) -> dict:
 def agents(hub, member=None) -> list[TokenRow]:
     """The agent tokens a reader may Tell: every one for the hub person, their own for a member."""
     rows = [r for r in hub.tokens.list() if r.client is not None and not r.invalid]
-    return rows if member is None else [r for r in rows if r.name in member.tokens]
+    return rows if member is None else [r for r in rows if hub.proxy.owns(member, r)]
 
 
 def live(hub, raw, member=None) -> TokenRow | None:
@@ -92,7 +92,8 @@ def stored(hub, address: str, member=None) -> dict | None:
         raw = entry.get("target")
         return raw if isinstance(raw, dict) and raw else None
     raw = (entry.get("targets") or {}).get(member.id) if isinstance(entry.get("targets"), dict) else None
-    if is_agent(raw) and raw.get("token") in member.tokens:
+    if is_agent(raw) and (raw.get("token") in member.tokens
+                          or any(r.name == raw.get("token") for r in agents(hub, member))):
         return raw
     return None
 

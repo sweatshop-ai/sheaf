@@ -36,7 +36,7 @@ from ..edit import EditError
 from ..mcp import Caller, Door
 from ..render import RenderError
 from ..source import StaleError, md_hash
-from . import auth, boxwait, codes, events, peer, place, proxy, relay, sheaf_view, targets, the_list, transcribe, visibility, work
+from . import auth, boxwait, codes, events, laptops, peer, place, proxy, relay, sheaf_view, targets, the_list, transcribe, visibility, work
 from . import waiting as waiting_mod
 from .tell import NO_AGENT, JobRefused
 from .index import Status
@@ -268,6 +268,9 @@ class Handler:
             ("POST", "/_/tick", "tick", COOKIE, self._tick),
             ("GET", "/_/session", "session", MEMBER, self._session),
             ("POST", "/_/sessions", "sessions", MEMBER, self._sessions),
+            ("GET", "/_/laptops", "laptops", MEMBER, self._laptops),
+            ("POST", "/_/laptops", "laptop-make", MEMBER, self._laptop_make),
+            ("POST", "/_/laptops/revoke", "laptop-revoke", MEMBER, self._laptop_revoke),
             ("POST", "/_/code", "code", MINT, self._code),
             ("POST", "/_/comment", "comment", COOKIE, self._comment),
             ("POST", "/_/tell", "tell", COOKIE, self._tell),
@@ -1417,7 +1420,7 @@ class Handler:
     def _token_member(self, caller):
         """The member the door token of `caller` acts for: whose James wrote, so whose copy holds his session."""
         proxy = self.hub.proxy
-        return proxy.member_of_token(caller.token.name) if proxy is not None and caller.token is not None else None
+        return proxy.member_of_row(caller.token) if proxy is not None and caller.token is not None else None
 
     def _latest(self, address: str, seq: int) -> bool:
         """Whether `seq` is still James's latest write to `address`: an older session never replaces a newer one."""
@@ -1491,6 +1494,30 @@ class Handler:
         James's on the box, another than `sid`, or there is none yet. Never over a member's fork on a laptop."""
         items = work.sessions(visibility.front_matter(text))
         return not items or (items[0]["host"] == self.hub.the_list.cfg.box and items[0]["id"] != sid)
+
+    def _laptops(self, req: Req) -> Response:
+        """The member's laptops, by name: never a token (9.7)."""
+        rows = laptops.of(self.hub, req.member.id)
+        return _json(200, {"laptops": [{"name": r.laptop, "created": r.created, "last_used": r.last_used} for r in rows]})
+
+    def _laptop_make(self, req: Req) -> Response:
+        """"Connect a laptop": a token for the named laptop and the signed-in member, shown once with the line that
+        connects it (9.7)."""
+        try:
+            token, row = laptops.make(self.hub, req.member.id, req.body.get("name"))
+        except laptops.LaptopError as e:
+            raise Refuse(e.status, str(e)) from None
+        self.hub.record("laptop-connected", "", laptop=row.laptop, **self._who(req))
+        return _json(200, {"name": row.laptop, "token": token, "command": f"sheaf connect {self.hub.proxy.origin} {token}"},
+                     {"Cache-Control": "no-store"})
+
+    def _laptop_revoke(self, req: Req) -> Response:
+        try:
+            laptops.revoke(self.hub, req.member.id, req.body.get("name"))
+        except laptops.LaptopError as e:
+            raise Refuse(e.status, str(e)) from None
+        self.hub.record("laptop-revoked", "", laptop=req.body.get("name"), **self._who(req))
+        return _ok()
 
     def _sessions(self, req: Req) -> Response:
         """A member forked one of the rectoverso's sessions on their machine (9.12): the fork becomes the rectoverso's live

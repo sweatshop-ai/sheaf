@@ -96,6 +96,18 @@ class ProxyConfig:
         """The member the door token `name` acts for, by their `tokens`; None for a token bound to nobody."""
         return next((m for m in self.members.values() if name in m.tokens), None)
 
+    def member_of_row(self, row):
+        """The member the token `row` acts for: the one its row names (a laptop's token, made from the Sheaf), else
+        the one whose `tokens` name it. A row that names a member this table lacks acts for nobody, never for the
+        config's holder of its name."""
+        if row.member is not None:
+            return self.members.get(row.member)
+        return self.member_of_token(row.name)
+
+    def owns(self, member, row) -> bool:
+        """Whether the token `row` is one of `member`'s."""
+        return self.member_of_row(row) is member
+
 
 def _read() -> dict:
     """The config file 4.1 names, read without printing a warning."""
@@ -504,10 +516,23 @@ def check_start_names(cfg: "ProxyConfig | None", person: str, rows) -> None:
     """What the hub checks of the names at its start, from the token rows it reads: the agents' (`check_agent_names`,
     in loopback too: a config may change the person's name), then, in proxy mode, the members' (`check_names`).
     Raises ProxyError."""
-    signed = [(t.client is not None, t.signed(person, cfg), t.name) for t in rows]
+    signed = signed_names(cfg, person, rows)
     check_agent_names(signed, proxy_mode=cfg is not None)
     if cfg is not None:
         check_names(cfg, person, [name for _, name, _ in signed], [token for _, _, token in signed])
+
+
+def signed_names(cfg: "ProxyConfig | None", person: str, rows) -> list[tuple[bool, str, str]]:
+    """(is an agent's, signed name, token name) of each row. The laptops of one member for one client sign alike
+    (`Claude Code (Bea)`, 9.7): they are one agent to the rule that no two sign the same, so only the first counts."""
+    out, seen = [], set()
+    for t in rows:
+        if t.laptop is not None and t.member is not None:
+            if (t.member, t.client) in seen:
+                continue
+            seen.add((t.member, t.client))
+        out.append((t.client is not None, t.signed(person, cfg), t.name))
+    return out
 
 
 # ── the proxy socket (9.9 "Two listeners") ───────────────────────────────────

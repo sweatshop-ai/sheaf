@@ -414,7 +414,7 @@ class Door:
     def _member(self, caller: Caller):
         """The member `caller` acts for (9.11): in proxy mode, the one whose `tokens` name its token; None for
         the key, a token bound to nobody, and every caller in loopback mode."""
-        return self.hub.proxy.member_of_token(caller.token.name) if self._judged(caller) else None
+        return self.hub.proxy.member_of_row(caller.token) if self._judged(caller) else None
 
     def _open(self, address: str):
         """The file of `address` opened beneath its root, the one open of the door (`sheafmd.beneath`): NotFound for

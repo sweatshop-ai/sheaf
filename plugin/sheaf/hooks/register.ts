@@ -3,13 +3,14 @@
 // Arming rule: a Tell is addressed to the session id that declared itself on a door write (SPEC 9.8), so this module
 // arms the moment this session declares itself, by any route: a Bash `sheaf FILE.md` that printed a tiroir address, or a
 // create, update, reply or resolve of the door's MCP server whose entry carries the headersHelper (`sheaf headers`, which
-// sends X-Sheaf-Session; without it the door never learns the id, so that write arms nothing). A fork has an id of its
+// sends X-Sheaf-Session; without it the door never learns the id, so that write arms nothing; and only when the door's answer echoes the id it
+// recorded and that is the session's own, which after a /clear is not so until the MCP reconnects). A fork has an id of its
 // own and arms itself that way; it is never armed because its parent was, and it never polls with the parent's id. Every
 // tiroir the session declared itself to is polled, for that one id, each with its own backoff. The poller is armed for
 // one id: when the session id is another one it stops and forgets its tiroirs, backoff and Tell in flight, and an answer
 // that arrives for an id that is no longer the session's is dropped, so its Tells wait at the door for that id.
 import type { Register } from 'claude-code'
-import { accept, addDoor, type Door, type DoorState, doorOfTool, fresh, nextGap, originOf, type Poller, POLL_TIMEOUT_MS, putBack, shouldPoll, takeNext, tellText, type Tell, WAIT_SECONDS } from './core'
+import { accept, addDoor, type Door, type DoorState, doorOfTool, echoedSession, fresh, nextGap, originOf, type Poller, POLL_TIMEOUT_MS, putBack, shouldPoll, takeNext, tellText, type Tell, WAIT_SECONDS } from './core'
 
 /** One long-poll of the door for this session, through the laptop's own `sheaf tells-poll`, so the token stays in the
  *  keyring and never reaches this module. It prints a JSON array of Tells. */
@@ -28,6 +29,7 @@ type Mod = {
   running: number            // main-loop turns under way
   interrupted: boolean       // the member pressed Esc: nothing goes in until they type again
   timer: { cancel: () => void } | null
+  saidStale: boolean         // the one line about a write recorded under an id that is no longer the session's
 }
 
 /** The session id changed under the poller (a fork, a /clear that raised no end): this poller declared itself for one id
@@ -113,19 +115,27 @@ async function sendsSession($: any, door: Door): Promise<boolean> {
  *  until then. */
 async function declare($: any, m: Mod, door: Door | null) {
   if (!door) return
+  if (m.p.doors.length && (await $.session.id()) !== m.p.armedFor) leave(m)      // the tick has not run yet: this id declares itself now, so it is armed, not dropped
   if (m.p.doors.some(d => d.door.flag === door.flag && d.door.value === door.value)) return
-  if (m.p.doors.length && (await $.session.id()) !== m.p.armedFor) return
   if (!(await arm($, m, door))) return
   await $.store.set(doorsKey(m.p.armedFor), m.p.doors.map(d => d.door))
 }
 
 export const register: Register = (on) => {
-  const m: Mod = { p: fresh(), running: 0, interrupted: false, timer: null }
+  const m: Mod = { p: fresh(), running: 0, interrupted: false, timer: null, saidStale: false }
 
   on('tool.call', async ($, e, next) => {
     const door = doorOfTool(String((e as any).tool))
     const done: any = await next(e)
-    if (door && done?.isError !== true && (await sendsSession($, door))) await declare($, m, door)
+    if (door && done?.isError !== true && (await sendsSession($, door))) {
+      // Arm only for the id the door recorded. After a /clear the helper still sends the old id until the MCP reconnects:
+      // that write queues Tells for the old id, which nobody polls, so it arms nothing (SPEC 9.14).
+      if (echoedSession(done) === (await $.session.id())) await declare($, m, door)
+      else if (!m.saidStale) {
+        m.saidStale = true
+        await $.ui.log('Sheaf: this write was recorded under the session before /clear, so Tells from the page are not delivered here yet. They wait at the door; reconnect the sheaf MCP server (/mcp) and write again.')
+      }
+    }
     return done
   })
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {

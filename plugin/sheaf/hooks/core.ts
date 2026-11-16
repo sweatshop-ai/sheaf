@@ -3,7 +3,8 @@
 export const WAIT_SECONDS = 25      // the door's own limit is 25
 export const MIN_GAP_MS = 5_000     // between two polls that returned at once (the door refuses a third in flight: "wait 5 seconds")
 export const MAX_BACKOFF_MS = 5 * 60_000
-export const POLL_TIMEOUT_MS = (WAIT_SECONDS + 15) * 1000   // over the CLI's own 35 s call (send.py), so the mod never kills a poll the CLI still waits on
+export const CLI_WORST_CASE_MS = (5 + 5 + 35) * 1000          // `sheaf tells-poll` at its slowest (send.py): initialize 5 s, its notice 5 s, the long poll 35 s
+export const POLL_TIMEOUT_MS = CLI_WORST_CASE_MS + 5_000      // over that, so the mod never kills a poll the CLI still waits on
 export const SUBMIT_WINDOW_MS = 60_000                       // a submit that never starts a turn frees the next Tell after this
 
 export type Tell = { id: string; doc: string; thread: string; message: string; by: string; at: string }
@@ -50,6 +51,18 @@ export function originOf(output: string): Door | null {
 export function doorOfTool(tool: string): Door | null {
   const m = /^mcp__(sheaf-[A-Za-z0-9_-]+)__(?:create|update|reply|resolve)$/.exec(tool)
   return m ? { flag: '--server', value: m[1] } : null
+}
+
+/** The session id a door write's answer says the door recorded (the `session` of the JSON the tool returned), or '': an
+ *  older door echoes none. Read from the call's text, else from its first text block. */
+export function echoedSession(done: any): string {
+  const text = typeof done?.text === 'string' ? done.text : done?.result?.content?.find?.((b: any) => b?.type === 'text')?.text
+  try {
+    const s = JSON.parse(String(text)).session
+    return typeof s === 'string' ? s : ''
+  } catch {
+    return ''
+  }
 }
 
 /** Whether to start a poll of this door now. Never two at once, never while waiting out a failure. */

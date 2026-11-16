@@ -156,3 +156,10 @@ def test_whoami_is_not_for_the_key_a_cookie_or_a_token_bound_to_no_member(mine, 
     assert browser.request("GET", "/_/whoami").status == 403
     free = mine.hub.tokens.add("free", client="Claude Code", write=True)
     assert browser.request("GET", "/_/whoami", cookie=False, headers={"Authorization": f"Bearer {free}"}).status == 404
+
+
+def test_a_token_whose_member_the_table_no_longer_names_is_refused_not_read_as_unbound(mine, browser):
+    token = connect(mine)["token"]
+    assert read_as(browser, token, "work/plan.md").status == 200
+    del mine.hub.proxy.members[BEA]
+    assert read_as(browser, token, "work/plan.md").status == 401

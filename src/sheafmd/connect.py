@@ -94,6 +94,15 @@ def entry_name(origin: str) -> str:
     return "sheaf-" + urllib.parse.urlsplit(origin).netloc.replace(":", "-")
 
 
+class _Refuse3xx(urllib.request.HTTPRedirectHandler):
+    """A redirect is an answer, never followed: the bearer would go with it to whatever host it names."""
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+_NO_REDIRECT = urllib.request.build_opener(_Refuse3xx)
+
+
 def probe(url: str, token: str):
     """(status, parsed JSON or None) of the door's answer to `initialize`, sent with the token. Any 2xx body is
     parsed; a refusal is its status. The one place `connect` touches the network."""
@@ -103,7 +112,7 @@ def probe(url: str, token: str):
     req = urllib.request.Request(url, body, {"Authorization": f"Bearer {token}", "Content-Type": "application/json",
                                              "Accept": "application/json, text/event-stream"}, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+        with _NO_REDIRECT.open(req, timeout=TIMEOUT) as r:
             raw, status = r.read(1 << 20), r.status
     except urllib.error.HTTPError as e:
         return e.code, None
@@ -156,8 +165,7 @@ def add_mcp_entry(origin: str, token: str) -> Path:
         raise ConnectError(f"{path} is not a Claude Code settings file: nothing was written there.")
     data.setdefault("mcpServers", {})[entry_name(origin)] = {
         "type": "http", "url": origin + DOOR_PATH, "headers": {"Authorization": f"Bearer {token}"}}
-    mode = path.stat().st_mode & 0o777 if path.exists() else 0o600
-    write_text_atomic(path, json.dumps(data, indent=2) + "\n", mode=mode)
+    write_text_atomic(path, json.dumps(data, indent=2) + "\n", mode=0o600)   # it holds a token: owner only
     return path
 
 

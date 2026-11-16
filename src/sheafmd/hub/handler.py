@@ -651,8 +651,14 @@ class Handler:
 
     def _token(self, req: Req) -> bool:
         """Whether the request carries an MCP token that is good now; its owner is on `req.token`."""
-        req.token = self.hub.tokens.verify(auth.bearer(req.headers.get("authorization")))
-        return req.token is not None
+        row = self.hub.tokens.verify(auth.bearer(req.headers.get("authorization")))
+        if row is not None and row.member is not None:
+            # a laptop's token acts for its member: one the table no longer names is refused, never read as unbound
+            cfg = self.hub.proxy
+            if cfg is None or row.member not in cfg.members:
+                row = None
+        req.token = row
+        return row is not None
 
     @staticmethod
     def _door_name(req: Req) -> str:

@@ -434,6 +434,14 @@ def parse(t: dict, where, list_table: dict | None = None) -> ProxyConfig:
             mine = getattr(members[mid], key).casefold()
             if mine and any(getattr(o, key).casefold() == mine for o in members.values() if o.id != mid):
                 raise ProxyError(f"'{key}' {getattr(members[mid], key)!r} of {mhere} is another member's")
+    named: dict[str, Member] = {}       # what names a member as an owner (`visibility.owner_key`): their short name, else their id
+    for m in members.values():
+        key = (m.short or m.id).casefold()
+        if (other := named.get(key)) is not None:
+            raise ProxyError(f"[proxy.members.\"{m.id}\"] of {where} is named as an owner by {(m.short or m.id)!r} "
+                             f"({m.name}), as [proxy.members.\"{other.id}\"] is ({other.name}): a member's short name, "
+                             "or their id when they have none, belongs to one member, in any case")
+        named[key] = m
     _check_private_roots(members, where)
     if client and not any(m.agency and m.short for m in members.values()):
         raise ProxyError(f"{here} is a client tiroir with no agency member that has a 'short': an agent could Share with nobody")

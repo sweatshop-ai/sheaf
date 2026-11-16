@@ -298,6 +298,15 @@ class Waiting:
             return gone, bool(gone)
         return self._change(change)
 
+    def rename(self, old: str, new: str):
+        """The Tells waiting on the page at `old` wait on the page at `new`: a page that moved (9.11) keeps its Tells."""
+        def change(rows):
+            hit = [t for t in rows if t["doc"] == old]
+            for t in hit:
+                t["doc"] = new
+            return None, bool(hit)
+        self._change(change)
+
     def end_root(self, name: str, reason: str):
         """Every Tell on the documents of the root `name` ends as cancelled (its folder was forgotten), whether the
         hub still holds an entry for the document or not; the other roots' Tells, of any token, stay."""

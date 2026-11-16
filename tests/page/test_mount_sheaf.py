@@ -296,7 +296,24 @@ def test_once_agentview_is_known_absent_the_remote_control_link_opens_in_the_cli
     until(lambda: opened(mounted) == [RC], what="the Remote Control link, after the request failed")
     before = mounted.page.evaluate("window.__clicks.length")
     with mounted.page.context.expect_page() as popup:
-        click_byline(mounted)                                # AgentView is known absent: the real link opens, a popup blocker has no say
+        click_byline(mounted)                                # AgentView is known absent: the browser follows the real link itself
     assert popup.value is not None
     assert mounted.page.evaluate("(n) => window.__clicks.slice(n)", before) == [False]
     assert opened(mounted) == [RC]                           # window.open was not used again
+
+
+def test_a_session_that_has_ended_is_reopened_from_the_byline(mounted, agentview):
+    agentview.mode = "ended"
+    open_page(mounted, "work/plan.md")
+    click_byline(mounted)
+    until(lambda: len(agentview.calls) == 2, what="the jump, then the reopen")
+    assert [c[0] for c in agentview.calls] == ["jump", "reopen"]
+
+
+def test_with_agentview_absent_and_no_remote_control_the_byline_name_is_plain_text_afterwards(mounted, agentview):
+    agentview.mode = "gone"
+    open_page(mounted, "work/ideas/first.md")
+    click_byline(mounted)
+    until(lambda: byline(mounted)["tag"] is None, what="plain text")
+    assert byline(mounted)["text"].startswith("Document prepared by Claude Code (Bea)")
+    assert opened(mounted) == []

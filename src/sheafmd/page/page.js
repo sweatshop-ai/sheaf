@@ -132,7 +132,7 @@ var create = function (ROOT, CFG, opts) {
     // Only when it changed: every answer of /_/doc comes here, and new nodes would end a selection made in the line.
     if (html !== bylineHtml) byline.innerHTML = bylineHtml = html;
   }
-  // A member's page (SPEC 11): the byline names the last agent session that wrote here, as the row of the Sheaf does, and
+  // A member's page (SPEC 6.2, item 11): the byline names the last agent session that wrote here, as the row of the Sheaf does, and
   // its name is the same link or button (sheaf.js, `sheafSession`). The hub's `way_back` is the whole of it: the name, the
   // tooltip and what the name links to; none of it is made from the page's own text. A page with no such session, or loaded
   // without sheaf.js, keeps the line as rendered or shows the name as text.

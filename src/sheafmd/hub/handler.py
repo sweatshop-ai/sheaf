@@ -1000,10 +1000,11 @@ class Handler:
     def _side(b: dict) -> str:
         """Whose verso a comment on a client page is for (9.11): `team` stays on this hub, `client` goes to the client's hub. A write
         on a comment names its side by its id (`tN` is a Team comment); an add with no side is the client's, as before."""
-        side = b.get("side", None) if "side" in b else None
+        side = b.get("side")
         _shape("side" not in b or side in ("team", "client"), "side must be team or client")
         if b.get("op") == "add":
-            return side or "client"
+            _shape("side" in b, "choose team or client: a comment on a client page names its side")
+            return side
         cid = b.get("id")
         mine = "team" if isinstance(cid, str) and team_mod.ID_RE.fullmatch(cid) else "client"
         _shape(side in (None, mine), f"that comment is a {mine} comment: side must be {mine}")

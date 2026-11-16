@@ -621,7 +621,7 @@ class Hub:
             return False
         return e.images_scope != self._image_scope(self._file_root(e), e.address)
 
-    def page(self, e: Entry, nonce: str, member=None) -> str:
+    def page(self, e: Entry, nonce: str, member=None, mount: str = "") -> str:
         """The page to send: the nonce of this response on its script, and the read state as it
         is now (it changes without the page being rendered again). For a `member` of proxy mode
         (9.9, 10.1) the meta block is theirs: their name and seen state, no agent and nothing it
@@ -635,11 +635,11 @@ class Hub:
         found = list(_META_RE.finditer(html))
         if found:
             m = found[-1]
-            meta = self._fresh_meta(e, json.loads(m.group(2)), member)
+            meta = self._fresh_meta(e, json.loads(m.group(2)), member, mount)
             html = (html[:m.start(2)] + json.dumps(meta).replace("<", "\\u003c") + html[m.end(2):])
         return html
 
-    def _fresh_meta(self, e: Entry, meta: dict, member) -> dict:
+    def _fresh_meta(self, e: Entry, meta: dict, member, mount: str = "") -> dict:
         """The meta block as it is now: the read state and what changes without the page being rendered again. The page
         route and the mount route (#116) both send this, so a page mounted in the front reads what a framed one does."""
         # The buttons of the text the page draws: a write since its render brings a `changed` and a reload,
@@ -652,7 +652,7 @@ class Hub:
             meta["agent"], meta["can"], meta["lines"] = v.agent(), v.can(), v.lines
             meta["targets"] = targets_mod.choices(self, e.address)
         else:
-            meta["doc"] = self.alias(member, e.address)
+            meta["doc"] = (f"{mount}/" if mount else "") + self.alias(member, e.address)      # a read-through page is told under `Clients/<client>` (9.9)
             meta.update(me=member.name, seen=self.member_seen.get(member.id, e.address), proxy=True,
                         member=member.id)
             work, can = self.member_work(e, member)
@@ -677,13 +677,13 @@ class Hub:
         v = targets_mod.agent_view(self, raw, member)
         return MemberTarget(v.shape, sorted({*can, "queue"}) if v.reaches else can, {"tell": v.line}, pickable)
 
-    def mount_doc(self, e: Entry, member=None) -> dict:
+    def mount_doc(self, e: Entry, member=None, mount: str = "") -> dict:
         """The rectoverso as the front mounts it (#116): {title, toc, html, config, css, version, script, assets}. The text
         is rendered now through the sanitiser's mount mode; the config is the meta block of `page`, so both read the
         same state."""
         h, text = e.live.current()
         got = json.loads(self._build(e, text, mount=True, count=False))
-        got["config"] = self._fresh_meta(e, got["config"], member)
+        got["config"] = self._fresh_meta(e, got["config"], member, mount)
         got["version"] = self.version
         got.update(self.mount_fields())
         return got

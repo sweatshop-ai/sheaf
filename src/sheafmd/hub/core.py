@@ -1553,6 +1553,9 @@ class Hub:
                 a, b = self._page_of(old), self._page_of(new)
                 if a is None or b is None or a == b or not new.exists() or old.exists():
                     continue
+                if roots_mod.Address.parse(a).root != roots_mod.Address.parse(b).root:
+                    self.record("rename-between-roots", a, to=b)      # 9.11: no move between roots; the page's stores stay
+                    continue
                 # A rename cannot be refused as a Move is: the address is marked, so no Tell starts on it meanwhile, and a Tell
                 # already running is a row (its answer meets a page that is gone from where it began). A Forward at the new
                 # address, which `Forwards.add` drops, the page being there, is a row too.

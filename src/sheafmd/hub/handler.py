@@ -684,7 +684,7 @@ class Handler:
     def _entry_to_write(self, req: Req, doc):
         """`_entry` for a route that writes: a clone that sleeps wakes first, once the caller may see the document."""
         self._owned(req, doc)
-        self.hub.wake_for_write(doc)
+        self.hub.wake_for_write(doc, visibility.owner_key(req.member) if req.member is not None else None)
         return self._entry(req, doc)
 
     def _entry(self, req: Req, doc):

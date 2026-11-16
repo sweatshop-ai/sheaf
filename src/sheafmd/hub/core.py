@@ -365,20 +365,29 @@ class Hub:
         root = self.roots.get(roots_mod.Address.parse(address).root)
         return root.clone if root is not None and self._repos is not None else ""
 
-    def wake_for_write(self, doc) -> None:
-        """A write names the page `doc` (an address, or the absolute path of its file): when it is a page of a clone that
-        sleeps, the clone wakes first, so the write finds its file (SPEC 13). Any other name is left to the write's own
-        refusal."""
+    def wake_for_write(self, doc, key=None) -> None:
+        """A write names the page `doc` (an address, the name a page was Shared under, or the absolute path of its file): when
+        it is a page of a clone that sleeps, or whose folders are out, the clone wakes first, so the write finds its file
+        (SPEC 13). Only the page's recorded owner (`key`, as a render report
+        recorded it) or a caller bound to no member (`key` None) wakes a clone: while it sleeps its front matter cannot be
+        read, so who else may see the page is not known, and a caller who may not write is refused by the write itself.
+        Any other name is left to the write's own refusal."""
         if not isinstance(doc, str) or self._repos is None:
             return
         try:
-            root = self.roots.get(roots_mod.Address.parse(doc).root)
-            if root is None and doc.startswith("/"):
-                root = self.roots.lookup(Path(doc))
+            named = [self.unalias(doc)] if not doc.startswith("/") else []
+            if doc.startswith("/") and (root := self.roots.lookup(Path(doc))) is not None:
+                named = [str(roots_mod.Address(root.name, Path(os.path.realpath(doc)).relative_to(root.path).as_posix()))]
+            for address in named:
+                a = roots_mod.Address.parse(address)
+                root = self.roots.get(a.root)
+                if root is None or not root.clone:
+                    continue
+                seen = self._repos.recorded_owner(root.clone, a.rel)
+                if seen is not None and (key is None or key in seen):
+                    self._repos.wake(root.clone)
         except Exception:
             return
-        if root is not None and root.clone:
-            self._repos.wake(root.clone)
 
     def read_only_line(self, address: str) -> str:
         """Why the page at `address` may not be written, in one sentence naming the `.sheaf.toml` line that would change

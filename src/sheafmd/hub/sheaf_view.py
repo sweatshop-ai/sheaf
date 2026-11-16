@@ -2,6 +2,7 @@
 loader to mount from `/_/mount?sheaf=1`. Whose pages these are is the index's to say (9.9); this module only draws what
 `Index.data` hands a member: it adds each row's title and its last write, and keeps no list of its own."""
 import os
+import re
 from pathlib import Path
 
 from . import index as index_mod
@@ -9,6 +10,8 @@ from . import place
 from . import roots as roots_mod
 from . import the_list
 
+SESSION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")      # what AgentView takes as a session id (SPEC 8.6)
+CHAT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 TITLES_KEPT = 5000                 # titles kept; a full cache starts over, each file is read again once
 
 
@@ -49,6 +52,23 @@ def say_write(line, session) -> str:
     return said
 
 
+def way_back(line, member) -> dict | None:
+    """What a row's session name links to, from the Write log's own line and nothing the page says (SPEC 8.6): `laptop` is
+    the provider and id the member's own laptop session declared (the page asks AgentView on their laptop to bring it back), with the
+    session's Remote Control link when it declared one; `remote` the link alone; `chat` an Open WebUI chat of this origin.
+    A claude.ai or ChatGPT write, a session of another member's laptop without a link, an id that is not a plain id, and a
+    session with no link at all give None: the name is plain text. A member's laptop is asked only for their own sessions
+    (their agents sign `<client> (<member>)`), never for one another member's."""
+    if line is None:
+        return None
+    if line.place == "chat client":
+        return {"kind": "chat", "href": f"/c/{line.chat}"} if CHAT_ID.fullmatch(line.chat) else None
+    if line.place == "laptop" and SESSION_ID.fullmatch(line.session) and line.writer.endswith(f"({member.name})"):
+        provider = "codex" if line.writer.startswith("Codex (") else "claude"           # AgentView's `provider:id` key
+        return {"kind": "laptop", "provider": provider, "session": line.session, "remote": line.link}
+    return {"kind": "remote", "href": line.link} if line.link else None
+
+
 def visible_folders(rel: str) -> list[str]:
     """The folders of a path inside a root that the tree draws: the ones above the first whose name starts with a dot."""
     out = []
@@ -82,7 +102,7 @@ def tree(rows: list[dict]) -> list[dict]:
 
 def data(hub, member, titles: Titles) -> dict:
     """`{tree, rows, more}` for `member`: every document of each of their roots that they may open, newest change first. A row
-    is `{doc, url, title, root, folder, mtime, when, open, write, write_tip, session, session_tip}`: the folder is the
+    is `{doc, url, title, root, folder, mtime, when, open, write, write_tip, session, session_tip, session_link}`: the folder is the
     path on disk, `write` the last write and `session` the writer of the last line that named an agent session. The
     tooltips hold the machine and the session's id, and only what the writer declared. No List status is in it. `more` is `{root: n}`, what the listing's cap (8.6) left out of each root."""
     found = hub.index.data(member=member)
@@ -98,13 +118,14 @@ def data(hub, member, titles: Titles) -> dict:
                 except roots_mod.NotFound:
                     continue
                 title = titles.of(path, at.rel)
-            last, session = hub.writes.last(address), hub.writes.last_session(address)
+            last, session = hub.writes.last(address), hub.writes.last_way_back(address)
             folder = "/".join([at.root, *at.rel.split("/")[:-1]])
             rows.append({"doc": address, "url": d["url"], "title": title, "root": at.root,
                          "folder": folder, "mtime": d["mtime"], "when": index_mod.when(d["mtime"], now),
                          "open": d["open"], "write": say_write(last, session),
                          "write_tip": last.host if last else "",
                          "session": session.writer if session else "",
-                         "session_tip": (session.session + (f" on {session.host}" if session.host else "")) if session else ""})
+                         "session_tip": (session.session + (f" on {session.host}" if session.host else "")) if session else "",
+                         "session_link": way_back(session, member)})
     rows.sort(key=lambda r: (-r["mtime"], r["doc"]))
     return {"tree": tree(rows), "rows": rows, "more": found["more"]}

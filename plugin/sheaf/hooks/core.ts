@@ -76,15 +76,6 @@ export function nextGap(d: DoorState): number {
   return Math.min(MAX_BACKOFF_MS, MIN_GAP_MS * 2 ** d.failures)
 }
 
-/** The session id changed (a /clear): what was held and delivered belonged to the old id, which the door will not
- *  list under the new one. */
-export function followSession(p: Poller, session: string) {
-  if (p.session === session) return
-  p.session = session
-  p.held = []
-  p.delivered = new Set()
-}
-
 /** Keep the Tells of a poll that are neither held nor submitted already. */
 export function accept(p: Poller, tells: Tell[]) {
   for (const t of tells) {

@@ -524,10 +524,14 @@ def check_start_names(cfg: "ProxyConfig | None", person: str, rows) -> None:
 
 def signed_names(cfg: "ProxyConfig | None", person: str, rows) -> list[tuple[bool, str, str]]:
     """(is an agent's, signed name, token name) of each row. The laptops of one member for one client sign alike
-    (`Claude Code (Bea)`, 9.7): they are one agent to the rule that no two sign the same, so only the first counts."""
+    (`Claude Code (Bea)`, 9.7): they are one agent to the rule that no two sign the same, so only the first counts.
+    A laptop whose member the table no longer names is left out: the hub refuses its token per request, and it must not
+    stop the hub from starting."""
     out, seen = [], set()
     for t in rows:
         if t.laptop is not None and t.member is not None:
+            if cfg is None or t.member not in cfg.members:
+                continue
             if (t.member, t.client) in seen:
                 continue
             seen.add((t.member, t.client))

@@ -135,25 +135,36 @@ def keep(root_path: Path, rel: str, on: bool = True) -> None:
     """Mark the page at `rel` never to be archived (`on`), or take the mark off. Written whole by a replace; refused
     (`Refused`) when it cannot be."""
     with state.file_locked("loose-keep.lock"):      # two creates at once each keep their own mark
-        held = marks(root_path)
-        if (rel in held) == on:
-            return
-        _put(root_path, KEEP.name, sorted([*held, rel] if on else [h for h in held if h != rel]), "keep marks")
+        keep_held(root_path, rel, on)
+
+
+def keep_held(root_path: Path, rel: str, on: bool = True) -> None:
+    """`keep` for a caller that holds `loose-keep.lock` already (the flock is not re-entrant)."""
+    held = marks(root_path)
+    if (rel in held) == on:
+        return
+    _put(root_path, KEEP.name, sorted([*held, rel] if on else [h for h in held if h != rel]), "keep marks")
 
 
 def stamp(root_path: Path, name: str, changes: dict, only_new: bool = False) -> None:
     """Set (or, for a None, take off) the times of pages in the mark file `.sheaf/<name>`; with `only_new` a page that has one
     keeps it. Nothing is written when nothing changes."""
     with state.file_locked("loose-keep.lock"):
-        held = times(root_path, name)
-        out = dict(held)
-        for rel, at in changes.items():
-            if at is None:
-                out.pop(rel, None)
-            elif not (only_new and rel in out):
-                out[rel] = at
-        if out != held:
-            _put(root_path, name, out, f"{name[:-5]} marks")
+        stamp_held(root_path, name, changes, only_new)
+
+
+def stamp_held(root_path: Path, name: str, changes: dict, only_new: bool = False) -> None:
+    """`stamp` for a caller that holds `loose-keep.lock` already (the flock is not re-entrant): it reads the marks and
+    writes them in the one hold, as the sweep does."""
+    held = times(root_path, name)
+    out = dict(held)
+    for rel, at in changes.items():
+        if at is None:
+            out.pop(rel, None)
+        elif not (only_new and rel in out):
+            out[rel] = at
+    if out != held:
+        _put(root_path, name, out, f"{name[:-5]} marks")
 
 
 class Loose:

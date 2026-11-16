@@ -19,6 +19,7 @@ import base64
 import json
 import os
 import re
+import shutil
 import subprocess
 import threading
 from pathlib import Path
@@ -116,7 +117,7 @@ class Repos:
         r = self._git(self.clone_dir(repo), "log", "-1", "--format=%an%x00%(trailers:key=Sheaf-Session,valueonly,"
                       "separator=%x01)%x00%(trailers:key=Sheaf-Host,valueonly,separator=%x01)", "--", path)
         author, session, host = (r.stdout.rstrip("\n").split("\x00") + ["", "", ""])[:3] if r.returncode == 0 else ("",) * 3
-        session, host = session.strip().split("\x01")[0].strip(), host.strip().split("\x01")[0].strip()
+        session, host = (v.split("\x01")[0].strip() for v in (session, host))
         if session:
             return {"session": session, "host": host or None, "link": None, "label": f"session {session}"}
         return {"session": None, "host": None, "link": None, "label": f"git · {author}" if author else "git"}
@@ -155,6 +156,7 @@ class Repos:
             return f"the clone of {repo} failed: {r.stderr.strip()[-300:] or 'git gave no reason'}"
         r = self._git(dest, "sparse-checkout", "set", "--cone", *([folder] if folder else []))
         if r.returncode != 0:
+            shutil.rmtree(dest, ignore_errors=True)         # a clone without its sparse set is none: the next report makes it again
             return f"the sparse set of {repo} could not be made: {r.stderr.strip()[-300:]}"
         return None
 
@@ -162,11 +164,10 @@ class Repos:
         """Add `folder` to the sparse set when it is not in it; whether it was added."""
         if not folder:
             return False
-        held = self._git(dest, "sparse-checkout", "list").stdout.split("\n")
-        if any(folder == h or folder.startswith(h + "/") for h in held if h):
+        listed = self._git(dest, "sparse-checkout", "list")
+        if listed.returncode == 0 and any(folder == h or folder.startswith(h + "/") for h in listed.stdout.split("\n") if h):
             return False
-        self._git(dest, "sparse-checkout", "add", folder)
-        return True
+        return self._git(dest, "sparse-checkout", "add", folder).returncode == 0
 
     def _knows(self, dest: Path, commit: str, token: str | None) -> bool:
         def has():
@@ -190,7 +191,7 @@ class Repos:
             dest = self.clone_dir(repo)
             made = not (dest / ".git").exists()
             token = self.provider.token(repo)       # the provider renews it: asked each time git reaches the remote
-            if token is None:
+            if token is None and made:
                 return {"repo": repo, "path": path, "clone": NO_APP, "widened": None, "commit_known": None,
                         "install": self.provider.install_url(repo)}
             widened = None
@@ -198,7 +199,7 @@ class Repos:
                 if (failed := self._clone(repo, token, folder)) is not None:
                     raise Refused(failed)
             else:
-                widened = folder if self._widen(dest, folder) else None
+                widened = folder if token is not None and self._widen(dest, folder) else None
             known = self._knows(dest, commit, token)
             data = self._read()
             row = data.setdefault(repo, {}).get(path)

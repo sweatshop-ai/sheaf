@@ -41,7 +41,6 @@ import subprocess
 import tempfile
 import threading
 import time
-from contextlib import nullcontext
 from pathlib import Path
 
 from .. import config
@@ -135,8 +134,11 @@ class Repos:
         self.FETCH_EVERY = 30.0
         self.ssh_hostname = ssh_hostname
         self.roots = None                       # the hub's registry: a whole clone is registered there (`serve`)
-        self.hold = lambda folder: nullcontext()    # the lock a git command that moves a clone's HEAD holds (the hub's repo lock)
+        # Runs `move()` as a pull moves a clone's files: `mover(root, address, target, move)` is the hub's `Commits.moved`,
+        # which gives it the pages' writer locks, the repo's lock and the Write log's window (the one path files move by).
+        self.mover = lambda root, address, target, move: move()
         self._saves: dict[str, tuple] = {}      # repo -> (the branch saves go on or None, the line when none), as last decided
+        self._why: dict[str, str] = {}          # repo -> why its HEAD is not on the save branch, after a switch that did not happen
 
     # ── the records ──────────────────────────────────────────────────────────
     @property
@@ -308,36 +310,73 @@ class Repos:
             return known
         return self.decide(repo) if (self.clone_dir(repo) / ".git").exists() else (None, "")
 
-    def switch(self, repo: str, branch: str, token: str | None) -> bool:
+    def head_of(self, repo: str) -> str | None:
+        """The branch the clone's HEAD is on, read from the clone's own file; None when it is on no branch."""
+        try:
+            head = (self.clone_dir(repo) / ".git" / "HEAD").read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+        return head.removeprefix("ref: refs/heads/") if head.startswith("ref: refs/heads/") else None
+
+    def read_only_line(self, repo: str) -> str:
+        """Why the pages of the clone of `repo` may not be written, "" when they may. A page is writable only when the
+        clone's HEAD is on the branch saves go on: what a save commits and pushes is HEAD's branch, whatever was decided."""
+        branch, line = self.saves_on(repo)
+        if branch is None:
+            return line
+        on = self.head_of(repo)
+        if on == branch:
+            return ""
+        return self._why.get(repo) or (f"The clone of {repo} is on {on or 'no branch'}, not on {branch}, where its pages "
+                                        f"are saved; it moves at the next render report.")
+
+    def switch(self, repo: str, branch: str, token: str | None) -> str:
         """Put the clone's HEAD on `branch` (the remote's), when it is not: only when no commit of the clone is
-        unpushed and its work tree has no change of its own; whether HEAD is on `branch` after."""
+        unpushed and its work tree has no change of its own. "" when HEAD is on `branch` after, else why it is not (the
+        line the page shows). The move is a pull's: under the pages' writer locks and the repo's lock, in the Write log's
+        window (`mover`), so no save comes between the check and the checkout and none is carried onto the new branch."""
         dest = self.clone_dir(repo)
-        now = self._git(dest, "symbolic-ref", "-q", "--short", "HEAD")
-        if now.returncode == 0 and now.stdout.strip() == branch:
-            return True
-        with self.hold(dest):
+        if self.head_of(repo) == branch:
+            return ""
+        now = self.head_of(repo) or "no branch"
+
+        def move() -> str:
             kept = self._git(dest, "rev-list", "--count", "HEAD", "--not", "--remotes", look=True)
             dirty = self._git(dest, "status", "--porcelain", "--untracked-files=no", look=True)
-            if kept.returncode != 0 or kept.stdout.strip() != "0" or dirty.returncode != 0 or dirty.stdout.strip():
-                return False
-            return self._git(dest, "checkout", "-q", "-B", branch, f"origin/{branch}", token=token, seconds=120).returncode == 0
+            if kept.returncode != 0 or dirty.returncode != 0:
+                return f"The clone of {repo} could not be looked at, so it stays on {now} until the next render report."
+            if kept.stdout.strip() != "0":
+                return f"The clone of {repo} has a save that is not pushed yet, so it stays on {now} until it is."
+            if dirty.stdout.strip():
+                return f"The clone of {repo} has a change of its own, so it stays on {now} until that is gone."
+            r = self._git(dest, "checkout", "-q", "-B", branch, f"origin/{branch}", token=token, seconds=120)
+            return "" if r.returncode == 0 else (f"The clone of {repo} could not be moved to {branch}, so it stays on "
+                                                  f"{now}; it is tried again at the next render report.")
+        root = self.roots.get(root_name(repo)) if self.roots is not None else None
+        why = self.mover(root, root_name(repo), f"origin/{branch}", move) if root is not None else move()
+        with self._guard:
+            if why:
+                self._why[repo] = why
+            else:
+                self._why.pop(repo, None)
+        return why
 
     def credential(self, repo: str):
         """Git run in the clone of `repo` by the hub's commits carries the App's token for it (`CREDENTIALS`)."""
         credential(self.clone_dir(repo), lambda: self.provider.token(repo))
 
     def serve(self, repo: str, token: str | None):
-        """The clone is whole: decide its save branch, put HEAD on it, and register it as a root once."""
+        """The clone is whole: decide its save branch, register it as a root once, then put HEAD on the branch. The page
+        is read-only until HEAD is there (`read_only_line`), so what is served meanwhile cannot be saved onto another branch."""
         branch, _ = self.decide(repo, token)
         self.credential(repo)
+        if self.roots is not None:
+            try:
+                self.roots._add(self.clone_dir(repo).resolve(), True, name=root_name(repo), clone=repo)
+            except ValueError:      # a name another root holds, or a private root: the clone is made and not served
+                return
         if branch is not None:
             self.switch(repo, branch, token)
-        if self.roots is None:
-            return
-        try:
-            self.roots._add(self.clone_dir(repo).resolve(), True, name=root_name(repo), clone=repo)
-        except ValueError:      # a name another root holds, or a private root: the clone is made and not served
-            pass
 
     def _holds(self, dest: Path, commit: str, path: str) -> bool:
         """Whether the page is in the tree of `commit`: no record is made for a page that is not there."""

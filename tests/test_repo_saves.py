@@ -1,8 +1,10 @@
 """Saves on a repo page (SPEC 8.11, 14): the tiroir serves a clone as a root, a save or a door `update` commits and pushes
 on `dev` where the remote has it, else on the branch the repo's `.sheaf.toml` names, and with neither the page is read-only
 with a line. Everything runs against local bare repos and a fake App, as test_repo_pages.py does."""
+import dataclasses
 import json
 import subprocess
+import threading
 
 import pytest
 from helpers import BEA, CAL, door, rpc
@@ -16,6 +18,7 @@ from sheafmd.blocks import split_md_blocks
 from sheafmd.hub import commits as commits_mod
 from sheafmd.hub import proxy as proxy_mod
 from sheafmd.hub import repos as repos_mod
+from sheafmd.hub import visibility
 from sheafmd.hub.repos import Repos, root_name
 from sheafmd.source import md_hash
 
@@ -49,7 +52,7 @@ def origin(tmp_path, request):
     subprocess.run(["git", "clone", "-q", str(bare), str(seed)], check=True, capture_output=True)
     sh(seed, "config", "user.name", "Dee Dev")
     sh(seed, "config", "user.email", "dee@example.com")
-    files = {"docs/plan.md": "# Plan\n\nA plan.\n", "notes/idea.md": "# Idea\n\nAn idea.\n", "README.md": "# Site\n"}
+    files = {"docs/plan.md": ("---\nowner: bea\n---\n" if shape.get("owned") else "") + "# Plan\n\nA plan.\n", "notes/idea.md": "# Idea\n\nAn idea.\n", "README.md": "# Site\n"}
     if "toml" in shape:
         files[".sheaf.toml"] = shape["toml"]
     for rel, text in files.items():
@@ -65,8 +68,11 @@ def origin(tmp_path, request):
 
 DEV = pytest.mark.parametrize("origin", [{"dev": True}], indirect=True)
 NAMED = pytest.mark.parametrize("origin", [{"toml": 'branch = "staging"\n', "branches": ["staging"]}], indirect=True)
+DEV_AND_NAMED = pytest.mark.parametrize(
+    "origin", [{"dev": True, "toml": 'branch = "staging"\n', "branches": ["staging"]}], indirect=True)
 NAMED_MISSING = pytest.mark.parametrize("origin", [{"toml": 'branch = "staging"\n'}], indirect=True)
 NEITHER = pytest.mark.parametrize("origin", [{}], indirect=True)
+NEITHER_OWNED = pytest.mark.parametrize("origin", [{"owned": True}], indirect=True)
 
 
 def served(hub_repos, **kw):
@@ -127,12 +133,15 @@ def test_the_repos_sheaf_toml_without_commit_or_push_does_not_stop_a_clone_savin
     assert len(remote_commits(hub_repos, "dev")) == 1
 
 
-@DEV
-def test_a_dev_branch_wins_over_a_branch_the_sheaf_toml_names(hub_repos, tmp_path):
-    push_branch(hub_repos.origin, tmp_path, "staging")
-    sh(hub_repos.origin, "config", "user.name", "x")
+@DEV_AND_NAMED
+def test_a_dev_branch_wins_over_a_branch_the_sheaf_toml_names(hub_repos):
     served(hub_repos)
+    assert config.branch_named(sh(hub_repos.origin, "show", "main:.sheaf.toml")) == "staging"     # the file does name one
+    assert sh(hub_repos.origin, "rev-parse", "--verify", "staging")                               # and the remote has it
     assert hub_repos.hub.repos.saves_on(REPO) == ("dev", "")
+    assert save(hub_repos).status == 200
+    assert len(remote_commits(hub_repos, "dev")) == 1
+    assert remote_commits(hub_repos, "staging") == []
 
 
 @DEV
@@ -171,7 +180,8 @@ def test_a_named_branch_the_remote_does_not_have_opens_read_only_with_its_own_li
     served(hub_repos)
     branch, line = hub_repos.hub.repos.saves_on(REPO)
     assert branch is None and "staging" in line and "does not have" in line
-    assert sh(hub_repos.origin, "branch", "--list").split() == ["*", "main"] or "staging" not in sh(hub_repos.origin, "branch")
+    assert sh(hub_repos.origin, "branch", "--list", "staging") == ""                  # the hub made no branch of that name
+    assert sh(hub_repos.origin, "for-each-ref", "--format=%(refname:short)", "refs/heads") == "main"   # nor any other
 
 
 @NEITHER
@@ -261,3 +271,152 @@ def test_the_proxy_table_checks_its_repos_table(tmp_path):
     for bad in ({"dir": "relative"}, {"dir": str(tmp_path), "other": 1}, {"dir": str(tmp_path), "token_command": "x"}):
         with pytest.raises(proxy_mod.ProxyError):
             proxy_mod.parse({**base, "repos": bad}, "the test")
+
+
+# ── fix round over 87bb477 ───────────────────────────────────────────────────
+
+def clone_log(hub_repos):
+    """Every commit the clone and the remote hold, by ref: nothing was committed or pushed if this is as it was."""
+    return (sh(the_clone(hub_repos), "for-each-ref", "--format=%(refname) %(objectname)"),
+            sh(hub_repos.origin, "for-each-ref", "--format=%(refname) %(objectname)"))
+
+
+@NEITHER_OWNED
+def test_share_on_a_read_only_page_is_refused_before_anything_is_written(hub_repos):
+    text = served(hub_repos)
+    before = clone_log(hub_repos)
+    r = hub_repos.post("/_/share", {"doc": ADDRESS, "hash": md_hash(text), "with": []}, member=BEA)
+    hub_repos.hub.commits.settle()
+    assert r.status == 403 and ".sheaf.toml" in r.text
+    assert hub_repos.hub.file(ADDRESS).read_text(encoding="utf-8") == text
+    assert clone_log(hub_repos) == before            # no commit, no undo commit, nothing pushed to main
+
+
+def broken_checkout(hub_repos):
+    """The clone's git cannot move HEAD: a checkout that times out (the blob fetch of a blobless clone)."""
+    repos = hub_repos.hub.repos
+    real = repos._git
+
+    def git(at, *args, **kw):
+        if args and args[0] == "checkout":
+            return subprocess.CompletedProcess(args, 124, "", "timed out")
+        return real(at, *args, **kw)
+    repos._git = git
+
+
+@DEV
+def test_a_clone_whose_checkout_failed_is_read_only_and_a_save_goes_nowhere(hub_repos):
+    broken_checkout(hub_repos)
+    served(hub_repos)
+    assert sh(the_clone(hub_repos), "symbolic-ref", "--short", "HEAD") == "main"      # the switch failed
+    assert hub_repos.hub.repos.saves_on(REPO)[0] == "dev"                              # and dev is what it should be on
+    assert hub_repos.hub.read_only_line(ADDRESS) != ""
+    assert '"readonly": true' in hub_repos.get(f"/{ADDRESS}", member=BEA).text
+    before = clone_log(hub_repos)
+    r = save(hub_repos)
+    hub_repos.hub.commits.settle()
+    assert r.status == 403
+    assert clone_log(hub_repos) == before            # nothing went to main
+
+
+@DEV
+def test_a_clone_with_a_change_of_its_own_stays_where_it_is_read_only_and_a_save_goes_nowhere(hub_repos):
+    served(hub_repos)
+    clone = the_clone(hub_repos)
+    assert hub_repos.hub.read_only_line(ADDRESS) == ""
+    sh(clone, "checkout", "-q", "main")                                    # HEAD is off the save branch
+    (clone / "docs/plan.md").write_text("# Plan\n\nA plan, with a change nobody saved.\n", encoding="utf-8")
+    hub_repos.hub.repos.serve(REPO, "ghs_faketoken")                       # the next report settles it again
+    assert sh(clone, "symbolic-ref", "--short", "HEAD") == "main"
+    assert "change" in hub_repos.hub.read_only_line(ADDRESS)
+    before = clone_log(hub_repos)
+    r = save(hub_repos)
+    hub_repos.hub.commits.settle()
+    assert r.status == 403
+    assert clone_log(hub_repos) == before
+    assert (clone / "docs/plan.md").read_text(encoding="utf-8").endswith("with a change nobody saved.\n")
+
+
+def dev_changes_the_plan(hub_repos, tmp_path):
+    work = tmp_path / "work-dev-plan"
+    subprocess.run(["git", "clone", "-q", str(hub_repos.origin), str(work)], check=True, capture_output=True)
+    sh(work, "config", "user.name", "Dee Dev")
+    sh(work, "config", "user.email", "dee@example.com")
+    sh(work, "checkout", "-q", "-b", "dev", "origin/main")
+    (work / "docs/plan.md").write_text("# Plan\n\nA plan, as dev has it.\n", encoding="utf-8")
+    sh(work, "commit", "-q", "-am", "dev's plan")
+    sh(work, "push", "-q", "origin", "dev")
+
+
+@NAMED
+def test_a_save_racing_the_switch_of_the_clone_is_held_and_never_carried_onto_the_new_branch(hub_repos, tmp_path):
+    served(hub_repos)                                                      # on staging: the repo has no dev yet
+    clone = the_clone(hub_repos)
+    assert sh(clone, "symbolic-ref", "--short", "HEAD") == "staging"
+    text = hub_repos.hub.file(ADDRESS).read_text(encoding="utf-8")
+    dev_changes_the_plan(hub_repos, tmp_path)
+    sh(clone, "fetch", "-q", "origin")
+    repos, real, raced = hub_repos.hub.repos, hub_repos.hub.repos._git, {}
+
+    def git(at, *args, **kw):
+        if args and args[0] == "checkout":                                 # the move of the files: a save now
+            def go():
+                raced["answer"] = save(hub_repos)
+            raced["thread"] = t = threading.Thread(target=go)
+            t.start()
+            t.join(1.0)
+            raced["held"] = t.is_alive() and "saved" not in (clone / "docs/plan.md").read_text(encoding="utf-8")
+        return real(at, *args, **kw)
+    repos._git = git
+    assert repos.switch(REPO, "dev", "ghs_faketoken") == ""                # a save that began while the page was writable
+    raced["thread"].join(30)
+    hub_repos.hub.commits.settle()
+    assert raced["held"], "the save wrote the page while the clone's files were being moved"
+    assert sh(clone, "symbolic-ref", "--short", "HEAD") == "dev"
+    assert remote_commits(hub_repos, "staging") == []                      # not on the branch it was made on
+    dev = sh(hub_repos.origin, "log", "--format=%an|%s", "main..dev").splitlines()
+    if raced["answer"].status == 200:       # it came after the move: a save of dev's text, on top of dev's own commit
+        assert dev == ["Bea|edit: docs/plan.md", "Dee Dev|dev's plan"]
+        assert "as dev has it" in sh(hub_repos.origin, "show", "dev:docs/plan.md")
+    else:
+        assert dev == ["Dee Dev|dev's plan"] and sh(hub_repos.origin, "show", "dev:docs/plan.md").endswith("as dev has it.")
+
+
+@DEV
+def test_nothing_but_fetch_and_push_asks_for_the_token(hub_repos):
+    served(hub_repos)
+    asked, here, real = [], threading.local(), commits_mod._git
+
+    def git(root, *args, **kw):
+        here.cmd = args[0]
+        try:
+            return real(root, *args, **kw)
+        finally:
+            here.cmd = None
+    given = hub_repos.app.token
+    hub_repos.app.token = lambda repo: (asked.append(getattr(here, "cmd", None)), given(repo))[1]
+    commits_mod._git, was = git, commits_mod._git
+    try:
+        assert save(hub_repos).status == 200
+        hub_repos.hub.commits.settle()
+    finally:
+        commits_mod._git = was
+    assert asked and set(asked) <= {"fetch", "push"}, asked
+    assert len(remote_commits(hub_repos, "dev")) == 1
+
+
+def test_one_helper_names_the_owner_a_report_records_and_the_one_a_page_is_matched_by():
+    with_short = proxy_mod.Member(id="id-1", name="Ann", roots=(), short="ann")
+    without = proxy_mod.Member(id="id-2", name="Bob", roots=())
+    assert visibility.owner_key(with_short) == "ann" and visibility.owner_key(without) == "id-2"
+    assert visibility.owner_of({"owner": "id-2"}, [with_short, without]) == [without]
+    assert visibility.owner_of({"owner": "Ann"}, [with_short, without]) == [with_short]
+
+
+@DEV
+def test_a_member_with_no_short_name_who_reported_a_page_can_open_it(hub_repos):
+    members = hub_repos.hub.proxy.members
+    members[BEA] = dataclasses.replace(members[BEA], short="")
+    served(hub_repos)
+    assert hub_repos.get(f"/{ADDRESS}", member=BEA).status == 200
+    assert hub_repos.get(f"/{ADDRESS}", member=CAL).status in (403, 404)

@@ -343,12 +343,12 @@ class Hub:
 
     @repos.setter
     def repos(self, repos):
-        """The clone store: it registers the clones it serves in this hub's registry, moves a clone's HEAD under the repo's
-        lock, and a clone already registered (a restart) gets its token for git again (SPEC 14)."""
+        """The clone store: it registers the clones it serves in this hub's registry, moves a clone's HEAD as a pull moves its
+        files (`Commits.moved`), and a clone already registered (a restart) gets its token for git again (SPEC 14)."""
         self._repos = repos
         if repos is not None:
             repos.roots = self.roots
-            repos.hold = lambda folder: self.commits._repo_lock(folder)
+            repos.mover = self.commits.moved
             for root in self.roots.all():
                 if root.clone:
                     repos.credential(root.clone)
@@ -360,13 +360,12 @@ class Hub:
 
     def read_only_line(self, address: str) -> str:
         """Why the page at `address` may not be written, in one sentence naming the `.sheaf.toml` line that would change
-        it; "" for a page that may be written. A page of a repo's clone is read-only while the clone has no save branch:
-        no `dev`, and no branch the repo's `.sheaf.toml` names (SPEC 14)."""
+        it; "" for a page that may be written. A page of a repo's clone is read-only while the clone has no save branch
+        (no `dev`, and no branch the repo's `.sheaf.toml` names) or its HEAD is not on it (SPEC 14)."""
         repo = self.clone_of(address)
         if not repo:
             return ""
-        branch, line = self._repos.saves_on(repo)
-        return "" if branch is not None else line
+        return self._repos.read_only_line(repo)
 
     def committed(self, address: str, member=None, what: str = "edit", by: str | None = None,
                   gone: str | None = None, author: Author | None = None):

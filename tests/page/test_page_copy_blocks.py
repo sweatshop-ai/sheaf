@@ -10,7 +10,7 @@ pytestmark = pytest.mark.page
 QUOTE = "main blockquote.rd-copy"
 TOGGLE = "#rd-mode button"
 MD = ("# Plan\n\nBefore the mail.\n\n"
-      "> [!COPY]\n> Hello **Anna**,\n> thanks for the call.\n>\n> Best, Thierry\n\n"
+      "> [!COPY]\n> Hello **Anna**,\n> thanks for the call.\n>\n> Best, Alice\n\n"
       "> A quote nobody copies.\n\nAfter.\n")
 
 
@@ -40,7 +40,7 @@ def test_only_the_marked_quote_has_a_copy_button_and_the_marker_is_not_shown(doc
 def test_copy_puts_the_block_as_shown_on_the_clipboard(doc):
     press_copy(doc.page)
     until(lambda: clipboard(doc.page), what="the clipboard")
-    assert clipboard(doc.page) == "Hello Anna, thanks for the call.\n\nBest, Thierry"
+    assert clipboard(doc.page) == "Hello Anna, thanks for the call.\n\nBest, Alice"
     assert doc.page.inner_text(f"{QUOTE} .rd-copybtn") == "Copied"
 
 
@@ -52,7 +52,7 @@ def test_copy_takes_the_text_typed_in_edit_mode_before_it_is_saved(doc):
     p.keyboard.type(" Really.")
     press_copy(p)
     until(lambda: "Really." in clipboard(p), what="the edit on the clipboard")
-    assert clipboard(p) == "Hello Anna, thanks for the call.\n\nBest, Thierry Really."
+    assert clipboard(p) == "Hello Anna, thanks for the call.\n\nBest, Alice Really."
     assert p.evaluate("document.activeElement.closest('blockquote') !== null")      # the caret stayed in the quote
 
 
@@ -66,7 +66,7 @@ def test_an_edit_is_saved_with_the_marker_and_without_the_button(doc, site):
     p.click(TOGGLE)
     until(lambda: "Really." in site.file.read_text(encoding="utf-8"), what="the saved edit")
     saved = site.file.read_text(encoding="utf-8")
-    assert "> [!COPY]\n>\n> Hello **Anna**, thanks for the call.\n>\n> Best, Thierry Really." in saved
+    assert "> [!COPY]\n>\n> Hello **Anna**, thanks for the call.\n>\n> Best, Alice Really." in saved
     assert "Copy" not in saved and "button" not in saved and "rd-" not in saved
     assert saved.count("[!COPY]") == 1
     assert "> A quote nobody copies." in saved
@@ -96,7 +96,7 @@ def test_the_text_copied_leaves_the_comment_badge_out(doc, site):
     doc.page.wait_for_selector(f"{QUOTE} .rd-anchor")
     press_copy(doc.page)
     until(lambda: clipboard(doc.page), what="the clipboard")
-    assert clipboard(doc.page) == "Hello Anna, thanks for the call.\n\nBest, Thierry"
+    assert clipboard(doc.page) == "Hello Anna, thanks for the call.\n\nBest, Alice"
 
 
 def test_a_mounted_page_gets_the_button_too(chromium, site):

@@ -22,7 +22,7 @@ FORK = f"uvx --from tiroir==0.2.0 tiroir work {ORIGIN}/list/acme/site/plan.md"
 ATTACH = "ssh tiroir-tt -t tmux -S /run/james/tmux.sock attach -t james \\; select-window -t =acme_site"
 BOX = {"id": "6f1c0e9a-2b3d-4c5e-8f70-1a2b3c4d5e6f", "host": "tiroir-tt", "member": "james",
        "date": "2026-10-28T05:12:03Z"}
-LAPTOP = {"id": "0b9d1e7c-4a2f-4e8b-9c3d-5f6a7b8c9d0e", "host": "thierry-laptop", "member": "thierry",
+LAPTOP = {"id": "0b9d1e7c-4a2f-4e8b-9c3d-5f6a7b8c9d0e", "host": "alice-laptop", "member": "alice",
           "date": "2026-10-28T09:40:00Z"}
 SENT = "Sent to James’s window; his answer appears in this thread."
 
@@ -127,10 +127,10 @@ def test_work_on_this_opens_the_two_ways_and_the_sessions(tab):
     # Newest first, as the front matter lists them, and five at most.
     assert w.locator(".rd-sess").all_inner_texts() == [
         "James on tiroir-tt · 2026-10-28 05:12 UTC",
-        "Thierry on thierry-laptop · 2026-10-24 08:00 UTC",
-        "Thierry on thierry-laptop · 2026-10-23 08:00 UTC",
-        "Thierry on thierry-laptop · 2026-10-22 08:00 UTC",
-        "Thierry on thierry-laptop · 2026-10-21 08:00 UTC"]
+        "Alice on alice-laptop · 2026-10-24 08:00 UTC",
+        "Alice on alice-laptop · 2026-10-23 08:00 UTC",
+        "Alice on alice-laptop · 2026-10-22 08:00 UTC",
+        "Alice on alice-laptop · 2026-10-21 08:00 UTC"]
     assert not tab.page.locator("#rd-menu").is_visible()
 
 
@@ -178,7 +178,7 @@ def test_a_sheaf_with_no_session_on_the_box_offers_no_fork(tab):
     open_work(tab.page)
     assert tab.page.locator("#rd-work h4").all_text_contents() == ["Sessions"]
     assert tab.page.locator("#rd-work .rd-cmd").count() == 0
-    assert "The live session runs on Thierry’s machine, thierry-laptop: open it there." in tab.page.inner_text("#rd-work")
+    assert "The live session runs on Alice’s machine, alice-laptop: open it there." in tab.page.inner_text("#rd-work")
 
 
 def test_a_sheaf_live_on_a_laptop_names_its_machine_in_place_of_the_fork(tab):
@@ -188,7 +188,7 @@ def test_a_sheaf_live_on_a_laptop_names_its_machine_in_place_of_the_fork(tab):
     open_work(tab.page)
     text = tab.page.inner_text("#rd-work")
     assert tab.page.locator("#rd-work .rd-cmd").count() == 0
-    assert "The live session runs on Thierry’s machine, thierry-laptop: open it there. " \
+    assert "The live session runs on Alice’s machine, alice-laptop: open it there. " \
            "This hub keeps no copy of it to fork." in text
     assert "Nothing to fork from this hub" not in text
 
@@ -340,7 +340,7 @@ def test_a_sheaf_live_on_a_laptop_turns_tell_off_with_its_line(tab):
     as_member(tab, work(sessions=[LAPTOP, BOX], live="laptop"))
     tab.open()
     comment_form(tab)
-    line = "This session runs on Thierry’s machine: open it there."
+    line = "This session runs on Alice’s machine: open it there."
     assert tell_offered(tab.page, "#rd-popover .rd-form") is False
     # Restated on 2026-11-09 (G): no line under the field any more; the reason is in the menu's Agent line.
     assert tab.page.locator("#rd-popover .rd-agent-line").count() == 0 and line not in tab.page.inner_text("#rd-popover")
@@ -357,7 +357,7 @@ def test_a_fork_the_doc_answer_reports_turns_box_tell_off(tab):
     assert tell_offered(tab.page, "#rd-popover .rd-form") is False
     assert tab.page.locator("#rd-popover .rd-agent-line").count() == 0      # restated (G): the reason is in the menu only
     tab.page.click("#rd-menu-btn")
-    assert "Thierry’s machine" in tab.page.inner_text("#rd-agent")
+    assert "Alice’s machine" in tab.page.inner_text("#rd-agent")
 
 
 def test_the_menu_button_closes_the_popover(tab):
@@ -392,7 +392,7 @@ def test_the_sent_line_outlasts_the_reload_a_recorded_session_brings(tab):
 
 
 def test_the_sent_line_keeps_the_name_it_was_sent_to_after_a_fork(tab):
-    # Sent to James; a fork the /_/doc answer reports moves the live session to Thierry's laptop before James replies.
+    # Sent to James; a fork the /_/doc answer reports moves the live session to Alice's laptop before James replies.
     as_member(tab, work(), can=BOX_CAN)
     tab.open()
     sent_to_box(tab)
@@ -570,12 +570,12 @@ def test_a_fork_with_its_relay_connected_offers_tell_to_its_session(tab):
     assert tell_offered(tab.page, "#rd-popover .rd-form") is True
     tab.page.fill("#rd-popover textarea", "Send the draft to Joey")
     tab.page.click("#rd-popover .rd-form button.rd-tell")
-    sent = "Sent to Thierry’s session on thierry-laptop; the answer appears in this thread."
+    sent = "Sent to Alice’s session on alice-laptop; the answer appears in this thread."
     until(lambda: sent in tab.page.inner_text("#rd-popover"), what="the sent line in the thread")
     assert [(b["op"], b.get("ask"), b["tell"]) for b in bodies] == [("add", None, True)]
     assert others == []
     open_work(tab.page)
-    assert tab.page.inner_text("#rd-work .rd-relay") == "Tell goes to Thierry’s session on thierry-laptop."
+    assert tab.page.inner_text("#rd-work .rd-relay") == "Tell goes to Alice’s session on alice-laptop."
 
 
 def test_a_fork_whose_relay_is_not_connected_says_so_in_work_on_this(tab):
@@ -583,7 +583,7 @@ def test_a_fork_whose_relay_is_not_connected_says_so_in_work_on_this(tab):
     tab.open()
     open_work(tab.page)
     assert tab.page.inner_text("#rd-work .rd-relay") == \
-        "Thierry’s session on thierry-laptop is not connected: Tell works again when it is."
+        "Alice’s session on alice-laptop is not connected: Tell works again when it is."
 
 
 def test_a_relay_that_connects_turns_tell_on_without_a_reload(tab):

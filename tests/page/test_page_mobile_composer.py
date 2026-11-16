@@ -1,6 +1,6 @@
 """The thread's box on a phone with its keyboard up, in Chromium and in WebKit at 390 px (ticket 03, the second trial).
 
-Thierry's iPhone showed the field under the hint and away from the arrow, and the last bubble cut by the composer. The
+Alice's iPhone showed the field under the hint and away from the arrow, and the last bubble cut by the composer. The
 keyboard is a `visualViewport` that the test controls (as in test_page_keyboard.py); only a real iPhone shows the real one.
 """
 import pytest

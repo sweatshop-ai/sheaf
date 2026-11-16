@@ -68,7 +68,7 @@ def test_deliver_pushes_the_drops_message_in_the_envelope_on_the_named_socket(de
     assert raw == envelope.line("Tell from sheaf: do it", SENDER, msg_id=json.loads(raw)["msg_id"])
 
 
-TODAYS_DROP = {"project": "acme/site", "member": "hans", "sheaf": "acme/site/brief.md",
+TODAYS_DROP = {"project": "acme/site", "member": "bob", "sheaf": "acme/site/brief.md",
                "text": "Shorten the intro.", "kind": "tell", "thread": "c7"}
 
 
@@ -80,7 +80,7 @@ def test_a_drop_as_the_hub_writes_it_today_is_told_with_the_sheaf_and_how_to_ans
     assert content_of(peer.received()) == (
         f'<cross-session-message from="{SENDER}" from-name="sheaf" from-mode="prompting">\n'
         "Tell from sheaf, on the page of acme/site/brief.md.\n"
-        "hans pressed Tell on comment c7: act on it here, in this conversation.\n\n"
+        "bob pressed Tell on comment c7: act on it here, in this conversation.\n\n"
         "The comment:\nShorten the intro.\n\n"
         "When you are done, answer in the thread so the page shows it, with the role action:\n"
         '- with the sheaf MCP tool: reply(doc="acme/site/brief.md", id="c7", text="<what you did>", '

@@ -334,3 +334,12 @@ def test_a_move_with_a_page_not_yet_forwarded_is_not_done(tmp_path):
 def test_cancel_and_done_of_no_move_change_nothing(tmp_path):
     moves = root_moves.Moves(tmp_path)
     assert moves.cancel("o/r") is False and moves.done("o/r") is False
+
+
+def test_a_sent_page_with_no_hash_goes_back_to_unsent_at_the_next_start(tmp_path):
+    (tmp_path / "root_moves.json").write_text('{"o/r": {"to": "%s", "id": "id1", "sent": ["a.md", "b.md"], "held": {}}}' % THERE)
+    moves = root_moves.Moves(tmp_path)
+    moves.start("o/r", THERE, "id2")
+    moves.sent("o/r", "c.md", "h3")
+    moves.start("o/r", THERE, "id3")
+    assert moves.get("o/r")["sent"] == ["c.md"] and moves.pending_forward("o/r") == {"c.md": "h3"}

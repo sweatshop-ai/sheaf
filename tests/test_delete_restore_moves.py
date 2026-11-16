@@ -4,8 +4,10 @@ address that a Forward holds, since an address that once pointed at a page does 
 the handler as the proxy sets it. Not run on a laptop: they start a hub, so CI is their run."""
 import threading
 
+import pytest
 import test_share
 from test_move_forward import ALICE, at, in_folder, move, moved, read
+from test_share import page
 
 from sheafmd.hub import moves
 
@@ -176,3 +178,33 @@ def test_a_trash_entry_that_cannot_be_unlinked_after_the_link_leaves_a_clean_ref
     assert not team.hub.file(first).exists()                            # the link made is taken off again
     assert [r["id"] for r in team.hub.archive.trashed(root_of(team))] == [row["id"]]
     assert restore_trash(team, row["id"]).status == 200                 # and the entry is still good: a second try restores it
+
+
+# ── a Forward that leads to a deleted address goes with it (round 7) ─────────────────────────────
+
+@pytest.mark.parametrize("how", ["create", "move", "restore"])
+def test_no_forward_leads_to_the_page_that_takes_the_address_of_a_deleted_one(team, how):
+    """Move A to B, delete B, then another page comes to B (a door create, a Move into it, a restore of an older page that was
+    at B): A does not lead to it. SPEC 9.11 says nothing of a delete, so the delete drops the Forwards that lead to its address."""
+    now = [1_000_000.0]
+    team.hub.clock = lambda: now[0]         # two deletes of one address in one second are refused: each gets its own
+    if how == "restore":
+        older = in_folder(team, "b")
+        assert delete(team, older).status == 200
+        [row] = team.hub.archive.trashed(root_of(team))
+        now[0] += 10
+    a = in_folder(team, "a")
+    b = moved(team, ALICE, a, "b")
+    assert team.hub.forwards.follow(a) == b
+    assert delete(team, b).status == 200
+    if how == "create":
+        assert in_folder(team, "b", text="# Another\n\nAnother page.\n") == b
+    elif how == "move":
+        other = in_folder(team, "c", text="# Another\n\nAnother page.\n")
+        assert moved(team, ALICE, other, "b") == b
+    else:
+        got = restore_trash(team, row["id"])
+        assert got.status == 200, got.text
+    assert team.hub.file(b).exists()
+    assert team.hub.forwards.follow(a) is None
+    assert page(team, ALICE, a).status == 404

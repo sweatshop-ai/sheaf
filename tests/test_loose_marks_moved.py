@@ -51,3 +51,15 @@ def test_an_unreadable_mark_file_refuses_the_lot_and_changes_nothing(tmp_path):
     with pytest.raises(loose.Refused):
         loose.marks_moved(tmp_path, "a/p.md", "b/p.md")
     assert get(tmp_path, "keep.json") == ["a/p.md"]
+
+
+def test_a_stale_keep_mark_at_the_new_path_does_not_outlive_a_page_that_is_not_kept(tmp_path):
+    put(tmp_path, "keep.json", ["b/p.md", "a/q.md"])
+    loose.marks_moved(tmp_path, "a/p.md", "b/p.md")
+    assert get(tmp_path, "keep.json") == ["a/q.md"]
+
+
+def test_a_stale_keep_mark_at_the_new_path_is_the_pages_own_when_it_is_kept(tmp_path):
+    put(tmp_path, "keep.json", ["a/p.md", "b/p.md"])
+    loose.marks_moved(tmp_path, "a/p.md", "b/p.md")
+    assert get(tmp_path, "keep.json") == ["b/p.md"]

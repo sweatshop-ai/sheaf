@@ -161,6 +161,27 @@ def test_the_routes_are_for_a_signed_in_member_alone(agents, tmp_path):
     assert agents.hub.team.list(ADDR) == []
 
 
+def test_a_door_token_gets_the_answer_of_no_sign_in_and_the_hub_key_the_refusal_of_the_route(agents, tmp_path):
+    """Pinned exactly: a 404 would also be what a request with no member gets, so it would not show the route's own guard."""
+    enabled(agents, tmp_path)
+    body = {"doc": ADDR, "op": "add", "body": "x", "quote": "q"}
+    token = {"Authorization": f"Bearer {agents.tokens['bea-claude']}"}
+    for method, path, b in (("GET", f"/_/team?doc={ADDR}", None), ("POST", "/_/team", body)):
+        got = agents.door.request(method, path, body=b, cookie=False, key=False, headers=token)
+        assert got.status == 401, (method, got.text)
+        got = agents.door.request(method, path, body=b, cookie=False, key=True)
+        assert got.status == 403, (method, got.text)
+    assert agents.hub.team.list(ADDR) == []
+
+
+def test_a_missing_or_non_text_doc_answers_as_a_page_that_is_not_there(agents, tmp_path):
+    enabled(agents, tmp_path)
+    assert agents.get("/_/team", member=BEA).status == 404
+    for doc in (None, 5, ["Clients/x"], {"a": 1}):
+        body = {"op": "add", "body": "x", "quote": "q"}
+        assert post(agents, body if doc is None else {**body, "doc": doc}).status == 404, doc
+
+
 def test_tell_on_a_team_comment_is_refused_with_a_line_and_writes_nothing(agents, tmp_path):
     enabled(agents, tmp_path)
     got = post(agents, {"doc": ADDR, "op": "add", "body": "x", "quote": "q", "tell": True})

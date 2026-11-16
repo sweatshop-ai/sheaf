@@ -1020,3 +1020,79 @@ def test_a_report_for_a_commit_the_clone_lacks_never_reaches_the_remote_on_the_r
     answer = repos.report("bea", REPO, "docs/plan.md", "a" * 40)
     assert answer["commit_known"] is False
     assert not log.exists(), "the look at the clone fetched from the remote"
+
+
+# ── a git that ignores GIT_NO_LAZY_FETCH (before 2.44) gets no look at the clone ─
+
+def look_calls(monkeypatch):
+    """Record every look (`look=True`) the Repos makes; the list."""
+    seen = []
+    real = repos_mod.Repos._git
+
+    def spy(self, at, *args, **k):
+        if k.get("look"):
+            seen.append(args)
+        return real(self, at, *args, **k)
+
+    monkeypatch.setattr(repos_mod.Repos, "_git", spy)
+    return seen
+
+
+@pytest.mark.parametrize("said, parsed", [
+    ("git version 2.43.0\n", (2, 43)), ("git version 2.53.0", (2, 53)), ("git version 2.39.5 (Apple Git-154)", (2, 39)),
+    ("git version 2.44.0.windows.1", (2, 44)), ("git version 10.1.2", (10, 1)), ("", None), ("not git at all", None)])
+def test_the_git_version_is_read_from_what_git_says(said, parsed):
+    assert repos_mod.parse_git_version(said) == parsed
+
+
+def test_the_git_version_is_read_once(monkeypatch):
+    calls = []
+
+    def run_git(*a, **k):
+        calls.append(a)
+        return subprocess.CompletedProcess(a, 0, "git version 2.43.0\n", "")
+
+    monkeypatch.setattr(repos_mod.subprocess, "run", run_git)
+    repos_mod._git_version.cache_clear()
+    try:
+        assert [repos_mod._git_version() for _ in range(3)] == [(2, 43)] * 3
+        assert len(calls) == 1
+    finally:
+        repos_mod._git_version.cache_clear()
+
+
+def test_a_git_that_cannot_be_run_reads_as_no_version(monkeypatch):
+    def broken(*a, **k):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(repos_mod.subprocess, "run", broken)
+    repos_mod._git_version.cache_clear()
+    try:
+        assert repos_mod._git_version() is None
+    finally:
+        repos_mod._git_version.cache_clear()
+
+
+@pytest.mark.parametrize("version", [(2, 43), (2, 0), (1, 99), None])
+def test_below_2_44_or_unknown_the_look_at_the_clone_is_not_made_and_nothing_fetches(hub_repos, tmp_path, monkeypatch, version):
+    report(hub_repos)
+    log = count_fetches(the_clone(hub_repos), tmp_path)
+    repos = hub_repos.hub.repos
+    head = sh(the_clone(hub_repos), "rev-parse", "origin/HEAD").strip()    # a commit the clone does hold
+    monkeypatch.setattr(repos_mod, "_git_version", lambda: version)
+    seen = look_calls(monkeypatch)
+    assert repos._on_branch(the_clone(hub_repos), head) is False       # answers as a look that found nothing
+    assert seen == []
+    assert not log.exists()
+
+
+@pytest.mark.parametrize("version", [(2, 44), (2, 53), (3, 0)])
+def test_from_2_44_the_look_at_the_clone_is_made_as_before(hub_repos, monkeypatch, version):
+    report(hub_repos)
+    repos = hub_repos.hub.repos
+    head = sh(the_clone(hub_repos), "rev-parse", "origin/HEAD").strip()
+    monkeypatch.setattr(repos_mod, "_git_version", lambda: version)
+    seen = look_calls(monkeypatch)
+    assert repos._on_branch(the_clone(hub_repos), head) is True
+    assert seen == [("branch", "-r", "--contains", head)]
+    assert repos._on_branch(the_clone(hub_repos), "a" * 40) is False

@@ -1058,7 +1058,10 @@ class Handler:
         except Exception:
             raise Refuse(404, "no such document") from None
         root = self.hub.roots.get(at.root)
-        if m is None or root is None or self.hub.loose.owner_of(root) != m.id or not self.hub.visible(m, doc):
+        # The owner's own page is theirs to archive, keep or delete whatever its front matter says and even when it cannot be
+        # read as text (`visible` says no to that): a page nobody can open is the one a member wants gone.
+        if m is None or root is None or self.hub.loose.owner_of(root) != m.id \
+                or not (self.hub.holds_loose(m, doc) or self.hub.visible(m, doc)):
             raise Refuse(404, "no such document")
         try:
             mtime = self.hub.file(doc).stat().st_mtime

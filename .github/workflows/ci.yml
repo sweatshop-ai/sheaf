@@ -23,6 +23,9 @@ on:
     branches: [main]
   push:
     branches: [main]
+    # Notes no test reads: on 2026-11-15 70 of main's 85 commits touched nothing else, and each push ran
+    # the whole suite. A push that changes anything outside them still runs it all.
+    paths-ignore: ['.scratch/**', '.boss/**']
   # paths-ignore filters push and pull_request only; a scheduled run always starts.
   schedule:
     - cron: '0 1 * * *'
@@ -154,11 +157,12 @@ jobs:
       - name: Wheel smoke (build, uv tool install, sheaf version, --share, init cursor, a hub)
         run: uv run --no-sync python tools/wheel_smoke.py
 
-      # These two install a real user service on the runner. They refuse to run anywhere else.
+      # These two install a real user service on the runner. They refuse to run anywhere else. The service
+      # is the same in every slice, so the first slice alone checks it (about 70 s a job).
       - name: User service, systemd
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.slice == 1
         run: PATH="$PWD/.venv/bin:$PATH" .venv/bin/python tools/ci/service_linux.py
 
       - name: User service, launchd
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && matrix.slice == 1
         run: PATH="$PWD/.venv/bin:$PATH" .venv/bin/python tools/ci/service_macos.py

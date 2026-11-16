@@ -4378,6 +4378,13 @@ var create = function (ROOT, CFG, opts) {
         try { d = JSON.parse(ev.data || '{}'); } catch (e) {}
         meetDocGone('', d.why === 'access');
       });
+      // Its owner moved the page (9.11): the old address forwards, so a reload finds it. Nothing is lost here: the edits stay on screen.
+      live.addEventListener('moved', function (ev) {
+        var d = data(ev);
+        if (typeof d.to !== 'string') return;
+        showHubLine('This page was moved to <code>' + esc(d.to) + '</code>. Open it there; ' +
+                    'your edits are safe on screen.');
+      });
       live.addEventListener('changed', function (ev) {
         var d = JSON.parse(ev.data || '{}');
         var late = !!d.rid && taken(d.rid);

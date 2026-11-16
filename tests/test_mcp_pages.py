@@ -1,5 +1,6 @@
 """The door's page tools `read`, `create` and `update`, in memory (SPEC 12, 9.7). The comment tools
 are in test_mcp_tools.py, authentication and the protocol in test_mcp_http.py."""
+import json
 import os
 import re
 import subprocess
@@ -97,7 +98,14 @@ def test_tools_list_shows_the_write_tools_only_to_a_caller_that_may_use_them(bro
     everything = ["documents", "threads", "reply", "resolve", "read", "create", "update", "tells", "render_report"]
     assert names() == everything                                        # the key
     assert names(token=Tokens().add("writer", write=True)) == everything
-    assert names(token=Tokens().add("codex")) == ["documents", "threads", "reply", "resolve", "tells"]
+    assert names(token=Tokens().add("codex")) == ["documents", "threads", "reply", "resolve", "tells", "render_report"]
+
+
+def test_a_token_made_without_write_may_send_a_render_report(browser):
+    res = door(browser, rpc("tools/call", {"name": "render_report", "arguments": {
+        "repo": "acme-org/site", "path": "docs/plan.md", "commit": "a" * 40}}), token=Tokens().add("codex"), as_name=None)
+    out = res.json()["result"]
+    assert out["isError"] is False and json.loads(out["content"][0]["text"])["clone"] == "none"
 
 
 def test_read_is_marked_read_only_and_the_write_tools_are_not(browser):

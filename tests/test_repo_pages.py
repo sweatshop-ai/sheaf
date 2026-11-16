@@ -8,6 +8,7 @@ import json
 import shutil
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -75,6 +76,7 @@ def app():
 def hub_repos(agents, origin, app, tmp_path):  # noqa: F811
     """The tiroir's clone store, wired to Bea's and Cal's hub with the fake App."""
     agents.hub.repos = Repos(tmp_path / "clones", app, remote_url=lambda repo: str(origin))
+    agents.hub.repos.FETCH_EVERY = 0.0              # the rate limit has its own test
     agents.app, agents.origin = app, origin
     return agents
 
@@ -91,8 +93,9 @@ def clones(hub_repos) -> Path:
     return hub_repos.hub.repos.base / "clones"
 
 
-def report(hub_repos, who="bea-claude", path="docs/plan.md", commit=None, repo=REPO, **declares):
-    """(is it an error, the answer) of a render report; `declares` is what the caller says in its headers."""
+def report_once(hub_repos, who="bea-claude", path="docs/plan.md", commit=None, repo=REPO, **declares):
+    """(is it an error, the answer) of one render report, as the door gave it; `declares` is what the caller says in its
+    headers."""
     commit = commit or sh(hub_repos.origin, "rev-parse", "main")
     res = door(hub_repos.door, rpc("tools/call", {"name": "render_report", "arguments": {
         "repo": repo, "path": path, "commit": commit}}), token=hub_repos.tokens[who], as_name=None,
@@ -101,6 +104,18 @@ def report(hub_repos, who="bea-claude", path="docs/plan.md", commit=None, repo=R
     out = res.json()["result"]
     text = out["content"][0]["text"]
     return out["isError"], (text if out["isError"] else json.loads(text))
+
+
+def report(hub_repos, **kw):
+    """The answer of a render report once the tiroir has done its work: the first report of a repo is answered
+    `cloning` and the clone is made behind it, so this waits for that and asks again."""
+    bad, got = report_once(hub_repos, **kw)
+    if not bad and (got["clone"] == "cloning" or got.get("commit_known") is False):
+        assert hub_repos.hub.repos.settle(), "the tiroir's thread did not finish"
+        bad, got = report_once(hub_repos, **kw)
+    elif hub_repos.hub.repos is not None:
+        assert hub_repos.hub.repos.settle()
+    return bad, got
 
 
 def the_clone(hub_repos) -> Path:
@@ -323,6 +338,7 @@ def test_sheaf_on_a_repo_page_sends_a_report_and_never_its_text(tiroir, hub_repo
     page.write_text("# Plan\n\nEdited, committed, pushed.\n", encoding="utf-8")
     sh(laptop, "commit", "-qam", "edit")
     sh(laptop, "push", "-q", "origin", "HEAD:main")
+    report(hub_repos, commit=sh(laptop, "rev-parse", "HEAD"))       # the tiroir has cloned the repo and fetched the commit
     code, out, err = run(capsys, page)
     assert code == 0, err
     assert local == []
@@ -633,7 +649,8 @@ def test_a_page_of_a_repo_that_is_anothers_private_root_renders_on_the_laptop_wi
 
 def test_a_page_whose_commit_the_tiroir_cannot_find_renders_on_the_laptop_with_one_line(
         tiroir, hub_repos, laptop, local, capsys, monkeypatch):
-    monkeypatch.setattr(repos_mod.Repos, "_knows", lambda self, dest, commit, token: False)
+    report(hub_repos)                                                   # the clone is made
+    monkeypatch.setattr(repos_mod.Repos, "_on_branch", lambda self, dest, commit, seconds=0: False)
     page = laptop / "docs" / "plan.md"
     code, out, err = run(capsys, page)
     assert code == 0 and local == [str(page)]
@@ -663,35 +680,94 @@ def test_a_private_root_without_a_git_dir_inside_another_repo_is_still_private(h
     assert got["clone"] == "private-root"
 
 
-def test_a_slow_clone_of_one_repo_does_not_hold_the_report_for_another(hub_repos, origin, tmp_path, monkeypatch):
+def test_a_slow_clone_never_holds_a_report_and_one_repo_does_not_hold_another(hub_repos, origin, tmp_path, monkeypatch):
     twin = tmp_path / "twin.git"
     subprocess.run(["git", "clone", "-q", "--bare", str(origin), str(twin)], check=True, capture_output=True)
     sh(twin, "config", "uploadpack.allowFilter", "true")
     hub_repos.app.installed.add(OTHER)
     repos = hub_repos.hub.repos
     repos.remote_url = lambda repo: str({REPO: origin, OTHER: twin}[repo])
-    started, release, real = threading.Event(), threading.Event(), Repos._clone
+    release, real = threading.Event(), Repos._clone
 
     def slow(self, repo, token, folder, dest):
         if repo == REPO:
-            started.set()
             assert release.wait(30)
         return real(self, repo, token, folder, dest)
 
     monkeypatch.setattr(Repos, "_clone", slow)
-    commit = sh(origin, "rev-parse", "main")
-    held = threading.Thread(target=repos.report, args=("bea", REPO, "docs/plan.md", commit))
-    held.start()
     try:
-        assert started.wait(30)
-        done = []
-        other = threading.Thread(target=lambda: done.append(repos.report("cal", OTHER, "docs/plan.md", commit)))
-        other.start()
-        other.join(20)
-        assert done and done[0]["clone"] == "ok", "the report for the other repo waited on the slow clone"
+        for who, repo in (("bea-claude", REPO), ("cal-claude", REPO), ("cal-claude", OTHER)):
+            began = time.monotonic()
+            bad, got = report_once(hub_repos, who=who, repo=repo)
+            assert not bad and got["clone"] == "cloning" and time.monotonic() - began < 0.5, (got, time.monotonic() - began)
+        end = time.monotonic() + 20           # the other repo's clone is made while the first one is still held
+        while time.monotonic() < end and not (clones(hub_repos) / "acme-org" / "elsewhere" / ".git").exists():
+            time.sleep(0.05)
+        assert (clones(hub_repos) / "acme-org" / "elsewhere" / ".git").exists()
+        assert not (clones(hub_repos) / "acme-org" / "site" / ".git").exists()
     finally:
         release.set()
-        held.join(30)
+        assert repos.settle()
+
+
+def test_a_hundred_made_up_commits_cost_one_fetch(hub_repos, monkeypatch):
+    report(hub_repos)
+    repos = hub_repos.hub.repos
+    repos.FETCH_EVERY, fetches, real = 3600.0, [], Repos._git
+
+    def spy(self, at, *args, **kw):
+        fetches.append(args) if "fetch" in args else None
+        return real(self, at, *args, **kw)
+
+    monkeypatch.setattr(Repos, "_git", spy)
+    for i in range(100):
+        bad, got = report_once(hub_repos, commit=f"{i:040x}")
+        assert not bad and got["commit_known"] is False
+    assert repos.settle()
+    assert len(fetches) <= 1, fetches
+
+
+@pytest.mark.parametrize("url,hostname,private", [
+    ("ssh://git@ssh.github.com:443/acme-org/site.git", None, True),
+    ("git@github-work:acme-org/site.git", "github.com", True),
+    ("git@github-work:acme-org/site.git", None, True),                      # ssh cannot say: fail closed on the path
+    ("git@mystery:acme-org/site.git", "mystery", True),                      # a name that is no domain: the same
+    ("git@gitlab-alias:acme-org/site.git", "gitlab.example.com", False),    # a real other host is another repo
+    ("git@github-work:acme-org/other.git", "github.com", False)])
+def test_a_private_root_reaching_github_by_another_host_name_is_still_private(
+        hub_repos, tmp_path, origin, url, hostname, private):
+    own = private_root_of(hub_repos, BEA, tmp_path, origin)
+    sh(own, "remote", "set-url", "origin", url)
+    hub_repos.hub.repos.remote_url = lambda repo: f"https://github.com/{repo}.git"
+    hub_repos.hub.repos.ssh_hostname = lambda host: hostname
+    got = report_once(hub_repos, who="cal-claude")[1]
+    assert (got["clone"] == "not-cloned") is private
+
+
+def test_ssh_hostname_resolves_an_alias_of_a_config_file(tmp_path):
+    config = tmp_path / "ssh_config"
+    config.write_text("Host github-work\n  HostName ssh.github.com\n  Port 443\n", encoding="utf-8")
+    assert repos_mod.ssh_hostname("github-work", str(config)) == "ssh.github.com"
+    assert repos_mod.ssh_hostname("plain.example.com", str(config)) == "plain.example.com"
+
+
+def test_a_page_git_cannot_read_keeps_the_owner_record_it_had(hub_repos, tmp_path, origin, monkeypatch):
+    pusher = laptop_clone(tmp_path, origin, "pusher")
+    (pusher / "docs" / "plan.md").write_text("---\nowner: cal\n---\n# Plan\n", encoding="utf-8")
+    sh(pusher, "commit", "-qam", "owned")
+    sh(pusher, "push", "-q", "origin", "HEAD:main")
+    commit = sh(pusher, "rev-parse", "HEAD")
+    report(hub_repos, who="bea-claude", commit=commit)
+    assert hub_repos.hub.repos.owner_of(REPO, "docs/plan.md") == "cal"
+    monkeypatch.setattr(Repos, "_named_owner", lambda self, *a, **kw: (False, None))
+    report(hub_repos, who="cal-claude", commit=commit, session=SESSION)
+    assert hub_repos.hub.repos.owner_of(REPO, "docs/plan.md") == "cal"
+
+
+def test_a_first_report_whose_page_git_cannot_read_makes_no_record(hub_repos, monkeypatch):
+    monkeypatch.setattr(Repos, "_named_owner", lambda self, *a, **kw: (False, None))
+    report(hub_repos)
+    assert hub_repos.hub.repos.owner_of(REPO, "docs/plan.md") is None
 
 
 def test_a_repo_that_became_a_private_root_after_it_was_cloned_takes_no_more_records(hub_repos, tmp_path, origin):

@@ -152,7 +152,7 @@ TOOLS = {
             "commit": {"type": "string", "description": "The commit id the page was rendered at."}},
         "required": ["repo", "path", "commit"]},
 }
-PAGE_TOOLS = ("read", "create", "update", "render_report")    # the key, or a token made with --write (SPEC 9.7)
+PAGE_TOOLS = ("read", "create", "update")    # the key, or a token made with --write (SPEC 9.7); a render report sends no text and needs only a member's token
 WRITE_TOOLS = ("create", "update")           # each call leaves a row in the diagnostics log (SPEC 15) and a line in the Write log (9.12)
 SESSION_WRITES = ("create", "update", "reply", "resolve")    # a write that names James's session to the hub (9.12)
 MAX_TEXT = 1024 * 1024           # bytes of UTF-8 a create or an update may write (SPEC 12)

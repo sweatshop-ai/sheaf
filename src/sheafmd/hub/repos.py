@@ -11,6 +11,14 @@ same whatever the tiroir holds: nothing is cloned for it, not even to throw away
 limit, written in the PR: a member who knows a repo's URL can tell that this tiroir will not clone it; nothing of its
 pages or its owner shows.
 
+Nothing on the request path clones or fetches. A report for a repo with no clone answers at once (`cloning`) and queues
+the work: one thread per repo makes the clone (into a folder of its own, moved into place when whole), then settles each
+queued report (widens the sparse set, looks for the commit, records the owner). A report for a repo that has a clone
+answers from what the clone already holds (`commit_known` from the fetched branches) and queues the same work. A commit
+the clone lacks costs one fetch of about 10 seconds in that thread, at most once in `FETCH_EVERY` seconds per repo, so a
+stream of made-up commit ids does nothing more. A clone that failed is told to the next report once (as a refusal), and
+that report starts the clone again.
+
 The credential is a seam, `provider`, with two methods: `token(repo)` is an installation token for the repo or None when
 the App cannot reach it, and `install_url(repo)` is the link that adds the repo to the installation. The token reaches
 git in the environment (`GIT_CONFIG_*`), never in an argument, a file or an answer. `remote_url(repo)` is where the clone
@@ -25,6 +33,7 @@ import re
 import shutil
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 from ..atomic import write_text_atomic
@@ -33,9 +42,13 @@ from . import proxy, visibility
 REPO_RE = re.compile(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}")
 COMMIT_RE = re.compile(r"[0-9a-f]{7,40}")
 GIT_SECONDS = 300.0
+FETCH_SECONDS = 10.0        # the one fetch a report whose commit the clone lacks may cost
+LOOK_SECONDS = 5.0          # a look at what the clone holds, on the request path
+MAX_QUEUED = 64             # reports waiting for a repo's thread; a report past it is answered and not queued
+GITHUB_HOSTS = ("github.com", "ssh.github.com", "www.github.com")
 
 NO_CLONES = "none"
-OK, PRIVATE_ROOT, NO_APP, NOT_CLONED = "ok", "private-root", "no-app", "not-cloned"
+OK, PRIVATE_ROOT, NO_APP, NOT_CLONED, CLONING = "ok", "private-root", "no-app", "not-cloned", "cloning"
 
 
 class Refused(ValueError):
@@ -63,17 +76,33 @@ def _clean_commit(commit) -> str:
     return commit
 
 
+def ssh_hostname(host: str, config: str | None = None) -> str | None:
+    """The host name `ssh` would connect to for `host` (an alias of ~/.ssh/config resolves to its HostName), from
+    `ssh -G`; None when ssh gives no answer."""
+    argv = ["ssh", *(["-F", config] if config else []), "-G", "--", host]
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=5, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for line in r.stdout.splitlines() if r.returncode == 0 else ():
+        if line.startswith("hostname "):
+            return line.split(None, 1)[1].strip().casefold() or None
+    return None
+
+
 class Repos:
     def __init__(self, base: Path, provider, remote_url=None):
         self.base, self.provider = Path(base), provider
         self.remote_url = remote_url or (lambda repo: f"https://github.com/{repo}.git")
         self._records = threading.RLock()       # the records file, held for a read or a read-modify-write, never across git
-        self._guard, self._repo_locks = threading.Lock(), {}
-
-    def _repo_lock(self, repo: str) -> threading.Lock:
-        """The lock of one repo's clone: a clone or fetch that stalls holds that repo's reports and no other's."""
-        with self._guard:
-            return self._repo_locks.setdefault(repo, threading.Lock())
+        self._guard = threading.Lock()          # the queues below, never held across git
+        self._queues: dict[str, list] = {}      # repo -> reports waiting for its thread; a repo with a key has one running
+        self._threads: set = set()
+        self._failed: dict[str, str] = {}       # repo -> why its last clone failed, told once to the next report
+        self._fetched: dict[str, float] = {}    # repo -> when a fetch for an unknown commit last started
+        self._hosts: dict[str, str | None] = {}  # ssh host -> the name ssh -G gives it
+        self.FETCH_EVERY = 30.0
+        self.ssh_hostname = ssh_hostname
 
     # ── the records ──────────────────────────────────────────────────────────
     @property
@@ -139,15 +168,32 @@ class Repos:
     def _is_private_root(self, repo: str, folder: str) -> bool:
         """Whether `repo` is the repo of the private root `folder`: any remote of the root, fetch or push, names it.
         Decided from the configured root: one that cannot be looked at (missing, no `.git` of its own, unreadable, git
-        gives no answer) counts as one, since git would read a parent folder's repo for it and a clone cannot be taken
-        back."""
+        gives no answer) counts as one, since git would read a parent folder's repo for it and a clone cannot be
+        taken back. A remote on a host that cannot be told from GitHub is the repo's when its path is."""
         if not os.path.lexists(os.path.join(folder, ".git")):
             return True
         try:
             places = proxy.repo_places(folder)
         except proxy.ProxyError:
             return True
-        return places is None or proxy.normal_place(self.remote_url(repo)) in places
+        if places is None or proxy.normal_place(self.remote_url(repo)) in places:
+            return True
+        return any(self._names_repo(place, repo) for place in places)
+
+    def _names_repo(self, place: str, repo: str) -> bool:
+        """Whether a root's remote (`host/owner/name`, as the proxy spells it) is `repo` on GitHub, however it is
+        reached: `ssh.github.com`, an ssh alias (resolved with `ssh -G`), or a host nothing can tell from GitHub."""
+        host, _, path = place.partition("/")
+        if place.startswith("/") or not host or path.casefold() != repo:
+            return False
+        if host in GITHUB_HOSTS:
+            return True
+        if host not in self._hosts:
+            self._hosts[host] = self.ssh_hostname(host)
+        named = self._hosts[host]
+        if named is None or "." not in named:
+            return True                   # no answer, or a name that is no domain: fail closed
+        return named in GITHUB_HOSTS
 
     def _clone(self, repo: str, token: str, folder: str, dest: Path) -> str | None:
         """Clone `repo` into `dest` blobless and sparse with `folder` in its set; an error sentence, or None when made."""
@@ -170,68 +216,157 @@ class Repos:
             return False
         return self._git(dest, "sparse-checkout", "add", "--", folder, token=token).returncode == 0
 
-    def _knows(self, dest: Path, commit: str, token: str | None) -> bool:
-        """Whether a branch of the remote holds `commit`, bringing the clone up to the remote's branch first when it does
-        not (a partial clone fetches a missing commit on its own, so being able to read it proves nothing)."""
-        def on_branch():       # on any branch the clone has fetched: the CLI takes a commit on any remote-tracking one
-            r = self._git(dest, "branch", "-r", "--contains", commit, seconds=30)
-            return r.returncode == 0 and bool(r.stdout.strip())
-        if on_branch():
+    def _on_branch(self, dest: Path, commit: str, seconds: float = LOOK_SECONDS) -> bool:
+        """Whether a remote-tracking branch the clone holds contains `commit`: a look at the clone, no network."""
+        r = self._git(dest, "branch", "-r", "--contains", commit, seconds=seconds)
+        return r.returncode == 0 and bool(r.stdout.strip())
+
+    def _knows(self, dest: Path, repo: str, commit: str, token: str | None) -> bool:
+        """Whether a branch of the remote holds `commit`. A commit the clone lacks costs one fetch of `FETCH_SECONDS`,
+        at most once in `FETCH_EVERY` seconds per repo, then the clone's files follow the branch."""
+        if self._on_branch(dest, commit, 30):
             return True
-        self._git(dest, "pull", "-q", "--ff-only", "--no-tags", token=token)     # the files come with the commit
-        return on_branch()
+        now = time.monotonic()
+        with self._guard:
+            last = self._fetched.get(repo)
+            if last is not None and now - last < self.FETCH_EVERY:
+                return False
+            self._fetched[repo] = now
+        if self._git(dest, "fetch", "-q", "--no-tags", "origin", token=token, seconds=FETCH_SECONDS).returncode != 0:
+            return False
+        self._git(dest, "merge", "-q", "--ff-only", "@{upstream}", token=token, seconds=60)     # the files come with it
+        return self._on_branch(dest, commit, 30)
 
     def _holds(self, dest: Path, commit: str, path: str) -> bool:
         """Whether the page is in the tree of `commit`: no record is made for a page that is not there."""
         r = self._git(dest, "ls-tree", "--name-only", commit, "--", path, seconds=30)
         return r.returncode == 0 and r.stdout.strip() == path
 
+    def _named_owner(self, dest: Path, commit: str, path: str, token: str | None) -> tuple[bool, str | None]:
+        """(whether git could read the page at `commit`, the `owner` of its front matter there); git fetches the blob
+        when the clone lacks it. A page it could not read says nothing of its owner."""
+        r = self._git(dest, "show", f"{commit}:{path}", token=token, seconds=60)
+        if r.returncode != 0:
+            return False, None
+        named = visibility.front_matter(r.stdout).get("owner") if r.stdout else None
+        return True, named if isinstance(named, str) and named else None
+
     # ── the report ───────────────────────────────────────────────────────────
     def report(self, member: str, repo, path, commit, private_roots=(), declared=None) -> dict:
         """The tiroir hears that `member` works on the page `path` of `repo` at `commit`. Raises `Refused` for a name
-        that is none; otherwise the answer: `clone` (`ok`, `private-root`, `not-cloned`, `no-app`), `commit_known`, and
-        for `no-app` the link that adds the repo. `private_roots` are (member, folder) pairs. A repo that is the
-        caller's own private root is told so; one that is another member's is `not-cloned` and nothing else: no
-        clone, no record, no owner named, and an answer that does not depend on what the tiroir holds (SPEC 9.11).
-        A repo that became a private root after it was cloned keeps its clone and its records, takes no more."""
+        that is none, and for a clone that failed since the last report; otherwise the answer: `clone` (`ok`,
+        `cloning`, `private-root`, `not-cloned`, `no-app`), `commit_known`, and for `no-app` the link that adds the
+        repo. `private_roots` are (member, folder) pairs. A repo that is the caller's own private root is told so;
+        one that is another member's is `not-cloned` and nothing else: no clone, no record, no owner named (SPEC 9.11).
+        A repo that became a private root after it was cloned keeps its clone and its records, takes no more.
+        Nothing here clones or fetches: that is the repo's thread's (see the top of the file)."""
         repo, path, commit = _clean_repo(repo), _clean_path(path), _clean_commit(commit)
-        declared = declared or {}
-        folder = path.rpartition("/")[0]
         roots = [who for who, root in private_roots if self._is_private_root(repo, root)]
         if member in roots:
             return {"repo": repo, "path": path, "clone": PRIVATE_ROOT, "commit_known": None}
         if roots:
             return {"repo": repo, "path": path, "clone": NOT_CLONED, "commit_known": None}
-        with self._repo_lock(repo):
-            token = self.provider.token(repo)       # the provider renews it: asked each time git reaches the remote
-            return self._answer(self.clone_dir(repo), member, repo, path, commit, folder, token, declared)
+        with self._guard:
+            failed = self._failed.pop(repo, None)
+        if failed:
+            raise Refused(failed)
+        dest = self.clone_dir(repo)
+        held = (dest / ".git").exists()
+        if not held and repo not in self._queues:
+            token = self.provider.token(repo)
+            if token is None:
+                return {"repo": repo, "path": path, "clone": NO_APP, "commit_known": None,
+                        "install": self.provider.install_url(repo)}
+        item = (member, path, commit, declared or {})
+        self._enqueue(repo, item)
+        if not held:
+            return {"repo": repo, "path": path, "clone": CLONING, "commit_known": None}
+        return {"repo": repo, "path": path, "clone": OK, "commit_known": self._on_branch(dest, commit)}
 
-    def _named_owner(self, dest: Path, commit: str, path: str, token: str | None) -> str | None:
-        """The `owner` of the page's front matter in the tree of `commit` (git fetches the blob when the clone lacks it)."""
-        r = self._git(dest, "show", f"{commit}:{path}", token=token, seconds=60)
-        named = visibility.front_matter(r.stdout).get("owner") if r.returncode == 0 and r.stdout else None
-        return named if isinstance(named, str) and named else None
+    def _enqueue(self, repo: str, item: tuple):
+        with self._guard:
+            queue = self._queues.get(repo)
+            if queue is not None:
+                if len(queue) < MAX_QUEUED and not any(q[:3] == item[:3] for q in queue):
+                    queue.append(item)
+                return
+            self._queues[repo] = [item]
+            t = threading.Thread(target=self._drain, args=(repo,), name=f"repos-{repo}", daemon=True)
+            self._threads.add(t)
+        t.start()
 
-    def _answer(self, dest: Path, member, repo, path, commit, folder, token, declared) -> dict:
-        made = not (dest / ".git").exists()
-        if token is None and made:
-            return {"repo": repo, "path": path, "clone": NO_APP, "commit_known": None,
-                    "install": self.provider.install_url(repo)}
-        if made:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            if (failed := self._clone(repo, token, folder, dest)) is not None:
-                raise Refused(failed)
-        elif token is not None:
-            self._widen(dest, folder, token)
-        known = self._knows(dest, commit, token)
-        if not known or not self._holds(dest, commit, path):
-            return {"repo": repo, "path": path, "clone": OK, "commit_known": known}
-        named = self._named_owner(dest, commit, path, token)
-        with self._records:
-            data = self._read()
-            row = data.setdefault(repo, {}).get(path)
-            owner = row["owner"] if isinstance(row, dict) else member
-            data[repo][path] = {"owner": owner, "commit": commit, **({"named": named} if named else {}),
-                                **{k: v for k, v in declared.items() if k in ("session", "host", "link") and v}}
-            self._write(data)
-        return {"repo": repo, "path": path, "clone": OK, "commit_known": known}
+    def settle(self, seconds: float = 120.0) -> bool:
+        """Wait until no repo's thread is left working; whether that came before `seconds` ran out."""
+        end = time.monotonic() + seconds
+        while True:
+            with self._guard:
+                threads = list(self._threads)
+            if not threads:
+                return True
+            for t in threads:
+                t.join(max(0.0, end - time.monotonic()))
+            if time.monotonic() >= end:
+                return False
+
+    def _drain(self, repo: str):
+        """The repo's thread: settle the queued reports until none is left; the one place a repo is cloned or fetched."""
+        try:
+            while True:
+                with self._guard:
+                    items = self._queues.get(repo)
+                    if not items:
+                        self._queues.pop(repo, None)
+                        self._threads.discard(threading.current_thread())
+                        return
+                    batch, self._queues[repo] = list(items), []
+                try:
+                    self._settle(repo, batch)
+                except Exception as e:      # a bug here must not leave the repo with a thread that never ends
+                    with self._guard:
+                        self._failed[repo] = f"the tiroir could not settle the report for {repo}: {type(e).__name__}"
+        except BaseException:
+            with self._guard:
+                self._queues.pop(repo, None)
+                self._threads.discard(threading.current_thread())
+            raise
+
+    def _settle(self, repo: str, batch: list):
+        dest = self.clone_dir(repo)
+        token = self.provider.token(repo)       # the provider renews it: asked each time git reaches the remote
+        if not (dest / ".git").exists():
+            if token is None:
+                return
+            if (failed := self._make_clone(repo, token, batch[0][1].rpartition("/")[0], dest)) is not None:
+                with self._guard:
+                    self._failed[repo] = failed
+                    self._queues[repo] = []     # what waited for the clone waits no more: the next report asks again
+                return
+        for member, path, commit, declared in batch:
+            folder = path.rpartition("/")[0]
+            if token is not None:
+                self._widen(dest, folder, token)
+            if not self._knows(dest, repo, commit, token) or not self._holds(dest, commit, path):
+                continue
+            readable, named = self._named_owner(dest, commit, path, token)
+            with self._records:
+                data = self._read()
+                row = data.setdefault(repo, {}).get(path)
+                if not readable:        # a page git could not read says nothing of its owner: keep what is known
+                    named = row.get("named") if isinstance(row, dict) else None
+                    if not isinstance(row, dict):
+                        continue
+                owner = row["owner"] if isinstance(row, dict) else member
+                data[repo][path] = {"owner": owner, "commit": commit, **({"named": named} if named else {}),
+                                    **{k: v for k, v in declared.items() if k in ("session", "host", "link") and v}}
+                self._write(data)
+
+    def _make_clone(self, repo: str, token: str, folder: str, dest: Path) -> str | None:
+        """Clone into a folder of its own and move it into place when whole, so a report never meets half a clone."""
+        partial = dest.with_name(dest.name + ".partial")
+        shutil.rmtree(partial, ignore_errors=True)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if (failed := self._clone(repo, token, folder, partial)) is not None:
+            shutil.rmtree(partial, ignore_errors=True)
+            return failed
+        os.replace(partial, dest)
+        return None

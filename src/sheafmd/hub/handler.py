@@ -987,6 +987,7 @@ class Handler:
         the page's own. A page with an unticked Share line has it ticked, and no second line is added."""
         b = req.body
         e = self._entry(req, b.get("doc"))
+        self._writable(e.address)           # before the first write: the Share line is committed before its tick is saved
         read, names = b.get("hash"), b.get("with", [])
         _shape(isinstance(read, str) and read != "", "hash must be the hash of the version the row read")
         _shape(names == [] or visibility.valid_names(names), "with must be a list of short names")

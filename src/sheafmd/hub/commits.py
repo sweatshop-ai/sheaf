@@ -65,7 +65,12 @@ class Author:
     email: str
 
 
+NETWORK = ("fetch", "push")      # the git commands that reach a remote: the only ones given a clone's token (SPEC 14)
+
+
 def _env(author: Author | None = None, folder: Path | None = None) -> dict:
+    """The environment of a git command; `folder`: the clone's, given only for a command that reaches the remote, so
+    a local one never asks for the App's token (which may start a command of the box's)."""
     env = {**os.environ, "LC_ALL": "C", "GIT_TERMINAL_PROMPT": "0"}
     if folder is not None and (token := CREDENTIALS.get(os.path.realpath(folder))) is not None and (t := token()):
         env.update(token_env(t))
@@ -148,10 +153,11 @@ def _git(root: Path, *args, author=None, seconds=GIT_SECONDS, given=None, childr
     its own: a signal to the hub's group never reaches it."""
     # No hook of the repo runs for the hub: hooks are code of whoever wrote `.git/hooks`.
     argv = ["git", "-C", str(root), "-c", "core.hooksPath=/dev/null", "--literal-pathspecs", *args]
+    folder = root if args and args[0] in NETWORK else None
     if children is not None:
-        return children.run(argv, seconds, _env(author, root))
+        return children.run(argv, seconds, _env(author, folder))
     return subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="surrogateescape",
-                          timeout=seconds, env=_env(author, root), input=given, start_new_session=True)
+                          timeout=seconds, env=_env(author, folder), input=given, start_new_session=True)
 
 
 def blame(file: Path, text: str, lines, seconds: float = BLAME_SECONDS) -> dict:
@@ -653,6 +659,29 @@ class Commits:
             authors = [(path, _author(top, theirs, path.relative_to(top).as_posix()) if ok else "?") for path in pages]
             self._tell(self._pulled, address, folder, authors, ok, left)
         return go
+
+    def moved(self, root, address: str, target: str, move) -> str:
+        """The files of the clone `root` move to `target` (a switch of its branch) by `move()`, which returns "" when they
+        did and else why not, as `_pull` moves them and in its order (the writers' locks of every file that differs, then
+        the repo's, SPEC 9.11; the Write log's window around both): the page open on a file that changes is told, a save
+        cannot land between `move`'s look at the tree and its checkout, and none is carried onto the new branch. The one
+        path a clone's files move by besides `_pull`; a checker of the lock order (17) lists both."""
+        folder = root.path
+        top = Path(_git(folder, "rev-parse", "--show-toplevel").stdout.strip())
+        changed = [p for p in _git(folder, "diff", "--name-only", "--no-renames", "-z", "HEAD", target).stdout.split("\0")
+                   if p]
+        pages = [top / p for p in changed if p.endswith(".md")]
+        self._tell(self._pulling, address, folder, [(path, "?") for path in pages])
+        why, left = "move failed", {}
+        try:
+            with self._guard(root, [top / p for p in changed]), self._repo_lock(folder):
+                why = move()
+                left = {path: _hash_of(path) for path in pages}
+        finally:
+            ok = why == ""
+            authors = [(path, _author(top, target, path.relative_to(top).as_posix()) if ok else "?") for path in pages]
+            self._tell(self._pulled, address, folder, authors, ok, left)
+        return why
 
     def _tell(self, call, address, *args):
         """The Write log's hearing of a pull: its failure is a diagnostics row, never the pull's."""

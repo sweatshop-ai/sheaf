@@ -341,3 +341,22 @@ def test_the_door_read_of_a_forward_for_a_stranger_is_a_page_that_is_not_there(t
 def test_the_door_lists_move_among_the_write_tools_and_offers_no_delete(team):
     from sheafmd import mcp
     assert "move" in mcp.WRITE_TOOLS and "move" in mcp.PAGE_TOOLS and "delete" not in mcp.TOOLS
+
+
+def test_a_page_with_a_tell_running_on_it_is_not_moved_until_it_ends(team, monkeypatch):
+    old = made(team, "alice", PLAN)["doc"]
+    running = [True]
+    monkeypatch.setattr(team.hub, "tell_live", lambda address: running[0] and address == old)
+    assert move(team, ALICE, old, "b").status == 409 and team.hub.file(old).exists()
+    running[0] = False
+    assert move(team, ALICE, old, "b").status == 200
+
+
+def test_a_waiting_tell_goes_with_the_page(team):
+    old = made(team, "alice", PLAN)["doc"]
+    from sheafmd.hub import waiting
+    team.hub.waiting_tells._change(lambda rows: (rows.append({"id": "t1", "doc": old, "thread": "c1", "token": "alice-claude",
+                                                              "tid": "x", "by": "Alice", "at": "now", "seen": None}), (None, True))[1])
+    new = moved(team, ALICE, old, "b")
+    rows = waiting.read_json(waiting._file(), [], aside=False)
+    assert [r["doc"] for r in rows] == [new]

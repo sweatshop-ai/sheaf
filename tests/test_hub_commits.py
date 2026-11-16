@@ -1234,6 +1234,7 @@ def test_a_version_the_remote_gained_while_the_hub_held_it_untracked_is_taken_in
     assert git(remote, "merge-base", "--is-ancestor", head, "main") == ""
     assert git(rectoversos, "rev-parse", "HEAD") == git(remote, "rev-parse", "main")
     assert untracked_versions(rectoversos) == ""
+    assert not [a for a in box.hub.writes._lines if a.endswith("README.md") or "/.sheaf/" in a]   # only pages are logged
 
 
 def opened(box, rectoversos):

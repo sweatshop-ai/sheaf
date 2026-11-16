@@ -1266,12 +1266,14 @@ class Hub:
             else:
                 continue
             rel = os.path.relpath(path, os.path.realpath(r.path))
-            if not rel.startswith("..") and (name := place.logical(rel.replace(os.sep, "/"))):
-                return f"{at.name}/{name}"
+            if not rel.startswith(".."):
+                name = place.logical(rel.replace(os.sep, "/"))
+                return f"{at.name}/{name}" if name else None       # a README, a versions file: no page of the hub
         try:
-            return self.roots.address(path)
+            address = self.roots.address(path)
         except roots_mod.NotFound:
             return None
+        return None if roots_mod._sheafs_own(address.partition("/")[2]) else address
 
     def pulling(self, folder: Path, files: list[tuple[Path, str]]):
         """A pull of the repo at `folder` is about to change `files`, (absolute path, last author): the page open on one
@@ -1281,18 +1283,22 @@ class Hub:
             if address in self.entries:
                 self.writes.expect_pull(address)
 
-    def pulled(self, folder: Path, files: list[tuple[Path, str]], ok: bool):
-        """The pull of `files` ended: each is known by the text it left, so the page's next sight of it is the pull's; when
-        the pull went through, a line each, `git · <author>`, for each that is a rectoverso of a root the hub serves."""
+    def pulled(self, folder: Path, files: list[tuple[Path, str]], ok: bool, left: dict | None = None):
+        """The pull of `files` ended: each open page is known by the text the pull left (`left`: path to hash, read under the
+        pull's locks; read now when not given), so the page's next sight of it is the pull's; when the pull went through, a
+        line each, `git · <author>`, for each that is a page of a root the hub serves."""
         for path, author in files:
             address = self._page_of(path)
             if address is None:
                 continue
-            try:
-                left = md_hash(path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                left = None
-            self.writes.end_pull(address, left if ok else None)
+            if address in self.entries and ok:
+                try:
+                    text = md_hash(path.read_text(encoding="utf-8")) if left is None else left.get(path)
+                except (OSError, ValueError):
+                    text = None
+            else:
+                text = None
+            self.writes.end_pull(address, text)
             if ok:
                 self.writes.add(address, f"git · {author}", "tiroir", "pull")
 

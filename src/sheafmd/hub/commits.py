@@ -42,6 +42,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .. import config, signals
+from ..source import md_hash
 from . import state
 
 GIT_SECONDS = 20                # a commit's git commands
@@ -244,6 +245,14 @@ def _locking(folder: Path, *args, author=None):
         raise
 
 
+def _hash_of(path: Path) -> str | None:
+    """The hash of the text of `path`, None for a file that is not there or not text."""
+    try:
+        return md_hash(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
 def _last_line(r) -> str:
     lines = (r.stderr or r.stdout or "").strip().splitlines()
     return lines[-1][:300] if lines else f"git exited {r.returncode}"
@@ -287,7 +296,7 @@ class Commits:
         when the pull was refused or failed: the Write log's line of it."""
         self._record = record
         self._pulling = pulling or (lambda folder, files: None)
-        self._pulled = pulled or (lambda folder, files, ok: None)
+        self._pulled = pulled or (lambda folder, files, ok, left=None: None)
         self._guard = guard or (lambda root, files: nullcontext())
         self._roots = roots or (lambda: ())
         self._refuse = refuse_rewrite if callable(refuse_rewrite) else (lambda: refuse_rewrite)
@@ -612,15 +621,16 @@ class Commits:
         authors = [(top / p, _git(folder, "log", "-1", "--format=%an", theirs, "--", p).stdout.strip() or "?")
                    for p in changed if p.endswith(".md")]
         self._tell(self._pulling, address, folder, authors)
-        go = False
+        go, left = False, {}
         try:
             with self._guard(root, [top / p for p in changed]), self._repo_lock(folder):
                 self._sweep(root, _repo(folder))           # what a page made since the pusher's sweep, before the work tree moves
                 go = self._catch_up(folder, theirs, address, record)
                 if go:
                     self._last_seen(folder, name, theirs)
+                left = {path: _hash_of(path) for path, _ in authors}   # the text the pull left, before a writer's lock is let go
         finally:
-            self._tell(self._pulled, address, folder, authors, go is not False)
+            self._tell(self._pulled, address, folder, authors, go is not False, left)
         return go
 
     def _tell(self, call, address, *args):

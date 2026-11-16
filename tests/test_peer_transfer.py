@@ -262,3 +262,35 @@ def test_a_landing_that_fails_with_any_exception_puts_the_lifted_forward_back(me
     except OSError:
         pass
     assert members.hub.forwards.remote(GONE) is not None
+
+
+def test_a_page_moving_back_drops_every_forward_the_move_made_for_it_not_only_the_one_at_its_address(members):
+    forwarded(members)
+    older = "loose-bea/older/gone.md"
+    members.hub.forwards.add(older, GONE, "Bea")                     # the page was at `older` first, and moved to GONE here
+    members.hub.forwards.add_remote(GONE, ELSEWHERE, "loose-bea2/projects/blog/gone.md", "Bea", "h1")    # then left: `older` leads there too
+    assert members.hub.forwards.remote(older) is not None
+    res = back(members, peer_token(origin=ELSEWHERE))
+    assert res.status == 200, res.text
+    assert members.hub.forwards.remote(GONE) is None and members.hub.forwards.remote(older) is None
+
+
+def test_a_landing_that_waited_for_the_lock_past_the_senders_deadline_lands_nothing(members, monkeypatch):
+    import threading
+    import time
+
+    from sheafmd.hub import state
+    monkeypatch.setattr(chan, "SECONDS", 0.2)
+    held, release = threading.Event(), threading.Event()
+
+    def other_landing():
+        with state.file_locked("transfers.lock"):
+            held.set()
+            release.wait(5)
+    threading.Thread(target=other_landing, daemon=True).start()
+    assert held.wait(5)
+    threading.Timer(0.5, release.set).start()
+    res = transfer(members, peer_token())
+    assert res.status == 409 and res.json()["why"] == "too_slow"
+    time.sleep(0.05)
+    assert not list(members.hub.proxy.members) or members.hub.loose.known(members.hub.proxy.members[BEA]) is None

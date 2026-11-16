@@ -185,8 +185,12 @@ def _json(status: int, obj: dict, headers: dict | None = None) -> Response:
                     json.dumps(obj).encode("utf-8"))
 
 
-def _line(line) -> dict | None:
-    return asdict(line) if line is not None else None
+def _line(line, told=None) -> dict | None:
+    """A Write log line as a dict, its `address` as `told` names it when the caller is told of the page under another name."""
+    if line is None:
+        return None
+    out = asdict(line)
+    return {**out, "address": told} if told is not None else out
 
 
 def _ok(**fields) -> Response:
@@ -862,8 +866,9 @@ class Handler:
         member reads the lines of a document they may name, no other (9.9)."""
         doc = self._owned(req, req.query.get("doc"), never_read=False)     # the lines outlive a restart, whom the page was visible to does not
         log = self.hub.writes
-        return _ok(lines=[asdict(l) for l in log.lines(doc)], last=_line(log.last(doc)),
-                   last_session=_line(log.last_session(doc)))
+        told = self.hub.alias(req.member, doc)         # a Shared page is told under its opaque name (9.11), never the owner's folders
+        return _ok(lines=[_line(l, told) for l in log.lines(doc)], last=_line(log.last(doc), told),
+                   last_session=_line(log.last_session(doc), told))
 
     def _doc(self, req: Req) -> Response:
         with self._reading(req.query.get("doc")):

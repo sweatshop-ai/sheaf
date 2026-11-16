@@ -195,6 +195,7 @@ class Hub:
         # Real path of every CONFIGURED private root -> id of the member whose it is: recorded before any validation,
         # whether the root registers or is refused, and never shrunk (`place.in_private`, SPEC 9.11 rule A).
         self._private_paths: dict[str, str] = {}
+        self.repos = None           # the clones of the repos whose pages are reported (13): `hub.repos.Repos` where the tiroir makes them
         self._private_ids: dict[tuple, str] = {}    # (st_dev, st_ino) of each, so a spelling in another case is the same folder
         self._private_by_identity: set[str] = set()     # ids of roots whose folder is a private one, spelled otherwise
         self._private_good: set[str] = set()       # those that registered: placement only, never privacy

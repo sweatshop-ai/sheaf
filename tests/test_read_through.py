@@ -221,3 +221,11 @@ def test_a_client_that_does_not_answer_a_page_is_502_and_serves_nothing(side):
     side.hub.clients = readthrough.Clients({"acme": "https://acme.example.com"}, lambda *a: (_ for _ in ()).throw(OSError("down")))
     assert side.get(f"/Clients/acme/{doc}", member=ALICE).status == 502
     assert side.get(f"/Clients/other/{doc}", member=ALICE).status == 404
+
+
+def test_a_member_with_no_e_mail_has_no_clients_node_and_is_told_why(side, tmp_path):
+    side.hub.proxy = proxy.parse({"origin": FRONT, "socket": "/run/sheaf-proxy/hub.sock", "proxy_user": pwd.getpwuid(os.getuid()).pw_name,
+                                  "client": True, "clients": {"acme": "https://acme.example.com"}, "members": members(tmp_path, emails=False)}, "the test")
+    got = side.get("/_/mount?sheaf=1", member=ALICE).json()["sheaf"]
+    assert all(n["name"] != "Clients" for n in got["tree"]) and "clients" not in got
+    assert "e-mail" in got["clients_line"] and side.asked == []

@@ -27,7 +27,8 @@ USER_KEYS = {"port": int, "name": str, "browser": bool, "proxy": dict, "jump": d
              "reopen": dict, "list": dict, "transcribe": dict, "tiroir": str}   # proxy: hub.proxy reads it (9.9); list: hub.the_list (9.10); transcribe: hub.transcribe
 JUMP_KEYS = {"command": list}
 ROOT_KEYS = {"theme": str, "for": str, "links": bool, "link_tlds": list, "credit": bool,
-             "versions": str, "commit": bool, "push": bool, "tiroir": str, "archive_after": object}      # object: a bad number warns and the default holds, it does not stop the hub
+             "versions": str, "commit": bool, "push": bool, "tiroir": str, "branch": str,
+             "archive_after": object}      # object: a bad number warns and the default holds, it does not stop the hub
 
 _ENDING = re.compile(r"[a-z0-9]+")
 
@@ -184,6 +185,7 @@ class RootConfig:
     commit: bool = False           # every write on the page is a git commit of who made it (8.11)
     push: bool = False             # and the hub pushes it (8.11)
     tiroir: str | None = None      # where a loose page of this root is sent: https://host (SPEC 13)
+    branch: str | None = None      # the branch the tiroir saves a repo's pages on when the repo has no `dev` (SPEC 14)
     archive_after: int = 30        # days without a write or a comment before a loose page is archived (8.6)
 
 
@@ -211,7 +213,18 @@ def load_root_config(root: Path, warn=None) -> RootConfig:
                       links=data.get("links", True), link_tlds=tuple(tlds),
                       credit=data.get("credit", False), versions_inside=versions == "root",
                       commit=data.get("commit", False), push=data.get("push", False),
-                      tiroir=data.get("tiroir") or None)
+                      tiroir=data.get("tiroir") or None, branch=data.get("branch") or None)
+
+
+def branch_named(text: str) -> str | None:
+    """The `branch` a `.sheaf.toml` says, given as text (a repo's file read from git, not a work tree's); None when it
+    names none, is not TOML or gives a thing that is no branch name."""
+    try:
+        branch = tomllib.loads(text).get("branch")
+    except tomllib.TOMLDecodeError:
+        return None
+    return branch if isinstance(branch, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,199}", branch) \
+        and ".." not in branch and not branch.endswith((".lock", "/", ".")) else None
 
 
 class GitPlace(NamedTuple):

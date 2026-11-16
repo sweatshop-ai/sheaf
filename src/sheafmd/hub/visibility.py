@@ -153,6 +153,12 @@ def effective(fm: dict) -> str:
     return "project"
 
 
+def owner_key(member) -> str:
+    """What names `member` as an owner: their short name, or their id for a member who has none. A page's `owner` that
+    a render report recorded is this, and a page is matched to its owner by it."""
+    return member.short or member.id
+
+
 def owner_of(fm: dict, members, assignees=None) -> list:
     """The members who own the sheaf `fm`: by the record's `assignees` when the list knows the issue and
     it has one, else by the front matter's `owner`."""
@@ -161,7 +167,7 @@ def owner_of(fm: dict, members, assignees=None) -> list:
         logins = {a.casefold() for a in assignees}
         return [m for m in members if m.github and m.github.casefold() in logins]
     short = text(fm, "owner").casefold()
-    return [m for m in members if short and m.short and m.short.casefold() == short]
+    return [m for m in members if short and owner_key(m).casefold() == short]
 
 
 def visible_to(fm: dict, member, assignees=None, granted: bool = True) -> bool:

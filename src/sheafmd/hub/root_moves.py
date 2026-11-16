@@ -7,9 +7,8 @@ import threading
 from pathlib import Path
 from typing import NamedTuple
 
-from .. import config, diagnostics
+from .. import config, connect, diagnostics
 from ..atomic import write_text_atomic
-from . import proxy
 
 FILE = "root_moves.json"
 RETRY_EVERY = 600           # seconds between two tries of a move from the hub's poll; a pull always tries
@@ -172,26 +171,15 @@ def inventory(owner_of, record, versions, logged) -> Inventory:
     return Inventory(send, ownerless)
 
 
-def owner_email(member) -> str | None:
-    """The e-mail the sender gives for a page's owner: the member's own, never the one made up for one with none."""
-    return member.email or None
-
-
-def match_owner(members, email, origins=()) -> tuple:
-    """The member of this tiroir who owns a landed page, by e-mail ignoring case: `(id, None)`, or `(None, why)`: `refused`
-    (no e-mail, or one made up for a member with none, on either side's origin in `origins`), `no_owner`, `ambiguous_owner`."""
-    members = list(members)
-    if not email:
-        return None, "refused"
-    want = email.strip().lower()
-    if not want or any(want == proxy.default_email(m.id, o).lower() for m in members for o in origins):
-        return None, "refused"
-    found = [m.id for m in members if m.email and m.email.strip().lower() == want]
-    if not found:
-        return None, "no_owner"
-    return (found[0], None) if len(found) == 1 else (None, "ambiguous_owner")
-
-
 def tip_holds(clone: Path, branch: str, page: str, blob: str) -> bool:
     """The save branch's tip holds `page` with this blob: the page is that text on this side too."""
     return _git(clone, "rev-parse", f"origin/{branch}:{page}") == blob
+
+
+def paired(to: str, store=None) -> bool:
+    """This hub holds a peer token for the tiroir at `to` (`sheaf peer use`). A `.sheaf.toml` naming any other starts nothing:
+    pairing is by hand, so a push alone never copies a root's versions and logs to a host of the pusher's choosing."""
+    try:
+        return bool(connect.peer_token_for(to, store))
+    except connect.ConnectError:
+        return False

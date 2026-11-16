@@ -165,12 +165,16 @@ def check_root(hub, b) -> tuple:
     a laptop's would be (same App, same private-root rule, so the peer token never widens what this tiroir may clone); each
     page's owner is the member its e-mail names; the page's blob must be what this tiroir's own clone holds at the save
     branch. `(202, {state: cloning})` while the clone is made or the tip not here yet; `(409, {why})` for the whole root;
-    else `(200, {pages: {path: {ready: True} | {ok: False, why}}})`. Nothing is written."""
+    else `(200, {pages: {path: {ready: True} | {ok: False, why}}})`. A repo whose root moved away from here is refused whole
+    (`moved`). This writes nothing of its own: the report is the laptop's, so it dates the clone as used and records the first
+    owner's page, as a laptop's would; the page's own state is landing's."""
     if (bad := _root_shape(b)) is not None:
         raise ValueError(bad)
     repos = getattr(hub, "repos", None)
     if repos is None:
         return 409, {"why": "no_clones"}
+    if getattr(hub, "proxy", None) is None:
+        return 409, {"why": "no_origin"}
     judged, first = {}, None
     for p in b["pages"]:
         owner, why = owner_for(hub, p["owner_email"])
@@ -187,7 +191,7 @@ def check_root(hub, b) -> tuple:
         clone = said.get("clone")
         if clone == repos_mod.NO_APP:
             return 409, {"why": "no_app", **({"install": said["install"]} if said.get("install") else {})}
-        if clone in (repos_mod.PRIVATE_ROOT, repos_mod.NOT_CLONED):
+        if clone in (repos_mod.PRIVATE_ROOT, repos_mod.NOT_CLONED, repos_mod.MOVED):
             return 409, {"why": clone.replace("-", "_")}
         if clone != repos_mod.OK or not said.get("commit_known"):
             return 202, {"state": "cloning"}

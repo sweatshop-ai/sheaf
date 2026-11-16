@@ -10,7 +10,9 @@ import pwd
 import pytest
 from helpers import FRONT, Front, door, rpc
 
+from sheafmd import comments as rdc
 from sheafmd import diagnostics
+from sheafmd.source import md_hash
 from sheafmd.hub import proxy, readthrough
 from sheafmd.hub.state import Tokens
 
@@ -41,6 +43,8 @@ def side(hub, browser, tmp_path):
 
     def call(client, verb, body):
         front.asked.append((client, verb, body))
+        if verb == "comment":
+            return readthrough.comment_answer(browser.handler, body)
         return readthrough.answer(browser.handler, body) if verb == "read" else (404, {})
     hub.clients = readthrough.Clients(hub.proxy.clients, call)
     return front
@@ -144,3 +148,76 @@ def test_the_knock_line_holds_the_client_op_member_and_status_and_no_page(side):
     lines = [json.loads(l) for l in diagnostics.log_path().read_text(encoding="utf-8").splitlines() if "read-through" in l]
     assert len(lines) == 1 and {k: lines[0][k] for k in ("client", "op", "member", "status")} == {"client": "acme", "op": "sheaf", "member": ALICE, "status": "ok"}
     assert MARKER not in json.dumps(lines) and "plan.md" not in json.dumps(lines)
+
+
+# ── a client page opened, read and commented through the agency tiroir ────────
+
+def test_alice_opens_a_client_page_and_it_is_told_under_clients(side):
+    doc = make(side, "alice", f"# Plan\n\n{MARKER}\n")
+    got = side.get(f"/Clients/acme/{doc}", member=ALICE)
+    assert got.status == 200 and MARKER in got.text and got.nonce
+    assert f'"doc": "Clients/acme/{doc}"' in got.text.replace(" ", " ")
+
+
+def test_a_page_she_may_not_open_and_a_page_that_is_not_there_are_one_answer(side):
+    theirs = make(side, "bob", "# B\n")
+    mine = make(side, "alice", "# A\n")
+    not_there = side.get("/Clients/acme/alice-work/nothing.md", member=ALICE)
+    refused = side.get(f"/Clients/acme/{theirs}", member=ALICE)
+    assert (refused.status, refused.body) == (not_there.status, not_there.body) == (404, not_there.body)
+    assert side.get(f"/Clients/acme/{mine}", member=ALICE).status == 200
+
+
+def test_a_client_member_gets_the_answer_of_a_page_that_is_not_there(side):
+    doc = make(side, "carol", "# C\n")
+    assert side.get(f"/Clients/acme/{doc}", member=CAROL).status == 404
+
+
+def test_the_doc_state_and_the_mount_come_through(side):
+    doc = make(side, "alice", f"# Plan\n\n{MARKER}\n")
+    state = side.get(f"/_/doc?doc=Clients/acme/{doc}", member=ALICE)
+    assert state.status == 200 and "hash" in state.json()
+    mounted = side.get(f"/_/mount?doc=Clients/acme/{doc}", member=ALICE)
+    assert mounted.status == 200 and MARKER in mounted.json()["html"]
+    assert mounted.json()["config"]["doc"] == f"Clients/acme/{doc}"
+
+
+def test_a_client_page_is_polled_never_streamed_and_has_no_write_log_here(side):
+    doc = make(side, "alice", "# Plan\n")
+    assert side.get(f"/_/live?doc=Clients/acme/{doc}", member=ALICE).status == 404
+    assert side.get(f"/_/writes?doc=Clients/acme/{doc}", member=ALICE).json()["lines"] == []
+
+
+def comment_on(side, doc, member, **extra):
+    text = side.hub.file(doc).read_text(encoding="utf-8")
+    blk, start, end = rdc.find_quote(text, "Plan")
+    return side.post("/_/comment", {"doc": f"Clients/acme/{doc}", "op": "add", "hash": md_hash(text), "block": blk, "start": start,
+                                    "end": end, "quote": "Plan", "body": "A note.", **extra}, member=member)
+
+
+def test_a_comment_lands_on_the_client_page_under_the_members_name(side):
+    doc = make(side, "alice", "# Plan\n")
+    got = comment_on(side, doc, ALICE)
+    assert got.status == 200, got.text
+    assert "A note." in side.hub.file(doc).read_text(encoding="utf-8") and "Alice" in side.hub.file(doc).read_text(encoding="utf-8")
+
+
+def test_a_comment_on_a_page_she_may_not_open_is_404_and_writes_nothing(side):
+    doc = make(side, "bob", "# Plan\n")
+    before = side.hub.file(doc).read_text(encoding="utf-8")
+    assert comment_on(side, doc, ALICE).status == 404
+    assert side.hub.file(doc).read_text(encoding="utf-8") == before
+
+
+def test_tell_on_a_client_page_is_refused_and_nothing_is_written(side):
+    doc = make(side, "alice", "# Plan\n")
+    before = side.hub.file(doc).read_text(encoding="utf-8")
+    assert comment_on(side, doc, ALICE, tell=True).status == 400
+    assert side.hub.file(doc).read_text(encoding="utf-8") == before
+
+
+def test_a_client_that_does_not_answer_a_page_is_502_and_serves_nothing(side):
+    doc = make(side, "alice", "# Plan\n")
+    side.hub.clients = readthrough.Clients({"acme": "https://acme.example.com"}, lambda *a: (_ for _ in ()).throw(OSError("down")))
+    assert side.get(f"/Clients/acme/{doc}", member=ALICE).status == 502
+    assert side.get(f"/Clients/other/{doc}", member=ALICE).status == 404

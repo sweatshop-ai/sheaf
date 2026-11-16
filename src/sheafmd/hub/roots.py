@@ -83,6 +83,9 @@ def _new_id() -> str:
     return secrets.token_hex(8)
 
 
+RESERVED = "clients"       # no root is named so, whatever the case: the address `Clients/...` is read-through's (9.9)
+
+
 def clean_name(folder_name: str) -> str:
     """The folder's name with every character outside [A-Za-z0-9._-] replaced by `-`, leading
     `.` and `_` stripped, `root` when nothing is left. Never starts with `_`, which keeps
@@ -316,7 +319,7 @@ class Roots:
                     return found
             base = clean_name(path.name)
             name, n = base, 2
-            while name in self._roots:
+            while name in self._roots or name.casefold() == RESERVED:      # `Clients` is the agency's folder of client tiroirs (9.9)
                 name, n = f"{base}-{n}", n + 1
             root = Root(name, path, git, _new_id())
             self._roots[name] = root

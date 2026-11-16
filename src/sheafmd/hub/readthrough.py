@@ -14,6 +14,8 @@ hub sets from the signed-in member and never reads from a request. There is no s
 The channel itself (the token, the route, the HTTP client) is ticket 20's; `Clients` takes it as `call(client, verb, body) ->
 (status, answer)`, which raises OSError when the client tiroir does not answer.
 """
+import json
+
 from . import roots as roots_mod
 from . import sheaf_view
 
@@ -84,8 +86,14 @@ class Clients:
         except (NotReachable, NoEmail, Missing):
             return False
 
-    def comment(self, client: str, member, **fields) -> dict:
-        return self._ask(client, member, "comment", fields, False)
+    def relay(self, client: str, member, op: str, doc: str, **fields) -> dict:
+        """The envelope `{status, type, body, nonce}` of `client`'s hub for a page route (`page`, `mount`, `doc`, `writes`) run as
+        `member`: `doc` is the address on that hub, `mount` the prefix its page is told under."""
+        return self._ask(client, member, "read", {"op": op, "doc": doc, **fields}, False)
+
+    def comment(self, client: str, member, doc: str, request: dict) -> dict:
+        """The envelope of `client`'s hub for a comment write (`request` is the page's own body) run as `member`: it signs it."""
+        return self._ask(client, member, "comment", {"doc": doc, "request": request}, False)
 
     def _ask(self, client, member, verb, fields, soft) -> dict:
         email = member.email
@@ -136,4 +144,49 @@ def answer(handler, body) -> tuple:
             return 200, {"open": False}
         doc = hub.unalias(doc)
         return 200, {"open": bool(hub.member_owns(member, doc) and hub.visible(member, doc))}
+    if op in ROUTES:
+        return relayed(handler, body)
     return 404, {}
+
+
+# ── the client tiroir runs a page route as the member the channel names ───────
+
+ROUTES = {"page": ("GET", "_page"), "mount": ("GET", "_mount"), "doc": ("GET", "_doc"), "writes": ("GET", "_writes")}
+KEPT = ("Cache-Control", "Content-Security-Policy", "X-Content-Type-Options", "Referrer-Policy")      # the headers a relayed page keeps
+SEEN = {"status": 404, "type": "json", "body": '{"error": "no such document"}', "nonce": None}       # a page that is not there, for every cause
+
+
+def run(handler, member, method: str, route: str, path: str, query: dict, body: dict, mount: str = "") -> dict:
+    """Run `handler.<route>` as `member` on a request made here, through the code a member's own request runs (`_unalias` first), and
+    say what it answered as an envelope. A refusal 404 is the one `SEEN` for any cause; other refusals (a comment the
+    member may not edit, a body that is not a comment) keep their status and sentence."""
+    from .handler import Refuse, Req              # the handler imports this module
+    req = Req(method, path, dict(query), {}, handler.hub.proxy.host, body=dict(body))
+    req.member, req.member_id, req.route, req.via, req.auth, req.mount = member, member.id, route, "proxy", handler.hub.auth, mount
+    try:
+        handler._unalias(req)
+        resp = getattr(handler, route)(req)
+    except Refuse as r:
+        return dict(SEEN) if r.status == 404 else {"status": r.status, "type": "json", "body": json.dumps({"error": r.message}), "nonce": None}
+    kind = "html" if resp.headers.get("Content-Type", "").startswith("text/html") else "json"
+    return {"status": resp.status, "type": kind, "body": resp.body.decode("utf-8", "replace"), "nonce": resp.nonce,
+            "headers": {k: v for k, v in resp.headers.items() if k in KEPT}}
+
+
+def relayed(handler, body) -> tuple:
+    """(200, envelope) of the `read` ops that run a page route (`ROUTES`)."""
+    member, op, doc = served(handler.hub, body.get("as")), body.get("op"), body.get("doc")
+    if member is None or not isinstance(doc, str) or not isinstance(body.get("mount", ""), str):
+        return 200, dict(SEEN)
+    method, route = ROUTES[op]
+    if route == "_page":
+        return 200, run(handler, member, method, route, roots_mod.url_path(doc), {}, {}, body.get("mount", ""))
+    return 200, run(handler, member, method, route, "/_/" + route[1:], {"doc": doc}, {}, body.get("mount", ""))
+
+
+def comment_answer(handler, body) -> tuple:
+    """(200, envelope) of the `comment` verb: the member's comment written on this hub, signed with their name here."""
+    member, request = served(handler.hub, body.get("as")), body.get("request")
+    if member is None or not isinstance(request, dict) or not isinstance(body.get("doc"), str):
+        return 200, dict(SEEN)
+    return 200, run(handler, member, "POST", "_comment", "/_/comment", {}, {**request, "doc": body["doc"]})

@@ -135,6 +135,7 @@ class Req:
     member: object = None            # the proxy.Member the proxy socket let in
     member_id: str = ""              # the member header, once the connection is the proxy's: every row names it
     code: object = None              # the codes.Code that let the request in, instead of the member header (9.13)
+    mount: str = ""                  # read-through: the prefix a page is told under, `Clients/<client>` (9.9); "" on every other request
     gone: object = None              # `gone()`: whether the caller closed the connection (a poll that waits asks it); None in a test
 
 
@@ -698,13 +699,17 @@ class Handler:
             return _html(200, self.hub.index.page(nonce, only=name, member=req.member), nonce)
         if not address.endswith(".md"):
             raise Refuse(404, "no such page")
+        if readthrough.is_clients(address):
+            return self._relay(req, address, "page")
         with self._reading(address):
             e = self._entry(req, address)
             self.hub.catch_up(e)
-            return _html(200, self.hub.page(e, nonce, member=req.member), nonce)
+            return _html(200, self.hub.page(e, nonce, member=req.member, mount=req.mount), nonce)
 
     def _live(self, req: Req) -> Response:
         hub, member = self.hub, req.member
+        if readthrough.is_clients(req.query.get("doc")):         # a client page is polled through `/_/doc`, never streamed (9.9)
+            raise Refuse(404, "no such document")
         if "doc" not in req.query:
             sub = hub.open_index_stream(lambda _: {"boot": hub.boot, "version": hub.version,
                                                    "service": hub.service},
@@ -766,6 +771,8 @@ class Handler:
     def _writes(self, req: Req) -> Response:
         """The Write log of one rectoverso: its lines, the last write and the last line that named an agent session. A
         member reads the lines of a document they may name, no other (9.9)."""
+        if readthrough.is_clients(req.query.get("doc")):         # the client tiroir's Write log is the client's: this hub keeps none of it
+            return _ok(lines=[], last=None, last_session=None)
         doc = self._owned(req, req.query.get("doc"), never_read=False)     # the lines outlive a restart, whom the page was visible to does not
         log = self.hub.writes
         told = self.hub.alias(req.member, doc)         # a Shared page is told under its opaque name (9.11), never the owner's folders
@@ -773,6 +780,8 @@ class Handler:
                    last_session=_line(log.last_session(doc), told))
 
     def _doc(self, req: Req) -> Response:
+        if readthrough.is_clients(req.query.get("doc")):
+            return self._relay(req, req.query["doc"], "doc")
         with self._reading(req.query.get("doc")):
             return self._doc_state(req)
 
@@ -823,11 +832,13 @@ class Handler:
             return self._mount_sheaf(req)
         doc = req.query.get("doc")
         _shape(isinstance(doc, str) and doc.endswith(".md"), "doc must be the address of a rectoverso")
+        if readthrough.is_clients(doc):
+            return self._relay(req, doc, "mount")
         with self._reading(doc):
             e = self._entry(req, doc)
             self.hub.catch_up(e)
             try:
-                got = self.hub.mount_doc(e, req.member)
+                got = self.hub.mount_doc(e, req.member, req.mount)
             except RenderError as ex:
                 raise Refuse(500, f"the page could not be rendered: {ex}") from None
             return _json(200, got, {"X-Content-Type-Options": "nosniff"})
@@ -873,7 +884,45 @@ class Handler:
         self._knock(req, name, "sheaf", "ok")
         return _json(200, {"client": name, "rows": rows, "tree": sheaf_view.tree(rows), "line": ""}, {"X-Content-Type-Options": "nosniff"})
 
-    def _knock(self, req: Req, client: str, op: str, status: str) -> None:
+    def _relay(self, req: Req, address: str, op: str) -> Response:
+        """A page route on an address under `Clients/` (9.9): the client tiroir runs it for this member and this hub sends the answer
+        on, text as it came, with the client's own headers and nonce. This hub reads no file and keeps nothing of it."""
+        clients, found = self.hub.clients, None
+        if clients is not None and req.member is not None:
+            found = clients.split(address)
+        if found is None:
+            raise Refuse(404, "no such document")
+        client, rest = found
+        return self._relayed(req, client, op, lambda: clients.relay(client, req.member, op, rest, mount=f"Clients/{client}"))
+
+    def _relay_comment(self, req: Req) -> Response:
+        clients, found = self.hub.clients, None
+        if clients is not None and req.member is not None:
+            found = clients.split(req.body["doc"])
+        if found is None:
+            raise Refuse(404, "no such document")
+        _shape(not req.body.get("tell"), "Tell is not offered on a client page")
+        client, rest = found
+        request = {k: v for k, v in req.body.items() if k not in ("doc", "as", "role")}
+        return self._relayed(req, client, "comment", lambda: clients.comment(client, req.member, rest, request))
+
+    def _relayed(self, req: Req, client: str, op: str, ask) -> Response:
+        try:
+            env = ask()
+        except readthrough.NoEmail as e:
+            raise Refuse(403, str(e)) from None
+        except readthrough.NotReachable:
+            self._knock(req, client, op, "unreachable")
+            raise Refuse(502, "This client tiroir is not reachable now.") from None
+        except readthrough.Missing:
+            raise Refuse(404, "no such document") from None
+        self._knock(req, client, op, str(env.get("status")))
+        status, body = env.get("status", 404), env.get("body", "")
+        if env.get("type") == "html":
+            return _html(status, body, env.get("nonce"), env.get("headers"))
+        return Response(status, {"Content-Type": "application/json", **(env.get("headers") or {})}, body.encode("utf-8"))
+
+    def _knock( req: Req, client: str, op: str, status: str) -> None:
         """One diagnostics line per call to a client tiroir: the client, the op, the member's id and the status. Never an address, a
         title or a body: what a client page is called is the client's, and stays off the agency's disk (9.9)."""
         diagnostics.record("hub", "read-through", client=client, op=op, member=req.member.id, status=status)
@@ -1700,6 +1749,8 @@ class Handler:
 
     def _comment(self, req: Req) -> Response:
         b = req.body
+        if readthrough.is_clients(b.get("doc")):
+            return self._relay_comment(req)
         e = self._entry(req, b.get("doc"))
         op = b.get("op")
         _shape(op in OPS, f"op must be one of {', '.join(OPS)}")

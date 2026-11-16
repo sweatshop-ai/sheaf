@@ -38,6 +38,7 @@ from . import projects
 from . import proxy as proxy_mod
 from . import readthrough
 from . import roots as roots_mod
+from . import team as team_mod
 from . import sheaf_view
 from . import state
 from . import targets as targets_mod
@@ -212,6 +213,8 @@ class Hub:
         self.roots.registered = self._note_identity       # rule E: no address of its own, registered or refused
         self._register_private_roots()
         self.loose = loose_mod.Loose(self)       # a member's loose root, by their id (the door's `create` with no root)
+        self.team = None                         # the agency's Team comments (SPEC 9.11): none until `enable_team`
+        self.team_gate = None                    # who may open a client page: set with the store
         self.loose.attach()
         self.archive = archive_mod.Archive(self)      # archived, kept and trashed loose pages (8.6)
         for r in self.roots.all():
@@ -1339,6 +1342,12 @@ class Hub:
         e = self.entries.get(address)
         if e is not None:
             e.bus.publish(name, data)
+
+    def enable_team(self, path, gate) -> None:
+        """Keep Team comments in `path`. `gate(member, address)` says whether the member may open that client page:
+        the read-through of the client hub answers it (TODO(23): wire it there; until then nothing sets this on a live hub)."""
+        self.team = team_mod.TeamComments(path)
+        self.team_gate = gate
 
     def tick(self):
         """One pass of the watcher, run every second. For each document with an open tab or a

@@ -718,3 +718,23 @@ def test_the_owner_still_sees_the_real_name_in_the_index_json_the_index_page_and
     for path in ("/_/index.json", "/", "/loose-alice/"):
         got = team.get(path, member=ALICE)
         assert got.status == 200 and real in got.text, path
+
+
+# ── the review's findings (PR 394, round 6) ──────────────────────────────────
+
+def test_a_tell_a_recipients_agent_is_given_names_the_page_by_its_opaque_name_never_the_owners_folders(team):
+    real = deep(team)
+    opaque = told(team, BOB, real)
+    _comment(team, real)
+    assert team.post("/_/target", {"doc": opaque, "target": "agent:bob-claude"}, member=BOB).status == 200
+    got = team.post("/_/comment", {"doc": opaque, "op": "reply", "id": "c1", "body": "Please do.", "tell": True}, member=BOB)
+    assert got.status == 200 and "tellError" not in got.json(), got.text
+    bad, listed = call(team, "bob", "documents")
+    assert not bad, listed
+    rows = json.loads(listed)
+    tells = [t for r in rows for t in r["tells"]]
+    assert tells and "Please do." in tells[0]["message"]
+    secret = ["private-matters", "deep"]
+    for text in [listed] + [t["message"] for t in tells]:
+        assert not any(s in text for s in secret), text
+    assert opaque in tells[0]["message"]

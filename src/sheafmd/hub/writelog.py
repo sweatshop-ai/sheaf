@@ -21,6 +21,11 @@ MAX_SESSION = 100
 MAX_DECLARED = 200
 
 
+def valid_session(session) -> bool:
+    """A session id the Tells long-poll may name: one line, at most MAX_SESSION characters."""
+    return isinstance(session, str) and 0 < len(session) <= MAX_SESSION and "\n" not in session
+
+
 @dataclass(frozen=True)
 class Line:
     address: str

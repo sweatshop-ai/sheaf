@@ -1677,6 +1677,7 @@ class Handler:
         if not snap.get("again") and (op == "delete" or (op == "status" and b.get("status") == "resolved")
                                       or (op == "reply" and b.get("resolve"))):
             self.hub.waiting_tells.end(e.address, b["id"], "cancelled", reason="closed")   # nothing left to answer (9.8)
+            self.hub.session_tells.end(e.address, b["id"], "cancelled", reason="closed")
         if snap.get("again"):
             # Taken before under this request id: what the first request started (a Tell's wait)
             # is running or done, and the page hears of it by its events.

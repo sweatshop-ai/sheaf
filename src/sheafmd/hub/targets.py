@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from ..agents.base import Adapter, Target
 from .auth import clean_display
 from .state import TokenRow
+from .writelog import valid_session
 
 REVOKED = "{agent} can no longer reach this hub: its token was revoked. Pick another target."
 WHAT = "The target is session, agent:<token name> or none."
@@ -154,6 +155,8 @@ def note_write(hub, address: str, row: TokenRow | None, member=None, session: st
     if row is None or row.client is None:
         return
 
+    if session is not None and not valid_session(session):
+        session = None                              # a poll of it would always be refused: no target waits for it
     told = hub.tell_live(address)                   # beside the docs lock, not inside it
 
     def settle(entry: dict) -> dict:

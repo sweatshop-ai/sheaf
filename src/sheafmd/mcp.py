@@ -702,7 +702,8 @@ class Door:
         def message(t):
             address = t["doc"]
             try:
-                opened = self._open_in(address, whole=True)
+                with place.held(hub, address):          # a read, under the name's lock (9.11)
+                    opened = self._open_in(address, whole=True)
                 text = opened[4]
                 got = rdc.parse(text) if text is not None else None
             except (NotFound, OSError, UnicodeDecodeError):

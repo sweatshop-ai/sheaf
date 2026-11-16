@@ -365,6 +365,21 @@ class Hub:
         root = self.roots.get(roots_mod.Address.parse(address).root)
         return root.clone if root is not None and self._repos is not None else ""
 
+    def wake_for_write(self, doc) -> None:
+        """A write names the page `doc` (an address, or the absolute path of its file): when it is a page of a clone that
+        sleeps, the clone wakes first, so the write finds its file (SPEC 13). Any other name is left to the write's own
+        refusal."""
+        if not isinstance(doc, str) or self._repos is None:
+            return
+        try:
+            root = self.roots.get(roots_mod.Address.parse(doc).root)
+            if root is None and doc.startswith("/"):
+                root = self.roots.lookup(Path(doc))
+        except Exception:
+            return
+        if root is not None and root.clone:
+            self._repos.wake(root.clone)
+
     def read_only_line(self, address: str) -> str:
         """Why the page at `address` may not be written, in one sentence naming the `.sheaf.toml` line that would change
         it; "" for a page that may be written. A page of a repo's clone is read-only while the clone has no save branch

@@ -887,6 +887,8 @@ class Door:
         """One tool, for a caller that may use it."""
         if name in PAGE_TOOLS and not caller.may_write:
             raise ToolError(NO_RIGHT, "no write right")
+        if name in SESSION_WRITES:
+            self.hub.wake_for_write(args.get("doc"))      # a write to a sleeping clone wakes it before it looks for the file
         return self._tools[name](_check(name, args), caller)
 
     def _logged(self, name: str, args: dict, caller: Caller) -> dict:

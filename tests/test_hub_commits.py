@@ -1937,3 +1937,15 @@ def test_a_read_of_the_renames_that_times_out_is_no_renames_and_the_pull_goes_th
     assert (rectoversos / "acme" / "blog" / "2026-10-30-plan.md").exists()
     assert box.hub.forwards.snapshot() == {}
     assert not box.hub.writes._pulling
+
+
+def test_a_git_rename_between_two_roots_of_a_repo_writes_no_forward_and_is_a_row(box, rectoversos, remote, tmp_path, monkeypatch):
+    """9.11: no move between roots. A repo may hold several roots; a rename from one to another is no Forward, and the stores
+    of the page stay where they are."""
+    real = box.hub._page_of
+    monkeypatch.setattr(box.hub, "_page_of", lambda path: real(path).replace("rectoversos/", "elsewhere/", 1)
+                        if path.name == "2026-10-30-plan.md" else real(path))
+    rename_pull(box, rectoversos, remote, tmp_path)
+    assert box.hub.forwards.snapshot() == {}
+    (row,) = rows("rename-between-roots")
+    assert row["doc"] == DOC and row["to"].startswith("elsewhere/")

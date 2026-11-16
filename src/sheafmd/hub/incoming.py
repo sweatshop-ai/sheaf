@@ -111,9 +111,16 @@ def _landed(hub, door, b, owner, deadline) -> tuple:
     # owner's alone, every Share box unticked and no `shared` line, whatever the sender's text said.
     text = visibility.unshare(visibility.without_ticked_share(b["text"]))
     args = {"doc": b["name"], "folder": b.get("folder"), "text": text, **({"keep": True} if b.get("keep") else {})}
+    # A page that comes back to the address it once left for the tiroir it comes from takes the Forward there away; any other Forward at
+    # the address stays, and refuses the landing as it refuses a create.
+    back = _forward_back(hub, owner, b)
+    if back is not None:
+        hub.forwards.drop(back[0])
     try:
         made = door._create(args, caller)
     except mcp.ToolError as e:
+        if back is not None:
+            hub.forwards.put_back(*back)
         return _refused("name_taken") if e.why == "exists" else _refused("not_landed", str(e))
     address = made["doc"]
     try:
@@ -141,6 +148,8 @@ def _landed(hub, door, b, owner, deadline) -> tuple:
             with contextlib.suppress(loose.Refused, OSError):
                 _unkeep(loose_root, address)
                 _unarchive(loose_root, address)
+        if back is not None:
+            hub.forwards.put_back(*back)
         raise
     return 200, {"ok": True, **answer}
 
@@ -152,6 +161,23 @@ def _unkeep(root_path, address: str) -> None:
         held = loose.marks(root_path)
         if rel in held:
             state.write_text_private(root_path / loose.KEEP, json.dumps(sorted(x for x in held if x != rel)) + "\n", inside=True)
+
+
+def _forward_back(hub, owner, b) -> tuple | None:
+    """(address, the Forward) when the bundle's page would land at an address that a Forward of this tiroir leads away from, to the
+    tiroir the bundle comes from: the page is moving back."""
+    came = (b.get("from") or {}).get("origin") if isinstance(b.get("from"), dict) else None
+    held = hub.loose.known(owner)
+    root = hub.roots.lookup(held / "x.md") if held is not None else None
+    if root is None or not isinstance(came, str):
+        return None
+    try:
+        folder = loose.folder_path(b.get("folder"))
+    except ValueError:
+        return None
+    address = f"{root.name}/{folder + '/' if folder else ''}{b['name']}"
+    far = hub.forwards.remote(address)
+    return (address, far) if far is not None and far["origin"] == came else None
 
 
 def _in_time(deadline: float) -> None:

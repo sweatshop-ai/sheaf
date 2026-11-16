@@ -42,9 +42,11 @@ AGENCY_KEPT = ("cache-control", "x-content-type-options", "referrer-policy")    
 def kept_headers(headers) -> dict:
     """The few headers of a client tiroir's answer this hub repeats, by a closed list: the type, the CSP, cookies and redirects are
     this origin's own to say."""
-    return {k: v for k, v in (headers or {}).items() if isinstance(k, str) and isinstance(v, str) and k.lower() in AGENCY_KEPT}
+    return {k: v for k, v in (headers or {}).items()
+            if isinstance(k, str) and isinstance(v, str) and k.lower() in AGENCY_KEPT and _PLAIN_VALUE.fullmatch(v)}
 
 
+_PLAIN_VALUE = re.compile(r"[\t\x20-\x7e\x80-\xff]*")          # a header value: no line break, no NUL, and what a latin-1 header line can hold
 _SCRIPT_RE = re.compile(r"<script\b([^>]*)>(.*?)</script\s*>", re.S | re.I)
 _NONCE_ATTR = re.compile(r'\s+nonce="([^"]*)"')
 
@@ -86,7 +88,7 @@ def fold_rows(client: str, rows: list) -> list:
         top = r["root"]
         out.append({**r, "doc": f"{ROOT}/{client}/{doc}", "url": roots_mod.url_path(f"{ROOT}/{client}/{doc}"),
                     "folder": f"{ROOT}/{client}/{folder}", "root": f"{ROOT}/{client}/{top}",
-                    "own": False, "share": "", "kept": False, "archived": False, "session": "", "session_tip": "",
+                    "own": False, "can_move": False, "share": "", "kept": False, "archived": False, "session": "", "session_tip": "",
                     "session_link": None, "write": "", "write_tip": ""})
     return out
 
@@ -136,11 +138,16 @@ class Clients:
 
     @staticmethod
     def _envelope(answer: dict) -> dict:
-        """`answer` as the envelope it must be (`status` a whole number, `body` text, `headers` a table when there are any), or the
+        """`answer` as the envelope it must be (`status` a whole number from 200 to 599 that carries a body, `body` text that encodes, `headers` a table when there are any), or the
         client tiroir did not answer as one."""
-        if (not isinstance(answer.get("status"), int) or isinstance(answer.get("status"), bool) or not isinstance(answer.get("body"), str)
-                or not isinstance(answer.get("headers", {}), dict) or answer.get("type") not in ("html", "json")):
+        status, body = answer.get("status"), answer.get("body")
+        if (not isinstance(status, int) or isinstance(status, bool) or not 200 <= status <= 599 or status in (204, 304)
+                or not isinstance(body, str) or not isinstance(answer.get("headers", {}), dict) or answer.get("type") not in ("html", "json")):
             raise NotReachable("the client tiroir did not answer as one")
+        try:
+            body.encode("utf-8")
+        except UnicodeEncodeError:
+            raise NotReachable("the client tiroir did not answer as one") from None
         return answer
 
     def _ask(self, client, member, verb, fields, soft) -> dict:

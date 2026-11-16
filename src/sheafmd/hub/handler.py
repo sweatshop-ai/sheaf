@@ -390,14 +390,15 @@ class Handler:
             h["Permissions-Policy"] = "microphone=(self), camera=(), geolocation=()"
         if res.status >= 400 and req is not None and res.row is not False:     # False: counted, not written
             error = res.error or ""
-            if not error and h.get("Content-Type") == "application/json":
+            seen = self._on_clients(req)          # what a client page is called is the client's: no address on this disk (9.9)
+            if not error and not seen and h.get("Content-Type") == "application/json":
                 try:
-                    error = json.loads(res.body).get("error", "")
+                    got = json.loads(res.body)
+                    error = got.get("error", "") if isinstance(got, dict) else ""
                 except ValueError:
                     pass
-            seen = self._on_clients(req)          # what a client page is called is the client's: no address on this disk (9.9)
             self.hub.record(res.row or f"{req.route}-{res.status}", None if seen else self._doc_hint(req),
-                            **({} if seen else {"endpoint": req.path}), error=error or None, **self._who(req), **res.fields)
+                            **({} if seen else {"endpoint": req.path}), error=None if seen else (error or None), **self._who(req), **res.fields)
         return res
 
     @staticmethod

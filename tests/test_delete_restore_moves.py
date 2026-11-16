@@ -149,9 +149,9 @@ def test_a_trash_entry_swapped_for_a_link_after_the_check_is_not_put_back_throug
             os.unlink(src)
             os.symlink(outside, src)
         return real(src, dst, *a, **k)
-    monkeypatch.setattr(os, "link", link)
-    got = restore_trash(team, row["id"])
-    monkeypatch.undo()
+    with monkeypatch.context() as m:
+        m.setattr(os, "link", link)
+        got = restore_trash(team, row["id"])
     assert swapped and got.status == 409, (got.status, got.text)
     dest = team.hub.file(first)
     assert not os.path.lexists(dest), "the page was put back through the swapped entry"
@@ -169,9 +169,9 @@ def test_a_trash_entry_that_cannot_be_unlinked_after_the_link_leaves_a_clean_ref
         if ".sheaf/trash" in str(path):
             raise PermissionError(13, "Permission denied")
         return real(path, *a, **k)
-    monkeypatch.setattr(os, "unlink", unlink)
-    got = restore_trash(team, row["id"])
-    monkeypatch.undo()
+    with monkeypatch.context() as m:
+        m.setattr(os, "unlink", unlink)
+        got = restore_trash(team, row["id"])
     assert got.status == 409, (got.status, got.text)
     assert not team.hub.file(first).exists()                            # the link made is taken off again
     assert [r["id"] for r in team.hub.archive.trashed(root_of(team))] == [row["id"]]

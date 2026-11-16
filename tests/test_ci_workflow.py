@@ -73,6 +73,18 @@ def test_the_full_matrix_runs_every_night_and_the_scratch_filter_does_not_stop_i
     assert "paths-ignore" not in section(on, "schedule", 2)
 
 
+def test_a_push_to_main_that_changes_only_notes_starts_nothing(text):
+    # .scratch and .boss hold notes no test reads; a push that changes anything else still runs.
+    push = section(section(text, "on"), "push", 2)
+    assert re.search(r"^    paths-ignore: \['\.scratch/\*\*', '\.boss/\*\*'\]\s*$", push, flags=re.M)
+
+
+def test_no_test_reads_the_notes_the_push_filter_ignores():
+    for path in (p for d in ("src", "tests", "tools") for p in (ROOT / d).rglob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        assert ".scratch" not in text and ".boss" not in text or path.name == "test_ci_workflow.py", path
+
+
 def test_a_pull_request_does_not_ignore_paths(text):
     # A pull request is never filtered by path: required checks must be able to report.
     pr = section(section(text, "on"), "pull_request", 2)
@@ -239,8 +251,9 @@ def test_the_page_tests_run_only_where_there_are_some_and_may_not_skip(text):
 
 def test_the_service_checks_run_per_system_through_the_ci_scripts(text):
     assert "tools/ci/service_linux.py" in text and "tools/ci/service_macos.py" in text
-    assert re.search(r"if: runner\.os == 'Linux'", text)
-    assert re.search(r"if: runner\.os == 'macOS'", text)
+    # The service is the same in every slice, so the first slice alone checks it.
+    assert "        if: runner.os == 'Linux' && matrix.slice == 1\n" in text
+    assert "        if: runner.os == 'macOS' && matrix.slice == 1\n" in text
 
 
 def test_the_wheel_is_built_and_installed_as_a_user_would(text):

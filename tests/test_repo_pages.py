@@ -182,15 +182,15 @@ def test_two_members_pages_in_one_repo_stay_apart_by_the_owner_record(hub_repos)
     report(hub_repos, who="bea-claude", path="docs/plan.md")
     report(hub_repos, who="cal-claude", path="notes/idea.md")
     repos = hub_repos.hub.repos
-    assert repos.owner_of(REPO, "docs/plan.md") == BEA
-    assert repos.owner_of(REPO, "notes/idea.md") == CAL
+    assert repos.owner_of(REPO, "docs/plan.md") == "bea"
+    assert repos.owner_of(REPO, "notes/idea.md") == "cal"
 
 
 def test_the_first_report_keeps_the_page_a_later_report_by_another_member_does_not_take_it(hub_repos):
     report(hub_repos, who="bea-claude")
     bad, got = report(hub_repos, who="cal-claude")
     assert not bad, got
-    assert hub_repos.hub.repos.owner_of(REPO, "docs/plan.md") == BEA
+    assert hub_repos.hub.repos.owner_of(REPO, "docs/plan.md") == "bea"
 
 
 def test_front_matter_owner_wins_over_the_record(hub_repos, tmp_path, origin):
@@ -205,7 +205,7 @@ def test_front_matter_owner_wins_over_the_record(hub_repos, tmp_path, origin):
 def test_the_owner_record_survives_a_new_hub_and_is_written_nowhere_in_the_repo(hub_repos, tmp_path, origin, app):
     report(hub_repos)
     again = Repos(tmp_path / "clones", app, remote_url=lambda repo: str(origin))
-    assert again.owner_of(REPO, "docs/plan.md") == BEA
+    assert again.owner_of(REPO, "docs/plan.md") == "bea"
     assert sh(the_clone(hub_repos), "status", "--porcelain") == ""
 
 
@@ -324,7 +324,7 @@ def test_sheaf_on_a_repo_page_sends_a_report_and_never_its_text(tiroir, hub_repo
                          **{k: v for k, v in arguments.items() if k in ("session", "host", "link")}}
     assert "Edited, committed, pushed" not in json.dumps(tiroir.seen)
     assert "create" not in seen_calls(tiroir) and "update" not in seen_calls(tiroir)
-    assert hub_repos.hub.repos.owner_of(REPO, "docs/plan.md") == BEA
+    assert hub_repos.hub.repos.owner_of(REPO, "docs/plan.md") == "bea"
     assert "docs/plan.md" in out
 
 
@@ -418,3 +418,44 @@ def test_a_clone_that_fails_leaves_no_half_made_folder_and_the_next_report_tries
     hub_repos.hub.repos.remote_url = lambda repo: str(origin)
     bad, got = report(hub_repos)
     assert not bad and got["clone"] == "made"
+
+
+# ── second round ─────────────────────────────────────────────────────────────
+
+def test_every_git_that_can_fetch_blobs_carries_the_token_the_sparse_set_included(hub_repos, monkeypatch):
+    """A blobless clone fetches the blobs of a folder when it is checked out: a private repo needs the token there."""
+    real, calls = subprocess.run, []
+
+    def spy(argv, *a, **k):
+        calls.append((list(argv), dict(k.get("env") or {})))
+        return real(argv, *a, **k)
+
+    monkeypatch.setattr(repos_mod.subprocess, "run", spy)
+    report(hub_repos)
+    report(hub_repos, path="notes/idea.md")
+    for needle in ("clone", "sparse-checkout"):
+        mine = [env for argv, env in calls if needle in argv and argv[-1] != "list"]
+        assert mine and all("GIT_CONFIG_VALUE_0" in env for env in mine), needle
+
+
+def test_a_newer_commit_brings_the_clones_files_with_it_so_a_new_owner_line_is_read(hub_repos, tmp_path, origin):
+    report(hub_repos, who="bea-claude")
+    pusher = laptop_clone(tmp_path, origin, "pusher")
+    (pusher / "docs" / "plan.md").write_text("---\nowner: cal\n---\n# Plan\n", encoding="utf-8")
+    sh(pusher, "commit", "-qam", "hand it over")
+    sh(pusher, "push", "-q", "origin", "HEAD:main")
+    assert hub_repos.hub.repos.owner_of(REPO, "docs/plan.md") == "bea"
+    report(hub_repos, who="bea-claude", commit=sh(pusher, "rev-parse", "HEAD"))
+    assert hub_repos.hub.repos.owner_of(REPO, "docs/plan.md") == "cal"
+
+
+def test_a_repo_named_in_another_case_is_the_same_repo_and_the_same_clone(hub_repos):
+    report(hub_repos)
+    commit = sh(hub_repos.origin, "rev-parse", "main")
+    res = door(hub_repos.door, rpc("tools/call", {"name": "render_report", "arguments": {
+        "repo": REPO.upper(), "path": "docs/plan.md", "commit": commit}}), token=hub_repos.tokens["cal-claude"],
+        as_name=None)
+    got = json.loads(res.json()["result"]["content"][0]["text"])
+    assert got["clone"] == "present" and got["repo"] == REPO
+    the_clone(hub_repos)
+    assert hub_repos.hub.repos.owner_of(REPO, "docs/plan.md") == "bea"

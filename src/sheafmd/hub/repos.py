@@ -40,10 +40,11 @@ class Refused(ValueError):
 
 
 def _clean_repo(repo) -> str:
-    if not isinstance(repo, str) or not REPO_RE.fullmatch(repo) or ".." in repo.split("/")[0] \
-            or repo.startswith(".") or "/." in repo:
+    """The repo in lower case: GitHub names are case-insensitive, and one repo has one clone and one set of records."""
+    if not isinstance(repo, str) or not REPO_RE.fullmatch(repo) or repo.startswith((".", "-")) or "/." in repo \
+            or "/-" in repo:
         raise Refused(f"{repo!r} is not a repo named owner/name.")
-    return repo
+    return repo.lower()
 
 
 def _clean_path(path) -> str:
@@ -154,28 +155,30 @@ class Repos:
                       str(dest), token=token)
         if r.returncode != 0:
             return f"the clone of {repo} failed: {r.stderr.strip()[-300:] or 'git gave no reason'}"
-        r = self._git(dest, "sparse-checkout", "set", "--cone", *([folder] if folder else []))
+        r = self._git(dest, "sparse-checkout", "set", "--cone", *([folder] if folder else []), token=token)
         if r.returncode != 0:
             shutil.rmtree(dest, ignore_errors=True)         # a clone without its sparse set is none: the next report makes it again
             return f"the sparse set of {repo} could not be made: {r.stderr.strip()[-300:]}"
         return None
 
-    def _widen(self, dest: Path, folder: str) -> bool:
+    def _widen(self, dest: Path, folder: str, token: str | None) -> bool:
         """Add `folder` to the sparse set when it is not in it; whether it was added."""
         if not folder:
             return False
         listed = self._git(dest, "sparse-checkout", "list")
         if listed.returncode == 0 and any(folder == h or folder.startswith(h + "/") for h in listed.stdout.split("\n") if h):
             return False
-        return self._git(dest, "sparse-checkout", "add", folder).returncode == 0
+        return self._git(dest, "sparse-checkout", "add", folder, token=token).returncode == 0
 
     def _knows(self, dest: Path, commit: str, token: str | None) -> bool:
-        def has():
-            return self._git(dest, "cat-file", "-e", f"{commit}^{{commit}}", seconds=30).returncode == 0
-        if has():
+        """Whether the clone's branch holds `commit`, bringing the clone up to the remote's branch first when it does
+        not (a partial clone fetches a missing commit on its own, so being able to read it proves nothing)."""
+        def on_branch():
+            return self._git(dest, "merge-base", "--is-ancestor", commit, "HEAD", seconds=30).returncode == 0
+        if on_branch():
             return True
-        self._git(dest, "fetch", "-q", "--no-tags", "origin", token=token)
-        return has()
+        self._git(dest, "pull", "-q", "--ff-only", "--no-tags", token=token)     # the files come with the commit
+        return on_branch()
 
     # ── the report ───────────────────────────────────────────────────────────
     def report(self, member: str, repo, path, commit, private_roots=(), declared=None) -> dict:
@@ -199,7 +202,7 @@ class Repos:
                 if (failed := self._clone(repo, token, folder)) is not None:
                     raise Refused(failed)
             else:
-                widened = folder if token is not None and self._widen(dest, folder) else None
+                widened = folder if token is not None and self._widen(dest, folder, token) else None
             known = self._knows(dest, commit, token)
             data = self._read()
             row = data.setdefault(repo, {}).get(path)

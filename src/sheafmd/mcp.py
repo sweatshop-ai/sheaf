@@ -724,7 +724,7 @@ class Door:
             raise ToolError("A render report is made with the token of a member: this one acts for nobody.", "no member")
         privates = [m.private_root for m in self.hub.proxy.members.values() if m.private_root]
         try:
-            return repos.report(member.id, args["repo"], args["path"], args["commit"], privates, caller.declared)
+            return repos.report(member.short or member.id, args["repo"], args["path"], args["commit"], privates, caller.declared)
         except repos_mod.Refused as e:
             raise ToolError(str(e), "refused") from None
 

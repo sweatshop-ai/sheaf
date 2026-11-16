@@ -3,6 +3,8 @@
 export const WAIT_SECONDS = 25      // the door's own limit is 25
 export const MIN_GAP_MS = 5_000     // between two polls that returned at once (the door refuses a third in flight: "wait 5 seconds")
 export const MAX_BACKOFF_MS = 5 * 60_000
+export const POLL_TIMEOUT_MS = (WAIT_SECONDS + 15) * 1000   // over the CLI's own 35 s call (send.py), so the mod never kills a poll the CLI still waits on
+export const SUBMIT_WINDOW_MS = 60_000                       // a submit that never starts a turn frees the next Tell after this
 
 export type Tell = { id: string; doc: string; thread: string; message: string; by: string; at: string }
 
@@ -13,9 +15,10 @@ export type Poller = {
   held: Tell[]               // taken from the door, not yet submitted (an Esc, or a turn running)
   delivered: Set<string>     // Tells already submitted: the door lists a Tell until the session answers it
   busy: boolean              // a poll is in flight: one at a time per session, never a pile-up
+  submittingUntil: number    // a Tell was handed to `$.prompt.submit` and its turn has not started: no second one before it does, or this time
 }
 
-export const fresh = (): Poller => ({ origin: null, session: '', failures: 0, held: [], delivered: new Set(), busy: false })
+export const fresh = (): Poller => ({ origin: null, session: '', failures: 0, held: [], delivered: new Set(), busy: false, submittingUntil: 0 })
 
 /** The address a successful `sheaf FILE.md` printed on its first line, or null: only a tiroir page arms the mod. */
 export function originOf(output: string): string | null {
@@ -59,9 +62,19 @@ export function tellText(t: Tell): string {
 
 /** What to submit now. Only when no turn runs and the member has not interrupted: a Tell is never put into a running
  *  turn, and after an Esc it waits for the member's next input. Returns the Tell to submit, or null. */
-export function takeNext(p: Poller, idle: boolean, interrupted: boolean): Tell | null {
-  if (!idle || interrupted) return null
+export function takeNext(p: Poller, idle: boolean, interrupted: boolean, now: number): Tell | null {
+  if (!idle || interrupted || now < p.submittingUntil) return null
   const t = p.held.shift() ?? null
-  if (t) p.delivered.add(t.id)
+  if (t) {
+    p.delivered.add(t.id)
+    p.submittingUntil = now + SUBMIT_WINDOW_MS
+  }
   return t
+}
+
+/** The submit of a Tell failed: it goes back first in line, as if never taken. */
+export function putBack(p: Poller, t: Tell) {
+  p.delivered.delete(t.id)
+  p.held.unshift(t)
+  p.submittingUntil = 0
 }

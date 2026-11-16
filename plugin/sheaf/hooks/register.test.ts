@@ -8,19 +8,28 @@ const TELL = { id: 't1', doc: 'loose-bea/notes.md', thread: 'c1', message: 'Plea
  *  `door.answers` (a queue; the last one repeats, as a door re-lists a Tell until it is answered). */
 function world($: any, on: any) {
   const clock = mock.clock(on)
-  const door = { runs: [] as string[][], answers: [{ exitCode: 0, stdout: '[]', stderr: '' }] as any[], session: SESSION,
+  const door = { runs: [] as string[][], timeouts: [] as number[], failSubmits: 0, answers: [{ exitCode: 0, stdout: '[]', stderr: '' }] as any[], session: SESSION,
                  printed: `${ORIGIN}/loose-bea/notes.md\non chat.example.com as Bea` }
   const submitted: string[] = []
   on('session.start', (_: any, e: any) => ({ cwd: e.cwd }))
   on('session.id', () => ({ value: door.session }))
   on('tool.call', () => ({ result: { stdout: door.printed, stderr: '' } }))
+  const kept = new Map<string, unknown>()     // `$.store`, which outlives a session
+  on('store.get', (_: any, e: any) => ({ value: kept.get(e.key) }))
+  on('store.set', (_: any, e: any) => { kept.set(e.key, e.value); return { value: undefined } })
+  on('session.end', (_: any, e: any) => ({ sessionId: e.sessionId }))
   on('turn.start', (_: any, e: any) => ({ turnId: e.turnId }))
   on('turn.complete', (_: any, e: any) => ({ text: e.answer }))
   on('process.run', (_: any, e: any) => {
     door.runs.push([...e.argv])
+    door.timeouts.push(e.init?.timeoutMs)
     return { value: door.answers.length > 1 ? door.answers.shift() : door.answers[0] }
   })
-  on('prompt.submit', (_: any, e: any) => { submitted.push(e.text); return { text: e.text } })
+  on('prompt.submit', (_: any, e: any) => {
+    if (door.failSubmits > 0 && e.origin?.kind !== 'composer') { door.failSubmits -= 1; throw new Error('refused') }
+    submitted.push(e.text)
+    return { text: e.text }
+  })
   const send = () => $.tool.call({ tool: 'Bash', command: 'sheaf notes.md' })
   return { clock, door, submitted, send }
 }
@@ -128,4 +137,68 @@ test('the token is never in what the mod runs', async ($, on) => {
   await w.send()
   await w.clock.advance(1_000)
   expect(JSON.stringify(w.door.runs)).not.toMatch(/token|Bearer|Authorization/i)
+})
+
+const TELL2 = { ...TELL, id: 't2', message: 'And this one.' }
+
+test('two Tells are never submitted at once: the second waits for the first one\'s turn to start and end', async ($, on) => {
+  const w = world($, on)
+  w.door.answers = [{ exitCode: 0, stdout: JSON.stringify([TELL, TELL2]), stderr: '' }]
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.send()
+  await w.clock.advance(20_000)
+  expect(w.submitted.length).toBe(1)
+  await start($)
+  await w.clock.advance(10_000)
+  expect(w.submitted.length).toBe(1)
+  await end($, 'answer')
+  await w.clock.advance(6_000)
+  expect(w.submitted.length).toBe(2)
+  expect(w.submitted[1]).toContain('And this one.')
+})
+
+test('a submit that fails keeps the Tell: it is offered again', async ($, on) => {
+  const w = world($, on)
+  w.door.failSubmits = 1
+  w.door.answers = [{ exitCode: 0, stdout: JSON.stringify([TELL]), stderr: '' }]
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.send()
+  await w.clock.advance(20_000)
+  expect(w.submitted.length).toBe(1)
+  expect(w.submitted[0]).toContain('Please look at this.')
+})
+
+test('a session that ended and sends a page again is polled again', async ($, on) => {
+  const w = world($, on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.send()
+  await w.clock.advance(1_000)
+  expect(polls(w.door).length).toBe(1)
+  await $.session.end({ reason: 'clear', sessionId: SESSION, resume: {} } as any)
+  const before = polls(w.door).length
+  await w.clock.advance(30_000)
+  expect(polls(w.door).length).toBe(before)
+  w.door.session = 'new-session'
+  await w.send()
+  await w.clock.advance(1_000)
+  expect(polls(w.door).at(-1)![5]).toBe('new-session')
+})
+
+test('a session resumed after it sent a page is polled without a new send', async ($, on) => {
+  const w = world($, on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.send()
+  await $.session.end({ reason: 'other', sessionId: SESSION, resume: {} } as any)
+  const before = polls(w.door).length
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.clock.advance(2_000)
+  expect(polls(w.door).length).toBeGreaterThan(before)
+})
+
+test('the poll is given longer than the CLI\'s own 35 s call', async ($, on) => {
+  const w = world($, on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.send()
+  await w.clock.advance(1_000)
+  expect(w.door.timeouts[0]).toBeGreaterThan(35_000)
 })

@@ -234,4 +234,4 @@ def test_a_forwards_file_that_cannot_be_written_after_the_page_is_in_the_trash_i
     assert not team.hub.file(b).exists()
     assert [r["id"].partition("/")[2] for r in team.hub.archive.trashed(root_of(team))] == [b.partition("/")[2]]
     assert told == [b] and touched == [b]                       # the tabs open on it are told, the index is told
-    assert logged and "forward" in logged[0]
+    assert logged and logged[0] == "delete-forward-failed"

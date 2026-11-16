@@ -260,6 +260,9 @@ def _create(door: Door, md: Path, text: str, args, origin: str) -> dict:
     if args.keep:
         arguments["keep"] = True
     bad, got = door.tool("create", arguments)
+    if bad and "exists already" in got:
+        raise SendError(f"a page named {md.name} exists already on the shared Sheaf and was not sent from this file. "
+                        f"Rename {md} and run sheaf again. Nothing was sent.")
     if bad:
         raise SendError(f"{got} Nothing was sent.")
     keep_row(md, {"tiroir": origin, "doc": got["doc"], "hash": got["hash"], "local": md_hash(text)})

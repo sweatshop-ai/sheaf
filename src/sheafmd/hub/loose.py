@@ -135,10 +135,15 @@ def keep(root_path: Path, rel: str, on: bool = True) -> None:
     """Mark the page at `rel` never to be archived (`on`), or take the mark off. Written whole by a replace; refused
     (`Refused`) when it cannot be."""
     with state.file_locked("loose-keep.lock"):      # two creates at once each keep their own mark
-        held = marks(root_path)
-        if (rel in held) == on:
-            return
-        _put(root_path, KEEP.name, sorted([*held, rel] if on else [h for h in held if h != rel]), "keep marks")
+        keep_held(root_path, rel, on)
+
+
+def keep_held(root_path: Path, rel: str, on: bool = True) -> None:
+    """`keep` for a caller that holds `loose-keep.lock` already (the flock is not re-entrant)."""
+    held = marks(root_path)
+    if (rel in held) == on:
+        return
+    _put(root_path, KEEP.name, sorted([*held, rel] if on else [h for h in held if h != rel]), "keep marks")
 
 
 def stamp(root_path: Path, name: str, changes: dict, only_new: bool = False) -> None:

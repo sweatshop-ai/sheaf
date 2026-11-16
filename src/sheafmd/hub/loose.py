@@ -62,10 +62,12 @@ def _marks(root_path: Path) -> list:
 
 
 def keep(root_path: Path, rel: str) -> None:
-    marks = _marks(root_path)
-    if rel not in marks:
-        (Path(root_path) / KEEP).parent.mkdir(mode=0o700, exist_ok=True)
-        state.write_json(Path(root_path) / KEEP, sorted([*marks, rel]))
+    mark = Path(root_path) / KEEP
+    with state.file_locked("loose-keep.lock"):      # two creates at once each keep their own mark
+        marks = _marks(root_path)
+        if rel not in marks:
+            mark.parent.mkdir(mode=0o700, exist_ok=True)
+            state.write_json(mark, sorted([*marks, rel]))
 
 
 class Loose:

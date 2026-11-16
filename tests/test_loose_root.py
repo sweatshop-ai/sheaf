@@ -1,8 +1,8 @@
 """A member's loose root: a door `create` with no root writes into `loose-<short>`, made on the member's first
 `create`, in the folder the agent named, else the month. Read at the handler seam in proxy mode, in memory."""
 import dataclasses
+import json
 import os
-import time
 
 import pytest
 from helpers import BEA, CAL, door, rpc
@@ -27,17 +27,12 @@ def call(agents, who, tool, **args):
 def made(agents, who, **args):
     bad, text = call(agents, who, "create", **args)
     assert not bad, text
-    import json
     return json.loads(text)
-
-
-def month():
-    return time.strftime("%Y-%m")
 
 
 def test_the_first_create_makes_the_loose_root_and_puts_the_page_in_the_month(agents):
     out = made(agents, "bea-claude", doc="notes.md", text=TEXT)
-    assert out["doc"] == f"loose-bea/{month()}/notes.md"
+    assert out["doc"] == f"loose-bea/{loose.month()}/notes.md"
     assert agents.hub.file(out["doc"]).read_text(encoding="utf-8").endswith("A first page.\n")
     assert agents.hub.roots.get("loose-bea") is not None
 
@@ -172,8 +167,18 @@ def test_a_link_that_replaces_the_month_folder_is_refused(agents, tmp_path):
     root = agents.hub.roots.get("loose-bea")
     outside = tmp_path / "elsewhere"
     outside.mkdir()
-    (root.path / month()).rename(root.path / "moved-away")
-    os.symlink(outside, root.path / month())
+    (root.path / loose.month()).rename(root.path / "moved-away")
+    os.symlink(outside, root.path / loose.month())
     bad, why = call(agents, "bea-claude", "create", doc="notes.md", text=TEXT)
     assert bad, why
     assert not list(outside.iterdir())
+
+
+def test_a_page_that_is_already_a_link_is_never_written_through(agents, tmp_path):
+    made(agents, "bea-claude", doc="first.md", text=TEXT, folder="x")
+    root = agents.hub.roots.get("loose-bea")
+    target = tmp_path / "target.md"
+    os.symlink(target, root.path / "x" / "notes.md")
+    bad, why = call(agents, "bea-claude", "create", doc="notes.md", text=TEXT, folder="x")
+    assert bad, why
+    assert not target.exists()

@@ -443,7 +443,7 @@
       root.replaceChildren(...parts, link, wrap);
       await new Promise((done) => { link.onload = link.onerror = done; cut = done; });   // the page measures its parts: their styles first
       if (stale()) return got;
-      const again = { body: wrap, remount: () => {
+      const again = { body: wrap, navigate: opts.navigate, upgrade: opts.upgrade, remount: () => {
         draw().catch((e) => {
           if (!gone && page && page.failed) page.failed('The page could not be loaded again: ' + e.message + '. Reload to try again.');
         });

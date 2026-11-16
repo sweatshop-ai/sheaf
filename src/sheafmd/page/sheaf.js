@@ -97,7 +97,8 @@ function render(data, target) {
 }
 
 function create(ROOT, opts) {
-  var selected = '', gone = false, handle = null;
+  opts = opts || {};
+  var selected = '', gone = false, handle = null, opened = 0;
   var view = ROOT.querySelector('.sheaf-view');
   var main = view.querySelector('.sheaf-main'), pane = view.querySelector('.sheaf-doc');
   var rows = Array.prototype.slice.call(ROOT.querySelectorAll('.sheaf-row'));
@@ -130,6 +131,9 @@ function create(ROOT, opts) {
     toggle.textContent = open ? '▸' : '▾';
   }
   function close() {
+    // The page asks its loader whether it holds unsaved text before the loader moves it (page.js dirty()); so Back does.
+    if (handle && handle.dirty()) { say('This page has unsaved changes. Save or discard them before going back.'); return; }
+    opened++;                                   // a mount still on its way is overtaken
     if (handle) { handle.unmount(); handle = null; }
     pane.hidden = true;
     main.hidden = false;
@@ -149,10 +153,11 @@ function create(ROOT, opts) {
     main.hidden = true;
     view.querySelector('.sheaf-tree').hidden = true;
     pane.hidden = false;
-    kit.mount(b, { doc: tr.dataset.doc }).then(function (h) {
-      if (gone || pane.hidden) { h.unmount(); return; }
+    var mine = ++opened;
+    kit.mount(b, { doc: tr.dataset.doc, navigate: opts.navigate, upgrade: opts.upgrade }).then(function (h) {
+      if (gone || mine !== opened) { h.unmount(); return; }
       handle = h;
-    }, function (e) { close(); say('The page could not be opened: ' + e.message); });
+    }, function (e) { if (mine === opened) { close(); say('The page could not be opened: ' + e.message); } });
   }
 
   function onClick(e) {

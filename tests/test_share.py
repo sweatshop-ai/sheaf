@@ -1069,3 +1069,48 @@ def test_a_share_with_ticked_on_a_page_whose_front_matter_cannot_be_read_names_n
     team.hub.file(doc).write_text("---\nsources: [issue:acme/x#1]\nsources: [library:doc-123]\n---\n"
                                   + NAMED.replace("- [ ] Share with bob", "- [x] Share with bob"), encoding="utf-8")
     assert _can_see(team, BOB, doc)[0] == 404 and page(team, ALICE, doc).status == 200
+
+
+# ── a door update never opens a page to a member the hub did not open it to before (ticket 31, review round 3) ──
+
+HAND_TICKED = "---\nvisibility: owner\n{front}---\n" + SHARED.replace("- [ ] Share", "- [x] Share")
+CLOSED_BY = {
+    "a private source": ("sources: [library:doc-123]\n", ""),
+    "an unreadable front matter": ("sources: [issue:acme/x#1]\nsources: [library:doc-123]\n", "sources: [issue:acme/x#1]\n"),
+}
+
+
+@pytest.mark.parametrize("closed_by", list(CLOSED_BY), ids=list(CLOSED_BY))
+def test_a_door_update_that_takes_off_what_kept_a_hand_ticked_share_closed_is_refused(team, closed_by):
+    front, mended = CLOSED_BY[closed_by]
+    doc = made(team, "alice", SHARED)["doc"]
+    closed = HAND_TICKED.format(front=front)
+    team.hub.file(doc).write_text(closed, encoding="utf-8")
+    assert _can_see(team, BOB, doc)[0] == 404
+    bad, why = call(team, "alice", "update", doc=doc, text=HAND_TICKED.format(front=mended), expected_hash=md_hash(closed))
+    assert bad and "cannot Share a page" in why, why
+    assert read(team, doc) == closed
+    for member in (BOB, CAROL):
+        assert _can_see(team, member, doc) == (404, False, False, False, False)
+    assert page(team, ALICE, doc).status == 200
+
+
+def test_a_door_update_that_changes_only_the_text_of_a_hand_ticked_closed_page_is_written_and_it_stays_closed(team):
+    doc = made(team, "alice", SHARED)["doc"]
+    closed = HAND_TICKED.format(front="sources: [library:doc-123]\n")
+    team.hub.file(doc).write_text(closed, encoding="utf-8")
+    bad, why = call(team, "alice", "update", doc=doc, text=closed + "\nMore.\n", expected_hash=md_hash(closed))
+    assert not bad, why
+    assert "More." in read(team, doc) and _can_see(team, BOB, doc)[0] == 404
+
+
+def test_the_owners_own_hand_in_the_page_still_opens_it_as_9_11_says(team):
+    doc = made(team, "alice", SHARED)["doc"]
+    closed = HAND_TICKED.format(front="sources: [library:doc-123]\n")
+    team.hub.file(doc).write_text(closed, encoding="utf-8")
+    assert _can_see(team, BOB, doc)[0] == 404
+    assert tick(team, ALICE, doc, "Share", release=True).status == 200       # the owner withdraws in the page
+    assert _can_see(team, BOB, doc)[0] == 404
+    assert tick(team, ALICE, doc, "Share").status == 200                     # and gives it again: the save writes the mark
+    assert "shared: alice " in read(team, doc)
+    assert _can_see(team, BOB, doc) == (200, True, True, True, True)

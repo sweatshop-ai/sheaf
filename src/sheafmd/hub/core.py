@@ -1106,23 +1106,34 @@ class Hub:
         root = self.roots.get(roots_mod.Address.parse(address).root)
         return None if root is None else self.loose.owner_of(root)
 
-    def opened_by_line(self, member, address: str) -> bool:
+    def opens_more(self, address: str, old: str, new: str) -> bool:
+        """Whether writing `new` over `old` at `address` opens the page to a member it was not open to: judged on the
+        hub's own audience of each text (its front matter's visibility, or its ticked Share line), never on the Share lines
+        alone, so a write that only takes a private source off a page whose line a hand ticked opens it all the same (9.11)."""
+        if self.proxy is None:
+            return False
+        def opens(member, text):
+            return visibility.effective(visibility.front_matter(text)) == "project" or self.opened_by_line(member, address, text)
+        return any(opens(m, new) and not opens(m, old) for m in self.proxy.members.values())
+
+    def opened_by_line(self, member, address: str, text: str | None = None) -> bool:
         """Whether the ticked Share line of the page at `address`, as the file holds it now, opens it to `member` (9.11),
         whatever its `visibility` says: a hand tick in the file gives what the tick of the page gives. In a root that is no
         member's loose root only a ticked `Share with <names>` that names `member` does, such a page staying its owner's
         alone in its front matter (a plain Share is the page's `visibility`). In another member's loose root a plain Share
-        does too, and `projects.toml` has no word."""
+        does too, and `projects.toml` has no word. `text`: judged on that text instead of the file."""
         if self.proxy is None:
             return False
         loose = self.loose_owner(address)
         if loose is not None and (loose == member.id or loose not in self.proxy.members):
             return False
-        try:
-            top, rel = self.where(address)
-            with beneath.open_beneath(top, rel) as op:
-                text = op.text()
-        except (OSError, UnicodeDecodeError, roots_mod.NotFound):
-            return False
+        if text is None:                        # the file as it is now; a door write asks of the text it would leave
+            try:
+                top, rel = self.where(address)
+                with beneath.open_beneath(top, rel) as op:
+                    text = op.text()
+            except (OSError, UnicodeDecodeError, roots_mod.NotFound):
+                return False
         shared, fm = visibility.audience(text), visibility.front_matter(text)
         if fm.get(visibility.UNREAD):             # a front matter the reader cannot judge: the owner's alone
             return False

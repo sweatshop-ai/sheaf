@@ -11,6 +11,7 @@ from helpers import FRONT, Front, door, rpc
 
 from test_share import (ALICE, BOB, CAROL, NAMED, PRIVATE, SHARED, call, doc_of, made, page, read, shared_rows, tick, told)
 from sheafmd.hub import proxy
+from sheafmd.hub.visibility import audience
 from sheafmd.hub.state import Tokens
 from sheafmd.source import md_hash
 
@@ -169,3 +170,66 @@ def test_a_page_that_exists_and_one_that_does_not_are_answered_alike(agency):
     doc = made(agency, "carol", PRIVATE)["doc"]
     a, b = page(agency, ALICE, doc), page(agency, ALICE, "loose-carol/never-written.md")
     assert a.status == b.status == 404 and a.body == b.body
+
+
+# ── an update changes no Share line, whatever the count ──────────────────────
+
+TWO = "# Plan\n\n- [x] Share with bob\n- [ ] Share with bob, alice\n"
+
+
+def update(team, who, old_text, new_text, name="plan.md"):
+    out = made(team, who, old_text, doc=name)
+    bad, why = call(team, who, "update", doc=out["doc"], text=new_text, expected_hash=out["hash"])
+    return out["doc"], bad, why
+
+
+@pytest.mark.parametrize("new", [
+    "# Plan\n\n- [x] Share with alice\n",                     # a recipient swapped
+    "# Plan\n\n- [x] Share with  bob\n",                      # extra spaces: the parser reads the same line
+    "# Plan\n\n- [x] Share with Bob\n",                       # a case trick
+    "# Plan\n\n- [x] Share with bob\n- [x] Share with bob\n", # a duplicate
+], ids=["swapped", "spaces", "case", "duplicate"])
+def test_an_update_that_rewrites_or_duplicates_a_share_line_is_refused_unless_it_is_the_same_line(agency, new, request):
+    doc, bad, why = update(agency, "alice", "# Plan\n\n- [x] Share with bob\n", new)
+    if request.node.callspec.id == "spaces":
+        assert not bad, why                                     # the parser reads it as the same line
+    else:
+        assert bad and "share" in why.lower(), why
+        assert audience(read(agency, doc)) == frozenset({"bob"}) and page(agency, CAROL, doc).status == 404
+
+
+def test_an_update_that_rewrites_a_line_at_the_same_count_is_refused(agency):
+    doc, bad, why = update(agency, "alice", TWO, "# Plan\n\n- [x] Share with bob\n- [ ] Share with carol\n")
+    assert bad, why
+    assert page(agency, CAROL, doc).status == 404
+
+
+def test_an_update_that_ticks_an_existing_line_at_the_same_count_is_refused(agency):
+    doc, bad, why = update(agency, "alice", TWO, TWO.replace("- [ ]", "- [x]"))
+    assert bad, why
+
+
+def test_an_update_that_unfences_a_hidden_share_line_is_refused(agency):
+    hidden = "# Plan\n\n```\n- [x] Share with carol\n```\n"
+    doc, bad, why = update(agency, "alice", hidden, "# Plan\n\n- [x] Share with carol\n")
+    assert bad, why
+    assert page(agency, CAROL, doc).status == 404
+
+
+def test_a_share_line_in_a_fence_or_a_comment_is_no_line_and_is_written(agency):
+    text = "# Plan\n\n```\n- [x] Share with carol\n```\n\n<!--\n- [x] Share\n-->\n"
+    doc, bad, why = update(agency, "alice", "# Plan\n", text)
+    assert not bad, why
+    assert page(agency, CAROL, doc).status == 404
+
+
+def test_an_update_that_removes_a_share_line_is_written(agency):
+    doc, bad, why = update(agency, "alice", TWO, "# Plan\n\n- [x] Share with bob\n")
+    assert not bad, why
+    doc, bad, why = update(agency, "alice", TWO, "# Plan\n", name="other.md")
+    assert not bad, why
+
+
+def test_an_update_that_reorders_the_share_lines_is_written(agency):
+    doc, bad, why = update(agency, "alice", TWO, "# Plan\n\n- [ ] Share with bob, alice\n- [x] Share with bob\n")
+    assert not bad, why

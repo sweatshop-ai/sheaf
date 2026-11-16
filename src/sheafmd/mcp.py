@@ -1155,10 +1155,22 @@ class Door:
         """`text` once the rule of Share holds for a door write (9.11). The agent may Share only on `create` of a new
         page: a ticked Share line there opens the page, and its `shared` line says which agent did, for the row.
         An `update` never opens a page to anyone it was not open to, whoever the token's member is, so text an agent
-        read cannot open a page that holds private work; closing a Share, or naming fewer members, opens nothing."""
+        read cannot open a page that holds private work; closing a Share, or naming fewer members, opens nothing.
+        On a client tiroir the agent may Share only with its agency members, never plain (9.11), and an update adds no
+        Share line at all: the lines it was sent are the ones it may send back."""
         if getattr(self.hub, "proxy", None) is None:
             return text
         now = visibility.audience(text)
+        cfg = self.hub.proxy
+        if cfg.client:
+            if old is None and not visibility.only_names_in(now, {m.short.casefold() for m in cfg.members.values()
+                                                                  if m.agency and m.short}):
+                raise ToolError("On this tiroir an agent may only Share with agency members, by name: `Share with <name>`. "
+                                "A plain Share, or a name that is not an agency member's, is the member's own act, "
+                                "from the page or the Sheaf.", "share")
+            if old is not None and len(visibility.share_lines(text)) > len(visibility.share_lines(old)):
+                raise ToolError("An update cannot add a Share line on this tiroir. Send the text with its Share lines as "
+                                "`read` gave them.", "share")
         if old is not None:
             if visibility.widens(visibility.audience(old), now):
                 raise ToolError("An update cannot Share a page, nor open it to more members: only its owner does, from "

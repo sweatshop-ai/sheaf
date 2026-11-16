@@ -1,6 +1,6 @@
 # tt-tiroir's record-share-label stage: three class c findings from Codex review 1
 
-**What to build:** nothing in sheaf. Three class c findings (no regression, no broken normal path) from Codex review 1 of `thinkingtoo/tt-tiroir` PR #962, which shipped the stage `stages/record-share-label-2026-11-14/` (applied on tiroir-tt 2026-11-14, see `tt-tiroir-record-routine-reads-the-share-label.md`). Each was checked on 2026-11-15 against tt-tiroir origin/main (c2748825) and, for the stage, against `/root/stage-record-share-label-2026-11-14/` on tiroir-tt (read only) and the stage folder in the #962 files; all three are VERIFIED. They belong in the next tt-tiroir change that touches `record.py` or a stage, not in a stage of their own.
+**What to build:** nothing in sheaf. Three class c findings (no regression, no broken normal path) from Codex review 1 of `acme/agency-tiroir` PR #962, which shipped the stage `stages/record-share-label-2026-11-14/` (applied on agency-tiroir 2026-11-14, see `tt-tiroir-record-routine-reads-the-share-label.md`). Each was checked on 2026-11-15 against tt-tiroir origin/main (c2748825) and, for the stage, against `/root/stage-record-share-label-2026-11-14/` on agency-tiroir (read only) and the stage folder in the #962 files; all three are VERIFIED. They belong in the next tt-tiroir change that touches `record.py` or a stage, not in a stage of their own.
 
 **Blocked by:** None.
 

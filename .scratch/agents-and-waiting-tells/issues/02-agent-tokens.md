@@ -1,6 +1,6 @@
 # 02: Agent tokens signed `Client (Member)`
 
-**What to build:** The hub's person can make a token for one AI client acting for one member, and every reply that token writes is signed `<client> (<member>)`, built by sheaf, never typed (SPEC 9.7, D27; design decisions 4 and 5). `ChatGPT (Hans)` for Hans's ChatGPT token, `AI (Hans)` for the token a door uses when it does not know the client.
+**What to build:** The hub's person can make a token for one AI client acting for one member, and every reply that token writes is signed `<client> (<member>)`, built by sheaf, never typed (SPEC 9.7, D27; design decisions 4 and 5). `ChatGPT (Bob)` for Bob's ChatGPT token, `AI (Bob)` for the token a door uses when it does not know the client.
 
 **Blocked by:** None (can start immediately)
 

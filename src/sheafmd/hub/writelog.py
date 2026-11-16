@@ -120,6 +120,10 @@ class WriteLog:
         """The last line that named an agent session."""
         return next((l for l in reversed(self.lines(address)) if l.session), None)
 
+    def last_way_back(self, address: str) -> Line | None:
+        """The last line that named an agent session or an Open WebUI chat: the one the row's session name follows."""
+        return next((l for l in reversed(self.lines(address)) if l.session or l.chat), None)
+
     # A pull writes files the hub then sees change. While it is under way, what a page sees of them is the pull's; when it
     # ends, the file it left is known by its hash, and the next change a page sees is the pull's only if it is that text.
     # A record no change ever matches is dropped by the next change that does not: nothing waits to swallow a later line.

@@ -142,3 +142,126 @@ def test_the_file_holds_no_text(tmp_path):
     moves = root_moves.Moves(tmp_path)
     moves.start("o/r", THERE, "id1")
     assert set(json.loads((tmp_path / "root_moves.json").read_text())["o/r"]) == {"to", "id", "sent", "held"}
+
+
+# ── the retry clock ──────────────────────────────────────────────────────────
+
+def test_a_move_is_due_at_a_pull_and_then_at_most_every_ten_minutes_from_the_poll():
+    clock = root_moves.Clock()
+    assert clock.due("o/r", 1000.0, pulled=False)               # never tried: due
+    clock.tried("o/r", 1000.0)
+    assert not clock.due("o/r", 1000.0 + 599, pulled=False)
+    assert clock.due("o/r", 1000.0 + 600, pulled=False)
+    assert clock.due("o/r", 1000.0 + 1, pulled=True)            # a pull always retries
+
+
+def test_the_clock_counts_per_repo():
+    clock = root_moves.Clock()
+    clock.tried("o/r", 1000.0)
+    assert clock.due("o/other", 1001.0, pulled=False)
+
+
+# ── the diagnostics rows ─────────────────────────────────────────────────────
+
+@pytest.fixture
+def rows(monkeypatch):
+    seen = []
+    monkeypatch.setattr(root_moves.diagnostics, "record", lambda source, kind, doc=None, **d: seen.append((source, kind, d)))
+    return seen
+
+
+def test_each_state_change_is_one_hub_row_named_for_it(rows):
+    d = root_moves.Diag()
+    d.started("o/r", THERE)
+    d.held("o/r", THERE, {"a.md": "unpushed"})
+    d.done("o/r", THERE, 3)
+    assert [(s, k) for s, k, _ in rows] == [("hub", "root-move-started"), ("hub", "root-move-held"), ("hub", "root-move-done")]
+    assert rows[1][2] == {"repo": "o/r", "to": THERE, "pages": {"a.md": "unpushed"}}
+    assert rows[2][2] == {"repo": "o/r", "to": THERE, "count": 3}
+
+
+def test_a_row_holds_no_text_and_no_token(rows):
+    d = root_moves.Diag()
+    d.started("o/r", THERE)
+    d.unpaired("o/r", THERE)
+    d.held("o/r", THERE, {"a.md": "differs"})
+    d.done("o/r", THERE, 1)
+    for _, _, detail in rows:
+        assert not {"text", "token", "body", "blob"} & set(detail)
+
+
+def test_an_unpaired_tiroir_is_written_once_per_repo_and_origin(rows):
+    d = root_moves.Diag()
+    d.unpaired("o/r", THERE)
+    d.unpaired("o/r", THERE)
+    d.unpaired("o/r", "https://third.example")
+    d.unpaired("o/other", THERE)
+    assert len(rows) == 3
+
+
+# ── which pages go ───────────────────────────────────────────────────────────
+
+def test_a_page_with_a_record_or_versions_or_log_lines_is_in_the_inventory():
+    owners = {"a.md": "alice", "b.md": "alice", "c.md": "alice", "plain.md": None}
+    got = root_moves.inventory(owners.get, record={"a.md"}, versions={"b.md"}, logged={"c.md"})
+    assert got.send == {"a.md": "alice", "b.md": "alice", "c.md": "alice"}
+    assert got.ownerless == set()
+
+
+def test_a_page_with_no_state_is_not_in_the_inventory():
+    assert root_moves.inventory(lambda p: "alice", record=set(), versions=set(), logged=set()).send == {}
+
+
+def test_a_page_with_no_owner_is_not_sent_and_gets_no_forward():
+    got = root_moves.inventory({"a.md": "alice"}.get, record={"a.md", "x.md"}, versions=set(), logged=set())
+    assert got.send == {"a.md": "alice"}
+    assert got.ownerless == {"x.md"}
+
+
+# ── the landing helpers ──────────────────────────────────────────────────────
+
+def member(id, email):
+    return root_moves.proxy.Member(id=id, name=id, roots=(), email=email)
+
+
+def test_the_owner_is_the_one_member_whose_email_matches_ignoring_case():
+    members = [member("alice", "Alice@Example.com"), member("bob", "bob@example.com")]
+    assert root_moves.match_owner(members, "alice@example.COM") == ("alice", None)
+
+
+@pytest.mark.parametrize("email", ["", None])
+def test_an_empty_email_matches_nobody_even_a_member_with_no_email(email):
+    assert root_moves.match_owner([member("alice", "")], email) == (None, "refused")
+
+
+def test_a_member_with_no_email_is_never_matched():
+    assert root_moves.match_owner([member("alice", "")], "alice@here.example") == (None, "no_owner")
+
+
+def test_a_made_up_email_is_refused():
+    made_up = root_moves.proxy.default_email("alice", HERE)
+    assert root_moves.match_owner([member("alice", made_up)], made_up, origins=(HERE, THERE)) == (None, "refused")
+
+
+def test_no_member_with_that_email_is_no_owner():
+    assert root_moves.match_owner([member("bob", "bob@example.com")], "alice@example.com") == (None, "no_owner")
+
+
+def test_two_members_with_that_email_are_ambiguous():
+    members = [member("alice", "a@example.com"), member("alice2", "A@example.com")]
+    assert root_moves.match_owner(members, "a@example.com") == (None, "ambiguous_owner")
+
+
+def test_an_email_is_sent_only_for_a_member_with_one():
+    assert root_moves.owner_email(member("alice", "a@example.com")) == "a@example.com"
+    assert root_moves.owner_email(member("alice", "")) is None
+
+
+def test_the_blob_check_passes_when_the_tip_holds_the_page_with_that_blob(pair):
+    blob = git(pair, "hash-object", "a.md")
+    assert root_moves.tip_holds(pair, "dev", "a.md", blob)
+
+
+def test_the_blob_check_fails_for_another_blob_or_a_page_the_tip_lacks(pair):
+    assert not root_moves.tip_holds(pair, "dev", "a.md", "0" * 40)
+    assert not root_moves.tip_holds(pair, "dev", "gone.md", git(pair, "hash-object", "a.md"))

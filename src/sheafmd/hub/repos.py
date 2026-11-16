@@ -25,7 +25,7 @@ import threading
 from pathlib import Path
 
 from ..atomic import write_text_atomic
-from . import visibility
+from . import proxy, visibility
 
 REPO_RE = re.compile(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}")
 COMMIT_RE = re.compile(r"[0-9a-f]{7,40}")
@@ -58,13 +58,6 @@ def _clean_commit(commit) -> str:
     if not isinstance(commit, str) or not COMMIT_RE.fullmatch(commit):
         raise Refused(f"{commit!r} is not a commit id.")
     return commit
-
-
-def _normal(url: str) -> str:
-    """`owner/name` (lower case) of a GitHub remote address, or the address itself when it is none."""
-    m = re.fullmatch(r"(?:https?://(?:[^/@]+@)?github\.com/|git@github\.com:|ssh://git@github\.com/)"
-                     r"([^/]+/[^/]+?)(?:\.git)?/?", url.strip())
-    return (m.group(1) if m else url.strip()).lower()
 
 
 class Repos:
@@ -140,12 +133,18 @@ class Repos:
             return subprocess.CompletedProcess(args, 124, "", str(e))
 
     def _is_private_root(self, repo: str, private_roots) -> bool:
-        """Whether `repo` is the repo of a private root of this tiroir: the root's `origin` names it."""
+        """Whether `repo` is the repo of a private root of this tiroir: any remote of the root, fetch or push, names it.
+        A root that cannot be looked at (missing, unreadable, git gives no answer) counts as one: a clone cannot be
+        taken back."""
+        wanted = proxy.normal_place(self.remote_url(repo))
         for folder in private_roots:
-            r = self._git(folder, "remote", "get-url", "origin", seconds=10)
-            if r.returncode == 124:             # it could not be looked at: it may be the repo, and a clone cannot be taken back
+            try:
+                places = proxy.repo_places(folder)
+            except proxy.ProxyError:
                 return True
-            if r.returncode == 0 and _normal(r.stdout) in (repo.lower(), _normal(self.remote_url(repo))):
+            if places is None and not os.path.isdir(folder):
+                return True
+            if places and wanted in places:
                 return True
         return False
 
@@ -173,10 +172,11 @@ class Repos:
         return self._git(dest, "sparse-checkout", "add", "--", folder, token=token).returncode == 0
 
     def _knows(self, dest: Path, commit: str, token: str | None) -> bool:
-        """Whether the clone's branch holds `commit`, bringing the clone up to the remote's branch first when it does
+        """Whether a branch of the remote holds `commit`, bringing the clone up to the remote's branch first when it does
         not (a partial clone fetches a missing commit on its own, so being able to read it proves nothing)."""
-        def on_branch():
-            return self._git(dest, "merge-base", "--is-ancestor", commit, "HEAD", seconds=30).returncode == 0
+        def on_branch():       # on any branch the clone has fetched: the CLI takes a commit on any remote-tracking one
+            r = self._git(dest, "branch", "-r", "--contains", commit, seconds=30)
+            return r.returncode == 0 and bool(r.stdout.strip())
         if on_branch():
             return True
         self._git(dest, "pull", "-q", "--ff-only", "--no-tags", token=token)     # the files come with the commit

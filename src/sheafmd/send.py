@@ -13,6 +13,10 @@ it as read and fails, so that the agent merges the two and runs the command agai
 latest text into the file, and never over an edit made here. Every write declares the session, the machine and the
 Remote Control link (SPEC 9.12), as declared and never verified.
 
+A tiroir that does not answer the messages before the write in 5 s each, or answers 5xx, leaves the page to the laptop hub with one loud
+line; nothing is queued, no process is left, and the next run sends `create` or `update` as the state says (a 401 or a
+403 fails with no fallback).
+
 With `--local`, with no credential, or for a page in a git repo, nothing is sent: `send_page` answers None and the
 caller renders on the laptop hub as before. The network is two functions, `post` and `get`, which a test replaces; the
 keyring is `connect.system_store()`, which a test replaces too.
@@ -21,6 +25,7 @@ import argparse
 import json
 import os
 import socket
+import ssl
 import sys
 import urllib.error
 import urllib.request
@@ -36,6 +41,7 @@ from .source import md_hash
 
 EXIT_OK, EXIT_FAILED = 0, 1
 TIMEOUT = 15.0
+CONNECT_TIMEOUT = 5.0   # the messages before a tool call (`initialize` and its notice): a tiroir that does not answer them is not there
 STATE_FILE = "sends.json"
 PROTOCOL = "2025-06-18"
 
@@ -46,16 +52,23 @@ class SendError(Exception):
     """A send that stops: the message is one sentence a person reads, and says what was left unchanged."""
 
 
+class Unreachable(SendError):
+    """The tiroir did not answer, or answered 5xx: the caller serves the page from the laptop hub and says so."""
+
+
 # ── the network: the two places a test stands in for the tiroir ─────────────
 
-def _request(req) -> tuple[int, dict | None, dict]:
+def _request(req, timeout: float = TIMEOUT) -> tuple[int, dict | None, dict]:
     try:
-        with connect._NO_REDIRECT.open(req, timeout=TIMEOUT) as r:
+        with connect._NO_REDIRECT.open(req, timeout=timeout) as r:
             raw, status, headers = r.read(8 << 20), r.status, {k.lower(): v for k, v in r.headers.items()}
     except urllib.error.HTTPError as e:
         return e.code, None, {}
     except (urllib.error.URLError, OSError) as e:
-        raise SendError(f"cannot reach {req.full_url.split('/', 3)[2]}: {getattr(e, 'reason', e)}. "
+        if isinstance(getattr(e, "reason", e), ssl.SSLError):   # a certificate it cannot trust is no outage
+            raise SendError(f"cannot trust {req.full_url.split('/', 3)[2]}: {getattr(e, 'reason', e)}. "
+                            "Nothing was sent.") from None
+        raise Unreachable(f"cannot reach {req.full_url.split('/', 3)[2]}: {getattr(e, 'reason', e)}. "
                         "Nothing was sent.") from None
     return status, connect._json_of(raw.decode("utf-8", "replace")) if raw.strip() else None, headers
 
@@ -65,7 +78,7 @@ def post(url: str, token: str, message: dict, headers: dict) -> tuple[int, dict 
     req = urllib.request.Request(url, json.dumps(message).encode(), {
         "Authorization": f"Bearer {token}", "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream", **headers}, method="POST")
-    return _request(req)
+    return _request(req, TIMEOUT if message.get("method") == "tools/call" else CONNECT_TIMEOUT)
 
 
 def get(url: str, token: str) -> tuple[int, dict | None, dict]:
@@ -117,12 +130,25 @@ class Door:
     def __init__(self, origin: str, token: str, headers: dict):
         self.origin, self.token, self.headers, self.n = origin, token, dict(headers), 0
         self.started = False
+        self.wrote = False   # a create or update has been sent: from then on the tiroir may hold the text
 
     def _post(self, message: dict) -> tuple[int, dict | None, dict]:
+        try:
+            return self._post_checked(message)
+        except Unreachable as e:
+            if not self.wrote:
+                raise
+            raise SendError(f"{e} The write may have reached {self.origin}: run sheaf again: if the page arrived, "
+                            "the answer is that a page of that name exists already, and it is this one. Nothing was "
+                            "changed on this laptop.") from None
+
+    def _post_checked(self, message: dict) -> tuple[int, dict | None, dict]:
         status, got, back = post(self.origin + connect.DOOR_PATH, self.token, message, self.headers)
         if status in (401, 403):
             raise SendError(f"{self.origin} refused the token (it was revoked, or it is not a token of that address): "
                             "make a new one with Connect a laptop and run sheaf connect. Nothing was sent.")
+        if status >= 500:
+            raise Unreachable(f"{self.origin} answered with status {status}.")
         return status, got, back
 
     def _start(self):
@@ -141,6 +167,7 @@ class Door:
         if not self.started:
             self._start()
         self.n += 1
+        self.wrote = self.wrote or name in ("create", "update")
         status, got, _ = self._post({"jsonrpc": "2.0", "id": self.n, "method": "tools/call",
                                      "params": {"name": name, "arguments": arguments}})
         result = got.get("result") if isinstance(got, dict) else None
@@ -296,6 +323,10 @@ def send_page(md: Path, args, out, err, environ=None) -> int | None:
         row = row_of(md, origin)
         got = _update(door, md, text, row) if row else _create(door, md, text, args, origin)
         member = member_name(origin, token)
+    except Unreachable as e:
+        err(f"sheaf: {e}")
+        err(f"sheaf: not on {origin.split('://', 1)[1]}: run sheaf {md} again when it is back")
+        return None
     except (SendError, connect.UsageError) as e:
         err(f"sheaf: {e}")
         return EXIT_FAILED

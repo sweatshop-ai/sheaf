@@ -468,12 +468,15 @@ class Tell:
         raw = targets.stored(self.hub, address, member)
         row = targets.live(self.hub, raw, member)
         if row is None:     # the page's own line (10.6): a revoked token is named, as the page names it
-            line = (targets.agent_view(self.hub, raw, member).line if targets.is_agent(raw)
+            line = (targets.agent_view(self.hub, raw, member).line if targets.is_agent(raw) or targets.is_laptop(raw)
                     else proxy.PROXY_LINE if member is not None else NO_AGENT)
             raise JobRefused(409, line)
         thread = self._thread(self._entry(address), cid)
         try:
-            self.hub.waiting_tells.queue(address, cid, row, member.name if member else self.hub.person, member, thread)
+            if targets.is_laptop(raw):               # a session on the member's laptop: it asks for the Tell at the door (9.8)
+                self.hub.session_tells.queue(address, cid, row, raw["session"], member.name, member, thread)
+            else:
+                self.hub.waiting_tells.queue(address, cid, row, member.name if member else self.hub.person, member, thread)
         except waiting_mod.Refused as r:
             raise JobRefused(r.status, r.message) from None
 

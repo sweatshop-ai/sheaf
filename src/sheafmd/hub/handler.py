@@ -134,6 +134,7 @@ class Req:
     member: object = None            # the proxy.Member the proxy socket let in
     member_id: str = ""              # the member header, once the connection is the proxy's: every row names it
     code: object = None              # the codes.Code that let the request in, instead of the member header (9.13)
+    gone: object = None              # `gone()`: whether the caller closed the connection (a poll that waits asks it); None in a test
     relay: dict | None = None        # the relays.json row of the relay token that let the request in (9.14)
 
 
@@ -278,6 +279,7 @@ class Handler:
             ("POST", "/_/tell", "tell", COOKIE, self._tell),
             ("POST", "/_/target", "target", COOKIE, self._target),
             ("POST", "/_/cancel", "cancel", COOKIE, self._cancel),
+            ("POST", "/_/retarget", "retarget", COOKIE, self._retarget),
             ("POST", "/_/jump", "jump", COOKIE, self._jump),
             ("POST", "/_/seen", "seen", COOKIE, self._seen),
             ("POST", "/_/export", "export", COOKIE, self._export),
@@ -296,7 +298,7 @@ class Handler:
             self.routes.setdefault(path, {})[method] = (name, who, fn)
 
     # ── the front door ───────────────────────────────────────────────────────
-    def handle(self, method: str, target: str, headers: dict, body=b"", conn=None, via="port") -> Response:
+    def handle(self, method: str, target: str, headers: dict, body=b"", conn=None, via="port", gone=None) -> Response:
         """`body` is the bytes, or a function that reads them off the wire: it is called only for
         a POST that has passed the Host, credential and Origin checks. `conn` is the connection
         the request came in on (a `peer.Conn`): the sign-in link looks up who owns it (9.3). `via`
@@ -306,7 +308,7 @@ class Handler:
             headers = {str(k).lower(): str(v) for k, v in headers.items()}
             path, _, qs = target.partition("?")
             req = Req(method, path, {k: v[0] for k, v in parse_qs(qs, keep_blank_values=True).items()},
-                      headers, headers.get("host", ""), conn=conn, via=via)
+                      headers, headers.get("host", ""), conn=conn, via=via, gone=gone)
             res = self._route_proxy(req, body) if via == "proxy" else self._route(req, body)
         except Refuse as r:
             res = self._refusal(req, r)
@@ -887,6 +889,7 @@ class Handler:
         """A member's `telling` (9.9): their own Tells that wait for an agent (9.8) and their own drops for
         James's window (9.12), and nothing of the hub account's session or of another member's."""
         return (self.hub.waiting_tells.waits(address, member, sweep=sweep)
+                + self.hub.session_tells.waits(address, member)
                 + self.hub.box_waits.telling(address, member.id, comments=comments, text=text))
 
     def _mount(self, req: Req) -> Response:
@@ -1675,6 +1678,7 @@ class Handler:
         if not snap.get("again") and (op == "delete" or (op == "status" and b.get("status") == "resolved")
                                       or (op == "reply" and b.get("resolve"))):
             self.hub.waiting_tells.end(e.address, b["id"], "cancelled", reason="closed")   # nothing left to answer (9.8)
+            self.hub.session_tells.end(e.address, b["id"], "cancelled", reason="closed")
         if snap.get("again"):
             # Taken before under this request id: what the first request started (a Tell's wait)
             # is running or done, and the page hears of it by its events.
@@ -1782,8 +1786,37 @@ class Handler:
         # A Tell that waits for an agent ends here, the reader's own and no other's (9.8). A member has no
         # session to stop: theirs is only a waiting Tell.
         self.hub.waiting_tells.end(doc, cid, "cancelled", member=req.member, only_member=True)
+        self.hub.session_tells.end(doc, cid, "cancelled", member=req.member, only_member=True)
         if req.member is None:
             self.hub.tell.cancel(doc, cid)
+        return _ok()
+
+    def _retarget(self, req: Req) -> Response:
+        """A member's Tell that waits for a laptop session goes to one of their own agents instead (SPEC 9.8): the waiting
+        Tell is cancelled, the target becomes that agent and the Tell is queued for it. The reader's own, and no one else's."""
+        if req.member is None:
+            raise Refuse(400, "Only a member's Tell waits for a laptop session.")
+        cid, target = self._comment_id(req), req.body.get("target")
+        with self._reading(req.body.get("doc")):        # judged and stored in one step, as `_target` does (9.11)
+            e = self._entry(req, req.body.get("doc"))
+            if not any(t["id"] == cid for t in self.hub.session_tells.waits(e.address, req.member)):
+                raise Refuse(409, "No Tell of yours waits for a session on this comment.")
+            if self._work_route(e.address, e.live.current()[1], req.member) is not None:    # the box and a relay come first
+                raise Refuse(400, proxy.PROXY_LINE)
+            was = targets.stored(self.hub, e.address, req.member)
+            try:
+                kind, _ = targets.parse(target)
+                if kind != "agent":
+                    raise targets.Refused("Pick one of your own agents.")
+                targets.pick(self.hub, e.address, req.member, target)
+            except targets.Refused as r:
+                raise Refuse(400, str(r)) from None
+        try:                                    # queued first: a refused one leaves the Tell where it waits, and the target as it was
+            self.hub.tell.start_member_tell(e.address, cid, req.member, held=self._page_hash(req))
+        except JobRefused as r:
+            targets.restore(self.hub, e.address, req.member, was)
+            raise Refuse(r.status, r.message) from None
+        self.hub.session_tells.end(e.address, cid, "cancelled", member=req.member, only_member=True, reason="retargeted")
         return _ok()
 
     def _seen(self, req: Req) -> Response:
@@ -1881,9 +1914,9 @@ class Handler:
             james = req.token.name in names
             caller = Caller(req.token.signed(self.hub.person, self.hub.proxy), req.token,
                             session=req.headers.get("x-james-session", "") if james else None,
-                            own_session=bool(own) and req.token.name == own, declared=self._declared(req))
+                            own_session=bool(own) and req.token.name == own, declared=self._declared(req), gone=req.gone)
         else:
-            caller = Caller(req.display, declared=self._declared(req))
+            caller = Caller(req.display, declared=self._declared(req), gone=req.gone)
         status, answer = self.door.handle(req.raw, caller)
         return _json(status, answer) if answer is not None else Response(status)
 

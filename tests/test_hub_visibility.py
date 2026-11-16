@@ -1323,3 +1323,14 @@ def test_a_door_update_that_adds_a_private_source_closes_a_named_share(team, bro
                                 lambda t: t.replace("sources: [library:doc-123]", "sources: [library:doc-123, mail:t-1]"))
     assert not is_error, got
     assert team.get(f"/work/{DOC}", member=BOB).status == 404
+
+
+def test_a_door_update_keeps_the_mark_of_a_named_share_on_a_page_with_a_private_source(team, browser, work):
+    put(team, work, DOC, PRIVATE.replace("- [ ] Share", "- [ ] Share with bob"))
+    assert tick_names(team, work, DOC, ALICE).status == 200
+    assert team.get(f"/work/{DOC}", member=BOB).status == 200
+    is_error, got = door_update(team, browser, work, DOC, lambda t: t + "\nMore.\n")
+    assert not is_error, got
+    text = (work / DOC).read_text(encoding="utf-8")
+    assert "More." in text and front_matter(text)["shared"].startswith("alice ")
+    assert team.get(f"/work/{DOC}", member=BOB).status == 200

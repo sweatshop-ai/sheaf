@@ -182,3 +182,20 @@ def test_a_page_that_is_already_a_link_is_never_written_through(agents, tmp_path
     bad, why = call(agents, "bea-claude", "create", doc="notes.md", text=TEXT, folder="x")
     assert bad, why
     assert not target.exists()
+
+
+def test_a_create_the_watcher_sees_before_the_door_has_told_the_hub_leaves_no_disk_line(agents, monkeypatch):
+    first = made(agents, "bea-claude", doc="notes.md", text=TEXT)
+    e = agents.hub.entry(first["doc"])
+    agents.hub.file(first["doc"]).unlink()                  # the hub still holds the page it knew under this name
+    real = agents.hub.wrote
+
+    def watcher_first(address, moved=False):
+        agents.hub.catch_up(e)                              # the watcher looks at the file between the write and `wrote()`
+        real(address, moved)
+
+    monkeypatch.setattr(agents.hub, "wrote", watcher_first)
+    made(agents, "bea-claude", doc="notes.md", text="# Again\n", folder=first["doc"].split("/")[1])
+    agents.hub.catch_up(e)
+    got = agents.get(f"/_/writes?doc={first['doc']}", member=BEA).json()
+    assert [l["via"] for l in got["lines"]] == ["create", "create"]

@@ -7,6 +7,7 @@ import dataclasses
 import json
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -232,15 +233,16 @@ def test_a_repo_that_is_the_members_private_root_gets_no_clone_and_says_so(hub_r
     assert not list(clones(hub_repos).glob("*/*")) and hub_repos.app.asked == []
 
 
-def test_a_repo_that_is_another_members_private_root_is_kept_nowhere_and_answered_as_any_repo(
+def test_a_repo_that_is_another_members_private_root_is_not_cloned_and_the_answer_names_no_one(
         hub_repos, tmp_path, origin):
     private_root_of(hub_repos, BEA, tmp_path, origin)
     bad, got = report(hub_repos, who="cal-claude")
     assert not bad, got
-    assert got["clone"] == "ok" and got["commit_known"] is True
-    assert not list(clones(hub_repos).glob("*/*"))
+    assert got == {"repo": REPO, "path": "docs/plan.md", "clone": "not-cloned", "commit_known": None}
+    assert not list(clones(hub_repos).glob("*/*")) and not (hub_repos.hub.repos.base / "scratch").exists()
+    assert hub_repos.app.asked == []
     assert hub_repos.hub.repos.owner_of(REPO, "docs/plan.md") is None
-    assert not list((hub_repos.hub.repos.base / "scratch").glob("*"))
+    assert "private" not in json.dumps(got) and "bea" not in json.dumps(got)
 
 
 def test_a_private_root_report_records_no_owner(hub_repos, tmp_path, origin):
@@ -578,63 +580,27 @@ def test_a_commit_on_a_feature_branch_is_known_to_the_first_report_of_a_repo_too
     assert hub_repos.hub.repos.owner_of(REPO, "docs/plan.md") == "bea"
 
 
-# ── another member's private root tells nothing (SPEC 9.11) ──────────────────
+# ── another member's private root: not cloned, said once and the same for everyone (SPEC 9.11) ──
 
 OTHER = "acme-org/elsewhere"
 
 
-@pytest.fixture
-def two_repos(hub_repos, origin, tmp_path):
-    """The hub knows two repos with the same pages, the App on both: REPO, and OTHER which no member has a root of."""
-    twin = tmp_path / "twin.git"
-    subprocess.run(["git", "clone", "-q", "--bare", str(origin), str(twin)], check=True, capture_output=True)
-    sh(twin, "config", "uploadpack.allowFilter", "true")
-    sh(twin, "config", "uploadpack.allowAnySHA1InWant", "true")
-    hub_repos.hub.repos.remote_url = lambda repo: str({REPO: origin, OTHER: twin}[repo])
-    hub_repos.app.installed.add(OTHER)
-    return hub_repos
-
-
-def alike(a, b):
-    """Two answers that differ in nothing but the repo they name."""
-    return {**a, "repo": None} == {**b, "repo": None}
-
-
 @pytest.mark.parametrize("what", ["a real commit", "a commit that does not exist"])
-def test_a_member_probing_anothers_private_root_gets_what_an_unknown_repo_gets_every_time(
-        two_repos, tmp_path, origin, what):
-    private_root_of(two_repos, BEA, tmp_path, origin)
+def test_another_members_private_root_is_answered_the_same_whatever_the_commit_or_the_app(
+        hub_repos, tmp_path, origin, what):
+    private_root_of(hub_repos, BEA, tmp_path, origin)
     commit = sh(origin, "rev-parse", "main") if what == "a real commit" else "a" * 40
-    for _ in range(2):                       # a second probe changes nothing either, for either repo
-        bad_a, root = report(two_repos, who="cal-claude", repo=REPO, commit=commit)
-        bad_b, unknown = report(two_repos, who="cal-claude", repo=OTHER, commit=commit)
-        assert not bad_a and not bad_b, (root, unknown)
-        assert alike(root, unknown), (root, unknown)
-        assert root["clone"] != "private-root"
+    first = report(hub_repos, who="cal-claude", commit=commit)[1]
+    hub_repos.app.installed.clear()
+    assert report(hub_repos, who="cal-claude", commit=commit)[1] == first
+    assert first["clone"] == "not-cloned" and not list(clones(hub_repos).glob("*/*"))
 
 
-def test_the_app_not_reaching_a_private_root_repo_is_answered_as_it_is_for_any_repo(two_repos, tmp_path, origin):
-    private_root_of(two_repos, BEA, tmp_path, origin)
-    two_repos.app.installed.clear()
-    _, root = report(two_repos, who="cal-claude", repo=REPO)
-    _, unknown = report(two_repos, who="cal-claude", repo=OTHER)
-    assert alike(root, unknown) and root["clone"] == "no-app"
-
-
-def test_a_failing_clone_of_a_private_root_repo_is_refused_as_it_is_for_any_repo(two_repos, tmp_path, origin):
-    private_root_of(two_repos, BEA, tmp_path, origin)
-    real = two_repos.hub.repos.remote_url
-    two_repos.hub.repos.remote_url = lambda repo: str(tmp_path / "gone.git") if repo == OTHER else real(repo)
-    bad_a, root = report(two_repos, who="cal-claude", repo=REPO)
-    bad_b, unknown = report(two_repos, who="cal-claude", repo=OTHER)
-    assert not bad_a and bad_b
-
-
-def test_the_owner_of_a_private_root_is_told_so_and_the_answer_is_not_the_probers(two_repos, tmp_path, origin):
-    private_root_of(two_repos, BEA, tmp_path, origin)
-    _, mine = report(two_repos, who="bea-claude", repo=REPO)
-    _, theirs = report(two_repos, who="cal-claude", repo=REPO)
-    assert mine["clone"] == "private-root" and theirs["clone"] == "ok"
+def test_the_owner_of_a_private_root_is_told_so_and_the_answer_is_not_the_probers(hub_repos, tmp_path, origin):
+    private_root_of(hub_repos, BEA, tmp_path, origin)
+    _, mine = report(hub_repos, who="bea-claude", repo=REPO)
+    _, theirs = report(hub_repos, who="cal-claude", repo=REPO)
+    assert mine["clone"] == "private-root" and theirs["clone"] == "not-cloned"
 
 
 def test_an_answer_never_tells_what_the_tiroir_already_holds(hub_repos):
@@ -656,6 +622,15 @@ def test_a_page_of_a_repo_that_is_your_private_root_renders_on_the_laptop_with_o
     assert err.count("\n") == 1 and "your private root" in err
 
 
+def test_a_page_of_a_repo_that_is_anothers_private_root_renders_on_the_laptop_with_one_line_naming_no_one(
+        tiroir, hub_repos, laptop, local, capsys, tmp_path, origin):
+    private_root_of(hub_repos, CAL, tmp_path, origin)
+    page = laptop / "docs" / "plan.md"
+    code, out, err = run(capsys, page)
+    assert code == 0 and local == [str(page)]
+    assert err.count("\n") == 1 and "not cloned" in err and "private" not in err and "cal" not in err.lower()
+
+
 def test_a_page_whose_commit_the_tiroir_cannot_find_renders_on_the_laptop_with_one_line(
         tiroir, hub_repos, laptop, local, capsys, monkeypatch):
     monkeypatch.setattr(repos_mod.Repos, "_knows", lambda self, dest, commit, token: False)
@@ -663,3 +638,85 @@ def test_a_page_whose_commit_the_tiroir_cannot_find_renders_on_the_laptop_with_o
     code, out, err = run(capsys, page)
     assert code == 0 and local == [str(page)]
     assert err.count("\n") == 1 and "pushed to GitHub" in err
+
+
+# ── third fix round ──────────────────────────────────────────────────────────
+
+def test_a_private_root_that_exists_without_a_git_dir_is_still_private(hub_repos, tmp_path, origin):
+    own = private_root_of(hub_repos, BEA, tmp_path, origin)
+    shutil.rmtree(own / ".git")
+    _, mine = report(hub_repos, who="bea-claude")
+    _, theirs = report(hub_repos, who="cal-claude")
+    assert mine["clone"] == "private-root" and theirs["clone"] == "not-cloned"
+    assert not list(clones(hub_repos).glob("*/*"))
+
+
+def test_a_private_root_without_a_git_dir_inside_another_repo_is_still_private(hub_repos, tmp_path, origin):
+    parent = laptop_clone(tmp_path, origin, "parent")           # git walks up from the root to this repo
+    root = parent / "work"
+    root.mkdir()
+    members = dict(hub_repos.hub.proxy.members)
+    members[BEA] = dataclasses.replace(members[BEA], private_root=str(root))
+    hub_repos.hub.proxy = dataclasses.replace(hub_repos.hub.proxy, members=members)
+    hub_repos.hub.repos.remote_url = lambda repo: str(tmp_path / "unrelated.git")      # not the parent's remote
+    _, got = report(hub_repos, who="bea-claude", repo="acme-org/unrelated")
+    assert got["clone"] == "private-root"
+
+
+def test_a_slow_clone_of_one_repo_does_not_hold_the_report_for_another(hub_repos, origin, tmp_path, monkeypatch):
+    twin = tmp_path / "twin.git"
+    subprocess.run(["git", "clone", "-q", "--bare", str(origin), str(twin)], check=True, capture_output=True)
+    sh(twin, "config", "uploadpack.allowFilter", "true")
+    hub_repos.app.installed.add(OTHER)
+    repos = hub_repos.hub.repos
+    repos.remote_url = lambda repo: str({REPO: origin, OTHER: twin}[repo])
+    started, release, real = threading.Event(), threading.Event(), Repos._clone
+
+    def slow(self, repo, token, folder, dest):
+        if repo == REPO:
+            started.set()
+            assert release.wait(30)
+        return real(self, repo, token, folder, dest)
+
+    monkeypatch.setattr(Repos, "_clone", slow)
+    commit = sh(origin, "rev-parse", "main")
+    held = threading.Thread(target=repos.report, args=("bea", REPO, "docs/plan.md", commit))
+    held.start()
+    try:
+        assert started.wait(30)
+        done = []
+        other = threading.Thread(target=lambda: done.append(repos.report("cal", OTHER, "docs/plan.md", commit)))
+        other.start()
+        other.join(20)
+        assert done and done[0]["clone"] == "ok", "the report for the other repo waited on the slow clone"
+    finally:
+        release.set()
+        held.join(30)
+
+
+def test_a_repo_that_became_a_private_root_after_it_was_cloned_takes_no_more_records(hub_repos, tmp_path, origin):
+    report(hub_repos, who="bea-claude")
+    clone, records = the_clone(hub_repos), (hub_repos.hub.repos.base / "reports.json").read_text(encoding="utf-8")
+    pusher = laptop_clone(tmp_path, origin, "pusher")
+    (pusher / "notes" / "idea.md").write_text("# Idea\n\nChanged.\n", encoding="utf-8")
+    sh(pusher, "commit", "-qam", "more")
+    sh(pusher, "push", "-q", "origin", "HEAD:main")
+    private_root_of(hub_repos, CAL, tmp_path, origin)
+    _, got = report(hub_repos, who="bea-claude", path="notes/idea.md", commit=sh(pusher, "rev-parse", "HEAD"))
+    assert got["clone"] == "not-cloned"
+    assert (hub_repos.hub.repos.base / "reports.json").read_text(encoding="utf-8") == records
+    assert clone.exists()
+
+
+def test_the_owner_of_a_page_is_read_at_the_reported_commit_not_at_the_default_branch(hub_repos, tmp_path, origin):
+    pusher = laptop_clone(tmp_path, origin, "pusher")
+    sh(pusher, "checkout", "-q", "-b", "feature")
+    (pusher / "docs" / "plan.md").write_text("---\nowner: cal\n---\n# Plan\n", encoding="utf-8")
+    sh(pusher, "commit", "-qam", "owned")
+    sh(pusher, "push", "-q", "origin", "feature")
+    _, got = report(hub_repos, who="bea-claude", commit=sh(pusher, "rev-parse", "HEAD"))
+    assert got["commit_known"] is True
+    assert hub_repos.hub.repos.owner_of(REPO, "docs/plan.md") == "cal"
+    main = sh(origin, "rev-parse", "main")                       # a later report at main, whose page names no owner
+    report(hub_repos, who="bea-claude", commit=main)
+    assert hub_repos.hub.repos.owner_of(REPO, "docs/plan.md") == "bea"

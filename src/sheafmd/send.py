@@ -386,6 +386,9 @@ def report_page(md: Path, top: Path, origin: str, token: str, args, out, err, en
         err(f"sheaf: {repo} is your private root on {origin.split('://', 1)[-1]}, so the tiroir clones nothing and {md} "
             "renders on this laptop.")
         return None
+    if clone == repos_mod.NOT_CLONED:
+        err(f"sheaf: {origin.split('://', 1)[-1]} has not cloned {repo}, so {md} renders on this laptop.")
+        return None
     if got.get("commit_known") is False:
         err(f"sheaf: the tiroir could not find commit {commit[:8]} on {repo}: is it pushed to GitHub? Rendering {md} "
             "on this laptop.")

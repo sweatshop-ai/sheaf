@@ -142,7 +142,7 @@ A page in no git repo: a session's scratchpad, a temporary folder, or anything a
 _Avoid_: scratch page, orphan page
 
 **Loose root** (of a member):
-The one folder, `loose-<short>`, where a member's Loose pages are written, made on the member's first door `create` with no root. It is kept against the member's id, so a rename or a short name another member held never gives or takes it. A page marked Keep (stored in the root's `.sheaf/`, not in the text) is never archived. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 03; the root, `folder` and `keep` on `create` are built, archiving is not.)
+The one folder, `loose-<short>`, where a member's Loose pages are written, made on the member's first door `create` with no root. It is kept against the member's id, so a rename or a short name another member held never gives or takes it. A page marked Keep (stored in the root's `.sheaf/`, not in the text) is never archived.
 _Avoid_: scratch folder, loose folder
 
 **Repo clone** (on a tiroir):
@@ -150,8 +150,16 @@ The tiroir's own copy of a git repo that a member's page came from, made the fir
 _Avoid_: mirror, checkout
 
 **Archived page**:
-A loose page out of the Sheaf's default view, after a time with no write and no comment, or by the member's hand. It still opens at its address and comes back when written or commented. Not deleted: only the member deletes a page. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 13; not built.)
+A loose page out of the Sheaf's default view, after `archive_after` days with no write, no comment and no open comment, or by the member's hand (Archive now). It still opens at its address and comes back when written or commented, or Restored. Not deleted: only the member deletes a page.
 _Avoid_: expired, stale
+
+**Kept page**:
+A loose page the member marked Keep (or made with `keep`): never archived, however quiet. The same control turns it off.
+_Avoid_: pinned, protected
+
+**Trash**:
+The root's `.sheaf/trash/`, where a page the member deleted waits thirty days to be restored, then is gone. Only the member's own act from the Sheaf puts a page there; no agent or door path does.
+_Avoid_: bin, recycle bin
 
 **Laptop token**:
 The agent token that "Connect a laptop" makes for one laptop of one member. It signs as `Claude Code (<member>)` whichever laptop it is, is checked by the hub on every request, sees what its member sees, and is revoked by the laptop's name. `sheaf connect` puts it in the laptop's login keyring and in Claude Code's MCP entries. (Decided 2026-11-16, wayfinder `sheaf-in-open-webui` ticket 05; the Sheaf's page for it comes with the Sheaf view.)

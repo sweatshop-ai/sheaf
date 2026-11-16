@@ -264,7 +264,7 @@ def test_a_folder_holding_only_anothers_private_page_is_absent_from_the_sheaf_th
     hub.proxy = dataclasses.replace(hub.proxy, members=members(work).members)
     edge.front.users = {THIERRY: "user", HANS: "user"}
     edge.front.sessions = {jwt("thierry"): THIERRY, jwt("hans"): HANS}
-    for rel, text in (("thinkingtoo/hidden/2026-10-28-contract.md", PRIVATE), ("thinkingtoo/tiroir/open.md", "# Open\n")):
+    for rel, text in (("acme/hidden/2026-10-28-contract.md", PRIVATE), ("acme/site/open.md", "# Open\n")):
         f = work / rel
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text(text, encoding="utf-8")
@@ -272,7 +272,7 @@ def test_a_folder_holding_only_anothers_private_page_is_absent_from_the_sheaf_th
     asked = {who: edge.request("GET", "/_/mount?sheaf=1", session=jwt(who)) for who in ("thierry", "hans")}
     assert [a.status for a in asked.values()] == [200, 200]
     hans, thierry = asked["hans"].json()["sheaf"], asked["thierry"].json()["sheaf"]
-    assert "work/thinkingtoo/hidden" in str(thierry["tree"])
+    assert "work/acme/hidden" in str(thierry["tree"])
     assert "hidden" not in str(hans) and "contract" not in str(hans)
-    assert [r["doc"] for r in hans["rows"] if "thinkingtoo" in r["doc"]] == ["work/thinkingtoo/tiroir/open.md"]
+    assert [r["doc"] for r in hans["rows"] if "acme" in r["doc"]] == ["work/acme/site/open.md"]
     assert edge.request("GET", "/_/mount?sheaf=1").status == 401         # no session: the hub sees nothing

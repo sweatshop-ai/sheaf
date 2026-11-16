@@ -4,6 +4,7 @@ tiroirs, the client tiroir's own answer is the gate, and a comment written on a 
 DRAFT, not pushed: it needs `tests/two_hubs.py` and `Hub.clients` of the read-through branch (#415), so it runs once that is merged
 here. Same fixture as `test_read_through_two_hubs.py`."""
 import json
+import re
 
 import pytest
 from two_hubs import Link, Site
@@ -129,3 +130,46 @@ def test_a_team_id_is_never_sent_to_the_client_and_a_client_id_never_reaches_the
     assert got.status == 200 and [v for _, v, _ in agency.link.asked[asked:]] == ["read"]
     wrong = agency.post("/_/comment", {"doc": f"Clients/acme/{mine}", "op": "reply", "id": "c1", "body": "r", "side": "team"}, member=AG_ALICE)
     assert wrong.status == 400
+
+
+# ── step 3: the Team list rides beside the client's comments, never inside them ──
+
+def _team_state(agency, mine, route, member=AG_ALICE):
+    return agency.get(f"/_/{route}?doc=Clients/acme/{mine}", member=member)
+
+
+def test_the_doc_state_of_a_client_page_carries_the_team_list_beside_the_clients_comments(agency_and_client):
+    agency, client = agency_and_client
+    mine = client.make("alice", "# Plan\n\nsome words here\n")
+    assert _team_state(agency, mine, "doc").json()["team"] == []
+    assert client_add(agency, client, mine).status == 200
+    team_post(agency, mine)
+    got = _team_state(agency, mine, "doc").json()
+    assert [c["body"] for c in got["team"]] == [NOTE] and [c["body"] for c in got["comments"]] == [NOTE]
+    assert got["team"][0]["id"] == "t1" and got["comments"][0]["id"] != "t1"
+
+
+def test_the_mount_config_and_the_page_meta_carry_the_same_team_list(agency_and_client):
+    agency, client = agency_and_client
+    mine = client.make("alice", "# Plan\n\nsome words here\n")
+    team_post(agency, mine)
+    mounted = _team_state(agency, mine, "mount").json()["config"]
+    assert [c["body"] for c in mounted["team"]] == [NOTE]
+    page = agency.get(f"/Clients/acme/{mine}", member=AG_ALICE)
+    meta = json.loads(re.search(r'<script id="rd-edit-meta" type="application/json">(.*?)</script>', page.text, re.S).group(1))
+    assert [c["body"] for c in meta["team"]] == [NOTE]
+
+
+def test_a_member_who_may_not_open_the_page_is_told_no_team_list(agency_and_client):
+    agency, client = agency_and_client
+    mine = client.make("alice", "# Plan\n")
+    team_post(agency, mine)
+    got = _team_state(agency, mine, "doc", member=AG_DANA)
+    assert got.status == 404 and NOTE not in got.text
+
+
+def test_the_client_hub_serves_no_team_list_of_its_own(agency_and_client):
+    agency, client = agency_and_client
+    mine = client.make("alice", "# Plan\n")
+    team_post(agency, mine)
+    assert "team" not in client.get(f"/_/doc?doc={mine}", member=CL_ALICE).json()

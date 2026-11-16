@@ -876,3 +876,50 @@ def test_a_row_and_the_write_log_of_a_shared_page_hold_nothing_of_the_owners_mac
     mine = {r["doc"]: r for r in shared_rows(team, ALICE)["rows"]}[real]
     assert OWNER_HOST in mine["write_tip"] and OWNER_SESSION in mine["session_tip"]   # the owner still sees their own
 
+
+
+# ── round 11 over 9fde09c: the owner of a loose page is the member whose loose root holds it (9.11) ─────────────
+
+def _bob_adds_a_private_source(team, real, opaque, text):
+    return call(team, "bob", "update", doc=opaque, text="---\nsources: [email:x]\n---\n" + text, expected_hash=md_hash(read(team, real)))
+
+
+def test_a_recipients_agent_that_closes_the_page_with_a_private_source_does_not_become_its_owner(team):
+    text = "# Agent page\n\n- [x] Share with bob\n"
+    out = made(team, "alice", text)
+    doc, opaque = out["doc"], told(team, BOB, out["doc"])
+    assert audience(read(team, doc)) == frozenset({"bob"})
+    bad, why = _bob_adds_a_private_source(team, doc, opaque, text)
+    assert "owner: bob" not in read(team, doc) and "owner:" not in read(team, doc), (bad, why, read(team, doc))     # (a)
+    bob = team.hub.proxy.members[BOB]
+    assert not team.hub.is_owner(bob, doc, __import__("sheafmd.hub.visibility", fromlist=["x"]).front_matter(read(team, doc)))
+    unticked = read(team, doc)
+    untick = team.post("/_/save", {"doc": opaque, "hash": md_hash(unticked), "edits": [line_edit(unticked, "Share with", False)]}, member=BOB)
+    assert untick.status != 200                                                                                       # (b)
+    assert audience(read(team, doc)) == frozenset({"bob"})
+    assert team.post("/_/share", {"doc": opaque, "hash": md_hash(read(team, doc))}, member=BOB).status in (404, 409)
+    assert audience(read(team, doc)) == frozenset({"bob"})                                                            # (c)
+    plain = call(team, "bob", "update", doc=opaque, text=read(team, doc).replace("Share with bob", "Share"),
+                 expected_hash=md_hash(read(team, doc)))
+    assert audience(read(team, doc)) != True, plain                                                                   # (c) by the door
+    assert tick(team, ALICE, doc, "Share with", release=True).status == 200                                          # (d)
+    assert audience(read(team, doc)) is None
+
+
+def test_an_owner_written_by_hand_into_a_loose_page_of_another_member_grants_nothing(team):
+    from sheafmd.hub import visibility
+    doc = made(team, "alice", PRIVATE)["doc"]
+    team.hub.file(doc).write_text("---\nowner: bob\n---\n" + PRIVATE, encoding="utf-8")
+    bob = team.hub.proxy.members[BOB]
+    assert not team.hub.is_owner(bob, doc, visibility.front_matter(read(team, doc)))
+    assert team.hub.is_owner(team.hub.proxy.members[ALICE], doc, visibility.front_matter(read(team, doc)))
+    assert page(team, BOB, doc).status == 404 and share(team, BOB, doc).status == 404
+
+
+def test_a_crlf_page_shared_through_the_button_has_no_bare_line_feed(team):
+    doc = made(team, "alice", PRIVATE)["doc"]
+    team.hub.file(doc).write_bytes(PRIVATE.replace("\n", "\r\n").encode())
+    row = {r["doc"]: r for r in shared_rows(team, ALICE)["rows"]}[doc]
+    assert team.post("/_/share", {"doc": doc, "hash": row["share"]}, member=ALICE).status == 200
+    raw = team.hub.file(doc).read_bytes()
+    assert raw.count(b"\n") == raw.count(b"\r\n") and b"Share" in raw

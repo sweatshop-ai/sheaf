@@ -7,8 +7,6 @@
 // sheafMount in a body of its own, under a "← Sheaf" button and the path as a breadcrumb; the button gives the table back
 // as it was (the folder, the filter and the collapsed folders stay).
 (function () {
-// An address is kept only when it is a path on this origin: one slash, then no second slash or backslash, and no
-// control or space anywhere (the URL parser drops a tab or a newline, so "/\t/host" would be "//host").
 function render(data, target) {
   var doc = target && target.ownerDocument ? target.ownerDocument : document;
   function el(tag, cls, text) {
@@ -17,6 +15,8 @@ function render(data, target) {
     if (text != null) e.textContent = String(text);
     return e;
   }
+  // An address is kept only when it is a path on this origin: one slash, then no second slash or backslash, and no
+  // control or space anywhere (the URL parser drops a tab or a newline, so "/\t/host" would be "//host").
   function href(a, value) {
     if (typeof value === 'string' && /^\/(?![\/\\])/.test(value) && !/[\u0000- \u007f\\]/.test(value)) a.setAttribute('href', value);
   }
@@ -79,6 +79,9 @@ function render(data, target) {
   var empty = el('p', 'sheaf-empty', 'No pages here.');
   empty.hidden = true;
   main.append(filter, table, empty);
+  Object.keys(data.more || {}).forEach(function (root) {
+    main.append(el('p', 'sheaf-more', 'and ' + data.more[root] + ' more in ' + root));
+  });
   var pane = el('section', 'sheaf-doc');
   pane.hidden = true;
   var bar = el('div', 'sheaf-bar'), back = el('button', 'sheaf-back', '← Sheaf');
@@ -131,6 +134,7 @@ function create(ROOT, opts) {
     pane.hidden = true;
     main.hidden = false;
     view.querySelector('.sheaf-tree').hidden = false;
+    // A root cannot be attached twice: the next rectoverso mounts in a body of its own.
     var b = pane.querySelector('.sheaf-doc-body');
     var fresh = b.cloneNode(false);
     b.replaceWith(fresh);

@@ -8,7 +8,7 @@ from . import index as index_mod
 from . import roots as roots_mod
 from . import the_list
 
-TITLES_KEPT = 5000
+TITLES_KEPT = 5000                 # titles kept; a full cache starts over, each file is read again once
 
 
 class Titles:
@@ -32,8 +32,8 @@ class Titles:
 
 
 def say_write(line, session) -> str:
-    """The last write as the row says it: who and where (`Hans · page`), and the session it follows when it is not that
-    session's own (`Hans · page, before Dimitri`). A chat client is its label alone; a pull and a disk write are named as
+    """The last write as the row says it: who and where (`Bea · page`), and the session it follows when it is not that
+    session's own (`Bea · page, before Ada`). A chat client is its label alone; a pull and a disk write are named as
     9.12 names them (`git · <author>`, `tiroir · ?`)."""
     if line is None:
         return ""
@@ -80,10 +80,10 @@ def tree(rows: list[dict]) -> list[dict]:
 
 
 def data(hub, member, titles: Titles) -> dict:
-    """`{tree, rows}` for `member`: every document of each of their roots that they may open, newest change first. A row
+    """`{tree, rows, more}` for `member`: every document of each of their roots that they may open, newest change first. A row
     is `{doc, url, title, root, folder, mtime, when, open, write, write_tip, session, session_tip}`: the folder is the
     path on disk, `write` the last write and `session` the writer of the last line that named an agent session. The
-    tooltips hold the machine and the session's id, and only what the writer declared. No List status is in it."""
+    tooltips hold the machine and the session's id, and only what the writer declared. No List status is in it. `more` is `{root: n}`, what the listing's cap (8.6) left out of each root."""
     found = hub.index.data(member=member)
     now = hub.clock()
     rows = []
@@ -104,4 +104,4 @@ def data(hub, member, titles: Titles) -> dict:
                          "session": session.writer if session else "",
                          "session_tip": (session.session + (f" on {session.host}" if session.host else "")) if session else ""})
     rows.sort(key=lambda r: (-r["mtime"], r["doc"]))
-    return {"tree": tree(rows), "rows": rows}
+    return {"tree": tree(rows), "rows": rows, "more": found["more"]}

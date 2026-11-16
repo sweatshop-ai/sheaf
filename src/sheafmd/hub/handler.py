@@ -533,7 +533,13 @@ class Handler:
         return _json(200, {"ok": True}) if owner is not None else _json(409, {"ok": False, "why": why})
 
     def _peer_transfer(self, req: Req) -> Response:
-        raise Refuse(404, "no such route")       # the landing: not built yet
+        """Land a page moved here (ticket 20): `incoming.land`. Whatever fails after the page was made takes it back and is a 500
+        the sender reads as a failed transfer, so it keeps its page."""
+        try:
+            status, answer = incoming.land(self.hub, self.door, req.body)
+        except ValueError as e:
+            raise Refuse(400, str(e)) from None
+        return _json(status, answer)
 
     def _unalias(self, req: Req) -> None:
         """A page Shared with the member is told to them under an opaque name (`Hub.alias`, 9.11): the one they send back, in

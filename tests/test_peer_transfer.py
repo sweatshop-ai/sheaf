@@ -1,0 +1,162 @@
+"""The receiving end of a move to this tiroir (ticket 20): `POST /_/tiroir/transfer` lands a bundle in the owner's loose
+root, in the same folder, matched by e-mail, and answers what landed. In memory through the handler (`front`)."""
+import json
+import os
+from dataclasses import replace
+
+import pytest
+from helpers import BEA, CAL
+from test_peer_channel import PEER, TAILNET, channel, peer_token  # noqa: F401  (fixtures and helpers)
+
+from sheafmd.hub import channel as chan
+from sheafmd.hub import loose
+from sheafmd.source import md_hash
+
+TEXT = """---
+owner: bea
+---
+# Notes
+
+First paragraph.
+
+<!-- comment c1: Cal, open
+Why pears?
+-->
+"""
+
+
+@pytest.fixture
+def members(front):
+    front.hub.proxy.members[BEA] = replace(front.hub.proxy.members[BEA], email="Bea@Example.com", short="bea")
+    front.hub.proxy.members[CAL] = replace(front.hub.proxy.members[CAL], short="cal")
+    return front
+
+
+def bundle(**over):
+    return {"id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "owner_email": "bea@example.com", "folder": "projects/blog",
+            "name": "notes.md", "text": TEXT, "versions": [{"text": "# Notes\n\nOlder.\n"}, {"text": TEXT}],
+            "writes": [{"time": "2026-11-10T09:00:00", "writer": "Claude Code (Bea)", "place": "laptop", "via": "door",
+                        "session": "s-1", "host": "", "link": "", "chat": ""}],
+            "keep": False, "from": {"origin": PEER, "by": "Bea", "at": "2026-11-16T10:00:00"}, **over}
+
+
+def transfer(front, token, **over):
+    return channel(front, "transfer", bundle(**over), token)
+
+
+def landed(front, res):
+    assert res.status == 200, res.text
+    out = res.json()
+    return out, front.hub.file(out["address"])
+
+
+def test_a_transfer_lands_the_page_in_the_owners_loose_root_in_the_same_folder(members):
+    res = transfer(members, peer_token())
+    out, path = landed(members, res)
+    assert out["address"] == "loose-bea/projects/blog/notes.md" and out["origin"] == members.hub.proxy.origin
+    assert out["hash"] == md_hash(path.read_text(encoding="utf-8"))
+    assert members.hub.loose.known(members.hub.proxy.members[BEA]) is not None
+
+
+def test_the_comments_travel_with_the_text_and_the_owner_is_the_one_there(members):
+    _, path = landed(members, transfer(members, peer_token()))
+    text = path.read_text(encoding="utf-8")
+    assert "comment c1: Cal, open" in text and "Why pears?" in text
+
+
+def test_the_bundle_carries_versions_write_log_lines_and_the_keep_mark(members):
+    out, _ = landed(members, transfer(members, peer_token(), keep=True))
+    a = out["address"]
+    assert members.hub.versions.get(a, md_hash("# Notes\n\nOlder.\n")) == "# Notes\n\nOlder.\n"
+    lines = members.hub.writes.lines(a)
+    assert any(l.session == "s-1" and l.writer == "Claude Code (Bea)" and l.time == "2026-11-10T09:00:00" for l in lines)
+    assert lines[-1].via == "transfer" and lines[-1].place == "tiroir"
+    root = members.hub.roots.get(a.split("/")[0])
+    assert loose.kept(root.path, "projects/blog/notes.md")
+
+
+def test_the_share_does_not_go_the_landed_page_is_private_to_the_owner(members):
+    shared = TEXT.replace("owner: bea\n", "owner: bea\nvisibility: project\nshared: Cal 2026-11-01\n").replace("# Notes\n", "# Notes\n\n- [x] Share with Cal\n")
+    out, path = landed(members, transfer(members, peer_token(), text=shared))
+    text = path.read_text(encoding="utf-8")
+    assert "shared:" not in text and "[x] Share" not in text and "[ ] Share with Cal" in text
+    cfg = members.hub.proxy
+    assert members.hub.member_owns(cfg.members[BEA], out["address"]) and not members.hub.member_owns(cfg.members[CAL], out["address"])
+
+
+def test_the_owner_is_matched_by_email_ignoring_case_never_by_name(members):
+    token = peer_token()
+    assert transfer(members, token, owner_email="BEA@example.COM").status == 200
+    res = transfer(members, token, id="2" * 36, owner_email="Bea", name="b.md")
+    assert res.status == 409 and res.json()["why"] == "no_owner"
+    res = transfer(members, token, id="3" * 36, owner_email="stranger@example.com", name="c.md")
+    assert res.status == 409 and res.json()["why"] == "no_owner"
+
+
+def test_two_members_with_the_same_email_land_nothing(members):
+    members.hub.proxy.members[CAL] = replace(members.hub.proxy.members[CAL], email="bea@example.com")
+    res = transfer(members, peer_token())
+    assert res.status == 409 and res.json()["why"] == "ambiguous_owner"
+    assert not list(os.scandir(loose._base())) if loose._base().exists() else True
+
+
+def test_a_member_with_no_email_cannot_be_the_owner_and_the_line_says_why(members):
+    members.hub.proxy.members[BEA] = replace(members.hub.proxy.members[BEA], email="")
+    res = transfer(members, peer_token(), owner_email="")
+    assert res.status == 409 and res.json()["why"] == "no_email" and "e-mail" in res.json()["say"]
+    made_up = f"{BEA}@{members.hub.proxy.origin.split('//')[1]}"
+    res = transfer(members, peer_token(), owner_email=made_up, id="4" * 36)
+    assert res.status == 409 and res.json()["why"] == "no_email"
+    res = transfer(members, peer_token(), owner_email="bea@example.com", id="5" * 36)
+    assert res.status == 409 and res.json()["why"] == "no_owner"          # her block has no e-mail: nobody is found by it
+
+
+def test_a_name_that_is_there_is_refused_and_nothing_is_overwritten_or_suffixed(members):
+    token = peer_token()
+    out, path = landed(members, transfer(members, token))
+    before = path.read_text(encoding="utf-8")
+    res = transfer(members, token, id="9" * 36, text=TEXT + "\nOther.\n")
+    assert res.status == 409 and res.json()["why"] == "name_taken"
+    assert path.read_text(encoding="utf-8") == before
+    assert sorted(p.name for p in path.parent.iterdir()) == ["notes.md"]
+
+
+def test_a_repeated_id_answers_the_first_answer_and_lands_nothing_more(members):
+    token = peer_token()
+    first = transfer(members, token).json()
+    again = transfer(members, token, text=TEXT + "\nChanged after.\n")
+    assert again.status == 200 and again.json() == first
+    path = members.hub.file(first["address"])
+    assert "Changed after" not in path.read_text(encoding="utf-8")
+
+
+def test_a_bundle_over_the_limit_is_refused_before_it_is_read(members):
+    token = peer_token()
+    big = json.dumps(bundle(text="x" * (chan.MAX_TRANSFER + 1))).encode()
+    res = members.request("POST", "/_/tiroir/transfer", member=None, raw=big,
+                          headers={**TAILNET, "Authorization": f"Bearer {token}"})
+    assert res.status == 413
+    assert members.hub.loose.known(members.hub.proxy.members[BEA]) is None
+
+
+@pytest.mark.parametrize("bad", [{"name": "../x.md"}, {"name": "x.txt"}, {"folder": "../up"}, {"folder": "/abs"},
+                                  {"versions": "no"}, {"writes": [1]}, {"id": ""}, {"text": 5}, {"keep": "yes"}],
+                         ids=lambda b: next(iter(b)) + "=" + str(next(iter(b.values()))))
+def test_a_bundle_that_is_not_one_lands_nothing(members, bad):
+    res = transfer(members, peer_token(), **bad)
+    assert res.status in (400, 409)
+    root = members.hub.loose.known(members.hub.proxy.members[BEA])
+    assert root is None or not [p for p in root.rglob("*.md")]
+
+
+def test_a_failed_landing_leaves_nothing_behind(members, monkeypatch):
+    def boom(*a, **k):
+        raise OSError("disk")
+    token = peer_token()
+    with monkeypatch.context() as m:
+        m.setattr(members.hub.versions, "put", boom)
+        res = transfer(members, token)
+    assert res.status == 500
+    root = members.hub.loose.known(members.hub.proxy.members[BEA])
+    assert not [p for p in root.rglob("*.md")]
+    assert transfer(members, token).status == 200      # the id of a failed landing is free again

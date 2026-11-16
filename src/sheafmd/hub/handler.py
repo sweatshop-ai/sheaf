@@ -37,7 +37,7 @@ from ..mcp import Caller, Door
 from ..render import RenderError
 from ..source import StaleError, md_hash
 from . import archive as archive_mod
-from . import auth, boxwait, channel, codes, events, incoming, laptops, loose, peer, place, proxy, readthrough, sheaf_view, targets, the_list, transcribe, visibility, work
+from . import auth, boxwait, channel, codes, events, incoming, laptops, loose, moves, peer, place, proxy, readthrough, sheaf_view, targets, the_list, transcribe, visibility, work
 from . import waiting as waiting_mod
 from .tell import NO_AGENT, JobRefused
 from .index import Status
@@ -272,6 +272,8 @@ class Handler:
             ("POST", "/_/pin", "pin", COOKIE, self._pin),
             ("POST", "/_/tick", "tick", COOKIE, self._tick),
             ("POST", "/_/share", "share", COOKIE, self._share),
+            ("POST", "/_/move", "move", COOKIE, self._move),
+            ("POST", "/_/move-folder", "move-folder", COOKIE, self._move_folder),
             ("POST", "/_/archive", "archive", COOKIE, self._archive),
             ("POST", "/_/restore", "restore", COOKIE, self._restore),
             ("POST", "/_/keep", "keep", COOKIE, self._keep),
@@ -321,13 +323,31 @@ class Handler:
             res = self._route_proxy(req, body) if via == "proxy" else self._route(req, body)
         except Refuse as r:
             res = self._refusal(req, r)
+        except (FileNotFoundError, NotFound) as e:
+            if req is not None and (doc := self._doc_hint(req)) and self._page_gone(doc):
+                res = self._refusal(req, Refuse(404, "no such document"))      # a writer that waited for a Delete's lock finds no page
+            else:
+                res = self._failed(req, e, method)
         except Exception as e:
-            if req is not None:
-                self.hub.record_exception("request-failed", self._doc_hint(req) if not self._on_clients(req) else None,
-                                          **({} if self._on_clients(req) else {"endpoint": req.path}), method=method, **self._who(req))
-            res = _json(500, {"ok": False, "error": f"the hub failed on this request "
-                              f"({type(e).__name__}); the details are in `sheaf diag`"})
+            res = self._failed(req, e, method)
         return self._finish(req, res)
+
+    def _page_gone(self, doc: str) -> bool:
+        """Whether the page `doc` names is not a file any more."""
+        try:
+            return not self.hub.file(doc).exists()
+        except (NotFound, OSError):
+            return True
+        except Exception:
+            return False
+
+    def _failed(self, req, e, method) -> Response:
+        if req is not None:
+            seen = self._on_clients(req)          # no client page address on this disk (9.9)
+            self.hub.record_exception("request-failed", None if seen else self._doc_hint(req),
+                                      **({} if seen else {"endpoint": req.path}), method=method, **self._who(req))
+        return _json(500, {"ok": False, "error": f"the hub failed on this request "
+                           f"({type(e).__name__}); the details are in `sheaf diag`"})
 
     def _refusal(self, req, r: Refuse) -> Response:
         res = self._refusal_answer(req, r)
@@ -747,10 +767,34 @@ class Handler:
             raise Refuse(404, "no such page")
         if readthrough.is_clients(address):
             return self._relay(req, address, "page")
+        if (to := self._forwarded(req, address)) is not None:
+            # 302 and never 301, and never cached: the page can move back, and a browser that kept a 301 from A to B
+            # would then loop between the two. "For ever" is the Forward's, not the redirect's.
+            return Response(302, {"Location": url_path(to), "Cache-Control": "no-store"})
         with self._reading(address):
             e = self._entry(req, address)
             self.hub.catch_up(e)
             return _html(200, self.hub.page(e, nonce, member=req.member, mount=req.mount), nonce)
+
+    def _forwarded(self, req: Req, address: str) -> str | None:
+        """Where the old address `address` of a page now leads, for the one who may be led there: the page's owner, or the hub's
+        person. None for everyone else, and for an address a page stands at: the answer is then the one of an address never
+        used, so no one learns that a page once was there (9.11)."""
+        hub, member = self.hub, req.member
+        to = hub.forwards.follow(address)
+        if to is None or self._has_file(address):
+            return None
+        if member is not None and not (hub.loose_owner(to) == member.id and hub.member_owns(member, to)
+                                       and hub.visible(member, to)):
+            return None
+        return to
+
+    def _has_file(self, address: str) -> bool:
+        try:
+            self.hub.roots.document(address)
+        except NotFound:
+            return False
+        return True
 
     def _live(self, req: Req) -> Response:
         hub, member = self.hub, req.member
@@ -770,6 +814,13 @@ class Handler:
         hub, member = self.hub, req.member
         e = self._entry(req, req.query.get("doc"))
         def for_member(name, data):
+            if name == "moved":      # the page went elsewhere (9.11): told to its owner alone, where it went
+                to = data.get("to") if isinstance(data, dict) else None
+                if isinstance(to, str) and hub.loose_owner(to) == member.id and hub.visible(member, to):
+                    return {"doc": data["doc"], "to": to}
+                if isinstance(to, str) and hub.visible(member, to):     # a recipient is never led: the page is gone from here, told as it is told them
+                    return events.Renamed("gone", {"doc": hub.alias(member, to)})
+                return None
             # Asked at each event: a write that makes the rectoverso its owner's alone silences a stream
             # opened before it (9.11). A change of `projects.toml` that shuts the member out is told `gone`, with
             # why (8.12): that alone, never a file of the rectoverso that cannot be read for a moment.
@@ -1099,6 +1150,29 @@ class Handler:
             self.hub.the_list.ticked(e.address)
         return _ok(hash=got["hash"])
 
+    def _move(self, req: Req) -> Response:
+        """The row's Move (9.11): the owner puts a loose page in another folder of their root, named by its path in the
+        dialog. The old address forwards to the new one, and everything the hub keeps of the page goes along."""
+        b = req.body
+        doc = self._owned(req, b.get("doc"))
+        try:
+            new = moves.move_page(self.hub, req.member, doc, b.get("folder"))
+        except moves.Refused as r:
+            raise Refuse(r.status, r.message) from None
+        self.hub.writes.add(new, req.member.name, "page", "move")
+        return _ok(doc=new, url=url_path(new), moved_from=doc)
+
+    def _move_folder(self, req: Req) -> Response:
+        """Renaming a folder of the member's loose root moves each page in it, each with its own Forward (9.11)."""
+        b = req.body
+        try:
+            done = moves.move_folder(self.hub, req.member, b.get("folder"), b.get("to"))
+        except moves.Refused as r:
+            raise Refuse(r.status, r.message) from None
+        for _, new in done:
+            self.hub.writes.add(new, req.member.name, "page", "move")
+        return _ok(moved=[{"doc": new, "moved_from": old} for old, new in done])
+
     def _share(self, req: Req) -> Response:
         """The row's Share button (9.11): the page's owner writes the page's Share line, `Share` or `Share with <names>`,
         and ticks it in the same request, as a tick of the page does. The line is appended in one write against the hash the
@@ -1162,7 +1236,10 @@ class Handler:
         except Exception:
             raise Refuse(404, "no such document") from None
         root = self.hub.roots.get(at.root)
-        if m is None or root is None or self.hub.loose.owner_of(root) != m.id or not self.hub.visible(m, doc):
+        # The owner's own page is theirs to archive, keep or delete whatever its front matter says and even when it cannot be
+        # read as text (`visible` says no to that): a page nobody can open is the one a member wants gone.
+        if m is None or root is None or self.hub.loose.owner_of(root) != m.id \
+                or not (self.hub.holds_loose(m, doc) or self.hub.visible(m, doc)):
             raise Refuse(404, "no such document")
         try:
             mtime = self.hub.file(doc).stat().st_mtime
@@ -1171,12 +1248,16 @@ class Handler:
         return root, at.rel, mtime
 
     def _acting(self, req: Req, act):
-        root, rel, mtime = self._own_loose(req, req.body.get("doc"))
-        try:
-            with place.held(self.hub, req.body["doc"]):
-                act(root, rel, mtime)
-        except loose.Refused as e:
-            raise Refuse(409, str(e)) from None
+        # The moves' lock first (the hub's lock order), from the read of the path to the write of the mark: a move comes before
+        # the read or after the write, so its `marks_moved` carries this mark and none is left at the old path. Then the page's
+        # name lock (`place.held`), and the act's own locks inside it. The path is not read again under the name lock.
+        with moves._LOCK:
+            root, rel, mtime = self._own_loose(req, req.body.get("doc"))
+            try:
+                with place.held(self.hub, req.body["doc"]):
+                    act(root, rel, mtime)
+            except loose.Refused as e:
+                raise Refuse(409, str(e)) from None
         self.hub.index.touch(req.body["doc"])
         return _ok()
 
@@ -1196,12 +1277,22 @@ class Handler:
         """Delete (8.6): the owner's page goes into its root's trash for thirty days. Never through the door."""
         doc = req.body.get("doc")
         self._own_loose(req, doc)
-        with place.held(self.hub, doc):
+        # The moves' lock first (the hub's lock order): a move is between its link and its unlink or it is not, never under the
+        # trash's move. Then the name, the page's lock, and the file's lock in `trash`.
+        with moves._LOCK, place.held(self.hub, doc):
             try:
                 root, rel, _ = self._own_loose(req, doc)
-                self.hub.archive.trash(root, rel)
+                with self.hub.page_lock(doc):       # a save in the middle of its write finishes first, one after it finds the page gone
+                    self.hub.archive.trash(root, rel)
             except (loose.Refused, OSError) as e:
                 raise Refuse(409, str(e) if isinstance(e, loose.Refused) else "the page could not be moved to the trash") from None
+            # A Forward that led to this address is no one's now (SPEC 9.11 words nothing for a delete): else the old address
+            # of the page would lead to whatever comes to this one. Under the moves' lock, as a move adds a Forward. The page is
+            # in the trash by now: a Forward that cannot be written is a row in the diagnostics log, never a refusal.
+            try:
+                self.hub.forwards.drop_leading_to(doc)
+            except Exception:
+                self.hub.record_exception("delete-forward-failed", doc)
         self.hub.forget_document(doc)
         self.hub.index.touch(doc)
         return _ok()
@@ -1219,7 +1310,12 @@ class Handler:
         stamp, _, wanted = ident.partition("/")
         doc = str(Address(root.name, wanted))
         try:
-            with place.held(self.hub, doc):
+            # The moves' lock first, as a delete takes it: a move adds its Forward under it, so the look at `forwards.json` and the
+            # put back are one step against a move.
+            with moves._LOCK, place.held(self.hub, doc), self.hub.page_lock(doc):
+                if self.hub.forwards.follow(doc) is not None:
+                    raise Refuse(409, "that address is taken: a page that was there moved away, and its old address leads to it, so "
+                                      "this page is not put back there")
                 rel = self.hub.archive.restore_trash(root, ident)
         except archive_mod.Taken:
             raise Refuse(409, "a page of that name is there already: it is not overwritten") from None

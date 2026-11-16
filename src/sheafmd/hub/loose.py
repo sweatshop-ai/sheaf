@@ -16,6 +16,8 @@ from . import roots as roots_mod
 from . import state
 
 KEEP = Path(".sheaf") / "keep.json"
+ARCHIVED, SEEN = "archived.json", "seen.json"      # the times of the archive (archive.py)
+TIMES = (ARCHIVED, SEEN)
 MONTH = "%Y-%m"
 
 
@@ -135,25 +137,58 @@ def keep(root_path: Path, rel: str, on: bool = True) -> None:
     """Mark the page at `rel` never to be archived (`on`), or take the mark off. Written whole by a replace; refused
     (`Refused`) when it cannot be."""
     with state.file_locked("loose-keep.lock"):      # two creates at once each keep their own mark
-        held = marks(root_path)
-        if (rel in held) == on:
-            return
-        _put(root_path, KEEP.name, sorted([*held, rel] if on else [h for h in held if h != rel]), "keep marks")
+        keep_held(root_path, rel, on)
+
+
+def keep_held(root_path: Path, rel: str, on: bool = True) -> None:
+    """`keep` for a caller that holds `loose-keep.lock` already (the flock is not re-entrant)."""
+    held = marks(root_path)
+    if (rel in held) == on:
+        return
+    _put(root_path, KEEP.name, sorted([*held, rel] if on else [h for h in held if h != rel]), "keep marks")
 
 
 def stamp(root_path: Path, name: str, changes: dict, only_new: bool = False) -> None:
     """Set (or, for a None, take off) the times of pages in the mark file `.sheaf/<name>`; with `only_new` a page that has one
     keeps it. Nothing is written when nothing changes."""
     with state.file_locked("loose-keep.lock"):
-        held = times(root_path, name)
-        out = dict(held)
-        for rel, at in changes.items():
-            if at is None:
-                out.pop(rel, None)
-            elif not (only_new and rel in out):
-                out[rel] = at
-        if out != held:
-            _put(root_path, name, out, f"{name[:-5]} marks")
+        stamp_held(root_path, name, changes, only_new)
+
+
+def stamp_held(root_path: Path, name: str, changes: dict, only_new: bool = False) -> None:
+    """`stamp` for a caller that holds `loose-keep.lock` already (the flock is not re-entrant): it reads the marks and
+    writes them in the one hold, as the sweep does."""
+    held = times(root_path, name)
+    out = dict(held)
+    for rel, at in changes.items():
+        if at is None:
+            out.pop(rel, None)
+        elif not (only_new and rel in out):
+            out[rel] = at
+    if out != held:
+        _put(root_path, name, out, f"{name[:-5]} marks")
+
+
+def marks_moved(root_path: Path, old: str, new: str) -> None:
+    """What the root holds about the page at `old` (its keep mark, and its archived and seen times) is the page at `new`'s,
+    a page that moved: a Move is no activity for the archive, so the seen time stays, an archived page stays archived and
+    a page moved back is not archived by a stale mark. All three are read under one hold before any is written (a file
+    that cannot be read refuses the lot, and nothing is changed), and each file is written in one replace, so a page is
+    never there unmarked. A mark at `new` (keep, archived or seen) that the page at `old` has no counterpart of goes. Refused (`Refused`) when a
+    mark cannot be read or written."""
+    with state.file_locked("loose-keep.lock"):
+        held = marks(root_path)
+        tables = {name: times(root_path, name) for name in TIMES}
+        if old in held or new in held:
+            kept = {*(r for r in held if r not in (old, new)), *([new] if old in held else [])}
+            state.write_text_private(Path(root_path) / KEEP, json.dumps(sorted(kept), indent=1, ensure_ascii=False) + "\n",
+                                     inside=True)
+        for name, table in tables.items():
+            out = {k: v for k, v in table.items() if k not in (old, new)}
+            if old in table:
+                out[new] = table[old]
+            if out != table:
+                _put(root_path, name, out, f"{name[:-5]} marks")
 
 
 class Loose:

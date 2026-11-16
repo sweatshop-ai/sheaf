@@ -11,6 +11,7 @@ from test_repo_pages import REPO, app, clones, hub_repos, origin, report, report
 from test_send import keyring, local, no_real_keyring, run, scratch, tiroir  # noqa: F401  (fixtures)
 from test_write_log import agents  # noqa: F401  (fixture)
 
+from sheafmd import diagnostics
 from sheafmd.hub import archive
 
 DAY = 86400
@@ -162,3 +163,24 @@ def test_a_report_that_comes_while_a_clone_goes_to_sleep_leaves_it_awake_and_ful
     assert reported and not reported[0][0]
     assert not repos.sleeping(REPO)
     assert sh(the_clone(napping), "sparse-checkout", "list").split() == ["docs", "notes"]
+
+
+def test_a_clone_that_does_not_finish_going_to_sleep_is_left_for_the_next_round_and_logged(napping, monkeypatch):
+    repos, release, rows = napping.hub.repos, threading.Event(), []
+    real = repos._git
+
+    def slow(at, *args, **kw):
+        if args[:1] == ("sparse-checkout",):
+            release.wait(10)
+        return real(at, *args, **kw)
+    monkeypatch.setattr(repos, "_git", slow)
+    monkeypatch.setattr(repos, "SLEEP_WAIT", 0.2)
+    monkeypatch.setattr(diagnostics, "record", lambda source, kind, doc=None, **detail: rows.append((source, kind, detail)))
+    napping.now[0] += 31 * DAY
+    assert repos.sleep_idle() == []                         # it came back without waiting for the clone
+    assert [(s, k) for s, k, _ in rows] == [("hub", "clone-sleep-slow")] and rows[0][2]["repo"] == REPO
+    assert not repos.sleeping(REPO)
+    release.set()
+    assert repos.settle()
+    assert repos.sleeping(REPO)                             # it finished behind the round, and the next one leaves it alone
+    assert repos.sleep_idle() == []

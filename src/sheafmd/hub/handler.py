@@ -1132,8 +1132,7 @@ class Handler:
                 # Naming fewer members closes the page at once to every member no longer named (9.11): the front matter
                 # goes to the names-only form, which `Hub.named` reads, and a `visibility: project` no longer lets them in.
                 # A loose page needs none: its audience is read from the file each time.
-                by = (m.short or m.name) if m is not None else self.hub.person
-                new = visibility.names_only(new, by, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+                new = visibility.names_only(new)
                 if visibility.front_matter(new).get("sessions", "") != visibility.front_matter(text).get("sessions", ""):
                     raise EditError("A save cannot change the front matter: change it in the file.")
             if "Share" in words:

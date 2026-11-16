@@ -173,3 +173,11 @@ def test_a_refusal_changes_no_byte_of_a_moved_clones_state(repos):
     repos.refusal("bea", REPO, [("bea", NEVER)])
     repos.refusal("bea", REPO)
     assert (repos._usage_file.read_bytes(), repos._records_file.read_bytes()) == before
+
+
+def test_a_root_coming_back_after_an_old_failed_clone_is_not_refused(repos):
+    made(repos)
+    repos.sleep_moved(REPO, THERE)
+    repos._failed[REPO] = "the clone failed"
+    assert repos.refusal("bea", REPO) is None
+    assert repos._failed[REPO] == "the clone failed"            # nothing popped: the report after the unmove settles it

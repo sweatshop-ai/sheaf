@@ -5,7 +5,7 @@ sheaf's owner."""
 import pytest
 
 from helpers import BEA
-from pagehelp import mark, toast, until
+from pagehelp import mark, reloaded, toast, until
 from sheafmd.hub import proxy
 
 pytestmark = pytest.mark.page
@@ -59,8 +59,10 @@ def test_a_click_on_any_of_the_words_of_the_label_ticks_share_and_a_second_click
     t = opened(SHEAF)
     p, f = t.page, t.site.file
     left, y, right = p.evaluate(SPOT, "Shared with the team")
+    mark(p)
     p.mouse.click(right, y)                     # the last word, not the first: the label is the whole line
     until(lambda: "- [x] Shared with the team" in f.read_text(encoding="utf-8"), what="the tick in the file")
+    reloaded(p)                                 # the tick's press holds the buttons until the page has reloaded onto the file
     until(lambda: share_box(p).is_checked(), what="the box ticked on the page")
     assert "- [ ] Approve" in f.read_text(encoding="utf-8")
     p.mouse.click(left, y)

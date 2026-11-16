@@ -163,3 +163,14 @@ def test_a_token_whose_member_the_table_no_longer_names_is_refused_not_read_as_u
     assert read_as(browser, token, "work/plan.md").status == 200
     del mine.hub.proxy.members[BEA]
     assert read_as(browser, token, "work/plan.md").status == 401
+
+
+def test_laptops_of_members_the_table_no_longer_names_do_not_stop_the_hub_from_starting(mine):
+    from sheafmd.hub import proxy
+    connect(mine, "Work MacBook")
+    connect(mine, "Cal's laptop", member=CAL)
+    rows = mine.hub.tokens.list()
+    del mine.hub.proxy.members[BEA]
+    del mine.hub.proxy.members[CAL]
+    proxy.check_start_names(mine.hub.proxy, "hub", rows)       # both laptops sign the hub's person: left out, no clash
+    proxy.check_start_names(None, "hub", rows)                 # proxy mode off: the same

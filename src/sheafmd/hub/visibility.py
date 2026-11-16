@@ -211,9 +211,54 @@ def share(text_: str, by: str, date: str) -> str:
     return set_keys(text_, {"visibility": "project", "shared": f"{by} {date}"})
 
 
-_BOX_RE = re.compile(r"(\s*[-*+] \[)([ xX])(\] (Shared with the team|Share|Stop James)(?:\s+@\S+)?\s*)")
+_BOX_RE = re.compile(r"(\s*[-*+] \[)([ xX])(\] (Shared with the team|Share with \S[^\n]*?|Share|Stop James)(?:\s+@\S+)?\s*)")
 # Share's tick box says it in its own words (9.11); the word is Share. The_list.LABELS holds the same, and imports this module.
+# `Share with <short>, <short>` is Share too, naming who it opens to.
 _LABELS = {"Shared with the team": "Share"}
+_NAMES_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")
+
+
+def _word(label: str) -> str:
+    """The word of an action's label: `Share` for `Shared with the team` and for `Share with <names>`."""
+    return "Share" if label.startswith("Share with ") else _LABELS.get(label, label)
+
+
+def audience(text_: str):
+    """Who a page's ticked Share opens it to (9.11): None when no Share line is ticked, True for a plain `Share`
+    (every member of the tiroir), else the frozenset of the `short` names, lower-cased, that a ticked `Share with`
+    names. A plain Share wins over names. Lines are read in the list blocks the page draws, so one in a fence or a
+    comment is none."""
+    named, everyone = set(), False
+    for b in split_md_blocks(text_):
+        if b.kind != "list":
+            continue
+        for line in _lines(b.content):
+            m = _BOX_RE.fullmatch(line)
+            if not m or m.group(2) not in "xX" or _word(m.group(4)) != "Share":
+                continue
+            if m.group(4).startswith("Share with "):
+                named |= {n.casefold() for n in _NAMES_RE.findall(m.group(4)[len("Share with "):])}
+            else:
+                everyone = True
+    return True if everyone else (frozenset(named) if named else None)
+
+
+def widens(old, new) -> bool:
+    """Whether the `audience` `new` opens a page to anyone that `old` did not: a Share ticked where none was, a plain Share
+    over names, a name added. Closing a Share, or naming fewer, widens nothing."""
+    if new is None or old is True:
+        return False
+    if old is None:
+        return True
+    return new is True or not new <= old
+
+
+def reaches(shared, member) -> bool:
+    """Whether the `audience` `shared` of a page opens it to `member`: every member for True, else the one whose
+    `short` it names."""
+    if shared is True:
+        return True
+    return bool(shared) and bool(member.short) and member.short.casefold() in shared
 
 
 def unshare(text_: str) -> str:
@@ -244,7 +289,7 @@ def _share_box(text_: str) -> str | None:
     for b in split_md_blocks(text_):
         if b.kind == "list":
             for line in _lines(b.content):
-                if (m := _BOX_RE.fullmatch(line)) and _LABELS.get(m.group(4), m.group(4)) == "Share":
+                if (m := _BOX_RE.fullmatch(line)) and _word(m.group(4)) == "Share":
                     marks.add(m.group(2).lower())
     return "x" if "x" in marks else (" " if marks else None)
 
@@ -259,7 +304,7 @@ def _flipped(toggled, was_marks: str, now_marks: str) -> set:
             m, n = _BOX_RE.fullmatch(was), _BOX_RE.fullmatch(now)
             if m and n and m.group(2) in was_marks and n.group(2) in now_marks \
                     and (m.group(1), m.group(3)) == (n.group(1), n.group(3)):
-                words.add(_LABELS.get(m.group(4), m.group(4)))
+                words.add(_word(m.group(4)))
     return words
 
 

@@ -590,8 +590,11 @@ class Index:
         for root in hub.roots.listed():
             if only is not None and root.name != only:
                 continue
+            giver = None                            # the member whose loose root this is, when it is another's
             if member is not None and not hub.owns(member, root):
-                continue
+                giver = hub.giver(member, root)     # only a loose root that Shares a page with this member is listed
+                if giver is None:
+                    continue
             listing = roots_mod.Listing([], 0) if rendered else roots_mod.list_documents(root)
             if not rendered:
                 hub.check_projects(root, (f.rel for f in listing.docs))
@@ -609,7 +612,8 @@ class Index:
                     address, path = str(roots_mod.Address(root.name, rel)), root.path / f.rel
                     keys.add(str(path))
                     have.add(address)
-                    if shown(root, path) and (member is None or hub.visible(member, address)):
+                    if shown(root, path) and (member is None or hub.visible(member, address)) \
+                            and (giver is None or hub.member_owns(member, address)):
                         if row := self._row(address, path, f.stat, waiting, running, member):
                             rows.append(row)
             # The files of a member's private root are listed to that member alone, under the list root's names (rule D).
@@ -639,17 +643,19 @@ class Index:
                             continue                    # a private file is no row of the hub's person, rendered or not (rule D)
                         privately.add(address)          # the board holds it for the members' streams; its end is theirs alone
                     keys.add(str(path))
-                    if shown(root, path) and (member is None or hub.visible(member, address)):
+                    if shown(root, path) and (member is None or hub.visible(member, address)) \
+                            and (giver is None or hub.member_owns(member, address)):
                         if row := self._row(address, path, os.fstat(op.fd), waiting, running, member, op, private_ok=board):
                             rows.append(row)
-            if rendered and not rows:
-                continue
+            if (rendered or giver is not None) and not rows:
+                continue                        # a root that Shares nothing with this member is not told of
             rows.sort(key=lambda r: (RANK[r["dot"]], -r["mtime"], r["doc"]))
             if listing.more:
                 more[root.name] = listing.more
             # A member is told the root's name, never its folder on the hub's disk (9.9).
             folder = {"path": str(root.path)} if member is None else {}
-            out.append({"name": root.name, **folder, "missing": root.missing(), "closed": root.closed(),
+            given = {"shared_from": giver.short or giver.name} if giver is not None else {}
+            out.append({"name": root.name, **folder, **given, "missing": root.missing(), "closed": root.closed(),
                         "dot": worst(r["dot"] for r in rows), "docs": rows})
         out.sort(key=lambda r: (-max((d["mtime"] for d in r["docs"]), default=0), r["name"]))
         if only is None and member is None and not rendered:

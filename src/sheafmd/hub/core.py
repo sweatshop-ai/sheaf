@@ -158,6 +158,7 @@ class Hub:
         self.docs = state.Docs()
         self.seen = state.Seen()
         self.member_seen = state.MemberSeen()
+        self.member_opened = state.MemberOpened()     # the change of each Shared page that a member last had open
         self.index = Index(self)
         self.tokens = state.Tokens()
         self.waiting_tells = waiting_mod.Waiting(self)    # the Tells that wait for an agent (9.8)
@@ -873,6 +874,7 @@ class Hub:
         with self._lock:
             root = roots_mod.forget(self.roots, self.docs, self.seen, self.versions, name,
                                     members=self.member_seen)
+            self.member_opened.forget_prefix(roots_mod.Address.prefix(name))
             # After the registry lets go (a Tell queued from now on is refused, `Waiting.queue`) and before the
             # entries go, so the pages open on them hear `tell-cancelled` ahead of `gone`. A failure here must not
             # keep the root from being forgotten.
@@ -928,10 +930,58 @@ class Hub:
         root = self.roots.get(at.root)
         if root is None or not at.plain:
             return []
-        mine = [m for m in members if self.owns(m, root)]
+        mine = [m for m in members if self.owns(m, root) or self.shared_with(m, root, address)]
         if mine and (private := place.private_member(self, address)) is not None:
             mine = [m for m in mine if m.id == private]       # rule A: a private root's file is its member's alone
         return mine if mine and self.roots.lookup(root.path / at.rel) == root else []
+
+    def shared_with(self, member, root, address: str) -> bool:
+        """Whether the loose page at `address` in `root`, another member's, is Shared with `member` (9.11): the ticked
+        Share line of the page as it is now, read from the file each time, so a withdrawn Share closes it at the next
+        request. A root that is no member's loose root shares nothing."""
+        if self.proxy is None:
+            return False
+        owner = self.loose.owner_of(root)
+        if owner is None or owner == member.id or owner not in self.proxy.members:
+            return False
+        return visibility.reaches(self.audience(address), member)
+
+    def opened_by(self, member, address: str) -> None:
+        """A member opened the page at `address`: the change they had in front of them is kept, so the Sheaf says "new"
+        for a Shared page only while it changed since (8.6). Only a page of another member's loose root is kept."""
+        root = self.roots.get(roots_mod.Address.parse(address).root)
+        if root is None or self.giver(member, root) is None:
+            return
+        try:
+            top, rel = self.where(address)
+            with beneath.open_beneath(top, rel, meta=True) as op:
+                self.member_opened.mark(member.id, address, int(os.fstat(op.fd).st_mtime * 1e9))
+        except (OSError, roots_mod.NotFound):
+            pass
+
+    def giver(self, member, root):
+        """The member whose loose root `root` is, when it is another member's and `member` is not in it: the one who may
+        Share pages from it with `member`. None for every other root."""
+        owner = self.loose.owner_of(root) if self.proxy is not None else None
+        giver = self.proxy.members.get(owner) if owner is not None else None
+        return giver if giver is not None and giver.id != member.id else None
+
+    def audience(self, address: str):
+        """`visibility.audience` of the page at `address`, None when it cannot be read."""
+        try:
+            top, rel = self.where(address)
+            with beneath.open_beneath(top, rel) as op:
+                return visibility.audience(op.text())
+        except (OSError, UnicodeDecodeError, roots_mod.NotFound):
+            return None
+
+    def is_owner(self, member, address: str, fm: dict) -> bool:
+        """Whether `member` owns the rectoverso at `address` whose front matter is `fm`: by the front matter (9.11), or
+        as the member whose loose root holds the page."""
+        if visibility.owner_of(fm, [member], self.assignees(address, fm)):
+            return True
+        root = self.roots.get(roots_mod.Address.parse(address).root)
+        return root is not None and self.loose.owner_of(root) == member.id
 
     def judged(self, address: str):
         """(front matter, assignees) of the rectoverso at `address`, what its visibility is judged on: the front

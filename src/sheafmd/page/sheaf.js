@@ -269,7 +269,13 @@ function create(ROOT, opts) {
       return r.json().then(function (b) { return { ok: r.ok && !(b && b.ok === false), error: b && b.error }; }, function () { return { ok: r.ok }; });
     }).then(function (got) {
       if (gone) return;
-      if (got.ok) { button.replaceWith(el('span', 'sheaf-shared', 'Shared')); return; }
+      if (got.ok) {
+        var shared = button.ownerDocument.createElement('span');
+        shared.className = 'sheaf-shared';
+        shared.textContent = 'Shared';
+        button.replaceWith(shared);
+        return;
+      }
       button.disabled = false;
       say(got.error || 'The page could not be shared.');
     }, function () {

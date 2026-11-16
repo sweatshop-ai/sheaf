@@ -5,13 +5,14 @@ import base64
 import dataclasses
 import json
 import os
+import pwd
 import subprocess
 import threading
 
 import pytest
-from helpers import BEA, CAL, door, rpc
+from helpers import BEA, CAL, FRONT, door, rpc
 from test_send import keyring, local, no_real_keyring, run, scratch, tiroir  # noqa: F401  (fixtures)
-from test_hub_commits import box, git, merged_on_github, rectoversos, remote  # noqa: F401  (fixtures)
+from test_hub_commits import DOC, box, git, merged_on_github, rectoversos, remote  # noqa: F401  (fixtures)
 from test_write_log import agents, declared  # noqa: F401  (fixtures)
 from test_repo_pages import (REPO, FakeApp, app, hub_repos, laptop_clone, report, sh, the_clone)  # noqa: F401
 
@@ -533,3 +534,21 @@ def test_the_credential_of_a_clone_is_read_from_a_copy_of_the_shared_dict(tmp_pa
     shared[Key("/b/clone")] = lambda: "two"
     monkeypatch.setattr(commits_mod, "CREDENTIALS", shared)
     assert commits_mod._credential(tmp_path / "not-a-clone") is None
+
+
+def test_a_member_whose_id_is_anothers_short_name_does_not_own_that_members_pages(box, rectoversos):
+    """The hole round 1's fix (e) opened: the owner of a page matched a short name or, for a member with none, an id, so
+    a member with id `nell` and no short name owned the pages of the member whose short name is `Nell`. That config no
+    longer starts a hub; were it read, the member could not open or Share the page."""
+    doc = rectoversos / "acme" / "blog" / "2026-10-28-plan.md"
+    doc.write_text("---\nowner: nell\n---\n" + doc.read_text(encoding="utf-8"), encoding="utf-8")
+    try:
+        box.hub.proxy = proxy_mod.parse({
+            "origin": FRONT, "socket": "/run/sheaf-proxy/hub.sock", "proxy_user": pwd.getpwuid(os.getuid()).pw_name,
+            "members": {CAL: {"name": "Nell Y", "short": "Nell", "roots": [str(rectoversos)]},
+                        "nell": {"name": "Nell X", "roots": [str(rectoversos)]}}}, "the test")
+    except proxy_mod.ProxyError:
+        return                                  # refused at the parse: no hub starts with it
+    text = doc.read_text(encoding="utf-8")
+    got = box.post("/_/share", {"doc": DOC, "hash": md_hash(text)}, member="nell")
+    assert got.status != 200 and doc.read_text(encoding="utf-8") == text

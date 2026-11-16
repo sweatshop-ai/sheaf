@@ -44,6 +44,7 @@ from pathlib import Path
 from .. import config, signals
 from ..source import md_hash
 from . import state
+from .repos import CREDENTIALS, CREDENTIALS_LOCK, token_env
 
 GIT_SECONDS = 20                # a commit's git commands
 BLAME_SECONDS = 2               # a blame the list's page waits for (9.10)
@@ -64,8 +65,24 @@ class Author:
     email: str
 
 
-def _env(author: Author | None = None) -> dict:
+def _credential(folder: Path):
+    """The token function of the clone that holds `folder` (the clone's folder or one beneath it), None for any other."""
+    here = os.path.realpath(folder)
+    with CREDENTIALS_LOCK:          # a copy: a serving thread adds a clone meanwhile
+        held = list(CREDENTIALS.items())
+    for clone, token in held:
+        if here == clone or here.startswith(clone + os.sep):
+            return token
+    return None
+
+
+def _env(author: Author | None = None, folder: Path | None = None) -> dict:
+    """The environment of a git command; `folder`: where it runs. In a clone every command gets the token, asked once a
+    call and never kept: the clone is blobless, so any command (`read-tree`, `merge-tree`) may fetch a blob from the remote
+    (SPEC 14). It lives in this process's environment only, never in a config or a file."""
     env = {**os.environ, "LC_ALL": "C", "GIT_TERMINAL_PROMPT": "0"}
+    if folder is not None and (token := _credential(folder)) is not None and (t := token()):
+        env.update(token_env(t))
     if author is not None:
         env["GIT_AUTHOR_NAME"], env["GIT_AUTHOR_EMAIL"] = author.name, author.email
     return env
@@ -145,10 +162,11 @@ def _git(root: Path, *args, author=None, seconds=GIT_SECONDS, given=None, childr
     its own: a signal to the hub's group never reaches it."""
     # No hook of the repo runs for the hub: hooks are code of whoever wrote `.git/hooks`.
     argv = ["git", "-C", str(root), "-c", "core.hooksPath=/dev/null", "--literal-pathspecs", *args]
+    folder = root
     if children is not None:
-        return children.run(argv, seconds, _env(author))
+        return children.run(argv, seconds, _env(author, folder))
     return subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="surrogateescape",
-                          timeout=seconds, env=_env(author), input=given, start_new_session=True)
+                          timeout=seconds, env=_env(author, folder), input=given, start_new_session=True)
 
 
 def blame(file: Path, text: str, lines, seconds: float = BLAME_SECONDS) -> dict:
@@ -291,6 +309,14 @@ def _again(folder: Path, commit: str, onto: str):
     return made.stdout.decode().strip(), []
 
 
+def root_config(root) -> "config.RootConfig":
+    """The settings a root's writes are committed by: its `.sheaf.toml`'s, except for a clone the tiroir serves, which
+    always commits and pushes whatever the repo's file says (SPEC 8.11): that file describes a root on a laptop."""
+    if getattr(root, "clone", ""):
+        return config.RootConfig(commit=True, push=True)
+    return config.load_root_config(root.path, warn=lambda line: None)
+
+
 class Commits:
     def __init__(self, record, guard=None, roots=None, refuse_rewrite=False, pulling=None, pulled=None):
         """`record(kind, doc, **detail)` writes a diagnostics row (15). `guard(root, files)` gives a context that
@@ -343,7 +369,7 @@ class Commits:
             if not r.git or (r is not root and _repo(r.path) != repo):
                 continue
             try:
-                rc = config.load_root_config(r.path, warn=lambda line: None)
+                rc = root_config(r)
             except (config.ConfigError, OSError):
                 split[False].append(r.name)
                 continue
@@ -373,7 +399,7 @@ class Commits:
         key = key or rel
         address = f"{root.name}/{key}"
         try:
-            rc = config.load_root_config(root.path, warn=lambda line: None)
+            rc = root_config(root)
         except config.ConfigError as e:
             self._record("commit-failed", address, error=str(e)[:300])
             return
@@ -479,7 +505,7 @@ class Commits:
             if not root.git:
                 continue
             try:
-                rc = config.load_root_config(root.path, warn=lambda line: None)
+                rc = root_config(root)
                 if not (rc.commit and (rc.push or rc.versions_inside)):
                     continue
                 repo = _repo(root.path)
@@ -643,6 +669,29 @@ class Commits:
             self._tell(self._pulled, address, folder, authors, ok, left)
         return go
 
+    def moved(self, root, address: str, target: str, move) -> str:
+        """The files of the clone `root` move to `target` (a switch of its branch) by `move()`, which returns "" when they
+        did and else why not, as `_pull` moves them and in its order (the writers' locks of every file that differs, then
+        the repo's, SPEC 9.11; the Write log's window around both): the page open on a file that changes is told, a save
+        cannot land between `move`'s look at the tree and its checkout, and none is carried onto the new branch. The one
+        path a clone's files move by besides `_pull`; a checker of the lock order (17) lists both."""
+        folder = root.path
+        top = Path(_git(folder, "rev-parse", "--show-toplevel").stdout.strip())
+        changed = [p for p in _git(folder, "diff", "--name-only", "--no-renames", "-z", "HEAD", target).stdout.split("\0")
+                   if p]
+        pages = [top / p for p in changed if p.endswith(".md")]
+        self._tell(self._pulling, address, folder, [(path, "?") for path in pages])
+        why, left = "move failed", {}
+        try:
+            with self._guard(root, [top / p for p in changed]), self._repo_lock(folder):
+                why = move()
+                left = {path: _hash_of(path) for path in pages}
+        finally:
+            ok = why == ""
+            authors = [(path, _author(top, target, path.relative_to(top).as_posix()) if ok else "?") for path in pages]
+            self._tell(self._pulled, address, folder, authors, ok, left)
+        return why
+
     def _tell(self, call, address, *args):
         """The Write log's hearing of a pull: its failure is a diagnostics row, never the pull's."""
         try:
@@ -708,7 +757,7 @@ class Commits:
             if not r.git or (r is not root and _repo(r.path) != repo):
                 continue
             try:
-                rc = config.load_root_config(r.path, warn=lambda line: None)
+                rc = root_config(r)
             except (config.ConfigError, OSError):
                 continue
             if not (rc.commit and rc.versions_inside):

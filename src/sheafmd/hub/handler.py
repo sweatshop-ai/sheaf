@@ -1181,7 +1181,9 @@ class Handler:
         """Delete (8.6): the owner's page goes into its root's trash for thirty days. Never through the door."""
         doc = req.body.get("doc")
         self._own_loose(req, doc)
-        with place.held(self.hub, doc):
+        # The moves' lock first (the hub's lock order): a move is between its link and its unlink or it is not, never under the
+        # trash's move. Then the name, the page's lock, and the file's lock in `trash`.
+        with moves._LOCK, place.held(self.hub, doc):
             try:
                 root, rel, _ = self._own_loose(req, doc)
                 with self.hub.page_lock(doc):       # a save in the middle of its write finishes first, one after it finds the page gone
@@ -1205,7 +1207,12 @@ class Handler:
         stamp, _, wanted = ident.partition("/")
         doc = str(Address(root.name, wanted))
         try:
-            with place.held(self.hub, doc), self.hub.page_lock(doc):
+            # The moves' lock first, as a delete takes it: a move adds its Forward under it, so the look at `forwards.json` and the
+            # put back are one step against a move.
+            with moves._LOCK, place.held(self.hub, doc), self.hub.page_lock(doc):
+                if self.hub.forwards.follow(doc) is not None:
+                    raise Refuse(409, "that address is taken: a page that was there moved away, and its old address leads to it, so "
+                                      "this page is not put back there")
                 rel = self.hub.archive.restore_trash(root, ident)
         except archive_mod.Taken:
             raise Refuse(409, "a page of that name is there already: it is not overwritten") from None

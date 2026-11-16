@@ -17,7 +17,7 @@ import threading
 import time
 import traceback
 import uuid
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -139,7 +139,7 @@ class Hub:
         self.versions = state.Versions()
         self.writes = WriteLog()                 # one line per write to a page, whatever the path (the Write log)
         self.commits = Commits(self.record, self._writers_out, self.roots.all,
-                               lambda: bool(self._private_paths), pulled=self.pulled)   # the roots that commit (8.11); the rewrite guard while a private root is configured
+                               lambda: bool(self._private_paths), pulling=self.pulling, pulled=self.pulled)   # the roots that commit (8.11); the rewrite guard while a private root is configured
         self._told_projects: set = set()         # what check_projects warned of this run (8.12)
         self._projects: dict = {}                # root id -> (stat key, entries | Invalid | None) of its projects.toml
         self._grants_seen: dict = {}             # root id -> the projects_of answer the open tabs were last told (8.12)
@@ -1247,24 +1247,38 @@ class Hub:
 
     def _refreshed(self, e: Entry):
         """Take in a write from outside, and write it in the Write log: a text that moved behind the hub's back is a file
-        written on disk, whoever wrote it (`?`), unless a pull of its repo just brought it in (that has its own line)."""
+        written on disk, whoever wrote it (`?`), unless a pull of its repo is bringing it in (that has its own line)."""
         got = e.live.refresh()
-        if got is not None and not self.writes.take_pull(e.address):
+        if got is not None and not self.writes.pulling(e.address):
             self.writes.add(e.address, "?", "tiroir", "disk")
         return got
 
-    def pulled(self, folder: Path, files: list[tuple[Path, str]]):
-        """A pull of the repo at `folder` changed `files`, (absolute path, last author): a line each, `git · <author>`, for
-        each that is a rectoverso of a root the hub serves. The page open on one is told, so its next sight of the file
-        on disk is the pull's, not a disk write."""
+    def pulling(self, folder: Path, files: list[tuple[Path, str]]):
+        """A pull of the repo at `folder` is about to change `files`, (absolute path, last author): the page open on one
+        takes the pull in, so what it sees of the file until `pulled` is the pull's, not a disk write."""
+        for path, _ in files:
+            with suppress(roots_mod.NotFound):
+                address = self.roots.address(path)
+                if address in self.entries:
+                    self.writes.expect_pull(address)
+
+    def pulled(self, folder: Path, files: list[tuple[Path, str]], ok: bool):
+        """The pull of `files` ended. Each open page takes the pull in now, under the pull's window, and the window
+        closes; when the pull went through, a line each, `git · <author>`, for each that is a rectoverso of a root
+        the hub serves."""
         for path, author in files:
             try:
                 address = self.roots.address(path)
             except roots_mod.NotFound:
                 continue
-            self.writes.add(address, f"git · {author}", "tiroir", "pull")
-            if address in self.entries:
-                self.writes.expect_pull(address)
+            try:
+                e = self.entries.get(address)
+                if e is not None:
+                    e.live.refresh()
+            finally:
+                self.writes.end_pull(address)
+            if ok:
+                self.writes.add(address, f"git · {author}", "tiroir", "pull")
 
     def wrote(self, address: str, moved: bool = False):
         """The door made or changed this document's file (SPEC 12): tell its open tabs now, as the

@@ -275,17 +275,19 @@ def _again(folder: Path, commit: str, onto: str):
 
 
 class Commits:
-    def __init__(self, record, guard=None, roots=None, refuse_rewrite=False, pulled=None):
+    def __init__(self, record, guard=None, roots=None, refuse_rewrite=False, pulling=None, pulled=None):
         """`record(kind, doc, **detail)` writes a diagnostics row (15). `guard(root, files)` gives a context that
         holds what a writer of each of `files` (absolute paths) holds before the repo's lock (9.11): a pull takes
         it before it changes them. `roots()` gives the registered roots: the repo of one pushes only when its other
         roots that commit push too (#89), judged by the pusher when it takes the repo. `refuse_rewrite`, a bool or a
         function that gives one: whether a pull refuses a remote branch that no longer holds the tip the hub last
         saw there (a force-push), kept in the repo's own ref `refs/sheaf/last-seen/<branch>`; off, no ref is read
-        or written and a pull is as it was. `pulled(folder, [(path, author)])` hears of the files a pull changed and
-        who last wrote each: the Write log's line of it."""
+        or written and a pull is as it was. `pulling(folder, [(path, author)])` hears of the files a pull is about to
+        change and who last wrote each, before the work tree moves; `pulled(folder, files, ok)` hears it end, `ok` false
+        when the pull was refused or failed: the Write log's line of it."""
         self._record = record
-        self._pulled = pulled or (lambda folder, files: None)
+        self._pulling = pulling or (lambda folder, files: None)
+        self._pulled = pulled or (lambda folder, files, ok: None)
         self._guard = guard or (lambda root, files: nullcontext())
         self._roots = roots or (lambda: ())
         self._refuse = refuse_rewrite if callable(refuse_rewrite) else (lambda: refuse_rewrite)
@@ -605,19 +607,28 @@ class Commits:
                    if p]
         # The writers' locks first, the repo's last (9.11): no write of a file the remote changed comes between
         # the look at it and its new text, and no commit of any root of the repo between the hub's HEAD read and moved.
-        with self._guard(root, [top / p for p in changed]), self._repo_lock(folder):
-            self._sweep(root, _repo(folder))           # what a page made since the pusher's sweep, before the work tree moves
-            go = self._catch_up(folder, theirs, address, record)
-            if go:
-                self._last_seen(folder, name, theirs)
-            authors = [(top / p, _git(folder, "log", "-1", "--format=%an", theirs, "--", p).stdout.strip() or "?")
-                       for p in changed if p.endswith(".md")] if go is not False else []
-        if authors:
-            try:
-                self._pulled(folder, authors)
-            except Exception:
-                record("write-log-failed", address)
+        # Who last wrote each .md file, read before the work tree moves; the Write log's window opens now and closes however
+        # the pull ends, so the page that takes the pull in is never taken for a disk write, nor a later write for the pull.
+        authors = [(top / p, _git(folder, "log", "-1", "--format=%an", theirs, "--", p).stdout.strip() or "?")
+                   for p in changed if p.endswith(".md")]
+        self._tell(self._pulling, address, folder, authors)
+        go = False
+        try:
+            with self._guard(root, [top / p for p in changed]), self._repo_lock(folder):
+                self._sweep(root, _repo(folder))           # what a page made since the pusher's sweep, before the work tree moves
+                go = self._catch_up(folder, theirs, address, record)
+                if go:
+                    self._last_seen(folder, name, theirs)
+        finally:
+            self._tell(self._pulled, address, folder, authors, go is not False)
         return go
+
+    def _tell(self, call, address, *args):
+        """The Write log's hearing of a pull: its failure is a diagnostics row, never the pull's."""
+        try:
+            call(*args)
+        except Exception:
+            self._record("write-log-failed", address)
 
     def seed(self, roots):
         """At hub start: for each repo of `roots` (git work trees) that has no last-seen ref for its branch yet, set it

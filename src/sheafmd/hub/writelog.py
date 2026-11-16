@@ -118,13 +118,15 @@ class WriteLog:
         """The last line that named an agent session."""
         return next((l for l in reversed(self.lines(address)) if l.session), None)
 
-    # A pull writes the file the hub then sees change: the next sight of it on disk is the pull's, not a disk write.
+    # A pull writes the files the hub then sees change: while its window is open, what a page sees of them is the pull's.
     def expect_pull(self, address: str):
         with self._lock:
             self._pulled.add(address)
 
-    def take_pull(self, address: str) -> bool:
+    def pulling(self, address: str) -> bool:
         with self._lock:
-            had = address in self._pulled
+            return address in self._pulled
+
+    def end_pull(self, address: str):
+        with self._lock:
             self._pulled.discard(address)
-            return had

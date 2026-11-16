@@ -183,3 +183,37 @@ def test_a_member_with_no_email_or_the_made_up_one_has_none_to_send_and_the_line
     assert none is None and "e-mail" in why
     made_up = replace(cfg.members[CAL], email=proxy.default_email(CAL, cfg.origin))
     assert outgoing.owner_email(cfg, made_up)[0] is None
+
+
+def test_an_archived_page_lands_archived_and_a_page_that_was_not_lands_in_the_default_view(members):
+    from sheafmd.hub import archive
+    token = peer_token()
+    out, path = landed(members, transfer(members, token, archived=True))
+    root = members.hub.roots.get(out["address"].split("/")[0])
+    rel = out["address"].split("/", 1)[1]
+    assert archive.is_archived(loose.times(root.path, loose.ARCHIVED), rel, path.stat().st_mtime)
+    out, path = landed(members, transfer(members, token, id="8" * 36, name="other.md", archived=False))
+    assert not archive.is_archived(loose.times(root.path, loose.ARCHIVED), "projects/blog/other.md", path.stat().st_mtime)
+
+
+def test_an_archived_that_is_not_true_or_false_is_not_a_bundle(members):
+    res = transfer(members, peer_token(), archived="yes")
+    assert res.status == 400
+
+
+def test_a_landing_that_outlasts_the_deadline_lands_nothing_and_answers_too_slow(members, monkeypatch):
+    import time
+    monkeypatch.setattr(chan, "SECONDS", 0.05)
+    real = members.hub.versions.put
+
+    def slow(*a, **k):
+        time.sleep(0.15)
+        return real(*a, **k)
+    monkeypatch.setattr(members.hub.versions, "put", slow)
+    token = peer_token()
+    res = transfer(members, token)
+    assert res.status == 409 and res.json()["why"] == "too_slow" and res.json()["say"]
+    root = members.hub.loose.known(members.hub.proxy.members[BEA])
+    assert root is None or not [p for p in root.rglob("notes.md")]
+    monkeypatch.setattr(members.hub.versions, "put", real)
+    assert transfer(members, token).status == 200            # nothing was remembered of the failed one: the same id lands

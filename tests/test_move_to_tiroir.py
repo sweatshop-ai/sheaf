@@ -94,6 +94,22 @@ def test_the_forward_is_written_after_the_receiver_confirms_and_the_page_is_drop
         assert two.hub.versions.get(OLD, md_hash(PLAN)) is None
 
 
+def test_a_move_ends_the_pages_tells_as_cancelled_page_moved_and_tells_the_open_tabs(two):
+    from sheafmd.hub import tell  # noqa: F401  (the Tell path is the hub's own; the row is queued as it queues one)
+    with two.active():
+        row = next(r for r in two.hub.tokens.list() if r.name == "alice")
+        member = two.hub.proxy.members[ALICE_A]
+        two.hub.session_tells.queue(OLD, "c1", row, "s-1", "Alice", member, None)
+        sub = two.hub.entry(OLD).bus.subscribe()
+    moved(two)
+    with two.active():
+        assert not two.hub.session_tells.waits(OLD, member)
+        ended = hub_rows("tell-cancelled")
+        assert [r["reason"] for r in ended if r["doc"] == OLD] == ["page moved"]
+    names = [n for n, d in sub.drain()]
+    assert "moved" in names
+
+
 def test_the_share_does_not_go_and_the_copy_there_is_private_to_its_owner(two):
     with two.active():
         path = two.hub.file(OLD)

@@ -46,6 +46,7 @@ from .commits import Author, Commits
 from .events import Bus
 from .index import Index
 from .jobs import Jobs
+from .writelog import WriteLog
 from .live import LiveDocument
 
 # What a render may set (SPEC 8.3). Every other key of docs.json is the hub's own.
@@ -136,8 +137,9 @@ class Hub:
         self.roots = roots_mod.Roots()
         self.roots.placer = lambda root, rel: place.physical(self, root, rel)
         self.versions = state.Versions()
+        self.writes = WriteLog()                 # one line per write to a page, whatever the path (the Write log)
         self.commits = Commits(self.record, self._writers_out, self.roots.all,
-                               lambda: bool(self._private_paths))   # the roots that commit (8.11); the rewrite guard while a private root is configured
+                               lambda: bool(self._private_paths), pulled=self.pulled)   # the roots that commit (8.11); the rewrite guard while a private root is configured
         self._told_projects: set = set()         # what check_projects warned of this run (8.12)
         self._projects: dict = {}                # root id -> (stat key, entries | Invalid | None) of its projects.toml
         self._grants_seen: dict = {}             # root id -> the projects_of answer the open tabs were last told (8.12)
@@ -847,6 +849,8 @@ class Hub:
             old, new = self.docs.change(address, settle)
             existed = address in self.entries
             e = self.entry(address)
+            if existed:
+                self._refreshed(e)          # a file written on disk since, seen at this render
             if existed and (any(old.get(k) != new[k] for k in SETTING_KEYS)
                             or old.get("target") != new.get("target")):
                 e.live.rebuild()
@@ -1161,7 +1165,7 @@ class Hub:
                 key = (st.st_mtime_ns, st.st_size)
                 if key == e.last_stat:
                     continue
-                e.live.refresh()
+                self._refreshed(e)
                 e.last_stat = key        # after: a rebuild that failed is tried again next tick
             except Exception as ex:
                 self._rebuild_failed(e, ex)
@@ -1234,12 +1238,33 @@ class Hub:
             st = e.stat()
             key = (st.st_mtime_ns, st.st_size)
             if key != e.last_stat:
-                e.live.refresh()
+                self._refreshed(e)
                 e.last_stat = key
             if self._images_moved(e):           # projects.toml or the owners moved: its images are judged otherwise
                 e.live.rebuild()
         except Exception as ex:
             self._rebuild_failed(e, ex)
+
+    def _refreshed(self, e: Entry):
+        """Take in a write from outside, and write it in the Write log: a text that moved behind the hub's back is a file
+        written on disk, whoever wrote it (`?`), unless a pull of its repo just brought it in (that has its own line)."""
+        got = e.live.refresh()
+        if got is not None and not self.writes.take_pull(e.address):
+            self.writes.add(e.address, "?", "tiroir", "disk")
+        return got
+
+    def pulled(self, folder: Path, files: list[tuple[Path, str]]):
+        """A pull of the repo at `folder` changed `files`, (absolute path, last author): a line each, `git · <author>`, for
+        each that is a rectoverso of a root the hub serves. The page open on one is told, so its next sight of the file
+        on disk is the pull's, not a disk write."""
+        for path, author in files:
+            try:
+                address = self.roots.address(path)
+            except roots_mod.NotFound:
+                continue
+            self.writes.add(address, f"git · {author}", "tiroir", "pull")
+            if address in self.entries:
+                self.writes.expect_pull(address)
 
     def wrote(self, address: str, moved: bool = False):
         """The door made or changed this document's file (SPEC 12): tell its open tabs now, as the

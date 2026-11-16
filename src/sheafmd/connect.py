@@ -84,7 +84,7 @@ def use_peer(url: str, token: str, store=None) -> str:
     """Keep `token` as the one this tiroir sends to the peer at `url`: in the login keyring, nowhere else. Returns the origin."""
     origin = origin_of(url)
     if not _TOKEN.fullmatch(token or ""):
-        raise UsageError("that is not a Sheaf token: copy the whole token that `sheaf peer add` printed on the other tiroir")
+        raise UsageError("that is not a Sheaf token: copy the whole token that `sheaf peer add` printed on the other shared Sheaf")
     (store or system_store()).set(PEER_SERVICE, origin, token)
     return origin
 

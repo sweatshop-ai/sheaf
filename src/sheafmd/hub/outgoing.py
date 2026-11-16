@@ -6,8 +6,8 @@ The move itself (the bundle, the call, confirm-then-Forward) is hooked up once t
 """
 from . import proxy
 
-NO_EMAIL = ("this tiroir does not know your e-mail address, so the other tiroir cannot tell who you are there: "
-            "ask for it to be set in this tiroir's configuration")
+NO_EMAIL = ("this shared Sheaf does not know your e-mail address, so the other one cannot tell who you are there: "
+            "ask for it to be set in this one's configuration")
 
 
 def owner_email(cfg, member) -> tuple:

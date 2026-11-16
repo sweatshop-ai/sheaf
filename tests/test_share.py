@@ -591,7 +591,7 @@ def test_a_door_create_with_a_private_source_leaves_its_share_line_unticked_and_
 
 
 def test_a_ticked_share_line_that_a_private_source_cannot_open_does_not_open_a_repo_page(team):
-    # the line stays ticked on disk when it is written by hand: Hub.named still honours the private source
+    # the line stays ticked on disk when it is written by hand: Hub.opened_by_line still honours the private source
     out = made(team, "alice", PRIVATE_SOURCE)
     team.hub.file(out["doc"]).write_text(PRIVATE_SOURCE, encoding="utf-8")
     assert page(team, BOB, out["doc"]).status == 404
@@ -929,3 +929,116 @@ def test_the_row_button_answers_403_to_a_request_with_no_member(team):
     doc = made(team, "alice", PRIVATE)["doc"]
     got = team.door.post("/_/share", {"doc": doc, "hash": md_hash(read(team, doc))})
     assert got.status == 403, got.text
+
+
+# ── a Share ticked again by hand in the file opens the page as one ticked in the page does (ticket 31) ──
+
+def _withdrawn(team, text=SHARED, prefix="Share", name="plan.md"):
+    """A loose page its owner Shared and then withdrew through the page: `visibility: owner`, no `shared`."""
+    doc = made(team, "alice", text, doc=name)["doc"]
+    assert tick(team, ALICE, doc, prefix).status == 200
+    assert tick(team, ALICE, doc, prefix, release=True).status == 200
+    fm = read(team, doc)
+    assert "visibility: owner" in fm and "shared:" not in fm
+    return doc
+
+
+def _on_disk(team, doc, old, new):
+    team.hub.file(doc).write_text(read(team, doc).replace(old, new), encoding="utf-8")
+
+
+def _can_see(team, member, doc):
+    """What `member` is told of `doc`: the page, the Sheaf rows, the index list and the door's `documents` and `read`."""
+    who = {ALICE: "alice", BOB: "bob", CAROL: "carol"}[member]
+    bad, listing = call(team, who, "documents", open_only=False)
+    bad_read, _ = call(team, who, "read", doc=told(team, member, doc))
+    index = team.get("/_/index.json", member=member).json()
+    in_index = any(told(team, member, doc) == d["doc"] for r in index["roots"] for d in r["docs"])
+    return (page(team, member, doc).status, told(team, member, doc) in doc_of(team, member), in_index,
+            told(team, member, doc) in listing, not bad_read)
+
+
+def test_a_share_ticked_again_on_disk_after_a_withdrawal_opens_the_page_to_every_member(team):
+    doc = _withdrawn(team)
+    bob = team.hub.proxy.members[BOB]
+    _on_disk(team, doc, "- [ ] Share", "- [x] Share")
+    assert team.hub.member_owns(bob, doc)
+    assert team.hub.visible(bob, doc) and team.hub.may_open(bob, doc, visibility_fm(read(team, doc)))
+    for member in (BOB, CAROL):
+        assert _can_see(team, member, doc) == (200, True, True, True, True)
+    sub = _bob_streams(team, doc)
+    _comment(team, doc)
+    team.hub.entry(doc).live.refresh(force=True)
+    assert sub.drain() != []
+
+
+def visibility_fm(text):
+    from sheafmd.hub import visibility
+    return visibility.front_matter(text)
+
+
+def test_a_share_with_ticked_again_on_disk_opens_the_page_to_the_named_members_only(team):
+    doc = _withdrawn(team, NAMED, "Share with")
+    _on_disk(team, doc, "- [ ] Share with bob", "- [x] Share with bob")
+    assert _can_see(team, BOB, doc) == (200, True, True, True, True)
+    got, gone = page(team, CAROL, doc), page(team, CAROL, "loose-alice/nothing.md")
+    assert got.status == 404 and got.body == gone.body
+    assert _can_see(team, CAROL, doc)[1:] == (False, False, False, False)
+    assert not _leaks(_says(got))
+
+
+def test_a_share_ticked_on_disk_gives_the_same_result_as_the_page_save(team):
+    for text, prefix, ticked in ((SHARED, "Share", "- [x] Share"), (NAMED, "Share with", "- [x] Share with bob")):
+        by_hand = _withdrawn(team, text, prefix, name="hand-" + prefix.replace(" ", "-") + ".md")
+        _on_disk(team, by_hand, text.split("\n")[2], ticked)
+        by_save = made(team, "alice", text, doc="other-" + prefix.replace(" ", "-") + ".md")["doc"]
+        assert tick(team, ALICE, by_save, prefix).status == 200
+        for member in (BOB, CAROL):
+            assert _can_see(team, member, by_hand) == _can_see(team, member, by_save)
+
+
+def test_a_hand_edit_that_leaves_the_share_unticked_keeps_the_page_closed(team):
+    doc = _withdrawn(team)
+    closed = (404, False, False, False, False)
+    assert _can_see(team, BOB, doc) == closed                       # the line still unticked
+    _on_disk(team, doc, "- [ ] Share\n\n", "")
+    assert _can_see(team, BOB, doc) == closed                       # the line taken off
+    team.hub.file(doc).write_text("---\nvisibility: owner\n---\n" + PRIVATE, encoding="utf-8")
+    assert _can_see(team, BOB, doc) == closed                       # `visibility: owner` on a page that never had one
+    assert page(team, ALICE, doc).status == 200
+
+
+def test_a_recipient_cannot_change_the_share_of_a_page_ticked_again_on_disk(team):
+    doc = _withdrawn(team, NAMED, "Share with")
+    _on_disk(team, doc, "- [ ] Share with bob", "- [x] Share with bob")
+    before = read(team, doc)
+    assert tick(team, BOB, doc, "Share with", release=True).status == 409
+    text = read(team, doc)
+    i = next(n for n, b in enumerate(split_md_blocks(text)) if "Share with" in b.content)
+    got = team.post("/_/save", {"doc": doc, "hash": md_hash(text),
+                                "edits": [{"i": i, "html": '<ul class="task-list"><li><input type="checkbox" checked disabled>'
+                                                           ' Share with bob, carol</li></ul>'}]}, member=BOB)
+    assert got.status == 409 and read(team, doc) == before
+    bad, why = call(team, "bob", "update", doc=told(team, BOB, doc), text=before.replace("Share with bob", "Share with bob, carol"),
+                    expected_hash=md_hash(before))
+    assert bad and read(team, doc) == before
+    assert _can_see(team, CAROL, doc)[0] == 404
+
+
+def test_a_share_ticked_on_disk_withdrawn_on_disk_again_closes_the_page_at_the_next_request(team):
+    doc = _withdrawn(team)
+    bob = team.hub.proxy.members[BOB]
+    _on_disk(team, doc, "- [ ] Share", "- [x] Share")
+    assert team.hub.visible(bob, doc)
+    _on_disk(team, doc, "- [x] Share", "- [ ] Share")
+    assert not team.hub.visible(bob, doc) and page(team, BOB, doc).status == 404
+
+
+def test_a_share_ticked_on_disk_on_a_loose_page_with_a_private_source_stays_closed_unless_it_carries_a_shared_mark(team):
+    doc = made(team, "alice", SHARED)["doc"]
+    marked = "---\nvisibility: owner\nsources: [library:doc-123]\nshared: alice 2026-11-16T09:00:00Z\n---\n"
+    bare = marked.replace("shared: alice 2026-11-16T09:00:00Z\n", "")
+    team.hub.file(doc).write_text(bare + SHARED.replace("- [ ] Share", "- [x] Share"), encoding="utf-8")
+    assert _can_see(team, BOB, doc)[0] == 404                       # a hand tick writes no mark (#40)
+    team.hub.file(doc).write_text(marked + SHARED.replace("- [ ] Share", "- [x] Share"), encoding="utf-8")
+    assert _can_see(team, BOB, doc)[0] == 200                       # the owner's own Share wrote the mark

@@ -879,6 +879,7 @@ class Hub:
                                     members=self.member_seen)
             self.member_opened.forget_prefix(roots_mod.Address.prefix(name))
             self.shared_ids.forget_prefix(roots_mod.Address.prefix(name))
+            self.forwards.forget_prefix(roots_mod.Address.prefix(name))
             # After the registry lets go (a Tell queued from now on is refused, `Waiting.queue`) and before the
             # entries go, so the pages open on them hear `tell-cancelled` ahead of `gone`. A failure here must not
             # keep the root from being forgotten.
@@ -927,6 +928,12 @@ class Hub:
             e = self.entries.pop(old, None)
             self.entries.pop(new, None)         # an entry made for the address before the page came is made again
         if e is not None:
+            # After the versions were carried (a version kept under the old key is the last of the old page, none of
+            # the new one's): what the entry's document still holds at the old address goes, as `forget_root` does it.
+            try:
+                e.live.forget()
+            except Exception:
+                self.record_exception("move-store-failed", new)
             e.bus.publish("moved", {"doc": old, "to": new})
         for address in (old, new):
             try:

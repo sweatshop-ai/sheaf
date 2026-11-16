@@ -361,3 +361,142 @@ def test_a_waiting_tell_goes_with_the_page(team):
     new = moved(team, ALICE, old, "b")
     rows = waiting.read_json(waiting._file(), [], aside=False)
     assert [r["doc"] for r in rows] == [new]
+
+
+# ── the fix round over c844295 ───────────────────────────────────────────────
+
+def test_a_door_create_in_a_loose_root_waits_for_a_move_under_way(team):
+    """A loose root's name has no lock of its own (`place.held` holds nothing there): the moves' lock is the one a door
+    create takes, so it neither makes a file between a move's checks and its rename nor reads a Forward half written."""
+    import threading
+    from sheafmd.hub import moves
+    done = threading.Event()
+    out = []
+
+    def create():
+        out.append(call(team, "alice", "create", doc="late.md", text=PLAN))
+        done.set()
+    with moves._LOCK:
+        worker = threading.Thread(target=create)
+        worker.start()
+        assert not done.wait(0.4)
+    worker.join(10)
+    assert done.is_set() and out == [(False, out[0][1])]
+
+
+def test_a_door_create_in_a_registered_root_does_not_wait_for_the_moves_lock(team, tmp_path):
+    import threading
+    from sheafmd.hub import moves
+    work = tmp_path / "alice-work"
+    (work / "n.md").write_text(PLAN, encoding="utf-8")
+    team.hub.roots.for_document(work / "n.md")        # a root of the member's own, not the loose one
+    done = threading.Event()
+    out = []
+
+    def create():
+        out.append(call(team, "alice", "create", doc=str(work / "reg.md"), text=PLAN))
+        done.set()
+    with moves._LOCK:
+        worker = threading.Thread(target=create)
+        worker.start()
+        finished = done.wait(5)
+    worker.join(10)
+    assert finished and out[0][0] is False, out
+
+
+def test_a_folder_move_that_fails_on_the_third_of_five_pages_puts_every_page_back(team, monkeypatch):
+    from sheafmd.hub import moves
+    hub = team.hub
+    olds = [in_folder(team, "f", name=f"p{i}.md") for i in range(5)]
+    news = [o.replace("/f/", "/g/") for o in olds]
+    hub.docs.put(olds[0], {"title": "Kept"})
+    hub.seen.mark(olds[1], "c1", 2)
+    real, calls = moves._put, []
+
+    def flaky(*args):
+        calls.append(args[3])
+        if len(calls) == 3:
+            raise moves.Refused(409, "disk full")
+        return real(*args)
+    monkeypatch.setattr(moves, "_put", flaky)
+    got = team.post("/_/move-folder", {"folder": "f", "to": "g"}, member=ALICE)
+    assert got.status == 409 and "disk full" in got.text
+    assert all(hub.file(o).exists() and read(team, o) == PLAN for o in olds)
+    assert not any(hub.file(n).exists() for n in news)
+    assert all(hub.forwards.follow(a) is None for a in olds + news)
+    assert hub.docs.get(olds[0]) == {"title": "Kept"} and hub.docs.get(news[0]) == {}
+    assert hub.seen.get(olds[1]) == {"c1": 2} and hub.seen.get(news[1]) == {}
+    assert not (hub.file(olds[0]).parent.parent / "g").exists()
+
+
+def test_forget_prefix_drops_the_forwards_of_a_root_and_those_that_lead_into_it():
+    f = forwards.Forwards()
+    f.add("r/a/x.md", "r/b/x.md", by="Alice")
+    f.add("s/a/x.md", "r/c/x.md", by="Alice")
+    f.add("s/a/y.md", "s/b/y.md", by="Alice")
+    f.forget_prefix("r/")
+    assert f.follow("r/a/x.md") is None and f.follow("s/a/x.md") is None and f.follow("s/a/y.md") == "s/b/y.md"
+
+
+def test_forgetting_a_root_takes_its_forwards_with_it(team):
+    old = made(team, "alice", PLAN)["doc"]
+    new = moved(team, ALICE, old, "b")
+    assert team.hub.forwards.follow(old) == new
+    team.hub.forget_root("loose-alice")
+    assert team.hub.forwards.follow(old) is None
+
+
+def test_the_old_entrys_document_lets_go_of_its_versions_before_the_entry_goes(team, monkeypatch):
+    old = made(team, "alice", PLAN)["doc"]
+    hub = team.hub
+    e = hub.entry(old)
+    gone = []
+    real = e.live.forget
+    monkeypatch.setattr(e.live, "forget", lambda: (gone.append(1), real())[1])
+    moved(team, ALICE, old, "b")
+    assert gone == [1]
+
+
+def test_a_version_put_at_the_old_address_during_the_move_does_not_survive_it(team, monkeypatch):
+    old = made(team, "alice", PLAN)["doc"]
+    hub = team.hub
+    hub.entry(old)
+    kept = md_hash(read(team, old))
+    hub.versions.put(old, read(team, old))
+    real = type(hub.versions).rename
+
+    def rename_then_stale(self, a, b):
+        real(self, a, b)
+        self.put(a, "# Stale\n")        # a write that began before the move lands under the old key
+    monkeypatch.setattr(type(hub.versions), "rename", rename_then_stale)
+    new = moved(team, ALICE, old, "b")
+    assert hub.versions.get(old, md_hash("# Stale\n")) is None
+    assert hub.versions.get(new, kept) is not None
+
+
+def test_a_recipients_open_tab_is_told_gone_under_its_opaque_name_when_the_page_moves(team):
+    old = made(team, "alice", SHARED)["doc"]
+    tick(team, ALICE, old, "Share")
+    opaque = told(team, BOB, old)
+    sub = team.get(f"/_/live?doc={opaque}", member=BOB).stream
+    sub.drain()
+    new = moved(team, ALICE, old, "b")
+    got = [(n, d) for n, d in sub.drain()]
+    assert ("gone", {"doc": opaque}) in got
+    assert not any(n == "moved" for n, _ in got)
+    assert told(team, BOB, new) == opaque
+
+
+def test_a_folder_the_move_made_before_a_private_refusal_is_taken_back(team, monkeypatch):
+    from sheafmd import beneath
+    from sheafmd.hub import place
+    old = made(team, "alice", PLAN)["doc"]
+    real = place.make_folders
+
+    def private(top, rel, judge=None):
+        os.close(real(top, rel, judge)[0])
+        raise beneath.Private("loose-alice")
+    monkeypatch.setattr(place, "make_folders", private)
+    got = move(team, ALICE, old, "x/y")
+    assert 400 <= got.status < 500
+    assert team.hub.file(old).exists() and not (team.hub.file(old).parent / "x").exists()

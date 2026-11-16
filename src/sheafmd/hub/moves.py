@@ -16,6 +16,13 @@ from .roots import Address, NotFound
 _LOCK = threading.RLock()       # one move at a time in a hub: the checks and the rename are one step
 
 
+@contextlib.contextmanager
+def exclusive():
+    """The moves' lock, for what else makes or reads a name of a loose root: its names are held by nothing else."""
+    with _LOCK:
+        yield
+
+
 class Refused(Exception):
     """A move the hub will not make: the status the route answers with, and the sentence."""
 
@@ -167,13 +174,31 @@ def move_folder(hub, member, folder: str, to: str) -> list:
             _clear(hub, new, old)
             _quiet(hub, old)
             plan.append((rel, new_rel, old, new))
-        done = []
-        for rel, new_rel, old, new in plan:
-            with place.held(hub, old), place.held(hub, new):
-                _put(hub, root, rel, new_rel, old, new)
-                hub.moved_page(old, new, member.name)
-            done.append((old, new))
-        return done
+        done, before = [], hub.forwards.snapshot()
+        try:
+            for rel, new_rel, old, new in plan:
+                with place.held(hub, old), place.held(hub, new):
+                    _put(hub, root, rel, new_rel, old, new)
+                    hub.moved_page(old, new, member.name)
+                done.append((rel, new_rel, old, new))
+        except BaseException:
+            _undo(hub, root, member, done, before)
+            raise
+        return [(old, new) for _, _, old, new in done]
+
+
+def _undo(hub, root, member, done: list, before: dict):
+    """A folder move that failed halfway: the pages already moved go back, last first, each with what the hub keeps of it,
+    and the Forwards are as they were. A page that cannot go back is a row in the diagnostics log, and the others go back
+    all the same."""
+    for rel, new_rel, old, new in reversed(done):
+        try:
+            with place.held(hub, new), place.held(hub, old):
+                _put(hub, root, new_rel, rel, new, old)
+                hub.moved_page(new, old, member.name)
+        except Exception:
+            hub.record_exception("move-undo-failed", old)
+    hub.forwards.restore(before)
 
 
 def _pages(top: Path, folder: str) -> list[str]:

@@ -9,6 +9,7 @@ from helpers import BEA, CAL, FRONT, door, rpc
 from test_hub_commits import DOC, box, edit, git, merged_on_github, rectoversos, remote  # noqa: F401  (fixtures)
 
 from sheafmd import diagnostics
+from sheafmd.mcp import Caller, written_from
 from sheafmd.hub import proxy, writelog
 from sheafmd.hub.state import Tokens
 from sheafmd.hub.writelog import WriteLog
@@ -205,3 +206,15 @@ def test_a_pull_that_the_page_never_matched_does_not_swallow_a_later_disk_write(
     assert not log.is_pull("a.md", "h-left")
     log.end_pull("a.md", "h-left")
     assert log.is_pull("a.md", "h-left") and not log.is_pull("a.md", "h-left")
+
+
+def test_the_box_s_james_is_a_tiroir_write_and_his_session_header_is_the_session():
+    james = Caller("James", session=SESSION)
+    assert written_from(james) == ("tiroir", {"session": SESSION})
+    assert written_from(Caller("James", session="", declared={"session": "own"}))[1]["session"] == "own"
+    assert written_from(Caller("James", session=""))[0] == "tiroir"
+    token = object()                                  # a token's row; only that there is one matters here
+    assert written_from(Caller("Bea", token, declared={"chat": "c", "session": "s"}))[0] == "chat client"
+    assert written_from(Caller("Bea", token, declared={"host": "h"}))[0] == "laptop"
+    assert written_from(Caller("Bea", token))[0] == "chat client"
+    assert written_from(Caller("Bea"))[0] == "laptop"                                  # the stdio door

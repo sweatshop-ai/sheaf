@@ -239,6 +239,19 @@ def markdown_files(root) -> list[str]:
     return out
 
 
+def written_from(caller: Caller) -> tuple[str, dict]:
+    """(place class, declared) of a door write, for the Write log, what the caller declared in its headers kept as declared.
+    The box's James (a token of `[list]`'s james_tokens) is `tiroir`, and his `X-James-Session` the session when he declared
+    no other; a caller that declared a chat id is a chat client; one that declared a session, a machine or a link, or that is
+    the stdio door, is a laptop; any other is a chat client that declared nothing."""
+    d = dict(caller.declared)
+    if caller.session is not None:
+        d["session"] = d.get("session") or caller.session
+        return "tiroir", d
+    laptop = caller.token is None or d.get("session") or d.get("host") or d.get("link")
+    return ("chat client" if d.get("chat") or not laptop else "laptop"), d
+
+
 class Door:
     def __init__(self, hub):
         self.hub = hub
@@ -707,13 +720,8 @@ class Door:
         return out
 
     def _logged_write(self, name: str, address: str, caller: Caller):
-        """The Write log's line of a door write: what the caller declared in its headers, kept as declared. A caller that
-        declared a chat id is a chat client; one that declared a session, a machine or a link, or that is the stdio door,
-        is a laptop; any other is a chat client that declared nothing."""
-        d = caller.declared
-        place = "chat client" if d.get("chat") else (
-            "laptop" if caller.token is None or d.get("session") or d.get("host") or d.get("link") else "chat client")
-        self.hub.writes.add(address, caller.display, place, name, **d)
+        place, declared = written_from(caller)
+        self.hub.writes.add(address, caller.display, place, name, **declared)
 
     @staticmethod
     def _check_size(text: str):

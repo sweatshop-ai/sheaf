@@ -17,7 +17,7 @@ import threading
 import time
 import traceback
 import uuid
-from contextlib import ExitStack, contextmanager, suppress
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -1253,22 +1253,40 @@ class Hub:
             self.writes.add(e.address, "?", "tiroir", "disk")
         return got
 
+    def _page_of(self, path: Path) -> str | None:
+        """The name the hub opens the rectoverso at `path` under: where it places rectoversos (9.11), the name under its
+        project for a file of `<project>/private/<short>/`, and the list's for a file of a private root, as `_writers_out`
+        names them; else the address of its root. None for a file no root of the hub holds."""
+        listed = next((r for r in self.roots.all() if place.applies(self, r.name)), None)
+        for r in self.roots.all():
+            if place.applies(self, r.name):
+                at = r
+            elif r.id in self.private_roots and listed is not None:
+                at = listed
+            else:
+                continue
+            rel = os.path.relpath(path, os.path.realpath(r.path))
+            if not rel.startswith("..") and (name := place.logical(rel.replace(os.sep, "/"))):
+                return f"{at.name}/{name}"
+        try:
+            return self.roots.address(path)
+        except roots_mod.NotFound:
+            return None
+
     def pulling(self, folder: Path, files: list[tuple[Path, str]]):
         """A pull of the repo at `folder` is about to change `files`, (absolute path, last author): the page open on one
         sees it change: until `pulled`, what it sees of the file is the pull's, not a disk write."""
         for path, _ in files:
-            with suppress(roots_mod.NotFound):
-                address = self.roots.address(path)
-                if address in self.entries:
-                    self.writes.expect_pull(address)
+            address = self._page_of(path)
+            if address in self.entries:
+                self.writes.expect_pull(address)
 
     def pulled(self, folder: Path, files: list[tuple[Path, str]], ok: bool):
         """The pull of `files` ended: each is known by the text it left, so the page's next sight of it is the pull's; when
         the pull went through, a line each, `git · <author>`, for each that is a rectoverso of a root the hub serves."""
         for path, author in files:
-            try:
-                address = self.roots.address(path)
-            except roots_mod.NotFound:
+            address = self._page_of(path)
+            if address is None:
                 continue
             try:
                 left = md_hash(path.read_text(encoding="utf-8"))

@@ -65,6 +65,7 @@ class LiveDocument:
         self._owner = None
         text = self._read()
         self._text, self._hash = text, rds.md_hash(text)
+        self._branch = None          # what the render answered with: the branch of a clone's page, read where the text was
         # Every text this hub run has handed a page a hash of, so a save made against an older
         # one can be merged onto the file as it is now instead of refused. The disk copy
         # (state.Versions) answers for a hash from before a restart.
@@ -179,8 +180,9 @@ class LiveDocument:
         # runs). The page would then carry a hash the hub does not know, the watcher would see
         # its own hash and never rebuild, and every new comment would fail with "select the text again".
         text = self._read()
-        self._render(text)
+        branch = self._render(text)
         self._text, self._hash = text, rds.md_hash(text)
+        self._branch = branch if isinstance(branch, str) else None
         self._remember(text)
 
     def _telling_view(self):
@@ -205,6 +207,12 @@ class LiveDocument:
         """(hash, text) of what the page was last rendered from."""
         with self._held():
             return self._hash, self._text
+
+    def current_read(self):
+        """(hash, text, branch) of what the page was last rendered from: the branch is the clone's HEAD at that render
+        (None for a page that is not a clone's), so the hash and the branch are one read."""
+        with self._held():
+            return self._hash, self._text, self._branch
 
     def snapshot(self):
         """What an open page needs to update its comments in place, as of the text it was last

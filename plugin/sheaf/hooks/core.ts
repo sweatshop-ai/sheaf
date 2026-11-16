@@ -5,7 +5,8 @@ export const MIN_GAP_MS = 5_000     // between two polls that returned at once (
 export const MAX_BACKOFF_MS = 5 * 60_000
 export const CLI_WORST_CASE_MS = (5 + 5 + 35) * 1000          // `sheaf tells-poll` at its slowest (send.py): initialize 5 s, its notice 5 s, the long poll 35 s
 export const POLL_TIMEOUT_MS = CLI_WORST_CASE_MS + 5_000      // over that, so the mod never kills a poll the CLI still waits on
-export const KEPT_MAX = 1000                                 // a safety bound on the Tells kept for a resume, far above any real queue: a Tell leaves the kept set when the door stops listing it
+export const KEPT_MAX = 1000                                 // a bound on the Tells kept for a resume, far above any real queue; past it the oldest go first
+export const KEPT_TTL_MS = 7 * 24 * 3600 * 1000              // a Tell is kept for a resume this long
 export const SUBMIT_WINDOW_MS = 60_000                       // a submit that never starts a turn frees the next Tell after this
 
 export type Tell = { id: string; doc: string; thread: string; message: string; by: string; at: string; door?: string }      // `door`: set by `accept`, the tiroir that listed it
@@ -21,8 +22,8 @@ export type DoorState = {
   notBefore: number          // no poll of this door before this time
 }
 
-/** A Tell kept for a resume: the tiroir that listed it, and when it was kept (a sequence number, so the age holds across tiroirs). */
-export type Kept = { door: string; seq: number }
+/** A Tell kept for a resume: the tiroir that listed it, when it was kept (`at`, to expire it) and its place in the order (`seq`, across tiroirs). */
+export type Kept = { door: string; seq: number; at: number }
 export type KeptEntry = Kept & { id: string }
 
 export type Poller = {
@@ -31,12 +32,13 @@ export type Poller = {
   session: string            // the session id the held and delivered Tells belong to
   held: Tell[]               // taken from any door, not yet submitted (an Esc, or a turn running)
   delivered: Set<string>     // Tells already submitted: the door lists a Tell until the session answers it
-  stored: Map<string, Kept>  // Tells whose submit started and was not rejected: what is kept for a `claude --resume`
+  starting: Tell | null      // the Tell handed to `$.prompt.submit` whose turn has not started: kept for a resume once it does
+  stored: Map<string, Kept>  // Tells whose own turn started: what is kept for a `claude --resume`
   seq: number                // the last sequence number given to a kept Tell: age across tiroirs
   submittingUntil: number    // a Tell was handed to `$.prompt.submit` and its turn has not started: no second one before it does, or this time
 }
 
-export const fresh = (): Poller => ({ doors: [], armedFor: '', session: '', held: [], delivered: new Set(), stored: new Map(), seq: 0, submittingUntil: 0 })
+export const fresh = (): Poller => ({ doors: [], armedFor: '', session: '', held: [], delivered: new Set(), starting: null, stored: new Map(), seq: 0, submittingUntil: 0 })
 
 /** Add a tiroir to poll; null when this session polls it already. */
 export function addDoor(p: Poller, door: Door): DoorState | null {
@@ -93,34 +95,28 @@ export function accept(p: Poller, tells: Tell[], door: string) {
   }
 }
 
-/** A poll of one tiroir listed these Tells: a kept Tell of that tiroir that is not among them was answered, so it is
- *  forgotten. True when something was. */
-export function pruneStored(p: Poller, door: string, listed: Tell[]): boolean {
-  const ids = new Set(listed.map(t => t.id))
-  let changed = false
-  for (const [id, k] of p.stored) if (k.door === door && !ids.has(id)) { p.stored.delete(id); changed = true }
-  return changed
+/** Keep a Tell whose own turn started: the prompt is in the transcript, so a resumed session has it. */
+export function remember(p: Poller, id: string, door: string, now: number) {
+  p.stored.set(id, { door, seq: ++p.seq, at: now })
 }
 
-/** Keep a Tell whose submit starts. */
-export function remember(p: Poller, id: string, door: string) {
-  p.stored.set(id, { door, seq: ++p.seq })
-}
+const live = (k: Kept, now: number) => now - k.at <= KEPT_TTL_MS
 
-/** Read back what an earlier run kept: the entries, whatever else the store holds being ignored. */
-export function restore(p: Poller, entries: unknown) {
+/** Read back what an earlier run kept: the entries not yet expired, whatever else the store holds being ignored. */
+export function restore(p: Poller, entries: unknown, now: number) {
   if (!Array.isArray(entries)) return
   for (const e of entries) {
-    if (!e || typeof e.id !== 'string' || typeof e.door !== 'string' || typeof e.seq !== 'number') continue
+    if (!e || typeof e.id !== 'string' || typeof e.door !== 'string' || typeof e.seq !== 'number' || typeof e.at !== 'number') continue
+    if (!live(e, now)) continue
     p.delivered.add(e.id)
-    p.stored.set(e.id, { door: e.door, seq: e.seq })
+    p.stored.set(e.id, { door: e.door, seq: e.seq, at: e.at })
     p.seq = Math.max(p.seq, e.seq)
   }
 }
 
-/** What is kept for a resume, oldest first; past KEPT_MAX the oldest are dropped, whichever tiroir they are of. */
-export function storedEntries(p: Poller): KeptEntry[] {
-  return [...p.stored].map(([id, k]) => ({ id, ...k })).sort((a, b) => a.seq - b.seq).slice(-KEPT_MAX)
+/** What is kept for a resume, oldest first: the entries of the last seven days, and past KEPT_MAX the oldest are dropped, whichever tiroir they are of. */
+export function storedEntries(p: Poller, now: number): KeptEntry[] {
+  return [...p.stored].filter(([, k]) => live(k, now)).map(([id, k]) => ({ id, ...k })).sort((a, b) => a.seq - b.seq).slice(-KEPT_MAX)
 }
 
 /** The text a Tell becomes in the session: says where it came from, and that it is another party's text, not the member's. */
@@ -136,6 +132,7 @@ export function takeNext(p: Poller, idle: boolean, interrupted: boolean, now: nu
   const t = p.held.shift() ?? null
   if (t) {
     p.delivered.add(t.id)
+    p.starting = t
     p.submittingUntil = now + SUBMIT_WINDOW_MS
   }
   return t
@@ -144,6 +141,7 @@ export function takeNext(p: Poller, idle: boolean, interrupted: boolean, now: nu
 /** The submit of a Tell failed: it goes back first in line, as if never taken. */
 export function putBack(p: Poller, t: Tell) {
   p.delivered.delete(t.id)
+  p.starting = null
   p.held.unshift(t)
   p.submittingUntil = 0
 }

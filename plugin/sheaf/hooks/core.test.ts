@@ -23,7 +23,7 @@ test('a failure backs the poll off, doubling to five minutes, and a success rese
 
 test('a Tell is submitted when idle, never mid-turn, and after an Esc it waits', async () => {
   const p = fresh()
-  p.held.push({ id: 'a', doc: 'x/y.md', message: 'hello', from: 'Bea' })
+  p.held.push({ id: 'a', doc: 'x/y.md', thread: 'c1', message: 'hello', by: 'Bea', at: 'now' })
   expect(takeNext(p, false, false)).toBeNull()
   expect(takeNext(p, true, true)).toBeNull()
   expect(p.held.length).toBe(1)
@@ -32,7 +32,7 @@ test('a Tell is submitted when idle, never mid-turn, and after an Esc it waits',
 })
 
 test('the session reads where a Tell came from', async () => {
-  const text = tellText({ id: 'a', doc: 'x/y.md', message: 'hello', from: 'Bea' })
+  const text = tellText({ id: 'a', doc: 'x/y.md', thread: 'c1', message: 'hello', by: 'Bea', at: 'now' })
   expect(text).toContain('Bea')
   expect(text).toContain('x/y.md')
   expect(text).toContain('did not type')

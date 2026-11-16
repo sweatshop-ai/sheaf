@@ -51,8 +51,8 @@ def test_a_client_page_is_polled_through_doc_every_30_seconds(tab, site):
     tab.open()
     run_clock(page, 1_000)
     first = seen.count("doc")
-    run_clock(page, 29_000)
+    run_clock(page, 28_000)
     assert seen.count("doc") == first          # not before the interval
-    run_clock(page, 2_000)
+    run_clock(page, 3_000)
     until(lambda: seen.count("doc") > first, what="the poll through /_/doc")
     assert "live" not in seen and not banner(page)

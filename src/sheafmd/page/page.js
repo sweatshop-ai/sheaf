@@ -4337,8 +4337,11 @@ var create = function (ROOT, CFG, opts) {
       }
       reloadKeep(popId, 'upgrade');
     };
+    // A client tiroir's page, opened through this hub (an address under `Clients/`, SPEC 9.9), has no stream: the hub keeps nothing of it
+    // and says no to `/_/live` for it. The page asks `/_/doc` every 30 s instead, and no stream failing is no "Hub unreachable".
+    var THROUGH = /^Clients(\/|$)/.test(CFG.doc || ''), POLL_MS = 30000;
     var connect = function () {
-      if (docGone || unmounted) return;         // an answer that comes after unmount() opens no stream for a page that is gone
+      if (THROUGH || docGone || unmounted) return;         // an answer that comes after unmount() opens no stream for a page that is gone
       try { live = new EventSource('/_/live?doc=' + encodeURIComponent(CFG.doc)); } catch (e) { return; }
       live.onopen = function () {
         streamBack();
@@ -4455,6 +4458,7 @@ var create = function (ROOT, CFG, opts) {
       });
     };
     connect();
+    if (THROUGH) setInterval(function () { if (!unmounted && document.visibilityState === 'visible') checkText(); }, POLL_MS);
     // Belt and braces, and an event rather than a timer: coming back to the tab
     // reopens a stream the browser gave up on.
     listen(document, 'visibilitychange', function () {

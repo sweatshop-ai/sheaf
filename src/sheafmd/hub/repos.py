@@ -376,6 +376,20 @@ class Repos:
                 data[repo] = {k: v for k, v in data.get(repo, {}).items() if k != "restore"}
                 write_text_atomic(self._usage_file, json.dumps(data, indent=1, sort_keys=True) + "\n")
 
+    def wake(self, repo: str) -> bool:
+        """A write is about to go to a page of `repo`: a clone that sleeps is used now and its folders come back before the
+        write looks for its file (the other wake is a report's, in the repo's thread). A write is a use of the clone. Nothing
+        is done for a clone that is awake, or that moved to another tiroir (it never wakes); False for that one."""
+        if self.moved_to(repo) is not None:
+            return False
+        if not self.sleeping(repo):
+            return True
+        dest = self.clone_dir(repo)
+        token = self.provider.token(repo)
+        self._use(repo)
+        self._wake(repo, dest, token)
+        return True
+
     def page_text(self, repo: str, path: str, commit: str) -> str | None:
         """The text of the page `path` at `commit`, read from git and not from the work tree, so a sleeping clone's pages open
         at their last text. Nothing is fetched: None for a page the clone does not hold."""

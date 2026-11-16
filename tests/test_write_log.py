@@ -9,7 +9,7 @@ from helpers import BEA, CAL, FRONT, door, rpc
 from test_hub_commits import DOC, box, edit, git, merged_on_github, rectoversos, remote  # noqa: F401  (fixtures)
 
 from sheafmd import diagnostics
-from sheafmd.hub import proxy
+from sheafmd.hub import proxy, writelog
 from sheafmd.hub.state import Tokens
 from sheafmd.hub.writelog import WriteLog
 from sheafmd.source import md_hash
@@ -171,8 +171,17 @@ def test_lines_are_kept_by_address_and_the_last_write_of_each_is_its_own(agents,
 def test_the_write_log_is_not_the_diagnostics_log(agents, rectoversos):
     update(agents, "bea-claude", declared(session=SESSION))
     assert not any(r["kind"] == "write" or r.get("session") == SESSION for r in diagnostics.read())
-    assert agents.hub.writes is not None and not hasattr(diagnostics, "write_log")
+    assert writelog.log_path() != diagnostics.log_path()
+    assert SESSION in writelog.log_path().read_text(encoding="utf-8")
+    assert SESSION not in diagnostics.log_path().read_text(encoding="utf-8")
 
+
+def test_two_members_writing_the_same_page_keep_their_own_lines(agents):
+    update(agents, "bea-claude", declared(session=SESSION), words="Bea's.")
+    update(agents, "cal-claude", words="Cal's.")
+    got = lines(agents, member=BEA)
+    assert [l["writer"] for l in got["lines"]] == ["Claude Code (Bea)", "Claude Code (Cal)"]
+    assert got["last"]["writer"] == "Claude Code (Cal)" and got["last_session"]["writer"] == "Claude Code (Bea)"
 
 def test_the_log_is_read_again_by_a_hub_that_starts_over(agents):
     update(agents, "bea-claude", declared(session=SESSION))

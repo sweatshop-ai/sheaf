@@ -126,8 +126,7 @@ TOOLS = {
         "required": ["doc", "text", "expected_hash"]},
 }
 PAGE_TOOLS = ("read", "create", "update")    # the key, or a token made with --write (SPEC 9.7)
-WRITE_TOOLS = ("create", "update")           # each call leaves a row in the diagnostics log (SPEC 15)
-WRITES = ("create", "update")                                   # the tools that leave a line in the Write log
+WRITE_TOOLS = ("create", "update")           # each call leaves a row in the diagnostics log (SPEC 15) and a line in the Write log (9.12)
 SESSION_WRITES = ("create", "update", "reply", "resolve")    # a write that names James's session to the hub (9.12)
 MAX_TEXT = 1024 * 1024           # bytes of UTF-8 a create or an update may write (SPEC 12)
 NO_RIGHT = ("This token reads and answers comments; it does not read, make or change pages. A "
@@ -700,7 +699,7 @@ class Door:
             self.hub.record(f"door-{name}", doc, outcome="stale" if isinstance(e, Stale) else "refused",
                             reason=e.why, **who)
             raise
-        if name in WRITES and out.get("changed", True):
+        if name in WRITE_TOOLS and out.get("changed", True):
             self._logged_write(name, out["doc"], caller)
         self.hub.record(f"door-{name}", out["doc"], outcome="written" if out.get("changed", True)
                         else "unchanged", hash=out["hash"], bytes=len(_as_read(args["text"]).encode("utf-8")),

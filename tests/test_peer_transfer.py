@@ -293,4 +293,5 @@ def test_a_landing_that_waited_for_the_lock_past_the_senders_deadline_lands_noth
     res = transfer(members, peer_token())
     assert res.status == 409 and res.json()["why"] == "too_slow"
     time.sleep(0.05)
-    assert not list(members.hub.proxy.members) or members.hub.loose.known(members.hub.proxy.members[BEA]) is None
+    root = members.hub.loose.known(members.hub.proxy.members[BEA])
+    assert root is None or not [p for p in root.rglob("notes.md")]

@@ -20,7 +20,7 @@ import uuid
 from pathlib import Path
 
 from .. import connect, paths
-from ..source import STAMP_FORMAT, md_hash
+from ..source import STAMP_FORMAT, file_lock, md_hash
 from . import archive, channel, incoming, loose, moves, place, proxy, state
 
 NO_EMAIL = ("this shared Sheaf does not know your e-mail address, so the other one cannot tell who you are there: "
@@ -125,7 +125,7 @@ def move_to_tiroir(hub, member, address: str, origin: str) -> dict:
     try:
         marked.enter_context(moves._marked(hub, address))
     except moves.Refused as r:
-        raise Refusal(r.status, "tell_running", r.message) from None
+        raise Refusal(r.status, "busy" if r.message == moves.BEING_MOVED else "tell_running", r.message) from None
     with marked:
         return _transfer(hub, member, root, rel, address, origin, email, token)
 
@@ -151,7 +151,7 @@ def _transfer(hub, member, root, rel: str, address: str, origin: str, email: str
         raise Refusal(409, why, str(answer.get("say") or incoming.SAYS.get(why) or "the other shared Sheaf refused the page"))
     if status != 200 or not isinstance(answer.get("address"), str) or not isinstance(answer.get("hash"), str):
         raise Refusal(502, "failed", f"{origin} could not take the page ({status}): it is where it was, and sending it again lands it once")
-    with moves._LOCK, place.held(hub, address), hub.page_lock(address):
+    with moves._LOCK, place.held(hub, address), hub.page_lock(address), file_lock(hub.file(address)):     # the file lock a save takes: what it wrote is read here or after
         try:
             now = md_hash(hub.file(address).read_text(encoding="utf-8"))
         except (OSError, ValueError):

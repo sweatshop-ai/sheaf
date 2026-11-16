@@ -896,6 +896,7 @@ class Door:
                 # Made there, it would be untracked and leave the listing (8.6): refused as a move there is.
                 raise ToolError(f"{address} cannot be made: {place.IGNORED}, so it would have no home.", "path")
             rel = home
+        self.hub.writes.expect_own(address, md_hash(text))     # a look at the file before `wrote()` is not a disk write
         try:
             if name is not None and (rel != name or private_home):    # the folders, walked as create_file walks
                 with place.folders_lock(top, name):     # so no move's tidying takes them before the file is in

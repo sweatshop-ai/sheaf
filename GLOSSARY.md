@@ -134,7 +134,7 @@ How the agency's tiroir shows a client tiroir's pages: its "Clients" folder asks
 _Avoid_: mirror, sync, copy
 
 **Team comment**:
-A comment the agency's members leave on a client tiroir's rectoverso that the client never sees. It lives on the agency's tiroir, tied to the rectoverso's address, on a team verso beside the client's; it never reaches the client tiroir. (Named 2026-11-16 by the maintainer, wayfinder `sheaf-in-open-webui` ticket 22; not built.)
+A comment the agency's members leave on a client tiroir's rectoverso that the client never sees. It lives on the agency's tiroir, tied to the rectoverso's address, on a team verso beside the client's; it never reaches the client tiroir. The store, with its view and API on the agency hub, is built; the hook-up to a client page waits on the read-through.
 _Avoid_: internal comment, private comment, team note
 
 **Default tiroir** (of a person):

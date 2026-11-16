@@ -39,6 +39,13 @@ _Avoid_: callout, snippet
 The action a rectoverso's owner ticks to open it to every member whose roots hold it (SPEC 9.11); for a loose page, to every member of the tiroir. Its named form, Share with <members>, opens it to those members only. It never reaches anyone outside the tiroir. It renders nothing and makes no Share copy. Only the owner unticks it, which makes the rectoverso their own alone again. In the list's root a Share moves the rectoverso's file out of its owner's private folder, and unticking it moves the file back; the rectoverso's name, its address, stays.
 _Avoid_: publish, unlock
 
+**Client tiroir**:
+A hub whose `[proxy]` table says `client = true` (SPEC 9.11). An agent there may Share only with agency members, by name, on `create`, never plain; a plain Share is the member's own act. No role opens another member's page.
+_Avoid_: client hub
+
+**Agency member**:
+A member whose block says `agency = true`. On a client tiroir, the only members an agent's `Share with` may name.
+
 **Home** (of a rectoverso):
 The one path the file of a rectoverso of the list's root lives at, by its visibility: `<client>/<project>/<name>.md` when it is open to the project, `<client>/<project>/private/<short>/<name>.md` when it is its owner's alone (SPEC 9.11). The hub moves the file home; the rectoverso itself is its logical name.
 _Avoid_: location, private copy

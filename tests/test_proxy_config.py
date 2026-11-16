@@ -282,3 +282,36 @@ def test_an_agent_name_clash_is_a_token_names_error_with_its_own_wording():
     with pytest.raises(proxy.TokenNamesError) as e:
         proxy.check_agent_names(clash, proxy_mode=False)             # loopback: there is no member to give it to
     assert "member" not in str(e.value).replace("(sheaf token list)", "") and "another client" in str(e.value)
+
+
+def test_client_and_agency_are_read():
+    write_config(table(client="true").replace('roots = ["/srv/pages/mails"]', 'short = "ada"\nagency = true\nroots = ["/srv/pages/mails"]')
+                 + f'\n[proxy.members."{BOB}"]\nname = "Bob"\nroots = ["/srv/b"]\n')
+    got = proxy.load()
+    assert got.client is True and got.members[ADA].agency is True and got.members[BOB].agency is False
+
+
+def test_without_client_a_tiroir_is_no_client_tiroir():
+    got = (write_config(table()), proxy.load())[1]
+    assert got.client is False and got.members[ADA].agency is False
+
+
+@pytest.mark.parametrize("value", ['"yes"', "1", "[true]"])
+def test_a_client_that_is_not_true_or_false_stops_the_start(value):
+    write_config(table(client=value))
+    with pytest.raises(ProxyError, match="'client' must be true or false") as e:
+        proxy.load()
+    assert "config.toml" in str(e.value)
+
+
+@pytest.mark.parametrize("value", ['"yes"', "1"])
+def test_an_agency_that_is_not_true_or_false_stops_the_start(value):
+    write_config(table() + f"agency = {value}\n")
+    with pytest.raises(ProxyError, match="'agency' must be true or false"):
+        proxy.load()
+
+
+def test_a_client_tiroir_with_no_agency_member_stops_the_start():
+    write_config(table(client="true"))
+    with pytest.raises(ProxyError, match="no agency member"):
+        proxy.load()

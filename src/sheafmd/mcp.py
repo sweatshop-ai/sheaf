@@ -427,7 +427,9 @@ class Door:
         if not isinstance(doc, str) or (member := self._member(caller)) is None:
             return text
         real = self.hub.unalias(doc)
-        told = self.hub.alias(member, real)
+        root = self.hub.roots.get(Address.parse(real).root)
+        # Only a page Shared with the caller has an opaque name: a made-up name in another's root is none, and writes none.
+        told = self.hub.alias(member, real) if root is not None and self.hub.shared_with(member, root, real) else doc
         return text.replace(real, told) if told != real else text
 
     def _told(self, address: str, caller: Caller) -> dict:
@@ -1093,7 +1095,7 @@ class Door:
                 raise ToolError("An update cannot Share a page, nor open it to more members: only its owner does, from "
                                 "the page or the Sheaf. Send the text with its Share lines as `read` gave them.", "share")
             m = self._member(caller)
-            if m is not None and visibility.audience(old) != now \
+            if m is not None and visibility.share_lines(old) != visibility.share_lines(text) \
                     and not self.hub.is_owner(m, address, visibility.front_matter(old)):
                 raise ToolError("Who a page is Shared with is its owner's alone: an update from a token of another member "
                                 "cannot narrow or withdraw it. Send the text with its Share lines as `read` gave them.", "share")

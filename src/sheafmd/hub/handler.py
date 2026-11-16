@@ -822,6 +822,8 @@ class Handler:
                 if name in waiting_mod.EVENTS:      # a Tell that waits for an agent: the member's own, and no other's (9.9)
                     return dict(data) if getattr(data, "member", None) == member.id else None
                 data = _document_events(name, data)
+                if name == "gone" and isinstance(data, dict) and isinstance(data.get("doc"), str):
+                    data = {**data, "doc": hub.alias(member, data["doc"])}      # told as the page is told (9.11), never the owner's folders
                 if name == "changed" and isinstance(data, dict) and "telling" in data:     # their own, not the hub person's (9.9)
                     data = {**data, "telling": self._member_telling(e.address, member, sweep=False, comments=data.get("comments"))}
                 return data
@@ -837,7 +839,7 @@ class Handler:
         if member is None and hub.auth is not req.auth:       # a rotation overtook this request, after it told the open streams
             sub.put("signed-out", {})
         if hub.entries.get(e.address) is not e:               # a forget overtook this request, after it told the open streams
-            sub.put("gone", {"doc": e.address})
+            sub.put("gone", {"doc": hub.alias(member, e.address)})
         e.opened = True
         return _stream(sub)
 
@@ -1207,9 +1209,11 @@ class Handler:
                 # A thread moves to one client (9.10, #109): a rectoverso answers Move to once, by whatever edit.
                 raise EditError(f"This thread moves to one client: Move to {slug} is ticked.")
             words = visibility.newly_ticked(toggled)
-            if m is not None and visibility.audience(text) != visibility.audience(new) \
+            if m is not None and visibility.share_lines(text) != visibility.share_lines(new) \
                     and not visibility.withdraws_share(text, new) and not self.hub.is_owner(m, e.address, fm):
-                # Who a page is Shared with is its owner's alone, by whatever edit moves the line or its names (9.11); an untick has its own refusal below.
+                # Who a page is Shared with is its owner's alone, by whatever edit adds, moves, ticks or removes any Share line or
+                # its names, whatever audience they compute (a `Share with carol` behind a plain Share leaves it `True`) (9.11);
+                # an untick of the one ticked box has its own refusal below.
                 raise EditError("Only the owner of this rectoverso can change who it is shared with.")
             if visibility.withdraws_share(text, new):
                 # Withdrawing a Share is its owner's alone, as giving it is (#40), by whatever edit unticks the box:

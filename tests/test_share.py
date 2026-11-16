@@ -621,3 +621,75 @@ def test_a_recipients_update_is_told_by_the_opaque_name_and_written_to_the_log_b
     got = json.loads(out)
     assert got["doc"] == name and "private-matters" not in out
     assert team.get(f"/_/writes?doc={doc}", member=ALICE).json()["lines"][-1]["writer"] == "Claude Code (Bob)"
+
+
+# ── the review's findings (PR 394, round 4) ──────────────────────────────────
+
+def test_a_recipient_of_a_plain_share_cannot_tick_a_share_with_line_the_owner_left_unticked(team):
+    doc = made(team, "alice", "# Alice's plan\n\n- [ ] Share\n- [ ] Share with carol\n")["doc"]
+    assert tick(team, ALICE, doc, "Share").status == 200
+    got = tick(team, BOB, doc, "Share with")
+    assert got.status == 409 and "owner" in got.text
+    assert "- [ ] Share with carol" in read(team, doc)
+    assert tick(team, ALICE, doc, "Share", release=True).status == 200
+    assert page(team, CAROL, doc).status == 404
+
+
+def test_a_recipient_cannot_untick_a_ticked_share_with_line_behind_a_plain_share(team):
+    doc = made(team, "alice", "# Alice's plan\n\n- [ ] Share\n- [ ] Share with carol\n")["doc"]
+    assert tick(team, ALICE, doc, "Share").status == 200
+    assert tick(team, ALICE, doc, "Share with").status == 200
+    got = tick(team, BOB, doc, "Share with", release=True)
+    assert got.status == 409 and "- [x] Share with carol" in read(team, doc)
+
+
+def test_a_recipients_agent_cannot_add_a_share_with_line_under_a_plain_share(team):
+    out = made(team, "alice", "# Agent page\n\n- [x] Share\n")
+    bad, why = call(team, "bob", "update", doc=out["doc"], text="# Agent page\n\n- [x] Share\n- [x] Share with carol\n",
+                    expected_hash=out["hash"])
+    assert bad, why
+    assert "carol" not in read(team, out["doc"])
+    bad, why = call(team, "bob", "update", doc=out["doc"], text="# Agent page\n\n- [x] Share\n- [ ] Share with carol\n",
+                    expected_hash=out["hash"])
+    assert bad, why
+    assert "carol" not in read(team, out["doc"])
+
+
+def test_a_recipients_agent_cannot_remove_a_plain_share_line_while_another_stays_ticked(team):
+    out = made(team, "alice", "# Agent page\n\n- [x] Share\n- [x] Share with carol\n")
+    bad, why = call(team, "bob", "update", doc=out["doc"], text="# Agent page\n\n- [x] Share with carol\n", expected_hash=out["hash"])
+    assert bad, why
+
+
+def test_a_gone_event_reaches_a_recipient_under_the_opaque_name(team):
+    doc = deep(team)
+    sub = _bob_streams(team, told(team, BOB, doc))
+    team.hub.entry(doc).bus.publish("gone", {"doc": doc})
+    seen = json.dumps([str(x) for x in sub.drain()])
+    assert "gone" in seen and "private-matters" not in seen and doc not in seen
+
+
+def test_a_gone_event_on_a_stream_the_forget_overtook_is_told_the_opaque_name_too(team, monkeypatch):
+    doc = deep(team)
+    name = told(team, BOB, doc)
+    from sheafmd.hub import handler
+    entry = handler.Handler._entry
+
+    def forgotten(self, req, address):
+        got = entry(self, req, address)
+        self.hub.entries.pop(got.address, None)       # a forget overtakes the request
+        return got
+    monkeypatch.setattr(handler.Handler, "_entry", forgotten)
+    sub = team.get(f"/_/live?doc={name}", member=BOB).stream
+    seen = json.dumps([str(x) for x in sub.drain()])
+    assert "gone" in seen and "private-matters" not in seen and doc not in seen
+
+
+def test_an_error_about_a_made_up_name_in_the_owners_root_writes_no_opaque_name(team):
+    doc = deep(team)
+    before = dict(team.hub.shared_ids._data)
+    for n in range(5):
+        bad, why = call(team, "bob", "read", doc=f"loose-alice/made-up-{n}.md")
+        assert bad
+    assert dict(team.hub.shared_ids._data) == before
+    assert "made-up" not in json.dumps(team.hub.shared_ids._data)

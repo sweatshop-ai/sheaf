@@ -314,7 +314,7 @@ def test_a_box_folder_inside_the_lists_root_or_relative_stops_the_start(tmp_path
     assert str(getattr(listing(tmp_path, **{key: "/run/james/x/"}), key)) == "/run/james/x"
 
 
-@pytest.mark.parametrize("value", ["", "tiroir_tt", "a" * 64, "tiroir tt"])
+@pytest.mark.parametrize("value", ["", "agency_tiroir", "a" * 64, "agency tiroir"])
 def test_a_box_that_is_not_a_host_name_stops_the_start(tmp_path, value):
     with pytest.raises(the_list.ListError, match="'box' must be a host name"):
         listing(tmp_path, box=value)

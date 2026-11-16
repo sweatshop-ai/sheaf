@@ -118,7 +118,7 @@ def test_a_page_the_answer_does_not_mention_is_held_not_forwarded(move):
 
 
 def test_a_page_already_sent_is_not_sent_again(move):
-    move.sent("o/r", "a.md")
+    move.sent("o/r", "a.md", "h1")
     receiver = Receiver(ok("b.md"))
     outgoing.send_root(receiver, move, "o/r", THERE, HEAD, [row("a.md"), row("b.md")])
     assert [p["path"] for p in receiver.calls[0][2]["pages"]] == ["b.md"]

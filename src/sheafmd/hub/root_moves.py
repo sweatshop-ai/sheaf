@@ -95,7 +95,7 @@ class Moves:
             self._write(data)
             return data[repo]
 
-    def sent(self, repo: str, page: str, hash: str = ""):
+    def sent(self, repo: str, page: str, hash: str):
         """`page` is confirmed by the receiver, which holds it with `hash`; its Forward is still to be written."""
         with self._lock:
             data = self._read()

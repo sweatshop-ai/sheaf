@@ -13,6 +13,7 @@ import threading
 from pathlib import Path
 
 from .. import config
+from ..source import file_lock
 from . import loose, state
 from . import roots as roots_mod
 
@@ -139,13 +140,14 @@ class Archive:
                 self._refused.discard(root.path)
 
     def _sweep_root(self, member, root, now: float) -> None:
-        pages = self._pages(member, root)
-        marks = Marks(root.path)
-        loose.stamp(root.path, SEEN, {rel: now for rel, _, _ in pages if rel not in marks.seen}, only_new=True)
-        seen = {**{rel: now for rel, _, _ in pages}, **marks.seen}
-        gone = due(pages, marks.archived, seen, marks.kept, now, self.days(root))
-        mtimes = {rel: mtime for rel, mtime, _ in pages}
-        loose.stamp(root.path, ARCHIVED, {rel: max(now, mtimes[rel]) for rel in gone})
+        pages = self._pages(member, root)            # the slow part, outside the lock
+        with state.file_locked("loose-keep.lock"):   # the marks are read and the archive written in one hold: a Keep or a Restore comes before or after
+            marks = Marks(root.path)
+            loose.stamp_held(root.path, SEEN, {rel: now for rel, _, _ in pages if rel not in marks.seen}, only_new=True)
+            seen = {**{rel: now for rel, _, _ in pages}, **marks.seen}
+            gone = due(pages, marks.archived, seen, marks.kept, now, self.days(root))
+            mtimes = {rel: mtime for rel, mtime, _ in pages}
+            loose.stamp_held(root.path, ARCHIVED, {rel: max(now, mtimes[rel]) for rel in gone})
 
     # ── what a row says ──────────────────────────────────────────────────────
     def facts(self, root) -> Marks | None:
@@ -157,18 +159,28 @@ class Archive:
 
     # ── the member's acts ────────────────────────────────────────────────────
     def archive_now(self, root, rel: str, mtime: float) -> None:
-        loose.stamp(root.path, ARCHIVED, {rel: max(self.hub.clock(), mtime)})
+        """Archive at once; refused (`loose.Refused`) for a kept page, which is never archived: Keep comes off first."""
+        with state.file_locked("loose-keep.lock"):
+            if rel in loose.marks(root.path):
+                raise loose.Refused("the page is kept and a kept page is never archived: take Keep off first")
+            loose.stamp_held(root.path, ARCHIVED, {rel: max(self.hub.clock(), mtime)})
 
     def restore(self, root, rel: str) -> None:
-        """Back to the default view, and the page's own clock starts over."""
+        """Back to the default view, and the page's own clock starts over: both marks in one hold, so a sweep comes before
+        or after and never between them."""
+        with state.file_locked("loose-keep.lock"):
+            self._restore_held(root, rel)
+
+    def _restore_held(self, root, rel: str) -> None:
         now = self.hub.clock()
-        loose.stamp(root.path, ARCHIVED, {rel: None})
-        loose.stamp(root.path, SEEN, {rel: now})
+        loose.stamp_held(root.path, ARCHIVED, {rel: None})
+        loose.stamp_held(root.path, SEEN, {rel: now})
 
     def keep(self, root, rel: str, on: bool, mtime: float) -> None:
-        loose.keep(root.path, rel, on)
-        if on:
-            self.restore(root, rel)             # a kept page is in the default view
+        with state.file_locked("loose-keep.lock"):
+            loose.keep_held(root.path, rel, on)
+            if on:
+                self._restore_held(root, rel)   # a kept page is in the default view
 
     # ── the trash ────────────────────────────────────────────────────────────
     @staticmethod
@@ -190,7 +202,9 @@ class Archive:
         if not stat.S_ISREG(os.lstat(src).st_mode):
             raise loose.Refused("the page is not a plain file: refused")
         at = int(self.hub.clock())
-        with state.file_locked("loose-keep.lock"):
+        # The page's file lock first, as a writer takes it (the order of the hub's locks: a file lock, then the state stores'):
+        # a door write of a page the hub holds no entry for comes before the move or finds the page gone.
+        with file_lock(src), state.file_locked("loose-keep.lock"):
             for part in (Path(root.path) / ".sheaf", Path(root.path) / TRASH, Path(root.path) / TRASH / str(at)):
                 self._plain_dir(part, make=True)
             dest = Path(root.path) / TRASH / str(at) / rel
@@ -200,9 +214,9 @@ class Archive:
             if os.path.lexists(dest):
                 raise loose.Refused("a page of that name was deleted in the same second: try again")
             os.replace(src, dest)
-        loose.stamp(root.path, ARCHIVED, {rel: None})
-        loose.stamp(root.path, SEEN, {rel: None})
-        loose.keep(root.path, rel, False)
+            loose.stamp_held(root.path, ARCHIVED, {rel: None})      # the marks go in the hold of the move: no sweep between
+            loose.stamp_held(root.path, SEEN, {rel: None})
+            loose.keep_held(root.path, rel, False)
 
     def trashed(self, root) -> list:
         """`[{id, rel, deleted_at, days_left}]` of the root's trash, newest first."""
@@ -221,21 +235,30 @@ class Archive:
         return sorted(out, key=lambda r: (-r["deleted_at"], r["rel"]))
 
     def restore_trash(self, root, ident: str) -> str:
-        """Put a trashed page back at its old address; refused (`Taken`) when a page is there, never overwritten."""
+        """Put a trashed page back at its old address; refused (`Taken`) when a page is there, also when one comes in while this runs, and never overwritten."""
         stamp, _, rel = ident.partition("/")
         if not stamp.isdigit() or not rel or any(p in ("", ".", "..") for p in rel.split("/")):
             raise KeyError(ident)
         src = Path(root.path) / TRASH / stamp / rel
         if not os.path.lexists(src) or not stat.S_ISREG(os.lstat(src).st_mode):
             raise KeyError(ident)
-        with state.file_locked("loose-keep.lock"):
-            dest = Path(root.path) / rel
+        dest = Path(root.path) / rel
+        # The file lock of the address first (the hub's lock order: a file lock, then the state stores'). A door create takes no
+        # lock, only a link that fails when the name is taken: so the move here is a link too, never a rename, which would
+        # replace a page that came in between the check and the move.
+        with file_lock(dest), state.file_locked("loose-keep.lock"):
             if os.path.lexists(dest):
                 raise Taken(rel)
             for part in reversed(Path(rel).parents):
                 if str(part) != ".":
                     os.makedirs(Path(root.path) / part, mode=0o700, exist_ok=True)
-            os.rename(src, dest)            # rename, not replace: a page that came in between is not overwritten
+            try:
+                os.link(src, dest)
+            except FileExistsError:
+                raise Taken(rel) from None
+            except OSError as e:
+                raise loose.Refused(f"the page could not be put back ({e.strerror})") from None
+            os.unlink(src)
         loose.stamp(root.path, SEEN, {rel: self.hub.clock()})
         with contextlib.suppress(OSError):
             for p in Path(rel).parents:

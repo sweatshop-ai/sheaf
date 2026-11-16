@@ -319,13 +319,30 @@ class Handler:
             res = self._route_proxy(req, body) if via == "proxy" else self._route(req, body)
         except Refuse as r:
             res = self._refusal(req, r)
+        except (FileNotFoundError, NotFound) as e:
+            if req is not None and (doc := self._doc_hint(req)) and self._page_gone(doc):
+                res = self._refusal(req, Refuse(404, "no such document"))      # a writer that waited for a Delete's lock finds no page
+            else:
+                res = self._failed(req, e, method)
         except Exception as e:
-            if req is not None:
-                self.hub.record_exception("request-failed", self._doc_hint(req),
-                                          endpoint=req.path, method=method, **self._who(req))
-            res = _json(500, {"ok": False, "error": f"the hub failed on this request "
-                              f"({type(e).__name__}); the details are in `sheaf diag`"})
+            res = self._failed(req, e, method)
         return self._finish(req, res)
+
+    def _page_gone(self, doc: str) -> bool:
+        """Whether the page `doc` names is not a file any more."""
+        try:
+            return not self.hub.file(doc).exists()
+        except (NotFound, OSError):
+            return True
+        except Exception:
+            return False
+
+    def _failed(self, req, e, method) -> Response:
+        if req is not None:
+            self.hub.record_exception("request-failed", self._doc_hint(req),
+                                      endpoint=req.path, method=method, **self._who(req))
+        return _json(500, {"ok": False, "error": f"the hub failed on this request "
+                           f"({type(e).__name__}); the details are in `sheaf diag`"})
 
     def _refusal(self, req, r: Refuse) -> Response:
         res = self._refusal_answer(req, r)
@@ -1071,7 +1088,10 @@ class Handler:
         except Exception:
             raise Refuse(404, "no such document") from None
         root = self.hub.roots.get(at.root)
-        if m is None or root is None or self.hub.loose.owner_of(root) != m.id or not self.hub.visible(m, doc):
+        # The owner's own page is theirs to archive, keep or delete whatever its front matter says and even when it cannot be
+        # read as text (`visible` says no to that): a page nobody can open is the one a member wants gone.
+        if m is None or root is None or self.hub.loose.owner_of(root) != m.id \
+                or not (self.hub.holds_loose(m, doc) or self.hub.visible(m, doc)):
             raise Refuse(404, "no such document")
         try:
             mtime = self.hub.file(doc).stat().st_mtime
@@ -1108,7 +1128,8 @@ class Handler:
         with place.held(self.hub, doc):
             try:
                 root, rel, _ = self._own_loose(req, doc)
-                self.hub.archive.trash(root, rel)
+                with self.hub.page_lock(doc):       # a save in the middle of its write finishes first, one after it finds the page gone
+                    self.hub.archive.trash(root, rel)
             except (loose.Refused, OSError) as e:
                 raise Refuse(409, str(e) if isinstance(e, loose.Refused) else "the page could not be moved to the trash") from None
         self.hub.forget_document(doc)
@@ -1128,7 +1149,7 @@ class Handler:
         stamp, _, wanted = ident.partition("/")
         doc = str(Address(root.name, wanted))
         try:
-            with place.held(self.hub, doc):
+            with place.held(self.hub, doc), self.hub.page_lock(doc):
                 rel = self.hub.archive.restore_trash(root, ident)
         except archive_mod.Taken:
             raise Refuse(409, "a page of that name is there already: it is not overwritten") from None

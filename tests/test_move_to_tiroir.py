@@ -79,7 +79,8 @@ def test_the_copy_there_carries_the_versions_the_write_log_lines_and_the_keep_ma
     moved(two)
     b = two.b
     with b.active():
-        assert b.hub.versions.get(NEW, md_hash(PLAN)) is not None
+        kept = b.hub.versions.texts(NEW)
+        assert any("First paragraph." in t and "Second." not in t for t in kept), kept       # the older version came, as the hub kept it
         assert any(w.session == "s-1" for w in b.hub.writes.lines(NEW))
         assert loose.kept(b.hub.roots.get("loose-al").path, "notes/plan.md")
 
@@ -191,7 +192,8 @@ def test_a_page_of_a_registered_root_does_not_move(two):
     from pathlib import Path
     (Path(root) / "work.md").write_text("# Work\n", encoding="utf-8")
     with two.active():
-        address = [r for r in two.hub.roots.all() if str(r.path) == str(Path(root))][0].name + "/work.md"
+        two.hub.roots.for_document(Path(root) / "work.md")
+        address = two.hub.roots.address(Path(root) / "work.md")
     got = move(two, doc=address)
     assert got.status == 409 and two.link.calls == []
 
@@ -232,7 +234,7 @@ def test_the_sentence_for_a_laptop_names_the_connect_line_and_the_one_for_a_chat
     assert "ask" in chat.lower() and "sheaf connect" not in chat
 
 
-@pytest.mark.parametrize("tool,args", [("threads", {}), ("reply", {"id": "c1", "body": "Done"}), ("resolve", {"id": "c1"})])
+@pytest.mark.parametrize("tool,args", [("threads", {}), ("reply", {"id": "c1", "text": "Done"}), ("resolve", {"id": "c1"})])
 def test_threads_reply_and_resolve_on_the_old_address_answer_moved_too(two, tool, args):
     moved(two)
     tree = two.tree()
@@ -261,7 +263,7 @@ def test_each_knock_on_the_old_address_is_one_moved_knock_line_with_no_text_and_
     two.ask("alice", "read", headers={"X-Sheaf-Chat": "chat-1"}, doc=OLD)
     with two.active():
         rows = hub_rows("moved-knock")[before:]
-    assert [(r["via"], r["place"]) for r in rows] == [("browser", ""), ("door", "laptop"), ("door", "chat client")]
+    assert [(r["via"], r.get("place", "")) for r in rows] == [("browser", ""), ("door", "laptop"), ("door", "chat client")]
     assert all(r["to"] == B_ORIGIN and r["doc"] == OLD and r["member"] for r in rows)
     flat = json.dumps(rows)
     assert "First paragraph" not in flat and two.tokens["alice"] not in flat

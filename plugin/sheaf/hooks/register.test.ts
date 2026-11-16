@@ -8,7 +8,7 @@ const TELL = { id: 't1', doc: 'loose-bea/notes.md', thread: 'c1', message: 'Plea
  *  `door.answers` (a queue; the last one repeats, as a door re-lists a Tell until it is answered). */
 function world($: any, on: any) {
   const clock = mock.clock(on)
-  const door = { runs: [] as string[][], timeouts: [] as number[], failSubmits: 0, onPoll: null as null | ((argv: string[]) => void), answers: [{ exitCode: 0, stdout: '[]', stderr: '' }] as any[], session: SESSION,
+  const door = { runs: [] as string[][], timeouts: [] as number[], failSubmits: 0, onPoll: null as null | ((argv: string[]) => void), answers: [{ exitCode: 0, stdout: '[]', stderr: '' }] as any[], session: SESSION, helper: true,
                  printed: `${ORIGIN}/loose-bea/notes.md\non chat.example.com as Bea` }
   const submitted: string[] = []
   on('session.start', (_: any, e: any) => ({ cwd: e.cwd }))
@@ -22,6 +22,7 @@ function world($: any, on: any) {
   on('turn.complete', (_: any, e: any) => ({ text: e.answer }))
   on('process.run', (_: any, e: any) => {
     door.runs.push([...e.argv])
+    if (e.argv[1] === 'headers') return { value: { exitCode: door.helper ? 0 : 1, stdout: '', stderr: '' } }     // `sheaf headers --check NAME`: does the entry carry the headersHelper
     door.timeouts.push(e.init?.timeoutMs)
     door.onPoll?.([...e.argv])
     return { value: door.answers.length > 1 ? door.answers.shift() : door.answers[0] }
@@ -248,4 +249,75 @@ test('the poll is given longer than the CLI\'s own 35 s call', async ($, on) => 
   await w.send()
   await w.clock.advance(1_000)
   expect(w.door.timeouts[0]).toBeGreaterThan(35_000)
+})
+
+test('a door MCP write arms the mod only when that server\'s entry carries the headersHelper', async ($, on) => {
+  const w = world($, on)
+  w.door.helper = false
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.mcp('mcp__sheaf-chat_example_com__reply')
+  await w.clock.advance(30_000)
+  expect(w.door.runs.some(r => r[1] === 'headers' && r[2] === '--check' && r[3] === 'sheaf-chat_example_com')).toBe(true)
+  expect(polls(w.door).length).toBe(0)
+  await w.send()                                  // a `sheaf X.md` send declares the session without the helper
+  await w.clock.advance(1_000)
+  expect(polls(w.door).length).toBe(1)
+})
+
+test('a session that writes to two tiroirs polls both, each with its own backoff', async ($, on) => {
+  const w = world($, on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.send()
+  w.door.printed = 'https://second.example.com/loose-bea/notes.md\non second.example.com as Bea'
+  await w.send()
+  await w.clock.advance(1_000)
+  const asked = polls(w.door).map((r: string[]) => `${r[2]} ${r[3]}`)
+  expect(asked).toContain(`--origin ${ORIGIN}`)
+  expect(asked).toContain('--origin https://second.example.com')
+  await w.mcp('mcp__sheaf-third_example_com__reply')
+  await w.clock.advance(6_000)
+  expect(polls(w.door).map((r: string[]) => `${r[2]} ${r[3]}`)).toContain('--server sheaf-third_example_com')
+})
+
+test('a Tell of the second tiroir is delivered', async ($, on) => {
+  const w = world($, on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.send()
+  w.door.printed = 'https://second.example.com/loose-bea/notes.md\non second.example.com as Bea'
+  w.door.onPoll = argv => { if (argv[3] === 'https://second.example.com') w.door.answers = [{ exitCode: 0, stdout: JSON.stringify([TELL]), stderr: '' }] }
+  await w.send()
+  await w.clock.advance(1_000)
+  await w.clock.advance(12_000)
+  expect(w.submitted.length).toBe(1)
+})
+
+test('a re-armed session starts with no backoff from the session before', async ($, on) => {
+  const w = world($, on)
+  w.door.answers = [{ exitCode: 1, stdout: '', stderr: 'sheaf: down' }]
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.send()
+  await w.clock.advance(80_000)                    // failures pile up: the gap is 20 s, then 40 s
+  await $.session.end({ reason: 'clear', sessionId: SESSION, resume: {} } as any)
+  w.door.session = 'new-session'
+  w.door.answers = [{ exitCode: 0, stdout: '[]', stderr: '' }]
+  await w.send()
+  const before = polls(w.door).length
+  await w.clock.advance(1_000)
+  expect(polls(w.door).length).toBe(before + 1)
+  expect(polls(w.door).at(-1)![5]).toBe('new-session')
+})
+
+test('a re-armed session is not held back by a Tell submitted for the session before', async ($, on) => {
+  const w = world($, on)
+  w.door.answers = [{ exitCode: 0, stdout: JSON.stringify([TELL]), stderr: '' }]
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.send()
+  await w.clock.advance(1_000)
+  expect(w.submitted.length).toBe(1)               // handed to submit; its turn never starts
+  await $.session.end({ reason: 'clear', sessionId: SESSION, resume: {} } as any)
+  w.door.session = 'new-session'
+  w.door.answers = [{ exitCode: 0, stdout: JSON.stringify([TELL2]), stderr: '' }]
+  await w.send()
+  await w.clock.advance(7_000)                     // well inside the 60 s window of the first submit
+  expect(w.submitted.length).toBe(2)
 })

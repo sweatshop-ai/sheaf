@@ -78,7 +78,8 @@ def test_connect_stores_the_token_adds_the_door_and_makes_the_tiroir_the_default
     assert code == 0, err
     assert keyring.get("sheaf", FRONT) == token
     entry = json.loads(claude_json().read_text())["mcpServers"]["sheaf-chat.example.com"]
-    assert entry == {"type": "http", "url": f"{FRONT}/mcp", "headers": {"Authorization": f"Bearer {token}"}}
+    assert entry == {"type": "http", "url": f"{FRONT}/mcp", "headers": {"Authorization": f"Bearer {token}"},
+                     "headersHelper": "sheaf headers"}     # it names the session on a door write; it never holds the token
     assert config.read_toml(paths.config_file(), config.USER_KEYS)["tiroir"] == FRONT
     assert token not in out + err and "sheaf_mcp_" not in out + err         # the token is never printed
     assert "chat.example.com" in out

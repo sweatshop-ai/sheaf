@@ -11,18 +11,32 @@ export type Tell = { id: string; doc: string; thread: string; message: string; b
 /** How `sheaf tells-poll` is told which tiroir: the address a send printed, or the name of the door's MCP server. */
 export type Door = { flag: '--origin' | '--server'; value: string }
 
+/** One tiroir this session polls: its own backoff and its own poll in flight. */
+export type DoorState = {
+  door: Door
+  failures: number           // consecutive polls of this door that failed
+  busy: boolean              // a poll of this door is in flight: one at a time per door, never a pile-up
+  notBefore: number          // no poll of this door before this time
+}
+
 export type Poller = {
-  origin: Door | null        // the tiroir this session has declared itself to; null until it has
+  doors: DoorState[]         // the tiroirs this session has declared itself to; empty until it has
   armedFor: string           // the session id that declared itself: the only id this poller ever polls for
   session: string            // the session id the held and delivered Tells belong to
-  failures: number           // consecutive polls that failed
-  held: Tell[]               // taken from the door, not yet submitted (an Esc, or a turn running)
+  held: Tell[]               // taken from any door, not yet submitted (an Esc, or a turn running)
   delivered: Set<string>     // Tells already submitted: the door lists a Tell until the session answers it
-  busy: boolean              // a poll is in flight: one at a time per session, never a pile-up
   submittingUntil: number    // a Tell was handed to `$.prompt.submit` and its turn has not started: no second one before it does, or this time
 }
 
-export const fresh = (): Poller => ({ origin: null, armedFor: '', session: '', failures: 0, held: [], delivered: new Set(), busy: false, submittingUntil: 0 })
+export const fresh = (): Poller => ({ doors: [], armedFor: '', session: '', held: [], delivered: new Set(), submittingUntil: 0 })
+
+/** Add a tiroir to poll; null when this session polls it already. */
+export function addDoor(p: Poller, door: Door): DoorState | null {
+  if (p.doors.some(d => d.door.flag === door.flag && d.door.value === door.value)) return null
+  const d: DoorState = { door, failures: 0, busy: false, notBefore: 0 }
+  p.doors.push(d)
+  return d
+}
 
 /** The address a successful `sheaf FILE.md` printed on its first line, or null: a tiroir page declares the session. */
 export function originOf(output: string): Door | null {
@@ -38,15 +52,15 @@ export function doorOfTool(tool: string): Door | null {
   return m ? { flag: '--server', value: m[1] } : null
 }
 
-/** Whether to start a poll now. Never before the first send, never two at once, never while waiting out a failure. */
-export function shouldPoll(p: Poller, now: number, notBefore: number): boolean {
-  return p.origin !== null && !p.busy && now >= notBefore
+/** Whether to start a poll of this door now. Never two at once, never while waiting out a failure. */
+export function shouldPoll(d: DoorState, now: number): boolean {
+  return !d.busy && now >= d.notBefore
 }
 
 /** How long to wait after a poll: a short gap on success, doubling to five minutes on failure. */
-export function nextGap(p: Poller): number {
-  if (p.failures === 0) return MIN_GAP_MS
-  return Math.min(MAX_BACKOFF_MS, MIN_GAP_MS * 2 ** p.failures)
+export function nextGap(d: DoorState): number {
+  if (d.failures === 0) return MIN_GAP_MS
+  return Math.min(MAX_BACKOFF_MS, MIN_GAP_MS * 2 ** d.failures)
 }
 
 /** The session id changed (a /clear): what was held and delivered belonged to the old id, which the door will not

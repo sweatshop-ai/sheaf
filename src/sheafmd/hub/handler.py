@@ -922,7 +922,7 @@ class Handler:
             return _html(status, body, env.get("nonce"), env.get("headers"))
         return Response(status, {"Content-Type": "application/json", **(env.get("headers") or {})}, body.encode("utf-8"))
 
-    def _knock( req: Req, client: str, op: str, status: str) -> None:
+    def _knock(self, req: Req, client: str, op: str, status: str) -> None:
         """One diagnostics line per call to a client tiroir: the client, the op, the member's id and the status. Never an address, a
         title or a body: what a client page is called is the client's, and stays off the agency's disk (9.9)."""
         diagnostics.record("hub", "read-through", client=client, op=op, member=req.member.id, status=status)

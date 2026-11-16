@@ -1862,3 +1862,61 @@ def test_a_rename_in_a_pull_the_hub_refuses_writes_no_forward(box, rectoversos, 
     poll_now(box, rectoversos)
     assert (rectoversos / "acme" / "blog" / "2026-10-28-plan.md").exists()
     assert box.hub.forwards.snapshot() == {}
+
+
+def rename_pull(box, rectoversos, remote, tmp_path):
+    renamed_on_github(tmp_path, remote, "acme/blog/2026-10-28-plan.md", "acme/blog/2026-10-30-plan.md")
+    poll_now(box, rectoversos)
+
+
+def test_a_git_rename_carries_the_page_under_the_name_locks_of_both_addresses(box, rectoversos, remote, tmp_path, monkeypatch):
+    """As a Move does (moves.py): what the hub keeps of the page is carried with both names held, so a save on either does not
+    come between the pull and the carrying."""
+    import contextlib
+    from sheafmd.hub import place
+    held, seen, real = [], [], place.held
+
+    @contextlib.contextmanager
+    def spy(hub, address):
+        with real(hub, address) as got:
+            held.append(address)
+            yield got
+        held.remove(address)
+
+    monkeypatch.setattr(place, "held", spy)
+    moved = box.hub.moved_page
+    monkeypatch.setattr(box.hub, "moved_page", lambda old, new, by: (seen.append(sorted(held)), moved(old, new, by)))
+    rename_pull(box, rectoversos, remote, tmp_path)
+    assert seen == [sorted([DOC, NEW])]
+
+
+def test_a_git_rename_under_a_running_tell_marks_the_address_and_says_so_in_the_diagnostics(box, rectoversos, remote, tmp_path, monkeypatch):
+    """A rename cannot be refused, as a Move is: no Tell starts on the old address meanwhile, the Forward is written all the
+    same, and a Tell already running is a row, since its answer then meets a page that is gone from where it began."""
+    seen = []
+    monkeypatch.setattr(box.hub, "tell_live", lambda address: address == DOC)
+    moved = box.hub.moved_page
+    monkeypatch.setattr(box.hub, "moved_page", lambda old, new, by: (seen.append(DOC in box.hub.moving), moved(old, new, by)))
+    rename_pull(box, rectoversos, remote, tmp_path)
+    assert seen == [True] and DOC not in box.hub.moving
+    assert box.hub.forwards.follow(DOC) == NEW
+    (row,) = rows("rename-under-tell")
+    assert row["doc"] == DOC
+
+
+def test_a_git_rename_onto_an_address_that_forwards_elsewhere_is_a_row(box, rectoversos, remote, tmp_path):
+    """A Forward at the new address is dropped, the page being there (Forwards.add); old links to it then open this page, which
+    a git rename cannot be refused for: it is written down."""
+    box.hub.forwards.add(NEW, "rectoversos/elsewhere.md", "someone")
+    rename_pull(box, rectoversos, remote, tmp_path)
+    assert box.hub.forwards.follow(DOC) == NEW and box.hub.forwards.follow(NEW) is None
+    (row,) = rows("forward-replaced")
+    assert row["doc"] == NEW and row["was"] == "rectoversos/elsewhere.md"
+
+
+def test_the_write_log_of_a_renamed_page_is_at_its_new_address_alone(box, rectoversos, remote, tmp_path):
+    edit(box, rectoversos)
+    pushed(box, remote)
+    rename_pull(box, rectoversos, remote, tmp_path)
+    assert box.hub.writes.lines(DOC) == []
+    assert [w.via for w in box.hub.writes.lines(NEW)][-1] == "pull"

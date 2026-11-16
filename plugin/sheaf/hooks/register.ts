@@ -31,6 +31,7 @@ type Mod = {
   timer: { cancel: () => void } | null
   saidFor: string            // the session id the line was said under
   saidStale: boolean         // the one line about a write recorded under an id that is no longer the session's
+  writes: Promise<void>      // the writes of what is kept, one after the other: they finish in the order they were called
 }
 
 /** The session id changed under the poller (a fork, a /clear that raised no end): this poller declared itself for one id
@@ -50,9 +51,11 @@ function leave(m: Mod) {
  *  transcript already. A write that fails costs a resume one repeated Tell, never a lost one. */
 const deliveredKey = (session: string) => `delivered:${session}`
 
-async function keepDelivered($: any, m: Mod, session: string) {
-  if (m.p.armedFor !== session) return      // the poller left the session meanwhile
-  await $.store.set(deliveredKey(session), storedByDoor(m.p)).catch(() => {})
+function keepDelivered($: any, m: Mod, session: string): Promise<void> {
+  if (m.p.armedFor !== session) return m.writes      // the poller left the session meanwhile
+  const snapshot = storedByDoor(m.p)      // taken now; written after the writes called before it, so the newest snapshot is the last one stored
+  m.writes = m.writes.then(() => $.store.set(deliveredKey(session), snapshot)).catch(() => {})
+  return m.writes
 }
 
 /** One Tell per turn: while its turn runs, `running` holds the next one back. */
@@ -63,15 +66,15 @@ async function deliver($: any, m: Mod) {
   const t = takeNext(p, m.running === 0, m.interrupted, await $.clock.now())
   if (!t) return
   // A submit that fails keeps the Tell: the door lists it until the session answers it, and it is offered again.
-  // It is recorded for a resume only once its submit has succeeded.
+  // It is recorded for a resume when its submit starts, since the submit may resolve only when its turn ends and a resume
+  // during that turn must not submit it again; a rejected submit takes it back. The one gap: the process dying between
+  // the record and the call.
   // Not awaited: a submit may resolve only when its turn ends, and this runs inside `turn.complete`.
   const session = p.armedFor
-  $.prompt.submit({ text: tellText(t) }).then(async (r: any) => {
-    if (r?.drop !== undefined) return putBack(p, t)
-    if (p.armedFor !== session || !t.door) return
-    p.stored.set(t.id, t.door)
-    await keepDelivered($, m, session)
-  }, () => putBack(p, t))
+  if (t.door) p.stored.set(t.id, t.door)
+  void keepDelivered($, m, session)
+  const undo = () => { putBack(p, t); p.stored.delete(t.id); void keepDelivered($, m, session) }
+  $.prompt.submit({ text: tellText(t) }).then((r: any) => { if (r?.drop !== undefined) undo() }, undo)
 }
 
 /** One poll of one door, for the session id it is made under. An answer that arrives when the session is another is
@@ -145,7 +148,7 @@ async function declare($: any, m: Mod, door: Door | null) {
 }
 
 export const register: Register = (on) => {
-  const m: Mod = { p: fresh(), running: 0, interrupted: false, timer: null, saidFor: '', saidStale: false }
+  const m: Mod = { p: fresh(), running: 0, interrupted: false, timer: null, saidFor: '', saidStale: false, writes: Promise.resolve() }
 
   on('tool.call', async ($, e, next) => {
     const door = doorOfTool(String((e as any).tool))

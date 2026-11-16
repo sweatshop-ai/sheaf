@@ -8,7 +8,7 @@ const TELL = { id: 't1', doc: 'loose-bea/notes.md', thread: 'c1', message: 'Plea
  *  `door.answers` (a queue; the last one repeats, as a door re-lists a Tell until it is answered). */
 function world($: any, on: any) {
   const clock = mock.clock(on)
-  const door = { runs: [] as string[][], timeouts: [] as number[], failSubmits: 0, onPoll: null as null | ((argv: string[]) => void), failStore: false, answers: [{ exitCode: 0, stdout: '[]', stderr: '' }] as any[], session: SESSION, echo: undefined as string | undefined, helper: true,
+  const door = { runs: [] as string[][], timeouts: [] as number[], failSubmits: 0, onPoll: null as null | ((argv: string[]) => void), failStore: false, holdSubmit: null as null | Promise<void>, holdStore: null as null | Promise<void>, answers: [{ exitCode: 0, stdout: '[]', stderr: '' }] as any[], session: SESSION, echo: undefined as string | undefined, helper: true,
                  printed: `${ORIGIN}/loose-bea/notes.md\non chat.example.com as Bea` }
   const submitted: string[] = []
   on('session.start', (_: any, e: any) => ({ cwd: e.cwd }))
@@ -20,7 +20,13 @@ function world($: any, on: any) {
   on('ui.log', (_: any, e: any) => { lines.push(e.text); return { value: undefined } })
   const kept = new Map<string, unknown>()     // `$.store`, which outlives a session
   on('store.get', (_: any, e: any) => ({ value: kept.get(e.key) }))
-  on('store.set', (_: any, e: any) => { if (door.failStore && String(e.key).startsWith('delivered:')) throw new Error('disk full'); kept.set(e.key, e.value); return { value: undefined } })
+  on('store.set', async (_: any, e: any) => {
+    if (door.failStore && String(e.key).startsWith('delivered:')) throw new Error('disk full')
+    const hold = door.holdStore      // the first write of what is kept is slow: it finishes after the ones called later
+    if (hold && String(e.key).startsWith('delivered:')) { door.holdStore = null; await hold }
+    kept.set(e.key, e.value)
+    return { value: undefined }
+  })
   on('session.end', (_: any, e: any) => ({ sessionId: e.sessionId }))
   on('turn.start', (_: any, e: any) => ({ turnId: e.turnId }))
   on('turn.complete', (_: any, e: any) => ({ text: e.answer }))
@@ -31,7 +37,8 @@ function world($: any, on: any) {
     door.onPoll?.([...e.argv])
     return { value: door.answers.length > 1 ? door.answers.shift() : door.answers[0] }
   })
-  on('prompt.submit', (_: any, e: any) => {
+  on('prompt.submit', async (_: any, e: any) => {
+    if (door.holdSubmit) await door.holdSubmit      // a submit resolves only when its turn ends
     if (door.failSubmits > 0 && e.origin?.kind !== 'composer') { door.failSubmits -= 1; throw new Error('refused') }
     submitted.push(e.text)
     return { text: e.text }
@@ -275,7 +282,7 @@ test('a Tell the mod submits is kept for the session once its submit has succeed
   expect(w.kept.get(`delivered:${SESSION}`)).toEqual({ [DOOR_KEY]: ['t1'] })
 })
 
-test('a Tell whose submit failed is never kept, and is submitted and kept when a later submit succeeds', async ($, on) => {
+test('a Tell whose submit was rejected is not kept, and is submitted and kept when a later submit succeeds', async ($, on) => {
   const w = world($, on)
   w.door.failSubmits = 1
   w.door.answers = listing('t1')
@@ -283,7 +290,7 @@ test('a Tell whose submit failed is never kept, and is submitted and kept when a
   await w.send()
   await w.clock.advance(1_000)
   expect(w.submitted.length).toBe(0)
-  expect(w.kept.get(`delivered:${SESSION}`)).toBeUndefined()      // the id was not recorded before the submit
+  expect(w.kept.get(`delivered:${SESSION}`)).toEqual({})      // recorded when the submit started, taken back when it was rejected
   await w.clock.advance(20_000)
   expect(w.submitted.length).toBe(1)
   expect(w.kept.get(`delivered:${SESSION}`)).toEqual({ [DOOR_KEY]: ['t1'] })
@@ -300,6 +307,33 @@ test('a submit that succeeds when the store cannot be written still submits the 
   expect(w.kept.get(`delivered:${SESSION}`)).toBeUndefined()
 })
 
+test('a Tell is kept from the moment its submit starts: a resume during the Tell\'s own turn does not submit it again', async ($, on) => {
+  const w = world($, on)
+  let release!: () => void
+  w.door.holdSubmit = new Promise<void>(r => { release = r })
+  w.door.answers = listing('t1')
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.send()
+  await w.clock.advance(1_000)
+  expect(w.kept.get(`delivered:${SESSION}`)).toEqual({ [DOOR_KEY]: ['t1'] })      // the submit has not resolved
+  release()
+})
+
+test('writes of what is kept finish in the order they were called: a slow older snapshot never overwrites a newer one', async ($, on) => {
+  const w = world($, on)
+  armedBefore(w, { [DOOR_KEY]: ['a'] })
+  let release!: () => void
+  w.door.holdStore = new Promise<void>(r => { release = r })
+  w.door.answers = [...listing('a', 't1'), ...listing('t1')]      // t1 is submitted and kept; then the door stops listing a
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.clock.advance(1_000)
+  expect(w.submitted.length).toBe(1)
+  await w.clock.advance(12_000)      // the second poll prunes a: a newer snapshot, called while the first write is still open
+  release()
+  await w.clock.advance(1_000)
+  expect(w.kept.get(`delivered:${SESSION}`)).toEqual({ [DOOR_KEY]: ['t1'] })
+})
+
 test('a Tell the door no longer lists is forgotten: the session answered it', async ($, on) => {
   const w = world($, on)
   armedBefore(w, { [DOOR_KEY]: ['t1', 'gone'] })
@@ -309,7 +343,7 @@ test('a Tell the door no longer lists is forgotten: the session answered it', as
   expect(w.kept.get(`delivered:${SESSION}`)).toEqual({ [DOOR_KEY]: ['t1'] })
 })
 
-test('the count of Tells kept is no cap: the 51st never displaces an unanswered one', async ($, on) => {
+test('sixty kept Tells are all still kept and none is submitted again when a 61st is submitted: there is no small count cap', async ($, on) => {
   const w = world($, on)
   const old = Array.from({ length: 60 }, (_, i) => `old${i}`)
   armedBefore(w, { [DOOR_KEY]: old })

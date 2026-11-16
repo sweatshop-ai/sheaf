@@ -38,6 +38,29 @@ class Forwards(_Store):
             return None, True
         self._change(change)
 
+    def snapshot(self) -> dict:
+        """Every Forward as it is now, to `restore` after a move that is taken back."""
+        with self._lock:
+            return {k: dict(e) for k, e in self._data.items() if isinstance(e, dict)}
+
+    def restore(self, kept: dict) -> None:
+        """The Forwards are `kept`, as `snapshot` gave them."""
+        def change(data):
+            data.clear()
+            data.update({k: dict(e) for k, e in kept.items()})
+            return None, True
+        self._change(change)
+
+    def forget_prefix(self, prefix: str) -> None:
+        """A root was forgotten (`<root>/`): drop each Forward from an address under it and each that leads into it."""
+        def change(data):
+            gone = [k for k, e in data.items() if k.startswith(prefix) or
+                    (isinstance(e, dict) and str(e.get("to", "")).startswith(prefix))]
+            for k in gone:
+                del data[k]
+            return None, bool(gone)
+        self._change(change)
+
     def leads_elsewhere(self, address: str, page: str | None = None) -> bool:
         """Whether `address` is the old address of a page other than the one that now stands at `page`: an address that
         once pointed at a page must not silently become another one."""

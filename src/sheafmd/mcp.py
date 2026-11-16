@@ -983,7 +983,10 @@ class Door:
         given = args
         args, fresh = self._loose(args, caller)
         try:
-            return self._created(given, args, caller)
+            # A loose root's names have no lock of their own (`place.held` holds nothing there): a create of one takes the
+            # moves' lock, so it is not made between a move's checks and its rename, nor reads a Forward half written.
+            with moves.exclusive() if args is not given else contextlib.nullcontext():
+                return self._created(given, args, caller)
         except BaseException:
             if fresh is not None:       # a refused create leaves no loose root it made behind
                 self.hub.loose.drop(*fresh)

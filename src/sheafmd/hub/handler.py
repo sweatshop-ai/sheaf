@@ -742,6 +742,8 @@ class Handler:
                 to = data.get("to") if isinstance(data, dict) else None
                 if isinstance(to, str) and hub.loose_owner(to) == member.id and hub.visible(member, to):
                     return {"doc": data["doc"], "to": to}
+                if isinstance(to, str) and hub.visible(member, to):     # a recipient is never led: the page is gone from here, told as it is told them
+                    return events.Renamed("gone", {"doc": hub.alias(member, to)})
                 return None
             # Asked at each event: a write that makes the rectoverso its owner's alone silences a stream
             # opened before it (9.11). A change of `projects.toml` that shuts the member out is told `gone`, with

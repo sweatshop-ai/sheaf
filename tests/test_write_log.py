@@ -133,7 +133,6 @@ def test_a_pull_leaves_a_git_line_with_the_commit_author_and_a_disk_write_a_tiro
     assert agents.hub.commits.settle()
     pulled = lines(agents)["lines"]
     assert [(l["writer"], l["place"], l["via"]) for l in pulled] == [("git · Ada", "tiroir", "pull")]
-    assert not agents.hub.writes.pulling(DOC)       # the pull's window closed with it: nothing waits to swallow a later line
     # A file written on the disk, seen at the next render of its page.
     agents.hub.catch_up(e)                          # the pull took the page in already: its line, no disk line
     assert [l["via"] for l in lines(agents)["lines"]] == ["pull"]
@@ -195,3 +194,14 @@ def test_a_line_per_address_is_capped(tmp_path):
     for i in range(5):
         log.add(address="a.md", writer=f"w{i}", place="page", via="save")
     assert [l.writer for l in log.lines("a.md")] == ["w2", "w3", "w4"]
+
+
+def test_a_pull_that_the_page_never_matched_does_not_swallow_a_later_disk_write():
+    log = WriteLog()
+    log.expect_pull("a.md")
+    assert log.is_pull("a.md", "h-any")             # while the pull is under way, any change a page sees is its
+    log.end_pull("a.md", "h-left")
+    assert not log.is_pull("a.md", "h-other")       # a different text is a disk write, and drops the record
+    assert not log.is_pull("a.md", "h-left")
+    log.end_pull("a.md", "h-left")
+    assert log.is_pull("a.md", "h-left") and not log.is_pull("a.md", "h-left")

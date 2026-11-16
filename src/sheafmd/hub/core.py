@@ -26,7 +26,7 @@ from .. import __version__, beneath, config, diagnostics, paths
 from ..agents import registry
 from ..agents.base import Adapter, Target
 from ..render import RenderError, render_file
-from ..source import STAMP_FORMAT, file_lock, lock_key
+from ..source import STAMP_FORMAT, file_lock, lock_key, md_hash
 from . import assets as assets_mod
 from . import boxwait
 from . import place
@@ -1249,13 +1249,13 @@ class Hub:
         """Take in a write from outside, and write it in the Write log: a text that moved behind the hub's back is a file
         written on disk, whoever wrote it (`?`), unless a pull of its repo is bringing it in (that has its own line)."""
         got = e.live.refresh()
-        if got is not None and not self.writes.pulling(e.address):
+        if got is not None and not self.writes.is_pull(e.address, e.live.current()[0]):
             self.writes.add(e.address, "?", "tiroir", "disk")
         return got
 
     def pulling(self, folder: Path, files: list[tuple[Path, str]]):
         """A pull of the repo at `folder` is about to change `files`, (absolute path, last author): the page open on one
-        takes the pull in, so what it sees of the file until `pulled` is the pull's, not a disk write."""
+        sees it change: until `pulled`, what it sees of the file is the pull's, not a disk write."""
         for path, _ in files:
             with suppress(roots_mod.NotFound):
                 address = self.roots.address(path)
@@ -1263,20 +1263,18 @@ class Hub:
                     self.writes.expect_pull(address)
 
     def pulled(self, folder: Path, files: list[tuple[Path, str]], ok: bool):
-        """The pull of `files` ended. Each open page takes the pull in now, under the pull's window, and the window
-        closes; when the pull went through, a line each, `git · <author>`, for each that is a rectoverso of a root
-        the hub serves."""
+        """The pull of `files` ended: each is known by the text it left, so the page's next sight of it is the pull's; when
+        the pull went through, a line each, `git · <author>`, for each that is a rectoverso of a root the hub serves."""
         for path, author in files:
             try:
                 address = self.roots.address(path)
             except roots_mod.NotFound:
                 continue
             try:
-                e = self.entries.get(address)
-                if e is not None:
-                    e.live.refresh()
-            finally:
-                self.writes.end_pull(address)
+                left = md_hash(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                left = None
+            self.writes.end_pull(address, left if ok else None)
             if ok:
                 self.writes.add(address, f"git · {author}", "tiroir", "pull")
 

@@ -29,6 +29,16 @@ class FakeRepos:
     def clone_dir(self, repo):
         return self.dest
 
+    moved, unmoved = None, []
+
+    def moved_to(self, repo):
+        return self.moved
+
+    def unmove(self, repo):
+        self.unmoved.append(repo)
+        self.moved = None
+        return True
+
 
 def git(at, *args):
     return subprocess.run(["git", "-C", str(at), *args], check=True, capture_output=True, text=True).stdout.strip()
@@ -152,3 +162,45 @@ def test_a_hub_with_no_origin_of_its_own_refuses_the_root_whole(clone):
     h = hub(clone)
     del h.proxy
     assert incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None))) == (409, {"why": "no_origin"})
+
+
+# ── the way back (ticket 21 part 2) ──────────────────────────────────────────
+
+def test_a_root_that_moved_to_the_sender_is_unmoved_before_the_report(clone):
+    h = hub(clone)
+    h.repos.moved, h.repos.unmoved = "https://there.example", []
+    status, answer = incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None)))
+    assert (status, answer) == (200, {"pages": {"a.md": {"ready": True}}})
+    assert h.repos.unmoved == ["o/r"]
+
+
+def test_a_root_that_moved_to_another_tiroir_than_the_sender_stays_moved(clone):
+    h = hub(clone, repos_mod.MOVED)
+    h.repos.moved, h.repos.unmoved = "https://third.example", []
+    assert incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None))) == (409, {"why": "moved"})
+    assert h.repos.unmoved == []
+
+
+def test_the_senders_origin_is_compared_as_the_hub_spells_it(clone):
+    h = hub(clone)
+    h.repos.moved, h.repos.unmoved = "https://there.example", []
+    b = body(clone, ("a.md", "alice@example.com", None))
+    b["from"] = {"origin": "HTTPS://There.example/", "by": "alice"}
+    incoming.check_root(h, b)
+    assert h.repos.unmoved == ["o/r"]
+
+
+def test_a_body_with_no_sender_unmoves_nothing(clone):
+    h = hub(clone, repos_mod.MOVED)
+    h.repos.moved, h.repos.unmoved = "https://there.example", []
+    b = body(clone, ("a.md", "alice@example.com", None))
+    del b["from"]
+    assert incoming.check_root(h, b) == (409, {"why": "moved"})
+    assert h.repos.unmoved == []
+
+
+def test_a_root_that_did_not_move_is_not_unmoved(clone):
+    h = hub(clone)
+    incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None)))
+    assert h.repos.unmoved == []
+

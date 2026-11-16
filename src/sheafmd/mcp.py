@@ -20,7 +20,7 @@ import json
 import os
 import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -127,6 +127,7 @@ TOOLS = {
 }
 PAGE_TOOLS = ("read", "create", "update")    # the key, or a token made with --write (SPEC 9.7)
 WRITE_TOOLS = ("create", "update")           # each call leaves a row in the diagnostics log (SPEC 15)
+WRITES = ("create", "update")                                   # the tools that leave a line in the Write log
 SESSION_WRITES = ("create", "update", "reply", "resolve")    # a write that names James's session to the hub (9.12)
 MAX_TEXT = 1024 * 1024           # bytes of UTF-8 a create or an update may write (SPEC 12)
 NO_RIGHT = ("This token reads and answers comments; it does not read, make or change pages. A "
@@ -144,6 +145,7 @@ class Caller:
     token: TokenRow | None = None
     session: str | None = None      # James's session, from X-James-Session: set only for a token of `[list]`'s james_tokens (9.12)
     own_session: bool = False       # False on a james_tokens entry but the own one: its header is read, never resolved to an own session
+    declared: dict = field(default_factory=dict)    # what the caller declared in headers: session, host, link, chat (the Write log)
 
     @property
     def token_name(self) -> str | None:
@@ -698,10 +700,21 @@ class Door:
             self.hub.record(f"door-{name}", doc, outcome="stale" if isinstance(e, Stale) else "refused",
                             reason=e.why, **who)
             raise
+        if name in WRITES and out.get("changed", True):
+            self._logged_write(name, out["doc"], caller)
         self.hub.record(f"door-{name}", out["doc"], outcome="written" if out.get("changed", True)
                         else "unchanged", hash=out["hash"], bytes=len(_as_read(args["text"]).encode("utf-8")),
                         **who)
         return out
+
+    def _logged_write(self, name: str, address: str, caller: Caller):
+        """The Write log's line of a door write: what the caller declared in its headers, kept as declared. A caller that
+        declared a chat id is a chat client; one that declared a session, a machine or a link, or that is the stdio door,
+        is a laptop; any other is a chat client that declared nothing."""
+        d = caller.declared
+        place = "chat client" if d.get("chat") else (
+            "laptop" if caller.token is None or d.get("session") or d.get("host") or d.get("link") else "chat client")
+        self.hub.writes.add(address, caller.display, place, name, **d)
 
     @staticmethod
     def _check_size(text: str):

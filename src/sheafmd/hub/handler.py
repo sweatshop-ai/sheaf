@@ -23,7 +23,7 @@ import tempfile
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote
 
@@ -184,6 +184,10 @@ def _json(status: int, obj: dict, headers: dict | None = None) -> Response:
                     json.dumps(obj).encode("utf-8"))
 
 
+def _line(line) -> dict | None:
+    return asdict(line) if line is not None else None
+
+
 def _ok(**fields) -> Response:
     return _json(200, {"ok": True, **fields})
 
@@ -252,6 +256,7 @@ class Handler:
             ("GET", "/_/open", "open", OPEN, self._open),
             ("GET", "/_/live", "live", COOKIE, self._live),
             ("GET", "/_/doc", "doc", EITHER, self._doc),
+            ("GET", "/_/writes", "writes", EITHER, self._writes),
             ("GET", "/_/mount", "mount", EITHER, self._mount),
             ("GET", "/_/mount.js", "mount-js", OPEN, lambda req: self._mount_asset(req, "mount.js", "text/javascript; charset=utf-8")),
             ("GET", "/_/mount.css", "mount-css", OPEN, lambda req: self._mount_asset(req, "mount.css", "text/css; charset=utf-8")),
@@ -819,6 +824,14 @@ class Handler:
             return None
         return root.id
 
+    def _writes(self, req: Req) -> Response:
+        """The Write log of one rectoverso: its lines, the last write and the last line that named an agent session. A
+        member reads the lines of a document they may name, no other (9.9)."""
+        doc = self._owned(req, req.query.get("doc"))
+        log = self.hub.writes
+        return _ok(lines=[asdict(l) for l in log.lines(doc)], last=_line(log.last(doc)),
+                   last_session=_line(log.last_session(doc)))
+
     def _doc(self, req: Req) -> Response:
         with self._reading(req.query.get("doc")):
             return self._doc_state(req)
@@ -935,6 +948,7 @@ class Handler:
                 if got["changed"] and not got.get("again"):
                     moved.clear()
                     self.hub.committed(e.address, req.member, "edit", gone=gone)
+                    self.hub.writes.add(e.address, req.member.name if req.member else self.hub.person, "page", "save")
                 # The buttons of the text written, under its lock (10.11): the page numbers its presses by them.
                 h, text = e.live.current()
                 try:
@@ -1790,6 +1804,13 @@ class Handler:
         return Response(204)
 
     # ── the MCP door (the key and a name, or a token) ────────────────────────
+    @staticmethod
+    def _declared(req: Req) -> dict:
+        """What a door caller says of itself in its headers, for the Write log: kept as declared, never verified (SPEC 12)."""
+        h = req.headers
+        return {"session": h.get("x-sheaf-session", ""), "host": h.get("x-sheaf-host", ""),
+                "link": h.get("x-sheaf-link", ""), "chat": h.get("x-sheaf-chat", "")}
+
     def _mcp(self, req: Req) -> Response:
         if req.token:
             the = self.hub.the_list
@@ -1798,9 +1819,9 @@ class Handler:
             james = req.token.name in names
             caller = Caller(req.token.signed(self.hub.person, self.hub.proxy), req.token,
                             session=req.headers.get("x-james-session", "") if james else None,
-                            own_session=bool(own) and req.token.name == own)
+                            own_session=bool(own) and req.token.name == own, declared=self._declared(req))
         else:
-            caller = Caller(req.display)
+            caller = Caller(req.display, declared=self._declared(req))
         status, answer = self.door.handle(req.raw, caller)
         return _json(status, answer) if answer is not None else Response(status)
 

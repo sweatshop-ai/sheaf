@@ -551,8 +551,9 @@ def test_a_save_that_began_before_a_move_is_at_the_new_address_after_it(team, mo
 
 def test_a_tell_that_starts_between_the_check_and_the_rename_is_refused_or_the_move_is(team, monkeypatch):
     """A Tell's start and the move's check of it take the same lock, the hub's admission lock: the move sees the Tell and
-    answers 409, or the Tell, finding the page gone from the old address, is refused. The hook is `tell_live` itself: the
-    Tell's start is begun the moment the move has looked, and the move goes on only when that start is through or waits."""
+    answers 409, or marks the address under that lock and the Tell's start, which looks at the mark under it, is refused.
+    The hook is `tell_live` itself: the Tell's start is begun the moment the move has looked, and the move goes on only
+    when that start is through or waits."""
     import threading
     from sheafmd.hub import tell as tell_mod
     hub = team.hub
@@ -575,7 +576,7 @@ def test_a_tell_that_starts_between_the_check_and_the_rename_is_refused_or_the_m
 
     def start():
         try:
-            with hub.tell._admitting():
+            with hub.tell._admitting(old):
                 outcome.append(hub.tell._start(entry, "tell", "c1", lambda job: hold.wait(20), None))
         except tell_mod.JobRefused as e:
             outcome.append(e)
@@ -704,3 +705,75 @@ def test_forgetting_a_root_offline_takes_its_forwards_with_it_and_a_new_root_of_
     assert team.hub.forwards.follow(old) == new
     roots_mod.forget_offline("loose-alice")
     assert forwards.Forwards().follow(old) is None
+
+
+# ── the fix round over b2f6ebe: one lock order (SPEC 9.11, `sheafmd.hub.lockorder`) ──────────────
+
+def test_a_move_renames_with_no_admission_lock_held(team, monkeypatch):
+    """The rename waits on the page's file lock and takes the admission lock never: a save in flight on one page must not keep
+    a Tell start on another waiting. The hook is `_link`, which runs under the file lock: from another thread the admission
+    lock is taken at once, and the move is still marked, so a Tell start on the page is refused."""
+    import threading
+    from sheafmd.hub import moves, tell as tell_mod
+    hub = team.hub
+    old = made(team, "alice", PLAN)["doc"]
+    inside, go, seen = threading.Event(), threading.Event(), {}
+    real = moves._link
+
+    def link(*a, **k):
+        inside.set()
+        assert go.wait(20)
+        return real(*a, **k)
+    monkeypatch.setattr(moves, "_link", link)
+    mover = threading.Thread(target=lambda: move(team, ALICE, old, "b"))
+    mover.start()
+    assert inside.wait(20)
+
+    def probe():
+        got = hub.admit.acquire(timeout=3)
+        seen["taken"] = got
+        if got:
+            try:
+                seen["marked"] = old in hub.moving
+                with pytest.raises(tell_mod.JobRefused) as r:
+                    with hub.tell._admitting(old):
+                        pass
+                seen["refused"] = r.value.status
+            finally:
+                hub.admit.release()
+    t = threading.Thread(target=probe)
+    t.start()
+    t.join(10)
+    go.set()
+    mover.join(20)
+    assert seen == {"taken": True, "marked": True, "refused": 409}, seen
+    assert old not in hub.moving                       # the mark is gone once the move is done
+
+
+def test_the_mark_of_a_refused_move_is_taken_off(team):
+    """A move that is refused after the mark (a name the folder holds) leaves no mark, so a Tell starts there."""
+    old = made(team, "alice", PLAN)["doc"]
+    in_folder(team, "b")
+    assert move(team, ALICE, old, "b").status == 409
+    assert old not in team.hub.moving
+    with team.hub.tell._admitting(old):
+        pass
+
+
+def test_a_queue_for_an_agent_holds_neither_the_admission_lock_nor_the_moves_lock_while_it_finds_the_entry(team, monkeypatch):
+    """`queue_agent` resolves the Forward and finds the entry (its first read and render may happen there) with no lock held,
+    and takes the moves' lock and the admission lock only for the look at the address and the queue."""
+    from sheafmd.hub import moves
+    old = made(team, "alice", PLAN)["doc"]
+    cid = comment(team, old)
+    assert team.post("/_/target", {"doc": old, "target": "agent:alice-claude"}, member=ALICE).status == 200
+    alice = team.hub.proxy.members[ALICE]
+    held = []
+    real = team.hub.tell._entry
+
+    def entry(address):
+        held.append((team.hub.admit._is_owned(), moves._LOCK._is_owned()))
+        return real(address)
+    monkeypatch.setattr(team.hub.tell, "_entry", entry)
+    team.hub.tell.queue_agent(old, cid, alice)
+    assert held and set(held) == {(False, False)}, held

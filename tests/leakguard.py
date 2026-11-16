@@ -131,6 +131,22 @@ def carries_this_run(pid: int) -> bool:
     return bool(env) and f"{RUN_VAR}={run}".encode() in env
 
 
+def is_ending(pid: int) -> bool:
+    """The process has no environment to read and ends within a moment: one that was found by its mark and has
+    since closed (a daemon told to go, a hub stopping) reads empty before it is a zombie. A live process, one
+    that is in the middle of its exec included, has an environment within `EXEC_WINDOW`: it is not this."""
+    deadline = time.monotonic() + EXEC_WINDOW
+    while True:
+        env = _environment(str(pid))
+        if env not in (None, [b""]):
+            return False
+        if proc_state(pid) != "alive":
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.02)
+
+
 def _send(pid: int, sig: int):
     try:
         signals.send(pid, sig)

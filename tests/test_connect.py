@@ -287,7 +287,7 @@ def test_an_ipv6_address_keeps_its_brackets_in_the_origin_and_not_in_the_entry_n
     assert origin == "https://[::1]:8443" and "[" not in connect.entry_name(origin)
 
 
-@pytest.mark.parametrize("empty", ['tiroir = ""', "tiroir = ''", 'tiroir = ""  # none yet'])
+@pytest.mark.parametrize("empty", ['tiroir = ""', "tiroir = ''", 'tiroir = ""  # none yet', 'tiroir = """"""'])
 def test_an_empty_default_in_the_config_is_filled_not_repeated(tiroir, keyring, capsys, empty):
     paths.config_file().parent.mkdir(parents=True, exist_ok=True)
     paths.config_file().write_text(f'name = "Ada"\n{empty}\n\n[jump]\ncommand = ["x"]\n')

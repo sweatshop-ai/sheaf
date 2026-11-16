@@ -13,7 +13,7 @@ from helpers import FRONT, Front, door, rpc
 import sheafmd.comments as rdc
 from sheafmd.edit import ticked_html
 from sheafmd.blocks import split_md_blocks
-from sheafmd.hub import proxy, the_list
+from sheafmd.hub import proxy, roots, the_list
 from sheafmd.hub.state import Tokens
 from sheafmd.hub.visibility import audience
 from sheafmd.source import md_hash
@@ -742,7 +742,10 @@ def test_a_tell_a_recipients_agent_is_given_names_the_page_by_its_opaque_name_ne
 
 # ── the class, not the instance (PR 394, round 8): no route tells a recipient the owner's folders ───────────
 
-SEGMENTS = ("private-matters", "/deep", "deep/")        # the folders of the owner's page, after the root's name (9.11)
+OWNER_SESSION = "6f1c2f0e-3a55-4a0e-9d52-0c1f6a1b7d11"
+OWNER_HOST = "alice-private-laptop"
+OWNER_LINK = "https://rc.example.com/code/session_ownersecret"
+SEGMENTS = ("private-matters", "/deep", "deep/", OWNER_SESSION, OWNER_HOST, "ownersecret")        # the folders of the owner's page, after the root's name (9.11)
 
 
 def _says(res):
@@ -764,6 +767,7 @@ def _seed_shared_deep_page(team):
     real = deep(team)
     opaque = told(team, BOB, real)
     _comment(team, real)
+    team.hub.writes.add(real, "Claude Code (Alice)", "laptop", "update", session=OWNER_SESSION, host=OWNER_HOST, link=OWNER_LINK)
     bad, why = call(team, "alice", "update", doc=real, text=read(team, real) + "\nMore.\n",
                     expected_hash=md_hash(read(team, real)))
     assert not bad, why
@@ -828,3 +832,47 @@ def test_no_tool_of_the_door_tells_a_recipient_the_owners_folders(team):
     assert all('"isError": false' in told_to_bob[n] for n in ("documents", "read", "threads", "reply")), told_to_bob
     bad = {k: _leaks(v) for k, v in told_to_bob.items() if _leaks(v)}
     assert not bad, "\n".join(f"{k}: {v}" for k, v in bad.items())
+
+
+# ── round 10 over 5a527bb: CRLF, a link a page can follow, no page count, no owner's machine ─────────────────────
+
+def test_a_page_with_crlf_line_ends_can_be_shared_from_its_row(team):
+    doc = made(team, "alice", PRIVATE)["doc"]
+    team.hub.file(doc).write_bytes(PRIVATE.replace("\n", "\r\n").encode())
+    row = {r["doc"]: r for r in shared_rows(team, ALICE)["rows"]}[doc]
+    got = team.post("/_/share", {"doc": doc, "hash": row["share"]}, member=ALICE)
+    assert got.status == 200, got.text
+    assert audience(read(team, doc)) is True
+
+
+def test_the_title_link_of_a_page_shared_with_me_is_a_path_the_page_can_follow(team):
+    real = deep(team)
+    row = {r["doc"]: r for r in shared_rows(team, BOB)["rows"]}[told(team, BOB, real)]
+    assert row["url"] == roots.url_path(row["doc"]) and row["url"].startswith("/")
+
+
+def test_a_recipient_is_not_told_how_many_pages_the_owner_has_beyond_the_listing_cap(team, monkeypatch):
+    first = made(team, "alice", SHARED, doc="a-first.md")["doc"]          # the page Bob is Shared sorts first: inside the cap
+    assert tick(team, ALICE, first, "Share").status == 200
+    for n in ("b", "c", "d"):
+        made(team, "alice", PRIVATE, doc=f"{n}.md")
+    monkeypatch.setattr(roots, "LIST_CAP", 2)
+    assert team.get("/_/index.json", member=ALICE).json()["more"]          # the owner is told: the cap is hit
+    assert doc_of(team, BOB)                                                # Bob's root is listed, with his page in it
+    assert team.get("/_/index.json", member=BOB).json()["more"] == {}
+    assert shared_rows(team, BOB)["more"] == {}
+
+
+def test_a_row_and_the_write_log_of_a_shared_page_hold_nothing_of_the_owners_machine_or_session(team):
+    real = deep(team)
+    opaque = told(team, BOB, real)
+    team.hub.writes.add(real, "Claude Code (Alice)", "laptop", "update", session=OWNER_SESSION, host=OWNER_HOST, link=OWNER_LINK)
+    row = {r["doc"]: r for r in shared_rows(team, BOB)["rows"]}[opaque]
+    assert (row["write_tip"], row["session_tip"], row["session_link"]) == ("", "", None)
+    assert row["write"] and row["session"]                                   # who wrote stays: the name is the owner's agent's
+    lines = team.get(f"/_/writes?doc={opaque}", member=BOB).json()
+    for l in (*lines["lines"], lines["last"], lines["last_session"]):
+        assert (l["session"], l["host"], l["link"], l["chat"]) == ("", "", "", "")
+    mine = {r["doc"]: r for r in shared_rows(team, ALICE)["rows"]}[real]
+    assert OWNER_HOST in mine["write_tip"] and OWNER_SESSION in mine["session_tip"]   # the owner still sees their own
+

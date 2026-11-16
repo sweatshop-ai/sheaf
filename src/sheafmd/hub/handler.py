@@ -190,7 +190,9 @@ def _line(line, told=None) -> dict | None:
     if line is None:
         return None
     out = asdict(line)
-    return {**out, "address": told} if told is not None else out
+    if told is None:
+        return out
+    return {**out, "address": told, "session": "", "host": "", "link": "", "chat": ""} if told != line.address else out
 
 
 def _ok(**fields) -> Response:

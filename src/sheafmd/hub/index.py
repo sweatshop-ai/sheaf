@@ -664,7 +664,7 @@ class Index:
             if (rendered or giver is not None) and not rows:
                 continue                        # a root that Shares nothing with this member is not told of
             rows.sort(key=lambda r: (RANK[r["dot"]], -r["mtime"], r["doc"]))
-            if listing.more:
+            if listing.more and giver is None:      # the owner's page count is the owner's
                 more[root.name] = listing.more
             # A member is told the root's name, never its folder on the hub's disk (9.9).
             folder = {"path": str(root.path)} if member is None else {}

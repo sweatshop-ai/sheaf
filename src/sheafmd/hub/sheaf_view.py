@@ -35,7 +35,7 @@ class Titles:
             st = path.stat()
             key = (str(path), st.st_mtime_ns, st.st_size)
             if key not in self._kept:
-                text = path.read_text(encoding="utf-8", errors="replace")
+                text = path.read_bytes().decode("utf-8", errors="replace")      # bytes: the hash is of the text a save reads, line ends as they are
                 if len(self._kept) >= TITLES_KEPT:
                     self._kept.clear()
                 self._kept[key] = (the_list.read_rectoverso(rel, text).title, shared_by(text),
@@ -100,6 +100,8 @@ def byline(hub, address: str, member) -> dict | None:
     line = hub.writes.last_way_back(address)
     if line is None:
         return None
+    if hub.alias(member, address) != address:       # a Shared page: the owner's machine, session and link are theirs
+        return {"name": line.writer, "tip": "", "link": None}
     return {"name": line.writer, "tip": session_tip(line), "link": way_back(line, member)}
 
 
@@ -170,13 +172,17 @@ def data(hub, member, titles: Titles) -> dict:
                 folder, given = f"{SHARED}/{root['shared_from']}", {"shared_from": root["shared_from"],
                                                                       "new": hub.member_opened.get(member.id, address) != int(d["mtime"] * 1e9)}
             told = hub.alias(member, address)     # the owner's folders are not the recipient's to read (9.11)
-            rows.append({"doc": told, "url": d["url"] if told == address else hub.url(told), "title": title, "root": SHARED if given else at.root,
+            if given:                             # nor is the owner's machine, session or Remote Control link
+                write_tip, session_tip_, link = "", "", None
+            else:
+                write_tip, session_tip_, link = last.host if last else "", session_tip(session) if session else "", way_back(session, member)
+            rows.append({"doc": told, "url": d["url"] if told == address else roots_mod.url_path(told), "title": title, "root": SHARED if given else at.root,
                          "folder": folder, "shared_by": agent, **given,
                          "share": unshared if mine(hub, member, at.root) and not given else "", "mtime": d["mtime"], "when": index_mod.when(d["mtime"], now),
                          "open": d["open"], "write": say_write(last, session),
-                         "write_tip": last.host if last else "",
+                         "write_tip": write_tip,
                          "session": session.writer if session else "",
-                         "session_tip": session_tip(session) if session else "",
-                         "session_link": way_back(session, member)})
+                         "session_tip": session_tip_,
+                         "session_link": link})
     rows.sort(key=lambda r: (-r["mtime"], r["doc"]))
     return {"tree": tree(rows), "rows": rows, "more": found["more"]}

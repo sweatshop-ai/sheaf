@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from helpers import BEA, CAL, FRONT, door, rpc
 from helpers import call as door_call
-from test_send import keyring, local, no_real_keyring, run, tiroir  # noqa: F401  (fixtures and helpers)
+from test_send import keyring, local, no_real_keyring, run, scratch, tiroir  # noqa: F401  (fixtures and helpers)
 from test_hub_commits import box, git, merged_on_github, rectoversos, remote  # noqa: F401  (fixtures)
 from test_write_log import agents, declared  # noqa: F401  (fixtures and helpers)
 
@@ -855,3 +855,64 @@ def test_a_refused_token_on_a_report_still_fails_loudly(status, tiroir, hub_repo
     code, out, err = run(capsys, laptop / "docs" / "plan.md")
     assert code == 1 and local == []
     assert "refused the token" in err
+
+
+# ── round nine: one parse step for the door's answer ─────────────────────────
+
+def _says(content=None, *, text=None, result=None):
+    """A door whose answer to a tool call is `result`, or a result holding `content`, or one text item `text`."""
+    def answer(message):
+        if message.get("method") != "tools/call":
+            return None
+        body = result if result is not None else {"content": content if content is not None
+                                                  else [{"type": "text", "text": text}]}
+        return 200, {"jsonrpc": "2.0", "id": message["id"], "result": body}, {}
+    return answer
+
+
+MALFORMED = {
+    "a list": _says(text="[]"), "a string": _says(text='"x"'), "a number": _says(text="1"),
+    "null": _says(text="null"), "an empty object": _says(text="{}"),
+    "a clone of a later version": _says(text='{"clone": "future-value"}'),
+    "a clone that is not a string": _says(text='{"clone": ["ok"]}'),
+    "ok without commit_known": _says(text='{"clone": "ok"}'),
+    "ok with commit_known a string": _says(text='{"clone": "ok", "commit_known": "yes"}'),
+    "no-app with an install that is no string": _says(text='{"clone": "no-app", "install": 5}'),
+    "content with a string in it": _says(["x"]), "content with no item": _says([]),
+    "content that is no list": _says("abc"), "an item whose text is a number": _says([{"text": 5}]),
+    "an item with no text": _says([{"type": "text"}]), "text that is not json": _says(text="not json"),
+    "a result that is a list": _says(result=[]), "a result that is a string": _says(result="x"),
+    "an error whose text is a number": _says(result={"isError": True, "content": [{"text": 5}]}),
+}
+
+
+@pytest.mark.parametrize("name", MALFORMED)
+def test_an_answer_that_is_no_report_renders_the_page_on_the_laptop_with_one_line(
+        name, tiroir, hub_repos, laptop, local, monkeypatch, capsys):
+    _door_that(monkeypatch, tiroir, MALFORMED[name])
+    page = laptop / "docs" / "plan.md"
+    code, out, err = run(capsys, page)
+    assert code == 0, err
+    assert local == [str(page)] and out == ""
+    assert "on this laptop" in err and "Traceback" not in err and len(err.strip().splitlines()) == 1
+
+
+@pytest.mark.parametrize("answer", [
+    '{"clone": "ok", "commit_known": true}', '{"clone": "ok", "commit_known": false}',
+    '{"clone": "cloning", "commit_known": null}', '{"clone": "not-cloned"}', '{"clone": "private-root"}',
+    '{"clone": "none"}', '{"clone": "no-app", "install": "https://example.com/install"}', '{"clone": "no-app"}'])
+def test_every_known_answer_still_gets_its_own_line(answer, tiroir, hub_repos, laptop, local, monkeypatch, capsys):
+    _door_that(monkeypatch, tiroir, _says(text=answer))
+    code, out, err = run(capsys, laptop / "docs" / "plan.md")
+    assert code in (0, 1) and "Traceback" not in err
+    if '"commit_known": true' in answer:
+        assert code == 0 and local == [] and "plan.md" in out
+    else:
+        assert local and err
+
+
+def test_a_loose_page_whose_create_is_answered_with_a_malformed_item_fails_with_a_sentence(
+        tiroir, scratch, local, monkeypatch, capsys):
+    _door_that(monkeypatch, tiroir, _says(["x"]))
+    code, out, err = run(capsys, scratch)
+    assert code == 1 and "Traceback" not in err and "answered" in err

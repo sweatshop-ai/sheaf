@@ -72,7 +72,7 @@ def test_the_form_docks_at_the_head_of_the_screen_when_a_keyboard_opens_after_it
 
 def test_the_field_comes_first_and_the_arrow_beside_it_at_the_top_all_above_the_keyboard(phone):
     """Restated on 2026-11-09 (G): the field and the round arrow are in one row, the arrow at the top right of the box, as
-    Thierry asked after the third trial (the first layout had the arrow above, the second under the field); none of them under
+    Alice asked after the third trial (the first layout had the arrow above, the second under the field); none of them under
     the keyboard (the popover is docked at the head of what can be seen)."""
     page = composer(phone)
     keyboard(page, 844 - KEYBOARD)

@@ -208,34 +208,34 @@ def test_the_messages_name_both_tokens_that_clash_and_the_token_that_signs_the_p
 
 def test_the_token_set_of_stage_sheaf_agents_hub_2026_11_07_passes_the_start_check(folder, sheaf, work, monkeypatch):
     """The members and tokens that tt-tiroir's stage sheaf-agents-hub-2026-11-07 writes on tiroir-tt (files/params.toml,
-    lib.sh AGENT_TOKENS): the person `Thierry`, four members, the eight live old tokens (names and displays read off the box's tokens.json on 2026-11-08), and the eight agents made by
+    lib.sh AGENT_TOKENS): the person `Alice`, four members, the eight live old tokens (names and displays read off the box's tokens.json on 2026-11-08), and the eight agents made by
     `sheaf token add NAME --client CLIENT --write` once the config is in place. A hub that refuses this is an outage."""
     monkeypatch.delenv("SHEAF_NAME")                           # `add` reads the person from the config, as on the box
-    ids = {"thierry": "503b2f77-83de-452c-817a-a357faf85929", "sven": "f9979e4c-b8f9-4767-b4ba-d094a4b089f3",
-           "hans": "0ce2df60-3e1f-4a15-b5a1-41ca61579780", "marina": "8d1a62b6-cf44-45bf-a4c3-9b5eaf263f91"}
-    thierry = ["james", "mistral", "tiroir-mail-list", "assistant-thierry", "sheaf-filter-thierry", "starter-thierry",
-               "thierry-chatgpt", "thierry-claude", "thierry-tiroir", "thierry-ai"]
-    hans = ["hans-chatgpt", "hans-claude", "hans-tiroir", "hans-ai"]
+    ids = {"alice": "503b2f77-83de-452c-817a-a357faf85929", "carol": "f9979e4c-b8f9-4767-b4ba-d094a4b089f3",
+           "bob": "0ce2df60-3e1f-4a15-b5a1-41ca61579780", "dave": "8d1a62b6-cf44-45bf-a4c3-9b5eaf263f91"}
+    alice = ["james", "mistral", "tiroir-mail-list", "assistant-alice", "sheaf-filter-alice", "starter-alice",
+               "alice-chatgpt", "alice-claude", "alice-tiroir", "alice-ai"]
+    bob = ["bob-chatgpt", "bob-claude", "bob-tiroir", "bob-ai"]
     block = lambda who, name, tokens: (f'\n[proxy.members."{ids[who]}"]\nname = "{name}"\nroots = ["{work}"]\n'
                                        f'short = "{who}"\nshell = false\n'
                                        + (f'tokens = {json.dumps(tokens)}\n' if tokens else ""))
     paths.config_file().parent.mkdir(parents=True, exist_ok=True)
     paths.config_file().write_text(
-        'name = "Thierry"\n' + proxy_table(folder / "hub.sock", {}) + block("thierry", "Thierry De Marre", thierry)
-        + block("sven", "Sven van den Broek", []) + block("hans", "Hans Hermans", hans)
-        + block("marina", "Marina Scalafiotti", []), encoding="utf-8")
+        'name = "Alice"\n' + proxy_table(folder / "hub.sock", {}) + block("alice", "Alice De Marre", alice)
+        + block("carol", "Carol van den Broek", []) + block("bob", "Bob Hermans", bob)
+        + block("dave", "Dave Example", []), encoding="utf-8")
     for old, shown in [("tiroir-mail", "tiroir"), ("laptop-revise", "tiroir"), ("mistral", "Mistral"), ("james", "James"),
-                       ("tiroir-mail-list", "Mail"), ("assistant-thierry", "James"),
-                       ("sheaf-filter-thierry", "Plan session"), ("starter-thierry", "Starter")]:
+                       ("tiroir-mail-list", "Mail"), ("assistant-alice", "James"),
+                       ("sheaf-filter-alice", "Plan session"), ("starter-alice", "Starter")]:
         Tokens().add(old, shown)                               # the box's rows; two share `tiroir`, two share `James`
-    for name, client in [("thierry-chatgpt", "ChatGPT"), ("thierry-claude", "Claude"), ("thierry-tiroir", "tiroir"),
-                         ("thierry-ai", "AI"), ("hans-chatgpt", "ChatGPT"), ("hans-claude", "Claude"),
-                         ("hans-tiroir", "tiroir"), ("hans-ai", "AI")]:
+    for name, client in [("alice-chatgpt", "ChatGPT"), ("alice-claude", "Claude"), ("alice-tiroir", "tiroir"),
+                         ("alice-ai", "AI"), ("bob-chatgpt", "ChatGPT"), ("bob-claude", "Claude"),
+                         ("bob-tiroir", "tiroir"), ("bob-ai", "AI")]:
         assert sheaf("token", "add", name, "--client", client, "--write").code == 0, name
     from sheafmd.hub import proxy
     cfg = proxy.load()
-    proxy.check_start_names(cfg, "Thierry", [t for t in Tokens().list() if not t.invalid])
-    assert {t.signed("Thierry", cfg) for t in Tokens().list()} >= {"ChatGPT (Thierry De Marre)", "AI (Hans Hermans)"}
+    proxy.check_start_names(cfg, "Alice", [t for t in Tokens().list() if not t.invalid])
+    assert {t.signed("Alice", cfg) for t in Tokens().list()} >= {"ChatGPT (Alice De Marre)", "AI (Bob Hermans)"}
 
 
 def test_a_proxy_socket_something_listens_on_stops_the_start(port, folder):

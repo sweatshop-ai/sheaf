@@ -259,20 +259,20 @@ def test_a_folder_holding_only_anothers_private_page_is_absent_from_the_sheaf_th
     """The Sheaf view's gap: the handler tests set the member at the handler's edge; here the verifier says who the
     session is, the proxy sets the header, and the hub's socket answers `/_/mount?sheaf=1` for each."""
     import dataclasses
-    from test_hub_visibility import HANS, PRIVATE, THIERRY, members
+    from test_hub_visibility import BOB, PRIVATE, ALICE, members
     hub = edge.hub
     hub.proxy = dataclasses.replace(hub.proxy, members=members(work).members)
-    edge.front.users = {THIERRY: "user", HANS: "user"}
-    edge.front.sessions = {jwt("thierry"): THIERRY, jwt("hans"): HANS}
+    edge.front.users = {ALICE: "user", BOB: "user"}
+    edge.front.sessions = {jwt("alice"): ALICE, jwt("bob"): BOB}
     for rel, text in (("acme/hidden/2026-10-28-contract.md", PRIVATE), ("acme/site/open.md", "# Open\n")):
         f = work / rel
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text(text, encoding="utf-8")
         hub.roots.for_document(f)
-    asked = {who: edge.request("GET", "/_/mount?sheaf=1", session=jwt(who)) for who in ("thierry", "hans")}
+    asked = {who: edge.request("GET", "/_/mount?sheaf=1", session=jwt(who)) for who in ("alice", "bob")}
     assert [a.status for a in asked.values()] == [200, 200]
-    hans, thierry = asked["hans"].json()["sheaf"], asked["thierry"].json()["sheaf"]
-    assert "work/acme/hidden" in str(thierry["tree"])
-    assert "hidden" not in str(hans) and "contract" not in str(hans)
-    assert [r["doc"] for r in hans["rows"] if "acme" in r["doc"]] == ["work/acme/site/open.md"]
+    bob, alice = asked["bob"].json()["sheaf"], asked["alice"].json()["sheaf"]
+    assert "work/acme/hidden" in str(alice["tree"])
+    assert "hidden" not in str(bob) and "contract" not in str(bob)
+    assert [r["doc"] for r in bob["rows"] if "acme" in r["doc"]] == ["work/acme/site/open.md"]
     assert edge.request("GET", "/_/mount?sheaf=1").status == 401         # no session: the hub sees nothing

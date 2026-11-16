@@ -1,5 +1,5 @@
 """The Edit / Save toggle wears a border in the colour of the status ball by the round menu, and follows its state (ticket 03,
-Thierry's trial 2026-11-09): grey when idle, green in Edit mode, red-orange when a block has changed. One source: the ball and the
+Alice's trial 2026-11-09): grey when idle, green in Edit mode, red-orange when a block has changed. One source: the ball and the
 border read the same variable, so they cannot disagree. The ball's colours do not change with the theme; both themes are checked."""
 import pytest
 

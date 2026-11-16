@@ -1076,17 +1076,17 @@ def cmd_token(argv: list[str]) -> int:
 def cmd_peer(argv: list[str]) -> int:
     from . import connect
     p = _parser("peer", "peer add ORIGIN [--scope SCOPE]... | use ORIGIN TOKEN",
-                "The hub-to-hub channel (ticket 20). `add` is run on the tiroir that RECEIVES: it makes the token the "
-                "peer at ORIGIN sends, shown once. `use` is run on the tiroir that SENDS: it keeps that token in the login "
-                "keyring. Pairing goes one way: a tiroir that holds a token for another may send to it, not the reverse.")
+                "The channel between two shared Sheafs. `add` is run on the one that RECEIVES: it makes the token the "
+                "peer at ORIGIN sends, shown once. `use` is run on the one that SENDS: it keeps that token in the login "
+                "keyring. Pairing goes one way: a shared Sheaf that holds a token for another may send to it, not the reverse.")
     sub = p.add_subparsers(dest="action", required=True, metavar="add|use")
     add = sub.add_parser("add", usage="sheaf peer add ORIGIN [--scope transfer|read]...",
-                         help="make a peer token for the tiroir at ORIGIN and print it once")
-    add.add_argument("origin", metavar="ORIGIN", help="the peer tiroir's address, https://host")
+                         help="make a peer token for the shared Sheaf at ORIGIN and print it once")
+    add.add_argument("origin", metavar="ORIGIN", help="the other shared Sheaf's address, https://host")
     add.add_argument("--scope", action="append", choices=PEER_SCOPES, metavar="SCOPE",
                      help="what the peer may ask: transfer (move a page here: the default) or read; give it again for both")
-    use = sub.add_parser("use", usage="sheaf peer use ORIGIN TOKEN", help="keep the token the peer at ORIGIN made for this tiroir")
-    use.add_argument("origin", metavar="ORIGIN", help="the tiroir that made the token, https://host")
+    use = sub.add_parser("use", usage="sheaf peer use ORIGIN TOKEN", help="keep the token the peer at ORIGIN made for this one")
+    use.add_argument("origin", metavar="ORIGIN", help="the shared Sheaf that made the token, https://host")
     use.add_argument("token", metavar="TOKEN", help="the token `sheaf peer add` printed there")
     args = p.parse_args(argv)
     try:
@@ -1108,7 +1108,7 @@ def cmd_peer(argv: list[str]) -> int:
     _out(f"  + peer token {name}, for {origin}, scopes: {', '.join(scopes)}")
     _out(f"    {token}")
     _out(f"  Written to {Tokens.path()}")
-    _out(f"  Shown once. Give it to the other tiroir: `sheaf peer use <this tiroir's address> <token>` there.")
+    _out(f"  Shown once. Give it to the other shared Sheaf: `sheaf peer use <this Sheaf's address> <token>` there.")
     return EXIT_OK
 
 
@@ -1225,8 +1225,8 @@ COMMAND_HELP.update({
     "mcp": ("mcp [--agent NAME]", "run the stdio MCP door for an agent (comments, replies, pages)"),
     "connect": ("connect URL TOKEN",
                 "connect this laptop to a shared Sheaf: token in the keyring, door in Claude Code, default address"),
-    "peer add": ("peer add ORIGIN [--scope SCOPE]...", "make the token a peer tiroir sends to this one's channel; shown once"),
-    "peer use": ("peer use ORIGIN TOKEN", "keep, in the login keyring, the token a peer tiroir made for this one"),
+    "peer add": ("peer add ORIGIN [--scope SCOPE]...", "make the token another shared Sheaf sends to this one's channel; shown once"),
+    "peer use": ("peer use ORIGIN TOKEN", "keep, in the login keyring, the token another shared Sheaf made for this one"),
     "token add": ("token add NAME [--client CLIENT | --as DISPLAY] [--write]",
                   "make an MCP token for an agent that reaches the hub over HTTP; shown once"),
     "token list": ("token list", "MCP tokens: name, display name, created, last used"),

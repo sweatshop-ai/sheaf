@@ -16,6 +16,8 @@ from . import roots as roots_mod
 from . import state
 
 KEEP = Path(".sheaf") / "keep.json"
+ARCHIVED, SEEN = "archived.json", "seen.json"      # the times of the archive (archive.py)
+TIMES = (ARCHIVED, SEEN)
 MONTH = "%Y-%m"
 
 
@@ -156,16 +158,25 @@ def stamp(root_path: Path, name: str, changes: dict, only_new: bool = False) -> 
             _put(root_path, name, out, f"{name[:-5]} marks")
 
 
-def keep_moved(root_path: Path, old: str, new: str) -> None:
-    """The keep mark of the page at `old` is the page at `new`'s, a page that moved: written in one replace, so a page
-    is never there unmarked. Refused (`Refused`) when the marks cannot be written."""
-    mark = Path(root_path) / KEEP
+def marks_moved(root_path: Path, old: str, new: str) -> None:
+    """What the root holds about the page at `old` (its keep mark, and its archived and seen times) is the page at `new`'s,
+    a page that moved: a Move is no activity for the archive, so the seen time stays, an archived page stays archived and
+    a page moved back is not archived by a stale mark. All three are read under one hold before any is written (a file
+    that cannot be read refuses the lot, and nothing is changed), and each file is written in one replace, so a page is
+    never there unmarked. A mark at `new` that the page at `old` has no counterpart of goes. Refused (`Refused`) when a
+    mark cannot be read or written."""
     with state.file_locked("loose-keep.lock"):
         held = marks(root_path)
-        if old not in held:
-            return
-        state.write_text_private(mark, json.dumps(sorted({*(r for r in held if r != old), new}), indent=1,
-                                                  ensure_ascii=False) + "\n", inside=True)
+        tables = {name: times(root_path, name) for name in TIMES}
+        if old in held:
+            state.write_text_private(Path(root_path) / KEEP, json.dumps(sorted({*(r for r in held if r != old), new}), indent=1,
+                                                                        ensure_ascii=False) + "\n", inside=True)
+        for name, table in tables.items():
+            out = {k: v for k, v in table.items() if k not in (old, new)}
+            if old in table:
+                out[new] = table[old]
+            if out != table:
+                _put(root_path, name, out, f"{name[:-5]} marks")
 
 
 class Loose:

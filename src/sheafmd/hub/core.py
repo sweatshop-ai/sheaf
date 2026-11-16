@@ -919,8 +919,8 @@ class Hub:
 
     def moved_page(self, old: str, new: str, by: str):
         """The page at `old` is now at `new`, its file moved (9.11): the Forward is written, and every store that is keyed by
-        the address follows the page, so its settings, versions, read marks, Tells, Write log, keep mark and the opaque name
-        it is Shared under are the page's still. Each store is carried on its own: one that fails is a row in the
+        the address follows the page, so its settings, versions, read marks, Tells, Write log, keep, archived and seen
+        marks and the opaque name it is Shared under are the page's still. Each store is carried on its own: one that fails is a row in the
         diagnostics log, and the others are carried all the same. The tabs open on `old` are told where it went."""
         root = self.roots.get(roots_mod.Address.parse(new).root)
         rel_old, rel_new = roots_mod.Address.parse(old).rel, roots_mod.Address.parse(new).rel
@@ -930,7 +930,7 @@ class Hub:
                  lambda: self.shared_ids.rename(old, new), lambda: self.waiting_tells.rename(old, new),
                  lambda: self.session_tells.rename(old, new), lambda: self.writes.rename(old, new),
                  lambda: (self._versions_of(root) or self.versions).rename(old, new),
-                 lambda: loose_mod.keep_moved(root.path, rel_old, rel_new)]
+                 lambda: loose_mod.marks_moved(root.path, rel_old, rel_new)]
         for step in steps:
             try:
                 step()

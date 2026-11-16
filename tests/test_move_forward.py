@@ -777,3 +777,30 @@ def test_a_queue_for_an_agent_holds_neither_the_admission_lock_nor_the_moves_loc
     monkeypatch.setattr(team.hub.tell, "_entry", entry)
     team.hub.tell.queue_agent(old, cid, alice)
     assert held and set(held) == {(False, False)}, held
+
+
+# ── the fix round over 355dfee: the archive marks go with the page ───────────────────────────────
+
+def test_a_move_carries_the_archived_and_seen_marks_and_leaves_none_at_the_old_path(team):
+    """A move is no activity for the archive (SPEC 9.11): the page keeps its seen time, an archived page stays archived at
+    its new path, and the old path holds no mark, so a page moved back does not come back archived by a stale one."""
+    from sheafmd.hub import archive, loose
+    hub = team.hub
+    in_folder(team, "a")
+    root = hub.roots.get("loose-alice").path
+    mtime = os.stat(hub.file(at("a"))).st_mtime
+    loose.stamp(root, archive.SEEN, {"a/plan.md": 111.0, "a/other.md": 5.0})
+    loose.stamp(root, archive.ARCHIVED, {"a/plan.md": mtime + 10, "a/other.md": 6.0})
+    moved(team, ALICE, at("a"), "b")
+    assert loose.times(root, archive.SEEN) == {"b/plan.md": 111.0, "a/other.md": 5.0}
+    assert loose.times(root, archive.ARCHIVED) == {"b/plan.md": mtime + 10, "a/other.md": 6.0}
+    assert archive.is_archived(loose.times(root, archive.ARCHIVED), "b/plan.md", mtime)
+
+
+def test_a_move_of_a_page_with_no_archive_marks_writes_none(team):
+    from sheafmd.hub import archive, loose
+    in_folder(team, "a")
+    root = team.hub.roots.get("loose-alice").path
+    moved(team, ALICE, at("a"), "b")
+    assert loose.times(root, archive.SEEN) == {} and loose.times(root, archive.ARCHIVED) == {}
+    assert not (root / ".sheaf" / archive.SEEN).exists() and not (root / ".sheaf" / archive.ARCHIVED).exists()

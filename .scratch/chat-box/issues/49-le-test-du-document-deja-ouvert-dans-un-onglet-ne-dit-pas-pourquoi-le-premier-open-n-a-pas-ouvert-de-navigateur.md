@@ -6,7 +6,7 @@
 
 **Claimed by:** Isolde 2026-11-12
 
-**Status:** done — PR 264 merged by the maintainer, main 4e35ed7
+**Status:** done — PR 264 merged by Alice, main 4e35ed7
 
 **Établi (preuves) :** dans `_open` (`src/sheafmd/cli.py`), le navigateur n'est pas ouvert quand `tabs > 0` (un flux `/_/live` déjà compté), quand `seat.remote(os.environ)` n'est pas `None` (SSH sans variable de navigateur), quand `--no-browser`, `SHEAF_NO_BROWSER=1` ou `browser = false`, ou quand le lien de connexion est refusé (`r.err`). Les deux premiers se lisent dans `r.out` ; le reste dans `r.err` et dans l'environnement.
 

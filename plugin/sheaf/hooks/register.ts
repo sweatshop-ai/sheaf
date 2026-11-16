@@ -10,7 +10,7 @@
 // one id: when the session id is another one it stops and forgets its tiroirs, backoff and Tell in flight, and an answer
 // that arrives for an id that is no longer the session's is dropped, so its Tells wait at the door for that id.
 import type { Register } from 'claude-code'
-import { accept, addDoor, type Door, doorKey, type DoorState, doorOfTool, echoedSession, fresh, nextGap, originOf, type Poller, POLL_TIMEOUT_MS, pruneStored, putBack, shouldPoll, storedByDoor, takeNext, tellText, type Tell, WAIT_SECONDS } from './core'
+import { accept, addDoor, type Door, doorKey, type DoorState, doorOfTool, echoedSession, fresh, nextGap, originOf, type Poller, POLL_TIMEOUT_MS, pruneStored, putBack, remember, restore, shouldPoll, storedEntries, takeNext, tellText, type Tell, WAIT_SECONDS } from './core'
 
 /** One long-poll of the door for this session, through the laptop's own `sheaf tells-poll`, so the token stays in the
  *  keyring and never reaches this module. It prints a JSON array of Tells. */
@@ -53,8 +53,22 @@ const deliveredKey = (session: string) => `delivered:${session}`
 
 function keepDelivered($: any, m: Mod, session: string): Promise<void> {
   if (m.p.armedFor !== session) return m.writes      // the poller left the session meanwhile
-  const snapshot = storedByDoor(m.p)      // taken now; written after the writes called before it, so the newest snapshot is the last one stored
+  const snapshot = storedEntries(m.p)      // taken now; written after the writes called before it, so the newest snapshot is the last one stored
   m.writes = m.writes.then(() => $.store.set(deliveredKey(session), snapshot)).catch(() => {})
+  return m.writes
+}
+
+/** A submit was rejected or dropped: its Tell leaves what is kept for the session and tiroir it started under, whether or
+ *  not the poller is still armed for that session (a /clear or an end may have come first). */
+function forgetKept($: any, m: Mod, session: string, id: string): Promise<void> {
+  if (m.p.armedFor === session) {
+    m.p.stored.delete(id)
+    return keepDelivered($, m, session)
+  }
+  m.writes = m.writes.then(async () => {
+    const kept: any = await $.store.get(deliveredKey(session))
+    if (Array.isArray(kept)) await $.store.set(deliveredKey(session), kept.filter((e: any) => e?.id !== id))
+  }).catch(() => {})
   return m.writes
 }
 
@@ -71,9 +85,9 @@ async function deliver($: any, m: Mod) {
   // the record and the call.
   // Not awaited: a submit may resolve only when its turn ends, and this runs inside `turn.complete`.
   const session = p.armedFor
-  if (t.door) p.stored.set(t.id, t.door)
+  if (t.door) remember(p, t.id, t.door)
   void keepDelivered($, m, session)
-  const undo = () => { putBack(p, t); p.stored.delete(t.id); void keepDelivered($, m, session) }
+  const undo = () => { putBack(p, t); void forgetKept($, m, session, t.id) }
   $.prompt.submit({ text: tellText(t) }).then((r: any) => { if (r?.drop !== undefined) undo() }, undo)
 }
 
@@ -181,9 +195,7 @@ export const register: Register = (on) => {
     const id = await $.session.id()
     const doors: any = await $.store.get(doorsKey(id))
     const sent: any = await $.store.get(deliveredKey(id))
-    if (sent && typeof sent === 'object' && !Array.isArray(sent)) {
-      for (const [key, ids] of Object.entries(sent)) if (Array.isArray(ids)) for (const t of ids) if (typeof t === 'string') { m.p.delivered.add(t); m.p.stored.set(t, key) }
-    }
+    restore(m.p, sent)
     if (Array.isArray(doors) && !m.p.doors.length) for (const door of doors) if (isDoor(door)) await arm($, m, door)
     return next(e)
   })

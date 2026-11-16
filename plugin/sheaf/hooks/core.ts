@@ -21,17 +21,22 @@ export type DoorState = {
   notBefore: number          // no poll of this door before this time
 }
 
+/** A Tell kept for a resume: the tiroir that listed it, and when it was kept (a sequence number, so the age holds across tiroirs). */
+export type Kept = { door: string; seq: number }
+export type KeptEntry = Kept & { id: string }
+
 export type Poller = {
   doors: DoorState[]         // the tiroirs this session has declared itself to; empty until it has
   armedFor: string           // the session id that declared itself: the only id this poller ever polls for
   session: string            // the session id the held and delivered Tells belong to
   held: Tell[]               // taken from any door, not yet submitted (an Esc, or a turn running)
   delivered: Set<string>     // Tells already submitted: the door lists a Tell until the session answers it
-  stored: Map<string, string> // Tells whose submit succeeded, id to the tiroir that listed it: what is kept for a `claude --resume`
+  stored: Map<string, Kept>  // Tells whose submit started and was not rejected: what is kept for a `claude --resume`
+  seq: number                // the last sequence number given to a kept Tell: age across tiroirs
   submittingUntil: number    // a Tell was handed to `$.prompt.submit` and its turn has not started: no second one before it does, or this time
 }
 
-export const fresh = (): Poller => ({ doors: [], armedFor: '', session: '', held: [], delivered: new Set(), stored: new Map(), submittingUntil: 0 })
+export const fresh = (): Poller => ({ doors: [], armedFor: '', session: '', held: [], delivered: new Set(), stored: new Map(), seq: 0, submittingUntil: 0 })
 
 /** Add a tiroir to poll; null when this session polls it already. */
 export function addDoor(p: Poller, door: Door): DoorState | null {
@@ -93,15 +98,29 @@ export function accept(p: Poller, tells: Tell[], door: string) {
 export function pruneStored(p: Poller, door: string, listed: Tell[]): boolean {
   const ids = new Set(listed.map(t => t.id))
   let changed = false
-  for (const [id, d] of p.stored) if (d === door && !ids.has(id)) { p.stored.delete(id); changed = true }
+  for (const [id, k] of p.stored) if (k.door === door && !ids.has(id)) { p.stored.delete(id); changed = true }
   return changed
 }
 
-/** What is kept for a resume: the ids by tiroir, the newest KEPT_MAX at most. */
-export function storedByDoor(p: Poller): Record<string, string[]> {
-  const out: Record<string, string[]> = {}
-  for (const [id, d] of [...p.stored].slice(-KEPT_MAX)) (out[d] ??= []).push(id)
-  return out
+/** Keep a Tell whose submit starts. */
+export function remember(p: Poller, id: string, door: string) {
+  p.stored.set(id, { door, seq: ++p.seq })
+}
+
+/** Read back what an earlier run kept: the entries, whatever else the store holds being ignored. */
+export function restore(p: Poller, entries: unknown) {
+  if (!Array.isArray(entries)) return
+  for (const e of entries) {
+    if (!e || typeof e.id !== 'string' || typeof e.door !== 'string' || typeof e.seq !== 'number') continue
+    p.delivered.add(e.id)
+    p.stored.set(e.id, { door: e.door, seq: e.seq })
+    p.seq = Math.max(p.seq, e.seq)
+  }
+}
+
+/** What is kept for a resume, oldest first; past KEPT_MAX the oldest are dropped, whichever tiroir they are of. */
+export function storedEntries(p: Poller): KeptEntry[] {
+  return [...p.stored].map(([id, k]) => ({ id, ...k })).sort((a, b) => a.seq - b.seq).slice(-KEPT_MAX)
 }
 
 /** The text a Tell becomes in the session: says where it came from, and that it is another party's text, not the member's. */

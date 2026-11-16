@@ -1042,3 +1042,30 @@ def test_a_share_ticked_on_disk_on_a_loose_page_with_a_private_source_stays_clos
     assert _can_see(team, BOB, doc)[0] == 404                       # a hand tick writes no mark (#40)
     team.hub.file(doc).write_text(marked + SHARED.replace("- [ ] Share", "- [x] Share"), encoding="utf-8")
     assert _can_see(team, BOB, doc)[0] == 200                       # the owner's own Share wrote the mark
+
+
+UNREADABLE = {
+    "a duplicated sources key": "sources: [issue:acme/x#1]\nsources: [library:doc-123]\n",
+    "a nested value hiding a private source": "sources:\n  nested: library:doc-123\n",
+}
+
+
+@pytest.mark.parametrize("front", list(UNREADABLE), ids=list(UNREADABLE))
+def test_a_share_ticked_on_disk_on_a_page_whose_front_matter_cannot_be_read_opens_to_its_owner_only(team, front):
+    from sheafmd.hub import visibility
+    doc = made(team, "alice", SHARED)["doc"]
+    text = "---\nvisibility: owner\n" + UNREADABLE[front] + "---\n" + SHARED.replace("- [ ] Share", "- [x] Share")
+    assert visibility.front_matter(text).get(visibility.UNREAD)
+    team.hub.file(doc).write_text(text, encoding="utf-8")
+    bob = team.hub.proxy.members[BOB]
+    assert not team.hub.member_owns(bob, doc) and not team.hub.visible(bob, doc)
+    for member in (BOB, CAROL):
+        assert _can_see(team, member, doc) == (404, False, False, False, False)
+    assert page(team, ALICE, doc).status == 200 and team.hub.visible(team.hub.proxy.members[ALICE], doc)
+
+
+def test_a_share_with_ticked_on_a_page_whose_front_matter_cannot_be_read_names_no_one(team):
+    doc = made(team, "alice", NAMED)["doc"]
+    team.hub.file(doc).write_text("---\nsources: [issue:acme/x#1]\nsources: [library:doc-123]\n---\n"
+                                  + NAMED.replace("- [ ] Share with bob", "- [x] Share with bob"), encoding="utf-8")
+    assert _can_see(team, BOB, doc)[0] == 404 and page(team, ALICE, doc).status == 200

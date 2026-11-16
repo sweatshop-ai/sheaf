@@ -1140,11 +1140,19 @@ def fake_git(monkeypatch, outcomes):
     return calls
 
 
-def test_a_failed_read_of_the_git_version_is_tried_again_and_only_a_good_one_is_kept(monkeypatch):
+def test_a_failed_read_of_the_git_version_is_tried_again_after_a_pause_and_only_a_good_one_is_kept(monkeypatch, capsys):
+    clock = [1000.0]
+    monkeypatch.setattr(repos_mod.time, "monotonic", lambda: clock[0])
     try:
         calls = fake_git(monkeypatch, [subprocess.TimeoutExpired("git", 10), "garbage", "git version 2.53.0\n"])
-        assert [repos_mod._git_version() for _ in range(5)] == [None, None, (2, 53), (2, 53), (2, 53)]
+        assert [repos_mod._git_version() for _ in range(3)] == [None] * 3
+        assert len(calls) == 1                              # a hanging git is not asked again on every request
+        clock[0] += repos_mod.RETRY_READ_EVERY
+        assert repos_mod._git_version() is None             # the second try fails too
+        clock[0] += repos_mod.RETRY_READ_EVERY
+        assert [repos_mod._git_version() for _ in range(3)] == [(2, 53)] * 3
         assert len(calls) == 3
+        assert capsys.readouterr().err.strip().splitlines() == ["sheaf hub: git 2.53 read: commit look on"]
     finally:
         repos_mod._git_version.cache_clear()
 

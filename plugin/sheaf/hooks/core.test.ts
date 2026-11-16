@@ -24,10 +24,10 @@ test('a failure backs the poll off, doubling to five minutes, and a success rese
 test('a Tell is submitted when idle, never mid-turn, and after an Esc it waits', async () => {
   const p = fresh()
   p.held.push({ id: 'a', doc: 'x/y.md', thread: 'c1', message: 'hello', by: 'Bea', at: 'now' })
-  expect(takeNext(p, false, false)).toBeNull()
-  expect(takeNext(p, true, true)).toBeNull()
+  expect(takeNext(p, false, false, 0)).toBeNull()
+  expect(takeNext(p, true, true, 0)).toBeNull()
   expect(p.held.length).toBe(1)
-  expect(takeNext(p, true, false)?.id).toBe('a')
+  expect(takeNext(p, true, false, 0)?.id).toBe('a')
   expect(p.held.length).toBe(0)
 })
 

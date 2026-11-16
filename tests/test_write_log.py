@@ -133,8 +133,9 @@ def test_a_pull_leaves_a_git_line_with_the_commit_author_and_a_disk_write_a_tiro
     assert agents.hub.commits.settle()
     pulled = lines(agents)["lines"]
     assert [(l["writer"], l["place"], l["via"]) for l in pulled] == [("git · Ada", "tiroir", "pull")]
+    assert not agents.hub.writes.pulling(DOC)       # the pull's window closed with it: nothing waits to swallow a later line
     # A file written on the disk, seen at the next render of its page.
-    agents.hub.catch_up(e)                          # the page takes in the pull: its line, no disk line
+    agents.hub.catch_up(e)                          # the pull took the page in already: its line, no disk line
     assert [l["via"] for l in lines(agents)["lines"]] == ["pull"]
     f = agents.hub.file(DOC)
     f.write_text(f.read_text(encoding="utf-8") + "\nWritten by an editor.\n", encoding="utf-8")

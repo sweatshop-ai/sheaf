@@ -824,6 +824,10 @@ class Handler:
             return None
         return root.id
 
+    def _page_wrote(self, req: Req, e, via: str):
+        """The Write log's line of a write from a page or its row: the member's name, else the hub's person."""
+        self.hub.writes.add(e.address, req.member.name if req.member else self.hub.person, "page", via)
+
     def _writes(self, req: Req) -> Response:
         """The Write log of one rectoverso: its lines, the last write and the last line that named an agent session. A
         member reads the lines of a document they may name, no other (9.9)."""
@@ -948,7 +952,7 @@ class Handler:
                 if got["changed"] and not got.get("again"):
                     moved.clear()
                     self.hub.committed(e.address, req.member, "edit", gone=gone)
-                    self.hub.writes.add(e.address, req.member.name if req.member else self.hub.person, "page", "save")
+                    self._page_wrote(req, e, "save")
                 # The buttons of the text written, under its lock (10.11): the page numbers its presses by them.
                 h, text = e.live.current()
                 try:
@@ -1019,6 +1023,7 @@ class Handler:
                 gone = moved[0] if moved else self._placed(e, ticked)
                 moved.clear()
                 self.hub.committed(e.address, req.member, "untick" if release else "tick", gone=gone)
+                self._page_wrote(req, e, "tick")
         if "Stop James" in ticked:
             self._stop_james(req, e)
         if self.hub.the_list is not None and not release:     # a release answers nothing: the row stays where it is

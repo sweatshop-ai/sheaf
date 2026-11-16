@@ -561,6 +561,13 @@ def test_the_rows_second_button_ticks_the_second_action_and_no_other(box, rectov
     assert path.read_text(encoding="utf-8") == before.replace("- [ ] Done", "- [x] Done")
 
 
+def test_a_tick_leaves_a_line_in_the_write_log(box, rectoversos, github):
+    r = box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Approve"}), member=NELL)
+    assert r.status == 200, r.text
+    line = box.hub.writes.last(JOEY)
+    assert (line.via, line.place, line.writer) == ("tick", "page", "Nell")
+
+
 def test_a_tick_on_the_row_is_answered_in_the_sheaf_and_the_row_leaves_waiting_on_you(box, rectoversos, github):
     before = (rectoversos / JOEY[5:]).read_text(encoding="utf-8")
     r = box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Approve"}), member=NELL)

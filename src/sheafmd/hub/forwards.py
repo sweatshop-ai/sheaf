@@ -21,6 +21,13 @@ class Forwards(_Store):
             to = e.get("to") if isinstance(e, dict) else None
             return to if isinstance(to, str) else None
 
+    def local(self, address: str) -> str | None:
+        """The address on this tiroir that `address` now leads to: None when it has no Forward, or its Forward leads to another tiroir."""
+        with self._lock:
+            e = self._data.get(address)
+            to = e.get("to") if isinstance(e, dict) and "origin" not in e else None
+            return to if isinstance(to, str) else None
+
     def remote(self, address: str) -> dict | None:
         """The Forward at `address` when it leads to another tiroir, else None."""
         e = self.entry(address)
@@ -65,11 +72,25 @@ class Forwards(_Store):
             return None, data.pop(address, None) is not None
         self._change(change)
 
-    def put_back(self, address: str, kept: dict) -> None:
-        """The Forward `entry` gave for `address`, as it was: a landing that took it away did not land."""
+    def lift_remote(self, address: str) -> dict:
+        """The page that left from `address` is back: its Forward goes, and with it every other Forward the move made for the same
+        page (the addresses it had before, re-pointed by `add_remote`: same tiroir, same address there). What was lifted, by address."""
         def change(data):
-            data[address] = dict(kept)
-            return None, True
+            far = data.get(address)
+            if not (isinstance(far, dict) and isinstance(far.get("origin"), str)):
+                return {}, False
+            gone = {k: dict(e) for k, e in data.items() if k == address or (isinstance(e, dict) and e.get("origin") == far["origin"]
+                                                                          and e.get("to") == far.get("to"))}
+            for k in gone:
+                del data[k]
+            return gone, True
+        return self._change(change)
+
+    def put_back(self, lifted: dict) -> None:
+        """The Forwards `lift_remote` took away, as they were: a landing that took them away did not land."""
+        def change(data):
+            data.update({k: dict(e) for k, e in lifted.items()})
+            return None, bool(lifted)
         self._change(change)
 
     def snapshot(self) -> dict:

@@ -66,6 +66,9 @@ def _clear(hub, address: str, came_from: str | None):
         raise Refused(409, "A page moved away from that address, and its Forward stays: pick another folder or name.")
 
 
+BEING_MOVED = "This page is being moved. Try again in a moment."
+
+
 def _quiet(hub, address: str):
     """A Tell that runs on the page, or waits for its reply, holds the page's address: it is moved when that ends. The
     answer holds only under the hub's admission lock, the one a Tell's start takes (`Tell._admitting`): taken from the look
@@ -81,6 +84,8 @@ def _marked(hub, address: str):
     page's name and file locks with no admission lock held, and a save in flight never keeps a Tell start on another
     page waiting. The mark stays until the hub has moved what it keeps of the page."""
     with hub.admit:
+        if address in hub.moving:           # another move holds it: its mark is not ours to set again, or to clear
+            raise Refused(409, BEING_MOVED)
         _quiet(hub, address)
         hub.moving.add(address)
     try:

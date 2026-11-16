@@ -136,6 +136,7 @@ class Req:
     member_id: str = ""              # the member header, once the connection is the proxy's: every row names it
     code: object = None              # the codes.Code that let the request in, instead of the member header (9.13)
     gone: object = None              # `gone()`: whether the caller closed the connection (a poll that waits asks it); None in a test
+    arrived: float = field(default_factory=time.monotonic)      # when the request came in: a transfer's deadline counts from here
 
 
 @dataclass(frozen=True)
@@ -562,7 +563,7 @@ class Handler:
         """Land a page moved here (ticket 20): `incoming.land`. Whatever fails after the page was made takes it back and is a 500
         the sender reads as a failed transfer, so it keeps its page."""
         try:
-            status, answer = incoming.land(self.hub, self.door, req.body, peer=req.token.peer)
+            status, answer = incoming.land(self.hub, self.door, req.body, peer=req.token.peer, deadline=req.arrived + channel.SECONDS)
         except ValueError as e:
             raise Refuse(400, str(e)) from None
         return _json(status, answer)

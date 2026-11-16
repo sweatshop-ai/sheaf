@@ -1203,6 +1203,11 @@ class Door:
             if visibility.widens(visibility.audience(old), now):
                 raise ToolError("An update cannot Share a page, nor open it to more members: only its owner does, from "
                                 "the page or the Sheaf. Send the text with its Share lines as `read` gave them.", "share")
+            if self.hub.opens_more(address, old, text):
+                # the hub's own audience before and after, not the Share lines: taking off the private source that kept a
+                # hand-ticked line closed opens the page as a Share would
+                raise ToolError("An update cannot Share a page, nor open it to more members: only its owner does, from "
+                                "the page or the Sheaf. Send the text with its Share lines as `read` gave them.", "share")
             m = self._member(caller)
             if m is not None and visibility.share_lines(old) != visibility.share_lines(text) \
                     and not self.hub.is_owner(m, address, visibility.front_matter(old)):

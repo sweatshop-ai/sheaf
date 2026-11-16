@@ -1111,6 +1111,10 @@ class Handler:
                 # A thread moves to one client (9.10, #109): a rectoverso answers Move to once, by whatever edit.
                 raise EditError(f"This thread moves to one client: Move to {slug} is ticked.")
             words = visibility.newly_ticked(toggled)
+            if visibility.audience(new) is True and isinstance(visibility.audience(text), frozenset):
+                # A box that stays ticked while its words change (`Share with bob` into `Share`) opens the page to more
+                # members as a new tick does, so the owner's save writes the same front matter (9.11).
+                words.add("Share")
             if m is not None and visibility.share_lines(text) != visibility.share_lines(new) \
                     and not visibility.withdraws_share(text, new) and not self.hub.is_owner(m, e.address, fm):
                 # Who a page is Shared with is its owner's alone, by whatever edit adds, moves, ticks or removes any Share line or
@@ -1130,7 +1134,7 @@ class Handler:
                 words.add("Unshare")
             elif visibility.narrows(visibility.audience(text), visibility.audience(new)) and self.hub.loose_owner(e.address) is None:
                 # Naming fewer members closes the page at once to every member no longer named (9.11): the front matter
-                # goes to the names-only form, which `Hub.named` reads, and a `visibility: project` no longer lets them in.
+                # goes to the names-only form, which `Hub.opened_by_line` reads, and a `visibility: project` no longer lets them in.
                 # A loose page needs none: its audience is read from the file each time.
                 new = visibility.names_only(new)
                 if visibility.front_matter(new).get("sessions", "") != visibility.front_matter(text).get("sessions", ""):
@@ -1139,7 +1143,7 @@ class Handler:
                 if m is not None and not self.hub.is_owner(m, e.address, fm):
                     raise EditError("Only the owner of this rectoverso can share it.")
                 # `Share with <names>` on a page of a shared root opens it to those members only: the front matter stays
-                # as it is and `Hub.named` judges who reads (9.11); only a plain Share writes `visibility: project`.
+                # as it is and `Hub.opened_by_line` judges who reads (9.11); only a plain Share writes `visibility: project`.
                 names = isinstance(visibility.audience(new), frozenset) and self.hub.loose_owner(e.address) is None
                 if visibility.effective(visibility.front_matter(new)) == "owner" and names:
                     by = (m.short or m.name) if m is not None else self.hub.person

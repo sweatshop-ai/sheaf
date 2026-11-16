@@ -991,11 +991,13 @@ class Hub:
         return real if real is not None and roots_mod.Address.parse(real).root == at.root else address
 
     def audience(self, address: str):
-        """`visibility.audience` of the page at `address`, None when it cannot be read."""
+        """`visibility.audience` of the page at `address`, None when it cannot be read, or when its front matter cannot
+        (`visibility.UNREAD`): a page the hub cannot judge opens to its owner only, whatever its Share line says."""
         try:
             top, rel = self.where(address)
             with beneath.open_beneath(top, rel) as op:
-                return visibility.audience(op.text())
+                text = op.text()
+            return None if visibility.front_matter(text).get(visibility.UNREAD) else visibility.audience(text)
         except (OSError, UnicodeDecodeError, roots_mod.NotFound):
             return None
 
@@ -1080,7 +1082,7 @@ class Hub:
         if judged is None:
             return never_read and self.granted(member, address)
         fm, assignees = self.judged_for(member, address, *judged)
-        return visibility.visible_to(fm, member, assignees, self.granted(member, address)) or self.named(member, address)
+        return visibility.visible_to(fm, member, assignees, self.granted(member, address)) or self.opened_by_line(member, address)
 
     def may_open(self, member, address: str, fm: dict, opened=place.UNJUDGED) -> bool:
         """Whether `member` may open the rectoverso at `address` whose front matter is `fm`, a text read under its lock
@@ -1088,7 +1090,7 @@ class Hub:
         private = place.private_member(self, address, fm, opened)
         if private is not None and private != member.id:        # rule A
             return False
-        if self.holds_loose(member, address) or self.named(member, address):
+        if self.holds_loose(member, address) or self.opened_by_line(member, address):
             return True
         fm, assignees = self.judged_for(member, address, fm, self.assignees(address, fm))
         return visibility.visible_to(fm, member, assignees, self.granted(member, address))
@@ -1105,23 +1107,43 @@ class Hub:
         root = self.roots.get(roots_mod.Address.parse(address).root)
         return None if root is None else self.loose.owner_of(root)
 
-    def named(self, member, address: str) -> bool:
-        """Whether a ticked `Share with <names>` on the page at `address`, in a root that is no member's loose root,
-        names `member` (9.11): such a page stays its owner's alone in its front matter and opens to the named members
-        only, read from the file each time like a loose page's Share. A plain Share is the page's `visibility`."""
-        if self.proxy is None or self.loose_owner(address) is not None:
+    def opens_more(self, address: str, old: str, new: str) -> bool:
+        """Whether writing `new` over `old` at `address` opens the page to a member it was not open to: judged on the
+        hub's own audience of each text (its front matter's visibility, or its ticked Share line), never on the Share lines
+        alone, so a write that only takes a private source off a page whose line a hand ticked opens it all the same (9.11)."""
+        if self.proxy is None:
             return False
-        try:
-            top, rel = self.where(address)
-            with beneath.open_beneath(top, rel) as op:
-                text = op.text()
-        except (OSError, UnicodeDecodeError, roots_mod.NotFound):
+        def opens(member, text):
+            return visibility.effective(visibility.front_matter(text)) == "project" or self.opened_by_line(member, address, text)
+        return any(opens(m, new) and not opens(m, old) for m in self.proxy.members.values())
+
+    def opened_by_line(self, member, address: str, text: str | None = None) -> bool:
+        """Whether the ticked Share line of the page at `address`, as the file holds it now, opens it to `member` (9.11),
+        whatever its `visibility` says: a hand tick in the file gives what the tick of the page gives. In a root that is no
+        member's loose root only a ticked `Share with <names>` that names `member` does, such a page staying its owner's
+        alone in its front matter (a plain Share is the page's `visibility`). In another member's loose root a plain Share
+        does too, and `projects.toml` has no word. `text`: judged on that text instead of the file."""
+        if self.proxy is None:
             return False
+        loose = self.loose_owner(address)
+        if loose is not None and (loose == member.id or loose not in self.proxy.members):
+            return False
+        if text is None:                        # the file as it is now; a door write asks of the text it would leave
+            try:
+                top, rel = self.where(address)
+                with beneath.open_beneath(top, rel) as op:
+                    text = op.text()
+            except (OSError, UnicodeDecodeError, roots_mod.NotFound):
+                return False
         shared, fm = visibility.audience(text), visibility.front_matter(text)
+        if fm.get(visibility.UNREAD):             # a front matter the reader cannot judge: the owner's alone
+            return False
         # A page that draws on a private source is opened only by its owner's own Share, which writes `shared`; an
-        # agent's write cannot (#40).
+        # agent's write, or a tick by hand, cannot (#40).
         if any(visibility.private(x) for x in visibility.sources(fm)) and not visibility.text(fm, "shared"):
             return False
+        if loose is not None:
+            return visibility.reaches(shared, member)
         return isinstance(shared, frozenset) and visibility.reaches(shared, member) and self.granted(member, address)
 
     def granted(self, member, address: str, by_name: bool = False) -> bool:

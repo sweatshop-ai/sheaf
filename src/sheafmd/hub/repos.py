@@ -24,7 +24,13 @@ the App cannot reach it, and `install_url(repo)` is the link that adds the repo 
 git in the environment (`GIT_CONFIG_*`), never in an argument, a file or an answer. `remote_url(repo)` is where the clone
 comes from (GitHub's address; a test gives a local bare repo).
 
-Layout under `base`: `clones/<owner>/<name>/` the clones, `reports.json` the records, written whole and atomically.
+A clone nobody has reported a page of for `SLEEP_DAYS` days sleeps (`sleep_idle`, run on the hub's tick): nothing fetches
+it, and its sparse set is shrunk to nothing, the folders it held kept to widen again. A page of it still reads at its last
+text from the commit (`page_text`), whatever the work tree holds. A report for the repo wakes it. Nothing here deletes a
+clone: only the member does.
+
+Layout under `base`: `clones/<owner>/<name>/` the clones, `reports.json` the records, `clones.json` when each clone was last
+used and whether it sleeps, written whole and atomically.
 """
 import base64
 import functools
@@ -47,6 +53,7 @@ GIT_SECONDS = 300.0
 FETCH_SECONDS = 10.0        # the one fetch a report whose commit the clone lacks may cost
 LOOK_SECONDS = 5.0          # a look at what the clone holds, on the request path
 MAX_QUEUED = 64             # reports waiting for a repo's thread; a report past it is answered and not queued
+SLEEP_DAYS = 30             # a clone nobody reported a page of for this long sleeps
 GITHUB_HOSTS = ("github.com", "ssh.github.com", "www.github.com")
 
 NO_CLONES = "none"
@@ -121,6 +128,7 @@ class Repos:
         self._fetched: dict[str, float] = {}    # repo -> when a fetch for an unknown commit last started
         self._hosts: dict[str, str | None] = {}  # ssh host -> the name ssh -G gives it
         self.FETCH_EVERY = 30.0
+        self.clock = time.time                  # the sleep of a clone counts in this clock's days; a test sets it
         self.ssh_hostname = ssh_hostname
 
     # ── the records ──────────────────────────────────────────────────────────
@@ -138,6 +146,100 @@ class Repos:
     def _write(self, data: dict):
         self.base.mkdir(parents=True, exist_ok=True)
         write_text_atomic(self._records_file, json.dumps(data, indent=1, sort_keys=True) + "\n")
+
+    # ── when a clone was used, and whether it sleeps ─────────────────────────
+    @property
+    def _usage_file(self) -> Path:
+        return self.base / "clones.json"
+
+    def _usage(self) -> dict:
+        try:
+            data = json.loads(self._usage_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _use(self, repo: str):
+        """A report for `repo`: the clone was used now, and a sleeping one is to wake (its folders come back in its thread)."""
+        with self._records:
+            data = self._usage()
+            row = data.get(repo) if isinstance(data.get(repo), dict) else {}
+            data[repo] = {**row, "last_used": self.clock(), "sleeping": False}
+            self.base.mkdir(parents=True, exist_ok=True)
+            write_text_atomic(self._usage_file, json.dumps(data, indent=1, sort_keys=True) + "\n")
+
+    def sleeping(self, repo: str) -> bool:
+        with self._records:
+            row = self._usage().get(repo)
+        return isinstance(row, dict) and row.get("sleeping") is True
+
+    def sleep_idle(self) -> list:
+        """Put to sleep each clone not used for `SLEEP_DAYS` days: its sparse set is shrunk to nothing and kept to be widened
+        again. A clone with no record is first dated now. The repos put to sleep. The git calls run in the repo's own thread,
+        which a clone with a report waiting or being settled already has: that one is not put to sleep under it."""
+        now, slept, claimed = self.clock(), [], []
+        for git_dir in sorted((self.base / "clones").glob("*/*/.git")):
+            dest = git_dir.parent
+            repo = f"{dest.parent.name}/{dest.name}"
+            with self._records:
+                data = self._usage()
+                row = data.get(repo) if isinstance(data.get(repo), dict) else None
+                if row is None or not isinstance(row.get("last_used"), (int, float)):
+                    data[repo] = {"last_used": now, "sleeping": False}
+                    write_text_atomic(self._usage_file, json.dumps(data, indent=1, sort_keys=True) + "\n")
+                    continue
+                if row.get("sleeping") or now - row["last_used"] <= SLEEP_DAYS * 86400:
+                    continue
+            with self._guard:
+                if repo in self._queues:
+                    continue                    # a report is being settled: not asleep under it
+                self._queues[repo] = []         # this repo's thread is the one below; a report that comes waits in its queue
+                t = threading.Thread(target=self._sleep_one, args=(repo, dest, slept), name=f"repos-{repo}", daemon=True)
+                self._threads.add(t)
+            t.start()
+            claimed.append(t)
+        for t in claimed:
+            t.join()
+        return slept
+
+    def _sleep_one(self, repo: str, dest: Path, slept: list):
+        """The repo's thread, for one clone going to sleep; then it settles whatever reports came meanwhile (its `_wake`
+        widens the set again), like any thread of the repo."""
+        try:
+            listed = self._git(dest, "-c", "core.quotePath=false", "sparse-checkout", "list")
+            if listed.returncode == 0 and self._git(dest, "sparse-checkout", "set", "--cone").returncode == 0:
+                idle = False
+                with self._records:
+                    data = self._usage()
+                    row = data.get(repo) if isinstance(data.get(repo), dict) else {}
+                    # A report since the check (`_use`) has dated the clone anew: it stays awake, and its folders come back.
+                    idle = self.clock() - row.get("last_used", 0) > SLEEP_DAYS * 86400
+                    data[repo] = {**row, "sleeping": idle or row.get("sleeping") is True,
+                                  "restore": [f for f in listed.stdout.split("\n") if f]}
+                    write_text_atomic(self._usage_file, json.dumps(data, indent=1, sort_keys=True) + "\n")
+                if idle:
+                    slept.append(repo)
+        finally:
+            self._drain(repo)
+
+    def _wake(self, repo: str, dest: Path, token: str | None):
+        """The folders a sleeping clone held come back into its sparse set, once, in the thread of the report that woke it."""
+        with self._records:
+            row = self._usage().get(repo)
+        folders = row.get("restore") if isinstance(row, dict) else None
+        if not folders:
+            return
+        if self._git(dest, "sparse-checkout", "set", "--cone", "--", *folders, token=token).returncode == 0:
+            with self._records:
+                data = self._usage()
+                data[repo] = {k: v for k, v in data.get(repo, {}).items() if k != "restore"}
+                write_text_atomic(self._usage_file, json.dumps(data, indent=1, sort_keys=True) + "\n")
+
+    def page_text(self, repo: str, path: str, commit: str) -> str | None:
+        """The text of the page `path` at `commit`, read from git and not from the work tree, so a sleeping clone's pages open
+        at their last text. Nothing is fetched: None for a page the clone does not hold."""
+        r = self._git(self.clone_dir(repo), "show", f"{_clean_commit(commit)}:{_clean_path(path)}", look=True, seconds=LOOK_SECONDS)
+        return r.stdout if r.returncode == 0 else None
 
     def clone_dir(self, repo: str) -> Path:
         owner, name = repo.split("/")
@@ -255,6 +357,8 @@ class Repos:
         at most once in `FETCH_EVERY` seconds per repo, then the clone's files follow the branch."""
         if self._on_branch(dest, commit, 30):
             return True
+        if self.sleeping(repo):
+            return False                        # a clone that sleeps fetches nothing
         now = time.monotonic()
         with self._guard:
             last = self._fetched.get(repo)
@@ -308,6 +412,7 @@ class Repos:
                 return {"repo": repo, "path": path, "clone": NO_APP, "commit_known": None,
                         "install": self.provider.install_url(repo)}
         item = (member, path, commit, declared or {})
+        self._use(repo)
         self._enqueue(repo, item)
         if not held:
             return {"repo": repo, "path": path, "clone": CLONING, "commit_known": None}
@@ -371,6 +476,7 @@ class Repos:
                     self._failed[repo] = failed
                     self._queues[repo] = []     # what waited for the clone waits no more: the next report asks again
                 return
+        self._wake(repo, dest, token)
         for member, path, commit, declared in batch:
             folder = path.rpartition("/")[0]
             if token is not None:

@@ -16,7 +16,7 @@ SID_RC, SID_BARE = "6f1c2f0e-3a55-4a0e-9d52-0c1f6a1b7d11", "a2d8e4b1-5c70-4f53-8
 RC = "https://rc.example.com/code/session_abc123"
 CHAT = "3f2a9c1e-77aa-4b1d-9a10-5d0e8b6c2f44"
 AGENTVIEW = "http://127.0.0.1:8765"
-OPENED = "window.__opened = []; window.open = (...a) => { window.__opened.push(a); return null; };"
+OPENED = "window.__clicks = []; window.addEventListener('click', (e) => window.__clicks.push(e.defaultPrevented)); window.__opened = []; window.open = (...a) => { window.__opened.push(a); return null; };"
 FRONT = "/_front-for-test"
 FRONT_HTML = f"""<!doctype html><html><head><meta charset="utf-8"></head>
 <body style="margin:0"><div id="pane" style="height:640px"></div>
@@ -24,9 +24,10 @@ FRONT_HTML = f"""<!doctype html><html><head><meta charset="utf-8"></head>
 <script>sheafMount.mount(document.getElementById('pane'), {json.dumps({"sheaf": True})})
   .then((m) => {{ window.__page = m; }}, (e) => {{ window.__failed = String(e); }});</script>
 </body></html>"""
-# The first closed root attached is the Sheaf's own: the rectoverso opened from a row attaches another, inside it.
+# The first closed root attached is the Sheaf's own: the rectoverso opened from a row attaches another, inside it (the last of
+# `__roots`). `__clicks` says for each click whether something called preventDefault on it by the time it reached the window.
 FIRST_ROOT = """(() => { const attach = Element.prototype.attachShadow;
-  Element.prototype.attachShadow = function (o) { const r = attach.call(this, o); window.__root = window.__root || r; return r; };
+  Element.prototype.attachShadow = function (o) { const r = attach.call(this, o); window.__root = window.__root || r; (window.__roots = window.__roots || []).push(r); return r; };
 })();"""
 
 
@@ -227,3 +228,92 @@ def test_the_row_holds_no_script_and_no_address_but_the_hubs_own(mounted):
     assert mounted.js("return root.querySelectorAll('script, [onclick], [href^=\"javascript:\"]').length;") == 0
     hrefs = mounted.js("return Array.from(root.querySelectorAll('.sheaf-session [href]')).map((a) => a.getAttribute('href'));")
     assert sorted(hrefs) == sorted([f"/c/{CHAT}", RC])
+
+
+# ── the byline of an opened page is the same way back (ticket 10) ───────────
+
+def open_page(m, doc):
+    """Opens `doc` from its row and waits for its byline in the root the page attached."""
+    m.click(f'.sheaf-row[data-doc="{doc}"] .sheaf-title a')
+    until(lambda: m.page.evaluate("window.__roots.length > 1 && !!window.__roots[window.__roots.length - 1].querySelector('p.doc-by')"),
+          what="the page's byline")
+
+
+def byline(m):
+    return m.page.evaluate("""(() => { const p = window.__roots[window.__roots.length - 1].querySelector('p.doc-by');
+        const l = p.querySelector('a, button');
+        return {text: p.textContent, tag: l && l.tagName, href: l && l.getAttribute('href'), target: l && l.getAttribute('target'),
+                rel: l && l.getAttribute('rel')}; })()""")
+
+
+def click_byline(m):
+    m.page.evaluate("window.__roots[window.__roots.length - 1].querySelector('p.doc-by').scrollIntoView()")
+    x, y = m.page.evaluate("""(() => { const r = window.__roots[window.__roots.length - 1].querySelector('p.doc-by .sheaf-session-link')
+        .getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()""")
+    m.page.mouse.click(x, y)
+
+
+def test_the_byline_of_an_opened_page_names_the_session_as_its_row_does(mounted):
+    open_page(mounted, "work/plan.md")
+    b = byline(mounted)
+    assert b["text"].startswith("Document prepared by Claude Code (Bea)")
+    assert (b["tag"], b["href"], b["target"], b["rel"]) == ("A", RC, "_blank", "noopener noreferrer")
+
+
+def test_a_click_on_the_byline_asks_agentview_to_jump_and_goes_nowhere_else(mounted, agentview):
+    open_page(mounted, "work/plan.md")
+    click_byline(mounted)
+    until(lambda: agentview.calls, what="the jump")
+    assert agentview.calls == [("jump", {"key": f"claude:{SID_RC}"}, "1")]
+    assert opened(mounted) == []
+
+
+def test_a_session_with_no_remote_control_is_a_button_in_the_byline_that_jumps(mounted, agentview):
+    open_page(mounted, "work/ideas/first.md")
+    assert byline(mounted)["tag"] == "BUTTON"
+    click_byline(mounted)
+    until(lambda: agentview.calls, what="the jump")
+    assert agentview.calls == [("jump", {"key": f"claude:{SID_BARE}"}, "1")]
+
+
+def test_the_byline_of_an_open_webui_write_links_to_its_chat(mounted):
+    open_page(mounted, "work/.tooling/n.md")
+    b = byline(mounted)
+    assert (b["tag"], b["href"], b["target"]) == ("A", f"/c/{CHAT}", "_blank")
+
+
+def test_a_page_with_no_session_keeps_its_byline_as_rendered(mounted):
+    open_page(mounted, "work/ideas/deep/second.md")
+    b = byline(mounted)
+    assert b["tag"] is None and "Claude" not in b["text"]
+
+
+def test_once_agentview_is_known_absent_the_remote_control_link_opens_in_the_click_itself(mounted, agentview):
+    agentview.mode = "gone"
+    mounted.page.context.route("https://rc.example.com/**", lambda route: route.abort())
+    open_page(mounted, "work/plan.md")
+    click_byline(mounted)                                    # the first click has to ask: AgentView may be there
+    until(lambda: opened(mounted) == [RC], what="the Remote Control link, after the request failed")
+    before = mounted.page.evaluate("window.__clicks.length")
+    with mounted.page.context.expect_page() as popup:
+        click_byline(mounted)                                # AgentView is known absent: the browser follows the real link itself
+    assert popup.value is not None
+    assert mounted.page.evaluate("(n) => window.__clicks.slice(n)", before) == [False]
+    assert opened(mounted) == [RC]                           # window.open was not used again
+
+
+def test_a_session_that_has_ended_is_reopened_from_the_byline(mounted, agentview):
+    agentview.mode = "ended"
+    open_page(mounted, "work/plan.md")
+    click_byline(mounted)
+    until(lambda: len(agentview.calls) == 2, what="the jump, then the reopen")
+    assert [c[0] for c in agentview.calls] == ["jump", "reopen"]
+
+
+def test_with_agentview_absent_and_no_remote_control_the_byline_name_is_plain_text_afterwards(mounted, agentview):
+    agentview.mode = "gone"
+    open_page(mounted, "work/ideas/first.md")
+    click_byline(mounted)
+    until(lambda: byline(mounted)["tag"] is None, what="plain text")
+    assert byline(mounted)["text"].startswith("Document prepared by Claude Code (Bea)")
+    assert opened(mounted) == []

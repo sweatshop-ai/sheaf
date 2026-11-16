@@ -283,3 +283,43 @@ def test_what_the_listing_cap_left_out_of_a_root_is_said(two, monkeypatch):
     monkeypatch.setattr(roots, "LIST_CAP", 1)
     got = sheaf(two)["sheaf"]
     assert got["more"] == two.get("/_/index.json").json()["more"] and got["more"]
+
+
+# ── the byline of an opened page (8.6, 11) ───────────────────────────────────
+
+def opened(front, address="work/plan.md", member=BEA):
+    r = front.get(f"/_/mount?doc={address}", member=member)
+    assert r.status == 200, r.text
+    return r.json()["config"]["way_back"]
+
+
+def test_an_opened_page_carries_the_way_back_the_row_has(two):
+    two.hub.writes.add("work/plan.md", "Claude Code (Bea)", "laptop", "update", session=SESSION, host="mac-mini", link=RC)
+    assert opened(two) == {"name": "Claude Code (Bea)", "tip": f"{SESSION} on mac-mini",
+                           "link": {"kind": "laptop", "provider": "claude", "session": SESSION, "remote": RC}}
+    assert opened(two) == {"name": "Claude Code (Bea)", "tip": f"{SESSION} on mac-mini", "link": link_of(two)}
+
+
+def test_an_opened_page_with_no_session_has_no_way_back(two):
+    assert opened(two) is None
+    two.hub.writes.add("work/plan.md", "Claude.ai (Bea)", "chat client", "update")
+    assert opened(two) is None
+
+
+def test_an_opened_page_asks_only_the_asking_members_laptop(two):
+    two.hub.writes.add("work/plan.md", "Claude Code (Cal)", "laptop", "update", session=SESSION)
+    assert opened(two)["link"] is None
+    two.hub.writes.add("work/plan.md", "Claude Code (Cal)", "laptop", "update", session=SESSION, link=RC)
+    assert opened(two)["link"] == {"kind": "remote", "href": RC}
+
+
+def test_an_opened_page_names_an_open_webui_chat(two):
+    two.hub.writes.add("work/plan.md", "Assistant (Bea)", "chat client", "update", chat=CHAT)
+    assert opened(two) == {"name": "Assistant (Bea)", "tip": "", "link": {"kind": "chat", "href": f"/c/{CHAT}"}}
+
+
+def test_the_answer_of_doc_carries_the_way_back_so_an_open_page_follows_a_new_session(two):
+    two.hub.writes.add("work/plan.md", "Claude Code (Bea)", "laptop", "update", session=SESSION)
+    r = two.get("/_/doc?doc=work/plan.md", member=BEA)
+    assert r.status == 200, r.text
+    assert r.json()["way_back"]["link"] == {"kind": "laptop", "provider": "claude", "session": SESSION, "remote": ""}

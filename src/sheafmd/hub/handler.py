@@ -273,6 +273,7 @@ class Handler:
             ("POST", "/_/tell", "tell", COOKIE, self._tell),
             ("POST", "/_/target", "target", COOKIE, self._target),
             ("POST", "/_/cancel", "cancel", COOKIE, self._cancel),
+            ("POST", "/_/retarget", "retarget", COOKIE, self._retarget),
             ("POST", "/_/jump", "jump", COOKIE, self._jump),
             ("POST", "/_/seen", "seen", COOKIE, self._seen),
             ("POST", "/_/export", "export", COOKIE, self._export),
@@ -875,6 +876,7 @@ class Handler:
         """A member's `telling` (9.9): their own Tells that wait for an agent (9.8) and their own drops for
         James's window (9.12), and nothing of the hub account's session or of another member's."""
         return (self.hub.waiting_tells.waits(address, member, sweep=sweep)
+                + self.hub.session_tells.waits(address, member, sweep=sweep)
                 + self.hub.box_waits.telling(address, member.id, comments=comments, text=text))
 
     def _mount(self, req: Req) -> Response:
@@ -1738,8 +1740,32 @@ class Handler:
         # A Tell that waits for an agent ends here, the reader's own and no other's (9.8). A member has no
         # session to stop: theirs is only a waiting Tell.
         self.hub.waiting_tells.end(doc, cid, "cancelled", member=req.member, only_member=True)
+        self.hub.session_tells.end(doc, cid, "cancelled", member=req.member, only_member=True)
         if req.member is None:
             self.hub.tell.cancel(doc, cid)
+        return _ok()
+
+    def _retarget(self, req: Req) -> Response:
+        """A member's Tell that waits for a laptop session goes to one of their own agents instead (SPEC 9.8): the waiting
+        Tell is cancelled, the target becomes that agent and the Tell is queued for it. The reader's own, and no one else's."""
+        if req.member is None:
+            raise Refuse(400, "Only a member's Tell waits for a laptop session.")
+        e = self._entry(req, req.body.get("doc"))
+        cid, target = self._comment_id(req), req.body.get("target")
+        if not any(t["id"] == cid for t in self.hub.session_tells.waits(e.address, req.member)):
+            raise Refuse(409, "No Tell of yours waits for a session on this comment.")
+        try:
+            kind, _ = targets.parse(target)
+            if kind != "agent":
+                raise targets.Refused("Pick one of your own agents.")
+            targets.pick(self.hub, e.address, req.member, target)
+        except targets.Refused as r:
+            raise Refuse(400, str(r)) from None
+        self.hub.session_tells.end(e.address, cid, "cancelled", member=req.member, only_member=True, reason="retargeted")
+        try:
+            self.hub.tell.start_member_tell(e.address, cid, req.member, held=self._page_hash(req))
+        except JobRefused as r:
+            raise Refuse(r.status, r.message) from None
         return _ok()
 
     def _seen(self, req: Req) -> Response:

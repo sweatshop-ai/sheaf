@@ -694,7 +694,7 @@ class Handler:
         hub never read is judged as (`Hub.visible`)."""
         _shape(isinstance(doc, str), "doc is missing")
         if req.member is not None and not (self.hub.member_owns(req.member, doc)
-                                           and self.hub.visible(req.member, doc, never_read)):
+                                           and self.hub.visible(req.member, doc, **({} if never_read else {"never_read": False}))):
             raise Refuse(404, "no such document")
         return doc
 

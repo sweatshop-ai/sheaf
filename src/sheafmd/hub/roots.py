@@ -620,7 +620,7 @@ def _walk(top: Path) -> Iterator[str]:
                 yield name if under == "." else f"{under}/{name}"
 
 
-def _capped(top: Path, names: Iterable[str], kept: Callable[[str, bool], bool]) -> Listing:
+def _capped(top: Path, names: Iterable[str], kept: Callable[[str, bool], bool], cap: int = LIST_CAP) -> Listing:
     """The first LIST_CAP of `names` that are documents of the root: what `resolve` would serve,
     a regular file inside it, and kept by `kept`; the rest of them counted (D15), up to
     `COUNT_LIMIT`, where the count stops."""
@@ -628,7 +628,7 @@ def _capped(top: Path, names: Iterable[str], kept: Callable[[str, bool], bool]) 
     for rel in names:
         if not (_servable(rel) and (found := _stat_inside(top, rel, folders)) and kept(rel, found[1])):
             continue
-        if len(docs) < LIST_CAP:
+        if len(docs) < cap:
             docs.append(Found(rel, found[0]))
         else:
             more += 1
@@ -637,7 +637,7 @@ def _capped(top: Path, names: Iterable[str], kept: Callable[[str, bool], bool]) 
     return Listing(sorted(docs, key=lambda d: d.rel), more)
 
 
-def list_documents(root: Root) -> Listing:
+def list_documents(root: Root, cap: int | None = None) -> Listing:
     """The markdown files of a root, sorted by path. A git root asks git (tracked and
     untracked, minus gitignored; nothing when git gives no answer); any other folder is walked.
     What `resolve` would refuse is not listed, nor what `document` would: a file that 8.2 keeps
@@ -648,4 +648,4 @@ def list_documents(root: Root) -> Listing:
     names = _git_names(top) if root.git else _NOT_A_REPO
     if names is None:                      # git gave no answer: list nothing it has not vouched for
         return Listing([], 0)
-    return _capped(top, _walk(top) if names is _NOT_A_REPO else sorted(set(names)), _kept(root))
+    return _capped(top, _walk(top) if names is _NOT_A_REPO else sorted(set(names)), _kept(root), LIST_CAP if cap is None else cap)

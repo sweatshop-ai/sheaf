@@ -73,11 +73,11 @@ def test_the_agency_member_sees_the_pages_they_may_open_there(side):
 @pytest.mark.parametrize("who", [{}, {"as": "*"}, {"as": ""}, {"as": "nobody@example.com"}, {"as": "carol@example.com"},
                                   {"as": "alice@example.com", "role": "admin", "admin": True}])
 def test_anyone_else_is_told_what_a_member_with_nothing_to_see_is(side, who):
-    make(side, "alice", "# Alice's plan\n")
+    mine = make(side, "alice", "# Alice's plan\n")
     empty = ask(side, **{"as": "bob@example.com"}, op="sheaf")
     status, got = ask(side, op="sheaf", **who)
     if who.get("as") == "alice@example.com":      # a stray field changes nothing: still Alice, only Alice's pages
-        assert [r["doc"] for r in got["rows"]] == ["alice-work/plan.md"]
+        assert [r["doc"] for r in got["rows"]] == [mine]
     else:
         assert (status, got) == empty and got == {"rows": [], "tree": [], "more": {}}
 

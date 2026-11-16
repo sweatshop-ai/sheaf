@@ -25,7 +25,7 @@ from sheafmd.hub.state import Tokens
 from sheafmd.hub.visibility import front_matter
 from sheafmd.source import md_hash
 
-NELL = "503b2f77-83de-452c-817a-a357faf85929"       # the front's ids of two members
+NELL = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"       # the front's ids of two members
 DORA = "2b9d7e1c-4a51-4c0e-9d1f-6f0c3a7e8b42"
 TOKEN = "ghs_fake_" "installation_token"
 NOW = 1_761_640_000                                    # 2025-10-28 08:26:40 UTC
@@ -1397,7 +1397,7 @@ def test_a_take_off_of_a_file_that_went_is_not_narrowed_by_a_later_tick_of_the_s
         assert the_list_._off[("name", "a/b/c.md")][1] == ("acme", "record", 5)
 
 
-# ── Move to: the eighth word, and the pointer a move leaves (tt-tiroir#211) ──
+# ── Move to: the eighth word, and the pointer a move leaves (agency-tiroir#211) ──
 
 CLIENT = """
 ## Client
@@ -1406,7 +1406,7 @@ The sender writes from dexis.be, which Dexis and Klium share. Which client is th
 
 - [ ] Move to dexis (ref 18f3a9c2)
 - [ ] Move to klium (ref 18f3a9c2)
-- [ ] Move to thinkingtoo (ref 18f3a9c2)
+- [ ] Move to acme (ref 18f3a9c2)
 """
 
 
@@ -1418,7 +1418,7 @@ def test_a_move_to_box_with_its_slug_and_ref_is_an_action_with_the_word_move_to(
 def test_a_client_section_of_three_boxes_gives_three_actions_in_its_order():
     s = the_list.read_rectoverso("a/b/c.md", "# A rectoverso\n" + CLIENT)
     assert [(w, line, arg) for w, _, line, arg in s.actions] == [
-        ("Move to", 6, "dexis"), ("Move to", 7, "klium"), ("Move to", 8, "thinkingtoo")]
+        ("Move to", 6, "dexis"), ("Move to", 7, "klium"), ("Move to", 8, "acme")]
 
 
 def test_a_move_to_the_hub_gave_back_escaped_reads_its_slug_unescaped():
@@ -1467,11 +1467,11 @@ def test_a_row_of_move_to_boxes_draws_one_one_off_button_per_candidate_named_by_
     box.hub.the_list.poll()
     res = box.get("/list", member=NELL)
     assert read(res)["Waiting on you 2"]["globex/black-friday"] == [
-        ("Reply to Joey about column L Move to dexis Move to klium Move to thinkingtoo James", "mail · you · #5 · 2 h")]
+        ("Reply to Joey about column L Move to dexis Move to klium Move to acme James", "mail · you · #5 · 2 h")]
     href = "/list/globex/black-friday/2026-10-28-reply-to-joey.md"
     assert [b for b in buttons(res) if b.doc == JOEY] == [
         (href, JOEY, str(n), "Move to", "one-off", f"Move to {slug}") for n, slug in enumerate(("dexis", "klium",
-                                                                                                 "thinkingtoo"))]
+                                                                                                 "acme"))]
 
 
 @pytest.mark.parametrize("mark", ["x", "X"])
@@ -1562,7 +1562,7 @@ def test_a_row_whose_move_to_boxes_come_before_another_action_carries_the_button
     box.hub.the_list.poll()
     assert [(b.action, b.word, b.label) for b in buttons(box.get("/list", member=NELL)) if b.doc == JOEY] == [
         ("0", "Move to", "Move to dexis"), ("1", "Move to", "Move to klium"),
-        ("2", "Move to", "Move to thinkingtoo"), ("3", "Approve", "Approve")]
+        ("2", "Move to", "Move to acme"), ("3", "Approve", "Approve")]
 
 
 # ── a one-off stays pressed (#108) ────────────────────────────────────────────

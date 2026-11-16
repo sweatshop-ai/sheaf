@@ -23,15 +23,15 @@ from sheafmd.hub.state import INSIDE, Tokens, doc_key
 from sheafmd.hub.visibility import front_matter
 from sheafmd.source import md_hash
 
-ALICE = "503b2f77-83de-452c-817a-a357faf85929"
+ALICE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 BOB = "2b9d7e1c-4a51-4c0e-9d1f-6f0c3a7e8b42"
 NAME = "2026-10-28-contract.md"
-SHARED = f"thinkingtoo/tiroir/{NAME}"
-HOME = f"thinkingtoo/tiroir/private/alice/{NAME}"
-MISSING = "thinkingtoo/tiroir/nothing.md"
+SHARED = f"acme/tiroir/{NAME}"
+HOME = f"acme/tiroir/private/alice/{NAME}"
+MISSING = "acme/tiroir/nothing.md"
 
 PRIVATE = """---
-issue: thinkingtoo/tt-tiroir#9
+issue: acme/agency-tiroir#9
 assistant: James
 owner: alice
 sources: [library:doc-123]
@@ -42,7 +42,7 @@ sources: [library:doc-123]
 
 A quote from the contract.
 """
-OPEN = PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:thinkingtoo/tt-tiroir#9]")
+OPEN = PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:acme/agency-tiroir#9]")
 
 
 def members(work):
@@ -56,16 +56,16 @@ def members(work):
 
 def the_list_on(hub, root, tmp_path):
     hub.the_list = the_list.TheList(hub, the_list.parse({
-        "root": str(root), "repo": "thinkingtoo/tt-tiroir", "project": 1,
+        "root": str(root), "repo": "acme/agency-tiroir", "project": 1,
         "token_file": str(tmp_path / "no-token")}, "the test"))
 
 
 @pytest.fixture
 def team(hub, browser, work, plan, tmp_path):
     hub.proxy = members(work)
-    (work / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["alice", "bob"]\n'
+    (work / "projects.toml").write_text('[projects."acme/tiroir"]\nmembers = ["alice", "bob"]\n'
                                         'status = "live"\n', encoding="utf-8")
-    (work / "thinkingtoo" / "tiroir").mkdir(parents=True)
+    (work / "acme" / "tiroir").mkdir(parents=True)
     the_list_on(hub, work, tmp_path)
     return Front(hub, browser.handler)
 
@@ -134,18 +134,18 @@ def test_a_door_create_of_an_open_sheaf_lands_at_the_project(team, work, browser
     is_error, got = call(browser, "create", token=tokens["alice"], doc=f"work/{SHARED}", text=OPEN)
     assert not is_error, got
     assert got["doc"] == f"work/{SHARED}" and (work / SHARED).exists()
-    assert not (work / "thinkingtoo/tiroir/private").exists()
+    assert not (work / "acme/tiroir/private").exists()
 
 
 def test_a_door_create_of_an_owner_only_sheaf_whose_owner_has_no_short_is_refused(team, work, browser, tokens):
     """A short that cannot name a folder (`..`, which the config's rule lets through) is no short for it."""
     team.hub.proxy.members[ALICE] = dataclasses.replace(team.hub.proxy.members[ALICE], short="..")
-    (work / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["..", "bob"]\n'
+    (work / "projects.toml").write_text('[projects."acme/tiroir"]\nmembers = ["..", "bob"]\n'
                                         'status = "live"\n', encoding="utf-8")       # the project names that short
     is_error, got = call(browser, "create", token=tokens["alice"], doc=f"work/{SHARED}",
                          text=PRIVATE.replace("owner: alice", "owner: .."))
     assert is_error and "no owner of it has a short" in got, got
-    assert not (work / SHARED).exists() and not (work / "thinkingtoo/tiroir/private").exists()
+    assert not (work / SHARED).exists() and not (work / "acme/tiroir/private").exists()
 
 
 def test_a_name_held_by_a_private_sheaf_is_taken_for_every_token(team, work, browser, tokens):
@@ -155,8 +155,8 @@ def test_a_name_held_by_a_private_sheaf_is_taken_for_every_token(team, work, bro
         assert is_error and got == f"work/{SHARED} exists already; `create` makes a new page, and `update` changes one."
 
 
-@pytest.mark.parametrize("rel", [f"thinkingtoo/tiroir/private/alice/{NAME}", f"thinkingtoo/tiroir/private/{NAME}",
-                                 f"thinkingtoo/private/{NAME}"])
+@pytest.mark.parametrize("rel", [f"acme/tiroir/private/alice/{NAME}", f"acme/tiroir/private/{NAME}",
+                                 f"acme/private/{NAME}"])
 def test_a_create_that_names_a_private_folder_is_refused(team, work, browser, tokens, rel):
     (work / rel).parent.mkdir(parents=True, exist_ok=True)
     is_error, got = call(browser, "create", token=tokens["alice"], doc=f"work/{rel}", text=OPEN)
@@ -194,7 +194,7 @@ def test_a_move_out_of_private_leaves_the_folder_a_create_just_made(team, work, 
     folder and not yet its file: the move's tidying must not take the folder from under it."""
     from sheafmd import mcp
     from sheafmd.hub import place
-    other = "thinkingtoo/tiroir/private/alice/other.md"
+    other = "acme/tiroir/private/alice/other.md"
     put(team, work, other, OPEN)
     (work / other).rename(work / "other.md")                    # out of the way while the create makes the folder
     real, threads = mcp.create_file, []
@@ -202,7 +202,7 @@ def test_a_move_out_of_private_leaves_the_folder_a_create_just_made(team, work, 
     def create_while_moving(top, rel, text, judge=None):
         monkeypatch.setattr(mcp, "create_file", real)
         os.rename(work / "other.md", work / other)              # an open rectoverso in the folder, the poll's to move
-        t = threading.Thread(target=place.place, args=(team.hub, "work/thinkingtoo/tiroir/other.md"))
+        t = threading.Thread(target=place.place, args=(team.hub, "work/acme/tiroir/other.md"))
         t.start()
         t.join(1)
         threads.append(t)
@@ -212,7 +212,7 @@ def test_a_move_out_of_private_leaves_the_folder_a_create_just_made(team, work, 
     threads[0].join(10)
     assert not threads[0].is_alive(), "the poll did not finish"
     assert not is_error, got
-    assert (work / HOME).exists() and (work / "thinkingtoo/tiroir/other.md").exists()
+    assert (work / HOME).exists() and (work / "acme/tiroir/other.md").exists()
 
 
 # ── the logical name is the address; the private path is none ────────────────
@@ -275,9 +275,9 @@ def test_the_doors_documents_lists_an_owner_only_sheaf_by_its_name_to_its_owner_
     docs = door_documents(browser, tokens["bob"])
     assert f"work/{SHARED}" not in docs and f"work/{HOME}" not in docs, docs
 
-@pytest.mark.parametrize("rel", ["thinkingtoo/tiroir/private/readme.md",
-                                 "thinkingtoo/tiroir/private/alice/sub/note.md",
-                                 "thinkingtoo/tiroir/private/alice/sub/deeper/note.md"])
+@pytest.mark.parametrize("rel", ["acme/tiroir/private/readme.md",
+                                 "acme/tiroir/private/alice/sub/note.md",
+                                 "acme/tiroir/private/alice/sub/deeper/note.md"])
 def test_every_path_under_a_projects_private_folder_is_no_address(team, work, browser, tokens, rel):
     """Not only a private home: a file anywhere under `private/` is no document, to the page, the index and the
     door, for the key and its owner too."""
@@ -324,7 +324,7 @@ def test_a_move_renders_the_page_again_from_the_new_folder(team, work):
     the file, the same text resolves the image against the shared folder, so the private image is no longer sent."""
     from PIL import Image
     put(team, work, HOME, PRIVATE.replace("A quote from the contract.", "![seal](seal.png)"))
-    Image.new("RGB", (8, 8), (200, 10, 10)).save(work / "thinkingtoo/tiroir/private/alice/seal.png", "PNG")
+    Image.new("RGB", (8, 8), (200, 10, 10)).save(work / "acme/tiroir/private/alice/seal.png", "PNG")
     assert "data:image/png;base64," in team.get(f"/work/{SHARED}", member=ALICE).text
     assert tick(team, work, "Share", ALICE).status == 200
     page = team.get(f"/work/{SHARED}", member=BOB)
@@ -557,14 +557,14 @@ def test_a_save_that_ticks_two_move_tos_at_once_is_refused(team, work):
 
 def test_the_poll_moves_an_owner_only_sheaf_into_private_and_an_open_one_out(team, work):
     put(team, work, SHARED, PRIVATE)
-    put(team, work, "thinkingtoo/tiroir/private/alice/open.md", OPEN)
+    put(team, work, "acme/tiroir/private/alice/open.md", OPEN)
     team.hub.the_list.poll()
     assert (work / HOME).exists() and not (work / SHARED).exists()
-    assert (work / "thinkingtoo/tiroir/open.md").exists()
-    assert not (work / "thinkingtoo/tiroir/private/alice/open.md").exists()
+    assert (work / "acme/tiroir/open.md").exists()
+    assert not (work / "acme/tiroir/private/alice/open.md").exists()
 
 
-QUARANTINE = f"thinkingtoo/tiroir/private/~unplaced/{NAME}"
+QUARANTINE = f"acme/tiroir/private/~unplaced/{NAME}"
 NOBODY = PRIVATE.replace("owner: alice", "owner: nobody")
 
 
@@ -593,7 +593,7 @@ def test_a_quarantined_sheaf_goes_home_once_it_has_one_and_the_quarantine_folder
     (work / QUARANTINE).write_text(PRIVATE, encoding="utf-8")         # an owner with a short now
     team.hub.the_list.poll()
     assert (work / HOME).read_text(encoding="utf-8") == PRIVATE and not (work / QUARANTINE).exists()
-    assert not (work / "thinkingtoo/tiroir/private/~unplaced").exists()
+    assert not (work / "acme/tiroir/private/~unplaced").exists()
 
 
 def test_a_quarantined_sheaf_opened_to_the_project_goes_to_the_projects_path(team, work):
@@ -619,7 +619,7 @@ def test_an_owner_only_sheaf_that_loses_every_owner_with_a_short_leaves_its_old_
     (work / HOME).write_text(NOBODY, encoding="utf-8")
     team.hub.the_list.poll()
     assert (work / QUARANTINE).read_text(encoding="utf-8") == NOBODY
-    assert not (work / HOME).exists() and not (work / "thinkingtoo/tiroir/private/alice").exists()
+    assert not (work / HOME).exists() and not (work / "acme/tiroir/private/alice").exists()
     rows = hub_rows("place-refused")
     assert [r["doc"] for r in rows] == [f"work/{SHARED}"] and rows[0]["quarantined"] is True, rows
 
@@ -631,12 +631,12 @@ def test_a_sheaf_in_the_folder_of_an_owner_it_still_has_stays_when_its_new_home_
     bob = PRIVATE.replace("owner: alice", "owner: bob")
     put(team, work, SHARED, bob)
     team.hub.the_list.poll()
-    at_bob = f"thinkingtoo/tiroir/private/bob/{NAME}"
+    at_bob = f"acme/tiroir/private/bob/{NAME}"
     assert (work / at_bob).exists()
     # Owned by both now, and its front matter names neither: its home is the first in the config's order, alice's.
     monkeypatch.setattr(team.hub, "assignees", lambda address, fm: ["bobsmith", "tiroir"])
     (work / at_bob).write_text(NOBODY, encoding="utf-8")
-    (work / "thinkingtoo/tiroir/private/alice").write_text("", encoding="utf-8")       # no folder can be made
+    (work / "acme/tiroir/private/alice").write_text("", encoding="utf-8")       # no folder can be made
     team.hub.the_list.poll()
     assert (work / at_bob).read_text(encoding="utf-8") == NOBODY and not (work / QUARANTINE).exists()
     assert [r.get("quarantined") for r in hub_rows("place-refused")] == [None]
@@ -668,7 +668,7 @@ def test_two_files_that_hold_one_name_are_refused_and_left_as_they_are(team, wor
     """Made by hand: one at the project's path, one in a private folder. The name answers as a document that does
     not exist, to the page and to the door, a create of it is refused, a diagnostics row says why, and the hub
     repairs nothing: no move, no write."""
-    bob = f"thinkingtoo/tiroir/private/bob/{NAME}"
+    bob = f"acme/tiroir/private/bob/{NAME}"
     put(team, work, SHARED, PRIVATE)
     put(team, work, bob, PRIVATE.replace("owner: alice", "owner: bob"))
     page, missing = team.get(f"/work/{SHARED}", member=ALICE), team.get(f"/work/{MISSING}", member=ALICE)
@@ -686,13 +686,13 @@ def test_two_files_that_hold_one_name_are_refused_and_left_as_they_are(team, wor
 def test_the_owner_is_the_front_matters_owner_when_it_is_one_of_the_owners(team, work):
     put(team, work, SHARED, PRIVATE.replace("owner: alice", "owner: bob"))
     team.hub.the_list.poll()
-    assert (work / f"thinkingtoo/tiroir/private/bob/{NAME}").exists()
+    assert (work / f"acme/tiroir/private/bob/{NAME}").exists()
 
 
 def test_nothing_moves_outside_the_lists_root_or_below_project_depth(team, work):
-    put(team, work, "thinkingtoo/tiroir/notes/deep.md", PRIVATE)
+    put(team, work, "acme/tiroir/notes/deep.md", PRIVATE)
     team.hub.the_list.poll()
-    assert (work / "thinkingtoo/tiroir/notes/deep.md").exists()
+    assert (work / "acme/tiroir/notes/deep.md").exists()
 
 
 def test_nothing_moves_in_loopback_mode(team, work, browser):
@@ -793,7 +793,7 @@ def committing(hub, browser, tmp_path, first=PRIVATE, at=SHARED, ignore=""):
     git(repo, "config", "user.name", "the box")
     git(repo, "config", "user.email", "box@example.com")
     (repo / ".sheaf.toml").write_text('versions = "root"\ncommit = true\n', encoding="utf-8")
-    (repo / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["alice"]\nstatus = "live"\n',
+    (repo / "projects.toml").write_text('[projects."acme/tiroir"]\nmembers = ["alice"]\nstatus = "live"\n',
                                         encoding="utf-8")
     (repo / at).parent.mkdir(parents=True)
     (repo / at).write_text(first, encoding="utf-8")
@@ -855,7 +855,7 @@ def subjects(repo):
 
 
 def test_the_owners_untick_is_one_commit_that_moves_the_new_text(hub, browser, tmp_path):
-    shared = OPEN.replace("- [ ] Share", "- [x] Share").replace("sources: [issue:thinkingtoo/tt-tiroir#9]\n",
+    shared = OPEN.replace("- [ ] Share", "- [x] Share").replace("sources: [issue:acme/agency-tiroir#9]\n",
                                                                   "visibility: project\n")
     box, repo = committing(hub, browser, tmp_path, first=shared)
     got = untick(box, repo, "Share", ALICE, root="rectoversos")
@@ -1026,7 +1026,7 @@ def test_a_reader_during_a_share_save_never_gets_the_page_rendered_from_the_priv
     the private folder. The reader waits on the name's lock, and the move comes before the write."""
     from PIL import Image
     put(team, work, HOME, PRIVATE.replace("A quote from the contract.", "![seal](seal.png)"))
-    Image.new("RGB", (8, 8), (200, 10, 10)).save(work / "thinkingtoo/tiroir/private/alice/seal.png", "PNG")
+    Image.new("RGB", (8, 8), (200, 10, 10)).save(work / "acme/tiroir/private/alice/seal.png", "PNG")
     assert "data:image/png;base64," in team.get(f"/work/{SHARED}", member=ALICE).text
     e = team.hub.entries[f"work/{SHARED}"]
     pages, threads = [], []
@@ -1100,19 +1100,19 @@ def test_two_writers_of_one_name_each_commit_their_own_write(hub, browser, tmp_p
 def test_a_door_create_of_an_owner_only_sheaf_in_a_root_that_ignores_private_is_refused(hub, browser, tmp_path):
     """An owner-only create picks the private home; in a root whose repo ignores it the file would be made
     untracked. Refused as the move is, and nothing is written."""
-    box, repo = committing(hub, browser, tmp_path, at="thinkingtoo/tiroir/other.md", first=OPEN,
+    box, repo = committing(hub, browser, tmp_path, at="acme/tiroir/other.md", first=OPEN,
                            ignore="*/*/private/\n")
     token = Tokens().add("james-alice", write=True)
     is_error, got = call(browser, "create", token=token, doc=f"rectoversos/{SHARED}", text=PRIVATE)
     assert is_error and "the repo ignores the private folder" in got, got
     assert not (repo / SHARED).exists() and not (repo / HOME).exists()
-    assert not (repo / "thinkingtoo/tiroir/private").exists()
+    assert not (repo / "acme/tiroir/private").exists()
 
 
 # ── round 7: a link holds no name; ahead is the one judge; a write and its commit are one step ──
 
-LINK = "thinkingtoo/tiroir/link.md"
-SHARED_TEXT = OPEN.replace("- [ ] Share", "- [x] Share").replace("sources: [issue:thinkingtoo/tt-tiroir#9]\n",
+LINK = "acme/tiroir/link.md"
+SHARED_TEXT = OPEN.replace("- [ ] Share", "- [x] Share").replace("sources: [issue:acme/agency-tiroir#9]\n",
                                                                    "visibility: project\n")
 
 
@@ -1155,9 +1155,9 @@ def test_a_withdrawal_through_a_link_name_writes_nothing_at_the_shared_path(team
 
 
 @pytest.mark.parametrize("alias, to", [
-    ("thinkingtoo/alias.md", f"tiroir/{NAME}"),
-    ("thinkingtoo/tiroir/notes/alias.md", f"../{NAME}"),
-    (f"thinkingtoo/tiroir/notes/{NAME}", ".."),
+    ("acme/alias.md", f"tiroir/{NAME}"),
+    ("acme/tiroir/notes/alias.md", f"../{NAME}"),
+    (f"acme/tiroir/notes/{NAME}", ".."),
 ])
 def test_no_path_reaches_a_sheaf_through_a_link_at_any_depth(team, work, alias, to):
     """Opus P1 (round 8): a link above or below project depth, or a linked folder on the way, was no name, so the
@@ -1182,12 +1182,12 @@ def test_no_path_reaches_a_sheaf_through_a_link_at_any_depth(team, work, alias, 
 
 def test_a_document_below_project_depth_in_real_folders_is_still_served(team, work):
     """The rule above refuses links, not depth: a file in real folders under a project is a document as before."""
-    put(team, work, "thinkingtoo/tiroir/notes/plain.md", "# Plain\n\nWords.\n")
-    assert team.get("/work/thinkingtoo/tiroir/notes/plain.md", member=ALICE).status == 200
+    put(team, work, "acme/tiroir/notes/plain.md", "# Plain\n\nWords.\n")
+    assert team.get("/work/acme/tiroir/notes/plain.md", member=ALICE).status == 200
 
 
-@pytest.mark.parametrize("alias, to", [("thinkingtoo/alias.md", f"tiroir/{NAME}"),
-                                       ("thinkingtoo/tiroir/notes/alias.md", f"../{NAME}")])
+@pytest.mark.parametrize("alias, to", [("acme/alias.md", f"tiroir/{NAME}"),
+                                       ("acme/tiroir/notes/alias.md", f"../{NAME}")])
 def test_a_link_off_a_sheafs_path_is_in_no_index_and_no_list_and_the_poll_says_so(team, work, alias, to):
     """Opus P2 (round 9): the page answered such a link 404, but the index listed it and the list read it as a
     sheaf, through the link and under no name's lock. Nothing is listed or read through a link (9.11), and the
@@ -1209,7 +1209,7 @@ def test_a_holder_that_turns_into_a_link_while_the_poll_moves_it_deadlocks_nothi
     (9.11): a name's, then the file's, then the folders'."""
     from sheafmd.hub import place
     from sheafmd.source import file_lock
-    other = "thinkingtoo/tiroir/other.md"
+    other = "acme/tiroir/other.md"
     put(team, work, SHARED, OPEN)
     put(team, work, other, PRIVATE)
     hub, top = team.hub, Path(os.path.realpath(work))
@@ -1247,8 +1247,8 @@ def test_a_file_under_a_linked_private_folder_holds_no_name(team, work, tmp_path
     target = elsewhere / "alice" if linked == "private" else elsewhere
     target.mkdir(parents=True)
     (target / NAME).write_text(PRIVATE, encoding="utf-8")
-    (work / "thinkingtoo/tiroir" / linked).parent.mkdir(parents=True, exist_ok=True)
-    os.symlink(elsewhere, work / "thinkingtoo/tiroir" / linked)
+    (work / "acme/tiroir" / linked).parent.mkdir(parents=True, exist_ok=True)
+    os.symlink(elsewhere, work / "acme/tiroir" / linked)
     team.hub.the_list.poll()
     assert team.get(f"/work/{SHARED}", member=ALICE).status == 404
     assert not (work / SHARED).exists() and (target / NAME).read_text(encoding="utf-8") == PRIVATE
@@ -1275,8 +1275,8 @@ def test_an_untick_whose_move_fails_in_the_folder_is_refused_and_writes_nothing(
     refuses the write."""
     put(team, work, SHARED, SHARED_TEXT)
     (tmp_path / "elsewhere").mkdir()
-    (work / "thinkingtoo/tiroir/private").mkdir()
-    os.symlink(tmp_path / "elsewhere", work / "thinkingtoo/tiroir/private/alice")
+    (work / "acme/tiroir/private").mkdir()
+    os.symlink(tmp_path / "elsewhere", work / "acme/tiroir/private/alice")
     got = untick(team, work, "Share", ALICE)
     assert got.status == 409 and "This rectoverso cannot go to its home" in got.text, got.text
     assert (work / SHARED).read_text(encoding="utf-8") == SHARED_TEXT
@@ -1360,7 +1360,7 @@ def test_the_lock_of_a_name_nobody_holds_is_let_go(team, work):
     from sheafmd.hub import place
     before = len(place._LOCKS)
     for n in range(200):
-        assert team.get(f"/work/thinkingtoo/tiroir/none-{n}.md", member=ALICE).status == 404
+        assert team.get(f"/work/acme/tiroir/none-{n}.md", member=ALICE).status == 404
     with place.held(team.hub, f"work/{SHARED}"):
         assert place.owns(team.hub, f"work/{SHARED}") and len(place._LOCKS) == before + 1
     assert len(place._LOCKS) == before and not place.owns(team.hub, f"work/{SHARED}")

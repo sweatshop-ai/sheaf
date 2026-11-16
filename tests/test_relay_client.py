@@ -13,7 +13,7 @@ from sheafmd import relay_client as rc
 from sheafmd.agents.base import DeliveryError
 
 TOKEN = "sheaf_" "relay_" + "A" * 43        # two literals: one secret-shaped would stop the review runner (#53)
-DOC = "work/thinkingtoo/tiroir/2026-10-28-contract.md"
+DOC = "work/acme/tiroir/2026-10-28-contract.md"
 SID = "7e8f9a0b-1c2d-4e3f-8a4b-5c6d7e8f9a0b"
 TID = "11111111-2222-4333-8444-555555555555"
 

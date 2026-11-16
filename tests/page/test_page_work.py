@@ -17,10 +17,10 @@ from sheafmd.source import update_file
 pytestmark = pytest.mark.page
 
 META = re.compile(r'(<script id="rd-edit-meta" type="application/json">)(.*?)(</script>)', re.S)
-ORIGIN = "https://tt.tiroir.me"
+ORIGIN = "https://agency.example.com"
 FORK = f"uvx --from tiroir==0.2.0 tiroir work {ORIGIN}/list/acme/site/plan.md"
-ATTACH = "ssh tiroir-tt -t tmux -S /run/james/tmux.sock attach -t james \\; select-window -t =acme_site"
-BOX = {"id": "6f1c0e9a-2b3d-4c5e-8f70-1a2b3c4d5e6f", "host": "tiroir-tt", "member": "james",
+ATTACH = "ssh agency-tiroir -t tmux -S /run/james/tmux.sock attach -t james \\; select-window -t =acme_site"
+BOX = {"id": "6f1c0e9a-2b3d-4c5e-8f70-1a2b3c4d5e6f", "host": "agency-tiroir", "member": "james",
        "date": "2026-10-28T05:12:03Z"}
 LAPTOP = {"id": "0b9d1e7c-4a2f-4e8b-9c3d-5f6a7b8c9d0e", "host": "alice-laptop", "member": "alice",
           "date": "2026-10-28T09:40:00Z"}
@@ -126,7 +126,7 @@ def test_work_on_this_opens_the_two_ways_and_the_sessions(tab):
            "Needs uv there." in w.inner_text()
     # Newest first, as the front matter lists them, and five at most.
     assert w.locator(".rd-sess").all_inner_texts() == [
-        "James on tiroir-tt · 2026-10-28 05:12 UTC",
+        "James on agency-tiroir · 2026-10-28 05:12 UTC",
         "Alice on alice-laptop · 2026-10-24 08:00 UTC",
         "Alice on alice-laptop · 2026-10-23 08:00 UTC",
         "Alice on alice-laptop · 2026-10-22 08:00 UTC",
@@ -140,7 +140,7 @@ UV_WINDOWS = 'powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/in
 
 
 def test_the_fork_folds_how_to_install_uv_on_a_bare_laptop(tab, context, site):
-    # tt-tiroir#170: a member's laptop may have nothing on it; uv's installer is one line per system, folded.
+    # agency-tiroir#170: a member's laptop may have nothing on it; uv's installer is one line per system, folded.
     context.grant_permissions(["clipboard-read", "clipboard-write"], origin=site.base)
     as_member(tab, work())
     tab.open()
@@ -182,7 +182,7 @@ def test_a_sheaf_with_no_session_on_the_box_offers_no_fork(tab):
 
 
 def test_a_sheaf_live_on_a_laptop_names_its_machine_in_place_of_the_fork(tab):
-    # tt-tiroir#165: the hub offers no fork of a box session while the live one runs on a laptop.
+    # agency-tiroir#165: the hub offers no fork of a box session while the live one runs on a laptop.
     as_member(tab, work(sessions=[LAPTOP, BOX], attach=None, live="laptop", fork=None))
     tab.open()
     open_work(tab.page)

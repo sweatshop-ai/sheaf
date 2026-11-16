@@ -1,6 +1,6 @@
 # 55: Un commentaire sur des mots d'un titre écrit son bloc au milieu du titre, et les autres lecteurs du fichier ne retrouvent plus le titre
 
-**What to build:** `comments.add_comment` place le bloc juste après la fin de la sélection (`anchor_point`). Pour un titre, une sélection qui ne finit pas la ligne coupe le titre : `## Done<!-- sheaf-comment … quote="Done" --> when`. `boss-goal` (claude-boss) et AgentView lisent alors un titre qui n'est plus « Done when » et perdent toutes les cases. Constaté le 2026-11-13 sur une page de but de piste (Tarek, boss d'AgentView ; leur dossier avec les fixtures : ticket boss-track/27, branche `boss-track-27-heading-comment` de thinkingtoo/agentview, lecture seule). Classe : b (autres lecteurs du fichier).
+**What to build:** `comments.add_comment` place le bloc juste après la fin de la sélection (`anchor_point`). Pour un titre, une sélection qui ne finit pas la ligne coupe le titre : `## Done<!-- sheaf-comment … quote="Done" --> when`. `boss-goal` (claude-boss) et AgentView lisent alors un titre qui n'est plus « Done when » et perdent toutes les cases. Constaté le 2026-11-13 sur une page de but de piste (Tarek, boss d'AgentView ; leur dossier avec les fixtures : ticket boss-track/27, branche `boss-track-27-heading-comment` de acme/agentview, lecture seule). Classe : b (autres lecteurs du fichier).
 
 **Blocked by:** none
 

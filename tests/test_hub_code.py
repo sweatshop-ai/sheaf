@@ -1,4 +1,4 @@
-"""The sign-in code (SPEC 9.13, tt-tiroir#60): a member asks for a code in a rectoverso's Work on this, and the laptop
+"""The sign-in code (SPEC 9.13, agency-tiroir#60): a member asks for a code in a rectoverso's Work on this, and the laptop
 client spends it on the two routes of 9.12, the transcript and the fork, for that one rectoverso, once each, in order,
 within 10 minutes. The verifier hands the hub the code's sha256 as `X-Sheaf-Code` and no member header; the hub
 alone knows whose it is. Through the handler in proxy mode, on the fixtures of test_hub_work.py."""
@@ -18,7 +18,7 @@ from sheafmd.hub import work as work_mod
 
 NO_GOOD = "This sign-in code is no good: get a new one from Work on this."
 NOT_OPEN = "This rectoverso is not open to you with this code: get a code from this rectoverso's Work on this."
-OTHER = "thinkingtoo/tiroir/2026-10-29-other.md"
+OTHER = "acme/tiroir/2026-10-29-other.md"
 
 
 def issue(team, member=BOB, doc=ADDRESS, **kw):
@@ -81,8 +81,8 @@ def test_no_code_for_a_sheaf_the_member_may_not_open(team, box):
 
 
 def test_no_code_for_a_page_that_is_not_a_sheaf(team, box, work):
-    put(team, work, "thinkingtoo/notes.md", "# Notes\n")
-    assert issue(team, doc="work/thinkingtoo/notes.md").status == 404
+    put(team, work, "acme/notes.md", "# Notes\n")
+    assert issue(team, doc="work/acme/notes.md").status == 404
 
 
 def test_no_code_while_the_live_session_runs_on_a_laptop(team, box, work):
@@ -171,7 +171,7 @@ def test_a_code_downloads_the_live_box_session_once(team, box):
 
 def test_a_code_does_not_serve_a_live_session_whose_transcript_is_another_projects(team, box, work):
     # sheaf#146: the live session's file sits only in another project's folder of the copy.
-    (box["sessions"] / "-home-james-work-thinkingtoo-tiroir" / f"{LIVE}.jsonl").unlink()
+    (box["sessions"] / "-home-james-work-acme-tiroir" / f"{LIVE}.jsonl").unlink()
     other = box["sessions"] / "-home-james-work-acme-site"
     other.mkdir()
     (other / f"{LIVE}.jsonl").write_text('{"cwd": "/home/james/work/acme/site", "sessionId": "%s"}\n' % LIVE,
@@ -256,20 +256,20 @@ def test_a_code_of_a_member_taken_out_of_the_members_is_no_good(team, box):
 def test_a_code_acts_as_its_member_on_visibility(team, box, work):
     """A code of Bob's on a rectoverso that is since Alice's alone is refused as Bob's request is."""
     code = code_of(team)
-    put(team, work, DOC, SHEAF.replace("sources: [issue:thinkingtoo/tt-tiroir#8]", "sources: [library:doc-1]"))
+    put(team, work, DOC, SHEAF.replace("sources: [issue:acme/agency-tiroir#8]", "sources: [library:doc-1]"))
     assert fetch(team, code).status == 404
 
 
 # ── the code serves the session it was made for, while it is the forkable one ──
 
-def live_now(team, work, sid, host="tiroir-tt", member="james"):
+def live_now(team, work, sid, host="agency-tiroir", member="james"):
     put(team, work, DOC, SHEAF.replace(f"  - {{id: {LIVE}", f"  - {{id: {sid}, host: {host}, member: {member}, "
                                        f"date: 2026-10-29T10:00:00Z}}\n  - {{id: {LIVE}", 1))
 
 
 def test_a_newer_box_session_needs_a_new_code(team, box, work):
     code = code_of(team)
-    (box["sessions"] / "-home-james-work-thinkingtoo-tiroir" / f"{FORK}.jsonl").write_bytes(b"{}\n")
+    (box["sessions"] / "-home-james-work-acme-tiroir" / f"{FORK}.jsonl").write_bytes(b"{}\n")
     live_now(team, work, FORK)
     got = fetch(team, code)
     assert got.status == 404 and got.json()["error"] == NOT_OPEN
@@ -338,7 +338,7 @@ def test_a_post_with_an_id_already_listed_is_409_and_ends_the_code(team, box, wo
 def test_a_post_of_another_shape_ends_the_code(team, box, work):
     code = code_of(team)
     fetch(team, code)
-    assert report(team, code, machine="tiroir-tt").status == 400
+    assert report(team, code, machine="agency-tiroir").status == 400
     assert report(team, code).status == 401
 
 

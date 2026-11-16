@@ -24,7 +24,7 @@
 - [ ] Cinq rapports Codex enregistrés
 - [ ] Chaque trouvaille classée a/b/c/d ; a et b corrigées avec un test rouge, c et d en tickets
 
-**Classification (Yuki, 2026-11-15, Thierry's review-by-risk rule of 2026-11-13: Codex only for gate, security, deploy or data PRs, once):**
+**Classification (Yuki, 2026-11-15, Alice's review-by-risk rule of 2026-11-13: Codex only for gate, security, deploy or data PRs, once):**
 
 | PR | Codex? | Why |
 |---|---|---|

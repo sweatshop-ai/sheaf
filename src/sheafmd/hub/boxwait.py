@@ -31,7 +31,7 @@ from typing import Callable
 
 from .. import comments as rdc
 
-STATES = ("picked-up", "delivered", "failed")      # what the supervisor writes (thinkingtoo/tt-tiroir#251)
+STATES = ("picked-up", "delivered", "failed")      # what the supervisor writes
 ERROR_MAX = 200
 STATUS_MAX = 4096           # bytes: a status is one small object
 BAD = "bad"

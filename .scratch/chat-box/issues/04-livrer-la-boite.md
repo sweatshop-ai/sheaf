@@ -15,6 +15,6 @@
 - [x] Mêmes garanties dans la page autonome et dans la page montée
   - Preuve : la page montée a des tests pour la sélection qui ouvre la boîte, le mode édition, Ctrl+C, le bouton refusé, le clic après un glissement, et le relâchement tactile (tests/page/test_mount_touch.py). Écarts nommés (surbrillance, Close/Resolve, liste des non-envoyés, attente au rechargement, Shift+Enter, pointerup/click comme relâchement, tape sur zone vide) : voir le premier commentaire de la PR.
 - [x] Fusionnée, branche supprimée, statut des tickets mis à jour avec le sha de fusion
-  - Preuve : PR #238, merge cdb0e24, 2026-11-10 22:43 UTC, by Thierry. Branche `cleo/chat-box` supprimée (`git ls-remote origin cleo/chat-box` ne renvoie rien). Tickets mis à jour sur `chat-box/next`.
-- [x] Le track action-list (Rocco) est prévenu : l'arrivée sur tiroir-tt passe par sa montée de version du hub
+  - Preuve : PR #238, merge cdb0e24, 2026-11-10 22:43 UTC, by Alice. Branche `cleo/chat-box` supprimée (`git ls-remote origin cleo/chat-box` ne renvoie rien). Tickets mis à jour sur `chat-box/next`.
+- [x] Le track action-list (Rocco) est prévenu : l'arrivée sur agency-tiroir passe par sa montée de version du hub
   - Preuve : message 2026-11-10 ~22:45, Rocco confirmed (hub bump queued after his P7 stage, from a green main on cdb0e24 or later)

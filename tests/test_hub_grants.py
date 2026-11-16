@@ -12,8 +12,8 @@ from sheafmd.hub import proxy
 from sheafmd.mcp import NOT_IN_A_ROOT
 
 CAROL = "7c4e2a90-1b3d-4f5e-8a6c-2d9e0f1b3c5a"
-GRANTS = '[projects."thinkingtoo/tiroir"]\nmembers = ["alice", "carol"]\nstatus = "live"\n'
-BOB_OWN = OPEN.replace("owner: alice", "owner: bob").replace("sources: [issue:thinkingtoo/tt-tiroir#9]",
+GRANTS = '[projects."acme/tiroir"]\nmembers = ["alice", "carol"]\nstatus = "live"\n'
+BOB_OWN = OPEN.replace("owner: alice", "owner: bob").replace("sources: [issue:acme/agency-tiroir#9]",
                                                                  "sources: [library:doc-9]")
 
 
@@ -31,7 +31,7 @@ def members(work):
 def team(hub, browser, work, plan, tmp_path):
     hub.proxy = members(work)
     (work / "projects.toml").write_text(GRANTS, encoding="utf-8")
-    (work / "thinkingtoo" / "tiroir").mkdir(parents=True)
+    (work / "acme" / "tiroir").mkdir(parents=True)
     the_list_on(hub, work, tmp_path)
     return Front(hub, browser.handler)
 
@@ -44,7 +44,7 @@ def test_a_member_the_project_does_not_name_cannot_open_its_shared_sheaf(team, w
 
 
 def test_an_owner_the_project_does_not_name_still_opens_their_own_sheaf(team, work):
-    put(team, work, f"thinkingtoo/tiroir/private/bob/{NAME}", BOB_OWN)
+    put(team, work, f"acme/tiroir/private/bob/{NAME}", BOB_OWN)
     assert team.get(f"/work/{SHARED}", member=BOB).status == 200
     assert team.get(f"/work/{SHARED}", member=CAROL).status == 404
 
@@ -55,10 +55,10 @@ def index_of(team, member):
 
 def test_the_index_leaves_out_a_project_that_does_not_name_the_member(team, work):
     put(team, work, SHARED, OPEN)
-    put(team, work, "thinkingtoo/README.md", "# ThinkingToo\n")
+    put(team, work, "acme/README.md", "# Acme\n")
     assert f"work/{SHARED}" in index_of(team, CAROL)
     bob = index_of(team, BOB)
-    assert "work/thinkingtoo/README.md" in bob and f"work/{SHARED}" not in bob, bob
+    assert "work/acme/README.md" in bob and f"work/{SHARED}" not in bob, bob
 
 
 def test_a_door_token_bound_to_a_member_the_project_does_not_name_gets_no_such_document(team, work, browser,
@@ -68,17 +68,17 @@ def test_a_door_token_bound_to_a_member_the_project_does_not_name_gets_no_such_d
     assert absent(browser, tokens["alice"], SHARED) != absent(browser, tokens["alice"], MISSING)
 
 
-@pytest.mark.parametrize("grants", ['[projects."thinkingtoo/other"]\nmembers = ["alice", "carol"]\nstatus = "live"\n',
+@pytest.mark.parametrize("grants", ['[projects."acme/other"]\nmembers = ["alice", "carol"]\nstatus = "live"\n',
                                     'not toml at all ['])
 def test_a_project_the_file_does_not_name_and_a_file_the_hub_cannot_read_are_open_to_owners_alone(team, work,
                                                                                                   grants):
     put(team, work, SHARED, OPEN)
-    put(team, work, "thinkingtoo/README.md", "# ThinkingToo\n")
+    put(team, work, "acme/README.md", "# Acme\n")
     (work / "projects.toml").write_text(grants, encoding="utf-8")
     assert team.get(f"/work/{SHARED}", member=CAROL).status == 404
-    assert team.get("/work/thinkingtoo/README.md", member=CAROL).status == 200       # above project depth: the roots
-    put(team, work, f"thinkingtoo/tiroir/private/bob/2026-10-29-own.md", BOB_OWN)
-    assert team.get("/work/thinkingtoo/tiroir/2026-10-29-own.md", member=BOB).status == 200
+    assert team.get("/work/acme/README.md", member=CAROL).status == 200       # above project depth: the roots
+    put(team, work, f"acme/tiroir/private/bob/2026-10-29-own.md", BOB_OWN)
+    assert team.get("/work/acme/tiroir/2026-10-29-own.md", member=BOB).status == 200
 
 
 def test_a_root_with_no_projects_toml_opens_as_before(team, work):
@@ -108,10 +108,10 @@ def test_an_open_stream_of_a_member_taken_off_the_project_is_told_gone(team, wor
 
 def test_a_door_token_bound_to_a_member_the_project_does_not_name_makes_nothing_in_it(team, work, browser, tokens):
     from helpers import call
-    is_error, got = call(browser, "create", token=tokens["bob"], doc="work/thinkingtoo/tiroir/2026-10-29-new.md",
+    is_error, got = call(browser, "create", token=tokens["bob"], doc="work/acme/tiroir/2026-10-29-new.md",
                          text="---\nvisibility: project\n---\n# New\n")
-    assert is_error and NOT_IN_A_ROOT in got and not (work / "thinkingtoo/tiroir/2026-10-29-new.md").exists(), got
-    is_error, got = call(browser, "create", token=tokens["alice"], doc="work/thinkingtoo/tiroir/2026-10-29-new.md",
+    assert is_error and NOT_IN_A_ROOT in got and not (work / "acme/tiroir/2026-10-29-new.md").exists(), got
+    is_error, got = call(browser, "create", token=tokens["alice"], doc="work/acme/tiroir/2026-10-29-new.md",
                          text="---\nvisibility: project\n---\n# New\n")
     assert not is_error, got
 
@@ -133,12 +133,12 @@ def test_projects_groups_gives_the_library_the_hubs_own_judgement(team, work, ca
     assert got["projects"] == [
         {"project": "acme/blog", "group": "group:proj-acme-blog", "glob": "acme/blog/*.md", "status": "closed",
          "members": ["carol"], "assistants": []},
-        {"project": "thinkingtoo/tiroir", "group": "group:proj-thinkingtoo-tiroir", "glob": "thinkingtoo/tiroir/*.md",
+        {"project": "acme/tiroir", "group": "group:proj-acme-tiroir", "glob": "acme/tiroir/*.md",
          "status": "live", "members": ["alice", "carol"], "assistants": []}]
-    assert got["members"] == {"carol": ["group:proj-acme-blog", "group:proj-thinkingtoo-tiroir"],
-                              "alice": ["group:proj-thinkingtoo-tiroir"]}
+    assert got["members"] == {"carol": ["group:proj-acme-blog", "group:proj-acme-tiroir"],
+                              "alice": ["group:proj-acme-tiroir"]}
     for member in team.hub.proxy.members.values():
-        assert ("group:proj-thinkingtoo-tiroir" in got["members"].get(member.short, [])) \
+        assert ("group:proj-acme-tiroir" in got["members"].get(member.short, [])) \
             == team.hub.granted(member, f"work/{SHARED}")
 
 
@@ -187,7 +187,7 @@ def test_a_link_in_a_granted_project_reaches_no_sheaf_of_a_project_that_is_not(t
 def test_a_sheaf_its_owner_keeps_outside_their_projects_is_never_told_gone_for_a_bad_moment(team, work):
     """Opus P2 (PR 51): `gone` ends the page for good; it is the answer to a change of `projects.toml` alone, never
     to a file of the rectoverso that cannot be read for a moment."""
-    rel = f"thinkingtoo/tiroir/private/bob/{NAME}"
+    rel = f"acme/tiroir/private/bob/{NAME}"
     put(team, work, rel, BOB_OWN)
     stream = team.get(f"/_/live?doc=work/{SHARED}", member=BOB).stream
     stream.drain()
@@ -233,7 +233,7 @@ def test_projects_groups_prints_each_projects_assistants_and_their_groups(work, 
     gives each its groups, as `members` does for a member. An entry without it has none."""
     import json
     (work / "projects.toml").write_text(GRANTS.replace("members =", 'assistants = ["James"]\nmembers =')
-                                        + '\n[projects."thinkingtoo/inbox"]\nmembers = ["alice"]\nstatus = "live"\n'
+                                        + '\n[projects."acme/inbox"]\nmembers = ["alice"]\nstatus = "live"\n'
                                         + 'assistants = ["james", "mistral"]\n'
                                         + '\n[projects."acme/blog"]\nmembers = ["carol"]\nstatus = "live"\n',
                                         encoding="utf-8")
@@ -241,11 +241,11 @@ def test_projects_groups_prints_each_projects_assistants_and_their_groups(work, 
     assert code == 0
     got = json.loads(out)
     assert {p["project"]: p["assistants"] for p in got["projects"]} == {
-        "acme/blog": [], "thinkingtoo/inbox": ["james", "mistral"], "thinkingtoo/tiroir": ["james"]}
-    assert got["assistants"] == {"james": ["group:proj-thinkingtoo-inbox", "group:proj-thinkingtoo-tiroir"],
-                                 "mistral": ["group:proj-thinkingtoo-inbox"]}
-    assert got["members"] == {"carol": ["group:proj-acme-blog", "group:proj-thinkingtoo-tiroir"],
-                              "alice": ["group:proj-thinkingtoo-inbox", "group:proj-thinkingtoo-tiroir"]}
+        "acme/blog": [], "acme/inbox": ["james", "mistral"], "acme/tiroir": ["james"]}
+    assert got["assistants"] == {"james": ["group:proj-acme-inbox", "group:proj-acme-tiroir"],
+                                 "mistral": ["group:proj-acme-inbox"]}
+    assert got["members"] == {"carol": ["group:proj-acme-blog", "group:proj-acme-tiroir"],
+                              "alice": ["group:proj-acme-inbox", "group:proj-acme-tiroir"]}
 
 
 def test_a_file_without_assistants_prints_none(work, capsys):

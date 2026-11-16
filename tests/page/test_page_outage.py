@@ -527,8 +527,17 @@ def test_a_second_merged_save_adds_its_toast_to_the_one_not_said_yet(replying, s
         status=200, content_type="application/json",
         body=json.dumps({"ok": True, "hash": "x", "changed": [1], "merged": True, "conflicts": []})))
     p.keyboard.press("Control+s")
-    until(lambda: "first note" in (p.evaluate("sessionStorage.getItem('rd-toast')") or "") and
-          "plan.md" in (p.evaluate("sessionStorage.getItem('rd-toast')") or ""), what="both notes stored")
+    stored = []
+
+    def both():
+        stored[:] = [p.evaluate("sessionStorage.getItem('rd-toast')") or ""]
+        return "first note" in stored[0] and "plan.md" in stored[0]
+    try:
+        until(both, what="both notes stored")
+    except AssertionError as e:
+        # CI flake (run 43860997733): the timeout did not say which note was missing.
+        missing = [n for n in ("first note", "plan.md") if n not in stored[0]] if stored else ["(never read)"]
+        raise AssertionError(f"{e}: missing {missing}, rd-toast holds {stored[0] if stored else None!r}") from e
 
 
 def test_a_settle_that_gives_up_leaves_its_toast_with_a_keep_naming_the_document(tab, site):

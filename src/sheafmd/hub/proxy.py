@@ -92,6 +92,7 @@ class ProxyConfig:
     members: dict               # id -> Member
     client: bool = False        # a client tiroir: an agent never Shares to the client's members (9.11)
     clients: dict = None        # an agency tiroir's client tiroirs, name -> origin: the "Clients" folder reads them through (9.9)
+    repos: dict | None = None   # `[proxy.repos]`: where the tiroir keeps its repo clones and how it gets a token (SPEC 14)
 
     def __post_init__(self):
         if self.clients is None:
@@ -166,7 +167,7 @@ _EMAIL_RE = re.compile(r"[^\s<>@,;\"']+@[^\s<>@,;\"']+")
 _SHORT_RE = re.compile(r"[A-Za-z0-9._-]{1,40}")
 _LOGIN_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
 OPTIONAL_MEMBER_KEYS = ("email", "short", "github", "shell", "tokens", "private_root", "agency")
-OPTIONAL_TABLE_KEYS = ("client", "clients")
+OPTIONAL_TABLE_KEYS = ("client", "clients", "repos")
 _OPTIONAL_WORDS = {"short": "1 to 40 letters, digits, dots, dashes or underscores (nell)",
                    "github": "a GitHub login (tiroir)"}
 SOCKET_MAX = 107                # bytes of a Unix socket's path (sun_path less its NUL)
@@ -395,6 +396,20 @@ def parse(t: dict, where, list_table: dict | None = None) -> ProxyConfig:
     client = t.get("client", False)
     if not isinstance(client, bool):
         raise ProxyError(f"'client' must be true or false, not {client!r}, in {here}")
+    repos = t.get("repos")
+    if repos is not None:
+        rhere = f"[proxy.repos] of {where}"
+        if not isinstance(repos, dict):
+            raise ProxyError(f"{rhere} must be a table with 'dir'")
+        if extra := sorted(set(repos) - {"dir", "token_command", "install_url"}):
+            raise ProxyError(f"unknown key {extra[0]!r} in {rhere}")
+        if not isinstance(repos.get("dir"), str) or not repos["dir"].startswith("/"):
+            raise ProxyError(f"'dir' must be an absolute path, in {rhere}")
+        cmd = repos.get("token_command", [])
+        if not isinstance(cmd, list) or not all(isinstance(a, str) and a for a in cmd):
+            raise ProxyError(f"'token_command' must be a list of words, in {rhere}")
+        if not isinstance(repos.get("install_url", ""), str):
+            raise ProxyError(f"'install_url' must be text, in {rhere}")
     origin, host = _origin(t["origin"], here)
     clients = _clients(t.get("clients", {}), origin, here)
     sock = t["socket"]
@@ -448,10 +463,18 @@ def parse(t: dict, where, list_table: dict | None = None) -> ProxyConfig:
             mine = getattr(members[mid], key).casefold()
             if mine and any(getattr(o, key).casefold() == mine for o in members.values() if o.id != mid):
                 raise ProxyError(f"'{key}' {getattr(members[mid], key)!r} of {mhere} is another member's")
+    named: dict[str, Member] = {}       # what names a member as an owner (`visibility.owner_key`): their short name, else their id
+    for m in members.values():
+        key = (m.short or m.id).casefold()
+        if (other := named.get(key)) is not None:
+            raise ProxyError(f"[proxy.members.\"{m.id}\"] of {where} is named as an owner by {(m.short or m.id)!r} "
+                             f"({m.name}), as [proxy.members.\"{other.id}\"] is ({other.name}): a member's short name, "
+                             "or their id when they have none, belongs to one member, in any case")
+        named[key] = m
     _check_private_roots(members, where)
     if client and not any(m.agency and m.short for m in members.values()):
         raise ProxyError(f"{here} is a client tiroir with no agency member that has a 'short': an agent could Share with nobody")
-    return ProxyConfig(origin, host, Path(sock), t["proxy_user"], acct.pw_uid, acct.pw_gid, members, client, clients)
+    return ProxyConfig(origin, host, Path(sock), t["proxy_user"], acct.pw_uid, acct.pw_gid, members, client, clients, repos)
 
 
 def _check_private_roots(members: dict, where) -> None:

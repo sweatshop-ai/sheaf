@@ -1805,3 +1805,147 @@ def test_a_reset_between_the_pull_and_the_push_is_not_forced_over_the_remote(gua
     assert guarded.hub.commits.settle()
     assert git(remote, "log", "-1", "--format=%s", "main").strip() == "a README"       # not forced over
     assert rows("push-failed")
+
+
+NEW = "rectoversos/acme/blog/2026-10-30-plan.md"
+
+
+def renamed_on_github(tmp_path, remote, old: str, new: str):
+    """`old` renamed to `new` away from the box and pushed to `remote`, as a PR merged on GitHub would."""
+    merged_on_github(tmp_path, remote, {"README.md": "# The rectoversos\n"}, "a README")    # makes the away clone
+    away = tmp_path / "github"
+    git(away, "mv", old, new)
+    git(away, "commit", "-q", "-m", "rename the plan")
+    git(away, "push", "-q", "origin", "HEAD:main")
+
+
+def test_a_rename_that_arrives_on_a_pull_writes_a_forward_and_carries_the_versions(box, rectoversos, remote, tmp_path, lock_order):
+    """Ticket 17: a repo page moves only by git; when a pull shows the rename, the hub writes a Forward from the old
+    address to the new one, and the versions kept under the old address are the new page's."""
+    edit(box, rectoversos)
+    pushed(box, remote)
+    root = box.hub.roots.get("rectoversos")
+    versions = box.hub._versions_of(root) or box.hub.versions
+    kept = md_hash((rectoversos / "acme" / "blog" / "2026-10-28-plan.md").read_text(encoding="utf-8"))
+    assert versions.get(DOC, kept) is not None
+    renamed_on_github(tmp_path, remote, "acme/blog/2026-10-28-plan.md", "acme/blog/2026-10-30-plan.md")
+    poll_now(box, rectoversos)
+    assert (rectoversos / "acme" / "blog" / "2026-10-30-plan.md").exists()
+    assert box.hub.forwards.follow(DOC) == NEW
+    assert versions.get(NEW, kept) is not None and versions.get(DOC, kept) is None
+    assert box.hub.forwards.entry(DOC)["by"] == "git"
+
+
+def test_a_pull_without_a_rename_writes_no_forward(box, rectoversos, remote, tmp_path):
+    merged_on_github(tmp_path, remote, {"README.md": "# The rectoversos\n"}, "a README")
+    poll_now(box, rectoversos)
+    assert box.hub.forwards.snapshot() == {}
+
+
+def test_a_rename_of_a_file_that_is_not_a_page_writes_no_forward(box, rectoversos, remote, tmp_path):
+    merged_on_github(tmp_path, remote, {"notes.txt": "x\n"}, "a note")
+    away = tmp_path / "github"
+    git(away, "mv", "notes.txt", "notes-2.txt")
+    git(away, "commit", "-q", "-m", "rename the note")
+    git(away, "push", "-q", "origin", "HEAD:main")
+    poll_now(box, rectoversos)
+    assert box.hub.forwards.snapshot() == {}
+
+
+def test_a_rename_in_a_pull_the_hub_refuses_writes_no_forward(box, rectoversos, remote, tmp_path):
+    (rectoversos / "projects.toml").write_text(ONLY_BEA + "# the person's own change\n", encoding="utf-8")
+    renamed_on_github(tmp_path, remote, "acme/blog/2026-10-28-plan.md", "acme/blog/2026-10-30-plan.md")
+    away = tmp_path / "github"
+    (away / "projects.toml").write_text(ONLY_BEA, encoding="utf-8")
+    git(away, "commit", "-qam", "Cal leaves")
+    git(away, "push", "-q", "origin", "HEAD:main")
+    poll_now(box, rectoversos)
+    assert (rectoversos / "acme" / "blog" / "2026-10-28-plan.md").exists()
+    assert box.hub.forwards.snapshot() == {}
+
+
+def rename_pull(box, rectoversos, remote, tmp_path):
+    renamed_on_github(tmp_path, remote, "acme/blog/2026-10-28-plan.md", "acme/blog/2026-10-30-plan.md")
+    poll_now(box, rectoversos)
+
+
+def test_a_git_rename_carries_the_page_under_the_name_locks_of_both_addresses(box, rectoversos, remote, tmp_path, monkeypatch):
+    """As a Move does (moves.py): what the hub keeps of the page is carried with both names held, so a save on either does not
+    come between the pull and the carrying."""
+    import contextlib
+    from sheafmd.hub import place
+    held, seen, real = [], [], place.held
+
+    @contextlib.contextmanager
+    def spy(hub, address):
+        with real(hub, address) as got:
+            held.append(address)
+            yield got
+        held.remove(address)
+
+    monkeypatch.setattr(place, "held", spy)
+    moved = box.hub.moved_page
+    monkeypatch.setattr(box.hub, "moved_page", lambda old, new, by: (seen.append(sorted(held)), moved(old, new, by)))
+    rename_pull(box, rectoversos, remote, tmp_path)
+    assert seen == [sorted([DOC, NEW])]
+
+
+def test_a_git_rename_under_a_running_tell_marks_the_address_and_says_so_in_the_diagnostics(box, rectoversos, remote, tmp_path, monkeypatch):
+    """A rename cannot be refused, as a Move is: no Tell starts on the old address meanwhile, the Forward is written all the
+    same, and a Tell already running is a row, since its answer then meets a page that is gone from where it began."""
+    seen = []
+    monkeypatch.setattr(box.hub, "tell_live", lambda address: address == DOC)
+    moved = box.hub.moved_page
+    monkeypatch.setattr(box.hub, "moved_page", lambda old, new, by: (seen.append(DOC in box.hub.moving), moved(old, new, by)))
+    rename_pull(box, rectoversos, remote, tmp_path)
+    assert seen == [True] and DOC not in box.hub.moving
+    assert box.hub.forwards.follow(DOC) == NEW
+    (row,) = rows("rename-under-tell")
+    assert row["doc"] == DOC
+
+
+def test_a_git_rename_onto_an_address_that_forwards_elsewhere_is_a_row(box, rectoversos, remote, tmp_path):
+    """A Forward at the new address is dropped, the page being there (Forwards.add); old links to it then open this page, which
+    a git rename cannot be refused for: it is written down."""
+    box.hub.forwards.add(NEW, "rectoversos/elsewhere.md", "someone")
+    rename_pull(box, rectoversos, remote, tmp_path)
+    assert box.hub.forwards.follow(DOC) == NEW and box.hub.forwards.follow(NEW) is None
+    (row,) = rows("forward-replaced")
+    assert row["doc"] == NEW and row["was"] == "rectoversos/elsewhere.md"
+
+
+def test_the_write_log_of_a_renamed_page_is_at_its_new_address_alone(box, rectoversos, remote, tmp_path):
+    edit(box, rectoversos)
+    pushed(box, remote)
+    rename_pull(box, rectoversos, remote, tmp_path)
+    assert box.hub.writes.lines(DOC) == []
+    assert [w.via for w in box.hub.writes.lines(NEW)][-1] == "pull"
+
+
+def test_a_read_of_the_renames_that_times_out_is_no_renames_and_the_pull_goes_through(box, rectoversos, remote, tmp_path, monkeypatch):
+    """The Write log's window of a pull closes however the pull ends: the look for renames is no reason to leave it open."""
+    from sheafmd.hub import commits
+    real = commits._git
+
+    def slow(folder, *args, **kw):
+        if "--diff-filter=R" in args:
+            raise subprocess.TimeoutExpired(args, 1)
+        return real(folder, *args, **kw)
+
+    monkeypatch.setattr(commits, "_git", slow)
+    rename_pull(box, rectoversos, remote, tmp_path)
+    assert (rectoversos / "acme" / "blog" / "2026-10-30-plan.md").exists()
+    assert box.hub.forwards.snapshot() == {}
+    assert not box.hub.writes._pulling
+
+
+def test_a_git_rename_between_two_roots_of_a_repo_writes_no_forward_and_is_a_row(box, rectoversos, remote, tmp_path, monkeypatch):
+    """9.11: no move between roots. A repo may hold several roots; a rename from one to another is no Forward, and the stores
+    of the page stay where they are."""
+    real = box.hub._page_of
+    monkeypatch.setattr(box.hub, "_page_of", lambda path: real(path).replace("rectoversos/", "elsewhere/", 1)
+                        if path.name == "2026-10-30-plan.md" else real(path))
+    rename_pull(box, rectoversos, remote, tmp_path)
+    assert box.hub.forwards.snapshot() == {}
+    (row,) = rows("rename-between-roots")
+    assert row["doc"] == DOC and row["to"].startswith("elsewhere/")

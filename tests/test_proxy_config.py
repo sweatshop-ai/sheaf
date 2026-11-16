@@ -315,3 +315,35 @@ def test_a_client_tiroir_with_no_agency_member_stops_the_start():
     write_config(table(client="true"))
     with pytest.raises(ProxyError, match="no agency member"):
         proxy.load()
+
+
+# ── what names a member as an owner is unique across all members (SPEC 9.9) ──
+
+def members_of(**members):
+    """`proxy.parse` of a table whose members are `members` (id -> its block): every one has a name and a root."""
+    return proxy.parse({"origin": "https://chat.example.com", "socket": "/run/sheaf-proxy/hub.sock", "proxy_user": ME,
+                        "members": {mid: {"name": mid.title(), "roots": ["/srv/pages/mails"], **block}
+                                    for mid, block in members.items()}}, "the test")
+
+
+@pytest.mark.parametrize("members", [
+    {"nell": {}, "ann": {"short": "Nell"}},
+    {"ann": {"short": "Nell"}, "nell": {}},
+    {"NELL": {}, "ann": {"short": "nell"}},
+    {"ann": {}, "Ann": {}},
+])
+def test_a_members_id_that_is_another_members_short_name_stops_the_start(members):
+    """A member with no short name is named as an owner by their id: it may not be another's short name or id, in any case."""
+    with pytest.raises(ProxyError, match="owner"):
+        members_of(**members)
+
+
+def test_a_collision_between_an_id_and_a_short_name_names_both_members():
+    with pytest.raises(ProxyError) as e:
+        members_of(nell={"short": "Nell"}, ann={}, ANN2={"short": "ann"})
+    assert "ann" in str(e.value).lower() and "ANN2".lower() in str(e.value).lower()
+
+
+def test_ids_and_short_names_that_differ_are_read():
+    got = members_of(nell={"short": "nelly"}, ann={}, bob={"short": "bob"})
+    assert set(got.members) == {"nell", "ann", "bob"}

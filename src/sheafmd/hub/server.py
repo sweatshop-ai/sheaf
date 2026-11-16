@@ -23,7 +23,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .. import __version__, config, diagnostics, paths
 from ..source import STAMP_FORMAT
-from . import peer, proxy, sender, service, state, the_list, transcribe
+from . import peer, proxy, repos as repos_mod, sender, service, state, the_list, transcribe
 from .client import STOPPING
 from .core import Hub
 from .events import KEEPALIVE, KEEPALIVE_SECONDS, PREAMBLE, frame
@@ -533,6 +533,8 @@ def _run(started_by: str, signals: "sender.Signals") -> int:
             sock.close()
             return _proxy_refused(e)
     hub = Hub(port=port, key=key, started_by=started_by, service=started_by == "service", proxy=cfg, person=person)
+    if cfg is not None and cfg.repos:
+        hub.repos = repos_mod.from_config(cfg.repos)         # the tiroir clones the repos its members' pages are in (SPEC 14)
     if transcribe_cfg is not None:
         hub.transcribe = transcribe.Relay(transcribe_cfg, record=hub.record)
     srv = HubServer(hub, sock, proxy_sock)

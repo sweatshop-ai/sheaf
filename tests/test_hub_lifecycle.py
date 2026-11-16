@@ -229,6 +229,9 @@ def test_a_sigterm_that_arrives_while_the_port_is_being_bound_is_still_a_clean_s
 # ── who sent the signal ─────────────────────────────────
 
 LINUX_SIGINFO = sender.BLOCKS
+# The sender the watcher tests make up. A real pid names a real process on a machine that runs other tests (on CI, a Chrome
+# of a page test held 4242 and the row gained its `sender_cmdline`); no Linux gives one above 2 ** 22.
+SENDER_PID = 2 ** 22 + 1
 SENDER = ("import os, signal, sys, time\n"
           "from sheafmd import signals\n"
           "signals.send(int(sys.argv[1]), getattr(signal, sys.argv[2]))\n"
@@ -302,8 +305,8 @@ def test_a_siginfo_that_names_a_stopping_signal_with_a_code_no_sender_writes_is_
     garbage = siginfo(signo, code=-1910714544, pid=1)
     assert sender.stopping(garbage) is False
     assert sender.who(garbage)["signal"] == "unknown"
-    assert watch(monkeypatch, [garbage, None, siginfo(signal.SIGTERM, pid=4242, uid=995)]) == \
-        [(signal.SIGTERM, {"signal": "SIGTERM", "sender_pid": 4242, "sender_uid": 995})]
+    assert watch(monkeypatch, [garbage, None, siginfo(signal.SIGTERM, pid=SENDER_PID, uid=995)]) == \
+        [(signal.SIGTERM, {"signal": "SIGTERM", "sender_pid": SENDER_PID, "sender_uid": 995})]
     row, = hub_rows("signal-unread")
     assert row["raw"] == {"si_signo": int(signo), "si_code": -1910714544, "si_pid": 1, "si_uid": 0}
 
@@ -321,7 +324,7 @@ def test_a_siginfo_that_names_a_stopping_signal_with_a_code_no_sender_writes_is_
 def test_a_real_stopping_signal_from_every_sender_still_stops_the_hub(monkeypatch, signo, code, sender_of):
     """The other direction of the guard above: a stop that never lands is worse than a hub that
     stops on garbage, since the unit then runs to its timeout and is killed."""
-    pid = 0 if code == 0x80 else 4242
+    pid = 0 if code == 0x80 else SENDER_PID
     got = watch(monkeypatch, [siginfo(signo, code=code, pid=pid, uid=995)])
     assert [g[0] for g in got] == [signo], sender_of
     assert got[0][1]["signal"] == signal.Signals(signo).name
@@ -331,7 +334,7 @@ def test_a_real_stopping_signal_from_every_sender_still_stops_the_hub(monkeypatc
 def test_the_watcher_takes_only_a_stopping_signal_and_logs_the_rest(monkeypatch):
     """CPython's sigtimedwait, interrupted (EINTR) once its deadline has passed, returns the
     siginfo it never filled in instead of None (sheaf#78). The hub stopped on it."""
-    waits = iter([siginfo(-1532110032, pid=443239200), None, siginfo(-7), siginfo(signal.SIGTERM, pid=4242, uid=995)])
+    waits = iter([siginfo(-1532110032, pid=443239200), None, siginfo(-7), siginfo(signal.SIGTERM, pid=SENDER_PID, uid=995)])
     held = sender.Signals.__new__(sender.Signals)
     held._done = threading.Event()
     delivered = []
@@ -343,7 +346,7 @@ def test_the_watcher_takes_only_a_stopping_signal_and_logs_the_rest(monkeypatch)
         return info
     monkeypatch.setattr(sender.signal, "sigtimedwait", fake_wait)
     held._wait(lambda signum, fields: delivered.append((signum, fields)))
-    assert delivered == [(signal.SIGTERM, {"signal": "SIGTERM", "sender_pid": 4242, "sender_uid": 995})]
+    assert delivered == [(signal.SIGTERM, {"signal": "SIGTERM", "sender_pid": SENDER_PID, "sender_uid": 995})]
     row, = hub_rows("signal-unread")                  # the second is counted, not written, within the minute
     assert row["raw"] == {"si_signo": -1532110032, "si_code": 0, "si_pid": 443239200, "si_uid": 0}
     assert row["count"] == 1
@@ -443,3 +446,11 @@ def test_a_sender_command_line_keeps_a_byte_that_is_not_utf8_as_the_log_escapes_
     finally:
         p.kill()
         p.wait(timeout=30)
+
+
+@pytest.mark.skipif(not LINUX_SIGINFO, reason="struct_siginfo and sigtimedwait exist where the OS gives siginfo")
+def test_the_sender_the_watcher_tests_make_up_is_a_pid_no_machine_gives_a_process(monkeypatch):
+    """Every pid Linux can give is a live process here: the row of the made-up sender must still be what the tests expect."""
+    monkeypatch.setattr(sender, "cmdline", lambda pid: "/a/process --on-this-machine" if 0 < pid <= 2 ** 22 else None)
+    assert watch(monkeypatch, [siginfo(signal.SIGTERM, pid=SENDER_PID, uid=995)]) == \
+        [(signal.SIGTERM, {"signal": "SIGTERM", "sender_pid": SENDER_PID, "sender_uid": 995})]

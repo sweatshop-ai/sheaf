@@ -63,11 +63,11 @@ class TokenRefused(SendError):
 
 class Moved(SendError):
     """The page was moved to another shared Sheaf by its owner (ticket 20): the door of the old one wrote nothing and says where
-    it went. `hash` is the text that landed there."""
+    it went. `hash` is the text that landed there, `was` the text that left (empty when the old tiroir did not say)."""
 
-    def __init__(self, sentence: str, origin: str, address: str, hash_: str):
+    def __init__(self, sentence: str, origin: str, address: str, hash_: str, was: str = ""):
         super().__init__(sentence)
-        self.origin, self.address, self.hash = origin, address, hash_
+        self.origin, self.address, self.hash, self.was = origin, address, hash_, was
 
 
 def _moved_part(text: str) -> Moved | None:
@@ -80,7 +80,8 @@ def _moved_part(text: str) -> Moved | None:
         return None
     if not (head and isinstance(origin, str) and isinstance(address, str)):
         return None
-    return Moved(head, origin, address, got["hash"] if isinstance(got.get("hash"), str) else "")
+    return Moved(head, origin, address, got["hash"] if isinstance(got.get("hash"), str) else "",
+                 got["was"] if isinstance(got.get("was"), str) else "")
 
 
 class Unreachable(SendError):
@@ -437,14 +438,17 @@ def _update(door: Door, md: Path, text: str, row: dict) -> dict:
 
 def _follow(md: Path, row: dict, moved: Moved, environ, say) -> tuple:
     """(the door of the tiroir the page went to, the page's row there, the token): the state row of `md` is rewritten to the new
-    tiroir, the new address and the text that landed, so the update that follows goes the stale way when the page changed there.
+    tiroir and the new address, and keeps this laptop's own last-read hash unless that was the text that moved: the update that follows
+    goes the stale way when the page there is not what this laptop last read, whether it changed on the old tiroir before the move
+    or on the new one after.
     A laptop with no credential for that tiroir is told the one line to run, and nothing is changed."""
     token = credential(moved.origin)
     if token is None:
         raise SendError(f"{moved} This laptop holds no credential for {moved.origin}: run `sheaf connect {moved.origin}` and "
                         f"run sheaf again. Nothing was sent and {md} is unchanged.")
-    new = {**row, "tiroir": moved.origin, "doc": moved.address, "hash": moved.hash or row["hash"],
-           "moved_from": row.get("moved_from", row["tiroir"])}
+    # the landed text is another hash than the text that left, so the row takes it only when this laptop last read the text that left
+    read = moved.hash if moved.hash and moved.was and moved.was == row["hash"] else row["hash"]
+    new = {**row, "tiroir": moved.origin, "doc": moved.address, "hash": read, "moved_from": row.get("moved_from", row["tiroir"])}
     keep_row(md, new)
     say(f"{row['doc']} was moved to {moved.origin.split('://', 1)[1]}: sent there")
     return Door(moved.origin, token, declared(environ)), new, token

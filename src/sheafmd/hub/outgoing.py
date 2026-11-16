@@ -8,6 +8,7 @@
 `send_root` sends a root's pages and keeps what the receiver confirmed; the Forward per confirmed page and the real call are
 hooked up once ticket 17's Forward is in main.
 """
+import contextlib
 import dataclasses
 import json
 import os
@@ -120,10 +121,17 @@ def move_to_tiroir(hub, member, address: str, origin: str) -> dict:
     if token is None:
         raise Refusal(409, "not_paired", f"this shared Sheaf holds no peer token for {origin}, so nothing was sent: "
                                          "pair the two with `sheaf peer add` on that one and `sheaf peer use` on this one")
+    marked = contextlib.ExitStack()      # the page is moving for the whole transfer: a Tell or a save is answered as on a busy page
     try:
-        moves._quiet(hub, address)
+        marked.enter_context(moves._marked(hub, address))
     except moves.Refused as r:
         raise Refusal(r.status, "tell_running", r.message) from None
+    with marked:
+        return _transfer(hub, member, root, rel, address, origin, email, token)
+
+
+def _transfer(hub, member, root, rel: str, address: str, origin: str, email: str, token: str) -> dict:
+    """The transfer of `move_to_tiroir`, with the page marked moving."""
     with state.file_locked("outgoing.lock"):
         held, _ = _notes()
     noted = held.get(address) if isinstance(held.get(address), dict) else {}
@@ -152,13 +160,14 @@ def move_to_tiroir(hub, member, address: str, origin: str) -> dict:
             _note(address, None)
             raise Refusal(409, "changed", "the page changed while it was moving: the copy there is older, so nothing was dropped "
                                           "here. Move it again once you have looked at both")
-        hub.moved_remote(address, origin, answer["address"], member.name, answer["hash"])
+        finish = hub.moved_remote(address, origin, answer["address"], member.name, answer["hash"], sent)
         try:
             os.unlink(hub.file(address))
             moves.tidy(Path(os.path.realpath(root.path)), rel)
         except OSError:
             hub.record_exception("move-store-failed", address)
         _note(address, None)
+    finish()        # the entry's document takes the page's writer lock again: after the locks above are let go
     return {"doc": answer["address"], "origin": origin, "hash": answer["hash"]}
 
 

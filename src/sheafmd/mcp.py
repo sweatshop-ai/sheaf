@@ -493,7 +493,7 @@ class Door:
                     f"`sheaf connect {far['origin']}`.")
         else:
             tail = f" Ask {far['by']} to move it back, or for an account on that shared Sheaf."
-        machine = json.dumps({"tiroir": far["origin"], "address": far["to"], "by": far["by"], "at": far["at"], "hash": far.get("hash", "")})
+        machine = json.dumps({"tiroir": far["origin"], "address": far["to"], "by": far["by"], "at": far["at"], "hash": far.get("hash", ""), "was": far.get("was", "")})
         return ToolError(f"{head}{tail}\nmoved: {machine}", "moved")
 
     def _judged(self, caller: Caller) -> bool:

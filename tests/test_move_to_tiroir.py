@@ -184,10 +184,7 @@ def test_the_versions_of_a_root_that_keeps_them_inside_do_not_stay_under_the_old
         folder = two.hub.loose.known(two.hub.proxy.members[ALICE_A])
     (folder / ".sheaf.toml").write_text('versions = "root"\n', encoding="utf-8")
     with two.active():
-        text = two.hub.file(OLD).read_text(encoding="utf-8")
-    bad, got = two.ask("alice", "update", doc=OLD, text=text + "\nInside.\n", expected_hash=md_hash(text))
-    assert not bad, got
-    with two.active():
+        two.hub._versions_of(two.hub.roots.get("loose-alice")).put(OLD, two.hub.file(OLD).read_text(encoding="utf-8"))
         inside = state.Versions(folder, "loose-alice")
         assert inside.texts(OLD)
     moved(two)

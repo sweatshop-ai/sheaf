@@ -270,7 +270,7 @@ def narrows(old, new) -> bool:
 def names_only(text_: str) -> str:
     """The sheaf `text_` once its audience is names: `visibility: owner` and the `shared` mark only when the text still holds
     one (narrowing never makes a mark: a page that draws on a private source stays closed to the named until its owner
-    marks it), the form `Hub.named` reads, so a member no longer named loses the page at once."""
+    marks it), the form `Hub.opened_by_line` reads, so a member no longer named loses the page at once."""
     return set_keys(text_, {"visibility": "owner", "shared": text(front_matter(text_), "shared") or None})
 
 
@@ -406,7 +406,7 @@ def for_door(text_: str, old: str | None) -> str:
     kept = text(was, "shared") if text(was, "shared") and mine <= set(sources(was)) else None
     want = "owner" if closed or (mine and not kept) else "project"
     # The mark stays on a closed page too: a `Share with <names>` tick on a page with a private source is `owner` with
-    # the owner's mark, and `Hub.named` reads it to open the page to the names; `kept` is None once the write adds a private source.
+    # the owner's mark, and `Hub.opened_by_line` reads it to open the page to the names; `kept` is None once the write adds a private source.
     values = {"visibility": want, "shared": kept}
     if old is not None:
         # an update neither gives nor changes the owner, nor the issue whose assignee is the owner; the door

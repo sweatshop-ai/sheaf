@@ -164,3 +164,43 @@ def test_the_client_refuses_a_tell_in_a_relayed_comment_whatever_the_agency_did(
     status, answer = agency.link("acme", "comment", {"as": "alice@example.com", "doc": doc, "request": request})
     assert status == 200 and answer["status"] == 400 and "Tell" in answer["body"]
     assert client.text(doc) == text
+
+
+# ── round 2 (review of the fixes): a client envelope is validated as a whole ─
+
+def json_env(**kw):
+    return {"status": 200, "type": "json", "nonce": None, "headers": {}, "body": "{}", **kw}
+
+
+@pytest.mark.parametrize("value", ["no-store\r\nSet-Cookie: sid=1\r\n\r\n<script>x</script>", "no-store\nX: y", "a\x00b", "€"])
+def test_a_header_value_with_a_line_break_a_nul_or_a_non_latin1_character_is_dropped(agency_and_client, value):
+    agency, client = agency_and_client
+    speaks(agency, json_env(headers={"Cache-Control": value}))
+    got = agency.get("/_/doc?doc=Clients/acme/work/x.md", member=AG_ALICE)
+    assert got.status == 200 and "Set-Cookie" not in got.headers
+    assert all(not any(c in v for c in "\r\n\x00") and v.isascii() or v == "no-store" for v in got.headers.values())
+    assert got.headers.get("Cache-Control") == "no-store"                      # the hub's own default, not the client's
+
+
+@pytest.mark.parametrize("status", [100, 101, 199, 204, 304, 600, 99, 0, -1, True])
+def test_a_status_that_cannot_carry_a_body_or_is_not_one_is_a_client_that_does_not_answer(agency_and_client, status):
+    agency, client = agency_and_client
+    speaks(agency, json_env(status=status, body="HTTP/1.1 200 OK\r\n\r\n<script>x</script>"))
+    assert agency.get("/_/doc?doc=Clients/acme/work/x.md", member=AG_ALICE).status == 502
+
+
+@pytest.mark.parametrize("type_", ["json", "html"])
+def test_a_body_that_cannot_be_encoded_is_a_client_that_does_not_answer(agency_and_client, type_):
+    agency, client = agency_and_client
+    speaks(agency, json_env(type=type_, body="\ud800"))
+    assert agency.get("/_/doc?doc=Clients/acme/work/x.md", member=AG_ALICE).status == 502
+
+
+def test_a_client_error_sentence_never_reaches_the_agency_log_and_a_body_that_is_not_an_object_does_not_crash(agency_and_client):
+    agency, client = agency_and_client
+    speaks(agency, json_env(status=403, body=json.dumps({"error": "Clients/acme/secret-merger.md"})))
+    assert agency.get("/_/doc?doc=Clients/acme/work/x.md", member=AG_ALICE).status == 403
+    for body in ("[1]", "3", "null", "not json"):
+        speaks(agency, json_env(status=403, body=body))
+        assert agency.get("/_/doc?doc=Clients/acme/work/x.md", member=AG_ALICE).status == 403, body
+    assert "secret-merger" not in agency_log(agency)

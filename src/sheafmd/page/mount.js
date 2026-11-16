@@ -333,7 +333,8 @@
     const sheaf = !!opts.sheaf;
     const data = opts.list != null || sheaf;                     // the list and the Sheaf are data, drawn from text
     const list = data;
-    const url = sheaf ? '/_/mount?sheaf=1' : opts.list != null
+    let view = '';                                               // the Sheaf's view: '' the pages, 'archived', 'trash' (SPEC 8.6)
+    const urlOf = () => sheaf ? '/_/mount?sheaf=1' + (view ? '&view=' + view : '') : opts.list != null
       ? '/_/mount?list=' + encodeURIComponent(opts.list) + (opts.show ? '&show=' + encodeURIComponent(opts.show) : '')
       : '/_/mount?doc=' + encodeURIComponent(opts.doc);
     let root = null;
@@ -384,7 +385,7 @@
       const stale = () => gone || mine !== drawn || (pane.live !== handle && pane.seq !== call);
       let fresh;
       try {
-        const res = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+        const res = await fetch(urlOf(), { credentials: 'same-origin', headers: { Accept: 'application/json' } });
         if (!res.ok) throw new Error('the hub answered ' + res.status + ' for ' + (sheaf ? 'the Sheaf' : list ? 'the list' : opts.doc));
         fresh = await res.json();
       } catch (e) {
@@ -447,7 +448,7 @@
         draw().catch((e) => {
           if (!gone && page && page.failed) page.failed('The page could not be loaded again: ' + e.message + '. Reload to try again.');
         });
-      } };
+      }, setView: (v) => { view = v; again.remount(); } };
       if (create) page = list ? create(root, again) : create(root, got.config, again);
       return got;
     }

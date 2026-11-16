@@ -21,6 +21,7 @@ from urllib.parse import quote, unquote
 from .. import config, paths
 from ..source import STAMP_FORMAT
 from . import state
+from .forwards import Forwards
 
 LIST_CAP = 2000                 # documents the walk of a root that is not a git repo lists (D15)
 COUNT_LIMIT = 100_000           # documents counted past the cap before the count is given up
@@ -510,6 +511,7 @@ def forget_offline(name: str) -> Root | None:
         return None
     _forget_entries((store() for store in (state.Docs, state.Seen, state.MemberSeen)), state.Versions(),
                     Address.prefix(name))
+    Forwards().forget_prefix(Address.prefix(name))      # a root of the name made again starts with none of the old Forwards
     Roots().forget(name)
     return root
 

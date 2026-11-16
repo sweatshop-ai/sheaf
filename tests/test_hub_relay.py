@@ -1,5 +1,5 @@
 """The relay of a forked session (SPEC 9.14, sheaf#117): the fork's report gets a relay token, and `sheaf relay` on
-the member's machine takes the Tells of that one sheaf for that one session through `/_/relay`. The verifier hands
+the member's machine takes the Tells of that one rectoverso for that one session through `/_/relay`. The verifier hands
 the hub the token's sha256 as `X-Sheaf-Relay` and no member header. Through the handler in proxy mode, on the
 fixtures of test_hub_work.py."""
 import hashlib
@@ -447,7 +447,7 @@ def test_a_member_whose_access_is_taken_away_gets_gone_instead_of_the_tell(team,
 
 
 def test_a_relay_in_its_grace_whose_member_lost_access_takes_no_tell(team, box, work):
-    """#135: the grace keeps a reconnecting relay, not one whose member can no longer open the sheaf."""
+    """#135: the grace keeps a reconnecting relay, not one whose member can no longer open the rectoverso."""
     listen(team, forked(team)).stream.close()
     (work / "projects.toml").write_text('[projects."thinkingtoo/tiroir"]\nmembers = ["thierry"]\n'
                                         'status = "live"\n', encoding="utf-8")

@@ -1,20 +1,20 @@
 """
 sheafmd.hub.boxwait — the wait of each Tell the hub drops for James's window (SPEC 9.12, sheaf#115). The
-hub runs no session for it: it keeps the drop open on the sheaf's page until a reply lands in its thread, or until
+hub runs no session for it: it keeps the drop open on the rectoverso's page until a reply lands in its thread, or until
 the Tell wait has passed, and reads what the box's supervisor says of it in `<drop>.status` beside it (sheaf#139).
 In memory: a restart forgets it.
 
     BoxWaits(clock)
-    .add(doc, thread, text, name)         a drop (always a Tell, `KIND`) on `thread`, the sheaf's text `text`
+    .add(doc, thread, text, name)         a drop (always a Tell, `KIND`) on `thread`, the rectoverso's text `text`
                                           then, written as the file `name` of `tell_dir`
-    .pending(doc, text)                   [{id, kind, state}] of the sheaf's drops with no reply in its text `text`;
+    .pending(doc, text)                   [{id, kind, state}] of the rectoverso's drops with no reply in its text `text`;
                                           the drops answered there end
     .expire(wait, text_of)                end every drop answered in `text_of(doc)` (None: not read), then take off
                                           every drop older than `wait` seconds: [(doc, thread, Drop)]
     .drops()                              [(doc, thread, Drop)] of every open drop
-    .working(doc, member=None)            whether James's session works on a drop of the sheaf (of `member`'s, when
+    .working(doc, member=None)            whether James's session works on a drop of the rectoverso (of `member`'s, when
                                           given): one `delivered`
-    .cleared()                            the sheaves where a `delivered` drop ended since the last ask
+    .cleared()                            the rectoversos where a `delivered` drop ended since the last ask
     .observe(doc, thread, got, drop)      take in `read_status`'s `got` for `drop`: (what changed, its state
                                           before), what being None, "ignored", "state" or "failed" (which ends it)
     .end(doc, thread)                     take one off: whether it was open
@@ -54,7 +54,7 @@ class BoxWaits:
         self._clock = clock
         self._lock = threading.Lock()
         self._drops: dict[str, dict[str, Drop]] = {}       # {doc: {thread: Drop}}
-        self._cleared: set[str] = set()                    # sheaves where a `delivered` drop ended since asked
+        self._cleared: set[str] = set()                    # rectoversos where a `delivered` drop ended since asked
 
     def add(self, doc: str, thread: str, text: str, name: str | None = None, folder: Path | None = None,
             member: str | None = None):
@@ -131,7 +131,7 @@ class BoxWaits:
             return self._end(doc, thread)
 
     def cleared(self) -> set:
-        """The sheaves where a `delivered` drop ended since the last ask, however it ended: a member's orange goes."""
+        """The rectoversos where a `delivered` drop ended since the last ask, however it ended: a member's orange goes."""
         with self._lock:
             out, self._cleared = self._cleared, set()
             return out

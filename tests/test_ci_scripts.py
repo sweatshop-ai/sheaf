@@ -215,7 +215,7 @@ def test_the_wheel_smoke_keeps_everything_in_its_own_folder(tmp_path, monkeypatc
 
 def test_the_wheel_smoke_says_what_it_cannot_isolate_on_macos(monkeypatch):
     """macOS ignores XDG_RUNTIME_DIR (paths.runtime_dir): there the smoke shares /tmp/sheaf-<uid>
-    with the person's own sheaf, and its docstring and its output say so."""
+    with the person's own rectoverso, and its docstring and its output say so."""
     spec = importlib.util.spec_from_file_location("wheel_smoke", TOOLS / "wheel_smoke.py")
     smoke = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(smoke)

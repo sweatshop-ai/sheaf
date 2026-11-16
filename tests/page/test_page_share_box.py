@@ -104,7 +104,7 @@ def test_a_member_who_is_not_the_owner_is_told_so_and_nothing_is_written(tab, si
     share_box(tab.page).wait_for()
     mark(tab.page)
     share_box(tab.page).click()
-    until(lambda: "Only the owner of this sheaf can share it." in toast(tab.page), what="the refusal")
+    until(lambda: "Only the owner of this rectoverso can share it." in toast(tab.page), what="the refusal")
     tab.page.wait_for_timeout(300)
     assert site.file.read_text(encoding="utf-8") == SHEAF
     assert not share_box(tab.page).is_checked()

@@ -3,7 +3,7 @@ sheafmd.images — local images become data: URIs, downscaled, captioned.
 
 Why this exists
 ---------------
-A sheaf page is one self-contained file that works over file://, offline and when
+A rectoverso page is one self-contained file that works over file://, offline and when
 forwarded. A local <img src="figure.png"> would break the moment the page moves, so
 each one is read, downscaled to the page width and inlined as base64, then wrapped in
 a <figure> captioned from its title, else its alt text. Remote and data: images are

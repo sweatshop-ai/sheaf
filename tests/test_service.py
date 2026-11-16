@@ -528,7 +528,7 @@ def test_a_system_that_is_neither_linux_nor_macos_is_refused(sheaf, monkeypatch)
     assert r.code == 1 and "Linux" in r.err and "macOS" in r.err
 
 
-# ── a sheaf run from a temporary copy (uvx, pipx run) installs no service ────
+# ── a rectoverso run from a temporary copy (uvx, pipx run) installs no service ────
 #
 # `uvx --from <source> sheaf service install` runs `<uv cache>/archive-v0/<hash>/bin/sheaf`, and
 # `pipx run --spec <source> sheaf service install` runs `<pipx cache>/<15 hex>/bin/sheaf` (the venv holds `pipx_metadata.json`, and

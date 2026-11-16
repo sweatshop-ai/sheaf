@@ -1,7 +1,7 @@
 """`projects.toml` at the top of a root (SPEC 8.12): one entry per `<client>/<project>` folder, with its
-members and its status. In proxy mode the file grants (#44): a member opens the shared sheaves of a project
+members and its status. In proxy mode the file grants (#44): a member opens the shared rectoversos of a project
 folder only when its `members` hold their `short`, and a folder it does not name, or every folder of a file
-the hub cannot read, is open to its sheaves' owners alone. A sheaf folder it does not name is also a warning,
+the hub cannot read, is open to its rectoversos' owners alone. A rectoverso folder it does not name is also a warning,
 in the hub's log and in the diagnostics log (15), once per folder per hub run.
 
     [projects."acme/blog"]
@@ -11,7 +11,7 @@ in the hub's log and in the diagnostics log (15), once per folder per hub run.
 
     read(folder, hub)         the entries, or None without the file; raises Invalid (`load`: with its key, no raise)
     unlisted(entries, rels)   the `<client>/<project>` folders of `rels` that the entries do not name
-    grants(entries, rel, short)   whether the member `short` may open the shared sheaves at `rel`
+    grants(entries, rel, short)   whether the member `short` may open the shared rectoversos at `rel`
     groups(entries)           what `sheaf projects groups` prints for the Library: the same judgement
     image_in_reach(doc, image, outsider)   whether a page of `doc` may embed the local image `image` (9.9)
 """
@@ -89,8 +89,8 @@ def parse(raw: bytes) -> dict:
             raise Invalid(f"{here}: a project is named <client>/<project>, each of letters, digits, '.', '_' or '-' "
                           "and not starting with '.'")
         if parts[1] == place.PRIVATE:
-            # `<client>/<project>/private/` holds the sheaves the hub places as their owner's alone (9.11)
-            raise Invalid(f"{here}: a project cannot be named private, the name of the folder of owner-only sheaves")
+            # `<client>/<project>/private/` holds the rectoversos the hub places as their owner's alone (9.11)
+            raise Invalid(f"{here}: a project cannot be named private, the name of the folder of owner-only rectoversos")
         if not isinstance(p, dict):
             raise Invalid(f"{here} must be a table with members and status")
         extra = sorted(set(p) - {"members", "status", "assistants"})
@@ -107,7 +107,7 @@ def parse(raw: bytes) -> dict:
             raise Invalid(f"'status' in {here} must be one of {', '.join(STATUSES)}, not {p.get('status')!r}")
     seen = {}
     for name in sorted(projects):
-        # The Library knows a project by its group alone: two that share one would give each the other's sheaves.
+        # The Library knows a project by its group alone: two that share one would give each the other's rectoversos.
         if (other := seen.setdefault(group_of(name).casefold(), name)) != name:
             raise Invalid(f'[projects."{other}"] and [projects."{name}"] would share the group {group_of(name)}')
     return projects
@@ -139,7 +139,7 @@ def project_of(rel: str) -> str | None:
 def image_in_reach(doc: str, image: str, outsider: bool = False) -> bool:
     """Whether a page of the document at `doc` may embed the image at `image` (paths in one root, 9.9 "Local
     images"), judged as a document is (8.12, 9.11) and the same for every reader of the page: an image above project
-    depth is open to every member of the root; one in a `private/<short>/` only to a sheaf in that same folder; any
+    depth is open to every member of the root; one in a `private/<short>/` only to a rectoverso in that same folder; any
     other of a project only to a page of that project that no `outsider` reads, an owner the project's `members` do
     not name (#81): a non-member never receives a project's content."""
     folder = project_of(image)
@@ -155,7 +155,7 @@ def image_in_reach(doc: str, image: str, outsider: bool = False) -> bool:
 
 def grants(entries, rel: str, short: str) -> bool:
     """Whether the file's `entries` (None for no file, an `Invalid` for one the hub cannot read) let the member of
-    `short` open the shared sheaves at `rel` (8.12): its project's `members` hold `short`, compared in lower case
+    `short` open the shared rectoversos at `rel` (8.12): its project's `members` hold `short`, compared in lower case
     (`str.lower()`, not casefolded: `groups` prints the names so, and the Library compares principal ids as given).
     A root with no file, and a document above project depth, grant as before: to every member of the root. A
     project the file does not name, and every project of a file the hub cannot read, grant no one."""

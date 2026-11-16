@@ -130,7 +130,7 @@ Vandaag: `- [x] Approve`. Met ontwerp C schrijft de hub bij indrukken:
 
 Ik raad **A** aan. Het doet wat gevraagd is (alle knoppen in één tabel op de lijst, een rode eenmalige knop die ingedrukt blijft, een aan/uit-knop) zonder dat er één byte verandert in hoe agents de markdown lezen en schrijven. Dat is het belangrijkste: James, de mailmodule en de routine werken door zoals vandaag.
 
-B voegt alleen iets toe als je vaak dezelfde actie over veel sheaves doet, en kost dan een raster dat op een telefoon niet werkt. C is pas nodig als dezelfde actie in de ene sheaf eenmalig en in de andere omkeerbaar moet zijn. Vandaag is er maar één omkeerbare actie, Share, en die is het altijd: dan is een vaste tabel in sheaf genoeg, en kan C later nog als de behoefte er komt.
+B voegt alleen iets toe als je vaak dezelfde actie over veel rectoversos doet, en kost dan een raster dat op een telefoon niet werkt. C is pas nodig als dezelfde actie in de ene rectoverso eenmalig en in de andere omkeerbaar moet zijn. Vandaag is er maar één omkeerbare actie, Share, en die is het altijd: dan is een vaste tabel in sheaf genoeg, en kan C later nog als de behoefte er komt.
 
 Twee vragen die bij A nog beantwoord moeten worden:
 

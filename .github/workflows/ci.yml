@@ -128,7 +128,7 @@ jobs:
         run: |
           set -o pipefail
           # --with-deps installs the browsers' system packages through sudo, which GitHub's runners have.
-          # Firefox and WebKit are here, and only here, for the mount tests (#116: the sheaf mounts in a shadow root
+          # Firefox and WebKit are here, and only here, for the mount tests (#116: the rectoverso mounts in a shadow root
           # and its selection code must hold in all three engines); the other steps install no browser.
           deps=""
           if [ "$RUNNER_OS" = "Linux" ] && command -v sudo >/dev/null; then deps="--with-deps"; fi

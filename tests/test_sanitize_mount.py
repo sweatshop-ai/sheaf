@@ -1,6 +1,6 @@
 """The sanitiser in MOUNT mode (#116 step 2, design note section 2).
 
-Once the sheaf is mounted in the front's document the page's own CSP is gone, so what the sanitiser lets through is DOM in the
+Once the rectoverso is mounted in the front's document the page's own CSP is gone, so what the sanitiser lets through is DOM in the
 origin of a signed-in member. `sanitize(..., mount=True)` closes what that CSP used to close: script and event handlers as before,
 and now also everything that phones home (an <img> on another host is a tracking pixel), the style attribute (it can overlay the
 front's UI), SVG that loads or scripts, MathML, navigation to file:, and names that collide with the page's own.

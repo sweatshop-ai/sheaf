@@ -223,7 +223,7 @@ def update_file(md_path, change, expected_hash=None, move=None):
     cannot truncate the document.
 
     `move(text, new)`, called under the lock before a write that changes the text, may move the
-    file (a sheaf going to the home of its new text, SPEC 9.11) and give the path it is at now:
+    file (a rectoverso going to the home of its new text, SPEC 9.11) and give the path it is at now:
     the new text is written there, under that path's lock too."""
     p = Path(md_path)
     with file_lock(p):

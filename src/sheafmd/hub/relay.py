@@ -1,22 +1,22 @@
 """
-sheafmd.hub.relay — the relay of a forked session (SPEC 9.14, sheaf#117): a Tell pressed on a sheaf whose live
+sheafmd.hub.relay — the relay of a forked session (SPEC 9.14, sheaf#117): a Tell pressed on a rectoverso whose live
 session runs on a member's machine reaches that session through `sheaf relay`, which the member runs beside it.
 
     Relays()                        the hub's relays: the tokens on disk, the queue and the open streams in memory
-    .issue(member, doc, session)    a new relay token for that one fork, which ends the sheaf's older ones
+    .issue(member, doc, session)    a new relay token for that one fork, which ends the rectoverso's older ones
     .find(sha256)                   the row of a token the hub holds, else None
-    .revoke(doc)                    end every token of the sheaf: how many there were
-    .put(doc, session, tell)        queue a Tell for the fork, or Full past QUEUE_MAX open on the sheaf: the Tells
+    .revoke(doc)                    end every token of the rectoverso: how many there were
+    .put(doc, session, tell)        queue a Tell for the fork, or Full past QUEUE_MAX open on the rectoverso: the Tells
                                     of another session it took off the queue, [(doc, Tell)]
     .open(doc, session)             the Tells queued for that fork and not yet acked, oldest first
     .ack(doc, id)                   take one off the queue: the Tell, or None when it is not queued
     .expire()                       take off every Tell queued TTL seconds ago or more: [(doc, Tell)]
-    .drop(doc)                      take every Tell of the sheaf off the queue, its fork no longer live: [(doc, Tell)]
+    .drop(doc)                      take every Tell of the rectoverso off the queue, its fork no longer live: [(doc, Tell)]
     .connect(doc, session, accept)  a stream for the relay, in the connected set until it closes
     .connected(doc, session)        the token's member while a relay of that fork has a stream open, or closed one
                                     less than GRACE seconds ago (it is reconnecting), else None
     .lapsed()                       the forks whose last stream closed GRACE seconds ago or more: [(doc, session)]
-    .end(doc, but)                  tell every stream of the sheaf (but the session `but`) it is `gone`
+    .end(doc, but)                  tell every stream of the rectoverso (but the session `but`) it is `gone`
     .unknown()                      the count of made-up tokens to write in a row now, or 0 within the minute
 
 A relay token is `sheaf_relay_` and 43 base64url characters. The verifier hands the hub its hex sha256
@@ -39,11 +39,11 @@ from .state import file_locked, read_json, write_json
 
 PREFIX = "sheaf_relay_"
 HASH_RE = re.compile(r"[0-9a-f]{64}")
-QUEUE_MAX = 20                  # Tells open on one sheaf at a time: bounds the hub's memory
+QUEUE_MAX = 20                  # Tells open on one rectoverso at a time: bounds the hub's memory
 TTL = 3600                      # seconds a Tell waits for its ack before it is dropped
 GRACE = 30                      # seconds a relay whose stream closed still counts as connected: its reconnect
 NO_GOOD = "This relay token is no good: fork the session again."
-FULL = "Twenty Tells on this sheaf are waiting for the session on the member's machine: wait for them first."
+FULL = "Twenty Tells on this rectoverso are waiting for the session on the member's machine: wait for them first."
 EXPIRED = "The session on the member's machine did not take this Tell within an hour; the comment is written."
 _clock = time.time
 
@@ -105,7 +105,7 @@ class Relays:
         return [r for r in read_json(self.path(), []) if isinstance(r, dict)]
 
     def issue(self, member: str, doc: str, session: str) -> tuple[str, str]:
-        """(the token, its relay id). The sheaf's older tokens go: one fork is live at a time."""
+        """(the token, its relay id). The rectoverso's older tokens go: one fork is live at a time."""
         token = PREFIX + secrets.token_urlsafe(32)
         rid = secrets.token_hex(4)
         with self._locked():
@@ -139,7 +139,7 @@ class Relays:
 
     # ── the queue ───────────────────────────────────────────────────────────
     def put(self, doc: str, session: str, tell: Tell) -> list:
-        """Queue `tell` for the fork `session`. The Tells queued for another session of the sheaf (its live session
+        """Queue `tell` for the fork `session`. The Tells queued for another session of the rectoverso (its live session
         changed without a fork report, by hand) leave the queue and are given back, [(doc, Tell)], to be dropped."""
         with self._lock:
             q = self._queues.get(doc)
@@ -176,7 +176,7 @@ class Relays:
         return out
 
     def drop(self, doc: str) -> list:
-        """Take every Tell of the sheaf off the queue: its fork is no longer live. [(doc, Tell)]."""
+        """Take every Tell of the rectoverso off the queue: its fork is no longer live. [(doc, Tell)]."""
         with self._lock:
             q = self._queues.pop(doc, None)
         return [(doc, t) for t in q["tells"].values()] if q else []

@@ -1,5 +1,5 @@
-"""Visibility (SPEC 9.11): a sheaf that draws on a private source is its owner's alone until the owner ticks
-Share. Through the handler in proxy mode, with two members of one root: Thierry, who owns the sheaves
+"""Visibility (SPEC 9.11): a rectoverso that draws on a private source is its owner's alone until the owner ticks
+Share. Through the handler in proxy mode, with two members of one root: Thierry, who owns the rectoversos
 below, and Hans, who is a member of the project but owns none of them."""
 import os
 import pwd
@@ -73,9 +73,9 @@ def test_a_sheaf_from_a_private_source_answers_404_to_hans_and_200_to_its_owner(
 
 
 def tick(team, work, rel, word, member, **extra):
-    """The page's save that ticks the first action `word` of the sheaf, as `member`."""
+    """The page's save that ticks the first action `word` of the rectoverso, as `member`."""
     text = (work / rel).read_text(encoding="utf-8")
-    n = [a[0] for a in the_list.read_sheaf(rel, text).actions].index(word)
+    n = [a[0] for a in the_list.read_rectoverso(rel, text).actions].index(word)
     edit = the_list.tick_edit(text, n, word)
     return team.post("/_/save", {"doc": f"work/{rel}", "hash": md_hash(text), "edits": [edit], **extra},
                      member=member)
@@ -157,7 +157,7 @@ MAIL_TEXT = "---\nsources: [mail]\n---\n# A mail\n\nWhat it says.\n"
 
 
 def test_a_door_create_by_a_bound_token_gives_its_member_an_owner_only_sheaf_with_no_owner(team, browser, work):
-    """#30: the mail module's token, bound to Thierry, writes a sheaf from a private source with no `owner`."""
+    """#30: the mail module's token, bound to Thierry, writes a rectoverso from a private source with no `owner`."""
     team.hub.proxy = members(work, thierry=["mail"])
     (work / "list/a/inbox").mkdir(parents=True)
     token = Tokens().add("mail", write=True)
@@ -214,7 +214,7 @@ def test_a_door_update_by_an_unbound_token_that_would_close_a_sheaf_with_no_owne
 
 def test_a_door_create_by_a_bound_token_of_a_sheaf_its_issues_assignee_owns_names_the_assignee(team, browser, work,
                                                                                             monkeypatch):
-    """The assignee stays the owner: the token's member as `owner` would have the sheaf once the list stops
+    """The assignee stays the owner: the token's member as `owner` would have the rectoverso once the list stops
     knowing the issue, and no `owner` would leave it to nobody (#33)."""
     team.hub.proxy = members(work, thierry=["mail"])
     monkeypatch.setattr(team.hub, "assignees", lambda address, fm: ["hanshermans"])
@@ -285,7 +285,7 @@ def test_stop_james_on_a_sheaf_of_another_assistant_drops_nothing(team, work, st
     put(team, work, DOC, STOPPABLE.replace("assistant: James", "assistant: Mistral"))
     assert tick(team, work, DOC, "Stop James", HANS).status == 200
     assert list(stop_dir.iterdir()) == []
-    assert hub_rows("stop-james")[0]["drop"] == "not a sheaf of James"
+    assert hub_rows("stop-james")[0]["drop"] == "not a rectoverso of James"
 
 
 def test_stop_james_without_a_stop_dir_still_writes_the_row(team, work):
@@ -332,7 +332,7 @@ def test_the_stop_file_is_readable_by_the_folders_group_whatever_the_hubs_umask(
 
 def door_update(team, browser, work, rel, change):
     """James's door update of `rel` for Thierry: the text it reads, changed by `change`. Its token is bound to
-    Thierry, who owns the sheaves here, so it is shown them (9.11)."""
+    Thierry, who owns the rectoversos here, so it is shown them (9.11)."""
     team.hub.proxy = members(work, thierry=["james"])
     token = Tokens().add("james", write=True)
     is_error, got = call(browser, "read", token=token, doc=f"work/{rel}")
@@ -449,7 +449,7 @@ def test_the_owners_share_nested_in_a_list_opens_the_sheaf_too(team, work):
 
 def test_a_door_update_cannot_give_an_owner_to_an_owner_only_sheaf_that_had_none(team, browser, work):
     put(team, work, DOC, PRIVATE.replace("owner: thierry\n", ""))
-    # A sheaf with no owner is no token's to see (9.11), so only the key reaches it.
+    # A rectoverso with no owner is no token's to see (9.11), so only the key reaches it.
     is_error, got = call(browser, "read", as_name="James", doc=f"work/{DOC}")
     is_error, got = call(browser, "update", as_name="James", doc=f"work/{DOC}", expected_hash=got["hash"],
                          text=got["text"].replace("assistant: James", "assistant: James\nowner: hans"))
@@ -915,7 +915,7 @@ def hans_root(team, work):
 
 
 def test_a_door_create_whose_owner_cannot_reach_its_root_is_refused(team, browser, work, hans_root):
-    """An owner who is a member but not of the sheaf's root could not open it either (9.9): an orphan all the
+    """An owner who is a member but not of the rectoverso's root could not open it either (9.9): an orphan all the
     same (#30)."""
     root, notes = hans_root
     team.hub.proxy = members(work, hans_also=root, hans=["mail-hans"])
@@ -928,7 +928,7 @@ def test_a_door_create_whose_owner_cannot_reach_its_root_is_refused(team, browse
 
 def test_a_refused_create_over_a_hidden_sheaf_answers_only_that_its_name_is_taken(team, browser, work,
                                                                                 monkeypatch):
-    """Whether a create has an owner reads the list's row for its address: over a sheaf the token may not see,
+    """Whether a create has an owner reads the list's row for its address: over a rectoverso the token may not see,
     the answer is the taken name's alone, whatever issue the text guesses (#30)."""
     put(team, work, DOC, PRIVATE)
     monkeypatch.setattr(team.hub, "assignees", lambda address, fm: ["tiroir"] if "issue" in fm else None)
@@ -940,8 +940,8 @@ def test_a_refused_create_over_a_hidden_sheaf_answers_only_that_its_name_is_take
 
 def test_a_create_over_a_hidden_sheaf_near_the_limit_answers_only_that_its_name_is_taken(team, browser, work,
                                                                                         monkeypatch):
-    """The owner line `_owned` adds depends on the list's row for the address; over a sheaf the token may not
-    see, a text near the limit must not tell by its size answer which issue that sheaf names (#30)."""
+    """The owner line `_owned` adds depends on the list's row for the address; over a rectoverso the token may not
+    see, a text near the limit must not tell by its size answer which issue that rectoverso names (#30)."""
     put(team, work, DOC, PRIVATE)
     team.hub.proxy = members(work, hans=["mail-hans"])
     monkeypatch.setattr(team.hub, "assignees",
@@ -1175,7 +1175,7 @@ OPEN = PRIVATE.replace("sources: [library:doc-123]\n", "")
 
 
 def hans_door(team, browser, work, rel):
-    """The door update of `rel` by Hans's assistant, over a sheaf Thierry owns that is open to the project:
+    """The door update of `rel` by Hans's assistant, over a rectoverso Thierry owns that is open to the project:
     a function of the change to the text."""
     team.hub.proxy = members(work, hans=["hansdoor"])
     token = Tokens().add("hansdoor", write=True)
@@ -1237,9 +1237,9 @@ def test_the_labelled_box_ticked_by_a_member_who_is_not_the_owner_is_refused_and
 
 
 def test_the_list_reads_the_labelled_box_as_the_share_action_and_gives_the_word_share(team, work):
-    sheaf = the_list.read_sheaf(DOC, LABELLED)
+    sheaf = the_list.read_rectoverso(DOC, LABELLED)
     assert [a[0] for a in sheaf.actions] == ["Share"]
-    assert [a[0] for a in the_list.read_sheaf(DOC, LABELLED.replace("[ ]", "[x]")).pressed] == ["Share"]
+    assert [a[0] for a in the_list.read_rectoverso(DOC, LABELLED.replace("[ ]", "[x]")).pressed] == ["Share"]
 
 
 def test_the_owners_release_of_the_labelled_box_makes_the_sheaf_their_own_alone_again(team, work):

@@ -26,7 +26,7 @@
 #rd-menu .rd-as{padding:2px 14px 6px;font-size:11px;opacity:.6}
 #rd-menu #rd-targets{padding:0 0 4px 12px}
 #rd-menu #rd-target-change{opacity:.8}
-/* Work on this (SPEC 10.2): where the menu stands, the commands that work on the sheaf's session. */
+/* Work on this (SPEC 10.2): where the menu stands, the commands that work on the rectoverso's session. */
 #rd-work{position:fixed;right:18px;bottom:74px;z-index:401;width:420px;max-width:calc(100vw - 32px);
  max-height:calc(100vh - 90px);overflow-y:auto;box-sizing:border-box;
  background:var(--bg,#fff);color:var(--fg,#000);border:2px solid var(--fg,#000);border-radius:3px;
@@ -234,7 +234,7 @@ blockquote.rd-copy{position:relative;padding-right:5.5em}
 #rd-popover .rd-hold,#rd-popover .rd-also,#rd-popover .rd-kept-quote,#rd-popover .rd-sending{font:12px/1.4 ui-monospace,monospace;opacity:.8;margin:0 0 6px}
 /* A form's send is out: the line stands where the form and the thread's buttons were. */
 #rd-popover .rd-sending{margin:8px 0 0}
-/* The action buttons at the top of a sheaf (SPEC 10.11): the list's, a one-off red, Share a blue toggle. */
+/* The action buttons at the top of a rectoverso (SPEC 10.11): the list's, a one-off red, Share a blue toggle. */
 #rd-actions{display:flex;flex-wrap:wrap;gap:6px;max-width:var(--measure,760px);margin:16px auto 0;padding:0 16px;
  box-sizing:border-box}
 /* Light or dark by the page's `color-scheme`, not the OS's: a mounted page's is the one the loader sets on the host with

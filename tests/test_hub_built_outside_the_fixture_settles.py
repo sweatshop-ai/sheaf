@@ -6,7 +6,7 @@ import time
 import pytest
 
 from helpers import BEA, CAL, FRONT, Front, browser_on
-from test_hub_commits import edit, remote, rows, sheaves     # noqa: F401  (the fixtures and helpers of the hub's commit tests)
+from test_hub_commits import edit, remote, rows, rectoversos     # noqa: F401  (the fixtures and helpers of the hub's commit tests)
 
 # The second test reads what the first left: a slice of the suite in CI keeps the file whole (SHEAF_TEST_SLICE,
 # tests/conftest.py).
@@ -14,7 +14,7 @@ IN_ORDER = True
 
 
 @pytest.fixture
-def own_box(sheaves):
+def own_box(rectoversos):
     """The box of test_hub_commits, with a hub this fixture builds itself: no `hub` fixture, no settle of its own."""
     import pwd
     from sheafmd import paths
@@ -24,13 +24,13 @@ def own_box(sheaves):
     h.proxy = proxy.parse({"origin": FRONT, "socket": "/run/sheaf-proxy/hub.sock",
                            "proxy_user": pwd.getpwuid(os.getuid()).pw_name,
                            "members": {BEA: {"name": "Bea", "email": "bea@example.com", "short": "bea",
-                                             "roots": [str(sheaves)]},
-                                       CAL: {"name": "Cal", "short": "cal", "roots": [str(sheaves)]}}}, "the test")
-    h.roots.for_document(sheaves / "acme" / "blog" / "2026-10-28-plan.md")
+                                             "roots": [str(rectoversos)]},
+                                       CAL: {"name": "Cal", "short": "cal", "roots": [str(rectoversos)]}}}, "the test")
+    h.roots.for_document(rectoversos / "acme" / "blog" / "2026-10-28-plan.md")
     return Front(h, browser_on(h).handler)
 
 
-def test_a_hub_built_outside_the_fixture_ends_with_a_push_due(own_box, sheaves, remote, tmp_path, monkeypatch):
+def test_a_hub_built_outside_the_fixture_ends_with_a_push_due(own_box, rectoversos, remote, tmp_path, monkeypatch):
     """First of a pair (the next test reads the log): a failing push still running when the test ends."""
     from sheafmd.hub import commits
     real = commits._git
@@ -42,7 +42,7 @@ def test_a_hub_built_outside_the_fixture_ends_with_a_push_due(own_box, sheaves, 
 
     monkeypatch.setattr(commits, "_git", slow_fetch)
     remote.rename(tmp_path / "away.git")            # the push will fail
-    edit(own_box, sheaves)                          # no settle: the pusher is in its fetch as the test returns
+    edit(own_box, rectoversos)                          # no settle: the pusher is in its fetch as the test returns
 
 
 def test_a_push_of_a_hub_a_test_before_built_itself_writes_no_row_into_this_one(own_box):

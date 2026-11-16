@@ -10,7 +10,7 @@
 // no eval: handlers are attached with addEventListener, never written into HTML.
 //
 // The page runs in a document of its own (the meta block below, the hub's page route) or mounted in the front's
-// document (#116): page/mount.js builds the sheaf in a closed shadow root and calls sheafPage.create(root, cfg,
+// document (#116): page/mount.js builds the rectoverso in a closed shadow root and calls sheafPage.create(root, cfg,
 // {body, remount}). Both run this one function. ROOT is where the page's elements are found (the document, or the
 // shadow root), BODY what it adds its own parts to (document.body, or the root's wrapper, which is also the scroller).
 (function () {
@@ -108,9 +108,9 @@ var create = function (ROOT, CFG, opts) {
   // the proxy socket (SPEC 9.9) every member shares the front's origin, so the key holds the member's
   // id, which a rename in the hub's config does not change (10.4, 10.8).
   var DRAFTS_OF = CFG.proxy ? 'm:' + CFG.member : location.port;
-  // On a member's page of a sheaf whose live session runs on the box, CFG.can holds "box-tell":
+  // On a member's page of a rectoverso whose live session runs on the box, CFG.can holds "box-tell":
   // Tell goes with the comment to /_/comment, the hub drops it for James's window, and James answers in
-  // the thread through the door. The page starts no wait of its own for it (SPEC 9.12). On a sheaf whose live
+  // the thread through the door. The page starts no wait of its own for it (SPEC 9.12). On a rectoverso whose live
   // session is a member's fork, CFG.can holds "relay-tell" while that fork's relay is connected: Tell goes the
   // same way, to the relay (9.14).
   var AGENT, AGENT_UC, CAN, canTell, toBox;
@@ -139,7 +139,7 @@ var create = function (ROOT, CFG, opts) {
     CAN = CFG.can || [];
     toBox = CAN.indexOf('box-tell') >= 0 || CAN.indexOf('relay-tell') >= 0;
     // The session's own name when it has one ("Linnea"), else the agent's display name (SPEC 10.5); on a
-    // box sheaf the member the live session runs as (James), and James on his sheaf with no session yet.
+    // box rectoverso the member the live session runs as (James), and James on his sheaf with no session yet.
     AGENT = toBox ? upper(liveSession().member) || 'James'
           : (CFG.agent && (CFG.agent.name || CFG.agent.display)) || 'the agent';
     AGENT_UC = AGENT.charAt(0).toUpperCase() + AGENT.slice(1);
@@ -173,7 +173,7 @@ var create = function (ROOT, CFG, opts) {
     // An open thread draws the agent's name and the Answer button; it is drawn again when they changed.
     if (before !== JSON.stringify([CFG.agent, CFG.can, CFG.lines, CFG.work, CFG.targets]) && pop && popId && byId[popId]) fillPopover(popId);
   }
-  // A sheaf whose live session runs on a member's machine is worked on there (SPEC 10.6).
+  // A rectoverso whose live session runs on a member's machine is worked on there (SPEC 10.6).
   function lineOf(what) {
     if (CFG.work && CFG.work.live === 'laptop') return 'This session runs on ' + upper(liveSession().member) + '’s machine: open it there.';
     return (CFG.lines && CFG.lines[what]) || NO_AGENT;
@@ -581,7 +581,7 @@ var create = function (ROOT, CFG, opts) {
 
   function buildMenu() {
     var h = '<div class="rd-state" id="rd-state"></div>';
-    // Work on this (CFG.work): on a member's page of a sheaf, the ways to work on its session (SPEC 10.2).
+    // Work on this (CFG.work): on a member's page of a rectoverso, the ways to work on its session (SPEC 10.2).
     if (canEdit || CFG.work) h += '<div class="rd-group">Document</div>';
     if (canEdit) {
       h += '<button id="rd-edit"><span>Edit</span><span class="rd-key">E</span></button>' +
@@ -786,7 +786,7 @@ var create = function (ROOT, CFG, opts) {
   });
 
   // ---- Work on this (SPEC 10.2) ----------------------------------------------------------------
-  // On a member's page of a sheaf, CFG.work holds the commands that work on its session (attach on the
+  // On a member's page of a rectoverso, CFG.work holds the commands that work on its session (attach on the
   // box, fork to the member's machine) and the sessions of its front matter, newest first. The popover
   // stands where the menu was; Escape and a click outside close it, as they close the menu.
   var workPop = null;
@@ -860,7 +860,7 @@ var create = function (ROOT, CFG, opts) {
       var j = {};
       try { j = await res.json(); } catch (e) { /* not JSON: said by its status below */ }
       if (!res.ok || typeof j.code !== 'string') return tell(j.error || 'The hub answered ' + res.status + '.');
-      box.innerHTML = cmdRow(j.code) + '<p>Good for 10 minutes, for this sheaf only. Paste it when ' +
+      box.innerHTML = cmdRow(j.code) + '<p>Good for 10 minutes, for this rectoverso only. Paste it when ' +
                       'the command above asks for it. It is shown once.</p>';
       var c = box.querySelector('.rd-cmd button');
       c.addEventListener('click', function () { copyCommand(c.previousElementSibling); });
@@ -2315,7 +2315,7 @@ var create = function (ROOT, CFG, opts) {
       ' is working on it in his window' + DOTS + '</div>';
     return '<div class="rd-msg rd-sent">Sent to ' + esc(s.to) + '’s window; his answer appears in this thread.</div>';
   }
-  // What a send with Tell started: on a box sheaf the line, counted from the thread as the hub's answer
+  // What a send with Tell started: on a box rectoverso the line, counted from the thread as the hub's answer
   // holds it (the send's own reply in it), else the page's own wait.
   function started(id, k, j) {
     if (!took(j, k + 'Error')) return;
@@ -3830,7 +3830,7 @@ var create = function (ROOT, CFG, opts) {
   // the text the hub holds and the edits are not merged against it afterwards; the buttons the save's answer brings
   // are the ones pressed.
   async function pressShare(x, box) {
-    if (!x.a.may) { say(x.a.pressed ? 'Only the owner of this sheaf can withdraw its Share.' : 'Only the owner of this sheaf can share it.'); return; }
+    if (!x.a.may) { say(x.a.pressed ? 'Only the owner of this rectoverso can withdraw its Share.' : 'Only the owner of this rectoverso can share it.'); return; }
     if (boxWaits.has(box)) return;
     var b = blockOf(box);
     if (b && unticked(ser(b)) !== unticked(b.pristine)) {

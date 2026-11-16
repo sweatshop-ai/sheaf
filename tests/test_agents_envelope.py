@@ -74,7 +74,7 @@ TODAYS_DROP = {"project": "acme/site", "member": "hans", "sheaf": "acme/site/bri
 
 def test_a_drop_as_the_hub_writes_it_today_is_told_with_the_sheaf_and_how_to_answer(deliver, peer):
     """A drop of 9.12 holds the comment's body, not the hub's Tell text: the text is built from its keys,
-    so the session reads which sheaf and thread it is and answers through the door."""
+    so the session reads which rectoverso and thread it is and answers through the door."""
     r = deliver("--socket", peer.path, "--from", SENDER, stdin=TODAYS_DROP)
     assert r.code == 0, r.err
     assert content_of(peer.received()) == (

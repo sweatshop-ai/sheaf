@@ -1,8 +1,8 @@
 """
-sheafmd.hub.work — Work on this (SPEC 9.12): a sheaf's sessions, the transcript of a box-hosted one, and the
+sheafmd.hub.work — Work on this (SPEC 9.12): a rectoverso's sessions, the transcript of a box-hosted one, and the
 file Tell and Stop James drop for James's window.
 
-    state(hub, address, text)       a sheaf's sessions and where its live session runs; None for another page
+    state(hub, address, text)       a rectoverso's sessions and where its live session runs; None for another page
     sessions(fm)                    the items of the front matter's `sessions` that parse, as written (newest first)
     serves(cfg, member)             whether the hub keeps a copy it serves `member` transcripts from (sessions_dir and work_dir)
     code_session(st, recorded)      the session a sign-in code serves (9.13): made, downloaded and forked by one rule
@@ -50,7 +50,7 @@ ISO = "%Y-%m-%dT%H:%M:%SZ"
 
 def sessions(fm: dict) -> list:
     """The sessions of the front matter `fm` (visibility.front_matter), as dicts of id, host, member and date,
-    in the order written: the first is the sheaf's live session."""
+    in the order written: the first is the rectoverso's live session."""
     v = fm.get("sessions", ())
     out = []
     for item in (v,) if isinstance(v, str) else v if isinstance(v, tuple) else ():
@@ -64,7 +64,7 @@ class State:
     sessions: list              # the items of `sessions` as written, which is newest first
     live: str                   # "box" when the first runs on `[list]`'s box, "laptop" on another host, "" none
     cfg: object                 # the list's the_list.ListConfig
-    james: bool = False         # the sheaf's `assistant` is James
+    james: bool = False         # the rectoverso's `assistant` is James
     relay: bool = False         # a relay of the live session, a member's fork, is connected with a good token (9.14)
     member: object = None       # the member whose James the page offers: theirs in `member_dirs`, else the `[list]` one
 
@@ -83,7 +83,7 @@ class State:
     @property
     def can(self) -> list:
         """The page's `can` (10.1): Tell goes to James's window while the live session is on the box,
-        or on a sheaf of James with no session yet (the hub records his when it finds it), and `[list]`
+        or on a rectoverso of James with no session yet (the hub records his when it finds it), and `[list]`
         names the box and the folder to drop them in; Tell goes to a fork's connected relay."""
         to_james = self.live == "box" or (self.live == "" and self.james)
         if to_james and self.cfg.box and self.cfg.dirs_for(self.member).tell_dir is not None:
@@ -99,25 +99,25 @@ def serves(cfg, member=None) -> bool:
 
 
 def code_session(st: State | None, recorded: str | None = None) -> str | None:
-    """The session a sign-in code serves on the sheaf whose state is `st` (9.13), the one rule of its making, its
-    GET and its POST: the sheaf's forkable session, while the hub keeps the copy that serves it. Asked with no
+    """The session a sign-in code serves on the rectoverso whose state is `st` (9.13), the one rule of its making, its
+    GET and its POST: the rectoverso's forkable session, while the hub keeps the copy that serves it. Asked with no
     `recorded`, the id a new code records; asked with a code's `recorded` id, that id while it is still the
     forkable one, else None: a newer live session, James's or a member's fork, needs a new code."""
     sid = st.forkable if st is not None and serves(st.cfg, st.member) else None
     return sid if sid is not None and recorded in (None, sid) else None
 
 
-def is_sheaf(hub, address: str) -> bool:
-    """Whether `address` names a sheaf of the list's root, at `<client>/<project>/<file>.md`."""
+def is_rectoverso(hub, address: str) -> bool:
+    """Whether `address` names a rectoverso of the list's root, at `<client>/<project>/<file>.md`."""
     at = Address.parse(address)
     return hub.the_list is not None and hub.the_list.serves(at.root) and at.rel.count("/") == 2
 
 
 def state(hub, address: str, text: str, asked_by=None) -> State | None:
-    """The sessions of the sheaf at `address` whose text is `text`, when it is a sheaf of the list's root at
+    """The sessions of the rectoverso at `address` whose text is `text`, when it is a rectoverso of the list's root at
     `<client>/<project>/<file>.md`; None for any other document, which has no Work on this. `asked_by` is the member the
     answer is for: it picks which James's folders count (`[list]`'s `member_dirs`), none the `[list]` ones."""
-    if not is_sheaf(hub, address):
+    if not is_rectoverso(hub, address):
         return None
     cfg = hub.the_list.cfg
     fm = front_matter(text)
@@ -129,7 +129,7 @@ def state(hub, address: str, text: str, asked_by=None) -> State | None:
     relays = getattr(hub, "relays", None)
     member = relays.connected(address, items[0]["id"]) if live == "laptop" and relays is not None else None
     members = getattr(hub.proxy, "members", {})
-    # A relay whose member may no longer open the sheaf is not connected, in its grace too (9.14, #135).
+    # A relay whose member may no longer open the rectoverso is not connected, in its grace too (9.14, #135).
     relay = bool(member) and member in members and hub.may_open(members[member], address, fm)
     return State(items, live, cfg, isinstance(assistant, str) and assistant.casefold() == "james", relay, asked_by)
 

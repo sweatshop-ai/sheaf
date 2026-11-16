@@ -67,7 +67,7 @@ class MemberTarget:
 @dataclass
 class Entry:
     address: str
-    file: Callable[[], Path]     # where its file is now: a sheaf of the list's root is found by its name (9.11)
+    file: Callable[[], Path]     # where its file is now: a rectoverso of the list's root is found by its name (9.11)
     root_id: str = ""            # the id of the root it was made for (SPEC 8.2), which its page carries (10.1)
     file_root: str = ""          # the id of the root its file was found in when it was opened (rule I): see `Hub._entry`
     live: LiveDocument | None = None
@@ -88,7 +88,7 @@ class Entry:
 
     @property
     def path(self) -> Path:
-        """The document's file as it is found now (9.11: a move renames the file of a sheaf, never its entry)."""
+        """The document's file as it is found now (9.11: a move renames the file of a rectoverso, never its entry)."""
         return self.file()
 
     def open(self):
@@ -118,7 +118,7 @@ RESTART_TOLD_TTL = 30            # seconds a restart that was announced is still
 
 
 def _project(address: str) -> str:
-    """`<client>/<project>` of a sheaf of the list's root at that address (9.10)."""
+    """`<client>/<project>` of a rectoverso of the list's root at that address (9.10)."""
     return "/".join(roots_mod.Address.parse(address).rel.split("/")[:2])
 
 
@@ -248,7 +248,7 @@ class Hub:
         """The versions store of `root`'s documents: inside it with `versions = "root"` (7.4), else the
         state folder's, also when its `.sheaf.toml` cannot be read; with `strict` (a private root's) that is
         None instead, so its text never reaches the state folder. `named` is the root of the documents'
-        addresses when it is not `root` (a private sheaf is addressed under the list's root): the prefix the
+        addresses when it is not `root` (a private rectoverso is addressed under the list's root): the prefix the
         store strips, so its folder is the one a commit of the file names."""
         try:
             inside = config.load_root_config(root.path, warn=lambda line: None).versions_inside
@@ -261,7 +261,7 @@ class Hub:
         return None if strict else self.versions
 
     def _store_of(self, address: str, root, bound: str):
-        """The versions store of the sheaf named `address` as its file is now placed, found at each call, not when
+        """The versions store of the rectoverso named `address` as its file is now placed, found at each call, not when
         its document was opened, for a document bound to the root `bound`: one opened for a file of the list's root
         keeps no private text there once a private file holds the name, and one opened for a private file stores
         nothing once that file is gone. None when the file cannot be decided (a name two roots hold, a private root
@@ -276,7 +276,7 @@ class Hub:
         return self._versions_of(at[0], root.name, strict=at[0].id in self.private_roots)
 
     def check_projects(self, root, rels):
-        """Warn of each sheaf folder of `root` (its documents `rels`) that the root's `projects.toml`
+        """Warn of each rectoverso folder of `root` (its documents `rels`) that the root's `projects.toml`
         does not name, and of a file that cannot be read, once per hub run (8.12)."""
         try:
             entries = projects.read(root.path, self)
@@ -293,17 +293,17 @@ class Hub:
                 continue
             self._told_projects.add((root.id, folder))
             self.record("project-unlisted", None, root=root.name, folder=folder)
-            print(f"sheaf: {root.name}/{folder} holds sheaves and {projects.FILE} has no entry for it",
+            print(f"sheaf: {root.name}/{folder} holds rectoversos and {projects.FILE} has no entry for it",
                   file=sys.stderr, flush=True)
 
     @contextmanager
     def _writers_out(self, root, files):
         """Hold what a writer of each of `files` (absolute paths in `root`'s repo) holds before the repo's commit
-        lock: the lock of its sheaf's name, in every root that holds the file and whose sheaves the hub places, then
+        lock: the lock of its rectoverso's name, in every root that holds the file and whose rectoversos the hub places, then
         its file lock (9.11). A pull (8.11, #62) holds it while it changes them, so no write lands between its look
         at a file and its new text. A pull of one root changes the files of every root of its repo, so the names are
         those of all of them, not of `root` alone, taken in one order, that of their locks' keys: a writer that
-        moves a sheaf of another root holds its name before its files, as the pull does, and the two never wait on
+        moves a rectoverso of another root holds its name before its files, as the pull does, and the two never wait on
         each other (#76)."""
         names = set()
         listed = next((r for r in self.roots.all() if place.applies(self, r.name)), None)
@@ -332,7 +332,7 @@ class Hub:
         """A write went to `address`, by `member` (a proxy.Member), by `by` (the display name of a door
         caller), by `author` when given (the hub itself, for a move of the poll) or else by the hub's person:
         a commit, in a root that commits (8.11). `gone`: the path in the root the document moved from (9.11). The
-        caller holds the sheaf's name (`place.held`): a write and its commit are one step under it, so no other
+        caller holds the rectoverso's name (`place.held`): a write and its commit are one step under it, so no other
         write of the name comes between, and a commit never carries another's write."""
         if not place.owns(self, address):
             raise RuntimeError(f"{address} committed outside its name's lock (9.11)")
@@ -345,7 +345,7 @@ class Hub:
                 held = self._bound(address)              # the file an open document was made for, no other
                 got = place.file_at(self, address, held.file_root if held else "")
             except roots_mod.NotFound:
-                self.record("commit-refused", address, why="its file is not where the sheaf was opened")
+                self.record("commit-refused", address, why="its file is not where the rectoverso was opened")
                 return
             root, rel = got if got else (root, place.file_rel(self, root, a.rel))
         else:
@@ -360,8 +360,8 @@ class Hub:
 
     def file(self, address: str, placed: bool | None = None, bound: str = "") -> Path:
         """The path of the file the document at `address` names, there or not, unchecked: in the list's root the one
-        file that holds a sheaf's name, wherever it lives (9.11), else the address's own path. `placed` is whether
-        the hub places the root's sheaves (`place.applies`), when the caller knows it. `bound`: the private root an
+        file that holds a rectoverso's name, wherever it lives (9.11), else the address's own path. `placed` is whether
+        the hub places the root's rectoversos (`place.applies`), when the caller knows it. `bound`: the private root an
         open document was made for; its file is never found anywhere else (`place.file_at`)."""
         at = roots_mod.Address.parse(address)
         root = self.roots.get(at.root)
@@ -422,7 +422,7 @@ class Hub:
         file that 8.2 keeps from the root for lying in a git directory, as the door says (12).
         The file is found before the hub's lock is taken, and its root looked at again under it: a
         `forget_root` that took the lock in between makes the address name nothing, as it does for
-        a request that comes after it. All of it under the lock of a sheaf's name (9.11), taken before
+        a request that comes after it. All of it under the lock of a rectoverso's name (9.11), taken before
         the hub's: the file is found and first read and rendered where no move takes it."""
         with place.held(self, address):
             return self._entry(address)
@@ -463,7 +463,7 @@ class Hub:
             if self.roots.get(name) != root:
                 raise roots_mod.NotFound(address)
             if place.applies(self, name):
-                # Keyed by the sheaf's name: its file is found again at each read, and under the name's lock at
+                # Keyed by the rectoverso's name: its file is found again at each read, and under the name's lock at
                 # each write, so a move of the file changes nothing the hub keeps (9.11).
                 def file():
                     return Path(os.path.realpath(self.file(address, placed=True, bound=e.file_root)))
@@ -529,8 +529,8 @@ class Hub:
                            image_read=self._image_read(root) if self.proxy is not None else None)
 
     def _file_root(self, e: Entry):
-        """The root the image rules judge the page of `e` against: the root its file is in, so the images of a sheaf of
-        a member's private root are judged there and show (rule H); the root of its address for any other sheaf."""
+        """The root the image rules judge the page of `e` against: the root its file is in, so the images of a rectoverso of
+        a member's private root are judged there and show (rule H); the root of its address for any other rectoverso."""
         at = self.roots.get(roots_mod.Address.parse(e.address).root)
         if at is None or not self.private_roots:
             return at
@@ -540,7 +540,7 @@ class Hub:
     def _image_read(self, root):
         """The bytes of a local image, from one open beneath `root` (`sheafmd.beneath`), refused when what was opened is
         in a private root other than `root` itself (9.11): the rule above judges the image's real path, this judges what
-        is read. A private `root` is the one its sheaf is in, and opens only beneath itself."""
+        is read. A private `root` is the one its rectoverso is in, and opens only beneath itself."""
         if root is None:                    # the image rule leaves every image out of a document in no root
             return None
         top = os.path.realpath(root.path)
@@ -559,7 +559,7 @@ class Hub:
     def _image_rule(self, root, doc, address: str, scope: tuple | None = None):
         """In proxy mode, a local image is embedded only when the root 8.2 finds for its file is the
         document's own root (9.9 "Local images"), and, in a root with a `projects.toml`, when its
-        `<client>/<project>` is in reach of the document's file `doc` for every reader of the sheaf at `address`
+        `<client>/<project>` is in reach of the document's file `doc` for every reader of the rectoverso at `address`
         (8.12, #81): in every render of the hub, the page and the share copy alike. None in loopback mode: every
         local image, as 6.2 says. `scope`, when given, is the `_image_scope` a page's build read (`_build` keeps it
         on the entry once the build worked, so `catch_up` builds the page again once it changes)."""
@@ -579,10 +579,10 @@ class Hub:
         return ok
 
     def _image_scope(self, root, address: str) -> tuple | None:
-        """(whether a page of `root` judges its images by project, whether the sheaf at `address` has a reader the
+        """(whether a page of `root` judges its images by project, whether the rectoverso at `address` has a reader the
         project does not name). By project when the root has a `projects.toml`, read or not (8.12: a root without
         one grants as before). A reader the project does not name is an owner its `members` do not hold, since an
-        owner opens their sheaf whatever the file says; judged at the address and where its file is, and every owner
+        owner opens their rectoverso whatever the file says; judged at the address and where its file is, and every owner
         when the file cannot be read (#81). One the hub cannot judge counts as such a reader. None in loopback mode
         or outside every root."""
         if self.proxy is None or root is None:
@@ -648,7 +648,7 @@ class Hub:
 
     def member_target(self, address: str, member, can: list) -> MemberTarget:
         """The target of a member's page (SPEC 9.8, 10.1): their own, an agent of theirs, never the hub account's
-        session. On a sheaf whose Tells go to James's window or a fork's relay (9.12) the target is not theirs to
+        session. On a rectoverso whose Tells go to James's window or a fork's relay (9.12) the target is not theirs to
         choose: none is shown and `picks` is empty."""
         lines = proxy_mod.member_lines()
         if {"box-tell", "relay-tell"} & set(can):
@@ -661,7 +661,7 @@ class Hub:
         return MemberTarget(v.shape, sorted({*can, "queue"}) if v.reaches else can, {"tell": v.line}, pickable)
 
     def mount_doc(self, e: Entry, member=None) -> dict:
-        """The sheaf as the front mounts it (#116): {title, toc, html, config, css, version, script, assets}. The text
+        """The rectoverso as the front mounts it (#116): {title, toc, html, config, css, version, script, assets}. The text
         is rendered now through the sanitiser's mount mode; the config is the meta block of `page`, so both read the
         same state."""
         h, text = e.live.current()
@@ -683,7 +683,7 @@ class Hub:
         number among the task boxes of that block] where the document draws it, or None."""
         if text is None:
             text = e.live.current()[1]
-        s = the_list.read_sheaf("x.md", text)       # read for its boxes alone: the name is no matter
+        s = the_list.read_rectoverso("x.md", text)       # read for its boxes alone: the name is no matter
         if not (s.actions or s.pressed):
             return []
         fm = visibility.front_matter(text)
@@ -703,7 +703,7 @@ class Hub:
         return out
 
     def member_work(self, e: Entry, member):
-        """The `work` of a member's page (None when it is not a sheaf of the list's root) and its `can`:
+        """The `work` of a member's page (None when it is not a rectoverso of the list's root) and its `can`:
         box-tell while the live session runs on the box and `[list]` names a `tell_dir` (10.1).
         The meta block and every /_/doc answer carry both, so a fork seen by the page changes what it offers."""
         st = work_mod.state(self, e.address, e.live.current()[1], member)
@@ -712,9 +712,9 @@ class Hub:
         return self.work_meta(e, member, st), st.can
 
     def work_meta(self, e: Entry, member, st) -> dict:
-        """What the page's Work on this shows a member (9.12, 10.1): the command that forks the sheaf's session
+        """What the page's Work on this shows a member (9.12, 10.1): the command that forks the rectoverso's session
         on their machine, the one that attaches to James's window when they have a shell on the box, the
-        sessions and where the live one runs. None for a page that is not a sheaf of the list's root."""
+        sessions and where the live one runs. None for a page that is not a rectoverso of the list's root."""
         out = {"sessions": st.sessions, "live": st.live}
         if st.live == "laptop":
             out["relay"] = st.relay         # whether Tell reaches the fork now (9.14, 10.1)
@@ -925,16 +925,16 @@ class Hub:
         return mine if mine and self.roots.lookup(root.path / at.rel) == root else []
 
     def judged(self, address: str):
-        """(front matter, assignees) of the sheaf at `address`, what its visibility is judged on: the front
+        """(front matter, assignees) of the rectoverso at `address`, what its visibility is judged on: the front
         matter read again only when its file moved, the assignees the list has for it now. For a file that is
-        not there, both as the hub last judged it, so a poll that no longer sees the sheaf changes nothing;
+        not there, both as the hub last judged it, so a poll that no longer sees the rectoverso changes nothing;
         None when it never did. ({}, None) in a root the hub does not know. Raises OSError or
         UnicodeDecodeError for a file that is there but cannot be read."""
         at = roots_mod.Address.parse(address)
         root = self.roots.get(at.root)
         if root is None:
             return {}, None
-        # Kept by the address's own path, a sheaf's name (9.11), and read where its file is now: opened beneath its root
+        # Kept by the address's own path, a rectoverso's name (9.11), and read where its file is now: opened beneath its root
         # once, judged on that descriptor, and read from it.
         kept = root.path / at.rel
         try:
@@ -955,7 +955,7 @@ class Hub:
         return fm, assignees
 
     def last_judged(self, address: str):
-        """(front matter, assignees) of the sheaf at `address` as the hub last judged it, whatever its file holds
+        """(front matter, assignees) of the rectoverso at `address` as the hub last judged it, whatever its file holds
         now: what the door judges a file that cannot be read on (9.11). None when the hub never read it, or read
         another file there (another inode): what that one said is nothing about this one."""
         at = roots_mod.Address.parse(address)
@@ -972,7 +972,7 @@ class Hub:
         return hit[1:] if same else None
 
     def visible(self, member, address: str, never_read: bool = True) -> bool:
-        """Whether the member may open the document at `address` by its visibility (9.11): a sheaf that is
+        """Whether the member may open the document at `address` by its visibility (9.11): a rectoverso that is
         its owner's alone is no other member's. A file that is not there is judged by the front matter it
         had when the hub last read it, so its going away is told to whom it was visible; one the hub never
         read is `never_read` (a page answers it as a missing document all the same, a stream tells nobody).
@@ -990,7 +990,7 @@ class Hub:
         return visibility.visible_to(judged[0], member, judged[1], self.granted(member, address))
 
     def may_open(self, member, address: str, fm: dict, opened=place.UNJUDGED) -> bool:
-        """Whether `member` may open the sheaf at `address` whose front matter is `fm`, a text read under its lock
+        """Whether `member` may open the rectoverso at `address` whose front matter is `fm`, a text read under its lock
         (9.11): as `visible` judges the file on disk, with `projects.toml`'s grant (8.12)."""
         private = place.private_member(self, address, fm, opened)
         if private is not None and private != member.id:        # rule A
@@ -1008,7 +1008,7 @@ class Hub:
         entries = self.projects_of(root)
         if entries is None:
             return True
-        # Judged where the file is as well as by the address: a link in one project to a sheaf of another (a root
+        # Judged where the file is as well as by the address: a link in one project to a rectoverso of another (a root
         # the hub does not place follows it) opens it only to a member both name.
         if by_name:
             return projects.grants(entries, at.rel, member.short)
@@ -1037,7 +1037,7 @@ class Hub:
         return got
 
     def owners(self, address: str, members) -> list:
-        """Those of `members` who own the sheaf at `address`, by its front matter now, as `visible` judges."""
+        """Those of `members` who own the rectoverso at `address`, by its front matter now, as `visible` judges."""
         try:
             fm, assignees = self.judged(address) or ({}, None)
         except (OSError, UnicodeDecodeError):
@@ -1045,8 +1045,8 @@ class Hub:
         return visibility.owner_of(fm, members, assignees)
 
     def assignees(self, address: str, fm: dict):
-        """The record's assignees of the issue of the sheaf at `address` whose front matter is `fm`, asked by
-        the address of the file it names, so a link has the owner of the sheaf it points to; None when the
+        """The record's assignees of the issue of the rectoverso at `address` whose front matter is `fm`, asked by
+        the address of the file it names, so a link has the owner of the rectoverso it points to; None when the
         list does not know it, or when `fm` names another issue than the one it polled."""
         if self.the_list is None:
             return None
@@ -1057,7 +1057,7 @@ class Hub:
             try:
                 rel = Path(os.path.realpath(self.file(address, placed))).relative_to(os.path.realpath(root.path))
                 rel = rel.as_posix()
-                # The list knows a sheaf by its name (9.11), wherever its file is.
+                # The list knows a rectoverso by its name (9.11), wherever its file is.
                 address = f"{root.name}/{(place.logical(rel) if placed else None) or rel}"
             except (ValueError, roots_mod.NotFound):     # a file that cannot be decided (rule B) renames nothing
                 pass
@@ -1077,7 +1077,7 @@ class Hub:
         """The drops for James's window (9.12): give up on those with no reply after the Tell wait (#115), read in
         the file as it is now, whether a page asked since or not; then read the supervisor's word on the others."""
         def text_of(address):
-            # The file, not the hub's copy: `sheaf reply` answers a drop without the hub, and a sheaf with no tab
+            # The file, not the hub's copy: `sheaf reply` answers a drop without the hub, and a rectoverso with no tab
             # is not refreshed by the pass.
             e = self.entries.get(address)
             if e is None:
@@ -1134,7 +1134,7 @@ class Hub:
             self.relay_failed(address, t, "tell-expired", relay_mod.EXPIRED)
 
     def relay_changed(self, address: str, session: str):
-        """A relay of the sheaf's live session `session` connected, or its grace ran out: the open pages read
+        """A relay of the rectoverso's live session `session` connected, or its grace ran out: the open pages read
         `/_/doc` again (9.14). A fork that is no longer the live one changes nothing on the page."""
         e = self.entries.get(address)
         if e is None:
@@ -1245,7 +1245,7 @@ class Hub:
         """The door made or changed this document's file (SPEC 12): tell its open tabs now, as the
         watcher would within a second, and the open indexes. Compared by its text, not by
         `(mtime, size)`, which a write of the same length within one clock tick leaves as it was.
-        `moved`: the file of a sheaf moved (9.11), its text the same; the page is rendered again all
+        `moved`: the file of a rectoverso moved (9.11), its text the same; the page is rendered again all
         the same, since its relative images are now found in the new folder."""
         e = self.entries.get(address)
         if e is not None:

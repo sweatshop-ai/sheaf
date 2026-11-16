@@ -1,5 +1,5 @@
-"""A sheaf of a private root can be opened and written (SPEC 9.11): the hub finds its file in the private root, commits
-and pushes it in the private repo under the sheaf's name lock, and an open document stays bound to the root its file
+"""A rectoverso of a private root can be opened and written (SPEC 9.11): the hub finds its file in the private root, commits
+and pushes it in the private repo under the rectoverso's name lock, and an open document stays bound to the root its file
 was found in, so a file that appears under the same name in the list's root is never written to."""
 import threading
 

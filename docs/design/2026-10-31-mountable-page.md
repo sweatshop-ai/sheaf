@@ -1,12 +1,12 @@
-# Mounting the sheaf page in the front's document: design and security note (#116, step 2)
+# Mounting the rectoverso page in the front's document: design and security note (#116, step 2)
 
-How the page of a sheaf and the list leave the iframe the front shows them in and run in the front's own document, what that costs in
+How the page of a rectoverso and the list leave the iframe the front shows them in and run in the front's own document, what that costs in
 protection, and what replaces it. Written before the code; the security review of this branch starts here. Decisions taken: the page is rebuilt
 in the browser from an allow-list; author SVG is a small allow-list and MathML is dropped; the front gets four CSP rules now and a strict
 one report-only for a week; the spike below (selection in a shadow root) has to hold in all three engines before anything is ported.
 
 0. FACTS THAT SHAPE IT
-- Today a sheaf page runs in an iframe under its own CSP (default-src 'none'; script-src nonce; img-src data:; connect-src 'self'; base-uri/form-action 'none'). The sanitiser (deny-list, bs4 parse tree, 3 passes) is the second layer, and 9.5 says the CSP "is the defence that holds when this one is wrong".
+- Today a rectoverso page runs in an iframe under its own CSP (default-src 'none'; script-src nonce; img-src data:; connect-src 'self'; base-uri/form-action 'none'). The sanitiser (deny-list, bs4 parse tree, 3 passes) is the second layer, and 9.5 says the CSP "is the defence that holds when this one is wrong".
 - The front (Open WebUI) sends NO Content-Security-Policy at all, direct or through Caddy (checked: only HSTS from Caddy), and its page has 3 inline scripts, so it cannot take a strict script-src.
 - page.js is 195 KB, one IIFE, written for a whole document: document.body x16, getSelection x8, window scroll x14, localStorage x15, sessionStorage x9, document-level listeners (click x2, mousedown x3, mouseup x2, selectionchange, keydown, resize, storage, blur, visibilitychange x2, beforeunload), 15 innerHTML/insertAdjacentHTML sites, location.reload x3, EventSource /_/live. page.css selects on body classes (body.rd-editing, body.notoc), has 8 position:fixed rules and a prefers-color-scheme block.
 - The page is assembled in render.py (inline <style>, inline nonce'd page.js, config as <script id="rd-edit-meta" type=application/json>).
@@ -40,7 +40,7 @@ Today none. Because Open WebUI needs inline scripts (and likely eval), a script-
 - Enforced now (safe for Open WebUI, none of its features use these): object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'. It closes plugins, <base> hijack, form-post exfiltration and framing of the front.
 - Report-only (observe first, one week): img-src 'self' data: blob: https:  is NOT useful against beacons (https: allowed); the useful one, img-src 'self' data: blob: plus connect-src 'self' wss:, may break chat images and any direct connection the front makes from the browser, so it ships as Content-Security-Policy-Report-Only, read from the console during the owner's checks, then enforced or dropped by the owner's decision. I would not enforce it unobserved.
 - The hub's own pages keep their CSP; frame-ancestors goes back to 'none' (SPEC 9.5/9.9 and the proxy-mode test row), the 'self' exception dies with the frame.
-- Referrer-Policy: same-origin on the front, so a click on an external link in a sheaf never sends the path (client and project names) as a Referer.
+- Referrer-Policy: same-origin on the front, so a click on an external link in a rectoverso never sends the path (client and project names) as a Referer.
 This is Caddy (the site block that already fronts both), so it is part of the stage.
 
 4. WHAT BREAKS / DECISIONS
@@ -63,7 +63,7 @@ Not covered by this spike, to be proved in the build: iOS Safari touch selection
 
 ## 7. Slice (ii) as built: where it differs from section 2
 
-- **The route is `GET /_/mount?doc=<address>`**, not `/_/mount/<path>`: the hub's route table matches the path exactly and every other `/_/` route takes the sheaf as `?doc=`. Same gate as `/_/doc` (a member's cookie or the key); the member sees what they could open. The assets are `GET /_/mount.js` and `/_/mount.css`, open (public code), kept for a year only when the request names the body (`?v=<the start of its sha256>`, #179: the body the hub read when it started, see `hub/assets.py`), `no-store` otherwise. Before #179 the name was the hub's version.
+- **The route is `GET /_/mount?doc=<address>`**, not `/_/mount/<path>`: the hub's route table matches the path exactly and every other `/_/` route takes the rectoverso as `?doc=`. Same gate as `/_/doc` (a member's cookie or the key); the member sees what they could open. The assets are `GET /_/mount.js` and `/_/mount.css`, open (public code), kept for a year only when the request names the body (`?v=<the start of its sha256>`, #179: the body the hub read when it started, see `hub/assets.py`), `no-store` otherwise. Before #179 the name was the hub's version.
 - **One meta, two routes.** The state the page route puts in the meta block (seen, agent, can, lines, the member's work, the buttons) is now one function, `Hub._fresh_meta`; the mount route calls the same one, so a mounted page cannot read a different state from a framed one.
 - **Mount mode is a keyword of the same sanitiser** (`sanitize(..., mount=True)`), so the share copy and the loopback page keep their rules. The body is rendered on each request, not cached: one pandoc call.
 - **Found while testing: nesting is a way to freeze the front's tab.** Chromium's `DOMParser` costs the square of the depth: 20.5 s for 100,000 nested divs (measured; Firefox and WebKit are faster). Two limits answer it. The mount sanitiser replaces anything nested deeper than 100 by its text; `mount.js` scans the tags before parsing and refuses a text nested deeper than 1,500 (`<x/>` counts as open outside svg, as the HTML parser reads it) with a one-line message instead of the page.

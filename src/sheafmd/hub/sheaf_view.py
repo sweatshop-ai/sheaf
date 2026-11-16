@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from . import index as index_mod
+from . import place
 from . import roots as roots_mod
 from . import the_list
 
@@ -91,13 +92,15 @@ def data(hub, member, titles: Titles) -> dict:
         for d in root["docs"]:
             address = d["doc"]
             at = roots_mod.Address.parse(address)
-            try:
-                path = Path(os.path.realpath(hub.file(address)))
-            except roots_mod.NotFound:
-                continue
+            with place.held(hub, address):          # every read of a rectoverso's file holds its name's lock (9.11)
+                try:
+                    path = Path(os.path.realpath(hub.file(address)))
+                except roots_mod.NotFound:
+                    continue
+                title = titles.of(path, at.rel)
             last, session = hub.writes.last(address), hub.writes.last_session(address)
             folder = "/".join([at.root, *at.rel.split("/")[:-1]])
-            rows.append({"doc": address, "url": d["url"], "title": titles.of(path, at.rel), "root": at.root,
+            rows.append({"doc": address, "url": d["url"], "title": title, "root": at.root,
                          "folder": folder, "mtime": d["mtime"], "when": index_mod.when(d["mtime"], now),
                          "open": d["open"], "write": say_write(last, session),
                          "write_tip": last.host if last else "",

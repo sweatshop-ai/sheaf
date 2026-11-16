@@ -812,7 +812,7 @@ def test_no_tool_of_the_door_tells_a_recipient_the_owners_folders(team):
             "status": "all", "expected_hash": md_hash(read(team, real)), "folder": "", "resolve": False}
     told_to_bob = {}
     for name, tool in mcp.TOOLS.items():
-        wanted = set(tool.get("inputSchema", {}).get("properties", args)) if isinstance(tool, dict) else set(args)
+        wanted = set(tool.get("properties", {}))
         given = {k: v for k, v in args.items() if k in wanted}
         if name == "create":
             given.update(doc="mine.md", text="# Mine\n")
@@ -825,5 +825,6 @@ def test_no_tool_of_the_door_tells_a_recipient_the_owners_folders(team):
                                  token=team.tokens["bob-claude"], as_name=None).text
     assert set(mcp.TOOLS) <= set(told_to_bob), "a tool of the door was not called"
     assert opaque in told_to_bob["documents"] and opaque in told_to_bob["read"], "the sweep reached no page"
+    assert all('"isError": false' in told_to_bob[n] for n in ("documents", "read", "threads", "reply")), told_to_bob
     bad = {k: _leaks(v) for k, v in told_to_bob.items() if _leaks(v)}
     assert not bad, "\n".join(f"{k}: {v}" for k, v in bad.items())

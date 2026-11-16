@@ -534,24 +534,29 @@ class Hub:
             self.entries[address] = e
             return e
 
-    def _rendered(self, e: Entry, text: str):
-        e.html = self._build(e, text)
+    def _rendered(self, e: Entry, text: str) -> str | None:
+        """Render `text` for `e`; answers the branch the page was rendered on (a clone's page), which the live document keeps
+        with the hash. The render runs under the pages' lock, which a switch of the clone takes, so HEAD is the text's."""
+        repo = self.clone_of(e.address)
+        branch = self._repos.head_of(repo) if repo else None
+        e.html = self._build(e, text, branch=branch)
         e.rebuild_failure = None         # every rebuild that works passes here: the next failure is news
+        return branch
 
     def _settings(self, address: str) -> dict:
         s = self.docs.get(address)
         return {k: s.get(k) for k in SETTING_KEYS}
 
-    def _build(self, e: Entry, text: str, *, mount: bool = False, count: bool = True) -> str:
+    def _build(self, e: Entry, text: str, *, mount: bool = False, count: bool = True, branch: str | None = None) -> str:
         s = self._settings(e.address)
         root = self._file_root(e)
         meta = {"doc": e.address, "root": e.root_id, "boot": self.boot, "version": self.version,
                 "service": self.service, "me": self.person,
                 "agent": None, "can": [], "lines": {}, "seen": {}}
-        if repo := self.clone_of(e.address):
-            # The branch this page is read on, recorded with the render its `hash` comes from: its save carries it back
-            # and a switch since is refused (SPEC 14). `_fresh_meta` keeps it, whatever HEAD is when the page is sent.
-            meta["branch"] = self._repos.head_of(repo)
+        if self.clone_of(e.address):
+            # The branch this page is read on, the one `_rendered` read with the text its `hash` is of: its save carries it
+            # back and a switch since is refused (SPEC 14). `_fresh_meta` keeps it, whatever HEAD is when the page is sent.
+            meta["branch"] = branch
         log = []
         scope = self._image_scope(root, e.address)
         # The link rule is a warning for whoever renders the document, said once: the hub's
@@ -720,8 +725,8 @@ class Hub:
         """The rectoverso as the front mounts it (#116): {title, toc, html, config, css, version, script, assets}. The text
         is rendered now through the sanitiser's mount mode; the config is the meta block of `page`, so both read the
         same state."""
-        h, text = e.live.current()
-        got = json.loads(self._build(e, text, mount=True, count=False))
+        h, text, branch = e.live.current_read()         # the hash and the branch of one render
+        got = json.loads(self._build(e, text, mount=True, count=False, branch=branch))
         got["config"] = self._fresh_meta(e, got["config"], member)
         got["version"] = self.version
         got.update(self.mount_fields())
@@ -1482,6 +1487,9 @@ class Hub:
                 e.last_stat = key
             if self._images_moved(e):           # projects.toml or the owners moved: its images are judged otherwise
                 e.live.rebuild()
+            elif (repo := self.clone_of(e.address)) and e.live.current_read()[2] != self._repos.head_of(repo):
+                e.live.rebuild()                # the clone moved (or left read-only) since the render: its file may be the
+                                                # same on both branches, and the page must be read on the branch it saves on
         except Exception as ex:
             self._rebuild_failed(e, ex)
 

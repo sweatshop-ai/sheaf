@@ -297,7 +297,7 @@ def valid_names(names) -> bool:
 def with_share_line(text_: str, names=()) -> str:
     """`text_` with an unticked `- [ ] Share` (`Share with <names>`) line of its own: under the page's first `# ` heading
     when that opens the body, else first in the body, after any front matter."""
-    nl = "\r\n" if "\r\n" in text_ else "\n"
+    cr = "\r" if "\r\n" in text_ else ""         # a CRLF page keeps its own line end on every line added
     line = "- [ ] " + ("Share with " + ", ".join(names) if names else "Share")
     lines = text_.split("\n")
     end = _end(_lines(text_))
@@ -306,11 +306,11 @@ def with_share_line(text_: str, names=()) -> str:
         at += 1
     if at < len(lines) and lines[at].startswith("# "):
         at += 1
-        lines[at:at] = ["", line + ("\r" if nl == "\r\n" else "")]
+        lines[at:at] = [cr, line + cr]
         if at + 2 < len(lines) and lines[at + 2].strip():
-            lines.insert(at + 2, "")
+            lines.insert(at + 2, cr)
     else:
-        lines[at:at] = [line + ("\r" if nl == "\r\n" else ""), ""]
+        lines[at:at] = [line + cr, cr]
     return "\n".join(lines)
 
 

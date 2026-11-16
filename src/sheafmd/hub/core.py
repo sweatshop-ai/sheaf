@@ -698,7 +698,7 @@ class Hub:
         if not (s.actions or s.pressed):
             return []
         fm = visibility.front_matter(text)
-        owner = member is None or bool(visibility.owner_of(fm, [member], self.assignees(e.address, fm)))
+        owner = member is None or self.is_owner(member, e.address, fm)
         lines = [line for _, _, line, _ in s.pressed]
         root = self.roots.get(roots_mod.Address.parse(e.address).root)
         who = {}
@@ -1001,11 +1001,18 @@ class Hub:
 
     def is_owner(self, member, address: str, fm: dict) -> bool:
         """Whether `member` owns the rectoverso at `address` whose front matter is `fm`: by the front matter (9.11), or
-        as the member whose loose root holds the page."""
-        if visibility.owner_of(fm, [member], self.assignees(address, fm)):
-            return True
-        root = self.roots.get(roots_mod.Address.parse(address).root)
-        return root is not None and self.loose.owner_of(root) == member.id
+        as the member whose loose root holds the page. A page of a loose root is its root's member's alone: its front matter's
+        `owner` and its issue's assignees name no other owner there."""
+        if (loose := self.loose_owner(address)) is not None:
+            return loose == member.id
+        return bool(visibility.owner_of(fm, [member], self.assignees(address, fm)))
+
+    def judged_for(self, member, address: str, fm: dict, assignees):
+        """`(fm, assignees)` as `member` is judged on them: for a page of another member's loose root the `owner` line and the
+        issue's assignees are not read, so what is written into such a page makes no one its owner (9.11)."""
+        if (loose := self.loose_owner(address)) is not None and loose != member.id:
+            return {k: v for k, v in fm.items() if k != "owner"}, None
+        return fm, assignees
 
     def judged(self, address: str):
         """(front matter, assignees) of the rectoverso at `address`, what its visibility is judged on: the front
@@ -1072,8 +1079,8 @@ class Hub:
             return True
         if judged is None:
             return never_read and self.granted(member, address)
-        return visibility.visible_to(judged[0], member, judged[1], self.granted(member, address)) \
-            or self.named(member, address)
+        fm, assignees = self.judged_for(member, address, *judged)
+        return visibility.visible_to(fm, member, assignees, self.granted(member, address)) or self.named(member, address)
 
     def may_open(self, member, address: str, fm: dict, opened=place.UNJUDGED) -> bool:
         """Whether `member` may open the rectoverso at `address` whose front matter is `fm`, a text read under its lock
@@ -1081,8 +1088,10 @@ class Hub:
         private = place.private_member(self, address, fm, opened)
         if private is not None and private != member.id:        # rule A
             return False
-        return self.holds_loose(member, address) or self.named(member, address) or \
-            visibility.visible_to(fm, member, self.assignees(address, fm), self.granted(member, address))
+        if self.holds_loose(member, address) or self.named(member, address):
+            return True
+        fm, assignees = self.judged_for(member, address, fm, self.assignees(address, fm))
+        return visibility.visible_to(fm, member, assignees, self.granted(member, address))
 
     def holds_loose(self, member, address: str) -> bool:
         """Whether the page at `address` is in the loose root of `member`: theirs whatever its front matter says, so the

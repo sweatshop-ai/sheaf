@@ -1137,6 +1137,10 @@ class Door:
         fm = visibility.front_matter(text)
         if visibility.effective(fm) == "project":
             return text
+        if (loose := self.hub.loose_owner(address)) is not None:
+            # A loose page is owned by the member whose loose root holds it (9.11), with no `owner` line: no other member's
+            # write names an owner there, and the text stays as it is.
+            return text
         # an owner whose roots do not hold the rectoverso cannot open it either (9.9)
         everyone = self.hub.members_owning(self.hub.proxy.members.values(), address)
         member = self._member(caller)

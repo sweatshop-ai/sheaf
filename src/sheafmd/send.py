@@ -22,6 +22,7 @@ caller renders on the laptop hub as before. The network is two functions, `post`
 keyring is `connect.system_store()`, which a test replaces too.
 """
 import argparse
+import dataclasses
 import json
 import os
 import re
@@ -181,16 +182,51 @@ class Door:
         status, got, _ = self._post({"jsonrpc": "2.0", "id": self.n, "method": "tools/call",
                                      "params": {"name": name, "arguments": arguments}})
         result = got.get("result") if isinstance(got, dict) else None
-        if status != 200 or not isinstance(result, dict) or not result.get("content"):
+        content = result.get("content") if isinstance(result, dict) else None
+        if status != 200 or not isinstance(content, list) or not content:
             raise SendError(f"the door of {self.origin} answered {name} with status {status} and no result. "
                             "Nothing was changed on this laptop.")
-        text = result["content"][0].get("text", "")
+        text = content[0].get("text") if isinstance(content[0], dict) else None
+        if not isinstance(text, str):
+            raise SendError(f"the door of {self.origin} answered {name} with a result that holds no text.")
         if result.get("isError"):
             return True, text
         try:
             return False, json.loads(text)
         except ValueError:
             raise SendError(f"the door of {self.origin} answered {name} with something that is not JSON.") from None
+
+
+@dataclasses.dataclass(frozen=True)
+class Report:
+    """The tiroir's answer to a render report once every hop of it is checked: what `report_page` reads, never the raw
+    answer. `commit_known` is a bool for `ok` and None otherwise; `install` is the App's link for `no-app`."""
+    clone: str
+    commit_known: bool | None = None
+    install: str | None = None
+
+
+_ANSWERS = (repos_mod.OK, repos_mod.NO_APP, repos_mod.NO_CLONES, repos_mod.PRIVATE_ROOT, repos_mod.CLONING,
+            repos_mod.NOT_CLONED)
+
+
+def parse_report(origin: str, got: object) -> Report:
+    """The typed report of the door's parsed answer, or SendError: an object whose `clone` is a value this CLI knows,
+    with the fields that value needs and of the right type. The caller falls back to rendering on the laptop."""
+    def bad(why: str):
+        return SendError(f"the door of {origin} answered the render report with {why}.")
+
+    if not isinstance(got, dict):
+        raise bad("something that is no report")
+    clone = got.get("clone")
+    if not isinstance(clone, str) or clone not in _ANSWERS:
+        raise bad("a clone state this sheaf does not know")
+    known, install = got.get("commit_known"), got.get("install")
+    if clone == repos_mod.OK and not isinstance(known, bool):
+        raise bad("an ok without a commit_known yes or no")
+    if install is not None and not isinstance(install, str):
+        raise bad("an install link that is no text")
+    return Report(clone, known if clone == repos_mod.OK else None, install)
 
 
 def member_name(origin: str, token: str) -> str | None:
@@ -372,6 +408,7 @@ def report_page(md: Path, top: Path, origin: str, token: str, args, out, err, en
     door = Door(origin, token, declared(environ))
     try:
         bad, got = door.tool("render_report", {"repo": repo, "path": path, "commit": commit})
+        report = None if bad else parse_report(origin, got)
     except Unreachable as e:
         err(f"sheaf: {e} The render report was dropped, not queued; rendering {md} on this laptop.")
         return None
@@ -383,10 +420,10 @@ def report_page(md: Path, top: Path, origin: str, token: str, args, out, err, en
     if bad:
         err(f"sheaf: the render report of {path} was refused: {got} Rendering {md} on this laptop.")
         return None
-    clone = got.get("clone")
+    clone = report.clone
     if clone == repos_mod.NO_APP:
         err(f"sheaf: the tiroir's GitHub App cannot reach {repo}, so it cannot clone it and {md} renders on this laptop "
-            f"only. Add {repo} to the installation: {got.get('install', '(the tiroir gave no link)')}")
+            f"only. Add {repo} to the installation: {report.install or '(the tiroir gave no link)'}")
         return None
     if clone == repos_mod.NO_CLONES:
         err(f"sheaf: {origin} makes no repo clones, so {md} renders on this laptop.")
@@ -401,7 +438,7 @@ def report_page(md: Path, top: Path, origin: str, token: str, args, out, err, en
     if clone == repos_mod.NOT_CLONED:
         err(f"sheaf: {origin.split('://', 1)[-1]} has not cloned {repo}, so {md} renders on this laptop.")
         return None
-    if got.get("commit_known") is False:
+    if report.commit_known is False:
         err(f"sheaf: the tiroir could not find commit {commit[:8]} on {repo}: is it pushed to GitHub? Rendering {md} "
             "on this laptop.")
         return None

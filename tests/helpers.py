@@ -96,6 +96,15 @@ def gone(pid: int) -> bool:
     return proc_state(pid) != "alive"
 
 
+def wait_until_ended(pid: int, seconds: float = 10.0):
+    """Return once `pid` has ended, a zombie not yet reaped included; `TimeoutError` after `seconds`, never a wait for ever."""
+    end = time.monotonic() + seconds
+    while proc_state(pid) == "alive":
+        if time.monotonic() > end:
+            raise TimeoutError(f"process {pid} is still running after {seconds} s")
+        time.sleep(0.005)
+
+
 def stop_hub(pid: int):
     """SIGTERM, then SIGKILL after five seconds, to one process of this user's (`sheafmd.signals`: a
     -1, 0 or 1 from `hub.pid` is refused on macOS as on Linux, sheaf#85). Where there is a /proc

@@ -80,11 +80,10 @@ def test_a_signal_that_sends_nothing_is_not_stopped_by_the_guard(sent_by_the_gua
 def test_a_process_that_is_ending_is_not_a_reason_to_refuse_the_second_signal(sent_by_the_guard):
     """A daemon told to go reads empty before it is a zombie: the signal that follows is let through, and a
     live process of the run, one that has an environment, is not taken for one that ends."""
-    from helpers import proc_state
+    from helpers import wait_until_ended
     from leakguard import is_ending
     done = subprocess.Popen([sys.executable, "-c", "pass"])
-    while proc_state(done.pid) == "alive":                  # ended, and not yet reaped: a zombie
-        pass
+    wait_until_ended(done.pid)                              # ended, and not yet reaped: a zombie
     assert is_ending(done.pid)
     live = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     assert not is_ending(live.pid)

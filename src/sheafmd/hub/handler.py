@@ -36,7 +36,8 @@ from ..edit import EditError
 from ..mcp import Caller, Door
 from ..render import RenderError
 from ..source import StaleError, md_hash
-from . import auth, boxwait, codes, events, laptops, peer, place, proxy, sheaf_view, targets, the_list, transcribe, visibility, work
+from . import archive as archive_mod
+from . import auth, boxwait, codes, events, laptops, loose, peer, place, proxy, sheaf_view, targets, the_list, transcribe, visibility, work
 from . import waiting as waiting_mod
 from .tell import NO_AGENT, JobRefused
 from .index import Status
@@ -269,6 +270,11 @@ class Handler:
             ("POST", "/_/pin", "pin", COOKIE, self._pin),
             ("POST", "/_/tick", "tick", COOKIE, self._tick),
             ("POST", "/_/share", "share", COOKIE, self._share),
+            ("POST", "/_/archive", "archive", COOKIE, self._archive),
+            ("POST", "/_/restore", "restore", COOKIE, self._restore),
+            ("POST", "/_/keep", "keep", COOKIE, self._keep),
+            ("POST", "/_/delete", "delete", COOKIE, self._delete),
+            ("POST", "/_/restore-trash", "restore-trash", COOKIE, self._restore_trash),
             ("GET", "/_/session", "session", MEMBER, self._session),
             ("POST", "/_/sessions", "sessions", MEMBER, self._sessions),
             ("GET", "/_/laptops", "laptops", MEMBER, self._laptops),
@@ -843,7 +849,7 @@ class Handler:
         if req.member is None:
             raise Refuse(404, "no such page")
         return _json(200, {"kind": "sheaf", "title": "Sheaf", "version": self.hub.version, **self.hub.mount_fields(),
-                           "sheaf": sheaf_view.data(self.hub, req.member, self._titles)},
+                           "sheaf": sheaf_view.data(self.hub, req.member, self._titles, req.query.get("view", ""))},
                      {"X-Content-Type-Options": "nosniff"})
 
     def _mount_asset(self, req: Req, name: str, kind: str) -> Response:
@@ -1023,6 +1029,85 @@ class Handler:
             if original:
                 self._unwrite_share_line(req, e, original[0], after)
             raise
+
+    def _own_loose(self, req: Req, doc):
+        """(root, rel, address) of a page of the signed-in member's own loose root that is there, for Archive, Keep and
+        Delete (8.6): the owner's alone. Anything else, a recipient, a repo page, a page of a registered root, a page that is
+        not there, is the answer for a page that is not there."""
+        _shape(isinstance(doc, str), "doc is missing")
+        m = req.member
+        try:
+            at = Address.parse(doc)
+        except Exception:
+            raise Refuse(404, "no such document") from None
+        root = self.hub.roots.get(at.root)
+        if m is None or root is None or self.hub.loose.owner_of(root) != m.id or not self.hub.visible(m, doc):
+            raise Refuse(404, "no such document")
+        try:
+            mtime = self.hub.file(doc).stat().st_mtime
+        except (OSError, NotFound):
+            raise Refuse(404, "no such document") from None
+        return root, at.rel, mtime
+
+    def _acting(self, req: Req, act):
+        root, rel, mtime = self._own_loose(req, req.body.get("doc"))
+        try:
+            with place.held(self.hub, req.body["doc"]):
+                act(root, rel, mtime)
+        except loose.Refused as e:
+            raise Refuse(409, str(e)) from None
+        self.hub.index.touch(req.body["doc"])
+        return _ok()
+
+    def _archive(self, req: Req) -> Response:
+        """Archive now (8.6): the owner's own act, on a page of their loose root."""
+        return self._acting(req, lambda root, rel, mtime: self.hub.archive.archive_now(root, rel, mtime))
+
+    def _restore(self, req: Req) -> Response:
+        return self._acting(req, lambda root, rel, mtime: self.hub.archive.restore(root, rel))
+
+    def _keep(self, req: Req) -> Response:
+        on = req.body.get("on", True)
+        _shape(isinstance(on, bool), "on must be true or false")
+        return self._acting(req, lambda root, rel, mtime: self.hub.archive.keep(root, rel, on, mtime))
+
+    def _delete(self, req: Req) -> Response:
+        """Delete (8.6): the owner's page goes into its root's trash for thirty days. Never through the door."""
+        doc = req.body.get("doc")
+        self._own_loose(req, doc)
+        with place.held(self.hub, doc):
+            try:
+                root, rel, _ = self._own_loose(req, doc)
+                self.hub.archive.trash(root, rel)
+            except (loose.Refused, OSError) as e:
+                raise Refuse(409, str(e) if isinstance(e, loose.Refused) else "the page could not be moved to the trash") from None
+        self.hub.forget_document(doc)
+        self.hub.index.touch(doc)
+        return _ok()
+
+    def _restore_trash(self, req: Req) -> Response:
+        """Put a trashed page of the member's own loose root back where it was; never over a page that is there."""
+        m, ident = req.member, req.body.get("id")
+        _shape(isinstance(ident, str), "id is missing")
+        folder = self.hub.loose.known(m) if m is not None else None
+        if folder is None:
+            raise Refuse(404, "no such page in the trash")
+        root = self.hub.archive.own_root(folder)
+        if root is None:
+            raise Refuse(404, "no such page in the trash")
+        stamp, _, wanted = ident.partition("/")
+        doc = str(Address(root.name, wanted))
+        try:
+            with place.held(self.hub, doc):
+                rel = self.hub.archive.restore_trash(root, ident)
+        except archive_mod.Taken:
+            raise Refuse(409, "a page of that name is there already: it is not overwritten") from None
+        except KeyError:
+            raise Refuse(404, "no such page in the trash") from None
+        except loose.Refused as e:
+            raise Refuse(409, str(e)) from None
+        self.hub.index.touch(doc)
+        return _ok(doc=doc)
 
     def _unwrite_share_line(self, req: Req, e, text: str, written: str) -> None:
         """The tick of a Share line this request appended was refused (another writer came between the two writes): the

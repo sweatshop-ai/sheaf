@@ -243,6 +243,25 @@ class Versions:
                 return text
         return None
 
+    def texts(self, address: str) -> list[str]:
+        """The newest versions of the document, oldest first, each only when it hashes to its name (as `get` believes it)."""
+        found = []
+        for p in self._folder(address).glob("*.md"):
+            try:
+                if _HASH_RE.fullmatch(p.stem) and p.is_file():
+                    found.append((p.stat().st_mtime_ns, p.name, p))
+            except OSError:
+                pass
+        out = []
+        for _, _, p in sorted(found):
+            try:
+                text = p.read_text(encoding="utf-8")
+            except (OSError, ValueError):
+                continue
+            if md_hash(text) == p.stem:
+                out.append(text)
+        return out
+
     def forget(self, address: str):
         """Drop every version of one document. A root that is forgotten takes its documents'
         versions with it: the name may go to another folder, and a page still open on the old

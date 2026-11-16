@@ -1,5 +1,7 @@
 """Forwards (SPEC 9.11, "Move and Forward"): where an address a page once had now leads. `forwards.json` holds
-`{old address: {"to": new address, "by": who moved it, "at": when}}`. A Forward never expires; a link that names the old
+`{old address: {"to": new address, "by": who moved it, "at": when}}`; a page that went to another tiroir (ticket 20) is
+`{"origin": that tiroir, "to": its address there, "by", "at", "hash": the text that landed}`: `to` is then an address of the
+other tiroir, never of this one, so everything here that looks at a `to` as a local address skips an entry with an `origin`. A Forward never expires; a link that names the old
 address is not rewritten, this resolves it. There is one hop, never a chain: a page that moves again re-points every Forward
 that led to its last address, and a page that moves back to an address it once left drops the Forward there."""
 import time
@@ -12,11 +14,17 @@ class Forwards(_Store):
     name = "forwards.json"
 
     def follow(self, address: str) -> str | None:
-        """The address `address` now leads to, None when it has no Forward."""
+        """The address `address` now leads to, None when it has no Forward. For a Forward to another tiroir (`remote`) it is the
+        address there."""
         with self._lock:
             e = self._data.get(address)
             to = e.get("to") if isinstance(e, dict) else None
             return to if isinstance(to, str) else None
+
+    def remote(self, address: str) -> dict | None:
+        """The Forward at `address` when it leads to another tiroir, else None."""
+        e = self.entry(address)
+        return e if e is not None and isinstance(e.get("origin"), str) else None
 
     def entry(self, address: str) -> dict | None:
         with self._lock:
@@ -29,12 +37,37 @@ class Forwards(_Store):
         def change(data):
             at = time.strftime(STAMP_FORMAT)
             for k, e in data.items():
-                if isinstance(e, dict) and e.get("to") == old:
+                if isinstance(e, dict) and "origin" not in e and e.get("to") == old:
                     e["to"] = new
             data.pop(new, None)
             data[old] = {"to": new, "by": by, "at": at}
-            for k in [k for k, e in data.items() if isinstance(e, dict) and e.get("to") == k]:
+            for k in [k for k, e in data.items() if isinstance(e, dict) and "origin" not in e and e.get("to") == k]:
                 del data[k]
+            return None, True
+        self._change(change)
+
+    def add_remote(self, old: str, origin: str, to: str, by: str, hash_: str) -> None:
+        """`old` now leads to `to` on the tiroir at `origin`, where the page landed with text `hash_`. Whatever led to `old`
+        here leads there too (one hop, never a chain)."""
+        def change(data):
+            at = time.strftime(STAMP_FORMAT)
+            for k, e in data.items():
+                if isinstance(e, dict) and "origin" not in e and e.get("to") == old:
+                    data[k] = {"origin": origin, "to": to, "by": e.get("by", by), "at": e.get("at", at), "hash": hash_}
+            data[old] = {"origin": origin, "to": to, "by": by, "at": at, "hash": hash_}
+            return None, True
+        self._change(change)
+
+    def drop(self, address: str) -> None:
+        """The Forward at `address` is no more: the page came back to it."""
+        def change(data):
+            return None, data.pop(address, None) is not None
+        self._change(change)
+
+    def put_back(self, address: str, kept: dict) -> None:
+        """The Forward `entry` gave for `address`, as it was: a landing that took it away did not land."""
+        def change(data):
+            data[address] = dict(kept)
             return None, True
         self._change(change)
 
@@ -55,7 +88,7 @@ class Forwards(_Store):
         """The page at `address` is gone (deleted): each Forward that led to it goes, so what takes the address next is never
         what the old address of that page leads to."""
         def change(data):
-            gone = [k for k, e in data.items() if isinstance(e, dict) and e.get("to") == address]
+            gone = [k for k, e in data.items() if isinstance(e, dict) and "origin" not in e and e.get("to") == address]
             for k in gone:
                 del data[k]
             return None, bool(gone)
@@ -65,7 +98,7 @@ class Forwards(_Store):
         """A root was forgotten (`<root>/`): drop each Forward from an address under it and each that leads into it."""
         def change(data):
             gone = [k for k, e in data.items() if k.startswith(prefix) or
-                    (isinstance(e, dict) and str(e.get("to", "")).startswith(prefix))]
+                    (isinstance(e, dict) and "origin" not in e and str(e.get("to", "")).startswith(prefix))]
             for k in gone:
                 del data[k]
             return None, bool(gone)

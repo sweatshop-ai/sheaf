@@ -37,7 +37,7 @@ from ..mcp import Caller, Door
 from ..render import RenderError
 from ..source import StaleError, md_hash
 from . import archive as archive_mod
-from . import auth, boxwait, codes, events, laptops, loose, peer, place, proxy, readthrough, sheaf_view, targets, the_list, transcribe, visibility, work
+from . import auth, boxwait, channel, codes, events, incoming, laptops, loose, peer, place, proxy, readthrough, sheaf_view, targets, the_list, transcribe, visibility, work
 from . import waiting as waiting_mod
 from .tell import NO_AGENT, JobRefused
 from .index import Status
@@ -489,6 +489,9 @@ class Handler:
             raise Refuse(403, "this hub answers on its proxy socket only to its front's host")
         if not req.path.startswith("/"):
             raise Refuse(400, "bad request target")
+        # The hub-to-hub channel, the one prefix with no member: a peer tiroir's token and nothing else decides (ticket 20).
+        if req.path.startswith("/_/tiroir/"):
+            return self._route_channel(req, raw)
         # A sign-in code the verifier let in, judged before the route, the method and the body (9.13).
         if req.headers.get("x-sheaf-code"):            # an empty one is none, as an empty member header
             return self._route_code(req, raw)
@@ -518,6 +521,33 @@ class Handler:
             self._read_body(req, self._body(req, raw))
         self._unalias(req)
         return fn(req)
+
+    def _route_channel(self, req: Req, raw: bytes) -> Response:
+        """`/_/tiroir/<verb>` (ticket 20): a peer tiroir's POST, let in by its peer token from the tailnet. Every refusal is the answer of
+        a route this hub does not have, so the caller cannot tell a wrong source from a wrong token; the row says which. The
+        member header and a sign-in code are not read: a person's credential opens nothing here."""
+        req.member_id, req.route = "", "tiroir"
+        row, why = channel.peer_for(self.hub, req)
+        if row is None:
+            raise Refuse(404, "no such route", row="peer-refused", fields={"reason": why})
+        req.token = row
+        verb = req.path.removeprefix("/_/tiroir/")
+        self._read_body(req, self._body(req, raw, channel.MAX_TRANSFER if verb == "transfer" else channel.MAX_ASK))
+        return getattr(self, f"_peer_{verb}")(req)
+
+    def _peer_resolve(self, req: Req) -> Response:
+        """Whether this tiroir has a member for the e-mail: asked before a page is bundled; `transfer` asks again."""
+        owner, why = incoming.owner_for(self.hub, req.body.get("owner_email"))
+        return _json(200, {"ok": True}) if owner is not None else _json(409, {"ok": False, "why": why})
+
+    def _peer_transfer(self, req: Req) -> Response:
+        """Land a page moved here (ticket 20): `incoming.land`. Whatever fails after the page was made takes it back and is a 500
+        the sender reads as a failed transfer, so it keeps its page."""
+        try:
+            status, answer = incoming.land(self.hub, self.door, req.body)
+        except ValueError as e:
+            raise Refuse(400, str(e)) from None
+        return _json(status, answer)
 
     def _unalias(self, req: Req) -> None:
         """A page Shared with the member is told to them under an opaque name (`Hub.alias`, 9.11): the one they send back, in
@@ -570,7 +600,7 @@ class Handler:
 
     def _token(self, req: Req) -> bool:
         """Whether the request carries an MCP token that is good now; its owner is on `req.token`."""
-        row = self.hub.tokens.verify(auth.bearer(req.headers.get("authorization")))
+        row = self.hub.tokens.verify(auth.bearer(req.headers.get("authorization")))      # never a peer's token: that opens the channel only
         if row is not None and row.member is not None:
             # a laptop's token acts for its member: one the table no longer names is refused, never read as unbound
             cfg = self.hub.proxy

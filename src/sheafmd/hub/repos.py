@@ -6,7 +6,10 @@ hears of it: blobless (`--filter=blob:none`) and sparse (cone mode), one clone p
 report for a page in a folder the clone does not hold widens the sparse set by that folder. The owner of a page is a
 record kept here (repo + path -> member), made at the page's first report and never moved by a later one; a page's
 front matter `owner` wins over it. A repo that is the private root of any member on this tiroir is never cloned and its
-pages get no record: they have one home.
+pages get no record: they have one home. A report for such a repo by another member is answered `not-cloned`, once and the
+same whatever the tiroir holds: nothing is cloned for it, not even to throw away, and the answer names no owner. The
+limit, written in the PR: a member who knows a repo's URL can tell that this tiroir will not clone it; nothing of its
+pages or its owner shows.
 
 The credential is a seam, `provider`, with two methods: `token(repo)` is an installation token for the repo or None when
 the App cannot reach it, and `install_url(repo)` is the link that adds the repo to the installation. The token reaches
@@ -21,7 +24,6 @@ import os
 import re
 import shutil
 import subprocess
-import tempfile
 import threading
 from pathlib import Path
 
@@ -33,7 +35,7 @@ COMMIT_RE = re.compile(r"[0-9a-f]{7,40}")
 GIT_SECONDS = 300.0
 
 NO_CLONES = "none"
-OK, PRIVATE_ROOT, NO_APP = "ok", "private-root", "no-app"
+OK, PRIVATE_ROOT, NO_APP, NOT_CLONED = "ok", "private-root", "no-app", "not-cloned"
 
 
 class Refused(ValueError):
@@ -65,7 +67,13 @@ class Repos:
     def __init__(self, base: Path, provider, remote_url=None):
         self.base, self.provider = Path(base), provider
         self.remote_url = remote_url or (lambda repo: f"https://github.com/{repo}.git")
-        self._lock = threading.RLock()
+        self._records = threading.RLock()       # the records file, held for a read or a read-modify-write, never across git
+        self._guard, self._repo_locks = threading.Lock(), {}
+
+    def _repo_lock(self, repo: str) -> threading.Lock:
+        """The lock of one repo's clone: a clone or fetch that stalls holds that repo's reports and no other's."""
+        with self._guard:
+            return self._repo_locks.setdefault(repo, threading.Lock())
 
     # ── the records ──────────────────────────────────────────────────────────
     @property
@@ -88,23 +96,18 @@ class Repos:
         return self.base / "clones" / owner / name
 
     def owner_of(self, repo: str, path: str) -> str | None:
-        """The member of a repo page: its front matter's `owner` when the clone holds the page and names one, else
-        the one the first report recorded; None for a page no report made."""
-        with self._lock:
+        """The member of a repo page: the `owner` of its front matter at the commit of the latest report when it names
+        one, else the one the first report recorded; None for a page no report made."""
+        with self._records:
             row = self._read().get(repo, {}).get(path)
-            try:
-                text = (self.clone_dir(repo) / path).read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
-                text = ""
-            named = visibility.front_matter(text).get("owner") if text else None
-            if isinstance(named, str) and named:
-                return named
-            return row["owner"] if isinstance(row, dict) else None
+        if not isinstance(row, dict):
+            return None
+        return row["named"] if isinstance(row.get("named"), str) and row["named"] else row["owner"]
 
     def attribution(self, repo: str, path: str) -> dict:
         """What a row says of the page's last writer: the session of the latest report, else the `Sheaf-Session:` and
         `Sheaf-Host:` trailers of the page's last commit, else `git · <author>`."""
-        with self._lock:
+        with self._records:
             row = self._read().get(repo, {}).get(path) or {}
         if row.get("session"):
             return {"session": row["session"], "host": row.get("host"), "link": row.get("link"),
@@ -135,15 +138,16 @@ class Repos:
 
     def _is_private_root(self, repo: str, folder: str) -> bool:
         """Whether `repo` is the repo of the private root `folder`: any remote of the root, fetch or push, names it.
-        A root that cannot be looked at (missing, unreadable, git gives no answer) counts as one: a clone cannot be
-        taken back."""
+        Decided from the configured root: one that cannot be looked at (missing, no `.git` of its own, unreadable, git
+        gives no answer) counts as one, since git would read a parent folder's repo for it and a clone cannot be taken
+        back."""
+        if not os.path.lexists(os.path.join(folder, ".git")):
+            return True
         try:
             places = proxy.repo_places(folder)
         except proxy.ProxyError:
             return True
-        if places is None:
-            return not os.path.isdir(folder)
-        return proxy.normal_place(self.remote_url(repo)) in places
+        return places is None or proxy.normal_place(self.remote_url(repo)) in places
 
     def _clone(self, repo: str, token: str, folder: str, dest: Path) -> str | None:
         """Clone `repo` into `dest` blobless and sparse with `folder` in its set; an error sentence, or None when made."""
@@ -185,33 +189,30 @@ class Repos:
     # ── the report ───────────────────────────────────────────────────────────
     def report(self, member: str, repo, path, commit, private_roots=(), declared=None) -> dict:
         """The tiroir hears that `member` works on the page `path` of `repo` at `commit`. Raises `Refused` for a name
-        that is none; otherwise the answer: `clone` (`ok`, `private-root`, `no-app`), `commit_known`, and for `no-app`
-        the link that adds the repo. `private_roots` are (member, folder) pairs. A repo that is the caller's own private
-        root is told so; one that is another member's is answered exactly as a repo the tiroir has not seen, by a
-        clone made in a scratch folder and thrown away, so the answer never tells a member whose work lives where
-        (SPEC 9.11). Nothing in the answer depends on what the tiroir already holds."""
+        that is none; otherwise the answer: `clone` (`ok`, `private-root`, `not-cloned`, `no-app`), `commit_known`, and
+        for `no-app` the link that adds the repo. `private_roots` are (member, folder) pairs. A repo that is the
+        caller's own private root is told so; one that is another member's is `not-cloned` and nothing else: no
+        clone, no record, no owner named, and an answer that does not depend on what the tiroir holds (SPEC 9.11).
+        A repo that became a private root after it was cloned keeps its clone and its records, takes no more."""
         repo, path, commit = _clean_repo(repo), _clean_path(path), _clean_commit(commit)
         declared = declared or {}
         folder = path.rpartition("/")[0]
-        with self._lock:
-            roots = [(who, root) for who, root in private_roots if self._is_private_root(repo, root)]
-            if any(who == member for who, _ in roots):
-                return {"repo": repo, "path": path, "clone": PRIVATE_ROOT, "commit_known": None}
+        roots = [who for who, root in private_roots if self._is_private_root(repo, root)]
+        if member in roots:
+            return {"repo": repo, "path": path, "clone": PRIVATE_ROOT, "commit_known": None}
+        if roots:
+            return {"repo": repo, "path": path, "clone": NOT_CLONED, "commit_known": None}
+        with self._repo_lock(repo):
             token = self.provider.token(repo)       # the provider renews it: asked each time git reaches the remote
-            if roots:                                # another member's private root: kept nowhere, recorded nowhere
-                scratch = Path(tempfile.mkdtemp(prefix="probe-", dir=self._scratch_base()))
-                try:
-                    return self._answer(scratch / "clone", member, repo, path, commit, folder, token, None, True)
-                finally:
-                    shutil.rmtree(scratch, ignore_errors=True)
-            return self._answer(self.clone_dir(repo), member, repo, path, commit, folder, token, declared, False)
+            return self._answer(self.clone_dir(repo), member, repo, path, commit, folder, token, declared)
 
-    def _scratch_base(self) -> Path:
-        base = self.base / "scratch"
-        base.mkdir(parents=True, exist_ok=True)
-        return base
+    def _named_owner(self, dest: Path, commit: str, path: str, token: str | None) -> str | None:
+        """The `owner` of the page's front matter in the tree of `commit` (git fetches the blob when the clone lacks it)."""
+        r = self._git(dest, "show", f"{commit}:{path}", token=token, seconds=60)
+        named = visibility.front_matter(r.stdout).get("owner") if r.returncode == 0 and r.stdout else None
+        return named if isinstance(named, str) and named else None
 
-    def _answer(self, dest: Path, member, repo, path, commit, folder, token, declared, scratch: bool) -> dict:
+    def _answer(self, dest: Path, member, repo, path, commit, folder, token, declared) -> dict:
         made = not (dest / ".git").exists()
         if token is None and made:
             return {"repo": repo, "path": path, "clone": NO_APP, "commit_known": None,
@@ -223,12 +224,14 @@ class Repos:
         elif token is not None:
             self._widen(dest, folder, token)
         known = self._knows(dest, commit, token)
-        if scratch or not known or not self._holds(dest, commit, path):
+        if not known or not self._holds(dest, commit, path):
             return {"repo": repo, "path": path, "clone": OK, "commit_known": known}
-        data = self._read()
-        row = data.setdefault(repo, {}).get(path)
-        owner = row["owner"] if isinstance(row, dict) else member
-        data[repo][path] = {"owner": owner, "commit": commit,
-                            **{k: v for k, v in declared.items() if k in ("session", "host", "link") and v}}
-        self._write(data)
+        named = self._named_owner(dest, commit, path, token)
+        with self._records:
+            data = self._read()
+            row = data.setdefault(repo, {}).get(path)
+            owner = row["owner"] if isinstance(row, dict) else member
+            data[repo][path] = {"owner": owner, "commit": commit, **({"named": named} if named else {}),
+                                **{k: v for k, v in declared.items() if k in ("session", "host", "link") and v}}
+            self._write(data)
         return {"repo": repo, "path": path, "clone": OK, "commit_known": known}

@@ -494,6 +494,7 @@ class Door:
         token's member, already asked."""
         if not self._judged(caller):
             return True
+        fm = self.hub.clone_fm(address, fm)             # a clone's page is judged as the page is (SPEC 14), by every door
         member = self._member(caller)
         if owns is None and member is not None:
             owns = self.hub.member_owns(member, address)

@@ -1061,6 +1061,7 @@ class Hub:
         `owner` and its issue's assignees name no other owner there."""
         if (loose := self.loose_owner(address)) is not None:
             return loose == member.id
+        fm = self.clone_fm(address, fm)
         return bool(visibility.owner_of(fm, [member], self.assignees(address, fm)))
 
     def judged_for(self, member, address: str, fm: dict, assignees):
@@ -1069,6 +1070,22 @@ class Hub:
         if (loose := self.loose_owner(address)) is not None and loose != member.id:
             return {k: v for k, v in fm.items() if k != "owner"}, None
         return fm, assignees
+
+    def clone_fm(self, address: str, fm: dict) -> dict:
+        """`fm` as a page of a clone is judged on it, by every door alike: a clone is a shared root, so a page that names
+        no owner has the one its first render report recorded, never written into the file, and is its owner's alone
+        unless its front matter says otherwise; a page with neither a record nor an owner opens to nobody (SPEC 14).
+        `fm` itself for a page of any other root."""
+        at = roots_mod.Address.parse(address)
+        root = self.roots.get(at.root)
+        if root is None or not root.clone or self._repos is None:
+            return fm
+        fm = dict(fm)
+        if not fm.get("owner") and (owner := self._repos.owner_of(root.clone, at.rel)) is not None:
+            fm["owner"] = owner
+        if not fm.get("visibility"):
+            fm["visibility"] = "owner"
+        return fm
 
     def judged(self, address: str):
         """(front matter, assignees) of the rectoverso at `address`, what its visibility is judged on: the front
@@ -1098,15 +1115,7 @@ class Hub:
             self._front[kept] = (key, fm, assignees)
             if self.private_roots:
                 place.private_member(self, address, fm, place.opened_private(self, op))   # remembered whoever read the file first (rule A)
-        if root.clone and self._repos is not None:
-            # A clone is a shared root: a page that names no owner has the one its first render report recorded, never
-            # written into the file, and is its owner's alone unless its front matter says otherwise; a page with
-            # neither a record nor an owner opens to nobody (SPEC 14).
-            fm = dict(fm)
-            if not fm.get("owner") and (owner := self._repos.owner_of(root.clone, at.rel)) is not None:
-                fm["owner"] = owner
-            if not fm.get("visibility"):
-                fm["visibility"] = "owner"
+        fm = self.clone_fm(address, fm)
         return fm, assignees
 
     def last_judged(self, address: str):
@@ -1150,6 +1159,7 @@ class Hub:
     def may_open(self, member, address: str, fm: dict, opened=place.UNJUDGED) -> bool:
         """Whether `member` may open the rectoverso at `address` whose front matter is `fm`, a text read under its lock
         (9.11): as `visible` judges the file on disk, with `projects.toml`'s grant (8.12)."""
+        fm = self.clone_fm(address, fm)
         private = place.private_member(self, address, fm, opened)
         if private is not None and private != member.id:        # rule A
             return False
@@ -1177,7 +1187,7 @@ class Hub:
         if self.proxy is None:
             return False
         def opens(member, text):
-            return visibility.effective(visibility.front_matter(text)) == "project" or self.opened_by_line(member, address, text)
+            return visibility.effective(self.clone_fm(address, visibility.front_matter(text))) == "project" or self.opened_by_line(member, address, text)
         return any(opens(m, new) and not opens(m, old) for m in self.proxy.members.values())
 
     def opened_by_line(self, member, address: str, text: str | None = None) -> bool:

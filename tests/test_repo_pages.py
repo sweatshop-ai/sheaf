@@ -112,9 +112,9 @@ def report(hub_repos, **kw):
     bad, got = report_once(hub_repos, **kw)
     if not bad and (got["clone"] == "cloning" or got.get("commit_known") is False):
         assert hub_repos.hub.repos.settle(), "the tiroir's thread did not finish"
-        bad, got = report_once(hub_repos, **kw)
-    elif hub_repos.hub.repos is not None:
-        assert hub_repos.hub.repos.settle()
+        bad, got = report_once(hub_repos, **kw)     # this report starts a thread of its own
+    if hub_repos.hub.repos is not None:
+        assert hub_repos.hub.repos.settle(), "the tiroir's thread did not finish"       # none left running when a test goes on
     return bad, got
 
 
@@ -1030,8 +1030,10 @@ def test_a_report_for_a_commit_the_clone_lacks_never_reaches_the_remote_on_the_r
 
 # ── a git that ignores GIT_NO_LAZY_FETCH (before 2.44) gets no look at the clone ─
 
-def look_calls(monkeypatch):
-    """Record every look (`look=True`) the Repos makes; the list."""
+def look_calls(monkeypatch, repos):
+    """Record every look (`look=True`) the Repos makes from now on; the list. A thread still running would put its own
+    looks in it, so none may be."""
+    assert repos.settle(), "a thread of the tiroir is still running: its looks would be counted"
     seen = []
     real = repos_mod.Repos._git
 
@@ -1092,7 +1094,7 @@ def test_below_2_44_or_unknown_the_request_path_makes_no_look_and_nothing_fetche
     repos = hub_repos.hub.repos
     head = sh(the_clone(hub_repos), "rev-parse", "origin/HEAD").strip()    # a commit the clone does hold
     monkeypatch.setattr(repos_mod, "_git_version", lambda: version)
-    seen = look_calls(monkeypatch)
+    seen = look_calls(monkeypatch, repos)
     answer = ask(repos, monkeypatch, head)
     assert answer["clone"] == "ok" and answer["commit_known"] is False     # as a look that found nothing
     assert seen == []
@@ -1105,7 +1107,7 @@ def test_from_2_44_the_request_path_looks_at_the_clone_as_before(hub_repos, monk
     repos = hub_repos.hub.repos
     head = sh(the_clone(hub_repos), "rev-parse", "origin/HEAD").strip()
     monkeypatch.setattr(repos_mod, "_git_version", lambda: version)
-    seen = look_calls(monkeypatch)
+    seen = look_calls(monkeypatch, repos)
     assert ask(repos, monkeypatch, head)["commit_known"] is True
     assert seen == [("branch", "-r", "--contains", head)]
     assert ask(repos, monkeypatch, "a" * 40)["commit_known"] is False
@@ -1117,7 +1119,7 @@ def test_on_an_old_git_the_repos_own_thread_still_looks_and_records_the_page(hub
     repos = hub_repos.hub.repos
     commit = sh(the_clone(hub_repos), "rev-parse", "origin/HEAD").strip()
     monkeypatch.setattr(repos_mod, "_git_version", lambda: (2, 43))
-    seen = look_calls(monkeypatch)
+    seen = look_calls(monkeypatch, repos)
     assert repos._knows(the_clone(hub_repos), REPO, commit, None) is True
     assert seen == [("branch", "-r", "--contains", commit)]
 

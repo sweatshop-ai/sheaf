@@ -28,7 +28,7 @@ def agency_and_client(tmp_path):
     agency = Site(tmp_path, "agency", 27422, "https://tt.example.com", {
         AG_ALICE: ("Alice", "alice@example.com", False), AG_BOB: ("Bob", "bob@example.com", False),
         AG_DANA: ("Dana", "dana@example.com", False)}, clients={"acme": CLIENT_ORIGIN})
-    link = Link(client, client.peer_token("https://tt.example.com", ["read"]))
+    link = Link(client, client.peer_token("https://tt.example.com", ["read"], name="agency-link"))
     agency.hub.clients = readthrough.Clients(agency.hub.proxy.clients, link)
     agency.link = link
     return agency, client
@@ -86,6 +86,17 @@ def test_the_channel_has_no_admin_scope(agency_and_client):
         assert got.status == 404
     assert client.post("/_/tiroir/read", {"as": "alice@example.com", "op": "sheaf"}, member=None,
                        headers={**TAILNET, "Authorization": f"Bearer {agency.link.token}", "X-Sheaf-Member": CL_CAROL}).status == 200
+
+
+def test_a_revoked_peer_token_gets_the_answer_of_no_route_and_the_agency_reads_nothing(agency_and_client):
+    agency, client = agency_and_client
+    client.make("alice", f"# Plan\n\n{MARKER}\n")
+    assert rows(agency, AG_ALICE).json()["rows"]
+    assert client.revoke("agency-link")
+    got = client.post("/_/tiroir/read", {"as": "alice@example.com", "op": "sheaf"}, member=None,
+                      headers={**TAILNET, "Authorization": f"Bearer {agency.link.token}"})
+    assert got.status == 404
+    assert rows(agency, AG_ALICE).json()["rows"] == []
 
 
 def test_browser_cannot_choose_who_it_reads_as(agency_and_client):

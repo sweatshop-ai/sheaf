@@ -75,9 +75,13 @@ class Site:
         assert not out["isError"], out
         return json.loads(out["content"][0]["text"])["doc"]
 
-    def peer_token(self, origin, scopes):
+    def peer_token(self, origin, scopes, name=None):
         with self.inside():
-            return Tokens().add_peer(f"peer-{len(Tokens().list())}", origin, scopes)
+            return Tokens().add_peer(name or f"peer-{len(Tokens().list())}", origin, scopes)
+
+    def revoke(self, name):
+        with self.inside():
+            return Tokens().revoke(name)
 
     def text(self, doc):
         with self.inside():

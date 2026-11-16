@@ -219,7 +219,8 @@ def test_an_open_webui_chat_and_a_claude_ai_write_each_read_as_the_spec_says(mou
     chat = cell(mounted, "work/.tooling/n.md")
     assert (chat["tag"], chat["href"], chat["target"], chat["rel"]) == ("A", f"/c/{CHAT}", "_blank", "noopener noreferrer")
     claude_ai = cell(mounted, "work/ideas/deep/second.md")
-    assert claude_ai["text"] == "Claude.ai (Bea)" and claude_ai["tag"] is None
+    assert claude_ai["text"] == "" and claude_ai["tag"] is None
+    assert mounted.js("return root.querySelector('.sheaf-row[data-doc=\"work/ideas/deep/second.md\"] .sheaf-write').textContent;") == "Claude.ai (Bea)"
 
 
 def test_the_row_holds_no_script_and_no_address_but_the_hubs_own(mounted):

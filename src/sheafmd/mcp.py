@@ -548,6 +548,7 @@ class Door:
         token's member, already asked."""
         if not self._judged(caller):
             return True
+        fm = self.hub.clone_fm(address, fm)             # a clone's page is judged as the page is (SPEC 14), by every door
         member = self._member(caller)
         if owns is None and member is not None:
             owns = self.hub.member_owns(member, address)
@@ -621,6 +622,12 @@ class Door:
             raise ToolError(f"There is no comment {cid} in {address}.")
         return c
 
+    def _writable(self, address: str):
+        """A page of a repo's clone with no save branch is not written, comments included (SPEC 14): the line says
+        which `.sheaf.toml` line would change that."""
+        if line := self.hub.read_only_line(address):
+            raise ToolError(line, "read-only")
+
     def _write(self, address: str, caller: Caller, doc: str, op: str, fields: dict, role=None):
         """A change to one comment, and the agent of its token made the target (9.8) before the tabs hear
         of it. Through the document's Live Document when the hub has one,
@@ -629,6 +636,7 @@ class Door:
         again on the file under its lock, so a rectoverso that closed since the check takes nothing. Both
         under the lock of the rectoverso's name (9.11), the file found again under it, so no move comes
         between finding the file and writing it."""
+        self._writable(address)
         noted = False
 
         def note():
@@ -887,9 +895,9 @@ class Door:
         member = self._member(caller)
         if member is None:
             raise ToolError("A render report is made with the token of a member: this one acts for nobody.", "no member")
-        privates = [(m.short or m.id, m.private_root) for m in self.hub.proxy.members.values() if m.private_root]
+        privates = [(visibility.owner_key(m), m.private_root) for m in self.hub.proxy.members.values() if m.private_root]
         try:
-            return repos.report(member.short or member.id, args["repo"], args["path"], args["commit"], privates, caller.declared)
+            return repos.report(visibility.owner_key(member), args["repo"], args["path"], args["commit"], privates, caller.declared)
         except repos_mod.Refused as e:
             raise ToolError(str(e), "refused") from None
 
@@ -1055,6 +1063,7 @@ class Door:
             # A root of another member's. Root ownership alone, not rule A: `_new_address` already refused a real path
             # inside a private root, and a list name a private root holds falls to `place.taken` below, as a shared one.
             raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path")
+        self._writable(address)         # a clone with no save branch is not written to, whoever's token
         if self.hub.forwards.follow(address) is not None:
             raise ToolError(f"{_named(args['doc'])} cannot be made: a page moved away from that address, and its "
                             "Forward stays. Pick another name or folder.", "moved")
@@ -1173,6 +1182,7 @@ class Door:
     def _update(self, args: dict, caller: Caller):
         followed: list = []
         address = self._address(args["doc"], caller, followed)
+        self._writable(address)
         text, expected = _as_read(args["text"]), args["expected_hash"]
         if not HASH_RE.fullmatch(expected):
             raise ToolError("expected_hash is not a hash that `read` or `create` gave (16 hex digits).",

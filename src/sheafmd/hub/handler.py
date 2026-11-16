@@ -963,9 +963,16 @@ class Handler:
         return _ok(**self.hub.jobs())
 
     # ── save and comment ─────────────────────────────────────────────────────
+    def _writable(self, address: str):
+        """Refuse a write to a page the tiroir may not save (a repo's clone with no save branch, SPEC 14): nothing is
+        written, comments included; the line says which `.sheaf.toml` line would change that."""
+        if line := self.hub.read_only_line(address):
+            raise Refuse(403, line)
+
     def _save(self, req: Req) -> Response:
         b = req.body
         e = self._entry(req, b.get("doc"))
+        self._writable(e.address)
         h, edits = b.get("hash"), b.get("edits")
         _shape(isinstance(h, str) and h != "", "hash must be the hash of the version the edits were made against")
         _shape(isinstance(edits, list), "edits must be a list")
@@ -1018,6 +1025,7 @@ class Handler:
         page saves a tick, so the file, the commit and the open tabs see what a tick in the page makes them see."""
         b = req.body
         e = self._entry(req, b.get("doc"))
+        self._writable(e.address)
         n, word, read, release = b.get("action"), b.get("word"), b.get("hash"), b.get("release", False)
         where = b.get("where", "list")
         _shape(where in ("list", "page"), "where must be list or page")
@@ -1115,6 +1123,7 @@ class Handler:
         the page's own. A page with an unticked Share line has it ticked, and no second line is added."""
         b = req.body
         e = self._entry(req, b.get("doc"))
+        self._writable(e.address)           # before the first write: the Share line is committed before its tick is saved
         read, names = b.get("hash"), b.get("with", [])
         _shape(isinstance(read, str) and read != "", "hash must be the hash of the version the row read")
         _shape(names == [] or visibility.valid_names(names), "with must be a list of short names")
@@ -1183,12 +1192,16 @@ class Handler:
         return root, at.rel, mtime
 
     def _acting(self, req: Req, act):
-        root, rel, mtime = self._own_loose(req, req.body.get("doc"))
-        try:
-            with place.held(self.hub, req.body["doc"]):
-                act(root, rel, mtime)
-        except loose.Refused as e:
-            raise Refuse(409, str(e)) from None
+        # The moves' lock first (the hub's lock order), from the read of the path to the write of the mark: a move comes before
+        # the read or after the write, so its `marks_moved` carries this mark and none is left at the old path. Then the page's
+        # name lock (`place.held`), and the act's own locks inside it. The path is not read again under the name lock.
+        with moves._LOCK:
+            root, rel, mtime = self._own_loose(req, req.body.get("doc"))
+            try:
+                with place.held(self.hub, req.body["doc"]):
+                    act(root, rel, mtime)
+            except loose.Refused as e:
+                raise Refuse(409, str(e)) from None
         self.hub.index.touch(req.body["doc"])
         return _ok()
 
@@ -1215,11 +1228,15 @@ class Handler:
                 root, rel, _ = self._own_loose(req, doc)
                 with self.hub.page_lock(doc):       # a save in the middle of its write finishes first, one after it finds the page gone
                     self.hub.archive.trash(root, rel)
-                # A Forward that led to this address is no one's now (SPEC 9.11 words nothing for a delete): else the old address
-                # of the page would lead to whatever comes to this one. Under the moves' lock, as a move adds a Forward.
-                self.hub.forwards.drop_leading_to(doc)
             except (loose.Refused, OSError) as e:
                 raise Refuse(409, str(e) if isinstance(e, loose.Refused) else "the page could not be moved to the trash") from None
+            # A Forward that led to this address is no one's now (SPEC 9.11 words nothing for a delete): else the old address
+            # of the page would lead to whatever comes to this one. Under the moves' lock, as a move adds a Forward. The page is
+            # in the trash by now: a Forward that cannot be written is a row in the diagnostics log, never a refusal.
+            try:
+                self.hub.forwards.drop_leading_to(doc)
+            except Exception:
+                self.hub.record_exception("delete-forward-failed", doc)
         self.hub.forget_document(doc)
         self.hub.index.touch(doc)
         return _ok()
@@ -1766,6 +1783,7 @@ class Handler:
             address, fm, _ = self._code_rectoverso(req, b.get("doc"))
         else:
             address, fm, _ = self._sheaf(req, b.get("doc"))
+        self._writable(address)
         sid, machine = b.get("id"), b.get("machine")
         _shape(isinstance(sid, str) and work.UUID_RE.fullmatch(sid), "id must be a session id (a lowercase UUID)")
         _shape(isinstance(machine, str) and work.MACHINE_RE.fullmatch(machine),
@@ -1819,6 +1837,7 @@ class Handler:
     def _comment(self, req: Req) -> Response:
         b = req.body
         e = self._entry(req, b.get("doc"))
+        self._writable(e.address)
         op = b.get("op")
         _shape(op in OPS, f"op must be one of {', '.join(OPS)}")
         _shape(not (op in ("add", "reply") and "ask" in b), ASK_RETIRED)

@@ -54,6 +54,10 @@ cfg = proxy.parse({"origin": "https://front.example.com", "socket": "/run/sheaf-
                                "id-b": {"name": "Member B", "short": "b", "email": "b@example.com", "tokens": ["tok-b"], **member}}},
                   "the twin")
 hub = Hub(port=39001, key=paths.ensure_key(), started_by="test", clock=lambda: NOW, proxy=cfg)
+if float(os.environ.get("TWIN_SWEEP_DELAY", "0")):      # the pusher's thread sweeps late: the order of its commit and the session's is the test's to pin
+    import time
+    _sweep = hub.commits._sweep
+    hub.commits._sweep = lambda *a, **k: (time.sleep(float(os.environ["TWIN_SWEEP_DELAY"])), _sweep(*a, **k))[1]
 hub.the_list = the_list.TheList(hub, the_list.ListConfig(repo, "acme/record", 1, work / "token"))
 root = hub.the_list.root()
 door, caller = Door(hub), Caller("Claude")
@@ -66,6 +70,7 @@ def tool(name, who=None, **args):
                                      "params": {"name": name, "arguments": args}}).encode(), who or caller)
     got = out["result"]
     assert not got["isError"], got
+    hub.commits.settle()        # the pusher's thread has swept before the next step: its commits are never between two steps by chance
     return json.loads(got["content"][0]["text"])
 
 
@@ -102,7 +107,9 @@ def by_hand(change):
     with place.held(hub, DOC):
         Path(hub.file(DOC)).write_text(change(now_text()), encoding="utf-8")
         hub.committed(DOC, what="edit", by="Ada")
+    hub.commits.settle()                                                # the sweep of that commit, before the move writes a version
     place.place(hub, DOC)
+    hub.commits.settle()
 
 
 tool("create", doc=DOC, text="---\nclient: acme\nproject: blog\n---\n# Plan\n\n- [ ] Approve\n\nFirst paragraph.\n")
@@ -114,6 +121,7 @@ with place.held(hub, DOC):                                                      
     Path(hub.file(DOC)).write_text(now_text().replace("- [ ] Approve", "- [x] Approve"), encoding="utf-8")
     hub.committed(DOC, cfg.members["id-a"], "tick")
 hub.the_list.ticked(DOC)                                                                # the list's tick, after the handler's
+hub.commits.settle()
 snapshot("ticked")
 by_hand(lambda t: t.replace("client: acme", "visibility: owner\nowner: a\nclient: acme"))   # closed: to a private home
 snapshot("closed")

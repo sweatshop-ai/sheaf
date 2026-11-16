@@ -473,7 +473,7 @@ def test_share_leaves_a_registry_it_cannot_read_where_it_is(proxied, sheaf, work
 
 
 PROJECTS = '[projects."acme/blog"]\nmembers = ["bea"]\nstatus = "live"\n' \
-           '[projects."thinkingtoo/tiroir"]\nmembers = ["bea"]\nstatus = "live"\n'
+           '[projects."acme/tiroir"]\nmembers = ["bea"]\nstatus = "live"\n'
 
 
 @pytest.fixture
@@ -506,8 +506,8 @@ def project_page(front, work, rel, src):
 def test_an_image_of_another_project_is_left_out_like_one_of_another_root(front, plan, granted, work):
     """A member opens a page of a project they are in; an image of a project they may not be in is no part of it
     (#53): judged by its `<client>/<project>` as a document is (8.12), the same for every reader of the page."""
-    png(work / "thinkingtoo" / "tiroir" / "secret.png")
-    html, share, log = project_page(front, work, "acme/blog/pic.md", "../../thinkingtoo/tiroir/secret.png")
+    png(work / "acme" / "tiroir" / "secret.png")
+    html, share, log = project_page(front, work, "acme/blog/pic.md", "../../acme/tiroir/secret.png")
     for out in (html, share):
         assert "data:image/png" not in out and "the figure" not in out and "missing image" not in out
     assert any("left out" in line and "secret.png" in line for line in log)
@@ -542,15 +542,15 @@ def test_an_image_in_a_private_folder_is_embedded_only_in_a_sheaf_of_that_folder
 
 def test_a_root_without_projects_toml_embeds_another_projects_image_as_before(front, plan, work):
     """A root without the file grants as before (8.12): a folder at project depth is no project there."""
-    png(work / "thinkingtoo" / "tiroir" / "fig.png")
-    html, share, _ = project_page(front, work, "acme/blog/pic.md", "../../thinkingtoo/tiroir/fig.png")
+    png(work / "acme" / "tiroir" / "fig.png")
+    html, share, _ = project_page(front, work, "acme/blog/pic.md", "../../acme/tiroir/fig.png")
     assert "data:image/png" in html and "data:image/png" in share
 
 
 def test_a_page_built_before_projects_toml_came_is_built_again_at_its_next_load(front, plan, granted, work):
     (work / "projects.toml").unlink()
-    png(work / "thinkingtoo" / "tiroir" / "secret.png")
-    html, _, _ = project_page(front, work, "acme/blog/pic.md", "../../thinkingtoo/tiroir/secret.png")
+    png(work / "acme" / "tiroir" / "secret.png")
+    html, _, _ = project_page(front, work, "acme/blog/pic.md", "../../acme/tiroir/secret.png")
     assert "data:image/png" in html
     (work / "projects.toml").write_text(PROJECTS, encoding="utf-8")
     assert "data:image/png" not in front.get("/work/acme/blog/pic.md").text
@@ -564,8 +564,8 @@ def test_a_build_that_failed_after_projects_toml_came_is_tried_again_at_the_next
     rule marked as such, so the next request builds it again."""
     from sheafmd.hub import core
     (work / "projects.toml").unlink()
-    png(work / "thinkingtoo" / "tiroir" / "secret.png")
-    html, _, _ = project_page(front, work, "acme/blog/pic.md", "../../thinkingtoo/tiroir/secret.png")
+    png(work / "acme" / "tiroir" / "secret.png")
+    html, _, _ = project_page(front, work, "acme/blog/pic.md", "../../acme/tiroir/secret.png")
     assert "data:image/png" in html
     (work / "projects.toml").write_text(PROJECTS, encoding="utf-8")
     real, calls = core.render_file, []

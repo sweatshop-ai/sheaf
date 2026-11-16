@@ -330,7 +330,7 @@ def test_sheaf_stop_of_a_service_hub_exits_stopped_and_the_supervisor_leaves_it_
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="systemd's rule: Linux")
 def test_a_stray_sigterm_to_a_service_hub_is_restarted(port, procs):
-    """2026-10-30 on tiroir-tt: a signal from a sender nobody knows stopped the hub, it exited 0 and
+    """2026-10-30 on agency-tiroir: a signal from a sender nobody knows stopped the hub, it exited 0 and
     Restart=on-failure left it down."""
     hub = start_hub("service", unit_env())
     sup = Supervisor(hub, unit_env())

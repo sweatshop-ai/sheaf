@@ -8,7 +8,7 @@ const TELL = { id: 't1', doc: 'loose-bea/notes.md', thread: 'c1', message: 'Plea
  *  `door.answers` (a queue; the last one repeats, as a door re-lists a Tell until it is answered). */
 function world($: any, on: any) {
   const clock = mock.clock(on)
-  const door = { runs: [] as string[][], timeouts: [] as number[], failSubmits: 0, onPoll: null as null | ((argv: string[]) => void), answers: [{ exitCode: 0, stdout: '[]', stderr: '' }] as any[], session: SESSION, echo: undefined as string | undefined, helper: true,
+  const door = { runs: [] as string[][], timeouts: [] as number[], failSubmits: 0, onPoll: null as null | ((argv: string[]) => void), failStore: false, holdSubmit: null as null | Promise<void>, holdStore: null as null | Promise<void>, answers: [{ exitCode: 0, stdout: '[]', stderr: '' }] as any[], session: SESSION, echo: undefined as string | undefined, helper: true,
                  printed: `${ORIGIN}/loose-bea/notes.md\non chat.example.com as Bea` }
   const submitted: string[] = []
   on('session.start', (_: any, e: any) => ({ cwd: e.cwd }))
@@ -20,7 +20,13 @@ function world($: any, on: any) {
   on('ui.log', (_: any, e: any) => { lines.push(e.text); return { value: undefined } })
   const kept = new Map<string, unknown>()     // `$.store`, which outlives a session
   on('store.get', (_: any, e: any) => ({ value: kept.get(e.key) }))
-  on('store.set', (_: any, e: any) => { kept.set(e.key, e.value); return { value: undefined } })
+  on('store.set', async (_: any, e: any) => {
+    if (door.failStore && String(e.key).startsWith('delivered:')) throw new Error('disk full')
+    const hold = door.holdStore      // the first write of what is kept is slow: it finishes after the ones called later
+    if (hold && String(e.key).startsWith('delivered:')) { door.holdStore = null; await hold }
+    kept.set(e.key, e.value)
+    return { value: undefined }
+  })
   on('session.end', (_: any, e: any) => ({ sessionId: e.sessionId }))
   on('turn.start', (_: any, e: any) => ({ turnId: e.turnId }))
   on('turn.complete', (_: any, e: any) => ({ text: e.answer }))
@@ -31,14 +37,15 @@ function world($: any, on: any) {
     door.onPoll?.([...e.argv])
     return { value: door.answers.length > 1 ? door.answers.shift() : door.answers[0] }
   })
-  on('prompt.submit', (_: any, e: any) => {
+  on('prompt.submit', async (_: any, e: any) => {
+    if (door.holdSubmit) await door.holdSubmit      // a submit resolves only when its turn ends
     if (door.failSubmits > 0 && e.origin?.kind !== 'composer') { door.failSubmits -= 1; throw new Error('refused') }
     submitted.push(e.text)
     return { text: e.text }
   })
   const send = () => $.tool.call({ tool: 'Bash', command: 'sheaf notes.md' })
   const mcp = (tool: string) => $.tool.call({ tool, id: 'c1', text: 'Looking.' } as any)
-  return { clock, door, submitted, send, mcp, lines }
+  return { clock, door, submitted, send, mcp, lines, kept }
 }
 
 const start = ($: any) => $.turn.start({ text: '', turnId: 'a' })
@@ -245,6 +252,229 @@ test('a session resumed after it sent a page is polled without a new send', asyn
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await w.clock.advance(2_000)
   expect(polls(w.door).length).toBeGreaterThan(before)
+})
+
+const DOOR_KEY = `--origin ${ORIGIN}`      // how the mod names a tiroir in what it keeps
+const listing = (...ids: string[]) => [{ exitCode: 0, stdout: JSON.stringify(ids.map(id => ({ ...TELL, id }))), stderr: '' }]
+/** What the mod keeps for the session, as the ids by tiroir. */
+const keptOf = (w: any): Record<string, string[]> | undefined => {
+  const e = w.kept.get(`delivered:${SESSION}`)
+  if (!Array.isArray(e)) return e
+  const out: Record<string, string[]> = {}
+  for (const x of e) (out[x.door] ??= []).push(x.id)
+  return out
+}
+const WEEK_MS = 7 * 24 * 3600 * 1000
+const armedBefore = async (_: any, w: any, sent: Record<string, string[]>, age = 0) => {
+  w.kept.set(`doors:${SESSION}`, [{ flag: '--origin', value: ORIGIN }])      // what an earlier run of the mod stored for this session
+  const at = (await w.clock.now()) - age
+  let seq = 0
+  if (Object.keys(sent).length) w.kept.set(`delivered:${SESSION}`, Object.entries(sent).flatMap(([door, ids]) => ids.map(id => ({ id, door, seq: ++seq, at }))))
+}
+
+test('a resumed session does not submit again a Tell it submitted before and has not answered: the door still lists it', async ($, on) => {
+  const w = world($, on)
+  await armedBefore($, w, { [DOOR_KEY]: ['t1'] })
+  w.door.answers = listing('t1')
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.clock.advance(20_000)
+  expect(polls(w.door).length).toBeGreaterThan(0)
+  expect(w.submitted.length).toBe(0)
+  expect(keptOf(w)).toEqual({ [DOOR_KEY]: ['t1'] })      // still listed, so still kept
+})
+
+test('a Tell the mod submits is kept for the session when its own turn starts, not before', async ($, on) => {
+  const w = world($, on)
+  w.door.answers = listing('t1')
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.send()
+  await w.clock.advance(1_000)
+  expect(w.submitted.length).toBe(1)
+  expect(keptOf(w)).toBeUndefined()      // the prompt is not in the transcript yet
+  await start($)
+  await w.clock.advance(100)
+  expect(keptOf(w)).toEqual({ [DOOR_KEY]: ['t1'] })
+})
+
+test('a process that exits with a queued submit keeps nothing: after it the Tell is delivered', async ($, on) => {
+  const w = world($, on)
+  w.door.holdSubmit = new Promise<void>(() => {})      // the submit never reaches a turn: the process is gone
+  w.door.answers = listing('t1')
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.send()
+  await w.clock.advance(1_000)
+  expect(w.door.runs.length).toBeGreaterThan(0)
+  expect(w.kept.get(`delivered:${SESSION}`)).toBeUndefined()      // never recorded before its turn: a resume finds nothing and the door lists the Tell
+})
+
+test('a resume that finds nothing kept delivers the Tell the door lists', async ($, on) => {
+  const w = world($, on)
+  await armedBefore($, w, {})
+  w.door.answers = listing('t1')
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.clock.advance(20_000)
+  expect(w.submitted.length).toBe(1)
+})
+
+test('a poll that skips a Tell does not make a resume submit it again: nothing is pruned against the door\'s listing', async ($, on) => {
+  const w = world($, on)
+  await armedBefore($, w, { [DOOR_KEY]: ['t1'] })
+  w.door.answers = [...listing(), ...listing('t1')]      // a poll that skips t1 (its page cannot be read now), then the door lists it again
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.clock.advance(20_000)
+  expect(keptOf(w)).toEqual({ [DOOR_KEY]: ['t1'] })
+  expect(w.submitted.length).toBe(0)
+})
+
+test('an entry kept for seven days and a second is dropped on a resume', async ($, on) => {
+  const w = world($, on)
+  await armedBefore($, w, { [DOOR_KEY]: ['old'] }, WEEK_MS + 1_000)
+  w.door.answers = listing('old')
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.clock.advance(20_000)
+  expect(w.submitted.length).toBe(1)      // expired: delivered like a new Tell
+})
+
+test('an entry a second short of seven days is still kept on a resume', async ($, on) => {
+  const w = world($, on)
+  await armedBefore($, w, { [DOOR_KEY]: ['young'] }, WEEK_MS - 1_000)
+  w.door.answers = listing('young')
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.clock.advance(20_000)
+  expect(w.submitted.length).toBe(0)
+})
+
+test('a Tell whose submit was rejected is not kept, and is submitted and kept when a later submit succeeds', async ($, on) => {
+  const w = world($, on)
+  w.door.failSubmits = 1
+  w.door.answers = listing('t1')
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.send()
+  await w.clock.advance(1_000)
+  expect(w.submitted.length).toBe(0)
+  expect(keptOf(w)).toBeUndefined()      // never recorded: there is nothing to take back
+  await w.clock.advance(20_000)
+  expect(w.submitted.length).toBe(1)
+  await start($)
+  await w.clock.advance(100)
+  expect(keptOf(w)).toEqual({ [DOOR_KEY]: ['t1'] })
+})
+
+test('a submit that succeeds when the store cannot be written still submits the Tell once: the cost is a repeat after a resume, never a lost Tell', async ($, on) => {
+  const w = world($, on)
+  w.door.failStore = true
+  w.door.answers = listing('t1')
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.send()
+  await w.clock.advance(30_000)
+  await start($)
+  await w.clock.advance(100)
+  expect(w.submitted.length).toBe(1)
+  expect(keptOf(w)).toBeUndefined()
+})
+
+/** A submit that starts, then the session ends (or is /cleared), then is rejected: the Tell goes back to the door's list. */
+async function endedThenRejected($: any, on: any, reason: string) {
+  const w = world($, on)
+  let release!: () => void
+  w.door.holdSubmit = new Promise<void>(r => { release = r })
+  w.door.answers = listing('t1')
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.send()
+  await w.clock.advance(1_000)
+  expect(keptOf(w)).toBeUndefined()
+  await $.session.end({ reason, sessionId: SESSION, resume: {} } as any)
+  w.door.failSubmits = 1
+  release()
+  await w.clock.advance(100)
+  return w
+}
+
+test('a submit rejected after the session ended leaves nothing kept, and a resume submits it again', async ($, on) => {
+  const w = await endedThenRejected($, on, 'other')
+  expect(keptOf(w)).toBeUndefined()
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.clock.advance(20_000)
+  expect(w.submitted.length).toBe(1)
+})
+
+test('the same after a /clear', async ($, on) => {
+  const w = await endedThenRejected($, on, 'clear')
+  expect(keptOf(w)).toBeUndefined()
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.clock.advance(20_000)
+  expect(w.submitted.length).toBe(1)
+})
+
+test('what is kept is bounded by age across tiroirs: past 1000 the oldest is dropped, whichever tiroir it is of', async ($, on) => {
+  const w = world($, on)
+  const OTHER = 'https://other.example.org'
+  const key2 = `--origin ${OTHER}`
+  w.kept.set(`doors:${SESSION}`, [{ flag: '--origin', value: ORIGIN }, { flag: '--origin', value: OTHER }])
+  // the oldest id is of the second tiroir; the first tiroir's ids come first in a file written by group
+  const at = await w.clock.now()
+  const seeded = Array.from({ length: 1000 }, (_, i) => i === 0 ? { id: 'oldest', door: key2, seq: 1, at } : { id: `n${i}`, door: i % 2 ? DOOR_KEY : key2, seq: i + 1, at })
+  w.kept.set(`delivered:${SESSION}`, seeded)
+  w.door.answers = listing(...seeded.map(s => s.id), 't1')
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.clock.advance(20_000)
+  expect(w.submitted.length).toBe(1)
+  await start($)
+  await w.clock.advance(100)
+  const ids = (w.kept.get(`delivered:${SESSION}`) as any[]).map(x => x.id)
+  expect(ids.length).toBe(1000)
+  expect(ids).not.toContain('oldest')
+  expect(ids).toContain('n1')
+  expect(ids).toContain('t1')
+})
+
+test('a resume during the Tell\'s own turn does not submit it again: it is kept from the moment that turn starts', async ($, on) => {
+  const w = world($, on)
+  let release!: () => void
+  w.door.holdSubmit = new Promise<void>(r => { release = r })
+  w.door.answers = listing('t1')
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.send()
+  await w.clock.advance(1_000)
+  await start($)      // the Tell's turn runs; its submit has not resolved
+  await w.clock.advance(100)
+  const e: any = (w.kept.get(`delivered:${SESSION}`) as any[])?.[0]
+  expect(e?.id).toBe('t1')
+  expect(typeof e?.at).toBe('number')
+  release()
+})
+
+test('writes of what is kept finish in the order they were called: a slow older snapshot never overwrites a newer one', async ($, on) => {
+  const w = world($, on)
+  let release!: () => void
+  w.door.holdStore = new Promise<void>(r => { release = r })
+  w.door.answers = listing('t1', 't2')
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.send()
+  await w.clock.advance(1_000)
+  await start($)      // t1 is kept: the first write is slow
+  await end($, 'completed')      // t2 goes in
+  await w.clock.advance(1_000)
+  await start($)      // t2 is kept: a newer snapshot, called while the first write is still open
+  release()
+  await w.clock.advance(1_000)
+  expect(keptOf(w)).toEqual({ [DOOR_KEY]: ['t1', 't2'] })
+})
+
+test('sixty kept Tells are all still kept and none is submitted again when a 61st is submitted: there is no small count cap', async ($, on) => {
+  const w = world($, on)
+  const old = Array.from({ length: 60 }, (_, i) => `old${i}`)
+  await armedBefore($, w, { [DOOR_KEY]: old })
+  w.door.answers = listing(...old, 't1')
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.clock.advance(20_000)
+  expect(w.submitted.length).toBe(1)
+  await start($)
+  await w.clock.advance(100)
+  expect(keptOf(w)).toEqual({ [DOOR_KEY]: [...old, 't1'] })
+  w.door.answers = listing(...old, 't1')
+  await w.clock.advance(30_000)
+  expect(w.submitted.length).toBe(1)      // none of the sixty was submitted again
 })
 
 test('the poll is given longer than the CLI\'s own 35 s call', async ($, on) => {

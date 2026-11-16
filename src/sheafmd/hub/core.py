@@ -963,6 +963,48 @@ class Hub:
             except Exception:
                 self.record_exception("status-failed")
 
+    def moved_remote(self, old: str, origin: str, to: str, by: str, landed: str):
+        """The page at `old` landed on the tiroir at `origin` as `to` (ticket 20): the Forward is written first, so the old address
+        answers from this moment, then the Tells on the page end as cancelled, what the hub keeps of it is dropped, the page's file
+        goes, and the tabs open on it are told where it went. The Write log keeps the page's lines: they are all that is left of
+        what was written here. Each step is on its own, as `moved_page`'s are: one that fails is a row in the diagnostics log."""
+        at = roots_mod.Address.parse(old)
+        root = self.roots.get(at.root)
+        self.forwards.add_remote(old, origin, to, by, landed)
+        for ending in (self.session_tells, self.waiting_tells):
+            try:
+                ending.end_page(old, "page moved")
+            except Exception:
+                self.record_exception("tell-end-failed", old)
+
+        def forget(store):
+            # Exactly this address: `forget_prefix` takes every address that starts with it, so the key goes under a name no
+            # other page has first.
+            gone = f"\0moved/{os.urandom(8).hex()}"
+            store.rename(old, gone)
+            store.forget_prefix(gone)
+        steps = [lambda: forget(self.docs), lambda: forget(self.seen), lambda: forget(self.member_seen),
+                 lambda: forget(self.member_opened), lambda: forget(self.shared_ids),
+                 lambda: (self._versions_of(root) or self.versions).forget(old),
+                 lambda: loose_mod.marks_gone(root.path, at.rel)]
+        for step in steps:
+            try:
+                step()
+            except Exception:
+                self.record_exception("move-store-failed", old)
+        with self._lock:
+            e = self.entries.pop(old, None)
+        if e is not None:
+            try:
+                e.live.forget()
+            except Exception:
+                self.record_exception("move-store-failed", old)
+            e.bus.publish("moved", {"doc": old, "to": to, "origin": origin})
+        try:
+            self.index.touch(old)
+        except Exception:
+            self.record_exception("status-failed")
+
     def open_index_stream(self, describe, accept=None):
         """A new index stream. The first one to open starts the board afresh, so a stream is
         told only what happens after it connects. Looking, starting the board and subscribing

@@ -191,6 +191,20 @@ def marks_moved(root_path: Path, old: str, new: str) -> None:
                 _put(root_path, name, out, f"{name[:-5]} marks")
 
 
+def marks_gone(root_path: Path, rel: str) -> None:
+    """The page at `rel` left the root (it went to another tiroir): its keep mark and its archived and seen times go with it, so
+    a page that comes to the name later is not born kept or archived."""
+    with state.file_locked("loose-keep.lock"):
+        held = marks(root_path)
+        tables = {name: times(root_path, name) for name in TIMES}
+        if rel in held:
+            state.write_text_private(Path(root_path) / KEEP, json.dumps(sorted(r for r in held if r != rel), indent=1,
+                                                                        ensure_ascii=False) + "\n", inside=True)
+        for name, table in tables.items():
+            if rel in table:
+                _put(root_path, name, {k: v for k, v in table.items() if k != rel}, f"{name[:-5]} marks")
+
+
 class Loose:
     """The registry of loose roots of a hub, over `loose.json`."""
 

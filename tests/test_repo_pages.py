@@ -459,3 +459,49 @@ def test_a_repo_named_in_another_case_is_the_same_repo_and_the_same_clone(hub_re
     assert got["clone"] == "present" and got["repo"] == REPO
     the_clone(hub_repos)
     assert hub_repos.hub.repos.owner_of(REPO, "docs/plan.md") == "bea"
+
+
+# ── after round two ──────────────────────────────────────────────────────────
+
+def test_a_report_the_door_refuses_still_renders_the_page_on_the_laptop_hub(tiroir, hub_repos, laptop, local, capsys):
+    hub_repos.hub.proxy = None                  # the token acts for nobody: the door refuses the report
+    page = laptop / "docs" / "plan.md"
+    code, out, err = run(capsys, page)
+    assert code == 0 and local == [str(page)]
+    assert "render report" in err
+
+
+def test_a_folder_that_looks_like_a_git_option_is_never_read_as_one(hub_repos):
+    report(hub_repos)
+    bad, got = report(hub_repos, path="--stdin/x.md")
+    assert not bad, got
+    assert got["widened"] in (None, "--stdin")      # git was told it is a folder, not an option
+    assert sh(the_clone(hub_repos), "status", "--porcelain") == ""
+
+
+def test_a_page_that_is_not_in_the_commit_and_a_commit_that_is_unknown_leave_no_owner_record(hub_repos):
+    report(hub_repos)
+    bad, got = report(hub_repos, who="cal-claude", path="docs/ghost.md")
+    assert not bad, got
+    assert hub_repos.hub.repos.owner_of(REPO, "docs/ghost.md") is None
+    bad, got = report(hub_repos, who="cal-claude", path="notes/idea.md", commit="a" * 40)
+    assert got["commit_known"] is False
+    assert hub_repos.hub.repos.owner_of(REPO, "notes/idea.md") is None
+    report(hub_repos, who="bea-claude", path="notes/idea.md")
+    assert hub_repos.hub.repos.owner_of(REPO, "notes/idea.md") == "bea"
+
+
+def test_a_private_root_that_cannot_be_looked_at_blocks_the_clone_rather_than_letting_it_through(
+        hub_repos, tmp_path, origin, monkeypatch):
+    private_root_of(hub_repos, BEA, tmp_path, origin)
+    real = repos_mod.Repos._git
+
+    def hang(self, at, *args, **k):
+        if args[:2] == ("remote", "get-url"):
+            return subprocess.CompletedProcess(args, 124, "", "timed out")
+        return real(self, at, *args, **k)
+
+    monkeypatch.setattr(repos_mod.Repos, "_git", hang)
+    bad, got = report(hub_repos, who="cal-claude")
+    assert not bad, got
+    assert got["clone"] == "private-root" and not list(clones(hub_repos).glob("*/*"))

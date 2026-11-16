@@ -372,7 +372,8 @@ def report_page(md: Path, top: Path, origin: str, token: str, args, out, err, en
         err(f"sheaf: {e} The render report was dropped, not queued; rendering {md} on this laptop.")
         return None
     if bad:
-        raise SendError(f"{got} Nothing was sent.")
+        err(f"sheaf: the render report of {path} was refused: {got} Rendering {md} on this laptop.")
+        return None
     clone = got.get("clone")
     if clone == repos_mod.NO_APP:
         err(f"sheaf: the tiroir's GitHub App cannot reach {repo}, so it cannot clone it and {md} renders on this laptop "

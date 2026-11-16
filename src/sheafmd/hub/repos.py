@@ -143,6 +143,8 @@ class Repos:
         """Whether `repo` is the repo of a private root of this tiroir: the root's `origin` names it."""
         for folder in private_roots:
             r = self._git(folder, "remote", "get-url", "origin", seconds=10)
+            if r.returncode == 124:             # it could not be looked at: it may be the repo, and a clone cannot be taken back
+                return True
             if r.returncode == 0 and _normal(r.stdout) in (repo.lower(), _normal(self.remote_url(repo))):
                 return True
         return False
@@ -155,7 +157,7 @@ class Repos:
                       str(dest), token=token)
         if r.returncode != 0:
             return f"the clone of {repo} failed: {r.stderr.strip()[-300:] or 'git gave no reason'}"
-        r = self._git(dest, "sparse-checkout", "set", "--cone", *([folder] if folder else []), token=token)
+        r = self._git(dest, "sparse-checkout", "set", "--cone", "--", *([folder] if folder else []), token=token)
         if r.returncode != 0:
             shutil.rmtree(dest, ignore_errors=True)         # a clone without its sparse set is none: the next report makes it again
             return f"the sparse set of {repo} could not be made: {r.stderr.strip()[-300:]}"
@@ -168,7 +170,7 @@ class Repos:
         listed = self._git(dest, "sparse-checkout", "list")
         if listed.returncode == 0 and any(folder == h or folder.startswith(h + "/") for h in listed.stdout.split("\n") if h):
             return False
-        return self._git(dest, "sparse-checkout", "add", folder, token=token).returncode == 0
+        return self._git(dest, "sparse-checkout", "add", "--", folder, token=token).returncode == 0
 
     def _knows(self, dest: Path, commit: str, token: str | None) -> bool:
         """Whether the clone's branch holds `commit`, bringing the clone up to the remote's branch first when it does
@@ -179,6 +181,11 @@ class Repos:
             return True
         self._git(dest, "pull", "-q", "--ff-only", "--no-tags", token=token)     # the files come with the commit
         return on_branch()
+
+    def _holds(self, dest: Path, commit: str, path: str) -> bool:
+        """Whether the page is in the tree of `commit`: no record is made for a page that is not there."""
+        r = self._git(dest, "ls-tree", "--name-only", commit, "--", path, seconds=30)
+        return r.returncode == 0 and r.stdout.strip() == path
 
     # ── the report ───────────────────────────────────────────────────────────
     def report(self, member: str, repo, path, commit, private_roots=(), declared=None) -> dict:
@@ -204,6 +211,9 @@ class Repos:
             else:
                 widened = folder if token is not None and self._widen(dest, folder, token) else None
             known = self._knows(dest, commit, token)
+            if not known or not self._holds(dest, commit, path):
+                return {"repo": repo, "path": path, "clone": MADE if made else PRESENT, "widened": widened,
+                        "commit_known": known, "owner": None}
             data = self._read()
             row = data.setdefault(repo, {}).get(path)
             owner = row["owner"] if isinstance(row, dict) else member

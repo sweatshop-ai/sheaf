@@ -1073,26 +1073,44 @@ def test_a_git_that_cannot_be_run_reads_as_no_version(monkeypatch):
         repos_mod._git_version.cache_clear()
 
 
+def ask(repos, monkeypatch, commit):
+    """A report on the request path for `commit`; the repo's thread is not what is looked at here."""
+    monkeypatch.setattr(repos, "_enqueue", lambda *a, **k: None)
+    return repos.report("bea", REPO, "docs/plan.md", commit)
+
+
 @pytest.mark.parametrize("version", [(2, 43), (2, 0), (1, 99), None])
-def test_below_2_44_or_unknown_the_look_at_the_clone_is_not_made_and_nothing_fetches(hub_repos, tmp_path, monkeypatch, version):
+def test_below_2_44_or_unknown_the_request_path_makes_no_look_and_nothing_fetches(hub_repos, tmp_path, monkeypatch, version):
     report(hub_repos)
     log = count_fetches(the_clone(hub_repos), tmp_path)
     repos = hub_repos.hub.repos
     head = sh(the_clone(hub_repos), "rev-parse", "origin/HEAD").strip()    # a commit the clone does hold
     monkeypatch.setattr(repos_mod, "_git_version", lambda: version)
     seen = look_calls(monkeypatch)
-    assert repos._on_branch(the_clone(hub_repos), head) is False       # answers as a look that found nothing
+    answer = ask(repos, monkeypatch, head)
+    assert answer["clone"] == "ok" and answer["commit_known"] is False     # as a look that found nothing
     assert seen == []
     assert not log.exists()
 
 
 @pytest.mark.parametrize("version", [(2, 44), (2, 53), (3, 0)])
-def test_from_2_44_the_look_at_the_clone_is_made_as_before(hub_repos, monkeypatch, version):
+def test_from_2_44_the_request_path_looks_at_the_clone_as_before(hub_repos, monkeypatch, version):
     report(hub_repos)
     repos = hub_repos.hub.repos
     head = sh(the_clone(hub_repos), "rev-parse", "origin/HEAD").strip()
     monkeypatch.setattr(repos_mod, "_git_version", lambda: version)
     seen = look_calls(monkeypatch)
-    assert repos._on_branch(the_clone(hub_repos), head) is True
+    assert ask(repos, monkeypatch, head)["commit_known"] is True
     assert seen == [("branch", "-r", "--contains", head)]
-    assert repos._on_branch(the_clone(hub_repos), "a" * 40) is False
+    assert ask(repos, monkeypatch, "a" * 40)["commit_known"] is False
+
+
+def test_on_an_old_git_the_repos_own_thread_still_looks_and_records_the_page(hub_repos, monkeypatch):
+    """The thread may fetch, so the guard is not its business: a page of a commit the clone holds still gets its record."""
+    report(hub_repos)
+    repos = hub_repos.hub.repos
+    commit = sh(the_clone(hub_repos), "rev-parse", "origin/HEAD").strip()
+    monkeypatch.setattr(repos_mod, "_git_version", lambda: (2, 43))
+    seen = look_calls(monkeypatch)
+    assert repos._knows(the_clone(hub_repos), REPO, commit, None) is True
+    assert seen == [("branch", "-r", "--contains", commit)]

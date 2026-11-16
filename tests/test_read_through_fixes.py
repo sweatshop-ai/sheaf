@@ -204,3 +204,9 @@ def test_a_client_error_sentence_never_reaches_the_agency_log_and_a_body_that_is
         speaks(agency, json_env(status=403, body=body))
         assert agency.get("/_/doc?doc=Clients/acme/work/x.md", member=AG_ALICE).status == 403, body
     assert "secret-merger" not in agency_log(agency)
+
+
+def test_a_client_row_never_offers_move_here():
+    row = {"doc": "work/a.md", "url": "/work/a.md", "folder": "work", "root": "work", "title": "A", "can_move": True, "own": True}
+    [out] = readthrough.fold_rows("acme", [row])
+    assert out["can_move"] is False and out["own"] is False

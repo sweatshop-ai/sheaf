@@ -127,6 +127,13 @@ class LiveDocument:
                 doc._lock.release()
         return Held()
 
+    @contextlib.contextmanager
+    def exclusive(self):
+        """The page's writer lock, the one a save, a comment and a render take: nothing writes the file while it is held, so a
+        move of the file (Delete into the trash) comes before a write or after it, never between its read and its write."""
+        with self._hold(), self._held():
+            yield
+
     def _after_write(self):
         """Test seam, a no-op: a save or a comment calls it after its write and before its
         render, with the lock held and the file lock released."""

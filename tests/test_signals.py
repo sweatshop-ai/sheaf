@@ -191,7 +191,9 @@ def test_a_process_that_has_ended_is_said_as_os_kill_says_it(calls, monkeypatch)
 
 ROOT = Path(__file__).resolve().parent.parent
 RAW = {"kill", "killpg", "waitpid"}
-GUARD = {ROOT / "src" / "sheafmd" / "signals.py", Path(__file__).resolve()}    # the guard, and this file's real ones
+TESTS = ROOT / "tests"
+GUARD = {ROOT / "src" / "sheafmd" / "signals.py", Path(__file__).resolve(),         # the guard, and this file's real ones
+         TESTS / "conftest.py", TESTS / "test_real_hub_untouched.py"}               # the suite's own guard on `os.kill`, and its test
 
 
 def raw_calls(path: Path):

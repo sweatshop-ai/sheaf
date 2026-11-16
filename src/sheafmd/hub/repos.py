@@ -45,6 +45,7 @@ import threading
 import time
 from pathlib import Path
 
+from .. import diagnostics
 from ..atomic import write_text_atomic
 from . import proxy, visibility
 
@@ -55,6 +56,7 @@ FETCH_SECONDS = 10.0        # the one fetch a report whose commit the clone lack
 LOOK_SECONDS = 5.0          # a look at what the clone holds, on the request path
 MAX_QUEUED = 64             # reports waiting for a repo's thread; a report past it is answered and not queued
 SLEEP_DAYS = 30             # a clone nobody reported a page of for this long sleeps
+SLEEP_WAIT = 60.0           # how long one round of `sleep_idle` waits for the clones' threads; the rest finish behind it
 GITHUB_HOSTS = ("github.com", "ssh.github.com", "www.github.com")
 
 NO_CLONES = "none"
@@ -165,6 +167,7 @@ class Repos:
         self._fetched: dict[str, float] = {}    # repo -> when a fetch for an unknown commit last started
         self._hosts: dict[str, str | None] = {}  # ssh host -> the name ssh -G gives it
         self.FETCH_EVERY = 30.0
+        self.SLEEP_WAIT = SLEEP_WAIT
         self.clock = time.time                  # the sleep of a clone counts in this clock's days; a test sets it
         self.ssh_hostname = ssh_hostname
         version = _git_version()
@@ -238,10 +241,13 @@ class Repos:
                 t = threading.Thread(target=self._sleep_one, args=(repo, dest, slept), name=f"repos-{repo}", daemon=True)
                 self._threads.add(t)
             t.start()
-            claimed.append(t)
-        for t in claimed:
-            t.join()
-        return slept
+            claimed.append((repo, t))
+        end = time.monotonic() + self.SLEEP_WAIT
+        for repo, t in claimed:
+            t.join(max(0.0, end - time.monotonic()))
+            if t.is_alive():                    # left to finish in its thread: the next round skips the repo while it works
+                diagnostics.record("hub", "clone-sleep-slow", repo=repo)
+        return list(slept)
 
     def _sleep_one(self, repo: str, dest: Path, slept: list):
         """The repo's thread, for one clone going to sleep; then it settles whatever reports came meanwhile (its `_wake`

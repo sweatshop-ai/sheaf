@@ -14,7 +14,7 @@ from test_share import tick
 from test_write_log import agents  # noqa: F401  (fixture)
 
 from sheafmd import config
-from sheafmd.hub import archive, loose
+from sheafmd.hub import archive, loose, state
 from sheafmd.hub import roots as roots_mod
 
 DAY = 86400
@@ -375,3 +375,35 @@ def test_a_registered_root_page_is_no_ones_to_archive_or_keep_from_the_row(agent
     got = agents.get("/_/mount?sheaf=1", member=BEA).json()["sheaf"]
     assert [r["own"] for r in got["rows"] if r["doc"].startswith("rectoversos/")] == [False]
     assert agents.post("/_/archive", {"doc": "rectoversos/acme/blog/2026-10-28-plan.md"}, member=BEA).status == 404
+
+
+def test_a_keep_that_comes_between_the_sweeps_read_and_its_move_leaves_the_page_not_archived(agents, clock, monkeypatch):
+    doc = made(agents, "bea-claude")
+    sweep(agents)
+    clock.now += 31 * DAY
+    root, rel = root_of(agents, doc), doc.split("/", 1)[1]
+    kept, real_due = [], archive.due
+
+    def due(*args, **kw):
+        out = real_due(*args, **kw)
+        racer = threading.Thread(target=lambda: agents.hub.archive.keep(root, rel, True, 0.0))
+        racer.start()
+        racer.join(0.3)                 # a Keep that can come in between the read and the move would be done by now
+        kept.append(racer)
+        return out
+    monkeypatch.setattr(archive, "due", due)
+    sweep(agents)
+    kept[0].join(5)
+    assert not kept[0].is_alive()
+    assert docs(agents, view="archived") == [] and docs(agents) == [doc]
+    assert rel in loose.marks(root.path)
+
+
+def test_archive_now_on_a_kept_page_is_refused_with_a_line_and_never_archives_it(agents, clock):
+    doc = made(agents, "bea-claude", keep=True)
+    got = agents.post("/_/archive", {"doc": doc}, member=BEA)
+    assert got.status == 409 and "kept" in got.text and "Keep" in got.text
+    assert docs(agents) == [doc] and docs(agents, view="archived") == []
+    assert agents.post("/_/keep", {"doc": doc, "on": False}, member=BEA).status == 200
+    assert agents.post("/_/archive", {"doc": doc}, member=BEA).status == 200
+    assert docs(agents, view="archived") == [doc]

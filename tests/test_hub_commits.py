@@ -1805,3 +1805,60 @@ def test_a_reset_between_the_pull_and_the_push_is_not_forced_over_the_remote(gua
     assert guarded.hub.commits.settle()
     assert git(remote, "log", "-1", "--format=%s", "main").strip() == "a README"       # not forced over
     assert rows("push-failed")
+
+
+NEW = "rectoversos/acme/blog/2026-10-30-plan.md"
+
+
+def renamed_on_github(tmp_path, remote, old: str, new: str):
+    """`old` renamed to `new` away from the box and pushed to `remote`, as a PR merged on GitHub would."""
+    merged_on_github(tmp_path, remote, {"README.md": "# The rectoversos\n"}, "a README")    # makes the away clone
+    away = tmp_path / "github"
+    git(away, "mv", old, new)
+    git(away, "commit", "-q", "-m", "rename the plan")
+    git(away, "push", "-q", "origin", "HEAD:main")
+
+
+def test_a_rename_that_arrives_on_a_pull_writes_a_forward_and_carries_the_versions(box, rectoversos, remote, tmp_path):
+    """Ticket 17: a repo page moves only by git; when a pull shows the rename, the hub writes a Forward from the old
+    address to the new one, and the versions kept under the old address are the new page's."""
+    edit(box, rectoversos)
+    pushed(box, remote)
+    root = box.hub.roots.get("rectoversos")
+    versions = box.hub._versions_of(root) or box.hub.versions
+    kept = md_hash((rectoversos / "acme" / "blog" / "2026-10-28-plan.md").read_text(encoding="utf-8"))
+    assert versions.get(DOC, kept) is not None
+    renamed_on_github(tmp_path, remote, "acme/blog/2026-10-28-plan.md", "acme/blog/2026-10-30-plan.md")
+    poll_now(box, rectoversos)
+    assert (rectoversos / "acme" / "blog" / "2026-10-30-plan.md").exists()
+    assert box.hub.forwards.follow(DOC) == NEW
+    assert versions.get(NEW, kept) is not None and versions.get(DOC, kept) is None
+    assert box.hub.forwards.entry(DOC)["by"] == "git"
+
+
+def test_a_pull_without_a_rename_writes_no_forward(box, rectoversos, remote, tmp_path):
+    merged_on_github(tmp_path, remote, {"README.md": "# The rectoversos\n"}, "a README")
+    poll_now(box, rectoversos)
+    assert box.hub.forwards.snapshot() == {}
+
+
+def test_a_rename_of_a_file_that_is_not_a_page_writes_no_forward(box, rectoversos, remote, tmp_path):
+    merged_on_github(tmp_path, remote, {"notes.txt": "x\n"}, "a note")
+    away = tmp_path / "github"
+    git(away, "mv", "notes.txt", "notes-2.txt")
+    git(away, "commit", "-q", "-m", "rename the note")
+    git(away, "push", "-q", "origin", "HEAD:main")
+    poll_now(box, rectoversos)
+    assert box.hub.forwards.snapshot() == {}
+
+
+def test_a_rename_in_a_pull_the_hub_refuses_writes_no_forward(box, rectoversos, remote, tmp_path):
+    (rectoversos / "projects.toml").write_text(ONLY_BEA + "# the person's own change\n", encoding="utf-8")
+    renamed_on_github(tmp_path, remote, "acme/blog/2026-10-28-plan.md", "acme/blog/2026-10-30-plan.md")
+    away = tmp_path / "github"
+    (away / "projects.toml").write_text(ONLY_BEA, encoding="utf-8")
+    git(away, "commit", "-qam", "Cal leaves")
+    git(away, "push", "-q", "origin", "HEAD:main")
+    poll_now(box, rectoversos)
+    assert (rectoversos / "acme" / "blog" / "2026-10-28-plan.md").exists()
+    assert box.hub.forwards.snapshot() == {}

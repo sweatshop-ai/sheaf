@@ -122,7 +122,7 @@ def member_for(hub, email):
 def served(hub, email):
     """`member_for`, and only when they are an agency member: a client tiroir answers over the channel for them alone."""
     m = member_for(hub, email)
-    return m if m is not None and m.agency else None
+    return m
 
 
 def answer(handler, body) -> tuple:

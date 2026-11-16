@@ -33,3 +33,4 @@ color:inherit;background:transparent;border:1px solid var(--ss-line);border-radi
 .sheaf-sheaf .sheaf-back{padding:3px 10px;border:1px solid var(--ss-line);border-radius:999px}
 .sheaf-sheaf .sheaf-crumb{color:var(--ss-muted)}
 .sheaf-sheaf .sheaf-doc-body{flex:1;min-height:0;position:relative}
+.sheaf-sheaf .sheaf-session-link{font:inherit;color:var(--ss-on);background:none;border:0;padding:0;text-decoration:underline;cursor:pointer}

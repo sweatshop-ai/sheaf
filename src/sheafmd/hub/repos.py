@@ -61,7 +61,6 @@ GITHUB_HOSTS = ("github.com", "ssh.github.com", "www.github.com")
 
 NO_CLONES = "none"
 OK, PRIVATE_ROOT, NO_APP, NOT_CLONED, CLONING = "ok", "private-root", "no-app", "not-cloned", "cloning"
-REFUSED = "refused"         # `refusal` only: a clone failed since the last report, which a report would raise as `Refused`
 MOVED = "moved"             # the clone's root went to another tiroir: its answer carries the new origin (`moved_to`)
 NO_LAZY_FETCH_FROM = (2, 44)    # the git that honours GIT_NO_LAZY_FETCH; an older one ignores it without an error
 
@@ -526,15 +525,12 @@ class Repos:
         return self.provider.install_url(_clean_repo(repo))
 
     def refusal(self, member: str, repo, private_roots=()) -> str | None:
-        """What `report` would refuse for `repo`, with nothing written: `private-root`, `not-cloned`, `refused` (a clone failed
-        since the last report) or `no-app`; None when it would not refuse. A repo that moved is not looked at for the last two:
-        its clone is held. Nothing here records, dates, queues or pops anything."""
+        """What `report` would refuse for `repo`, with nothing written: `private-root`, `not-cloned` or `no-app`; None when it
+        would not refuse. A clone that failed before is not looked at: the report that follows raises it, once, and starts the
+        clone again. Nothing here records, dates, queues or pops anything."""
         repo = _clean_repo(repo)
         if (private := self._private(member, repo, private_roots)) is not None:
             return private
-        with self._guard:
-            if self._failed.get(repo):
-                return REFUSED
         if not (self.clone_dir(repo) / ".git").exists() and repo not in self._queues and self.provider.token(repo) is None:
             return NO_APP
         return None

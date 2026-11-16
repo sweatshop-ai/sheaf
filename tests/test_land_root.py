@@ -40,7 +40,7 @@ class FakeRepos:
     def refusal(self, member, repo, privates=()):
         a = self.answer
         if isinstance(a, Exception):
-            return repos_mod.REFUSED
+            return None
         return a["clone"] if a["clone"] in (repos_mod.NO_APP, repos_mod.PRIVATE_ROOT, repos_mod.NOT_CLONED) else None
 
     def unmove(self, repo):
@@ -218,11 +218,11 @@ def test_a_refusal_of_the_whole_root_leaves_it_moved(clone, state):
     assert status == 409 and h.repos.unmoved == [] and h.repos.moved == THERE
 
 
-def test_a_report_the_repos_refuse_leaves_it_moved(clone):
+def test_a_report_the_repos_refuse_after_the_unmove_is_answered_refused_and_the_root_is_back(clone):
     h = moved_hub(clone)
     h.repos.answer = repos_mod.Refused("clone failed")
     assert incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None)), peer=THERE) == (409, {"why": "refused"})
-    assert h.repos.unmoved == [] and h.repos.moved == THERE
+    assert h.repos.unmoved == ["o/r"]           # a clone that failed before is settled by this report, as for any root: it is tried again
 
 
 def test_no_page_with_a_known_owner_unmoves_nothing(clone):

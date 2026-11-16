@@ -84,6 +84,11 @@ class Moves:
         with self._lock:
             data = self._read()
             row = data.get(repo)
+            if isinstance(row, dict):
+                lost = [p for p in row.get("sent", []) if not row.get("hashes", {}).get(p) and p not in row.get("forwarded", [])]
+                if lost:        # confirmed without a hash (a row from before the hash was kept): it goes again
+                    row["sent"] = [p for p in row["sent"] if p not in lost]
+                    self._write(data)
             if isinstance(row, dict) and (row.get("to") == to or row.get("sent")):
                 return row
             data[repo] = {"to": to, "id": id, "sent": [], "hashes": {}, "forwarded": [], "held": {}}

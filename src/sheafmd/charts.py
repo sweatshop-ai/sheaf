@@ -3,7 +3,7 @@ sheafmd.charts — the page's own diagrams: chart fences and mermaid fences to i
 
 Why this exists
 ---------------
-A sheaf page is one self-contained file: no script from a CDN, no image fetched at
+A rectoverso page is one self-contained file: no script from a CDN, no image fetched at
 view time. So a ```chart fence (a small JSON spec: bar, hbar or line, with bands and
 error bars) is drawn here as plain SVG with no library, and a ```mermaid fence goes
 through the mermaid CLI (mmdc) once, is cached by its source, and is inlined.

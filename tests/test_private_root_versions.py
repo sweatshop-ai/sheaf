@@ -1,4 +1,4 @@
-"""The versions store follows the file (SPEC 7.4, 9.11): a private sheaf's versions are kept in the private repo under the
+"""The versions store follows the file (SPEC 7.4, 9.11): a private rectoverso's versions are kept in the private repo under the
 key its commit uses, chosen again at each call, so the list repo never holds one."""
 import pytest
 from test_private_root_file import NAME, OPEN, PRIVATE_TEXT, address, hub_of, untouched
@@ -56,7 +56,7 @@ def test_versions_store_follows_file_root(two):
     git(two.list_repo, "commit", "-q", "-m", "gone")
     git(two.list_repo, "push", "-q", "origin", "HEAD:main")
     seen = untouched(two)
-    (two.private_repo / NAME).write_text(PRIVATE_TEXT, encoding="utf-8")   # a private sheaf at the same name
+    (two.private_repo / NAME).write_text(PRIVATE_TEXT, encoding="utf-8")   # a private rectoverso at the same name
     live._remember("# post\n\nPrivate edit, through the old handle.\n")
     edit(hub, NAME, "Private edit.")
     hub.tick()                                                 # the sweep of each repo's versions

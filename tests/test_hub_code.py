@@ -1,5 +1,5 @@
-"""The sign-in code (SPEC 9.13, tt-tiroir#60): a member asks for a code in a sheaf's Work on this, and the laptop
-client spends it on the two routes of 9.12, the transcript and the fork, for that one sheaf, once each, in order,
+"""The sign-in code (SPEC 9.13, tt-tiroir#60): a member asks for a code in a rectoverso's Work on this, and the laptop
+client spends it on the two routes of 9.12, the transcript and the fork, for that one rectoverso, once each, in order,
 within 10 minutes. The verifier hands the hub the code's sha256 as `X-Sheaf-Code` and no member header; the hub
 alone knows whose it is. Through the handler in proxy mode, on the fixtures of test_hub_work.py."""
 import hashlib
@@ -17,7 +17,7 @@ from sheafmd.hub import the_list
 from sheafmd.hub import work as work_mod
 
 NO_GOOD = "This sign-in code is no good: get a new one from Work on this."
-NOT_OPEN = "This sheaf is not open to you with this code: get a code from this sheaf's Work on this."
+NOT_OPEN = "This rectoverso is not open to you with this code: get a code from this rectoverso's Work on this."
 OTHER = "thinkingtoo/tiroir/2026-10-29-other.md"
 
 
@@ -254,7 +254,7 @@ def test_a_code_of_a_member_taken_out_of_the_members_is_no_good(team, box):
 
 
 def test_a_code_acts_as_its_member_on_visibility(team, box, work):
-    """A code of Hans's on a sheaf that is since Thierry's alone is refused as Hans's request is."""
+    """A code of Hans's on a rectoverso that is since Thierry's alone is refused as Hans's request is."""
     code = code_of(team)
     put(team, work, DOC, SHEAF.replace("sources: [issue:thinkingtoo/tt-tiroir#8]", "sources: [library:doc-1]"))
     assert fetch(team, code).status == 404
@@ -330,7 +330,7 @@ def test_a_post_with_an_id_already_listed_is_409_and_ends_the_code(team, box, wo
     fetch(team, code)
     before = (work / DOC).read_text(encoding="utf-8")
     got = report(team, code, id=OLDER)
-    assert got.status == 409 and got.json()["error"] == "That session is already listed on this sheaf"
+    assert got.status == 409 and got.json()["error"] == "That session is already listed on this rectoverso"
     assert (work / DOC).read_text(encoding="utf-8") == before
     assert report(team, code).status == 401
 

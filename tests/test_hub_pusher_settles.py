@@ -2,14 +2,14 @@
 the test's own, never a row in the state of the test that runs next."""
 import time
 
-from test_hub_commits import box, edit, remote, rows, sheaves     # noqa: F401  (the fixtures and helpers of the hub's commit tests)
+from test_hub_commits import box, edit, remote, rows, rectoversos     # noqa: F401  (the fixtures and helpers of the hub's commit tests)
 
 # The second test reads what the first left: a slice of the suite in CI keeps the file whole (SHEAF_TEST_SLICE,
 # tests/conftest.py).
 IN_ORDER = True
 
 
-def test_a_test_that_ends_with_a_push_due_leaves_it_to_its_own_teardown(box, sheaves, remote, tmp_path, monkeypatch):
+def test_a_test_that_ends_with_a_push_due_leaves_it_to_its_own_teardown(box, rectoversos, remote, tmp_path, monkeypatch):
     """First of a pair (the next test reads the log): a failing push still running when the test ends."""
     from sheafmd.hub import commits
     real = commits._git
@@ -21,7 +21,7 @@ def test_a_test_that_ends_with_a_push_due_leaves_it_to_its_own_teardown(box, she
 
     monkeypatch.setattr(commits, "_git", slow_fetch)
     remote.rename(tmp_path / "away.git")            # the push will fail
-    edit(box, sheaves)                              # no settle: the pusher is in its fetch as the test returns
+    edit(box, rectoversos)                              # no settle: the pusher is in its fetch as the test returns
 
 
 def test_a_push_a_test_before_left_due_writes_no_row_into_this_one(box):

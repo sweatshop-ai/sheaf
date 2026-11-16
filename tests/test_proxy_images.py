@@ -582,7 +582,7 @@ def test_a_build_that_failed_after_projects_toml_came_is_tried_again_at_the_next
 
 @pytest.fixture
 def outsider(front, granted, work):
-    """Cal, `cal`, holds `work` too and is in none of its projects (8.12): an owner of a sheaf there is no member."""
+    """Cal, `cal`, holds `work` too and is in none of its projects (8.12): an owner of a rectoverso there is no member."""
     import pwd
     from helpers import BEA, CAL, FRONT
     from sheafmd.hub import proxy
@@ -611,7 +611,7 @@ def owned_page(front, work, rel, owner, src, member=None, visibility="project"):
 
 def test_a_sheaf_with_an_owner_outside_its_project_embeds_none_of_the_projects_images(front, plan, outsider):
     """`projects.toml` is the one source of who is in a project (8.12, #81): a non-member never receives a project's
-    content, even as the owner of a sheaf in it. Its page is one render for every reader, so no reader gets them."""
+    content, even as the owner of a rectoverso in it. Its page is one render for every reader, so no reader gets them."""
     from helpers import CAL
     for member in (None, CAL):
         html, share = owned_page(front, outsider, "acme/blog/pic.md", "cal", "fig.png", member=member)
@@ -666,7 +666,7 @@ def test_an_entry_whose_root_was_forgotten_is_built_again_once_not_at_every_catc
 
 
 def test_a_link_sheaf_judges_its_owners_by_the_project_of_its_file_too(front, plan, outsider):
-    """A link in a project Cal is in, to a sheaf of one he is not, that he owns: he opens it (8.12), and its images
+    """A link in a project Cal is in, to a rectoverso of one he is not, that he owns: he opens it (8.12), and its images
     are judged by where its file is, so its owners are judged there as well, as `granted` judges both (#81)."""
     from helpers import CAL
     (outsider / "projects.toml").write_text(
@@ -704,8 +704,8 @@ def test_a_page_built_with_its_images_drops_them_when_its_owners_can_no_longer_b
                          ids=["not-toml", "invalid"])
 def test_an_invalid_projects_toml_leaves_out_the_projects_images_of_a_sheaf_with_an_owner(front, plan, outsider,
                                                                                           bad):
-    """A file the hub cannot read names nobody, so every owner counts as one it does not name (#81, #91): a sheaf
-    with an owner embeds none of the project's images. Above-project images and the sheaf's own `private/<short>/`
+    """A file the hub cannot read names nobody, so every owner counts as one it does not name (#81, #91): a rectoverso
+    with an owner embeds none of the project's images. Above-project images and the rectoverso's own `private/<short>/`
     ones stay."""
     png(outsider / "acme" / "blog" / "private" / "bea" / "seal.png")
     png(outsider / "logo.png")

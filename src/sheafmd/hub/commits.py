@@ -151,7 +151,7 @@ def _git(root: Path, *args, author=None, seconds=GIT_SECONDS, given=None, childr
 
 
 def blame(file: Path, text: str, lines, seconds: float = BLAME_SECONDS) -> dict:
-    """{0-based line: (author's name, author's e-mail, epoch seconds)} of each of `lines` of `text`, the sheaf whose
+    """{0-based line: (author's name, author's e-mail, epoch seconds)} of each of `lines` of `text`, the rectoverso whose
     file is `file`, by the commit that last changed that line (8.11): its tick, on the list (`tick: <path>`) or in the
     page (`edit: <path>`) (9.10, #110). Blamed on `text` itself, so the lines are the ones read. A line no commit holds
     (a root that is no git work tree, a write not committed yet) is left out."""
@@ -345,7 +345,7 @@ class Commits:
     def saved(self, root, rel: str, author: Author, what: str, gone: str | None = None, key: str | None = None):
         """`rel`, the file of a document of `root` (a roots.Root), was written by `author`: commit it when the
         root commits. `what` names the write in the subject (`edit`, `comment`). `key` is the document's own path,
-        its address in the root, when that is not `rel` (a sheaf's name, 9.11), which names its versions folder.
+        its address in the root, when that is not `rel` (a rectoverso's name, 9.11), which names its versions folder.
         `gone` is the path the file was moved from (9.11): the commit is `move: <gone> -> <rel>`, and stages the
         file's going from there with its coming here. Never raises: a commit that fails is a diagnostics row, and
         the write stands."""

@@ -1,5 +1,5 @@
-"""`projects.toml` grants (SPEC 8.12, #44): in proxy mode a member opens the shared sheaves of a `<client>/<project>`
-folder only when that project's `members` hold their `short`; an owner always opens their own sheaf. A project the
+"""`projects.toml` grants (SPEC 8.12, #44): in proxy mode a member opens the shared rectoversos of a `<client>/<project>`
+folder only when that project's `members` hold their `short`; an owner always opens their own rectoverso. A project the
 file does not name, and every project of a root whose file the hub cannot read, is open to its owners alone."""
 import os
 import pwd
@@ -186,7 +186,7 @@ def test_a_link_in_a_granted_project_reaches_no_sheaf_of_a_project_that_is_not(t
 
 def test_a_sheaf_its_owner_keeps_outside_their_projects_is_never_told_gone_for_a_bad_moment(team, work):
     """Opus P2 (PR 51): `gone` ends the page for good; it is the answer to a change of `projects.toml` alone, never
-    to a file of the sheaf that cannot be read for a moment."""
+    to a file of the rectoverso that cannot be read for a moment."""
     rel = f"thinkingtoo/tiroir/private/hans/{NAME}"
     put(team, work, rel, HANS_OWN)
     stream = team.get(f"/_/live?doc=work/{SHARED}", member=HANS).stream

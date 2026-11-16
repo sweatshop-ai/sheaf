@@ -1028,7 +1028,7 @@ def _foreign_comments(content: str) -> list:
     that paragraph left a copy of it on its own line, a new hidden comment in the file
     every time.
 
-    A sheaf comment is one `comments.parse` accepted. One it refused (no id, an
+    A rectoverso comment is one `comments.parse` accepted. One it refused (no id, an
     unknown status, a repeated key or id) has no anchor in the page and is nobody's
     to rewrite, so it is kept byte for byte like a comment from another tool; the
     person who must fix it is told by `sheaf comments`, and an edit of the
@@ -1463,7 +1463,7 @@ def _convert_with_comments(block, fragment: str, strays=None):
     by_id = {c.id: c for c in parsed}
     # Every other HTML comment in the block (another review tool's, a toc
     # directive, an internal note) is not sheaf's to change: it gets the same
-    # placeholder trip as a sheaf comment, matched on its exact text.
+    # placeholder trip as a rectoverso comment, matched on its exact text.
     foreign = _foreign_comments(block.content)
     unused = list(foreign)
     tokens, placed = {}, {}
@@ -1540,7 +1540,7 @@ def _convert_with_comments(block, fragment: str, strays=None):
             unused.remove(raw)
             stray.append(raw)
     if not RAW_COMMENT_RE.sub("", new_md).strip():
-        # The block is gone: every sheaf comment is an orphan, every other comment
+        # The block is gone: every rectoverso comment is an orphan, every other comment
         # stays where the block was.
         return "\n\n".join(foreign), parsed
     if stray:

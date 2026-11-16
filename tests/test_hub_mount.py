@@ -1,4 +1,4 @@
-"""The routes the front's loader mounts a sheaf from (#116 step 2): `/_/mount?doc=` answers the page as JSON
+"""The routes the front's loader mounts a rectoverso from (#116 step 2): `/_/mount?doc=` answers the page as JSON
 {title, html, config, css, toc, version, assets} with the body already through the MOUNT sanitiser, `/_/mount.js` and
 `/_/mount.css` are the hub's own files, read when it starts and named by their content in the address so a browser
 keeps them (#179). The page route and the share copy are unchanged."""

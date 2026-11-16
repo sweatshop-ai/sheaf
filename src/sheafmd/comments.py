@@ -823,7 +823,7 @@ _HTML_TAG_RE = re.compile(
 
 def _unclosed_opener(text: str) -> int:
     """Where a `<!--` outside code that nothing closes starts in `text`, or -1. Any `<!--`
-    counts, not only a sheaf comment's: a block written after it would close it (see `_scan`).
+    counts, not only a rectoverso comment's: a block written after it would close it (see `_scan`).
     `<!-->` and `<!--->` are whole comments, as CommonMark and the list read them."""
     return next((a for kind, a, _ in _scan(text) if kind == "open"), -1)
 

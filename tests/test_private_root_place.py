@@ -1,4 +1,4 @@
-"""Where the file of a sheaf lives when a member has a private root (SPEC 9.11): `home_in` names the root as well as
+"""Where the file of a rectoverso lives when a member has a private root (SPEC 9.11): `home_in` names the root as well as
 the path, a name is looked for in the list's root and in each private root, and the placer answers a root and a path
 (the door's create into a private root is in test_private_root_create.py)."""
 import pytest

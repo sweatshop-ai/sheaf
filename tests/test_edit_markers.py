@@ -116,7 +116,7 @@ def test_prose_is_what_is_left_when_both_markers_are_taken_out():
     ("<!-- line one\nline two ``` -->\ntext", ["<!-- line one\nline two ``` -->"]),
     ('t <!-- sheaf-comment id=c1 by="a" at=2026-10-13T10:00 status=open quote="q"\nx\n--> '
      '<!-- rd-comment id=c2 by="a" at=2026-10-13T10:00 status=open quote="q"\ny\n--> <!-- f -->', ["<!-- f -->"]),
-    # a sheaf comment the parser refuses is not sheaf's to drop: it is kept like any other
+    # a rectoverso comment the parser refuses is not sheaf's to drop: it is kept like any other
     ('a <!-- sheaf-comment by="a" at=2026-10-13T10:00 status=open quote="q"\nno id\n--> b',
      ['<!-- sheaf-comment by="a" at=2026-10-13T10:00 status=open quote="q"\nno id\n-->']),
     ('a <!-- rd-comment id=c1 status=bogus\nx\n--> b', ['<!-- rd-comment id=c1 status=bogus\nx\n-->']),

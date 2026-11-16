@@ -2,7 +2,7 @@
 code of a named older commit and once against this tree (`python twin_session.py <work folder>`, with PYTHONPATH
 naming the `src` folder to run). It writes the list repo under <work folder>/list; the test compares those files
 and the git log of the two runs byte for byte. It uses only what the older commit has too. Besides the list repo it writes <work folder>/snapshot.json: what each
-member's index and door `documents` list show, after each step that changes who may see a sheaf."""
+member's index and door `documents` list show, after each step that changes who may see a rectoverso."""
 import json
 import os
 import pwd

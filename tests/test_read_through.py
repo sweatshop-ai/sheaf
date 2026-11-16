@@ -192,7 +192,7 @@ def comment_on(side, doc, member, **extra):
     text = side.hub.file(doc).read_text(encoding="utf-8")
     blk, start, end = rdc.find_quote(text, "Plan")
     return side.post("/_/comment", {"doc": f"Clients/acme/{doc}", "op": "add", "hash": md_hash(text), "block": blk, "start": start,
-                                    "end": end, "quote": "Plan", "body": "A note.", **extra}, member=member)
+                                    "end": end, "quote": "Plan", "body": "A note.", "side": "client", **extra}, member=member)
 
 
 def test_a_comment_lands_on_the_client_page_under_the_members_name(side):

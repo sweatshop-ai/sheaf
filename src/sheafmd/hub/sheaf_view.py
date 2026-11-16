@@ -204,7 +204,7 @@ def counts_and_trash(hub, member, counts: dict, view: str) -> dict:
     """`counts` of what the other views hold, and in the trash view the member's own trashed pages (8.6)."""
     out = {"counts": counts}
     root = hub.loose.known(member)
-    root = hub.roots.for_document(root / "x.md") if root is not None else None
+    root = hub.archive.own_root(root) if root is not None else None
     trashed = hub.archive.trashed(root) if root is not None else []
     counts["trash"] = len(trashed)
     if view == "trash":

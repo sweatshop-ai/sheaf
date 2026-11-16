@@ -1,6 +1,7 @@
 """Delete and the trash of a member's loose pages (SPEC 8.6): Delete is the owner's own act from the Sheaf, moves the page
 into the root's `.sheaf/trash/` for thirty days, and no agent or door path can delete. Through the handler in proxy mode
 and the door, in memory, with the hub's clock under test control."""
+import contextlib
 import os
 
 import pytest
@@ -10,7 +11,7 @@ from test_hub_commits import DOC, box, git, merged_on_github, rectoversos, remot
 from test_share import tick
 from test_write_log import agents  # noqa: F401  (fixture)
 
-from sheafmd.hub import loose
+from sheafmd.hub import loose, place
 
 
 def trash_rows(agents, member=BEA):
@@ -76,6 +77,7 @@ def test_the_hub_tick_purges_the_trash(agents, clock):
     assert delete(agents, doc).status == 200
     clock.now += 31 * DAY
     agents.hub.tick()
+    agents.hub.archive.settle()
     assert trash_rows(agents) == []
 
 
@@ -169,3 +171,35 @@ def test_delete_takes_the_pages_marks_with_it(agents, clock):
     doc = made(agents, "bea-claude", keep=True)
     assert delete(agents, doc).status == 200
     assert loose.marks(root_of(agents, doc).path) == []
+
+
+def test_a_loose_folder_that_is_not_its_own_root_has_no_trash_to_read_or_restore(agents, clock, monkeypatch):
+    foreign = root_of(agents, "rectoversos/x")
+    held = foreign.path / ".sheaf" / "trash" / "1" / "stray.md"
+    held.parent.mkdir(parents=True)
+    held.write_text("# Stray\n", encoding="utf-8")
+    made(agents, "bea-claude")
+    monkeypatch.setattr(agents.hub.roots, "for_document", lambda path: foreign)      # the loose folder lies inside another root
+    assert trash_rows(agents) == []
+    assert agents.post("/_/restore-trash", {"id": "1/stray.md"}, member=BEA).status == 404
+    assert held.exists() and not (foreign.path / "stray.md").exists()
+
+
+def test_restore_from_trash_and_delete_hold_the_place_lock_and_tell_the_index(agents, clock, monkeypatch):
+    doc = made(agents, "bea-claude")
+    held, touched, inside = [], [], []
+    real_restore = agents.hub.archive.restore_trash
+
+    @contextlib.contextmanager
+    def watch(hub, address):
+        held.append(address)
+        yield
+    monkeypatch.setattr(place, "held", watch)
+    monkeypatch.setattr(agents.hub.index, "touch", touched.append)
+    assert delete(agents, doc).status == 200
+    assert doc in held and touched[-1] == doc
+    [row] = trash_rows(agents)
+    held.clear()
+    monkeypatch.setattr(agents.hub.archive, "restore_trash", lambda root, ident: (inside.append(list(held)), real_restore(root, ident))[1])
+    assert agents.post("/_/restore-trash", {"id": row["id"]}, member=BEA).status == 200
+    assert inside == [[doc]] and touched[-1] == doc

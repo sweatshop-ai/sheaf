@@ -1082,6 +1082,7 @@ class Handler:
             except (loose.Refused, OSError) as e:
                 raise Refuse(409, str(e) if isinstance(e, loose.Refused) else "the page could not be moved to the trash") from None
         self.hub.forget_document(doc)
+        self.hub.index.touch(doc)
         return _ok()
 
     def _restore_trash(self, req: Req) -> Response:
@@ -1091,16 +1092,22 @@ class Handler:
         folder = self.hub.loose.known(m) if m is not None else None
         if folder is None:
             raise Refuse(404, "no such page in the trash")
-        root = self.hub.roots.for_document(folder / "x.md")
+        root = self.hub.archive.own_root(folder)
+        if root is None:
+            raise Refuse(404, "no such page in the trash")
+        stamp, _, wanted = ident.partition("/")
+        doc = str(Address(root.name, wanted))
         try:
-            rel = self.hub.archive.restore_trash(root, ident)
+            with place.held(self.hub, doc):
+                rel = self.hub.archive.restore_trash(root, ident)
         except archive_mod.Taken:
             raise Refuse(409, "a page of that name is there already: it is not overwritten") from None
         except KeyError:
             raise Refuse(404, "no such page in the trash") from None
         except loose.Refused as e:
             raise Refuse(409, str(e)) from None
-        return _ok(doc=str(Address(root.name, rel)))
+        self.hub.index.touch(doc)
+        return _ok(doc=doc)
 
     def _unwrite_share_line(self, req: Req, e, text: str, written: str) -> None:
         """The tick of a Share line this request appended was refused (another writer came between the two writes): the

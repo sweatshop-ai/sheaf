@@ -157,8 +157,9 @@ class Repos:
 
     def sleep_idle(self) -> list:
         """Put to sleep each clone not used for `SLEEP_DAYS` days: its sparse set is shrunk to nothing and kept to be widened
-        again. A clone with no record is first dated now. The repos put to sleep."""
-        now, slept = self.clock(), []
+        again. A clone with no record is first dated now. The repos put to sleep. The git calls run in the repo's own thread,
+        which a clone with a report waiting or being settled already has: that one is not put to sleep under it."""
+        now, slept, claimed = self.clock(), [], []
         for git_dir in sorted((self.base / "clones").glob("*/*/.git")):
             dest = git_dir.parent
             repo = f"{dest.parent.name}/{dest.name}"
@@ -171,17 +172,37 @@ class Repos:
                     continue
                 if row.get("sleeping") or now - row["last_used"] <= SLEEP_DAYS * 86400:
                     continue
-            if repo in self._queues:
-                continue                        # a report is being settled: not asleep under it
-            listed = self._git(dest, "-c", "core.quotePath=false", "sparse-checkout", "list")
-            if listed.returncode != 0 or self._git(dest, "sparse-checkout", "set", "--cone").returncode != 0:
-                continue
-            with self._records:
-                data = self._usage()
-                data[repo] = {**data.get(repo, {}), "sleeping": True, "restore": [f for f in listed.stdout.split("\n") if f]}
-                write_text_atomic(self._usage_file, json.dumps(data, indent=1, sort_keys=True) + "\n")
-            slept.append(repo)
+            with self._guard:
+                if repo in self._queues:
+                    continue                    # a report is being settled: not asleep under it
+                self._queues[repo] = []         # this repo's thread is the one below; a report that comes waits in its queue
+                t = threading.Thread(target=self._sleep_one, args=(repo, dest, slept), name=f"repos-{repo}", daemon=True)
+                self._threads.add(t)
+            t.start()
+            claimed.append(t)
+        for t in claimed:
+            t.join()
         return slept
+
+    def _sleep_one(self, repo: str, dest: Path, slept: list):
+        """The repo's thread, for one clone going to sleep; then it settles whatever reports came meanwhile (its `_wake`
+        widens the set again), like any thread of the repo."""
+        try:
+            listed = self._git(dest, "-c", "core.quotePath=false", "sparse-checkout", "list")
+            if listed.returncode == 0 and self._git(dest, "sparse-checkout", "set", "--cone").returncode == 0:
+                idle = False
+                with self._records:
+                    data = self._usage()
+                    row = data.get(repo) if isinstance(data.get(repo), dict) else {}
+                    # A report since the check (`_use`) has dated the clone anew: it stays awake, and its folders come back.
+                    idle = self.clock() - row.get("last_used", 0) > SLEEP_DAYS * 86400
+                    data[repo] = {**row, "sleeping": idle or row.get("sleeping") is True,
+                                  "restore": [f for f in listed.stdout.split("\n") if f]}
+                    write_text_atomic(self._usage_file, json.dumps(data, indent=1, sort_keys=True) + "\n")
+                if idle:
+                    slept.append(repo)
+        finally:
+            self._drain(repo)
 
     def _wake(self, repo: str, dest: Path, token: str | None):
         """The folders a sleeping clone held come back into its sparse set, once, in the thread of the report that woke it."""

@@ -60,16 +60,31 @@ def test_the_box_s_james_at_the_door_writes_from_tiroir_with_his_session(world):
     assert world.hub.writes.last_session(world.address) == line
 
 
-def test_a_pull_logs_the_pages_the_hub_opens_and_no_versions_file_nor_readme(world):
-    top = world.two.list_repo
-    others = [top / ".sheaf/versions/acme/blog" / NAME.rsplit("/", 1)[1].replace(".md", "") / "ab12.md",
-              top / "README.md"]
-    for path in others:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("# Not a page\n", encoding="utf-8")
-        assert world.hub._page_of(path) is None
-        pulled(world, path)
+def test_a_pull_logs_what_the_hub_serves_as_a_page_and_not_the_versions_store(world):
+    top, root = world.two.list_repo, world.address.partition("/")[0]
+    store = top / ".sheaf/versions/acme/blog" / NAME.rsplit("/", 1)[1].replace(".md", "") / "ab12.md"
+    store.parent.mkdir(parents=True, exist_ok=True)
+    store.write_text("# A version\n", encoding="utf-8")
+    assert world.hub._page_of(store) is None
+    pulled(world, store)
     assert world.hub.writes._lines == {} and world.hub.writes._left == {}
+    for rel in ("README.md", "acme/README.md", "acme/blog/sub/deeper.md"):     # served, though place.logical names none
+        path = top / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# A page\n", encoding="utf-8")
+        assert world.hub._page_of(path) == f"{root}/{rel}"
+        pulled(world, path)
+        assert [l.via for l in world.hub.writes.lines(f"{root}/{rel}")] == ["pull"]
+
+
+def test_a_pulled_file_with_windows_line_endings_is_known_by_the_text_the_page_reads(world):
+    world.put(OPEN)
+    path = world.two.private_repo / NAME
+    path.write_bytes(OPEN.replace("\n", "\r\n").encode("utf-8"))
+    world.hub.entry(world.address)
+    pulled(world, path)
+    seen = md_hash(path.read_bytes().decode("utf-8"))               # as the page reads it: bytes, no newline translation
+    assert world.hub.writes.is_pull(world.address, seen)
 
 
 def test_a_pull_remembers_the_text_it_left_only_for_a_page_that_is_open(world):

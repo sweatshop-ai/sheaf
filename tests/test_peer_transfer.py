@@ -90,7 +90,7 @@ def test_the_versions_carry_no_share_either(members):
     kept = [members.hub.versions.get(out["address"], md_hash(t)) for t in (shared,)]
     assert kept == [None]
     from sheafmd.hub import visibility
-    clean = visibility.unshare(visibility.without_ticked_share(shared))
+    clean = visibility.set_keys(visibility.without_ticked_share(shared), {"shared": None})
     assert members.hub.versions.get(out["address"], md_hash(clean)) == clean
 
 

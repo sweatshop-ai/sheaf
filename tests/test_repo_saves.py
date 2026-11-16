@@ -6,6 +6,7 @@ import dataclasses
 import json
 import os
 import pwd
+import re
 import subprocess
 import threading
 
@@ -622,22 +623,61 @@ def test_a_moved_clones_read_only_line_says_the_repo_moved_and_does_not_promise_
     assert "wakes" not in line and "asleep" not in line, line
 
 
+def meta_branch(hub_repos):
+    """The `branch` the page's meta carries as the hub serves the page now (None: it carries none), and its hash."""
+    page = hub_repos.get(f"/{ADDRESS}", member=BEA).text
+    m = re.search(r'"branch": ("[^"]*"|null)', page)
+    return (json.loads(m.group(1)) if m else None), re.search(r'"hash": "([0-9a-f]+)"', page).group(1)
+
+
+def the_page_moves_to_dev(hub_repos, tmp_path, identical):
+    """A report's work: `dev` appears on the remote (with the same pages when `identical`), is decided and the clone moves."""
+    if identical:
+        push_branch(hub_repos.origin, tmp_path, "dev")
+    else:
+        dev_changes_the_plan(hub_repos, tmp_path)
+    sh(the_clone(hub_repos), "fetch", "-q", "origin")
+    assert hub_repos.hub.repos.decide(REPO, "ghs_faketoken")[0] == "dev"
+    assert hub_repos.hub.repos.switch(REPO, "dev", "ghs_faketoken") == ""
+
+
 @NAMED
-def test_a_page_served_from_its_render_keeps_the_branch_it_was_rendered_on_after_a_switch(hub_repos, tmp_path):
-    """The branch is recorded where the render's hash is, not read at the request: the render held by the entry is staging's,
-    the clone then moves to dev before the page is sent from it, and the page still says staging (its save is refused)."""
+def test_a_page_identical_on_both_branches_is_saveable_on_dev_after_a_switch_and_a_reload(hub_repos, tmp_path):
+    """The file does not change in the switch, so no render is made again: the page must still be sent as read on dev."""
     served(hub_repos)
-    clone = the_clone(hub_repos)
+    assert meta_branch(hub_repos)[0] == "staging"
+    the_page_moves_to_dev(hub_repos, tmp_path, identical=True)
+    branch, h = meta_branch(hub_repos)             # the reload
+    assert branch == "dev"
+    r = hub_repos.post("/_/save", {"doc": ADDRESS, "hash": h, "branch": branch,
+                                   "edits": [{"i": 1, "html": "<p>A plan, saved on the page.</p>"}]}, member=BEA)
+    assert r.status == 200, r.text
+
+
+@NEITHER
+def test_a_page_rendered_read_only_is_saveable_once_the_clone_reaches_the_save_branch_and_the_page_is_reloaded(hub_repos, tmp_path):
+    served(hub_repos)
+    assert "readonly" in hub_repos.get(f"/{ADDRESS}", member=BEA).text
+    the_page_moves_to_dev(hub_repos, tmp_path, identical=True)
+    page = hub_repos.get(f"/{ADDRESS}", member=BEA).text
+    assert '"readonly"' not in page, page
+    branch, h = meta_branch(hub_repos)
+    assert branch == "dev"
+    r = hub_repos.post("/_/save", {"doc": ADDRESS, "hash": h, "branch": branch,
+                                   "edits": [{"i": 1, "html": "<p>A plan, saved on the page.</p>"}]}, member=BEA)
+    assert r.status == 200, r.text
+
+
+@NAMED
+def test_a_mounted_page_reads_its_hash_and_its_branch_from_one_render_whatever_the_clone_does_between(hub_repos, tmp_path):
+    """The hash and the branch are one read (`live.current_read`): a switch between that read and the build of the mount
+    answer gives the hash of staging's text with staging's name, never dev's."""
+    served(hub_repos)
     e = hub_repos.hub.entry(ADDRESS)
-    assert '"branch": "staging"' in hub_repos.hub.page(e, "n")
     old_hash = md_hash(hub_repos.hub.file(ADDRESS).read_text(encoding="utf-8"))
     dev_changes_the_plan(hub_repos, tmp_path)
-    sh(clone, "fetch", "-q", "origin")
-    assert hub_repos.hub.repos.decide(REPO, "ghs_faketoken")[0] == "dev"      # as a report decides it, then moves the clone
+    sh(the_clone(hub_repos), "fetch", "-q", "origin")
+    assert hub_repos.hub.repos.decide(REPO, "ghs_faketoken")[0] == "dev"
     assert hub_repos.hub.repos.switch(REPO, "dev", "ghs_faketoken") == ""
-    got = hub_repos.hub.page(e, "n")            # the entry's render is not made again: it is the one of staging's text
-    assert f'"hash": "{old_hash}"' in got
-    assert '"branch": "staging"' in got and '"branch": "dev"' not in got, got
-    r = hub_repos.post("/_/save", {"doc": ADDRESS, "hash": old_hash, "branch": "staging",
-                                   "edits": [{"i": 1, "html": "<p>A plan, saved on the page.</p>"}]}, member=BEA)
-    assert r.status == 403, r.text
+    got = hub_repos.hub.mount_doc(e)["config"]        # no catch_up: the entry's render is staging's
+    assert (got["hash"], got["branch"]) == (old_hash, "staging"), got

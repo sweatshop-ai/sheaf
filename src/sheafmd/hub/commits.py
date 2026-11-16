@@ -65,14 +65,21 @@ class Author:
     email: str
 
 
-NETWORK = ("fetch", "push")      # the git commands that reach a remote: the only ones given a clone's token (SPEC 14)
+def _credential(folder: Path):
+    """The token function of the clone that holds `folder` (the clone's folder or one beneath it), None for any other."""
+    here = os.path.realpath(folder)
+    for clone, token in CREDENTIALS.items():
+        if here == clone or here.startswith(clone + os.sep):
+            return token
+    return None
 
 
 def _env(author: Author | None = None, folder: Path | None = None) -> dict:
-    """The environment of a git command; `folder`: the clone's, given only for a command that reaches the remote, so
-    a local one never asks for the App's token (which may start a command of the box's)."""
+    """The environment of a git command; `folder`: where it runs. In a clone every command gets the token, asked once a
+    call and never kept: the clone is blobless, so any command (`read-tree`, `merge-tree`) may fetch a blob from the remote
+    (SPEC 14). It lives in this process's environment only, never in a config or a file."""
     env = {**os.environ, "LC_ALL": "C", "GIT_TERMINAL_PROMPT": "0"}
-    if folder is not None and (token := CREDENTIALS.get(os.path.realpath(folder))) is not None and (t := token()):
+    if folder is not None and (token := _credential(folder)) is not None and (t := token()):
         env.update(token_env(t))
     if author is not None:
         env["GIT_AUTHOR_NAME"], env["GIT_AUTHOR_EMAIL"] = author.name, author.email
@@ -153,7 +160,7 @@ def _git(root: Path, *args, author=None, seconds=GIT_SECONDS, given=None, childr
     its own: a signal to the hub's group never reaches it."""
     # No hook of the repo runs for the hub: hooks are code of whoever wrote `.git/hooks`.
     argv = ["git", "-C", str(root), "-c", "core.hooksPath=/dev/null", "--literal-pathspecs", *args]
-    folder = root if args and args[0] in NETWORK else None
+    folder = root
     if children is not None:
         return children.run(argv, seconds, _env(author, folder))
     return subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="surrogateescape",

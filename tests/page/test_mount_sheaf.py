@@ -1,0 +1,132 @@
+"""The Sheaf mounted in the front's document (SPEC 8.6): `sheafMount.mount(host, {sheaf: true})` builds the tree and the table
+in a closed shadow root from `/_/mount?sheaf=1` (data, never markup) and sheaf.js makes it live: folders that collapse, a
+folder that narrows the table, a filter on titles, and a click on a row that takes the pane for the rectoverso under a
+"← Sheaf" button. Every request is answered by the hub's proxy handler as Bea. The page's clock is Playwright's."""
+import json
+import subprocess
+
+import pytest
+from helpers import BEA, PLAN
+from pagehelp import close_context, new_context, until
+
+pytestmark = pytest.mark.page
+
+ORIGIN = "http://sheaf.test"
+FRONT = "/_front-for-test"
+FRONT_HTML = f"""<!doctype html><html><head><meta charset="utf-8"></head>
+<body style="margin:0"><div id="pane" style="height:640px"></div>
+<script src="/_/mount.js"></script>
+<script>sheafMount.mount(document.getElementById('pane'), {json.dumps({"sheaf": True})})
+  .then((m) => {{ window.__page = m; }}, (e) => {{ window.__failed = String(e); }});</script>
+</body></html>"""
+# The first closed root attached is the Sheaf's own: the rectoverso opened from a row attaches another, inside it.
+FIRST_ROOT = """(() => { const attach = Element.prototype.attachShadow;
+  Element.prototype.attachShadow = function (o) { const r = attach.call(this, o); window.__root = window.__root || r; return r; };
+})();"""
+
+
+@pytest.fixture
+def pages(front, work):
+    subprocess.run(["git", "init", "-q", str(work)], check=True)       # a git root lists a dot-folder's pages (8.6)
+    for rel, title in (("plan.md", "The plan"), ("ideas/first.md", "First idea"), ("ideas/deep/second.md", "Second idea"),
+                       (".tooling/n.md", "Scratch note")):
+        f = work / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(PLAN.replace("# Plan", f"# {title}", 1), encoding="utf-8")
+        front.hub.roots.for_document(f)
+    return front
+
+
+class Mounted:
+    def __init__(self, page, errors):
+        self.page, self.errors = page, errors
+
+    def js(self, body, arg=None):
+        return self.page.evaluate("([arg]) => { const root = window.__root; " + body + " }", [arg])
+
+    def visible_rows(self):
+        return self.js("return Array.from(root.querySelectorAll('.sheaf-row')).filter((r) => !r.hidden).map((r) => r.dataset.doc);")
+
+    def click(self, css):
+        until(lambda: self.js("return !!root.querySelector(arg);", css), what=css)
+        x, y = self.js("const r = root.querySelector(arg).getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2];", css)
+        self.page.mouse.click(x, y)
+
+
+@pytest.fixture
+def mounted(chromium, pages):
+    errors = []
+
+    def answer(route):
+        path = route.request.url[len(ORIGIN):]
+        if path == FRONT:
+            return route.fulfill(status=200, content_type="text/html", body=FRONT_HTML)
+        res = pages.get(path, member=BEA)
+        route.fulfill(status=res.status, headers=dict(res.headers), body=res.body)
+
+    context = new_context(chromium)
+    context.route(f"{ORIGIN}/**", answer)
+    page = context.new_page()
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.add_init_script(FIRST_ROOT)
+    page.goto(ORIGIN + FRONT)
+    until(lambda: page.evaluate("!!(window.__page || window.__failed)"), what="the mount")
+    assert page.evaluate("window.__failed || null") is None
+    m = Mounted(page, errors)
+    until(lambda: m.js("return !!root.querySelector('.sheaf-row');"), what="the rows in the root")
+    yield m
+    try:
+        assert errors == [], "the Sheaf raised script errors"
+    finally:
+        close_context(context)
+
+
+def test_the_tree_has_all_pages_on_top_then_the_root_and_its_folders_and_no_dot_folder(mounted):
+    got = mounted.js("return Array.from(root.querySelectorAll('.sheaf-folder')).map((b) => [b.textContent, b.dataset.path]);")
+    assert got == [["All pages", ""], ["work", "work"], ["ideas", "work/ideas"], ["deep", "work/ideas/deep"]]
+    assert mounted.js("return root.querySelector('.sheaf-folder.on').textContent;") == "All pages"
+
+
+def test_the_table_shows_every_page_newest_first_with_no_list_status(mounted):
+    assert sorted(mounted.visible_rows()) == ["work/.tooling/n.md", "work/ideas/deep/second.md", "work/ideas/first.md", "work/plan.md"]
+    heads = mounted.js("return Array.from(root.querySelectorAll('th')).map((h) => h.textContent);")
+    assert heads == ["Title", "Folder", "Last write", "Last agent session", "When", "Open"]
+
+
+def test_a_folder_narrows_the_table_to_itself_and_everything_below_it(mounted):
+    mounted.click('.sheaf-folder[data-path="work/ideas"]')
+    assert sorted(mounted.visible_rows()) == ["work/ideas/deep/second.md", "work/ideas/first.md"]
+    mounted.click('.sheaf-folder[data-path="work/ideas/deep"]')
+    assert mounted.visible_rows() == ["work/ideas/deep/second.md"]
+    mounted.click('.sheaf-folder[data-path=""]')
+    assert len(mounted.visible_rows()) == 4
+
+
+def test_a_folder_collapses_and_expands(mounted):
+    seen = "return root.querySelector('.sheaf-folder[data-path=\"work/ideas\"]').offsetParent !== null;"
+    assert mounted.js(seen) is True
+    mounted.click(".sheaf-toggle")
+    assert mounted.js("return root.querySelector('.sheaf-toggle').getAttribute('aria-expanded');") == "false"
+    assert mounted.js(seen) is False
+    mounted.click(".sheaf-toggle")
+    assert mounted.js(seen) is True
+
+
+def test_the_filter_keeps_the_rows_whose_title_holds_the_words(mounted):
+    mounted.js("const f = root.querySelector('.sheaf-filter'); f.value = 'idea'; f.dispatchEvent(new Event('input'));")
+    assert sorted(mounted.visible_rows()) == ["work/ideas/deep/second.md", "work/ideas/first.md"]
+    mounted.js("const f = root.querySelector('.sheaf-filter'); f.value = 'nothing like it'; f.dispatchEvent(new Event('input'));")
+    assert mounted.visible_rows() == [] and mounted.js("return !root.querySelector('.sheaf-empty').hidden;") is True
+
+
+def test_a_click_on_a_row_opens_the_rectoverso_under_a_back_button_and_back_gives_the_table_as_it_was(mounted):
+    mounted.click('.sheaf-folder[data-path="work/ideas"]')
+    mounted.click('.sheaf-row[data-doc="work/ideas/first.md"] .sheaf-title a')
+    until(lambda: mounted.js("return !root.querySelector('.sheaf-doc').hidden;"), what="the pane for the rectoverso")
+    assert mounted.js("return root.querySelector('.sheaf-main').hidden;") is True
+    assert mounted.js("return root.querySelector('.sheaf-crumb').textContent;") == "work / ideas / first.md"
+    mounted.click(".sheaf-back")
+    until(lambda: mounted.js("return !root.querySelector('.sheaf-main').hidden;"), what="the table again")
+    assert mounted.js("return root.querySelector('.sheaf-doc').hidden;") is True
+    assert sorted(mounted.visible_rows()) == ["work/ideas/deep/second.md", "work/ideas/first.md"]
+    assert mounted.js("return root.querySelector('.sheaf-folder.on').dataset.path;") == "work/ideas"

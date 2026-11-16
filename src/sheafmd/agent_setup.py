@@ -10,10 +10,10 @@ sheafmd.agent_setup — `sheaf init AGENT`: register the stdio door with an agen
 `init` never replaces what it did not write. Before it adds, it asks the agent (or reads the
 agent's file) whether a server called `sheaf` is there: `codex mcp add` and `gemini mcp add`
 replace one without a word. One that is ours (the same command) is left as it is, and one init
-wrote for a rectoverso at another path is pointed at this one; any other is left alone and said so, with
+wrote for a sheaf at another path is pointed at this one; any other is left alone and said so, with
 the command that removes it. A skill file is replaced only when it holds the marker line below,
 and the skill is checked first (and again just before it is written), so a refusal changes nothing.
-A rectoverso that runs from uv's or pipx's cache (`uvx`, `pipx run`) is not registered: that path goes when the cache is cleaned.
+A sheaf that runs from uv's or pipx's cache (`uvx`, `pipx run`) is not registered: that path goes when the cache is cleaned.
 
 Each command is a function `(argv) -> exit code`, registered in COMMANDS and given its usage line in
 COMMAND_HELP, which the foot of cli.py merges into its own. This module does not import cli.py.
@@ -54,7 +54,7 @@ class Done(enum.StrEnum):
     """What init did to the door of an agent."""
     ADDED = "added"
     ALREADY = "already"
-    MOVED = "moved"          # init's own entry for another rectoverso, now for this one
+    MOVED = "moved"          # init's own entry for another sheaf, now for this one
 
 
 class Skill(enum.StrEnum):
@@ -120,7 +120,7 @@ def _line(source: _Source) -> str:
 
 
 def install_line() -> str:
-    """The command that installs this same rectoverso for good: the pinned revision when it came from
+    """The command that installs this same sheaf for good: the pinned revision when it came from
     git, the URL it came from otherwise (with its `subdirectory`), and `sheafmd` from the index when
     there is no record. A credential in the URL, a password or a token as the user name, is left
     out (only ssh's own `git@` stays), and so are its query and fragment, where a signed link keeps
@@ -153,7 +153,7 @@ def _entry(command: list[str]) -> dict:
 class Kind(enum.StrEnum):
     ABSENT = "absent"
     OURS = "ours"
-    MOVED = "moved"        # ours, for a rectoverso at another path
+    MOVED = "moved"        # ours, for a sheaf at another path
     OTHER = "other"        # a server of that name, set up differently
     UNKNOWN = "unknown"    # sheaf could not tell
 
@@ -168,7 +168,7 @@ ABSENT = Found(Kind.ABSENT)
 
 
 def _ours_at_another_path(found_command, found_args: list, command: list[str]) -> bool:
-    """Is this an entry init itself would have written, for a rectoverso at another path: `</abs/path/to/a
+    """Is this an entry init itself would have written, for a sheaf at another path: `</abs/path/to/a
     sheaf script> mcp --agent NAME`, or `</abs/path/to/an/interpreter> -m sheafmd mcp --agent NAME` (`sys.executable` is whatever runs sheaf:
     python3, pypy3, ...), with this agent's NAME
     (the tail of `command`, which `door_command` made)?"""
@@ -406,12 +406,12 @@ def _register(agent: str, command: list[str]) -> Done:
     if found.kind == Kind.UNKNOWN:
         raise _cannot_tell(spec, command, found)
     if found.kind == Kind.MOVED and not spec.sees_all:
-        raise SetupError(f"{spec.exe} has the sheaf door that sheaf init wrote for a rectoverso at another path, "
+        raise SetupError(f"{spec.exe} has the sheaf door that sheaf init wrote for a sheaf at another path, "
                          f"and sheaf init does not replace it: what {spec.exe} says about an entry leaves "
                          f"out settings a person can have added by hand (a timeout, a tool list), and "
-                         f"replacing it would drop them. To point it at this rectoverso: {spec.remove}, "
+                         f"replacing it would drop them. To point it at this sheaf: {spec.remove}, "
                          f"then run `sheaf init {agent}` again.")
-    # Another command can register a rectoverso between the look and the add, which would replace it. A
+    # Another command can register a sheaf between the look and the add, which would replace it. A
     # second look just before the add narrows that to the add's own start; nothing closes it.
     with _looks(agent):
         again = spec.look(exe, command) if spec.add_replaces else found

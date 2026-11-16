@@ -142,3 +142,13 @@ def test_a_hub_with_no_clones_refuses_the_root(clone):
 def test_a_body_that_is_not_a_root_is_refused_with_the_reason(clone, bad):
     with pytest.raises(ValueError):
         incoming.check_root(hub(clone), body(clone, ("a.md", "alice@example.com", None), **bad))
+
+
+def test_a_repo_that_moved_away_is_refused_whole_and_never_answers_cloning(clone):
+    assert incoming.check_root(hub(clone, repos_mod.MOVED), body(clone, ("a.md", "alice@example.com", None))) == (409, {"why": "moved"})
+
+
+def test_a_hub_with_no_origin_of_its_own_refuses_the_root_whole(clone):
+    h = hub(clone)
+    del h.proxy
+    assert incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None))) == (409, {"why": "no_origin"})

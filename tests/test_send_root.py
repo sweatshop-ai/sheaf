@@ -139,3 +139,12 @@ def test_the_held_row_is_written_only_when_the_reason_changes(move):
     outgoing.send_root(Receiver((202, {})), move, "o/r", THERE, HEAD, rows, diag=Diag())
     outgoing.send_root(Receiver((409, {"why": "no_app"})), move, "o/r", THERE, HEAD, rows, diag=Diag())
     assert seen == [{"a.md": "cloning"}, {"a.md": "no_app"}]
+
+
+@pytest.mark.parametrize("why", [5, ["x"], "x" * 65, "has space", "", "Upper", "a\nb"])
+def test_a_reason_the_peer_makes_up_is_held_as_failed_not_stored(move, why):
+    receiver = Receiver((200, {"pages": {"a.md": {"ok": False, "why": why}}}), (409, {"why": why}))
+    outgoing.send_root(receiver, move, "o/r", THERE, HEAD, [row("a.md")])
+    assert move.get("o/r")["held"] == {"a.md": "failed"}
+    outgoing.send_root(receiver, move, "o/r", THERE, HEAD, [row("a.md")])
+    assert move.get("o/r")["held"] == {"a.md": "failed"}

@@ -990,11 +990,13 @@ class Hub:
         return real if real is not None and roots_mod.Address.parse(real).root == at.root else address
 
     def audience(self, address: str):
-        """`visibility.audience` of the page at `address`, None when it cannot be read."""
+        """`visibility.audience` of the page at `address`, None when it cannot be read, or when its front matter cannot
+        (`visibility.UNREAD`): a page the hub cannot judge opens to its owner only, whatever its Share line says."""
         try:
             top, rel = self.where(address)
             with beneath.open_beneath(top, rel) as op:
-                return visibility.audience(op.text())
+                text = op.text()
+            return None if visibility.front_matter(text).get(visibility.UNREAD) else visibility.audience(text)
         except (OSError, UnicodeDecodeError, roots_mod.NotFound):
             return None
 
@@ -1122,6 +1124,8 @@ class Hub:
         except (OSError, UnicodeDecodeError, roots_mod.NotFound):
             return False
         shared, fm = visibility.audience(text), visibility.front_matter(text)
+        if fm.get(visibility.UNREAD):             # a front matter the reader cannot judge: the owner's alone
+            return False
         # A page that draws on a private source is opened only by its owner's own Share, which writes `shared`; an
         # agent's write, or a tick by hand, cannot (#40).
         if any(visibility.private(x) for x in visibility.sources(fm)) and not visibility.text(fm, "shared"):

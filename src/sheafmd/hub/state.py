@@ -251,6 +251,19 @@ class Versions:
         if self._root is None:
             shutil.rmtree(self._folder(address), ignore_errors=True)
 
+    def rename(self, old: str, new: str):
+        """The versions of the document at `old` are those of `new`: a page that moved keeps its history, newest and
+        pinned alike. Nothing at `old`, nothing to carry; whatever `new` held before is replaced (its page is the one that
+        moved there)."""
+        src = self._folder(old)
+        if not src.is_dir():
+            return
+        dst = self._dir(self.dir) / doc_key(self._key(new))
+        if dst != src:
+            shutil.rmtree(dst, ignore_errors=True)
+            os.replace(src, dst)
+        write_text_private(dst / _ADDRESS_FILE, self._key(new), self._root is not None)
+
     def forget_prefix(self, prefix: str):
         """Drop the versions of every document whose address starts with `prefix` (`<root>/`),
         found by the `address` file of each folder. A document that was opened and never
@@ -307,6 +320,15 @@ class _Store:
             if save:
                 write_json(file, self._data)
             return result
+
+    def rename(self, old: str, new: str) -> None:
+        """The entry of the address `old` becomes that of `new`, for a page that moved (9.11); `new`'s own is replaced."""
+        def change(data):
+            if old not in data:
+                return None, False
+            data[new] = data.pop(old)
+            return None, True
+        self._change(change)
 
     def forget_prefix(self, prefix: str) -> list[str]:
         """Drop every entry whose address starts with `prefix` (`<root>/`); the addresses dropped."""
@@ -623,6 +645,17 @@ class MemberOpened(_Store):
             return None, True
         self._change(change)
 
+    def rename(self, old: str, new: str) -> None:
+        """Every member's entry of the address `old` becomes that of `new`, for a page that moved (9.11)."""
+        def change(data):
+            hit = False
+            for docs in data.values():
+                if isinstance(docs, dict) and old in docs:
+                    docs[new] = docs.pop(old)
+                    hit = True
+            return None, hit
+        self._change(change)
+
     def forget_prefix(self, prefix: str) -> list[str]:
         def change(data):
             gone = set()
@@ -656,6 +689,15 @@ class SharedIds(_Store):
             v = self._data.get(key)
             return v if isinstance(v, str) else None
 
+    def rename(self, old: str, new: str) -> None:
+        """The opaque name of the page at `old` is now the name of the page at `new`: a recipient's link keeps working."""
+        def change(data):
+            hit = [k for k, v in data.items() if v == old]
+            for k in hit:
+                data[k] = new
+            return None, bool(hit)
+        self._change(change)
+
     def forget_prefix(self, prefix: str) -> None:
         def change(data):
             gone = [k for k, v in data.items() if isinstance(v, str) and v.startswith(prefix)]
@@ -684,6 +726,17 @@ class MemberSeen(_Store):
                 doc[cid] = count
                 return None, True
             return None, False
+        self._change(change)
+
+    def rename(self, old: str, new: str) -> None:
+        """Every member's entry of the address `old` becomes that of `new`, for a page that moved (9.11)."""
+        def change(data):
+            hit = False
+            for docs in data.values():
+                if isinstance(docs, dict) and old in docs:
+                    docs[new] = docs.pop(old)
+                    hit = True
+            return None, hit
         self._change(change)
 
     def forget_prefix(self, prefix: str) -> list[str]:

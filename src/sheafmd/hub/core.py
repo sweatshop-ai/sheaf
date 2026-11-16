@@ -29,6 +29,7 @@ from ..render import RenderError, render_file
 from ..source import STAMP_FORMAT, file_lock, lock_key, md_hash
 from . import assets as assets_mod
 from . import boxwait
+from . import forwards as forwards_mod
 from . import loose as loose_mod
 from . import place
 from . import projects
@@ -160,6 +161,7 @@ class Hub:
         self.seen = state.Seen()
         self.member_seen = state.MemberSeen()
         self.shared_ids = state.SharedIds()           # the opaque names of the pages Shared with a member
+        self.forwards = forwards_mod.Forwards()        # where an address a page left now leads (9.11)
         self.member_opened = state.MemberOpened()     # the change of each Shared page that a member last had open
         self.index = Index(self)
         self.tokens = state.Tokens()
@@ -901,6 +903,36 @@ class Hub:
             if root is not None:
                 self.index.forgot(name)
             return root
+
+    def moved_page(self, old: str, new: str, by: str):
+        """The page at `old` is now at `new`, its file moved (9.11): the Forward is written, and every store that is keyed by
+        the address follows the page, so its settings, versions, read marks, Tells, Write log, keep mark and the opaque name
+        it is Shared under are the page's still. Each store is carried on its own: one that fails is a row in the
+        diagnostics log, and the others are carried all the same. The tabs open on `old` are told where it went."""
+        root = self.roots.get(roots_mod.Address.parse(new).root)
+        rel_old, rel_new = roots_mod.Address.parse(old).rel, roots_mod.Address.parse(new).rel
+        steps = [lambda: self.forwards.add(old, new, by),
+                 lambda: self.docs.rename(old, new), lambda: self.seen.rename(old, new),
+                 lambda: self.member_seen.rename(old, new), lambda: self.member_opened.rename(old, new),
+                 lambda: self.shared_ids.rename(old, new), lambda: self.waiting_tells.rename(old, new),
+                 lambda: self.session_tells.rename(old, new), lambda: self.writes.rename(old, new),
+                 lambda: (self._versions_of(root) or self.versions).rename(old, new),
+                 lambda: loose_mod.keep_moved(root.path, rel_old, rel_new)]
+        for step in steps:
+            try:
+                step()
+            except Exception:
+                self.record_exception("move-store-failed", new)
+        with self._lock:
+            e = self.entries.pop(old, None)
+            self.entries.pop(new, None)         # an entry made for the address before the page came is made again
+        if e is not None:
+            e.bus.publish("moved", {"doc": old, "to": new})
+        for address in (old, new):
+            try:
+                self.index.touch(address)
+            except Exception:
+                self.record_exception("status-failed")
 
     def open_index_stream(self, describe, accept=None):
         """A new index stream. The first one to open starts the board afresh, so a stream is

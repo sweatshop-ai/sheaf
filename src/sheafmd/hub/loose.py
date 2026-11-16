@@ -117,6 +117,18 @@ def keep(root_path: Path, rel: str) -> None:
             raise Refused(f"the keep mark could not be written ({getattr(e, 'strerror', None) or e})") from None
 
 
+def keep_moved(root_path: Path, old: str, new: str) -> None:
+    """The keep mark of the page at `old` is the page at `new`'s, a page that moved: written in one replace, so a page
+    is never there unmarked. Refused (`Refused`) when the marks cannot be written."""
+    mark = Path(root_path) / KEEP
+    with state.file_locked("loose-keep.lock"):
+        held = marks(root_path)
+        if old not in held:
+            return
+        state.write_text_private(mark, json.dumps(sorted({*(r for r in held if r != old), new}), indent=1,
+                                                  ensure_ascii=False) + "\n", inside=True)
+
+
 class Loose:
     """The registry of loose roots of a hub, over `loose.json`."""
 

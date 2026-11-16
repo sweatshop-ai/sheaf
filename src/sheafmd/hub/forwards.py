@@ -1,0 +1,45 @@
+"""Forwards (SPEC 9.11, "Move and Forward"): where an address a page once had now leads. `forwards.json` holds
+`{old address: {"to": new address, "by": who moved it, "at": when}}`. A Forward never expires; a link that names the old
+address is not rewritten, this resolves it. There is one hop, never a chain: a page that moves again re-points every Forward
+that led to its last address, and a page that moves back to an address it once left drops the Forward there."""
+import time
+
+from ..source import STAMP_FORMAT
+from .state import _Store
+
+
+class Forwards(_Store):
+    name = "forwards.json"
+
+    def follow(self, address: str) -> str | None:
+        """The address `address` now leads to, None when it has no Forward."""
+        with self._lock:
+            e = self._data.get(address)
+            to = e.get("to") if isinstance(e, dict) else None
+            return to if isinstance(to, str) else None
+
+    def entry(self, address: str) -> dict | None:
+        with self._lock:
+            e = self._data.get(address)
+            return dict(e) if isinstance(e, dict) else None
+
+    def add(self, old: str, new: str, by: str) -> None:
+        """`old` now leads to `new`. Whatever led to `old` leads to `new`; whatever `new` led to is no Forward any more,
+        the page being there again."""
+        def change(data):
+            at = time.strftime(STAMP_FORMAT)
+            for k, e in data.items():
+                if isinstance(e, dict) and e.get("to") == old:
+                    e["to"] = new
+            data.pop(new, None)
+            data[old] = {"to": new, "by": by, "at": at}
+            for k in [k for k, e in data.items() if isinstance(e, dict) and e.get("to") == k]:
+                del data[k]
+            return None, True
+        self._change(change)
+
+    def leads_elsewhere(self, address: str, page: str | None = None) -> bool:
+        """Whether `address` is the old address of a page other than the one that now stands at `page`: an address that
+        once pointed at a page must not silently become another one."""
+        to = self.follow(address)
+        return to is not None and to != page

@@ -178,7 +178,8 @@ def data(hub, member, titles: Titles) -> dict:
                 write_tip, session_tip_, link = last.host if last else "", session_tip(session) if session else "", way_back(session, member)
             rows.append({"doc": told, "url": d["url"] if told == address else roots_mod.url_path(told), "title": title, "root": SHARED if given else at.root,
                          "folder": folder, "shared_by": agent, **given,
-                         "share": unshared if mine(hub, member, at.root) and not given else "", "mtime": d["mtime"], "when": index_mod.when(d["mtime"], now),
+                         "share": unshared if mine(hub, member, at.root) and not given else "",
+                         "can_move": mine(hub, member, at.root) and not given, "mtime": d["mtime"], "when": index_mod.when(d["mtime"], now),
                          "open": d["open"], "write": say_write(last, session),
                          "write_tip": write_tip,
                          "session": session.writer if session else "",

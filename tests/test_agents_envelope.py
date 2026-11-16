@@ -1,5 +1,5 @@
 """The one envelope a Tell travels in, on every path (SPEC 11.4, sheaf#117), and `sheaf deliver`,
-which pushes it for a process that is not the hub: the box's supervisor, and the fork's relay.
+which pushes it for a process that is not the hub: the box's supervisor.
 
 The session is a record in the test's own config folder and its socket a peer thread of the test."""
 import io

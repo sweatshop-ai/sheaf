@@ -1,7 +1,7 @@
 """
 sheafmd.agents.envelope — the one envelope a Tell travels in, on every path (SPEC 11.4, sheaf#117).
 
-The local hub, `sheaf deliver` (the box's supervisor) and the fork's relay all push these bytes on a
+The local hub and `sheaf deliver` (the box's supervisor) both push these bytes on a
 Claude Code session's socket, so a session sees a Tell the same way whoever delivers it: a peer message
 from sheaf, never a typed user turn and never a frame from no one.
 """

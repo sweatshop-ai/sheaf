@@ -339,6 +339,8 @@ class Door:
             return _error(id_, INVALID_PARAMS, "The arguments are not an object.")
         try:
             out = self._logged(name, args, caller) if name in WRITE_TOOLS else self._run(name, args, caller)
+            if name in SESSION_WRITES and isinstance(out, dict) and (declared := caller.declared.get("session")):
+                out = {**out, "session": declared}      # the id the door recorded: the mod arms only for its own (9.14)
             if caller.session is not None and self.called is not None:
                 self._tell_called(name, args, caller)
             return self._ok(id_, {"content": [{"type": "text", "text": json.dumps(out, ensure_ascii=False)}],

@@ -110,9 +110,7 @@ var create = function (ROOT, CFG, opts) {
   var DRAFTS_OF = CFG.proxy ? 'm:' + CFG.member : location.port;
   // On a member's page of a rectoverso whose live session runs on the box, CFG.can holds "box-tell":
   // Tell goes with the comment to /_/comment, the hub drops it for James's window, and James answers in
-  // the thread through the door. The page starts no wait of its own for it (SPEC 9.12). On a rectoverso whose live
-  // session is a member's fork, CFG.can holds "relay-tell" while that fork's relay is connected: Tell goes the
-  // same way, to the relay (9.14).
+  // the thread through the door. The page starts no wait of its own for it (SPEC 9.12).
   var AGENT, AGENT_UC, CAN, canTell, toBox;
   // The byline names who prepared the document. On a page rendered from a session that is the session ("Document
   // prepared by Yusuf"), not the hub's person, and its name brings the session to the front, or opens it again once
@@ -161,22 +159,20 @@ var create = function (ROOT, CFG, opts) {
   });
   function takeAgent() {
     CAN = CFG.can || [];
-    toBox = CAN.indexOf('box-tell') >= 0 || CAN.indexOf('relay-tell') >= 0;
+    toBox = CAN.indexOf('box-tell') >= 0;
     // The session's own name when it has one ("Linnea"), else the agent's display name (SPEC 10.5); on a
     // box rectoverso the member the live session runs as (James), and James on his sheaf with no session yet.
     AGENT = toBox ? upper(liveSession().member) || 'James'
           : (CFG.agent && (CFG.agent.name || CFG.agent.display)) || 'the agent';
     AGENT_UC = AGENT.charAt(0).toUpperCase() + AGENT.slice(1);
-    canTell = CAN.indexOf('relay-tell') >= 0 || CAN.indexOf(toBox ? 'box-tell' : 'deliver') >= 0 ||
+    canTell = CAN.indexOf(toBox ? 'box-tell' : 'deliver') >= 0 ||
               (!toBox && CAN.indexOf('reopen') >= 0) ||
               (!toBox && CAN.indexOf('queue') >= 0);        // an agent: the Tell waits for it (SPEC 9.8)
     takeByline();
   }
   function liveSession() { return (CFG.work && CFG.work.sessions && CFG.work.sessions[0]) || {}; }
-  // Where a member's Tell goes: James's window on the box, or the fork's session through its relay (9.14).
-  function whereTo() {
-    return CAN.indexOf('relay-tell') >= 0 ? AGENT + '’s session on ' + liveSession().host : AGENT + '’s window on the box';
-  }
+  // Where a member's Tell goes: James's window on the box.
+  function whereTo() { return AGENT + '’s window on the box'; }
   function upper(s) { s = String(s || ''); return s.charAt(0).toUpperCase() + s.slice(1); }
   takeAgent();
   // What the hub's answer to /_/doc says of the agent: a rename, or a session that ended, reaches
@@ -854,10 +850,6 @@ var create = function (ROOT, CFG, opts) {
     var live = liveSession(), none = w.live === 'laptop'
       ? 'The live session runs on ' + upper(live.member) + '’s machine, ' + live.host + ': open it there. This hub keeps no copy of it to fork.'
       : 'Nothing to fork from this hub: it keeps no copy of the box’s transcripts.';
-    // Whether a Tell reaches that fork now: its relay connected or not (9.14).
-    if (w.live === 'laptop' && 'relay' in w) h += '<p class="rd-relay">' + esc(w.relay
-      ? 'Tell goes to ' + upper(live.member) + '’s session on ' + live.host + '.'
-      : upper(live.member) + '’s session on ' + live.host + ' is not connected: Tell works again when it is.') + '</p>';
     h += '<h4>Sessions</h4>' + (ss.length ? ss.map(function (x) {
       return '<div class="rd-sess">' + esc(upper(x.member)) + ' on ' + esc(x.host) + ' · ' + esc(utcDate(x.date)) + '</div>';
     }).join('') : '<p class="rd-none">No session yet.</p>') +
@@ -2347,7 +2339,6 @@ var create = function (ROOT, CFG, opts) {
     if (toBox) {
       var c = (j.comments || []).filter(function (x) { return x.id === id; })[0] || byId[id];
       sentBox[id] = { n: ((c && c.replies) || []).length, to: AGENT };
-      if (CAN.indexOf('relay-tell') >= 0) sentBox[id].at = whereTo();
     } else if (j && j.telling) {
       takeTelling(j.telling, false, j.seenSince);
     } else telling[id] = true;
@@ -4406,18 +4397,6 @@ var create = function (ROOT, CFG, opts) {
         delete telling[d.id];
         touched(d.id);
         say('Tell ' + AGENT + ' failed: ' + (d.error || 'unknown error'), true);
-      });
-      // A member's Tell that the fork's relay will not deliver: it expired, or the session did not take it (9.14).
-      live.addEventListener('tell-relay-failed', function (ev) {
-        var d = JSON.parse(ev.data || '{}');
-        touched(d.id);
-        say('Tell ' + AGENT + ' failed: ' + (d.error || 'unknown error'), true);
-      });
-      // A fork's relay connected, or is gone: Tell on the page follows it at once, not at the next /_/doc (#135).
-      live.addEventListener('relay', function () {
-        readDoc().then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
-          if (j && j.ok !== false) takeTarget(j);
-        }).catch(function () {});
       });
       // A drop for James's window that the hub gave up on: no reply within the Tell wait (#115).
       live.addEventListener('box-failed', function (ev) {

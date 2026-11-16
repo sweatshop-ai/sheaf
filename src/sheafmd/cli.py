@@ -26,7 +26,7 @@ import webbrowser
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from . import __version__, agent_setup, comments, config, deliver, diagnostics, lifecycle, mcp, paths, pdf, relay_client, seat, send, theme
+from . import __version__, agent_setup, comments, config, deliver, diagnostics, lifecycle, mcp, paths, pdf, seat, send, tells_poll, theme
 from .agents.detect import detect
 from .agents.registry import detect_target
 from .atomic import write_text_atomic
@@ -56,6 +56,8 @@ usage:
                  on a laptop connected to a shared Sheaf (sheaf connect), a page outside git is sent there
   sheaf pull FILE.md
                  write the shared Sheaf's latest text of a page you sent into the file
+
+  A file or folder named like a command (headers, pull, ...) is the command; to open that file, write ./name.
 
   --local        render on this laptop's hub instead of sending the page to a shared Sheaf
   --folder NAME  the folder of your Sheaf for a page sent for the first time (default: the month)
@@ -1200,10 +1202,11 @@ COMMANDS.update(agent_setup.COMMANDS)
 COMMAND_HELP.update(agent_setup.COMMAND_HELP)
 COMMANDS.update(deliver.COMMANDS)
 COMMAND_HELP.update(deliver.COMMAND_HELP)
-COMMANDS.update(relay_client.COMMANDS)
-COMMAND_HELP.update(relay_client.COMMAND_HELP)
-COMMANDS.update({"pull": lambda argv: send.cmd_pull(argv, _out, _err)})
+COMMANDS.update({"pull": lambda argv: send.cmd_pull(argv, _out, _err),
+                 "tells-poll": lambda argv: tells_poll.cmd_tells_poll(argv, _out, _err),
+                 "headers": lambda argv: tells_poll.cmd_headers(argv, _out, _err)})
 COMMAND_HELP.update(send.COMMAND_HELP)
+COMMAND_HELP.update(tells_poll.COMMAND_HELP)
 
 
 # SPEC 14.2: on native Windows only what needs no hub and no service manager runs.
@@ -1233,7 +1236,7 @@ def main(argv: list[str] | None = None) -> int:
         _out(top_help())
         return EXIT_OK
     try:
-        is_file = first.endswith(".md") or Path(first).exists()
+        is_file = first.endswith(".md") or (first not in COMMANDS and Path(first).exists())      # a command name wins over a file of that name: ./name opens the file
         if (is_file or first in COMMANDS) and windows_stops(first, is_file, argv):
             _err(WINDOWS_SAYING)
             return EXIT_FAILED

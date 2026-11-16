@@ -679,6 +679,8 @@ class Hub:
         meta["actions"] = self.actions(e, member, text) if h == meta.get("hash") else []
         if line := self.read_only_line(e.address):
             meta["readonly"], meta["why_readonly"] = True, line
+        elif repo := self.clone_of(e.address):
+            meta["branch"] = self._repos.head_of(repo)      # the branch this page is read on: its save carries it back (SPEC 14)
         if member is None:
             meta["seen"] = self.seen.get(e.address)
             v = self.tell.view(e.address)

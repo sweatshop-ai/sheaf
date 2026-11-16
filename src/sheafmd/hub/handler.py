@@ -957,6 +957,29 @@ class Handler:
         if line := self.hub.read_only_line(address):
             raise Refuse(403, line)
 
+    def _read_on(self, address: str, given) -> str:
+        """The branch a save of a repo clone's page was read on, as the page's meta gave it; "" for any other page. A save of
+        a clone page names it (SPEC 14): without it the hub cannot tell a save of this branch from one of another."""
+        if not self.hub.clone_of(address):
+            return ""
+        _shape(isinstance(given, str) and given != "", "branch must be the branch the page was read on")
+        return given
+
+    def _on_branch(self, address: str, read_on: str, guard):
+        """`guard` and, under the page's lock, the refusal of a save read on a branch the clone has left: answered as a
+        read-only page is (403), and nothing is merged into the new branch's text."""
+        if not read_on:
+            return guard
+        repo = self.hub.clone_of(address)
+
+        def on_branch(text, new, toggled):
+            on = self.hub.repos.head_of(repo)
+            if on != read_on:
+                raise Refuse(403, f"The clone of {repo} moved from {read_on} to {on or 'no branch'} since this page was read, "
+                                  "so the save is not made: reload the page.")
+            return guard(text, new, toggled)
+        return on_branch
+
     def _save(self, req: Req) -> Response:
         b = req.body
         e = self._entry(req, b.get("doc"))
@@ -971,8 +994,10 @@ class Handler:
         _shape(rid is None or (isinstance(rid, str) and _RID_RE.fullmatch(rid)), "rid is not a request id")
         # The name's lock (9.11) from the guard's judging of the rectoverso's home to the commit: move, write, render,
         # commit, one operation.
+        read_on = self._read_on(e.address, b.get("branch"))
         with place.held(self.hub, e.address):
             guard, ticked = self._ticks(req, e)
+            guard = self._on_branch(e.address, read_on, guard)
             move, moved = self._mover(e, ticked)
             with self._moved_committed(e, req.member, "edit", moved):
                 try:

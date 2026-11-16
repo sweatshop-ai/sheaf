@@ -139,13 +139,14 @@ class Archive:
                 self._refused.discard(root.path)
 
     def _sweep_root(self, member, root, now: float) -> None:
-        pages = self._pages(member, root)
-        marks = Marks(root.path)
-        loose.stamp(root.path, SEEN, {rel: now for rel, _, _ in pages if rel not in marks.seen}, only_new=True)
-        seen = {**{rel: now for rel, _, _ in pages}, **marks.seen}
-        gone = due(pages, marks.archived, seen, marks.kept, now, self.days(root))
-        mtimes = {rel: mtime for rel, mtime, _ in pages}
-        loose.stamp(root.path, ARCHIVED, {rel: max(now, mtimes[rel]) for rel in gone})
+        pages = self._pages(member, root)            # the slow part, outside the lock
+        with state.file_locked("loose-keep.lock"):   # the marks are read and the archive written in one hold: a Keep or a Restore comes before or after
+            marks = Marks(root.path)
+            loose.stamp_held(root.path, SEEN, {rel: now for rel, _, _ in pages if rel not in marks.seen}, only_new=True)
+            seen = {**{rel: now for rel, _, _ in pages}, **marks.seen}
+            gone = due(pages, marks.archived, seen, marks.kept, now, self.days(root))
+            mtimes = {rel: mtime for rel, mtime, _ in pages}
+            loose.stamp_held(root.path, ARCHIVED, {rel: max(now, mtimes[rel]) for rel in gone})
 
     # ── what a row says ──────────────────────────────────────────────────────
     def facts(self, root) -> Marks | None:
@@ -157,7 +158,11 @@ class Archive:
 
     # ── the member's acts ────────────────────────────────────────────────────
     def archive_now(self, root, rel: str, mtime: float) -> None:
-        loose.stamp(root.path, ARCHIVED, {rel: max(self.hub.clock(), mtime)})
+        """Archive at once; refused (`loose.Refused`) for a kept page, which is never archived: Keep comes off first."""
+        with state.file_locked("loose-keep.lock"):
+            if rel in loose.marks(root.path):
+                raise loose.Refused("the page is kept and a kept page is never archived: take Keep off first")
+            loose.stamp_held(root.path, ARCHIVED, {rel: max(self.hub.clock(), mtime)})
 
     def restore(self, root, rel: str) -> None:
         """Back to the default view, and the page's own clock starts over."""

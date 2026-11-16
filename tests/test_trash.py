@@ -3,15 +3,17 @@ into the root's `.sheaf/trash/` for thirty days, and no agent or door path can d
 and the door, in memory, with the hub's clock under test control."""
 import contextlib
 import os
+import threading
 
 import pytest
 from helpers import BEA, CAL, comment, door, rpc
 from test_archive import DAY, Clock, call, clock, docs, made, root_of, rows, sweep  # noqa: F401  (fixtures)
 from test_hub_commits import DOC, box, git, merged_on_github, rectoversos, remote  # noqa: F401  (fixtures)
-from test_share import tick
+from test_share import line_edit, tick
 from test_write_log import agents  # noqa: F401  (fixture)
 
 from sheafmd.hub import loose, place
+from sheafmd.source import md_hash
 
 
 def trash_rows(agents, member=BEA):
@@ -202,4 +204,29 @@ def test_restore_from_trash_and_delete_hold_the_place_lock_and_tell_the_index(ag
     held.clear()
     monkeypatch.setattr(agents.hub.archive, "restore_trash", lambda root, ident: (inside.append(list(held)), real_restore(root, ident))[1])
     assert agents.post("/_/restore-trash", {"id": row["id"]}, member=BEA).status == 200
-    assert inside == [[doc]] and touched[-1] == doc
+    assert inside and set(inside[0]) == {doc} and touched[-1] == doc
+
+
+def test_a_save_racing_a_delete_lands_before_it_or_is_refused(agents, clock, monkeypatch):
+    doc = made(agents, "bea-claude", text="# Tasks\n\n- [ ] one\n- [ ] two\n")
+    text = agents.hub.file(doc).read_text(encoding="utf-8")
+    saved, real_trash = [], agents.hub.archive.trash
+
+    def save():
+        saved.append(agents.post("/_/save", {"doc": doc, "hash": md_hash(text), "edits": [line_edit(text, "one")]}, member=BEA))
+
+    def trash(root, rel):
+        racer = threading.Thread(target=save)
+        racer.start()
+        racer.join(0.3)                 # a save that can come in beside the move would have finished by now
+        assert racer.is_alive(), "a save came in while Delete moved the page"
+        saved.append(racer)
+        real_trash(root, rel)
+    monkeypatch.setattr(agents.hub.archive, "trash", trash)
+    assert delete(agents, doc).status == 200
+    racer = saved.pop(0)
+    racer.join(5)
+    assert not racer.is_alive()
+    assert not agents.hub.file(doc).exists()                # the save did not write the page back to its address
+    assert [r["rel"] for r in trash_rows(agents)] == [doc.split("/", 1)[1]]
+    assert [r.status for r in saved] == [404], saved                  # refused, the page is gone

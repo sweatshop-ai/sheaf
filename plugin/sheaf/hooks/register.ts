@@ -29,6 +29,7 @@ type Mod = {
   running: number            // main-loop turns under way
   interrupted: boolean       // the member pressed Esc: nothing goes in until they type again
   timer: { cancel: () => void } | null
+  saidFor: string            // the session id the line was said under
   saidStale: boolean         // the one line about a write recorded under an id that is no longer the session's
 }
 
@@ -122,7 +123,7 @@ async function declare($: any, m: Mod, door: Door | null) {
 }
 
 export const register: Register = (on) => {
-  const m: Mod = { p: fresh(), running: 0, interrupted: false, timer: null, saidStale: false }
+  const m: Mod = { p: fresh(), running: 0, interrupted: false, timer: null, saidFor: '', saidStale: false }
 
   on('tool.call', async ($, e, next) => {
     const door = doorOfTool(String((e as any).tool))
@@ -130,9 +131,13 @@ export const register: Register = (on) => {
     if (door && done?.isError !== true && (await sendsSession($, door))) {
       // Arm only for the id the door recorded. After a /clear the helper still sends the old id until the MCP reconnects:
       // that write queues Tells for the old id, which nobody polls, so it arms nothing (SPEC 9.14).
-      if (echoedSession(done) === (await $.session.id())) await declare($, m, door)
-      else if (!m.saidStale) {
+      const id = await $.session.id()
+      const echoed = echoedSession(done)
+      if (id !== m.saidFor) m.saidStale = false      // a new session id (a second /clear) may be told again
+      if (echoed === id) await declare($, m, door)
+      else if (echoed && !m.saidStale) {      // an empty echo (an older door) is no stale write: nothing to say
         m.saidStale = true
+        m.saidFor = id
         await $.ui.log('Sheaf: this write was recorded under the session before /clear, so Tells from the page are not delivered here yet. They wait at the door; reconnect the sheaf MCP server (/mcp) and write again.')
       }
     }

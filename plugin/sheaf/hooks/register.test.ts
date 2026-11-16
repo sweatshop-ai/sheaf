@@ -363,3 +363,25 @@ test('a new id that declares itself before the tick has left the old one is arme
   expect(mine.length).toBeGreaterThan(0)
   expect(mine.every((r: string[]) => r.includes('sheaf-third_example_com'))).toBe(true)
 })
+
+test('an empty echo prints no /clear line', async ($, on) => {
+  const w = world($, on)
+  w.door.echo = ''
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await w.mcp('mcp__sheaf-chat_example_com__reply')
+  expect(w.lines.length).toBe(0)
+})
+
+test('a stale write after a second /clear says so again: the line is once per session id', async ($, on) => {
+  const w = world($, on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  w.door.echo = 'old-1'
+  await w.mcp('mcp__sheaf-chat_example_com__reply')
+  await w.mcp('mcp__sheaf-chat_example_com__reply')
+  expect(w.lines.length).toBe(1)
+  w.door.session = 'second-session'       // a second /clear
+  w.door.echo = 'second-old'
+  await w.mcp('mcp__sheaf-chat_example_com__reply')
+  await w.mcp('mcp__sheaf-chat_example_com__reply')
+  expect(w.lines.length).toBe(2)
+})

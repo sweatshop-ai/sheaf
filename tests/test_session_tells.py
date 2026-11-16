@@ -189,3 +189,37 @@ def test_a_revoked_token_leaves_its_waiting_tell_waiting_for_the_member_to_cance
     assert len(doc(laptops, BEA)["telling"]) == 2
     assert post(laptops, BEA, "/_/cancel").status == 200
     assert doc(laptops, BEA)["telling"] == []
+
+
+def test_the_events_and_the_rows_name_a_laptop_tell_alike_so_the_page_finds_its_line(laptops):
+    declare(laptops)
+    tab = laptops.get(f"/_/live?doc={DOC}", member=BEA).stream
+    tell(laptops)
+    name = doc(laptops, BEA)["telling"][0]["to"]
+    poll(laptops)
+    assert post(laptops, BEA, "/_/cancel").status == 200
+    heard = [d["agent"] for n, d in tab.drain() if n.startswith("tell-")]
+    assert heard and set(heard) == {name}
+
+
+def test_a_retarget_the_hub_refuses_leaves_the_target_and_the_waiting_tell_as_they_were(laptops):
+    laptops.tokens["bea-agent"] = agent_token("bea-agent", "ChatGPT")
+    laptops.hub.proxy = both(laptops.hub.proxy.members[BEA].roots[0], bea=["bea-one", "bea-two", "bea-agent"], cal=["cal-one"])
+    declare(laptops)
+    tell(laptops)
+    assert post(laptops, BEA, "/_/retarget", target="agent:bea-agent").status == 200
+    declare(laptops)                                                # the laptop is the target again, with a new Tell
+    tell(laptops)
+    before = doc(laptops, BEA)["target"]
+    assert before["laptop"] is True
+    assert post(laptops, BEA, "/_/retarget", target="agent:bea-agent").status == 409      # that agent has this comment waiting already
+    assert doc(laptops, BEA)["target"] == before
+    assert [t["state"] for t in doc(laptops, BEA)["telling"] if t.get("laptop")] == ["waiting"]
+
+
+def test_a_token_that_no_longer_acts_for_the_tells_member_is_listed_nothing(laptops):
+    declare(laptops)
+    tell(laptops)
+    laptops.hub.proxy = both(laptops.hub.proxy.members[BEA].roots[0], bea=["bea-two"], cal=["cal-one", "bea-one"])
+    assert poll(laptops)[1] == {"tells": []}
+    assert doc(laptops, BEA)["telling"][0]["state"] != "seen"

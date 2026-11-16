@@ -864,6 +864,7 @@ class Handler:
             return _ok(**{**proxy.for_member(snap), "telling": self._member_telling(e.address, req.member, text=e.live.current()[1])},
                        seen=self.hub.member_seen.get(req.member.id, e.address),
                        question="", target=mt.agent, targets=mt.picks, capabilities=mt.can, lines=mt.lines,
+                       way_back=sheaf_view.byline(self.hub, e.address, req.member),
                        sent=self.hub.box_waits.pending(e.address, e.live.current()[1]), **extra)
         v = self.hub.tell.view(e.address)
         return _ok(**snap, seen=self.hub.seen.get(e.address),

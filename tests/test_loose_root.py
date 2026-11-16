@@ -101,12 +101,11 @@ def test_keep_is_stored_in_the_roots_sheaf_folder_not_in_the_text(agents):
 
 def test_two_members_with_the_same_short_name_never_share_a_root(agents):
     """Cal's short is empty and his name derives to `bea`: Bea's root is Bea's, Cal gets another."""
-    bea = agents.hub.proxy.members[BEA]
     agents.hub.proxy.members[CAL] = dataclasses.replace(agents.hub.proxy.members[CAL], name="Bea", short="")
     a = made(agents, "bea-claude", doc="notes.md", text=TEXT)
     c = made(agents, "cal-claude", doc="notes.md", text=TEXT)
     assert a["doc"].split("/")[0] != c["doc"].split("/")[0]
-    assert agents.hub.owns(bea, agents.hub.roots.get(a["doc"].split("/")[0]))
+    assert agents.hub.owns(agents.hub.proxy.members[BEA], agents.hub.roots.get(a["doc"].split("/")[0]))
     assert not agents.hub.owns(agents.hub.proxy.members[CAL], agents.hub.roots.get(a["doc"].split("/")[0]))
     bad, _ = call(agents, "cal-claude", "read", doc=a["doc"])
     assert bad

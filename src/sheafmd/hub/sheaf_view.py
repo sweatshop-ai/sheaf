@@ -149,7 +149,7 @@ def mine(hub, member, root_name: str) -> bool:
 def data(hub, member, titles: Titles, view: str = "") -> dict:
     """`{tree, rows, more}` for `member`: every document of each of their roots that they may open, newest change first. A row
     is `{doc, url, title, root, folder, share, mtime, when, open, write, write_tip, session, session_tip, session_link}`:
-    the folder is the path on disk; `share` the hash of a page of the member's own loose root that no Share line opens (the
+    the folder is the path on disk; `can_move` whether the member may Move it (a page of their own loose root, 9.11); `share` the hash of a page of the member's own loose root that no Share line opens (the
     row's Share button writes against it), else ""; `write` the last write and `session` the writer of the last line that named
     an agent session. The tooltips hold the machine and the session's id, and only what the writer declared. No List status is
     in it. `more` is `{root: n}`, what the listing's cap (8.6) left out of each root."""
@@ -188,7 +188,8 @@ def data(hub, member, titles: Titles, view: str = "") -> dict:
                 write_tip, session_tip_, link = last.host if last else "", session_tip(session) if session else "", way_back(session, member)
             rows.append({"doc": told, "url": d["url"] if told == address else roots_mod.url_path(told), "title": title, "root": SHARED if given else at.root,
                          "folder": folder, "shared_by": agent, **given,
-                         "share": unshared if mine(hub, member, at.root) and not given else "", "mtime": d["mtime"], "when": index_mod.when(d["mtime"], now),
+                         "share": unshared if mine(hub, member, at.root) and not given else "",
+                         "can_move": mine(hub, member, at.root) and not given, "mtime": d["mtime"], "when": index_mod.when(d["mtime"], now),
                          "open": d["open"], "own": mine(hub, member, at.root) and not given, "archived": archived, "kept": kept_, "write": say_write(last, session),
                          "write_tip": write_tip,
                          "session": session.writer if session else "",

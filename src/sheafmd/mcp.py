@@ -20,7 +20,7 @@ import json
 import os
 import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -126,7 +126,7 @@ TOOLS = {
         "required": ["doc", "text", "expected_hash"]},
 }
 PAGE_TOOLS = ("read", "create", "update")    # the key, or a token made with --write (SPEC 9.7)
-WRITE_TOOLS = ("create", "update")           # each call leaves a row in the diagnostics log (SPEC 15)
+WRITE_TOOLS = ("create", "update")           # each call leaves a row in the diagnostics log (SPEC 15) and a line in the Write log (9.12)
 SESSION_WRITES = ("create", "update", "reply", "resolve")    # a write that names James's session to the hub (9.12)
 MAX_TEXT = 1024 * 1024           # bytes of UTF-8 a create or an update may write (SPEC 12)
 NO_RIGHT = ("This token reads and answers comments; it does not read, make or change pages. A "
@@ -144,6 +144,7 @@ class Caller:
     token: TokenRow | None = None
     session: str | None = None      # James's session, from X-James-Session: set only for a token of `[list]`'s james_tokens (9.12)
     own_session: bool = False       # False on a james_tokens entry but the own one: its header is read, never resolved to an own session
+    declared: dict = field(default_factory=dict)    # what the caller declared in headers: session, host, link, chat (the Write log)
 
     @property
     def token_name(self) -> str | None:
@@ -236,6 +237,19 @@ def markdown_files(root) -> list[str]:
                 if len(out) >= WALK_LIMIT:
                     return out
     return out
+
+
+def written_from(caller: Caller) -> tuple[str, dict]:
+    """(place class, declared) of a door write, for the Write log, what the caller declared in its headers kept as declared.
+    The box's James (a token of `[list]`'s james_tokens) is `tiroir`, and his `X-James-Session` the session when he declared
+    no other; a caller that declared a chat id is a chat client; one that declared a session, a machine or a link, or that is
+    the stdio door, is a laptop; any other is a chat client that declared nothing."""
+    d = dict(caller.declared)
+    if caller.session is not None:
+        d["session"] = d.get("session") or caller.session
+        return "tiroir", d
+    laptop = caller.token is None or d.get("session") or d.get("host") or d.get("link")
+    return ("chat client" if d.get("chat") or not laptop else "laptop"), d
 
 
 class Door:
@@ -698,10 +712,16 @@ class Door:
             self.hub.record(f"door-{name}", doc, outcome="stale" if isinstance(e, Stale) else "refused",
                             reason=e.why, **who)
             raise
+        if name in WRITE_TOOLS and out.get("changed", True):
+            self._logged_write(name, out["doc"], caller)
         self.hub.record(f"door-{name}", out["doc"], outcome="written" if out.get("changed", True)
                         else "unchanged", hash=out["hash"], bytes=len(_as_read(args["text"]).encode("utf-8")),
                         **who)
         return out
+
+    def _logged_write(self, name: str, address: str, caller: Caller):
+        place, declared = written_from(caller)
+        self.hub.writes.add(address, caller.display, place, name, **declared)
 
     @staticmethod
     def _check_size(text: str):
@@ -888,6 +908,7 @@ class Door:
             _check_comments(now_text, text)
             written[0] = self._door_text(text, now_text, address, caller)
             self._check_size(written[0])
+            self.hub.writes.expect_own(address, md_hash(written[0]))       # a look at the file before `wrote()` is not a disk write
             return written[0]
 
         def move(now_text, new):

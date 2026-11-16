@@ -42,6 +42,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .. import config, signals
+from ..source import md_hash
 from . import state
 
 GIT_SECONDS = 20                # a commit's git commands
@@ -244,6 +245,22 @@ def _locking(folder: Path, *args, author=None):
         raise
 
 
+def _author(folder: Path, commit: str, rel: str) -> str:
+    """Who last changed `rel` as of `commit`: `?` when git cannot say, since a missing name must never stop a pull."""
+    try:
+        return _git(folder, "log", "-1", "--format=%an", commit, "--", rel).stdout.strip() or "?"
+    except (subprocess.SubprocessError, OSError):
+        return "?"
+
+
+def _hash_of(path: Path) -> str | None:
+    """The hash of the text of `path`, None for a file that is not there or not text."""
+    try:
+        return md_hash(path.read_bytes().decode("utf-8"))      # the bytes, as a page reads them: no newline translation
+    except (OSError, ValueError):
+        return None
+
+
 def _last_line(r) -> str:
     lines = (r.stderr or r.stdout or "").strip().splitlines()
     return lines[-1][:300] if lines else f"git exited {r.returncode}"
@@ -275,15 +292,19 @@ def _again(folder: Path, commit: str, onto: str):
 
 
 class Commits:
-    def __init__(self, record, guard=None, roots=None, refuse_rewrite=False):
+    def __init__(self, record, guard=None, roots=None, refuse_rewrite=False, pulling=None, pulled=None):
         """`record(kind, doc, **detail)` writes a diagnostics row (15). `guard(root, files)` gives a context that
         holds what a writer of each of `files` (absolute paths) holds before the repo's lock (9.11): a pull takes
         it before it changes them. `roots()` gives the registered roots: the repo of one pushes only when its other
         roots that commit push too (#89), judged by the pusher when it takes the repo. `refuse_rewrite`, a bool or a
         function that gives one: whether a pull refuses a remote branch that no longer holds the tip the hub last
         saw there (a force-push), kept in the repo's own ref `refs/sheaf/last-seen/<branch>`; off, no ref is read
-        or written and a pull is as it was."""
+        or written and a pull is as it was. `pulling(folder, [(path, author)])` hears of the files a pull is about to
+        change and who last wrote each, before the work tree moves; `pulled(folder, files, ok)` hears it end, `ok` false
+        when the pull was refused or failed: the Write log's line of it."""
         self._record = record
+        self._pulling = pulling or (lambda folder, files: None)
+        self._pulled = pulled or (lambda folder, files, ok, left=None: None)
         self._guard = guard or (lambda root, files: nullcontext())
         self._roots = roots or (lambda: ())
         self._refuse = refuse_rewrite if callable(refuse_rewrite) else (lambda: refuse_rewrite)
@@ -603,12 +624,31 @@ class Commits:
                    if p]
         # The writers' locks first, the repo's last (9.11): no write of a file the remote changed comes between
         # the look at it and its new text, and no commit of any root of the repo between the hub's HEAD read and moved.
-        with self._guard(root, [top / p for p in changed]), self._repo_lock(folder):
-            self._sweep(root, _repo(folder))           # what a page made since the pusher's sweep, before the work tree moves
-            go = self._catch_up(folder, theirs, address, record)
-            if go:
-                self._last_seen(folder, name, theirs)
-            return go
+        # The Write log's window opens now and closes however the pull ends, so the page that takes the pull in is never
+        # taken for a disk write, nor a later write for the pull.
+        pages = [top / p for p in changed if p.endswith(".md")]
+        self._tell(self._pulling, address, folder, [(path, "?") for path in pages])
+        go, left = False, {}
+        try:
+            with self._guard(root, [top / p for p in changed]), self._repo_lock(folder):
+                self._sweep(root, _repo(folder))           # what a page made since the pusher's sweep, before the work tree moves
+                go = self._catch_up(folder, theirs, address, record)
+                if go:
+                    self._last_seen(folder, name, theirs)
+                left = {path: _hash_of(path) for path in pages}   # the text the pull left, before a writer's lock is let go
+        finally:
+            # Who last wrote each page, asked of the commit pulled, which the locks do not guard: a slow git holds up no writer.
+            ok = go is not False
+            authors = [(path, _author(top, theirs, path.relative_to(top).as_posix()) if ok else "?") for path in pages]
+            self._tell(self._pulled, address, folder, authors, ok, left)
+        return go
+
+    def _tell(self, call, address, *args):
+        """The Write log's hearing of a pull: its failure is a diagnostics row, never the pull's."""
+        try:
+            call(*args)
+        except Exception:
+            self._record("write-log-failed", address)
 
     def seed(self, roots):
         """At hub start: for each repo of `roots` (git work trees) that has no last-seen ref for its branch yet, set it

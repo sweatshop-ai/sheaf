@@ -1,6 +1,7 @@
 """Saves on a repo page (SPEC 8.11, 14): the tiroir serves a clone as a root, a save or a door `update` commits and pushes
 on `dev` where the remote has it, else on the branch the repo's `.sheaf.toml` names, and with neither the page is read-only
 with a line. Everything runs against local bare repos and a fake App, as test_repo_pages.py does."""
+import base64
 import dataclasses
 import json
 import subprocess
@@ -20,9 +21,11 @@ from sheafmd.hub import proxy as proxy_mod
 from sheafmd.hub import repos as repos_mod
 from sheafmd.hub import visibility
 from sheafmd.hub.repos import Repos, root_name
+from sheafmd.hub.state import Tokens
 from sheafmd.source import md_hash
 
 ADDRESS = f"{root_name(REPO)}/docs/plan.md"
+HEADER = base64.b64encode(b"x-access-token:ghs_faketoken").decode()     # how the token reaches git, in the environment
 
 
 def push_branch(origin, tmp_path, name, toml=None, on="main"):
@@ -250,6 +253,29 @@ def test_a_page_with_no_owner_record_opens_to_nobody_and_one_with_it_to_its_memb
     assert hub_repos.get(f"/{root_name(REPO)}/notes/idea.md", member=BEA).status in (403, 404)    # nobody reported it
 
 
+@DEV
+def test_no_door_path_judges_a_clone_page_on_its_raw_front_matter(hub_repos):
+    """A page of a clone with no `visibility:` line is its reporter's alone at the door as on the page: another member's
+    agent and a token bound to nobody neither read, list nor update it (SPEC 14)."""
+    text = served(hub_repos)
+    assert "visibility" not in text
+    loose = Tokens().add("loose", write=True).token
+    hub_repos.tokens["loose"] = loose
+    bad, said = door_call(hub_repos, "bea-claude", "read", doc=ADDRESS)
+    assert not bad, said
+    bad, said = door_call(hub_repos, "bea-claude", "documents", root=root_name(REPO), open_only=False)
+    assert not bad and ADDRESS in said, said
+    for who in ("cal-claude", "loose"):
+        bad, said = door_call(hub_repos, who, "read", doc=ADDRESS)
+        assert bad and "By the door" not in said and "A plan" not in said, (who, said)
+        bad, said = door_call(hub_repos, who, "documents", root=root_name(REPO), open_only=False)
+        assert ADDRESS not in said, (who, said)
+        bad, said = door_call(hub_repos, who, "update", doc=ADDRESS, expected_hash=md_hash(text), text=text + "\nTaken.\n")
+        assert bad, (who, said)
+    assert remote_commits(hub_repos, "dev") == []
+    assert hub_repos.hub.file(ADDRESS).read_text(encoding="utf-8") == text
+
+
 # ── the wiring ───────────────────────────────────────────────────────────────
 
 def test_a_proxy_repos_table_builds_a_repos_whose_token_comes_from_its_command(tmp_path):
@@ -383,7 +409,7 @@ def test_a_save_racing_the_switch_of_the_clone_is_held_and_never_carried_onto_th
 
 
 @DEV
-def test_nothing_but_fetch_and_push_asks_for_the_token(hub_repos):
+def test_a_clone_command_asks_for_the_token_once_a_call_and_never_keeps_it(hub_repos):
     served(hub_repos)
     asked, here, real = [], threading.local(), commits_mod._git
 
@@ -401,8 +427,39 @@ def test_nothing_but_fetch_and_push_asks_for_the_token(hub_repos):
         hub_repos.hub.commits.settle()
     finally:
         commits_mod._git = was
-    assert asked and set(asked) <= {"fetch", "push"}, asked
+    assert {"fetch", "push"} <= set(asked) and set(asked) - {"fetch", "push"}, asked    # a lazy blob fetch can come from any command
     assert len(remote_commits(hub_repos, "dev")) == 1
+
+
+@DEV
+def test_every_git_call_in_a_clone_gets_the_token_in_its_environment(hub_repos):
+    """A blobless clone fetches missing blobs from any command (`read-tree`, `merge-tree`, ...): every git command run in
+    the clone, or a folder of it, gets the credential for that one call (SPEC 14)."""
+    served(hub_repos)
+    clone = the_clone(hub_repos)
+    for args in (("read-tree", "-m", "-u", "HEAD"), ("merge-tree", "--write-tree", "HEAD", "HEAD"), ("status",), ("log", "-1")):
+        seen = {}
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(commits_mod.subprocess, "run", lambda argv, **kw: seen.update(env=kw["env"]) or subprocess.CompletedProcess(argv, 0, "", ""))
+            commits_mod._git(clone, *args)
+        assert seen["env"].get("GIT_CONFIG_KEY_0") == "http.extraHeader", args
+        assert HEADER in seen["env"]["GIT_CONFIG_VALUE_0"], args
+    seen = {}
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(commits_mod.subprocess, "run", lambda argv, **kw: seen.update(env=kw["env"]) or subprocess.CompletedProcess(argv, 0, "", ""))
+        commits_mod._git(clone / "docs", "blame", "x")                     # a folder of the clone is the clone's
+    assert HEADER in seen["env"].get("GIT_CONFIG_VALUE_0", "")
+
+
+@DEV
+def test_the_token_each_git_call_gets_is_in_no_file_after_a_save(hub_repos):
+    served(hub_repos)
+    assert save(hub_repos).status == 200
+    hub_repos.hub.commits.settle()
+    assert len(remote_commits(hub_repos, "dev")) == 1
+    base = hub_repos.hub.repos.base
+    for f in (p for p in base.rglob("*") if p.is_file() and "objects" not in p.parts):
+        assert b"ghs_faketoken" not in f.read_bytes() and HEADER.encode() not in f.read_bytes(), f
 
 
 def test_one_helper_names_the_owner_a_report_records_and_the_one_a_page_is_matched_by():

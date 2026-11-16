@@ -4,6 +4,7 @@ and `--keep` pages are never archived; a hub's first boot archives nothing, what
 handler in proxy mode and the door, in memory, with the hub's clock under test control."""
 import json
 import os
+import threading
 import time
 
 import pytest
@@ -14,6 +15,7 @@ from test_write_log import agents  # noqa: F401  (fixture)
 
 from sheafmd import config
 from sheafmd.hub import archive, loose
+from sheafmd.hub import roots as roots_mod
 
 DAY = 86400
 TEXT = "# Notes\n\nA first page.\n\nSecond paragraph.\n"
@@ -244,26 +246,62 @@ def test_keep_is_the_owners_alone_on_the_row_and_the_route(agents, clock):
     assert loose.marks(root_of(agents, doc).path) == []
 
 
-def test_a_keep_file_that_cannot_be_read_stops_the_sweep_and_archives_nothing(agents, clock):
+def test_a_keep_file_that_cannot_be_read_stops_that_root_and_archives_nothing_of_it(agents, clock):
     doc = made(agents, "bea-claude", keep=True)
     other = made(agents, "bea-claude", doc="other.md")
     sweep(agents)
     marks = root_of(agents, doc).path / ".sheaf"
     (marks / "keep.json").write_text("{not a list", encoding="utf-8")
     clock.now += 400 * DAY
-    with pytest.raises(loose.Refused):
-        sweep(agents)
+    sweep(agents)                                           # the root is refused whole and the sweep goes on
     assert not (marks / "archived.json").exists()
     assert set(docs(agents)) >= {other}
+
+
+def test_a_root_whose_marks_cannot_be_read_does_not_stop_the_sweep_of_the_next_member(agents, clock):
+    mine = made(agents, "bea-claude", doc="bea.md")
+    theirs = made(agents, "cal-claude", doc="cal.md")
+    sweep(agents)                                           # first seen of both
+    (root_of(agents, mine).path / ".sheaf" / "keep.json").write_text("{not a list", encoding="utf-8")
+    clock.now += 31 * DAY
+    sweep(agents)
+    assert docs(agents, member=CAL, view="archived") == [theirs]
+    assert docs(agents, member=BEA, view="archived") == []
+
+
+def test_the_sweep_covers_the_pages_past_the_listing_cap(agents, clock, monkeypatch):
+    monkeypatch.setattr(roots_mod, "LIST_CAP", 2)
+    made_ = [made(agents, "bea-claude", doc=f"p{i}.md") for i in range(4)]
+    sweep(agents)
+    clock.now += 31 * DAY
+    sweep(agents)
+    archived = loose.times(root_of(agents, made_[0]).path, archive.ARCHIVED)
+    assert sorted(rel.rpartition("/")[2] for rel in archived) == [f"p{i}.md" for i in range(4)]
 
 
 def test_the_hub_tick_runs_the_sweep_every_ten_minutes_and_at_start(agents, clock):
     doc = made(agents, "bea-claude")
     agents.hub.tick()                                       # the first tick sweeps: first seen is written
+    agents.hub.archive.settle()
     assert (root_of(agents, doc).path / ".sheaf" / "seen.json").exists()
     clock.now += 31 * DAY
     agents.hub.tick()
+    agents.hub.archive.settle()
     assert docs(agents, view="archived") == [doc]
+
+
+def test_a_slow_sweep_does_not_delay_the_tick(agents, clock, monkeypatch):
+    release, ran = threading.Event(), []
+
+    def slow(self):
+        release.wait(5)
+        ran.append(threading.current_thread())
+    monkeypatch.setattr(archive.Archive, "sweep", slow)
+    agents.hub.tick()
+    assert ran == []                                        # the tick came back with the sweep still running
+    release.set()
+    agents.hub.archive.settle()
+    assert ran and ran[0] is not threading.current_thread()
 
 
 # ── AC 5: the first boot (R18) ───────────────────────────────────────────────

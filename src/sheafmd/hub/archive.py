@@ -9,6 +9,7 @@ import contextlib
 import os
 import shutil
 import stat
+import threading
 from pathlib import Path
 
 from .. import config
@@ -55,6 +56,14 @@ class Archive:
     def __init__(self, hub):
         self.hub = hub
         self._next = 0.0
+        self._worker: threading.Thread | None = None    # the sweep, the purge and the clones' sleep: one at a time, off the tick
+        self._refused: set = set()                      # roots whose refusal is recorded already, until they are read again
+
+    def own_root(self, folder):
+        """The root of a member's loose `folder` when that folder is the root itself, else None: a folder inside another root
+        or a git work tree is that root's, and its trash and marks are not read, nor a page put back into it."""
+        root = self.hub.roots.for_document(Path(folder) / "x.md")
+        return root if root.path == Path(os.path.realpath(folder)) else None
 
     # ── the loose roots ──────────────────────────────────────────────────────
     def _loose_roots(self):
@@ -66,45 +75,77 @@ class Archive:
             member = proxy.members.get(mid)
             if member is None:
                 continue
-            root = self.hub.roots.for_document(Path(folder) / "x.md")
-            if root.path == Path(os.path.realpath(folder)):
+            if (root := self.own_root(folder)) is not None:
                 yield member, root
 
     def _pages(self, member, root) -> list:
         found = self.hub.index.data(member=member)
+        pages = []
         for r in found["roots"]:
             if r["name"] == root.name and "shared_from" not in r:
-                return [(roots_mod.Address.parse(d["doc"]).rel, d["mtime"], d["open"]) for d in r["docs"]]
-        return []
+                pages = [(roots_mod.Address.parse(d["doc"]).rel, d["mtime"], d["open"]) for d in r["docs"]]
+        if found["more"].get(root.name):                # the listing stops at its cap: the sweep reads the rest from the root itself
+            have = {rel for rel, _, _ in pages}
+            for f in roots_mod.list_documents(root, cap=roots_mod.COUNT_LIMIT).docs:
+                if f.rel not in have:
+                    address = str(roots_mod.Address(root.name, f.rel))
+                    if (s := self.hub.index.summary(address, root.path / f.rel, f.stat, member)) is not None:
+                        pages.append((f.rel, f.stat.st_mtime, s.open))
+        return pages
 
     def days(self, root) -> int:
         return config.load_root_config(root.path, lambda _m: None).archive_after
 
     # ── the sweep ────────────────────────────────────────────────────────────
     def tick(self, now: float) -> None:
-        """The sweep on the hub's tick: at the first tick, then every ten minutes."""
-        if now < self._next:
+        """The sweep on the hub's tick: at the first tick, then every ten minutes. It runs in a thread of its own, one at a
+        time: a listing of every loose root and the clones' git calls are not the tick's to wait for."""
+        if now < self._next or (self._worker is not None and self._worker.is_alive()):
             return
         self._next = now + SWEEP_EVERY
+        self._worker = threading.Thread(target=self._run, name="archive-sweep", daemon=True)
+        self._worker.start()
+
+    def _run(self) -> None:
         try:
-            self.sweep()                        # a root whose marks cannot be read stops this, not the trash or the clones
+            self.sweep()
+        except Exception:
+            self.hub.record_exception("archive-failed")
         finally:
-            self.purge()
-            if getattr(self.hub, "repos", None) is not None:
-                self.hub.repos.sleep_idle()     # a clone nobody used for thirty days sleeps (13)
+            try:
+                self.purge()
+                if getattr(self.hub, "repos", None) is not None:
+                    self.hub.repos.sleep_idle()     # a clone nobody used for thirty days sleeps (13)
+            except Exception:
+                self.hub.record_exception("archive-failed")
+
+    def settle(self, seconds: float = 30.0) -> None:
+        """Wait for the sweep the tick started, if one runs."""
+        if (t := self._worker) is not None:
+            t.join(seconds)
 
     def sweep(self) -> None:
-        """Mark the pages that are due, in each loose root. A root whose marks cannot be read is refused (`loose.Refused`)
-        before anything of it is written, never read as none."""
+        """Mark the pages that are due, in each loose root. A root whose marks cannot be read is refused whole
+        (`loose.Refused`) before anything of it is written, never read as none, and the other roots are swept all the same."""
         now = self.hub.clock()
         for member, root in self._loose_roots():
-            pages = self._pages(member, root)
-            marks = Marks(root.path)
-            loose.stamp(root.path, SEEN, {rel: now for rel, _, _ in pages if rel not in marks.seen}, only_new=True)
-            seen = {**{rel: now for rel, _, _ in pages}, **marks.seen}
-            gone = due(pages, marks.archived, seen, marks.kept, now, self.days(root))
-            mtimes = {rel: mtime for rel, mtime, _ in pages}
-            loose.stamp(root.path, ARCHIVED, {rel: max(now, mtimes[rel]) for rel in gone})
+            try:
+                self._sweep_root(member, root, now)
+            except loose.Refused:
+                if root.path not in self._refused:      # told once, until the root is read again
+                    self._refused.add(root.path)
+                    self.hub.record_exception("archive-root-refused", root=root.name)
+            else:
+                self._refused.discard(root.path)
+
+    def _sweep_root(self, member, root, now: float) -> None:
+        pages = self._pages(member, root)
+        marks = Marks(root.path)
+        loose.stamp(root.path, SEEN, {rel: now for rel, _, _ in pages if rel not in marks.seen}, only_new=True)
+        seen = {**{rel: now for rel, _, _ in pages}, **marks.seen}
+        gone = due(pages, marks.archived, seen, marks.kept, now, self.days(root))
+        mtimes = {rel: mtime for rel, mtime, _ in pages}
+        loose.stamp(root.path, ARCHIVED, {rel: max(now, mtimes[rel]) for rel in gone})
 
     # ── what a row says ──────────────────────────────────────────────────────
     def facts(self, root) -> Marks | None:
@@ -187,13 +228,14 @@ class Archive:
         src = Path(root.path) / TRASH / stamp / rel
         if not os.path.lexists(src) or not stat.S_ISREG(os.lstat(src).st_mode):
             raise KeyError(ident)
-        dest = Path(root.path) / rel
-        if os.path.lexists(dest):
-            raise Taken(rel)
-        for part in reversed(Path(rel).parents):
-            if str(part) != ".":
-                os.makedirs(Path(root.path) / part, mode=0o700, exist_ok=True)
-        os.rename(src, dest)            # rename, not replace: a page that came in between is not overwritten
+        with state.file_locked("loose-keep.lock"):
+            dest = Path(root.path) / rel
+            if os.path.lexists(dest):
+                raise Taken(rel)
+            for part in reversed(Path(rel).parents):
+                if str(part) != ".":
+                    os.makedirs(Path(root.path) / part, mode=0o700, exist_ok=True)
+            os.rename(src, dest)            # rename, not replace: a page that came in between is not overwritten
         loose.stamp(root.path, SEEN, {rel: self.hub.clock()})
         with contextlib.suppress(OSError):
             for p in Path(rel).parents:

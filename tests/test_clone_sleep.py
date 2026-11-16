@@ -3,9 +3,11 @@ still read at their last text from the commit; a new report wakes it and widens 
 archived, deleted or marked, and only the member deletes a clone. Against local bare repos and a fake App, as
 tests/test_repo_pages.py does."""
 
+import threading
+
 import pytest
 from test_hub_commits import box, git, merged_on_github, rectoversos, remote  # noqa: F401  (fixtures)
-from test_repo_pages import REPO, app, clones, hub_repos, origin, report, sh, the_clone  # noqa: F401  (fixtures and helpers)
+from test_repo_pages import REPO, app, clones, hub_repos, origin, report, report_once, sh, the_clone  # noqa: F401  (fixtures and helpers)
 from test_send import keyring, local, no_real_keyring, run, scratch, tiroir  # noqa: F401  (fixtures)
 from test_write_log import agents  # noqa: F401  (fixture)
 
@@ -120,4 +122,43 @@ def test_the_hub_tick_puts_an_idle_clone_to_sleep(napping):
     napping.now[0] += 31 * DAY
     napping.hub.clock = lambda: napping.now[0]
     napping.hub.tick()
+    napping.hub.archive.settle()
     assert napping.hub.repos.sleeping(REPO)
+
+
+def test_a_clone_is_shrunk_on_the_repos_own_thread_and_not_on_the_callers(napping, monkeypatch):
+    repos, threads = napping.hub.repos, []
+    real = repos._git
+
+    def watch(at, *args, **kw):
+        if args[:1] == ("sparse-checkout",):
+            threads.append(threading.current_thread().name)
+        return real(at, *args, **kw)
+    monkeypatch.setattr(repos, "_git", watch)
+    napping.now[0] += 31 * DAY
+    repos.sleep_idle()
+    assert threads and all(name == f"repos-{REPO}" for name in threads)
+
+
+def test_a_report_that_comes_while_a_clone_goes_to_sleep_leaves_it_awake_and_full(napping, monkeypatch):
+    repos, woke, reported = napping.hub.repos, threading.Event(), []
+    real_git, real_wake = repos._git, repos._wake
+
+    def git_(at, *args, **kw):
+        out = real_git(at, *args, **kw)
+        if args == ("sparse-checkout", "set", "--cone") and not reported:       # the shrink has run: a report comes in
+            reported.append(report_once(napping))
+            woke.wait(0.5)      # a wake that runs beside the sleep would end here; one that waits its turn is not waited for
+        return out
+
+    def wake(*args, **kw):
+        woke.set()
+        return real_wake(*args, **kw)
+    monkeypatch.setattr(repos, "_git", git_)
+    monkeypatch.setattr(repos, "_wake", wake)
+    napping.now[0] += 31 * DAY
+    repos.sleep_idle()
+    assert repos.settle()
+    assert reported and not reported[0][0]
+    assert not repos.sleeping(REPO)
+    assert sh(the_clone(napping), "sparse-checkout", "list").split() == ["docs", "notes"]

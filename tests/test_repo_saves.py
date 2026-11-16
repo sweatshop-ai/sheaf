@@ -552,3 +552,49 @@ def test_a_member_whose_id_is_anothers_short_name_does_not_own_that_members_page
     text = doc.read_text(encoding="utf-8")
     got = box.post("/_/share", {"doc": DOC, "hash": md_hash(text)}, member="nell")
     assert got.status != 200 and doc.read_text(encoding="utf-8") == text
+
+
+# ── a write to a sleeping clone wakes it first ───────────────────────────────
+
+def asleep(hub_repos):
+    """The clone made by a report, its page opened, and thirty-one days without use: its folders are out of the work tree."""
+    repos, now = hub_repos.hub.repos, [1_000_000.0]
+    repos.clock = lambda: now[0]
+    text = served(hub_repos)
+    assert hub_repos.get(f"/{ADDRESS}", member=BEA).status == 200       # the page is open: the hub holds its entry
+    now[0] += 31 * 86400
+    assert repos.sleep_idle() == [REPO]
+    assert not hub_repos.hub.file(ADDRESS).exists()
+    return text
+
+
+@DEV
+def test_a_save_on_a_sleeping_clones_page_wakes_the_clone_and_commits_on_dev(hub_repos):
+    text = asleep(hub_repos)
+    i = next(i for i, b in enumerate(split_md_blocks(text)) if b.content.startswith("A plan"))
+    r = hub_repos.post("/_/save", {"doc": ADDRESS, "hash": md_hash(text), "branch": "dev",
+                                   "edits": [{"i": i, "html": "<p>A plan, saved on the page.</p>"}]}, member=BEA)
+    assert r.status == 200, r.text
+    assert not hub_repos.hub.repos.sleeping(REPO)
+    assert hub_repos.hub.file(ADDRESS).read_text(encoding="utf-8").endswith("A plan, saved on the page.\n")
+    assert remote_commits(hub_repos, "dev") == ["Bea|edit: docs/plan.md"]
+
+
+@DEV
+def test_a_door_update_on_a_sleeping_clones_page_wakes_the_clone_and_commits_on_dev(hub_repos):
+    text = asleep(hub_repos)
+    bad, said = door_call(hub_repos, "bea-claude", "update", doc=ADDRESS, expected_hash=md_hash(text),
+                          text=text + "\nA line the door added.\n")
+    assert not bad, said
+    assert not hub_repos.hub.repos.sleeping(REPO)
+    assert hub_repos.hub.file(ADDRESS).read_text(encoding="utf-8").endswith("A line the door added.\n")
+    assert len(remote_commits(hub_repos, "dev")) == 1
+
+
+@DEV
+def test_a_write_to_a_clone_that_moved_to_another_tiroir_does_not_wake_it(hub_repos):
+    text = served(hub_repos)
+    assert hub_repos.hub.repos.sleep_moved(REPO, "https://there.example")
+    hub_repos.post("/_/save", {"doc": ADDRESS, "hash": md_hash(text), "branch": "dev",       # whatever the answer: it stays asleep
+                               "edits": [{"i": 1, "html": "<p>A plan, saved on the page.</p>"}]}, member=BEA)
+    assert hub_repos.hub.repos.sleeping(REPO) and hub_repos.hub.repos.moved_to(REPO) == "https://there.example"

@@ -105,7 +105,7 @@ def _landed(hub, door, b, owner) -> tuple:
     address = made["doc"]
     try:
         for v in b.get("versions", []):
-            hub.versions.put(address, visibility.unshare(visibility.without_ticked_share(v["text"])))     # a version restored brings back no audience
+            hub.versions.put(address, visibility.set_keys(visibility.without_ticked_share(v["text"]), {"shared": None}))     # a version restored brings back no audience
         by = (b.get("from") or {}).get("by") if isinstance(b.get("from"), dict) else None
         came_from = (b.get("from") or {}).get("origin") if isinstance(b.get("from"), dict) else None
         hub.writes.carry(address, b.get("writes", []), came_from if isinstance(came_from, str) else "",

@@ -146,6 +146,10 @@ _Avoid_: mirror, checkout
 A loose page out of the Sheaf's default view, after a time with no write and no comment, or by the member's hand. It still opens at its address and comes back when written or commented. Not deleted: only the member deletes a page. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 13; not built.)
 _Avoid_: expired, stale
 
+**Laptop token**:
+The agent token that "Connect a laptop" makes for one laptop of one member. It signs as `Claude Code (<member>)` whichever laptop it is, is checked by the hub on every request, sees what its member sees, and is revoked by the laptop's name. `sheaf connect` puts it in the laptop's login keyring and in Claude Code's MCP entries. (Decided 2026-11-16, wayfinder `sheaf-in-open-webui` ticket 05; the Sheaf's page for it comes with the Sheaf view.)
+_Avoid_: device key, API key
+
 **Write log**:
 The hub's own record of the writes to its pages, one line per write whatever the path: who wrote, from which place (laptop, chat client, tiroir, page), and the agent session when it is known. It is where a row of the Sheaf gets its last write and its last agent session. Not the Diagnostics log, which records what went wrong. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 09; not built.)
 _Avoid_: journal, history, audit log

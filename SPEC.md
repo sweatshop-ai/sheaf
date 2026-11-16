@@ -235,6 +235,7 @@ A state file the hub cannot read as JSON of the kind it expects (`tokens.json`, 
 port = 27419        # the hub port; one per account on a shared box
 name = "Ada"        # who you are: author of your comments and default byline (6.3)
 browser = true      # false: sheaf never opens a browser window
+tiroir = "https://host"   # the shared Sheaf this laptop sends to by default; `sheaf connect` writes it when there is none
 ```
 
 Every key is optional. Resolution, first found wins:
@@ -914,6 +915,8 @@ In loopback mode a reverse proxy or a tunnelling service in front of a hub fails
 **What a write token reaches.** Every document of every registered root, as the comment tools do; in proxy mode, for a token a member's `tokens` name, only that member's roots, and of the rectoversos that are their owner's alone only those that member may open, as for the comment tools (9.11): a write token that leaks can read and rewrite every `.md` of the hub's roots, so a hub that holds one is given only the roots its caller needs. A token held to one root, or to the pages it made itself, were the other ways; neither was chosen.
 
 **A token's pages are hostile content.** A process that holds a write token may put text into a page that third parties wrote, such as a mail. Such a page is a document like any other: every render of it goes through the sanitiser and the CSP of 9.5, so a `<script>`, an `on*` attribute or a `javascript:` address in its text never runs in the person's signed-in tab. What the text cannot carry is a comment: `create` refuses a text that holds a comment (5.2), and `update` one whose comments are not exactly the file's (12), so text quoted into a page cannot plant a thread, or a reply, in someone's name. Each `create` and `update` writes a row in the diagnostics log (15), with the token's name and never the text.
+
+**A laptop's token (Connect a laptop).** In proxy mode a member names a laptop and the hub makes an agent token for that laptop and that member: `POST /_/laptops {name}` on the proxy socket answers once with `{name, token, command}`, `command` being `sheaf connect <front> <token>`; `GET /_/laptops` lists the member's laptops (name, created, last used, never a token); `POST /_/laptops/revoke {name}` deletes the row. The name is one printable line of at most 60 characters and unique for the member, compared without case. The token is an agent's token for the client `Claude Code` with `--write` rights; its row also keeps the member's front id and the laptop's name, and the member comes from the row, not from `[proxy.members]`'s `tokens`, so a token acts for the member it was made for and sees what that member sees (9.11), and for no other. The hub is where the token is checked: `tokens.json` is read on every request, so a revoked token gets `401` on its next call, with no fallback. A library door in front of the hub passes a `sheaf_mcp_` bearer through to the hub's `/_/mcp` unchanged and never reads which member it is. The laptops of one member sign alike (`Claude Code (Bea)`) and count as one agent to the rule that no two tokens sign the same name; a laptop whose signed name another token already has is refused with that reason, so the hub's next start is never stopped by it. `sheaf connect <url> <token>` (13) is the laptop's half.
 
 ### 9.8 Tell
 
@@ -1669,6 +1672,7 @@ Comment writes of the door go through the document's `LiveDocument` (or straight
 | `sheaf start` / `stop` / `restart` / `status` | Hub control; with the service installed, `start` and `restart` go through it |
 | `sheaf rotate` | New hub key (9.3) |
 | `sheaf signin-url` | Prints the sign-in URL (9.3) |
+| `sheaf connect URL TOKEN` | Connects this laptop to a shared Sheaf (9.7): checks that the address's door accepts the token (whatever door version it answers with), keeps the token in the login keyring under the address, adds the door (`<url>/mcp`, the token as its `Authorization` header) to Claude Code's MCP servers in `~/.claude.json` (`CLAUDE_CONFIG_DIR` when set), and writes `tiroir = URL` in `config.toml` when there is none. Nothing is written when the door refuses, and the token is never printed |
 | `sheaf token add NAME [--as DISPLAY] [--write]` / `list` / `revoke NAME` | MCP tokens (9.7); `--write` lets the token read, make and change pages (12) |
 | `sheaf roots` / `sheaf roots forget NAME` | Roots (8.2) |
 | `sheaf service install` / `uninstall` | The user service (14.3) |

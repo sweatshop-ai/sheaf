@@ -6,13 +6,15 @@ import json
 import os
 
 import pytest
-from test_share import ALICE, BOB, CAROL, NAMED, SHARED, call, line_edit, made, page, read, told, team, tick  # noqa: F401
+import test_share
+from test_share import ALICE, BOB, CAROL, SHARED, call, made, page, read, told, tick
 
 import sheafmd.comments as rdc
 from sheafmd.hub import forwards
 from sheafmd.source import md_hash
 
 PLAN = "# Alice's plan\n\nA plan.\n"
+team = test_share.team         # Alice, Bob and Carol of one tiroir, the fixture of the Share tests
 
 
 def move(team, member, doc, folder):
@@ -100,7 +102,7 @@ def test_a_move_carries_every_store_keyed_by_the_address(team):
     assert hub.seen.get(new) == {"c1": 2} and hub.seen.get(old) == {}
     assert hub.member_seen.get(ALICE, new) == {"c1": 2} and hub.member_seen.get(ALICE, old) == {}
     assert hub.member_opened.get(ALICE, new) == 5 and hub.member_opened.get(ALICE, old) == 0
-    assert [l.via for l in hub.writes.lines(new)] == ["create", "save", "move"] and hub.writes.lines(old) == []
+    assert [w.via for w in hub.writes.lines(new)] == ["create", "save", "move"] and hub.writes.lines(old) == []
     assert loose.marks(hub.roots.get("loose-alice").path) == ["b/plan.md"]
     assert "A note." in read(team, new)
     assert team.get(f"/_/doc?doc={new}", member=ALICE).status == 200
@@ -111,7 +113,7 @@ def test_the_write_log_forgets_the_old_address_after_a_restart(team):
     new = moved(team, ALICE, old, "b")
     from sheafmd.hub.writelog import WriteLog
     again = WriteLog()
-    assert again.lines(old) == [] and [l.via for l in again.lines(new)][-1] == "move"
+    assert again.lines(old) == [] and [w.via for w in again.lines(new)][-1] == "move"
 
 
 def test_share_goes_along_bob_still_opens_the_page_at_its_new_address(team):
@@ -157,15 +159,14 @@ def test_a_stranger_gets_the_same_answer_for_a_forwarded_address_as_for_one_neve
     assert got.status == 404 and got.body == never.body and "Location" not in got.headers
 
 
-def test_a_forward_is_followed_for_a_recipient_only_to_the_opaque_name(team):
+def test_a_forward_is_not_followed_for_a_recipient_who_never_knew_the_old_address(team):
     old = made(team, "alice", SHARED)["doc"]
     tick(team, ALICE, old, "Share")
-    new = moved(team, ALICE, old, "b/secret-folder")
-    got = page(team, BOB, old)
-    if got.status == 302:
-        assert "secret-folder" not in got.headers["Location"] and "loose-alice" not in got.headers["Location"]
-    else:
-        assert got.status == 404
+    kept = told(team, BOB, old)
+    moved(team, ALICE, old, "b/secret-folder")
+    never, got = page(team, BOB, "loose-alice/nothing/x.md"), page(team, BOB, old)
+    assert got.status == 404 and got.body == never.body and "Location" not in got.headers
+    assert page(team, BOB, kept).status == 200          # the name Bob holds still opens it
 
 
 def test_moving_a_page_back_opens_it_at_the_old_address_again(team):

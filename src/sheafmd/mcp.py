@@ -471,11 +471,30 @@ class Door:
         if to is None:
             return address
         member = self._member(caller)
+        if (far := self.hub.forwards.remote(address)) is not None:
+            if member is not None and self.hub.loose_owner(address) != member.id:
+                return address
+            raise self._moved_away(address, far, caller, member)
         if member is not None and self.hub.loose_owner(to) != member.id:
             return address
         if followed is not None:
             followed.append(address)
         return to
+
+    def _moved_away(self, address: str, far: dict, caller: Caller, member) -> ToolError:
+        """The answer of a tool that names an address whose page went to another tiroir (ticket 20): nothing is written, and the
+        sentence says who moved it, when, where it is, and what the caller does next, by the place it is calling from. The last line
+        is the one the CLI reads."""
+        where, declared = written_from(caller)
+        self.hub.record("moved-knock", address, via="door", place=where, member=member.short if member else "", to=far["origin"])
+        head = f"{address} was moved to {far['origin']} by {far['by']} on {far['at']} and is now {far['to']} there."
+        if where == "laptop":
+            tail = (f" `sheaf` sends it there itself when this laptop is connected to that shared Sheaf; otherwise run "
+                    f"`sheaf connect {far['origin']}`.")
+        else:
+            tail = f" Ask {far['by']} to move it back, or for an account on that shared Sheaf."
+        machine = json.dumps({"tiroir": far["origin"], "address": far["to"], "by": far["by"], "at": far["at"], "hash": far.get("hash", "")})
+        return ToolError(f"{head}{tail}\nmoved: {machine}", "moved")
 
     def _judged(self, caller: Caller) -> bool:
         """Whether visibility (9.11) holds `caller`: a token, in proxy mode."""

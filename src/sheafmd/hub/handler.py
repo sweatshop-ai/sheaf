@@ -999,7 +999,7 @@ class Handler:
     @staticmethod
     def _side(b: dict) -> str:
         """Whose verso a comment on a client page is for (9.11): `team` stays on this hub, `client` goes to the client's hub. A write
-        on a comment names its side by its id (`tN` is a Team comment); an add with no side is the client's, as before."""
+        on a comment names its side by its id (`tN` is a Team comment); an add must name its side."""
         side = b.get("side")
         _shape("side" not in b or side in ("team", "client"), "side must be team or client")
         if b.get("op") == "add":

@@ -376,3 +376,15 @@ def test_the_output_names_the_agent_that_ran_the_command(tiroir, scratch, monkey
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", SESSION)
     code, out, err = run(capsys, scratch)
     assert out.splitlines()[1] == "on chat.example.com as Bea · Claude Code"
+
+
+# ── two loose files with one name ────────────────────────────────────────────
+def test_a_second_loose_file_with_the_same_name_is_refused_and_the_first_page_keeps_its_text(tiroir, scratch, tmp_path, capsys):
+    run(capsys, scratch)
+    other = tmp_path / "elsewhere" / scratch.name
+    other.parent.mkdir()
+    other.write_text("# Other\n\nA different page.\n", encoding="utf-8")
+    code, out, err = run(capsys, other)
+    assert code == 1 and out == ""
+    assert "exists already" in err and scratch.name in err and "Rename" in err
+    assert on_the_tiroir(tiroir, f"loose-bea/{loose.month()}/{scratch.name}") == TEXT

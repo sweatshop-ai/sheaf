@@ -3,6 +3,7 @@ answers, and the CLI that follows. Two hubs in memory, each with a state folder 
 the tailnet (`helpers.two_hubs`): no socket, no thread. The page is moved by the owner's request to `/_/move-tiroir` (the row's
 "Move to another tiroir…"), the call to the other hub goes through `outgoing.post`, and the Forward is written only after the other
 hub says the page landed."""
+import dataclasses
 import json
 
 import pytest
@@ -123,6 +124,75 @@ def test_the_share_does_not_go_and_the_copy_there_is_private_to_its_owner(two):
     moved(two)
     landed = two.b.hub.file(NEW).read_text(encoding="utf-8")
     assert "shared:" not in landed and "[x] Share" not in landed
+
+
+def test_a_page_open_in_the_hub_moves_without_a_store_failing_under_its_own_lock(two):
+    with two.active():
+        two.hub.entry(OLD)
+    moved(two)
+    with two.active():
+        assert hub_rows("move-store-failed") == []
+        assert OLD not in two.hub.entries
+
+
+def test_the_page_is_marked_moving_for_the_whole_transfer_and_the_mark_is_cleared_after_it(two, monkeypatch):
+    seen = []
+    real = two.link.post
+
+    def post(origin, verb, body, token, seconds=None):
+        with two.active():
+            seen.append(OLD in two.hub.moving)
+        return real(origin, verb, body, token, seconds)
+    monkeypatch.setattr(outgoing, "post", post)
+    moved(two)
+    assert seen == [True]
+    with two.active():
+        assert OLD not in two.hub.moving
+
+
+@pytest.mark.parametrize("how", ["down", "refused"])
+def test_the_moving_mark_is_cleared_when_the_move_does_not_complete(two, how):
+    if how == "down":
+        two.link.down = True
+    else:
+        with two.b.active():
+            two.b.hub.proxy.members[ALICE_B] = dataclasses.replace(two.b.hub.proxy.members[ALICE_B], email="other@example.com")
+    assert move(two).status >= 400
+    with two.active():
+        assert OLD not in two.hub.moving
+
+
+def test_a_recipients_open_tab_is_told_gone_under_the_opaque_name_it_had_and_no_new_one_is_made(two):
+    with two.active():
+        text = two.hub.file(OLD).read_text(encoding="utf-8")
+    shared = two.post("/_/share", {"doc": OLD, "hash": md_hash(text), "with": ["bob"]}, member=ALICE_A)
+    assert shared.status == 200, shared.text
+    with two.active():
+        opaque = two.hub.alias(two.hub.proxy.members[BOB_A], OLD)
+    sub = two.get(f"/_/live?doc={opaque}", member=BOB_A).stream
+    sub.drain()
+    moved(two)
+    got = [(n, d) for n, d in sub.drain()]
+    assert ("gone", {"doc": opaque}) in got
+    with two.active():
+        assert OLD not in two.hub.shared_ids._data.values()
+
+
+def test_the_versions_of_a_root_that_keeps_them_inside_do_not_stay_under_the_old_address(two):
+    from sheafmd.hub import state
+    with two.active():
+        folder = two.hub.loose.known(two.hub.proxy.members[ALICE_A])
+    (folder / ".sheaf.toml").write_text('versions = "root"\n', encoding="utf-8")
+    with two.active():
+        text = two.hub.file(OLD).read_text(encoding="utf-8")
+    bad, got = two.ask("alice", "update", doc=OLD, text=text + "\nInside.\n", expected_hash=md_hash(text))
+    assert not bad, got
+    with two.active():
+        inside = state.Versions(folder, "loose-alice")
+        assert inside.texts(OLD)
+    moved(two)
+    with two.active():
+        assert inside.texts(OLD) == []
 
 
 # ── a move that does not complete leaves everything as it was ────────────────
@@ -359,3 +429,19 @@ def test_pull_follows_the_move_the_same_way(two, laptop, keyring, capsys):
     code, out, err = run(capsys, "pull", md)
     assert code == 0, err
     assert send.row_of(md)["tiroir"] == B_ORIGIN
+
+
+def test_an_edit_made_on_the_old_tiroir_before_the_move_is_not_hidden_by_the_landed_hash(two, laptop, keyring, capsys):
+    md, doc = laptop
+    row = send.row_of(md)
+    with two.active():
+        text = two.hub.file(doc).read_text(encoding="utf-8")
+    bad, got = two.ask("alice", "update", doc=doc, text=text + "\nEdited in the browser.\n", expected_hash=row["hash"])
+    assert not bad, got
+    moved(two, doc=doc)
+    keyring.set("sheaf", B_ORIGIN, two.b.tokens["al"])
+    md.write_text("# Plan\n\nLaptop's own edit.\n", encoding="utf-8")
+    code, out, err = run(capsys, md)
+    assert code != 0 and md.with_name("plan.tiroir.md").exists()
+    assert "Edited in the browser." in md.with_name("plan.tiroir.md").read_text(encoding="utf-8")
+    assert md.read_text(encoding="utf-8") == "# Plan\n\nLaptop's own edit.\n"

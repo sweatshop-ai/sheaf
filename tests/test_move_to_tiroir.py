@@ -76,6 +76,9 @@ def test_a_move_lands_the_page_in_the_owners_loose_root_there_in_the_same_folder
 
 
 def test_the_copy_there_carries_the_versions_the_write_log_lines_and_the_keep_mark(two):
+    with two.active():          # a door write keeps no version of its own: the hub keeps the texts it hands a page, so one is handed
+        root = two.hub.roots.get("loose-alice")
+        (two.hub._versions_of(root) or two.hub.versions).put(OLD, PLAN)
     moved(two)
     b = two.b
     with b.active():

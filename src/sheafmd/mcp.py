@@ -567,6 +567,12 @@ class Door:
             raise ToolError(f"There is no comment {cid} in {address}.")
         return c
 
+    def _writable(self, address: str):
+        """A page of a repo's clone with no save branch is not written, comments included (SPEC 14): the line says
+        which `.sheaf.toml` line would change that."""
+        if line := self.hub.read_only_line(address):
+            raise ToolError(line, "read-only")
+
     def _write(self, address: str, caller: Caller, doc: str, op: str, fields: dict, role=None):
         """A change to one comment, and the agent of its token made the target (9.8) before the tabs hear
         of it. Through the document's Live Document when the hub has one,
@@ -575,6 +581,7 @@ class Door:
         again on the file under its lock, so a rectoverso that closed since the check takes nothing. Both
         under the lock of the rectoverso's name (9.11), the file found again under it, so no move comes
         between finding the file and writing it."""
+        self._writable(address)
         noted = False
 
         def note():
@@ -1100,6 +1107,7 @@ class Door:
 
     def _update(self, args: dict, caller: Caller):
         address = self._address(args["doc"], caller)
+        self._writable(address)
         text, expected = _as_read(args["text"]), args["expected_hash"]
         if not HASH_RE.fullmatch(expected):
             raise ToolError("expected_hash is not a hash that `read` or `create` gave (16 hex digits).",

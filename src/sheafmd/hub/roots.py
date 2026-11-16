@@ -27,6 +27,10 @@ COUNT_LIMIT = 100_000           # documents counted past the cap before the coun
 _GIT_LIST_SECONDS = 20
 
 
+class NameTaken(ValueError):
+    """A root named for a clone whose name another root holds."""
+
+
 class Nested(ValueError):
     """A root that encloses, or lies inside, a private root (SPEC 9.11, rule A): none is registered."""
 
@@ -50,6 +54,8 @@ class Root:
     # a forget is another root, with another id, and a page of the old one tells the two apart by it
     # (SPEC 8.2, 10.7).
     id: str = ""
+    # The repo (owner/name, lower case) whose clone this root is, for a clone the tiroir serves (SPEC 14); "" for any other.
+    clone: str = ""
 
     def missing(self) -> bool:
         """The folder is gone: the root keeps its name, and says so (SPEC 8.6). A folder the hub
@@ -269,7 +275,8 @@ class Roots:
                 rid = e.get("id")
                 if not (isinstance(rid, str) and rid):
                     rid, unnamed = _new_id(), True
-                self._roots[name] = Root(name, Path(e["path"]), bool(e.get("git")), rid)
+                self._roots[name] = Root(name, Path(e["path"]), bool(e.get("git")), rid,
+                                         e["clone"] if isinstance(e.get("clone"), str) else "")
                 self._added[name] = str(e.get("added") or "")
         return unnamed
 
@@ -281,7 +288,8 @@ class Roots:
         if not self._writes:
             return
         state.write_json(self._file(), {
-            n: {"path": str(r.path), "git": r.git, "added": self._added.get(n, ""), "id": r.id}
+            n: {"path": str(r.path), "git": r.git, "added": self._added.get(n, ""), "id": r.id,
+                **({"clone": r.clone} if r.clone else {})}
             for n, r in self._roots.items()})
 
     def all(self) -> list[Root]:
@@ -299,7 +307,9 @@ class Roots:
             root = self._roots.get(name)
             return None if root is not None and self.hidden(root) else root
 
-    def _add(self, path: Path, git: bool) -> Root:
+    def _add(self, path: Path, git: bool, name: str | None = None, clone: str = "") -> Root:
+        """Register `path`. `name` fixes the root's name (a clone's, made from its repo) instead of the folder's; a name
+        another folder holds is refused, never numbered, since a Forward is for ever."""
         with self._lock:
             known = {n: r.path for n, r in self._roots.items()}
         with self._changing():
@@ -314,11 +324,15 @@ class Roots:
                 found = self._find(path, list(self._roots.values()))[0]
                 if found is not None:
                     return found
-            base = clean_name(path.name)
-            name, n = base, 2
-            while name in self._roots:
-                name, n = f"{base}-{n}", n + 1
-            root = Root(name, path, git, _new_id())
+            if name is not None:
+                if name in self._roots:
+                    raise NameTaken(f"the name {name} is held by another root")
+            else:
+                base = clean_name(path.name)
+                name, n = base, 2
+                while name in self._roots:
+                    name, n = f"{base}-{n}", n + 1
+            root = Root(name, path, git, _new_id(), clone)
             self._roots[name] = root
             self._added[name] = time.strftime(STAMP_FORMAT)
             self._save()

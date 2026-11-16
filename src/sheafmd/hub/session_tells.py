@@ -191,6 +191,15 @@ class SessionTells:
             return gone, bool(gone)
         return self._change(change)
 
+    def rename(self, old: str, new: str):
+        """The Tells to a laptop session on the page at `old` are on the page at `new`: a page that moved (9.11)."""
+        def change(rows, held):
+            hit = [t for t in rows if t["doc"] == old]
+            for t in hit:
+                t["doc"] = new
+            return None, bool(hit)
+        self._change(change)
+
     def end_root(self, name: str, reason: str):
         from .roots import Address
         prefix = Address.prefix(name)

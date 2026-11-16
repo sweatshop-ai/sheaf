@@ -16,6 +16,7 @@ from .. import paths
 
 KEEP = 200                  # lines kept in memory per address
 MAX_BYTES = 10 * 1024 * 1024
+RENAMED = "renamed"        # the marker line of `WriteLog.rename`: `writer` is the address the lines went to
 NAME, ROTATED = "write-log.jsonl", "write-log.1.jsonl"
 MAX_SESSION = 100
 MAX_DECLARED = 200
@@ -82,7 +83,24 @@ class WriteLog:
                 line = Line(**{k: v for k, v in got.items() if k in names})
             except (ValueError, TypeError):
                 continue
+            if line.via == RENAMED:
+                self._carry(line.address, line.writer)
+                continue
             self._lines.setdefault(line.address, deque(maxlen=self._keep)).append(line)
+
+    def _carry(self, old: str, new: str):
+        kept = self._lines.pop(old, None)
+        if kept:
+            self._lines.setdefault(new, deque(maxlen=self._keep)).extend(kept)
+
+    def rename(self, old: str, new: str):
+        """The lines of the page at `old` are those of the page at `new`, a page that moved (9.11). A line of its own,
+        `renamed`, tells a restart where they went: it keeps no line of its own and is never shown."""
+        with self._lock:
+            if old not in self._lines:
+                return
+            self._carry(old, new)
+            self._append(Line(address=old, time=self._now(), writer=new, place="", via=RENAMED))
 
     def add(self, address: str, writer: str, place: str, via: str, **declared) -> Line:
         """One line, the time now. Never raises: a log that cannot be written must not break the write it records."""

@@ -330,8 +330,10 @@
    *  (a pane already holding a root of this script needs a new host: a root belongs to the script that made it); without
    *  it the pane says to reload. A remount that fails is said in the page, which stays as it was. */
   async function mount(host, opts) {
-    const list = opts.list != null;
-    const url = list
+    const sheaf = !!opts.sheaf;
+    const data = opts.list != null || sheaf;                     // the list and the Sheaf are data, drawn from text
+    const list = data;
+    const url = sheaf ? '/_/mount?sheaf=1' : opts.list != null
       ? '/_/mount?list=' + encodeURIComponent(opts.list) + (opts.show ? '&show=' + encodeURIComponent(opts.show) : '')
       : '/_/mount?doc=' + encodeURIComponent(opts.doc);
     let root = null;
@@ -340,7 +342,7 @@
     PANES.set(host, pane);
     const call = ++pane.seq;
     let told = false;
-    const kit = list ? window.sheafList : window.sheafPage;          // taken now: a later front script cannot swap it in
+    const kit = sheaf ? window.sheafView : list ? window.sheafList : window.sheafPage;          // taken now: a later front script cannot swap it in
     const create = kit && kit.create;
     const render = list && kit && kit.render;
     let page = null;
@@ -383,14 +385,14 @@
       let fresh;
       try {
         const res = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
-        if (!res.ok) throw new Error('the hub answered ' + res.status + ' for ' + (list ? 'the list' : opts.doc));
+        if (!res.ok) throw new Error('the hub answered ' + res.status + ' for ' + (sheaf ? 'the Sheaf' : list ? 'the list' : opts.doc));
         fresh = await res.json();
       } catch (e) {
         if (stale()) return got;                    // overtaken: its failure is no one's
         throw e;
       }
       if (stale()) return got;
-      if (list && (fresh.kind !== 'list' || !render)) throw new Error('the hub sent no list');
+      if (list && (fresh.kind !== (sheaf ? 'sheaf' : 'list') || !render)) throw new Error('the hub sent no ' + (sheaf ? 'Sheaf' : 'list'));
       const upgraded = KNOWN && (fresh.version !== VERSION
         || (SCRIPT_KNOWN && typeof fresh.script === 'string' && fresh.script !== SCRIPT));
       if (upgraded && typeof opts.upgrade === 'function') {
@@ -432,16 +434,16 @@
       const css = got.assets && typeof got.assets['mount.css'] === 'string' ? got.assets['mount.css'] : null;
       link.href = css === null ? '/_/mount.css' : '/_/mount.css?v=' + encodeURIComponent(css);
       const wrap = doc.createElement('div');
-      wrap.className = list ? 'rd-root sheaf-list' : 'rd-root' + (got.toc ? '' : ' notoc');
+      wrap.className = sheaf ? 'rd-root sheaf-list sheaf-sheaf' : list ? 'rd-root sheaf-list' : 'rd-root' + (got.toc ? '' : ' notoc');
       wrap.tabIndex = -1;
       wrap.addEventListener('click', follow);
-      wrap.appendChild(list ? render(got.list, wrap) : rebuild(got.html, wrap));
+      wrap.appendChild(list ? render(sheaf ? got.sheaf : got.list, wrap) : rebuild(got.html, wrap));
       if (page) page.unmount();
       page = null;
       root.replaceChildren(...parts, link, wrap);
       await new Promise((done) => { link.onload = link.onerror = done; cut = done; });   // the page measures its parts: their styles first
       if (stale()) return got;
-      const again = { body: wrap, remount: () => {
+      const again = { body: wrap, navigate: opts.navigate, upgrade: opts.upgrade, remount: () => {
         draw().catch((e) => {
           if (!gone && page && page.failed) page.failed('The page could not be loaded again: ' + e.message + '. Reload to try again.');
         });

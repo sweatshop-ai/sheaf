@@ -846,13 +846,13 @@ class Door:
                     except OSError as e:
                         raise _not_made(address, e) from None
                 text = self._make(root, top, rel, name, address, text, caller)
+                if args.get("keep"):        # under the name's lock with the write: the page is never there unmarked
+                    loose.keep(root.path, rel)
             except Private:         # the root's folder, as opened, is a private root's: answered as a path in no root
                 raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path") from None
             self._agent_wrote(address, caller)          # before the tabs and indexes hear of it
             self.hub.wrote(address)
             self.hub.committed(address, by=caller.display, what="create")
-        if args.get("keep"):
-            loose.keep(root.path, rel)
         return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text)}
 
     def _make(self, root, top: Path, rel: str, name: str | None, address: str, text: str, caller: Caller):

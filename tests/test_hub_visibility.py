@@ -1415,7 +1415,7 @@ def test_a_door_update_that_narrows_the_share_and_adds_a_private_source_leaves_t
     is_error, got = call(browser, "update", token=token, doc=f"work/{DOC}", expected_hash=got["hash"], text=text)
     assert not is_error, got
     assert "shared" not in front_matter((work / DOC).read_text(encoding="utf-8"))
-    assert not team.hub.named(team.hub.proxy.members[BOB], f"work/{DOC}")
+    assert not team.hub.opened_by_line(team.hub.proxy.members[BOB], f"work/{DOC}")
     assert reads(team, DOC) == {"alice": 200, "bob": 404, "carol": 404}
 
 
@@ -1436,3 +1436,19 @@ def test_a_save_that_narrows_the_share_of_a_page_with_a_private_source_and_no_ma
     assert untick(team, work, DOC, "- [x] Share", ALICE).status == 200
     assert "shared" not in front_matter((work / DOC).read_text(encoding="utf-8"))
     assert reads(team, DOC) == {"alice": 200, "bob": 404, "carol": 404}
+
+
+def test_editing_share_with_names_into_a_plain_share_while_the_box_is_ticked_opens_the_page_to_the_project(team, work):
+    """The box stays ticked, so it is no new tick: the owner's save still writes `visibility: project` (9.11)."""
+    put(team, work, DOC, PRIVATE.replace("- [ ] Share", "- [ ] Share with carol"))
+    assert tick_names(team, work, DOC, ALICE).status == 200
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404                      # named carol only
+    text = (work / DOC).read_text(encoding="utf-8")
+    i = next(n for n, b in enumerate(split_md_blocks(text)) if "Share with" in b.content)
+    got = team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text),
+                                "edits": [{"i": i, "html": '<ul class="task-list"><li><input type="checkbox" checked disabled>'
+                                                           ' Share</li></ul>'}]}, member=ALICE)
+    assert got.status == 200, got.text
+    after = (work / DOC).read_text(encoding="utf-8")
+    assert "- [x] Share\n" in after and front_matter(after)["visibility"] == "project"
+    assert team.get(f"/work/{DOC}", member=BOB).status == 200

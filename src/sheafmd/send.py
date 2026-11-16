@@ -26,6 +26,7 @@ import json
 import os
 import socket
 import ssl
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -113,17 +114,36 @@ def remote_link(environ, session: str) -> str:
     return ""
 
 
-def ancestor_pids(pid: int | None = None, proc: Path = Path("/proc")) -> list[int]:
-    """`pid` and its parents up to init, read from `proc`/PID/stat; stops at a process it cannot read."""
+MAX_ANCESTORS = 64      # a walk this deep has gone past any process tree
+PS_TIMEOUT = 2.0
+
+
+def ps_parent(pid: int) -> int:
+    """The parent of `pid` from `ps -o ppid= -p PID` (no shell), for a system with no /proc; raises OSError when ps fails."""
+    try:
+        done = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True, text=True, timeout=PS_TIMEOUT)
+        if done.returncode != 0:
+            raise OSError(f"ps exited {done.returncode}")
+        return int(done.stdout.strip())
+    except (subprocess.SubprocessError, ValueError) as e:
+        raise OSError(str(e)) from None
+
+
+def ancestor_pids(pid: int | None = None, proc: Path = Path("/proc"), ps=ps_parent) -> list[int]:
+    """`pid` and its parents up to init: each parent from `proc`/PID/stat, else from `ps`; the walk stops at a process
+    neither can read, at a loop, and after MAX_ANCESTORS."""
     pid = os.getpid() if pid is None else pid
     chain: list[int] = []
-    while pid > 0 and pid not in chain:
+    while pid > 0 and pid not in chain and len(chain) < MAX_ANCESTORS:
         chain.append(pid)
         try:
             stat = (proc / str(pid) / "stat").read_text(encoding="utf-8", errors="replace")
             pid = int(stat.rpartition(")")[2].split()[1])      # after the name, which may hold spaces and brackets: state, ppid
         except (OSError, ValueError, IndexError):
-            break
+            try:
+                pid = ps(pid)
+            except OSError:
+                break
     return chain
 
 

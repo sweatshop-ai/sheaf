@@ -111,12 +111,18 @@ def _has_helper(name: str) -> bool:
 
 def cmd_headers(argv: list[str], out=None, err=None) -> int:
     out = out or (lambda line="": print(line))
+    err = err or (lambda line="": print(line, file=sys.stderr))
     p = argparse.ArgumentParser(prog="sheaf headers", usage="sheaf headers [--check NAME]",
                                 description="Print the headers a door write declares itself with, as one JSON object: the "
                                             "session, the machine and the Remote Control link. Never a token.")
     p.add_argument("--check", metavar="NAME", help="print nothing; exit 0 when the MCP entry NAME carries this helper, else 1")
     args = p.parse_args(argv)
     if args.check is not None:
-        return EXIT_OK if _has_helper(args.check) else EXIT_FAILED
+        if not _has_helper(args.check):
+            return EXIT_FAILED
+        if send.registry_session() is None:      # the helper would send no session: the mod must not arm from this write
+            err("sheaf: no Claude Code session record among this process's parents, so a door write names no session here.")
+            return EXIT_FAILED
+        return EXIT_OK
     out(json.dumps(send.declared(session=send.registry_session())))
     return EXIT_OK

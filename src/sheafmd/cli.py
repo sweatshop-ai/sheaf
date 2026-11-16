@@ -57,6 +57,8 @@ usage:
   sheaf pull FILE.md
                  write the shared Sheaf's latest text of a page you sent into the file
 
+  A file or folder named like a command (headers, pull, ...) is the command; to open that file, write ./name.
+
   --local        render on this laptop's hub instead of sending the page to a shared Sheaf
   --folder NAME  the folder of your Sheaf for a page sent for the first time (default: the month)
   --keep         never archive a page sent for the first time
@@ -1234,7 +1236,7 @@ def main(argv: list[str] | None = None) -> int:
         _out(top_help())
         return EXIT_OK
     try:
-        is_file = first.endswith(".md") or Path(first).exists()
+        is_file = first.endswith(".md") or (first not in COMMANDS and Path(first).exists())      # a command name wins over a file of that name: ./name opens the file
         if (is_file or first in COMMANDS) and windows_stops(first, is_file, argv):
             _err(WINDOWS_SAYING)
             return EXIT_FAILED

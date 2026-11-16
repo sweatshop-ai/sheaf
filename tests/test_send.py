@@ -541,6 +541,7 @@ def test_running_again_after_recovery_updates_with_the_last_hash_when_the_page_h
     run(capsys, scratch)
     scratch.write_text(TEXT + "\nMore.\n", encoding="utf-8")
     stand_in("500")
+    send.post, send.get = ORIGINAL_POST, ORIGINAL_GET  # the tiroir is gone: the CLI's own network, into the stand-in
     run(capsys, scratch)
     send.post, send.get = kept
     tiroir.seen.clear()
@@ -548,6 +549,7 @@ def test_running_again_after_recovery_updates_with_the_last_hash_when_the_page_h
     assert code == 0, err
     tools = [m["params"]["name"] for _, _, m in tiroir.seen if m and m["method"] == "tools/call"]
     assert tools == ["update"]
+    assert local == [str(scratch)]  # the run that failed rendered here; this one did not
     assert on_the_tiroir(tiroir, f"loose-bea/{loose.month()}/notes.md") == TEXT + "\nMore.\n"
 
 
@@ -557,7 +559,9 @@ def test_a_page_changed_on_the_tiroir_while_it_was_away_is_refused_as_before(tir
     address = f"loose-bea/{loose.month()}/notes.md"
     scratch.write_text(TEXT + "\nMine.\n", encoding="utf-8")
     stand_in("500")
+    send.post, send.get = ORIGINAL_POST, ORIGINAL_GET
     run(capsys, scratch)
+    assert local == [str(scratch)] and on_the_tiroir(tiroir, address) == TEXT  # it stayed here, nothing reached the tiroir
     send.post, send.get = kept
     changed_there(tiroir, address, TEXT + "\nTheirs.\n")
     code, out, err = run(capsys, scratch)
@@ -576,3 +580,15 @@ def test_a_failure_after_the_write_was_sent_is_no_fallback_and_says_it_may_have_
     monkeypatch.setattr(send, "post", dies_on_the_write)
     code, out, err = run(capsys, scratch)
     assert code == 1 and local == [] and "may have reached" in err and "not on" not in err
+
+
+def test_a_certificate_the_laptop_cannot_trust_is_no_outage_and_falls_back_nowhere(tiroir, real_network, scratch, local, capsys, monkeypatch):
+    import ssl
+    import urllib.error
+
+    def untrusted(req, timeout=None):
+        raise urllib.error.URLError(ssl.SSLCertVerificationError("certificate verify failed"))
+
+    monkeypatch.setattr(connect._NO_REDIRECT, "open", untrusted)
+    code, out, err = run(capsys, scratch)
+    assert code == 1 and local == [] and "cannot trust" in err and "not on" not in err

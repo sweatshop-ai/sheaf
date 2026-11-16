@@ -3,6 +3,7 @@ written on disk and seen), read per address through the handler in proxy mode, i
 It is not the Diagnostics log."""
 import os
 import pwd
+import threading
 
 import pytest
 from helpers import BEA, CAL, FRONT, door, rpc
@@ -272,3 +273,72 @@ def test_the_lines_of_a_page_that_is_gone_are_not_read_by_a_hub_that_never_saw_i
     assert agents.get(f"/_/writes?doc={DOC}", member=BEA).status == 200      # known: judged as the hub last saw it
     agents.hub._front.clear()                                                 # as a restarted hub: it knows nothing of it
     assert agents.get(f"/_/writes?doc={DOC}", member=BEA).status == 404
+
+
+# ── the tick and the page save, as the door ─────────────────────────────────────
+def same_size_same_mtime(agents):
+    """Another text of the file's length, written with the mtime it had: `(mtime, size)` sees nothing."""
+    f = agents.hub.file(DOC)
+    before = f.stat()
+    text = f.read_text(encoding="utf-8")
+    assert "apples" in text
+    f.write_text(text.replace("apples", "pears_"), encoding="utf-8")
+    os.utime(f, ns=(before.st_atime_ns, before.st_mtime_ns))
+    assert (f.stat().st_mtime_ns, f.stat().st_size) == (before.st_mtime_ns, before.st_size)
+    return md_hash(f.read_text(encoding="utf-8"))
+
+
+def test_a_disk_write_of_the_same_size_and_mtime_read_through_a_tick_leaves_one_disk_line(agents):
+    agents.hub.entry(DOC)
+    agents.hub.catch_up(agents.hub.entry(DOC))
+    now = same_size_same_mtime(agents)
+    agents.post("/_/tick", {"doc": DOC, "action": 0, "word": "Done", "hash": now, "where": "page"}, member=BEA)
+    assert [l["via"] for l in lines(agents)["lines"]] == ["disk"]
+
+
+def test_a_page_save_the_watcher_sees_before_the_hub_logs_it_leaves_the_page_line_only(agents, rectoversos, monkeypatch):
+    from sheafmd.hub import live
+    e = agents.hub.entry(DOC)
+    real, pending = live.LiveDocument._after_write, []
+
+    def watcher_first(self, *a, **kw):
+        # The watcher is another thread: it looks at the file between the write and the hub's note of it.
+        looked = threading.Thread(target=agents.hub.catch_up, args=(e,))
+        looked.start()
+        looked.join(0.3)
+        out = real(self, *a, **kw)
+        pending.append(looked)
+        return out
+
+    monkeypatch.setattr(live.LiveDocument, "_after_write", watcher_first)
+    edit(agents, rectoversos, member=CAL)
+    monkeypatch.undo()
+    for looked in pending:
+        looked.join()
+    agents.hub.catch_up(e)
+    assert [(l["via"], l["place"]) for l in lines(agents)["lines"]] == [("save", "page")]
+
+
+def test_an_editor_write_after_a_page_save_still_leaves_its_disk_line(agents, rectoversos):
+    e = agents.hub.entry(DOC)
+    edit(agents, rectoversos, member=CAL)
+    f = agents.hub.file(DOC)
+    f.write_text(f.read_text(encoding="utf-8") + "\nWritten by an editor.\n", encoding="utf-8")
+    agents.hub.catch_up(e)
+    assert [l["via"] for l in lines(agents)["lines"]] == ["save", "disk"]
+
+
+def test_a_write_that_fails_after_the_hub_expected_it_leaves_no_expectation_behind(agents, monkeypatch):
+    from sheafmd import mcp
+    real = mcp.update_beneath
+
+    def fails_after(*a, **kw):
+        real(*a, **kw)                              # the text was judged, and written
+        raise OSError("disk full")
+
+    monkeypatch.setattr(mcp, "update_beneath", fails_after)
+    text = plan_text(agents)
+    res = door(agents.door, rpc("tools/call", {"name": "update", "arguments": {
+        "doc": DOC, "expected_hash": md_hash(text), "text": text + "\nLost.\n"}}), token=agents.tokens["bea-claude"], as_name=None)
+    assert res.json()["result"]["isError"]
+    assert agents.hub.writes._own == {}

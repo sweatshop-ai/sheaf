@@ -1012,7 +1012,11 @@ class Door:
             top, rel = self.hub.roots.locate(address)
             before, _ = update_beneath(top.path, rel, change, move=move)
         except (OSError, UnicodeDecodeError, NotFound):
+            self.hub.writes.told(address)           # a write that failed leaves nothing to expect
             raise ToolError(f"{address} could not be written.", "not written") from None
+        except BaseException:
+            self.hub.writes.told(address)
+            raise
         text = written[0]
         if before != text:
             self._agent_wrote(address, caller)          # before the tabs hear of it (9.8)

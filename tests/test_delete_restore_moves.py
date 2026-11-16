@@ -127,3 +127,52 @@ def test_restore_trash_waits_while_another_thread_holds_the_moves_lock(team):
     r.join(20)
     assert waiting, "the restore did not wait for the moves' lock"
     assert answer["got"].status == 200
+
+
+# ── restore-trash's link: a swapped entry is not followed, a failed unlink is a clean answer ─────
+
+def test_a_trash_entry_swapped_for_a_link_after_the_check_is_not_put_back_through_it(team, monkeypatch, tmp_path):
+    """The entry is a plain file when it is looked at and a link to a file outside the root when the link is made: the page
+    is not restored through it, nothing of the outside file reaches the address, and the answer is a refusal."""
+    import os
+    first = in_folder(team, "a")
+    assert delete(team, first).status == 200
+    [row] = team.hub.archive.trashed(root_of(team))
+    outside = tmp_path / "outside.md"
+    outside.write_text("# Not the page\n")
+    real = os.link
+    swapped = []
+
+    def link(src, dst, *a, **k):
+        if str(src).endswith("plan.md") and ".sheaf/trash" in str(src) and not swapped:
+            swapped.append(src)
+            os.unlink(src)
+            os.symlink(outside, src)
+        return real(src, dst, *a, **k)
+    monkeypatch.setattr(os, "link", link)
+    got = restore_trash(team, row["id"])
+    monkeypatch.undo()
+    assert swapped and got.status == 409, (got.status, got.text)
+    dest = team.hub.file(first)
+    assert not os.path.lexists(dest), "the page was put back through the swapped entry"
+    assert outside.read_text() == "# Not the page\n"
+
+
+def test_a_trash_entry_that_cannot_be_unlinked_after_the_link_leaves_a_clean_refusal_and_the_page_in_the_trash(team, monkeypatch):
+    import os
+    first = in_folder(team, "a")
+    assert delete(team, first).status == 200
+    [row] = team.hub.archive.trashed(root_of(team))
+    real = os.unlink
+
+    def unlink(path, *a, **k):
+        if ".sheaf/trash" in str(path):
+            raise PermissionError(13, "Permission denied")
+        return real(path, *a, **k)
+    monkeypatch.setattr(os, "unlink", unlink)
+    got = restore_trash(team, row["id"])
+    monkeypatch.undo()
+    assert got.status == 409, (got.status, got.text)
+    assert not team.hub.file(first).exists()                            # the link made is taken off again
+    assert [r["id"] for r in team.hub.archive.trashed(root_of(team))] == [row["id"]]
+    assert restore_trash(team, row["id"]).status == 200                 # and the entry is still good: a second try restores it

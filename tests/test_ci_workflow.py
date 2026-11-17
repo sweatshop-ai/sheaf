@@ -182,9 +182,12 @@ def test_a_job_that_hangs_is_stopped(text):
     assert int(got.group(1)) <= 60 and int(got.group(2)) <= 120
 
 
-def test_the_token_can_only_read_and_no_secret_is_used(text):
+def test_the_token_can_only_read_and_the_one_secret_is_the_list_of_names_for_the_public_tree_guard(text):
     assert re.search(r"^permissions:\n  contents: read\s*$", text, flags=re.M)
-    assert "secrets." not in text
+    assert re.findall(r"secrets\.\w+", text) == ["secrets.SHEAF_PUBLIC_TREE_TERMS"]
+    # Only the step that runs the guard has it, not every process of the job (the page tests, the installs).
+    step = text.split("      - name: Tests\n", 1)[1].split("\n      - name:", 1)[0]
+    assert re.search(r"^        env:\n          SHEAF_PUBLIC_TREE_TERMS: \$\{\{ secrets\.SHEAF_PUBLIC_TREE_TERMS \}\}\s*$", step, flags=re.M)
     assert "pull_request_target" not in text
 
 

@@ -545,16 +545,24 @@ STREAM_JOURNAL_JS = """(() => {
 # `__leaving`. A navigation that has not committed leaves the old document in place, so the flag is readable until the
 # new one comes; the new document starts without it.
 # A page that asks before it is left cancels the navigation (a handler's preventDefault): once every handler has run, such a leave is no longer pending.
-LEAVING_JS = """window.addEventListener('beforeunload', e => {
-  window.__leaving = true;
-  setTimeout(() => { if (e.defaultPrevented || e.returnValue) window.__leaving = false; }, 0);
-})"""
+# Only a trusted event counts (a test's own dispatchEvent leaves nothing), and the reset runs on the timer the page had
+# at the start: a test's `page.clock` replaces the page's setTimeout with one that stands still.
+LEAVING_JS = """(() => {
+  const later = window.setTimeout.bind(window);
+  window.addEventListener('beforeunload', e => {
+    if (!e.isTrusted) return;
+    window.__leaving = true;
+    later(() => { if (e.defaultPrevented || e.returnValue) window.__leaving = false; }, 0);
+  });
+})()"""
 
 
 def leaving(page):
-    """Whether the page is leaving for a navigation that has not committed (or its document went away while we asked)."""
+    """Whether the page is leaving for a navigation that has not committed (or its document went away while we asked).
+    `Page.evaluate` takes no timeout: a page that stops answering is a PageStalled, not a wait for ever."""
     try:
-        return page.evaluate("window.__leaving === true")
+        with stalls_after(CLOSE_BOUND, "the page to say whether it is leaving"):
+            return page.evaluate("window.__leaving === true")
     except Exception as e:      # a PageStalled is not an Exception
         return any(said in str(e) for said in RELOADING)
 

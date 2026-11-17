@@ -333,3 +333,40 @@ def test_the_file_the_command_writes_is_the_file_the_hub_reads(sheaf, stdin, mon
     assert sheaf("peer", "use", PEER, "--store", "file", "--dir", tmp_path).code == 0
     monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(tmp_path))
     assert connect.peer_token_for(PEER) == FAKE
+
+
+# ── the two findings of the review of the file store ─────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("how", ["a file", "a closed folder", "a leftover link"])
+def test_a_file_store_that_cannot_be_written_is_a_message_and_not_a_traceback(sheaf, stdin, tmp_path, how, closed):
+    folder = tmp_path / "creds"
+    if how == "a file":
+        folder.write_text("x")
+    elif how == "a closed folder":
+        folder.mkdir()
+        closed(folder)
+    else:
+        folder.mkdir()
+        (folder / (connect.peer_credential_name(PEER) + ".new")).symlink_to(tmp_path / "elsewhere")
+    stdin(FAKE + "\n")
+    r = sheaf("peer", "use", PEER, "--store", "file", "--dir", folder)
+    assert r.code == 1 and r.err.startswith("sheaf: ") and "Traceback" not in r.err
+    assert str(folder) in r.err and FAKE not in r.out + r.err
+    assert not (tmp_path / "elsewhere").exists()
+
+
+def test_an_unreadable_credential_file_is_a_warning_without_its_content_and_the_keyring_answers(keyring, monkeypatch, tmp_path, capsys):
+    keyring.set("sheaf-peer", PEER, FAKE)
+    (tmp_path / connect.peer_credential_name(PEER)).write_bytes(b"\xff\xfe" + FAKE.encode() + b"\x80")
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(tmp_path))
+    assert connect.peer_token_for(PEER) == FAKE
+    err = capsys.readouterr().err
+    assert len(err.strip().splitlines()) == 1 and connect.peer_credential_name(PEER) in err
+    assert FAKE not in err and "\xff" not in err and "sheaf_mcp_" not in err
+
+
+def test_a_missing_credential_file_says_nothing(keyring, monkeypatch, tmp_path, capsys):
+    keyring.set("sheaf-peer", PEER, FAKE)
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(tmp_path))
+    assert connect.peer_token_for(PEER) == FAKE
+    assert capsys.readouterr().err == ""

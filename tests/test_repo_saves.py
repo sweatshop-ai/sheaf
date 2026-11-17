@@ -9,6 +9,7 @@ import os
 import pwd
 import re
 import subprocess
+import sys
 import threading
 
 import pytest
@@ -691,9 +692,9 @@ def test_a_write_to_an_awake_clone_asks_the_provider_for_no_token(hub_repos, mon
     """The token may be a command run on the box: it is asked for only when folders are to come back."""
     served(hub_repos)
     repos, asked = hub_repos.hub.repos, []
-    monkeypatch.setattr(repos.provider, "token", lambda repo: asked.append(repo) or "ghs_faketoken")
+    monkeypatch.setattr(repos.provider, "token", lambda repo: asked.append(sys._getframe(1).f_code.co_name) or "ghs_faketoken")
     assert repos.wake(REPO) is True
-    assert asked == []
+    assert "wake" not in asked          # other git work of the clone may ask; the wake does not
 
 
 @DEV

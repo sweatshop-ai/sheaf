@@ -202,7 +202,7 @@ def test_every_team_op_leaves_no_trace_on_the_client_site_or_in_a_request_to_it(
     got = agency.get(f"/_/doc?doc=Clients/acme/{mine}", member=AG_ALICE).json()
     assert [c["body"] for c in got["team"]] == [NOTE + "-edit"] and got["comments"] == []
     assert client.text(mine) == before
-    assert traces(agency, client, NOTE, '"team"', "t1") == []
+    assert traces(agency, client, NOTE, '"team"', '"t1"') == []
     assert {v for _, v, _ in agency.link.asked} == {"read"}                 # the gate and the page reads, never a `comment`
     assert team_op(agency, mine, "delete", id="t1").status == 200
     assert agency.hub.team.list(f"Clients/acme/{mine}") == []

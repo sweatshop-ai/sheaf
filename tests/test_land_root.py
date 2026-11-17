@@ -20,10 +20,14 @@ class FakeRepos:
     def __init__(self, clone, dest):
         self.answer, self.dest, self.calls = {"clone": clone, "commit_known": True}, dest, []
 
+    busy, settle_ok = False, True
+
     def report(self, member, repo, path, commit, privates=(), declared=None):
         self.calls.append((member, repo, path, commit, list(privates)))
         if isinstance(self.answer, Exception):
             raise self.answer
+        self.busy = True            # the report is settled on the repo's own thread: `settle` waits for it
+        self.queued = (member, repo, path, commit)
         return {"repo": repo, "path": path, **self.answer}
 
     def clone_dir(self, repo):
@@ -38,7 +42,18 @@ class FakeRepos:
         r = subprocess.run(["git", "-C", str(self.dest), "show", f"{commit}:{path}"], capture_output=True, text=True)
         return r.stdout if r.returncode == 0 else None
 
+    def settle(self, seconds=120.0):
+        if self.settle_ok and self.busy:
+            self.busy = False
+            self._settled()
+        return self.settle_ok
+
+    def _settled(self):
+        pass
+
     def sleep_moved(self, repo, to):
+        if self.busy:
+            return False            # a report is being settled: the caller asks again
         self.slept.append((repo, to))
         self.moved = to
         return True
@@ -278,33 +293,53 @@ def test_a_root_with_no_clone_of_the_tip_yet_is_not_judged_by_its_toml(clone):
 
 # ── landing (ticket 21 part 2b) ──────────────────────────────────────────────
 
-class Store:
-    """A hub store that records what it is given, and fails when told to."""
+class Versions:
+    """A hub's versions that record what they are given, and fail when told to."""
 
-    def __init__(self, fail=False):
-        self.puts, self.forgot, self.carried, self.dropped, self.fail = [], [], [], [], fail
+    def __init__(self, fail=False, before=()):
+        self.puts, self.fail, self.before, self.taken_back = [], fail, list(before), []
 
     def put(self, address, text):
         if self.fail:
             raise OSError("disk full")
         self.puts.append((address, text))
 
-    def forget(self, address):
-        self.forgot.append(address)
+    def texts(self, address):
+        return list(self.before)
+
+    def take_back(self, address, before):
+        self.taken_back.append((address, list(before)))
+
+
+class Writes:
+    def __init__(self, before=()):
+        self.carried, self.restored, self.before = [], [], list(before)
+
+    def lines(self, address):
+        return list(self.before)
 
     def carry(self, address, lines, came_from, by):
         self.carried.append((address, lines, came_from, by))
 
-    def drop(self, address):
-        self.dropped.append(address)
+    def restore(self, address, kept):
+        self.restored.append((address, list(kept)))
 
 
 class LandRepos(FakeRepos):
     def __init__(self, *a):
         super().__init__(*a)
-        self.rows, self.priors = {}, {}
+        self.rows, self.priors, self.events = {}, {}, []
+
+    def _settled(self):
+        """What the repo's thread writes when it settles the report: the row of the page it was made for, as `_settle` writes one,
+        the first owner kept and no field of a landed record."""
+        member, repo, path, commit = self.queued
+        row = self.rows.get((repo, path))
+        self.rows[(repo, path)] = (row[0] if row else member, commit, {})
+        self.events.append("settled")
 
     def land_record(self, repo, path, owner, commit, record):
+        self.events.append("land_record")
         self.priors[(repo, path)] = self.rows.get((repo, path))
         self.rows[(repo, path)] = (owner, commit, record)
         return self.priors[(repo, path)]
@@ -319,7 +354,7 @@ class LandRepos(FakeRepos):
 def land_hub(clone, state=repos_mod.OK, fail=False):
     h = hub(clone, state)
     h.repos = LandRepos(state, clone)
-    h.versions, h.writes = Store(fail), Store()
+    h.versions, h.writes = Versions(fail), Writes()
     return h
 
 
@@ -373,8 +408,8 @@ def test_a_failing_store_leaves_nothing_and_answers_failed_for_that_page(clone):
     b = body(clone, ("a.md", "alice@example.com", None))
     b["pages"][0]["versions"] = [{"text": "# old\n"}]
     assert incoming.land_root(h, b) == (200, {"pages": {"a.md": {"ok": False, "why": "failed"}}})
-    assert h.repos.rows == {}
-    assert h.versions.forgot == ["o--r/a.md"] and h.writes.dropped == ["o--r/a.md"]
+    assert h.repos.rows == {("o/r", "a.md"): ("al", b["tip"], {})}      # the row the report made, and no more
+    assert h.versions.taken_back == [("o--r/a.md", [])] and h.writes.restored == [("o--r/a.md", [])]
 
 
 def test_a_failed_landing_restores_the_row_the_page_had_and_is_not_remembered(clone):
@@ -383,7 +418,7 @@ def test_a_failed_landing_restores_the_row_the_page_had_and_is_not_remembered(cl
     b = body(clone, ("a.md", "alice@example.com", None))
     b["pages"][0]["versions"] = [{"text": "# old\n"}]
     incoming.land_root(h, b)
-    assert h.repos.rows == {("o/r", "a.md"): ("bob", "old", {})}
+    assert h.repos.rows == {("o/r", "a.md"): ("bob", b["tip"], {})}      # as the report left it: the first owner is kept, never alice's
     h.versions.fail = False
     assert incoming.land_root(h, b)[1]["pages"]["a.md"]["ok"] is True     # a retry of the same id lands
 
@@ -408,7 +443,7 @@ def test_a_page_the_check_refused_writes_nothing(clone):
     b = body(clone, ("a.md", "nobody@example.com", None), ("gone.md", "alice@example.com", "0" * 40))
     status, answer = incoming.land_root(h, b)
     assert status == 200 and answer["pages"]["a.md"]["why"] == "no_owner" and answer["pages"]["gone.md"]["why"] == "text_differs"
-    assert h.repos.rows == {} and h.versions.puts == [] and h.writes.carried == []
+    assert ("o/r", "a.md") not in h.repos.rows and h.versions.puts == [] and h.writes.carried == []     # nothing landed for either page
 
 
 def test_a_root_the_check_refuses_whole_is_answered_as_is_and_writes_nothing(clone):
@@ -444,3 +479,81 @@ def test_a_page_with_a_malformed_extra_is_a_value_error_before_anything_is_writt
     with pytest.raises(ValueError):
         incoming.land_root(h, b)
     assert h.repos.calls == [] and h.repos.rows == {}
+
+
+# ── the fix round of the first review (ticket 21 part 2b) ────────────────────
+
+def test_a_page_that_comes_back_keeps_its_prior_versions_and_pins_when_its_landing_fails(clone):
+    """What the member kept at the address before the page left stays when the landing fails: only what it made goes."""
+    from sheafmd.hub import state as hub_state
+    h = land_hub(clone)
+    h.versions = real = hub_state.Versions()
+    address = "o--r/a.md"
+    for text in ("# one\n", "# two\n"):
+        real.put(address, text)
+    pinned = real.pin(address, "# pinned\n")
+    before = real.texts(address)
+    h.writes.carry = lambda *a: (_ for _ in ()).throw(OSError("disk full"))
+    b = body(clone, ("a.md", "alice@example.com", None))
+    b["pages"][0]["versions"] = [{"text": "# two\n"}, {"text": "# from there\n"}]
+    assert incoming.land_root(h, b) == (200, {"pages": {"a.md": {"ok": False, "why": "failed"}}})
+    assert sorted(real.texts(address)) == sorted(before)
+    assert real.get(address, pinned) == "# pinned\n"
+
+
+def test_a_page_that_comes_back_keeps_its_prior_versions_when_the_incoming_ones_push_them_out(clone):
+    from sheafmd.hub import state as hub_state
+    h = land_hub(clone)
+    h.versions = real = hub_state.Versions()
+    address = "o--r/a.md"
+    prior = [f"# prior {n}\n" for n in range(hub_state.VERSIONS_KEPT)]
+    for text in prior:
+        real.put(address, text)
+    h.writes.carry = lambda *a: (_ for _ in ()).throw(OSError("disk full"))
+    b = body(clone, ("a.md", "alice@example.com", None))
+    b["pages"][0]["versions"] = [{"text": f"# incoming {n}\n"} for n in range(10)]
+    incoming.land_root(h, b)
+    assert sorted(real.texts(address)) == sorted(prior)
+
+
+def test_a_failed_landing_gives_the_write_log_lines_the_address_had_back(clone):
+    h = land_hub(clone, fail=True)
+    h.writes.before = ["kept line"]
+    b = body(clone, ("a.md", "alice@example.com", None))
+    b["pages"][0]["versions"] = [{"text": "# old\n"}]
+    incoming.land_root(h, b)
+    assert h.writes.restored == [("o--r/a.md", ["kept line"])]
+
+
+def test_the_report_is_settled_before_any_page_lands_so_it_cannot_overwrite_a_landed_row(clone):
+    h = land_hub(clone)
+    b = body(clone, ("a.md", "alice@example.com", None))
+    b["pages"][0]["record"] = {"session": "s1"}
+    incoming.land_root(h, b)
+    assert h.repos.events == ["settled", "land_record"]
+    h.repos.settle()                       # a late settle changes nothing
+    assert h.repos.rows == {("o/r", "a.md"): ("al", b["tip"], {"session": "s1"})}
+
+
+def test_a_failed_first_page_leaves_the_row_the_report_made_whenever_the_thread_runs(clone):
+    h = land_hub(clone, fail=True)
+    b = body(clone, ("a.md", "alice@example.com", None))
+    b["pages"][0]["versions"] = [{"text": "# old\n"}]
+    incoming.land_root(h, b)
+    first = dict(h.repos.rows)
+    h.repos.settle()
+    assert h.repos.rows == first == {("o/r", "a.md"): ("al", b["tip"], {})}
+
+
+def test_a_report_that_does_not_settle_in_time_answers_cloning_and_lands_nothing(clone):
+    h = land_hub(clone)
+    h.repos.settle_ok = False
+    assert incoming.land_root(h, body(clone, ("a.md", "alice@example.com", None))) == (202, {"state": "cloning"})
+    assert h.writes.carried == [] and "land_record" not in h.repos.events
+
+
+def test_a_root_unmoved_by_the_call_goes_back_to_sleep_though_its_report_is_still_being_settled(clone):
+    set_toml(clone, 'tiroir = "https://other.example"\n')
+    h = moved_hub(clone)
+    assert incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None)), peer=THERE) == (409, {"why": "not_named"})
+    assert h.repos.slept == [("o/r", THERE)] and h.repos.moved == THERE and not h.repos.busy

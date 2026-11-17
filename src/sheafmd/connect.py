@@ -75,18 +75,69 @@ def system_store():
     return SystemStore()
 
 
+def peer_credential_name(url: str) -> str:
+    """The name of the file that holds the token for the peer tiroir at `url`, in a service's credentials folder (systemd
+    `LoadCredential=NAME:PATH` makes it `$CREDENTIALS_DIRECTORY/NAME`): one safe word per origin and port."""
+    netloc = urllib.parse.urlsplit(origin_of(url)).netloc
+    return "sheaf-peer-" + re.sub(r"[^A-Za-z0-9._-]", "-", netloc)
+
+
+def _credential_file(url: str) -> str | None:
+    """The token in this service's credentials folder for the peer at `url`, or None: no folder, no file, or a file that is
+    no token (the keyring is then asked, as before)."""
+    folder = os.environ.get("CREDENTIALS_DIRECTORY")
+    if not folder:
+        return None
+    try:
+        text = (Path(folder) / peer_credential_name(url)).read_text()
+    except OSError:
+        return None
+    token = text.strip()
+    return token if _TOKEN.fullmatch(token) else None
+
+
 def peer_token_for(url: str, store=None) -> str | None:
-    """The token this tiroir holds for the peer tiroir at `url` (`sheaf peer use`), or None."""
-    return (store or system_store()).get(PEER_SERVICE, origin_of(url))
+    """The token this tiroir holds for the peer tiroir at `url` (`sheaf peer use`), or None. A service's credentials folder
+    (`$CREDENTIALS_DIRECTORY`, the file store) is read first; only then the keyring, which a server may not have."""
+    return _credential_file(url) or (store or system_store()).get(PEER_SERVICE, origin_of(url))
 
 
 def use_peer(url: str, token: str, store=None) -> str:
     """Keep `token` as the one this tiroir sends to the peer at `url`: in the login keyring, nowhere else. Returns the origin."""
     origin = origin_of(url)
-    if not _TOKEN.fullmatch(token or ""):
-        raise UsageError("that is not a Sheaf token: copy the whole token that `sheaf peer add` printed on the other shared Sheaf")
+    _check_peer_token(token)
     (store or system_store()).set(PEER_SERVICE, origin, token)
     return origin
+
+
+def use_peer_file(url: str, token: str, folder: Path) -> Path:
+    """Keep `token` in the file store instead: one 0600 file named by `peer_credential_name` in `folder` (made 0700 if it is
+    not there), for a service to load as a credential. An earlier file for the same peer is replaced whole. Returns the path."""
+    origin = origin_of(url)
+    _check_peer_token(token)
+    folder = Path(folder)
+    folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+    target = folder / peer_credential_name(origin)
+    tmp = folder / (target.name + ".new")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+        data = memoryview((token + "\n").encode("ascii"))
+        while data:
+            data = data[os.write(fd, data):]
+        os.fsync(fd)
+    except BaseException:
+        os.close(fd)
+        tmp.unlink(missing_ok=True)
+        raise
+    os.close(fd)
+    os.replace(tmp, target)
+    return target
+
+
+def _check_peer_token(token: str) -> None:
+    if not _TOKEN.fullmatch(token or ""):
+        raise UsageError("that is not a Sheaf token: copy the whole token that `sheaf peer add` printed on the other shared Sheaf")
 
 
 def token_for(url: str, store=None) -> str | None:

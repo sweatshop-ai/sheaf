@@ -184,6 +184,7 @@ function render(data, target) {
   head.append(hr);
   var body = el('tbody');
   (data.rows || []).forEach(function (r) { body.append(buildRow(doc, el, r)); });
+  if (data.clients_line) main.append(el('p', 'sheaf-clients-line', data.clients_line));      // no Clients folder for a member with no e-mail: the line says why
   table.append(head, body);
   var empty = el('p', 'sheaf-empty', 'No pages here.');
   empty.hidden = true;
@@ -462,7 +463,6 @@ function create(ROOT, opts) {
   ROOT.addEventListener('click', onClick, true);
   filter.addEventListener('input', show);
   show();
-  if (data.clients_line) say(data.clients_line);       // no Clients folder for a member with no e-mail: the line says why
   return {
     unmount: function () { gone = true; if (handle) handle.unmount(); handle = null; ROOT.removeEventListener('click', onClick, true); },
     dirty: function () { return !!handle && handle.dirty(); },

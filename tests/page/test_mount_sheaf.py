@@ -74,9 +74,29 @@ def agentview():
     return AgentView()
 
 
+class Gate:
+    """Holds the hub's answers to `/_/doc` while `holding`, and sends them when `release` is called. `answered` counts the ones sent."""
+
+    def __init__(self):
+        self.holding, self.held, self.answered = False, [], 0
+
+    def pass_or_hold(self, route, send):
+        if self.holding:
+            self.held.append(send)
+        else:
+            send()
+            self.answered += 1
+
+    def release(self):
+        self.holding, held, self.held = False, self.held, []
+        for send in held:
+            send()
+            self.answered += 1
+
+
 class Mounted:
-    def __init__(self, page, errors):
-        self.page, self.errors = page, errors
+    def __init__(self, page, errors, gate):
+        self.page, self.errors, self.gate = page, errors, gate
 
     def js(self, body, arg=None):
         return self.page.evaluate("([arg]) => { const root = window.__root; " + body + " }", [arg])
@@ -92,7 +112,7 @@ class Mounted:
 
 @pytest.fixture
 def mounted(chromium, pages, agentview):
-    errors = []
+    errors, gate = [], Gate()
 
     def answer(route):
         path = route.request.url[len(ORIGIN):]
@@ -100,7 +120,10 @@ def mounted(chromium, pages, agentview):
             return route.fulfill(status=200, content_type="text/html", body=FRONT_HTML)
         req = route.request
         res = pages.post(path, json.loads(req.post_data or "{}"), member=BEA) if req.method == "POST" else pages.get(path, member=BEA)
-        route.fulfill(status=res.status, headers=dict(res.headers), body=res.body)
+        send = lambda: route.fulfill(status=res.status, headers=dict(res.headers), body=res.body)
+        if path.startswith("/_/doc"):
+            return gate.pass_or_hold(route, send)
+        send()
 
     context = new_context(chromium)
     context.route(f"{ORIGIN}/**", answer)
@@ -112,7 +135,7 @@ def mounted(chromium, pages, agentview):
     page.goto(ORIGIN + FRONT)
     until(lambda: page.evaluate("!!(window.__page || window.__failed)"), what="the mount")
     assert page.evaluate("window.__failed || null") is None
-    m = Mounted(page, errors)
+    m = Mounted(page, errors, gate)
     until(lambda: m.js("return !!root.querySelector('.sheaf-row');"), what="the rows in the root")
     yield m
     try:
@@ -233,11 +256,17 @@ def test_the_row_holds_no_script_and_no_address_but_the_hubs_own(mounted):
 
 # ── the byline of an opened page is the same way back (ticket 10) ───────────
 
-def open_page(m, doc):
-    """Opens `doc` from its row and waits for its byline in the root the page attached."""
+def open_page(m, doc, answered=True):
+    """Opens `doc` from its row and waits for its byline in the root the page attached, and (unless `answered` is False) for what
+    the hub says of the document: the byline names the session only when that answer (`/_/doc`, `way_back`) has been taken, so
+    before it the line is the one rendered ("Document prepared by Ada")."""
+    before = m.gate.answered
     m.click(f'.sheaf-row[data-doc="{doc}"] .sheaf-title a')
     until(lambda: m.page.evaluate("window.__roots.length > 1 && !!window.__roots[window.__roots.length - 1].querySelector('p.doc-by')"),
           what="the page's byline")
+    if answered:
+        until(lambda: m.gate.answered > before, what="the hub's answer about the document")
+        m.page.evaluate("new Promise((done) => setTimeout(done, 0))")   # the page takes that answer in a task after it arrives
 
 
 def byline(m):
@@ -259,6 +288,14 @@ def test_the_byline_of_an_opened_page_names_the_session_as_its_row_does(mounted)
     b = byline(mounted)
     assert b["text"].startswith("Document prepared by Claude Code (Bea)")
     assert (b["tag"], b["href"], b["target"], b["rel"]) == ("A", RC, "_blank", "noopener noreferrer")
+
+
+def test_the_byline_is_as_rendered_until_the_hub_has_answered_which_session_wrote_the_page(mounted):
+    mounted.gate.holding = True
+    open_page(mounted, "work/plan.md", answered=False)
+    assert byline(mounted)["text"].startswith("Document prepared by ") and "Claude Code" not in byline(mounted)["text"]
+    mounted.gate.release()
+    until(lambda: byline(mounted)["text"].startswith("Document prepared by Claude Code (Bea)"), what="the session's name")
 
 
 def test_a_click_on_the_byline_asks_agentview_to_jump_and_goes_nowhere_else(mounted, agentview):

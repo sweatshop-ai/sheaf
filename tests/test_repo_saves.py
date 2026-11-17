@@ -2,6 +2,7 @@
 on `dev` where the remote has it, else on the branch the repo's `.sheaf.toml` names, and with neither the page is read-only
 with a line. Everything runs against local bare repos and a fake App, as test_repo_pages.py does."""
 import base64
+import contextlib
 import dataclasses
 import json
 import os
@@ -683,6 +684,36 @@ def test_a_clone_that_is_written_to_is_not_put_to_sleep_thirty_days_after_its_la
     now[0] += 29 * 86400
     assert repos.sleep_idle() == []
     assert not repos.sleeping(REPO)
+
+
+@DEV
+def test_a_write_to_an_awake_clone_asks_the_provider_for_no_token(hub_repos, monkeypatch):
+    """The token may be a command run on the box: it is asked for only when folders are to come back."""
+    served(hub_repos)
+    repos, asked = hub_repos.hub.repos, []
+    monkeypatch.setattr(repos.provider, "token", lambda repo: asked.append(repo) or "ghs_faketoken")
+    assert repos.wake(REPO) is True
+    assert asked == []
+
+
+@DEV
+def test_a_clone_that_moves_between_the_check_and_the_lock_is_not_marked_awake_by_a_write(hub_repos, monkeypatch):
+    asleep(hub_repos)
+    repos = hub_repos.hub.repos
+    holding = repos.holding
+
+    @contextlib.contextmanager
+    def moved_on_entry(dest):                       # the move lands after `wake` checked, before it holds the lock
+        with repos._records:
+            data = repos._usage()
+            data[REPO] = {**data[REPO], "moved": "https://there.example"}
+            repos_mod.write_text_atomic(repos._usage_file, json.dumps(data))
+        with holding(dest):
+            yield
+
+    monkeypatch.setattr(repos, "holding", moved_on_entry)
+    assert repos.wake(REPO) is False
+    assert repos.sleeping(REPO) and repos.moved_to(REPO) == "https://there.example"
 
 
 # ── round 6: a save lands only on the branch it was read on ──────────────────

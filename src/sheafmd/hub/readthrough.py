@@ -68,6 +68,13 @@ def is_clients(address) -> bool:
     return isinstance(address, str) and (address == ROOT or address.startswith(ROOT + "/"))
 
 
+def read_only_doc(got: dict) -> dict:
+    """`got`, a `/_/doc` answer for a page read through (9.9), with no agent, no Tell target, no Work and no session byline: the page of
+    a client is read and commented on here, and what its client tiroir says of its agents is that tiroir's."""
+    return {**{k: v for k, v in got.items() if k not in ("way_back", "work")},
+            "target": None, "targets": [], "capabilities": [], "lines": {}, "telling": []}
+
+
 def fold_rows(client: str, rows: list) -> list:
     """The rows `client`'s hub told, drawn under `Clients/<client>`: the address, URL, folder and root carry the prefix. Whose
     rows they are is the client hub's to say, so none of the owner's actions (Share, Keep, Archive, a session's way back)

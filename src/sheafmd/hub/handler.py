@@ -918,11 +918,12 @@ class Handler:
             work, can = self.hub.member_work(e, req.member)
             extra = {} if work is None else {"work": work}
             mt = self.hub.member_target(e.address, req.member, can)
-            return _ok(**{**proxy.for_member(snap), "telling": self._member_telling(e.address, req.member, text=e.live.current()[1])},
-                       seen=self.hub.member_seen.get(req.member.id, e.address),
-                       question="", target=mt.agent, targets=mt.picks, capabilities=mt.can, lines=mt.lines,
-                       way_back=sheaf_view.byline(self.hub, e.address, req.member),
-                       sent=self.hub.box_waits.pending(e.address, e.live.current()[1]), **extra)
+            got = {**proxy.for_member(snap), "telling": self._member_telling(e.address, req.member, text=e.live.current()[1]),
+                   "seen": self.hub.member_seen.get(req.member.id, e.address),
+                   "question": "", "target": mt.agent, "targets": mt.picks, "capabilities": mt.can, "lines": mt.lines,
+                   "way_back": sheaf_view.byline(self.hub, e.address, req.member),
+                   "sent": self.hub.box_waits.pending(e.address, e.live.current()[1]), **extra}
+            return _ok(**(readthrough.read_only_doc(got) if req.mount else got))
         v = self.hub.tell.view(e.address)
         return _ok(**snap, seen=self.hub.seen.get(e.address),
                    question=e.live.session_question(), target=v.agent(),
@@ -1037,10 +1038,22 @@ class Handler:
                 raise Refuse(502, "This client tiroir is not reachable now.") from None
         if op == "mount" and status == 200:   # the front compares these with its own: the client's build is not this hub's
             body = self._own_build(body)
+        if op == "doc" and status == 200:     # what an older client tiroir still says of its agents is not shown here (9.9)
+            body = self._read_only_doc(body)
         if env.get("type") == "html":
             own = auth.new_nonce()           # the client's nonce is never this origin's: only its own page script runs here
             return _html(status, readthrough.adopt(body, env.get("nonce"), own), own, kept)
         return Response(status, {"Content-Type": "application/json", **kept}, body.encode("utf-8"))
+
+    @staticmethod
+    def _read_only_doc(body: str) -> str:
+        try:
+            got = json.loads(body)
+        except ValueError:
+            got = None
+        if not isinstance(got, dict):
+            raise Refuse(502, "This client tiroir is not reachable now.")
+        return json.dumps(readthrough.read_only_doc(got))
 
     def _own_build(self, body: str) -> str:
         try:

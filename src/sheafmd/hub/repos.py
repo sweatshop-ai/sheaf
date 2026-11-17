@@ -395,13 +395,15 @@ class Repos:
         dest = self.clone_dir(repo)
         if not (dest / ".git").exists():
             return False
-        token = self.provider.token(repo)
         with self.holding(dest):
+            if self.moved_to(repo) is not None:     # a move that landed since the check above: the clone never wakes
+                return False
             with self._records:
                 row = self._usage().get(repo)
             self._use(repo)
             if not (isinstance(row, dict) and (row.get("sleeping") is True or row.get("restore"))):
-                return True
+                return True                         # nothing is out: no token is asked for
+            token = self.provider.token(repo)
             return self._restore(repo, dest, token)
 
     def page_text(self, repo: str, path: str, commit: str) -> str | None:

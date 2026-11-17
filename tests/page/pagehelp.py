@@ -541,6 +541,28 @@ STREAM_JOURNAL_JS = """(() => {
 })()"""
 
 
+# The page's side of the guard of close_context: a document that has begun to leave (a reload, a goto) says so in
+# `__leaving`. A navigation that has not committed leaves the old document in place, so the flag is readable until the
+# new one comes; the new document starts without it.
+LEAVING_JS = "window.addEventListener('beforeunload', () => { window.__leaving = true; })"
+
+
+def pending_navigations(context):
+    """The URLs of the pages of the context that are leaving for a navigation that has not committed (or whose
+    document went away while we asked)."""
+    out = []
+    for page in context.pages:
+        try:
+            leaving = page.evaluate("window.__leaving === true")
+        except Exception as e:      # a PageStalled is not an Exception
+            if not any(said in str(e) for said in RELOADING):
+                continue
+            leaving = True
+        if leaving:
+            out.append(page.url)
+    return out
+
+
 def new_context(browser, error=None, **options):
     """A context of the browser (its clicks, fills and waits for a selector give up after PAGE_TIMEOUT_MS),
     or a failure that says whether the browser is still there. `error` is
@@ -551,6 +573,7 @@ def new_context(browser, error=None, **options):
         context = browser.new_context(**options)
         context.set_default_timeout(PAGE_TIMEOUT_MS)
         context.add_init_script(STREAM_JOURNAL_JS)
+        context.add_init_script(LEAVING_JS)
         return context
     except error as e:
         pytest.fail(f"Chromium went away under a new context (connected={browser.is_connected()}):\n{e}")
@@ -558,7 +581,21 @@ def new_context(browser, error=None, **options):
 
 def close_context(context):
     """Close a context of new_context. A route of its pages still in `route.fetch` would otherwise fail
-    there, and Playwright raises that failure in the next call into the browser: another test's new_context."""
+    there, and Playwright raises that failure in the next call into the browser: another test's new_context.
+    A test that ends while a page is still navigating fails (flake e2: closing a context under a reload in flight
+    hung the driver, 4 of 85 CI runs), after the context is closed."""
+    pending = pending_navigations(context)
+    try:
+        _close_context(context)
+    except PageStalled:
+        if not pending:
+            raise
+    if pending:
+        pytest.fail(f"the test ended with a navigation still pending on {pending}: wait for the page to load "
+                    f"(reloaded(page), then a selector of the new page) before the test ends")
+
+
+def _close_context(context):
     try:
         with stalls_after(CLOSE_BOUND, "the routes to come off"):
             for page in context.pages:
